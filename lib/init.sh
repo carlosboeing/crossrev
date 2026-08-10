@@ -213,7 +213,7 @@ _init_secret_note() {
       if [[ -f "$(_auth_meta "$INIT_OWNER")" ]]; then printf -- '— revloop will set it'
       else printf -- '— run `revloop auth login` first'; fi ;;
     CLAUDE_CODE_OAUTH_TOKEN)
-      printf -- '— set it yourself: `claude setup-token`, then `gh secret set`' ;;
+      printf -- '— set it yourself for now: `claude setup-token`, then `gh secret set`' ;;
     REVLOOP_SOURCE_KEY)
       printf -- '— a read-only deploy key on %s; see the note after this plan' "$INIT_SOURCE_REPO" ;;
   esac
@@ -348,7 +348,14 @@ _init_execute() {
       CLAUDE_CODE_OAUTH_TOKEN)
         ui_no "CLAUDE_CODE_OAUTH_TOKEN — both legs run on Claude, so neither can authenticate"
         ui_line "   claude setup-token"
-        ui_line "   gh secret set CLAUDE_CODE_OAUTH_TOKEN $(_init_secret_scope_flag)" ;;
+        ui_line "   gh secret set CLAUDE_CODE_OAUTH_TOKEN $(_init_secret_scope_flag)"
+        ui_line ""
+        ui_line "   That token is valid for a year and the command will not show it"
+        ui_line "   again, so put it in the secret in the same sitting. Note the date:"
+        ui_line "   the first sign of expiry is a CI failure on a day nobody is looking."
+        ui_line ""
+        ui_line "   Capturing it automatically, and warning as the year closes, is on"
+        ui_line "   the subscription-credentials amendment's task list." ;;
       APP_ID|APP_PRIVATE_KEY)
         : ;;   # already explained above
     esac
