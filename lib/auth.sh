@@ -68,6 +68,19 @@ _auth_role_summary() {
   esac
 }
 
+# Which secret carries a role's private key.
+#
+# Named per role rather than assumed, because the two are not interchangeable and
+# the consequence of confusing them is not a broken deploy — it is the refresher's
+# key material sitting behind the loop App's identity, which is the exact
+# privilege separation the two Apps exist to draw.
+_auth_role_key_secret() {
+  case "$1" in
+    loop)      printf 'APP_PRIVATE_KEY' ;;
+    refresher) printf 'REVLOOP_REFRESH_APP_PRIVATE_KEY' ;;
+  esac
+}
+
 _auth_role_default_name() {
   case "$1" in
     loop)      printf 'revloop-%s' "$2" ;;
@@ -787,7 +800,16 @@ auth_rotate() {
   ui_gap
   ui_line "Two things are still yours to do, and both are outward-facing:"
   ui_next "delete the old key on GitHub: $settings_url"
-  ui_next "update APP_PRIVATE_KEY wherever it is stored: revloop init --upgrade, or gh secret set"
+  # The role's own secret, never a hardcoded APP_PRIVATE_KEY. Told to update
+  # that one after rotating the refresher's key, someone following the
+  # instruction literally would put the refresher's key material behind the loop
+  # App's identity — handing secrets:write to the job that reads a pull request
+  # diff, which is the one thing the two-App split exists to prevent.
+  ui_next "update $(_auth_role_key_secret "$role") wherever it is stored: revloop init --upgrade, or gh secret set"
+  if [[ "$role" == "refresher" ]]; then
+    ui_line "   repository-scoped: this key can write secrets, so it must never be"
+    ui_line "   an organisation secret visible to every workflow in the org"
+  fi
   ui_end "Until the secret carries the new key, CI is still authenticating with the old one."
 }
 

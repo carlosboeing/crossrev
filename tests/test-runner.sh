@@ -209,6 +209,41 @@ is  "an endpoint on a harness that cannot use one refuses" "$rc" "1"
 has "and names the harness and the endpoint"    "$err" "runs on 'codex', which cannot use one"
 has "and gives the fix"                         "$err" "Use harness: claude with endpoint: kimi"
 
+# --- the instructions have to agree with the warnings ------------------------
+#
+# `init` warns that an organisation-level rotating credential breaks every other
+# repository reading it. The remediation it prints for the same secret must not
+# then tell someone to create one — an instruction copied verbatim is exactly
+# where an inconsistency gets acted on.
+fixture_repo "$(config_for github-hosted codex claude)"; stub_reset
+routes_init
+route_first 'api users/*' '{"type":"Organization"}'
+out="$("$REVLOOP" init --yes 2>&1)"
+
+has "on an org, the codex credential is still seeded repository-scoped" \
+  "$out" "gh secret set REVLOOP_CODEX_AUTH --repo acme/widget"
+hasnt "never with --org, which is the misconfiguration init warns about" \
+  "$out" "gh secret set REVLOOP_CODEX_AUTH --org"
+has "and it says why, rather than leaving the flag to look arbitrary" \
+  "$out" "Concurrency groups do not span repositories"
+
+# --- rotating the right key updates the right secret -------------------------
+#
+# `auth rotate` takes a --role, and the two roles' keys are not interchangeable.
+# Told to update APP_PRIVATE_KEY after rotating the refresher's key, someone
+# following that literally puts the refresher's key material behind the loop
+# App's identity — handing secrets:write to the job that reads a pull request
+# diff, which is the one thing the two-App split exists to prevent.
+key_secret() (
+  # shellcheck source=../lib/ui.sh
+  source "$HERE/../lib/ui.sh"
+  # shellcheck source=../lib/auth.sh
+  source "$HERE/../lib/auth.sh"
+  _auth_role_key_secret "$1"
+)
+is  "the loop role's key lives in APP_PRIVATE_KEY"  "$(key_secret loop)" "APP_PRIVATE_KEY"
+is  "and the refresher's in its own secret"        "$(key_secret refresher)" "REVLOOP_REFRESH_APP_PRIVATE_KEY"
+
 # --- every rendered workflow is still valid YAML -----------------------------
 #
 # Stripping whole blocks out of a YAML file with awk is exactly the edit that

@@ -559,7 +559,17 @@ _init_execute() {
       REVLOOP_CODEX_AUTH)
         ui_no "REVLOOP_CODEX_AUTH — a leg runs on Codex, so it cannot authenticate"
         ui_line "   codex login          # on a machine with a browser"
-        ui_line "   gh secret set REVLOOP_CODEX_AUTH $(_init_secret_scope_flag) < ~/.codex/auth.json"
+        # --repo unconditionally, never _init_secret_scope_flag. On an org-owned
+        # repository that helper prints --org, and this is the one secret that
+        # must never be organisation-scoped — the same misconfiguration init
+        # warns about a few lines above. An instruction someone copies verbatim
+        # is not the place to be inconsistent with your own warning.
+        ui_line "   gh secret set REVLOOP_CODEX_AUTH --repo $INIT_REPO < ~/.codex/auth.json"
+        ui_line ""
+        ui_line "   Repository-scoped, not organisation-scoped, even on an org."
+        ui_line "   Concurrency groups do not span repositories, so an org-level"
+        ui_line "   copy is refreshed by every repository reading it and the first"
+        ui_line "   one to refresh invalidates it for all the rest."
         ui_line ""
         ui_line "   Seeded once. From then on the refresher workflow is the only"
         ui_line "   thing that writes it, because using a refresh token consumes it"
