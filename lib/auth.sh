@@ -56,11 +56,13 @@ auth_status() {
   fi
 
   ui_section "Apps"
-  local meta owner id name pem mode
+  local meta owner owner_type id name slug pem mode
   for meta in "$dir"/*.json; do
     owner="$(jq -r .owner "$meta")"
+    owner_type="$(jq -r .owner_type "$meta")"
     id="$(jq -r .id "$meta")"
     name="$(jq -r .name "$meta")"
+    slug="$(jq -r .slug "$meta")"
     pem="$(_auth_pem "$owner")"
 
     ui_ok "$owner — $name (id $id)"
@@ -76,8 +78,9 @@ auth_status() {
     else
       ui_no "   key missing at $pem — this App cannot mint a token"
     fi
+    ui_line "   install $(_auth_install_url "$owner" "$owner_type" "$slug")"
   done
-  ui_end "Rotate a key with:   revloop auth rotate --owner <owner>"
+  ui_end "An App reaches only the repositories it is installed on."
 }
 
 # ---------------------------------------------------------------------------
@@ -297,6 +300,21 @@ HTML
   ui_gap
   ui_line "The App exists but is installed nowhere yet, so it can currently reach"
   ui_line "no repository at all. Install it on the ones you want reviewed:"
-  ui_next "https://github.com/settings/apps/$slug/installations"
+  ui_next "$(_auth_install_url "$owner" "$owner_type" "$slug")"
   ui_end "Then:   revloop init"
+}
+
+# Where to install an App.
+#
+# The two paths are not interchangeable and the wrong one 404s: an org-owned App
+# lives under the organisation's settings, not yours. The public
+# github.com/apps/<slug> page is no help either, because these Apps are private
+# and have no public page.
+_auth_install_url() {
+  local owner="$1" owner_type="$2" slug="$3"
+  if [[ "$owner_type" == "Organization" ]]; then
+    printf 'https://github.com/organizations/%s/settings/apps/%s/installations' "$owner" "$slug"
+  else
+    printf 'https://github.com/settings/apps/%s/installations' "$slug"
+  fi
 }
