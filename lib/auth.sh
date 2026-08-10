@@ -131,28 +131,48 @@ p{margin:.5rem 0;opacity:.75}
 HTML
 }
 
-# Serve one request on $1, write the raw request to $2. Returns non-zero if
-# nothing arrived before the timeout.
-_listen_once() {
-  local port="$1" outfile="$2" timeout="${3:-300}"
+# Listen on $1 until a request carrying the OAuth code arrives, writing every
+# raw request to $2. Returns non-zero if nothing matching arrived in time.
+#
+# `nc -k` keeps the socket open across connections, and that detail is the whole
+# design. One connection is not safe to assume: browsers open speculative ones
+# and anything on the machine can probe a listening port. Serving a single
+# connection and re-binding in a loop was tried and is wrong — the re-bind takes
+# long enough that a request arriving in the gap gets connection-refused, which
+# is exactly the failure this listener exists to remove. Measured: a decoy
+# request followed a second later by the real one lost the real one every time.
+#
+# The cost of -k is that only the first connection receives the response body,
+# because nc's stdin is consumed once. That is the right trade. In the real flow
+# the redirect *is* the first connection, so it gets the page; anything later is
+# a favicon request nobody sees fail. And the worst case — a decoy arriving
+# first — is a blank tab with the flow still completing on its own, rather than
+# a missed code and a fall back to pasting.
+_listen_for_code() {
+  local port="$1" outfile="$2" total="${3:-300}"
   local body len pid waited=0
   body="$(_auth_done_page)"
+  # Byte count, not character count: Content-Length is in bytes, and a wrong one
+  # truncates the page in the browser.
   len="$(printf '%s' "$body" | wc -c | tr -d ' ')"
 
   {
     printf 'HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: %s\r\nConnection: close\r\n\r\n%s' \
-      "$len" "$body" | nc -l "$port" >"$outfile" 2>/dev/null
+      "$len" "$body" | nc -k -l "$port" >"$outfile" 2>/dev/null
   } &
   pid=$!
 
-  while (( waited < timeout )); do
+  while (( waited < total )); do
+    grep -q 'code=' "$outfile" 2>/dev/null && break
+    # nc gone without a code means it never bound, or this build has no -k.
+    # Either way there is nothing left to wait for; the paste fallback covers it.
     kill -0 "$pid" 2>/dev/null || break
     sleep 1
     (( waited++ )) || true
   done
+
   kill "$pid" 2>/dev/null || true
   wait "$pid" 2>/dev/null || true
-
   grep -q 'code=' "$outfile" 2>/dev/null
 }
 
@@ -351,7 +371,7 @@ HTML
       "could not open a browser automatically" \
       "Open this to continue: file://$html"
 
-    if _listen_once "$port" "$reqfile" 300; then
+    if _listen_for_code "$port" "$reqfile" 300; then
       local reqline; reqline="$(head -1 "$reqfile")"
       code="$(sed -n 's/.*[?&]code=\([^& ]*\).*/\1/p' <<<"$reqline")"
       returned_state="$(sed -n 's/.*[?&]state=\([^& ]*\).*/\1/p' <<<"$reqline")"
