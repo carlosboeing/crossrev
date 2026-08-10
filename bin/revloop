@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+#
+# revloop — cross-model PR review loop.
+#
+# One model reviews a pull request, a second verifies and addresses each
+# finding, then the first looks again. Runs from a terminal against any PR you
+# can already see, and on GitHub Actions once `revloop init` has set it up.
+
+set -euo pipefail
+
+# install.sh symlinks this into PATH, so BASH_SOURCE is usually a symlink and
+# lib/ is relative to the real file. BSD readlink has no -f, so walk it.
+_resolve() {
+  local src="$1" dir
+  while [[ -L "$src" ]]; do
+    dir="$(cd -P "$(dirname "$src")" && pwd)"
+    src="$(readlink "$src")"
+    [[ "$src" != /* ]] && src="$dir/$src"
+  done
+  cd -P "$(dirname "$src")" && pwd
+}
+
+ROOT="$(cd "$(_resolve "${BASH_SOURCE[0]}")/.." && pwd)"
+readonly ROOT
+
+# shellcheck source=lib/ui.sh
+source "$ROOT/lib/ui.sh"
+# shellcheck source=lib/preflight.sh
+source "$ROOT/lib/preflight.sh"
+# shellcheck source=lib/auth.sh
+source "$ROOT/lib/auth.sh"
+
+revloop_version() { tr -d '[:space:]' <"$ROOT/VERSION"; }
+
+usage() {
+  cat <<'EOF'
+
+  revloop — cross-model PR review loop
+
+  Review a pull request with one model, address the findings with another.
+
+  USAGE
+    revloop <command> [options]
+
+  COMMANDS
+    auth status              Which Apps are configured, for which owners
+    auth login               Register a GitHub App for an owner
+    doctor                   Check that everything revloop needs is installed
+    version                  Print the installed version
+
+  Automated mode needs a GitHub App. Local runs do not — they use the gh
+  authentication you already have.
+
+  Run `revloop <command> --help` for more.
+
+EOF
+}
+
+# A command that exists in the design but is not built yet says so, and says
+# what does work instead. Silence would read as a typo.
+not_built_yet() {
+  ui_die "\`revloop $1\` is not built yet — this is a work in progress" \
+    "Built so far: auth status, auth login, doctor, version. See tools/revloop/README.md for what is coming."
+}
+
+main() {
+  local cmd="${1:-help}"
+  [[ $# -gt 0 ]] && shift
+
+  case "$cmd" in
+    auth)
+      local sub="${1:-status}"
+      [[ $# -gt 0 ]] && shift
+      case "$sub" in
+        status) auth_status "$@" ;;
+        login)  auth_login "$@" ;;
+        rotate)
+          ui_die "\`revloop auth rotate\` is not built yet" \
+            "GitHub has no API to generate an App private key — it is a web-UI action. Until this lands, generate one at https://github.com/settings/apps and replace the file that \`revloop auth status\` names." ;;
+        *) ui_die "unknown auth command: $sub" "Try: revloop auth status | login" ;;
+      esac ;;
+
+    doctor)
+      preflight_check harness && ui_end "Everything revloop needs is installed." \
+        || ui_end "Install what is marked ✗ above, then run this again." ;;
+
+    review|address|run|status|init) not_built_yet "$cmd" ;;
+
+    version|--version|-v) revloop_version; echo ;;
+    help|--help|-h) usage ;;
+    *) ui_die "unknown command: $cmd" "Run: revloop help" ;;
+  esac
+}
+
+main "$@"
