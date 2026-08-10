@@ -52,6 +52,7 @@ ui_line "version $(tr -d '[:space:]' <"$HERE/VERSION")"
 preflight_check harness || true
 
 target="$BIN_DIR/revloop"
+replaced=""
 if [[ -e "$target" || -L "$target" ]]; then
   existing="$(readlink "$target" 2>/dev/null || echo "$target")"
   if [[ "$existing" == "$HERE/bin/revloop" ]]; then
@@ -60,6 +61,7 @@ if [[ -e "$target" || -L "$target" ]]; then
     ui_warn "$target already exists and points somewhere else" \
       "Continuing will replace it. It currently points at: $existing"
     ui_confirm "Replace it?" || { ui_say "Left it alone. Nothing was installed."; exit 1; }
+    replaced="$existing"
   fi
 fi
 
@@ -73,6 +75,15 @@ ui_section "Installed"
 # "command not found" later, a long way from here.
 if [[ -x "$target" ]]; then
   ui_ok "$target"
+  # Say what moved, not just what landed. The prompt above is easy to accept and
+  # easier to skip with --yes, and the failure it leads to is silent: `revloop`
+  # keeps working while running a different checkout than the one you think, so
+  # the next `git pull` in the old one changes nothing and there is no error to
+  # explain why.
+  if [[ -n "$replaced" ]]; then
+    ui_line "   replaced a link to $replaced"
+    ui_line "   \`revloop\` now runs from $HERE"
+  fi
 else
   ui_no "$target — created, but does not resolve to an executable"
   exit 1

@@ -20,13 +20,28 @@ It runs on the AI subscriptions you already have rather than per-token API keys.
 
 ## Install
 
+One command, from nothing:
+
 ```bash
-git clone git@github.com:carlosboeing/claude-code-resources.git
-cd claude-code-resources
+gh api repos/carlosboeing/claude-code-resources/contents/tools/revloop/bootstrap.sh \
+  -H "Accept: application/vnd.github.raw" | bash
+```
+
+`gh api` rather than `curl` because the repository is private, and `curl` cannot reach the credentials `gh` and `git` already hold — it has to be handed a token, which then sits in your shell history and in the process table for every local process to read. `gh` needs no such handover, and revloop requires it anyway. **When the repository goes public this becomes a plain `curl` with no token and no `gh`**, and nothing inside the script changes.
+
+That fetches [`bootstrap.sh`](bootstrap.sh), which clones the repository somewhere durable (`~/.local/share/revloop` by default), then hands to `install.sh`. Pass `--ref <tag>` to pin a known revision, `--dir` to clone elsewhere.
+
+**Every step is optional and it is safe to re-run.** If you already have a checkout — you're inside one, you have `revloop` installed already, or one is at the destination — it uses that instead of cloning again.
+
+Already have the repository? Skip the bootstrap entirely:
+
+```bash
 tools/revloop/install.sh
 ```
 
 That puts `revloop` on your PATH by symlinking it into `~/.local/bin`, and checks what's installed. `--yes` runs it non-interactively; `--bin-dir` puts it somewhere else.
+
+**The checkout is the installation.** `install.sh` symlinks rather than copies, and `revloop` reads its libraries, skills and templates from the checkout at runtime. So `git pull` updates the tool with no reinstall step — and moving or deleting the clone uninstalls it.
 
 That also **offers** to install `pr-review` and `pr-address` for your harnesses, and hands over to the [`skills` CLI](https://github.com/obra/skills) if you say yes. That CLI runs its own flow — it detects which harnesses you have, and asks about project versus global scope and whether to symlink. Those are its questions, deliberately: suppressing them would mean making three choices on your behalf and calling it convenience. `--skills` and `--no-skills` decide the offer up front for scripted installs, and only the scripted path passes flags that answer them.
 
