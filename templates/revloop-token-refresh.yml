@@ -29,6 +29,14 @@ on:
 
 # Never cancel, never overlap. Two concurrent refreshes are the exact failure
 # this workflow exists to prevent.
+#
+# **This group is repository-scoped, and that is the boundary of the guarantee.**
+# GitHub concurrency does not span repositories, so two repositories each running
+# this workflow against the same seeded credential are two writers, and the first
+# to refresh invalidates the other for good. That is why the credential is a
+# repository secret rather than an organisation one, and why `revloop init` warns
+# when it finds an organisation-level copy: one credential, one repository, one
+# writer. A second repository needs its own `codex login` seed.
 concurrency:
   group: revloop-token-refresh
 

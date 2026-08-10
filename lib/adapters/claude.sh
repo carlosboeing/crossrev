@@ -42,6 +42,10 @@ adapter_claude() {
   # "command not found" and an empty error string. That broke every invocation
   # with no endpoint configured, which is the default local case.
   local -a run=(env -u GH_TOKEN -u GITHUB_TOKEN -u GH_ENTERPRISE_TOKEN)
+  # And every credential belonging to a harness that is not this one. The
+  # workflow hands all of them to one process; only one of them is this leg's.
+  local v
+  while IFS= read -r v; do run+=(-u "$v"); done < <(cred_env_strip_for claude)
   local endpoint_label="vendor"
   if [[ -n "$endpoint" && "$endpoint" != "null" ]]; then
     local resolved url tok_env tok

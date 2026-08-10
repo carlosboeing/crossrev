@@ -104,6 +104,29 @@ cred_prepare() {
   esac
 }
 
+# Which environment variables must not reach a given harness.
+#
+# The workflow hands every credential the pairing might need to one process, and
+# each leg needs exactly one of them. The rest are for a harness that is not
+# running, so passing them on is pure exposure: the agent process is the one
+# reading attacker-controlled text, and a prompt injection that reaches tool use
+# can read its own environment. A model that never sees the other vendor's token
+# cannot be talked into exfiltrating it.
+#
+# REVLOOP_CODEX_AUTH is stripped even from codex, because by then the credential
+# has been written into CODEX_HOME and the raw copy in the environment is a
+# second one nobody needs.
+cred_env_strip_for() {
+  local harness="$1" v
+  for v in CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY REVLOOP_CODEX_AUTH; do
+    case "$harness:$v" in
+      # The one variable each harness legitimately needs.
+      claude:CLAUDE_CODE_OAUTH_TOKEN) continue ;;
+    esac
+    printf '%s\n' "$v"
+  done
+}
+
 cred_discard() {
   [[ -n "$CRED_SCRATCH" ]] || return 0
   rm -rf "$CRED_SCRATCH"
@@ -170,11 +193,21 @@ cred_refresh_codex() {
   endpoint="$(_cred_discovery_token_endpoint "$issuer")"
   [[ -n "$endpoint" ]] || { ui_say "could not read a token endpoint from $issuer's discovery document"; return 1; }
 
+  # No -f: a rejection comes back as a JSON body naming the reason, and -f throws
+  # that body away in favour of an exit code. "token_expired" and
+  # "invalid_client" need different fixes, and the difference is only in the body.
+  local http
   resp="$(jq -cn --arg ct "refresh_token" --arg cid "$client_id" --arg rt "$refresh_token" \
             '{grant_type:$ct, client_id:$cid, refresh_token:$rt, scope:"openid profile email offline_access"}' \
-          | curl -fsS --max-time 60 -X POST "$endpoint" \
+          | curl -sS --max-time 60 -w '\n%{http_code}' -X POST "$endpoint" \
               -H 'Content-Type: application/json' --data-binary @- 2>/dev/null)" \
-    || { ui_say "the vendor rejected the refresh"; return 1; }
+    || { ui_say "could not reach $endpoint at all"; return 1; }
+  http="${resp##*$'\n'}"; resp="${resp%$'\n'*}"
+
+  if [[ "$http" != 2* ]]; then
+    ui_say "the vendor rejected the refresh (HTTP $http): $(jq -r '.error.message // .error_description // .error // "no reason given"' <<<"$resp" 2>/dev/null)"
+    return 1
+  fi
 
   local new_access new_refresh new_id
   new_access="$(jq -r '.access_token // empty' <<<"$resp")"

@@ -36,11 +36,19 @@ adapter_codex() {
   # No --effort flag; it is a config override.
   [[ -n "$effort" && "$effort" != "null" ]] && args+=(-c "model_reasoning_effort=$effort")
 
+  # No GitHub credential, and no credential belonging to another harness. By this
+  # point the codex credential lives in CODEX_HOME, so the raw copy the workflow
+  # passed in is a second one nothing needs — and this is the process that reads
+  # attacker-controlled text.
+  local -a run=(env -u GH_TOKEN -u GITHUB_TOKEN -u GH_ENTERPRISE_TOKEN)
+  local v
+  while IFS= read -r v; do run+=(-u "$v"); done < <(cred_env_strip_for codex)
+
   # stdin from /dev/null is required, not defensive. Without it `codex exec`
   # blocks indefinitely on "Reading additional input from stdin..." and the leg
   # hangs with no output and no error.
-  ( cd "$workdir" && env -u GH_TOKEN -u GITHUB_TOKEN -u GH_ENTERPRISE_TOKEN \
-      codex "${args[@]}" "$(cat "$prompt_file")" ) >/dev/null 2>"$err" </dev/null
+  ( cd "$workdir" && "${run[@]}" codex "${args[@]}" "$(cat "$prompt_file")" ) \
+    >/dev/null 2>"$err" </dev/null
   rc=$?
 
   if (( rc != 0 )) || [[ ! -s "$out_file" ]]; then

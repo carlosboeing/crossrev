@@ -48,8 +48,15 @@ adapter_agy() {
   local out err rc
   out="$(mktemp)"; err="$(mktemp)"
 
-  ( cd "$workdir" && env -u GH_TOKEN -u GITHUB_TOKEN -u GH_ENTERPRISE_TOKEN \
-      agy "${args[@]}" --print "$(cat "$prompt_file")" ) >"$out" 2>"$err" </dev/null
+  # No GitHub credential, and none belonging to another harness: this process
+  # reads attacker-controlled text, and a credential it never receives is one no
+  # injection can talk it into exfiltrating.
+  local -a run=(env -u GH_TOKEN -u GITHUB_TOKEN -u GH_ENTERPRISE_TOKEN)
+  local v
+  while IFS= read -r v; do run+=(-u "$v"); done < <(cred_env_strip_for agy)
+
+  ( cd "$workdir" && "${run[@]}" agy "${args[@]}" --print "$(cat "$prompt_file")" ) \
+    >"$out" 2>"$err" </dev/null
   rc=$?
 
   local status; status="$(jq -r '.status // empty' "$out" 2>/dev/null)"

@@ -85,6 +85,15 @@ _init_resolve() {
   # cannot serve should fail here, with the token lifetime named, rather than at
   # the first API call with an authentication error.
   INIT_RUNNER="$(cfg_get '.runner')"; [[ -n "$INIT_RUNNER" ]] || INIT_RUNNER="github-hosted"
+  # A typo here is the worst kind of wrong. Rendering treats anything unrecognised
+  # as hosted, while the refresher derivation matches the exact string — so
+  # `runner: github_hosted` would emit hosted workflows with no refresher, and the
+  # credential would expire ten days later with nothing pointing at the cause.
+  case "$INIT_RUNNER" in
+    github-hosted|self-hosted) : ;;
+    *) ui_die "the config sets runner: $INIT_RUNNER, which revloop does not recognise" \
+         "It must be exactly github-hosted or self-hosted. Anything else would be treated as hosted while behaving as neither, and the first sign would be a credential expiring weeks later." ;;
+  esac
   _init_assert_runner_serves_pairing
   _init_resolve_refresher
 
@@ -161,6 +170,13 @@ _init_assert_runner_serves_pairing() {
     # surface rather than in the middle of assembling a secret list.
     if [[ -n "$endpoint" && "$endpoint" != "null" ]]; then
       cfg_endpoint "$endpoint" >/dev/null
+      # Endpoints are Anthropic-compatible and only the claude adapter speaks
+      # them; the others refuse at invocation. Caught here, that is a config
+      # error before anything is installed. Caught there, it is a workflow that
+      # installs cleanly, fires on the first pull request, and dies every time.
+      [[ "$harness" == "claude" ]] || ui_die \
+        "the $leg names the endpoint '$endpoint' but runs on '$harness', which cannot use one" \
+        "Named endpoints are Anthropic-compatible and reached through the claude adapter. Use harness: claude with endpoint: $endpoint, or drop the endpoint for this leg."
       continue
     fi
     reason="$(preflight_pairing_supported "$INIT_RUNNER" "$harness")" && continue
@@ -186,7 +202,7 @@ _init_resolve_refresher() {
   done
 }
 
-# The secrets this configuration actually needs, one "<name> <note>" per line.
+# The secrets this configuration actually needs, one name per line.
 #
 # Derived rather than fixed, because half of them exist only for one runner or
 # one pairing. A hosted runner needs a credential for each subscription harness;
@@ -421,6 +437,16 @@ _init_execute() {
   # in an organisation, which is precisely the credential nobody remembers to
   # rotate.
   if (( INIT_NEEDS_REFRESHER )); then
+    # One credential, one repository, one writer. Concurrency groups do not span
+    # repositories, so an organisation-level copy of the rotating credential
+    # means every repository that reads it also refreshes it — and the first one
+    # to refresh invalidates it for all the others, permanently.
+    if [[ "$INIT_OWNER_TYPE" == "organization" ]] \
+       && gh secret list --org "$INIT_OWNER" 2>/dev/null | grep -q '^REVLOOP_CODEX_AUTH\b'; then
+      ui_warn "REVLOOP_CODEX_AUTH exists as an organisation secret on $INIT_OWNER" \
+        "The refresher writes a repository secret, which takes precedence — so this repository will work and the organisation copy will go stale, breaking every other repository reading it. Each repository needs its own credential, seeded with its own \`codex login\`. Delete the organisation-level copy."
+    fi
+
     local rmeta; rmeta="$(_auth_meta "$INIT_OWNER" refresher)"
     if [[ ! -f "$rmeta" ]]; then
       ui_gap
@@ -441,10 +467,10 @@ _init_execute() {
     fi
     if [[ -f "$rmeta" ]]; then
       local rpem; rpem="$(_auth_pem "$INIT_OWNER" refresher)"
-      _init_secret_set REVLOOP_REFRESH_APP_ID "$(jq -r .id "$rmeta")" \
+      _init_secret_set REVLOOP_REFRESH_APP_ID "$(jq -r .id "$rmeta")" repo \
         || unfinished="$unfinished REVLOOP_REFRESH_APP_ID"
       if [[ -f "$rpem" ]]; then
-        _init_secret_set REVLOOP_REFRESH_APP_PRIVATE_KEY "$(cat "$rpem")" \
+        _init_secret_set REVLOOP_REFRESH_APP_PRIVATE_KEY "$(cat "$rpem")" repo \
           || unfinished="$unfinished REVLOOP_REFRESH_APP_PRIVATE_KEY"
       else
         ui_no "REVLOOP_REFRESH_APP_PRIVATE_KEY — the key file is missing at $rpem"
@@ -565,6 +591,35 @@ _init_execute() {
 #   # revloop:only <runner>
 #   ...lines kept only for that runner...
 #   # revloop:end
+# The install line for the harnesses this configuration actually names.
+#
+# Installing only Claude is worse than failing: `run_resolve_leg` falls back to
+# whatever harness *is* present, warns in one line nobody reads in a CI log, and
+# the loop runs both legs on one model. It completes normally, and the
+# cross-model property the whole design exists for is gone with no error
+# anywhere. Neither harness is on GitHub's runner images, so what gets installed
+# has to follow the pairing.
+_init_harness_install_line() {
+  local leg harness endpoint seen="" out=""
+  for leg in reviewer addresser; do
+    harness="$(cfg_get ".$leg.harness")"
+    # A leg on an endpoint still runs through the claude binary.
+    endpoint="$(cfg_get ".$leg.endpoint")"
+    [[ -n "$endpoint" && "$endpoint" != "null" ]] && harness="claude"
+    [[ "$seen" == *" $harness "* ]] && continue
+    seen="$seen $harness "
+    # agy cannot appear here: it has no unattended installer, which is why the
+    # pairing check refuses it on a hosted runner before rendering happens.
+    case "$harness" in
+      claude) out="$out          npm install -g @anthropic-ai/claude-code"$'\n' ;;
+      codex)  out="$out          npm install -g @openai/codex"$'\n' ;;
+    esac
+  done
+  # Indented to sit inside the template's `run: |` block, and trailing newline
+  # trimmed so the substitution does not leave a blank line behind.
+  printf '%s' "${out%$'\n'}"
+}
+
 _init_render_workflow() {
   local template="$1" runs_on refresh_scope
   if [[ "$INIT_RUNNER" == "self-hosted" ]]; then
@@ -574,18 +629,28 @@ _init_render_workflow() {
   else
     runs_on="ubuntu-latest"
   fi
-  if [[ "$INIT_OWNER_TYPE" == "organization" ]]; then
-    refresh_scope="--org $INIT_OWNER"
-  else
-    refresh_scope="--repo $INIT_REPO"
-  fi
+  # Always repository-scoped. An organisation-level rotating credential would be
+  # refreshed by every repository reading it, and concurrency groups do not span
+  # repositories — so "one writer" would quietly become several, and the first to
+  # refresh would invalidate the rest.
+  refresh_scope="--repo $INIT_REPO"
 
-  sed -e "s#__SOURCE_REPO__#$INIT_SOURCE_REPO#g" \
+  # The install block is several lines, and neither `sed s///` nor `awk -v` can
+  # carry a newline in a replacement — awk rejects the assignment outright with
+  # "newline in string". So it goes through a file that awk reads line by line.
+  local block; block="$(mktemp)"
+  # shellcheck disable=SC2064  # expand now, not at trap time
+  trap "rm -f '$block'" RETURN
+  _init_harness_install_line >"$block"
+
+  awk -v f="$block" '
+    index($0, "__HARNESS_INSTALL__") { while ((getline line < f) > 0) print line; next }
+    { print }' "$template" \
+    | sed -e "s#__SOURCE_REPO__#$INIT_SOURCE_REPO#g" \
       -e "s#__SOURCE_SHA__#$INIT_SOURCE_SHA#g" \
       -e "s#__SOURCE_REF__#$INIT_SOURCE_REF#g" \
       -e "s#__RUNS_ON__#$runs_on#g" \
       -e "s#__REFRESH_SCOPE__#$refresh_scope#g" \
-      "$template" \
     | awk -v want="$INIT_RUNNER" '
         /^[[:space:]]*# revloop:only / { skip = ($3 != want); next }
         /^[[:space:]]*# revloop:end/   { skip = 0; next }
@@ -615,8 +680,13 @@ _init_set_claude_token() {
 
   local raw token; raw="$(mktemp)"
   chmod 600 "$raw"
+  # EXIT as well as RETURN. A RETURN trap does not fire when the process is cut
+  # short — a Ctrl-C or a SIGTERM between `tee` writing the token and this
+  # function returning would leave a year-long credential sitting in a temp file.
+  # Both are set because the ordinary path returns normally and should clean up
+  # then rather than at the end of the run.
   # shellcheck disable=SC2064  # expand now, not at trap time
-  trap "rm -f '$raw'" RETURN
+  trap "rm -f '$raw'" RETURN EXIT
 
   # tee keeps the raw copy; sed redacts what reaches the terminal.
   #
@@ -653,8 +723,31 @@ _init_secret_scope_flag() {
 
 # Org level where the owner is an org, so later repositories in it need only
 # config, labels and the App install.
+#
+# $3 is "repo" to force repository scope, and two secrets require it.
+#
+# **The refresher App's private key must never be an organisation secret with
+# `--visibility all`.** That key can rewrite repository secrets, and org-wide
+# visibility hands it to every workflow in the organisation — including this
+# design's own review job, which checks out a pull request branch and runs a
+# model over a diff. A prompt injection that reaches tool use in that job could
+# read the key from its environment and mint a token that overwrites secrets. The
+# whole argument for a second App is that its permission is unreachable from
+# untrusted text; org-wide visibility would hand it straight back.
+#
+# The rotating credential is repository-scoped for a different reason: one
+# credential refreshed by one writer, and concurrency groups do not span
+# repositories.
 _init_secret_set() {
-  local name="$1" value="$2"
+  local name="$1" value="$2" force="${3:-}"
+  if [[ "$force" == "repo" ]]; then
+    if printf '%s' "$value" | gh secret set "$name" --repo "$INIT_REPO" >/dev/null 2>&1; then
+      ui_ok "$name — set on $INIT_REPO, repository-scoped on purpose"
+      return 0
+    fi
+    ui_no "$name — could not be set on $INIT_REPO"
+    return 1
+  fi
   if [[ "$INIT_OWNER_TYPE" == "organization" ]]; then
     if printf '%s' "$value" | gh secret set "$name" --org "$INIT_OWNER" --visibility all >/dev/null 2>&1; then
       ui_ok "$name — set at the $INIT_OWNER organisation level"

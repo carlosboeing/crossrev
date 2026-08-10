@@ -140,9 +140,27 @@ out="$("$REVLOOP" init --yes 2>&1)"; rc=$?
 is  "init writes the refresher workflow when the pairing needs it" \
   "$(ls .github/workflows | wc -l | tr -d ' ')" "4"
 wf="$(cat .github/workflows/revloop-review.yml)"
-has "a hosted workflow installs the harness per run" "$wf" "npm install -g @anthropic-ai/claude-code"
+# Both harnesses, not just the one the earlier version of this assertion checked.
+# Neither is on GitHub's runner images, and installing only Claude does not fail:
+# `run_resolve_leg` falls back, warns in one line nobody reads in a CI log, and
+# both legs run Claude. The loop completes and the cross-model property is gone.
+has "a hosted workflow installs the addresser's harness"  "$wf" "npm install -g @anthropic-ai/claude-code"
+has "AND the reviewer's, which is a different one"        "$wf" "npm install -g @openai/codex"
 has "and passes the credentials in as secrets"       "$wf" "REVLOOP_CODEX_AUTH"
 has "on GitHub's own runner"                         "$wf" "runs-on: ubuntu-latest"
+
+# A pairing on one harness installs it once rather than twice.
+fixture_repo "$(config_for github-hosted claude claude)"; stub_reset
+routes_init
+"$REVLOOP" init --yes >/dev/null 2>&1
+is  "a same-harness pairing installs it once, not twice" \
+  "$(grep -c 'npm install -g @anthropic-ai/claude-code' .github/workflows/revloop-review.yml)" "1"
+hasnt "and installs nothing it does not use" \
+  "$(cat .github/workflows/revloop-review.yml)" "@openai/codex"
+
+fixture_repo "$(config_for github-hosted codex claude)"; stub_reset
+routes_init
+out="$("$REVLOOP" init --yes 2>&1)"
 
 refresh="$(grep -v '^[[:space:]]*#' .github/workflows/revloop-token-refresh.yml)"
 has "the refresher runs on a schedule"               "$refresh" "cron:"
@@ -160,5 +178,70 @@ hasnt "no model runs in it"                             "$refresh" "revloop revi
 has "a scripted run names the App it cannot register for you" \
   "$out" "revloop auth login --owner acme --role refresher"
 has "and says why a blanket --yes did not cover it"  "$out" "needs a browser"
+
+# --- what init refuses -------------------------------------------------------
+#
+# Each of these installs cleanly and then fails at runtime if it is not caught
+# here, which is the expensive order to find out.
+
+# A runner value it does not recognise. Rendering treats anything unknown as
+# hosted while the refresher derivation matches the exact string, so a typo would
+# emit hosted workflows with no refresher and the credential would expire days
+# later with nothing pointing at the cause.
+fixture_repo "$(config_for github_hosted codex claude)"; stub_reset
+routes_init
+err="$("$REVLOOP" init --dry-run 2>&1 >/dev/null)"; rc=$?
+is  "an unrecognised runner value refuses"      "$rc" "1"
+has "and says what the two legal values are"    "$err" "exactly github-hosted or self-hosted"
+has "and why a typo is worse than an error"     "$err" "expiring weeks later"
+
+# Only the claude adapter speaks endpoints; the others refuse at invocation.
+ep='endpoints:
+  kimi:
+    base_url: https://api.kimi.com/coding/
+    token_env: KIMI_API_KEY'
+fixture_repo "$(config_for github-hosted codex claude "$ep")"; stub_reset
+routes_init
+yq -i '.reviewer.endpoint = "kimi"' .github/revloop.yml
+git add -A && git commit -q -m ep && git push -q origin main
+err="$("$REVLOOP" init --dry-run 2>&1 >/dev/null)"; rc=$?
+is  "an endpoint on a harness that cannot use one refuses" "$rc" "1"
+has "and names the harness and the endpoint"    "$err" "runs on 'codex', which cannot use one"
+has "and gives the fix"                         "$err" "Use harness: claude with endpoint: kimi"
+
+# --- every rendered workflow is still valid YAML -----------------------------
+#
+# Stripping whole blocks out of a YAML file with awk is exactly the edit that
+# breaks indentation, and the failure surfaces on GitHub as "invalid workflow
+# file" long after anyone is watching. Asserting on content would not catch it:
+# a file can contain every string this suite greps for and still not parse.
+#
+# A fresh fixture, because the refusal cases above deliberately leave a
+# repository with no workflows in it at all.
+fixture_repo "$(config_for github-hosted codex claude)"; stub_reset
+routes_init
+"$REVLOOP" init --yes >/dev/null 2>&1
+for f in .github/workflows/revloop-*.yml; do
+  if yq -e '.jobs' "$f" >/dev/null 2>&1; then
+    ok "$(basename "$f") parses as YAML with a jobs block"
+  else
+    notok "$(basename "$f") parses as YAML with a jobs block" "valid YAML" "$(yq '.' "$f" 2>&1 | head -1)"
+  fi
+done
+
+fixture_repo "$(config_for self-hosted agy codex)"; stub_reset
+routes_init
+"$REVLOOP" init --yes >/dev/null 2>&1
+for f in .github/workflows/revloop-*.yml; do
+  if yq -e '.jobs' "$f" >/dev/null 2>&1; then
+    ok "$(basename "$f") still parses after the self-hosted blocks are stripped"
+  else
+    notok "$(basename "$f") still parses after the self-hosted blocks are stripped" \
+      "valid YAML" "$(yq '.' "$f" 2>&1 | head -1)"
+  fi
+done
+is "and runs-on survives as a list rather than a mangled string" \
+  "$(yq -r '.jobs.review["runs-on"] | join(",")' .github/workflows/revloop-review.yml)" \
+  "self-hosted,revloop"
 
 finish

@@ -45,6 +45,14 @@ _auth_meta() {
 }
 
 # What each role is for, and what it is allowed to do.
+#
+# The refresher gets `secrets`, which is GitHub's **repository** secret
+# permission. `organization_secrets` is a separate permission and is deliberately
+# not requested, because a rotating credential stored at organisation level would
+# be refreshed by every repository that reads it. Concurrency groups are
+# repository-scoped, so several repositories means several writers, and the first
+# one to refresh invalidates the rest — the exact collision the single writer
+# exists to prevent. One credential, one repository, one writer.
 _auth_role_permissions() {
   case "$1" in
     loop)      jq -cn '{contents:"write", issues:"write", pull_requests:"write"}' ;;
@@ -56,7 +64,7 @@ _auth_role_permissions() {
 _auth_role_summary() {
   case "$1" in
     loop)      printf 'contents:write, issues:write, pull_requests:write' ;;
-    refresher) printf 'secrets:write' ;;
+    refresher) printf 'secrets:write (repository secrets only)' ;;
   esac
 }
 
@@ -837,13 +845,18 @@ auth_refresh() {
   # shellcheck disable=SC2064  # expand now, not at trap time
   trap "rm -f '$current' '$check'" EXIT
   (umask 077; printf '%s' "$new" >"$check")
-  after="$(cred_seconds_left "$check")" || after=""
+  # Rule 5: do not report success for something unverified — and an expiry that
+  # cannot be read is unverified, not "probably fine". A vendor response that is
+  # HTTP 200 with a malformed access token would otherwise be written back over a
+  # working credential, reported as a success, and rejected by every leg from
+  # then on. Refuse instead: the stored secret still holds something that works.
+  after="$(cred_seconds_left "$check")" || ui_die \
+    "the refreshed credential's expiry cannot be read, so revloop will not write it back" \
+    "The vendor answered, but what came back does not parse as a token with an exp claim. The stored secret is untouched and still works until it expires. Re-seed it by hand if this repeats: codex login, then set the secret from ~/.codex/auth.json."
 
-  # Rule 5: do not report success for something unverified. A response that
-  # parses but carries an expiry no later than the one it replaced means the
-  # refresh did not happen, and writing it back would burn a refresh token for
-  # nothing.
-  if [[ -n "$before" && -n "$after" ]] && (( after <= before )); then
+  # An expiry no later than the one it replaces means the refresh did not happen,
+  # and writing it back would burn a refresh token for nothing.
+  if [[ -n "$before" ]] && (( after <= before )); then
     ui_die "the refreshed credential expires no later than the one it replaces" \
       "The vendor answered but did not issue a new token. The stored secret is untouched. Check the account's session has not been revoked: codex login status"
   fi

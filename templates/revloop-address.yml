@@ -47,7 +47,7 @@ jobs:
       - run: |
           echo "$GITHUB_WORKSPACE/.revloop-src/tools/revloop/bin" >>"$GITHUB_PATH"
           # revloop:only github-hosted
-          npm install -g @anthropic-ai/claude-code
+          __HARNESS_INSTALL__
           # revloop:end
 
       - name: address
