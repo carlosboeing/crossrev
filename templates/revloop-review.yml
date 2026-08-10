@@ -41,7 +41,7 @@ jobs:
         || github.event_name == 'issue_comment' && github.event.issue.pull_request != null
            && startsWith(github.event.comment.body, '/revloop review')
       )
-    runs-on: ubuntu-latest
+    runs-on: __RUNS_ON__
     permissions:
       contents: read
     steps:
@@ -86,15 +86,27 @@ jobs:
           ssh-key: ${{ secrets.REVLOOP_SOURCE_KEY }}
           path: .revloop-src
 
+      # A hosted runner is a fresh container every time, so the harness is
+      # installed per run. A self-hosted one already has them, along with the
+      # logins they refresh on disk — which is the whole reason it needs no
+      # token plumbing.
       - run: |
           echo "$GITHUB_WORKSPACE/.revloop-src/tools/revloop/bin" >>"$GITHUB_PATH"
+          # revloop:only github-hosted
           npm install -g @anthropic-ai/claude-code
+          # revloop:end
 
       - name: review
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
           REVLOOP_APP_SLUG: ${{ steps.app.outputs.app-slug }}
+          # revloop:only github-hosted
+          # Restored, read and discarded. This job never writes either of them
+          # back: the refresher workflow is the only writer, because using a
+          # refresh token consumes it and a second writer kills the chain.
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          REVLOOP_CODEX_AUTH: ${{ secrets.REVLOOP_CODEX_AUTH }}
+          # revloop:end
         run: revloop review --pr ${{ steps.pr.outputs.number }} --no-tips
 
       # The token is revoked rather than left to expire, and this runs even when

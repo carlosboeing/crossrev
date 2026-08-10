@@ -21,6 +21,10 @@ INIT_SOURCE_REPO=""; INIT_SOURCE_SHA=""; INIT_SOURCE_REF=""
 INIT_PASS_LABELS=""; INIT_FIXED_LABELS=""; INIT_SINK_LABELS=""
 INIT_SINK_RESOLVED=""; INIT_SINK_ORIGIN=""
 INIT_WRITES=""; INIT_OVERWRITES=""
+INIT_RUNNER="github-hosted"
+INIT_NEEDS_REFRESHER=0
+INIT_WORKFLOWS=""
+INIT_SECRETS=""
 
 readonly INIT_LABEL_COLOUR="5319e7"
 
@@ -76,6 +80,14 @@ _init_resolve() {
   # the config `init` is about to write.
   cfg_load ""
 
+  # Which harnesses are reachable in CI is a property of the runner rather than
+  # of the config, so this is settled before anything else — a pairing the runner
+  # cannot serve should fail here, with the token lifetime named, rather than at
+  # the first API call with an authentication error.
+  INIT_RUNNER="$(cfg_get '.runner')"; [[ -n "$INIT_RUNNER" ]] || INIT_RUNNER="github-hosted"
+  _init_assert_runner_serves_pairing
+  _init_resolve_refresher
+
   local max; max="$(cfg_get '.max_passes')"
   local i
   for (( i = 1; i <= max; i++ )); do
@@ -120,13 +132,95 @@ _init_resolve() {
     "could not work out which commit of revloop to pin the workflows to" \
     "init generates workflows that check revloop out at a 40-character SHA. Run it from a git checkout of the repository revloop lives in."
 
-  local f
-  for f in .github/workflows/revloop-review.yml .github/workflows/revloop-address.yml \
-           .github/workflows/revloop-watchdog.yml .github/revloop.yml; do
-    INIT_WRITES="$INIT_WRITES $f"
+  INIT_WORKFLOWS="review address watchdog"
+  (( INIT_NEEDS_REFRESHER )) && INIT_WORKFLOWS="$INIT_WORKFLOWS token-refresh"
+
+  local f t
+  for t in $INIT_WORKFLOWS; do INIT_WRITES="$INIT_WRITES .github/workflows/revloop-$t.yml"; done
+  INIT_WRITES="$INIT_WRITES .github/revloop.yml"
+  for f in $INIT_WRITES; do
     [[ -e "$f" ]] && INIT_OVERWRITES="$INIT_OVERWRITES $f"
   done
   INIT_WRITES="${INIT_WRITES# }"; INIT_OVERWRITES="${INIT_OVERWRITES# }"
+
+  INIT_SECRETS="$(_init_required_secrets)"
+}
+
+# ---------------------------------------------------------------------------
+# What the runner can serve, and what that costs
+# ---------------------------------------------------------------------------
+
+_init_assert_runner_serves_pairing() {
+  local leg harness endpoint reason
+  for leg in reviewer addresser; do
+    harness="$(cfg_get ".$leg.harness")"
+    endpoint="$(cfg_get ".$leg.endpoint")"
+    # An endpoint means a static token in a secret, which never rotates and so
+    # never cares what kind of runner it is on. It still has to resolve: an
+    # endpoint named nowhere is a hard failure, and this is where it should
+    # surface rather than in the middle of assembling a secret list.
+    if [[ -n "$endpoint" && "$endpoint" != "null" ]]; then
+      cfg_endpoint "$endpoint" >/dev/null
+      continue
+    fi
+    reason="$(preflight_pairing_supported "$INIT_RUNNER" "$harness")" && continue
+    ui_die "the $leg is configured to run $harness by subscription, and a $INIT_RUNNER runner cannot serve that" \
+      "$reason. Two fixes: set runner: self-hosted in the config, where every harness refreshes its own credential on disk; or name a different harness for this leg."
+  done
+}
+
+# Derived, never asked.
+#
+# The refresher exists for exactly one situation: a harness whose credential
+# rotates, authenticating by subscription, on an ephemeral runner. Change any one
+# of those three and it disappears — so asking about it would be asking someone
+# to restate a consequence of a pairing they already chose. A repository that
+# does not need it never hears of it, and no second App is created.
+_init_resolve_refresher() {
+  local leg
+  INIT_NEEDS_REFRESHER=0
+  for leg in reviewer addresser; do
+    if preflight_needs_refresher "$INIT_RUNNER" "$(cfg_get ".$leg.harness")" "$(cfg_get ".$leg.endpoint")"; then
+      INIT_NEEDS_REFRESHER=1
+    fi
+  done
+}
+
+# The secrets this configuration actually needs, one "<name> <note>" per line.
+#
+# Derived rather than fixed, because half of them exist only for one runner or
+# one pairing. A hosted runner needs a credential for each subscription harness;
+# a self-hosted one needs none of them, since the machine is already logged in.
+_init_required_secrets() {
+  printf 'APP_ID\n'
+  printf 'APP_PRIVATE_KEY\n'
+  printf 'REVLOOP_SOURCE_KEY\n'
+
+  local leg harness endpoint ep tok seen=""
+  for leg in reviewer addresser; do
+    harness="$(cfg_get ".$leg.harness")"
+    endpoint="$(cfg_get ".$leg.endpoint")"
+    if [[ -n "$endpoint" && "$endpoint" != "null" ]]; then
+      # An endpoint carries its own token variable, so the secret it needs is
+      # whatever the endpoint block names — Kimi, Ollama or anything else. Naming
+      # the variable rather than a vendor is what keeps this from going stale
+      # every time the pairing changes.
+      ep="$(cfg_endpoint "$endpoint")" || continue
+      read -r _ tok <<<"$ep"
+      [[ "$seen" == *" $tok "* ]] || { printf '%s\n' "$tok"; seen="$seen $tok "; }
+      continue
+    fi
+    [[ "$INIT_RUNNER" == "self-hosted" ]] && continue
+    case "$harness" in
+      claude) [[ "$seen" == *" CLAUDE_CODE_OAUTH_TOKEN "* ]] || { printf 'CLAUDE_CODE_OAUTH_TOKEN\n'; seen="$seen CLAUDE_CODE_OAUTH_TOKEN "; } ;;
+      codex)  [[ "$seen" == *" REVLOOP_CODEX_AUTH "* ]] || { printf 'REVLOOP_CODEX_AUTH\n'; seen="$seen REVLOOP_CODEX_AUTH "; } ;;
+    esac
+  done
+
+  if (( INIT_NEEDS_REFRESHER )); then
+    printf 'REVLOOP_REFRESH_APP_ID\n'
+    printf 'REVLOOP_REFRESH_APP_PRIVATE_KEY\n'
+  fi
 }
 
 # ---------------------------------------------------------------------------
@@ -148,18 +242,46 @@ _init_print_plan() {
   ui_line "source pin        $INIT_SOURCE_REPO @ ${INIT_SOURCE_SHA:0:40}"
   ui_line "                  ($INIT_SOURCE_REF — the SHA is the pin, the tag is a comment)"
 
+  ui_line ""
+  ui_line "runner            $INIT_RUNNER"
+  local leg harness endpoint
+  for leg in reviewer addresser; do
+    harness="$(cfg_get ".$leg.harness")"
+    endpoint="$(cfg_get ".$leg.endpoint")"
+    if [[ -n "$endpoint" && "$endpoint" != "null" ]]; then
+      ui_line "                  $leg: $harness via the '$endpoint' endpoint, a static token"
+    else
+      ui_line "                  $leg: $harness by subscription"
+    fi
+  done
+
+  if (( INIT_NEEDS_REFRESHER )); then
+    local refresher_meta; refresher_meta="$(_auth_meta "$INIT_OWNER" refresher)"
+    ui_line ""
+    ui_line "refresher App     needed — codex authenticates by subscription on an"
+    ui_line "                  ephemeral runner, and its credential rotates, so one"
+    ui_line "                  scheduled job refreshes it and the legs only read"
+    if [[ -f "$refresher_meta" ]]; then
+      ui_line "                  reuse \"$(jq -r .name "$refresher_meta")\" (id $(jq -r .id "$refresher_meta"))"
+    else
+      ui_line "                  one more browser approval, for an App carrying"
+      ui_line "                  secrets:write and nothing else"
+    fi
+  fi
+
   local scope="repository"
   [[ "$INIT_OWNER_TYPE" == "organization" ]] && scope="organisation"
   ui_line ""
   ui_line "secrets           checked at $scope level, and set only where revloop has the value"
   local s
-  for s in APP_ID APP_PRIVATE_KEY CLAUDE_CODE_OAUTH_TOKEN REVLOOP_SOURCE_KEY; do
+  while read -r s; do
+    [[ -n "$s" ]] || continue
     if _init_secret_exists "$s"; then
       ui_line "                  $s — already set"
     else
       ui_line "                  $s — MISSING $(_init_secret_note "$s")"
     fi
-  done
+  done <<<"$INIT_SECRETS"
 
   ui_line ""
   local pass_count fixed_count
@@ -212,10 +334,17 @@ _init_secret_note() {
     APP_ID|APP_PRIVATE_KEY)
       if [[ -f "$(_auth_meta "$INIT_OWNER")" ]]; then printf -- '— revloop will set it'
       else printf -- '— run `revloop auth login` first'; fi ;;
+    REVLOOP_REFRESH_APP_ID|REVLOOP_REFRESH_APP_PRIVATE_KEY)
+      if [[ -f "$(_auth_meta "$INIT_OWNER" refresher)" ]]; then printf -- '— revloop will set it'
+      else printf -- '— revloop will register the refresher App and set it'; fi ;;
     CLAUDE_CODE_OAUTH_TOKEN)
-      printf -- '— set it yourself for now: `claude setup-token`, then `gh secret set`' ;;
+      printf -- '— revloop runs `claude setup-token` and captures the output; the token is never printed' ;;
+    REVLOOP_CODEX_AUTH)
+      printf -- '— seed once from a machine with a browser: `codex login`, then `gh secret set REVLOOP_CODEX_AUTH < ~/.codex/auth.json`' ;;
     REVLOOP_SOURCE_KEY)
       printf -- '— a read-only deploy key on %s; see the note after this plan' "$INIT_SOURCE_REPO" ;;
+    *)
+      printf -- '— the token an endpoint in the config names; set it yourself with `gh secret set %s`' "$1" ;;
   esac
 }
 
@@ -287,28 +416,75 @@ _init_execute() {
     unfinished="$unfinished APP_ID APP_PRIVATE_KEY"
   fi
 
+  # The refresher App, when and only when the pairing needs one. Registering it
+  # defensively would leave a private key carrying secrets:write sitting unused
+  # in an organisation, which is precisely the credential nobody remembers to
+  # rotate.
+  if (( INIT_NEEDS_REFRESHER )); then
+    local rmeta; rmeta="$(_auth_meta "$INIT_OWNER" refresher)"
+    if [[ ! -f "$rmeta" ]]; then
+      ui_gap
+      ui_line "codex authenticates by subscription on an ephemeral runner, so one"
+      ui_line "scheduled job has to refresh its credential. That job needs an App"
+      ui_line "of its own carrying secrets:write — never the loop's App, which the"
+      ui_line "review jobs use on attacker-controlled text."
+      # Registering an App means approving it in a browser, so --yes cannot cover
+      # it: a blanket yes must not stand in for an approval nobody is present to
+      # give. Scripted runs name the command instead of pretending to run it.
+      if [[ "${REVLOOP_ASSUME_YES:-0}" == "1" ]] || ! _ui_input_source >/dev/null 2>&1; then
+        ui_no "no refresher App is registered for $INIT_OWNER, and registering one needs a browser"
+        ui_next "revloop auth login --owner $INIT_OWNER --role refresher"
+      elif ui_confirm "Register the refresher App for $INIT_OWNER?"; then
+        auth_login --owner "$INIT_OWNER" --role refresher
+        rmeta="$(_auth_meta "$INIT_OWNER" refresher)"
+      fi
+    fi
+    if [[ -f "$rmeta" ]]; then
+      local rpem; rpem="$(_auth_pem "$INIT_OWNER" refresher)"
+      _init_secret_set REVLOOP_REFRESH_APP_ID "$(jq -r .id "$rmeta")" \
+        || unfinished="$unfinished REVLOOP_REFRESH_APP_ID"
+      if [[ -f "$rpem" ]]; then
+        _init_secret_set REVLOOP_REFRESH_APP_PRIVATE_KEY "$(cat "$rpem")" \
+          || unfinished="$unfinished REVLOOP_REFRESH_APP_PRIVATE_KEY"
+      else
+        ui_no "REVLOOP_REFRESH_APP_PRIVATE_KEY — the key file is missing at $rpem"
+        unfinished="$unfinished REVLOOP_REFRESH_APP_PRIVATE_KEY"
+      fi
+    else
+      unfinished="$unfinished REVLOOP_REFRESH_APP_ID REVLOOP_REFRESH_APP_PRIVATE_KEY"
+    fi
+  fi
+
   local s
-  for s in CLAUDE_CODE_OAUTH_TOKEN REVLOOP_SOURCE_KEY; do
+  while read -r s; do
+    case "$s" in ""|APP_ID|APP_PRIVATE_KEY|REVLOOP_REFRESH_APP_*) continue ;; esac
     if _init_secret_exists "$s"; then
       ui_ok "$s — already set"
-    else
-      ui_no "$s — not set, and revloop does not have the value to set it"
-      unfinished="$unfinished $s"
+      continue
     fi
-  done
+    if [[ "$s" == "CLAUDE_CODE_OAUTH_TOKEN" ]] && _init_set_claude_token; then
+      continue
+    fi
+    ui_no "$s — not set, and revloop does not have the value to set it"
+    unfinished="$unfinished $s"
+  done <<<"$INIT_SECRETS"
 
   # --- files ---------------------------------------------------------------
   ui_section "Files"
   mkdir -p .github/workflows
   local t name
-  for t in review address watchdog; do
+  for t in $INIT_WORKFLOWS; do
     name=".github/workflows/revloop-$t.yml"
-    sed -e "s#__SOURCE_REPO__#$INIT_SOURCE_REPO#g" \
-        -e "s#__SOURCE_SHA__#$INIT_SOURCE_SHA#g" \
-        -e "s#__SOURCE_REF__#$INIT_SOURCE_REF#g" \
-        "$ROOT/templates/revloop-$t.yml" >"$name"
+    _init_render_workflow "$ROOT/templates/revloop-$t.yml" >"$name"
     ui_ok "wrote $name"
   done
+  # A pairing that stopped needing the refresher leaves its workflow behind,
+  # still on a cron, still failing on a secret nobody sets any more. Saying so
+  # beats a scheduled job that emails a failure every twelve hours.
+  if (( INIT_NEEDS_REFRESHER == 0 )) && [[ -e .github/workflows/revloop-token-refresh.yml ]]; then
+    ui_warn "this configuration needs no refresher, but .github/workflows/revloop-token-refresh.yml is still there" \
+      "It stays on its schedule and fails every run once the credential it reads is gone. Delete it, and remove the refresher App's secrets, if the pairing is not going back."
+  fi
 
   if (( INIT_UPGRADE )) && [[ -e .github/revloop.yml ]]; then
     # --upgrade regenerates workflows from the installed version, so drift across
@@ -346,21 +522,124 @@ _init_execute() {
         ui_line "   Read-only by default, so its blast radius if leaked is read access"
         ui_line "   to that one repository — no write, no user identity." ;;
       CLAUDE_CODE_OAUTH_TOKEN)
-        ui_no "CLAUDE_CODE_OAUTH_TOKEN — both legs run on Claude, so neither can authenticate"
+        ui_no "CLAUDE_CODE_OAUTH_TOKEN — a leg runs on Claude, so it cannot authenticate"
         ui_line "   claude setup-token"
         ui_line "   gh secret set CLAUDE_CODE_OAUTH_TOKEN $(_init_secret_scope_flag)"
         ui_line ""
         ui_line "   That token is valid for a year and the command will not show it"
-        ui_line "   again, so put it in the secret in the same sitting. Note the date:"
-        ui_line "   the first sign of expiry is a CI failure on a day nobody is looking."
+        ui_line "   again, so put it in the secret in the same sitting. Re-run"
+        ui_line "   \`revloop init\` from a terminal and it does both, and records the"
+        ui_line "   date so \`revloop auth status\` can warn as the year closes." ;;
+      REVLOOP_CODEX_AUTH)
+        ui_no "REVLOOP_CODEX_AUTH — a leg runs on Codex, so it cannot authenticate"
+        ui_line "   codex login          # on a machine with a browser"
+        ui_line "   gh secret set REVLOOP_CODEX_AUTH $(_init_secret_scope_flag) < ~/.codex/auth.json"
         ui_line ""
-        ui_line "   Capturing it automatically, and warning as the year closes, is on"
-        ui_line "   the subscription-credentials amendment's task list." ;;
+        ui_line "   Seeded once. From then on the refresher workflow is the only"
+        ui_line "   thing that writes it, because using a refresh token consumes it"
+        ui_line "   and a second writer kills the chain for everyone." ;;
+      REVLOOP_REFRESH_APP_ID|REVLOOP_REFRESH_APP_PRIVATE_KEY)
+        ui_no "$s — without the refresher App, codex's credential expires and stays expired"
+        ui_line "   revloop auth login --owner $INIT_OWNER --role refresher"
+        ui_line "   revloop init --upgrade" ;;
       APP_ID|APP_PRIVATE_KEY)
         : ;;   # already explained above
+      *)
+        ui_no "$s — an endpoint in the config names it, and nothing sets it"
+        ui_line "   gh secret set $s $(_init_secret_scope_flag)" ;;
     esac
   done
   ui_end "The workflows are installed but will fail at the first missing secret, before any review runs."
+  return 0
+}
+
+# Render one workflow template for the configured runner.
+#
+# Two mechanisms, and the split is deliberate. Scalars are substituted; whole
+# steps and env entries are fenced, because a hosted runner installs the harness
+# per run and passes credentials in as secrets, while a self-hosted one has both
+# already and passing them would be the mistake — a secret restored over a
+# working on-disk login is how you get a job authenticating as something nobody
+# intended.
+#
+#   # revloop:only <runner>
+#   ...lines kept only for that runner...
+#   # revloop:end
+_init_render_workflow() {
+  local template="$1" runs_on refresh_scope
+  if [[ "$INIT_RUNNER" == "self-hosted" ]]; then
+    # Two labels, not one: `self-hosted` alone matches every self-hosted runner
+    # the owner has, including ones set up for something else entirely.
+    runs_on="[self-hosted, revloop]"
+  else
+    runs_on="ubuntu-latest"
+  fi
+  if [[ "$INIT_OWNER_TYPE" == "organization" ]]; then
+    refresh_scope="--org $INIT_OWNER"
+  else
+    refresh_scope="--repo $INIT_REPO"
+  fi
+
+  sed -e "s#__SOURCE_REPO__#$INIT_SOURCE_REPO#g" \
+      -e "s#__SOURCE_SHA__#$INIT_SOURCE_SHA#g" \
+      -e "s#__SOURCE_REF__#$INIT_SOURCE_REF#g" \
+      -e "s#__RUNS_ON__#$runs_on#g" \
+      -e "s#__REFRESH_SCOPE__#$refresh_scope#g" \
+      "$template" \
+    | awk -v want="$INIT_RUNNER" '
+        /^[[:space:]]*# revloop:only / { skip = ($3 != want); next }
+        /^[[:space:]]*# revloop:end/   { skip = 0; next }
+        !skip'
+}
+
+# Capture `claude setup-token` rather than asking for a paste.
+#
+# The command opens a browser for one authorisation and then prints the token to
+# stdout, saying plainly that it will not show it again. Capturing it here closes
+# the last place in the hosted setup where a credential would otherwise pass
+# through a clipboard.
+#
+# The terminal still sees the command's own output, with anything token-shaped
+# redacted on the way past: the URL and the prompts are what someone needs to
+# complete the flow, and the token is not.
+_init_set_claude_token() {
+  command -v claude >/dev/null 2>&1 || return 1
+  _ui_input_source >/dev/null 2>&1 || return 1   # no terminal, no browser flow
+
+  ui_gap
+  ui_line "CLAUDE_CODE_OAUTH_TOKEN is missing, and both legs need it to authenticate."
+  ui_line "\`claude setup-token\` opens a browser once and prints a token valid for a"
+  ui_line "year. revloop captures it straight into the secret — it is never printed"
+  ui_line "here, never written to a file, and never shown again by anything."
+  ui_confirm "Run \`claude setup-token\` now?" || return 1
+
+  local raw token; raw="$(mktemp)"
+  chmod 600 "$raw"
+  # shellcheck disable=SC2064  # expand now, not at trap time
+  trap "rm -f '$raw'" RETURN
+
+  # tee keeps the raw copy; sed redacts what reaches the terminal.
+  #
+  # `|| true` is load-bearing under `set -o pipefail`: a failed authorisation
+  # would otherwise abort init entirely, halfway through, having already written
+  # labels and secrets. The check below is what decides whether this worked.
+  claude setup-token 2>&1 | tee "$raw" \
+    | sed -E 's/(sk-ant-[A-Za-z0-9_-]{6})[A-Za-z0-9_-]+/\1…[captured by revloop, not shown]/g' \
+    || true
+
+  token="$(grep -oE 'sk-ant-[A-Za-z0-9_-]{20,}' "$raw" | tail -1)"
+  if [[ -z "$token" ]]; then
+    ui_warn "\`claude setup-token\` finished without printing a token revloop could recognise" \
+      "The secret is not set, so CI cannot authenticate yet. Run it by hand and set the secret: claude setup-token, then gh secret set CLAUDE_CODE_OAUTH_TOKEN $(_init_secret_scope_flag)"
+    return 1
+  fi
+
+  _init_secret_set CLAUDE_CODE_OAUTH_TOKEN "$token" || return 1
+  # The one-year clock starts now, and this is the only moment the date exists:
+  # the token cannot be read back, so nothing later can work out when it was
+  # issued. Without this the first sign of expiry is a CI failure.
+  auth_token_record "$INIT_REPO" CLAUDE_CODE_OAUTH_TOKEN 365
+  ui_line "   expires in 365 days — \`revloop auth status\` warns as that closes"
   return 0
 }
 

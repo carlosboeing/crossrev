@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+#
+# A fake `agy` for the offline suite.
+#
+# It returns what the real CLI returns for `--output-format json --json-schema`:
+# the parsed object under `structured_output`, the same JSON as a string in
+# `response`, a status, and no model anywhere. That last part is not an omission
+# in the fixture — Antigravity reports no answering model, which is why the
+# adapter writes model_reported: null rather than echoing back what it asked for.
+#
+# It also asserts the flag order the real CLI forces. `--print` takes the prompt
+# as its value, so every other flag has to come before it; written the other way
+# round the CLI answers a question about the flag it was handed instead, in
+# prose, and burns a real call doing it.
+
+set -uo pipefail
+
+[[ "${1:-}" == "--version" ]] && { printf '9.9.9 (test stub)\n'; exit 0; }
+
+prompt=""
+saw_print=0
+while (( $# )); do
+  case "$1" in
+    --print|--prompt) prompt="${2:-}"; saw_print=1; shift 2 ;;
+    --output-format|--json-schema|--model|--effort)
+      (( saw_print )) && { printf 'test stub: %s came after --print, so the real CLI would have read it as the prompt\n' "$1" >&2; exit 96; }
+      shift 2 ;;
+    *) shift ;;
+  esac
+done
+
+[[ -n "${REVLOOP_PROMPT_LOG:-}" ]] && printf '%s' "$prompt" >"$REVLOOP_PROMPT_LOG"
+
+payload_file="${REVLOOP_HARNESS_PAYLOAD:-}"
+if [[ "$prompt" == *"You are the review leg"* ]]; then
+  [[ -n "${REVLOOP_REVIEW_PAYLOAD:-}" ]] && payload_file="$REVLOOP_REVIEW_PAYLOAD"
+elif [[ "$prompt" == *"You are the address leg"* ]]; then
+  [[ -n "${REVLOOP_ADDRESS_PAYLOAD:-}" ]] && payload_file="$REVLOOP_ADDRESS_PAYLOAD"
+fi
+
+if [[ -z "$payload_file" || ! -f "$payload_file" ]]; then
+  jq -cn '{status:"ERROR", response:"no canned payload was set for this stub invocation"}'
+  exit 1
+fi
+
+jq -cn --argjson p "$(cat "$payload_file")" --arg r "$(cat "$payload_file")" \
+  '{conversation_id:"stub", status:"SUCCESS", response:$r, structured_output:$p,
+    duration_seconds:1, num_turns:1,
+    usage:{input_tokens:1, output_tokens:1, total_tokens:2}}'

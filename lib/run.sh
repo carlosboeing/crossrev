@@ -44,6 +44,10 @@ run_trap_install() {
 run_cleanup() {
   [[ -n "$REVLOOP_SANDBOXED" ]] && sandbox_restore "$REVLOOP_SANDBOXED"
   [[ -n "$REVLOOP_LOCK" && -f "$REVLOOP_LOCK" ]] && rm -f "$REVLOOP_LOCK"
+  # A restored credential dies with the process that borrowed it, on the fatal
+  # paths as much as the clean one. Leaving it on disk is how a second job finds
+  # a copy of a token that only one holder may refresh.
+  cred_discard
   return 0
 }
 
@@ -212,12 +216,16 @@ run_resolve_leg() {
 
   command -v "$LEG_HARNESS" >/dev/null 2>&1 && return 0
 
-  for h in claude codex kimi; do
+  # Only harnesses that have an adapter. `kimi` was in this list and should not
+  # have been: it is reached through the claude adapter as an endpoint, so
+  # falling back to it named a harness with no adapter_kimi behind it, and the
+  # leg died on "command not found" rather than on the missing harness.
+  for h in claude codex agy; do
     command -v "$h" >/dev/null 2>&1 && { alt="$h"; break; }
   done
   [[ -n "$alt" ]] || ui_die \
     "the $leg is configured to use '$LEG_HARNESS', which is not installed, and no other harness is either" \
-    "Install one of claude or codex. revloop needs at least one, and two different ones is what makes the cross-model check mean anything."
+    "Install one of claude, codex or agy. revloop needs at least one, and two different ones is what makes the cross-model check mean anything."
 
   ui_warn "'$LEG_HARNESS' is not installed, so the $leg runs on '$alt' instead" \
     "Both legs now run on the same harness, so a bug it misses while reviewing it also misses while addressing. Install $LEG_HARNESS to get the second lineage back."
@@ -248,6 +256,12 @@ run_invoke() {
   # cross-model property gone and no error anywhere.
   legs_assert_env_clean
 
+  # A credential restored from a secret is read, used and thrown away. The
+  # scratch home is discarded whichever way this returns, including the fatal
+  # paths below, so a harness that refreshes and writes back on its own writes
+  # into a directory nothing reads again.
+  cred_prepare "$harness"
+
   local attempts=1 i=1 payload problem
   validate_harness_is_schema_native "$harness" || attempts=2
 
@@ -272,7 +286,7 @@ run_invoke() {
     fi
 
     payload="$(jq -c '.payload' "$out_file")"
-    if problem="$("$validator" "$payload")"; then return 0; fi
+    if problem="$("$validator" "$payload")"; then cred_discard; return 0; fi
 
     if (( i < attempts )); then
       ui_warn "$harness returned an object that does not match the schema — $problem" \

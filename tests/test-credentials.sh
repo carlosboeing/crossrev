@@ -1,0 +1,140 @@
+#!/usr/bin/env bash
+#
+# Restored credentials: read them, refuse when they are nearly dead, and never
+# write them back.
+#
+# The failure this suite guards against is quiet and expensive. Using a refresh
+# token consumes it, so a leg that refreshes in flight leaves the stored copy
+# invalid, carries on with a replacement it never saved, and the next scheduled
+# refresh fails hours later with nothing to point at. Everything below is a pure
+# decision over a credential file, so all of it is testable with no vendor, no
+# network and no billed call.
+
+set -uo pipefail
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=../lib/ui.sh
+source "$HERE/../lib/ui.sh"
+# shellcheck source=../lib/credentials.sh
+source "$HERE/../lib/credentials.sh"
+
+pass=0 fail=0
+ok()    { printf '  ok    %s\n' "$1"; pass=$((pass+1)); }
+notok() { printf '  FAIL  %s\n    expected: %s\n    actual:   %s\n' "$1" "$2" "$3"; fail=$((fail+1)); }
+is()    { [[ "$2" == "$3" ]] && ok "$1" || notok "$1" "$3" "$2"; }
+has()   { [[ "$2" == *"$3"* ]] && ok "$1" || notok "$1" "contains '$3'" "$2"; }
+
+b64url() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
+
+# A credential in the shape codex actually stores, with an access token whose
+# claims say what this test needs them to say. Signed with nothing: revloop reads
+# the claims for expiry, issuer and client id and never treats them as an
+# authorisation decision, so an unsigned token is the honest fixture.
+fake_credential() {
+  local seconds_left="$1" header payload jwt
+  header="$(printf '%s' '{"alg":"RS256","typ":"JWT"}' | b64url)"
+  payload="$(jq -cn --argjson exp "$(( $(date -u +%s) + seconds_left ))" \
+    '{exp:$exp, iss:"https://auth.example.com", client_id:"app_test"}' | b64url)"
+  jwt="$header.$payload.signature"
+  jq -cn --arg a "$jwt" \
+    '{OPENAI_API_KEY:null, auth_mode:"chatgpt", last_refresh:"2026-08-01T00:00:00Z",
+      tokens:{access_token:$a, refresh_token:"refresh-abc", id_token:"id-abc", account_id:"acct"}}'
+}
+
+# --- reading a token -------------------------------------------------------
+f="$(mktemp)"; fake_credential 86400 >"$f"
+
+left="$(cred_seconds_left "$f")"
+(( left > 86000 && left <= 86400 )) && ok "the expiry is read out of the access token's own claims" \
+  || notok "the expiry is read out of the access token's own claims" "about 86400" "$left"
+
+claims="$(cred_codex_claims "$f")"
+is "and so is the issuer, so nothing about the vendor is hardcoded" \
+  "$(jq -r .iss <<<"$claims")" "https://auth.example.com"
+is "and the client id, which is the other half of a refresh request" \
+  "$(jq -r .client_id <<<"$claims")" "app_test"
+
+# A base64url payload whose length is not a multiple of four still has to decode:
+# the padding is stripped by the encoder and putting it back is the reader's job.
+# Getting this wrong fails on some tokens and not others, which is the worst kind.
+decoded_all=1
+for pad in 1 2 3 4 5; do
+  probe="$(jq -cn --argjson n "$pad" '{exp:1, pad:("x" * $n)}')"
+  [[ "$(cred_jwt_claims "h.$(printf '%s' "$probe" | b64url).s" | jq -r .exp)" == "1" ]] \
+    || { decoded_all=0; break; }
+done
+(( decoded_all )) && ok "a payload of any length decodes, whatever padding the encoder stripped" \
+  || notok "a payload of any length decodes, whatever padding the encoder stripped" "every length" "failed at length $pad"
+
+bad="$(mktemp)"; printf '{"tokens":{"access_token":"not-a-jwt"}}' >"$bad"
+cred_seconds_left "$bad" >/dev/null 2>&1 \
+  && notok "an unreadable token is not silently treated as fresh" "refuse" "allow" \
+  || ok "an unreadable token is not silently treated as fresh"
+
+# --- refusing rather than refreshing in flight -----------------------------
+out="$( ( cred_assert_fresh codex "$f" ) 2>&1 )"; rc=$?
+is  "a credential with a day left runs"         "$rc" "0"
+
+nearly="$(mktemp)"; fake_credential 900 >"$nearly"
+out="$( ( cred_assert_fresh codex "$nearly" ) 2>&1 )"; rc=$?
+is  "one with fifteen minutes left refuses"     "$rc" "1"
+has "and says how much is left"                 "$out" "15 minutes"
+has "and names the one-hour floor"              "$out" "one-hour floor"
+has "and says why refreshing here is worse than stopping" \
+  "$out" "consume the refresh token"
+has "and names both ways out"                   "$out" "revloop-token-refresh"
+# The amendment asks for exactly this: kill the refresher for a full token
+# lifetime and the next leg must fail loudly with the manual recovery named,
+# rather than hanging or quietly degrading.
+has "including the manual recovery, by name"    "$out" "codex login"
+
+expired="$(mktemp)"; fake_credential -60 >"$expired"
+out="$( ( cred_assert_fresh codex "$expired" ) 2>&1 )"; rc=$?
+is  "an expired credential refuses too"         "$rc" "1"
+has "and says so plainly rather than in negative minutes" "$out" "expired"
+
+unreadable="$(mktemp)"; printf '{"tokens":{}}' >"$unreadable"
+out="$( ( cred_assert_fresh codex "$unreadable" ) 2>&1 )"; rc=$?
+is  "a credential with no readable expiry refuses" "$rc" "1"
+has "rather than assuming it is fine"           "$out" "cannot reason about"
+
+# --- restore, then discard --------------------------------------------------
+#
+# The scratch home is the mechanism that makes a leg read-only. The harness may
+# refresh and write back on its own — there is no flag to stop it — so the copy
+# it writes into has to be one nothing reads again.
+unset CODEX_HOME
+REVLOOP_CODEX_AUTH="$(fake_credential 86400)"; export REVLOOP_CODEX_AUTH
+cred_prepare codex
+is  "a restored credential lands in a scratch home, not in ~/.codex" \
+  "$(dirname "${CODEX_HOME:-none}")" "$(dirname "$(mktemp -u)")"
+is  "with the credential where the harness looks for it" \
+  "$(jq -r '.tokens.refresh_token' "$CODEX_HOME/auth.json")" "refresh-abc"
+is  "and readable by nobody else" \
+  "$(stat -f '%Lp' "$CODEX_HOME/auth.json" 2>/dev/null || stat -c '%a' "$CODEX_HOME/auth.json")" "600"
+
+scratch="$CODEX_HOME"
+
+# Two legs running at once must not share a copy. They each borrow their own,
+# and neither is the one the secret holds — which is what makes "several holders"
+# safe as long as none of them writes.
+( cred_prepare codex; printf '%s' "$CODEX_HOME" ) >/tmp/revloop-second-home.$$
+second="$(cat /tmp/revloop-second-home.$$)"; rm -f /tmp/revloop-second-home.$$
+[[ -n "$second" && "$second" != "$scratch" ]] \
+  && ok "a second leg gets its own copy rather than sharing one" \
+  || notok "a second leg gets its own copy rather than sharing one" "a different scratch home" "$second"
+
+cred_discard
+[[ -d "$scratch" ]] && notok "the scratch home is gone when the leg finishes" "gone" "still there" \
+  || ok "the scratch home is gone when the leg finishes"
+is  "and CODEX_HOME is unset again"             "${CODEX_HOME:-unset}" "unset"
+
+# Nothing to restore is the local and self-hosted case, where the harness has its
+# own login on disk. It must cost nothing and touch nothing.
+unset REVLOOP_CODEX_AUTH
+cred_prepare codex
+is  "with no restored credential, nothing is prepared" "${CODEX_HOME:-unset}" "unset"
+cred_prepare claude
+is  "and claude needs no restore at all — setup-token is long-lived" "${CODEX_HOME:-unset}" "unset"
+
+printf '\n  %d passed, %d failed\n' "$pass" "$fail"
+(( fail == 0 ))

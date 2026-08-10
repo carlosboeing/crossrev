@@ -31,6 +31,8 @@ source "$ROOT/lib/preflight.sh"
 source "$ROOT/lib/auth.sh"
 # shellcheck source=lib/config.sh
 source "$ROOT/lib/config.sh"
+# shellcheck source=lib/credentials.sh
+source "$ROOT/lib/credentials.sh"
 # shellcheck source=lib/sandbox.sh
 source "$ROOT/lib/sandbox.sh"
 # shellcheck source=lib/state.sh
@@ -51,6 +53,8 @@ source "$ROOT/lib/init.sh"
 source "$ROOT/lib/adapters/claude.sh"
 # shellcheck source=lib/adapters/codex.sh
 source "$ROOT/lib/adapters/codex.sh"
+# shellcheck source=lib/adapters/agy.sh
+source "$ROOT/lib/adapters/agy.sh"
 
 revloop_version() { tr -d '[:space:]' <"$ROOT/VERSION"; }
 
@@ -75,6 +79,8 @@ usage() {
     auth status              Which Apps are configured, and where installed
     auth login               Register a GitHub App and install it
     auth install             Install an already-registered App somewhere
+    auth rotate              Replace an App's private key, guided
+    auth refresh             Refresh a rotating harness credential (the refresher job)
     doctor                   Check that everything revloop needs is installed
     version                  Print the installed version
 
@@ -101,10 +107,9 @@ main() {
         status)  auth_status "$@" ;;
         login)   auth_login "$@" ;;
         install) auth_install "$@" ;;
-        rotate)
-          ui_die "\`revloop auth rotate\` is not built yet" \
-            "GitHub has no API to generate an App private key — it is a web-UI action. Until this lands, generate one at https://github.com/settings/apps and replace the file that \`revloop auth status\` names." ;;
-        *) ui_die "unknown auth command: $sub" "Try: revloop auth status | login | install" ;;
+        rotate)  auth_rotate "$@" ;;
+        refresh) auth_refresh "$@" ;;
+        *) ui_die "unknown auth command: $sub" "Try: revloop auth status | login | install | rotate | refresh" ;;
       esac ;;
 
     config)
@@ -117,8 +122,17 @@ main() {
       esac ;;
 
     doctor)
-      preflight_check harness && ui_end "Everything revloop needs is installed." \
-        || ui_end "Install what is marked ✗ above, then run this again." ;;
+      local doctor_ok=0
+      preflight_check harness || doctor_ok=1
+      # Which pairings the configured runner can serve is the other half of "is
+      # this set up correctly", and it is invisible until a CI run fails to
+      # authenticate. Reported here rather than discovered there.
+      if command -v yq >/dev/null 2>&1; then
+        cfg_load ""
+        preflight_report_pairings "$(cfg_get '.runner')" || doctor_ok=1
+      fi
+      (( doctor_ok == 0 )) && ui_end "Everything revloop needs is installed." \
+        || ui_end "Fix what is marked ✗ above, then run this again." ;;
 
     review)  leg_review "$@" ;;
     address) leg_address "$@" ;;

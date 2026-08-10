@@ -55,7 +55,7 @@ revloop doctor
 | `git`, `gh` | Reading and writing the PR. `gh` must be authenticated |
 | `jq` | The findings and address payloads are JSON |
 | `yq` | Both config layers are YAML, and `jq` cannot read YAML |
-| One of `claude`, `codex`, `kimi` | Something has to do the reviewing |
+| One of `claude`, `codex`, `agy` | Something has to do the reviewing |
 
 `yq` is the one usually missing on macOS — `brew install yq`. It's preinstalled on both GitHub runner families.
 
@@ -74,9 +74,27 @@ revloop doctor
 | `revloop auth status` | Works |
 | `revloop auth login` | Works — registers a GitHub App and installs it, end to end |
 | `revloop auth install` | Works — installs an already-registered App |
-| `revloop auth rotate` | Not built. GitHub has no API to generate an App key; it's a web-UI action |
+| `revloop auth rotate` | Built. Guided, because GitHub has no API to generate an App key. It proves the new key works before replacing the old one |
+| `revloop auth refresh` | Built. The refresher job's only command, and the only thing that writes a rotating harness credential |
 
-**Not yet run against a real pull request.** Every one of those is exercised offline against a stubbed `gh` boundary — 248 assertions, no network, no model, no PR. That catches the deterministic half, which is the half that fails silently. It does not tell you whether the reviews are any good, and no repository has had the workflows installed yet.
+**Not yet run against a real pull request.** Every one of those is exercised offline against a stubbed `gh` boundary — 330 assertions, no network, no model, no PR. That catches the deterministic half, which is the half that fails silently. It does not tell you whether the reviews are any good, and no repository has had the workflows installed yet.
+
+## Subscriptions in CI
+
+revloop runs on the subscriptions you already pay for rather than per-token API keys. Whether that works in CI is a property of the **runner**, because it comes down to whether a harness's credential can sit in a repository secret. These lifetimes were read off installed credentials, not documentation:
+
+| Harness | Subscription credential | Lifetime | Survives an ephemeral runner |
+|---|---|---|---|
+| `claude` | `claude setup-token`, purpose-built | 1 year | Yes |
+| `codex` | OAuth access token in `~/.codex/auth.json` | 10 days | Yes, with the refresher below |
+| `agy` | OAuth access token in `~/.gemini/oauth_creds.json` | ~1 hour | No |
+| `kimi` | OAuth access token | 15 minutes | No |
+
+`revloop init` refuses a pairing its runner cannot serve, naming the lifetime and both fixes, rather than installing workflows that fail at the first API call. `runner: self-hosted` serves every pairing — the machine holds its own logins and refreshes them the ordinary way, so there are no secrets, no refresher and no rotation chain at all.
+
+**Refresh tokens rotate: using one consumes it.** So the legs never refresh. On a hosted runner with Codex in the pairing, `init` generates `revloop-token-refresh.yml` — one scheduled job, on its own concurrency group, that is the only writer. Each leg restores a copy into a throwaway home and discards it, and a leg holding under an hour of token life stops rather than refreshing in flight.
+
+That workflow is also the only place revloop needs `Secrets: write`, which is why it gets a second App (`--role refresher`) rather than widening the loop's. The refresher job never checks out the pull request branch, never runs a model and never reads a diff or a comment — there is nothing in it to inject into. `init` derives whether you need one from the pairing and never asks; most configurations, including the default, never see it.
 
 ## Local endpoints
 
@@ -140,8 +158,9 @@ bin/revloop      entrypoint
 lib/             sourced by bin/revloop
   ui.sh            output voice — six rules, enforced by the helpers' shapes
   preflight.sh     dependency checks that name the fix, not just the gap
-  auth.sh          GitHub App registration via the manifest flow
+  auth.sh          GitHub App registration via the manifest flow, per owner and role
   config.sh        two-layer config, endpoint and sink resolution
+  credentials.sh   restoring a rotating subscription credential, read-only
   sandbox.sh       quarantining repository-provided harness configuration
   state.sh         labels, markers, trust, revision detection, finding ids
   legs.sh          termination, the push guard, the divergence guard
@@ -150,7 +169,7 @@ lib/             sourced by bin/revloop
   prompt.sh        what each leg is given
   run.sh           the two legs, the drivers, the watchdog
   init.sh          the plan-then-confirm upgrade to automated mode
-  adapters/        claude.sh, codex.sh
+  adapters/        claude.sh, codex.sh, agy.sh
 schemas/         findings.schema.json, address.schema.json
 skills/          pr-review/, pr-address/
 templates/       workflows, starter config, example operator config

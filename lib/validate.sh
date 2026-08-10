@@ -67,12 +67,14 @@ validate_address() {
 
 # Does this harness constrain its own output to the schema?
 #
-# Both v1 harnesses do, which is why the retry below is not the normal path. It
-# exists so that adding a harness without a schema flag does not also mean adding
-# retry logic under time pressure.
+# All three shipped harnesses do, which is why the retry is not the normal path.
+# It exists so that adding a harness without a schema flag does not also mean
+# adding retry logic under time pressure. agy joined the list on evidence: its
+# --json-schema was tested against a two-field schema and came back conforming,
+# contradicting the amendment that asked for a fenced-JSON fallback.
 validate_harness_is_schema_native() {
   case "$1" in
-    claude|codex) return 0 ;;
-    *)            return 1 ;;
+    claude|codex|agy) return 0 ;;
+    *)                return 1 ;;
   esac
 }
