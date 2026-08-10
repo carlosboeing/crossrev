@@ -120,8 +120,15 @@ cred_env_strip_for() {
   local harness="$1" v
   for v in CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY REVLOOP_CODEX_AUTH; do
     case "$harness:$v" in
-      # The one variable each harness legitimately needs.
-      claude:CLAUDE_CODE_OAUTH_TOKEN) continue ;;
+      # What each harness legitimately needs, and nothing more.
+      #
+      # ANTHROPIC_API_KEY stays for claude deliberately. It is the operator's own
+      # environment rather than something a workflow injected, and stripping it
+      # would silently move a local run from API billing to subscription billing
+      # — a substitution nobody asked for, in a tool whose divergence guard
+      # exists to catch exactly that class of quiet swap. For the other harnesses
+      # it is a foreign vendor's credential and goes.
+      claude:CLAUDE_CODE_OAUTH_TOKEN|claude:ANTHROPIC_API_KEY) continue ;;
     esac
     printf '%s\n' "$v"
   done
@@ -190,7 +197,11 @@ cred_refresh_codex() {
     return 1
   }
 
-  endpoint="$(_cred_discovery_token_endpoint "$issuer")"
+  # `|| true` so an unreachable discovery document reaches the check below rather
+  # than the caller's `set -e`. It is suppressed today, because every caller runs
+  # this on the left of a `||` — but that is a property of the callers, not of
+  # this function, and the next caller should not have to know it.
+  endpoint="$(_cred_discovery_token_endpoint "$issuer" || true)"
   [[ -n "$endpoint" ]] || { ui_say "could not read a token endpoint from $issuer's discovery document"; return 1; }
 
   # No -f: a rejection comes back as a JSON body naming the reason, and -f throws

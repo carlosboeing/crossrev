@@ -73,7 +73,15 @@ adapter_claude() {
   rc=$?
 
   if (( rc != 0 )) || [[ "$(jq -r '.is_error // false' "$out" 2>/dev/null)" == "true" ]]; then
-    jq -cn --arg e "$(jq -r '.result // empty' "$out" 2>/dev/null || head -c 400 "$err")" \
+    # Chosen on whether a message is there, not on jq's exit status. On an EMPTY
+    # stdout jq exits 0 with no output, so a `jq … || head "$err"` fallback never
+    # fires and the error becomes the empty string — exactly when stderr holds
+    # the only diagnosis. Found by a reviewer in the agy adapter, which copied
+    # this line.
+    local msg; msg="$(jq -r '.result // empty' "$out" 2>/dev/null)"
+    [[ -n "$msg" ]] || msg="$(head -c 400 "$err")"
+    [[ -n "$msg" ]] || msg="claude exited $rc with no output on either stream"
+    jq -cn --arg e "$msg" \
       '{ok:false, payload:null, harness:"claude", endpoint:null, model_reported:null, error:$e}'
     rm -f "$out" "$err"; return 1
   fi

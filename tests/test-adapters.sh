@@ -49,12 +49,32 @@ has "it reads the payload out of structured_output" "$out" "verdict: issues-rema
 is  "and posts the finding it carried"            "$(count 'method POST repos/acme/widget/pulls/42/comments')" "1"
 has "the comment names the harness that produced it" "$(calls)" "agy"
 
-# The prompt reached the CLI as the value of --print. The stub exits 96 if any
-# flag followed it, which is what the real CLI silently mis-parses.
-is  "the prompt is the value of --print, with every flag before it" \
-  "$(grep -c 'came after --print' <<<"$out")" "0"
-has "and the leg really did get the review prompt" \
+# The flag order, asserted two ways, because the obvious way asserts nothing.
+#
+# Grepping the leg's output for the stub's complaint cannot fail: the stub writes
+# it to stderr, the adapter captures stderr into a temp file, and that file only
+# surfaces on the error path. The assertion passed whatever the adapter did.
+#
+# What actually covers it is the run above. Wrong order means the stub exits 96,
+# the adapter returns ok:false, and `revloop review` dies — so "a review leg runs
+# on agy" is the real assertion, and it is already at the top of this file.
+# What is left worth checking here is that the stub can still tell the
+# difference, since a tripwire that has stopped tripping is worse than none.
+#
+# Read the prompt log first: the probes below invoke the stub directly and it
+# overwrites that file.
+has "the leg really did get the review prompt" \
   "$(cat "$PROMPT_LOG")" "You are the review leg"
+
+( unset REVLOOP_REVIEW_PAYLOAD REVLOOP_HARNESS_PAYLOAD
+  "$HERE/stub/agy" --print "prompt" --output-format json >/dev/null 2>&1 )
+is  "the stub still refuses a flag placed after --print" "$?" "96"
+# 1 rather than 0, and deliberately: the order is accepted, and it then fails for
+# the ordinary reason — no canned payload was set for a bare invocation. What
+# matters is that it is not 96.
+( unset REVLOOP_REVIEW_PAYLOAD REVLOOP_HARNESS_PAYLOAD
+  "$HERE/stub/agy" --output-format json --print "prompt" >/dev/null 2>&1 )
+is  "and accepts the order the adapter uses"            "$?" "1"
 
 # --- no model, and that is not a failure ------------------------------------
 #

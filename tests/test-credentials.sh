@@ -22,6 +22,7 @@ ok()    { printf '  ok    %s\n' "$1"; pass=$((pass+1)); }
 notok() { printf '  FAIL  %s\n    expected: %s\n    actual:   %s\n' "$1" "$2" "$3"; fail=$((fail+1)); }
 is()    { [[ "$2" == "$3" ]] && ok "$1" || notok "$1" "$3" "$2"; }
 has()   { [[ "$2" == *"$3"* ]] && ok "$1" || notok "$1" "contains '$3'" "$2"; }
+hasnt() { [[ "$2" != *"$3"* ]] && ok "$1" || notok "$1" "does not contain '$3'" "$2"; }
 
 b64url() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
 
@@ -135,6 +136,31 @@ cred_prepare codex
 is  "with no restored credential, nothing is prepared" "${CODEX_HOME:-unset}" "unset"
 cred_prepare claude
 is  "and claude needs no restore at all — setup-token is long-lived" "${CODEX_HOME:-unset}" "unset"
+
+# --- what reaches the harness process ---------------------------------------
+#
+# The workflow hands one process every credential the pairing might need, and
+# that process is the one reading attacker-controlled text. Each leg should hold
+# exactly what it needs to authenticate and nothing else, so a prompt injection
+# that reaches tool use finds no other vendor's token to exfiltrate.
+strip_for() { cred_env_strip_for "$1" | tr '\n' ' ' | sed 's/ $//'; }
+
+has "claude sheds the codex credential"          "$(strip_for claude)" "REVLOOP_CODEX_AUTH"
+hasnt "and keeps the token it authenticates with" "$(strip_for claude)" "CLAUDE_CODE_OAUTH_TOKEN"
+# Not stripped for claude on purpose: it is the operator's own environment, not
+# something a workflow injected, and removing it would quietly move a local run
+# from API billing to subscription billing.
+hasnt "and leaves the operator's own API key alone" "$(strip_for claude)" "ANTHROPIC_API_KEY"
+
+has "codex sheds claude's token"                 "$(strip_for codex)" "CLAUDE_CODE_OAUTH_TOKEN"
+has "and the anthropic key, which is a foreign vendor's here" "$(strip_for codex)" "ANTHROPIC_API_KEY"
+# Stripped even from codex: by then the credential is in CODEX_HOME, so the copy
+# in the environment is a second one nothing needs.
+has "and even its own raw credential, already written to CODEX_HOME" \
+  "$(strip_for codex)" "REVLOOP_CODEX_AUTH"
+
+has "agy sheds every credential, holding none of them" "$(strip_for agy)" "CLAUDE_CODE_OAUTH_TOKEN"
+has "including the codex one"                    "$(strip_for agy)" "REVLOOP_CODEX_AUTH"
 
 printf '\n  %d passed, %d failed\n' "$pass" "$fail"
 (( fail == 0 ))

@@ -871,6 +871,12 @@ auth_refresh() {
       "The refresher App needs secrets:write on that repository. Check: revloop auth status"
   fi
 
+  # Explicitly, rather than leaving it to the EXIT trap. The trap is the
+  # backstop for the fatal paths; on the ordinary one the credential should stop
+  # existing on disk the moment it is no longer needed, not whenever the process
+  # happens to end.
+  rm -f "$current" "$check"
+
   ui_section "Refreshed"
   ui_ok "$secret now holds a credential valid for $(_cred_human_duration "${after:-0}")"
   ui_end "This is the only job that writes it. Every leg restores a copy and discards it."

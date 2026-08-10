@@ -61,7 +61,15 @@ adapter_agy() {
 
   local status; status="$(jq -r '.status // empty' "$out" 2>/dev/null)"
   if (( rc != 0 )) || [[ "$status" != "SUCCESS" ]]; then
-    jq -cn --arg e "$(jq -r '.error // .response // empty' "$out" 2>/dev/null || head -c 400 "$err")" \
+    # The message is chosen on whether one is actually there, not on jq's exit
+    # status. `jq … || head -c 400 "$err"` reads as a fallback and is not one: on
+    # an EMPTY stdout jq exits 0 with no output, so the fallback never fires and
+    # the error becomes the empty string — which is precisely the case where the
+    # only diagnosis lives on stderr.
+    local msg; msg="$(jq -r '.error // .response // empty' "$out" 2>/dev/null)"
+    [[ -n "$msg" ]] || msg="$(head -c 400 "$err")"
+    [[ -n "$msg" ]] || msg="agy exited $rc with no output on either stream"
+    jq -cn --arg e "$msg" \
       '{ok:false, payload:null, harness:"agy", endpoint:null, model_reported:null, error:$e}'
     rm -f "$out" "$err"; return 1
   fi

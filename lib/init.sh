@@ -637,14 +637,17 @@ _init_render_workflow() {
 
   # The install block is several lines, and neither `sed s///` nor `awk -v` can
   # carry a newline in a replacement — awk rejects the assignment outright with
-  # "newline in string". So it goes through a file that awk reads line by line.
-  local block; block="$(mktemp)"
-  # shellcheck disable=SC2064  # expand now, not at trap time
-  trap "rm -f '$block'" RETURN
-  _init_harness_install_line >"$block"
-
-  awk -v f="$block" '
-    index($0, "__HARNESS_INSTALL__") { while ((getline line < f) > 0) print line; next }
+  # "newline in string". The environment can, and ENVIRON reads it back intact.
+  #
+  # A temp file was the first fix and was worse: this runs once per workflow, so
+  # a RETURN trap cleans up on the ordinary path and leaks a file on every other
+  # one. A file that never exists needs no trap.
+  REVLOOP_HARNESS_INSTALL="$(_init_harness_install_line)" awk '
+    index($0, "__HARNESS_INSTALL__") {
+      n = split(ENVIRON["REVLOOP_HARNESS_INSTALL"], a, "\n")
+      for (i = 1; i <= n; i++) print a[i]
+      next
+    }
     { print }' "$template" \
     | sed -e "s#__SOURCE_REPO__#$INIT_SOURCE_REPO#g" \
       -e "s#__SOURCE_SHA__#$INIT_SOURCE_SHA#g" \
