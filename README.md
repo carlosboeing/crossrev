@@ -77,7 +77,7 @@ revloop doctor
 | `revloop auth rotate` | Built. Guided, because GitHub has no API to generate an App key. It proves the new key works before replacing the old one |
 | `revloop auth refresh` | Built. The refresher job's only command, and the only thing that writes a rotating harness credential |
 
-**Not yet run against a real pull request.** Every one of those is exercised offline against a stubbed `gh` boundary — 347 assertions, no network, no model, no PR. That catches the deterministic half, which is the half that fails silently. It does not tell you whether the reviews are any good, and no repository has had the workflows installed yet.
+**Not yet run against a real pull request.** Every one of those is exercised offline against a stubbed `gh` boundary — 361 assertions, no network, no model, no PR. That catches the deterministic half, which is the half that fails silently. It does not tell you whether the reviews are any good, and no repository has had the workflows installed yet.
 
 ## Subscriptions in CI
 

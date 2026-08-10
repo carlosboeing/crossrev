@@ -25,7 +25,7 @@ All notable changes to revloop. Format follows [Keep a Changelog](https://keepac
 - `lib/credentials.sh` — reading a token's expiry, issuer and client id from its own claims, restoring one read-only, and the refusal threshold.
 - `templates/` — the workflows, the starter policy config, and a commented example operator config.
 - `scripts/lint.sh` — syntax plus `shellcheck -S warning` across everything, in one command.
-- A stubbed-`gh` test suite: 347 offline assertions across thirteen files, no network, no model, no pull request. `tests/stub/codex` is a tripwire rather than a stub, because a fixture whose config failed to load reached the real billed CLI once before it existed. `tests/stub/agy` is a tripwire of a different kind: it exits non-zero if a flag follows `--print`, which is the mis-parse the real CLI answers cheerfully in prose.
+- A stubbed-`gh` test suite: 361 offline assertions across thirteen files, no network, no model, no pull request. `tests/stub/codex` is a tripwire rather than a stub, because a fixture whose config failed to load reached the real billed CLI once before it existed. `tests/stub/agy` is a tripwire of a different kind: it exits non-zero if a flag follows `--print`, which is the mis-parse the real CLI answers cheerfully in prose.
 - `action.yml` — a composite action manifest for the day revloop is public. Its `app-token` input has no default on purpose: `GITHUB_TOKEN` writes do not trigger workflows, so defaulting it would stall the chain after pass 1 while looking healthy.
 - `bin/revloop` entrypoint with `doctor`, `version` and `help`.
 
