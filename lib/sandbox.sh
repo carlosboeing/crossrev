@@ -1,0 +1,99 @@
+# shellcheck shell=bash
+# lib/sandbox.sh — neutralise repository-provided harness configuration.
+#
+# A pull request branch does not only contain content to review. It contains
+# files that configure the thing reviewing it: settings, instruction files,
+# hooks, MCP server definitions, agents. A hook is arbitrary code execution
+# before the model ever sees a token.
+#
+# Two mechanisms were available and only one of them is usable.
+#
+# Claude Code's `--bare` skips hooks, plugin sync, auto-memory and CLAUDE.md
+# auto-discovery, which is exactly right — but it also refuses subscription
+# auth: "Anthropic auth is strictly ANTHROPIC_API_KEY or apiKeyHelper via
+# --settings (OAuth and keychain are never read)". Verified by running it with
+# no API key present, which fails with "Not logged in". So on Claude Code you
+# can have project-config isolation or subscription billing, not both, and the
+# design's headline is that it runs on subscriptions.
+#
+# Codex requires persisted trust before running a hook, and exposes
+# `--dangerously-bypass-hook-trust` to skip that check. revloop never passes it.
+#
+# So sanitising the checkout is the mechanism, and the flags are defence in
+# depth where they are free. It is also harness-agnostic, which matters: a flag
+# that changes name in the next release fails open, whereas a file that is not
+# there cannot be read by anything.
+#
+# Quarantined rather than deleted, for a reason that is easy to miss: a pull
+# request that ADDS a hook is exactly the pull request a reviewer should be
+# flagging. The diff still carries the text, and the files stay readable at a
+# path no harness auto-loads.
+
+REVLOOP_QUARANTINE=".revloop-quarantine"
+
+# Every path a harness is known to load from a working directory.
+#
+# Deliberately over-broad and deliberately not exhaustive — this list is a
+# best-effort layer, not the thing standing between an injected hook and the
+# App token. That is the credential separation: the agent process holds no
+# GitHub credential at all, so an injection that reaches tool use still cannot
+# post as the App, push a commit, or read a secret.
+_sandbox_paths() {
+  cat <<'PATHS'
+.claude
+.codex
+.agents
+.cursor
+.gemini
+.mcp.json
+CLAUDE.md
+AGENTS.md
+GEMINI.md
+.clauderc
+.github/copilot-instructions.md
+PATHS
+}
+
+# Move repository-provided harness configuration out of the way.
+# Prints one line per quarantined path.
+sandbox_quarantine() {
+  local root="${1:-.}" moved=0 p
+  mkdir -p "$root/$REVLOOP_QUARANTINE"
+
+  while IFS= read -r p; do
+    [[ -e "$root/$p" ]] || continue
+    mkdir -p "$root/$REVLOOP_QUARANTINE/$(dirname "$p")"
+    mv "$root/$p" "$root/$REVLOOP_QUARANTINE/$p"
+    printf 'quarantined %s\n' "$p"
+    moved=$((moved+1))
+  done < <(_sandbox_paths)
+
+  # An empty quarantine directory is itself a repository-provided path the
+  # harness might notice, and it is noise in `git status`.
+  rmdir "$root/$REVLOOP_QUARANTINE" 2>/dev/null || true
+  return 0
+}
+
+# Put everything back, so the checkout is the PR's again before anything is
+# committed. Without this the addresser would commit the quarantine.
+sandbox_restore() {
+  local root="${1:-.}" q="${1:-.}/$REVLOOP_QUARANTINE" p
+  [[ -d "$q" ]] || return 0
+  while IFS= read -r p; do
+    [[ -e "$q/$p" ]] || continue
+    mkdir -p "$root/$(dirname "$p")"
+    rm -rf "${root:?}/$p"
+    mv "$q/$p" "$root/$p"
+  done < <(_sandbox_paths)
+  rm -rf "$q"
+}
+
+# Arguments that harden a harness invocation without costing the billing model.
+# Empty for claude: --bare is the only isolation flag and it disables OAuth.
+sandbox_args_for() {
+  case "$1" in
+    codex)  printf '%s' "--ignore-user-config" ;;
+    claude) printf '' ;;
+    *)      printf '' ;;
+  esac
+}
