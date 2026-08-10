@@ -7,6 +7,10 @@
 # a personal App for personal repos, an org-owned App whose key lives in that
 # org's secrets, and a separate one for any client org later. A leak in one
 # cannot reach another.
+#
+# The flow is: register, install, verify. All three open a browser at a URL that
+# is already correct, and the terminal follows along on its own. Nothing is
+# copied, pasted, or clicked out of a message.
 
 _auth_dir() { printf '%s/revloop/apps' "${XDG_CONFIG_HOME:-$HOME/.config}"; }
 _auth_pem()  { printf '%s/%s.pem'  "$(_auth_dir)" "$1"; }
@@ -18,13 +22,25 @@ _auth_detect_owner() {
   gh repo view --json owner --jq .owner.login 2>/dev/null || return 1
 }
 
-# "User" or "Organization" — decides which settings path the manifest posts to.
-_auth_owner_type() {
-  gh api "users/$1" --jq .type 2>/dev/null || return 1
+# "<type> <id>" for an account. /users/ resolves organisations too and returns
+# the same numeric id, so one call answers both questions. The id is what
+# prefills the install page with the right target.
+_auth_owner_info() {
+  gh api "users/$1" --jq '"\(.type) \(.id)"' 2>/dev/null || return 1
 }
 
-# Escape a string for use inside an HTML double-quoted attribute. Ampersand
-# first, or it double-escapes the entities produced by the later rules.
+# Where to install an App.
+#
+# /apps/<slug>/installations/new/permissions with target_id and target_type
+# lands directly on the install form with the account already chosen. It works
+# for private Apps, which the owner-settings path also does but without the
+# prefill — one fewer decision for someone who has just approved permissions.
+_auth_install_url() {
+  local slug="$1" owner_type="$2" owner_id="$3"
+  printf 'https://github.com/apps/%s/installations/new/permissions?target_id=%s&target_type=%s' \
+    "$slug" "$owner_id" "$owner_type"
+}
+
 _html_attr_escape() {
   printf '%s' "$1" \
     | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' -e 's/"/\&quot;/g'
@@ -36,6 +52,108 @@ _open_browser() {
   elif command -v xdg-open >/dev/null 2>&1; then xdg-open "$url" >/dev/null 2>&1
   else return 1
   fi
+}
+
+# ---------------------------------------------------------------------------
+# App authentication — a JWT signed with the private key
+# ---------------------------------------------------------------------------
+#
+# An App authenticates as itself with a short-lived RS256 JWT. This is what lets
+# revloop confirm an installation actually landed rather than telling you to go
+# and check. gh honours an Authorization header we set, so this needs no curl.
+
+_b64url() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
+
+_auth_jwt() {
+  local pem="$1" app_id="$2" now header payload signing_input sig
+  now="$(date +%s)"
+  header='{"alg":"RS256","typ":"JWT"}'
+  # Backdated 60s because GitHub rejects a JWT whose iat is in the future, and
+  # clock skew between here and GitHub is not ours to control.
+  payload="$(jq -cn --argjson iat "$((now - 60))" --argjson exp "$((now + 540))" \
+    --argjson iss "$app_id" '{iat:$iat, exp:$exp, iss:$iss}')"
+  signing_input="$(printf '%s' "$header" | _b64url).$(printf '%s' "$payload" | _b64url)"
+  sig="$(printf '%s' "$signing_input" | openssl dgst -sha256 -sign "$pem" -binary | _b64url)"
+  printf '%s.%s' "$signing_input" "$sig"
+}
+
+# Accounts this App is installed on, one per line as "<login> <selection>".
+_auth_installations() {
+  local jwt="$1"
+  gh api -H "Authorization: Bearer $jwt" /app/installations \
+    --jq '.[] | "\(.account.login) \(.repository_selection)"' 2>/dev/null || return 1
+}
+
+# ---------------------------------------------------------------------------
+# A one-shot local listener
+# ---------------------------------------------------------------------------
+#
+# The design deferred this, betting that pasting one value was a small cost. It
+# is not: the browser lands on ERR_CONNECTION_REFUSED, which reads as broken no
+# matter how well the terminal warned you, and the reflex is to hit Reload
+# rather than read the address bar. Accepting one connection is about forty
+# lines and is not a web server.
+#
+# It stays best-effort. Every failure falls through to the paste, so it cannot
+# make anything worse than it already was.
+
+_port_free() { ! nc -z localhost "$1" >/dev/null 2>&1; }
+
+_free_port() {
+  local p
+  for p in 33517 33518 33519 33520 33521 33522; do
+    _port_free "$p" && { printf '%s' "$p"; return 0; }
+  done
+  return 1
+}
+
+_listener_available() { command -v nc >/dev/null 2>&1; }
+
+# The page the browser lands on. Deliberately theme-aware and plain: it exists
+# to say "this worked, go back to your terminal" and nothing else.
+_auth_done_page() {
+  cat <<'HTML'
+<!doctype html>
+<html><head><meta charset="utf-8"><title>revloop</title><style>
+:root{color-scheme:light dark}
+body{font:16px/1.6 system-ui,-apple-system,sans-serif;margin:0;min-height:100vh;
+display:grid;place-items:center;background:#fbfbfa;color:#1f1b16}
+@media (prefers-color-scheme:dark){body{background:#16130f;color:#f0ece4}}
+.c{max-width:26rem;padding:2rem;text-align:center}
+h1{font-size:1.25rem;margin:0 0 .5rem}
+p{margin:.5rem 0;opacity:.75}
+.t{margin-top:1.5rem;font-size:.875rem;opacity:.55}
+</style></head><body><div class="c">
+<h1>Registered</h1>
+<p>revloop has the App details and is carrying on in your terminal.</p>
+<p class="t">You can close this tab.</p>
+</div></body></html>
+HTML
+}
+
+# Serve one request on $1, write the raw request to $2. Returns non-zero if
+# nothing arrived before the timeout.
+_listen_once() {
+  local port="$1" outfile="$2" timeout="${3:-300}"
+  local body len pid waited=0
+  body="$(_auth_done_page)"
+  len="$(printf '%s' "$body" | wc -c | tr -d ' ')"
+
+  {
+    printf 'HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: %s\r\nConnection: close\r\n\r\n%s' \
+      "$len" "$body" | nc -l "$port" >"$outfile" 2>/dev/null
+  } &
+  pid=$!
+
+  while (( waited < timeout )); do
+    kill -0 "$pid" 2>/dev/null || break
+    sleep 1
+    (( waited++ )) || true
+  done
+  kill "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+
+  grep -q 'code=' "$outfile" 2>/dev/null
 }
 
 # ---------------------------------------------------------------------------
@@ -56,46 +174,54 @@ auth_status() {
   fi
 
   ui_section "Apps"
-  local meta owner owner_type id name slug pem mode
+  local meta owner owner_type owner_id id name slug pem mode jwt installs
   for meta in "$dir"/*.json; do
     owner="$(jq -r .owner "$meta")"
     owner_type="$(jq -r .owner_type "$meta")"
+    owner_id="$(jq -r '.owner_id // empty' "$meta")"
     id="$(jq -r .id "$meta")"
     name="$(jq -r .name "$meta")"
     slug="$(jq -r .slug "$meta")"
     pem="$(_auth_pem "$owner")"
 
     ui_ok "$owner — $name (id $id)"
+
     if [[ -f "$pem" ]]; then
-      mode="$(stat -f '%Lp' "$pem" 2>/dev/null || stat -c '%a' "$pem" 2>/dev/null)"
-      if [[ "$mode" == "600" ]]; then
-        ui_line "   key $pem (0600)"
+      # stat drops the leading zero, and "600" next to a sentence about 0600
+      # reads as a mismatch. Same number, printed the way it is talked about.
+      mode="$(printf '%04d' "$(stat -f '%Lp' "$pem" 2>/dev/null || stat -c '%a' "$pem" 2>/dev/null)")"
+      ui_line "   key $pem${mode:+ ($mode)}"
+      [[ "$mode" == "0600" ]] || ui_warn \
+        "the private key for $owner is mode $mode, not 0600" \
+        "Any process running as you can read it, and it can mint a token for every repository this App is installed on. Fix with: chmod 600 $pem"
+
+      # Rule 5: report what is true, not what was configured. An App installed
+      # nowhere looks identical to a working one until the first API call fails.
+      if jwt="$(_auth_jwt "$pem" "$id")" && installs="$(_auth_installations "$jwt")"; then
+        if [[ -n "$installs" ]]; then
+          while read -r acct sel; do
+            ui_line "   installed on $acct ($sel repositories)"
+          done <<<"$installs"
+        else
+          ui_no "   installed nowhere — it can reach no repository at all"
+          # owner_id was added after the first Apps were registered, so recover
+          # it rather than degrading the message for anything created earlier.
+          [[ -n "$owner_id" ]] || owner_id="$(gh api "users/$owner" --jq .id 2>/dev/null)"
+          [[ -n "$owner_id" ]] && ui_next "install: $(_auth_install_url "$slug" "$owner_type" "$owner_id")"
+        fi
       else
-        ui_line "   key $pem"
-        ui_warn "the private key for $owner is mode $mode, not 0600" \
-          "Any process running as you can read it, and it can mint a token for every repository this App is installed on. Fix with: chmod 600 $pem"
+        ui_line "   could not check installations — the key may not match this App"
       fi
     else
       ui_no "   key missing at $pem — this App cannot mint a token"
     fi
-    ui_line "   install $(_auth_install_url "$owner" "$owner_type" "$slug")"
   done
   ui_end "An App reaches only the repositories it is installed on."
 }
 
 # ---------------------------------------------------------------------------
-# revloop auth login — the GitHub App Manifest flow
+# revloop auth login
 # ---------------------------------------------------------------------------
-#
-# Creating an App is the one step that needs a human, because approving
-# permissions is a consent decision GitHub deliberately does not automate.
-# Everything around it is automated, and the manifest prefills the form so the
-# whole class of misconfiguration disappears rather than merely getting faster
-# to fix: the homepage URL, the webhook that defaults to ON, the install scope,
-# and three permissions buried in a long list of three-state dropdowns.
-#
-# The code is pasted, not caught. Capturing the redirect would mean running a
-# local HTTP listener, which is the least bash-shaped thing in this project.
 
 auth_login() {
   local owner="" app_name=""
@@ -107,10 +233,6 @@ auth_login() {
     esac
   done
 
-  # This flow opens a browser and then asks you to paste a code back. If there
-  # is nowhere to read that paste from, say so now rather than after registering
-  # an App nobody can finish setting up — rule 6 cuts both ways, and acting
-  # outward when you already know you cannot finish is the worse half.
   _ui_input_source >/dev/null || _ui_no_input
 
   if [[ -z "$owner" ]]; then
@@ -119,12 +241,12 @@ auth_login() {
       "Run this inside a git repository with a GitHub remote, or name it: revloop auth login --owner <owner>"
   fi
 
-  local owner_type; owner_type="$(_auth_owner_type "$owner")" || ui_die \
+  local owner_type owner_id info
+  info="$(_auth_owner_info "$owner")" || ui_die \
     "GitHub does not recognise the account '$owner'" \
     "Check the spelling, or pass a different one with --owner"
+  read -r owner_type owner_id <<<"$info"
 
-  # Already configured? Reuse rather than quietly creating a second App, since
-  # two Apps for one owner means two keys and two things to rotate.
   local meta; meta="$(_auth_meta "$owner")"
   if [[ -f "$meta" ]]; then
     ui_section "Already configured"
@@ -132,21 +254,27 @@ auth_login() {
     ui_gap
     ui_line "One App per owner is the design. Creating a second would mean a"
     ui_line "second private key to protect and rotate, for no extra reach."
-    ui_end "To replace its key instead:   revloop auth rotate --owner $owner"
+    ui_end "See where it is installed with:   revloop auth status"
     return 0
   fi
 
   # GitHub App names are globally unique, so a bare "revloop" is very likely
-  # taken by now. Suffixing the owner is both likelier to be free and clearer
-  # in a list of installed Apps.
+  # taken. Suffixing the owner is likelier to be free and clearer in a list.
   [[ -n "$app_name" ]] || app_name="revloop-$owner"
 
   local state; state="$(openssl rand -hex 16)"
-  local redirect="http://localhost:33517/revloop-auth"
 
-  # hook_attributes.url is required by the form even when the webhook is off,
-  # so it is present and inert. revloop is never called by GitHub — the
-  # workflows call revloop — so there is nothing to deliver.
+  # Bind the port BEFORE building the manifest, so redirect_url names a port we
+  # know is free. Hardcoding it first is how you get a redirect to a port
+  # something else already owns, with nothing to do about it afterwards.
+  local port="" use_listener=0
+  if _listener_available && port="$(_free_port)"; then
+    use_listener=1
+  else
+    port=33517
+  fi
+  local redirect="http://localhost:$port/revloop-auth"
+
   local manifest
   manifest="$(jq -cn \
     --arg name "$app_name" \
@@ -173,8 +301,6 @@ auth_login() {
     post_url="https://github.com/settings/apps/new"
   fi
 
-  # Rule 6: explain before acting outward. This opens a browser and registers an
-  # identity on GitHub, so say what it will look like first.
   ui_section "Register a GitHub App for $owner"
   ui_line "Owner        $owner ($owner_type)"
   ui_line "Name         $app_name"
@@ -186,25 +312,23 @@ auth_login() {
   ui_line "issues:write looks surprising and is not optional — GitHub models pull"
   ui_line "request labels under the Issues API, and the loop is label-driven."
   ui_gap
-  ui_line "The permissions are prefilled from a manifest, so nothing on that page"
-  ui_line "is yours to get wrong. You name it and approve."
+  ui_line "Two approvals in the browser: create the App, then install it. revloop"
+  ui_line "follows along here — nothing to copy back."
   printf '\n'
 
-  ui_confirm "Open GitHub to register it?" || {
-    ui_say "Nothing was created."
-    return 1
-  }
+  ui_confirm "Open GitHub?" || { ui_say "Nothing was created."; return 1; }
 
   local html; html="$(mktemp -t revloop-manifest).html"
-  # shellcheck disable=SC2064  # expand $html now, not at trap time
-  trap "rm -f '$html'" RETURN
+  local reqfile; reqfile="$(mktemp -t revloop-redirect)"
+  # shellcheck disable=SC2064  # expand now, not at trap time
+  trap "rm -f '$html' '$reqfile'" RETURN
 
   cat >"$html" <<HTML
 <!doctype html>
 <meta charset="utf-8">
-<title>revloop — registering a GitHub App</title>
+<title>revloop</title>
 <body style="font:16px system-ui;margin:4rem auto;max-width:34rem">
-<p>Sending you to GitHub to register <strong>$(_html_attr_escape "$app_name")</strong>…</p>
+<p>Sending you to GitHub to register <strong>$(_html_attr_escape "$app_name")</strong>&hellip;</p>
 <p>If nothing happens, press the button.</p>
 <form id="f" action="$(_html_attr_escape "$post_url")" method="post">
   <input type="hidden" name="manifest" value="$(_html_attr_escape "$manifest")">
@@ -215,36 +339,51 @@ auth_login() {
 </body>
 HTML
 
-  _open_browser "file://$html" || {
-    ui_warn "could not open a browser automatically" \
-      "Open this file yourself to continue: file://$html"
-  }
+  local code="" returned_state=""
 
-  ui_section "Approve it in the browser"
-  ui_line "GitHub will send you back to a localhost address that will NOT load."
-  ui_line "That is expected — revloop runs no web server, so there is nothing"
-  ui_line "listening. The address bar is what matters."
-  ui_gap
-  ui_line "Copy the whole URL from the address bar and paste it below."
-  ui_line "It looks like: ${redirect}?code=abc123&state=…"
-  printf '\n'
+  if (( use_listener )); then
+    ui_section "Waiting for you to approve it"
+    ui_line "A browser tab is open on GitHub's App registration page."
+    ui_line "Name it if you like, then approve. This picks up automatically."
+    printf '\n'
 
-  local pasted; pasted="$(ui_prompt "URL or code")" || ui_die \
-    "no code was pasted" "Re-run: revloop auth login --owner $owner"
+    _open_browser "file://$html" || ui_warn \
+      "could not open a browser automatically" \
+      "Open this to continue: file://$html"
 
-  # Accept either the full redirect URL or a bare code, because asking someone
-  # to surgically extract one query parameter is a worse ask than copying an
-  # address bar — and the full URL also carries the state we can verify.
-  local code returned_state=""
-  if [[ "$pasted" == *"code="* ]]; then
-    code="$(printf '%s' "$pasted" | sed -n 's/.*[?&]code=\([^&]*\).*/\1/p')"
-    returned_state="$(printf '%s' "$pasted" | sed -n 's/.*[?&]state=\([^&]*\).*/\1/p')"
+    if _listen_once "$port" "$reqfile" 300; then
+      local reqline; reqline="$(head -1 "$reqfile")"
+      code="$(sed -n 's/.*[?&]code=\([^& ]*\).*/\1/p' <<<"$reqline")"
+      returned_state="$(sed -n 's/.*[?&]state=\([^& ]*\).*/\1/p' <<<"$reqline")"
+    else
+      ui_warn "nothing arrived on localhost:$port within five minutes" \
+        "Falling back to pasting the code by hand. If the browser is showing a page that will not load, the address bar still has what is needed."
+    fi
   else
-    code="$pasted"
+    _open_browser "file://$html" || ui_warn \
+      "could not open a browser automatically" \
+      "Open this to continue: file://$html"
+  fi
+
+  # Paste fallback. Reached when there is no nc, no free port, or the listener
+  # timed out. It is the floor, not the plan.
+  if [[ -z "$code" ]]; then
+    ui_section "Approve it in the browser"
+    ui_line "GitHub sends you back to a localhost address that will not load."
+    ui_line "Copy the whole URL from the address bar and paste it below."
+    printf '\n'
+    local pasted; pasted="$(ui_prompt "URL or code")" || ui_die \
+      "no code was pasted" "Re-run: revloop auth login --owner $owner"
+    if [[ "$pasted" == *"code="* ]]; then
+      code="$(sed -n 's/.*[?&]code=\([^&]*\).*/\1/p' <<<"$pasted")"
+      returned_state="$(sed -n 's/.*[?&]state=\([^&]*\).*/\1/p' <<<"$pasted")"
+    else
+      code="$pasted"
+    fi
   fi
 
   [[ -n "$code" ]] || ui_die \
-    "no code found in what you pasted" \
+    "no code found" \
     "Paste the full URL from the address bar, or just the value after code="
 
   if [[ -n "$returned_state" && "$returned_state" != "$state" ]]; then
@@ -252,7 +391,6 @@ HTML
       "This request did not come from the page revloop opened. Start again: revloop auth login --owner $owner"
   fi
 
-  ui_section "Exchanging the code"
   local resp
   if ! resp="$(gh api --method POST "app-manifests/$code/conversions" 2>&1)"; then
     ui_die "GitHub rejected the code" \
@@ -267,26 +405,23 @@ HTML
 
   [[ "$app_id" != "null" && -n "$pem" && "$pem" != "null" ]] || ui_die \
     "GitHub's response did not contain an App id and private key" \
-    "Nothing was stored. Check https://github.com/settings/apps for a half-created App before retrying"
+    "Nothing was stored. Check for a half-created App before retrying"
 
   local dir; dir="$(_auth_dir)"
-  mkdir -p "$dir"
-  chmod 700 "$dir"
+  mkdir -p "$dir"; chmod 700 "$dir"
 
-  # Write at 0600 from the start rather than creating then chmod-ing, so the key
-  # is never briefly readable.
+  # umask rather than create-then-chmod, so the key is never briefly readable.
   local pem_path; pem_path="$(_auth_pem "$owner")"
   (umask 077; printf '%s' "$pem" >"$pem_path")
 
-  local meta_path; meta_path="$(_auth_meta "$owner")"
   (umask 077; jq -n \
-    --arg owner "$owner" --arg owner_type "$owner_type" \
-    --arg id "$app_id" --arg slug "$slug" --arg name "$real_name" \
+    --arg owner "$owner" --arg owner_type "$owner_type" --argjson owner_id "$owner_id" \
+    --argjson id "$app_id" --arg slug "$slug" --arg name "$real_name" \
     --arg created "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    '{owner:$owner, owner_type:$owner_type, id:($id|tonumber), slug:$slug, name:$name, created:$created}' \
-    >"$meta_path")
+    '{owner:$owner, owner_type:$owner_type, owner_id:$owner_id,
+      id:$id, slug:$slug, name:$name, created:$created}' \
+    >"$(_auth_meta "$owner")")
 
-  # Rule 5: read it back rather than assuming the write landed.
   local stored_mode
   stored_mode="$(stat -f '%Lp' "$pem_path" 2>/dev/null || stat -c '%a' "$pem_path" 2>/dev/null)"
 
@@ -297,24 +432,82 @@ HTML
   else
     ui_no "Key    $pem_path — expected mode 0600, found $stored_mode"
   fi
-  ui_gap
-  ui_line "The App exists but is installed nowhere yet, so it can currently reach"
-  ui_line "no repository at all. Install it on the ones you want reviewed:"
-  ui_next "$(_auth_install_url "$owner" "$owner_type" "$slug")"
-  ui_end "Then:   revloop init"
+
+  _auth_install_flow "$owner" "$owner_type" "$owner_id" "$slug" "$app_id" "$pem_path"
 }
 
-# Where to install an App.
+# revloop auth install — run the install half on its own.
 #
-# The two paths are not interchangeable and the wrong one 404s: an org-owned App
-# lives under the organisation's settings, not yours. The public
-# github.com/apps/<slug> page is no help either, because these Apps are private
-# and have no public page.
-_auth_install_url() {
-  local owner="$1" owner_type="$2" slug="$3"
-  if [[ "$owner_type" == "Organization" ]]; then
-    printf 'https://github.com/organizations/%s/settings/apps/%s/installations' "$owner" "$slug"
-  else
-    printf 'https://github.com/settings/apps/%s/installations' "$slug"
-  fi
+# `login` does both halves, but the two can be separated by a closed tab, a
+# declined permission prompt, or a new repository a year later. Re-running
+# `login` is the wrong instrument: it refuses, correctly, because the App
+# already exists.
+auth_install() {
+  local owner=""
+  while (( $# )); do
+    case "$1" in
+      --owner) owner="${2:?--owner needs a value}"; shift 2 ;;
+      *) ui_die "unknown option for auth install: $1" "Run: revloop auth install [--owner <owner>]" ;;
+    esac
+  done
+
+  [[ -n "$owner" ]] || owner="$(_auth_detect_owner)" || ui_die \
+    "could not work out which owner's App to install" \
+    "Name it: revloop auth install --owner <owner>"
+
+  local meta; meta="$(_auth_meta "$owner")"
+  [[ -f "$meta" ]] || ui_die \
+    "no App is configured for $owner" \
+    "Register one first: revloop auth login --owner $owner"
+
+  local owner_type owner_id slug app_id pem
+  owner_type="$(jq -r .owner_type "$meta")"
+  owner_id="$(jq -r '.owner_id // empty' "$meta")"
+  [[ -n "$owner_id" ]] || owner_id="$(gh api "users/$owner" --jq .id 2>/dev/null)"
+  slug="$(jq -r .slug "$meta")"
+  app_id="$(jq -r .id "$meta")"
+  pem="$(_auth_pem "$owner")"
+
+  [[ -f "$pem" ]] || ui_die \
+    "the private key for $owner is missing at $pem" \
+    "Without it revloop cannot confirm the installation. Re-register: revloop auth login --owner $owner"
+
+  _auth_install_flow "$owner" "$owner_type" "$owner_id" "$slug" "$app_id" "$pem"
+}
+
+# Second half of the flow: install the App, then confirm it landed.
+#
+# Registering an App that reaches no repository is not a finished job, so this
+# is part of `login` rather than a link at the end of it.
+_auth_install_flow() {
+  local owner="$1" owner_type="$2" owner_id="$3" slug="$4" app_id="$5" pem="$6"
+  local url; url="$(_auth_install_url "$slug" "$owner_type" "$owner_id")"
+
+  ui_section "Install it on the repositories you want reviewed"
+  ui_line "The App exists but reaches nothing until it is installed."
+  ui_line "Choose 'Only select repositories' unless you mean all of them."
+  printf '\n'
+
+  _open_browser "$url" || ui_warn \
+    "could not open a browser automatically" \
+    "Install it here: $url"
+
+  local jwt installs waited=0
+  ui_line "Waiting for the installation to appear..."
+  while (( waited < 300 )); do
+    if jwt="$(_auth_jwt "$pem" "$app_id")" && installs="$(_auth_installations "$jwt")" \
+       && [[ -n "$installs" ]]; then
+      ui_gap
+      while read -r acct sel; do
+        ui_ok "installed on $acct ($sel repositories)"
+      done <<<"$installs"
+      ui_end "Next:   revloop init"
+      return 0
+    fi
+    sleep 3
+    (( waited += 3 )) || true
+  done
+
+  ui_warn "no installation showed up within five minutes" \
+    "The App is registered and its key is stored, so nothing is lost. Install it at $url and check with: revloop auth status"
 }

@@ -58,7 +58,8 @@ revloop doctor
 | `revloop doctor` | Works |
 | `revloop version` | Works |
 | `revloop auth status` | Works |
-| `revloop auth login` | Works — registers a GitHub App via the manifest flow |
+| `revloop auth login` | Works — registers a GitHub App and installs it, end to end |
+| `revloop auth install` | Works — installs an already-registered App |
 | `revloop auth rotate` | Not built. GitHub has no API to generate an App key; it's a web-UI action |
 | `revloop review`, `address`, `run`, `status`, `init` | Not built |
 
@@ -73,11 +74,13 @@ revloop auth login              # detects the owner from the repo you're in
 revloop auth login --owner your-org
 ```
 
-It builds a manifest prefilling the name, the three permissions and the webhook setting, opens your browser at the right registration page, and exchanges the code GitHub hands back for an App ID and private key. **Nothing on that page is yours to get wrong** — creating the App by hand means a required homepage URL you don't need, a webhook that defaults to *on*, an install-scope choice that decides whether it can reach an org at all, and three permissions buried in a long list of three-state dropdowns.
+**Two approvals in a browser, nothing to copy back.** revloop builds a manifest prefilling the name, the three permissions and the webhook setting, opens your browser at the right registration page, catches GitHub's redirect on a local port, exchanges the code for an App ID and private key, then opens the install page with your account already selected and waits until the installation actually appears.
 
-The browser sends you to a `localhost` address that won't load. That's expected: revloop runs no web server, and the code is in the address bar. Paste the whole URL back.
+Nothing on either page is yours to get wrong. Creating the App by hand means a required homepage URL you don't need, a webhook that defaults to *on*, an install-scope choice that decides whether it can reach an org at all, and three permissions buried in a long list of three-state dropdowns.
 
-Keys are stored per owner at `~/.config/revloop/apps/<owner>.pem`, mode 0600.
+If the local listener can't start — no `nc`, no free port — it falls back to asking you to paste the redirect URL. That path is the floor, not the plan.
+
+Keys are stored per owner at `~/.config/revloop/apps/<owner>.pem`, mode 0600. `revloop auth status` confirms where each App is actually installed by signing a JWT and asking GitHub, rather than assuming the setup worked.
 
 ### Why those three permissions
 

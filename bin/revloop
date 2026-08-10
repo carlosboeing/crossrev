@@ -43,8 +43,9 @@ usage() {
     revloop <command> [options]
 
   COMMANDS
-    auth status              Which Apps are configured, for which owners
-    auth login               Register a GitHub App for an owner
+    auth status              Which Apps are configured, and where installed
+    auth login               Register a GitHub App and install it
+    auth install             Install an already-registered App somewhere
     doctor                   Check that everything revloop needs is installed
     version                  Print the installed version
 
@@ -60,7 +61,7 @@ EOF
 # what does work instead. Silence would read as a typo.
 not_built_yet() {
   ui_die "\`revloop $1\` is not built yet — this is a work in progress" \
-    "Built so far: auth status, auth login, doctor, version. See tools/revloop/README.md for what is coming."
+    "Built so far: auth status, auth login, auth install, doctor, version. See tools/revloop/README.md for what is coming."
 }
 
 main() {
@@ -72,12 +73,13 @@ main() {
       local sub="${1:-status}"
       [[ $# -gt 0 ]] && shift
       case "$sub" in
-        status) auth_status "$@" ;;
-        login)  auth_login "$@" ;;
+        status)  auth_status "$@" ;;
+        login)   auth_login "$@" ;;
+        install) auth_install "$@" ;;
         rotate)
           ui_die "\`revloop auth rotate\` is not built yet" \
             "GitHub has no API to generate an App private key — it is a web-UI action. Until this lands, generate one at https://github.com/settings/apps and replace the file that \`revloop auth status\` names." ;;
-        *) ui_die "unknown auth command: $sub" "Try: revloop auth status | login" ;;
+        *) ui_die "unknown auth command: $sub" "Try: revloop auth status | login | install" ;;
       esac ;;
 
     doctor)
