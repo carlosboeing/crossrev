@@ -108,14 +108,29 @@ fi
 # never walks into tools/revloop/skills/. And --skill takes one name per flag —
 # a comma-separated list matches nothing and says "No matching skills found"
 # rather than complaining about the syntax.
+# Hand off, rather than drive.
+#
+# The skills CLI runs its own flow for a human: it detects which harnesses are
+# installed, asks about project versus global scope, and asks whether to symlink
+# or copy. That flow is better than anything decided here, and it is the flow
+# someone gets running the command by hand — so an installer that suppressed it
+# with --yes would be quietly making three choices on their behalf and calling it
+# convenience.
+#
+# It also detects when an *agent* is driving it and goes non-interactive by
+# itself, which is why the scripted branch is a real branch rather than
+# defensiveness: in that mode nobody is asked, and its default scope is project —
+# meaning the clone this script runs from. Present in the repository you were
+# only installing from, absent everywhere you work, silent about the difference.
+# So the scripted path names the scope and the interactive one does not.
+#
+# $1 is "interactive" or "scripted".
 _install_skills() {
-  # --global explicitly. Without it the CLI installs project-level, and since
-  # this script runs from inside the clone, that means into the clone: present
-  # for the repository you were only installing from, absent everywhere you
-  # actually work, and silent about the difference.
-  npx skills@latest add "$HERE" \
-    --skill pr-review --skill pr-address \
-    --global --yes
+  if [[ "$1" == "interactive" ]]; then
+    npx skills@latest add "$HERE" --skill pr-review --skill pr-address
+  else
+    npx skills@latest add "$HERE" --skill pr-review --skill pr-address --global --yes
+  fi
 }
 
 ui_gap
@@ -139,20 +154,26 @@ else
   ui_line "you can invoke them by hand outside the loop. The loop itself does not"
   ui_line "need them — it reproduces both into each prompt from this checkout."
   ui_line ""
-  ui_line "This installs them globally, at user level, for the agents the skills"
-  ui_line "CLI finds. It symlinks rather than copies, so this checkout stays the"
-  ui_line "one source of truth."
+  ui_line "The skills CLI takes it from here: it detects which harnesses you have"
+  ui_line "and asks where to put them and whether to symlink. Its questions, not"
+  ui_line "revloop's."
   printf '\n'
-  if [[ "$WANT_SKILLS" == "1" ]] || ui_confirm "Install the two skills now?"; then
-    if _install_skills; then
-      ui_ok "installed pr-review and pr-address"
+  if [[ "$WANT_SKILLS" == "1" ]] || ui_confirm "Hand over to the skills CLI now?"; then
+    # Interactive unless install.sh was itself told not to ask. --yes here means
+    # "do not ask ME whether to install them", not "answer the skills CLI's
+    # questions for someone" — those are different permissions and only the
+    # scripted path has the second.
+    mode=interactive
+    [[ "${REVLOOP_ASSUME_YES:-0}" == "1" ]] && mode=scripted
+    if _install_skills "$mode"; then
+      ui_ok "the skills CLI finished"
     else
       ui_warn "the skills CLI did not finish" \
-        "Nothing else is affected — the loop reads both skills out of this checkout regardless. Retry with: npx skills@latest add $HERE --skill pr-review --skill pr-address --global"
+        "Nothing else is affected — the loop reads both skills out of this checkout regardless. Retry with: npx skills@latest add $HERE --skill pr-review --skill pr-address"
     fi
   else
     ui_say "Left them out. Add them later with --skills, or:"
-    ui_say "  npx skills@latest add $HERE --skill pr-review --skill pr-address --global"
+    ui_say "  npx skills@latest add $HERE --skill pr-review --skill pr-address"
   fi
 fi
 ui_end "Then check everything:   revloop doctor"

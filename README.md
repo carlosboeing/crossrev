@@ -28,22 +28,21 @@ tools/revloop/install.sh
 
 That puts `revloop` on your PATH by symlinking it into `~/.local/bin`, and checks what's installed. `--yes` runs it non-interactively; `--bin-dir` puts it somewhere else.
 
-That also **offers** to install `pr-review` and `pr-address` for your harnesses, via the [`skills` CLI](https://github.com/obra/skills). Say yes and it runs the command for you; `--skills` and `--no-skills` decide it up front for scripted installs.
+That also **offers** to install `pr-review` and `pr-address` for your harnesses, and hands over to the [`skills` CLI](https://github.com/obra/skills) if you say yes. That CLI runs its own flow — it detects which harnesses you have, and asks about project versus global scope and whether to symlink. Those are its questions, deliberately: suppressing them would mean making three choices on your behalf and calling it convenience. `--skills` and `--no-skills` decide the offer up front for scripted installs, and only the scripted path passes flags that answer them.
 
 **It stays an offer rather than part of the install**, for two reasons. The loop does not need them: revloop reads both skills out of the checkout and reproduces their text into each prompt, so installing them is for invoking them by hand in an ordinary session. And it is the only step that wants Node — everything else runs on git, bash and coreutils, so a hard dependency on `npx` for an optional extra would be a poor trade. With no `npx`, or no terminal to ask at, it skips and prints the command.
 
 By hand, it is:
 
 ```bash
-npx skills@latest add ./tools/revloop \
-  --skill pr-review --skill pr-address --global
+npx skills@latest add ./tools/revloop --skill pr-review --skill pr-address
 ```
 
 Three details found by running it, each of which fails by reporting nothing rather than erroring:
 
 - **Point it at `tools/revloop`, not the repo root.** From the root it finds the six standalone skills in `skills/` and does not walk into `tools/revloop/skills/`.
 - **One name per `--skill` flag.** A comma-separated list matches nothing, and it reports "No matching skills found" rather than complaining about the syntax.
-- **Pass `--global` explicitly.** It installs project-level by default, which — run from inside the clone — means into the clone: present in the repository you were only installing from, absent everywhere you work.
+- **It goes non-interactive when an agent is driving it**, printing "Agent detected". In that mode nobody is asked anything and the scope defaults to project — which, run from inside the clone, means into the clone: present in the repository you were only installing from, absent everywhere you work. Pass `--global` explicitly whenever it is not a human answering.
 
 Then check everything's in place:
 
