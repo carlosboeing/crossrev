@@ -1,0 +1,81 @@
+# shellcheck shell=bash
+# lib/adapters/claude.sh
+#
+# Returns two things, not one: the payload, and execution metadata naming the
+# harness, the resolved endpoint and the answering model where the harness
+# reports one. Invoked with no GitHub credential in its environment, and with
+# repository-provided harness customisation disabled.
+
+# adapter_claude <prompt_file> <schema_file> <workdir> <model> <effort> <endpoint_name>
+#
+# Prints a JSON object: {payload, harness, endpoint, model_reported, ok, error}
+adapter_claude() {
+  local prompt_file="$1" schema_file="$2" workdir="$3"
+  local model="${4:-}" effort="${5:-}" endpoint="${6:-}"
+
+  command -v claude >/dev/null 2>&1 || ui_die \
+    "the claude CLI is not installed, and this leg is configured to use it" \
+    "Install it from https://claude.com/claude-code, or point this leg at another harness with --harness."
+
+  local -a args=(-p --output-format json)
+
+  # Claude Code takes the schema INLINE as a JSON string. Codex takes a file
+  # path. Verified: handing Claude a path fails with a JSON parse error about
+  # the leading slash, which reads like a corrupt schema rather than a wrong
+  # argument type.
+  [[ -n "$schema_file" ]] && args+=(--json-schema "$(cat "$schema_file")")
+
+  # Model ids must be fully qualified. `--model sonnet-5` fails with "It may not
+  # exist or you may not have access to it", which reads like an entitlement
+  # problem rather than a typo.
+  [[ -n "$model"  && "$model"  != "null" ]] && args+=(--model "$model")
+  [[ -n "$effort" && "$effort" != "null" ]] && args+=(--effort "$effort")
+
+  local -a env_prefix=()
+  local endpoint_label="vendor"
+  if [[ -n "$endpoint" && "$endpoint" != "null" ]]; then
+    local resolved url tok_env tok
+    resolved="$(cfg_endpoint "$endpoint")" || return 1
+    read -r url tok_env <<<"$resolved"
+    tok="${!tok_env:-}"
+    [[ -n "$tok" ]] || ui_die \
+      "the endpoint '$endpoint' needs \$$tok_env, which is unset" \
+      "Export it, or set it as a repository secret for CI. revloop will not fall back to the vendor's own API."
+    # Set inline on the invocation only. Never exported, never in a workflow
+    # env: block. These variables are process-scoped, so a leg that leaks them
+    # silently redirects the OTHER leg too — both legs run on one model, the
+    # loop completes normally, and the cross-model property that justifies the
+    # whole design is gone with no error anywhere.
+    env_prefix=(env "ANTHROPIC_BASE_URL=$url" "ANTHROPIC_AUTH_TOKEN=$tok")
+    endpoint_label="$endpoint"
+  fi
+
+  local out err rc payload model_reported
+  out="$(mktemp)"; err="$(mktemp)"
+
+  # stdin from /dev/null: with a terminal attached the CLI waits for piped input.
+  # GH_TOKEN and friends are stripped, not merely unset by convention — the
+  # agent process must hold no GitHub credential even if the caller has one.
+  ( cd "$workdir" && "${env_prefix[@]:-}" \
+      env -u GH_TOKEN -u GITHUB_TOKEN -u GH_ENTERPRISE_TOKEN \
+      claude "${args[@]}" "$(cat "$prompt_file")" ) >"$out" 2>"$err" </dev/null
+  rc=$?
+
+  if (( rc != 0 )) || [[ "$(jq -r '.is_error // false' "$out" 2>/dev/null)" == "true" ]]; then
+    jq -cn --arg e "$(jq -r '.result // empty' "$out" 2>/dev/null || head -c 400 "$err")" \
+      '{ok:false, payload:null, harness:"claude", endpoint:null, model_reported:null, error:$e}'
+    rm -f "$out" "$err"; return 1
+  fi
+
+  payload="$(jq -r '.result // empty' "$out")"
+  # The harness's accounting of what served the turn, never the model's own
+  # claim about itself — a substituted endpoint would get a self-report wrong in
+  # precisely the case this exists to catch.
+  model_reported="$(jq -r '(.modelUsage // {}) | keys | .[0] // empty' "$out")"
+  rm -f "$out" "$err"
+
+  jq -cn --argjson p "$(jq -c . <<<"$payload" 2>/dev/null || echo null)" \
+     --arg ep "$endpoint_label" --arg m "$model_reported" \
+    '{ok:true, payload:$p, harness:"claude", endpoint:$ep,
+      model_reported:(if $m == "" then null else $m end), error:null}'
+}

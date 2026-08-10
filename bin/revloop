@@ -29,6 +29,12 @@ source "$ROOT/lib/ui.sh"
 source "$ROOT/lib/preflight.sh"
 # shellcheck source=lib/auth.sh
 source "$ROOT/lib/auth.sh"
+# shellcheck source=lib/config.sh
+source "$ROOT/lib/config.sh"
+# shellcheck source=lib/adapters/claude.sh
+source "$ROOT/lib/adapters/claude.sh"
+# shellcheck source=lib/adapters/codex.sh
+source "$ROOT/lib/adapters/codex.sh"
 
 revloop_version() { tr -d '[:space:]' <"$ROOT/VERSION"; }
 
@@ -80,6 +86,15 @@ main() {
           ui_die "\`revloop auth rotate\` is not built yet" \
             "GitHub has no API to generate an App private key — it is a web-UI action. Until this lands, generate one at https://github.com/settings/apps and replace the file that \`revloop auth status\` names." ;;
         *) ui_die "unknown auth command: $sub" "Try: revloop auth status | login | install" ;;
+      esac ;;
+
+    config)
+      preflight_require_yq
+      cfg_load ""
+      case "${1:-show}" in
+        show)  jq . <<<"$CFG_MERGED" ;;
+        sink)  ui_say "deferred work would go to: $(cfg_resolve_sink "" "$(cfg_get '.persist.defects')")" ;;
+        *) ui_die "unknown config command: $1" "Try: revloop config show | sink" ;;
       esac ;;
 
     doctor)
