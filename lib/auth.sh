@@ -104,6 +104,12 @@ auth_login() {
     esac
   done
 
+  # This flow opens a browser and then asks you to paste a code back. If there
+  # is nowhere to read that paste from, say so now rather than after registering
+  # an App nobody can finish setting up — rule 6 cuts both ways, and acting
+  # outward when you already know you cannot finish is the worse half.
+  _ui_input_source >/dev/null || _ui_no_input
+
   if [[ -z "$owner" ]]; then
     owner="$(_auth_detect_owner)" || ui_die \
       "could not work out which account this App should belong to" \

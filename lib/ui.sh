@@ -66,6 +66,26 @@ ui_die() {
   exit 1
 }
 
+# Where to read an answer from.
+#
+# /dev/tty first, so prompting still works with the tool on the right-hand side
+# of a pipe — `curl … | sh` is a supported install path and its stdin is the
+# script. But /dev/tty is not always there: cron, a CI step, a container without
+# a controlling terminal, and some editor-embedded shells all fail to open it.
+# Falling back to stdin covers those, and having neither is worth a real message
+# rather than bash's "Device not configured".
+_ui_input_source() {
+  if ( : </dev/tty ) 2>/dev/null; then printf '/dev/tty'
+  elif [[ -t 0 ]]; then printf '/dev/stdin'
+  else return 1
+  fi
+}
+
+_ui_no_input() {
+  ui_die "revloop needs to ask you something, but no terminal is attached" \
+    "Run this in a terminal directly. Editor-embedded and captured shells often have no controlling terminal, which is what this is."
+}
+
 # Ask before an outward-facing action — rule 6. The caller explains first; this
 # only collects the answer. Defaults to no, so a stray newline cannot approve
 # something. Honours --yes via REVLOOP_ASSUME_YES.
@@ -74,17 +94,18 @@ ui_confirm() {
     printf '%s◆  %s%s  yes (--yes)\n' "$_c_bold" "$1" "$_c_reset"
     return 0
   fi
-  local reply
+  local reply src
+  src="$(_ui_input_source)" || _ui_no_input
   printf '%s◆  %s%s  [y/N] ' "$_c_bold" "$1" "$_c_reset"
-  read -r reply </dev/tty || return 1
+  read -r reply <"$src" || return 1
   [[ "$reply" =~ ^[Yy]([Ee][Ss])?$ ]]
 }
 
-# Read one value from the terminal. Reads /dev/tty rather than stdin so it still
-# works when the tool is on the right-hand side of a pipe.
+# Read one value. Prompt goes to stderr so the value can be captured from stdout.
 ui_prompt() {
-  local reply
+  local reply src
+  src="$(_ui_input_source)" || _ui_no_input
   printf '%s◆  %s%s › ' "$_c_bold" "$1" "$_c_reset" >&2
-  read -r reply </dev/tty || return 1
+  read -r reply <"$src" || return 1
   printf '%s' "$reply"
 }
