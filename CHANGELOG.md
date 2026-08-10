@@ -25,7 +25,7 @@ All notable changes to revloop. Format follows [Keep a Changelog](https://keepac
 - `lib/credentials.sh` — reading a token's expiry, issuer and client id from its own claims, restoring one read-only, and the refusal threshold.
 - `templates/` — the workflows, the starter policy config, and a commented example operator config.
 - `scripts/lint.sh` — syntax plus `shellcheck -S warning` across everything, in one command.
-- A stubbed-`gh` test suite: 330 offline assertions across thirteen files, no network, no model, no pull request. `tests/stub/codex` is a tripwire rather than a stub, because a fixture whose config failed to load reached the real billed CLI once before it existed. `tests/stub/agy` is a tripwire of a different kind: it exits non-zero if a flag follows `--print`, which is the mis-parse the real CLI answers cheerfully in prose.
+- A stubbed-`gh` test suite: 347 offline assertions across thirteen files, no network, no model, no pull request. `tests/stub/codex` is a tripwire rather than a stub, because a fixture whose config failed to load reached the real billed CLI once before it existed. `tests/stub/agy` is a tripwire of a different kind: it exits non-zero if a flag follows `--print`, which is the mis-parse the real CLI answers cheerfully in prose.
 - `action.yml` — a composite action manifest for the day revloop is public. Its `app-token` input has no default on purpose: `GITHUB_TOKEN` writes do not trigger workflows, so defaulting it would stall the chain after pass 1 while looking healthy.
 - `bin/revloop` entrypoint with `doctor`, `version` and `help`.
 
@@ -44,6 +44,12 @@ All notable changes to revloop. Format follows [Keep a Changelog](https://keepac
 - `install.sh` — symlinks `bin/revloop` onto PATH and reports what's missing. Skills are left to the `skills` CLI.
 - `lib/ui.sh` — the six output rules from the design, enforced by the helper signatures rather than remembered per call site. `ui_warn` and `ui_die` both require a second argument, so a warning always states its consequence and an error always states the next action.
 - `lib/preflight.sh` — dependency checks that name what's missing and how to install it, normalised to one `<tool> <version>` format across seven CLIs that each report themselves differently.
+
+### Security
+
+- **The refresher App's private key is never an organisation secret**, and never `--visibility all`. That key can rewrite repository secrets, and org-wide visibility would hand it to every workflow in the organisation — including revloop's own review job, which checks out a pull request branch and runs a model over a diff. The whole argument for a second App is that its permission is unreachable from untrusted text.
+- **Each adapter strips every credential that is not its own.** The workflow hands one process every credential the pairing might need; the agent process is the one reading attacker-controlled text, and a token it never receives is one no injection can talk it into exfiltrating. Codex's raw credential is stripped too, since by then it lives in `CODEX_HOME`.
+- **The single-writer guarantee is repository-scoped, and says so.** Concurrency groups do not span repositories, so one credential belongs to one repository. `init` warns on an organisation-level copy, because the repository secret takes precedence — the repository you just set up works while every other one reading the organisation copy breaks.
 
 ### Notes
 
