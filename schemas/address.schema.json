@@ -1,0 +1,69 @@
+{
+  "title": "revloop address intent",
+  "description": "What the address leg returns. It is intent for the orchestrator to act on, never a record of what the agent already did — the agent holds no GitHub credential and makes no GitHub call. Carries the same two harness-forced shapes as the findings schema: no $schema or $id key, because Claude Code's --json-schema rejects a schema naming the 2020-12 meta-schema; and every property listed in 'required', because Codex enforces OpenAI strict mode. Optional fields are nullable rather than absent.",
+  "type": "object",
+  "required": ["dispositions", "wrap_up", "blocked", "blocked_reason"],
+  "additionalProperties": false,
+  "properties": {
+    "blocked": {
+      "type": "boolean",
+      "description": "True when the leg could not do its job at all. Terminates the loop."
+    },
+    "blocked_reason": {
+      "type": ["string", "null"],
+      "description": "Why, or null. Only meaningful when blocked is true."
+    },
+    "wrap_up": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The overall comment body, in Markdown, explaining what was fixed, skipped, deferred and rebutted. Written for a collaborator who has never heard of revloop. The orchestrator appends the machine-readable marker and any 'Deferred work filed' list; do not write either yourself."
+    },
+    "dispositions": {
+      "type": "array",
+      "description": "One entry per finding supplied in the prompt. Every finding gets one, whatever its severity — severity governs what happens after verification, never whether verification happens.",
+      "items": {
+        "type": "object",
+        "required": ["finding_id", "disposition", "reply", "persist", "duplicate_of"],
+        "additionalProperties": false,
+        "properties": {
+          "finding_id": {
+            "type": "string",
+            "description": "The id supplied in the prompt. Not invented here."
+          },
+          "disposition": {
+            "type": "string",
+            "enum": ["fixed", "skipped", "deferred", "rebutted", "escalated"],
+            "description": "fixed: code changed. skipped: not acting by policy, such as a nit past skip_nits_after_pass. deferred: real, worth doing, not here — persists to a sink. rebutted: technically wrong for this codebase. escalated: needs a human decision, applies revloop/stop and leaves the thread open."
+          },
+          "reply": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The in-thread reply body to post. Always required: nothing is silently dropped, and a skipped nit still gets a one-line reason."
+          },
+          "persist": {
+            "type": ["object", "null"],
+            "description": "For a deferred defect worth recording outside this PR, the issue to file. Null for every other disposition. Write it to stand alone for someone who never saw the PR.",
+            "required": ["title", "body"],
+            "additionalProperties": false,
+            "properties": {
+              "title": {
+                "type": "string",
+                "minLength": 1,
+                "description": "One line naming the defect, as an issue title rather than a review comment."
+              },
+              "body": {
+                "type": "string",
+                "minLength": 1,
+                "description": "What the defect is, where, why it matters, and what fixing it would involve. Measure before asserting: a headline number that turns out to be mostly unrelated makes the issue misleading."
+              }
+            }
+          },
+          "duplicate_of": {
+            "type": ["integer", "null"],
+            "description": "The number of an existing issue that already covers this defect, chosen from the candidates supplied in the prompt. Null when none of them match. Ambiguity counts as a match: a missed filing still has the PR thread behind it, while a duplicate is mess someone has to clean up."
+          }
+        }
+      }
+    }
+  }
+}
