@@ -1,0 +1,129 @@
+{
+  "title": "revloop review findings",
+  "description": "What the review leg returns. Both v1 harnesses constrain output to this natively, so the orchestrator receives validated JSON rather than scraping a fenced block out of prose. Two shapes here are forced by the harnesses rather than chosen: no $schema or $id key, because Claude Code's --json-schema rejects a schema naming the 2020-12 meta-schema and fails before the model is called; and every property listed in 'required', because Codex enforces OpenAI strict mode, which demands it. Genuinely optional fields are therefore nullable rather than absent.",
+  "type": "object",
+  "required": [
+    "verdict",
+    "findings",
+    "prior",
+    "blocked_reason"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "verdict": {
+      "type": "string",
+      "enum": [
+        "converged",
+        "issues-remain",
+        "blocked"
+      ],
+      "description": "converged when no Important findings remain. Nits and pre-existing findings are reported but cannot keep the loop alive. blocked when the review could not be completed at all."
+    },
+    "findings": {
+      "type": "array",
+      "description": "Every finding, whatever its severity. An empty array with verdict converged is a valid and common result.",
+      "items": {
+        "type": "object",
+        "required": [
+          "path",
+          "line",
+          "side",
+          "severity",
+          "title",
+          "why",
+          "fix"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Repository-relative path, exactly as it appears in the diff."
+          },
+          "line": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Line the comment anchors to, in the file as of the side named below."
+          },
+          "side": {
+            "type": "string",
+            "enum": [
+              "LEFT",
+              "RIGHT"
+            ],
+            "description": "Which side of the diff. RIGHT for additions and unchanged lines, LEFT for deletions shown in red. A finding on a deleted line posted as RIGHT targets a line that does not exist and is rejected by GitHub."
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "important",
+              "nit",
+              "pre-existing"
+            ],
+            "description": "important: a bug that should be fixed before merging. nit: minor, worth fixing, not blocking. pre-existing: a real bug this PR did not introduce, which is reported and never fixed here."
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "description": "One line naming the defect. Becomes the comment heading and part of the finding's stable id, so keep it stable for the same defect across passes."
+          },
+          "why": {
+            "type": "string",
+            "minLength": 1,
+            "description": "What goes wrong as a result. Consequence, not restatement of the title."
+          },
+          "fix": {
+            "type": "string",
+            "minLength": 1,
+            "description": "How to fix it, concretely enough to act on."
+          }
+        }
+      }
+    },
+    "prior": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "description": "From pass 2 onward, one entry per finding carried in from an earlier pass, classified before any new reviewing happens. Null on pass 1.",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "note"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The finding id supplied in the prompt."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "addressed",
+              "credibly-rebutted",
+              "still-open",
+              "regressed"
+            ],
+            "description": "addressed: the code changed and the defect is gone. credibly-rebutted: the reply gave a technical reason this was wrong, and it holds. still-open: nothing changed at that location. regressed: it was fixed and has come back."
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "One line of reasoning, or null. Expected for credibly-rebutted and regressed, where the classification is a judgement rather than an observation."
+          }
+        }
+      }
+    },
+    "blocked_reason": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Why the review could not be completed, or null. Only meaningful with verdict blocked."
+    }
+  }
+}
