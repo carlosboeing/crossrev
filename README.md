@@ -4,7 +4,7 @@ A cross-model PR review loop. One model reviews a pull request and leaves inline
 
 It runs on the AI subscriptions you already have rather than per-token API keys. GitHub Actions triggers it where CI exists; a terminal command triggers it where CI doesn't — the same command in both cases.
 
-> **Work in progress.** The design and plan are complete; the code is not. See [what works today](#what-works-today) for the honest current state.
+> **Work in progress.** Every command is built and tested offline, and none has run against a real pull request yet. See [what works today](#what-works-today) for the honest current state.
 
 ## Two ways to use it
 
@@ -28,11 +28,19 @@ tools/revloop/install.sh
 
 That puts `revloop` on your PATH by symlinking it into `~/.local/bin`, and checks what's installed. `--yes` runs it non-interactively; `--bin-dir` puts it somewhere else.
 
-**PATH is all the installer owns.** The two skills are installed separately by the [`skills` CLI](https://github.com/obra/skills), which already does this better than a bash reimplementation would:
+**PATH is all the installer owns.** revloop reads the two skills straight out of `skills/` and reproduces them into each prompt, so the loop works with nothing installed. Install them anyway if you want to use them by hand, via the [`skills` CLI](https://github.com/obra/skills):
 
 ```bash
-npx skills@latest add carlosboeing/claude-code-resources --skill pr-review,pr-address
+npx skills@latest add carlosboeing/claude-code-resources/tools/revloop \
+  --skill pr-review --skill pr-address
 ```
+
+Two details found by running it, both easy to get wrong:
+
+- **Point it at `tools/revloop`, not the repo root.** From the root it finds the six standalone skills in `skills/` and does not walk into `tools/revloop/skills/`.
+- **One name per `--skill` flag.** A comma-separated list matches nothing, and it reports "No matching skills found" rather than complaining about the syntax.
+
+It also installs non-interactively when it detects an agent driving it, into the *current directory* by default — so run it from where you want the skills, not from a repo you were only reading.
 
 Then check everything's in place:
 
@@ -55,15 +63,41 @@ revloop doctor
 
 | Command | State |
 |---|---|
+| `revloop review --pr N` | Built. One review pass: inline comments, a summary, the pass marker |
+| `revloop address --pr N` | Built. Verifies each finding, commits fixes, replies, resolves, files deferred work |
+| `revloop run --pr N` | Built. The whole loop in one process, up to `max_passes` |
+| `revloop status --pr N` | Built. Position *and* interruption, with the command that resumes it |
+| `revloop init` | Built. Plan-then-confirm, `--dry-run`, `--yes`, `--upgrade` |
+| `revloop watchdog` | Built. Finds stuck legs, retries once, then halts and says why |
 | `revloop doctor` | Works |
 | `revloop version` | Works |
 | `revloop auth status` | Works |
 | `revloop auth login` | Works — registers a GitHub App and installs it, end to end |
 | `revloop auth install` | Works — installs an already-registered App |
 | `revloop auth rotate` | Not built. GitHub has no API to generate an App key; it's a web-UI action |
-| `revloop review`, `address`, `run`, `status`, `init` | Not built |
 
-Anything not built says so when you run it, rather than failing like a typo.
+**Not yet run against a real pull request.** Every one of those is exercised offline against a stubbed `gh` boundary — 248 assertions, no network, no model, no PR. That catches the deterministic half, which is the half that fails silently. It does not tell you whether the reviews are any good, and no repository has had the workflows installed yet.
+
+## Local endpoints
+
+`~/.config/revloop/config.yml` holds the endpoints that only exist on your machine — an Ollama box on your LAN, a router on localhost. There's a commented example at [`templates/operator-config.yml`](templates/operator-config.yml):
+
+```bash
+mkdir -p ~/.config/revloop
+cp tools/revloop/templates/operator-config.yml ~/.config/revloop/config.yml
+```
+
+Endpoint definitions merge by name with the repository's, and this file wins. So a repo can declare a public endpoint while you point the same name at your own instance, with no change to the repo. Tokens stay out of both files: `token_env` names a variable, and its value comes from your shell locally or a repository secret in CI.
+
+An endpoint a leg names but nothing defines is a hard failure. It never falls back to the vendor's own API — that would mean running Claude while the config says Ollama, which is the silent substitution the whole cross-model design exists to catch.
+
+## Where the skill text comes from
+
+The orchestrator reproduces `skills/pr-review/SKILL.md` and `skills/pr-address/SKILL.md` into each prompt rather than relying on the harness discovering them. That's a departure from the design's CI wiring, for two concrete reasons.
+
+The quarantine moves `.claude/` and `.agents/` out of the checkout before any invocation, which is exactly where a workflow would have placed the skills. Re-planting into a quarantined tree and removing them again before the commit leaves a window where a crash commits revloop's own skills into someone's pull request. And reproducing the text makes the prompt byte-identical across harnesses, which is the property that lets pass 2 judge pass 1's findings.
+
+The skills stay installable and usable by hand; nothing about them changes. The generated workflows just don't need to place them anywhere.
 
 ## Registering the App
 
@@ -101,10 +135,34 @@ The full design and the implementation plan live in this repo's working memory:
 The contents of this directory are laid out as the standalone repository it may later become, so extraction is `git subtree split -P tools/revloop` rather than a reorganisation.
 
 ```
+action.yml       composite action manifest, unusable until revloop is public
 bin/revloop      entrypoint
-lib/             sourced by bin/revloop — ui, preflight, auth, config, state, legs, adapters
+lib/             sourced by bin/revloop
+  ui.sh            output voice — six rules, enforced by the helpers' shapes
+  preflight.sh     dependency checks that name the fix, not just the gap
+  auth.sh          GitHub App registration via the manifest flow
+  config.sh        two-layer config, endpoint and sink resolution
+  sandbox.sh       quarantining repository-provided harness configuration
+  state.sh         labels, markers, trust, revision detection, finding ids
+  legs.sh          termination, the push guard, the divergence guard
+  github.sh        every GitHub read and write revloop makes
+  validate.sh      structural jq checks on what a harness returned
+  prompt.sh        what each leg is given
+  run.sh           the two legs, the drivers, the watchdog
+  init.sh          the plan-then-confirm upgrade to automated mode
+  adapters/        claude.sh, codex.sh
 schemas/         findings.schema.json, address.schema.json
 skills/          pr-review/, pr-address/
-templates/       workflows and starter config, emitted by `revloop init`
-tests/           stubbed-gh suite
+templates/       workflows, starter config, example operator config
+scripts/         lint.sh — syntax and shellcheck across everything
+tests/           the stubbed-gh suite. `tests/run.sh` runs all of it
 ```
+
+## Working on it
+
+```bash
+tools/revloop/tests/run.sh      # 248 offline assertions, no network, no model
+tools/revloop/scripts/lint.sh   # syntax plus shellcheck -S warning
+```
+
+Both are offline and take seconds. The suite stubs `gh` and `claude` onto PATH and builds throwaway git repositories with real histories and real bare origins, so the assertions are about what revloop actually did rather than what it printed. `tests/stub/codex` is a deliberate tripwire: it exits loudly instead of running, because the no-config default names codex as reviewer and a fixture whose config failed to load would otherwise reach the real CLI and make a real billed call.

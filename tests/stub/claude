@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+#
+# A fake `claude` for the offline suite.
+#
+# It returns what the real CLI returns for `-p --output-format json`: the payload
+# as a JSON *string* in `result`, plus `modelUsage` keyed by the answering model.
+# That shape matters — it is what lib/adapters/claude.sh parses, and layer two of
+# the divergence guard reads the key.
+#
+# The leg is inferred from the prompt rather than from a flag, so one stub covers
+# `revloop run` calling both legs in sequence.
+
+set -uo pipefail
+
+[[ "${1:-}" == "--version" ]] && { printf '9.9.9 (test stub)\n'; exit 0; }
+
+prompt="${!#}"
+[[ -n "${REVLOOP_PROMPT_LOG:-}" ]] && printf '%s' "$prompt" >"$REVLOOP_PROMPT_LOG"
+
+payload_file="${REVLOOP_HARNESS_PAYLOAD:-}"
+model="${REVLOOP_HARNESS_MODEL:-claude-test-model}"
+if [[ "$prompt" == *"You are the review leg"* ]]; then
+  [[ -n "${REVLOOP_REVIEW_PAYLOAD:-}" ]] && payload_file="$REVLOOP_REVIEW_PAYLOAD"
+  model="${REVLOOP_REVIEW_MODEL:-$model}"
+elif [[ "$prompt" == *"You are the address leg"* ]]; then
+  [[ -n "${REVLOOP_ADDRESS_PAYLOAD:-}" ]] && payload_file="$REVLOOP_ADDRESS_PAYLOAD"
+  model="${REVLOOP_ADDRESS_MODEL:-$model}"
+fi
+
+if [[ -z "$payload_file" || ! -f "$payload_file" ]]; then
+  jq -cn '{is_error:true, result:"no canned payload was set for this stub invocation"}'
+  exit 1
+fi
+
+# An addresser changes code in the working tree, and the orchestrator commits it.
+# A test that needs that models it with a script rather than pretending.
+if [[ "$prompt" == *"You are the address leg"* && -n "${REVLOOP_ADDRESS_EDIT:-}" ]]; then
+  bash "$REVLOOP_ADDRESS_EDIT" || true
+fi
+
+jq -cn --arg r "$(cat "$payload_file")" --arg m "$model" \
+  '{result:$r, is_error:false, modelUsage:{($m):{inputTokens:1}}, provider:"stub"}'

@@ -1,0 +1,61 @@
+# revloop — repository policy. Written by `revloop init`; yours to edit.
+#
+# This file is read from the BASE revision of every pull request, never from the
+# branch under review, so a pull request cannot rewrite the loop that reviews it.
+# A change here takes effect when it merges — the new policy is reviewed under the
+# old one, which is the correct order.
+#
+# Machine-local endpoints belong in ~/.config/revloop/config.yml instead. A URL
+# like http://tower.local:11434 asserts something false on a GitHub runner.
+version: 1
+
+mode: event-driven          # event-driven | single-run
+max_passes: 3
+
+# Declared and working, but NOT the CI reviewer: Kimi's subscription credential
+# is a 15-minute OAuth access token with a rotating refresh token, not a static
+# key, so it cannot live in a repository secret. Point a leg at it locally, or in
+# CI once a static credential exists.
+endpoints:
+  kimi:
+    base_url: https://api.kimi.com/coding/
+    token_env: KIMI_API_KEY
+
+# Same vendor, different models. Weaker than cross-vendor — a bug this family
+# misses while reviewing, it also misses while addressing — and much better than
+# one model reviewing itself. Override locally per run with `--harness codex`.
+reviewer:
+  harness: claude
+  model: claude-fable-5
+  effort: medium
+
+addresser:
+  harness: claude
+  model: claude-opus-5
+  effort: high
+  skip_nits_after_pass: 1   # 0 = never change code for nits, 3 = always
+
+# Where a finding that is real but not fixed here goes. An unresolved thread on a
+# merged pull request is visible in no GitHub view, so without a sink `deferred`
+# findings leave their threads open instead of resolving into nothing.
+sinks:
+  issues:
+    type: github_issue
+    identity_label: revloop-review   # one flat label on every issue revloop files
+    labels: [bug]                    # yours to override; your taxonomy wins
+    create_labels: true              # false = use existing only, and fail loudly
+    comment_on_match: false          # cross-link from the PR, not onto your issue
+
+persist:
+  defects: issues           # a sink name | none
+  escalated: none           # a decision request, not a defect: a human is already coming
+
+caps:
+  runs_per_day: 12
+  max_files_changed: 200    # above this, comment instead of reviewing
+
+runner: github-hosted       # github-hosted | self-hosted
+
+# Set to false to permanently silence the suggestion that a repository already
+# running Actions could run this loop automatically. `--no-tips` does it per run.
+tips: true

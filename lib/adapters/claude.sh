@@ -31,7 +31,17 @@ adapter_claude() {
   [[ -n "$model"  && "$model"  != "null" ]] && args+=(--model "$model")
   [[ -n "$effort" && "$effort" != "null" ]] && args+=(--effort "$effort")
 
-  local -a env_prefix=()
+  # One env invocation, built as a single array.
+  #
+  # GH_TOKEN and friends are stripped, not merely unset by convention — the agent
+  # process must hold no GitHub credential even when the caller has one.
+  #
+  # Built this way rather than as a separate optional prefix because an empty
+  # bash array expanded with a default yields one EMPTY word, not zero words:
+  # `"${prefix[@]:-}" env … claude` runs the command named "" and fails with
+  # "command not found" and an empty error string. That broke every invocation
+  # with no endpoint configured, which is the default local case.
+  local -a run=(env -u GH_TOKEN -u GITHUB_TOKEN -u GH_ENTERPRISE_TOKEN)
   local endpoint_label="vendor"
   if [[ -n "$endpoint" && "$endpoint" != "null" ]]; then
     local resolved url tok_env tok
@@ -46,19 +56,16 @@ adapter_claude() {
     # silently redirects the OTHER leg too — both legs run on one model, the
     # loop completes normally, and the cross-model property that justifies the
     # whole design is gone with no error anywhere.
-    env_prefix=(env "ANTHROPIC_BASE_URL=$url" "ANTHROPIC_AUTH_TOKEN=$tok")
+    run+=("ANTHROPIC_BASE_URL=$url" "ANTHROPIC_AUTH_TOKEN=$tok")
     endpoint_label="$endpoint"
   fi
+  run+=(claude "${args[@]}")
 
   local out err rc payload model_reported
   out="$(mktemp)"; err="$(mktemp)"
 
   # stdin from /dev/null: with a terminal attached the CLI waits for piped input.
-  # GH_TOKEN and friends are stripped, not merely unset by convention — the
-  # agent process must hold no GitHub credential even if the caller has one.
-  ( cd "$workdir" && "${env_prefix[@]:-}" \
-      env -u GH_TOKEN -u GITHUB_TOKEN -u GH_ENTERPRISE_TOKEN \
-      claude "${args[@]}" "$(cat "$prompt_file")" ) >"$out" 2>"$err" </dev/null
+  ( cd "$workdir" && "${run[@]}" "$(cat "$prompt_file")" ) >"$out" 2>"$err" </dev/null
   rc=$?
 
   if (( rc != 0 )) || [[ "$(jq -r '.is_error // false' "$out" 2>/dev/null)" == "true" ]]; then

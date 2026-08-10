@@ -27,11 +27,16 @@ state_trusted_author() {
     event-driven)
       # The App, and nothing else. A forged marker here makes an *agent* act:
       # push a commit, skip a finding, believe a leg finished.
-      local slug
-      slug="$(jq -r '.slug // empty' "$(_auth_meta "${REVLOOP_OWNER:-}")" 2>/dev/null)"
+      #
+      # On a runner there is no ~/.config/revloop, so the slug comes from the
+      # environment — actions/create-github-app-token emits it as `app-slug`, and
+      # the generated workflows pass it through. The local metadata file is the
+      # fallback for an event-driven run started from a machine.
+      local slug="${REVLOOP_APP_SLUG:-}"
+      [[ -n "$slug" ]] || slug="$(jq -r '.slug // empty' "$(_auth_meta "${REVLOOP_OWNER:-}")" 2>/dev/null)"
       [[ -n "$slug" ]] || ui_die \
         "cannot determine which App's markers to trust" \
-        "Automated mode reads markers only from the App that writes them. Run: revloop auth status"
+        "Automated mode reads markers only from the App that writes them. In a workflow, set REVLOOP_APP_SLUG from the token step's app-slug output. Locally, run: revloop auth status"
       printf '%s[bot]' "$slug" ;;
     *)
       # The invoking user. No watchdog, no unattended push, no chaining — you
@@ -47,12 +52,14 @@ state_trusted_author() {
 # ---------------------------------------------------------------------------
 
 # Every comment on the PR authored by the trusted author, newest last.
+#
+# Filtered by piping into jq rather than with `gh --jq`, because that flag takes a
+# bare expression and no `--arg`: passing one makes the expression literally
+# "--arg", which fails. It only ever worked by falling through to a second call.
 _state_comments() {
   local pr="$1" repo="$2" author="$3"
-  gh api --paginate "repos/$repo/issues/$pr/comments" \
-    --jq --arg a "$author" '.[] | select(.user.login == $a) | {id, body, created_at: .created_at}' 2>/dev/null \
-    || gh api --paginate "repos/$repo/issues/$pr/comments" \
-       | jq -c --arg a "$author" '.[] | select(.user.login == $a) | {id, body, created_at}'
+  gh api --paginate "repos/$repo/issues/$pr/comments" 2>/dev/null \
+    | jq -c --arg a "$author" '.[] | select(.user.login == $a) | {id, body, created_at}' 2>/dev/null
 }
 
 # Pull the marker object out of a comment body, or nothing.
@@ -147,6 +154,20 @@ state_current_pass_complete() {
       '[.[] | select(.pass == $p and .leg == $l and .state == "complete")] | length' <<<"$markers")" != "0" ]]
 }
 
+# The pass the address leg belongs to: the newest review pass, not the next one.
+state_current_review_pass() {
+  jq -r '[.[] | select(.leg == "review") | .pass] | max // 0' <<<"$1"
+}
+
+# The newest marker for a (pass, leg), whatever its state. The address leg needs
+# the review leg's to read the finding list; recovery needs its own to reuse the
+# comment id rather than posting a second claim.
+state_marker_for() {
+  local markers="$1" pass="$2" leg="$3"
+  jq -c --argjson p "$pass" --arg l "$leg" \
+    'map(select(.pass == $p and .leg == $l)) | last // empty' <<<"$markers"
+}
+
 # An unfinished claim for the same (pr, pass, leg) means recovery, not a fresh
 # start.
 state_open_claim() {
@@ -154,6 +175,31 @@ state_open_claim() {
   jq -c --argjson p "$pass" --arg l "$leg" \
     'map(select(.pass == $p and .leg == $l)) | last // empty
      | select(.state == "started")' <<<"$markers"
+}
+
+# Is a claim too old, or against a revision that has since moved on?
+#
+# Resuming either one is worse than abandoning it: coming back a week later would
+# resume into a pull request that has changed underneath, and the work would be
+# reconciled against findings that no longer describe the code. Prints the reason
+# it is stale, or nothing.
+state_claim_is_stale() {
+  local claim="$1" head_sha="$2" window="${3:-3600}"
+  local ts claim_sha now
+  now="$(date +%s)"
+  ts="$(jq -r '.ts // 0' <<<"$claim")"
+  claim_sha="$(jq -r '.head_sha // empty' <<<"$claim")"
+
+  if [[ -n "$claim_sha" && "$claim_sha" != "$head_sha" ]]; then
+    printf 'it claimed %s and the pull request is now at %s' "${claim_sha:0:7}" "${head_sha:0:7}"
+    return 0
+  fi
+  if (( ts > 0 && now - ts > window )); then
+    printf 'it was made %s minutes ago, past the %s-minute window' \
+      "$(( (now - ts) / 60 ))" "$(( window / 60 ))"
+    return 0
+  fi
+  return 1
 }
 
 # GitHub has no "new revision" event and `synchronize` fires per push, so rather

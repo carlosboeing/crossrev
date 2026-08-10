@@ -1,0 +1,65 @@
+# A composite action manifest for the day revloop is its own public repository.
+#
+# It is not used yet, and it cannot be. GitHub shares actions and reusable
+# workflows from private repositories only within the same user or organisation,
+# and revloop currently lives inside a personal repo consumed by an org — so
+# `uses:` cannot reach it at all. The generated workflows do a second checkout at
+# a pinned commit SHA instead, with a read-only deploy key.
+#
+# Keeping the manifest here means extraction is a `git subtree split`, not a
+# redesign. Once revloop is public, the consuming workflow collapses to:
+#
+#   - uses: carlosboeing/revloop@<sha>   # v1.0.0
+#     with:
+#       leg: review
+#       pr: ${{ github.event.pull_request.number }}
+#       app-token: ${{ steps.app.outputs.token }}
+#
+# and the source checkout, the deploy key and the REVLOOP_SOURCE_KEY secret all
+# disappear — which is one of the better reasons to extract it.
+name: revloop
+description: Review a pull request with one model and address the findings with another.
+author: carlosboeing
+
+inputs:
+  leg:
+    description: Which leg to run — review, address, run, status or watchdog.
+    required: true
+  pr:
+    description: The pull request number. Not needed for watchdog.
+    required: false
+  app-token:
+    description: >-
+      A GitHub App installation token. Deliberately has NO default: GITHUB_TOKEN
+      writes do not trigger workflows, so defaulting to it would stall the chain
+      after pass 1 while looking healthy the whole way. Published review actions
+      commonly default this input, and copying that here would be the exact bug
+      the design exists to prevent.
+    required: true
+  harness:
+    description: Override the harness the repository config names for that leg.
+    required: false
+  no-tips:
+    description: Suppress the automated-mode suggestion. Always true in CI.
+    required: false
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.app-token }}
+      run: |
+        set -euo pipefail
+        [[ -n "${{ inputs.app-token }}" ]] || {
+          echo "::error::app-token is empty. revloop will not run with GITHUB_TOKEN:" \
+               "writes made with it do not trigger workflows, so the loop would stop" \
+               "after one pass with no error anywhere."
+          exit 1
+        }
+        args=("${{ inputs.leg }}")
+        [[ -n "${{ inputs.pr }}" ]] && args+=(--pr "${{ inputs.pr }}")
+        [[ -n "${{ inputs.harness }}" ]] && args+=(--harness "${{ inputs.harness }}")
+        [[ "${{ inputs.no-tips }}" == "true" ]] && args+=(--no-tips)
+        "${{ github.action_path }}/bin/revloop" "${args[@]}"

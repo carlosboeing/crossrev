@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+#
+# A deliberate tripwire, not a stub.
+#
+# The default config with no repository policy names codex as the reviewer, and
+# codex is installed on the machine this suite is developed on — so a test whose
+# fixture config failed to load would silently reach the real CLI, make a real
+# billed call, and pass or fail for reasons nothing to do with revloop. That
+# happened once. This makes it impossible rather than unlikely.
+#
+# A suite that genuinely wants to exercise the codex adapter should give this file
+# canned output instead of removing it.
+
+set -uo pipefail
+
+[[ "${1:-}" == "--version" ]] && { printf 'codex-cli 9.9.9 (test tripwire)\n'; exit 0; }
+
+printf 'test tripwire: the real codex CLI must never be reached from the offline suite.\n' >&2
+printf 'A leg resolved to codex, which means the fixture config did not load.\n' >&2
+exit 97

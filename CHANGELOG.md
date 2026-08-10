@@ -6,7 +6,27 @@ All notable changes to revloop. Format follows [Keep a Changelog](https://keepac
 
 ### Added
 
+- `revloop review --pr N` — one review pass. Claims before working, posts one inline comment per finding on the line it affects, records everything in a hidden marker on its own summary comment, and hands the loop to the address leg by label.
+- `revloop address --pr N` — verifies every finding whatever its severity, commits and pushes what it fixed, replies in-thread, resolves what it settled, and persists deferred defects to a sink before resolving their threads.
+- `revloop run --pr N` — the whole loop in one process, up to `max_passes`. A thin driver over the same legs the workflows invoke, because state lives on the pull request rather than in process memory.
+- `revloop status --pr N` — position *and* interruption, naming the command that resumes a leg that died mid-flight and saying whether a re-run would resume it or abandon it as stale.
+- `revloop init` — the upgrade to automated mode, behind an itemised plan naming every path, secret and label, where deferred work will go and where that answer came from, and anything it would overwrite. `--dry-run`, `--yes` and `--upgrade`.
+- `revloop watchdog` — finds pull requests stuck waiting on a leg, retries once by re-firing the label, then halts and comments why. Re-applying a label GitHub already holds fires no event, so the retry removes it first.
+- `lib/github.sh` — the whole GitHub boundary in one file: inline comments, threaded replies, GraphQL thread resolution, labels, issues, both dedupe tiers, the commit and the push. One file because that is what makes it stubbable.
+- `lib/validate.sh` — structural checks in jq on what a harness returned. Deliberately not general JSON Schema validation, which bash cannot do.
+- `lib/prompt.sh` — what each leg is given. Reproduces the skill text into the prompt rather than relying on harness discovery, because the quarantine moves the discovery paths out of the checkout.
+- `templates/` — the three workflows, the starter policy config, and a commented example operator config.
+- `scripts/lint.sh` — syntax plus `shellcheck -S warning` across everything, in one command.
+- A stubbed-`gh` test suite: 248 offline assertions across ten files, no network, no model, no pull request. `tests/stub/codex` is a tripwire rather than a stub, because a fixture whose config failed to load reached the real billed CLI once before it existed.
+- `action.yml` — a composite action manifest for the day revloop is public. Its `app-token` input has no default on purpose: `GITHUB_TOKEN` writes do not trigger workflows, so defaulting it would stall the chain after pass 1 while looking healthy.
 - `bin/revloop` entrypoint with `doctor`, `version` and `help`.
+
+### Fixed
+
+- The claude adapter never ran the CLI at all when no endpoint was configured — the default local case. An empty bash array expanded with a default yields one *empty* word, so `"${prefix[@]:-}" env … claude` ran the command named `""` and failed with "command not found" and an empty error string.
+- Marker reads passed `--arg` to `gh api --jq`, which takes a bare expression: the jq program became literally `--arg`. It only ever worked by falling through to a second, correct call.
+- `git ls-remote` failing was read as "nobody else pushed", so the check for a concurrent push to the branch silently did nothing on an unreachable remote. It now says the check did not run.
+- Adapter stderr was discarded, so a fatal error inside an adapter — an endpoint that resolves nowhere, for instance — exited the process with nothing printed.
 - `revloop auth install` — runs the install half on its own, for the closed tab or the new repository a year later.
 - A one-shot local listener on the redirect, so the browser lands on a real page and the terminal carries on by itself. `nc -k` keeps the socket open across connections: serving one connection and re-binding was measured losing the redirect whenever anything else connected first, because the re-bind gap returns connection-refused.
 - Installation verification — `auth login` opens the install page with the account prefilled, then signs an RS256 JWT with the stored key and polls until GitHub confirms the installation. "Registered" no longer reports success for an App that can reach no repository.

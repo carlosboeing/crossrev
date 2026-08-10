@@ -31,6 +31,22 @@ source "$ROOT/lib/preflight.sh"
 source "$ROOT/lib/auth.sh"
 # shellcheck source=lib/config.sh
 source "$ROOT/lib/config.sh"
+# shellcheck source=lib/sandbox.sh
+source "$ROOT/lib/sandbox.sh"
+# shellcheck source=lib/state.sh
+source "$ROOT/lib/state.sh"
+# shellcheck source=lib/legs.sh
+source "$ROOT/lib/legs.sh"
+# shellcheck source=lib/github.sh
+source "$ROOT/lib/github.sh"
+# shellcheck source=lib/validate.sh
+source "$ROOT/lib/validate.sh"
+# shellcheck source=lib/prompt.sh
+source "$ROOT/lib/prompt.sh"
+# shellcheck source=lib/run.sh
+source "$ROOT/lib/run.sh"
+# shellcheck source=lib/init.sh
+source "$ROOT/lib/init.sh"
 # shellcheck source=lib/adapters/claude.sh
 source "$ROOT/lib/adapters/claude.sh"
 # shellcheck source=lib/adapters/codex.sh
@@ -49,25 +65,28 @@ usage() {
     revloop <command> [options]
 
   COMMANDS
+    review --pr <n>          One review pass: post findings as inline comments
+    address --pr <n>          Verify each finding, fix or push back, reply, push
+    run --pr <n>             The whole loop in one process, up to max_passes
+    status --pr <n>          Read the loop's state off the pull request
+    init                     Set up automated mode: App, secrets, labels, workflows
+    watchdog                 Find pull requests stuck waiting on a leg, and retry once
+    config show|sink         The merged config, and where deferred work goes
     auth status              Which Apps are configured, and where installed
     auth login               Register a GitHub App and install it
     auth install             Install an already-registered App somewhere
     doctor                   Check that everything revloop needs is installed
     version                  Print the installed version
 
+  OPTIONS on review, address and run
+    --harness claude|codex   Override the harness the config names for that leg
+    --repo owner/name        Target another repository than this checkout
+    --no-tips                Suppress the automated-mode suggestion
+
   Automated mode needs a GitHub App. Local runs do not — they use the gh
   authentication you already have.
 
-  Run `revloop <command> --help` for more.
-
 EOF
-}
-
-# A command that exists in the design but is not built yet says so, and says
-# what does work instead. Silence would read as a typo.
-not_built_yet() {
-  ui_die "\`revloop $1\` is not built yet — this is a work in progress" \
-    "Built so far: auth status, auth login, auth install, doctor, version. See tools/revloop/README.md for what is coming."
 }
 
 main() {
@@ -101,7 +120,12 @@ main() {
       preflight_check harness && ui_end "Everything revloop needs is installed." \
         || ui_end "Install what is marked ✗ above, then run this again." ;;
 
-    review|address|run|status|init) not_built_yet "$cmd" ;;
+    review)  leg_review "$@" ;;
+    address) leg_address "$@" ;;
+    run)     cmd_run "$@" ;;
+    status)   cmd_status "$@" ;;
+    init)     cmd_init "$@" ;;
+    watchdog) cmd_watchdog "$@" ;;
 
     version|--version|-v) revloop_version; echo ;;
     help|--help|-h) usage ;;

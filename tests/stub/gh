@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+#
+# A fake `gh` for the offline suite.
+#
+# revloop keeps its whole GitHub boundary in lib/github.sh and lib/state.sh, so
+# putting this earlier on PATH exercises the real call sites — the real argument
+# shapes, the real jq expressions, the real ordering — with no network and no pull
+# request. Every invocation is logged, so a test can assert on what revloop *did*
+# rather than only on what it printed.
+#
+# Routes are matched in file order, so a test adds the specific ones first.
+
+set -uo pipefail
+
+joined="$*"
+[[ -n "${REVLOOP_GH_LOG:-}" ]] && printf '%s\n' "$joined" >>"$REVLOOP_GH_LOG"
+
+# Honour --jq, because a lot of revloop's reads rely on it and a stub that
+# ignored it would be testing a different program.
+jq_expr=""
+prev=""
+for a in "$@"; do
+  [[ "$prev" == "--jq" ]] && { jq_expr="$a"; break; }
+  prev="$a"
+done
+
+emit() {
+  if [[ -n "$jq_expr" ]]; then
+    jq -r "$jq_expr" 2>/dev/null || true
+  else
+    cat
+  fi
+}
+
+if [[ -f "${REVLOOP_GH_ROUTES:-/nonexistent}" ]]; then
+  while IFS=$'\t' read -r pat resp; do
+    [[ -n "${pat:-}" ]] || continue
+    # shellcheck disable=SC2053  # the pattern is a glob on purpose
+    if [[ "$joined" == $pat ]]; then
+      # Checked before the pipeline, not inside it: `exit 1` on the left of a pipe
+      # runs in a subshell, so the stub would exit 0 and every "this call fails"
+      # fixture would silently succeed.
+      [[ "${resp:-}" == "!fail" ]] && exit 1
+      if [[ "${resp:-}" == @* ]]; then
+        cat "${resp#@}"
+      else
+        printf '%s\n' "${resp:-}"
+      fi | emit
+      exit 0
+    fi
+  done <"$REVLOOP_GH_ROUTES"
+fi
+
+# Unmatched writes succeed and return nothing useful, which is the honest default:
+# a test that cares asserts on the log.
+printf '{}\n' | emit
+exit 0
