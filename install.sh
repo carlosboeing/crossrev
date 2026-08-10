@@ -82,7 +82,16 @@ if ! command -v revloop >/dev/null 2>&1; then
 fi
 
 ui_gap
-ui_line "Install the skills for your harnesses with:"
-ui_line "  npx skills@latest add carlosboeing/claude-code-resources \\"
-ui_line "    --skill pr-review,pr-address"
+ui_line "revloop reads the two skills straight out of this checkout and reproduces"
+ui_line "them into each prompt, so the loop already works. Install them only if you"
+ui_line "want to invoke them by hand:"
+ui_line ""
+# Both details here were established by running the CLI, and both are easy to
+# get wrong in a way that reports nothing rather than an error. The source must
+# be this directory: from the repository root the CLI finds the standalone
+# skills in skills/ and never walks into tools/revloop/skills/. And --skill
+# takes ONE name per flag — a comma-separated list matches nothing and reports
+# "No matching skills found" rather than complaining about the syntax.
+ui_line "  npx skills@latest add $HERE \\"
+ui_line "    --skill pr-review --skill pr-address"
 ui_end "Then check everything:   revloop doctor"
