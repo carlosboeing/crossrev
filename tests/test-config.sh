@@ -83,5 +83,14 @@ is "docs/ROADMAP.md is the last sniffed convention" "$($REVLOOP config sink)" " 
 printf '# x\n\n## Project Map\n\n- **Tracker**: GitHub Issues\n' > AGENTS.md
 is "a declaration beats a sniffed convention" "$($REVLOOP config sink)" "  deferred work would go to: issues"
 
+# The bare-`none` case above passes with docs/ROADMAP.md absent, so it cannot
+# catch a gloss being read as part of the value. This one can: a sniffable
+# convention is on disk, so a `none` that fails to match resolves to it instead.
+printf '# x\n\n## Project Map\n\n- **Tracker**: none (ROADMAP.md is the single source of truth for "what next" — no separate tracker)\n' > AGENTS.md
+is "a glossed none still stops probing" "$($REVLOOP config sink)" "  deferred work would go to: none"
+
+printf '# x\n\n## Project Map\n\n- **Tracker**: docs/BACKLOG.md (newest at the top)\n' > AGENTS.md
+is "a glossed path keeps the path and drops the gloss" "$($REVLOOP config sink)" "  deferred work would go to: file docs/BACKLOG.md"
+
 printf '\n  %d passed, %d failed\n' "$pass" "$fail"
 (( fail == 0 ))

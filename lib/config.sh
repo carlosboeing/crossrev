@@ -177,7 +177,14 @@ cfg_project_map_tracker() {
              inmap && /^##[[:space:]]/ {inmap=0}
              inmap' \
       | sed -n 's/^[[:space:]]*-[[:space:]]*\*\*Tracker\*\*:[[:space:]]*//Ip' | head -1)"
-    tracker="$(printf '%s' "$tracker" | sed 's/[[:space:]]*$//')"
+    # Drop a parenthetical gloss before returning the value. Project Map fields
+    # routinely carry one — `none (ROADMAP.md is the single source of truth for
+    # "what's next")` is how the convention's own example reads — and an
+    # unstripped gloss makes `none` stop matching `none`, so the caller falls
+    # through to the sniff and picks a destination the repository just declared
+    # it does not have. Nothing legitimate here holds a parenthesis: the value
+    # is a path, a tracker name, or `none`.
+    tracker="$(printf '%s' "$tracker" | sed 's/[[:space:]]*(.*$//; s/[[:space:]]*$//')"
     [[ -n "$tracker" ]] && { printf '%s' "$tracker"; return 0; }
   done
   return 1
