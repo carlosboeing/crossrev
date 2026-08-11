@@ -220,6 +220,12 @@ cfg_resolve_sink() {
     case "$(printf '%s' "$tracker" | tr '[:upper:]' '[:lower:]')" in
       none)            printf 'none'; return 0 ;;
       *github*issue*)  printf 'issues'; return 0 ;;
+      # A URL is a hosted tracker, not a path. It has to be caught before the
+      # slash arm below, which would otherwise turn
+      # `https://linear.app/acme/team/ENG` into a directory of that name inside
+      # the checkout — relative, so the inside-the-repo guard waves it through.
+      # Same outcome as a bare `Linear`: somewhere real, nothing to write to.
+      http://*|https://*) : ;;
       */*|*.md)        printf 'file %s' "$tracker"; return 0 ;;
       *)               : ;;  # Linear, Jira and friends: nothing to write to yet
     esac

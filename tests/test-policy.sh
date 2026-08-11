@@ -259,4 +259,17 @@ out="$("$REVLOOP" run --pr 42 2>&1)" || true
 hasnt "run does not collide with the lock its own review leg took" \
   "$out" "already holds pull request"
 
+# A harness that is installed but has no adapter. The fallback was taught not to
+# pick one; naming it outright went straight past that, because the binary check
+# succeeds and returns before anything asks whether an adapter exists. The stub
+# on PATH is what makes this the real case rather than the missing-binary one.
+fixture_repo; stub_reset
+routes_baseline "$(marker_comment 9001 "$converged_marker" | jq -cs . | payload)"
+no_threads
+out="$("$REVLOOP" review --pr 42 --harness kimi 2>&1)" || true
+has  "a harness with no adapter is named as such"    "$out" "no adapter for the harness 'kimi'"
+has  "and the message points at the endpoint route"  "$out" "reviewer.endpoint"
+hasnt "the harness itself is never invoked"          "$out" "was invoked"
+hasnt "and it does not die on a missing function"    "$out" "command not found"
+
 finish

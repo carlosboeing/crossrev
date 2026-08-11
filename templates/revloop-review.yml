@@ -33,13 +33,30 @@ jobs:
     # withholds secrets from them. pull_request_target would supply the secrets
     # and is the one configuration that turns a fork PR into an exploit, so it
     # appears nowhere in this design.
+    #
+    # The fork check sits inside the pull_request branch rather than in front of
+    # the whole condition. In front, it ANDed with the comment branch too — and
+    # an issue_comment payload carries no github.event.pull_request at all, so
+    # that read was null, the comparison was false, and the entire trigger could
+    # never fire. The `on: issue_comment` block and the /revloop review branch
+    # were dead the whole time.
+    #
+    # A comment cannot be fork-checked here, because its payload says nothing
+    # about the head repository. That check moved into the first step below,
+    # which runs before anything is checked out.
     if: >-
-      github.event.pull_request.head.repo.full_name == github.repository
-      && (
-        github.event_name == 'pull_request' && github.event.action != 'labeled'
-        || github.event_name == 'pull_request' && github.event.label.name == 'revloop/awaiting-review'
-        || github.event_name == 'issue_comment' && github.event.issue.pull_request != null
-           && startsWith(github.event.comment.body, '/revloop review')
+      (
+        github.event_name == 'pull_request'
+        && github.event.pull_request.head.repo.full_name == github.repository
+        && (
+          github.event.action != 'labeled'
+          || github.event.label.name == 'revloop/awaiting-review'
+        )
+      )
+      || (
+        github.event_name == 'issue_comment'
+        && github.event.issue.pull_request != null
+        && startsWith(github.event.comment.body, '/revloop review')
       )
     runs-on: __RUNS_ON__
     permissions:
@@ -56,13 +73,33 @@ jobs:
           app-id: ${{ secrets.APP_ID }}
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
 
+      # Resolve the number, and make the fork check a comment cannot make in the
+      # job condition above.
+      #
+      # This has to happen before the checkout below, not inside revloop, and the
+      # difference matters. An issue_comment runs in the BASE repository's
+      # context and therefore WITH secrets, while the next step checks out
+      # refs/pull/N/head — attacker-controlled code on a fork pull request. A
+      # guard that fired only once revloop was running would already have put
+      # that code on disk beside a subscription token. That combination is
+      # exactly what makes pull_request_target dangerous, and why it appears
+      # nowhere in this design.
       - id: pr
+        shell: bash
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
           NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
-        run: echo "number=$NUMBER" >>"$GITHUB_OUTPUT"
+          REPO: ${{ github.repository }}
+        run: |
+          echo "number=$NUMBER" >>"$GITHUB_OUTPUT"
+          fork="$(gh pr view "$NUMBER" --repo "$REPO" --json isCrossRepository --jq .isCrossRepository)"
+          if [[ "$fork" == "true" ]]; then
+            echo "skip=true" >>"$GITHUB_OUTPUT"
+            echo "::notice::revloop does not run on fork pull requests: GitHub withholds secrets from them, and the head branch is not this repository's to push to. Review it by hand."
+          fi
 
-      - uses: actions/checkout@v5
+      - if: steps.pr.outputs.skip != 'true'
+        uses: actions/checkout@v5
         with:
           ref: refs/pull/${{ steps.pr.outputs.number }}/head
           fetch-depth: 0
@@ -79,7 +116,8 @@ jobs:
       #
       # A tag is not a pin: `git tag -f` plus a force push moves it. The 40
       # character SHA is the pin and the tag rides in the comment.
-      - uses: actions/checkout@v5
+      - if: steps.pr.outputs.skip != 'true'
+        uses: actions/checkout@v5
         with:
           repository: __SOURCE_REPO__
           ref: __SOURCE_SHA__   # __SOURCE_REF__
@@ -90,13 +128,15 @@ jobs:
       # installed per run. A self-hosted one already has them, along with the
       # logins they refresh on disk — which is the whole reason it needs no
       # token plumbing.
-      - run: |
+      - if: steps.pr.outputs.skip != 'true'
+        run: |
           echo "$GITHUB_WORKSPACE/.revloop-src/tools/revloop/bin" >>"$GITHUB_PATH"
           # revloop:only github-hosted
           __HARNESS_INSTALL__
           # revloop:end
 
       - name: review
+        if: steps.pr.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
           REVLOOP_APP_SLUG: ${{ steps.app.outputs.app-slug }}

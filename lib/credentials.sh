@@ -181,19 +181,26 @@ _cred_discovery_token_endpoint() {
 #
 # Prints nothing and returns non-zero on any failure, so a caller cannot mistake
 # a half-answer for a credential and write it back over the good one.
+#
+# Every diagnostic below goes to stderr, and that is load-bearing rather than
+# tidy: stdout is the return value. A reason written to stdout is captured into
+# the caller's `new="$(cred_refresh_codex …)"` and thrown away with it, leaving
+# the operator the generic failure and none of the detail — which defeats the
+# whole point of reading the body, since token_expired and invalid_client need
+# different fixes and the difference is only in there.
 cred_refresh_codex() {
   local file="$1" claims issuer client_id endpoint refresh_token resp
   command -v curl >/dev/null 2>&1 || ui_die \
     "curl is not installed, and refreshing a credential is an HTTP call to the vendor" \
     "Install curl. Every runner family ships it; this is only reachable on an unusual image."
 
-  claims="$(cred_codex_claims "$file")" || { ui_say "the stored credential has no readable access token"; return 1; }
+  claims="$(cred_codex_claims "$file")" || { ui_say "the stored credential has no readable access token" >&2; return 1; }
   issuer="$(jq -r '.iss // empty' <<<"$claims")"
   client_id="$(jq -r '.client_id // empty' <<<"$claims")"
   refresh_token="$(jq -r '.tokens.refresh_token // empty' "$file")"
 
   [[ -n "$issuer" && -n "$client_id" && -n "$refresh_token" ]] || {
-    ui_say "the stored credential is missing an issuer, a client id or a refresh token"
+    ui_say "the stored credential is missing an issuer, a client id or a refresh token" >&2
     return 1
   }
 
@@ -202,7 +209,7 @@ cred_refresh_codex() {
   # this on the left of a `||` — but that is a property of the callers, not of
   # this function, and the next caller should not have to know it.
   endpoint="$(_cred_discovery_token_endpoint "$issuer" || true)"
-  [[ -n "$endpoint" ]] || { ui_say "could not read a token endpoint from $issuer's discovery document"; return 1; }
+  [[ -n "$endpoint" ]] || { ui_say "could not read a token endpoint from $issuer's discovery document" >&2; return 1; }
 
   # No -f: a rejection comes back as a JSON body naming the reason, and -f throws
   # that body away in favour of an exit code. "token_expired" and
@@ -212,11 +219,11 @@ cred_refresh_codex() {
             '{grant_type:$ct, client_id:$cid, refresh_token:$rt, scope:"openid profile email offline_access"}' \
           | curl -sS --max-time 60 -w '\n%{http_code}' -X POST "$endpoint" \
               -H 'Content-Type: application/json' --data-binary @- 2>/dev/null)" \
-    || { ui_say "could not reach $endpoint at all"; return 1; }
+    || { ui_say "could not reach $endpoint at all" >&2; return 1; }
   http="${resp##*$'\n'}"; resp="${resp%$'\n'*}"
 
   if [[ "$http" != 2* ]]; then
-    ui_say "the vendor rejected the refresh (HTTP $http): $(jq -r '.error.message // .error_description // .error // "no reason given"' <<<"$resp" 2>/dev/null)"
+    ui_say "the vendor rejected the refresh (HTTP $http): $(jq -r '.error.message // .error_description // .error // "no reason given"' <<<"$resp" 2>/dev/null)" >&2
     return 1
   fi
 
@@ -224,7 +231,7 @@ cred_refresh_codex() {
   new_access="$(jq -r '.access_token // empty' <<<"$resp")"
   new_refresh="$(jq -r '.refresh_token // empty' <<<"$resp")"
   new_id="$(jq -r '.id_token // empty' <<<"$resp")"
-  [[ -n "$new_access" ]] || { ui_say "the vendor's response carried no access token"; return 1; }
+  [[ -n "$new_access" ]] || { ui_say "the vendor's response carried no access token" >&2; return 1; }
 
   # A response that returns no replacement refresh token means this one was not
   # consumed, so keeping it is correct rather than a fallback.

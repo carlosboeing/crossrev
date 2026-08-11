@@ -195,6 +195,12 @@ run_pass_labels() {
     [[ "$l" == "$next" ]] && continue
     state_label_remove "$CTX_PR" "$CTX_REPO" "revloop/$l"
   done
+  # A pass that got this far is a pass that did not stall, so the watchdog's
+  # retry marker goes with the state it described. Left standing it is per-PR
+  # rather than per-stall: a pull request that stalls on pass 1, recovers, and
+  # stalls again on pass 3 is halted on the spot for having "already been
+  # retried once", and someone has to remove the label by hand to restart it.
+  state_label_remove "$CTX_PR" "$CTX_REPO" "revloop/watchdog-retried"
   run_label_add "revloop/pass-$pass"
   [[ -n "$next" ]] && run_label_add "revloop/$next"
   return 0
@@ -220,6 +226,19 @@ run_resolve_leg() {
   LEG_EFFORT="$(cfg_get ".$leg.effort")"
   LEG_ENDPOINT="$(cfg_get ".$leg.endpoint")"
   if [[ -n "$override" ]]; then LEG_HARNESS="$override"; LEG_ENDPOINT=""; LEG_MODEL=""; fi
+
+  # A harness needs an adapter, not just a binary on PATH — and this is checked
+  # before the binary test precisely because being installed is what makes it
+  # reachable. `kimi` is the live case: the CLI sits on plenty of machines, so
+  # `command -v kimi` succeeds, the function returns here, and the dispatch
+  # three steps later dies on `adapter_kimi: command not found` with nothing
+  # pointing back at the configuration that asked for it. The fallback below was
+  # taught not to *choose* a harness with no adapter; it could not help when one
+  # was named outright.
+  if ! declare -F "adapter_$LEG_HARNESS" >/dev/null 2>&1; then
+    ui_die "there is no adapter for the harness '$LEG_HARNESS'" \
+      "revloop drives claude, codex and agy directly. Kimi is reached through the claude adapter instead: define it under endpoints: and set $leg.endpoint, not $leg.harness."
+  fi
 
   command -v "$LEG_HARNESS" >/dev/null 2>&1 && return 0
 
