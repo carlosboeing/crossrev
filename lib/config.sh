@@ -112,6 +112,23 @@ cfg_load() {
       | $base
       | .endpoints = (($base.endpoints // {}) * ($o.endpoints // {}))
     ')"
+
+  cfg_assert_fix_at
+}
+
+# An unrecognised threshold must not be representable.
+#
+# Left to the ranking table it ranks zero, and zero meets nothing — so
+# `fix_at: medum` counts no finding as actionable, the pass reports converged,
+# and the cycle stops with a high-severity finding sitting on the pull request.
+# A typo would look exactly like a clean review. Refuse the value instead.
+cfg_assert_fix_at() {
+  local fix_at; fix_at="$(jq -r '.resolver.fix_at // empty' <<<"$CFG_MERGED")"
+  case "$fix_at" in
+    high|medium|low) return 0 ;;
+    *) ui_die "resolver.fix_at is '${fix_at:-unset}', which is not one of high, medium or low" \
+         "It names the lowest severity the resolve leg may change code for unattended. Set it to high, medium or low in the repository config, or remove it to take the default of medium." ;;
+  esac
 }
 
 # A version key that is present and not 1 is a refusal, not a warning. The whole

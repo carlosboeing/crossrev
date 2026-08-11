@@ -43,6 +43,31 @@ err="$($REVLOOP config show 2>&1 >/dev/null)"; rc=$?
 is  "version mismatch exits non-zero" "$rc" "1"
 has "version mismatch names both versions" "$err" "declares version 99"
 
+# --- the fixing threshold --------------------------------------------------
+#
+# A typo here used to read as a clean review: an unrecognised threshold ranks
+# zero, zero meets nothing, so no finding counted as actionable and the pass
+# reported converged with the bug still on the pull request. The value is
+# refused at load instead, where the message can name it.
+d="$(new_repo)"; cd "$d" || exit 1; mkdir -p .github
+printf 'version: 1\nresolver:\n  fix_at: medum\n' > .github/revloop.yml
+err="$($REVLOOP config show 2>&1 >/dev/null)"; rc=$?
+is  "a misspelt fix_at exits non-zero"     "$rc" "1"
+has "and the error names the bad value"    "$err" "resolver.fix_at is 'medum'"
+has "and says what the valid values are"   "$err" "high, medium or low"
+
+d="$(new_repo)"; cd "$d" || exit 1; mkdir -p .github
+printf 'version: 1\nresolver:\n  harness: claude\n' > .github/revloop.yml
+out="$($REVLOOP config show)"; rc=$?
+is "a resolver block without fix_at keeps the default" "$(jq -r .resolver.fix_at <<<"$out")" "medium"
+is "and loading it is not an error"                    "$rc" "0"
+
+for level in high medium low; do
+  d="$(new_repo)"; cd "$d" || exit 1; mkdir -p .github
+  printf 'version: 1\nresolver:\n  fix_at: %s\n' "$level" > .github/revloop.yml
+  is "fix_at $level is accepted" "$($REVLOOP config show | jq -r .resolver.fix_at)" "$level"
+done
+
 # --- precedence ------------------------------------------------------------
 d="$(new_repo)"; cd "$d" || exit 1; mkdir -p .github
 printf 'version: 1\nmax_passes: 5\nreviewer:\n  harness: claude\n' > .github/revloop.yml

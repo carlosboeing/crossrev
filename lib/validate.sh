@@ -29,7 +29,13 @@ validate_findings() {
             or ((.side? // "RIGHT") | IN("LEFT","RIGHT") | not)
             or ((.severity? // "") | IN("high","medium","low") | not)
             or ((.category? // "") | IN("correctness","security","performance","maintainability","testing","docs") | not)
-            or ((.pre_existing? // false) | type != "boolean")
+            # Presence and type are checked separately, and neither through a
+            # default. The only default available is false, which is the value
+            # that says "this pull request introduced it" — so an absent or null
+            # field would reach the resolve leg as something it may change code
+            # for, defeating the one guardrail that is not configurable.
+            or ((has("pre_existing")? // false) | not)
+            or (.pre_existing? | type != "boolean")
             or (.title? | type != "string") or (.title == "")
           ) ] ) as $bad
       | if ($bad | length) > 0

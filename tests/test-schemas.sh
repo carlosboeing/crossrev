@@ -96,9 +96,24 @@ if validate_findings "$(_finding high security true)" >/dev/null; then
 else
   notok "a well-formed finding passes" "the validator rejected it"
 fi
+if validate_findings "$(_finding high security false)" >/dev/null; then
+  ok "and an explicit false is not mistaken for an absent field"
+else
+  notok "and an explicit false is not mistaken for an absent field" "the validator rejected it"
+fi
 rejects "an old severity word is rejected"    "$(_finding important correctness false)"
 rejects "an invented category is rejected"    "$(_finding high refactoring false)"
 rejects "a non-boolean pre_existing is rejected" "$(_finding high correctness '"yes"')"
+
+# Provenance has no safe default. Absent or null must fail rather than fall to
+# false, which is the value that authorises the resolve leg to change code.
+_finding_without_provenance() {
+  jq -cn '{verdict:"issues-remain", prior:null, blocked_reason:null,
+           findings:[{path:"a.ts", line:1, side:"RIGHT", severity:"high",
+                      category:"correctness", title:"t", why:"w", fix:"f"}]}'
+}
+rejects "a missing pre_existing is rejected"  "$(_finding_without_provenance)"
+rejects "a null pre_existing is rejected"     "$(_finding high correctness null)"
 
 printf '\n  %d passed, %d failed\n' "$pass" "$fail"
 (( fail == 0 ))
