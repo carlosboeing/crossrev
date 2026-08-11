@@ -61,16 +61,21 @@ review_marker() {
         thread_id:"T_DEFER", disposition:null, tracked_as:null}]}'
 }
 
+# What the resolver returns. Findings are named by the number the prompt gave
+# them — 1 is ID_FIX and 2 is ID_DEFER, in the order review_marker lists them —
+# and the orchestrator translates back to ids before anything is recorded. The
+# marker fixtures further down deliberately stay in the id shape, because that is
+# what the markers on live pull requests carry and what this still has to read.
 resolve_payload() {
   local dup="${1:-null}" persist="${2:-yes}"
   local p='{"title":"Legacy export is untyped","body":"Measured before filing."}'
   [[ "$persist" == "no" ]] && p='null'
-  jq -cn --arg f "$ID_FIX" --arg d "$ID_DEFER" --argjson dup "$dup" --argjson p "$p" '
+  jq -cn --argjson dup "$dup" --argjson p "$p" '
     {blocked:false, blocked_reason:null,
      summary:"Fixed the unchecked response. The untyped legacy export is real but predates this branch.",
      dispositions:[
-       {finding_id:$f, disposition:"fixed", reply:"Added the ok check.", persist:null, duplicate_of:null},
-       {finding_id:$d, disposition:"deferred", reply:"Confirmed real, and it predates this branch.",
+       {finding_number:1, disposition:"fixed", reply:"Added the ok check.", persist:null, duplicate_of:null},
+       {finding_number:2, disposition:"deferred", reply:"Confirmed real, and it predates this branch.",
         persist:$p, duplicate_of:$dup}]}'
 }
 
@@ -101,12 +106,19 @@ EOF
 
 # Only a deferral, nothing fixed. The case where a commit has to happen for a
 # reason other than a code change.
+#
+# Both findings are still dispositioned. This fixture used to answer only the
+# deferred one, which is the silent under-coverage the numbering change now
+# rejects: the other finding got no reply, its thread was never resolved, and
+# nothing anywhere said so.
 defer_only_payload() {
-  jq -cn --arg d "$ID_DEFER" '
+  jq -cn '
     {blocked:false, blocked_reason:null,
      summary:"Nothing was fixed here. The untyped legacy export is real but predates this branch.",
      dispositions:[
-       {finding_id:$d, disposition:"deferred", reply:"Confirmed real, and it predates this branch.",
+       {finding_number:1, disposition:"skipped", reply:"Left alone this pass.",
+        persist:null, duplicate_of:null},
+       {finding_number:2, disposition:"deferred", reply:"Confirmed real, and it predates this branch.",
         persist:{title:"Legacy export is untyped", body:"Measured before filing."},
         duplicate_of:null}]}'
 }
@@ -378,10 +390,10 @@ hasnt "so the marker carries no dead copy of the old field" "$(calls)" "wrap_up"
 fixture_repo "$(config_with_issue_sink)"; stub_reset
 routes_baseline "$(marker_comment 9001 "$(review_marker)" | jq -cs . | payload)"
 routes_resolve
-escalating="$(jq -cn --arg f "$ID_FIX" --arg d "$ID_DEFER" '
+escalating="$(jq -cn '
   {blocked:false, blocked_reason:null, summary:"One point needs you.",
-   dispositions:[{finding_id:$f, disposition:"escalated", reply:"We disagree twice over.", persist:null, duplicate_of:null},
-                 {finding_id:$d, disposition:"rebutted", reply:"Not real here.", persist:null, duplicate_of:null}]}')"
+   dispositions:[{finding_number:1, disposition:"escalated", reply:"We disagree twice over.", persist:null, duplicate_of:null},
+                 {finding_number:2, disposition:"rebutted", reply:"Not real here.", persist:null, duplicate_of:null}]}')"
 REVLOOP_RESOLVE_PAYLOAD="$(printf '%s' "$escalating" | payload)"; export REVLOOP_RESOLVE_PAYLOAD
 out="$("$REVLOOP" resolve --pr 42 2>&1)"
 
@@ -389,6 +401,135 @@ has "an escalated finding applies revloop/stop"       "$(calls)" "labels[]=revlo
 has "and halts rather than handing back to the reviewer" "$(calls)" "labels[]=revloop/halted"
 has "and says a human is needed"                      "$out" "need a human decision"
 is  "the escalated thread is left open"               "$(count 'resolveReviewThread')" "1"
+
+# --- the seam where model output enters the orchestrator ----------------
+#
+# On PR 5 the resolver returned three finding ids that were each one or two
+# characters off the ones revloop had handed it. Nothing checked them against the
+# set revloop itself generated, so four things keyed on a string nothing matched:
+# the reply went to the bottom of the pull request instead of into the thread, no
+# thread resolved, the disposition was written against an id no finding has, and
+# the summary table fell back to printing the raw hash. All four degraded and
+# none said so, which is worse than failing outright — the next pass reads the
+# record.
+#
+# Findings are numbered in the prompt now, so the harness's own schema
+# enforcement rules out the mistyped identifier. What the schema cannot express
+# is a per-run range, a duplicate or an omission.
+
+# The numbering has to reach the model, or it has nothing to answer with.
+fixture_repo "$(config_with_issue_sink)"; stub_reset
+routes_baseline "$(marker_comment 9001 "$(review_marker)" | jq -cs . | payload)"
+routes_resolve
+REVLOOP_RESOLVE_PAYLOAD="$(resolve_payload | payload)"; export REVLOOP_RESOLVE_PAYLOAD
+out="$("$REVLOOP" resolve --pr 42 2>&1)"
+prompt="$(cat "$PROMPT_LOG")"
+
+has "each finding is numbered in the prompt"          "$prompt" "### 1. \`$ID_FIX\`"
+has "and numbered in the order the marker lists them" "$prompt" "### 2. \`$ID_DEFER\`"
+has "the id stays beside the number for quoting"      "$prompt" "$ID_DEFER"
+has "and the model is told which one to return"       "$prompt" "\`\"finding_number\": 2\`"
+
+# The round trip: numbers in, ids out. Everything downstream still keys on the
+# id, which is why no live marker needs migrating.
+has "a numbered disposition reaches the right thread" "$(calls)" "pulls/42/comments/5000/replies"
+is  "both threads are settled by number"              "$(count 'resolveReviewThread')" "2"
+has "and the marker records the disposition against the finding's id" \
+  "$(calls)" "\"id\":\"$ID_FIX\",\"path\":\"app.ts\""
+hasnt "the number itself is not stored, only used"    "$(calls)" "finding_number"
+
+# Range. A hash could be mistyped into another plausible-looking hash; a number
+# past the end cannot hide, and this is the failure that actually happened.
+fixture_repo "$(config_with_issue_sink)"; stub_reset
+routes_baseline "$(marker_comment 9001 "$(review_marker)" | jq -cs . | payload)"
+routes_resolve
+out_of_range="$(jq -cn '
+  {blocked:false, blocked_reason:null, summary:"s",
+   dispositions:[{finding_number:1, disposition:"fixed", reply:"r", persist:null, duplicate_of:null},
+                 {finding_number:7, disposition:"fixed", reply:"r", persist:null, duplicate_of:null}]}')"
+REVLOOP_RESOLVE_PAYLOAD="$(printf '%s' "$out_of_range" | payload)"; export REVLOOP_RESOLVE_PAYLOAD
+err="$("$REVLOOP" resolve --pr 42 2>&1 >/dev/null)"; rc=$?
+
+is  "a finding number nothing was numbered with is fatal" "$rc" "1"
+has "and the error names the number and the range"    "$err" "finding number(s) 7 do not exist"
+has "it says the shape was right, so this is drift"   "$err" "contradicts what it was given"
+is  "nothing was replied to"                          "$(count 'replies')" "0"
+is  "and no thread was resolved against a guess"      "$(count 'resolveReviewThread')" "0"
+
+# Drift gets a second attempt; a shape mismatch still does not. The two mean
+# opposite things about who is at fault — every shipped harness constrains its
+# own output, so a wrong shape is an adapter bug that a retry reproduces, while
+# wrong content with a right shape is the model and no adapter is involved.
+fixture_repo "$(config_with_issue_sink)"; stub_reset
+routes_baseline "$(marker_comment 9001 "$(review_marker)" | jq -cs . | payload)"
+routes_resolve
+REVLOOP_RESOLVE_PAYLOAD="$(printf '%s' "$out_of_range" | payload)"; export REVLOOP_RESOLVE_PAYLOAD
+REVLOOP_RESOLVE_PAYLOAD_2="$(resolve_payload | payload)"; export REVLOOP_RESOLVE_PAYLOAD_2
+REVLOOP_STUB_COUNT="$(mktemp)"; export REVLOOP_STUB_COUNT
+out="$("$REVLOOP" resolve --pr 42 2>&1)"; rc=$?
+
+is  "drift is asked once more rather than costing the pass" "$rc" "0"
+has "and says so before retrying"                     "$out" "Asking once more"
+is  "the second answer is the one that is acted on"   "$(count 'resolveReviewThread')" "2"
+unset REVLOOP_RESOLVE_PAYLOAD_2 REVLOOP_STUB_COUNT
+
+# duplicate_of names an issue the orchestrator retrieved. Inventing one makes
+# revloop comment on an unrelated issue and resolve the thread claiming the
+# finding is tracked there.
+fixture_repo "$(config_with_issue_sink)"; stub_reset
+routes_baseline "$(marker_comment 9001 "$(review_marker)" | jq -cs . | payload)"
+routes_resolve
+route_first 'api -X GET search/issues*' \
+  '{"items":[{"number":19,"title":"untyped exports","state":"open","body":"b"}]}'
+REVLOOP_RESOLVE_PAYLOAD="$(resolve_payload 404 | payload)"; export REVLOOP_RESOLVE_PAYLOAD
+err="$("$REVLOOP" resolve --pr 42 2>&1 >/dev/null)"; rc=$?
+
+is  "an issue number nobody offered is fatal"         "$rc" "1"
+has "and the error names it"                          "$err" "duplicate_of names issue(s) 404"
+is  "so no unrelated issue is commented on"           "$(count 'issues/404')" "0"
+
+# --- a reply that could not be threaded is not silence ------------------
+#
+# The top-level fallback exists for a real case: an inline comment GitHub refused
+# to anchor, so there is no thread to reply to. Losing it would be worse than
+# keeping it. What is not acceptable is that it used to change where a reply
+# landed without changing anything the run said about it, so a pass that threaded
+# none of its replies read exactly like one that threaded all of them.
+fixture_repo "$(config_with_issue_sink)"; stub_reset
+routes_baseline "$(marker_comment 9001 "$(review_marker)" | jq -cs . | payload)"
+routes_resolve
+route_first 'api --method POST repos/*/pulls/42/comments/*/replies*' '!fail'
+REVLOOP_RESOLVE_PAYLOAD="$(resolve_payload | payload)"; export REVLOOP_RESOLVE_PAYLOAD
+out="$("$REVLOOP" resolve --pr 42 2>&1)"; rc=$?
+
+is  "the leg still finishes, because the reply is not lost" "$rc" "0"
+has "the run says how many replies missed their thread" "$out" "2 replies could not be threaded"
+has "and the pull request records it too, not just the terminal" \
+  "$(calls)" "could not be posted in the review threads they answer"
+
+# --- a marker written before the numbering still recovers ---------------
+#
+# The number is a wire format between the orchestrator and the model, and it
+# stops existing the moment the payload is validated. So the shape stored on the
+# pull request did not change, and the resolve markers already sitting on live
+# pull requests stay readable — this is the same recovery branch the wrap_up
+# rename had to be careful about, and the reason it needs no migration of its own.
+fixture_repo "$(config_with_issue_sink)"; stub_reset
+pre_numbering="$(jq -cn --arg sha "$FIX_HEAD" --argjson ts "$(date +%s)" --arg f "$ID_FIX" --arg d "$ID_DEFER" '
+  {v:1, leg:"resolve", pass:1, state:"started", ts:$ts, run_id:"1", head_sha:$sha,
+   harness:"claude", model:"resolver-model", model_reported:"resolver-model",
+   blocked:false, blocked_reason:null, commit_sha:"cafe0000cafe0000cafe0000cafe0000cafe0000",
+   summary:"Recorded before findings were numbered.",
+   dispositions:[{finding_id:$f, disposition:"fixed", reply:"done", persist:null, duplicate_of:null},
+                 {finding_id:$d, disposition:"rebutted", reply:"not real", persist:null, duplicate_of:null}]}')"
+comments="$( { marker_comment 9001 "$(review_marker)"; marker_comment 9002 "$pre_numbering"; } | jq -cs . | payload)"
+routes_baseline "$comments"
+routes_resolve
+out="$("$REVLOOP" resolve --pr 42 2>&1)"; rc=$?
+
+is  "a claim recorded against ids still recovers"     "$rc" "0"
+has "its text survives into the summary comment"      "$(calls)" "Recorded before findings were numbered."
+is  "and its dispositions still reach their threads"  "$(count 'resolveReviewThread')" "2"
 
 # --- the divergence guard, layer two ----------------------------------
 #

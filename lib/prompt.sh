@@ -65,9 +65,12 @@ prompt_review() {
 
     if [[ "$(jq -r '(. // []) | length' <<<"$prior")" != "0" ]]; then
       printf '## Findings from earlier passes\n\n'
-      printf 'Classify every one of these into `prior` before looking for anything new. Do not re-raise a dispositioned finding unless the code at that location changed, and never re-raise one carrying `tracked_as`.\n\n'
-      printf '| id | path:line | severity | category | pre-existing | title | disposition | tracked_as |\n|---|---|---|---|---|---|---|---|\n'
-      jq -r '.[] | "| \(.id) | \(.path):\(.line) | \(.severity) | \(.category // "-") | \(if (.pre_existing // false) then "yes" else "no" end) | \(.title // "-") | \(.disposition // "none") | \(.tracked_as // "-") |"' <<<"$prior"
+      printf 'Classify every one of these into `prior` before looking for anything new. Name each by the number in the first column, not by its id. Do not re-raise a dispositioned finding unless the code at that location changed, and never re-raise one carrying `tracked_as`.\n\n'
+      printf '| # | id | path:line | severity | category | pre-existing | title | disposition | tracked_as |\n|---|---|---|---|---|---|---|---|---|\n'
+      # The number is the row's position, and it is what `prior[].finding_number`
+      # refers to. The id stays in its own column so it can still be quoted in
+      # prose — what it is no longer used for is being copied back accurately.
+      jq -r 'to_entries[] | "| \(.key + 1) | \(.value.id) | \(.value.path):\(.value.line) | \(.value.severity) | \(.value.category // "-") | \(if (.value.pre_existing // false) then "yes" else "no" end) | \(.value.title // "-") | \(.value.disposition // "none") | \(.value.tracked_as // "-") |"' <<<"$prior"
       printf '\n'
     fi
 
@@ -127,9 +130,13 @@ prompt_resolve() {
     printf '\n'
 
     printf '## The findings to address\n\n'
-    printf 'Return exactly one entry in `dispositions` per finding here — no more, no fewer. A finding you cannot evaluate is `escalated` with a reply saying why, not an omission.\n\n'
+    printf 'Return exactly one entry in `dispositions` per finding here — no more, no fewer. Name each one by its number: the heading `### 2.` is `"finding_number": 2`. A finding you cannot evaluate is `escalated` with a reply saying why, not an omission.\n\n'
+    # Numbered from the record rather than from the loop's position, so the
+    # translation back to ids on the other side reads the same field the model
+    # was shown. The id is printed beside the number because a reply often wants
+    # to quote it; what it is no longer used for is being copied back.
     jq -r '.[] |
-      "### `\(.id)` — \(.severity) \(.category)\(if (.pre_existing // false) then ", pre-existing" else "" end) — \(.path):\(.line)\n\n" +
+      "### \(.number). `\(.id)` — \(.severity) \(.category)\(if (.pre_existing // false) then ", pre-existing" else "" end) — \(.path):\(.line)\n\n" +
       "**\(.title)**\n\n" +
       "- Why it matters: \(.why // "-")\n" +
       "- Suggested fix: \(.fix // "-")\n" +
@@ -141,9 +148,15 @@ prompt_resolve() {
 
     if [[ "$(jq -r '(. // {}) | length' <<<"$candidates")" != "0" ]]; then
       printf '## Issues that might already cover one of these\n\n'
-      printf 'Keyed by finding id, drawn from open and recently-closed issues. If one is the same defect, set `duplicate_of` to its number and leave `persist` null. If you are unsure, treat it as a duplicate — a missed filing still has this PR'"'"'s thread behind it, while a duplicate is mess someone else cleans up.\n\n'
-      jq -r 'to_entries[] | "### candidates for `\(.key)`\n\n" +
-             ([.value[] | "- **#\(.number)** (\(.state)) \(.title)"] | join("\n")) + "\n"' <<<"$candidates"
+      printf 'Drawn from open and recently-closed issues. If one is the same defect, set `duplicate_of` to its number and leave `persist` null. If you are unsure, treat it as a duplicate — a missed filing still has this PR'"'"'s thread behind it, while a duplicate is mess someone else cleans up.\n\n'
+      printf '**`duplicate_of` only ever names an issue listed here.** Any other number is rejected, because commenting on an unrelated issue and resolving the thread against it is worse than filing a duplicate. A candidate listed under one finding may be used for another if it genuinely covers it.\n\n'
+      # Headed by the finding's number as well as its id, so the model reads one
+      # numbering scheme throughout rather than switching back to hashes here.
+      jq -r --argjson f "$findings" 'to_entries[]
+             | .key as $id
+             | ([$f[] | select(.id == $id) | .number] | first) as $n
+             | "### candidates for finding \($n) (`\($id)`)\n\n" +
+               ([.value[] | "- **#\(.number)** (\(.state)) \(.title)"] | join("\n")) + "\n"' <<<"$candidates"
       printf '\n'
     fi
 

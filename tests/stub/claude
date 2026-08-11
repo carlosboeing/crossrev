@@ -37,6 +37,15 @@ if [[ "$prompt" == *"You are the review leg"* ]]; then
 elif [[ "$prompt" == *"You are the resolve leg"* ]]; then
   [[ -n "${REVLOOP_RESOLVE_PAYLOAD:-}" ]] && payload_file="$REVLOOP_RESOLVE_PAYLOAD"
   model="${REVLOOP_RESOLVE_MODEL:-$model}"
+  # A leg that retries invokes this twice, and a test about the retry needs the
+  # second answer to differ from the first — otherwise "it retried" and "it
+  # accepted the first answer" look identical. The counter is a file because each
+  # invocation is its own process.
+  if [[ -n "${REVLOOP_RESOLVE_PAYLOAD_2:-}" && -n "${REVLOOP_STUB_COUNT:-}" ]]; then
+    n=$(( $(cat "$REVLOOP_STUB_COUNT" 2>/dev/null || printf 0) + 1 ))
+    printf '%s' "$n" >"$REVLOOP_STUB_COUNT"
+    (( n >= 2 )) && payload_file="$REVLOOP_RESOLVE_PAYLOAD_2"
+  fi
 fi
 
 if [[ -z "$payload_file" || ! -f "$payload_file" ]]; then

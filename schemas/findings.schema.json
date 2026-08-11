@@ -106,15 +106,16 @@
       "items": {
         "type": "object",
         "required": [
-          "id",
+          "finding_number",
           "status",
           "note"
         ],
         "additionalProperties": false,
         "properties": {
-          "id": {
-            "type": "string",
-            "description": "The finding id supplied in the prompt."
+          "finding_number": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The number in the first column of the earlier-findings table in the prompt. A small integer rather than the finding's 16-character id, for the same reason the resolve leg uses one: copying a hash accurately is clerical work, and the harness can enforce a number."
           },
           "status": {
             "type": "string",

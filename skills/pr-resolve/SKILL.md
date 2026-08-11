@@ -108,6 +108,7 @@ The orchestrator gives you candidate issues that may already cover the defect, d
 
 - **If one is the same defect**, set `duplicate_of` to its number and leave `persist` null.
 - **If none is**, leave `duplicate_of` null and fill in `persist`.
+- **`duplicate_of` only ever names an issue from that list.** Any other number is rejected, because commenting on an unrelated issue and resolving the thread against it is worse than filing a duplicate. With no candidates listed, the answer is null.
 - **If you are unsure**, treat it as a duplicate. A missed filing still has this PR's thread behind it; a duplicate is mess someone else cleans up. The asymmetry is one-sided, so the tiebreak is too.
 
 A **closed** candidate counts. Closing an issue is a decision, and re-filing something explicitly closed is the most irritating duplicate there is.
@@ -121,3 +122,5 @@ The orchestrator wraps it: the alert at the top, the disposition table, the run 
 ## Output
 
 Return JSON matching the supplied schema and nothing else. One entry in `dispositions` per finding you were given — no more, no fewer. A finding you cannot evaluate is `escalated` with a reply saying why, not an omission.
+
+**Name each finding by its number, not by its id.** The heading `### 2.` in the prompt is `"finding_number": 2`. The 16-character id printed beside it is there for quoting in prose, and copying it into the payload is exactly the clerical step this replaced — a mistyped one used to be accepted in silence, and every lookup keyed on it then missed. The orchestrator checks that the numbers cover every finding exactly once.

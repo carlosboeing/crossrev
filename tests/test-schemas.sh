@@ -121,7 +121,7 @@ rejects "a null pre_existing is rejected"     "$(_finding high correctness null)
 _resolve_payload() {
   jq -cn --arg field "${1:-summary}" '
     {blocked:false, blocked_reason:null,
-     dispositions:[{finding_id:"a1", disposition:"fixed", reply:"r",
+     dispositions:[{finding_number:1, disposition:"fixed", reply:"r",
                     persist:null, duplicate_of:null}]}
     + {($field): "What happened this pass."}'
 }
@@ -135,6 +135,118 @@ if validate_resolve "$(_resolve_payload wrap_up)" >/dev/null 2>&1; then
 else
   ok "the old wrap_up field is rejected"
 fi
+
+# ---------------------------------------------------------------------------
+# The seam: what the orchestrator supplied, and what came back
+# ---------------------------------------------------------------------------
+#
+# A finding is named by the number it was given in the prompt, so the harness's
+# own schema enforcement rules out the mistyped identifier that corrupted three
+# dispositions on PR 5. What the schema cannot express is a per-run range, a
+# duplicate, or an omission, and those are checked here.
+#
+# The exit code is part of the contract. 1 is a shape problem, which on a
+# schema-native harness means the adapter is broken and a retry reproduces it.
+# 2 is the content contradicting what the orchestrator handed over, which is
+# model drift and gets one more attempt. Conflating them either retries a bug or
+# discards a pass over a typo.
+
+# Three findings were supplied, and two issues were offered as candidates.
+_expect='{"findings":3,"candidates":[19,31]}'
+
+_dispositions() {
+  jq -cn --argjson d "$1" \
+    '{blocked:false, blocked_reason:null, summary:"What happened.", dispositions:$d}'
+}
+_d() {   # number, and an optional duplicate_of
+  jq -cn --argjson n "$1" --argjson dup "${2:-null}" \
+    '{finding_number:$n, disposition:"fixed", reply:"r", persist:null, duplicate_of:$dup}'
+}
+_all_three() { jq -cs . <<<"$(_d 1)
+$(_d 2)
+$(_d 3)"; }
+
+# rc <what> <expected-code> <payload> [expect]
+rc() {
+  local what="$1" want="$2" payload="$3" expect="${4:-}" got
+  validate_resolve "$payload" "$expect" >/dev/null 2>&1; got=$?
+  if [[ "$got" == "$want" ]]; then ok "$what"
+  else notok "$what" "exit $got, wanted $want"; fi
+}
+
+rc "three numbered dispositions for three findings pass" 0 \
+  "$(_dispositions "$(_all_three)")" "$_expect"
+
+# The failure this whole change exists for. A hash could be mistyped into
+# another valid-looking hash; a number outside the range cannot hide.
+rc "a finding number past the end is rejected" 2 \
+  "$(_dispositions "$(jq -cs . <<<"$(_d 1)
+$(_d 2)
+$(_d 7)")")" "$_expect"
+rc "and a number below one is rejected" 2 \
+  "$(_dispositions "$(jq -cs . <<<"$(_d 1)
+$(_d 2)
+$(_d 0)")")" "$_expect"
+rc "the same finding dispositioned twice is rejected" 2 \
+  "$(_dispositions "$(jq -cs . <<<"$(_d 1)
+$(_d 2)
+$(_d 2)")")" "$_expect"
+# An omission is silent today: that finding gets no reply, its thread is never
+# resolved, and the marker records it as undispositioned.
+rc "a finding with no disposition at all is rejected" 2 \
+  "$(_dispositions "$(jq -cs . <<<"$(_d 1)
+$(_d 2)")")" "$_expect"
+
+# Shape, not drift. A harness that constrains output to the schema cannot emit
+# either of these, so both mean something below the model is wrong.
+rc "the old finding_id field is a shape failure, not a semantic one" 1 \
+  "$(_dispositions '[{"finding_id":"9e4f9ee1cbe25125","disposition":"fixed","reply":"r","persist":null,"duplicate_of":null}]')" \
+  "$_expect"
+rc "and so is a finding number that is not a whole number" 1 \
+  "$(_dispositions '[{"finding_number":1.5,"disposition":"fixed","reply":"r","persist":null,"duplicate_of":null}]')" \
+  "$_expect"
+
+# duplicate_of names an issue the orchestrator retrieved. Inventing one makes
+# revloop comment on an unrelated issue and resolve the thread against it.
+rc "a duplicate_of naming a supplied candidate passes" 0 \
+  "$(_dispositions "$(jq -cs . <<<"$(_d 1 19)
+$(_d 2)
+$(_d 3)")")" "$_expect"
+# Candidates are supplied per finding, but the check is against all of them.
+# Per-finding would reject a model that correctly noticed one issue covers two
+# findings, and inventing a number is the failure being designed out.
+rc "as does one that names a candidate offered for a different finding" 0 \
+  "$(_dispositions "$(jq -cs . <<<"$(_d 1)
+$(_d 2 31)
+$(_d 3)")")" "$_expect"
+rc "a duplicate_of naming an issue nobody offered is rejected" 2 \
+  "$(_dispositions "$(jq -cs . <<<"$(_d 1 404)
+$(_d 2)
+$(_d 3)")")" "$_expect"
+# A file-sink repository is offered no candidates at all, and yet duplicate_of
+# still becomes the "tracked as" line on a deferred finding's reply.
+rc "and with no candidates offered, any duplicate_of is rejected" 2 \
+  "$(_dispositions "$(_all_three)" | jq -c '.dispositions[0].duplicate_of = 19')" \
+  '{"findings":3,"candidates":[]}'
+
+# Called without expectations — as the fenced-JSON fallback path and the shape
+# tests above do — it checks shape and stops. The semantic checks need something
+# to compare against, and inventing one would be worse than not running them.
+rc "with nothing to compare against, only shape is checked" 0 \
+  "$(_dispositions "$(jq -cs . <<<"$(_d 9)")")"
+
+# ---------------------------------------------------------------------------
+# The review leg carries no hashes either
+# ---------------------------------------------------------------------------
+#
+# `prior` is the review leg's classification of findings carried in from an
+# earlier pass, and it named each one by its 16-character hash. One rule across
+# both legs — the orchestrator numbers things, the model returns numbers — beats
+# one rule per leg, especially where pass 2 is judging pass 1.
+is "prior findings are named by number, not by hash" \
+  "$(jq -r '.properties.prior.items.properties.finding_number.type // "absent"' "$F")" "integer"
+is "and the old id field is gone rather than left beside it" \
+  "$(jq -r '.properties.prior.items.properties.id.type // "absent"' "$F")" "absent"
 
 printf '\n  %d passed, %d failed\n' "$pass" "$fail"
 (( fail == 0 ))

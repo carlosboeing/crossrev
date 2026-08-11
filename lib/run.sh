@@ -380,9 +380,14 @@ _nullable() { [[ "$1" == "null" ]] && printf '' || printf '%s' "$1"; }
 #
 # Retries once when the harness does not constrain its own output, which is the
 # only path where a mismatched object is expected rather than a bug.
+# run_invoke <out> <harness> <prompt> <schema> <workdir> <model> <effort> <endpoint> <validator> [expect]
+#
+# `expect` is passed to the validator as its second argument, describing what
+# the orchestrator supplied — see lib/validate.sh. Absent for a leg with nothing
+# to compare against.
 run_invoke() {
   local out_file="$1" harness="$2" prompt_file="$3" schema_file="$4" workdir="$5"
-  local model="$6" effort="$7" endpoint="$8" validator="$9"
+  local model="$6" effort="$7" endpoint="$8" validator="$9" expect="${10:-}"
 
   # Layer one of the divergence guard, and the specific failure it exists for:
   # these variables are process-scoped, so a leg that leaks them silently
@@ -396,10 +401,23 @@ run_invoke() {
   # into a directory nothing reads again.
   cred_prepare "$harness"
 
-  local attempts=1 i=1 payload problem
-  validate_harness_is_schema_native "$harness" || attempts=2
+  # Two budgets, because a shape failure and a semantic one mean opposite things
+  # about who is at fault.
+  #
+  # Shape: every shipped harness constrains its output to the schema, so a
+  # mismatch there is an adapter or harness bug and a second call reproduces it.
+  # Only a harness that does not constrain output gets a retry, which is what
+  # this has always done.
+  #
+  # Semantic: the shape is perfect and the content contradicts what the
+  # orchestrator supplied — a finding number nothing was numbered with, one
+  # answered twice, one left out. That is model drift by definition, no adapter
+  # is involved, and it earns one more attempt rather than costing a pass that
+  # has already been paid for.
+  local shape_budget=1 semantic_budget=1 payload problem rc
+  validate_harness_is_schema_native "$harness" || shape_budget=2
 
-  while (( i <= attempts )); do
+  while :; do
     REVLOOP_SANDBOXED="$workdir"
     sandbox_quarantine "$workdir" >/dev/null
     # Adapter stderr is NOT discarded. Each adapter already captures the harness
@@ -420,16 +438,32 @@ run_invoke() {
     fi
 
     payload="$(jq -c '.payload' "$out_file")"
-    if problem="$("$validator" "$payload")"; then cred_discard; return 0; fi
+    # `|| rc=$?` rather than reading $? on the next line: this runs under
+    # `set -e`, which kills the process on a bare failing assignment before any
+    # branch below gets to look at the code.
+    rc=0
+    problem="$("$validator" "$payload" "$expect")" || rc=$?
+    if (( rc == 0 )); then cred_discard; return 0; fi
 
-    if (( i < attempts )); then
+    if (( rc == 2 )); then
+      if (( semantic_budget > 0 )); then
+        semantic_budget=$(( semantic_budget - 1 ))
+        ui_warn "$harness returned an answer that contradicts what it was given — $problem" \
+          "The shape is right, so this is the model drifting rather than a bug in revloop or the harness. Asking once more; a second one is fatal."
+        continue
+      fi
+      ui_die "$harness twice returned an answer that contradicts what it was given — $problem" \
+        "The shape was right both times, so the schema cannot catch this and revloop will not guess which finding was meant. Nothing has been written to the pull request. Re-run the leg, or try the other harness."
+    fi
+
+    shape_budget=$(( shape_budget - 1 ))
+    if (( shape_budget > 0 )); then
       ui_warn "$harness returned an object that does not match the schema — $problem" \
         "That harness does not constrain its own output, so this is the expected failure rather than a bug. Retrying once; a second mismatch is fatal."
-    else
-      ui_die "$harness returned an object that does not match the schema — $problem" \
-        "This harness validates output against the schema natively, so a mismatch is an adapter or harness bug rather than model drift. Nothing has been written to the pull request."
+      continue
     fi
-    i=$((i+1))
+    ui_die "$harness returned an object that does not match the schema — $problem" \
+      "This harness validates output against the schema natively, so a mismatch is an adapter or harness bug rather than model drift. Nothing has been written to the pull request."
   done
 }
 
@@ -1082,6 +1116,13 @@ Verifying each finding against the codebase. This comment becomes the pass summa
       [ .[] as $f
         | $f + {prior_disposition: ([$prior[] | select(.finding_id == $f.id) | .disposition] | last // null)} ]' \
       <<<"$findings")"
+    # Each finding also gets the number the prompt will show it under. The model
+    # returns that number instead of the finding's 16-character id, because
+    # copying a hash accurately is clerical work models are poor at — on PR 5 the
+    # resolver mistyped all three, and every lookup keyed on them missed in
+    # silence. Every shipped harness enforces "an integer" before revloop sees
+    # the payload, so the mistyped identifier stops being reachable rather than
+    # merely being detected.
     local n_e i_e f_e may enriched_out="[]"
     n_e="$(jq 'length' <<<"$enriched")"
     for (( i_e = 0; i_e < n_e; i_e++ )); do
@@ -1089,8 +1130,8 @@ Verifying each finding against the codebase. This comment becomes the pass summa
       may=false
       legs_should_fix "$(jq -r .severity <<<"$f_e")" "$CTX_FIX_AT" \
         "$(jq -r '.pre_existing // false' <<<"$f_e")" && may=true
-      enriched_out="$(jq -c --argjson f "$f_e" --argjson m "$may" \
-        '. + [$f + {may_fix: $m}]' <<<"$enriched_out")"
+      enriched_out="$(jq -c --argjson f "$f_e" --argjson m "$may" --argjson n "$(( i_e + 1 ))" \
+        '. + [$f + {may_fix: $m, number: $n}]' <<<"$enriched_out")"
     done
     enriched="$enriched_out"
 
@@ -1109,14 +1150,36 @@ Verifying each finding against the codebase. This comment becomes the pass summa
     prompt_resolve "$prompt_file" "$ROOT/skills/pr-resolve/SKILL.md" "$diff_file" \
       "$meta" "$enriched" "$threads" "$candidates"
 
+    # What the orchestrator supplied, so the validator can check the answer
+    # against it: how many findings were numbered, and which issue numbers were
+    # offered as duplicate candidates.
+    local expect
+    expect="$(jq -cn --argjson n "$n_e" --argjson c "$candidates" \
+      '{findings: $n, candidates: [$c[]?[]?.number] | unique}')"
+
     ui_say "Verifying each finding against the codebase."
     run_invoke "$envelope_file" "$harness" "$prompt_file" \
       "$ROOT/schemas/resolve.schema.json" "$(pwd)" \
-      "$model" "$effort" "$endpoint" validate_resolve
+      "$model" "$effort" "$endpoint" validate_resolve "$expect"
 
     payload="$(jq -c .payload "$envelope_file")"
     model_reported="$(jq -r '.model_reported // "null"' "$envelope_file")"
     dispositions="$(jq -c '.dispositions' <<<"$payload")"
+
+    # The number stops existing here. Everything below — the marker, the thread
+    # lookup, the dedupe, the commit message, the disposition table — keeps
+    # keying on the finding's id exactly as it did before, so a marker written
+    # after this change is readable by the code that came before it and no
+    # migration is needed for the ones already on live pull requests.
+    #
+    # Matched on the number each finding was rendered with rather than on array
+    # position. The two agree today, and a mapping that depends on nobody ever
+    # reordering that array is the kind of assumption this change exists to stop
+    # making.
+    dispositions="$(jq -c --argjson f "$enriched" '
+      [ .[] as $d
+        | $d + {finding_id: ([$f[] | select(.number == $d.finding_number) | .id] | first)}
+        | del(.finding_number) ]' <<<"$dispositions")"
     summary="$(jq -r '.summary' <<<"$payload")"
     blocked="$(jq -r '.blocked // false' <<<"$payload")"
     blocked_reason="$(jq -r '.blocked_reason // "null"' <<<"$payload")"
@@ -1250,7 +1313,16 @@ Pushed \`${commit_sha:0:7}\`; replying to each thread now.$(state_marker_encode 
   run_checkpoint
 
   # --- pass two: reply and resolve ----------------------------------------
-  local already resolved_n=0 escalated=0
+  #
+  # `unthreaded` counts the replies that did not land under the finding they
+  # answer. The top-level fallback exists for a real case — an inline comment
+  # GitHub refused to anchor, so there is no thread to reply to — and losing it
+  # would be worse than keeping it. What is not acceptable is that it used to
+  # change where a reply landed without changing anything the run said about it,
+  # so a pass that threaded none of its replies read exactly like one that
+  # threaded all of them. A fallback may change how something lands and may never
+  # change whether the run says it landed normally.
+  local already resolved_n=0 escalated=0 unthreaded=0
   local thread_id root_id should_resolve reply_body
   already="$(state_posted_finding_ids "$CTX_PR" "$CTX_REPO" "$CTX_AUTHOR" resolve)" || already=""
 
@@ -1268,8 +1340,18 @@ Pushed \`${commit_sha:0:7}\`; replying to each thread now.$(state_marker_encode 
     if ! grep -qx -- "$id" <<<"$already"; then
       reply_body="$(_resolve_reply_body "$d" "$tracked" "$pass" "$harness" "$model")"
       if [[ -n "$root_id" && "$root_id" != "null" ]]; then
-        gh_review_reply "$CTX_REPO" "$CTX_PR" "$root_id" "$reply_body" || true
+        # gh_review_reply says why it failed; what it cannot do is make the run
+        # account for it, so the `|| true` that used to discard the outcome
+        # counts it instead and the reply is posted where it will at least be
+        # read.
+        if ! gh_review_reply "$CTX_REPO" "$CTX_PR" "$root_id" "$reply_body"; then
+          unthreaded=$(( unthreaded + 1 ))
+          gh_comment_create "$CTX_REPO" "$CTX_PR" "$reply_body" >/dev/null
+        fi
       else
+        unthreaded=$(( unthreaded + 1 ))
+        ui_warn "no review thread was found for finding $id, so its reply is a top-level comment" \
+          "The reply is on the pull request rather than under the code it answers. This is expected when GitHub refused to anchor the original inline comment, and unexpected otherwise."
         gh_comment_create "$CTX_REPO" "$CTX_PR" "$reply_body" >/dev/null
       fi
       run_checkpoint
@@ -1302,6 +1384,11 @@ Pushed \`${commit_sha:0:7}\`; replying to each thread now.$(state_marker_encode 
   (( filed > 0 ))      && ui_ok "filed $filed issue(s) for deferred work"
   (( matched > 0 ))    && ui_say "$matched deferred finding(s) already had an issue, so nothing was filed for them."
   (( resolved_n > 0 )) && ui_ok "resolved $resolved_n thread(s)"
+  if (( unthreaded > 0 )); then
+    local reply_noun="replies"; (( unthreaded == 1 )) && reply_noun="reply"
+    ui_warn "$unthreaded $reply_noun could not be threaded and landed as top-level comments" \
+      "Each one names the finding it answers, so nothing is lost, but a reader following the diff will not see it beside the code."
+  fi
 
   # The review marker is edited rather than copied, so the finding list and its
   # dispositions cannot drift apart.
@@ -1313,8 +1400,14 @@ Pushed \`${commit_sha:0:7}\`; replying to each thread now.$(state_marker_encode 
   run_checkpoint
 
   # --- the summary comment, then completion --------------------------------------
+  #
+  # The un-threaded count goes onto the marker rather than being passed as an
+  # argument, for the same reason everything else the comment reports about the
+  # run does: the marker is what the comment is re-rendered from, so a fact that
+  # lives only in a local disappears on recovery.
   local summary_body
-  marker="$(jq -c --argjson t "$(date +%s)" '.done_ts = $t' <<<"$marker")"
+  marker="$(jq -c --argjson t "$(date +%s)" --argjson u "$unthreaded" \
+    '.done_ts = $t | .unthreaded = $u' <<<"$marker")"
   summary_body="$(_resolve_summary_body "$dispositions" "$findings" "$deferred_lines" "$marker")"
   gh_comment_edit "$CTX_REPO" "$comment_id" \
     "$summary_body$(state_marker_encode "$(jq -c 'del(.comment_id)' <<<"$marker")")"
@@ -1529,6 +1622,17 @@ _resolve_summary_body() {
     printf 'Fixes pushed as `%s`.\n\n' "${commit:0:7}"
   else
     printf 'No code changed this pass.\n\n'
+  fi
+
+  # A degraded reply is recorded here rather than only in the run's own output,
+  # because the pull request is what anyone reads afterwards and the run's output
+  # is gone. Silence here is what made the same failure invisible on PR 5.
+  local unthreaded
+  unthreaded="$(jq -r '.unthreaded // 0' <<<"$marker")"
+  if (( unthreaded == 1 )); then
+    printf 'One reply could not be posted in the review thread it answers, so it is a top-level comment on this pull request naming its finding instead.\n\n'
+  elif (( unthreaded > 1 )); then
+    printf '%s replies could not be posted in the review threads they answer, so they are top-level comments on this pull request naming their findings instead.\n\n' "$unthreaded"
   fi
 
   printf '%s\n\n' "$summary"

@@ -80,7 +80,7 @@ Do not report a finding for code you did not read. Do not report one you cannot 
 
 ## From pass 2 onward
 
-Before looking for anything new, classify every prior finding you were given, into `prior`:
+Before looking for anything new, classify every prior finding you were given, into `prior`. Name each by the number in the first column of the table you were given — `"finding_number": 2` for the second row — rather than by its 16-character id, which is printed beside it for quoting in prose.
 
 | Status | When |
 |---|---|

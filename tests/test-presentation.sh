@@ -69,14 +69,16 @@ review_marker() {
         why:"w", fix:"f", anchor:"", thread_id:"T_PRE", disposition:null, tracked_as:null}]}'
 }
 
+# Findings are named by the number the prompt gave them, in the order the review
+# marker above lists them: 1 is ID_SEC, 2 is ID_PRE.
 resolve_payload() {
-  jq -cn --arg s "$ID_SEC" --arg p "$ID_PRE" '
+  jq -cn '
     {blocked:false, blocked_reason:null,
      summary:"Replaced the comparison. The drain loop predates this branch.",
      dispositions:[
-       {finding_id:$s, disposition:"fixed", reply:"Replaced with a constant-time compare.",
+       {finding_number:1, disposition:"fixed", reply:"Replaced with a constant-time compare.",
         persist:null, duplicate_of:null},
-       {finding_id:$p, disposition:"skipped", reply:"Pre-existing, so it is reported not fixed.",
+       {finding_number:2, disposition:"skipped", reply:"Pre-existing, so it is reported not fixed.",
         persist:null, duplicate_of:null}]}'
 }
 

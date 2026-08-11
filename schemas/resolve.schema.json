@@ -20,15 +20,16 @@
     },
     "dispositions": {
       "type": "array",
-      "description": "One entry per finding supplied in the prompt. Every finding gets one, whatever its severity — severity governs what happens after verification, never whether verification happens.",
+      "description": "Exactly one entry per finding supplied in the prompt, no more and no fewer. Every finding gets one, whatever its severity — severity governs what happens after verification, never whether verification happens. The orchestrator checks the coverage: a finding left out has no reply and its thread is never resolved, which is a silent loss rather than a visible one.",
       "items": {
         "type": "object",
-        "required": ["finding_id", "disposition", "reply", "persist", "duplicate_of"],
+        "required": ["finding_number", "disposition", "reply", "persist", "duplicate_of"],
         "additionalProperties": false,
         "properties": {
-          "finding_id": {
-            "type": "string",
-            "description": "The id supplied in the prompt. Not invented here."
+          "finding_number": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The number shown beside the finding in the prompt — 1 for the first, 2 for the second, and so on. A small integer rather than the finding's id, because copying a 16-character hash accurately is clerical work models are poor at and a mistyped one is accepted silently. The id is still printed beside the number for quoting in prose."
           },
           "disposition": {
             "type": "string",
@@ -60,7 +61,7 @@
           },
           "duplicate_of": {
             "type": ["integer", "null"],
-            "description": "The number of an existing issue that already covers this defect, chosen from the candidates supplied in the prompt. Null when none of them match. Ambiguity counts as a match: a missed filing still has the PR thread behind it, while a duplicate is mess someone has to clean up."
+            "description": "The number of an existing issue that already covers this defect, chosen from the candidates supplied in the prompt. Null when none of them match, and null when none were supplied — the orchestrator rejects a number it did not offer, because commenting on an unrelated issue and resolving the thread against it is worse than filing a duplicate. Ambiguity between two supplied candidates counts as a match: a missed filing still has the PR thread behind it, while a duplicate is mess someone has to clean up."
           }
         }
       }
