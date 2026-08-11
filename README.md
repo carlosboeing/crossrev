@@ -83,7 +83,7 @@ revloop doctor
 | `revloop review --pr N` | Built. One review pass: inline comments, a summary, the pass marker |
 | `revloop resolve --pr N` | Built. Verifies each finding, commits fixes, replies, resolves, files deferred work |
 | `revloop cycle --pr N` | Built. The whole loop in one process, up to `max_passes`. Also what a bare `revloop --pr N` runs |
-| `revloop status --pr N` | Built. Position *and* interruption, with the command that resumes it |
+| `revloop status --pr N` | Built. The state in one word, every pass with both legs, and the command that resumes it |
 | `revloop init` | Built. Plan-then-confirm, `--dry-run`, `--yes`, `--upgrade` |
 | `revloop watchdog` | Built. Finds stuck legs, retries once, then halts and says why |
 | `revloop doctor` | Works |
@@ -94,7 +94,7 @@ revloop doctor
 | `revloop auth rotate` | Built. Guided, because GitHub has no API to generate an App key. It proves the new key works before replacing the old one |
 | `revloop auth refresh` | Built. The refresher job's only command, and the only thing that writes a rotating harness credential |
 
-**Exercised offline, and run against real pull requests locally.** Every command above is asserted against a stubbed `gh` boundary — 433 assertions, no network, no model, no PR — which catches the deterministic half, the half that fails silently. Two live local runs cover the other half: PR 3 converged on pass 3 against three planted defects, and PR 4 converged on pass 2 while reviewing revloop's own rename, where the reviewer found two real defects in the change under review and pushed back on a third. **No repository has had the workflows installed yet**, so automated mode is still unproven end to end.
+**Exercised offline, and run against real pull requests locally.** Every command above is asserted against a stubbed `gh` boundary — 554 assertions, no network, no model, no PR — which catches the deterministic half, the half that fails silently. Two live local runs cover the other half: PR 3 converged on pass 3 against three planted defects, and PR 4 converged on pass 2 while reviewing revloop's own rename, where the reviewer found two real defects in the change under review and pushed back on a third. **No repository has had the workflows installed yet**, so automated mode is still unproven end to end.
 
 ## Using it
 
@@ -123,6 +123,10 @@ To watch without any risk of a push, run `review` only.
 ### What it writes
 
 One inline comment per finding on the line it affects, one summary comment carrying a hidden marker, and the `revloop/*` labels. The resolve leg adds threaded replies, resolves the threads it settled, commits any fixes, and files deferred defects to whichever sink the config resolves to.
+
+Each finding's heading carries a coloured circle for severity and its category as a word — `🔴 **High · Security** — <title>` — and the summary table adds a pictogram per category. Each summary comment opens with exactly one native GitHub alert carrying the verdict, and ends with a run-details table naming the agent that ran, how long it took and what it cost in tokens. One row, for that comment's own leg.
+
+The six loop labels carry six colours, so the label row on a pull request reads at a glance: blue for a review owed, purple for a resolution owed, green for converged, orange for halted, red for `revloop/stop`, grey for the pass number. Red is reserved for `stop` — the one label a human applies — so a red pill in a list always means somebody pulled the brake. `revloop init --upgrade` recolours labels minted before this, so there is no migration.
 
 **Every pass is reconstructable from the pull request alone** — the markers are the state, so there is nothing to clean up locally and nothing to lose if a run dies mid-flight.
 
@@ -246,7 +250,7 @@ tests/           the stubbed-gh suite. `tests/run.sh` runs all of it
 ## Working on it
 
 ```bash
-tools/revloop/tests/run.sh      # 361 offline assertions, no network, no model
+tools/revloop/tests/run.sh      # 554 offline assertions, no network, no model
 tools/revloop/scripts/lint.sh   # syntax plus shellcheck -S warning
 ```
 
