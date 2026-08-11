@@ -221,18 +221,59 @@ run_actionable() {
           | select($bar > 0 and (($r[.severity] // 0) >= $bar)) ] | length' <<<"$findings"
 }
 
-# `[High · Security]`, or `[Medium · Correctness · pre-existing]`.
+# Severity is a scale, so it gets coloured circles: they read as one, and they
+# carry colour into the summary table, where a GitHub alert cannot reach because
+# alerts are block-level and do not render inside a cell.
+run_severity_emoji() {
+  case "$1" in
+    high)   printf '🔴' ;;
+    medium) printf '🟠' ;;
+    low)    printf '🔵' ;;
+    *)      printf '⚪' ;;
+  esac
+}
+
+# Category is a kind rather than a scale, so it gets a pictogram. These appear in
+# the summary table, where the column header supplies the context a bare glyph
+# would otherwise lack.
+run_category_emoji() {
+  case "$1" in
+    correctness)     printf '🐛' ;;
+    security)        printf '🔒' ;;
+    performance)     printf '⚡' ;;
+    maintainability) printf '🧹' ;;
+    testing)         printf '🧪' ;;
+    docs)            printf '📄' ;;
+    *)               printf '❓' ;;
+  esac
+}
+
+# `🔴 **High · Security**`, the prefix of an inline finding heading.
+#
+# One line, so it does not wrap in a narrow diff column, and the category stays a
+# readable word rather than a pictogram the reader has to decode. Provenance is
+# deliberately absent: `pre-existing` is not a fourth severity and must not read
+# as one, so it goes in the summary table's *what* cell and in the note under
+# this finding, both of which have room to say what it means.
 #
 # Decorates the RENDERED heading only. A finding's stable id derives from its
 # title, so decorating the title field itself would re-post every finding as new
 # on the next pass.
 run_finding_label() {
   local f="$1" sev kind
-  sev="$(_ucfirst "$(jq -r '.severity // "?"' <<<"$f")")"
-  kind="$(_ucfirst "$(jq -r '.category // "?"' <<<"$f")")"
-  printf '[%s · %s' "$sev" "$kind"
-  [[ "$(jq -r '.pre_existing // false' <<<"$f")" == "true" ]] && printf ' · pre-existing'
-  printf ']'
+  sev="$(jq -r '.severity // "?"' <<<"$f")"
+  kind="$(jq -r '.category // "?"' <<<"$f")"
+  printf '%s **%s · %s**' "$(run_severity_emoji "$sev")" \
+    "$(_ucfirst "$sev")" "$(_ucfirst "$kind")"
+}
+
+# Text that is about to land in a Markdown table cell.
+#
+# A model-written title carrying a pipe splits the row into extra columns, and a
+# newline ends the table outright — both of which are silently wrong rather than
+# obviously broken, because the surrounding rows still render.
+_md_cell() {
+  printf '%s' "$1" | tr '\n' ' ' | sed 's/|/\\|/g'
 }
 
 run_pass_labels() {
@@ -587,7 +628,7 @@ Findings recorded; posting them now.$(state_marker_encode "$(jq -c 'del(.comment
 
   # --- the summary comment -------------------------------------------------
   local summary_body
-  summary_body="$(_review_summary_body "$findings" "$verdict" "$pass" "$harness" "$model" "$model_reported")"
+  summary_body="$(_review_summary_body "$findings" "$marker")"
   gh_comment_edit "$CTX_REPO" "$comment_id" \
     "$summary_body$(state_marker_encode "$(jq -c 'del(.comment_id)' <<<"$marker")")"
   ui_ok "posted a summary comment"
@@ -633,17 +674,55 @@ _review_comment_body() {
   else
     note="Below this repository's \`fix_at\` ($CTX_FIX_AT), so it is reported and left to a human."
   fi
-  printf '**%s %s**\n\n%s\n\n**Fix:** %s\n\n<sub>%s · revloop pass %s, reviewed by %s%s. A second agent now verifies this point and either fixes it, defers it, or explains why it is wrong.</sub>%s' \
+  printf '%s — %s\n\n%s\n\n**Fix:** %s\n\n<sub>%s · revloop pass %s, reviewed by %s%s. A second agent now verifies this point and either fixes it, defers it, or explains why it is wrong.</sub>%s' \
     "$(run_finding_label "$f")" "$(jq -r .title <<<"$f")" \
     "$(jq -r .why <<<"$f")" "$(jq -r .fix <<<"$f")" \
     "$note" "$pass" "$harness" "${model:+ ($model)}" \
     "$(state_finding_marker "$(jq -r .id <<<"$f")" "$pass" review)"
 }
 
+# The summary table. Severity and category carry emoji, and provenance sits in
+# the *what* cell rather than beside the severity — `pre-existing` is not a
+# fourth severity and must not read as one.
+#
+# Rendered row by row rather than in one jq pass, because the emoji come from the
+# two functions above and a second copy of either mapping inside a jq program is
+# a copy that drifts.
+_findings_table() {
+  local findings="$1" n i f sev kind pre
+  n="$(jq 'length' <<<"$findings")"
+  printf '| Severity | Category | Where | What |\n|---|---|---|---|\n'
+  for (( i = 0; i < n; i++ )); do
+    f="$(jq -c ".[$i]" <<<"$findings")"
+    sev="$(jq -r '.severity // "?"' <<<"$f")"
+    kind="$(jq -r '.category // "?"' <<<"$f")"
+    pre=""
+    [[ "$(jq -r '.pre_existing // false' <<<"$f")" == "true" ]] && pre=' <sub>· pre-existing</sub>'
+    printf '| %s %s | %s %s | `%s:%s` | %s%s |\n' \
+      "$(run_severity_emoji "$sev")" "$(_ucfirst "$sev")" \
+      "$(run_category_emoji "$kind")" "$(_ucfirst "$kind")" \
+      "$(jq -r .path <<<"$f")" "$(jq -r .line <<<"$f")" \
+      "$(_md_cell "$(jq -r .title <<<"$f")")" "$pre"
+  done
+  printf '\n'
+}
+
+# The review leg's summary comment.
+#
+# Takes the marker rather than eight positional arguments, because the resolve
+# leg re-renders this comment from the marker alone when it fills in the
+# dispositions. Everything the comment says about the run — harness, model,
+# effort, endpoint, timing, tokens — therefore has to live on the marker, and
+# passing the marker is what keeps the two renderings honest about that.
 _review_summary_body() {
-  local findings="$1" verdict="$2" pass="$3" harness="$4" model="$5" reported="$6" n actionable
+  local findings="$1" marker="$2" n actionable verdict pass harness model reported
   n="$(jq 'length' <<<"$findings")"
   actionable="$(run_actionable "$findings")"
+  verdict="$(jq -r '.verdict // "issues-remain"' <<<"$marker")"
+  pass="$(jq -r '.pass // 1' <<<"$marker")"
+  harness="$(jq -r '.harness // "?"' <<<"$marker")"
+  model="$(jq -r '.model // ""' <<<"$marker")"
+  reported="$(jq -r '.model_reported // ""' <<<"$marker")"
 
   printf '## revloop review — pass %s of %s\n\n' "$pass" "$CTX_MAX_PASSES"
   printf 'Reviewed by `%s`%s' "$harness" "${model:+ using \`$model\`}"
@@ -653,9 +732,7 @@ _review_summary_body() {
   if (( n == 0 )); then
     printf 'No findings. Low-severity and pre-existing issues would be listed here too, so this is an empty review rather than a filtered one.\n\n'
   else
-    printf '| severity | category | where | what |\n|---|---|---|---|\n'
-    jq -r '.[] | "| \(.severity) | \(.category)\(if (.pre_existing // false) then " · pre-existing" else "" end) | `\(.path):\(.line)` | \(.title) |"' <<<"$findings"
-    printf '\n'
+    _findings_table "$findings"
   fi
 
   case "$verdict" in
@@ -1019,15 +1096,12 @@ Pushed \`${commit_sha:0:7}\`; replying to each thread now.$(state_marker_encode 
   review_comment_id="$(jq -r '.comment_id' <<<"$review_marker")"
   updated_review="$(jq -c --argjson f "$findings" 'del(.comment_id) | .findings = $f' <<<"$review_marker")"
   gh_comment_edit "$CTX_REPO" "$review_comment_id" \
-    "$(_review_summary_body "$findings" "$(jq -r '.verdict' <<<"$review_marker")" "$pass" \
-       "$(jq -r '.harness' <<<"$review_marker")" "$(jq -r '.model // ""' <<<"$review_marker")" \
-       "$(jq -r '.model_reported // "null"' <<<"$review_marker")")$(state_marker_encode "$updated_review")"
+    "$(_review_summary_body "$findings" "$review_marker")$(state_marker_encode "$updated_review")"
   run_checkpoint
 
   # --- the summary comment, then completion --------------------------------------
   local summary_body
-  summary_body="$(_resolve_summary_body "$summary" "$dispositions" "$deferred_lines" "$pass" \
-    "$harness" "$model" "$model_reported" "$commit_sha" "$blocked" "$blocked_reason")"
+  summary_body="$(_resolve_summary_body "$dispositions" "$findings" "$deferred_lines" "$marker")"
   gh_comment_edit "$CTX_REPO" "$comment_id" \
     "$summary_body$(state_marker_encode "$(jq -c 'del(.comment_id)' <<<"$marker")")"
   ui_ok "posted a summary comment"
@@ -1141,9 +1215,45 @@ _resolve_reply_body() {
     "$(state_finding_marker "$(jq -r .finding_id <<<"$d")" "$pass" resolve)"
 }
 
+# The disposition table, with the severity emoji on each finding.
+#
+# The finding is named by its title rather than by its id, because the id means
+# nothing to a collaborator reading the pull request — but the id is what the
+# dispositions are keyed on, so it stays in the cell, small, for anyone matching
+# a row against a thread. The reasoning is deliberately not a column: the only
+# text revloop holds is the model's full reply, which belongs in the thread it
+# was written for and would not survive a table cell.
+_dispositions_table() {
+  local dispositions="$1" findings="$2" n i d id f sev title
+  n="$(jq 'length' <<<"$dispositions")"
+  printf '| Finding | Disposition |\n|---|---|\n'
+  for (( i = 0; i < n; i++ )); do
+    d="$(jq -c ".[$i]" <<<"$dispositions")"
+    id="$(jq -r .finding_id <<<"$d")"
+    f="$(jq -c --arg id "$id" 'map(select(.id == $id)) | first // {}' <<<"$findings")"
+    sev="$(jq -r '.severity // "?"' <<<"$f")"
+    title="$(jq -r '.title // ""' <<<"$f")"
+    [[ -n "$title" ]] || title="$id"
+    printf '| %s %s <sub>`%s`</sub> | %s |\n' \
+      "$(run_severity_emoji "$sev")" "$(_md_cell "$title")" "$id" \
+      "$(jq -r .disposition <<<"$d")"
+  done
+  printf '\n'
+}
+
+# The resolve leg's summary comment. Takes the marker for the same reason the
+# review leg's does — everything it reports about the run lives there.
 _resolve_summary_body() {
-  local summary="$1" dispositions="$2" deferred_lines="$3" pass="$4"
-  local harness="$5" model="$6" reported="$7" commit="$8" blocked="$9" blocked_reason="${10}"
+  local dispositions="$1" findings="$2" deferred_lines="$3" marker="$4"
+  local summary pass harness model reported commit blocked blocked_reason
+  summary="$(jq -r '.summary // ""' <<<"$marker")"
+  pass="$(jq -r '.pass // 1' <<<"$marker")"
+  harness="$(jq -r '.harness // "?"' <<<"$marker")"
+  model="$(jq -r '.model // ""' <<<"$marker")"
+  reported="$(jq -r '.model_reported // ""' <<<"$marker")"
+  commit="$(jq -r '.commit_sha // ""' <<<"$marker")"
+  blocked="$(jq -r '.blocked // false' <<<"$marker")"
+  blocked_reason="$(jq -r '.blocked_reason // ""' <<<"$marker")"
 
   printf '## revloop resolved pass %s of %s\n\n' "$pass" "$CTX_MAX_PASSES"
   printf 'Verified by `%s`%s' "$harness" "${model:+ using \`$model\`}"
@@ -1157,9 +1267,7 @@ _resolve_summary_body() {
 
   printf '%s\n\n' "$summary"
 
-  printf '| finding | disposition |\n|---|---|\n'
-  jq -r '.[] | "| `\(.finding_id)` | \(.disposition) |"' <<<"$dispositions"
-  printf '\n'
+  _dispositions_table "$dispositions" "$findings"
 
   if [[ -n "$deferred_lines" ]]; then
     printf '## Deferred work filed\n'

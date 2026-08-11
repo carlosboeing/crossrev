@@ -357,7 +357,7 @@ has "a medium finding under fix_at high is still posted" \
   "$(calls)" "method POST repos/acme/widget/pulls/42/comments"
 has "and the comment says why it will not be touched" \
   "$(calls)" "Below this repository"
-has "and it still appears in the summary table"      "$(calls)" "| medium | performance |"
+has "and it still appears in the summary table"      "$(calls)" "| 🟠 Medium | ⚡ Performance |"
 has "the run reports nothing at or above the threshold" "$out" "0 at or above fix_at (high)"
 has "so the pass converges rather than calling the resolve leg" \
   "$(calls)" "labels[]=revloop/converged"

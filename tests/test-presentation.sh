@@ -116,10 +116,43 @@ hasnt "the review prompt makes no model claim either" "$review_prompt" "two-mode
 has   "the review skill says two-agent"               "$review_prompt" "two-agent loop"
 
 run_resolve "$(resolve_payload)"
+resolve_calls="$(calls)"
 resolve_prompt="$(cat "$PROMPT_LOG")"
 
 hasnt "the resolve prompt claims no different model"  "$resolve_prompt" "different model"
 has   "it names the review leg as a separate agent"   "$resolve_prompt" "a separate agent"
 has   "and the resolve skill agrees"                  "$resolve_prompt" "a second agent that reviewed it"
+
+# ---------------------------------------------------------------------------
+# Decision 1 — emoji for severity and category
+# ---------------------------------------------------------------------------
+
+# Variant A: severity dot, category word, title on the same line. It has to fit a
+# narrow diff column without wrapping, which is why the category stays a word and
+# only the severity carries a glyph.
+has "the inline heading leads with the severity dot"  "$review_calls" "🔴 **High · Security** — Token compared"
+hasnt "and does not put the category emoji there too" "$review_calls" "🔴 🔒"
+hasnt "nor bracket it like machine output"            "$review_calls" "[High · Security]"
+
+# Provenance is not a fourth severity. It belongs where there is room to say what
+# it means, which is the table's *what* cell and the note under the finding.
+hasnt "the heading carries no provenance"             "$review_calls" "· Security · pre-existing"
+has   "the table's what cell does, muted"             "$review_calls" "<sub>· pre-existing</sub>"
+
+has "the summary table header names both columns"     "$review_calls" "| Severity | Category | Where | What |"
+has "a high security finding carries both glyphs"     "$review_calls" "| 🔴 High | 🔒 Security |"
+has "a low maintainability one carries its own"       "$review_calls" "| 🔵 Low | 🧹 Maintainability |"
+has "and a medium correctness one"                    "$review_calls" "| 🟠 Medium | 🐛 Correctness |"
+
+# A model-written title carrying a pipe splits the row into extra columns, and the
+# surrounding rows still render — so the table is quietly wrong rather than
+# obviously broken. Escaped at the cell, not hoped away in the prompt.
+has "a pipe in a title is escaped rather than splitting the row" \
+  "$review_calls" 'Off-by-one in the drain loop \| second clause'
+
+has "the resolve table names findings, not ids alone" \
+  "$resolve_calls" "| 🔴 Token compared with == instead of a constant-time check"
+has "and keeps the id small for matching a row to a thread" \
+  "$resolve_calls" "<sub>\`$ID_SEC\`</sub> | fixed |"
 
 finish
