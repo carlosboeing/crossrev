@@ -117,8 +117,39 @@ state_posted_finding_ids() {
   {
     gh api --paginate "repos/$repo/pulls/$pr/comments" 2>/dev/null | jq -r --arg a "$author" '.[] | select(.user.login==$a) | .body'
     gh api --paginate "repos/$repo/issues/$pr/comments" 2>/dev/null | jq -r --arg a "$author" '.[] | select(.user.login==$a) | .body'
-  } | sed -n 's/.*<!-- revloop:f \(.*\) -->.*/\1/p' \
-    | jq -r --arg leg "$leg" 'select(.leg==$leg) | .id' 2>/dev/null | sort -u
+  } | _state_finding_ids "$leg"
+}
+
+# Which findings got a reply that landed as a top-level comment rather than in
+# the thread it answers, for one pass.
+#
+# The same markers state_posted_finding_ids reads, narrowed to the issue-comment
+# endpoint — and that narrowing is the whole trick. A threaded reply is a review
+# comment and a fallback reply is an issue comment, so WHERE the marker was
+# recorded already is the record of which of the two happened, written by the
+# same HTTP call that posted the reply.
+#
+# Read back rather than counted in a local, for the reason every other fact
+# about a pass is: a run that stops between a fallback reply and the summary
+# comment resumes with that reply already posted and skipped as a duplicate, so
+# a counter starting at zero on the way back in reports a clean pass over a
+# degraded one — which is exactly the silence the count was added to remove.
+state_unthreaded_finding_ids() {
+  local pr="$1" repo="$2" author="$3" leg="$4" pass="$5"
+  gh api --paginate "repos/$repo/issues/$pr/comments" 2>/dev/null \
+    | jq -r --arg a "$author" '.[] | select(.user.login==$a) | .body' \
+    | _state_finding_ids "$leg" "$pass"
+}
+
+# Finding ids out of a stream of comment bodies, optionally for one pass only.
+# One reader for the marker format, so a change to it cannot update one call
+# site and quietly miss the other.
+_state_finding_ids() {
+  local leg="$1" pass="${2:-}"
+  sed -n 's/.*<!-- revloop:f \(.*\) -->.*/\1/p' \
+    | jq -r --arg leg "$leg" --arg pass "$pass" \
+        'select(.leg == $leg) | select($pass == "" or .pass == ($pass | tonumber)) | .id' 2>/dev/null \
+    | sort -u
 }
 
 # ---------------------------------------------------------------------------

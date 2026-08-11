@@ -380,6 +380,72 @@ _nullable() { [[ "$1" == "null" ]] && printf '' || printf '%s' "$1"; }
 #
 # Retries once when the harness does not constrain its own output, which is the
 # only path where a mismatched object is expected rather than a bug.
+#
+# ---------------------------------------------------------------------------
+# The working tree across a retry
+# ---------------------------------------------------------------------------
+#
+# The resolve harness edits files before it returns its answer, and a rejected
+# answer is thrown away — its edits are not. So a retry that reuses the tree
+# reads one the discarded attempt already changed: it applies a non-idempotent
+# fix twice, or finds a finding already fixed and calls it skipped, and
+# `git add -A` commits whatever is sitting there either way. The dispositions
+# that get recorded then describe a tree nobody produced, which is the same
+# class of silent divergence between record and reality that the numbering
+# above exists to remove.
+#
+# So each attempt starts from the state captured before the first one.
+#
+# Captured into a temporary index rather than with `git stash`: stash rewrites
+# the real index and pushes onto the user's stash list, and revloop is routinely
+# run in a checkout somebody else is also working in. Seeded from the real index
+# so the stat cache still applies and this costs a `git status`, not a rehash of
+# every file in the repository.
+#
+# Prints the tree object, or nothing when the state could not be captured.
+_run_tree_capture() {
+  local idx="$1" gitdir
+  gitdir="$(git rev-parse --git-dir 2>/dev/null)" || return 1
+  rm -f "$idx"
+  cp "$gitdir/index" "$idx" 2>/dev/null || true
+  # The same pathspec gh_commit_and_push stages with. revloop's own checkout
+  # sits at .revloop-src inside the workspace in automated mode, and capturing
+  # it would mean restoring — or deleting — the tool mid-run.
+  GIT_INDEX_FILE="$idx" git add -A -- ':(top)' ':(exclude,top).revloop-src' >/dev/null 2>&1 || return 1
+  GIT_INDEX_FILE="$idx" git write-tree 2>/dev/null
+}
+
+# Put the working tree back to a captured state, or fail.
+#
+# Anything untracked afterwards was written by the attempt being discarded: the
+# capture indexed every file that was there before it ran, so read-tree restores
+# those and only the leftovers are left over. Ignored files are neither captured
+# nor removed, which is right — they are not committed either.
+_run_tree_restore() {
+  local tree="$1" p top
+  [[ -n "$tree" ]] || return 1
+  top="$(git rev-parse --show-toplevel 2>/dev/null)" || return 1
+  git read-tree --reset -u "$tree" >/dev/null 2>&1 || return 1
+  while IFS= read -r p; do
+    [[ "$p" == .revloop-src* ]] && continue
+    rm -rf -- "${top:?}/$p"
+  done < <(git -C "$top" ls-files --others --exclude-standard)
+  return 0
+}
+
+# Reset before a retry, or refuse to retry at all.
+#
+# Asking again on top of a discarded attempt's edits is worse than losing the
+# pass: the accepted answer is then recorded against changes it never made, and
+# the commit carries both. So a capture that was never taken, or a restore that
+# will not apply, stops the leg instead of degrading it quietly.
+_run_retry_reset() {
+  local tree="$1" harness="$2" problem="$3"
+  _run_tree_restore "$tree" && return 0
+  ui_die "$harness needs asking again, and the working tree it already edited could not be put back — $problem" \
+    "Retrying on top of a discarded attempt's edits would commit changes no accepted answer describes. Nothing has been written to the pull request; check \`git status\` in the checkout and re-run the leg."
+}
+
 # run_invoke <out> <harness> <prompt> <schema> <workdir> <model> <effort> <endpoint> <validator> [expect]
 #
 # `expect` is passed to the validator as its second argument, describing what
@@ -417,6 +483,12 @@ run_invoke() {
   local shape_budget=1 semantic_budget=1 payload problem rc
   validate_harness_is_schema_native "$harness" || shape_budget=2
 
+  # Taken before the first attempt, because that is the only moment the tree is
+  # still the one a retry needs to start from. See _run_tree_capture.
+  local snap_index snap_tree
+  snap_index="$(mktemp -u)"
+  snap_tree="$(_run_tree_capture "$snap_index")" || snap_tree=""
+
   while :; do
     REVLOOP_SANDBOXED="$workdir"
     sandbox_quarantine "$workdir" >/dev/null
@@ -443,13 +515,14 @@ run_invoke() {
     # branch below gets to look at the code.
     rc=0
     problem="$("$validator" "$payload" "$expect")" || rc=$?
-    if (( rc == 0 )); then cred_discard; return 0; fi
+    if (( rc == 0 )); then cred_discard; rm -f "$snap_index"; return 0; fi
 
     if (( rc == 2 )); then
       if (( semantic_budget > 0 )); then
         semantic_budget=$(( semantic_budget - 1 ))
+        _run_retry_reset "$snap_tree" "$harness" "$problem"
         ui_warn "$harness returned an answer that contradicts what it was given — $problem" \
-          "The shape is right, so this is the model drifting rather than a bug in revloop or the harness. Asking once more; a second one is fatal."
+          "The shape is right, so this is the model drifting rather than a bug in revloop or the harness. Anything it edited has been put back, and it is being asked once more; a second one is fatal."
         continue
       fi
       ui_die "$harness twice returned an answer that contradicts what it was given — $problem" \
@@ -458,8 +531,9 @@ run_invoke() {
 
     shape_budget=$(( shape_budget - 1 ))
     if (( shape_budget > 0 )); then
+      _run_retry_reset "$snap_tree" "$harness" "$problem"
       ui_warn "$harness returned an object that does not match the schema — $problem" \
-        "That harness does not constrain its own output, so this is the expected failure rather than a bug. Retrying once; a second mismatch is fatal."
+        "That harness does not constrain its own output, so this is the expected failure rather than a bug. Anything it edited has been put back, and it is being retried once; a second mismatch is fatal."
       continue
     fi
     ui_die "$harness returned an object that does not match the schema — $problem" \
@@ -1323,8 +1397,19 @@ Pushed \`${commit_sha:0:7}\`; replying to each thread now.$(state_marker_encode 
   # threaded all of them. A fallback may change how something lands and may never
   # change whether the run says it landed normally.
   local already resolved_n=0 escalated=0 unthreaded=0
-  local thread_id root_id should_resolve reply_body
+  local thread_id root_id should_resolve reply_body unthreaded_already
   already="$(state_posted_finding_ids "$CTX_PR" "$CTX_REPO" "$CTX_AUTHOR" resolve)" || already=""
+
+  # Seeded from the pull request rather than from zero, because a run that
+  # stopped between a fallback reply and the summary comment comes back with
+  # that reply already posted — `already` skips it below, so the loop never
+  # counts it, and the summary would report a clean pass over a degraded one.
+  # The reply's own marker is the record, and it is only ever an issue comment
+  # when the thread reply is what failed.
+  unthreaded_already="$(state_unthreaded_finding_ids \
+    "$CTX_PR" "$CTX_REPO" "$CTX_AUTHOR" resolve "$pass")" || unthreaded_already=""
+  [[ -n "$unthreaded_already" ]] && \
+    unthreaded="$(printf '%s\n' "$unthreaded_already" | wc -l | tr -d ' ')"
 
   for (( i = 0; i < n; i++ )); do
     d="$(jq -c ".[$i]" <<<"$dispositions")"

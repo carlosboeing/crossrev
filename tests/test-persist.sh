@@ -123,6 +123,15 @@ defer_only_payload() {
         duplicate_of:null}]}'
 }
 
+# A resolver whose fix is not idempotent: run twice, it appends twice. That is
+# what makes "did the second attempt start from a clean tree" observable at all
+# — an idempotent fix looks identical either way.
+appending_edit_script() {
+  local f; f="$(mktemp)"
+  printf 'printf "export const patched = 1\\n" >> app.ts\n' >"$f"
+  printf '%s' "$f"
+}
+
 # The resolver changes code; the orchestrator commits it.
 edit_script() {
   local f; f="$(mktemp)"
@@ -469,9 +478,33 @@ REVLOOP_STUB_COUNT="$(mktemp)"; export REVLOOP_STUB_COUNT
 out="$("$REVLOOP" resolve --pr 42 2>&1)"; rc=$?
 
 is  "drift is asked once more rather than costing the pass" "$rc" "0"
-has "and says so before retrying"                     "$out" "Asking once more"
+has "and says so before retrying"                     "$out" "asked once more"
 is  "the second answer is the one that is acted on"   "$(count 'resolveReviewThread')" "2"
 unset REVLOOP_RESOLVE_PAYLOAD_2 REVLOOP_STUB_COUNT
+
+# The retry starts from the tree the first attempt saw, not from its leftovers.
+#
+# A resolver edits files before it answers, and a rejected answer is discarded
+# while its edits are not. Left in place, the second resolver reads a tree the
+# first one already changed — it applies a non-idempotent fix twice, or finds a
+# finding already fixed and calls it skipped — and `git add -A` commits whatever
+# is sitting there, against dispositions that describe neither attempt.
+fixture_repo "$(config_with_issue_sink)"; stub_reset
+routes_baseline "$(marker_comment 9001 "$(review_marker)" | jq -cs . | payload)"
+routes_resolve
+REVLOOP_RESOLVE_PAYLOAD="$(printf '%s' "$out_of_range" | payload)"; export REVLOOP_RESOLVE_PAYLOAD
+REVLOOP_RESOLVE_PAYLOAD_2="$(resolve_payload | payload)"; export REVLOOP_RESOLVE_PAYLOAD_2
+REVLOOP_STUB_COUNT="$(mktemp)"; export REVLOOP_STUB_COUNT
+REVLOOP_RESOLVE_EDIT="$(appending_edit_script)"; export REVLOOP_RESOLVE_EDIT
+out="$("$REVLOOP" resolve --pr 42 2>&1)"; rc=$?
+
+is  "a leg that retried after editing files still exits clean" "$rc" "0"
+is  "the discarded attempt's edit is applied once, not twice" \
+  "$(git show HEAD:app.ts | grep -c 'const patched')" "1"
+is  "and nothing of it is left loose in the tree" \
+  "$(git status --porcelain | wc -l | tr -d ' ')" "0"
+has "the run says the discarded edits were put back" "$out" "put back"
+unset REVLOOP_RESOLVE_PAYLOAD_2 REVLOOP_STUB_COUNT REVLOOP_RESOLVE_EDIT
 
 # duplicate_of names an issue the orchestrator retrieved. Inventing one makes
 # revloop comment on an unrelated issue and resolve the thread claiming the
@@ -506,6 +539,30 @@ is  "the leg still finishes, because the reply is not lost" "$rc" "0"
 has "the run says how many replies missed their thread" "$out" "2 replies could not be threaded"
 has "and the pull request records it too, not just the terminal" \
   "$(calls)" "could not be posted in the review threads they answer"
+
+# And it survives a recovery, which is where a count held only in a local goes
+# missing. A run that stops between posting the fallback and writing the summary
+# comes back with the reply already on the pull request, so the loop skips it as
+# a duplicate and never counts it — and a counter starting at zero then reports a
+# clean pass over a degraded one, which is the silence the count exists to
+# remove. The reply's own marker is on an issue comment rather than a review
+# comment, and that is the record recovery reads.
+fixture_repo "$(config_with_issue_sink)"; stub_reset
+resumed="$( { marker_comment 9001 "$(review_marker)"
+              POSTED_LEG=resolve posted_comments "$ID_FIX" | jq -c '.[]'
+            } | jq -cs . | payload)"
+routes_baseline "$resumed"
+routes_resolve
+REVLOOP_RESOLVE_PAYLOAD="$(resolve_payload | payload)"; export REVLOOP_RESOLVE_PAYLOAD
+out="$("$REVLOOP" resolve --pr 42 2>&1)"; rc=$?
+
+is  "the resumed leg exits clean"                     "$rc" "0"
+is  "the reply already on the pull request is not posted twice" \
+  "$(count 'pulls/42/comments/5000/replies')" "1"
+has "the resumed run still says a reply missed its thread" \
+  "$out" "1 reply could not be threaded"
+has "and the summary comment still records it" \
+  "$(calls)" "One reply could not be posted in the review thread it answers"
 
 # --- a marker written before the numbering still recovers ---------------
 #
