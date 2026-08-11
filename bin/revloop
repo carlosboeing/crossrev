@@ -2,9 +2,12 @@
 #
 # revloop — cross-model PR review loop.
 #
-# One model reviews a pull request, a second verifies and addresses each
-# finding, then the first looks again. Runs from a terminal against any PR you
-# can already see, and on GitHub Actions once `revloop init` has set it up.
+# One model reviews a pull request, a second verifies and resolves each finding,
+# then the first looks again. Runs from a terminal against any PR you can
+# already see, and on GitHub Actions once `revloop init` has set it up.
+#
+# Three words, each meaning one thing: a CYCLE contains PASSES, and a pass has
+# two LEGS.
 
 set -euo pipefail
 
@@ -63,15 +66,16 @@ usage() {
 
   revloop — cross-model PR review loop
 
-  Review a pull request with one model, address the findings with another.
+  Review a pull request with one model, resolve the findings with another.
 
   USAGE
     revloop <command> [options]
+    revloop --pr <n>         A cycle, which is what you want most of the time
 
   COMMANDS
-    review --pr <n>          One review pass: post findings as inline comments
-    address --pr <n>          Verify each finding, fix or push back, reply, push
-    run --pr <n>             The whole loop in one process, up to max_passes
+    cycle --pr <n>           The whole loop in one process, up to max_passes
+    review --pr <n>          One review leg: post findings as inline comments
+    resolve --pr <n>         Verify each finding, fix or push back, reply, push
     status --pr <n>          Read the loop's state off the pull request
     init                     Set up automated mode: App, secrets, labels, workflows
     watchdog                 Find pull requests stuck waiting on a leg, and retry once
@@ -84,7 +88,7 @@ usage() {
     doctor                   Check that everything revloop needs is installed
     version                  Print the installed version
 
-  OPTIONS on review, address and run
+  OPTIONS on cycle, review and resolve
     --harness claude|codex   Override the harness the config names for that leg
     --repo owner/name        Target another repository than this checkout
     --no-tips                Suppress the automated-mode suggestion
@@ -95,9 +99,28 @@ usage() {
 EOF
 }
 
+# The parse rule, written down rather than discovered later:
+#
+#   If the first argument begins with `-`, it is the default cycle. Otherwise it
+#   is a subcommand, and an unknown subcommand is an error.
+#
+# So `revloop --pr 3` cycles, and `revloop reviw --pr 3` dies naming the typo
+# rather than silently running the most expensive operation the tool offers.
+# Help and version are special-cased ahead of the rule, because they are the two
+# dash-arguments nobody means as a cycle. Bare `revloop` prints help; it does not
+# cycle.
 main() {
-  local cmd="${1:-help}"
-  [[ $# -gt 0 ]] && shift
+  case "${1:-}" in
+    ""|help|--help|-h)    usage; return 0 ;;
+    version|--version|-v) revloop_version; echo; return 0 ;;
+  esac
+
+  local cmd
+  if [[ "$1" == -* ]]; then
+    cmd="cycle"                 # no shift: the options are the cycle's own
+  else
+    cmd="$1"; shift
+  fi
 
   case "$cmd" in
     auth)
@@ -134,15 +157,13 @@ main() {
       (( doctor_ok == 0 )) && ui_end "Everything revloop needs is installed." \
         || ui_end "Fix what is marked ✗ above, then run this again." ;;
 
+    cycle)   cmd_cycle "$@" ;;
     review)  leg_review "$@" ;;
-    address) leg_address "$@" ;;
-    run)     cmd_run "$@" ;;
+    resolve) leg_resolve "$@" ;;
     status)   cmd_status "$@" ;;
     init)     cmd_init "$@" ;;
     watchdog) cmd_watchdog "$@" ;;
 
-    version|--version|-v) revloop_version; echo ;;
-    help|--help|-h) usage ;;
     *) ui_die "unknown command: $cmd" "Run: revloop help" ;;
   esac
 }

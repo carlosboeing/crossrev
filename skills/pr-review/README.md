@@ -8,8 +8,9 @@ Forked from Superpowers' `code-reviewer.md`, which already supplied the right sk
 
 | Change | Why |
 |---|---|
-| Three severities — `important` / `nit` / `pre-existing` — replacing Critical/Important/Minor | Without `pre-existing`, a reviewer blames the current PR for old bugs, the addresser fixes them, and the diff grows without limit |
-| Only `important` affects the verdict | A loop that can't converge because of nits is a loop nobody leaves switched on |
+| Severity, category and provenance as three fields rather than one enum | "How bad is it", "what kind is it" and "did this PR cause it" are unrelated questions. Fused, a critical pre-existing security hole and a trivial pre-existing typo carry the same value and neither is ever fixed |
+| `pre_existing` as a boolean, and never fixed here | Without it a reviewer blames the current PR for old bugs, the resolve leg fixes them, and the diff grows without limit |
+| The verdict keys off the repository's `fix_at` threshold | A loop that can't converge over a naming quibble is a loop nobody leaves switched on |
 | Findings as schema-constrained JSON | Free-form JSON drifts. Verified: the same prompt without a schema produced `verdict: "fail"`, `severity: "critical"` and keys `issue`/`detail` — none in the schema |
 | `side` on every finding, `RIGHT` by default | GitHub anchors a comment to a line *and a side*. A finding on a deleted line posted as `RIGHT` targets a line that doesn't exist and is rejected |
 | Pass awareness | From pass 2, every prior finding is classified `addressed` / `credibly-rebutted` / `still-open` / `regressed` before any new reviewing |
@@ -31,7 +32,7 @@ Both harnesses, same schema, same planted bug — an unchecked `fetch` response 
 
 | Harness | Invocation | Result |
 |---|---|---|
-| `claude` | `--json-schema <inline JSON>` | `issues-remain`, 1 finding, `important`, all seven keys present, `prior` and `blocked_reason` null |
+| `claude` | `--json-schema <inline JSON>` | `issues-remain`, 1 finding, all keys present, `prior` and `blocked_reason` null |
 | `codex` | `--output-schema <file path>` | Identical verdict, count and severity |
 
 Two adapter facts fell out of that testing. **The schema flags differ in shape** — Claude Code takes the schema inline as a JSON string, Codex takes a file path; handing Claude a path fails with a JSON parse error about the leading slash. And **`codex exec` blocks reading stdin**, so the adapter must redirect it from `/dev/null` or the process hangs indefinitely with `Reading additional input from stdin...`.
@@ -39,7 +40,7 @@ Two adapter facts fell out of that testing. **The schema flags differ in shape**
 ## Install
 
 ```bash
-npx skills@latest add carlosboeing/claude-code-resources --skill pr-review,pr-address
+npx skills@latest add carlosboeing/claude-code-resources --skill pr-review --skill pr-resolve
 ```
 
 Normally you don't invoke it yourself — `revloop review --pr N` does.

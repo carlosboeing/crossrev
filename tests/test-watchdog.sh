@@ -47,13 +47,13 @@ has "the summary counts what it looked at"        "$out" "checked 1 pull request
 # remove it first. That is the whole mechanism.
 fixture_repo; stub_reset
 stuck="$(jq -c --argjson ts "$(( $(date +%s) - 3600 ))" '.ts = $ts' <<<"$fresh")"
-routes_watchdog "$(waiting_prs '[{"name":"revloop/awaiting-address"}]')" \
+routes_watchdog "$(waiting_prs '[{"name":"revloop/awaiting-resolution"}]')" \
   "$(marker_comment 9001 "$stuck" "$FIX_APP" | jq -cs . | payload)"
 out="$("$REVLOOP" watchdog 2>&1)"
 
 has "a stuck leg is named with how long it has been stuck" "$out" "for 60 minutes, past the 30-minute timeout"
-has "the retry removes the label first"          "$(calls)" "method DELETE repos/acme/widget/issues/42/labels/revloop/awaiting-address"
-has "and re-applies it to re-fire the event"     "$(calls)" "labels[]=revloop/awaiting-address"
+has "the retry removes the label first"          "$(calls)" "method DELETE repos/acme/widget/issues/42/labels/revloop/awaiting-resolution"
+has "and re-applies it to re-fire the event"     "$(calls)" "labels[]=revloop/awaiting-resolution"
 has "the retry is recorded on the pull request so it happens only once" \
   "$(calls)" "labels[]=revloop/watchdog-retried"
 has "the summary counts the retry"               "$out" "retried 1, halted 0"
@@ -61,7 +61,7 @@ is  "and nothing is halted yet"                  "$(count 'labels\[\]=revloop/ha
 
 # --- a second failure halts and says why -------------------------------
 fixture_repo; stub_reset
-routes_watchdog "$(waiting_prs '[{"name":"revloop/awaiting-address"},{"name":"revloop/watchdog-retried"}]')" \
+routes_watchdog "$(waiting_prs '[{"name":"revloop/awaiting-resolution"},{"name":"revloop/watchdog-retried"}]')" \
   "$(marker_comment 9001 "$stuck" "$FIX_APP" | jq -cs . | payload)"
 out="$("$REVLOOP" watchdog 2>&1)"
 
@@ -82,7 +82,7 @@ has "and it is retried"                          "$out" "retried 1, halted 0"
 
 # --- revloop/stop is honoured here too ---------------------------------
 fixture_repo; stub_reset
-routes_watchdog "$(waiting_prs '[{"name":"revloop/awaiting-address"},{"name":"revloop/stop"}]')" \
+routes_watchdog "$(waiting_prs '[{"name":"revloop/awaiting-resolution"},{"name":"revloop/stop"}]')" \
   "$(marker_comment 9001 "$stuck" "$FIX_APP" | jq -cs . | payload)"
 out="$("$REVLOOP" watchdog 2>&1)"
 is  "a pull request a human stopped is not retried" "$(count 'method DELETE')" "0"
@@ -94,7 +94,7 @@ has "and the summary says nothing was acted on"     "$out" "retried 0, halted 0"
 # mislead, so it reads markers under the same trusted-author rule as everything
 # else.
 fixture_repo; stub_reset
-routes_watchdog "$(waiting_prs '[{"name":"revloop/awaiting-address"}]')" \
+routes_watchdog "$(waiting_prs '[{"name":"revloop/awaiting-resolution"}]')" \
   "$(marker_comment 9001 "$(jq -c '.state = "complete"' <<<"$stuck")" "$FIX_USER" | jq -cs . | payload)"
 out="$("$REVLOOP" watchdog 2>&1)"
 has "a marker authored by anyone but the App is treated as absent" \

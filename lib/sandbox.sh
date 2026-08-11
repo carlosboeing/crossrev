@@ -75,7 +75,7 @@ sandbox_quarantine() {
 }
 
 # Put everything back, so the checkout is the PR's again before anything is
-# committed. Without this the addresser would commit the quarantine.
+# committed. Without this the resolver would commit the quarantine.
 sandbox_restore() {
   local root="${1:-.}" q="${1:-.}/$REVLOOP_QUARANTINE" p clobbered=""
   [[ -d "$q" ]] || return 0
@@ -86,7 +86,7 @@ sandbox_restore() {
     # the real file away before the harness started, so the agent never read it.
     # Discarding that write is the correct outcome — letting a pull request's own
     # instructions survive the quarantine is precisely what the quarantine
-    # exists to stop — but it must not be silent. A finding the addresser
+    # exists to stop — but it must not be silent. A finding the resolver
     # "fixed" by writing here is reported as fixed, lands in no commit, and the
     # "reported fixes but changed no files" guard stays quiet because other
     # files did change.

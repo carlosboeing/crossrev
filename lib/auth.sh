@@ -57,7 +57,7 @@ _auth_role_permissions() {
   case "$1" in
     loop)      jq -cn '{contents:"write", issues:"write", pull_requests:"write"}' ;;
     refresher) jq -cn '{secrets:"write"}' ;;
-    *) ui_die "unknown App role '$1'" "Roles are: loop (the review and address jobs) and refresher (the credential refresh job)." ;;
+    *) ui_die "unknown App role '$1'" "Roles are: loop (the review and resolve jobs) and refresher (the credential refresh job)." ;;
   esac
 }
 

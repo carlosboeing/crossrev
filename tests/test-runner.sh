@@ -14,9 +14,9 @@ set -uo pipefail
 # shellcheck source=harness.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/harness.sh"
 
-# $1 runner, $2 reviewer harness, $3 addresser harness, $4 optional endpoint block
+# $1 runner, $2 reviewer harness, $3 resolver harness, $4 optional endpoint block
 config_for() {
-  local runner="$1" reviewer="$2" addresser="$3" endpoint="${4:-}"
+  local runner="$1" reviewer="$2" resolver="$3" endpoint="${4:-}"
   cat <<EOF
 version: 1
 mode: event-driven
@@ -26,9 +26,9 @@ $endpoint
 reviewer:
   harness: $reviewer
   model: reviewer-model
-addresser:
-  harness: $addresser
-  model: addresser-model
+resolver:
+  harness: $resolver
+  model: resolver-model
 persist:
   defects: none
 EOF
@@ -144,7 +144,7 @@ wf="$(cat .github/workflows/revloop-review.yml)"
 # Neither is on GitHub's runner images, and installing only Claude does not fail:
 # `run_resolve_leg` falls back, warns in one line nobody reads in a CI log, and
 # both legs run Claude. The loop completes and the cross-model property is gone.
-has "a hosted workflow installs the addresser's harness"  "$wf" "npm install -g @anthropic-ai/claude-code"
+has "a hosted workflow installs the resolver's harness"  "$wf" "npm install -g @anthropic-ai/claude-code"
 has "AND the reviewer's, which is a different one"        "$wf" "npm install -g @openai/codex"
 has "and passes the credentials in as secrets"       "$wf" "REVLOOP_CODEX_AUTH"
 has "on GitHub's own runner"                         "$wf" "runs-on: ubuntu-latest"

@@ -41,5 +41,64 @@ for f in "$SCHEMAS"/*.json; do
   fi
 done
 
+# ---------------------------------------------------------------------------
+# The three severity fields
+# ---------------------------------------------------------------------------
+#
+# One field answering three questions is what the redesign took apart, so the
+# split is asserted rather than assumed: how bad it is, what kind it is, and
+# whether this pull request caused it.
+
+F="$SCHEMAS/findings.schema.json"
+props='.properties.findings.items.properties'
+
+is() { [[ "$2" == "$3" ]] && ok "$1" || notok "$1" "expected '$3', got '$2'"; }
+
+is "severity is the three-rung ordinal scale" \
+  "$(jq -r "$props.severity.enum | join(\",\")" "$F")" "high,medium,low"
+is "category is the closed six" \
+  "$(jq -r "$props.category.enum | join(\",\")" "$F")" \
+  "correctness,security,performance,maintainability,testing,docs"
+is "pre_existing is a boolean, not an enum" \
+  "$(jq -r "$props.pre_existing.type" "$F")" "boolean"
+is "and provenance is not smuggled back into severity" \
+  "$(jq -r "$props.severity.enum | index(\"pre-existing\") // \"absent\"" "$F")" "absent"
+
+# ---------------------------------------------------------------------------
+# What the validator does with a payload the harness did not constrain
+# ---------------------------------------------------------------------------
+#
+# On a fenced-JSON fallback path this check is the only one there is, so each of
+# the three fields gets a rejection case. A validator that waves an out-of-range
+# value through posts a comment with a severity nothing downstream can rank.
+
+# shellcheck source=../lib/validate.sh
+source "$HERE/../lib/validate.sh"
+
+_finding() {
+  jq -cn --arg s "${1:-high}" --arg c "${2:-correctness}" --argjson p "${3:-false}" \
+    '{verdict:"issues-remain", prior:null, blocked_reason:null,
+      findings:[{path:"a.ts", line:1, side:"RIGHT", severity:$s, category:$c,
+                 pre_existing:$p, title:"t", why:"w", fix:"f"}]}'
+}
+
+rejects() {
+  local what="$1" payload="$2"
+  if validate_findings "$payload" >/dev/null 2>&1; then
+    notok "$what" "the validator accepted it"
+  else
+    ok "$what"
+  fi
+}
+
+if validate_findings "$(_finding high security true)" >/dev/null; then
+  ok "a well-formed finding passes"
+else
+  notok "a well-formed finding passes" "the validator rejected it"
+fi
+rejects "an old severity word is rejected"    "$(_finding important correctness false)"
+rejects "an invented category is rejected"    "$(_finding high refactoring false)"
+rejects "a non-boolean pre_existing is rejected" "$(_finding high correctness '"yes"')"
+
 printf '\n  %d passed, %d failed\n' "$pass" "$fail"
 (( fail == 0 ))

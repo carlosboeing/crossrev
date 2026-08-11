@@ -47,10 +47,10 @@ max_passes: 3
 reviewer:
   harness: claude
   model: reviewer-model
-addresser:
+resolver:
   harness: claude
-  model: addresser-model
-  skip_nits_after_pass: 1
+  model: resolver-model
+  fix_at: medium
 persist:
   defects: none
 caps:
@@ -111,7 +111,7 @@ stub_reset() {
   : >"$GH_LOG"; : >"$GH_ROUTES"
   export REVLOOP_GH_LOG="$GH_LOG" REVLOOP_GH_ROUTES="$GH_ROUTES" REVLOOP_PROMPT_LOG="$PROMPT_LOG"
   export PATH="$HERE/stub:$PATH"
-  unset REVLOOP_REVIEW_PAYLOAD REVLOOP_ADDRESS_PAYLOAD REVLOOP_HARNESS_PAYLOAD REVLOOP_ADDRESS_EDIT
+  unset REVLOOP_REVIEW_PAYLOAD REVLOOP_RESOLVE_PAYLOAD REVLOOP_HARNESS_PAYLOAD REVLOOP_RESOLVE_EDIT
 }
 
 # The routes file is line-based, so a multi-line response is spooled to a file and

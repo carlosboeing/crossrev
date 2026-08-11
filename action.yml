@@ -18,12 +18,12 @@
 # and the source checkout, the deploy key and the REVLOOP_SOURCE_KEY secret all
 # disappear — which is one of the better reasons to extract it.
 name: revloop
-description: Review a pull request with one model and address the findings with another.
+description: Review a pull request with one model and resolve the findings with another.
 author: carlosboeing
 
 inputs:
   leg:
-    description: Which leg to run — review, address, run, status or watchdog.
+    description: Which leg to run — review, resolve, cycle, status or watchdog.
     required: true
   pr:
     description: The pull request number. Not needed for watchdog.

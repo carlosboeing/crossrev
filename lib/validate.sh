@@ -27,11 +27,13 @@ validate_findings() {
             (.path? | type != "string") or (.path == "")
             or (.line? | type != "number")
             or ((.side? // "RIGHT") | IN("LEFT","RIGHT") | not)
-            or ((.severity? // "") | IN("important","nit","pre-existing") | not)
+            or ((.severity? // "") | IN("high","medium","low") | not)
+            or ((.category? // "") | IN("correctness","security","performance","maintainability","testing","docs") | not)
+            or ((.pre_existing? // false) | type != "boolean")
             or (.title? | type != "string") or (.title == "")
           ) ] ) as $bad
       | if ($bad | length) > 0
-        then bad("\($bad | length) finding(s) have a missing or out-of-range path, line, side, severity or title — first: \($bad[0] | tojson)")
+        then bad("\($bad | length) finding(s) have a missing or out-of-range path, line, side, severity, category, pre_existing or title — first: \($bad[0] | tojson)")
         else empty end
     end' <<<"$payload" 2>/dev/null)" || problem="the payload is not parseable JSON"
   [[ -z "$problem" ]] && return 0
@@ -39,7 +41,7 @@ validate_findings() {
   return 1
 }
 
-validate_address() {
+validate_resolve() {
   local payload="$1" problem
   problem="$(jq -r '
     def bad(m): m;

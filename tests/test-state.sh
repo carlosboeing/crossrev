@@ -45,8 +45,8 @@ c="$(state_finding_id "lib/other.ts" "Token refresh races with logout" "abcd1234
 is "no trusted marker means pass 1" "$(state_pass '[]')" "1"
 is "one completed review means pass 2" \
   "$(state_pass '[{"leg":"review","pass":1,"state":"complete"}]')" "2"
-is "the address leg does not advance the pass number" \
-  "$(state_pass '[{"leg":"review","pass":1,"state":"complete"},{"leg":"address","pass":1,"state":"complete"}]')" "2"
+is "the resolve leg does not advance the pass number" \
+  "$(state_pass '[{"leg":"review","pass":1,"state":"complete"},{"leg":"resolve","pass":1,"state":"complete"}]')" "2"
 
 # --- recovery --------------------------------------------------------------
 claim='[{"leg":"review","pass":2,"state":"started","run_id":"7"}]'

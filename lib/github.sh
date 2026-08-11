@@ -38,7 +38,7 @@ gh_default_branch() {
 
 # The diff under review, with paths matching an exclude pattern dropped.
 #
-# The exclusion is not cosmetic: a file sink means the addresser commits its own
+# The exclusion is not cosmetic: a file sink means the resolver commits its own
 # bookkeeping into the PR branch, and the next pass would then review revloop's
 # notes about the last pass.
 gh_pr_diff() {
@@ -232,7 +232,7 @@ gh_issue_comment() {
 # Writes — code
 # ---------------------------------------------------------------------------
 
-# Commit whatever the addresser changed, and push it to the PR's own branch.
+# Commit whatever the resolver changed, and push it to the PR's own branch.
 #
 # The push guard in legs.sh runs first and is not optional. Branch protection is
 # a backstop behind it, not a substitute: it fires after a bad push is attempted
@@ -243,7 +243,7 @@ gh_commit_and_push() {
   # Never stage revloop's own source checkout. The generated workflows put it at
   # .revloop-src inside GITHUB_WORKSPACE, which is the same tree `git add -A` is
   # walking, and git stages an embedded repository as a gitlink with a warning
-  # rather than an error — so every address run that fixed anything pushed a
+  # rather than an error — so every resolve run that fixed anything pushed a
   # submodule entry into someone's pull request. The quieter half of the same
   # bug: with .revloop-src always staged, `git diff --cached --quiet` below was
   # never true, so the "reported fixes but changed no files" guard could not
@@ -255,7 +255,7 @@ gh_commit_and_push() {
   git -c user.name="${REVLOOP_GIT_NAME:-revloop}" \
       -c user.email="${REVLOOP_GIT_EMAIL:-revloop@users.noreply.github.com}" \
       commit -q -m "$message" || ui_die \
-    "could not commit the addresser's changes" \
+    "could not commit the resolver's changes" \
     "The working tree still holds them, so nothing is lost. Check \`git status\` in the checkout."
 
   # Re-read the remote head immediately before pushing. A human pushing to the
@@ -273,7 +273,7 @@ gh_commit_and_push() {
       "If someone pushed to that branch while this leg was working, this push may not include their commit. Confirm the branch looks right before merging."
   elif [[ -n "$expected_head" && "$remote_head" != "$expected_head" ]]; then
     ui_die "$branch moved while this leg was running — it is now at ${remote_head:0:7}, not ${expected_head:0:7}" \
-      "Someone else pushed. The fix is committed locally and not pushed; rebase onto the new head and re-run: revloop address --pr <n>"
+      "Someone else pushed. The fix is committed locally and not pushed; rebase onto the new head and re-run: revloop resolve --pr <n>"
   fi
 
   git push origin "HEAD:refs/heads/$branch" >/dev/null 2>&1 || ui_die \

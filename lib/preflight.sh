@@ -166,7 +166,7 @@ preflight_needs_refresher() {
 preflight_report_pairings() {
   local runner="$1" leg reason harness endpoint
   ui_section "Pairings on runner: $runner"
-  for leg in reviewer addresser; do
+  for leg in reviewer resolver; do
     harness="$(cfg_get ".$leg.harness")"
     endpoint="$(cfg_get ".$leg.endpoint")"
     if [[ -n "$endpoint" && "$endpoint" != "null" ]]; then

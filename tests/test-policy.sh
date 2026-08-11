@@ -126,9 +126,9 @@ out="$("$REVLOOP" status --pr 42 2>&1)"
 has "the App's own markers are trusted in automated mode" "$out" "passes      2 of 3"
 unset REVLOOP_APP_SLUG
 
-# A converged review is the reason the loop stopped, so no address leg is owed.
+# A converged review is the reason the loop stopped, so no resolve leg is owed.
 # The next-action chain asked only whether that leg had run, never whether one
-# was ever due, and sent you to address a pass with an empty findings list.
+# was ever due, and sent you to resolve a pass with an empty findings list.
 # head_sha matches the fixture's, or revision detection would answer first.
 status_marker() {
   jq -cn --arg sha "$FIX_HEAD" --argjson ts "$(date +%s)" --arg v "$1" '
@@ -140,22 +140,22 @@ fixture_repo; stub_reset
 routes_baseline "$(marker_comment 9001 "$(status_marker converged)" | jq -cs . | payload)"
 out="$("$REVLOOP" status --pr 42 2>&1)"
 has   "a converged loop is reported as finished"      "$out" "nothing — the loop converged on pass 2"
-hasnt "and the address leg is not recommended"        "$out" "revloop address --pr 42"
-has   "the address leg reads as not owed rather than outstanding" \
-  "$out" "address — not needed, the review converged"
+hasnt "and the resolve leg is not recommended"        "$out" "revloop resolve --pr 42"
+has   "the resolve leg reads as not owed rather than outstanding" \
+  "$out" "resolve — not needed, the review converged"
 
 fixture_repo; stub_reset
 routes_baseline "$(marker_comment 9001 "$(status_marker blocked)" | jq -cs . | payload)"
 out="$("$REVLOOP" status --pr 42 2>&1)"
 has   "a blocked review hands over to a human"        "$out" "a human's call"
-hasnt "and does not recommend the address leg either" "$out" "revloop address --pr 42"
+hasnt "and does not recommend the resolve leg either" "$out" "revloop resolve --pr 42"
 
-# The other side of the same guard: a verdict that does owe an address leg must
+# The other side of the same guard: a verdict that does owe a resolve leg must
 # still ask for one, or the fix above has simply broken the common path.
 fixture_repo; stub_reset
 routes_baseline "$(marker_comment 9001 "$(status_marker issues-remain)" | jq -cs . | payload)"
 out="$("$REVLOOP" status --pr 42 2>&1)"
-has "issues remaining still points at the address leg" "$out" "revloop address --pr 42"
+has "issues remaining still points at the resolve leg" "$out" "revloop resolve --pr 42"
 
 # --- a human's stop request outranks everything ------------------------
 fixture_repo; stub_reset
@@ -163,8 +163,8 @@ routes_baseline "$(printf '[]' | payload)" '[{"name":"revloop/stop"}]'
 out="$("$REVLOOP" review --pr 42 2>&1)"
 has "revloop/stop stops the review leg"        "$out" "stops without reviewing"
 is  "and nothing is written"                   "$(count 'method POST')" "0"
-out="$("$REVLOOP" address --pr 42 2>&1)"
-has "revloop/stop stops the address leg too"   "$out" "nothing is addressed"
+out="$("$REVLOOP" resolve --pr 42 2>&1)"
+has "revloop/stop stops the resolve leg too"   "$out" "nothing is resolved"
 
 # --- the caps -----------------------------------------------------------
 #
@@ -265,14 +265,14 @@ converged_marker="$(jq -cn --arg sha "$FIX_HEAD" --argjson ts "$(date +%s)" '
    verdict:"converged", findings:[]}')"
 routes_baseline "$(marker_comment 9001 "$converged_marker" | jq -cs . | payload)"
 no_threads
-out="$("$REVLOOP" run --pr 42 2>&1)"; rc=$?
+out="$("$REVLOOP" cycle --pr 42 2>&1)"; rc=$?
 is  "run exits clean on a converged first pass" "$rc" "0"
 has "and says it converged rather than finished" "$out" "Converged after pass 1"
 has "run explains that interrupting it is safe"  "$out" "each leg finishes the write in flight"
 
 # The converged case above never reaches the second leg, which is what let one
 # process deadlock against its own lock go unnoticed: leg_review takes the per-PR
-# lock and only the EXIT trap clears it, so leg_address in the same process found
+# lock and only the EXIT trap clears it, so leg_resolve in the same process found
 # a live PID holding it and read that as a competing run. Any pass that does not
 # converge is enough to show it.
 fixture_repo; stub_reset
@@ -281,12 +281,12 @@ remaining_marker="$(jq -cn --arg sha "$FIX_HEAD" --argjson ts "$(date +%s)" '
    harness:"claude", model:"reviewer-model", model_reported:"reviewer-model",
    verdict:"issues-remain",
    findings:[{id:"cccc000000000001", path:"app.ts", line:2, side:"RIGHT",
-              severity:"important", title:"Unchecked fetch response", why:"w",
+              severity:"high", category:"correctness", pre_existing:false, title:"Unchecked fetch response", why:"w",
               fix:"check it", anchor:"", thread_id:"T_ONE",
               disposition:null, tracked_as:null}]}')"
 routes_baseline "$(marker_comment 9001 "$remaining_marker" | jq -cs . | payload)"
 no_threads
-out="$("$REVLOOP" run --pr 42 2>&1)" || true
+out="$("$REVLOOP" cycle --pr 42 2>&1)" || true
 hasnt "run does not collide with the lock its own review leg took" \
   "$out" "already holds pull request"
 
@@ -302,5 +302,66 @@ has  "a harness with no adapter is named as such"    "$out" "no adapter for the 
 has  "and the message points at the endpoint route"  "$out" "reviewer.endpoint"
 hasnt "the harness itself is never invoked"          "$out" "was invoked"
 hasnt "and it does not die on a missing function"    "$out" "command not found"
+
+# --- the parse rule --------------------------------------------------------
+#
+# A first argument beginning with `-` is the default cycle; anything else is a
+# subcommand, and an unknown subcommand is an error. The failure this prevents
+# is specific: a mistyped leg silently running the most expensive operation the
+# tool offers, against a real pull request, with no way to tell afterwards that
+# it was not what you asked for.
+fixture_repo; stub_reset
+parse_marker="$(jq -cn --arg sha "$FIX_HEAD" --argjson ts "$(date +%s)" '
+  {v:1, leg:"review", pass:1, state:"complete", ts:$ts, run_id:"x", head_sha:$sha,
+   harness:"claude", model:"reviewer-model", model_reported:"reviewer-model",
+   verdict:"converged", findings:[]}')"
+routes_baseline "$(marker_comment 9001 "$parse_marker" | jq -cs . | payload)"
+no_threads
+out="$("$REVLOOP" --pr 42 2>&1)"; rc=$?
+is  "a bare --pr exits clean"                        "$rc" "0"
+has "and runs a cycle rather than one leg"           "$out" "Cycling acme/widget#42"
+
+stub_reset
+routes_baseline "$(marker_comment 9001 "$parse_marker" | jq -cs . | payload)"
+no_threads
+out="$("$REVLOOP" reviw --pr 42 2>&1)"; rc=$?
+is  "a mistyped subcommand fails"                    "$rc" "1"
+has "and names the command it did not recognise"     "$out" "unknown command: reviw"
+hasnt "rather than cycling on a typo"                "$out" "Cycling"
+
+out="$("$REVLOOP" 2>&1)"; rc=$?
+is  "bare revloop exits clean"                       "$rc" "0"
+has "and prints help rather than cycling"            "$out" "revloop <command> [options]"
+hasnt "a bare invocation touches no pull request"    "$out" "Cycling"
+
+# --- fix_at governs the commit, never the comment --------------------------
+#
+# The threshold's whole job is to bound what changes while nobody is watching.
+# A medium finding under `fix_at: high` must still be posted and still appear in
+# the summary — reporting and fixing are separate, and collapsing them is what
+# would make revloop's own "this is an empty review rather than a filtered one"
+# untrue.
+fixture_repo "$(fixture_default_config | sed 's/^  fix_at: medium$/  fix_at: high/')"
+stub_reset
+routes_baseline "$(printf '[]' | payload)"
+route 'api --method POST repos/*/issues/42/comments*' '{"id":9001}'
+no_threads
+REVLOOP_REVIEW_PAYLOAD="$(jq -cn '
+  {verdict:"issues-remain", blocked_reason:null, prior:null,
+   findings:[{path:"app.ts", line:2, side:"RIGHT", severity:"medium",
+              category:"performance", pre_existing:false,
+              title:"Repeated lookup in a loop", why:"w", fix:"hoist it"}]}' | payload)"
+export REVLOOP_REVIEW_PAYLOAD
+out="$("$REVLOOP" review --pr 42 2>&1)"
+has "a medium finding under fix_at high is still posted" \
+  "$(calls)" "method POST repos/acme/widget/pulls/42/comments"
+has "and the comment says why it will not be touched" \
+  "$(calls)" "Below this repository"
+has "and it still appears in the summary table"      "$(calls)" "| medium | performance |"
+has "the run reports nothing at or above the threshold" "$out" "0 at or above fix_at (high)"
+has "so the pass converges rather than calling the resolve leg" \
+  "$(calls)" "labels[]=revloop/converged"
+hasnt "and the resolve label is removed rather than applied" \
+  "$(calls)" "labels[]=revloop/awaiting-resolution"
 
 finish

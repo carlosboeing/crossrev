@@ -1,6 +1,6 @@
 {
-  "title": "revloop address intent",
-  "description": "What the address leg returns. It is intent for the orchestrator to act on, never a record of what the agent already did — the agent holds no GitHub credential and makes no GitHub call. Carries the same two harness-forced shapes as the findings schema: no $schema or $id key, because Claude Code's --json-schema rejects a schema naming the 2020-12 meta-schema; and every property listed in 'required', because Codex enforces OpenAI strict mode. Optional fields are nullable rather than absent.",
+  "title": "revloop resolve intent",
+  "description": "What the resolve leg returns. It is intent for the orchestrator to act on, never a record of what the agent already did — the agent holds no GitHub credential and makes no GitHub call. Carries the same two harness-forced shapes as the findings schema: no $schema or $id key, because Claude Code's --json-schema rejects a schema naming the 2020-12 meta-schema; and every property listed in 'required', because Codex enforces OpenAI strict mode. Optional fields are nullable rather than absent.",
   "type": "object",
   "required": ["dispositions", "wrap_up", "blocked", "blocked_reason"],
   "additionalProperties": false,
@@ -33,12 +33,12 @@
           "disposition": {
             "type": "string",
             "enum": ["fixed", "skipped", "deferred", "rebutted", "escalated"],
-            "description": "fixed: code changed. skipped: not acting by policy, such as a nit past skip_nits_after_pass. deferred: real, worth doing, not here — persists to a sink. rebutted: technically wrong for this codebase. escalated: needs a human decision, applies revloop/stop and leaves the thread open."
+            "description": "fixed: code changed. skipped: not acting by policy, such as a finding below the pass's fix_at threshold. deferred: real, worth doing, not here — persists to a sink. rebutted: technically wrong for this codebase. escalated: needs a human decision, applies revloop/stop and leaves the thread open."
           },
           "reply": {
             "type": "string",
             "minLength": 1,
-            "description": "The in-thread reply body to post. Always required: nothing is silently dropped, and a skipped nit still gets a one-line reason."
+            "description": "The in-thread reply body to post. Always required: nothing is silently dropped, and a finding skipped for being below the threshold still gets a one-line reason."
           },
           "persist": {
             "type": ["object", "null"],

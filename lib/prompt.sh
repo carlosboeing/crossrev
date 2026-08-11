@@ -55,15 +55,19 @@ prompt_review() {
     printf -- '- Repository: %s\n' "$(jq -r .repo <<<"$meta")"
     printf -- '- Number: %s\n' "$(jq -r .pr <<<"$meta")"
     printf -- '- Head commit: %s\n' "$(jq -r .head_sha <<<"$meta")"
-    printf -- '- Title: %s\n\n' "$(jq -r .title <<<"$meta")"
+    printf -- '- Title: %s\n' "$(jq -r .title <<<"$meta")"
+    # The verdict is a question about the threshold, not about severity alone, so
+    # the threshold is stated rather than left to be guessed from the rubric.
+    printf -- '- `fix_at` in force this pass: **%s**. A finding at or above that severity, and not pre-existing, keeps the loop alive; anything else is reported and cannot prevent convergence.\n\n' \
+      "$(jq -r '.fix_at // "medium"' <<<"$meta")"
     printf '### Description as written by the author\n\n'
     printf '````\n%s\n````\n\n' "$(jq -r '.body // ""' <<<"$meta")"
 
     if [[ "$(jq -r '(. // []) | length' <<<"$prior")" != "0" ]]; then
       printf '## Findings from earlier passes\n\n'
       printf 'Classify every one of these into `prior` before looking for anything new. Do not re-raise a dispositioned finding unless the code at that location changed, and never re-raise one carrying `tracked_as`.\n\n'
-      printf '| id | path:line | severity | title | disposition | tracked_as |\n|---|---|---|---|---|---|\n'
-      jq -r '.[] | "| \(.id) | \(.path):\(.line) | \(.severity) | \(.title // "-") | \(.disposition // "none") | \(.tracked_as // "-") |"' <<<"$prior"
+      printf '| id | path:line | severity | category | pre-existing | title | disposition | tracked_as |\n|---|---|---|---|---|---|---|---|\n'
+      jq -r '.[] | "| \(.id) | \(.path):\(.line) | \(.severity) | \(.category // "-") | \(if (.pre_existing // false) then "yes" else "no" end) | \(.title // "-") | \(.disposition // "none") | \(.tracked_as // "-") |"' <<<"$prior"
       printf '\n'
     fi
 
@@ -83,16 +87,17 @@ prompt_review() {
   } >"$out"
 }
 
-# prompt_address <out_file> <skill_file> <diff_file> <meta_json> <findings_json> <threads_json> <candidates_json>
+# prompt_resolve <out_file> <skill_file> <diff_file> <meta_json> <findings_json> <threads_json> <candidates_json>
 #
-# findings_json carries each finding plus its id, the thread it lives in, and
-# whether it was already dispositioned in an earlier pass.
-prompt_address() {
+# findings_json carries each finding plus its id, the thread it lives in, whether
+# it was already dispositioned in an earlier pass, and `may_fix` — the
+# orchestrator's own answer to whether code may change for it.
+prompt_resolve() {
   local out="$1" skill="$2" diff="$3" meta="$4" findings="$5" threads="$6" candidates="$7"
 
   {
     printf '# Your task\n\n'
-    printf 'You are the address leg of revloop, running pass %s of %s on %s pull request #%s. The findings below came from a different model reviewing this diff.\n\n' \
+    printf 'You are the resolve leg of revloop, running pass %s of %s on %s pull request #%s. The findings below came from a different model reviewing this diff.\n\n' \
       "$(jq -r .pass <<<"$meta")" "$(jq -r .max_passes <<<"$meta")" \
       "$(jq -r .repo <<<"$meta")" "$(jq -r .pr <<<"$meta")"
     printf 'You are in a checkout of the pull request'"'"'s head branch at %s. Change code in the working tree; the orchestrator commits and pushes it. Make no GitHub call — you have no credential for one.\n\n' \
@@ -103,17 +108,14 @@ prompt_address() {
     printf '\n---\n\n'
 
     printf '## Policy in force this pass\n\n'
-    local skip_nits; skip_nits="$(jq -r '.fix_nits' <<<"$meta")"
-    if [[ "$skip_nits" == "true" ]]; then
-      printf -- '- Nits: fix them. This pass is at or below `skip_nits_after_pass`.\n'
-    else
-      printf -- '- Nits: **do not change code for them**. Reply with a one-line reason and let the thread be resolved. Nothing is silently dropped.\n'
-    fi
-    printf -- '- Pre-existing findings: verify, then stop. Confirmed real becomes `deferred`; found wrong becomes `rebutted`. Do not fix them here, however easy it looks.\n'
+    printf -- '- `fix_at` is **%s**. Every finding below carries `may fix: yes` or `may fix: no`, worked out from that threshold — do not re-derive it, and do not argue with it. A `no` finding is still verified and still gets a reply; what it does not get is a change to the code.\n' \
+      "$(jq -r '.fix_at // "medium"' <<<"$meta")"
+    printf -- '- A finding you may not fix is `skipped` with a one-line reason, unless it is genuinely wrong, in which case it is `rebutted`. Nothing is silently dropped.\n'
+    printf -- '- Pre-existing findings: verify, then stop. Confirmed real becomes `deferred`; found wrong becomes `rebutted`. Do not fix them here, however easy it looks, whatever their severity.\n'
     # The quarantine moved these out of the checkout before this process started,
-    # so the addresser cannot read them, verify against them, or fix them — while
+    # so the resolver cannot read them, verify against them, or fix them — while
     # the diff it is handed still contains their changes, so the reviewer can and
-    # does raise findings there. Without this the addresser writes to a path it
+    # does raise findings there. Without this the resolver writes to a path it
     # cannot see, the restore deletes the write, and the finding is reported
     # fixed. Saying so keeps the review and makes the inability explicit instead
     # of accidental.
@@ -127,10 +129,11 @@ prompt_address() {
     printf '## The findings to address\n\n'
     printf 'Return exactly one entry in `dispositions` per finding here — no more, no fewer. A finding you cannot evaluate is `escalated` with a reply saying why, not an omission.\n\n'
     jq -r '.[] |
-      "### `\(.id)` — \(.severity) — \(.path):\(.line)\n\n" +
+      "### `\(.id)` — \(.severity) \(.category)\(if (.pre_existing // false) then ", pre-existing" else "" end) — \(.path):\(.line)\n\n" +
       "**\(.title)**\n\n" +
       "- Why it matters: \(.why // "-")\n" +
       "- Suggested fix: \(.fix // "-")\n" +
+      "- May fix: \(if (.may_fix // false) then "yes" else "no — reply and skip, or rebut if it is wrong" end)\n" +
       (if (.prior_disposition // null) != null
          then "- **You dispositioned this `\(.prior_disposition)` in an earlier pass.** If it is unchanged and re-raised, escalate rather than re-argue.\n"
          else "" end) +

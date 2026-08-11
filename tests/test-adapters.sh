@@ -15,7 +15,7 @@ set -uo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/harness.sh"
 
 REVIEW_PAYLOAD='{"verdict":"issues-remain","blocked_reason":null,"prior":null,"findings":[
-  {"path":"app.ts","line":2,"side":"RIGHT","severity":"important",
+  {"path":"app.ts","line":2,"side":"RIGHT","severity":"high","category":"correctness","pre_existing":false,
    "title":"Unchecked fetch response","why":"A failed request looks like a success","fix":"Check response.ok"}
 ]}'
 
@@ -27,9 +27,9 @@ max_passes: 3
 reviewer:
   harness: agy
   model: reviewer-model
-addresser:
+resolver:
   harness: claude
-  model: addresser-model
+  model: resolver-model
 persist:
   defects: none
 EOF

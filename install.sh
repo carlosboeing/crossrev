@@ -138,9 +138,9 @@ fi
 # $1 is "interactive" or "scripted".
 _install_skills() {
   if [[ "$1" == "interactive" ]]; then
-    npx skills@latest add "$HERE" --skill pr-review --skill pr-address
+    npx skills@latest add "$HERE" --skill pr-review --skill pr-resolve
   else
-    npx skills@latest add "$HERE" --skill pr-review --skill pr-address --global --yes
+    npx skills@latest add "$HERE" --skill pr-review --skill pr-resolve --global --yes
   fi
 }
 
@@ -152,16 +152,16 @@ elif ! command -v npx >/dev/null 2>&1; then
   ui_line "npx is not installed, so the two skills were not offered. Nothing is"
   ui_line "missing — revloop reproduces both into each prompt from this checkout."
   ui_line "Install Node if you want them available by hand, then run:"
-  ui_line "  npx skills@latest add $HERE --skill pr-review --skill pr-address --global"
+  ui_line "  npx skills@latest add $HERE --skill pr-review --skill pr-resolve --global"
 elif [[ "$WANT_SKILLS" != "1" ]] && ! _ui_input_source >/dev/null 2>&1; then
   # No terminal to ask at — a script, a CI step, a container with no controlling
   # terminal. Skip and say so. Dying here would fail an install that has already
   # succeeded, over an optional extra nobody was asked about.
   ui_line "No terminal attached, so the two optional skills were not offered."
   ui_line "The loop is unaffected. Add them with --skills, or:"
-  ui_line "  npx skills@latest add $HERE --skill pr-review --skill pr-address --global"
+  ui_line "  npx skills@latest add $HERE --skill pr-review --skill pr-resolve --global"
 else
-  ui_line "pr-review and pr-address can also be installed for your harnesses, so"
+  ui_line "pr-review and pr-resolve can also be installed for your harnesses, so"
   ui_line "you can invoke them by hand outside the loop. The loop itself does not"
   ui_line "need them — it reproduces both into each prompt from this checkout."
   ui_line ""
@@ -180,11 +180,11 @@ else
       ui_ok "the skills CLI finished"
     else
       ui_warn "the skills CLI did not finish" \
-        "Nothing else is affected — the loop reads both skills out of this checkout regardless. Retry with: npx skills@latest add $HERE --skill pr-review --skill pr-address"
+        "Nothing else is affected — the loop reads both skills out of this checkout regardless. Retry with: npx skills@latest add $HERE --skill pr-review --skill pr-resolve"
     fi
   else
     ui_say "Left them out. Add them later with --skills, or:"
-    ui_say "  npx skills@latest add $HERE --skill pr-review --skill pr-address"
+    ui_say "  npx skills@latest add $HERE --skill pr-review --skill pr-resolve"
   fi
 fi
 ui_end "Then check everything:   revloop doctor"

@@ -22,9 +22,9 @@ model="${REVLOOP_HARNESS_MODEL:-claude-test-model}"
 if [[ "$prompt" == *"You are the review leg"* ]]; then
   [[ -n "${REVLOOP_REVIEW_PAYLOAD:-}" ]] && payload_file="$REVLOOP_REVIEW_PAYLOAD"
   model="${REVLOOP_REVIEW_MODEL:-$model}"
-elif [[ "$prompt" == *"You are the address leg"* ]]; then
-  [[ -n "${REVLOOP_ADDRESS_PAYLOAD:-}" ]] && payload_file="$REVLOOP_ADDRESS_PAYLOAD"
-  model="${REVLOOP_ADDRESS_MODEL:-$model}"
+elif [[ "$prompt" == *"You are the resolve leg"* ]]; then
+  [[ -n "${REVLOOP_RESOLVE_PAYLOAD:-}" ]] && payload_file="$REVLOOP_RESOLVE_PAYLOAD"
+  model="${REVLOOP_RESOLVE_MODEL:-$model}"
 fi
 
 if [[ -z "$payload_file" || ! -f "$payload_file" ]]; then
@@ -32,10 +32,10 @@ if [[ -z "$payload_file" || ! -f "$payload_file" ]]; then
   exit 1
 fi
 
-# An addresser changes code in the working tree, and the orchestrator commits it.
+# A resolver changes code in the working tree, and the orchestrator commits it.
 # A test that needs that models it with a script rather than pretending.
-if [[ "$prompt" == *"You are the address leg"* && -n "${REVLOOP_ADDRESS_EDIT:-}" ]]; then
-  bash "$REVLOOP_ADDRESS_EDIT" || true
+if [[ "$prompt" == *"You are the resolve leg"* && -n "${REVLOOP_RESOLVE_EDIT:-}" ]]; then
+  bash "$REVLOOP_RESOLVE_EDIT" || true
 fi
 
 jq -cn --arg r "$(cat "$payload_file")" --arg m "$model" \

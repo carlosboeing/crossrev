@@ -49,7 +49,7 @@ present "the quarantined settings stay readable, so a PR adding one can still be
         "$REVLOOP_QUARANTINE/.claude/settings.json"
 
 # The checkout must be the PR's own again before anything is committed, or the
-# addresser commits the quarantine.
+# resolver commits the quarantine.
 sandbox_restore .
 present "restore puts .claude back"     ".claude/settings.json"
 present "restore puts CLAUDE.md back"   "CLAUDE.md"

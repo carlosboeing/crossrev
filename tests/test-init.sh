@@ -22,9 +22,9 @@ max_passes: 3
 reviewer:
   harness: claude
   model: reviewer-model
-addresser:
+resolver:
   harness: claude
-  model: addresser-model
+  model: resolver-model
 sinks:
   issues:
     type: github_issue
@@ -92,7 +92,7 @@ out="$("$REVLOOP" init --yes 2>&1)"; rc=$?
 
 is  "init exits clean even with secrets outstanding" "$rc" "0"
 is  "it writes all three workflows"             "$(ls .github/workflows | wc -l | tr -d ' ')" "3"
-has "it creates the labels the loop needs"      "$(calls)" "name=revloop/awaiting-address"
+has "it creates the labels the loop needs"      "$(calls)" "name=revloop/awaiting-resolution"
 is  "and only the ones that were missing"       "$(count 'method POST repos/acme/widget/labels')" "8"
 
 # Refusing to finish quietly. A missing source key fails at checkout before any
@@ -116,8 +116,8 @@ hasnt "and GITHUB_TOKEN is never used for a write"                "$wf" "secrets
 hasnt "pull_request_target appears nowhere"                       "$wf" "pull_request_target"
 is  "the source checkout is pinned to a 40-character SHA" \
   "$(grep -oE 'ref: [0-9a-f]{40}' <<<"$wf" | wc -l | tr -d ' ')" "1"
-has "the address workflow shares the review workflow's group" \
-  "$(cat .github/workflows/revloop-address.yml)" "group: revloop-pr-\${{ github.event.pull_request.number }}"
+has "the resolve workflow shares the review workflow's group" \
+  "$(cat .github/workflows/revloop-resolve.yml)" "group: revloop-pr-\${{ github.event.pull_request.number }}"
 
 # The generated config states where deferred work goes, so `auto` is a bootstrap
 # convenience rather than a runtime mode.

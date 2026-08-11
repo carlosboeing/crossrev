@@ -64,9 +64,9 @@ _cfg_defaults() {
     endpoints: {},
     sinks: {},
     persist: { defects: "auto", escalated: "none" },
-    reviewer:  { harness: "codex",  model: null, effort: null, endpoint: null },
-    addresser: { harness: "claude", model: null, effort: null, endpoint: null,
-                 skip_nits_after_pass: 1 },
+    reviewer: { harness: "codex",  model: null, effort: null, endpoint: null },
+    resolver: { harness: "claude", model: null, effort: null, endpoint: null,
+                fix_at: "medium" },
     caps: { runs_per_day: 12, max_files_changed: 200 },
     runner: "github-hosted"
   }'

@@ -1,9 +1,9 @@
 ---
-name: pr-address
-description: Use when addressing review findings on a pull request as one leg of the revloop cross-model review loop - verifies each finding against the codebase, fixes what is real, pushes back on what is wrong, and returns dispositions and reply text as schema-constrained JSON. Not for ad-hoc review response; use receiving-code-review for that.
+name: pr-resolve
+description: Use when resolving review findings on a pull request as one leg of the revloop cross-model review loop - verifies each finding against the codebase, fixes what is real, pushes back on what is wrong, and returns dispositions and reply text as schema-constrained JSON. Not for ad-hoc review response; use receiving-code-review for that.
 ---
 
-# pr-address
+# pr-resolve
 
 You are receiving code review on a pull request, from a different model than the one you are. Code review requires technical evaluation, not emotional performance.
 
@@ -36,17 +36,28 @@ You *do* change code in the working tree. That is the one outward thing you own,
 
 **Never:** "You're absolutely right!", "Great catch!", "Excellent feedback!". Performative agreement is noise in a machine-readable thread. State the technical fact and move on.
 
-## Severity governs what happens after verification, never whether it happens
+## What you may change, and what you only reply to
 
-Every finding gets verified, whatever its severity. `pre-existing` means "do not fix this here", not "do not look at it".
+Every finding gets verified. Nothing about the threshold below changes that — `may fix: no` means "do not change the code for this", never "do not look at it".
 
-| Severity | What you do |
+Each finding in the prompt carries three fields and one instruction:
+
+| Field | What it tells you |
 |---|---|
-| `important` | Verify. If real, fix it. If wrong, rebut it |
-| `nit` | Verify. Fix it, unless you are past `skip_nits_after_pass`, in which case reply with a one-line reason and skip |
-| `pre-existing` | Verify, then **stop**. Confirmed real becomes `deferred`. Found wrong becomes `rebutted` |
+| `severity` | `high`, `medium` or `low`. How bad it is, and nothing else |
+| `category` | `correctness`, `security`, `performance`, `maintainability`, `testing` or `docs` |
+| `pre_existing` | Whether the defect would survive a revert of this pull request |
+| **May fix** | The orchestrator's own answer, worked out from the repository's `fix_at` threshold |
 
-**Do not fix a `pre-existing` finding, however easy it looks.** The severity exists precisely to stop the diff growing without limit, and a helpful fix defeats it. This is the rule you are most likely to break by good intentions.
+**Take `May fix` as given.** It already accounts for the threshold and for provenance, and the reviewer's comment on the pull request already says which way it went. Re-deriving it from severity is how the reply ends up contradicting a comment a human is reading two lines above it.
+
+| The prompt says | What you do |
+|---|---|
+| `May fix: yes` | Verify. If real, fix it. If wrong, rebut it |
+| `May fix: no` | Verify. If real, `skipped` with a one-line reason. If wrong, `rebutted` |
+| `pre_existing: true` | Verify, then **stop**. Confirmed real becomes `deferred`. Found wrong becomes `rebutted` |
+
+**Do not fix a pre-existing finding, however easy it looks and however high its severity.** The boolean exists precisely to stop the diff growing without limit, and a helpful fix defeats it. This is the rule you are most likely to break by good intentions.
 
 ## Some paths are not in the checkout, and findings can still land on them
 
@@ -64,12 +75,12 @@ So a finding on a quarantined path is **`deferred`**, with a reply that says the
 | Disposition | Thread | Means |
 |---|---|---|
 | `fixed` | resolved | You changed the code. The reply says what and why |
-| `skipped` | resolved | Not acting, by policy. The reply gives the one-line reason |
+| `skipped` | resolved | Not acting, by policy — usually `May fix: no`. The reply gives the one-line reason |
 | `deferred` | resolved once persisted | Real, worth doing, not in this PR. Fill in `persist` so it outlives the merge |
 | `rebutted` | resolved | Technically wrong for this codebase. The reply gives the reason, with evidence |
 | `escalated` | left open | A human decision is needed. Applies `revloop/stop` and halts the loop |
 
-Every disposition carries a reply. **Nothing is ever silently dropped** — a skipped nit with no reply reads as an oversight, and the next pass raises it again.
+Every disposition carries a reply. **Nothing is ever silently dropped** — a skipped finding with no reply reads as an oversight, and the next pass raises it again.
 
 ### Rebutting well
 

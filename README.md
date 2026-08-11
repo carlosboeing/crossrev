@@ -43,14 +43,14 @@ That puts `revloop` on your PATH by symlinking it into `~/.local/bin`, and check
 
 **The checkout is the installation.** `install.sh` symlinks rather than copies, and `revloop` reads its libraries, skills and templates from the checkout at runtime. So `git pull` updates the tool with no reinstall step — and moving or deleting the clone uninstalls it.
 
-That also **offers** to install `pr-review` and `pr-address` for your harnesses, and hands over to the [`skills` CLI](https://github.com/obra/skills) if you say yes. That CLI runs its own flow — it detects which harnesses you have, and asks about project versus global scope and whether to symlink. Those are its questions, deliberately: suppressing them would mean making three choices on your behalf and calling it convenience. `--skills` and `--no-skills` decide the offer up front for scripted installs, and only the scripted path passes flags that answer them.
+That also **offers** to install `pr-review` and `pr-resolve` for your harnesses, and hands over to the [`skills` CLI](https://github.com/obra/skills) if you say yes. That CLI runs its own flow — it detects which harnesses you have, and asks about project versus global scope and whether to symlink. Those are its questions, deliberately: suppressing them would mean making three choices on your behalf and calling it convenience. `--skills` and `--no-skills` decide the offer up front for scripted installs, and only the scripted path passes flags that answer them.
 
 **It stays an offer rather than part of the install**, for two reasons. The loop does not need them: revloop reads both skills out of the checkout and reproduces their text into each prompt, so installing them is for invoking them by hand in an ordinary session. And it is the only step that wants Node — everything else runs on git, bash and coreutils, so a hard dependency on `npx` for an optional extra would be a poor trade. With no `npx`, or no terminal to ask at, it skips and prints the command.
 
 By hand, it is:
 
 ```bash
-npx skills@latest add ./tools/revloop --skill pr-review --skill pr-address
+npx skills@latest add ./tools/revloop --skill pr-review --skill pr-resolve
 ```
 
 Three details found by running it, each of which fails by reporting nothing rather than erroring:
@@ -70,7 +70,7 @@ revloop doctor
 | Tool | Why |
 |---|---|
 | `git`, `gh` | Reading and writing the PR. `gh` must be authenticated |
-| `jq` | The findings and address payloads are JSON |
+| `jq` | The findings and resolve payloads are JSON |
 | `yq` | Both config layers are YAML, and `jq` cannot read YAML |
 | One of `claude`, `codex`, `agy` | Something has to do the reviewing |
 
@@ -81,8 +81,8 @@ revloop doctor
 | Command | State |
 |---|---|
 | `revloop review --pr N` | Built. One review pass: inline comments, a summary, the pass marker |
-| `revloop address --pr N` | Built. Verifies each finding, commits fixes, replies, resolves, files deferred work |
-| `revloop run --pr N` | Built. The whole loop in one process, up to `max_passes` |
+| `revloop resolve --pr N` | Built. Verifies each finding, commits fixes, replies, resolves, files deferred work |
+| `revloop cycle --pr N` | Built. The whole loop in one process, up to `max_passes`. Also what a bare `revloop --pr N` runs |
 | `revloop status --pr N` | Built. Position *and* interruption, with the command that resumes it |
 | `revloop init` | Built. Plan-then-confirm, `--dry-run`, `--yes`, `--upgrade` |
 | `revloop watchdog` | Built. Finds stuck legs, retries once, then halts and says why |
@@ -94,7 +94,7 @@ revloop doctor
 | `revloop auth rotate` | Built. Guided, because GitHub has no API to generate an App key. It proves the new key works before replacing the old one |
 | `revloop auth refresh` | Built. The refresher job's only command, and the only thing that writes a rotating harness credential |
 
-**Not yet run against a real pull request.** Every one of those is exercised offline against a stubbed `gh` boundary — 361 assertions, no network, no model, no PR. That catches the deterministic half, which is the half that fails silently. It does not tell you whether the reviews are any good, and no repository has had the workflows installed yet.
+**Not yet run against a real pull request.** Every one of those is exercised offline against a stubbed `gh` boundary — 422 assertions, no network, no model, no PR. That catches the deterministic half, which is the half that fails silently. It does not tell you whether the reviews are any good, and no repository has had the workflows installed yet.
 
 ## Using it
 
@@ -103,15 +103,16 @@ revloop doctor
 Nothing to set up. No App, no secrets, no workflows — it uses the `gh` authentication you already have, so its comments appear as **you**.
 
 ```bash
-revloop review  --pr 42     # one review pass: inline comments plus a summary
-revloop address --pr 42     # verify each finding, fix, reply, resolve, push
-revloop run     --pr 42     # both, alternating, up to max_passes
+revloop        --pr 42      # a cycle: both legs, alternating, up to max_passes
+revloop cycle   --pr 42     # the same thing, spelled out
+revloop review  --pr 42     # one review leg: inline comments plus a summary
+revloop resolve --pr 42     # verify each finding, fix, reply, resolve, push
 revloop status  --pr 42     # where the loop is, and how to resume it
 ```
 
 **Start with `review` on its own.** It only writes comments, so it is the cheapest way to find out whether the findings are any good — which is the question that decides whether the rest is worth it.
 
-**`address` and `run` commit and push to the pull request's branch.** That is the point of the tool and it is the thing to know before pointing it at something you care about. Three rails constrain it:
+**`resolve` and `cycle` commit and push to the pull request's branch.** That is the point of the tool and it is the thing to know before pointing it at something you care about. Three rails constrain it:
 
 - **The branch guard** refuses to push unless the checkout is on the pull request's own head branch, that branch is not the repository default, and the head repository matches the origin. Asserted before anything leaves the machine.
 - **`max_passes`** caps the loop at 3 by default.
@@ -121,13 +122,13 @@ To watch without any risk of a push, run `review` only.
 
 ### What it writes
 
-One inline comment per finding on the line it affects, one summary comment carrying a hidden marker, and the `revloop/*` labels. The address leg adds threaded replies, resolves the threads it settled, commits any fixes, and files deferred defects to whichever sink the config resolves to.
+One inline comment per finding on the line it affects, one summary comment carrying a hidden marker, and the `revloop/*` labels. The resolve leg adds threaded replies, resolves the threads it settled, commits any fixes, and files deferred defects to whichever sink the config resolves to.
 
 **Every pass is reconstructable from the pull request alone** — the markers are the state, so there is nothing to clean up locally and nothing to lose if a run dies mid-flight.
 
 ### Which models run
 
-With no config file anywhere, the defaults are `codex` reviewing and `claude` addressing, in `single-run` mode, with nothing persisted. Override per run without touching the repository:
+With no config file anywhere, the defaults are `codex` reviewing and `claude` resolving, in `single-run` mode, with nothing persisted. Override per run without touching the repository:
 
 ```bash
 revloop review --pr 42 --harness claude
@@ -176,7 +177,7 @@ An endpoint a leg names but nothing defines is a hard failure. It never falls ba
 
 ## Where the skill text comes from
 
-The orchestrator reproduces `skills/pr-review/SKILL.md` and `skills/pr-address/SKILL.md` into each prompt rather than relying on the harness discovering them. That's a departure from the design's CI wiring, for two concrete reasons.
+The orchestrator reproduces `skills/pr-review/SKILL.md` and `skills/pr-resolve/SKILL.md` into each prompt rather than relying on the harness discovering them. That's a departure from the design's CI wiring, for two concrete reasons.
 
 The quarantine moves `.claude/` and `.agents/` out of the checkout before any invocation, which is exactly where a workflow would have placed the skills. Re-planting into a quarantined tree and removing them again before the commit leaves a window where a crash commits revloop's own skills into someone's pull request. And reproducing the text makes the prompt byte-identical across harnesses, which is the property that lets pass 2 judge pass 1's findings.
 
@@ -197,7 +198,7 @@ Nothing on either page is yours to get wrong. Creating the App by hand means a r
 
 If the local listener can't start — no `nc`, no free port — it falls back to asking you to paste the redirect URL. That path is the floor, not the plan.
 
-Keys are stored per owner **and role** at `~/.config/revloop/apps/<owner>.<role>.pem`, mode 0600 — `loop` for the review and address jobs, `refresher` for the credential refresher when a pairing needs one. Apps registered before roles existed stay readable at `<owner>.pem`. `revloop auth status` confirms where each App is actually installed by signing a JWT and asking GitHub, rather than assuming the setup worked.
+Keys are stored per owner **and role** at `~/.config/revloop/apps/<owner>.<role>.pem`, mode 0600 — `loop` for the review and resolve jobs, `refresher` for the credential refresher when a pairing needs one. Apps registered before roles existed stay readable at `<owner>.pem`. `revloop auth status` confirms where each App is actually installed by signing a JWT and asking GitHub, rather than assuming the setup worked.
 
 ### Why those three permissions
 
@@ -235,8 +236,8 @@ lib/             sourced by bin/revloop
   run.sh           the two legs, the drivers, the watchdog
   init.sh          the plan-then-confirm upgrade to automated mode
   adapters/        claude.sh, codex.sh, agy.sh
-schemas/         findings.schema.json, address.schema.json
-skills/          pr-review/, pr-address/
+schemas/         findings.schema.json, resolve.schema.json
+skills/          pr-review/, pr-resolve/
 templates/       workflows, starter config, example operator config
 scripts/         lint.sh — syntax and shellcheck across everything
 tests/           the stubbed-gh suite. `tests/run.sh` runs all of it

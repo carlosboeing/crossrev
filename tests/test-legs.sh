@@ -28,7 +28,7 @@ decides() {
 decides continue "issues remain below every cap"        issues-remain 1 3 false false 0 12 10 200
 decides converged "converged stops the loop"            converged     1 3 false false 0 12 10 200
 decides halt     "revloop/stop outranks a healthy verdict" converged  1 3 true  false 0 12 10 200
-decides halt     "the addresser reporting blocked halts" issues-remain 1 3 false true  0 12 10 200
+decides halt     "the resolver reporting blocked halts"  issues-remain 1 3 false true  0 12 10 200
 
 # The boundary is the thing worth testing: pass 3 of max 3 is the last pass, not
 # the one after which a fourth begins.
@@ -43,15 +43,40 @@ decides continue "exactly at the file cap still runs"   issues-remain 1 3 false 
 decides halt     "above the file cap halts"             issues-remain 1 3 false false 0 12 201 200
 decides continue "a file cap of zero is no cap"         issues-remain 1 3 false false 0 12 9999 0
 
-# --- nits ------------------------------------------------------------------
-legs_should_fix_nits 1 1 && ok "nits are fixed up to skip_nits_after_pass" \
-  || notok "nits are fixed up to skip_nits_after_pass" "yes" "no"
-legs_should_fix_nits 2 1 && notok "nits stop being fixed past the cap" "no" "yes" \
-  || ok "nits stop being fixed past the cap"
-legs_should_fix_nits 1 0 && notok "skip_nits_after_pass 0 never fixes nits" "no" "yes" \
-  || ok "skip_nits_after_pass 0 never fixes nits"
-legs_should_fix_nits 3 3 && ok "skip_nits_after_pass 3 fixes them on the last pass" \
-  || notok "skip_nits_after_pass 3 fixes them on the last pass" "yes" "no"
+# --- the fixing threshold --------------------------------------------------
+fixes() {
+  local want="$1" desc="$2"; shift 2
+  local got; if legs_should_fix "$@"; then got=yes; else got=no; fi
+  [[ "$got" == "$want" ]] && ok "$desc" || notok "$desc" "$want" "$got"
+}
+
+fixes yes "at the threshold, the resolver may act"        medium medium false
+fixes yes "above it too"                                  high   medium false
+fixes no  "below it, the finding is reported and left"    low    medium false
+fixes yes "fix_at low takes everything"                   low    low    false
+fixes no  "fix_at high takes only the top rung"           medium high   false
+
+# The one guardrail that is not configurable: provenance outranks severity, so a
+# critical pre-existing hole is reported and filed rather than fixed here.
+fixes no  "a pre-existing finding is never fixed"         high   low    true
+fixes no  "even with the threshold at its lowest"         medium low    true
+
+# Both unknown-value cases fail closed. Guessing here writes a commit nobody
+# asked for, while refusing leaves a finding on the pull request for a human.
+fixes no  "an unrecognised severity meets no threshold"   important medium false
+fixes no  "an unrecognised threshold fixes nothing"       high      urgent false
+
+# --- the label a leg waits behind ------------------------------------------
+#
+# The leg is the verb and the label is the noun, so this is a mapping rather
+# than string concatenation. A mismatch here stalls the chain in silence: the
+# label sits on the pull request with no workflow listening for it.
+label() {
+  local got; got="$(legs_awaiting_label "$1")"
+  [[ "$got" == "$2" ]] && ok "$3" || notok "$3" "$2" "$got"
+}
+label review  revloop/awaiting-review     "review waits behind awaiting-review"
+label resolve revloop/awaiting-resolution "resolve waits behind awaiting-resolution, not awaiting-resolve"
 
 # --- push guard ------------------------------------------------------------
 guard() {

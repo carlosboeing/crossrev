@@ -9,7 +9,7 @@
 # Should the loop continue? Prints "<decision> <reason>".
 #
 # Terminates on the first of: the reviewer returns converged; the pass count
-# reaches max_passes; a human applies revloop/stop; the addresser returns
+# reaches max_passes; a human applies revloop/stop; the resolver returns
 # blocked; the daily run cap is exceeded; the PR is larger than the file cap.
 #
 # $1 verdict, $2 pass, $3 max_passes, $4 has_stop_label, $5 blocked,
@@ -22,11 +22,11 @@ legs_should_continue() {
   # Deliberately checked first: revloop/stop is an instruction, not a state.
   [[ "$stop" == "true" ]] && { printf 'halt a human applied revloop/stop'; return 1; }
 
-  [[ "$blocked" == "true" ]] && { printf 'halt the addresser reported blocked'; return 1; }
+  [[ "$blocked" == "true" ]] && { printf 'halt the resolver reported blocked'; return 1; }
 
-  # Only Important findings keep the loop alive. Nits and pre-existing findings
-  # are reported and cannot prevent convergence.
-  [[ "$verdict" == "converged" ]] && { printf 'converged no important findings remain'; return 1; }
+  # Only findings at or above fix_at keep the loop alive. Anything below it, and
+  # anything pre-existing, is reported and cannot prevent convergence.
+  [[ "$verdict" == "converged" ]] && { printf 'converged nothing at or above fix_at remains'; return 1; }
 
   # At exactly the cap, stop. Pass 3 of max_passes 3 is the last pass, not the
   # one after which a fourth begins.
@@ -46,14 +46,57 @@ legs_should_continue() {
   return 0
 }
 
-# Should the addresser act on a nit?
+# ---------------------------------------------------------------------------
+# The fixing threshold
+# ---------------------------------------------------------------------------
 #
-# It still replies and resolves either way — nothing is silently dropped — but
-# past the configured pass it stops changing code for them.
-legs_should_fix_nits() {
-  local pass="$1" skip_after="$2"
-  (( skip_after <= 0 )) && return 1        # 0 = never fix nits
-  (( pass <= skip_after ))
+# `fix_at` names the lowest severity the resolve leg may change code for while
+# nobody is watching. Everything below it is still reported, still tabled, and
+# still replied to — the threshold governs the commit, never the comment.
+
+# An ordinal rank for a severity word. 0 for anything unrecognised, which cannot
+# meet any real threshold.
+legs_severity_rank() {
+  case "$1" in
+    high)   printf '3' ;;
+    medium) printf '2' ;;
+    low)    printf '1' ;;
+    *)      printf '0' ;;
+  esac
+}
+
+# May the resolve leg change code for this finding?
+#
+# $1 severity, $2 fix_at, $3 pre_existing ("true" or anything else)
+#
+# Two rules, in order. A pre-existing defect is never fixed here whatever its
+# severity — that is the one guardrail deliberately not configurable, because a
+# pull request that also fixes old bugs is one nobody can review. Otherwise the
+# severity has to reach the threshold.
+#
+# An unrecognised threshold fixes nothing rather than guessing. The two ways to
+# be wrong are not symmetrical: refusing to fix leaves a finding reported and a
+# human to read it, while guessing leaves an unattended commit nobody asked for.
+legs_should_fix() {
+  local severity="$1" fix_at="$2" pre_existing="${3:-false}"
+  [[ "$pre_existing" == "true" ]] && return 1
+  local bar; bar="$(legs_severity_rank "$fix_at")"
+  (( bar == 0 )) && return 1
+  (( $(legs_severity_rank "$severity") >= bar ))
+}
+
+# The label a leg waits behind.
+#
+# Not `revloop/awaiting-$leg`: the leg is named for the verb and the label for
+# the noun, so `resolve` waits behind `revloop/awaiting-resolution`. Derived in
+# one place because the workflows key off these strings and a mismatch stalls the
+# chain silently — the label sits on the pull request with nothing listening.
+legs_awaiting_label() {
+  case "$1" in
+    review)  printf 'revloop/awaiting-review' ;;
+    resolve) printf 'revloop/awaiting-resolution' ;;
+    *)       printf 'revloop/awaiting-%s' "$1" ;;
+  esac
 }
 
 # Refuse to push anywhere except the PR's own head branch.
@@ -99,8 +142,8 @@ legs_assert_env_clean() {
 # controls? Prints "same" or "different".
 legs_configured_difference() {
   local r_harness="$1" r_endpoint="$2" r_model="$3"
-  local a_harness="$4" a_endpoint="$5" a_model="$6"
-  if [[ "$r_harness" != "$a_harness" || "$r_endpoint" != "$a_endpoint" || "$r_model" != "$a_model" ]]; then
+  local s_harness="$4" s_endpoint="$5" s_model="$6"
+  if [[ "$r_harness" != "$s_harness" || "$r_endpoint" != "$s_endpoint" || "$r_model" != "$s_model" ]]; then
     printf 'different'
   else
     printf 'same'
@@ -114,11 +157,11 @@ legs_configured_difference() {
 # *server-side* substitution; where it is unavailable the marker records its
 # absence rather than implying a check that never ran.
 legs_assert_models_diverged() {
-  local configured="$1" reviewer_model="$2" addresser_model="$3"
+  local configured="$1" reviewer_model="$2" resolver_model="$3"
   [[ "$configured" == "different" ]] || return 0          # one model was asked for
   [[ -n "$reviewer_model" && "$reviewer_model" != "null" ]] || return 0
-  [[ -n "$addresser_model" && "$addresser_model" != "null" ]] || return 0
-  [[ "$reviewer_model" != "$addresser_model" ]] || ui_die \
+  [[ -n "$resolver_model" && "$resolver_model" != "null" ]] || return 0
+  [[ "$reviewer_model" != "$resolver_model" ]] || ui_die \
     "both legs were configured to differ but the same model answered each: $reviewer_model" \
     "This is the failure the cross-model design exists to prevent, and it completes normally when unchecked. Check the endpoint block and that no endpoint variable is exported."
 }

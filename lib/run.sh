@@ -72,7 +72,7 @@ run_lock_acquire() {
     holder="$(cat "$lock" 2>/dev/null)"
     pid="${holder%% *}"
     # Our own lock, from an earlier leg in this same process. `revloop run`
-    # drives review and address one after the other, so the second leg re-enters
+    # drives review and resolve one after the other, so the second leg re-enters
     # here holding what the first one took — a live PID that passes the check
     # below and reads as a collision with itself. Keep the lock for the whole
     # run rather than releasing it between legs: dropping it mid-loop would open
@@ -100,6 +100,7 @@ CTX_HEAD_BRANCH=""; CTX_DEFAULT_BRANCH=""; CTX_CHANGED=0
 CTX_TITLE=""; CTX_BODY=""; CTX_LABELS=""
 CTX_MODE=""; CTX_AUTHOR=""; CTX_MARKERS="[]"; CTX_MAX_PASSES=3
 CTX_SINK="none"; CTX_IDENTITY_LABEL="revloop-review"; CTX_SINK_LABELS=""
+CTX_FIX_AT="medium"
 
 ctx_load() {
   local pr="$1" repo="${2:-}" pr_json want
@@ -145,6 +146,7 @@ ctx_load() {
   cfg_load "$CTX_BASE_SHA"
   CTX_MODE="$(cfg_get '.mode')"
   CTX_MAX_PASSES="$(cfg_get '.max_passes')"
+  CTX_FIX_AT="$(cfg_get '.resolver.fix_at')"
 
   want="$(cfg_get '.persist.defects')"
   CTX_SINK="$(cfg_resolve_sink "$CTX_BASE_SHA" "$want")"
@@ -189,9 +191,53 @@ run_label_add() {
   return 0
 }
 
+# ---------------------------------------------------------------------------
+# Severity, and what the threshold makes of it
+# ---------------------------------------------------------------------------
+
+# Capitalise a word for display. Not `${x^}`: macOS ships bash 3.2, where that
+# expansion is a syntax error rather than a no-op.
+_ucfirst() {
+  local s="$1"
+  printf '%s%s' "$(printf '%s' "${s:0:1}" | tr '[:lower:]' '[:upper:]')" "${s:1}"
+}
+
+# How many findings the resolve leg may change code for: at or above `fix_at`,
+# and not pre-existing. The verdict, the labels and the summary all read this
+# one number.
+#
+# The rank table is taken from legs.sh rather than restated in jq. Two copies of
+# an ordinal scale drift, and the drift is invisible from outside: a pull request
+# that says nothing is outstanding while the resolve leg is still committing.
+run_actionable() {
+  local findings="$1" ranks bar
+  bar="$(legs_severity_rank "$CTX_FIX_AT")"
+  ranks="$(jq -cn --argjson h "$(legs_severity_rank high)" \
+                  --argjson m "$(legs_severity_rank medium)" \
+                  --argjson l "$(legs_severity_rank low)" \
+             '{high:$h, medium:$m, low:$l}')"
+  jq --argjson r "$ranks" --argjson bar "$bar" '
+    [ .[] | select((.pre_existing // false) | not)
+          | select($bar > 0 and (($r[.severity] // 0) >= $bar)) ] | length' <<<"$findings"
+}
+
+# `[High · Security]`, or `[Medium · Correctness · pre-existing]`.
+#
+# Decorates the RENDERED heading only. A finding's stable id derives from its
+# title, so decorating the title field itself would re-post every finding as new
+# on the next pass.
+run_finding_label() {
+  local f="$1" sev kind
+  sev="$(_ucfirst "$(jq -r '.severity // "?"' <<<"$f")")"
+  kind="$(_ucfirst "$(jq -r '.category // "?"' <<<"$f")")"
+  printf '[%s · %s' "$sev" "$kind"
+  [[ "$(jq -r '.pre_existing // false' <<<"$f")" == "true" ]] && printf ' · pre-existing'
+  printf ']'
+}
+
 run_pass_labels() {
   local pass="$1" next="$2" l
-  for l in awaiting-review awaiting-address converged halted; do
+  for l in awaiting-review awaiting-resolution converged halted; do
     [[ "$l" == "$next" ]] && continue
     state_label_remove "$CTX_PR" "$CTX_REPO" "revloop/$l"
   done
@@ -219,7 +265,7 @@ LEG_HARNESS=""; LEG_MODEL=""; LEG_EFFORT=""; LEG_ENDPOINT=""
 # both legs on it and say so in one line naming the cost, rather than halting.
 # The divergence guard stays quiet in that case by design — it catches a config
 # that asked for two models and got one, and this config asked for one.
-run_resolve_leg() {
+run_leg_settings() {
   local leg="$1" override="${2:-}" alt="" h
   LEG_HARNESS="$(cfg_get ".$leg.harness")"
   LEG_MODEL="$(cfg_get ".$leg.model")"
@@ -254,7 +300,7 @@ run_resolve_leg() {
     "Install one of claude, codex or agy. revloop needs at least one, and two different ones is what makes the cross-model check mean anything."
 
   ui_warn "'$LEG_HARNESS' is not installed, so the $leg runs on '$alt' instead" \
-    "Both legs now run on the same harness, so a bug it misses while reviewing it also misses while addressing. Install $LEG_HARNESS to get the second lineage back."
+    "Both legs now run on the same harness, so a bug it misses while reviewing it also misses while resolving. Install $LEG_HARNESS to get the second lineage back."
   LEG_HARNESS="$alt"
   # A model id for the harness that was asked for is wrong for a different one.
   LEG_MODEL=""; LEG_ENDPOINT=""
@@ -376,7 +422,7 @@ leg_review() {
     pass=$(( current + 1 ))
   else
     ui_say "$CTX_REPO#$CTX_PR is already reviewed at ${CTX_HEAD_SHA:0:7} — pass $current, and nothing has changed since."
-    ui_say "Push a revision, or run: revloop address --pr $CTX_PR"
+    ui_say "Push a revision, or run: revloop resolve --pr $CTX_PR"
     return 0
   fi
 
@@ -397,7 +443,7 @@ No review ran, so nothing here is a judgement about the code. Raising the cap in
     return 0
   fi
 
-  run_resolve_leg reviewer "$harness_override"
+  run_leg_settings reviewer "$harness_override"
   local harness="$LEG_HARNESS" model effort endpoint
   model="$(_nullable "$LEG_MODEL")"
   effort="$(_nullable "$LEG_EFFORT")"
@@ -450,9 +496,10 @@ Reading the diff and any earlier review threads. This comment becomes the pass s
     cfg_show_at_base "$CTX_BASE_SHA" "REVIEW.md" >"$review_md" 2>/dev/null || : >"$review_md"
 
     meta="$(jq -cn --arg repo "$CTX_REPO" --argjson pr "$CTX_PR" --argjson pass "$pass" \
-      --argjson max "$CTX_MAX_PASSES" --arg sha "$CTX_HEAD_SHA" \
+      --argjson max "$CTX_MAX_PASSES" --arg sha "$CTX_HEAD_SHA" --arg fa "$CTX_FIX_AT" \
       --arg t "$CTX_TITLE" --arg b "$CTX_BODY" \
-      '{repo:$repo, pr:$pr, pass:$pass, max_passes:$max, head_sha:$sha, title:$t, body:$b}')"
+      '{repo:$repo, pr:$pr, pass:$pass, max_passes:$max, head_sha:$sha, fix_at:$fa,
+        title:$t, body:$b}')"
     prior="$(jq -c '[.[] | select(.leg == "review") | (.findings // [])[]]' <<<"$CTX_MARKERS")"
     threads="$(gh_review_threads "$CTX_REPO" "$CTX_PR")"
 
@@ -502,13 +549,16 @@ Findings recorded; posting them now.$(state_marker_encode "$(jq -c 'del(.comment
   already="$(state_posted_finding_ids "$CTX_PR" "$CTX_REPO" "$CTX_AUTHOR" review)" || already=""
 
   n="$(jq 'length' <<<"$findings")"
-  local important nits pre
-  important="$(jq '[.[] | select(.severity == "important")] | length' <<<"$findings")"
-  nits="$(jq '[.[] | select(.severity == "nit")] | length' <<<"$findings")"
-  pre="$(jq '[.[] | select(.severity == "pre-existing")] | length' <<<"$findings")"
+  local high medium low pre actionable
+  high="$(jq '[.[] | select(.severity == "high")] | length' <<<"$findings")"
+  medium="$(jq '[.[] | select(.severity == "medium")] | length' <<<"$findings")"
+  low="$(jq '[.[] | select(.severity == "low")] | length' <<<"$findings")"
+  pre="$(jq '[.[] | select(.pre_existing // false)] | length' <<<"$findings")"
+  actionable="$(run_actionable "$findings")"
 
   if (( n > 0 )); then
-    ui_say "Found $n issue(s) — $important important, $nits nit(s), $pre pre-existing."
+    ui_say "Found $n issue(s) — $high high, $medium medium, $low low, of which $pre pre-existing."
+    ui_say "$actionable at or above fix_at ($CTX_FIX_AT); the rest are reported and left alone."
     ui_say "Posting them as inline comments on the lines they affect."
   fi
 
@@ -552,14 +602,14 @@ Findings recorded; posting them now.$(state_marker_encode "$(jq -c 'del(.comment
   case "$verdict" in
     converged) next="converged" ;;
     blocked)   next="halted" ;;
-    *) if (( important > 0 )); then next="awaiting-address"; else next="converged"; fi ;;
+    *) if (( actionable > 0 )); then next="awaiting-resolution"; else next="converged"; fi ;;
   esac
   run_pass_labels "$pass" "$next"
 
   printf '  → verdict: %s\n\n' "$verdict"
-  if [[ "$next" == "awaiting-address" ]]; then
+  if [[ "$next" == "awaiting-resolution" ]]; then
     ui_say "Nothing was changed in your working tree. To act on these:"
-    ui_say "  revloop address --pr $CTX_PR"
+    ui_say "  revloop resolve --pr $CTX_PR"
     printf '\n'
   else
     (( no_tips )) || run_upgrade_nudge
@@ -569,26 +619,31 @@ Findings recorded; posting them now.$(state_marker_encode "$(jq -c 'del(.comment
 
 # A review comment must explain itself to a collaborator who has never heard of
 # revloop — which model, which pass of how many, and what happens next.
+#
+# The note under each finding says what will happen to it, which is a question
+# about the threshold rather than about the severity alone. Saying "minor, not
+# blocking" while the resolve leg is about to rewrite that line would be the
+# comment contradicting the commit.
 _review_comment_body() {
-  local f="$1" pass="$2" harness="$3" model="$4" sev note
-  sev="$(jq -r .severity <<<"$f")"
-  case "$sev" in
-    important)    note="A bug worth fixing before this merges." ;;
-    nit)          note="Minor — worth fixing, not blocking." ;;
-    pre-existing) note="A real bug, but this pull request did not introduce it, so it will not be fixed here." ;;
-    *)            note="" ;;
-  esac
-  printf '**%s** — %s\n\n%s\n\n**Fix:** %s\n\n<sub>%s · revloop pass %s, reviewed by %s%s. A second model now verifies this point and either fixes it, defers it, or explains why it is wrong.</sub>%s' \
-    "$(jq -r .title <<<"$f")" "$sev" \
+  local f="$1" pass="$2" harness="$3" model="$4" note
+  if [[ "$(jq -r '.pre_existing // false' <<<"$f")" == "true" ]]; then
+    note="A real bug, but this pull request did not introduce it, so it is reported here and never fixed here."
+  elif legs_should_fix "$(jq -r .severity <<<"$f")" "$CTX_FIX_AT" false; then
+    note="At or above this repository's \`fix_at\` ($CTX_FIX_AT), so a second model may change code for it."
+  else
+    note="Below this repository's \`fix_at\` ($CTX_FIX_AT), so it is reported and left to a human."
+  fi
+  printf '**%s %s**\n\n%s\n\n**Fix:** %s\n\n<sub>%s · revloop pass %s, reviewed by %s%s. A second model now verifies this point and either fixes it, defers it, or explains why it is wrong.</sub>%s' \
+    "$(run_finding_label "$f")" "$(jq -r .title <<<"$f")" \
     "$(jq -r .why <<<"$f")" "$(jq -r .fix <<<"$f")" \
     "$note" "$pass" "$harness" "${model:+ ($model)}" \
     "$(state_finding_marker "$(jq -r .id <<<"$f")" "$pass" review)"
 }
 
 _review_overall_body() {
-  local findings="$1" verdict="$2" pass="$3" harness="$4" model="$5" reported="$6" n important
+  local findings="$1" verdict="$2" pass="$3" harness="$4" model="$5" reported="$6" n actionable
   n="$(jq 'length' <<<"$findings")"
-  important="$(jq '[.[] | select(.severity == "important")] | length' <<<"$findings")"
+  actionable="$(run_actionable "$findings")"
 
   printf '## revloop review — pass %s of %s\n\n' "$pass" "$CTX_MAX_PASSES"
   printf 'Reviewed by `%s`%s' "$harness" "${model:+ using \`$model\`}"
@@ -596,28 +651,28 @@ _review_overall_body() {
   printf '. Verdict: **%s**.\n\n' "$verdict"
 
   if (( n == 0 )); then
-    printf 'No findings. Nits and pre-existing issues would be listed here too, so this is an empty review rather than a filtered one.\n\n'
+    printf 'No findings. Low-severity and pre-existing issues would be listed here too, so this is an empty review rather than a filtered one.\n\n'
   else
-    printf '| severity | where | what |\n|---|---|---|\n'
-    jq -r '.[] | "| \(.severity) | `\(.path):\(.line)` | \(.title) |"' <<<"$findings"
+    printf '| severity | category | where | what |\n|---|---|---|---|\n'
+    jq -r '.[] | "| \(.severity) | \(.category)\(if (.pre_existing // false) then " · pre-existing" else "" end) | `\(.path):\(.line)` | \(.title) |"' <<<"$findings"
     printf '\n'
   fi
 
   case "$verdict" in
     converged)
-      printf 'No important findings remain, so the loop stops here. Only important findings affect the verdict — a loop that cannot converge because of nits is one nobody leaves switched on.\n' ;;
+      printf 'Nothing at or above `fix_at` (%s) remains, so the loop stops here. Findings below the threshold, and pre-existing ones, are reported but cannot keep the loop alive — a loop that cannot converge because of a naming quibble is one nobody leaves switched on.\n' "$CTX_FIX_AT" ;;
     blocked)
       printf 'The review could not be completed, so the loop halts and a human is needed.\n' ;;
     *)
-      printf '**Next:** a different model verifies each of these %s important finding(s) against the codebase and either fixes it, skips it, defers it, or explains why it is wrong. Every finding is verified whatever its severity; severity governs what happens afterwards.\n' "$important" ;;
+      printf '**Next:** a different model verifies every finding above against the codebase and either fixes it, skips it, defers it, or explains why it is wrong. It may change code for the %s at or above `fix_at` (%s); the rest are verified and reported, never silently dropped.\n' "$actionable" "$CTX_FIX_AT" ;;
   esac
 }
 
 # ---------------------------------------------------------------------------
-# The address leg
+# The resolve leg
 # ---------------------------------------------------------------------------
 
-leg_address() {
+leg_resolve() {
   local pr="" repo="" harness_override="" no_tips=0
   while (( $# )); do
     case "$1" in
@@ -626,42 +681,42 @@ leg_address() {
       --harness) harness_override="${2:-}"; shift 2 ;;
       --no-tips) no_tips=1; shift ;;
       --pass)    shift 2 ;;
-      *) ui_die "unknown option for address: $1" \
-           "Usage: revloop address --pr <number> [--harness claude|codex]" ;;
+      *) ui_die "unknown option for resolve: $1" \
+           "Usage: revloop resolve --pr <number> [--harness claude|codex]" ;;
     esac
   done
-  [[ -n "$pr" ]] || ui_die "revloop address needs a pull request number" "Usage: revloop address --pr 42"
+  [[ -n "$pr" ]] || ui_die "revloop resolve needs a pull request number" "Usage: revloop resolve --pr 42"
 
   run_trap_install
   ctx_load "$pr" "$repo"
   run_lock_acquire "$CTX_PR" "$CTX_MODE"
-  REVLOOP_RESUME_HINT="revloop address --pr $CTX_PR"
+  REVLOOP_RESUME_HINT="revloop resolve --pr $CTX_PR"
 
   if grep -qw "revloop/stop" <<<"$CTX_LABELS"; then
-    ui_say "revloop/stop is on $CTX_REPO#$CTX_PR, so nothing is addressed."
+    ui_say "revloop/stop is on $CTX_REPO#$CTX_PR, so nothing is resolved."
     ui_say "Remove the label to let the loop continue."
     return 0
   fi
 
   local pass review_marker findings
   pass="$(state_current_review_pass "$CTX_MARKERS")"
-  (( pass > 0 )) || ui_die "$CTX_REPO#$CTX_PR has no review to address" \
-    "The address leg acts on a review leg's findings. Run: revloop review --pr $CTX_PR"
+  (( pass > 0 )) || ui_die "$CTX_REPO#$CTX_PR has no review to resolve" \
+    "The resolve leg acts on a review leg's findings. Run: revloop review --pr $CTX_PR"
 
   review_marker="$(state_marker_for "$CTX_MARKERS" "$pass" review)"
   [[ "$(jq -r '.state // ""' <<<"$review_marker")" == "complete" ]] || ui_die \
     "the pass-$pass review on $CTX_REPO#$CTX_PR did not finish" \
-    "Addressing a half-posted review would reply to findings the reviewer may not have finished recording. Re-run: revloop review --pr $CTX_PR"
+    "Resolving a half-posted review would reply to findings the reviewer may not have finished recording. Re-run: revloop review --pr $CTX_PR"
 
-  if state_current_pass_complete "$CTX_MARKERS" "$pass" address; then
-    ui_say "pass $pass of $CTX_REPO#$CTX_PR is already addressed."
+  if state_current_pass_complete "$CTX_MARKERS" "$pass" resolve; then
+    ui_say "pass $pass of $CTX_REPO#$CTX_PR is already resolved."
     ui_say "Push a revision, or run: revloop review --pr $CTX_PR"
     return 0
   fi
 
   findings="$(jq -c '.findings // []' <<<"$review_marker")"
   if [[ "$(jq 'length' <<<"$findings")" == "0" ]]; then
-    ui_say "pass $pass found nothing to address on $CTX_REPO#$CTX_PR."
+    ui_say "pass $pass found nothing to resolve on $CTX_REPO#$CTX_PR."
     run_pass_labels "$pass" converged
     return 0
   fi
@@ -674,21 +729,21 @@ leg_address() {
   legs_assert_push_target "$(git rev-parse --abbrev-ref HEAD)" "$CTX_HEAD_BRANCH" \
     "$CTX_DEFAULT_BRANCH" "$CTX_REPO" "${origin_repo:-$CTX_REPO}"
 
-  run_resolve_leg addresser "$harness_override"
+  run_leg_settings resolver "$harness_override"
   local harness="$LEG_HARNESS" model effort endpoint
   model="$(_nullable "$LEG_MODEL")"
   effort="$(_nullable "$LEG_EFFORT")"
   endpoint="$(_nullable "$LEG_ENDPOINT")"
 
-  printf '\n  Addressing %s#%s — pass %s of %s\n' "$CTX_REPO" "$CTX_PR" "$pass" "$CTX_MAX_PASSES"
-  printf '  Addresser: %s%s%s\n' "$harness" "${model:+, $model}" "${effort:+, $effort effort}"
+  printf '\n  Resolving %s#%s — pass %s of %s\n' "$CTX_REPO" "$CTX_PR" "$pass" "$CTX_MAX_PASSES"
+  printf '  Resolver: %s%s%s\n' "$harness" "${model:+, $model}" "${effort:+, $effort effort}"
 
   local claim comment_id marker stale
-  claim="$(state_open_claim "$CTX_MARKERS" "$pass" address)" || claim=""
+  claim="$(state_open_claim "$CTX_MARKERS" "$pass" resolve)" || claim=""
   if [[ -n "$claim" ]]; then
     comment_id="$(jq -r '.comment_id' <<<"$claim")"
     if stale="$(state_claim_is_stale "$claim" "$CTX_HEAD_SHA")"; then
-      ui_warn "abandoning the unfinished pass-$pass address claim — $stale" \
+      ui_warn "abandoning the unfinished pass-$pass resolve claim — $stale" \
         "Resuming it would reconcile replies against a revision that has moved. Starting the pass again instead."
       marker="$(jq -c --argjson ts "$(date +%s)" --arg sha "$CTX_HEAD_SHA" \
         '.ts = $ts | .head_sha = $sha | .dispositions = [] | .commit_sha = null' <<<"$claim")"
@@ -700,15 +755,15 @@ leg_address() {
     marker="$(jq -cn --argjson p "$pass" --arg sha "$CTX_HEAD_SHA" \
       --arg r "${GITHUB_RUN_ID:-local-$$}" --argjson ts "$(date +%s)" \
       --arg h "$harness" --arg m "$model" \
-      '{v:1, leg:"address", pass:$p, state:"started", ts:$ts, run_id:$r, head_sha:$sha,
+      '{v:1, leg:"resolve", pass:$p, state:"started", ts:$ts, run_id:$r, head_sha:$sha,
         harness:$h, model:(if $m == "" then null else $m end), model_reported:null,
         blocked:false, blocked_reason:null, commit_sha:null, wrap_up:"", dispositions:[]}')"
     comment_id="$(gh_comment_create "$CTX_REPO" "$CTX_PR" \
-"**revloop — addressing pass $pass of $CTX_MAX_PASSES**
+"**revloop — resolving pass $pass of $CTX_MAX_PASSES**
 
 Verifying each finding against the codebase. This comment becomes the wrap-up when the pass finishes.$(state_marker_encode "$marker")")"
     [[ -n "$comment_id" ]] || ui_die "the claim comment did not post on $CTX_REPO#$CTX_PR" \
-      "The claim is what makes a retry safe, so revloop stops rather than addressing without one."
+      "The claim is what makes a retry safe, so revloop stops rather than resolving without one."
   fi
   marker="$(jq -c --argjson id "$comment_id" '. + {comment_id: $id}' <<<"$marker")"
   run_checkpoint
@@ -717,23 +772,38 @@ Verifying each finding against the codebase. This comment becomes the wrap-up wh
   threads="$(gh_review_threads "$CTX_REPO" "$CTX_PR")"
 
   if [[ "$(jq -r '(.dispositions // []) | length' <<<"$marker")" != "0" ]]; then
-    ui_say "The previous attempt already recorded its dispositions, so the addresser is not run again."
+    ui_say "The previous attempt already recorded its dispositions, so the resolver is not run again."
     dispositions="$(jq -c '.dispositions' <<<"$marker")"
     wrap_up="$(jq -r '.wrap_up // ""' <<<"$marker")"
     blocked="$(jq -r '.blocked // false' <<<"$marker")"
     blocked_reason="$(jq -r '.blocked_reason // "null"' <<<"$marker")"
     model_reported="$(jq -r '.model_reported // "null"' <<<"$marker")"
   else
-    local candidates enriched prior_dispositions fix_nits=false
-    candidates="$(_address_dedupe_candidates "$findings")"
+    local candidates enriched prior_dispositions
+    candidates="$(_resolve_dedupe_candidates "$findings")"
 
-    prior_dispositions="$(jq -c '[.[] | select(.leg == "address") | (.dispositions // [])[]]' <<<"$CTX_MARKERS")"
+    prior_dispositions="$(jq -c '[.[] | select(.leg == "resolve") | (.dispositions // [])[]]' <<<"$CTX_MARKERS")"
+
+    # Each finding is handed to the model with the orchestrator's own answer to
+    # "may you change code for this", rather than the threshold and a rule to
+    # apply. Two readings of one policy is one reading too many: the label the
+    # reviewer already posted says which findings are fixable, and a model that
+    # ranks them differently contradicts a comment sitting on the pull request.
     enriched="$(jq -c --argjson prior "$prior_dispositions" '
       [ .[] as $f
         | $f + {prior_disposition: ([$prior[] | select(.finding_id == $f.id) | .disposition] | last // null)} ]' \
       <<<"$findings")"
-
-    legs_should_fix_nits "$pass" "$(cfg_get '.addresser.skip_nits_after_pass')" && fix_nits=true
+    local n_e i_e f_e may enriched_out="[]"
+    n_e="$(jq 'length' <<<"$enriched")"
+    for (( i_e = 0; i_e < n_e; i_e++ )); do
+      f_e="$(jq -c ".[$i_e]" <<<"$enriched")"
+      may=false
+      legs_should_fix "$(jq -r .severity <<<"$f_e")" "$CTX_FIX_AT" \
+        "$(jq -r '.pre_existing // false' <<<"$f_e")" && may=true
+      enriched_out="$(jq -c --argjson f "$f_e" --argjson m "$may" \
+        '. + [$f + {may_fix: $m}]' <<<"$enriched_out")"
+    done
+    enriched="$enriched_out"
 
     local tmp diff_file prompt_file envelope_file exclude meta payload
     tmp="$(mktemp -d)"
@@ -743,17 +813,17 @@ Verifying each finding against the codebase. This comment becomes the wrap-up wh
     gh_pr_diff "$CTX_REPO" "$CTX_PR" "$exclude" >"$diff_file"
 
     meta="$(jq -cn --arg repo "$CTX_REPO" --argjson pr "$CTX_PR" --argjson pass "$pass" \
-      --argjson max "$CTX_MAX_PASSES" --arg sha "$CTX_HEAD_SHA" --argjson fn "$fix_nits" \
+      --argjson max "$CTX_MAX_PASSES" --arg sha "$CTX_HEAD_SHA" --arg fa "$CTX_FIX_AT" \
       --arg sink "$CTX_SINK" \
-      '{repo:$repo, pr:$pr, pass:$pass, max_passes:$max, head_sha:$sha, fix_nits:$fn, sink:$sink}')"
+      '{repo:$repo, pr:$pr, pass:$pass, max_passes:$max, head_sha:$sha, fix_at:$fa, sink:$sink}')"
 
-    prompt_address "$prompt_file" "$ROOT/skills/pr-address/SKILL.md" "$diff_file" \
+    prompt_resolve "$prompt_file" "$ROOT/skills/pr-resolve/SKILL.md" "$diff_file" \
       "$meta" "$enriched" "$threads" "$candidates"
 
     ui_say "Verifying each finding against the codebase."
     run_invoke "$envelope_file" "$harness" "$prompt_file" \
-      "$ROOT/schemas/address.schema.json" "$(pwd)" \
-      "$model" "$effort" "$endpoint" validate_address
+      "$ROOT/schemas/resolve.schema.json" "$(pwd)" \
+      "$model" "$effort" "$endpoint" validate_resolve
 
     payload="$(jq -c .payload "$envelope_file")"
     model_reported="$(jq -r '.model_reported // "null"' "$envelope_file")"
@@ -769,7 +839,7 @@ Verifying each finding against the codebase. This comment becomes the wrap-up wh
       | .blocked_reason = (if $br == "null" then null else $br end)
       | .model_reported = (if $mr == "null" then null else $mr end)' <<<"$marker")"
     gh_comment_edit "$CTX_REPO" "$comment_id" \
-"**revloop — addressing pass $pass of $CTX_MAX_PASSES**
+"**revloop — resolving pass $pass of $CTX_MAX_PASSES**
 
 Dispositions recorded; committing and replying now.$(state_marker_encode "$(jq -c 'del(.comment_id)' <<<"$marker")")"
   fi
@@ -781,7 +851,7 @@ Dispositions recorded; committing and replying now.$(state_marker_encode "$(jq -
   local configured
   configured="$(legs_configured_difference \
     "$(cfg_get '.reviewer.harness')"  "$(cfg_get '.reviewer.endpoint')"  "$(cfg_get '.reviewer.model')" \
-    "$(cfg_get '.addresser.harness')" "$(cfg_get '.addresser.endpoint')" "$(cfg_get '.addresser.model')")"
+    "$(cfg_get '.resolver.harness')" "$(cfg_get '.resolver.endpoint')" "$(cfg_get '.resolver.model')")"
   legs_assert_models_diverged "$configured" \
     "$(jq -r '.model_reported // "null"' <<<"$review_marker")" "${model_reported:-null}"
 
@@ -825,10 +895,10 @@ Dispositions recorded; committing and replying now.$(state_marker_encode "$(jq -
 - \`$id\` — matches the existing issue #$dup, so nothing was filed"
       if [[ "$(run_sink_field "$(cfg_get '.persist.defects')" comment_on_match false)" == "true" ]]; then
         gh_issue_comment "$CTX_REPO" "$dup" \
-          "Seen again while reviewing $CTX_REPO#$CTX_PR (revloop pass $pass).$(state_finding_marker "$id" "$pass" address)"
+          "Seen again while reviewing $CTX_REPO#$CTX_PR (revloop pass $pass).$(state_finding_marker "$id" "$pass" resolve)"
       fi
     else
-      tracked="$(_address_persist "$d" "$id" "$pass")" || tracked=""
+      tracked="$(_resolve_persist "$d" "$id" "$pass")" || tracked=""
       if [[ -n "$tracked" ]]; then
         filed=$(( filed + 1 ))
         # Only a file sink puts something in the tree for the commit to carry.
@@ -862,7 +932,7 @@ Dispositions recorded; committing and replying now.$(state_marker_encode "$(jq -
   elif (( fixed_count > 0 || sink_wrote )); then
     commit_sha=""
     if (( fixed_count > 0 )); then
-      commit_msg="fix: address revloop review findings (pass $pass)
+      commit_msg="fix: resolve revloop review findings (pass $pass)
 
 $(jq -r '[.[] | select(.disposition == "fixed") | "- " + .finding_id] | join("\n")' <<<"$dispositions")"
     else
@@ -877,13 +947,13 @@ $(jq -r '[.[] | select(.disposition == "deferred") | "- " + .finding_id] | join(
       # is the one crash boundary comments cannot dedupe away.
       marker="$(jq -c --arg s "$commit_sha" '.commit_sha = $s' <<<"$marker")"
       gh_comment_edit "$CTX_REPO" "$comment_id" \
-"**revloop — addressing pass $pass of $CTX_MAX_PASSES**
+"**revloop — resolving pass $pass of $CTX_MAX_PASSES**
 
 Pushed \`${commit_sha:0:7}\`; replying to each thread now.$(state_marker_encode "$(jq -c 'del(.comment_id)' <<<"$marker")")"
     elif (( fixed_count > 0 )); then
       # Only meaningful when fixes were claimed. A deferral-only pass whose sink
       # write produced no diff is not a broken promise about the code.
-      ui_warn "the addresser reported $fixed_count fix(es) but changed no files" \
+      ui_warn "the resolver reported $fixed_count fix(es) but changed no files" \
         "The replies below will claim a fix that is not in the diff. Treat those dispositions as unverified and read the thread before merging."
     fi
   fi
@@ -892,7 +962,7 @@ Pushed \`${commit_sha:0:7}\`; replying to each thread now.$(state_marker_encode 
   # --- pass two: reply and resolve ----------------------------------------
   local already resolved_n=0 escalated=0
   local thread_id root_id should_resolve reply_body
-  already="$(state_posted_finding_ids "$CTX_PR" "$CTX_REPO" "$CTX_AUTHOR" address)" || already=""
+  already="$(state_posted_finding_ids "$CTX_PR" "$CTX_REPO" "$CTX_AUTHOR" resolve)" || already=""
 
   for (( i = 0; i < n; i++ )); do
     d="$(jq -c ".[$i]" <<<"$dispositions")"
@@ -906,7 +976,7 @@ Pushed \`${commit_sha:0:7}\`; replying to each thread now.$(state_marker_encode 
     # The reply carries its own finding marker, which is what stops a retry
     # replying twice.
     if ! grep -qx -- "$id" <<<"$already"; then
-      reply_body="$(_address_reply_body "$d" "$tracked" "$pass" "$harness" "$model")"
+      reply_body="$(_resolve_reply_body "$d" "$tracked" "$pass" "$harness" "$model")"
       if [[ -n "$root_id" && "$root_id" != "null" ]]; then
         gh_review_reply "$CTX_REPO" "$CTX_PR" "$root_id" "$reply_body" || true
       else
@@ -956,7 +1026,7 @@ Pushed \`${commit_sha:0:7}\`; replying to each thread now.$(state_marker_encode 
 
   # --- the wrap-up, then completion --------------------------------------
   local wrap_body
-  wrap_body="$(_address_wrap_body "$wrap_up" "$dispositions" "$deferred_lines" "$pass" \
+  wrap_body="$(_resolve_wrap_body "$wrap_up" "$dispositions" "$deferred_lines" "$pass" \
     "$harness" "$model" "$model_reported" "$commit_sha" "$blocked" "$blocked_reason")"
   gh_comment_edit "$CTX_REPO" "$comment_id" \
     "$wrap_body$(state_marker_encode "$(jq -c 'del(.comment_id)' <<<"$marker")")"
@@ -978,7 +1048,7 @@ Pushed \`${commit_sha:0:7}\`; replying to each thread now.$(state_marker_encode 
   if [[ "$blocked" == "true" ]]; then
     printf '  → blocked: %s\n\n' "$blocked_reason"
   else
-    printf '  → addressed pass %s\n\n' "$pass"
+    printf '  → resolved pass %s\n\n' "$pass"
     if [[ "$next" == "awaiting-review" ]]; then
       ui_say "To look again with the reviewer:"
       ui_say "  revloop review --pr $CTX_PR"
@@ -994,7 +1064,7 @@ Pushed \`${commit_sha:0:7}\`; replying to each thread now.$(state_marker_encode 
 # Keyed on the file path, since an issue about a bug in a file almost always names
 # it. Capped, and the cap is announced rather than silent — a truncated candidate
 # set that reads as "nothing matched" is how a duplicate gets filed.
-_address_dedupe_candidates() {
+_resolve_dedupe_candidates() {
   local findings="$1" out="{}" searched=0 limit=10 n i f cand
   [[ "$CTX_SINK" == "issues" ]] || { printf '%s' "$out"; return 0; }
 
@@ -1016,7 +1086,7 @@ _address_dedupe_candidates() {
 
 # File one deferred defect to the resolved sink. Prints where it landed, or
 # nothing when the write did not happen.
-_address_persist() {
+_resolve_persist() {
   local d="$1" id="$2" pass="$3" persist title body dir target n
   persist="$(jq -c '.persist // null' <<<"$d")"
   [[ "$persist" != "null" ]] || return 1
@@ -1025,7 +1095,7 @@ _address_persist() {
   body="$(jq -r .body <<<"$persist")
 
 ---
-Found by revloop while reviewing $CTX_REPO#$CTX_PR (pass $pass). Verified against the codebase before filing: one model raised it, a second confirmed it is real, and it was left out of that pull request deliberately rather than missed.$(state_finding_marker "$id" "$pass" address)"
+Found by revloop while reviewing $CTX_REPO#$CTX_PR (pass $pass). Verified against the codebase before filing: one model raised it, a second confirmed it is real, and it was left out of that pull request deliberately rather than missed.$(state_finding_marker "$id" "$pass" resolve)"
 
   case "$CTX_SINK" in
     issues)
@@ -1053,7 +1123,7 @@ Found by revloop while reviewing $CTX_REPO#$CTX_PR (pass $pass). Verified agains
   esac
 }
 
-_address_reply_body() {
+_resolve_reply_body() {
   local d="$1" tracked="$2" pass="$3" harness="$4" model="$5" disp lead
   disp="$(jq -r .disposition <<<"$d")"
   case "$disp" in
@@ -1068,14 +1138,14 @@ _address_reply_body() {
   [[ -n "$tracked" ]] && printf '\nTracked outside this pull request as %s, so it survives the merge.\n' "$tracked"
   printf '\n<sub>revloop pass %s, verified by %s%s. Every finding is verified whatever its severity — severity governs what happens afterwards, not whether the check happens.</sub>%s' \
     "$pass" "$harness" "${model:+ ($model)}" \
-    "$(state_finding_marker "$(jq -r .finding_id <<<"$d")" "$pass" address)"
+    "$(state_finding_marker "$(jq -r .finding_id <<<"$d")" "$pass" resolve)"
 }
 
-_address_wrap_body() {
+_resolve_wrap_body() {
   local wrap_up="$1" dispositions="$2" deferred_lines="$3" pass="$4"
   local harness="$5" model="$6" reported="$7" commit="$8" blocked="$9" blocked_reason="${10}"
 
-  printf '## revloop addressed pass %s of %s\n\n' "$pass" "$CTX_MAX_PASSES"
+  printf '## revloop resolved pass %s of %s\n\n' "$pass" "$CTX_MAX_PASSES"
   printf 'Verified by `%s`%s' "$harness" "${model:+ using \`$model\`}"
   [[ -n "$reported" && "$reported" != "null" ]] && printf ', answered by `%s`' "$reported"
   printf '. '
@@ -1110,7 +1180,7 @@ _address_wrap_body() {
 # the pull request rather than in process memory, this is a thin driver over the
 # same legs the workflows invoke, and the two modes can be A/B tested on real
 # pull requests without touching leg code.
-cmd_run() {
+cmd_cycle() {
   local pr="" repo="" no_tips=0
   local -a args=()
   while (( $# )); do
@@ -1119,14 +1189,14 @@ cmd_run() {
       --repo)    repo="${2:-}"; args+=(--repo "${2:-}"); shift 2 ;;
       --harness) args+=(--harness "${2:-}"); shift 2 ;;
       --no-tips) no_tips=1; shift ;;
-      *) ui_die "unknown option for run: $1" "Usage: revloop run --pr <number> [--no-tips]" ;;
+      *) ui_die "unknown option for cycle: $1" "Usage: revloop cycle --pr <number> [--no-tips]" ;;
     esac
   done
-  [[ -n "$pr" ]] || ui_die "revloop run needs a pull request number" "Usage: revloop run --pr 42"
+  [[ -n "$pr" ]] || ui_die "revloop cycle needs a pull request number" "Usage: revloop cycle --pr 42"
 
   ctx_load "$pr" "$repo"
-  local max="$CTX_MAX_PASSES" i pass marker amarker verdict important
-  ui_say "Running the whole loop on $CTX_REPO#$CTX_PR, up to $max passes. Ctrl-C is safe — each leg finishes the write in flight."
+  local max="$CTX_MAX_PASSES" i pass marker rmarker verdict actionable
+  ui_say "Cycling $CTX_REPO#$CTX_PR, up to $max passes. Ctrl-C is safe — each leg finishes the write in flight."
 
   for (( i = 1; i <= max; i++ )); do
     leg_review "${args[@]}" --no-tips || return 1
@@ -1136,24 +1206,24 @@ cmd_run() {
     pass="$(state_current_review_pass "$CTX_MARKERS")"
     marker="$(state_marker_for "$CTX_MARKERS" "$pass" review)"
     verdict="$(jq -r '.verdict // "blocked"' <<<"$marker")"
-    important="$(jq '[(.findings // [])[] | select(.severity == "important")] | length' <<<"$marker")"
+    actionable="$(run_actionable "$(jq -c '.findings // []' <<<"$marker")")"
 
     if [[ "$verdict" == "blocked" ]]; then
       ui_end "Halted after pass $pass — the reviewer could not complete."
       return 0
     fi
-    if [[ "$verdict" == "converged" ]] || (( important == 0 )); then
-      ui_end "Converged after pass $pass — no important findings remain."
+    if [[ "$verdict" == "converged" ]] || (( actionable == 0 )); then
+      ui_end "Converged after pass $pass — nothing at or above fix_at ($CTX_FIX_AT) remains."
       (( no_tips )) || run_upgrade_nudge
       return 0
     fi
 
-    leg_address "${args[@]}" --no-tips || return 1
+    leg_resolve "${args[@]}" --no-tips || return 1
 
     ctx_load "$pr" "$repo"
-    amarker="$(state_marker_for "$CTX_MARKERS" "$pass" address)"
-    if [[ "$(jq -r '.blocked // false' <<<"$amarker")" == "true" ]]; then
-      ui_end "Halted after pass $pass — the addresser reported blocked."
+    rmarker="$(state_marker_for "$CTX_MARKERS" "$pass" resolve)"
+    if [[ "$(jq -r '.blocked // false' <<<"$rmarker")" == "true" ]]; then
+      ui_end "Halted after pass $pass — the resolver reported blocked."
       return 0
     fi
     if grep -qw "revloop/stop" <<<"$CTX_LABELS"; then
@@ -1202,26 +1272,26 @@ cmd_status() {
   ui_line "passes      $pass of $CTX_MAX_PASSES, from $total trusted marker(s)"
   ui_gap
 
-  # Was an address leg ever owed this pass? A converged review is the reason the
+  # Was a resolve leg ever owed this pass? A converged review is the reason the
   # loop stopped and a blocked one hands over to a human, so in both cases the
   # answer is no. Everything below asks this before it asks whether that leg ran
   # — the two questions look alike and only one of them is about work outstanding.
-  local m_review review_state review_verdict address_due=1
+  local m_review review_state review_verdict resolve_due=1
   m_review="$(state_marker_for "$CTX_MARKERS" "$pass" review)"
   review_state="$(jq -r '.state // ""' <<<"$m_review")"
   review_verdict="$(jq -r '.verdict // ""' <<<"$m_review")"
   [[ "$review_state" == "complete" ]] \
     && [[ "$review_verdict" == "converged" || "$review_verdict" == "blocked" ]] \
-    && address_due=0
+    && resolve_due=0
 
-  for leg in review address; do
+  for leg in review resolve; do
     m="$(state_marker_for "$CTX_MARKERS" "$pass" "$leg")"
     if [[ -z "$m" ]]; then
-      # "has not run" reads as a step still outstanding. When no address leg was
+      # "has not run" reads as a step still outstanding. When no resolve leg was
       # due, that is the difference between a finished loop and one that looks
       # abandoned halfway.
-      if [[ "$leg" == "address" ]] && (( address_due == 0 )); then
-        ui_opt "address — not needed, the review $review_verdict"
+      if [[ "$leg" == "resolve" ]] && (( resolve_due == 0 )); then
+        ui_opt "resolve — not needed, the review $review_verdict"
       else
         ui_opt "$leg — has not run this pass"
       fi
@@ -1240,8 +1310,8 @@ cmd_status() {
   ui_gap
   if [[ "$review_state" != "complete" ]]; then
     ui_next "revloop review --pr $CTX_PR"
-  elif (( address_due )) && ! state_current_pass_complete "$CTX_MARKERS" "$pass" address; then
-    ui_next "revloop address --pr $CTX_PR"
+  elif (( resolve_due )) && ! state_current_pass_complete "$CTX_MARKERS" "$pass" resolve; then
+    ui_next "revloop resolve --pr $CTX_PR"
   elif state_is_new_revision "$CTX_MARKERS" "$CTX_HEAD_SHA"; then
     ui_next "revloop review --pr $CTX_PR"
   elif [[ "$review_verdict" == "converged" ]]; then
@@ -1249,7 +1319,7 @@ cmd_status() {
   elif [[ "$review_verdict" == "blocked" ]]; then
     ui_next "nothing automatic — the reviewer reported blocked, so what happens next is a human's call"
   else
-    ui_next "nothing — this revision is reviewed and addressed"
+    ui_next "nothing — this revision is reviewed and resolved"
   fi
   ui_end "State is read from the pull request itself, so this is the same view a workflow gets."
 }
@@ -1297,7 +1367,7 @@ cmd_watchdog() {
 
     grep -qw "revloop/stop" <<<"$labels" && continue
 
-    if [[ "$labels" == *"revloop/awaiting-address"* ]]; then leg="address"; else leg="review"; fi
+    if [[ "$labels" == *"revloop/awaiting-resolution"* ]]; then leg="resolve"; else leg="review"; fi
 
     author="$(state_trusted_author event-driven)"
     markers="$(state_markers "$pr" "$repo" "$author")"
@@ -1330,7 +1400,7 @@ cmd_watchdog() {
 # One retry, then halt. A second failure is not a dropped event.
 _watchdog_retry() {
   local repo="$1" pr="$2" labels="$3" leg="$4" head="$5"
-  local label="revloop/awaiting-$leg"
+  local label; label="$(legs_awaiting_label "$leg")"
 
   if grep -qw "revloop/watchdog-retried" <<<"$labels"; then
     state_label_remove "$pr" "$repo" "$label"

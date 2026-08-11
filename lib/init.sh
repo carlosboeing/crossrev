@@ -103,7 +103,7 @@ _init_resolve() {
     INIT_PASS_LABELS="$INIT_PASS_LABELS revloop/pass-$i"
   done
   INIT_PASS_LABELS="${INIT_PASS_LABELS# }"
-  INIT_FIXED_LABELS="revloop/awaiting-address revloop/awaiting-review revloop/converged revloop/halted revloop/stop"
+  INIT_FIXED_LABELS="revloop/awaiting-resolution revloop/awaiting-review revloop/converged revloop/halted revloop/stop"
 
   # `auto` is a bootstrap convenience, not a runtime mode: resolve it once here
   # and write the concrete answer into the generated config, so the committed file
@@ -141,7 +141,7 @@ _init_resolve() {
     "could not work out which commit of revloop to pin the workflows to" \
     "init generates workflows that check revloop out at a 40-character SHA. Run it from a git checkout of the repository revloop lives in."
 
-  INIT_WORKFLOWS="review address watchdog"
+  INIT_WORKFLOWS="review resolve watchdog"
   (( INIT_NEEDS_REFRESHER )) && INIT_WORKFLOWS="$INIT_WORKFLOWS token-refresh"
 
   local f t
@@ -161,7 +161,7 @@ _init_resolve() {
 
 _init_assert_runner_serves_pairing() {
   local leg harness endpoint reason
-  for leg in reviewer addresser; do
+  for leg in reviewer resolver; do
     harness="$(cfg_get ".$leg.harness")"
     endpoint="$(cfg_get ".$leg.endpoint")"
     # An endpoint means a static token in a secret, which never rotates and so
@@ -195,7 +195,7 @@ _init_assert_runner_serves_pairing() {
 _init_resolve_refresher() {
   local leg
   INIT_NEEDS_REFRESHER=0
-  for leg in reviewer addresser; do
+  for leg in reviewer resolver; do
     if preflight_needs_refresher "$INIT_RUNNER" "$(cfg_get ".$leg.harness")" "$(cfg_get ".$leg.endpoint")"; then
       INIT_NEEDS_REFRESHER=1
     fi
@@ -213,7 +213,7 @@ _init_required_secrets() {
   printf 'REVLOOP_SOURCE_KEY\n'
 
   local leg harness endpoint ep tok seen=""
-  for leg in reviewer addresser; do
+  for leg in reviewer resolver; do
     harness="$(cfg_get ".$leg.harness")"
     endpoint="$(cfg_get ".$leg.endpoint")"
     if [[ -n "$endpoint" && "$endpoint" != "null" ]]; then
@@ -261,7 +261,7 @@ _init_print_plan() {
   ui_line ""
   ui_line "runner            $INIT_RUNNER"
   local leg harness endpoint
-  for leg in reviewer addresser; do
+  for leg in reviewer resolver; do
     harness="$(cfg_get ".$leg.harness")"
     endpoint="$(cfg_get ".$leg.endpoint")"
     if [[ -n "$endpoint" && "$endpoint" != "null" ]]; then
@@ -611,7 +611,7 @@ _init_execute() {
 # has to follow the pairing.
 _init_harness_install_line() {
   local leg harness endpoint seen="" out=""
-  for leg in reviewer addresser; do
+  for leg in reviewer resolver; do
     harness="$(cfg_get ".$leg.harness")"
     # A leg on an endpoint still runs through the claude binary.
     endpoint="$(cfg_get ".$leg.endpoint")"

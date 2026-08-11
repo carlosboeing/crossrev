@@ -17,7 +17,7 @@
         "issues-remain",
         "blocked"
       ],
-      "description": "converged when no Important findings remain. Nits and pre-existing findings are reported but cannot keep the loop alive. blocked when the review could not be completed at all."
+      "description": "converged when no finding at or above the pass's fix_at threshold remains, counting only findings this pull request introduced. Findings below the threshold, and pre-existing ones at any severity, are reported but cannot keep the loop alive. blocked when the review could not be completed at all."
     },
     "findings": {
       "type": "array",
@@ -29,6 +29,8 @@
           "line",
           "side",
           "severity",
+          "category",
+          "pre_existing",
           "title",
           "why",
           "fix"
@@ -55,11 +57,27 @@
           "severity": {
             "type": "string",
             "enum": [
-              "important",
-              "nit",
-              "pre-existing"
+              "high",
+              "medium",
+              "low"
             ],
-            "description": "important: a bug that should be fixed before merging. nit: minor, worth fixing, not blocking. pre-existing: a real bug this PR did not introduce, which is reported and never fixed here."
+            "description": "How bad it is, and nothing else. high: a bug that should be fixed before merging. medium: worth fixing, not alarming. low: minor. The pass's fix_at threshold decides which of these the resolve leg may change code for; severity itself says only how bad the defect is."
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "correctness",
+              "security",
+              "performance",
+              "maintainability",
+              "testing",
+              "docs"
+            ],
+            "description": "What kind of defect it is. correctness covers logic bugs, edge cases and race conditions. A closed set on purpose: free text turns the summary table to mush."
+          },
+          "pre_existing": {
+            "type": "boolean",
+            "description": "True when the defect would still exist if this pull request were reverted. Reported and, if confirmed, filed to the backlog — never fixed here, whatever its severity, because a pull request that fixes old bugs is one nobody can review. The test is simple: would this defect survive a revert?"
           },
           "title": {
             "type": "string",

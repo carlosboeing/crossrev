@@ -34,8 +34,8 @@ done
 payload_file="${REVLOOP_HARNESS_PAYLOAD:-}"
 if [[ "$prompt" == *"You are the review leg"* ]]; then
   [[ -n "${REVLOOP_REVIEW_PAYLOAD:-}" ]] && payload_file="$REVLOOP_REVIEW_PAYLOAD"
-elif [[ "$prompt" == *"You are the address leg"* ]]; then
-  [[ -n "${REVLOOP_ADDRESS_PAYLOAD:-}" ]] && payload_file="$REVLOOP_ADDRESS_PAYLOAD"
+elif [[ "$prompt" == *"You are the resolve leg"* ]]; then
+  [[ -n "${REVLOOP_RESOLVE_PAYLOAD:-}" ]] && payload_file="$REVLOOP_RESOLVE_PAYLOAD"
 fi
 
 if [[ -z "$payload_file" || ! -f "$payload_file" ]]; then

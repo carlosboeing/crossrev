@@ -107,9 +107,9 @@ state_finding_marker() {
 # $4 is the leg asking, and it is not optional. Every marker carries the leg
 # that wrote it, because "already written out" means different things to the two
 # legs: the review leg is asking which findings it already has inline comments
-# for, the address leg which it has already replied to. Reading the ids without
+# for, the resolve leg which it has already replied to. Reading the ids without
 # the leg conflates them — the review leg stamps a marker on every inline
-# comment, so the address leg would find every id already present, skip every
+# comment, so the resolve leg would find every id already present, skip every
 # reply as a duplicate, and resolve the threads anyway. That leaves a
 # collaborator with a resolved thread and no explanation.
 state_posted_finding_ids() {
@@ -163,12 +163,12 @@ state_current_pass_complete() {
       '[.[] | select(.pass == $p and .leg == $l and .state == "complete")] | length' <<<"$markers")" != "0" ]]
 }
 
-# The pass the address leg belongs to: the newest review pass, not the next one.
+# The pass the resolve leg belongs to: the newest review pass, not the next one.
 state_current_review_pass() {
   jq -r '[.[] | select(.leg == "review") | .pass] | max // 0' <<<"$1"
 }
 
-# The newest marker for a (pass, leg), whatever its state. The address leg needs
+# The newest marker for a (pass, leg), whatever its state. The resolve leg needs
 # the review leg's to read the finding list; recovery needs its own to reuse the
 # comment id rather than posting a second claim.
 state_marker_for() {
@@ -237,7 +237,7 @@ state_runs_today() {
 #
 # The chain is label-driven and `gh` refuses to apply a label that does not
 # exist, so a repository without them posts its first review and then dies
-# applying revloop/awaiting-address, looking healthy the whole time.
+# applying revloop/awaiting-resolution, looking healthy the whole time.
 
 state_label_add() {
   local pr="$1" repo="$2" label="$3"

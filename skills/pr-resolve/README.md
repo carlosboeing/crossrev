@@ -1,6 +1,6 @@
-# pr-address
+# pr-resolve
 
-The address leg of [revloop](../../). Verifies each review finding against the codebase, fixes what's real, pushes back on what isn't, and returns dispositions and reply text as schema-constrained JSON.
+The resolve leg of [revloop](../../). Verifies each review finding against the codebase, fixes what's real, pushes back on what isn't, and returns dispositions and reply text as schema-constrained JSON.
 
 Forked from Superpowers' `receiving-code-review`, which already encodes the required stance: verify before implementing, push back with technical reasoning when the reviewer lacks context, no performative agreement, reply in-thread rather than at top level.
 
@@ -9,9 +9,9 @@ Forked from Superpowers' `receiving-code-review`, which already encodes the requ
 | Change | Why |
 |---|---|
 | Five dispositions with explicit thread rules | The orchestrator needs a machine-readable decision per finding, not prose |
-| Every disposition carries a reply | A skipped nit with no reply reads as an oversight, and the next pass raises it again |
-| Severity governs what happens *after* verification, never whether it happens | `pre-existing` means "don't fix this here", not "don't look at it" — otherwise the backlog fills with one model's unchecked guesses |
-| A hard rule against fixing `pre-existing` findings | That severity exists to stop the diff growing without limit, and a helpful fix defeats it. The rule most likely to be broken by good intentions |
+| Every disposition carries a reply | A skipped finding with no reply reads as an oversight, and the next pass raises it again |
+| Policy governs what happens *after* verification, never whether it happens | `pre_existing` means "don't fix this here", not "don't look at it" — otherwise the backlog fills with one model's unchecked guesses |
+| A hard rule against fixing `pre_existing` findings | That boolean exists to stop the diff growing without limit, and a helpful fix defeats it. The rule most likely to be broken by good intentions |
 | Deferral intent — an issue title and body | An unresolved thread on a merged PR is visible in no GitHub view, so deferred work needs somewhere durable |
 | Duplicate judgement over supplied candidates | Stops revloop filing a second issue for something you already filed by hand |
 | Re-raised rebuttals escalate rather than re-argue | Two models disagreeing twice about the same line is a human's decision |
@@ -27,7 +27,7 @@ The one outward thing the skill does own is changing code in the working tree. T
 
 ## The schema
 
-[`schemas/address.schema.json`](../../schemas/address.schema.json). Same two harness-forced shapes as the findings schema, both found by running the harnesses rather than reading about them:
+[`schemas/resolve.schema.json`](../../schemas/resolve.schema.json). Same two harness-forced shapes as the findings schema, both found by running the harnesses rather than reading about them:
 
 - **No `$schema` or `$id` key** — Claude Code's `--json-schema` rejects a schema naming the 2020-12 meta-schema and fails before the model is called.
 - **Every property in `required`** — Codex enforces OpenAI strict mode. Optional fields are nullable rather than absent.
@@ -41,7 +41,7 @@ The one outward thing the skill does own is changing code in the working tree. T
 ## Install
 
 ```bash
-npx skills@latest add carlosboeing/claude-code-resources --skill pr-review,pr-address
+npx skills@latest add carlosboeing/claude-code-resources --skill pr-review --skill pr-resolve
 ```
 
-Normally you don't invoke it yourself — `revloop address --pr N` does.
+Normally you don't invoke it yourself — `revloop resolve --pr N` does.

@@ -32,7 +32,7 @@ d="$(new_repo)"; cd "$d" || exit 1
 out="$($REVLOOP config show)"
 is "no config: mode is single-run"        "$(jq -r .mode <<<"$out")"              "single-run"
 is "no config: codex reviews"             "$(jq -r .reviewer.harness <<<"$out")"  "codex"
-is "no config: claude addresses"          "$(jq -r .addresser.harness <<<"$out")" "claude"
+is "no config: claude resolves"          "$(jq -r .resolver.harness <<<"$out")" "claude"
 is "no config: no endpoints are defined"  "$(jq -r '.endpoints|length' <<<"$out")" "0"
 is "no config: nothing demands an API key" "$(jq -r '[.endpoints[]?.token_env]|length' <<<"$out")" "0"
 

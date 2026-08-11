@@ -12,9 +12,9 @@ set -uo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/harness.sh"
 
 REVIEW_PAYLOAD='{"verdict":"issues-remain","blocked_reason":null,"prior":null,"findings":[
-  {"path":"app.ts","line":2,"side":"RIGHT","severity":"important",
+  {"path":"app.ts","line":2,"side":"RIGHT","severity":"high","category":"correctness","pre_existing":false,
    "title":"Unchecked fetch response","why":"A failed request looks like a success","fix":"Check response.ok"},
-  {"path":"app.ts","line":2,"side":"RIGHT","severity":"nit",
+  {"path":"app.ts","line":2,"side":"RIGHT","severity":"low","category":"maintainability","pre_existing":false,
    "title":"Missing return type","why":"The inferred type is wider than intended","fix":"Annotate it"}
 ]}'
 
@@ -35,10 +35,10 @@ make_claim() {
     {v:1, leg:"review", pass:1, state:"started", ts:$ts, run_id:"1", head_sha:$sha,
      harness:"claude", model:"reviewer-model", model_reported:"reviewer-model",
      verdict:"issues-remain",
-     findings:[{id:$id, path:"app.ts", line:2, side:"RIGHT", severity:"important",
+     findings:[{id:$id, path:"app.ts", line:2, side:"RIGHT", severity:"high", category:"correctness", pre_existing:false,
                 title:"Unchecked fetch response", why:"w", fix:"f", anchor:"",
                 thread_id:null, disposition:null, tracked_as:null},
-               {id:"other000", path:"app.ts", line:2, side:"RIGHT", severity:"nit",
+               {id:"other000", path:"app.ts", line:2, side:"RIGHT", severity:"low", category:"maintainability", pre_existing:false,
                 title:"Missing return type", why:"w", fix:"f", anchor:"",
                 thread_id:null, disposition:null, tracked_as:null}]}'
 }
@@ -53,12 +53,12 @@ out="$("$REVLOOP" review --pr 42 2>&1)"; rc=$?
 
 is  "a first pass exits clean"                        "$rc" "0"
 has "it reports the verdict"                          "$out" "verdict: issues-remain"
-has "it counts the severities it found"               "$out" "1 important, 1 nit(s), 0 pre-existing"
+has "it counts the severities it found"               "$out" "1 high, 0 medium, 1 low, of which 0 pre-existing"
 is  "it posts one inline comment per finding"         "$(count 'method POST repos/acme/widget/pulls/42/comments')" "2"
 is  "it posts exactly one overall comment"            "$(count 'method POST repos/acme/widget/issues/42/comments')" "1"
 has "the claim is edited to complete, not re-posted"  "$(calls)" "PATCH repos/acme/widget/issues/comments/9001"
 has "it applies the pass label"                       "$(calls)" "labels[]=revloop/pass-1"
-has "it hands the loop to the address leg"            "$(calls)" "labels[]=revloop/awaiting-address"
+has "it hands the loop to the resolve leg"            "$(calls)" "labels[]=revloop/awaiting-resolution"
 
 # Every inline comment carries its own finding id, which is what makes recovery
 # exact rather than approximate.
@@ -131,7 +131,7 @@ routes_baseline "$(marker_comment 9001 "$claim" | jq -cs . | payload)"
 out="$("$REVLOOP" status --pr 42 2>&1)"
 has "status names the interrupted leg"                "$out" "review — interrupted mid-flight"
 has "status names the command that resumes it"        "$out" "revloop review --pr 42"
-has "status says which side is not resumable work"    "$out" "address — has not run this pass"
+has "status says which side is not resumable work"    "$out" "resolve — has not run this pass"
 
 # --- the local lock -------------------------------------------------------
 fixture_repo; stub_reset
