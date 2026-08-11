@@ -108,6 +108,9 @@ run_resolve() {
 run_review "$REVIEW_PAYLOAD"
 review_calls="$(calls)"
 review_prompt="$(cat "$PROMPT_LOG")"
+# Every run_* rebuilds the fixture, so FIX_HEAD has moved on by the time the
+# assertions below run. Keep the sha that actually produced these calls.
+review_head="$FIX_HEAD"
 
 hasnt "the inline comment claims no second model"     "$review_calls" "second model"
 hasnt "nor a different one"                           "$review_calls" "different model"
@@ -128,12 +131,15 @@ has   "and the resolve skill agrees"                  "$resolve_prompt" "a secon
 # Decision 1 — emoji for severity and category
 # ---------------------------------------------------------------------------
 
-# Variant A: severity dot, category word, title on the same line. It has to fit a
-# narrow diff column without wrapping, which is why the category stays a word and
-# only the severity carries a glyph.
-has "the inline heading leads with the severity dot"  "$review_calls" "🔴 **High · Security** — Token compared"
+# Severity dot, bracketed label, title, all on one line and promoted to a
+# heading. It sits in a narrow diff column, which is why the category stays a
+# word and only the severity carries a glyph.
+has "the inline heading is a heading, so the finding has an edge against its own explanation" \
+  "$review_calls" "#### 🔴 [High · Security] Token compared"
 hasnt "and does not put the category emoji there too" "$review_calls" "🔴 🔒"
-hasnt "nor bracket it like machine output"            "$review_calls" "[High · Security]"
+# Brackets rather than bold: with the emphasis off the label, they are the only
+# thing delimiting it, so they carry weight instead of repeating it.
+hasnt "the label is not bolded beside a plain title" "$review_calls" "**High · Security**"
 
 # Provenance is not a fourth severity. It belongs where there is room to say what
 # it means, which is the table's *what* cell and the note under the finding.
@@ -141,15 +147,66 @@ hasnt "the heading carries no provenance"             "$review_calls" "· Securi
 has   "the table's what cell does, muted"             "$review_calls" "<sub>· pre-existing</sub>"
 
 has "the summary table header names both columns"     "$review_calls" "| Severity | Category | Where | What |"
-has "a high security finding carries both glyphs"     "$review_calls" "| 🔴 High | 🔒 Security |"
-has "a low maintainability one carries its own"       "$review_calls" "| 🔵 Low | 🧹 Maintainability |"
-has "and a medium correctness one"                    "$review_calls" "| 🟠 Medium | 🐛 Correctness |"
+has "a high security finding carries both glyphs"     "$review_calls" "| 🔴&nbsp;High | 🔒&nbsp;Security |"
+has "a low maintainability one carries its own"       "$review_calls" "| 🔵&nbsp;Low | 🧹&nbsp;Maintainability |"
+has "and a medium correctness one"                    "$review_calls" "| 🟠&nbsp;Medium | 🐛&nbsp;Correctness |"
 
 # A model-written title carrying a pipe splits the row into extra columns, and the
 # surrounding rows still render — so the table is quietly wrong rather than
 # obviously broken. Escaped at the cell, not hoped away in the prompt.
 has "a pipe in a title is escaped rather than splitting the row" \
   "$review_calls" 'Off-by-one in the drain loop \| second clause'
+
+# Severity and Category are the narrowest columns, so an ordinary space between
+# glyph and word is a break opportunity the renderer takes — the emoji ends up
+# orphaned on a line above its own label.
+hasnt "no breakable space is left between a glyph and its word" \
+  "$review_calls" "| 🔴 High |"
+
+# The cell shows the basename and links to the line, so the columns that carry
+# meaning get the width. The full path survives as the link title, which is what
+# a hover shows, so two files sharing a name are still tellable apart.
+has "the where cell links to the line rather than printing the path" \
+  "$review_calls" '[`app.ts:2`](https://github.com/acme/widget/blob/'
+has "and the link is pinned to the revision that was reviewed, not to the branch" \
+  "$review_calls" "/blob/$review_head/app.ts#L2"
+has "with the full path kept as the link title"       "$review_calls" '#L2 "app.ts:2")'
+
+# ---------------------------------------------------------------------------
+# The reply lead belongs to the orchestrator, not to the model
+# ---------------------------------------------------------------------------
+#
+# The resolve prompt hands the model "the conversation so far", which contains
+# earlier replies opening with exactly these words — so the model reads the house
+# style off the pull request, reproduces it, and revloop prefixes its own on top.
+# Seven replies on this repository's own PR 5 read "**Fixed.** **Fixed.** …".
+#
+# Checked through a real leg rather than against the helper alone, because the
+# defect was never in the helper: it was in nothing owning the opening.
+run_resolve "$(resolve_payload | jq -c '
+  .dispositions[0].reply = "**Fixed.** Replaced with a constant-time compare."
+  | .dispositions[1].reply = "Skipped. Pre-existing, so it is reported not fixed."')"
+lead_calls="$(calls)"
+
+hasnt "a lead the model wrote itself is not stacked on revloop's" \
+  "$lead_calls" "**Fixed.** **Fixed.**"
+has   "revloop's own lead is what survives"           "$lead_calls" "**Fixed.** Replaced with a constant-time compare."
+# The model's own word is dropped whether or not it was bolded, and whether or
+# not it agreed with the disposition the orchestrator settled on.
+hasnt "an unbolded lead is dropped too"               "$lead_calls" "**Skipped.** Skipped."
+has   "and the disposition revloop decided is the one shown" \
+  "$lead_calls" "**Skipped.** Pre-existing, so it is reported not fixed."
+
+# A reply that merely begins with the word is left alone. The trailing period is
+# what separates a lead from a sentence, and without it "Fixed the comparison"
+# would lose its first word.
+run_resolve "$(resolve_payload | jq -c '
+  .dispositions[0].reply = "Fixed the comparison so it is constant-time now."')"
+has "a reply that opens with the word but not the lead keeps it" \
+  "$(calls)" "**Fixed.** Fixed the comparison so it is constant-time now."
+
+run_resolve "$(resolve_payload)"
+resolve_calls="$(calls)"
 
 has "the resolve table names findings, not ids alone" \
   "$resolve_calls" "| 🔴 Token compared with == instead of a constant-time check"

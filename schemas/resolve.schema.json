@@ -38,7 +38,7 @@
           "reply": {
             "type": "string",
             "minLength": 1,
-            "description": "The in-thread reply body to post. Always required: nothing is silently dropped, and a finding skipped for being below the threshold still gets a one-line reason."
+            "description": "The in-thread reply body to post. Always required: nothing is silently dropped, and a finding skipped for being below the threshold still gets a one-line reason. Start with the reason, not with the disposition — the orchestrator prepends 'Fixed.', 'Deferred.' and the rest. Earlier replies quoted back to you in the prompt already carry that lead, and repeating it is how a comment ends up reading 'Fixed. Fixed.'"
           },
           "persist": {
             "type": ["object", "null"],

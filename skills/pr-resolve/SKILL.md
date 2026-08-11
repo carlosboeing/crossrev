@@ -82,6 +82,8 @@ So a finding on a quarantined path is **`deferred`**, with a reply that says the
 
 Every disposition carries a reply. **Nothing is ever silently dropped** — a skipped finding with no reply reads as an oversight, and the next pass raises it again.
 
+**Start the reply with the reason, never with the disposition.** The orchestrator prepends "Fixed.", "Deferred." and the rest, so a reply that opens with one gets it twice. This is easy to get wrong for a good reason: the earlier replies quoted back to you in the prompt already carry that lead, so the house style looks like something to copy. It is not — it is the orchestrator's, added after you hand the text over.
+
 ### Rebutting well
 
 A rebuttal is a technical claim, so support it: name the file and line that makes the finding wrong, the existing guard the reviewer did not see, the type that makes the case impossible, the test that covers it. "This is fine" is not a rebuttal and will be re-raised.

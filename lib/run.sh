@@ -252,13 +252,23 @@ run_category_emoji() {
   esac
 }
 
-# `🔴 **High · Security**`, the prefix of an inline finding heading.
+# `🔴 [High · Security]`, the label on an inline finding heading.
 #
-# One line, so it does not wrap in a narrow diff column, and the category stays a
-# readable word rather than a pictogram the reader has to decode. Provenance is
-# deliberately absent: `pre-existing` is not a fourth severity and must not read
-# as one, so it goes in the summary table's *what* cell and in the note under
-# this finding, both of which have room to say what it means.
+# Brackets rather than bold, because the emphasis belongs on the defect. The
+# heading carries the title, and a bold label beside a plain title puts the
+# reader's eye on a two-word classification they scan past rather than on the
+# thing that is wrong. With the bold moved off, the brackets are the only thing
+# delimiting the label, so they are doing work rather than repeating it.
+#
+# The space after the closing bracket is load-bearing: `[text](url)` is a link
+# only when the paren immediately follows, so a title beginning with `(` would
+# otherwise swallow the label whole.
+#
+# One line, and the category stays a readable word rather than a pictogram the
+# reader has to decode. Provenance is deliberately absent: `pre-existing` is not
+# a fourth severity and must not read as one, so it goes in the summary table's
+# *what* cell and in the note under this finding, both of which have room to say
+# what it means.
 #
 # Decorates the RENDERED heading only. A finding's stable id derives from its
 # title, so decorating the title field itself would re-post every finding as new
@@ -267,17 +277,24 @@ run_finding_label() {
   local f="$1" sev kind
   sev="$(jq -r '.severity // "?"' <<<"$f")"
   kind="$(jq -r '.category // "?"' <<<"$f")"
-  printf '%s **%s · %s**' "$(run_severity_emoji "$sev")" \
+  printf '%s [%s · %s]' "$(run_severity_emoji "$sev")" \
     "$(_ucfirst "$sev")" "$(_ucfirst "$kind")"
+}
+
+# Model-written text flattened to one line.
+#
+# A newline in a heading ends the heading, and a newline in a table cell ends the
+# table — both silently, because everything around them still renders.
+_one_line() {
+  printf '%s' "$1" | tr '\n' ' '
 }
 
 # Text that is about to land in a Markdown table cell.
 #
-# A model-written title carrying a pipe splits the row into extra columns, and a
-# newline ends the table outright — both of which are silently wrong rather than
-# obviously broken, because the surrounding rows still render.
+# A pipe in a model-written title splits the row into extra columns, which is
+# wrong in the same quiet way: the surrounding rows are unaffected.
 _md_cell() {
-  printf '%s' "$1" | tr '\n' ' ' | sed 's/|/\\|/g'
+  _one_line "$1" | sed 's/|/\\|/g'
 }
 
 run_pass_labels() {
@@ -697,8 +714,11 @@ _review_comment_body() {
   else
     note="Below this repository's \`fix_at\` ($CTX_FIX_AT), so it is reported and left to a human."
   fi
-  printf '%s — %s\n\n%s\n\n**Fix:** %s\n\n<sub>%s · revloop pass %s, reviewed by %s%s. A second agent now verifies this point and either fixes it, defers it, or explains why it is wrong.</sub>%s' \
-    "$(run_finding_label "$f")" "$(jq -r .title <<<"$f")" \
+  # A heading rather than a bold run of prose. Without it the label, the title,
+  # the consequence and the fix are all one weight, and a reader scanning a diff
+  # column has no edge to stop at.
+  printf '#### %s %s\n\n%s\n\n**Fix:** %s\n\n<sub>%s · revloop pass %s, reviewed by %s%s. A second agent now verifies this point and either fixes it, defers it, or explains why it is wrong.</sub>%s' \
+    "$(run_finding_label "$f")" "$(_one_line "$(jq -r .title <<<"$f")")" \
     "$(jq -r .why <<<"$f")" "$(jq -r .fix <<<"$f")" \
     "$note" "$pass" "$harness" "${model:+ ($model)}" \
     "$(state_finding_marker "$(jq -r .id <<<"$f")" "$pass" review)"
@@ -843,22 +863,42 @@ _run_details() {
 # two functions above and a second copy of either mapping inside a jq program is
 # a copy that drifts.
 _findings_table() {
-  local findings="$1" n i f sev kind pre
+  local findings="$1" sha="$2" n i f sev kind pre path line
   n="$(jq 'length' <<<"$findings")"
   printf '| Severity | Category | Where | What |\n|---|---|---|---|\n'
   for (( i = 0; i < n; i++ )); do
     f="$(jq -c ".[$i]" <<<"$findings")"
     sev="$(jq -r '.severity // "?"' <<<"$f")"
     kind="$(jq -r '.category // "?"' <<<"$f")"
+    path="$(jq -r .path <<<"$f")"
+    line="$(jq -r .line <<<"$f")"
     pre=""
     [[ "$(jq -r '.pre_existing // false' <<<"$f")" == "true" ]] && pre=' <sub>· pre-existing</sub>'
-    printf '| %s %s | %s %s | `%s:%s` | %s%s |\n' \
+    # `&nbsp;` between glyph and word, because these are the narrowest columns
+    # and an ordinary space is a break opportunity — the pair wraps onto two
+    # lines and the emoji ends up orphaned above its own label.
+    #
+    # The cell shows the basename and links to the line, so the two columns that
+    # carry meaning get the width instead of a repository path nobody reads in
+    # full. The full path survives as the link's title, which is what a hover
+    # shows, so two files sharing a name are still tellable apart.
+    printf '| %s&nbsp;%s | %s&nbsp;%s | [`%s:%s`](%s "%s:%s") | %s%s |\n' \
       "$(run_severity_emoji "$sev")" "$(_ucfirst "$sev")" \
       "$(run_category_emoji "$kind")" "$(_ucfirst "$kind")" \
-      "$(jq -r .path <<<"$f")" "$(jq -r .line <<<"$f")" \
+      "${path##*/}" "$line" "$(_blob_url "$sha" "$path" "$line")" "$path" "$line" \
       "$(_md_cell "$(jq -r .title <<<"$f")")" "$pre"
   done
   printf '\n'
+}
+
+# A permalink to one line of one file at the revision that was reviewed.
+#
+# Pinned to the marker's head_sha rather than to the branch: the resolve leg
+# re-renders this comment after pushing its fixes, and a branch-relative link
+# would then point at code that has moved under the finding it describes.
+_blob_url() {
+  local sha="$1" path="$2" line="$3"
+  printf 'https://github.com/%s/blob/%s/%s#L%s' "$CTX_REPO" "$sha" "$path" "$line"
 }
 
 # The review leg's summary comment.
@@ -901,7 +941,7 @@ _review_summary_body() {
   if (( n == 0 )); then
     printf 'No findings. Low-severity and pre-existing issues would be listed here too, so this is an empty review rather than a filtered one.\n\n'
   else
-    _findings_table "$findings"
+    _findings_table "$findings" "$(jq -r '.head_sha // ""' <<<"$marker")"
   fi
 
   _run_details "$marker" review
@@ -1371,6 +1411,37 @@ Found by revloop while reviewing $CTX_REPO#$CTX_PR (pass $pass). Verified agains
   esac
 }
 
+# Strip an opening the model wrote for itself.
+#
+# The reply's lead is presentation, so it belongs to the orchestrator — but
+# nothing said so, and the resolve prompt hands the model "the conversation so
+# far", which contains earlier replies opening with exactly these words. So the
+# model reads the house style off the pull request, reproduces it, and revloop
+# prefixes its own on top: "**Fixed.** **Fixed.** Confirmed, and …".
+#
+# Three details it has to get right. The trailing period is required, or a reply
+# legitimately beginning "Fixed the comparison" loses its first word. It repeats,
+# because one pass over "**Fixed.** **Fixed.**" leaves a second copy for revloop
+# to double again. And it touches the first line only — `^` in sed anchors per
+# line, so an unrestricted pass would eat a "Deferred." that opens a paragraph
+# three screens down.
+#
+# It also catches the model opening with the WRONG word. The disposition is the
+# orchestrator's own answer, so a reply that leads "Fixed." on a skipped finding
+# has its lead replaced rather than stacked.
+_strip_disposition_lead() {
+  local text="$1" head rest prev
+  head="${text%%$'\n'*}"
+  rest=""
+  [[ "$head" != "$text" ]] && rest="${text#*$'\n'}"
+  prev=""
+  while [[ "$head" != "$prev" ]]; do
+    prev="$head"
+    head="$(printf '%s' "$head" | sed -E 's/^[[:space:]]*(\*\*)?(Fixed|Skipped|Deferred|Not changing this|This needs a human decision)\.(\*\*)?[[:space:]]*//')"
+  done
+  if [[ -n "$rest" ]]; then printf '%s\n%s' "$head" "$rest"; else printf '%s' "$head"; fi
+}
+
 _resolve_reply_body() {
   local d="$1" tracked="$2" pass="$3" harness="$4" model="$5" disp lead
   disp="$(jq -r .disposition <<<"$d")"
@@ -1382,7 +1453,7 @@ _resolve_reply_body() {
     escalated) lead="**This needs a human decision.**" ;;
     *)         lead="**$disp.**" ;;
   esac
-  printf '%s %s\n' "$lead" "$(jq -r .reply <<<"$d")"
+  printf '%s %s\n' "$lead" "$(_strip_disposition_lead "$(jq -r .reply <<<"$d")")"
   [[ -n "$tracked" ]] && printf '\nTracked outside this pull request as %s, so it survives the merge.\n' "$tracked"
   printf '\n<sub>revloop pass %s, verified by %s%s. Every finding is verified whatever its severity — severity governs what happens afterwards, not whether the check happens.</sub>%s' \
     "$pass" "$harness" "${model:+ ($model)}" \

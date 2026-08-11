@@ -72,7 +72,7 @@ Do not inflate. A `low` marked `high` costs a commit, a review cycle, and some o
 
 - **`path` and `line`** anchor the comment to code. Vague is useless: the comment is posted *on that line*.
 - **`side`** is `RIGHT` for additions and unchanged lines, `LEFT` for deletions shown in red. Getting this wrong on a deleted line means GitHub rejects the comment outright, because the line does not exist on the right side.
-- **`title`** names the defect in one line. **Keep it stable across passes for the same defect** — it is part of the finding's identity, and a reworded title reads as a new finding and gets posted twice. Do not prefix it with the severity or category yourself; the orchestrator renders `🔴 **High · Security** —` in front of it, and a title that carries one too would change the finding's identity every time you reworded it.
+- **`title`** names the defect in one line. **Keep it stable across passes for the same defect** — it is part of the finding's identity, and a reworded title reads as a new finding and gets posted twice. Do not prefix it with the severity or category yourself; the orchestrator renders the whole thing as `#### 🔴 [High · Security] <your title>`, and a title that carries one too would change the finding's identity every time you reworded it.
 - **`why`** is the consequence, not a restatement. "Leaves stale sessions active after sign-out" is a why. "This is wrong" is not.
 - **`fix`** is concrete enough to act on.
 
