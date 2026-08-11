@@ -37,10 +37,13 @@ persist:
 EOF
 }
 
+# The colour is part of the fixture, not decoration: `gh_label_ensure` reads it to
+# decide between leaving a label alone and recolouring it, so a route that answers
+# without one describes a label GitHub never returns.
 routes_init() {
   route 'api users/*'                      '{"type":"User"}'
-  route 'api repos/*/labels/revloop/stop'  '{"name":"revloop/stop"}'
-  route 'api repos/*/labels/bug'           '{"name":"bug"}'
+  route 'api repos/*/labels/revloop/stop'  '{"name":"revloop/stop","color":"f85149"}'
+  route 'api repos/*/labels/bug'           '{"name":"bug","color":"d4c5f9"}'
   route 'api repos/*/labels/*'             '!fail'
   route 'api repos/*/branches/main/protection' '!fail'
   route 'secret list*'                     ''
@@ -62,15 +65,15 @@ is  "and it creates no labels"                  "$(count 'method POST')" "0"
 # the five fixed ones.
 has "the plan states the loop's label count"    "$out" "labels            8 for the loop"
 is  "and the list under it is exactly that long" \
-  "$(grep -cE '^\S*│  +(create|exists)  revloop/' <<<"$out")" "8"
-has "a label that already exists is named as existing, not claimed as created" \
-  "$out" "exists  revloop/stop"
-has "and the missing ones are marked for creation" "$out" "create  revloop/pass-1"
+  "$(grep -cE '^\S*│  +(create|exists|recolour) +revloop/' <<<"$out")" "8"
+has "a label that already exists in the right colour is named as existing" \
+  "$out" "exists    revloop/stop"
+has "and the missing ones are marked for creation" "$out" "create    revloop/pass-1"
 
 # The issue sink's labels are a different set with a different owner, so they are
 # counted separately.
 has "the sink's labels are counted on their own"   "$out" "2 for filed issues"
-has "and one that already exists is reported so"   "$out" "exists  bug"
+has "and one that already exists is reported so"   "$out" "exists    bug"
 
 has "the plan says where deferred work will go"    "$out" "deferred work     issues"
 has "and where that answer came from"              "$out" "named in the repository config as 'issues'"
@@ -132,6 +135,42 @@ has "--upgrade rewrites a stale workflow"       "$(cat .github/workflows/revloop
 has "and says it left the policy file alone"    "$out" "regenerates workflows, not policy"
 is  "so the hand-edited policy survives"        "$(grep -c 'max_passes: 7' .github/revloop.yml)" "1"
 has "and it flags the files it would overwrite" "$out" "overwrites        .github/workflows/revloop-review.yml"
+
+# --- --upgrade recolours labels minted under the old single purple -----
+#
+# Every loop label used to be created with one hex, so the label row on a pull
+# request carried no signal at a glance. Six hues fix that, and the migration is
+# `init --upgrade` rather than a script: `gh_label_ensure` recolours a label that
+# already exists. A repository that never upgrades keeps working — the colour is
+# cosmetic, unlike the label itself, which the chain cannot run without.
+fixture_repo "$(config_with_issue_sink)"; stub_reset
+routes_init
+route_first 'api repos/*/labels/bug'      '{"name":"bug","color":"d4c5f9"}'
+route_first 'api repos/*/labels/revloop/*' '{"name":"old","color":"5319e7"}'
+out="$("$REVLOOP" init --upgrade --dry-run 2>&1)"
+
+has "the plan calls a wrong-coloured label a recolour, not an existing one" \
+  "$out" "recolour  revloop/converged"
+hasnt "and does not claim it would create one"  "$out" "create    revloop/converged"
+
+stub_reset; routes_init
+route_first 'api repos/*/labels/bug'      '{"name":"bug","color":"d4c5f9"}'
+route_first 'api repos/*/labels/revloop/*' '{"name":"old","color":"5319e7"}'
+out="$("$REVLOOP" init --upgrade --yes 2>&1)"
+
+is  "every loop label is recoloured, none created" \
+  "$(count 'method PATCH repos/acme/widget/labels/revloop/')" "8"
+is  "and no loop label is created, because they all already existed" \
+  "$(count 'method POST repos/acme/widget/labels -f name=revloop/')" "0"
+has "the run says how many it recoloured"       "$out" "recoloured 8"
+has "converged is green"                        "$(calls)" "labels/revloop/converged -f color=4ac26b"
+has "halted is orange"                          "$(calls)" "labels/revloop/halted -f color=e8873f"
+# Red is reserved for the one label a human applies, so a red pill in a pull
+# request list always means somebody pulled the brake.
+has "stop is red"                               "$(calls)" "labels/revloop/stop -f color=f85149"
+has "a pass label is grey, because it is informational rather than a state" \
+  "$(calls)" "labels/revloop/pass-2 -f color=afb8c1"
+hasnt "and nothing is minted in the old single purple any more" "$(calls)" "color=5319e7"
 
 # --- create_labels: false refuses rather than inventing ----------------
 #

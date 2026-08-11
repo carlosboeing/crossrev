@@ -155,17 +155,55 @@ gh_label_exists() {
   gh api "repos/$1/labels/$2" >/dev/null 2>&1
 }
 
-# Prints "created" or "exists", so a caller reporting an inventory can tell the
-# truth about which it did. A plan claiming to create a label it did not create
-# is the same class of lie as a count that disagrees with its own list.
+# The hex a label currently carries, or nothing if it does not exist. Lowercased,
+# because GitHub accepts either case on write and answers in one of them.
+#
+# Absence is the answer here rather than an error, so the pipeline's failure is
+# swallowed. Without the `|| true` a missing label fails the pipeline under
+# `pipefail`, and the caller's plain assignment then takes `set -e` down with it
+# — which is every fresh repository, on the most consequential command revloop
+# has.
+# Filtered with a piped jq rather than `gh --jq`, so the call is byte-identical to
+# the existence check it replaces. Not a style choice: the offline suite matches
+# routes on the whole argument string, and an extra flag would silently miss every
+# label fixture in it.
+gh_label_colour() {
+  gh api "repos/$1/labels/$2" 2>/dev/null \
+    | jq -r '.color // empty' 2>/dev/null \
+    | tr '[:upper:]' '[:lower:]' || true
+}
+
+# Prints "created", "recoloured" or "exists", so a caller reporting an inventory
+# can tell the truth about which it did. A plan claiming to create a label it did
+# not create is the same class of lie as a count that disagrees with its own list.
+#
+# Recolouring an existing label is what makes the six loop colours need no
+# migration: `init --upgrade` on a repository minted under the old single purple
+# brings all six into line. A failed recolour is a warning rather than a fatal,
+# because a label with the wrong colour still drives the chain — unlike a missing
+# one, which gh refuses to apply and which stalls it.
 gh_label_ensure() {
-  local repo="$1" name="$2" colour="${3:-ededed}" desc="${4:-}"
-  if gh_label_exists "$repo" "$name"; then printf 'exists'; return 0; fi
-  gh api --method POST "repos/$repo/labels" \
-    -f name="$name" -f color="$colour" -f description="$desc" >/dev/null 2>&1 \
-    || ui_die "could not create the label '$name' on $repo" \
-       "The loop is label-driven and gh refuses to apply a label that does not exist, so this would fail later at a point that looks healthy. Create it by hand, or grant the token issues write."
-  printf 'created'
+  local repo="$1" name="$2" colour="${3:-ededed}" desc="${4:-}" current
+  current="$(gh_label_colour "$repo" "$name")"
+  if [[ -z "$current" ]]; then
+    gh api --method POST "repos/$repo/labels" \
+      -f name="$name" -f color="$colour" -f description="$desc" >/dev/null 2>&1 \
+      || ui_die "could not create the label '$name' on $repo" \
+         "The loop is label-driven and gh refuses to apply a label that does not exist, so this would fail later at a point that looks healthy. Create it by hand, or grant the token issues write."
+    printf 'created'
+    return 0
+  fi
+  if [[ "$current" == "$(tr '[:upper:]' '[:lower:]' <<<"$colour")" ]]; then
+    printf 'exists'
+    return 0
+  fi
+  if gh api --method PATCH "repos/$repo/labels/$name" -f color="$colour" >/dev/null 2>&1; then
+    printf 'recoloured'
+  else
+    ui_warn "could not update the colour of '$name' on $repo" \
+      "The label still exists and the loop still runs on it, so this is cosmetic — the pull request's label row just carries less signal than it should. Recolour it by hand, or grant the token issues write."
+    printf 'exists'
+  fi
 }
 
 # ---------------------------------------------------------------------------

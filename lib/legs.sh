@@ -99,6 +99,36 @@ legs_awaiting_label() {
   esac
 }
 
+# The colour a loop label is minted with.
+#
+# Six hues, no two adjacent on the wheel, so the label row on a pull request
+# carries state at a glance rather than a row of identical purple pills. Red is
+# reserved for `revloop/stop`, the one label a human applies — a red pill in a
+# pull request list always means somebody pulled the brake, never that the loop
+# had trouble.
+#
+# Near-black was considered for `stop` and rejected on evidence: GitHub derives
+# dark-theme label text from the same hex it uses for the light-theme background,
+# so a near-black label renders as dark text on a dark pill and is unreadable.
+#
+# One map rather than a constant per call site. The watchdog mints
+# `revloop/halted` itself when it gives up, and a second hex there is how the
+# same label ends up two colours depending on which code path created it.
+legs_label_colour() {
+  case "$1" in
+    revloop/awaiting-review)     printf '54aeff' ;;   # blue, in progress
+    revloop/awaiting-resolution) printf 'a371f7' ;;   # purple, a leg owes an answer
+    revloop/converged)           printf '4ac26b' ;;   # green, finished on its own
+    revloop/halted)              printf 'e8873f' ;;   # orange, a human is needed
+    revloop/stop)                printf 'f85149' ;;   # red, a human applied it
+    revloop/pass-*)              printf 'afb8c1' ;;   # grey, informational
+    # Not a loop state and not one of the six: the watchdog's own bookkeeping,
+    # which reads as a qualifier on whatever state it sits beside.
+    revloop/watchdog-retried)    printf 'fbca04' ;;
+    *)                           printf 'ededed' ;;
+  esac
+}
+
 # Refuse to push anywhere except the PR's own head branch.
 #
 # Branch protection is a backstop, not a control: it fires after a bad push is

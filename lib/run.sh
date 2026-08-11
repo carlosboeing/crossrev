@@ -1404,7 +1404,7 @@ _watchdog_retry() {
 
   if grep -qw "revloop/watchdog-retried" <<<"$labels"; then
     state_label_remove "$pr" "$repo" "$label"
-    gh_label_ensure "$repo" "revloop/halted" "b60205" "revloop stopped" >/dev/null
+    gh_label_ensure "$repo" "revloop/halted" "$(legs_label_colour revloop/halted)" "revloop stopped" >/dev/null
     state_label_add "$pr" "$repo" "revloop/halted"
     gh_comment_create "$repo" "$pr" \
 "**revloop halted** — the $leg leg was already retried once and is still not finishing.
@@ -1418,7 +1418,8 @@ To look yourself: \`revloop status --pr $pr\`. To restart it, remove \`revloop/h
 
   # Re-applying a label GitHub already holds fires no event, so the retry has to
   # remove it first.
-  gh_label_ensure "$repo" "revloop/watchdog-retried" "fbca04" "revloop retried this leg once" >/dev/null
+  gh_label_ensure "$repo" "revloop/watchdog-retried" \
+    "$(legs_label_colour revloop/watchdog-retried)" "revloop retried this leg once" >/dev/null
   state_label_add "$pr" "$repo" "revloop/watchdog-retried"
   state_label_remove "$pr" "$repo" "$label"
   state_label_add "$pr" "$repo" "$label"

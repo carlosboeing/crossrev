@@ -26,7 +26,9 @@ INIT_NEEDS_REFRESHER=0
 INIT_WORKFLOWS=""
 INIT_SECRETS=""
 
-readonly INIT_LABEL_COLOUR="5319e7"
+# Labels filed against an issue sink, which are not loop state and do not follow
+# the loop's colour scheme. The loop's own six come from legs_label_colour.
+readonly INIT_SINK_LABEL_COLOUR="d4c5f9"
 
 cmd_init() {
   local yes=0
@@ -307,7 +309,7 @@ _init_print_plan() {
   _init_label_inventory "$INIT_PASS_LABELS $INIT_FIXED_LABELS"
   if [[ -n "$INIT_SINK_LABELS" ]]; then
     ui_line "                  $(wc -w <<<"$INIT_SINK_LABELS" | tr -d ' ') for filed issues:"
-    _init_label_inventory "$INIT_SINK_LABELS"
+    _init_label_inventory "$INIT_SINK_LABELS" "$INIT_SINK_LABEL_COLOUR"
   fi
   ui_line "                  the chain is label-driven and gh refuses to apply a label"
   ui_line "                  that does not exist, so a repository without them posts its"
@@ -337,11 +339,21 @@ _init_print_plan() {
   fi
 }
 
+# $1 is the label list. $2 is the colour they should carry, or empty to take each
+# label's own from the loop's map.
+#
+# `recolour` is its own word rather than folded into `exists`, for the reason the
+# rest of this plan exists: a run that says "exists" and then quietly changes the
+# label's colour has told the reader something false about what it would do.
 _init_label_inventory() {
-  local l state
-  for l in $1; do
-    if gh_label_exists "$INIT_REPO" "$l"; then state="exists"; else state="create"; fi
-    ui_line "                    $state  $l"
+  local labels="$1" colour="${2:-}" l state current want
+  for l in $labels; do
+    want="${colour:-$(legs_label_colour "$l")}"
+    current="$(gh_label_colour "$INIT_REPO" "$l")"
+    if [[ -z "$current" ]]; then state="create"
+    elif [[ "$current" == "$(tr '[:upper:]' '[:lower:]' <<<"$want")" ]]; then state="exists"
+    else state="recolour"; fi
+    ui_line "                    $(printf '%-8s' "$state")  $l"
   done
 }
 
@@ -386,13 +398,18 @@ _init_execute() {
   local unfinished=""
 
   # --- labels --------------------------------------------------------------
-  local created=0 existed=0 l state
+  local created=0 existed=0 recoloured=0 l state
   for l in $INIT_PASS_LABELS $INIT_FIXED_LABELS; do
-    state="$(gh_label_ensure "$INIT_REPO" "$l" "$INIT_LABEL_COLOUR" "revloop loop state")"
-    [[ "$state" == "created" ]] && created=$(( created + 1 )) || existed=$(( existed + 1 ))
+    state="$(gh_label_ensure "$INIT_REPO" "$l" "$(legs_label_colour "$l")" "revloop loop state")"
+    case "$state" in
+      created)    created=$(( created + 1 )) ;;
+      recoloured) recoloured=$(( recoloured + 1 )) ;;
+      *)          existed=$(( existed + 1 )) ;;
+    esac
   done
   ui_section "Labels"
   ui_ok "created $created and found $existed already on $INIT_REPO for the loop"
+  (( recoloured > 0 )) && ui_ok "recoloured $recoloured that were already there, so the label row carries state at a glance"
 
   if [[ -n "$INIT_SINK_LABELS" ]]; then
     local can_create missing=""
@@ -401,7 +418,7 @@ _init_execute() {
     for l in $INIT_SINK_LABELS; do
       if gh_label_exists "$INIT_REPO" "$l"; then existed=$(( existed + 1 )); continue; fi
       if [[ "$can_create" == "false" ]]; then missing="$missing $l"; continue; fi
-      gh_label_ensure "$INIT_REPO" "$l" "d4c5f9" "filed by revloop" >/dev/null
+      gh_label_ensure "$INIT_REPO" "$l" "$INIT_SINK_LABEL_COLOUR" "filed by revloop" >/dev/null
       created=$(( created + 1 ))
     done
     if [[ -n "$missing" ]]; then
