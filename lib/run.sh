@@ -502,10 +502,12 @@ No review ran, so nothing here is a judgement about the code. Raising the cap in
   else
     marker="$(jq -cn --argjson p "$pass" --arg sha "$CTX_HEAD_SHA" \
       --arg r "${GITHUB_RUN_ID:-local-$$}" --argjson ts "$(date +%s)" \
-      --arg h "$harness" --arg m "$model" \
-      '{v:1, leg:"review", pass:$p, state:"started", ts:$ts, run_id:$r,
+      --arg h "$harness" --arg m "$model" --arg e "$effort" --arg ep "$endpoint" \
+      '{v:1, leg:"review", pass:$p, state:"started", ts:$ts, done_ts:null, run_id:$r,
         head_sha:$sha, harness:$h, model:(if $m == "" then null else $m end),
-        model_reported:null, verdict:null, findings:[]}')"
+        effort:(if $e == "" then null else $e end),
+        endpoint:(if $ep == "" then null else $ep end),
+        model_reported:null, tokens:null, verdict:null, findings:[]}')"
     comment_id="$(gh_comment_create "$CTX_REPO" "$CTX_PR" \
 "**revloop — reviewing, pass $pass of $CTX_MAX_PASSES**
 
@@ -517,7 +519,7 @@ Reading the diff and any earlier review threads. This comment becomes the pass s
   run_checkpoint
 
   # --- the agent, unless a previous attempt already recorded its output -----
-  local findings verdict model_reported
+  local findings verdict model_reported tokens
   if [[ "$(jq -r '(.findings // []) | length' <<<"$marker")" != "0" \
         && "$(jq -r '.verdict // "null"' <<<"$marker")" != "null" ]]; then
     ui_say "The previous attempt already recorded its findings, so the review is not run again."
@@ -554,6 +556,7 @@ Reading the diff and any earlier review threads. This comment becomes the pass s
 
     payload="$(jq -c .payload "$envelope_file")"
     model_reported="$(jq -r '.model_reported // "null"' "$envelope_file")"
+    tokens="$(jq -c '.tokens // null' "$envelope_file")"
     verdict="$(jq -r .verdict <<<"$payload")"
 
     # Stable ids, so "already posted" is a set-membership test rather than a
@@ -576,7 +579,8 @@ Reading the diff and any earlier review threads. This comment becomes the pass s
     # this point needs no second model invocation to recover, which is the
     # difference between a cheap retry and an expensive one.
     marker="$(jq -c --argjson f "$findings" --arg v "$verdict" --arg mr "$model_reported" \
-      '.findings = $f | .verdict = $v
+      --argjson tk "${tokens:-null}" \
+      '.findings = $f | .verdict = $v | .tokens = $tk
        | .model_reported = (if $mr == "null" then null else $mr end)' <<<"$marker")"
     gh_comment_edit "$CTX_REPO" "$comment_id" \
 "**revloop — reviewing, pass $pass of $CTX_MAX_PASSES**
@@ -627,7 +631,13 @@ Findings recorded; posting them now.$(state_marker_encode "$(jq -c 'del(.comment
   marker="$(jq -c --argjson f "$findings" '.findings = $f' <<<"$marker")"
 
   # --- the summary comment -------------------------------------------------
+  #
+  # Stamped before the body is rendered, because the run-details table reads the
+  # elapsed time off the marker and the marker is what the resolve leg re-renders
+  # this comment from. A stamp written after the render would leave the first copy
+  # of the comment claiming a duration nothing recorded.
   local summary_body
+  marker="$(jq -c --argjson t "$(date +%s)" '.done_ts = $t' <<<"$marker")"
   summary_body="$(_review_summary_body "$findings" "$marker")"
   gh_comment_edit "$CTX_REPO" "$comment_id" \
     "$summary_body$(state_marker_encode "$(jq -c 'del(.comment_id)' <<<"$marker")")"
@@ -701,6 +711,89 @@ _alert() {
   printf '\n'
 }
 
+# "3m 12s", from two marker timestamps. An em dash when either is missing, which
+# is what a marker written before this field existed looks like.
+_elapsed() {
+  local from="$1" to="$2" secs
+  [[ "$from" =~ ^[0-9]+$ && "$to" =~ ^[0-9]+$ ]] || { printf '—'; return 0; }
+  secs=$(( to - from ))
+  (( secs < 0 )) && { printf '—'; return 0; }
+  if (( secs < 60 )); then printf '%ss' "$secs"
+  else printf '%sm %ss' "$(( secs / 60 ))" "$(( secs % 60 ))"; fi
+}
+
+# 41205 as 41,205. Nothing in bash groups digits, and an unpunctuated six-figure
+# number is the one cell in the table a reader has to count.
+#
+# Done with parameter expansion rather than a sed loop: BSD sed rejects labels
+# written on one line, so the obvious `:a; s/…/; ta` one-liner works on GNU and
+# silently prints the number ungrouped here.
+_thousands() {
+  [[ "$1" =~ ^[0-9]+$ ]] || { printf '—'; return 0; }
+  local n="$1" out=""
+  while (( ${#n} > 3 )); do
+    out=",${n: -3}$out"
+    n="${n:0:${#n}-3}"
+  done
+  printf '%s%s' "$n" "$out"
+}
+
+# The run details, one row for the comment's own leg and no other.
+#
+# **One row per leg, and only its own.** The review comment reports the review
+# leg, the resolve comment the resolve leg. The two sit adjacent on the pull
+# request, so nothing is lost by not duplicating — and duplication means that
+# after a retry or a resume the two copies can disagree, with no rule saying
+# which wins.
+#
+# **Harness, model and effort are one cell.** They describe one thing: which
+# agent ran. A named endpoint adds a fourth segment, because which endpoint
+# served the call matters as much as which model.
+#
+# **Unconditional.** It appears whatever the verdict, including converged and
+# blocked. A pass that finds nothing still spends time and tokens, and that is
+# exactly when you want to know.
+_run_details() {
+  local marker="$1" leg="$2" harness model reported effort endpoint agent gaps=""
+  harness="$(jq -r '.harness // "?"' <<<"$marker")"
+  model="$(jq -r '.model // ""' <<<"$marker")"
+  reported="$(jq -r '.model_reported // ""' <<<"$marker")"
+  effort="$(jq -r '.effort // ""' <<<"$marker")"
+  endpoint="$(jq -r '.endpoint // ""' <<<"$marker")"
+
+  agent="\`$harness\`"
+  if [[ -n "$reported" && "$reported" != "null" ]]; then
+    agent="$agent · \`$reported\`"
+    # A genuine mismatch is not a footnote. It may mean the cross-model property
+    # broke, and it should be impossible to skim past.
+    if [[ -n "$model" && "$model" != "null" && "$model" != "$reported" ]]; then
+      agent="$agent — **requested \`$model\`, a different model answered**"
+    fi
+  elif [[ -n "$model" && "$model" != "null" ]]; then
+    agent="$agent · \`$model\`"
+    gaps="$harness does not report which model answered, so the model above is the one revloop requested."
+  fi
+  [[ -n "$effort" && "$effort" != "null" ]] && agent="$agent · $effort effort"
+  [[ -n "$endpoint" && "$endpoint" != "null" && "$endpoint" != "vendor" ]] \
+    && agent="$agent · via \`$endpoint\`"
+
+  printf '**Run details**\n\n'
+  printf '| Leg | Agent | Duration | Tokens |\n|---|---|---|---|\n'
+  printf '| %s | %s | %s | %s |\n\n' "$leg" "$agent" \
+    "$(_elapsed "$(jq -r '.ts // ""' <<<"$marker")" "$(jq -r '.done_ts // ""' <<<"$marker")")" \
+    "$(_thousands "$(jq -r '.tokens // ""' <<<"$marker")")"
+
+  # Named once, under the table, rather than annotated in every cell: the gap is
+  # the same every pass, so repeating it is noise.
+  #
+  # Cost is deliberately absent rather than left as a blank column that reads as
+  # zero. Both legs run on subscriptions today, where no per-run dollar figure
+  # exists, and computing one from tokens times a price table means maintaining a
+  # price table that goes stale.
+  printf '<sub>%sNo cost is shown: this leg ran on a subscription, where there is no per-run figure to report.</sub>\n\n' \
+    "${gaps:+$gaps }"
+}
+
 # The summary table. Severity and category carry emoji, and provenance sits in
 # the *what* cell rather than beside the severity — `pre-existing` is not a
 # fourth severity and must not read as one.
@@ -735,14 +828,11 @@ _findings_table() {
 # effort, endpoint, timing, tokens — therefore has to live on the marker, and
 # passing the marker is what keeps the two renderings honest about that.
 _review_summary_body() {
-  local findings="$1" marker="$2" n actionable verdict pass harness model reported
+  local findings="$1" marker="$2" n actionable verdict pass
   n="$(jq 'length' <<<"$findings")"
   actionable="$(run_actionable "$findings")"
   verdict="$(jq -r '.verdict // "issues-remain"' <<<"$marker")"
   pass="$(jq -r '.pass // 1' <<<"$marker")"
-  harness="$(jq -r '.harness // "?"' <<<"$marker")"
-  model="$(jq -r '.model // ""' <<<"$marker")"
-  reported="$(jq -r '.model_reported // ""' <<<"$marker")"
 
   printf '## revloop review — pass %s of %s\n\n' "$pass" "$CTX_MAX_PASSES"
 
@@ -762,15 +852,18 @@ _review_summary_body() {
       _alert CAUTION "$(printf '**%s %s need resolving.** A second agent now verifies every finding below against the codebase and either fixes it, skips it, defers it, or explains why it is wrong. It may change code for the %s at or above `fix_at` (%s); the rest are verified and reported, never silently dropped.' "$n" "$noun" "$actionable" "$CTX_FIX_AT")" ;;
   esac
 
-  printf 'Reviewed by `%s`%s' "$harness" "${model:+ using \`$model\`}"
-  [[ -n "$reported" && "$reported" != "null" ]] && printf ', answered by `%s`' "$reported"
-  printf '. Verdict: **%s**.\n\n' "$verdict"
+  # Which agent ran is the run-details table's job now, and repeating the
+  # answering model here is the duplication Decision 4 rejected — two renderings
+  # of one fact that can disagree after a retry.
+  printf 'Verdict: **%s**.\n\n' "$verdict"
 
   if (( n == 0 )); then
     printf 'No findings. Low-severity and pre-existing issues would be listed here too, so this is an empty review rather than a filtered one.\n\n'
   else
     _findings_table "$findings"
   fi
+
+  _run_details "$marker" review
 }
 
 # ---------------------------------------------------------------------------
@@ -859,9 +952,12 @@ leg_resolve() {
   else
     marker="$(jq -cn --argjson p "$pass" --arg sha "$CTX_HEAD_SHA" \
       --arg r "${GITHUB_RUN_ID:-local-$$}" --argjson ts "$(date +%s)" \
-      --arg h "$harness" --arg m "$model" \
-      '{v:1, leg:"resolve", pass:$p, state:"started", ts:$ts, run_id:$r, head_sha:$sha,
-        harness:$h, model:(if $m == "" then null else $m end), model_reported:null,
+      --arg h "$harness" --arg m "$model" --arg e "$effort" --arg ep "$endpoint" \
+      '{v:1, leg:"resolve", pass:$p, state:"started", ts:$ts, done_ts:null, run_id:$r,
+        head_sha:$sha, harness:$h, model:(if $m == "" then null else $m end),
+        effort:(if $e == "" then null else $e end),
+        endpoint:(if $ep == "" then null else $ep end),
+        model_reported:null, tokens:null,
         blocked:false, blocked_reason:null, commit_sha:null, summary:"", dispositions:[]}')"
     comment_id="$(gh_comment_create "$CTX_REPO" "$CTX_PR" \
 "**revloop — resolving pass $pass of $CTX_MAX_PASSES**
@@ -873,7 +969,7 @@ Verifying each finding against the codebase. This comment becomes the pass summa
   marker="$(jq -c --argjson id "$comment_id" '. + {comment_id: $id}' <<<"$marker")"
   run_checkpoint
 
-  local threads dispositions blocked blocked_reason summary model_reported
+  local threads dispositions blocked blocked_reason summary model_reported tokens
   threads="$(gh_review_threads "$CTX_REPO" "$CTX_PR")"
 
   if [[ "$(jq -r '(.dispositions // []) | length' <<<"$marker")" != "0" ]]; then
@@ -936,11 +1032,12 @@ Verifying each finding against the codebase. This comment becomes the pass summa
     summary="$(jq -r '.summary' <<<"$payload")"
     blocked="$(jq -r '.blocked // false' <<<"$payload")"
     blocked_reason="$(jq -r '.blocked_reason // "null"' <<<"$payload")"
+    tokens="$(jq -c '.tokens // null' "$envelope_file")"
     rm -rf "$tmp"
 
     marker="$(jq -c --argjson d "$dispositions" --arg w "$summary" --argjson b "$blocked" \
-      --arg br "$blocked_reason" --arg mr "$model_reported" '
-      .dispositions = $d | .summary = $w | .blocked = $b
+      --arg br "$blocked_reason" --arg mr "$model_reported" --argjson tk "${tokens:-null}" '
+      .dispositions = $d | .summary = $w | .blocked = $b | .tokens = $tk
       | .blocked_reason = (if $br == "null" then null else $br end)
       | .model_reported = (if $mr == "null" then null else $mr end)' <<<"$marker")"
     gh_comment_edit "$CTX_REPO" "$comment_id" \
@@ -1129,6 +1226,7 @@ Pushed \`${commit_sha:0:7}\`; replying to each thread now.$(state_marker_encode 
 
   # --- the summary comment, then completion --------------------------------------
   local summary_body
+  marker="$(jq -c --argjson t "$(date +%s)" '.done_ts = $t' <<<"$marker")"
   summary_body="$(_resolve_summary_body "$dispositions" "$findings" "$deferred_lines" "$marker")"
   gh_comment_edit "$CTX_REPO" "$comment_id" \
     "$summary_body$(state_marker_encode "$(jq -c 'del(.comment_id)' <<<"$marker")")"
@@ -1285,12 +1383,9 @@ _dispositions_table() {
 # review leg's does — everything it reports about the run lives there.
 _resolve_summary_body() {
   local dispositions="$1" findings="$2" deferred_lines="$3" marker="$4"
-  local summary pass harness model reported commit blocked blocked_reason
+  local summary pass commit blocked blocked_reason
   summary="$(jq -r '.summary // ""' <<<"$marker")"
   pass="$(jq -r '.pass // 1' <<<"$marker")"
-  harness="$(jq -r '.harness // "?"' <<<"$marker")"
-  model="$(jq -r '.model // ""' <<<"$marker")"
-  reported="$(jq -r '.model_reported // ""' <<<"$marker")"
   commit="$(jq -r '.commit_sha // ""' <<<"$marker")"
   blocked="$(jq -r '.blocked // false' <<<"$marker")"
   blocked_reason="$(jq -r '.blocked_reason // ""' <<<"$marker")"
@@ -1311,9 +1406,6 @@ _resolve_summary_body() {
     _alert NOTE "$(printf '**%s** Every finding was verified whatever its severity — severity governs what happens afterwards, not whether the check happens.' "$counts")"
   fi
 
-  printf 'Verified by `%s`%s' "$harness" "${model:+ using \`$model\`}"
-  [[ -n "$reported" && "$reported" != "null" ]] && printf ', answered by `%s`' "$reported"
-  printf '. '
   if [[ -n "$commit" && "$commit" != "null" ]]; then
     printf 'Fixes pushed as `%s`.\n\n' "${commit:0:7}"
   else
@@ -1329,6 +1421,8 @@ _resolve_summary_body() {
     printf '%s\n\n' "$deferred_lines"
     printf 'An unresolved thread on a merged pull request is visible in no GitHub view, which is why a deferred finding goes somewhere durable before its thread is resolved.\n\n'
   fi
+
+  _run_details "$marker" resolve
 }
 
 # ---------------------------------------------------------------------------

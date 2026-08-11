@@ -85,8 +85,18 @@ is  "and accepts the order the adapter uses"            "$?" "1"
 # echoing back the one that was asked for.
 has "the marker records that no answering model was reported" \
   "$(calls)" '"model_reported":null'
-hasnt "and the comment does not pass the requested model off as the answering one" \
-  "$(calls)" "answered by"
+# The run-details table has one cell for which agent ran, so a harness that
+# reports no answering model has to say so rather than let the requested one
+# stand in for it unannounced. Named once under the table, not per row: the gap
+# is the same every pass.
+has "the run details name the gap rather than passing the requested model off as the answering one" \
+  "$(calls)" "agy does not report which model answered"
+has "and the cell still says which model was asked for" \
+  "$(calls)" '`agy` · `reviewer-model`'
+
+# Antigravity does report usage, which is the one number it can contribute.
+has "the token count reaches the run-details table" "$(calls)" "| review |"
+has "and the marker records it for a re-render"     "$(calls)" '"tokens":2'
 
 # The read-only rule, asserted at the boundary where it would break: a leg makes
 # no attempt to write a secret, whatever the harness did to its borrowed copy.

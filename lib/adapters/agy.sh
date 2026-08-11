@@ -70,18 +70,25 @@ adapter_agy() {
     [[ -n "$msg" ]] || msg="$(head -c 400 "$err")"
     [[ -n "$msg" ]] || msg="agy exited $rc with no output on either stream"
     jq -cn --arg e "$msg" \
-      '{ok:false, payload:null, harness:"agy", endpoint:null, model_reported:null, error:$e}'
+      '{ok:false, payload:null, harness:"agy", endpoint:null, model_reported:null,
+        tokens:null, error:$e}'
     rm -f "$out" "$err"; return 1
   fi
 
   # structured_output is the parsed object when a schema was given. The response
   # string is the same JSON, and parsing it is the fallback for a run with no
   # schema rather than a second-guess of the first.
-  local payload
+  local payload tokens
   payload="$(jq -c '.structured_output // (.response | fromjson? // null)' "$out" 2>/dev/null || echo null)"
+  # It reports no answering model and does report usage, so this is the one number
+  # it can contribute to the run-details table.
+  tokens="$(jq -r '(.usage // {})
+                   | (.total_tokens // ((.input_tokens // 0) + (.output_tokens // 0)))
+                   | if . == 0 then "null" else tostring end' "$out" 2>/dev/null)" || tokens=null
+  [[ -n "$tokens" ]] || tokens=null
   rm -f "$out" "$err"
 
-  jq -cn --argjson p "${payload:-null}" \
+  jq -cn --argjson p "${payload:-null}" --argjson t "$tokens" \
     '{ok:true, payload:$p, harness:"agy", endpoint:"vendor",
-      model_reported:null, error:null}'
+      model_reported:null, tokens:$t, error:null}'
 }

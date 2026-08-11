@@ -17,8 +17,20 @@ set -uo pipefail
 prompt="${!#}"
 [[ -n "${REVLOOP_PROMPT_LOG:-}" ]] && printf '%s' "$prompt" >"$REVLOOP_PROMPT_LOG"
 
+# The answering model defaults to the one that was asked for, which is what the
+# real CLI reports when nothing substitutes it. A stub that answered as something
+# else made every run look like a server-side substitution, which the run-details
+# table now calls out in bold — correctly, and on a fixture that never meant it.
+# A test that wants a substitution sets REVLOOP_*_MODEL and gets one.
+requested=""
+prev=""
+for a in "$@"; do
+  [[ "$prev" == "--model" ]] && { requested="$a"; break; }
+  prev="$a"
+done
+
 payload_file="${REVLOOP_HARNESS_PAYLOAD:-}"
-model="${REVLOOP_HARNESS_MODEL:-claude-test-model}"
+model="${REVLOOP_HARNESS_MODEL:-${requested:-claude-test-model}}"
 if [[ "$prompt" == *"You are the review leg"* ]]; then
   [[ -n "${REVLOOP_REVIEW_PAYLOAD:-}" ]] && payload_file="$REVLOOP_REVIEW_PAYLOAD"
   model="${REVLOOP_REVIEW_MODEL:-$model}"
@@ -38,5 +50,10 @@ if [[ "$prompt" == *"You are the resolve leg"* && -n "${REVLOOP_RESOLVE_EDIT:-}"
   bash "$REVLOOP_RESOLVE_EDIT" || true
 fi
 
+# modelUsage carries all four counters the real CLI reports, because the adapter
+# sums them into the run-details table and a fixture with only one would let a
+# regression through that drops the other three.
 jq -cn --arg r "$(cat "$payload_file")" --arg m "$model" \
-  '{result:$r, is_error:false, modelUsage:{($m):{inputTokens:1}}, provider:"stub"}'
+  '{result:$r, is_error:false, provider:"stub",
+    modelUsage:{($m):{inputTokens:1200, outputTokens:300,
+                      cacheReadInputTokens:40000, cacheCreationInputTokens:5}}}'

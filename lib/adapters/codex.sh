@@ -26,10 +26,13 @@ adapter_codex() {
       "Named endpoints are Anthropic-compatible and reached through the claude adapter. Use harness: claude with endpoint: $endpoint, or drop the endpoint for this leg."
   fi
 
-  local out_file err rc
-  out_file="$(mktemp)"; err="$(mktemp)"
+  local out_file err events rc
+  out_file="$(mktemp)"; err="$(mktemp)"; events="$(mktemp)"
 
-  local -a args=(exec --skip-git-repo-check -o "$out_file")
+  # `--json` streams events on stdout while `-o` still writes the final payload to
+  # a file, so this buys the token counts without changing where the payload comes
+  # from. Codex carries them on turn.completed and nothing else does.
+  local -a args=(exec --skip-git-repo-check --json -o "$out_file")
   # Codex takes the schema as a FILE PATH, where Claude Code takes it inline.
   [[ -n "$schema_file" ]] && args+=(--output-schema "$schema_file")
   [[ -n "$model" && "$model" != "null" ]] && args+=(-m "$model")
@@ -48,19 +51,31 @@ adapter_codex() {
   # blocks indefinitely on "Reading additional input from stdin..." and the leg
   # hangs with no output and no error.
   ( cd "$workdir" && "${run[@]}" codex "${args[@]}" "$(cat "$prompt_file")" ) \
-    >/dev/null 2>"$err" </dev/null
+    >"$events" 2>"$err" </dev/null
   rc=$?
 
   if (( rc != 0 )) || [[ ! -s "$out_file" ]]; then
     jq -cn --arg e "$(head -c 400 "$err")" \
-      '{ok:false, payload:null, harness:"codex", endpoint:null, model_reported:null, error:$e}'
-    rm -f "$out_file" "$err"; return 1
+      '{ok:false, payload:null, harness:"codex", endpoint:null, model_reported:null,
+        tokens:null, error:$e}'
+    rm -f "$out_file" "$err" "$events"; return 1
   fi
 
-  local payload; payload="$(jq -c . "$out_file" 2>/dev/null || echo null)"
-  rm -f "$out_file" "$err"
+  # The last turn.completed event, if one is there. Parsed leniently on purpose:
+  # a missing count renders as a dash under a footnote, which is a better outcome
+  # than an adapter that fails because a vendor renamed a field.
+  local payload tokens
+  payload="$(jq -c . "$out_file" 2>/dev/null || echo null)"
+  tokens="$(jq -s -r '
+    [ .[] | select(.type == "turn.completed") | .usage // empty ] | last
+    | if . == null then "null"
+      else ((.input_tokens // 0) + (.output_tokens // 0)
+            + (.cached_input_tokens // 0) | tostring) end' \
+    "$events" 2>/dev/null)" || tokens=null
+  [[ -n "$tokens" ]] || tokens=null
+  rm -f "$out_file" "$err" "$events"
 
-  jq -cn --argjson p "$payload" \
+  jq -cn --argjson p "$payload" --argjson t "$tokens" \
     '{ok:true, payload:$p, harness:"codex", endpoint:"vendor",
-      model_reported:null, error:null}'
+      model_reported:null, tokens:$t, error:null}'
 }

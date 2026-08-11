@@ -221,4 +221,51 @@ has "naming what stopped"                             "$blocked_resolve" "schema
 is  "and the halt is stated once, not once in the alert and again below it" \
   "$(grep -c 'The loop halts here and needs a human' <<<"$blocked_resolve" || true)" "1"
 
+# ---------------------------------------------------------------------------
+# Decision 4 — the run-details table
+# ---------------------------------------------------------------------------
+
+rows_in() { grep -c '^| \(review\|resolve\) |' <<<"$1" || true; }
+
+has "the review comment carries a run-details block" "$review_body" "**Run details**"
+has "with the four columns"                          "$review_body" "| Leg | Agent | Duration | Tokens |"
+is  "and exactly one row"                            "$(rows_in "$review_body")" "1"
+has "for its own leg"                                "$review_body" "| review | \`claude\`"
+# Harness, model and effort describe one thing — which agent ran — so they are
+# one cell rather than three rows.
+has "harness and model share the cell"               "$review_body" "\`claude\` · \`reviewer-model\`"
+# Six figures of tokens is the one cell a reader would otherwise have to count.
+has "the token count is grouped"                     "$review_body" "41,505"
+
+# Unconditional. A pass that finds nothing still spends time and tokens, and that
+# is exactly when you want to know — so the block appears on a converged comment
+# with an empty findings list too.
+has "a converged pass still reports what it cost"    "$converged_body" "**Run details**"
+is  "with the same single row"                       "$(rows_in "$converged_body")" "1"
+has "and a blocked one does as well"                 "$blocked_body" "**Run details**"
+
+# Cost is deliberately absent rather than a blank column that reads as zero: both
+# legs run on subscriptions, where no per-run figure exists.
+has "cost is named as absent rather than left blank" "$review_body" "no per-run figure to report"
+
+# One row per leg, and only its own. The two comments sit adjacent on the pull
+# request, so nothing is lost by not duplicating — and duplicated rows can
+# disagree after a retry, with no rule saying which wins.
+is  "the resolve comment carries one row"            "$(rows_in "$resolve_body")" "1"
+has "and it is the resolve leg's"                    "$resolve_body" "| resolve | \`claude\`"
+hasnt "not the review leg's as well"                 "$resolve_body" "| review |"
+
+# A genuine mismatch — one model requested, a different one answering — is not a
+# footnote. It may mean the cross-model property broke, and it has to be
+# impossible to skim past, so it goes inline and in bold.
+REVLOOP_REVIEW_MODEL=some-other-model; export REVLOOP_REVIEW_MODEL
+run_review "$REVIEW_PAYLOAD"
+mismatch_body="$(last_body 9001)"
+unset REVLOOP_REVIEW_MODEL
+
+has "a model the config did not ask for is called out inline" \
+  "$mismatch_body" "**requested \`reviewer-model\`, a different model answered**"
+hasnt "and not tucked into the footnote under the table" \
+  "$mismatch_body" "does not report which model answered"
+
 finish

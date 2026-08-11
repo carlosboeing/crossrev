@@ -2,13 +2,13 @@
 # lib/adapters/claude.sh
 #
 # Returns two things, not one: the payload, and execution metadata naming the
-# harness, the resolved endpoint and the answering model where the harness
-# reports one. Invoked with no GitHub credential in its environment, and with
-# repository-provided harness customisation disabled.
+# harness, the resolved endpoint, the answering model where the harness reports
+# one, and what the turn cost in tokens. Invoked with no GitHub credential in its
+# environment, and with repository-provided harness customisation disabled.
 
 # adapter_claude <prompt_file> <schema_file> <workdir> <model> <effort> <endpoint_name>
 #
-# Prints a JSON object: {payload, harness, endpoint, model_reported, ok, error}
+# Prints a JSON object: {payload, harness, endpoint, model_reported, tokens, ok, error}
 adapter_claude() {
   local prompt_file="$1" schema_file="$2" workdir="$3"
   local model="${4:-}" effort="${5:-}" endpoint="${6:-}"
@@ -82,7 +82,8 @@ adapter_claude() {
     [[ -n "$msg" ]] || msg="$(head -c 400 "$err")"
     [[ -n "$msg" ]] || msg="claude exited $rc with no output on either stream"
     jq -cn --arg e "$msg" \
-      '{ok:false, payload:null, harness:"claude", endpoint:null, model_reported:null, error:$e}'
+      '{ok:false, payload:null, harness:"claude", endpoint:null, model_reported:null,
+        tokens:null, error:$e}'
     rm -f "$out" "$err"; return 1
   fi
 
@@ -91,10 +92,21 @@ adapter_claude() {
   # claim about itself — a substituted endpoint would get a self-report wrong in
   # precisely the case this exists to catch.
   model_reported="$(jq -r '(.modelUsage // {}) | keys | .[0] // empty' "$out")"
+
+  # Every token the turn cost, summed across models and across the four ways
+  # Claude Code counts them. Cache reads are included deliberately: they are
+  # cheaper, not free, and a number that quietly omits them under-reports the
+  # passes that reuse the most context.
+  local tokens
+  tokens="$(jq '[(.modelUsage // {}) | to_entries[] | .value
+                 | (.inputTokens // 0) + (.outputTokens // 0)
+                   + (.cacheReadInputTokens // 0) + (.cacheCreationInputTokens // 0)]
+                | add // null' "$out" 2>/dev/null)" || tokens=null
   rm -f "$out" "$err"
 
   jq -cn --argjson p "$(jq -c . <<<"$payload" 2>/dev/null || echo null)" \
      --arg ep "$endpoint_label" --arg m "$model_reported" \
+     --argjson t "${tokens:-null}" \
     '{ok:true, payload:$p, harness:"claude", endpoint:$ep,
-      model_reported:(if $m == "" then null else $m end), error:null}'
+      model_reported:(if $m == "" then null else $m end), tokens:$t, error:null}'
 }
