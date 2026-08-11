@@ -506,6 +506,67 @@ is  "and nothing of it is left loose in the tree" \
 has "the run says the discarded edits were put back" "$out" "put back"
 unset REVLOOP_RESOLVE_PAYLOAD_2 REVLOOP_STUB_COUNT REVLOOP_RESOLVE_EDIT
 
+# And it leaves the staging area as it found it.
+#
+# The capture is a tree of everything that was in the checkout, staged and
+# unstaged alike, so putting it back through the repository's own index would
+# stage every unstaged change the run happened to find. revloop is routinely run
+# in a checkout somebody is working in, and a pass that then fixes nothing hands
+# that checkout back with a staging area revloop invented.
+both_rebutted="$(jq -cn '
+  {blocked:false, blocked_reason:null, summary:"Neither holds up in this codebase.",
+   dispositions:[{finding_number:1, disposition:"rebutted", reply:"Not real here.", persist:null, duplicate_of:null},
+                 {finding_number:2, disposition:"rebutted", reply:"Not real here either.", persist:null, duplicate_of:null}]}')"
+
+fixture_repo "$(config_with_issue_sink)"; stub_reset
+printf 'export const staged = 1\n' >staged.ts; git add staged.ts
+printf 'export const loose = 1\n' >>app.ts
+before_status="$(git status --porcelain)"
+routes_baseline "$(marker_comment 9001 "$(review_marker)" | jq -cs . | payload)"
+routes_resolve
+REVLOOP_RESOLVE_PAYLOAD="$(printf '%s' "$out_of_range" | payload)"; export REVLOOP_RESOLVE_PAYLOAD
+REVLOOP_RESOLVE_PAYLOAD_2="$(printf '%s' "$both_rebutted" | payload)"; export REVLOOP_RESOLVE_PAYLOAD_2
+REVLOOP_STUB_COUNT="$(mktemp)"; export REVLOOP_STUB_COUNT
+out="$("$REVLOOP" resolve --pr 42 2>&1)"; rc=$?
+
+is  "a leg that retried in a checkout someone was working in exits clean" "$rc" "0"
+is  "the staged change is still the only staged change" \
+  "$(git diff --cached --name-only | tr '\n' ' ')" "staged.ts "
+is  "and the unstaged one is still unstaged" \
+  "$(git status --porcelain)" "$before_status"
+unset REVLOOP_RESOLVE_PAYLOAD_2 REVLOOP_STUB_COUNT
+
+# A second rejected answer ends the leg, and its edits go back too.
+#
+# The retry restores; the exhausted budget used not to, which left the last
+# rejected attempt's edits in the checkout with nothing on the pull request to
+# say they were there. The next run captures them as its own baseline and commits
+# them under dispositions describing neither attempt — the same divergence, one
+# run later.
+twice_over="$(jq -cn '
+  {blocked:false, blocked_reason:null, summary:"s",
+   dispositions:[{finding_number:1, disposition:"fixed", reply:"r", persist:null, duplicate_of:null},
+                 {finding_number:1, disposition:"fixed", reply:"r", persist:null, duplicate_of:null}]}')"
+
+fixture_repo "$(config_with_issue_sink)"; stub_reset
+printf 'export const staged = 1\n' >staged.ts; git add staged.ts
+printf 'export const loose = 1\n' >>app.ts
+before_status="$(git status --porcelain)"; before_app="$(cat app.ts)"
+routes_baseline "$(marker_comment 9001 "$(review_marker)" | jq -cs . | payload)"
+routes_resolve
+REVLOOP_RESOLVE_PAYLOAD="$(printf '%s' "$out_of_range" | payload)"; export REVLOOP_RESOLVE_PAYLOAD
+REVLOOP_RESOLVE_PAYLOAD_2="$(printf '%s' "$twice_over" | payload)"; export REVLOOP_RESOLVE_PAYLOAD_2
+REVLOOP_STUB_COUNT="$(mktemp)"; export REVLOOP_STUB_COUNT
+REVLOOP_RESOLVE_EDIT="$(appending_edit_script)"; export REVLOOP_RESOLVE_EDIT
+err="$("$REVLOOP" resolve --pr 42 2>&1 >/dev/null)"; rc=$?
+
+is  "a second answer that also contradicts the prompt is fatal" "$rc" "1"
+has "and the error says both answers were wrong"      "$err" "twice returned an answer that contradicts"
+is  "neither rejected attempt's edit is left in the tree" "$(cat app.ts)" "$before_app"
+is  "the checkout is exactly as the leg found it"     "$(git status --porcelain)" "$before_status"
+is  "and nothing was committed over it"               "$(git log -1 --format=%s)" "feature"
+unset REVLOOP_RESOLVE_PAYLOAD_2 REVLOOP_STUB_COUNT REVLOOP_RESOLVE_EDIT
+
 # duplicate_of names an issue the orchestrator retrieved. Inventing one makes
 # revloop comment on an unrelated issue and resolve the thread claiming the
 # finding is tracked there.

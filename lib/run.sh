@@ -417,19 +417,34 @@ _run_tree_capture() {
 
 # Put the working tree back to a captured state, or fail.
 #
+# Read into the capture's own index rather than the repository's, and that is
+# what keeps someone's staging area out of this. The capture is a tree of
+# everything that was there, staged and unstaged alike, so resetting the real
+# index to it stages every unstaged change the run happened to find — and a pass
+# that then fixes nothing, or dies later, hands the checkout back with a staging
+# area revloop invented. Reading into the temporary index puts the same files
+# back and leaves the real one untouched.
+#
+# The files still get rewritten: the capture's stat cache was recorded before the
+# attempt ran, so anything the attempt touched fails the stat check and is
+# checked out again.
+#
 # Anything untracked afterwards was written by the attempt being discarded: the
 # capture indexed every file that was there before it ran, so read-tree restores
-# those and only the leftovers are left over. Ignored files are neither captured
-# nor removed, which is right — they are not committed either.
+# those and only the leftovers are left over. `ls-files` reads the capture for
+# the same reason — a file that was untracked before revloop started is in the
+# capture but not in the real index, and asking the real index would delete it as
+# though the attempt had written it. Ignored files are neither captured nor
+# removed, which is right — they are not committed either.
 _run_tree_restore() {
-  local tree="$1" p top
-  [[ -n "$tree" ]] || return 1
+  local idx="$1" tree="$2" p top
+  [[ -n "$tree" && -f "$idx" ]] || return 1
   top="$(git rev-parse --show-toplevel 2>/dev/null)" || return 1
-  git read-tree --reset -u "$tree" >/dev/null 2>&1 || return 1
+  GIT_INDEX_FILE="$idx" git read-tree --reset -u "$tree" >/dev/null 2>&1 || return 1
   while IFS= read -r p; do
     [[ "$p" == .revloop-src* ]] && continue
     rm -rf -- "${top:?}/$p"
-  done < <(git -C "$top" ls-files --others --exclude-standard)
+  done < <(GIT_INDEX_FILE="$idx" git -C "$top" ls-files --others --exclude-standard)
   return 0
 }
 
@@ -440,10 +455,30 @@ _run_tree_restore() {
 # the commit carries both. So a capture that was never taken, or a restore that
 # will not apply, stops the leg instead of degrading it quietly.
 _run_retry_reset() {
-  local tree="$1" harness="$2" problem="$3"
-  _run_tree_restore "$tree" && return 0
+  local idx="$1" tree="$2" harness="$3" problem="$4"
+  _run_tree_restore "$idx" "$tree" && return 0
+  rm -f "$idx"
   ui_die "$harness needs asking again, and the working tree it already edited could not be put back — $problem" \
     "Retrying on top of a discarded attempt's edits would commit changes no accepted answer describes. Nothing has been written to the pull request; check \`git status\` in the checkout and re-run the leg."
+}
+
+# The way out when an answer is rejected and there is no attempt left to make.
+#
+# A retry restores; an exhausted budget used not to, which left the last rejected
+# attempt's edits sitting in the checkout with nothing on the pull request to say
+# so. The next run then captures them as its own baseline and commits them under
+# dispositions that describe neither attempt — the divergence the capture exists
+# to prevent, arriving one run later instead of one attempt later.
+#
+# A restore that will not apply is warned about rather than hidden: the leg is
+# dying anyway, and the operator is the one who has to deal with what is left.
+_run_invoke_abort() {
+  local idx="$1" tree="$2"
+  if [[ -n "$tree" ]] && ! _run_tree_restore "$idx" "$tree"; then
+    ui_warn "the rejected attempt's edits could not be put back" \
+      "They are still in the checkout, and a later run would capture them as its own baseline. Check \`git status\` before re-running the leg."
+  fi
+  rm -f "$idx"
 }
 
 # run_invoke <out> <harness> <prompt> <schema> <workdir> <model> <effort> <endpoint> <validator> [expect]
@@ -505,6 +540,10 @@ run_invoke() {
       '{"ok":false,"payload":null,"error":"the adapter returned nothing at all"}' >"$out_file"
 
     if [[ "$(jq -r '.ok // false' "$out_file")" != "true" ]]; then
+      # The capture is dropped rather than applied. There is no rejected answer
+      # here — the harness never got as far as one — so whatever it did write is
+      # evidence of how it failed, and deleting that is not revloop's call.
+      rm -f "$snap_index"
       ui_die "the $harness harness failed: $(jq -r '.error // "no error reported"' "$out_file")" \
         "Nothing has been written to the pull request. Check the harness runs by hand: $harness --version"
     fi
@@ -520,24 +559,26 @@ run_invoke() {
     if (( rc == 2 )); then
       if (( semantic_budget > 0 )); then
         semantic_budget=$(( semantic_budget - 1 ))
-        _run_retry_reset "$snap_tree" "$harness" "$problem"
+        _run_retry_reset "$snap_index" "$snap_tree" "$harness" "$problem"
         ui_warn "$harness returned an answer that contradicts what it was given — $problem" \
           "The shape is right, so this is the model drifting rather than a bug in revloop or the harness. Anything it edited has been put back, and it is being asked once more; a second one is fatal."
         continue
       fi
+      _run_invoke_abort "$snap_index" "$snap_tree"
       ui_die "$harness twice returned an answer that contradicts what it was given — $problem" \
-        "The shape was right both times, so the schema cannot catch this and revloop will not guess which finding was meant. Nothing has been written to the pull request. Re-run the leg, or try the other harness."
+        "The shape was right both times, so the schema cannot catch this and revloop will not guess which finding was meant. Nothing has been written to the pull request, and the edits both rejected attempts made have been put back. Re-run the leg, or try the other harness."
     fi
 
     shape_budget=$(( shape_budget - 1 ))
     if (( shape_budget > 0 )); then
-      _run_retry_reset "$snap_tree" "$harness" "$problem"
+      _run_retry_reset "$snap_index" "$snap_tree" "$harness" "$problem"
       ui_warn "$harness returned an object that does not match the schema — $problem" \
         "That harness does not constrain its own output, so this is the expected failure rather than a bug. Anything it edited has been put back, and it is being retried once; a second mismatch is fatal."
       continue
     fi
+    _run_invoke_abort "$snap_index" "$snap_tree"
     ui_die "$harness returned an object that does not match the schema — $problem" \
-      "This harness validates output against the schema natively, so a mismatch is an adapter or harness bug rather than model drift. Nothing has been written to the pull request."
+      "This harness validates output against the schema natively, so a mismatch is an adapter or harness bug rather than model drift. Nothing has been written to the pull request, and the rejected attempt's edits have been put back."
   done
 }
 
