@@ -681,6 +681,26 @@ _review_comment_body() {
     "$(state_finding_marker "$(jq -r .id <<<"$f")" "$pass" review)"
 }
 
+# A GitHub alert: a tinted callout with a coloured left border, an icon and a
+# bold label. They work in pull request comments, not only in files.
+#
+# **Exactly one per summary comment.** Stacking callouts turns the comment into
+# wallpaper and destroys the thing that made the first one work, which is why the
+# per-finding severities live in the table where emoji carry the colour instead.
+#
+# It degrades to a plain blockquote wherever GitHub's stylesheet is absent —
+# notification email, a third-party mirror, `gh pr view` in a terminal. Acceptable
+# for one coarse signal at the top of a comment, and not acceptable for every
+# finding, which is the other half of why emoji do the fine-grained work.
+_alert() {
+  local kind="$1" body="$2"
+  printf '> [!%s]\n' "$kind"
+  # Every line needs its own marker, or the alert ends at the first newline and
+  # the rest of the sentence renders as ordinary prose underneath it.
+  printf '%s\n' "$body" | sed 's/^/> /'
+  printf '\n'
+}
+
 # The summary table. Severity and category carry emoji, and provenance sits in
 # the *what* cell rather than beside the severity — `pre-existing` is not a
 # fourth severity and must not read as one.
@@ -725,6 +745,23 @@ _review_summary_body() {
   reported="$(jq -r '.model_reported // ""' <<<"$marker")"
 
   printf '## revloop review — pass %s of %s\n\n' "$pass" "$CTX_MAX_PASSES"
+
+  # The alert is the one line in the comment that has to read as a sentence, so
+  # it gets a real plural rather than the "(s)" the terminal output uses.
+  local noun="findings"; (( n == 1 )) && noun="finding"
+
+  # The verdict, in the one place a reader cannot skim past. It used to sit at the
+  # foot of the comment as ordinary prose, below a table, which is the last place
+  # anyone looks for the answer to "what happens now".
+  case "$verdict" in
+    converged)
+      _alert TIP "$(printf '**Converged.** Nothing at or above `fix_at` (%s) remains, so the loop stops here. Findings below the threshold, and pre-existing ones, are reported but cannot keep the loop alive — a loop that cannot converge because of a naming quibble is one nobody leaves switched on.' "$CTX_FIX_AT")" ;;
+    blocked)
+      _alert WARNING '**The review could not be completed.** The loop halts here and a human is needed. Nothing in this comment is a judgement about the code.' ;;
+    *)
+      _alert CAUTION "$(printf '**%s %s need resolving.** A second agent now verifies every finding below against the codebase and either fixes it, skips it, defers it, or explains why it is wrong. It may change code for the %s at or above `fix_at` (%s); the rest are verified and reported, never silently dropped.' "$n" "$noun" "$actionable" "$CTX_FIX_AT")" ;;
+  esac
+
   printf 'Reviewed by `%s`%s' "$harness" "${model:+ using \`$model\`}"
   [[ -n "$reported" && "$reported" != "null" ]] && printf ', answered by `%s`' "$reported"
   printf '. Verdict: **%s**.\n\n' "$verdict"
@@ -734,15 +771,6 @@ _review_summary_body() {
   else
     _findings_table "$findings"
   fi
-
-  case "$verdict" in
-    converged)
-      printf 'Nothing at or above `fix_at` (%s) remains, so the loop stops here. Findings below the threshold, and pre-existing ones, are reported but cannot keep the loop alive — a loop that cannot converge because of a naming quibble is one nobody leaves switched on.\n' "$CTX_FIX_AT" ;;
-    blocked)
-      printf 'The review could not be completed, so the loop halts and a human is needed.\n' ;;
-    *)
-      printf '**Next:** a second agent verifies every finding above against the codebase and either fixes it, skips it, defers it, or explains why it is wrong. It may change code for the %s at or above `fix_at` (%s); the rest are verified and reported, never silently dropped.\n' "$actionable" "$CTX_FIX_AT" ;;
-  esac
 }
 
 # ---------------------------------------------------------------------------
@@ -1215,6 +1243,18 @@ _resolve_reply_body() {
     "$(state_finding_marker "$(jq -r .finding_id <<<"$d")" "$pass" resolve)"
 }
 
+# "3 fixed, 1 skipped, 1 deferred" — only the dispositions that actually
+# happened, in the order the five are defined, so a pass that fixed everything
+# does not read as four zeroes.
+_disposition_counts() {
+  jq -r '
+    ["fixed","skipped","deferred","rebutted","escalated"] as $order
+    | (group_by(.disposition) | map({key: .[0].disposition, value: length}) | from_entries) as $by
+    | [ $order[] | select($by[.] != null) | "\($by[.]) \(.)" ]
+    | if length == 0 then "Nothing to disposition."
+      else join(", ") + "." end' <<<"$1"
+}
+
 # The disposition table, with the severity emoji on each finding.
 #
 # The finding is named by its title rather than by its id, because the id means
@@ -1256,6 +1296,21 @@ _resolve_summary_body() {
   blocked_reason="$(jq -r '.blocked_reason // ""' <<<"$marker")"
 
   printf '## revloop resolved pass %s of %s\n\n' "$pass" "$CTX_MAX_PASSES"
+
+  local counts escalated noun
+  counts="$(_disposition_counts "$dispositions")"
+  escalated="$(jq '[.[] | select(.disposition == "escalated")] | length' <<<"$dispositions")"
+  noun="findings"; (( escalated == 1 )) && noun="finding"
+  if [[ "$blocked" == "true" ]]; then
+    _alert WARNING "$(printf '**Blocked:** %s The loop halts here and needs a human. %s' \
+      "$blocked_reason" "$counts")"
+  elif (( escalated > 0 )); then
+    _alert WARNING "$(printf '**%s %s need a human decision.** `revloop/stop` is applied, so the loop halts until somebody removes it. %s' \
+      "$escalated" "$noun" "$counts")"
+  else
+    _alert NOTE "$(printf '**%s** Every finding was verified whatever its severity — severity governs what happens afterwards, not whether the check happens.' "$counts")"
+  fi
+
   printf 'Verified by `%s`%s' "$harness" "${model:+ using \`$model\`}"
   [[ -n "$reported" && "$reported" != "null" ]] && printf ', answered by `%s`' "$reported"
   printf '. '
@@ -1273,10 +1328,6 @@ _resolve_summary_body() {
     printf '## Deferred work filed\n'
     printf '%s\n\n' "$deferred_lines"
     printf 'An unresolved thread on a merged pull request is visible in no GitHub view, which is why a deferred finding goes somewhere durable before its thread is resolved.\n\n'
-  fi
-
-  if [[ "$blocked" == "true" ]]; then
-    printf '**Blocked:** %s\n\nThe loop halts here and needs a human.\n' "$blocked_reason"
   fi
 }
 

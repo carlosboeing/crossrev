@@ -111,7 +111,7 @@ review_prompt="$(cat "$PROMPT_LOG")"
 hasnt "the inline comment claims no second model"     "$review_calls" "second model"
 hasnt "nor a different one"                           "$review_calls" "different model"
 has   "it claims a second agent instead"              "$review_calls" "A second agent now verifies"
-has   "and the summary hands over to one"             "$review_calls" "a second agent verifies every finding"
+has   "and the summary hands over to one"             "$review_calls" "A second agent now verifies every finding below"
 hasnt "the review prompt makes no model claim either" "$review_prompt" "two-model loop"
 has   "the review skill says two-agent"               "$review_prompt" "two-agent loop"
 
@@ -154,5 +154,71 @@ has "the resolve table names findings, not ids alone" \
   "$resolve_calls" "| 🔴 Token compared with == instead of a constant-time check"
 has "and keeps the id small for matching a row to a thread" \
   "$resolve_calls" "<sub>\`$ID_SEC\`</sub> | fixed |"
+
+# ---------------------------------------------------------------------------
+# Decision 2 — exactly one native alert per summary comment
+# ---------------------------------------------------------------------------
+#
+# One is the whole point. Stacking callouts turns the comment into wallpaper and
+# destroys the thing that made the first one work, so the count is asserted
+# rather than only the kind.
+
+# "Exactly one" has to be counted against the comment a reader sees, not against
+# the call log: the gh stub logs one line per line of its arguments, and a summary
+# comment is edited more than once on its way to being finished, so the whole log
+# holds several copies of the same body.
+last_body() {
+  awk -v pat="issues/comments/$1 -f body=" '
+    index($0, pat)  { buf = substr($0, index($0, pat) + length(pat)); open = 1; next }
+    open && /^(api|gh|repo|pr|secret|issue) / { last = buf; open = 0 }
+    open            { buf = buf "\n" $0 }
+    END             { if (open) last = buf; print last }' "$GH_LOG"
+}
+alerts_in() { grep -c '^> \[!' <<<"$1" || true; }
+
+# Re-run the review so its log is the current one, then read the comment it left.
+run_review "$REVIEW_PAYLOAD"
+review_body="$(last_body 9001)"
+
+is  "a review that found things carries exactly one alert" "$(alerts_in "$review_body")" "1"
+has "and it is the red one"                           "$review_body" "> [!CAUTION]"
+has "which says how many need resolving"              "$review_body" "**3 findings need resolving.**"
+has "and what happens to them next"                   "$review_body" "at or above \`fix_at\`"
+# The verdict used to sit at the foot of the comment, under a table, which is the
+# last place anyone looks for the answer to "what happens now".
+hasnt "the verdict no longer trails the table as prose" "$review_body" "**Next:** a second agent"
+
+run_review "$CONVERGED_PAYLOAD"
+converged_body="$(last_body 9001)"
+is  "a converged review carries exactly one alert"    "$(alerts_in "$converged_body")" "1"
+has "and it is the green one"                         "$converged_body" "> [!TIP]"
+has "which says the loop stopped on its own"          "$converged_body" "**Converged.**"
+# The vocabulary has to match what `revloop status` says about the same state.
+has "in the same words the terminal uses"             "$converged_body" "Nothing at or above \`fix_at\`"
+hasnt "no caution is stacked underneath it"           "$converged_body" "> [!CAUTION]"
+
+run_review "$BLOCKED_PAYLOAD"
+blocked_body="$(last_body 9001)"
+is  "a blocked review carries exactly one alert"      "$(alerts_in "$blocked_body")" "1"
+has "and it is the amber one"                         "$blocked_body" "> [!WARNING]"
+has "saying a human is needed"                        "$blocked_body" "a human is needed"
+has "and that nothing here judges the code"           "$blocked_body" "Nothing in this comment is a judgement about the code"
+
+run_resolve "$(resolve_payload)"
+resolve_body="$(last_body 9002)"
+is  "a normal resolve pass carries exactly one alert" "$(alerts_in "$resolve_body")" "1"
+has "and it is the blue one"                          "$resolve_body" "> [!NOTE]"
+has "carrying the disposition counts"                 "$resolve_body" "**1 fixed, 1 skipped.**"
+
+# Blocked halts, and it needs the amber alert rather than the blue one — a reader
+# has to be able to tell a pass that finished from one that stopped without
+# working through the table.
+run_resolve "$(resolve_payload | jq -c '.blocked = true | .blocked_reason = "one fix needs a schema migration nobody has approved."')"
+blocked_resolve="$(last_body 9002)"
+is  "a blocked resolve pass still carries exactly one alert" "$(alerts_in "$blocked_resolve")" "1"
+has "and it is amber rather than the ordinary blue"   "$blocked_resolve" "> [!WARNING]"
+has "naming what stopped"                             "$blocked_resolve" "schema migration nobody has approved"
+is  "and the halt is stated once, not once in the alert and again below it" \
+  "$(grep -c 'The loop halts here and needs a human' <<<"$blocked_resolve" || true)" "1"
 
 finish
