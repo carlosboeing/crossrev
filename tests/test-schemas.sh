@@ -115,5 +115,26 @@ _finding_without_provenance() {
 rejects "a missing pre_existing is rejected"  "$(_finding_without_provenance)"
 rejects "a null pre_existing is rejected"     "$(_finding high correctness null)"
 
+# One concept, one name. The summary comment was `wrap_up` in the schema and
+# "the overall comment body" in its own description, and a field the model fills
+# at run time is the cheapest kind to rename — no live pull request carries one.
+_resolve_payload() {
+  jq -cn --arg field "${1:-summary}" '
+    {blocked:false, blocked_reason:null,
+     dispositions:[{finding_id:"a1", disposition:"fixed", reply:"r",
+                    persist:null, duplicate_of:null}]}
+    + {($field): "What happened this pass."}'
+}
+if validate_resolve "$(_resolve_payload summary)" >/dev/null; then
+  ok "a resolve payload carrying summary passes"
+else
+  notok "a resolve payload carrying summary passes" "the validator rejected it"
+fi
+if validate_resolve "$(_resolve_payload wrap_up)" >/dev/null 2>&1; then
+  notok "the old wrap_up field is rejected" "the validator accepted it"
+else
+  ok "the old wrap_up field is rejected"
+fi
+
 printf '\n  %d passed, %d failed\n' "$pass" "$fail"
 (( fail == 0 ))

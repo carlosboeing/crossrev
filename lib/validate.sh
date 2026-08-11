@@ -54,8 +54,8 @@ validate_resolve() {
     if type != "object" then bad("the payload is not a JSON object")
     elif (has("dispositions") | not) or (.dispositions | type != "array")
       then bad("dispositions is missing or not an array")
-    elif (has("wrap_up") | not) or (.wrap_up | type != "string") or (.wrap_up == "")
-      then bad("wrap_up is missing or empty")
+    elif (has("summary") | not) or (.summary | type != "string") or (.summary == "")
+      then bad("summary is missing or empty")
     elif ((.blocked // false) | type != "boolean")
       then bad("blocked is not a boolean")
     else

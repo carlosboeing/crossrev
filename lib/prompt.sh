@@ -97,7 +97,7 @@ prompt_resolve() {
 
   {
     printf '# Your task\n\n'
-    printf 'You are the resolve leg of revloop, running pass %s of %s on %s pull request #%s. The findings below came from a different model reviewing this diff.\n\n' \
+    printf 'You are the resolve leg of revloop, running pass %s of %s on %s pull request #%s. The findings below came from the review leg — a separate agent, reviewing this diff without seeing your work.\n\n' \
       "$(jq -r .pass <<<"$meta")" "$(jq -r .max_passes <<<"$meta")" \
       "$(jq -r .repo <<<"$meta")" "$(jq -r .pr <<<"$meta")"
     printf 'You are in a checkout of the pull request'"'"'s head branch at %s. Change code in the working tree; the orchestrator commits and pushes it. Make no GitHub call — you have no credential for one.\n\n' \
@@ -157,6 +157,6 @@ prompt_resolve() {
     printf '````diff\n'; cat "$diff"; printf '\n````\n\n'
 
     printf '## Output\n\n'
-    printf 'Change code in the working tree for anything you disposition `fixed`. Then return JSON matching the schema you were given, and nothing else. Do not write the marker block or a "Deferred work filed" list into `wrap_up` — the orchestrator appends both, because the issue numbers do not exist yet.\n'
+    printf 'Change code in the working tree for anything you disposition `fixed`. Then return JSON matching the schema you were given, and nothing else. Do not write the marker block or a "Deferred work filed" list into `summary` — the orchestrator appends both, because the issue numbers do not exist yet.\n'
   } >"$out"
 }

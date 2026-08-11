@@ -585,18 +585,18 @@ Findings recorded; posting them now.$(state_marker_encode "$(jq -c 'del(.comment
     <<<"$findings")"
   marker="$(jq -c --argjson f "$findings" '.findings = $f' <<<"$marker")"
 
-  # --- the overall comment -------------------------------------------------
-  local overall
-  overall="$(_review_overall_body "$findings" "$verdict" "$pass" "$harness" "$model" "$model_reported")"
+  # --- the summary comment -------------------------------------------------
+  local summary_body
+  summary_body="$(_review_summary_body "$findings" "$verdict" "$pass" "$harness" "$model" "$model_reported")"
   gh_comment_edit "$CTX_REPO" "$comment_id" \
-    "$overall$(state_marker_encode "$(jq -c 'del(.comment_id)' <<<"$marker")")"
+    "$summary_body$(state_marker_encode "$(jq -c 'del(.comment_id)' <<<"$marker")")"
   ui_ok "posted a summary comment"
   run_checkpoint
 
   # --- complete last -------------------------------------------------------
   marker="$(jq -c '.state = "complete"' <<<"$marker")"
   gh_comment_edit "$CTX_REPO" "$comment_id" \
-    "$overall$(state_marker_encode "$(jq -c 'del(.comment_id)' <<<"$marker")")"
+    "$summary_body$(state_marker_encode "$(jq -c 'del(.comment_id)' <<<"$marker")")"
 
   local next
   case "$verdict" in
@@ -629,18 +629,18 @@ _review_comment_body() {
   if [[ "$(jq -r '.pre_existing // false' <<<"$f")" == "true" ]]; then
     note="A real bug, but this pull request did not introduce it, so it is reported here and never fixed here."
   elif legs_should_fix "$(jq -r .severity <<<"$f")" "$CTX_FIX_AT" false; then
-    note="At or above this repository's \`fix_at\` ($CTX_FIX_AT), so a second model may change code for it."
+    note="At or above this repository's \`fix_at\` ($CTX_FIX_AT), so the resolve leg may change code for it."
   else
     note="Below this repository's \`fix_at\` ($CTX_FIX_AT), so it is reported and left to a human."
   fi
-  printf '**%s %s**\n\n%s\n\n**Fix:** %s\n\n<sub>%s · revloop pass %s, reviewed by %s%s. A second model now verifies this point and either fixes it, defers it, or explains why it is wrong.</sub>%s' \
+  printf '**%s %s**\n\n%s\n\n**Fix:** %s\n\n<sub>%s · revloop pass %s, reviewed by %s%s. A second agent now verifies this point and either fixes it, defers it, or explains why it is wrong.</sub>%s' \
     "$(run_finding_label "$f")" "$(jq -r .title <<<"$f")" \
     "$(jq -r .why <<<"$f")" "$(jq -r .fix <<<"$f")" \
     "$note" "$pass" "$harness" "${model:+ ($model)}" \
     "$(state_finding_marker "$(jq -r .id <<<"$f")" "$pass" review)"
 }
 
-_review_overall_body() {
+_review_summary_body() {
   local findings="$1" verdict="$2" pass="$3" harness="$4" model="$5" reported="$6" n actionable
   n="$(jq 'length' <<<"$findings")"
   actionable="$(run_actionable "$findings")"
@@ -664,7 +664,7 @@ _review_overall_body() {
     blocked)
       printf 'The review could not be completed, so the loop halts and a human is needed.\n' ;;
     *)
-      printf '**Next:** a different model verifies every finding above against the codebase and either fixes it, skips it, defers it, or explains why it is wrong. It may change code for the %s at or above `fix_at` (%s); the rest are verified and reported, never silently dropped.\n' "$actionable" "$CTX_FIX_AT" ;;
+      printf '**Next:** a second agent verifies every finding above against the codebase and either fixes it, skips it, defers it, or explains why it is wrong. It may change code for the %s at or above `fix_at` (%s); the rest are verified and reported, never silently dropped.\n' "$actionable" "$CTX_FIX_AT" ;;
   esac
 }
 
@@ -757,24 +757,24 @@ leg_resolve() {
       --arg h "$harness" --arg m "$model" \
       '{v:1, leg:"resolve", pass:$p, state:"started", ts:$ts, run_id:$r, head_sha:$sha,
         harness:$h, model:(if $m == "" then null else $m end), model_reported:null,
-        blocked:false, blocked_reason:null, commit_sha:null, wrap_up:"", dispositions:[]}')"
+        blocked:false, blocked_reason:null, commit_sha:null, summary:"", dispositions:[]}')"
     comment_id="$(gh_comment_create "$CTX_REPO" "$CTX_PR" \
 "**revloop — resolving pass $pass of $CTX_MAX_PASSES**
 
-Verifying each finding against the codebase. This comment becomes the wrap-up when the pass finishes.$(state_marker_encode "$marker")")"
+Verifying each finding against the codebase. This comment becomes the pass summary when the resolve leg finishes.$(state_marker_encode "$marker")")"
     [[ -n "$comment_id" ]] || ui_die "the claim comment did not post on $CTX_REPO#$CTX_PR" \
       "The claim is what makes a retry safe, so revloop stops rather than resolving without one."
   fi
   marker="$(jq -c --argjson id "$comment_id" '. + {comment_id: $id}' <<<"$marker")"
   run_checkpoint
 
-  local threads dispositions blocked blocked_reason wrap_up model_reported
+  local threads dispositions blocked blocked_reason summary model_reported
   threads="$(gh_review_threads "$CTX_REPO" "$CTX_PR")"
 
   if [[ "$(jq -r '(.dispositions // []) | length' <<<"$marker")" != "0" ]]; then
     ui_say "The previous attempt already recorded its dispositions, so the resolver is not run again."
     dispositions="$(jq -c '.dispositions' <<<"$marker")"
-    wrap_up="$(jq -r '.wrap_up // ""' <<<"$marker")"
+    summary="$(jq -r '.summary // ""' <<<"$marker")"
     blocked="$(jq -r '.blocked // false' <<<"$marker")"
     blocked_reason="$(jq -r '.blocked_reason // "null"' <<<"$marker")"
     model_reported="$(jq -r '.model_reported // "null"' <<<"$marker")"
@@ -828,14 +828,14 @@ Verifying each finding against the codebase. This comment becomes the wrap-up wh
     payload="$(jq -c .payload "$envelope_file")"
     model_reported="$(jq -r '.model_reported // "null"' "$envelope_file")"
     dispositions="$(jq -c '.dispositions' <<<"$payload")"
-    wrap_up="$(jq -r '.wrap_up' <<<"$payload")"
+    summary="$(jq -r '.summary' <<<"$payload")"
     blocked="$(jq -r '.blocked // false' <<<"$payload")"
     blocked_reason="$(jq -r '.blocked_reason // "null"' <<<"$payload")"
     rm -rf "$tmp"
 
-    marker="$(jq -c --argjson d "$dispositions" --arg w "$wrap_up" --argjson b "$blocked" \
+    marker="$(jq -c --argjson d "$dispositions" --arg w "$summary" --argjson b "$blocked" \
       --arg br "$blocked_reason" --arg mr "$model_reported" '
-      .dispositions = $d | .wrap_up = $w | .blocked = $b
+      .dispositions = $d | .summary = $w | .blocked = $b
       | .blocked_reason = (if $br == "null" then null else $br end)
       | .model_reported = (if $mr == "null" then null else $mr end)' <<<"$marker")"
     gh_comment_edit "$CTX_REPO" "$comment_id" \
@@ -1019,23 +1019,23 @@ Pushed \`${commit_sha:0:7}\`; replying to each thread now.$(state_marker_encode 
   review_comment_id="$(jq -r '.comment_id' <<<"$review_marker")"
   updated_review="$(jq -c --argjson f "$findings" 'del(.comment_id) | .findings = $f' <<<"$review_marker")"
   gh_comment_edit "$CTX_REPO" "$review_comment_id" \
-    "$(_review_overall_body "$findings" "$(jq -r '.verdict' <<<"$review_marker")" "$pass" \
+    "$(_review_summary_body "$findings" "$(jq -r '.verdict' <<<"$review_marker")" "$pass" \
        "$(jq -r '.harness' <<<"$review_marker")" "$(jq -r '.model // ""' <<<"$review_marker")" \
        "$(jq -r '.model_reported // "null"' <<<"$review_marker")")$(state_marker_encode "$updated_review")"
   run_checkpoint
 
-  # --- the wrap-up, then completion --------------------------------------
-  local wrap_body
-  wrap_body="$(_resolve_wrap_body "$wrap_up" "$dispositions" "$deferred_lines" "$pass" \
+  # --- the summary comment, then completion --------------------------------------
+  local summary_body
+  summary_body="$(_resolve_summary_body "$summary" "$dispositions" "$deferred_lines" "$pass" \
     "$harness" "$model" "$model_reported" "$commit_sha" "$blocked" "$blocked_reason")"
   gh_comment_edit "$CTX_REPO" "$comment_id" \
-    "$wrap_body$(state_marker_encode "$(jq -c 'del(.comment_id)' <<<"$marker")")"
-  ui_ok "posted a wrap-up comment"
+    "$summary_body$(state_marker_encode "$(jq -c 'del(.comment_id)' <<<"$marker")")"
+  ui_ok "posted a summary comment"
   run_checkpoint
 
   marker="$(jq -c '.state = "complete"' <<<"$marker")"
   gh_comment_edit "$CTX_REPO" "$comment_id" \
-    "$wrap_body$(state_marker_encode "$(jq -c 'del(.comment_id)' <<<"$marker")")"
+    "$summary_body$(state_marker_encode "$(jq -c 'del(.comment_id)' <<<"$marker")")"
 
   local next="awaiting-review"
   if [[ "$blocked" == "true" ]] || (( escalated > 0 )); then next="halted"; fi
@@ -1141,8 +1141,8 @@ _resolve_reply_body() {
     "$(state_finding_marker "$(jq -r .finding_id <<<"$d")" "$pass" resolve)"
 }
 
-_resolve_wrap_body() {
-  local wrap_up="$1" dispositions="$2" deferred_lines="$3" pass="$4"
+_resolve_summary_body() {
+  local summary="$1" dispositions="$2" deferred_lines="$3" pass="$4"
   local harness="$5" model="$6" reported="$7" commit="$8" blocked="$9" blocked_reason="${10}"
 
   printf '## revloop resolved pass %s of %s\n\n' "$pass" "$CTX_MAX_PASSES"
@@ -1155,7 +1155,7 @@ _resolve_wrap_body() {
     printf 'No code changed this pass.\n\n'
   fi
 
-  printf '%s\n\n' "$wrap_up"
+  printf '%s\n\n' "$summary"
 
   printf '| finding | disposition |\n|---|---|\n'
   jq -r '.[] | "| `\(.finding_id)` | \(.disposition) |"' <<<"$dispositions"

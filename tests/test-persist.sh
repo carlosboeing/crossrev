@@ -67,7 +67,7 @@ resolve_payload() {
   [[ "$persist" == "no" ]] && p='null'
   jq -cn --arg f "$ID_FIX" --arg d "$ID_DEFER" --argjson dup "$dup" --argjson p "$p" '
     {blocked:false, blocked_reason:null,
-     wrap_up:"Fixed the unchecked response. The untyped legacy export is real but predates this branch.",
+     summary:"Fixed the unchecked response. The untyped legacy export is real but predates this branch.",
      dispositions:[
        {finding_id:$f, disposition:"fixed", reply:"Added the ok check.", persist:null, duplicate_of:null},
        {finding_id:$d, disposition:"deferred", reply:"Confirmed real, and it predates this branch.",
@@ -104,7 +104,7 @@ EOF
 defer_only_payload() {
   jq -cn --arg d "$ID_DEFER" '
     {blocked:false, blocked_reason:null,
-     wrap_up:"Nothing was fixed here. The untyped legacy export is real but predates this branch.",
+     summary:"Nothing was fixed here. The untyped legacy export is real but predates this branch.",
      dispositions:[
        {finding_id:$d, disposition:"deferred", reply:"Confirmed real, and it predates this branch.",
         persist:{title:"Legacy export is untyped", body:"Measured before filing."},
@@ -157,7 +157,7 @@ has "and the repository's own taxonomy alongside it"  "$(calls)" "labels[]=bug"
 is  "it replies in each thread rather than at top level" \
   "$(count 'pulls/42/comments/5000/replies')" "2"
 has "it resolves the threads it settled"              "$out" "resolved 2 thread(s)"
-has "the wrap-up lists what was deferred and where"   "$(calls)" "Deferred work filed"
+has "the summary lists what was deferred and where"   "$(calls)" "Deferred work filed"
 has "the loop is handed back to the reviewer"         "$(calls)" "labels[]=revloop/awaiting-review"
 
 # Provenance governs what happens after verification, never whether it happens.
@@ -266,7 +266,7 @@ out="$("$REVLOOP" resolve --pr 42 2>&1)"; rc=$?
 
 is  "with no sink the leg still completes"            "$rc" "0"
 is  "nothing is filed anywhere"                       "$(count 'method POST repos/acme/widget/issues -f title=')" "0"
-has "and the wrap-up says the thread stays open"      "$(calls)" "not persisted anywhere"
+has "and the summary says the thread stays open"      "$(calls)" "not persisted anywhere"
 is  "only the settled thread is resolved, not the deferred one" \
   "$(count 'resolveReviewThread')" "1"
 
@@ -295,7 +295,7 @@ REVLOOP_RESOLVE_PAYLOAD="$(resolve_payload 31 | payload)"; export REVLOOP_RESOLV
 out="$("$REVLOOP" resolve --pr 42 2>&1)"; rc=$?
 
 is  "a matched human-filed issue files nothing"       "$(count 'method POST repos/acme/widget/issues -f title=')" "0"
-has "and the wrap-up names the issue it matched"      "$(calls)" "matches the existing issue #31"
+has "and the summary names the issue it matched"      "$(calls)" "matches the existing issue #31"
 has "the candidates were handed to the model to judge" "$(cat "$PROMPT_LOG")" "**#31** (open)"
 hasnt "and revloop did not comment on the human's issue by default" \
   "$(calls)" "repos/acme/widget/issues/31/comments"
@@ -325,7 +325,7 @@ out="$("$REVLOOP" resolve --pr 42 2>&1)"; rc=$?
 
 is  "a failed filing does not fail the whole leg"     "$rc" "0"
 has "it says the write did not land"                  "$out" "could not file an issue"
-has "and the wrap-up records that nothing was persisted" "$(calls)" "not persisted anywhere"
+has "and the summary records that nothing was persisted" "$(calls)" "not persisted anywhere"
 is  "the deferred thread is left open"                "$(count 'resolveReviewThread')" "1"
 
 # --- commit idempotency -------------------------------------------------
@@ -337,7 +337,7 @@ addr_claim="$(jq -cn --arg sha "$FIX_HEAD" --argjson ts "$(date +%s)" --arg f "$
   {v:1, leg:"resolve", pass:1, state:"started", ts:$ts, run_id:"1", head_sha:$sha,
    harness:"claude", model:"resolver-model", model_reported:"resolver-model",
    blocked:false, blocked_reason:null, commit_sha:"cafe0000cafe0000cafe0000cafe0000cafe0000",
-   wrap_up:"Recovered.",
+   summary:"Recovered.",
    dispositions:[{finding_id:$f, disposition:"fixed", reply:"done", persist:null, duplicate_of:null},
                  {finding_id:$d, disposition:"rebutted", reply:"not real", persist:null, duplicate_of:null}]}')"
 comments="$( { marker_comment 9001 "$(review_marker)"; marker_comment 9002 "$addr_claim"; } | jq -cs . | payload)"
@@ -355,7 +355,7 @@ fixture_repo "$(config_with_issue_sink)"; stub_reset
 routes_baseline "$(marker_comment 9001 "$(review_marker)" | jq -cs . | payload)"
 routes_resolve
 escalating="$(jq -cn --arg f "$ID_FIX" --arg d "$ID_DEFER" '
-  {blocked:false, blocked_reason:null, wrap_up:"One point needs you.",
+  {blocked:false, blocked_reason:null, summary:"One point needs you.",
    dispositions:[{finding_id:$f, disposition:"escalated", reply:"We disagree twice over.", persist:null, duplicate_of:null},
                  {finding_id:$d, disposition:"rebutted", reply:"Not real here.", persist:null, duplicate_of:null}]}')"
 REVLOOP_RESOLVE_PAYLOAD="$(printf '%s' "$escalating" | payload)"; export REVLOOP_RESOLVE_PAYLOAD
