@@ -71,6 +71,13 @@ run_lock_acquire() {
   if [[ -f "$lock" ]]; then
     holder="$(cat "$lock" 2>/dev/null)"
     pid="${holder%% *}"
+    # Our own lock, from an earlier leg in this same process. `revloop run`
+    # drives review and address one after the other, so the second leg re-enters
+    # here holding what the first one took — a live PID that passes the check
+    # below and reads as a collision with itself. Keep the lock for the whole
+    # run rather than releasing it between legs: dropping it mid-loop would open
+    # a window for a second terminal to start a pass halfway through this one.
+    if [[ "$pid" == "$$" ]]; then return 0; fi
     if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
       ui_die "another revloop run already holds pull request $pr — $holder" \
         "Two runs writing the same pull request would interleave comments and replies. Wait for it to finish, or stop that process."
@@ -473,7 +480,7 @@ Findings recorded; posting them now.$(state_marker_encode "$(jq -c 'del(.comment
 
   # --- inline comments, reconciled against what already landed -------------
   local already posted=0 skipped=0 n i f id
-  already="$(state_posted_finding_ids "$CTX_PR" "$CTX_REPO" "$CTX_AUTHOR")" || already=""
+  already="$(state_posted_finding_ids "$CTX_PR" "$CTX_REPO" "$CTX_AUTHOR" review)" || already=""
 
   n="$(jq 'length' <<<"$findings")"
   local important nits pre
@@ -796,7 +803,7 @@ Pushed \`${commit_sha:0:7}\`; replying to each thread now.$(state_marker_encode 
   # exactly how work disappears.
   local already filed=0 matched=0 resolved_n=0 escalated=0 deferred_lines=""
   local n i d id disp thread_id root_id tracked dup existing should_resolve reply_body
-  already="$(state_posted_finding_ids "$CTX_PR" "$CTX_REPO" "$CTX_AUTHOR")" || already=""
+  already="$(state_posted_finding_ids "$CTX_PR" "$CTX_REPO" "$CTX_AUTHOR" address)" || already=""
 
   n="$(jq 'length' <<<"$dispositions")"
   for (( i = 0; i < n; i++ )); do

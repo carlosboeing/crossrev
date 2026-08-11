@@ -239,4 +239,24 @@ is  "run exits clean on a converged first pass" "$rc" "0"
 has "and says it converged rather than finished" "$out" "Converged after pass 1"
 has "run explains that interrupting it is safe"  "$out" "each leg finishes the write in flight"
 
+# The converged case above never reaches the second leg, which is what let one
+# process deadlock against its own lock go unnoticed: leg_review takes the per-PR
+# lock and only the EXIT trap clears it, so leg_address in the same process found
+# a live PID holding it and read that as a competing run. Any pass that does not
+# converge is enough to show it.
+fixture_repo; stub_reset
+remaining_marker="$(jq -cn --arg sha "$FIX_HEAD" --argjson ts "$(date +%s)" '
+  {v:1, leg:"review", pass:1, state:"complete", ts:$ts, run_id:"x", head_sha:$sha,
+   harness:"claude", model:"reviewer-model", model_reported:"reviewer-model",
+   verdict:"issues-remain",
+   findings:[{id:"cccc000000000001", path:"app.ts", line:2, side:"RIGHT",
+              severity:"important", title:"Unchecked fetch response", why:"w",
+              fix:"check it", anchor:"", thread_id:"T_ONE",
+              disposition:null, tracked_as:null}]}')"
+routes_baseline "$(marker_comment 9001 "$remaining_marker" | jq -cs . | payload)"
+no_threads
+out="$("$REVLOOP" run --pr 42 2>&1)" || true
+hasnt "run does not collide with the lock its own review leg took" \
+  "$out" "already holds pull request"
+
 finish

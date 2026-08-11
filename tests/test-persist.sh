@@ -129,6 +129,42 @@ has "a pre-existing finding still reached the addresser" \
 has "and the prompt tells it not to fix that one here" \
   "$(cat "$PROMPT_LOG")" "verify, then stop"
 
+# --- the review leg's own comments must not silence the addresser ---------
+#
+# Every inline comment the review leg posts carries a finding marker, so a posted
+# set read without filtering on the leg finds every id already there. The reply
+# is then skipped as a duplicate while the thread is resolved anyway, and the
+# collaborator gets a resolved thread with no explanation in it. The baseline
+# stubs pulls/42/comments as [], which is exactly why nothing caught this: the
+# one condition that triggers it is the one the fixture never had.
+fixture_repo "$(config_with_issue_sink)"; stub_reset
+routes_baseline "$(marker_comment 9001 "$(review_marker)" | jq -cs . | payload)"
+routes_address
+route_first "api --paginate repos/*/pulls/42/comments*" \
+  "@$(POSTED_LEG=review posted_comments "$ID_FIX" "$ID_DEFER" | payload)"
+REVLOOP_ADDRESS_PAYLOAD="$(address_payload | payload)"; export REVLOOP_ADDRESS_PAYLOAD
+REVLOOP_ADDRESS_EDIT="$(edit_script)"; export REVLOOP_ADDRESS_EDIT
+out="$("$REVLOOP" address --pr 42 2>&1)"; rc=$?
+
+is  "the leg completes with the review leg's comments present" "$rc" "0"
+is  "it still replies in both threads" \
+  "$(count 'pulls/42/comments/5000/replies')" "2"
+has "and still resolves what it settled"              "$out" "resolved 2 thread(s)"
+
+# The other half of the same rule: an address-leg marker DOES mean "replied
+# already", so a retry after a crash must not reply twice.
+fixture_repo "$(config_with_issue_sink)"; stub_reset
+routes_baseline "$(marker_comment 9001 "$(review_marker)" | jq -cs . | payload)"
+routes_address
+route_first "api --paginate repos/*/pulls/42/comments*" \
+  "@$(POSTED_LEG=address posted_comments "$ID_FIX" | payload)"
+REVLOOP_ADDRESS_PAYLOAD="$(address_payload | payload)"; export REVLOOP_ADDRESS_PAYLOAD
+REVLOOP_ADDRESS_EDIT="$(edit_script)"; export REVLOOP_ADDRESS_EDIT
+out="$("$REVLOOP" address --pr 42 2>&1)"; rc=$?
+
+is  "a finding already replied to is not replied to twice" \
+  "$(count 'pulls/42/comments/5000/replies')" "1"
+
 # --- persist: none files nothing and leaves the thread open ---------------
 fixture_repo; stub_reset      # the default config has persist.defects: none
 routes_baseline "$(marker_comment 9001 "$(review_marker)" | jq -cs . | payload)"

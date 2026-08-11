@@ -104,12 +104,21 @@ state_finding_marker() {
 
 # Which finding ids have already been written out, read back from the PR itself
 # rather than from a ledger.
+# $4 is the leg asking, and it is not optional. Every marker carries the leg
+# that wrote it, because "already written out" means different things to the two
+# legs: the review leg is asking which findings it already has inline comments
+# for, the address leg which it has already replied to. Reading the ids without
+# the leg conflates them — the review leg stamps a marker on every inline
+# comment, so the address leg would find every id already present, skip every
+# reply as a duplicate, and resolve the threads anyway. That leaves a
+# collaborator with a resolved thread and no explanation.
 state_posted_finding_ids() {
-  local pr="$1" repo="$2" author="$3"
+  local pr="$1" repo="$2" author="$3" leg="$4"
   {
     gh api --paginate "repos/$repo/pulls/$pr/comments" 2>/dev/null | jq -r --arg a "$author" '.[] | select(.user.login==$a) | .body'
     gh api --paginate "repos/$repo/issues/$pr/comments" 2>/dev/null | jq -r --arg a "$author" '.[] | select(.user.login==$a) | .body'
-  } | sed -n 's/.*<!-- revloop:f \(.*\) -->.*/\1/p' | jq -r '.id' 2>/dev/null | sort -u
+  } | sed -n 's/.*<!-- revloop:f \(.*\) -->.*/\1/p' \
+    | jq -r --arg leg "$leg" 'select(.leg==$leg) | .id' 2>/dev/null | sort -u
 }
 
 # ---------------------------------------------------------------------------
