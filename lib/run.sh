@@ -1834,8 +1834,25 @@ _status_next() {
   esac
 
   # awaiting review, and why one is owed.
-  ui_cmd "revloop review --pr $CTX_PR"
+  #
+  # The cap comes first, because a pass at max_passes is owed a review that
+  # cannot run. `legs_should_continue` refuses when the last pass reached the cap,
+  # so printing the bare command here would send the reader at something that
+  # declines, writes a declined marker and halts the loop. The condition that has
+  # to change goes above the command that follows it — which is the shape the
+  # halted and stopped sections already use.
   m="$(state_marker_for "$CTX_MARKERS" "$pass" review)"
+  if (( pass >= CTX_MAX_PASSES )) \
+     && [[ "$(jq -r '.state // ""' <<<"$m")" == "complete" ]] \
+     && state_current_pass_complete "$CTX_MARKERS" "$pass" resolve; then
+    ui_line "pass $pass was the last one max_passes ($CTX_MAX_PASSES) allows, so a"
+    ui_line "review now would be refused rather than run. Raise max_passes in"
+    ui_line ".github/revloop.yml, then:"
+    ui_cmd  "revloop review --pr $CTX_PR"
+    return 0
+  fi
+
+  ui_cmd "revloop review --pr $CTX_PR"
   if [[ -n "$m" && "$(jq -r '.state // ""' <<<"$m")" == "started" ]]; then
     if stale="$(state_claim_is_stale "$m" "$CTX_HEAD_SHA")"; then
       ui_line "That claim is stale — $stale — so a re-run abandons it and starts"

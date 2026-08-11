@@ -145,6 +145,37 @@ has "a young claim is described in exactly the same words" \
   "$out" "claimed 2 minute(s) ago, never finished"
 has "and NEXT says a re-run resumes it"         "$out" "a re-run resumes pass 1"
 
+# --- the cap is reached, and no pass has been refused yet -------------------
+#
+# The state between "the last pass finished" and "a refused pass recorded a
+# declined marker". A review is genuinely owed — the loop hands back to the
+# reviewer after every resolve leg — but `legs_should_continue` refuses when the
+# last pass reached the cap, so the bare command would send the reader at
+# something that declines, writes a declined marker and halts the loop. Found by
+# running the loop to its cap on a real pull request; no fixture reached it.
+out="$(status_with "$(lbl revloop/awaiting-review revloop/pass-3)" \
+  "$(review_m 1 issues-remain "$HIGH_LOW")" \
+  "$(resolve_m 1 "$FIXED_SKIPPED")" \
+  "$(review_m 2 issues-remain "$ONE_MED")" \
+  "$(resolve_m 2 "$ONE_FIXED" d81a3f2abc)" \
+  "$(review_m 3 issues-remain "$ONE_MED")" \
+  "$(resolve_m 3 "$ONE_FIXED" c02b418def)")"
+
+has "the last pass allowed says so rather than inviting the next one" \
+  "$out" "pass 3 was the last one max_passes (3) allows"
+has "and says what a review now would do instead of running" \
+  "$out" "refused rather than run"
+has "the condition that has to change comes before the command"  "$out" "Raise max_passes in"
+has "and NEXT still ends in something you can type"              "$out" "revloop review --pr 42"
+hasnt "nothing invites a pass beyond the cap"                    "$out" "so pass 4 reviews"
+
+# Below the cap the invitation is correct and must survive the guard above.
+out="$(status_with "$(lbl revloop/awaiting-review revloop/pass-1)" \
+  "$(review_m 1 issues-remain "$HIGH_LOW")" \
+  "$(resolve_m 1 "$FIXED_SKIPPED" d81a3f2abc)")"
+has "a pass below the cap still points at the next review" "$out" "revloop review --pr 42"
+hasnt "and says nothing about max_passes"                  "$out" "max_passes"
+
 # --- halted: a cap stopped the next pass before it began --------------------
 #
 # Caps are evaluated when a review leg decides whether the NEXT pass may begin, so
