@@ -96,6 +96,54 @@ revloop doctor
 
 **Not yet run against a real pull request.** Every one of those is exercised offline against a stubbed `gh` boundary — 361 assertions, no network, no model, no PR. That catches the deterministic half, which is the half that fails silently. It does not tell you whether the reviews are any good, and no repository has had the workflows installed yet.
 
+## Using it
+
+### Locally, against a real pull request
+
+Nothing to set up. No App, no secrets, no workflows — it uses the `gh` authentication you already have, so its comments appear as **you**.
+
+```bash
+revloop review  --pr 42     # one review pass: inline comments plus a summary
+revloop address --pr 42     # verify each finding, fix, reply, resolve, push
+revloop run     --pr 42     # both, alternating, up to max_passes
+revloop status  --pr 42     # where the loop is, and how to resume it
+```
+
+**Start with `review` on its own.** It only writes comments, so it is the cheapest way to find out whether the findings are any good — which is the question that decides whether the rest is worth it.
+
+**`address` and `run` commit and push to the pull request's branch.** That is the point of the tool and it is the thing to know before pointing it at something you care about. Three rails constrain it:
+
+- **The branch guard** refuses to push unless the checkout is on the pull request's own head branch, that branch is not the repository default, and the head repository matches the origin. Asserted before anything leaves the machine.
+- **`max_passes`** caps the loop at 3 by default.
+- **The `revloop/stop` label** halts it, and outranks a healthy verdict. It is checked first, every pass.
+
+To watch without any risk of a push, run `review` only.
+
+### What it writes
+
+One inline comment per finding on the line it affects, one summary comment carrying a hidden marker, and the `revloop/*` labels. The address leg adds threaded replies, resolves the threads it settled, commits any fixes, and files deferred defects to whichever sink the config resolves to.
+
+**Every pass is reconstructable from the pull request alone** — the markers are the state, so there is nothing to clean up locally and nothing to lose if a run dies mid-flight.
+
+### Which models run
+
+With no config file anywhere, the defaults are `codex` reviewing and `claude` addressing, in `single-run` mode, with nothing persisted. Override per run without touching the repository:
+
+```bash
+revloop review --pr 42 --harness claude
+```
+
+Repository policy lives in `.github/revloop.yml`, and **it is read from the base revision, never the branch under review** — so a config committed on the pull request branch has no effect until it merges. That is deliberate: a pull request cannot rewrite the loop that reviews it.
+
+### Automated mode
+
+```bash
+revloop auth login          # register and install the GitHub App, two browser approvals
+revloop init                # prints an itemised plan, asks once, then sets it up
+```
+
+`init` is the most consequential command here — it registers a GitHub identity, writes secrets and adds workflow files. It prints every path, secret and label it would touch, flags anything it would overwrite, and stops there under `--dry-run`.
+
 ## Subscriptions in CI
 
 revloop runs on the subscriptions you already pay for rather than per-token API keys. Whether that works in CI is a property of the **runner**, because it comes down to whether a harness's credential can sit in a repository secret. These lifetimes were read off installed credentials, not documentation:
@@ -149,7 +197,7 @@ Nothing on either page is yours to get wrong. Creating the App by hand means a r
 
 If the local listener can't start — no `nc`, no free port — it falls back to asking you to paste the redirect URL. That path is the floor, not the plan.
 
-Keys are stored per owner at `~/.config/revloop/apps/<owner>.pem`, mode 0600. `revloop auth status` confirms where each App is actually installed by signing a JWT and asking GitHub, rather than assuming the setup worked.
+Keys are stored per owner **and role** at `~/.config/revloop/apps/<owner>.<role>.pem`, mode 0600 — `loop` for the review and address jobs, `refresher` for the credential refresher when a pairing needs one. Apps registered before roles existed stay readable at `<owner>.pem`. `revloop auth status` confirms where each App is actually installed by signing a JWT and asking GitHub, rather than assuming the setup worked.
 
 ### Why those three permissions
 
@@ -197,7 +245,7 @@ tests/           the stubbed-gh suite. `tests/run.sh` runs all of it
 ## Working on it
 
 ```bash
-tools/revloop/tests/run.sh      # 248 offline assertions, no network, no model
+tools/revloop/tests/run.sh      # 361 offline assertions, no network, no model
 tools/revloop/scripts/lint.sh   # syntax plus shellcheck -S warning
 ```
 
