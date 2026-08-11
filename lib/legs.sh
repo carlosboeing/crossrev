@@ -136,6 +136,31 @@ legs_label_colour() {
   esac
 }
 
+# What the label means, in the words the design uses for it.
+#
+# Per label rather than one string for all of them, because a label description
+# is the only place GitHub shows a reader what a label means without them going
+# looking — it is the hover text on the pill and the second column on the labels
+# page. "revloop loop state" on all six answered nothing, and the colours are
+# the only other signal a reader has.
+#
+# One map rather than a constant per call site, for the same reason the colours
+# are one map: the watchdog mints `revloop/halted` itself when it gives up, and a
+# second string there is how the same label ends up described two ways depending
+# on which code path created it.
+legs_label_description() {
+  case "$1" in
+    revloop/awaiting-review)     printf 'revloop: a review is owed on this pull request' ;;
+    revloop/awaiting-resolution) printf 'revloop: the review landed, the resolve leg is owed' ;;
+    revloop/converged)           printf 'revloop: the loop finished on its own' ;;
+    revloop/halted)              printf 'revloop: stopped short, a human is needed' ;;
+    revloop/stop)                printf 'revloop: apply this to stop the loop' ;;
+    revloop/pass-*)              printf 'revloop: reached pass %s' "${1##*-}" ;;
+    revloop/watchdog-retried)    printf 'revloop: the watchdog retried this leg once' ;;
+    *)                           printf 'revloop loop state' ;;
+  esac
+}
+
 # Refuse to push anywhere except the PR's own head branch.
 #
 # Branch protection is a backstop, not a control: it fires after a bad push is

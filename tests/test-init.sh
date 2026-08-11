@@ -98,6 +98,16 @@ is  "it writes all three workflows"             "$(ls .github/workflows | wc -l 
 has "it creates the labels the loop needs"      "$(calls)" "name=revloop/awaiting-resolution"
 is  "and only the ones that were missing"       "$(count 'method POST repos/acme/widget/labels')" "8"
 
+# A label description is the only place GitHub shows a reader what a label means
+# without them going looking — the hover text on the pill, the second column on
+# the labels page. All six carried "revloop loop state", which answered nothing
+# and left the colour as the only signal.
+has "each label says what its own state means"  "$(calls)" "the resolve leg is owed"
+has "including the pass label, which counts rather than states" \
+  "$(calls)" "reached pass 2"
+hasnt "rather than one generic string across all of them" \
+  "$(calls)" "description=revloop loop state"
+
 # Refusing to finish quietly. A missing source key fails at checkout before any
 # review runs, which is the good kind of failure — but only if someone knows.
 has "a missing source key is named, not glossed"    "$out" "REVLOOP_SOURCE_KEY"

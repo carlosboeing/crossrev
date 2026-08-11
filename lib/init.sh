@@ -405,7 +405,7 @@ _init_execute() {
   # --- labels --------------------------------------------------------------
   local created=0 existed=0 recoloured=0 l state
   for l in $INIT_PASS_LABELS $INIT_FIXED_LABELS; do
-    state="$(gh_label_ensure "$INIT_REPO" "$l" "$(legs_label_colour "$l")" "revloop loop state")"
+    state="$(gh_label_ensure "$INIT_REPO" "$l" "$(legs_label_colour "$l")" "$(legs_label_description "$l")")"
     case "$state" in
       created)    created=$(( created + 1 )) ;;
       recoloured) recoloured=$(( recoloured + 1 )) ;;
