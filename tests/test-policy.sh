@@ -126,6 +126,37 @@ out="$("$REVLOOP" status --pr 42 2>&1)"
 has "the App's own markers are trusted in automated mode" "$out" "passes      2 of 3"
 unset REVLOOP_APP_SLUG
 
+# A converged review is the reason the loop stopped, so no address leg is owed.
+# The next-action chain asked only whether that leg had run, never whether one
+# was ever due, and sent you to address a pass with an empty findings list.
+# head_sha matches the fixture's, or revision detection would answer first.
+status_marker() {
+  jq -cn --arg sha "$FIX_HEAD" --argjson ts "$(date +%s)" --arg v "$1" '
+    {v:1, leg:"review", pass:2, state:"complete", ts:$ts, run_id:"x", head_sha:$sha,
+     harness:"claude", model:"m", model_reported:"m", verdict:$v, findings:[]}'
+}
+
+fixture_repo; stub_reset
+routes_baseline "$(marker_comment 9001 "$(status_marker converged)" | jq -cs . | payload)"
+out="$("$REVLOOP" status --pr 42 2>&1)"
+has   "a converged loop is reported as finished"      "$out" "nothing — the loop converged on pass 2"
+hasnt "and the address leg is not recommended"        "$out" "revloop address --pr 42"
+has   "the address leg reads as not owed rather than outstanding" \
+  "$out" "address — not needed, the review converged"
+
+fixture_repo; stub_reset
+routes_baseline "$(marker_comment 9001 "$(status_marker blocked)" | jq -cs . | payload)"
+out="$("$REVLOOP" status --pr 42 2>&1)"
+has   "a blocked review hands over to a human"        "$out" "a human's call"
+hasnt "and does not recommend the address leg either" "$out" "revloop address --pr 42"
+
+# The other side of the same guard: a verdict that does owe an address leg must
+# still ask for one, or the fix above has simply broken the common path.
+fixture_repo; stub_reset
+routes_baseline "$(marker_comment 9001 "$(status_marker issues-remain)" | jq -cs . | payload)"
+out="$("$REVLOOP" status --pr 42 2>&1)"
+has "issues remaining still points at the address leg" "$out" "revloop address --pr 42"
+
 # --- a human's stop request outranks everything ------------------------
 fixture_repo; stub_reset
 routes_baseline "$(printf '[]' | payload)" '[{"name":"revloop/stop"}]'

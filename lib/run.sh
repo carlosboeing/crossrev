@@ -1202,9 +1202,31 @@ cmd_status() {
   ui_line "passes      $pass of $CTX_MAX_PASSES, from $total trusted marker(s)"
   ui_gap
 
+  # Was an address leg ever owed this pass? A converged review is the reason the
+  # loop stopped and a blocked one hands over to a human, so in both cases the
+  # answer is no. Everything below asks this before it asks whether that leg ran
+  # — the two questions look alike and only one of them is about work outstanding.
+  local m_review review_state review_verdict address_due=1
+  m_review="$(state_marker_for "$CTX_MARKERS" "$pass" review)"
+  review_state="$(jq -r '.state // ""' <<<"$m_review")"
+  review_verdict="$(jq -r '.verdict // ""' <<<"$m_review")"
+  [[ "$review_state" == "complete" ]] \
+    && [[ "$review_verdict" == "converged" || "$review_verdict" == "blocked" ]] \
+    && address_due=0
+
   for leg in review address; do
     m="$(state_marker_for "$CTX_MARKERS" "$pass" "$leg")"
-    if [[ -z "$m" ]]; then ui_opt "$leg — has not run this pass"; continue; fi
+    if [[ -z "$m" ]]; then
+      # "has not run" reads as a step still outstanding. When no address leg was
+      # due, that is the difference between a finished loop and one that looks
+      # abandoned halfway.
+      if [[ "$leg" == "address" ]] && (( address_due == 0 )); then
+        ui_opt "address — not needed, the review $review_verdict"
+      else
+        ui_opt "$leg — has not run this pass"
+      fi
+      continue
+    fi
     st="$(jq -r '.state' <<<"$m")"
     if [[ "$st" == "complete" ]]; then
       ui_ok "$leg — complete, $(jq -r '.verdict // (if .blocked then "blocked" else "done" end)' <<<"$m")"
@@ -1216,13 +1238,16 @@ cmd_status() {
   done
 
   ui_gap
-  m_review="$(state_marker_for "$CTX_MARKERS" "$pass" review)"
-  if [[ "$(jq -r '.state // ""' <<<"$m_review")" != "complete" ]]; then
+  if [[ "$review_state" != "complete" ]]; then
     ui_next "revloop review --pr $CTX_PR"
-  elif ! state_current_pass_complete "$CTX_MARKERS" "$pass" address; then
+  elif (( address_due )) && ! state_current_pass_complete "$CTX_MARKERS" "$pass" address; then
     ui_next "revloop address --pr $CTX_PR"
   elif state_is_new_revision "$CTX_MARKERS" "$CTX_HEAD_SHA"; then
     ui_next "revloop review --pr $CTX_PR"
+  elif [[ "$review_verdict" == "converged" ]]; then
+    ui_next "nothing — the loop converged on pass $pass"
+  elif [[ "$review_verdict" == "blocked" ]]; then
+    ui_next "nothing automatic — the reviewer reported blocked, so what happens next is a human's call"
   else
     ui_next "nothing — this revision is reviewed and addressed"
   fi
