@@ -64,13 +64,19 @@ adapter_codex() {
   # The last turn.completed event, if one is there. Parsed leniently on purpose:
   # a missing count renders as a dash under a footnote, which is a better outcome
   # than an adapter that fails because a vendor renamed a field.
+  #
+  # `cached_input_tokens` is deliberately NOT added: it is the cached subset of
+  # `input_tokens`, not a figure alongside it. Codex's own summary line reads
+  # `total=T input=I (+ C cached) output=O`, where the cached count sits inside
+  # the input figure it qualifies. Adding it would overstate every run that hits
+  # the prompt cache, which is exactly the context-heavy pass this table exists
+  # to report on.
   local payload tokens
   payload="$(jq -c . "$out_file" 2>/dev/null || echo null)"
   tokens="$(jq -s -r '
     [ .[] | select(.type == "turn.completed") | .usage // empty ] | last
     | if . == null then "null"
-      else ((.input_tokens // 0) + (.output_tokens // 0)
-            + (.cached_input_tokens // 0) | tostring) end' \
+      else ((.input_tokens // 0) + (.output_tokens // 0) | tostring) end' \
     "$events" 2>/dev/null)" || tokens=null
   [[ -n "$tokens" ]] || tokens=null
   rm -f "$out_file" "$err" "$events"

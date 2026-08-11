@@ -190,6 +190,35 @@ out="$(status_with "$(lbl revloop/halted revloop/pass-1)" \
   "$(review_m 1 blocked '[]')")"
 has "a blocked review gets the red glyph, not the green one" "$out" "✗ review   blocked"
 
+# --- halted: a finding was escalated, with no labels to read it off ----------
+#
+# Escalation is the one halt the markers have to answer on their own. Locally a
+# label that will not apply is a warning rather than a fatal, so a repository
+# that never ran `revloop init` runs the loop with no labels on it at all — and
+# there the header comes from the markers. A resolve pass that escalated is
+# complete and not blocked, so reading only `blocked` would answer "awaiting
+# review" and send the reader to start a pass that settles nothing.
+ESCALATED='[{"disposition":"fixed"},{"disposition":"escalated"}]'
+out="$(status_with '[]' \
+  "$(review_m 1 issues-remain "$HIGH_LOW")" \
+  "$(resolve_m 1 "$ESCALATED")")"
+
+has "an escalated disposition halts the loop even with no labels to read" \
+  "$out" "acme/widget#42 — halted"
+hasnt "and does not hand the loop back to the reviewer as though it were owed" \
+  "$out" "— awaiting review"
+has "NEXT names the pending decision"           "$out" "1 finding need"
+has "and where the reasoning is"                "$out" "left the"
+has "then the command that follows settling it" "$out" "revloop review --pr 42"
+
+# With the labels applied, the stop the resolve leg put on outranks the halt
+# beside it — and the two paths have to agree that this is not a review owed.
+out="$(status_with "$(lbl revloop/halted revloop/stop revloop/pass-1)" \
+  "$(review_m 1 issues-remain "$HIGH_LOW")" \
+  "$(resolve_m 1 "$ESCALATED")")"
+has "the labelled path reads the stop the escalation applied" "$out" "acme/widget#42 — stopped"
+hasnt "and still does not read as a review owed"              "$out" "— awaiting review"
+
 # --- stopped by a human -----------------------------------------------------
 #
 # Its own word rather than folding into halted, because the remedy differs.

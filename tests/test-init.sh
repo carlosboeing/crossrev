@@ -172,6 +172,31 @@ has "a pass label is grey, because it is informational rather than a state" \
   "$(calls)" "labels/revloop/pass-2 -f color=afb8c1"
 hasnt "and nothing is minted in the old single purple any more" "$(calls)" "color=5319e7"
 
+# --- the sink's labels belong to the repository, so init never repaints them --
+#
+# `bug` is the repository's own taxonomy. init creates one that is missing so
+# filing does not die after the review has already posted, and leaves the colour
+# of one it finds alone — recolouring somebody's `bug` label because revloop once
+# minted one would be overstepping. The plan has to say the same thing execution
+# does: a plan promising a recolour that never happens is the same class of lie
+# as one claiming to create a label it does not create.
+fixture_repo "$(config_with_issue_sink)"; stub_reset
+routes_init
+route_first 'api repos/*/labels/bug'       '{"name":"bug","color":"d73a4a"}'
+route_first 'api repos/*/labels/revloop/*' '{"name":"old","color":"5319e7"}'
+out="$("$REVLOOP" init --upgrade --dry-run 2>&1)"
+
+has "a sink label in the repository's own colour is reported as existing" \
+  "$out" "exists    bug"
+hasnt "and never as a recolour the run would not perform" "$out" "recolour  bug"
+
+stub_reset; routes_init
+route_first 'api repos/*/labels/bug'       '{"name":"bug","color":"d73a4a"}'
+route_first 'api repos/*/labels/revloop/*' '{"name":"old","color":"5319e7"}'
+out="$("$REVLOOP" init --upgrade --yes 2>&1)"
+is  "and execution leaves its colour exactly as the repository set it" \
+  "$(count 'method PATCH repos/acme/widget/labels/bug')" "0"
+
 # --- create_labels: false refuses rather than inventing ----------------
 #
 # A repository that governs its own label set is one where inventing labels is

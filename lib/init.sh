@@ -309,7 +309,7 @@ _init_print_plan() {
   _init_label_inventory "$INIT_PASS_LABELS $INIT_FIXED_LABELS"
   if [[ -n "$INIT_SINK_LABELS" ]]; then
     ui_line "                  $(wc -w <<<"$INIT_SINK_LABELS" | tr -d ' ') for filed issues:"
-    _init_label_inventory "$INIT_SINK_LABELS" "$INIT_SINK_LABEL_COLOUR"
+    _init_label_inventory "$INIT_SINK_LABELS" keep
   fi
   ui_line "                  the chain is label-driven and gh refuses to apply a label"
   ui_line "                  that does not exist, so a repository without them posts its"
@@ -339,19 +339,24 @@ _init_print_plan() {
   fi
 }
 
-# $1 is the label list. $2 is the colour they should carry, or empty to take each
-# label's own from the loop's map.
+# $1 is the label list. $2 is `keep` for a set init creates but never repaints,
+# which is the issue sink's: those labels are the repository's own taxonomy, and
+# a tool that recoloured somebody's `bug` label because it minted one once would
+# be overstepping. The loop's own six are the other case, and they default.
 #
 # `recolour` is its own word rather than folded into `exists`, for the reason the
 # rest of this plan exists: a run that says "exists" and then quietly changes the
-# label's colour has told the reader something false about what it would do.
+# label's colour has told the reader something false about what it would do. The
+# same rule cuts the other way for a set execution leaves alone — reporting
+# `recolour` there would promise a change that never comes, which is the same lie
+# told backwards. So planning and execution answer from one policy: this argument.
 _init_label_inventory() {
-  local labels="$1" colour="${2:-}" l state current want
+  local labels="$1" policy="${2:-recolour}" l state current
   for l in $labels; do
-    want="${colour:-$(legs_label_colour "$l")}"
     current="$(gh_label_colour "$INIT_REPO" "$l")"
     if [[ -z "$current" ]]; then state="create"
-    elif [[ "$current" == "$(tr '[:upper:]' '[:lower:]' <<<"$want")" ]]; then state="exists"
+    elif [[ "$policy" == "keep" ]]; then state="exists"
+    elif [[ "$current" == "$(tr '[:upper:]' '[:lower:]' <<<"$(legs_label_colour "$l")")" ]]; then state="exists"
     else state="recolour"; fi
     ui_line "                    $(printf '%-8s' "$state")  $l"
   done

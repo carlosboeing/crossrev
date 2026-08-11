@@ -1631,9 +1631,23 @@ _status_state_from_markers() {
     printf 'awaiting resolution'
   elif [[ "$(jq -r '.blocked // false' <<<"$m_resolve")" == "true" ]]; then
     printf 'halted'
+  elif (( $(_status_escalated "$m_resolve") > 0 )); then
+    # A resolve pass that escalated halted deliberately, and its own leg applied
+    # `revloop/halted` and `revloop/stop` for exactly that reason. Reading only
+    # `blocked` here would answer "awaiting review" on the one path where the
+    # loop is waiting on a person, and send the reader to start a pass that
+    # settles nothing.
+    printf 'halted'
   else
     printf 'awaiting review'
   fi
+}
+
+# How many findings this resolve leg handed to a human. Empty marker counts as
+# none, so callers can ask before they know one exists.
+_status_escalated() {
+  [[ -n "$1" ]] || { printf '0'; return 0; }
+  jq '[(.dispositions // [])[] | select(.disposition == "escalated")] | length' <<<"$1"
 }
 
 # One leg line: the glyph reflects the OUTCOME, not whether the leg ran.
@@ -1793,12 +1807,12 @@ _status_next() {
   return 0
 }
 
-# A halt has two shapes and they need different levers: a cap wants raising, a
-# blocked leg wants the underlying decision made. Both are read off the marker
-# that recorded the halt rather than off the label, which says only that one
-# happened.
+# A halt has three shapes and they need different levers: a cap wants raising, a
+# blocked leg wants the underlying decision made, and an escalated finding wants
+# the disagreement settled. All three are read off the marker that recorded the
+# halt rather than off the label, which says only that one happened.
 _status_next_halted() {
-  local pass="$1" m_review m_resolve
+  local pass="$1" m_review m_resolve escalated noun
   m_review="$(state_marker_for "$CTX_MARKERS" "$(( pass + 1 ))" review)"
   if [[ -n "$m_review" && "$(jq -r '.state // ""' <<<"$m_review")" == "declined" ]]; then
     ui_line "pass $(( pass + 1 )) never began — $(jq -r '.reason // "a cap stopped it"' <<<"$m_review")."
@@ -1813,6 +1827,21 @@ _status_next_halted() {
     ui_line "the resolve leg reported blocked and left its reasoning in the thread"
     ui_line "it belongs to. Once that is settled:"
     ui_cmd  "revloop resolve --pr $CTX_PR"
+    return 0
+  fi
+
+  # An escalated finding is the one halt nobody can automate past: two agents
+  # disagreed twice, or the point needs a judgement that is not theirs. The
+  # thread is left open on purpose, so the lever is reading it, not re-running
+  # the leg that already declined to decide.
+  escalated="$(_status_escalated "$m_resolve")"
+  if (( escalated > 0 )); then
+    noun="findings"; (( escalated == 1 )) && noun="finding"
+    ui_line "$escalated $noun need a human decision. The resolve leg left the"
+    ui_line "thread open and said why in it. Once you have settled it:"
+    grep -qw "revloop/stop" <<<"$CTX_LABELS" \
+      && ui_cmd "gh pr edit $CTX_PR --remove-label revloop/stop"
+    ui_cmd  "revloop review --pr $CTX_PR"
     return 0
   fi
 
