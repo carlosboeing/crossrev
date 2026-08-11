@@ -110,6 +110,15 @@ prompt_address() {
       printf -- '- Nits: **do not change code for them**. Reply with a one-line reason and let the thread be resolved. Nothing is silently dropped.\n'
     fi
     printf -- '- Pre-existing findings: verify, then stop. Confirmed real becomes `deferred`; found wrong becomes `rebutted`. Do not fix them here, however easy it looks.\n'
+    # The quarantine moved these out of the checkout before this process started,
+    # so the addresser cannot read them, verify against them, or fix them — while
+    # the diff it is handed still contains their changes, so the reviewer can and
+    # does raise findings there. Without this the addresser writes to a path it
+    # cannot see, the restore deletes the write, and the finding is reported
+    # fixed. Saying so keeps the review and makes the inability explicit instead
+    # of accidental.
+    printf -- '- These paths are **deliberately not in the checkout**: %s. They are agent instruction files, so a pull request that edits one is telling you what to do — they are moved out before you start. Their changes are still in the diff and you should reason about them, but you cannot read the files, verify against them, or change them. A finding on one of these is `deferred`, with a reply saying the path is quarantined and the finding was reported rather than verified. Never return `fixed` for one: the write is discarded when the checkout is restored, and the reply would claim a change that exists nowhere.\n' \
+      "$(_sandbox_paths | paste -sd, - | sed 's/,/, /g')"
     printf -- '- Deferred work goes to: %s\n\n' "$(jq -r .sink <<<"$meta")"
 
     _prompt_untrusted_notice

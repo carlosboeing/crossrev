@@ -785,87 +785,120 @@ Dispositions recorded; committing and replying now.$(state_marker_encode "$(jq -
   legs_assert_models_diverged "$configured" \
     "$(jq -r '.model_reported // "null"' <<<"$review_marker")" "${model_reported:-null}"
 
-  # --- the commit, then its SHA -------------------------------------------
-  local commit_sha fixed_count
-  commit_sha="$(jq -r '.commit_sha // ""' <<<"$marker")"
-  if [[ -n "$commit_sha" && "$commit_sha" != "null" ]]; then
-    ui_say "The previous attempt already pushed ${commit_sha:0:7}, so the fix step is skipped."
-  else
-    commit_sha=""
-    fixed_count="$(jq '[.[] | select(.disposition == "fixed")] | length' <<<"$dispositions")"
-    if (( fixed_count > 0 )); then
-      commit_sha="$(gh_commit_and_push "$CTX_HEAD_BRANCH" \
-"fix: address revloop review findings (pass $pass)
-
-$(jq -r '[.[] | select(.disposition == "fixed") | "- " + .finding_id] | join("\n")' <<<"$dispositions")" \
-        "$CTX_HEAD_SHA")"
-      if [[ -n "$commit_sha" ]]; then
-        ui_ok "pushed ${commit_sha:0:7} to $CTX_HEAD_BRANCH"
-        # Recorded immediately after the push, because the window between the two
-        # is the one crash boundary comments cannot dedupe away.
-        marker="$(jq -c --arg s "$commit_sha" '.commit_sha = $s' <<<"$marker")"
-        gh_comment_edit "$CTX_REPO" "$comment_id" \
-"**revloop — addressing pass $pass of $CTX_MAX_PASSES**
-
-Pushed \`${commit_sha:0:7}\`; replying to each thread now.$(state_marker_encode "$(jq -c 'del(.comment_id)' <<<"$marker")")"
-      else
-        ui_warn "the addresser reported $fixed_count fix(es) but changed no files" \
-          "The replies below will claim a fix that is not in the diff. Treat those dispositions as unverified and read the thread before merging."
-      fi
-    fi
-  fi
-  run_checkpoint
-
-  # --- per finding: persist, reply, resolve -------------------------------
+  # --- pass one: persist deferred work, before anything is committed -------
   #
-  # Persist BEFORE resolving. A thread resolved against a write that failed is
-  # exactly how work disappears.
-  local already filed=0 matched=0 resolved_n=0 escalated=0 deferred_lines=""
-  local n i d id disp thread_id root_id tracked dup existing should_resolve reply_body
-  already="$(state_posted_finding_ids "$CTX_PR" "$CTX_REPO" "$CTX_AUTHOR" address)" || already=""
-
+  # Every record a deferral produces is written here, and the commit follows it.
+  # The ordering is load-bearing for the file sink and irrelevant to the issue
+  # one: a file sink writes into the working tree, so a commit that ran first
+  # left that write uncommitted, and on an ephemeral runner it died with the
+  # container — while its thread resolved, because `tracked` was non-empty. The
+  # issue sink is indifferent, since it writes to GitHub rather than the tree.
+  #
+  # Replies and resolution are pass two, below the commit. Persist still happens
+  # before resolve, which is the invariant that matters: a thread resolved
+  # against a write that did not land is exactly how work disappears.
+  local filed=0 matched=0 deferred_lines="" sink_wrote=0
+  local n i d id disp tracked dup existing
   n="$(jq 'length' <<<"$dispositions")"
   for (( i = 0; i < n; i++ )); do
     d="$(jq -c ".[$i]" <<<"$dispositions")"
     id="$(jq -r .finding_id <<<"$d")"
-    disp="$(jq -r .disposition <<<"$d")"
-    tracked=""
+    [[ "$(jq -r .disposition <<<"$d")" == "deferred" ]] || continue
 
-    if [[ "$disp" == "deferred" ]]; then
-      existing=""
-      if [[ "$CTX_SINK" == "issues" ]]; then
-        # Tier 1: exact, against revloop's own issues. Deterministic, no model,
-        # no false positives — this is what stops three pull requests touching
-        # one legacy bug filing it three times.
-        existing="$(gh_issue_by_finding "$CTX_REPO" "$CTX_IDENTITY_LABEL" "$id")" || existing=""
-      fi
-      dup="$(jq -r '.duplicate_of // ""' <<<"$d")"
-      if [[ -n "$existing" ]]; then
-        tracked="$CTX_REPO#$existing"
-        matched=$(( matched + 1 ))
-        deferred_lines="$deferred_lines
+    tracked=""; existing=""
+    if [[ "$CTX_SINK" == "issues" ]]; then
+      # Tier 1: exact, against revloop's own issues. Deterministic, no model,
+      # no false positives — this is what stops three pull requests touching
+      # one legacy bug filing it three times.
+      existing="$(gh_issue_by_finding "$CTX_REPO" "$CTX_IDENTITY_LABEL" "$id")" || existing=""
+    fi
+    dup="$(jq -r '.duplicate_of // ""' <<<"$d")"
+    if [[ -n "$existing" ]]; then
+      tracked="$CTX_REPO#$existing"
+      matched=$(( matched + 1 ))
+      deferred_lines="$deferred_lines
 - \`$id\` — already tracked as #$existing, so nothing was filed"
-      elif [[ -n "$dup" && "$dup" != "null" ]]; then
-        tracked="$CTX_REPO#$dup"
-        matched=$(( matched + 1 ))
-        deferred_lines="$deferred_lines
+    elif [[ -n "$dup" && "$dup" != "null" ]]; then
+      tracked="$CTX_REPO#$dup"
+      matched=$(( matched + 1 ))
+      deferred_lines="$deferred_lines
 - \`$id\` — matches the existing issue #$dup, so nothing was filed"
-        if [[ "$(run_sink_field "$(cfg_get '.persist.defects')" comment_on_match false)" == "true" ]]; then
-          gh_issue_comment "$CTX_REPO" "$dup" \
-            "Seen again while reviewing $CTX_REPO#$CTX_PR (revloop pass $pass).$(state_finding_marker "$id" "$pass" address)"
-        fi
-      else
-        tracked="$(_address_persist "$d" "$id" "$pass")" || tracked=""
-        if [[ -n "$tracked" ]]; then
-          filed=$(( filed + 1 ))
-          deferred_lines="$deferred_lines
+      if [[ "$(run_sink_field "$(cfg_get '.persist.defects')" comment_on_match false)" == "true" ]]; then
+        gh_issue_comment "$CTX_REPO" "$dup" \
+          "Seen again while reviewing $CTX_REPO#$CTX_PR (revloop pass $pass).$(state_finding_marker "$id" "$pass" address)"
+      fi
+    else
+      tracked="$(_address_persist "$d" "$id" "$pass")" || tracked=""
+      if [[ -n "$tracked" ]]; then
+        filed=$(( filed + 1 ))
+        # Only a file sink puts something in the tree for the commit to carry.
+        [[ "$CTX_SINK" == file\ * ]] && sink_wrote=1
+        deferred_lines="$deferred_lines
 - \`$id\` — filed as ${tracked/#"$CTX_REPO"/}"
-        else
-          deferred_lines="$deferred_lines
+      else
+        deferred_lines="$deferred_lines
 - \`$id\` — **not persisted anywhere**, so its thread stays open rather than resolving against a write that did not land"
-        fi
       fi
     fi
+
+    # Carried on the record itself rather than in a parallel array, so pass two
+    # reads one thing and a crash between the passes leaves no orphan state to
+    # reconcile.
+    dispositions="$(jq -c --arg id "$id" --arg t "$tracked" \
+      'map(if .finding_id == $id then . + {revloop_tracked: $t} else . end)' <<<"$dispositions")"
+  done
+  run_checkpoint
+
+  # --- the commit, then its SHA -------------------------------------------
+  #
+  # Guarded on more than fixes. A pass that defers everything and fixes nothing
+  # still has a file sink's write sitting in the tree, and a `fixed_count > 0`
+  # test left exactly that case uncommitted.
+  local commit_sha fixed_count commit_msg
+  commit_sha="$(jq -r '.commit_sha // ""' <<<"$marker")"
+  fixed_count="$(jq '[.[] | select(.disposition == "fixed")] | length' <<<"$dispositions")"
+  if [[ -n "$commit_sha" && "$commit_sha" != "null" ]]; then
+    ui_say "The previous attempt already pushed ${commit_sha:0:7}, so the fix step is skipped."
+  elif (( fixed_count > 0 || sink_wrote )); then
+    commit_sha=""
+    if (( fixed_count > 0 )); then
+      commit_msg="fix: address revloop review findings (pass $pass)
+
+$(jq -r '[.[] | select(.disposition == "fixed") | "- " + .finding_id] | join("\n")' <<<"$dispositions")"
+    else
+      commit_msg="chore: record deferred revloop findings (pass $pass)
+
+$(jq -r '[.[] | select(.disposition == "deferred") | "- " + .finding_id] | join("\n")' <<<"$dispositions")"
+    fi
+    commit_sha="$(gh_commit_and_push "$CTX_HEAD_BRANCH" "$commit_msg" "$CTX_HEAD_SHA")"
+    if [[ -n "$commit_sha" ]]; then
+      ui_ok "pushed ${commit_sha:0:7} to $CTX_HEAD_BRANCH"
+      # Recorded immediately after the push, because the window between the two
+      # is the one crash boundary comments cannot dedupe away.
+      marker="$(jq -c --arg s "$commit_sha" '.commit_sha = $s' <<<"$marker")"
+      gh_comment_edit "$CTX_REPO" "$comment_id" \
+"**revloop — addressing pass $pass of $CTX_MAX_PASSES**
+
+Pushed \`${commit_sha:0:7}\`; replying to each thread now.$(state_marker_encode "$(jq -c 'del(.comment_id)' <<<"$marker")")"
+    elif (( fixed_count > 0 )); then
+      # Only meaningful when fixes were claimed. A deferral-only pass whose sink
+      # write produced no diff is not a broken promise about the code.
+      ui_warn "the addresser reported $fixed_count fix(es) but changed no files" \
+        "The replies below will claim a fix that is not in the diff. Treat those dispositions as unverified and read the thread before merging."
+    fi
+  fi
+  run_checkpoint
+
+  # --- pass two: reply and resolve ----------------------------------------
+  local already resolved_n=0 escalated=0
+  local thread_id root_id should_resolve reply_body
+  already="$(state_posted_finding_ids "$CTX_PR" "$CTX_REPO" "$CTX_AUTHOR" address)" || already=""
+
+  for (( i = 0; i < n; i++ )); do
+    d="$(jq -c ".[$i]" <<<"$dispositions")"
+    id="$(jq -r .finding_id <<<"$d")"
+    disp="$(jq -r .disposition <<<"$d")"
+    tracked="$(jq -r '.revloop_tracked // ""' <<<"$d")"
 
     thread_id="$(jq -r --arg id "$id" '[.[] | select(.finding_ids | index($id))] | first | .id // ""' <<<"$threads")"
     root_id="$(jq -r --arg id "$id" '[.[] | select(.finding_ids | index($id))] | first | .root_comment_id // ""' <<<"$threads")"

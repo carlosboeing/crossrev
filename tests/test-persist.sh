@@ -74,6 +74,43 @@ address_payload() {
         persist:$p, duplicate_of:$dup}]}'
 }
 
+config_with_file_sink() {
+  cat <<'EOF'
+version: 1
+mode: single-run
+max_passes: 3
+reviewer:
+  harness: claude
+  model: reviewer-model
+addresser:
+  harness: claude
+  model: addresser-model
+  skip_nits_after_pass: 1
+sinks:
+  backlog:
+    type: file
+    path: .revloop/backlog
+persist:
+  defects: backlog
+  escalated: none
+caps:
+  runs_per_day: 12
+  max_files_changed: 200
+EOF
+}
+
+# Only a deferral, nothing fixed. The case where a commit has to happen for a
+# reason other than a code change.
+defer_only_payload() {
+  jq -cn --arg d "$ID_DEFER" '
+    {blocked:false, blocked_reason:null,
+     wrap_up:"Nothing was fixed here. The untyped legacy export is real but predates this branch.",
+     dispositions:[
+       {finding_id:$d, disposition:"deferred", reply:"Confirmed real, and it predates this branch.",
+        persist:{title:"Legacy export is untyped", body:"Measured before filing."},
+        duplicate_of:null}]}'
+}
+
 # The addresser changes code; the orchestrator commits it.
 edit_script() {
   local f; f="$(mktemp)"
@@ -128,6 +165,53 @@ has "a pre-existing finding still reached the addresser" \
   "$(cat "$PROMPT_LOG")" "Legacy export is untyped"
 has "and the prompt tells it not to fix that one here" \
   "$(cat "$PROMPT_LOG")" "verify, then stop"
+
+# The addresser is blind to the quarantined paths while the diff still carries
+# their changes, so the reviewer can raise findings it cannot act on. The rule
+# is only useful if the list is concrete: "instruction files" is not a path.
+has "the prompt says which paths are not in the checkout" \
+  "$(cat "$PROMPT_LOG")" "deliberately not in the checkout"
+has "and names them rather than describing them" \
+  "$(cat "$PROMPT_LOG")" "CLAUDE.md, AGENTS.md, GEMINI.md"
+has "and says what to return for one"                 "$(cat "$PROMPT_LOG")" "quarantined and the finding was reported rather than verified"
+
+# --- a file sink's write has to be inside the commit ----------------------
+#
+# The issue sink writes to GitHub, so ordering cannot hurt it. A file sink writes
+# into the working tree, and a commit that ran first left that write behind: on
+# an ephemeral runner it died with the container while its thread resolved,
+# because `tracked` was non-empty. That is the "work disappears" failure
+# persist-before-resolve exists to prevent, one step further along.
+fixture_repo "$(config_with_file_sink)"; stub_reset
+routes_baseline "$(marker_comment 9001 "$(review_marker)" | jq -cs . | payload)"
+routes_address
+REVLOOP_ADDRESS_PAYLOAD="$(address_payload | payload)"; export REVLOOP_ADDRESS_PAYLOAD
+REVLOOP_ADDRESS_EDIT="$(edit_script)"; export REVLOOP_ADDRESS_EDIT
+out="$("$REVLOOP" address --pr 42 2>&1)"; rc=$?
+
+is  "the file-sink leg exits clean"                   "$rc" "0"
+has "the deferral is recorded to the file sink"       "$out" "filed 1 issue(s) for deferred work"
+is  "the sink file is in the commit, not just the tree" \
+  "$(git show --name-only --format= HEAD | grep -c '^\.revloop/backlog/')" "1"
+is  "so nothing of it is left behind in the tree" \
+  "$(git status --porcelain -- .revloop | wc -l | tr -d ' ')" "0"
+is  "and the code fix rides in the same commit" \
+  "$(git show --name-only --format= HEAD | grep -c '^app\.ts$')" "1"
+
+# The other half: a pass that defers and fixes nothing still has a tree write to
+# carry, and a commit guarded only on the fix count skipped exactly that case.
+fixture_repo "$(config_with_file_sink)"; stub_reset
+routes_baseline "$(marker_comment 9001 "$(review_marker)" | jq -cs . | payload)"
+routes_address
+REVLOOP_ADDRESS_PAYLOAD="$(defer_only_payload | payload)"; export REVLOOP_ADDRESS_PAYLOAD
+out="$("$REVLOOP" address --pr 42 2>&1)"; rc=$?
+
+is  "a deferral-only pass exits clean"                "$rc" "0"
+is  "it still commits, because the sink wrote to the tree" \
+  "$(git show --name-only --format= HEAD | grep -c '^\.revloop/backlog/')" "1"
+has "and says what the commit is for, not 'fix'"      "$(git log -1 --format=%s)" "chore: record deferred revloop findings"
+hasnt "no fix was claimed, so nothing warns about one" \
+  "$out" "changed no files"
 
 # --- the review leg's own comments must not silence the addresser ---------
 #

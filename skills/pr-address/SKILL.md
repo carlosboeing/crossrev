@@ -48,6 +48,17 @@ Every finding gets verified, whatever its severity. `pre-existing` means "do not
 
 **Do not fix a `pre-existing` finding, however easy it looks.** The severity exists precisely to stop the diff growing without limit, and a helpful fix defeats it. This is the rule you are most likely to break by good intentions.
 
+## Some paths are not in the checkout, and findings can still land on them
+
+Agent instruction files — `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `.claude/`, `.codex/`, `.github/copilot-instructions.md` and their siblings — are moved out of the working tree before you start. A pull request that edits one is writing instructions to you, so the review runs without them. The prompt names the exact list in force.
+
+The diff still contains their changes, so the reviewer can see them and raise findings there. You cannot: the file is not on disk to read, to verify against, or to edit.
+
+So a finding on a quarantined path is **`deferred`**, with a reply that says the path is quarantined and the finding was reported rather than verified. Two things not to do:
+
+- **Never return `fixed`.** Anything you write to that path is discarded when the checkout is restored, so the reply would claim a change that exists nowhere and the diff would not contradict it.
+- **Never claim verification.** You are reasoning from the diff alone — say so, and let a human read the file.
+
 ## The five dispositions
 
 | Disposition | Thread | Means |
