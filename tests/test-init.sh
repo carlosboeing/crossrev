@@ -42,7 +42,7 @@ EOF
 # without one describes a label GitHub never returns.
 routes_init() {
   route 'api users/*'                      '{"type":"User"}'
-  route 'api repos/*/labels/revloop/stop'  '{"name":"revloop/stop","color":"f85149"}'
+  route 'api repos/*/labels/revloop/stop'  '{"name":"revloop/stop","color":"cf222e"}'
   route 'api repos/*/labels/bug'           '{"name":"bug","color":"d4c5f9"}'
   route 'api repos/*/labels/*'             '!fail'
   route 'api repos/*/branches/main/protection' '!fail'
@@ -163,13 +163,13 @@ is  "every loop label is recoloured, none created" \
 is  "and no loop label is created, because they all already existed" \
   "$(count 'method POST repos/acme/widget/labels -f name=revloop/')" "0"
 has "the run says how many it recoloured"       "$out" "recoloured 8"
-has "converged is green"                        "$(calls)" "labels/revloop/converged -f color=4ac26b"
-has "halted is orange"                          "$(calls)" "labels/revloop/halted -f color=e8873f"
+has "converged is green"                        "$(calls)" "labels/revloop/converged -f color=1a7f37"
+has "halted is orange"                          "$(calls)" "labels/revloop/halted -f color=bc4c00"
 # Red is reserved for the one label a human applies, so a red pill in a pull
 # request list always means somebody pulled the brake.
-has "stop is red"                               "$(calls)" "labels/revloop/stop -f color=f85149"
+has "stop is red"                               "$(calls)" "labels/revloop/stop -f color=cf222e"
 has "a pass label is grey, because it is informational rather than a state" \
-  "$(calls)" "labels/revloop/pass-2 -f color=afb8c1"
+  "$(calls)" "labels/revloop/pass-2 -f color=57606a"
 hasnt "and nothing is minted in the old single purple any more" "$(calls)" "color=5319e7"
 
 # --- the sink's labels belong to the repository, so init never repaints them --

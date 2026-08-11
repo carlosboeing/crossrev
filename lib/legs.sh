@@ -107,21 +107,28 @@ legs_awaiting_label() {
 # pull request list always means somebody pulled the brake, never that the loop
 # had trouble.
 #
-# Near-black was considered for `stop` and rejected on evidence: GitHub derives
-# dark-theme label text from the same hex it uses for the light-theme background,
-# so a near-black label renders as dark text on a dark pill and is unreadable.
+# Dark enough that GitHub renders the label text white. It picks by brightness
+# and cannot be told otherwise, so the background is the only lever — and the
+# lighter first palette left `revloop/pass-N` at 4.42:1 on a pull request chip,
+# under the 4.5:1 the accessibility standard asks for. Every colour here clears
+# that in all three renderings GitHub uses: the solid pill on the labels page,
+# and the tinted chip in light and dark themes.
+#
+# One Primer step darker again reads better on the labels page and fails in dark
+# mode, where GitHub derives the chip's text from this same hex. That is the wall
+# the design hit when it rejected near-black for `stop`, one step further along.
 #
 # One map rather than a constant per call site. The watchdog mints
 # `revloop/halted` itself when it gives up, and a second hex there is how the
 # same label ends up two colours depending on which code path created it.
 legs_label_colour() {
   case "$1" in
-    revloop/awaiting-review)     printf '54aeff' ;;   # blue, in progress
-    revloop/awaiting-resolution) printf 'a371f7' ;;   # purple, a leg owes an answer
-    revloop/converged)           printf '4ac26b' ;;   # green, finished on its own
-    revloop/halted)              printf 'e8873f' ;;   # orange, a human is needed
-    revloop/stop)                printf 'f85149' ;;   # red, a human applied it
-    revloop/pass-*)              printf 'afb8c1' ;;   # grey, informational
+    revloop/awaiting-review)     printf '0969da' ;;   # blue, in progress
+    revloop/awaiting-resolution) printf '8250df' ;;   # purple, a leg owes an answer
+    revloop/converged)           printf '1a7f37' ;;   # green, finished on its own
+    revloop/halted)              printf 'bc4c00' ;;   # orange, a human is needed
+    revloop/stop)                printf 'cf222e' ;;   # red, a human applied it
+    revloop/pass-*)              printf '57606a' ;;   # grey, informational
     # Not a loop state and not one of the six: the watchdog's own bookkeeping,
     # which reads as a qualifier on whatever state it sits beside.
     revloop/watchdog-retried)    printf 'fbca04' ;;
