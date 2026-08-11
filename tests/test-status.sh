@@ -170,6 +170,24 @@ has "then the command that follows it"          "$out" "revloop review --pr 42"
 # re-running would then answer "already reviewed at this revision".
 has "the refused pass does not become the current one" "$out" "passes     2 of 3"
 
+# --- halted: a cap refused the very first pass ------------------------------
+#
+# The same exclusion that keeps a refused pass out of the numbering leaves this
+# case with no preceding pass at all, so the current pass is 0 — and the wording
+# above would then warn that "anything pass 0 changed is unverified". No such
+# pass exists, nothing was reviewed, and nothing was changed.
+out="$(status_with "$(lbl revloop/halted revloop/pass-1)" \
+  "$(declined_m 1 'reached max_files_changed (200)')")"
+
+has   "a cap refusing the first pass still reads as halted" "$out" "acme/widget#42 — halted"
+has   "with the refusal on the leg that made it"  "$out" "1  ✗ review   never started — reached max_files_changed"
+has   "the loop section says nothing has run"     "$out" "passes     none yet, up to 3"
+has   "NEXT names the pass that never began"      "$out" "pass 1 never began"
+has   "and says no review ran rather than warning about a pass that never existed" \
+  "$out" "No review has run on this pull request at all"
+hasnt "so nothing refers to pass zero"            "$out" "pass 0"
+has   "the lever is still the cap"                "$out" "Raise the cap in"
+
 # --- halted: a leg reported blocked -----------------------------------------
 out="$(status_with "$(lbl revloop/halted revloop/pass-2)" \
   "$(review_m 1 issues-remain "$HIGH_LOW")" \
@@ -210,6 +228,13 @@ hasnt "and does not hand the loop back to the reviewer as though it were owed" \
 has "NEXT names the pending decision"           "$out" "1 finding need"
 has "and where the reasoning is"                "$out" "left the"
 has "then the command that follows settling it" "$out" "revloop review --pr 42"
+
+# The row has to agree with the header above it. A completed resolve marker gets
+# the tick for reaching `complete`, which is the wrong question: this one halted
+# the loop for a human, and a green leg line under a halted header reads as a
+# healthy pass.
+has   "the escalated leg carries the failure glyph" "$out" "✗ resolve  1 fixed, 1 escalated"
+hasnt "and never the tick a settled pass gets"      "$out" "✓ resolve  1 fixed, 1 escalated"
 
 # With the labels applied, the stop the resolve leg put on outranks the halt
 # beside it — and the two paths have to agree that this is not a review owed.

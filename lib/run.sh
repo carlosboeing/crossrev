@@ -988,7 +988,14 @@ Verifying each finding against the codebase. This comment becomes the pass summa
   if [[ "$(jq -r '(.dispositions // []) | length' <<<"$marker")" != "0" ]]; then
     ui_say "The previous attempt already recorded its dispositions, so the resolver is not run again."
     dispositions="$(jq -c '.dispositions' <<<"$marker")"
-    summary="$(jq -r '.summary // ""' <<<"$marker")"
+    # A claim written before the field was renamed carries `wrap_up`, and an
+    # upgrade between recording the dispositions and finishing the pass lands
+    # exactly here: the dispositions are found, the agent is not run again, and a
+    # bare `.summary` read publishes an empty comment. Migrated on the MARKER
+    # rather than read defensively into a local, because the summary comment is
+    # rendered from the marker and a local would leave the published body empty.
+    marker="$(jq -c '.summary = (.summary // .wrap_up // "") | del(.wrap_up)' <<<"$marker")"
+    summary="$(jq -r '.summary' <<<"$marker")"
     blocked="$(jq -r '.blocked // false' <<<"$marker")"
     blocked_reason="$(jq -r '.blocked_reason // "null"' <<<"$marker")"
     model_reported="$(jq -r '.model_reported // "null"' <<<"$marker")"
@@ -1747,7 +1754,14 @@ _status_leg_complete() {
   parts="${parts%.}"
   commit="$(jq -r '.commit_sha // ""' <<<"$m")"
   [[ -n "$commit" && "$commit" != "null" ]] && parts="$parts, pushed ${commit:0:7}"
-  ui_row "$gutter" ok "$label$parts"
+  # An escalated disposition halted the loop for a human, so the row cannot carry
+  # the tick a settled pass gets. The header above already says halted, and a
+  # green leg line underneath it contradicts the section it sits in.
+  if (( $(_status_escalated "$m") > 0 )); then
+    ui_row "$gutter" no "$label$parts"
+  else
+    ui_row "$gutter" ok "$label$parts"
+  fi
 }
 
 # NEXT always ends in something the reader can type: a command, or the condition
@@ -1766,7 +1780,13 @@ _status_next() {
          || [[ "$(_status_state_from_markers)" == "awaiting resolution" ]]; then
         resume="revloop resolve --pr $CTX_PR"
       fi
-      ui_line "someone applied revloop/stop. To continue from pass ${pass:-1}:"
+      # Same rule as the cap halt below: with no pass behind it there is nothing
+      # to continue from, and "pass 0" names one that never existed.
+      if (( pass > 0 )); then
+        ui_line "someone applied revloop/stop. To continue from pass $pass:"
+      else
+        ui_line "someone applied revloop/stop. To start the loop:"
+      fi
       ui_cmd  "gh pr edit $CTX_PR --remove-label revloop/stop"
       ui_cmd  "$resume"
       return 0 ;;
@@ -1816,7 +1836,14 @@ _status_next_halted() {
   m_review="$(state_marker_for "$CTX_MARKERS" "$(( pass + 1 ))" review)"
   if [[ -n "$m_review" && "$(jq -r '.state // ""' <<<"$m_review")" == "declined" ]]; then
     ui_line "pass $(( pass + 1 )) never began — $(jq -r '.reason // "a cap stopped it"' <<<"$m_review")."
-    ui_line "So anything pass $pass changed is unverified. Raise the cap in"
+    if (( pass == 0 )); then
+      # A cap that refuses the FIRST pass leaves nothing behind it. There is no
+      # pass 0, and warning that its changes are unverified describes a review
+      # that never ran over code nobody looked at.
+      ui_line "No review has run on this pull request at all. Raise the cap in"
+    else
+      ui_line "So anything pass $pass changed is unverified. Raise the cap in"
+    fi
     ui_line ".github/revloop.yml, then:"
     ui_cmd  "revloop review --pr $CTX_PR"
     return 0

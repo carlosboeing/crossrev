@@ -350,6 +350,30 @@ has "it does not run the resolver again"             "$out" "already recorded it
 has "and it does not re-run the fix step"             "$out" "already pushed cafe000"
 is  "so nothing new is committed"                     "$(git log -1 --format=%s)" "feature"
 
+# --- recovery across the wrap_up → summary rename ------------------------
+#
+# The recovery branch above is exactly where an upgrade lands badly: the previous
+# attempt recorded its dispositions under the old field name, so the resolver is
+# not run again and there is no second chance to produce the text. Reading only
+# `.summary` there publishes a summary comment with nothing in it, and the marker
+# says the pass completed.
+fixture_repo "$(config_with_issue_sink)"; stub_reset
+old_claim="$(jq -cn --arg sha "$FIX_HEAD" --argjson ts "$(date +%s)" --arg f "$ID_FIX" --arg d "$ID_DEFER" '
+  {v:1, leg:"resolve", pass:1, state:"started", ts:$ts, run_id:"1", head_sha:$sha,
+   harness:"claude", model:"resolver-model", model_reported:"resolver-model",
+   blocked:false, blocked_reason:null, commit_sha:"cafe0000cafe0000cafe0000cafe0000cafe0000",
+   wrap_up:"Recovered from a marker written before the rename.",
+   dispositions:[{finding_id:$f, disposition:"fixed", reply:"done", persist:null, duplicate_of:null},
+                 {finding_id:$d, disposition:"rebutted", reply:"not real", persist:null, duplicate_of:null}]}')"
+comments="$( { marker_comment 9001 "$(review_marker)"; marker_comment 9002 "$old_claim"; } | jq -cs . | payload)"
+routes_baseline "$comments"
+routes_resolve
+out="$("$REVLOOP" resolve --pr 42 2>&1)"; rc=$?
+
+is  "a pre-rename claim still recovers"               "$rc" "0"
+has "and its text survives into the summary comment"  "$(calls)" "Recovered from a marker written before the rename."
+hasnt "so the marker carries no dead copy of the old field" "$(calls)" "wrap_up"
+
 # --- escalation halts the loop and summons a human ---------------------
 fixture_repo "$(config_with_issue_sink)"; stub_reset
 routes_baseline "$(marker_comment 9001 "$(review_marker)" | jq -cs . | payload)"
