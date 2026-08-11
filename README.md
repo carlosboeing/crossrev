@@ -94,7 +94,7 @@ revloop doctor
 | `revloop auth rotate` | Built. Guided, because GitHub has no API to generate an App key. It proves the new key works before replacing the old one |
 | `revloop auth refresh` | Built. The refresher job's only command, and the only thing that writes a rotating harness credential |
 
-**Exercised offline, and run against real pull requests locally.** Every command above is asserted against a stubbed `gh` boundary — 576 assertions, no network, no model, no PR — which catches the deterministic half, the half that fails silently. Two live local runs cover the other half: PR 3 converged on pass 3 against three planted defects, and PR 4 converged on pass 2 while reviewing revloop's own rename, where the reviewer found two real defects in the change under review and pushed back on a third. **No repository has had the workflows installed yet**, so automated mode is still unproven end to end.
+**Exercised offline, and run against real pull requests locally.** Every command above is asserted against a stubbed `gh` boundary — 580 assertions, no network, no model, no PR — which catches the deterministic half, the half that fails silently. Two live local runs cover the other half: PR 3 converged on pass 3 against three planted defects, and PR 4 converged on pass 2 while reviewing revloop's own rename, where the reviewer found two real defects in the change under review and pushed back on a third. **No repository has had the workflows installed yet**, so automated mode is still unproven end to end.
 
 ## Using it
 
@@ -250,7 +250,7 @@ tests/           the stubbed-gh suite. `tests/run.sh` runs all of it
 ## Working on it
 
 ```bash
-tools/revloop/tests/run.sh      # 576 offline assertions, no network, no model
+tools/revloop/tests/run.sh      # 580 offline assertions, no network, no model
 tools/revloop/scripts/lint.sh   # syntax plus shellcheck -S warning
 ```
 

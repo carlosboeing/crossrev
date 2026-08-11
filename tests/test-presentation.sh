@@ -40,10 +40,11 @@ no_threads() {
   route '*reviewThreads*' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}'
 }
 
-# One review leg against a canned payload. Leaves the call log and the prompt log
-# in place for the caller to assert on.
+# One review leg against a canned payload. $2 is an alternative repository
+# config, for the one case that turns on what the config asked for. Leaves the
+# call log and the prompt log in place for the caller to assert on.
 run_review() {
-  fixture_repo; stub_reset
+  fixture_repo "${2:-$(fixture_default_config)}"; stub_reset
   routes_baseline "$(printf '[]' | payload)"
   route 'api --method POST repos/*/issues/42/comments*' '{"id":9001}'
   no_threads
@@ -244,9 +245,15 @@ has "a converged pass still reports what it cost"    "$converged_body" "**Run de
 is  "with the same single row"                       "$(rows_in "$converged_body")" "1"
 has "and a blocked one does as well"                 "$blocked_body" "**Run details**"
 
-# Cost is deliberately absent rather than a blank column that reads as zero: both
-# legs run on subscriptions, where no per-run figure exists.
-has "cost is named as absent rather than left blank" "$review_body" "no per-run figure to report"
+# Cost is deliberately absent rather than a blank column that reads as zero, and
+# the sentence says what revloop knows rather than what the run cost. A leg can
+# be authenticated as a subscription, as a vendor API key, or as a named
+# endpoint that charges per token, so a footnote claiming there is nothing to pay
+# would be wrong on two of the three.
+has "cost is named as absent rather than left blank" \
+  "$review_body" "revloop is given no billing figure by the harness"
+hasnt "and the absence is not explained by a claim about how the leg was paid for" \
+  "$review_body" "subscription"
 
 # One row per leg, and only its own. The two comments sit adjacent on the pull
 # request, so nothing is lost by not duplicating — and duplicated rows can
@@ -267,5 +274,25 @@ has "a model the config did not ask for is called out inline" \
   "$mismatch_body" "**requested \`reviewer-model\`, a different model answered**"
 hasnt "and not tucked into the footnote under the table" \
   "$mismatch_body" "does not report which model answered"
+
+# An alias is not a substitution. A harness resolves `opus` to the canonical id
+# it landed on and reports that, so a raw string comparison renders ordinary
+# configuration as the warning above — and a warning that fires on a healthy run
+# is one nobody reads on the run where it means something.
+alias_config() { fixture_default_config | sed 's/model: reviewer-model/model: opus/'; }
+
+REVLOOP_REVIEW_MODEL=claude-opus-4-5-20251101; export REVLOOP_REVIEW_MODEL
+run_review "$REVIEW_PAYLOAD" "$(alias_config)"
+alias_body="$(last_body 9001)"
+unset REVLOOP_REVIEW_MODEL
+
+hasnt "an alias resolved to its canonical id is not called a substitution" \
+  "$alias_body" "a different model answered"
+has "and the cell names the model that actually answered" \
+  "$alias_body" "\`claude\` · \`claude-opus-4-5-20251101\`"
+# The canonical id is the more precise answer to the same question, so the alias
+# the config happened to type does not need repeating beside it.
+hasnt "nor does it echo the alias back alongside the id it resolved to" \
+  "$alias_body" "requested \`opus\`"
 
 finish

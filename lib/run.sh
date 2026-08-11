@@ -751,6 +751,30 @@ _thousands() {
   printf '%s%s' "$n" "$out"
 }
 
+# Whether two model names denote the same model: the one revloop asked for, and
+# the one the harness says answered.
+#
+# Not a string comparison, because a harness resolves an alias. Claude Code
+# takes `opus` or `sonnet` and reports the canonical id it landed on, so
+# comparing raw strings turns ordinary configuration into a bold warning that
+# the cross-model pairing may have broken. That warning is the one line in the
+# table that must never cry wolf: a reader who has seen it fire on a healthy run
+# will skim past it on the run where it means something.
+#
+# Containment rather than an alias table, deliberately — an alias-to-id table
+# goes stale for the same reason the price table does, and it would have to be
+# maintained per harness. An alias is the family token its canonical id carries,
+# `opus` inside `claude-opus-4-5-20251101`, and a date pin is that id with more
+# of it, so one name inside the other is one model written at two precisions. A
+# substitution shares no such token, which is the case worth shouting about.
+_same_model() {
+  local want got
+  want="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+  got="$(printf '%s' "$2" | tr '[:upper:]' '[:lower:]')"
+  [[ -n "$want" && -n "$got" ]] || return 1
+  [[ "$got" == *"$want"* || "$want" == *"$got"* ]]
+}
+
 # The run details, one row for the comment's own leg and no other.
 #
 # **One row per leg, and only its own.** The review comment reports the review
@@ -777,9 +801,10 @@ _run_details() {
   agent="\`$harness\`"
   if [[ -n "$reported" && "$reported" != "null" ]]; then
     agent="$agent · \`$reported\`"
-    # A genuine mismatch is not a footnote. It may mean the cross-model property
-    # broke, and it should be impossible to skim past.
-    if [[ -n "$model" && "$model" != "null" && "$model" != "$reported" ]]; then
+    # A genuine substitution is not a footnote. It may mean the cross-model
+    # property broke, and it should be impossible to skim past. An alias
+    # resolving to its own canonical id is not one, so it is not flagged as one.
+    if [[ -n "$model" && "$model" != "null" ]] && ! _same_model "$model" "$reported"; then
       agent="$agent — **requested \`$model\`, a different model answered**"
     fi
   elif [[ -n "$model" && "$model" != "null" ]]; then
@@ -800,10 +825,13 @@ _run_details() {
   # the same every pass, so repeating it is noise.
   #
   # Cost is deliberately absent rather than left as a blank column that reads as
-  # zero. Both legs run on subscriptions today, where no per-run dollar figure
-  # exists, and computing one from tokens times a price table means maintaining a
-  # price table that goes stale.
-  printf '<sub>%sNo cost is shown: this leg ran on a subscription, where there is no per-run figure to report.</sub>\n\n' \
+  # zero, and the sentence says what revloop knows rather than what the run cost.
+  # A leg can be authenticated as a subscription, as a vendor API key, or as a
+  # named Anthropic-compatible endpoint that charges per token — and revloop is
+  # handed no billing figure in any of them, so claiming there is nothing to pay
+  # would be wrong on two of the three. Computing one from tokens times a price
+  # table means maintaining a price table that goes stale.
+  printf '<sub>%sNo cost is shown: revloop is given no billing figure by the harness, whichever credential the leg ran on.</sub>\n\n' \
     "${gaps:+$gaps }"
 }
 
