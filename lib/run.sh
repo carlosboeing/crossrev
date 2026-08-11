@@ -97,7 +97,7 @@ run_lock_acquire() {
 
 CTX_REPO=""; CTX_PR=""; CTX_HEAD_SHA=""; CTX_BASE_SHA=""
 CTX_HEAD_BRANCH=""; CTX_DEFAULT_BRANCH=""; CTX_CHANGED=0
-CTX_TITLE=""; CTX_BODY=""; CTX_LABELS=""
+CTX_TITLE=""; CTX_BODY=""; CTX_LABELS=""; CTX_URL=""
 CTX_MODE=""; CTX_AUTHOR=""; CTX_MARKERS="[]"; CTX_MAX_PASSES=3
 CTX_SINK="none"; CTX_IDENTITY_LABEL="revloop-review"; CTX_SINK_LABELS=""
 CTX_FIX_AT="medium"
@@ -130,6 +130,10 @@ ctx_load() {
   CTX_REPO="$repo"
   CTX_PR="$pr"
   CTX_TITLE="$(jq -r .title <<<"$pr_json")"
+  # Already in the one `gh pr view --json` call every leg makes, so this costs no
+  # extra round trip. `status` is the only reader: it names the pull request and
+  # says where to open it, which today's output never does.
+  CTX_URL="$(jq -r '.url // ""' <<<"$pr_json")"
   CTX_BODY="$(jq -r '.body // ""' <<<"$pr_json")"
   CTX_HEAD_SHA="$(jq -r .headRefOid <<<"$pr_json")"
   CTX_BASE_SHA="$(jq -r .baseRefOid <<<"$pr_json")"
@@ -476,10 +480,19 @@ leg_review() {
       "$CTX_CHANGED" "$(cfg_get '.caps.max_files_changed')")"; then
     reason="${decision#* }"
     ui_say "not reviewing $CTX_REPO#$CTX_PR — $reason"
+    # The refusal gets a marker as well as a comment and a label. Without one,
+    # `status` has nothing to render the halt from and has to infer it from a
+    # label plus the prose of a comment body — which is how a readable state
+    # becomes a guessed one. `state: "declined"` keeps it out of pass numbering,
+    # revision detection and the daily cap: it records a pass that did not run.
     gh_comment_create "$CTX_REPO" "$CTX_PR" \
 "**revloop stopped before pass $pass** — $reason.
 
-No review ran, so nothing here is a judgement about the code. Raising the cap in \`.github/revloop.yml\` and pushing a revision would start it again." >/dev/null
+No review ran, so nothing here is a judgement about the code. Raising the cap in \`.github/revloop.yml\` and pushing a revision would start it again.$(state_marker_encode "$(jq -cn --argjson p "$pass" --arg sha "$CTX_HEAD_SHA" \
+  --arg r "${GITHUB_RUN_ID:-local-$$}" --argjson ts "$(date +%s)" --arg why "$reason" \
+  '{v:1, leg:"review", pass:$p, state:"declined", ts:$ts, done_ts:$ts, run_id:$r,
+    head_sha:$sha, harness:null, model:null, effort:null, endpoint:null,
+    model_reported:null, tokens:null, verdict:"declined", reason:$why, findings:[]}')")" >/dev/null
     run_pass_labels "$(( pass > 1 ? pass - 1 : 1 ))" halted
     return 0
   fi
@@ -1490,8 +1503,19 @@ cmd_cycle() {
   return 0
 }
 
-# Position AND interruption, because a stuck local run with no watchdog is only
-# recoverable if something tells you it is stuck.
+# Position, and what to do about it.
+#
+# Five sections, and the words in them are the words on the pull request. The
+# header carries the state in one word — the only thing a reader needs when they
+# are checking a dozen pull requests in a row — and that word is the loop label's
+# own, so learning the labels on GitHub teaches the terminal and the other way
+# round. There is one fewer place for the two to disagree because the header is
+# read off the label rather than computed beside it.
+#
+# It reads the pull request, not the process, so it never says a leg is running.
+# A leg the usage limit killed after forty seconds and a leg happily working for
+# forty seconds leave identical state on the pull request, and an age-based
+# "still running" would hand a dead loop a reassuring status line.
 cmd_status() {
   local pr="" repo=""
   while (( $# )); do
@@ -1505,76 +1529,304 @@ cmd_status() {
 
   ctx_load "$pr" "$repo"
 
-  ui_section "$CTX_REPO#$CTX_PR"
-  ui_line "head        ${CTX_HEAD_SHA:0:7} on $CTX_HEAD_BRANCH, $CTX_CHANGED file(s) changed"
-  ui_line "mode        $CTX_MODE, trusting markers written by $CTX_AUTHOR"
-  ui_line "labels      ${CTX_LABELS:-none}"
-  ui_line "deferred    $CTX_SINK"
+  local state kind pass max_pass
+  state="$(_status_state)"
+  case "$state" in
+    converged)             kind="ok" ;;
+    halted)                kind="warn" ;;
+    stopped)               kind="bad" ;;
+    *)                     kind="info" ;;
+  esac
+  local note=""
+  grep -qw "revloop/watchdog-retried" <<<"$CTX_LABELS" && note="(retried once)"
+  ui_section_state "$CTX_REPO#$CTX_PR" "$state" "$kind" "$note"
 
-  local pass total leg m st stale m_review
   pass="$(state_current_review_pass "$CTX_MARKERS")"
-  total="$(jq 'length' <<<"$CTX_MARKERS")"
+  max_pass="$(state_max_pass "$CTX_MARKERS")"
+
+  ui_gap
+  ui_head "PULL REQUEST"
+  ui_line "title      $CTX_TITLE"
+  [[ -n "$CTX_URL" ]] && ui_line "url        $CTX_URL"
+  ui_line "head       ${CTX_HEAD_SHA:0:7} on $CTX_HEAD_BRANCH, $CTX_CHANGED file(s)"
+  ui_line "labels     ${CTX_LABELS:-none}"
+
+  ui_gap
+  ui_head "LOOP"
+  ui_line "mode       $CTX_MODE, markers by $CTX_AUTHOR"
   if (( pass == 0 )); then
-    ui_line "passes      none yet"
+    ui_line "passes     none yet, up to $CTX_MAX_PASSES"
+  else
+    ui_line "passes     $pass of $CTX_MAX_PASSES"
+  fi
+  ui_line "deferred   $CTX_SINK"
+
+  # Omitted entirely rather than printed with nothing under it. A heading with an
+  # empty body reads as a bug, and the `passes` line above already says none yet.
+  if (( max_pass > 0 )); then
     ui_gap
-    ui_next "revloop review --pr $CTX_PR"
-    ui_end "Nothing has run on this pull request."
+    ui_head "PASSES"
+    local p
+    for (( p = 1; p <= max_pass; p++ )); do
+      _status_leg_row "$p" review  "$(printf '%-2s ' "$p")"
+      _status_leg_row "$p" resolve "   "
+    done
+  fi
+
+  ui_gap
+  ui_head "NEXT"
+  _status_next "$state" "$pass"
+  ui_end "State is read from the pull request itself, so this is the same view a workflow gets."
+}
+
+# The header word, read off the loop labels rather than computed beside them.
+#
+# One to one with INIT_FIXED_LABELS, no exceptions, in the order a human would
+# read them: a stop request outranks everything, then a halt, then convergence,
+# then whichever leg is owed. Someone who learns the labels on GitHub already
+# knows the terminal's words, and the header stops being computed independently
+# of the label it duplicates.
+_status_state() {
+  if   grep -qw "revloop/stop"                <<<"$CTX_LABELS"; then printf 'stopped'
+  elif grep -qw "revloop/halted"              <<<"$CTX_LABELS"; then printf 'halted'
+  elif grep -qw "revloop/converged"           <<<"$CTX_LABELS"; then printf 'converged'
+  elif grep -qw "revloop/awaiting-resolution" <<<"$CTX_LABELS"; then printf 'awaiting resolution'
+  elif grep -qw "revloop/awaiting-review"     <<<"$CTX_LABELS"; then printf 'awaiting review'
+  else _status_state_from_markers
+  fi
+}
+
+# No state label at all, which is not the same question as which one.
+#
+# Locally a label that will not apply is a warning rather than a fatal — one
+# process drives both legs, so the chain does not depend on it — which means a
+# repository that never ran `revloop init` runs the loop perfectly well with no
+# labels on it. Answering "awaiting review" there whenever a resolve leg is
+# plainly owed would send the reader to the wrong command, so the markers answer
+# instead. They say the same thing the labels would have; they are just the copy
+# that is always written.
+_status_state_from_markers() {
+  local pass m_review m_resolve verdict
+  pass="$(state_current_review_pass "$CTX_MARKERS")"
+  (( pass > 0 )) || { printf 'awaiting review'; return 0; }
+
+  # A pass a cap refused to start is a halt, and it is recorded one pass ahead of
+  # the last one that ran.
+  m_review="$(state_marker_for "$CTX_MARKERS" "$(( pass + 1 ))" review)"
+  [[ -n "$m_review" && "$(jq -r '.state // ""' <<<"$m_review")" == "declined" ]] \
+    && { printf 'halted'; return 0; }
+
+  m_review="$(state_marker_for "$CTX_MARKERS" "$pass" review)"
+  [[ "$(jq -r '.state // ""' <<<"$m_review")" == "complete" ]] \
+    || { printf 'awaiting review'; return 0; }
+
+  verdict="$(jq -r '.verdict // ""' <<<"$m_review")"
+  case "$verdict" in
+    converged) printf 'converged'; return 0 ;;
+    blocked)   printf 'halted';    return 0 ;;
+  esac
+
+  m_resolve="$(state_marker_for "$CTX_MARKERS" "$pass" resolve)"
+  if [[ "$(jq -r '.state // ""' <<<"$m_resolve")" != "complete" ]]; then
+    printf 'awaiting resolution'
+  elif [[ "$(jq -r '.blocked // false' <<<"$m_resolve")" == "true" ]]; then
+    printf 'halted'
+  else
+    printf 'awaiting review'
+  fi
+}
+
+# One leg line: the glyph reflects the OUTCOME, not whether the leg ran.
+#
+# Green for a normal outcome, red for a bad one, a dim circle for a leg that
+# never ran. Today's output prints a green tick for any leg that reached
+# `complete` whatever its verdict, so a review that came back blocked looks
+# identical to one that converged — green for "the reviewer gave up".
+#
+# The left column is always `review` or `resolve`, never a pseudo-leg standing in
+# for a reason. The reason belongs in the description beside it, which is what
+# lets a cap halt explain itself without inventing anything: caps are evaluated
+# when a review leg decides whether the next pass may begin, so the refusal
+# attaches to that review leg, which is literally what happened.
+_status_leg_row() {
+  local pass="$1" leg="$2" gutter="$3" m st label
+  label="$(printf '%-9s' "$leg")"
+  m="$(state_marker_for "$CTX_MARKERS" "$pass" "$leg")"
+
+  if [[ -z "$m" ]]; then
+    ui_row "$gutter" opt "$label$(_status_leg_absent "$pass" "$leg")"
     return 0
   fi
 
-  ui_line "passes      $pass of $CTX_MAX_PASSES, from $total trusted marker(s)"
-  ui_gap
+  st="$(jq -r '.state // ""' <<<"$m")"
+  case "$st" in
+    declined)
+      ui_row "$gutter" no "$label""never started — $(jq -r '.reason // "a cap stopped it"' <<<"$m")" ;;
+    complete)
+      _status_leg_complete "$gutter" "$label" "$leg" "$m" ;;
+    *)
+      # Never "still running". The claim marker posts before the harness is
+      # invoked and the cleanup path leaves it in place so a resumed run does not
+      # duplicate work, so a leg killed forty seconds in is indistinguishable from
+      # one that started forty seconds ago and is working. The age is worth
+      # printing; the liveness claim the pull request cannot support is not.
+      local age stale detail
+      age=$(( $(date +%s) - $(jq -r '.ts // 0' <<<"$m") ))
+      detail="claimed $(( age / 60 )) minute(s) ago, never finished"
+      stale="$(state_claim_is_stale "$m" "$CTX_HEAD_SHA")" && detail="$detail — stale"
+      ui_row "$gutter" no "$label$detail" ;;
+  esac
+}
 
-  # Was a resolve leg ever owed this pass? A converged review is the reason the
-  # loop stopped and a blocked one hands over to a human, so in both cases the
-  # answer is no. Everything below asks this before it asks whether that leg ran
-  # — the two questions look alike and only one of them is about work outstanding.
-  local m_review review_state review_verdict resolve_due=1
+# What a leg with no marker at all should say. "Has not run" reads as a step
+# still outstanding, which is wrong for every case here but the first.
+_status_leg_absent() {
+  local pass="$1" leg="$2" m_review verdict
+  [[ "$leg" == "resolve" ]] || { printf 'not run yet'; return 0; }
+
+  grep -qw "revloop/stop" <<<"$CTX_LABELS" && { printf 'not run — revloop/stop is applied'; return 0; }
+
+  # A pass a cap refused to start never reached the resolve leg and never will,
+  # so "not run yet" would promise something that is not coming.
   m_review="$(state_marker_for "$CTX_MARKERS" "$pass" review)"
-  review_state="$(jq -r '.state // ""' <<<"$m_review")"
-  review_verdict="$(jq -r '.verdict // ""' <<<"$m_review")"
-  [[ "$review_state" == "complete" ]] \
-    && [[ "$review_verdict" == "converged" || "$review_verdict" == "blocked" ]] \
-    && resolve_due=0
+  [[ "$(jq -r '.state // ""' <<<"$m_review")" == "declined" ]] && { printf 'not run'; return 0; }
+  [[ "$(jq -r '.state // ""' <<<"$m_review")" == "complete" ]] || { printf 'not run yet'; return 0; }
 
-  for leg in review resolve; do
-    m="$(state_marker_for "$CTX_MARKERS" "$pass" "$leg")"
-    if [[ -z "$m" ]]; then
-      # "has not run" reads as a step still outstanding. When no resolve leg was
-      # due, that is the difference between a finished loop and one that looks
-      # abandoned halfway.
-      if [[ "$leg" == "resolve" ]] && (( resolve_due == 0 )); then
-        ui_opt "resolve — not needed, the review $review_verdict"
-      else
-        ui_opt "$leg — has not run this pass"
-      fi
-      continue
+  # A converged review is the reason the loop stopped and a blocked one hands over
+  # to a human, so in neither case was a resolve leg ever owed.
+  verdict="$(jq -r '.verdict // ""' <<<"$m_review")"
+  case "$verdict" in
+    converged|blocked) printf 'not needed, the review %s' "$verdict" ;;
+    *)                 printf 'not run yet' ;;
+  esac
+}
+
+# A finished leg, described by what it found or did.
+_status_leg_complete() {
+  local gutter="$1" label="$2" leg="$3" m="$4" verdict blocked parts commit
+  if [[ "$leg" == "review" ]]; then
+    verdict="$(jq -r '.verdict // ""' <<<"$m")"
+    if [[ "$verdict" == "blocked" ]]; then
+      ui_row "$gutter" no "$label""blocked — $(jq -r '.blocked_reason // "the reviewer could not complete"' <<<"$m")"
+      return 0
     fi
-    st="$(jq -r '.state' <<<"$m")"
-    if [[ "$st" == "complete" ]]; then
-      ui_ok "$leg — complete, $(jq -r '.verdict // (if .blocked then "blocked" else "done" end)' <<<"$m")"
-    elif stale="$(state_claim_is_stale "$m" "$CTX_HEAD_SHA")"; then
-      ui_no "$leg — interrupted, and stale: $stale. A re-run abandons it and starts the pass again."
+    parts="$(jq -r '
+      (.findings // []) as $f
+      | [ "high", "medium", "low" ]
+      | map(. as $s | ($f | map(select(.severity == $s)) | length) as $n
+            | select($n > 0) | "\($n) \($s)")
+      | join(", ")' <<<"$m")"
+    if [[ -z "$parts" ]]; then
+      ui_row "$gutter" ok "$label""no findings — $verdict"
     else
-      ui_no "$leg — interrupted mid-flight. A re-run resumes it and posts only what is missing."
+      ui_row "$gutter" ok "$label$parts"
     fi
-  done
-
-  ui_gap
-  if [[ "$review_state" != "complete" ]]; then
-    ui_next "revloop review --pr $CTX_PR"
-  elif (( resolve_due )) && ! state_current_pass_complete "$CTX_MARKERS" "$pass" resolve; then
-    ui_next "revloop resolve --pr $CTX_PR"
-  elif state_is_new_revision "$CTX_MARKERS" "$CTX_HEAD_SHA"; then
-    ui_next "revloop review --pr $CTX_PR"
-  elif [[ "$review_verdict" == "converged" ]]; then
-    ui_next "nothing — the loop converged on pass $pass"
-  elif [[ "$review_verdict" == "blocked" ]]; then
-    ui_next "nothing automatic — the reviewer reported blocked, so what happens next is a human's call"
-  else
-    ui_next "nothing — this revision is reviewed and resolved"
+    return 0
   fi
-  ui_end "State is read from the pull request itself, so this is the same view a workflow gets."
+
+  blocked="$(jq -r '.blocked // false' <<<"$m")"
+  if [[ "$blocked" == "true" ]]; then
+    ui_row "$gutter" no "$label""blocked — $(jq -r '.blocked_reason // "the resolve leg could not complete"' <<<"$m")"
+    return 0
+  fi
+  parts="$(_disposition_counts "$(jq -c '.dispositions // []' <<<"$m")")"
+  parts="${parts%.}"
+  commit="$(jq -r '.commit_sha // ""' <<<"$m")"
+  [[ -n "$commit" && "$commit" != "null" ]] && parts="$parts, pushed ${commit:0:7}"
+  ui_row "$gutter" ok "$label$parts"
+}
+
+# NEXT always ends in something the reader can type: a command, or the condition
+# that has to change first and the command that follows it. Never an empty
+# section, never a bare dash, and never "nothing automatic" as the last word — a
+# tool whose job is telling you what to do next should not end on a dead end.
+_status_next() {
+  local state="$1" pass="$2" m stale
+  case "$state" in
+    stopped)
+      # The second command is the leg that was owed when the brake went on,
+      # which is what "continue" means here. Read from the labels beside the
+      # stop, or from the markers when none is there.
+      local resume="revloop review --pr $CTX_PR"
+      if grep -qw "revloop/awaiting-resolution" <<<"$CTX_LABELS" \
+         || [[ "$(_status_state_from_markers)" == "awaiting resolution" ]]; then
+        resume="revloop resolve --pr $CTX_PR"
+      fi
+      ui_line "someone applied revloop/stop. To continue from pass ${pass:-1}:"
+      ui_cmd  "gh pr edit $CTX_PR --remove-label revloop/stop"
+      ui_cmd  "$resume"
+      return 0 ;;
+    converged)
+      # Deliberately the same vocabulary as the converged summary comment, so a
+      # reader moving between the terminal and GitHub is not translating between
+      # two descriptions of one state.
+      ui_line "nothing to run — the loop converged on pass $pass: nothing at or"
+      ui_line "above fix_at ($CTX_FIX_AT) remains."
+      return 0 ;;
+    halted)
+      _status_next_halted "$pass"
+      return 0 ;;
+    "awaiting resolution")
+      ui_cmd "revloop resolve --pr $CTX_PR"
+      return 0 ;;
+  esac
+
+  # awaiting review, and why one is owed.
+  ui_cmd "revloop review --pr $CTX_PR"
+  m="$(state_marker_for "$CTX_MARKERS" "$pass" review)"
+  if [[ -n "$m" && "$(jq -r '.state // ""' <<<"$m")" == "started" ]]; then
+    if stale="$(state_claim_is_stale "$m" "$CTX_HEAD_SHA")"; then
+      ui_line "That claim is stale — $stale — so a re-run abandons it and starts"
+      ui_line "pass $pass again."
+    else
+      ui_line "The head has not moved, so a re-run resumes pass $pass and posts"
+      ui_line "only what is missing."
+    fi
+  elif (( pass > 0 )) && state_is_new_revision "$CTX_MARKERS" "$CTX_HEAD_SHA"; then
+    ui_line "Pass $pass is closed and the branch moved, so pass $(( pass + 1 )) reviews"
+    ui_line "the new revision."
+  fi
+  grep -qw "revloop/watchdog-retried" <<<"$CTX_LABELS" && {
+    ui_line "The watchdog has already retried this leg once — a second failure"
+    ui_line "halts the loop rather than retrying again."
+  }
+  return 0
+}
+
+# A halt has two shapes and they need different levers: a cap wants raising, a
+# blocked leg wants the underlying decision made. Both are read off the marker
+# that recorded the halt rather than off the label, which says only that one
+# happened.
+_status_next_halted() {
+  local pass="$1" m_review m_resolve
+  m_review="$(state_marker_for "$CTX_MARKERS" "$(( pass + 1 ))" review)"
+  if [[ -n "$m_review" && "$(jq -r '.state // ""' <<<"$m_review")" == "declined" ]]; then
+    ui_line "pass $(( pass + 1 )) never began — $(jq -r '.reason // "a cap stopped it"' <<<"$m_review")."
+    ui_line "So anything pass $pass changed is unverified. Raise the cap in"
+    ui_line ".github/revloop.yml, then:"
+    ui_cmd  "revloop review --pr $CTX_PR"
+    return 0
+  fi
+
+  m_resolve="$(state_marker_for "$CTX_MARKERS" "$pass" resolve)"
+  if [[ -n "$m_resolve" && "$(jq -r '.blocked // false' <<<"$m_resolve")" == "true" ]]; then
+    ui_line "the resolve leg reported blocked and left its reasoning in the thread"
+    ui_line "it belongs to. Once that is settled:"
+    ui_cmd  "revloop resolve --pr $CTX_PR"
+    return 0
+  fi
+
+  m_review="$(state_marker_for "$CTX_MARKERS" "$pass" review)"
+  if [[ -n "$m_review" && "$(jq -r '.verdict // ""' <<<"$m_review")" == "blocked" ]]; then
+    ui_line "the review leg reported blocked, so what happens next is a human's"
+    ui_line "call. Once you have looked:"
+    ui_cmd  "revloop review --pr $CTX_PR"
+    return 0
+  fi
+
+  ui_line "the loop stopped short and needs a human. Remove revloop/halted once"
+  ui_line "you have looked, then:"
+  ui_cmd  "revloop review --pr $CTX_PR"
 }
 
 # ---------------------------------------------------------------------------

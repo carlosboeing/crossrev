@@ -129,9 +129,9 @@ fixture_repo; stub_reset
 claim="$(make_claim)"
 routes_baseline "$(marker_comment 9001 "$claim" | jq -cs . | payload)"
 out="$("$REVLOOP" status --pr 42 2>&1)"
-has "status names the interrupted leg"                "$out" "review — interrupted mid-flight"
+has "status names the interrupted leg"                "$out" "review   claimed 0 minute(s) ago, never finished"
 has "status names the command that resumes it"        "$out" "revloop review --pr 42"
-has "status says which side is not resumable work"    "$out" "resolve — has not run this pass"
+has "status says which side is not resumable work"    "$out" "resolve  not run yet"
 
 # --- the local lock -------------------------------------------------------
 fixture_repo; stub_reset

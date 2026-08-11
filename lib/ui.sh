@@ -27,6 +27,44 @@ fi
 # Section heading. Opens a block; body lines are prefixed with a rule.
 ui_section() { printf '\n%s◇  %s%s\n' "$_c_blue" "$1" "$_c_reset"; }
 
+# Section heading whose subject carries a state word — "#3 — converged".
+#
+# The word answers the first question before the reader parses anything else,
+# which is the whole job when they are checking a dozen pull requests in a row.
+# $3 picks the colour: ok, bad, warn, or anything else for the neutral blue.
+# $4 is an optional dim qualifier, such as "(retried once)".
+ui_section_state() {
+  local title="$1" word="$2" kind="$3" note="${4:-}" c
+  case "$kind" in
+    ok)   c="$_c_green" ;;
+    bad)  c="$_c_red" ;;
+    warn) c="$_c_yellow" ;;
+    *)    c="$_c_blue" ;;
+  esac
+  printf '\n%s◇  %s%s — %s%s%s' "$_c_blue" "$title" "$_c_reset" "$c" "$word" "$_c_reset"
+  [[ -n "$note" ]] && printf ' %s%s%s' "$_c_yellow" "$note" "$_c_reset"
+  printf '\n'
+}
+
+# A heading inside a section, grouping the lines under it.
+ui_head() { printf '%s│%s  %s%s%s\n' "$_c_dim" "$_c_reset" "$_c_bold" "$1" "$_c_reset"; }
+
+# A leg line, with a gutter before the glyph so the pass number sits to its left.
+# $2 is ok, no, or anything else for the dim circle.
+ui_row() {
+  local gutter="$1" kind="$2" text="$3" glyph
+  case "$kind" in
+    ok) glyph="${_c_green}✓${_c_reset}" ;;
+    no) glyph="${_c_red}✗${_c_reset}" ;;
+    *)  glyph="${_c_dim}○${_c_reset}" ;;
+  esac
+  printf '%s│%s  %s%s %s\n' "$_c_dim" "$_c_reset" "$gutter" "$glyph" "$text"
+}
+
+# A command the reader can type. No glyph: under a NEXT heading the arrow is
+# redundant, and the line reads as something to copy rather than as narration.
+ui_cmd() { printf '%s│%s  %s%s%s\n' "$_c_dim" "$_c_reset" "$_c_blue" "$1" "$_c_reset"; }
+
 # Body line inside a section.
 ui_line() { printf '%s│%s  %s\n' "$_c_dim" "$_c_reset" "$1"; }
 

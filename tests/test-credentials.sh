@@ -75,7 +75,11 @@ cred_seconds_left "$bad" >/dev/null 2>&1 \
 out="$( ( cred_assert_fresh codex "$f" ) 2>&1 )"; rc=$?
 is  "a credential with a day left runs"         "$rc" "0"
 
-nearly="$(mktemp)"; fake_credential 900 >"$nearly"
+# 930 rather than 900: the message floors the remainder to whole minutes, so a
+# fixture sitting exactly on a minute boundary reports 14 whenever a second
+# elapses between building it and reading it. Rare, load-dependent, and it fails
+# a test that has nothing to do with clocks.
+nearly="$(mktemp)"; fake_credential 930 >"$nearly"
 out="$( ( cred_assert_fresh codex "$nearly" ) 2>&1 )"; rc=$?
 is  "one with fifteen minutes left refuses"     "$rc" "1"
 has "and says how much is left"                 "$out" "15 minutes"

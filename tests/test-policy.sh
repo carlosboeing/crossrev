@@ -85,7 +85,7 @@ on_head AGENTS.md '# x
 - **Tracker**: GitHub Issues'
 routes_baseline "$(printf '[]' | payload)"
 out="$("$REVLOOP" status --pr 42 2>&1)"
-has "a Project Map added only on the branch is ignored" "$out" "deferred    none"
+has "a Project Map added only on the branch is ignored" "$out" "deferred   none"
 
 fixture_repo "$(auto_sink_config)"; stub_reset
 git checkout -q main
@@ -97,7 +97,7 @@ git push -qf origin feature
 FIX_BASE="$(git rev-parse main)"; FIX_HEAD="$(git rev-parse HEAD)"
 routes_baseline "$(printf '[]' | payload)"
 out="$("$REVLOOP" status --pr 42 2>&1)"
-has "the base revision's Project Map does take effect" "$out" "deferred    issues"
+has "the base revision's Project Map does take effect" "$out" "deferred   issues"
 
 # --- marker trust scales with autonomy ----------------------------------
 automated_config() {
@@ -111,19 +111,19 @@ forged="$(jq -cn --argjson ts "$(date +%s)" '
 fixture_repo; stub_reset
 routes_baseline "$(marker_comment 9001 "$forged" "$FIX_USER" | jq -cs . | payload)"
 out="$("$REVLOOP" status --pr 42 2>&1)"
-has "locally, the invoking user's own markers are trusted" "$out" "passes      2 of 3"
+has "locally, the invoking user's own markers are trusted" "$out" "passes     2 of 3"
 
 fixture_repo "$(automated_config)"; stub_reset
 REVLOOP_APP_SLUG=revloop-acme; export REVLOOP_APP_SLUG
 routes_baseline "$(marker_comment 9001 "$forged" "$FIX_USER" | jq -cs . | payload)"
 out="$("$REVLOOP" status --pr 42 2>&1)"
-has "in automated mode a user-authored marker is treated as absent" "$out" "passes      none yet"
+has "in automated mode a user-authored marker is treated as absent" "$out" "passes     none yet, up to 3"
 has "and the mode says whose markers it trusts"                     "$out" "revloop-acme[bot]"
 
 fixture_repo "$(automated_config)"; stub_reset
 routes_baseline "$(marker_comment 9001 "$forged" "$FIX_APP" | jq -cs . | payload)"
 out="$("$REVLOOP" status --pr 42 2>&1)"
-has "the App's own markers are trusted in automated mode" "$out" "passes      2 of 3"
+has "the App's own markers are trusted in automated mode" "$out" "passes     2 of 3"
 unset REVLOOP_APP_SLUG
 
 # A converged review is the reason the loop stopped, so no resolve leg is owed.
@@ -139,15 +139,15 @@ status_marker() {
 fixture_repo; stub_reset
 routes_baseline "$(marker_comment 9001 "$(status_marker converged)" | jq -cs . | payload)"
 out="$("$REVLOOP" status --pr 42 2>&1)"
-has   "a converged loop is reported as finished"      "$out" "nothing — the loop converged on pass 2"
+has   "a converged loop is reported as finished"      "$out" "nothing to run — the loop converged on pass 2"
 hasnt "and the resolve leg is not recommended"        "$out" "revloop resolve --pr 42"
 has   "the resolve leg reads as not owed rather than outstanding" \
-  "$out" "resolve — not needed, the review converged"
+  "$out" "resolve  not needed, the review converged"
 
 fixture_repo; stub_reset
 routes_baseline "$(marker_comment 9001 "$(status_marker blocked)" | jq -cs . | payload)"
 out="$("$REVLOOP" status --pr 42 2>&1)"
-has   "a blocked review hands over to a human"        "$out" "a human's call"
+has   "a blocked review hands over to a human"        "$out" "what happens next is a human's"
 hasnt "and does not recommend the resolve leg either" "$out" "revloop resolve --pr 42"
 
 # The other side of the same guard: a verdict that does owe a resolve leg must

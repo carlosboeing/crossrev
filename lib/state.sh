@@ -147,14 +147,33 @@ state_anchor() {
 # Pass number and revision detection
 # ---------------------------------------------------------------------------
 
+# A pass that a cap refused to start writes a marker so `status` has something to
+# render the refusal from — otherwise the state is a comment body plus a label,
+# and neither is machine-readable. But that marker records a pass that did not
+# happen, so it must not count as one.
+#
+# Three places care, and all three would be wrong without this. Pass numbering
+# would report the refused pass as the current one, so raising the cap and
+# re-running would answer "already reviewed". Revision detection would take the
+# refused marker's head_sha as a revision that had been reviewed. And the daily
+# cap would count a run that never ran, against the cap that stopped it.
+_state_real() { jq -c '[.[] | select((.state // "") != "declined")]' <<<"$1"; }
+
 # No trusted marker means pass 1, with trust resolved per mode. Pass numbering,
 # revision detection and run counting all read the same rule, so there is one
 # definition to get right rather than three.
 state_pass() {
   local markers="$1"
   local n
-  n="$(jq -r '[.[] | select(.leg == "review") | .pass] | max // 0' <<<"$markers")"
+  n="$(jq -r '[.[] | select(.leg == "review") | .pass] | max // 0' <<<"$(_state_real "$markers")")"
   printf '%s' "$(( n + 1 ))"
+}
+
+# The highest pass number any marker mentions, refused passes included. `status`
+# renders every pass, and a pass that was refused is one of the things it has to
+# show.
+state_max_pass() {
+  jq -r '[.[] | .pass // 0] | max // 0' <<<"$1"
 }
 
 state_current_pass_complete() {
@@ -165,7 +184,7 @@ state_current_pass_complete() {
 
 # The pass the resolve leg belongs to: the newest review pass, not the next one.
 state_current_review_pass() {
-  jq -r '[.[] | select(.leg == "review") | .pass] | max // 0' <<<"$1"
+  jq -r '[.[] | select(.leg == "review") | .pass] | max // 0' <<<"$(_state_real "$1")"
 }
 
 # The newest marker for a (pass, leg), whatever its state. The resolve leg needs
@@ -216,7 +235,8 @@ state_claim_is_stale() {
 # Same SHA, nothing new. Different SHA, a revision landed.
 state_is_new_revision() {
   local markers="$1" head_sha="$2" last
-  last="$(jq -r '[.[] | select(.leg == "review") | .head_sha] | last // empty' <<<"$markers")"
+  last="$(jq -r '[.[] | select(.leg == "review") | .head_sha] | last // empty' \
+    <<<"$(_state_real "$markers")")"
   [[ -z "$last" || "$last" != "$head_sha" ]]
 }
 
@@ -228,7 +248,7 @@ state_runs_today() {
   local markers="$1" cutoff
   cutoff="$(( $(date +%s) - 86400 ))"
   jq -r --argjson c "$cutoff" \
-    '[.[] | select((.ts // 0) > $c)] | length' <<<"$markers"
+    '[.[] | select((.ts // 0) > $c)] | length' <<<"$(_state_real "$markers")"
 }
 
 # ---------------------------------------------------------------------------
