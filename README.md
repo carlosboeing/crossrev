@@ -191,6 +191,23 @@ The quarantine moves `.claude/` and `.agents/` out of the checkout before any in
 
 The skills stay installable and usable by hand; nothing about them changes. The generated workflows just don't need to place them anywhere.
 
+## Environment variables
+
+**This is the complete list of what a person or a workflow sets. Anything else beginning with `REVLOOP_` is internal** — the code uses that prefix for its own state and for arguments it passes to child processes, and setting one of those from outside is unsupported rather than merely undocumented.
+
+| Variable | Set by | What it does |
+|---|---|---|
+| `REVLOOP_CODEX_AUTH` | the workflow, from a secret | Codex credentials, restored read-only into a throwaway home for the leg |
+| `REVLOOP_APP_SLUG` | you, or `revloop auth login` | Which GitHub App the loop authenticates as |
+| `REVLOOP_OWNER` | you | The owner whose App key and role files to read, when it cannot be inferred |
+| `REVLOOP_REFRESH_APP_ID`, `REVLOOP_REFRESH_APP_PRIVATE_KEY` | the token-refresh workflow | The second App, which holds `Secrets: write` and nothing else |
+| `REVLOOP_HARNESS_INSTALL` | the workflow | Whether the runner installs the harness per run |
+| `REVLOOP_ASSUME_YES` | you | Answers the install and upgrade prompts, same as `--yes` |
+| `REVLOOP_NO_TIPS` | you | Drops the closing suggestion from a command's output |
+| `REVLOOP_GIT_NAME`, `REVLOOP_GIT_EMAIL` | you | Overrides the identity the resolve leg commits under |
+
+Two kinds of internal variable share the prefix and are worth recognising so they are not mistaken for settings. The test suite drives the stubbed harnesses through names like `REVLOOP_REVIEW_PAYLOAD`, `REVLOOP_GH_ROUTES` and `REVLOOP_STUB_COUNT`; setting those against a real run makes it lie to you. And `REVLOOP_DIFF_PATH`, `REVLOOP_DIFF_SIDE` and `REVLOOP_DIFF_EXCLUDE` are arguments to an `awk` program, passed by environment rather than by `-v` because `-v` runs its value through awk's own escape processing and would decode a backslash in a path on the way in. They are set on every call, including to the empty string, so exporting one changes nothing.
+
 ## Registering the App
 
 Only needed for automated mode. One App per owner — not one globally, and not one per repository.
