@@ -290,16 +290,45 @@ is "and finishing it starts no further review pass" \
 has "and the bound is still what stops the run"     "$out" "Reached max_passes_per_cycle (3)"
 
 # Interrupted one leg earlier: the review claim itself is unfinished, so the
-# review leg resumes it as a continuation before its resolve leg follows.
+# review leg resumes it before its resolve leg follows.
+#
+# The resume is deliberately not a continuation. An open claim is resumed at its
+# own pass number, so the flag cannot be what holds the number down — and the
+# bound it turns on is what refuses a pass numbered above it, which is the pass
+# below.
 : >"$cycle_log"
 out="$(cycle_driver 3 "$cycle_log" started no)"
 is "an unfinished final review is resumed rather than abandoned" \
   "$(grep -c '^review ' "$cycle_log" || true)" "1"
-is "as a continuation, so it cannot start a fresh pass" \
-  "$(grep -c -- '--continuation' "$cycle_log" || true)" "1"
+is "and the bound is not applied to a pass already under way" \
+  "$(grep -c -- '--continuation' "$cycle_log" || true)" "0"
 is "and its resolve leg follows once it completes" \
   "$(grep -c '^resolve ' "$cycle_log" || true)" "1"
 has "before the bound stops the run"                "$out" "Reached max_passes_per_cycle (3)"
+
+# A pass numbered above the bound, interrupted. `revloop review --pr N` typed by
+# hand runs one attended pass past max_passes_per_cycle by design, so pass 4 of a
+# bound of 3 is a state an operator can legitimately be in — and a cycle then has
+# to be able to finish it. Applying the bound to that resume refuses it, writes a
+# declined marker over a pass that is mid-flight, and exits clean with the review
+# unfinished: a halt that reads as a completed cycle.
+: >"$cycle_log"
+out="$(cycle_driver 4 "$cycle_log" started no)"
+is "an interrupted pass above the bound is still resumed" \
+  "$(grep -c '^review ' "$cycle_log" || true)" "1"
+is "without the flag that would make the bound refuse it" \
+  "$(grep -c -- '--continuation' "$cycle_log" || true)" "0"
+is "and its resolve leg follows, so its findings are not stranded" \
+  "$(grep -c '^resolve ' "$cycle_log" || true)" "1"
+
+# The other half of the same branch, and why the flag cannot simply be dropped.
+# A marker that is not an open claim — a declined one, or none — leaves the review
+# leg to compute a pass number of its own, and the bound is the only thing
+# stopping it starting one above the bound from inside a cycle.
+: >"$cycle_log"
+out="$(cycle_driver 4 "$cycle_log" declined no)"
+is "an unfinished pass with no open claim keeps the bound in force" \
+  "$(grep -c -- '--continuation' "$cycle_log" || true)" "1"
 
 # A non-positive bound used to mean opposite things on the two paths: the
 # automatic loop skipped the pass check entirely and kept starting passes, while

@@ -1891,12 +1891,31 @@ _resolve_summary_body() {
 # $1 the current review pass, $2 the bound, then the arguments for the legs.
 _cycle_finish_at_bound() {
   local pass="$1" max="$2"; shift 2
-  local marker verdict actionable
+  local marker state verdict actionable
 
   marker="$(state_marker_for "$CTX_MARKERS" "$pass" review)"
-  if [[ "$(jq -r '.state // ""' <<<"$marker")" != "complete" ]]; then
-    ui_say "Pass $pass is the last one max_passes_per_cycle ($max) allows, and its review did not finish. Resuming it."
-    leg_review "$@" --continuation --no-tips || return 1
+  state="$(jq -r '.state // ""' <<<"$marker")"
+  if [[ "$state" != "complete" ]]; then
+    ui_say "Pass $pass is unfinished, and max_passes_per_cycle ($max) starts no further pass. Resuming its review."
+    # Whether the bound applies turns on which kind of unfinished this is, and
+    # the marker's own state answers it.
+    #
+    # `started` is an open claim, and the review leg resumes an open claim at its
+    # existing pass number rather than beginning another — `state_open_claim`
+    # reads the same marker this did, so the two cannot disagree. The bound must
+    # not be applied to that: a person may legitimately have started pass 4 under
+    # a bound of 3, which is exactly what `revloop review --pr N` typed by hand
+    # does, and --continuation would refuse the resume, write a declined marker
+    # over a pass that is mid-flight, and exit clean with the review unfinished.
+    #
+    # Anything else — a declined marker, or none — leaves the leg to compute a
+    # pass number of its own, and the bound is the only thing stopping it
+    # starting one. That case keeps the flag.
+    if [[ "$state" == "started" ]]; then
+      leg_review "$@" --no-tips || return 1
+    else
+      leg_review "$@" --continuation --no-tips || return 1
+    fi
     ctx_load "$CTX_PR" "$CTX_REPO"
     pass="$(state_current_review_pass "$CTX_MARKERS")"
     marker="$(state_marker_for "$CTX_MARKERS" "$pass" review)"
@@ -1921,7 +1940,7 @@ _cycle_finish_at_bound() {
     return 0
   fi
 
-  ui_say "Pass $pass is the last one max_passes_per_cycle ($max) allows, and its resolve leg is still owed."
+  ui_say "Pass $pass is unfinished, and max_passes_per_cycle ($max) starts no further pass. Its resolve leg is still owed."
   leg_resolve "$@" --no-tips || return 1
 
   # The same two outcomes the loop reports after a resolve leg, so the last line
