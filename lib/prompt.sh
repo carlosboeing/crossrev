@@ -35,7 +35,7 @@ prompt_review() {
   {
     printf '# Your task\n\n'
     printf 'You are the review leg of revloop, running pass %s of %s on %s pull request #%s.\n\n' \
-      "$(jq -r .pass <<<"$meta")" "$(jq -r .max_passes <<<"$meta")" \
+      "$(jq -r .pass <<<"$meta")" "$(jq -r .max_passes_per_cycle <<<"$meta")" \
       "$(jq -r .repo <<<"$meta")" "$(jq -r .pr <<<"$meta")"
     printf 'Follow the skill reproduced immediately below. It is the whole rubric; there is no other.\n\n'
     printf -- '---\n\n'
@@ -58,8 +58,8 @@ prompt_review() {
     printf -- '- Title: %s\n' "$(jq -r .title <<<"$meta")"
     # The verdict is a question about the threshold, not about severity alone, so
     # the threshold is stated rather than left to be guessed from the rubric.
-    printf -- '- `fix_at` in force this pass: **%s**. A finding at or above that severity, and not pre-existing, keeps the loop alive; anything else is reported and cannot prevent convergence.\n\n' \
-      "$(jq -r '.fix_at // "medium"' <<<"$meta")"
+    printf -- '- `min_fix_severity` in force this pass: **%s**. A finding at or above that severity, and not pre-existing, keeps the loop alive; anything else is reported and cannot prevent convergence.\n\n' \
+      "$(jq -r '.min_fix_severity // "medium"' <<<"$meta")"
     printf '### Description as written by the author\n\n'
     printf '````\n%s\n````\n\n' "$(jq -r '.body // ""' <<<"$meta")"
 
@@ -101,7 +101,7 @@ prompt_resolve() {
   {
     printf '# Your task\n\n'
     printf 'You are the resolve leg of revloop, running pass %s of %s on %s pull request #%s. The findings below came from the review leg — a separate agent, reviewing this diff without seeing your work.\n\n' \
-      "$(jq -r .pass <<<"$meta")" "$(jq -r .max_passes <<<"$meta")" \
+      "$(jq -r .pass <<<"$meta")" "$(jq -r .max_passes_per_cycle <<<"$meta")" \
       "$(jq -r .repo <<<"$meta")" "$(jq -r .pr <<<"$meta")"
     printf 'You are in a checkout of the pull request'"'"'s head branch at %s. Change code in the working tree; the orchestrator commits and pushes it. Make no GitHub call — you have no credential for one.\n\n' \
       "$(jq -r .head_sha <<<"$meta")"
@@ -111,8 +111,8 @@ prompt_resolve() {
     printf '\n---\n\n'
 
     printf '## Policy in force this pass\n\n'
-    printf -- '- `fix_at` is **%s**. Every finding below carries `may fix: yes` or `may fix: no`, worked out from that threshold — do not re-derive it, and do not argue with it. A `no` finding is still verified and still gets a reply; what it does not get is a change to the code.\n' \
-      "$(jq -r '.fix_at // "medium"' <<<"$meta")"
+    printf -- '- `min_fix_severity` is **%s**. Every finding below carries `may fix: yes` or `may fix: no`, worked out from that threshold — do not re-derive it, and do not argue with it. A `no` finding is still verified and still gets a reply; what it does not get is a change to the code.\n' \
+      "$(jq -r '.min_fix_severity // "medium"' <<<"$meta")"
     printf -- '- A finding you may not fix is `skipped` with a one-line reason, unless it is genuinely wrong, in which case it is `rebutted`. Nothing is silently dropped.\n'
     printf -- '- Pre-existing findings: verify, then stop. Confirmed real becomes `deferred`; found wrong becomes `rebutted`. Do not fix them here, however easy it looks, whatever their severity.\n'
     # The quarantine moved these out of the checkout before this process started,

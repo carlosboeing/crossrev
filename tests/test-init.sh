@@ -17,8 +17,12 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/harness.sh"
 config_with_issue_sink() {
   cat <<'EOF'
 version: 1
-mode: event-driven
-max_passes: 3
+mode: automated
+policy:
+  min_fix_severity: medium
+  max_passes_per_cycle: 3
+  max_files_changed_per_pr: 200
+  max_prs_per_day: 25
 reviewer:
   harness: claude
   model: reviewer-model
@@ -61,7 +65,7 @@ has "and says plainly that it changed nothing"  "$out" "--dry-run prints the pla
 is  "it writes no workflow files"               "$(ls .github/workflows 2>/dev/null | wc -l | tr -d ' ')" "0"
 is  "and it creates no labels"                  "$(count 'method POST')" "0"
 
-# The count and the list have to agree: max_passes 3 means three pass labels plus
+# The count and the list have to agree: max_passes_per_cycle 3 means three pass labels plus
 # the five fixed ones.
 has "the plan states the loop's label count"    "$out" "labels            8 for the loop"
 is  "and the list under it is exactly that long" \
@@ -144,13 +148,13 @@ has "the resolve workflow shares the review workflow's group" \
 has "the generated config names the resolved sink" "$(cat .github/revloop.yml)" "defects: issues"
 
 # --- --upgrade regenerates workflows and leaves policy alone -----------
-printf 'version: 1\nmax_passes: 7\n' >.github/revloop.yml
+printf 'version: 1\npolicy:\n  max_passes_per_cycle: 7\n' >.github/revloop.yml
 printf 'stale\n' >.github/workflows/revloop-review.yml
 stub_reset; routes_init
 out="$("$REVLOOP" init --upgrade --yes 2>&1)"
 has "--upgrade rewrites a stale workflow"       "$(cat .github/workflows/revloop-review.yml)" "name: revloop review"
 has "and says it left the policy file alone"    "$out" "regenerates workflows, not policy"
-is  "so the hand-edited policy survives"        "$(grep -c 'max_passes: 7' .github/revloop.yml)" "1"
+is  "so the hand-edited policy survives"        "$(grep -c 'max_passes_per_cycle: 7' .github/revloop.yml)" "1"
 has "and it flags the files it would overwrite" "$out" "overwrites        .github/workflows/revloop-review.yml"
 
 # --- --upgrade recolours labels minted under the old single purple -----
@@ -224,7 +228,7 @@ routes_init
 err="$("$REVLOOP" init --yes 2>&1 >/dev/null)"; rc=$?
 is  "init stops when a sink label is missing"   "$rc" "1"
 has "and names the label it will not invent"    "$err" "needs-triage"
-has "and says what would otherwise fail later"  "$err" "filing would die after the review had already posted"
+has "and says why it stops"                     "$err" "asked revloop to use existing labels only"
 
 # --- reading the secrets that are already there --------------------------
 #

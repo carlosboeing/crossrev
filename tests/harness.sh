@@ -40,22 +40,27 @@ FIX_BASE=""
 # stubs. The two models differ, which is what keeps the divergence guard live in
 # every case rather than only in the one that tests it.
 fixture_default_config() {
-  cat <<'EOF'
+  fixture_config local medium
+}
+
+fixture_config() {
+  local mode="$1" min_fix_severity="$2"
+  cat <<EOF
 version: 1
-mode: single-run
-max_passes: 3
+mode: $mode
+policy:
+  min_fix_severity: $min_fix_severity
+  max_passes_per_cycle: 3
+  max_files_changed_per_pr: 200
+  max_prs_per_day: 25
 reviewer:
   harness: claude
   model: reviewer-model
 resolver:
   harness: claude
   model: resolver-model
-  fix_at: medium
 persist:
   defects: none
-caps:
-  runs_per_day: 12
-  max_files_changed: 200
 EOF
 }
 

@@ -82,7 +82,7 @@ revloop doctor
 |---|---|
 | `revloop review --pr N` | Built. One review pass: inline comments, a summary, the pass marker |
 | `revloop resolve --pr N` | Built. Verifies each finding, commits fixes, replies, resolves, files deferred work |
-| `revloop cycle --pr N` | Built. The whole loop in one process, up to `max_passes`. Also what a bare `revloop --pr N` runs |
+| `revloop cycle --pr N` | Built. The whole loop in one process, up to `max_passes_per_cycle`. Also what a bare `revloop --pr N` runs |
 | `revloop status --pr N` | Built. The state in one word, every pass with both legs, and the command that resumes it |
 | `revloop init` | Built. Plan-then-confirm, `--dry-run`, `--yes`, `--upgrade` |
 | `revloop watchdog` | Built. Finds stuck legs, retries once, then halts and says why |
@@ -94,7 +94,7 @@ revloop doctor
 | `revloop auth rotate` | Built. Guided, because GitHub has no API to generate an App key. It proves the new key works before replacing the old one |
 | `revloop auth refresh` | Built. The refresher job's only command, and the only thing that writes a rotating harness credential |
 
-**Exercised offline, and run against real pull requests locally.** Every command above is asserted against a stubbed `gh` boundary — 654 assertions, no network, no model, no PR — which catches the deterministic half, the half that fails silently. Three live local runs cover the other half. PR 3 converged on pass 3 against three planted defects. PR 4 converged on pass 2 while reviewing revloop's own rename, where the reviewer found two real defects in the change under review and pushed back on a third. PR 5 ran all three passes over revloop's own presentation change and found ten findings, nine of them real defects in the branch under review — including one in the token accounting the same branch had just added. **No repository has had the workflows installed yet**, so automated mode is still unproven end to end.
+**Exercised offline, and run against real pull requests locally.** Every command above is asserted against a stubbed `gh` boundary — 684 assertions, no network, no model, no PR — which catches the deterministic half, the half that fails silently. Three live local runs cover the other half. PR 3 converged on pass 3 against three planted defects. PR 4 converged on pass 2 while reviewing revloop's own rename, where the reviewer found two real defects in the change under review and pushed back on a third. PR 5 ran all three passes over revloop's own presentation change and found ten findings, nine of them real defects in the branch under review — including one in the token accounting the same branch had just added. **No repository has had the workflows installed yet**, so automated mode is still unproven end to end.
 
 ## Using it
 
@@ -103,7 +103,7 @@ revloop doctor
 Nothing to set up. No App, no secrets, no workflows — it uses the `gh` authentication you already have, so its comments appear as **you**.
 
 ```bash
-revloop        --pr 42      # a cycle: both legs, alternating, up to max_passes
+revloop        --pr 42      # a cycle: both legs, alternating, up to max_passes_per_cycle
 revloop cycle   --pr 42     # the same thing, spelled out
 revloop review  --pr 42     # one review leg: inline comments plus a summary
 revloop resolve --pr 42     # verify each finding, fix, reply, resolve, push
@@ -115,7 +115,7 @@ revloop status  --pr 42     # where the loop is, and how to resume it
 **`resolve` and `cycle` commit and push to the pull request's branch.** That is the point of the tool and it is the thing to know before pointing it at something you care about. Three rails constrain it:
 
 - **The branch guard** refuses to push unless the checkout is on the pull request's own head branch, that branch is not the repository default, and the head repository matches the origin. Asserted before anything leaves the machine.
-- **`max_passes`** caps the loop at 3 by default.
+- **`policy.max_passes_per_cycle`** caps the loop at 3 by default.
 - **The `revloop/stop` label** halts it, and outranks a healthy verdict. It is checked first, every pass.
 
 To watch without any risk of a push, run `review` only.
@@ -132,13 +132,15 @@ The six loop labels carry six colours, so the label row on a pull request reads 
 
 ### Which models run
 
-With no config file anywhere, the defaults are `codex` reviewing and `claude` resolving, in `single-run` mode, with nothing persisted. Override per run without touching the repository:
+With no config file anywhere, the defaults are `codex` reviewing and `claude` resolving, in `local` mode, with nothing persisted. Override per run without touching the repository:
 
 ```bash
 revloop review --pr 42 --harness claude
 ```
 
 Repository policy lives in `.github/revloop.yml`, and **it is read from the base revision, never the branch under review** — so a config committed on the pull request branch has no effect until it merges. That is deliberate: a pull request cannot rewrite the loop that reviews it.
+
+The `policy` block has three continuation bounds: passes per cycle, files changed per pull request, and pull requests reviewed per rolling day. They end automatic reviewing and never block a person. `min_fix_severity` is different: it limits what the resolve agent may change, so it applies to attended and automatic runs alike.
 
 ### Automated mode
 
@@ -250,7 +252,7 @@ tests/           the stubbed-gh suite. `tests/run.sh` runs all of it
 ## Working on it
 
 ```bash
-tools/revloop/tests/run.sh      # 654 offline assertions, no network, no model
+tools/revloop/tests/run.sh      # 684 offline assertions, no network, no model
 tools/revloop/scripts/lint.sh   # syntax plus shellcheck -S warning
 ```
 

@@ -17,7 +17,7 @@
         "issues-remain",
         "blocked"
       ],
-      "description": "converged when no finding at or above the pass's fix_at threshold remains, counting only findings this pull request introduced. Findings below the threshold, and pre-existing ones at any severity, are reported but cannot keep the loop alive. blocked when the review could not be completed at all."
+      "description": "converged when no finding at or above the pass's min_fix_severity threshold remains, counting only findings this pull request introduced. Findings below the threshold, and pre-existing ones at any severity, are reported but cannot keep the loop alive. blocked when the review could not be completed at all."
     },
     "findings": {
       "type": "array",
@@ -61,7 +61,7 @@
               "medium",
               "low"
             ],
-            "description": "How bad it is, and nothing else. high: a bug that should be fixed before merging. medium: worth fixing, not alarming. low: minor. The pass's fix_at threshold decides which of these the resolve leg may change code for; severity itself says only how bad the defect is."
+            "description": "How bad it is, and nothing else. high: a bug that should be fixed before merging. medium: worth fixing, not alarming. low: minor. The pass's min_fix_severity threshold decides which of these the resolve leg may change code for; severity itself says only how bad the defect is."
           },
           "category": {
             "type": "string",

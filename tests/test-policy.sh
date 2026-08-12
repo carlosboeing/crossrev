@@ -64,12 +64,13 @@ auto_sink_config() { fixture_default_config | sed 's/^  defects: none$/  defects
 
 # --- policy comes from the base revision, never the head -------------------
 #
-# Read from the head, a pull request could raise max_passes, repoint an endpoint at
+# Read from the head, a pull request could raise max_passes_per_cycle, repoint an endpoint at
 # a server it controls and harvest every prompt, or ship a REVIEW.md saying to
 # return converged.
 fixture_repo; stub_reset
 on_head .github/revloop.yml 'version: 1
-max_passes: 99
+policy:
+  max_passes_per_cycle: 99
 reviewer:
   harness: claude
   model: hijacked-model
@@ -81,7 +82,7 @@ no_threads
 REVLOOP_REVIEW_PAYLOAD="$(printf '%s' "$CONVERGED" | payload)"; export REVLOOP_REVIEW_PAYLOAD
 out="$("$REVLOOP" review --pr 42 2>&1)"
 
-has "a max_passes raised only on the branch is ignored"   "$out" "pass 1 of 3"
+has "a max_passes_per_cycle raised only on the branch is ignored" "$out" "pass 1 of 3"
 hasnt "and the branch's model choice does not take effect" "$out" "hijacked-model"
 has "the base revision's reviewer is what runs"            "$out" "reviewer-model"
 
@@ -132,7 +133,7 @@ has "the base revision's Project Map does take effect" "$out" "deferred   issues
 
 # --- marker trust scales with autonomy ----------------------------------
 automated_config() {
-  fixture_default_config | sed 's/^mode: single-run$/mode: event-driven/'
+  fixture_config automated medium
 }
 forged="$(jq -cn --argjson ts "$(date +%s)" '
   {v:1, leg:"review", pass:2, state:"complete", ts:$ts, run_id:"x",
@@ -210,7 +211,7 @@ big="$(jq -cn --arg h "$FIX_HEAD" --arg b "$FIX_BASE" '
 route_first "pr view $FIX_PR --repo * --json *" "$big"
 route 'api --method POST repos/*/issues/42/comments*' '{"id":9001}'
 out="$("$REVLOOP" review --pr 42 --trigger automatic 2>&1)"
-has "a diff above max_files_changed is not reviewed" "$out" "above max_files_changed"
+has "a diff above max_files_changed_per_pr is not reviewed" "$out" "above max_files_changed_per_pr"
 has "and it says so on the pull request"             "$(calls)" "revloop stopped before pass 1"
 has "and marks the pull request halted"              "$(calls)" "labels[]=revloop/halted"
 
@@ -256,18 +257,18 @@ stub_reset
 routes_baseline "$(marker_comment 9001 "$three_done" | jq -cs . | payload)"
 route 'api --method POST repos/*/issues/42/comments*' '{"id":9001}'
 out="$("$REVLOOP" review --pr 42 --continuation 2>&1)"
-has "a generated pass at the bound does not start" "$out" "reached max_passes (3)"
+has "a generated pass at the bound does not start" "$out" "reached max_passes_per_cycle (3)"
 
 cycle_log="$(mktemp)"
 out="$(cycle_driver 0 "$cycle_log")"
 is "an attended cycle runs only three review passes" "$(wc -l <"$cycle_log" | tr -d ' ')" "3"
 is "its first pass is individually requested"       "$(grep -c -- '--continuation' "$cycle_log" || true)" "2"
-has "and the cycle stops at max_passes"              "$out" "Reached max_passes (3)"
+has "and the cycle stops at max_passes_per_cycle"    "$out" "Reached max_passes_per_cycle (3)"
 
 : >"$cycle_log"
 out="$(cycle_driver 3 "$cycle_log")"
 is "an attended cycle already at the bound stops immediately" "$(wc -l <"$cycle_log" | tr -d ' ')" "0"
-has "and it explains the bound before running a leg"           "$out" "Reached max_passes (3)"
+has "and it explains the bound before running a leg"           "$out" "Reached max_passes_per_cycle (3)"
 
 # --- fork pull requests fail closed ------------------------------------
 fixture_repo; stub_reset
@@ -406,14 +407,14 @@ is  "bare revloop exits clean"                       "$rc" "0"
 has "and prints help rather than cycling"            "$out" "revloop <command> [options]"
 hasnt "a bare invocation touches no pull request"    "$out" "Cycling"
 
-# --- fix_at governs the commit, never the comment --------------------------
+# --- min_fix_severity governs the commit, never the comment ----------------
 #
 # The threshold's whole job is to bound what changes while nobody is watching.
-# A medium finding under `fix_at: high` must still be posted and still appear in
+# A medium finding under `min_fix_severity: high` must still be posted and still appear in
 # the summary — reporting and fixing are separate, and collapsing them is what
 # would make revloop's own "this is an empty review rather than a filtered one"
 # untrue.
-fixture_repo "$(fixture_default_config | sed 's/^  fix_at: medium$/  fix_at: high/')"
+fixture_repo "$(fixture_config local high)"
 stub_reset
 routes_baseline "$(printf '[]' | payload)"
 route 'api --method POST repos/*/issues/42/comments*' '{"id":9001}'
@@ -425,12 +426,12 @@ REVLOOP_REVIEW_PAYLOAD="$(jq -cn '
               title:"Repeated lookup in a loop", why:"w", fix:"hoist it"}]}' | payload)"
 export REVLOOP_REVIEW_PAYLOAD
 out="$("$REVLOOP" review --pr 42 2>&1)"
-has "a medium finding under fix_at high is still posted" \
+has "a medium finding under min_fix_severity high is still posted" \
   "$(calls)" "method POST repos/acme/widget/pulls/42/comments"
 has "and the comment says why it will not be touched" \
   "$(calls)" "Below this repository"
 has "and it still appears in the summary table"      "$(calls)" "| 🟠&nbsp;Medium | ⚡&nbsp;Performance |"
-has "the run reports nothing at or above the threshold" "$out" "0 at or above fix_at (high)"
+has "the run reports nothing at or above the threshold" "$out" "0 at or above min_fix_severity (high)"
 has "so the pass converges rather than calling the resolve leg" \
   "$(calls)" "labels[]=revloop/converged"
 hasnt "and the resolve label is removed rather than applied" \

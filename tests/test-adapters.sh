@@ -22,8 +22,12 @@ REVIEW_PAYLOAD='{"verdict":"issues-remain","blocked_reason":null,"prior":null,"f
 config_agy_reviews() {
   cat <<'EOF'
 version: 1
-mode: single-run
-max_passes: 3
+mode: local
+policy:
+  min_fix_severity: medium
+  max_passes_per_cycle: 3
+  max_files_changed_per_pr: 200
+  max_prs_per_day: 25
 reviewer:
   harness: agy
   model: reviewer-model

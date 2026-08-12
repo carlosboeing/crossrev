@@ -53,8 +53,8 @@ fixes() {
 fixes yes "at the threshold, the resolver may act"        medium medium false
 fixes yes "above it too"                                  high   medium false
 fixes no  "below it, the finding is reported and left"    low    medium false
-fixes yes "fix_at low takes everything"                   low    low    false
-fixes no  "fix_at high takes only the top rung"           medium high   false
+fixes yes "min_fix_severity low takes everything"         low    low    false
+fixes no  "min_fix_severity high takes only the top rung" medium high   false
 
 # The one guardrail that is not configurable: provenance outranks severity, so a
 # critical pre-existing hole is reported and filed rather than fixed here.

@@ -24,14 +24,14 @@ REVLOOP_FINDING_PREFIX="<!-- revloop:f"
 state_trusted_author() {
   local mode="$1"
   case "$mode" in
-    event-driven)
+    automated)
       # The App, and nothing else. A forged marker here makes an *agent* act:
       # push a commit, skip a finding, believe a leg finished.
       #
       # On a runner there is no ~/.config/revloop, so the slug comes from the
       # environment — actions/create-github-app-token emits it as `app-slug`, and
       # the generated workflows pass it through. The local metadata file is the
-      # fallback for an event-driven run started from a machine.
+      # fallback for an automated run started from a machine.
       local slug="${REVLOOP_APP_SLUG:-}"
       [[ -n "$slug" ]] || slug="$(jq -r '.slug // empty' "$(_auth_meta "${REVLOOP_OWNER:-}")" 2>/dev/null)"
       [[ -n "$slug" ]] || ui_die \
@@ -286,15 +286,15 @@ state_runs_today() {
 # Labels
 # ---------------------------------------------------------------------------
 #
-# The chain is label-driven and `gh` refuses to apply a label that does not
-# exist, so a repository without them posts its first review and then dies
-# applying revloop/awaiting-resolution, looking healthy the whole time.
+# The chain is label-driven, so any API failure applying a label leaves the next
+# workflow with no event to hear. Absence itself is not the failure: GitHub's
+# add-labels endpoint creates a missing label with default metadata.
 
 state_label_add() {
   local pr="$1" repo="$2" label="$3"
   gh api --method POST "repos/$repo/issues/$pr/labels" -f "labels[]=$label" >/dev/null 2>&1 || ui_die \
     "could not apply the label '$label' to $repo#$pr" \
-    "The loop is label-driven, so this is fatal rather than cosmetic. If the label does not exist, create it with: revloop init"
+    "The loop is label-driven, so this is fatal rather than cosmetic. Check the token's issues permission and GitHub's availability, then retry."
 }
 
 state_label_remove() {

@@ -21,7 +21,7 @@ INIT_SOURCE_REPO=""; INIT_SOURCE_SHA=""; INIT_SOURCE_REF=""
 INIT_PASS_LABELS=""; INIT_FIXED_LABELS=""; INIT_SINK_LABELS=""
 INIT_SINK_RESOLVED=""; INIT_SINK_ORIGIN=""
 INIT_WRITES=""; INIT_OVERWRITES=""
-INIT_RUNNER="github-hosted"
+INIT_RUNNER=""
 INIT_NEEDS_REFRESHER=0
 INIT_WORKFLOWS=""
 INIT_SECRETS=""
@@ -87,7 +87,7 @@ _init_resolve() {
   # of the config, so this is settled before anything else — a pairing the runner
   # cannot serve should fail here, with the token lifetime named, rather than at
   # the first API call with an authentication error.
-  INIT_RUNNER="$(cfg_get '.runner')"; [[ -n "$INIT_RUNNER" ]] || INIT_RUNNER="github-hosted"
+  INIT_RUNNER="$(cfg_get '.runner')"
   # A typo here is the worst kind of wrong. Rendering treats anything unrecognised
   # as hosted, while the refresher derivation matches the exact string — so
   # `runner: github_hosted` would emit hosted workflows with no refresher, and the
@@ -100,7 +100,7 @@ _init_resolve() {
   _init_assert_runner_serves_pairing
   _init_resolve_refresher
 
-  local max; max="$(cfg_get '.max_passes')"
+  local max; max="$(cfg_get '.policy.max_passes_per_cycle')"
   local i
   for (( i = 1; i <= max; i++ )); do
     INIT_PASS_LABELS="$INIT_PASS_LABELS revloop/pass-$i"
@@ -313,9 +313,9 @@ _init_print_plan() {
     ui_line "                  $(wc -w <<<"$INIT_SINK_LABELS" | tr -d ' ') for filed issues:"
     _init_label_inventory "$INIT_SINK_LABELS" keep
   fi
-  ui_line "                  the chain is label-driven and gh refuses to apply a label"
-  ui_line "                  that does not exist, so a repository without them posts its"
-  ui_line "                  first review and then dies looking healthy"
+  ui_line "                  init creates these up front so their colours and descriptions"
+  ui_line "                  carry the loop's state; GitHub would otherwise create a missing"
+  ui_line "                  label later with default metadata"
 
   ui_line ""
   ui_line "deferred work     $INIT_SINK_RESOLVED"
@@ -454,7 +454,7 @@ _init_execute() {
       # A repository that governs its own label set is one where inventing labels
       # is worse than stopping.
       ui_die "the issue sink needs these labels and create_labels is false:$missing" \
-        "gh refuses to apply a label that does not exist, so filing would die after the review had already posted. Create them by hand, or set create_labels: true in the sink."
+        "The repository asked revloop to use existing labels only. Create them by hand, or set create_labels: true in the sink."
     fi
     ui_ok "created $created and found $existed already for filed issues"
   fi
@@ -876,7 +876,5 @@ _init_policy_pairing() {
       fi
     done
   done
-  v="$(cfg_get '.resolver.fix_at')"
-  [[ -n "$v" && "$v" != "null" ]] && printf ' | .resolver.fix_at = "%s"' "$v"
   return 0
 }

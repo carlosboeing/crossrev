@@ -64,7 +64,7 @@ run_checkpoint() {
 # the holder rather than failing opaquely.
 run_lock_acquire() {
   local pr="$1" mode="$2" gitdir lock holder pid
-  [[ "$mode" == "event-driven" ]] && return 0
+  [[ "$mode" == "automated" ]] && return 0
   gitdir="$(git rev-parse --git-dir 2>/dev/null)" || return 0
   mkdir -p "$gitdir/revloop"
   lock="$gitdir/revloop/pr-$pr.lock"
@@ -98,9 +98,9 @@ run_lock_acquire() {
 CTX_REPO=""; CTX_PR=""; CTX_HEAD_SHA=""; CTX_BASE_SHA=""
 CTX_HEAD_BRANCH=""; CTX_DEFAULT_BRANCH=""; CTX_CHANGED=0
 CTX_TITLE=""; CTX_BODY=""; CTX_LABELS=""; CTX_URL=""
-CTX_MODE=""; CTX_AUTHOR=""; CTX_MARKERS="[]"; CTX_MAX_PASSES=3
+CTX_MODE=""; CTX_AUTHOR=""; CTX_MARKERS="[]"; CTX_MAX_PASSES_PER_CYCLE=3
 CTX_SINK="none"; CTX_IDENTITY_LABEL="revloop-review"; CTX_SINK_LABELS=""
-CTX_FIX_AT="medium"
+CTX_MIN_FIX_SEVERITY="medium"
 
 ctx_load() {
   local pr="$1" repo="${2:-}" trigger="${3:-human}" pr_json want
@@ -149,14 +149,14 @@ ctx_load() {
   CTX_DEFAULT_BRANCH="$(gh_default_branch "$repo")"
 
   # Policy comes from the base revision, never the pull request head. Read from
-  # the head, a branch could raise max_passes, repoint an endpoint at a server it
+  # the head, a branch could raise max_passes_per_cycle, repoint an endpoint at a server it
   # controls and harvest every prompt, or ship a REVIEW.md saying to return
   # converged. A branch that legitimately changes review policy therefore takes
   # effect when it merges, which is the correct order.
   cfg_load "$CTX_BASE_SHA"
   CTX_MODE="$(cfg_get '.mode')"
-  CTX_MAX_PASSES="$(cfg_get '.max_passes')"
-  CTX_FIX_AT="$(cfg_get '.resolver.fix_at')"
+  CTX_MAX_PASSES_PER_CYCLE="$(cfg_get '.policy.max_passes_per_cycle')"
+  CTX_MIN_FIX_SEVERITY="$(cfg_get '.policy.min_fix_severity')"
 
   want="$(cfg_get '.persist.defects')"
   CTX_SINK="$(cfg_resolve_sink "$CTX_BASE_SHA" "$want")"
@@ -185,13 +185,13 @@ run_sink_field() {
 }
 
 # Labels are load-bearing for the event chain and cosmetic without it, so the
-# consequence of a missing one differs by mode. In event-driven mode a label that
-# cannot be applied stalls the loop, which is fatal. Locally one process drives
+# consequence of an application failure differs by mode. In automated mode a
+# label that cannot be applied stalls the loop, which is fatal. Locally one process drives
 # both legs, so it is a warning — otherwise every local run against a repository
 # that never ran `init` would die after posting a perfectly good review.
 run_label_add() {
   local label="$1"
-  if [[ "$CTX_MODE" == "event-driven" ]]; then
+  if [[ "$CTX_MODE" == "automated" ]]; then
     state_label_add "$CTX_PR" "$CTX_REPO" "$label"
   else
     gh api --method POST "repos/$CTX_REPO/issues/$CTX_PR/labels" -f "labels[]=$label" >/dev/null 2>&1 \
@@ -212,7 +212,7 @@ _ucfirst() {
   printf '%s%s' "$(printf '%s' "${s:0:1}" | tr '[:lower:]' '[:upper:]')" "${s:1}"
 }
 
-# How many findings the resolve leg may change code for: at or above `fix_at`,
+# How many findings the resolve leg may change code for: at or above `min_fix_severity`,
 # and not pre-existing. The verdict, the labels and the summary all read this
 # one number.
 #
@@ -221,7 +221,7 @@ _ucfirst() {
 # that says nothing is outstanding while the resolve leg is still committing.
 run_actionable() {
   local findings="$1" ranks bar
-  bar="$(legs_severity_rank "$CTX_FIX_AT")"
+  bar="$(legs_severity_rank "$CTX_MIN_FIX_SEVERITY")"
   ranks="$(jq -cn --argjson h "$(legs_severity_rank high)" \
                   --argjson m "$(legs_severity_rank medium)" \
                   --argjson l "$(legs_severity_rank low)" \
@@ -655,20 +655,20 @@ leg_review() {
   fi
 
   # Termination, asked as "should a pass after $((pass-1)) begin?". Pass 3 of a
-  # max_passes of 3 is the last pass, not the one after which a fourth starts.
-  local runs_today=0 max_passes=0 runs_per_day=0 files_changed=0 max_files_changed=0
+  # max_passes_per_cycle of 3 is the last pass, not the one after which a fourth starts.
+  local prs_today=0 max_passes_per_cycle=0 max_prs_per_day=0 files_changed=0 max_files_changed_per_pr=0
   local decision reason
   if [[ "$trigger" == "automatic" ]]; then
-    max_passes="$CTX_MAX_PASSES"
-    runs_today="$(state_runs_today "$CTX_MARKERS")"
-    runs_per_day="$(cfg_get '.caps.runs_per_day')"
+    max_passes_per_cycle="$CTX_MAX_PASSES_PER_CYCLE"
+    prs_today="$(state_runs_today "$CTX_MARKERS")"
+    max_prs_per_day="$(cfg_get '.policy.max_prs_per_day')"
     files_changed="$CTX_CHANGED"
-    max_files_changed="$(cfg_get '.caps.max_files_changed')"
+    max_files_changed_per_pr="$(cfg_get '.policy.max_files_changed_per_pr')"
   elif (( continuation )); then
-    max_passes="$CTX_MAX_PASSES"
+    max_passes_per_cycle="$CTX_MAX_PASSES_PER_CYCLE"
   fi
-  if ! decision="$(legs_should_continue "issues-remain" "$(( pass - 1 ))" "$max_passes" \
-      false false "$runs_today" "$runs_per_day" "$files_changed" "$max_files_changed")"; then
+  if ! decision="$(legs_should_continue "issues-remain" "$(( pass - 1 ))" "$max_passes_per_cycle" \
+      false false "$prs_today" "$max_prs_per_day" "$files_changed" "$max_files_changed_per_pr")"; then
     reason="${decision#* }"
     ui_say "not reviewing $CTX_REPO#$CTX_PR — $reason"
     # The refusal gets a marker as well as a comment and a label. Without one,
@@ -694,7 +694,7 @@ No review ran, so nothing here is a judgement about the code. Raising the cap in
   effort="$(_nullable "$LEG_EFFORT")"
   endpoint="$(_nullable "$LEG_ENDPOINT")"
 
-  printf '\n  Reviewing %s#%s — pass %s of %s\n' "$CTX_REPO" "$CTX_PR" "$pass" "$CTX_MAX_PASSES"
+  printf '\n  Reviewing %s#%s — pass %s of %s\n' "$CTX_REPO" "$CTX_PR" "$pass" "$CTX_MAX_PASSES_PER_CYCLE"
   printf '  Reviewer: %s%s%s\n' "$harness" "${model:+, $model}" "${effort:+, $effort effort}"
 
   # --- claim before work ---------------------------------------------------
@@ -713,7 +713,7 @@ No review ran, so nothing here is a judgement about the code. Raising the cap in
         endpoint:(if $ep == "" then null else $ep end),
         model_reported:null, tokens:null, verdict:null, findings:[]}')"
     comment_id="$(gh_comment_create "$CTX_REPO" "$CTX_PR" \
-"**revloop — reviewing, pass $pass of $CTX_MAX_PASSES**
+"**revloop — reviewing, pass $pass of $CTX_MAX_PASSES_PER_CYCLE**
 
 Reading the diff and any earlier review threads. This comment becomes the pass summary when the review finishes.$(state_marker_encode "$marker")")"
     [[ -n "$comment_id" ]] || ui_die "the claim comment did not post on $CTX_REPO#$CTX_PR" \
@@ -743,9 +743,9 @@ Reading the diff and any earlier review threads. This comment becomes the pass s
     cfg_show_at_base "$CTX_BASE_SHA" "REVIEW.md" >"$review_md" 2>/dev/null || : >"$review_md"
 
     meta="$(jq -cn --arg repo "$CTX_REPO" --argjson pr "$CTX_PR" --argjson pass "$pass" \
-      --argjson max "$CTX_MAX_PASSES" --arg sha "$CTX_HEAD_SHA" --arg fa "$CTX_FIX_AT" \
+      --argjson max "$CTX_MAX_PASSES_PER_CYCLE" --arg sha "$CTX_HEAD_SHA" --arg fa "$CTX_MIN_FIX_SEVERITY" \
       --arg t "$CTX_TITLE" --arg b "$CTX_BODY" \
-      '{repo:$repo, pr:$pr, pass:$pass, max_passes:$max, head_sha:$sha, fix_at:$fa,
+      '{repo:$repo, pr:$pr, pass:$pass, max_passes_per_cycle:$max, head_sha:$sha, min_fix_severity:$fa,
         title:$t, body:$b}')"
     prior="$(jq -c '[.[] | select(.leg == "review") | (.findings // [])[]]' <<<"$CTX_MARKERS")"
     threads="$(gh_review_threads "$CTX_REPO" "$CTX_PR")"
@@ -787,7 +787,7 @@ Reading the diff and any earlier review threads. This comment becomes the pass s
       '.findings = $f | .verdict = $v | .tokens = $tk
        | .model_reported = (if $mr == "null" then null else $mr end)' <<<"$marker")"
     gh_comment_edit "$CTX_REPO" "$comment_id" \
-"**revloop — reviewing, pass $pass of $CTX_MAX_PASSES**
+"**revloop — reviewing, pass $pass of $CTX_MAX_PASSES_PER_CYCLE**
 
 Findings recorded; posting them now.$(state_marker_encode "$(jq -c 'del(.comment_id)' <<<"$marker")")"
   fi
@@ -807,7 +807,7 @@ Findings recorded; posting them now.$(state_marker_encode "$(jq -c 'del(.comment
 
   if (( n > 0 )); then
     ui_say "Found $n issue(s) — $high high, $medium medium, $low low, of which $pre pre-existing."
-    ui_say "$actionable at or above fix_at ($CTX_FIX_AT); the rest are reported and left alone."
+    ui_say "$actionable at or above min_fix_severity ($CTX_MIN_FIX_SEVERITY); the rest are reported and left alone."
     ui_say "Posting them as inline comments on the lines they affect."
   fi
 
@@ -883,10 +883,10 @@ _review_comment_body() {
   local f="$1" pass="$2" harness="$3" model="$4" note
   if [[ "$(jq -r '.pre_existing // false' <<<"$f")" == "true" ]]; then
     note="A real bug, but this pull request did not introduce it, so it is reported here and never fixed here."
-  elif legs_should_fix "$(jq -r .severity <<<"$f")" "$CTX_FIX_AT" false; then
-    note="At or above this repository's \`fix_at\` ($CTX_FIX_AT), so the resolve leg may change code for it."
+  elif legs_should_fix "$(jq -r .severity <<<"$f")" "$CTX_MIN_FIX_SEVERITY" false; then
+    note="At or above this repository's \`min_fix_severity\` ($CTX_MIN_FIX_SEVERITY), so the resolve leg may change code for it."
   else
-    note="Below this repository's \`fix_at\` ($CTX_FIX_AT), so it is reported and left to a human."
+    note="Below this repository's \`min_fix_severity\` ($CTX_MIN_FIX_SEVERITY), so it is reported and left to a human."
   fi
   # A heading rather than a bold run of prose. Without it the label, the title,
   # the consequence and the fix are all one weight, and a reader scanning a diff
@@ -1089,7 +1089,7 @@ _review_summary_body() {
   verdict="$(jq -r '.verdict // "issues-remain"' <<<"$marker")"
   pass="$(jq -r '.pass // 1' <<<"$marker")"
 
-  printf '## revloop review — pass %s of %s\n\n' "$pass" "$CTX_MAX_PASSES"
+  printf '## revloop review — pass %s of %s\n\n' "$pass" "$CTX_MAX_PASSES_PER_CYCLE"
 
   # The alert is the one line in the comment that has to read as a sentence, so
   # it gets a real plural rather than the "(s)" the terminal output uses.
@@ -1100,11 +1100,11 @@ _review_summary_body() {
   # anyone looks for the answer to "what happens now".
   case "$verdict" in
     converged)
-      _alert TIP "$(printf '**Converged.** Nothing at or above `fix_at` (%s) remains, so the loop stops here. Findings below the threshold, and pre-existing ones, are reported but cannot keep the loop alive — a loop that cannot converge because of a naming quibble is one nobody leaves switched on.' "$CTX_FIX_AT")" ;;
+      _alert TIP "$(printf '**Converged.** Nothing at or above `min_fix_severity` (%s) remains, so the loop stops here. Findings below the threshold, and pre-existing ones, are reported but cannot keep the loop alive — a loop that cannot converge because of a naming quibble is one nobody leaves switched on.' "$CTX_MIN_FIX_SEVERITY")" ;;
     blocked)
       _alert WARNING '**The review could not be completed.** The loop halts here and a human is needed. Nothing in this comment is a judgement about the code.' ;;
     *)
-      _alert CAUTION "$(printf '**%s %s need resolving.** A second agent now verifies every finding below against the codebase and either fixes it, skips it, defers it, or explains why it is wrong. It may change code for the %s at or above `fix_at` (%s); the rest are verified and reported, never silently dropped.' "$n" "$noun" "$actionable" "$CTX_FIX_AT")" ;;
+      _alert CAUTION "$(printf '**%s %s need resolving.** A second agent now verifies every finding below against the codebase and either fixes it, skips it, defers it, or explains why it is wrong. It may change code for the %s at or above `min_fix_severity` (%s); the rest are verified and reported, never silently dropped.' "$n" "$noun" "$actionable" "$CTX_MIN_FIX_SEVERITY")" ;;
   esac
 
   # Which agent ran is the run-details table's job now, and repeating the
@@ -1188,7 +1188,7 @@ leg_resolve() {
   effort="$(_nullable "$LEG_EFFORT")"
   endpoint="$(_nullable "$LEG_ENDPOINT")"
 
-  printf '\n  Resolving %s#%s — pass %s of %s\n' "$CTX_REPO" "$CTX_PR" "$pass" "$CTX_MAX_PASSES"
+  printf '\n  Resolving %s#%s — pass %s of %s\n' "$CTX_REPO" "$CTX_PR" "$pass" "$CTX_MAX_PASSES_PER_CYCLE"
   printf '  Resolver: %s%s%s\n' "$harness" "${model:+, $model}" "${effort:+, $effort effort}"
 
   local claim comment_id marker stale
@@ -1215,7 +1215,7 @@ leg_resolve() {
         model_reported:null, tokens:null,
         blocked:false, blocked_reason:null, commit_sha:null, summary:"", dispositions:[]}')"
     comment_id="$(gh_comment_create "$CTX_REPO" "$CTX_PR" \
-"**revloop — resolving pass $pass of $CTX_MAX_PASSES**
+"**revloop — resolving pass $pass of $CTX_MAX_PASSES_PER_CYCLE**
 
 Verifying each finding against the codebase. This comment becomes the pass summary when the resolve leg finishes.$(state_marker_encode "$marker")")"
     [[ -n "$comment_id" ]] || ui_die "the claim comment did not post on $CTX_REPO#$CTX_PR" \
@@ -1268,7 +1268,7 @@ Verifying each finding against the codebase. This comment becomes the pass summa
     for (( i_e = 0; i_e < n_e; i_e++ )); do
       f_e="$(jq -c ".[$i_e]" <<<"$enriched")"
       may=false
-      legs_should_fix "$(jq -r .severity <<<"$f_e")" "$CTX_FIX_AT" \
+      legs_should_fix "$(jq -r .severity <<<"$f_e")" "$CTX_MIN_FIX_SEVERITY" \
         "$(jq -r '.pre_existing // false' <<<"$f_e")" && may=true
       enriched_out="$(jq -c --argjson f "$f_e" --argjson m "$may" --argjson n "$(( i_e + 1 ))" \
         '. + [$f + {may_fix: $m, number: $n}]' <<<"$enriched_out")"
@@ -1283,9 +1283,9 @@ Verifying each finding against the codebase. This comment becomes the pass summa
     gh_pr_diff "$CTX_REPO" "$CTX_PR" "$exclude" >"$diff_file"
 
     meta="$(jq -cn --arg repo "$CTX_REPO" --argjson pr "$CTX_PR" --argjson pass "$pass" \
-      --argjson max "$CTX_MAX_PASSES" --arg sha "$CTX_HEAD_SHA" --arg fa "$CTX_FIX_AT" \
+      --argjson max "$CTX_MAX_PASSES_PER_CYCLE" --arg sha "$CTX_HEAD_SHA" --arg fa "$CTX_MIN_FIX_SEVERITY" \
       --arg sink "$CTX_SINK" \
-      '{repo:$repo, pr:$pr, pass:$pass, max_passes:$max, head_sha:$sha, fix_at:$fa, sink:$sink}')"
+      '{repo:$repo, pr:$pr, pass:$pass, max_passes_per_cycle:$max, head_sha:$sha, min_fix_severity:$fa, sink:$sink}')"
 
     prompt_resolve "$prompt_file" "$ROOT/skills/pr-resolve/SKILL.md" "$diff_file" \
       "$meta" "$enriched" "$threads" "$candidates"
@@ -1332,7 +1332,7 @@ Verifying each finding against the codebase. This comment becomes the pass summa
       | .blocked_reason = (if $br == "null" then null else $br end)
       | .model_reported = (if $mr == "null" then null else $mr end)' <<<"$marker")"
     gh_comment_edit "$CTX_REPO" "$comment_id" \
-"**revloop — resolving pass $pass of $CTX_MAX_PASSES**
+"**revloop — resolving pass $pass of $CTX_MAX_PASSES_PER_CYCLE**
 
 Dispositions recorded; committing and replying now.$(state_marker_encode "$(jq -c 'del(.comment_id)' <<<"$marker")")"
   fi
@@ -1440,7 +1440,7 @@ $(jq -r '[.[] | select(.disposition == "deferred") | "- " + .finding_id] | join(
       # is the one crash boundary comments cannot dedupe away.
       marker="$(jq -c --arg s "$commit_sha" '.commit_sha = $s' <<<"$marker")"
       gh_comment_edit "$CTX_REPO" "$comment_id" \
-"**revloop — resolving pass $pass of $CTX_MAX_PASSES**
+"**revloop — resolving pass $pass of $CTX_MAX_PASSES_PER_CYCLE**
 
 Pushed \`${commit_sha:0:7}\`; replying to each thread now.$(state_marker_encode "$(jq -c 'del(.comment_id)' <<<"$marker")")"
     elif (( fixed_count > 0 )); then
@@ -1753,7 +1753,7 @@ _resolve_summary_body() {
   blocked="$(jq -r '.blocked // false' <<<"$marker")"
   blocked_reason="$(jq -r '.blocked_reason // ""' <<<"$marker")"
 
-  printf '## revloop resolved pass %s of %s\n\n' "$pass" "$CTX_MAX_PASSES"
+  printf '## revloop resolved pass %s of %s\n\n' "$pass" "$CTX_MAX_PASSES_PER_CYCLE"
 
   local counts escalated noun
   counts="$(_disposition_counts "$dispositions")"
@@ -1803,7 +1803,7 @@ _resolve_summary_body() {
 # The drivers
 # ---------------------------------------------------------------------------
 
-# single-run mode: one process calls the legs in sequence. Because state lives on
+# local mode: one process calls the legs in sequence. Because state lives on
 # the pull request rather than in process memory, this is a thin driver over the
 # same legs the workflows invoke, and the two modes can be A/B tested on real
 # pull requests without touching leg code.
@@ -1822,12 +1822,12 @@ cmd_cycle() {
   [[ -n "$pr" ]] || ui_die "revloop cycle needs a pull request number" "Usage: revloop cycle --pr 42"
 
   ctx_load "$pr" "$repo"
-  local max="$CTX_MAX_PASSES" i pass marker rmarker verdict actionable
+  local max="$CTX_MAX_PASSES_PER_CYCLE" i pass marker rmarker verdict actionable
   ui_say "Cycling $CTX_REPO#$CTX_PR, up to $max passes. Ctrl-C is safe — each leg finishes the write in flight."
 
   pass="$(state_current_review_pass "$CTX_MARKERS")"
   if (( pass >= max )); then
-    ui_end "Reached max_passes ($max) on $CTX_REPO#$CTX_PR without starting another pass."
+    ui_end "Reached max_passes_per_cycle ($max) on $CTX_REPO#$CTX_PR without starting another pass."
     return 0
   fi
 
@@ -1836,7 +1836,7 @@ cmd_cycle() {
       ctx_load "$pr" "$repo"
       pass="$(state_current_review_pass "$CTX_MARKERS")"
       if (( pass >= max )); then
-        ui_end "Reached max_passes ($max) on $CTX_REPO#$CTX_PR without starting another pass."
+        ui_end "Reached max_passes_per_cycle ($max) on $CTX_REPO#$CTX_PR without starting another pass."
         return 0
       fi
       leg_review "${args[@]}" --continuation --no-tips || return 1
@@ -1856,7 +1856,7 @@ cmd_cycle() {
       return 0
     fi
     if [[ "$verdict" == "converged" ]] || (( actionable == 0 )); then
-      ui_end "Converged after pass $pass — nothing at or above fix_at ($CTX_FIX_AT) remains."
+      ui_end "Converged after pass $pass — nothing at or above min_fix_severity ($CTX_MIN_FIX_SEVERITY) remains."
       (( no_tips )) || run_upgrade_nudge
       return 0
     fi
@@ -1875,7 +1875,7 @@ cmd_cycle() {
     fi
   done
 
-  ui_end "Reached max_passes ($max) on $CTX_REPO#$CTX_PR without converging. Every finding and reply is on the pull request."
+  ui_end "Reached max_passes_per_cycle ($max) on $CTX_REPO#$CTX_PR without converging. Every finding and reply is on the pull request."
   (( no_tips )) || run_upgrade_nudge
   return 0
 }
@@ -1932,9 +1932,9 @@ cmd_status() {
   ui_head "LOOP"
   ui_line "mode       $CTX_MODE, markers by $CTX_AUTHOR"
   if (( pass == 0 )); then
-    ui_line "passes     none yet, up to $CTX_MAX_PASSES"
+    ui_line "passes     none yet, up to $CTX_MAX_PASSES_PER_CYCLE"
   else
-    ui_line "passes     $pass of $CTX_MAX_PASSES"
+    ui_line "passes     $pass of $CTX_MAX_PASSES_PER_CYCLE"
   fi
   ui_line "deferred   $CTX_SINK"
 
@@ -2165,7 +2165,7 @@ _status_next() {
       # reader moving between the terminal and GitHub is not translating between
       # two descriptions of one state.
       ui_line "nothing to run — the loop converged on pass $pass: nothing at or"
-      ui_line "above fix_at ($CTX_FIX_AT) remains."
+      ui_line "above min_fix_severity ($CTX_MIN_FIX_SEVERITY) remains."
       return 0 ;;
     halted)
       _status_next_halted "$pass"
@@ -2177,18 +2177,18 @@ _status_next() {
 
   # awaiting review, and why one is owed.
   #
-  # The cap comes first, because a pass at max_passes is owed a review that
+  # The cap comes first, because a pass at max_passes_per_cycle is owed a review that
   # cannot run. `legs_should_continue` refuses when the last pass reached the cap,
   # so printing the bare command here would send the reader at something that
   # declines, writes a declined marker and halts the loop. The condition that has
   # to change goes above the command that follows it — which is the shape the
   # halted and stopped sections already use.
   m="$(state_marker_for "$CTX_MARKERS" "$pass" review)"
-  if (( pass >= CTX_MAX_PASSES )) \
+  if (( pass >= CTX_MAX_PASSES_PER_CYCLE )) \
      && [[ "$(jq -r '.state // ""' <<<"$m")" == "complete" ]] \
      && state_current_pass_complete "$CTX_MARKERS" "$pass" resolve; then
-    ui_line "pass $pass was the last one max_passes ($CTX_MAX_PASSES) allows, so a"
-    ui_line "review now would be refused rather than run. Raise max_passes in"
+    ui_line "pass $pass was the last one max_passes_per_cycle ($CTX_MAX_PASSES_PER_CYCLE) allows, so a"
+    ui_line "review now would be refused rather than run. Raise policy.max_passes_per_cycle in"
     ui_line ".github/revloop.yml, then:"
     ui_cmd  "revloop review --pr $CTX_PR"
     return 0
@@ -2317,7 +2317,7 @@ cmd_watchdog() {
 
     if [[ "$labels" == *"revloop/awaiting-resolution"* ]]; then leg="resolve"; else leg="review"; fi
 
-    author="$(state_trusted_author event-driven)"
+    author="$(state_trusted_author automated)"
     markers="$(state_markers "$pr" "$repo" "$author")"
     marker="$(jq -c '[.[]] | last // empty' <<<"$markers")"
     if [[ -z "$marker" ]]; then
@@ -2387,7 +2387,7 @@ To look yourself: \`revloop status --pr $pr\`. To restart it, remove \`revloop/h
 # so at most once per pull request. Suppressible by flag and by config.
 run_upgrade_nudge() {
   [[ "${REVLOOP_NO_TIPS:-0}" == "1" ]] && return 0
-  [[ "$(cfg_get '.tips')" == "false" ]] && return 0
+  [[ "$(cfg_get '.enable_automation_hint')" == "false" ]] && return 0
   [[ -d .github/workflows ]] || return 0
   compgen -G ".github/workflows/revloop-*.yml" >/dev/null 2>&1 && return 0
 

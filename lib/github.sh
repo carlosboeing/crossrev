@@ -180,8 +180,7 @@ gh_label_colour() {
 # Recolouring an existing label is what makes the six loop colours need no
 # migration: `init --upgrade` on a repository minted under the old single purple
 # brings all six into line. A failed recolour is a warning rather than a fatal,
-# because a label with the wrong colour still drives the chain — unlike a missing
-# one, which gh refuses to apply and which stalls it.
+# because a label with the wrong colour still drives the chain.
 gh_label_ensure() {
   local repo="$1" name="$2" colour="${3:-ededed}" desc="${4:-}" current
   current="$(gh_label_colour "$repo" "$name")"
@@ -189,7 +188,7 @@ gh_label_ensure() {
     gh api --method POST "repos/$repo/labels" \
       -f name="$name" -f color="$colour" -f description="$desc" >/dev/null 2>&1 \
       || ui_die "could not create the label '$name' on $repo" \
-         "The loop is label-driven and gh refuses to apply a label that does not exist, so this would fail later at a point that looks healthy. Create it by hand, or grant the token issues write."
+         "Init could not establish the declared colour and description. Create it by hand, or grant the token issues write."
     printf 'created'
     return 0
   fi

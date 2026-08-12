@@ -47,7 +47,7 @@ Each finding in the prompt carries three fields and one instruction:
 | `severity` | `high`, `medium` or `low`. How bad it is, and nothing else |
 | `category` | `correctness`, `security`, `performance`, `maintainability`, `testing` or `docs` |
 | `pre_existing` | Whether the defect would survive a revert of this pull request |
-| **May fix** | The orchestrator's own answer, worked out from the repository's `fix_at` threshold |
+| **May fix** | The orchestrator's own answer, worked out from the repository's `min_fix_severity` threshold |
 
 **Take `May fix` as given.** It already accounts for the threshold and for provenance, and the reviewer's comment on the pull request already says which way it went. Re-deriving it from severity is how the reply ends up contradicting a comment a human is reading two lines above it.
 

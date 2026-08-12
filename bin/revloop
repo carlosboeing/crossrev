@@ -73,7 +73,7 @@ usage() {
     revloop --pr <n>         A cycle, which is what you want most of the time
 
   COMMANDS
-    cycle --pr <n>           The whole loop in one process, up to max_passes
+    cycle --pr <n>           The whole loop in one process, up to max_passes_per_cycle
     review --pr <n>          One review leg: post findings as inline comments
     resolve --pr <n>         Verify each finding, fix or push back, reply, push
     status --pr <n>          Read the loop's state off the pull request

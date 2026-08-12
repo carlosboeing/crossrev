@@ -9,14 +9,14 @@
 # Should the loop continue? Prints "<decision> <reason>".
 #
 # Terminates on the first of: the reviewer returns converged; the pass count
-# reaches max_passes; a human applies revloop/stop; the resolver returns
+# reaches max_passes_per_cycle; a human applies revloop/stop; the resolver returns
 # blocked; the daily run cap is exceeded; the PR is larger than the file cap.
 #
-# $1 verdict, $2 pass, $3 max_passes, $4 has_stop_label, $5 blocked,
-# $6 runs_today, $7 runs_per_day, $8 files_changed, $9 max_files_changed
+# $1 verdict, $2 pass, $3 max_passes_per_cycle, $4 has_stop_label, $5 blocked,
+# $6 prs_today, $7 max_prs_per_day, $8 files_changed, $9 max_files_changed_per_pr
 legs_should_continue() {
-  local verdict="$1" pass="$2" max_passes="$3" stop="$4" blocked="$5"
-  local runs_today="$6" runs_per_day="$7" files="$8" max_files="$9"
+  local verdict="$1" pass="$2" max_passes_per_cycle="$3" stop="$4" blocked="$5"
+  local prs_today="$6" max_prs_per_day="$7" files="$8" max_files_changed_per_pr="$9"
 
   # A human's request outranks everything, including a healthy verdict.
   # Deliberately checked first: revloop/stop is an instruction, not a state.
@@ -24,22 +24,22 @@ legs_should_continue() {
 
   [[ "$blocked" == "true" ]] && { printf 'halt the resolver reported blocked'; return 1; }
 
-  # Only findings at or above fix_at keep the loop alive. Anything below it, and
+  # Only findings at or above min_fix_severity keep the loop alive. Anything below it, and
   # anything pre-existing, is reported and cannot prevent convergence.
-  [[ "$verdict" == "converged" ]] && { printf 'converged nothing at or above fix_at remains'; return 1; }
+  [[ "$verdict" == "converged" ]] && { printf 'converged nothing at or above min_fix_severity remains'; return 1; }
 
-  # At exactly the cap, stop. Pass 3 of max_passes 3 is the last pass, not the
+  # At exactly the cap, stop. Pass 3 of max_passes_per_cycle 3 is the last pass, not the
   # one after which a fourth begins.
-  if (( max_passes > 0 && pass >= max_passes )); then
-    printf 'halt reached max_passes (%s)' "$max_passes"; return 1
+  if (( max_passes_per_cycle > 0 && pass >= max_passes_per_cycle )); then
+    printf 'halt reached max_passes_per_cycle (%s)' "$max_passes_per_cycle"; return 1
   fi
 
-  if (( runs_per_day > 0 && runs_today >= runs_per_day )); then
-    printf 'halt reached runs_per_day (%s) in the last 24 hours' "$runs_per_day"; return 1
+  if (( max_prs_per_day > 0 && prs_today >= max_prs_per_day )); then
+    printf 'halt reached max_prs_per_day (%s) in the last 24 hours' "$max_prs_per_day"; return 1
   fi
 
-  if (( max_files > 0 && files > max_files )); then
-    printf 'halt %s files changed, above max_files_changed (%s)' "$files" "$max_files"; return 1
+  if (( max_files_changed_per_pr > 0 && files > max_files_changed_per_pr )); then
+    printf 'halt %s files changed, above max_files_changed_per_pr (%s)' "$files" "$max_files_changed_per_pr"; return 1
   fi
 
   printf 'continue issues remain and no cap is reached'
@@ -50,7 +50,7 @@ legs_should_continue() {
 # The fixing threshold
 # ---------------------------------------------------------------------------
 #
-# `fix_at` names the lowest severity the resolve leg may change code for while
+# `min_fix_severity` names the lowest severity the resolve leg may change code for while
 # nobody is watching. Everything below it is still reported, still tabled, and
 # still replied to — the threshold governs the commit, never the comment.
 
@@ -67,7 +67,7 @@ legs_severity_rank() {
 
 # May the resolve leg change code for this finding?
 #
-# $1 severity, $2 fix_at, $3 pre_existing ("true" or anything else)
+# $1 severity, $2 min_fix_severity, $3 pre_existing ("true" or anything else)
 #
 # Two rules, in order. A pre-existing defect is never fixed here whatever its
 # severity — that is the one guardrail deliberately not configurable, because a
@@ -78,9 +78,9 @@ legs_severity_rank() {
 # be wrong are not symmetrical: refusing to fix leaves a finding reported and a
 # human to read it, while guessing leaves an unattended commit nobody asked for.
 legs_should_fix() {
-  local severity="$1" fix_at="$2" pre_existing="${3:-false}"
+  local severity="$1" min_fix_severity="$2" pre_existing="${3:-false}"
   [[ "$pre_existing" == "true" ]] && return 1
-  local bar; bar="$(legs_severity_rank "$fix_at")"
+  local bar; bar="$(legs_severity_rank "$min_fix_severity")"
   (( bar == 0 )) && return 1
   (( $(legs_severity_rank "$severity") >= bar ))
 }

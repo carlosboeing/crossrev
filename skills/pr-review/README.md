@@ -10,7 +10,7 @@ Forked from Superpowers' `code-reviewer.md`, which already supplied the right sk
 |---|---|
 | Severity, category and provenance as three fields rather than one enum | "How bad is it", "what kind is it" and "did this PR cause it" are unrelated questions. Fused, a critical pre-existing security hole and a trivial pre-existing typo carry the same value and neither is ever fixed |
 | `pre_existing` as a boolean, and never fixed here | Without it a reviewer blames the current PR for old bugs, the resolve leg fixes them, and the diff grows without limit |
-| The verdict keys off the repository's `fix_at` threshold | A loop that can't converge over a naming quibble is a loop nobody leaves switched on |
+| The verdict keys off the repository's `min_fix_severity` threshold | A loop that can't converge over a naming quibble is a loop nobody leaves switched on |
 | Findings as schema-constrained JSON | Free-form JSON drifts. Verified: the same prompt without a schema produced `verdict: "fail"`, `severity: "critical"` and keys `issue`/`detail` — none in the schema |
 | `side` on every finding, `RIGHT` by default | GitHub anchors a comment to a line *and a side*. A finding on a deleted line posted as `RIGHT` targets a line that doesn't exist and is rejected |
 | Pass awareness | From pass 2, every prior finding is classified `addressed` / `credibly-rebutted` / `still-open` / `regressed` before any new reviewing |

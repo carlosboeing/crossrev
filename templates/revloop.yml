@@ -9,8 +9,18 @@
 # like http://tower.local:11434 asserts something false on a GitHub runner.
 version: 1
 
-mode: event-driven          # event-driven | single-run
-max_passes: 3
+mode: automated             # automated | local — who may write trusted state
+runner: github-hosted       # github-hosted | self-hosted — where init renders the workflows to run
+
+# Bounds on what revloop does unattended. The three continuation bounds end automatic reviewing and
+# never block a person: a review a human asked for runs regardless. min_fix_severity is different —
+# it bounds what an agent may change rather than whether the loop continues, so it holds on every
+# run. Daily bounds roll over 24 hours rather than resetting at midnight.
+policy:
+  min_fix_severity: medium          # high | medium | low
+  max_passes_per_cycle: 3
+  max_files_changed_per_pr: 200
+  max_prs_per_day: 25
 
 # Declared and working, but NOT the CI reviewer: Kimi's subscription credential
 # is a 15-minute OAuth access token with a rotating refresh token, not a static
@@ -22,7 +32,7 @@ endpoints:
     token_env: KIMI_API_KEY
 
 # The pairing, as `revloop init` resolved it. init writes both blocks — harness,
-# model, effort, endpoint, and the resolver's fix_at — so the committed file says
+# model, effort, and endpoint — so the committed file says
 # what the loop runs and what init provisioned credentials for. A field resolving
 # to nothing is removed rather than left at this template's value.
 #
@@ -49,11 +59,6 @@ resolver:
   harness: claude
   model: claude-opus-5
   effort: high
-  fix_at: medium            # this severity and above, the resolve leg may change
-                            # code unattended. high | medium | low. Everything
-                            # below is still reported and still tabled; it is
-                            # left for a human. Pre-existing findings are never
-                            # fixed here, whatever their severity.
 
 # Where a finding that is real but not fixed here goes. An unresolved thread on a
 # merged pull request is visible in no GitHub view, so without a sink `deferred`
@@ -70,12 +75,6 @@ persist:
   defects: issues           # a sink name | none
   escalated: none           # a decision request, not a defect: a human is already coming
 
-caps:
-  runs_per_day: 12
-  max_files_changed: 200    # above this, comment instead of reviewing
-
-runner: github-hosted       # github-hosted | self-hosted
-
 # Set to false to permanently silence the suggestion that a repository already
 # running Actions could run this loop automatically. `--no-tips` does it per run.
-tips: true
+enable_automation_hint: true

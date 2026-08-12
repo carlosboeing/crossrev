@@ -33,7 +33,7 @@ _cfg_yaml_to_json() {
 # Read a path from a git revision rather than the working tree.
 #
 # Policy comes from the base revision, never the PR head. Read from the head, a
-# pull request could raise max_passes, repoint an endpoint at a server it
+# pull request could raise max_passes_per_cycle, repoint an endpoint at a server it
 # controls and harvest every prompt, or ship a REVIEW.md saying to return
 # converged. A PR that legitimately changes review policy therefore takes effect
 # when it merges, which is the correct order: the new policy is reviewed under
@@ -55,20 +55,24 @@ _cfg_yaml_text_to_json() {
 # a local user who has never heard of it would otherwise be told to set an API
 # key before their first review, contradicting the promise that
 # `revloop review --pr 42` just works. So: no endpoints, two different local
-# harnesses, single-run, and nothing persisted anywhere uninvited.
+# harnesses, local mode, and nothing persisted anywhere uninvited.
 _cfg_defaults() {
   jq -cn '{
     version: 1,
-    mode: "single-run",
-    max_passes: 3,
+    mode: "local",
+    runner: "github-hosted",
+    policy: {
+      min_fix_severity: "medium",
+      max_passes_per_cycle: 3,
+      max_files_changed_per_pr: 200,
+      max_prs_per_day: 25
+    },
     endpoints: {},
     sinks: {},
     persist: { defects: "auto", escalated: "none" },
     reviewer: { harness: "codex",  model: null, effort: null, endpoint: null },
-    resolver: { harness: "claude", model: null, effort: null, endpoint: null,
-                fix_at: "medium" },
-    caps: { runs_per_day: 12, max_files_changed: 200 },
-    runner: "github-hosted"
+    resolver: { harness: "claude", model: null, effort: null, endpoint: null },
+    enable_automation_hint: true
   }'
 }
 
@@ -113,20 +117,21 @@ cfg_load() {
       | .endpoints = (($base.endpoints // {}) * ($o.endpoints // {}))
     ')"
 
-  cfg_assert_fix_at
+  cfg_assert_min_fix_severity
 }
 
 # An unrecognised threshold must not be representable.
 #
 # Left to the ranking table it ranks zero, and zero meets nothing — so
-# `fix_at: medum` counts no finding as actionable, the pass reports converged,
+# `min_fix_severity: medum` counts no finding as actionable, the pass reports converged,
 # and the cycle stops with a high-severity finding sitting on the pull request.
 # A typo would look exactly like a clean review. Refuse the value instead.
-cfg_assert_fix_at() {
-  local fix_at; fix_at="$(jq -r '.resolver.fix_at // empty' <<<"$CFG_MERGED")"
-  case "$fix_at" in
+cfg_assert_min_fix_severity() {
+  local min_fix_severity
+  min_fix_severity="$(jq -r '.policy.min_fix_severity // empty' <<<"$CFG_MERGED")"
+  case "$min_fix_severity" in
     high|medium|low) return 0 ;;
-    *) ui_die "resolver.fix_at is '${fix_at:-unset}', which is not one of high, medium or low" \
+    *) ui_die "policy.min_fix_severity is '${min_fix_severity:-unset}', which is not one of high, medium or low" \
          "It names the lowest severity the resolve leg may change code for unattended. Set it to high, medium or low in the repository config, or remove it to take the default of medium." ;;
   esac
 }

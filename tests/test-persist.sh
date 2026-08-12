@@ -18,15 +18,18 @@ ID_DEFER="bbbb000000000002"
 config_with_issue_sink() {
   cat <<'EOF'
 version: 1
-mode: single-run
-max_passes: 3
+mode: local
+policy:
+  min_fix_severity: medium
+  max_passes_per_cycle: 3
+  max_files_changed_per_pr: 200
+  max_prs_per_day: 25
 reviewer:
   harness: claude
   model: reviewer-model
 resolver:
   harness: claude
   model: resolver-model
-  fix_at: medium
 sinks:
   issues:
     type: github_issue
@@ -37,9 +40,6 @@ sinks:
 persist:
   defects: issues
   escalated: none
-caps:
-  runs_per_day: 12
-  max_files_changed: 200
 EOF
 }
 
@@ -82,15 +82,18 @@ resolve_payload() {
 config_with_file_sink() {
   cat <<'EOF'
 version: 1
-mode: single-run
-max_passes: 3
+mode: local
+policy:
+  min_fix_severity: medium
+  max_passes_per_cycle: 3
+  max_files_changed_per_pr: 200
+  max_prs_per_day: 25
 reviewer:
   harness: claude
   model: reviewer-model
 resolver:
   harness: claude
   model: resolver-model
-  fix_at: medium
 sinks:
   backlog:
     type: file
@@ -98,9 +101,6 @@ sinks:
 persist:
   defects: backlog
   escalated: none
-caps:
-  runs_per_day: 12
-  max_files_changed: 200
 EOF
 }
 

@@ -243,7 +243,7 @@ review_body="$(last_body 9001)"
 is  "a review that found things carries exactly one alert" "$(alerts_in "$review_body")" "1"
 has "and it is the red one"                           "$review_body" "> [!CAUTION]"
 has "which says how many need resolving"              "$review_body" "**3 findings need resolving.**"
-has "and what happens to them next"                   "$review_body" "at or above \`fix_at\`"
+has "and what happens to them next"                   "$review_body" "at or above \`min_fix_severity\`"
 # The verdict used to sit at the foot of the comment, under a table, which is the
 # last place anyone looks for the answer to "what happens now".
 hasnt "the verdict no longer trails the table as prose" "$review_body" "**Next:** a second agent"
@@ -254,7 +254,7 @@ is  "a converged review carries exactly one alert"    "$(alerts_in "$converged_b
 has "and it is the green one"                         "$converged_body" "> [!TIP]"
 has "which says the loop stopped on its own"          "$converged_body" "**Converged.**"
 # The vocabulary has to match what `revloop status` says about the same state.
-has "in the same words the terminal uses"             "$converged_body" "Nothing at or above \`fix_at\`"
+has "in the same words the terminal uses"             "$converged_body" "Nothing at or above \`min_fix_severity\`"
 hasnt "no caution is stacked underneath it"           "$converged_body" "> [!CAUTION]"
 
 run_review "$BLOCKED_PAYLOAD"

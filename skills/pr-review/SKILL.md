@@ -24,7 +24,7 @@ The orchestrator supplies everything in the prompt. **You do not fetch anything.
 | Prior findings | From pass 2 onward: earlier findings, their ids, and how the resolve leg dispositioned each |
 | Open threads | Existing review conversation, including any rebuttals |
 | `REVIEW.md` | Per-repository review instruction, when the repository has one |
-| `fix_at` | The fixing threshold in force this pass, which is what the verdict keys off |
+| `min_fix_severity` | The fixing threshold in force this pass, which is what the verdict keys off |
 
 If something you need is missing, say so in `blocked_reason` and return verdict `blocked`. Do not guess at a diff you were not given.
 
@@ -62,7 +62,7 @@ One field used to answer all three at once, and it could not. How bad is it, wha
 
 **A `pre_existing` finding is verified, reported, and filed to the backlog if it is real — and never fixed here, whatever its severity.** That guardrail is not configurable, and it is the one you are most likely to erode by good intentions. Without it a reviewer blames the current pull request for old bugs, the resolve leg dutifully fixes them, and the diff grows until nobody can review it. The test is simple: would this defect survive a revert? If yes, `pre_existing` is true, however tempting it is to bundle.
 
-**The verdict keys off `fix_at`, the repository's fixing threshold**, which the prompt names for each pass. A finding at or above it, and not pre-existing, keeps the loop alive. Everything else is reported and commented but cannot prevent convergence — a loop that cannot converge over a naming quibble is one nobody leaves switched on.
+**The verdict keys off `min_fix_severity`, the repository's fixing threshold**, which the prompt names for each pass. A finding at or above it, and not pre-existing, keeps the loop alive. Everything else is reported and commented but cannot prevent convergence — a loop that cannot converge over a naming quibble is one nobody leaves switched on.
 
 Do not inflate. A `low` marked `high` costs a commit, a review cycle, and some of the trust that makes the rest of your findings land. Do not deflate either: the threshold decides what gets fixed, so under-rating a real bug is how it ends up reported and ignored.
 
@@ -99,8 +99,8 @@ Then two rules that make convergence possible:
 
 ## The verdict
 
-- `converged` — nothing at or above `fix_at` that this pull request introduced. Findings below the threshold, and pre-existing ones at any severity, may still be present and reported.
-- `issues-remain` — at least one finding at or above `fix_at` that is not pre-existing.
+- `converged` — nothing at or above `min_fix_severity` that this pull request introduced. Findings below the threshold, and pre-existing ones at any severity, may still be present and reported.
+- `issues-remain` — at least one finding at or above `min_fix_severity` that is not pre-existing.
 - `blocked` — you could not review: the diff was missing, unintelligible, or too large to reason about.
 
 ## Output

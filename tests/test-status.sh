@@ -98,7 +98,7 @@ has "whose resolve leg was never owed"          "$out" "○ resolve  not needed,
 # between them is not translating between two descriptions of one state.
 has "NEXT says the loop finished, in the summary comment's own words" \
   "$out" "the loop converged on pass 3: nothing at or"
-has "naming the threshold that let it"          "$out" "above fix_at (medium) remains"
+has "naming the threshold that let it"          "$out" "above min_fix_severity (medium) remains"
 
 # --- awaiting review, with nothing run yet ----------------------------------
 out="$(status_with '[]')"
@@ -162,10 +162,10 @@ out="$(status_with "$(lbl revloop/awaiting-review revloop/pass-3)" \
   "$(resolve_m 3 "$ONE_FIXED" c02b418def)")"
 
 has "the last pass allowed says so rather than inviting the next one" \
-  "$out" "pass 3 was the last one max_passes (3) allows"
+  "$out" "pass 3 was the last one max_passes_per_cycle (3) allows"
 has "and says what a review now would do instead of running" \
   "$out" "refused rather than run"
-has "the condition that has to change comes before the command"  "$out" "Raise max_passes in"
+has "the condition that has to change comes before the command"  "$out" "Raise policy.max_passes_per_cycle in"
 has "and NEXT still ends in something you can type"              "$out" "revloop review --pr 42"
 hasnt "nothing invites a pass beyond the cap"                    "$out" "so pass 4 reviews"
 
@@ -174,7 +174,7 @@ out="$(status_with "$(lbl revloop/awaiting-review revloop/pass-1)" \
   "$(review_m 1 issues-remain "$HIGH_LOW")" \
   "$(resolve_m 1 "$FIXED_SKIPPED" d81a3f2abc)")"
 has "a pass below the cap still points at the next review" "$out" "revloop review --pr 42"
-hasnt "and says nothing about max_passes"                  "$out" "max_passes"
+hasnt "and says nothing about max_passes_per_cycle"        "$out" "max_passes_per_cycle"
 
 # --- halted: a cap stopped the next pass before it began --------------------
 #
@@ -186,11 +186,11 @@ out="$(status_with "$(lbl revloop/halted revloop/pass-2)" \
   "$(resolve_m 1 "$FIXED_SKIPPED")" \
   "$(review_m 2 issues-remain "$ONE_MED")" \
   "$(resolve_m 2 "$ONE_FIXED" d81a3f2abc)" \
-  "$(declined_m 3 'reached runs_per_day (12) in the last 24 hours')")"
+  "$(declined_m 3 'reached max_prs_per_day (25) in the last 24 hours')")"
 
 has "a cap halt reads as halted"                "$out" "acme/widget#42 — halted"
 has "attached to the review leg that refused to start" \
-  "$out" "3  ✗ review   never started — reached runs_per_day"
+  "$out" "3  ✗ review   never started — reached max_prs_per_day"
 has "with its resolve leg shown as never run"   "$out" "○ resolve  not run"
 has "NEXT says what the cap cost"               "$out" "So anything pass 2 changed is unverified"
 has "and gives the lever"                       "$out" "Raise the cap in"
@@ -208,10 +208,10 @@ has "the refused pass does not become the current one" "$out" "passes     2 of 3
 # above would then warn that "anything pass 0 changed is unverified". No such
 # pass exists, nothing was reviewed, and nothing was changed.
 out="$(status_with "$(lbl revloop/halted revloop/pass-1)" \
-  "$(declined_m 1 'reached max_files_changed (200)')")"
+  "$(declined_m 1 'reached max_files_changed_per_pr (200)')")"
 
 has   "a cap refusing the first pass still reads as halted" "$out" "acme/widget#42 — halted"
-has   "with the refusal on the leg that made it"  "$out" "1  ✗ review   never started — reached max_files_changed"
+has   "with the refusal on the leg that made it"  "$out" "1  ✗ review   never started — reached max_files_changed_per_pr"
 has   "the loop section says nothing has run"     "$out" "passes     none yet, up to 3"
 has   "NEXT names the pass that never began"      "$out" "pass 1 never began"
 has   "and says no review ran rather than warning about a pass that never existed" \

@@ -30,11 +30,14 @@ XDG_CONFIG_HOME="$(mktemp -d)"; export XDG_CONFIG_HOME
 # --- defaults --------------------------------------------------------------
 d="$(new_repo)"; cd "$d" || exit 1
 out="$($REVLOOP config show)"
-is "no config: mode is single-run"        "$(jq -r .mode <<<"$out")"              "single-run"
+is "no config: mode is local"             "$(jq -r .mode <<<"$out")"              "local"
 is "no config: codex reviews"             "$(jq -r .reviewer.harness <<<"$out")"  "codex"
 is "no config: claude resolves"          "$(jq -r .resolver.harness <<<"$out")" "claude"
 is "no config: no endpoints are defined"  "$(jq -r '.endpoints|length' <<<"$out")" "0"
 is "no config: nothing demands an API key" "$(jq -r '[.endpoints[]?.token_env]|length' <<<"$out")" "0"
+is "no config: three passes per cycle"     "$(jq -r .policy.max_passes_per_cycle <<<"$out")" "3"
+is "no config: medium is the minimum fix severity" "$(jq -r .policy.min_fix_severity <<<"$out")" "medium"
+is "no config: automation hints are enabled" "$(jq -r .enable_automation_hint <<<"$out")" "true"
 
 # --- version ---------------------------------------------------------------
 d="$(new_repo)"; cd "$d" || exit 1; mkdir -p .github
@@ -50,31 +53,31 @@ has "version mismatch names both versions" "$err" "declares version 99"
 # reported converged with the bug still on the pull request. The value is
 # refused at load instead, where the message can name it.
 d="$(new_repo)"; cd "$d" || exit 1; mkdir -p .github
-printf 'version: 1\nresolver:\n  fix_at: medum\n' > .github/revloop.yml
+printf 'version: 1\npolicy:\n  min_fix_severity: medum\n' > .github/revloop.yml
 err="$($REVLOOP config show 2>&1 >/dev/null)"; rc=$?
-is  "a misspelt fix_at exits non-zero"     "$rc" "1"
-has "and the error names the bad value"    "$err" "resolver.fix_at is 'medum'"
+is  "a misspelt min_fix_severity exits non-zero" "$rc" "1"
+has "and the error names the bad value"    "$err" "policy.min_fix_severity is 'medum'"
 has "and says what the valid values are"   "$err" "high, medium or low"
 
 d="$(new_repo)"; cd "$d" || exit 1; mkdir -p .github
 printf 'version: 1\nresolver:\n  harness: claude\n' > .github/revloop.yml
 out="$($REVLOOP config show)"; rc=$?
-is "a resolver block without fix_at keeps the default" "$(jq -r .resolver.fix_at <<<"$out")" "medium"
+is "a resolver block keeps the policy default"         "$(jq -r .policy.min_fix_severity <<<"$out")" "medium"
 is "and loading it is not an error"                    "$rc" "0"
 
 for level in high medium low; do
   d="$(new_repo)"; cd "$d" || exit 1; mkdir -p .github
-  printf 'version: 1\nresolver:\n  fix_at: %s\n' "$level" > .github/revloop.yml
-  is "fix_at $level is accepted" "$($REVLOOP config show | jq -r .resolver.fix_at)" "$level"
+  printf 'version: 1\npolicy:\n  min_fix_severity: %s\n' "$level" > .github/revloop.yml
+  is "min_fix_severity $level is accepted" "$($REVLOOP config show | jq -r .policy.min_fix_severity)" "$level"
 done
 
 # --- precedence ------------------------------------------------------------
 d="$(new_repo)"; cd "$d" || exit 1; mkdir -p .github
-printf 'version: 1\nmax_passes: 5\nreviewer:\n  harness: claude\n' > .github/revloop.yml
-printf 'version: 1\nmax_passes: 9\n' > .revloop.yml
+printf 'version: 1\npolicy:\n  max_passes_per_cycle: 5\nreviewer:\n  harness: claude\n' > .github/revloop.yml
+printf 'version: 1\npolicy:\n  max_passes_per_cycle: 9\n' > .revloop.yml
 out="$($REVLOOP config show)"
-is ".github/revloop.yml wins over .revloop.yml" "$(jq -r .max_passes <<<"$out")" "5"
-is "unset keys keep their default"              "$(jq -r .caps.runs_per_day <<<"$out")" "12"
+is ".github/revloop.yml wins over .revloop.yml" "$(jq -r .policy.max_passes_per_cycle <<<"$out")" "5"
+is "unset keys keep their default"              "$(jq -r .policy.max_prs_per_day <<<"$out")" "25"
 
 # --- endpoint merge --------------------------------------------------------
 d="$(new_repo)"; cd "$d" || exit 1; mkdir -p .github
