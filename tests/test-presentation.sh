@@ -437,6 +437,17 @@ has "the fallback comment names the location it could not reach" \
   "$(calls)" "**app.ts:40** (RIGHT)"
 has "and the summary comment records it, not just the terminal" \
   "$(last_body 9001)" "One finding could not be anchored to a line of the diff"
+
+# The counter above the warning counts findings written out, not findings written
+# out inline, and calling it the second thing put a clean line directly above the
+# warning contradicting it. The subtraction is not the fix: `unanchored` is seeded
+# from the pass's own markers before the loop runs, so a run resumed after an
+# interruption starts non-zero over findings it never posts, and `posted` minus
+# `unanchored` can reach zero on a pass where inline comments genuinely landed.
+hasnt "a fallback is not counted as an inline comment" \
+  "$far_out" "posted 1 inline comment"
+has "the count says what it counts — findings written out, however each landed" \
+  "$far_out" "posted 1 finding comment(s)"
 has "and says the reply will land there too, so the second orphan is expected" \
   "$(last_body 9001)" "no review thread to put one in"
 

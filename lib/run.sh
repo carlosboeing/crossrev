@@ -833,7 +833,13 @@ Findings recorded; posting them now.$(state_marker_encode "$(jq -c 'del(.comment
     run_checkpoint
   done
 
-  (( posted > 0 ))  && ui_ok "posted $posted inline comment(s)"
+  # "finding" rather than "inline", because a fallback is counted here too and
+  # the warning below is what splits the two. Subtracting `unanchored` instead
+  # would be wrong on the resume path: it is seeded from the pass's own markers
+  # before the loop runs, so a run coming back after an interruption starts
+  # non-zero over findings `already` skips, and the difference can reach zero
+  # on a pass where inline comments did land.
+  (( posted > 0 ))  && ui_ok "posted $posted finding comment(s)"
   (( skipped > 0 )) && ui_say "$skipped finding(s) were already on the pull request from an earlier attempt, so they were not posted twice."
   if (( unanchored > 0 )); then
     local finding_noun="findings"; (( unanchored == 1 )) && finding_noun="finding"
