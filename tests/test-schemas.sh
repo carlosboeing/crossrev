@@ -223,7 +223,7 @@ rc "a duplicate_of naming an issue nobody offered is rejected" 2 \
   "$(_dispositions "$(jq -cs . <<<"$(_d 1 404)
 $(_d 2)
 $(_d 3)")")" "$_expect"
-# A file-sink repository is offered no candidates at all, and yet duplicate_of
+# A repository-backlog destination is offered no candidates at all, and yet duplicate_of
 # still becomes the "tracked as" line on a deferred finding's reply.
 rc "and with no candidates offered, any duplicate_of is rejected" 2 \
   "$(_dispositions "$(_all_three)" | jq -c '.dispositions[0].duplicate_of = 19')" \

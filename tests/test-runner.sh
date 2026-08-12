@@ -33,8 +33,8 @@ reviewer:
 resolver:
   harness: $resolver
   model: resolver-model
-persist:
-  defects: none
+backlog:
+  destination: none
 EOF
 }
 

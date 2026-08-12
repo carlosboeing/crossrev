@@ -33,6 +33,9 @@ All notable changes to revloop. Format follows [Keep a Changelog](https://keepac
 
 ### Changed
 
+- **Deferred work now has one `backlog:` contract.** `destination` selects GitHub issues, a repository path, nothing or automatic discovery; destination settings live under their own names, repository layout is explicit, and `revloop config backlog` prints the resolved answer. Automatic discovery recognizes `BACKLOG.md`, stops treating `docs/ROADMAP.md` as a backlog, and writes the resolved layout into generated configuration.
+- **Explicit false booleans are preserved.** Disabling missing-label creation, matched-issue comments or automation hints no longer falls through an accessor that treats `false` like a missing value.
+
 - **The policy vocabulary now names its scope and unit.** `mode` is `local` or `automated`, autonomy settings live under `policy:`, and `max_passes_per_cycle`, `max_files_changed_per_pr`, `max_prs_per_day` and `min_fix_severity` replace the scattered caps and resolver threshold. `config.sh` is the single owner of the `github-hosted` runner default.
 - **The missing-label guidance now matches the API.** Adding a label to a pull request creates one that does not exist with default metadata; only an API failure or an explicit existing-label-only policy blocks the operation.
 

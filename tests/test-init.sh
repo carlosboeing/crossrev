@@ -29,15 +29,13 @@ reviewer:
 resolver:
   harness: claude
   model: resolver-model
-sinks:
-  issues:
-    type: github_issue
-    identity_label: revloop-review
+backlog:
+  destination: github_issues
+  github_issues:
+    tracking_label: revloop-review
     labels: [bug]
-    create_labels: true
-persist:
-  defects: issues
-  escalated: none
+    create_missing_labels: true
+    comment_on_existing_issue: false
 EOF
 }
 
@@ -74,13 +72,13 @@ has "a label that already exists in the right colour is named as existing" \
   "$out" "exists    revloop/stop"
 has "and the missing ones are marked for creation" "$out" "create    revloop/pass-1"
 
-# The issue sink's labels are a different set with a different owner, so they are
+# The GitHub issues destination's labels are a different set with a different owner, so they are
 # counted separately.
-has "the sink's labels are counted on their own"   "$out" "2 for filed issues"
+has "the backlog labels are counted on their own"  "$out" "2 for filed issues"
 has "and one that already exists is reported so"   "$out" "exists    bug"
 
-has "the plan says where deferred work will go"    "$out" "deferred work     issues"
-has "and where that answer came from"              "$out" "named in the repository config as 'issues'"
+has "the plan says where deferred work will go"    "$out" "deferred work     github_issues"
+has "and where that answer came from"              "$out" "named in the repository config as 'github_issues'"
 has "the plan names every file it would write"     "$out" ".github/workflows/revloop-watchdog.yml"
 # The fixture already carries a policy file, so the plan must say it would be
 # replaced rather than quietly replacing it.
@@ -145,7 +143,7 @@ has "the resolve workflow shares the review workflow's group" \
 
 # The generated config states where deferred work goes, so `auto` is a bootstrap
 # convenience rather than a runtime mode.
-has "the generated config names the resolved sink" "$(cat .github/revloop.yml)" "defects: issues"
+has "the generated config names the resolved backlog" "$(cat .github/revloop.yml)" "destination: github_issues"
 
 # --- --upgrade regenerates workflows and leaves policy alone -----------
 printf 'version: 1\npolicy:\n  max_passes_per_cycle: 7\n' >.github/revloop.yml
@@ -193,7 +191,7 @@ has "a pass label is grey, because it is informational rather than a state" \
   "$(calls)" "labels/revloop/pass-2 -f color=57606a"
 hasnt "and nothing is minted in the old single purple any more" "$(calls)" "color=5319e7"
 
-# --- the sink's labels belong to the repository, so init never repaints them --
+# --- the backlog labels belong to the repository, so init never repaints them --
 #
 # `bug` is the repository's own taxonomy. init creates one that is missing so
 # filing does not die after the review has already posted, and leaves the colour
@@ -207,7 +205,7 @@ route_first 'api repos/*/labels/bug'       '{"name":"bug","color":"d73a4a"}'
 route_first 'api repos/*/labels/revloop/*' '{"name":"old","color":"5319e7"}'
 out="$("$REVLOOP" init --upgrade --dry-run 2>&1)"
 
-has "a sink label in the repository's own colour is reported as existing" \
+has "a backlog label in the repository's own colour is reported as existing" \
   "$out" "exists    bug"
 hasnt "and never as a recolour the run would not perform" "$out" "recolour  bug"
 
@@ -218,15 +216,15 @@ out="$("$REVLOOP" init --upgrade --yes 2>&1)"
 is  "and execution leaves its colour exactly as the repository set it" \
   "$(count 'method PATCH repos/acme/widget/labels/bug')" "0"
 
-# --- create_labels: false refuses rather than inventing ----------------
+# --- create_missing_labels: false refuses rather than inventing --------
 #
 # A repository that governs its own label set is one where inventing labels is
 # worse than stopping.
-strict="$(config_with_issue_sink | sed 's/    create_labels: true/    create_labels: false/; s/    labels: \[bug\]/    labels: [needs-triage]/')"
+strict="$(config_with_issue_sink | sed 's/    create_missing_labels: true/    create_missing_labels: false/; s/    labels: \[bug\]/    labels: [needs-triage]/')"
 fixture_repo "$strict"; stub_reset
 routes_init
 err="$("$REVLOOP" init --yes 2>&1 >/dev/null)"; rc=$?
-is  "init stops when a sink label is missing"   "$rc" "1"
+is  "init stops when a backlog label is missing" "$rc" "1"
 has "and names the label it will not invent"    "$err" "needs-triage"
 has "and says why it stops"                     "$err" "asked revloop to use existing labels only"
 
@@ -270,7 +268,7 @@ hasnt "rather than reporting every secret missing"   "$out" "APP_ID — MISSING"
 # from the resolved pairing. A policy file naming a different one leaves the
 # repository provisioned for a leg that never runs — a Codex credential and a
 # cron refresher for a reviewer the committed config says is Claude. Same rule
-# the sink already follows: init resolves the answer and writes it down.
+# the backlog already follows: init resolves the answer and writes it down.
 # Only the reviewer, so the two legs differ and a write-through that collapsed
 # them into one value would show up rather than passing by coincidence. Its model
 # goes too, so the resolved-to-nothing path is exercised rather than described.

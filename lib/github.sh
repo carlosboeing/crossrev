@@ -38,7 +38,7 @@ gh_default_branch() {
 
 # The diff under review, with paths matching an exclude pattern dropped.
 #
-# The exclusion is not cosmetic: a file sink means the resolver commits its own
+# The exclusion is not cosmetic: a repository backlog means the resolver commits its own
 # bookkeeping into the PR branch, and the next pass would then review revloop's
 # notes about the last pass.
 gh_pr_diff() {
@@ -255,7 +255,7 @@ gh_issue_create() {
     # must leave the thread open rather than resolve it against a write that did
     # not land, which is exactly how deferred work disappears.
     ui_warn "could not file an issue on $repo for a deferred finding" \
-      "The thread stays open and unresolved instead, so the finding is still visible on the pull request. Check that the sink's labels exist and the token has issues write."
+      "The thread stays open and unresolved instead, so the finding is still visible on the pull request. Check that the backlog labels exist and the token has issues write."
     return 1
   fi
   printf '%s' "$n"

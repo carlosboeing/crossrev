@@ -94,7 +94,7 @@ revloop doctor
 | `revloop auth rotate` | Built. Guided, because GitHub has no API to generate an App key. It proves the new key works before replacing the old one |
 | `revloop auth refresh` | Built. The refresher job's only command, and the only thing that writes a rotating harness credential |
 
-**Exercised offline, and run against real pull requests locally.** Every command above is asserted against a stubbed `gh` boundary — 684 assertions, no network, no model, no PR — which catches the deterministic half, the half that fails silently. Three live local runs cover the other half. PR 3 converged on pass 3 against three planted defects. PR 4 converged on pass 2 while reviewing revloop's own rename, where the reviewer found two real defects in the change under review and pushed back on a third. PR 5 ran all three passes over revloop's own presentation change and found ten findings, nine of them real defects in the branch under review — including one in the token accounting the same branch had just added. **No repository has had the workflows installed yet**, so automated mode is still unproven end to end.
+**Exercised offline, and run against real pull requests locally.** Every command above is asserted against a stubbed `gh` boundary — 688 assertions, no network, no model, no PR — which catches the deterministic half, the half that fails silently. Three live local runs cover the other half. PR 3 converged on pass 3 against three planted defects. PR 4 converged on pass 2 while reviewing revloop's own rename, where the reviewer found two real defects in the change under review and pushed back on a third. PR 5 ran all three passes over revloop's own presentation change and found ten findings, nine of them real defects in the branch under review — including one in the token accounting the same branch had just added. **No repository has had the workflows installed yet**, so automated mode is still unproven end to end.
 
 ## Using it
 
@@ -122,7 +122,7 @@ To watch without any risk of a push, run `review` only.
 
 ### What it writes
 
-One inline comment per finding on the line it affects, one summary comment carrying a hidden marker, and the `revloop/*` labels. The resolve leg adds threaded replies, resolves the threads it settled, commits any fixes, and files deferred defects to whichever sink the config resolves to.
+One inline comment per finding on the line it affects, one summary comment carrying a hidden marker, and the `revloop/*` labels. The resolve leg adds threaded replies, resolves the threads it settled, commits any fixes, and files deferred defects to whichever backlog destination the config resolves to.
 
 Each finding's heading carries a coloured circle for severity and its category as a word — `🔴 **High · Security** — <title>` — and the summary table adds a pictogram per category. Each summary comment opens with exactly one native GitHub alert carrying the verdict, and ends with a run-details table naming the agent that ran, how long it took and what it cost in tokens. One row, for that comment's own leg.
 
@@ -141,6 +141,8 @@ revloop review --pr 42 --harness claude
 Repository policy lives in `.github/revloop.yml`, and **it is read from the base revision, never the branch under review** — so a config committed on the pull request branch has no effect until it merges. That is deliberate: a pull request cannot rewrite the loop that reviews it.
 
 The `policy` block has three continuation bounds: passes per cycle, files changed per pull request, and pull requests reviewed per rolling day. They end automatic reviewing and never block a person. `min_fix_severity` is different: it limits what the resolve agent may change, so it applies to attended and automatic runs alike.
+
+The `backlog` block says where a real finding goes when this pull request does not fix it. `github_issues` files an issue with the repository's labels; `repository` writes either one file per finding with `layout: folder` or appends to one list with `layout: file`; `none` leaves the thread open; `auto` inspects the Project Map and established backlog conventions. Run `revloop config backlog` to see the resolved destination.
 
 ### Automated mode
 
@@ -231,7 +233,7 @@ lib/             sourced by bin/revloop
   ui.sh            output voice — six rules, enforced by the helpers' shapes
   preflight.sh     dependency checks that name the fix, not just the gap
   auth.sh          GitHub App registration via the manifest flow, per owner and role
-  config.sh        two-layer config, endpoint and sink resolution
+  config.sh        two-layer config, endpoint and backlog resolution
   credentials.sh   restoring a rotating subscription credential, read-only
   sandbox.sh       quarantining repository-provided harness configuration
   state.sh         labels, markers, trust, revision detection, finding ids
@@ -252,7 +254,7 @@ tests/           the stubbed-gh suite. `tests/run.sh` runs all of it
 ## Working on it
 
 ```bash
-tools/revloop/tests/run.sh      # 684 offline assertions, no network, no model
+tools/revloop/tests/run.sh      # 688 offline assertions, no network, no model
 tools/revloop/scripts/lint.sh   # syntax plus shellcheck -S warning
 ```
 

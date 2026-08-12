@@ -99,11 +99,12 @@ CTX_REPO=""; CTX_PR=""; CTX_HEAD_SHA=""; CTX_BASE_SHA=""
 CTX_HEAD_BRANCH=""; CTX_DEFAULT_BRANCH=""; CTX_CHANGED=0
 CTX_TITLE=""; CTX_BODY=""; CTX_LABELS=""; CTX_URL=""
 CTX_MODE=""; CTX_AUTHOR=""; CTX_MARKERS="[]"; CTX_MAX_PASSES_PER_CYCLE=3
-CTX_SINK="none"; CTX_IDENTITY_LABEL="revloop-review"; CTX_SINK_LABELS=""
+CTX_BACKLOG="none"; CTX_BACKLOG_LAYOUT=""; CTX_BACKLOG_PATH=""
+CTX_TRACKING_LABEL="revloop-review"; CTX_BACKLOG_LABELS=""
 CTX_MIN_FIX_SEVERITY="medium"
 
 ctx_load() {
-  local pr="$1" repo="${2:-}" trigger="${3:-human}" pr_json want
+  local pr="$1" repo="${2:-}" trigger="${3:-human}" pr_json resolved
   preflight_require_yq
 
   if [[ -z "$repo" ]]; then
@@ -158,30 +159,15 @@ ctx_load() {
   CTX_MAX_PASSES_PER_CYCLE="$(cfg_get '.policy.max_passes_per_cycle')"
   CTX_MIN_FIX_SEVERITY="$(cfg_get '.policy.min_fix_severity')"
 
-  want="$(cfg_get '.persist.defects')"
-  CTX_SINK="$(cfg_resolve_sink "$CTX_BASE_SHA" "$want")"
-  CTX_IDENTITY_LABEL="$(run_sink_field "$want" identity_label "revloop-review")"
-  CTX_SINK_LABELS="$(run_sink_field "$want" labels "")"
+  resolved="$(cfg_resolve_backlog "$CTX_BASE_SHA" "$(cfg_get '.backlog.destination')")"
+  read -r CTX_BACKLOG CTX_BACKLOG_LAYOUT CTX_BACKLOG_PATH <<<"$resolved"
+  CTX_TRACKING_LABEL="$(cfg_get '.backlog.github_issues.tracking_label')"
+  CTX_BACKLOG_LABELS="$(jq -r '.backlog.github_issues.labels | join(" ")' <<<"$CFG_MERGED")"
 
   CTX_AUTHOR="$(state_trusted_author "$CTX_MODE")"
   [[ -n "$CTX_AUTHOR" ]] || ui_die "could not resolve whose markers to trust on $repo#$pr" \
     "Pass numbering, revision detection and the daily cap all read from the trusted author. Run: gh auth login"
   CTX_MARKERS="$(state_markers "$CTX_PR" "$CTX_REPO" "$CTX_AUTHOR")"
-}
-
-# A sink's own settings, by name or by finding the first one of a usable type.
-run_sink_field() {
-  local want="$1" field="$2" default="$3" name="$1" out
-  if [[ -z "$want" || "$want" == "auto" || "$want" == "none" ]]; then
-    name="$(jq -r 'first((.sinks // {} | to_entries[] | select(.value.type == "github_issue") | .key)) // empty' <<<"$CFG_MERGED")"
-  fi
-  [[ -n "$name" ]] || { printf '%s' "$default"; return 0; }
-  out="$(jq -r --arg n "$name" --arg f "$field" '
-    (.sinks[$n][$f]) as $v
-    | if $v == null then ""
-      elif ($v | type) == "array" then ($v | join(" "))
-      else ($v | tostring) end' <<<"$CFG_MERGED")"
-  if [[ -n "$out" ]]; then printf '%s' "$out"; else printf '%s' "$default"; fi
 }
 
 # Labels are load-bearing for the event chain and cosmetic without it, so the
@@ -737,7 +723,7 @@ Reading the diff and any earlier review threads. This comment becomes the pass s
     review_md="$tmp/review.md"; envelope_file="$tmp/envelope"
 
     exclude=""
-    [[ "$CTX_SINK" == file\ * ]] && exclude="^(${CTX_SINK#file }|\\.revloop/)"
+    [[ "$CTX_BACKLOG" == "repository" ]] && exclude="^(${CTX_BACKLOG_PATH}|\\.revloop/)"
     gh_pr_diff "$CTX_REPO" "$CTX_PR" "$exclude" >"$diff_file"
 
     cfg_show_at_base "$CTX_BASE_SHA" "REVIEW.md" >"$review_md" 2>/dev/null || : >"$review_md"
@@ -1279,13 +1265,13 @@ Verifying each finding against the codebase. This comment becomes the pass summa
     tmp="$(mktemp -d)"
     diff_file="$tmp/diff"; prompt_file="$tmp/prompt"; envelope_file="$tmp/envelope"
     exclude=""
-    [[ "$CTX_SINK" == file\ * ]] && exclude="^(${CTX_SINK#file }|\\.revloop/)"
+    [[ "$CTX_BACKLOG" == "repository" ]] && exclude="^(${CTX_BACKLOG_PATH}|\\.revloop/)"
     gh_pr_diff "$CTX_REPO" "$CTX_PR" "$exclude" >"$diff_file"
 
     meta="$(jq -cn --arg repo "$CTX_REPO" --argjson pr "$CTX_PR" --argjson pass "$pass" \
       --argjson max "$CTX_MAX_PASSES_PER_CYCLE" --arg sha "$CTX_HEAD_SHA" --arg fa "$CTX_MIN_FIX_SEVERITY" \
-      --arg sink "$CTX_SINK" \
-      '{repo:$repo, pr:$pr, pass:$pass, max_passes_per_cycle:$max, head_sha:$sha, min_fix_severity:$fa, sink:$sink}')"
+      --arg backlog "$CTX_BACKLOG" \
+      '{repo:$repo, pr:$pr, pass:$pass, max_passes_per_cycle:$max, head_sha:$sha, min_fix_severity:$fa, backlog:$backlog}')"
 
     prompt_resolve "$prompt_file" "$ROOT/skills/pr-resolve/SKILL.md" "$diff_file" \
       "$meta" "$enriched" "$threads" "$candidates"
@@ -1351,16 +1337,16 @@ Dispositions recorded; committing and replying now.$(state_marker_encode "$(jq -
   # --- pass one: persist deferred work, before anything is committed -------
   #
   # Every record a deferral produces is written here, and the commit follows it.
-  # The ordering is load-bearing for the file sink and irrelevant to the issue
-  # one: a file sink writes into the working tree, so a commit that ran first
+  # The ordering is load-bearing for the repository backlog and irrelevant to the
+  # GitHub issues destination: a repository write in the working tree after a commit
   # left that write uncommitted, and on an ephemeral runner it died with the
   # container — while its thread resolved, because `tracked` was non-empty. The
-  # issue sink is indifferent, since it writes to GitHub rather than the tree.
+  # GitHub issues are indifferent, since they are written outside the tree.
   #
   # Replies and resolution are pass two, below the commit. Persist still happens
   # before resolve, which is the invariant that matters: a thread resolved
   # against a write that did not land is exactly how work disappears.
-  local filed=0 matched=0 deferred_lines="" sink_wrote=0
+  local filed=0 matched=0 deferred_lines="" backlog_wrote=0
   local n i d id disp tracked dup existing
   n="$(jq 'length' <<<"$dispositions")"
   for (( i = 0; i < n; i++ )); do
@@ -1369,11 +1355,11 @@ Dispositions recorded; committing and replying now.$(state_marker_encode "$(jq -
     [[ "$(jq -r .disposition <<<"$d")" == "deferred" ]] || continue
 
     tracked=""; existing=""
-    if [[ "$CTX_SINK" == "issues" ]]; then
+    if [[ "$CTX_BACKLOG" == "github_issues" ]]; then
       # Tier 1: exact, against revloop's own issues. Deterministic, no model,
       # no false positives — this is what stops three pull requests touching
       # one legacy bug filing it three times.
-      existing="$(gh_issue_by_finding "$CTX_REPO" "$CTX_IDENTITY_LABEL" "$id")" || existing=""
+      existing="$(gh_issue_by_finding "$CTX_REPO" "$CTX_TRACKING_LABEL" "$id")" || existing=""
     fi
     dup="$(jq -r '.duplicate_of // ""' <<<"$d")"
     if [[ -n "$existing" ]]; then
@@ -1386,7 +1372,7 @@ Dispositions recorded; committing and replying now.$(state_marker_encode "$(jq -
       matched=$(( matched + 1 ))
       deferred_lines="$deferred_lines
 - \`$id\` — matches the existing issue #$dup, so nothing was filed"
-      if [[ "$(run_sink_field "$(cfg_get '.persist.defects')" comment_on_match false)" == "true" ]]; then
+      if [[ "$(jq -r '.backlog.github_issues.comment_on_existing_issue' <<<"$CFG_MERGED")" == "true" ]]; then
         gh_issue_comment "$CTX_REPO" "$dup" \
           "Seen again while reviewing $CTX_REPO#$CTX_PR (revloop pass $pass).$(state_finding_marker "$id" "$pass" resolve)"
       fi
@@ -1394,8 +1380,8 @@ Dispositions recorded; committing and replying now.$(state_marker_encode "$(jq -
       tracked="$(_resolve_persist "$d" "$id" "$pass")" || tracked=""
       if [[ -n "$tracked" ]]; then
         filed=$(( filed + 1 ))
-        # Only a file sink puts something in the tree for the commit to carry.
-        [[ "$CTX_SINK" == file\ * ]] && sink_wrote=1
+        # Only a repository backlog puts something in the tree for the commit to carry.
+        [[ "$CTX_BACKLOG" == "repository" ]] && backlog_wrote=1
         deferred_lines="$deferred_lines
 - \`$id\` — filed as ${tracked/#"$CTX_REPO"/}"
       else
@@ -1415,14 +1401,14 @@ Dispositions recorded; committing and replying now.$(state_marker_encode "$(jq -
   # --- the commit, then its SHA -------------------------------------------
   #
   # Guarded on more than fixes. A pass that defers everything and fixes nothing
-  # still has a file sink's write sitting in the tree, and a `fixed_count > 0`
+  # still has a repository backlog write sitting in the tree, and a `fixed_count > 0`
   # test left exactly that case uncommitted.
   local commit_sha fixed_count commit_msg
   commit_sha="$(jq -r '.commit_sha // ""' <<<"$marker")"
   fixed_count="$(jq '[.[] | select(.disposition == "fixed")] | length' <<<"$dispositions")"
   if [[ -n "$commit_sha" && "$commit_sha" != "null" ]]; then
     ui_say "The previous attempt already pushed ${commit_sha:0:7}, so the fix step is skipped."
-  elif (( fixed_count > 0 || sink_wrote )); then
+  elif (( fixed_count > 0 || backlog_wrote )); then
     commit_sha=""
     if (( fixed_count > 0 )); then
       commit_msg="fix: resolve revloop review findings (pass $pass)
@@ -1444,7 +1430,7 @@ $(jq -r '[.[] | select(.disposition == "deferred") | "- " + .finding_id] | join(
 
 Pushed \`${commit_sha:0:7}\`; replying to each thread now.$(state_marker_encode "$(jq -c 'del(.comment_id)' <<<"$marker")")"
     elif (( fixed_count > 0 )); then
-      # Only meaningful when fixes were claimed. A deferral-only pass whose sink
+      # Only meaningful when fixes were claimed. A deferral-only pass whose backlog
       # write produced no diff is not a broken promise about the code.
       ui_warn "the resolver reported $fixed_count fix(es) but changed no files" \
         "The replies below will claim a fix that is not in the diff. Treat those dispositions as unverified and read the thread before merging."
@@ -1598,7 +1584,7 @@ Pushed \`${commit_sha:0:7}\`; replying to each thread now.$(state_marker_encode 
 # set that reads as "nothing matched" is how a duplicate gets filed.
 _resolve_dedupe_candidates() {
   local findings="$1" out="{}" searched=0 limit=10 n i f cand
-  [[ "$CTX_SINK" == "issues" ]] || { printf '%s' "$out"; return 0; }
+  [[ "$CTX_BACKLOG" == "github_issues" ]] || { printf '%s' "$out"; return 0; }
 
   n="$(jq 'length' <<<"$findings")"
   for (( i = 0; i < n; i++ )); do
@@ -1616,7 +1602,7 @@ _resolve_dedupe_candidates() {
   printf '%s' "$out"
 }
 
-# File one deferred defect to the resolved sink. Prints where it landed, or
+# File one deferred defect to the resolved backlog. Prints where it landed, or
 # nothing when the write did not happen.
 _resolve_persist() {
   local d="$1" id="$2" pass="$3" persist title body dir target n
@@ -1629,15 +1615,15 @@ _resolve_persist() {
 ---
 Found by revloop while reviewing $CTX_REPO#$CTX_PR (pass $pass). Verified against the codebase before filing: one model raised it, a second confirmed it is real, and it was left out of that pull request deliberately rather than missed.$(state_finding_marker "$id" "$pass" resolve)"
 
-  case "$CTX_SINK" in
-    issues)
-      n="$(gh_issue_create "$CTX_REPO" "$title" "$body" "$CTX_IDENTITY_LABEL $CTX_SINK_LABELS")" || return 1
+  case "$CTX_BACKLOG" in
+    github_issues)
+      n="$(gh_issue_create "$CTX_REPO" "$title" "$body" "$CTX_TRACKING_LABEL $CTX_BACKLOG_LABELS")" || return 1
       [[ -n "$n" ]] || return 1
       printf '%s#%s' "$CTX_REPO" "$n" ;;
-    file\ *)
-      dir="${CTX_SINK#file }"
+    repository)
+      dir="$CTX_BACKLOG_PATH"
       cfg_assert_path_inside_repo "$dir"
-      if [[ "$dir" == *.md ]]; then
+      if [[ "$CTX_BACKLOG_LAYOUT" == "file" ]]; then
         # An existing markdown convention is appended to, because that is what
         # the convention is.
         printf '\n## %s\n\n%s\n' "$title" "$body" >>"$dir"
@@ -1936,7 +1922,7 @@ cmd_status() {
   else
     ui_line "passes     $pass of $CTX_MAX_PASSES_PER_CYCLE"
   fi
-  ui_line "deferred   $CTX_SINK"
+  ui_line "deferred   $CTX_BACKLOG${CTX_BACKLOG_LAYOUT:+ $CTX_BACKLOG_LAYOUT}${CTX_BACKLOG_PATH:+ $CTX_BACKLOG_PATH}"
 
   # Omitted entirely rather than printed with nothing under it. A heading with an
   # empty body reads as a bug, and the `passes` line above already says none yet.
@@ -2387,7 +2373,7 @@ To look yourself: \`revloop status --pr $pr\`. To restart it, remove \`revloop/h
 # so at most once per pull request. Suppressible by flag and by config.
 run_upgrade_nudge() {
   [[ "${REVLOOP_NO_TIPS:-0}" == "1" ]] && return 0
-  [[ "$(cfg_get '.enable_automation_hint')" == "false" ]] && return 0
+  [[ "$(jq -r '.enable_automation_hint' <<<"$CFG_MERGED")" == "false" ]] && return 0
   [[ -d .github/workflows ]] || return 0
   compgen -G ".github/workflows/revloop-*.yml" >/dev/null 2>&1 && return 0
 

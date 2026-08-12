@@ -34,8 +34,8 @@ reviewer:
 resolver:
   harness: claude
   model: resolver-model
-persist:
-  defects: none
+backlog:
+  destination: none
 EOF
 }
 

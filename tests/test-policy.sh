@@ -58,9 +58,9 @@ cycle_driver() {
   '
 }
 
-# `auto` is what makes the three-tier sink discovery run at all; a config that
+# `auto` is what makes the three-tier backlog discovery run at all; a config that
 # already names `none` short-circuits before the Project Map is ever read.
-auto_sink_config() { fixture_default_config | sed 's/^  defects: none$/  defects: auto/'; }
+auto_sink_config() { fixture_default_config | sed 's/^  destination: none$/  destination: auto/'; }
 
 # --- policy comes from the base revision, never the head -------------------
 #
@@ -74,8 +74,8 @@ policy:
 reviewer:
   harness: claude
   model: hijacked-model
-persist:
-  defects: issues'
+backlog:
+  destination: github_issues'
 routes_baseline "$(printf '[]' | payload)"
 route 'api --method POST repos/*/issues/42/comments*' '{"id":9001}'
 no_threads
@@ -129,7 +129,7 @@ git push -qf origin feature
 FIX_BASE="$(git rev-parse main)"; FIX_HEAD="$(git rev-parse HEAD)"
 routes_baseline "$(printf '[]' | payload)"
 out="$("$REVLOOP" status --pr 42 2>&1)"
-has "the base revision's Project Map does take effect" "$out" "deferred   issues"
+has "the base revision's Project Map does take effect" "$out" "deferred   github_issues"
 
 # --- marker trust scales with autonomy ----------------------------------
 automated_config() {
@@ -317,6 +317,16 @@ hasnt "--no-tips silences it"                  "$out" "would run this"
 printf 'name: revloop review\n' >.github/workflows/revloop-review.yml
 out="$("$REVLOOP" review --pr 42 2>&1)"
 hasnt "and it stays quiet once revloop workflows exist" "$out" "would run this"
+
+hint_off="$(fixture_default_config)
+enable_automation_hint: false"
+fixture_repo "$hint_off"; stub_reset
+mkdir -p .github/workflows && printf 'name: ci\n' >.github/workflows/ci.yml
+routes_baseline "$(printf '[]' | payload)"
+route 'api --method POST repos/*/issues/42/comments*' '{"id":9001}'
+no_threads
+out="$("$REVLOOP" review --pr 42 2>&1)"
+hasnt "the config can disable the automation hint" "$out" "would run this"
 
 fixture_repo; stub_reset      # no .github/workflows at all
 routes_baseline "$(printf '[]' | payload)"

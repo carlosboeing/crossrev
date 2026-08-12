@@ -18,8 +18,8 @@ INIT_OWNER_TYPE="user"
 
 # Everything the plan needs, resolved before anything is printed.
 INIT_SOURCE_REPO=""; INIT_SOURCE_SHA=""; INIT_SOURCE_REF=""
-INIT_PASS_LABELS=""; INIT_FIXED_LABELS=""; INIT_SINK_LABELS=""
-INIT_SINK_RESOLVED=""; INIT_SINK_ORIGIN=""
+INIT_PASS_LABELS=""; INIT_FIXED_LABELS=""; INIT_BACKLOG_LABELS=""
+INIT_BACKLOG_RESOLVED=""; INIT_BACKLOG_ORIGIN=""
 INIT_WRITES=""; INIT_OVERWRITES=""
 INIT_RUNNER=""
 INIT_NEEDS_REFRESHER=0
@@ -27,9 +27,9 @@ INIT_WORKFLOWS=""
 INIT_SECRETS=""
 INIT_SECRET_INVENTORY=""
 
-# Labels filed against an issue sink, which are not loop state and do not follow
+# Labels filed against the GitHub issues destination, which are not loop state and do not follow
 # the loop's colour scheme. The loop's own six come from legs_label_colour.
-readonly INIT_SINK_LABEL_COLOUR="d4c5f9"
+readonly INIT_BACKLOG_LABEL_COLOUR="d4c5f9"
 
 cmd_init() {
   local yes=0
@@ -111,23 +111,23 @@ _init_resolve() {
   # `auto` is a bootstrap convenience, not a runtime mode: resolve it once here
   # and write the concrete answer into the generated config, so the committed file
   # states plainly where deferred work goes.
-  local want; want="$(cfg_get '.persist.defects')"
-  INIT_SINK_RESOLVED="$(cfg_resolve_sink "" "$want")"
+  local want; want="$(cfg_get '.backlog.destination')"
+  INIT_BACKLOG_RESOLVED="$(cfg_resolve_backlog "" "$want")"
   if [[ "$want" == "auto" ]]; then
     if cfg_project_map_tracker "" >/dev/null; then
-      INIT_SINK_ORIGIN="resolved from the ## Project Map section's Tracker field"
+      INIT_BACKLOG_ORIGIN="resolved from the ## Project Map section's Tracker field"
     else
-      INIT_SINK_ORIGIN="resolved by sniffing for a convention already in use"
+      INIT_BACKLOG_ORIGIN="resolved by sniffing for a convention already in use"
     fi
   else
-    INIT_SINK_ORIGIN="named in the repository config as '$want'"
+    INIT_BACKLOG_ORIGIN="named in the repository config as '$want'"
   fi
 
-  if [[ "$INIT_SINK_RESOLVED" == "issues" ]]; then
-    local identity extra
-    identity="$(run_sink_field "$want" identity_label "revloop-review")"
-    extra="$(run_sink_field "$want" labels "")"
-    INIT_SINK_LABELS="$(printf '%s %s' "$identity" "$extra" | tr -s ' ' | sed 's/ *$//')"
+  if [[ "$INIT_BACKLOG_RESOLVED" == "github_issues" ]]; then
+    local tracking extra
+    tracking="$(cfg_get '.backlog.github_issues.tracking_label')"
+    extra="$(jq -r '.backlog.github_issues.labels | join(" ")' <<<"$CFG_MERGED")"
+    INIT_BACKLOG_LABELS="$(printf '%s %s' "$tracking" "$extra" | tr -s ' ' | sed 's/ *$//')"
   fi
 
   # Where the workflows fetch revloop from, pinned by SHA. A tag only looks
@@ -309,17 +309,17 @@ _init_print_plan() {
   fixed_count="$(wc -w <<<"$INIT_FIXED_LABELS" | tr -d ' ')"
   ui_line "labels            $(( pass_count + fixed_count )) for the loop:"
   _init_label_inventory "$INIT_PASS_LABELS $INIT_FIXED_LABELS"
-  if [[ -n "$INIT_SINK_LABELS" ]]; then
-    ui_line "                  $(wc -w <<<"$INIT_SINK_LABELS" | tr -d ' ') for filed issues:"
-    _init_label_inventory "$INIT_SINK_LABELS" keep
+  if [[ -n "$INIT_BACKLOG_LABELS" ]]; then
+    ui_line "                  $(wc -w <<<"$INIT_BACKLOG_LABELS" | tr -d ' ') for filed issues:"
+    _init_label_inventory "$INIT_BACKLOG_LABELS" keep
   fi
   ui_line "                  init creates these up front so their colours and descriptions"
   ui_line "                  carry the loop's state; GitHub would otherwise create a missing"
   ui_line "                  label later with default metadata"
 
   ui_line ""
-  ui_line "deferred work     $INIT_SINK_RESOLVED"
-  ui_line "                  $INIT_SINK_ORIGIN"
+  ui_line "deferred work     $INIT_BACKLOG_RESOLVED"
+  ui_line "                  $INIT_BACKLOG_ORIGIN"
 
   ui_line ""
   local f first=1
@@ -342,7 +342,7 @@ _init_print_plan() {
 }
 
 # $1 is the label list. $2 is `keep` for a set init creates but never repaints,
-# which is the issue sink's: those labels are the repository's own taxonomy, and
+# which is the GitHub issues destination's: those labels are the repository's own taxonomy, and
 # a tool that recoloured somebody's `bug` label because it minted one once would
 # be overstepping. The loop's own six are the other case, and they default.
 #
@@ -440,21 +440,21 @@ _init_execute() {
   ui_ok "created $created and found $existed already on $INIT_REPO for the loop"
   (( recoloured > 0 )) && ui_ok "recoloured $recoloured that were already there, so the label row carries state at a glance"
 
-  if [[ -n "$INIT_SINK_LABELS" ]]; then
+  if [[ -n "$INIT_BACKLOG_LABELS" ]]; then
     local can_create missing=""
-    can_create="$(run_sink_field "$(cfg_get '.persist.defects')" create_labels true)"
+    can_create="$(jq -r '.backlog.github_issues.create_missing_labels' <<<"$CFG_MERGED")"
     created=0; existed=0
-    for l in $INIT_SINK_LABELS; do
+    for l in $INIT_BACKLOG_LABELS; do
       if gh_label_exists "$INIT_REPO" "$l"; then existed=$(( existed + 1 )); continue; fi
       if [[ "$can_create" == "false" ]]; then missing="$missing $l"; continue; fi
-      gh_label_ensure "$INIT_REPO" "$l" "$INIT_SINK_LABEL_COLOUR" "filed by revloop" >/dev/null
+      gh_label_ensure "$INIT_REPO" "$l" "$INIT_BACKLOG_LABEL_COLOUR" "filed by revloop" >/dev/null
       created=$(( created + 1 ))
     done
     if [[ -n "$missing" ]]; then
       # A repository that governs its own label set is one where inventing labels
       # is worse than stopping.
-      ui_die "the issue sink needs these labels and create_labels is false:$missing" \
-        "The repository asked revloop to use existing labels only. Create them by hand, or set create_labels: true in the sink."
+      ui_die "the GitHub issues destination needs these labels and create_missing_labels is false:$missing" \
+        "The repository asked revloop to use existing labels only. Create them by hand, or set backlog.github_issues.create_missing_labels: true."
     fi
     ui_ok "created $created and found $existed already for filed issues"
   fi
@@ -565,7 +565,7 @@ _init_execute() {
     ui_say "left .github/revloop.yml alone — --upgrade regenerates workflows, not policy"
   else
     _init_write_config
-    ui_ok "wrote .github/revloop.yml, with deferred work resolved to $INIT_SINK_RESOLVED"
+    ui_ok "wrote .github/revloop.yml, with deferred work resolved to $INIT_BACKLOG_RESOLVED"
   fi
 
   # --- what is not done ----------------------------------------------------
@@ -825,23 +825,25 @@ _init_secret_set() {
 
 # The generated config states plainly where deferred work goes, because `auto` is
 # a bootstrap convenience rather than a runtime mode. Written with yq rather than
-# sed, so a file sink adds a key to the existing `sinks` block instead of a second
-# `sinks:` mapping alongside it.
+# sed, so the resolved layout and path update the existing `backlog` block rather
+# than adding a second mapping alongside it.
 _init_write_config() {
-  local resolved="$INIT_SINK_RESOLVED" persist="none" path=""
+  local resolved="$INIT_BACKLOG_RESOLVED" destination="none" layout="" path=""
   case "$resolved" in
-    issues)  persist="issues" ;;
-    file\ *) persist="backlog"; path="${resolved#file }" ;;
-    *)       persist="none" ;;
+    github_issues) destination="github_issues" ;;
+    repository\ *)
+      destination="repository"
+      read -r _ layout path <<<"$resolved" ;;
+    *) destination="none" ;;
   esac
 
   local expr
   if [[ -n "$path" ]]; then
-    expr=".persist.defects = \"backlog\"
-        | .sinks.backlog.type = \"file\"
-        | .sinks.backlog.path = \"$path\""
+    expr=".backlog.destination = \"repository\"
+        | .backlog.repository.layout = \"$layout\"
+        | .backlog.repository.path = \"$path\""
   else
-    expr=".persist.defects = \"$persist\""
+    expr=".backlog.destination = \"$destination\""
   fi
 
   yq "$expr$(_init_policy_pairing)" "$ROOT/templates/revloop.yml" >.github/revloop.yml
@@ -857,7 +859,7 @@ _init_write_config() {
 # loop would then read that policy from the base revision and run the leg nobody
 # had provisioned.
 #
-# Same rule `persist.defects: auto` already follows — init resolves the answer
+# Same rule `backlog.destination: auto` follows — init resolves the answer
 # and the committed config states it, rather than leaving a bootstrap default in
 # a file the loop reads at runtime.
 #

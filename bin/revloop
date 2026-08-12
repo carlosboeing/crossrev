@@ -79,7 +79,7 @@ usage() {
     status --pr <n>          Read the loop's state off the pull request
     init                     Set up automated mode: App, secrets, labels, workflows
     watchdog                 Find pull requests stuck waiting on a leg, and retry once
-    config show|sink         The merged config, and where deferred work goes
+    config show|backlog      The merged config, and where deferred work goes
     auth status              Which Apps are configured, and where installed
     auth login               Register a GitHub App and install it
     auth install             Install an already-registered App somewhere
@@ -140,8 +140,8 @@ main() {
       cfg_load ""
       case "${1:-show}" in
         show)  jq . <<<"$CFG_MERGED" ;;
-        sink)  ui_say "deferred work would go to: $(cfg_resolve_sink "" "$(cfg_get '.persist.defects')")" ;;
-        *) ui_die "unknown config command: $1" "Try: revloop config show | sink" ;;
+        backlog) ui_say "deferred work would go to: $(cfg_resolve_backlog "" "$(cfg_get '.backlog.destination')")" ;;
+        *) ui_die "unknown config command: $1" "Try: revloop config show | backlog" ;;
       esac ;;
 
     doctor)

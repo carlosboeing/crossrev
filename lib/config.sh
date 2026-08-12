@@ -1,5 +1,5 @@
 # shellcheck shell=bash
-# lib/config.sh — two-layer configuration, endpoint and sink resolution.
+# lib/config.sh — two-layer configuration, endpoint and backlog resolution.
 #
 # Two files, because endpoints and policy live at different layers. Policy is
 # repo-specific and belongs in the repo. Endpoint URLs are cross-project, and
@@ -68,8 +68,16 @@ _cfg_defaults() {
       max_prs_per_day: 25
     },
     endpoints: {},
-    sinks: {},
-    persist: { defects: "auto", escalated: "none" },
+    backlog: {
+      destination: "auto",
+      github_issues: {
+        labels: [],
+        tracking_label: "revloop-review",
+        create_missing_labels: true,
+        comment_on_existing_issue: false
+      },
+      repository: { layout: "folder", path: null }
+    },
     reviewer: { harness: "codex",  model: null, effort: null, endpoint: null },
     resolver: { harness: "claude", model: null, effort: null, endpoint: null },
     enable_automation_hint: true
@@ -178,7 +186,7 @@ cfg_endpoint() {
 #
 # Inventing a folder in someone else's repository is the wrong default, so
 # revloop does not. Three tiers, first hit wins, and the last one only fires
-# when a file sink was explicitly asked for.
+# when a repository backlog was explicitly asked for.
 
 # Read the Tracker field out of a `## Project Map` section.
 #
@@ -212,28 +220,38 @@ cfg_project_map_tracker() {
   return 1
 }
 
-# Resolve `persist.defects: auto` to a concrete destination.
+# Resolve `backlog.destination` to a concrete destination.
 #
-# Prints "<kind> <detail>": "issues", "file <path>", or "none".
-cfg_resolve_sink() {
+# Prints "github_issues", "repository <layout> <path>", or "none".
+cfg_resolve_backlog() {
   local base_sha="${1:-}" want="${2:-auto}"
 
   case "$want" in
     none|"") printf 'none'; return 0 ;;
+    github_issues) printf 'github_issues'; return 0 ;;
+    repository)
+      local layout path layout_stated=false
+      layout="$(jq -r '.backlog.repository.layout // "folder"' <<<"$CFG_MERGED")"
+      path="$(jq -r '.backlog.repository.path // empty' <<<"$CFG_MERGED")"
+      case "$layout" in
+        folder|file) : ;;
+        *) ui_die "backlog.repository.layout is '$layout', which is not folder or file" \
+             "Set it to folder or file in the repository config." ;;
+      esac
+      if [[ -n "$path" ]]; then
+        printf 'repository %s %s' "$layout" "$path"
+        return 0
+      fi
+      [[ "$(jq -r '.backlog.repository | has("layout")' <<<"$CFG_REPO")" == "true" ]] && layout_stated=true
+      if [[ "$layout_stated" == "true" ]]; then
+        _cfg_sniff_repository_backlog "$base_sha" explicit "$layout"
+      else
+        _cfg_sniff_repository_backlog "$base_sha" explicit any
+      fi
+      return 0 ;;
     auto) : ;;
-    *)
-      local kind; kind="$(jq -r --arg n "$want" '.sinks[$n].type // empty' <<<"$CFG_MERGED")"
-      [[ -n "$kind" ]] || ui_die \
-        "persist names the sink '$want', which is defined nowhere" \
-        "Define it under sinks: in the repository config, or set persist.defects to none."
-      case "$kind" in
-        github_issue) printf 'issues'; return 0 ;;
-        file)
-          local p; p="$(jq -r --arg n "$want" '.sinks[$n].path // "auto"' <<<"$CFG_MERGED")"
-          [[ "$p" == "auto" ]] && { _cfg_sniff_file_sink "$base_sha" explicit; return 0; }
-          printf 'file %s' "$p"; return 0 ;;
-        *) ui_die "the sink '$want' has an unknown type '$kind'" "Supported types are github_issue and file." ;;
-      esac ;;
+    *) ui_die "backlog.destination is '$want', which revloop does not recognise" \
+         "Set it to github_issues, repository, none or auto in the repository config." ;;
   esac
 
   # Tier 1 — the repository's own declaration.
@@ -241,25 +259,32 @@ cfg_resolve_sink() {
   if tracker="$(cfg_project_map_tracker "$base_sha")"; then
     case "$(printf '%s' "$tracker" | tr '[:upper:]' '[:lower:]')" in
       none)            printf 'none'; return 0 ;;
-      *github*issue*)  printf 'issues'; return 0 ;;
+      *github*issue*)  printf 'github_issues'; return 0 ;;
       # A URL is a hosted tracker, not a path. It has to be caught before the
       # slash arm below, which would otherwise turn
       # `https://linear.app/acme/team/ENG` into a directory of that name inside
       # the checkout — relative, so the inside-the-repo guard waves it through.
       # Same outcome as a bare `Linear`: somewhere real, nothing to write to.
       http://*|https://*) : ;;
-      */*|*.md)        printf 'file %s' "$tracker"; return 0 ;;
+      */*|*.md)
+        if [[ "$tracker" == *.md ]]; then
+          printf 'repository file %s' "$tracker"
+        else
+          printf 'repository folder %s' "$tracker"
+        fi
+        return 0 ;;
       *)               : ;;  # Linear, Jira and friends: nothing to write to yet
     esac
   fi
 
   # Tiers 2 and 3.
-  _cfg_sniff_file_sink "$base_sha" auto
+  _cfg_sniff_repository_backlog "$base_sha" auto any
 }
 
-# Sniff for a convention already in use. $2 is "explicit" when a file sink was
-# actually asked for, in which case tier 3 applies; "auto" falls to none rather
-# than creating a directory nobody asked for.
+# Sniff for a convention already in use. $2 is "explicit" when a repository
+# destination was asked for, in which case tier 3 applies; "auto" falls to none
+# rather than creating a location nobody asked for. $3 constrains the layout
+# when the repository config stated one explicitly.
 # Does a path exist, in the base revision when there is one, else on disk?
 _cfg_path_exists() {
   local base_sha="$1" path="$2"
@@ -267,20 +292,29 @@ _cfg_path_exists() {
   else [[ -e "$path" ]]; fi
 }
 
-_cfg_sniff_file_sink() {
-  local base_sha="${1:-}" mode="${2:-auto}"
-  if _cfg_path_exists "$base_sha" backlog.config.yml \
-     || _cfg_path_exists "$base_sha" backlog/config.yml \
-     || _cfg_path_exists "$base_sha" .backlog/config.yml; then
-    printf 'file backlog/tasks'; return 0
+_cfg_sniff_repository_backlog() {
+  local base_sha="${1:-}" mode="${2:-auto}" layout="${3:-any}"
+  if [[ "$layout" == "any" || "$layout" == "folder" ]]; then
+    if _cfg_path_exists "$base_sha" backlog.config.yml \
+       || _cfg_path_exists "$base_sha" backlog/config.yml \
+       || _cfg_path_exists "$base_sha" .backlog/config.yml; then
+      printf 'repository folder backlog/tasks'; return 0
+    fi
   fi
-  if _cfg_path_exists "$base_sha" TODO.md;         then printf 'file TODO.md';         return 0; fi
-  if _cfg_path_exists "$base_sha" docs/ROADMAP.md; then printf 'file docs/ROADMAP.md'; return 0; fi
-  if [[ "$mode" == "explicit" ]]; then printf 'file .revloop/backlog'; return 0; fi
+  if [[ "$layout" == "any" || "$layout" == "file" ]]; then
+    if _cfg_path_exists "$base_sha" BACKLOG.md; then printf 'repository file BACKLOG.md'; return 0; fi
+    if _cfg_path_exists "$base_sha" TODO.md;    then printf 'repository file TODO.md';    return 0; fi
+  fi
+  if [[ "$mode" == "explicit" ]]; then
+    if [[ "$layout" == "file" ]]; then printf 'repository file .revloop/backlog.md'
+    else printf 'repository folder .revloop/backlog'
+    fi
+    return 0
+  fi
   printf 'none'
 }
 
-# A sink path is a write target, so it is bounded rather than trusted. Even read
+# A backlog path is a write target, so it is bounded rather than trusted. Even read
 # from the base revision it is a string that ends in a file write, so a `../`
 # sequence or an absolute path must fail loudly instead of landing somewhere
 # surprising. Same reasoning as the branch guard: the check is cheap and the
@@ -290,12 +324,12 @@ cfg_assert_path_inside_repo() {
   root="$(git rev-parse --show-toplevel 2>/dev/null)" || ui_die \
     "not inside a git repository" "Run revloop from a checkout of the repository under review."
   [[ "$path" != /* ]] || ui_die \
-    "the sink path '$path' is absolute" "Sink paths are repository-relative, so that revloop cannot write outside the checkout."
+    "the backlog path '$path' is absolute" "Backlog paths are repository-relative, so that revloop cannot write outside the checkout."
   resolved="$(cd "$root" && python3 -c 'import os,sys; print(os.path.normpath(os.path.join(os.getcwd(), sys.argv[1])))' "$path" 2>/dev/null)" \
     || resolved="$root/$path"
   case "$resolved" in
     "$root"|"$root"/*) return 0 ;;
-    *) ui_die "the sink path '$path' resolves outside the repository" \
-         "It resolves to $resolved. Sink paths must stay inside the checkout." ;;
+    *) ui_die "the backlog path '$path' resolves outside the repository" \
+         "It resolves to $resolved. Backlog paths must stay inside the checkout." ;;
   esac
 }

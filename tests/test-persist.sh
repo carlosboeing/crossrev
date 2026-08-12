@@ -30,16 +30,13 @@ reviewer:
 resolver:
   harness: claude
   model: resolver-model
-sinks:
-  issues:
-    type: github_issue
-    identity_label: revloop-review
+backlog:
+  destination: github_issues
+  github_issues:
+    tracking_label: revloop-review
     labels: [bug]
-    create_labels: true
-    comment_on_match: false
-persist:
-  defects: issues
-  escalated: none
+    create_missing_labels: true
+    comment_on_existing_issue: false
 EOF
 }
 
@@ -94,13 +91,11 @@ reviewer:
 resolver:
   harness: claude
   model: resolver-model
-sinks:
-  backlog:
-    type: file
+backlog:
+  destination: repository
+  repository:
+    layout: folder
     path: .revloop/backlog
-persist:
-  defects: backlog
-  escalated: none
 EOF
 }
 
@@ -193,7 +188,7 @@ has "the prompt marks it as one the resolver may not fix" \
   "$(cat "$PROMPT_LOG")" "May fix: no"
 hasnt "a high-severity pre-existing finding is not in the commit" \
   "$(git log -1 --format=%B)" "$ID_DEFER"
-has  "it is filed to the sink instead"                "$(calls)" "Legacy export is untyped"
+has  "it is filed to the backlog instead"             "$(calls)" "Legacy export is untyped"
 
 # The resolver is blind to the quarantined paths while the diff still carries
 # their changes, so the reviewer can raise findings it cannot act on. The rule
@@ -204,9 +199,9 @@ has "and names them rather than describing them" \
   "$(cat "$PROMPT_LOG")" "CLAUDE.md, AGENTS.md, GEMINI.md"
 has "and says what to return for one"                 "$(cat "$PROMPT_LOG")" "quarantined and the finding was reported rather than verified"
 
-# --- a file sink's write has to be inside the commit ----------------------
+# --- a repository backlog write has to be inside the commit ---------------
 #
-# The issue sink writes to GitHub, so ordering cannot hurt it. A file sink writes
+# The GitHub issues destination writes outside the tree, so ordering cannot hurt it. A repository backlog writes
 # into the working tree, and a commit that ran first left that write behind: on
 # an ephemeral runner it died with the container while its thread resolved,
 # because `tracked` was non-empty. That is the "work disappears" failure
@@ -218,9 +213,9 @@ REVLOOP_RESOLVE_PAYLOAD="$(resolve_payload | payload)"; export REVLOOP_RESOLVE_P
 REVLOOP_RESOLVE_EDIT="$(edit_script)"; export REVLOOP_RESOLVE_EDIT
 out="$("$REVLOOP" resolve --pr 42 2>&1)"; rc=$?
 
-is  "the file-sink leg exits clean"                   "$rc" "0"
-has "the deferral is recorded to the file sink"       "$out" "filed 1 issue(s) for deferred work"
-is  "the sink file is in the commit, not just the tree" \
+is  "the repository-backlog leg exits clean"          "$rc" "0"
+has "the deferral is recorded to the repository backlog" "$out" "filed 1 issue(s) for deferred work"
+is  "the backlog file is in the commit, not just the tree" \
   "$(git show --name-only --format= HEAD | grep -c '^\.revloop/backlog/')" "1"
 is  "so nothing of it is left behind in the tree" \
   "$(git status --porcelain -- .revloop | wc -l | tr -d ' ')" "0"
@@ -236,7 +231,7 @@ REVLOOP_RESOLVE_PAYLOAD="$(defer_only_payload | payload)"; export REVLOOP_RESOLV
 out="$("$REVLOOP" resolve --pr 42 2>&1)"; rc=$?
 
 is  "a deferral-only pass exits clean"                "$rc" "0"
-is  "it still commits, because the sink wrote to the tree" \
+is  "it still commits, because the backlog wrote to the tree" \
   "$(git show --name-only --format= HEAD | grep -c '^\.revloop/backlog/')" "1"
 has "and says what the commit is for, not 'fix'"      "$(git log -1 --format=%s)" "chore: record deferred revloop findings"
 hasnt "no fix was claimed, so nothing warns about one" \
@@ -278,14 +273,14 @@ out="$("$REVLOOP" resolve --pr 42 2>&1)"; rc=$?
 is  "a finding already replied to is not replied to twice" \
   "$(count 'pulls/42/comments/5000/replies')" "1"
 
-# --- persist: none files nothing and leaves the thread open ---------------
-fixture_repo; stub_reset      # the default config has persist.defects: none
+# --- destination: none files nothing and leaves the thread open -----------
+fixture_repo; stub_reset      # the default config has backlog.destination: none
 routes_baseline "$(marker_comment 9001 "$(review_marker)" | jq -cs . | payload)"
 routes_resolve
 REVLOOP_RESOLVE_PAYLOAD="$(resolve_payload null no | payload)"; export REVLOOP_RESOLVE_PAYLOAD
 out="$("$REVLOOP" resolve --pr 42 2>&1)"; rc=$?
 
-is  "with no sink the leg still completes"            "$rc" "0"
+is  "with no backlog destination the leg still completes" "$rc" "0"
 is  "nothing is filed anywhere"                       "$(count 'method POST repos/acme/widget/issues -f title=')" "0"
 has "and the summary says the thread stays open"      "$(calls)" "not persisted anywhere"
 is  "only the settled thread is resolved, not the deferred one" \
@@ -335,7 +330,7 @@ has "and the closed candidate was offered for judgement" "$(cat "$PROMPT_LOG")" 
 
 # --- persist before resolve ---------------------------------------------
 #
-# A sink write that fails must leave the thread open and the disposition
+# A backlog write that fails must leave the thread open and the disposition
 # unrecorded, rather than resolving against a write that did not land.
 fixture_repo "$(config_with_issue_sink)"; stub_reset
 routes_baseline "$(marker_comment 9001 "$(review_marker)" | jq -cs . | payload)"

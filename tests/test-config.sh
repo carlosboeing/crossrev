@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 #
-# Config, endpoint and sink-discovery tests.
+# Config, endpoint and backlog-discovery tests.
 #
 # All of this is deterministic logic whose failure is silent: a config layer
 # that quietly loses a value, an endpoint that falls back to the wrong vendor,
-# a sink that writes somewhere nobody asked for. None of it needs a network, a
+# a backlog destination that writes somewhere nobody asked for. None of it needs a network, a
 # harness or a pull request.
 
 set -uo pipefail
@@ -88,37 +88,54 @@ out="$($REVLOOP config show)"
 is "operator endpoint wins for the same name" "$(jq -r '.endpoints.kimi.base_url' <<<"$out")" "http://mine.local/"
 rm -f "$XDG_CONFIG_HOME/revloop/config.yml"
 
-# --- sink discovery --------------------------------------------------------
+# --- backlog discovery -----------------------------------------------------
 d="$(new_repo)"; cd "$d" || exit 1
-is "nothing declared or installed resolves to none" "$($REVLOOP config sink)" "  deferred work would go to: none"
+is "nothing declared or installed resolves to none" "$($REVLOOP config backlog)" "  deferred work would go to: none"
 
 printf '# x\n\n## Project Map\n\n- **Tracker**: GitHub Issues\n' > AGENTS.md
-is "Project Map GitHub Issues routes to the issue sink" "$($REVLOOP config sink)" "  deferred work would go to: issues"
+is "Project Map GitHub Issues routes to GitHub issues" "$($REVLOOP config backlog)" "  deferred work would go to: github_issues"
 
 printf '# x\n\n## Project Map\n\n- **Tracker**: none\n' > AGENTS.md
-is "Project Map none stops probing" "$($REVLOOP config sink)" "  deferred work would go to: none"
+is "Project Map none stops probing" "$($REVLOOP config backlog)" "  deferred work would go to: none"
 
 rm AGENTS.md; touch backlog.config.yml
-is "an installed Backlog.md is used in its own format" "$($REVLOOP config sink)" "  deferred work would go to: file backlog/tasks"
+is "an installed Backlog config uses the folder layout" "$($REVLOOP config backlog)" "  deferred work would go to: repository folder backlog/tasks"
 
-rm backlog.config.yml; touch TODO.md
-is "a root TODO.md is used" "$($REVLOOP config sink)" "  deferred work would go to: file TODO.md"
+rm backlog.config.yml; touch BACKLOG.md
+is "a root BACKLOG.md uses the file layout" "$($REVLOOP config backlog)" "  deferred work would go to: repository file BACKLOG.md"
 
-rm TODO.md; mkdir -p docs; touch docs/ROADMAP.md
-is "docs/ROADMAP.md is the last sniffed convention" "$($REVLOOP config sink)" "  deferred work would go to: file docs/ROADMAP.md"
+rm BACKLOG.md; touch TODO.md
+is "a root TODO.md uses the file layout" "$($REVLOOP config backlog)" "  deferred work would go to: repository file TODO.md"
 
 # Tier 1 beats tier 2: a declaration is not overridden by a sniff.
 printf '# x\n\n## Project Map\n\n- **Tracker**: GitHub Issues\n' > AGENTS.md
-is "a declaration beats a sniffed convention" "$($REVLOOP config sink)" "  deferred work would go to: issues"
+is "a declaration beats a sniffed convention" "$($REVLOOP config backlog)" "  deferred work would go to: github_issues"
 
-# The bare-`none` case above passes with docs/ROADMAP.md absent, so it cannot
+# The bare-`none` case above passes with TODO.md absent, so it cannot
 # catch a gloss being read as part of the value. This one can: a sniffable
 # convention is on disk, so a `none` that fails to match resolves to it instead.
 printf '# x\n\n## Project Map\n\n- **Tracker**: none (ROADMAP.md is the single source of truth for "what next" — no separate tracker)\n' > AGENTS.md
-is "a glossed none still stops probing" "$($REVLOOP config sink)" "  deferred work would go to: none"
+is "a glossed none still stops probing" "$($REVLOOP config backlog)" "  deferred work would go to: none"
 
 printf '# x\n\n## Project Map\n\n- **Tracker**: docs/BACKLOG.md (newest at the top)\n' > AGENTS.md
-is "a glossed path keeps the path and drops the gloss" "$($REVLOOP config sink)" "  deferred work would go to: file docs/BACKLOG.md"
+is "a glossed path keeps the path and infers its layout" "$($REVLOOP config backlog)" "  deferred work would go to: repository file docs/BACKLOG.md"
+
+# A repository key is explicit only when it appears in the repository config,
+# not when it arrives through the merged defaults. A stated layout constrains
+# the candidates rather than reinterpreting a path that belongs to another one.
+d="$(new_repo)"; cd "$d" || exit 1; mkdir -p .github; touch BACKLOG.md
+printf 'version: 1\nbacklog:\n  destination: repository\n' >.github/revloop.yml
+is "with neither repository key stated the sniff decides both" \
+  "$($REVLOOP config backlog)" "  deferred work would go to: repository file BACKLOG.md"
+
+printf 'version: 1\nbacklog:\n  destination: repository\n  repository:\n    layout: folder\n' >.github/revloop.yml
+is "an explicit folder layout skips a file convention" \
+  "$($REVLOOP config backlog)" "  deferred work would go to: repository folder .revloop/backlog"
+
+rm BACKLOG.md; mkdir -p backlog; touch backlog/config.yml
+printf 'version: 1\nbacklog:\n  destination: repository\n  repository:\n    layout: file\n' >.github/revloop.yml
+is "an explicit file layout skips a folder convention" \
+  "$($REVLOOP config backlog)" "  deferred work would go to: repository file .revloop/backlog.md"
 
 printf '\n  %d passed, %d failed\n' "$pass" "$fail"
 (( fail == 0 ))

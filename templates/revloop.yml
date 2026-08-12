@@ -60,20 +60,19 @@ resolver:
   model: claude-opus-5
   effort: high
 
-# Where a finding that is real but not fixed here goes. An unresolved thread on a
-# merged pull request is visible in no GitHub view, so without a sink `deferred`
-# findings leave their threads open instead of resolving into nothing.
-sinks:
-  issues:
-    type: github_issue
-    identity_label: revloop-review   # one flat label on every issue revloop files
-    labels: [bug]                    # yours to override; your taxonomy wins
-    create_labels: true              # false = use existing only, and fail loudly
-    comment_on_match: false          # cross-link from the PR, not onto your issue
-
-persist:
-  defects: issues           # a sink name | none
-  escalated: none           # a decision request, not a defect: a human is already coming
+# A real finding revloop chose not to fix still has to go somewhere, or it disappears when the pull
+# request merges: an unresolved thread on a merged pull request appears in no GitHub view. Each
+# destination's own settings sit under its name.
+backlog:
+  destination: github_issues      # github_issues | repository | none | auto — auto resolves at init
+  github_issues:
+    labels: [bug]                 # added to every issue revloop opens — your taxonomy wins
+    tracking_label: revloop-review    # how revloop recognises its own earlier issues, to avoid duplicates
+    create_missing_labels: true   # false — use only labels that exist, and stop rather than invent one
+    comment_on_existing_issue: false  # true — comment on the match instead of only linking from the pull request
+  repository:
+    layout: folder                # folder | file — folder writes one file per finding and survives concurrent merges; file appends to a list
+    path: backlog/findings        # repository-relative; writing outside the checkout is refused
 
 # Set to false to permanently silence the suggestion that a repository already
 # running Actions could run this loop automatically. `--no-tips` does it per run.
