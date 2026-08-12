@@ -1,0 +1,113 @@
+# shellcheck shell=bash
+# lib/diff.sh — reading a unified diff, for the two questions revloop asks of one.
+#
+# Both questions are about the same thing: which line of which file a given line
+# of the diff is. The review leg needs that answer written down, because a model
+# that has to derive it counts lines under a `@@` header and sometimes counts
+# wrong. The orchestrator needs it again before posting, because GitHub accepts a
+# comment only on a line the diff actually shows, and a finding one line outside
+# a hunk is refused and falls out of the thread it belongs in.
+#
+# So there is one state machine here and two ways out of it, chosen by `mode`.
+# Splitting them into two parsers would mean two places to keep the rule that a
+# bare empty line inside a hunk is context, and the first one to drift silently
+# renumbers everything after it.
+#
+# No GitHub call, no credential, no network. That is what makes the whole thing
+# testable against a fixture, which is where the pull-request-14 case lives.
+
+# The default snap distance, in lines. Three is the number of context lines git
+# puts either side of a change, so it is exactly the margin a miscount lands in:
+# the reviewer read the right hunk and fell off its end. Past that the reviewer
+# meant somewhere else, and moving the comment would anchor it to code the
+# finding never mentions — worse than not anchoring it at all.
+REVLOOP_DIFF_SNAP=3
+
+# _diff_parse <mode> <file> [path] [side] [line] [bound]
+#
+# mode `number`: the diff back with an old/new line-number gutter.
+# mode `anchor`: the line to anchor to, or nothing.
+_diff_parse() {
+  local mode="$1" file="$2" want_path="${3:-}" want_side="${4:-}" want_line="${5:-0}" bound="${6:-0}"
+  [[ -s "$file" ]] || return 0
+  awk -v mode="$mode" -v want_path="$want_path" -v want_side="$want_side" \
+      -v want_line="$want_line" -v bound="$bound" '
+    function keep(kind, o, n, raw) {
+      if (mode != "number") return
+      rows++; k[rows] = kind; ro[rows] = o; rn[rows] = n; rr[rows] = raw
+      if (o != "-" && o + 0 > widest) widest = o + 0
+      if (n != "-" && n + 0 > widest) widest = n + 0
+    }
+    # A candidate is a line this file shows on the side being asked about.
+    function offer(o, n,    v) {
+      if (mode != "anchor") return
+      if (path != want_path && bpath != want_path) return
+      v = (want_side == "LEFT") ? o : n
+      if (v == "-") return
+      d = (v < want_line) ? want_line - v : v - want_line
+      # Ties go to the earlier line. A finding names something at or after the
+      # number the reviewer gave more often than before it, so on a tie the
+      # lower number is the better guess at what they were looking at.
+      if (best == "" || d < bestd || (d == bestd && v < best)) { best = v; bestd = d }
+    }
+
+    /^diff --git / {
+      path = $3; sub(/^a\//, "", path)
+      bpath = $4; sub(/^b\//, "", bpath)
+      in_hunk = 0; keep("H", "-", "-", $0); next
+    }
+    # Hunk counts are omitted when they are 1, so read only up to the comma.
+    /^@@/ {
+      o = substr($2, 2); sub(/,.*/, "", o)
+      n = substr($3, 2); sub(/,.*/, "", n)
+      oldno = o + 0; newno = n + 0
+      in_hunk = 1; keep("H", "-", "-", $0); next
+    }
+    # `--- a/x` and `+++ b/x` reach here only outside a hunk, so a deleted line
+    # whose own text starts with `--` is still read as a deletion.
+    !in_hunk { keep("H", "-", "-", $0); next }
+    # "\ No newline at end of file" annotates the line above and is not one.
+    /^\\/ { keep("H", "-", "-", $0); next }
+
+    substr($0, 1, 1) == "+" { offer("-", newno); keep("B", "-", newno, $0); newno++; next }
+    substr($0, 1, 1) == "-" { offer(oldno, "-"); keep("B", oldno, "-", $0); oldno++; next }
+    # Context, including a blank line that lost its leading space in transit.
+    { offer(oldno, newno); keep("B", oldno, newno, $0); oldno++; newno++ }
+
+    END {
+      if (mode == "anchor") {
+        if (best != "" && bestd <= bound) print best
+        exit
+      }
+      w = length(widest ""); if (w < 4) w = 4
+      fmt = "%" w "s %" w "s |%s\n"
+      for (i = 1; i <= rows; i++) {
+        if (k[i] == "H") print rr[i]; else printf fmt, ro[i], rn[i], rr[i]
+      }
+    }
+  ' "$file"
+}
+
+# diff_number <diff_file>
+#
+# The diff with every hunk line prefixed by its old and its new line number, a
+# dash standing in for the side that does not have one. Headers pass through
+# bare so the gutter reads as a gutter rather than as part of the diff.
+#
+# This is what the review leg is given instead of the raw diff. The number it
+# must put in a finding is now on the line it is looking at, and the dash says
+# which side that line can take a comment on without being told separately.
+diff_number() { _diff_parse number "$1"; }
+
+# diff_anchor <diff_file> <path> <side> <line> [bound]
+#
+# The line to actually post on: the one asked for when the diff shows it, the
+# nearest one it does show when that is within `bound`, and nothing at all when
+# the file is absent from the diff or the miss is too wide to repair.
+#
+# Nothing is a real answer, not a failure. It means the finding has to go
+# somewhere other than a line, and the caller has to say so.
+diff_anchor() {
+  local file="$1" path="$2" side="$3" line="$4" bound="${5:-$REVLOOP_DIFF_SNAP}"
+  _diff_parse anchor "$file" "$path" "$side" "$line" "$bound"
+}

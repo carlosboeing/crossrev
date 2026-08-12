@@ -38,6 +38,8 @@ source "$ROOT/lib/config.sh"
 source "$ROOT/lib/credentials.sh"
 # shellcheck source=lib/sandbox.sh
 source "$ROOT/lib/sandbox.sh"
+# shellcheck source=lib/diff.sh
+source "$ROOT/lib/diff.sh"
 # shellcheck source=lib/state.sh
 source "$ROOT/lib/state.sh"
 # shellcheck source=lib/legs.sh

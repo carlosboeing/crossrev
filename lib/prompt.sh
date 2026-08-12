@@ -28,6 +28,23 @@ review overrides this.
 EOF
 }
 
+# One description of the gutter, given to both legs, because the two have to
+# mean the same thing by a line number for pass 2 to judge pass 1.
+_prompt_gutter_notice() {
+  cat <<'EOF'
+Every line inside a hunk is prefixed with its number in the old file, its number
+in the new file, and a `|`. A dash stands where the line does not exist on that
+side: an added line has no old number, a deleted line has no new number. File
+and hunk headers have no gutter, and their own line numbers are the summary the
+gutter replaces.
+
+The gutter is also what `side` means. A line can only take a comment on a side
+where it has a number — `RIGHT` reads the second column, `LEFT` the first — so a
+line showing a dash on one side cannot be commented on that side.
+
+EOF
+}
+
 # prompt_review <out_file> <skill_file> <diff_file> <meta_json> <prior_json> <threads_json> [review_md_file]
 prompt_review() {
   local out="$1" skill="$2" diff="$3" meta="$4" prior="$5" threads="$6" review_md="${7:-}"
@@ -83,7 +100,9 @@ prompt_review() {
     fi
 
     printf '## The diff under review\n\n'
-    printf '````diff\n'; cat "$diff"; printf '\n````\n\n'
+    _prompt_gutter_notice
+    printf 'Copy a finding'"'"'s `line` out of this gutter. Do not count lines under a `@@` header to arrive at one — a number one past the end of a hunk is not part of the diff, GitHub refuses the comment, and the finding ends up outside the thread it belongs in.\n\n'
+    printf '````diff\n'; diff_number "$diff"; printf '\n````\n\n'
 
     printf '## Output\n\n'
     printf 'Return JSON matching the schema you were given, and nothing else. An empty `findings` array with verdict `converged` is a good and common result.\n'
@@ -167,7 +186,9 @@ prompt_resolve() {
     fi
 
     printf '## The diff under review\n\n'
-    printf '````diff\n'; cat "$diff"; printf '\n````\n\n'
+    _prompt_gutter_notice
+    printf 'The review leg read the same gutter, so a finding'"'"'s line number is comparable with what you see here.\n\n'
+    printf '````diff\n'; diff_number "$diff"; printf '\n````\n\n'
 
     printf '## Output\n\n'
     printf 'Change code in the working tree for anything you disposition `fixed`. Then return JSON matching the schema you were given, and nothing else. Do not write the marker block or a "Deferred work filed" list into `summary` — the orchestrator appends both, because the issue numbers do not exist yet.\n'

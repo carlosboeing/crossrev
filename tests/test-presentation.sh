@@ -354,4 +354,106 @@ has "and the cell names the model that actually answered" \
 hasnt "nor does it echo the alias back alongside the id it resolved to" \
   "$alias_body" "requested \`opus\`"
 
+# --- a finding that missed the diff by a line ------------------------------
+#
+# GitHub takes a comment only on a line the diff actually shows, and the
+# baseline fixture shows two of them: `app.ts` line 1 as context and line 2 as
+# the addition. A reviewer that counts lines under a `@@` header instead of
+# reading the gutter lands just outside that, which is what happened on pull
+# request 14 — a finding on `CHANGELOG.md:14` when the sentence it faulted was
+# on line 13, the last line of the hunk.
+#
+# The cost of not repairing it is two comments in the wrong place, not one. With
+# no inline comment there is no review thread, so the resolve leg's reply falls
+# back to the top of the pull request as well.
+OUTSIDE_PAYLOAD='{"verdict":"issues-remain","blocked_reason":null,"prior":null,"findings":[
+  {"path":"app.ts","line":4,"side":"RIGHT","severity":"high","category":"correctness","pre_existing":false,
+   "title":"Refresh swallows the fetch rejection",
+   "why":"A failed refresh is indistinguishable from a successful one","fix":"Return the promise"}
+]}'
+
+fixture_repo "$(fixture_default_config)"; stub_reset
+routes_baseline "$(printf '[]' | payload)"
+route 'api --method POST repos/*/issues/42/comments*' '{"id":9001}'
+no_threads
+REVLOOP_REVIEW_PAYLOAD="$(printf '%s' "$OUTSIDE_PAYLOAD" | payload)"; export REVLOOP_REVIEW_PAYLOAD
+outside_out="$("$REVLOOP" review --pr 42 2>&1)"
+
+is  "a line two past the end of the hunk is posted on the last line in it" \
+  "$(count '-F line=2')" "1"
+is  "and the line the reviewer named is not the one posted" \
+  "$(count '-F line=4')" "0"
+has "the run says the line moved, and where to" \
+  "$outside_out" "app.ts:4 (RIGHT) is not a line the diff shows; anchoring the finding to line 2 instead"
+hasnt "and nothing fell back to the top of the pull request" \
+  "$outside_out" "could not be anchored"
+
+# The gutter is the other half: the reviewer should not have had to count in the
+# first place. Both legs read the same rendering, so a line number means the
+# same thing to the one that finds a defect and the one that verifies it.
+has "the review prompt carries the diff with its line numbers" \
+  "$(cat "$PROMPT_LOG")" "   1    1 | export const ok = 1"
+has "and marks the side an added line cannot be commented on" \
+  "$(cat "$PROMPT_LOG")" "   -    2 |+export function refresh()"
+
+# --- a finding that could not be anchored at all ---------------------------
+#
+# The snap is bounded, and GitHub can refuse a line for reasons the diff does
+# not predict, so the top-level fallback stays. What is not acceptable is the
+# run reporting a clean inline post over a degraded one: `gh_review_comment_create`
+# said which of the two happened and the caller sent that answer to /dev/null.
+FAR_PAYLOAD='{"verdict":"issues-remain","blocked_reason":null,"prior":null,"findings":[
+  {"path":"app.ts","line":40,"side":"RIGHT","severity":"high","category":"correctness","pre_existing":false,
+   "title":"Refresh swallows the fetch rejection",
+   "why":"A failed refresh is indistinguishable from a successful one","fix":"Return the promise"}
+]}'
+
+fixture_repo "$(fixture_default_config)"; stub_reset
+routes_baseline "$(printf '[]' | payload)"
+route 'api --method POST repos/*/issues/42/comments*' '{"id":9001}'
+no_threads
+route_first 'api --method POST repos/*/pulls/42/comments *' '!fail'
+REVLOOP_REVIEW_PAYLOAD="$(printf '%s' "$FAR_PAYLOAD" | payload)"; export REVLOOP_REVIEW_PAYLOAD
+far_out="$("$REVLOOP" review --pr 42 2>&1)"; far_rc=$?
+far_calls="$(calls)"
+
+is  "the leg still finishes, because the finding is not lost" "$far_rc" "0"
+has "a line too far from any hunk is left where the reviewer put it" \
+  "$far_out" "GitHub would not anchor a comment to app.ts:40"
+has "the run says how many findings missed their line" \
+  "$far_out" "1 finding could not be anchored to a line"
+has "the fallback comment names the location it could not reach" \
+  "$(calls)" "**app.ts:40** (RIGHT)"
+has "and the summary comment records it, not just the terminal" \
+  "$(last_body 9001)" "One finding could not be anchored to a line of the diff"
+has "and says the reply will land there too, so the second orphan is expected" \
+  "$(last_body 9001)" "no review thread to put one in"
+
+# It has to survive a recovery, which is where a count held only in a local goes
+# missing. A run that stops between the fallback comment and the summary comes
+# back with that comment already posted, so the loop skips it as a duplicate and
+# never counts it. Where the marker landed is the record: an anchored finding's
+# marker is on a review comment, a fallback's is on an issue comment.
+# Taken from the marker the run above actually wrote, not recomputed here. The
+# id hashes a window of lines around the anchor, so a copy of that arithmetic in
+# the test would be a second implementation to keep in step — and it would agree
+# with the first right up until the thing it is meant to catch.
+ID_FAR="$(sed -n 's/.*<!-- revloop:f \(.*\) -->.*/\1/p' <<<"$far_calls" | jq -r .id | head -1)"
+is "the fallback comment carries the finding's own marker" "${#ID_FAR}" "16"
+
+fixture_repo "$(fixture_default_config)"; stub_reset
+routes_baseline "$(POSTED_LEG=review posted_comments "$ID_FAR" | payload)"
+route 'api --method POST repos/*/issues/42/comments*' '{"id":9001}'
+no_threads
+REVLOOP_REVIEW_PAYLOAD="$(printf '%s' "$FAR_PAYLOAD" | payload)"; export REVLOOP_REVIEW_PAYLOAD
+resumed_out="$("$REVLOOP" review --pr 42 2>&1)"; resumed_rc=$?
+
+is  "the resumed leg exits clean"                     "$resumed_rc" "0"
+is  "the comment already on the pull request is not posted twice" \
+  "$(count 'pulls/42/comments -f body')" "0"
+has "the resumed run still says a finding missed its line" \
+  "$resumed_out" "1 finding could not be anchored to a line"
+has "and the summary comment still records it" \
+  "$(last_body 9001)" "One finding could not be anchored to a line of the diff"
+
 finish

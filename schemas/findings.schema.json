@@ -44,7 +44,7 @@
           "line": {
             "type": "integer",
             "minimum": 1,
-            "description": "Line the comment anchors to, in the file as of the side named below."
+            "description": "Line the comment anchors to, copied from the diff's line-number gutter — the first column for LEFT, the second for RIGHT. Never counted up from a @@ header: a number the gutter does not show is not part of the diff, GitHub refuses a comment on it, and the finding leaves the thread it belongs in."
           },
           "side": {
             "type": "string",
@@ -52,7 +52,7 @@
               "LEFT",
               "RIGHT"
             ],
-            "description": "Which side of the diff. RIGHT for additions and unchanged lines, LEFT for deletions shown in red. A finding on a deleted line posted as RIGHT targets a line that does not exist and is rejected by GitHub."
+            "description": "Which side of the diff. RIGHT for additions and unchanged lines, LEFT for deletions shown in red. The gutter is the check: it shows a dash in place of a number wherever the line does not exist on that side, so a finding on a deleted line posted as RIGHT targets a line that does not exist and is rejected by GitHub."
           },
           "severity": {
             "type": "string",

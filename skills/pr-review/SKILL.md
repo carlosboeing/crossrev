@@ -19,7 +19,7 @@ The orchestrator supplies everything in the prompt. **You do not fetch anything.
 
 | Supplied | What it is |
 |---|---|
-| The diff | The changes under review, with paths and line numbers |
+| The diff | The changes under review, every hunk line prefixed with its old and new line number |
 | Pass number | Which pass this is, out of the configured maximum |
 | Prior findings | From pass 2 onward: earlier findings, their ids, and how the resolve leg dispositioned each |
 | Open threads | Existing review conversation, including any rebuttals |
@@ -70,8 +70,8 @@ Do not inflate. A `low` marked `high` costs a commit, a review cycle, and some o
 
 `path`, `line`, `side`, `severity`, `category`, `pre_existing`, `title`, `why`, `fix` — and each does a job:
 
-- **`path` and `line`** anchor the comment to code. Vague is useless: the comment is posted *on that line*.
-- **`side`** is `RIGHT` for additions and unchanged lines, `LEFT` for deletions shown in red. Getting this wrong on a deleted line means GitHub rejects the comment outright, because the line does not exist on the right side.
+- **`path` and `line`** anchor the comment to code. Vague is useless: the comment is posted *on that line*. **Read `line` out of the diff's gutter — do not count lines under a `@@` header to work one out.** A number the gutter does not show is not part of the diff, and GitHub refuses a comment on it: the finding then lands at the top of the pull request instead of beside the code, and the resolve leg's reply has no thread to go in either. One line past the end of a hunk is the usual way this happens, and it is close enough to look right.
+- **`side`** is `RIGHT` for additions and unchanged lines, `LEFT` for deletions shown in red. The gutter is the check: it prints a dash in place of a number wherever the line does not exist on that side, so a deleted line has no right-hand number and an added line has no left-hand one. Getting this wrong means GitHub rejects the comment outright.
 - **`title`** names the defect in one line. **Keep it stable across passes for the same defect** — it is part of the finding's identity, and a reworded title reads as a new finding and gets posted twice. Do not prefix it with the severity or category yourself; the orchestrator renders the whole thing as `#### 🔴 [High · Security] <your title>`, and a title that carries one too would change the finding's identity every time you reworded it.
 - **`why`** is the consequence, not a restatement. "Leaves stale sessions active after sign-out" is a why. "This is wrong" is not.
 - **`fix`** is concrete enough to act on.

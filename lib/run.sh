@@ -754,11 +754,16 @@ Reading the diff and any earlier review threads. This comment becomes the pass s
 
     # Stable ids, so "already posted" is a set-membership test rather than a
     # guess. The anchor lets a finding still be matched after the line moves.
-    local raw enriched="[]" i n f id anchor
+    local raw enriched="[]" i n f id anchor moved
     raw="$(jq -c '[.findings[]]' <<<"$payload")"
     n="$(jq 'length' <<<"$raw")"
     for (( i = 0; i < n; i++ )); do
       f="$(jq -c ".[$i]" <<<"$raw")"
+      moved="$(_review_anchor_to_diff "$f" "$diff_file")"
+      if [[ -n "$moved" ]]; then
+        ui_say "$(jq -r .path <<<"$f"):$(jq -r .line <<<"$f") ($(jq -r '.side // "RIGHT"' <<<"$f")) is not a line the diff shows; anchoring the finding to line $moved instead."
+        f="$(jq -c --argjson l "$moved" '.line = $l' <<<"$f")"
+      fi
       anchor="$(state_anchor "$(jq -r .path <<<"$f")" "$(jq -r .line <<<"$f")")"
       id="$(state_finding_id "$(jq -r .path <<<"$f")" "$(jq -r .title <<<"$f")" "$anchor")"
       enriched="$(jq -c --argjson f "$f" --arg id "$id" --arg a "$anchor" \
@@ -783,8 +788,20 @@ Findings recorded; posting them now.$(state_marker_encode "$(jq -c 'del(.comment
   run_checkpoint
 
   # --- inline comments, reconciled against what already landed -------------
-  local already posted=0 skipped=0 n i f id
+  local already posted=0 skipped=0 unanchored=0 n i f id landed unanchored_already
   already="$(state_posted_finding_ids "$CTX_PR" "$CTX_REPO" "$CTX_AUTHOR" review)" || already=""
+
+  # Seeded from the pull request rather than from zero, for the same reason the
+  # resolve leg seeds its unthreaded count: a run that stopped between a
+  # fallback comment and the summary comes back with that comment already
+  # posted, `already` skips it below, and a counter starting at zero would
+  # report a clean pass over a degraded one. Where the finding's marker landed
+  # is the record — an inline comment is a review comment, and a fallback is an
+  # issue comment, written by the same call that posted it.
+  unanchored_already="$(state_unthreaded_finding_ids \
+    "$CTX_PR" "$CTX_REPO" "$CTX_AUTHOR" review "$pass")" || unanchored_already=""
+  [[ -n "$unanchored_already" ]] && \
+    unanchored="$(printf '%s\n' "$unanchored_already" | wc -l | tr -d ' ')"
 
   n="$(jq 'length' <<<"$findings")"
   local high medium low pre actionable
@@ -804,15 +821,25 @@ Findings recorded; posting them now.$(state_marker_encode "$(jq -c 'del(.comment
     f="$(jq -c ".[$i]" <<<"$findings")"
     id="$(jq -r .id <<<"$f")"
     if grep -qx -- "$id" <<<"$already"; then skipped=$(( skipped + 1 )); continue; fi
-    gh_review_comment_create "$CTX_REPO" "$CTX_PR" "$CTX_HEAD_SHA" \
+    # gh_review_comment_create says which of the two happened. Discarding that
+    # is how the run came to claim a clean inline post over a degraded one — a
+    # fallback may change how something lands and may never change whether the
+    # run says it landed normally.
+    landed="$(gh_review_comment_create "$CTX_REPO" "$CTX_PR" "$CTX_HEAD_SHA" \
       "$(jq -r .path <<<"$f")" "$(jq -r .line <<<"$f")" "$(jq -r '.side // "RIGHT"' <<<"$f")" \
-      "$(_review_comment_body "$f" "$pass" "$harness" "$model")" >/dev/null
+      "$(_review_comment_body "$f" "$pass" "$harness" "$model")")"
     posted=$(( posted + 1 ))
+    [[ "$landed" == "fallback" ]] && unanchored=$(( unanchored + 1 ))
     run_checkpoint
   done
 
   (( posted > 0 ))  && ui_ok "posted $posted inline comment(s)"
   (( skipped > 0 )) && ui_say "$skipped finding(s) were already on the pull request from an earlier attempt, so they were not posted twice."
+  if (( unanchored > 0 )); then
+    local finding_noun="findings"; (( unanchored == 1 )) && finding_noun="finding"
+    ui_warn "$unanchored $finding_noun could not be anchored to a line and landed as top-level comments" \
+      "Each one names the location it faults, so nothing is lost, but it sits at the top of the pull request rather than beside the code — and the resolve leg has no thread to reply into either."
+  fi
 
   # Thread ids come from GraphQL, matched by the finding marker in each comment
   # body rather than by path and line, so a moved line does not lose the link.
@@ -830,7 +857,8 @@ Findings recorded; posting them now.$(state_marker_encode "$(jq -c 'del(.comment
   # this comment from. A stamp written after the render would leave the first copy
   # of the comment claiming a duration nothing recorded.
   local summary_body
-  marker="$(jq -c --argjson t "$(date +%s)" '.done_ts = $t' <<<"$marker")"
+  marker="$(jq -c --argjson t "$(date +%s)" --argjson u "$unanchored" \
+    '.done_ts = $t | .unanchored = $u' <<<"$marker")"
   summary_body="$(_review_summary_body "$findings" "$marker")"
   gh_comment_edit "$CTX_REPO" "$comment_id" \
     "$summary_body$(state_marker_encode "$(jq -c 'del(.comment_id)' <<<"$marker")")"
@@ -858,6 +886,36 @@ Findings recorded; posting them now.$(state_marker_encode "$(jq -c 'del(.comment
   else
     (( no_tips )) || run_upgrade_nudge
   fi
+  return 0
+}
+
+# A finding's line, checked against the diff it was found in and moved onto the
+# nearest line GitHub will accept when the miss is small enough to be a miscount.
+#
+# GitHub takes a comment only on a line the diff actually shows, and a reviewer
+# that counts lines under a `@@` header instead of reading the gutter lands just
+# outside one. That is not a small failure downstream: the comment falls back to
+# the top of the pull request, so no review thread exists, so the resolve leg's
+# reply has nowhere to go either and falls back in turn. One miscounted number
+# costs two orphaned comments.
+#
+# Called before the finding's id is derived, and that ordering is load-bearing.
+# `state_finding_id` hashes a window of lines around the anchor, so a line
+# corrected after the id was computed would be a different finding to the next
+# pass, and every cross-pass disposition would come apart.
+#
+# A line the diff cannot place is left exactly as the reviewer wrote it. Posting
+# still attempts it, because the diff is not the only reason GitHub refuses one,
+# and the fallback that catches it is the same either way.
+#
+# Prints the line to move to, or nothing when the finding stays where it is. The
+# caller narrates the move and applies it, so this writes nothing to the stream
+# it answers on.
+_review_anchor_to_diff() {
+  local f="$1" diff_file="$2" moved
+  moved="$(diff_anchor "$diff_file" \
+    "$(jq -r .path <<<"$f")" "$(jq -r '.side // "RIGHT"' <<<"$f")" "$(jq -r .line <<<"$f")")"
+  [[ -n "$moved" && "$moved" != "$(jq -r .line <<<"$f")" ]] && printf '%s' "$moved"
   return 0
 }
 
@@ -1105,6 +1163,19 @@ _review_summary_body() {
     printf 'No findings. Low-severity and pre-existing issues would be listed here too, so this is an empty review rather than a filtered one.\n\n'
   else
     _findings_table "$findings" "$(jq -r '.head_sha // ""' <<<"$marker")"
+  fi
+
+  # A finding that never reached its line is recorded here rather than only in
+  # the run's own output, because the pull request is what anyone reads
+  # afterwards and the run's output is gone. The same silence hid this on PR 14:
+  # the table listed a finding at `CHANGELOG.md:14` and nothing said the comment
+  # was sitting at the top of the pull request instead.
+  local unanchored
+  unanchored="$(jq -r '.unanchored // 0' <<<"$marker")"
+  if (( unanchored == 1 )); then
+    printf 'One finding could not be anchored to a line of the diff, so it is a top-level comment on this pull request naming its location instead. Its reply will land there too, because there is no review thread to put one in.\n\n'
+  elif (( unanchored > 1 )); then
+    printf '%s findings could not be anchored to a line of the diff, so they are top-level comments on this pull request naming their locations instead. Their replies will land there too, because there are no review threads to put them in.\n\n' "$unanchored"
   fi
 
   _run_details "$marker" review
