@@ -6,6 +6,8 @@ All notable changes to revloop. Format follows [Keep a Changelog](https://keepac
 
 ### Added
 
+- **A two-direction template/default drift test.** Eleven behavior leaves must agree after the explicit setup exemptions are removed, so a contradictory default fails and a template key the code no longer implements fails too.
+
 - `revloop review --pr N` — one review pass. Claims before working, posts one inline comment per finding on the line it affects, records everything in a hidden marker on its own summary comment, and hands the loop to the resolve leg by label.
 - `revloop resolve --pr N` — verifies every finding whatever its severity, commits and pushes what it fixed, replies in-thread, resolves what it settled, and persists deferred defects to a sink before resolving their threads.
 - `revloop cycle --pr N` — the whole loop in one process, up to `max_passes`, and what a bare `revloop --pr N` runs. A thin driver over the same legs the workflows invoke, because state lives on the pull request rather than in process memory.

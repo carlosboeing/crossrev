@@ -39,6 +39,39 @@ is "no config: three passes per cycle"     "$(jq -r .policy.max_passes_per_cycle
 is "no config: medium is the minimum fix severity" "$(jq -r .policy.min_fix_severity <<<"$out")" "medium"
 is "no config: automation hints are enabled" "$(jq -r .enable_automation_hint <<<"$out")" "true"
 
+# --- template/default drift -----------------------------------------------
+#
+# Compare both directions. Defaults missing from the template contradict what
+# init teaches an operator; template-only keys are worse, because the code can
+# stop reading one while the hand-written file keeps promising it works.
+flatten_config() {
+  jq -r '
+    def exempt($k):
+      $k == "mode"
+      or ($k | startswith("endpoints."))
+      or ($k | startswith("reviewer."))
+      or ($k | startswith("resolver."))
+      or $k == "backlog.destination"
+      or $k == "backlog.repository.path"
+      or ($k | startswith("backlog.github_issues.labels"));
+    paths(scalars | true) as $p
+    | ($p | map(tostring) | join(".")) as $k
+    | select(exempt($k) | not)
+    | [$k, (getpath($p) | tojson)] | @tsv
+  ' <<<"$1" | sort
+}
+
+defaults="$(bash -c 'source "$1"; _cfg_defaults' _ "$HERE/../lib/config.sh")"
+template="$(yq -o=json -I=0 '.' "$HERE/../templates/revloop.yml")"
+flat_defaults="$(flatten_config "$defaults")"
+flat_template="$(flatten_config "$template")"
+is "the drift comparison covers eleven behavior leaves in both documents" \
+  "$(printf '%s\n%s' "$(wc -l <<<"$flat_defaults" | tr -d ' ')" "$(wc -l <<<"$flat_template" | tr -d ' ')" | paste -sd / -)" "11/11"
+is "every non-exempt default exists in the template with the same value" \
+  "$(comm -23 <(printf '%s\n' "$flat_defaults") <(printf '%s\n' "$flat_template"))" ""
+is "every non-exempt template leaf is implemented by the defaults" \
+  "$(comm -13 <(printf '%s\n' "$flat_defaults") <(printf '%s\n' "$flat_template"))" ""
+
 # --- version ---------------------------------------------------------------
 d="$(new_repo)"; cd "$d" || exit 1; mkdir -p .github
 printf 'version: 99\n' > .github/revloop.yml
