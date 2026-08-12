@@ -28,7 +28,7 @@ REVLOOP_DIFF_SNAP=3
 # mode `number`: the diff back with an old/new line-number gutter.
 # mode `anchor`: the line to anchor to, or nothing.
 _diff_parse() {
-  local mode="$1" file="$2" want_path="${3:-}" want_side="${4:-}" want_line="${5:-0}" bound="${6:-0}"
+  local mode="$1" file="$2" want_path="${3:-}" want_side="${4:-}" want_line="${5:-0}" bound="${6:-0}" ex_list="${7:-}"
   [[ -s "$file" ]] || return 0
   # LC_ALL=C so every substr, length and sprintf below counts bytes rather than
   # characters. A path git escaped as octal has to be rebuilt one byte at a
@@ -39,7 +39,11 @@ _diff_parse() {
   # `-v` runs its value through awk's own escape processing: a path containing a
   # backslash would be decoded on the way in and then fail to match the path in
   # the diff, or match one it is not. ENVIRON hands the bytes over untouched.
-  REVLOOP_DIFF_PATH="$want_path" REVLOOP_DIFF_SIDE="$want_side" \
+  #
+  # All three are set on every call, including to the empty string, so a value
+  # exported in the caller's environment can never reach the program. They are
+  # arguments that happen to travel by environment, not configuration.
+  REVLOOP_DIFF_PATH="$want_path" REVLOOP_DIFF_SIDE="$want_side" REVLOOP_DIFF_EXCLUDE="$ex_list" \
   LC_ALL=C awk -v mode="$mode" -v want_line="$want_line" -v bound="$bound" '
     BEGIN {
       want_path = ENVIRON["REVLOOP_DIFF_PATH"]; want_side = ENVIRON["REVLOOP_DIFF_SIDE"]
@@ -223,5 +227,5 @@ diff_exclude() {
   local list="" p
   for p in "$@"; do [[ -n "$p" ]] && list+="${list:+$'\n'}$p"; done
   if [[ -z "$list" ]]; then cat -- "$file"; return 0; fi
-  REVLOOP_DIFF_EXCLUDE="$list" _diff_parse exclude "$file"
+  _diff_parse exclude "$file" "" "" 0 0 "$list"
 }
