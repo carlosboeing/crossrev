@@ -250,7 +250,7 @@ state_claim_is_stale() {
   claim_sha="$(jq -r '.head_sha // empty' <<<"$claim")"
 
   if [[ -n "$claim_sha" && "$claim_sha" != "$head_sha" ]]; then
-    printf 'it claimed %s and the pull request is now at %s' "${claim_sha:0:7}" "${head_sha:0:7}"
+    printf 'it started against %s and the pull request is now at %s' "${claim_sha:0:7}" "${head_sha:0:7}"
     return 0
   fi
   if (( ts > 0 && now - ts > window )); then

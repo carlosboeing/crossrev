@@ -9,25 +9,38 @@
 # the header stops being computed independently of the label it duplicates. A
 # sixth word would be a place for the two to disagree.
 #
-# **status reads the pull request, not the process, so it never says a leg is
-# running.** A leg the usage limit killed after forty seconds and a leg happily
-# working for forty seconds leave identical state on the pull request: the claim
-# marker posts before the harness is invoked, and the cleanup path leaves it in
-# place so a resumed run does not duplicate work. An age-based "still running"
-# would hand a dead loop a reassuring status line, which is the exact failure the
-# age was added to prevent.
+# **A leg that has not finished is described from evidence, never from its age.**
+# The marker cannot tell a leg the usage limit killed after forty seconds from
+# one working happily for forty seconds — it posts before the harness is invoked
+# and survives the cleanup path — so neither "still running" nor "never finished"
+# may be read off the clock. What can be read is the lock file a local run leaves
+# in the git dir and the workflow status an automated one's run id buys, and the
+# rows below only make a liveness claim where one of those answers. Where neither
+# does, the row says how long ago the leg started and stops there.
 
 set -uo pipefail
 # shellcheck source=harness.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/harness.sh"
 
-# A review marker. $1 pass, $2 verdict, $3 findings, $4 state, $5 age in seconds.
+# A review marker. $1 pass, $2 verdict, $3 findings, $4 state, $5 age in seconds,
+# $6 run_id.
+#
+# The run_id defaults to something no liveness check can read, which is the
+# honest default for a fixture: it is what a status with no evidence either way
+# renders from, and the cases that do have evidence say so by passing one.
 review_m() {
   jq -cn --arg sha "$FIX_HEAD" --argjson ts "$(( $(date +%s) - ${5:-60} ))" \
-    --argjson p "$1" --arg v "$2" --argjson f "$3" --arg st "${4:-complete}" '
-    {v:1, leg:"review", pass:$p, state:$st, ts:$ts, done_ts:($ts + 30), run_id:"x",
+    --argjson p "$1" --arg v "$2" --argjson f "$3" --arg st "${4:-complete}" \
+    --arg r "${6:-x}" '
+    {v:1, leg:"review", pass:$p, state:$st, ts:$ts, done_ts:($ts + 30), run_id:$r,
      head_sha:$sha, harness:"claude", model:"m", effort:"high", endpoint:null,
      model_reported:"m", tokens:1000, verdict:$v, findings:$f}'
+}
+
+# A review marker whose head_sha is not the pull request's, so it is stale for
+# the other reason: the branch moved underneath it.
+moved_m() {
+  review_m 1 null '[]' started 120 | jq -c '.head_sha = "0000000000000000000000000000000000000000"'
 }
 
 # A resolve marker. $1 pass, $2 dispositions, $3 commit sha, $4 blocked reason.
@@ -57,9 +70,17 @@ ONE_MED='[{"severity":"medium"}]'
 FIXED_SKIPPED='[{"disposition":"fixed"},{"disposition":"fixed"},{"disposition":"skipped"}]'
 ONE_FIXED='[{"disposition":"fixed"}]'
 
-# $1 is the labels array, then any number of marker JSON strings.
-status_with() {
-  local labels="$1"; shift
+# $1 names a function to run inside the fixture checkout after the routes are in
+# place and before status runs — a lock file, an extra route — or is empty for
+# the cases that need nothing. $2 is the labels array, then any number of marker
+# JSON strings.
+#
+# The setup is an argument rather than a variable a case sets beforehand, because
+# every call here happens inside `$( )`: a variable the function cleared at the
+# end would be cleared in the subshell, and the next case would silently inherit
+# the last one's evidence.
+status_setup_with() {
+  local setup="$1" labels="$2"; shift 2
   local comments="[]" id=9000 m
   for m in "$@"; do
     id=$(( id + 1 ))
@@ -67,8 +88,28 @@ status_with() {
   done
   fixture_repo; stub_reset
   routes_baseline "$(printf '%s' "$comments" | payload)" "$labels"
+  [[ -n "$setup" ]] && "$setup"
   "$REVLOOP" status --pr 42 2>&1
 }
+
+status_with() { status_setup_with "" "$@"; }
+
+# The lock a local run leaves in the git dir while it works, in the format
+# run_lock_acquire writes: `<pid> on <host> since <timestamp>`. $1 is the pid,
+# $2 the host, defaulting to this machine's.
+write_lock() {
+  local dir; dir="$(git rev-parse --git-dir)/revloop"
+  mkdir -p "$dir"
+  printf '%s on %s since 2026-08-12T00:00:00Z\n' \
+    "$1" "${2:-$(hostname 2>/dev/null || printf 'local')}" >"$dir/pr-42.lock"
+}
+lock_alive()     { write_lock "$$"; }                  # this test process, which is running
+lock_dead()      { write_lock 999999; }                # a pid nothing is behind
+lock_elsewhere() { write_lock "$$" buildbox; }         # readable here, testable only there
+
+# What the Actions API says about the workflow run a marker names.
+run_in_progress() { route_first 'run view 55501 --repo acme/widget --json status*' '{"status":"in_progress"}'; }
+run_completed()   { route_first 'run view 55501 --repo acme/widget --json status*' '{"status":"completed"}'; }
 
 lbl() { jq -cn --args '[$ARGS.positional[] | {name: .}]' "$@"; }
 
@@ -117,33 +158,128 @@ has "a landed review with findings owes the resolve leg" \
 has "and NEXT is the command that runs it"      "$out" "revloop resolve --pr 42"
 has "with the resolve leg shown as still owed"  "$out" "○ resolve  not run yet"
 
-# --- stalled, and already retried once --------------------------------------
+# The leg the loop is waiting on is the one most likely to be running while
+# someone reads this, which is the case the issue was filed from: the row said
+# the resolve leg had failed and the pull request said it was working. Both lines
+# have to agree with the process now, not only the row.
+resolve_started() {
+  jq -cn --arg sha "$FIX_HEAD" --argjson ts "$(( $(date +%s) - 420 ))" --arg r "local-$$" '
+    {v:1, leg:"resolve", pass:1, state:"started", ts:$ts, done_ts:null, run_id:$r,
+     head_sha:$sha, harness:"claude", model:"m", effort:"high", endpoint:null,
+     model_reported:null, tokens:null, blocked:false, blocked_reason:null,
+     commit_sha:null, summary:"", dispositions:[]}'
+}
+out="$(status_setup_with lock_alive "$(lbl revloop/awaiting-resolution revloop/pass-1)" \
+  "$(review_m 1 issues-remain "$HIGH_LOW")" "$(resolve_started)")"
+has   "a running resolve leg says so on its row"  "$out" "◐ resolve  running now — started 7 minute(s) ago"
+has   "and NEXT stops reading as an invitation to start a second one" \
+  "$out" "Pass 1 is running now, so wait for it"
+has   "while still ending in the command that resumes it if that run dies" \
+  "$out" "revloop resolve --pr 42"
+
+# --- an unfinished leg, and what status can actually prove about it ---------
 #
-# This is the block that stops the loop going quiet. The age comes from the claim
-# marker's own timestamp, which status already reads, so it works in local mode
-# where no watchdog exists — and it fires on the first stall rather than the
-# second, which a watchdog cannot.
+# The row reports liveness, and reports it only from evidence it can name: the
+# lock file a local run leaves in the git dir, or the Actions API for a run that
+# carries a real GITHUB_RUN_ID. The red cross belongs to the cases where the leg
+# is provably over, and to no others — the whole point being that a leg still
+# working is not a leg that failed.
+
+# Nothing to go on: an unreadable run_id, no lock, inside the window. The row
+# says how long ago it started and that no result has landed, which is the whole
+# of what is known, and it carries neither verdict glyph.
 out="$(status_with "$(lbl revloop/awaiting-review revloop/watchdog-retried revloop/pass-2)" \
   "$(review_m 1 issues-remain "$HIGH_LOW")" \
   "$(resolve_m 1 "$FIXED_SKIPPED")" \
   "$(review_m 2 null '[]' started 2820)")"
 
-has "a stalled claim shows its age"             "$out" "claimed 47 minute(s) ago, never finished"
-# Never "still running". The pull request cannot support that claim, whatever the
-# age, and an age-based liveness reading is how a dead loop gets a reassuring line.
-hasnt "and never claims the leg is running"     "$out" "still running"
-has "the glyph says the outcome was bad"        "$out" "✗ review"
-has "the retry is a qualifier on the header, read straight off its label" \
+has   "an unfinished leg with no evidence either way shows its age" \
+  "$out" "started 47 minute(s) ago, no result yet"
+hasnt "and is not called a failure"             "$out" "✗ review"
+hasnt "nor claimed to be running"               "$out" "running now"
+has   "the retry is a qualifier on the header, read straight off its label" \
   "$out" "awaiting review (retried once)"
-has "and NEXT warns that a second failure halts" "$out" "a second failure"
+has   "and NEXT warns that a second failure halts" "$out" "a second failure"
 
-# A claim inside the window reads the same way, with a smaller number. The only
-# difference the age makes is to the number, never to the wording.
+# The word is "started", not "claimed". A leg posts a marker before it works so a
+# second runner does not duplicate it, which is a claim in the code and a lease
+# in the design — and neither is a distinction the reader of a status line has to
+# make.
+hasnt "no unfinished row talks about a claim" "$out" "claimed"
+hasnt "and none of them says never finished"  "$out" "never finished"
+
+# Alive: the marker names a pid and the lock file says that pid, on this host, is
+# running against this pull request. Both have to agree before the row will say
+# so — a pid alone is recycled, and every machine has its own.
+out="$(status_setup_with lock_alive "$(lbl revloop/awaiting-review revloop/pass-1)" \
+  "$(review_m 1 null '[]' started 420 "local-$$")")"
+has   "a leg whose process answers is reported as running"  "$out" "◐ review   running now — started 7 minute(s) ago"
+hasnt "and never as a failure"                              "$out" "✗ review"
+has   "NEXT says to wait for it"                            "$out" "Pass 1 is running now, so wait for it"
+hasnt "rather than inviting a second run over the same pull request" \
+  "$out" "a re-run resumes pass 1"
+
+# Dead, two minutes in. The lock is the same evidence read the other way, and it
+# is definitive well inside the window: the process that took the lock is gone
+# and the marker never completed.
+out="$(status_setup_with lock_dead "$(lbl revloop/awaiting-review revloop/pass-1)" \
+  "$(review_m 1 null '[]' started 120 "local-999999")")"
+has "a leg whose process is gone is a failure, however recent" \
+  "$out" "✗ review   started 2 minute(s) ago, abandoned — the process that started it is gone"
+
+# On another machine. The lock is readable — a checkout on a shared filesystem —
+# but the pid in it is not this machine's to test, so the row names where the run
+# is instead of guessing whether it lives.
+out="$(status_setup_with lock_elsewhere "$(lbl revloop/awaiting-review revloop/pass-1)" \
+  "$(review_m 1 null '[]' started 420 "local-$$")")"
+has   "a lock on another host names the host"   "$out" "○ review   started 7 minute(s) ago on buildbox"
+hasnt "and claims nothing about the process"    "$out" "running now"
+hasnt "least of all that it failed"             "$out" "✗ review"
+
+# An automated leg answers from anywhere, because the marker carries the real
+# workflow run id. The run_id's shape is what picks the check, not the configured
+# mode: a marker written on a runner reads the same from a laptop.
+out="$(status_setup_with run_in_progress "$(lbl revloop/awaiting-review revloop/pass-1)" \
+  "$(review_m 1 null '[]' started 420 55501)")"
+has "a workflow run still in progress is reported as running" \
+  "$out" "◐ review   running now — started 7 minute(s) ago"
+
+out="$(status_setup_with run_completed "$(lbl revloop/awaiting-review revloop/pass-1)" \
+  "$(review_m 1 null '[]' started 120 55501)")"
+has "a workflow that ended without completing the leg is a failure" \
+  "$out" "✗ review   started 2 minute(s) ago, abandoned — the workflow run finished without it"
+
+# The API not answering is not evidence of death. A run in another repository, a
+# token without actions:read and an aeroplane all look the same from here, and
+# none of them says the leg failed.
+out="$(status_with "$(lbl revloop/awaiting-review revloop/pass-1)" \
+  "$(review_m 1 null '[]' started 120 55501)")"
+has   "an unanswerable workflow read falls back to what is known" \
+  "$out" "started 2 minute(s) ago, no result yet"
+hasnt "and never turns an unreachable API into a dead leg" "$out" "✗ review"
+
+# Past the window with nothing to check, the age is the evidence and the claim is
+# written off. The reason says so in its own words rather than the row repeating
+# the age it already carries.
+out="$(status_with "$(lbl revloop/awaiting-review revloop/pass-1)" \
+  "$(review_m 1 null '[]' started 7200)")"
+has "an unfinished leg past the window is abandoned" \
+  "$out" "✗ review   abandoned — it was made 120 minutes ago, past the 60-minute window"
+has "and NEXT says a re-run starts the pass again" "$out" "so a re-run abandons it"
+
+# Stale for the other reason: the branch moved under it, so resuming would
+# reconcile against a revision the findings no longer describe.
+out="$(status_with "$(lbl revloop/awaiting-review revloop/pass-1)" "$(moved_m)")"
+has   "a claim against a revision that moved is abandoned too" \
+  "$out" "✗ review   abandoned — it started against 0000000 and the pull request is now at"
+hasnt "and says it started against that revision rather than claimed it" \
+  "$out" "it claimed 0000000"
+
+# Nothing to check, inside the window: a re-run resumes rather than restarts, and
+# that is still what NEXT says.
 out="$(status_with "$(lbl revloop/awaiting-review revloop/pass-1)" \
   "$(review_m 1 null '[]' started 120)")"
-has "a young claim is described in exactly the same words" \
-  "$out" "claimed 2 minute(s) ago, never finished"
-has "and NEXT says a re-run resumes it"         "$out" "a re-run resumes pass 1"
+has "NEXT says a re-run resumes a pass nothing contradicts" "$out" "a re-run resumes pass 1"
 
 # --- the cap is reached, and no pass has been refused yet -------------------
 #

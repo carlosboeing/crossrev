@@ -111,7 +111,7 @@ routes_baseline "$(marker_comment 9001 "$old" | jq -cs . | payload)"
 route '*reviewThreads*' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}'
 REVLOOP_REVIEW_PAYLOAD="$(printf '%s' "$REVIEW_PAYLOAD" | payload)"; export REVLOOP_REVIEW_PAYLOAD
 out="$("$REVLOOP" review --pr 42 2>&1)"; rc=$?
-has "a claim past its window is abandoned"            "$out" "abandoning the unfinished pass-1 review claim"
+has "a claim past its window is abandoned"            "$out" "abandoning the unfinished pass-1 review"
 has "and the reason names the window"                 "$out" "past the 60-minute window"
 is  "abandoning still exits clean"                    "$rc" "0"
 
@@ -129,7 +129,7 @@ fixture_repo; stub_reset
 claim="$(make_claim)"
 routes_baseline "$(marker_comment 9001 "$claim" | jq -cs . | payload)"
 out="$("$REVLOOP" status --pr 42 2>&1)"
-has "status names the interrupted leg"                "$out" "review   claimed 0 minute(s) ago, never finished"
+has "status names the unfinished leg"                 "$out" "review   started 0 minute(s) ago, no result yet"
 has "status names the command that resumes it"        "$out" "revloop review --pr 42"
 has "status says which side is not resumable work"    "$out" "resolve  not run yet"
 

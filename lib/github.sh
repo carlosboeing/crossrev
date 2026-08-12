@@ -36,6 +36,22 @@ gh_default_branch() {
   gh repo view "$1" --json defaultBranchRef --jq .defaultBranchRef.name 2>/dev/null || printf 'main'
 }
 
+# Whether a workflow run is still going: `queued`, `in_progress`, `completed`,
+# or one of the newer waiting states.
+#
+# This is how an automated leg's liveness is knowable from any machine — the
+# marker carries GITHUB_RUN_ID and this turns it into an answer. Prints nothing
+# when there is no answer to be had: a run in another repository, a token
+# without `actions: read`, or no network. Every caller has to treat an empty
+# result as "unknown" rather than as "finished", because a status that says a
+# leg died because the API was unreachable is the failure this whole read exists
+# to remove.
+gh_workflow_run_status() {
+  local repo="$1" run_id="$2"
+  [[ "$run_id" =~ ^[0-9]+$ ]] || return 0
+  gh run view "$run_id" --repo "$repo" --json status --jq '.status // empty' 2>/dev/null || true
+}
+
 # One page of repository-wide issue comments updated since an epoch timestamp.
 # Pull-request conversation comments are issue comments in GitHub's REST API;
 # each response carries the issue_url that identifies the pull request.

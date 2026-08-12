@@ -50,13 +50,19 @@ ui_section_state() {
 ui_head() { printf '%s│%s  %s%s%s\n' "$_c_dim" "$_c_reset" "$_c_bold" "$1" "$_c_reset"; }
 
 # A leg line, with a gutter before the glyph so the pass number sits to its left.
-# $2 is ok, no, or anything else for the dim circle.
+# $2 is ok, no, run, or anything else for the dim circle.
+#
+# `run` is a leg that is working right now, and it is deliberately neither of the
+# other two: a tick would read as finished and a cross as failed, and it is
+# neither. Blue rather than green for the same reason — the outcome is not in
+# yet, and only the two settled glyphs get a verdict colour.
 ui_row() {
   local gutter="$1" kind="$2" text="$3" glyph
   case "$kind" in
-    ok) glyph="${_c_green}✓${_c_reset}" ;;
-    no) glyph="${_c_red}✗${_c_reset}" ;;
-    *)  glyph="${_c_dim}○${_c_reset}" ;;
+    ok)  glyph="${_c_green}✓${_c_reset}" ;;
+    no)  glyph="${_c_red}✗${_c_reset}" ;;
+    run) glyph="${_c_blue}◐${_c_reset}" ;;
+    *)   glyph="${_c_dim}○${_c_reset}" ;;
   esac
   printf '%s│%s  %s%s %s\n' "$_c_dim" "$_c_reset" "$gutter" "$glyph" "$text"
 }

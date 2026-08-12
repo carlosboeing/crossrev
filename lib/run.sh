@@ -55,7 +55,7 @@ run_cleanup() {
 run_checkpoint() {
   (( REVLOOP_INTERRUPTED == 0 )) && return 0
   ui_warn "interrupted after the last completed write" \
-    "The claim marker on the pull request records how far this got, so nothing is duplicated on the way back in. Resume with: ${REVLOOP_RESUME_HINT:-revloop status --pr <n>}"
+    "The marker on the pull request records how far this got, so nothing is duplicated on the way back in. Resume with: ${REVLOOP_RESUME_HINT:-revloop status --pr <n>}"
   exit 130
 }
 
@@ -83,7 +83,7 @@ run_lock_acquire() {
         "Two runs writing the same pull request would interleave comments and replies. Wait for it to finish, or stop that process."
     fi
     ui_warn "a previous run left a lock on pull request $pr held by $holder, which is no longer running" \
-      "Taking it over. If that run was killed mid-write, its claim marker records how far it got and this run posts only the difference."
+      "Taking it over. If that run was killed mid-write, its marker records how far it got and this run posts only the difference."
     rm -f "$lock"
   fi
   printf '%s on %s since %s\n' "$$" "$(hostname 2>/dev/null || echo local)" \
@@ -622,7 +622,7 @@ leg_review() {
 
   if [[ -n "$claim" ]]; then
     if stale="$(state_claim_is_stale "$claim" "$CTX_HEAD_SHA")"; then
-      ui_warn "abandoning the unfinished pass-$current review claim — $stale" \
+      ui_warn "abandoning the unfinished pass-$current review — $stale" \
         "Resuming it would reconcile against findings that no longer describe this code. Starting the pass again instead."
       pass="$current"
       claim="$(jq -c --argjson ts "$(date +%s)" --arg sha "$CTX_HEAD_SHA" \
@@ -706,7 +706,7 @@ No review ran, so nothing here is a judgement about the code. Raising the cap in
 
 Reading the diff and any earlier review threads. This comment becomes the pass summary when the review finishes.$(state_marker_encode "$marker")")"
     [[ -n "$comment_id" ]] || ui_die "the claim comment did not post on $CTX_REPO#$CTX_PR" \
-      "The claim is what makes a retry safe, so revloop stops rather than reviewing without one."
+      "The marker is what makes a retry safe, so revloop stops rather than reviewing without one."
     marker="$(jq -c --argjson id "$comment_id" '. + {comment_id: $id}' <<<"$marker")"
   fi
   run_checkpoint
@@ -1256,7 +1256,7 @@ leg_resolve() {
   if [[ -n "$claim" ]]; then
     comment_id="$(jq -r '.comment_id' <<<"$claim")"
     if stale="$(state_claim_is_stale "$claim" "$CTX_HEAD_SHA")"; then
-      ui_warn "abandoning the unfinished pass-$pass resolve claim — $stale" \
+      ui_warn "abandoning the unfinished pass-$pass resolve — $stale" \
         "Resuming it would reconcile replies against a revision that has moved. Starting the pass again instead."
       marker="$(jq -c --argjson ts "$(date +%s)" --arg sha "$CTX_HEAD_SHA" \
         '.ts = $ts | .head_sha = $sha | .dispositions = [] | .commit_sha = null' <<<"$claim")"
@@ -1279,7 +1279,7 @@ leg_resolve() {
 
 Verifying each finding against the codebase. This comment becomes the pass summary when the resolve leg finishes.$(state_marker_encode "$marker")")"
     [[ -n "$comment_id" ]] || ui_die "the claim comment did not post on $CTX_REPO#$CTX_PR" \
-      "The claim is what makes a retry safe, so revloop stops rather than resolving without one."
+      "The marker is what makes a retry safe, so revloop stops rather than resolving without one."
   fi
   marker="$(jq -c --argjson id "$comment_id" '. + {comment_id: $id}' <<<"$marker")"
   run_checkpoint
@@ -2022,10 +2022,13 @@ cmd_cycle() {
 # round. There is one fewer place for the two to disagree because the header is
 # read off the label rather than computed beside it.
 #
-# It reads the pull request, not the process, so it never says a leg is running.
-# A leg the usage limit killed after forty seconds and a leg happily working for
-# forty seconds leave identical state on the pull request, and an age-based
-# "still running" would hand a dead loop a reassuring status line.
+# The state comes off the pull request, and only the liveness of an unfinished
+# leg comes off the process — from the lock file locally and the Actions API in
+# automated mode, never from the age. A leg the usage limit killed after forty
+# seconds and a leg happily working for forty seconds leave identical state on
+# the pull request, so an age-based "still running" would hand a dead loop a
+# reassuring line; a pid that answers is a different kind of fact, and it is the
+# only thing that puts "running now" on a row.
 cmd_status() {
   local pr="" repo=""
   while (( $# )); do
@@ -2189,16 +2192,129 @@ _status_leg_row() {
     complete)
       _status_leg_complete "$gutter" "$label" "$leg" "$m" ;;
     *)
-      # Never "still running". The claim marker posts before the harness is
-      # invoked and the cleanup path leaves it in place so a resumed run does not
-      # duplicate work, so a leg killed forty seconds in is indistinguishable from
-      # one that started forty seconds ago and is working. The age is worth
-      # printing; the liveness claim the pull request cannot support is not.
-      local age stale detail
+      # An open claim is not an outcome, so the row says whether the process
+      # behind it is still working — and says it only where the evidence is
+      # nameable.
+      #
+      # This branch used to print "never finished" under a red cross whatever the
+      # age, on the grounds that the marker posts before the harness is invoked
+      # and survives the cleanup path, so a leg killed forty seconds in leaves
+      # exactly what a leg working for forty seconds leaves. That is true of the
+      # marker and false of the run: a local leg records its pid in the lock file
+      # beside the git dir, an automated one carries its GITHUB_RUN_ID, and
+      # `kill -0` and `gh run view` answer from those what the marker cannot. The
+      # old line was making a liveness claim anyway — the negative one — and it
+      # was wrong on every leg that was alive, which is the state a reader is
+      # most likely to be looking at.
+      #
+      # Positive evidence outranks the age, in both directions. A leg the API
+      # says is `completed` is abandoned two minutes in, without waiting an hour
+      # for the window; a leg whose pid answers is running at ninety minutes,
+      # however stale its claim. The window only decides the case where there is
+      # no evidence either way, and there the row states the absence rather than
+      # inventing a verdict for it.
+      local age started stale
       age=$(( $(date +%s) - $(jq -r '.ts // 0' <<<"$m") ))
-      detail="claimed $(( age / 60 )) minute(s) ago, never finished"
-      stale="$(state_claim_is_stale "$m" "$CTX_HEAD_SHA")" && detail="$detail — stale"
-      ui_row "$gutter" no "$label$detail" ;;
+      started="started $(( age / 60 )) minute(s) ago"
+      _status_liveness "$m"
+      case "$STATUS_LIVENESS" in
+        running)
+          ui_row "$gutter" run "$label""running now — $started" ;;
+        elsewhere)
+          ui_row "$gutter" opt "$label$started on $STATUS_LIVENESS_DETAIL" ;;
+        gone)
+          ui_row "$gutter" no "$label$started, abandoned — $STATUS_LIVENESS_DETAIL" ;;
+        *)
+          # A stale claim carries its own reason, and both reasons already say
+          # either how old it is or which revision it was made against, so the
+          # age prefix would be printing the same fact twice.
+          if stale="$(state_claim_is_stale "$m" "$CTX_HEAD_SHA")"; then
+            ui_row "$gutter" no "$label""abandoned — $stale"
+          else
+            ui_row "$gutter" opt "$label$started, no result yet"
+          fi ;;
+      esac ;;
+  esac
+}
+
+# Is the run behind an open claim still working?
+#
+# Sets STATUS_LIVENESS to one of `running`, `gone`, `elsewhere`, or empty for
+# "no evidence either way", with STATUS_LIVENESS_DETAIL carrying the reason a
+# `gone` is known or the host an `elsewhere` is on. Globals rather than stdout
+# because the answer is memoised, and a `$( )` around it would run the memo in a
+# subshell and throw the cached value away with it — which for an automated leg
+# means a second API call per row.
+#
+# Empty is a real answer and the common one. Anything that cannot be shown is
+# not claimed: an unreadable lock, a run in another checkout, a pull request
+# being watched from a machine that never held the lock.
+STATUS_LIVENESS=""
+STATUS_LIVENESS_DETAIL=""
+_STATUS_LIVENESS_FOR=""
+_status_liveness() {
+  local run_id
+  run_id="$(jq -r '.run_id // ""' <<<"$1")"
+  [[ "$run_id" != "$_STATUS_LIVENESS_FOR" ]] || return 0
+  _STATUS_LIVENESS_FOR="$run_id"
+  STATUS_LIVENESS=""; STATUS_LIVENESS_DETAIL=""
+  [[ -n "$run_id" ]] || return 0
+  if [[ "$run_id" == local-* ]]; then
+    _status_liveness_local "${run_id#local-}"
+  else
+    _status_liveness_workflow "$run_id"
+  fi
+  return 0
+}
+
+# A local run, answered from the lock file the run took over the same pull
+# request — `<pid> on <host> since <timestamp>`, written by run_lock_acquire.
+#
+# `kill -0` on the marker's pid alone would be cheaper and is what the lock
+# check twenty lines up does, but it is only sound where the pid means what the
+# marker meant by it. Pids are recycled and every machine has its own, so a bare
+# probe from a second machine, or from the same one an hour later, can find a
+# stranger's process and print "running now" over a leg that died — the exact
+# reassurance the old rendering refused to give, arrived at by a different
+# route. The lock is revloop's own record that this pid, on this host, is
+# running against this pull request, so requiring it to agree with the marker
+# makes the answer as trustworthy as the collision check that writes it.
+_status_liveness_local() {
+  local pid="$1" gitdir lock holder lock_pid lock_host rest
+  [[ "$pid" =~ ^[0-9]+$ ]] || return 0
+  gitdir="$(git rev-parse --git-dir 2>/dev/null)" || return 0
+  lock="$gitdir/revloop/pr-$CTX_PR.lock"
+  [[ -f "$lock" ]] || return 0
+  holder="$(cat "$lock" 2>/dev/null)" || return 0
+  lock_pid="${holder%% *}"
+  [[ "$lock_pid" == "$pid" ]] || return 0
+  rest="${holder#* on }"; lock_host="${rest%% since *}"
+
+  # A checkout on a shared filesystem is the one case where the lock is readable
+  # from a machine that cannot test the pid in it. Naming the host is the whole
+  # of what is knowable, and it is enough to go and look.
+  if [[ -n "$lock_host" && "$lock_host" != "$(hostname 2>/dev/null || printf 'local')" ]]; then
+    STATUS_LIVENESS="elsewhere"; STATUS_LIVENESS_DETAIL="$lock_host"
+    return 0
+  fi
+  if kill -0 "$pid" 2>/dev/null; then
+    STATUS_LIVENESS="running"
+  else
+    STATUS_LIVENESS="gone"; STATUS_LIVENESS_DETAIL="the process that started it is gone"
+  fi
+}
+
+# An automated run, answered by the Actions API from anywhere. `completed` is
+# the useful half: the run is over and the marker never reached `complete`, so
+# the leg died inside it however recently that was.
+_status_liveness_workflow() {
+  local st
+  st="$(gh_workflow_run_status "$CTX_REPO" "$1")"
+  case "$st" in
+    queued|in_progress|requested|waiting|pending)
+      STATUS_LIVENESS="running" ;;
+    completed)
+      STATUS_LIVENESS="gone"; STATUS_LIVENESS_DETAIL="the workflow run finished without it" ;;
   esac
 }
 
@@ -2305,6 +2421,11 @@ _status_next() {
       return 0 ;;
     "awaiting resolution")
       ui_cmd "revloop resolve --pr $CTX_PR"
+      m="$(state_marker_for "$CTX_MARKERS" "$pass" resolve)"
+      if [[ -n "$m" && "$(jq -r '.state // ""' <<<"$m")" == "started" ]]; then
+        _status_liveness "$m"
+        [[ "$STATUS_LIVENESS" == "running" ]] && _status_next_running "$pass"
+      fi
       return 0 ;;
   esac
 
@@ -2331,9 +2452,12 @@ _status_next() {
 
   ui_cmd "revloop review --pr $CTX_PR"
   if [[ -n "$m" && "$(jq -r '.state // ""' <<<"$m")" == "started" ]]; then
-    if stale="$(state_claim_is_stale "$m" "$CTX_HEAD_SHA")"; then
-      ui_line "That claim is stale — $stale — so a re-run abandons it and starts"
-      ui_line "pass $pass again."
+    _status_liveness "$m"
+    if [[ "$STATUS_LIVENESS" == "running" ]]; then
+      _status_next_running "$pass"
+    elif stale="$(state_claim_is_stale "$m" "$CTX_HEAD_SHA")"; then
+      ui_line "The unfinished pass is stale — $stale — so a re-run abandons it"
+      ui_line "and starts pass $pass again."
     else
       ui_line "The head has not moved, so a re-run resumes pass $pass and posts"
       ui_line "only what is missing."
@@ -2347,6 +2471,19 @@ _status_next() {
     ui_line "halts the loop rather than retrying again."
   }
   return 0
+}
+
+# What NEXT says under a command whose leg is already running.
+#
+# The row above says the leg is alive, so a section that reads as an invitation
+# to start it again would contradict the one thing this display exists to get
+# right. The command keeps its place — it is what resumes the pass if that run
+# dies, and NEXT always ends in something typable — but it stops being the thing
+# to do now.
+_status_next_running() {
+  ui_line "Pass $1 is running now, so wait for it rather than starting a"
+  ui_line "second run over the same pull request. The command above resumes"
+  ui_line "the pass if that one dies."
 }
 
 # A halt has three shapes and they need different levers: a cap wants raising, a
