@@ -1799,6 +1799,72 @@ _resolve_summary_body() {
 # The drivers
 # ---------------------------------------------------------------------------
 
+# At the pass bound, finish the pass already under way, then stop.
+#
+# The bound stops another pass from *starting*; it must not strand one that has
+# already begun. A cycle interrupted between the two legs of the last allowed
+# pass would otherwise be unresumable: the restart reads the pass number, finds
+# it at the bound and exits 0, leaving that pass's findings unresolved and its
+# threads open — a halt that reads as a clean finish, which is the shape of
+# failure this loop exists to avoid.
+#
+# Runs at most one leg. Nothing here starts a pass: the review leg is invoked
+# only to resume an unfinished claim for the pass already at the bound.
+#
+# $1 the current review pass, $2 the bound, then the arguments for the legs.
+_cycle_finish_at_bound() {
+  local pass="$1" max="$2"; shift 2
+  local marker verdict actionable
+
+  marker="$(state_marker_for "$CTX_MARKERS" "$pass" review)"
+  if [[ "$(jq -r '.state // ""' <<<"$marker")" != "complete" ]]; then
+    ui_say "Pass $pass is the last one max_passes_per_cycle ($max) allows, and its review did not finish. Resuming it."
+    leg_review "$@" --continuation --no-tips || return 1
+    ctx_load "$CTX_PR" "$CTX_REPO"
+    pass="$(state_current_review_pass "$CTX_MARKERS")"
+    marker="$(state_marker_for "$CTX_MARKERS" "$pass" review)"
+    if [[ "$(jq -r '.state // ""' <<<"$marker")" != "complete" ]]; then
+      ui_end "Stopped on pass $pass of $CTX_REPO#$CTX_PR — the review leg did not finish, so no resolve leg follows it."
+      return 0
+    fi
+  fi
+
+  verdict="$(jq -r '.verdict // "blocked"' <<<"$marker")"
+  actionable="$(run_actionable "$(jq -c '.findings // []' <<<"$marker")")"
+  if [[ "$verdict" == "blocked" ]]; then
+    ui_end "Halted after pass $pass — the reviewer could not complete."
+    return 0
+  fi
+  if [[ "$verdict" == "converged" ]] || (( actionable == 0 )); then
+    ui_end "Converged after pass $pass — nothing at or above min_fix_severity ($CTX_MIN_FIX_SEVERITY) remains."
+    return 0
+  fi
+  if state_current_pass_complete "$CTX_MARKERS" "$pass" resolve; then
+    ui_end "Reached max_passes_per_cycle ($max) on $CTX_REPO#$CTX_PR without starting another pass."
+    return 0
+  fi
+
+  ui_say "Pass $pass is the last one max_passes_per_cycle ($max) allows, and its resolve leg is still owed."
+  leg_resolve "$@" --no-tips || return 1
+
+  # The same two outcomes the loop reports after a resolve leg, so the last line
+  # an operator reads describes what actually happened rather than assuming the
+  # bound was the reason it stopped.
+  local rmarker
+  ctx_load "$CTX_PR" "$CTX_REPO"
+  rmarker="$(state_marker_for "$CTX_MARKERS" "$pass" resolve)"
+  if [[ "$(jq -r '.blocked // false' <<<"$rmarker")" == "true" ]]; then
+    ui_end "Halted after pass $pass — the resolver reported blocked."
+    return 0
+  fi
+  if grep -qw "revloop/stop" <<<"$CTX_LABELS"; then
+    ui_end "Halted after pass $pass — a point needs a human decision, so revloop/stop is applied."
+    return 0
+  fi
+  ui_end "Reached max_passes_per_cycle ($max) on $CTX_REPO#$CTX_PR — pass $pass is resolved, and no further pass starts."
+  return 0
+}
+
 # local mode: one process calls the legs in sequence. Because state lives on
 # the pull request rather than in process memory, this is a thin driver over the
 # same legs the workflows invoke, and the two modes can be A/B tested on real
@@ -1823,7 +1889,7 @@ cmd_cycle() {
 
   pass="$(state_current_review_pass "$CTX_MARKERS")"
   if (( pass >= max )); then
-    ui_end "Reached max_passes_per_cycle ($max) on $CTX_REPO#$CTX_PR without starting another pass."
+    _cycle_finish_at_bound "$pass" "$max" "${args[@]}" || return 1
     return 0
   fi
 

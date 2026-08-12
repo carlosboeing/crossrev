@@ -30,26 +30,33 @@ no_threads() { route '*reviewThreads*' "$(threads_response)"; }
 # Exercise the cycle driver without replacing the behavior under test with a
 # mock. The real cmd_cycle owns argument classification and its loop boundary;
 # only the networked legs and state reads beneath that boundary are replaced.
+# $3 and $4 describe an interrupted pass: the state of its review marker, and
+# whether its resolve leg already ran. A finished pass is the default.
 cycle_driver() {
-  local starting_pass="$1" log="$2" pass_file
+  local starting_pass="$1" log="$2" review_state="${3:-complete}" resolve_done="${4:-yes}"
+  local pass_file
   pass_file="$(mktemp)"
   printf '%s' "$starting_pass" >"$pass_file"
-  ROOT="$HERE/.." CYCLE_PASS_FILE="$pass_file" CYCLE_LOG="$log" bash -c '
+  ROOT="$HERE/.." CYCLE_PASS_FILE="$pass_file" CYCLE_LOG="$log" \
+  CYCLE_REVIEW_STATE="$review_state" CYCLE_RESOLVE_DONE="$resolve_done" bash -c '
     source "$ROOT/lib/run.sh"
     ctx_load() {
-      CTX_REPO="acme/widget"; CTX_PR=42; CTX_MAX_PASSES=3
-      CTX_MARKERS="[]"; CTX_LABELS=""; CTX_FIX_AT="medium"
+      CTX_REPO="acme/widget"; CTX_PR=42; CTX_MAX_PASSES_PER_CYCLE=3
+      CTX_MARKERS="[]"; CTX_LABELS=""; CTX_MIN_FIX_SEVERITY="medium"
     }
     leg_review() {
-      printf "%s\n" "$*" >>"$CYCLE_LOG"
+      printf "review %s\n" "$*" >>"$CYCLE_LOG"
       current="$(cat "$CYCLE_PASS_FILE")"
       printf "%s" "$((current + 1))" >"$CYCLE_PASS_FILE"
+      CYCLE_REVIEW_STATE=complete
+      CYCLE_RESOLVE_DONE=no
     }
-    leg_resolve() { :; }
+    leg_resolve() { printf "resolve %s\n" "$*" >>"$CYCLE_LOG"; CYCLE_RESOLVE_DONE=yes; }
     state_current_review_pass() { cat "$CYCLE_PASS_FILE"; }
     state_marker_for() {
-      printf "%s" "{\"verdict\":\"issues-remain\",\"findings\":[{\"severity\":\"high\"}]}"
+      printf "%s" "{\"state\":\"$CYCLE_REVIEW_STATE\",\"verdict\":\"issues-remain\",\"findings\":[{\"severity\":\"high\"}]}"
     }
+    state_current_pass_complete() { [[ "$CYCLE_RESOLVE_DONE" == "yes" ]]; }
     run_actionable() { printf "1"; }
     ui_say() { :; }
     ui_end() { printf "%s\n" "$*"; }
@@ -261,7 +268,7 @@ has "a generated pass at the bound does not start" "$out" "reached max_passes_pe
 
 cycle_log="$(mktemp)"
 out="$(cycle_driver 0 "$cycle_log")"
-is "an attended cycle runs only three review passes" "$(wc -l <"$cycle_log" | tr -d ' ')" "3"
+is "an attended cycle runs only three review passes" "$(grep -c '^review ' "$cycle_log" || true)" "3"
 is "its first pass is individually requested"       "$(grep -c -- '--continuation' "$cycle_log" || true)" "2"
 has "and the cycle stops at max_passes_per_cycle"    "$out" "Reached max_passes_per_cycle (3)"
 
@@ -269,6 +276,30 @@ has "and the cycle stops at max_passes_per_cycle"    "$out" "Reached max_passes_
 out="$(cycle_driver 3 "$cycle_log")"
 is "an attended cycle already at the bound stops immediately" "$(wc -l <"$cycle_log" | tr -d ' ')" "0"
 has "and it explains the bound before running a leg"           "$out" "Reached max_passes_per_cycle (3)"
+
+# The bound stops a pass starting, not a pass finishing. A cycle killed between
+# the two legs of the last allowed pass used to be unresumable: the restart read
+# the pass number, found it at the bound and exited clean, leaving that pass's
+# findings unresolved and its threads open.
+: >"$cycle_log"
+out="$(cycle_driver 3 "$cycle_log" complete no)"
+is "an interrupted final pass still gets the resolve leg it is owed" \
+  "$(grep -c '^resolve ' "$cycle_log" || true)" "1"
+is "and finishing it starts no further review pass" \
+  "$(grep -c '^review ' "$cycle_log" || true)" "0"
+has "and the bound is still what stops the run"     "$out" "Reached max_passes_per_cycle (3)"
+
+# Interrupted one leg earlier: the review claim itself is unfinished, so the
+# review leg resumes it as a continuation before its resolve leg follows.
+: >"$cycle_log"
+out="$(cycle_driver 3 "$cycle_log" started no)"
+is "an unfinished final review is resumed rather than abandoned" \
+  "$(grep -c '^review ' "$cycle_log" || true)" "1"
+is "as a continuation, so it cannot start a fresh pass" \
+  "$(grep -c -- '--continuation' "$cycle_log" || true)" "1"
+is "and its resolve leg follows once it completes" \
+  "$(grep -c '^resolve ' "$cycle_log" || true)" "1"
+has "before the bound stops the run"                "$out" "Reached max_passes_per_cycle (3)"
 
 # A non-positive bound used to mean opposite things on the two paths: the
 # automatic loop skipped the pass check entirely and kept starting passes, while
