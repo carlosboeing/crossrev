@@ -396,6 +396,17 @@ has "the review prompt carries the diff with its line numbers" \
 has "and marks the side an added line cannot be commented on" \
   "$(cat "$PROMPT_LOG")" "   -    2 |+export function refresh()"
 
+# The lines checked above and the commit the comment is posted against have to
+# describe one revision. `repos/{repo}/pulls/{n}` returns whatever the diff is
+# at the moment of the call, so asking for it by number is a second read of a
+# moving target: a push landing between that read and the `gh pr view` the leg
+# already did would validate lines from one revision and post them against
+# another. Both revisions now come from the one call that read them together.
+has "the diff is fetched pinned to the revisions the leg loaded" \
+  "$(calls)" "compare/$FIX_BASE...$FIX_HEAD"
+hasnt "and not by pull request number, which is whatever it is at the time" \
+  "$(calls)" "vnd.github.diff repos/$FIX_REPO/pulls/42"
+
 # --- a finding that could not be anchored at all ---------------------------
 #
 # The snap is bounded, and GitHub can refuse a line for reasons the diff does

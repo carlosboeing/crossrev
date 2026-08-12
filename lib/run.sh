@@ -727,7 +727,7 @@ Reading the diff and any earlier review threads. This comment becomes the pass s
 
     exclude=""
     [[ "$CTX_BACKLOG" == "repository" ]] && exclude="^(${CTX_BACKLOG_PATH}|\\.revloop/)"
-    gh_pr_diff "$CTX_REPO" "$CTX_PR" "$exclude" >"$diff_file"
+    gh_pr_diff "$CTX_REPO" "$CTX_PR" "$CTX_BASE_SHA" "$CTX_HEAD_SHA" "$exclude" >"$diff_file"
 
     cfg_show_at_base "$CTX_BASE_SHA" "REVIEW.md" >"$review_md" 2>/dev/null || : >"$review_md"
 
@@ -1340,7 +1340,7 @@ Verifying each finding against the codebase. This comment becomes the pass summa
     diff_file="$tmp/diff"; prompt_file="$tmp/prompt"; envelope_file="$tmp/envelope"
     exclude=""
     [[ "$CTX_BACKLOG" == "repository" ]] && exclude="^(${CTX_BACKLOG_PATH}|\\.revloop/)"
-    gh_pr_diff "$CTX_REPO" "$CTX_PR" "$exclude" >"$diff_file"
+    gh_pr_diff "$CTX_REPO" "$CTX_PR" "$CTX_BASE_SHA" "$CTX_HEAD_SHA" "$exclude" >"$diff_file"
 
     meta="$(jq -cn --arg repo "$CTX_REPO" --argjson pr "$CTX_PR" --argjson pass "$pass" \
       --argjson max "$CTX_MAX_PASSES_PER_CYCLE" --arg sha "$CTX_HEAD_SHA" --arg fa "$CTX_MIN_FIX_SEVERITY" \

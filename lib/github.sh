@@ -53,10 +53,24 @@ gh_repo_issue_comments_page() {
 # The exclusion is not cosmetic: a repository backlog means the resolver commits its own
 # bookkeeping into the PR branch, and the next pass would then review revloop's
 # notes about the last pass.
+#
+# Pinned to the two revisions the leg already loaded rather than asked for by
+# pull request number, because `repos/{repo}/pulls/{n}` returns whatever the
+# diff is at the moment of the call. The line numbers in it are what a finding
+# anchors to and what the orchestrator checks that anchor against, while the
+# comment is posted against `head_sha` read earlier in the same leg — so two
+# reads of a moving target would let a push between them validate lines from one
+# revision and post them against another. One read of the pair, from `gh pr
+# view`, cannot disagree with itself.
+#
+# `base...head` is the three-dot comparison, so it diffs from the merge base
+# exactly as the pull request view does. Verified against pull request 14: the
+# two endpoints returned byte-identical output.
 gh_pr_diff() {
-  local repo="$1" pr="$2" exclude_re="${3:-}" diff
-  diff="$(gh api -H "Accept: application/vnd.github.diff" "repos/$repo/pulls/$pr" 2>/dev/null)" \
-    || ui_die "could not fetch the diff for $repo#$pr" \
+  local repo="$1" pr="$2" base="$3" head="$4" exclude_re="${5:-}" diff
+  diff="$(gh api -H "Accept: application/vnd.github.diff" \
+            "repos/$repo/compare/$base...$head" 2>/dev/null)" \
+    || ui_die "could not fetch the diff for $repo#$pr at $head" \
        "The review leg has nothing to reason about without it. Check network access and \`gh auth status\`."
   if [[ -z "$exclude_re" ]]; then printf '%s' "$diff"; return 0; fi
   awk -v ex="$exclude_re" '
