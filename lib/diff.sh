@@ -30,8 +30,64 @@ REVLOOP_DIFF_SNAP=3
 _diff_parse() {
   local mode="$1" file="$2" want_path="${3:-}" want_side="${4:-}" want_line="${5:-0}" bound="${6:-0}"
   [[ -s "$file" ]] || return 0
-  awk -v mode="$mode" -v want_path="$want_path" -v want_side="$want_side" \
-      -v want_line="$want_line" -v bound="$bound" '
+  # LC_ALL=C so every substr, length and sprintf below counts bytes rather than
+  # characters. A path git escaped as octal has to be rebuilt one byte at a
+  # time — under a UTF-8 locale `sprintf("%c", 195)` yields a two-byte
+  # character instead of the byte the path is made of.
+  #
+  # The path arrives through the environment rather than through `-v`, because
+  # `-v` runs its value through awk's own escape processing: a path containing a
+  # backslash would be decoded on the way in and then fail to match the path in
+  # the diff, or match one it is not. ENVIRON hands the bytes over untouched.
+  REVLOOP_DIFF_PATH="$want_path" REVLOOP_DIFF_SIDE="$want_side" \
+  LC_ALL=C awk -v mode="$mode" -v want_line="$want_line" -v bound="$bound" '
+    BEGIN { want_path = ENVIRON["REVLOOP_DIFF_PATH"]; want_side = ENVIRON["REVLOOP_DIFF_SIDE"] }
+    # Undo git C-style quoting: the whole path wrapped in double quotes, with
+    # \\ and \" escaped, the usual control-character escapes, and \### octal for
+    # every byte outside printable ASCII. GitHub anchors a comment to the raw
+    # path, so the quoting is decoded rather than compared against.
+    function unquote(s,   out, i, e, n, j) {
+      if (substr(s, 1, 1) != "\"") return s
+      s = substr(s, 2, length(s) - 2)
+      out = ""
+      for (i = 1; i <= length(s); i++) {
+        if (substr(s, i, 1) != "\\") { out = out substr(s, i, 1); continue }
+        e = substr(s, i + 1, 1)
+        if (e >= "0" && e <= "7") {
+          n = 0
+          for (j = 0; j < 3 && substr(s, i + 1, 1) >= "0" && substr(s, i + 1, 1) <= "7"; j++) {
+            n = n * 8 + (substr(s, i + 1, 1) + 0); i++
+          }
+          out = out sprintf("%c", n)
+          continue
+        }
+        i++
+        if      (e == "a") out = out sprintf("%c", 7)
+        else if (e == "b") out = out sprintf("%c", 8)
+        else if (e == "t") out = out sprintf("%c", 9)
+        else if (e == "n") out = out sprintf("%c", 10)
+        else if (e == "v") out = out sprintf("%c", 11)
+        else if (e == "f") out = out sprintf("%c", 12)
+        else if (e == "r") out = out sprintf("%c", 13)
+        else               out = out e
+      }
+      return out
+    }
+    # One path off a `---` or `+++` line, decoded and with its side prefix off.
+    #
+    # These carry one path each and the `diff --git` header carries two with no
+    # separator that cannot appear inside a name, so `diff --git a/my file.md
+    # b/my file.md` is genuinely ambiguous and reading whitespace fields off it
+    # makes `my` and `file.md` out of one name. A trailing tab is git marking a
+    # name it could not otherwise delimit, and never part of the name — a real
+    # tab inside one is escaped, so the quoted form has no literal tab in it.
+    function header_path(rest, prefix,   p) {
+      sub(/\t.*$/, "", rest)
+      p = unquote(rest)
+      if (p == "/dev/null") return ""
+      sub("^" prefix, "", p)
+      return p
+    }
     function keep(kind, o, n, raw) {
       if (mode != "number") return
       rows++; k[rows] = kind; ro[rows] = o; rn[rows] = n; rr[rows] = raw
@@ -51,9 +107,10 @@ _diff_parse() {
       if (best == "" || d < bestd || (d == bestd && v < best)) { best = v; bestd = d }
     }
 
+    # The header only clears the previous file. Its own paths are read off the
+    # two lines below it, which a file with hunks always has.
     /^diff --git / {
-      path = $3; sub(/^a\//, "", path)
-      bpath = $4; sub(/^b\//, "", bpath)
+      path = ""; bpath = ""
       in_hunk = 0; keep("H", "-", "-", $0); next
     }
     # Hunk counts are omitted when they are 1, so read only up to the comma.
@@ -63,8 +120,10 @@ _diff_parse() {
       oldno = o + 0; newno = n + 0
       in_hunk = 1; keep("H", "-", "-", $0); next
     }
-    # `--- a/x` and `+++ b/x` reach here only outside a hunk, so a deleted line
+    # `--- a/x` and `+++ b/x` are matched only outside a hunk, so a deleted line
     # whose own text starts with `--` is still read as a deletion.
+    !in_hunk && /^--- / { path  = header_path(substr($0, 5), "a/"); keep("H", "-", "-", $0); next }
+    !in_hunk && /^\+\+\+ / { bpath = header_path(substr($0, 5), "b/"); keep("H", "-", "-", $0); next }
     !in_hunk { keep("H", "-", "-", $0); next }
     # "\ No newline at end of file" annotates the line above and is not one.
     /^\\/ { keep("H", "-", "-", $0); next }

@@ -130,6 +130,44 @@ is "and the bound is settable for a caller that wants a wider reach" \
 is "an equidistant line snaps to the earlier of the two" \
   "$(diff_anchor "$tmp/pr14.diff" "$CH" RIGHT 24 11)" "13"
 
+# --- paths git could not write plainly -------------------------------------
+#
+# Two shapes, and the header line cannot express either one. A name with a space
+# is written bare — `diff --git a/docs/my notes.md b/docs/my notes.md` — with no
+# separator that cannot also appear inside a name, so whitespace fields make
+# `a/docs/my` and `notes.md` out of one path. Anything outside printable ASCII
+# is C-quoted instead, and then the field is a quoted, escaped string rather
+# than a path at all. Either way the file is invisible to a parser reading
+# fields, so a finding on it can be neither validated nor snapped, and the
+# off-by-one this layer exists to repair falls back to a top-level comment.
+#
+# The `---` and `+++` lines carry one path each, which is why they are what gets
+# read. Git marks a name it could not otherwise delimit with a trailing tab.
+printf 'diff --git a/docs/my notes.md b/docs/my notes.md\n' >"$tmp/odd.diff"
+printf 'index 1111111..2222222 100644\n' >>"$tmp/odd.diff"
+printf -- '--- a/docs/my notes.md\t\n+++ b/docs/my notes.md\t\n' >>"$tmp/odd.diff"
+printf '@@ -6,2 +6,3 @@ heading\n existing line\n+added line\n context line\n' >>"$tmp/odd.diff"
+printf 'diff --git "a/docs/caf\\303\\251.md" "b/docs/caf\\303\\251.md"\n' >>"$tmp/odd.diff"
+printf 'index 3333333..4444444 100644\n' >>"$tmp/odd.diff"
+printf -- '--- "a/docs/caf\\303\\251.md"\n+++ "b/docs/caf\\303\\251.md"\n' >>"$tmp/odd.diff"
+printf '@@ -20,1 +20,2 @@ heading\n kept line\n+new line\n' >>"$tmp/odd.diff"
+
+SPACED='docs/my notes.md'
+QUOTED="$(printf 'docs/caf\303\251.md')"
+
+is "a line inside a hunk of a spaced path is used as given" \
+  "$(diff_anchor "$tmp/odd.diff" "$SPACED" RIGHT 7)" "7"
+is "and one line past its hunk snaps back into it" \
+  "$(diff_anchor "$tmp/odd.diff" "$SPACED" RIGHT 9)" "8"
+is "a C-quoted path is decoded to the raw path GitHub anchors against" \
+  "$(diff_anchor "$tmp/odd.diff" "$QUOTED" RIGHT 21)" "21"
+is "and its off-by-one snaps back too" \
+  "$(diff_anchor "$tmp/odd.diff" "$QUOTED" RIGHT 22)" "21"
+is "the escaped spelling is not itself a path in the diff" \
+  "$(diff_anchor "$tmp/odd.diff" 'docs/caf\303\251.md' RIGHT 21)" ""
+is "and the two files stay separate rather than sharing one hunk" \
+  "$(diff_anchor "$tmp/odd.diff" "$SPACED" RIGHT 21)" ""
+
 # --- degenerate input ------------------------------------------------------
 : >"$tmp/empty.diff"
 is "an empty diff anchors nothing" \
