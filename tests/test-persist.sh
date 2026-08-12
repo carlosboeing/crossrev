@@ -99,6 +99,12 @@ backlog:
 EOF
 }
 
+# A stated `layout: file` with no path, which is the only configuration whose
+# resolved destination has a parent directory that does not exist yet.
+config_with_default_file_backlog() {
+  config_with_file_sink | sed 's/^    layout: folder$/    layout: file/; /^    path: /d'
+}
+
 # Only a deferral, nothing fixed. The case where a commit has to happen for a
 # reason other than a code change.
 #
@@ -236,6 +242,27 @@ is  "it still commits, because the backlog wrote to the tree" \
 has "and says what the commit is for, not 'fix'"      "$(git log -1 --format=%s)" "chore: record deferred revloop findings"
 hasnt "no fix was claimed, so nothing warns about one" \
   "$out" "changed no files"
+
+# --- the default file layout has to write where it says it wrote ----------
+#
+# `layout: file` with no path resolves to `.revloop/backlog.md`, and `.revloop`
+# does not exist in a repository that has never run the loop. The append then
+# failed on the missing directory without stopping the function, which printed
+# the path anyway — so the finding was counted filed and its thread resolved
+# against a file nobody had written. The folder layout was never exposed to it,
+# because it creates its directory first.
+fixture_repo "$(config_with_default_file_backlog)"; stub_reset
+routes_baseline "$(marker_comment 9001 "$(review_marker)" | jq -cs . | payload)"
+routes_resolve
+REVLOOP_RESOLVE_PAYLOAD="$(defer_only_payload | payload)"; export REVLOOP_RESOLVE_PAYLOAD
+out="$("$REVLOOP" resolve --pr 42 2>&1)"; rc=$?
+
+is  "the default file layout exits clean"             "$rc" "0"
+is  "and the file it names is actually written" \
+  "$(git show --name-only --format= HEAD | grep -c '^\.revloop/backlog\.md$')" "1"
+has "carrying the deferred finding it claimed to file" \
+  "$(cat .revloop/backlog.md)" "Legacy export is untyped"
+has "and the summary points at that path"             "$out" "filed 1 issue(s) for deferred work"
 
 # --- the review leg's own comments must not silence the resolver ---------
 #

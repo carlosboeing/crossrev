@@ -1628,15 +1628,22 @@ Found by revloop while reviewing $CTX_REPO#$CTX_PR (pass $pass). Verified agains
       cfg_assert_path_inside_repo "$dir"
       if [[ "$CTX_BACKLOG_LAYOUT" == "file" ]]; then
         # An existing markdown convention is appended to, because that is what
-        # the convention is.
-        printf '\n## %s\n\n%s\n' "$title" "$body" >>"$dir"
+        # the convention is. The parent is created first: the fallback for a
+        # stated `layout: file` with no path is `.revloop/backlog.md`, whose
+        # directory normally does not exist, and an append into a missing
+        # directory fails without stopping the function. The path was printed
+        # anyway, so the caller counted the finding tracked and resolved its
+        # thread against a write that never landed — which is the one failure
+        # persisting before resolving exists to prevent.
+        mkdir -p "$(dirname "$dir")" || return 1
+        printf '\n## %s\n\n%s\n' "$title" "$body" >>"$dir" || return 1
         printf '%s' "$dir"
       else
         # One file per finding, never an append: two concurrent pull requests
         # appending to one markdown file conflict on merge every time.
-        mkdir -p "$dir"
+        mkdir -p "$dir" || return 1
         target="$dir/$id.md"
-        printf '# %s\n\n%s\n' "$title" "$body" >"$target"
+        printf '# %s\n\n%s\n' "$title" "$body" >"$target" || return 1
         printf '%s' "$target"
       fi ;;
     *)
@@ -2166,19 +2173,21 @@ _status_next() {
 
   # awaiting review, and why one is owed.
   #
-  # The cap comes first, because a pass at max_passes_per_cycle is owed a review that
-  # cannot run. `legs_should_continue` refuses when the last pass reached the cap,
-  # so printing the bare command here would send the reader at something that
-  # declines, writes a declined marker and halts the loop. The condition that has
-  # to change goes above the command that follows it — which is the shape the
-  # halted and stopped sections already use.
+  # The cap comes first, because a pass at max_passes_per_cycle is owed a review
+  # the loop will not start by itself. The bound is a bound on the loop
+  # continuing, not on a person: an automatic trigger and a cycle's own later
+  # passes meet it, while `revloop review --pr N` typed by hand runs one attended
+  # pass regardless. So the state is described rather than the command withheld,
+  # and the condition that changes the *automatic* behaviour goes above the
+  # command — the shape the halted and stopped sections already use.
   m="$(state_marker_for "$CTX_MARKERS" "$pass" review)"
   if (( pass >= CTX_MAX_PASSES_PER_CYCLE )) \
      && [[ "$(jq -r '.state // ""' <<<"$m")" == "complete" ]] \
      && state_current_pass_complete "$CTX_MARKERS" "$pass" resolve; then
-    ui_line "pass $pass was the last one max_passes_per_cycle ($CTX_MAX_PASSES_PER_CYCLE) allows, so a"
-    ui_line "review now would be refused rather than run. Raise policy.max_passes_per_cycle in"
-    ui_line ".github/revloop.yml, then:"
+    ui_line "pass $pass reached max_passes_per_cycle ($CTX_MAX_PASSES_PER_CYCLE), so the loop will"
+    ui_line "not start another pass on its own. Raise policy.max_passes_per_cycle in"
+    ui_line ".github/revloop.yml to let it continue by itself. Asking for one pass"
+    ui_line "by hand runs it either way:"
     ui_cmd  "revloop review --pr $CTX_PR"
     return 0
   fi
