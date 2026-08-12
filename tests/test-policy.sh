@@ -270,6 +270,29 @@ out="$(cycle_driver 3 "$cycle_log")"
 is "an attended cycle already at the bound stops immediately" "$(wc -l <"$cycle_log" | tr -d ' ')" "0"
 has "and it explains the bound before running a leg"           "$out" "Reached max_passes_per_cycle (3)"
 
+# A non-positive bound used to mean opposite things on the two paths: the
+# automatic loop skipped the pass check entirely and kept starting passes, while
+# a cycle compared the pass number and stopped before the first one. The daily
+# bound does not cover the gap, because repeated passes on one pull request cost
+# it nothing. Both paths now refuse the value when the config loads.
+for bad in 0 -1; do
+  fixture_repo "$(fixture_default_config | sed "s/max_passes_per_cycle: 3/max_passes_per_cycle: $bad/")"
+  stub_reset
+  routes_baseline "$(marker_comment 9001 "$three_done" | jq -cs . | payload)"
+  route 'api --method POST repos/*/issues/42/comments*' '{"id":9001}'
+  no_threads
+
+  out="$("$REVLOOP" review --pr 42 --trigger automatic 2>&1)"; rc=$?
+  is  "an automatic review under max_passes_per_cycle $bad exits non-zero" "$rc" "1"
+  has "and names the bound rather than looping past it" \
+    "$out" "max_passes_per_cycle is '$bad'"
+  is  "and it writes nothing to the pull request"       "$(count 'method POST')" "0"
+
+  out="$("$REVLOOP" cycle --pr 42 2>&1)"; rc=$?
+  is  "a cycle under the same value exits non-zero"     "$rc" "1"
+  has "and gives the same reason as the review leg"     "$out" "max_passes_per_cycle is '$bad'"
+done
+
 # --- fork pull requests fail closed ------------------------------------
 fixture_repo; stub_reset
 routes_baseline "$(printf '[]' | payload)"

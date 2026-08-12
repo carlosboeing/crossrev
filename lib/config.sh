@@ -126,6 +126,7 @@ cfg_load() {
     ')"
 
   cfg_assert_min_fix_severity
+  cfg_assert_max_passes_per_cycle
 }
 
 # An unrecognised threshold must not be representable.
@@ -142,6 +143,25 @@ cfg_assert_min_fix_severity() {
     *) ui_die "policy.min_fix_severity is '${min_fix_severity:-unset}', which is not one of high, medium or low" \
          "It names the lowest severity the resolve leg may change code for unattended. Set it to high, medium or low in the repository config, or remove it to take the default of medium." ;;
   esac
+}
+
+# A pass bound is a count of passes, and zero is not one.
+#
+# Zero is already spoken for inside the orchestrator: `leg_review` passes 0 into
+# `legs_should_continue` as its own sentinel for "no pass bound applies to this
+# invocation", which is what lets a person ask for one attended pass past the
+# bound. An operator writing 0 or -1 lands on that sentinel from the other
+# direction, and the two readers then disagree about what it means — the
+# automatic loop takes it as no bound at all and keeps starting passes, while
+# `cmd_cycle` compares the pass number directly and stops before the first one.
+# Neither is what somebody typing zero into a cap expects, and the automatic
+# reading is the expensive one. Refuse the value where it can still be named.
+cfg_assert_max_passes_per_cycle() {
+  local max
+  max="$(jq -r '.policy.max_passes_per_cycle // empty' <<<"$CFG_MERGED")"
+  if [[ "$max" =~ ^[0-9]+$ ]] && (( max > 0 )); then return 0; fi
+  ui_die "policy.max_passes_per_cycle is '${max:-unset}', which is not a whole number of passes above zero" \
+    "It bounds how many passes the loop runs by itself before a person has to ask for another, so the smallest meaningful value is 1. Set it to 1 or more in the repository config, or remove it to take the default of 3. To stop revloop reviewing a repository at all, remove its workflows rather than setting the bound to zero."
 }
 
 # A version key that is present and not 1 is a refusal, not a warning. The whole

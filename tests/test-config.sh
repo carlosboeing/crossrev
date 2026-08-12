@@ -104,6 +104,28 @@ for level in high medium low; do
   is "min_fix_severity $level is accepted" "$($REVLOOP config show | jq -r .policy.min_fix_severity)" "$level"
 done
 
+# --- the pass bound --------------------------------------------------------
+#
+# Zero is the orchestrator's own sentinel for "no pass bound applies to this
+# invocation", which is what lets a person ask for one attended pass past the
+# bound. An operator writing zero into the cap lands on it from the other side,
+# and the two readers then disagree: the automatic loop reads no bound and keeps
+# starting passes, while `cmd_cycle` compares the pass number and stops before
+# the first one. Refused at load, where the message can still name the key.
+for bad in 0 -1 three; do
+  d="$(new_repo)"; cd "$d" || exit 1; mkdir -p .github
+  printf 'version: 1\npolicy:\n  max_passes_per_cycle: %s\n' "$bad" > .github/revloop.yml
+  err="$($REVLOOP config show 2>&1 >/dev/null)"; rc=$?
+  is  "max_passes_per_cycle $bad exits non-zero"   "$rc" "1"
+  has "and the error names the bad value"          "$err" "max_passes_per_cycle is '$bad'"
+  has "and says the smallest value that works"     "$err" "Set it to 1 or more"
+done
+
+d="$(new_repo)"; cd "$d" || exit 1; mkdir -p .github
+printf 'version: 1\npolicy:\n  max_passes_per_cycle: 1\n' > .github/revloop.yml
+is "a single pass per cycle is accepted" \
+  "$($REVLOOP config show | jq -r .policy.max_passes_per_cycle)" "1"
+
 # --- precedence ------------------------------------------------------------
 d="$(new_repo)"; cd "$d" || exit 1; mkdir -p .github
 printf 'version: 1\npolicy:\n  max_passes_per_cycle: 5\nreviewer:\n  harness: claude\n' > .github/revloop.yml
