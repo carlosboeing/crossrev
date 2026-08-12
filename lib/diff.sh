@@ -41,7 +41,14 @@ _diff_parse() {
   # the diff, or match one it is not. ENVIRON hands the bytes over untouched.
   REVLOOP_DIFF_PATH="$want_path" REVLOOP_DIFF_SIDE="$want_side" \
   LC_ALL=C awk -v mode="$mode" -v want_line="$want_line" -v bound="$bound" '
-    BEGIN { want_path = ENVIRON["REVLOOP_DIFF_PATH"]; want_side = ENVIRON["REVLOOP_DIFF_SIDE"] }
+    BEGIN {
+      want_path = ENVIRON["REVLOOP_DIFF_PATH"]; want_side = ENVIRON["REVLOOP_DIFF_SIDE"]
+      # Newline-separated, because a path may contain a space and every other
+      # separator can appear in one too. Trailing slashes come off so that
+      # `docs/backlog` and `docs/backlog/` mean the same directory.
+      n_ex = split(ENVIRON["REVLOOP_DIFF_EXCLUDE"], ex, "\n")
+      for (i = 1; i <= n_ex; i++) sub(/\/+$/, "", ex[i])
+    }
     # Undo git C-style quoting: the whole path wrapped in double quotes, with
     # \\ and \" escaped, the usual control-character escapes, and \### octal for
     # every byte outside printable ASCII. GitHub anchors a comment to the raw
@@ -88,7 +95,31 @@ _diff_parse() {
       sub("^" prefix, "", p)
       return p
     }
+    # Does this path name an excluded file, or sit inside an excluded directory?
+    #
+    # Compared literally rather than as a pattern. The path is operator-supplied
+    # configuration, and interpolating it into a regular expression made a dot
+    # match any character, dropped the end anchor so `BACKLOG.md` also matched
+    # `BACKLOG.md.old`, and turned an unbalanced bracket in a filename into a
+    # syntax error that killed the whole diff.
+    function hits(d,   i) {
+      if (d == "") return 0
+      for (i = 1; i <= n_ex; i++) {
+        if (ex[i] == "") continue
+        if (d == ex[i] || index(d, ex[i] "/") == 1) return 1
+      }
+      return 0
+    }
+    # The lines of one file, emitted unless either side of it is excluded.
+    # Either side, not the new one alone, so a rename out of the backlog is
+    # still dropped.
+    function flush_section(   i) {
+      if (mode != "exclude") return
+      if (!hits(path) && !hits(bpath)) for (i = 1; i <= nbuf; i++) print buf[i]
+      nbuf = 0
+    }
     function keep(kind, o, n, raw) {
+      if (mode == "exclude") { buf[++nbuf] = raw; return }
       if (mode != "number") return
       rows++; k[rows] = kind; ro[rows] = o; rn[rows] = n; rr[rows] = raw
       if (o != "-" && o + 0 > widest) widest = o + 0
@@ -110,6 +141,7 @@ _diff_parse() {
     # The header only clears the previous file. Its own paths are read off the
     # two lines below it, which a file with hunks always has.
     /^diff --git / {
+      flush_section()
       path = ""; bpath = ""
       in_hunk = 0; keep("H", "-", "-", $0); next
     }
@@ -134,6 +166,7 @@ _diff_parse() {
     { offer(oldno, newno); keep("B", oldno, newno, $0); oldno++; newno++ }
 
     END {
+      if (mode == "exclude") { flush_section(); exit }
       if (mode == "anchor") {
         if (best != "" && bestd <= bound) print best
         exit
@@ -169,4 +202,26 @@ diff_number() { _diff_parse number "$1"; }
 diff_anchor() {
   local file="$1" path="$2" side="$3" line="$4" bound="${5:-$REVLOOP_DIFF_SNAP}"
   _diff_parse anchor "$file" "$path" "$side" "$line" "$bound"
+}
+
+# diff_exclude <diff_file> <path>...
+#
+# The diff with whole file sections dropped: a path that equals one of the given
+# paths, or sits under one of them as a directory. Everything else passes through
+# byte for byte.
+#
+# This exists because the backlog destination can be a path inside the repository
+# under review, and a leg that reviews the file its own findings are written to
+# reviews its own output. The paths come from operator configuration, so they are
+# matched literally — `.` is a dot, `BACKLOG.md` does not match `BACKLOG.md.old`,
+# and a bracket in a filename is a bracket rather than a broken pattern.
+#
+# It reads paths the way the rest of this file does, off the `---` and `+++`
+# lines with git's quoting decoded, so a name with a space in it is one name.
+diff_exclude() {
+  local file="$1"; shift
+  local list="" p
+  for p in "$@"; do [[ -n "$p" ]] && list+="${list:+$'\n'}$p"; done
+  if [[ -z "$list" ]]; then cat -- "$file"; return 0; fi
+  REVLOOP_DIFF_EXCLUDE="$list" _diff_parse exclude "$file"
 }

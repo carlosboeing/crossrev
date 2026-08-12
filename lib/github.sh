@@ -83,15 +83,21 @@ gh_repo_issue_comments_page() {
 # exactly as the pull request view does. Verified against pull request 14: the
 # two endpoints returned byte-identical output.
 gh_pr_diff() {
-  local repo="$1" pr="$2" base="$3" head="$4" exclude_re="${5:-}" diff
+  local repo="$1" pr="$2" base="$3" head="$4"; shift 4
+  local diff tmp
   diff="$(gh api -H "Accept: application/vnd.github.diff" \
             "repos/$repo/compare/$base...$head" 2>/dev/null)" \
     || ui_die "could not fetch the diff for $repo#$pr at $head" \
        "The review leg has nothing to reason about without it. Check network access and \`gh auth status\`."
-  if [[ -z "$exclude_re" ]]; then printf '%s' "$diff"; return 0; fi
-  awk -v ex="$exclude_re" '
-    /^diff --git / { p = $3; sub(/^a\//, "", p); keep = (p ~ ex) ? 0 : 1 }
-    keep' <<<"$diff"
+  if (( $# == 0 )); then printf '%s' "$diff"; return 0; fi
+  # Through a file rather than a pipe: `_diff_parse` refuses an empty input, and
+  # `-s` on a fifo answers that question about the pipe rather than about what
+  # is coming down it.
+  tmp="$(mktemp)" || ui_die "could not create a temporary file to filter the diff" \
+    "Check that the temporary directory is writable."
+  printf '%s' "$diff" >"$tmp"
+  diff_exclude "$tmp" "$@"
+  rm -f "$tmp"
 }
 
 # Review threads, with each thread's revloop finding ids read out of its comment

@@ -168,6 +168,64 @@ is "the escaped spelling is not itself a path in the diff" \
 is "and the two files stay separate rather than sharing one hunk" \
   "$(diff_anchor "$tmp/odd.diff" "$SPACED" RIGHT 21)" ""
 
+# --- dropping the backlog's own files --------------------------------------
+#
+# The backlog destination can be a path inside the repository under review, so
+# the leg would otherwise review the file its own findings are written to. The
+# path is operator configuration and used to be interpolated into a regular
+# expression, which failed three ways at once: `.` matched any character, there
+# was no end anchor so a configured file also matched longer names beginning
+# with it, and a bracket in a filename made an invalid pattern that killed the
+# whole diff rather than one file of it.
+mk_diff() {
+  local out="$1"; shift
+  : >"$out"
+  local p
+  for p in "$@"; do
+    printf 'diff --git a/%s b/%s\n' "$p" "$p" >>"$out"
+    printf 'index 1111111..2222222 100644\n' >>"$out"
+    printf -- '--- a/%s\n+++ b/%s\n' "$p" "$p" >>"$out"
+    printf '@@ -1,1 +1,2 @@\n kept\n+added\n' >>"$out"
+  done
+}
+paths_in() { grep '^diff --git' | sed 's|^diff --git a/||; s| b/.*$||'; }
+
+mk_diff "$tmp/ex.diff" 'BACKLOG.md' 'BACKLOG.md.old' 'BACKLOGxmd' 'app.ts' 'docs/backlog/one.md' 'docs/backlogged.md'
+
+kept="$(diff_exclude "$tmp/ex.diff" 'BACKLOG.md' | paths_in)"
+is   "the configured file itself is dropped"        "$(grep -Fxc 'BACKLOG.md' <<<"$kept")" "0"
+is   "a longer name beginning with it is not"       "$(grep -Fxc 'BACKLOG.md.old' <<<"$kept")" "1"
+is   "and the dot is a dot rather than any character" "$(grep -Fxc 'BACKLOGxmd' <<<"$kept")" "1"
+is   "an unrelated file is untouched"               "$(grep -Fxc 'app.ts' <<<"$kept")" "1"
+
+kept="$(diff_exclude "$tmp/ex.diff" 'docs/backlog' | paths_in)"
+is   "a configured directory drops what is inside it" "$(grep -Fxc 'docs/backlog/one.md' <<<"$kept")" "0"
+is   "and not a sibling sharing its prefix"           "$(grep -Fxc 'docs/backlogged.md' <<<"$kept")" "1"
+is   "a trailing slash means the same directory" \
+  "$(diff_exclude "$tmp/ex.diff" 'docs/backlog/' | paths_in | grep -Fxc 'docs/backlog/one.md')" "0"
+
+is   "several paths can be excluded at once" \
+  "$(diff_exclude "$tmp/ex.diff" 'BACKLOG.md' 'docs/backlog' | paths_in | wc -l | tr -d ' ')" "4"
+is   "excluding nothing passes the diff through unchanged" \
+  "$(diff_exclude "$tmp/ex.diff" | wc -l | tr -d ' ')" "$(wc -l <"$tmp/ex.diff" | tr -d ' ')"
+
+# A filename git could not write plainly, which the old parser could not read at
+# all: it took the path as whitespace fields off the `diff --git` header, so a
+# name with a space became two fields and matched nothing.
+mk_diff "$tmp/ex2.diff" 'docs/my notes.md' 'app.ts'
+is   "a path with a space is matched as one name" \
+  "$(diff_exclude "$tmp/ex2.diff" 'docs/my notes.md' | paths_in | grep -Fxc 'docs/my notes.md')" "0"
+is   "and its neighbour still passes"  \
+  "$(diff_exclude "$tmp/ex2.diff" 'docs/my notes.md' | paths_in | grep -Fxc 'app.ts')" "1"
+
+# A bracket in a filename was an unbalanced group, so awk exited and the leg was
+# handed an empty diff — every file unreviewed, and nothing said so.
+mk_diff "$tmp/ex3.diff" 'docs/backlog(new).md' 'app.ts'
+is   "a regex metacharacter in a filename does not empty the diff" \
+  "$(diff_exclude "$tmp/ex3.diff" 'docs/backlog(new).md' | paths_in | grep -Fxc 'app.ts')" "1"
+is   "and that file is still the one dropped" \
+  "$(diff_exclude "$tmp/ex3.diff" 'docs/backlog(new).md' | paths_in | grep -Fxc 'docs/backlog(new).md')" "0"
+
 # --- degenerate input ------------------------------------------------------
 : >"$tmp/empty.diff"
 is "an empty diff anchors nothing" \
