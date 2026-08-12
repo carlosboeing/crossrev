@@ -21,9 +21,25 @@ endpoints:
     base_url: https://api.kimi.com/coding/
     token_env: KIMI_API_KEY
 
-# Same vendor, different models. Weaker than cross-vendor — a bug this family
-# misses while reviewing, it also misses while resolving — and much better than
-# one model reviewing itself. Override locally per run with `--harness codex`.
+# The pairing, as `revloop init` resolved it. init writes both blocks — harness,
+# model, effort, endpoint, and the resolver's fix_at — so the committed file says
+# what the loop runs and what init provisioned credentials for. A field resolving
+# to nothing is removed rather than left at this template's value.
+#
+# Cross-vendor is strongest: a bug one model family misses reviewing, it misses
+# resolving too. What works, and what each costs:
+#
+#   codex / claude   hosted, cross-vendor. Codex's token rotates, so it adds
+#                    REVLOOP_CODEX_AUTH, a second App with Secrets: write, and a cron
+#   claude / claude  one vendor, two models — fable reviewing, opus resolving. One
+#                    secret, no cron. Weaker, and doubles Claude usage
+#   agy / claude     cross-vendor, self-hosted only: agy's token lives about an hour
+#   kimi / claude    local only. kimi is an endpoint on the claude adapter, and its
+#                    credential is a 15-minute OAuth token
+#
+# Model ids must be fully qualified: `claude-fable-5`, never `fable-5`, which fails
+# as an entitlement error rather than a typo. `effort` reaches the harness verbatim.
+# Override a leg for one run with `--harness codex`, without touching this.
 reviewer:
   harness: claude
   model: claude-fable-5

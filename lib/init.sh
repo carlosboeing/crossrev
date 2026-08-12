@@ -25,6 +25,7 @@ INIT_RUNNER="github-hosted"
 INIT_NEEDS_REFRESHER=0
 INIT_WORKFLOWS=""
 INIT_SECRETS=""
+INIT_SECRET_INVENTORY=""
 
 # Labels filed against an issue sink, which are not loop state and do not follow
 # the loop's colour scheme. The loop's own six come from legs_label_colour.
@@ -155,6 +156,7 @@ _init_resolve() {
   INIT_WRITES="${INIT_WRITES# }"; INIT_OVERWRITES="${INIT_OVERWRITES# }"
 
   INIT_SECRETS="$(_init_required_secrets)"
+  _init_load_secrets
 }
 
 # ---------------------------------------------------------------------------
@@ -381,13 +383,35 @@ _init_secret_note() {
   esac
 }
 
-_init_secret_exists() {
-  local name="$1"
+# One read per scope, cached for the run.
+#
+# This used to query GitHub twice per secret and decide from grep's exit status
+# alone, with stderr discarded — so a call that *failed* was indistinguishable
+# from a secret that was *absent*. Seven secrets meant fourteen calls to render
+# one plan, and any one of them falling over printed "MISSING — revloop will set
+# it" about a secret already sitting there. Measured on a live repository: five
+# identical dry-runs, five different answers, all three known-present secrets
+# flipping. In the one place an operator decides whether to hand this command a
+# live repository.
+#
+# The organisation read is allowed to fail. A login without `admin:org` gets 403
+# there, which is a permission state rather than a fault, and the repository read
+# is what decides the answer anyway. That one stops the run rather than guessing.
+_init_load_secrets() {
+  local out
   if [[ "$INIT_OWNER_TYPE" == "organization" ]] \
-     && gh secret list --org "$INIT_OWNER" 2>/dev/null | grep -q "^$name\b"; then
-    return 0
+     && out="$(gh secret list --org "$INIT_OWNER" 2>/dev/null)"; then
+    INIT_SECRET_INVENTORY="$out"
   fi
-  gh secret list --repo "$INIT_REPO" 2>/dev/null | grep -q "^$name\b"
+  out="$(gh secret list --repo "$INIT_REPO" 2>&1)" || ui_die \
+    "could not read the secrets on $INIT_REPO" \
+    "The plan says which secrets are already set, and a failed read would report every one of them missing. Check the login reaches that repository, then run it again. GitHub said: $out"
+  INIT_SECRET_INVENTORY="$INIT_SECRET_INVENTORY
+$out"
+}
+
+_init_secret_exists() {
+  grep -qE "^$1([[:space:]]|\$)" <<<"$INIT_SECRET_INVENTORY"
 }
 
 _init_branch_protected() {
@@ -811,12 +835,48 @@ _init_write_config() {
     *)       persist="none" ;;
   esac
 
+  local expr
   if [[ -n "$path" ]]; then
-    yq ".persist.defects = \"backlog\"
+    expr=".persist.defects = \"backlog\"
         | .sinks.backlog.type = \"file\"
-        | .sinks.backlog.path = \"$path\"" \
-      "$ROOT/templates/revloop.yml" >.github/revloop.yml
+        | .sinks.backlog.path = \"$path\""
   else
-    yq ".persist.defects = \"$persist\"" "$ROOT/templates/revloop.yml" >.github/revloop.yml
+    expr=".persist.defects = \"$persist\""
   fi
+
+  yq "$expr$(_init_policy_pairing)" "$ROOT/templates/revloop.yml" >.github/revloop.yml
+}
+
+# The pairing init actually provisioned for, written down.
+#
+# init derives the secret list — and whether a refresher App is needed at all —
+# from the resolved pairing, while the template ships a pairing of its own.
+# Copying the template verbatim therefore left a repository provisioned for one
+# reviewer and configured for another: a Codex credential, a second App carrying
+# `Secrets: write` and a cron refresher, all under a policy naming Claude. The
+# loop would then read that policy from the base revision and run the leg nobody
+# had provisioned.
+#
+# Same rule `persist.defects: auto` already follows — init resolves the answer
+# and the committed config states it, rather than leaving a bootstrap default in
+# a file the loop reads at runtime.
+#
+# A field resolving to nothing is deleted rather than left at the template's
+# value, so a leg cannot inherit `model: claude-fable-5` under a harness that
+# never had it.
+_init_policy_pairing() {
+  local leg f v
+  for leg in reviewer resolver; do
+    for f in harness model effort endpoint; do
+      v="$(cfg_get ".$leg.$f")"
+      if [[ -z "$v" || "$v" == "null" ]]; then
+        printf ' | del(.%s.%s)' "$leg" "$f"
+      else
+        printf ' | .%s.%s = "%s"' "$leg" "$f" "$v"
+      fi
+    done
+  done
+  v="$(cfg_get '.resolver.fix_at')"
+  [[ -n "$v" && "$v" != "null" ]] && printf ' | .resolver.fix_at = "%s"' "$v"
+  return 0
 }

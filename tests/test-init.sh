@@ -219,4 +219,67 @@ is  "init stops when a sink label is missing"   "$rc" "1"
 has "and names the label it will not invent"    "$err" "needs-triage"
 has "and says what would otherwise fail later"  "$err" "filing would die after the review had already posted"
 
+# --- reading the secrets that are already there --------------------------
+#
+# Nothing covered the found case. The baseline routes every `secret list` to an
+# empty string, which is what an absent secret and a failed query both look like
+# once stderr is discarded — so the plan could report a secret missing that was
+# sitting right there, and tell you to go set it again.
+fixture_repo "$(config_with_issue_sink)"; stub_reset
+routes_init
+route_first 'secret list --repo*' "$(printf 'APP_ID\t2026-08-10T11:34:05Z\nAPP_PRIVATE_KEY\t2026-08-10T11:34:06Z')"
+out="$("$REVLOOP" init --dry-run 2>&1)"
+
+has  "a secret that is set is reported as set"      "$out" "APP_ID — already set"
+hasnt "and is not also reported as missing"         "$out" "APP_ID — MISSING"
+has  "while one that is absent is still missing"    "$out" "REVLOOP_SOURCE_KEY — MISSING"
+
+# One query per scope, not two per secret. Seven secrets meant fourteen calls to
+# render one plan, which is what gave a transient failure seven chances to land.
+is "the repository's secrets are read once, not once per secret" \
+  "$(count 'secret list --repo')" "1"
+
+# --- a query that failed is not an absent secret -------------------------
+#
+# The plan gate is the one place an operator decides whether to hand this command
+# a live repository. Reporting a secret missing because the call to check it fell
+# over is the worst available answer: it reads as a clean fact.
+fixture_repo "$(config_with_issue_sink)"; stub_reset
+routes_init
+route_first 'secret list --repo*' '!fail'
+out="$("$REVLOOP" init --dry-run 2>&1)"; rc=$?
+
+is    "a secret query that fails stops the run"      "$rc" "1"
+has   "and says which repository it could not read"  "$out" "could not read the secrets on acme/widget"
+hasnt "rather than reporting every secret missing"   "$out" "APP_ID — MISSING"
+
+# --- the policy file states the pairing that was provisioned -------------
+#
+# init derives the secret list, and whether a refresher App is needed at all,
+# from the resolved pairing. A policy file naming a different one leaves the
+# repository provisioned for a leg that never runs — a Codex credential and a
+# cron refresher for a reviewer the committed config says is Claude. Same rule
+# the sink already follows: init resolves the answer and writes it down.
+# Only the reviewer, so the two legs differ and a write-through that collapsed
+# them into one value would show up rather than passing by coincidence. Its model
+# goes too, so the resolved-to-nothing path is exercised rather than described.
+paired="$(config_with_issue_sink \
+  | awk '!d && $0=="  harness: claude" { $0="  harness: codex"; d=1 } 1' \
+  | grep -v '^  model: reviewer-model$')"
+fixture_repo "$paired"; stub_reset
+routes_init
+"$REVLOOP" init --yes >/dev/null 2>&1
+pol="$(cat .github/revloop.yml)"
+
+is "the written policy names the reviewer init provisioned for" \
+  "$(yq -r '.reviewer.harness' <<<"$pol")" "codex"
+is "and the resolver alongside it" \
+  "$(yq -r '.resolver.harness' <<<"$pol")" "claude"
+is "a model from the resolved config is carried through" \
+  "$(yq -r '.resolver.model' <<<"$pol")" "resolver-model"
+# The template ships a model per leg. Carrying one through under a harness that
+# never had it is how you get `model: claude-fable-5` under `harness: codex`.
+is "while a leg with no model of its own gets none, not the template's" \
+  "$(yq -r '.reviewer.model' <<<"$pol")" "null"
+
 finish
