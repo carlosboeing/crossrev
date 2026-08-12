@@ -642,19 +642,22 @@ leg_review() {
 
   # Termination, asked as "should a pass after $((pass-1)) begin?". Pass 3 of a
   # max_passes_per_cycle of 3 is the last pass, not the one after which a fourth starts.
-  local prs_today=0 max_passes_per_cycle=0 max_prs_per_day=0 files_changed=0 max_files_changed_per_pr=0
+  local other_prs_today=0 max_passes_per_cycle=0 max_prs_per_day=0 files_changed=0 max_files_changed_per_pr=0
   local decision reason
   if [[ "$trigger" == "automatic" ]]; then
     max_passes_per_cycle="$CTX_MAX_PASSES_PER_CYCLE"
-    prs_today="$(state_runs_today "$CTX_MARKERS")"
     max_prs_per_day="$(cfg_get '.policy.max_prs_per_day')"
+    if (( max_prs_per_day > 0 )); then
+      other_prs_today="$(state_prs_reviewed_today "$CTX_REPO" "$CTX_AUTHOR" "$(( $(date +%s) - 86400 ))" \
+        "$max_prs_per_day" "$CTX_PR" "$CTX_MARKERS")"
+    fi
     files_changed="$CTX_CHANGED"
     max_files_changed_per_pr="$(cfg_get '.policy.max_files_changed_per_pr')"
   elif (( continuation )); then
     max_passes_per_cycle="$CTX_MAX_PASSES_PER_CYCLE"
   fi
   if ! decision="$(legs_should_continue "issues-remain" "$(( pass - 1 ))" "$max_passes_per_cycle" \
-      false false "$prs_today" "$max_prs_per_day" "$files_changed" "$max_files_changed_per_pr")"; then
+      false false "$other_prs_today" "$max_prs_per_day" "$files_changed" "$max_files_changed_per_pr")"; then
     reason="${decision#* }"
     ui_say "not reviewing $CTX_REPO#$CTX_PR — $reason"
     # The refusal gets a marker as well as a comment and a label. Without one,

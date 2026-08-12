@@ -271,15 +271,52 @@ state_is_new_revision() {
   [[ -z "$last" || "$last" != "$head_sha" ]]
 }
 
-# The daily cap needs no extra state: count trusted markers in the last 24
-# hours, which the orchestrator is already reading. Counting *trusted* rather
-# than App-authored is what makes the cap mean anything locally, and a local
-# loop burning quota is the case it was written for.
-state_runs_today() {
-  local markers="$1" cutoff
-  cutoff="$(( $(date +%s) - 86400 ))"
-  jq -r --argjson c "$cutoff" \
-    '[.[] | select((.ts // 0) > $c)] | length' <<<"$(_state_real "$markers")"
+# Count distinct pull requests other than the current one that carry a trusted
+# review marker inside the rolling window. A review-and-resolve cycle counts
+# once because only the review marker participates. If the current pull request
+# is already in the window, reviewing it again consumes no new unit and returns
+# zero without reading the repository-wide list.
+state_prs_reviewed_today() {
+  local repo="$1" author="$2" cutoff="$3" cap="$4" current_pr="$5" current_markers="$6"
+  if [[ "$(jq -r --argjson c "$cutoff" \
+      '[.[] | select(.leg == "review" and (.state // "") != "declined" and (.ts // 0) > $c)] | length' \
+      <<<"$current_markers")" != "0" ]]; then
+    printf '0'
+    return 0
+  fi
+
+  local seen="[]" page comments count=0 n c body marker issue_url
+  for page in 1 2 3 4 5 6 7 8 9 10; do
+    if ! comments="$(gh_repo_issue_comments_page "$repo" "$cutoff" "$page")"; then
+      ui_warn "could not read repository comments while checking max_prs_per_day" \
+        "The backstop rounds down to zero rather than stopping a healthy automatic review early. Check GitHub availability and the token's issues read permission."
+      printf '0'
+      return 0
+    fi
+    n="$(jq 'length' <<<"$comments" 2>/dev/null || printf '0')"
+    while IFS= read -r c; do
+      [[ "$(jq -r '.user.login // empty' <<<"$c")" == "$author" ]] || continue
+      body="$(jq -r '.body // empty' <<<"$c")"
+      marker="$(state_marker_of "$body")"
+      [[ -n "$marker" ]] || continue
+      [[ "$(jq -r --argjson cutoff "$cutoff" \
+        '.leg == "review" and (.state // "") != "declined" and (.ts // 0) > $cutoff' <<<"$marker")" == "true" ]] || continue
+      issue_url="$(jq -r '.issue_url // empty' <<<"$c")"
+      [[ -n "$issue_url" ]] || continue
+      [[ "$issue_url" == */"$current_pr" ]] && continue
+      seen="$(jq -c --arg u "$issue_url" '. + [$u] | unique' <<<"$seen")"
+      count="$(jq 'length' <<<"$seen")"
+      if (( cap > 0 && count >= cap )); then
+        printf '%s' "$count"
+        return 0
+      fi
+    done < <(jq -c '.[]' <<<"$comments" 2>/dev/null)
+    (( n < 100 )) && { printf '%s' "$count"; return 0; }
+  done
+
+  ui_warn "the daily review count stopped after the first 10 pages of repository comments" \
+    "The bound intentionally rounds down rather than stopping healthy automatic reviews early. The count below includes only the comments revloop inspected."
+  printf '%s' "$count"
 }
 
 # ---------------------------------------------------------------------------

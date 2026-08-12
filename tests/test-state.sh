@@ -12,6 +12,8 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$HERE/../lib/ui.sh"
 # shellcheck source=../lib/auth.sh
 source "$HERE/../lib/auth.sh"
+# shellcheck source=../lib/github.sh
+source "$HERE/../lib/github.sh"
 # shellcheck source=../lib/state.sh
 source "$HERE/../lib/state.sh"
 
@@ -19,6 +21,7 @@ pass=0 fail=0
 ok()    { printf '  ok    %s\n' "$1"; pass=$((pass+1)); }
 notok() { printf '  FAIL  %s\n    expected: %s\n    actual:   %s\n' "$1" "$2" "$3"; fail=$((fail+1)); }
 is()    { [[ "$2" == "$3" ]] && ok "$1" || notok "$1" "$3" "$2"; }
+has()   { [[ "$2" == *"$3"* ]] && ok "$1" || notok "$1" "contains '$3'" "$2"; }
 
 # --- marker round-trip -----------------------------------------------------
 m='{"v":1,"leg":"review","pass":2,"state":"complete","verdict":"issues-remain","head_sha":"9f3c1ab"}'
@@ -67,10 +70,35 @@ state_is_new_revision '[]' "aaa111" \
   && ok "a PR with no review marker is always a new revision" \
   || notok "a PR with no review marker is always a new revision" "true" "false"
 
-# --- daily cap -------------------------------------------------------------
+# --- repository-wide daily cap --------------------------------------------
 now="$(date +%s)"
-recent="$(jq -cn --argjson n "$now" '[{ts:($n-100)},{ts:($n-200)},{ts:($n-90000)}]')"
-is "runs are counted only within the last 24 hours" "$(state_runs_today "$recent")" "2"
+cutoff="$(( now - 86400 ))"
+review_body="review$(state_marker_encode "$(jq -cn --argjson ts "$now" '{leg:"review",state:"complete",ts:$ts}')")"
+resolve_body="resolve$(state_marker_encode "$(jq -cn --argjson ts "$now" '{leg:"resolve",state:"complete",ts:$ts}')")"
+
+gh_repo_issue_comments_page() {
+  jq -cn --arg a trusted --arg rb "$review_body" --arg xb "$resolve_body" '[
+    {user:{login:$a},body:$rb,issue_url:"https://api.github.test/repos/acme/widget/issues/7"},
+    {user:{login:$a},body:$xb,issue_url:"https://api.github.test/repos/acme/widget/issues/7"},
+    {user:{login:$a},body:$rb,issue_url:"https://api.github.test/repos/acme/widget/issues/8"}
+  ]'
+}
+is "one review-and-resolve cycle counts once, not once per leg" \
+  "$(state_prs_reviewed_today acme/widget trusted "$cutoff" 25 42 '[]')" "2"
+
+current_markers="$(jq -cn --argjson ts "$now" '[{leg:"review",state:"complete",ts:$ts}]')"
+is "a pull request already reviewed in the window adds no new unit" \
+  "$(state_prs_reviewed_today acme/widget trusted "$cutoff" 25 42 "$current_markers")" "0"
+
+gh_repo_issue_comments_page() {
+  local page="$3"
+  jq -cn --arg a trusted --arg b "$review_body" --argjson p "$page" '
+    [range(0;100) | {user:{login:$a},body:$b,
+      issue_url:("https://api.github.test/repos/acme/widget/issues/" + (($p * 1000 + .) | tostring))}]'
+}
+truncated="$(state_prs_reviewed_today acme/widget trusted "$cutoff" 2000 42 '[]' 2>&1)"
+has "a daily count truncated after ten pages announces itself" "$truncated" "first 10 pages"
+is "and the bounded read returns the distinct count it saw" "${truncated##*$'\n'}" "1000"
 
 # --- finding markers -------------------------------------------------------
 fm="$(state_finding_marker "a1b2c3d4" 2 review)"

@@ -186,7 +186,7 @@ out="$(status_with "$(lbl revloop/halted revloop/pass-2)" \
   "$(resolve_m 1 "$FIXED_SKIPPED")" \
   "$(review_m 2 issues-remain "$ONE_MED")" \
   "$(resolve_m 2 "$ONE_FIXED" d81a3f2abc)" \
-  "$(declined_m 3 'reached max_prs_per_day (25) in the last 24 hours')")"
+  "$(declined_m 3 'reached max_prs_per_day (25) — 25 other pull requests were already reviewed in the last 24 hours')")"
 
 has "a cap halt reads as halted"                "$out" "acme/widget#42 — halted"
 has "attached to the review leg that refused to start" \

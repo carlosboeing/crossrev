@@ -13,10 +13,10 @@
 # blocked; the daily run cap is exceeded; the PR is larger than the file cap.
 #
 # $1 verdict, $2 pass, $3 max_passes_per_cycle, $4 has_stop_label, $5 blocked,
-# $6 prs_today, $7 max_prs_per_day, $8 files_changed, $9 max_files_changed_per_pr
+# $6 other_prs_today, $7 max_prs_per_day, $8 files_changed, $9 max_files_changed_per_pr
 legs_should_continue() {
   local verdict="$1" pass="$2" max_passes_per_cycle="$3" stop="$4" blocked="$5"
-  local prs_today="$6" max_prs_per_day="$7" files="$8" max_files_changed_per_pr="$9"
+  local other_prs_today="$6" max_prs_per_day="$7" files="$8" max_files_changed_per_pr="$9"
 
   # A human's request outranks everything, including a healthy verdict.
   # Deliberately checked first: revloop/stop is an instruction, not a state.
@@ -34,8 +34,9 @@ legs_should_continue() {
     printf 'halt reached max_passes_per_cycle (%s)' "$max_passes_per_cycle"; return 1
   fi
 
-  if (( max_prs_per_day > 0 && prs_today >= max_prs_per_day )); then
-    printf 'halt reached max_prs_per_day (%s) in the last 24 hours' "$max_prs_per_day"; return 1
+  if (( max_prs_per_day > 0 && other_prs_today >= max_prs_per_day )); then
+    printf 'halt reached max_prs_per_day (%s) — %s other pull requests were already reviewed in the last 24 hours' \
+      "$max_prs_per_day" "$other_prs_today"; return 1
   fi
 
   if (( max_files_changed_per_pr > 0 && files > max_files_changed_per_pr )); then

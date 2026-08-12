@@ -17,6 +17,7 @@ source "$HERE/../lib/legs.sh"
 pass=0 fail=0
 ok()    { printf '  ok    %s\n' "$1"; pass=$((pass+1)); }
 notok() { printf '  FAIL  %s\n    expected: %s\n    actual:   %s\n' "$1" "$2" "$3"; fail=$((fail+1)); }
+is()    { [[ "$2" == "$3" ]] && ok "$1" || notok "$1" "$3" "$2"; }
 
 # verdict pass max stop blocked runs cap files maxfiles -> first word of decision
 decides() {
@@ -38,6 +39,9 @@ decides halt     "beyond the pass cap halts"            issues-remain 4 3 false 
 
 decides continue "one below the daily cap continues"    issues-remain 1 3 false false 11 12 10 200
 decides halt     "exactly at the daily cap halts"       issues-remain 1 3 false false 12 12 10 200
+is "the daily halt names the other pull requests already reviewed" \
+  "$(legs_should_continue issues-remain 1 3 false false 12 12 10 200)" \
+  "halt reached max_prs_per_day (12) — 12 other pull requests were already reviewed in the last 24 hours"
 
 decides continue "exactly at the file cap still runs"   issues-remain 1 3 false false 0 12 200 200
 decides halt     "above the file cap halts"             issues-remain 1 3 false false 0 12 201 200

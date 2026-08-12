@@ -33,6 +33,8 @@ All notable changes to revloop. Format follows [Keep a Changelog](https://keepac
 
 ### Changed
 
+- **`max_prs_per_day` now counts distinct pull requests repository-wide.** A review-and-resolve cycle counts once, repeated passes on the current pull request add nothing, and only trusted non-declined review markers inside the rolling 24-hour window participate. The repository issue-comments read stops at the threshold, caps itself at ten pages and announces any undercount.
+
 - **Deferred work now has one `backlog:` contract.** `destination` selects GitHub issues, a repository path, nothing or automatic discovery; destination settings live under their own names, repository layout is explicit, and `revloop config backlog` prints the resolved answer. Automatic discovery recognizes `BACKLOG.md`, stops treating `docs/ROADMAP.md` as a backlog, and writes the resolved layout into generated configuration.
 - **Explicit false booleans are preserved.** Disabling missing-label creation, matched-issue comments or automation hints no longer falls through an accessor that treats `false` like a missing value.
 

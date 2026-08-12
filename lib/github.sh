@@ -36,6 +36,18 @@ gh_default_branch() {
   gh repo view "$1" --json defaultBranchRef --jq .defaultBranchRef.name 2>/dev/null || printf 'main'
 }
 
+# One page of repository-wide issue comments updated since an epoch timestamp.
+# Pull-request conversation comments are issue comments in GitHub's REST API;
+# each response carries the issue_url that identifies the pull request.
+gh_repo_issue_comments_page() {
+  local repo="$1" cutoff="$2" page="$3" since
+  if since="$(date -u -r "$cutoff" '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null)"; then :
+  else since="$(date -u -d "@$cutoff" '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null)" || return 1
+  fi
+  gh api --method GET "repos/$repo/issues/comments" \
+    -f since="$since" -F per_page=100 -F page="$page" 2>/dev/null
+}
+
 # The diff under review, with paths matching an exclude pattern dropped.
 #
 # The exclusion is not cosmetic: a repository backlog means the resolver commits its own

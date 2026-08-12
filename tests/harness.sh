@@ -181,6 +181,9 @@ routes_baseline() {
 +export function refresh() { fetch("/t") }'
   route "api --paginate repos/*/issues/$FIX_PR/comments*" "@$comments_file"
   route "api --paginate repos/*/pulls/$FIX_PR/comments*" '[]'
+  # Keep the repository-wide route after the specific per-pull-request route:
+  # routes are matched in file order, and the broader one must not shadow it.
+  route 'api --method GET repos/*/issues/comments -f since=* -F per_page=100 -F page=*' '[]'
 }
 
 # A review-comments payload in which each named finding id has already been posted.
