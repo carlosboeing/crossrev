@@ -6,7 +6,7 @@ name: revloop review
 
 on:
   pull_request:
-    types: [opened, synchronize, ready_for_review, labeled]
+    types: [opened, ready_for_review, labeled]
   issue_comment:
     types: [created]
 
@@ -48,6 +48,7 @@ jobs:
       (
         github.event_name == 'pull_request'
         && github.event.pull_request.head.repo.full_name == github.repository
+        && github.event.pull_request.draft == false
         && (
           github.event.action != 'labeled'
           || github.event.label.name == 'revloop/awaiting-review'
@@ -57,6 +58,7 @@ jobs:
         github.event_name == 'issue_comment'
         && github.event.issue.pull_request != null
         && startsWith(github.event.comment.body, '/revloop review')
+        && contains(fromJson('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
       )
     runs-on: __RUNS_ON__
     permissions:
@@ -147,7 +149,12 @@ jobs:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           REVLOOP_CODEX_AUTH: ${{ secrets.REVLOOP_CODEX_AUTH }}
           # revloop:end
-        run: revloop review --pr ${{ steps.pr.outputs.number }} --no-tips
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
+            revloop review --pr ${{ steps.pr.outputs.number }} --trigger automatic --no-tips
+          else
+            revloop review --pr ${{ steps.pr.outputs.number }} --no-tips
+          fi
 
       # The token is revoked rather than left to expire, and this runs even when
       # the leg failed.

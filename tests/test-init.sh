@@ -127,6 +127,13 @@ hasnt "cancel-in-progress appears nowhere, since it is unsafe here" "$wf" "cance
 has "every write uses the App token"                              "$wf" "steps.app.outputs.token"
 hasnt "and GITHUB_TOKEN is never used for a write"                "$wf" "secrets.GITHUB_TOKEN"
 hasnt "pull_request_target appears nowhere"                       "$wf" "pull_request_target"
+hasnt "pushes do not trigger another automatic review"            "$wf" "synchronize"
+has "automatic pull request events skip draft pull requests"       "$wf" "github.event.pull_request.draft == false"
+has "public commenters cannot trigger an uncapped review"          "$wf" "github.event.comment.author_association"
+has "the comment gate accepts only repository relationships"       "$wf" "OWNER\",\"MEMBER\",\"COLLABORATOR"
+has "pull request events identify themselves as automatic"         "$wf" "--trigger automatic"
+hasnt "the unverified effective-permission endpoint is not guessed" \
+  "$wf" 'collaborators/$ACTOR/permission'
 is  "the source checkout is pinned to a 40-character SHA" \
   "$(grep -oE 'ref: [0-9a-f]{40}' <<<"$wf" | wc -l | tr -d ' ')" "1"
 has "the resolve workflow shares the review workflow's group" \

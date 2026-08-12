@@ -26,7 +26,7 @@ gh_repo_slug() {
 gh_pr_json() {
   local repo="$1" pr="$2" out
   out="$(gh pr view "$pr" --repo "$repo" --json \
-    number,title,body,url,headRefName,headRefOid,baseRefName,baseRefOid,changedFiles,labels,isCrossRepository,headRepositoryOwner,headRepository,state 2>/dev/null)" \
+    number,title,body,url,headRefName,headRefOid,baseRefName,baseRefOid,changedFiles,labels,isCrossRepository,isDraft,headRepositoryOwner,headRepository,state 2>/dev/null)" \
     || ui_die "could not read $repo#$pr" \
        "Check the number, and that \`gh auth status\` passes for that repository."
   printf '%s' "$out"

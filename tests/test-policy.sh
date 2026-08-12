@@ -27,6 +27,37 @@ on_head() {
 
 no_threads() { route '*reviewThreads*' "$(threads_response)"; }
 
+# Exercise the cycle driver without replacing the behavior under test with a
+# mock. The real cmd_cycle owns argument classification and its loop boundary;
+# only the networked legs and state reads beneath that boundary are replaced.
+cycle_driver() {
+  local starting_pass="$1" log="$2" pass_file
+  pass_file="$(mktemp)"
+  printf '%s' "$starting_pass" >"$pass_file"
+  ROOT="$HERE/.." CYCLE_PASS_FILE="$pass_file" CYCLE_LOG="$log" bash -c '
+    source "$ROOT/lib/run.sh"
+    ctx_load() {
+      CTX_REPO="acme/widget"; CTX_PR=42; CTX_MAX_PASSES=3
+      CTX_MARKERS="[]"; CTX_LABELS=""; CTX_FIX_AT="medium"
+    }
+    leg_review() {
+      printf "%s\n" "$*" >>"$CYCLE_LOG"
+      current="$(cat "$CYCLE_PASS_FILE")"
+      printf "%s" "$((current + 1))" >"$CYCLE_PASS_FILE"
+    }
+    leg_resolve() { :; }
+    state_current_review_pass() { cat "$CYCLE_PASS_FILE"; }
+    state_marker_for() {
+      printf "%s" "{\"verdict\":\"issues-remain\",\"findings\":[{\"severity\":\"high\"}]}"
+    }
+    run_actionable() { printf "1"; }
+    ui_say() { :; }
+    ui_end() { printf "%s\n" "$*"; }
+    run_upgrade_nudge() { :; }
+    cmd_cycle --pr 42 --no-tips
+  '
+}
+
 # `auto` is what makes the three-tier sink discovery run at all; a config that
 # already names `none` short-circuits before the Project Map is ever read.
 auto_sink_config() { fixture_default_config | sed 's/^  defects: none$/  defects: auto/'; }
@@ -178,14 +209,36 @@ big="$(jq -cn --arg h "$FIX_HEAD" --arg b "$FIX_BASE" '
    headRepositoryOwner:{login:"acme"}, headRepository:{name:"widget"}, state:"OPEN"}')"
 route_first "pr view $FIX_PR --repo * --json *" "$big"
 route 'api --method POST repos/*/issues/42/comments*' '{"id":9001}'
-out="$("$REVLOOP" review --pr 42 2>&1)"
+out="$("$REVLOOP" review --pr 42 --trigger automatic 2>&1)"
 has "a diff above max_files_changed is not reviewed" "$out" "above max_files_changed"
 has "and it says so on the pull request"             "$(calls)" "revloop stopped before pass 1"
 has "and marks the pull request halted"              "$(calls)" "labels[]=revloop/halted"
 
-# The pass cap: pass 3 of 3 runs, a fourth does not.
-# Pass 3 of 3 completed against an older revision, and a new one has landed: the
-# fourth pass is the one that must not start.
+# A draft is unattended only when the invocation says so. The workflow supplies
+# that fact; the local CLI defaults to human because it cannot infer intent.
+fixture_repo; stub_reset
+routes_baseline "$(printf '[]' | payload)"
+draft="$(jq -cn --arg h "$FIX_HEAD" --arg b "$FIX_BASE" '
+  {number:42, title:"t", body:"", url:"u", headRefName:"feature", headRefOid:$h,
+   baseRefName:"main", baseRefOid:$b, changedFiles:1, labels:[], isCrossRepository:false,
+   isDraft:true, headRepositoryOwner:{login:"acme"}, headRepository:{name:"widget"}, state:"OPEN"}')"
+route_first "pr view $FIX_PR --repo * --json *" "$draft"
+out="$("$REVLOOP" review --pr 42 --trigger automatic 2>&1)"
+has "a draft pull request is not reviewed automatically" "$out" "draft pull request"
+is  "and automatic draft suppression writes nothing"     "$(count 'method POST')" "0"
+
+stub_reset
+routes_baseline "$(printf '[]' | payload)"
+route_first "pr view $FIX_PR --repo * --json *" "$draft"
+route 'api --method POST repos/*/issues/42/comments*' '{"id":9001}'
+no_threads
+REVLOOP_REVIEW_PAYLOAD="$(printf '%s' "$CONVERGED" | payload)"; export REVLOOP_REVIEW_PAYLOAD
+out="$("$REVLOOP" review --pr 42 2>&1)"
+has "a human can ask to review a draft pull request" "$out" "Reviewing acme/widget#42"
+has "and that attended review writes its claim"      "$(calls)" "method POST repos/acme/widget/issues/42/comments"
+
+# Pass limits classify the pass, not only the invocation. A direct review is
+# individually requested; cycle-generated passes carry --continuation.
 fixture_repo; stub_reset
 three_done="$(jq -cn --argjson ts "$(date +%s)" '
   {v:1, leg:"review", pass:3, state:"complete", ts:$ts, run_id:"x",
@@ -194,8 +247,27 @@ three_done="$(jq -cn --argjson ts "$(date +%s)" '
    verdict:"issues-remain", findings:[]}')"
 routes_baseline "$(marker_comment 9001 "$three_done" | jq -cs . | payload)"
 route 'api --method POST repos/*/issues/42/comments*' '{"id":9001}'
+no_threads
+REVLOOP_REVIEW_PAYLOAD="$(printf '%s' "$CONVERGED" | payload)"; export REVLOOP_REVIEW_PAYLOAD
 out="$("$REVLOOP" review --pr 42 2>&1)"
-has "a fourth pass does not start at max_passes 3" "$out" "reached max_passes (3)"
+has "a single human review beyond the pass bound runs" "$out" "pass 4 of 3"
+
+stub_reset
+routes_baseline "$(marker_comment 9001 "$three_done" | jq -cs . | payload)"
+route 'api --method POST repos/*/issues/42/comments*' '{"id":9001}'
+out="$("$REVLOOP" review --pr 42 --continuation 2>&1)"
+has "a generated pass at the bound does not start" "$out" "reached max_passes (3)"
+
+cycle_log="$(mktemp)"
+out="$(cycle_driver 0 "$cycle_log")"
+is "an attended cycle runs only three review passes" "$(wc -l <"$cycle_log" | tr -d ' ')" "3"
+is "its first pass is individually requested"       "$(grep -c -- '--continuation' "$cycle_log" || true)" "2"
+has "and the cycle stops at max_passes"              "$out" "Reached max_passes (3)"
+
+: >"$cycle_log"
+out="$(cycle_driver 3 "$cycle_log")"
+is "an attended cycle already at the bound stops immediately" "$(wc -l <"$cycle_log" | tr -d ' ')" "0"
+has "and it explains the bound before running a leg"           "$out" "Reached max_passes (3)"
 
 # --- fork pull requests fail closed ------------------------------------
 fixture_repo; stub_reset

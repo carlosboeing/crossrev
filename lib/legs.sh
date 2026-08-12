@@ -30,11 +30,11 @@ legs_should_continue() {
 
   # At exactly the cap, stop. Pass 3 of max_passes 3 is the last pass, not the
   # one after which a fourth begins.
-  if (( pass >= max_passes )); then
+  if (( max_passes > 0 && pass >= max_passes )); then
     printf 'halt reached max_passes (%s)' "$max_passes"; return 1
   fi
 
-  if (( runs_today >= runs_per_day )); then
+  if (( runs_per_day > 0 && runs_today >= runs_per_day )); then
     printf 'halt reached runs_per_day (%s) in the last 24 hours' "$runs_per_day"; return 1
   fi
 

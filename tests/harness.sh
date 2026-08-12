@@ -166,7 +166,7 @@ routes_baseline() {
     --argjson n "$FIX_PR" --arg h "$FIX_HEAD" --arg b "$FIX_BASE" --argjson l "$labels" \
     '{number:$n, title:"Add refresh", body:"Adds a refresh helper.", url:"https://github.com/x",
       headRefName:"feature", headRefOid:$h, baseRefName:"main", baseRefOid:$b,
-      changedFiles:1, labels:$l, isCrossRepository:false,
+      changedFiles:1, labels:$l, isCrossRepository:false, isDraft:false,
       headRepositoryOwner:{login:"acme"}, headRepository:{name:"widget"}, state:"OPEN"}')"
   route '*Accept: application/vnd.github.diff*' 'diff --git a/app.ts b/app.ts
 --- a/app.ts

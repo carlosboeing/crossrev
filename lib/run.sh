@@ -103,7 +103,7 @@ CTX_SINK="none"; CTX_IDENTITY_LABEL="revloop-review"; CTX_SINK_LABELS=""
 CTX_FIX_AT="medium"
 
 ctx_load() {
-  local pr="$1" repo="${2:-}" pr_json want
+  local pr="$1" repo="${2:-}" trigger="${3:-human}" pr_json want
   preflight_require_yq
 
   if [[ -z "$repo" ]]; then
@@ -126,6 +126,12 @@ ctx_load() {
   [[ "$(jq -r .state <<<"$pr_json")" == "OPEN" ]] || ui_die \
     "$repo#$pr is not open" \
     "revloop only runs on open pull requests. Reopen it, or pick another number."
+
+  if [[ "$trigger" == "automatic" && "$(jq -r '.isDraft // false' <<<"$pr_json")" == "true" ]]; then
+    ui_say "$repo#$pr is a draft pull request, so an automatic invocation does not review it."
+    ui_say "Mark it ready for review, or ask for a review explicitly."
+    return 2
+  fi
 
   CTX_REPO="$repo"
   CTX_PR="$pr"
@@ -587,12 +593,14 @@ run_invoke() {
 # ---------------------------------------------------------------------------
 
 leg_review() {
-  local pr="" repo="" harness_override="" no_tips=0
+  local pr="" repo="" harness_override="" trigger="human" no_tips=0 continuation=0
   while (( $# )); do
     case "$1" in
       --pr)      pr="${2:-}"; shift 2 ;;
       --repo)    repo="${2:-}"; shift 2 ;;
       --harness) harness_override="${2:-}"; shift 2 ;;
+      --trigger) trigger="${2:-}"; shift 2 ;;
+      --continuation) continuation=1; shift ;;
       --no-tips) no_tips=1; shift ;;
       --pass)    shift 2 ;;   # accepted and ignored: the pass comes from the PR
       *) ui_die "unknown option for review: $1" \
@@ -600,9 +608,18 @@ leg_review() {
     esac
   done
   [[ -n "$pr" ]] || ui_die "revloop review needs a pull request number" "Usage: revloop review --pr 42"
+  case "$trigger" in
+    human|automatic) ;;
+    *) ui_die "unknown review trigger: $trigger" "Use --trigger human or --trigger automatic." ;;
+  esac
 
   run_trap_install
-  ctx_load "$pr" "$repo"
+  local load_rc
+  ctx_load "$pr" "$repo" "$trigger" || {
+    load_rc=$?
+    (( load_rc == 2 )) && return 0
+    return "$load_rc"
+  }
   run_lock_acquire "$CTX_PR" "$CTX_MODE"
   REVLOOP_RESUME_HINT="revloop review --pr $CTX_PR"
 
@@ -639,11 +656,19 @@ leg_review() {
 
   # Termination, asked as "should a pass after $((pass-1)) begin?". Pass 3 of a
   # max_passes of 3 is the last pass, not the one after which a fourth starts.
-  local runs_today decision reason
-  runs_today="$(state_runs_today "$CTX_MARKERS")"
-  if ! decision="$(legs_should_continue "issues-remain" "$(( pass - 1 ))" "$CTX_MAX_PASSES" \
-      false false "$runs_today" "$(cfg_get '.caps.runs_per_day')" \
-      "$CTX_CHANGED" "$(cfg_get '.caps.max_files_changed')")"; then
+  local runs_today=0 max_passes=0 runs_per_day=0 files_changed=0 max_files_changed=0
+  local decision reason
+  if [[ "$trigger" == "automatic" ]]; then
+    max_passes="$CTX_MAX_PASSES"
+    runs_today="$(state_runs_today "$CTX_MARKERS")"
+    runs_per_day="$(cfg_get '.caps.runs_per_day')"
+    files_changed="$CTX_CHANGED"
+    max_files_changed="$(cfg_get '.caps.max_files_changed')"
+  elif (( continuation )); then
+    max_passes="$CTX_MAX_PASSES"
+  fi
+  if ! decision="$(legs_should_continue "issues-remain" "$(( pass - 1 ))" "$max_passes" \
+      false false "$runs_today" "$runs_per_day" "$files_changed" "$max_files_changed")"; then
     reason="${decision#* }"
     ui_say "not reviewing $CTX_REPO#$CTX_PR — $reason"
     # The refusal gets a marker as well as a comment and a label. Without one,
@@ -1800,8 +1825,24 @@ cmd_cycle() {
   local max="$CTX_MAX_PASSES" i pass marker rmarker verdict actionable
   ui_say "Cycling $CTX_REPO#$CTX_PR, up to $max passes. Ctrl-C is safe — each leg finishes the write in flight."
 
+  pass="$(state_current_review_pass "$CTX_MARKERS")"
+  if (( pass >= max )); then
+    ui_end "Reached max_passes ($max) on $CTX_REPO#$CTX_PR without starting another pass."
+    return 0
+  fi
+
   for (( i = 1; i <= max; i++ )); do
-    leg_review "${args[@]}" --no-tips || return 1
+    if (( i > 1 )); then
+      ctx_load "$pr" "$repo"
+      pass="$(state_current_review_pass "$CTX_MARKERS")"
+      if (( pass >= max )); then
+        ui_end "Reached max_passes ($max) on $CTX_REPO#$CTX_PR without starting another pass."
+        return 0
+      fi
+      leg_review "${args[@]}" --continuation --no-tips || return 1
+    else
+      leg_review "${args[@]}" --no-tips || return 1
+    fi
 
     # Re-read: the review leg wrote the state this decision reads.
     ctx_load "$pr" "$repo"
