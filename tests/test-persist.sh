@@ -33,7 +33,7 @@ resolver:
 backlog:
   destination: github_issues
   github_issues:
-    tracking_label: revloop-review
+    tracking_label: crossrev-review
     labels: [bug]
     create_missing_labels: true
     comment_on_existing_issue: false
@@ -95,7 +95,7 @@ backlog:
   destination: repository
   repository:
     layout: folder
-    path: .revloop/backlog
+    path: .crossrev/backlog
 EOF
 }
 
@@ -157,16 +157,16 @@ routes_resolve() {
 fixture_repo "$(config_with_issue_sink)"; stub_reset
 routes_baseline "$(marker_comment 9001 "$(review_marker)" | jq -cs . | payload)"
 routes_resolve
-REVLOOP_RESOLVE_PAYLOAD="$(resolve_payload | payload)"; export REVLOOP_RESOLVE_PAYLOAD
-REVLOOP_RESOLVE_EDIT="$(edit_script)"; export REVLOOP_RESOLVE_EDIT
-REVLOOP_RESOLVE_MODEL=resolver-model; export REVLOOP_RESOLVE_MODEL
-out="$("$REVLOOP" resolve --pr 42 2>&1)"; rc=$?
+CROSSREV_RESOLVE_PAYLOAD="$(resolve_payload | payload)"; export CROSSREV_RESOLVE_PAYLOAD
+CROSSREV_RESOLVE_EDIT="$(edit_script)"; export CROSSREV_RESOLVE_EDIT
+CROSSREV_RESOLVE_MODEL=resolver-model; export CROSSREV_RESOLVE_MODEL
+out="$("$CROSSREV" resolve --pr 42 2>&1)"; rc=$?
 
 is  "the resolve leg exits clean"                     "$rc" "0"
 has "it reports the pass it resolved"                "$out" "resolved pass 1"
 has "it commits and pushes the fix"                   "$out" "to feature"
 is  "the fix is actually in the branch" \
-  "$(git log -1 --format=%s)" "fix: resolve revloop review findings (pass 1)"
+  "$(git log -1 --format=%s)" "fix: resolve crossrev review findings (pass 1)"
 # Checked against the bare repo rather than `git ls-remote origin`: the fixture's
 # fetch URL is a real github.com address it must never contact, so ls-remote there
 # would fail and prove nothing either way.
@@ -174,13 +174,13 @@ is  "and it is pushed, not just committed" \
   "$(git rev-parse HEAD)" "$(git -C "$FIX_ORIGIN" rev-parse refs/heads/feature)"
 
 has "it files the deferred defect"                    "$out" "filed 1 issue(s) for deferred work"
-has "the issue carries the identity label"            "$(calls)" "labels[]=revloop-review"
+has "the issue carries the identity label"            "$(calls)" "labels[]=crossrev-review"
 has "and the repository's own taxonomy alongside it"  "$(calls)" "labels[]=bug"
 is  "it replies in each thread rather than at top level" \
   "$(count 'pulls/42/comments/5000/replies')" "2"
 has "it resolves the threads it settled"              "$out" "resolved 2 thread(s)"
 has "the summary lists what was deferred and where"   "$(calls)" "Deferred work filed"
-has "the loop is handed back to the reviewer"         "$(calls)" "labels[]=revloop/awaiting-review"
+has "the loop is handed back to the reviewer"         "$(calls)" "labels[]=crossrev/awaiting-review"
 
 # Provenance governs what happens after verification, never whether it happens.
 # The fixture's pre-existing finding is `high` deliberately: under the severity
@@ -215,16 +215,16 @@ has "and says what to return for one"                 "$(cat "$PROMPT_LOG")" "qu
 fixture_repo "$(config_with_file_sink)"; stub_reset
 routes_baseline "$(marker_comment 9001 "$(review_marker)" | jq -cs . | payload)"
 routes_resolve
-REVLOOP_RESOLVE_PAYLOAD="$(resolve_payload | payload)"; export REVLOOP_RESOLVE_PAYLOAD
-REVLOOP_RESOLVE_EDIT="$(edit_script)"; export REVLOOP_RESOLVE_EDIT
-out="$("$REVLOOP" resolve --pr 42 2>&1)"; rc=$?
+CROSSREV_RESOLVE_PAYLOAD="$(resolve_payload | payload)"; export CROSSREV_RESOLVE_PAYLOAD
+CROSSREV_RESOLVE_EDIT="$(edit_script)"; export CROSSREV_RESOLVE_EDIT
+out="$("$CROSSREV" resolve --pr 42 2>&1)"; rc=$?
 
 is  "the repository-backlog leg exits clean"          "$rc" "0"
 has "the deferral is recorded to the repository backlog" "$out" "filed 1 issue(s) for deferred work"
 is  "the backlog file is in the commit, not just the tree" \
-  "$(git show --name-only --format= HEAD | grep -c '^\.revloop/backlog/')" "1"
+  "$(git show --name-only --format= HEAD | grep -c '^\.crossrev/backlog/')" "1"
 is  "so nothing of it is left behind in the tree" \
-  "$(git status --porcelain -- .revloop | wc -l | tr -d ' ')" "0"
+  "$(git status --porcelain -- .crossrev | wc -l | tr -d ' ')" "0"
 is  "and the code fix rides in the same commit" \
   "$(git show --name-only --format= HEAD | grep -c '^app\.ts$')" "1"
 
@@ -233,19 +233,19 @@ is  "and the code fix rides in the same commit" \
 fixture_repo "$(config_with_file_sink)"; stub_reset
 routes_baseline "$(marker_comment 9001 "$(review_marker)" | jq -cs . | payload)"
 routes_resolve
-REVLOOP_RESOLVE_PAYLOAD="$(defer_only_payload | payload)"; export REVLOOP_RESOLVE_PAYLOAD
-out="$("$REVLOOP" resolve --pr 42 2>&1)"; rc=$?
+CROSSREV_RESOLVE_PAYLOAD="$(defer_only_payload | payload)"; export CROSSREV_RESOLVE_PAYLOAD
+out="$("$CROSSREV" resolve --pr 42 2>&1)"; rc=$?
 
 is  "a deferral-only pass exits clean"                "$rc" "0"
 is  "it still commits, because the backlog wrote to the tree" \
-  "$(git show --name-only --format= HEAD | grep -c '^\.revloop/backlog/')" "1"
-has "and says what the commit is for, not 'fix'"      "$(git log -1 --format=%s)" "chore: record deferred revloop findings"
+  "$(git show --name-only --format= HEAD | grep -c '^\.crossrev/backlog/')" "1"
+has "and says what the commit is for, not 'fix'"      "$(git log -1 --format=%s)" "chore: record deferred crossrev findings"
 hasnt "no fix was claimed, so nothing warns about one" \
   "$out" "changed no files"
 
 # --- the default file layout has to write where it says it wrote ----------
 #
-# `layout: file` with no path resolves to `.revloop/backlog.md`, and `.revloop`
+# `layout: file` with no path resolves to `.crossrev/backlog.md`, and `.crossrev`
 # does not exist in a repository that has never run the loop. The append then
 # failed on the missing directory without stopping the function, which printed
 # the path anyway — so the finding was counted filed and its thread resolved
@@ -254,14 +254,14 @@ hasnt "no fix was claimed, so nothing warns about one" \
 fixture_repo "$(config_with_default_file_backlog)"; stub_reset
 routes_baseline "$(marker_comment 9001 "$(review_marker)" | jq -cs . | payload)"
 routes_resolve
-REVLOOP_RESOLVE_PAYLOAD="$(defer_only_payload | payload)"; export REVLOOP_RESOLVE_PAYLOAD
-out="$("$REVLOOP" resolve --pr 42 2>&1)"; rc=$?
+CROSSREV_RESOLVE_PAYLOAD="$(defer_only_payload | payload)"; export CROSSREV_RESOLVE_PAYLOAD
+out="$("$CROSSREV" resolve --pr 42 2>&1)"; rc=$?
 
 is  "the default file layout exits clean"             "$rc" "0"
 is  "and the file it names is actually written" \
-  "$(git show --name-only --format= HEAD | grep -c '^\.revloop/backlog\.md$')" "1"
+  "$(git show --name-only --format= HEAD | grep -c '^\.crossrev/backlog\.md$')" "1"
 has "carrying the deferred finding it claimed to file" \
-  "$(cat .revloop/backlog.md)" "Legacy export is untyped"
+  "$(cat .crossrev/backlog.md)" "Legacy export is untyped"
 has "and the summary points at that path"             "$out" "filed 1 issue(s) for deferred work"
 
 # --- the review leg's own comments must not silence the resolver ---------
@@ -277,9 +277,9 @@ routes_baseline "$(marker_comment 9001 "$(review_marker)" | jq -cs . | payload)"
 routes_resolve
 route_first "api --paginate repos/*/pulls/42/comments*" \
   "@$(POSTED_LEG=review posted_comments "$ID_FIX" "$ID_DEFER" | payload)"
-REVLOOP_RESOLVE_PAYLOAD="$(resolve_payload | payload)"; export REVLOOP_RESOLVE_PAYLOAD
-REVLOOP_RESOLVE_EDIT="$(edit_script)"; export REVLOOP_RESOLVE_EDIT
-out="$("$REVLOOP" resolve --pr 42 2>&1)"; rc=$?
+CROSSREV_RESOLVE_PAYLOAD="$(resolve_payload | payload)"; export CROSSREV_RESOLVE_PAYLOAD
+CROSSREV_RESOLVE_EDIT="$(edit_script)"; export CROSSREV_RESOLVE_EDIT
+out="$("$CROSSREV" resolve --pr 42 2>&1)"; rc=$?
 
 is  "the leg completes with the review leg's comments present" "$rc" "0"
 is  "it still replies in both threads" \
@@ -293,9 +293,9 @@ routes_baseline "$(marker_comment 9001 "$(review_marker)" | jq -cs . | payload)"
 routes_resolve
 route_first "api --paginate repos/*/pulls/42/comments*" \
   "@$(POSTED_LEG=resolve posted_comments "$ID_FIX" | payload)"
-REVLOOP_RESOLVE_PAYLOAD="$(resolve_payload | payload)"; export REVLOOP_RESOLVE_PAYLOAD
-REVLOOP_RESOLVE_EDIT="$(edit_script)"; export REVLOOP_RESOLVE_EDIT
-out="$("$REVLOOP" resolve --pr 42 2>&1)"; rc=$?
+CROSSREV_RESOLVE_PAYLOAD="$(resolve_payload | payload)"; export CROSSREV_RESOLVE_PAYLOAD
+CROSSREV_RESOLVE_EDIT="$(edit_script)"; export CROSSREV_RESOLVE_EDIT
+out="$("$CROSSREV" resolve --pr 42 2>&1)"; rc=$?
 
 is  "a finding already replied to is not replied to twice" \
   "$(count 'pulls/42/comments/5000/replies')" "1"
@@ -304,8 +304,8 @@ is  "a finding already replied to is not replied to twice" \
 fixture_repo; stub_reset      # the default config has backlog.destination: none
 routes_baseline "$(marker_comment 9001 "$(review_marker)" | jq -cs . | payload)"
 routes_resolve
-REVLOOP_RESOLVE_PAYLOAD="$(resolve_payload null no | payload)"; export REVLOOP_RESOLVE_PAYLOAD
-out="$("$REVLOOP" resolve --pr 42 2>&1)"; rc=$?
+CROSSREV_RESOLVE_PAYLOAD="$(resolve_payload null no | payload)"; export CROSSREV_RESOLVE_PAYLOAD
+out="$("$CROSSREV" resolve --pr 42 2>&1)"; rc=$?
 
 is  "with no backlog destination the leg still completes" "$rc" "0"
 is  "nothing is filed anywhere"                       "$(count 'method POST repos/acme/widget/issues -f title=')" "0"
@@ -313,16 +313,16 @@ has "and the summary says the thread stays open"      "$(calls)" "not persisted 
 is  "only the settled thread is resolved, not the deferred one" \
   "$(count 'resolveReviewThread')" "1"
 
-# --- dedupe tier 1: revloop already filed this exact finding --------------
+# --- dedupe tier 1: crossrev already filed this exact finding --------------
 fixture_repo "$(config_with_issue_sink)"; stub_reset
 routes_baseline "$(marker_comment 9001 "$(review_marker)" | jq -cs . | payload)"
 routes_resolve
 existing="$(jq -cn --arg d "$ID_DEFER" '
   [{number:55, pull_request:null,
-    body:("Filed earlier. <!-- revloop:f " + ({id:$d, pass:1, leg:"resolve"} | tojson) + " -->")}]')"
+    body:("Filed earlier. <!-- crossrev:f " + ({id:$d, pass:1, leg:"resolve"} | tojson) + " -->")}]')"
 route_first 'api --paginate repos/*/issues?state=all*' "$existing"
-REVLOOP_RESOLVE_PAYLOAD="$(resolve_payload | payload)"; export REVLOOP_RESOLVE_PAYLOAD
-out="$("$REVLOOP" resolve --pr 42 2>&1)"; rc=$?
+CROSSREV_RESOLVE_PAYLOAD="$(resolve_payload | payload)"; export CROSSREV_RESOLVE_PAYLOAD
+out="$("$CROSSREV" resolve --pr 42 2>&1)"; rc=$?
 
 is  "an already-filed finding files nothing"          "$(count 'method POST repos/acme/widget/issues -f title=')" "0"
 has "and it says the finding was already tracked"     "$(calls)" "already tracked as #55"
@@ -334,13 +334,13 @@ routes_baseline "$(marker_comment 9001 "$(review_marker)" | jq -cs . | payload)"
 routes_resolve
 route_first 'api -X GET search/issues*' \
   '{"items":[{"number":31,"title":"app.ts exports are untyped","state":"open","body":"Noticed a while ago."}]}'
-REVLOOP_RESOLVE_PAYLOAD="$(resolve_payload 31 | payload)"; export REVLOOP_RESOLVE_PAYLOAD
-out="$("$REVLOOP" resolve --pr 42 2>&1)"; rc=$?
+CROSSREV_RESOLVE_PAYLOAD="$(resolve_payload 31 | payload)"; export CROSSREV_RESOLVE_PAYLOAD
+out="$("$CROSSREV" resolve --pr 42 2>&1)"; rc=$?
 
 is  "a matched human-filed issue files nothing"       "$(count 'method POST repos/acme/widget/issues -f title=')" "0"
 has "and the summary names the issue it matched"      "$(calls)" "matches the existing issue #31"
 has "the candidates were handed to the model to judge" "$(cat "$PROMPT_LOG")" "**#31** (open)"
-hasnt "and revloop did not comment on the human's issue by default" \
+hasnt "and crossrev did not comment on the human's issue by default" \
   "$(calls)" "repos/acme/widget/issues/31/comments"
 
 # A closed candidate counts the same: re-filing something explicitly closed is the
@@ -350,8 +350,8 @@ routes_baseline "$(marker_comment 9001 "$(review_marker)" | jq -cs . | payload)"
 routes_resolve
 route_first 'api -X GET search/issues*' \
   '{"items":[{"number":19,"title":"untyped exports","state":"closed","body":"Decided against."}]}'
-REVLOOP_RESOLVE_PAYLOAD="$(resolve_payload 19 | payload)"; export REVLOOP_RESOLVE_PAYLOAD
-out="$("$REVLOOP" resolve --pr 42 2>&1)"
+CROSSREV_RESOLVE_PAYLOAD="$(resolve_payload 19 | payload)"; export CROSSREV_RESOLVE_PAYLOAD
+out="$("$CROSSREV" resolve --pr 42 2>&1)"
 is  "a closed matching issue files nothing"           "$(count 'method POST repos/acme/widget/issues -f title=')" "0"
 has "and the closed candidate was offered for judgement" "$(cat "$PROMPT_LOG")" "(closed)"
 
@@ -363,8 +363,8 @@ fixture_repo "$(config_with_issue_sink)"; stub_reset
 routes_baseline "$(marker_comment 9001 "$(review_marker)" | jq -cs . | payload)"
 routes_resolve
 route_first 'api --method POST repos/*/issues -f title=*' '!fail'
-REVLOOP_RESOLVE_PAYLOAD="$(resolve_payload | payload)"; export REVLOOP_RESOLVE_PAYLOAD
-out="$("$REVLOOP" resolve --pr 42 2>&1)"; rc=$?
+CROSSREV_RESOLVE_PAYLOAD="$(resolve_payload | payload)"; export CROSSREV_RESOLVE_PAYLOAD
+out="$("$CROSSREV" resolve --pr 42 2>&1)"; rc=$?
 
 is  "a failed filing does not fail the whole leg"     "$rc" "0"
 has "it says the write did not land"                  "$out" "could not file an issue"
@@ -386,7 +386,7 @@ addr_claim="$(jq -cn --arg sha "$FIX_HEAD" --argjson ts "$(date +%s)" --arg f "$
 comments="$( { marker_comment 9001 "$(review_marker)"; marker_comment 9002 "$addr_claim"; } | jq -cs . | payload)"
 routes_baseline "$comments"
 routes_resolve
-out="$("$REVLOOP" resolve --pr 42 2>&1)"; rc=$?
+out="$("$CROSSREV" resolve --pr 42 2>&1)"; rc=$?
 
 is  "recovery with a recorded SHA exits clean"        "$rc" "0"
 has "it does not run the resolver again"             "$out" "already recorded its dispositions"
@@ -411,7 +411,7 @@ old_claim="$(jq -cn --arg sha "$FIX_HEAD" --argjson ts "$(date +%s)" --arg f "$I
 comments="$( { marker_comment 9001 "$(review_marker)"; marker_comment 9002 "$old_claim"; } | jq -cs . | payload)"
 routes_baseline "$comments"
 routes_resolve
-out="$("$REVLOOP" resolve --pr 42 2>&1)"; rc=$?
+out="$("$CROSSREV" resolve --pr 42 2>&1)"; rc=$?
 
 is  "a pre-rename claim still recovers"               "$rc" "0"
 has "and its text survives into the summary comment"  "$(calls)" "Recovered from a marker written before the rename."
@@ -425,19 +425,19 @@ escalating="$(jq -cn '
   {blocked:false, blocked_reason:null, summary:"One point needs you.",
    dispositions:[{finding_number:1, disposition:"escalated", reply:"We disagree twice over.", persist:null, duplicate_of:null},
                  {finding_number:2, disposition:"rebutted", reply:"Not real here.", persist:null, duplicate_of:null}]}')"
-REVLOOP_RESOLVE_PAYLOAD="$(printf '%s' "$escalating" | payload)"; export REVLOOP_RESOLVE_PAYLOAD
-out="$("$REVLOOP" resolve --pr 42 2>&1)"
+CROSSREV_RESOLVE_PAYLOAD="$(printf '%s' "$escalating" | payload)"; export CROSSREV_RESOLVE_PAYLOAD
+out="$("$CROSSREV" resolve --pr 42 2>&1)"
 
-has "an escalated finding applies revloop/stop"       "$(calls)" "labels[]=revloop/stop"
-has "and halts rather than handing back to the reviewer" "$(calls)" "labels[]=revloop/halted"
+has "an escalated finding applies crossrev/stop"       "$(calls)" "labels[]=crossrev/stop"
+has "and halts rather than handing back to the reviewer" "$(calls)" "labels[]=crossrev/halted"
 has "and says a human is needed"                      "$out" "need a human decision"
 is  "the escalated thread is left open"               "$(count 'resolveReviewThread')" "1"
 
 # --- the seam where model output enters the orchestrator ----------------
 #
 # On PR 5 the resolver returned three finding ids that were each one or two
-# characters off the ones revloop had handed it. Nothing checked them against the
-# set revloop itself generated, so four things keyed on a string nothing matched:
+# characters off the ones crossrev had handed it. Nothing checked them against the
+# set crossrev itself generated, so four things keyed on a string nothing matched:
 # the reply went to the bottom of the pull request instead of into the thread, no
 # thread resolved, the disposition was written against an id no finding has, and
 # the summary table fell back to printing the raw hash. All four degraded and
@@ -452,8 +452,8 @@ is  "the escalated thread is left open"               "$(count 'resolveReviewThr
 fixture_repo "$(config_with_issue_sink)"; stub_reset
 routes_baseline "$(marker_comment 9001 "$(review_marker)" | jq -cs . | payload)"
 routes_resolve
-REVLOOP_RESOLVE_PAYLOAD="$(resolve_payload | payload)"; export REVLOOP_RESOLVE_PAYLOAD
-out="$("$REVLOOP" resolve --pr 42 2>&1)"
+CROSSREV_RESOLVE_PAYLOAD="$(resolve_payload | payload)"; export CROSSREV_RESOLVE_PAYLOAD
+out="$("$CROSSREV" resolve --pr 42 2>&1)"
 prompt="$(cat "$PROMPT_LOG")"
 
 has "each finding is numbered in the prompt"          "$prompt" "### 1. \`$ID_FIX\`"
@@ -478,8 +478,8 @@ out_of_range="$(jq -cn '
   {blocked:false, blocked_reason:null, summary:"s",
    dispositions:[{finding_number:1, disposition:"fixed", reply:"r", persist:null, duplicate_of:null},
                  {finding_number:7, disposition:"fixed", reply:"r", persist:null, duplicate_of:null}]}')"
-REVLOOP_RESOLVE_PAYLOAD="$(printf '%s' "$out_of_range" | payload)"; export REVLOOP_RESOLVE_PAYLOAD
-err="$("$REVLOOP" resolve --pr 42 2>&1 >/dev/null)"; rc=$?
+CROSSREV_RESOLVE_PAYLOAD="$(printf '%s' "$out_of_range" | payload)"; export CROSSREV_RESOLVE_PAYLOAD
+err="$("$CROSSREV" resolve --pr 42 2>&1 >/dev/null)"; rc=$?
 
 is  "a finding number nothing was numbered with is fatal" "$rc" "1"
 has "and the error names the number and the range"    "$err" "finding number(s) 7 do not exist"
@@ -494,15 +494,15 @@ is  "and no thread was resolved against a guess"      "$(count 'resolveReviewThr
 fixture_repo "$(config_with_issue_sink)"; stub_reset
 routes_baseline "$(marker_comment 9001 "$(review_marker)" | jq -cs . | payload)"
 routes_resolve
-REVLOOP_RESOLVE_PAYLOAD="$(printf '%s' "$out_of_range" | payload)"; export REVLOOP_RESOLVE_PAYLOAD
-REVLOOP_RESOLVE_PAYLOAD_2="$(resolve_payload | payload)"; export REVLOOP_RESOLVE_PAYLOAD_2
-REVLOOP_STUB_COUNT="$(mktemp)"; export REVLOOP_STUB_COUNT
-out="$("$REVLOOP" resolve --pr 42 2>&1)"; rc=$?
+CROSSREV_RESOLVE_PAYLOAD="$(printf '%s' "$out_of_range" | payload)"; export CROSSREV_RESOLVE_PAYLOAD
+CROSSREV_RESOLVE_PAYLOAD_2="$(resolve_payload | payload)"; export CROSSREV_RESOLVE_PAYLOAD_2
+CROSSREV_STUB_COUNT="$(mktemp)"; export CROSSREV_STUB_COUNT
+out="$("$CROSSREV" resolve --pr 42 2>&1)"; rc=$?
 
 is  "drift is asked once more rather than costing the pass" "$rc" "0"
 has "and says so before retrying"                     "$out" "asked once more"
 is  "the second answer is the one that is acted on"   "$(count 'resolveReviewThread')" "2"
-unset REVLOOP_RESOLVE_PAYLOAD_2 REVLOOP_STUB_COUNT
+unset CROSSREV_RESOLVE_PAYLOAD_2 CROSSREV_STUB_COUNT
 
 # The retry starts from the tree the first attempt saw, not from its leftovers.
 #
@@ -514,11 +514,11 @@ unset REVLOOP_RESOLVE_PAYLOAD_2 REVLOOP_STUB_COUNT
 fixture_repo "$(config_with_issue_sink)"; stub_reset
 routes_baseline "$(marker_comment 9001 "$(review_marker)" | jq -cs . | payload)"
 routes_resolve
-REVLOOP_RESOLVE_PAYLOAD="$(printf '%s' "$out_of_range" | payload)"; export REVLOOP_RESOLVE_PAYLOAD
-REVLOOP_RESOLVE_PAYLOAD_2="$(resolve_payload | payload)"; export REVLOOP_RESOLVE_PAYLOAD_2
-REVLOOP_STUB_COUNT="$(mktemp)"; export REVLOOP_STUB_COUNT
-REVLOOP_RESOLVE_EDIT="$(appending_edit_script)"; export REVLOOP_RESOLVE_EDIT
-out="$("$REVLOOP" resolve --pr 42 2>&1)"; rc=$?
+CROSSREV_RESOLVE_PAYLOAD="$(printf '%s' "$out_of_range" | payload)"; export CROSSREV_RESOLVE_PAYLOAD
+CROSSREV_RESOLVE_PAYLOAD_2="$(resolve_payload | payload)"; export CROSSREV_RESOLVE_PAYLOAD_2
+CROSSREV_STUB_COUNT="$(mktemp)"; export CROSSREV_STUB_COUNT
+CROSSREV_RESOLVE_EDIT="$(appending_edit_script)"; export CROSSREV_RESOLVE_EDIT
+out="$("$CROSSREV" resolve --pr 42 2>&1)"; rc=$?
 
 is  "a leg that retried after editing files still exits clean" "$rc" "0"
 is  "the discarded attempt's edit is applied once, not twice" \
@@ -526,15 +526,15 @@ is  "the discarded attempt's edit is applied once, not twice" \
 is  "and nothing of it is left loose in the tree" \
   "$(git status --porcelain | wc -l | tr -d ' ')" "0"
 has "the run says the discarded edits were put back" "$out" "put back"
-unset REVLOOP_RESOLVE_PAYLOAD_2 REVLOOP_STUB_COUNT REVLOOP_RESOLVE_EDIT
+unset CROSSREV_RESOLVE_PAYLOAD_2 CROSSREV_STUB_COUNT CROSSREV_RESOLVE_EDIT
 
 # And it leaves the staging area as it found it.
 #
 # The capture is a tree of everything that was in the checkout, staged and
 # unstaged alike, so putting it back through the repository's own index would
-# stage every unstaged change the run happened to find. revloop is routinely run
+# stage every unstaged change the run happened to find. crossrev is routinely run
 # in a checkout somebody is working in, and a pass that then fixes nothing hands
-# that checkout back with a staging area revloop invented.
+# that checkout back with a staging area crossrev invented.
 both_rebutted="$(jq -cn '
   {blocked:false, blocked_reason:null, summary:"Neither holds up in this codebase.",
    dispositions:[{finding_number:1, disposition:"rebutted", reply:"Not real here.", persist:null, duplicate_of:null},
@@ -546,17 +546,17 @@ printf 'export const loose = 1\n' >>app.ts
 before_status="$(git status --porcelain)"
 routes_baseline "$(marker_comment 9001 "$(review_marker)" | jq -cs . | payload)"
 routes_resolve
-REVLOOP_RESOLVE_PAYLOAD="$(printf '%s' "$out_of_range" | payload)"; export REVLOOP_RESOLVE_PAYLOAD
-REVLOOP_RESOLVE_PAYLOAD_2="$(printf '%s' "$both_rebutted" | payload)"; export REVLOOP_RESOLVE_PAYLOAD_2
-REVLOOP_STUB_COUNT="$(mktemp)"; export REVLOOP_STUB_COUNT
-out="$("$REVLOOP" resolve --pr 42 2>&1)"; rc=$?
+CROSSREV_RESOLVE_PAYLOAD="$(printf '%s' "$out_of_range" | payload)"; export CROSSREV_RESOLVE_PAYLOAD
+CROSSREV_RESOLVE_PAYLOAD_2="$(printf '%s' "$both_rebutted" | payload)"; export CROSSREV_RESOLVE_PAYLOAD_2
+CROSSREV_STUB_COUNT="$(mktemp)"; export CROSSREV_STUB_COUNT
+out="$("$CROSSREV" resolve --pr 42 2>&1)"; rc=$?
 
 is  "a leg that retried in a checkout someone was working in exits clean" "$rc" "0"
 is  "the staged change is still the only staged change" \
   "$(git diff --cached --name-only | tr '\n' ' ')" "staged.ts "
 is  "and the unstaged one is still unstaged" \
   "$(git status --porcelain)" "$before_status"
-unset REVLOOP_RESOLVE_PAYLOAD_2 REVLOOP_STUB_COUNT
+unset CROSSREV_RESOLVE_PAYLOAD_2 CROSSREV_STUB_COUNT
 
 # A second rejected answer ends the leg, and its edits go back too.
 #
@@ -576,29 +576,29 @@ printf 'export const loose = 1\n' >>app.ts
 before_status="$(git status --porcelain)"; before_app="$(cat app.ts)"
 routes_baseline "$(marker_comment 9001 "$(review_marker)" | jq -cs . | payload)"
 routes_resolve
-REVLOOP_RESOLVE_PAYLOAD="$(printf '%s' "$out_of_range" | payload)"; export REVLOOP_RESOLVE_PAYLOAD
-REVLOOP_RESOLVE_PAYLOAD_2="$(printf '%s' "$twice_over" | payload)"; export REVLOOP_RESOLVE_PAYLOAD_2
-REVLOOP_STUB_COUNT="$(mktemp)"; export REVLOOP_STUB_COUNT
-REVLOOP_RESOLVE_EDIT="$(appending_edit_script)"; export REVLOOP_RESOLVE_EDIT
-err="$("$REVLOOP" resolve --pr 42 2>&1 >/dev/null)"; rc=$?
+CROSSREV_RESOLVE_PAYLOAD="$(printf '%s' "$out_of_range" | payload)"; export CROSSREV_RESOLVE_PAYLOAD
+CROSSREV_RESOLVE_PAYLOAD_2="$(printf '%s' "$twice_over" | payload)"; export CROSSREV_RESOLVE_PAYLOAD_2
+CROSSREV_STUB_COUNT="$(mktemp)"; export CROSSREV_STUB_COUNT
+CROSSREV_RESOLVE_EDIT="$(appending_edit_script)"; export CROSSREV_RESOLVE_EDIT
+err="$("$CROSSREV" resolve --pr 42 2>&1 >/dev/null)"; rc=$?
 
 is  "a second answer that also contradicts the prompt is fatal" "$rc" "1"
 has "and the error says both answers were wrong"      "$err" "twice returned an answer that contradicts"
 is  "neither rejected attempt's edit is left in the tree" "$(cat app.ts)" "$before_app"
 is  "the checkout is exactly as the leg found it"     "$(git status --porcelain)" "$before_status"
 is  "and nothing was committed over it"               "$(git log -1 --format=%s)" "feature"
-unset REVLOOP_RESOLVE_PAYLOAD_2 REVLOOP_STUB_COUNT REVLOOP_RESOLVE_EDIT
+unset CROSSREV_RESOLVE_PAYLOAD_2 CROSSREV_STUB_COUNT CROSSREV_RESOLVE_EDIT
 
 # duplicate_of names an issue the orchestrator retrieved. Inventing one makes
-# revloop comment on an unrelated issue and resolve the thread claiming the
+# crossrev comment on an unrelated issue and resolve the thread claiming the
 # finding is tracked there.
 fixture_repo "$(config_with_issue_sink)"; stub_reset
 routes_baseline "$(marker_comment 9001 "$(review_marker)" | jq -cs . | payload)"
 routes_resolve
 route_first 'api -X GET search/issues*' \
   '{"items":[{"number":19,"title":"untyped exports","state":"open","body":"b"}]}'
-REVLOOP_RESOLVE_PAYLOAD="$(resolve_payload 404 | payload)"; export REVLOOP_RESOLVE_PAYLOAD
-err="$("$REVLOOP" resolve --pr 42 2>&1 >/dev/null)"; rc=$?
+CROSSREV_RESOLVE_PAYLOAD="$(resolve_payload 404 | payload)"; export CROSSREV_RESOLVE_PAYLOAD
+err="$("$CROSSREV" resolve --pr 42 2>&1 >/dev/null)"; rc=$?
 
 is  "an issue number nobody offered is fatal"         "$rc" "1"
 has "and the error names it"                          "$err" "duplicate_of names issue(s) 404"
@@ -615,8 +615,8 @@ fixture_repo "$(config_with_issue_sink)"; stub_reset
 routes_baseline "$(marker_comment 9001 "$(review_marker)" | jq -cs . | payload)"
 routes_resolve
 route_first 'api --method POST repos/*/pulls/42/comments/*/replies*' '!fail'
-REVLOOP_RESOLVE_PAYLOAD="$(resolve_payload | payload)"; export REVLOOP_RESOLVE_PAYLOAD
-out="$("$REVLOOP" resolve --pr 42 2>&1)"; rc=$?
+CROSSREV_RESOLVE_PAYLOAD="$(resolve_payload | payload)"; export CROSSREV_RESOLVE_PAYLOAD
+out="$("$CROSSREV" resolve --pr 42 2>&1)"; rc=$?
 
 is  "the leg still finishes, because the reply is not lost" "$rc" "0"
 has "the run says how many replies missed their thread" "$out" "2 replies could not be threaded"
@@ -636,8 +636,8 @@ resumed="$( { marker_comment 9001 "$(review_marker)"
             } | jq -cs . | payload)"
 routes_baseline "$resumed"
 routes_resolve
-REVLOOP_RESOLVE_PAYLOAD="$(resolve_payload | payload)"; export REVLOOP_RESOLVE_PAYLOAD
-out="$("$REVLOOP" resolve --pr 42 2>&1)"; rc=$?
+CROSSREV_RESOLVE_PAYLOAD="$(resolve_payload | payload)"; export CROSSREV_RESOLVE_PAYLOAD
+out="$("$CROSSREV" resolve --pr 42 2>&1)"; rc=$?
 
 is  "the resumed leg exits clean"                     "$rc" "0"
 is  "the reply already on the pull request is not posted twice" \
@@ -665,7 +665,7 @@ pre_numbering="$(jq -cn --arg sha "$FIX_HEAD" --argjson ts "$(date +%s)" --arg f
 comments="$( { marker_comment 9001 "$(review_marker)"; marker_comment 9002 "$pre_numbering"; } | jq -cs . | payload)"
 routes_baseline "$comments"
 routes_resolve
-out="$("$REVLOOP" resolve --pr 42 2>&1)"; rc=$?
+out="$("$CROSSREV" resolve --pr 42 2>&1)"; rc=$?
 
 is  "a claim recorded against ids still recovers"     "$rc" "0"
 has "its text survives into the summary comment"      "$(calls)" "Recorded before findings were numbered."
@@ -678,11 +678,11 @@ is  "and its dispositions still reach their threads"  "$(count 'resolveReviewThr
 fixture_repo "$(config_with_issue_sink)"; stub_reset
 routes_baseline "$(marker_comment 9001 "$(review_marker)" | jq -cs . | payload)"
 routes_resolve
-REVLOOP_RESOLVE_PAYLOAD="$(resolve_payload | payload)"; export REVLOOP_RESOLVE_PAYLOAD
-REVLOOP_RESOLVE_MODEL=reviewer-model; export REVLOOP_RESOLVE_MODEL
-err="$("$REVLOOP" resolve --pr 42 2>&1 >/dev/null)"; rc=$?
+CROSSREV_RESOLVE_PAYLOAD="$(resolve_payload | payload)"; export CROSSREV_RESOLVE_PAYLOAD
+CROSSREV_RESOLVE_MODEL=reviewer-model; export CROSSREV_RESOLVE_MODEL
+err="$("$CROSSREV" resolve --pr 42 2>&1 >/dev/null)"; rc=$?
 is  "the same answering model on both legs halts"     "$rc" "1"
 has "and the error names the model that answered both" "$err" "the same model answered each: reviewer-model"
-export REVLOOP_RESOLVE_MODEL=resolver-model
+export CROSSREV_RESOLVE_MODEL=resolver-model
 
 finish

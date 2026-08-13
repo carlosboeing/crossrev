@@ -18,7 +18,7 @@ REVIEW_PAYLOAD='{"verdict":"issues-remain","blocked_reason":null,"prior":null,"f
    "title":"Missing return type","why":"The inferred type is wider than intended","fix":"Annotate it"}
 ]}'
 
-# The two ids revloop will derive, so the fixtures can pretend one already landed.
+# The two ids crossrev will derive, so the fixtures can pretend one already landed.
 id_of() {
   # shellcheck source=../lib/state.sh
   ( source "$HERE/../lib/ui.sh"; source "$HERE/../lib/state.sh"
@@ -48,8 +48,8 @@ fixture_repo; stub_reset
 routes_baseline "$(printf '[]' | payload)"
 route 'api --method POST repos/*/issues/42/comments*' '{"id":9001}'
 route '*reviewThreads*' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}'
-REVLOOP_REVIEW_PAYLOAD="$(printf '%s' "$REVIEW_PAYLOAD" | payload)"; export REVLOOP_REVIEW_PAYLOAD
-out="$("$REVLOOP" review --pr 42 2>&1)"; rc=$?
+CROSSREV_REVIEW_PAYLOAD="$(printf '%s' "$REVIEW_PAYLOAD" | payload)"; export CROSSREV_REVIEW_PAYLOAD
+out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
 
 is  "a first pass exits clean"                        "$rc" "0"
 has "it reports the verdict"                          "$out" "verdict: issues-remain"
@@ -57,13 +57,13 @@ has "it counts the severities it found"               "$out" "1 high, 0 medium, 
 is  "it posts one inline comment per finding"         "$(count 'method POST repos/acme/widget/pulls/42/comments')" "2"
 is  "it posts exactly one overall comment"            "$(count 'method POST repos/acme/widget/issues/42/comments')" "1"
 has "the claim is edited to complete, not re-posted"  "$(calls)" "PATCH repos/acme/widget/issues/comments/9001"
-has "it applies the pass label"                       "$(calls)" "labels[]=revloop/pass-1"
-has "it hands the loop to the resolve leg"            "$(calls)" "labels[]=revloop/awaiting-resolution"
+has "it applies the pass label"                       "$(calls)" "labels[]=crossrev/pass-1"
+has "it hands the loop to the resolve leg"            "$(calls)" "labels[]=crossrev/awaiting-resolution"
 
 # Every inline comment carries its own finding id, which is what makes recovery
 # exact rather than approximate.
 is  "each inline comment carries a finding marker" \
-  "$(grep -c 'revloop:f' "$GH_LOG")" "2"
+  "$(grep -c 'crossrev:f' "$GH_LOG")" "2"
 
 # --- crash boundary: between two inline comments ---------------------------
 #
@@ -75,7 +75,7 @@ routes_baseline "$(marker_comment 9001 "$claim" | jq -cs . | payload)"
 landed="$(posted_comments "$first_id")"
 route_first "api --paginate repos/*/pulls/$FIX_PR/comments*" "$landed"
 route '*reviewThreads*' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}'
-out="$("$REVLOOP" review --pr 42 2>&1)"; rc=$?
+out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
 
 is  "recovery exits clean"                            "$rc" "0"
 has "recovery says what it is resuming"               "$out" "Resuming pass 1"
@@ -90,7 +90,7 @@ routes_baseline "$(marker_comment 9001 "$claim" | jq -cs . | payload)"
 landed="$(posted_comments "$first_id" other000)"
 route_first "api --paginate repos/*/pulls/$FIX_PR/comments*" "$landed"
 route '*reviewThreads*' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}'
-out="$("$REVLOOP" review --pr 42 2>&1)"; rc=$?
+out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
 
 is  "with every inline comment landed, recovery posts none again" \
   "$(count 'method POST repos/acme/widget/pulls/42/comments')" "0"
@@ -109,8 +109,8 @@ fixture_repo; stub_reset
 old="$(make_claim "$FIX_HEAD" "$(( $(date +%s) - 7200 ))")"
 routes_baseline "$(marker_comment 9001 "$old" | jq -cs . | payload)"
 route '*reviewThreads*' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}'
-REVLOOP_REVIEW_PAYLOAD="$(printf '%s' "$REVIEW_PAYLOAD" | payload)"; export REVLOOP_REVIEW_PAYLOAD
-out="$("$REVLOOP" review --pr 42 2>&1)"; rc=$?
+CROSSREV_REVIEW_PAYLOAD="$(printf '%s' "$REVIEW_PAYLOAD" | payload)"; export CROSSREV_REVIEW_PAYLOAD
+out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
 has "a claim past its window is abandoned"            "$out" "abandoning the unfinished pass-1 review"
 has "and the reason names the window"                 "$out" "past the 60-minute window"
 is  "abandoning still exits clean"                    "$rc" "0"
@@ -121,35 +121,35 @@ fixture_repo; stub_reset
 moved="$(make_claim 0000000000000000000000000000000000000000)"
 routes_baseline "$(marker_comment 9001 "$moved" | jq -cs . | payload)"
 route '*reviewThreads*' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}'
-out="$("$REVLOOP" review --pr 42 2>&1)"; rc=$?
+out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
 has "a claim against a moved head is abandoned"       "$out" "and the pull request is now at"
 
 # --- status reports interruption, not just position ------------------------
 fixture_repo; stub_reset
 claim="$(make_claim)"
 routes_baseline "$(marker_comment 9001 "$claim" | jq -cs . | payload)"
-out="$("$REVLOOP" status --pr 42 2>&1)"
+out="$("$CROSSREV" status --pr 42 2>&1)"
 has "status names the unfinished leg"                 "$out" "review   started 0 minute(s) ago, no result yet"
-has "status names the command that resumes it"        "$out" "revloop review --pr 42"
+has "status names the command that resumes it"        "$out" "crossrev review --pr 42"
 has "status says which side is not resumable work"    "$out" "resolve  not run yet"
 
 # --- the local lock -------------------------------------------------------
 fixture_repo; stub_reset
-mkdir -p "$(git rev-parse --git-dir)/revloop"
-printf '%s on other since now\n' "$$" >"$(git rev-parse --git-dir)/revloop/pr-42.lock"
+mkdir -p "$(git rev-parse --git-dir)/crossrev"
+printf '%s on other since now\n' "$$" >"$(git rev-parse --git-dir)/crossrev/pr-42.lock"
 routes_baseline "$(printf '[]' | payload)"
-err="$("$REVLOOP" review --pr 42 2>&1 >/dev/null)"; rc=$?
+err="$("$CROSSREV" review --pr 42 2>&1 >/dev/null)"; rc=$?
 is  "a second run against the same PR refuses"        "$rc" "1"
 has "and it names the process holding the lock"       "$err" "already holds pull request 42 — $$"
 
 # A lock left by a process that is gone is taken over rather than obeyed.
-printf '999999 on other since then\n' >"$(git rev-parse --git-dir)/revloop/pr-42.lock"
+printf '999999 on other since then\n' >"$(git rev-parse --git-dir)/crossrev/pr-42.lock"
 stub_reset
 routes_baseline "$(printf '[]' | payload)"
 route 'api --method POST repos/*/issues/42/comments*' '{"id":9001}'
 route '*reviewThreads*' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}'
-REVLOOP_REVIEW_PAYLOAD="$(printf '%s' "$REVIEW_PAYLOAD" | payload)"; export REVLOOP_REVIEW_PAYLOAD
-out="$("$REVLOOP" review --pr 42 2>&1)"; rc=$?
+CROSSREV_REVIEW_PAYLOAD="$(printf '%s' "$REVIEW_PAYLOAD" | payload)"; export CROSSREV_REVIEW_PAYLOAD
+out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
 is  "a dead holder's lock is taken over"              "$rc" "0"
 has "and taking it over is announced"                 "$out" "no longer running"
 
@@ -157,7 +157,7 @@ has "and taking it over is announced"                 "$out" "no longer running"
 fixture_repo; stub_reset
 done_marker="$(make_claim | jq -c '.state = "complete"')"
 routes_baseline "$(marker_comment 9001 "$done_marker" | jq -cs . | payload)"
-out="$("$REVLOOP" review --pr 42 2>&1)"; rc=$?
+out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
 is  "a reviewed revision is a no-op"                  "$rc" "0"
 has "and it says why rather than looking busy"        "$out" "nothing has changed since"
 is  "a no-op writes nothing"                          "$(count 'method POST')" "0"

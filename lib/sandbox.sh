@@ -17,7 +17,7 @@
 # design's headline is that it runs on subscriptions.
 #
 # Codex requires persisted trust before running a hook, and exposes
-# `--dangerously-bypass-hook-trust` to skip that check. revloop never passes it.
+# `--dangerously-bypass-hook-trust` to skip that check. crossrev never passes it.
 #
 # So sanitising the checkout is the mechanism, and the flags are defence in
 # depth where they are free. It is also harness-agnostic, which matters: a flag
@@ -29,7 +29,7 @@
 # flagging. The diff still carries the text, and the files stay readable at a
 # path no harness auto-loads.
 
-REVLOOP_QUARANTINE=".revloop-quarantine"
+CROSSREV_QUARANTINE=".crossrev-quarantine"
 
 # Every path a harness is known to load from a working directory.
 #
@@ -58,26 +58,26 @@ PATHS
 # Prints one line per quarantined path.
 sandbox_quarantine() {
   local root="${1:-.}" moved=0 p
-  mkdir -p "$root/$REVLOOP_QUARANTINE"
+  mkdir -p "$root/$CROSSREV_QUARANTINE"
 
   while IFS= read -r p; do
     [[ -e "$root/$p" ]] || continue
-    mkdir -p "$root/$REVLOOP_QUARANTINE/$(dirname "$p")"
-    mv "$root/$p" "$root/$REVLOOP_QUARANTINE/$p"
+    mkdir -p "$root/$CROSSREV_QUARANTINE/$(dirname "$p")"
+    mv "$root/$p" "$root/$CROSSREV_QUARANTINE/$p"
     printf 'quarantined %s\n' "$p"
     moved=$((moved+1))
   done < <(_sandbox_paths)
 
   # An empty quarantine directory is itself a repository-provided path the
   # harness might notice, and it is noise in `git status`.
-  rmdir "$root/$REVLOOP_QUARANTINE" 2>/dev/null || true
+  rmdir "$root/$CROSSREV_QUARANTINE" 2>/dev/null || true
   return 0
 }
 
 # Put everything back, so the checkout is the PR's again before anything is
 # committed. Without this the resolver would commit the quarantine.
 sandbox_restore() {
-  local root="${1:-.}" q="${1:-.}/$REVLOOP_QUARANTINE" p clobbered=""
+  local root="${1:-.}" q="${1:-.}/$CROSSREV_QUARANTINE" p clobbered=""
   [[ -d "$q" ]] || return 0
   while IFS= read -r p; do
     [[ -e "$q/$p" ]] || continue

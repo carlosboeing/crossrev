@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# install.sh — put revloop on your PATH.
+# install.sh — put crossrev on your PATH.
 #
 # PATH is all this owns, permanently. Skills are installed by the `skills` CLI,
 # which already knows 76 agents, offers project or global scope, symlinks rather
@@ -14,7 +14,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 if [[ ! -f "$HERE/lib/ui.sh" ]]; then
   echo "error  install.sh must run from a checkout of the repository." >&2
-  echo "       Clone it first, then run tools/revloop/install.sh from there." >&2
+  echo "       Clone it first, then run tools/crossrev/install.sh from there." >&2
   exit 1
 fi
 
@@ -23,14 +23,14 @@ source "$HERE/lib/ui.sh"
 # shellcheck source=lib/preflight.sh
 source "$HERE/lib/preflight.sh"
 
-BIN_DIR="${REVLOOP_BIN_DIR:-$HOME/.local/bin}"
+BIN_DIR="${CROSSREV_BIN_DIR:-$HOME/.local/bin}"
 # empty = ask, 1 = install them, 0 = do not
 WANT_SKILLS=""
 
 while (( $# )); do
   case "$1" in
     # ui_confirm reads this, so exporting it is the whole of --yes.
-    --yes|-y) export REVLOOP_ASSUME_YES=1; shift ;;
+    --yes|-y) export CROSSREV_ASSUME_YES=1; shift ;;
     --bin-dir) BIN_DIR="${2:?--bin-dir needs a path}"; shift 2 ;;
     --skills)    WANT_SKILLS=1; shift ;;
     --no-skills) WANT_SKILLS=0; shift ;;
@@ -40,7 +40,7 @@ while (( $# )); do
   esac
 done
 
-printf '\n  %srevloop%s\n' "$(tput bold 2>/dev/null || true)" "$(tput sgr0 2>/dev/null || true)"
+printf '\n  %scrossrev%s\n' "$(tput bold 2>/dev/null || true)" "$(tput sgr0 2>/dev/null || true)"
 
 ui_section "Source"
 ui_line "$HERE"
@@ -51,11 +51,11 @@ ui_line "version $(tr -d '[:space:]' <"$HERE/VERSION")"
 # and the legs themselves are where a missing dependency becomes fatal.
 preflight_check harness || true
 
-target="$BIN_DIR/revloop"
+target="$BIN_DIR/crossrev"
 replaced=""
 if [[ -e "$target" || -L "$target" ]]; then
   existing="$(readlink "$target" 2>/dev/null || echo "$target")"
-  if [[ "$existing" == "$HERE/bin/revloop" ]]; then
+  if [[ "$existing" == "$HERE/bin/crossrev" ]]; then
     :  # already pointing at this checkout, nothing to ask
   else
     ui_warn "$target already exists and points somewhere else" \
@@ -68,7 +68,7 @@ fi
 mkdir -p "$BIN_DIR"
 # Symlink rather than copy, so editing the checkout takes effect immediately and
 # there is one source of truth. Same conclusion the skills CLI reached.
-ln -sf "$HERE/bin/revloop" "$target"
+ln -sf "$HERE/bin/crossrev" "$target"
 
 ui_section "Installed"
 # Rule 5: verify rather than assert. A symlink that resolves to nothing runs as
@@ -76,22 +76,22 @@ ui_section "Installed"
 if [[ -x "$target" ]]; then
   ui_ok "$target"
   # Say what moved, not just what landed. The prompt above is easy to accept and
-  # easier to skip with --yes, and the failure it leads to is silent: `revloop`
+  # easier to skip with --yes, and the failure it leads to is silent: `crossrev`
   # keeps working while running a different checkout than the one you think, so
   # the next `git pull` in the old one changes nothing and there is no error to
   # explain why.
   if [[ -n "$replaced" ]]; then
     ui_line "   replaced a link to $replaced"
-    ui_line "   \`revloop\` now runs from $HERE"
+    ui_line "   \`crossrev\` now runs from $HERE"
   fi
 else
   ui_no "$target — created, but does not resolve to an executable"
   exit 1
 fi
 
-if ! command -v revloop >/dev/null 2>&1; then
+if ! command -v crossrev >/dev/null 2>&1; then
   ui_gap
-  ui_line "$BIN_DIR is not on your PATH, so typing \`revloop\` will not find it."
+  ui_line "$BIN_DIR is not on your PATH, so typing \`crossrev\` will not find it."
   ui_line "Add this to your shell profile:"
   ui_line "  export PATH=\"$BIN_DIR:\$PATH\""
 fi
@@ -104,7 +104,7 @@ fi
 # against everywhere else, so this offers to run it. It stays an offer rather
 # than becoming part of the install for two reasons that are not politeness.
 #
-# The loop does not need them. revloop reads both skills out of this checkout
+# The loop does not need them. crossrev reads both skills out of this checkout
 # and reproduces their text into each prompt, so installing them is for using
 # them by hand in an ordinary session. Installing something unneeded by default
 # is worse than asking.
@@ -116,7 +116,7 @@ fi
 # Two details in the command were established by running the CLI, and both fail
 # by reporting nothing rather than erroring. The source must be THIS directory:
 # from the repository root the CLI finds the standalone skills in skills/ and
-# never walks into tools/revloop/skills/. And --skill takes one name per flag —
+# never walks into tools/crossrev/skills/. And --skill takes one name per flag —
 # a comma-separated list matches nothing and says "No matching skills found"
 # rather than complaining about the syntax.
 # Hand off, rather than drive.
@@ -147,10 +147,10 @@ _install_skills() {
 ui_gap
 if [[ "$WANT_SKILLS" == "0" ]]; then
   ui_line "Skipped the skills (--no-skills). The loop does not need them:"
-  ui_line "revloop reproduces both into each prompt from this checkout."
+  ui_line "crossrev reproduces both into each prompt from this checkout."
 elif ! command -v npx >/dev/null 2>&1; then
   ui_line "npx is not installed, so the two skills were not offered. Nothing is"
-  ui_line "missing — revloop reproduces both into each prompt from this checkout."
+  ui_line "missing — crossrev reproduces both into each prompt from this checkout."
   ui_line "Install Node if you want them available by hand, then run:"
   ui_line "  npx skills@latest add $HERE --skill pr-review --skill pr-resolve --global"
 elif [[ "$WANT_SKILLS" != "1" ]] && ! _ui_input_source >/dev/null 2>&1; then
@@ -167,7 +167,7 @@ else
   ui_line ""
   ui_line "The skills CLI takes it from here: it detects which harnesses you have"
   ui_line "and asks where to put them and whether to symlink. Its questions, not"
-  ui_line "revloop's."
+  ui_line "crossrev's."
   printf '\n'
   if [[ "$WANT_SKILLS" == "1" ]] || ui_confirm "Hand over to the skills CLI now?"; then
     # Interactive unless install.sh was itself told not to ask. --yes here means
@@ -175,7 +175,7 @@ else
     # questions for someone" — those are different permissions and only the
     # scripted path has the second.
     mode=interactive
-    [[ "${REVLOOP_ASSUME_YES:-0}" == "1" ]] && mode=scripted
+    [[ "${CROSSREV_ASSUME_YES:-0}" == "1" ]] && mode=scripted
     if _install_skills "$mode"; then
       ui_ok "the skills CLI finished"
     else
@@ -187,4 +187,4 @@ else
     ui_say "  npx skills@latest add $HERE --skill pr-review --skill pr-resolve"
   fi
 fi
-ui_end "Then check everything:   revloop doctor"
+ui_end "Then check everything:   crossrev doctor"

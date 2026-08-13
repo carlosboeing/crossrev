@@ -18,9 +18,9 @@ CFG_REPO=""      # repository policy, as JSON
 CFG_OPERATOR=""  # operator file, as JSON
 CFG_MERGED=""    # the two merged, as JSON
 
-REVLOOP_CONFIG_VERSION=1
+CROSSREV_CONFIG_VERSION=1
 
-_cfg_operator_path() { printf '%s/revloop/config.yml' "${XDG_CONFIG_HOME:-$HOME/.config}"; }
+_cfg_operator_path() { printf '%s/crossrev/config.yml' "${XDG_CONFIG_HOME:-$HOME/.config}"; }
 
 # Read a YAML file into JSON, or emit {} when it is absent.
 _cfg_yaml_to_json() {
@@ -54,7 +54,7 @@ _cfg_yaml_text_to_json() {
 # Deliberately not what `init` writes. The CI starter names a specific pairing;
 # a local user who has never heard of it would otherwise be told to set an API
 # key before their first review, contradicting the promise that
-# `revloop review --pr 42` just works. So: no endpoints, two different local
+# `crossrev review --pr 42` just works. So: no endpoints, two different local
 # harnesses, local mode, and nothing persisted anywhere uninvited.
 _cfg_defaults() {
   jq -cn '{
@@ -72,7 +72,7 @@ _cfg_defaults() {
       destination: "auto",
       github_issues: {
         labels: [],
-        tracking_label: "revloop-review",
+        tracking_label: "crossrev-review",
         create_missing_labels: true,
         comment_on_existing_issue: false
       },
@@ -95,19 +95,19 @@ cfg_load() {
 
   if [[ -n "$base_sha" ]]; then
     local text
-    text="$(cfg_show_at_base "$base_sha" ".github/revloop.yml" \
-         || cfg_show_at_base "$base_sha" ".revloop.yml" || true)"
+    text="$(cfg_show_at_base "$base_sha" ".github/crossrev.yml" \
+         || cfg_show_at_base "$base_sha" ".crossrev.yml" || true)"
     repo_json="$(_cfg_yaml_text_to_json "$text")"
   else
-    if   [[ -f .github/revloop.yml ]]; then repo_json="$(_cfg_yaml_to_json .github/revloop.yml)"
-    elif [[ -f .revloop.yml ]];        then repo_json="$(_cfg_yaml_to_json .revloop.yml)"
+    if   [[ -f .github/crossrev.yml ]]; then repo_json="$(_cfg_yaml_to_json .github/crossrev.yml)"
+    elif [[ -f .crossrev.yml ]];        then repo_json="$(_cfg_yaml_to_json .crossrev.yml)"
     else repo_json='{}'
     fi
   fi
 
   operator_json="$(_cfg_yaml_to_json "$(_cfg_operator_path)")"
 
-  cfg_check_version "$repo_json" "$(basename "${base_sha:+base revision }").github/revloop.yml"
+  cfg_check_version "$repo_json" "$(basename "${base_sha:+base revision }").github/crossrev.yml"
   cfg_check_version "$operator_json" "$(_cfg_operator_path)"
 
   CFG_REPO="$repo_json"
@@ -161,7 +161,7 @@ cfg_assert_max_passes_per_cycle() {
   max="$(jq -r '.policy.max_passes_per_cycle // empty' <<<"$CFG_MERGED")"
   if [[ "$max" =~ ^[0-9]+$ ]] && (( max > 0 )); then return 0; fi
   ui_die "policy.max_passes_per_cycle is '${max:-unset}', which is not a whole number of passes above zero" \
-    "It bounds how many passes the loop runs by itself before a person has to ask for another, so the smallest meaningful value is 1. Set it to 1 or more in the repository config, or remove it to take the default of 3. To stop revloop reviewing a repository at all, remove its workflows rather than setting the bound to zero."
+    "It bounds how many passes the loop runs by itself before a person has to ask for another, so the smallest meaningful value is 1. Set it to 1 or more in the repository config, or remove it to take the default of 3. To stop crossrev reviewing a repository at all, remove its workflows rather than setting the bound to zero."
 }
 
 # A version key that is present and not 1 is a refusal, not a warning. The whole
@@ -170,9 +170,9 @@ cfg_check_version() {
   local json="$1" where="$2" v
   v="$(jq -r '.version // empty' <<<"$json")"
   [[ -z "$v" ]] && return 0
-  [[ "$v" == "$REVLOOP_CONFIG_VERSION" ]] && return 0
-  ui_die "$where declares version $v, and this revloop understands version $REVLOOP_CONFIG_VERSION" \
-    "Upgrade revloop, or set version: $REVLOOP_CONFIG_VERSION in that file if it really is the current shape."
+  [[ "$v" == "$CROSSREV_CONFIG_VERSION" ]] && return 0
+  ui_die "$where declares version $v, and this crossrev understands version $CROSSREV_CONFIG_VERSION" \
+    "Upgrade crossrev, or set version: $CROSSREV_CONFIG_VERSION in that file if it really is the current shape."
 }
 
 cfg_get() { jq -r "$1 // empty" <<<"$CFG_MERGED"; }
@@ -191,7 +191,7 @@ cfg_endpoint() {
   ep="$(jq -c --arg n "$name" '.endpoints[$n] // empty' <<<"$CFG_MERGED")"
   [[ -n "$ep" ]] || ui_die \
     "the endpoint '$name' is named in the config but defined nowhere" \
-    "Define it under endpoints: in the repository config, or in $(_cfg_operator_path) if it is machine-local. revloop will not silently fall back to the vendor's own API."
+    "Define it under endpoints: in the repository config, or in $(_cfg_operator_path) if it is machine-local. crossrev will not silently fall back to the vendor's own API."
   local url tok
   url="$(jq -r '.base_url // empty' <<<"$ep")"
   tok="$(jq -r '.token_env // empty' <<<"$ep")"
@@ -205,7 +205,7 @@ cfg_endpoint() {
 # ---------------------------------------------------------------------------
 #
 # Inventing a folder in someone else's repository is the wrong default, so
-# revloop does not. Three tiers, first hit wins, and the last one only fires
+# crossrev does not. Three tiers, first hit wins, and the last one only fires
 # when a repository backlog was explicitly asked for.
 
 # Read the Tracker field out of a `## Project Map` section.
@@ -270,7 +270,7 @@ cfg_resolve_backlog() {
       fi
       return 0 ;;
     auto) : ;;
-    *) ui_die "backlog.destination is '$want', which revloop does not recognise" \
+    *) ui_die "backlog.destination is '$want', which crossrev does not recognise" \
          "Set it to github_issues, repository, none or auto in the repository config." ;;
   esac
 
@@ -326,8 +326,8 @@ _cfg_sniff_repository_backlog() {
     if _cfg_path_exists "$base_sha" TODO.md;    then printf 'repository file TODO.md';    return 0; fi
   fi
   if [[ "$mode" == "explicit" ]]; then
-    if [[ "$layout" == "file" ]]; then printf 'repository file .revloop/backlog.md'
-    else printf 'repository folder .revloop/backlog'
+    if [[ "$layout" == "file" ]]; then printf 'repository file .crossrev/backlog.md'
+    else printf 'repository folder .crossrev/backlog'
     fi
     return 0
   fi
@@ -342,9 +342,9 @@ _cfg_sniff_repository_backlog() {
 cfg_assert_path_inside_repo() {
   local path="$1" root resolved
   root="$(git rev-parse --show-toplevel 2>/dev/null)" || ui_die \
-    "not inside a git repository" "Run revloop from a checkout of the repository under review."
+    "not inside a git repository" "Run crossrev from a checkout of the repository under review."
   [[ "$path" != /* ]] || ui_die \
-    "the backlog path '$path' is absolute" "Backlog paths are repository-relative, so that revloop cannot write outside the checkout."
+    "the backlog path '$path' is absolute" "Backlog paths are repository-relative, so that crossrev cannot write outside the checkout."
   resolved="$(cd "$root" && python3 -c 'import os,sys; print(os.path.normpath(os.path.join(os.getcwd(), sys.argv[1])))' "$path" 2>/dev/null)" \
     || resolved="$root/$path"
   case "$resolved" in

@@ -4,11 +4,11 @@
 # State lives on the pull request rather than in process memory, so it survives
 # a crash, is readable by a human, and is identical in both modes.
 #
-# Every `gh` call in revloop goes through this file or legs.sh. The agent
+# Every `gh` call in crossrev goes through this file or legs.sh. The agent
 # process never sees one.
 
-REVLOOP_MARKER_PREFIX="<!-- revloop:"
-REVLOOP_FINDING_PREFIX="<!-- revloop:f"
+CROSSREV_MARKER_PREFIX="<!-- crossrev:"
+CROSSREV_FINDING_PREFIX="<!-- crossrev:f"
 
 # ---------------------------------------------------------------------------
 # Trust
@@ -28,15 +28,15 @@ state_trusted_author() {
       # The App, and nothing else. A forged marker here makes an *agent* act:
       # push a commit, skip a finding, believe a leg finished.
       #
-      # On a runner there is no ~/.config/revloop, so the slug comes from the
+      # On a runner there is no ~/.config/crossrev, so the slug comes from the
       # environment — actions/create-github-app-token emits it as `app-slug`, and
       # the generated workflows pass it through. The local metadata file is the
       # fallback for an automated run started from a machine.
-      local slug="${REVLOOP_APP_SLUG:-}"
-      [[ -n "$slug" ]] || slug="$(jq -r '.slug // empty' "$(_auth_meta "${REVLOOP_OWNER:-}")" 2>/dev/null)"
+      local slug="${CROSSREV_APP_SLUG:-}"
+      [[ -n "$slug" ]] || slug="$(jq -r '.slug // empty' "$(_auth_meta "${CROSSREV_OWNER:-}")" 2>/dev/null)"
       [[ -n "$slug" ]] || ui_die \
         "cannot determine which App's markers to trust" \
-        "Automated mode reads markers only from the App that writes them. In a workflow, set REVLOOP_APP_SLUG from the token step's app-slug output. Locally, run: revloop auth status"
+        "Automated mode reads markers only from the App that writes them. In a workflow, set CROSSREV_APP_SLUG from the token step's app-slug output. Locally, run: crossrev auth status"
       printf '%s[bot]' "$slug" ;;
     *)
       # The invoking user. No watchdog, no unattended push, no chaining — you
@@ -66,7 +66,7 @@ _state_comments() {
 state_marker_of() {
   local body="$1"
   printf '%s' "$body" \
-    | sed -n 's/.*<!-- revloop: \(.*\) -->.*/\1/p' \
+    | sed -n 's/.*<!-- crossrev: \(.*\) -->.*/\1/p' \
     | tr -d '\n' | jq -c . 2>/dev/null
 }
 
@@ -87,7 +87,7 @@ state_markers() {
 
 # Serialise a marker for embedding in a comment body. Invisible in the UI, and
 # it doubles as the audit trail.
-state_marker_encode() { printf '\n\n%s %s -->' "$REVLOOP_MARKER_PREFIX" "$(jq -c . <<<"$1")"; }
+state_marker_encode() { printf '\n\n%s %s -->' "$CROSSREV_MARKER_PREFIX" "$(jq -c . <<<"$1")"; }
 
 # The per-write marker that makes recovery exact.
 #
@@ -98,7 +98,7 @@ state_marker_encode() { printf '\n\n%s %s -->' "$REVLOOP_MARKER_PREFIX" "$(jq -c
 # construction, because the record and the thing it records are one HTTP call.
 state_finding_marker() {
   local id="$1" pass="$2" leg="$3"
-  printf '\n\n%s %s -->' "$REVLOOP_FINDING_PREFIX" \
+  printf '\n\n%s %s -->' "$CROSSREV_FINDING_PREFIX" \
     "$(jq -cn --arg i "$id" --argjson p "$pass" --arg l "$leg" '{id:$i,pass:$p,leg:$l}')"
 }
 
@@ -146,7 +146,7 @@ state_unthreaded_finding_ids() {
 # site and quietly miss the other.
 _state_finding_ids() {
   local leg="$1" pass="${2:-}"
-  sed -n 's/.*<!-- revloop:f \(.*\) -->.*/\1/p' \
+  sed -n 's/.*<!-- crossrev:f \(.*\) -->.*/\1/p' \
     | jq -r --arg leg "$leg" --arg pass "$pass" \
         'select(.leg == $leg) | select($pass == "" or .pass == ($pass | tonumber)) | .id' 2>/dev/null \
     | sort -u
@@ -315,7 +315,7 @@ state_prs_reviewed_today() {
   done
 
   ui_warn "the daily review count stopped after the first 10 pages of repository comments" \
-    "The bound intentionally rounds down rather than stopping healthy automatic reviews early. The count below includes only the comments revloop inspected."
+    "The bound intentionally rounds down rather than stopping healthy automatic reviews early. The count below includes only the comments crossrev inspected."
   printf '%s' "$count"
 }
 

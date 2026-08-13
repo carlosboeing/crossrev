@@ -1,7 +1,7 @@
 # shellcheck shell=bash
 # lib/ui.sh — output voice.
 #
-# The design sets six rules for everything revloop prints. They live here rather
+# The design sets six rules for everything crossrev prints. They live here rather
 # than in each caller's memory:
 #
 #   1. Name the thing            — "created 5 labels on your-org/website", not "labels"
@@ -126,15 +126,15 @@ _ui_input_source() {
 }
 
 _ui_no_input() {
-  ui_die "revloop needs to ask you something, but no terminal is attached" \
+  ui_die "crossrev needs to ask you something, but no terminal is attached" \
     "Run this in a terminal directly. Editor-embedded and captured shells often have no controlling terminal, which is what this is."
 }
 
 # Ask before an outward-facing action — rule 6. The caller explains first; this
 # only collects the answer. Defaults to no, so a stray newline cannot approve
-# something. Honours --yes via REVLOOP_ASSUME_YES.
+# something. Honours --yes via CROSSREV_ASSUME_YES.
 ui_confirm() {
-  if [[ "${REVLOOP_ASSUME_YES:-0}" == "1" ]]; then
+  if [[ "${CROSSREV_ASSUME_YES:-0}" == "1" ]]; then
     printf '%s◆  %s%s  yes (--yes)\n' "$_c_bold" "$1" "$_c_reset"
     return 0
   fi

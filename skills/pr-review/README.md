@@ -1,6 +1,6 @@
 # pr-review
 
-The review leg of [revloop](../../). Reads a pull request diff and prior review threads supplied in the prompt, and returns findings as schema-constrained JSON anchored to file and line.
+The review leg of [crossrev](../../). Reads a pull request diff and prior review threads supplied in the prompt, and returns findings as schema-constrained JSON anchored to file and line.
 
 Forked from Superpowers' `code-reviewer.md`, which already supplied the right skeleton: harness-neutral markdown, a severity model, a hard requirement that every finding carries file, line, what's wrong, why it matters and how to fix, read-only discipline, and an explicit verdict.
 
@@ -43,4 +43,4 @@ Two adapter facts fell out of that testing. **The schema flags differ in shape**
 npx skills@latest add carlosboeing/claude-code-resources --skill pr-review --skill pr-resolve
 ```
 
-Normally you don't invoke it yourself — `revloop review --pr N` does.
+Normally you don't invoke it yourself — `crossrev review --pr N` does.

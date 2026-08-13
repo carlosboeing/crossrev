@@ -90,7 +90,7 @@ preflight_check() {
   if [[ "$need" == "harness" ]]; then
     local found_harness=0
     # The three with adapters. Kimi is not on this list because it is not a
-    # revloop harness: it is reached through the claude adapter as a named
+    # crossrev harness: it is reached through the claude adapter as a named
     # endpoint, so the `kimi` binary being present says nothing about whether
     # the loop can use it.
     for t in claude codex agy; do
@@ -102,7 +102,7 @@ preflight_check() {
       fi
     done
     if (( found_harness == 0 )); then
-      ui_no "no harness CLI found — revloop needs at least one of claude, codex or agy"
+      ui_no "no harness CLI found — crossrev needs at least one of claude, codex or agy"
       missing+=("harness")
     fi
   fi
@@ -145,7 +145,7 @@ preflight_pairing_supported() {
       printf "Kimi's subscription token lives 15 minutes, and a scheduler with a five-minute floor that runs late under load cannot stay ahead of it"
       return 1 ;;
     *)
-      printf "revloop has no adapter for '%s'" "$harness"
+      printf "crossrev has no adapter for '%s'" "$harness"
       return 1 ;;
   esac
 }
@@ -162,7 +162,7 @@ preflight_needs_refresher() {
   [[ "$harness" == "codex" ]]
 }
 
-# One line per leg, for `revloop doctor` and the `init` plan.
+# One line per leg, for `crossrev doctor` and the `init` plan.
 preflight_report_pairings() {
   local runner="$1" leg reason harness endpoint
   ui_section "Pairings on runner: $runner"
@@ -191,6 +191,6 @@ preflight_report_pairings() {
 # optional and the check says why rather than just naming the binary.
 preflight_require_yq() {
   command -v yq >/dev/null 2>&1 || ui_die \
-    "yq is not installed, and revloop's config files are YAML" \
+    "yq is not installed, and crossrev's config files are YAML" \
     "jq cannot read YAML. Install it with: $(_install_hint yq)"
 }

@@ -27,7 +27,7 @@ hasnt() { [[ "$2" != *"$3"* ]] && ok "$1" || notok "$1" "does not contain '$3'" 
 b64url() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
 
 # A credential in the shape codex actually stores, with an access token whose
-# claims say what this test needs them to say. Signed with nothing: revloop reads
+# claims say what this test needs them to say. Signed with nothing: crossrev reads
 # the claims for expiry, issuer and client id and never treats them as an
 # authorisation decision, so an unsigned token is the honest fixture.
 fake_credential() {
@@ -86,7 +86,7 @@ has "and says how much is left"                 "$out" "15 minutes"
 has "and names the one-hour floor"              "$out" "one-hour floor"
 has "and says why refreshing here is worse than stopping" \
   "$out" "consume the refresh token"
-has "and names both ways out"                   "$out" "revloop-token-refresh"
+has "and names both ways out"                   "$out" "crossrev-token-refresh"
 # The amendment asks for exactly this: kill the refresher for a full token
 # lifetime and the next leg must fail loudly with the manual recovery named,
 # rather than hanging or quietly degrading.
@@ -108,7 +108,7 @@ has "rather than assuming it is fine"           "$out" "cannot reason about"
 # refresh and write back on its own — there is no flag to stop it — so the copy
 # it writes into has to be one nothing reads again.
 unset CODEX_HOME
-REVLOOP_CODEX_AUTH="$(fake_credential 86400)"; export REVLOOP_CODEX_AUTH
+CROSSREV_CODEX_AUTH="$(fake_credential 86400)"; export CROSSREV_CODEX_AUTH
 cred_prepare codex
 is  "a restored credential lands in a scratch home, not in ~/.codex" \
   "$(dirname "${CODEX_HOME:-none}")" "$(dirname "$(mktemp -u)")"
@@ -122,8 +122,8 @@ scratch="$CODEX_HOME"
 # Two legs running at once must not share a copy. They each borrow their own,
 # and neither is the one the secret holds — which is what makes "several holders"
 # safe as long as none of them writes.
-( cred_prepare codex; printf '%s' "$CODEX_HOME" ) >/tmp/revloop-second-home.$$
-second="$(cat /tmp/revloop-second-home.$$)"; rm -f /tmp/revloop-second-home.$$
+( cred_prepare codex; printf '%s' "$CODEX_HOME" ) >/tmp/crossrev-second-home.$$
+second="$(cat /tmp/crossrev-second-home.$$)"; rm -f /tmp/crossrev-second-home.$$
 [[ -n "$second" && "$second" != "$scratch" ]] \
   && ok "a second leg gets its own copy rather than sharing one" \
   || notok "a second leg gets its own copy rather than sharing one" "a different scratch home" "$second"
@@ -135,7 +135,7 @@ is  "and CODEX_HOME is unset again"             "${CODEX_HOME:-unset}" "unset"
 
 # Nothing to restore is the local and self-hosted case, where the harness has its
 # own login on disk. It must cost nothing and touch nothing.
-unset REVLOOP_CODEX_AUTH
+unset CROSSREV_CODEX_AUTH
 cred_prepare codex
 is  "with no restored credential, nothing is prepared" "${CODEX_HOME:-unset}" "unset"
 cred_prepare claude
@@ -149,7 +149,7 @@ is  "and claude needs no restore at all — setup-token is long-lived" "${CODEX_
 # that reaches tool use finds no other vendor's token to exfiltrate.
 strip_for() { cred_env_strip_for "$1" | tr '\n' ' ' | sed 's/ $//'; }
 
-has "claude sheds the codex credential"          "$(strip_for claude)" "REVLOOP_CODEX_AUTH"
+has "claude sheds the codex credential"          "$(strip_for claude)" "CROSSREV_CODEX_AUTH"
 hasnt "and keeps the token it authenticates with" "$(strip_for claude)" "CLAUDE_CODE_OAUTH_TOKEN"
 # Not stripped for claude on purpose: it is the operator's own environment, not
 # something a workflow injected, and removing it would quietly move a local run
@@ -161,10 +161,10 @@ has "and the anthropic key, which is a foreign vendor's here" "$(strip_for codex
 # Stripped even from codex: by then the credential is in CODEX_HOME, so the copy
 # in the environment is a second one nothing needs.
 has "and even its own raw credential, already written to CODEX_HOME" \
-  "$(strip_for codex)" "REVLOOP_CODEX_AUTH"
+  "$(strip_for codex)" "CROSSREV_CODEX_AUTH"
 
 has "agy sheds every credential, holding none of them" "$(strip_for agy)" "CLAUDE_CODE_OAUTH_TOKEN"
-has "including the codex one"                    "$(strip_for agy)" "REVLOOP_CODEX_AUTH"
+has "including the codex one"                    "$(strip_for agy)" "CROSSREV_CODEX_AUTH"
 
 printf '\n  %d passed, %d failed\n' "$pass" "$fail"
 (( fail == 0 ))

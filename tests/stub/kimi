@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # A tripwire, not a stub. Kimi has no adapter: it is reached through the claude
-# adapter as a named endpoint. If revloop ever invokes this, a harness with no
+# adapter as a named endpoint. If crossrev ever invokes this, a harness with no
 # adapter behind it got past the guard in run_resolve_leg, and the run should
 # fail loudly here rather than somewhere three steps downstream.
 printf 'tests/stub/kimi was invoked: kimi has no adapter and must never be dispatched\n' >&2

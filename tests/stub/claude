@@ -8,20 +8,20 @@
 # the divergence guard reads the key.
 #
 # The leg is inferred from the prompt rather than from a flag, so one stub covers
-# `revloop run` calling both legs in sequence.
+# `crossrev run` calling both legs in sequence.
 
 set -uo pipefail
 
 [[ "${1:-}" == "--version" ]] && { printf '9.9.9 (test stub)\n'; exit 0; }
 
 prompt="${!#}"
-[[ -n "${REVLOOP_PROMPT_LOG:-}" ]] && printf '%s' "$prompt" >"$REVLOOP_PROMPT_LOG"
+[[ -n "${CROSSREV_PROMPT_LOG:-}" ]] && printf '%s' "$prompt" >"$CROSSREV_PROMPT_LOG"
 
 # The answering model defaults to the one that was asked for, which is what the
 # real CLI reports when nothing substitutes it. A stub that answered as something
 # else made every run look like a server-side substitution, which the run-details
 # table now calls out in bold — correctly, and on a fixture that never meant it.
-# A test that wants a substitution sets REVLOOP_*_MODEL and gets one.
+# A test that wants a substitution sets CROSSREV_*_MODEL and gets one.
 requested=""
 prev=""
 for a in "$@"; do
@@ -29,22 +29,22 @@ for a in "$@"; do
   prev="$a"
 done
 
-payload_file="${REVLOOP_HARNESS_PAYLOAD:-}"
-model="${REVLOOP_HARNESS_MODEL:-${requested:-claude-test-model}}"
+payload_file="${CROSSREV_HARNESS_PAYLOAD:-}"
+model="${CROSSREV_HARNESS_MODEL:-${requested:-claude-test-model}}"
 if [[ "$prompt" == *"You are the review leg"* ]]; then
-  [[ -n "${REVLOOP_REVIEW_PAYLOAD:-}" ]] && payload_file="$REVLOOP_REVIEW_PAYLOAD"
-  model="${REVLOOP_REVIEW_MODEL:-$model}"
+  [[ -n "${CROSSREV_REVIEW_PAYLOAD:-}" ]] && payload_file="$CROSSREV_REVIEW_PAYLOAD"
+  model="${CROSSREV_REVIEW_MODEL:-$model}"
 elif [[ "$prompt" == *"You are the resolve leg"* ]]; then
-  [[ -n "${REVLOOP_RESOLVE_PAYLOAD:-}" ]] && payload_file="$REVLOOP_RESOLVE_PAYLOAD"
-  model="${REVLOOP_RESOLVE_MODEL:-$model}"
+  [[ -n "${CROSSREV_RESOLVE_PAYLOAD:-}" ]] && payload_file="$CROSSREV_RESOLVE_PAYLOAD"
+  model="${CROSSREV_RESOLVE_MODEL:-$model}"
   # A leg that retries invokes this twice, and a test about the retry needs the
   # second answer to differ from the first — otherwise "it retried" and "it
   # accepted the first answer" look identical. The counter is a file because each
   # invocation is its own process.
-  if [[ -n "${REVLOOP_RESOLVE_PAYLOAD_2:-}" && -n "${REVLOOP_STUB_COUNT:-}" ]]; then
-    n=$(( $(cat "$REVLOOP_STUB_COUNT" 2>/dev/null || printf 0) + 1 ))
-    printf '%s' "$n" >"$REVLOOP_STUB_COUNT"
-    (( n >= 2 )) && payload_file="$REVLOOP_RESOLVE_PAYLOAD_2"
+  if [[ -n "${CROSSREV_RESOLVE_PAYLOAD_2:-}" && -n "${CROSSREV_STUB_COUNT:-}" ]]; then
+    n=$(( $(cat "$CROSSREV_STUB_COUNT" 2>/dev/null || printf 0) + 1 ))
+    printf '%s' "$n" >"$CROSSREV_STUB_COUNT"
+    (( n >= 2 )) && payload_file="$CROSSREV_RESOLVE_PAYLOAD_2"
   fi
 fi
 
@@ -55,8 +55,8 @@ fi
 
 # A resolver changes code in the working tree, and the orchestrator commits it.
 # A test that needs that models it with a script rather than pretending.
-if [[ "$prompt" == *"You are the resolve leg"* && -n "${REVLOOP_RESOLVE_EDIT:-}" ]]; then
-  bash "$REVLOOP_RESOLVE_EDIT" || true
+if [[ "$prompt" == *"You are the resolve leg"* && -n "${CROSSREV_RESOLVE_EDIT:-}" ]]; then
+  bash "$CROSSREV_RESOLVE_EDIT" || true
 fi
 
 # modelUsage carries all four counters the real CLI reports, because the adapter

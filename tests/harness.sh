@@ -13,7 +13,7 @@
 # shellcheck disable=SC2034
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REVLOOP="$HERE/../bin/revloop"
+CROSSREV="$HERE/../bin/crossrev"
 
 pass=0; fail=0
 ok()    { printf '  ok    %s\n' "$1"; pass=$((pass+1)); }
@@ -30,7 +30,7 @@ XDG_CONFIG_HOME="$(mktemp -d)"; export XDG_CONFIG_HOME
 FIX_REPO="acme/widget"
 FIX_PR=42
 FIX_USER="carlosboeing"
-FIX_APP="revloop-acme[bot]"
+FIX_APP="crossrev-acme[bot]"
 FIX_DIR=""       # set by fixture_repo
 FIX_ORIGIN=""    # the bare repo the fixture pushes to
 FIX_HEAD=""      # set by fixture_repo, a real SHA
@@ -90,7 +90,7 @@ fixture_repo() {
     git config user.name Test
     printf 'export const ok = 1\n' >app.ts
     mkdir -p .github
-    printf '%s\n' "$config" >.github/revloop.yml
+    printf '%s\n' "$config" >.github/crossrev.yml
     git add -A && git commit -q -m base
     git remote add origin "https://github.com/$FIX_REPO.git"
     git remote set-url --push origin "$bare"
@@ -114,15 +114,15 @@ stub_reset() {
   local d; d="$(mktemp -d)"
   GH_LOG="$d/gh.log"; GH_ROUTES="$d/routes"; PROMPT_LOG="$d/prompt"
   : >"$GH_LOG"; : >"$GH_ROUTES"
-  export REVLOOP_GH_LOG="$GH_LOG" REVLOOP_GH_ROUTES="$GH_ROUTES" REVLOOP_PROMPT_LOG="$PROMPT_LOG"
+  export CROSSREV_GH_LOG="$GH_LOG" CROSSREV_GH_ROUTES="$GH_ROUTES" CROSSREV_PROMPT_LOG="$PROMPT_LOG"
   export PATH="$HERE/stub:$PATH"
-  unset REVLOOP_REVIEW_PAYLOAD REVLOOP_RESOLVE_PAYLOAD REVLOOP_HARNESS_PAYLOAD REVLOOP_RESOLVE_EDIT
+  unset CROSSREV_REVIEW_PAYLOAD CROSSREV_RESOLVE_PAYLOAD CROSSREV_HARNESS_PAYLOAD CROSSREV_RESOLVE_EDIT
 }
 
 # The routes file is line-based, so a multi-line response is spooled to a file and
 # referenced. Without this a diff fixture would silently shred every route added
 # after it, and the tests would fail for a reason that has nothing to do with
-# revloop.
+# crossrev.
 route() {
   local pat="$1" resp="$2" f
   if [[ "$resp" == *$'\n'* ]]; then
@@ -197,7 +197,7 @@ posted_comments() {
   local out="[]" id
   for id in "$@"; do
     out="$(jq -c --arg id "$id" --arg a "$FIX_USER" --arg leg "${POSTED_LEG:-review}" \
-      '. + [{body: ("posted <!-- revloop:f " + ({id:$id, pass:1, leg:$leg} | tojson) + " -->"),
+      '. + [{body: ("posted <!-- crossrev:f " + ({id:$id, pass:1, leg:$leg} | tojson) + " -->"),
              user: {login: $a}}]' <<<"$out")"
   done
   printf '%s' "$out"
@@ -212,7 +212,7 @@ thread_node() {
     --argjson ids "$ids" --arg a "$FIX_USER" '
     {id:$id, isResolved:$r, isOutdated:false, path:$p, line:$l,
      comments:{nodes: [ $ids[] | {databaseId:5000, author:{login:$a},
-       body: ("finding <!-- revloop:f " + ({id:., pass:1, leg:"review"} | tojson) + " -->")} ]}}'
+       body: ("finding <!-- crossrev:f " + ({id:., pass:1, leg:"review"} | tojson) + " -->")} ]}}'
 }
 
 # The GraphQL envelope around a set of thread nodes.
@@ -227,7 +227,7 @@ threads_response() {
 marker_comment() {
   local id="$1" marker="$2" author="${3:-$FIX_USER}" body="${4:-Summary.}"
   jq -cn --argjson id "$id" --arg a "$author" --arg b "$body" --arg m "$marker" \
-    '{id:$id, body:($b + "\n\n<!-- revloop: " + $m + " -->"), user:{login:$a},
+    '{id:$id, body:($b + "\n\n<!-- crossrev: " + $m + " -->"), user:{login:$a},
       created_at:"2026-08-11T00:00:00Z"}'
 }
 

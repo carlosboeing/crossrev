@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 #
-# `revloop init` — the plan gate, the label inventory, and what it refuses to
+# `crossrev init` — the plan gate, the label inventory, and what it refuses to
 # claim it did.
 #
-# This is the most consequential command revloop has: it registers a GitHub
+# This is the most consequential command crossrev has: it registers a GitHub
 # identity, writes organisation secrets, and adds files to a repository. Two
 # things are therefore tested harder than the rest. A count that disagrees with
 # its own list is the kind of lie a reader catches and a test usually does not.
@@ -32,7 +32,7 @@ resolver:
 backlog:
   destination: github_issues
   github_issues:
-    tracking_label: revloop-review
+    tracking_label: crossrev-review
     labels: [bug]
     create_missing_labels: true
     comment_on_existing_issue: false
@@ -44,7 +44,7 @@ EOF
 # without one describes a label GitHub never returns.
 routes_init() {
   route 'api users/*'                      '{"type":"User"}'
-  route 'api repos/*/labels/revloop/stop'  '{"name":"revloop/stop","color":"cf222e"}'
+  route 'api repos/*/labels/crossrev/stop'  '{"name":"crossrev/stop","color":"cf222e"}'
   route 'api repos/*/labels/bug'           '{"name":"bug","color":"d4c5f9"}'
   route 'api repos/*/labels/*'             '!fail'
   route 'api repos/*/branches/main/protection' '!fail'
@@ -56,7 +56,7 @@ routes_init() {
 # --- the plan ------------------------------------------------------------
 fixture_repo "$(config_with_issue_sink)"; stub_reset
 routes_init
-out="$("$REVLOOP" init --dry-run 2>&1)"; rc=$?
+out="$("$CROSSREV" init --dry-run 2>&1)"; rc=$?
 
 is  "--dry-run exits clean"                    "$rc" "0"
 has "and says plainly that it changed nothing"  "$out" "--dry-run prints the plan and stops"
@@ -67,10 +67,10 @@ is  "and it creates no labels"                  "$(count 'method POST')" "0"
 # the five fixed ones.
 has "the plan states the loop's label count"    "$out" "labels            8 for the loop"
 is  "and the list under it is exactly that long" \
-  "$(grep -cE '^\S*│  +(create|exists|recolour) +revloop/' <<<"$out")" "8"
+  "$(grep -cE '^\S*│  +(create|exists|recolour) +crossrev/' <<<"$out")" "8"
 has "a label that already exists in the right colour is named as existing" \
-  "$out" "exists    revloop/stop"
-has "and the missing ones are marked for creation" "$out" "create    revloop/pass-1"
+  "$out" "exists    crossrev/stop"
+has "and the missing ones are marked for creation" "$out" "create    crossrev/pass-1"
 
 # The GitHub issues destination's labels are a different set with a different owner, so they are
 # counted separately.
@@ -79,40 +79,40 @@ has "and one that already exists is reported so"   "$out" "exists    bug"
 
 has "the plan says where deferred work will go"    "$out" "deferred work     github_issues"
 has "and where that answer came from"              "$out" "named in the repository config as 'github_issues'"
-has "the plan names every file it would write"     "$out" ".github/workflows/revloop-watchdog.yml"
+has "the plan names every file it would write"     "$out" ".github/workflows/crossrev-watchdog.yml"
 # The fixture already carries a policy file, so the plan must say it would be
 # replaced rather than quietly replacing it.
-has "and flags the file it would overwrite"        "$out" "overwrites        .github/revloop.yml"
+has "and flags the file it would overwrite"        "$out" "overwrites        .github/crossrev.yml"
 
 # A tag only looks immutable, so the pin is the 40-character SHA.
 has "the source pin is a commit, with the tag as a comment" "$out" "the SHA is the pin, the tag is a comment"
 has "an unprotected default branch is a warning with its consequence" \
   "$out" "would be the only thing stopping a bad push"
-has "the App is named as missing rather than assumed" "$out" "run \`revloop auth login\` first"
+has "the App is named as missing rather than assumed" "$out" "run \`crossrev auth login\` first"
 
 # --- execution -----------------------------------------------------------
 fixture_repo "$(config_with_issue_sink)"; stub_reset
 routes_init
-out="$("$REVLOOP" init --yes 2>&1)"; rc=$?
+out="$("$CROSSREV" init --yes 2>&1)"; rc=$?
 
 is  "init exits clean even with secrets outstanding" "$rc" "0"
 is  "it writes all three workflows"             "$(ls .github/workflows | wc -l | tr -d ' ')" "3"
-has "it creates the labels the loop needs"      "$(calls)" "name=revloop/awaiting-resolution"
+has "it creates the labels the loop needs"      "$(calls)" "name=crossrev/awaiting-resolution"
 is  "and only the ones that were missing"       "$(count 'method POST repos/acme/widget/labels')" "8"
 
 # A label description is the only place GitHub shows a reader what a label means
 # without them going looking — the hover text on the pill, the second column on
-# the labels page. All six carried "revloop loop state", which answered nothing
+# the labels page. All six carried "crossrev loop state", which answered nothing
 # and left the colour as the only signal.
 has "each label says what its own state means"  "$(calls)" "the resolve leg is owed"
 has "including the pass label, which counts rather than states" \
   "$(calls)" "reached pass 2"
 hasnt "rather than one generic string across all of them" \
-  "$(calls)" "description=revloop loop state"
+  "$(calls)" "description=crossrev loop state"
 
 # Refusing to finish quietly. A missing source key fails at checkout before any
 # review runs, which is the good kind of failure — but only if someone knows.
-has "a missing source key is named, not glossed"    "$out" "REVLOOP_SOURCE_KEY"
+has "a missing source key is named, not glossed"    "$out" "CROSSREV_SOURCE_KEY"
 has "and it explains why neither existing token can read the source" \
   "$out" "cannot read"
 has "and gives the exact commands to fix it"        "$out" "gh repo deploy-key add"
@@ -122,8 +122,8 @@ has "the closing line does not claim success"       "$out" "will fail at the fir
 # Comments are stripped first: the templates discuss cancel-in-progress and
 # pull_request_target precisely to explain why neither is used, and an assertion
 # that cannot tell a warning from a usage is not an assertion.
-wf="$(grep -v '^[[:space:]]*#' .github/workflows/revloop-review.yml)"
-has "both workflows share one concurrency group per pull request" "$wf" "group: revloop-pr-"
+wf="$(grep -v '^[[:space:]]*#' .github/workflows/crossrev-review.yml)"
+has "both workflows share one concurrency group per pull request" "$wf" "group: crossrev-pr-"
 has "and queue rather than evict, which is not the default"       "$wf" "queue: max"
 hasnt "cancel-in-progress appears nowhere, since it is unsafe here" "$wf" "cancel-in-progress"
 has "every write uses the App token"                              "$wf" "steps.app.outputs.token"
@@ -139,21 +139,21 @@ hasnt "the unverified effective-permission endpoint is not guessed" \
 is  "the source checkout is pinned to a 40-character SHA" \
   "$(grep -oE 'ref: [0-9a-f]{40}' <<<"$wf" | wc -l | tr -d ' ')" "1"
 has "the resolve workflow shares the review workflow's group" \
-  "$(cat .github/workflows/revloop-resolve.yml)" "group: revloop-pr-\${{ github.event.pull_request.number }}"
+  "$(cat .github/workflows/crossrev-resolve.yml)" "group: crossrev-pr-\${{ github.event.pull_request.number }}"
 
 # The generated config states where deferred work goes, so `auto` is a bootstrap
 # convenience rather than a runtime mode.
-has "the generated config names the resolved backlog" "$(cat .github/revloop.yml)" "destination: github_issues"
+has "the generated config names the resolved backlog" "$(cat .github/crossrev.yml)" "destination: github_issues"
 
 # --- --upgrade regenerates workflows and leaves policy alone -----------
-printf 'version: 1\npolicy:\n  max_passes_per_cycle: 7\n' >.github/revloop.yml
-printf 'stale\n' >.github/workflows/revloop-review.yml
+printf 'version: 1\npolicy:\n  max_passes_per_cycle: 7\n' >.github/crossrev.yml
+printf 'stale\n' >.github/workflows/crossrev-review.yml
 stub_reset; routes_init
-out="$("$REVLOOP" init --upgrade --yes 2>&1)"
-has "--upgrade rewrites a stale workflow"       "$(cat .github/workflows/revloop-review.yml)" "name: revloop review"
+out="$("$CROSSREV" init --upgrade --yes 2>&1)"
+has "--upgrade rewrites a stale workflow"       "$(cat .github/workflows/crossrev-review.yml)" "name: crossrev review"
 has "and says it left the policy file alone"    "$out" "regenerates workflows, not policy"
-is  "so the hand-edited policy survives"        "$(grep -c 'max_passes_per_cycle: 7' .github/revloop.yml)" "1"
-has "and it flags the files it would overwrite" "$out" "overwrites        .github/workflows/revloop-review.yml"
+is  "so the hand-edited policy survives"        "$(grep -c 'max_passes_per_cycle: 7' .github/crossrev.yml)" "1"
+has "and it flags the files it would overwrite" "$out" "overwrites        .github/workflows/crossrev-review.yml"
 
 # --- --upgrade recolours labels minted under the old single purple -----
 #
@@ -165,45 +165,45 @@ has "and it flags the files it would overwrite" "$out" "overwrites        .githu
 fixture_repo "$(config_with_issue_sink)"; stub_reset
 routes_init
 route_first 'api repos/*/labels/bug'      '{"name":"bug","color":"d4c5f9"}'
-route_first 'api repos/*/labels/revloop/*' '{"name":"old","color":"5319e7"}'
-out="$("$REVLOOP" init --upgrade --dry-run 2>&1)"
+route_first 'api repos/*/labels/crossrev/*' '{"name":"old","color":"5319e7"}'
+out="$("$CROSSREV" init --upgrade --dry-run 2>&1)"
 
 has "the plan calls a wrong-coloured label a recolour, not an existing one" \
-  "$out" "recolour  revloop/converged"
-hasnt "and does not claim it would create one"  "$out" "create    revloop/converged"
+  "$out" "recolour  crossrev/converged"
+hasnt "and does not claim it would create one"  "$out" "create    crossrev/converged"
 
 stub_reset; routes_init
 route_first 'api repos/*/labels/bug'      '{"name":"bug","color":"d4c5f9"}'
-route_first 'api repos/*/labels/revloop/*' '{"name":"old","color":"5319e7"}'
-out="$("$REVLOOP" init --upgrade --yes 2>&1)"
+route_first 'api repos/*/labels/crossrev/*' '{"name":"old","color":"5319e7"}'
+out="$("$CROSSREV" init --upgrade --yes 2>&1)"
 
 is  "every loop label is recoloured, none created" \
-  "$(count 'method PATCH repos/acme/widget/labels/revloop/')" "8"
+  "$(count 'method PATCH repos/acme/widget/labels/crossrev/')" "8"
 is  "and no loop label is created, because they all already existed" \
-  "$(count 'method POST repos/acme/widget/labels -f name=revloop/')" "0"
+  "$(count 'method POST repos/acme/widget/labels -f name=crossrev/')" "0"
 has "the run says how many it recoloured"       "$out" "recoloured 8"
-has "converged is green"                        "$(calls)" "labels/revloop/converged -f color=1a7f37"
-has "halted is orange"                          "$(calls)" "labels/revloop/halted -f color=bc4c00"
+has "converged is green"                        "$(calls)" "labels/crossrev/converged -f color=1a7f37"
+has "halted is orange"                          "$(calls)" "labels/crossrev/halted -f color=bc4c00"
 # Red is reserved for the one label a human applies, so a red pill in a pull
 # request list always means somebody pulled the brake.
-has "stop is red"                               "$(calls)" "labels/revloop/stop -f color=cf222e"
+has "stop is red"                               "$(calls)" "labels/crossrev/stop -f color=cf222e"
 has "a pass label is grey, because it is informational rather than a state" \
-  "$(calls)" "labels/revloop/pass-2 -f color=57606a"
+  "$(calls)" "labels/crossrev/pass-2 -f color=57606a"
 hasnt "and nothing is minted in the old single purple any more" "$(calls)" "color=5319e7"
 
 # --- the backlog labels belong to the repository, so init never repaints them --
 #
 # `bug` is the repository's own taxonomy. init creates one that is missing so
 # filing does not die after the review has already posted, and leaves the colour
-# of one it finds alone — recolouring somebody's `bug` label because revloop once
+# of one it finds alone — recolouring somebody's `bug` label because crossrev once
 # minted one would be overstepping. The plan has to say the same thing execution
 # does: a plan promising a recolour that never happens is the same class of lie
 # as one claiming to create a label it does not create.
 fixture_repo "$(config_with_issue_sink)"; stub_reset
 routes_init
 route_first 'api repos/*/labels/bug'       '{"name":"bug","color":"d73a4a"}'
-route_first 'api repos/*/labels/revloop/*' '{"name":"old","color":"5319e7"}'
-out="$("$REVLOOP" init --upgrade --dry-run 2>&1)"
+route_first 'api repos/*/labels/crossrev/*' '{"name":"old","color":"5319e7"}'
+out="$("$CROSSREV" init --upgrade --dry-run 2>&1)"
 
 has "a backlog label in the repository's own colour is reported as existing" \
   "$out" "exists    bug"
@@ -211,8 +211,8 @@ hasnt "and never as a recolour the run would not perform" "$out" "recolour  bug"
 
 stub_reset; routes_init
 route_first 'api repos/*/labels/bug'       '{"name":"bug","color":"d73a4a"}'
-route_first 'api repos/*/labels/revloop/*' '{"name":"old","color":"5319e7"}'
-out="$("$REVLOOP" init --upgrade --yes 2>&1)"
+route_first 'api repos/*/labels/crossrev/*' '{"name":"old","color":"5319e7"}'
+out="$("$CROSSREV" init --upgrade --yes 2>&1)"
 is  "and execution leaves its colour exactly as the repository set it" \
   "$(count 'method PATCH repos/acme/widget/labels/bug')" "0"
 
@@ -223,10 +223,10 @@ is  "and execution leaves its colour exactly as the repository set it" \
 strict="$(config_with_issue_sink | sed 's/    create_missing_labels: true/    create_missing_labels: false/; s/    labels: \[bug\]/    labels: [needs-triage]/')"
 fixture_repo "$strict"; stub_reset
 routes_init
-err="$("$REVLOOP" init --yes 2>&1 >/dev/null)"; rc=$?
+err="$("$CROSSREV" init --yes 2>&1 >/dev/null)"; rc=$?
 is  "init stops when a backlog label is missing" "$rc" "1"
 has "and names the label it will not invent"    "$err" "needs-triage"
-has "and says why it stops"                     "$err" "asked revloop to use existing labels only"
+has "and says why it stops"                     "$err" "asked crossrev to use existing labels only"
 
 # --- reading the secrets that are already there --------------------------
 #
@@ -237,11 +237,11 @@ has "and says why it stops"                     "$err" "asked revloop to use exi
 fixture_repo "$(config_with_issue_sink)"; stub_reset
 routes_init
 route_first 'secret list --repo*' "$(printf 'APP_ID\t2026-08-10T11:34:05Z\nAPP_PRIVATE_KEY\t2026-08-10T11:34:06Z')"
-out="$("$REVLOOP" init --dry-run 2>&1)"
+out="$("$CROSSREV" init --dry-run 2>&1)"
 
 has  "a secret that is set is reported as set"      "$out" "APP_ID — already set"
 hasnt "and is not also reported as missing"         "$out" "APP_ID — MISSING"
-has  "while one that is absent is still missing"    "$out" "REVLOOP_SOURCE_KEY — MISSING"
+has  "while one that is absent is still missing"    "$out" "CROSSREV_SOURCE_KEY — MISSING"
 
 # One query per scope, not two per secret. Seven secrets meant fourteen calls to
 # render one plan, which is what gave a transient failure seven chances to land.
@@ -256,7 +256,7 @@ is "the repository's secrets are read once, not once per secret" \
 fixture_repo "$(config_with_issue_sink)"; stub_reset
 routes_init
 route_first 'secret list --repo*' '!fail'
-out="$("$REVLOOP" init --dry-run 2>&1)"; rc=$?
+out="$("$CROSSREV" init --dry-run 2>&1)"; rc=$?
 
 is    "a secret query that fails stops the run"      "$rc" "1"
 has   "and says which repository it could not read"  "$out" "could not read the secrets on acme/widget"
@@ -277,8 +277,8 @@ paired="$(config_with_issue_sink \
   | grep -v '^  model: reviewer-model$')"
 fixture_repo "$paired"; stub_reset
 routes_init
-"$REVLOOP" init --yes >/dev/null 2>&1
-pol="$(cat .github/revloop.yml)"
+"$CROSSREV" init --yes >/dev/null 2>&1
+pol="$(cat .github/crossrev.yml)"
 
 is "the written policy names the reviewer init provisioned for" \
   "$(yq -r '.reviewer.harness' <<<"$pol")" "codex"

@@ -5,7 +5,7 @@
 # The default config with no repository policy names codex as the reviewer, and
 # codex is installed on the machine this suite is developed on — so a test whose
 # fixture config failed to load would silently reach the real CLI, make a real
-# billed call, and pass or fail for reasons nothing to do with revloop. That
+# billed call, and pass or fail for reasons nothing to do with crossrev. That
 # happened once. This makes it impossible rather than unlikely.
 #
 # A suite that genuinely wants to exercise the codex adapter should give this file

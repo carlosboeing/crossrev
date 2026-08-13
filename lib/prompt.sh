@@ -10,7 +10,7 @@
 # reasons, both concrete. The quarantine moves `.claude/` and `.agents/` out of
 # the checkout before any invocation, which is exactly where a workflow would
 # have placed the skills — re-planting into a quarantined tree and removing them
-# again before the commit leaves a window where a crash commits revloop's own
+# again before the commit leaves a window where a crash commits crossrev's own
 # skills into someone's pull request. And reproducing the text makes the protocol
 # byte-identical across harnesses, which is the property that lets pass 2 judge
 # pass 1. The skills stay installable for human use; nothing about them changes.
@@ -51,7 +51,7 @@ prompt_review() {
 
   {
     printf '# Your task\n\n'
-    printf 'You are the review leg of revloop, running pass %s of %s on %s pull request #%s.\n\n' \
+    printf 'You are the review leg of crossrev, running pass %s of %s on %s pull request #%s.\n\n' \
       "$(jq -r .pass <<<"$meta")" "$(jq -r .max_passes_per_cycle <<<"$meta")" \
       "$(jq -r .repo <<<"$meta")" "$(jq -r .pr <<<"$meta")"
     printf 'Follow the skill reproduced immediately below. It is the whole rubric; there is no other.\n\n'
@@ -119,7 +119,7 @@ prompt_resolve() {
 
   {
     printf '# Your task\n\n'
-    printf 'You are the resolve leg of revloop, running pass %s of %s on %s pull request #%s. The findings below came from the review leg — a separate agent, reviewing this diff without seeing your work.\n\n' \
+    printf 'You are the resolve leg of crossrev, running pass %s of %s on %s pull request #%s. The findings below came from the review leg — a separate agent, reviewing this diff without seeing your work.\n\n' \
       "$(jq -r .pass <<<"$meta")" "$(jq -r .max_passes_per_cycle <<<"$meta")" \
       "$(jq -r .repo <<<"$meta")" "$(jq -r .pr <<<"$meta")"
     printf 'You are in a checkout of the pull request'"'"'s head branch at %s. Change code in the working tree; the orchestrator commits and pushes it. Make no GitHub call — you have no credential for one.\n\n' \

@@ -44,8 +44,8 @@ fixture_repo "$(config_agy_reviews)"; stub_reset
 routes_baseline "$(printf '[]' | payload)"
 route 'api --method POST repos/*/issues/42/comments*' '{"id":9001}'
 route '*reviewThreads*' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}'
-REVLOOP_REVIEW_PAYLOAD="$(printf '%s' "$REVIEW_PAYLOAD" | payload)"; export REVLOOP_REVIEW_PAYLOAD
-out="$("$REVLOOP" review --pr 42 2>&1)"; rc=$?
+CROSSREV_REVIEW_PAYLOAD="$(printf '%s' "$REVIEW_PAYLOAD" | payload)"; export CROSSREV_REVIEW_PAYLOAD
+out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
 
 is  "a review leg runs on agy"                    "$rc" "0"
 has "and names it in the run header"              "$out" "Reviewer: agy"
@@ -60,7 +60,7 @@ has "the comment names the harness that produced it" "$(calls)" "agy"
 # surfaces on the error path. The assertion passed whatever the adapter did.
 #
 # What actually covers it is the run above. Wrong order means the stub exits 96,
-# the adapter returns ok:false, and `revloop review` dies — so "a review leg runs
+# the adapter returns ok:false, and `crossrev review` dies — so "a review leg runs
 # on agy" is the real assertion, and it is already at the top of this file.
 # What is left worth checking here is that the stub can still tell the
 # difference, since a tripwire that has stopped tripping is worse than none.
@@ -70,13 +70,13 @@ has "the comment names the harness that produced it" "$(calls)" "agy"
 has "the leg really did get the review prompt" \
   "$(cat "$PROMPT_LOG")" "You are the review leg"
 
-( unset REVLOOP_REVIEW_PAYLOAD REVLOOP_HARNESS_PAYLOAD
+( unset CROSSREV_REVIEW_PAYLOAD CROSSREV_HARNESS_PAYLOAD
   "$HERE/stub/agy" --print "prompt" --output-format json >/dev/null 2>&1 )
 is  "the stub still refuses a flag placed after --print" "$?" "96"
 # 1 rather than 0, and deliberately: the order is accepted, and it then fails for
 # the ordinary reason — no canned payload was set for a bare invocation. What
 # matters is that it is not 96.
-( unset REVLOOP_REVIEW_PAYLOAD REVLOOP_HARNESS_PAYLOAD
+( unset CROSSREV_REVIEW_PAYLOAD CROSSREV_HARNESS_PAYLOAD
   "$HERE/stub/agy" --output-format json --print "prompt" >/dev/null 2>&1 )
 is  "and accepts the order the adapter uses"            "$?" "1"
 

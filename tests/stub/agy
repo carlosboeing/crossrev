@@ -29,13 +29,13 @@ while (( $# )); do
   esac
 done
 
-[[ -n "${REVLOOP_PROMPT_LOG:-}" ]] && printf '%s' "$prompt" >"$REVLOOP_PROMPT_LOG"
+[[ -n "${CROSSREV_PROMPT_LOG:-}" ]] && printf '%s' "$prompt" >"$CROSSREV_PROMPT_LOG"
 
-payload_file="${REVLOOP_HARNESS_PAYLOAD:-}"
+payload_file="${CROSSREV_HARNESS_PAYLOAD:-}"
 if [[ "$prompt" == *"You are the review leg"* ]]; then
-  [[ -n "${REVLOOP_REVIEW_PAYLOAD:-}" ]] && payload_file="$REVLOOP_REVIEW_PAYLOAD"
+  [[ -n "${CROSSREV_REVIEW_PAYLOAD:-}" ]] && payload_file="$CROSSREV_REVIEW_PAYLOAD"
 elif [[ "$prompt" == *"You are the resolve leg"* ]]; then
-  [[ -n "${REVLOOP_RESOLVE_PAYLOAD:-}" ]] && payload_file="$REVLOOP_RESOLVE_PAYLOAD"
+  [[ -n "${CROSSREV_RESOLVE_PAYLOAD:-}" ]] && payload_file="$CROSSREV_RESOLVE_PAYLOAD"
 fi
 
 if [[ -z "$payload_file" || ! -f "$payload_file" ]]; then

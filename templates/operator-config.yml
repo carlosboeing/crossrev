@@ -1,4 +1,4 @@
-# revloop — operator configuration.  Copy to ~/.config/revloop/config.yml
+# crossrev — operator configuration.  Copy to ~/.config/crossrev/config.yml
 #
 # This file never leaves your machine and is never committed. It holds the things
 # that are true HERE and false everywhere else: an Ollama instance on your LAN, a

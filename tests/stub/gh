@@ -2,10 +2,10 @@
 #
 # A fake `gh` for the offline suite.
 #
-# revloop keeps its whole GitHub boundary in lib/github.sh and lib/state.sh, so
+# crossrev keeps its whole GitHub boundary in lib/github.sh and lib/state.sh, so
 # putting this earlier on PATH exercises the real call sites — the real argument
 # shapes, the real jq expressions, the real ordering — with no network and no pull
-# request. Every invocation is logged, so a test can assert on what revloop *did*
+# request. Every invocation is logged, so a test can assert on what crossrev *did*
 # rather than only on what it printed.
 #
 # Routes are matched in file order, so a test adds the specific ones first.
@@ -13,9 +13,9 @@
 set -uo pipefail
 
 joined="$*"
-[[ -n "${REVLOOP_GH_LOG:-}" ]] && printf '%s\n' "$joined" >>"$REVLOOP_GH_LOG"
+[[ -n "${CROSSREV_GH_LOG:-}" ]] && printf '%s\n' "$joined" >>"$CROSSREV_GH_LOG"
 
-# Honour --jq, because a lot of revloop's reads rely on it and a stub that
+# Honour --jq, because a lot of crossrev's reads rely on it and a stub that
 # ignored it would be testing a different program.
 jq_expr=""
 prev=""
@@ -32,7 +32,7 @@ emit() {
   fi
 }
 
-if [[ -f "${REVLOOP_GH_ROUTES:-/nonexistent}" ]]; then
+if [[ -f "${CROSSREV_GH_ROUTES:-/nonexistent}" ]]; then
   while IFS=$'\t' read -r pat resp; do
     [[ -n "${pat:-}" ]] || continue
     # shellcheck disable=SC2053  # the pattern is a glob on purpose
@@ -48,7 +48,7 @@ if [[ -f "${REVLOOP_GH_ROUTES:-/nonexistent}" ]]; then
       fi | emit
       exit 0
     fi
-  done <"$REVLOOP_GH_ROUTES"
+  done <"$CROSSREV_GH_ROUTES"
 fi
 
 # Unmatched writes succeed and return nothing useful, which is the honest default:

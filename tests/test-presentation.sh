@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# What revloop shows a human: the emoji, the one native alert per summary
+# What crossrev shows a human: the emoji, the one native alert per summary
 # comment, the run-details table, and the wording correction underneath all of
 # it.
 #
@@ -48,8 +48,8 @@ run_review() {
   routes_baseline "$(printf '[]' | payload)"
   route 'api --method POST repos/*/issues/42/comments*' '{"id":9001}'
   no_threads
-  REVLOOP_REVIEW_PAYLOAD="$(printf '%s' "$1" | payload)"; export REVLOOP_REVIEW_PAYLOAD
-  "$REVLOOP" review --pr 42 >/dev/null 2>&1
+  CROSSREV_REVIEW_PAYLOAD="$(printf '%s' "$1" | payload)"; export CROSSREV_REVIEW_PAYLOAD
+  "$CROSSREV" review --pr 42 >/dev/null 2>&1
 }
 
 # A completed review marker carrying the same three findings, so the resolve leg
@@ -92,9 +92,9 @@ run_resolve() {
     "$(thread_node T_PRE app.ts 1 false "$ID_PRE")")"
   route '*resolveReviewThread*' '{"data":{"resolveReviewThread":{"thread":{"isResolved":true}}}}'
   route 'api --method POST repos/*/pulls/42/comments/*/replies*' '{"id":6001}'
-  REVLOOP_RESOLVE_PAYLOAD="$(printf '%s' "$1" | payload)"; export REVLOOP_RESOLVE_PAYLOAD
-  REVLOOP_RESOLVE_MODEL=resolver-model; export REVLOOP_RESOLVE_MODEL
-  "$REVLOOP" resolve --pr 42 >/dev/null 2>&1
+  CROSSREV_RESOLVE_PAYLOAD="$(printf '%s' "$1" | payload)"; export CROSSREV_RESOLVE_PAYLOAD
+  CROSSREV_RESOLVE_MODEL=resolver-model; export CROSSREV_RESOLVE_MODEL
+  "$CROSSREV" resolve --pr 42 >/dev/null 2>&1
 }
 
 # ---------------------------------------------------------------------------
@@ -104,7 +104,7 @@ run_resolve() {
 # `legs_assert_models_diverged` short-circuits when both legs were configured
 # with the same model, so configuring them identically is permitted and the loop
 # runs normally. Every emitted claim of a *different model* is therefore a claim
-# revloop cannot back. Agent-shaped wording is true in every configuration and
+# crossrev cannot back. Agent-shaped wording is true in every configuration and
 # still carries the independent-second-look property.
 
 run_review "$REVIEW_PAYLOAD"
@@ -180,7 +180,7 @@ has "with the full path kept as the link title"       "$review_calls" '#L2 "app.
 #
 # The resolve prompt hands the model "the conversation so far", which contains
 # earlier replies opening with exactly these words — so the model reads the house
-# style off the pull request, reproduces it, and revloop prefixes its own on top.
+# style off the pull request, reproduces it, and crossrev prefixes its own on top.
 # Seven replies on this repository's own PR 5 read "**Fixed.** **Fixed.** …".
 #
 # Checked through a real leg rather than against the helper alone, because the
@@ -190,13 +190,13 @@ run_resolve "$(resolve_payload | jq -c '
   | .dispositions[1].reply = "Skipped. Pre-existing, so it is reported not fixed."')"
 lead_calls="$(calls)"
 
-hasnt "a lead the model wrote itself is not stacked on revloop's" \
+hasnt "a lead the model wrote itself is not stacked on crossrev's" \
   "$lead_calls" "**Fixed.** **Fixed.**"
-has   "revloop's own lead is what survives"           "$lead_calls" "**Fixed.** Replaced with a constant-time compare."
+has   "crossrev's own lead is what survives"           "$lead_calls" "**Fixed.** Replaced with a constant-time compare."
 # The model's own word is dropped whether or not it was bolded, and whether or
 # not it agreed with the disposition the orchestrator settled on.
 hasnt "an unbolded lead is dropped too"               "$lead_calls" "**Skipped.** Skipped."
-has   "and the disposition revloop decided is the one shown" \
+has   "and the disposition crossrev decided is the one shown" \
   "$lead_calls" "**Skipped.** Pre-existing, so it is reported not fixed."
 
 # A reply that merely begins with the word is left alone. The trailing period is
@@ -253,7 +253,7 @@ converged_body="$(last_body 9001)"
 is  "a converged review carries exactly one alert"    "$(alerts_in "$converged_body")" "1"
 has "and it is the green one"                         "$converged_body" "> [!TIP]"
 has "which says the loop stopped on its own"          "$converged_body" "**Converged.**"
-# The vocabulary has to match what `revloop status` says about the same state.
+# The vocabulary has to match what `crossrev status` says about the same state.
 has "in the same words the terminal uses"             "$converged_body" "Nothing at or above \`min_fix_severity\`"
 hasnt "no caution is stacked underneath it"           "$converged_body" "> [!CAUTION]"
 
@@ -305,12 +305,12 @@ is  "with the same single row"                       "$(rows_in "$converged_body
 has "and a blocked one does as well"                 "$blocked_body" "**Run details**"
 
 # Cost is deliberately absent rather than a blank column that reads as zero, and
-# the sentence says what revloop knows rather than what the run cost. A leg can
+# the sentence says what crossrev knows rather than what the run cost. A leg can
 # be authenticated as a subscription, as a vendor API key, or as a named
 # endpoint that charges per token, so a footnote claiming there is nothing to pay
 # would be wrong on two of the three.
 has "cost is named as absent rather than left blank" \
-  "$review_body" "revloop is given no billing figure by the harness"
+  "$review_body" "crossrev is given no billing figure by the harness"
 hasnt "and the absence is not explained by a claim about how the leg was paid for" \
   "$review_body" "subscription"
 
@@ -324,10 +324,10 @@ hasnt "not the review leg's as well"                 "$resolve_body" "| review |
 # A genuine mismatch — one model requested, a different one answering — is not a
 # footnote. It may mean the cross-model property broke, and it has to be
 # impossible to skim past, so it goes inline and in bold.
-REVLOOP_REVIEW_MODEL=some-other-model; export REVLOOP_REVIEW_MODEL
+CROSSREV_REVIEW_MODEL=some-other-model; export CROSSREV_REVIEW_MODEL
 run_review "$REVIEW_PAYLOAD"
 mismatch_body="$(last_body 9001)"
-unset REVLOOP_REVIEW_MODEL
+unset CROSSREV_REVIEW_MODEL
 
 has "a model the config did not ask for is called out inline" \
   "$mismatch_body" "**requested \`reviewer-model\`, a different model answered**"
@@ -340,10 +340,10 @@ hasnt "and not tucked into the footnote under the table" \
 # is one nobody reads on the run where it means something.
 alias_config() { fixture_default_config | sed 's/model: reviewer-model/model: opus/'; }
 
-REVLOOP_REVIEW_MODEL=claude-opus-4-5-20251101; export REVLOOP_REVIEW_MODEL
+CROSSREV_REVIEW_MODEL=claude-opus-4-5-20251101; export CROSSREV_REVIEW_MODEL
 run_review "$REVIEW_PAYLOAD" "$(alias_config)"
 alias_body="$(last_body 9001)"
-unset REVLOOP_REVIEW_MODEL
+unset CROSSREV_REVIEW_MODEL
 
 hasnt "an alias resolved to its canonical id is not called a substitution" \
   "$alias_body" "a different model answered"
@@ -376,8 +376,8 @@ fixture_repo "$(fixture_default_config)"; stub_reset
 routes_baseline "$(printf '[]' | payload)"
 route 'api --method POST repos/*/issues/42/comments*' '{"id":9001}'
 no_threads
-REVLOOP_REVIEW_PAYLOAD="$(printf '%s' "$OUTSIDE_PAYLOAD" | payload)"; export REVLOOP_REVIEW_PAYLOAD
-outside_out="$("$REVLOOP" review --pr 42 2>&1)"
+CROSSREV_REVIEW_PAYLOAD="$(printf '%s' "$OUTSIDE_PAYLOAD" | payload)"; export CROSSREV_REVIEW_PAYLOAD
+outside_out="$("$CROSSREV" review --pr 42 2>&1)"
 
 is  "a line two past the end of the hunk is posted on the last line in it" \
   "$(count '-F line=2')" "1"
@@ -424,8 +424,8 @@ routes_baseline "$(printf '[]' | payload)"
 route 'api --method POST repos/*/issues/42/comments*' '{"id":9001}'
 no_threads
 route_first 'api --method POST repos/*/pulls/42/comments *' '!fail'
-REVLOOP_REVIEW_PAYLOAD="$(printf '%s' "$FAR_PAYLOAD" | payload)"; export REVLOOP_REVIEW_PAYLOAD
-far_out="$("$REVLOOP" review --pr 42 2>&1)"; far_rc=$?
+CROSSREV_REVIEW_PAYLOAD="$(printf '%s' "$FAR_PAYLOAD" | payload)"; export CROSSREV_REVIEW_PAYLOAD
+far_out="$("$CROSSREV" review --pr 42 2>&1)"; far_rc=$?
 far_calls="$(calls)"
 
 is  "the leg still finishes, because the finding is not lost" "$far_rc" "0"
@@ -460,15 +460,15 @@ has "and says the reply will land there too, so the second orphan is expected" \
 # id hashes a window of lines around the anchor, so a copy of that arithmetic in
 # the test would be a second implementation to keep in step — and it would agree
 # with the first right up until the thing it is meant to catch.
-ID_FAR="$(sed -n 's/.*<!-- revloop:f \(.*\) -->.*/\1/p' <<<"$far_calls" | jq -r .id | head -1)"
+ID_FAR="$(sed -n 's/.*<!-- crossrev:f \(.*\) -->.*/\1/p' <<<"$far_calls" | jq -r .id | head -1)"
 is "the fallback comment carries the finding's own marker" "${#ID_FAR}" "16"
 
 fixture_repo "$(fixture_default_config)"; stub_reset
 routes_baseline "$(POSTED_LEG=review posted_comments "$ID_FAR" | payload)"
 route 'api --method POST repos/*/issues/42/comments*' '{"id":9001}'
 no_threads
-REVLOOP_REVIEW_PAYLOAD="$(printf '%s' "$FAR_PAYLOAD" | payload)"; export REVLOOP_REVIEW_PAYLOAD
-resumed_out="$("$REVLOOP" review --pr 42 2>&1)"; resumed_rc=$?
+CROSSREV_REVIEW_PAYLOAD="$(printf '%s' "$FAR_PAYLOAD" | payload)"; export CROSSREV_REVIEW_PAYLOAD
+resumed_out="$("$CROSSREV" review --pr 42 2>&1)"; resumed_rc=$?
 
 is  "the resumed leg exits clean"                     "$resumed_rc" "0"
 is  "the comment already on the pull request is not posted twice" \

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# bootstrap.sh — one command, from nothing to a working `revloop`.
+# bootstrap.sh — one command, from nothing to a working `crossrev`.
 #
 # This is the only file meant to be fetched and run directly. Everything else
 # assumes a checkout already exists; this is what produces one.
@@ -12,16 +12,16 @@
 # runs immediately after it and has the real one.
 #
 # **How it gets here does not change what it does.** Today the repository is
-# private, so it is fetched with `gh api`, which uses the authentication revloop
+# private, so it is fetched with `gh api`, which uses the authentication crossrev
 # already requires rather than a credential anyone has to be given:
 #
-#   gh api "repos/carlosboeing/claude-code-resources/contents/tools/revloop/bootstrap.sh" \
+#   gh api "repos/carlosboeing/claude-code-resources/contents/tools/crossrev/bootstrap.sh" \
 #     -H "Accept: application/vnd.github.raw" | bash
 #
 # When the repository is public, raw.githubusercontent.com starts serving it
 # anonymously and the incantation becomes a plain curl with no token and no gh:
 #
-#   curl -fsSL https://raw.githubusercontent.com/<owner>/<repo>/main/tools/revloop/bootstrap.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/<owner>/<repo>/main/tools/crossrev/bootstrap.sh | bash
 #
 # Nothing in this file changes between those two. It is a script fetched by
 # different means, not two installers — which is the point: single-shot now, and
@@ -33,14 +33,14 @@
 
 set -euo pipefail
 
-REPO="${REVLOOP_REPO:-carlosboeing/claude-code-resources}"
+REPO="${CROSSREV_REPO:-carlosboeing/claude-code-resources}"
 # Named for the tool rather than the repository it currently lives in, so the
 # path survives the extraction into a repository of its own.
-DEST="${REVLOOP_SRC_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/revloop}"
+DEST="${CROSSREV_SRC_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/crossrev}"
 # Empty means the repository's default branch. A tag or SHA here is how you get
 # a reproducible install — "what did I install?" has an answer only if the ref
 # was not a moving branch.
-REF="${REVLOOP_REF:-}"
+REF="${CROSSREV_REF:-}"
 ASSUME_YES=0
 DEST_EXPLICIT=0
 INSTALL_ARGS=()
@@ -100,34 +100,34 @@ find_checkout() {
   # else would be answering a different question than the one asked — and the
   # message would still say "using the checkout at ...", making it look deliberate.
   if (( DEST_EXPLICIT )); then
-    [[ -f "$DEST/tools/revloop/install.sh" ]] && { printf '%s' "$DEST"; return 0; }
+    [[ -f "$DEST/tools/crossrev/install.sh" ]] && { printf '%s' "$DEST"; return 0; }
     return 1
   fi
 
   # 1. Run from inside one. Normalised, because "$PWD/../.." is a correct path
   # that reads like a bug in every message that prints it afterwards.
-  if [[ -f "$PWD/tools/revloop/install.sh" ]]; then printf '%s' "$PWD"; return 0; fi
-  if [[ -f "$PWD/install.sh" && -f "$PWD/bin/revloop" ]]; then
+  if [[ -f "$PWD/tools/crossrev/install.sh" ]]; then printf '%s' "$PWD"; return 0; fi
+  if [[ -f "$PWD/install.sh" && -f "$PWD/bin/crossrev" ]]; then
     ( cd -P "$PWD/../.." && pwd ); return 0
   fi
 
   # 2. Already installed — follow the symlink back to its source.
-  if p="$(command -v revloop 2>/dev/null)"; then
+  if p="$(command -v crossrev 2>/dev/null)"; then
     while [[ -L "$p" ]]; do
       local d; d="$(cd -P "$(dirname "$p")" && pwd)"
       p="$(readlink "$p")"; [[ "$p" != /* ]] && p="$d/$p"
     done
     p="$(cd -P "$(dirname "$p")/../../.." && pwd 2>/dev/null)" || p=""
-    [[ -n "$p" && -f "$p/tools/revloop/install.sh" ]] && { printf '%s' "$p"; return 0; }
+    [[ -n "$p" && -f "$p/tools/crossrev/install.sh" ]] && { printf '%s' "$p"; return 0; }
   fi
 
   # 3. Where this script would have put it.
-  [[ -f "$DEST/tools/revloop/install.sh" ]] && { printf '%s' "$DEST"; return 0; }
+  [[ -f "$DEST/tools/crossrev/install.sh" ]] && { printf '%s' "$DEST"; return 0; }
 
   return 1
 }
 
-printf '\n  %srevloop%s\n' "$_b" "$_r"
+printf '\n  %scrossrev%s\n' "$_b" "$_r"
 
 # --- get a checkout ----------------------------------------------------------
 
@@ -137,11 +137,11 @@ if SRC="$(find_checkout)"; then
   say "Nothing was cloned. Re-run with --dir to install from somewhere else."
 else
   command -v git >/dev/null 2>&1 || die \
-    "git is not installed, and revloop runs from a checkout" \
+    "git is not installed, and crossrev runs from a checkout" \
     "Install git and run this again. On macOS: xcode-select --install"
 
   step "Clone"
-  say "revloop runs from a checkout rather than a copied binary, so this needs"
+  say "crossrev runs from a checkout rather than a copied binary, so this needs"
   say "somewhere to live. It stays there — deleting it uninstalls the tool."
   say ""
   say "  repository  $REPO"
@@ -177,8 +177,8 @@ fi
 # and it is the same script someone with a checkout runs by hand. Duplicating any
 # of that here would be a second copy to keep in step.
 
-[[ -x "$SRC/tools/revloop/install.sh" ]] || die \
-  "the checkout at $SRC has no tools/revloop/install.sh" \
-  "Either that is not a revloop source tree, or the ref you cloned predates it — try --ref with a tag that has it. Point --dir somewhere else, or delete $SRC and re-run."
+[[ -x "$SRC/tools/crossrev/install.sh" ]] || die \
+  "the checkout at $SRC has no tools/crossrev/install.sh" \
+  "Either that is not a crossrev source tree, or the ref you cloned predates it — try --ref with a tag that has it. Point --dir somewhere else, or delete $SRC and re-run."
 
-exec "$SRC/tools/revloop/install.sh" ${INSTALL_ARGS+"${INSTALL_ARGS[@]}"}
+exec "$SRC/tools/crossrev/install.sh" ${INSTALL_ARGS+"${INSTALL_ARGS[@]}"}

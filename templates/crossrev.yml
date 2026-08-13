@@ -1,18 +1,18 @@
-# revloop — repository policy. Written by `revloop init`; yours to edit.
+# crossrev — repository policy. Written by `crossrev init`; yours to edit.
 #
 # This file is read from the BASE revision of every pull request, never from the
 # branch under review, so a pull request cannot rewrite the loop that reviews it.
 # A change here takes effect when it merges — the new policy is reviewed under the
 # old one, which is the correct order.
 #
-# Machine-local endpoints belong in ~/.config/revloop/config.yml instead. A URL
+# Machine-local endpoints belong in ~/.config/crossrev/config.yml instead. A URL
 # like http://tower.local:11434 asserts something false on a GitHub runner.
 version: 1
 
 mode: automated             # automated | local — who may write trusted state
 runner: github-hosted       # github-hosted | self-hosted — where init renders the workflows to run
 
-# Bounds on what revloop does unattended. The three continuation bounds end automatic reviewing and
+# Bounds on what crossrev does unattended. The three continuation bounds end automatic reviewing and
 # never block a person: a review a human asked for runs regardless. min_fix_severity is different —
 # it bounds what an agent may change rather than whether the loop continues, so it holds on every
 # run. Daily bounds roll over 24 hours rather than resetting at midnight.
@@ -31,7 +31,7 @@ endpoints:
     base_url: https://api.kimi.com/coding/
     token_env: KIMI_API_KEY
 
-# The pairing, as `revloop init` resolved it. init writes both blocks — harness,
+# The pairing, as `crossrev init` resolved it. init writes both blocks — harness,
 # model, effort, and endpoint — so the committed file says
 # what the loop runs and what init provisioned credentials for. A field resolving
 # to nothing is removed rather than left at this template's value.
@@ -40,7 +40,7 @@ endpoints:
 # resolving too. What works, and what each costs:
 #
 #   codex / claude   hosted, cross-vendor. Codex's token rotates, so it adds
-#                    REVLOOP_CODEX_AUTH, a second App with Secrets: write, and a cron
+#                    CROSSREV_CODEX_AUTH, a second App with Secrets: write, and a cron
 #   claude / claude  one vendor, two models — fable reviewing, opus resolving. One
 #                    secret, no cron. Weaker, and doubles Claude usage
 #   agy / claude     cross-vendor, self-hosted only: agy's token lives about an hour
@@ -60,14 +60,14 @@ resolver:
   model: claude-opus-5
   effort: high
 
-# A real finding revloop chose not to fix still has to go somewhere, or it disappears when the pull
+# A real finding crossrev chose not to fix still has to go somewhere, or it disappears when the pull
 # request merges: an unresolved thread on a merged pull request appears in no GitHub view. Each
 # destination's own settings sit under its name.
 backlog:
   destination: github_issues      # github_issues | repository | none | auto — auto resolves at init
   github_issues:
-    labels: [bug]                 # added to every issue revloop opens — your taxonomy wins
-    tracking_label: revloop-review    # how revloop recognises its own earlier issues, to avoid duplicates
+    labels: [bug]                 # added to every issue crossrev opens — your taxonomy wins
+    tracking_label: crossrev-review    # how crossrev recognises its own earlier issues, to avoid duplicates
     create_missing_labels: true   # false — use only labels that exist, and stop rather than invent one
     comment_on_existing_issue: false  # true — comment on the match instead of only linking from the pull request
   repository:

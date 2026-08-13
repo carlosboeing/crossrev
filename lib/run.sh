@@ -23,10 +23,10 @@
 # ends the subshell and lets the caller carry on with an empty string, which is
 # how a fatal error becomes a silent one.
 
-REVLOOP_INTERRUPTED=0
-REVLOOP_LOCK=""
-REVLOOP_SANDBOXED=""
-REVLOOP_RESUME_HINT=""
+CROSSREV_INTERRUPTED=0
+CROSSREV_LOCK=""
+CROSSREV_SANDBOXED=""
+CROSSREV_RESUME_HINT=""
 
 # ---------------------------------------------------------------------------
 # Interruption, locking and cleanup
@@ -37,13 +37,13 @@ REVLOOP_RESUME_HINT=""
 # recording it.
 
 run_trap_install() {
-  trap 'REVLOOP_INTERRUPTED=1' INT TERM
+  trap 'CROSSREV_INTERRUPTED=1' INT TERM
   trap run_cleanup EXIT
 }
 
 run_cleanup() {
-  [[ -n "$REVLOOP_SANDBOXED" ]] && sandbox_restore "$REVLOOP_SANDBOXED"
-  [[ -n "$REVLOOP_LOCK" && -f "$REVLOOP_LOCK" ]] && rm -f "$REVLOOP_LOCK"
+  [[ -n "$CROSSREV_SANDBOXED" ]] && sandbox_restore "$CROSSREV_SANDBOXED"
+  [[ -n "$CROSSREV_LOCK" && -f "$CROSSREV_LOCK" ]] && rm -f "$CROSSREV_LOCK"
   # A restored credential dies with the process that borrowed it, on the fatal
   # paths as much as the clean one. Leaving it on disk is how a second job finds
   # a copy of a token that only one holder may refresh.
@@ -53,9 +53,9 @@ run_cleanup() {
 
 # Called between outward writes. Nothing is half-written when this returns.
 run_checkpoint() {
-  (( REVLOOP_INTERRUPTED == 0 )) && return 0
+  (( CROSSREV_INTERRUPTED == 0 )) && return 0
   ui_warn "interrupted after the last completed write" \
-    "The marker on the pull request records how far this got, so nothing is duplicated on the way back in. Resume with: ${REVLOOP_RESUME_HINT:-revloop status --pr <n>}"
+    "The marker on the pull request records how far this got, so nothing is duplicated on the way back in. Resume with: ${CROSSREV_RESUME_HINT:-crossrev status --pr <n>}"
   exit 130
 }
 
@@ -66,12 +66,12 @@ run_lock_acquire() {
   local pr="$1" mode="$2" gitdir lock holder pid
   [[ "$mode" == "automated" ]] && return 0
   gitdir="$(git rev-parse --git-dir 2>/dev/null)" || return 0
-  mkdir -p "$gitdir/revloop"
-  lock="$gitdir/revloop/pr-$pr.lock"
+  mkdir -p "$gitdir/crossrev"
+  lock="$gitdir/crossrev/pr-$pr.lock"
   if [[ -f "$lock" ]]; then
     holder="$(cat "$lock" 2>/dev/null)"
     pid="${holder%% *}"
-    # Our own lock, from an earlier leg in this same process. `revloop run`
+    # Our own lock, from an earlier leg in this same process. `crossrev run`
     # drives review and resolve one after the other, so the second leg re-enters
     # here holding what the first one took — a live PID that passes the check
     # below and reads as a collision with itself. Keep the lock for the whole
@@ -79,7 +79,7 @@ run_lock_acquire() {
     # a window for a second terminal to start a pass halfway through this one.
     if [[ "$pid" == "$$" ]]; then return 0; fi
     if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
-      ui_die "another revloop run already holds pull request $pr — $holder" \
+      ui_die "another crossrev run already holds pull request $pr — $holder" \
         "Two runs writing the same pull request would interleave comments and replies. Wait for it to finish, or stop that process."
     fi
     ui_warn "a previous run left a lock on pull request $pr held by $holder, which is no longer running" \
@@ -88,7 +88,7 @@ run_lock_acquire() {
   fi
   printf '%s on %s since %s\n' "$$" "$(hostname 2>/dev/null || echo local)" \
     "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" >"$lock"
-  REVLOOP_LOCK="$lock"
+  CROSSREV_LOCK="$lock"
 }
 
 # ---------------------------------------------------------------------------
@@ -100,7 +100,7 @@ CTX_HEAD_BRANCH=""; CTX_DEFAULT_BRANCH=""; CTX_CHANGED=0
 CTX_TITLE=""; CTX_BODY=""; CTX_LABELS=""; CTX_URL=""
 CTX_MODE=""; CTX_AUTHOR=""; CTX_MARKERS="[]"; CTX_MAX_PASSES_PER_CYCLE=3
 CTX_BACKLOG="none"; CTX_BACKLOG_LAYOUT=""; CTX_BACKLOG_PATH=""
-CTX_TRACKING_LABEL="revloop-review"; CTX_BACKLOG_LABELS=""
+CTX_TRACKING_LABEL="crossrev-review"; CTX_BACKLOG_LABELS=""
 CTX_MIN_FIX_SEVERITY="medium"
 
 ctx_load() {
@@ -110,7 +110,7 @@ ctx_load() {
   if [[ -z "$repo" ]]; then
     repo="$(gh_repo_slug)"
     [[ -n "$repo" ]] || ui_die "could not work out which repository this is" \
-      "Run revloop from a checkout with a GitHub remote, or pass --repo owner/name."
+      "Run crossrev from a checkout with a GitHub remote, or pass --repo owner/name."
   fi
 
   pr_json="$(gh_pr_json "$repo" "$pr")"
@@ -122,11 +122,11 @@ ctx_load() {
   # branch is not ours to push to.
   [[ "$(jq -r .isCrossRepository <<<"$pr_json")" == "false" ]] || ui_die \
     "$repo#$pr comes from a fork" \
-    "revloop does not run on fork pull requests: GitHub withholds secrets from them, and the head branch is not this repository's to push to. Review it by hand."
+    "crossrev does not run on fork pull requests: GitHub withholds secrets from them, and the head branch is not this repository's to push to. Review it by hand."
 
   [[ "$(jq -r .state <<<"$pr_json")" == "OPEN" ]] || ui_die \
     "$repo#$pr is not open" \
-    "revloop only runs on open pull requests. Reopen it, or pick another number."
+    "crossrev only runs on open pull requests. Reopen it, or pick another number."
 
   if [[ "$trigger" == "automatic" && "$(jq -r '.isDraft // false' <<<"$pr_json")" == "true" ]]; then
     ui_say "$repo#$pr is a draft pull request, so an automatic invocation does not review it."
@@ -182,7 +182,7 @@ run_label_add() {
   else
     gh api --method POST "repos/$CTX_REPO/issues/$CTX_PR/labels" -f "labels[]=$label" >/dev/null 2>&1 \
       || ui_warn "could not apply the label '$label' to $CTX_REPO#$CTX_PR" \
-           "Locally that is cosmetic, because this process drives both legs itself. In automated mode it would stall the chain, which is what \`revloop init\` creates the labels for."
+           "Locally that is cosmetic, because this process drives both legs itself. In automated mode it would stall the chain, which is what \`crossrev init\` creates the labels for."
   fi
   return 0
 }
@@ -293,16 +293,16 @@ run_pass_labels() {
   local pass="$1" next="$2" l
   for l in awaiting-review awaiting-resolution converged halted; do
     [[ "$l" == "$next" ]] && continue
-    state_label_remove "$CTX_PR" "$CTX_REPO" "revloop/$l"
+    state_label_remove "$CTX_PR" "$CTX_REPO" "crossrev/$l"
   done
   # A pass that got this far is a pass that did not stall, so the watchdog's
   # retry marker goes with the state it described. Left standing it is per-PR
   # rather than per-stall: a pull request that stalls on pass 1, recovers, and
   # stalls again on pass 3 is halted on the spot for having "already been
   # retried once", and someone has to remove the label by hand to restart it.
-  state_label_remove "$CTX_PR" "$CTX_REPO" "revloop/watchdog-retried"
-  run_label_add "revloop/pass-$pass"
-  [[ -n "$next" ]] && run_label_add "revloop/$next"
+  state_label_remove "$CTX_PR" "$CTX_REPO" "crossrev/watchdog-retried"
+  run_label_add "crossrev/pass-$pass"
+  [[ -n "$next" ]] && run_label_add "crossrev/$next"
   return 0
 }
 
@@ -337,7 +337,7 @@ run_leg_settings() {
   # was named outright.
   if ! declare -F "adapter_$LEG_HARNESS" >/dev/null 2>&1; then
     ui_die "there is no adapter for the harness '$LEG_HARNESS'" \
-      "revloop drives claude, codex and agy directly. Kimi is reached through the claude adapter instead: define it under endpoints: and set $leg.endpoint, not $leg.harness."
+      "crossrev drives claude, codex and agy directly. Kimi is reached through the claude adapter instead: define it under endpoints: and set $leg.endpoint, not $leg.harness."
   fi
 
   command -v "$LEG_HARNESS" >/dev/null 2>&1 && return 0
@@ -351,7 +351,7 @@ run_leg_settings() {
   done
   [[ -n "$alt" ]] || ui_die \
     "the $leg is configured to use '$LEG_HARNESS', which is not installed, and no other harness is either" \
-    "Install one of claude, codex or agy. revloop needs at least one, and two different ones is what makes the cross-model check mean anything."
+    "Install one of claude, codex or agy. crossrev needs at least one, and two different ones is what makes the cross-model check mean anything."
 
   ui_warn "'$LEG_HARNESS' is not installed, so the $leg runs on '$alt' instead" \
     "Both legs now run on the same harness, so a bug it misses while reviewing it also misses while resolving. Install $LEG_HARNESS to get the second lineage back."
@@ -367,7 +367,7 @@ _nullable() { [[ "$1" == "null" ]] && printf '' || printf '%s' "$1"; }
 # and write the adapter's envelope to $1.
 #
 # Not a command substitution: the quarantine has to be recorded in the caller's
-# own REVLOOP_SANDBOXED so that the EXIT trap restores the checkout if this dies.
+# own CROSSREV_SANDBOXED so that the EXIT trap restores the checkout if this dies.
 # A quarantine leaked out of a subshell leaves someone's working tree mangled.
 #
 # Retries once when the harness does not constrain its own output, which is the
@@ -389,7 +389,7 @@ _nullable() { [[ "$1" == "null" ]] && printf '' || printf '%s' "$1"; }
 # So each attempt starts from the state captured before the first one.
 #
 # Captured into a temporary index rather than with `git stash`: stash rewrites
-# the real index and pushes onto the user's stash list, and revloop is routinely
+# the real index and pushes onto the user's stash list, and crossrev is routinely
 # run in a checkout somebody else is also working in. Seeded from the real index
 # so the stat cache still applies and this costs a `git status`, not a rehash of
 # every file in the repository.
@@ -400,10 +400,10 @@ _run_tree_capture() {
   gitdir="$(git rev-parse --git-dir 2>/dev/null)" || return 1
   rm -f "$idx"
   cp "$gitdir/index" "$idx" 2>/dev/null || true
-  # The same pathspec gh_commit_and_push stages with. revloop's own checkout
-  # sits at .revloop-src inside the workspace in automated mode, and capturing
+  # The same pathspec gh_commit_and_push stages with. crossrev's own checkout
+  # sits at .crossrev-src inside the workspace in automated mode, and capturing
   # it would mean restoring — or deleting — the tool mid-run.
-  GIT_INDEX_FILE="$idx" git add -A -- ':(top)' ':(exclude,top).revloop-src' >/dev/null 2>&1 || return 1
+  GIT_INDEX_FILE="$idx" git add -A -- ':(top)' ':(exclude,top).crossrev-src' >/dev/null 2>&1 || return 1
   GIT_INDEX_FILE="$idx" git write-tree 2>/dev/null
 }
 
@@ -414,7 +414,7 @@ _run_tree_capture() {
 # everything that was there, staged and unstaged alike, so resetting the real
 # index to it stages every unstaged change the run happened to find — and a pass
 # that then fixes nothing, or dies later, hands the checkout back with a staging
-# area revloop invented. Reading into the temporary index puts the same files
+# area crossrev invented. Reading into the temporary index puts the same files
 # back and leaves the real one untouched.
 #
 # The files still get rewritten: the capture's stat cache was recorded before the
@@ -424,7 +424,7 @@ _run_tree_capture() {
 # Anything untracked afterwards was written by the attempt being discarded: the
 # capture indexed every file that was there before it ran, so read-tree restores
 # those and only the leftovers are left over. `ls-files` reads the capture for
-# the same reason — a file that was untracked before revloop started is in the
+# the same reason — a file that was untracked before crossrev started is in the
 # capture but not in the real index, and asking the real index would delete it as
 # though the attempt had written it. Ignored files are neither captured nor
 # removed, which is right — they are not committed either.
@@ -434,7 +434,7 @@ _run_tree_restore() {
   top="$(git rev-parse --show-toplevel 2>/dev/null)" || return 1
   GIT_INDEX_FILE="$idx" git read-tree --reset -u "$tree" >/dev/null 2>&1 || return 1
   while IFS= read -r p; do
-    [[ "$p" == .revloop-src* ]] && continue
+    [[ "$p" == .crossrev-src* ]] && continue
     rm -rf -- "${top:?}/$p"
   done < <(GIT_INDEX_FILE="$idx" git -C "$top" ls-files --others --exclude-standard)
   return 0
@@ -517,16 +517,16 @@ run_invoke() {
   snap_tree="$(_run_tree_capture "$snap_index")" || snap_tree=""
 
   while :; do
-    REVLOOP_SANDBOXED="$workdir"
+    CROSSREV_SANDBOXED="$workdir"
     sandbox_quarantine "$workdir" >/dev/null
     # Adapter stderr is NOT discarded. Each adapter already captures the harness
-    # CLI's own noise into a temp file, so what reaches here is revloop's own
+    # CLI's own noise into a temp file, so what reaches here is crossrev's own
     # messages — including a fatal one about an endpoint that does not resolve.
     # Swallowing those left the process exiting 1 with nothing printed.
     "adapter_$harness" "$prompt_file" "$schema_file" "$workdir" \
       "$model" "$effort" "$endpoint" >"$out_file" || true
     sandbox_restore "$workdir"
-    REVLOOP_SANDBOXED=""
+    CROSSREV_SANDBOXED=""
 
     [[ -s "$out_file" ]] || printf '%s' \
       '{"ok":false,"payload":null,"error":"the adapter returned nothing at all"}' >"$out_file"
@@ -534,7 +534,7 @@ run_invoke() {
     if [[ "$(jq -r '.ok // false' "$out_file")" != "true" ]]; then
       # The capture is dropped rather than applied. There is no rejected answer
       # here — the harness never got as far as one — so whatever it did write is
-      # evidence of how it failed, and deleting that is not revloop's call.
+      # evidence of how it failed, and deleting that is not crossrev's call.
       rm -f "$snap_index"
       ui_die "the $harness harness failed: $(jq -r '.error // "no error reported"' "$out_file")" \
         "Nothing has been written to the pull request. Check the harness runs by hand: $harness --version"
@@ -553,12 +553,12 @@ run_invoke() {
         semantic_budget=$(( semantic_budget - 1 ))
         _run_retry_reset "$snap_index" "$snap_tree" "$harness" "$problem"
         ui_warn "$harness returned an answer that contradicts what it was given — $problem" \
-          "The shape is right, so this is the model drifting rather than a bug in revloop or the harness. Anything it edited has been put back, and it is being asked once more; a second one is fatal."
+          "The shape is right, so this is the model drifting rather than a bug in crossrev or the harness. Anything it edited has been put back, and it is being asked once more; a second one is fatal."
         continue
       fi
       _run_invoke_abort "$snap_index" "$snap_tree"
       ui_die "$harness twice returned an answer that contradicts what it was given — $problem" \
-        "The shape was right both times, so the schema cannot catch this and revloop will not guess which finding was meant. Nothing has been written to the pull request, and the edits both rejected attempts made have been put back. Re-run the leg, or try the other harness."
+        "The shape was right both times, so the schema cannot catch this and crossrev will not guess which finding was meant. Nothing has been written to the pull request, and the edits both rejected attempts made have been put back. Re-run the leg, or try the other harness."
     fi
 
     shape_budget=$(( shape_budget - 1 ))
@@ -590,10 +590,10 @@ leg_review() {
       --no-tips) no_tips=1; shift ;;
       --pass)    shift 2 ;;   # accepted and ignored: the pass comes from the PR
       *) ui_die "unknown option for review: $1" \
-           "Usage: revloop review --pr <number> [--harness claude|codex] [--no-tips]" ;;
+           "Usage: crossrev review --pr <number> [--harness claude|codex] [--no-tips]" ;;
     esac
   done
-  [[ -n "$pr" ]] || ui_die "revloop review needs a pull request number" "Usage: revloop review --pr 42"
+  [[ -n "$pr" ]] || ui_die "crossrev review needs a pull request number" "Usage: crossrev review --pr 42"
   case "$trigger" in
     human|automatic) ;;
     *) ui_die "unknown review trigger: $trigger" "Use --trigger human or --trigger automatic." ;;
@@ -607,11 +607,11 @@ leg_review() {
     return "$load_rc"
   }
   run_lock_acquire "$CTX_PR" "$CTX_MODE"
-  REVLOOP_RESUME_HINT="revloop review --pr $CTX_PR"
+  CROSSREV_RESUME_HINT="crossrev review --pr $CTX_PR"
 
   # A human's request outranks everything, including a healthy verdict.
-  if grep -qw "revloop/stop" <<<"$CTX_LABELS"; then
-    ui_say "revloop/stop is on $CTX_REPO#$CTX_PR, so this run stops without reviewing."
+  if grep -qw "crossrev/stop" <<<"$CTX_LABELS"; then
+    ui_say "crossrev/stop is on $CTX_REPO#$CTX_PR, so this run stops without reviewing."
     ui_say "Remove the label to let the loop continue."
     return 0
   fi
@@ -636,7 +636,7 @@ leg_review() {
     pass=$(( current + 1 ))
   else
     ui_say "$CTX_REPO#$CTX_PR is already reviewed at ${CTX_HEAD_SHA:0:7} — pass $current, and nothing has changed since."
-    ui_say "Push a revision, or run: revloop resolve --pr $CTX_PR"
+    ui_say "Push a revision, or run: crossrev resolve --pr $CTX_PR"
     return 0
   fi
 
@@ -666,9 +666,9 @@ leg_review() {
     # becomes a guessed one. `state: "declined"` keeps it out of pass numbering,
     # revision detection and the daily cap: it records a pass that did not run.
     gh_comment_create "$CTX_REPO" "$CTX_PR" \
-"**revloop stopped before pass $pass** — $reason.
+"**crossrev stopped before pass $pass** — $reason.
 
-No review ran, so nothing here is a judgement about the code. Raising the cap in \`.github/revloop.yml\` and pushing a revision would start it again.$(state_marker_encode "$(jq -cn --argjson p "$pass" --arg sha "$CTX_HEAD_SHA" \
+No review ran, so nothing here is a judgement about the code. Raising the cap in \`.github/crossrev.yml\` and pushing a revision would start it again.$(state_marker_encode "$(jq -cn --argjson p "$pass" --arg sha "$CTX_HEAD_SHA" \
   --arg r "${GITHUB_RUN_ID:-local-$$}" --argjson ts "$(date +%s)" --arg why "$reason" \
   '{v:1, leg:"review", pass:$p, state:"declined", ts:$ts, done_ts:$ts, run_id:$r,
     head_sha:$sha, harness:null, model:null, effort:null, endpoint:null,
@@ -702,11 +702,11 @@ No review ran, so nothing here is a judgement about the code. Raising the cap in
         endpoint:(if $ep == "" then null else $ep end),
         model_reported:null, tokens:null, verdict:null, findings:[]}')"
     comment_id="$(gh_comment_create "$CTX_REPO" "$CTX_PR" \
-"**revloop — reviewing, pass $pass of $CTX_MAX_PASSES_PER_CYCLE**
+"**crossrev — reviewing, pass $pass of $CTX_MAX_PASSES_PER_CYCLE**
 
 Reading the diff and any earlier review threads. This comment becomes the pass summary when the review finishes.$(state_marker_encode "$marker")")"
     [[ -n "$comment_id" ]] || ui_die "the claim comment did not post on $CTX_REPO#$CTX_PR" \
-      "The marker is what makes a retry safe, so revloop stops rather than reviewing without one."
+      "The marker is what makes a retry safe, so crossrev stops rather than reviewing without one."
     marker="$(jq -c --argjson id "$comment_id" '. + {comment_id: $id}' <<<"$marker")"
   fi
   run_checkpoint
@@ -727,7 +727,7 @@ Reading the diff and any earlier review threads. This comment becomes the pass s
     review_md="$tmp/review.md"; envelope_file="$tmp/envelope"
 
     exclude=()
-    [[ "$CTX_BACKLOG" == "repository" ]] && exclude=("$CTX_BACKLOG_PATH" .revloop)
+    [[ "$CTX_BACKLOG" == "repository" ]] && exclude=("$CTX_BACKLOG_PATH" .crossrev)
     gh_pr_diff "$CTX_REPO" "$CTX_PR" "$CTX_BASE_SHA" "$CTX_HEAD_SHA" ${exclude[@]+"${exclude[@]}"} >"$diff_file"
 
     cfg_show_at_base "$CTX_BASE_SHA" "REVIEW.md" >"$review_md" 2>/dev/null || : >"$review_md"
@@ -782,7 +782,7 @@ Reading the diff and any earlier review threads. This comment becomes the pass s
       '.findings = $f | .verdict = $v | .tokens = $tk
        | .model_reported = (if $mr == "null" then null else $mr end)' <<<"$marker")"
     gh_comment_edit "$CTX_REPO" "$comment_id" \
-"**revloop — reviewing, pass $pass of $CTX_MAX_PASSES_PER_CYCLE**
+"**crossrev — reviewing, pass $pass of $CTX_MAX_PASSES_PER_CYCLE**
 
 Findings recorded; posting them now.$(state_marker_encode "$(jq -c 'del(.comment_id)' <<<"$marker")")"
   fi
@@ -888,7 +888,7 @@ Findings recorded; posting them now.$(state_marker_encode "$(jq -c 'del(.comment
   printf '  → verdict: %s\n\n' "$verdict"
   if [[ "$next" == "awaiting-resolution" ]]; then
     ui_say "Nothing was changed in your working tree. To act on these:"
-    ui_say "  revloop resolve --pr $CTX_PR"
+    ui_say "  crossrev resolve --pr $CTX_PR"
     printf '\n'
   else
     (( no_tips )) || run_upgrade_nudge
@@ -927,7 +927,7 @@ _review_anchor_to_diff() {
 }
 
 # A review comment must explain itself to a collaborator who has never heard of
-# revloop — which model, which pass of how many, and what happens next.
+# crossrev — which model, which pass of how many, and what happens next.
 #
 # The note under each finding says what will happen to it, which is a question
 # about the threshold rather than about the severity alone. Saying "minor, not
@@ -945,7 +945,7 @@ _review_comment_body() {
   # A heading rather than a bold run of prose. Without it the label, the title,
   # the consequence and the fix are all one weight, and a reader scanning a diff
   # column has no edge to stop at.
-  printf '#### %s %s\n\n%s\n\n**Fix:** %s\n\n<sub>%s · revloop pass %s, reviewed by %s%s. A second agent now verifies this point and either fixes it, defers it, or explains why it is wrong.</sub>%s' \
+  printf '#### %s %s\n\n%s\n\n**Fix:** %s\n\n<sub>%s · crossrev pass %s, reviewed by %s%s. A second agent now verifies this point and either fixes it, defers it, or explains why it is wrong.</sub>%s' \
     "$(run_finding_label "$f")" "$(_one_line "$(jq -r .title <<<"$f")")" \
     "$(jq -r .why <<<"$f")" "$(jq -r .fix <<<"$f")" \
     "$note" "$pass" "$harness" "${model:+ ($model)}" \
@@ -999,7 +999,7 @@ _thousands() {
   printf '%s%s' "$n" "$out"
 }
 
-# Whether two model names denote the same model: the one revloop asked for, and
+# Whether two model names denote the same model: the one crossrev asked for, and
 # the one the harness says answered.
 #
 # Not a string comparison, because a harness resolves an alias. Claude Code
@@ -1057,7 +1057,7 @@ _run_details() {
     fi
   elif [[ -n "$model" && "$model" != "null" ]]; then
     agent="$agent · \`$model\`"
-    gaps="$harness does not report which model answered, so the model above is the one revloop requested."
+    gaps="$harness does not report which model answered, so the model above is the one crossrev requested."
   fi
   [[ -n "$effort" && "$effort" != "null" ]] && agent="$agent · $effort effort"
   [[ -n "$endpoint" && "$endpoint" != "null" && "$endpoint" != "vendor" ]] \
@@ -1073,13 +1073,13 @@ _run_details() {
   # the same every pass, so repeating it is noise.
   #
   # Cost is deliberately absent rather than left as a blank column that reads as
-  # zero, and the sentence says what revloop knows rather than what the run cost.
+  # zero, and the sentence says what crossrev knows rather than what the run cost.
   # A leg can be authenticated as a subscription, as a vendor API key, or as a
-  # named Anthropic-compatible endpoint that charges per token — and revloop is
+  # named Anthropic-compatible endpoint that charges per token — and crossrev is
   # handed no billing figure in any of them, so claiming there is nothing to pay
   # would be wrong on two of the three. Computing one from tokens times a price
   # table means maintaining a price table that goes stale.
-  printf '<sub>%sNo cost is shown: revloop is given no billing figure by the harness, whichever credential the leg ran on.</sub>\n\n' \
+  printf '<sub>%sNo cost is shown: crossrev is given no billing figure by the harness, whichever credential the leg ran on.</sub>\n\n' \
     "${gaps:+$gaps }"
 }
 
@@ -1143,7 +1143,7 @@ _review_summary_body() {
   verdict="$(jq -r '.verdict // "issues-remain"' <<<"$marker")"
   pass="$(jq -r '.pass // 1' <<<"$marker")"
 
-  printf '## revloop review — pass %s of %s\n\n' "$pass" "$CTX_MAX_PASSES_PER_CYCLE"
+  printf '## crossrev review — pass %s of %s\n\n' "$pass" "$CTX_MAX_PASSES_PER_CYCLE"
 
   # The alert is the one line in the comment that has to read as a sentence, so
   # it gets a real plural rather than the "(s)" the terminal output uses.
@@ -1202,18 +1202,18 @@ leg_resolve() {
       --no-tips) no_tips=1; shift ;;
       --pass)    shift 2 ;;
       *) ui_die "unknown option for resolve: $1" \
-           "Usage: revloop resolve --pr <number> [--harness claude|codex]" ;;
+           "Usage: crossrev resolve --pr <number> [--harness claude|codex]" ;;
     esac
   done
-  [[ -n "$pr" ]] || ui_die "revloop resolve needs a pull request number" "Usage: revloop resolve --pr 42"
+  [[ -n "$pr" ]] || ui_die "crossrev resolve needs a pull request number" "Usage: crossrev resolve --pr 42"
 
   run_trap_install
   ctx_load "$pr" "$repo"
   run_lock_acquire "$CTX_PR" "$CTX_MODE"
-  REVLOOP_RESUME_HINT="revloop resolve --pr $CTX_PR"
+  CROSSREV_RESUME_HINT="crossrev resolve --pr $CTX_PR"
 
-  if grep -qw "revloop/stop" <<<"$CTX_LABELS"; then
-    ui_say "revloop/stop is on $CTX_REPO#$CTX_PR, so nothing is resolved."
+  if grep -qw "crossrev/stop" <<<"$CTX_LABELS"; then
+    ui_say "crossrev/stop is on $CTX_REPO#$CTX_PR, so nothing is resolved."
     ui_say "Remove the label to let the loop continue."
     return 0
   fi
@@ -1221,16 +1221,16 @@ leg_resolve() {
   local pass review_marker findings
   pass="$(state_current_review_pass "$CTX_MARKERS")"
   (( pass > 0 )) || ui_die "$CTX_REPO#$CTX_PR has no review to resolve" \
-    "The resolve leg acts on a review leg's findings. Run: revloop review --pr $CTX_PR"
+    "The resolve leg acts on a review leg's findings. Run: crossrev review --pr $CTX_PR"
 
   review_marker="$(state_marker_for "$CTX_MARKERS" "$pass" review)"
   [[ "$(jq -r '.state // ""' <<<"$review_marker")" == "complete" ]] || ui_die \
     "the pass-$pass review on $CTX_REPO#$CTX_PR did not finish" \
-    "Resolving a half-posted review would reply to findings the reviewer may not have finished recording. Re-run: revloop review --pr $CTX_PR"
+    "Resolving a half-posted review would reply to findings the reviewer may not have finished recording. Re-run: crossrev review --pr $CTX_PR"
 
   if state_current_pass_complete "$CTX_MARKERS" "$pass" resolve; then
     ui_say "pass $pass of $CTX_REPO#$CTX_PR is already resolved."
-    ui_say "Push a revision, or run: revloop review --pr $CTX_PR"
+    ui_say "Push a revision, or run: crossrev review --pr $CTX_PR"
     return 0
   fi
 
@@ -1282,11 +1282,11 @@ leg_resolve() {
         model_reported:null, tokens:null,
         blocked:false, blocked_reason:null, commit_sha:null, summary:"", dispositions:[]}')"
     comment_id="$(gh_comment_create "$CTX_REPO" "$CTX_PR" \
-"**revloop — resolving pass $pass of $CTX_MAX_PASSES_PER_CYCLE**
+"**crossrev — resolving pass $pass of $CTX_MAX_PASSES_PER_CYCLE**
 
 Verifying each finding against the codebase. This comment becomes the pass summary when the resolve leg finishes.$(state_marker_encode "$marker")")"
     [[ -n "$comment_id" ]] || ui_die "the claim comment did not post on $CTX_REPO#$CTX_PR" \
-      "The marker is what makes a retry safe, so revloop stops rather than resolving without one."
+      "The marker is what makes a retry safe, so crossrev stops rather than resolving without one."
   fi
   marker="$(jq -c --argjson id "$comment_id" '. + {comment_id: $id}' <<<"$marker")"
   run_checkpoint
@@ -1327,7 +1327,7 @@ Verifying each finding against the codebase. This comment becomes the pass summa
     # returns that number instead of the finding's 16-character id, because
     # copying a hash accurately is clerical work models are poor at — on PR 5 the
     # resolver mistyped all three, and every lookup keyed on them missed in
-    # silence. Every shipped harness enforces "an integer" before revloop sees
+    # silence. Every shipped harness enforces "an integer" before crossrev sees
     # the payload, so the mistyped identifier stops being reachable rather than
     # merely being detected.
     local n_e i_e f_e may enriched_out="[]"
@@ -1347,7 +1347,7 @@ Verifying each finding against the codebase. This comment becomes the pass summa
     tmp="$(mktemp -d)"
     diff_file="$tmp/diff"; prompt_file="$tmp/prompt"; envelope_file="$tmp/envelope"
     exclude=()
-    [[ "$CTX_BACKLOG" == "repository" ]] && exclude=("$CTX_BACKLOG_PATH" .revloop)
+    [[ "$CTX_BACKLOG" == "repository" ]] && exclude=("$CTX_BACKLOG_PATH" .crossrev)
     gh_pr_diff "$CTX_REPO" "$CTX_PR" "$CTX_BASE_SHA" "$CTX_HEAD_SHA" ${exclude[@]+"${exclude[@]}"} >"$diff_file"
 
     meta="$(jq -cn --arg repo "$CTX_REPO" --argjson pr "$CTX_PR" --argjson pass "$pass" \
@@ -1400,7 +1400,7 @@ Verifying each finding against the codebase. This comment becomes the pass summa
       | .blocked_reason = (if $br == "null" then null else $br end)
       | .model_reported = (if $mr == "null" then null else $mr end)' <<<"$marker")"
     gh_comment_edit "$CTX_REPO" "$comment_id" \
-"**revloop — resolving pass $pass of $CTX_MAX_PASSES_PER_CYCLE**
+"**crossrev — resolving pass $pass of $CTX_MAX_PASSES_PER_CYCLE**
 
 Dispositions recorded; committing and replying now.$(state_marker_encode "$(jq -c 'del(.comment_id)' <<<"$marker")")"
   fi
@@ -1438,7 +1438,7 @@ Dispositions recorded; committing and replying now.$(state_marker_encode "$(jq -
 
     tracked=""; existing=""
     if [[ "$CTX_BACKLOG" == "github_issues" ]]; then
-      # Tier 1: exact, against revloop's own issues. Deterministic, no model,
+      # Tier 1: exact, against crossrev's own issues. Deterministic, no model,
       # no false positives — this is what stops three pull requests touching
       # one legacy bug filing it three times.
       existing="$(gh_issue_by_finding "$CTX_REPO" "$CTX_TRACKING_LABEL" "$id")" || existing=""
@@ -1456,7 +1456,7 @@ Dispositions recorded; committing and replying now.$(state_marker_encode "$(jq -
 - \`$id\` — matches the existing issue #$dup, so nothing was filed"
       if [[ "$(jq -r '.backlog.github_issues.comment_on_existing_issue' <<<"$CFG_MERGED")" == "true" ]]; then
         gh_issue_comment "$CTX_REPO" "$dup" \
-          "Seen again while reviewing $CTX_REPO#$CTX_PR (revloop pass $pass).$(state_finding_marker "$id" "$pass" resolve)"
+          "Seen again while reviewing $CTX_REPO#$CTX_PR (crossrev pass $pass).$(state_finding_marker "$id" "$pass" resolve)"
       fi
     else
       tracked="$(_resolve_persist "$d" "$id" "$pass")" || tracked=""
@@ -1476,7 +1476,7 @@ Dispositions recorded; committing and replying now.$(state_marker_encode "$(jq -
     # reads one thing and a crash between the passes leaves no orphan state to
     # reconcile.
     dispositions="$(jq -c --arg id "$id" --arg t "$tracked" \
-      'map(if .finding_id == $id then . + {revloop_tracked: $t} else . end)' <<<"$dispositions")"
+      'map(if .finding_id == $id then . + {crossrev_tracked: $t} else . end)' <<<"$dispositions")"
   done
   run_checkpoint
 
@@ -1493,11 +1493,11 @@ Dispositions recorded; committing and replying now.$(state_marker_encode "$(jq -
   elif (( fixed_count > 0 || backlog_wrote )); then
     commit_sha=""
     if (( fixed_count > 0 )); then
-      commit_msg="fix: resolve revloop review findings (pass $pass)
+      commit_msg="fix: resolve crossrev review findings (pass $pass)
 
 $(jq -r '[.[] | select(.disposition == "fixed") | "- " + .finding_id] | join("\n")' <<<"$dispositions")"
     else
-      commit_msg="chore: record deferred revloop findings (pass $pass)
+      commit_msg="chore: record deferred crossrev findings (pass $pass)
 
 $(jq -r '[.[] | select(.disposition == "deferred") | "- " + .finding_id] | join("\n")' <<<"$dispositions")"
     fi
@@ -1508,7 +1508,7 @@ $(jq -r '[.[] | select(.disposition == "deferred") | "- " + .finding_id] | join(
       # is the one crash boundary comments cannot dedupe away.
       marker="$(jq -c --arg s "$commit_sha" '.commit_sha = $s' <<<"$marker")"
       gh_comment_edit "$CTX_REPO" "$comment_id" \
-"**revloop — resolving pass $pass of $CTX_MAX_PASSES_PER_CYCLE**
+"**crossrev — resolving pass $pass of $CTX_MAX_PASSES_PER_CYCLE**
 
 Pushed \`${commit_sha:0:7}\`; replying to each thread now.$(state_marker_encode "$(jq -c 'del(.comment_id)' <<<"$marker")")"
     elif (( fixed_count > 0 )); then
@@ -1549,7 +1549,7 @@ Pushed \`${commit_sha:0:7}\`; replying to each thread now.$(state_marker_encode 
     d="$(jq -c ".[$i]" <<<"$dispositions")"
     id="$(jq -r .finding_id <<<"$d")"
     disp="$(jq -r .disposition <<<"$d")"
-    tracked="$(jq -r '.revloop_tracked // ""' <<<"$d")"
+    tracked="$(jq -r '.crossrev_tracked // ""' <<<"$d")"
 
     thread_id="$(jq -r --arg id "$id" '[.[] | select(.finding_ids | index($id))] | first | .id // ""' <<<"$threads")"
     root_id="$(jq -r --arg id "$id" '[.[] | select(.finding_ids | index($id))] | first | .root_comment_id // ""' <<<"$threads")"
@@ -1641,8 +1641,8 @@ Pushed \`${commit_sha:0:7}\`; replying to each thread now.$(state_marker_encode 
   if [[ "$blocked" == "true" ]] || (( escalated > 0 )); then next="halted"; fi
   run_pass_labels "$pass" "$next"
   if (( escalated > 0 )); then
-    run_label_add "revloop/stop"
-    ui_say "$escalated finding(s) need a human decision, so revloop/stop is applied and the loop halts."
+    run_label_add "crossrev/stop"
+    ui_say "$escalated finding(s) need a human decision, so crossrev/stop is applied and the loop halts."
   fi
 
   if [[ "$blocked" == "true" ]]; then
@@ -1651,7 +1651,7 @@ Pushed \`${commit_sha:0:7}\`; replying to each thread now.$(state_marker_encode 
     printf '  → resolved pass %s\n\n' "$pass"
     if [[ "$next" == "awaiting-review" ]]; then
       ui_say "To look again with the reviewer:"
-      ui_say "  revloop review --pr $CTX_PR"
+      ui_say "  crossrev review --pr $CTX_PR"
       printf '\n'
     fi
   fi
@@ -1695,7 +1695,7 @@ _resolve_persist() {
   body="$(jq -r .body <<<"$persist")
 
 ---
-Found by revloop while reviewing $CTX_REPO#$CTX_PR (pass $pass). Verified against the codebase before filing: one model raised it, a second confirmed it is real, and it was left out of that pull request deliberately rather than missed.$(state_finding_marker "$id" "$pass" resolve)"
+Found by crossrev while reviewing $CTX_REPO#$CTX_PR (pass $pass). Verified against the codebase before filing: one model raised it, a second confirmed it is real, and it was left out of that pull request deliberately rather than missed.$(state_finding_marker "$id" "$pass" resolve)"
 
   case "$CTX_BACKLOG" in
     github_issues)
@@ -1708,7 +1708,7 @@ Found by revloop while reviewing $CTX_REPO#$CTX_PR (pass $pass). Verified agains
       if [[ "$CTX_BACKLOG_LAYOUT" == "file" ]]; then
         # An existing markdown convention is appended to, because that is what
         # the convention is. The parent is created first: the fallback for a
-        # stated `layout: file` with no path is `.revloop/backlog.md`, whose
+        # stated `layout: file` with no path is `.crossrev/backlog.md`, whose
         # directory normally does not exist, and an append into a missing
         # directory fails without stopping the function. The path was printed
         # anyway, so the caller counted the finding tracked and resolved its
@@ -1735,12 +1735,12 @@ Found by revloop while reviewing $CTX_REPO#$CTX_PR (pass $pass). Verified agains
 # The reply's lead is presentation, so it belongs to the orchestrator — but
 # nothing said so, and the resolve prompt hands the model "the conversation so
 # far", which contains earlier replies opening with exactly these words. So the
-# model reads the house style off the pull request, reproduces it, and revloop
+# model reads the house style off the pull request, reproduces it, and crossrev
 # prefixes its own on top: "**Fixed.** **Fixed.** Confirmed, and …".
 #
 # Three details it has to get right. The trailing period is required, or a reply
 # legitimately beginning "Fixed the comparison" loses its first word. It repeats,
-# because one pass over "**Fixed.** **Fixed.**" leaves a second copy for revloop
+# because one pass over "**Fixed.** **Fixed.**" leaves a second copy for crossrev
 # to double again. And it touches the first line only — `^` in sed anchors per
 # line, so an unrestricted pass would eat a "Deferred." that opens a paragraph
 # three screens down.
@@ -1774,7 +1774,7 @@ _resolve_reply_body() {
   esac
   printf '%s %s\n' "$lead" "$(_strip_disposition_lead "$(jq -r .reply <<<"$d")")"
   [[ -n "$tracked" ]] && printf '\nTracked outside this pull request as %s, so it survives the merge.\n' "$tracked"
-  printf '\n<sub>revloop pass %s, verified by %s%s. Every finding is verified whatever its severity — severity governs what happens afterwards, not whether the check happens.</sub>%s' \
+  printf '\n<sub>crossrev pass %s, verified by %s%s. Every finding is verified whatever its severity — severity governs what happens afterwards, not whether the check happens.</sub>%s' \
     "$pass" "$harness" "${model:+ ($model)}" \
     "$(state_finding_marker "$(jq -r .finding_id <<<"$d")" "$pass" resolve)"
 }
@@ -1797,7 +1797,7 @@ _disposition_counts() {
 # nothing to a collaborator reading the pull request — but the id is what the
 # dispositions are keyed on, so it stays in the cell, small, for anyone matching
 # a row against a thread. The reasoning is deliberately not a column: the only
-# text revloop holds is the model's full reply, which belongs in the thread it
+# text crossrev holds is the model's full reply, which belongs in the thread it
 # was written for and would not survive a table cell.
 _dispositions_table() {
   local dispositions="$1" findings="$2" n i d id f sev title
@@ -1828,7 +1828,7 @@ _resolve_summary_body() {
   blocked="$(jq -r '.blocked // false' <<<"$marker")"
   blocked_reason="$(jq -r '.blocked_reason // ""' <<<"$marker")"
 
-  printf '## revloop resolved pass %s of %s\n\n' "$pass" "$CTX_MAX_PASSES_PER_CYCLE"
+  printf '## crossrev resolved pass %s of %s\n\n' "$pass" "$CTX_MAX_PASSES_PER_CYCLE"
 
   local counts escalated noun
   counts="$(_disposition_counts "$dispositions")"
@@ -1838,7 +1838,7 @@ _resolve_summary_body() {
     _alert WARNING "$(printf '**Blocked:** %s The loop halts here and needs a human. %s' \
       "$blocked_reason" "$counts")"
   elif (( escalated > 0 )); then
-    _alert WARNING "$(printf '**%s %s need a human decision.** `revloop/stop` is applied, so the loop halts until somebody removes it. %s' \
+    _alert WARNING "$(printf '**%s %s need a human decision.** `crossrev/stop` is applied, so the loop halts until somebody removes it. %s' \
       "$escalated" "$noun" "$counts")"
   else
     _alert NOTE "$(printf '**%s** Every finding was verified whatever its severity — severity governs what happens afterwards, not whether the check happens.' "$counts")"
@@ -1906,7 +1906,7 @@ _cycle_finish_at_bound() {
     # existing pass number rather than beginning another — `state_open_claim`
     # reads the same marker this did, so the two cannot disagree. The bound must
     # not be applied to that: a person may legitimately have started pass 4 under
-    # a bound of 3, which is exactly what `revloop review --pr N` typed by hand
+    # a bound of 3, which is exactly what `crossrev review --pr N` typed by hand
     # does, and --continuation would refuse the resume, write a declined marker
     # over a pass that is mid-flight, and exit clean with the review unfinished.
     #
@@ -1955,8 +1955,8 @@ _cycle_finish_at_bound() {
     ui_end "Halted after pass $pass — the resolver reported blocked."
     return 0
   fi
-  if grep -qw "revloop/stop" <<<"$CTX_LABELS"; then
-    ui_end "Halted after pass $pass — a point needs a human decision, so revloop/stop is applied."
+  if grep -qw "crossrev/stop" <<<"$CTX_LABELS"; then
+    ui_end "Halted after pass $pass — a point needs a human decision, so crossrev/stop is applied."
     return 0
   fi
   ui_end "Reached max_passes_per_cycle ($max) on $CTX_REPO#$CTX_PR — pass $pass is resolved, and no further pass starts."
@@ -1976,10 +1976,10 @@ cmd_cycle() {
       --repo)    repo="${2:-}"; args+=(--repo "${2:-}"); shift 2 ;;
       --harness) args+=(--harness "${2:-}"); shift 2 ;;
       --no-tips) no_tips=1; shift ;;
-      *) ui_die "unknown option for cycle: $1" "Usage: revloop cycle --pr <number> [--no-tips]" ;;
+      *) ui_die "unknown option for cycle: $1" "Usage: crossrev cycle --pr <number> [--no-tips]" ;;
     esac
   done
-  [[ -n "$pr" ]] || ui_die "revloop cycle needs a pull request number" "Usage: revloop cycle --pr 42"
+  [[ -n "$pr" ]] || ui_die "crossrev cycle needs a pull request number" "Usage: crossrev cycle --pr 42"
 
   ctx_load "$pr" "$repo"
   local max="$CTX_MAX_PASSES_PER_CYCLE" i pass marker rmarker verdict actionable
@@ -2029,8 +2029,8 @@ cmd_cycle() {
       ui_end "Halted after pass $pass — the resolver reported blocked."
       return 0
     fi
-    if grep -qw "revloop/stop" <<<"$CTX_LABELS"; then
-      ui_end "Halted after pass $pass — a point needs a human decision, so revloop/stop is applied."
+    if grep -qw "crossrev/stop" <<<"$CTX_LABELS"; then
+      ui_end "Halted after pass $pass — a point needs a human decision, so crossrev/stop is applied."
       return 0
     fi
   done
@@ -2062,10 +2062,10 @@ cmd_status() {
     case "$1" in
       --pr)   pr="${2:-}"; shift 2 ;;
       --repo) repo="${2:-}"; shift 2 ;;
-      *) ui_die "unknown option for status: $1" "Usage: revloop status --pr <number>" ;;
+      *) ui_die "unknown option for status: $1" "Usage: crossrev status --pr <number>" ;;
     esac
   done
-  [[ -n "$pr" ]] || ui_die "revloop status needs a pull request number" "Usage: revloop status --pr 42"
+  [[ -n "$pr" ]] || ui_die "crossrev status needs a pull request number" "Usage: crossrev status --pr 42"
 
   ctx_load "$pr" "$repo"
 
@@ -2078,7 +2078,7 @@ cmd_status() {
     *)                     kind="info" ;;
   esac
   local note=""
-  grep -qw "revloop/watchdog-retried" <<<"$CTX_LABELS" && note="(retried once)"
+  grep -qw "crossrev/watchdog-retried" <<<"$CTX_LABELS" && note="(retried once)"
   ui_section_state "$CTX_REPO#$CTX_PR" "$state" "$kind" "$note"
 
   pass="$(state_current_review_pass "$CTX_MARKERS")"
@@ -2127,11 +2127,11 @@ cmd_status() {
 # knows the terminal's words, and the header stops being computed independently
 # of the label it duplicates.
 _status_state() {
-  if   grep -qw "revloop/stop"                <<<"$CTX_LABELS"; then printf 'stopped'
-  elif grep -qw "revloop/halted"              <<<"$CTX_LABELS"; then printf 'halted'
-  elif grep -qw "revloop/converged"           <<<"$CTX_LABELS"; then printf 'converged'
-  elif grep -qw "revloop/awaiting-resolution" <<<"$CTX_LABELS"; then printf 'awaiting resolution'
-  elif grep -qw "revloop/awaiting-review"     <<<"$CTX_LABELS"; then printf 'awaiting review'
+  if   grep -qw "crossrev/stop"                <<<"$CTX_LABELS"; then printf 'stopped'
+  elif grep -qw "crossrev/halted"              <<<"$CTX_LABELS"; then printf 'halted'
+  elif grep -qw "crossrev/converged"           <<<"$CTX_LABELS"; then printf 'converged'
+  elif grep -qw "crossrev/awaiting-resolution" <<<"$CTX_LABELS"; then printf 'awaiting resolution'
+  elif grep -qw "crossrev/awaiting-review"     <<<"$CTX_LABELS"; then printf 'awaiting review'
   else _status_state_from_markers
   fi
 }
@@ -2140,7 +2140,7 @@ _status_state() {
 #
 # Locally a label that will not apply is a warning rather than a fatal — one
 # process drives both legs, so the chain does not depend on it — which means a
-# repository that never ran `revloop init` runs the loop perfectly well with no
+# repository that never ran `crossrev init` runs the loop perfectly well with no
 # labels on it. Answering "awaiting review" there whenever a resolve leg is
 # plainly owed would send the reader to the wrong command, so the markers answer
 # instead. They say the same thing the labels would have; they are just the copy
@@ -2173,7 +2173,7 @@ _status_state_from_markers() {
     printf 'halted'
   elif (( $(_status_escalated "$m_resolve") > 0 )); then
     # A resolve pass that escalated halted deliberately, and its own leg applied
-    # `revloop/halted` and `revloop/stop` for exactly that reason. Reading only
+    # `crossrev/halted` and `crossrev/stop` for exactly that reason. Reading only
     # `blocked` here would answer "awaiting review" on the one path where the
     # loop is waiting on a person, and send the reader to start a pass that
     # settles nothing.
@@ -2303,14 +2303,14 @@ _status_liveness() {
 # probe from a second machine, or from the same one an hour later, can find a
 # stranger's process and print "running now" over a leg that died — the exact
 # reassurance the old rendering refused to give, arrived at by a different
-# route. The lock is revloop's own record that this pid, on this host, is
+# route. The lock is crossrev's own record that this pid, on this host, is
 # running against this pull request, so requiring it to agree with the marker
 # makes the answer as trustworthy as the collision check that writes it.
 _status_liveness_local() {
   local pid="$1" gitdir lock holder lock_pid lock_host rest
   [[ "$pid" =~ ^[0-9]+$ ]] || return 0
   gitdir="$(git rev-parse --git-dir 2>/dev/null)" || return 0
-  lock="$gitdir/revloop/pr-$CTX_PR.lock"
+  lock="$gitdir/crossrev/pr-$CTX_PR.lock"
   [[ -f "$lock" ]] || return 0
   holder="$(cat "$lock" 2>/dev/null)" || return 0
   lock_pid="${holder%% *}"
@@ -2351,7 +2351,7 @@ _status_leg_absent() {
   local pass="$1" leg="$2" m_review verdict
   [[ "$leg" == "resolve" ]] || { printf 'not run yet'; return 0; }
 
-  grep -qw "revloop/stop" <<<"$CTX_LABELS" && { printf 'not run — revloop/stop is applied'; return 0; }
+  grep -qw "crossrev/stop" <<<"$CTX_LABELS" && { printf 'not run — crossrev/stop is applied'; return 0; }
 
   # A pass a cap refused to start never reached the resolve leg and never will,
   # so "not run yet" would promise something that is not coming.
@@ -2421,19 +2421,19 @@ _status_next() {
       # The second command is the leg that was owed when the brake went on,
       # which is what "continue" means here. Read from the labels beside the
       # stop, or from the markers when none is there.
-      local resume="revloop review --pr $CTX_PR"
-      if grep -qw "revloop/awaiting-resolution" <<<"$CTX_LABELS" \
+      local resume="crossrev review --pr $CTX_PR"
+      if grep -qw "crossrev/awaiting-resolution" <<<"$CTX_LABELS" \
          || [[ "$(_status_state_from_markers)" == "awaiting resolution" ]]; then
-        resume="revloop resolve --pr $CTX_PR"
+        resume="crossrev resolve --pr $CTX_PR"
       fi
       # Same rule as the cap halt below: with no pass behind it there is nothing
       # to continue from, and "pass 0" names one that never existed.
       if (( pass > 0 )); then
-        ui_line "someone applied revloop/stop. To continue from pass $pass:"
+        ui_line "someone applied crossrev/stop. To continue from pass $pass:"
       else
-        ui_line "someone applied revloop/stop. To start the loop:"
+        ui_line "someone applied crossrev/stop. To start the loop:"
       fi
-      ui_cmd  "gh pr edit $CTX_PR --remove-label revloop/stop"
+      ui_cmd  "gh pr edit $CTX_PR --remove-label crossrev/stop"
       ui_cmd  "$resume"
       return 0 ;;
     converged)
@@ -2447,7 +2447,7 @@ _status_next() {
       _status_next_halted "$pass"
       return 0 ;;
     "awaiting resolution")
-      ui_cmd "revloop resolve --pr $CTX_PR"
+      ui_cmd "crossrev resolve --pr $CTX_PR"
       m="$(state_marker_for "$CTX_MARKERS" "$pass" resolve)"
       if [[ -n "$m" && "$(jq -r '.state // ""' <<<"$m")" == "started" ]]; then
         _status_liveness "$m"
@@ -2461,7 +2461,7 @@ _status_next() {
   # The cap comes first, because a pass at max_passes_per_cycle is owed a review
   # the loop will not start by itself. The bound is a bound on the loop
   # continuing, not on a person: an automatic trigger and a cycle's own later
-  # passes meet it, while `revloop review --pr N` typed by hand runs one attended
+  # passes meet it, while `crossrev review --pr N` typed by hand runs one attended
   # pass regardless. So the state is described rather than the command withheld,
   # and the condition that changes the *automatic* behaviour goes above the
   # command — the shape the halted and stopped sections already use.
@@ -2471,13 +2471,13 @@ _status_next() {
      && state_current_pass_complete "$CTX_MARKERS" "$pass" resolve; then
     ui_line "pass $pass reached max_passes_per_cycle ($CTX_MAX_PASSES_PER_CYCLE), so the loop will"
     ui_line "not start another pass on its own. Raise policy.max_passes_per_cycle in"
-    ui_line ".github/revloop.yml to let it continue by itself. Asking for one pass"
+    ui_line ".github/crossrev.yml to let it continue by itself. Asking for one pass"
     ui_line "by hand runs it either way:"
-    ui_cmd  "revloop review --pr $CTX_PR"
+    ui_cmd  "crossrev review --pr $CTX_PR"
     return 0
   fi
 
-  ui_cmd "revloop review --pr $CTX_PR"
+  ui_cmd "crossrev review --pr $CTX_PR"
   if [[ -n "$m" && "$(jq -r '.state // ""' <<<"$m")" == "started" ]]; then
     _status_liveness "$m"
     if [[ "$STATUS_LIVENESS" == "running" ]]; then
@@ -2493,7 +2493,7 @@ _status_next() {
     ui_line "Pass $pass is closed and the branch moved, so pass $(( pass + 1 )) reviews"
     ui_line "the new revision."
   fi
-  grep -qw "revloop/watchdog-retried" <<<"$CTX_LABELS" && {
+  grep -qw "crossrev/watchdog-retried" <<<"$CTX_LABELS" && {
     ui_line "The watchdog has already retried this leg once — a second failure"
     ui_line "halts the loop rather than retrying again."
   }
@@ -2530,8 +2530,8 @@ _status_next_halted() {
     else
       ui_line "So anything pass $pass changed is unverified. Raise the cap in"
     fi
-    ui_line ".github/revloop.yml, then:"
-    ui_cmd  "revloop review --pr $CTX_PR"
+    ui_line ".github/crossrev.yml, then:"
+    ui_cmd  "crossrev review --pr $CTX_PR"
     return 0
   fi
 
@@ -2539,7 +2539,7 @@ _status_next_halted() {
   if [[ -n "$m_resolve" && "$(jq -r '.blocked // false' <<<"$m_resolve")" == "true" ]]; then
     ui_line "the resolve leg reported blocked and left its reasoning in the thread"
     ui_line "it belongs to. Once that is settled:"
-    ui_cmd  "revloop resolve --pr $CTX_PR"
+    ui_cmd  "crossrev resolve --pr $CTX_PR"
     return 0
   fi
 
@@ -2552,9 +2552,9 @@ _status_next_halted() {
     noun="findings"; (( escalated == 1 )) && noun="finding"
     ui_line "$escalated $noun need a human decision. The resolve leg left the"
     ui_line "thread open and said why in it. Once you have settled it:"
-    grep -qw "revloop/stop" <<<"$CTX_LABELS" \
-      && ui_cmd "gh pr edit $CTX_PR --remove-label revloop/stop"
-    ui_cmd  "revloop review --pr $CTX_PR"
+    grep -qw "crossrev/stop" <<<"$CTX_LABELS" \
+      && ui_cmd "gh pr edit $CTX_PR --remove-label crossrev/stop"
+    ui_cmd  "crossrev review --pr $CTX_PR"
     return 0
   fi
 
@@ -2562,13 +2562,13 @@ _status_next_halted() {
   if [[ -n "$m_review" && "$(jq -r '.verdict // ""' <<<"$m_review")" == "blocked" ]]; then
     ui_line "the review leg reported blocked, so what happens next is a human's"
     ui_line "call. Once you have looked:"
-    ui_cmd  "revloop review --pr $CTX_PR"
+    ui_cmd  "crossrev review --pr $CTX_PR"
     return 0
   fi
 
-  ui_line "the loop stopped short and needs a human. Remove revloop/halted once"
+  ui_line "the loop stopped short and needs a human. Remove crossrev/halted once"
   ui_line "you have looked, then:"
-  ui_cmd  "revloop review --pr $CTX_PR"
+  ui_cmd  "crossrev review --pr $CTX_PR"
 }
 
 # ---------------------------------------------------------------------------
@@ -2586,7 +2586,7 @@ cmd_watchdog() {
     case "$1" in
       --repo)    repo="${2:-}"; shift 2 ;;
       --timeout) timeout="${2:-1800}"; shift 2 ;;
-      *) ui_die "unknown option for watchdog: $1" "Usage: revloop watchdog [--repo owner/name] [--timeout <seconds>]" ;;
+      *) ui_die "unknown option for watchdog: $1" "Usage: crossrev watchdog [--repo owner/name] [--timeout <seconds>]" ;;
     esac
   done
 
@@ -2599,10 +2599,10 @@ cmd_watchdog() {
   local stuck now checked=0 retried=0 halted=0
   now="$(date +%s)"
   stuck="$(gh api "repos/$repo/pulls?state=open&per_page=100" \
-    --jq '[.[] | select([.labels[].name] | any(startswith("revloop/awaiting-")))
+    --jq '[.[] | select([.labels[].name] | any(startswith("crossrev/awaiting-")))
            | {number, labels: [.labels[].name], head: .head.sha}]' 2>/dev/null)" || stuck="[]"
 
-  ui_section "revloop watchdog on $repo"
+  ui_section "crossrev watchdog on $repo"
 
   local n i pr labels head author markers marker age leg
   n="$(jq 'length' <<<"$stuck")"
@@ -2612,9 +2612,9 @@ cmd_watchdog() {
     head="$(jq -r ".[$i].head" <<<"$stuck")"
     checked=$(( checked + 1 ))
 
-    grep -qw "revloop/stop" <<<"$labels" && continue
+    grep -qw "crossrev/stop" <<<"$labels" && continue
 
-    if [[ "$labels" == *"revloop/awaiting-resolution"* ]]; then leg="resolve"; else leg="review"; fi
+    if [[ "$labels" == *"crossrev/awaiting-resolution"* ]]; then leg="resolve"; else leg="review"; fi
 
     author="$(state_trusted_author automated)"
     markers="$(state_markers "$pr" "$repo" "$author")"
@@ -2649,27 +2649,27 @@ _watchdog_retry() {
   local repo="$1" pr="$2" labels="$3" leg="$4" head="$5"
   local label; label="$(legs_awaiting_label "$leg")"
 
-  if grep -qw "revloop/watchdog-retried" <<<"$labels"; then
+  if grep -qw "crossrev/watchdog-retried" <<<"$labels"; then
     state_label_remove "$pr" "$repo" "$label"
-    gh_label_ensure "$repo" "revloop/halted" "$(legs_label_colour revloop/halted)" \
-      "$(legs_label_description revloop/halted)" >/dev/null
-    state_label_add "$pr" "$repo" "revloop/halted"
+    gh_label_ensure "$repo" "crossrev/halted" "$(legs_label_colour crossrev/halted)" \
+      "$(legs_label_description crossrev/halted)" >/dev/null
+    state_label_add "$pr" "$repo" "crossrev/halted"
     gh_comment_create "$repo" "$pr" \
-"**revloop halted** — the $leg leg was already retried once and is still not finishing.
+"**crossrev halted** — the $leg leg was already retried once and is still not finishing.
 
 The last marker on this pull request records how far it got. Nothing here is a judgement about the code: the loop stopped, it did not converge.
 
-To look yourself: \`revloop status --pr $pr\`. To restart it, remove \`revloop/halted\` and \`revloop/watchdog-retried\`, then apply \`$label\`." >/dev/null
+To look yourself: \`crossrev status --pr $pr\`. To restart it, remove \`crossrev/halted\` and \`crossrev/watchdog-retried\`, then apply \`$label\`." >/dev/null
     ui_line "   halted — it had already been retried once"
     return 1
   fi
 
   # Re-applying a label GitHub already holds fires no event, so the retry has to
   # remove it first.
-  gh_label_ensure "$repo" "revloop/watchdog-retried" \
-    "$(legs_label_colour revloop/watchdog-retried)" \
-    "$(legs_label_description revloop/watchdog-retried)" >/dev/null
-  state_label_add "$pr" "$repo" "revloop/watchdog-retried"
+  gh_label_ensure "$repo" "crossrev/watchdog-retried" \
+    "$(legs_label_colour crossrev/watchdog-retried)" \
+    "$(legs_label_description crossrev/watchdog-retried)" >/dev/null
+  state_label_add "$pr" "$repo" "crossrev/watchdog-retried"
   state_label_remove "$pr" "$repo" "$label"
   state_label_add "$pr" "$repo" "$label"
   ui_line "   retried by re-firing $label at ${head:0:7}"
@@ -2681,17 +2681,17 @@ To look yourself: \`revloop status --pr $pr\`. To restart it, remove \`revloop/h
 # ---------------------------------------------------------------------------
 #
 # Only where it applies: a repository already running GitHub Actions but with no
-# revloop workflows. A repository with no CI at all gets nothing, because the
+# crossrev workflows. A repository with no CI at all gets nothing, because the
 # suggestion would be noise. Rarely: only on a run that reached a terminal state,
 # so at most once per pull request. Suppressible by flag and by config.
 run_upgrade_nudge() {
-  [[ "${REVLOOP_NO_TIPS:-0}" == "1" ]] && return 0
+  [[ "${CROSSREV_NO_TIPS:-0}" == "1" ]] && return 0
   [[ "$(jq -r '.enable_automation_hint' <<<"$CFG_MERGED")" == "false" ]] && return 0
   [[ -d .github/workflows ]] || return 0
-  compgen -G ".github/workflows/revloop-*.yml" >/dev/null 2>&1 && return 0
+  compgen -G ".github/workflows/crossrev-*.yml" >/dev/null 2>&1 && return 0
 
   cat <<'EOF'
-  Tip: this repo already runs GitHub Actions. `revloop init` would run this
+  Tip: this repo already runs GitHub Actions. `crossrev init` would run this
   loop automatically on every pull request — review, fixes, re-review — and
   takes about a minute to set up. Silence this with `--no-tips`.
 

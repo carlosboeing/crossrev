@@ -20,7 +20,7 @@
 # workflow reads nothing untrusted at all — no checkout of the branch, no model,
 # no diff, no comments — which is what makes the stronger permission safe there.
 
-_auth_dir() { printf '%s/revloop/apps' "${XDG_CONFIG_HOME:-$HOME/.config}"; }
+_auth_dir() { printf '%s/crossrev/apps' "${XDG_CONFIG_HOME:-$HOME/.config}"; }
 
 # Where a role's key and metadata live: <owner>.<role>.pem.
 #
@@ -77,14 +77,14 @@ _auth_role_summary() {
 _auth_role_key_secret() {
   case "$1" in
     loop)      printf 'APP_PRIVATE_KEY' ;;
-    refresher) printf 'REVLOOP_REFRESH_APP_PRIVATE_KEY' ;;
+    refresher) printf 'CROSSREV_REFRESH_APP_PRIVATE_KEY' ;;
   esac
 }
 
 _auth_role_default_name() {
   case "$1" in
-    loop)      printf 'revloop-%s' "$2" ;;
-    refresher) printf 'revloop-refresh-%s' "$2" ;;
+    loop)      printf 'crossrev-%s' "$2" ;;
+    refresher) printf 'crossrev-refresh-%s' "$2" ;;
   esac
 }
 
@@ -131,7 +131,7 @@ _open_browser() {
 # ---------------------------------------------------------------------------
 #
 # An App authenticates as itself with a short-lived RS256 JWT. This is what lets
-# revloop confirm an installation actually landed rather than telling you to go
+# crossrev confirm an installation actually landed rather than telling you to go
 # and check. gh honours an Authorization header we set, so this needs no curl.
 
 _b64url() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
@@ -186,7 +186,7 @@ _listener_available() { command -v nc >/dev/null 2>&1; }
 _auth_done_page() {
   cat <<'HTML'
 <!doctype html>
-<html><head><meta charset="utf-8"><title>revloop</title><style>
+<html><head><meta charset="utf-8"><title>crossrev</title><style>
 :root{color-scheme:light dark}
 body{font:16px/1.6 system-ui,-apple-system,sans-serif;margin:0;min-height:100vh;
 display:grid;place-items:center;background:#fbfbfa;color:#1f1b16}
@@ -197,7 +197,7 @@ p{margin:.5rem 0;opacity:.75}
 .t{margin-top:1.5rem;font-size:.875rem;opacity:.55}
 </style></head><body><div class="c">
 <h1>Registered</h1>
-<p>revloop has the App details and is carrying on in your terminal.</p>
+<p>crossrev has the App details and is carrying on in your terminal.</p>
 <p class="t">You can close this tab.</p>
 </div></body></html>
 HTML
@@ -260,7 +260,7 @@ _listen_for_code() {
 #
 # The ledger holds dates, never tokens.
 
-_auth_tokens_file() { printf '%s/revloop/tokens.json' "${XDG_CONFIG_HOME:-$HOME/.config}"; }
+_auth_tokens_file() { printf '%s/crossrev/tokens.json' "${XDG_CONFIG_HOME:-$HOME/.config}"; }
 
 # auth_token_record <repo> <secret_name> <valid_days>
 auth_token_record() {
@@ -291,7 +291,7 @@ auth_token_days_left() {
 }
 
 # ---------------------------------------------------------------------------
-# revloop auth status
+# crossrev auth status
 # ---------------------------------------------------------------------------
 
 auth_status() {
@@ -301,9 +301,9 @@ auth_status() {
     ui_section "Apps"
     ui_opt "none configured"
     ui_gap
-    ui_line "revloop needs an App only for automated mode — the loop running on"
+    ui_line "crossrev needs an App only for automated mode — the loop running on"
     ui_line "GitHub events. Local runs use your own gh authentication."
-    ui_end "Set one up with:   revloop auth login"
+    ui_end "Set one up with:   crossrev auth login"
     _auth_status_tokens
     return 0
   fi
@@ -382,11 +382,11 @@ _auth_status_tokens() {
       fi
     done <<<"$names"
   done <<<"$repos"
-  ui_end "Dates only — revloop never stores a token, and this one cannot be read back."
+  ui_end "Dates only — crossrev never stores a token, and this one cannot be read back."
 }
 
 # ---------------------------------------------------------------------------
-# revloop auth login
+# crossrev auth login
 # ---------------------------------------------------------------------------
 
 auth_login() {
@@ -396,7 +396,7 @@ auth_login() {
       --owner) owner="${2:?--owner needs a value}"; shift 2 ;;
       --name)  app_name="${2:?--name needs a value}"; shift 2 ;;
       --role)  role="${2:?--role needs a value}"; shift 2 ;;
-      *) ui_die "unknown option for auth login: $1" "Run: revloop auth login [--owner <owner>] [--role loop|refresher] [--name <name>]" ;;
+      *) ui_die "unknown option for auth login: $1" "Run: crossrev auth login [--owner <owner>] [--role loop|refresher] [--name <name>]" ;;
     esac
   done
   _auth_role_permissions "$role" >/dev/null   # rejects an unknown role before anything opens
@@ -406,7 +406,7 @@ auth_login() {
   if [[ -z "$owner" ]]; then
     owner="$(_auth_detect_owner)" || ui_die \
       "could not work out which account this App should belong to" \
-      "Run this inside a git repository with a GitHub remote, or name it: revloop auth login --owner <owner>"
+      "Run this inside a git repository with a GitHub remote, or name it: crossrev auth login --owner <owner>"
   fi
 
   local owner_type owner_id info
@@ -422,11 +422,11 @@ auth_login() {
     ui_gap
     ui_line "One App per owner per role is the design. Creating a second would mean"
     ui_line "a second private key to protect and rotate, for no extra reach."
-    ui_end "See where it is installed with:   revloop auth status"
+    ui_end "See where it is installed with:   crossrev auth status"
     return 0
   fi
 
-  # GitHub App names are globally unique, so a bare "revloop" is very likely
+  # GitHub App names are globally unique, so a bare "crossrev" is very likely
   # taken. Suffixing the owner is likelier to be free and clearer in a list.
   [[ -n "$app_name" ]] || app_name="$(_auth_role_default_name "$role" "$owner")"
 
@@ -441,7 +441,7 @@ auth_login() {
   else
     port=33517
   fi
-  local redirect="http://localhost:$port/revloop-auth"
+  local redirect="http://localhost:$port/crossrev-auth"
 
   local manifest
   manifest="$(jq -cn \
@@ -472,7 +472,7 @@ auth_login() {
   ui_line "Role         $role"
   ui_line "Permissions  $(_auth_role_summary "$role")"
   ui_line "             and nothing else"
-  ui_line "Webhook      disabled. GitHub never calls revloop; your workflows do"
+  ui_line "Webhook      disabled. GitHub never calls crossrev; your workflows do"
   ui_line "Visibility   private to $owner"
   ui_gap
   if [[ "$role" == "refresher" ]]; then
@@ -486,21 +486,21 @@ auth_login() {
     ui_line "request labels under the Issues API, and the loop is label-driven."
   fi
   ui_gap
-  ui_line "Two approvals in the browser: create the App, then install it. revloop"
+  ui_line "Two approvals in the browser: create the App, then install it. crossrev"
   ui_line "follows along here — nothing to copy back."
   printf '\n'
 
   ui_confirm "Open GitHub?" || { ui_say "Nothing was created."; return 1; }
 
-  local html; html="$(mktemp -t revloop-manifest).html"
-  local reqfile; reqfile="$(mktemp -t revloop-redirect)"
+  local html; html="$(mktemp -t crossrev-manifest).html"
+  local reqfile; reqfile="$(mktemp -t crossrev-redirect)"
   # shellcheck disable=SC2064  # expand now, not at trap time
   trap "rm -f '$html' '$reqfile'" RETURN
 
   cat >"$html" <<HTML
 <!doctype html>
 <meta charset="utf-8">
-<title>revloop</title>
+<title>crossrev</title>
 <body style="font:16px system-ui;margin:4rem auto;max-width:34rem">
 <p>Sending you to GitHub to register <strong>$(_html_attr_escape "$app_name")</strong>&hellip;</p>
 <p>If nothing happens, press the button.</p>
@@ -547,7 +547,7 @@ HTML
     ui_line "Copy the whole URL from the address bar and paste it below."
     printf '\n'
     local pasted; pasted="$(ui_prompt "URL or code")" || ui_die \
-      "no code was pasted" "Re-run: revloop auth login --owner $owner"
+      "no code was pasted" "Re-run: crossrev auth login --owner $owner"
     if [[ "$pasted" == *"code="* ]]; then
       code="$(sed -n 's/.*[?&]code=\([^&]*\).*/\1/p' <<<"$pasted")"
       returned_state="$(sed -n 's/.*[?&]state=\([^&]*\).*/\1/p' <<<"$pasted")"
@@ -561,14 +561,14 @@ HTML
     "Paste the full URL from the address bar, or just the value after code="
 
   if [[ -n "$returned_state" && "$returned_state" != "$state" ]]; then
-    ui_die "the state value GitHub returned does not match the one revloop sent" \
-      "This request did not come from the page revloop opened. Start again: revloop auth login --owner $owner"
+    ui_die "the state value GitHub returned does not match the one crossrev sent" \
+      "This request did not come from the page crossrev opened. Start again: crossrev auth login --owner $owner"
   fi
 
   local resp
   if ! resp="$(gh api --method POST "app-manifests/$code/conversions" 2>&1)"; then
     ui_die "GitHub rejected the code" \
-      "Codes expire one hour after the App is created, and each works once. Re-run: revloop auth login --owner $owner"
+      "Codes expire one hour after the App is created, and each works once. Re-run: crossrev auth login --owner $owner"
   fi
 
   local app_id slug real_name pem
@@ -611,7 +611,7 @@ HTML
   _auth_install_flow "$owner" "$owner_type" "$owner_id" "$slug" "$app_id" "$pem_path"
 }
 
-# revloop auth install — run the install half on its own.
+# crossrev auth install — run the install half on its own.
 #
 # `login` does both halves, but the two can be separated by a closed tab, a
 # declined permission prompt, or a new repository a year later. Re-running
@@ -623,18 +623,18 @@ auth_install() {
     case "$1" in
       --owner) owner="${2:?--owner needs a value}"; shift 2 ;;
       --role)  role="${2:?--role needs a value}"; shift 2 ;;
-      *) ui_die "unknown option for auth install: $1" "Run: revloop auth install [--owner <owner>] [--role loop|refresher]" ;;
+      *) ui_die "unknown option for auth install: $1" "Run: crossrev auth install [--owner <owner>] [--role loop|refresher]" ;;
     esac
   done
 
   [[ -n "$owner" ]] || owner="$(_auth_detect_owner)" || ui_die \
     "could not work out which owner's App to install" \
-    "Name it: revloop auth install --owner <owner>"
+    "Name it: crossrev auth install --owner <owner>"
 
   local meta; meta="$(_auth_meta "$owner" "$role")"
   [[ -f "$meta" ]] || ui_die \
     "no $role App is configured for $owner" \
-    "Register one first: revloop auth login --owner $owner --role $role"
+    "Register one first: crossrev auth login --owner $owner --role $role"
 
   local owner_type owner_id slug app_id pem
   owner_type="$(jq -r .owner_type "$meta")"
@@ -646,7 +646,7 @@ auth_install() {
 
   [[ -f "$pem" ]] || ui_die \
     "the $role private key for $owner is missing at $pem" \
-    "Without it revloop cannot confirm the installation. Re-register: revloop auth login --owner $owner --role $role"
+    "Without it crossrev cannot confirm the installation. Re-register: crossrev auth login --owner $owner --role $role"
 
   _auth_install_flow "$owner" "$owner_type" "$owner_id" "$slug" "$app_id" "$pem"
 }
@@ -677,7 +677,7 @@ _auth_install_flow() {
       while read -r acct sel; do
         ui_ok "installed on $acct ($sel repositories)"
       done <<<"$installs"
-      ui_end "Next:   revloop init"
+      ui_end "Next:   crossrev init"
       return 0
     fi
     sleep 3
@@ -685,11 +685,11 @@ _auth_install_flow() {
   done
 
   ui_warn "no installation showed up within five minutes" \
-    "The App is registered and its key is stored, so nothing is lost. Install it at $url and check with: revloop auth status"
+    "The App is registered and its key is stored, so nothing is lost. Install it at $url and check with: crossrev auth status"
 }
 
 # ---------------------------------------------------------------------------
-# revloop auth rotate
+# crossrev auth rotate
 # ---------------------------------------------------------------------------
 #
 # GitHub exposes no API for generating an App private key. It is a web-UI action
@@ -711,18 +711,18 @@ auth_rotate() {
       --role)  role="${2:?--role needs a value}"; shift 2 ;;
       --key)   keyfile="${2:?--key needs a value}"; shift 2 ;;
       *) ui_die "unknown option for auth rotate: $1" \
-           "Run: revloop auth rotate [--owner <owner>] [--role loop|refresher] [--key <downloaded.pem>]" ;;
+           "Run: crossrev auth rotate [--owner <owner>] [--role loop|refresher] [--key <downloaded.pem>]" ;;
     esac
   done
 
   [[ -n "$owner" ]] || owner="$(_auth_detect_owner)" || ui_die \
     "could not work out which owner's key to rotate" \
-    "Name it: revloop auth rotate --owner <owner>"
+    "Name it: crossrev auth rotate --owner <owner>"
 
   local meta; meta="$(_auth_meta "$owner" "$role")"
   [[ -f "$meta" ]] || ui_die \
     "no $role App is configured for $owner" \
-    "There is nothing to rotate. Register one with: revloop auth login --owner $owner --role $role"
+    "There is nothing to rotate. Register one with: crossrev auth login --owner $owner --role $role"
 
   local app_id slug pem
   app_id="$(jq -r .id "$meta")"
@@ -742,7 +742,7 @@ auth_rotate() {
   ui_gap
   ui_line "GitHub has no API for generating an App key, so this part happens in"
   ui_line "the browser: press 'Generate a private key' and the .pem downloads."
-  ui_line "revloop picks it up, proves it works as this App, and installs it."
+  ui_line "crossrev picks it up, proves it works as this App, and installs it."
   ui_gap
   ui_line "Nothing is replaced until the new key authenticates, and the old one"
   ui_line "keeps working until you delete it on GitHub — so a failure here leaves"
@@ -769,7 +769,7 @@ auth_rotate() {
       ui_ok "found $keyfile"
     else
       keyfile="$(ui_prompt "Path to the downloaded .pem")" || ui_die \
-        "no key file was named" "Re-run: revloop auth rotate --owner $owner --role $role --key <path>"
+        "no key file was named" "Re-run: crossrev auth rotate --owner $owner --role $role --key <path>"
     fi
   fi
 
@@ -805,7 +805,7 @@ auth_rotate() {
   # instruction literally would put the refresher's key material behind the loop
   # App's identity — handing secrets:write to the job that reads a pull request
   # diff, which is the one thing the two-App split exists to prevent.
-  ui_next "update $(_auth_role_key_secret "$role") wherever it is stored: revloop init --upgrade, or gh secret set"
+  ui_next "update $(_auth_role_key_secret "$role") wherever it is stored: crossrev init --upgrade, or gh secret set"
   if [[ "$role" == "refresher" ]]; then
     ui_line "   repository-scoped: this key can write secrets, so it must never be"
     ui_line "   an organisation secret visible to every workflow in the org"
@@ -814,7 +814,7 @@ auth_rotate() {
 }
 
 # ---------------------------------------------------------------------------
-# revloop auth refresh — the single writer
+# crossrev auth refresh — the single writer
 # ---------------------------------------------------------------------------
 #
 # Called by the refresher workflow and by nobody else. It is the only place that
@@ -823,7 +823,7 @@ auth_rotate() {
 # one silently invalidates the rest.
 
 auth_refresh() {
-  local harness="codex" repo="" secret="REVLOOP_CODEX_AUTH" scope=""
+  local harness="codex" repo="" secret="CROSSREV_CODEX_AUTH" scope=""
   while (( $# )); do
     case "$1" in
       --harness) harness="${2:?--harness needs a value}"; shift 2 ;;
@@ -831,17 +831,17 @@ auth_refresh() {
       --secret)  secret="${2:?--secret needs a value}"; shift 2 ;;
       --org)     scope="${2:?--org needs a value}"; shift 2 ;;
       *) ui_die "unknown option for auth refresh: $1" \
-           "Run: revloop auth refresh [--harness codex] [--repo owner/name | --org owner] [--secret NAME]" ;;
+           "Run: crossrev auth refresh [--harness codex] [--repo owner/name | --org owner] [--secret NAME]" ;;
     esac
   done
 
   [[ "$harness" == "codex" ]] || ui_die \
-    "revloop refreshes codex credentials and no others" \
+    "crossrev refreshes codex credentials and no others" \
     "Claude's setup-token is long-lived and needs no refresher; Antigravity and Kimi rotate too fast for a scheduler to keep ahead of, so they need runner: self-hosted instead."
 
-  [[ -n "${REVLOOP_CODEX_AUTH:-}" ]] || ui_die \
-    "REVLOOP_CODEX_AUTH is not set, so there is no credential to refresh" \
-    "The refresher workflow passes the secret in as this variable. Seed it once from a machine with a browser: codex login, then gh secret set REVLOOP_CODEX_AUTH < ~/.codex/auth.json"
+  [[ -n "${CROSSREV_CODEX_AUTH:-}" ]] || ui_die \
+    "CROSSREV_CODEX_AUTH is not set, so there is no credential to refresh" \
+    "The refresher workflow passes the secret in as this variable. Seed it once from a machine with a browser: codex login, then gh secret set CROSSREV_CODEX_AUTH < ~/.codex/auth.json"
 
   [[ -n "$repo" || -n "$scope" ]] || repo="$(gh_repo_slug)"
   [[ -n "$repo" || -n "$scope" ]] || ui_die \
@@ -855,7 +855,7 @@ auth_refresh() {
   local current; current="$(mktemp)"
   # shellcheck disable=SC2064  # expand now, not at trap time
   trap "rm -f '$current'" EXIT
-  (umask 077; printf '%s' "$REVLOOP_CODEX_AUTH" >"$current")
+  (umask 077; printf '%s' "$CROSSREV_CODEX_AUTH" >"$current")
 
   local before after new
   before="$(cred_seconds_left "$current")" || before=""
@@ -873,7 +873,7 @@ auth_refresh() {
   # working credential, reported as a success, and rejected by every leg from
   # then on. Refuse instead: the stored secret still holds something that works.
   after="$(cred_seconds_left "$check")" || ui_die \
-    "the refreshed credential's expiry cannot be read, so revloop will not write it back" \
+    "the refreshed credential's expiry cannot be read, so crossrev will not write it back" \
     "The vendor answered, but what came back does not parse as a token with an exp claim. The stored secret is untouched and still works until it expires. Re-seed it by hand if this repeats: codex login, then set the secret from ~/.codex/auth.json."
 
   # An expiry no later than the one it replaces means the refresh did not happen,
@@ -886,11 +886,11 @@ auth_refresh() {
   if [[ -n "$scope" ]]; then
     printf '%s' "$new" | gh secret set "$secret" --org "$scope" --visibility all >/dev/null || ui_die \
       "could not write $secret at the $scope organisation level" \
-      "The refresher App needs secrets:write on that organisation. Check: revloop auth status"
+      "The refresher App needs secrets:write on that organisation. Check: crossrev auth status"
   else
     printf '%s' "$new" | gh secret set "$secret" --repo "$repo" >/dev/null || ui_die \
       "could not write $secret on $repo" \
-      "The refresher App needs secrets:write on that repository. Check: revloop auth status"
+      "The refresher App needs secrets:write on that repository. Check: crossrev auth status"
   fi
 
   # Explicitly, rather than leaving it to the EXIT trap. The trap is the

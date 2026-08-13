@@ -94,9 +94,9 @@ cred_prepare() {
   local harness="$1"
   case "$harness" in
     codex)
-      [[ -n "${REVLOOP_CODEX_AUTH:-}" ]] || return 0
+      [[ -n "${CROSSREV_CODEX_AUTH:-}" ]] || return 0
       CRED_SCRATCH="$(mktemp -d)"
-      (umask 077; printf '%s' "$REVLOOP_CODEX_AUTH" >"$CRED_SCRATCH/auth.json")
+      (umask 077; printf '%s' "$CROSSREV_CODEX_AUTH" >"$CRED_SCRATCH/auth.json")
       cred_assert_fresh codex "$CRED_SCRATCH/auth.json"
       export CODEX_HOME="$CRED_SCRATCH"
       ;;
@@ -113,12 +113,12 @@ cred_prepare() {
 # can read its own environment. A model that never sees the other vendor's token
 # cannot be talked into exfiltrating it.
 #
-# REVLOOP_CODEX_AUTH is stripped even from codex, because by then the credential
+# CROSSREV_CODEX_AUTH is stripped even from codex, because by then the credential
 # has been written into CODEX_HOME and the raw copy in the environment is a
 # second one nobody needs.
 cred_env_strip_for() {
   local harness="$1" v
-  for v in CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY REVLOOP_CODEX_AUTH; do
+  for v in CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY CROSSREV_CODEX_AUTH; do
     case "$harness:$v" in
       # What each harness legitimately needs, and nothing more.
       #
@@ -151,11 +151,11 @@ cred_assert_fresh() {
   local harness="$1" file="$2" left
   left="$(cred_seconds_left "$file")" || ui_die \
     "the restored $harness credential does not carry a readable expiry" \
-    "revloop reads the access token's exp claim to decide whether it is safe to run. A credential it cannot read is one it cannot reason about, so it stops. Re-seed the secret from a fresh \`$harness login\`."
+    "crossrev reads the access token's exp claim to decide whether it is safe to run. A credential it cannot read is one it cannot reason about, so it stops. Re-seed the secret from a fresh \`$harness login\`."
 
   if (( left < CRED_MIN_SECONDS )); then
-    ui_die "the restored $harness credential has $(_cred_human_duration "$left") left, under revloop's one-hour floor" \
-      "Refreshing it here would consume the refresh token and leave the stored copy dead, so this leg stops instead. Run the revloop-token-refresh workflow, or re-seed the secret with \`$harness login\` on a machine with a browser."
+    ui_die "the restored $harness credential has $(_cred_human_duration "$left") left, under crossrev's one-hour floor" \
+      "Refreshing it here would consume the refresh token and leave the stored copy dead, so this leg stops instead. Run the crossrev-token-refresh workflow, or re-seed the secret with \`$harness login\` on a machine with a browser."
   fi
   return 0
 }

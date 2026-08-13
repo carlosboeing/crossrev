@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 #
-# revloop — cross-model PR review loop.
+# crossrev — cross-model PR review loop.
 #
 # One model reviews a pull request, a second verifies and resolves each finding,
 # then the first looks again. Runs from a terminal against any PR you can
-# already see, and on GitHub Actions once `revloop init` has set it up.
+# already see, and on GitHub Actions once `crossrev init` has set it up.
 #
 # Three words, each meaning one thing: a CYCLE contains PASSES, and a pass has
 # two LEGS.
@@ -61,18 +61,18 @@ source "$ROOT/lib/adapters/codex.sh"
 # shellcheck source=lib/adapters/agy.sh
 source "$ROOT/lib/adapters/agy.sh"
 
-revloop_version() { tr -d '[:space:]' <"$ROOT/VERSION"; }
+crossrev_version() { tr -d '[:space:]' <"$ROOT/VERSION"; }
 
 usage() {
   cat <<'EOF'
 
-  revloop — cross-model PR review loop
+  crossrev — cross-model PR review loop
 
   Review a pull request with one model, resolve the findings with another.
 
   USAGE
-    revloop <command> [options]
-    revloop --pr <n>         A cycle, which is what you want most of the time
+    crossrev <command> [options]
+    crossrev --pr <n>         A cycle, which is what you want most of the time
 
   COMMANDS
     cycle --pr <n>           The whole loop in one process, up to max_passes_per_cycle
@@ -87,7 +87,7 @@ usage() {
     auth install             Install an already-registered App somewhere
     auth rotate              Replace an App's private key, guided
     auth refresh             Refresh a rotating harness credential (the refresher job)
-    doctor                   Check that everything revloop needs is installed
+    doctor                   Check that everything crossrev needs is installed
     version                  Print the installed version
 
   OPTIONS on cycle, review and resolve
@@ -106,15 +106,15 @@ EOF
 #   If the first argument begins with `-`, it is the default cycle. Otherwise it
 #   is a subcommand, and an unknown subcommand is an error.
 #
-# So `revloop --pr 3` cycles, and `revloop reviw --pr 3` dies naming the typo
+# So `crossrev --pr 3` cycles, and `crossrev reviw --pr 3` dies naming the typo
 # rather than silently running the most expensive operation the tool offers.
 # Help and version are special-cased ahead of the rule, because they are the two
-# dash-arguments nobody means as a cycle. Bare `revloop` prints help; it does not
+# dash-arguments nobody means as a cycle. Bare `crossrev` prints help; it does not
 # cycle.
 main() {
   case "${1:-}" in
     ""|help|--help|-h)    usage; return 0 ;;
-    version|--version|-v) revloop_version; echo; return 0 ;;
+    version|--version|-v) crossrev_version; echo; return 0 ;;
   esac
 
   local cmd
@@ -134,7 +134,7 @@ main() {
         install) auth_install "$@" ;;
         rotate)  auth_rotate "$@" ;;
         refresh) auth_refresh "$@" ;;
-        *) ui_die "unknown auth command: $sub" "Try: revloop auth status | login | install | rotate | refresh" ;;
+        *) ui_die "unknown auth command: $sub" "Try: crossrev auth status | login | install | rotate | refresh" ;;
       esac ;;
 
     config)
@@ -143,7 +143,7 @@ main() {
       case "${1:-show}" in
         show)  jq . <<<"$CFG_MERGED" ;;
         backlog) ui_say "deferred work would go to: $(cfg_resolve_backlog "" "$(cfg_get '.backlog.destination')")" ;;
-        *) ui_die "unknown config command: $1" "Try: revloop config show | backlog" ;;
+        *) ui_die "unknown config command: $1" "Try: crossrev config show | backlog" ;;
       esac ;;
 
     doctor)
@@ -156,7 +156,7 @@ main() {
         cfg_load ""
         preflight_report_pairings "$(cfg_get '.runner')" || doctor_ok=1
       fi
-      (( doctor_ok == 0 )) && ui_end "Everything revloop needs is installed." \
+      (( doctor_ok == 0 )) && ui_end "Everything crossrev needs is installed." \
         || ui_end "Fix what is marked ✗ above, then run this again." ;;
 
     cycle)   cmd_cycle "$@" ;;
@@ -166,7 +166,7 @@ main() {
     init)     cmd_init "$@" ;;
     watchdog) cmd_watchdog "$@" ;;
 
-    *) ui_die "unknown command: $cmd" "Run: revloop help" ;;
+    *) ui_die "unknown command: $cmd" "Run: crossrev help" ;;
   esac
 }
 

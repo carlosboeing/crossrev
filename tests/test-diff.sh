@@ -4,7 +4,7 @@
 # check that decides whether GitHub will accept a finding's line.
 #
 # The fixture is the real one. On pull request 14 the reviewer put a finding on
-# `tools/revloop/CHANGELOG.md:14` when the sentence it faulted was on line 13,
+# `tools/crossrev/CHANGELOG.md:14` when the sentence it faulted was on line 13,
 # and 13 is the last line of the hunk — so 14 was one line outside the diff and
 # GitHub refused the comment. Both halves of the fix are pinned here: the gutter
 # that stops the number being counted, and the snap that repairs it if it is.
@@ -35,32 +35,32 @@ trap 'rm -rf "$tmp"' EXIT
 # which only recognises a leading space is a parser that miscounts on a diff
 # somebody's editor touched.
 cat >"$tmp/pr14.diff" <<'DIFF'
-diff --git a/tools/revloop/CHANGELOG.md b/tools/revloop/CHANGELOG.md
+diff --git a/tools/crossrev/CHANGELOG.md b/tools/crossrev/CHANGELOG.md
 index e773ac4..0b34128 100644
---- a/tools/revloop/CHANGELOG.md
-+++ b/tools/revloop/CHANGELOG.md
-@@ -6,6 +6,8 @@ All notable changes to revloop.
+--- a/tools/crossrev/CHANGELOG.md
++++ b/tools/crossrev/CHANGELOG.md
+@@ -6,6 +6,8 @@ All notable changes to crossrev.
 
  ### Added
 
 +- **A two-direction template/default drift test.** Eleven behavior leaves must agree.
 +
- - `revloop review --pr N` — one review pass. Claims before working.
- - `revloop resolve --pr N` — verifies every finding whatever its severity.
- - `revloop cycle --pr N` — the whole loop in one process, up to `max_passes`.
-@@ -33,3 +35,4 @@ All notable changes to revloop.
- - `revloop status --pr N` — position and interruption.
+ - `crossrev review --pr N` — one review pass. Claims before working.
+ - `crossrev resolve --pr N` — verifies every finding whatever its severity.
+ - `crossrev cycle --pr N` — the whole loop in one process, up to `max_passes`.
+@@ -33,3 +35,4 @@ All notable changes to crossrev.
+ - `crossrev status --pr N` — position and interruption.
 -- `runs_per_day` bounded a number that was not runs.
 +- `max_prs_per_day` counts distinct pull requests repository-wide.
 +- `max_passes_per_cycle` replaces the scattered caps.
- - `revloop watchdog` — finds pull requests stuck waiting on a leg.
+ - `crossrev watchdog` — finds pull requests stuck waiting on a leg.
 DIFF
 
 # --- the gutter ------------------------------------------------------------
 numbered="$(diff_number "$tmp/pr14.diff")"
 
 is "the file header carries no gutter" \
-  "$(grep -c '^diff --git a/tools/revloop/CHANGELOG.md' <<<"$numbered")" "1"
+  "$(grep -c '^diff --git a/tools/crossrev/CHANGELOG.md' <<<"$numbered")" "1"
 is "the hunk header carries no gutter" \
   "$(grep -c '^@@ -6,6 +6,8 @@' <<<"$numbered")" "1"
 
@@ -83,7 +83,7 @@ is "the gutter preserves every line of the diff" \
   "$(wc -l <"$tmp/pr14.diff" | tr -d ' ')" "$(printf '%s\n' "$numbered" | wc -l | tr -d ' ')"
 
 # --- the anchor check ------------------------------------------------------
-CH=tools/revloop/CHANGELOG.md
+CH=tools/crossrev/CHANGELOG.md
 
 is "a context line inside the hunk is used as given" \
   "$(diff_anchor "$tmp/pr14.diff" "$CH" RIGHT 13)" "13"

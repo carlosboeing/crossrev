@@ -54,7 +54,7 @@ adapter_claude() {
     tok="${!tok_env:-}"
     [[ -n "$tok" ]] || ui_die \
       "the endpoint '$endpoint' needs \$$tok_env, which is unset" \
-      "Export it, or set it as a repository secret for CI. revloop will not fall back to the vendor's own API."
+      "Export it, or set it as a repository secret for CI. crossrev will not fall back to the vendor's own API."
     # Set inline on the invocation only. Never exported, never in a workflow
     # env: block. These variables are process-scoped, so a leg that leaks them
     # silently redirects the OTHER leg too — both legs run on one model, the

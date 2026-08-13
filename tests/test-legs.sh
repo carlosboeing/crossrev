@@ -28,7 +28,7 @@ decides() {
 
 decides continue "issues remain below every cap"        issues-remain 1 3 false false 0 12 10 200
 decides converged "converged stops the loop"            converged     1 3 false false 0 12 10 200
-decides halt     "revloop/stop outranks a healthy verdict" converged  1 3 true  false 0 12 10 200
+decides halt     "crossrev/stop outranks a healthy verdict" converged  1 3 true  false 0 12 10 200
 decides halt     "the resolver reporting blocked halts"  issues-remain 1 3 false true  0 12 10 200
 
 # The boundary is the thing worth testing: pass 3 of max 3 is the last pass, not
@@ -79,8 +79,8 @@ label() {
   local got; got="$(legs_awaiting_label "$1")"
   [[ "$got" == "$2" ]] && ok "$3" || notok "$3" "$2" "$got"
 }
-label review  revloop/awaiting-review     "review waits behind awaiting-review"
-label resolve revloop/awaiting-resolution "resolve waits behind awaiting-resolution, not awaiting-resolve"
+label review  crossrev/awaiting-review     "review waits behind awaiting-review"
+label resolve crossrev/awaiting-resolution "resolve waits behind awaiting-resolution, not awaiting-resolve"
 
 # --- push guard ------------------------------------------------------------
 guard() {

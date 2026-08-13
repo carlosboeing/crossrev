@@ -1,6 +1,6 @@
 ---
 name: pr-resolve
-description: Use when resolving review findings on a pull request as one leg of the revloop cross-model review loop - verifies each finding against the codebase, fixes what is real, pushes back on what is wrong, and returns dispositions and reply text as schema-constrained JSON. Not for ad-hoc review response; use receiving-code-review for that.
+description: Use when resolving review findings on a pull request as one leg of the crossrev cross-model review loop - verifies each finding against the codebase, fixes what is real, pushes back on what is wrong, and returns dispositions and reply text as schema-constrained JSON. Not for ad-hoc review response; use receiving-code-review for that.
 ---
 
 # pr-resolve
@@ -78,7 +78,7 @@ So a finding on a quarantined path is **`deferred`**, with a reply that says the
 | `skipped` | resolved | Not acting, by policy — usually `May fix: no`. The reply gives the one-line reason |
 | `deferred` | resolved once persisted | Real, worth doing, not in this PR. Fill in `persist` so it outlives the merge |
 | `rebutted` | resolved | Technically wrong for this codebase. The reply gives the reason, with evidence |
-| `escalated` | left open | A human decision is needed. Applies `revloop/stop` and halts the loop |
+| `escalated` | left open | A human decision is needed. Applies `crossrev/stop` and halts the loop |
 
 Every disposition carries a reply. **Nothing is ever silently dropped** — a skipped finding with no reply reads as an oversight, and the next pass raises it again.
 
@@ -115,7 +115,7 @@ A **closed** candidate counts. Closing an issue is a decision, and re-filing som
 
 ## The summary comment
 
-One comment summarising what happened, in Markdown, written for a collaborator who has never heard of revloop: what was fixed, what was skipped and why, what was deferred and where it went, what was rebutted and on what grounds. It goes in the `summary` field.
+One comment summarising what happened, in Markdown, written for a collaborator who has never heard of crossrev: what was fixed, what was skipped and why, what was deferred and where it went, what was rebutted and on what grounds. It goes in the `summary` field.
 
 The orchestrator wraps it: the alert at the top, the disposition table, the run details, the machine-readable marker and the `## Deferred work filed` list. **Do not write any of them yourself** — and you could not write the last one anyway, because the filing has not happened yet and you do not know the issue numbers.
 

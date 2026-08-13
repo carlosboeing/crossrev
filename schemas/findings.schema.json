@@ -1,5 +1,5 @@
 {
-  "title": "revloop review findings",
+  "title": "crossrev review findings",
   "description": "What the review leg returns. Both v1 harnesses constrain output to this natively, so the orchestrator receives validated JSON rather than scraping a fenced block out of prose. Two shapes here are forced by the harnesses rather than chosen: no $schema or $id key, because Claude Code's --json-schema rejects a schema naming the 2020-12 meta-schema and fails before the model is called; and every property listed in 'required', because Codex enforces OpenAI strict mode, which demands it. Genuinely optional fields are therefore nullable rather than absent.",
   "type": "object",
   "required": [

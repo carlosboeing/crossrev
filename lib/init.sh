@@ -1,7 +1,7 @@
 # shellcheck shell=bash
-# lib/init.sh — `revloop init`, the upgrade from local to automated.
+# lib/init.sh — `crossrev init`, the upgrade from local to automated.
 #
-# This is the most consequential command revloop has: it registers a GitHub
+# This is the most consequential command crossrev has: it registers a GitHub
 # identity, writes organisation secrets, and adds files to a repository. So it
 # prints an itemised plan naming every path, secret and label, the resolved
 # destination for deferred work and where that resolution came from, flags
@@ -41,7 +41,7 @@ cmd_init() {
       --upgrade) INIT_UPGRADE=1; shift ;;
       --yes|-y)  yes=1; shift ;;
       *) ui_die "unknown option for init: $1" \
-           "Usage: revloop init [--owner <owner>] [--upgrade] [--dry-run] [--yes]" ;;
+           "Usage: crossrev init [--owner <owner>] [--upgrade] [--dry-run] [--yes]" ;;
     esac
   done
 
@@ -56,7 +56,7 @@ cmd_init() {
 
   if (( yes )); then
     # shellcheck disable=SC2034  # read by ui_confirm
-    REVLOOP_ASSUME_YES=1
+    CROSSREV_ASSUME_YES=1
   fi
   ui_confirm "Proceed?" || { ui_end "Nothing was changed."; return 0; }
 
@@ -70,7 +70,7 @@ cmd_init() {
 _init_resolve() {
   [[ -n "$INIT_REPO" ]] || INIT_REPO="$(gh_repo_slug)"
   [[ -n "$INIT_REPO" ]] || ui_die "could not work out which repository to set up" \
-    "Run revloop init from a checkout with a GitHub remote, or pass --repo owner/name."
+    "Run crossrev init from a checkout with a GitHub remote, or pass --repo owner/name."
 
   # Detected, not asked. The repository's own owner is the trust boundary the
   # App's private key should sit on — the org for an org repo, your account for a
@@ -94,7 +94,7 @@ _init_resolve() {
   # credential would expire ten days later with nothing pointing at the cause.
   case "$INIT_RUNNER" in
     github-hosted|self-hosted) : ;;
-    *) ui_die "the config sets runner: $INIT_RUNNER, which revloop does not recognise" \
+    *) ui_die "the config sets runner: $INIT_RUNNER, which crossrev does not recognise" \
          "It must be exactly github-hosted or self-hosted. Anything else would be treated as hosted while behaving as neither, and the first sign would be a credential expiring weeks later." ;;
   esac
   _init_assert_runner_serves_pairing
@@ -103,10 +103,10 @@ _init_resolve() {
   local max; max="$(cfg_get '.policy.max_passes_per_cycle')"
   local i
   for (( i = 1; i <= max; i++ )); do
-    INIT_PASS_LABELS="$INIT_PASS_LABELS revloop/pass-$i"
+    INIT_PASS_LABELS="$INIT_PASS_LABELS crossrev/pass-$i"
   done
   INIT_PASS_LABELS="${INIT_PASS_LABELS# }"
-  INIT_FIXED_LABELS="revloop/awaiting-resolution revloop/awaiting-review revloop/converged revloop/halted revloop/stop"
+  INIT_FIXED_LABELS="crossrev/awaiting-resolution crossrev/awaiting-review crossrev/converged crossrev/halted crossrev/stop"
 
   # `auto` is a bootstrap convenience, not a runtime mode: resolve it once here
   # and write the concrete answer into the generated config, so the committed file
@@ -130,7 +130,7 @@ _init_resolve() {
     INIT_BACKLOG_LABELS="$(printf '%s %s' "$tracking" "$extra" | tr -s ' ' | sed 's/ *$//')"
   fi
 
-  # Where the workflows fetch revloop from, pinned by SHA. A tag only looks
+  # Where the workflows fetch crossrev from, pinned by SHA. A tag only looks
   # immutable: `git tag -f` plus a force push moves it, and the failure mode is a
   # repository whose review behaviour changes with nothing in its own history to
   # show for it.
@@ -138,18 +138,18 @@ _init_resolve() {
     | sed -E 's#^.*github\.com[:/]##; s#\.git$##')" || INIT_SOURCE_REPO=""
   INIT_SOURCE_SHA="$(git -C "$ROOT" rev-parse HEAD 2>/dev/null)" || INIT_SOURCE_SHA=""
   INIT_SOURCE_REF="$(git -C "$ROOT" describe --tags --exact-match 2>/dev/null)" \
-    || INIT_SOURCE_REF="v$(revloop_version)"
+    || INIT_SOURCE_REF="v$(crossrev_version)"
 
   [[ -n "$INIT_SOURCE_REPO" && -n "$INIT_SOURCE_SHA" ]] || ui_die \
-    "could not work out which commit of revloop to pin the workflows to" \
-    "init generates workflows that check revloop out at a 40-character SHA. Run it from a git checkout of the repository revloop lives in."
+    "could not work out which commit of crossrev to pin the workflows to" \
+    "init generates workflows that check crossrev out at a 40-character SHA. Run it from a git checkout of the repository crossrev lives in."
 
   INIT_WORKFLOWS="review resolve watchdog"
   (( INIT_NEEDS_REFRESHER )) && INIT_WORKFLOWS="$INIT_WORKFLOWS token-refresh"
 
   local f t
-  for t in $INIT_WORKFLOWS; do INIT_WRITES="$INIT_WRITES .github/workflows/revloop-$t.yml"; done
-  INIT_WRITES="$INIT_WRITES .github/revloop.yml"
+  for t in $INIT_WORKFLOWS; do INIT_WRITES="$INIT_WRITES .github/workflows/crossrev-$t.yml"; done
+  INIT_WRITES="$INIT_WRITES .github/crossrev.yml"
   for f in $INIT_WRITES; do
     [[ -e "$f" ]] && INIT_OVERWRITES="$INIT_OVERWRITES $f"
   done
@@ -214,7 +214,7 @@ _init_resolve_refresher() {
 _init_required_secrets() {
   printf 'APP_ID\n'
   printf 'APP_PRIVATE_KEY\n'
-  printf 'REVLOOP_SOURCE_KEY\n'
+  printf 'CROSSREV_SOURCE_KEY\n'
 
   local leg harness endpoint ep tok seen=""
   for leg in reviewer resolver; do
@@ -233,13 +233,13 @@ _init_required_secrets() {
     [[ "$INIT_RUNNER" == "self-hosted" ]] && continue
     case "$harness" in
       claude) [[ "$seen" == *" CLAUDE_CODE_OAUTH_TOKEN "* ]] || { printf 'CLAUDE_CODE_OAUTH_TOKEN\n'; seen="$seen CLAUDE_CODE_OAUTH_TOKEN "; } ;;
-      codex)  [[ "$seen" == *" REVLOOP_CODEX_AUTH "* ]] || { printf 'REVLOOP_CODEX_AUTH\n'; seen="$seen REVLOOP_CODEX_AUTH "; } ;;
+      codex)  [[ "$seen" == *" CROSSREV_CODEX_AUTH "* ]] || { printf 'CROSSREV_CODEX_AUTH\n'; seen="$seen CROSSREV_CODEX_AUTH "; } ;;
     esac
   done
 
   if (( INIT_NEEDS_REFRESHER )); then
-    printf 'REVLOOP_REFRESH_APP_ID\n'
-    printf 'REVLOOP_REFRESH_APP_PRIVATE_KEY\n'
+    printf 'CROSSREV_REFRESH_APP_ID\n'
+    printf 'CROSSREV_REFRESH_APP_PRIVATE_KEY\n'
   fi
 }
 
@@ -253,7 +253,7 @@ _init_print_plan() {
   if [[ -f "$meta" ]]; then
     app_line="reuse \"$(jq -r .name "$meta")\" (id $(jq -r .id "$meta"), owner $INIT_OWNER)"
   else
-    app_line="none registered for $INIT_OWNER — run \`revloop auth login\` first"
+    app_line="none registered for $INIT_OWNER — run \`crossrev auth login\` first"
   fi
 
   ui_section "Plan for $INIT_REPO"
@@ -292,7 +292,7 @@ _init_print_plan() {
   local scope="repository"
   [[ "$INIT_OWNER_TYPE" == "organization" ]] && scope="organisation"
   ui_line ""
-  ui_line "secrets           checked at $scope level, and set only where revloop has the value"
+  ui_line "secrets           checked at $scope level, and set only where crossrev has the value"
   local s
   while read -r s; do
     [[ -n "$s" ]] || continue
@@ -367,16 +367,16 @@ _init_label_inventory() {
 _init_secret_note() {
   case "$1" in
     APP_ID|APP_PRIVATE_KEY)
-      if [[ -f "$(_auth_meta "$INIT_OWNER")" ]]; then printf -- '— revloop will set it'
-      else printf -- '— run `revloop auth login` first'; fi ;;
-    REVLOOP_REFRESH_APP_ID|REVLOOP_REFRESH_APP_PRIVATE_KEY)
-      if [[ -f "$(_auth_meta "$INIT_OWNER" refresher)" ]]; then printf -- '— revloop will set it'
-      else printf -- '— revloop will register the refresher App and set it'; fi ;;
+      if [[ -f "$(_auth_meta "$INIT_OWNER")" ]]; then printf -- '— crossrev will set it'
+      else printf -- '— run `crossrev auth login` first'; fi ;;
+    CROSSREV_REFRESH_APP_ID|CROSSREV_REFRESH_APP_PRIVATE_KEY)
+      if [[ -f "$(_auth_meta "$INIT_OWNER" refresher)" ]]; then printf -- '— crossrev will set it'
+      else printf -- '— crossrev will register the refresher App and set it'; fi ;;
     CLAUDE_CODE_OAUTH_TOKEN)
-      printf -- '— revloop runs `claude setup-token` and captures the output; the token is never printed' ;;
-    REVLOOP_CODEX_AUTH)
-      printf -- '— seed once from a machine with a browser: `codex login`, then `gh secret set REVLOOP_CODEX_AUTH < ~/.codex/auth.json`' ;;
-    REVLOOP_SOURCE_KEY)
+      printf -- '— crossrev runs `claude setup-token` and captures the output; the token is never printed' ;;
+    CROSSREV_CODEX_AUTH)
+      printf -- '— seed once from a machine with a browser: `codex login`, then `gh secret set CROSSREV_CODEX_AUTH < ~/.codex/auth.json`' ;;
+    CROSSREV_SOURCE_KEY)
       printf -- '— a read-only deploy key on %s; see the note after this plan' "$INIT_SOURCE_REPO" ;;
     *)
       printf -- '— the token an endpoint in the config names; set it yourself with `gh secret set %s`' "$1" ;;
@@ -388,7 +388,7 @@ _init_secret_note() {
 # This used to query GitHub twice per secret and decide from grep's exit status
 # alone, with stderr discarded — so a call that *failed* was indistinguishable
 # from a secret that was *absent*. Seven secrets meant fourteen calls to render
-# one plan, and any one of them falling over printed "MISSING — revloop will set
+# one plan, and any one of them falling over printed "MISSING — crossrev will set
 # it" about a secret already sitting there. Measured on a live repository: five
 # identical dry-runs, five different answers, all three known-present secrets
 # flipping. In the one place an operator decides whether to hand this command a
@@ -447,14 +447,14 @@ _init_execute() {
     for l in $INIT_BACKLOG_LABELS; do
       if gh_label_exists "$INIT_REPO" "$l"; then existed=$(( existed + 1 )); continue; fi
       if [[ "$can_create" == "false" ]]; then missing="$missing $l"; continue; fi
-      gh_label_ensure "$INIT_REPO" "$l" "$INIT_BACKLOG_LABEL_COLOUR" "filed by revloop" >/dev/null
+      gh_label_ensure "$INIT_REPO" "$l" "$INIT_BACKLOG_LABEL_COLOUR" "filed by crossrev" >/dev/null
       created=$(( created + 1 ))
     done
     if [[ -n "$missing" ]]; then
       # A repository that governs its own label set is one where inventing labels
       # is worse than stopping.
       ui_die "the GitHub issues destination needs these labels and create_missing_labels is false:$missing" \
-        "The repository asked revloop to use existing labels only. Create them by hand, or set backlog.github_issues.create_missing_labels: true."
+        "The repository asked crossrev to use existing labels only. Create them by hand, or set backlog.github_issues.create_missing_labels: true."
     fi
     ui_ok "created $created and found $existed already for filed issues"
   fi
@@ -474,7 +474,7 @@ _init_execute() {
     fi
   else
     ui_no "no App is registered for $INIT_OWNER, so APP_ID and APP_PRIVATE_KEY were not set"
-    ui_next "revloop auth login --owner $INIT_OWNER"
+    ui_next "crossrev auth login --owner $INIT_OWNER"
     unfinished="$unfinished APP_ID APP_PRIVATE_KEY"
   fi
 
@@ -488,8 +488,8 @@ _init_execute() {
     # means every repository that reads it also refreshes it — and the first one
     # to refresh invalidates it for all the others, permanently.
     if [[ "$INIT_OWNER_TYPE" == "organization" ]] \
-       && gh secret list --org "$INIT_OWNER" 2>/dev/null | grep -q '^REVLOOP_CODEX_AUTH\b'; then
-      ui_warn "REVLOOP_CODEX_AUTH exists as an organisation secret on $INIT_OWNER" \
+       && gh secret list --org "$INIT_OWNER" 2>/dev/null | grep -q '^CROSSREV_CODEX_AUTH\b'; then
+      ui_warn "CROSSREV_CODEX_AUTH exists as an organisation secret on $INIT_OWNER" \
         "The refresher writes a repository secret, which takes precedence — so this repository will work and the organisation copy will go stale, breaking every other repository reading it. Each repository needs its own credential, seeded with its own \`codex login\`. Delete the organisation-level copy."
     fi
 
@@ -503,9 +503,9 @@ _init_execute() {
       # Registering an App means approving it in a browser, so --yes cannot cover
       # it: a blanket yes must not stand in for an approval nobody is present to
       # give. Scripted runs name the command instead of pretending to run it.
-      if [[ "${REVLOOP_ASSUME_YES:-0}" == "1" ]] || ! _ui_input_source >/dev/null 2>&1; then
+      if [[ "${CROSSREV_ASSUME_YES:-0}" == "1" ]] || ! _ui_input_source >/dev/null 2>&1; then
         ui_no "no refresher App is registered for $INIT_OWNER, and registering one needs a browser"
-        ui_next "revloop auth login --owner $INIT_OWNER --role refresher"
+        ui_next "crossrev auth login --owner $INIT_OWNER --role refresher"
       elif ui_confirm "Register the refresher App for $INIT_OWNER?"; then
         auth_login --owner "$INIT_OWNER" --role refresher
         rmeta="$(_auth_meta "$INIT_OWNER" refresher)"
@@ -513,23 +513,23 @@ _init_execute() {
     fi
     if [[ -f "$rmeta" ]]; then
       local rpem; rpem="$(_auth_pem "$INIT_OWNER" refresher)"
-      _init_secret_set REVLOOP_REFRESH_APP_ID "$(jq -r .id "$rmeta")" repo \
-        || unfinished="$unfinished REVLOOP_REFRESH_APP_ID"
+      _init_secret_set CROSSREV_REFRESH_APP_ID "$(jq -r .id "$rmeta")" repo \
+        || unfinished="$unfinished CROSSREV_REFRESH_APP_ID"
       if [[ -f "$rpem" ]]; then
-        _init_secret_set REVLOOP_REFRESH_APP_PRIVATE_KEY "$(cat "$rpem")" repo \
-          || unfinished="$unfinished REVLOOP_REFRESH_APP_PRIVATE_KEY"
+        _init_secret_set CROSSREV_REFRESH_APP_PRIVATE_KEY "$(cat "$rpem")" repo \
+          || unfinished="$unfinished CROSSREV_REFRESH_APP_PRIVATE_KEY"
       else
-        ui_no "REVLOOP_REFRESH_APP_PRIVATE_KEY — the key file is missing at $rpem"
-        unfinished="$unfinished REVLOOP_REFRESH_APP_PRIVATE_KEY"
+        ui_no "CROSSREV_REFRESH_APP_PRIVATE_KEY — the key file is missing at $rpem"
+        unfinished="$unfinished CROSSREV_REFRESH_APP_PRIVATE_KEY"
       fi
     else
-      unfinished="$unfinished REVLOOP_REFRESH_APP_ID REVLOOP_REFRESH_APP_PRIVATE_KEY"
+      unfinished="$unfinished CROSSREV_REFRESH_APP_ID CROSSREV_REFRESH_APP_PRIVATE_KEY"
     fi
   fi
 
   local s
   while read -r s; do
-    case "$s" in ""|APP_ID|APP_PRIVATE_KEY|REVLOOP_REFRESH_APP_*) continue ;; esac
+    case "$s" in ""|APP_ID|APP_PRIVATE_KEY|CROSSREV_REFRESH_APP_*) continue ;; esac
     if _init_secret_exists "$s"; then
       ui_ok "$s — already set"
       continue
@@ -537,7 +537,7 @@ _init_execute() {
     if [[ "$s" == "CLAUDE_CODE_OAUTH_TOKEN" ]] && _init_set_claude_token; then
       continue
     fi
-    ui_no "$s — not set, and revloop does not have the value to set it"
+    ui_no "$s — not set, and crossrev does not have the value to set it"
     unfinished="$unfinished $s"
   done <<<"$INIT_SECRETS"
 
@@ -546,33 +546,33 @@ _init_execute() {
   mkdir -p .github/workflows
   local t name
   for t in $INIT_WORKFLOWS; do
-    name=".github/workflows/revloop-$t.yml"
-    _init_render_workflow "$ROOT/templates/revloop-$t.yml" >"$name"
+    name=".github/workflows/crossrev-$t.yml"
+    _init_render_workflow "$ROOT/templates/crossrev-$t.yml" >"$name"
     ui_ok "wrote $name"
   done
   # A pairing that stopped needing the refresher leaves its workflow behind,
   # still on a cron, still failing on a secret nobody sets any more. Saying so
   # beats a scheduled job that emails a failure every twelve hours.
-  if (( INIT_NEEDS_REFRESHER == 0 )) && [[ -e .github/workflows/revloop-token-refresh.yml ]]; then
-    ui_warn "this configuration needs no refresher, but .github/workflows/revloop-token-refresh.yml is still there" \
+  if (( INIT_NEEDS_REFRESHER == 0 )) && [[ -e .github/workflows/crossrev-token-refresh.yml ]]; then
+    ui_warn "this configuration needs no refresher, but .github/workflows/crossrev-token-refresh.yml is still there" \
       "It stays on its schedule and fails every run once the credential it reads is gone. Delete it, and remove the refresher App's secrets, if the pairing is not going back."
   fi
 
-  if (( INIT_UPGRADE )) && [[ -e .github/revloop.yml ]]; then
+  if (( INIT_UPGRADE )) && [[ -e .github/crossrev.yml ]]; then
     # --upgrade regenerates workflows from the installed version, so drift across
     # repositories is handled by regeneration rather than hand-editing every copy.
     # It deliberately leaves the policy file alone.
-    ui_say "left .github/revloop.yml alone — --upgrade regenerates workflows, not policy"
+    ui_say "left .github/crossrev.yml alone — --upgrade regenerates workflows, not policy"
   else
     _init_write_config
-    ui_ok "wrote .github/revloop.yml, with deferred work resolved to $INIT_BACKLOG_RESOLVED"
+    ui_ok "wrote .github/crossrev.yml, with deferred work resolved to $INIT_BACKLOG_RESOLVED"
   fi
 
   # --- what is not done ----------------------------------------------------
   ui_section "Still needed"
   if [[ -z "$unfinished" ]]; then
     ui_ok "nothing — open a pull request and the loop runs"
-    ui_end "Watch it with: revloop status --pr <number>"
+    ui_end "Watch it with: crossrev status --pr <number>"
     return 0
   fi
 
@@ -580,16 +580,16 @@ _init_execute() {
   # review runs, which is the good kind of failure — but only if someone knows.
   for s in $unfinished; do
     case "$s" in
-      REVLOOP_SOURCE_KEY)
-        ui_no "REVLOOP_SOURCE_KEY — the workflows cannot check revloop out without it"
+      CROSSREV_SOURCE_KEY)
+        ui_no "CROSSREV_SOURCE_KEY — the workflows cannot check crossrev out without it"
         ui_line "   The App token is scoped to its own installation and cannot read"
         ui_line "   $INIT_SOURCE_REPO; the default workflow token is scoped to this"
         ui_line "   repository. So the source checkout needs a credential of its own."
         ui_line ""
-        ui_line "   ssh-keygen -t ed25519 -C revloop-source -f /tmp/revloop-source -N ''"
-        ui_line "   gh repo deploy-key add /tmp/revloop-source.pub --repo $INIT_SOURCE_REPO --title revloop-source"
-        ui_line "   gh secret set REVLOOP_SOURCE_KEY $(_init_secret_scope_flag) </tmp/revloop-source"
-        ui_line "   rm /tmp/revloop-source /tmp/revloop-source.pub"
+        ui_line "   ssh-keygen -t ed25519 -C crossrev-source -f /tmp/crossrev-source -N ''"
+        ui_line "   gh repo deploy-key add /tmp/crossrev-source.pub --repo $INIT_SOURCE_REPO --title crossrev-source"
+        ui_line "   gh secret set CROSSREV_SOURCE_KEY $(_init_secret_scope_flag) </tmp/crossrev-source"
+        ui_line "   rm /tmp/crossrev-source /tmp/crossrev-source.pub"
         ui_line ""
         ui_line "   Read-only by default, so its blast radius if leaked is read access"
         ui_line "   to that one repository — no write, no user identity." ;;
@@ -600,17 +600,17 @@ _init_execute() {
         ui_line ""
         ui_line "   That token is valid for a year and the command will not show it"
         ui_line "   again, so put it in the secret in the same sitting. Re-run"
-        ui_line "   \`revloop init\` from a terminal and it does both, and records the"
-        ui_line "   date so \`revloop auth status\` can warn as the year closes." ;;
-      REVLOOP_CODEX_AUTH)
-        ui_no "REVLOOP_CODEX_AUTH — a leg runs on Codex, so it cannot authenticate"
+        ui_line "   \`crossrev init\` from a terminal and it does both, and records the"
+        ui_line "   date so \`crossrev auth status\` can warn as the year closes." ;;
+      CROSSREV_CODEX_AUTH)
+        ui_no "CROSSREV_CODEX_AUTH — a leg runs on Codex, so it cannot authenticate"
         ui_line "   codex login          # on a machine with a browser"
         # --repo unconditionally, never _init_secret_scope_flag. On an org-owned
         # repository that helper prints --org, and this is the one secret that
         # must never be organisation-scoped — the same misconfiguration init
         # warns about a few lines above. An instruction someone copies verbatim
         # is not the place to be inconsistent with your own warning.
-        ui_line "   gh secret set REVLOOP_CODEX_AUTH --repo $INIT_REPO < ~/.codex/auth.json"
+        ui_line "   gh secret set CROSSREV_CODEX_AUTH --repo $INIT_REPO < ~/.codex/auth.json"
         ui_line ""
         ui_line "   Repository-scoped, not organisation-scoped, even on an org."
         ui_line "   Concurrency groups do not span repositories, so an org-level"
@@ -620,10 +620,10 @@ _init_execute() {
         ui_line "   Seeded once. From then on the refresher workflow is the only"
         ui_line "   thing that writes it, because using a refresh token consumes it"
         ui_line "   and a second writer kills the chain for everyone." ;;
-      REVLOOP_REFRESH_APP_ID|REVLOOP_REFRESH_APP_PRIVATE_KEY)
+      CROSSREV_REFRESH_APP_ID|CROSSREV_REFRESH_APP_PRIVATE_KEY)
         ui_no "$s — without the refresher App, codex's credential expires and stays expired"
-        ui_line "   revloop auth login --owner $INIT_OWNER --role refresher"
-        ui_line "   revloop init --upgrade" ;;
+        ui_line "   crossrev auth login --owner $INIT_OWNER --role refresher"
+        ui_line "   crossrev init --upgrade" ;;
       APP_ID|APP_PRIVATE_KEY)
         : ;;   # already explained above
       *)
@@ -644,9 +644,9 @@ _init_execute() {
 # working on-disk login is how you get a job authenticating as something nobody
 # intended.
 #
-#   # revloop:only <runner>
+#   # crossrev:only <runner>
 #   ...lines kept only for that runner...
-#   # revloop:end
+#   # crossrev:end
 # The install line for the harnesses this configuration actually names.
 #
 # Installing only Claude is worse than failing: `run_resolve_leg` falls back to
@@ -681,7 +681,7 @@ _init_render_workflow() {
   if [[ "$INIT_RUNNER" == "self-hosted" ]]; then
     # Two labels, not one: `self-hosted` alone matches every self-hosted runner
     # the owner has, including ones set up for something else entirely.
-    runs_on="[self-hosted, revloop]"
+    runs_on="[self-hosted, crossrev]"
   else
     runs_on="ubuntu-latest"
   fi
@@ -698,9 +698,9 @@ _init_render_workflow() {
   # A temp file was the first fix and was worse: this runs once per workflow, so
   # a RETURN trap cleans up on the ordinary path and leaks a file on every other
   # one. A file that never exists needs no trap.
-  REVLOOP_HARNESS_INSTALL="$(_init_harness_install_line)" awk '
+  CROSSREV_HARNESS_INSTALL="$(_init_harness_install_line)" awk '
     index($0, "__HARNESS_INSTALL__") {
-      n = split(ENVIRON["REVLOOP_HARNESS_INSTALL"], a, "\n")
+      n = split(ENVIRON["CROSSREV_HARNESS_INSTALL"], a, "\n")
       for (i = 1; i <= n; i++) print a[i]
       next
     }
@@ -711,8 +711,8 @@ _init_render_workflow() {
       -e "s#__RUNS_ON__#$runs_on#g" \
       -e "s#__REFRESH_SCOPE__#$refresh_scope#g" \
     | awk -v want="$INIT_RUNNER" '
-        /^[[:space:]]*# revloop:only / { skip = ($3 != want); next }
-        /^[[:space:]]*# revloop:end/   { skip = 0; next }
+        /^[[:space:]]*# crossrev:only / { skip = ($3 != want); next }
+        /^[[:space:]]*# crossrev:end/   { skip = 0; next }
         !skip'
 }
 
@@ -733,7 +733,7 @@ _init_set_claude_token() {
   ui_gap
   ui_line "CLAUDE_CODE_OAUTH_TOKEN is missing, and both legs need it to authenticate."
   ui_line "\`claude setup-token\` opens a browser once and prints a token valid for a"
-  ui_line "year. revloop captures it straight into the secret — it is never printed"
+  ui_line "year. crossrev captures it straight into the secret — it is never printed"
   ui_line "here, never written to a file, and never shown again by anything."
   ui_confirm "Run \`claude setup-token\` now?" || return 1
 
@@ -753,12 +753,12 @@ _init_set_claude_token() {
   # would otherwise abort init entirely, halfway through, having already written
   # labels and secrets. The check below is what decides whether this worked.
   claude setup-token 2>&1 | tee "$raw" \
-    | sed -E 's/(sk-ant-[A-Za-z0-9_-]{6})[A-Za-z0-9_-]+/\1…[captured by revloop, not shown]/g' \
+    | sed -E 's/(sk-ant-[A-Za-z0-9_-]{6})[A-Za-z0-9_-]+/\1…[captured by crossrev, not shown]/g' \
     || true
 
   token="$(grep -oE 'sk-ant-[A-Za-z0-9_-]{20,}' "$raw" | tail -1)"
   if [[ -z "$token" ]]; then
-    ui_warn "\`claude setup-token\` finished without printing a token revloop could recognise" \
+    ui_warn "\`claude setup-token\` finished without printing a token crossrev could recognise" \
       "The secret is not set, so CI cannot authenticate yet. Run it by hand and set the secret: claude setup-token, then gh secret set CLAUDE_CODE_OAUTH_TOKEN $(_init_secret_scope_flag)"
     return 1
   fi
@@ -768,7 +768,7 @@ _init_set_claude_token() {
   # the token cannot be read back, so nothing later can work out when it was
   # issued. Without this the first sign of expiry is a CI failure.
   auth_token_record "$INIT_REPO" CLAUDE_CODE_OAUTH_TOKEN 365
-  ui_line "   expires in 365 days — \`revloop auth status\` warns as that closes"
+  ui_line "   expires in 365 days — \`crossrev auth status\` warns as that closes"
   return 0
 }
 
@@ -846,7 +846,7 @@ _init_write_config() {
     expr=".backlog.destination = \"$destination\""
   fi
 
-  yq "$expr$(_init_policy_pairing)" "$ROOT/templates/revloop.yml" >.github/revloop.yml
+  yq "$expr$(_init_policy_pairing)" "$ROOT/templates/crossrev.yml" >.github/crossrev.yml
 }
 
 # The pairing init actually provisioned for, written down.

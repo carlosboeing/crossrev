@@ -1,5 +1,5 @@
 {
-  "title": "revloop resolve intent",
+  "title": "crossrev resolve intent",
   "description": "What the resolve leg returns. It is intent for the orchestrator to act on, never a record of what the agent already did — the agent holds no GitHub credential and makes no GitHub call. Carries the same two harness-forced shapes as the findings schema: no $schema or $id key, because Claude Code's --json-schema rejects a schema naming the 2020-12 meta-schema; and every property listed in 'required', because Codex enforces OpenAI strict mode. Optional fields are nullable rather than absent.",
   "type": "object",
   "required": ["dispositions", "summary", "blocked", "blocked_reason"],
@@ -16,7 +16,7 @@
     "summary": {
       "type": "string",
       "minLength": 1,
-      "description": "The summary comment body, in Markdown, explaining what was fixed, skipped, deferred and rebutted. Written for a collaborator who has never heard of revloop. The orchestrator appends the alert, the disposition table, the run details, the machine-readable marker and any 'Deferred work filed' list; do not write any of them yourself."
+      "description": "The summary comment body, in Markdown, explaining what was fixed, skipped, deferred and rebutted. Written for a collaborator who has never heard of crossrev. The orchestrator appends the alert, the disposition table, the run details, the machine-readable marker and any 'Deferred work filed' list; do not write any of them yourself."
     },
     "dispositions": {
       "type": "array",
@@ -34,7 +34,7 @@
           "disposition": {
             "type": "string",
             "enum": ["fixed", "skipped", "deferred", "rebutted", "escalated"],
-            "description": "fixed: code changed. skipped: not acting by policy, such as a finding below the pass's min_fix_severity threshold. deferred: real, worth doing, not here — persists to the backlog. rebutted: technically wrong for this codebase. escalated: needs a human decision, applies revloop/stop and leaves the thread open."
+            "description": "fixed: code changed. skipped: not acting by policy, such as a finding below the pass's min_fix_severity threshold. deferred: real, worth doing, not here — persists to the backlog. rebutted: technically wrong for this codebase. escalated: needs a human decision, applies crossrev/stop and leaves the thread open."
           },
           "reply": {
             "type": "string",

@@ -50,29 +50,29 @@ routes_init() {
 # --- claude both legs on a hosted runner: the default, and the cheap case ---
 fixture_repo "$(config_for github-hosted claude claude)"; stub_reset
 routes_init
-out="$("$REVLOOP" init --dry-run 2>&1)"; rc=$?
+out="$("$CROSSREV" init --dry-run 2>&1)"; rc=$?
 
 is  "the v1 default plans clean"                   "$rc" "0"
 has "the plan names the runner"                    "$out" "runner            github-hosted"
 has "and what each leg authenticates as"           "$out" "reviewer: claude by subscription"
 hasnt "no refresher is mentioned, because none is needed" "$out" "refresher App"
 has "the token it needs is the long-lived one"     "$out" "CLAUDE_CODE_OAUTH_TOKEN"
-hasnt "and nothing asks for a rotating codex credential" "$out" "REVLOOP_CODEX_AUTH"
+hasnt "and nothing asks for a rotating codex credential" "$out" "CROSSREV_CODEX_AUTH"
 has "and it says the token is captured rather than pasted" \
   "$out" "captures the output"
 
 # --- codex reviewing on a hosted runner: needs the refresher ---------------
 fixture_repo "$(config_for github-hosted codex claude)"; stub_reset
 routes_init
-out="$("$REVLOOP" init --dry-run 2>&1)"; rc=$?
+out="$("$CROSSREV" init --dry-run 2>&1)"; rc=$?
 
 is  "codex on a hosted runner is allowed"          "$rc" "0"
 has "and the plan says a refresher is needed"      "$out" "refresher App     needed"
 has "with the reason, not just the fact"           "$out" "its credential rotates"
 has "and that only one job writes it"              "$out" "the legs only read"
-has "the refresher's own App secrets are listed"   "$out" "REVLOOP_REFRESH_APP_ID"
-has "and the credential the legs restore"          "$out" "REVLOOP_CODEX_AUTH"
-has "the refresher workflow is one of the files"   "$out" "revloop-token-refresh.yml"
+has "the refresher's own App secrets are listed"   "$out" "CROSSREV_REFRESH_APP_ID"
+has "and the credential the legs restore"          "$out" "CROSSREV_CODEX_AUTH"
+has "the refresher workflow is one of the files"   "$out" "crossrev-token-refresh.yml"
 
 # Derived from the pairing, never asked. Nobody is offered a choice about it.
 hasnt "nothing asks whether a refresher is wanted" "$out" "Do you want"
@@ -83,7 +83,7 @@ hasnt "nothing asks whether a refresher is wanted" "$out" "Do you want"
 # reason and both ways out, because "not supported" tells nobody what to change.
 fixture_repo "$(config_for github-hosted agy claude)"; stub_reset
 routes_init
-err="$("$REVLOOP" init --dry-run 2>&1 >/dev/null)"; rc=$?
+err="$("$CROSSREV" init --dry-run 2>&1 >/dev/null)"; rc=$?
 
 is  "agy by subscription on a hosted runner refuses" "$rc" "1"
 has "and names the token lifetime as the reason"     "$err" "about an hour"
@@ -92,7 +92,7 @@ has "and the change-the-harness fix"                 "$err" "name a different ha
 
 fixture_repo "$(config_for github-hosted kimi claude)"; stub_reset
 routes_init
-err="$("$REVLOOP" init --dry-run 2>&1 >/dev/null)"; rc=$?
+err="$("$CROSSREV" init --dry-run 2>&1 >/dev/null)"; rc=$?
 is  "kimi by subscription on a hosted runner refuses" "$rc" "1"
 has "and names its fifteen minutes"                   "$err" "15 minutes"
 has "against a scheduler that cannot keep up"         "$err" "five-minute floor"
@@ -107,9 +107,9 @@ kimi_endpoint='endpoints:
 fixture_repo "$(config_for github-hosted claude claude "$kimi_endpoint")"; stub_reset
 routes_init
 # Point the reviewer at the endpoint, which config_for does not template.
-yq -i '.reviewer.endpoint = "kimi"' .github/revloop.yml
+yq -i '.reviewer.endpoint = "kimi"' .github/crossrev.yml
 git add -A && git commit -q -m endpoint && git push -q origin main
-out="$("$REVLOOP" init --dry-run 2>&1)"; rc=$?
+out="$("$CROSSREV" init --dry-run 2>&1)"; rc=$?
 
 is  "a harness reached through an endpoint is allowed on any runner" "$rc" "0"
 has "and the plan says which endpoint it goes through" "$out" "via the 'kimi' endpoint"
@@ -119,68 +119,68 @@ has "the secret it needs is the one the endpoint names, not a vendor name" \
 # --- self-hosted serves everything -----------------------------------------
 fixture_repo "$(config_for self-hosted agy codex)"; stub_reset
 routes_init
-out="$("$REVLOOP" init --yes 2>&1)"; rc=$?
+out="$("$CROSSREV" init --yes 2>&1)"; rc=$?
 
 is  "self-hosted serves a pairing a hosted runner cannot" "$rc" "0"
 hasnt "and needs no refresher, because credentials refresh on disk" "$out" "refresher App"
-hasnt "no rotating credential is asked for"        "$out" "REVLOOP_CODEX_AUTH"
+hasnt "no rotating credential is asked for"        "$out" "CROSSREV_CODEX_AUTH"
 hasnt "and no long-lived token either"             "$out" "CLAUDE_CODE_OAUTH_TOKEN"
 is  "three workflows, not four"                    "$(ls .github/workflows | wc -l | tr -d ' ')" "3"
 
-wf="$(cat .github/workflows/revloop-review.yml)"
-has "the workflow asks for the self-hosted runner"  "$wf" "runs-on: [self-hosted, revloop]"
+wf="$(cat .github/workflows/crossrev-review.yml)"
+has "the workflow asks for the self-hosted runner"  "$wf" "runs-on: [self-hosted, crossrev]"
 # Two labels rather than one: `self-hosted` alone matches every self-hosted
 # runner the owner has, including ones set up for something else.
-has "by both labels"                                "$wf" "revloop]"
+has "by both labels"                                "$wf" "crossrev]"
 hasnt "it does not install a harness that is already there" "$wf" "npm install"
 hasnt "and passes no credential, since the machine is logged in" "$wf" "CLAUDE_CODE_OAUTH_TOKEN"
-hasnt "the fence markers are stripped, not left in the file" "$wf" "revloop:only"
+hasnt "the fence markers are stripped, not left in the file" "$wf" "crossrev:only"
 
 # --- the hosted workflows carry the other half ------------------------------
 fixture_repo "$(config_for github-hosted codex claude)"; stub_reset
 routes_init
-out="$("$REVLOOP" init --yes 2>&1)"; rc=$?
+out="$("$CROSSREV" init --yes 2>&1)"; rc=$?
 
 is  "init writes the refresher workflow when the pairing needs it" \
   "$(ls .github/workflows | wc -l | tr -d ' ')" "4"
-wf="$(cat .github/workflows/revloop-review.yml)"
+wf="$(cat .github/workflows/crossrev-review.yml)"
 # Both harnesses, not just the one the earlier version of this assertion checked.
 # Neither is on GitHub's runner images, and installing only Claude does not fail:
 # `run_resolve_leg` falls back, warns in one line nobody reads in a CI log, and
 # both legs run Claude. The loop completes and the cross-model property is gone.
 has "a hosted workflow installs the resolver's harness"  "$wf" "npm install -g @anthropic-ai/claude-code"
 has "AND the reviewer's, which is a different one"        "$wf" "npm install -g @openai/codex"
-has "and passes the credentials in as secrets"       "$wf" "REVLOOP_CODEX_AUTH"
+has "and passes the credentials in as secrets"       "$wf" "CROSSREV_CODEX_AUTH"
 has "on GitHub's own runner"                         "$wf" "runs-on: ubuntu-latest"
 
 # A pairing on one harness installs it once rather than twice.
 fixture_repo "$(config_for github-hosted claude claude)"; stub_reset
 routes_init
-"$REVLOOP" init --yes >/dev/null 2>&1
+"$CROSSREV" init --yes >/dev/null 2>&1
 is  "a same-harness pairing installs it once, not twice" \
-  "$(grep -c 'npm install -g @anthropic-ai/claude-code' .github/workflows/revloop-review.yml)" "1"
+  "$(grep -c 'npm install -g @anthropic-ai/claude-code' .github/workflows/crossrev-review.yml)" "1"
 hasnt "and installs nothing it does not use" \
-  "$(cat .github/workflows/revloop-review.yml)" "@openai/codex"
+  "$(cat .github/workflows/crossrev-review.yml)" "@openai/codex"
 
 fixture_repo "$(config_for github-hosted codex claude)"; stub_reset
 routes_init
-out="$("$REVLOOP" init --yes 2>&1)"
+out="$("$CROSSREV" init --yes 2>&1)"
 
-refresh="$(grep -v '^[[:space:]]*#' .github/workflows/revloop-token-refresh.yml)"
+refresh="$(grep -v '^[[:space:]]*#' .github/workflows/crossrev-token-refresh.yml)"
 has "the refresher runs on a schedule"               "$refresh" "cron:"
 has "on its own concurrency group, so there is one writer" \
-  "$refresh" "group: revloop-token-refresh"
+  "$refresh" "group: crossrev-token-refresh"
 hasnt "and never cancels a refresh in flight"        "$refresh" "cancel-in-progress"
 has "it authenticates as the refresher App, not the loop's" \
-  "$refresh" "REVLOOP_REFRESH_APP_ID"
+  "$refresh" "CROSSREV_REFRESH_APP_ID"
 # The isolation argument, asserted rather than described: this job never touches
 # anything a pull request author can influence.
 hasnt "it never checks out the repository under review" "$refresh" "ref: refs/pull"
 hasnt "and never checks out a head branch either"       "$refresh" "head.ref"
-hasnt "no model runs in it"                             "$refresh" "revloop review"
+hasnt "no model runs in it"                             "$refresh" "crossrev review"
 
 has "a scripted run names the App it cannot register for you" \
-  "$out" "revloop auth login --owner acme --role refresher"
+  "$out" "crossrev auth login --owner acme --role refresher"
 has "and says why a blanket --yes did not cover it"  "$out" "needs a browser"
 
 # --- what init refuses -------------------------------------------------------
@@ -194,7 +194,7 @@ has "and says why a blanket --yes did not cover it"  "$out" "needs a browser"
 # later with nothing pointing at the cause.
 fixture_repo "$(config_for github_hosted codex claude)"; stub_reset
 routes_init
-err="$("$REVLOOP" init --dry-run 2>&1 >/dev/null)"; rc=$?
+err="$("$CROSSREV" init --dry-run 2>&1 >/dev/null)"; rc=$?
 is  "an unrecognised runner value refuses"      "$rc" "1"
 has "and says what the two legal values are"    "$err" "exactly github-hosted or self-hosted"
 has "and why a typo is worse than an error"     "$err" "expiring weeks later"
@@ -206,9 +206,9 @@ ep='endpoints:
     token_env: KIMI_API_KEY'
 fixture_repo "$(config_for github-hosted codex claude "$ep")"; stub_reset
 routes_init
-yq -i '.reviewer.endpoint = "kimi"' .github/revloop.yml
+yq -i '.reviewer.endpoint = "kimi"' .github/crossrev.yml
 git add -A && git commit -q -m ep && git push -q origin main
-err="$("$REVLOOP" init --dry-run 2>&1 >/dev/null)"; rc=$?
+err="$("$CROSSREV" init --dry-run 2>&1 >/dev/null)"; rc=$?
 is  "an endpoint on a harness that cannot use one refuses" "$rc" "1"
 has "and names the harness and the endpoint"    "$err" "runs on 'codex', which cannot use one"
 has "and gives the fix"                         "$err" "Use harness: claude with endpoint: kimi"
@@ -222,12 +222,12 @@ has "and gives the fix"                         "$err" "Use harness: claude with
 fixture_repo "$(config_for github-hosted codex claude)"; stub_reset
 routes_init
 route_first 'api users/*' '{"type":"Organization"}'
-out="$("$REVLOOP" init --yes 2>&1)"
+out="$("$CROSSREV" init --yes 2>&1)"
 
 has "on an org, the codex credential is still seeded repository-scoped" \
-  "$out" "gh secret set REVLOOP_CODEX_AUTH --repo acme/widget"
+  "$out" "gh secret set CROSSREV_CODEX_AUTH --repo acme/widget"
 hasnt "never with --org, which is the misconfiguration init warns about" \
-  "$out" "gh secret set REVLOOP_CODEX_AUTH --org"
+  "$out" "gh secret set CROSSREV_CODEX_AUTH --org"
 has "and it says why, rather than leaving the flag to look arbitrary" \
   "$out" "Concurrency groups do not span repositories"
 
@@ -246,7 +246,7 @@ key_secret() (
   _auth_role_key_secret "$1"
 )
 is  "the loop role's key lives in APP_PRIVATE_KEY"  "$(key_secret loop)" "APP_PRIVATE_KEY"
-is  "and the refresher's in its own secret"        "$(key_secret refresher)" "REVLOOP_REFRESH_APP_PRIVATE_KEY"
+is  "and the refresher's in its own secret"        "$(key_secret refresher)" "CROSSREV_REFRESH_APP_PRIVATE_KEY"
 
 # --- every rendered workflow is still valid YAML -----------------------------
 #
@@ -259,8 +259,8 @@ is  "and the refresher's in its own secret"        "$(key_secret refresher)" "RE
 # repository with no workflows in it at all.
 fixture_repo "$(config_for github-hosted codex claude)"; stub_reset
 routes_init
-"$REVLOOP" init --yes >/dev/null 2>&1
-for f in .github/workflows/revloop-*.yml; do
+"$CROSSREV" init --yes >/dev/null 2>&1
+for f in .github/workflows/crossrev-*.yml; do
   if yq -e '.jobs' "$f" >/dev/null 2>&1; then
     ok "$(basename "$f") parses as YAML with a jobs block"
   else
@@ -270,8 +270,8 @@ done
 
 fixture_repo "$(config_for self-hosted agy codex)"; stub_reset
 routes_init
-"$REVLOOP" init --yes >/dev/null 2>&1
-for f in .github/workflows/revloop-*.yml; do
+"$CROSSREV" init --yes >/dev/null 2>&1
+for f in .github/workflows/crossrev-*.yml; do
   if yq -e '.jobs' "$f" >/dev/null 2>&1; then
     ok "$(basename "$f") still parses after the self-hosted blocks are stripped"
   else
@@ -280,7 +280,7 @@ for f in .github/workflows/revloop-*.yml; do
   fi
 done
 is "and runs-on survives as a list rather than a mangled string" \
-  "$(yq -r '.jobs.review["runs-on"] | join(",")' .github/workflows/revloop-review.yml)" \
-  "self-hosted,revloop"
+  "$(yq -r '.jobs.review["runs-on"] | join(",")' .github/workflows/crossrev-review.yml)" \
+  "self-hosted,crossrev"
 
 finish

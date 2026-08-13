@@ -1,5 +1,5 @@
 # shellcheck shell=bash
-# lib/github.sh — every GitHub read and write revloop makes.
+# lib/github.sh — every GitHub read and write crossrev makes.
 #
 # The agent process holds no GitHub credential. Every inline comment, reply,
 # resolution, label, issue, commit and push is made here, from the intent a
@@ -19,7 +19,7 @@
 gh_repo_slug() {
   gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null || ui_die \
     "could not work out which repository this is" \
-    "Run revloop from a checkout with a GitHub remote, or pass --repo owner/name."
+    "Run crossrev from a checkout with a GitHub remote, or pass --repo owner/name."
 }
 
 # Everything about the pull request the legs need, in one call.
@@ -67,7 +67,7 @@ gh_repo_issue_comments_page() {
 # The diff under review, with paths matching an exclude pattern dropped.
 #
 # The exclusion is not cosmetic: a repository backlog means the resolver commits its own
-# bookkeeping into the PR branch, and the next pass would then review revloop's
+# bookkeeping into the PR branch, and the next pass would then review crossrev's
 # notes about the last pass.
 #
 # Pinned to the two revisions the leg already loaded rather than asked for by
@@ -100,7 +100,7 @@ gh_pr_diff() {
   rm -f "$tmp"
 }
 
-# Review threads, with each thread's revloop finding ids read out of its comment
+# Review threads, with each thread's crossrev finding ids read out of its comment
 # bodies. Thread identity comes from GraphQL because the REST review-comment API
 # does not expose the node id the resolve mutation needs.
 gh_review_threads() {
@@ -123,7 +123,7 @@ gh_review_threads() {
              | { id, isResolved, isOutdated, path, line,
                  root_comment_id: (.comments.nodes[0].databaseId // null),
                  finding_ids: [ .comments.nodes[].body // ""
-                                | scan("<!-- revloop:f (\\{[^}]*\\}) -->") | .[0]
+                                | scan("<!-- crossrev:f (\\{[^}]*\\}) -->") | .[0]
                                 | fromjson | .id ],
                  comments: [ .comments.nodes[] | {author: .author.login, body} ] } ]' \
   || printf '[]'
@@ -140,7 +140,7 @@ gh_comment_create() {
   id="$(gh api --method POST "repos/$repo/issues/$pr/comments" \
         -f body="$body" --jq .id 2>/dev/null)" \
     || ui_die "could not post a comment on $repo#$pr" \
-       "Every pass records itself in a comment, so revloop stops rather than working without a record. Check the token has pull-requests write."
+       "Every pass records itself in a comment, so crossrev stops rather than working without a record. Check the token has pull-requests write."
   printf '%s' "$id"
 }
 
@@ -209,7 +209,7 @@ gh_label_exists() {
 # Absence is the answer here rather than an error, so the pipeline's failure is
 # swallowed. Without the `|| true` a missing label fails the pipeline under
 # `pipefail`, and the caller's plain assignment then takes `set -e` down with it
-# — which is every fresh repository, on the most consequential command revloop
+# — which is every fresh repository, on the most consequential command crossrev
 # has.
 # Filtered with a piped jq rather than `gh --jq`, so the call is byte-identical to
 # the existence check it replaces. Not a style choice: the offline suite matches
@@ -257,7 +257,7 @@ gh_label_ensure() {
 # Writes — issues, and not filing twice
 # ---------------------------------------------------------------------------
 
-# Tier 1 dedupe: exact, against revloop's own issues.
+# Tier 1 dedupe: exact, against crossrev's own issues.
 #
 # Every filed issue carries the finding's hidden marker, the same mechanism
 # every other outward write uses. Deterministic, no model, no false positives —
@@ -268,7 +268,7 @@ gh_issue_by_finding() {
   gh api --paginate "repos/$repo/issues?state=all&labels=$label&per_page=100" 2>/dev/null \
     | jq -r --arg id "$finding_id" '
         .[] | select(.pull_request == null)
-        | select([ (.body // "") | scan("<!-- revloop:f (\\{[^}]*\\}) -->") | .[]
+        | select([ (.body // "") | scan("<!-- crossrev:f (\\{[^}]*\\}) -->") | .[]
                    | fromjson | .id ] | index($id))
         | .number' 2>/dev/null | head -1
 }
@@ -325,20 +325,20 @@ gh_issue_comment() {
 gh_commit_and_push() {
   local branch="$1" message="$2" expected_head="$3" sha
 
-  # Never stage revloop's own source checkout. The generated workflows put it at
-  # .revloop-src inside GITHUB_WORKSPACE, which is the same tree `git add -A` is
+  # Never stage crossrev's own source checkout. The generated workflows put it at
+  # .crossrev-src inside GITHUB_WORKSPACE, which is the same tree `git add -A` is
   # walking, and git stages an embedded repository as a gitlink with a warning
   # rather than an error — so every resolve run that fixed anything pushed a
   # submodule entry into someone's pull request. The quieter half of the same
-  # bug: with .revloop-src always staged, `git diff --cached --quiet` below was
+  # bug: with .crossrev-src always staged, `git diff --cached --quiet` below was
   # never true, so the "reported fixes but changed no files" guard could not
   # fire at all. `:(top)` anchors both pathspecs to the repository root, so this
   # holds wherever the leg is invoked from.
-  git add -A -- ':(top)' ':(exclude,top).revloop-src' >/dev/null 2>&1 || true
+  git add -A -- ':(top)' ':(exclude,top).crossrev-src' >/dev/null 2>&1 || true
   if git diff --cached --quiet 2>/dev/null; then printf ''; return 0; fi
 
-  git -c user.name="${REVLOOP_GIT_NAME:-revloop}" \
-      -c user.email="${REVLOOP_GIT_EMAIL:-revloop@users.noreply.github.com}" \
+  git -c user.name="${CROSSREV_GIT_NAME:-crossrev}" \
+      -c user.email="${CROSSREV_GIT_EMAIL:-crossrev@users.noreply.github.com}" \
       commit -q -m "$message" || ui_die \
     "could not commit the resolver's changes" \
     "The working tree still holds them, so nothing is lost. Check \`git status\` in the checkout."
@@ -358,7 +358,7 @@ gh_commit_and_push() {
       "If someone pushed to that branch while this leg was working, this push may not include their commit. Confirm the branch looks right before merging."
   elif [[ -n "$expected_head" && "$remote_head" != "$expected_head" ]]; then
     ui_die "$branch moved while this leg was running — it is now at ${remote_head:0:7}, not ${expected_head:0:7}" \
-      "Someone else pushed. The fix is committed locally and not pushed; rebase onto the new head and re-run: revloop resolve --pr <n>"
+      "Someone else pushed. The fix is committed locally and not pushed; rebase onto the new head and re-run: crossrev resolve --pr <n>"
   fi
 
   git push origin "HEAD:refs/heads/$branch" >/dev/null 2>&1 || ui_die \

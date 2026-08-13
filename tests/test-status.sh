@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# `revloop status` — the five header words, every pass, and what to type next.
+# `crossrev status` — the five header words, every pass, and what to type next.
 #
 # Two properties carry the whole display, and both fail quietly if broken.
 #
@@ -89,7 +89,7 @@ status_setup_with() {
   fixture_repo; stub_reset
   routes_baseline "$(printf '%s' "$comments" | payload)" "$labels"
   [[ -n "$setup" ]] && "$setup"
-  "$REVLOOP" status --pr 42 2>&1
+  "$CROSSREV" status --pr 42 2>&1
 }
 
 status_with() { status_setup_with "" "$@"; }
@@ -98,7 +98,7 @@ status_with() { status_setup_with "" "$@"; }
 # run_lock_acquire writes: `<pid> on <host> since <timestamp>`. $1 is the pid,
 # $2 the host, defaulting to this machine's.
 write_lock() {
-  local dir; dir="$(git rev-parse --git-dir)/revloop"
+  local dir; dir="$(git rev-parse --git-dir)/crossrev"
   mkdir -p "$dir"
   printf '%s on %s since 2026-08-12T00:00:00Z\n' \
     "$1" "${2:-$(hostname 2>/dev/null || printf 'local')}" >"$dir/pr-42.lock"
@@ -114,7 +114,7 @@ run_completed()   { route_first 'run view 55501 --repo acme/widget --json status
 lbl() { jq -cn --args '[$ARGS.positional[] | {name: .}]' "$@"; }
 
 # --- a three-pass converged loop, which is the shape the design draws -------
-out="$(status_with "$(lbl revloop/converged revloop/pass-3)" \
+out="$(status_with "$(lbl crossrev/converged crossrev/pass-3)" \
   "$(review_m 1 issues-remain "$HIGH_LOW")" \
   "$(resolve_m 1 "$FIXED_SKIPPED")" \
   "$(review_m 2 issues-remain "$ONE_MED")" \
@@ -148,14 +148,14 @@ has "and says so on the passes line too"        "$out" "passes     none yet, up 
 # A heading with an empty body reads as a bug, and the line above already carries
 # the information a `not started` header word would have duplicated.
 hasnt "the PASSES section is omitted rather than printed empty" "$out" "PASSES"
-has "NEXT is a command"                         "$out" "revloop review --pr 42"
+has "NEXT is a command"                         "$out" "crossrev review --pr 42"
 
 # --- awaiting resolution ----------------------------------------------------
-out="$(status_with "$(lbl revloop/awaiting-resolution revloop/pass-1)" \
+out="$(status_with "$(lbl crossrev/awaiting-resolution crossrev/pass-1)" \
   "$(review_m 1 issues-remain "$HIGH_LOW")")"
 has "a landed review with findings owes the resolve leg" \
   "$out" "acme/widget#42 — awaiting resolution"
-has "and NEXT is the command that runs it"      "$out" "revloop resolve --pr 42"
+has "and NEXT is the command that runs it"      "$out" "crossrev resolve --pr 42"
 has "with the resolve leg shown as still owed"  "$out" "○ resolve  not run yet"
 
 # The leg the loop is waiting on is the one most likely to be running while
@@ -169,13 +169,13 @@ resolve_started() {
      model_reported:null, tokens:null, blocked:false, blocked_reason:null,
      commit_sha:null, summary:"", dispositions:[]}'
 }
-out="$(status_setup_with lock_alive "$(lbl revloop/awaiting-resolution revloop/pass-1)" \
+out="$(status_setup_with lock_alive "$(lbl crossrev/awaiting-resolution crossrev/pass-1)" \
   "$(review_m 1 issues-remain "$HIGH_LOW")" "$(resolve_started)")"
 has   "a running resolve leg says so on its row"  "$out" "◐ resolve  running now — started 7 minute(s) ago"
 has   "and NEXT stops reading as an invitation to start a second one" \
   "$out" "Pass 1 is running now, so wait for it"
 has   "while still ending in the command that resumes it if that run dies" \
-  "$out" "revloop resolve --pr 42"
+  "$out" "crossrev resolve --pr 42"
 
 # --- an unfinished leg, and what status can actually prove about it ---------
 #
@@ -188,7 +188,7 @@ has   "while still ending in the command that resumes it if that run dies" \
 # Nothing to go on: an unreadable run_id, no lock, inside the window. The row
 # says how long ago it started and that no result has landed, which is the whole
 # of what is known, and it carries neither verdict glyph.
-out="$(status_with "$(lbl revloop/awaiting-review revloop/watchdog-retried revloop/pass-2)" \
+out="$(status_with "$(lbl crossrev/awaiting-review crossrev/watchdog-retried crossrev/pass-2)" \
   "$(review_m 1 issues-remain "$HIGH_LOW")" \
   "$(resolve_m 1 "$FIXED_SKIPPED")" \
   "$(review_m 2 null '[]' started 2820)")"
@@ -211,7 +211,7 @@ hasnt "and none of them says never finished"  "$out" "never finished"
 # Alive: the marker names a pid and the lock file says that pid, on this host, is
 # running against this pull request. Both have to agree before the row will say
 # so — a pid alone is recycled, and every machine has its own.
-out="$(status_setup_with lock_alive "$(lbl revloop/awaiting-review revloop/pass-1)" \
+out="$(status_setup_with lock_alive "$(lbl crossrev/awaiting-review crossrev/pass-1)" \
   "$(review_m 1 null '[]' started 420 "local-$$")")"
 has   "a leg whose process answers is reported as running"  "$out" "◐ review   running now — started 7 minute(s) ago"
 hasnt "and never as a failure"                              "$out" "✗ review"
@@ -222,7 +222,7 @@ hasnt "rather than inviting a second run over the same pull request" \
 # Dead, two minutes in. The lock is the same evidence read the other way, and it
 # is definitive well inside the window: the process that took the lock is gone
 # and the marker never completed.
-out="$(status_setup_with lock_dead "$(lbl revloop/awaiting-review revloop/pass-1)" \
+out="$(status_setup_with lock_dead "$(lbl crossrev/awaiting-review crossrev/pass-1)" \
   "$(review_m 1 null '[]' started 120 "local-999999")")"
 has "a leg whose process is gone is a failure, however recent" \
   "$out" "✗ review   started 2 minute(s) ago, abandoned — the process that started it is gone"
@@ -230,7 +230,7 @@ has "a leg whose process is gone is a failure, however recent" \
 # On another machine. The lock is readable — a checkout on a shared filesystem —
 # but the pid in it is not this machine's to test, so the row names where the run
 # is instead of guessing whether it lives.
-out="$(status_setup_with lock_elsewhere "$(lbl revloop/awaiting-review revloop/pass-1)" \
+out="$(status_setup_with lock_elsewhere "$(lbl crossrev/awaiting-review crossrev/pass-1)" \
   "$(review_m 1 null '[]' started 420 "local-$$")")"
 has   "a lock on another host names the host"   "$out" "○ review   started 7 minute(s) ago on buildbox"
 hasnt "and claims nothing about the process"    "$out" "running now"
@@ -239,12 +239,12 @@ hasnt "least of all that it failed"             "$out" "✗ review"
 # An automated leg answers from anywhere, because the marker carries the real
 # workflow run id. The run_id's shape is what picks the check, not the configured
 # mode: a marker written on a runner reads the same from a laptop.
-out="$(status_setup_with run_in_progress "$(lbl revloop/awaiting-review revloop/pass-1)" \
+out="$(status_setup_with run_in_progress "$(lbl crossrev/awaiting-review crossrev/pass-1)" \
   "$(review_m 1 null '[]' started 420 55501)")"
 has "a workflow run still in progress is reported as running" \
   "$out" "◐ review   running now — started 7 minute(s) ago"
 
-out="$(status_setup_with run_completed "$(lbl revloop/awaiting-review revloop/pass-1)" \
+out="$(status_setup_with run_completed "$(lbl crossrev/awaiting-review crossrev/pass-1)" \
   "$(review_m 1 null '[]' started 120 55501)")"
 has "a workflow that ended without completing the leg is a failure" \
   "$out" "✗ review   started 2 minute(s) ago, abandoned — the workflow run finished without it"
@@ -252,7 +252,7 @@ has "a workflow that ended without completing the leg is a failure" \
 # The API not answering is not evidence of death. A run in another repository, a
 # token without actions:read and an aeroplane all look the same from here, and
 # none of them says the leg failed.
-out="$(status_with "$(lbl revloop/awaiting-review revloop/pass-1)" \
+out="$(status_with "$(lbl crossrev/awaiting-review crossrev/pass-1)" \
   "$(review_m 1 null '[]' started 120 55501)")"
 has   "an unanswerable workflow read falls back to what is known" \
   "$out" "started 2 minute(s) ago, no result yet"
@@ -261,7 +261,7 @@ hasnt "and never turns an unreachable API into a dead leg" "$out" "✗ review"
 # Past the window with nothing to check, the age is the evidence and the claim is
 # written off. The reason says so in its own words rather than the row repeating
 # the age it already carries.
-out="$(status_with "$(lbl revloop/awaiting-review revloop/pass-1)" \
+out="$(status_with "$(lbl crossrev/awaiting-review crossrev/pass-1)" \
   "$(review_m 1 null '[]' started 7200)")"
 has "an unfinished leg past the window is abandoned" \
   "$out" "✗ review   abandoned — it was made 120 minutes ago, past the 60-minute window"
@@ -269,7 +269,7 @@ has "and NEXT says a re-run starts the pass again" "$out" "so a re-run abandons 
 
 # Stale for the other reason: the branch moved under it, so resuming would
 # reconcile against a revision the findings no longer describe.
-out="$(status_with "$(lbl revloop/awaiting-review revloop/pass-1)" "$(moved_m)")"
+out="$(status_with "$(lbl crossrev/awaiting-review crossrev/pass-1)" "$(moved_m)")"
 has   "a claim against a revision that moved is abandoned too" \
   "$out" "✗ review   abandoned — it started against 0000000 and the pull request is now at"
 hasnt "and says it started against that revision rather than claimed it" \
@@ -277,7 +277,7 @@ hasnt "and says it started against that revision rather than claimed it" \
 
 # Nothing to check, inside the window: a re-run resumes rather than restarts, and
 # that is still what NEXT says.
-out="$(status_with "$(lbl revloop/awaiting-review revloop/pass-1)" \
+out="$(status_with "$(lbl crossrev/awaiting-review crossrev/pass-1)" \
   "$(review_m 1 null '[]' started 120)")"
 has "NEXT says a re-run resumes a pass nothing contradicts" "$out" "a re-run resumes pass 1"
 
@@ -287,10 +287,10 @@ has "NEXT says a re-run resumes a pass nothing contradicts" "$out" "a re-run res
 # declined marker". A review is genuinely owed — the loop hands back to the
 # reviewer after every resolve leg — and the bound stops the loop starting one
 # by itself, not a person asking for one. So NEXT has to describe the state
-# without telling the reader their own command would be refused: `revloop review
+# without telling the reader their own command would be refused: `crossrev review
 # --pr N` typed by hand runs a pass past the bound, and only an automatic
 # trigger or a cycle's generated pass meets it.
-out="$(status_with "$(lbl revloop/awaiting-review revloop/pass-3)" \
+out="$(status_with "$(lbl crossrev/awaiting-review crossrev/pass-3)" \
   "$(review_m 1 issues-remain "$HIGH_LOW")" \
   "$(resolve_m 1 "$FIXED_SKIPPED")" \
   "$(review_m 2 issues-remain "$ONE_MED")" \
@@ -304,14 +304,14 @@ has "and that the bound stops the loop, not the reader" \
   "$out" "Asking for one pass"
 hasnt "so nothing claims the command below would be refused"     "$out" "refused rather than run"
 has "the condition that has to change comes before the command"  "$out" "Raise policy.max_passes_per_cycle in"
-has "and NEXT still ends in something you can type"              "$out" "revloop review --pr 42"
+has "and NEXT still ends in something you can type"              "$out" "crossrev review --pr 42"
 hasnt "nothing invites a pass beyond the cap automatically"      "$out" "so pass 4 reviews"
 
 # Below the cap the invitation is correct and must survive the guard above.
-out="$(status_with "$(lbl revloop/awaiting-review revloop/pass-1)" \
+out="$(status_with "$(lbl crossrev/awaiting-review crossrev/pass-1)" \
   "$(review_m 1 issues-remain "$HIGH_LOW")" \
   "$(resolve_m 1 "$FIXED_SKIPPED" d81a3f2abc)")"
-has "a pass below the cap still points at the next review" "$out" "revloop review --pr 42"
+has "a pass below the cap still points at the next review" "$out" "crossrev review --pr 42"
 hasnt "and says nothing about max_passes_per_cycle"        "$out" "max_passes_per_cycle"
 
 # --- halted: a cap stopped the next pass before it began --------------------
@@ -319,7 +319,7 @@ hasnt "and says nothing about max_passes_per_cycle"        "$out" "max_passes_pe
 # Caps are evaluated when a review leg decides whether the NEXT pass may begin, so
 # the halt attaches to that review leg — which is literally what happened. A cap
 # therefore never halts at a resolve leg; it cannot, given where the check sits.
-out="$(status_with "$(lbl revloop/halted revloop/pass-2)" \
+out="$(status_with "$(lbl crossrev/halted crossrev/pass-2)" \
   "$(review_m 1 issues-remain "$HIGH_LOW")" \
   "$(resolve_m 1 "$FIXED_SKIPPED")" \
   "$(review_m 2 issues-remain "$ONE_MED")" \
@@ -332,7 +332,7 @@ has "attached to the review leg that refused to start" \
 has "with its resolve leg shown as never run"   "$out" "○ resolve  not run"
 has "NEXT says what the cap cost"               "$out" "So anything pass 2 changed is unverified"
 has "and gives the lever"                       "$out" "Raise the cap in"
-has "then the command that follows it"          "$out" "revloop review --pr 42"
+has "then the command that follows it"          "$out" "crossrev review --pr 42"
 
 # The refused pass records a pass that did not happen, so it must not count as
 # one. Counting it would report pass 3 as current, and raising the cap and
@@ -345,7 +345,7 @@ has "the refused pass does not become the current one" "$out" "passes     2 of 3
 # case with no preceding pass at all, so the current pass is 0 — and the wording
 # above would then warn that "anything pass 0 changed is unverified". No such
 # pass exists, nothing was reviewed, and nothing was changed.
-out="$(status_with "$(lbl revloop/halted revloop/pass-1)" \
+out="$(status_with "$(lbl crossrev/halted crossrev/pass-1)" \
   "$(declined_m 1 'reached max_files_changed_per_pr (200)')")"
 
 has   "a cap refusing the first pass still reads as halted" "$out" "acme/widget#42 — halted"
@@ -358,7 +358,7 @@ hasnt "so nothing refers to pass zero"            "$out" "pass 0"
 has   "the lever is still the cap"                "$out" "Raise the cap in"
 
 # --- halted: a leg reported blocked -----------------------------------------
-out="$(status_with "$(lbl revloop/halted revloop/pass-2)" \
+out="$(status_with "$(lbl crossrev/halted crossrev/pass-2)" \
   "$(review_m 1 issues-remain "$HIGH_LOW")" \
   "$(resolve_m 1 "$FIXED_SKIPPED")" \
   "$(review_m 2 issues-remain "$ONE_MED")" \
@@ -368,12 +368,12 @@ has "a blocked leg reads as halted, the same word and the same label" \
   "$out" "acme/widget#42 — halted"
 has "attached to the leg that reported it"      "$out" "✗ resolve  blocked — one fix needs a schema migration"
 has "and NEXT names the remedy"                 "$out" "Once that is settled"
-has "with the command"                          "$out" "revloop resolve --pr 42"
+has "with the command"                          "$out" "crossrev resolve --pr 42"
 
 # Today's output prints a green tick for any leg that reached `complete` whatever
 # its verdict, so a review that came back blocked looked identical to one that
 # converged — green for "the reviewer gave up".
-out="$(status_with "$(lbl revloop/halted revloop/pass-1)" \
+out="$(status_with "$(lbl crossrev/halted crossrev/pass-1)" \
   "$(review_m 1 blocked '[]')")"
 has "a blocked review gets the red glyph, not the green one" "$out" "✗ review   blocked"
 
@@ -381,7 +381,7 @@ has "a blocked review gets the red glyph, not the green one" "$out" "✗ review 
 #
 # Escalation is the one halt the markers have to answer on their own. Locally a
 # label that will not apply is a warning rather than a fatal, so a repository
-# that never ran `revloop init` runs the loop with no labels on it at all — and
+# that never ran `crossrev init` runs the loop with no labels on it at all — and
 # there the header comes from the markers. A resolve pass that escalated is
 # complete and not blocked, so reading only `blocked` would answer "awaiting
 # review" and send the reader to start a pass that settles nothing.
@@ -396,7 +396,7 @@ hasnt "and does not hand the loop back to the reviewer as though it were owed" \
   "$out" "— awaiting review"
 has "NEXT names the pending decision"           "$out" "1 finding need"
 has "and where the reasoning is"                "$out" "left the"
-has "then the command that follows settling it" "$out" "revloop review --pr 42"
+has "then the command that follows settling it" "$out" "crossrev review --pr 42"
 
 # The row has to agree with the header above it. A completed resolve marker gets
 # the tick for reaching `complete`, which is the wrong question: this one halted
@@ -407,7 +407,7 @@ hasnt "and never the tick a settled pass gets"      "$out" "✓ resolve  1 fixed
 
 # With the labels applied, the stop the resolve leg put on outranks the halt
 # beside it — and the two paths have to agree that this is not a review owed.
-out="$(status_with "$(lbl revloop/halted revloop/stop revloop/pass-1)" \
+out="$(status_with "$(lbl crossrev/halted crossrev/stop crossrev/pass-1)" \
   "$(review_m 1 issues-remain "$HIGH_LOW")" \
   "$(resolve_m 1 "$ESCALATED")")"
 has "the labelled path reads the stop the escalation applied" "$out" "acme/widget#42 — stopped"
@@ -418,24 +418,24 @@ hasnt "and still does not read as a review owed"              "$out" "— awaiti
 # Its own word rather than folding into halted, because the remedy differs.
 # Halted means raise a cap or take over. Stopped means remove a label somebody
 # applied on purpose.
-out="$(status_with "$(lbl revloop/stop revloop/awaiting-resolution revloop/pass-1)" \
+out="$(status_with "$(lbl crossrev/stop crossrev/awaiting-resolution crossrev/pass-1)" \
   "$(review_m 1 issues-remain "$HIGH_LOW")")"
 
 has "a stop request outranks the awaiting label beside it" "$out" "acme/widget#42 — stopped"
-has "and NEXT starts with removing the label"   "$out" "gh pr edit 42 --remove-label revloop/stop"
-has "then the leg that was owed when the brake went on" "$out" "revloop resolve --pr 42"
-has "the resolve leg says why it did not run"   "$out" "○ resolve  not run — revloop/stop is applied"
+has "and NEXT starts with removing the label"   "$out" "gh pr edit 42 --remove-label crossrev/stop"
+has "then the leg that was owed when the brake went on" "$out" "crossrev resolve --pr 42"
+has "the resolve leg says why it did not run"   "$out" "○ resolve  not run — crossrev/stop is applied"
 
 # --- the header word is one of exactly five ---------------------------------
 #
 # A sixth word would be a place for the terminal and the label to disagree, which
 # is the thing reading the header off the label was meant to stop.
 for pair in \
-  "revloop/awaiting-review:awaiting review" \
-  "revloop/awaiting-resolution:awaiting resolution" \
-  "revloop/converged:converged" \
-  "revloop/halted:halted" \
-  "revloop/stop:stopped"; do
+  "crossrev/awaiting-review:awaiting review" \
+  "crossrev/awaiting-resolution:awaiting resolution" \
+  "crossrev/converged:converged" \
+  "crossrev/halted:halted" \
+  "crossrev/stop:stopped"; do
   label="${pair%%:*}"; word="${pair#*:}"
   out="$(status_with "$(lbl "$label")" "$(review_m 1 issues-remain "$ONE_MED")")"
   has "$label reads as '$word'" "$out" "acme/widget#42 — $word"

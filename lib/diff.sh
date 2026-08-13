@@ -1,5 +1,5 @@
 # shellcheck shell=bash
-# lib/diff.sh — reading a unified diff, for the two questions revloop asks of one.
+# lib/diff.sh — reading a unified diff, for the two questions crossrev asks of one.
 #
 # Both questions are about the same thing: which line of which file a given line
 # of the diff is. The review leg needs that answer written down, because a model
@@ -21,7 +21,7 @@
 # the reviewer read the right hunk and fell off its end. Past that the reviewer
 # meant somewhere else, and moving the comment would anchor it to code the
 # finding never mentions — worse than not anchoring it at all.
-REVLOOP_DIFF_SNAP=3
+CROSSREV_DIFF_SNAP=3
 
 # _diff_parse <mode> <file> [path] [side] [line] [bound]
 #
@@ -43,14 +43,14 @@ _diff_parse() {
   # All three are set on every call, including to the empty string, so a value
   # exported in the caller's environment can never reach the program. They are
   # arguments that happen to travel by environment, not configuration.
-  REVLOOP_DIFF_PATH="$want_path" REVLOOP_DIFF_SIDE="$want_side" REVLOOP_DIFF_EXCLUDE="$ex_list" \
+  CROSSREV_DIFF_PATH="$want_path" CROSSREV_DIFF_SIDE="$want_side" CROSSREV_DIFF_EXCLUDE="$ex_list" \
   LC_ALL=C awk -v mode="$mode" -v want_line="$want_line" -v bound="$bound" '
     BEGIN {
-      want_path = ENVIRON["REVLOOP_DIFF_PATH"]; want_side = ENVIRON["REVLOOP_DIFF_SIDE"]
+      want_path = ENVIRON["CROSSREV_DIFF_PATH"]; want_side = ENVIRON["CROSSREV_DIFF_SIDE"]
       # Newline-separated, because a path may contain a space and every other
       # separator can appear in one too. Trailing slashes come off so that
       # `docs/backlog` and `docs/backlog/` mean the same directory.
-      n_ex = split(ENVIRON["REVLOOP_DIFF_EXCLUDE"], ex, "\n")
+      n_ex = split(ENVIRON["CROSSREV_DIFF_EXCLUDE"], ex, "\n")
       for (i = 1; i <= n_ex; i++) sub(/\/+$/, "", ex[i])
     }
     # Undo git C-style quoting: the whole path wrapped in double quotes, with
@@ -204,7 +204,7 @@ diff_number() { _diff_parse number "$1"; }
 # Nothing is a real answer, not a failure. It means the finding has to go
 # somewhere other than a line, and the caller has to say so.
 diff_anchor() {
-  local file="$1" path="$2" side="$3" line="$4" bound="${5:-$REVLOOP_DIFF_SNAP}"
+  local file="$1" path="$2" side="$3" line="$4" bound="${5:-$CROSSREV_DIFF_SNAP}"
   _diff_parse anchor "$file" "$path" "$side" "$line" "$bound"
 }
 

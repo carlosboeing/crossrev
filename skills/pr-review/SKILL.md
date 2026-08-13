@@ -1,6 +1,6 @@
 ---
 name: pr-review
-description: Use when reviewing a pull request as one leg of the revloop cross-model review loop - reads a diff and prior review threads supplied in the prompt, and returns findings as schema-constrained JSON anchored to file and line. Not for ad-hoc code review; use the harness's own review skill for that.
+description: Use when reviewing a pull request as one leg of the crossrev cross-model review loop - reads a diff and prior review threads supplied in the prompt, and returns findings as schema-constrained JSON anchored to file and line. Not for ad-hoc code review; use the harness's own review skill for that.
 ---
 
 # pr-review

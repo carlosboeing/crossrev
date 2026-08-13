@@ -207,7 +207,7 @@ rc "and so is a finding number that is not a whole number" 1 \
   "$_expect"
 
 # duplicate_of names an issue the orchestrator retrieved. Inventing one makes
-# revloop comment on an unrelated issue and resolve the thread against it.
+# crossrev comment on an unrelated issue and resolve the thread against it.
 rc "a duplicate_of naming a supplied candidate passes" 0 \
   "$(_dispositions "$(jq -cs . <<<"$(_d 1 19)
 $(_d 2)

@@ -103,9 +103,9 @@ is "and the bounded read returns the distinct count it saw" "${truncated##*$'\n'
 # --- finding markers -------------------------------------------------------
 fm="$(state_finding_marker "a1b2c3d4" 2 review)"
 is "a per-write finding marker carries its id" \
-  "$(sed -n 's/.*<!-- revloop:f \(.*\) -->.*/\1/p' <<<"$fm" | jq -r .id)" "a1b2c3d4"
+  "$(sed -n 's/.*<!-- crossrev:f \(.*\) -->.*/\1/p' <<<"$fm" | jq -r .id)" "a1b2c3d4"
 is "a per-write finding marker carries its pass" \
-  "$(sed -n 's/.*<!-- revloop:f \(.*\) -->.*/\1/p' <<<"$fm" | jq -r .pass)" "2"
+  "$(sed -n 's/.*<!-- crossrev:f \(.*\) -->.*/\1/p' <<<"$fm" | jq -r .pass)" "2"
 
 printf '\n  %d passed, %d failed\n' "$pass" "$fail"
 (( fail == 0 ))
