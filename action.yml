@@ -1,23 +1,17 @@
-# A composite action manifest for the day crossrev is its own public repository.
+# The composite action consuming repositories call.
 #
-# It is not used yet, and it cannot be. GitHub shares actions and reusable
-# workflows from private repositories only within the same user or organisation,
-# and crossrev currently lives inside a personal repo consumed by an org — so
-# `uses:` cannot reach it at all. The generated workflows do a second checkout at
-# a pinned commit SHA instead, with a read-only deploy key.
-#
-# Keeping the manifest here means extraction is a `git subtree split`, not a
-# redesign. Once crossrev is public, the consuming workflow collapses to:
-#
-#   - uses: carlosboeing/crossrev@<sha>   # v1.0.0
+#   - uses: carlosboeing/crossrev@<40-char-sha>   # v0.1.0
 #     with:
 #       leg: review
 #       pr: ${{ github.event.pull_request.number }}
 #       app-token: ${{ steps.app.outputs.token }}
 #
-# and the source checkout, the deploy key and the CROSSREV_SOURCE_KEY secret all
-# disappear — which is one of the better reasons to extract it.
-name: crossrev
+# The SHA is the pin and the tag is a comment: `git tag -f` plus a force push
+# moves a tag, and the failure mode is a repository whose review behaviour
+# changes with nothing in its own history to show for it. `crossrev init`
+# generates the pinned form; the floating @v0 in the README is a human choosing
+# convenience knowingly.
+name: CrossRev
 description: Review a pull request with one model and resolve the findings with another.
 author: carlosboeing
 
@@ -47,6 +41,22 @@ inputs:
 runs:
   using: composite
   steps:
+    # A consumer's workflow cannot forget this, which is the only reason it
+    # lives here rather than in each template. Installation stays the runner's
+    # job — this fails naming the missing dependency rather than mid-leg with a
+    # `command not found` three steps later.
+    #
+    # GH_TOKEN is set because preflight verifies gh is authenticated, not just
+    # installed: an unauthenticated gh fails at the first API call instead.
+    - shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.app-token }}
+      run: |
+        set -euo pipefail
+        source "${{ github.action_path }}/lib/ui.sh"
+        source "${{ github.action_path }}/lib/preflight.sh"
+        preflight_check
+
     - shell: bash
       env:
         GH_TOKEN: ${{ inputs.app-token }}

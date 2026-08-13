@@ -40,7 +40,7 @@ Two adapter facts fell out of that testing. **The schema flags differ in shape**
 ## Install
 
 ```bash
-npx skills@latest add carlosboeing/claude-code-resources --skill pr-review --skill pr-resolve
+npx skills@latest add carlosboeing/crossrev
 ```
 
 Normally you don't invoke it yourself — `crossrev review --pr N` does.

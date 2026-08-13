@@ -23,11 +23,10 @@ It runs on the AI subscriptions you already have rather than per-token API keys.
 One command, from nothing:
 
 ```bash
-gh api repos/carlosboeing/claude-code-resources/contents/tools/crossrev/bootstrap.sh \
-  -H "Accept: application/vnd.github.raw" | bash
+curl -fsSL https://raw.githubusercontent.com/carlosboeing/crossrev/main/bootstrap.sh | bash
 ```
 
-`gh api` rather than `curl` because the repository is private, and `curl` cannot reach the credentials `gh` and `git` already hold — it has to be handed a token, which then sits in your shell history and in the process table for every local process to read. `gh` needs no such handover, and crossrev requires it anyway. **When the repository goes public this becomes a plain `curl` with no token and no `gh`**, and nothing inside the script changes.
+No token, no `gh`, no credential of any kind — the repository is public, so raw.githubusercontent serves the file anonymously.
 
 That fetches [`bootstrap.sh`](bootstrap.sh), which clones the repository somewhere durable (`~/.local/share/crossrev` by default), then hands to `install.sh`. Pass `--ref <tag>` to pin a known revision, `--dir` to clone elsewhere.
 
@@ -36,7 +35,7 @@ That fetches [`bootstrap.sh`](bootstrap.sh), which clones the repository somewhe
 Already have the repository? Skip the bootstrap entirely:
 
 ```bash
-tools/crossrev/install.sh
+./install.sh
 ```
 
 That puts `crossrev` on your PATH by symlinking it into `~/.local/bin`, and checks what's installed. `--yes` runs it non-interactively; `--bin-dir` puts it somewhere else.

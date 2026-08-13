@@ -14,6 +14,7 @@ _install_hint() {
         jq)     echo "brew install jq" ;;
         yq)     echo "brew install yq" ;;
         git)    echo "xcode-select --install" ;;
+        openssl) echo "already present on macOS; otherwise brew install openssl" ;;
         claude) echo "https://claude.com/claude-code" ;;
         codex)  echo "npm install -g @openai/codex" ;;
         agy)    echo "https://antigravity.google" ;;
@@ -26,6 +27,7 @@ _install_hint() {
         jq)     echo "https://jqlang.github.io/jq/download/" ;;
         yq)     echo "https://github.com/mikefarah/yq#install" ;;
         git)    echo "your package manager, e.g. apt install git" ;;
+        openssl) echo "your package manager, e.g. apt install openssl" ;;
         claude) echo "https://claude.com/claude-code" ;;
         codex)  echo "npm install -g @openai/codex" ;;
         agy)    echo "https://antigravity.google" ;;
@@ -53,8 +55,12 @@ _tool_version() {
 # Check the tools a given command actually needs.
 #
 # $1 is the requirement set:
-#   core     git, gh (authenticated), jq, yq
+#   core     git, gh (authenticated), jq, yq, openssl
 #   harness  core plus at least one of claude, codex, kimi
+#
+# openssl is core because the leg path reaches it: credentials.sh decodes a
+# restored credential with it, and auth.sh signs the App JWT with it. A runner
+# without it fails mid-leg on `command not found`, a long way from the cause.
 #
 # Prints a report and returns non-zero if anything required is missing, so the
 # caller decides whether that is fatal. install.sh reports; a leg dies.
@@ -65,7 +71,7 @@ preflight_check() {
   ui_section "Requirements"
 
   local t v
-  for t in git gh jq yq; do
+  for t in git gh jq yq openssl; do
     if v="$(_tool_version "$t")"; then
       if [[ "$t" == "gh" ]]; then
         # Installed is not the same as usable. Rule 5: do not report success for

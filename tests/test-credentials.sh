@@ -166,5 +166,22 @@ has "and even its own raw credential, already written to CODEX_HOME" \
 has "agy sheds every credential, holding none of them" "$(strip_for agy)" "CLAUDE_CODE_OAUTH_TOKEN"
 has "including the codex one"                    "$(strip_for agy)" "CROSSREV_CODEX_AUTH"
 
+# openssl belongs to the core requirement set, not to the incidental one.
+#
+# This suite is the natural home for the assertion because this suite covers the
+# code that needs it: the decode below runs on the leg path, so a runner without
+# openssl fails mid-leg on `command not found` rather than at the preflight that
+# exists to catch exactly that.
+grep -qE '^\s*for t in .*\bopenssl\b' "$HERE/../lib/preflight.sh" \
+  && ok "openssl is in preflight's core requirement set" \
+  || notok "openssl is in preflight's core requirement set" \
+           "a core loop naming openssl" \
+           "$(grep -nE '^\s*for t in ' "$HERE/../lib/preflight.sh")"
+
+grep -q 'openssl base64 -d' "$HERE/../lib/credentials.sh" \
+  && ok "and the leg-path decode is what requires it" \
+  || notok "and the leg-path decode is what requires it" \
+           "an openssl decode in credentials.sh" "not found"
+
 printf '\n  %d passed, %d failed\n' "$pass" "$fail"
 (( fail == 0 ))

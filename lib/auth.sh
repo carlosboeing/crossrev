@@ -446,7 +446,7 @@ auth_login() {
   local manifest
   manifest="$(jq -cn \
     --arg name "$app_name" \
-    --arg url "https://github.com/carlosboeing/claude-code-resources" \
+    --arg url "https://github.com/carlosboeing/crossrev" \
     --arg redirect "$redirect" \
     --argjson perms "$(_auth_role_permissions "$role")" \
     '{

@@ -41,7 +41,7 @@ The one outward thing the skill does own is changing code in the working tree. T
 ## Install
 
 ```bash
-npx skills@latest add carlosboeing/claude-code-resources --skill pr-review --skill pr-resolve
+npx skills@latest add carlosboeing/crossrev
 ```
 
 Normally you don't invoke it yourself — `crossrev resolve --pr N` does.
