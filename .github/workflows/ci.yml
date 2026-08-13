@@ -1,0 +1,52 @@
+# The offline suite and the linter, on a runner.
+#
+# Both commands are the ones a contributor runs locally, unchanged. Nothing here
+# needs a network, a model, a GitHub App or a pull request — the suite stubs its
+# own `gh` and harnesses.
+#
+# The dependency step is explicit rather than trusted, for one specific reason:
+# `scripts/lint.sh` SKIPS shellcheck with a note when it is not installed and
+# still prints `lint clean`. A runner without shellcheck would therefore report a
+# green lint that never linted anything. The check below fails instead.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install and verify dependencies
+        run: |
+          set -euo pipefail
+          # jq, yq and shellcheck are all preinstalled on ubuntu-latest today.
+          # Installing anyway costs seconds and survives an image change.
+          command -v jq         >/dev/null || sudo apt-get install -y --no-install-recommends jq
+          command -v yq         >/dev/null || sudo snap install yq
+          command -v shellcheck >/dev/null || sudo apt-get install -y --no-install-recommends shellcheck
+
+          # Assert rather than assume. A missing shellcheck reads as clean.
+          for t in bash git jq yq shellcheck openssl; do
+            command -v "$t" >/dev/null || { echo "::error::$t is missing"; exit 1; }
+          done
+          printf '%s\n' "bash $BASH_VERSION" "$(jq --version)" "$(yq --version)" \
+            "$(shellcheck --version | sed -n 's/^version: /shellcheck /p')" \
+            "$(openssl version)"
+
+      - name: Lint
+        run: bash scripts/lint.sh
+
+      - name: Tests
+        run: bash tests/run.sh

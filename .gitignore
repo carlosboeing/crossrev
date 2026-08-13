@@ -1,0 +1,11 @@
+.DS_Store
+*.swp
+
+# The private workbench is an independent clone nested here. This line is the
+# strongest layer of the public/private gate: `git add -A` at this root can
+# never sweep a workbench file into a public commit.
+.workbench/
+
+# Local git worktrees, per the shared convention.
+.worktrees/
+.claude/worktrees/
