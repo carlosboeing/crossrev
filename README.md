@@ -89,7 +89,7 @@ crossrev doctor
 | `crossrev auth rotate` | Built. Guided, because GitHub has no API to generate an App key. It proves the new key works before replacing the old one |
 | `crossrev auth refresh` | Built. The refresher job's only command, and the only thing that writes a rotating harness credential |
 
-**Exercised offline, and run against real pull requests locally.** Every command above is asserted against a stubbed `gh` boundary — 842 assertions, no network, no model, no PR — which catches the deterministic half, the half that fails silently. Live local runs cover the other half: the loop has reviewed real pull requests, converged on its own, found real defects in the branch under review, and pushed back on findings that did not hold up. **No repository has had the workflows installed yet**, so automated mode is still unproven end to end.
+**Exercised offline, and run against real pull requests locally.** Every command above is asserted against a stubbed `gh` boundary — 849 assertions, no network, no model, no PR — which catches the deterministic half, the half that fails silently. Live local runs cover the other half: the loop has reviewed real pull requests, converged on its own, found real defects in the branch under review, and pushed back on findings that did not hold up. **No repository has had the workflows installed yet**, so automated mode is still unproven end to end.
 
 ## Using it
 
@@ -265,7 +265,7 @@ tests/           the stubbed-gh suite. `tests/run.sh` runs all of it
 ## Working on it
 
 ```bash
-tests/run.sh      # 842 offline assertions, no network, no model
+tests/run.sh      # 849 offline assertions, no network, no model
 scripts/lint.sh   # syntax plus shellcheck -S warning
 ```
 
