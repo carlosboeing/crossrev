@@ -14,13 +14,15 @@ Installing CrossRev today means cloning it. `bootstrap.sh` clones somewhere dura
 
 Two things push against clone-only distribution.
 
-**Trying the tool costs a clone.** Someone who wants to see what a review leg does has to pick a directory, run a bootstrap script piped from the internet, and accept a PATH change. `npx crossrev` is one line and leaves nothing behind.
+**Trying the tool costs a clone.** Someone who wants to see what a review leg does has to pick a directory, run a bootstrap script piped from the internet, and accept a PATH change. `npx crossrev-ai` is one line and leaves nothing behind.
 
-**The name is unclaimed and unscoped names are first-come.** `crossrev` was free on the registry. Claiming it is cheap now and impossible later if somebody else takes it.
+**A package name is worth claiming early.** Of four comparable tools surveyed, three carry permanent name problems from not doing so.
 
 ## Decision
 
-**CrossRev is published to npm as `crossrev`, and the package serves the local path only.**
+**CrossRev is published to npm as `crossrev-ai`, and the package serves the local path only.**
+
+**The installed command is `crossrev`.** The `bin` field decides what lands on PATH, so the package identifier and the command are allowed to differ, and here they must — see the naming section below. Everything a user types after installing is unchanged.
 
 The package ships the five things the CLI reads at runtime and nothing else: `bin/`, `lib/`, `schemas/`, `skills/`, `templates/` and the `VERSION` file. A `files` allowlist in `package.json` names them explicitly. 34 files, about 142 kB.
 
@@ -34,11 +36,23 @@ The package ships the five things the CLI reads at runtime and nothing else: `bi
 
 **`os` is `["darwin", "linux"]`.** A bash tool depending on `git`, `gh`, `jq`, `yq` and `openssl` should fail at install time on Windows rather than install cleanly and break at first run. The field is per-version and costs nothing to lift later.
 
+## The name, and why it is not `crossrev`
+
+**npm refuses `crossrev`.** Publishing it returns a 403: *"Package name too similar to existing package cross-env"*. npm's anti-typosquatting check compares names with periods, hyphens and underscores removed, so `cross-env` normalises to `crossenv`, which is two character substitutions from `crossrev`. The neighbourhood is guarded for good reason — `crossenv` was itself a credential-stealing typosquat of `cross-env` in 2017.
+
+The check is automated and has no documented appeal, so this is a constraint rather than a preference.
+
+`crossrev-ai` normalises to `crossrevai` and clears it. The suffix follows an established pattern: headroom ships its CLI as `headroom-ai` while the command stays `headroom`.
+
+**This is a real cost, recorded rather than glossed.** `npm install crossrev` does not work and cannot be made to work — an unscoped name has no alias mechanism. Anyone who guesses the short form gets nothing. The ADR's earlier draft argued that package, command, repository and label namespace all reading `crossrev` was worth more than any route consolidation. That alignment is now broken in exactly one place, and only for npm: **Homebrew, GitHub Releases and the git remote are unrestricted and keep `crossrev`.**
+
 ## Options considered
 
 **Staying clone-only.** The status quo works and 0009 chose it deliberately. What changed is not the `init` constraint — that is intact — but the recognition that the local path and automated mode have different install needs. The local path never needed a `.git`; it was carried along by a decision made for `init`.
 
-**A scoped `@carlosboeing/crossrev`.** Always available, immune to name races, and it costs the short `npx crossrev`. Rejected because the unscoped name was free, and a scope can still be added later for per-platform binary packages without giving up the flat name.
+**A scoped `@carlosboeing/crossrev`.** npm's own suggested remedy, and certain to work. Rejected because a personal scope ages badly if the project outgrows its author, and because it costs the short `npx` form just as `crossrev-ai` does — so it pays the same price for a worse name. A scope is still the right shape later for per-platform binary packages, where `@crossrev/cli-darwin-arm64` and siblings sit under an organisation rather than a person.
+
+**A different unscoped name such as `crossrev-cli`.** Keeps the invocation short, but recreates the package-versus-command mismatch that measurably bites other tools, and there was no way to test whether it clears the filter without permanently claiming whatever name succeeded.
 
 **Publishing a placeholder to reserve the name.** The registry discourages empty placeholder packages, and a stub that prints "go clone the repo" is worse than the working CLI it would stand in for. The package claims the name by being real.
 
