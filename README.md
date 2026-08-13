@@ -89,7 +89,7 @@ crossrev doctor
 | `crossrev auth rotate` | Built. Guided, because GitHub has no API to generate an App key. It proves the new key works before replacing the old one |
 | `crossrev auth refresh` | Built. The refresher job's only command, and the only thing that writes a rotating harness credential |
 
-**Exercised offline, and run against real pull requests locally.** Every command above is asserted against a stubbed `gh` boundary — 835 assertions, no network, no model, no PR — which catches the deterministic half, the half that fails silently. Three live local runs cover the other half, all against pull requests in the repository CrossRev was extracted from. PR 3 converged on pass 3 against three planted defects. PR 4 converged on pass 2 while reviewing CrossRev's own rename, where the reviewer found two real defects in the change under review and pushed back on a third. PR 5 ran all three passes over CrossRev's own presentation change and found ten findings, nine of them real defects in the branch under review — including one in the token accounting the same branch had just added. **No repository has had the workflows installed yet**, so automated mode is still unproven end to end.
+**Exercised offline, and run against real pull requests locally.** Every command above is asserted against a stubbed `gh` boundary — 842 assertions, no network, no model, no PR — which catches the deterministic half, the half that fails silently. Live local runs cover the other half: the loop has reviewed real pull requests, converged on its own, found real defects in the branch under review, and pushed back on findings that did not hold up. **No repository has had the workflows installed yet**, so automated mode is still unproven end to end.
 
 ## Using it
 
