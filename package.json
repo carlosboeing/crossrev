@@ -1,5 +1,5 @@
 {
-  "name": "crossrev",
+  "name": "crossrev-ai",
   "version": "0.1.0",
   "description": "A cross-model pull request review loop. One model reviews, a second verifies and replies in-thread, then the first looks again. Runs on the AI subscriptions you already have.",
   "keywords": [

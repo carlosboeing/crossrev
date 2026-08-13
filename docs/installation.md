@@ -29,9 +29,11 @@ Pass `--dir` and it looks nowhere else. An explicit destination is an instructio
 ## From npm, to try it without cloning
 
 ```bash
-npx crossrev --pr 42        # nothing installed, nothing left behind
-npm install -g crossrev     # or put it on your PATH the npm way
+npx crossrev-ai --pr 42        # nothing installed, nothing left behind
+npm install -g crossrev-ai     # or put it on your PATH the npm way
 ```
+
+**The package is `crossrev-ai`; the command it installs is `crossrev`.** npm refuses the plain name as too similar to `cross-env`, a check with no appeal, so the suffix is a constraint rather than a choice ([ADR 0011](adrs/0011-npm-as-a-second-install-route.md)). `npm install crossrev` will not find anything. Every other route — Homebrew, releases, the clone — uses the plain name, and what you type after installing is `crossrev` in all of them.
 
 The package is the same bash the clone runs — `bin/`, `lib/`, `schemas/`, `skills/`, `templates/` and the `VERSION` file, with no build step and no dependencies. It needs Node only to install; nothing about the tool runs on it. macOS and Linux only, declared in the manifest, so Windows fails at install rather than at first run.
 
@@ -39,7 +41,7 @@ The package is the same bash the clone runs — `bin/`, `lib/`, `schemas/`, `ski
 
 So: **npm is the local path, a clone is either path.** If you're setting up automated mode, use the bootstrap above. Full reasoning in [ADR 0011](adrs/0011-npm-as-a-second-install-route.md).
 
-Updating is `npm update -g crossrev`, which is the one thing npm does better than the clone — see [the checkout is the installation](#the-checkout-is-the-installation) for why the clone has no update command yet.
+Updating is `npm update -g crossrev-ai`, which is the one thing npm does better than the clone — see [the checkout is the installation](#the-checkout-is-the-installation) for why the clone has no update command yet.
 
 ## Installing from a checkout you already have
 

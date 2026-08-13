@@ -9,3 +9,7 @@
 # Local git worktrees, per the shared convention.
 .worktrees/
 .claude/worktrees/
+
+# package.json exists for npm distribution only. There is no dependency tree
+# to lock, and the repo has no package manager step.
+package-lock.json
