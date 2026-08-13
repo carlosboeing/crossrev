@@ -1,0 +1,35 @@
+# Roadmap
+
+Forward view of CrossRev: what's in flight, what's next, what's deliberately deferred, and what shipped. Single source of truth for "what's next". Decisions of record live in [`adrs/`](adrs/).
+
+## In flight
+
+- **Prove automated mode end to end.** This is the `v1.0.0` bar and the reason the current tag is `v0`. Every command is covered by the offline suite and the local path has run against real pull requests, but **no repository has had the generated workflows installed yet**. What that proof has to establish: a real event chains one leg to the next through the label it applies, the composite action resolves and runs from a consuming repository, a credential restored from a secret authenticates, the watchdog catches a dropped event, and `yq` is genuinely present on GitHub's runner images. Until then, automated mode is built and unproven, and the docs say so wherever it comes up.
+
+## Next actions
+
+- **`crossrev update`.** Today the update is `git pull` in the checkout and the uninstall is deleting it, which [installation.md](installation.md) states plainly because pretending otherwise is the failure mode. A real command would handle the pull, report what changed, and tell you when a config version has moved.
+- **`crossrev stop` and `crossrev resume`.** `crossrev/stop` is the loop's only human-facing kill switch. It is read in five places and written in one — the resolve leg applying it to itself after an escalation. So CrossRev can pull its own brake and you cannot, unless you reach for the GitHub label picker or a raw API call. The moment you need it is a leg mid-flight pushing commits, which is the moment you are least able to look up the syntax.
+- **Record why a leg stopped, in the marker.** A halt today is legible from the label and the comment prose, and `crossrev status` has to infer some of it. The reason belongs in the marker beside everything else the pass recorded, so `status` renders a fact rather than a reconstruction.
+- **Kimi as a local harness.** Kimi is reachable today as a named endpoint on the Claude adapter. A native `lib/adapters/kimi.sh` would make the two legs different binaries, which removes the endpoint-variable hazard entirely, and it gains a skills-directory flag. What it costs, measured rather than assumed: no schema flag, no effort flag, and stdout that mixes narration and a resume hint around the payload with no way to isolate the answer. Local only either way — its credential is a 15-minute OAuth token.
+- **Comparable cost telemetry.** Each leg reports a duration and one token total, which is not enough to answer the question an operator actually has: how expensive was that leg, and how does it compare against another harness, model or effort level? What is needed is the usage each harness reported, enough cache context to explain an otherwise alarming total, and an API-equivalent estimate on one economic frame across harnesses — labelled as an equivalence rather than as an amount charged, since a subscription-backed run inside its included usage is invoiced nothing.
+- **Fix the pass label accumulating instead of moving.** Each pass adds `crossrev/pass-N` without removing `crossrev/pass-(N-1)`, so a three-pass pull request carries three grey pills where it should carry one. Tracked at *(issue link to follow)*.
+
+## Future considerations
+
+Everything here is deferred to the `v1.0.0` conversation, and all of it is a door deliberately kept open rather than a plan.
+
+- **Revisit distribution.** `v0` installs by cloning, because `crossrev init` reads its action pin from `git rev-parse HEAD` and any route producing no `.git` leaves `init` unable to run. Going public and retiring the source-checkout delivery mode ([ADR 0009](adrs/0009-delivery-via-sha-pinned-composite-action.md)) removed the two reasons a tarball, a package or a formula was awkward, so the question is genuinely open again — it now depends only on giving `init` another way to learn its pin.
+- **A compiled binary behind the same entrypoint.** `bin/crossrev` is the permanent entrypoint: `install.sh`, `action.yml`, the preflight and every doc go through it, so a compiled binary slots in behind it or replaces it under the same name with no consumer seeing the difference. The rewrite boundary is behavioural rather than structural — the offline suite drives the tool only through that entrypoint, stubbed `gh`, stubbed harness CLIs and throwaway git repositories, so it asserts what the tool does and never how it is written. The compatibility contract is four things: the CLI surface (commands, flags, environment variables, exit codes), the two JSON schemas, the marker and label contract, and the label namespace. The implementation language is not one of them.
+- **Package the skills for harness plugin systems.** `skills/pr-review/` and `skills/pr-resolve/` are plain `SKILL.md` files, which is the packaging-agnostic source form. A plugin bundle or a marketplace listing is a later packaging of the same files; nothing in their content ties them to the current install path.
+- **A second repository, on a trigger rather than a schedule.** `v0` is one repository by choice. The trigger for splitting is a second artifact with its own release cadence — a compiled binary versioned independently of the skills, or a plugin package with its own publishing cycle. Splitting is cheap and proven: this repository was extracted from a larger one with `git subtree split`, and joins work the other direction. Premature separation is its own cost.
+- **More reviewers, with different lenses.** The name encodes the mechanism rather than a count precisely so this survives ([ADR 0010](adrs/0010-name-crossrev.md)). Nothing is designed yet.
+
+## Open questions
+
+- **Does the offline suite need a second runner family?** CI runs on Ubuntu only. The tool is used on macOS daily and `init` renders workflows for both runner families, so a macOS job would catch a BSD-versus-GNU divergence that the Ubuntu job cannot. Worth doing when something breaks that way, rather than before.
+- **Should `bootstrap.sh` be shellchecked?** It is syntax-checked but absent from the shellcheck list, which is the one entry script a stranger runs first.
+
+## Recently shipped
+
+- **v0.1.0 (2026-08-13)** — the first release, and the extraction into this repository. The tool was renamed from its working title, delivery moved to a public composite action pinned by SHA, the source-checkout-plus-deploy-key mode was retired, and the two entry scripts got the tests they had never had. Details in [`CHANGELOG.md`](../CHANGELOG.md).
