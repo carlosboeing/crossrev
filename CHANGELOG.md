@@ -6,6 +6,8 @@ All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepa
 
 ### Fixed
 
+- **Generated GitHub App display names take the product name** ([#4](https://github.com/carlosboeing/crossrev/issues/4)). `crossrev auth login` named the Apps it creates `crossrev-<owner>` and `crossrev-refresh-<owner>` — lowercase, in the one place the product is named outside a terminal, sitting in an organisation's installed Apps list beside `Claude` and `Vercel`. They are now `CrossRev <owner>` and `CrossRev Refresh <owner>`, per [ADR 0010](docs/adrs/0010-name-crossrev.md). **The slug is unchanged**, because GitHub derives it by lowercasing and turning spaces into hyphens — which matters, since `state_trusted_author` matches that slug literally and a change would make automated mode trust an author that does not exist. A new `tests/test-auth.sh` asserts both halves so the name and the slug cannot drift apart. Existing Apps are unaffected; renaming one is a single field in its settings.
+
 - **The pass label moves instead of accumulating** ([#2](https://github.com/carlosboeing/crossrev/issues/2)). Each pass added `crossrev/pass-N` without taking the previous one off, so a three-pass pull request carried three grey pills and the reader had to scan for the highest. The pass label is mutually exclusive like the four state labels beside it, and is now treated that way. Which labels to take off is read from the pull request rather than counted down from the cap, so a new revision that resets the counter to 1 sheds the higher labels a finished cycle left behind. A display defect rather than a state one — the markers were always correct and `crossrev status` was never affected.
 
 ## [0.1.0] — 2026-08-13

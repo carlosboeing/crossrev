@@ -81,10 +81,23 @@ _auth_role_key_secret() {
   esac
 }
 
+# The name is display text and takes the product name (ADR 0010): it is what a
+# person reads in an organisation's installed Apps list, beside `Claude` and
+# `Vercel`, and it is in none of the categories that ADR keeps lowercase.
+#
+# The spaces are safe, and that is load-bearing rather than incidental. GitHub
+# derives the slug by lowercasing and turning spaces into hyphens, so every
+# spelling here yields the slug the lowercase form did — and the slug is what
+# `state_trusted_author` matches literally. Verified against `GET /app` on a live
+# App renamed through all four spellings; asserted offline in tests/test-auth.sh
+# so it cannot drift.
+#
+# The owner half keeps its own casing. That is an identity GitHub chose, not
+# prose CrossRev gets to restyle.
 _auth_role_default_name() {
   case "$1" in
-    loop)      printf 'crossrev-%s' "$2" ;;
-    refresher) printf 'crossrev-refresh-%s' "$2" ;;
+    loop)      printf 'CrossRev %s' "$2" ;;
+    refresher) printf 'CrossRev Refresh %s' "$2" ;;
   esac
 }
 
