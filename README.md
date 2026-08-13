@@ -49,14 +49,12 @@ That also **offers** to install `pr-review` and `pr-resolve` for your harnesses,
 By hand, it is:
 
 ```bash
-npx skills@latest add ./tools/crossrev --skill pr-review --skill pr-resolve
+npx skills@latest add carlosboeing/crossrev
 ```
 
-Three details found by running it, each of which fails by reporting nothing rather than erroring:
+There are no `--skill` filters to pass. `skills/` holds exactly `pr-review` and `pr-resolve`, so naming them selects everything and can only go stale. A local path works the same way as the repository shorthand.
 
-- **Point it at `tools/crossrev`, not the repo root.** From the root it finds the six standalone skills in `skills/` and does not walk into `tools/crossrev/skills/`.
-- **One name per `--skill` flag.** A comma-separated list matches nothing, and it reports "No matching skills found" rather than complaining about the syntax.
-- **It goes non-interactive when an agent is driving it**, printing "Agent detected". In that mode nobody is asked anything and the scope defaults to project — which, run from inside the clone, means into the clone: present in the repository you were only installing from, absent everywhere you work. Pass `--global` explicitly whenever it is not a human answering.
+One detail is worth knowing, because it fails by reporting nothing rather than erroring: **the CLI goes non-interactive when an agent is driving it**, printing "Agent detected". In that mode nobody is asked anything and the scope defaults to project — which, run from inside the clone, means into the clone: present in the repository you were only installing from, absent everywhere you work. Pass `--global` explicitly whenever it is not a human answering.
 
 Then check everything's in place:
 
@@ -93,7 +91,7 @@ crossrev doctor
 | `crossrev auth rotate` | Built. Guided, because GitHub has no API to generate an App key. It proves the new key works before replacing the old one |
 | `crossrev auth refresh` | Built. The refresher job's only command, and the only thing that writes a rotating harness credential |
 
-**Exercised offline, and run against real pull requests locally.** Every command above is asserted against a stubbed `gh` boundary — 815 assertions, no network, no model, no PR — which catches the deterministic half, the half that fails silently. Three live local runs cover the other half. PR 3 converged on pass 3 against three planted defects. PR 4 converged on pass 2 while reviewing CrossRev's own rename, where the reviewer found two real defects in the change under review and pushed back on a third. PR 5 ran all three passes over CrossRev's own presentation change and found ten findings, nine of them real defects in the branch under review — including one in the token accounting the same branch had just added. **No repository has had the workflows installed yet**, so automated mode is still unproven end to end.
+**Exercised offline, and run against real pull requests locally.** Every command above is asserted against a stubbed `gh` boundary — 835 assertions, no network, no model, no PR — which catches the deterministic half, the half that fails silently. Three live local runs cover the other half, all against pull requests in the repository CrossRev was extracted from. PR 3 converged on pass 3 against three planted defects. PR 4 converged on pass 2 while reviewing CrossRev's own rename, where the reviewer found two real defects in the change under review and pushed back on a third. PR 5 ran all three passes over CrossRev's own presentation change and found ten findings, nine of them real defects in the branch under review — including one in the token accounting the same branch had just added. **No repository has had the workflows installed yet**, so automated mode is still unproven end to end.
 
 ## Using it
 
@@ -175,7 +173,7 @@ That workflow is also the only place CrossRev needs `Secrets: write`, which is w
 
 ```bash
 mkdir -p ~/.config/crossrev
-cp tools/crossrev/templates/operator-config.yml ~/.config/crossrev/config.yml
+cp templates/operator-config.yml ~/.config/crossrev/config.yml   # from your checkout
 ```
 
 Endpoint definitions merge by name with the repository's, and this file wins. So a repo can declare a public endpoint while you point the same name at your own instance, with no change to the repo. Tokens stay out of both files: `token_env` names a variable, and its value comes from your shell locally or a repository secret in CI.
@@ -230,21 +228,20 @@ Contents, Issues and Pull requests, all at write, and nothing else — no Secret
 
 `issues:write` looks surprising and isn't trimmable: **GitHub models pull request labels under the Issues API**, and the whole loop is label-driven. It also covers filing issues for deferred findings.
 
-## Design
+## Documentation
 
-The full design and the implementation plan live in this repo's working memory:
-
-- [Design](../../docs/2-design/2026-08-10-cross-model-pr-review-loop-design.md)
-- [Plan](../../docs/3-plans/2026-08-10-cross-model-pr-review-loop-plan.md)
-- [Extraction runbook](../../docs/guides/guide-extracting-crossrev.md) — how this becomes its own repository, if it does
+- [Documentation index](docs/README.md) — installation, usage, configuration, credentials, troubleshooting
+- [Architecture](docs/architecture.md) — the two legs, the orchestrator, the adapters, the marker and label contract
+- [Decision records](docs/adrs/) — why the loop is cross-model, why the pull request is the state, and how delivery is pinned
+- [Roadmap](docs/ROADMAP.md) — what's next, and what's deliberately deferred
 
 ## Layout
 
-The contents of this directory are laid out as the standalone repository it may later become, so extraction is `git subtree split -P tools/crossrev` rather than a reorganisation.
+The repository root is the tool. `bin/crossrev` reads its libraries, skills and templates from alongside itself, so a checkout is a working installation.
 
 ```
-action.yml       composite action manifest, unusable until crossrev is public
-bin/crossrev      entrypoint
+action.yml       the composite action consuming repositories call
+bin/crossrev     entrypoint
 lib/             sourced by bin/crossrev
   ui.sh            output voice — six rules, enforced by the helpers' shapes
   preflight.sh     dependency checks that name the fix, not just the gap
@@ -270,8 +267,8 @@ tests/           the stubbed-gh suite. `tests/run.sh` runs all of it
 ## Working on it
 
 ```bash
-tools/crossrev/tests/run.sh      # 815 offline assertions, no network, no model
-tools/crossrev/scripts/lint.sh   # syntax plus shellcheck -S warning
+tests/run.sh      # 835 offline assertions, no network, no model
+scripts/lint.sh   # syntax plus shellcheck -S warning
 ```
 
 Both are offline and take seconds. The suite stubs `gh` and `claude` onto PATH and builds throwaway git repositories with real histories and real bare origins, so the assertions are about what CrossRev actually did rather than what it printed. `tests/stub/codex` is a deliberate tripwire: it exits loudly instead of running, because the no-config default names codex as reviewer and a fixture whose config failed to load would otherwise reach the real CLI and make a real billed call.
