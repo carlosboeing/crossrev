@@ -1,0 +1,73 @@
+# Publish the package to npm when a version tag is pushed.
+#
+# Authentication is trusted publishing: GitHub mints a short-lived OIDC token
+# that npm verifies against a publisher configured on the package. There is no
+# npm token in this repository and none on anybody's laptop, which is the point
+# — a stored publish credential is the thing worth not having.
+#
+# The suite and linter run first. They are offline and take under two minutes,
+# and a published version cannot be recalled: npm's unpublish policy is
+# conditional and cannot be undone. Cheap gate, permanent mistake.
+name: Publish to npm
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+  id-token: write # required for OIDC; without it npm falls back and fails
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install and verify dependencies
+        run: |
+          set -euo pipefail
+          command -v jq         >/dev/null || sudo apt-get install -y --no-install-recommends jq
+          command -v yq         >/dev/null || sudo snap install yq
+          command -v shellcheck >/dev/null || sudo apt-get install -y --no-install-recommends shellcheck
+
+          # Assert rather than assume. A missing shellcheck reads as clean.
+          for t in bash git jq yq shellcheck openssl; do
+            command -v "$t" >/dev/null || { echo "::error::$t is missing"; exit 1; }
+          done
+
+      - name: Lint
+        run: bash scripts/lint.sh
+
+      - name: Tests
+        run: bash tests/run.sh
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+          package-manager-cache: false # never cache in a release build
+
+      - name: Check the tag against the version
+        run: |
+          set -euo pipefail
+          # scripts/lint.sh already proved package.json and VERSION agree. This
+          # covers the third copy: the tag someone typed by hand.
+          tag="${GITHUB_REF_NAME#v}"
+          pkg="$(jq -r .version package.json)"
+          [[ "$tag" == "$pkg" ]] || {
+            echo "::error::tag $GITHUB_REF_NAME does not match package.json version $pkg"
+            exit 1
+          }
+          echo "publishing $pkg as $GITHUB_REF_NAME"
+
+      - name: Show what will ship
+        run: npm pack --dry-run
+
+      - name: Publish
+        # Trusted publishing needs npm 11.5.1 or newer. Node 24 ships one, but a
+        # silent fallback to token auth fails confusingly, so print it.
+        run: |
+          set -euo pipefail
+          npm --version
+          npm publish

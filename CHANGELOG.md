@@ -4,6 +4,11 @@ All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepa
 
 ## [Unreleased]
 
+### Added
+
+- **CrossRev installs from npm** ([ADR 0011](docs/adrs/0011-npm-as-a-second-install-route.md)). `npx crossrev --pr 42` runs the local loop without cloning anything, and `npm install -g crossrev` is a second way onto your PATH. The package is the same bash the clone runs, with no build step and no dependencies — Node is needed to install it and for nothing after that. macOS and Linux only, declared in the manifest so Windows fails at install rather than at first run. **`crossrev init` still needs a clone**, because it pins the composite action to a SHA read from CrossRev's own git checkout and an npm package has none; it stops with an error naming the cause rather than writing a workflow pinned to nothing. Publishing runs on a tag through trusted publishing, so no npm token exists in this repository or on a laptop.
+- **The linter fails when the version drifts.** `package.json` and the `VERSION` file both carry the version, because npm reads one and `crossrev --version` reads the other. `scripts/lint.sh` now compares them, and the release workflow compares the tag against both. The failure it prevents is quiet: a published package whose own `--version` disagrees with the registry it came from.
+
 ### Fixed
 
 - **Generated GitHub App display names take the product name** ([#4](https://github.com/carlosboeing/crossrev/issues/4)). `crossrev auth login` named the Apps it creates `crossrev-<owner>` and `crossrev-refresh-<owner>` — lowercase, in the one place the product is named outside a terminal, sitting in an organisation's installed Apps list beside `Claude` and `Vercel`. They are now `CrossRev <owner>` and `CrossRev Refresh <owner>`, per [ADR 0010](docs/adrs/0010-name-crossrev.md). **The slug is unchanged**, because GitHub derives it by lowercasing and turning spaces into hyphens — which matters, since `state_trusted_author` matches that slug literally and a change would make automated mode trust an author that does not exist. A new `tests/test-auth.sh` asserts both halves so the name and the slug cannot drift apart. Existing Apps are unaffected; renaming one is a single field in its settings.
