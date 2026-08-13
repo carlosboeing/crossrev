@@ -11,21 +11,12 @@
 # tool does. Anything it would have to explain twice belongs in install.sh, which
 # runs immediately after it and has the real one.
 #
-# **How it gets here does not change what it does.** Today the repository is
-# private, so it is fetched with `gh api`, which uses the authentication crossrev
-# already requires rather than a credential anyone has to be given:
+# **It is fetched, not cloned.** The repository is public, so raw.githubusercontent
+# serves this file anonymously — no token, no gh, no credential of any kind:
 #
-#   gh api "repos/carlosboeing/claude-code-resources/contents/tools/crossrev/bootstrap.sh" \
-#     -H "Accept: application/vnd.github.raw" | bash
+#   curl -fsSL https://raw.githubusercontent.com/carlosboeing/crossrev/main/bootstrap.sh | bash
 #
-# When the repository is public, raw.githubusercontent.com starts serving it
-# anonymously and the incantation becomes a plain curl with no token and no gh:
-#
-#   curl -fsSL https://raw.githubusercontent.com/<owner>/<repo>/main/tools/crossrev/bootstrap.sh | bash
-#
-# Nothing in this file changes between those two. It is a script fetched by
-# different means, not two installers — which is the point: single-shot now, and
-# still single-shot the day the repository goes public.
+# Everything below assumes nothing but bash, git and coreutils.
 #
 # **Every step it takes is optional.** Someone who already has a checkout, or who
 # cloned it by hand, should not be made to clone again — so it looks for an
@@ -33,9 +24,7 @@
 
 set -euo pipefail
 
-REPO="${CROSSREV_REPO:-carlosboeing/claude-code-resources}"
-# Named for the tool rather than the repository it currently lives in, so the
-# path survives the extraction into a repository of its own.
+REPO="${CROSSREV_REPO:-carlosboeing/crossrev}"
 DEST="${CROSSREV_SRC_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/crossrev}"
 # Empty means the repository's default branch. A tag or SHA here is how you get
 # a reproducible install — "what did I install?" has an answer only if the ref
@@ -92,37 +81,40 @@ ask() {
 # Three places worth looking, cheapest first. Cloning over the top of a checkout
 # someone already has is the rudest thing this script could do.
 
+# Both files, not just install.sh. A directory carrying an install.sh and no
+# bin/crossrev is some other project, and treating it as a checkout produces the
+# silent failure this predicate exists to prevent: a real directory, returned
+# confidently, that cannot run the tool.
+_is_checkout() { [[ -f "$1/install.sh" && -f "$1/bin/crossrev" ]]; }
+
 find_checkout() {
   local p
 
   # An explicit --dir is an instruction about where to install from, so it is the
   # only place looked at. Searching anyway and quietly using a checkout somewhere
-  # else would be answering a different question than the one asked — and the
-  # message would still say "using the checkout at ...", making it look deliberate.
+  # else would be answering a different question than the one asked.
   if (( DEST_EXPLICIT )); then
-    [[ -f "$DEST/tools/crossrev/install.sh" ]] && { printf '%s' "$DEST"; return 0; }
+    _is_checkout "$DEST" && { printf '%s' "$DEST"; return 0; }
     return 1
   fi
 
-  # 1. Run from inside one. Normalised, because "$PWD/../.." is a correct path
-  # that reads like a bug in every message that prints it afterwards.
-  if [[ -f "$PWD/tools/crossrev/install.sh" ]]; then printf '%s' "$PWD"; return 0; fi
-  if [[ -f "$PWD/install.sh" && -f "$PWD/bin/crossrev" ]]; then
-    ( cd -P "$PWD/../.." && pwd ); return 0
-  fi
+  # 1. Run from inside one. The tool is the repository root now, so $PWD is
+  # already the answer — the old two-level walk out of tools/crossrev is gone.
+  _is_checkout "$PWD" && { printf '%s' "$PWD"; return 0; }
 
-  # 2. Already installed — follow the symlink back to its source.
+  # 2. Already installed — follow the symlink back to its source. One level up
+  # from bin/, not three: the checkout root holds bin/ directly.
   if p="$(command -v crossrev 2>/dev/null)"; then
     while [[ -L "$p" ]]; do
       local d; d="$(cd -P "$(dirname "$p")" && pwd)"
       p="$(readlink "$p")"; [[ "$p" != /* ]] && p="$d/$p"
     done
-    p="$(cd -P "$(dirname "$p")/../../.." && pwd 2>/dev/null)" || p=""
-    [[ -n "$p" && -f "$p/tools/crossrev/install.sh" ]] && { printf '%s' "$p"; return 0; }
+    p="$(cd -P "$(dirname "$p")/.." && pwd 2>/dev/null)" || p=""
+    [[ -n "$p" ]] && _is_checkout "$p" && { printf '%s' "$p"; return 0; }
   fi
 
   # 3. Where this script would have put it.
-  [[ -f "$DEST/tools/crossrev/install.sh" ]] && { printf '%s' "$DEST"; return 0; }
+  _is_checkout "$DEST" && { printf '%s' "$DEST"; return 0; }
 
   return 1
 }
@@ -177,8 +169,8 @@ fi
 # and it is the same script someone with a checkout runs by hand. Duplicating any
 # of that here would be a second copy to keep in step.
 
-[[ -x "$SRC/tools/crossrev/install.sh" ]] || die \
-  "the checkout at $SRC has no tools/crossrev/install.sh" \
-  "Either that is not a crossrev source tree, or the ref you cloned predates it — try --ref with a tag that has it. Point --dir somewhere else, or delete $SRC and re-run."
+[[ -x "$SRC/install.sh" ]] || die \
+  "the checkout at $SRC has no install.sh" \
+  "Either that is not a CrossRev source tree, or the ref you cloned predates it — try --ref with a tag that has it. Point --dir somewhere else, or delete $SRC and re-run."
 
-exec "$SRC/tools/crossrev/install.sh" ${INSTALL_ARGS+"${INSTALL_ARGS[@]}"}
+exec "$SRC/install.sh" ${INSTALL_ARGS+"${INSTALL_ARGS[@]}"}

@@ -14,7 +14,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 if [[ ! -f "$HERE/lib/ui.sh" ]]; then
   echo "error  install.sh must run from a checkout of the repository." >&2
-  echo "       Clone it first, then run tools/crossrev/install.sh from there." >&2
+  echo "       Clone it first, then run install.sh from there." >&2
   exit 1
 fi
 
@@ -113,12 +113,10 @@ fi
 # bash and coreutils; making the whole install depend on npx for an optional
 # extra would be a poor trade.
 #
-# Two details in the command were established by running the CLI, and both fail
-# by reporting nothing rather than erroring. The source must be THIS directory:
-# from the repository root the CLI finds the standalone skills in skills/ and
-# never walks into tools/crossrev/skills/. And --skill takes one name per flag —
-# a comma-separated list matches nothing and says "No matching skills found"
-# rather than complaining about the syntax.
+# The source is this directory. Root skills/ holds exactly pr-review and
+# pr-resolve, so naming them with --skill would select everything the CLI would
+# have found anyway — a filter that can only go stale.
+#
 # Hand off, rather than drive.
 #
 # The skills CLI runs its own flow for a human: it detects which harnesses are
@@ -138,9 +136,9 @@ fi
 # $1 is "interactive" or "scripted".
 _install_skills() {
   if [[ "$1" == "interactive" ]]; then
-    npx skills@latest add "$HERE" --skill pr-review --skill pr-resolve
+    npx skills@latest add "$HERE"
   else
-    npx skills@latest add "$HERE" --skill pr-review --skill pr-resolve --global --yes
+    npx skills@latest add "$HERE" --global --yes
   fi
 }
 
@@ -152,14 +150,14 @@ elif ! command -v npx >/dev/null 2>&1; then
   ui_line "npx is not installed, so the two skills were not offered. Nothing is"
   ui_line "missing — crossrev reproduces both into each prompt from this checkout."
   ui_line "Install Node if you want them available by hand, then run:"
-  ui_line "  npx skills@latest add $HERE --skill pr-review --skill pr-resolve --global"
+  ui_line "  npx skills@latest add $HERE --global"
 elif [[ "$WANT_SKILLS" != "1" ]] && ! _ui_input_source >/dev/null 2>&1; then
   # No terminal to ask at — a script, a CI step, a container with no controlling
   # terminal. Skip and say so. Dying here would fail an install that has already
   # succeeded, over an optional extra nobody was asked about.
   ui_line "No terminal attached, so the two optional skills were not offered."
   ui_line "The loop is unaffected. Add them with --skills, or:"
-  ui_line "  npx skills@latest add $HERE --skill pr-review --skill pr-resolve --global"
+  ui_line "  npx skills@latest add $HERE --global"
 else
   ui_line "pr-review and pr-resolve can also be installed for your harnesses, so"
   ui_line "you can invoke them by hand outside the loop. The loop itself does not"
@@ -180,11 +178,14 @@ else
       ui_ok "the skills CLI finished"
     else
       ui_warn "the skills CLI did not finish" \
-        "Nothing else is affected — the loop reads both skills out of this checkout regardless. Retry with: npx skills@latest add $HERE --skill pr-review --skill pr-resolve"
+        "Nothing else is affected — the loop reads both skills out of this checkout regardless. Retry with: npx skills@latest add $HERE"
     fi
   else
     ui_say "Left them out. Add them later with --skills, or:"
-    ui_say "  npx skills@latest add $HERE --skill pr-review --skill pr-resolve"
+    ui_say "  npx skills@latest add $HERE"
+    # The remote shorthand needs no checkout at all, which is the one thing the
+    # line above cannot do. It is a hint for elsewhere, not what this run used.
+    ui_say "  npx skills@latest add carlosboeing/crossrev   # from anywhere"
   fi
 fi
 ui_end "Then check everything:   crossrev doctor"
