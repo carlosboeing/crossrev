@@ -327,7 +327,14 @@ auth_status() {
     if [[ -f "$pem" ]]; then
       # stat drops the leading zero, and "600" next to a sentence about 0600
       # reads as a mismatch. Same number, printed the way it is talked about.
-      mode="$(printf '%04d' "$(stat -f '%Lp' "$pem" 2>/dev/null || stat -c '%a' "$pem" 2>/dev/null)")"
+      #
+      # GNU first, BSD second, and the order is load-bearing. `-f` on GNU stat
+      # means "file system status" — a real flag that SUCCEEDS and prints
+      # `File: "…"`, so a BSD-first probe never reaches its fallback on Linux and
+      # this check warned that a correctly-moded key was wrong. `-c` is not a BSD
+      # flag at all, so it fails cleanly and the fallback fires. Same reversal at
+      # the two other sites; see tests/test-credentials.sh.
+      mode="$(printf '%04d' "$(stat -c '%a' "$pem" 2>/dev/null || stat -f '%Lp' "$pem" 2>/dev/null)")"
       ui_line "   key $pem${mode:+ ($mode)}"
       [[ "$mode" == "0600" ]] || ui_warn \
         "the private key for $owner is mode $mode, not 0600" \
@@ -597,8 +604,10 @@ HTML
       id:$id, slug:$slug, name:$name, role:$role, created:$created}' \
     >"$(_auth_dir)/$owner.$role.json")
 
+  # GNU first, BSD second — see the note at auth_status. Reversed, a successful
+  # registration on Linux reported its own key as the wrong mode.
   local stored_mode
-  stored_mode="$(stat -f '%Lp' "$pem_path" 2>/dev/null || stat -c '%a' "$pem_path" 2>/dev/null)"
+  stored_mode="$(stat -c '%a' "$pem_path" 2>/dev/null || stat -f '%Lp' "$pem_path" 2>/dev/null)"
 
   ui_section "Registered"
   ui_ok "App    $real_name (id $app_id)"

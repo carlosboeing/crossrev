@@ -114,8 +114,12 @@ is  "a restored credential lands in a scratch home, not in ~/.codex" \
   "$(dirname "${CODEX_HOME:-none}")" "$(dirname "$(mktemp -u)")"
 is  "with the credential where the harness looks for it" \
   "$(jq -r '.tokens.refresh_token' "$CODEX_HOME/auth.json")" "refresh-abc"
+# GNU first, BSD second. `-f` on GNU stat is a real flag meaning "file system
+# status": it succeeds and prints `File: "…"`, so a BSD-first probe never reaches
+# its fallback on Linux — which is how this assertion passed on a laptop for weeks
+# and failed on CI's first run. `-c` is not a BSD flag, so it fails cleanly there.
 is  "and readable by nobody else" \
-  "$(stat -f '%Lp' "$CODEX_HOME/auth.json" 2>/dev/null || stat -c '%a' "$CODEX_HOME/auth.json")" "600"
+  "$(stat -c '%a' "$CODEX_HOME/auth.json" 2>/dev/null || stat -f '%Lp' "$CODEX_HOME/auth.json")" "600"
 
 scratch="$CODEX_HOME"
 
