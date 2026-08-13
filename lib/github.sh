@@ -325,16 +325,7 @@ gh_issue_comment() {
 gh_commit_and_push() {
   local branch="$1" message="$2" expected_head="$3" sha
 
-  # Never stage crossrev's own source checkout. The generated workflows put it at
-  # .crossrev-src inside GITHUB_WORKSPACE, which is the same tree `git add -A` is
-  # walking, and git stages an embedded repository as a gitlink with a warning
-  # rather than an error — so every resolve run that fixed anything pushed a
-  # submodule entry into someone's pull request. The quieter half of the same
-  # bug: with .crossrev-src always staged, `git diff --cached --quiet` below was
-  # never true, so the "reported fixes but changed no files" guard could not
-  # fire at all. `:(top)` anchors both pathspecs to the repository root, so this
-  # holds wherever the leg is invoked from.
-  git add -A -- ':(top)' ':(exclude,top).crossrev-src' >/dev/null 2>&1 || true
+  git add -A >/dev/null 2>&1 || true
   if git diff --cached --quiet 2>/dev/null; then printf ''; return 0; fi
 
   git -c user.name="${CROSSREV_GIT_NAME:-crossrev}" \

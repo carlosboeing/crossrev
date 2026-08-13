@@ -400,10 +400,7 @@ _run_tree_capture() {
   gitdir="$(git rev-parse --git-dir 2>/dev/null)" || return 1
   rm -f "$idx"
   cp "$gitdir/index" "$idx" 2>/dev/null || true
-  # The same pathspec gh_commit_and_push stages with. crossrev's own checkout
-  # sits at .crossrev-src inside the workspace in automated mode, and capturing
-  # it would mean restoring — or deleting — the tool mid-run.
-  GIT_INDEX_FILE="$idx" git add -A -- ':(top)' ':(exclude,top).crossrev-src' >/dev/null 2>&1 || return 1
+  GIT_INDEX_FILE="$idx" git add -A >/dev/null 2>&1 || return 1
   GIT_INDEX_FILE="$idx" git write-tree 2>/dev/null
 }
 
@@ -434,7 +431,6 @@ _run_tree_restore() {
   top="$(git rev-parse --show-toplevel 2>/dev/null)" || return 1
   GIT_INDEX_FILE="$idx" git read-tree --reset -u "$tree" >/dev/null 2>&1 || return 1
   while IFS= read -r p; do
-    [[ "$p" == .crossrev-src* ]] && continue
     rm -rf -- "${top:?}/$p"
   done < <(GIT_INDEX_FILE="$idx" git -C "$top" ls-files --others --exclude-standard)
   return 0

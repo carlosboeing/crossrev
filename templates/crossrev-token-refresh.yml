@@ -51,17 +51,23 @@ jobs:
           app-id: ${{ secrets.CROSSREV_REFRESH_APP_ID }}
           private-key: ${{ secrets.CROSSREV_REFRESH_APP_PRIVATE_KEY }}
 
-      # Only crossrev's own source is checked out. The repository under review
+      # Only CrossRev's own source is checked out. The repository under review
       # never appears in this job, which is what keeps it free of anything a
       # pull request author can influence.
+      #
+      # This one keeps a checkout rather than collapsing to `uses:` like the
+      # legs did. `auth refresh` is not expressible through the action's `leg`
+      # input, whose values are review|resolve|cycle|status|watchdog, and
+      # extending that interface belongs to the automated-mode proof rather than
+      # here. The checkout is public now, so it needs no token, no deploy key
+      # and no secret — the threat posture is unchanged.
       - uses: actions/checkout@v5
         with:
-          repository: __SOURCE_REPO__
+          repository: carlosboeing/crossrev
           ref: __SOURCE_SHA__   # __SOURCE_REF__
-          ssh-key: ${{ secrets.CROSSREV_SOURCE_KEY }}
           path: .crossrev-src
 
-      - run: echo "$GITHUB_WORKSPACE/.crossrev-src/tools/crossrev/bin" >>"$GITHUB_PATH"
+      - run: echo "$GITHUB_WORKSPACE/.crossrev-src/bin" >>"$GITHUB_PATH"
 
       - name: refresh
         env:

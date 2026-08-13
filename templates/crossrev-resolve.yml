@@ -37,22 +37,22 @@ jobs:
           fetch-depth: 0
           token: ${{ steps.app.outputs.token }}
 
-      - uses: actions/checkout@v5
-        with:
-          repository: __SOURCE_REPO__
-          ref: __SOURCE_SHA__   # __SOURCE_REF__
-          ssh-key: ${{ secrets.CROSSREV_SOURCE_KEY }}
-          path: .crossrev-src
-
+      # crossrev:only github-hosted
+      # The whole step sits inside the sentinel rather than just its body: a
+      # `run:` block emptied by the filter is a workflow that fails to parse.
       - run: |
-          echo "$GITHUB_WORKSPACE/.crossrev-src/tools/crossrev/bin" >>"$GITHUB_PATH"
-          # crossrev:only github-hosted
           __HARNESS_INSTALL__
-          # crossrev:end
+      # crossrev:end
 
+      # A tag is not a pin: `git tag -f` plus a force push moves it. The 40
+      # character SHA is the pin and the tag rides in the comment.
       - name: resolve
+        uses: carlosboeing/crossrev@__SOURCE_SHA__   # __SOURCE_REF__
+        with:
+          leg: resolve
+          pr: ${{ github.event.pull_request.number }}
+          app-token: ${{ steps.app.outputs.token }}
         env:
-          GH_TOKEN: ${{ steps.app.outputs.token }}
           CROSSREV_APP_SLUG: ${{ steps.app.outputs.app-slug }}
           # crossrev:only github-hosted
           # Read-only, and discarded when the leg finishes. See the review
@@ -60,7 +60,6 @@ jobs:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           CROSSREV_CODEX_AUTH: ${{ secrets.CROSSREV_CODEX_AUTH }}
           # crossrev:end
-        run: crossrev resolve --pr ${{ github.event.pull_request.number }} --no-tips
 
       - if: always()
         env:

@@ -33,6 +33,19 @@ inputs:
   harness:
     description: Override the harness the repository config names for that leg.
     required: false
+  trigger:
+    description: >-
+      Whether a machine fired this or a person asked. `automatic` applies the
+      policy caps — passes per cycle, pull requests per day, files changed — and
+      skips draft pull requests. `human` applies none of them, which is correct
+      for an explicit `/crossrev review` and wrong for anything on a timer.
+
+      Defaults to `automatic` rather than mirroring the CLI's `human` default,
+      because the two entry points fail safe in opposite directions: forgetting
+      this input in a workflow should give you the caps, not an uncapped loop.
+      Same reasoning as no-tips defaulting to true here and off in the CLI.
+    required: false
+    default: automatic
   no-tips:
     description: Suppress the automated-mode suggestion. Always true in CI.
     required: false
@@ -71,5 +84,6 @@ runs:
         args=("${{ inputs.leg }}")
         [[ -n "${{ inputs.pr }}" ]] && args+=(--pr "${{ inputs.pr }}")
         [[ -n "${{ inputs.harness }}" ]] && args+=(--harness "${{ inputs.harness }}")
+        [[ -n "${{ inputs.trigger }}" ]] && args+=(--trigger "${{ inputs.trigger }}")
         [[ "${{ inputs.no-tips }}" == "true" ]] && args+=(--no-tips)
         "${{ github.action_path }}/bin/crossrev" "${args[@]}"

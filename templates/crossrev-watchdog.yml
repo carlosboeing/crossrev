@@ -24,17 +24,12 @@ jobs:
 
       - uses: actions/checkout@v5
 
-      - uses: actions/checkout@v5
-        with:
-          repository: __SOURCE_REPO__
-          ref: __SOURCE_SHA__   # __SOURCE_REF__
-          ssh-key: ${{ secrets.CROSSREV_SOURCE_KEY }}
-          path: .crossrev-src
-
-      - run: echo "$GITHUB_WORKSPACE/.crossrev-src/tools/crossrev/bin" >>"$GITHUB_PATH"
-
+      # A tag is not a pin: `git tag -f` plus a force push moves it. The 40
+      # character SHA is the pin and the tag rides in the comment.
       - name: watchdog
+        uses: carlosboeing/crossrev@__SOURCE_SHA__   # __SOURCE_REF__
+        with:
+          leg: watchdog
+          app-token: ${{ steps.app.outputs.token }}
         env:
-          GH_TOKEN: ${{ steps.app.outputs.token }}
           CROSSREV_APP_SLUG: ${{ steps.app.outputs.app-slug }}
-        run: crossrev watchdog

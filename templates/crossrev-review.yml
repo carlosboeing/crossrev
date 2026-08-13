@@ -107,40 +107,30 @@ jobs:
           fetch-depth: 0
           token: ${{ steps.app.outputs.token }}
 
-      # crossrev itself lives in another account, and GitHub shares private
-      # actions and reusable workflows only within one account — so `uses:`
-      # cannot reach it and a checkout is the only mechanism available. It needs a
-      # credential of its own: the App token is scoped to its own installation and
-      # the default workflow token to the repository under review, so neither can
-      # read a personal repository. CROSSREV_SOURCE_KEY is a read-only deploy key
-      # on the source repo, and its blast radius if leaked is read access to that
-      # one repository.
-      #
-      # A tag is not a pin: `git tag -f` plus a force push moves it. The 40
-      # character SHA is the pin and the tag rides in the comment.
-      - if: steps.pr.outputs.skip != 'true'
-        uses: actions/checkout@v5
-        with:
-          repository: __SOURCE_REPO__
-          ref: __SOURCE_SHA__   # __SOURCE_REF__
-          ssh-key: ${{ secrets.CROSSREV_SOURCE_KEY }}
-          path: .crossrev-src
-
+      # crossrev:only github-hosted
       # A hosted runner is a fresh container every time, so the harness is
       # installed per run. A self-hosted one already has them, along with the
       # logins they refresh on disk — which is the whole reason it needs no
       # token plumbing.
+      #
+      # The whole step sits inside the sentinel rather than just its body: a
+      # `run:` block emptied by the filter is a workflow that fails to parse.
       - if: steps.pr.outputs.skip != 'true'
         run: |
-          echo "$GITHUB_WORKSPACE/.crossrev-src/tools/crossrev/bin" >>"$GITHUB_PATH"
-          # crossrev:only github-hosted
           __HARNESS_INSTALL__
-          # crossrev:end
+      # crossrev:end
 
+      # A tag is not a pin: `git tag -f` plus a force push moves it. The 40
+      # character SHA is the pin and the tag rides in the comment.
       - name: review
         if: steps.pr.outputs.skip != 'true'
+        uses: carlosboeing/crossrev@__SOURCE_SHA__   # __SOURCE_REF__
+        with:
+          leg: review
+          pr: ${{ steps.pr.outputs.number }}
+          app-token: ${{ steps.app.outputs.token }}
+          trigger: ${{ github.event_name == 'pull_request' && 'automatic' || 'human' }}
         env:
-          GH_TOKEN: ${{ steps.app.outputs.token }}
           CROSSREV_APP_SLUG: ${{ steps.app.outputs.app-slug }}
           # crossrev:only github-hosted
           # Restored, read and discarded. This job never writes either of them
@@ -149,12 +139,6 @@ jobs:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           CROSSREV_CODEX_AUTH: ${{ secrets.CROSSREV_CODEX_AUTH }}
           # crossrev:end
-        run: |
-          if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
-            crossrev review --pr ${{ steps.pr.outputs.number }} --trigger automatic --no-tips
-          else
-            crossrev review --pr ${{ steps.pr.outputs.number }} --no-tips
-          fi
 
       # The token is revoked rather than left to expire, and this runs even when
       # the leg failed.

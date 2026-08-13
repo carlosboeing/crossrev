@@ -17,7 +17,7 @@ INIT_OWNER=""
 INIT_OWNER_TYPE="user"
 
 # Everything the plan needs, resolved before anything is printed.
-INIT_SOURCE_REPO=""; INIT_SOURCE_SHA=""; INIT_SOURCE_REF=""
+INIT_SOURCE_SHA=""; INIT_SOURCE_REF=""
 INIT_PASS_LABELS=""; INIT_FIXED_LABELS=""; INIT_BACKLOG_LABELS=""
 INIT_BACKLOG_RESOLVED=""; INIT_BACKLOG_ORIGIN=""
 INIT_WRITES=""; INIT_OVERWRITES=""
@@ -130,19 +130,21 @@ _init_resolve() {
     INIT_BACKLOG_LABELS="$(printf '%s %s' "$tracking" "$extra" | tr -s ' ' | sed 's/ *$//')"
   fi
 
-  # Where the workflows fetch crossrev from, pinned by SHA. A tag only looks
+  # Which commit of the action the workflows pin, by SHA. A tag only looks
   # immutable: `git tag -f` plus a force push moves it, and the failure mode is a
   # repository whose review behaviour changes with nothing in its own history to
   # show for it.
-  INIT_SOURCE_REPO="$(git -C "$ROOT" remote get-url origin 2>/dev/null \
-    | sed -E 's#^.*github\.com[:/]##; s#\.git$##')" || INIT_SOURCE_REPO=""
+  #
+  # The repository half of this is gone: the rendered `uses:` line names
+  # carlosboeing/crossrev outright, so parsing the origin remote answered a
+  # question nobody asks any more.
   INIT_SOURCE_SHA="$(git -C "$ROOT" rev-parse HEAD 2>/dev/null)" || INIT_SOURCE_SHA=""
   INIT_SOURCE_REF="$(git -C "$ROOT" describe --tags --exact-match 2>/dev/null)" \
     || INIT_SOURCE_REF="v$(crossrev_version)"
 
-  [[ -n "$INIT_SOURCE_REPO" && -n "$INIT_SOURCE_SHA" ]] || ui_die \
-    "could not work out which commit of crossrev to pin the workflows to" \
-    "init generates workflows that check crossrev out at a 40-character SHA. Run it from a git checkout of the repository crossrev lives in."
+  [[ -n "$INIT_SOURCE_SHA" ]] || ui_die \
+    "could not work out which commit of CrossRev to pin the workflows to" \
+    "init generates workflows that pin the action at a 40-character SHA. Run it from a git checkout of CrossRev."
 
   INIT_WORKFLOWS="review resolve watchdog"
   (( INIT_NEEDS_REFRESHER )) && INIT_WORKFLOWS="$INIT_WORKFLOWS token-refresh"
@@ -214,7 +216,6 @@ _init_resolve_refresher() {
 _init_required_secrets() {
   printf 'APP_ID\n'
   printf 'APP_PRIVATE_KEY\n'
-  printf 'CROSSREV_SOURCE_KEY\n'
 
   local leg harness endpoint ep tok seen=""
   for leg in reviewer resolver; do
@@ -259,7 +260,7 @@ _init_print_plan() {
   ui_section "Plan for $INIT_REPO"
   ui_line ""
   ui_line "GitHub App        $app_line"
-  ui_line "source pin        $INIT_SOURCE_REPO @ ${INIT_SOURCE_SHA:0:40}"
+  ui_line "source pin        ${INIT_SOURCE_SHA:0:40}"
   ui_line "                  ($INIT_SOURCE_REF — the SHA is the pin, the tag is a comment)"
 
   ui_line ""
@@ -376,8 +377,6 @@ _init_secret_note() {
       printf -- '— crossrev runs `claude setup-token` and captures the output; the token is never printed' ;;
     CROSSREV_CODEX_AUTH)
       printf -- '— seed once from a machine with a browser: `codex login`, then `gh secret set CROSSREV_CODEX_AUTH < ~/.codex/auth.json`' ;;
-    CROSSREV_SOURCE_KEY)
-      printf -- '— a read-only deploy key on %s; see the note after this plan' "$INIT_SOURCE_REPO" ;;
     *)
       printf -- '— the token an endpoint in the config names; set it yourself with `gh secret set %s`' "$1" ;;
   esac
@@ -576,23 +575,10 @@ _init_execute() {
     return 0
   fi
 
-  # Refusing to finish quietly. A missing source key fails at checkout before any
-  # review runs, which is the good kind of failure — but only if someone knows.
+  # Refusing to finish quietly. A missing secret fails the run before any review
+  # happens, which is the good kind of failure — but only if someone knows.
   for s in $unfinished; do
     case "$s" in
-      CROSSREV_SOURCE_KEY)
-        ui_no "CROSSREV_SOURCE_KEY — the workflows cannot check crossrev out without it"
-        ui_line "   The App token is scoped to its own installation and cannot read"
-        ui_line "   $INIT_SOURCE_REPO; the default workflow token is scoped to this"
-        ui_line "   repository. So the source checkout needs a credential of its own."
-        ui_line ""
-        ui_line "   ssh-keygen -t ed25519 -C crossrev-source -f /tmp/crossrev-source -N ''"
-        ui_line "   gh repo deploy-key add /tmp/crossrev-source.pub --repo $INIT_SOURCE_REPO --title crossrev-source"
-        ui_line "   gh secret set CROSSREV_SOURCE_KEY $(_init_secret_scope_flag) </tmp/crossrev-source"
-        ui_line "   rm /tmp/crossrev-source /tmp/crossrev-source.pub"
-        ui_line ""
-        ui_line "   Read-only by default, so its blast radius if leaked is read access"
-        ui_line "   to that one repository — no write, no user identity." ;;
       CLAUDE_CODE_OAUTH_TOKEN)
         ui_no "CLAUDE_CODE_OAUTH_TOKEN — a leg runs on Claude, so it cannot authenticate"
         ui_line "   claude setup-token"
@@ -705,8 +691,7 @@ _init_render_workflow() {
       next
     }
     { print }' "$template" \
-    | sed -e "s#__SOURCE_REPO__#$INIT_SOURCE_REPO#g" \
-      -e "s#__SOURCE_SHA__#$INIT_SOURCE_SHA#g" \
+    | sed -e "s#__SOURCE_SHA__#$INIT_SOURCE_SHA#g" \
       -e "s#__SOURCE_REF__#$INIT_SOURCE_REF#g" \
       -e "s#__RUNS_ON__#$runs_on#g" \
       -e "s#__REFRESH_SCOPE__#$refresh_scope#g" \

@@ -110,12 +110,11 @@ has "including the pass label, which counts rather than states" \
 hasnt "rather than one generic string across all of them" \
   "$(calls)" "description=crossrev loop state"
 
-# Refusing to finish quietly. A missing source key fails at checkout before any
-# review runs, which is the good kind of failure — but only if someone knows.
-has "a missing source key is named, not glossed"    "$out" "CROSSREV_SOURCE_KEY"
-has "and it explains why neither existing token can read the source" \
-  "$out" "cannot read"
-has "and gives the exact commands to fix it"        "$out" "gh repo deploy-key add"
+# The source checkout and its deploy key are retired. The action is public, so
+# `uses:` reaches it with no credential — and a secret set that still asked for
+# a key nobody can produce would block an install that has nothing wrong with it.
+hasnt "no deploy-key secret is demanded any more"   "$out" "CROSSREV_SOURCE_KEY"
+hasnt "and no deploy-key instructions are printed"  "$out" "gh repo deploy-key add"
 has "the closing line does not claim success"       "$out" "will fail at the first missing secret"
 
 # The generated workflows carry the two things the chain depends on.
@@ -133,11 +132,20 @@ hasnt "pushes do not trigger another automatic review"            "$wf" "synchro
 has "automatic pull request events skip draft pull requests"       "$wf" "github.event.pull_request.draft == false"
 has "public commenters cannot trigger an uncapped review"          "$wf" "github.event.comment.author_association"
 has "the comment gate accepts only repository relationships"       "$wf" "OWNER\",\"MEMBER\",\"COLLABORATOR"
-has "pull request events identify themselves as automatic"         "$wf" "--trigger automatic"
+# The automatic/human distinction survived the collapse to `uses:` as an action
+# input rather than a shell branch. It controls the policy caps and the draft
+# skip, so losing it would uncap the loop silently.
+has "the trigger is derived from the event, not assumed"           "$wf" "trigger: \${{ github.event_name == 'pull_request' && 'automatic' || 'human' }}"
 hasnt "the unverified effective-permission endpoint is not guessed" \
   "$wf" 'collaborators/$ACTOR/permission'
-is  "the source checkout is pinned to a 40-character SHA" \
-  "$(grep -oE 'ref: [0-9a-f]{40}' <<<"$wf" | wc -l | tr -d ' ')" "1"
+# The pin is the SHA and the tag is a comment, so a moved tag cannot change a
+# repository's review behaviour with nothing in its own history to show for it.
+is  "the action is pinned to a 40-character SHA" \
+  "$(grep -oE 'uses: carlosboeing/crossrev@[0-9a-f]{40}' <<<"$wf" | wc -l | tr -d ' ')" "1"
+hasnt "and never to a floating tag" "$wf" "carlosboeing/crossrev@v"
+# The retired apparatus, asserted gone rather than assumed gone.
+hasnt "no second checkout of the source survives"   "$wf" ".crossrev-src"
+hasnt "and no deploy key is referenced"             "$wf" "CROSSREV_SOURCE_KEY"
 has "the resolve workflow shares the review workflow's group" \
   "$(cat .github/workflows/crossrev-resolve.yml)" "group: crossrev-pr-\${{ github.event.pull_request.number }}"
 
@@ -241,7 +249,10 @@ out="$("$CROSSREV" init --dry-run 2>&1)"
 
 has  "a secret that is set is reported as set"      "$out" "APP_ID — already set"
 hasnt "and is not also reported as missing"         "$out" "APP_ID — MISSING"
-has  "while one that is absent is still missing"    "$out" "CROSSREV_SOURCE_KEY — MISSING"
+# APP_PRIVATE_KEY is stubbed as present above; the harness credential is not, so
+# it is the one that must still come back MISSING. Asserting this on a secret
+# that is no longer required at all would test nothing.
+has  "while one that is absent is still missing"    "$out" "CLAUDE_CODE_OAUTH_TOKEN — MISSING"
 
 # One query per scope, not two per secret. Seven secrets meant fourteen calls to
 # render one plan, which is what gave a transient failure seven chances to land.
