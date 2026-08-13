@@ -30,5 +30,6 @@ Everything here is deferred to the `v1.0.0` conversation, and all of it is a doo
 
 ## Recently shipped
 
+- **Generated App display names take the product name** ([#4](https://github.com/carlosboeing/crossrev/issues/4), 2026-08-14). `CrossRev <owner>` and `CrossRev Refresh <owner>` rather than the lowercase forms. The slug GitHub derives is unchanged, so marker trust is untouched, and `tests/test-auth.sh` now holds those two facts together.
 - **The pass label moves instead of accumulating** ([#2](https://github.com/carlosboeing/crossrev/issues/2), 2026-08-13). One grey pill, always the pass the pull request is on. A revision that resets the counter sheds the higher labels rather than keeping them as history — the markers are the record of what ran, the label row is the current state.
 - **v0.1.0 (2026-08-13)** — the first release, and the extraction into this repository. The tool was renamed from its working title, delivery moved to a public composite action pinned by SHA, the source-checkout-plus-deploy-key mode was retired, and the two entry scripts got the tests they had never had. Details in [`CHANGELOG.md`](../CHANGELOG.md).
