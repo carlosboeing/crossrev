@@ -162,4 +162,38 @@ is  "a reviewed revision is a no-op"                  "$rc" "0"
 has "and it says why rather than looking busy"        "$out" "nothing has changed since"
 is  "a no-op writes nothing"                          "$(count 'method POST')" "0"
 
+# --- the pass label moves, it does not accumulate --------------------------
+#
+# The grey pill is *the* pass number, singular, and the six crossrev/* labels are
+# mutually exclusive. A completed pass 1 against a head the pull request has since
+# moved off makes this run pass 2, so the label pass 1 left has to go with it.
+fixture_repo; stub_reset
+stale="$(make_claim 0000000000000000000000000000000000000000 | jq -c '.state = "complete"')"
+routes_baseline "$(marker_comment 9001 "$stale" | jq -cs . | payload)" \
+  '[{"name":"crossrev/pass-1"},{"name":"crossrev/awaiting-review"}]'
+route 'api --method POST repos/*/issues/42/comments*' '{"id":9002}'
+route '*reviewThreads*' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}'
+CROSSREV_REVIEW_PAYLOAD="$(printf '%s' "$REVIEW_PAYLOAD" | payload)"; export CROSSREV_REVIEW_PAYLOAD
+out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
+
+is  "a second pass exits clean"                       "$rc" "0"
+has "it applies the new pass label"                   "$(calls)" "labels[]=crossrev/pass-2"
+has "and takes the one before it off"                 "$(calls)" "DELETE repos/acme/widget/issues/42/labels/crossrev/pass-1"
+
+# A new revision resets the counter, so the higher labels a finished cycle left
+# behind are shed rather than kept as history. The markers are the record of what
+# ran; the label row is the current state and nothing else.
+fixture_repo; stub_reset
+routes_baseline "$(printf '[]' | payload)" \
+  '[{"name":"crossrev/pass-2"},{"name":"crossrev/pass-3"},{"name":"crossrev/converged"}]'
+route 'api --method POST repos/*/issues/42/comments*' '{"id":9003}'
+route '*reviewThreads*' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}'
+CROSSREV_REVIEW_PAYLOAD="$(printf '%s' "$REVIEW_PAYLOAD" | payload)"; export CROSSREV_REVIEW_PAYLOAD
+out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
+
+is  "a reset to pass 1 exits clean"                   "$rc" "0"
+has "it applies the pass label it is on"              "$(calls)" "labels[]=crossrev/pass-1"
+has "and sheds the higher one"                        "$(calls)" "DELETE repos/acme/widget/issues/42/labels/crossrev/pass-2"
+has "and the one above that"                          "$(calls)" "DELETE repos/acme/widget/issues/42/labels/crossrev/pass-3"
+
 finish

@@ -2,6 +2,12 @@
 
 All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **The pass label moves instead of accumulating** ([#2](https://github.com/carlosboeing/crossrev/issues/2)). Each pass added `crossrev/pass-N` without taking the previous one off, so a three-pass pull request carried three grey pills and the reader had to scan for the highest. The pass label is mutually exclusive like the four state labels beside it, and is now treated that way. Which labels to take off is read from the pull request rather than counted down from the cap, so a new revision that resets the counter to 1 sheds the higher labels a finished cycle left behind. A display defect rather than a state one — the markers were always correct and `crossrev status` was never affected.
+
 ## [0.1.0] — 2026-08-13
 
 The first release, and the one that made CrossRev its own thing. Everything below ships for the first time — there are no earlier released versions, because the tool spent its whole life so far inside another repository under a working title.

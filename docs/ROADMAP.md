@@ -13,8 +13,6 @@ Forward view of CrossRev: what's in flight, what's next, what's deliberately def
 - **Record why a leg stopped, in the marker.** A halt today is legible from the label and the comment prose, and `crossrev status` has to infer some of it. The reason belongs in the marker beside everything else the pass recorded, so `status` renders a fact rather than a reconstruction.
 - **Kimi as a local harness.** Kimi is reachable today as a named endpoint on the Claude adapter. A native `lib/adapters/kimi.sh` would make the two legs different binaries, which removes the endpoint-variable hazard entirely, and it gains a skills-directory flag. What it costs, measured rather than assumed: no schema flag, no effort flag, and stdout that mixes narration and a resume hint around the payload with no way to isolate the answer. Local only either way — its credential is a 15-minute OAuth token.
 - **Comparable cost telemetry.** Each leg reports a duration and one token total, which is not enough to answer the question an operator actually has: how expensive was that leg, and how does it compare against another harness, model or effort level? What is needed is the usage each harness reported, enough cache context to explain an otherwise alarming total, and an API-equivalent estimate on one economic frame across harnesses — labelled as an equivalence rather than as an amount charged, since a subscription-backed run inside its included usage is invoiced nothing.
-- **Fix the pass label accumulating instead of moving** ([#2](https://github.com/carlosboeing/crossrev/issues/2)). Each pass adds `crossrev/pass-N` without removing `crossrev/pass-(N-1)`, so a three-pass pull request carries three grey pills where it should carry one. A display defect rather than a state one — the markers stay correct and `crossrev status` is unaffected.
-
 ## Future considerations
 
 Everything here is deferred to the `v1.0.0` conversation, and all of it is a door deliberately kept open rather than a plan.
@@ -32,4 +30,5 @@ Everything here is deferred to the `v1.0.0` conversation, and all of it is a doo
 
 ## Recently shipped
 
+- **The pass label moves instead of accumulating** ([#2](https://github.com/carlosboeing/crossrev/issues/2), 2026-08-13). One grey pill, always the pass the pull request is on. A revision that resets the counter sheds the higher labels rather than keeping them as history — the markers are the record of what ran, the label row is the current state.
 - **v0.1.0 (2026-08-13)** — the first release, and the extraction into this repository. The tool was renamed from its working title, delivery moved to a public composite action pinned by SHA, the source-checkout-plus-deploy-key mode was retired, and the two entry scripts got the tests they had never had. Details in [`CHANGELOG.md`](../CHANGELOG.md).

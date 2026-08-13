@@ -301,6 +301,18 @@ run_pass_labels() {
   # stalls again on pass 3 is halted on the spot for having "already been
   # retried once", and someone has to remove the label by hand to restart it.
   state_label_remove "$CTX_PR" "$CTX_REPO" "crossrev/watchdog-retried"
+  # The pass label is mutually exclusive like the four above it, so it moves
+  # rather than accumulates: the grey pill is *the* pass number, singular, and a
+  # three-pass pull request carrying three of them makes the reader scan for the
+  # highest. Which ones to take off is read from the labels actually on the pull
+  # request rather than counted down from the cap, so a new revision that resets
+  # the counter to 1 sheds the higher labels a finished cycle left behind, and a
+  # label from a config whose cap has since been lowered still goes.
+  # shellcheck disable=SC2086  # CTX_LABELS is a space-joined list; splitting is the point
+  for l in $CTX_LABELS; do
+    [[ "$l" == crossrev/pass-* && "$l" != "crossrev/pass-$pass" ]] || continue
+    state_label_remove "$CTX_PR" "$CTX_REPO" "$l"
+  done
   run_label_add "crossrev/pass-$pass"
   [[ -n "$next" ]] && run_label_add "crossrev/$next"
   return 0
