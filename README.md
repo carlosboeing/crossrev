@@ -4,8 +4,6 @@ A cross-model PR review loop. One model reviews a pull request and leaves inline
 
 It runs on the AI subscriptions you already have rather than per-token API keys. GitHub Actions triggers it where CI exists; a terminal command triggers it where CI doesn't — the same command in both cases.
 
-> **Work in progress.** Every command is built and tested offline, and none has run against a real pull request yet. See [what works today](#what-works-today) for the honest current state.
-
 ## Two ways to use it
 
 |  | **Local** | **Automated** |
@@ -267,7 +265,7 @@ tests/           the stubbed-gh suite. `tests/run.sh` runs all of it
 ## Working on it
 
 ```bash
-tests/run.sh      # 835 offline assertions, no network, no model
+tests/run.sh      # 842 offline assertions, no network, no model
 scripts/lint.sh   # syntax plus shellcheck -S warning
 ```
 
