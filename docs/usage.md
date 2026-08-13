@@ -85,7 +85,7 @@ The label row on a pull request reads at a glance, because no two of the six col
 | `crossrev/converged` | green | The loop finished on its own |
 | `crossrev/halted` | orange | Stopped short, a human is needed |
 | `crossrev/stop` | red | A human applied it, and the loop stops |
-| `crossrev/pass-N` | grey | Which pass it reached |
+| `crossrev/pass-N` | grey | Which pass it is on |
 
 **Red is reserved for `stop`**, the one label a human applies, so a red pill in a pull request list always means somebody pulled the brake — never that the loop had trouble. `crossrev/watchdog-retried` is a seventh, yellow, and it is bookkeeping rather than a loop state.
 
