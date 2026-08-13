@@ -1,0 +1,41 @@
+{
+  "name": "crossrev",
+  "version": "0.1.0",
+  "description": "A cross-model pull request review loop. One model reviews, a second verifies and replies in-thread, then the first looks again. Runs on the AI subscriptions you already have.",
+  "keywords": [
+    "code-review",
+    "pull-request",
+    "github",
+    "cli",
+    "ai",
+    "agents",
+    "claude",
+    "codex"
+  ],
+  "homepage": "https://github.com/carlosboeing/crossrev#readme",
+  "bugs": "https://github.com/carlosboeing/crossrev/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/carlosboeing/crossrev.git"
+  },
+  "license": "MIT",
+  "author": "Carlos Boeing",
+  "bin": {
+    "crossrev": "bin/crossrev"
+  },
+  "files": [
+    "bin/",
+    "lib/",
+    "schemas/",
+    "skills/",
+    "templates/",
+    "VERSION"
+  ],
+  "os": [
+    "darwin",
+    "linux"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
+}

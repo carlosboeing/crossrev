@@ -26,6 +26,21 @@ No token, no `gh`, no credential of any kind. The repository is public, so raw.g
 
 Pass `--dir` and it looks nowhere else. An explicit destination is an instruction, and searching anyway would answer a different question than the one you asked.
 
+## From npm, to try it without cloning
+
+```bash
+npx crossrev --pr 42        # nothing installed, nothing left behind
+npm install -g crossrev     # or put it on your PATH the npm way
+```
+
+The package is the same bash the clone runs — `bin/`, `lib/`, `schemas/`, `skills/`, `templates/` and the `VERSION` file, with no build step and no dependencies. It needs Node only to install; nothing about the tool runs on it. macOS and Linux only, declared in the manifest, so Windows fails at install rather than at first run.
+
+**`crossrev init` does not work from an npm install, and this is the one real difference.** `init` generates workflows that pin the composite action to a 40-character SHA, and it reads that SHA from CrossRev's own git checkout ([ADR 0009](adrs/0009-delivery-via-sha-pinned-composite-action.md)). An npm package has no `.git`, so `init` stops with an error naming the cause rather than writing a workflow pinned to nothing.
+
+So: **npm is the local path, a clone is either path.** If you're setting up automated mode, use the bootstrap above. Full reasoning in [ADR 0011](adrs/0011-npm-as-a-second-install-route.md).
+
+Updating is `npm update -g crossrev`, which is the one thing npm does better than the clone — see [the checkout is the installation](#the-checkout-is-the-installation) for why the clone has no update command yet.
+
 ## Installing from a checkout you already have
 
 Skip the bootstrap:
