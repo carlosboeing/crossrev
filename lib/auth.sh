@@ -301,7 +301,7 @@ auth_status() {
     ui_section "Apps"
     ui_opt "none configured"
     ui_gap
-    ui_line "crossrev needs an App only for automated mode — the loop running on"
+    ui_line "CrossRev needs an App only for automated mode — the loop running on"
     ui_line "GitHub events. Local runs use your own gh authentication."
     ui_end "Set one up with:   crossrev auth login"
     _auth_status_tokens
@@ -382,7 +382,7 @@ _auth_status_tokens() {
       fi
     done <<<"$names"
   done <<<"$repos"
-  ui_end "Dates only — crossrev never stores a token, and this one cannot be read back."
+  ui_end "Dates only — CrossRev never stores a token, and this one cannot be read back."
 }
 
 # ---------------------------------------------------------------------------
@@ -472,7 +472,7 @@ auth_login() {
   ui_line "Role         $role"
   ui_line "Permissions  $(_auth_role_summary "$role")"
   ui_line "             and nothing else"
-  ui_line "Webhook      disabled. GitHub never calls crossrev; your workflows do"
+  ui_line "Webhook      disabled. GitHub never calls CrossRev; your workflows do"
   ui_line "Visibility   private to $owner"
   ui_gap
   if [[ "$role" == "refresher" ]]; then
@@ -486,7 +486,7 @@ auth_login() {
     ui_line "request labels under the Issues API, and the loop is label-driven."
   fi
   ui_gap
-  ui_line "Two approvals in the browser: create the App, then install it. crossrev"
+  ui_line "Two approvals in the browser: create the App, then install it. CrossRev"
   ui_line "follows along here — nothing to copy back."
   printf '\n'
 
@@ -561,7 +561,7 @@ HTML
     "Paste the full URL from the address bar, or just the value after code="
 
   if [[ -n "$returned_state" && "$returned_state" != "$state" ]]; then
-    ui_die "the state value GitHub returned does not match the one crossrev sent" \
+    ui_die "the state value GitHub returned does not match the one CrossRev sent" \
       "This request did not come from the page crossrev opened. Start again: crossrev auth login --owner $owner"
   fi
 
@@ -742,7 +742,7 @@ auth_rotate() {
   ui_gap
   ui_line "GitHub has no API for generating an App key, so this part happens in"
   ui_line "the browser: press 'Generate a private key' and the .pem downloads."
-  ui_line "crossrev picks it up, proves it works as this App, and installs it."
+  ui_line "CrossRev picks it up, proves it works as this App, and installs it."
   ui_gap
   ui_line "Nothing is replaced until the new key authenticates, and the old one"
   ui_line "keeps working until you delete it on GitHub — so a failure here leaves"

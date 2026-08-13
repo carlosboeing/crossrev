@@ -108,7 +108,7 @@ preflight_check() {
       fi
     done
     if (( found_harness == 0 )); then
-      ui_no "no harness CLI found — crossrev needs at least one of claude, codex or agy"
+      ui_no "no harness CLI found — CrossRev needs at least one of claude, codex or agy"
       missing+=("harness")
     fi
   fi
@@ -151,7 +151,7 @@ preflight_pairing_supported() {
       printf "Kimi's subscription token lives 15 minutes, and a scheduler with a five-minute floor that runs late under load cannot stay ahead of it"
       return 1 ;;
     *)
-      printf "crossrev has no adapter for '%s'" "$harness"
+      printf "CrossRev has no adapter for '%s'" "$harness"
       return 1 ;;
   esac
 }

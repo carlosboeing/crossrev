@@ -154,7 +154,7 @@ cred_assert_fresh() {
     "crossrev reads the access token's exp claim to decide whether it is safe to run. A credential it cannot read is one it cannot reason about, so it stops. Re-seed the secret from a fresh \`$harness login\`."
 
   if (( left < CRED_MIN_SECONDS )); then
-    ui_die "the restored $harness credential has $(_cred_human_duration "$left") left, under crossrev's one-hour floor" \
+    ui_die "the restored $harness credential has $(_cred_human_duration "$left") left, under CrossRev's one-hour floor" \
       "Refreshing it here would consume the refresh token and leave the stored copy dead, so this leg stops instead. Run the crossrev-token-refresh workflow, or re-seed the secret with \`$harness login\` on a machine with a browser."
   fi
   return 0

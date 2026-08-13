@@ -79,7 +79,7 @@ run_lock_acquire() {
     # a window for a second terminal to start a pass halfway through this one.
     if [[ "$pid" == "$$" ]]; then return 0; fi
     if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
-      ui_die "another crossrev run already holds pull request $pr — $holder" \
+      ui_die "another CrossRev run already holds pull request $pr — $holder" \
         "Two runs writing the same pull request would interleave comments and replies. Wait for it to finish, or stop that process."
     fi
     ui_warn "a previous run left a lock on pull request $pr held by $holder, which is no longer running" \
@@ -2598,7 +2598,7 @@ cmd_watchdog() {
     --jq '[.[] | select([.labels[].name] | any(startswith("crossrev/awaiting-")))
            | {number, labels: [.labels[].name], head: .head.sha}]' 2>/dev/null)" || stuck="[]"
 
-  ui_section "crossrev watchdog on $repo"
+  ui_section "CrossRev watchdog on $repo"
 
   local n i pr labels head author markers marker age leg
   n="$(jq 'length' <<<"$stuck")"

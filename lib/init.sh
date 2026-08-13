@@ -94,7 +94,7 @@ _init_resolve() {
   # credential would expire ten days later with nothing pointing at the cause.
   case "$INIT_RUNNER" in
     github-hosted|self-hosted) : ;;
-    *) ui_die "the config sets runner: $INIT_RUNNER, which crossrev does not recognise" \
+    *) ui_die "the config sets runner: $INIT_RUNNER, which CrossRev does not recognise" \
          "It must be exactly github-hosted or self-hosted. Anything else would be treated as hosted while behaving as neither, and the first sign would be a credential expiring weeks later." ;;
   esac
   _init_assert_runner_serves_pairing
@@ -293,7 +293,7 @@ _init_print_plan() {
   local scope="repository"
   [[ "$INIT_OWNER_TYPE" == "organization" ]] && scope="organisation"
   ui_line ""
-  ui_line "secrets           checked at $scope level, and set only where crossrev has the value"
+  ui_line "secrets           checked at $scope level, and set only where CrossRev has the value"
   local s
   while read -r s; do
     [[ -n "$s" ]] || continue
@@ -536,7 +536,7 @@ _init_execute() {
     if [[ "$s" == "CLAUDE_CODE_OAUTH_TOKEN" ]] && _init_set_claude_token; then
       continue
     fi
-    ui_no "$s — not set, and crossrev does not have the value to set it"
+    ui_no "$s — not set, and CrossRev does not have the value to set it"
     unfinished="$unfinished $s"
   done <<<"$INIT_SECRETS"
 
@@ -718,7 +718,7 @@ _init_set_claude_token() {
   ui_gap
   ui_line "CLAUDE_CODE_OAUTH_TOKEN is missing, and both legs need it to authenticate."
   ui_line "\`claude setup-token\` opens a browser once and prints a token valid for a"
-  ui_line "year. crossrev captures it straight into the secret — it is never printed"
+  ui_line "year. CrossRev captures it straight into the secret — it is never printed"
   ui_line "here, never written to a file, and never shown again by anything."
   ui_confirm "Run \`claude setup-token\` now?" || return 1
 
@@ -743,7 +743,7 @@ _init_set_claude_token() {
 
   token="$(grep -oE 'sk-ant-[A-Za-z0-9_-]{20,}' "$raw" | tail -1)"
   if [[ -z "$token" ]]; then
-    ui_warn "\`claude setup-token\` finished without printing a token crossrev could recognise" \
+    ui_warn "\`claude setup-token\` finished without printing a token CrossRev could recognise" \
       "The secret is not set, so CI cannot authenticate yet. Run it by hand and set the secret: claude setup-token, then gh secret set CLAUDE_CODE_OAUTH_TOKEN $(_init_secret_scope_flag)"
     return 1
   fi

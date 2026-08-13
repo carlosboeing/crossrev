@@ -1,4 +1,4 @@
-# crossrev
+# CrossRev
 
 A cross-model PR review loop. One model reviews a pull request and leaves inline comments; a second verifies each point and either fixes it, skips it, defers it or pushes back, replies in-thread, resolves what it handled, and pushes. Then the first looks again. Two or three passes, then it stops.
 
@@ -44,7 +44,7 @@ That puts `crossrev` on your PATH by symlinking it into `~/.local/bin`, and chec
 
 That also **offers** to install `pr-review` and `pr-resolve` for your harnesses, and hands over to the [`skills` CLI](https://github.com/obra/skills) if you say yes. That CLI runs its own flow — it detects which harnesses you have, and asks about project versus global scope and whether to symlink. Those are its questions, deliberately: suppressing them would mean making three choices on your behalf and calling it convenience. `--skills` and `--no-skills` decide the offer up front for scripted installs, and only the scripted path passes flags that answer them.
 
-**It stays an offer rather than part of the install**, for two reasons. The loop does not need them: crossrev reads both skills out of the checkout and reproduces their text into each prompt, so installing them is for invoking them by hand in an ordinary session. And it is the only step that wants Node — everything else runs on git, bash and coreutils, so a hard dependency on `npx` for an optional extra would be a poor trade. With no `npx`, or no terminal to ask at, it skips and prints the command.
+**It stays an offer rather than part of the install**, for two reasons. The loop does not need them: CrossRev reads both skills out of the checkout and reproduces their text into each prompt, so installing them is for invoking them by hand in an ordinary session. And it is the only step that wants Node — everything else runs on git, bash and coreutils, so a hard dependency on `npx` for an optional extra would be a poor trade. With no `npx`, or no terminal to ask at, it skips and prints the command.
 
 By hand, it is:
 
@@ -93,7 +93,7 @@ crossrev doctor
 | `crossrev auth rotate` | Built. Guided, because GitHub has no API to generate an App key. It proves the new key works before replacing the old one |
 | `crossrev auth refresh` | Built. The refresher job's only command, and the only thing that writes a rotating harness credential |
 
-**Exercised offline, and run against real pull requests locally.** Every command above is asserted against a stubbed `gh` boundary — 815 assertions, no network, no model, no PR — which catches the deterministic half, the half that fails silently. Three live local runs cover the other half. PR 3 converged on pass 3 against three planted defects. PR 4 converged on pass 2 while reviewing crossrev's own rename, where the reviewer found two real defects in the change under review and pushed back on a third. PR 5 ran all three passes over crossrev's own presentation change and found ten findings, nine of them real defects in the branch under review — including one in the token accounting the same branch had just added. **No repository has had the workflows installed yet**, so automated mode is still unproven end to end.
+**Exercised offline, and run against real pull requests locally.** Every command above is asserted against a stubbed `gh` boundary — 815 assertions, no network, no model, no PR — which catches the deterministic half, the half that fails silently. Three live local runs cover the other half. PR 3 converged on pass 3 against three planted defects. PR 4 converged on pass 2 while reviewing CrossRev's own rename, where the reviewer found two real defects in the change under review and pushed back on a third. PR 5 ran all three passes over CrossRev's own presentation change and found ten findings, nine of them real defects in the branch under review — including one in the token accounting the same branch had just added. **No repository has had the workflows installed yet**, so automated mode is still unproven end to end.
 
 ## Using it
 
@@ -154,7 +154,7 @@ crossrev init                # prints an itemised plan, asks once, then sets it 
 
 ## Subscriptions in CI
 
-crossrev runs on the subscriptions you already pay for rather than per-token API keys. Whether that works in CI is a property of the **runner**, because it comes down to whether a harness's credential can sit in a repository secret. These lifetimes were read off installed credentials, not documentation:
+CrossRev runs on the subscriptions you already pay for rather than per-token API keys. Whether that works in CI is a property of the **runner**, because it comes down to whether a harness's credential can sit in a repository secret. These lifetimes were read off installed credentials, not documentation:
 
 | Harness | Subscription credential | Lifetime | Survives an ephemeral runner |
 |---|---|---|---|
@@ -167,7 +167,7 @@ crossrev runs on the subscriptions you already pay for rather than per-token API
 
 **Refresh tokens rotate: using one consumes it.** So the legs never refresh. On a hosted runner with Codex in the pairing, `init` generates `crossrev-token-refresh.yml` — one scheduled job, on its own concurrency group, that is the only writer. Each leg restores a copy into a throwaway home and discards it, and a leg holding under an hour of token life stops rather than refreshing in flight.
 
-That workflow is also the only place crossrev needs `Secrets: write`, which is why it gets a second App (`--role refresher`) rather than widening the loop's. The refresher job never checks out the pull request branch, never runs a model and never reads a diff or a comment — there is nothing in it to inject into. `init` derives whether you need one from the pairing and never asks; most configurations, including the default, never see it.
+That workflow is also the only place CrossRev needs `Secrets: write`, which is why it gets a second App (`--role refresher`) rather than widening the loop's. The refresher job never checks out the pull request branch, never runs a model and never reads a diff or a comment — there is nothing in it to inject into. `init` derives whether you need one from the pairing and never asks; most configurations, including the default, never see it.
 
 ## Local endpoints
 
@@ -186,7 +186,7 @@ An endpoint a leg names but nothing defines is a hard failure. It never falls ba
 
 The orchestrator reproduces `skills/pr-review/SKILL.md` and `skills/pr-resolve/SKILL.md` into each prompt rather than relying on the harness discovering them. That's a departure from the design's CI wiring, for two concrete reasons.
 
-The quarantine moves `.claude/` and `.agents/` out of the checkout before any invocation, which is exactly where a workflow would have placed the skills. Re-planting into a quarantined tree and removing them again before the commit leaves a window where a crash commits crossrev's own skills into someone's pull request. And reproducing the text makes the prompt byte-identical across harnesses, which is the property that lets pass 2 judge pass 1's findings.
+The quarantine moves `.claude/` and `.agents/` out of the checkout before any invocation, which is exactly where a workflow would have placed the skills. Re-planting into a quarantined tree and removing them again before the commit leaves a window where a crash commits CrossRev's own skills into someone's pull request. And reproducing the text makes the prompt byte-identical across harnesses, which is the property that lets pass 2 judge pass 1's findings.
 
 The skills stay installable and usable by hand; nothing about them changes. The generated workflows just don't need to place them anywhere.
 
@@ -216,7 +216,7 @@ crossrev auth login              # detects the owner from the repo you're in
 crossrev auth login --owner your-org
 ```
 
-**Two approvals in a browser, nothing to copy back.** crossrev builds a manifest prefilling the name, the three permissions and the webhook setting, opens your browser at the right registration page, catches GitHub's redirect on a local port, exchanges the code for an App ID and private key, then opens the install page with your account already selected and waits until the installation actually appears.
+**Two approvals in a browser, nothing to copy back.** CrossRev builds a manifest prefilling the name, the three permissions and the webhook setting, opens your browser at the right registration page, catches GitHub's redirect on a local port, exchanges the code for an App ID and private key, then opens the install page with your account already selected and waits until the installation actually appears.
 
 Nothing on either page is yours to get wrong. Creating the App by hand means a required homepage URL you don't need, a webhook that defaults to *on*, an install-scope choice that decides whether it can reach an org at all, and three permissions buried in a long list of three-state dropdowns.
 
@@ -254,7 +254,7 @@ lib/             sourced by bin/crossrev
   sandbox.sh       quarantining repository-provided harness configuration
   state.sh         labels, markers, trust, revision detection, finding ids
   legs.sh          termination, the push guard, the divergence guard
-  github.sh        every GitHub read and write crossrev makes
+  github.sh        every GitHub read and write CrossRev makes
   validate.sh      structural jq checks on what a harness returned
   prompt.sh        what each leg is given
   run.sh           the two legs, the drivers, the watchdog
@@ -274,4 +274,4 @@ tools/crossrev/tests/run.sh      # 815 offline assertions, no network, no model
 tools/crossrev/scripts/lint.sh   # syntax plus shellcheck -S warning
 ```
 
-Both are offline and take seconds. The suite stubs `gh` and `claude` onto PATH and builds throwaway git repositories with real histories and real bare origins, so the assertions are about what crossrev actually did rather than what it printed. `tests/stub/codex` is a deliberate tripwire: it exits loudly instead of running, because the no-config default names codex as reviewer and a fixture whose config failed to load would otherwise reach the real CLI and make a real billed call.
+Both are offline and take seconds. The suite stubs `gh` and `claude` onto PATH and builds throwaway git repositories with real histories and real bare origins, so the assertions are about what CrossRev actually did rather than what it printed. `tests/stub/codex` is a deliberate tripwire: it exits loudly instead of running, because the no-config default names codex as reviewer and a fixture whose config failed to load would otherwise reach the real CLI and make a real billed call.

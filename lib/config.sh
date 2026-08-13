@@ -270,7 +270,7 @@ cfg_resolve_backlog() {
       fi
       return 0 ;;
     auto) : ;;
-    *) ui_die "backlog.destination is '$want', which crossrev does not recognise" \
+    *) ui_die "backlog.destination is '$want', which CrossRev does not recognise" \
          "Set it to github_issues, repository, none or auto in the repository config." ;;
   esac
 

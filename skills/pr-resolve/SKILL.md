@@ -1,6 +1,6 @@
 ---
 name: pr-resolve
-description: Use when resolving review findings on a pull request as one leg of the crossrev cross-model review loop - verifies each finding against the codebase, fixes what is real, pushes back on what is wrong, and returns dispositions and reply text as schema-constrained JSON. Not for ad-hoc review response; use receiving-code-review for that.
+description: Use when resolving review findings on a pull request as one leg of the CrossRev cross-model review loop - verifies each finding against the codebase, fixes what is real, pushes back on what is wrong, and returns dispositions and reply text as schema-constrained JSON. Not for ad-hoc review response; use receiving-code-review for that.
 ---
 
 # pr-resolve
@@ -115,7 +115,7 @@ A **closed** candidate counts. Closing an issue is a decision, and re-filing som
 
 ## The summary comment
 
-One comment summarising what happened, in Markdown, written for a collaborator who has never heard of crossrev: what was fixed, what was skipped and why, what was deferred and where it went, what was rebutted and on what grounds. It goes in the `summary` field.
+One comment summarising what happened, in Markdown, written for a collaborator who has never heard of CrossRev: what was fixed, what was skipped and why, what was deferred and where it went, what was rebutted and on what grounds. It goes in the `summary` field.
 
 The orchestrator wraps it: the alert at the top, the disposition table, the run details, the machine-readable marker and the `## Deferred work filed` list. **Do not write any of them yourself** — and you could not write the last one anyway, because the filing has not happened yet and you do not know the issue numbers.
 

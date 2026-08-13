@@ -51,7 +51,7 @@ prompt_review() {
 
   {
     printf '# Your task\n\n'
-    printf 'You are the review leg of crossrev, running pass %s of %s on %s pull request #%s.\n\n' \
+    printf 'You are the review leg of CrossRev, running pass %s of %s on %s pull request #%s.\n\n' \
       "$(jq -r .pass <<<"$meta")" "$(jq -r .max_passes_per_cycle <<<"$meta")" \
       "$(jq -r .repo <<<"$meta")" "$(jq -r .pr <<<"$meta")"
     printf 'Follow the skill reproduced immediately below. It is the whole rubric; there is no other.\n\n'
@@ -119,7 +119,7 @@ prompt_resolve() {
 
   {
     printf '# Your task\n\n'
-    printf 'You are the resolve leg of crossrev, running pass %s of %s on %s pull request #%s. The findings below came from the review leg — a separate agent, reviewing this diff without seeing your work.\n\n' \
+    printf 'You are the resolve leg of CrossRev, running pass %s of %s on %s pull request #%s. The findings below came from the review leg — a separate agent, reviewing this diff without seeing your work.\n\n' \
       "$(jq -r .pass <<<"$meta")" "$(jq -r .max_passes_per_cycle <<<"$meta")" \
       "$(jq -r .repo <<<"$meta")" "$(jq -r .pr <<<"$meta")"
     printf 'You are in a checkout of the pull request'"'"'s head branch at %s. Change code in the working tree; the orchestrator commits and pushes it. Make no GitHub call — you have no credential for one.\n\n' \

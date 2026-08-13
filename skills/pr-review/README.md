@@ -1,6 +1,6 @@
 # pr-review
 
-The review leg of [crossrev](../../). Reads a pull request diff and prior review threads supplied in the prompt, and returns findings as schema-constrained JSON anchored to file and line.
+The review leg of [CrossRev](../../). Reads a pull request diff and prior review threads supplied in the prompt, and returns findings as schema-constrained JSON anchored to file and line.
 
 Forked from Superpowers' `code-reviewer.md`, which already supplied the right skeleton: harness-neutral markdown, a severity model, a hard requirement that every finding carries file, line, what's wrong, why it matters and how to fix, read-only discipline, and an explicit verdict.
 

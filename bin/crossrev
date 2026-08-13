@@ -156,7 +156,7 @@ main() {
         cfg_load ""
         preflight_report_pairings "$(cfg_get '.runner')" || doctor_ok=1
       fi
-      (( doctor_ok == 0 )) && ui_end "Everything crossrev needs is installed." \
+      (( doctor_ok == 0 )) && ui_end "Everything CrossRev needs is installed." \
         || ui_end "Fix what is marked ✗ above, then run this again." ;;
 
     cycle)   cmd_cycle "$@" ;;

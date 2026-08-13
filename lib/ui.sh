@@ -126,7 +126,7 @@ _ui_input_source() {
 }
 
 _ui_no_input() {
-  ui_die "crossrev needs to ask you something, but no terminal is attached" \
+  ui_die "CrossRev needs to ask you something, but no terminal is attached" \
     "Run this in a terminal directly. Editor-embedded and captured shells often have no controlling terminal, which is what this is."
 }
 
