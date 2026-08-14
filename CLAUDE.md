@@ -22,7 +22,7 @@ Named 2026-08-13, renamed from the working title `revloop` ([ADR 0010](docs/adrs
   - No build step, no package manager, no lockfile. The checkout is the installation: `install.sh` symlinks `bin/crossrev` onto PATH and the tool reads its libraries, skills and templates from the checkout at runtime.
   - Dependencies are `git`, `gh`, `jq`, `yq`, `openssl`, plus `shellcheck` for the linter. Adding a language runtime needs an ADR first.
   - Delivery to consuming repositories is a composite action pinned by full 40-character SHA ([ADR 0009](docs/adrs/0009-delivery-via-sha-pinned-composite-action.md)). `crossrev init` generates the pinned form; the floating `@v0` exists only in the README's copy-paste example.
-  - CI runs `scripts/lint.sh` and `tests/run.sh` on push and pull request. There is no release workflow — a release is a tag.
+  - CI runs `scripts/lint.sh` and `tests/run.sh` on push and pull request, plus `scripts/check-changelog.sh` on pull requests only. A release is a tag, and the tag triggers `.github/workflows/npm-publish.yml`.
 
 ## The public/private gate
 
@@ -117,6 +117,17 @@ The boundary that catches people: in help text, `crossrev review --pr 42` stays 
 ## Commits
 
 Conventional Commits: `<type>(<scope>): <description>`, imperative, subject ≤72 chars, body explains *why*. Types: `feat`, `fix`, `docs`, `style`, `refactor`, `test`, `chore`, `perf`, `ci`. Reference an ADR in the body when relevant. Never reference a private workbench path in a public commit message.
+
+**The type you choose is the version decision** ([ADR 0012](docs/adrs/0012-versions-are-cut-deliberately.md)). `fix` is a patch, `feat` is a minor, `!` or a `BREAKING CHANGE:` footer is a breaking change. Nothing re-derives this later from a diff, so a `feat` written as a `chore` disappears from the next version silently.
+
+## Releases
+
+Versions are **cut deliberately, not per merge**. Changes accumulate under `## [Unreleased]`; a release turns that heading into a version.
+
+- **Every branch that changes what ships must add an entry under `## [Unreleased]`.** CI enforces it on pull requests via `scripts/check-changelog.sh`, which reads the shipped set from `npm pack` rather than a hardcoded list. Docs, tests and CI changes are exempt because they do not ship.
+- **To cut a release:** run `scripts/next-version.sh` for the bump the commit types imply, set `VERSION` and `package.json` to it together — `lint.sh` fails if they disagree — move the `[Unreleased]` entries under the new heading, commit, then tag `vX.Y.Z` and push the tag.
+- **Never choose major on your own.** `v1.0.0` is gated on proving automated mode end to end. Raise it rather than deciding it.
+- **A published version is permanent.** npm's unpublish is conditional and cannot be undone, and a `name@version` pair is never reusable. Treat a tag push as irreversible, because it is.
 
 ## Working principles for agent sessions
 
