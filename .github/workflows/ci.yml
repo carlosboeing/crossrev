@@ -50,3 +50,32 @@ jobs:
 
       - name: Tests
         run: bash tests/run.sh
+
+  # A pull request only. The check compares against the base branch, and a push
+  # has no base to compare against.
+  changelog:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Fetch the base branch
+        # actions/checkout fetches only the ref it checks out, so the base is
+        # absent by default and `git diff base...HEAD` has nothing to resolve.
+        # The ref name goes through the environment rather than into the command
+        # line, so a branch name can never be read as shell.
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: git fetch --no-tags origin "+refs/heads/$BASE_REF:refs/remotes/origin/$BASE_REF"
+
+      - name: Verify dependencies
+        run: |
+          set -euo pipefail
+          for t in bash git jq npm; do
+            command -v "$t" >/dev/null || { echo "::error::$t is missing"; exit 1; }
+          done
+
+      - name: Changelog
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: bash scripts/check-changelog.sh "origin/$BASE_REF"
