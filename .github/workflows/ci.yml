@@ -57,13 +57,17 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
+      # fetch-depth: 0 is load-bearing. The default shallow clone shares no
+      # history with the base branch, so `git diff base...HEAD` dies with
+      # "no merge base" rather than returning a diff.
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - name: Fetch the base branch
-        # actions/checkout fetches only the ref it checks out, so the base is
-        # absent by default and `git diff base...HEAD` has nothing to resolve.
-        # The ref name goes through the environment rather than into the command
-        # line, so a branch name can never be read as shell.
+        # checkout fetches only the ref it checks out, so the base still needs
+        # naming even with full depth. The ref goes through the environment
+        # rather than the command line, so a branch name is never read as shell.
         env:
           BASE_REF: ${{ github.base_ref }}
         run: git fetch --no-tags origin "+refs/heads/$BASE_REF:refs/remotes/origin/$BASE_REF"

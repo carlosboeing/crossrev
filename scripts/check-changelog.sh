@@ -42,7 +42,17 @@ if [[ -z "$shipped" ]]; then
   exit 1
 fi
 
-changed="$(git diff --name-only "$BASE...HEAD")"
+# A failed diff must not read as an empty diff. On a shallow clone this fails
+# with "no merge base", and treating that as "nothing changed" makes the whole
+# check pass without ever having run — the exact failure it is here to catch.
+if ! changed="$(git diff --name-only "$BASE...HEAD" 2>&1)"; then
+  echo "error  cannot diff against $BASE:" >&2
+  sed 's/^/       /' >&2 <<<"$changed"
+  echo "       A shallow clone has no merge base. In CI, check out with" >&2
+  echo "       fetch-depth: 0 so the base and the head share history." >&2
+  exit 1
+fi
+
 [[ -z "$changed" ]] && { printf '\nchangelog\n  ○     nothing changed against %s\n' "$BASE"; exit 0; }
 
 # The intersection: changed files that a user would actually receive.
