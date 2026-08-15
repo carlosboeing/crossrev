@@ -28,8 +28,13 @@ done < <(find . -name '*.sh' -o -name crossrev -path '*/bin/*' | sort)
 
 printf '\nshellcheck -S warning\n'
 if command -v shellcheck >/dev/null 2>&1; then
+  # bootstrap.sh is here for the reason it cannot be anywhere else: it is fetched
+  # and piped into bash straight from the internet, and it is deliberately
+  # self-contained — it cannot source lib/ui.sh, because the reason it is running
+  # is that lib/ is not on the machine yet. Nothing else would catch a mistake in
+  # it.
   if shellcheck -S warning -x bin/crossrev lib/*.sh lib/adapters/*.sh \
-       tests/*.sh tests/stub/* install.sh scripts/*.sh; then
+       tests/*.sh tests/stub/* bootstrap.sh install.sh scripts/*.sh; then
     printf '  ok    clean\n'
   else
     fail=1
