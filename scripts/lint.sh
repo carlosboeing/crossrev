@@ -34,7 +34,8 @@ if command -v shellcheck >/dev/null 2>&1; then
   # is that lib/ is not on the machine yet. Nothing else would catch a mistake in
   # it.
   if shellcheck -S warning -x bin/crossrev lib/*.sh lib/adapters/*.sh \
-       tests/*.sh tests/stub/* bootstrap.sh install.sh scripts/*.sh; then
+       tests/*.sh tests/stub/* bootstrap.sh install.sh scripts/*.sh \
+       scripts/githooks/pre-commit; then
     printf '  ok    clean\n'
   else
     fail=1

@@ -32,7 +32,7 @@ Named 2026-08-13, renamed from the working title `revloop` ([ADR 0010](docs/adrs
 
 `.workbench/` is an independent clone nested at this root and named in `.gitignore`, so `git add -A` here can never sweep a workbench file into a public commit.
 
-**Never cross-commit.** In this working tree, plain `git …` targets the public repo and `git -C .workbench …` targets the private one. There is no command that legitimately stages both.
+**Never cross-commit.** In this working tree, plain `git …` targets **whichever repository the shell is currently inside** — the public one at the root, the private one from anywhere under `.workbench/`. From the root, `git -C .workbench …` names the private one explicitly. Nothing in git's output says which repo it resolved, so when you are not certain where the shell is, name the target with `-C` rather than assuming. There is no command that legitimately stages both.
 
 ### 2. The routing rule
 
@@ -64,6 +64,8 @@ git diff --cached | grep -inE '\.workbench|hosted (service|tier)|monetiz|monetis
 ```
 
 Read the hits rather than counting them. This file is itself a hit, because stating a rule needs the words the rule forbids — which is exactly why the flip-time sweep excludes `CLAUDE.md`, `AGENTS.md` and `.gitignore` by name and then has a human read them.
+
+**`scripts/githooks/pre-commit` now runs this automatically** and refuses the commit, so it is enforced rather than remembered. Enable it once per clone — git will not do it for you — with `git config core.hooksPath scripts/githooks`. Its money pattern is tighter than the grep above: a bare `\$[0-9]` also matches every shell positional parameter, which blocked 16 of 40 real commits when measured. The override for a commit that is genuinely fine is `git commit --no-verify`.
 
 Product-technical direction is fine. This check is about privacy the way the ship checklist is about tracking files: applied to every change, not only the ones that feel sensitive.
 
