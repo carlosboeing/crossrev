@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+#
+# pre-commit — keep private working-memory content out of a public commit.
+#
+# For the public-repo-plus-private-workbench pattern: an independent private
+# clone nested inside a public repository, sharing one working tree.
+#
+# `.gitignore` already stops `git add -A` sweeping workbench *files* into a
+# public commit, and that layer needs no vigilance. This hook covers the other
+# direction, which no ignore rule can see: private *content* retyped, pasted or
+# summarised into a public file from the correct directory. A path rule cannot
+# catch that, because nothing about the path is wrong.
+#
+# Two checks, both refusing the commit:
+#
+#   1. The workbench staged as a gitlink. `git add -f .workbench/some/file` is
+#      not the risk — git refuses to reach inside a nested repository and
+#      silently stages nothing. `git add -f .workbench` is: it records a
+#      submodule reference, publishing the private repository's name and commit
+#      SHA even though clones get none of its content.
+#   2. Workbench vocabulary in added lines — the scan list from CLAUDE.md.
+#
+# Deliberate override, for the commit that is genuinely fine:
+#
+#   git commit --no-verify
+#
+# Install: see the README beside this file.
+
+set -uo pipefail
+
+# The scan list. Kept in step with the "pre-commit privacy check" section of the
+# repository's CLAUDE.md — if one changes, change the other.
+#
+# **Money needs two digits, or a separator.** A bare `\$[0-9]` also matches every
+# shell positional parameter, and in an all-bash repository that is not a corner
+# case: measured against crossrev, it alone blocked 16 of the last 40 commits
+# while every other term blocked at most one. A hook that cries wolf on 40% of
+# commits gets bypassed reflexively, which is worse than no hook.
+PATTERN='\.workbench|hosted (service|tier)|monetiz|monetis|pricing|per (seat|month|user)|\$[0-9]{2,}|\$[0-9]+[.,][0-9]'
+
+# Files that must name the forbidden words in order to state the rule, and so
+# can never satisfy it. CLAUDE.md documents this same exclusion for the manual
+# flip-time sweep; a human reads these instead.
+_skip() {
+  case "$1" in
+    CLAUDE.md|AGENTS.md|.gitignore) return 0 ;;
+    */githooks/pre-commit|githooks/pre-commit) return 0 ;;
+    */private-workbench-guard/*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+fail=0
+
+# --- 1. the workbench staged as a gitlink -----------------------------------
+#
+# The trailing `(/|$)` matters. `git add -f .workbench` stages the path with no
+# slash, which is exactly the case worth catching; requiring a slash misses it.
+
+inside="$(git diff --cached --name-only --diff-filter=ACMR | grep -E '^\.workbench(/|$)' || true)"
+if [ -n "$inside" ]; then
+  printf '\npre-commit: refusing — the private workbench is staged.\n\n' >&2
+  printf '%s\n' "$inside" | sed 's/^/    /' >&2
+  printf '\n  Committing this records a submodule reference to the private repository.\n' >&2
+  printf '  Unstage it here: git reset .workbench\n' >&2
+  printf '  Workbench content is committed with: git -C .workbench commit\n' >&2
+  fail=1
+fi
+
+# --- 2. workbench vocabulary in added lines ---------------------------------
+
+reported=0
+while IFS= read -r f; do
+  [ -n "$f" ] || continue
+  _skip "$f" && continue
+  hits="$(git diff --cached --unified=0 -- "$f" \
+            | grep -E '^\+' | grep -v '^+++' \
+            | grep -inE "$PATTERN" || true)"
+  [ -n "$hits" ] || continue
+  if [ "$reported" -eq 0 ]; then
+    printf '\npre-commit: refusing — added lines carry workbench vocabulary.\n\n' >&2
+    reported=1
+  fi
+  printf '  %s\n' "$f" >&2
+  printf '%s\n' "$hits" | sed 's/^/      /' >&2
+  fail=1
+done < <(git diff --cached --name-only --diff-filter=ACMR)
+
+if [ "$reported" -eq 1 ]; then
+  printf '\n  Read the hits rather than counting them. Product direction is fine here;\n' >&2
+  printf '  brand, company and commercial reasoning is workbench-only.\n' >&2
+  printf '  If this commit is genuinely fine: git commit --no-verify\n\n' >&2
+fi
+
+exit "$fail"
