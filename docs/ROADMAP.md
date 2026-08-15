@@ -27,10 +27,10 @@ Everything here is deferred to the `v1.0.0` conversation, and all of it is a doo
 ## Open questions
 
 - **Does the offline suite need a second runner family?** CI runs on Ubuntu only. The tool is used on macOS daily and `init` renders workflows for both runner families, so a macOS job would catch a BSD-versus-GNU divergence that the Ubuntu job cannot. Worth doing when something breaks that way, rather than before.
-- **Should `bootstrap.sh` be shellchecked?** It is syntax-checked but absent from the shellcheck list, which is the one entry script a stranger runs first.
 
 ## Recently shipped
 
+- **`bootstrap.sh` is shellchecked** (2026-08-15). It was syntax-checked but absent from the shellcheck list, and it is the one entry script a stranger runs first — fetched from raw.githubusercontent and piped into bash. Being deliberately self-contained is what leaves it uncovered: it cannot source `lib/ui.sh`, so nothing else would catch a mistake in it. It was already clean at the severity the linter runs; the list now keeps it that way.
 - **Generated App display names take the product name** ([#4](https://github.com/carlosboeing/crossrev/issues/4), 2026-08-14). `CrossRev <owner>` and `CrossRev Refresh <owner>` rather than the lowercase forms. The slug GitHub derives is unchanged, so marker trust is untouched, and `tests/test-auth.sh` now holds those two facts together.
 - **Install from npm** ([ADR 0011](adrs/0011-npm-as-a-second-install-route.md), 2026-08-13). `npx crossrev-ai` runs the local loop with nothing cloned and nothing left behind. Automated-mode setup still needs a checkout, because `crossrev init` pins the action to a SHA it reads from CrossRev's own git directory — so npm carries the half that has run against real pull requests, and the half that hasn't stays where its proof will come from.
 - **The pass label moves instead of accumulating** ([#2](https://github.com/carlosboeing/crossrev/issues/2), 2026-08-13). One grey pill, always the pass the pull request is on. A revision that resets the counter sheds the higher labels rather than keeping them as history — the markers are the record of what ran, the label row is the current state.
