@@ -4,6 +4,10 @@ All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepa
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-08-16
+
+A second way in, and a release process. CrossRev installs from npm without a clone, versions are now cut deliberately rather than per merge, and two display-level defects are fixed. **Automated mode is still built and unproven** — nothing here changes that, and proving it remains the `v1.0.0` bar.
+
 ### Added
 
 - **CrossRev installs from npm, as `crossrev-ai`** ([ADR 0011](docs/adrs/0011-npm-as-a-second-install-route.md)). `npx crossrev-ai --pr 42` runs the local loop without cloning anything, and `npm install -g crossrev-ai` is a second way onto your PATH. **The installed command is still `crossrev`** — only the package identifier carries the suffix, because npm refuses `crossrev` as too similar to the long-established `cross-env` and that check has no appeal. Homebrew, GitHub Releases and the repository itself are unaffected and keep the plain name. The package is the same bash the clone runs, with no build step and no dependencies — Node is needed to install it and for nothing after that. macOS and Linux only, declared in the manifest so Windows fails at install rather than at first run. **`crossrev init` still needs a clone**, because it pins the composite action to a SHA read from CrossRev's own git checkout and an npm package has none; it stops with an error naming the cause rather than writing a workflow pinned to nothing. Publishing runs on a tag through trusted publishing, so no npm token exists in this repository or on a laptop.
