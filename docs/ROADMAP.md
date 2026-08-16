@@ -31,6 +31,7 @@ Everything here is deferred to the `v1.0.0` conversation, and all of it is a doo
 
 ## Recently shipped
 
+- **`auth status` revalidates the App identity it reports** ([#5](https://github.com/carlosboeing/crossrev/issues/5), 2026-08-16). It read the name and slug from a file written once at registration and never checked them, so a rename went unnoticed — and the cached slug is what marker trust falls back to. It now reads `GET /app` with the JWT it was already minting, reports the drift, and corrects the cache.
 - **v0.2.0 (2026-08-16)** — the four entries below, published. It carries the npm install route, the deliberate release process, and the two display fixes; automated mode is still built and unproven, so the version stays in `0.x`. Details in [`CHANGELOG.md`](../CHANGELOG.md).
 - **`bootstrap.sh` is shellchecked** (2026-08-15). It was syntax-checked but absent from the shellcheck list, and it is the one entry script a stranger runs first — fetched from raw.githubusercontent and piped into bash. Being deliberately self-contained is what leaves it uncovered: it cannot source `lib/ui.sh`, so nothing else would catch a mistake in it. It was already clean at the severity the linter runs; the list now keeps it that way.
 - **Generated App display names take the product name** ([#4](https://github.com/carlosboeing/crossrev/issues/4), 2026-08-14). `CrossRev <owner>` and `CrossRev Refresh <owner>` rather than the lowercase forms. The slug GitHub derives is unchanged, so marker trust is untouched, and `tests/test-auth.sh` now holds those two facts together.

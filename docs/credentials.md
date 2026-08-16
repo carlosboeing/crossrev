@@ -69,7 +69,7 @@ crossrev auth login --owner your-org
 
 Two approvals in a browser, nothing to copy back. CrossRev builds a manifest prefilling the name, the three permissions and the webhook setting, opens your browser at the right page, catches GitHub's redirect on a local port, exchanges the code for an App ID and private key, then opens the install page with your account already selected and waits until the installation appears. If the local listener can't start, it falls back to asking you to paste the redirect URL — that path is the floor, not the plan.
 
-`crossrev auth status` confirms where each App is actually installed by signing a JWT and asking GitHub, rather than assuming the setup worked.
+`crossrev auth status` confirms where each App is actually installed by signing a JWT and asking GitHub, rather than assuming the setup worked. The same call re-reads the App's own name and slug. Renaming an App in its settings moves both, and CrossRev recorded them once at registration — so if they have drifted, `auth status` says so and corrects its cached copy. That matters more than it looks: the cached slug is what automated mode falls back to when deciding whose markers to trust, and a stale one makes it trust an author that does not exist.
 
 ## Harness credentials on hosted runners
 
