@@ -169,6 +169,51 @@ _auth_installations() {
     --jq '.[] | "\(.account.login) \(.repository_selection)"' 2>/dev/null || return 1
 }
 
+# What the App calls itself, as GitHub has it: name on the first line, slug on
+# the second. Authoritative, and reachable with the key already on disk — the
+# same JWT the installations call above is already holding.
+_auth_app_identity() {
+  local jwt="$1" name slug
+  { read -r name; read -r slug; } < <(
+    gh api -H "Authorization: Bearer $jwt" /app --jq '.name, .slug' 2>/dev/null)
+  # A reachable API that answered with neither is not evidence of anything, and
+  # an empty slug written back would be worse than the stale one it replaced.
+  [[ -n "$name" && -n "$slug" ]] || return 1
+  printf '%s\n%s\n' "$name" "$slug"
+}
+
+# Reconcile the cached identity against the authoritative one, correcting it.
+#
+# Prints one line per field that moved, as tab-separated "<field> <was> <now>",
+# and nothing at all when the two agree — so a caller tests for output rather
+# than remembering which way a return code points. Tabs rather than spaces
+# because an App name is free text and routinely contains spaces: CrossRev
+# proposes one that does.
+#
+# It writes, which a status command otherwise does not. The justification is that
+# this file is CrossRev's own cache of a fact GitHub owns, not operator config,
+# and the cached slug is what `state_trusted_author` falls back to. Diagnosing
+# that drift and then leaving it in place would report a fault it had already
+# found and could have fixed, and the only repair left would be editing JSON by
+# hand.
+_auth_sync_meta() {
+  local meta="$1" name="$2" slug="$3" was_name was_slug drift=""
+  was_name="$(jq -r '.name // empty' "$meta" 2>/dev/null)"
+  was_slug="$(jq -r '.slug // empty' "$meta" 2>/dev/null)"
+
+  [[ "$was_name" == "$name" ]] || drift+="name"$'\t'"$was_name"$'\t'"$name"$'\n'
+  [[ "$was_slug" == "$slug" ]] || drift+="slug"$'\t'"$was_slug"$'\t'"$slug"$'\n'
+  [[ -n "$drift" ]] || return 0
+
+  # umask rather than create-then-chmod, and a rename rather than a truncate in
+  # place, so nothing ever reads a half-written file or one briefly wider than
+  # the 0600 the original was created with.
+  (umask 077; jq --arg n "$name" --arg s "$slug" '.name = $n | .slug = $s' \
+    "$meta" >"$meta.tmp" && mv "$meta.tmp" "$meta") || return 1
+
+  printf '%s' "$drift"
+}
+
 # ---------------------------------------------------------------------------
 # A one-shot local listener
 # ---------------------------------------------------------------------------
@@ -323,6 +368,7 @@ auth_status() {
 
   ui_section "Apps"
   local meta owner role owner_type owner_id id name slug pem mode jwt installs
+  local identity real_name real_slug drift field was now
   for meta in "$dir"/*.json; do
     # Owner and role come out of the file rather than out of its name. Anything
     # registered before roles existed has no role key, and it is the loop's.
@@ -335,7 +381,34 @@ auth_status() {
     slug="$(jq -r .slug "$meta")"
     pem="$(_auth_pem "$owner" "$role")"
 
+    # Rule 5, before the first line is printed rather than after: the name and
+    # slug just read came out of a file written once, at creation. Renaming the
+    # App in its settings moves both and nothing local notices, so `auth status`
+    # — the command whose entire job is answering "is my credential set up
+    # correctly" — would answer confidently from a file that can be wrong.
+    # Revalidate against GET /app first, and report what came back.
+    jwt=""; drift=""
+    if [[ -f "$pem" ]] && jwt="$(_auth_jwt "$pem" "$id")" \
+       && identity="$(_auth_app_identity "$jwt")"; then
+      real_name="$(sed -n 1p <<<"$identity")"
+      real_slug="$(sed -n 2p <<<"$identity")"
+      drift="$(_auth_sync_meta "$meta" "$real_name" "$real_slug")"
+      # Report the identity GitHub has, including in the install URL below,
+      # which was being built from the stale slug too.
+      [[ -z "$drift" ]] || { name="$real_name"; slug="$real_slug"; }
+    fi
+
     ui_ok "$owner — $name (id $id, role $role: $(_auth_role_summary "$role"))"
+
+    if [[ -n "$drift" ]]; then
+      while IFS=$'\t' read -r field was now; do
+        [[ -n "$field" ]] || continue
+        ui_line "   $field was $was, now $now"
+      done <<<"$drift"
+      ui_warn \
+        "$owner's App was renamed since CrossRev recorded it — the cached copy has been corrected" \
+        "The slug is the half that matters. state_trusted_author falls back to it when CROSSREV_APP_SLUG is unset, so an automated run started from this machine was trusting an author that does not exist: no markers read, pass 1 for ever, nothing reconciled. Generated workflows pass the slug from the token step's app-slug output and were never affected."
+    fi
 
     if [[ -f "$pem" ]]; then
       # stat drops the leading zero, and "600" next to a sentence about 0600
@@ -355,7 +428,7 @@ auth_status() {
 
       # Rule 5: report what is true, not what was configured. An App installed
       # nowhere looks identical to a working one until the first API call fails.
-      if jwt="$(_auth_jwt "$pem" "$id")" && installs="$(_auth_installations "$jwt")"; then
+      if [[ -n "$jwt" ]] && installs="$(_auth_installations "$jwt")"; then
         if [[ -n "$installs" ]]; then
           while read -r acct sel; do
             ui_line "   installed on $acct ($sel repositories)"

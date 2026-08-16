@@ -19,6 +19,8 @@ pass=0 fail=0
 ok()    { printf '  ok    %s\n' "$1"; pass=$((pass+1)); }
 notok() { printf '  FAIL  %s\n    expected: %s\n    actual:   %s\n' "$1" "$2" "$3"; fail=$((fail+1)); }
 is()    { [[ "$2" == "$3" ]] && ok "$1" || notok "$1" "$3" "$2"; }
+has()   { [[ "$2" == *"$3"* ]] && ok "$1" || notok "$1" "contains '$3'" "$2"; }
+hasnt() { [[ "$2" != *"$3"* ]] && ok "$1" || notok "$1" "does not contain '$3'" "$2"; }
 
 # GitHub derives a slug by lowercasing and turning spaces into hyphens. Modelled
 # here rather than asserted from a live API, so the suite stays offline.
@@ -58,6 +60,149 @@ is "the owner's own casing survives" \
   "$(_auth_role_default_name loop ShoreLogic)" "CrossRev ShoreLogic"
 is "and still slugs to what the App is installed as" \
   "$(slugify "$(_auth_role_default_name loop ShoreLogic)")" "crossrev-shorelogic"
+
+# --- the cached identity is revalidated, not believed -----------------------
+#
+# `auth login` records the name and slug once, at creation. Renaming the App in
+# its settings moves both, and nothing local notices — which matters because the
+# cached slug is not decoration: `state_trusted_author` reads it as the fallback
+# when CROSSREV_APP_SLUG is unset, so a stale one makes automated mode trust an
+# author that does not exist. No markers read, pass 1 for ever, nothing
+# reconciled, and `auth status` reporting confidently the whole time.
+#
+# GET /app is authoritative and reachable with the key already on disk. These
+# cases cover reading it, and reconciling the file against it.
+
+XDG_CONFIG_HOME="$(mktemp -d)"; export XDG_CONFIG_HOME
+STUB_DIR="$(mktemp -d)"
+export CROSSREV_GH_ROUTES="$STUB_DIR/routes"
+export PATH="$HERE/stub:$PATH"
+
+# The file `auth login` writes, with the identity it had at creation. Everything
+# below the name and slug is here to prove a correction leaves it alone.
+meta_fixture() {
+  local dir; dir="$(_auth_dir)"
+  mkdir -p "$dir"
+  (umask 077; jq -n \
+    --arg owner ShoreLogic --arg name "$1" --arg slug "$2" \
+    '{owner:$owner, owner_type:"Organization", owner_id:12345,
+      id:987, slug:$slug, name:$name, role:"loop",
+      created:"2026-08-13T00:00:00Z"}' >"$dir/ShoreLogic.loop.json")
+  printf '%s/ShoreLogic.loop.json' "$dir"
+}
+
+# --- reading the authoritative identity ------------------------------------
+
+printf '%s\t%s\n' '*/app --jq*' \
+  '{"name":"CrossRev ShoreLogic","slug":"crossrev-shorelogic","id":987}' \
+  >"$CROSSREV_GH_ROUTES"
+
+# The JWT is opaque to this test — the stub answers on the route, not the token.
+is "the authoritative identity comes back as name then slug" \
+  "$(_auth_app_identity dummy-jwt | tr '\n' '|')" "CrossRev ShoreLogic|crossrev-shorelogic|"
+
+# --- an App that has not been renamed --------------------------------------
+
+fresh="$(meta_fixture "CrossRev ShoreLogic" crossrev-shorelogic)"
+before="$(cat "$fresh")"
+
+is "an unchanged App reports no drift" \
+  "$(_auth_sync_meta "$fresh" "CrossRev ShoreLogic" crossrev-shorelogic)" ""
+is "and its file is left exactly as it was" "$(cat "$fresh")" "$before"
+
+# --- an App renamed in its settings ----------------------------------------
+#
+# The 2026-08-13 rename, which is where this was found: revloop-ShoreLogic
+# became CrossRev ShoreLogic, and the slug moved with it.
+
+stale="$(meta_fixture "revloop-ShoreLogic" revloop-shorelogic)"
+drift="$(_auth_sync_meta "$stale" "CrossRev ShoreLogic" crossrev-shorelogic)"
+
+has "a renamed App reports the name that moved" "$drift" \
+  "name"$'\t'"revloop-ShoreLogic"$'\t'"CrossRev ShoreLogic"
+has "and the slug that moved with it" "$drift" \
+  "slug"$'\t'"revloop-shorelogic"$'\t'"crossrev-shorelogic"
+
+is "the corrected file carries the new name" "$(jq -r .name "$stale")" "CrossRev ShoreLogic"
+
+# The assertion this whole suite exists for. `state_trusted_author` reads exactly
+# this field and prints "<slug>[bot]", so a correction that stopped short of the
+# slug would leave automated mode broken while reporting itself fixed.
+is "and the new slug, which is what marker trust reads" \
+  "$(jq -r .slug "$stale")" "crossrev-shorelogic"
+is "so the trusted author resolves to the App that exists" \
+  "$(jq -r .slug "$stale")[bot]" "crossrev-shorelogic[bot]"
+
+# --- a correction rewrites two fields and no others -------------------------
+
+is "the App id survives the correction"      "$(jq -r .id "$stale")"         "987"
+is "the owner survives"                      "$(jq -r .owner "$stale")"      "ShoreLogic"
+is "the owner type survives"                 "$(jq -r .owner_type "$stale")" "Organization"
+is "the owner id survives"                   "$(jq -r .owner_id "$stale")"   "12345"
+is "the role survives"                       "$(jq -r .role "$stale")"       "loop"
+is "and the registration date is not restamped" \
+  "$(jq -r .created "$stale")" "2026-08-13T00:00:00Z"
+
+# The directory is chmod 700 and the key beside it is 0600. A correction that
+# rewrote the metadata world-readable would widen the one thing that names which
+# App a machine trusts.
+is "the corrected file keeps its mode" \
+  "$(printf '%04d' "$(stat -c '%a' "$stale" 2>/dev/null || stat -f '%Lp' "$stale" 2>/dev/null)")" \
+  "0600"
+
+# --- when GitHub cannot be reached -----------------------------------------
+#
+# Rule 5 cuts both ways: an unreachable API is not evidence the cached identity
+# is wrong, so nothing is corrected and nothing is claimed.
+
+printf '%s\t%s\n' '*/app --jq*' '!fail' >"$CROSSREV_GH_ROUTES"
+_auth_app_identity dummy-jwt >/dev/null 2>&1
+is "an unreachable /app fails rather than inventing an identity" "$?" "1"
+
+# --- and `auth status` puts it in front of a person -------------------------
+#
+# The helpers above are the mechanism; this is the command an operator actually
+# runs to answer "is my credential set up correctly". It answered that from the
+# cache, confidently, which is the whole defect.
+
+# A real key, because _auth_jwt signs with openssl and a fixture string would
+# only prove the stub was reached. Generated once, into the same 0600 the
+# registration path creates.
+(umask 077; openssl genrsa -out "$(_auth_dir)/ShoreLogic.loop.pem" 2048 2>/dev/null)
+
+{
+  printf '%s\t%s\n' '*/app --jq*' \
+    '{"name":"CrossRev ShoreLogic","slug":"crossrev-shorelogic","id":987}'
+  printf '%s\t%s\n' '*/app/installations*' \
+    '[{"account":{"login":"ShoreLogic"},"repository_selection":"selected"}]'
+} >"$CROSSREV_GH_ROUTES"
+
+stale="$(meta_fixture "revloop-ShoreLogic" revloop-shorelogic)"
+out="$(auth_status 2>&1)"
+
+has "status says the App was renamed" "$out" "renamed"
+has "and shows the slug that moved, because that is the half that breaks trust" \
+  "$out" "slug was revloop-shorelogic, now crossrev-shorelogic"
+has "it reports the name GitHub has, not the one on disk" "$out" "CrossRev ShoreLogic"
+hasnt "and does not present the stale name as current" "$out" "— revloop-ShoreLogic ("
+is "the cached slug is corrected as a side effect of asking" \
+  "$(jq -r .slug "$stale")" "crossrev-shorelogic"
+
+# Running it again is the honest test of a self-healing read: the drift is gone,
+# so the warning goes with it rather than firing on every invocation.
+out="$(auth_status 2>&1)"
+hasnt "a second run reports no drift, having fixed it" "$out" "renamed"
+has "and still reports the installation" "$out" "installed on ShoreLogic"
+
+# An App name is free text and routinely contains spaces — CrossRev proposes one
+# with a space in it. So the field the report splits on cannot be a space, or a
+# rename away from a two-word name prints the halves in the wrong places.
+stale="$(meta_fixture "CrossRev Shore Logic" crossrev-shore-logic)"
+out="$(auth_status 2>&1)"
+
+has "a rename away from a name with spaces reports the old name whole" \
+  "$out" "name was CrossRev Shore Logic, now CrossRev ShoreLogic"
+is "and still corrects the slug" "$(jq -r .slug "$stale")" "crossrev-shorelogic"
 
 printf '\n  %d passed, %d failed\n' "$pass" "$fail"
 (( fail == 0 ))

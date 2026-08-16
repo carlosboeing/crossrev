@@ -4,6 +4,10 @@ All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepa
 
 ## [Unreleased]
 
+### Fixed
+
+- **`crossrev auth status` revalidates the App's identity instead of reporting a cache** ([#5](https://github.com/carlosboeing/crossrev/issues/5)). `auth login` records an App's name and slug once, at registration. Renaming the App in its settings moves both, and nothing local noticed — so the one command whose job is answering "is my credential set up correctly" answered confidently from a file that could be wrong. It now signs the JWT it was already minting for the installations check, reads `GET /app`, and reports what came back. **The cached copy is corrected in place when it has drifted**, which is a write from a status command and deliberate: the cached slug is not decoration. `state_trusted_author` falls back to it when `CROSSREV_APP_SLUG` is unset, so a stale slug makes an automated run started from a machine trust an author that does not exist — no markers read, pass 1 for ever, nothing reconciled. Detecting that and leaving it in place would have reported a fault it had already diagnosed, with hand-editing JSON as the only repair. Generated workflows were never exposed, because they pass the slug from the token step's `app-slug` output. An unreachable `GET /app` corrects nothing and claims nothing.
+
 ## [0.2.0] — 2026-08-16
 
 A second way in, and a release process. CrossRev installs from npm without a clone, versions are now cut deliberately rather than per merge, and two display-level defects are fixed. **Automated mode is still built and unproven** — nothing here changes that, and proving it remains the `v1.0.0` bar.
