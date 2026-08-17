@@ -1276,7 +1276,14 @@ leg_resolve() {
     # An empty pass converges only when nothing is waiting on a human. While an
     # escalation stands, halted is the honest label — the same call the review
     # leg makes — and converged would contradict the threads still open.
-    if (( $(_markers_escalated "$CTX_MARKERS") > 0 )); then
+    #
+    # The verdict is read for the same reason `legs_pass_label` exempts it: a
+    # reviewer that converges after a human settled the escalated thread is the
+    # settlement being verified, and that is the one way out of the halt. Left
+    # to the escalation count alone, running this leg over that pass would strip
+    # the green label the review leg had just earned and halt it again.
+    if [[ "$(jq -r '.verdict // ""' <<<"$review_marker")" != "converged" ]] \
+       && (( $(_markers_escalated "$CTX_MARKERS") > 0 )); then
       ui_say "pass $pass raised nothing new on $CTX_REPO#$CTX_PR, and the escalated findings still need a human decision."
       run_pass_labels "$pass" halted
     else
