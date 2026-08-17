@@ -100,7 +100,7 @@ adapter_claude() {
     # the only diagnosis. Found by a reviewer in the agy adapter, which copied
     # this line.
     local msg; msg="$(jq -r '.result // empty' "$out" 2>/dev/null)"
-    [[ -n "$msg" ]] || msg="$(head -c 400 "$err")"
+    [[ -n "$msg" ]] || msg="$(legs_harness_error "$err")"
     [[ -n "$msg" ]] || msg="claude exited $rc with no output on either stream"
     jq -cn --arg e "$msg" \
       '{ok:false, payload:null, harness:"claude", endpoint:null, model_reported:null,

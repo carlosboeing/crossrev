@@ -573,8 +573,14 @@ run_invoke() {
       # here — the harness never got as far as one — so whatever it did write is
       # evidence of how it failed, and deleting that is not crossrev's call.
       rm -f "$snap_index"
+      # `$harness --version` was the advice here and it tests the wrong thing: it
+      # answers with no credential, so it succeeds on a runner that cannot
+      # authenticate and sends the reader away satisfied while the leg keeps
+      # failing. Same defect the gh check in preflight exists to avoid — installed
+      # is not the same as usable. Authentication is what this fails on most
+      # often, so it is what the advice names.
       ui_die "the $harness harness failed: $(jq -r '.error // "no error reported"' "$out_file")" \
-        "Nothing has been written to the pull request. Check the harness runs by hand: $harness --version"
+        "Nothing has been written to the pull request. If the error above mentions authentication, a token or a 401, the harness is installed and cannot log in: on a GitHub-hosted runner its credential comes from a repository secret, so check \`gh secret list\`, and locally check the harness's own login. \`$harness --version\` cannot tell you either way — it answers without a credential."
     fi
 
     payload="$(jq -c '.payload' "$out_file")"
