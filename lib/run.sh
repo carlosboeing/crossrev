@@ -97,7 +97,7 @@ run_lock_acquire() {
 
 CTX_REPO=""; CTX_PR=""; CTX_HEAD_SHA=""; CTX_BASE_SHA=""
 CTX_HEAD_BRANCH=""; CTX_DEFAULT_BRANCH=""; CTX_CHANGED=0
-CTX_HEAD_REPO=""; CTX_MAINTAINER_CAN_MODIFY=true
+CTX_HEAD_REPO=""; CTX_MAINTAINER_CAN_MODIFY=false; CTX_IS_CROSS_REPOSITORY=false
 CTX_TITLE=""; CTX_BODY=""; CTX_LABELS=""; CTX_URL=""
 CTX_MODE=""; CTX_AUTHOR=""; CTX_MARKERS="[]"; CTX_MAX_PASSES_PER_CYCLE=3
 CTX_BACKLOG="none"; CTX_BACKLOG_LAYOUT=""; CTX_BACKLOG_PATH=""
@@ -151,9 +151,10 @@ ctx_load() {
   CTX_CHANGED="$(jq -r '.changedFiles // 0' <<<"$pr_json")"
   CTX_LABELS="$(jq -r '[.labels[].name] | join(" ")' <<<"$pr_json")"
   CTX_DEFAULT_BRANCH="$(gh_default_branch "$repo")"
+  CTX_IS_CROSS_REPOSITORY="$(jq -r 'if .isCrossRepository != null then .isCrossRepository else "" end' <<<"$pr_json")"
   CTX_HEAD_REPO="$(jq -r 'if .headRepositoryOwner.login and .headRepository.name then "\(.headRepositoryOwner.login)/\(.headRepository.name)" else .headRepository.nameWithOwner // "" end' <<<"$pr_json")"
   CTX_HEAD_REPO="${CTX_HEAD_REPO:-$repo}"
-  CTX_MAINTAINER_CAN_MODIFY="$(jq -r 'if .maintainerCanModify != null then .maintainerCanModify else true end' <<<"$pr_json")"
+  CTX_MAINTAINER_CAN_MODIFY="$(jq -r 'if .maintainerCanModify != null then .maintainerCanModify else false end' <<<"$pr_json")"
 
   # Policy comes from the base revision, never the pull request head. Read from
   # the head, a branch could raise max_passes_per_cycle, repoint an endpoint at a server it
@@ -1326,7 +1327,7 @@ leg_resolve() {
     "Check \`git remote -v\` in this checkout."
 
   legs_assert_push_target "$current_branch" "$CTX_HEAD_BRANCH" \
-    "$CTX_DEFAULT_BRANCH" "$CTX_HEAD_REPO" "$target_repo" "$CTX_MAINTAINER_CAN_MODIFY"
+    "$CTX_DEFAULT_BRANCH" "$CTX_HEAD_REPO" "$target_repo" "$CTX_MAINTAINER_CAN_MODIFY" "$CTX_IS_CROSS_REPOSITORY"
 
   run_leg_settings resolver "$harness_override"
   local harness="$LEG_HARNESS" model effort endpoint write="$LEG_WRITE"
