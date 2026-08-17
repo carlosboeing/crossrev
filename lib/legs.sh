@@ -117,6 +117,28 @@ legs_resolve_redrivable() {
   [[ "$(jq '[(.dispositions // [])[] | select(.disposition == "escalated")] | length' <<<"$marker")" != "0" ]]
 }
 
+# The loop-state label a finished review pass leaves behind.
+#
+# An empty pass after an escalation is not a convergence. The reviewer
+# correctly declines to re-raise a dispositioned finding, so nothing actionable
+# means nothing NEW — while the escalated thread still waits on a human, and
+# halted is the honest label beside a marker that reads issues-remain. The
+# converged verdict arm is exempt: a reviewer that says converged after the
+# human settled the thread is the settlement being verified, which is the one
+# way out of the halt that does not need a person again.
+#
+# $1 verdict, $2 actionable finding count, $3 open escalations count.
+legs_pass_label() {
+  local verdict="$1" actionable="$2" escalated="$3"
+  case "$verdict" in
+    converged) printf 'converged' ;;
+    blocked)   printf 'halted' ;;
+    *) if (( actionable > 0 )); then printf 'awaiting-resolution'
+       elif (( escalated > 0 )); then printf 'halted'
+       else printf 'converged'; fi ;;
+  esac
+}
+
 # The colour a loop label is minted with.
 #
 # Six hues, no two adjacent on the wheel, so the label row on a pull request

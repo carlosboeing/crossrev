@@ -899,11 +899,7 @@ Findings recorded; posting them now.$(state_marker_encode "$(jq -c 'del(.comment
     "$summary_body$(state_marker_encode "$(jq -c 'del(.comment_id)' <<<"$marker")")"
 
   local next
-  case "$verdict" in
-    converged) next="converged" ;;
-    blocked)   next="halted" ;;
-    *) if (( actionable > 0 )); then next="awaiting-resolution"; else next="converged"; fi ;;
-  esac
+  next="$(legs_pass_label "$verdict" "$actionable" "$(_markers_escalated "$CTX_MARKERS")")"
   run_pass_labels "$pass" "$next"
 
   printf '  → verdict: %s\n\n' "$verdict"
@@ -1277,8 +1273,16 @@ leg_resolve() {
 
   findings="$(jq -c '.findings // []' <<<"$review_marker")"
   if [[ "$(jq 'length' <<<"$findings")" == "0" ]]; then
-    ui_say "pass $pass found nothing to resolve on $CTX_REPO#$CTX_PR."
-    run_pass_labels "$pass" converged
+    # An empty pass converges only when nothing is waiting on a human. While an
+    # escalation stands, halted is the honest label — the same call the review
+    # leg makes — and converged would contradict the threads still open.
+    if (( $(_markers_escalated "$CTX_MARKERS") > 0 )); then
+      ui_say "pass $pass raised nothing new on $CTX_REPO#$CTX_PR, and the escalated findings still need a human decision."
+      run_pass_labels "$pass" halted
+    else
+      ui_say "pass $pass found nothing to resolve on $CTX_REPO#$CTX_PR."
+      run_pass_labels "$pass" converged
+    fi
     return 0
   fi
 
@@ -2007,7 +2011,14 @@ _cycle_finish_at_bound() {
     return 0
   fi
   if [[ "$verdict" == "converged" ]] || (( actionable == 0 )); then
-    ui_end "Converged after pass $pass — nothing at or above min_fix_severity ($CTX_MIN_FIX_SEVERITY) remains."
+    # The review leg already wrote the label this message reports; the two
+    # have to agree, so an empty pass while an escalation stands is not read
+    # out as a convergence.
+    if [[ "$verdict" != "converged" ]] && (( $(_markers_escalated "$CTX_MARKERS") > 0 )); then
+      ui_end "Halted after pass $pass — the pass raised nothing new, and the escalated findings still need a human decision."
+    else
+      ui_end "Converged after pass $pass — nothing at or above min_fix_severity ($CTX_MIN_FIX_SEVERITY) remains."
+    fi
     return 0
   fi
   if state_current_pass_complete "$CTX_MARKERS" "$pass" resolve; then
@@ -2104,7 +2115,13 @@ cmd_cycle() {
       return 0
     fi
     if [[ "$verdict" == "converged" ]] || (( actionable == 0 )); then
-      ui_end "Converged after pass $pass — nothing at or above min_fix_severity ($CTX_MIN_FIX_SEVERITY) remains."
+      # Same agreement the review leg's label keeps: an empty pass while an
+      # escalation stands is a halt, not a convergence.
+      if [[ "$verdict" != "converged" ]] && (( $(_markers_escalated "$CTX_MARKERS") > 0 )); then
+        ui_end "Halted after pass $pass — the pass raised nothing new, and the escalated findings still need a human decision."
+      else
+        ui_end "Converged after pass $pass — nothing at or above min_fix_severity ($CTX_MIN_FIX_SEVERITY) remains."
+      fi
       (( no_tips )) || run_upgrade_nudge
       return 0
     fi
@@ -2262,7 +2279,16 @@ _status_state_from_markers() {
 
   m_resolve="$(state_marker_for "$CTX_MARKERS" "$pass" resolve)"
   if [[ "$(jq -r '.state // ""' <<<"$m_resolve")" != "complete" ]]; then
-    printf 'awaiting resolution'
+    # The marker copy of the label the review leg wrote (legs_pass_label), so
+    # the two cannot disagree on a pull request with no labels to read: an
+    # empty pass while an escalation stands is halted, not a resolve leg owed
+    # — there is nothing for the leg to do.
+    if (( $(run_actionable "$(jq -c '.findings // []' <<<"$m_review")") == 0 )) \
+       && (( $(_markers_escalated "$CTX_MARKERS") > 0 )); then
+      printf 'halted'
+    else
+      printf 'awaiting resolution'
+    fi
   elif [[ "$(jq -r '.blocked // false' <<<"$m_resolve")" == "true" ]]; then
     printf 'halted'
   elif (( $(_status_escalated "$m_resolve") > 0 )); then
