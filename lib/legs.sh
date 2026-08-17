@@ -207,7 +207,7 @@ legs_label_description() {
 # attempted and says nothing about which branch was targeted. This asserts the
 # target before anything leaves the machine.
 legs_assert_push_target() {
-  local current_branch="$1" head_branch="$2" default_branch="$3" head_repo="$4" origin_repo="$5"
+  local current_branch="$1" head_branch="$2" default_branch="$3" head_repo="$4" origin_repo="$5" maintainer_can_modify="${6:-true}"
 
   [[ "$current_branch" == "$head_branch" ]] || ui_die \
     "the checkout is on '$current_branch' but the pull request's head branch is '$head_branch'" \
@@ -216,6 +216,10 @@ legs_assert_push_target() {
   [[ "$head_branch" != "$default_branch" ]] || ui_die \
     "the pull request's head branch is the repository default branch ('$default_branch')" \
     "crossrev refuses to push to a default branch. Re-open the pull request from a feature branch."
+
+  [[ "$maintainer_can_modify" == "true" ]] || ui_die \
+    "the contributor has not allowed maintainer edits on $head_repo" \
+    "The contributor has not allowed maintainer edits on this pull request, so the fix cannot be pushed."
 
   [[ "$head_repo" == "$origin_repo" ]] || ui_die \
     "the pull request's head is in '$head_repo' but this checkout pushes to '$origin_repo'" \
