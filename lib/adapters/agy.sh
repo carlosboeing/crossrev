@@ -24,10 +24,10 @@
 # usage counts and nothing identifying what served the turn — so model_reported
 # is null, exactly as for codex. Layer one of the divergence guard covers it.
 
-# adapter_agy <prompt_file> <schema_file> <workdir> <model> <effort> <endpoint_name>
+# adapter_agy <prompt_file> <schema_file> <workdir> <model> <effort> <endpoint_name> <write>
 adapter_agy() {
   local prompt_file="$1" schema_file="$2" workdir="$3"
-  local model="${4:-}" effort="${5:-}" endpoint="${6:-}"
+  local model="${4:-}" effort="${5:-}" endpoint="${6:-}" write="${7:-no}"
 
   command -v agy >/dev/null 2>&1 || ui_die \
     "the agy CLI is not installed, and this leg is configured to use it" \
@@ -40,6 +40,13 @@ adapter_agy() {
 
   # Order matters: everything before --print, and the prompt as its value.
   local -a args=(--output-format json --disable-slash-commands)
+
+  # Same shape as the other two: the resolve leg has to change files and this
+  # grants exactly that. `--mode` takes accept-edits or plan, and plan changes
+  # what the model does rather than what it may touch, so a reading leg passes no
+  # mode at all and the default denies the write.
+  # --dangerously-skip-permissions is the blanket bypass and is never passed.
+  [[ "$write" == "yes" ]] && args+=(--mode accept-edits)
   # Unlike Claude Code, this one takes the schema as a PATH.
   [[ -n "$schema_file" ]] && args+=(--json-schema "$schema_file")
   [[ -n "$model"  && "$model"  != "null" ]] && args+=(--model "$model")

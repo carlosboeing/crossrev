@@ -12,10 +12,10 @@
 # not emit the field. Layer one of the divergence guard already catches the
 # failures reachable from a config mistake.
 
-# adapter_codex <prompt_file> <schema_file> <workdir> <model> <effort> <endpoint_name>
+# adapter_codex <prompt_file> <schema_file> <workdir> <model> <effort> <endpoint_name> <write>
 adapter_codex() {
   local prompt_file="$1" schema_file="$2" workdir="$3"
-  local model="${4:-}" effort="${5:-}" endpoint="${6:-}"
+  local model="${4:-}" effort="${5:-}" endpoint="${6:-}" write="${7:-no}"
 
   command -v codex >/dev/null 2>&1 || ui_die \
     "the codex CLI is not installed, and this leg is configured to use it" \
@@ -33,6 +33,22 @@ adapter_codex() {
   # a file, so this buys the token counts without changing where the payload comes
   # from. Codex carries them on turn.completed and nothing else does.
   local -a args=(exec --skip-git-repo-check --json -o "$out_file")
+
+  # `codex exec` sandboxes to read-only by default, so a resolve leg on this
+  # harness could verify a finding and then fail to apply the fix. workspace-write
+  # confines writes to the checkout, which is exactly what the leg needs;
+  # danger-full-access and --dangerously-bypass-approvals-and-sandbox are on the
+  # wrong side of the line between editing files and running arbitrary commands.
+  #
+  # A reading leg is pinned read-only rather than left to the default, because
+  # codex reads a user config that can set one. Saying it costs nothing and means
+  # a machine-level setting cannot quietly hand the review leg a writable tree.
+  if [[ "$write" == "yes" ]]; then
+    args+=(--sandbox workspace-write)
+  else
+    args+=(--sandbox read-only)
+  fi
+
   # Codex takes the schema as a FILE PATH, where Claude Code takes it inline.
   [[ -n "$schema_file" ]] && args+=(--output-schema "$schema_file")
   [[ -n "$model" && "$model" != "null" ]] && args+=(-m "$model")

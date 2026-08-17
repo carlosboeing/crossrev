@@ -1,0 +1,202 @@
+#!/usr/bin/env bash
+#
+# Write permission, scoped to the leg that needs it.
+#
+# The resolve leg's whole job is to change files, and until it was granted
+# permission it could verify a finding, work out the correct fix and then fail to
+# apply it. That is what the first real automated run did. Locally it had always
+# worked, because headless Claude Code reads the operator's own settings and
+# those already permit Edit and Write; a hosted runner is a fresh container with
+# no such file, so the identical command was denied.
+#
+# The grant has to be a CLI flag rather than a settings file. lib/sandbox.sh
+# quarantines every path a harness auto-loads configuration from — settings,
+# instructions, hooks, MCP definitions, agents — because a pull request branch
+# otherwise configures the thing reviewing it. A settings file written into the
+# workspace to grant permission would be moved out of the way before the harness
+# started, and any mechanism that survived the quarantine would have reopened the
+# hole the quarantine exists to close.
+#
+# The review leg must NOT carry the grant. It has no reason to write, and write
+# access widens the blast radius of a prompt injection carried in a diff for no
+# benefit at all. That absence is a security property, so it is asserted here
+# rather than assumed.
+#
+# The adapters are enumerated off lib/adapters/ rather than listed, for the same
+# reason tests/test-action.sh reads its flags off action.yml: a fourth adapter
+# added without the capability is exactly the change that brings this back.
+
+set -uo pipefail
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=../lib/ui.sh
+source "$HERE/../lib/ui.sh"
+# shellcheck source=../lib/credentials.sh
+source "$HERE/../lib/credentials.sh"
+for _a in "$HERE"/../lib/adapters/*.sh; do
+  # shellcheck source=/dev/null
+  source "$_a"
+done
+# Sourced last so its assertion helpers and counters are the ones in force.
+# shellcheck source=harness.sh
+source "$HERE/harness.sh"
+
+# ---------------------------------------------------------------------------
+# A recorder in place of every harness CLI
+# ---------------------------------------------------------------------------
+#
+# It logs the argument list and exits. Each adapter then takes its own error
+# path, which is fine and deliberate: this suite reads the log, never the
+# envelope, so one recorder covers a harness whose output shape it knows nothing
+# about — including the next one somebody adds.
+FAKE="$(mktemp -d)"
+ARGV_PROBE="$(mktemp)"
+PROMPT_FILE="$(mktemp)"; printf 'prompt\n' >"$PROMPT_FILE"
+
+cat >"$FAKE/_record" <<'REC'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$CROSSREV_ARGV_LOG"
+exit 0
+REC
+chmod +x "$FAKE/_record"
+
+HARNESSES=""
+for _a in "$HERE"/../lib/adapters/*.sh; do
+  _h="$(basename "$_a" .sh)"
+  HARNESSES="$HARNESSES $_h"
+  cp "$FAKE/_record" "$FAKE/$_h"
+done
+
+# The enumeration is derived, so one that quietly returned nothing would make
+# every assertion below vacuous.
+has "the adapters are enumerated off lib/adapters/" "$HARNESSES" "claude"
+has "and all three are there"                       "$HARNESSES" "codex"
+has "including the third harness"                   "$HARNESSES" "agy"
+
+# probe <harness> <write> -> the argument list that harness CLI was invoked with
+#
+# Every token holding a path is flattened to the word PATH, and that is what
+# makes the comparison below mean anything: the codex adapter passes `-o` a fresh
+# mktemp file, so two raw argument lists differ on every invocation whatever the
+# adapter did with the capability, and the check would have passed against the
+# unfixed code. No flag or flag value in play here contains a slash.
+probe() {
+  local h="$1" write="$2"
+  : >"$ARGV_PROBE"
+  ( export CROSSREV_ARGV_LOG="$ARGV_PROBE"
+    PATH="$FAKE:$PATH"
+    "adapter_$h" "$PROMPT_FILE" "" "$PWD" "" "" "" "$write" ) >/dev/null 2>&1
+  sed -E 's#[^ ]*/[^ ]*#PATH#g' "$ARGV_PROBE"
+}
+
+differs() { [[ "$2" != "$3" ]] && ok "$1" || notok "$1" "two different invocations" "$2"; }
+
+# ---------------------------------------------------------------------------
+# The class: every adapter distinguishes a writing leg from a reading one
+# ---------------------------------------------------------------------------
+for _h in $HARNESSES; do
+  writing="$(probe "$_h" yes)"
+  reading="$(probe "$_h" no)"
+
+  differs "the $_h adapter invokes a writing leg differently from a reading one" \
+    "$writing" "$reading"
+
+  # The line worth holding is between editing files and running arbitrary
+  # commands. Every harness offers a mode on the wrong side of it, and none of
+  # them is what a resolve leg needs.
+  hasnt "the $_h write grant stops short of Claude Code's blanket bypass" \
+    "$writing" "bypassPermissions"
+  hasnt "the $_h write grant stops short of an unsandboxed codex" \
+    "$writing" "danger-full-access"
+  hasnt "and nothing prefixed --dangerously reaches the $_h CLI" \
+    "$writing" "--dangerously"
+done
+
+# ---------------------------------------------------------------------------
+# The flags themselves, per harness
+# ---------------------------------------------------------------------------
+#
+# Checked against the installed CLIs rather than their documentation. claude
+# takes `--permission-mode` from acceptEdits, auto, bypassPermissions, manual,
+# dontAsk and plan; codex takes `--sandbox` from read-only, workspace-write and
+# danger-full-access; agy takes `--mode` from accept-edits and plan. The narrow
+# one in each case.
+has  "a writing claude leg accepts edits"        "$(probe claude yes)" "--permission-mode acceptEdits"
+# There is no claude permission mode that means "deny": plan mode changes what
+# the model does rather than what it may touch. So a reading leg passes no mode
+# at all and headless Claude Code's own default denies the write — which is
+# precisely the behaviour that exposed this bug, working as intended.
+hasnt "a reading claude leg asks for no permission mode at all" "$(probe claude no)" "--permission-mode"
+
+has  "a writing codex leg gets a workspace-writable sandbox" "$(probe codex yes)" "--sandbox workspace-write"
+# Explicit rather than left to the default, because codex reads a user config
+# that can set one. read-only is already the default; saying so costs nothing and
+# means a machine-level setting cannot quietly hand the review leg a writable
+# tree.
+has  "a reading codex leg is pinned read-only"   "$(probe codex no)" "--sandbox read-only"
+
+has  "a writing agy leg accepts edits"           "$(probe agy yes)" "--mode accept-edits"
+hasnt "a reading agy leg asks for no mode at all" "$(probe agy no)" "--mode"
+
+# agy's --print takes the prompt as its VALUE, so a mode flag written after it
+# becomes the prompt. The stub refuses that order; this is the assertion that
+# the new flag went in on the right side of it.
+agy_writing="$(probe agy yes)"
+is "the agy mode flag comes before --print" \
+  "$(printf '%s' "${agy_writing%%--print*}" | grep -c -- '--mode')" "1"
+
+# ---------------------------------------------------------------------------
+# The wiring: which leg gets it, through the real orchestrator
+# ---------------------------------------------------------------------------
+ID_A="a1b2c3d4"
+
+review_marker() {
+  jq -cn --arg sha "$FIX_HEAD" --argjson ts "$(( $(date +%s) - 192 ))" --arg a "$ID_A" '
+    {v:1, leg:"review", pass:1, state:"complete", ts:$ts, done_ts:($ts + 192), run_id:"1",
+     head_sha:$sha, harness:"claude", model:"reviewer-model", model_reported:"reviewer-model",
+     effort:null, endpoint:null, tokens:41205, verdict:"issues-remain",
+     findings:[
+       {id:$a, path:"app.ts", line:2, side:"RIGHT", severity:"high", category:"correctness",
+        pre_existing:false, title:"Unchecked fetch response", why:"w", fix:"f",
+        anchor:"", thread_id:"T_A", disposition:null, tracked_as:null}]}'
+}
+
+REVIEW_PAYLOAD='{"verdict":"issues-remain","blocked_reason":null,"prior":null,"findings":[
+  {"path":"app.ts","line":2,"side":"RIGHT","severity":"high","category":"correctness","pre_existing":false,
+   "title":"Unchecked fetch response","why":"A failed request looks like a success","fix":"Check response.ok"}
+]}'
+
+RESOLVE_PAYLOAD='{"blocked":false,"blocked_reason":null,"summary":"Checked the response.",
+  "dispositions":[{"finding_number":1,"disposition":"fixed","reply":"Checked response.ok.",
+                   "persist":null,"duplicate_of":null}]}'
+
+# --- a review leg -----------------------------------------------------------
+fixture_repo; stub_reset
+routes_baseline "$(printf '[]' | payload)"
+route 'api --method POST repos/*/issues/42/comments*' '{"id":9001}'
+route '*reviewThreads*' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}'
+CROSSREV_REVIEW_PAYLOAD="$(printf '%s' "$REVIEW_PAYLOAD" | payload)"; export CROSSREV_REVIEW_PAYLOAD
+"$CROSSREV" review --pr 42 >/dev/null 2>&1
+review_argv="$(cat "$ARGV_LOG")"
+
+has  "the review leg really did reach the harness" "$review_argv" "--output-format json"
+hasnt "and it was granted no permission to write"  "$review_argv" "acceptEdits"
+hasnt "nor any other permission mode"              "$review_argv" "--permission-mode"
+
+# --- a resolve leg over that review -----------------------------------------
+fixture_repo; stub_reset
+routes_baseline "$(marker_comment 9001 "$(review_marker)" | jq -cs . | payload)"
+route 'api --method POST repos/*/issues/42/comments*' '{"id":9002}'
+route '*reviewThreads*' "$(threads_response "$(thread_node T_A app.ts 2 false "$ID_A")")"
+route '*resolveReviewThread*' '{"data":{"resolveReviewThread":{"thread":{"isResolved":true}}}}'
+route 'api --method POST repos/*/pulls/42/comments/*/replies*' '{"id":6001}'
+CROSSREV_RESOLVE_PAYLOAD="$(printf '%s' "$RESOLVE_PAYLOAD" | payload)"; export CROSSREV_RESOLVE_PAYLOAD
+CROSSREV_RESOLVE_EDIT="$(mktemp)"
+printf 'printf "export const ok = 2\\n" >app.ts\n' >"$CROSSREV_RESOLVE_EDIT"
+export CROSSREV_RESOLVE_EDIT
+"$CROSSREV" resolve --pr 42 >/dev/null 2>&1
+resolve_argv="$(cat "$ARGV_LOG")"
+
+has "the resolve leg really did reach the harness" "$resolve_argv" "--output-format json"
+has "and it may write to the working tree"         "$resolve_argv" "--permission-mode acceptEdits"
+
+finish

@@ -16,6 +16,9 @@ set -uo pipefail
 
 prompt="${!#}"
 [[ -n "${CROSSREV_PROMPT_LOG:-}" ]] && printf '%s' "$prompt" >"$CROSSREV_PROMPT_LOG"
+# Every flag the adapter built, so a suite can assert what a leg was and was not
+# granted. Appended, because one `crossrev run` invokes this twice.
+[[ -n "${CROSSREV_ARGV_LOG:-}" ]] && printf '%s\n' "$*" >>"$CROSSREV_ARGV_LOG"
 
 # The answering model defaults to the one that was asked for, which is what the
 # real CLI reports when nothing substitutes it. A stub that answered as something

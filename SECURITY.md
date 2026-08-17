@@ -48,6 +48,13 @@ token elsewhere in the same job. Findings of particular interest:
   ([ADR 0003](docs/adrs/0003-policy-read-from-the-base-revision.md)).
 - **A push the branch guard should have refused** — a target other than the pull
   request's own head branch in the origin repository.
+- **A review leg that can write to the checkout.** The resolve leg's process is
+  granted file edits in its workspace, because changing files is its job — never
+  a blanket bypass, and never permission to run arbitrary commands outside it.
+  The review leg is granted nothing, and the capability is derived from the leg
+  rather than configured. A path that gives the review leg write access, or that
+  widens either leg past editing files, is a finding. Neither process holds a
+  GitHub credential either way.
 - **A path where a backlog write escapes the checkout.**
 - **Anything that widens what a GitHub App token can do**, or that reaches the
   refresher App's `Secrets: write` permission from a job that reads a pull
