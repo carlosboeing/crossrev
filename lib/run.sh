@@ -2690,6 +2690,19 @@ _status_next() {
       ui_cmd  "$resume"
       return 0 ;;
     converged)
+      # A revision pushed after the loop converged is unreviewed, and nothing
+      # starts a pass for it by itself: the generated review workflow listens
+      # for labels and comments rather than `synchronize`, and the converged
+      # label stays where the loop left it, so no label change fires anything.
+      # Reporting "nothing to run" over that head would be the one wrong answer
+      # this section exists to avoid. The settle arm below compares the head for
+      # the same reason.
+      if (( pass > 0 )) && state_is_new_revision "$CTX_MARKERS" "$CTX_HEAD_SHA"; then
+        ui_line "the loop converged on pass $pass, and the branch has moved since."
+        ui_line "Nothing reviews a new revision on its own, so pass $(( pass + 1 )) is owed:"
+        ui_cmd  "crossrev review --pr $CTX_PR"
+        return 0
+      fi
       # Deliberately the same vocabulary as the converged summary comment, so a
       # reader moving between the terminal and GitHub is not translating between
       # two descriptions of one state.

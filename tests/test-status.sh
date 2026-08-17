@@ -417,6 +417,30 @@ out="$(status_setup_with moved_after_settle_comments "$(lbl crossrev/awaiting-re
 has "a revision pushed after the settle is still owed a review" "$out" "crossrev review --pr 42"
 hasnt "and is not waved through as settled"                     "$out" "nothing new to see"
 
+# The same revision under the label the settle itself writes. `crossrev/converged`
+# is terminal, and nothing moves it: the review workflow fires on labels and
+# comments, not on a push, so a converged pull request that gains a revision has
+# no trigger left and `status` is the only thing that can ask for the pass.
+out="$(status_setup_with moved_after_settle_comments "$(lbl crossrev/converged crossrev/pass-1)")"
+has "a revision after a converged settle is owed a review"  "$out" "crossrev review --pr 42"
+has "and NEXT says why the terminal state stopped applying" "$out" "the branch has moved since"
+hasnt "rather than reporting nothing to run over it"        "$out" "nothing to run"
+
+# And the marker copy of the same decision, for a pull request with no labels to
+# read: converged is derived from the resolve marker there, and the head
+# comparison has to happen on that path too.
+out="$(status_setup_with moved_after_settle_comments '[]')"
+has "with no labels the same revision is still owed a review" "$out" "crossrev review --pr 42"
+hasnt "and is not waved through as settled"                   "$out" "nothing to run"
+
+# A converged loop whose head has not moved keeps the terminal answer, so the
+# head comparison did not cost the state its ending.
+out="$(status_with "$(lbl crossrev/converged crossrev/pass-1)" \
+  "$(review_m 1 issues-remain "$ONE_MED")" \
+  "$(resolve_m 1 "$REBUTTED")")"
+has "a settle at the reviewed head still reads as finished" "$out" "nothing to run"
+hasnt "and asks for no further pass"                        "$out" "crossrev review --pr 42"
+
 # --- halted: a cap stopped the next pass before it began --------------------
 #
 # Caps are evaluated when a review leg decides whether the NEXT pass may begin, so
