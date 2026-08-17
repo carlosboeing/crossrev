@@ -26,7 +26,7 @@ gh_repo_slug() {
 gh_pr_json() {
   local repo="$1" pr="$2" out
   out="$(gh pr view "$pr" --repo "$repo" --json \
-    number,title,body,url,headRefName,headRefOid,baseRefName,baseRefOid,changedFiles,labels,isCrossRepository,isDraft,headRepositoryOwner,headRepository,state 2>/dev/null)" \
+    number,title,body,url,headRefName,headRefOid,baseRefName,baseRefOid,changedFiles,labels,isCrossRepository,isDraft,headRepositoryOwner,headRepository,maintainerCanModify,state 2>/dev/null)" \
     || ui_die "could not read $repo#$pr" \
        "Check the number, and that \`gh auth status\` passes for that repository."
   printf '%s' "$out"
@@ -323,7 +323,7 @@ gh_issue_comment() {
 # a backstop behind it, not a substitute: it fires after a bad push is attempted
 # and says nothing about which branch was targeted.
 gh_commit_and_push() {
-  local branch="$1" message="$2" expected_head="$3" sha
+  local branch="$1" message="$2" expected_head="$3" remote="${4:-origin}" sha
 
   git add -A >/dev/null 2>&1 || true
   if git diff --cached --quiet 2>/dev/null; then printf ''; return 0; fi
@@ -340,19 +340,20 @@ gh_commit_and_push() {
   # An unreachable remote is reported rather than read as "nobody else pushed" —
   # those look identical from an empty ls-remote, and treating the second as the
   # first turns a skipped check into a silent one.
-  local remote_head
-  if ! remote_head="$(git ls-remote origin "refs/heads/$branch" 2>/dev/null | cut -f1)"; then
+  local remote_head remote_push_url
+  remote_push_url="$(git remote get-url --push "$remote" 2>/dev/null || git remote get-url "$remote" 2>/dev/null || printf '%s' "$remote")"
+  if ! remote_head="$(git ls-remote "$remote_push_url" "refs/heads/$branch" 2>/dev/null | cut -f1)"; then
     remote_head=""
   fi
   if [[ -z "$remote_head" ]]; then
-    ui_warn "could not read $branch on origin, so the check for a concurrent push did not run" \
+    ui_warn "could not read $branch on $remote, so the check for a concurrent push did not run" \
       "If someone pushed to that branch while this leg was working, this push may not include their commit. Confirm the branch looks right before merging."
   elif [[ -n "$expected_head" && "$remote_head" != "$expected_head" ]]; then
     ui_die "$branch moved while this leg was running — it is now at ${remote_head:0:7}, not ${expected_head:0:7}" \
       "Someone else pushed. The fix is committed locally and not pushed; rebase onto the new head and re-run: crossrev resolve --pr <n>"
   fi
 
-  git push origin "HEAD:refs/heads/$branch" >/dev/null 2>&1 || ui_die \
+  git push "$remote" "HEAD:refs/heads/$branch" >/dev/null 2>&1 || ui_die \
     "could not push to $branch" \
     "The commit exists locally. If branch protection refused it, that is the backstop working — check the rule, or push by hand."
 

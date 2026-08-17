@@ -97,6 +97,7 @@ run_lock_acquire() {
 
 CTX_REPO=""; CTX_PR=""; CTX_HEAD_SHA=""; CTX_BASE_SHA=""
 CTX_HEAD_BRANCH=""; CTX_DEFAULT_BRANCH=""; CTX_CHANGED=0
+CTX_HEAD_REPO=""; CTX_MAINTAINER_CAN_MODIFY=true
 CTX_TITLE=""; CTX_BODY=""; CTX_LABELS=""; CTX_URL=""
 CTX_MODE=""; CTX_AUTHOR=""; CTX_MARKERS="[]"; CTX_MAX_PASSES_PER_CYCLE=3
 CTX_BACKLOG="none"; CTX_BACKLOG_LAYOUT=""; CTX_BACKLOG_PATH=""
@@ -150,6 +151,9 @@ ctx_load() {
   CTX_CHANGED="$(jq -r '.changedFiles // 0' <<<"$pr_json")"
   CTX_LABELS="$(jq -r '[.labels[].name] | join(" ")' <<<"$pr_json")"
   CTX_DEFAULT_BRANCH="$(gh_default_branch "$repo")"
+  CTX_HEAD_REPO="$(jq -r 'if .headRepositoryOwner.login and .headRepository.name then "\(.headRepositoryOwner.login)/\(.headRepository.name)" else .headRepository.nameWithOwner // "" end' <<<"$pr_json")"
+  CTX_HEAD_REPO="${CTX_HEAD_REPO:-$repo}"
+  CTX_MAINTAINER_CAN_MODIFY="$(jq -r 'if .maintainerCanModify != null then .maintainerCanModify else true end' <<<"$pr_json")"
 
   # Policy comes from the base revision, never the pull request head. Read from
   # the head, a branch could raise max_passes_per_cycle, repoint an endpoint at a server it
@@ -1298,10 +1302,31 @@ leg_resolve() {
   # The push guard runs before anything is invoked, not before the push. Finding
   # out after a model has run that the checkout is on the wrong branch wastes the
   # invocation and leaves changes in a tree nobody expected them in.
-  local origin_repo
-  origin_repo="$(git remote get-url origin 2>/dev/null | sed -E 's#^.*github\.com[:/]##; s#\.git$##')" || origin_repo=""
-  legs_assert_push_target "$(git rev-parse --abbrev-ref HEAD)" "$CTX_HEAD_BRANCH" \
-    "$CTX_DEFAULT_BRANCH" "$CTX_REPO" "${origin_repo:-$CTX_REPO}"
+  local current_branch push_remote target_repo
+  current_branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+  push_remote="$(git config "branch.${current_branch}.pushRemote" 2>/dev/null || true)"
+  if [[ -z "$push_remote" ]]; then
+    push_remote="$(git config "branch.${current_branch}.remote" 2>/dev/null || true)"
+  fi
+  if [[ -z "$push_remote" ]]; then
+    push_remote="$(git config "remote.pushDefault" 2>/dev/null || true)"
+  fi
+  if [[ -z "$push_remote" ]]; then
+    if git remote get-url origin >/dev/null 2>&1; then
+      push_remote="origin"
+    fi
+  fi
+  [[ -n "$push_remote" ]] || ui_die \
+    "could not resolve the push remote for branch '$current_branch'" \
+    "Check out the pull request with \`gh pr checkout $CTX_PR\` to configure the remote."
+
+  target_repo="$(git remote get-url "$push_remote" 2>/dev/null | sed -E 's#^.*github\.com[:/]##; s#\.git$##')" || target_repo=""
+  [[ -n "$target_repo" ]] || ui_die \
+    "could not read the URL for remote '$push_remote'" \
+    "Check \`git remote -v\` in this checkout."
+
+  legs_assert_push_target "$current_branch" "$CTX_HEAD_BRANCH" \
+    "$CTX_DEFAULT_BRANCH" "$CTX_HEAD_REPO" "$target_repo" "$CTX_MAINTAINER_CAN_MODIFY"
 
   run_leg_settings resolver "$harness_override"
   local harness="$LEG_HARNESS" model effort endpoint write="$LEG_WRITE"
@@ -1578,7 +1603,7 @@ $(jq -r '[.[] | select(.disposition == "fixed") | "- " + .finding_id] | join("\n
 
 $(jq -r '[.[] | select(.disposition == "deferred") | "- " + .finding_id] | join("\n")' <<<"$dispositions")"
     fi
-    commit_sha="$(gh_commit_and_push "$CTX_HEAD_BRANCH" "$commit_msg" "$CTX_HEAD_SHA")"
+    commit_sha="$(gh_commit_and_push "$CTX_HEAD_BRANCH" "$commit_msg" "$CTX_HEAD_SHA" "$push_remote")"
     if [[ -n "$commit_sha" ]]; then
       ui_ok "pushed ${commit_sha:0:7} to $CTX_HEAD_BRANCH"
       # Recorded immediately after the push, because the window between the two

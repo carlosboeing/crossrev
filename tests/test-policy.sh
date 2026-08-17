@@ -412,6 +412,163 @@ out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
 is  "a human review on a fork pull request is permitted" "$rc" "0"
 has "and that attended review writes its claim"          "$(calls)" "method POST repos/acme/widget/issues/42/comments"
 
+# --- fork resolve and push target resolution --------------------------
+policy_edit_script() {
+  local f; f="$(mktemp)"
+  printf 'printf "export const ok = 1\\nexport async function refresh() { const r = await fetch(\\"/t\\"); if (!r.ok) throw new Error(\\"bad\\") }\\n" > app.ts\n' >"$f"
+  printf '%s' "$f"
+}
+
+policy_review_marker() {
+  jq -cn --arg h "$FIX_HEAD" '
+    {v:1, pass:1, leg:"review", state:"complete", verdict:"issues-remain",
+     blocked_reason:null, head_sha:$h,
+     findings:[
+       {finding_number:1, title:"Missing error handling", path:"app.ts", line:2,
+        severity:"high", pre_existing:false, duplicate_of:null,
+        finding_id:"app.ts:2:Missing error handling"}
+     ]}'
+}
+
+policy_resolve_payload() {
+  jq -cn '
+    {blocked:false, blocked_reason:null,
+     summary:"Fixed error handling.",
+     dispositions:[
+       {finding_number:1, disposition:"fixed", reply:"Added try/catch error check.",
+        persist:null, duplicate_of:null}]}'
+}
+
+policy_routes_resolve() {
+  local threads; threads="$(threads_response \
+    "$(thread_node T_FIX app.ts 2 false "app.ts:2:Missing error handling")")"
+  route 'api --method POST repos/*/issues/42/comments*' '{"id":9002}'
+  route '*reviewThreads*' "$threads"
+  route '*resolveReviewThread*' '{"data":{"resolveReviewThread":{"thread":{"isResolved":true}}}}'
+  route 'api --method POST repos/*/pulls/42/comments/*/replies*' '{"id":6001}'
+  route 'api -X GET search/issues*' '{"items":[]}'
+  route 'api --paginate repos/*/issues?state=all*' '[]'
+}
+
+# Same-repo resolve still pushes to origin
+fixture_repo; stub_reset
+routes_baseline "$(marker_comment 9001 "$(policy_review_marker)" | jq -cs . | payload)"
+policy_routes_resolve
+CROSSREV_RESOLVE_PAYLOAD="$(policy_resolve_payload | payload)"; export CROSSREV_RESOLVE_PAYLOAD
+CROSSREV_RESOLVE_EDIT="$(policy_edit_script)"; export CROSSREV_RESOLVE_EDIT
+CROSSREV_RESOLVE_MODEL=resolver-model; export CROSSREV_RESOLVE_MODEL
+out="$("$CROSSREV" resolve --pr 42 2>&1)"; rc=$?
+is  "same-repo resolve exits clean" "$rc" "0"
+has "and pushes to the branch" "$out" "pushed"
+is  "and reaches origin bare repo" "$(git rev-parse HEAD)" "$(git -C "$FIX_ORIGIN" rev-parse refs/heads/feature)"
+
+# Fork resolve with maintainerCanModify: true reaches the push and targets head repo
+fixture_repo; stub_reset
+fork_bare="$(mktemp -d)/fork.git"
+git init -q --bare "$fork_bare"
+git remote add fork "https://github.com/contributor/widget.git"
+git remote set-url --push fork "$fork_bare"
+git config branch.feature.remote fork
+
+routes_baseline "$(marker_comment 9001 "$(policy_review_marker)" | jq -cs . | payload)"
+route_first "pr view $FIX_PR --repo * --json *" "$(jq -cn --arg h "$FIX_HEAD" --arg b "$FIX_BASE" '
+  {number:42, title:"t", body:"", url:"u", headRefName:"feature", headRefOid:$h,
+   baseRefName:"main", baseRefOid:$b, changedFiles:1, labels:[], isCrossRepository:true,
+   headRepositoryOwner:{login:"contributor"}, headRepository:{name:"widget"},
+   maintainerCanModify:true, state:"OPEN"}')"
+policy_routes_resolve
+CROSSREV_RESOLVE_PAYLOAD="$(policy_resolve_payload | payload)"; export CROSSREV_RESOLVE_PAYLOAD
+CROSSREV_RESOLVE_EDIT="$(policy_edit_script)"; export CROSSREV_RESOLVE_EDIT
+CROSSREV_RESOLVE_MODEL=resolver-model; export CROSSREV_RESOLVE_MODEL
+out="$("$CROSSREV" resolve --pr 42 2>&1)"; rc=$?
+is  "a fork resolve with maintainerCanModify: true exits clean" "$rc" "0"
+has "and reports the push" "$out" "pushed"
+is  "and targets the fork remote" "$(git rev-parse HEAD)" "$(git -C "$fork_bare" rev-parse refs/heads/feature)"
+
+# Fork resolve with maintainerCanModify: false refuses specifically
+fixture_repo; stub_reset
+fork_bare="$(mktemp -d)/fork.git"
+git init -q --bare "$fork_bare"
+git remote add fork "https://github.com/contributor/widget.git"
+git remote set-url --push fork "$fork_bare"
+git config branch.feature.remote fork
+
+routes_baseline "$(marker_comment 9001 "$(policy_review_marker)" | jq -cs . | payload)"
+route_first "pr view $FIX_PR --repo * --json *" "$(jq -cn --arg h "$FIX_HEAD" --arg b "$FIX_BASE" '
+  {number:42, title:"t", body:"", url:"u", headRefName:"feature", headRefOid:$h,
+   baseRefName:"main", baseRefOid:$b, changedFiles:1, labels:[], isCrossRepository:true,
+   headRepositoryOwner:{login:"contributor"}, headRepository:{name:"widget"},
+   maintainerCanModify:false, state:"OPEN"}')"
+policy_routes_resolve
+CROSSREV_RESOLVE_PAYLOAD="$(policy_resolve_payload | payload)"; export CROSSREV_RESOLVE_PAYLOAD
+CROSSREV_RESOLVE_EDIT="$(policy_edit_script)"; export CROSSREV_RESOLVE_EDIT
+CROSSREV_RESOLVE_MODEL=resolver-model; export CROSSREV_RESOLVE_MODEL
+err="$("$CROSSREV" resolve --pr 42 2>&1 >/dev/null)"; rc=$?
+is  "fork resolve with maintainerCanModify: false refuses" "$rc" "1"
+has "and names the specific maintainer edit permission reason" "$err" "The contributor has not allowed maintainer edits on this pull request, so the fix cannot be pushed."
+
+# Fork resolve where checkout pushes to wrong remote refuses
+fixture_repo; stub_reset
+routes_baseline "$(marker_comment 9001 "$(policy_review_marker)" | jq -cs . | payload)"
+route_first "pr view $FIX_PR --repo * --json *" "$(jq -cn --arg h "$FIX_HEAD" --arg b "$FIX_BASE" '
+  {number:42, title:"t", body:"", url:"u", headRefName:"feature", headRefOid:$h,
+   baseRefName:"main", baseRefOid:$b, changedFiles:1, labels:[], isCrossRepository:true,
+   headRepositoryOwner:{login:"contributor"}, headRepository:{name:"widget"},
+   maintainerCanModify:true, state:"OPEN"}')"
+policy_routes_resolve
+CROSSREV_RESOLVE_PAYLOAD="$(policy_resolve_payload | payload)"; export CROSSREV_RESOLVE_PAYLOAD
+CROSSREV_RESOLVE_EDIT="$(policy_edit_script)"; export CROSSREV_RESOLVE_EDIT
+CROSSREV_RESOLVE_MODEL=resolver-model; export CROSSREV_RESOLVE_MODEL
+err="$("$CROSSREV" resolve --pr 42 2>&1 >/dev/null)"; rc=$?
+is  "fork resolve pushing to wrong remote refuses" "$rc" "1"
+has "and names the target repo mismatch" "$err" "the pull request's head is in 'contributor/widget' but this checkout pushes to 'acme/widget'"
+
+# Fork resolve on automatic trigger still refuses at ctx_load
+fixture_repo; stub_reset
+routes_baseline "$(printf '[]' | payload)"
+route_first "pr view $FIX_PR --repo * --json *" "$(jq -cn --arg h "$FIX_HEAD" --arg b "$FIX_BASE" '
+  {number:42, title:"t", body:"", url:"u", headRefName:"feature", headRefOid:$h,
+   baseRefName:"main", baseRefOid:$b, changedFiles:1, labels:[], isCrossRepository:true,
+   headRepositoryOwner:{login:"contributor"}, headRepository:{name:"widget"},
+   maintainerCanModify:true, state:"OPEN"}')"
+err="$("$CROSSREV" resolve --pr 42 --trigger automatic 2>&1 >/dev/null)"; rc=$?
+is  "an automatic resolve on a fork pull request refuses at ctx_load" "$rc" "1"
+has "and gives the secrets reason" "$err" "GitHub withholds secrets from them"
+
+# Concurrent push check runs against the resolved remote
+fixture_repo; stub_reset
+fork_bare="$(mktemp -d)/fork.git"
+git init -q --bare "$fork_bare"
+git remote add fork "https://github.com/contributor/widget.git"
+git remote set-url --push fork "$fork_bare"
+git config branch.feature.remote fork
+git push -q fork feature
+(
+  d_other="$(mktemp -d)"
+  git clone -q "$fork_bare" "$d_other"
+  cd "$d_other" || exit 1
+  git config user.email t@example.com
+  git config user.name Test
+  git checkout -q feature
+  echo "concurrent edit" >> app.ts
+  git commit -q -am "concurrent commit"
+  git push -q origin feature
+)
+
+routes_baseline "$(marker_comment 9001 "$(policy_review_marker)" | jq -cs . | payload)"
+route_first "pr view $FIX_PR --repo * --json *" "$(jq -cn --arg h "$FIX_HEAD" --arg b "$FIX_BASE" '
+  {number:42, title:"t", body:"", url:"u", headRefName:"feature", headRefOid:$h,
+   baseRefName:"main", baseRefOid:$b, changedFiles:1, labels:[], isCrossRepository:true,
+   headRepositoryOwner:{login:"contributor"}, headRepository:{name:"widget"},
+   maintainerCanModify:true, state:"OPEN"}')"
+policy_routes_resolve
+CROSSREV_RESOLVE_PAYLOAD="$(policy_resolve_payload | payload)"; export CROSSREV_RESOLVE_PAYLOAD
+CROSSREV_RESOLVE_EDIT="$(policy_edit_script)"; export CROSSREV_RESOLVE_EDIT
+CROSSREV_RESOLVE_MODEL=resolver-model; export CROSSREV_RESOLVE_MODEL
+err="$("$CROSSREV" resolve --pr 42 2>&1 >/dev/null)"; rc=$?
+is  "concurrent push check on fork remote detects moving ref" "$rc" "1"
+has "and refuses because branch moved" "$err" "feature moved while this leg was running"
+
 # --- the harness override ---------------------------------------------
 fixture_repo; stub_reset
 routes_baseline "$(printf '[]' | payload)"
