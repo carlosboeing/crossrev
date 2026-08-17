@@ -217,11 +217,15 @@ legs_assert_push_target() {
     "the pull request's head branch is the repository default branch ('$default_branch')" \
     "crossrev refuses to push to a default branch. Re-open the pull request from a feature branch."
 
+  [[ -n "$head_repo" ]] || ui_die \
+    "could not determine the head repository for this pull request" \
+    "The pull request metadata is missing head repository information."
+
   [[ "$head_repo" == "$origin_repo" ]] || ui_die \
     "the pull request's head is in '$head_repo' but this checkout pushes to '$origin_repo'" \
     "crossrev pushes only to the head repository of the pull request under review."
 
-  if [[ "$is_cross_repo" == "true" ]]; then
+  if [[ "$is_cross_repo" != "false" ]]; then
     [[ "$maintainer_can_modify" == "true" ]] || ui_die \
       "the contributor has not allowed maintainer edits on $head_repo" \
       "The contributor has not allowed maintainer edits on this pull request, so the fix cannot be pushed."
