@@ -271,12 +271,22 @@ legs_assert_env_clean() {
 # back to the tail rather than the head keeps that property when no keyword
 # matches, because the banner is always at the top and never worth the budget.
 legs_harness_error() {
-  local err="$1" cap="${2:-400}" picked
+  local err="$1" cap="${2:-400}" picked trimmed
   [[ -s "$err" ]] || return 1
   picked="$(grep -iE 'error|fatal|denied|unauthor|forbidden|invalid|expired|timed out|refused|not found' \
     "$err" 2>/dev/null | tail -2)"
   [[ -n "$picked" ]] || picked="$(tail -3 "$err")"
-  printf '%s' "$picked" | tail -c "$cap"
+
+  # Trimming to the cap takes the end, for the same reason the search does. A cut
+  # that lands mid-line then drops that partial line, so the output never opens
+  # halfway through a sentence — unless dropping it would leave nothing, which is
+  # one line longer than the whole budget and better shown cut than not at all.
+  if (( ${#picked} > cap )); then
+    picked="${picked: -cap}"
+    trimmed="${picked#*$'\n'}"
+    [[ "$picked" == *$'\n'* && -n "$trimmed" ]] && picked="$trimmed"
+  fi
+  printf '%s' "$picked"
 }
 
 # Layer one's other half: did the two legs differ in anything the orchestrator
