@@ -117,12 +117,14 @@ ctx_load() {
   [[ -n "$pr_json" ]] || ui_die "could not read $repo#$pr" \
     "Check the number, and that \`gh auth status\` passes for that repository."
 
-  # Fork pull requests fail closed. GitHub withholds secrets from them, so the
-  # loop would run unauthenticated rather than not at all — and a fork's head
-  # branch is not ours to push to.
-  [[ "$(jq -r .isCrossRepository <<<"$pr_json")" == "false" ]] || ui_die \
-    "$repo#$pr comes from a fork" \
-    "crossrev does not run on fork pull requests: GitHub withholds secrets from them, and the head branch is not this repository's to push to. Review it by hand."
+  # Fork pull requests fail closed in automated mode: GitHub withholds secrets
+  # from them, so the loop would run unauthenticated rather than not at all.
+  # A local run uses the operator's own credentials, so the refusal is scoped
+  # to automatic triggers.
+  if [[ "$trigger" == "automatic" && "$(jq -r '.isCrossRepository // false' <<<"$pr_json")" == "true" ]]; then
+    ui_die "$repo#$pr comes from a fork" \
+      "crossrev does not run on fork pull requests: GitHub withholds secrets from them. Review it locally or by hand."
+  fi
 
   [[ "$(jq -r .state <<<"$pr_json")" == "OPEN" ]] || ui_die \
     "$repo#$pr is not open" \
