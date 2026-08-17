@@ -322,9 +322,9 @@ run_pass_labels() {
 # Which harness runs a leg
 # ---------------------------------------------------------------------------
 
-LEG_HARNESS=""; LEG_MODEL=""; LEG_EFFORT=""; LEG_ENDPOINT=""
+LEG_HARNESS=""; LEG_MODEL=""; LEG_EFFORT=""; LEG_ENDPOINT=""; LEG_WRITE="no"
 
-# Sets the four LEG_* globals rather than printing them, so the warnings and the
+# Sets the five LEG_* globals rather than printing them, so the warnings and the
 # fatal case below reach the caller instead of dying in a subshell.
 #
 # Includes the single-harness fallback: when only one harness is installed, run
@@ -333,6 +333,14 @@ LEG_HARNESS=""; LEG_MODEL=""; LEG_EFFORT=""; LEG_ENDPOINT=""
 # that asked for two models and got one, and this config asked for one.
 run_leg_settings() {
   local leg="$1" override="${2:-}" alt="" h
+
+  # Derived from the leg, and deliberately not configurable. Only the resolver
+  # changes files; the reviewer has no reason to, and granting it write access
+  # widens the blast radius of a prompt injection carried in a diff for nothing
+  # in return. Set before the early returns below so every path carries it.
+  LEG_WRITE=no
+  [[ "$leg" == "resolver" ]] && LEG_WRITE=yes
+
   LEG_HARNESS="$(cfg_get ".$leg.harness")"
   LEG_MODEL="$(cfg_get ".$leg.model")"
   LEG_EFFORT="$(cfg_get ".$leg.effort")"
@@ -481,14 +489,19 @@ _run_invoke_abort() {
   rm -f "$idx"
 }
 
-# run_invoke <out> <harness> <prompt> <schema> <workdir> <model> <effort> <endpoint> <validator> [expect]
+# run_invoke <out> <harness> <prompt> <schema> <workdir> <model> <effort> <endpoint> <write> <validator> [expect]
+#
+# `write` is yes or no and rides alongside the other leg-derived settings, so
+# each adapter decides how its own CLI expresses the capability. See
+# run_leg_settings for where it comes from.
 #
 # `expect` is passed to the validator as its second argument, describing what
 # the orchestrator supplied — see lib/validate.sh. Absent for a leg with nothing
 # to compare against.
 run_invoke() {
   local out_file="$1" harness="$2" prompt_file="$3" schema_file="$4" workdir="$5"
-  local model="$6" effort="$7" endpoint="$8" validator="$9" expect="${10:-}"
+  local model="$6" effort="$7" endpoint="$8" write="$9"
+  local validator="${10}" expect="${11:-}"
 
   # Layer one of the divergence guard, and the specific failure it exists for:
   # these variables are process-scoped, so a leg that leaks them silently
@@ -532,7 +545,7 @@ run_invoke() {
     # messages — including a fatal one about an endpoint that does not resolve.
     # Swallowing those left the process exiting 1 with nothing printed.
     "adapter_$harness" "$prompt_file" "$schema_file" "$workdir" \
-      "$model" "$effort" "$endpoint" >"$out_file" || true
+      "$model" "$effort" "$endpoint" "$write" >"$out_file" || true
     sandbox_restore "$workdir"
     CROSSREV_SANDBOXED=""
 
@@ -686,7 +699,7 @@ No review ran, so nothing here is a judgement about the code. Raising the cap in
   fi
 
   run_leg_settings reviewer "$harness_override"
-  local harness="$LEG_HARNESS" model effort endpoint
+  local harness="$LEG_HARNESS" model effort endpoint write="$LEG_WRITE"
   model="$(_nullable "$LEG_MODEL")"
   effort="$(_nullable "$LEG_EFFORT")"
   endpoint="$(_nullable "$LEG_ENDPOINT")"
@@ -754,7 +767,7 @@ Reading the diff and any earlier review threads. This comment becomes the pass s
     ui_say "Reading the diff and any prior review threads."
     run_invoke "$envelope_file" "$harness" "$prompt_file" \
       "$ROOT/schemas/findings.schema.json" "$(pwd)" \
-      "$model" "$effort" "$endpoint" validate_findings
+      "$model" "$effort" "$endpoint" "$write" validate_findings
 
     payload="$(jq -c .payload "$envelope_file")"
     model_reported="$(jq -r '.model_reported // "null"' "$envelope_file")"
@@ -1271,7 +1284,7 @@ leg_resolve() {
     "$CTX_DEFAULT_BRANCH" "$CTX_REPO" "${origin_repo:-$CTX_REPO}"
 
   run_leg_settings resolver "$harness_override"
-  local harness="$LEG_HARNESS" model effort endpoint
+  local harness="$LEG_HARNESS" model effort endpoint write="$LEG_WRITE"
   model="$(_nullable "$LEG_MODEL")"
   effort="$(_nullable "$LEG_EFFORT")"
   endpoint="$(_nullable "$LEG_ENDPOINT")"
@@ -1389,7 +1402,7 @@ Verifying each finding against the codebase. This comment becomes the pass summa
     ui_say "Verifying each finding against the codebase."
     run_invoke "$envelope_file" "$harness" "$prompt_file" \
       "$ROOT/schemas/resolve.schema.json" "$(pwd)" \
-      "$model" "$effort" "$endpoint" validate_resolve "$expect"
+      "$model" "$effort" "$endpoint" "$write" validate_resolve "$expect"
 
     payload="$(jq -c .payload "$envelope_file")"
     model_reported="$(jq -r '.model_reported // "null"' "$envelope_file")"

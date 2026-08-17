@@ -6,18 +6,39 @@
 # one, and what the turn cost in tokens. Invoked with no GitHub credential in its
 # environment, and with repository-provided harness customisation disabled.
 
-# adapter_claude <prompt_file> <schema_file> <workdir> <model> <effort> <endpoint_name>
+# adapter_claude <prompt_file> <schema_file> <workdir> <model> <effort> <endpoint_name> <write>
 #
-# Prints a JSON object: {payload, harness, endpoint, model_reported, tokens, ok, error}
+# `write` is yes or no, derived from the leg rather than configured. Prints a JSON
+# object: {payload, harness, endpoint, model_reported, tokens, ok, error}
 adapter_claude() {
   local prompt_file="$1" schema_file="$2" workdir="$3"
-  local model="${4:-}" effort="${5:-}" endpoint="${6:-}"
+  local model="${4:-}" effort="${5:-}" endpoint="${6:-}" write="${7:-no}"
 
   command -v claude >/dev/null 2>&1 || ui_die \
     "the claude CLI is not installed, and this leg is configured to use it" \
     "Install it from https://claude.com/claude-code, or point this leg at another harness with --harness."
 
   local -a args=(-p --output-format json)
+
+  # A resolve leg has to change files, and headless Claude Code denies a write
+  # tool unless something grants it. Locally that something is the operator's own
+  # ~/.claude/settings.json; a runner is a fresh container with no such file, so
+  # the leg verified findings, worked out the fix and then could not apply it.
+  #
+  # It has to be this flag rather than a settings file: lib/sandbox.sh quarantines
+  # every path a harness auto-loads configuration from, so a settings file written
+  # into the workspace would be moved out of the way before claude started — and a
+  # grant that survived the quarantine would be the hole the quarantine exists to
+  # close.
+  #
+  # acceptEdits, not bypassPermissions: the line worth holding is between editing
+  # files and running arbitrary commands, and the resolve leg only needs the first.
+  #
+  # A reading leg passes no mode at all. There is no permission mode meaning
+  # "deny" — plan mode changes what the model does rather than what it may touch —
+  # and the headless default already denies the write, which is the behaviour that
+  # exposed this in the first place.
+  [[ "$write" == "yes" ]] && args+=(--permission-mode acceptEdits)
 
   # Claude Code takes the schema INLINE as a JSON string. Codex takes a file
   # path. Verified: handing Claude a path fails with a JSON parse error about

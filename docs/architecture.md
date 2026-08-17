@@ -141,7 +141,9 @@ If the harness writes to a quarantined path anyway, that write was made blind an
 
 ## The harness seam
 
-Each adapter takes a prompt file, a schema, a working directory, and an optional model, effort and endpoint. Each returns **two things**: the payload, and execution metadata naming the harness, the resolved endpoint, the answering model where the harness reports one, and what the turn cost in tokens.
+Each adapter takes a prompt file, a schema, a working directory, an optional model, effort and endpoint, and whether the leg may write to the working tree. Each returns **two things**: the payload, and execution metadata naming the harness, the resolved endpoint, the answering model where the harness reports one, and what the turn cost in tokens.
+
+**Write permission is derived from the leg, not configured.** The resolve leg has to change files, so it is granted file edits — `--permission-mode acceptEdits` on Claude Code, `--sandbox workspace-write` on Codex, `--mode accept-edits` on Antigravity. The review leg is granted nothing: it has no reason to write, and write access widens the blast radius of a prompt injection carried in a diff for nothing in return. The line held is between editing files and running arbitrary commands, so `bypassPermissions` and `danger-full-access` are never passed. The grant is a flag rather than a settings file because the quarantine above would move a settings file out of the way before the harness started — and a grant that survived it would be the hole the quarantine exists to close.
 
 | Adapter | Harness | Notes |
 |---|---|---|

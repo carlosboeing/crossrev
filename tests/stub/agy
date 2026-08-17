@@ -17,12 +17,16 @@ set -uo pipefail
 
 [[ "${1:-}" == "--version" ]] && { printf '9.9.9 (test stub)\n'; exit 0; }
 
+# Every flag the adapter built, so a suite can assert what a leg was and was not
+# granted. Appended, because one `crossrev run` invokes this twice.
+[[ -n "${CROSSREV_ARGV_LOG:-}" ]] && printf '%s\n' "$*" >>"$CROSSREV_ARGV_LOG"
+
 prompt=""
 saw_print=0
 while (( $# )); do
   case "$1" in
     --print|--prompt) prompt="${2:-}"; saw_print=1; shift 2 ;;
-    --output-format|--json-schema|--model|--effort)
+    --output-format|--json-schema|--model|--effort|--mode)
       (( saw_print )) && { printf 'test stub: %s came after --print, so the real CLI would have read it as the prompt\n' "$1" >&2; exit 96; }
       shift 2 ;;
     *) shift ;;
