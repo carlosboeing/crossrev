@@ -2108,10 +2108,10 @@ _cycle_finish_at_bound() {
   ui_say "Pass $pass is unfinished, and max_passes_per_cycle ($max) starts no further pass. Its resolve leg is still owed."
   leg_resolve "$@" --no-tips || return 1
 
-  # The same two outcomes the loop reports after a resolve leg, so the last line
-  # an operator reads describes what actually happened rather than assuming the
+  # The same outcomes the loop reports after a resolve leg, so the last line an
+  # operator reads describes what actually happened rather than assuming the
   # bound was the reason it stopped.
-  local rmarker
+  local rmarker rlabel
   ctx_load "$CTX_PR" "$CTX_REPO"
   rmarker="$(state_marker_for "$CTX_MARKERS" "$pass" resolve)"
   if [[ "$(jq -r '.blocked // false' <<<"$rmarker")" == "true" ]]; then
@@ -2120,6 +2120,23 @@ _cycle_finish_at_bound() {
   fi
   if grep -qw "crossrev/stop" <<<"$CTX_LABELS"; then
     ui_end "Halted after pass $pass — a point needs a human decision, so crossrev/stop is applied."
+    return 0
+  fi
+  # How the resolve pass ended outranks the bound, because the bound is a
+  # statement about passes that will not start and this pass has a terminal
+  # state of its own. Reported as the cap instead, a settle reads as a failure
+  # to converge, and a deferral nobody filed or a fix that reached no commit
+  # reads as a pass that finished cleanly.
+  rlabel=""
+  if [[ -n "$rmarker" && "$(jq -r '.state // ""' <<<"$rmarker")" == "complete" ]]; then
+    rlabel="$(legs_resolve_pass_label "$rmarker" "$(_markers_escalated "$CTX_MARKERS")")"
+  fi
+  if [[ "$rlabel" == "converged" ]]; then
+    ui_end "Converged after pass $pass — nothing at or above min_fix_severity ($CTX_MIN_FIX_SEVERITY) remains."
+    return 0
+  fi
+  if [[ "$rlabel" == "halted" ]]; then
+    ui_end "Halted after pass $pass — the resolve leg left something a person has to settle. \`crossrev status --pr $CTX_PR\` says what."
     return 0
   fi
   ui_end "Reached max_passes_per_cycle ($max) on $CTX_REPO#$CTX_PR — pass $pass is resolved, and no further pass starts."

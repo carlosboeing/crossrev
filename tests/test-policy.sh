@@ -411,6 +411,26 @@ is "a pass that settled everything without pushing ends the cycle" \
 has "and it is reported as a convergence"           "$out" "Converged after pass 1"
 hasnt "not as a run that ran out of passes"         "$out" "without converging"
 
+# The same three endings at the pass bound. The cap path runs the resolve leg
+# the interrupted pass is owed, so it reaches exactly the same endings — and
+# reporting the bound over them tells an operator the loop ran out of passes
+# when it either finished or stopped for them.
+: >"$cycle_log"
+out="$(cycle_driver 3 "$cycle_log" complete no "$CYCLE_END_SETTLED")"
+has "a settle at the bound is reported as a convergence" "$out" "Converged after pass 3"
+hasnt "rather than as the cap it happened to sit on"     "$out" "max_passes_per_cycle"
+
+: >"$cycle_log"
+out="$(cycle_driver 3 "$cycle_log" complete no "$CYCLE_END_UNFILED")"
+has "a deferral nobody filed halts at the bound too"  "$out" "Halted after pass 3"
+has "and names the command that says what"            "$out" "crossrev status --pr 42"
+hasnt "never reported as a pass that is resolved"     "$out" "is resolved"
+
+: >"$cycle_log"
+out="$(cycle_driver 3 "$cycle_log" complete no "$CYCLE_END_UNPUSHED")"
+has "a fix that reached no commit halts at the bound" "$out" "Halted after pass 3"
+hasnt "and never claims the loop converged"           "$out" "Converged"
+
 # A non-positive bound used to mean opposite things on the two paths: the
 # automatic loop skipped the pass check entirely and kept starting passes, while
 # a cycle compared the pass number and stopped before the first one. The daily
