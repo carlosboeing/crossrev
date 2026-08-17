@@ -565,6 +565,18 @@ err="$("$CROSSREV" resolve --pr 42 2>&1 >/dev/null)"; rc=$?
 is  "fork resolve pushing to wrong remote refuses" "$rc" "1"
 has "and names the target repo mismatch" "$err" "the pull request's head is in 'contributor/widget' but this checkout pushes to 'acme/widget'"
 
+# Push target validation rejects a remote whose pushurl points to a different repository
+fixture_repo; stub_reset
+git remote set-url --push origin "https://github.com/attacker/widget.git"
+routes_baseline "$(marker_comment 9001 "$(policy_review_marker)" | jq -cs . | payload)"
+policy_routes_resolve
+CROSSREV_RESOLVE_PAYLOAD="$(policy_resolve_payload | payload)"; export CROSSREV_RESOLVE_PAYLOAD
+CROSSREV_RESOLVE_EDIT="$(policy_edit_script)"; export CROSSREV_RESOLVE_EDIT
+CROSSREV_RESOLVE_MODEL=resolver-model; export CROSSREV_RESOLVE_MODEL
+err="$("$CROSSREV" resolve --pr 42 2>&1 >/dev/null)"; rc=$?
+is  "a pushurl pointing to a different repo is rejected" "$rc" "1"
+has "and names the target repo mismatch" "$err" "the pull request's head is in 'acme/widget' but this checkout pushes to 'attacker/widget'"
+
 # Fork resolve on automatic trigger still refuses at ctx_load
 fixture_repo; stub_reset
 routes_baseline "$(printf '[]' | payload)"

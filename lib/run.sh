@@ -1325,7 +1325,12 @@ leg_resolve() {
     "could not resolve the push remote for branch '$current_branch'" \
     "Check out the pull request with \`gh pr checkout $CTX_PR\` to configure the remote."
 
-  target_repo="$(git remote get-url "$push_remote" 2>/dev/null | sed -E 's#^.*github\.com[:/]##; s#\.git$##')" || target_repo=""
+  local push_url
+  push_url="$(git remote get-url --push "$push_remote" 2>/dev/null || true)"
+  if [[ -z "$push_url" || "$push_url" != *"github.com"* ]]; then
+    push_url="$(git remote get-url "$push_remote" 2>/dev/null || true)"
+  fi
+  target_repo="$(sed -E 's#^.*github\.com[:/]##; s#\.git$##' <<<"$push_url")"
   [[ -n "$target_repo" ]] || ui_die \
     "could not read the URL for remote '$push_remote'" \
     "Check \`git remote -v\` in this checkout."
