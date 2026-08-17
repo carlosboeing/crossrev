@@ -305,6 +305,7 @@ fixture_repo; stub_reset      # the default config has backlog.destination: none
 routes_baseline "$(marker_comment 9001 "$(review_marker)" | jq -cs . | payload)"
 routes_resolve
 CROSSREV_RESOLVE_PAYLOAD="$(resolve_payload null no | payload)"; export CROSSREV_RESOLVE_PAYLOAD
+CROSSREV_RESOLVE_EDIT="$(edit_script)"; export CROSSREV_RESOLVE_EDIT
 out="$("$CROSSREV" resolve --pr 42 2>&1)"; rc=$?
 
 is  "with no backlog destination the leg still completes" "$rc" "0"
@@ -322,6 +323,7 @@ existing="$(jq -cn --arg d "$ID_DEFER" '
     body:("Filed earlier. <!-- crossrev:f " + ({id:$d, pass:1, leg:"resolve"} | tojson) + " -->")}]')"
 route_first 'api --paginate repos/*/issues?state=all*' "$existing"
 CROSSREV_RESOLVE_PAYLOAD="$(resolve_payload | payload)"; export CROSSREV_RESOLVE_PAYLOAD
+CROSSREV_RESOLVE_EDIT="$(edit_script)"; export CROSSREV_RESOLVE_EDIT
 out="$("$CROSSREV" resolve --pr 42 2>&1)"; rc=$?
 
 is  "an already-filed finding files nothing"          "$(count 'method POST repos/acme/widget/issues -f title=')" "0"
@@ -364,6 +366,7 @@ routes_baseline "$(marker_comment 9001 "$(review_marker)" | jq -cs . | payload)"
 routes_resolve
 route_first 'api --method POST repos/*/issues -f title=*' '!fail'
 CROSSREV_RESOLVE_PAYLOAD="$(resolve_payload | payload)"; export CROSSREV_RESOLVE_PAYLOAD
+CROSSREV_RESOLVE_EDIT="$(edit_script)"; export CROSSREV_RESOLVE_EDIT
 out="$("$CROSSREV" resolve --pr 42 2>&1)"; rc=$?
 
 is  "a failed filing does not fail the whole leg"     "$rc" "0"
@@ -453,6 +456,7 @@ fixture_repo "$(config_with_issue_sink)"; stub_reset
 routes_baseline "$(marker_comment 9001 "$(review_marker)" | jq -cs . | payload)"
 routes_resolve
 CROSSREV_RESOLVE_PAYLOAD="$(resolve_payload | payload)"; export CROSSREV_RESOLVE_PAYLOAD
+CROSSREV_RESOLVE_EDIT="$(edit_script)"; export CROSSREV_RESOLVE_EDIT
 out="$("$CROSSREV" resolve --pr 42 2>&1)"
 prompt="$(cat "$PROMPT_LOG")"
 
@@ -497,6 +501,7 @@ routes_resolve
 CROSSREV_RESOLVE_PAYLOAD="$(printf '%s' "$out_of_range" | payload)"; export CROSSREV_RESOLVE_PAYLOAD
 CROSSREV_RESOLVE_PAYLOAD_2="$(resolve_payload | payload)"; export CROSSREV_RESOLVE_PAYLOAD_2
 CROSSREV_STUB_COUNT="$(mktemp)"; export CROSSREV_STUB_COUNT
+CROSSREV_RESOLVE_EDIT="$(edit_script)"; export CROSSREV_RESOLVE_EDIT
 out="$("$CROSSREV" resolve --pr 42 2>&1)"; rc=$?
 
 is  "drift is asked once more rather than costing the pass" "$rc" "0"
