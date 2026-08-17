@@ -107,6 +107,8 @@ Markers are HTML comments in comment bodies. They carry the pass number, the leg
 | halted | It stopped short — a cap, a blocked leg, or an escalated finding. A human is needed |
 | stopped | Somebody applied `crossrev/stop` |
 
+A resolve pass that ended blocked or escalated is complete but not settled, so it can be driven again: once whatever stopped it is fixed, `crossrev resolve --pr N` runs the resolver over the same findings instead of refusing. A pass that settled every finding stays finished. `status` names whichever command applies.
+
 Converged does not mean "no findings". It means no finding this pull request introduced, at or above the threshold, remains. Findings below the threshold and pre-existing ones are reported and cannot keep the loop alive — a loop that cannot converge because of a naming quibble is one nobody leaves switched on.
 
 ## Which models run

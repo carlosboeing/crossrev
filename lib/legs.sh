@@ -100,6 +100,23 @@ legs_awaiting_label() {
   esac
 }
 
+# May a completed resolve pass be driven again?
+#
+# Escalating or reporting blocked completes a pass rather than abandoning it —
+# the dispositions are on the pull request and the threads carry the reasoning —
+# and completion is what the re-run guard reads, so without this a pass that
+# ended either way could never run again once whatever stopped it was fixed.
+# Both endings leave something undecided, so both admit a re-drive. A pass that
+# settled every finding stays refused: running it again would re-decide work
+# that is done.
+#
+# $1 the completed resolve marker.
+legs_resolve_redrivable() {
+  local marker="$1"
+  [[ "$(jq -r '.blocked // false' <<<"$marker")" == "true" ]] && return 0
+  [[ "$(jq '[(.dispositions // [])[] | select(.disposition == "escalated")] | length' <<<"$marker")" != "0" ]]
+}
+
 # The colour a loop label is minted with.
 #
 # Six hues, no two adjacent on the wheel, so the label row on a pull request
