@@ -32,6 +32,14 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$HERE/../lib/ui.sh"
 # shellcheck source=../lib/credentials.sh
 source "$HERE/../lib/credentials.sh"
+# An adapter's no-output path reads the useful end of stderr through
+# legs_harness_error, and the recorder below drives codex and agy straight down
+# it. bin/crossrev sources lib/legs.sh ahead of the adapters for that reason
+# (line 46, against 58 to 62). Without the same line here the probes run that
+# path against an undefined function: probe() discards the command-not-found and
+# the argv log the assertions read is unchanged, so the suite passes over it.
+# shellcheck source=../lib/legs.sh
+source "$HERE/../lib/legs.sh"
 for _a in "$HERE"/../lib/adapters/*.sh; do
   # shellcheck source=/dev/null
   source "$_a"
