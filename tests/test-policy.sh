@@ -39,6 +39,7 @@ cycle_driver() {
   printf '%s' "$starting_pass" >"$pass_file"
   ROOT="$HERE/.." CYCLE_PASS_FILE="$pass_file" CYCLE_LOG="$log" \
   CYCLE_REVIEW_STATE="$review_state" CYCLE_RESOLVE_DONE="$resolve_done" bash -c '
+    source "$ROOT/lib/legs.sh"
     source "$ROOT/lib/run.sh"
     ctx_load() {
       CTX_REPO="acme/widget"; CTX_PR=42; CTX_MAX_PASSES_PER_CYCLE=3
@@ -53,8 +54,11 @@ cycle_driver() {
     }
     leg_resolve() { printf "resolve %s\n" "$*" >>"$CYCLE_LOG"; CYCLE_RESOLVE_DONE=yes; }
     state_current_review_pass() { cat "$CYCLE_PASS_FILE"; }
+    # One blob stands in for the markers of both legs, so the resolve read has
+    # to carry what the loop-end decision reads: a pushed commit, or the
+    # driver would report a convergence these cases never modelled.
     state_marker_for() {
-      printf "%s" "{\"state\":\"$CYCLE_REVIEW_STATE\",\"verdict\":\"issues-remain\",\"findings\":[{\"severity\":\"high\"}]}"
+      printf "%s" "{\"state\":\"$CYCLE_REVIEW_STATE\",\"verdict\":\"issues-remain\",\"findings\":[{\"severity\":\"high\"}],\"blocked\":false,\"commit_sha\":\"abc123\",\"dispositions\":[{\"disposition\":\"fixed\"}]}"
     }
     state_current_pass_complete() { [[ "$CYCLE_RESOLVE_DONE" == "yes" ]]; }
     run_actionable() { printf "1"; }

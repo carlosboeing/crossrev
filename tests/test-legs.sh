@@ -165,6 +165,12 @@ redrivable no  "a settled pass stays refused" \
   '{"leg":"resolve","pass":1,"state":"complete","blocked":false,"dispositions":[{"disposition":"fixed"},{"disposition":"skipped"}]}'
 redrivable no  "a pass that dispositioned nothing stays refused" \
   '{"leg":"resolve","pass":1,"state":"complete","blocked":false,"dispositions":[]}'
+redrivable no  "an all-rebutted pass stays refused" \
+  '{"leg":"resolve","pass":1,"state":"complete","blocked":false,"dispositions":[{"disposition":"rebutted"}]}'
+# A deferral whose record never landed left its thread open on purpose, so the
+# pass is not settled: once the filing is fixed, driving it again is the remedy.
+redrivable yes "an unpersisted deferral re-drives once the filing is fixed" \
+  '{"leg":"resolve","pass":1,"state":"complete","blocked":false,"dispositions":[{"disposition":"deferred","crossrev_tracked":""}]}'
 
 # --- the guard itself, end to end -------------------------------------------
 #
@@ -272,6 +278,82 @@ if [[ ! -s "$PROMPT_LOG" ]]; then
 else
   notok "and the resolver is not run again" "no prompt" "$(cat "$PROMPT_LOG")"
 fi
+
+# --- the label a finished resolve pass leaves behind -------------------------
+#
+# A pass that pushed hands back to the reviewer, because the head moved and
+# there is something new to see. A pass that settled every finding without
+# pushing — each rebutted, skipped, or deferred and tracked — is over: the
+# reviewer declines an unchanged head, so awaiting-review would park the loop
+# on a command that refuses. Escalation still wins, and a deferral whose
+# record never landed is not settled — its thread is open on purpose.
+resolve_label() {
+  local want="$1" desc="$2"
+  local got; got="$(legs_resolve_pass_label "$3" "$4")"
+  [[ "$got" == "$want" ]] && ok "$desc" || notok "$desc" "$want" "$got"
+}
+
+resolve_label converged "an all-rebutted pass converges" \
+  '{"state":"complete","blocked":false,"commit_sha":null,"dispositions":[{"disposition":"rebutted"}]}' 0
+resolve_label converged "an all-skipped pass converges" \
+  '{"state":"complete","blocked":false,"commit_sha":null,"dispositions":[{"disposition":"skipped"}]}' 0
+resolve_label converged "a deferral tracked elsewhere converges" \
+  '{"state":"complete","blocked":false,"commit_sha":null,"dispositions":[{"disposition":"deferred","crossrev_tracked":"o/r#7"}]}' 0
+resolve_label converged "a mix of the three settles" \
+  '{"state":"complete","blocked":false,"commit_sha":null,"dispositions":[{"disposition":"rebutted"},{"disposition":"skipped"},{"disposition":"deferred","crossrev_tracked":"o/r#7"}]}' 0
+resolve_label converged "a legacy deferral without the tracking field reads as settled" \
+  '{"state":"complete","blocked":false,"commit_sha":null,"dispositions":[{"disposition":"deferred"}]}' 0
+resolve_label awaiting-review "a pass that pushed a fix hands back to the reviewer" \
+  '{"state":"complete","blocked":false,"commit_sha":"d81a3f2abc","dispositions":[{"disposition":"fixed"},{"disposition":"rebutted"}]}' 0
+resolve_label awaiting-review "a deferral committed to the repository backlog moved the head" \
+  '{"state":"complete","blocked":false,"commit_sha":"d81a3f2abc","dispositions":[{"disposition":"deferred","crossrev_tracked":".crossrev/backlog#1"}]}' 0
+resolve_label halted "a rebuttal beside an escalation halts — the escalation wins" \
+  '{"state":"complete","blocked":false,"commit_sha":null,"dispositions":[{"disposition":"rebutted"},{"disposition":"escalated"}]}' 0
+resolve_label halted "an escalation an earlier pass left standing halts the settle" \
+  '{"state":"complete","blocked":false,"commit_sha":null,"dispositions":[{"disposition":"rebutted"}]}' 1
+resolve_label halted "a blocked pass halts" \
+  '{"state":"complete","blocked":true,"commit_sha":null,"dispositions":[{"disposition":"rebutted"}]}' 0
+resolve_label halted "a deferral whose record never landed halts" \
+  '{"state":"complete","blocked":false,"commit_sha":null,"dispositions":[{"disposition":"deferred","crossrev_tracked":""}]}' 0
+
+# --- and the label the resolve leg actually writes, end to end ---------------
+#
+# Every finding rebutted, nothing pushed: the loop is done, and the label has
+# to say so rather than hand back to a reviewer that will decline.
+RD_REBUT_PAYLOAD='{"blocked":false,"blocked_reason":null,"summary":"Both rebutted.","dispositions":[
+  {"finding_number":1,"disposition":"rebutted","reply":"Not a defect.","persist":null,"duplicate_of":null},
+  {"finding_number":2,"disposition":"rebutted","reply":"Not this one either.","persist":null,"duplicate_of":null}]}'
+
+fixture_repo; stub_reset
+routes_baseline "$(jq -cn --argjson a "$(marker_comment 9001 "$(rd_review_marker)")" '[$a]' | payload)"
+rd_routes
+CROSSREV_RESOLVE_PAYLOAD="$(printf '%s' "$RD_REBUT_PAYLOAD" | payload)"; export CROSSREV_RESOLVE_PAYLOAD
+CROSSREV_RESOLVE_MODEL=resolver-model; export CROSSREV_RESOLVE_MODEL
+out="$("$CROSSREV" resolve --pr 42 2>&1)"; rc=$?
+
+is  "the all-rebutted resolve exits clean"            "$rc" "0"
+has "both threads are answered and resolved"          "$out" "resolved 2 thread(s)"
+has "the pass is labelled converged"                  "$(calls)" "labels[]=crossrev/converged"
+hasnt "not handed back to a reviewer that declines"   "$(calls)" "labels[]=crossrev/awaiting-review"
+has "and the run says the loop is done"               "$out" "the loop is done"
+
+# One rebuttal beside one escalation: the pass is halted, not converged — the
+# escalation waits on a human and outranks every settle beside it.
+RD_MIXED_PAYLOAD='{"blocked":false,"blocked_reason":null,"summary":"One rebutted, one escalated.","dispositions":[
+  {"finding_number":1,"disposition":"rebutted","reply":"Not a defect.","persist":null,"duplicate_of":null},
+  {"finding_number":2,"disposition":"escalated","reply":"This needs a human.","persist":null,"duplicate_of":null}]}'
+
+fixture_repo; stub_reset
+routes_baseline "$(jq -cn --argjson a "$(marker_comment 9001 "$(rd_review_marker)")" '[$a]' | payload)"
+rd_routes
+CROSSREV_RESOLVE_PAYLOAD="$(printf '%s' "$RD_MIXED_PAYLOAD" | payload)"; export CROSSREV_RESOLVE_PAYLOAD
+CROSSREV_RESOLVE_MODEL=resolver-model; export CROSSREV_RESOLVE_MODEL
+out="$("$CROSSREV" resolve --pr 42 2>&1)"; rc=$?
+
+is  "the mixed pass exits clean"                      "$rc" "0"
+has "a rebuttal beside an escalation stays halted"    "$(calls)" "labels[]=crossrev/halted"
+hasnt "and never converges"                           "$(calls)" "labels[]=crossrev/converged"
+has "the stop the escalation applies still lands"     "$(calls)" "crossrev/stop"
 
 # --- the label a finished review pass leaves behind --------------------------
 #

@@ -70,6 +70,10 @@ ONE_MED='[{"severity":"medium"}]'
 FIXED_SKIPPED='[{"disposition":"fixed"},{"disposition":"fixed"},{"disposition":"skipped"}]'
 ONE_FIXED='[{"disposition":"fixed"}]'
 ESCALATED='[{"disposition":"fixed"},{"disposition":"escalated"}]'
+REBUTTED='[{"disposition":"rebutted"},{"disposition":"skipped"}]'
+REBUTTED_ESCALATED='[{"disposition":"rebutted"},{"disposition":"escalated"}]'
+DEFERRED_TRACKED='[{"disposition":"deferred","crossrev_tracked":"acme/widget#7"}]'
+DEFERRED_UNTRACKED='[{"disposition":"deferred","crossrev_tracked":""}]'
 
 # $1 names a function to run inside the fixture checkout after the routes are in
 # place and before status runs — a lock file, an extra route — or is empty for
@@ -314,6 +318,82 @@ out="$(status_with "$(lbl crossrev/awaiting-review crossrev/pass-1)" \
   "$(resolve_m 1 "$FIXED_SKIPPED" d81a3f2abc)")"
 has "a pass below the cap still points at the next review" "$out" "crossrev review --pr 42"
 hasnt "and says nothing about max_passes_per_cycle"        "$out" "max_passes_per_cycle"
+
+# --- a pass whose findings were all rebutted is done, however it is read -----
+#
+# Every finding settled without a push, so the head never moved and the
+# reviewer declines a re-run. The pass is over; the only question is whether
+# the display says so.
+out="$(status_with "$(lbl crossrev/converged crossrev/pass-1)" \
+  "$(review_m 1 issues-remain "$ONE_MED")" \
+  "$(resolve_m 1 "$REBUTTED")")"
+has "a rebuttal-settled pass reads as converged" "$out" "acme/widget#42 — converged"
+has "and NEXT says there is nothing to run"      "$out" "nothing to run"
+hasnt "rather than recommending a review that declines" "$out" "crossrev review --pr 42"
+
+# The pull request this was filed from wore the stale label: awaiting-review,
+# written before the resolve leg could label the settle. The label is history,
+# but NEXT must still not send the reader to a command that refuses.
+#
+# The markers are built inside the fixture, after fixture_repo sets FIX_HEAD:
+# built beforehand they carry the parent shell's empty head, and the head
+# comparison the arm relies on — has the branch moved since the review? —
+# would always answer yes.
+settled_comments() {
+  route_first "api --paginate repos/*/issues/$FIX_PR/comments*" "$(jq -cn \
+    --argjson a "$(marker_comment 9001 "$(review_m 1 issues-remain "$ONE_MED")")" \
+    --argjson b "$(marker_comment 9002 "$(resolve_m 1 "$REBUTTED")")" '[$a,$b]')"
+}
+out="$(status_setup_with settled_comments "$(lbl crossrev/awaiting-review crossrev/pass-1)")"
+hasnt "a settled pass under a stale label does not recommend the review that declines" \
+  "$out" "crossrev review --pr 42"
+has "and says why there is nothing to run" "$out" "nothing new to see"
+
+# With no labels at all, the marker copy of the same decision has to agree:
+# halted and converged come from the markers, and this pass converged.
+out="$(status_with '[]' \
+  "$(review_m 1 issues-remain "$ONE_MED")" \
+  "$(resolve_m 1 "$REBUTTED")")"
+has "with no labels the markers give the same answer" "$out" "acme/widget#42 — converged"
+hasnt "not a hand-back to a reviewer that declines"   "$out" "— awaiting review"
+hasnt "nor a resolve leg that was already owed and ran" "$out" "— awaiting resolution"
+
+# A tracked deferral settles the pass the same way: the finding was real, but
+# the work lives in an issue off this pull request, so nothing is owed here.
+out="$(status_with '[]' \
+  "$(review_m 1 issues-remain "$ONE_MED")" \
+  "$(resolve_m 1 "$DEFERRED_TRACKED")")"
+has "a pass whose only finding was deferred and tracked converges" \
+  "$out" "acme/widget#42 — converged"
+
+# A deferral whose record never landed is not settled — the thread stayed open
+# on purpose — so the loop halts for a human rather than converging over an
+# open thread.
+out="$(status_with '[]' \
+  "$(review_m 1 issues-remain "$ONE_MED")" \
+  "$(resolve_m 1 "$DEFERRED_UNTRACKED")")"
+has "a deferral whose record never landed halts" "$out" "acme/widget#42 — halted"
+hasnt "rather than converging over an open thread" "$out" "— converged"
+has "and NEXT sends the reader to re-drive the resolve leg" "$out" "crossrev resolve --pr 42"
+
+# A rebuttal beside an escalation is a halt, and the marker copy agrees.
+out="$(status_with '[]' \
+  "$(review_m 1 issues-remain "$HIGH_LOW")" \
+  "$(resolve_m 1 "$REBUTTED_ESCALATED")")"
+has "a rebuttal beside an escalation reads as halted" "$out" "acme/widget#42 — halted"
+has "and NEXT names the pending decision"             "$out" "1 finding need"
+hasnt "and never claims the loop converged"           "$out" "— converged"
+
+# The settle only ends the loop because the head never moved. A revision
+# pushed afterwards is genuinely unreviewed, and NEXT must say so.
+moved_after_settle_comments() {
+  route_first "api --paginate repos/*/issues/$FIX_PR/comments*" "$(jq -cn \
+    --argjson a "$(marker_comment 9001 "$(review_m 1 issues-remain "$ONE_MED" | jq -c '.head_sha = "0000000000000000000000000000000000000000"')")" \
+    --argjson b "$(marker_comment 9002 "$(resolve_m 1 "$REBUTTED" | jq -c '.head_sha = "0000000000000000000000000000000000000000"')")" '[$a,$b]')"
+}
+out="$(status_setup_with moved_after_settle_comments "$(lbl crossrev/awaiting-review crossrev/pass-1)")"
+has "a revision pushed after the settle is still owed a review" "$out" "crossrev review --pr 42"
+hasnt "and is not waved through as settled"                     "$out" "nothing new to see"
 
 # --- halted: a cap stopped the next pass before it began --------------------
 #

@@ -1594,8 +1594,15 @@ Dispositions recorded; committing and replying now.$(state_marker_encode "$(jq -
     # Carried on the record itself rather than in a parallel array, so pass two
     # reads one thing and a crash between the passes leaves no orphan state to
     # reconcile.
-    dispositions="$(jq -c --arg id "$id" --arg t "$tracked" \
-      'map(if .finding_id == $id then . + {crossrev_tracked: $t} else . end)' <<<"$dispositions")"
+    #
+    # With no backlog configured there is nothing to track into: the thread
+    # staying open is the configuration, not a failure, so the field is left
+    # off rather than recorded empty. An empty value asserts a landing that was
+    # attempted and did not happen — the loop-end decision reads exactly that.
+    if [[ "$CTX_BACKLOG" != "none" ]]; then
+      dispositions="$(jq -c --arg id "$id" --arg t "$tracked" \
+        'map(if .finding_id == $id then . + {crossrev_tracked: $t} else . end)' <<<"$dispositions")"
+    fi
   done
   run_checkpoint
 
@@ -1753,8 +1760,12 @@ Pushed \`${commit_sha:0:7}\`; replying to each thread now.$(state_marker_encode 
   # run does: the marker is what the comment is re-rendered from, so a fact that
   # lives only in a local disappears on recovery.
   local summary_body
-  marker="$(jq -c --argjson t "$(date +%s)" --argjson u "$unthreaded" \
-    '.done_ts = $t | .unthreaded = $u' <<<"$marker")"
+  # The dispositions go back onto the marker with the tracking each deferral
+  # earned, because the marker is the record status reads the pass's ending
+  # from — a deferral whose record never landed has to be visible there, or
+  # the marker copy of the label decision cannot agree with the label.
+  marker="$(jq -c --argjson t "$(date +%s)" --argjson u "$unthreaded" --argjson d "$dispositions" \
+    '.done_ts = $t | .unthreaded = $u | .dispositions = $d' <<<"$marker")"
   summary_body="$(_resolve_summary_body "$dispositions" "$findings" "$deferred_lines" "$marker")"
   gh_comment_edit "$CTX_REPO" "$comment_id" \
     "$summary_body$(state_marker_encode "$(jq -c 'del(.comment_id)' <<<"$marker")")"
@@ -1765,8 +1776,14 @@ Pushed \`${commit_sha:0:7}\`; replying to each thread now.$(state_marker_encode 
   gh_comment_edit "$CTX_REPO" "$comment_id" \
     "$summary_body$(state_marker_encode "$(jq -c 'del(.comment_id)' <<<"$marker")")"
 
-  local next="awaiting-review"
-  if [[ "$blocked" == "true" ]] || (( escalated > 0 )); then next="halted"; fi
+  local next other_escalated
+  # Escalations in OTHER passes stand too — the halt outlives the pass that
+  # caused it. This pass's own marker is re-read below rather than trusted
+  # from the load the leg started with, because a re-drive rewrites it.
+  other_escalated="$(jq --argjson p "$pass" \
+    '[.[] | select(.leg == "resolve" and .pass != $p) | (.dispositions // [])[] | select(.disposition == "escalated")] | length' \
+    <<<"$CTX_MARKERS")"
+  next="$(legs_resolve_pass_label "$marker" "$other_escalated")"
   run_pass_labels "$pass" "$next"
   if (( escalated > 0 )); then
     run_label_add "crossrev/stop"
@@ -1780,6 +1797,9 @@ Pushed \`${commit_sha:0:7}\`; replying to each thread now.$(state_marker_encode 
     if [[ "$next" == "awaiting-review" ]]; then
       ui_say "To look again with the reviewer:"
       ui_say "  crossrev review --pr $CTX_PR"
+      printf '\n'
+    elif [[ "$next" == "converged" ]]; then
+      ui_say "Every finding settled without a change to the code, so the loop is done."
       printf '\n'
     fi
   fi
@@ -2189,6 +2209,16 @@ cmd_cycle() {
       ui_end "Halted after pass $pass — a point needs a human decision, so crossrev/stop is applied."
       return 0
     fi
+    # A pass that settled every finding without pushing is done: the next
+    # review would decline the unchanged head, so the loop stops here rather
+    # than spinning declines until the cap and reporting a convergence as a
+    # failure to converge.
+    if [[ -n "$rmarker" && "$(jq -r '.state // ""' <<<"$rmarker")" == "complete" ]] \
+       && [[ "$(legs_resolve_pass_label "$rmarker" "$(_markers_escalated "$CTX_MARKERS")")" == "converged" ]]; then
+      ui_end "Converged after pass $pass — nothing at or above min_fix_severity ($CTX_MIN_FIX_SEVERITY) remains."
+      (( no_tips )) || run_upgrade_nudge
+      return 0
+    fi
   done
 
   ui_end "Reached max_passes_per_cycle ($max) on $CTX_REPO#$CTX_PR without converging. Every finding and reply is on the pull request."
@@ -2340,17 +2370,19 @@ _status_state_from_markers() {
     else
       printf 'awaiting resolution'
     fi
-  elif [[ "$(jq -r '.blocked // false' <<<"$m_resolve")" == "true" ]]; then
-    printf 'halted'
-  elif (( $(_status_escalated "$m_resolve") > 0 )); then
-    # A resolve pass that escalated halted deliberately, and its own leg applied
-    # `crossrev/halted` and `crossrev/stop` for exactly that reason. Reading only
-    # `blocked` here would answer "awaiting review" on the one path where the
-    # loop is waiting on a person, and send the reader to start a pass that
-    # settles nothing.
-    printf 'halted'
   else
-    printf 'awaiting review'
+    # The marker copy of the label the resolve leg wrote
+    # (legs_resolve_pass_label), read off the same marker by the same rule, so
+    # the two cannot disagree on a pull request with no labels to read. A pass
+    # that escalated is one of the halts inside it: reading only `blocked`
+    # here would answer "awaiting review" on the path where the loop is
+    # waiting on a person, and send the reader to start a pass that settles
+    # nothing.
+    case "$(legs_resolve_pass_label "$m_resolve" "$(_markers_escalated "$CTX_MARKERS")")" in
+      halted)    printf 'halted' ;;
+      converged) printf 'converged' ;;
+      *)         printf 'awaiting review' ;;
+    esac
   fi
 }
 
@@ -2637,8 +2669,25 @@ _status_next() {
 
   # awaiting review, and why one is owed.
   #
-  # The cap comes first, because a pass at max_passes_per_cycle is owed a review
-  # the loop will not start by itself. The bound is a bound on the loop
+  # A resolve pass that settled every finding without pushing is done: the
+  # reviewer declines an unchanged head, so the review command below is one
+  # that refuses. Passes labelled after the fact carry converged and never
+  # reach here; this arm is the same decision (legs_resolve_pass_label) read
+  # off the marker, for the pull requests whose awaiting-review label predates
+  # it. A revision pushed after the settle is genuinely unreviewed, so the
+  # head has to not have moved for the pass to be over.
+  m="$(state_marker_for "$CTX_MARKERS" "$pass" resolve)"
+  if (( pass > 0 )) && [[ -n "$m" && "$(jq -r '.state // ""' <<<"$m")" == "complete" ]] \
+     && [[ "$(legs_resolve_pass_label "$m" "$(_markers_escalated "$CTX_MARKERS")")" == "converged" ]] \
+     && ! state_is_new_revision "$CTX_MARKERS" "$CTX_HEAD_SHA"; then
+    ui_line "nothing to run — pass $pass settled every finding without a code"
+    ui_line "change, so a re-review would decline: there is nothing new to see."
+    return 0
+  fi
+
+  # The cap comes before the plain invitation, because a pass at
+  # max_passes_per_cycle is owed a review the loop will not start by itself. The
+  # bound is a bound on the loop
   # continuing, not on a person: an automatic trigger and a cycle's own later
   # passes meet it, while `crossrev review --pr N` typed by hand runs one attended
   # pass regardless. So the state is described rather than the command withheld,
@@ -2739,6 +2788,18 @@ _status_next_halted() {
   # was the environment rather than a disagreement, so once a human has fixed
   # that, running the leg again is exactly the remedy.
   m_resolve="$(state_marker_for "$CTX_MARKERS" "$pass" resolve)"
+  # A deferral whose record never landed is not settled: the thread stayed
+  # open on purpose, and the remedy is filing the work and driving the pass
+  # again — which legs_resolve_redrivable admits for exactly this marker.
+  if [[ -n "$m_resolve" && "$(jq -r '.state // ""' <<<"$m_resolve")" == "complete" ]] \
+     && [[ "$(jq -r '.blocked // false' <<<"$m_resolve")" != "true" ]] \
+     && [[ "$(jq '[(.dispositions // [])[] | select(.disposition == "deferred" and .crossrev_tracked == "")] | length' <<<"$m_resolve")" != "0" ]]; then
+    ui_line "a deferred finding was never filed anywhere durable, so its thread"
+    ui_line "stays open. Put the work somewhere tracked, then drive the pass again:"
+    ui_cmd  "crossrev resolve --pr $CTX_PR"
+    return 0
+  fi
+
   if [[ -n "$m_resolve" && "$(jq -r '.blocked // false' <<<"$m_resolve")" == "true" ]]; then
     ui_line "the resolve leg reported blocked and left its reasoning in the thread"
     ui_line "it belongs to. Once that is settled:"
