@@ -395,6 +395,16 @@ err="$("$CROSSREV" review --pr 42 --trigger automatic 2>&1 >/dev/null)"; rc=$?
 is  "an automatic review on a fork pull request refuses to run" "$rc" "1"
 has "and the reason is the credential, not capability" "$err" "GitHub withholds secrets from them"
 
+stub_reset
+routes_baseline "$(printf '[]' | payload)"
+route_first "pr view $FIX_PR --repo * --json *" "$(jq -cn --arg h "$FIX_HEAD" --arg b "$FIX_BASE" '
+  {number:42, title:"t", body:"", url:"u", headRefName:"feature", headRefOid:$h,
+   baseRefName:"main", baseRefOid:$b, changedFiles:1, labels:[],
+   headRepositoryOwner:{login:"someone"}, headRepository:{name:"widget"}, state:"OPEN"}')"
+err="$("$CROSSREV" review --pr 42 --trigger automatic 2>&1 >/dev/null)"; rc=$?
+is  "a payload missing isCrossRepository refuses on automatic trigger" "$rc" "1"
+has "and fails closed with the same reason" "$err" "GitHub withholds secrets from them"
+
 route 'api --method POST repos/*/issues/42/comments*' '{"id":9001}'
 no_threads
 CROSSREV_REVIEW_PAYLOAD="$(printf '%s' "$CONVERGED" | payload)"; export CROSSREV_REVIEW_PAYLOAD
