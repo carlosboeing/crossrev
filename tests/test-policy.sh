@@ -245,6 +245,37 @@ out="$("$CROSSREV" review --pr 42 2>&1)"
 has "a human can ask to review a draft pull request" "$out" "Reviewing acme/widget#42"
 has "and that attended review writes its claim"      "$(calls)" "method POST repos/acme/widget/issues/42/comments"
 
+# Who started the pass is a property of the pass, not of one leg. The composite
+# action forwards --trigger to whichever leg it runs and the input defaults to
+# automatic, so a resolve leg that cannot parse the flag cannot run in automated
+# mode at all — which is what stopped every pass completing.
+stub_reset
+routes_baseline "$(printf '[]' | payload)" '[{"name":"crossrev/stop"}]'
+out="$("$CROSSREV" resolve --pr 42 --trigger automatic 2>&1)"
+has "the resolve leg takes --trigger automatic"  "$out" "nothing is resolved"
+out="$("$CROSSREV" resolve --pr 42 --trigger human 2>&1)"
+has "the resolve leg takes --trigger human"      "$out" "nothing is resolved"
+err="$("$CROSSREV" resolve --pr 42 --trigger cron 2>&1 >/dev/null)"; rc=$?
+is  "and refuses a trigger it does not know"     "$rc" "1"
+has "naming the two it does"                     "$err" "Use --trigger human or --trigger automatic."
+
+# Accepting the flag is only half of it: the draft rule lives in ctx_load, so a
+# resolve leg that parses --trigger and drops it looks fixed and is not.
+stub_reset
+routes_baseline "$(printf '[]' | payload)"
+route_first "pr view $FIX_PR --repo * --json *" "$draft"
+out="$("$CROSSREV" resolve --pr 42 --trigger automatic 2>&1)"; rc=$?
+has "a draft pull request is not resolved automatically"  "$out" "draft pull request"
+is  "and declining it is not a workflow failure"          "$rc" "0"
+is  "and it writes nothing"                               "$(count 'method POST')" "0"
+
+stub_reset
+routes_baseline "$(printf '[]' | payload)"
+route_first "pr view $FIX_PR --repo * --json *" "$draft"
+err="$("$CROSSREV" resolve --pr 42 --trigger human 2>&1 >/dev/null)"
+hasnt "a human can ask to resolve a draft pull request"   "$err" "draft pull request"
+has   "and it gets as far as looking for a review to resolve" "$err" "has no review to resolve"
+
 # Pass limits classify the pass, not only the invocation. A direct review is
 # individually requested; cycle-generated passes carry --continuation.
 fixture_repo; stub_reset
