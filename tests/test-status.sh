@@ -122,12 +122,24 @@ run_completed()   { route_first 'run view 55501 --repo acme/widget --json status
 lbl() { jq -cn --args '[$ARGS.positional[] | {name: .}]' "$@"; }
 
 # --- a three-pass converged loop, which is the shape the design draws -------
-out="$(status_with "$(lbl crossrev/converged crossrev/pass-3)" \
-  "$(review_m 1 issues-remain "$HIGH_LOW")" \
-  "$(resolve_m 1 "$FIXED_SKIPPED")" \
-  "$(review_m 2 issues-remain "$ONE_MED")" \
-  "$(resolve_m 2 "$ONE_FIXED" d81a3f2abc)" \
-  "$(review_m 3 converged '[]')")"
+#
+# The markers are built inside the fixture, after fixture_repo sets FIX_HEAD:
+# built beforehand they carry the parent shell's empty head, and the converged
+# arm's head comparison — has the branch moved since the loop finished? —
+# would always answer yes.
+converged_loop_comments() {
+  local comments="[]" id=9000 m
+  for m in "$(review_m 1 issues-remain "$HIGH_LOW")" \
+           "$(resolve_m 1 "$FIXED_SKIPPED")" \
+           "$(review_m 2 issues-remain "$ONE_MED")" \
+           "$(resolve_m 2 "$ONE_FIXED" d81a3f2abc)" \
+           "$(review_m 3 converged '[]')"; do
+    id=$(( id + 1 ))
+    comments="$(jq -c --argjson c "$(marker_comment "$id" "$m")" '. + [$c]' <<<"$comments")"
+  done
+  route_first "api --paginate repos/*/issues/$FIX_PR/comments*" "$comments"
+}
+out="$(status_setup_with converged_loop_comments "$(lbl crossrev/converged crossrev/pass-3)")"
 
 has "the verdict is in the header, before anything to parse" "$out" "acme/widget#42 — converged"
 has "the pull request is identifiable"          "$out" "title      Add refresh"
@@ -327,9 +339,17 @@ hasnt "and says nothing about max_passes_per_cycle"        "$out" "max_passes_pe
 # Every finding settled without a push, so the head never moved and the
 # reviewer declines a re-run. The pass is over; the only question is whether
 # the display says so.
-out="$(status_with "$(lbl crossrev/converged crossrev/pass-1)" \
-  "$(review_m 1 issues-remain "$ONE_MED")" \
-  "$(resolve_m 1 "$REBUTTED")")"
+#
+# The markers are built inside the fixture, after fixture_repo sets FIX_HEAD:
+# built beforehand they carry the parent shell's empty head, and the head
+# comparison the converged and settle arms rely on — has the branch moved
+# since the review? — would always answer yes.
+settled_comments() {
+  route_first "api --paginate repos/*/issues/$FIX_PR/comments*" "$(jq -cn \
+    --argjson a "$(marker_comment 9001 "$(review_m 1 issues-remain "$ONE_MED")")" \
+    --argjson b "$(marker_comment 9002 "$(resolve_m 1 "$REBUTTED")")" '[$a,$b]')"
+}
+out="$(status_setup_with settled_comments "$(lbl crossrev/converged crossrev/pass-1)")"
 has "a rebuttal-settled pass reads as converged" "$out" "acme/widget#42 — converged"
 has "and NEXT says there is nothing to run"      "$out" "nothing to run"
 hasnt "rather than recommending a review that declines" "$out" "crossrev review --pr 42"
@@ -337,16 +357,6 @@ hasnt "rather than recommending a review that declines" "$out" "crossrev review 
 # The pull request this was filed from wore the stale label: awaiting-review,
 # written before the resolve leg could label the settle. The label is history,
 # but NEXT must still not send the reader to a command that refuses.
-#
-# The markers are built inside the fixture, after fixture_repo sets FIX_HEAD:
-# built beforehand they carry the parent shell's empty head, and the head
-# comparison the arm relies on — has the branch moved since the review? —
-# would always answer yes.
-settled_comments() {
-  route_first "api --paginate repos/*/issues/$FIX_PR/comments*" "$(jq -cn \
-    --argjson a "$(marker_comment 9001 "$(review_m 1 issues-remain "$ONE_MED")")" \
-    --argjson b "$(marker_comment 9002 "$(resolve_m 1 "$REBUTTED")")" '[$a,$b]')"
-}
 out="$(status_setup_with settled_comments "$(lbl crossrev/awaiting-review crossrev/pass-1)")"
 hasnt "a settled pass under a stale label does not recommend the review that declines" \
   "$out" "crossrev review --pr 42"
@@ -435,9 +445,7 @@ hasnt "and is not waved through as settled"                   "$out" "nothing to
 
 # A converged loop whose head has not moved keeps the terminal answer, so the
 # head comparison did not cost the state its ending.
-out="$(status_with "$(lbl crossrev/converged crossrev/pass-1)" \
-  "$(review_m 1 issues-remain "$ONE_MED")" \
-  "$(resolve_m 1 "$REBUTTED")")"
+out="$(status_setup_with settled_comments "$(lbl crossrev/converged crossrev/pass-1)")"
 has "a settle at the reviewed head still reads as finished" "$out" "nothing to run"
 hasnt "and asks for no further pass"                        "$out" "crossrev review --pr 42"
 
