@@ -66,9 +66,10 @@ EOF
 
 # A throwaway repository with a bare origin.
 #
-# The origin's FETCH url is a github.com address so the push guard sees the right
-# thing, and its PUSH url is the local bare repo so the push actually lands. Both
-# are ordinary git configuration rather than a hole in the guard.
+# The origin's configured URL is a github.com address, and `pushInsteadOf` sends
+# writes to a local bare repository so a push actually lands. The remote's own
+# configuration is what a real checkout carries, so the guard reads exactly what
+# it would in production and needs no test-only branch to let the suite through.
 #
 # $1 is the repository config to commit on main, defaulting to the one above.
 # Committing it on main rather than writing it into the working tree is not
@@ -93,7 +94,7 @@ fixture_repo() {
     printf '%s\n' "$config" >.github/crossrev.yml
     git add -A && git commit -q -m base
     git remote add origin "https://github.com/$FIX_REPO.git"
-    git remote set-url --push origin "$bare"
+    git config "url.$bare.pushInsteadOf" "https://github.com/$FIX_REPO.git"
     git push -q origin main
     git checkout -q -b feature
     printf 'export const ok = 1\nexport function refresh() { fetch("/t") }\n' >app.ts

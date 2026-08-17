@@ -467,7 +467,7 @@ fixture_repo; stub_reset
 fork_bare="$(mktemp -d)/fork.git"
 git init -q --bare "$fork_bare"
 git remote add fork "https://github.com/contributor/widget.git"
-git remote set-url --push fork "$fork_bare"
+git config "url.$fork_bare.pushInsteadOf" "https://github.com/contributor/widget.git"
 git config branch.feature.remote fork
 
 routes_baseline "$(marker_comment 9001 "$(policy_review_marker)" | jq -cs . | payload)"
@@ -490,7 +490,7 @@ fixture_repo; stub_reset
 fork_bare="$(mktemp -d)/fork.git"
 git init -q --bare "$fork_bare"
 git remote add fork "https://github.com/contributor/widget.git"
-git remote set-url --push fork "$fork_bare"
+git config "url.$fork_bare.pushInsteadOf" "https://github.com/contributor/widget.git"
 git config branch.feature.remote fork
 
 routes_baseline "$(marker_comment 9001 "$(policy_review_marker)" | jq -cs . | payload)"
@@ -512,7 +512,7 @@ fixture_repo; stub_reset
 fork_bare="$(mktemp -d)/fork.git"
 git init -q --bare "$fork_bare"
 git remote add fork "https://github.com/contributor/widget.git"
-git remote set-url --push fork "$fork_bare"
+git config "url.$fork_bare.pushInsteadOf" "https://github.com/contributor/widget.git"
 git config branch.feature.remote fork
 
 routes_baseline "$(marker_comment 9001 "$(policy_review_marker)" | jq -cs . | payload)"
@@ -535,7 +535,7 @@ fixture_repo; stub_reset
 fork_bare="$(mktemp -d)/fork.git"
 git init -q --bare "$fork_bare"
 git remote add fork "https://github.com/contributor/widget.git"
-git remote set-url --push fork "$fork_bare"
+git config "url.$fork_bare.pushInsteadOf" "https://github.com/contributor/widget.git"
 git config branch.feature.remote fork
 
 routes_baseline "$(marker_comment 9001 "$(policy_review_marker)" | jq -cs . | payload)"
@@ -557,7 +557,7 @@ fixture_repo; stub_reset
 fork_bare="$(mktemp -d)/fork.git"
 git init -q --bare "$fork_bare"
 git remote add fork "https://github.com/contributor/widget.git"
-git remote set-url --push fork "$fork_bare"
+git config "url.$fork_bare.pushInsteadOf" "https://github.com/contributor/widget.git"
 git config branch.feature.remote fork
 
 routes_baseline "$(marker_comment 9001 "$(policy_review_marker)" | jq -cs . | payload)"
@@ -601,6 +601,37 @@ err="$("$CROSSREV" resolve --pr 42 2>&1 >/dev/null)"; rc=$?
 is  "a pushurl pointing to a different repo is rejected" "$rc" "1"
 has "and names the target repo mismatch" "$err" "the pull request's head is in 'acme/widget' but this checkout pushes to 'attacker/widget'"
 
+# A pushurl that is not a github.com URL is refused rather than checked against
+# the fetch URL instead. Substituting the fetch URL validates an address the
+# push will never reach, which is the one case the guard exists for.
+fixture_repo; stub_reset
+git remote set-url --push origin "https://git.example.com/someone/widget.git"
+routes_baseline "$(marker_comment 9001 "$(policy_review_marker)" | jq -cs . | payload)"
+policy_routes_resolve
+CROSSREV_RESOLVE_PAYLOAD="$(policy_resolve_payload | payload)"; export CROSSREV_RESOLVE_PAYLOAD
+CROSSREV_RESOLVE_EDIT="$(policy_edit_script)"; export CROSSREV_RESOLVE_EDIT
+CROSSREV_RESOLVE_MODEL=resolver-model; export CROSSREV_RESOLVE_MODEL
+err="$("$CROSSREV" resolve --pr 42 2>&1 >/dev/null)"; rc=$?
+is  "a pushurl that is not a github.com URL is rejected" "$rc" "1"
+has "and names the URL it could not check" "$err" "https://git.example.com/someone/widget.git"
+is  "and nothing reached the origin bare repo" "$(git -C "$FIX_ORIGIN" rev-parse refs/heads/feature)" "$FIX_HEAD"
+
+# A remote may carry several pushurl entries and git writes to all of them.
+# `git remote get-url --push` returns only the first, so a wrong second entry is
+# invisible to a guard that reads that.
+fixture_repo; stub_reset
+git remote set-url --push --add origin "https://github.com/acme/widget.git"
+git remote set-url --push --add origin "https://github.com/attacker/widget.git"
+routes_baseline "$(marker_comment 9001 "$(policy_review_marker)" | jq -cs . | payload)"
+policy_routes_resolve
+CROSSREV_RESOLVE_PAYLOAD="$(policy_resolve_payload | payload)"; export CROSSREV_RESOLVE_PAYLOAD
+CROSSREV_RESOLVE_EDIT="$(policy_edit_script)"; export CROSSREV_RESOLVE_EDIT
+CROSSREV_RESOLVE_MODEL=resolver-model; export CROSSREV_RESOLVE_MODEL
+err="$("$CROSSREV" resolve --pr 42 2>&1 >/dev/null)"; rc=$?
+is  "a second pushurl pointing elsewhere is rejected" "$rc" "1"
+has "and names both repositories" "$err" "'acme/widget' and 'attacker/widget'"
+is  "and nothing reached the origin bare repo" "$(git -C "$FIX_ORIGIN" rev-parse refs/heads/feature)" "$FIX_HEAD"
+
 # Fork resolve on automatic trigger still refuses at ctx_load
 fixture_repo; stub_reset
 routes_baseline "$(printf '[]' | payload)"
@@ -618,7 +649,7 @@ fixture_repo; stub_reset
 fork_bare="$(mktemp -d)/fork.git"
 git init -q --bare "$fork_bare"
 git remote add fork "https://github.com/contributor/widget.git"
-git remote set-url --push fork "$fork_bare"
+git config "url.$fork_bare.pushInsteadOf" "https://github.com/contributor/widget.git"
 git config branch.feature.remote fork
 git push -q fork feature
 (
