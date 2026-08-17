@@ -121,7 +121,7 @@ ctx_load() {
   # from them, so the loop would run unauthenticated rather than not at all.
   # A local run uses the operator's own credentials, so the refusal is scoped
   # to automatic triggers.
-  if [[ "$trigger" == "automatic" && "$(jq -r '.isCrossRepository // false' <<<"$pr_json")" == "true" ]]; then
+  if [[ "$trigger" == "automatic" && "$(jq -r '.isCrossRepository' <<<"$pr_json")" != "false" ]]; then
     ui_die "$repo#$pr comes from a fork" \
       "crossrev does not run on fork pull requests: GitHub withholds secrets from them. Review it locally or by hand."
   fi
