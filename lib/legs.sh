@@ -256,6 +256,29 @@ legs_assert_env_clean() {
     "They redirect the harness process-wide, so a leg would silently run on the wrong model and the loop would complete normally with no error anywhere. Unset them; crossrev sets them per invocation."
 }
 
+# The part of a harness's stderr worth showing, capped at $2 bytes.
+#
+# `head -c 400` reads the wrong end of the stream. Every harness opens with a
+# banner — version, workdir, model, sandbox, session id — and codex echoes the
+# prompt after it, so on a real leg the first 400 bytes are banner and diff and
+# the error is nowhere in them. Measured on a captured unauthenticated run: the
+# first "401" sat at byte 402, two bytes past the window, with a two-word prompt.
+# A review prompt pushes it thousands of bytes out.
+#
+# So: search for a line that looks like a diagnosis, and prefer the last one.
+# Harnesses retry, and the final message is the one that stuck — codex reports
+# the same 401 nine times and only the last carries the reason phrase. Falling
+# back to the tail rather than the head keeps that property when no keyword
+# matches, because the banner is always at the top and never worth the budget.
+legs_harness_error() {
+  local err="$1" cap="${2:-400}" picked
+  [[ -s "$err" ]] || return 1
+  picked="$(grep -iE 'error|fatal|denied|unauthor|forbidden|invalid|expired|timed out|refused|not found' \
+    "$err" 2>/dev/null | tail -2)"
+  [[ -n "$picked" ]] || picked="$(tail -3 "$err")"
+  printf '%s' "$picked" | tail -c "$cap"
+}
+
 # Layer one's other half: did the two legs differ in anything the orchestrator
 # controls? Prints "same" or "different".
 legs_configured_difference() {

@@ -232,10 +232,10 @@ _init_required_secrets() {
       continue
     fi
     [[ "$INIT_RUNNER" == "self-hosted" ]] && continue
-    case "$harness" in
-      claude) [[ "$seen" == *" CLAUDE_CODE_OAUTH_TOKEN "* ]] || { printf 'CLAUDE_CODE_OAUTH_TOKEN\n'; seen="$seen CLAUDE_CODE_OAUTH_TOKEN "; } ;;
-      codex)  [[ "$seen" == *" CROSSREV_CODEX_AUTH "* ]] || { printf 'CROSSREV_CODEX_AUTH\n'; seen="$seen CROSSREV_CODEX_AUTH "; } ;;
-    esac
+    # The same mapping the leg path checks against, read from one place so `init`
+    # cannot ask for a secret no leg reads, or a leg demand one init never named.
+    tok="$(preflight_harness_secret "$harness")" || continue
+    [[ "$seen" == *" $tok "* ]] || { printf '%s\n' "$tok"; seen="$seen $tok "; }
   done
 
   if (( INIT_NEEDS_REFRESHER )); then

@@ -208,6 +208,34 @@ preflight_pairing_supported() {
   esac
 }
 
+# Which secret carries a harness's subscription credential in automated mode.
+#
+# Non-zero for a harness that needs none, which is not the same as an unknown
+# one: agy and kimi have no secret because their tokens are too short-lived for a
+# scheduler to keep warm, and preflight_pairing_supported is what says so.
+#
+# One copy of this mapping, because the consequence of two is a repository whose
+# `init` asks for a secret nothing reads, or a leg demanding one `init` never
+# offered. lib/init.sh reads it to decide what to ask for; cred_assert_present
+# reads it to decide what is missing.
+preflight_harness_secret() {
+  case "$1" in
+    claude) printf 'CLAUDE_CODE_OAUTH_TOKEN' ;;
+    codex)  printf 'CROSSREV_CODEX_AUTH' ;;
+    *) return 1 ;;
+  esac
+}
+
+# Is this a runner where a credential can only arrive as a secret?
+#
+# GitHub sets RUNNER_ENVIRONMENT, and it is the only signal that separates the
+# three environments CrossRev runs in. GITHUB_ACTIONS does not: it is true on a
+# self-hosted runner too, where the harness is logged in on disk and no secret is
+# expected — which is why the templates filter those env lines out of the
+# workflow they generate for one. The values are GitHub's and happen to be the
+# same two the `runner:` config key already uses.
+preflight_hosted_runner() { [[ "${RUNNER_ENVIRONMENT:-}" == "github-hosted" ]]; }
+
 # Does this pairing need the single-writer refresher?
 #
 # Only one situation does: a harness whose credential rotates, authenticating by

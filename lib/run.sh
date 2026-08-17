@@ -529,7 +529,7 @@ run_invoke() {
   # scratch home is discarded whichever way this returns, including the fatal
   # paths below, so a harness that refreshes and writes back on its own writes
   # into a directory nothing reads again.
-  cred_prepare "$harness"
+  cred_prepare "$harness" "$endpoint"
 
   # Two budgets, because a shape failure and a semantic one mean opposite things
   # about who is at fault.

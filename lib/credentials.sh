@@ -90,8 +90,41 @@ _cred_human_duration() {
 # and write back on its own, and there is no flag to stop it. Writing into a
 # throwaway copy means that write reaches a directory nobody reads again,
 # instead of a file something later hands back to the secret.
+# Refuse when the secret that should have arrived did not.
+#
+# The early return below is right on a laptop and on a self-hosted runner, where
+# the harness keeps its own login on disk. On a GitHub-hosted runner it is a
+# silent pass: a secret that is unset, misnamed, or scoped to the wrong place
+# leaves exactly the same empty variable as a laptop, so the leg starts the
+# harness with no credential and the first sign of trouble is an authentication
+# error from the vendor, minutes later and one billed pass in.
+#
+# GitHub expands a reference to a secret that does not exist into the empty
+# string rather than dropping the variable, so empty and unset are the same
+# fault and both are checked.
+#
+# An endpoint is exempt because its credential is a different variable
+# altogether, named by the endpoint block; the adapter resolves it and dies with
+# its own message when it is unset.
+cred_assert_present() {
+  local harness="$1" endpoint="${2:-}" secret hint
+  preflight_hosted_runner || return 0
+  [[ -z "$endpoint" || "$endpoint" == "null" ]] || return 0
+  secret="$(preflight_harness_secret "$harness")" || return 0
+  [[ -z "${!secret:-}" ]] || return 0
+
+  case "$harness" in
+    claude) hint="Issue one with \`claude setup-token\`, then: gh secret set $secret" ;;
+    codex)  hint="Seed it from a machine with a browser: \`codex login\`, then: gh secret set $secret < ~/.codex/auth.json" ;;
+  esac
+
+  ui_die "$secret is not set, and this github-hosted runner has no other way to authenticate $harness" \
+    "A hosted runner is a fresh container with no login on disk, so this secret is the only credential $harness has. It is empty here, which means it was never set, is named differently, or is scoped to an organisation this repository cannot read — GitHub expands a missing secret to an empty string rather than failing. CrossRev stops now instead of starting $harness unauthenticated, which surfaces as a vendor authentication error with nothing pointing back here. $hint. Check what is set with: gh secret list. A self-hosted runner needs none of this."
+}
+
 cred_prepare() {
-  local harness="$1"
+  local harness="$1" endpoint="${2:-}"
+  cred_assert_present "$harness" "$endpoint"
   case "$harness" in
     codex)
       [[ -n "${CROSSREV_CODEX_AUTH:-}" ]] || return 0
