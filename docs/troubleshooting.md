@@ -20,6 +20,13 @@ crossrev doctor
 
 `doctor` also verifies that `gh` is **authenticated**, not merely installed, because an unauthenticated `gh` fails at the first API call instead of at the check. And it reports which reviewer/resolver pairings your configured runner can serve — otherwise that stays invisible until a CI run fails to authenticate.
 
+How it proves that depends on the token, and both kinds are ordinary. A user token is asked for its login. A **GitHub App installation token** — which is what automated mode holds on every run — cannot read `GET /user` at all, so it is asked for its installation instead, and `rate_limit` settles anything that answers neither. Only a `gh` that reaches none of the three is reported as unauthenticated.
+
+That failure reads differently on a runner, because the fix is:
+
+- **Locally** — `gh — installed but not authenticated. Run: gh auth login`.
+- **On a runner** — `gh — installed, but the token it was given was refused.` There is no interactive login to run and nothing wrong with the credential's shape. Check the `app-token` the workflow passes, and that the App is still installed on the repository.
+
 The composite action runs the same check as its first step, so a runner missing a dependency fails naming it rather than dying mid-leg with `command not found` three steps later.
 
 ## A leg stopped and left a claim
