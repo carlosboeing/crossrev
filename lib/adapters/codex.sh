@@ -71,7 +71,7 @@ adapter_codex() {
   rc=$?
 
   if (( rc != 0 )) || [[ ! -s "$out_file" ]]; then
-    jq -cn --arg e "$(head -c 400 "$err")" \
+    jq -cn --arg e "$(legs_harness_error "$err")" \
       '{ok:false, payload:null, harness:"codex", endpoint:null, model_reported:null,
         tokens:null, error:$e}'
     rm -f "$out_file" "$err" "$events"; return 1

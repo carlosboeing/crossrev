@@ -334,4 +334,69 @@ else
   notok "with no resolver run over a pass that has no findings" "no prompt" "$(cat "$PROMPT_LOG")"
 fi
 
+# --- the part of a harness's stderr worth showing ---------------------------
+#
+# The fixture is a real capture, not an invention: `codex exec` run against an
+# empty CODEX_HOME, which is exactly what a leg does when the secret did not
+# arrive. Its shape is the whole problem — a banner, the prompt echoed back, then
+# the same 401 nine times, with the only line carrying a reason phrase at the very
+# end. An invented fixture would have put the error first and proved nothing.
+cxerr="$(mktemp)"
+cat >"$cxerr" <<'STDERR'
+Reading additional input from stdin...
+OpenAI Codex v0.147.0
+--------
+workdir: /private/tmp
+model: gpt-5.6-sol
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: none
+reasoning summaries: none
+session id: 01a00fbb-b6b4-76d0-9880-dd8ffb257a31
+--------
+user
+say hi
+2026-08-17T12:39:16.323309Z ERROR codex_api::endpoint::responses_websocket: failed to connect to websocket: HTTP error: 401 Unauthorized, url: wss://api.openai.com/v1/responses
+ERROR: Reconnecting... 5/5
+warning: Falling back from WebSockets to HTTPS transport. unexpected status 401 Unauthorized: Missing bearer or basic authentication in header, url: wss://api.openai.com/v1/responses
+ERROR: unexpected status 401 Unauthorized: Missing bearer or basic authentication in header, url: https://api.openai.com/v1/responses, request id: req_9274b2b4de5546c9afd06f74c789a44d
+STDERR
+
+picked="$(legs_harness_error "$cxerr")"
+has "the harness error names the status code that explains it" "$picked" "401"
+has "and the reason phrase behind it"          "$picked" "Missing bearer or basic authentication"
+hasnt "not the banner the harness opens with"  "$picked" "OpenAI Codex v0.147.0"
+hasnt "nor the prompt echoed back at us"       "$picked" "say hi"
+hasnt "nor a session id nobody can act on"     "$picked" "session id"
+
+# The regression this replaced, asserted rather than described. head -c 400 on
+# this fixture stops two bytes short of the first "401" — measured, not estimated
+# — and a real review prompt pushes it thousands of bytes further out.
+hasnt "the old head-of-stream read missed all of that" "$(head -c 400 "$cxerr")" "401"
+
+# A budget spent on repeated retries is a budget spent on nothing. Codex reports
+# the identical failure nine times and only the last line says why.
+(( ${#picked} <= 400 )) && ok "and it stays inside the 400-byte budget" \
+  || notok "and it stays inside the 400-byte budget" "<= 400" "${#picked}"
+[[ "$picked" != $'\n'* && "$picked" != " "* ]] \
+  && ok "and never opens halfway through a truncated line" \
+  || notok "and never opens halfway through a truncated line" "a whole line" "$picked"
+
+# No keyword anywhere is the case the tail fallback exists for: the banner is
+# always at the top, so the end of the stream is the better guess either way.
+quiet="$(mktemp)"
+printf 'banner line\nversion 1.2.3\nworkdir: /tmp\nsession: abc\nmiddle\nthe last thing it said\n' >"$quiet"
+has "a stream with no diagnosis falls back to its end" \
+  "$(legs_harness_error "$quiet")" "the last thing it said"
+hasnt "rather than to the banner at its start" \
+  "$(legs_harness_error "$quiet")" "banner line"
+
+empty="$(mktemp)"
+legs_harness_error "$empty" >/dev/null 2>&1 \
+  && notok "an empty stderr reports nothing rather than an empty message" "non-zero" "0" \
+  || ok "an empty stderr reports nothing rather than an empty message"
+
+rm -f "$cxerr" "$quiet" "$empty"
+
 finish
