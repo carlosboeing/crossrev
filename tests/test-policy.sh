@@ -507,6 +507,48 @@ err="$("$CROSSREV" resolve --pr 42 2>&1 >/dev/null)"; rc=$?
 is  "fork resolve with maintainerCanModify: false refuses" "$rc" "1"
 has "and names the specific maintainer edit permission reason" "$err" "The contributor has not allowed maintainer edits on this pull request, so the fix cannot be pushed."
 
+# Fork resolve with missing maintainerCanModify fails closed
+fixture_repo; stub_reset
+fork_bare="$(mktemp -d)/fork.git"
+git init -q --bare "$fork_bare"
+git remote add fork "https://github.com/contributor/widget.git"
+git remote set-url --push fork "$fork_bare"
+git config branch.feature.remote fork
+
+routes_baseline "$(marker_comment 9001 "$(policy_review_marker)" | jq -cs . | payload)"
+route_first "pr view $FIX_PR --repo * --json *" "$(jq -cn --arg h "$FIX_HEAD" --arg b "$FIX_BASE" '
+  {number:42, title:"t", body:"", url:"u", headRefName:"feature", headRefOid:$h,
+   baseRefName:"main", baseRefOid:$b, changedFiles:1, labels:[], isCrossRepository:true,
+   headRepositoryOwner:{login:"contributor"}, headRepository:{name:"widget"}, state:"OPEN"}')"
+policy_routes_resolve
+CROSSREV_RESOLVE_PAYLOAD="$(policy_resolve_payload | payload)"; export CROSSREV_RESOLVE_PAYLOAD
+CROSSREV_RESOLVE_EDIT="$(policy_edit_script)"; export CROSSREV_RESOLVE_EDIT
+CROSSREV_RESOLVE_MODEL=resolver-model; export CROSSREV_RESOLVE_MODEL
+err="$("$CROSSREV" resolve --pr 42 2>&1 >/dev/null)"; rc=$?
+is  "fork resolve with missing maintainerCanModify fails closed" "$rc" "1"
+has "and refuses because edits are not allowed" "$err" "The contributor has not allowed maintainer edits on this pull request, so the fix cannot be pushed."
+
+# Fork resolve with missing headRepository fails closed
+fixture_repo; stub_reset
+fork_bare="$(mktemp -d)/fork.git"
+git init -q --bare "$fork_bare"
+git remote add fork "https://github.com/contributor/widget.git"
+git remote set-url --push fork "$fork_bare"
+git config branch.feature.remote fork
+
+routes_baseline "$(marker_comment 9001 "$(policy_review_marker)" | jq -cs . | payload)"
+route_first "pr view $FIX_PR --repo * --json *" "$(jq -cn --arg h "$FIX_HEAD" --arg b "$FIX_BASE" '
+  {number:42, title:"t", body:"", url:"u", headRefName:"feature", headRefOid:$h,
+   baseRefName:"main", baseRefOid:$b, changedFiles:1, labels:[], isCrossRepository:true,
+   maintainerCanModify:true, state:"OPEN"}')"
+policy_routes_resolve
+CROSSREV_RESOLVE_PAYLOAD="$(policy_resolve_payload | payload)"; export CROSSREV_RESOLVE_PAYLOAD
+CROSSREV_RESOLVE_EDIT="$(policy_edit_script)"; export CROSSREV_RESOLVE_EDIT
+CROSSREV_RESOLVE_MODEL=resolver-model; export CROSSREV_RESOLVE_MODEL
+err="$("$CROSSREV" resolve --pr 42 2>&1 >/dev/null)"; rc=$?
+is  "fork resolve with missing head repo fails closed" "$rc" "1"
+has "and refuses because head repository is unknown" "$err" "could not determine the head repository for this pull request"
+
 # Fork resolve where checkout pushes to wrong remote refuses
 fixture_repo; stub_reset
 routes_baseline "$(marker_comment 9001 "$(policy_review_marker)" | jq -cs . | payload)"

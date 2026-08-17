@@ -151,10 +151,14 @@ ctx_load() {
   CTX_CHANGED="$(jq -r '.changedFiles // 0' <<<"$pr_json")"
   CTX_LABELS="$(jq -r '[.labels[].name] | join(" ")' <<<"$pr_json")"
   CTX_DEFAULT_BRANCH="$(gh_default_branch "$repo")"
-  CTX_IS_CROSS_REPOSITORY="$(jq -r 'if .isCrossRepository != null then .isCrossRepository else "" end' <<<"$pr_json")"
-  CTX_HEAD_REPO="$(jq -r 'if .headRepositoryOwner.login and .headRepository.name then "\(.headRepositoryOwner.login)/\(.headRepository.name)" else .headRepository.nameWithOwner // "" end' <<<"$pr_json")"
-  CTX_HEAD_REPO="${CTX_HEAD_REPO:-$repo}"
-  CTX_MAINTAINER_CAN_MODIFY="$(jq -r 'if .maintainerCanModify != null then .maintainerCanModify else false end' <<<"$pr_json")"
+  CTX_IS_CROSS_REPOSITORY="$(jq -r 'if .isCrossRepository != null then (.isCrossRepository | tostring) else "" end' <<<"$pr_json")"
+  if [[ "$CTX_IS_CROSS_REPOSITORY" == "false" ]]; then
+    CTX_HEAD_REPO="$repo"
+    CTX_MAINTAINER_CAN_MODIFY="false"
+  else
+    CTX_HEAD_REPO="$(jq -r 'if .headRepositoryOwner.login and .headRepository.name then "\(.headRepositoryOwner.login)/\(.headRepository.name)" elif .headRepository.nameWithOwner then .headRepository.nameWithOwner else "" end' <<<"$pr_json")"
+    CTX_MAINTAINER_CAN_MODIFY="$(jq -r 'if .maintainerCanModify != null then (.maintainerCanModify | tostring) else "" end' <<<"$pr_json")"
+  fi
 
   # Policy comes from the base revision, never the pull request head. Read from
   # the head, a branch could raise max_passes_per_cycle, repoint an endpoint at a server it
