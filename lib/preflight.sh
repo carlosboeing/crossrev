@@ -37,19 +37,35 @@ _install_hint() {
   esac
 }
 
-# "<tool> <version>", or non-zero if the tool is not installed.
+# "<tool> <version>", or non-zero if the tool is not installed or would not say.
 #
 # Every CLI reports itself differently — "git version 2.50.1 (Apple Git-155)",
 # "jq-1.8.1", "codex-cli 0.147.0", and claude and kimi print a bare number with
 # no name at all. Pulling out the first version-shaped token and prefixing the
 # tool name gives one readable format, and satisfies the first output rule:
 # name the thing.
+#
+# Two failures, because the fixes differ and the caller has to say which:
+#
+#   1  not installed — install it
+#   2  installed, but nothing version-shaped came back — find out why
+#
+# The second used to be a success. stderr is folded into the capture so a tool
+# that complains still gets read, and printing the complaint as the version made
+# every existence check pass whatever the tool actually did. openssl was the
+# instance that surfaced it, and it is why the probe is not one flag for
+# everything: openssl's own subcommand is `openssl version`, --version came
+# later, and the build on GitHub's hosted runners rejects it.
 _tool_version() {
   command -v "$1" >/dev/null 2>&1 || return 1
   local raw ver
-  raw="$("$1" --version 2>&1 | head -1)"
+  case "$1" in
+    openssl) raw="$(openssl version 2>&1 | head -1)" ;;
+    *)       raw="$("$1" --version 2>&1 | head -1)" ;;
+  esac
   ver="$(printf '%s' "$raw" | grep -oE 'v?[0-9]+\.[0-9]+[0-9A-Za-z.+-]*' | head -1)"
-  printf '%s %s' "$1" "${ver:-$raw}"
+  [[ -n "$ver" ]] || return 2
+  printf '%s %s' "$1" "$ver"
 }
 
 # Check the tools a given command actually needs.
@@ -70,9 +86,12 @@ preflight_check() {
 
   ui_section "Requirements"
 
-  local t v
+  local t v rc
   for t in git gh jq yq openssl; do
-    if v="$(_tool_version "$t")"; then
+    # `|| rc=$?` rather than `; rc=$?`: the composite action sources this under
+    # `set -e`, where a bare assignment from a failing substitution ends the step.
+    rc=0; v="$(_tool_version "$t")" || rc=$?
+    if (( rc == 0 )); then
       if [[ "$t" == "gh" ]]; then
         # Installed is not the same as usable. Rule 5: do not report success for
         # something unverified, and an unauthenticated gh fails at the first API
@@ -109,6 +128,11 @@ preflight_check() {
       else
         ui_ok "$v"
       fi
+    elif (( rc == 2 )); then
+      # Present but not answering. Installing it again is the one thing that
+      # will not help, so the message says so rather than reaching for the hint.
+      ui_no "$t — installed, but it did not report a version. Check that it runs."
+      missing+=("$t")
     else
       ui_no "$t — not found. Install with: $(_install_hint "$t")"
       missing+=("$t")
@@ -122,9 +146,15 @@ preflight_check() {
     # endpoint, so the `kimi` binary being present says nothing about whether
     # the loop can use it.
     for t in claude codex agy; do
-      if v="$(_tool_version "$t")"; then
+      rc=0; v="$(_tool_version "$t")" || rc=$?
+      if (( rc == 0 )); then
         ui_ok "$v"
         found_harness=1
+      elif (( rc == 2 )); then
+        # Deliberately not counted as a harness. A CLI that will not say what it
+        # is has not been shown to work, and reporting "found" here means the
+        # loop discovers it at the first model invocation instead.
+        ui_opt "$t — installed, but it did not report a version"
       else
         ui_opt "$t — not found, optional"
       fi
