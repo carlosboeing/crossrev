@@ -58,10 +58,38 @@ STUB
   printf '#!/usr/bin/env bash\nprintf "git version 2.54.0\\n"\n'                >"$d/git"
   printf '#!/usr/bin/env bash\nprintf "jq-1.7.1\\n"\n'                          >"$d/jq"
   printf '#!/usr/bin/env bash\nprintf "yq (mikefarah/yq) version v4.53.3\\n"\n' >"$d/yq"
-  printf '#!/usr/bin/env bash\nprintf "OpenSSL 3.6.3 1 Jul 2026\\n"\n'          >"$d/openssl"
+
+  # openssl as GitHub's hosted runners have it, which is the only machine that
+  # exposed the defect: the subcommand is `openssl version`, and this build
+  # rejects the --version flag outright rather than accepting it as an alias.
+  cat >"$d/openssl" <<'STUB'
+#!/usr/bin/env bash
+[[ "${1:-}" == "version" ]] && { printf 'OpenSSL 3.0.2 15 Mar 2022\n'; exit 0; }
+printf 'Invalid command '"'"'%s'"'"'; type "help" for a list.\n' "${1:-}" >&2
+exit 1
+STUB
 
   chmod +x "$d"/*
+
+  # The stub directory is the whole PATH, not the front of it — otherwise "this
+  # tool is missing" only means "missing from the stubs", and the real one two
+  # entries along answers instead. So the handful of commands preflight and ui
+  # reach for come in as symlinks, `bash` among them because the stubs are
+  # `#!/usr/bin/env bash` and env resolves that through PATH like anything else.
+  local ext p
+  for ext in bash env uname grep head sed cat tr cut awk; do
+    p="$(command -v "$ext")" && ln -sf "$p" "$d/$ext"
+  done
+
   printf '%s' "$d"
+}
+
+# Replace one tool in a stub PATH. Each case below wants a machine that is wrong
+# in exactly one way, and rebuilding the whole directory to say so would bury it.
+stub_tool() {
+  local dir="$1" name="$2" body="$3"
+  printf '#!/usr/bin/env bash\n%s\n' "$body" >"$dir/$name"
+  chmod +x "$dir/$name"
 }
 
 # preflight_check's report and its exit status, run against a stub PATH.
@@ -72,8 +100,15 @@ STUB
 run_preflight() {
   local dir="$1" need="${2:-core}" out rc
   out="$( {
-    PATH="$dir:$PATH"
+    PATH="$dir"
     export PATH
+    # A GitHub runner exports GITHUB_ACTIONS=true into every step, and this suite
+    # runs there too — so a case meaning "not on a runner" has to say so rather
+    # than assume the variable is absent. Inheriting it made the local-message
+    # case pass on a laptop and fail in CI, which is precisely the shape of
+    # mistake the rest of this file is built to keep out.
+    GITHUB_ACTIONS="${STUB_ON_RUNNER:-}"
+    export GITHUB_ACTIONS
     # shellcheck source=lib/ui.sh
     source "$ROOT/lib/ui.sh"
     # shellcheck source=lib/preflight.sh
@@ -122,10 +157,43 @@ has "and locally the fix is still gh auth login"   "$(report "$r")" "gh auth log
 
 # On a runner there is no interactive login to run and nothing wrong with the
 # credential's shape, so the same failure has to name a different fix.
-r="$(GITHUB_ACTIONS=true STUB_GH_REACHABLE="" run_preflight "$d")"
+r="$(STUB_ON_RUNNER=true STUB_GH_REACHABLE="" run_preflight "$d")"
 is    "a rejected token on a runner still fails"  "$(status "$r")" "1"
 hasnt "but is not told to run gh auth login"      "$(report "$r")" "gh auth login"
 has   "and is pointed at the token the workflow passed" "$(report "$r")" "app-token"
+
+# ---------------------------------------------------------------------------
+# A tool is checked by whether it runs, not by whether it exists
+# ---------------------------------------------------------------------------
+#
+# `_tool_version` probed everything with --version, folded stderr into the
+# capture, and printed whatever came back when no version parsed out of it — so
+# openssl's refusal of the flag was displayed as its version, under a tick. That
+# made the whole check vacuous: any tool that merely existed passed it, which is
+# the opposite of what preflight is for.
+
+r="$(STUB_GH_REACHABLE="user rate_limit" run_preflight "$d")"
+is    "openssl is probed with its own subcommand"        "$(status "$r")" "0"
+has   "and the version it reports is the version"        "$(report "$r")" "openssl 3.0.2"
+hasnt "not its refusal of a flag it does not have"       "$(report "$r")" "Invalid command"
+
+# A tool that runs but says nothing version-shaped is the general case openssl
+# was one instance of, and it has to fail rather than tick.
+b="$(stub_path)"
+stub_tool "$b" yq 'printf "yq: error while loading shared libraries\n" >&2; exit 1'
+r="$(STUB_GH_REACHABLE="user rate_limit" run_preflight "$b")"
+is    "a tool that reports no version fails the check" "$(status "$r")" "1"
+has   "and says it is installed rather than missing"   "$(report "$r")" "yq — installed, but it did not report a version"
+hasnt "so nobody is sent to install what is already there" "$(report "$r")" "yq — not found"
+
+# The distinction the previous case rests on: genuinely missing still reads as
+# missing, and still names the install command.
+m="$(stub_path)"
+rm -f "$m/yq"
+r="$(STUB_GH_REACHABLE="user rate_limit" run_preflight "$m")"
+is  "a missing tool still fails the check"    "$(status "$r")" "1"
+has "and is still reported as not found"      "$(report "$r")" "yq — not found"
+has "with the command that would install it"  "$(report "$r")" "Install with:"
 
 printf '\n  %d passed, %d failed\n' "$pass" "$fail"
 (( fail == 0 ))

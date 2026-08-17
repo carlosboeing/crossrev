@@ -27,6 +27,8 @@ That failure reads differently on a runner, because the fix is:
 - **Locally** — `gh — installed but not authenticated. Run: gh auth login`.
 - **On a runner** — `gh — installed, but the token it was given was refused.` There is no interactive login to run and nothing wrong with the credential's shape. Check the `app-token` the workflow passes, and that the App is still installed on the repository.
 
+A tool it finds but cannot get a version out of is reported as `<tool> — installed, but it did not report a version. Check that it runs.` That is a separate line from `not found` on purpose: installing it again is the one thing that won't help. Run the tool by hand and see what it says.
+
 The composite action runs the same check as its first step, so a runner missing a dependency fails naming it rather than dying mid-leg with `command not found` three steps later.
 
 ## A leg stopped and left a claim
