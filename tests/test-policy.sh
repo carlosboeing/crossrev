@@ -27,18 +27,29 @@ on_head() {
 
 no_threads() { route '*reviewThreads*' "$(threads_response)"; }
 
+# How a resolve pass ended, as the fields the loop-end decision reads. The
+# default is the ordinary pass: fixes claimed, and a commit pushed carrying
+# them, which hands the loop back to the reviewer.
+CYCLE_END_PUSHED='"blocked":false,"commit_sha":"abc123","dispositions":[{"disposition":"fixed"}]'
+CYCLE_END_UNFILED='"blocked":false,"commit_sha":null,"dispositions":[{"disposition":"deferred","crossrev_tracked":""}]'
+CYCLE_END_UNPUSHED='"blocked":false,"commit_sha":null,"dispositions":[{"disposition":"fixed"}]'
+CYCLE_END_SETTLED='"blocked":false,"commit_sha":null,"dispositions":[{"disposition":"rebutted"}]'
+
 # Exercise the cycle driver without replacing the behavior under test with a
 # mock. The real cmd_cycle owns argument classification and its loop boundary;
 # only the networked legs and state reads beneath that boundary are replaced.
 # $3 and $4 describe an interrupted pass: the state of its review marker, and
-# whether its resolve leg already ran. A finished pass is the default.
+# whether its resolve leg already ran. A finished pass is the default. $5 is how
+# the resolve pass ended, one of the CYCLE_END_* fragments above.
 cycle_driver() {
   local starting_pass="$1" log="$2" review_state="${3:-complete}" resolve_done="${4:-yes}"
+  local resolve_end="${5:-$CYCLE_END_PUSHED}"
   local pass_file
   pass_file="$(mktemp)"
   printf '%s' "$starting_pass" >"$pass_file"
   ROOT="$HERE/.." CYCLE_PASS_FILE="$pass_file" CYCLE_LOG="$log" \
-  CYCLE_REVIEW_STATE="$review_state" CYCLE_RESOLVE_DONE="$resolve_done" bash -c '
+  CYCLE_REVIEW_STATE="$review_state" CYCLE_RESOLVE_DONE="$resolve_done" \
+  CYCLE_RESOLVE_END="$resolve_end" bash -c '
     source "$ROOT/lib/legs.sh"
     source "$ROOT/lib/run.sh"
     ctx_load() {
@@ -55,10 +66,10 @@ cycle_driver() {
     leg_resolve() { printf "resolve %s\n" "$*" >>"$CYCLE_LOG"; CYCLE_RESOLVE_DONE=yes; }
     state_current_review_pass() { cat "$CYCLE_PASS_FILE"; }
     # One blob stands in for the markers of both legs, so the resolve read has
-    # to carry what the loop-end decision reads: a pushed commit, or the
-    # driver would report a convergence these cases never modelled.
+    # to carry what the loop-end decision reads: how the pass ended. Without it
+    # the driver would report a convergence these cases never modelled.
     state_marker_for() {
-      printf "%s" "{\"state\":\"$CYCLE_REVIEW_STATE\",\"verdict\":\"issues-remain\",\"findings\":[{\"severity\":\"high\"}],\"blocked\":false,\"commit_sha\":\"abc123\",\"dispositions\":[{\"disposition\":\"fixed\"}]}"
+      printf "%s" "{\"state\":\"$CYCLE_REVIEW_STATE\",\"verdict\":\"issues-remain\",\"findings\":[{\"severity\":\"high\"}],$CYCLE_RESOLVE_END}"
     }
     state_current_pass_complete() { [[ "$CYCLE_RESOLVE_DONE" == "yes" ]]; }
     run_actionable() { printf "1"; }
@@ -364,6 +375,41 @@ is "and its resolve leg follows, so its findings are not stranded" \
 out="$(cycle_driver 4 "$cycle_log" declined no)"
 is "an unfinished pass with no open claim keeps the bound in force" \
   "$(grep -c -- '--continuation' "$cycle_log" || true)" "1"
+
+# --- how a resolve pass ended ends the cycle too ----------------------------
+#
+# Two of the resolve leg's halts apply no `crossrev/stop`, because nobody pulled
+# the brake: a deferral nobody filed anywhere durable, and a fix the resolver
+# claimed and never committed. Both leave a thread open on purpose and wait on a
+# person. A driver that reads only blocked and the stop label starts another pass
+# over them, re-driving the resolver on work nobody has touched, until the cap
+# reports a halt as a failure to converge.
+: >"$cycle_log"
+out="$(cycle_driver 0 "$cycle_log" complete yes "$CYCLE_END_UNFILED")"
+is "a deferral nobody filed stops the cycle after its own pass" \
+  "$(grep -c '^review ' "$cycle_log" || true)" "1"
+is "and the resolver is not driven again over it" \
+  "$(grep -c '^resolve ' "$cycle_log" || true)" "1"
+has "the cycle says a person has to settle it"      "$out" "Halted after pass 1"
+has "and names the command that says what"          "$out" "crossrev status --pr 42"
+hasnt "rather than reporting the cap"               "$out" "max_passes_per_cycle"
+
+: >"$cycle_log"
+out="$(cycle_driver 0 "$cycle_log" complete yes "$CYCLE_END_UNPUSHED")"
+is "a fix that reached no commit stops the cycle too" \
+  "$(grep -c '^review ' "$cycle_log" || true)" "1"
+has "with the same halt a person reads"             "$out" "Halted after pass 1"
+hasnt "and never claims the loop converged"         "$out" "Converged"
+
+# The settle at the other end. Every finding answered and nothing pushed means
+# the head never moved, so the next review declines — the cycle stops on the
+# convergence rather than spinning declines until the cap.
+: >"$cycle_log"
+out="$(cycle_driver 0 "$cycle_log" complete yes "$CYCLE_END_SETTLED")"
+is "a pass that settled everything without pushing ends the cycle" \
+  "$(grep -c '^review ' "$cycle_log" || true)" "1"
+has "and it is reported as a convergence"           "$out" "Converged after pass 1"
+hasnt "not as a run that ran out of passes"         "$out" "without converging"
 
 # A non-positive bound used to mean opposite things on the two paths: the
 # automatic loop skipped the pass check entirely and kept starting passes, while

@@ -74,6 +74,9 @@ REBUTTED='[{"disposition":"rebutted"},{"disposition":"skipped"}]'
 REBUTTED_ESCALATED='[{"disposition":"rebutted"},{"disposition":"escalated"}]'
 DEFERRED_TRACKED='[{"disposition":"deferred","crossrev_tracked":"acme/widget#7"}]'
 DEFERRED_UNTRACKED='[{"disposition":"deferred","crossrev_tracked":""}]'
+# Claimed fixed, and the commit column of resolve_m left empty: the promise is
+# not in the diff.
+UNPUSHED_FIX='[{"disposition":"fixed"},{"disposition":"rebutted"}]'
 
 # $1 names a function to run inside the fixture checkout after the routes are in
 # place and before status runs — a lock file, an extra route — or is empty for
@@ -375,6 +378,25 @@ out="$(status_with '[]' \
 has "a deferral whose record never landed halts" "$out" "acme/widget#42 — halted"
 hasnt "rather than converging over an open thread" "$out" "— converged"
 has "and NEXT sends the reader to re-drive the resolve leg" "$out" "crossrev resolve --pr 42"
+
+# A fix the resolver claimed and never committed is the same shape of halt: the
+# finding is real by the resolver's own answer, and the code is unchanged. A
+# green header there would sit over exactly the defect the reviewer raised.
+out="$(status_with '[]' \
+  "$(review_m 1 issues-remain "$ONE_MED")" \
+  "$(resolve_m 1 "$UNPUSHED_FIX")")"
+has "a fix that reached no commit halts"           "$out" "acme/widget#42 — halted"
+hasnt "and never converges over an unkept promise" "$out" "— converged"
+hasnt "nor hands back a head that never moved"     "$out" "— awaiting review"
+has "and NEXT says the claim is not in the diff"   "$out" "pushed no commit"
+
+# The same pass with its commit is an ordinary one, so the halt is the missing
+# push and not the fix.
+out="$(status_with '[]' \
+  "$(review_m 1 issues-remain "$ONE_MED")" \
+  "$(resolve_m 1 "$UNPUSHED_FIX" d81a3f2abc)")"
+has "the same dispositions with a commit hand back to the reviewer" \
+  "$out" "acme/widget#42 — awaiting review"
 
 # A rebuttal beside an escalation is a halt, and the marker copy agrees.
 out="$(status_with '[]' \

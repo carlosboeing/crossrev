@@ -1641,7 +1641,7 @@ Pushed \`${commit_sha:0:7}\`; replying to each thread now.$(state_marker_encode 
       # Only meaningful when fixes were claimed. A deferral-only pass whose backlog
       # write produced no diff is not a broken promise about the code.
       ui_warn "the resolver reported $fixed_count fix(es) but changed no files" \
-        "The replies below will claim a fix that is not in the diff. Treat those dispositions as unverified and read the thread before merging."
+        "The replies below will claim a fix that is not in the diff, so their threads stay open and the pass halts for a person. Treat those dispositions as unverified and read the thread before merging."
     fi
   fi
   run_checkpoint
@@ -1714,12 +1714,17 @@ Pushed \`${commit_sha:0:7}\`; replying to each thread now.$(state_marker_encode 
     # Resolution, per the disposition's own rule. `deferred` resolves only once
     # persisted; with nothing persisted the thread stays open, which is the
     # honest behaviour — resolving a thread whose content lands nowhere is how
-    # work disappears.
+    # work disappears. `fixed` is the same rule read against the commit: with
+    # nothing pushed, the reply claims a change the diff does not carry, and a
+    # resolved thread puts a green tick over exactly the defect the reviewer
+    # raised. The pass halts on the same fact, so the thread is what a person
+    # reads when they come to see why.
     should_resolve=0
     case "$disp" in
-      fixed|skipped|rebutted) should_resolve=1 ;;
-      deferred)  [[ -n "$tracked" ]] && should_resolve=1 ;;
-      escalated) escalated=$(( escalated + 1 )) ;;
+      fixed)            [[ -n "$commit_sha" ]] && should_resolve=1 ;;
+      skipped|rebutted) should_resolve=1 ;;
+      deferred)         [[ -n "$tracked" ]] && should_resolve=1 ;;
+      escalated)        escalated=$(( escalated + 1 )) ;;
     esac
     if (( should_resolve )) && [[ -n "$thread_id" && "$thread_id" != "null" ]]; then
       gh_thread_resolve "$thread_id" && resolved_n=$(( resolved_n + 1 )) || true
@@ -1800,6 +1805,9 @@ Pushed \`${commit_sha:0:7}\`; replying to each thread now.$(state_marker_encode 
       printf '\n'
     elif [[ "$next" == "converged" ]]; then
       ui_say "Every finding settled without a change to the code, so the loop is done."
+      printf '\n'
+    elif [[ "$next" == "halted" ]] && legs_resolve_unpushed_fix "$marker"; then
+      ui_say "A claimed fix reached no commit, so its thread stays open and the pass halts."
       printf '\n'
     fi
   fi
@@ -2152,7 +2160,7 @@ cmd_cycle() {
     (( load_rc == 2 )) && return 0
     return "$load_rc"
   }
-  local max="$CTX_MAX_PASSES_PER_CYCLE" i pass marker rmarker verdict actionable
+  local max="$CTX_MAX_PASSES_PER_CYCLE" i pass marker rmarker rlabel verdict actionable
   ui_say "Cycling $CTX_REPO#$CTX_PR, up to $max passes. Ctrl-C is safe — each leg finishes the write in flight."
 
   pass="$(state_current_review_pass "$CTX_MARKERS")"
@@ -2209,14 +2217,31 @@ cmd_cycle() {
       ui_end "Halted after pass $pass — a point needs a human decision, so crossrev/stop is applied."
       return 0
     fi
+    # The label the resolve leg just applied, read here by the same function it
+    # wrote it with, so the terminal and the pull request cannot disagree about
+    # how the pass ended. Read once: two calls are two chances to answer
+    # differently.
+    rlabel=""
+    if [[ -n "$rmarker" && "$(jq -r '.state // ""' <<<"$rmarker")" == "complete" ]]; then
+      rlabel="$(legs_resolve_pass_label "$rmarker" "$(_markers_escalated "$CTX_MARKERS")")"
+    fi
     # A pass that settled every finding without pushing is done: the next
     # review would decline the unchanged head, so the loop stops here rather
     # than spinning declines until the cap and reporting a convergence as a
     # failure to converge.
-    if [[ -n "$rmarker" && "$(jq -r '.state // ""' <<<"$rmarker")" == "complete" ]] \
-       && [[ "$(legs_resolve_pass_label "$rmarker" "$(_markers_escalated "$CTX_MARKERS")")" == "converged" ]]; then
+    if [[ "$rlabel" == "converged" ]]; then
       ui_end "Converged after pass $pass — nothing at or above min_fix_severity ($CTX_MIN_FIX_SEVERITY) remains."
       (( no_tips )) || run_upgrade_nudge
+      return 0
+    fi
+    # And a halt ends the cycle too. Blocked and escalated are caught above,
+    # each by the thing that records them; the halts left here — a deferral
+    # nobody filed, a fix that reached no commit — apply no `crossrev/stop`,
+    # because nobody pulled the brake. Without this the driver reads a pass the
+    # resolve leg labelled halted, starts another one anyway, and re-drives the
+    # resolver over work that is waiting on a person.
+    if [[ "$rlabel" == "halted" ]]; then
+      ui_end "Halted after pass $pass — the resolve leg left something a person has to settle. \`crossrev status --pr $CTX_PR\` says what."
       return 0
     fi
   done
@@ -2796,6 +2821,21 @@ _status_next_halted() {
      && [[ "$(jq '[(.dispositions // [])[] | select(.disposition == "deferred" and .crossrev_tracked == "")] | length' <<<"$m_resolve")" != "0" ]]; then
     ui_line "a deferred finding was never filed anywhere durable, so its thread"
     ui_line "stays open. Put the work somewhere tracked, then drive the pass again:"
+    ui_cmd  "crossrev resolve --pr $CTX_PR"
+    return 0
+  fi
+
+  # A fix the resolver claimed and never committed. The finding is real by the
+  # resolver's own answer and the code is unchanged, so the thread stayed open
+  # and the pass halted rather than converging over it. Reading the reply is
+  # the first move; after that the leg is redrivable, as it is for the deferral
+  # above.
+  if [[ -n "$m_resolve" && "$(jq -r '.state // ""' <<<"$m_resolve")" == "complete" ]] \
+     && [[ "$(jq -r '.blocked // false' <<<"$m_resolve")" != "true" ]] \
+     && legs_resolve_unpushed_fix "$m_resolve"; then
+    ui_line "the resolver claimed a fix and pushed no commit, so its thread stays"
+    ui_line "open. Read the reply, then either make the change yourself or drive"
+    ui_line "the pass again:"
     ui_cmd  "crossrev resolve --pr $CTX_PR"
     return 0
   fi
