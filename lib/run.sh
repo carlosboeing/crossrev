@@ -151,7 +151,12 @@ ctx_load() {
   CTX_CHANGED="$(jq -r '.changedFiles // 0' <<<"$pr_json")"
   CTX_LABELS="$(jq -r '[.labels[].name] | join(" ")' <<<"$pr_json")"
   CTX_DEFAULT_BRANCH="$(gh_default_branch "$repo")"
-  CTX_IS_CROSS_REPOSITORY="$(jq -r 'if .isCrossRepository != null then (.isCrossRepository | tostring) else "" end' <<<"$pr_json")"
+  # Only an explicit `isCrossRepository: false` means "this repository's own
+  # branch". Absent metadata is recorded as unknown rather than left empty, so
+  # the push guard reads it as a fork and demands a resolved head repository and
+  # maintainer edits — an unknown push target must never inherit the permission
+  # an upstream branch gets by default.
+  CTX_IS_CROSS_REPOSITORY="$(jq -r 'if .isCrossRepository != null then (.isCrossRepository | tostring) else "unknown" end' <<<"$pr_json")"
   if [[ "$CTX_IS_CROSS_REPOSITORY" == "false" ]]; then
     CTX_HEAD_REPO="$repo"
     CTX_MAINTAINER_CAN_MODIFY="false"

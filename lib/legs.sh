@@ -207,7 +207,11 @@ legs_label_description() {
 # attempted and says nothing about which branch was targeted. This asserts the
 # target before anything leaves the machine.
 legs_assert_push_target() {
-  local current_branch="$1" head_branch="$2" default_branch="$3" head_repo="$4" origin_repo="$5" maintainer_can_modify="${6:-false}" is_cross_repo="${7:-false}"
+  # `${n-…}` rather than `${n:-…}`: the defaults are for a caller that passes
+  # five arguments, not for one that passes an empty value it could not read. An
+  # empty cross-repository flag has to stay empty, because "false" here means
+  # "this repository's own branch" and would skip the maintainer-edit check.
+  local current_branch="$1" head_branch="$2" default_branch="$3" head_repo="$4" origin_repo="$5" maintainer_can_modify="${6-false}" is_cross_repo="${7-false}"
 
   [[ "$current_branch" == "$head_branch" ]] || ui_die \
     "the checkout is on '$current_branch' but the pull request's head branch is '$head_branch'" \
@@ -225,6 +229,8 @@ legs_assert_push_target() {
     "the pull request's head is in '$head_repo' but this checkout pushes to '$origin_repo'" \
     "crossrev pushes only to the head repository of the pull request under review."
 
+  # Anything other than an explicit "false" — a fork, or provenance that could
+  # not be read — needs the contributor's permission before a push.
   if [[ "$is_cross_repo" != "false" ]]; then
     [[ "$maintainer_can_modify" == "true" ]] || ui_die \
       "the contributor has not allowed maintainer edits on $head_repo" \
