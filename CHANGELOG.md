@@ -6,7 +6,7 @@ All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepa
 
 ### Added
 
-- **`crossrev resolve` pushes fixes to fork pull requests from a terminal** ([#31](https://github.com/carlosboeing/crossrev/issues/31)). A local resolve leg now pushes directly to a fork contributor's branch when `maintainerCanModify` is enabled. Remote resolution reads `branch.<name>.pushRemote` and `branch.<name>.remote` rather than hardcoding `origin`, validates the remote's effective push URL against `CTX_HEAD_REPO`, and verifies that `maintainerCanModify` is permitted before invoking the resolver. Automated mode continues to fail closed in CI.
+- **`crossrev resolve` pushes fixes to fork pull requests from a terminal** ([#31](https://github.com/carlosboeing/crossrev/issues/31)). A local resolve leg now pushes directly to a fork contributor's branch when `maintainerCanModify` is enabled. Remote resolution reads `branch.<name>.pushRemote` and `branch.<name>.remote` rather than hardcoding `origin`, validates the remote's effective push URL against `CTX_HEAD_REPO`, and verifies that `maintainerCanModify` is permitted before invoking the resolver. Provenance the metadata does not state is treated as a fork rather than as this repository's own branch: only an explicit `isCrossRepository: false` skips the maintainer-edit check, so a pull request whose fork status could not be read is refused rather than pushed to. Automated mode continues to fail closed in CI.
 
 ### Fixed
 
