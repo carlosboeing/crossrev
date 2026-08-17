@@ -14,6 +14,11 @@ set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=../lib/ui.sh
 source "$HERE/../lib/ui.sh"
+# cred_assert_present asks preflight which secret a harness needs and whether
+# this runner is one that can only get it from a secret. bin/crossrev sources
+# both; this suite has to as well.
+# shellcheck source=../lib/preflight.sh
+source "$HERE/../lib/preflight.sh"
 # shellcheck source=../lib/credentials.sh
 source "$HERE/../lib/credentials.sh"
 
@@ -139,11 +144,86 @@ is  "and CODEX_HOME is unset again"             "${CODEX_HOME:-unset}" "unset"
 
 # Nothing to restore is the local and self-hosted case, where the harness has its
 # own login on disk. It must cost nothing and touch nothing.
+#
+# RUNNER_ENVIRONMENT is unset explicitly rather than assumed absent, because this
+# suite runs on GitHub Actions as often as on a laptop and GitHub sets it there.
+# Without this line these two assertions would pass locally and take the hosted
+# path in crossrev's own CI, which is the failure mode the block below exists for.
+unset RUNNER_ENVIRONMENT
 unset CROSSREV_CODEX_AUTH
 cred_prepare codex
 is  "with no restored credential, nothing is prepared" "${CODEX_HOME:-unset}" "unset"
 cred_prepare claude
 is  "and claude needs no restore at all — setup-token is long-lived" "${CODEX_HOME:-unset}" "unset"
+
+# --- a secret that never arrived, on a runner that needed one ---------------
+#
+# The block above and a GitHub-hosted runner whose secret is missing are the same
+# environment: nothing in CROSSREV_CODEX_AUTH, nothing to restore. cred_prepare
+# cannot tell them apart, so it returns 0 for both — right on a laptop, and on a
+# hosted runner it starts the harness with no credential at all. Nothing here
+# fails; the leg dies later inside the vendor CLI with a 401 that names nothing
+# about crossrev, after a checkout, a harness install and a prompt build.
+#
+# RUNNER_ENVIRONMENT separates them and GitHub sets it, not crossrev:
+# github-hosted on GitHub's own runners, self-hosted on the operator's. It is the
+# same vocabulary the `runner:` config key already uses. Reading GITHUB_ACTIONS
+# instead would be wrong — it is true on both, and a self-hosted runner has no
+# secret on purpose, which is why the review template filters those env lines out
+# of the workflow it generates for one.
+#
+# Everything below runs cred_prepare in a subshell, because refusing is a ui_die
+# and ui_die exits.
+
+# Two shapes, because a missing secret produces both. A workflow referencing a
+# secret that does not exist gets the empty string — GitHub expands the reference
+# rather than dropping the variable — and a hand-edited workflow that lost the
+# env line gets nothing at all.
+for shape in empty unset; do
+  out="$(
+    (
+      export RUNNER_ENVIRONMENT=github-hosted
+      if [[ "$shape" == "empty" ]]; then export CROSSREV_CODEX_AUTH=""; else unset CROSSREV_CODEX_AUTH; fi
+      cred_prepare codex
+    ) 2>&1
+  )"; rc=$?
+  is  "a codex secret that is $shape on a hosted runner stops the leg" "$rc" "1"
+  has "and the $shape case names the secret that did not arrive" "$out" "CROSSREV_CODEX_AUTH"
+done
+
+has "and says the secret is what is missing, not the credential inside it" \
+  "$out" "secret"
+has "and names the runner it is talking about"  "$out" "github-hosted"
+has "and gives the command that fixes it"       "$out" "gh secret set"
+# Rule 5 applied to the message: the failure a reader has to be talked out of is
+# assuming the harness is broken, because that is what the 401 looks like.
+hasnt "and does not blame the harness for it"   "$out" "not installed"
+
+# The same hole, one harness wider. claude has no cred_prepare branch at all —
+# the case statement handles codex and falls through — so a claude leg with no
+# CLAUDE_CODE_OAUTH_TOKEN gets the identical silent pass.
+out="$(
+  ( export RUNNER_ENVIRONMENT=github-hosted; unset CLAUDE_CODE_OAUTH_TOKEN; cred_prepare claude ) 2>&1
+)"; rc=$?
+is  "a missing claude token on a hosted runner stops the leg too" "$rc" "1"
+has "and names the token it wanted"             "$out" "CLAUDE_CODE_OAUTH_TOKEN"
+
+# --- and the three cases that must stay silent ------------------------------
+#
+# A guard that fires on a laptop is worse than no guard: it breaks the path the
+# early return was written for in the first place.
+rc=0; ( unset RUNNER_ENVIRONMENT; unset CROSSREV_CODEX_AUTH; cred_prepare codex ) >/dev/null 2>&1 || rc=$?
+is  "a laptop with no secret is still none of crossrev's business" "$rc" "0"
+
+rc=0; ( export RUNNER_ENVIRONMENT=self-hosted; unset CROSSREV_CODEX_AUTH; cred_prepare codex ) >/dev/null 2>&1 || rc=$?
+is  "and a self-hosted runner keeps its own login on disk" "$rc" "0"
+
+rc=0; (
+  export RUNNER_ENVIRONMENT=github-hosted
+  CROSSREV_CODEX_AUTH="$(fake_credential 86400)"; export CROSSREV_CODEX_AUTH
+  cred_prepare codex
+) >/dev/null 2>&1 || rc=$?
+is  "and a hosted runner whose secret did arrive runs" "$rc" "0"
 
 # --- what reaches the harness process ---------------------------------------
 #
