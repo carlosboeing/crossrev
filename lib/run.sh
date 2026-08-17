@@ -1201,22 +1201,35 @@ _review_summary_body() {
 # ---------------------------------------------------------------------------
 
 leg_resolve() {
-  local pr="" repo="" harness_override="" no_tips=0
+  local pr="" repo="" harness_override="" trigger="human" no_tips=0
   while (( $# )); do
     case "$1" in
       --pr)      pr="${2:-}"; shift 2 ;;
       --repo)    repo="${2:-}"; shift 2 ;;
       --harness) harness_override="${2:-}"; shift 2 ;;
+      --trigger) trigger="${2:-}"; shift 2 ;;
       --no-tips) no_tips=1; shift ;;
       --pass)    shift 2 ;;
       *) ui_die "unknown option for resolve: $1" \
-           "Usage: crossrev resolve --pr <number> [--harness claude|codex]" ;;
+           "Usage: crossrev resolve --pr <number> [--harness claude|codex] [--trigger human|automatic]" ;;
     esac
   done
   [[ -n "$pr" ]] || ui_die "crossrev resolve needs a pull request number" "Usage: crossrev resolve --pr 42"
+  case "$trigger" in
+    human|automatic) ;;
+    *) ui_die "unknown resolve trigger: $trigger" "Use --trigger human or --trigger automatic." ;;
+  esac
 
   run_trap_install
-  ctx_load "$pr" "$repo"
+  # Handed on rather than parsed and dropped: ctx_load declines a draft pull
+  # request on an automatic invocation, and a resolve leg that always said
+  # "human" would resolve findings on a draft the review leg refused to make.
+  local load_rc
+  ctx_load "$pr" "$repo" "$trigger" || {
+    load_rc=$?
+    (( load_rc == 2 )) && return 0
+    return "$load_rc"
+  }
   run_lock_acquire "$CTX_PR" "$CTX_MODE"
   CROSSREV_RESUME_HINT="crossrev resolve --pr $CTX_PR"
 
@@ -1976,20 +1989,35 @@ _cycle_finish_at_bound() {
 # same legs the workflows invoke, and the two modes can be A/B tested on real
 # pull requests without touching leg code.
 cmd_cycle() {
-  local pr="" repo="" no_tips=0
+  local pr="" repo="" trigger="human" no_tips=0
   local -a args=()
   while (( $# )); do
     case "$1" in
       --pr)      pr="${2:-}"; args+=(--pr "${2:-}"); shift 2 ;;
       --repo)    repo="${2:-}"; args+=(--repo "${2:-}"); shift 2 ;;
       --harness) args+=(--harness "${2:-}"); shift 2 ;;
+      --trigger) trigger="${2:-}"; args+=(--trigger "${2:-}"); shift 2 ;;
       --no-tips) no_tips=1; shift ;;
-      *) ui_die "unknown option for cycle: $1" "Usage: crossrev cycle --pr <number> [--no-tips]" ;;
+      *) ui_die "unknown option for cycle: $1" \
+           "Usage: crossrev cycle --pr <number> [--trigger human|automatic] [--no-tips]" ;;
     esac
   done
   [[ -n "$pr" ]] || ui_die "crossrev cycle needs a pull request number" "Usage: crossrev cycle --pr 42"
+  # Checked here as well as in the legs, because ctx_load below reads it first
+  # and anything it does not recognise it treats as human.
+  case "$trigger" in
+    human|automatic) ;;
+    *) ui_die "unknown cycle trigger: $trigger" "Use --trigger human or --trigger automatic." ;;
+  esac
 
-  ctx_load "$pr" "$repo"
+  # The draft rule is applied once, here, rather than left to the first leg: a
+  # cycle that declined mid-loop would report the reviewer as unable to finish.
+  local load_rc
+  ctx_load "$pr" "$repo" "$trigger" || {
+    load_rc=$?
+    (( load_rc == 2 )) && return 0
+    return "$load_rc"
+  }
   local max="$CTX_MAX_PASSES_PER_CYCLE" i pass marker rmarker verdict actionable
   ui_say "Cycling $CTX_REPO#$CTX_PR, up to $max passes. Ctrl-C is safe — each leg finishes the write in flight."
 
@@ -2070,6 +2098,12 @@ cmd_status() {
     case "$1" in
       --pr)   pr="${2:-}"; shift 2 ;;
       --repo) repo="${2:-}"; shift 2 ;;
+      # Accepted and ignored: the composite action forwards these to whichever
+      # leg it was told to run, and status reads the pull request rather than
+      # acting on it, so none of them has anything to change here.
+      --harness) shift 2 ;;
+      --trigger) shift 2 ;;
+      --no-tips) shift ;;
       *) ui_die "unknown option for status: $1" "Usage: crossrev status --pr <number>" ;;
     esac
   done
@@ -2594,6 +2628,13 @@ cmd_watchdog() {
     case "$1" in
       --repo)    repo="${2:-}"; shift 2 ;;
       --timeout) timeout="${2:-1800}"; shift 2 ;;
+      # Accepted and ignored, as in status. The watchdog sweeps a repository
+      # rather than acting on one pull request with one harness, and it only
+      # ever runs on a schedule, so it is automatic by construction.
+      --pr)      shift 2 ;;
+      --harness) shift 2 ;;
+      --trigger) shift 2 ;;
+      --no-tips) shift ;;
       *) ui_die "unknown option for watchdog: $1" "Usage: crossrev watchdog [--repo owner/name] [--timeout <seconds>]" ;;
     esac
   done
