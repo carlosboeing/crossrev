@@ -152,7 +152,7 @@ RD_ID_A="cccc000000000003"
 RD_ID_B="dddd000000000004"
 
 rd_review_marker() {
-  jq -cn --arg sha "$FIX_HEAD" --arg a "$RD_ID_A" --arg b "$RD_ID_B" '
+  jq -cn --arg sha "${1:-$FIX_HEAD}" --arg a "$RD_ID_A" --arg b "$RD_ID_B" '
     {v:1, leg:"review", pass:1, state:"complete", ts:100, done_ts:200, run_id:"1",
      head_sha:$sha, harness:"claude", model:"reviewer-model", effort:null, endpoint:null,
      model_reported:"reviewer-model", tokens:100, verdict:"issues-remain",
@@ -165,9 +165,9 @@ rd_review_marker() {
         disposition:null, tracked_as:null}]}'
 }
 
-# $1 dispositions, $2 blocked flag.
+# $1 dispositions, $2 blocked flag, $3 the revision the pass ran against.
 rd_resolve_marker() {
-  jq -cn --arg sha "$FIX_HEAD" --argjson d "$1" --argjson b "$2" '
+  jq -cn --arg sha "${3:-$FIX_HEAD}" --argjson d "$1" --argjson b "$2" '
     {v:1, leg:"resolve", pass:1, state:"complete", ts:300, done_ts:400, run_id:"1",
      head_sha:$sha, harness:"claude", model:"resolver-model", effort:null, endpoint:null,
      model_reported:"resolver-model", tokens:100, blocked:$b,
@@ -209,8 +209,8 @@ rd_routes() {
 }
 
 rd_comments() {
-  jq -cn --argjson a "$(marker_comment 9001 "$(rd_review_marker)")" \
-         --argjson b "$(marker_comment 9002 "$(rd_resolve_marker "$1" "$2")")" '[$a, $b]'
+  jq -cn --argjson a "$(marker_comment 9001 "$(rd_review_marker "${3:-}")")" \
+         --argjson b "$(marker_comment 9002 "$(rd_resolve_marker "$1" "$2" "${3:-}")")" '[$a, $b]'
 }
 
 RD_FIX_PAYLOAD='{"blocked":false,"blocked_reason":null,"summary":"Fixed both.","dispositions":[
@@ -249,5 +249,56 @@ if [[ ! -s "$PROMPT_LOG" ]]; then
 else
   notok "and the resolver is not run again" "no prompt" "$(cat "$PROMPT_LOG")"
 fi
+
+# --- the label a finished review pass leaves behind --------------------------
+#
+# An empty pass after an escalation is not a convergence: the reviewer
+# correctly declined to re-raise a dispositioned finding, so nothing actionable
+# means nothing NEW, while the escalated thread still waits on a human. halted
+# is the honest label; converged would contradict the marker it sits beside.
+pass_label() {
+  local want="$1" desc="$2"; shift 2
+  local got; got="$(legs_pass_label "$@")"
+  [[ "$got" == "$want" ]] && ok "$desc" || notok "$desc" "$want" "$got"
+}
+
+pass_label converged           "a converged verdict converges, whatever is open" converged 0 2
+pass_label halted              "a blocked review halts"                          blocked 0 0
+pass_label awaiting-resolution "actionable findings owe the resolve leg"         issues-remain 2 0
+pass_label converged           "an empty pass with nothing open converges"       issues-remain 0 0
+pass_label halted              "an empty pass while an escalation stands halts"  issues-remain 0 1
+
+# --- and the label the leg actually writes, end to end -----------------------
+#
+# The reviewer stub answers with no findings and verdict issues-remain — the
+# correct answer over a pass whose open findings are all escalated, since a
+# dispositioned finding is not re-raised. What the label row says afterwards is
+# the whole assertion.
+EMPTY_REVIEW='{"verdict":"issues-remain","blocked_reason":null,"prior":null,"findings":[]}'
+# Pass 1 ran against an older revision, so the review leg may start pass 2.
+RD_OLD_SHA="1111111111111111111111111111111111111111"
+
+fixture_repo; stub_reset
+routes_baseline "$(rd_comments "$(rd_dispositions escalated)" false "$RD_OLD_SHA" | payload)"
+route 'api --method POST repos/*/issues/42/comments*' '{"id":9003}'
+route '*reviewThreads*' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}'
+CROSSREV_REVIEW_PAYLOAD="$(printf '%s' "$EMPTY_REVIEW" | payload)"; export CROSSREV_REVIEW_PAYLOAD
+out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
+
+is  "the empty pass exits clean"                      "$rc" "0"
+has "the pull request stays halted"                   "$(calls)" "labels[]=crossrev/halted"
+hasnt "and is never labelled converged"               "$(calls)" "labels[]=crossrev/converged"
+
+# With nothing escalated the same empty pass is a real convergence, so the
+# green label still exists for the pass that earned it.
+fixture_repo; stub_reset
+routes_baseline "$(rd_comments "$(rd_dispositions fixed)" false "$RD_OLD_SHA" | payload)"
+route 'api --method POST repos/*/issues/42/comments*' '{"id":9003}'
+route '*reviewThreads*' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}'
+CROSSREV_REVIEW_PAYLOAD="$(printf '%s' "$EMPTY_REVIEW" | payload)"; export CROSSREV_REVIEW_PAYLOAD
+out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
+
+is  "the settled pass's empty review exits clean"     "$rc" "0"
+has "and converges, with nothing left open"           "$(calls)" "labels[]=crossrev/converged"
 
 finish

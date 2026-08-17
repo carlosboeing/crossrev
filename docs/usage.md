@@ -111,6 +111,8 @@ A resolve pass that ended blocked or escalated is complete but not settled, so i
 
 Converged does not mean "no findings". It means no finding this pull request introduced, at or above the threshold, remains. Findings below the threshold and pre-existing ones are reported and cannot keep the loop alive — a loop that cannot converge because of a naming quibble is one nobody leaves switched on.
 
+One exception keeps the green honest: a pass that raises nothing new while an escalated finding is still open does not converge. The reviewer does not re-raise a dispositioned finding, so the pass is empty precisely because the loop is waiting on a person — and `halted` stays on the pull request until that person settles the thread and a later pass verifies the settlement.
+
 ## Which models run
 
 With no config file anywhere, the defaults are `codex` reviewing and `claude` resolving, in `local` mode, with nothing persisted. Override a leg for one run without touching the repository:

@@ -392,6 +392,16 @@ has "an escalation from an earlier pass still names the decision" "$out" "1 find
 has "and still ends in the command that re-reviews"               "$out" "crossrev review --pr 42"
 hasnt "rather than the dead-end fallback"                         "$out" "the loop stopped short"
 
+# With no labels to read, the marker copy of the label rule has to agree: a
+# pass that added nothing while an escalation stands is halted, not a resolve
+# leg owed — there is nothing for the leg to do.
+out="$(status_with '[]' \
+  "$(review_m 1 issues-remain "$ONE_MED")" \
+  "$(resolve_m 1 "$ESCALATED")" \
+  "$(review_m 2 issues-remain '[]')")"
+has "an empty pass over an open escalation reads as halted" "$out" "acme/widget#42 — halted"
+hasnt "not as a resolve leg owed"                           "$out" "awaiting resolution"
+
 # Today's output prints a green tick for any leg that reached `complete` whatever
 # its verdict, so a review that came back blocked looked identical to one that
 # converged — green for "the reviewer gave up".
