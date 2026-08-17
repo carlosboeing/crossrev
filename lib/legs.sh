@@ -245,6 +245,13 @@ legs_github_slug() {
 # unreadable validates an address the commit will never reach, which is exactly
 # the configuration the guard exists to catch.
 #
+# What this does not cover, stated rather than implied: `git config` returns the
+# configured URL, and git resolves `url.<base>.pushInsteadOf` after reading it.
+# A rewrite rule can still redirect a URL this approved. Reading the effective
+# URLs instead would close that and break every offline test that pushes, since
+# a fixture's effective push URL is a local path and no local path resolves to a
+# github.com slug. Closing it needs a decision about the suite, not a one-liner.
+#
 # Sets LEGS_PUSH_REPO empty when the remote has no URL at all; the caller owns
 # that message, because what to say about it depends on how the remote was
 # resolved. Deliberately not printed from a command substitution: it dies on a
