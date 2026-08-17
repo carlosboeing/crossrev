@@ -77,9 +77,31 @@ preflight_check() {
         # Installed is not the same as usable. Rule 5: do not report success for
         # something unverified, and an unauthenticated gh fails at the first API
         # call rather than here.
+        #
+        # Which endpoint proves it depends on what kind of token gh holds, and
+        # both kinds are ordinary here: a person runs the local path with a user
+        # token, and automated mode authenticates as a GitHub App installation on
+        # every run. `GET /user` answers only the first — an installation token is
+        # scoped to the installation, not to a user, so asking it for a user is a
+        # 403 on a credential that is working perfectly.
+        #
+        # So each is asked for identity at the endpoint that suits it, cheapest
+        # first, and `rate_limit` — which every token type can reach — settles the
+        # case where neither answers. Reaching none of the three is the only thing
+        # that means unauthenticated.
         local who
-        if who="$(gh api user --jq .login 2>/dev/null)"; then
+        if who="$(gh api user --jq .login 2>/dev/null)" && [[ -n "$who" ]]; then
           ui_ok "$v — authenticated as $who"
+        elif gh api installation/repositories --jq .total_count >/dev/null 2>&1; then
+          ui_ok "$v — authenticated as a GitHub App installation"
+        elif gh api rate_limit >/dev/null 2>&1; then
+          ui_ok "$v — authenticated"
+        elif [[ -n "${GITHUB_ACTIONS:-}" ]]; then
+          # Rule 4: name the next action. A runner cannot log in interactively,
+          # and nothing it could do to gh would help — the credential it was
+          # handed is the thing to look at.
+          ui_no "gh — installed, but the token it was given was refused. Check the app-token the workflow passes, and that the App is still installed on this repository."
+          missing+=("gh-auth")
         else
           ui_no "gh — installed but not authenticated. Run: gh auth login"
           missing+=("gh-auth")
