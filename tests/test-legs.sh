@@ -3,21 +3,19 @@
 # Termination and guard tests.
 #
 # A loop that stops one pass early looks exactly like a loop that converged, and
-# a push guard that lets one case through is not a guard. Both are pure
-# decisions over state the orchestrator already holds, so both are testable
-# without a network.
+# a push guard that lets one case through is not a guard. The decisions are pure
+# functions over state the orchestrator already holds; the guard cases at the
+# bottom run the legs themselves against the stubbed boundary, because a
+# predicate nothing calls is not a guard either. Neither needs a network.
 
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=harness.sh
+source "$HERE/harness.sh"
 # shellcheck source=../lib/ui.sh
 source "$HERE/../lib/ui.sh"
 # shellcheck source=../lib/legs.sh
 source "$HERE/../lib/legs.sh"
-
-pass=0 fail=0
-ok()    { printf '  ok    %s\n' "$1"; pass=$((pass+1)); }
-notok() { printf '  FAIL  %s\n    expected: %s\n    actual:   %s\n' "$1" "$2" "$3"; fail=$((fail+1)); }
-is()    { [[ "$2" == "$3" ]] && ok "$1" || notok "$1" "$3" "$2"; }
 
 # verdict pass max stop blocked runs cap files maxfiles -> first word of decision
 decides() {
@@ -124,5 +122,132 @@ is_diff same      "identical configuration is not a difference" claude vendor cl
   && notok "an exported ANTHROPIC_BASE_URL is refused" "refuse" "allow" \
   || ok "an exported ANTHROPIC_BASE_URL is refused"
 
-printf '\n  %d passed, %d failed\n' "$pass" "$fail"
-(( fail == 0 ))
+# --- a completed resolve pass that settled nothing can be driven again ------
+#
+# Escalating or reporting blocked completes a pass rather than abandoning it,
+# and the guard that refuses a second resolve run reads exactly that
+# completion — so without a re-drive, the command status recommends for the
+# halt is one that always declines.
+redrivable() {
+  local want="$1" desc="$2"
+  local got; if legs_resolve_redrivable "$3"; then got=yes; else got=no; fi
+  [[ "$got" == "$want" ]] && ok "$desc" || notok "$desc" "$want" "$got"
+}
+
+redrivable yes "a blocked pass re-drives once what stopped it is fixed" \
+  '{"leg":"resolve","pass":1,"state":"complete","blocked":true,"dispositions":[]}'
+redrivable yes "an escalated pass re-drives once a human has settled it" \
+  '{"leg":"resolve","pass":1,"state":"complete","blocked":false,"dispositions":[{"disposition":"fixed"},{"disposition":"escalated"}]}'
+redrivable no  "a settled pass stays refused" \
+  '{"leg":"resolve","pass":1,"state":"complete","blocked":false,"dispositions":[{"disposition":"fixed"},{"disposition":"skipped"}]}'
+redrivable no  "a pass that dispositioned nothing stays refused" \
+  '{"leg":"resolve","pass":1,"state":"complete","blocked":false,"dispositions":[]}'
+
+# --- the guard itself, end to end -------------------------------------------
+#
+# The predicate is only worth anything wired into the resolve leg, so these
+# run the leg against the stubbed boundary: a pass that ended blocked with its
+# findings escalated is driven again, and a settled one is still refused.
+RD_ID_A="cccc000000000003"
+RD_ID_B="dddd000000000004"
+
+rd_review_marker() {
+  jq -cn --arg sha "$FIX_HEAD" --arg a "$RD_ID_A" --arg b "$RD_ID_B" '
+    {v:1, leg:"review", pass:1, state:"complete", ts:100, done_ts:200, run_id:"1",
+     head_sha:$sha, harness:"claude", model:"reviewer-model", effort:null, endpoint:null,
+     model_reported:"reviewer-model", tokens:100, verdict:"issues-remain",
+     findings:[
+       {id:$a, path:"app.ts", line:2, side:"RIGHT", severity:"high", category:"correctness",
+        pre_existing:false, title:"t a", why:"w", fix:"f", anchor:"", thread_id:"T_A",
+        disposition:null, tracked_as:null},
+       {id:$b, path:"app.ts", line:2, side:"RIGHT", severity:"medium", category:"correctness",
+        pre_existing:false, title:"t b", why:"w", fix:"f", anchor:"", thread_id:"T_B",
+        disposition:null, tracked_as:null}]}'
+}
+
+# $1 dispositions, $2 blocked flag.
+rd_resolve_marker() {
+  jq -cn --arg sha "$FIX_HEAD" --argjson d "$1" --argjson b "$2" '
+    {v:1, leg:"resolve", pass:1, state:"complete", ts:300, done_ts:400, run_id:"1",
+     head_sha:$sha, harness:"claude", model:"resolver-model", effort:null, endpoint:null,
+     model_reported:"resolver-model", tokens:100, blocked:$b,
+     blocked_reason:(if $b then "no write access to the working tree" else null end),
+     commit_sha:null, summary:"s", dispositions:$d}'
+}
+
+rd_dispositions() {
+  jq -cn --arg a "$RD_ID_A" --arg b "$RD_ID_B" --arg disp "$1" '
+    [{finding_id:$a, disposition:$disp, reply:"r", persist:null, duplicate_of:null},
+     {finding_id:$b, disposition:$disp, reply:"r", persist:null, duplicate_of:null}]'
+}
+
+# The first attempt's escalation replies, already on the threads when the
+# re-drive runs. Their finding markers are what the reply dedupe reads, so they
+# are the difference between answering again and resolving a thread in silence.
+rd_prior_replies() {
+  jq -cn --arg a "$RD_ID_A" --arg b "$RD_ID_B" --arg u "$FIX_USER" '
+    [ {body: ("needs a human <!-- crossrev:f " + ({id:$a, pass:1, leg:"resolve"} | tojson) + " -->"),
+       user:{login:$u}},
+      {body: ("needs a human <!-- crossrev:f " + ({id:$b, pass:1, leg:"resolve"} | tojson) + " -->"),
+       user:{login:$u}} ]'
+}
+
+# The resolver changes code in the working tree; the orchestrator commits it.
+rd_edit_script() {
+  local f; f="$(mktemp)"
+  printf 'printf "export const patched = 1\\n" >> app.ts\n' >"$f"
+  printf '%s' "$f"
+}
+
+rd_routes() {
+  route 'api --method POST repos/*/issues/42/comments*' '{"id":9003}'
+  route '*reviewThreads*' "$(threads_response \
+    "$(thread_node T_A app.ts 2 false "$RD_ID_A")" \
+    "$(thread_node T_B app.ts 2 false "$RD_ID_B")")"
+  route '*resolveReviewThread*' '{"data":{"resolveReviewThread":{"thread":{"isResolved":true}}}}'
+  route 'api --method POST repos/*/pulls/42/comments/*/replies*' '{"id":6001}'
+}
+
+rd_comments() {
+  jq -cn --argjson a "$(marker_comment 9001 "$(rd_review_marker)")" \
+         --argjson b "$(marker_comment 9002 "$(rd_resolve_marker "$1" "$2")")" '[$a, $b]'
+}
+
+RD_FIX_PAYLOAD='{"blocked":false,"blocked_reason":null,"summary":"Fixed both.","dispositions":[
+  {"finding_number":1,"disposition":"fixed","reply":"Fixed a.","persist":null,"duplicate_of":null},
+  {"finding_number":2,"disposition":"fixed","reply":"Fixed b.","persist":null,"duplicate_of":null}]}'
+
+fixture_repo; stub_reset
+routes_baseline "$(rd_comments "$(rd_dispositions escalated)" true | payload)"
+rd_routes
+route_first 'api --paginate repos/*/pulls/42/comments*' "$(rd_prior_replies)"
+CROSSREV_RESOLVE_PAYLOAD="$(printf '%s' "$RD_FIX_PAYLOAD" | payload)"; export CROSSREV_RESOLVE_PAYLOAD
+CROSSREV_RESOLVE_EDIT="$(rd_edit_script)"; export CROSSREV_RESOLVE_EDIT
+CROSSREV_RESOLVE_MODEL=resolver-model; export CROSSREV_RESOLVE_MODEL
+out="$("$CROSSREV" resolve --pr 42 2>&1)"; rc=$?
+
+is  "the re-drive exits clean"                        "$rc" "0"
+has "it says the pass is being driven again"          "$out" "driving pass 1 again"
+hasnt "rather than declining as already resolved"     "$out" "already resolved"
+has "the resolver actually runs"                      "$(cat "$PROMPT_LOG")" "You are the resolve leg"
+has "and its fix is committed" "$(git log -1 --format=%s)" "fix: resolve crossrev review findings (pass 1)"
+is  "both threads are answered again, over the first attempt's replies" \
+  "$(count 'pulls/42/comments/5000/replies')" "2"
+has "and resolved once fixed"                         "$out" "resolved 2 thread(s)"
+has "the loop is handed back to the reviewer"         "$(calls)" "labels[]=crossrev/awaiting-review"
+
+# The guard's other half: a pass that settled every finding is done, and
+# re-running it would re-decide work that finished.
+fixture_repo; stub_reset
+routes_baseline "$(rd_comments "$(rd_dispositions fixed)" false | payload)"
+out="$("$CROSSREV" resolve --pr 42 2>&1)"; rc=$?
+
+is  "the settled pass still declines cleanly"         "$rc" "0"
+has "with the refusal the guard has always given"     "$out" "already resolved"
+if [[ ! -s "$PROMPT_LOG" ]]; then
+  ok "and the resolver is not run again"
+else
+  notok "and the resolver is not run again" "no prompt" "$(cat "$PROMPT_LOG")"
+fi
+
+finish

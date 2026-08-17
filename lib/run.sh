@@ -1262,10 +1262,17 @@ leg_resolve() {
     "the pass-$pass review on $CTX_REPO#$CTX_PR did not finish" \
     "Resolving a half-posted review would reply to findings the reviewer may not have finished recording. Re-run: crossrev review --pr $CTX_PR"
 
+  local redrive=""
   if state_current_pass_complete "$CTX_MARKERS" "$pass" resolve; then
-    ui_say "pass $pass of $CTX_REPO#$CTX_PR is already resolved."
-    ui_say "Push a revision, or run: crossrev review --pr $CTX_PR"
-    return 0
+    local done_marker
+    done_marker="$(state_marker_for "$CTX_MARKERS" "$pass" resolve)"
+    if legs_resolve_redrivable "$done_marker"; then
+      redrive="$done_marker"
+    else
+      ui_say "pass $pass of $CTX_REPO#$CTX_PR is already resolved."
+      ui_say "Push a revision, or run: crossrev review --pr $CTX_PR"
+      return 0
+    fi
   fi
 
   findings="$(jq -c '.findings // []' <<<"$review_marker")"
@@ -1294,7 +1301,30 @@ leg_resolve() {
 
   local claim comment_id marker stale
   claim="$(state_open_claim "$CTX_MARKERS" "$pass" resolve)" || claim=""
-  if [[ -n "$claim" ]]; then
+  if [[ -n "$redrive" ]]; then
+    # A pass that ended blocked or escalated is complete but not settled, so
+    # the claim is rebuilt from the finished marker rather than refused: the
+    # dispositions and the block go back to empty, the clock and the revision
+    # move to now, and the same comment carries the new attempt — editing it
+    # keeps the marker history one record per pass, which is what every reader
+    # above assumes.
+    comment_id="$(jq -r '.comment_id' <<<"$redrive")"
+    marker="$(jq -c --argjson ts "$(date +%s)" --arg sha "$CTX_HEAD_SHA" \
+      --arg r "${GITHUB_RUN_ID:-local-$$}" \
+      --arg h "$harness" --arg m "$model" --arg e "$effort" --arg ep "$endpoint" '
+      .state = "started" | .ts = $ts | .done_ts = null | .head_sha = $sha | .run_id = $r
+      | .harness = $h | .model = (if $m == "" then null else $m end)
+      | .effort = (if $e == "" then null else $e end)
+      | .endpoint = (if $ep == "" then null else $ep end)
+      | .blocked = false | .blocked_reason = null | .commit_sha = null
+      | .model_reported = null | .tokens = null | .summary = "" | .dispositions = []
+      | del(.unthreaded)' <<<"$redrive")"
+    ui_say "Pass $pass's resolve leg ended without settling its findings — driving pass $pass again."
+    gh_comment_edit "$CTX_REPO" "$comment_id" \
+"**crossrev — resolving pass $pass of $CTX_MAX_PASSES_PER_CYCLE**
+
+Driving the pass again: the previous attempt ended without settling its findings. Verifying each finding against the codebase. This comment becomes the pass summary when the resolve leg finishes.$(state_marker_encode "$(jq -c 'del(.comment_id)' <<<"$marker")")"
+  elif [[ -n "$claim" ]]; then
     comment_id="$(jq -r '.comment_id' <<<"$claim")"
     if stale="$(state_claim_is_stale "$claim" "$CTX_HEAD_SHA")"; then
       ui_warn "abandoning the unfinished pass-$pass resolve — $stale" \
@@ -1567,6 +1597,15 @@ Pushed \`${commit_sha:0:7}\`; replying to each thread now.$(state_marker_encode 
   local already resolved_n=0 escalated=0 unthreaded=0
   local thread_id root_id should_resolve reply_body unthreaded_already
   already="$(state_posted_finding_ids "$CTX_PR" "$CTX_REPO" "$CTX_AUTHOR" resolve)" || already=""
+
+  # A re-driven pass answers its own findings again: the replies already on
+  # those threads record the attempt that declined to decide, and a thread this
+  # pass resolves cannot be left with that as its last word. The dedupe still
+  # holds for every other pass — and for this pass's own replies on a resume,
+  # which arrives here through the claim path with `redrive` empty.
+  if [[ -n "$redrive" ]]; then
+    already="$(grep -vxF -f <(jq -r '.[].id' <<<"$findings") <<<"$already" || true)"
+  fi
 
   # Seeded from the pull request rather than from zero, because a run that
   # stopped between a fallback reply and the summary comment comes back with
@@ -2245,6 +2284,14 @@ _status_escalated() {
   jq '[(.dispositions // [])[] | select(.disposition == "escalated")] | length' <<<"$1"
 }
 
+# Escalated findings across every resolve marker on the pull request. Which
+# pass handed one to a human stops mattering when a newer pass runs: the halt
+# it caused is still standing, and only re-driving that pass — which rewrites
+# its marker — or settling the thread by hand clears it.
+_markers_escalated() {
+  jq '[.[] | select(.leg == "resolve") | (.dispositions // [])[] | select(.disposition == "escalated")] | length' <<<"$1"
+}
+
 # One leg line: the glyph reflects the OUTCOME, not whether the leg ran.
 #
 # Green for a normal outcome, red for a bad one, a dim circle for a leg that
@@ -2590,19 +2637,17 @@ _status_next_halted() {
     return 0
   fi
 
-  m_resolve="$(state_marker_for "$CTX_MARKERS" "$pass" resolve)"
-  if [[ -n "$m_resolve" && "$(jq -r '.blocked // false' <<<"$m_resolve")" == "true" ]]; then
-    ui_line "the resolve leg reported blocked and left its reasoning in the thread"
-    ui_line "it belongs to. Once that is settled:"
-    ui_cmd  "crossrev resolve --pr $CTX_PR"
-    return 0
-  fi
-
+  # Escalation is tested before blocked, and counted across every resolve
+  # marker rather than only this pass's. A blocked pass is always a completed
+  # pass, so a marker carrying both flags sent the reader to the one command
+  # that declines; and a later pass that adds nothing leaves the halt standing
+  # while the finding that caused it moves a pass back.
+  #
   # An escalated finding is the one halt nobody can automate past: two agents
   # disagreed twice, or the point needs a judgement that is not theirs. The
   # thread is left open on purpose, so the lever is reading it, not re-running
   # the leg that already declined to decide.
-  escalated="$(_status_escalated "$m_resolve")"
+  escalated="$(_markers_escalated "$CTX_MARKERS")"
   if (( escalated > 0 )); then
     noun="findings"; (( escalated == 1 )) && noun="finding"
     ui_line "$escalated $noun need a human decision. The resolve leg left the"
@@ -2610,6 +2655,17 @@ _status_next_halted() {
     grep -qw "crossrev/stop" <<<"$CTX_LABELS" \
       && ui_cmd "gh pr edit $CTX_PR --remove-label crossrev/stop"
     ui_cmd  "crossrev review --pr $CTX_PR"
+    return 0
+  fi
+
+  # Reachable because the resolve leg re-drives a blocked pass: what stopped it
+  # was the environment rather than a disagreement, so once a human has fixed
+  # that, running the leg again is exactly the remedy.
+  m_resolve="$(state_marker_for "$CTX_MARKERS" "$pass" resolve)"
+  if [[ -n "$m_resolve" && "$(jq -r '.blocked // false' <<<"$m_resolve")" == "true" ]]; then
+    ui_line "the resolve leg reported blocked and left its reasoning in the thread"
+    ui_line "it belongs to. Once that is settled:"
+    ui_cmd  "crossrev resolve --pr $CTX_PR"
     return 0
   fi
 

@@ -69,6 +69,7 @@ HIGH_LOW='[{"severity":"high"},{"severity":"high"},{"severity":"low"}]'
 ONE_MED='[{"severity":"medium"}]'
 FIXED_SKIPPED='[{"disposition":"fixed"},{"disposition":"fixed"},{"disposition":"skipped"}]'
 ONE_FIXED='[{"disposition":"fixed"}]'
+ESCALATED='[{"disposition":"fixed"},{"disposition":"escalated"}]'
 
 # $1 names a function to run inside the fixture checkout after the routes are in
 # place and before status runs — a lock file, an extra route — or is empty for
@@ -370,6 +371,27 @@ has "attached to the leg that reported it"      "$out" "✗ resolve  blocked —
 has "and NEXT names the remedy"                 "$out" "Once that is settled"
 has "with the command"                          "$out" "crossrev resolve --pr 42"
 
+# A blocked pass is always also a completed pass, so when the marker carries
+# both flags, recommending the resolve leg points at the one command that
+# declines. The escalations are what a human can act on, and they win.
+out="$(status_with "$(lbl crossrev/halted crossrev/pass-1)" \
+  "$(review_m 1 issues-remain "$ONE_MED")" \
+  "$(resolve_m 1 "$ESCALATED" '' 'no write access to the working tree')")"
+has "a blocked-and-escalated halt names the pending decision" "$out" "1 finding need"
+has "and recommends the review leg, which runs"               "$out" "crossrev review --pr 42"
+hasnt "not the resolve leg, which declines"                   "$out" "crossrev resolve --pr 42"
+
+# The escalation that caused the halt is counted wherever it sits: a pass that
+# adds nothing leaves the halt standing, so by the time anyone reads this the
+# finding waiting on a human belongs to an earlier pass.
+out="$(status_with "$(lbl crossrev/halted crossrev/pass-2)" \
+  "$(review_m 1 issues-remain "$ONE_MED")" \
+  "$(resolve_m 1 "$ESCALATED")" \
+  "$(review_m 2 issues-remain '[]')")"
+has "an escalation from an earlier pass still names the decision" "$out" "1 finding need"
+has "and still ends in the command that re-reviews"               "$out" "crossrev review --pr 42"
+hasnt "rather than the dead-end fallback"                         "$out" "the loop stopped short"
+
 # Today's output prints a green tick for any leg that reached `complete` whatever
 # its verdict, so a review that came back blocked looked identical to one that
 # converged — green for "the reviewer gave up".
@@ -385,7 +407,6 @@ has "a blocked review gets the red glyph, not the green one" "$out" "✗ review 
 # there the header comes from the markers. A resolve pass that escalated is
 # complete and not blocked, so reading only `blocked` would answer "awaiting
 # review" and send the reader to start a pass that settles nothing.
-ESCALATED='[{"disposition":"fixed"},{"disposition":"escalated"}]'
 out="$(status_with '[]' \
   "$(review_m 1 issues-remain "$HIGH_LOW")" \
   "$(resolve_m 1 "$ESCALATED")")"
