@@ -201,6 +201,80 @@ legs_label_description() {
   esac
 }
 
+# owner/repo for a github.com URL, or non-zero for anything else.
+#
+# Substring matching is not enough here, because the strings this rejects are
+# the ones that matter: `https://github.com.example.net/a/b` and a local path
+# holding `github.com/a/b` both contain the host and are not it. So the host is
+# isolated and compared whole, in every shape git accepts a remote in — https,
+# ssh://, git://, and the scp-style `git@github.com:owner/repo.git`.
+legs_github_slug() {
+  local url="$1" rest host path
+  if [[ "$url" == *"://"* ]]; then
+    rest="${url#*://}"
+  elif [[ "$url" == *:* && "${url%%:*}" != */* ]]; then
+    # scp-style. The first colon separates host from path; a colon after a slash
+    # is part of a local path, which is why the guard above tests for one.
+    rest="${url%%:*}/${url#*:}"
+  else
+    return 1
+  fi
+  # Drop userinfo only when the `@` is in the authority, never when it is a
+  # character in the path.
+  if [[ "${rest%%/*}" == *@* ]]; then rest="${rest#*@}"; fi
+  host="${rest%%/*}"
+  host="${host%%:*}"
+  path="${rest#*/}"
+  [[ "$(printf '%s' "$host" | tr '[:upper:]' '[:lower:]')" == "github.com" ]] || return 1
+  path="${path%/}"
+  path="${path%.git}"
+  [[ "$path" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]] || return 1
+  printf '%s' "$path"
+}
+
+# The repository `git push <remote>` would write to, into LEGS_PUSH_REPO.
+#
+# `git remote get-url --push` cannot answer this. A remote may carry several
+# `remote.<name>.pushurl` entries and git pushes to every one of them, but that
+# command returns only the first — so a second entry pointing somewhere else is
+# invisible to anything that reads it. When no pushurl is set at all, git pushes
+# to the `remote.<name>.url` entries instead, so those are the fallback.
+#
+# A URL that does not resolve to a github.com slug is refused rather than
+# swapped for one that does. Checking the fetch URL because the push URL is
+# unreadable validates an address the commit will never reach, which is exactly
+# the configuration the guard exists to catch.
+#
+# Sets LEGS_PUSH_REPO empty when the remote has no URL at all; the caller owns
+# that message, because what to say about it depends on how the remote was
+# resolved. Deliberately not printed from a command substitution: it dies on a
+# bad URL, and a subshell would swallow the exit.
+LEGS_PUSH_REPO=""
+legs_resolve_push_repo() {
+  local remote="$1" urls url slug repo=""
+  urls="$(git config --get-all "remote.${remote}.pushurl" 2>/dev/null || true)"
+  [[ -n "$urls" ]] || urls="$(git config --get-all "remote.${remote}.url" 2>/dev/null || true)"
+
+  while IFS= read -r url; do
+    [[ -n "$url" ]] || continue
+    slug="$(legs_github_slug "$url")" || ui_die \
+      "remote '$remote' pushes to '$url', which is not a github.com repository URL" \
+      "CrossRev checks where a fix will land before it leaves the machine, and it can only do that for a github.com URL. Check \`git config --get-all remote.$remote.pushurl\`."
+    if [[ -z "$repo" ]]; then
+      repo="$slug"
+    elif [[ "$repo" != "$slug" ]]; then
+      ui_die \
+        "remote '$remote' pushes to two different repositories, '$repo' and '$slug'" \
+        "git pushes to every \`remote.$remote.pushurl\` entry, and CrossRev pushes only to the head repository of the pull request under review. Remove the entry that does not belong."
+    fi
+  done <<EOF
+$urls
+EOF
+
+  # shellcheck disable=SC2034  # read by run.sh and github.sh
+  LEGS_PUSH_REPO="$repo"
+}
+
 # Refuse to push anywhere except the PR's own head branch.
 #
 # Branch protection is a backstop, not a control: it fires after a bad push is

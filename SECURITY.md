@@ -47,7 +47,11 @@ token elsewhere in the same job. Findings of particular interest:
   caps or repoint an endpoint at a server it controls
   ([ADR 0003](docs/adrs/0003-policy-read-from-the-base-revision.md)).
 - **A push the branch guard should have refused** — a target other than the pull
-  request's own head branch in the origin repository.
+  request's own head branch in the origin repository. Every URL `git push` would
+  write to is resolved to an `owner/repo` slug. Each slug must match the pull
+  request's head repository, checked before the resolver runs and again before
+  the commit is pushed. A URL that resolves to no github.com slug is refused
+  rather than checked against a different URL on the same remote.
 - **A review leg that can write to the checkout.** The resolve leg's process is
   granted file edits in its workspace, because changing files is its job — never
   a blanket bypass, and never permission to run arbitrary commands outside it.

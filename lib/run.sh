@@ -1336,12 +1336,8 @@ leg_resolve() {
     "could not resolve the push remote for branch '$current_branch'" \
     "Check out the pull request with \`gh pr checkout $CTX_PR\` to configure the remote."
 
-  local push_url
-  push_url="$(git remote get-url --push "$push_remote" 2>/dev/null || true)"
-  if [[ -z "$push_url" || "$push_url" != *"github.com"* ]]; then
-    push_url="$(git remote get-url "$push_remote" 2>/dev/null || true)"
-  fi
-  target_repo="$(sed -E 's#^.*github\.com[:/]##; s#\.git$##' <<<"$push_url")"
+  legs_resolve_push_repo "$push_remote"
+  target_repo="$LEGS_PUSH_REPO"
   [[ -n "$target_repo" ]] || ui_die \
     "could not read the URL for remote '$push_remote'" \
     "Check \`git remote -v\` in this checkout."
@@ -1624,7 +1620,7 @@ $(jq -r '[.[] | select(.disposition == "fixed") | "- " + .finding_id] | join("\n
 
 $(jq -r '[.[] | select(.disposition == "deferred") | "- " + .finding_id] | join("\n")' <<<"$dispositions")"
     fi
-    commit_sha="$(gh_commit_and_push "$CTX_HEAD_BRANCH" "$commit_msg" "$CTX_HEAD_SHA" "$push_remote")"
+    commit_sha="$(gh_commit_and_push "$CTX_HEAD_BRANCH" "$commit_msg" "$CTX_HEAD_SHA" "$push_remote" "$CTX_HEAD_REPO")"
     if [[ -n "$commit_sha" ]]; then
       ui_ok "pushed ${commit_sha:0:7} to $CTX_HEAD_BRANCH"
       # Recorded immediately after the push, because the window between the two

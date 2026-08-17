@@ -323,10 +323,19 @@ gh_issue_comment() {
 # a backstop behind it, not a substitute: it fires after a bad push is attempted
 # and says nothing about which branch was targeted.
 gh_commit_and_push() {
-  local branch="$1" message="$2" expected_head="$3" remote="${4:-origin}" sha
+  local branch="$1" message="$2" expected_head="$3" remote="${4:-origin}" expected_repo="${5:-}" sha
 
   git add -A >/dev/null 2>&1 || true
   if git diff --cached --quiet 2>/dev/null; then printf ''; return 0; fi
+
+  # The remote's URLs are read again here rather than trusted from the guard
+  # that ran before the model did. This is the last point before a commit leaves
+  # the machine, and a leg that edits the working tree has had a git repository
+  # in front of it since then.
+  legs_resolve_push_repo "$remote"
+  [[ -n "$expected_repo" && "$LEGS_PUSH_REPO" == "$expected_repo" ]] || ui_die \
+    "remote '$remote' pushes to '${LEGS_PUSH_REPO:-a URL CrossRev could not read}', but the head repository of this pull request is '${expected_repo:-unknown}'" \
+    "CrossRev pushes only to the head repository of the pull request under review. The resolver's changes are still in the working tree and nothing was pushed. Check \`git config --get-all remote.$remote.pushurl\`."
 
   git -c user.name="${CROSSREV_GIT_NAME:-crossrev}" \
       -c user.email="${CROSSREV_GIT_EMAIL:-crossrev@users.noreply.github.com}" \

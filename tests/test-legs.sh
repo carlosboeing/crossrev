@@ -91,6 +91,29 @@ guard refuse "refuses when the checkout is on another branch"   main   feat/x ma
 guard refuse "refuses when the head branch is the default"      main   main   main o/r o/r
 guard refuse "refuses when the head repo is not the origin"     feat/x feat/x main fork/r o/r
 
+# --- the URL the guard is handed --------------------------------------------
+#
+# Everything above is only as good as the slug it compares. Testing for the
+# substring "github.com" accepts a neighbouring host and a local path that
+# happens to contain the name, and each of those is a way past the guard.
+slug() {
+  local want="$1" desc="$2" url="$3" got
+  got="$(legs_github_slug "$url" 2>/dev/null)" || got=refused
+  [[ "$got" == "$want" ]] && ok "$desc" || notok "$desc" "$want" "$got"
+}
+slug o/r     "an https remote"                        "https://github.com/o/r.git"
+slug o/r     "an https remote with no .git suffix"    "https://github.com/o/r"
+slug o/r     "an scp-style ssh remote"                "git@github.com:o/r.git"
+slug o/r     "an ssh:// remote carrying a port"       "ssh://git@github.com:22/o/r.git"
+slug o/r     "a git:// remote"                        "git://github.com/o/r.git"
+slug o/r     "a host spelled with capitals"           "https://GitHub.com/o/r.git"
+slug refused "a host that merely ends in the name"    "https://notgithub.com/o/r.git"
+slug refused "a host that merely starts with it"      "https://github.com.example.net/o/r.git"
+slug refused "a local path holding the host name"     "/tmp/w/github.com/o/r.git"
+slug refused "an https remote on another host"        "https://git.example.com/o/r.git"
+slug refused "a plain local path"                     "/tmp/w/origin.git"
+slug refused "a path deeper than owner/repo"          "https://github.com/o/r/x.git"
+
 # --- divergence ------------------------------------------------------------
 is_diff() {
   local want="$1" desc="$2"; shift 2
