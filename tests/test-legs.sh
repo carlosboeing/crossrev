@@ -301,4 +301,37 @@ out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
 is  "the settled pass's empty review exits clean"     "$rc" "0"
 has "and converges, with nothing left open"           "$(calls)" "labels[]=crossrev/converged"
 
+# --- the way out of the halt, driven by hand ---------------------------------
+#
+# A human settles the escalated thread and the next review returns converged,
+# which is the escape the label rule exempts. Running the resolve leg over that
+# pass by hand finds nothing to resolve, and reading only the escalation count
+# there would take the green label straight back off: the escalation is history
+# the marker keeps, and the verdict is the answer about it.
+rd_converged_review_marker() {
+  jq -cn --arg sha "$FIX_HEAD" '
+    {v:1, leg:"review", pass:2, state:"complete", ts:500, done_ts:600, run_id:"1",
+     head_sha:$sha, harness:"claude", model:"reviewer-model", effort:null, endpoint:null,
+     model_reported:"reviewer-model", tokens:100, verdict:"converged", findings:[]}'
+}
+
+fixture_repo; stub_reset
+routes_baseline "$(jq -cn \
+  --argjson a "$(marker_comment 9001 "$(rd_review_marker "$RD_OLD_SHA")")" \
+  --argjson b "$(marker_comment 9002 "$(rd_resolve_marker "$(rd_dispositions escalated)" false "$RD_OLD_SHA")")" \
+  --argjson c "$(marker_comment 9004 "$(rd_converged_review_marker)")" '[$a, $b, $c]' | payload)" \
+  '[{"name":"crossrev/converged"},{"name":"crossrev/pass-2"}]'
+out="$("$CROSSREV" resolve --pr 42 2>&1)"; rc=$?
+
+is  "resolving a converged pass exits clean"          "$rc" "0"
+has "it says there is nothing to resolve"             "$out" "found nothing to resolve"
+has "the converged label stands"                      "$(calls)" "labels[]=crossrev/converged"
+hasnt "it is never taken off the pull request"        "$(calls)" "labels/crossrev/converged"
+hasnt "and the settled pass is not halted again"      "$(calls)" "labels[]=crossrev/halted"
+if [[ ! -s "$PROMPT_LOG" ]]; then
+  ok "with no resolver run over a pass that has no findings"
+else
+  notok "with no resolver run over a pass that has no findings" "no prompt" "$(cat "$PROMPT_LOG")"
+fi
+
 finish
