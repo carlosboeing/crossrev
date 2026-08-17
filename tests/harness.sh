@@ -120,6 +120,19 @@ stub_reset() {
   export CROSSREV_ARGV_LOG="$ARGV_LOG"
   export PATH="$HERE/stub:$PATH"
   unset CROSSREV_REVIEW_PAYLOAD CROSSREV_RESOLVE_PAYLOAD CROSSREV_HARNESS_PAYLOAD CROSSREV_RESOLVE_EDIT
+
+  # GitHub sets RUNNER_ENVIRONMENT=github-hosted on its own runners, and this
+  # suite runs there. Left alone every fixture inherits it and takes the hosted
+  # path, so `cred_assert_present` demands a harness secret no fixture sets and
+  # the leg dies — a test failing in CI while passing on a laptop, for a reason
+  # that has nothing to do with what it is testing.
+  #
+  # Same shape as the GITHUB_ACTIONS leak that STUB_ON_RUNNER already exists for
+  # in tests/test-preflight.sh: an ambient variable that means one thing to the
+  # code under test and another to the machine running it. The default here is
+  # the developer machine, because that is what every fixture is a model of; a
+  # test that wants the hosted path sets the variable itself.
+  unset RUNNER_ENVIRONMENT
 }
 
 # The routes file is line-based, so a multi-line response is spooled to a file and
