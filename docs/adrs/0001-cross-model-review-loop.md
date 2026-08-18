@@ -18,7 +18,7 @@ Two things had to be decided together: whether the two halves run on different m
 
 **The reviewer and the resolver are different model families**, and CrossRev asserts that they actually differed rather than assuming it.
 
-**Each leg returns schema-constrained JSON, and the orchestrator acts on it.** The model returns findings or dispositions; every GitHub call — inline comments, threaded replies, thread resolution, labels, commits, the push — is made by the orchestrator. The model makes none.
+**Each leg returns schema-constrained JSON, and the orchestrator acts on it.** The model returns findings or resolutions; every GitHub call — inline comments, threaded replies, thread resolution, labels, commits, the push — is made by the orchestrator. The model makes none.
 
 **One protocol, many models.** The rubric, the severity vocabulary and the output schema are identical whichever harness runs them. Only the model varies. That is precisely what lets pass 2 judge pass 1's findings: if the two legs read a different brief, a disagreement between them says nothing.
 

@@ -73,25 +73,25 @@ validate_resolve() {
   problem="$(jq -r '
     def bad(m): m;
     if type != "object" then bad("the payload is not a JSON object")
-    elif (has("dispositions") | not) or (.dispositions | type != "array")
-      then bad("dispositions is missing or not an array")
+    elif (has("resolutions") | not) or (.resolutions | type != "array")
+      then bad("resolutions is missing or not an array")
     elif (has("summary") | not) or (.summary | type != "string") or (.summary == "")
       then bad("summary is missing or empty")
     elif ((.blocked // false) | type != "boolean")
       then bad("blocked is not a boolean")
     else
-      ( [ .dispositions[] | select(
+      ( [ .resolutions[] | select(
             # jq has one number type, so whole-ness is checked rather than
             # assumed. A harness that constrains output cannot return 1.5 here,
             # and the fenced-JSON path has no such guarantee.
             (.finding_number? | type != "number")
             or ((.finding_number | floor) != .finding_number)
-            or ((.disposition? // "") | IN("fixed","skipped","deferred","rebutted","escalated") | not)
+            or ((.resolution? // "") | IN("fixed","skipped","deferred","disputed","escalated") | not)
             or (.reply? | type != "string") or (.reply == "")
             or ((.duplicate_of? // 0) | type != "number")
           ) ] ) as $bad
       | if ($bad | length) > 0
-        then bad("\($bad | length) disposition(s) have a missing or non-whole finding_number, a missing reply, a non-numeric duplicate_of, or a disposition outside the five allowed — first: \($bad[0] | tojson)")
+        then bad("\($bad | length) resolution(s) have a missing or non-whole finding_number, a missing reply, a non-numeric duplicate_of, or a resolution outside the five allowed — first: \($bad[0] | tojson)")
         else empty end
     end' <<<"$payload" 2>/dev/null)" || problem="the payload is not parseable JSON"
   if [[ -n "$problem" ]]; then printf '%s' "$problem"; return 1; fi
@@ -101,18 +101,18 @@ validate_resolve() {
 
   problem="$(jq -r --argjson e "$expect" '
     ($e.findings // 0) as $n
-    | [ .dispositions[].finding_number ] as $got
+    | [ .resolutions[].finding_number ] as $got
     | ([ $got[] | select(. < 1 or . > $n) ] | unique) as $range
     | ([ $got | group_by(.)[] | select(length > 1) | .[0] ] | unique) as $twice
     | (([range(1; $n + 1)] - $got) | unique) as $missing
-    | ([ .dispositions[] | select(.duplicate_of != null) | .duplicate_of ]
+    | ([ .resolutions[] | select(.duplicate_of != null) | .duplicate_of ]
        - ($e.candidates // []) | unique) as $invented
     | if ($range | length) > 0
       then "finding number(s) \($range | join(", ")) do not exist — \($n) finding(s) were supplied, numbered 1 to \($n)"
       elif ($twice | length) > 0
-      then "finding(s) \($twice | join(", ")) were dispositioned more than once"
+      then "finding(s) \($twice | join(", ")) were settled more than once"
       elif ($missing | length) > 0
-      then "finding(s) \($missing | join(", ")) got no disposition at all, and a finding left out gets no reply and no thread resolution"
+      then "finding(s) \($missing | join(", ")) got no resolution at all, and a finding left out gets no reply and no thread resolution"
       elif ($invented | length) > 0
       then "duplicate_of names issue(s) \($invented | join(", ")), which were not among the candidates supplied in the prompt"
       else empty end' <<<"$payload" 2>/dev/null)" \

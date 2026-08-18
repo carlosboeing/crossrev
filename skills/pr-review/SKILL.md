@@ -21,8 +21,8 @@ The orchestrator supplies everything in the prompt. **You do not fetch anything.
 |---|---|
 | The diff | The changes under review, every hunk line prefixed with its old and new line number |
 | Pass number | Which pass this is, out of the configured maximum |
-| Prior findings | From pass 2 onward: earlier findings, their ids, and how the resolve leg dispositioned each |
-| Open threads | Existing review conversation, including any rebuttals |
+| Prior findings | From pass 2 onward: earlier findings, their ids, and how the resolve leg settled each |
+| Open threads | Existing review conversation, including any disputes |
 | `REVIEW.md` | Per-repository review instruction, when the repository has one |
 | `min_fix_severity` | The fixing threshold in force this pass, which is what the verdict keys off |
 
@@ -30,7 +30,7 @@ If something you need is missing, say so in `blocked_reason` and return verdict 
 
 ## Read-only
 
-You modify nothing. No files, no working tree, no index, no branch state. You may read the checkout to understand context the diff does not carry — a function's other callers, a type definition, an existing test — and reading widely is encouraged, because a finding that ignores surrounding code is the kind the resolve leg rebuts.
+You modify nothing. No files, no working tree, no index, no branch state. You may read the checkout to understand context the diff does not carry — a function's other callers, a type definition, an existing test — and reading widely is encouraged, because a finding that ignores surrounding code is the kind the resolve leg disputes.
 
 ## What to check
 
@@ -85,17 +85,17 @@ Before looking for anything new, classify every prior finding you were given, in
 | Status | When |
 |---|---|
 | `addressed` | The code changed and the defect is gone |
-| `credibly-rebutted` | The reply gave a technical reason the finding was wrong for this codebase, and having read the code, it holds |
+| `credibly-disputed` | The reply gave a technical reason the finding was wrong for this codebase, and having read the code, it holds |
 | `still-open` | Nothing changed at that location and the defect remains |
 | `regressed` | It was fixed in an earlier pass and has come back |
 
 Then two rules that make convergence possible:
 
-**Do not re-raise a dispositioned finding unless the code at that location changed.** If it was fixed, skipped, rebutted or deferred, it is settled. Raising it again is how a loop runs to its cap arguing with itself.
+**Do not re-raise a settled finding unless the code at that location changed.** If it was fixed, skipped, disputed or deferred, it is settled. Raising it again is how a loop runs to its cap arguing with itself.
 
-**A finding marked `tracked_as` is settled twice over** — dispositioned, and recorded somewhere durable outside this PR. Never re-raise those.
+**A finding marked `tracked_as` is settled twice over** — settled, and recorded somewhere durable outside this PR. Never re-raise those.
 
-**Accepting a rebuttal is a real outcome, not a concession.** If the resolve leg explained why you were wrong and the explanation holds against the code, say `credibly-rebutted` and move on. If it does not hold, `still-open` is correct and the disagreement escalates to a human — which is the designed path, not a failure.
+**Accepting a dispute is a real outcome, not a concession.** If the resolve leg explained why you were wrong and the explanation holds against the code, say `credibly-disputed` and move on. If it does not hold, `still-open` is correct and the disagreement escalates to a human — which is the designed path, not a failure.
 
 ## The verdict
 

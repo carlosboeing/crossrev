@@ -1,6 +1,6 @@
 ---
 name: pr-resolve
-description: Use when resolving review findings on a pull request as one leg of the CrossRev cross-model review loop - verifies each finding against the codebase, fixes what is real, pushes back on what is wrong, and returns dispositions and reply text as schema-constrained JSON. Not for ad-hoc review response; use receiving-code-review for that.
+description: Use when resolving review findings on a pull request as one leg of the CrossRev cross-model review loop - verifies each finding against the codebase, fixes what is real, pushes back on what is wrong, and returns resolutions and reply text as schema-constrained JSON. Not for ad-hoc review response; use receiving-code-review for that.
 ---
 
 # pr-resolve
@@ -29,9 +29,9 @@ You *do* change code in the working tree. That is the one outward thing you own,
 1. READ     the finding completely without reacting
 2. VERIFY   against the codebase — does this defect actually exist here?
 3. EVALUATE is the suggested fix right for THIS codebase?
-4. DECIDE   a disposition
+4. DECIDE   a resolution
 5. COMPOSE  a reply that gives the technical reason
-6. IMPLEMENT one at a time, if the disposition is fixed
+6. IMPLEMENT one at a time, if the resolution is fixed
 ```
 
 **Never:** "You're absolutely right!", "Great catch!", "Excellent feedback!". Performative agreement is noise in a machine-readable thread. State the technical fact and move on.
@@ -53,9 +53,9 @@ Each finding in the prompt carries three fields and one instruction:
 
 | The prompt says | What you do |
 |---|---|
-| `May fix: yes` | Verify. If real, fix it. If wrong, rebut it |
-| `May fix: no` | Verify. If real, `skipped` with a one-line reason. If wrong, `rebutted` |
-| `pre_existing: true` | Verify, then **stop**. Confirmed real becomes `deferred`. Found wrong becomes `rebutted` |
+| `May fix: yes` | Verify. If real, fix it. If wrong, dispute it |
+| `May fix: no` | Verify. If real, `skipped` with a one-line reason. If wrong, `disputed` |
+| `pre_existing: true` | Verify, then **stop**. Confirmed real becomes `deferred`. Found wrong becomes `disputed` |
 
 **Do not fix a pre-existing finding, however easy it looks and however high its severity.** The boolean exists precisely to stop the diff growing without limit, and a helpful fix defeats it. This is the rule you are most likely to break by good intentions.
 
@@ -70,29 +70,29 @@ So a finding on a quarantined path is **`deferred`**, with a reply that says the
 - **Never return `fixed`.** Anything you write to that path is discarded when the checkout is restored, so the reply would claim a change that exists nowhere and the diff would not contradict it.
 - **Never claim verification.** You are reasoning from the diff alone — say so, and let a human read the file.
 
-## The five dispositions
+## The five resolutions
 
-| Disposition | Thread | Means |
+| Resolution | Thread | Means |
 |---|---|---|
 | `fixed` | resolved | You changed the code. The reply says what and why |
 | `skipped` | resolved | Not acting, by policy — usually `May fix: no`. The reply gives the one-line reason |
 | `deferred` | resolved once persisted | Real, worth doing, not in this PR. Fill in `persist` so it outlives the merge |
-| `rebutted` | resolved | Technically wrong for this codebase. The reply gives the reason, with evidence |
+| `disputed` | resolved | Technically wrong for this codebase. The reply gives the reason, with evidence |
 | `escalated` | left open | A human decision is needed. Applies `crossrev/stop` and halts the loop |
 
-Every disposition carries a reply. **Nothing is ever silently dropped** — a skipped finding with no reply reads as an oversight, and the next pass raises it again.
+Every resolution carries a reply. **Nothing is ever silently dropped** — a skipped finding with no reply reads as an oversight, and the next pass raises it again.
 
-**Start the reply with the reason, never with the disposition.** The orchestrator prepends "Fixed.", "Deferred." and the rest, so a reply that opens with one gets it twice. This is easy to get wrong for a good reason: the earlier replies quoted back to you in the prompt already carry that lead, so the house style looks like something to copy. It is not — it is the orchestrator's, added after you hand the text over.
+**Start the reply with the reason, never with the resolution.** The orchestrator prepends "Fixed.", "Deferred." and the rest, so a reply that opens with one gets it twice. This is easy to get wrong for a good reason: the earlier replies quoted back to you in the prompt already carry that lead, so the house style looks like something to copy. It is not — it is the orchestrator's, added after you hand the text over.
 
-### Rebutting well
+### Disputing well
 
-A rebuttal is a technical claim, so support it: name the file and line that makes the finding wrong, the existing guard the reviewer did not see, the type that makes the case impossible, the test that covers it. "This is fine" is not a rebuttal and will be re-raised.
+A dispute is a technical claim, so support it: name the file and line that makes the finding wrong, the existing guard the reviewer did not see, the type that makes the case impossible, the test that covers it. "This is fine" is not a dispute and will be re-raised.
 
-Rebut when you are right. Do not rebut to avoid work, and do not implement to avoid disagreement — both corrupt the loop's signal, in opposite directions.
+Dispute when you are right. Do not dispute to avoid work, and do not implement to avoid disagreement — both corrupt the loop's signal, in opposite directions.
 
 ### Escalating
 
-**A point you rebutted in an earlier pass, re-raised unchanged, is escalated rather than re-argued.** Two models disagreeing twice about the same line is a human's decision. Re-arguing it burns the pass cap and settles nothing.
+**A point you disputed in an earlier pass, re-raised unchanged, is escalated rather than re-argued.** Two models disagreeing twice about the same line is a human's decision. Re-arguing it burns the pass cap and settles nothing.
 
 Also escalate anything needing a judgement that is not yours: a product decision, a legal or privacy call, a deliberate trade-off the codebase records elsewhere.
 
@@ -115,12 +115,12 @@ A **closed** candidate counts. Closing an issue is a decision, and re-filing som
 
 ## The summary comment
 
-One comment summarising what happened, in Markdown, written for a collaborator who has never heard of CrossRev: what was fixed, what was skipped and why, what was deferred and where it went, what was rebutted and on what grounds. It goes in the `summary` field.
+One comment summarising what happened, in Markdown, written for a collaborator who has never heard of CrossRev: what was fixed, what was skipped and why, what was deferred and where it went, what was disputed and on what grounds. It goes in the `summary` field.
 
-The orchestrator wraps it: the alert at the top, the disposition table, the run details, the machine-readable marker and the `## Deferred work filed` list. **Do not write any of them yourself** — and you could not write the last one anyway, because the filing has not happened yet and you do not know the issue numbers.
+The orchestrator wraps it: the alert at the top, the resolution table, the run details, the machine-readable marker and the `## Deferred work filed` list. **Do not write any of them yourself** — and you could not write the last one anyway, because the filing has not happened yet and you do not know the issue numbers.
 
 ## Output
 
-Return JSON matching the supplied schema and nothing else. One entry in `dispositions` per finding you were given — no more, no fewer. A finding you cannot evaluate is `escalated` with a reply saying why, not an omission.
+Return JSON matching the supplied schema and nothing else. One entry in `resolutions` per finding you were given — no more, no fewer. A finding you cannot evaluate is `escalated` with a reply saying why, not an omission.
 
 **Name each finding by its number, not by its id.** The heading `### 2.` in the prompt is `"finding_number": 2`. The 16-character id printed beside it is there for quoting in prose, and copying it into the payload is exactly the clerical step this replaced — a mistyped one used to be accepted in silence, and every lookup keyed on it then missed. The orchestrator checks that the numbers cover every finding exactly once.

@@ -57,7 +57,7 @@ Which link depends on what you are likely to be asking at that point.
 | Where you see it | The link goes to |
 |---|---|
 | The review leg's findings table | The code, permalinked to the revision that was reviewed |
-| The resolve leg's summary table | The review thread, where the reasoning and any rebuttal are |
+| The resolve leg's summary table | The review thread, where the reasoning and any dispute are |
 | The deferred work list | The same thread |
 
 A finding GitHub could not anchor to a line has no thread, so its location falls back to the code permalink.
@@ -78,16 +78,16 @@ Category is a closed set — `correctness`, `security`, `performance`, `maintain
 
 A finding also carries `pre_existing`, true when the defect would still be there if the pull request were reverted. Pre-existing defects are reported at any severity but never fixed, and they cannot keep the loop alive. A pull request that also fixes old bugs is one nobody can review.
 
-### The five dispositions
+### The five resolutions
 
 Every finding gets a reply, whatever the resolve leg decides. Nothing is silently dropped.
 
-| Disposition | What it means |
+| Resolution | What it means |
 |---|---|
 | `fixed` | Code changed |
 | `skipped` | Not acting, by policy — typically below `min_fix_severity` |
 | `deferred` | Real, worth doing, not here. Persisted to the backlog |
-| `rebutted` | Technically wrong for this codebase |
+| `disputed` | Technically wrong for this codebase |
 | `escalated` | Needs a human decision. Applies `crossrev/stop` and leaves the thread open |
 
 ### The six labels
@@ -125,11 +125,11 @@ Markers are HTML comments in comment bodies. They carry the pass number, the leg
 
 A resolve pass that ended blocked or escalated is complete but not settled, so it can be driven again. Once whatever stopped it is fixed, `crossrev resolve --pr N` runs the resolver over the same findings instead of refusing. The same goes for a pass that left a deferral unpersisted, and for one whose claimed fix reached no commit. A pass that settled every finding stays finished. `status` names whichever command applies.
 
-A resolve pass can also finish the loop itself. A pass that settled every finding without pushing a commit — each rebutted, skipped, or deferred and tracked — converges on the spot: the head never moved, so a re-review would find nothing new and decline. A pass that pushed hands back to the reviewer, because there is something new to see.
+A resolve pass can also finish the loop itself. A pass that settled every finding without pushing a commit — each disputed, skipped, or deferred and tracked — converges on the spot: the head never moved, so a re-review would find nothing new and decline. A pass that pushed hands back to the reviewer, because there is something new to see.
 
 Converged does not mean "no findings". It means no finding this pull request introduced, at or above the threshold, remains. Findings below the threshold and pre-existing ones are reported and cannot keep the loop alive — a loop that cannot converge because of a naming quibble is one nobody leaves switched on.
 
-One exception keeps the green honest: a pass that raises nothing new while an escalated finding is still open does not converge. The reviewer does not re-raise a dispositioned finding, so the pass is empty precisely because the loop is waiting on a person — and `halted` stays on the pull request until that person settles the thread and a later pass verifies the settlement.
+One exception keeps the green honest: a pass that raises nothing new while an escalated finding is still open does not converge. The reviewer does not re-raise a settled finding, so the pass is empty precisely because the loop is waiting on a person — and `halted` stays on the pull request until that person settles the thread and a later pass verifies the settlement.
 
 ## Which models run
 

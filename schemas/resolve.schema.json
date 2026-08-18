@@ -2,7 +2,7 @@
   "title": "crossrev resolve intent",
   "description": "What the resolve leg returns. It is intent for the orchestrator to act on, never a record of what the agent already did — the agent holds no GitHub credential and makes no GitHub call. Carries the same two harness-forced shapes as the findings schema: no $schema or $id key, because Claude Code's --json-schema rejects a schema naming the 2020-12 meta-schema; and every property listed in 'required', because Codex enforces OpenAI strict mode. Optional fields are nullable rather than absent.",
   "type": "object",
-  "required": ["dispositions", "summary", "blocked", "blocked_reason"],
+  "required": ["resolutions", "summary", "blocked", "blocked_reason"],
   "additionalProperties": false,
   "properties": {
     "blocked": {
@@ -16,14 +16,14 @@
     "summary": {
       "type": "string",
       "minLength": 1,
-      "description": "The summary comment body, in Markdown, explaining what was fixed, skipped, deferred and rebutted. Written for a collaborator who has never heard of crossrev. The orchestrator appends the alert, the disposition table, the run details, the machine-readable marker and any 'Deferred work filed' list; do not write any of them yourself."
+      "description": "The summary comment body, in Markdown, explaining what was fixed, skipped, deferred and disputed. Written for a collaborator who has never heard of crossrev. The orchestrator appends the alert, the resolution table, the run details, the machine-readable marker and any 'Deferred work filed' list; do not write any of them yourself."
     },
-    "dispositions": {
+    "resolutions": {
       "type": "array",
       "description": "Exactly one entry per finding supplied in the prompt, no more and no fewer. Every finding gets one, whatever its severity — severity governs what happens after verification, never whether verification happens. The orchestrator checks the coverage: a finding left out has no reply and its thread is never resolved, which is a silent loss rather than a visible one.",
       "items": {
         "type": "object",
-        "required": ["finding_number", "disposition", "reply", "persist", "duplicate_of"],
+        "required": ["finding_number", "resolution", "reply", "persist", "duplicate_of"],
         "additionalProperties": false,
         "properties": {
           "finding_number": {
@@ -31,19 +31,19 @@
             "minimum": 1,
             "description": "The number shown beside the finding in the prompt — 1 for the first, 2 for the second, and so on. A small integer rather than the finding's id, because copying a 16-character hash accurately is clerical work models are poor at and a mistyped one is accepted silently. The id is still printed beside the number for quoting in prose."
           },
-          "disposition": {
+          "resolution": {
             "type": "string",
-            "enum": ["fixed", "skipped", "deferred", "rebutted", "escalated"],
-            "description": "fixed: code changed. skipped: not acting by policy, such as a finding below the pass's min_fix_severity threshold. deferred: real, worth doing, not here — persists to the backlog. rebutted: technically wrong for this codebase. escalated: needs a human decision, applies crossrev/stop and leaves the thread open."
+            "enum": ["fixed", "skipped", "deferred", "disputed", "escalated"],
+            "description": "fixed: code changed. skipped: not acting by policy, such as a finding below the pass's min_fix_severity threshold. deferred: real, worth doing, not here — persists to the backlog. disputed: technically wrong for this codebase. escalated: needs a human decision, applies crossrev/stop and leaves the thread open."
           },
           "reply": {
             "type": "string",
             "minLength": 1,
-            "description": "The in-thread reply body to post. Always required: nothing is silently dropped, and a finding skipped for being below the threshold still gets a one-line reason. Start with the reason, not with the disposition — the orchestrator prepends 'Fixed.', 'Deferred.' and the rest. Earlier replies quoted back to you in the prompt already carry that lead, and repeating it is how a comment ends up reading 'Fixed. Fixed.'"
+            "description": "The in-thread reply body to post. Always required: nothing is silently dropped, and a finding skipped for being below the threshold still gets a one-line reason. Start with the reason, not with the resolution — the orchestrator prepends 'Fixed.', 'Deferred.' and the rest. Earlier replies quoted back to you in the prompt already carry that lead, and repeating it is how a comment ends up reading 'Fixed. Fixed.'"
           },
           "persist": {
             "type": ["object", "null"],
-            "description": "For a deferred defect worth recording outside this PR, the issue to file. Null for every other disposition. Write it to stand alone for someone who never saw the PR.",
+            "description": "For a deferred defect worth recording outside this PR, the issue to file. Null for every other resolution. Write it to stand alone for someone who never saw the PR.",
             "required": ["title", "body"],
             "additionalProperties": false,
             "properties": {

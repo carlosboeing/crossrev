@@ -36,6 +36,43 @@ is "a marker parses beside adjacent HTML comments" "$(state_marker_of "$body2" |
 
 is "a body with no marker yields nothing" "$(state_marker_of "just a comment")" ""
 
+# --- old vocabulary on a marker already on a pull request ------------------
+#
+# `dispositions` became `resolutions` and `rebutted` became `disputed`. A pull
+# request mid-loop when the rename shipped carries the old keys, and every read
+# of them is a `jq` that returns empty rather than failing — so an unmigrated
+# marker would report a pass as having settled nothing, and the loop would drive
+# a finished pass again. Migrated at the decode, which is the one place every
+# read goes through.
+old_marker='{"v":1,"leg":"resolve","pass":1,"state":"complete","dispositions":[
+  {"finding_id":"aaaa000000000001","disposition":"fixed"},
+  {"finding_id":"aaaa000000000002","disposition":"rebutted"}]}'
+old_body="Pass summary.$(state_marker_encode "$old_marker")"
+migrated="$(state_marker_of "$old_body")"
+
+is "an old marker's dispositions are read as resolutions" \
+  "$(jq -r '.resolutions | length' <<<"$migrated")" "2"
+is "and the old key is gone rather than carried alongside" \
+  "$(jq -r 'has("dispositions")' <<<"$migrated")" "false"
+is "a per-finding disposition is read as its resolution" \
+  "$(jq -r '.resolutions[0].resolution' <<<"$migrated")" "fixed"
+is "and rebutted is read as disputed" \
+  "$(jq -r '.resolutions[1].resolution' <<<"$migrated")" "disputed"
+
+# A review marker carries the same word on each finding.
+old_review='{"v":1,"leg":"review","pass":1,"findings":[
+  {"id":"aaaa000000000001","disposition":"rebutted"}]}'
+migrated_review="$(state_marker_of "Findings.$(state_marker_encode "$old_review")")"
+is "a finding's old disposition is migrated too" \
+  "$(jq -r '.findings[0].resolution' <<<"$migrated_review")" "disputed"
+
+# A marker already written in the new vocabulary passes through untouched.
+new_marker='{"v":1,"leg":"resolve","pass":2,"resolutions":[
+  {"finding_id":"aaaa000000000003","resolution":"deferred"}]}'
+is "a marker already using the new keys is left alone" \
+  "$(state_marker_of "Pass.$(state_marker_encode "$new_marker")" | jq -c .)" \
+  "$(jq -c . <<<"$new_marker")"
+
 # --- finding identity ------------------------------------------------------
 a="$(state_finding_id "lib/auth.ts" "Token refresh races with logout" "abcd1234")"
 b="$(state_finding_id "lib/auth.ts" "  token   REFRESH races with logout " "abcd1234")"

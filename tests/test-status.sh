@@ -43,7 +43,7 @@ moved_m() {
   review_m 1 null '[]' started 120 | jq -c '.head_sha = "0000000000000000000000000000000000000000"'
 }
 
-# A resolve marker. $1 pass, $2 dispositions, $3 commit sha, $4 blocked reason.
+# A resolve marker. $1 pass, $2 resolutions, $3 commit sha, $4 blocked reason.
 resolve_m() {
   jq -cn --arg sha "$FIX_HEAD" --argjson ts "$(( $(date +%s) - 60 ))" \
     --argjson p "$1" --argjson d "$2" --arg c "${3:-}" --arg br "${4:-}" '
@@ -52,7 +52,7 @@ resolve_m() {
      model_reported:"m", tokens:2000,
      blocked:($br != ""), blocked_reason:(if $br == "" then null else $br end),
      commit_sha:(if $c == "" then null else $c end),
-     summary:"s", dispositions:$d}'
+     summary:"s", resolutions:$d}'
 }
 
 # A pass a cap refused to start: a comment and a label are not machine-readable,
@@ -67,16 +67,16 @@ declined_m() {
 
 HIGH_LOW='[{"severity":"high"},{"severity":"high"},{"severity":"low"}]'
 ONE_MED='[{"severity":"medium"}]'
-FIXED_SKIPPED='[{"disposition":"fixed"},{"disposition":"fixed"},{"disposition":"skipped"}]'
-ONE_FIXED='[{"disposition":"fixed"}]'
-ESCALATED='[{"disposition":"fixed"},{"disposition":"escalated"}]'
-REBUTTED='[{"disposition":"rebutted"},{"disposition":"skipped"}]'
-REBUTTED_ESCALATED='[{"disposition":"rebutted"},{"disposition":"escalated"}]'
-DEFERRED_TRACKED='[{"disposition":"deferred","crossrev_tracked":"acme/widget#7"}]'
-DEFERRED_UNTRACKED='[{"disposition":"deferred","crossrev_tracked":""}]'
+FIXED_SKIPPED='[{"resolution":"fixed"},{"resolution":"fixed"},{"resolution":"skipped"}]'
+ONE_FIXED='[{"resolution":"fixed"}]'
+ESCALATED='[{"resolution":"fixed"},{"resolution":"escalated"}]'
+DISPUTED='[{"resolution":"disputed"},{"resolution":"skipped"}]'
+DISPUTED_ESCALATED='[{"resolution":"disputed"},{"resolution":"escalated"}]'
+DEFERRED_TRACKED='[{"resolution":"deferred","crossrev_tracked":"acme/widget#7"}]'
+DEFERRED_UNTRACKED='[{"resolution":"deferred","crossrev_tracked":""}]'
 # Claimed fixed, and the commit column of resolve_m left empty: the promise is
 # not in the diff.
-UNPUSHED_FIX='[{"disposition":"fixed"},{"disposition":"rebutted"}]'
+UNPUSHED_FIX='[{"resolution":"fixed"},{"resolution":"disputed"}]'
 
 # $1 names a function to run inside the fixture checkout after the routes are in
 # place and before status runs — a lock file, an extra route — or is empty for
@@ -187,7 +187,7 @@ resolve_started() {
     {v:1, leg:"resolve", pass:1, state:"started", ts:$ts, done_ts:null, run_id:$r,
      head_sha:$sha, harness:"claude", model:"m", effort:"high", endpoint:null,
      model_reported:null, tokens:null, blocked:false, blocked_reason:null,
-     commit_sha:null, summary:"", dispositions:[]}'
+     commit_sha:null, summary:"", resolutions:[]}'
 }
 out="$(status_setup_with lock_alive "$(lbl crossrev/awaiting-resolution crossrev/pass-1)" \
   "$(review_m 1 issues-remain "$HIGH_LOW")" "$(resolve_started)")"
@@ -334,7 +334,7 @@ out="$(status_with "$(lbl crossrev/awaiting-review crossrev/pass-1)" \
 has "a pass below the cap still points at the next review" "$out" "crossrev review --pr 42"
 hasnt "and says nothing about max_passes_per_cycle"        "$out" "max_passes_per_cycle"
 
-# --- a pass whose findings were all rebutted is done, however it is read -----
+# --- a pass whose findings were all disputed is done, however it is read -----
 #
 # Every finding settled without a push, so the head never moved and the
 # reviewer declines a re-run. The pass is over; the only question is whether
@@ -347,10 +347,10 @@ hasnt "and says nothing about max_passes_per_cycle"        "$out" "max_passes_pe
 settled_comments() {
   route_first "api --paginate repos/*/issues/$FIX_PR/comments*" "$(jq -cn \
     --argjson a "$(marker_comment 9001 "$(review_m 1 issues-remain "$ONE_MED")")" \
-    --argjson b "$(marker_comment 9002 "$(resolve_m 1 "$REBUTTED")")" '[$a,$b]')"
+    --argjson b "$(marker_comment 9002 "$(resolve_m 1 "$DISPUTED")")" '[$a,$b]')"
 }
 out="$(status_setup_with settled_comments "$(lbl crossrev/converged crossrev/pass-1)")"
-has "a rebuttal-settled pass reads as converged" "$out" "acme/widget#42 — converged"
+has "a dispute-settled pass reads as converged" "$out" "acme/widget#42 — converged"
 has "and NEXT says there is nothing to run"      "$out" "nothing to run"
 hasnt "rather than recommending a review that declines" "$out" "crossrev review --pr 42"
 
@@ -366,7 +366,7 @@ has "and says why there is nothing to run" "$out" "nothing new to see"
 # halted and converged come from the markers, and this pass converged.
 out="$(status_with '[]' \
   "$(review_m 1 issues-remain "$ONE_MED")" \
-  "$(resolve_m 1 "$REBUTTED")")"
+  "$(resolve_m 1 "$DISPUTED")")"
 has "with no labels the markers give the same answer" "$out" "acme/widget#42 — converged"
 hasnt "not a hand-back to a reviewer that declines"   "$out" "— awaiting review"
 hasnt "nor a resolve leg that was already owed and ran" "$out" "— awaiting resolution"
@@ -405,17 +405,17 @@ has "and NEXT says the claim is not in the diff"   "$out" "pushed no commit"
 out="$(status_with '[]' \
   "$(review_m 1 issues-remain "$ONE_MED")" \
   "$(resolve_m 1 "$UNPUSHED_FIX" d81a3f2abc)")"
-has "the same dispositions with a commit hand back to the reviewer" \
+has "the same resolutions with a commit hand back to the reviewer" \
   "$out" "acme/widget#42 — awaiting review"
 
-# A pass that recorded no dispositions at all, which is what a crossrev old
+# A pass that recorded no resolutions at all, which is what a crossrev old
 # enough not to carry them left behind. Every settle is read off that record, so
 # there is nothing here to call settled — and the green header would be a claim
 # about a pass nobody can check.
 out="$(status_with '[]' \
   "$(review_m 1 issues-remain "$ONE_MED")" \
   "$(resolve_m 1 '[]')")"
-has "a pass with no dispositions recorded halts"    "$out" "acme/widget#42 — halted"
+has "a pass with no resolutions recorded halts"    "$out" "acme/widget#42 — halted"
 hasnt "rather than converging over an unread pass"  "$out" "— converged"
 has "and NEXT offers the re-drive that records them" "$out" "crossrev resolve --pr 42"
 
@@ -427,11 +427,11 @@ out="$(status_with '[]' \
 has "a legacy pass that pushed hands back to the reviewer" \
   "$out" "acme/widget#42 — awaiting review"
 
-# A rebuttal beside an escalation is a halt, and the marker copy agrees.
+# A dispute beside an escalation is a halt, and the marker copy agrees.
 out="$(status_with '[]' \
   "$(review_m 1 issues-remain "$HIGH_LOW")" \
-  "$(resolve_m 1 "$REBUTTED_ESCALATED")")"
-has "a rebuttal beside an escalation reads as halted" "$out" "acme/widget#42 — halted"
+  "$(resolve_m 1 "$DISPUTED_ESCALATED")")"
+has "a dispute beside an escalation reads as halted" "$out" "acme/widget#42 — halted"
 has "and NEXT names the pending decision"             "$out" "1 finding need"
 hasnt "and never claims the loop converged"           "$out" "— converged"
 
@@ -440,7 +440,7 @@ hasnt "and never claims the loop converged"           "$out" "— converged"
 moved_after_settle_comments() {
   route_first "api --paginate repos/*/issues/$FIX_PR/comments*" "$(jq -cn \
     --argjson a "$(marker_comment 9001 "$(review_m 1 issues-remain "$ONE_MED" | jq -c '.head_sha = "0000000000000000000000000000000000000000"')")" \
-    --argjson b "$(marker_comment 9002 "$(resolve_m 1 "$REBUTTED" | jq -c '.head_sha = "0000000000000000000000000000000000000000"')")" '[$a,$b]')"
+    --argjson b "$(marker_comment 9002 "$(resolve_m 1 "$DISPUTED" | jq -c '.head_sha = "0000000000000000000000000000000000000000"')")" '[$a,$b]')"
 }
 out="$(status_setup_with moved_after_settle_comments "$(lbl crossrev/awaiting-review crossrev/pass-1)")"
 has "a revision pushed after the settle is still owed a review" "$out" "crossrev review --pr 42"
@@ -574,7 +574,7 @@ out="$(status_with '[]' \
   "$(review_m 1 issues-remain "$HIGH_LOW")" \
   "$(resolve_m 1 "$ESCALATED")")"
 
-has "an escalated disposition halts the loop even with no labels to read" \
+has "an escalated resolution halts the loop even with no labels to read" \
   "$out" "acme/widget#42 — halted"
 hasnt "and does not hand the loop back to the reviewer as though it were owed" \
   "$out" "— awaiting review"

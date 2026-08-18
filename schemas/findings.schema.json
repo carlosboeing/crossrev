@@ -121,18 +121,18 @@
             "type": "string",
             "enum": [
               "addressed",
-              "credibly-rebutted",
+              "credibly-disputed",
               "still-open",
               "regressed"
             ],
-            "description": "addressed: the code changed and the defect is gone. credibly-rebutted: the reply gave a technical reason this was wrong, and it holds. still-open: nothing changed at that location. regressed: it was fixed and has come back."
+            "description": "addressed: the code changed and the defect is gone. credibly-disputed: the reply gave a technical reason this was wrong, and it holds. still-open: nothing changed at that location. regressed: it was fixed and has come back."
           },
           "note": {
             "type": [
               "string",
               "null"
             ],
-            "description": "One line of reasoning, or null. Expected for credibly-rebutted and regressed, where the classification is a judgement rather than an observation."
+            "description": "One line of reasoning, or null. Expected for credibly-disputed and regressed, where the classification is a judgement rather than an observation."
           }
         }
       }

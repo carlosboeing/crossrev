@@ -82,18 +82,18 @@ prompt_review() {
 
     if [[ "$(jq -r '(. // []) | length' <<<"$prior")" != "0" ]]; then
       printf '## Findings from earlier passes\n\n'
-      printf 'Classify every one of these into `prior` before looking for anything new. Name each by the number in the first column, not by its id. Do not re-raise a dispositioned finding unless the code at that location changed, and never re-raise one carrying `tracked_as`.\n\n'
-      printf '| # | id | path:line | severity | category | pre-existing | title | disposition | tracked_as |\n|---|---|---|---|---|---|---|---|---|\n'
+      printf 'Classify every one of these into `prior` before looking for anything new. Name each by the number in the first column, not by its id. Do not re-raise a settled finding unless the code at that location changed, and never re-raise one carrying `tracked_as`.\n\n'
+      printf '| # | id | path:line | severity | category | pre-existing | title | resolution | tracked_as |\n|---|---|---|---|---|---|---|---|---|\n'
       # The number is the row's position, and it is what `prior[].finding_number`
       # refers to. The id stays in its own column so it can still be quoted in
       # prose — what it is no longer used for is being copied back accurately.
-      jq -r 'to_entries[] | "| \(.key + 1) | \(.value.id) | \(.value.path):\(.value.line) | \(.value.severity) | \(.value.category // "-") | \(if (.value.pre_existing // false) then "yes" else "no" end) | \(.value.title // "-") | \(.value.disposition // "none") | \(.value.tracked_as // "-") |"' <<<"$prior"
+      jq -r 'to_entries[] | "| \(.key + 1) | \(.value.id) | \(.value.path):\(.value.line) | \(.value.severity) | \(.value.category // "-") | \(if (.value.pre_existing // false) then "yes" else "no" end) | \(.value.title // "-") | \(.value.resolution // "none") | \(.value.tracked_as // "-") |"' <<<"$prior"
       printf '\n'
     fi
 
     if [[ "$(jq -r '(. // []) | length' <<<"$threads")" != "0" ]]; then
       printf '## Open review conversation\n\n'
-      printf 'Replies here may include rebuttals. A rebuttal that holds against the code is `credibly-rebutted`, which is a real outcome rather than a concession.\n\n'
+      printf 'Replies here may include disputes. A dispute that holds against the code is `credibly-disputed`, which is a real outcome rather than a concession.\n\n'
       jq -r '.[] | select(.isResolved == false)
              | "### \(.path):\(.line // 0)\n\n" + ([.comments[] | "- **\(.author)**: \(.body | gsub("<!--[^>]*-->";"") | gsub("\n";" "))"] | join("\n")) + "\n"' <<<"$threads"
       printf '\n'
@@ -112,7 +112,7 @@ prompt_review() {
 # prompt_resolve <out_file> <skill_file> <diff_file> <meta_json> <findings_json> <threads_json> <candidates_json>
 #
 # findings_json carries each finding plus its id, the thread it lives in, whether
-# it was already dispositioned in an earlier pass, and `may_fix` — the
+# it was already settled in an earlier pass, and `may_fix` — the
 # orchestrator's own answer to whether code may change for it.
 prompt_resolve() {
   local out="$1" skill="$2" diff="$3" meta="$4" findings="$5" threads="$6" candidates="$7"
@@ -132,8 +132,8 @@ prompt_resolve() {
     printf '## Policy in force this pass\n\n'
     printf -- '- `min_fix_severity` is **%s**. Every finding below carries `may fix: yes` or `may fix: no`, worked out from that threshold — do not re-derive it, and do not argue with it. A `no` finding is still verified and still gets a reply; what it does not get is a change to the code.\n' \
       "$(jq -r '.min_fix_severity // "medium"' <<<"$meta")"
-    printf -- '- A finding you may not fix is `skipped` with a one-line reason, unless it is genuinely wrong, in which case it is `rebutted`. Nothing is silently dropped.\n'
-    printf -- '- Pre-existing findings: verify, then stop. Confirmed real becomes `deferred`; found wrong becomes `rebutted`. Do not fix them here, however easy it looks, whatever their severity.\n'
+    printf -- '- A finding you may not fix is `skipped` with a one-line reason, unless it is genuinely wrong, in which case it is `disputed`. Nothing is silently dropped.\n'
+    printf -- '- Pre-existing findings: verify, then stop. Confirmed real becomes `deferred`; found wrong becomes `disputed`. Do not fix them here, however easy it looks, whatever their severity.\n'
     # The quarantine moved these out of the checkout before this process started,
     # so the resolver cannot read them, verify against them, or fix them — while
     # the diff it is handed still contains their changes, so the reviewer can and
@@ -149,7 +149,7 @@ prompt_resolve() {
     printf '\n'
 
     printf '## The findings to address\n\n'
-    printf 'Return exactly one entry in `dispositions` per finding here — no more, no fewer. Name each one by its number: the heading `### 2.` is `"finding_number": 2`. A finding you cannot evaluate is `escalated` with a reply saying why, not an omission.\n\n'
+    printf 'Return exactly one entry in `resolutions` per finding here — no more, no fewer. Name each one by its number: the heading `### 2.` is `"finding_number": 2`. A finding you cannot evaluate is `escalated` with a reply saying why, not an omission.\n\n'
     # Numbered from the record rather than from the loop's position, so the
     # translation back to ids on the other side reads the same field the model
     # was shown. The id is printed beside the number because a reply often wants
@@ -159,9 +159,9 @@ prompt_resolve() {
       "**\(.title)**\n\n" +
       "- Why it matters: \(.why // "-")\n" +
       "- Suggested fix: \(.fix // "-")\n" +
-      "- May fix: \(if (.may_fix // false) then "yes" else "no — reply and skip, or rebut if it is wrong" end)\n" +
-      (if (.prior_disposition // null) != null
-         then "- **You dispositioned this `\(.prior_disposition)` in an earlier pass.** If it is unchanged and re-raised, escalate rather than re-argue.\n"
+      "- May fix: \(if (.may_fix // false) then "yes" else "no — reply and skip, or dispute if it is wrong" end)\n" +
+      (if (.prior_resolution // null) != null
+         then "- **You settled this `\(.prior_resolution)` in an earlier pass.** If it is unchanged and re-raised, escalate rather than re-argue.\n"
          else "" end) +
       "\n"' <<<"$findings"
 
@@ -191,6 +191,6 @@ prompt_resolve() {
     printf '````diff\n'; diff_number "$diff"; printf '\n````\n\n'
 
     printf '## Output\n\n'
-    printf 'Change code in the working tree for anything you disposition `fixed`. Then return JSON matching the schema you were given, and nothing else. Do not write the marker block or a "Deferred work filed" list into `summary` — the orchestrator appends both, because the issue numbers do not exist yet.\n'
+    printf 'Change code in the working tree for anything you resolution `fixed`. Then return JSON matching the schema you were given, and nothing else. Do not write the marker block or a "Deferred work filed" list into `summary` — the orchestrator appends both, because the issue numbers do not exist yet.\n'
   } >"$out"
 }

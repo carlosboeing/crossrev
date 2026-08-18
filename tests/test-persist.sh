@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# The resolve leg: dispositions, deferral, both dedupe tiers, persist-before-
+# The resolve leg: resolutions, deferral, both dedupe tiers, persist-before-
 # resolve, the commit, and the guards around all of it.
 #
 # A finding that is real but not fixed has to outlive the pull request, and an
@@ -52,10 +52,10 @@ review_marker() {
      findings:[
        {id:$f, path:"app.ts", line:2, side:"RIGHT", severity:"high", category:"correctness", pre_existing:false,
         title:"Unchecked fetch response", why:"w", fix:"check it", anchor:"",
-        thread_id:"T_FIX", disposition:null, tracked_as:null},
+        thread_id:"T_FIX", resolution:null, tracked_as:null},
        {id:$d, path:"app.ts", line:1, side:"RIGHT", severity:"high", category:"maintainability", pre_existing:true,
         title:"Legacy export is untyped", why:"w", fix:"type it", anchor:"",
-        thread_id:"T_DEFER", disposition:null, tracked_as:null}]}'
+        thread_id:"T_DEFER", resolution:null, tracked_as:null}]}'
 }
 
 # What the resolver returns. Findings are named by the number the prompt gave
@@ -70,9 +70,9 @@ resolve_payload() {
   jq -cn --argjson dup "$dup" --argjson p "$p" '
     {blocked:false, blocked_reason:null,
      summary:"Fixed the unchecked response. The untyped legacy export is real but predates this branch.",
-     dispositions:[
-       {finding_number:1, disposition:"fixed", reply:"Added the ok check.", persist:null, duplicate_of:null},
-       {finding_number:2, disposition:"deferred", reply:"Confirmed real, and it predates this branch.",
+     resolutions:[
+       {finding_number:1, resolution:"fixed", reply:"Added the ok check.", persist:null, duplicate_of:null},
+       {finding_number:2, resolution:"deferred", reply:"Confirmed real, and it predates this branch.",
         persist:$p, duplicate_of:$dup}]}'
 }
 
@@ -108,7 +108,7 @@ config_with_default_file_backlog() {
 # Only a deferral, nothing fixed. The case where a commit has to happen for a
 # reason other than a code change.
 #
-# Both findings are still dispositioned. This fixture used to answer only the
+# Both findings are still settled. This fixture used to answer only the
 # deferred one, which is the silent under-coverage the numbering change now
 # rejects: the other finding got no reply, its thread was never resolved, and
 # nothing anywhere said so.
@@ -116,10 +116,10 @@ defer_only_payload() {
   jq -cn '
     {blocked:false, blocked_reason:null,
      summary:"Nothing was fixed here. The untyped legacy export is real but predates this branch.",
-     dispositions:[
-       {finding_number:1, disposition:"skipped", reply:"Left alone this pass.",
+     resolutions:[
+       {finding_number:1, resolution:"skipped", reply:"Left alone this pass.",
         persist:null, duplicate_of:null},
-       {finding_number:2, disposition:"deferred", reply:"Confirmed real, and it predates this branch.",
+       {finding_number:2, resolution:"deferred", reply:"Confirmed real, and it predates this branch.",
         persist:{title:"Legacy export is untyped", body:"Measured before filing."},
         duplicate_of:null}]}'
 }
@@ -365,7 +365,7 @@ has "and the closed candidate was offered for judgement" "$(cat "$PROMPT_LOG")" 
 
 # --- persist before resolve ---------------------------------------------
 #
-# A backlog write that fails must leave the thread open and the disposition
+# A backlog write that fails must leave the thread open and the resolution
 # unrecorded, rather than resolving against a write that did not land.
 fixture_repo "$(config_with_issue_sink)"; stub_reset
 routes_baseline "$(marker_comment 9001 "$(review_marker)" | jq -cs . | payload)"
@@ -390,22 +390,22 @@ addr_claim="$(jq -cn --arg sha "$FIX_HEAD" --argjson ts "$(date +%s)" --arg f "$
    harness:"claude", model:"resolver-model", model_reported:"resolver-model",
    blocked:false, blocked_reason:null, commit_sha:"cafe0000cafe0000cafe0000cafe0000cafe0000",
    summary:"Recovered.",
-   dispositions:[{finding_id:$f, disposition:"fixed", reply:"done", persist:null, duplicate_of:null},
-                 {finding_id:$d, disposition:"rebutted", reply:"not real", persist:null, duplicate_of:null}]}')"
+   resolutions:[{finding_id:$f, resolution:"fixed", reply:"done", persist:null, duplicate_of:null},
+                 {finding_id:$d, resolution:"disputed", reply:"not real", persist:null, duplicate_of:null}]}')"
 comments="$( { marker_comment 9001 "$(review_marker)"; marker_comment 9002 "$addr_claim"; } | jq -cs . | payload)"
 routes_baseline "$comments"
 routes_resolve
 out="$("$CROSSREV" resolve --pr 42 2>&1)"; rc=$?
 
 is  "recovery with a recorded SHA exits clean"        "$rc" "0"
-has "it does not run the resolver again"             "$out" "already recorded its dispositions"
+has "it does not run the resolver again"             "$out" "already recorded its resolutions"
 has "and it does not re-run the fix step"             "$out" "already pushed cafe000"
 is  "so nothing new is committed"                     "$(git log -1 --format=%s)" "feature"
 
 # --- recovery across the wrap_up → summary rename ------------------------
 #
 # The recovery branch above is exactly where an upgrade lands badly: the previous
-# attempt recorded its dispositions under the old field name, so the resolver is
+# attempt recorded its resolutions under the old field name, so the resolver is
 # not run again and there is no second chance to produce the text. Reading only
 # `.summary` there publishes a summary comment with nothing in it, and the marker
 # says the pass completed.
@@ -415,8 +415,8 @@ old_claim="$(jq -cn --arg sha "$FIX_HEAD" --argjson ts "$(date +%s)" --arg f "$I
    harness:"claude", model:"resolver-model", model_reported:"resolver-model",
    blocked:false, blocked_reason:null, commit_sha:"cafe0000cafe0000cafe0000cafe0000cafe0000",
    wrap_up:"Recovered from a marker written before the rename.",
-   dispositions:[{finding_id:$f, disposition:"fixed", reply:"done", persist:null, duplicate_of:null},
-                 {finding_id:$d, disposition:"rebutted", reply:"not real", persist:null, duplicate_of:null}]}')"
+   resolutions:[{finding_id:$f, resolution:"fixed", reply:"done", persist:null, duplicate_of:null},
+                 {finding_id:$d, resolution:"disputed", reply:"not real", persist:null, duplicate_of:null}]}')"
 comments="$( { marker_comment 9001 "$(review_marker)"; marker_comment 9002 "$old_claim"; } | jq -cs . | payload)"
 routes_baseline "$comments"
 routes_resolve
@@ -432,8 +432,8 @@ routes_baseline "$(marker_comment 9001 "$(review_marker)" | jq -cs . | payload)"
 routes_resolve
 escalating="$(jq -cn '
   {blocked:false, blocked_reason:null, summary:"One point needs you.",
-   dispositions:[{finding_number:1, disposition:"escalated", reply:"We disagree twice over.", persist:null, duplicate_of:null},
-                 {finding_number:2, disposition:"rebutted", reply:"Not real here.", persist:null, duplicate_of:null}]}')"
+   resolutions:[{finding_number:1, resolution:"escalated", reply:"We disagree twice over.", persist:null, duplicate_of:null},
+                 {finding_number:2, resolution:"disputed", reply:"Not real here.", persist:null, duplicate_of:null}]}')"
 CROSSREV_RESOLVE_PAYLOAD="$(printf '%s' "$escalating" | payload)"; export CROSSREV_RESOLVE_PAYLOAD
 out="$("$CROSSREV" resolve --pr 42 2>&1)"
 
@@ -448,7 +448,7 @@ is  "the escalated thread is left open"               "$(count 'resolveReviewThr
 # characters off the ones crossrev had handed it. Nothing checked them against the
 # set crossrev itself generated, so four things keyed on a string nothing matched:
 # the reply went to the bottom of the pull request instead of into the thread, no
-# thread resolved, the disposition was written against an id no finding has, and
+# thread resolved, the resolution was written against an id no finding has, and
 # the summary table fell back to printing the raw hash. All four degraded and
 # none said so, which is worse than failing outright — the next pass reads the
 # record.
@@ -473,9 +473,9 @@ has "and the model is told which one to return"       "$prompt" "\`\"finding_num
 
 # The round trip: numbers in, ids out. Everything downstream still keys on the
 # id, which is why no live marker needs migrating.
-has "a numbered disposition reaches the right thread" "$(calls)" "pulls/42/comments/5000/replies"
+has "a numbered resolution reaches the right thread" "$(calls)" "pulls/42/comments/5000/replies"
 is  "both threads are settled by number"              "$(count 'resolveReviewThread')" "2"
-has "and the marker records the disposition against the finding's id" \
+has "and the marker records the resolution against the finding's id" \
   "$(calls)" "\"id\":\"$ID_FIX\",\"path\":\"app.ts\""
 hasnt "the number itself is not stored, only used"    "$(calls)" "finding_number"
 
@@ -486,8 +486,8 @@ routes_baseline "$(marker_comment 9001 "$(review_marker)" | jq -cs . | payload)"
 routes_resolve
 out_of_range="$(jq -cn '
   {blocked:false, blocked_reason:null, summary:"s",
-   dispositions:[{finding_number:1, disposition:"fixed", reply:"r", persist:null, duplicate_of:null},
-                 {finding_number:7, disposition:"fixed", reply:"r", persist:null, duplicate_of:null}]}')"
+   resolutions:[{finding_number:1, resolution:"fixed", reply:"r", persist:null, duplicate_of:null},
+                 {finding_number:7, resolution:"fixed", reply:"r", persist:null, duplicate_of:null}]}')"
 CROSSREV_RESOLVE_PAYLOAD="$(printf '%s' "$out_of_range" | payload)"; export CROSSREV_RESOLVE_PAYLOAD
 err="$("$CROSSREV" resolve --pr 42 2>&1 >/dev/null)"; rc=$?
 
@@ -521,7 +521,7 @@ unset CROSSREV_RESOLVE_PAYLOAD_2 CROSSREV_STUB_COUNT
 # while its edits are not. Left in place, the second resolver reads a tree the
 # first one already changed — it applies a non-idempotent fix twice, or finds a
 # finding already fixed and calls it skipped — and `git add -A` commits whatever
-# is sitting there, against dispositions that describe neither attempt.
+# is sitting there, against resolutions that describe neither attempt.
 fixture_repo "$(config_with_issue_sink)"; stub_reset
 routes_baseline "$(marker_comment 9001 "$(review_marker)" | jq -cs . | payload)"
 routes_resolve
@@ -546,10 +546,10 @@ unset CROSSREV_RESOLVE_PAYLOAD_2 CROSSREV_STUB_COUNT CROSSREV_RESOLVE_EDIT
 # stage every unstaged change the run happened to find. crossrev is routinely run
 # in a checkout somebody is working in, and a pass that then fixes nothing hands
 # that checkout back with a staging area crossrev invented.
-both_rebutted="$(jq -cn '
+both_disputed="$(jq -cn '
   {blocked:false, blocked_reason:null, summary:"Neither holds up in this codebase.",
-   dispositions:[{finding_number:1, disposition:"rebutted", reply:"Not real here.", persist:null, duplicate_of:null},
-                 {finding_number:2, disposition:"rebutted", reply:"Not real here either.", persist:null, duplicate_of:null}]}')"
+   resolutions:[{finding_number:1, resolution:"disputed", reply:"Not real here.", persist:null, duplicate_of:null},
+                 {finding_number:2, resolution:"disputed", reply:"Not real here either.", persist:null, duplicate_of:null}]}')"
 
 fixture_repo "$(config_with_issue_sink)"; stub_reset
 printf 'export const staged = 1\n' >staged.ts; git add staged.ts
@@ -558,7 +558,7 @@ before_status="$(git status --porcelain)"
 routes_baseline "$(marker_comment 9001 "$(review_marker)" | jq -cs . | payload)"
 routes_resolve
 CROSSREV_RESOLVE_PAYLOAD="$(printf '%s' "$out_of_range" | payload)"; export CROSSREV_RESOLVE_PAYLOAD
-CROSSREV_RESOLVE_PAYLOAD_2="$(printf '%s' "$both_rebutted" | payload)"; export CROSSREV_RESOLVE_PAYLOAD_2
+CROSSREV_RESOLVE_PAYLOAD_2="$(printf '%s' "$both_disputed" | payload)"; export CROSSREV_RESOLVE_PAYLOAD_2
 CROSSREV_STUB_COUNT="$(mktemp)"; export CROSSREV_STUB_COUNT
 out="$("$CROSSREV" resolve --pr 42 2>&1)"; rc=$?
 
@@ -574,12 +574,12 @@ unset CROSSREV_RESOLVE_PAYLOAD_2 CROSSREV_STUB_COUNT
 # The retry restores; the exhausted budget used not to, which left the last
 # rejected attempt's edits in the checkout with nothing on the pull request to
 # say they were there. The next run captures them as its own baseline and commits
-# them under dispositions describing neither attempt — the same divergence, one
+# them under resolutions describing neither attempt — the same divergence, one
 # run later.
 twice_over="$(jq -cn '
   {blocked:false, blocked_reason:null, summary:"s",
-   dispositions:[{finding_number:1, disposition:"fixed", reply:"r", persist:null, duplicate_of:null},
-                 {finding_number:1, disposition:"fixed", reply:"r", persist:null, duplicate_of:null}]}')"
+   resolutions:[{finding_number:1, resolution:"fixed", reply:"r", persist:null, duplicate_of:null},
+                 {finding_number:1, resolution:"fixed", reply:"r", persist:null, duplicate_of:null}]}')"
 
 fixture_repo "$(config_with_issue_sink)"; stub_reset
 printf 'export const staged = 1\n' >staged.ts; git add staged.ts
@@ -671,8 +671,8 @@ pre_numbering="$(jq -cn --arg sha "$FIX_HEAD" --argjson ts "$(date +%s)" --arg f
    harness:"claude", model:"resolver-model", model_reported:"resolver-model",
    blocked:false, blocked_reason:null, commit_sha:"cafe0000cafe0000cafe0000cafe0000cafe0000",
    summary:"Recorded before findings were numbered.",
-   dispositions:[{finding_id:$f, disposition:"fixed", reply:"done", persist:null, duplicate_of:null},
-                 {finding_id:$d, disposition:"rebutted", reply:"not real", persist:null, duplicate_of:null}]}')"
+   resolutions:[{finding_id:$f, resolution:"fixed", reply:"done", persist:null, duplicate_of:null},
+                 {finding_id:$d, resolution:"disputed", reply:"not real", persist:null, duplicate_of:null}]}')"
 comments="$( { marker_comment 9001 "$(review_marker)"; marker_comment 9002 "$pre_numbering"; } | jq -cs . | payload)"
 routes_baseline "$comments"
 routes_resolve
@@ -680,7 +680,7 @@ out="$("$CROSSREV" resolve --pr 42 2>&1)"; rc=$?
 
 is  "a claim recorded against ids still recovers"     "$rc" "0"
 has "its text survives into the summary comment"      "$(calls)" "Recorded before findings were numbered."
-is  "and its dispositions still reach their threads"  "$(count 'resolveReviewThread')" "2"
+is  "and its resolutions still reach their threads"  "$(count 'resolveReviewThread')" "2"
 
 # --- the divergence guard, layer two ----------------------------------
 #

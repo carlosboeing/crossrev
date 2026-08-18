@@ -37,10 +37,10 @@ make_claim() {
      verdict:"issues-remain",
      findings:[{id:$id, path:"app.ts", line:2, side:"RIGHT", severity:"high", category:"correctness", pre_existing:false,
                 title:"Unchecked fetch response", why:"w", fix:"f", anchor:"",
-                thread_id:null, disposition:null, tracked_as:null},
+                thread_id:null, resolution:null, tracked_as:null},
                {id:"other000", path:"app.ts", line:2, side:"RIGHT", severity:"low", category:"maintainability", pre_existing:false,
                 title:"Missing return type", why:"w", fix:"f", anchor:"",
-                thread_id:null, disposition:null, tracked_as:null}]}'
+                thread_id:null, resolution:null, tracked_as:null}]}'
 }
 
 # --- a clean first pass ----------------------------------------------------

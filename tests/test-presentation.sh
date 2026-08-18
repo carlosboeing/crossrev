@@ -53,7 +53,7 @@ run_review() {
 }
 
 # A completed review marker carrying the same three findings, so the resolve leg
-# has something to disposition.
+# has something to resolution.
 review_marker() {
   jq -cn --arg sha "$FIX_HEAD" --argjson ts "$(( $(date +%s) - 192 ))" \
     --arg s "$ID_SEC" --arg p "$ID_PRE" '
@@ -63,10 +63,10 @@ review_marker() {
      findings:[
        {id:$s, path:"app.ts", line:2, side:"RIGHT", severity:"high", category:"security",
         pre_existing:false, title:"Token compared with == instead of a constant-time check",
-        why:"w", fix:"f", anchor:"", thread_id:"T_SEC", disposition:null, tracked_as:null},
+        why:"w", fix:"f", anchor:"", thread_id:"T_SEC", resolution:null, tracked_as:null},
        {id:$p, path:"app.ts", line:1, side:"RIGHT", severity:"medium", category:"correctness",
         pre_existing:true, title:"Off-by-one in the drain loop | second clause",
-        why:"w", fix:"f", anchor:"", thread_id:"T_PRE", disposition:null, tracked_as:null}]}'
+        why:"w", fix:"f", anchor:"", thread_id:"T_PRE", resolution:null, tracked_as:null}]}'
 }
 
 # Findings are named by the number the prompt gave them, in the order the review
@@ -75,10 +75,10 @@ resolve_payload() {
   jq -cn '
     {blocked:false, blocked_reason:null,
      summary:"Replaced the comparison. The drain loop predates this branch.",
-     dispositions:[
-       {finding_number:1, disposition:"fixed", reply:"Replaced with a constant-time compare.",
+     resolutions:[
+       {finding_number:1, resolution:"fixed", reply:"Replaced with a constant-time compare.",
         persist:null, duplicate_of:null},
-       {finding_number:2, disposition:"skipped", reply:"Pre-existing, so it is reported not fixed.",
+       {finding_number:2, resolution:"skipped", reply:"Pre-existing, so it is reported not fixed.",
         persist:null, duplicate_of:null}]}'
 }
 
@@ -189,24 +189,24 @@ hasnt "the path is not demoted to a hover title"      "$review_calls" '#L2 "app.
 # Checked through a real leg rather than against the helper alone, because the
 # defect was never in the helper: it was in nothing owning the opening.
 run_resolve "$(resolve_payload | jq -c '
-  .dispositions[0].reply = "**Fixed.** Replaced with a constant-time compare."
-  | .dispositions[1].reply = "Skipped. Pre-existing, so it is reported not fixed."')"
+  .resolutions[0].reply = "**Fixed.** Replaced with a constant-time compare."
+  | .resolutions[1].reply = "Skipped. Pre-existing, so it is reported not fixed."')"
 lead_calls="$(calls)"
 
 hasnt "a lead the model wrote itself is not stacked on crossrev's" \
   "$lead_calls" "**Fixed.** **Fixed.**"
 has   "crossrev's own lead is what survives"           "$lead_calls" "**Fixed.** Replaced with a constant-time compare."
 # The model's own word is dropped whether or not it was bolded, and whether or
-# not it agreed with the disposition the orchestrator settled on.
+# not it agreed with the resolution the orchestrator settled on.
 hasnt "an unbolded lead is dropped too"               "$lead_calls" "**Skipped.** Skipped."
-has   "and the disposition crossrev decided is the one shown" \
+has   "and the resolution crossrev decided is the one shown" \
   "$lead_calls" "**Skipped.** Pre-existing, so it is reported not fixed."
 
 # A reply that merely begins with the word is left alone. The trailing period is
 # what separates a lead from a sentence, and without it "Fixed the comparison"
 # would lose its first word.
 run_resolve "$(resolve_payload | jq -c '
-  .dispositions[0].reply = "Fixed the comparison so it is constant-time now."')"
+  .resolutions[0].reply = "Fixed the comparison so it is constant-time now."')"
 has "a reply that opens with the word but not the lead keeps it" \
   "$(calls)" "**Fixed.** Fixed the comparison so it is constant-time now."
 
@@ -214,7 +214,7 @@ run_resolve "$(resolve_payload)"
 resolve_calls="$(calls)"
 
 has "the resolve table names all four columns" \
-  "$resolve_calls" "| Severity | Finding | Location | Disposition |"
+  "$resolve_calls" "| Severity | Finding | Location | Resolution |"
 has "and names a finding by its title, with severity beside it" \
   "$resolve_calls" "| 🔴&nbsp;High | Token compared with == instead of a constant-time check"
 # The id is a correlation key for crossrev's own state. It lives in a marker that
@@ -299,7 +299,7 @@ run_resolve "$(resolve_payload)"
 resolve_body="$(last_body 9002)"
 is  "a normal resolve pass carries exactly one alert" "$(alerts_in "$resolve_body")" "1"
 has "and it is the blue one"                          "$resolve_body" "> [!NOTE]"
-has "carrying the disposition counts"                 "$resolve_body" "**1 fixed, 1 skipped.**"
+has "carrying the resolution counts"                 "$resolve_body" "**1 fixed, 1 skipped.**"
 
 # Blocked halts, and it needs the amber alert rather than the blue one — a reader
 # has to be able to tell a pass that finished from one that stopped without

@@ -1,6 +1,6 @@
 # pr-resolve
 
-The resolve leg of [CrossRev](../../). Verifies each review finding against the codebase, fixes what's real, pushes back on what isn't, and returns dispositions and reply text as schema-constrained JSON.
+The resolve leg of [CrossRev](../../). Verifies each review finding against the codebase, fixes what's real, pushes back on what isn't, and returns resolutions and reply text as schema-constrained JSON.
 
 Forked from Superpowers' `receiving-code-review`, which already encodes the required stance: verify before implementing, push back with technical reasoning when the reviewer lacks context, no performative agreement, reply in-thread rather than at top level.
 
@@ -8,13 +8,13 @@ Forked from Superpowers' `receiving-code-review`, which already encodes the requ
 
 | Change | Why |
 |---|---|
-| Five dispositions with explicit thread rules | The orchestrator needs a machine-readable decision per finding, not prose |
-| Every disposition carries a reply | A skipped finding with no reply reads as an oversight, and the next pass raises it again |
+| Five resolutions with explicit thread rules | The orchestrator needs a machine-readable decision per finding, not prose |
+| Every resolution carries a reply | A skipped finding with no reply reads as an oversight, and the next pass raises it again |
 | Policy governs what happens *after* verification, never whether it happens | `pre_existing` means "don't fix this here", not "don't look at it" — otherwise the backlog fills with one model's unchecked guesses |
 | A hard rule against fixing `pre_existing` findings | That boolean exists to stop the diff growing without limit, and a helpful fix defeats it. The rule most likely to be broken by good intentions |
 | Deferral intent — an issue title and body | An unresolved thread on a merged PR is visible in no GitHub view, so deferred work needs somewhere durable |
 | Duplicate judgement over supplied candidates | Stops CrossRev filing a second issue for something you already filed by hand |
-| Re-raised rebuttals escalate rather than re-argue | Two models disagreeing twice about the same line is a human's decision |
+| Re-raised disputes escalate rather than re-argue | Two models disagreeing twice about the same line is a human's decision |
 | The skill makes no GitHub call | It holds no credential. Every reply, resolution, label, commit, push and filing is the orchestrator acting on returned intent |
 
 ## Intent, not action
