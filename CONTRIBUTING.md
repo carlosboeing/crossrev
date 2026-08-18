@@ -30,7 +30,7 @@ missing — `brew install yq shellcheck`.
 ## Tests
 
 ```bash
-bash tests/run.sh      # 835 offline assertions, no network, no model, no PR
+bash tests/run.sh      # the offline suite: no network, no model, no PR
 bash scripts/lint.sh   # bash -n syntax plus shellcheck -S warning
 ```
 
