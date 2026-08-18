@@ -30,10 +30,10 @@ no_threads() { route '*reviewThreads*' "$(threads_response)"; }
 # How a resolve pass ended, as the fields the loop-end decision reads. The
 # default is the ordinary pass: fixes claimed, and a commit pushed carrying
 # them, which hands the loop back to the reviewer.
-CYCLE_END_PUSHED='"blocked":false,"commit_sha":"abc123","dispositions":[{"disposition":"fixed"}]'
-CYCLE_END_UNFILED='"blocked":false,"commit_sha":null,"dispositions":[{"disposition":"deferred","crossrev_tracked":""}]'
-CYCLE_END_UNPUSHED='"blocked":false,"commit_sha":null,"dispositions":[{"disposition":"fixed"}]'
-CYCLE_END_SETTLED='"blocked":false,"commit_sha":null,"dispositions":[{"disposition":"rebutted"}]'
+CYCLE_END_PUSHED='"blocked":false,"commit_sha":"abc123","resolutions":[{"resolution":"fixed"}]'
+CYCLE_END_UNFILED='"blocked":false,"commit_sha":null,"resolutions":[{"resolution":"deferred","crossrev_tracked":""}]'
+CYCLE_END_UNPUSHED='"blocked":false,"commit_sha":null,"resolutions":[{"resolution":"fixed"}]'
+CYCLE_END_SETTLED='"blocked":false,"commit_sha":null,"resolutions":[{"resolution":"disputed"}]'
 
 # Exercise the cycle driver without replacing the behavior under test with a
 # mock. The real cmd_cycle owns argument classification and its loop boundary;
@@ -504,8 +504,8 @@ policy_resolve_payload() {
   jq -cn '
     {blocked:false, blocked_reason:null,
      summary:"Fixed error handling.",
-     dispositions:[
-       {finding_number:1, disposition:"fixed", reply:"Added try/catch error check.",
+     resolutions:[
+       {finding_number:1, resolution:"fixed", reply:"Added try/catch error check.",
         persist:null, duplicate_of:null}]}'
 }
 
@@ -833,7 +833,7 @@ remaining_marker="$(jq -cn --arg sha "$FIX_HEAD" --argjson ts "$(date +%s)" '
    findings:[{id:"cccc000000000001", path:"app.ts", line:2, side:"RIGHT",
               severity:"high", category:"correctness", pre_existing:false, title:"Unchecked fetch response", why:"w",
               fix:"check it", anchor:"", thread_id:"T_ONE",
-              disposition:null, tracked_as:null}]}')"
+              resolution:null, tracked_as:null}]}')"
 routes_baseline "$(marker_comment 9001 "$remaining_marker" | jq -cs . | payload)"
 no_threads
 out="$("$CROSSREV" cycle --pr 42 2>&1)" || true

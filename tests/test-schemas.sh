@@ -121,7 +121,7 @@ rejects "a null pre_existing is rejected"     "$(_finding high correctness null)
 _resolve_payload() {
   jq -cn --arg field "${1:-summary}" '
     {blocked:false, blocked_reason:null,
-     dispositions:[{finding_number:1, disposition:"fixed", reply:"r",
+     resolutions:[{finding_number:1, resolution:"fixed", reply:"r",
                     persist:null, duplicate_of:null}]}
     + {($field): "What happened this pass."}'
 }
@@ -142,7 +142,7 @@ fi
 #
 # A finding is named by the number it was given in the prompt, so the harness's
 # own schema enforcement rules out the mistyped identifier that corrupted three
-# dispositions on PR 5. What the schema cannot express is a per-run range, a
+# resolutions on PR 5. What the schema cannot express is a per-run range, a
 # duplicate, or an omission, and those are checked here.
 #
 # The exit code is part of the contract. 1 is a shape problem, which on a
@@ -154,13 +154,13 @@ fi
 # Three findings were supplied, and two issues were offered as candidates.
 _expect='{"findings":3,"candidates":[19,31]}'
 
-_dispositions() {
+_resolutions() {
   jq -cn --argjson d "$1" \
-    '{blocked:false, blocked_reason:null, summary:"What happened.", dispositions:$d}'
+    '{blocked:false, blocked_reason:null, summary:"What happened.", resolutions:$d}'
 }
 _d() {   # number, and an optional duplicate_of
   jq -cn --argjson n "$1" --argjson dup "${2:-null}" \
-    '{finding_number:$n, disposition:"fixed", reply:"r", persist:null, duplicate_of:$dup}'
+    '{finding_number:$n, resolution:"fixed", reply:"r", persist:null, duplicate_of:$dup}'
 }
 _all_three() { jq -cs . <<<"$(_d 1)
 $(_d 2)
@@ -174,66 +174,87 @@ rc() {
   else notok "$what" "exit $got, wanted $want"; fi
 }
 
-rc "three numbered dispositions for three findings pass" 0 \
-  "$(_dispositions "$(_all_three)")" "$_expect"
+rc "three numbered resolutions for three findings pass" 0 \
+  "$(_resolutions "$(_all_three)")" "$_expect"
 
 # The failure this whole change exists for. A hash could be mistyped into
 # another valid-looking hash; a number outside the range cannot hide.
 rc "a finding number past the end is rejected" 2 \
-  "$(_dispositions "$(jq -cs . <<<"$(_d 1)
+  "$(_resolutions "$(jq -cs . <<<"$(_d 1)
 $(_d 2)
 $(_d 7)")")" "$_expect"
 rc "and a number below one is rejected" 2 \
-  "$(_dispositions "$(jq -cs . <<<"$(_d 1)
+  "$(_resolutions "$(jq -cs . <<<"$(_d 1)
 $(_d 2)
 $(_d 0)")")" "$_expect"
-rc "the same finding dispositioned twice is rejected" 2 \
-  "$(_dispositions "$(jq -cs . <<<"$(_d 1)
+rc "the same finding settled twice is rejected" 2 \
+  "$(_resolutions "$(jq -cs . <<<"$(_d 1)
 $(_d 2)
 $(_d 2)")")" "$_expect"
 # An omission is silent today: that finding gets no reply, its thread is never
-# resolved, and the marker records it as undispositioned.
-rc "a finding with no disposition at all is rejected" 2 \
-  "$(_dispositions "$(jq -cs . <<<"$(_d 1)
+# resolved, and the marker records it as unsettled.
+rc "a finding with no resolution at all is rejected" 2 \
+  "$(_resolutions "$(jq -cs . <<<"$(_d 1)
 $(_d 2)")")" "$_expect"
 
 # Shape, not drift. A harness that constrains output to the schema cannot emit
 # either of these, so both mean something below the model is wrong.
 rc "the old finding_id field is a shape failure, not a semantic one" 1 \
-  "$(_dispositions '[{"finding_id":"9e4f9ee1cbe25125","disposition":"fixed","reply":"r","persist":null,"duplicate_of":null}]')" \
+  "$(_resolutions '[{"finding_id":"9e4f9ee1cbe25125","resolution":"fixed","reply":"r","persist":null,"duplicate_of":null}]')" \
   "$_expect"
 rc "and so is a finding number that is not a whole number" 1 \
-  "$(_dispositions '[{"finding_number":1.5,"disposition":"fixed","reply":"r","persist":null,"duplicate_of":null}]')" \
+  "$(_resolutions '[{"finding_number":1.5,"resolution":"fixed","reply":"r","persist":null,"duplicate_of":null}]')" \
   "$_expect"
+
+# The commit subject becomes permanent repository history, and `jq -r` reads a
+# number, a boolean or an empty array out of the payload as a plausible-looking
+# string. On the fenced-JSON path this check is the only thing between one of
+# those and `git log`.
+rc "a commit subject that is not a string is a shape failure" 1 \
+  "$(_resolutions "$(_all_three)" | jq -c '.commit_subject = 3')" "$_expect"
+rc "and an empty array is caught rather than committed as \"[]\"" 1 \
+  "$(_resolutions "$(_all_three)" | jq -c '.commit_subject = []')" "$_expect"
+rc "a null subject passes, because a pass may fix nothing" 0 \
+  "$(_resolutions "$(_all_three)" | jq -c '.commit_subject = null')" "$_expect"
+rc "so does one the model wrote" 0 \
+  "$(_resolutions "$(_all_three)" | jq -c '.commit_subject = "fix(api): check the response status"')" \
+  "$_expect"
+# Typed rather than required, deliberately, and this is the case that says so.
+# The schema lists commit_subject under "required" because one harness enforces
+# strict mode; a payload without it is a resolver that wrote no subject, and the
+# commit carries the generic one. Failing the pass over a missing message would
+# cost the fix to save the description of it.
+rc "an omitted subject is accepted, and the commit goes out generic" 0 \
+  "$(_resolutions "$(_all_three)")" "$_expect"
 
 # duplicate_of names an issue the orchestrator retrieved. Inventing one makes
 # crossrev comment on an unrelated issue and resolve the thread against it.
 rc "a duplicate_of naming a supplied candidate passes" 0 \
-  "$(_dispositions "$(jq -cs . <<<"$(_d 1 19)
+  "$(_resolutions "$(jq -cs . <<<"$(_d 1 19)
 $(_d 2)
 $(_d 3)")")" "$_expect"
 # Candidates are supplied per finding, but the check is against all of them.
 # Per-finding would reject a model that correctly noticed one issue covers two
 # findings, and inventing a number is the failure being designed out.
 rc "as does one that names a candidate offered for a different finding" 0 \
-  "$(_dispositions "$(jq -cs . <<<"$(_d 1)
+  "$(_resolutions "$(jq -cs . <<<"$(_d 1)
 $(_d 2 31)
 $(_d 3)")")" "$_expect"
 rc "a duplicate_of naming an issue nobody offered is rejected" 2 \
-  "$(_dispositions "$(jq -cs . <<<"$(_d 1 404)
+  "$(_resolutions "$(jq -cs . <<<"$(_d 1 404)
 $(_d 2)
 $(_d 3)")")" "$_expect"
 # A repository-backlog destination is offered no candidates at all, and yet duplicate_of
 # still becomes the "tracked as" line on a deferred finding's reply.
 rc "and with no candidates offered, any duplicate_of is rejected" 2 \
-  "$(_dispositions "$(_all_three)" | jq -c '.dispositions[0].duplicate_of = 19')" \
+  "$(_resolutions "$(_all_three)" | jq -c '.resolutions[0].duplicate_of = 19')" \
   '{"findings":3,"candidates":[]}'
 
 # Called without expectations — as the fenced-JSON fallback path and the shape
 # tests above do — it checks shape and stops. The semantic checks need something
 # to compare against, and inventing one would be worse than not running them.
 rc "with nothing to compare against, only shape is checked" 0 \
-  "$(_dispositions "$(jq -cs . <<<"$(_d 9)")")"
+  "$(_resolutions "$(jq -cs . <<<"$(_d 9)")")"
 
 # ---------------------------------------------------------------------------
 # The review leg carries no hashes either

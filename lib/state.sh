@@ -63,11 +63,37 @@ _state_comments() {
 }
 
 # Pull the marker object out of a comment body, or nothing.
+#
+# Old vocabulary is migrated here, at the single point every marker is decoded
+# through, rather than at each of the dozen places one is read. A read that
+# forgot the fallback would not fail loudly: it would report a pass as having
+# settled nothing, which is how a finished pull request gets driven again.
+#
+# `dispositions` became `resolutions` and `rebutted` became `disputed`, because
+# both were borrowed vocabulary — one from records management, one from
+# argumentation — for a field bug trackers have called a resolution for decades.
+# Reading the old keys is one jq clause; the new key is the only one written.
 state_marker_of() {
   local body="$1"
   printf '%s' "$body" \
     | sed -n 's/.*<!-- crossrev: \(.*\) -->.*/\1/p' \
-    | tr -d '\n' | jq -c . 2>/dev/null
+    | tr -d '\n' \
+    | jq -c '
+        def rename($from; $to):
+          if has($from) and (has($to) | not)
+          then .[$to] = .[$from] | del(.[$from]) else . end;
+        rename("dispositions"; "resolutions")
+        | if (.resolutions | type) == "array" then
+            .resolutions = [ .resolutions[]
+              | rename("disposition"; "resolution")
+              | if .resolution == "rebutted" then .resolution = "disputed" else . end ]
+          else . end
+        | if (.findings | type) == "array" then
+            .findings = [ .findings[]
+              | rename("disposition"; "resolution")
+              | if .resolution == "rebutted" then .resolution = "disputed" else . end ]
+          else . end
+      ' 2>/dev/null
 }
 
 # Every trusted marker on the PR, as a JSON array in chronological order.

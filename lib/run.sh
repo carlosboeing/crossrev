@@ -293,8 +293,13 @@ run_finding_label() {
 #
 # A newline in a heading ends the heading, and a newline in a table cell ends the
 # table — both silently, because everything around them still renders.
+#
+# Every other control character goes with the newline, because a lone carriage
+# return is a line ending by CommonMark's own definition and ends the row just as
+# quietly, and an escape sequence renders nowhere useful. `_commit_line` strips
+# the same span on the way into a commit body, for the same reason.
 _one_line() {
-  printf '%s' "$1" | tr '\n' ' '
+  printf '%s' "$1" | tr '\000-\037\177' ' '
 }
 
 # Text that is about to land in a Markdown table cell.
@@ -417,7 +422,7 @@ _nullable() { [[ "$1" == "null" ]] && printf '' || printf '%s' "$1"; }
 # answer is thrown away — its edits are not. So a retry that reuses the tree
 # reads one the discarded attempt already changed: it applies a non-idempotent
 # fix twice, or finds a finding already fixed and calls it skipped, and
-# `git add -A` commits whatever is sitting there either way. The dispositions
+# `git add -A` commits whatever is sitting there either way. The resolutions
 # that get recorded then describe a tree nobody produced, which is the same
 # class of silent divergence between record and reality that the numbering
 # above exists to remove.
@@ -491,7 +496,7 @@ _run_retry_reset() {
 # A retry restores; an exhausted budget used not to, which left the last rejected
 # attempt's edits sitting in the checkout with nothing on the pull request to say
 # so. The next run then captures them as its own baseline and commits them under
-# dispositions that describe neither attempt — the divergence the capture exists
+# resolutions that describe neither attempt — the divergence the capture exists
 # to prevent, arriving one run later instead of one attempt later.
 #
 # A restore that will not apply is warned about rather than hidden: the leg is
@@ -811,7 +816,7 @@ Reading the diff and any earlier review threads. This comment becomes the pass s
       anchor="$(state_anchor "$(jq -r .path <<<"$f")" "$(jq -r .line <<<"$f")")"
       id="$(state_finding_id "$(jq -r .path <<<"$f")" "$(jq -r .title <<<"$f")" "$anchor")"
       enriched="$(jq -c --argjson f "$f" --arg id "$id" --arg a "$anchor" \
-        '. + [$f + {id:$id, anchor:$a, thread_id:null, disposition:null, tracked_as:null}]' \
+        '. + [$f + {id:$id, anchor:$a, thread_id:null, root_comment_id:null, resolution:null, tracked_as:null}]' \
         <<<"$enriched")"
     done
     findings="$enriched"
@@ -893,10 +898,19 @@ Findings recorded; posting them now.$(state_marker_encode "$(jq -c 'del(.comment
 
   # Thread ids come from GraphQL, matched by the finding marker in each comment
   # body rather than by path and line, so a moved line does not lose the link.
+  #
+  # `root_comment_id` is carried beside `thread_id` because the two answer
+  # different questions and only one of them is a URL. `thread_id` is the GraphQL
+  # node the resolve leg resolves the thread through; `root_comment_id` is the
+  # numeric id a `#r<id>` anchor is built from, which is how a person reaches the
+  # conversation from a table or a commit message.
   local threads_now
   threads_now="$(gh_review_threads "$CTX_REPO" "$CTX_PR")"
   findings="$(jq -c --argjson t "$threads_now" '
-    [ .[] as $f | $f + {thread_id: ([$t[] | select(.finding_ids | index($f.id)) | .id] | first // $f.thread_id)} ]' \
+    [ .[] as $f
+      | [$t[] | select(.finding_ids | index($f.id))] | first as $m
+      | $f + { thread_id: ($m.id // $f.thread_id),
+               root_comment_id: ($m.root_comment_id // $f.root_comment_id) } ]' \
     <<<"$findings")"
   marker="$(jq -c --argjson f "$findings" '.findings = $f' <<<"$marker")"
 
@@ -948,7 +962,7 @@ Findings recorded; posting them now.$(state_marker_encode "$(jq -c 'del(.comment
 # Called before the finding's id is derived, and that ordering is load-bearing.
 # `state_finding_id` hashes a window of lines around the anchor, so a line
 # corrected after the id was computed would be a different finding to the next
-# pass, and every cross-pass disposition would come apart.
+# pass, and every cross-pass resolution would come apart.
 #
 # A line the diff cannot place is left exactly as the reviewer wrote it. Posting
 # still attempts it, because the diff is not the only reason GitHub refuses one,
@@ -1132,7 +1146,7 @@ _run_details() {
 _findings_table() {
   local findings="$1" sha="$2" n i f sev kind pre path line
   n="$(jq 'length' <<<"$findings")"
-  printf '| Severity | Category | Where | What |\n|---|---|---|---|\n'
+  printf '| Severity | Category | Finding | Location |\n|---|---|---|---|\n'
   for (( i = 0; i < n; i++ )); do
     f="$(jq -c ".[$i]" <<<"$findings")"
     sev="$(jq -r '.severity // "?"' <<<"$f")"
@@ -1145,15 +1159,16 @@ _findings_table() {
     # and an ordinary space is a break opportunity — the pair wraps onto two
     # lines and the emoji ends up orphaned above its own label.
     #
-    # The cell shows the basename and links to the line, so the two columns that
-    # carry meaning get the width instead of a repository path nobody reads in
-    # full. The full path survives as the link's title, which is what a hover
-    # shows, so two files sharing a name are still tellable apart.
-    printf '| %s&nbsp;%s | %s&nbsp;%s | [`%s:%s`](%s "%s:%s") | %s%s |\n' \
+    # The finding comes before its location, because the reading order is
+    # severity, then what was found, then where it is. The location has a column
+    # of its own and carries the full path rather than a basename with the path
+    # hidden in a hover title, so two files sharing a name are tellable apart
+    # without one.
+    printf '| %s&nbsp;%s | %s&nbsp;%s | %s%s | %s |\n' \
       "$(run_severity_emoji "$sev")" "$(_ucfirst "$sev")" \
       "$(run_category_emoji "$kind")" "$(_ucfirst "$kind")" \
-      "${path##*/}" "$line" "$(_blob_url "$sha" "$path" "$line")" "$path" "$line" \
-      "$(_md_cell "$(jq -r .title <<<"$f")")" "$pre"
+      "$(_md_cell "$(jq -r .title <<<"$f")")" "$pre" \
+      "$(_location_link "$path" "$line" "$(_blob_url "$sha" "$path" "$line")")"
   done
   printf '\n'
 }
@@ -1165,14 +1180,84 @@ _findings_table() {
 # would then point at code that has moved under the finding it describes.
 _blob_url() {
   local sha="$1" path="$2" line="$3"
-  printf 'https://github.com/%s/blob/%s/%s#L%s' "$CTX_REPO" "$sha" "$path" "$line"
+  printf 'https://github.com/%s/blob/%s/%s#L%s' "$CTX_REPO" "$sha" "$(_url_path "$path")" "$line"
+}
+
+# A repository path on its way into a link destination.
+#
+# Percent-encoded one segment at a time, so the separators survive and everything
+# else is escaped. Three characters are the reason, and all three are legal in a
+# path: a space ends an inline link's destination, a `)` closes it early and
+# spills the rest of the URL into the cell around it, and a `|` splits the table
+# row the link sits in.
+#
+# `@uri` covers all three. It is stricter than JavaScript's encodeURIComponent,
+# which leaves the parentheses alone — a difference worth knowing, because the
+# rule that holds for one does not hold for the other.
+_url_path() {
+  jq -rn --arg p "$1" '$p | split("/") | map(@uri) | join("/")'
+}
+
+# A link to the review thread a finding was raised in.
+#
+# The files-tab form rather than the conversation-tab one, and the difference was
+# measured rather than assumed. `<pr>#discussion_r<id>` never scrolls on a first
+# load: the timeline renders after the browser has already applied the fragment,
+# so it works on a reload and not on a click, which is not a property a link in
+# permanent history can rely on. `<pr>/files#r<id>` scrolls, and fails only for a
+# comment GitHub has marked outdated because it could no longer re-anchor it onto
+# the current diff.
+_thread_url() {
+  printf 'https://github.com/%s/pull/%s/files#r%s' "$CTX_REPO" "$CTX_PR" "$1"
+}
+
+# How a finding is named to a person: its location, linked.
+#
+# Never its id. The 16-character finding id is a correlation key for crossrev's
+# own state. It lives in an HTML comment marker, so it renders invisible, and a
+# browser find on the pull request matches only the row the reader started from.
+# It is a dead end wherever it is printed.
+#
+# The path is a table cell like any other, and it gets the same escaping the
+# title beside it gets. `src/a|b/x.ts` is a legal path on any POSIX filesystem,
+# and the path on a finding is a model-written string that nothing upstream holds
+# to more than "not empty" — so an unescaped pipe splits the row into an extra
+# column, silently, with every row around it still rendering. The escape goes
+# inside the code span because GFM resolves `\|` before the span is parsed: a
+# pipe in backticks splits the row exactly as one outside them does.
+_location_link() {
+  local path="$1" line="$2" url="$3"
+  [[ -n "$path" && "$path" != "null" ]] || { printf -- '—'; return 0; }
+  printf '[`%s:%s`](%s)' "$(_md_cell "$path")" "$(_md_cell "$line")" "$url"
+}
+
+# The location cell for a finding the resolve leg reports on.
+#
+# Links the thread, because the reader's question there is what happened to this
+# finding and the answer is the conversation. Falls back to the code permalink
+# for a finding that never got a thread — the `unthreaded` case, an inline
+# comment GitHub refused to anchor.
+#
+# The text comes from crossrev's own finding record and never from GitHub's:
+# GitHub drops a comment's line to null once it goes outdated, which is exactly
+# when the link stops working and the text has to carry the reader alone.
+_finding_location() {
+  local f="$1" sha="$2" path line root
+  path="$(jq -r '.path // ""' <<<"$f")"
+  line="$(jq -r '.line // ""' <<<"$f")"
+  root="$(jq -r '.root_comment_id // ""' <<<"$f")"
+  if [[ -n "$root" && "$root" != "null" ]]; then
+    _location_link "$path" "$line" "$(_thread_url "$root")"
+  else
+    _location_link "$path" "$line" "$(_blob_url "$sha" "$path" "$line")"
+  fi
 }
 
 # The review leg's summary comment.
 #
 # Takes the marker rather than eight positional arguments, because the resolve
 # leg re-renders this comment from the marker alone when it fills in the
-# dispositions. Everything the comment says about the run — harness, model,
+# resolutions. Everything the comment says about the run — harness, model,
 # effort, endpoint, timing, tokens — therefore has to live on the marker, and
 # passing the marker is what keeps the two renderings honest about that.
 _review_summary_body() {
@@ -1359,7 +1444,7 @@ leg_resolve() {
   if [[ -n "$redrive" ]]; then
     # A pass that ended blocked or escalated is complete but not settled, so
     # the claim is rebuilt from the finished marker rather than refused: the
-    # dispositions and the block go back to empty, the clock and the revision
+    # resolutions and the block go back to empty, the clock and the revision
     # move to now, and the same comment carries the new attempt — editing it
     # keeps the marker history one record per pass, which is what every reader
     # above assumes.
@@ -1372,7 +1457,8 @@ leg_resolve() {
       | .effort = (if $e == "" then null else $e end)
       | .endpoint = (if $ep == "" then null else $ep end)
       | .blocked = false | .blocked_reason = null | .commit_sha = null
-      | .model_reported = null | .tokens = null | .summary = "" | .dispositions = []
+      | .model_reported = null | .tokens = null | .summary = "" | .resolutions = []
+      | .commit_subject = null
       | del(.unthreaded)' <<<"$redrive")"
     ui_say "Pass $pass's resolve leg ended without settling its findings — driving pass $pass again."
     gh_comment_edit "$CTX_REPO" "$comment_id" \
@@ -1385,10 +1471,11 @@ Driving the pass again: the previous attempt ended without settling its findings
       ui_warn "abandoning the unfinished pass-$pass resolve — $stale" \
         "Resuming it would reconcile replies against a revision that has moved. Starting the pass again instead."
       marker="$(jq -c --argjson ts "$(date +%s)" --arg sha "$CTX_HEAD_SHA" \
-        '.ts = $ts | .head_sha = $sha | .dispositions = [] | .commit_sha = null' <<<"$claim")"
+        '.ts = $ts | .head_sha = $sha | .resolutions = [] | .commit_sha = null
+         | .commit_subject = null' <<<"$claim")"
     else
       marker="$claim"
-      ui_say "Resuming pass $pass — the previous attempt recorded $(jq -r '(.dispositions // []) | length' <<<"$marker") disposition(s)."
+      ui_say "Resuming pass $pass — the previous attempt recorded $(jq -r '(.resolutions // []) | length' <<<"$marker") resolution(s)."
     fi
   else
     marker="$(jq -cn --argjson p "$pass" --arg sha "$CTX_HEAD_SHA" \
@@ -1399,7 +1486,8 @@ Driving the pass again: the previous attempt ended without settling its findings
         effort:(if $e == "" then null else $e end),
         endpoint:(if $ep == "" then null else $ep end),
         model_reported:null, tokens:null,
-        blocked:false, blocked_reason:null, commit_sha:null, summary:"", dispositions:[]}')"
+        blocked:false, blocked_reason:null, commit_sha:null, commit_subject:null,
+        summary:"", resolutions:[]}')"
     comment_id="$(gh_comment_create "$CTX_REPO" "$CTX_PR" \
 "**crossrev — resolving pass $pass of $CTX_MAX_PASSES_PER_CYCLE**
 
@@ -1410,15 +1498,25 @@ Verifying each finding against the codebase. This comment becomes the pass summa
   marker="$(jq -c --argjson id "$comment_id" '. + {comment_id: $id}' <<<"$marker")"
   run_checkpoint
 
-  local threads dispositions blocked blocked_reason summary model_reported tokens
+  local threads resolutions blocked blocked_reason summary model_reported tokens commit_subject
   threads="$(gh_review_threads "$CTX_REPO" "$CTX_PR")"
 
-  if [[ "$(jq -r '(.dispositions // []) | length' <<<"$marker")" != "0" ]]; then
-    ui_say "The previous attempt already recorded its dispositions, so the resolver is not run again."
-    dispositions="$(jq -c '.dispositions' <<<"$marker")"
+  # Backfilled rather than trusted from the review marker, because a pull request
+  # reviewed before findings carried `root_comment_id` has none on record and its
+  # summary table would fall back to the code permalink for every row. The review
+  # leg sets it too; this covers what it could not.
+  findings="$(jq -c --argjson t "$threads" '
+    [ .[] as $f
+      | [$t[] | select(.finding_ids | index($f.id))] | first as $m
+      | $f + { root_comment_id: ($f.root_comment_id // $m.root_comment_id) } ]' \
+    <<<"$findings")"
+
+  if [[ "$(jq -r '(.resolutions // []) | length' <<<"$marker")" != "0" ]]; then
+    ui_say "The previous attempt already recorded its resolutions, so the resolver is not run again."
+    resolutions="$(jq -c '.resolutions' <<<"$marker")"
     # A claim written before the field was renamed carries `wrap_up`, and an
-    # upgrade between recording the dispositions and finishing the pass lands
-    # exactly here: the dispositions are found, the agent is not run again, and a
+    # upgrade between recording the resolutions and finishing the pass lands
+    # exactly here: the resolutions are found, the agent is not run again, and a
     # bare `.summary` read publishes an empty comment. Migrated on the MARKER
     # rather than read defensively into a local, because the summary comment is
     # rendered from the marker and a local would leave the published body empty.
@@ -1428,19 +1526,19 @@ Verifying each finding against the codebase. This comment becomes the pass summa
     blocked_reason="$(jq -r '.blocked_reason // "null"' <<<"$marker")"
     model_reported="$(jq -r '.model_reported // "null"' <<<"$marker")"
   else
-    local candidates enriched prior_dispositions
+    local candidates enriched prior_resolutions
     candidates="$(_resolve_dedupe_candidates "$findings")"
 
-    prior_dispositions="$(jq -c '[.[] | select(.leg == "resolve") | (.dispositions // [])[]]' <<<"$CTX_MARKERS")"
+    prior_resolutions="$(jq -c '[.[] | select(.leg == "resolve") | (.resolutions // [])[]]' <<<"$CTX_MARKERS")"
 
     # Each finding is handed to the model with the orchestrator's own answer to
     # "may you change code for this", rather than the threshold and a rule to
     # apply. Two readings of one policy is one reading too many: the label the
     # reviewer already posted says which findings are fixable, and a model that
     # ranks them differently contradicts a comment sitting on the pull request.
-    enriched="$(jq -c --argjson prior "$prior_dispositions" '
+    enriched="$(jq -c --argjson prior "$prior_resolutions" '
       [ .[] as $f
-        | $f + {prior_disposition: ([$prior[] | select(.finding_id == $f.id) | .disposition] | last // null)} ]' \
+        | $f + {prior_resolution: ([$prior[] | select(.finding_id == $f.id) | .resolution] | last // null)} ]' \
       <<<"$findings")"
     # Each finding also gets the number the prompt will show it under. The model
     # returns that number instead of the finding's 16-character id, because
@@ -1469,10 +1567,16 @@ Verifying each finding against the codebase. This comment becomes the pass summa
     [[ "$CTX_BACKLOG" == "repository" ]] && exclude=("$CTX_BACKLOG_PATH" .crossrev)
     gh_pr_diff "$CTX_REPO" "$CTX_PR" "$CTX_BASE_SHA" "$CTX_HEAD_SHA" ${exclude[@]+"${exclude[@]}"} >"$diff_file"
 
+    # `base_sha` and `crossrev_email` are here for the commit convention the
+    # prompt shows: the subjects are sampled from the base revision, and the
+    # leg's own past commits are excluded so it does not learn the generic
+    # subject it is replacing.
     meta="$(jq -cn --arg repo "$CTX_REPO" --argjson pr "$CTX_PR" --argjson pass "$pass" \
       --argjson max "$CTX_MAX_PASSES_PER_CYCLE" --arg sha "$CTX_HEAD_SHA" --arg fa "$CTX_MIN_FIX_SEVERITY" \
-      --arg backlog "$CTX_BACKLOG" \
-      '{repo:$repo, pr:$pr, pass:$pass, max_passes_per_cycle:$max, head_sha:$sha, min_fix_severity:$fa, backlog:$backlog}')"
+      --arg backlog "$CTX_BACKLOG" --arg base "$CTX_BASE_SHA" \
+      --arg mine "${CROSSREV_GIT_EMAIL:-crossrev@users.noreply.github.com}" \
+      '{repo:$repo, pr:$pr, pass:$pass, max_passes_per_cycle:$max, head_sha:$sha, min_fix_severity:$fa,
+        backlog:$backlog, base_sha:$base, crossrev_email:$mine}')"
 
     prompt_resolve "$prompt_file" "$ROOT/skills/pr-resolve/SKILL.md" "$diff_file" \
       "$meta" "$enriched" "$threads" "$candidates"
@@ -1491,10 +1595,10 @@ Verifying each finding against the codebase. This comment becomes the pass summa
 
     payload="$(jq -c .payload "$envelope_file")"
     model_reported="$(jq -r '.model_reported // "null"' "$envelope_file")"
-    dispositions="$(jq -c '.dispositions' <<<"$payload")"
+    resolutions="$(jq -c '.resolutions' <<<"$payload")"
 
     # The number stops existing here. Everything below — the marker, the thread
-    # lookup, the dedupe, the commit message, the disposition table — keeps
+    # lookup, the dedupe, the commit message, the resolution table — keeps
     # keying on the finding's id exactly as it did before, so a marker written
     # after this change is readable by the code that came before it and no
     # migration is needed for the ones already on live pull requests.
@@ -1503,25 +1607,32 @@ Verifying each finding against the codebase. This comment becomes the pass summa
     # position. The two agree today, and a mapping that depends on nobody ever
     # reordering that array is the kind of assumption this change exists to stop
     # making.
-    dispositions="$(jq -c --argjson f "$enriched" '
+    resolutions="$(jq -c --argjson f "$enriched" '
       [ .[] as $d
         | $d + {finding_id: ([$f[] | select(.number == $d.finding_number) | .id] | first)}
-        | del(.finding_number) ]' <<<"$dispositions")"
+        | del(.finding_number) ]' <<<"$resolutions")"
     summary="$(jq -r '.summary' <<<"$payload")"
     blocked="$(jq -r '.blocked // false' <<<"$payload")"
     blocked_reason="$(jq -r '.blocked_reason // "null"' <<<"$payload")"
     tokens="$(jq -c '.tokens // null' "$envelope_file")"
+    # Onto the marker rather than into a local, for the reason every other field
+    # here is: the commit happens after a checkpoint, so a run that dies between
+    # the two comes back needing the subject the resolver wrote, and a local is
+    # gone by then.
+    commit_subject="$(jq -r '.commit_subject // ""' <<<"$payload")"
     rm -rf "$tmp"
 
-    marker="$(jq -c --argjson d "$dispositions" --arg w "$summary" --argjson b "$blocked" \
-      --arg br "$blocked_reason" --arg mr "$model_reported" --argjson tk "${tokens:-null}" '
-      .dispositions = $d | .summary = $w | .blocked = $b | .tokens = $tk
+    marker="$(jq -c --argjson d "$resolutions" --arg w "$summary" --argjson b "$blocked" \
+      --arg br "$blocked_reason" --arg mr "$model_reported" --argjson tk "${tokens:-null}" \
+      --arg cs "$commit_subject" '
+      .resolutions = $d | .summary = $w | .blocked = $b | .tokens = $tk
+      | .commit_subject = (if $cs == "" then null else $cs end)
       | .blocked_reason = (if $br == "null" then null else $br end)
       | .model_reported = (if $mr == "null" then null else $mr end)' <<<"$marker")"
     gh_comment_edit "$CTX_REPO" "$comment_id" \
 "**crossrev — resolving pass $pass of $CTX_MAX_PASSES_PER_CYCLE**
 
-Dispositions recorded; committing and replying now.$(state_marker_encode "$(jq -c 'del(.comment_id)' <<<"$marker")")"
+Resolutions recorded; committing and replying now.$(state_marker_encode "$(jq -c 'del(.comment_id)' <<<"$marker")")"
   fi
   run_checkpoint
 
@@ -1548,12 +1659,19 @@ Dispositions recorded; committing and replying now.$(state_marker_encode "$(jq -
   # before resolve, which is the invariant that matters: a thread resolved
   # against a write that did not land is exactly how work disappears.
   local filed=0 matched=0 deferred_lines="" backlog_wrote=0
-  local n i d id disp tracked dup existing
-  n="$(jq 'length' <<<"$dispositions")"
+  local n i d id disp tracked dup existing where
+  n="$(jq 'length' <<<"$resolutions")"
   for (( i = 0; i < n; i++ )); do
-    d="$(jq -c ".[$i]" <<<"$dispositions")"
+    d="$(jq -c ".[$i]" <<<"$resolutions")"
     id="$(jq -r .finding_id <<<"$d")"
-    [[ "$(jq -r .disposition <<<"$d")" == "deferred" ]] || continue
+    [[ "$(jq -r .resolution <<<"$d")" == "deferred" ]] || continue
+
+    # Each line leads with where the finding is, not with its id. The id named
+    # nothing a reader could reach: it lives in an invisible marker, so it is not
+    # even searchable on the page the list is printed on.
+    where="$(_finding_location \
+      "$(jq -c --arg id "$id" 'map(select(.id == $id)) | first // {}' <<<"$findings")" \
+      "$(jq -r '.head_sha // ""' <<<"$marker")")"
 
     tracked=""; existing=""
     if [[ "$CTX_BACKLOG" == "github_issues" ]]; then
@@ -1567,12 +1685,12 @@ Dispositions recorded; committing and replying now.$(state_marker_encode "$(jq -
       tracked="$CTX_REPO#$existing"
       matched=$(( matched + 1 ))
       deferred_lines="$deferred_lines
-- \`$id\` — already tracked as #$existing, so nothing was filed"
+- $where — already tracked as #$existing, so nothing was filed"
     elif [[ -n "$dup" && "$dup" != "null" ]]; then
       tracked="$CTX_REPO#$dup"
       matched=$(( matched + 1 ))
       deferred_lines="$deferred_lines
-- \`$id\` — matches the existing issue #$dup, so nothing was filed"
+- $where — matches the existing issue #$dup, so nothing was filed"
       if [[ "$(jq -r '.backlog.github_issues.comment_on_existing_issue' <<<"$CFG_MERGED")" == "true" ]]; then
         gh_issue_comment "$CTX_REPO" "$dup" \
           "Seen again while reviewing $CTX_REPO#$CTX_PR (crossrev pass $pass).$(state_finding_marker "$id" "$pass" resolve)"
@@ -1584,10 +1702,10 @@ Dispositions recorded; committing and replying now.$(state_marker_encode "$(jq -
         # Only a repository backlog puts something in the tree for the commit to carry.
         [[ "$CTX_BACKLOG" == "repository" ]] && backlog_wrote=1
         deferred_lines="$deferred_lines
-- \`$id\` — filed as ${tracked/#"$CTX_REPO"/}"
+- $where — filed as ${tracked/#"$CTX_REPO"/}"
       else
         deferred_lines="$deferred_lines
-- \`$id\` — **not persisted anywhere**, so its thread stays open rather than resolving against a write that did not land"
+- $where — **not persisted anywhere**, so its thread stays open rather than resolving against a write that did not land"
       fi
     fi
 
@@ -1600,8 +1718,8 @@ Dispositions recorded; committing and replying now.$(state_marker_encode "$(jq -
     # off rather than recorded empty. An empty value asserts a landing that was
     # attempted and did not happen — the loop-end decision reads exactly that.
     if [[ "$CTX_BACKLOG" != "none" ]]; then
-      dispositions="$(jq -c --arg id "$id" --arg t "$tracked" \
-        'map(if .finding_id == $id then . + {crossrev_tracked: $t} else . end)' <<<"$dispositions")"
+      resolutions="$(jq -c --arg id "$id" --arg t "$tracked" \
+        'map(if .finding_id == $id then . + {crossrev_tracked: $t} else . end)' <<<"$resolutions")"
     fi
   done
   run_checkpoint
@@ -1613,19 +1731,34 @@ Dispositions recorded; committing and replying now.$(state_marker_encode "$(jq -
   # test left exactly that case uncommitted.
   local commit_sha fixed_count commit_msg
   commit_sha="$(jq -r '.commit_sha // ""' <<<"$marker")"
-  fixed_count="$(jq '[.[] | select(.disposition == "fixed")] | length' <<<"$dispositions")"
+  fixed_count="$(jq '[.[] | select(.resolution == "fixed")] | length' <<<"$resolutions")"
   if [[ -n "$commit_sha" && "$commit_sha" != "null" ]]; then
     ui_say "The previous attempt already pushed ${commit_sha:0:7}, so the fix step is skipped."
   elif (( fixed_count > 0 || backlog_wrote )); then
     commit_sha=""
+    local subject
     if (( fixed_count > 0 )); then
-      commit_msg="fix: resolve crossrev review findings (pass $pass)
+      # The model's subject, or the generic one. A subject that fails validation
+      # is reported rather than swallowed: the commit still lands, and the run
+      # says the message is not the one the resolver wrote.
+      subject="$(jq -r '.commit_subject // ""' <<<"$marker")"
+      if ! _commit_subject_ok "$subject"; then
+        [[ -z "$subject" || "$subject" == "null" ]] || ui_warn \
+          "the resolver's commit subject was rejected, so the commit carries a generic one" \
+          "A subject must be one line of at most 100 characters, with no control characters. The fix itself is unaffected."
+        subject="fix: resolve crossrev review findings (pass $pass)"
+      fi
+      commit_msg="$subject
 
-$(jq -r '[.[] | select(.disposition == "fixed") | "- " + .finding_id] | join("\n")' <<<"$dispositions")"
+$(_commit_body "$resolutions" "$findings" fixed "$CTX_HEAD_SHA" "$pass")"
     else
+      # A deferral-only pass keeps a fixed subject. "Record deferred findings" is
+      # already an accurate description of what happened — no code changed — so a
+      # second piece of model-authored text would widen what has to be validated
+      # and say nothing new.
       commit_msg="chore: record deferred crossrev findings (pass $pass)
 
-$(jq -r '[.[] | select(.disposition == "deferred") | "- " + .finding_id] | join("\n")' <<<"$dispositions")"
+$(_commit_body "$resolutions" "$findings" deferred "$CTX_HEAD_SHA" "$pass")"
     fi
     commit_sha="$(gh_commit_and_push "$CTX_HEAD_BRANCH" "$commit_msg" "$CTX_HEAD_SHA" "$push_remote" "$CTX_HEAD_REPO")"
     if [[ -n "$commit_sha" ]]; then
@@ -1641,7 +1774,7 @@ Pushed \`${commit_sha:0:7}\`; replying to each thread now.$(state_marker_encode 
       # Only meaningful when fixes were claimed. A deferral-only pass whose backlog
       # write produced no diff is not a broken promise about the code.
       ui_warn "the resolver reported $fixed_count fix(es) but changed no files" \
-        "The replies below will claim a fix that is not in the diff, so their threads stay open and the pass halts for a person. Treat those dispositions as unverified and read the thread before merging."
+        "The replies below will claim a fix that is not in the diff, so their threads stay open and the pass halts for a person. Treat those resolutions as unverified and read the thread before merging."
     fi
   fi
   run_checkpoint
@@ -1681,9 +1814,9 @@ Pushed \`${commit_sha:0:7}\`; replying to each thread now.$(state_marker_encode 
     unthreaded="$(printf '%s\n' "$unthreaded_already" | wc -l | tr -d ' ')"
 
   for (( i = 0; i < n; i++ )); do
-    d="$(jq -c ".[$i]" <<<"$dispositions")"
+    d="$(jq -c ".[$i]" <<<"$resolutions")"
     id="$(jq -r .finding_id <<<"$d")"
-    disp="$(jq -r .disposition <<<"$d")"
+    disp="$(jq -r .resolution <<<"$d")"
     tracked="$(jq -r '.crossrev_tracked // ""' <<<"$d")"
 
     thread_id="$(jq -r --arg id "$id" '[.[] | select(.finding_ids | index($id))] | first | .id // ""' <<<"$threads")"
@@ -1711,7 +1844,7 @@ Pushed \`${commit_sha:0:7}\`; replying to each thread now.$(state_marker_encode 
       run_checkpoint
     fi
 
-    # Resolution, per the disposition's own rule. `deferred` resolves only once
+    # Resolution, per the resolution's own rule. `deferred` resolves only once
     # persisted; with nothing persisted the thread stays open, which is the
     # honest behaviour — resolving a thread whose content lands nowhere is how
     # work disappears. `fixed` is the same rule read against the commit: with
@@ -1722,7 +1855,7 @@ Pushed \`${commit_sha:0:7}\`; replying to each thread now.$(state_marker_encode 
     should_resolve=0
     case "$disp" in
       fixed)            [[ -n "$commit_sha" ]] && should_resolve=1 ;;
-      skipped|rebutted) should_resolve=1 ;;
+      skipped|disputed) should_resolve=1 ;;
       deferred)         [[ -n "$tracked" ]] && should_resolve=1 ;;
       escalated)        escalated=$(( escalated + 1 )) ;;
     esac
@@ -1730,11 +1863,11 @@ Pushed \`${commit_sha:0:7}\`; replying to each thread now.$(state_marker_encode 
       gh_thread_resolve "$thread_id" && resolved_n=$(( resolved_n + 1 )) || true
     fi
 
-    # Fill the disposition into the review leg's marker. One record per finding
+    # Fill the resolution into the review leg's marker. One record per finding
     # rather than two that can disagree.
     findings="$(jq -c --arg id "$id" --arg disp "$disp" --arg tracked "$tracked" '
       map(if .id == $id
-          then .disposition = $disp
+          then .resolution = $disp
                | .tracked_as = (if $tracked == "" then null else $tracked end)
           else . end)' <<<"$findings")"
     run_checkpoint
@@ -1750,7 +1883,7 @@ Pushed \`${commit_sha:0:7}\`; replying to each thread now.$(state_marker_encode 
   fi
 
   # The review marker is edited rather than copied, so the finding list and its
-  # dispositions cannot drift apart.
+  # resolutions cannot drift apart.
   local review_comment_id updated_review
   review_comment_id="$(jq -r '.comment_id' <<<"$review_marker")"
   updated_review="$(jq -c --argjson f "$findings" 'del(.comment_id) | .findings = $f' <<<"$review_marker")"
@@ -1765,13 +1898,13 @@ Pushed \`${commit_sha:0:7}\`; replying to each thread now.$(state_marker_encode 
   # run does: the marker is what the comment is re-rendered from, so a fact that
   # lives only in a local disappears on recovery.
   local summary_body
-  # The dispositions go back onto the marker with the tracking each deferral
+  # The resolutions go back onto the marker with the tracking each deferral
   # earned, because the marker is the record status reads the pass's ending
   # from — a deferral whose record never landed has to be visible there, or
   # the marker copy of the label decision cannot agree with the label.
-  marker="$(jq -c --argjson t "$(date +%s)" --argjson u "$unthreaded" --argjson d "$dispositions" \
-    '.done_ts = $t | .unthreaded = $u | .dispositions = $d' <<<"$marker")"
-  summary_body="$(_resolve_summary_body "$dispositions" "$findings" "$deferred_lines" "$marker")"
+  marker="$(jq -c --argjson t "$(date +%s)" --argjson u "$unthreaded" --argjson d "$resolutions" \
+    '.done_ts = $t | .unthreaded = $u | .resolutions = $d' <<<"$marker")"
+  summary_body="$(_resolve_summary_body "$resolutions" "$findings" "$deferred_lines" "$marker")"
   gh_comment_edit "$CTX_REPO" "$comment_id" \
     "$summary_body$(state_marker_encode "$(jq -c 'del(.comment_id)' <<<"$marker")")"
   ui_ok "posted a summary comment"
@@ -1786,7 +1919,7 @@ Pushed \`${commit_sha:0:7}\`; replying to each thread now.$(state_marker_encode 
   # caused it. This pass's own marker is re-read below rather than trusted
   # from the load the leg started with, because a re-drive rewrites it.
   other_escalated="$(jq --argjson p "$pass" \
-    '[.[] | select(.leg == "resolve" and .pass != $p) | (.dispositions // [])[] | select(.disposition == "escalated")] | length' \
+    '[.[] | select(.leg == "resolve" and .pass != $p) | (.resolutions // [])[] | select(.resolution == "escalated")] | length' \
     <<<"$CTX_MARKERS")"
   next="$(legs_resolve_pass_label "$marker" "$other_escalated")"
   run_pass_labels "$pass" "$next"
@@ -1901,10 +2034,10 @@ Found by crossrev while reviewing $CTX_REPO#$CTX_PR (pass $pass). Verified again
 # line, so an unrestricted pass would eat a "Deferred." that opens a paragraph
 # three screens down.
 #
-# It also catches the model opening with the WRONG word. The disposition is the
+# It also catches the model opening with the WRONG word. The resolution is the
 # orchestrator's own answer, so a reply that leads "Fixed." on a skipped finding
 # has its lead replaced rather than stacked.
-_strip_disposition_lead() {
+_strip_resolution_lead() {
   local text="$1" head rest prev
   head="${text%%$'\n'*}"
   rest=""
@@ -1919,64 +2052,150 @@ _strip_disposition_lead() {
 
 _resolve_reply_body() {
   local d="$1" tracked="$2" pass="$3" harness="$4" model="$5" disp lead
-  disp="$(jq -r .disposition <<<"$d")"
+  disp="$(jq -r .resolution <<<"$d")"
   case "$disp" in
     fixed)     lead="**Fixed.**" ;;
     skipped)   lead="**Skipped.**" ;;
     deferred)  lead="**Deferred.**" ;;
-    rebutted)  lead="**Not changing this.**" ;;
+    disputed)  lead="**Not changing this.**" ;;
     escalated) lead="**This needs a human decision.**" ;;
     *)         lead="**$disp.**" ;;
   esac
-  printf '%s %s\n' "$lead" "$(_strip_disposition_lead "$(jq -r .reply <<<"$d")")"
+  printf '%s %s\n' "$lead" "$(_strip_resolution_lead "$(jq -r .reply <<<"$d")")"
   [[ -n "$tracked" ]] && printf '\nTracked outside this pull request as %s, so it survives the merge.\n' "$tracked"
   printf '\n<sub>crossrev pass %s, verified by %s%s. Every finding is verified whatever its severity — severity governs what happens afterwards, not whether the check happens.</sub>%s' \
     "$pass" "$harness" "${model:+ ($model)}" \
     "$(state_finding_marker "$(jq -r .finding_id <<<"$d")" "$pass" resolve)"
 }
 
-# "3 fixed, 1 skipped, 1 deferred" — only the dispositions that actually
+# "3 fixed, 1 skipped, 1 deferred" — only the resolutions that actually
 # happened, in the order the five are defined, so a pass that fixed everything
 # does not read as four zeroes.
-_disposition_counts() {
+_resolution_counts() {
   jq -r '
-    ["fixed","skipped","deferred","rebutted","escalated"] as $order
-    | (group_by(.disposition) | map({key: .[0].disposition, value: length}) | from_entries) as $by
+    ["fixed","skipped","deferred","disputed","escalated"] as $order
+    | (group_by(.resolution) | map({key: .[0].resolution, value: length}) | from_entries) as $by
     | [ $order[] | select($by[.] != null) | "\($by[.]) \(.)" ]
-    | if length == 0 then "Nothing to disposition."
+    | if length == 0 then "Nothing to resolution."
       else join(", ") + "." end' <<<"$1"
 }
 
-# The disposition table, with the severity emoji on each finding.
+# The resolution table, with the severity emoji on each finding.
 #
 # The finding is named by its title rather than by its id, because the id means
 # nothing to a collaborator reading the pull request — but the id is what the
-# dispositions are keyed on, so it stays in the cell, small, for anyone matching
+# resolutions are keyed on, so it stays in the cell, small, for anyone matching
 # a row against a thread. The reasoning is deliberately not a column: the only
 # text crossrev holds is the model's full reply, which belongs in the thread it
 # was written for and would not survive a table cell.
-_dispositions_table() {
-  local dispositions="$1" findings="$2" n i d id f sev title
-  n="$(jq 'length' <<<"$dispositions")"
-  printf '| Finding | Disposition |\n|---|---|\n'
+_resolutions_table() {
+  local resolutions="$1" findings="$2" sha="$3" n i d id f sev title
+  n="$(jq 'length' <<<"$resolutions")"
+  printf '| Severity | Finding | Location | Resolution |\n|---|---|---|---|\n'
   for (( i = 0; i < n; i++ )); do
-    d="$(jq -c ".[$i]" <<<"$dispositions")"
+    d="$(jq -c ".[$i]" <<<"$resolutions")"
     id="$(jq -r .finding_id <<<"$d")"
     f="$(jq -c --arg id "$id" 'map(select(.id == $id)) | first // {}' <<<"$findings")"
     sev="$(jq -r '.severity // "?"' <<<"$f")"
     title="$(jq -r '.title // ""' <<<"$f")"
-    [[ -n "$title" ]] || title="$id"
-    printf '| %s %s <sub>`%s`</sub> | %s |\n' \
-      "$(run_severity_emoji "$sev")" "$(_md_cell "$title")" "$id" \
-      "$(jq -r .disposition <<<"$d")"
+    # The id appears here and nowhere else, and only when the review record has
+    # no finding under it. That is a broken state rather than a normal one, and
+    # the id is then the single handle anyone debugging it has.
+    [[ -n "$title" ]] || title="finding \`$id\` is not in the review record"
+    printf '| %s&nbsp;%s | %s | %s | %s |\n' \
+      "$(run_severity_emoji "$sev")" "$(_ucfirst "$sev")" \
+      "$(_md_cell "$title")" \
+      "$(_finding_location "$f" "$sha")" \
+      "$(jq -r .resolution <<<"$d")"
   done
   printf '\n'
+}
+
+# The subject line of a resolve leg's commit, or nothing.
+#
+# The model writes it, because only the model knows what the change did. That
+# makes it the one piece of model-authored text that becomes permanent history,
+# so it is validated rather than trusted, and every rule below rejects instead of
+# repairing: a silently repaired subject is a subject nobody chose.
+#
+# A rejected subject is not fatal. The caller falls back to the generic message
+# and says so — a bad commit subject is not worth failing a pass that fixed real
+# defects.
+_commit_subject_ok() {
+  local s="$1"
+  [[ -n "$s" && "$s" != "null" ]] || return 1
+  # A newline would turn the rest into a body the orchestrator did not compose.
+  [[ "$s" != *$'\n'* ]] || return 1
+  # Control characters reach `git log` and every terminal that renders it. DEL
+  # is named beside the C0 range rather than left out of it: it sits above the
+  # range at 0x7f, and `_commit_line` below already strips it from a body line.
+  # A subject git records forever is no better a place for it than a body is.
+  [[ "$s" != *[$'\x01'-$'\x1f'$'\x7f']* ]] || return 1
+  # A safety net above every convention's own limit rather than a convention of
+  # its own: the repository's subjects are what the model is told to match.
+  (( ${#s} <= 100 )) || return 1
+  # Marker prefixes are matched literally wherever crossrev reads its own state.
+  [[ "$s" != *"$CROSSREV_MARKER_PREFIX"* ]] || return 1
+  return 0
+}
+
+# Model-written text on its way into a commit message, flattened to one line.
+#
+# The body is the orchestrator's, but the titles and paths in it are the review
+# leg's, and nothing upstream holds them to a line: the schema asks for one and a
+# model returns what it returns. Raw, a newline in a title continues the body
+# with lines nobody composed — including a second `Crossrev-pr:` trailer, which
+# every tool that reads these commits parses as crossrev's own — and a control
+# character reaches `git log` and every terminal that renders it, permanently.
+#
+# Flattened rather than rejected, unlike the subject beside it. The subject is a
+# whole line the model chose, so repairing one publishes a subject nobody wrote;
+# a title is a fragment the orchestrator is quoting, and the honest repair is to
+# quote it on the one line it was asked for.
+_commit_line() {
+  printf '%s' "$1" | tr '\000-\037\177' ' '
+}
+
+# The body of a resolve leg's commit: what was settled, where, and how to reach
+# the conversation that settled it.
+#
+# Composed by the orchestrator rather than by the model. It already holds the
+# titles and the locations, so asking for text it would then have to validate
+# buys nothing — and the reasoning belongs in the thread, which the body links.
+_commit_body() {
+  local resolutions="$1" findings="$2" want="$3" sha="$4" pass="$5"
+  local n i r id f title path line root
+  n="$(jq 'length' <<<"$resolutions")"
+  for (( i = 0; i < n; i++ )); do
+    r="$(jq -c ".[$i]" <<<"$resolutions")"
+    [[ "$(jq -r .resolution <<<"$r")" == "$want" ]] || continue
+    id="$(jq -r .finding_id <<<"$r")"
+    f="$(jq -c --arg id "$id" 'map(select(.id == $id)) | first // {}' <<<"$findings")"
+    title="$(jq -r '.title // ""' <<<"$f")"
+    path="$(jq -r '.path // ""' <<<"$f")"
+    line="$(jq -r '.line // ""' <<<"$f")"
+    root="$(jq -r '.root_comment_id // ""' <<<"$f")"
+    printf -- '- %s\n' "$(_commit_line "${title:-$id}")"
+    [[ -n "$path" && "$path" != "null" ]] || continue
+    # The path and the line go through it too. Both are the same model's text on
+    # the same output line, and sanitising one of the three would be arbitrary.
+    path="$(_commit_line "$path")"; line="$(_commit_line "$line")"
+    if [[ -n "$root" && "$root" != "null" ]]; then
+      printf '  %s:%s - %s\n' "$path" "$line" "$(_thread_url "$root")"
+    else
+      printf '  %s:%s - %s\n' "$path" "$line" "$(_blob_url "$sha" "$path" "$line")"
+    fi
+  done
+  # Trailers rather than a sentence, so `git log --grep` and any tool that parses
+  # them can read what the subject no longer says. The committer identity already
+  # marks these as crossrev's; these say which pull request and which pass.
+  printf '\nCrossrev-pr: %s#%s\nCrossrev-pass: %s\n' "$CTX_REPO" "$CTX_PR" "$pass"
 }
 
 # The resolve leg's summary comment. Takes the marker for the same reason the
 # review leg's does — everything it reports about the run lives there.
 _resolve_summary_body() {
-  local dispositions="$1" findings="$2" deferred_lines="$3" marker="$4"
+  local resolutions="$1" findings="$2" deferred_lines="$3" marker="$4"
   local summary pass commit blocked blocked_reason
   summary="$(jq -r '.summary // ""' <<<"$marker")"
   pass="$(jq -r '.pass // 1' <<<"$marker")"
@@ -1987,8 +2206,8 @@ _resolve_summary_body() {
   printf '## crossrev resolved pass %s of %s\n\n' "$pass" "$CTX_MAX_PASSES_PER_CYCLE"
 
   local counts escalated noun
-  counts="$(_disposition_counts "$dispositions")"
-  escalated="$(jq '[.[] | select(.disposition == "escalated")] | length' <<<"$dispositions")"
+  counts="$(_resolution_counts "$resolutions")"
+  escalated="$(jq '[.[] | select(.resolution == "escalated")] | length' <<<"$resolutions")"
   noun="findings"; (( escalated == 1 )) && noun="finding"
   if [[ "$blocked" == "true" ]]; then
     _alert WARNING "$(printf '**Blocked:** %s The loop halts here and needs a human. %s' \
@@ -2019,7 +2238,7 @@ _resolve_summary_body() {
 
   printf '%s\n\n' "$summary"
 
-  _dispositions_table "$dispositions" "$findings"
+  _resolutions_table "$resolutions" "$findings" "$(jq -r '.head_sha // ""' <<<"$marker")"
 
   if [[ -n "$deferred_lines" ]]; then
     printf '## Deferred work filed\n'
@@ -2432,7 +2651,7 @@ _status_state_from_markers() {
 # none, so callers can ask before they know one exists.
 _status_escalated() {
   [[ -n "$1" ]] || { printf '0'; return 0; }
-  jq '[(.dispositions // [])[] | select(.disposition == "escalated")] | length' <<<"$1"
+  jq '[(.resolutions // [])[] | select(.resolution == "escalated")] | length' <<<"$1"
 }
 
 # Escalated findings across every resolve marker on the pull request. Which
@@ -2440,7 +2659,7 @@ _status_escalated() {
 # it caused is still standing, and only re-driving that pass — which rewrites
 # its marker — or settling the thread by hand clears it.
 _markers_escalated() {
-  jq '[.[] | select(.leg == "resolve") | (.dispositions // [])[] | select(.disposition == "escalated")] | length' <<<"$1"
+  jq '[.[] | select(.leg == "resolve") | (.resolutions // [])[] | select(.resolution == "escalated")] | length' <<<"$1"
 }
 
 # One leg line: the glyph reflects the OUTCOME, not whether the leg ran.
@@ -2649,11 +2868,11 @@ _status_leg_complete() {
     ui_row "$gutter" no "$label""blocked — $(jq -r '.blocked_reason // "the resolve leg could not complete"' <<<"$m")"
     return 0
   fi
-  parts="$(_disposition_counts "$(jq -c '.dispositions // []' <<<"$m")")"
+  parts="$(_resolution_counts "$(jq -c '.resolutions // []' <<<"$m")")"
   parts="${parts%.}"
   commit="$(jq -r '.commit_sha // ""' <<<"$m")"
   [[ -n "$commit" && "$commit" != "null" ]] && parts="$parts, pushed ${commit:0:7}"
-  # An escalated disposition halted the loop for a human, so the row cannot carry
+  # An escalated resolution halted the loop for a human, so the row cannot carry
   # the tick a settled pass gets. The header above already says halted, and a
   # green leg line underneath it contradicts the section it sits in.
   if (( $(_status_escalated "$m") > 0 )); then
@@ -2848,7 +3067,7 @@ _status_next_halted() {
   # again — which legs_resolve_redrivable admits for exactly this marker.
   if [[ -n "$m_resolve" && "$(jq -r '.state // ""' <<<"$m_resolve")" == "complete" ]] \
      && [[ "$(jq -r '.blocked // false' <<<"$m_resolve")" != "true" ]] \
-     && [[ "$(jq '[(.dispositions // [])[] | select(.disposition == "deferred" and .crossrev_tracked == "")] | length' <<<"$m_resolve")" != "0" ]]; then
+     && [[ "$(jq '[(.resolutions // [])[] | select(.resolution == "deferred" and .crossrev_tracked == "")] | length' <<<"$m_resolve")" != "0" ]]; then
     ui_line "a deferred finding was never filed anywhere durable, so its thread"
     ui_line "stays open. Put the work somewhere tracked, then drive the pass again:"
     ui_cmd  "crossrev resolve --pr $CTX_PR"
@@ -2870,14 +3089,14 @@ _status_next_halted() {
     return 0
   fi
 
-  # A pass whose dispositions were never recorded, written by a crossrev old
+  # A pass whose resolutions were never recorded, written by a crossrev old
   # enough not to carry them. Nothing on it can be shown to have settled, so it
   # is not a convergence — and driving the pass again both answers the findings
   # and writes the record every reader here is missing.
   if [[ -n "$m_resolve" && "$(jq -r '.state // ""' <<<"$m_resolve")" == "complete" ]] \
      && [[ "$(jq -r '.blocked // false' <<<"$m_resolve")" != "true" ]] \
      && legs_resolve_unrecorded "$m_resolve"; then
-    ui_line "the pass recorded no dispositions, so what it settled cannot be read"
+    ui_line "the pass recorded no resolutions, so what it settled cannot be read"
     ui_line "back. Drive it again to answer the findings on the record:"
     ui_cmd  "crossrev resolve --pr $CTX_PR"
     return 0

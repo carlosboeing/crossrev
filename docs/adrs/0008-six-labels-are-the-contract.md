@@ -45,7 +45,7 @@ Both jobs are served by the same six strings, which means the strings are an int
 
 **Six shades of one hue.** Rejected on the reading test — a row of near-identical pills carries no state at a glance, which is the whole reason the labels are visible.
 
-**A `critical` severity rung that halts and escalates.** Considered and rejected in favour of an action: the "stop, get a human" case is the `escalated` disposition, which applies `crossrev/stop` and leaves the thread open. An action beats a label, and a severity word with no distinct consequence teaches readers that the scale is decorative.
+**A `critical` severity rung that halts and escalates.** Considered and rejected in favour of an action: the "stop, get a human" case is the `escalated` resolution, which applies `crossrev/stop` and leaves the thread open. An action beats a label, and a severity word with no distinct consequence teaches readers that the scale is decorative.
 
 **Spelling the human's brake `crossrev/halted` and letting it double as the terminal state.** Rejected: the two mean opposite things about who acts next, and the difference has to survive being read quickly.
 

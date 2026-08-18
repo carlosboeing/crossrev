@@ -165,7 +165,7 @@ review_marker() {
      findings:[
        {id:$a, path:"app.ts", line:2, side:"RIGHT", severity:"high", category:"correctness",
         pre_existing:false, title:"Unchecked fetch response", why:"w", fix:"f",
-        anchor:"", thread_id:"T_A", disposition:null, tracked_as:null}]}'
+        anchor:"", thread_id:"T_A", resolution:null, tracked_as:null}]}'
 }
 
 REVIEW_PAYLOAD='{"verdict":"issues-remain","blocked_reason":null,"prior":null,"findings":[
@@ -174,7 +174,7 @@ REVIEW_PAYLOAD='{"verdict":"issues-remain","blocked_reason":null,"prior":null,"f
 ]}'
 
 RESOLVE_PAYLOAD='{"blocked":false,"blocked_reason":null,"summary":"Checked the response.",
-  "dispositions":[{"finding_number":1,"disposition":"fixed","reply":"Checked response.ok.",
+  "resolutions":[{"finding_number":1,"resolution":"fixed","reply":"Checked response.ok.",
                    "persist":null,"duplicate_of":null}]}'
 
 # --- a review leg -----------------------------------------------------------

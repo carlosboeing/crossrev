@@ -180,7 +180,7 @@ gh_review_reply() {
   gh api --method POST "repos/$repo/pulls/$pr/comments/$root_comment_id/replies" \
     -f body="$body" >/dev/null 2>&1 && return 0
   ui_warn "could not reply in the thread rooted at comment $root_comment_id on $repo#$pr" \
-    "The disposition is still recorded in the pass marker, but the collaborator reading the thread will not see the reason. Check the token has pull-requests write."
+    "The resolution is still recorded in the pass marker, but the collaborator reading the thread will not see the reason. Check the token has pull-requests write."
   return 1
 }
 

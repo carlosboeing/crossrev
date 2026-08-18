@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# The resolve leg: dispositions, deferral, both dedupe tiers, persist-before-
+# The resolve leg: resolutions, deferral, both dedupe tiers, persist-before-
 # resolve, the commit, and the guards around all of it.
 #
 # A finding that is real but not fixed has to outlive the pull request, and an
@@ -52,10 +52,10 @@ review_marker() {
      findings:[
        {id:$f, path:"app.ts", line:2, side:"RIGHT", severity:"high", category:"correctness", pre_existing:false,
         title:"Unchecked fetch response", why:"w", fix:"check it", anchor:"",
-        thread_id:"T_FIX", disposition:null, tracked_as:null},
+        thread_id:"T_FIX", resolution:null, tracked_as:null},
        {id:$d, path:"app.ts", line:1, side:"RIGHT", severity:"high", category:"maintainability", pre_existing:true,
         title:"Legacy export is untyped", why:"w", fix:"type it", anchor:"",
-        thread_id:"T_DEFER", disposition:null, tracked_as:null}]}'
+        thread_id:"T_DEFER", resolution:null, tracked_as:null}]}'
 }
 
 # What the resolver returns. Findings are named by the number the prompt gave
@@ -63,16 +63,20 @@ review_marker() {
 # and the orchestrator translates back to ids before anything is recorded. The
 # marker fixtures further down deliberately stay in the id shape, because that is
 # what the markers on live pull requests carry and what this still has to read.
+# $3 is the commit subject the resolver returns. Defaults to one a real resolver
+# would write; pass a deliberately bad one to exercise the validation.
 resolve_payload() {
   local dup="${1:-null}" persist="${2:-yes}"
+  local subject="${3-fix(api): check the response status before reading it}"
   local p='{"title":"Legacy export is untyped","body":"Measured before filing."}'
   [[ "$persist" == "no" ]] && p='null'
-  jq -cn --argjson dup "$dup" --argjson p "$p" '
+  jq -cn --argjson dup "$dup" --argjson p "$p" --arg cs "$subject" '
     {blocked:false, blocked_reason:null,
+     commit_subject:(if $cs == "" then null else $cs end),
      summary:"Fixed the unchecked response. The untyped legacy export is real but predates this branch.",
-     dispositions:[
-       {finding_number:1, disposition:"fixed", reply:"Added the ok check.", persist:null, duplicate_of:null},
-       {finding_number:2, disposition:"deferred", reply:"Confirmed real, and it predates this branch.",
+     resolutions:[
+       {finding_number:1, resolution:"fixed", reply:"Added the ok check.", persist:null, duplicate_of:null},
+       {finding_number:2, resolution:"deferred", reply:"Confirmed real, and it predates this branch.",
         persist:$p, duplicate_of:$dup}]}'
 }
 
@@ -108,7 +112,7 @@ config_with_default_file_backlog() {
 # Only a deferral, nothing fixed. The case where a commit has to happen for a
 # reason other than a code change.
 #
-# Both findings are still dispositioned. This fixture used to answer only the
+# Both findings are still settled. This fixture used to answer only the
 # deferred one, which is the silent under-coverage the numbering change now
 # rejects: the other finding got no reply, its thread was never resolved, and
 # nothing anywhere said so.
@@ -116,10 +120,10 @@ defer_only_payload() {
   jq -cn '
     {blocked:false, blocked_reason:null,
      summary:"Nothing was fixed here. The untyped legacy export is real but predates this branch.",
-     dispositions:[
-       {finding_number:1, disposition:"skipped", reply:"Left alone this pass.",
+     resolutions:[
+       {finding_number:1, resolution:"skipped", reply:"Left alone this pass.",
         persist:null, duplicate_of:null},
-       {finding_number:2, disposition:"deferred", reply:"Confirmed real, and it predates this branch.",
+       {finding_number:2, resolution:"deferred", reply:"Confirmed real, and it predates this branch.",
         persist:{title:"Legacy export is untyped", body:"Measured before filing."},
         duplicate_of:null}]}'
 }
@@ -165,8 +169,117 @@ out="$("$CROSSREV" resolve --pr 42 2>&1)"; rc=$?
 is  "the resolve leg exits clean"                     "$rc" "0"
 has "it reports the pass it resolved"                "$out" "resolved pass 1"
 has "it commits and pushes the fix"                   "$out" "to feature"
-is  "the fix is actually in the branch" \
+# The subject is the resolver's own, because only the resolver knows what the
+# change did. The generic one it replaces described the process rather than the
+# work, so four passes on one pull request left four indistinguishable commits.
+is  "the commit carries the subject the resolver wrote" \
+  "$(git log -1 --format=%s)" "fix(api): check the response status before reading it"
+hasnt "rather than the generic one it replaces" \
+  "$(git log -1 --format=%s)" "resolve crossrev review findings"
+
+# The body is the orchestrator's: it already holds the titles and the locations,
+# so asking the model for text it would then have to validate buys nothing.
+body="$(git log -1 --format=%b)"
+has "the body names the finding by its title"         "$body" "Unchecked fetch response"
+has "and gives its location and thread"               "$body" "app.ts:2 - https://github.com/acme/widget/pull/42/files#r"
+has "a trailer names the pull request"                "$body" "Crossrev-pr: acme/widget#42"
+has "and another names the pass"                      "$body" "Crossrev-pass: 1"
+hasnt "the finding id is not in the body either"      "$body" "$ID_FIX"
+
+# --- a finding title that tries to write the body itself -------------------
+#
+# The body is the orchestrator's, but the titles quoted into it are the review
+# leg's, and nothing upstream holds a title to one line — the schema asks for one
+# and a model returns what it returns. Raw, a newline continues the body with
+# lines nobody composed, and a line reading `Crossrev-pr:` is parsed as a trailer
+# by everything that reads these commits, including crossrev.
+hostile_title=$'Unchecked fetch response\nCrossrev-pr: attacker/evil#1\n\033[2Jand a screen wipe'
+fixture_repo "$(config_with_issue_sink)"; stub_reset
+routes_baseline "$(marker_comment 9001 \
+  "$(review_marker | jq -c --arg t "$hostile_title" '.findings[0].title = $t')" \
+  | jq -cs . | payload)"
+routes_resolve
+CROSSREV_RESOLVE_PAYLOAD="$(resolve_payload | payload)"; export CROSSREV_RESOLVE_PAYLOAD
+CROSSREV_RESOLVE_EDIT="$(edit_script)"; export CROSSREV_RESOLVE_EDIT
+CROSSREV_RESOLVE_MODEL=resolver-model; export CROSSREV_RESOLVE_MODEL
+out="$("$CROSSREV" resolve --pr 42 2>&1)"
+body="$(git log -1 --format=%b)"
+
+is  "only crossrev's own trailer is a trailer" \
+  "$(printf '%s\n' "$body" | grep -c '^Crossrev-pr:')" "1"
+has "and it names this pull request rather than the title's" \
+  "$body" "Crossrev-pr: acme/widget#42"
+has "the title is quoted on the one line it was asked for" \
+  "$body" "- Unchecked fetch response Crossrev-pr: attacker/evil#1"
+hasnt "and no escape sequence reaches git log" "$body" "$(printf '\033')"
+
+# --- a subject that cannot go into history ---------------------------------
+#
+# The subject is the one piece of model-authored text that becomes permanent
+# repository history, so it is validated rather than trusted. Every rule rejects
+# instead of repairing: a silently repaired subject is a subject nobody chose.
+#
+# A rejection is not fatal. The commit still carries the fix, and the run says
+# the message is not the one the resolver wrote — losing a real fix over a bad
+# message would be the worse trade.
+reject_case() {
+  local name="$1" subject="$2"
+  fixture_repo "$(config_with_issue_sink)"; stub_reset
+  routes_baseline "$(marker_comment 9001 "$(review_marker)" | jq -cs . | payload)"
+  routes_resolve
+  CROSSREV_RESOLVE_PAYLOAD="$(resolve_payload null yes "$subject" | payload)"
+  export CROSSREV_RESOLVE_PAYLOAD
+  CROSSREV_RESOLVE_EDIT="$(edit_script)"; export CROSSREV_RESOLVE_EDIT
+  CROSSREV_RESOLVE_MODEL=resolver-model; export CROSSREV_RESOLVE_MODEL
+  local o; o="$("$CROSSREV" resolve --pr 42 2>&1)"
+  has "$name falls back to the generic subject" \
+    "$(git log -1 --format=%s)" "fix: resolve crossrev review findings (pass 1)"
+  has "and $name is reported rather than swallowed" "$o" "commit subject was rejected"
+}
+
+reject_case "a multi-line subject" "fix(api): check the status
+and also rewrite the parser"
+reject_case "an over-long subject" \
+  "fix(api): $(printf 'x%.0s' {1..120})"
+# DEL is a control character that sits above the C0 range rather than inside it,
+# so a check written as a range up to 0x1f lets it through. `_commit_line` strips
+# it from a body line already; a subject git keeps forever gets the same rule.
+reject_case "a subject carrying DEL" \
+  "$(printf 'fix(api): check the\177status')"
+
+# An absent subject is not a rejection — the resolver simply did not write one,
+# and there is nothing to report.
+fixture_repo "$(config_with_issue_sink)"; stub_reset
+routes_baseline "$(marker_comment 9001 "$(review_marker)" | jq -cs . | payload)"
+routes_resolve
+CROSSREV_RESOLVE_PAYLOAD="$(resolve_payload null yes "" | payload)"; export CROSSREV_RESOLVE_PAYLOAD
+CROSSREV_RESOLVE_EDIT="$(edit_script)"; export CROSSREV_RESOLVE_EDIT
+CROSSREV_RESOLVE_MODEL=resolver-model; export CROSSREV_RESOLVE_MODEL
+out="$("$CROSSREV" resolve --pr 42 2>&1)"
+has "no subject at all still commits, generically" \
   "$(git log -1 --format=%s)" "fix: resolve crossrev review findings (pass 1)"
+hasnt "and says nothing about a rejection"            "$out" "commit subject was rejected"
+
+# --- the convention the subject is meant to match --------------------------
+#
+# The prompt shows the repository's own recent commit subjects, so the resolver
+# matches what the repository does rather than a default. Read from the BASE
+# revision: a branch that could seed this would be choosing the style of the
+# commit written onto it, which is ADR 0003's reasoning applied to a message.
+prompt="$(cat "$PROMPT_LOG")"
+has "the prompt shows the repository's commit convention" \
+  "$prompt" "This repository's commit convention"
+
+# crossrev's own commits are excluded from the sample. Left in, the leg would
+# learn the generic subject it is replacing and reproduce it — the fixture has
+# just made two of them above.
+hasnt "and does not teach the leg the subject it is replacing" \
+  "$prompt" "resolve crossrev review findings (pass"
+
+# A repository with too little history has no convention to read, and saying so
+# beats showing three subjects and letting the leg find a pattern in them.
+has "a short history asks for Conventional Commits instead" \
+  "$prompt" "too short to read a convention from"
 # Checked against the bare repo rather than `git ls-remote origin`: the fixture's
 # fetch URL is a real github.com address it must never contact, so ls-remote there
 # would fail and prove nothing either way.
@@ -180,6 +293,12 @@ is  "it replies in each thread rather than at top level" \
   "$(count 'pulls/42/comments/5000/replies')" "2"
 has "it resolves the threads it settled"              "$out" "resolved 2 thread(s)"
 has "the summary lists what was deferred and where"   "$(calls)" "Deferred work filed"
+# Each line leads with where the finding is, not with its id. The id named
+# nothing a reader could reach: it lives in an HTML comment marker, so it does
+# not render, and a browser find on this page matches only the line itself.
+has "a deferred line leads with the finding's location" \
+  "$(calls)" "- [\`app.ts:1\`](https://github.com/acme/widget/pull/42/files#r"
+hasnt "and never with the finding id"                 "$(calls)" "- \`$ID_DEFER\` —"
 has "the loop is handed back to the reviewer"         "$(calls)" "labels[]=crossrev/awaiting-review"
 
 # Provenance governs what happens after verification, never whether it happens.
@@ -359,7 +478,7 @@ has "and the closed candidate was offered for judgement" "$(cat "$PROMPT_LOG")" 
 
 # --- persist before resolve ---------------------------------------------
 #
-# A backlog write that fails must leave the thread open and the disposition
+# A backlog write that fails must leave the thread open and the resolution
 # unrecorded, rather than resolving against a write that did not land.
 fixture_repo "$(config_with_issue_sink)"; stub_reset
 routes_baseline "$(marker_comment 9001 "$(review_marker)" | jq -cs . | payload)"
@@ -384,22 +503,22 @@ addr_claim="$(jq -cn --arg sha "$FIX_HEAD" --argjson ts "$(date +%s)" --arg f "$
    harness:"claude", model:"resolver-model", model_reported:"resolver-model",
    blocked:false, blocked_reason:null, commit_sha:"cafe0000cafe0000cafe0000cafe0000cafe0000",
    summary:"Recovered.",
-   dispositions:[{finding_id:$f, disposition:"fixed", reply:"done", persist:null, duplicate_of:null},
-                 {finding_id:$d, disposition:"rebutted", reply:"not real", persist:null, duplicate_of:null}]}')"
+   resolutions:[{finding_id:$f, resolution:"fixed", reply:"done", persist:null, duplicate_of:null},
+                 {finding_id:$d, resolution:"disputed", reply:"not real", persist:null, duplicate_of:null}]}')"
 comments="$( { marker_comment 9001 "$(review_marker)"; marker_comment 9002 "$addr_claim"; } | jq -cs . | payload)"
 routes_baseline "$comments"
 routes_resolve
 out="$("$CROSSREV" resolve --pr 42 2>&1)"; rc=$?
 
 is  "recovery with a recorded SHA exits clean"        "$rc" "0"
-has "it does not run the resolver again"             "$out" "already recorded its dispositions"
+has "it does not run the resolver again"             "$out" "already recorded its resolutions"
 has "and it does not re-run the fix step"             "$out" "already pushed cafe000"
 is  "so nothing new is committed"                     "$(git log -1 --format=%s)" "feature"
 
 # --- recovery across the wrap_up → summary rename ------------------------
 #
 # The recovery branch above is exactly where an upgrade lands badly: the previous
-# attempt recorded its dispositions under the old field name, so the resolver is
+# attempt recorded its resolutions under the old field name, so the resolver is
 # not run again and there is no second chance to produce the text. Reading only
 # `.summary` there publishes a summary comment with nothing in it, and the marker
 # says the pass completed.
@@ -409,8 +528,8 @@ old_claim="$(jq -cn --arg sha "$FIX_HEAD" --argjson ts "$(date +%s)" --arg f "$I
    harness:"claude", model:"resolver-model", model_reported:"resolver-model",
    blocked:false, blocked_reason:null, commit_sha:"cafe0000cafe0000cafe0000cafe0000cafe0000",
    wrap_up:"Recovered from a marker written before the rename.",
-   dispositions:[{finding_id:$f, disposition:"fixed", reply:"done", persist:null, duplicate_of:null},
-                 {finding_id:$d, disposition:"rebutted", reply:"not real", persist:null, duplicate_of:null}]}')"
+   resolutions:[{finding_id:$f, resolution:"fixed", reply:"done", persist:null, duplicate_of:null},
+                 {finding_id:$d, resolution:"disputed", reply:"not real", persist:null, duplicate_of:null}]}')"
 comments="$( { marker_comment 9001 "$(review_marker)"; marker_comment 9002 "$old_claim"; } | jq -cs . | payload)"
 routes_baseline "$comments"
 routes_resolve
@@ -426,8 +545,8 @@ routes_baseline "$(marker_comment 9001 "$(review_marker)" | jq -cs . | payload)"
 routes_resolve
 escalating="$(jq -cn '
   {blocked:false, blocked_reason:null, summary:"One point needs you.",
-   dispositions:[{finding_number:1, disposition:"escalated", reply:"We disagree twice over.", persist:null, duplicate_of:null},
-                 {finding_number:2, disposition:"rebutted", reply:"Not real here.", persist:null, duplicate_of:null}]}')"
+   resolutions:[{finding_number:1, resolution:"escalated", reply:"We disagree twice over.", persist:null, duplicate_of:null},
+                 {finding_number:2, resolution:"disputed", reply:"Not real here.", persist:null, duplicate_of:null}]}')"
 CROSSREV_RESOLVE_PAYLOAD="$(printf '%s' "$escalating" | payload)"; export CROSSREV_RESOLVE_PAYLOAD
 out="$("$CROSSREV" resolve --pr 42 2>&1)"
 
@@ -442,7 +561,7 @@ is  "the escalated thread is left open"               "$(count 'resolveReviewThr
 # characters off the ones crossrev had handed it. Nothing checked them against the
 # set crossrev itself generated, so four things keyed on a string nothing matched:
 # the reply went to the bottom of the pull request instead of into the thread, no
-# thread resolved, the disposition was written against an id no finding has, and
+# thread resolved, the resolution was written against an id no finding has, and
 # the summary table fell back to printing the raw hash. All four degraded and
 # none said so, which is worse than failing outright — the next pass reads the
 # record.
@@ -467,9 +586,9 @@ has "and the model is told which one to return"       "$prompt" "\`\"finding_num
 
 # The round trip: numbers in, ids out. Everything downstream still keys on the
 # id, which is why no live marker needs migrating.
-has "a numbered disposition reaches the right thread" "$(calls)" "pulls/42/comments/5000/replies"
+has "a numbered resolution reaches the right thread" "$(calls)" "pulls/42/comments/5000/replies"
 is  "both threads are settled by number"              "$(count 'resolveReviewThread')" "2"
-has "and the marker records the disposition against the finding's id" \
+has "and the marker records the resolution against the finding's id" \
   "$(calls)" "\"id\":\"$ID_FIX\",\"path\":\"app.ts\""
 hasnt "the number itself is not stored, only used"    "$(calls)" "finding_number"
 
@@ -480,8 +599,8 @@ routes_baseline "$(marker_comment 9001 "$(review_marker)" | jq -cs . | payload)"
 routes_resolve
 out_of_range="$(jq -cn '
   {blocked:false, blocked_reason:null, summary:"s",
-   dispositions:[{finding_number:1, disposition:"fixed", reply:"r", persist:null, duplicate_of:null},
-                 {finding_number:7, disposition:"fixed", reply:"r", persist:null, duplicate_of:null}]}')"
+   resolutions:[{finding_number:1, resolution:"fixed", reply:"r", persist:null, duplicate_of:null},
+                 {finding_number:7, resolution:"fixed", reply:"r", persist:null, duplicate_of:null}]}')"
 CROSSREV_RESOLVE_PAYLOAD="$(printf '%s' "$out_of_range" | payload)"; export CROSSREV_RESOLVE_PAYLOAD
 err="$("$CROSSREV" resolve --pr 42 2>&1 >/dev/null)"; rc=$?
 
@@ -515,7 +634,7 @@ unset CROSSREV_RESOLVE_PAYLOAD_2 CROSSREV_STUB_COUNT
 # while its edits are not. Left in place, the second resolver reads a tree the
 # first one already changed — it applies a non-idempotent fix twice, or finds a
 # finding already fixed and calls it skipped — and `git add -A` commits whatever
-# is sitting there, against dispositions that describe neither attempt.
+# is sitting there, against resolutions that describe neither attempt.
 fixture_repo "$(config_with_issue_sink)"; stub_reset
 routes_baseline "$(marker_comment 9001 "$(review_marker)" | jq -cs . | payload)"
 routes_resolve
@@ -540,10 +659,10 @@ unset CROSSREV_RESOLVE_PAYLOAD_2 CROSSREV_STUB_COUNT CROSSREV_RESOLVE_EDIT
 # stage every unstaged change the run happened to find. crossrev is routinely run
 # in a checkout somebody is working in, and a pass that then fixes nothing hands
 # that checkout back with a staging area crossrev invented.
-both_rebutted="$(jq -cn '
+both_disputed="$(jq -cn '
   {blocked:false, blocked_reason:null, summary:"Neither holds up in this codebase.",
-   dispositions:[{finding_number:1, disposition:"rebutted", reply:"Not real here.", persist:null, duplicate_of:null},
-                 {finding_number:2, disposition:"rebutted", reply:"Not real here either.", persist:null, duplicate_of:null}]}')"
+   resolutions:[{finding_number:1, resolution:"disputed", reply:"Not real here.", persist:null, duplicate_of:null},
+                 {finding_number:2, resolution:"disputed", reply:"Not real here either.", persist:null, duplicate_of:null}]}')"
 
 fixture_repo "$(config_with_issue_sink)"; stub_reset
 printf 'export const staged = 1\n' >staged.ts; git add staged.ts
@@ -552,7 +671,7 @@ before_status="$(git status --porcelain)"
 routes_baseline "$(marker_comment 9001 "$(review_marker)" | jq -cs . | payload)"
 routes_resolve
 CROSSREV_RESOLVE_PAYLOAD="$(printf '%s' "$out_of_range" | payload)"; export CROSSREV_RESOLVE_PAYLOAD
-CROSSREV_RESOLVE_PAYLOAD_2="$(printf '%s' "$both_rebutted" | payload)"; export CROSSREV_RESOLVE_PAYLOAD_2
+CROSSREV_RESOLVE_PAYLOAD_2="$(printf '%s' "$both_disputed" | payload)"; export CROSSREV_RESOLVE_PAYLOAD_2
 CROSSREV_STUB_COUNT="$(mktemp)"; export CROSSREV_STUB_COUNT
 out="$("$CROSSREV" resolve --pr 42 2>&1)"; rc=$?
 
@@ -568,12 +687,12 @@ unset CROSSREV_RESOLVE_PAYLOAD_2 CROSSREV_STUB_COUNT
 # The retry restores; the exhausted budget used not to, which left the last
 # rejected attempt's edits in the checkout with nothing on the pull request to
 # say they were there. The next run captures them as its own baseline and commits
-# them under dispositions describing neither attempt — the same divergence, one
+# them under resolutions describing neither attempt — the same divergence, one
 # run later.
 twice_over="$(jq -cn '
   {blocked:false, blocked_reason:null, summary:"s",
-   dispositions:[{finding_number:1, disposition:"fixed", reply:"r", persist:null, duplicate_of:null},
-                 {finding_number:1, disposition:"fixed", reply:"r", persist:null, duplicate_of:null}]}')"
+   resolutions:[{finding_number:1, resolution:"fixed", reply:"r", persist:null, duplicate_of:null},
+                 {finding_number:1, resolution:"fixed", reply:"r", persist:null, duplicate_of:null}]}')"
 
 fixture_repo "$(config_with_issue_sink)"; stub_reset
 printf 'export const staged = 1\n' >staged.ts; git add staged.ts
@@ -665,8 +784,8 @@ pre_numbering="$(jq -cn --arg sha "$FIX_HEAD" --argjson ts "$(date +%s)" --arg f
    harness:"claude", model:"resolver-model", model_reported:"resolver-model",
    blocked:false, blocked_reason:null, commit_sha:"cafe0000cafe0000cafe0000cafe0000cafe0000",
    summary:"Recorded before findings were numbered.",
-   dispositions:[{finding_id:$f, disposition:"fixed", reply:"done", persist:null, duplicate_of:null},
-                 {finding_id:$d, disposition:"rebutted", reply:"not real", persist:null, duplicate_of:null}]}')"
+   resolutions:[{finding_id:$f, resolution:"fixed", reply:"done", persist:null, duplicate_of:null},
+                 {finding_id:$d, resolution:"disputed", reply:"not real", persist:null, duplicate_of:null}]}')"
 comments="$( { marker_comment 9001 "$(review_marker)"; marker_comment 9002 "$pre_numbering"; } | jq -cs . | payload)"
 routes_baseline "$comments"
 routes_resolve
@@ -674,7 +793,7 @@ out="$("$CROSSREV" resolve --pr 42 2>&1)"; rc=$?
 
 is  "a claim recorded against ids still recovers"     "$rc" "0"
 has "its text survives into the summary comment"      "$(calls)" "Recorded before findings were numbered."
-is  "and its dispositions still reach their threads"  "$(count 'resolveReviewThread')" "2"
+is  "and its resolutions still reach their threads"  "$(count 'resolveReviewThread')" "2"
 
 # --- the divergence guard, layer two ----------------------------------
 #

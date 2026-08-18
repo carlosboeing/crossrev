@@ -18,7 +18,7 @@ Anywhere that state could live outside the pull request is a place it can disagr
 
 **State lives on the pull request, in labels and in markers.** There is no database, no cache and no local state file. Markers are HTML comments embedded in comment bodies — invisible in the GitHub UI, readable by anyone who views the source.
 
-A marker carries the protocol version, the leg, the pass number, its own state, timestamps, the run id, the head SHA, the harness and model and effort and endpoint, the model that actually answered, the token cost, the verdict, and the findings or dispositions.
+A marker carries the protocol version, the leg, the pass number, its own state, timestamps, the run id, the head SHA, the harness and model and effort and endpoint, the model that actually answered, the token cost, the verdict, and the findings or resolutions.
 
 Three mechanisms make a leg survive being run twice:
 

@@ -24,7 +24,7 @@ flowchart TD
     review -->|"prompt, diff, prior threads"| ra["Reviewer harness"]
     resolve -->|"prompt, diff, findings"| sa["Resolver harness"]
     ra -->|"findings JSON"| review
-    sa -->|"dispositions JSON"| resolve
+    sa -->|"resolutions JSON"| resolve
 
     orch -->|"comments, replies, labels, commits"| gh["The pull request"]
     gh -->|"markers are the state"| ctx
@@ -51,7 +51,7 @@ flowchart TD
 1. Same context load, same policy source.
 2. Find the newest review pass's marker and read its findings.
 3. Post its own claim, then invoke the resolver with the diff, the findings and the prior threads.
-4. For each finding: reply in-thread, resolve the thread where the disposition says to, and commit a fix where policy allows one.
+4. For each finding: reply in-thread, resolve the thread where the resolution says to, and commit a fix where policy allows one.
 5. Persist deferred findings to the backlog.
 6. Push, behind the branch guard. Post the summary. Set the labels.
 
@@ -61,11 +61,11 @@ flowchart TD
 
 There is no database, no cache and no local state file. Everything the loop knows is on the pull request, in **markers** — HTML comments embedded in comment bodies, invisible in the UI and readable by anyone who views the source.
 
-A marker carries the protocol version, the leg, the pass number, its state, timestamps, the run id, the head SHA, the harness and model and effort and endpoint, the model that actually answered, the token cost, the verdict, and the findings or dispositions.
+A marker carries the protocol version, the leg, the pass number, its state, timestamps, the run id, the head SHA, the harness and model and effort and endpoint, the model that actually answered, the token cost, the verdict, and the findings or resolutions.
 
 | Prefix | Where | What it records |
 |---|---|---|
-| `<!-- crossrev:` | The pass summary comment | The whole pass: verdict, findings, dispositions, cost |
+| `<!-- crossrev:` | The pass summary comment | The whole pass: verdict, findings, resolutions, cost |
 | `<!-- crossrev:f` | Each inline comment and each reply | One finding id, its pass, and the leg that wrote it |
 
 Three properties follow, and each one is why a marker exists rather than a ledger:
