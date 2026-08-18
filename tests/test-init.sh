@@ -143,6 +143,9 @@ hasnt "the unverified effective-permission endpoint is not guessed" \
 is  "the action is pinned to a 40-character SHA" \
   "$(grep -oE 'uses: carlosboeing/crossrev@[0-9a-f]{40}' <<<"$wf" | wc -l | tr -d ' ')" "1"
 hasnt "and never to a floating tag" "$wf" "carlosboeing/crossrev@v"
+expected_ref="$(git -C "$HERE/.." describe --tags 2>/dev/null || printf 'untagged')"
+has "the source pin comment is the described ref rather than a stale version tag" \
+  "$wf" "# $expected_ref"
 # The retired apparatus, asserted gone rather than assumed gone.
 hasnt "no second checkout of the source survives"   "$wf" ".crossrev-src"
 hasnt "and no deploy key is referenced"             "$wf" "CROSSREV_SOURCE_KEY"
