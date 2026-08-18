@@ -1191,12 +1191,11 @@ _blob_url() {
 # spills the rest of the URL into the cell around it, and a `|` splits the table
 # row the link sits in.
 #
-# The two parentheses are encoded here rather than by `@uri`, which follows
-# JavaScript's encodeURIComponent and leaves them alone — correct for a query
-# parameter, and wrong for a destination Markdown reads the brackets of.
+# `@uri` covers all three. It is stricter than JavaScript's encodeURIComponent,
+# which leaves the parentheses alone — a difference worth knowing, because the
+# rule that holds for one does not hold for the other.
 _url_path() {
-  jq -rn --arg p "$1" '$p | split("/") | map(@uri) | join("/")
-                          | gsub("\\("; "%28") | gsub("\\)"; "%29")'
+  jq -rn --arg p "$1" '$p | split("/") | map(@uri) | join("/")'
 }
 
 # A link to the review thread a finding was raised in.
