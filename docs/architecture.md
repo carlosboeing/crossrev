@@ -248,7 +248,7 @@ tests/           the stubbed-gh suite. tests/run.sh runs all of it
 
 ## The test suite
 
-`tests/run.sh` is 849 offline assertions with no network, no model and no pull request. It stubs `gh` and `claude` onto PATH and builds throwaway git repositories with real histories and real bare origins, so the assertions are about what CrossRev actually did rather than what it printed.
+`tests/run.sh` runs the whole suite offline, with no network, no model and no pull request. It stubs `gh` and `claude` onto PATH and builds throwaway git repositories with real histories and real bare origins, so the assertions are about what CrossRev actually did rather than what it printed.
 
 `tests/stub/codex` is a deliberate tripwire: it exits loudly instead of running, because the no-config default names codex as reviewer, and a fixture whose config failed to load would otherwise reach the real CLI and make a real billed call.
 
