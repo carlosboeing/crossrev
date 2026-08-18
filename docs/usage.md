@@ -48,6 +48,32 @@ The review leg writes:
 
 The resolve leg adds threaded replies, resolves the threads it settled, commits any fixes, files deferred defects to the configured backlog, and posts its own summary comment.
 
+### The commits CrossRev makes
+
+A pass that changes code makes one commit and pushes it to the pull request's own branch.
+
+**The resolver writes the subject**, because only it knows what the change did. It is told to follow your repository's commit convention, which CrossRev works out from your twenty most recent commit subjects, read from the pull request's base revision so a branch cannot seed the style of the commit written onto it. A `.gitmessage` template is read from the same revision. A repository with fewer than five subjects to sample has no convention to read, and Conventional Commits is used instead.
+
+CrossRev's own past commits are excluded from that sample, so it does not learn from the generic message this replaced.
+
+**CrossRev composes the body**: one line per finding fixed, each with its location and a link to the review thread that settled it, then two trailers.
+
+```
+fix(api): check the response status before reading it
+
+- Response used without checking ok
+  src/api.ts:42 - https://github.com/acme/widget/pull/7/files#r2298471023
+
+Crossrev-pr: acme/widget#7
+Crossrev-pass: 1
+```
+
+The commits are also identifiable by author — they are made as `crossrev`, so `git log --author=crossrev` finds every one.
+
+A subject that is not a single line, runs past 100 characters, or carries control characters is refused. The commit still happens, with a generic subject, and the run says so rather than passing it off as the resolver's own.
+
+A pass that fixed nothing but recorded deferred work commits under `chore: record deferred crossrev findings`, which is already an accurate description of what happened.
+
 ### How a finding is named
 
 Wherever CrossRev refers to a finding in something you read, it names it by **where the code is** — `path:line`, in a column headed Location — and links it.

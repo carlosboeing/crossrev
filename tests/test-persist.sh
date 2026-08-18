@@ -63,12 +63,16 @@ review_marker() {
 # and the orchestrator translates back to ids before anything is recorded. The
 # marker fixtures further down deliberately stay in the id shape, because that is
 # what the markers on live pull requests carry and what this still has to read.
+# $3 is the commit subject the resolver returns. Defaults to one a real resolver
+# would write; pass a deliberately bad one to exercise the validation.
 resolve_payload() {
   local dup="${1:-null}" persist="${2:-yes}"
+  local subject="${3-fix(api): check the response status before reading it}"
   local p='{"title":"Legacy export is untyped","body":"Measured before filing."}'
   [[ "$persist" == "no" ]] && p='null'
-  jq -cn --argjson dup "$dup" --argjson p "$p" '
+  jq -cn --argjson dup "$dup" --argjson p "$p" --arg cs "$subject" '
     {blocked:false, blocked_reason:null,
+     commit_subject:(if $cs == "" then null else $cs end),
      summary:"Fixed the unchecked response. The untyped legacy export is real but predates this branch.",
      resolutions:[
        {finding_number:1, resolution:"fixed", reply:"Added the ok check.", persist:null, duplicate_of:null},
@@ -165,8 +169,85 @@ out="$("$CROSSREV" resolve --pr 42 2>&1)"; rc=$?
 is  "the resolve leg exits clean"                     "$rc" "0"
 has "it reports the pass it resolved"                "$out" "resolved pass 1"
 has "it commits and pushes the fix"                   "$out" "to feature"
-is  "the fix is actually in the branch" \
+# The subject is the resolver's own, because only the resolver knows what the
+# change did. The generic one it replaces described the process rather than the
+# work, so four passes on one pull request left four indistinguishable commits.
+is  "the commit carries the subject the resolver wrote" \
+  "$(git log -1 --format=%s)" "fix(api): check the response status before reading it"
+hasnt "rather than the generic one it replaces" \
+  "$(git log -1 --format=%s)" "resolve crossrev review findings"
+
+# The body is the orchestrator's: it already holds the titles and the locations,
+# so asking the model for text it would then have to validate buys nothing.
+body="$(git log -1 --format=%b)"
+has "the body names the finding by its title"         "$body" "Unchecked fetch response"
+has "and gives its location and thread"               "$body" "app.ts:2 - https://github.com/acme/widget/pull/42/files#r"
+has "a trailer names the pull request"                "$body" "Crossrev-pr: acme/widget#42"
+has "and another names the pass"                      "$body" "Crossrev-pass: 1"
+hasnt "the finding id is not in the body either"      "$body" "$ID_FIX"
+
+# --- a subject that cannot go into history ---------------------------------
+#
+# The subject is the one piece of model-authored text that becomes permanent
+# repository history, so it is validated rather than trusted. Every rule rejects
+# instead of repairing: a silently repaired subject is a subject nobody chose.
+#
+# A rejection is not fatal. The commit still carries the fix, and the run says
+# the message is not the one the resolver wrote — losing a real fix over a bad
+# message would be the worse trade.
+reject_case() {
+  local name="$1" subject="$2"
+  fixture_repo "$(config_with_issue_sink)"; stub_reset
+  routes_baseline "$(marker_comment 9001 "$(review_marker)" | jq -cs . | payload)"
+  routes_resolve
+  CROSSREV_RESOLVE_PAYLOAD="$(resolve_payload null yes "$subject" | payload)"
+  export CROSSREV_RESOLVE_PAYLOAD
+  CROSSREV_RESOLVE_EDIT="$(edit_script)"; export CROSSREV_RESOLVE_EDIT
+  CROSSREV_RESOLVE_MODEL=resolver-model; export CROSSREV_RESOLVE_MODEL
+  local o; o="$("$CROSSREV" resolve --pr 42 2>&1)"
+  has "$name falls back to the generic subject" \
+    "$(git log -1 --format=%s)" "fix: resolve crossrev review findings (pass 1)"
+  has "and $name is reported rather than swallowed" "$o" "commit subject was rejected"
+}
+
+reject_case "a multi-line subject" "fix(api): check the status
+and also rewrite the parser"
+reject_case "an over-long subject" \
+  "fix(api): $(printf 'x%.0s' {1..120})"
+
+# An absent subject is not a rejection — the resolver simply did not write one,
+# and there is nothing to report.
+fixture_repo "$(config_with_issue_sink)"; stub_reset
+routes_baseline "$(marker_comment 9001 "$(review_marker)" | jq -cs . | payload)"
+routes_resolve
+CROSSREV_RESOLVE_PAYLOAD="$(resolve_payload null yes "" | payload)"; export CROSSREV_RESOLVE_PAYLOAD
+CROSSREV_RESOLVE_EDIT="$(edit_script)"; export CROSSREV_RESOLVE_EDIT
+CROSSREV_RESOLVE_MODEL=resolver-model; export CROSSREV_RESOLVE_MODEL
+out="$("$CROSSREV" resolve --pr 42 2>&1)"
+has "no subject at all still commits, generically" \
   "$(git log -1 --format=%s)" "fix: resolve crossrev review findings (pass 1)"
+hasnt "and says nothing about a rejection"            "$out" "commit subject was rejected"
+
+# --- the convention the subject is meant to match --------------------------
+#
+# The prompt shows the repository's own recent commit subjects, so the resolver
+# matches what the repository does rather than a default. Read from the BASE
+# revision: a branch that could seed this would be choosing the style of the
+# commit written onto it, which is ADR 0003's reasoning applied to a message.
+prompt="$(cat "$PROMPT_LOG")"
+has "the prompt shows the repository's commit convention" \
+  "$prompt" "This repository's commit convention"
+
+# crossrev's own commits are excluded from the sample. Left in, the leg would
+# learn the generic subject it is replacing and reproduce it — the fixture has
+# just made two of them above.
+hasnt "and does not teach the leg the subject it is replacing" \
+  "$prompt" "resolve crossrev review findings (pass"
+
+# A repository with too little history has no convention to read, and saying so
+# beats showing three subjects and letting the leg find a pattern in them.
+has "a short history asks for Conventional Commits instead" \
+  "$prompt" "too short to read a convention from"
 # Checked against the bare repo rather than `git ls-remote origin`: the fixture's
 # fetch URL is a real github.com address it must never contact, so ls-remote there
 # would fail and prove nothing either way.

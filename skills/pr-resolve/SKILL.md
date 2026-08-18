@@ -119,6 +119,18 @@ One comment summarising what happened, in Markdown, written for a collaborator w
 
 The orchestrator wraps it: the alert at the top, the resolution table, the run details, the machine-readable marker and the `## Deferred work filed` list. **Do not write any of them yourself** — and you could not write the last one anyway, because the filing has not happened yet and you do not know the issue numbers.
 
+## The commit subject
+
+You changed code, so there will be a commit, and you write its subject. Put it in `commit_subject`. Null when you fixed nothing, because then there is no commit.
+
+**Say what changed.** `fix(auth): compare tokens in constant time` tells someone reading `git log` in a year what happened. `fix: resolve review findings` tells them a process ran. The second is what this replaces.
+
+**Follow the repository's own convention.** The prompt shows you its recent commit subjects, taken from the base revision. Match what they do — the prefix, the mood, the length, the capitalisation. Where a repository has too little history to read a convention from, the prompt says so and you use Conventional Commits.
+
+Where the recent subjects disagree with something the repository has written down, follow the subjects. Practice is the better evidence.
+
+**One line, and only the subject.** The orchestrator composes the body from the findings you fixed, so a newline in this field is rejected and the commit falls back to a generic subject. Several unrelated fixes in one pass get one subject naming the theme; the body names each finding.
+
 ## Output
 
 Return JSON matching the supplied schema and nothing else. One entry in `resolutions` per finding you were given — no more, no fewer. A finding you cannot evaluate is `escalated` with a reply saying why, not an omission.

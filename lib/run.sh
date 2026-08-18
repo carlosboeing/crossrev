@@ -1430,6 +1430,7 @@ leg_resolve() {
       | .endpoint = (if $ep == "" then null else $ep end)
       | .blocked = false | .blocked_reason = null | .commit_sha = null
       | .model_reported = null | .tokens = null | .summary = "" | .resolutions = []
+      | .commit_subject = null
       | del(.unthreaded)' <<<"$redrive")"
     ui_say "Pass $pass's resolve leg ended without settling its findings — driving pass $pass again."
     gh_comment_edit "$CTX_REPO" "$comment_id" \
@@ -1442,7 +1443,8 @@ Driving the pass again: the previous attempt ended without settling its findings
       ui_warn "abandoning the unfinished pass-$pass resolve — $stale" \
         "Resuming it would reconcile replies against a revision that has moved. Starting the pass again instead."
       marker="$(jq -c --argjson ts "$(date +%s)" --arg sha "$CTX_HEAD_SHA" \
-        '.ts = $ts | .head_sha = $sha | .resolutions = [] | .commit_sha = null' <<<"$claim")"
+        '.ts = $ts | .head_sha = $sha | .resolutions = [] | .commit_sha = null
+         | .commit_subject = null' <<<"$claim")"
     else
       marker="$claim"
       ui_say "Resuming pass $pass — the previous attempt recorded $(jq -r '(.resolutions // []) | length' <<<"$marker") resolution(s)."
@@ -1456,7 +1458,8 @@ Driving the pass again: the previous attempt ended without settling its findings
         effort:(if $e == "" then null else $e end),
         endpoint:(if $ep == "" then null else $ep end),
         model_reported:null, tokens:null,
-        blocked:false, blocked_reason:null, commit_sha:null, summary:"", resolutions:[]}')"
+        blocked:false, blocked_reason:null, commit_sha:null, commit_subject:null,
+        summary:"", resolutions:[]}')"
     comment_id="$(gh_comment_create "$CTX_REPO" "$CTX_PR" \
 "**crossrev — resolving pass $pass of $CTX_MAX_PASSES_PER_CYCLE**
 
@@ -1467,7 +1470,7 @@ Verifying each finding against the codebase. This comment becomes the pass summa
   marker="$(jq -c --argjson id "$comment_id" '. + {comment_id: $id}' <<<"$marker")"
   run_checkpoint
 
-  local threads resolutions blocked blocked_reason summary model_reported tokens
+  local threads resolutions blocked blocked_reason summary model_reported tokens commit_subject
   threads="$(gh_review_threads "$CTX_REPO" "$CTX_PR")"
 
   # Backfilled rather than trusted from the review marker, because a pull request
@@ -1536,10 +1539,16 @@ Verifying each finding against the codebase. This comment becomes the pass summa
     [[ "$CTX_BACKLOG" == "repository" ]] && exclude=("$CTX_BACKLOG_PATH" .crossrev)
     gh_pr_diff "$CTX_REPO" "$CTX_PR" "$CTX_BASE_SHA" "$CTX_HEAD_SHA" ${exclude[@]+"${exclude[@]}"} >"$diff_file"
 
+    # `base_sha` and `crossrev_email` are here for the commit convention the
+    # prompt shows: the subjects are sampled from the base revision, and the
+    # leg's own past commits are excluded so it does not learn the generic
+    # subject it is replacing.
     meta="$(jq -cn --arg repo "$CTX_REPO" --argjson pr "$CTX_PR" --argjson pass "$pass" \
       --argjson max "$CTX_MAX_PASSES_PER_CYCLE" --arg sha "$CTX_HEAD_SHA" --arg fa "$CTX_MIN_FIX_SEVERITY" \
-      --arg backlog "$CTX_BACKLOG" \
-      '{repo:$repo, pr:$pr, pass:$pass, max_passes_per_cycle:$max, head_sha:$sha, min_fix_severity:$fa, backlog:$backlog}')"
+      --arg backlog "$CTX_BACKLOG" --arg base "$CTX_BASE_SHA" \
+      --arg mine "${CROSSREV_GIT_EMAIL:-crossrev@users.noreply.github.com}" \
+      '{repo:$repo, pr:$pr, pass:$pass, max_passes_per_cycle:$max, head_sha:$sha, min_fix_severity:$fa,
+        backlog:$backlog, base_sha:$base, crossrev_email:$mine}')"
 
     prompt_resolve "$prompt_file" "$ROOT/skills/pr-resolve/SKILL.md" "$diff_file" \
       "$meta" "$enriched" "$threads" "$candidates"
@@ -1578,11 +1587,18 @@ Verifying each finding against the codebase. This comment becomes the pass summa
     blocked="$(jq -r '.blocked // false' <<<"$payload")"
     blocked_reason="$(jq -r '.blocked_reason // "null"' <<<"$payload")"
     tokens="$(jq -c '.tokens // null' "$envelope_file")"
+    # Onto the marker rather than into a local, for the reason every other field
+    # here is: the commit happens after a checkpoint, so a run that dies between
+    # the two comes back needing the subject the resolver wrote, and a local is
+    # gone by then.
+    commit_subject="$(jq -r '.commit_subject // ""' <<<"$payload")"
     rm -rf "$tmp"
 
     marker="$(jq -c --argjson d "$resolutions" --arg w "$summary" --argjson b "$blocked" \
-      --arg br "$blocked_reason" --arg mr "$model_reported" --argjson tk "${tokens:-null}" '
+      --arg br "$blocked_reason" --arg mr "$model_reported" --argjson tk "${tokens:-null}" \
+      --arg cs "$commit_subject" '
       .resolutions = $d | .summary = $w | .blocked = $b | .tokens = $tk
+      | .commit_subject = (if $cs == "" then null else $cs end)
       | .blocked_reason = (if $br == "null" then null else $br end)
       | .model_reported = (if $mr == "null" then null else $mr end)' <<<"$marker")"
     gh_comment_edit "$CTX_REPO" "$comment_id" \
@@ -1692,14 +1708,29 @@ Resolutions recorded; committing and replying now.$(state_marker_encode "$(jq -c
     ui_say "The previous attempt already pushed ${commit_sha:0:7}, so the fix step is skipped."
   elif (( fixed_count > 0 || backlog_wrote )); then
     commit_sha=""
+    local subject
     if (( fixed_count > 0 )); then
-      commit_msg="fix: resolve crossrev review findings (pass $pass)
+      # The model's subject, or the generic one. A subject that fails validation
+      # is reported rather than swallowed: the commit still lands, and the run
+      # says the message is not the one the resolver wrote.
+      subject="$(jq -r '.commit_subject // ""' <<<"$marker")"
+      if ! _commit_subject_ok "$subject"; then
+        [[ -z "$subject" || "$subject" == "null" ]] || ui_warn \
+          "the resolver's commit subject was rejected, so the commit carries a generic one" \
+          "A subject must be one line of at most 100 characters, with no control characters. The fix itself is unaffected."
+        subject="fix: resolve crossrev review findings (pass $pass)"
+      fi
+      commit_msg="$subject
 
-$(jq -r '[.[] | select(.resolution == "fixed") | "- " + .finding_id] | join("\n")' <<<"$resolutions")"
+$(_commit_body "$resolutions" "$findings" fixed "$CTX_HEAD_SHA" "$pass")"
     else
+      # A deferral-only pass keeps a fixed subject. "Record deferred findings" is
+      # already an accurate description of what happened — no code changed — so a
+      # second piece of model-authored text would widen what has to be validated
+      # and say nothing new.
       commit_msg="chore: record deferred crossrev findings (pass $pass)
 
-$(jq -r '[.[] | select(.resolution == "deferred") | "- " + .finding_id] | join("\n")' <<<"$resolutions")"
+$(_commit_body "$resolutions" "$findings" deferred "$CTX_HEAD_SHA" "$pass")"
     fi
     commit_sha="$(gh_commit_and_push "$CTX_HEAD_BRANCH" "$commit_msg" "$CTX_HEAD_SHA" "$push_remote" "$CTX_HEAD_REPO")"
     if [[ -n "$commit_sha" ]]; then
@@ -2050,6 +2081,64 @@ _resolutions_table() {
       "$(jq -r .resolution <<<"$d")"
   done
   printf '\n'
+}
+
+# The subject line of a resolve leg's commit, or nothing.
+#
+# The model writes it, because only the model knows what the change did. That
+# makes it the one piece of model-authored text that becomes permanent history,
+# so it is validated rather than trusted, and every rule below rejects instead of
+# repairing: a silently repaired subject is a subject nobody chose.
+#
+# A rejected subject is not fatal. The caller falls back to the generic message
+# and says so — a bad commit subject is not worth failing a pass that fixed real
+# defects.
+_commit_subject_ok() {
+  local s="$1"
+  [[ -n "$s" && "$s" != "null" ]] || return 1
+  # A newline would turn the rest into a body the orchestrator did not compose.
+  [[ "$s" != *$'\n'* ]] || return 1
+  # Control characters reach `git log` and every terminal that renders it.
+  [[ "$s" != *[$'\x01'-$'\x1f']* ]] || return 1
+  # A safety net above every convention's own limit rather than a convention of
+  # its own: the repository's subjects are what the model is told to match.
+  (( ${#s} <= 100 )) || return 1
+  # Marker prefixes are matched literally wherever crossrev reads its own state.
+  [[ "$s" != *"$CROSSREV_MARKER_PREFIX"* ]] || return 1
+  return 0
+}
+
+# The body of a resolve leg's commit: what was settled, where, and how to reach
+# the conversation that settled it.
+#
+# Composed by the orchestrator rather than by the model. It already holds the
+# titles and the locations, so asking for text it would then have to validate
+# buys nothing — and the reasoning belongs in the thread, which the body links.
+_commit_body() {
+  local resolutions="$1" findings="$2" want="$3" sha="$4" pass="$5"
+  local n i r id f title path line root
+  n="$(jq 'length' <<<"$resolutions")"
+  for (( i = 0; i < n; i++ )); do
+    r="$(jq -c ".[$i]" <<<"$resolutions")"
+    [[ "$(jq -r .resolution <<<"$r")" == "$want" ]] || continue
+    id="$(jq -r .finding_id <<<"$r")"
+    f="$(jq -c --arg id "$id" 'map(select(.id == $id)) | first // {}' <<<"$findings")"
+    title="$(jq -r '.title // ""' <<<"$f")"
+    path="$(jq -r '.path // ""' <<<"$f")"
+    line="$(jq -r '.line // ""' <<<"$f")"
+    root="$(jq -r '.root_comment_id // ""' <<<"$f")"
+    printf -- '- %s\n' "${title:-$id}"
+    [[ -n "$path" && "$path" != "null" ]] || continue
+    if [[ -n "$root" && "$root" != "null" ]]; then
+      printf '  %s:%s - %s\n' "$path" "$line" "$(_thread_url "$root")"
+    else
+      printf '  %s:%s - %s\n' "$path" "$line" "$(_blob_url "$sha" "$path" "$line")"
+    fi
+  done
+  # Trailers rather than a sentence, so `git log --grep` and any tool that parses
+  # them can read what the subject no longer says. The committer identity already
+  # marks these as crossrev's; these say which pull request and which pass.
+  printf '\nCrossrev-pr: %s#%s\nCrossrev-pass: %s\n' "$CTX_REPO" "$CTX_PR" "$pass"
 }
 
 # The resolve leg's summary comment. Takes the marker for the same reason the
