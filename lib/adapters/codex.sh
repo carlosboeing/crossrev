@@ -33,6 +33,12 @@ adapter_codex() {
   # a file, so this buys the token counts without changing where the payload comes
   # from. Codex carries them on turn.completed and nothing else does.
   local -a args=(exec --skip-git-repo-check --json -o "$out_file")
+  local sandbox_args
+  if ! sandbox_args="$(sandbox_args_for codex)" || [[ -z "$sandbox_args" ]]; then
+    ui_die "could not resolve hardening arguments for codex" \
+      "sandbox_args_for in lib/sandbox.sh must return --ignore-user-config for codex. Refusing to run codex unhardened."
+  fi
+  args+=("$sandbox_args")
 
   # `codex exec` sandboxes to read-only by default, so a resolve leg on this
   # harness could verify a finding and then fail to apply the fix. workspace-write

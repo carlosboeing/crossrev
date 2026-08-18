@@ -32,6 +32,8 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$HERE/../lib/ui.sh"
 # shellcheck source=../lib/credentials.sh
 source "$HERE/../lib/credentials.sh"
+# shellcheck source=../lib/sandbox.sh
+source "$HERE/../lib/sandbox.sh"
 # An adapter's no-output path reads the useful end of stderr through
 # legs_harness_error, and the recorder below drives codex and agy straight down
 # it. bin/crossrev sources lib/legs.sh ahead of the adapters for that reason
@@ -141,6 +143,21 @@ has  "a writing codex leg gets a workspace-writable sandbox" "$(probe codex yes)
 # means a machine-level setting cannot quietly hand the review leg a writable
 # tree.
 has  "a reading codex leg is pinned read-only"   "$(probe codex no)" "--sandbox read-only"
+has  "a reading codex leg ignores user config"   "$(probe codex no)" "--ignore-user-config"
+has  "a writing codex leg ignores user config"   "$(probe codex yes)" "--ignore-user-config"
+hasnt "a reading claude leg ignores no user config" "$(probe claude no)" "--ignore-user-config"
+hasnt "a reading agy leg ignores no user config"    "$(probe agy no)" "--ignore-user-config"
+
+# An unresolvable codex hardening argument halts loudly rather than running unhardened.
+err_missing="$(
+  (
+    PATH="$FAKE:$PATH"
+    sandbox_args_for() { return 1; }
+    adapter_codex "$PROMPT_FILE" "" "$PWD" "" "" "" "no"
+  ) 2>&1 || true
+)"
+has "a missing codex hardening argument fails loudly" \
+  "$err_missing" "could not resolve hardening arguments for codex"
 
 has  "a writing agy leg accepts edits"           "$(probe agy yes)" "--mode accept-edits"
 hasnt "a reading agy leg asks for no mode at all" "$(probe agy no)" "--mode"
