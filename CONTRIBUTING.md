@@ -79,6 +79,9 @@ Do not "fix" it.
    `chore`, `perf`, `ci`.
 4. If the change affects user-facing behaviour, update `CHANGELOG.md`,
    `docs/ROADMAP.md`, and any relevant doc or ADR in the **same commit set**.
+   Touching `README.md` needs a `CHANGELOG.md` entry too, even when no
+   behaviour changed: npm packs it into the published tarball, so
+   `scripts/check-changelog.sh` fails the pull request without one.
 5. Open a pull request using the template. CI must be green before merge.
 
 ## Filing an issue

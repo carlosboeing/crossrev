@@ -26,7 +26,7 @@ That raised two questions that had never needed answering: how often a version g
 
 **Major is never chosen automatically.** While the version is `0.x`, semver already permits a breaking change inside a minor bump, and `v1.0.0` is gated on proving automated mode end to end ([ROADMAP](../ROADMAP.md)). That is a conversation, not a commit type. The script reports a breaking change and declines to act on it.
 
-**CI enforces the thing that actually gets forgotten.** `scripts/check-changelog.sh` fails a pull request that changes what ships without adding anything under `## [Unreleased]`. It derives the shipped set from `npm pack` rather than restating it, so it cannot drift from the `files` allowlist. Changes to docs, tests or CI configuration are exempt automatically, because they do not ship.
+**CI enforces the thing that actually gets forgotten.** `scripts/check-changelog.sh` fails a pull request that changes what ships without adding anything under `## [Unreleased]`. It derives the shipped set from `npm pack` rather than restating it, so it cannot drift from the `files` allowlist. Changes to tests or CI configuration are exempt automatically, because they do not ship. Documentation is not exempt as a category: `README.md` is in the published tarball, as is every Markdown file under `skills/`.
 
 **The changelog stays hand-written.**
 
