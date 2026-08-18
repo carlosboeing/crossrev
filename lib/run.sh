@@ -2098,8 +2098,11 @@ _commit_subject_ok() {
   [[ -n "$s" && "$s" != "null" ]] || return 1
   # A newline would turn the rest into a body the orchestrator did not compose.
   [[ "$s" != *$'\n'* ]] || return 1
-  # Control characters reach `git log` and every terminal that renders it.
-  [[ "$s" != *[$'\x01'-$'\x1f']* ]] || return 1
+  # Control characters reach `git log` and every terminal that renders it. DEL
+  # is named beside the C0 range rather than left out of it: it sits above the
+  # range at 0x7f, and `_commit_line` below already strips it from a body line.
+  # A subject git records forever is no better a place for it than a body is.
+  [[ "$s" != *[$'\x01'-$'\x1f'$'\x7f']* ]] || return 1
   # A safety net above every convention's own limit rather than a convention of
   # its own: the repository's subjects are what the model is told to match.
   (( ${#s} <= 100 )) || return 1

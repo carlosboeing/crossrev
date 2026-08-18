@@ -241,6 +241,11 @@ reject_case "a multi-line subject" "fix(api): check the status
 and also rewrite the parser"
 reject_case "an over-long subject" \
   "fix(api): $(printf 'x%.0s' {1..120})"
+# DEL is a control character that sits above the C0 range rather than inside it,
+# so a check written as a range up to 0x1f lets it through. `_commit_line` strips
+# it from a body line already; a subject git keeps forever gets the same rule.
+reject_case "a subject carrying DEL" \
+  "$(printf 'fix(api): check the\177status')"
 
 # An absent subject is not a rejection — the resolver simply did not write one,
 # and there is nothing to report.
