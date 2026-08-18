@@ -375,8 +375,10 @@ legs_resolve_push_repo() {
   urls="$(git config --get-all "remote.${remote}.pushurl" 2>/dev/null || true)"
   [[ -n "$urls" ]] || urls="$(git config --get-all "remote.${remote}.url" 2>/dev/null || true)"
 
+  local cfg_urls=()
   while IFS= read -r url; do
     [[ -n "$url" ]] || continue
+    cfg_urls+=("$url")
     slug="$(legs_github_slug "$url")" || ui_die \
       "remote '$remote' pushes to '$url', which is not a github.com repository URL" \
       "CrossRev checks where a fix will land before it leaves the machine, and it can only do that for a github.com URL. Check \`git config --get-all remote.$remote.pushurl\`."
@@ -393,6 +395,29 @@ EOF
 
   # shellcheck disable=SC2034  # read by run.sh and github.sh
   LEGS_PUSH_REPO="$repo"
+
+  # Warn when a pushInsteadOf rewrite redirects an approved push URL.
+  # This is partial: the push still proceeds to the rewritten destination.
+  # Effective URLs are only used to decide whether to warn, not for validation.
+  # A rewrite only reaches this code when no explicit pushurl is set.
+  # The two URL lists therefore come from the same source and pair positionally.
+  local eff_arr=() eff_urls eff_url i cfg eff
+  eff_urls="$(git remote get-url --push --all "$remote" 2>/dev/null || true)"
+  while IFS= read -r eff_url; do
+    [[ -n "$eff_url" ]] && eff_arr+=("$eff_url")
+  done <<EOF
+$eff_urls
+EOF
+
+  for (( i=0; i<${#cfg_urls[@]}; i++ )); do
+    cfg="${cfg_urls[i]}"
+    eff="${eff_arr[i]:-$cfg}"
+    if [[ -n "$cfg" && -n "$eff" && "$cfg" != "$eff" ]]; then
+      ui_warn \
+        "remote '$remote' push URL '$cfg' is rewritten to '$eff'" \
+        "The guard approved '$cfg', but git push will send commits to '$eff'. Check \`git config --get-regexp '^url\..*\.pushInsteadOf'\`."
+    fi
+  done
 }
 
 # Refuse to push anywhere except the PR's own head branch.
