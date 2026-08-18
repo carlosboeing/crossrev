@@ -1498,7 +1498,7 @@ Verifying each finding against the codebase. This comment becomes the pass summa
   marker="$(jq -c --argjson id "$comment_id" '. + {comment_id: $id}' <<<"$marker")"
   run_checkpoint
 
-  local threads resolutions blocked blocked_reason summary model_reported tokens commit_subject
+  local threads resolutions blocked blocked_reason summary model_reported tokens
   threads="$(gh_review_threads "$CTX_REPO" "$CTX_PR")"
 
   # Backfilled rather than trusted from the review marker, because a pull request
@@ -1619,14 +1619,13 @@ Verifying each finding against the codebase. This comment becomes the pass summa
     # here is: the commit happens after a checkpoint, so a run that dies between
     # the two comes back needing the subject the resolver wrote, and a local is
     # gone by then.
-    commit_subject="$(jq -r '.commit_subject // ""' <<<"$payload")"
     rm -rf "$tmp"
 
     marker="$(jq -c --argjson d "$resolutions" --arg w "$summary" --argjson b "$blocked" \
       --arg br "$blocked_reason" --arg mr "$model_reported" --argjson tk "${tokens:-null}" \
-      --arg cs "$commit_subject" '
+      --argjson p "$payload" '
       .resolutions = $d | .summary = $w | .blocked = $b | .tokens = $tk
-      | .commit_subject = (if $cs == "" then null else $cs end)
+      | .commit_subject = ($p.commit_subject // null)
       | .blocked_reason = (if $br == "null" then null else $br end)
       | .model_reported = (if $mr == "null" then null else $mr end)' <<<"$marker")"
     gh_comment_edit "$CTX_REPO" "$comment_id" \
@@ -1742,7 +1741,7 @@ Resolutions recorded; committing and replying now.$(state_marker_encode "$(jq -c
       # is reported rather than swallowed: the commit still lands, and the run
       # says the message is not the one the resolver wrote.
       subject="$(jq -r '.commit_subject // ""' <<<"$marker")"
-      if ! _commit_subject_ok "$subject"; then
+      if ! _commit_subject_ok "$subject" "$marker"; then
         [[ -z "$subject" || "$subject" == "null" ]] || ui_warn \
           "the resolver's commit subject was rejected, so the commit carries a generic one" \
           "A subject must be one line of at most 100 characters, with no control characters. The fix itself is unaffected."
@@ -2122,8 +2121,15 @@ _resolutions_table() {
 # and says so — a bad commit subject is not worth failing a pass that fixed real
 # defects.
 _commit_subject_ok() {
-  local s="$1"
+  local s="$1" raw_json="${2:-}"
   [[ -n "$s" && "$s" != "null" ]] || return 1
+  # If the marker or raw JSON was passed, check the JSON-encoded subject directly
+  # before command substitution stripped NUL bytes.
+  if [[ -n "$raw_json" ]]; then
+    if jq -e '.commit_subject | if . == null then false else test("[\u0000-\u001f\u007f]") end' <<<"$raw_json" >/dev/null 2>&1; then
+      return 1
+    fi
+  fi
   # A newline would turn the rest into a body the orchestrator did not compose.
   [[ "$s" != *$'\n'* ]] || return 1
   # Control characters reach `git log` and every terminal that renders it. DEL

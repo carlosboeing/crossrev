@@ -247,6 +247,20 @@ reject_case "an over-long subject" \
 reject_case "a subject carrying DEL" \
   "$(printf 'fix(api): check the\177status')"
 
+# A NUL byte is dropped by bash command substitution, so the raw JSON in the
+# marker must be checked to reject it rather than letting it pass as a clean string.
+fixture_repo "$(config_with_issue_sink)"; stub_reset
+routes_baseline "$(marker_comment 9001 "$(review_marker)" | jq -cs . | payload)"
+routes_resolve
+CROSSREV_RESOLVE_PAYLOAD="$(resolve_payload | jq -c '.commit_subject = "fix(api): check the\u0000status"' | payload)"
+export CROSSREV_RESOLVE_PAYLOAD
+CROSSREV_RESOLVE_EDIT="$(edit_script)"; export CROSSREV_RESOLVE_EDIT
+CROSSREV_RESOLVE_MODEL=resolver-model; export CROSSREV_RESOLVE_MODEL
+o="$("$CROSSREV" resolve --pr 42 2>&1)"
+has "a subject carrying NUL falls back to the generic subject" \
+  "$(git log -1 --format=%s)" "fix: resolve crossrev review findings (pass 1)"
+has "and a subject carrying NUL is reported rather than swallowed" "$o" "commit subject was rejected"
+
 # An absent subject is not a rejection — the resolver simply did not write one,
 # and there is nothing to report.
 fixture_repo "$(config_with_issue_sink)"; stub_reset
