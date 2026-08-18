@@ -163,7 +163,10 @@ redrivable yes "an escalated pass re-drives once a human has settled it" \
   '{"leg":"resolve","pass":1,"state":"complete","blocked":false,"dispositions":[{"disposition":"fixed"},{"disposition":"escalated"}]}'
 redrivable no  "a settled pass stays refused" \
   '{"leg":"resolve","pass":1,"state":"complete","blocked":false,"commit_sha":"d81a3f2abc","dispositions":[{"disposition":"fixed"},{"disposition":"skipped"}]}'
-redrivable no  "a pass that dispositioned nothing stays refused" \
+# The leg writes no resolve marker for a pass that raised nothing, so a marker
+# that reached `complete` answered at least one finding. One that records none
+# of those answers settled nothing anybody can read, so it re-drives.
+redrivable yes "a pass that recorded no dispositions re-drives" \
   '{"leg":"resolve","pass":1,"state":"complete","blocked":false,"dispositions":[]}'
 redrivable no  "an all-rebutted pass stays refused" \
   '{"leg":"resolve","pass":1,"state":"complete","blocked":false,"dispositions":[{"disposition":"rebutted"}]}'
@@ -176,8 +179,12 @@ redrivable yes "an unpersisted deferral re-drives once the filing is fixed" \
 # once whatever stopped the write is dealt with.
 redrivable yes "a fix that reached no commit re-drives" \
   '{"leg":"resolve","pass":1,"state":"complete","blocked":false,"commit_sha":null,"dispositions":[{"disposition":"fixed"},{"disposition":"rebutted"}]}'
-redrivable no  "a legacy pass with no dispositions recorded claims nothing either way" \
+redrivable yes "a legacy pass with no dispositions recorded re-drives" \
   '{"leg":"resolve","pass":1,"state":"complete","blocked":false,"commit_sha":null}'
+# The same legacy marker with a commit is an ordinary finished pass: the head
+# moved, the reviewer has something to see, and re-deciding it settles nothing.
+redrivable no  "a legacy pass that pushed stays refused" \
+  '{"leg":"resolve","pass":1,"state":"complete","blocked":false,"commit_sha":"d81a3f2abc"}'
 
 # --- the guard itself, end to end -------------------------------------------
 #
@@ -335,6 +342,15 @@ resolve_label halted "a fix the resolver claimed and never committed halts" \
   '{"state":"complete","blocked":false,"commit_sha":null,"dispositions":[{"disposition":"fixed"}]}' 0
 resolve_label halted "and it outranks the rebuttals beside it" \
   '{"state":"complete","blocked":false,"commit_sha":null,"dispositions":[{"disposition":"fixed"},{"disposition":"rebutted"}]}' 0
+# Every settle above is read off the dispositions, so a marker carrying none
+# cannot be shown to have settled anything. Converging there would print the
+# green terminal on the strength of a missing record.
+resolve_label halted "a pass that recorded no dispositions halts" \
+  '{"state":"complete","blocked":false,"commit_sha":null,"dispositions":[]}' 0
+resolve_label halted "and a legacy marker without the field at all halts too" \
+  '{"state":"complete","blocked":false,"commit_sha":null}' 0
+resolve_label awaiting-review "the same legacy marker with a commit hands back to the reviewer" \
+  '{"state":"complete","blocked":false,"commit_sha":"d81a3f2abc"}' 0
 
 # --- and the label the resolve leg actually writes, end to end ---------------
 #

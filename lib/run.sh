@@ -2870,6 +2870,19 @@ _status_next_halted() {
     return 0
   fi
 
+  # A pass whose dispositions were never recorded, written by a crossrev old
+  # enough not to carry them. Nothing on it can be shown to have settled, so it
+  # is not a convergence — and driving the pass again both answers the findings
+  # and writes the record every reader here is missing.
+  if [[ -n "$m_resolve" && "$(jq -r '.state // ""' <<<"$m_resolve")" == "complete" ]] \
+     && [[ "$(jq -r '.blocked // false' <<<"$m_resolve")" != "true" ]] \
+     && legs_resolve_unrecorded "$m_resolve"; then
+    ui_line "the pass recorded no dispositions, so what it settled cannot be read"
+    ui_line "back. Drive it again to answer the findings on the record:"
+    ui_cmd  "crossrev resolve --pr $CTX_PR"
+    return 0
+  fi
+
   if [[ -n "$m_resolve" && "$(jq -r '.blocked // false' <<<"$m_resolve")" == "true" ]]; then
     ui_line "the resolve leg reported blocked and left its reasoning in the thread"
     ui_line "it belongs to. Once that is settled:"

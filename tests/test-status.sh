@@ -408,6 +408,25 @@ out="$(status_with '[]' \
 has "the same dispositions with a commit hand back to the reviewer" \
   "$out" "acme/widget#42 — awaiting review"
 
+# A pass that recorded no dispositions at all, which is what a crossrev old
+# enough not to carry them left behind. Every settle is read off that record, so
+# there is nothing here to call settled — and the green header would be a claim
+# about a pass nobody can check.
+out="$(status_with '[]' \
+  "$(review_m 1 issues-remain "$ONE_MED")" \
+  "$(resolve_m 1 '[]')")"
+has "a pass with no dispositions recorded halts"    "$out" "acme/widget#42 — halted"
+hasnt "rather than converging over an unread pass"  "$out" "— converged"
+has "and NEXT offers the re-drive that records them" "$out" "crossrev resolve --pr 42"
+
+# The same legacy marker with a commit moved the head, so the reviewer has
+# something to see and the loop is owed a review rather than a re-drive.
+out="$(status_with '[]' \
+  "$(review_m 1 issues-remain "$ONE_MED")" \
+  "$(resolve_m 1 '[]' d81a3f2abc)")"
+has "a legacy pass that pushed hands back to the reviewer" \
+  "$out" "acme/widget#42 — awaiting review"
+
 # A rebuttal beside an escalation is a halt, and the marker copy agrees.
 out="$(status_with '[]' \
   "$(review_m 1 issues-remain "$HIGH_LOW")" \
