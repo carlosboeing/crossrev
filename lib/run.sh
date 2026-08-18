@@ -404,6 +404,15 @@ run_leg_settings() {
 
 _nullable() { [[ "$1" == "null" ]] && printf '' || printf '%s' "$1"; }
 
+_pass_label() {
+  local p="$1" m="$2"
+  if (( p > m )); then
+    printf 'pass %s (past the cycle cap of %s)' "$p" "$m"
+  else
+    printf 'pass %s of %s' "$p" "$m"
+  fi
+}
+
 # Invoke a harness against a prompt and a schema, with the checkout quarantined,
 # and write the adapter's envelope to $1.
 #
@@ -731,7 +740,7 @@ No review ran, so nothing here is a judgement about the code. Raising the cap in
   effort="$(_nullable "$LEG_EFFORT")"
   endpoint="$(_nullable "$LEG_ENDPOINT")"
 
-  printf '\n  Reviewing %s#%s — pass %s of %s\n' "$CTX_REPO" "$CTX_PR" "$pass" "$CTX_MAX_PASSES_PER_CYCLE"
+  printf '\n  Reviewing %s#%s — %s\n' "$CTX_REPO" "$CTX_PR" "$(_pass_label "$pass" "$CTX_MAX_PASSES_PER_CYCLE")"
   printf '  Reviewer: %s%s%s\n' "$harness" "${model:+, $model}" "${effort:+, $effort effort}"
 
   # --- claim before work ---------------------------------------------------
@@ -750,7 +759,7 @@ No review ran, so nothing here is a judgement about the code. Raising the cap in
         endpoint:(if $ep == "" then null else $ep end),
         model_reported:null, tokens:null, verdict:null, findings:[]}')"
     comment_id="$(gh_comment_create "$CTX_REPO" "$CTX_PR" \
-"**crossrev — reviewing, pass $pass of $CTX_MAX_PASSES_PER_CYCLE**
+"**crossrev — reviewing, $(_pass_label "$pass" "$CTX_MAX_PASSES_PER_CYCLE")**
 
 Reading the diff and any earlier review threads. This comment becomes the pass summary when the review finishes.$(state_marker_encode "$marker")")"
     [[ -n "$comment_id" ]] || ui_die "the claim comment did not post on $CTX_REPO#$CTX_PR" \
@@ -830,7 +839,7 @@ Reading the diff and any earlier review threads. This comment becomes the pass s
       '.findings = $f | .verdict = $v | .tokens = $tk
        | .model_reported = (if $mr == "null" then null else $mr end)' <<<"$marker")"
     gh_comment_edit "$CTX_REPO" "$comment_id" \
-"**crossrev — reviewing, pass $pass of $CTX_MAX_PASSES_PER_CYCLE**
+"**crossrev — reviewing, $(_pass_label "$pass" "$CTX_MAX_PASSES_PER_CYCLE")**
 
 Findings recorded; posting them now.$(state_marker_encode "$(jq -c 'del(.comment_id)' <<<"$marker")")"
   fi
@@ -1267,7 +1276,7 @@ _review_summary_body() {
   verdict="$(jq -r '.verdict // "issues-remain"' <<<"$marker")"
   pass="$(jq -r '.pass // 1' <<<"$marker")"
 
-  printf '## crossrev review — pass %s of %s\n\n' "$pass" "$CTX_MAX_PASSES_PER_CYCLE"
+  printf '## crossrev review — %s\n\n' "$(_pass_label "$pass" "$CTX_MAX_PASSES_PER_CYCLE")"
 
   # The alert is the one line in the comment that has to read as a sentence, so
   # it gets a real plural rather than the "(s)" the terminal output uses.
@@ -1436,7 +1445,7 @@ leg_resolve() {
   effort="$(_nullable "$LEG_EFFORT")"
   endpoint="$(_nullable "$LEG_ENDPOINT")"
 
-  printf '\n  Resolving %s#%s — pass %s of %s\n' "$CTX_REPO" "$CTX_PR" "$pass" "$CTX_MAX_PASSES_PER_CYCLE"
+  printf '\n  Resolving %s#%s — %s\n' "$CTX_REPO" "$CTX_PR" "$(_pass_label "$pass" "$CTX_MAX_PASSES_PER_CYCLE")"
   printf '  Resolver: %s%s%s\n' "$harness" "${model:+, $model}" "${effort:+, $effort effort}"
 
   local claim comment_id marker stale
@@ -1462,7 +1471,7 @@ leg_resolve() {
       | del(.unthreaded)' <<<"$redrive")"
     ui_say "Pass $pass's resolve leg ended without settling its findings — driving pass $pass again."
     gh_comment_edit "$CTX_REPO" "$comment_id" \
-"**crossrev — resolving pass $pass of $CTX_MAX_PASSES_PER_CYCLE**
+"**crossrev — resolving $(_pass_label "$pass" "$CTX_MAX_PASSES_PER_CYCLE")**
 
 Driving the pass again: the previous attempt ended without settling its findings. Verifying each finding against the codebase. This comment becomes the pass summary when the resolve leg finishes.$(state_marker_encode "$(jq -c 'del(.comment_id)' <<<"$marker")")"
   elif [[ -n "$claim" ]]; then
@@ -1489,7 +1498,7 @@ Driving the pass again: the previous attempt ended without settling its findings
         blocked:false, blocked_reason:null, commit_sha:null, commit_subject:null,
         summary:"", resolutions:[]}')"
     comment_id="$(gh_comment_create "$CTX_REPO" "$CTX_PR" \
-"**crossrev — resolving pass $pass of $CTX_MAX_PASSES_PER_CYCLE**
+"**crossrev — resolving $(_pass_label "$pass" "$CTX_MAX_PASSES_PER_CYCLE")**
 
 Verifying each finding against the codebase. This comment becomes the pass summary when the resolve leg finishes.$(state_marker_encode "$marker")")"
     [[ -n "$comment_id" ]] || ui_die "the claim comment did not post on $CTX_REPO#$CTX_PR" \
@@ -1629,7 +1638,7 @@ Verifying each finding against the codebase. This comment becomes the pass summa
       | .blocked_reason = (if $br == "null" then null else $br end)
       | .model_reported = (if $mr == "null" then null else $mr end)' <<<"$marker")"
     gh_comment_edit "$CTX_REPO" "$comment_id" \
-"**crossrev — resolving pass $pass of $CTX_MAX_PASSES_PER_CYCLE**
+"**crossrev — resolving $(_pass_label "$pass" "$CTX_MAX_PASSES_PER_CYCLE")**
 
 Resolutions recorded; committing and replying now.$(state_marker_encode "$(jq -c 'del(.comment_id)' <<<"$marker")")"
   fi
@@ -1766,7 +1775,7 @@ $(_commit_body "$resolutions" "$findings" deferred "$CTX_HEAD_SHA" "$pass")"
       # is the one crash boundary comments cannot dedupe away.
       marker="$(jq -c --arg s "$commit_sha" '.commit_sha = $s' <<<"$marker")"
       gh_comment_edit "$CTX_REPO" "$comment_id" \
-"**crossrev — resolving pass $pass of $CTX_MAX_PASSES_PER_CYCLE**
+"**crossrev — resolving $(_pass_label "$pass" "$CTX_MAX_PASSES_PER_CYCLE")**
 
 Pushed \`${commit_sha:0:7}\`; replying to each thread now.$(state_marker_encode "$(jq -c 'del(.comment_id)' <<<"$marker")")"
     elif (( fixed_count > 0 )); then
@@ -2209,7 +2218,7 @@ _resolve_summary_body() {
   blocked="$(jq -r '.blocked // false' <<<"$marker")"
   blocked_reason="$(jq -r '.blocked_reason // ""' <<<"$marker")"
 
-  printf '## crossrev resolved pass %s of %s\n\n' "$pass" "$CTX_MAX_PASSES_PER_CYCLE"
+  printf '## crossrev resolved %s\n\n' "$(_pass_label "$pass" "$CTX_MAX_PASSES_PER_CYCLE")"
 
   local counts escalated noun
   counts="$(_resolution_counts "$resolutions")"
@@ -2555,6 +2564,8 @@ cmd_status() {
   ui_line "mode       $CTX_MODE, markers by $CTX_AUTHOR"
   if (( pass == 0 )); then
     ui_line "passes     none yet, up to $CTX_MAX_PASSES_PER_CYCLE"
+  elif (( pass > CTX_MAX_PASSES_PER_CYCLE )); then
+    ui_line "passes     $pass (past the cycle cap of $CTX_MAX_PASSES_PER_CYCLE)"
   else
     ui_line "passes     $pass of $CTX_MAX_PASSES_PER_CYCLE"
   fi

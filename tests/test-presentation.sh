@@ -532,4 +532,62 @@ has "the resumed run still says a finding missed its line" \
 has "and the summary comment still records it" \
   "$(last_body 9001)" "One finding could not be anchored to a line of the diff"
 
+# --- pass formatting beyond the cycle cap -----------------------------------
+#
+# An operator running a pass by hand beyond max_passes_per_cycle is driving, so
+# the cap no longer bounds the run. The terminal line and the pull request
+# comments must say which pass this is without an impossible denominator.
+# --- pass formatting beyond the cycle cap -----------------------------------
+#
+# An operator running a pass by hand beyond max_passes_per_cycle is driving, so
+# the cap no longer bounds the run. The terminal line and the pull request
+# comments must say which pass this is without an impossible denominator.
+pass4_review_marker() {
+  jq -cn --arg sha "$FIX_HEAD" --argjson ts "$(( $(date +%s) - 100 ))" '
+    {v:1, leg:"review", pass:4, state:"complete", ts:$ts, done_ts:($ts + 100), run_id:"1",
+     head_sha:$sha, harness:"claude", model:"reviewer-model", model_reported:"reviewer-model",
+     effort:"high", endpoint:null, tokens:1000, verdict:"issues-remain",
+     findings:[
+       {id:"a1", path:"app.ts", line:2, side:"RIGHT", severity:"high", category:"correctness",
+        pre_existing:false, title:"t", why:"w", fix:"f", anchor:"", thread_id:"T_A",
+        resolution:null, tracked_as:null}]}'
+}
+
+three_done_marker() {
+  jq -cn --argjson ts "$(date +%s)" '
+    {v:1, leg:"review", pass:3, state:"complete", ts:$ts, run_id:"x",
+     head_sha:"0000000000000000000000000000000000000000",
+     harness:"claude", model:"reviewer-model", model_reported:"reviewer-model",
+     verdict:"issues-remain", findings:[]}'
+}
+
+fixture_repo; stub_reset
+routes_baseline "$(marker_comment 9001 "$(three_done_marker)" | jq -cs . | payload)"
+route 'api --method POST repos/*/issues/42/comments*' '{"id":9004}'
+no_threads
+CROSSREV_REVIEW_PAYLOAD="$(printf '%s' "$CONVERGED_PAYLOAD" | payload)"; export CROSSREV_REVIEW_PAYLOAD
+p4_out="$("$CROSSREV" review --pr 42 2>&1)"
+
+has "a manual review pass beyond the cycle cap formats the header without a false denominator" \
+  "$p4_out" "Reviewing acme/widget#42 — pass 4 (past the cycle cap of 3)"
+has "and the review summary comment formats the header the same way" \
+  "$(last_body 9004)" "## crossrev review — pass 4 (past the cycle cap of 3)"
+
+fixture_repo; stub_reset
+routes_baseline "$(marker_comment 9004 "$(pass4_review_marker)" | jq -cs . | payload)"
+route 'api --method POST repos/*/issues/42/comments*' '{"id":9005}'
+route '*reviewThreads*' "$(threads_response "$(thread_node T_A app.ts 2 false "a1")")"
+route '*resolveReviewThread*' '{"data":{"resolveReviewThread":{"thread":{"isResolved":true}}}}'
+route 'api --method POST repos/*/pulls/42/comments/*/replies*' '{"id":6001}'
+CROSSREV_RESOLVE_PAYLOAD="$(jq -cn '{blocked:false, blocked_reason:null, summary:"All settled.", resolutions:[{finding_number:1, resolution:"fixed", reply:"Fixed.", persist:null, duplicate_of:null}]}' | payload)"
+export CROSSREV_RESOLVE_PAYLOAD
+CROSSREV_RESOLVE_EDIT="$(mktemp)"; printf 'printf "export const ok = 2\\n" >app.ts\n' >"$CROSSREV_RESOLVE_EDIT"; export CROSSREV_RESOLVE_EDIT
+CROSSREV_RESOLVE_MODEL=resolver-model; export CROSSREV_RESOLVE_MODEL
+p4_res_out="$("$CROSSREV" resolve --pr 42 2>&1)"
+
+has "a manual resolve pass beyond the cycle cap formats the header without a false denominator" \
+  "$p4_res_out" "Resolving acme/widget#42 — pass 4 (past the cycle cap of 3)"
+has "and the resolve summary comment formats the header the same way" \
+  "$(last_body 9005)" "## crossrev resolved pass 4 (past the cycle cap of 3)"
+
 finish

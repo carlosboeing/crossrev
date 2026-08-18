@@ -22,6 +22,8 @@ All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepa
 
 ### Fixed
 
+- **Manual passes beyond `max_passes_per_cycle` no longer print impossible denominators** ([#54](https://github.com/carlosboeing/crossrev/issues/54)). An operator manually driving passes beyond the configured cycle cap previously saw headers, comments, and status lines formatting `pass 4 of 3`. These now format as `pass 4 (past the cycle cap of 3)`, preserving the cap context while reporting the pass count accurately without asserting a false limit.
+
 - **Control characters in commit subjects, including NUL, are rejected before commit** ([#55](https://github.com/carlosboeing/crossrev/issues/55)). Bash command substitution drops NUL bytes, so a subject carrying a NUL byte was previously stripped to a clean string before reaching `_commit_subject_ok`. `_commit_subject_ok` now inspects the raw JSON marker subject directly for control characters, ensuring NUL bytes are detected and rejected in favour of the generic fallback subject.
 
 - **The codex adapter runs with `--ignore-user-config`** ([#27](https://github.com/carlosboeing/crossrev/issues/27)). `sandbox_args_for` was defined in `lib/sandbox.sh` to return `--ignore-user-config` for codex and was never called by the adapter, leaving codex invocations subject to user configuration from `~/.codex/config.toml`. The adapter now invokes `sandbox_args_for codex` so user configuration is ignored and harness invocations stay isolated without affecting authentication.

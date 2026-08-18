@@ -304,7 +304,7 @@ route 'api --method POST repos/*/issues/42/comments*' '{"id":9001}'
 no_threads
 CROSSREV_REVIEW_PAYLOAD="$(printf '%s' "$CONVERGED" | payload)"; export CROSSREV_REVIEW_PAYLOAD
 out="$("$CROSSREV" review --pr 42 2>&1)"
-has "a single human review beyond the pass bound runs" "$out" "pass 4 of 3"
+has "a single human review beyond the pass bound runs" "$out" "pass 4 (past the cycle cap of 3)"
 
 stub_reset
 routes_baseline "$(marker_comment 9001 "$three_done" | jq -cs . | payload)"
