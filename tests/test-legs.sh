@@ -114,6 +114,40 @@ slug refused "an https remote on another host"        "https://git.example.com/o
 slug refused "a plain local path"                     "/tmp/w/origin.git"
 slug refused "a path deeper than owner/repo"          "https://github.com/o/r/x.git"
 
+# --- push-target URL resolution and rewrite warning ------------------------
+err_file="$(mktemp)"
+d="$(mktemp -d)"
+(
+  cd "$d" || exit 1
+  git init -q
+  git remote add origin "https://github.com/o/r.git"
+)
+orig_pwd="$PWD"
+cd "$d" || exit 1
+LEGS_PUSH_REPO=""
+legs_resolve_push_repo origin 2>"$err_file"
+cd "$orig_pwd" || exit 1
+err="$(cat "$err_file")"
+is "a remote with no rewrite does not warn" "$err" ""
+is "and resolves the repository slug" "$LEGS_PUSH_REPO" "o/r"
+
+d="$(mktemp -d)"
+(
+  cd "$d" || exit 1
+  git init -q
+  git remote add origin "https://github.com/o/r.git"
+  git config "url./tmp/elsewhere.git.pushInsteadOf" "https://github.com/o/r"
+)
+cd "$d" || exit 1
+LEGS_PUSH_REPO=""
+legs_resolve_push_repo origin 2>"$err_file"
+cd "$orig_pwd" || exit 1
+err="$(cat "$err_file")"
+rm -f "$err_file"
+is "a remote with a pushInsteadOf rule still allows the push" "$LEGS_PUSH_REPO" "o/r"
+has "a remote with a pushInsteadOf rule warns" "$err" "https://github.com/o/r.git"
+has "and names the rewritten URL" "$err" "/tmp/elsewhere.git.git"
+
 # --- divergence ------------------------------------------------------------
 is_diff() {
   local want="$1" desc="$2"; shift 2

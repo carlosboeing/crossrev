@@ -51,9 +51,11 @@ token elsewhere in the same job. Findings of particular interest:
   is configured with is resolved to an `owner/repo` slug. Each slug must match
   the pull request's head repository, checked before the resolver runs and again
   before the commit is pushed. A URL that resolves to no github.com slug is
-  refused rather than checked against a different URL on the same remote. A
-  `url.<base>.pushInsteadOf` rewrite is applied by git after that read, so a
-  rewrite rule can still redirect an approved URL. That gap is known and open.
+  refused rather than checked against a different URL on the same remote. When a
+  remote sets no explicit `pushurl`, git applies `url.<base>.pushInsteadOf` to the
+  fallback URL after that read. A rewrite rule can then redirect an approved URL.
+  Git ignores the rewrite when an explicit `pushurl` exists. CrossRev warns when
+  a rewrite is detected, but the push is not refused. That gap is known and open.
 - **A review leg that can write to the checkout.** The resolve leg's process is
   granted file edits in its workspace, because changing files is its job — never
   a blanket bypass, and never permission to run arbitrary commands outside it.
