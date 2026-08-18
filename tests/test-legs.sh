@@ -162,9 +162,29 @@ redrivable yes "a blocked pass re-drives once what stopped it is fixed" \
 redrivable yes "an escalated pass re-drives once a human has settled it" \
   '{"leg":"resolve","pass":1,"state":"complete","blocked":false,"dispositions":[{"disposition":"fixed"},{"disposition":"escalated"}]}'
 redrivable no  "a settled pass stays refused" \
-  '{"leg":"resolve","pass":1,"state":"complete","blocked":false,"dispositions":[{"disposition":"fixed"},{"disposition":"skipped"}]}'
-redrivable no  "a pass that dispositioned nothing stays refused" \
+  '{"leg":"resolve","pass":1,"state":"complete","blocked":false,"commit_sha":"d81a3f2abc","dispositions":[{"disposition":"fixed"},{"disposition":"skipped"}]}'
+# The leg writes no resolve marker for a pass that raised nothing, so a marker
+# that reached `complete` answered at least one finding. One that records none
+# of those answers settled nothing anybody can read, so it re-drives.
+redrivable yes "a pass that recorded no dispositions re-drives" \
   '{"leg":"resolve","pass":1,"state":"complete","blocked":false,"dispositions":[]}'
+redrivable no  "an all-rebutted pass stays refused" \
+  '{"leg":"resolve","pass":1,"state":"complete","blocked":false,"dispositions":[{"disposition":"rebutted"}]}'
+# A deferral whose record never landed left its thread open on purpose, so the
+# pass is not settled: once the filing is fixed, driving it again is the remedy.
+redrivable yes "an unpersisted deferral re-drives once the filing is fixed" \
+  '{"leg":"resolve","pass":1,"state":"complete","blocked":false,"dispositions":[{"disposition":"deferred","crossrev_tracked":""}]}'
+# A fix the resolver claimed and never committed decided nothing either: the
+# thread is open, the code is unchanged, and re-running the leg is the remedy
+# once whatever stopped the write is dealt with.
+redrivable yes "a fix that reached no commit re-drives" \
+  '{"leg":"resolve","pass":1,"state":"complete","blocked":false,"commit_sha":null,"dispositions":[{"disposition":"fixed"},{"disposition":"rebutted"}]}'
+redrivable yes "a legacy pass with no dispositions recorded re-drives" \
+  '{"leg":"resolve","pass":1,"state":"complete","blocked":false,"commit_sha":null}'
+# The same legacy marker with a commit is an ordinary finished pass: the head
+# moved, the reviewer has something to see, and re-deciding it settles nothing.
+redrivable no  "a legacy pass that pushed stays refused" \
+  '{"leg":"resolve","pass":1,"state":"complete","blocked":false,"commit_sha":"d81a3f2abc"}'
 
 # --- the guard itself, end to end -------------------------------------------
 #
@@ -188,14 +208,19 @@ rd_review_marker() {
         disposition:null, tracked_as:null}]}'
 }
 
-# $1 dispositions, $2 blocked flag, $3 the revision the pass ran against.
+# $1 dispositions, $2 blocked flag, $3 the revision the pass ran against, $4 the
+# commit it pushed.
+#
+# A pass that fixed something and pushed nothing is a distinct ending — the
+# claim is not in the diff — so a fixture modelling a settled pass has to say
+# which of the two it is rather than leaving the SHA off.
 rd_resolve_marker() {
-  jq -cn --arg sha "${3:-$FIX_HEAD}" --argjson d "$1" --argjson b "$2" '
+  jq -cn --arg sha "${3:-$FIX_HEAD}" --arg c "${4:-}" --argjson d "$1" --argjson b "$2" '
     {v:1, leg:"resolve", pass:1, state:"complete", ts:300, done_ts:400, run_id:"1",
      head_sha:$sha, harness:"claude", model:"resolver-model", effort:null, endpoint:null,
      model_reported:"resolver-model", tokens:100, blocked:$b,
      blocked_reason:(if $b then "no write access to the working tree" else null end),
-     commit_sha:null, summary:"s", dispositions:$d}'
+     commit_sha:(if $c == "" then null else $c end), summary:"s", dispositions:$d}'
 }
 
 rd_dispositions() {
@@ -233,7 +258,7 @@ rd_routes() {
 
 rd_comments() {
   jq -cn --argjson a "$(marker_comment 9001 "$(rd_review_marker "${3:-}")")" \
-         --argjson b "$(marker_comment 9002 "$(rd_resolve_marker "$1" "$2" "${3:-}")")" '[$a, $b]'
+         --argjson b "$(marker_comment 9002 "$(rd_resolve_marker "$1" "$2" "${3:-}" "${4:-}")")" '[$a, $b]'
 }
 
 RD_FIX_PAYLOAD='{"blocked":false,"blocked_reason":null,"summary":"Fixed both.","dispositions":[
@@ -260,9 +285,11 @@ has "and resolved once fixed"                         "$out" "resolved 2 thread(
 has "the loop is handed back to the reviewer"         "$(calls)" "labels[]=crossrev/awaiting-review"
 
 # The guard's other half: a pass that settled every finding is done, and
-# re-running it would re-decide work that finished.
+# re-running it would re-decide work that finished. Settled means fixed AND
+# pushed — the SHA is what makes this marker a finished pass rather than a
+# claim the diff does not carry.
 fixture_repo; stub_reset
-routes_baseline "$(rd_comments "$(rd_dispositions fixed)" false | payload)"
+routes_baseline "$(rd_comments "$(rd_dispositions fixed)" false "" d81a3f2abc | payload)"
 out="$("$CROSSREV" resolve --pr 42 2>&1)"; rc=$?
 
 is  "the settled pass still declines cleanly"         "$rc" "0"
@@ -272,6 +299,118 @@ if [[ ! -s "$PROMPT_LOG" ]]; then
 else
   notok "and the resolver is not run again" "no prompt" "$(cat "$PROMPT_LOG")"
 fi
+
+# --- the label a finished resolve pass leaves behind -------------------------
+#
+# A pass that pushed hands back to the reviewer, because the head moved and
+# there is something new to see. A pass that settled every finding without
+# pushing — each rebutted, skipped, or deferred and tracked — is over: the
+# reviewer declines an unchanged head, so awaiting-review would park the loop
+# on a command that refuses. Escalation still wins, and a deferral whose
+# record never landed is not settled — its thread is open on purpose.
+resolve_label() {
+  local want="$1" desc="$2"
+  local got; got="$(legs_resolve_pass_label "$3" "$4")"
+  [[ "$got" == "$want" ]] && ok "$desc" || notok "$desc" "$want" "$got"
+}
+
+resolve_label converged "an all-rebutted pass converges" \
+  '{"state":"complete","blocked":false,"commit_sha":null,"dispositions":[{"disposition":"rebutted"}]}' 0
+resolve_label converged "an all-skipped pass converges" \
+  '{"state":"complete","blocked":false,"commit_sha":null,"dispositions":[{"disposition":"skipped"}]}' 0
+resolve_label converged "a deferral tracked elsewhere converges" \
+  '{"state":"complete","blocked":false,"commit_sha":null,"dispositions":[{"disposition":"deferred","crossrev_tracked":"o/r#7"}]}' 0
+resolve_label converged "a mix of the three settles" \
+  '{"state":"complete","blocked":false,"commit_sha":null,"dispositions":[{"disposition":"rebutted"},{"disposition":"skipped"},{"disposition":"deferred","crossrev_tracked":"o/r#7"}]}' 0
+resolve_label converged "a legacy deferral without the tracking field reads as settled" \
+  '{"state":"complete","blocked":false,"commit_sha":null,"dispositions":[{"disposition":"deferred"}]}' 0
+resolve_label awaiting-review "a pass that pushed a fix hands back to the reviewer" \
+  '{"state":"complete","blocked":false,"commit_sha":"d81a3f2abc","dispositions":[{"disposition":"fixed"},{"disposition":"rebutted"}]}' 0
+resolve_label awaiting-review "a deferral committed to the repository backlog moved the head" \
+  '{"state":"complete","blocked":false,"commit_sha":"d81a3f2abc","dispositions":[{"disposition":"deferred","crossrev_tracked":".crossrev/backlog#1"}]}' 0
+resolve_label halted "a rebuttal beside an escalation halts — the escalation wins" \
+  '{"state":"complete","blocked":false,"commit_sha":null,"dispositions":[{"disposition":"rebutted"},{"disposition":"escalated"}]}' 0
+resolve_label halted "an escalation an earlier pass left standing halts the settle" \
+  '{"state":"complete","blocked":false,"commit_sha":null,"dispositions":[{"disposition":"rebutted"}]}' 1
+resolve_label halted "a blocked pass halts" \
+  '{"state":"complete","blocked":true,"commit_sha":null,"dispositions":[{"disposition":"rebutted"}]}' 0
+resolve_label halted "a deferral whose record never landed halts" \
+  '{"state":"complete","blocked":false,"commit_sha":null,"dispositions":[{"disposition":"deferred","crossrev_tracked":""}]}' 0
+# A fix nobody committed is the one settle that must never read as converged:
+# the resolver's own answer says the defect is real, and the code is unchanged.
+resolve_label halted "a fix the resolver claimed and never committed halts" \
+  '{"state":"complete","blocked":false,"commit_sha":null,"dispositions":[{"disposition":"fixed"}]}' 0
+resolve_label halted "and it outranks the rebuttals beside it" \
+  '{"state":"complete","blocked":false,"commit_sha":null,"dispositions":[{"disposition":"fixed"},{"disposition":"rebutted"}]}' 0
+# Every settle above is read off the dispositions, so a marker carrying none
+# cannot be shown to have settled anything. Converging there would print the
+# green terminal on the strength of a missing record.
+resolve_label halted "a pass that recorded no dispositions halts" \
+  '{"state":"complete","blocked":false,"commit_sha":null,"dispositions":[]}' 0
+resolve_label halted "and a legacy marker without the field at all halts too" \
+  '{"state":"complete","blocked":false,"commit_sha":null}' 0
+resolve_label awaiting-review "the same legacy marker with a commit hands back to the reviewer" \
+  '{"state":"complete","blocked":false,"commit_sha":"d81a3f2abc"}' 0
+
+# --- and the label the resolve leg actually writes, end to end ---------------
+#
+# Every finding rebutted, nothing pushed: the loop is done, and the label has
+# to say so rather than hand back to a reviewer that will decline.
+RD_REBUT_PAYLOAD='{"blocked":false,"blocked_reason":null,"summary":"Both rebutted.","dispositions":[
+  {"finding_number":1,"disposition":"rebutted","reply":"Not a defect.","persist":null,"duplicate_of":null},
+  {"finding_number":2,"disposition":"rebutted","reply":"Not this one either.","persist":null,"duplicate_of":null}]}'
+
+fixture_repo; stub_reset
+routes_baseline "$(jq -cn --argjson a "$(marker_comment 9001 "$(rd_review_marker)")" '[$a]' | payload)"
+rd_routes
+CROSSREV_RESOLVE_PAYLOAD="$(printf '%s' "$RD_REBUT_PAYLOAD" | payload)"; export CROSSREV_RESOLVE_PAYLOAD
+CROSSREV_RESOLVE_MODEL=resolver-model; export CROSSREV_RESOLVE_MODEL
+out="$("$CROSSREV" resolve --pr 42 2>&1)"; rc=$?
+
+is  "the all-rebutted resolve exits clean"            "$rc" "0"
+has "both threads are answered and resolved"          "$out" "resolved 2 thread(s)"
+has "the pass is labelled converged"                  "$(calls)" "labels[]=crossrev/converged"
+hasnt "not handed back to a reviewer that declines"   "$(calls)" "labels[]=crossrev/awaiting-review"
+has "and the run says the loop is done"               "$out" "the loop is done"
+
+# One rebuttal beside one escalation: the pass is halted, not converged — the
+# escalation waits on a human and outranks every settle beside it.
+RD_MIXED_PAYLOAD='{"blocked":false,"blocked_reason":null,"summary":"One rebutted, one escalated.","dispositions":[
+  {"finding_number":1,"disposition":"rebutted","reply":"Not a defect.","persist":null,"duplicate_of":null},
+  {"finding_number":2,"disposition":"escalated","reply":"This needs a human.","persist":null,"duplicate_of":null}]}'
+
+fixture_repo; stub_reset
+routes_baseline "$(jq -cn --argjson a "$(marker_comment 9001 "$(rd_review_marker)")" '[$a]' | payload)"
+rd_routes
+CROSSREV_RESOLVE_PAYLOAD="$(printf '%s' "$RD_MIXED_PAYLOAD" | payload)"; export CROSSREV_RESOLVE_PAYLOAD
+CROSSREV_RESOLVE_MODEL=resolver-model; export CROSSREV_RESOLVE_MODEL
+out="$("$CROSSREV" resolve --pr 42 2>&1)"; rc=$?
+
+is  "the mixed pass exits clean"                      "$rc" "0"
+has "a rebuttal beside an escalation stays halted"    "$(calls)" "labels[]=crossrev/halted"
+hasnt "and never converges"                           "$(calls)" "labels[]=crossrev/converged"
+has "the stop the escalation applies still lands"     "$(calls)" "crossrev/stop"
+
+# Both findings claimed fixed, and the resolver changed no files: with no edit
+# script the tree is clean, so `gh_commit_and_push` produces no commit and the
+# replies claim a change the diff does not carry. The pass is not converged —
+# nothing was settled — and it is not awaiting review either, because the head
+# never moved. It halts, and the threads stay open for the person who reads it.
+fixture_repo; stub_reset
+routes_baseline "$(jq -cn --argjson a "$(marker_comment 9001 "$(rd_review_marker)")" '[$a]' | payload)"
+rd_routes
+CROSSREV_RESOLVE_PAYLOAD="$(printf '%s' "$RD_FIX_PAYLOAD" | payload)"; export CROSSREV_RESOLVE_PAYLOAD
+CROSSREV_RESOLVE_MODEL=resolver-model; export CROSSREV_RESOLVE_MODEL
+out="$("$CROSSREV" resolve --pr 42 2>&1)"; rc=$?
+
+is  "the no-change fixed pass exits clean"            "$rc" "0"
+has "the run says the fixes reached no files"         "$out" "changed no files"
+is  "nothing is committed over an unchanged tree"     "$(git log -1 --format=%s)" "feature"
+has "the pass is halted"                              "$(calls)" "labels[]=crossrev/halted"
+hasnt "never converged over an unkept promise"        "$(calls)" "labels[]=crossrev/converged"
+hasnt "nor handed to a reviewer with nothing to see"  "$(calls)" "labels[]=crossrev/awaiting-review"
+is  "and no thread is resolved over it"               "$(count 'resolveReviewThread')" "0"
+has "the run says why a person is needed"             "$out" "reached no commit"
 
 # --- the label a finished review pass leaves behind --------------------------
 #
@@ -315,7 +454,7 @@ hasnt "and is never labelled converged"               "$(calls)" "labels[]=cross
 # With nothing escalated the same empty pass is a real convergence, so the
 # green label still exists for the pass that earned it.
 fixture_repo; stub_reset
-routes_baseline "$(rd_comments "$(rd_dispositions fixed)" false "$RD_OLD_SHA" | payload)"
+routes_baseline "$(rd_comments "$(rd_dispositions fixed)" false "$RD_OLD_SHA" d81a3f2abc | payload)"
 route 'api --method POST repos/*/issues/42/comments*' '{"id":9003}'
 route '*reviewThreads*' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}'
 CROSSREV_REVIEW_PAYLOAD="$(printf '%s' "$EMPTY_REVIEW" | payload)"; export CROSSREV_REVIEW_PAYLOAD

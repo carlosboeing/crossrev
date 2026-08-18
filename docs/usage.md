@@ -104,10 +104,12 @@ Markers are HTML comments in comment bodies. They carry the pass number, the leg
 | awaiting review | A review leg is owed |
 | awaiting resolution | The review landed; the resolve leg is owed |
 | converged | Nothing at or above `min_fix_severity` remains. The loop finished on its own |
-| halted | It stopped short — a cap, a blocked leg, or an escalated finding. A human is needed |
+| halted | It stopped short — a cap, a blocked leg, an escalated finding, or a deferral whose record never landed. A human is needed |
 | stopped | Somebody applied `crossrev/stop` |
 
-A resolve pass that ended blocked or escalated is complete but not settled, so it can be driven again: once whatever stopped it is fixed, `crossrev resolve --pr N` runs the resolver over the same findings instead of refusing. A pass that settled every finding stays finished. `status` names whichever command applies.
+A resolve pass that ended blocked or escalated is complete but not settled, so it can be driven again. Once whatever stopped it is fixed, `crossrev resolve --pr N` runs the resolver over the same findings instead of refusing. The same goes for a pass that left a deferral unpersisted, and for one whose claimed fix reached no commit. A pass that settled every finding stays finished. `status` names whichever command applies.
+
+A resolve pass can also finish the loop itself. A pass that settled every finding without pushing a commit — each rebutted, skipped, or deferred and tracked — converges on the spot: the head never moved, so a re-review would find nothing new and decline. A pass that pushed hands back to the reviewer, because there is something new to see.
 
 Converged does not mean "no findings". It means no finding this pull request introduced, at or above the threshold, remains. Findings below the threshold and pre-existing ones are reported and cannot keep the loop alive — a loop that cannot converge because of a naming quibble is one nobody leaves switched on.
 

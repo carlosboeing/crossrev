@@ -100,21 +100,134 @@ legs_awaiting_label() {
   esac
 }
 
+# A fix the resolver claimed and never committed.
+#
+# `gh_commit_and_push` produces no commit when the tree is unchanged, so a
+# `fixed` disposition on a marker carrying no commit_sha is a promise about the
+# code that the diff does not keep. The run already warns about it in the
+# terminal, and every decision read off the marker has to agree: the finding
+# was examined, it was not rebutted, and nothing was written for it.
+#
+# A marker with no dispositions claims no fix either way; that shape is
+# legs_resolve_unrecorded's, below.
+#
+# $1 the completed resolve marker.
+legs_resolve_unpushed_fix() {
+  local marker="$1"
+  [[ -n "$(jq -r '.commit_sha // ""' <<<"$marker")" ]] && return 1
+  [[ "$(jq '[(.dispositions // [])[] | select(.disposition == "fixed")] | length' <<<"$marker")" != "0" ]]
+}
+
+# A completed pass that recorded no dispositions and pushed no commit.
+#
+# The leg returns before it writes a resolve marker when its review pass raised
+# nothing, so a marker that reached `complete` answered at least one finding.
+# One that records none of those answers is a legacy marker, written before the
+# leg carried them, and it says nothing about what happened to the findings.
+# Silence is not a settle: reading it as one prints a green terminal over a pass
+# nobody can check, and stops status offering a remedy for it. Driving the pass
+# again is that remedy, and it writes the record the marker is missing.
+#
+# The commit is read for the same reason the unpushed-fix rule reads it. A
+# legacy marker that pushed moved the head, so the reviewer has something new to
+# see and awaiting-review is the honest answer there — the question this asks is
+# only about a pass that ended with nothing recorded and nothing written.
+#
+# $1 the completed resolve marker.
+legs_resolve_unrecorded() {
+  local marker="$1"
+  [[ -n "$(jq -r '.commit_sha // ""' <<<"$marker")" ]] && return 1
+  [[ "$(jq '(.dispositions // []) | length' <<<"$marker")" == "0" ]]
+}
+
 # May a completed resolve pass be driven again?
 #
 # Escalating or reporting blocked completes a pass rather than abandoning it —
 # the dispositions are on the pull request and the threads carry the reasoning —
 # and completion is what the re-run guard reads, so without this a pass that
 # ended either way could never run again once whatever stopped it was fixed.
-# Both endings leave something undecided, so both admit a re-drive. A pass that
-# settled every finding stays refused: running it again would re-decide work
-# that is done.
+# Both endings leave something undecided, so both admit a re-drive. So does a
+# deferral whose record never landed, a fix that reached no commit, and a pass
+# that recorded no dispositions at all — the last one because a marker that
+# says nothing about its findings cannot say they are settled either. A pass
+# that settled every finding stays refused: running it again would re-decide
+# work that is done.
 #
 # $1 the completed resolve marker.
 legs_resolve_redrivable() {
   local marker="$1"
   [[ "$(jq -r '.blocked // false' <<<"$marker")" == "true" ]] && return 0
-  [[ "$(jq '[(.dispositions // [])[] | select(.disposition == "escalated")] | length' <<<"$marker")" != "0" ]]
+  [[ "$(jq '[(.dispositions // [])[] | select(.disposition == "escalated")] | length' <<<"$marker")" != "0" ]] && return 0
+  # A finding the resolver said it fixed and did not is undecided in the same
+  # way: what stopped the write was the environment or the model, and once a
+  # person has dealt with it, running the leg again is the remedy.
+  legs_resolve_unpushed_fix "$marker" && return 0
+  # A legacy marker recorded no answers at all, so nothing on it is settled
+  # either. Re-running the leg over the same findings is what writes the record
+  # a reader — and every decision above — needs.
+  legs_resolve_unrecorded "$marker" && return 0
+  # A deferral whose record never landed left its thread open on purpose, so
+  # the pass is not settled either — once the filing is fixed, driving the
+  # pass again is the remedy. `.crossrev_tracked == ""` matches only a marker
+  # that records the field; a deferral without it is a legacy marker, or one
+  # written with no backlog configured, and both read as settled.
+  [[ "$(jq '[(.dispositions // [])[] | select(.disposition == "deferred" and .crossrev_tracked == "")] | length' <<<"$marker")" != "0" ]]
+}
+
+# The loop-state label a finished resolve pass leaves behind.
+#
+# Same question legs_pass_label answers for the review leg, asked of the
+# resolve leg's own record, and read off the marker rather than recomputed
+# beside it so the label and the marker cannot disagree. A pass that pushed
+# hands back to the reviewer, because the head moved and there is something
+# new to see — and the push, not the disposition, is the signal: a deferral
+# recorded into the repository backlog moves the head without fixing anything.
+#
+# A pass that settled every finding without pushing — each rebutted, skipped,
+# or deferred and tracked — is over. The reviewer declines an unchanged head,
+# so awaiting-review would park the loop on a command that refuses, and
+# converged is the honest label: nothing at or above the threshold remains.
+# The findings were examined and found not to be defects, or their work lives
+# in a tracked issue off this pull request.
+#
+# Five endings still halt, and each outranks a settle. Blocked and escalated
+# are the existing ones — a rebuttal beside an escalation is a halt, the
+# escalation wins, and an escalation left standing by an EARLIER pass halts a
+# later settle just the same. The third is a deferral whose record never
+# landed despite a backlog configured to land it in: its thread stays open on
+# purpose, and a green label over an open thread is how work disappears, so a
+# human has to put it somewhere durable first.
+#
+# The fourth is a fix the resolver claimed and never committed. Nothing was
+# settled there and nothing was written: the finding is real by the resolver's
+# own answer, the code is unchanged, and converged would tell a reader nothing
+# at or above the threshold remains over exactly the defect the reviewer
+# raised. It is not awaiting-review either, because the head never moved — so
+# it halts, and the thread the leg leaves open is what a person reads.
+#
+# The fifth is a pass that recorded no dispositions and pushed nothing. Every
+# settle above is read off the dispositions, so a marker that carries none
+# cannot be shown to have settled anything: converging there would print the
+# green terminal on the strength of a missing record. It halts instead, and
+# legs_resolve_redrivable admits it, so the remedy is driving the pass again.
+#
+# $1 the completed resolve marker. $2 escalated findings standing in other
+# passes' markers — this pass's own are read off the marker, and the caller
+# may hold a newer record of this pass than the marker list does.
+legs_resolve_pass_label() {
+  local marker="$1" other_escalated="${2:-0}"
+  if [[ "$(jq -r '.blocked // false' <<<"$marker")" == "true" ]] \
+     || [[ "$(jq '[(.dispositions // [])[] | select(.disposition == "escalated")] | length' <<<"$marker")" != "0" ]] \
+     || (( other_escalated > 0 )) \
+     || legs_resolve_unpushed_fix "$marker" \
+     || legs_resolve_unrecorded "$marker" \
+     || [[ "$(jq '[(.dispositions // [])[] | select(.disposition == "deferred" and .crossrev_tracked == "")] | length' <<<"$marker")" != "0" ]]; then
+    printf 'halted'
+  elif [[ -z "$(jq -r '.commit_sha // ""' <<<"$marker")" ]]; then
+    printf 'converged'
+  else
+    printf 'awaiting-review'
+  fi
 }
 
 # The loop-state label a finished review pass leaves behind.
