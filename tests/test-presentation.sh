@@ -177,6 +177,29 @@ has "and the link is pinned to the revision that was reviewed, not to the branch
   "$review_calls" "/blob/$review_head/app.ts#L2"
 hasnt "the path is not demoted to a hover title"      "$review_calls" '#L2 "app.ts:2")'
 
+# A path is a cell like any other, and the characters that break one are all
+# legal in a path: `src/a|b (old)/app.ts` is a real path on any POSIX
+# filesystem, and a finding's path is a model-written string nothing upstream
+# holds to more than "not empty". The pipe splits the row, and in the
+# destination beside it the space ends the link and the bracket closes it early
+# — each of them quietly, with every row around it still rendering.
+HOSTILE_PATH_PAYLOAD='{"verdict":"issues-remain","blocked_reason":null,"prior":null,"findings":[
+  {"path":"src/a|b (old)/app.ts","line":2,"side":"RIGHT","severity":"high","category":"correctness",
+   "pre_existing":false,"title":"Unchecked fetch response","why":"w","fix":"f"}
+]}'
+run_review "$HOSTILE_PATH_PAYLOAD"
+path_calls="$(calls)"
+path_head="$FIX_HEAD"
+
+has "a pipe in a directory name is escaped rather than splitting the row" \
+  "$path_calls" '[`src/a\|b (old)/app.ts:2`]'
+# Escaped inside the code span, because GFM resolves `\|` before the span is
+# parsed — backticks are no protection at all here.
+hasnt "and no raw pipe is left in the cell"           "$path_calls" '`src/a|b'
+has "the destination percent-encodes every one of the three" \
+  "$path_calls" "/blob/$path_head/src/a%7Cb%20%28old%29/app.ts#L2"
+hasnt "so none of them reaches the URL raw"           "$path_calls" "(old)/app.ts#L2"
+
 # ---------------------------------------------------------------------------
 # The reply lead belongs to the orchestrator, not to the model
 # ---------------------------------------------------------------------------

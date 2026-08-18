@@ -293,8 +293,13 @@ run_finding_label() {
 #
 # A newline in a heading ends the heading, and a newline in a table cell ends the
 # table — both silently, because everything around them still renders.
+#
+# Every other control character goes with the newline, because a lone carriage
+# return is a line ending by CommonMark's own definition and ends the row just as
+# quietly, and an escape sequence renders nowhere useful. `_commit_line` strips
+# the same span on the way into a commit body, for the same reason.
 _one_line() {
-  printf '%s' "$1" | tr '\n' ' '
+  printf '%s' "$1" | tr '\000-\037\177' ' '
 }
 
 # Text that is about to land in a Markdown table cell.
@@ -1175,7 +1180,23 @@ _findings_table() {
 # would then point at code that has moved under the finding it describes.
 _blob_url() {
   local sha="$1" path="$2" line="$3"
-  printf 'https://github.com/%s/blob/%s/%s#L%s' "$CTX_REPO" "$sha" "$path" "$line"
+  printf 'https://github.com/%s/blob/%s/%s#L%s' "$CTX_REPO" "$sha" "$(_url_path "$path")" "$line"
+}
+
+# A repository path on its way into a link destination.
+#
+# Percent-encoded one segment at a time, so the separators survive and everything
+# else is escaped. Three characters are the reason, and all three are legal in a
+# path: a space ends an inline link's destination, a `)` closes it early and
+# spills the rest of the URL into the cell around it, and a `|` splits the table
+# row the link sits in.
+#
+# The two parentheses are encoded here rather than by `@uri`, which follows
+# JavaScript's encodeURIComponent and leaves them alone — correct for a query
+# parameter, and wrong for a destination Markdown reads the brackets of.
+_url_path() {
+  jq -rn --arg p "$1" '$p | split("/") | map(@uri) | join("/")
+                          | gsub("\\("; "%28") | gsub("\\)"; "%29")'
 }
 
 # A link to the review thread a finding was raised in.
@@ -1197,10 +1218,18 @@ _thread_url() {
 # own state. It lives in an HTML comment marker, so it renders invisible, and a
 # browser find on the pull request matches only the row the reader started from.
 # It is a dead end wherever it is printed.
+#
+# The path is a table cell like any other, and it gets the same escaping the
+# title beside it gets. `src/a|b/x.ts` is a legal path on any POSIX filesystem,
+# and the path on a finding is a model-written string that nothing upstream holds
+# to more than "not empty" — so an unescaped pipe splits the row into an extra
+# column, silently, with every row around it still rendering. The escape goes
+# inside the code span because GFM resolves `\|` before the span is parsed: a
+# pipe in backticks splits the row exactly as one outside them does.
 _location_link() {
   local path="$1" line="$2" url="$3"
   [[ -n "$path" && "$path" != "null" ]] || { printf -- '—'; return 0; }
-  printf '[`%s:%s`](%s)' "$path" "$line" "$url"
+  printf '[`%s:%s`](%s)' "$(_md_cell "$path")" "$(_md_cell "$line")" "$url"
 }
 
 # The location cell for a finding the resolve leg reports on.
