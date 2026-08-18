@@ -180,6 +180,12 @@ is  "it replies in each thread rather than at top level" \
   "$(count 'pulls/42/comments/5000/replies')" "2"
 has "it resolves the threads it settled"              "$out" "resolved 2 thread(s)"
 has "the summary lists what was deferred and where"   "$(calls)" "Deferred work filed"
+# Each line leads with where the finding is, not with its id. The id named
+# nothing a reader could reach: it lives in an HTML comment marker, so it does
+# not render, and a browser find on this page matches only the line itself.
+has "a deferred line leads with the finding's location" \
+  "$(calls)" "- [\`app.ts:1\`](https://github.com/acme/widget/pull/42/files#r"
+hasnt "and never with the finding id"                 "$(calls)" "- \`$ID_DEFER\` —"
 has "the loop is handed back to the reviewer"         "$(calls)" "labels[]=crossrev/awaiting-review"
 
 # Provenance governs what happens after verification, never whether it happens.

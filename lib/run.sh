@@ -811,7 +811,7 @@ Reading the diff and any earlier review threads. This comment becomes the pass s
       anchor="$(state_anchor "$(jq -r .path <<<"$f")" "$(jq -r .line <<<"$f")")"
       id="$(state_finding_id "$(jq -r .path <<<"$f")" "$(jq -r .title <<<"$f")" "$anchor")"
       enriched="$(jq -c --argjson f "$f" --arg id "$id" --arg a "$anchor" \
-        '. + [$f + {id:$id, anchor:$a, thread_id:null, disposition:null, tracked_as:null}]' \
+        '. + [$f + {id:$id, anchor:$a, thread_id:null, root_comment_id:null, disposition:null, tracked_as:null}]' \
         <<<"$enriched")"
     done
     findings="$enriched"
@@ -893,10 +893,19 @@ Findings recorded; posting them now.$(state_marker_encode "$(jq -c 'del(.comment
 
   # Thread ids come from GraphQL, matched by the finding marker in each comment
   # body rather than by path and line, so a moved line does not lose the link.
+  #
+  # `root_comment_id` is carried beside `thread_id` because the two answer
+  # different questions and only one of them is a URL. `thread_id` is the GraphQL
+  # node the resolve leg resolves the thread through; `root_comment_id` is the
+  # numeric id a `#r<id>` anchor is built from, which is how a person reaches the
+  # conversation from a table or a commit message.
   local threads_now
   threads_now="$(gh_review_threads "$CTX_REPO" "$CTX_PR")"
   findings="$(jq -c --argjson t "$threads_now" '
-    [ .[] as $f | $f + {thread_id: ([$t[] | select(.finding_ids | index($f.id)) | .id] | first // $f.thread_id)} ]' \
+    [ .[] as $f
+      | [$t[] | select(.finding_ids | index($f.id))] | first as $m
+      | $f + { thread_id: ($m.id // $f.thread_id),
+               root_comment_id: ($m.root_comment_id // $f.root_comment_id) } ]' \
     <<<"$findings")"
   marker="$(jq -c --argjson f "$findings" '.findings = $f' <<<"$marker")"
 
@@ -1132,7 +1141,7 @@ _run_details() {
 _findings_table() {
   local findings="$1" sha="$2" n i f sev kind pre path line
   n="$(jq 'length' <<<"$findings")"
-  printf '| Severity | Category | Where | What |\n|---|---|---|---|\n'
+  printf '| Severity | Category | Finding | Location |\n|---|---|---|---|\n'
   for (( i = 0; i < n; i++ )); do
     f="$(jq -c ".[$i]" <<<"$findings")"
     sev="$(jq -r '.severity // "?"' <<<"$f")"
@@ -1145,15 +1154,16 @@ _findings_table() {
     # and an ordinary space is a break opportunity — the pair wraps onto two
     # lines and the emoji ends up orphaned above its own label.
     #
-    # The cell shows the basename and links to the line, so the two columns that
-    # carry meaning get the width instead of a repository path nobody reads in
-    # full. The full path survives as the link's title, which is what a hover
-    # shows, so two files sharing a name are still tellable apart.
-    printf '| %s&nbsp;%s | %s&nbsp;%s | [`%s:%s`](%s "%s:%s") | %s%s |\n' \
+    # The finding comes before its location, because the reading order is
+    # severity, then what was found, then where it is. The location has a column
+    # of its own and carries the full path rather than a basename with the path
+    # hidden in a hover title, so two files sharing a name are tellable apart
+    # without one.
+    printf '| %s&nbsp;%s | %s&nbsp;%s | %s%s | %s |\n' \
       "$(run_severity_emoji "$sev")" "$(_ucfirst "$sev")" \
       "$(run_category_emoji "$kind")" "$(_ucfirst "$kind")" \
-      "${path##*/}" "$line" "$(_blob_url "$sha" "$path" "$line")" "$path" "$line" \
-      "$(_md_cell "$(jq -r .title <<<"$f")")" "$pre"
+      "$(_md_cell "$(jq -r .title <<<"$f")")" "$pre" \
+      "$(_location_link "$path" "$line" "$(_blob_url "$sha" "$path" "$line")")"
   done
   printf '\n'
 }
@@ -1166,6 +1176,53 @@ _findings_table() {
 _blob_url() {
   local sha="$1" path="$2" line="$3"
   printf 'https://github.com/%s/blob/%s/%s#L%s' "$CTX_REPO" "$sha" "$path" "$line"
+}
+
+# A link to the review thread a finding was raised in.
+#
+# The files-tab form rather than the conversation-tab one, and the difference was
+# measured rather than assumed. `<pr>#discussion_r<id>` never scrolls on a first
+# load: the timeline renders after the browser has already applied the fragment,
+# so it works on a reload and not on a click, which is not a property a link in
+# permanent history can rely on. `<pr>/files#r<id>` scrolls, and fails only for a
+# comment GitHub has marked outdated because it could no longer re-anchor it onto
+# the current diff.
+_thread_url() {
+  printf 'https://github.com/%s/pull/%s/files#r%s' "$CTX_REPO" "$CTX_PR" "$1"
+}
+
+# How a finding is named to a person: its location, linked.
+#
+# Never its id. The 16-character finding id is a correlation key for crossrev's
+# own state. It lives in an HTML comment marker, so it renders invisible, and a
+# browser find on the pull request matches only the row the reader started from.
+# It is a dead end wherever it is printed.
+_location_link() {
+  local path="$1" line="$2" url="$3"
+  [[ -n "$path" && "$path" != "null" ]] || { printf -- '—'; return 0; }
+  printf '[`%s:%s`](%s)' "$path" "$line" "$url"
+}
+
+# The location cell for a finding the resolve leg reports on.
+#
+# Links the thread, because the reader's question there is what happened to this
+# finding and the answer is the conversation. Falls back to the code permalink
+# for a finding that never got a thread — the `unthreaded` case, an inline
+# comment GitHub refused to anchor.
+#
+# The text comes from crossrev's own finding record and never from GitHub's:
+# GitHub drops a comment's line to null once it goes outdated, which is exactly
+# when the link stops working and the text has to carry the reader alone.
+_finding_location() {
+  local f="$1" sha="$2" path line root
+  path="$(jq -r '.path // ""' <<<"$f")"
+  line="$(jq -r '.line // ""' <<<"$f")"
+  root="$(jq -r '.root_comment_id // ""' <<<"$f")"
+  if [[ -n "$root" && "$root" != "null" ]]; then
+    _location_link "$path" "$line" "$(_thread_url "$root")"
+  else
+    _location_link "$path" "$line" "$(_blob_url "$sha" "$path" "$line")"
+  fi
 }
 
 # The review leg's summary comment.
@@ -1413,6 +1470,16 @@ Verifying each finding against the codebase. This comment becomes the pass summa
   local threads dispositions blocked blocked_reason summary model_reported tokens
   threads="$(gh_review_threads "$CTX_REPO" "$CTX_PR")"
 
+  # Backfilled rather than trusted from the review marker, because a pull request
+  # reviewed before findings carried `root_comment_id` has none on record and its
+  # summary table would fall back to the code permalink for every row. The review
+  # leg sets it too; this covers what it could not.
+  findings="$(jq -c --argjson t "$threads" '
+    [ .[] as $f
+      | [$t[] | select(.finding_ids | index($f.id))] | first as $m
+      | $f + { root_comment_id: ($f.root_comment_id // $m.root_comment_id) } ]' \
+    <<<"$findings")"
+
   if [[ "$(jq -r '(.dispositions // []) | length' <<<"$marker")" != "0" ]]; then
     ui_say "The previous attempt already recorded its dispositions, so the resolver is not run again."
     dispositions="$(jq -c '.dispositions' <<<"$marker")"
@@ -1548,12 +1615,19 @@ Dispositions recorded; committing and replying now.$(state_marker_encode "$(jq -
   # before resolve, which is the invariant that matters: a thread resolved
   # against a write that did not land is exactly how work disappears.
   local filed=0 matched=0 deferred_lines="" backlog_wrote=0
-  local n i d id disp tracked dup existing
+  local n i d id disp tracked dup existing where
   n="$(jq 'length' <<<"$dispositions")"
   for (( i = 0; i < n; i++ )); do
     d="$(jq -c ".[$i]" <<<"$dispositions")"
     id="$(jq -r .finding_id <<<"$d")"
     [[ "$(jq -r .disposition <<<"$d")" == "deferred" ]] || continue
+
+    # Each line leads with where the finding is, not with its id. The id named
+    # nothing a reader could reach: it lives in an invisible marker, so it is not
+    # even searchable on the page the list is printed on.
+    where="$(_finding_location \
+      "$(jq -c --arg id "$id" 'map(select(.id == $id)) | first // {}' <<<"$findings")" \
+      "$(jq -r '.head_sha // ""' <<<"$marker")")"
 
     tracked=""; existing=""
     if [[ "$CTX_BACKLOG" == "github_issues" ]]; then
@@ -1567,12 +1641,12 @@ Dispositions recorded; committing and replying now.$(state_marker_encode "$(jq -
       tracked="$CTX_REPO#$existing"
       matched=$(( matched + 1 ))
       deferred_lines="$deferred_lines
-- \`$id\` — already tracked as #$existing, so nothing was filed"
+- $where — already tracked as #$existing, so nothing was filed"
     elif [[ -n "$dup" && "$dup" != "null" ]]; then
       tracked="$CTX_REPO#$dup"
       matched=$(( matched + 1 ))
       deferred_lines="$deferred_lines
-- \`$id\` — matches the existing issue #$dup, so nothing was filed"
+- $where — matches the existing issue #$dup, so nothing was filed"
       if [[ "$(jq -r '.backlog.github_issues.comment_on_existing_issue' <<<"$CFG_MERGED")" == "true" ]]; then
         gh_issue_comment "$CTX_REPO" "$dup" \
           "Seen again while reviewing $CTX_REPO#$CTX_PR (crossrev pass $pass).$(state_finding_marker "$id" "$pass" resolve)"
@@ -1584,10 +1658,10 @@ Dispositions recorded; committing and replying now.$(state_marker_encode "$(jq -
         # Only a repository backlog puts something in the tree for the commit to carry.
         [[ "$CTX_BACKLOG" == "repository" ]] && backlog_wrote=1
         deferred_lines="$deferred_lines
-- \`$id\` — filed as ${tracked/#"$CTX_REPO"/}"
+- $where — filed as ${tracked/#"$CTX_REPO"/}"
       else
         deferred_lines="$deferred_lines
-- \`$id\` — **not persisted anywhere**, so its thread stays open rather than resolving against a write that did not land"
+- $where — **not persisted anywhere**, so its thread stays open rather than resolving against a write that did not land"
       fi
     fi
 
@@ -1956,18 +2030,23 @@ _disposition_counts() {
 # text crossrev holds is the model's full reply, which belongs in the thread it
 # was written for and would not survive a table cell.
 _dispositions_table() {
-  local dispositions="$1" findings="$2" n i d id f sev title
+  local dispositions="$1" findings="$2" sha="$3" n i d id f sev title
   n="$(jq 'length' <<<"$dispositions")"
-  printf '| Finding | Disposition |\n|---|---|\n'
+  printf '| Severity | Finding | Location | Disposition |\n|---|---|---|---|\n'
   for (( i = 0; i < n; i++ )); do
     d="$(jq -c ".[$i]" <<<"$dispositions")"
     id="$(jq -r .finding_id <<<"$d")"
     f="$(jq -c --arg id "$id" 'map(select(.id == $id)) | first // {}' <<<"$findings")"
     sev="$(jq -r '.severity // "?"' <<<"$f")"
     title="$(jq -r '.title // ""' <<<"$f")"
-    [[ -n "$title" ]] || title="$id"
-    printf '| %s %s <sub>`%s`</sub> | %s |\n' \
-      "$(run_severity_emoji "$sev")" "$(_md_cell "$title")" "$id" \
+    # The id appears here and nowhere else, and only when the review record has
+    # no finding under it. That is a broken state rather than a normal one, and
+    # the id is then the single handle anyone debugging it has.
+    [[ -n "$title" ]] || title="finding \`$id\` is not in the review record"
+    printf '| %s&nbsp;%s | %s | %s | %s |\n' \
+      "$(run_severity_emoji "$sev")" "$(_ucfirst "$sev")" \
+      "$(_md_cell "$title")" \
+      "$(_finding_location "$f" "$sha")" \
       "$(jq -r .disposition <<<"$d")"
   done
   printf '\n'
@@ -2019,7 +2098,7 @@ _resolve_summary_body() {
 
   printf '%s\n\n' "$summary"
 
-  _dispositions_table "$dispositions" "$findings"
+  _dispositions_table "$dispositions" "$findings" "$(jq -r '.head_sha // ""' <<<"$marker")"
 
   if [[ -n "$deferred_lines" ]]; then
     printf '## Deferred work filed\n'

@@ -83,13 +83,16 @@ resolve_payload() {
 }
 
 # One resolve leg over that marker.
+# $2 replaces the thread routing, for the one case that has no threads at all.
 run_resolve() {
   fixture_repo; stub_reset
   routes_baseline "$(marker_comment 9001 "$(review_marker)" | jq -cs . | payload)"
   route 'api --method POST repos/*/issues/42/comments*' '{"id":9002}'
-  route '*reviewThreads*' "$(threads_response \
-    "$(thread_node T_SEC app.ts 2 false "$ID_SEC")" \
-    "$(thread_node T_PRE app.ts 1 false "$ID_PRE")")"
+  if [[ -n "${2:-}" ]]; then "$2"; else
+    route '*reviewThreads*' "$(threads_response \
+      "$(thread_node T_SEC app.ts 2 false "$ID_SEC")" \
+      "$(thread_node T_PRE app.ts 1 false "$ID_PRE")")"
+  fi
   route '*resolveReviewThread*' '{"data":{"resolveReviewThread":{"thread":{"isResolved":true}}}}'
   route 'api --method POST repos/*/pulls/42/comments/*/replies*' '{"id":6001}'
   CROSSREV_RESOLVE_PAYLOAD="$(printf '%s' "$1" | payload)"; export CROSSREV_RESOLVE_PAYLOAD
@@ -148,7 +151,7 @@ hasnt "the label is not bolded beside a plain title" "$review_calls" "**High · 
 hasnt "the heading carries no provenance"             "$review_calls" "· Security · pre-existing"
 has   "the table's what cell does, muted"             "$review_calls" "<sub>· pre-existing</sub>"
 
-has "the summary table header names both columns"     "$review_calls" "| Severity | Category | Where | What |"
+has "the findings table names all four columns"       "$review_calls" "| Severity | Category | Finding | Location |"
 has "a high security finding carries both glyphs"     "$review_calls" "| 🔴&nbsp;High | 🔒&nbsp;Security |"
 has "a low maintainability one carries its own"       "$review_calls" "| 🔵&nbsp;Low | 🧹&nbsp;Maintainability |"
 has "and a medium correctness one"                    "$review_calls" "| 🟠&nbsp;Medium | 🐛&nbsp;Correctness |"
@@ -165,14 +168,14 @@ has "a pipe in a title is escaped rather than splitting the row" \
 hasnt "no breakable space is left between a glyph and its word" \
   "$review_calls" "| 🔴 High |"
 
-# The cell shows the basename and links to the line, so the columns that carry
-# meaning get the width. The full path survives as the link title, which is what
-# a hover shows, so two files sharing a name are still tellable apart.
-has "the where cell links to the line rather than printing the path" \
+# The location has a column of its own, so it carries the full path rather than a
+# basename with the path hidden in a hover title. Two files sharing a name are
+# tellable apart without hovering, and the text stays readable where a link fails.
+has "the location cell links the full path and line" \
   "$review_calls" '[`app.ts:2`](https://github.com/acme/widget/blob/'
 has "and the link is pinned to the revision that was reviewed, not to the branch" \
   "$review_calls" "/blob/$review_head/app.ts#L2"
-has "with the full path kept as the link title"       "$review_calls" '#L2 "app.ts:2")'
+hasnt "the path is not demoted to a hover title"      "$review_calls" '#L2 "app.ts:2")'
 
 # ---------------------------------------------------------------------------
 # The reply lead belongs to the orchestrator, not to the model
@@ -210,10 +213,38 @@ has "a reply that opens with the word but not the lead keeps it" \
 run_resolve "$(resolve_payload)"
 resolve_calls="$(calls)"
 
-has "the resolve table names findings, not ids alone" \
-  "$resolve_calls" "| 🔴 Token compared with == instead of a constant-time check"
-has "and keeps the id small for matching a row to a thread" \
-  "$resolve_calls" "<sub>\`$ID_SEC\`</sub> | fixed |"
+has "the resolve table names all four columns" \
+  "$resolve_calls" "| Severity | Finding | Location | Disposition |"
+has "and names a finding by its title, with severity beside it" \
+  "$resolve_calls" "| 🔴&nbsp;High | Token compared with == instead of a constant-time check"
+# The id is a correlation key for crossrev's own state. It lives in a marker that
+# renders invisible, so a reader who sees it cannot even search the page for it —
+# printing it spends a column on a dead end.
+hasnt "and never prints the finding id at the reader" \
+  "$resolve_calls" "<sub>\`$ID_SEC\`</sub>"
+
+# The reader's question at this table is what happened to the finding, and the
+# answer is the conversation — so the location links the thread rather than the
+# code. The files-tab anchor, not the conversation-tab one: `#discussion_r<id>`
+# never scrolls on a first load, because the timeline renders after the browser
+# has already applied the fragment.
+has "the location links the review thread it was settled in" \
+  "$resolve_calls" '[`app.ts:2`](https://github.com/acme/widget/pull/42/files#r5000)'
+hasnt "not the conversation tab, which does not scroll on a first load" \
+  "$resolve_calls" "#discussion_r"
+
+# A finding GitHub refused to anchor has no thread to link. The location still
+# has to be reachable, so it falls back to the code permalink rather than losing
+# the link entirely.
+run_resolve "$(resolve_payload)" no_threads
+no_thread_calls="$(calls)"
+has "a finding with no thread falls back to the code permalink" \
+  "$no_thread_calls" '[`app.ts:2`](https://github.com/acme/widget/blob/'
+# The positive above would pass on the review comment's own links alone, which
+# this leg re-renders. The absence is what proves the fallback fired: a thread
+# anchor can only come from _thread_url.
+hasnt "and no thread anchor is invented for it" \
+  "$no_thread_calls" "files#r"
 
 # ---------------------------------------------------------------------------
 # Decision 2 — exactly one native alert per summary comment

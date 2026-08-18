@@ -48,6 +48,22 @@ The review leg writes:
 
 The resolve leg adds threaded replies, resolves the threads it settled, commits any fixes, files deferred defects to the configured backlog, and posts its own summary comment.
 
+### How a finding is named
+
+Wherever CrossRev refers to a finding in something you read, it names it by **where the code is** — `path:line`, in a column headed Location — and links it.
+
+Which link depends on what you are likely to be asking at that point.
+
+| Where you see it | The link goes to |
+|---|---|
+| The review leg's findings table | The code, permalinked to the revision that was reviewed |
+| The resolve leg's summary table | The review thread, where the reasoning and any rebuttal are |
+| The deferred work list | The same thread |
+
+A finding GitHub could not anchor to a line has no thread, so its location falls back to the code permalink.
+
+CrossRev also gives every finding a 16-character id, used to match a reply to the finding it answers across passes. It is deliberately not shown to you: it lives inside a hidden marker, so it does not render and you cannot even search a page for it.
+
 ### Severity and category
 
 Severity says how bad the defect is, and nothing else:
