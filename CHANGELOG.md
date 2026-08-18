@@ -22,6 +22,8 @@ All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepa
 
 ### Fixed
 
+- **`crossrev init` uses `git describe` for source pin label provenance** ([#15](https://github.com/carlosboeing/crossrev/issues/15)). Workflow templates and the init plan comment the pinned commit with its source ref. When init ran in a checkout ahead of a tag, `git describe --tags --exact-match` failed and fell back to `v$(crossrev_version)`, labelling the pinned commit with a tag it did not point at. `INIT_SOURCE_REF` now uses `git describe --tags` (falling back to `untagged` if describe fails), accurately reflecting whether the commit is at a tag, ahead of a tag, or untagged.
+
 - **Manual passes beyond `max_passes_per_cycle` no longer print impossible denominators** ([#54](https://github.com/carlosboeing/crossrev/issues/54)). An operator manually driving passes beyond the configured cycle cap previously saw headers, comments, and status lines formatting `pass 4 of 3`. These now format as `pass 4 (past the cycle cap of 3)`, preserving the cap context while reporting the pass count accurately without asserting a false limit.
 
 - **Control characters in commit subjects, including NUL, are rejected before commit** ([#55](https://github.com/carlosboeing/crossrev/issues/55)). Bash command substitution drops NUL bytes, so a subject carrying a NUL byte was previously stripped to a clean string before reaching `_commit_subject_ok`. `_commit_subject_ok` now inspects the raw JSON marker subject directly for control characters, ensuring NUL bytes are detected and rejected in favour of the generic fallback subject.

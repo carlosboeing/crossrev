@@ -139,8 +139,8 @@ _init_resolve() {
   # carlosboeing/crossrev outright, so parsing the origin remote answered a
   # question nobody asks any more.
   INIT_SOURCE_SHA="$(git -C "$ROOT" rev-parse HEAD 2>/dev/null)" || INIT_SOURCE_SHA=""
-  INIT_SOURCE_REF="$(git -C "$ROOT" describe --tags --exact-match 2>/dev/null)" \
-    || INIT_SOURCE_REF="v$(crossrev_version)"
+  INIT_SOURCE_REF="$(git -C "$ROOT" describe --tags 2>/dev/null)" \
+    || INIT_SOURCE_REF="untagged"
 
   [[ -n "$INIT_SOURCE_SHA" ]] || ui_die \
     "could not work out which commit of CrossRev to pin the workflows to" \
