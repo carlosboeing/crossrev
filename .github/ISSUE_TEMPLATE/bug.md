@@ -7,6 +7,11 @@ labels: bug
 
 <!-- Not for security issues. Those go through SECURITY.md, privately. -->
 
+<!-- Title: one clause, under 60 characters, stating the wrong behaviour —
+     "Push-target validation does not see a pushInsteadOf rewrite". Not
+     "push bug". Skip internal vocabulary; a title needing "and" is
+     probably two issues. -->
+
 ## What happened
 
 <!-- What you ran, and what it did. Paste the output rather than describing it. -->

@@ -122,6 +122,23 @@ Conventional Commits: `<type>(<scope>): <description>`, imperative, subject ≤7
 
 **The type you choose is the version decision** ([ADR 0012](docs/adrs/0012-versions-are-cut-deliberately.md)). `fix` is a patch, `feat` is a minor, `!` or a `BREAKING CHANGE:` footer is a breaking change. Nothing re-derives this later from a diff, so a `feat` written as a `chore` disappears from the next version silently.
 
+## Issues
+
+Most issues here are filed with `gh issue create --title ... --body ...`, which bypasses `.github/ISSUE_TEMPLATE/` entirely. The templates guide the body and say nothing about the title, so both halves are written out here.
+
+**A title is one clause, under 60 characters, naming the change or the symptom.**
+
+- **Enhancement titles are imperative.** "Extend doctor to check the repository setup", not "Improve doctor".
+- **Bug titles state the wrong behaviour.** "Push-target validation does not see a pushInsteadOf rewrite".
+- **No internal vocabulary.** "The legs" means nothing to a reader outside this codebase.
+- **A title needing "and" is probably two issues.**
+
+**A body follows `.github/ISSUE_TEMPLATE/`**, including when you file with `gh issue create`, which does not apply the templates for you.
+
+- **Cite `file:line` for anything already in the code.**
+- **Say what was measured, not what was assumed.** A rate needs its sample.
+- **Link the ADRs and issues it touches.**
+
 ## Releases
 
 Versions are **cut deliberately, not per merge**. Changes accumulate under `## [Unreleased]`; a release turns that heading into a version.
