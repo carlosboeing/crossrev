@@ -62,6 +62,43 @@ hasnt "crossrev's own commits are not shown back to it" \
 has "while the repository's own subjects still are" \
   "$out" "feat(api): add the widget endpoint"
 
+# And they are excluded before the sample is capped, never after. Capping the
+# log first put a fixed depth on the search: a base carrying sixty of crossrev's
+# own commits filled it, nothing eligible survived the filter, and a repository
+# with a real convention was told its history was too short to read one from —
+# the fallback firing hardest on the repositories crossrev has run on longest.
+deep="$(mktemp -d)"
+git -C "$deep" init -q
+git -C "$deep" config user.email "dev@example.com"
+git -C "$deep" config user.name "Dev"
+for s in \
+  "feat(api): add the widget endpoint" \
+  "fix(api): reject an empty payload" \
+  "refactor(store): split the cache from the reader" \
+  "test(api): cover the empty payload path" \
+  "docs: describe the widget endpoint" \
+  "chore(deps): bump the linter"
+do
+  git -C "$deep" commit -q --allow-empty -m "$s"
+done
+# Seventy, so the run of excluded commits is longer than any cap the old code
+# read the log through.
+for (( i = 1; i <= 70; i++ )); do
+  git -C "$deep" -c user.email="$MINE" -c user.name=crossrev \
+    commit -q --allow-empty -m "fix: resolve crossrev review findings (pass $i)"
+done
+dbase="$(git -C "$deep" rev-parse HEAD)"
+
+out="$(cd "$deep" && prompt_commit_convention "$dbase" "$MINE")"
+has "seventy crossrev commits do not bury the repository's own convention" \
+  "$out" "feat(api): add the widget endpoint"
+has "and the search reaches every eligible subject beneath them" \
+  "$out" "chore(deps): bump the linter"
+hasnt "so the leg is not told to fall back over crossrev's own history" \
+  "$out" "too short to read a convention from"
+hasnt "and none of those commits reaches the sample either" \
+  "$out" "resolve crossrev review findings"
+
 # Under five subjects is a coincidence rather than a convention.
 short="$(mktemp -d)"
 git -C "$short" init -q
@@ -125,6 +162,6 @@ out="$(cd "$repo" && prompt_commit_convention "" "$MINE")"
 is_empty() { [[ -z "$1" ]] && ok "$2" || notok "$2" "nothing" "$1"; }
 is_empty "$out" "no base revision prints nothing rather than a bare heading"
 
-rm -rf "$repo" "$short"
+rm -rf "$repo" "$short" "$deep"
 printf '\n  %s passed, %s failed\n' "$pass" "$fail"
 (( fail == 0 ))

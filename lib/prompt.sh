@@ -54,9 +54,26 @@ prompt_commit_convention() {
   local base="$1" mine="${2:-}" subjects template n
   [[ -n "$base" ]] || return 0
 
-  subjects="$(git log --format='%ae%x09%s' -n 60 "$base" 2>/dev/null \
-    | { [[ -n "$mine" ]] && grep -vF "$mine	" || cat; } \
-    | cut -f2- | head -20)" || subjects=""
+  # Filtered first, capped second. A cap read off the log rather than off the
+  # sample is a cap on how far back the search may look: sixty of crossrev's own
+  # commits sitting at the base fill it, nothing eligible survives the filter,
+  # and a repository with years of convention behind it is told its history is
+  # too short to read one from.
+  #
+  # awk rather than `grep -v | head`, because the walk has to stop at the
+  # twentieth ELIGIBLE subject rather than at a fixed depth — so the only bound
+  # is how far back twenty of them are, and a base whose whole history is
+  # crossrev's is read to its end because that is the honest answer.
+  #
+  # Stopping there closes the pipe under `git log`, which is why pipefail is off
+  # inside the substitution. SIGPIPE is how this is meant to end; with pipefail
+  # on it is a failed pipeline, and the `|| subjects=""` below would discard the
+  # twenty subjects that had just been collected.
+  subjects="$(set +o pipefail
+    git log --format='%ae%x09%s' "$base" 2>/dev/null \
+      | awk -F'\t' -v mine="$mine" '
+          mine == "" || $1 != mine { print; if (++n == 20) exit }' \
+      | cut -f2-)" || subjects=""
 
   # A commit template is commit-specific and small, so it belongs here. General
   # contributor guidance is a different input and arrives separately.
