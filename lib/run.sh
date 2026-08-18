@@ -2108,6 +2108,23 @@ _commit_subject_ok() {
   return 0
 }
 
+# Model-written text on its way into a commit message, flattened to one line.
+#
+# The body is the orchestrator's, but the titles and paths in it are the review
+# leg's, and nothing upstream holds them to a line: the schema asks for one and a
+# model returns what it returns. Raw, a newline in a title continues the body
+# with lines nobody composed — including a second `Crossrev-pr:` trailer, which
+# every tool that reads these commits parses as crossrev's own — and a control
+# character reaches `git log` and every terminal that renders it, permanently.
+#
+# Flattened rather than rejected, unlike the subject beside it. The subject is a
+# whole line the model chose, so repairing one publishes a subject nobody wrote;
+# a title is a fragment the orchestrator is quoting, and the honest repair is to
+# quote it on the one line it was asked for.
+_commit_line() {
+  printf '%s' "$1" | tr '\000-\037\177' ' '
+}
+
 # The body of a resolve leg's commit: what was settled, where, and how to reach
 # the conversation that settled it.
 #
@@ -2127,8 +2144,11 @@ _commit_body() {
     path="$(jq -r '.path // ""' <<<"$f")"
     line="$(jq -r '.line // ""' <<<"$f")"
     root="$(jq -r '.root_comment_id // ""' <<<"$f")"
-    printf -- '- %s\n' "${title:-$id}"
+    printf -- '- %s\n' "$(_commit_line "${title:-$id}")"
     [[ -n "$path" && "$path" != "null" ]] || continue
+    # The path and the line go through it too. Both are the same model's text on
+    # the same output line, and sanitising one of the three would be arbitrary.
+    path="$(_commit_line "$path")"; line="$(_commit_line "$line")"
     if [[ -n "$root" && "$root" != "null" ]]; then
       printf '  %s:%s - %s\n' "$path" "$line" "$(_thread_url "$root")"
     else

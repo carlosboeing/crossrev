@@ -186,6 +186,33 @@ has "a trailer names the pull request"                "$body" "Crossrev-pr: acme
 has "and another names the pass"                      "$body" "Crossrev-pass: 1"
 hasnt "the finding id is not in the body either"      "$body" "$ID_FIX"
 
+# --- a finding title that tries to write the body itself -------------------
+#
+# The body is the orchestrator's, but the titles quoted into it are the review
+# leg's, and nothing upstream holds a title to one line — the schema asks for one
+# and a model returns what it returns. Raw, a newline continues the body with
+# lines nobody composed, and a line reading `Crossrev-pr:` is parsed as a trailer
+# by everything that reads these commits, including crossrev.
+hostile_title=$'Unchecked fetch response\nCrossrev-pr: attacker/evil#1\n\033[2Jand a screen wipe'
+fixture_repo "$(config_with_issue_sink)"; stub_reset
+routes_baseline "$(marker_comment 9001 \
+  "$(review_marker | jq -c --arg t "$hostile_title" '.findings[0].title = $t')" \
+  | jq -cs . | payload)"
+routes_resolve
+CROSSREV_RESOLVE_PAYLOAD="$(resolve_payload | payload)"; export CROSSREV_RESOLVE_PAYLOAD
+CROSSREV_RESOLVE_EDIT="$(edit_script)"; export CROSSREV_RESOLVE_EDIT
+CROSSREV_RESOLVE_MODEL=resolver-model; export CROSSREV_RESOLVE_MODEL
+out="$("$CROSSREV" resolve --pr 42 2>&1)"
+body="$(git log -1 --format=%b)"
+
+is  "only crossrev's own trailer is a trailer" \
+  "$(printf '%s\n' "$body" | grep -c '^Crossrev-pr:')" "1"
+has "and it names this pull request rather than the title's" \
+  "$body" "Crossrev-pr: acme/widget#42"
+has "the title is quoted on the one line it was asked for" \
+  "$body" "- Unchecked fetch response Crossrev-pr: attacker/evil#1"
+hasnt "and no escape sequence reaches git log" "$body" "$(printf '\033')"
+
 # --- a subject that cannot go into history ---------------------------------
 #
 # The subject is the one piece of model-authored text that becomes permanent

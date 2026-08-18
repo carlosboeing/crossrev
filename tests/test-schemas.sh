@@ -206,6 +206,27 @@ rc "and so is a finding number that is not a whole number" 1 \
   "$(_resolutions '[{"finding_number":1.5,"resolution":"fixed","reply":"r","persist":null,"duplicate_of":null}]')" \
   "$_expect"
 
+# The commit subject becomes permanent repository history, and `jq -r` reads a
+# number, a boolean or an empty array out of the payload as a plausible-looking
+# string. On the fenced-JSON path this check is the only thing between one of
+# those and `git log`.
+rc "a commit subject that is not a string is a shape failure" 1 \
+  "$(_resolutions "$(_all_three)" | jq -c '.commit_subject = 3')" "$_expect"
+rc "and an empty array is caught rather than committed as \"[]\"" 1 \
+  "$(_resolutions "$(_all_three)" | jq -c '.commit_subject = []')" "$_expect"
+rc "a null subject passes, because a pass may fix nothing" 0 \
+  "$(_resolutions "$(_all_three)" | jq -c '.commit_subject = null')" "$_expect"
+rc "so does one the model wrote" 0 \
+  "$(_resolutions "$(_all_three)" | jq -c '.commit_subject = "fix(api): check the response status"')" \
+  "$_expect"
+# Typed rather than required, deliberately, and this is the case that says so.
+# The schema lists commit_subject under "required" because one harness enforces
+# strict mode; a payload without it is a resolver that wrote no subject, and the
+# commit carries the generic one. Failing the pass over a missing message would
+# cost the fix to save the description of it.
+rc "an omitted subject is accepted, and the commit goes out generic" 0 \
+  "$(_resolutions "$(_all_three)")" "$_expect"
+
 # duplicate_of names an issue the orchestrator retrieved. Inventing one makes
 # crossrev comment on an unrelated issue and resolve the thread against it.
 rc "a duplicate_of naming a supplied candidate passes" 0 \

@@ -79,6 +79,16 @@ validate_resolve() {
       then bad("summary is missing or empty")
     elif ((.blocked // false) | type != "boolean")
       then bad("blocked is not a boolean")
+    # Typed rather than required, which is the same call `blocked_reason` above
+    # gets: the schema lists both under "required" because one harness enforces
+    # strict mode, not because a payload without them says anything false. An
+    # absent subject is a resolver that wrote none, and the commit carries the
+    # generic one — a fix is not worth failing over a missing message. A subject
+    # of the wrong type is different, because `jq -r` turns a number, a boolean
+    # or an empty array into a plausible-looking string and commits it.
+    elif (has("commit_subject")) and (.commit_subject != null)
+         and (.commit_subject | type != "string")
+      then bad("commit_subject is \(.commit_subject | type), and a commit subject is a string or null")
     else
       ( [ .resolutions[] | select(
             # jq has one number type, so whole-ness is checked rather than
