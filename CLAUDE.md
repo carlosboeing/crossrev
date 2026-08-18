@@ -122,6 +122,23 @@ Conventional Commits: `<type>(<scope>): <description>`, imperative, subject ≤7
 
 **The type you choose is the version decision** ([ADR 0012](docs/adrs/0012-versions-are-cut-deliberately.md)). `fix` is a patch, `feat` is a minor, `!` or a `BREAKING CHANGE:` footer is a breaking change. Nothing re-derives this later from a diff, so a `feat` written as a `chore` disappears from the next version silently.
 
+## Issues
+
+Most issues here are filed with `gh issue create --title ... --body ...`, which bypasses `.github/ISSUE_TEMPLATE/` entirely. The templates guide the body and say nothing about the title, so both halves are written out here.
+
+**A title is one clause, under 60 characters, naming the change or the symptom.**
+
+- **Enhancement titles are imperative.** "Extend doctor to check the repository setup", not "Improve doctor".
+- **Bug titles state the wrong behaviour.** "Push-target validation does not see a pushInsteadOf rewrite".
+- **No internal vocabulary.** "The legs" means nothing to a reader outside this codebase.
+- **A title needing "and" is probably two issues.**
+
+**A body follows `.github/ISSUE_TEMPLATE/`**, including when you file with `gh issue create`, which does not apply the templates for you.
+
+- **Cite `file:line` for anything already in the code.**
+- **Say what was measured, not what was assumed.** A rate needs its sample.
+- **Link the ADRs and issues it touches.**
+
 ## Releases
 
 Versions are **cut deliberately, not per merge**. Changes accumulate under `## [Unreleased]`; a release turns that heading into a version.
@@ -135,7 +152,7 @@ Versions are **cut deliberately, not per merge**. Changes accumulate under `## [
 
 - **Branch and workspace isolation.** Verify the active branch and workspace state at the start of a session. New feature work goes on a clean branch off `origin/main` — a worktree, or a manual checkout. If your runtime has a `using-git-worktrees` skill, invoke it.
 - **Run both checks before claiming done.** `bash tests/run.sh` must report `all suites passed` and `bash scripts/lint.sh` must report `lint clean`. Both are offline and take seconds, so there is no excuse for asserting instead of verifying.
-  - **The suite prints a per-file count, not a total.** `tail` shows the last file's assertions. To quote a total, sum it: `bash tests/run.sh | awk '/passed, [0-9]+ failed/ {p+=$1; f+=$3} END {print p, f}'`. The current baseline is **874 passed, 0 failed**.
+  - **The suite prints a per-file count, not a total.** `tail` shows the last file's assertions. To quote a total, sum it: `bash tests/run.sh | awk '/passed, [0-9]+ failed/ {p+=$1; f+=$3} END {print p, f}'`. The current baseline is **1137 passed, 0 failed** across 22 files.
   - **`lint.sh` skips shellcheck with a note if it is not installed, and still prints `lint clean`.** A green lint on a machine without shellcheck has linted nothing. Check that it ran.
 - **Never let a GitHub credential reach the agent process.** Every GitHub read and write goes through the orchestrator. The adapters strip `GH_TOKEN`, `GITHUB_TOKEN` and `GH_ENTERPRISE_TOKEN` before starting the model-facing process. This is the security boundary rather than a convention ([ADR 0001](docs/adrs/0001-cross-model-review-loop.md), `SECURITY.md`).
 - **Policy is read from the pull request's base revision, never its head** ([ADR 0003](docs/adrs/0003-policy-read-from-the-base-revision.md)). This covers any new config key without being thought about, which is the point of it being structural.

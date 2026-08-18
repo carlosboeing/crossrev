@@ -81,6 +81,16 @@ Do not "fix" it.
    `docs/ROADMAP.md`, and any relevant doc or ADR in the **same commit set**.
 5. Open a pull request using the template. CI must be green before merge.
 
+## Filing an issue
+
+Use the templates in [`.github/ISSUE_TEMPLATE/`](.github/ISSUE_TEMPLATE/) — one
+for a bug, one for an enhancement. `gh issue create` does not apply them, so
+paste the sections in yourself when you file from the command line.
+
+The title is one clause, under 60 characters, naming the change or the symptom:
+imperative for an enhancement, the wrong behaviour for a bug. The rest of the
+rule is in [`CLAUDE.md`](CLAUDE.md#issues).
+
 ## Reporting a security issue
 
 Not through a pull request or a public issue. See [`SECURITY.md`](SECURITY.md).

@@ -5,6 +5,11 @@ title: ""
 labels: enhancement
 ---
 
+<!-- Title: one clause, under 60 characters, imperative, naming the change —
+     "Extend doctor to check the repository setup", not "Improve doctor".
+     Skip internal vocabulary; a title needing "and" is probably two
+     issues. -->
+
 ## What you want to be able to do
 
 <!-- The outcome, not the implementation. -->
