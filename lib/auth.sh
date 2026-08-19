@@ -101,17 +101,25 @@ _auth_role_default_name() {
   esac
 }
 
+# Derive a slug from an App name: lowercase, spaces to hyphens.
+_auth_slug() {
+  printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | tr ' ' '-'
+}
+
 # The owner is detected, not asked, because the repository's owner is the trust
 # boundary the private key should sit on. --owner overrides.
 _auth_detect_owner() {
   gh repo view --json owner --jq .owner.login 2>/dev/null || return 1
 }
 
-# "<type> <id>" for an account. /users/ resolves organisations too and returns
-# the same numeric id, so one call answers both questions. The id is what
-# prefills the install page with the right target.
-_auth_owner_info() {
-  gh api "users/$1" --jq '"\(.type) \(.id)"' 2>/dev/null || return 1
+# "<type> <id>" for an account (user, organisation, or bot). /users/ resolves
+# all three and returns the numeric id and type. The id prefills the install
+# page with the right target.
+_auth_account_info() {
+  local info
+  info="$(gh api "users/$1" --jq '"\(.type // empty) \(.id // empty)"' 2>/dev/null)" || return 1
+  [[ "$info" != " " && -n "$info" ]] || return 1
+  printf '%s' "$info"
 }
 
 # Where to install an App.
@@ -503,7 +511,7 @@ auth_login() {
   fi
 
   local owner_type owner_id info
-  info="$(_auth_owner_info "$owner")" || ui_die \
+  info="$(_auth_account_info "$owner")" || ui_die \
     "GitHub does not recognise the account '$owner'" \
     "Check the spelling, or pass a different one with --owner"
   read -r owner_type owner_id <<<"$info"
@@ -522,6 +530,12 @@ auth_login() {
   # GitHub App names are globally unique, so a bare "crossrev" is very likely
   # taken. Suffixing the owner is likelier to be free and clearer in a list.
   [[ -n "$app_name" ]] || app_name="$(_auth_role_default_name "$role" "$owner")"
+
+  local slug; slug="$(_auth_slug "$app_name")"
+  if _auth_account_info "${slug}[bot]" >/dev/null 2>&1; then
+    ui_die "a GitHub App named '$app_name' already exists" \
+      "To reuse the App, generate a fresh private key on GitHub and install it locally. To register a separate App, re-run with: crossrev auth login --name <name>"
+  fi
 
   local state; state="$(openssl rand -hex 16)"
 
@@ -561,7 +575,7 @@ auth_login() {
 
   ui_section "Register a GitHub App for $owner"
   ui_line "Owner        $owner ($owner_type)"
-  ui_line "Name         $app_name"
+  ui_line "Name         $app_name (override with --name)"
   ui_line "Role         $role"
   ui_line "Permissions  $(_auth_role_summary "$role")"
   ui_line "             and nothing else"
@@ -583,7 +597,7 @@ auth_login() {
   ui_line "follows along here — nothing to copy back."
   printf '\n'
 
-  ui_confirm "Open GitHub?" || { ui_say "Nothing was created."; return 1; }
+  ui_confirm "Open GitHub in your browser to create the App?" || { ui_say "Nothing was created."; return 1; }
 
   local html; html="$(mktemp -t crossrev-manifest).html"
   local reqfile; reqfile="$(mktemp -t crossrev-redirect)"
@@ -609,9 +623,10 @@ HTML
   local code="" returned_state=""
 
   if (( use_listener )); then
-    ui_section "Waiting for you to approve it"
+    ui_section "Step 1 of 2: Create the GitHub App"
     ui_line "A browser tab is open on GitHub's App registration page."
-    ui_line "Name it if you like, then approve. This picks up automatically."
+    ui_line "Review the settings and create the App. CrossRev detects the creation"
+    ui_line "and continues automatically."
     printf '\n'
 
     _open_browser "file://$html" || ui_warn \
@@ -635,9 +650,9 @@ HTML
   # Paste fallback. Reached when there is no nc, no free port, or the listener
   # timed out. It is the floor, not the plan.
   if [[ -z "$code" ]]; then
-    ui_section "Approve it in the browser"
-    ui_line "GitHub sends you back to a localhost address that will not load."
-    ui_line "Copy the whole URL from the address bar and paste it below."
+    ui_section "Step 1 of 2: Paste the registration code"
+    ui_line "GitHub redirected your browser to a localhost address that will not load."
+    ui_line "Copy the full URL from the address bar and paste it below."
     printf '\n'
     local pasted; pasted="$(ui_prompt "URL or code")" || ui_die \
       "no code was pasted" "Re-run: crossrev auth login --owner $owner"
@@ -754,8 +769,8 @@ _auth_install_flow() {
   local owner="$1" owner_type="$2" owner_id="$3" slug="$4" app_id="$5" pem="$6"
   local url; url="$(_auth_install_url "$slug" "$owner_type" "$owner_id")"
 
-  ui_section "Install it on the repositories you want reviewed"
-  ui_line "The App exists but reaches nothing until it is installed."
+  ui_section "Step 2 of 2: Install the App on the repositories you want reviewed"
+  ui_line "The App exists on GitHub, but reaches nothing until it is installed."
   ui_line "Choose 'Only select repositories' unless you mean all of them."
   printf '\n'
 

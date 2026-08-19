@@ -6,6 +6,8 @@ All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepa
 
 ### Fixed
 
+- **`crossrev auth login` detects App name collisions on GitHub before opening a browser** ([#16](https://github.com/carlosboeing/crossrev/issues/16)). When local metadata under `~/.config/crossrev/apps/` is missing but an App already exists on GitHub, `auth login` previously sent the user to GitHub to register under the derived name, where GitHub rejected the registration with "Name is already taken". CrossRev now probes `GET /users/<slug>[bot]` before opening a browser, refuses the registration if the App exists, and names both recovery paths: reusing the App by generating a fresh private key, or registering under a separate name with `--name`. The confirmation panel now makes `--name` discoverable, and the prompts and waiting screens in the login flow state their step and position clearly.
+
 - **Actionable findings outrank a reviewer's converged verdict** ([#60](https://github.com/carlosboeing/crossrev/issues/60)). `legs_pass_label` returned `converged` immediately on a converged verdict, ignoring the orchestrator's actionable count. A reviewer returning `converged` alongside actionable findings now yields `awaiting-resolution` instead, so the resolve leg addresses the findings. The call site warns when the verdict is overridden. A converged verdict with zero actionable findings remains authoritative as the exit from a human-settled escalation halt.
 
 ## [0.3.0] — 2026-08-19

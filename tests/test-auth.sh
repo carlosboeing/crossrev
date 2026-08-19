@@ -22,10 +22,6 @@ is()    { [[ "$2" == "$3" ]] && ok "$1" || notok "$1" "$3" "$2"; }
 has()   { [[ "$2" == *"$3"* ]] && ok "$1" || notok "$1" "contains '$3'" "$2"; }
 hasnt() { [[ "$2" != *"$3"* ]] && ok "$1" || notok "$1" "does not contain '$3'" "$2"; }
 
-# GitHub derives a slug by lowercasing and turning spaces into hyphens. Modelled
-# here rather than asserted from a live API, so the suite stays offline.
-slugify() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | tr ' ' '-'; }
-
 # --- the display name follows ADR 0010 -------------------------------------
 #
 # A GitHub App's name is the string a person reads in an organisation's installed
@@ -45,21 +41,23 @@ is "and so is the refresher" \
 # no markers read, pass 1 for ever, nothing reconciled.
 
 is "the loop slug is unchanged by the casing" \
-  "$(slugify "$(_auth_role_default_name loop acme)")" "crossrev-acme"
+  "$(_auth_slug "$(_auth_role_default_name loop acme)")" "crossrev-acme"
 is "and the refresher slug is unchanged too" \
-  "$(slugify "$(_auth_role_default_name refresher acme)")" "crossrev-refresh-acme"
+  "$(_auth_slug "$(_auth_role_default_name refresher acme)")" "crossrev-refresh-acme"
+is "a custom App name is slugified the same way" \
+  "$(_auth_slug "My Custom App")" "my-custom-app"
 
 # The fixture identity the stubbed-gh suites assert against, derived the same
 # way, so those suites and this one cannot drift apart.
 is "the slug matches the identity the other suites use" \
-  "$(slugify "$(_auth_role_default_name loop acme)")[bot]" "crossrev-acme[bot]"
+  "$(_auth_slug "$(_auth_role_default_name loop acme)")[bot]" "crossrev-acme[bot]"
 
 # An owner whose name is already mixed case keeps its own casing: the owner half
 # is an identity GitHub chose, not prose CrossRev gets to restyle.
 is "the owner's own casing survives" \
   "$(_auth_role_default_name loop ShoreLogic)" "CrossRev ShoreLogic"
 is "and still slugs to what the App is installed as" \
-  "$(slugify "$(_auth_role_default_name loop ShoreLogic)")" "crossrev-shorelogic"
+  "$(_auth_slug "$(_auth_role_default_name loop ShoreLogic)")" "crossrev-shorelogic"
 
 # --- the cached identity is revalidated, not believed -----------------------
 #
@@ -204,5 +202,80 @@ has "a rename away from a name with spaces reports the old name whole" \
   "$out" "name was CrossRev Shore Logic, now CrossRev ShoreLogic"
 is "and still corrects the slug" "$(jq -r .slug "$stale")" "crossrev-shorelogic"
 
+# --- generalised account lookup --------------------------------------------
+printf '%s\t%s\n' '*users/ShoreLogic*' '{"type":"Organization","id":12345}' >"$CROSSREV_GH_ROUTES"
+is "_auth_account_info resolves an organisation" \
+  "$(_auth_account_info ShoreLogic)" "Organization 12345"
+
+printf '%s\t%s\n' '*users/carlosboeing*' '{"type":"User","id":3394597}' >"$CROSSREV_GH_ROUTES"
+is "_auth_account_info resolves a user" \
+  "$(_auth_account_info carlosboeing)" "User 3394597"
+
+printf '%s\t%s\n' '*users/crossrev-acme\[bot\]*' '{"type":"Bot","id":99999}' >"$CROSSREV_GH_ROUTES"
+is "_auth_account_info resolves a bot account" \
+  "$(_auth_account_info "crossrev-acme[bot]")" "Bot 99999"
+
+printf '%s\t%s\n' '*users/nonexistent*' '!fail' >"$CROSSREV_GH_ROUTES"
+_auth_account_info nonexistent >/dev/null 2>&1
+is "_auth_account_info fails when the account does not exist" "$?" "1"
+
+# --- collision detection on auth login --------------------------------------
+#
+# When local metadata is missing but the App still exists on GitHub, auth login
+# must detect the collision via the bot user existence probe before opening a
+# browser, refuse to proceed, and explain both ways forward (reuse and --name).
+
+# Decline confirmations in tests rather than waiting on /dev/tty
+ui_confirm() {
+  printf '◆  %s  [y/N]\n' "$1"
+  return 1
+}
+
+XDG_CONFIG_HOME="$(mktemp -d)"; export XDG_CONFIG_HOME
+
+{
+  printf '%s\t%s\n' '*users/ShoreLogic*' '{"type":"Organization","id":12345}'
+  printf '%s\t%s\n' '*users/crossrev-shorelogic\[bot\]*' '{"type":"Bot","id":99999}'
+} >"$CROSSREV_GH_ROUTES"
+
+collision_out="$( (auth_login --owner ShoreLogic) 2>&1 || true )"
+has "collision detection refuses when the App exists on GitHub" \
+  "$collision_out" "a GitHub App named 'CrossRev ShoreLogic' already exists"
+has "and names reuse by generating a fresh private key" \
+  "$collision_out" "generate a fresh private key"
+has "and names the --name override" \
+  "$collision_out" "crossrev auth login --name"
+hasnt "and does not prompt to open a browser" \
+  "$collision_out" "Open GitHub"
+
+# --- probe returns 404 and login proceeds to confirmation -------------------
+#
+# When the bot account does not exist, the flow proceeds past the existence check
+# to the confirmation panel.
+
+{
+  printf '%s\t%s\n' '*users/ShoreLogic*' '{"type":"Organization","id":12345}'
+  printf '%s\t%s\n' '*users/crossrev-shorelogic\[bot\]*' '!fail'
+} >"$CROSSREV_GH_ROUTES"
+
+proceed_out="$( (echo "n" | auth_login --owner ShoreLogic) 2>&1 || true )"
+has "flow proceeds to registration panel when App does not exist" \
+  "$proceed_out" "Register a GitHub App for ShoreLogic"
+has "the panel shows the --name override option" \
+  "$proceed_out" "Name         CrossRev ShoreLogic (override with --name)"
+has "and prompts before opening a browser" \
+  "$proceed_out" "Open GitHub in your browser to create the App?"
+
+# --- custom --name passed to auth login -------------------------------------
+{
+  printf '%s\t%s\n' '*users/ShoreLogic*' '{"type":"Organization","id":12345}'
+  printf '%s\t%s\n' '*users/my-custom-app\[bot\]*' '!fail'
+} >"$CROSSREV_GH_ROUTES"
+
+custom_out="$( (echo "n" | auth_login --owner ShoreLogic --name "My Custom App") 2>&1 || true )"
+has "the panel reflects the custom name and override hint" \
+  "$custom_out" "Name         My Custom App (override with --name)"
+
 printf '\n  %d passed, %d failed\n' "$pass" "$fail"
 (( fail == 0 ))
+
