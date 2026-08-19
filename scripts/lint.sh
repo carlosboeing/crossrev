@@ -24,7 +24,12 @@ while IFS= read -r f; do
     bash -n "$f" 2>&1 | sed 's/^/        /'
     fail=1
   fi
-done < <(find . -name '*.sh' -o -name crossrev -path '*/bin/*' | sort)
+# `.worktrees/` holds other branches' checkouts, which are not this branch's code
+# to lint. Without the prune a shellcheck warning on an in-flight branch fails
+# lint on main, and only from the repository root — a session working inside a
+# worktree sees a clean run and never learns why CI disagreed.
+done < <(find . -path './.worktrees' -prune -o \
+  -type f \( -name '*.sh' -o -name crossrev -path '*/bin/*' -o -path './tests/stub/*' \) -print | sort)
 
 printf '\nshellcheck -S warning\n'
 if command -v shellcheck >/dev/null 2>&1; then

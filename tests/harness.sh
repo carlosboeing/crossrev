@@ -110,12 +110,14 @@ fixture_repo() {
 
 # Stub wiring. Call after fixture_repo, once per case, so each case gets a clean
 # call log and a clean route table.
-GH_LOG=""; GH_ROUTES=""; PROMPT_LOG=""; ARGV_LOG=""
+GH_LOG=""; GH_ROUTES=""; PROMPT_LOG=""; ARGV_LOG=""; BROWSER_LOG=""
 stub_reset() {
   local d; d="$(mktemp -d)"
   GH_LOG="$d/gh.log"; GH_ROUTES="$d/routes"; PROMPT_LOG="$d/prompt"; ARGV_LOG="$d/argv"
-  : >"$GH_LOG"; : >"$GH_ROUTES"; : >"$ARGV_LOG"
+  BROWSER_LOG="$d/browser.log"
+  : >"$GH_LOG"; : >"$GH_ROUTES"; : >"$ARGV_LOG"; : >"$BROWSER_LOG"
   export CROSSREV_GH_LOG="$GH_LOG" CROSSREV_GH_ROUTES="$GH_ROUTES" CROSSREV_PROMPT_LOG="$PROMPT_LOG"
+  export CROSSREV_BROWSER_LOG="$BROWSER_LOG"
   # Appended to, not overwritten: `crossrev run` invokes the harness twice, and
   # what a test about permission needs is which leg got which flags.
   export CROSSREV_ARGV_LOG="$ARGV_LOG"

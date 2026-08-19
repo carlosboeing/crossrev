@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+#
+# A fake `open` for the offline suite.
+#
+# Prevents tests from launching a real browser on macOS.
+# Logs every invocation so tests can assert what URL was requested.
+
+set -uo pipefail
+
+[[ -n "${CROSSREV_BROWSER_LOG:-}" ]] && printf '%s\n' "${1:-}" >>"$CROSSREV_BROWSER_LOG"
+exit 0
