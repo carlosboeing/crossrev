@@ -280,3 +280,45 @@ preflight_require_yq() {
     "yq is not installed, and crossrev's config files are YAML" \
     "jq cannot read YAML. Install it with: $(_install_hint yq)"
 }
+
+# Check for a stranded quarantine directory left behind by a killed run.
+#
+# sandbox_restore removes .crossrev-quarantine/ when a run completes normally.
+# A run killed by SIGKILL, a machine sleeping, or a crash before restore leaves
+# the quarantine sitting in the tree and the real instruction files looking
+# deleted in git status.
+preflight_check_quarantine() {
+  local q=".crossrev-quarantine"
+  [[ -d "$q" ]] || return 0
+  local paths=() p
+  while IFS= read -r p; do
+    [[ -n "$p" ]] && paths+=("$p")
+  done < <(find "$q" -mindepth 1 2>/dev/null | sed "s|^$q/||" | sort)
+  ui_no "stranded quarantine found at $q"
+  if (( ${#paths[@]} > 0 )); then
+    ui_line "   Files inside: ${paths[*]}"
+  fi
+  ui_line "   A previous run died before restoring the checkout. Move them back to restore your files."
+  return 1
+}
+
+# Report tool-owned worktrees left behind by failed resolve runs.
+#
+# A clean resolve run removes its worktree; a failed run leaves it behind so
+# the uncommitted edits and reflog can be inspected. Accumulation is reported
+# here so leftover worktrees are discoverable rather than silent.
+preflight_report_worktrees() {
+  local base="${XDG_STATE_HOME:-$HOME/.local/state}/crossrev/worktrees"
+  [[ -d "$base" ]] || return 0
+  local wts=() wt
+  while IFS= read -r wt; do
+    [[ -d "$wt" ]] && wts+=("$wt")
+  done < <(find "$base" -mindepth 2 -maxdepth 2 -type d 2>/dev/null | sort)
+  (( ${#wts[@]} > 0 )) || return 0
+  ui_section "Tool-owned worktrees"
+  for wt in "${wts[@]}"; do
+    ui_opt "$wt"
+  done
+  ui_line "   Left behind by failed resolve runs. Safe to remove if no run is in progress."
+  return 0
+}

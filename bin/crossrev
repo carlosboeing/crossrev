@@ -149,6 +149,7 @@ main() {
     doctor)
       local doctor_ok=0
       preflight_check harness || doctor_ok=1
+      preflight_check_quarantine || doctor_ok=1
       # Which pairings the configured runner can serve is the other half of "is
       # this set up correctly", and it is invisible until a CI run fails to
       # authenticate. Reported here rather than discovered there.
@@ -156,8 +157,13 @@ main() {
         cfg_load ""
         preflight_report_pairings "$(cfg_get '.runner')" || doctor_ok=1
       fi
-      (( doctor_ok == 0 )) && ui_end "Everything CrossRev needs is installed." \
-        || ui_end "Fix what is marked ✗ above, then run this again." ;;
+      preflight_report_worktrees
+      if (( doctor_ok == 0 )); then
+        ui_end "Everything CrossRev needs is installed."
+      else
+        ui_end "Fix what is marked ✗ above, then run this again."
+        return 1
+      fi ;;
 
     cycle)   cmd_cycle "$@" ;;
     review)  leg_review "$@" ;;

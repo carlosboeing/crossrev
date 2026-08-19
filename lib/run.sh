@@ -27,6 +27,13 @@ CROSSREV_INTERRUPTED=0
 CROSSREV_LOCK=""
 CROSSREV_SANDBOXED=""
 CROSSREV_RESUME_HINT=""
+CROSSREV_WORKTREE=""
+
+_worktree_dir() {
+  local repo="$1" pr="$2" slug
+  slug="${repo//\//-}"
+  printf '%s/crossrev/worktrees/%s/pr-%s' "${XDG_STATE_HOME:-$HOME/.local/state}" "$slug" "$pr"
+}
 
 # ---------------------------------------------------------------------------
 # Interruption, locking and cleanup
@@ -42,13 +49,17 @@ run_trap_install() {
 }
 
 run_cleanup() {
+  local rc=$?
   [[ -n "$CROSSREV_SANDBOXED" ]] && sandbox_restore "$CROSSREV_SANDBOXED"
   [[ -n "$CROSSREV_LOCK" && -f "$CROSSREV_LOCK" ]] && rm -f "$CROSSREV_LOCK"
+  if (( rc != 0 )) && [[ -n "$CROSSREV_WORKTREE" && -d "$CROSSREV_WORKTREE" ]]; then
+    printf '  Worktree kept for debugging: %s\n' "$CROSSREV_WORKTREE" >&2
+  fi
   # A restored credential dies with the process that borrowed it, on the fatal
   # paths as much as the clean one. Leaving it on disk is how a second job finds
   # a copy of a token that only one holder may refresh.
   cred_discard
-  return 0
+  return "$rc"
 }
 
 # Called between outward writes. Nothing is half-written when this returns.
@@ -1414,14 +1425,15 @@ leg_resolve() {
     return 0
   fi
 
-  # The push guard runs before anything is invoked, not before the push. Finding
-  # out after a model has run that the checkout is on the wrong branch wastes the
-  # invocation and leaves changes in a tree nobody expected them in.
-  local current_branch push_remote target_repo
-  current_branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
-  push_remote="$(git config "branch.${current_branch}.pushRemote" 2>/dev/null || true)"
+  # Resolve runs in a dedicated worktree so the operator's checkout is untouched.
+  local orig_cwd wt_dir wt_err wt_cur_sha push_remote target_repo current_sha
+  orig_cwd="$(pwd)"
+  wt_dir="$(_worktree_dir "$CTX_REPO" "$CTX_PR")"
+  CROSSREV_WORKTREE="$wt_dir"
+
+  push_remote="$(git config "branch.${CTX_HEAD_BRANCH}.pushRemote" 2>/dev/null || true)"
   if [[ -z "$push_remote" ]]; then
-    push_remote="$(git config "branch.${current_branch}.remote" 2>/dev/null || true)"
+    push_remote="$(git config "branch.${CTX_HEAD_BRANCH}.remote" 2>/dev/null || true)"
   fi
   if [[ -z "$push_remote" ]]; then
     push_remote="$(git config "remote.pushDefault" 2>/dev/null || true)"
@@ -1432,8 +1444,8 @@ leg_resolve() {
     fi
   fi
   [[ -n "$push_remote" ]] || ui_die \
-    "could not resolve the push remote for branch '$current_branch'" \
-    "Check out the pull request with \`gh pr checkout $CTX_PR\` to configure the remote."
+    "could not resolve the push remote for branch '$CTX_HEAD_BRANCH'" \
+    "Check \`git remote -v\` in this checkout."
 
   legs_resolve_push_repo "$push_remote"
   target_repo="$LEGS_PUSH_REPO"
@@ -1441,7 +1453,40 @@ leg_resolve() {
     "could not read the URL for remote '$push_remote'" \
     "Check \`git remote -v\` in this checkout."
 
-  legs_assert_push_target "$current_branch" "$CTX_HEAD_BRANCH" \
+  if ! git cat-file -e "${CTX_HEAD_SHA}^{commit}" 2>/dev/null; then
+    git fetch "$push_remote" "$CTX_HEAD_SHA" >/dev/null 2>&1 \
+      || git fetch "$push_remote" "refs/pull/${CTX_PR}/head" >/dev/null 2>&1 \
+      || git fetch "$push_remote" "$CTX_HEAD_BRANCH" >/dev/null 2>&1 \
+      || git fetch "$push_remote" >/dev/null 2>&1 || true
+    if ! git cat-file -e "${CTX_HEAD_SHA}^{commit}" 2>/dev/null; then
+      ui_die "could not find revision '$CTX_HEAD_SHA' for $CTX_REPO#$CTX_PR" \
+        "Fetching from remote '$push_remote' did not reach the pull request's head revision."
+    fi
+  fi
+
+  if [[ -d "$wt_dir" ]]; then
+    wt_cur_sha="$(git -C "$wt_dir" rev-parse HEAD 2>/dev/null || true)"
+    if [[ -z "$wt_cur_sha" || "$wt_cur_sha" != "$CTX_HEAD_SHA" ]]; then
+      rm -rf "$wt_dir"
+      git worktree prune 2>/dev/null || true
+    fi
+  fi
+
+  if [[ ! -d "$wt_dir" ]]; then
+    mkdir -p "$(dirname "$wt_dir")"
+    if ! wt_err="$(git worktree add --detach "$wt_dir" "$CTX_HEAD_SHA" 2>&1)"; then
+      ui_die "could not create worktree for revision '$CTX_HEAD_SHA' at $wt_dir" "$wt_err"
+    fi
+  fi
+
+  cd "$wt_dir" || ui_die "could not enter worktree at $wt_dir" "Check directory permissions."
+
+  # The push guard runs before anything is invoked, not before the push. Finding
+  # out after a model has run that the checkout is on the wrong revision wastes the
+  # invocation and leaves changes in a tree nobody expected them in.
+  current_sha="$(git rev-parse HEAD 2>/dev/null || true)"
+
+  legs_assert_push_target "$current_sha" "$CTX_HEAD_SHA" "$CTX_HEAD_BRANCH" \
     "$CTX_DEFAULT_BRANCH" "$CTX_HEAD_REPO" "$target_repo" "$CTX_MAINTAINER_CAN_MODIFY" "$CTX_IS_CROSS_REPOSITORY"
 
   run_leg_settings resolver "$harness_override"
@@ -1958,6 +2003,15 @@ Pushed \`${commit_sha:0:7}\`; replying to each thread now.$(state_marker_encode 
     fi
   fi
   if (( no_tips == 0 )) && [[ "$next" != "awaiting-review" ]]; then run_upgrade_nudge; fi
+
+  cd "$orig_cwd" || true
+  git worktree remove --force "$wt_dir" 2>/dev/null || rm -rf "$wt_dir"
+  # One level, not `rmdir -p`. The `-p` form walks up removing every parent that
+  # becomes empty, and stops only at the first non-empty one - which on a machine
+  # where ~/.local holds nothing else means CrossRev deletes ~/.local/state and
+  # ~/.local. Four of those levels are ours to remove and two are not.
+  rmdir "$(dirname "$wt_dir")" 2>/dev/null || true
+  CROSSREV_WORKTREE=""
   return 0
 }
 

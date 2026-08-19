@@ -6,6 +6,8 @@ All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepa
 
 ### Changed
 
+- **The resolve leg runs in a dedicated git worktree** ([#38](https://github.com/carlosboeing/crossrev/issues/38)). A resolve leg previously ran harnesses directly in the operator's checkout, exposing dirty working trees to model edits and risking commit loss when concurrent sessions touched the repository. The resolve leg now creates and operates in an isolated worktree detached at the pull request's head SHA under `${XDG_STATE_HOME:-$HOME/.local/state}/crossrev/worktrees/<owner>-<repo>/pr-<n>`, leaving the operator's checkout and active branch untouched. Clean runs remove the worktree automatically. Failed runs preserve the worktree for debugging and output its path to stderr. Subsequent runs for the same repository and pull request reuse the worktree if its revision matches. `crossrev doctor` reports tool-owned worktrees left behind and flags stranded `.crossrev-quarantine/` directories.
+
 - **Document which pull requests CrossRev reviews on a public repository** ([#32](https://github.com/carlosboeing/crossrev/issues/32)). `README.md` now records that automated mode reviews pull requests from in-repo branches and not from forks. `docs/usage.md` adds the public repository breakdown and workarounds, explains the remote requirement for local fork resolution, and clarifies that local runs review fork pull requests directly and resolve them when maintainer edits are allowed. `docs/troubleshooting.md` scopes its fork refusal row to automatic triggers.
 
 ### Fixed
