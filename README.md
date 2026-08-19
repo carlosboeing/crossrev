@@ -91,6 +91,8 @@ crossrev doctor
 
 **Exercised offline, and run against real pull requests locally.** Every command above is asserted against a stubbed `gh` boundary — no network, no model, no PR — which catches the deterministic half, the half that fails silently. Live local runs cover the other half: the loop has reviewed real pull requests, converged on its own, found real defects in the branch under review, and pushed back on findings that did not hold up. **No repository has had the workflows installed yet**, so automated mode is still unproven end to end.
 
+**On a public repository, automated mode reviews pull requests from branches in the repository, including Dependabot's, and not contributions from forks.** GitHub withholds secrets from fork workflows, so CrossRev refuses them in automated mode rather than running unauthenticated. Local runs from a terminal can review and resolve fork pull requests directly.
+
 ## Using it
 
 ### Locally, against a real pull request

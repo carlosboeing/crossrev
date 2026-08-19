@@ -4,6 +4,10 @@ All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepa
 
 ## [Unreleased]
 
+### Changed
+
+- **Document which pull requests CrossRev reviews on a public repository** ([#32](https://github.com/carlosboeing/crossrev/issues/32)). `README.md` now records that automated mode reviews pull requests from in-repo branches and not from forks. `docs/usage.md` adds the public repository breakdown and workarounds, and corrects the note that described fork pull requests as refused unconditionally — local runs from a terminal can review and resolve fork pull requests when maintainer edits are allowed. `docs/troubleshooting.md` scopes its fork refusal row to automatic triggers.
+
 ### Fixed
 
 - **Actionable findings outrank a reviewer's converged verdict** ([#60](https://github.com/carlosboeing/crossrev/issues/60)). `legs_pass_label` returned `converged` immediately on a converged verdict, ignoring the orchestrator's actionable count. A reviewer returning `converged` alongside actionable findings now yields `awaiting-resolution` instead, so the resolve leg addresses the findings. The call site warns when the verdict is overridden. A converged verdict with zero actionable findings remains authoritative as the exit from a human-settled escalation halt.

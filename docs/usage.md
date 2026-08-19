@@ -36,7 +36,7 @@ Options on `cycle`, `review` and `resolve`:
 
 To watch with no risk of a push at all, run `review` only.
 
-**Fork pull requests are refused, not skipped quietly.** GitHub withholds secrets from them, and a fork's head branch is not yours to push to. CrossRev says so and stops.
+**Fork pull requests work locally when maintainer edits are enabled.** `crossrev resolve` pushes fixes directly to the fork branch if `maintainerCanModify` is permitted on the pull request. If maintainer edits are disabled, the resolve leg refuses to push. Automated mode refuses fork pull requests because GitHub withholds secrets from fork workflows.
 
 ## What a pass writes to the pull request
 
@@ -181,6 +181,22 @@ crossrev init          # prints an itemised plan, asks once, then sets it up
 `init` generates up to four workflows: the review leg, the resolve leg, a watchdog on a schedule, and — only when the pairing needs one — a credential refresher. Each pins CrossRev's composite action at a full 40-character SHA with the tag as a trailing comment.
 
 **Automated mode is unproven end to end.** No repository has had these workflows installed yet. That is what the `0.x` version records, and it is the [roadmap's](ROADMAP.md) first item.
+
+### Pull requests on a public repository
+
+On a public repository, CrossRev's automated mode reviews pull requests from branches in the repository — your team's, and Dependabot's — but not contributions from forks. GitHub withholds secrets from fork workflows, so CrossRev refuses them in CI rather than running unauthenticated.
+
+| Case | Works |
+|---|---|
+| Maintainer and collaborator pull requests | Yes — push access means the branch is in the repository |
+| Dependabot and Renovate | Yes — they push to in-repo branches (`dependabot/...`), not forks |
+| Public repositories where all contributors have push access | Yes |
+| Outside-contributor pull requests | No |
+
+Two workarounds exist for outside-contributor pull requests:
+
+- **Copy the contributor's branch into the repository and open an internal pull request from it.** CrossRev then reviews it normally. The review comments land on the copy, so the contributor never sees inline comments on their own pull request.
+- **Add the contributor as a collaborator so they push branches rather than forking.** A trust decision unrelated to CrossRev, and only sensible for repeat contributors.
 
 ### The watchdog
 
