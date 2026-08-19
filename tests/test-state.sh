@@ -73,6 +73,39 @@ is "a marker already using the new keys is left alone" \
   "$(state_marker_of "Pass.$(state_marker_encode "$new_marker")" | jq -c .)" \
   "$(jq -c . <<<"$new_marker")"
 
+# --- a payload that is not one marker object -------------------------------
+#
+# Two markers in one body used to decode as a stream of two values, which the
+# caller then rejected — losing not that comment but every marker on the pull
+# request, and reporting a finished loop as pass 1. A payload that is not a
+# single object is skipped, whichever kind it is.
+is "a body carrying two markers yields nothing" \
+  "$(state_marker_of "A.$(state_marker_encode '{"leg":"review"}')$(state_marker_encode '{"leg":"resolve"}')")" ""
+is "a marker payload of JSON null yields nothing" \
+  "$(state_marker_of "A.$(state_marker_encode 'null')")" ""
+
+# --- the batched read over a whole comment stream --------------------------
+#
+# state_markers decodes the stream in one jq. The fixture stands in for the
+# orchestrator's read so the test stays offline.
+_state_comments() {
+  jq -cn --arg b "Pass 1.$(state_marker_encode '{"v":1,"leg":"review","pass":1,"state":"complete"}')" '{id:11,body:$b}'
+  printf 'not json\n'
+  jq -cn --arg b "Pass 1.$(state_marker_encode '{"v":1,"leg":"resolve","pass":1,"state":"complete","dispositions":[{"finding_id":"f1","disposition":"rebutted"}]}')" '{id:12,body:$b}'
+  jq -cn --arg b "a human reply with no marker" '{id:13,body:$b}'
+}
+batched="$(state_markers 42 owner/repo alice)"
+is "the batched read keeps only the comments carrying a marker" \
+  "$(jq -r 'length' <<<"$batched")" "2"
+is "and attaches each comment id to its own marker" \
+  "$(jq -r '[.[].comment_id] | join(",")' <<<"$batched")" "11,12"
+is "and migrates old vocabulary inside the batch" \
+  "$(jq -r '.[1].resolutions[0].resolution' <<<"$batched")" "disputed"
+is "and an unreadable line does not lose the markers around it" \
+  "$(jq -r '[.[].leg] | join(",")' <<<"$batched")" "review,resolve"
+# shellcheck source=../lib/state.sh
+source "$HERE/../lib/state.sh"   # restore the real reader
+
 # --- finding identity ------------------------------------------------------
 a="$(state_finding_id "lib/auth.ts" "Token refresh races with logout" "abcd1234")"
 b="$(state_finding_id "lib/auth.ts" "  token   REFRESH races with logout " "abcd1234")"
