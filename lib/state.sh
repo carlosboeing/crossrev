@@ -311,7 +311,7 @@ state_prs_reviewed_today() {
     return 0
   fi
 
-  local seen="[]" page comments count=0 n c body marker issue_url
+  local seen="[]" page comments count=0 n batch
   for page in 1 2 3 4 5 6 7 8 9 10; do
     if ! comments="$(gh_repo_issue_comments_page "$repo" "$cutoff" "$page")"; then
       ui_warn "could not read repository comments while checking max_prs_per_day" \
@@ -320,23 +320,45 @@ state_prs_reviewed_today() {
       return 0
     fi
     n="$(jq 'length' <<<"$comments" 2>/dev/null || printf '0')"
-    while IFS= read -r c; do
-      [[ "$(jq -r '.user.login // empty' <<<"$c")" == "$author" ]] || continue
-      body="$(jq -r '.body // empty' <<<"$c")"
-      marker="$(state_marker_of "$body")"
-      [[ -n "$marker" ]] || continue
-      [[ "$(jq -r --argjson cutoff "$cutoff" \
-        '.leg == "review" and (.state // "") != "declined" and (.ts // 0) > $cutoff' <<<"$marker")" == "true" ]] || continue
-      issue_url="$(jq -r '.issue_url // empty' <<<"$c")"
-      [[ -n "$issue_url" ]] || continue
-      [[ "$issue_url" == */"$current_pr" ]] && continue
-      seen="$(jq -c --arg u "$issue_url" '. + [$u] | unique' <<<"$seen")"
-      count="$(jq 'length' <<<"$seen")"
-      if (( cap > 0 && count >= cap )); then
-        printf '%s' "$count"
-        return 0
-      fi
-    done < <(jq -c '.[]' <<<"$comments" 2>/dev/null)
+    # One jq for the whole page, not one per comment. The per-comment form forked
+    # nine times for each of a hundred comments, so a full ten-page read spent
+    # about twenty-five seconds in process startup and nothing else.
+    #
+    # The marker is pulled out here rather than through state_marker_of because
+    # this read never touches a migrated key: it looks at leg, state and ts only.
+    # The extraction below is the same rule that function's sed applies — per
+    # line, the last opening delimiter and the last closing one after it — so a
+    # body carrying two markers still concatenates to invalid JSON and is still
+    # skipped.
+    batch="$(jq -c --arg a "$author" --argjson cutoff "$cutoff" \
+      --arg suffix "/$current_pr" --argjson seen "$seen" '
+        def marker_of:
+          [ (.body // "") | split("\n")[]
+            | split("<!-- crossrev: ") | select(length > 1) | last
+            | split(" -->") | select(length > 1) | .[:-1] | join(" -->") ]
+          | join("") | fromjson? ;
+        reduce (.[] | select((.user.login // "") == $a)) as $c ($seen;
+          . as $acc
+          | ([$c | marker_of] | .[0]) as $m
+          | ($c.issue_url // "") as $u
+          | if ($m | type) == "object"
+               and $m.leg == "review"
+               and ($m.state // "") != "declined"
+               and ($m.ts // 0) > $cutoff
+               and ($u | length) > 0
+               and (($u | endswith($suffix)) | not)
+               and (($acc | index($u)) == null)
+            then $acc + [$u] else $acc end)
+      ' <<<"$comments" 2>/dev/null)" || batch=""
+    [[ -n "$batch" ]] && seen="$batch"
+    count="$(jq 'length' <<<"$seen")"
+    # The per-comment loop returned the instant the count reached the cap, so it
+    # could never report more than the cap itself. A whole page is folded in at
+    # once now, so the cap is what gets printed rather than the overshoot.
+    if (( cap > 0 && count >= cap )); then
+      printf '%s' "$cap"
+      return 0
+    fi
     (( n < 100 )) && { printf '%s' "$count"; return 0; }
   done
 
