@@ -2006,7 +2006,11 @@ Pushed \`${commit_sha:0:7}\`; replying to each thread now.$(state_marker_encode 
 
   cd "$orig_cwd" || true
   git worktree remove --force "$wt_dir" 2>/dev/null || rm -rf "$wt_dir"
-  rmdir -p "$(dirname "$wt_dir")" 2>/dev/null || true
+  # One level, not `rmdir -p`. The `-p` form walks up removing every parent that
+  # becomes empty, and stops only at the first non-empty one - which on a machine
+  # where ~/.local holds nothing else means CrossRev deletes ~/.local/state and
+  # ~/.local. Four of those levels are ours to remove and two are not.
+  rmdir "$(dirname "$wt_dir")" 2>/dev/null || true
   CROSSREV_WORKTREE=""
   return 0
 }
