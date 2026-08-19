@@ -30,13 +30,13 @@ Options on `cycle`, `review` and `resolve`:
 
 **`resolve` and `cycle` commit and push to the pull request's branch.** That is the point of the tool. Three rails constrain it:
 
-- **The branch guard** refuses to push unless your checkout is on the pull request's own head branch, that branch is not the repository default, and the head repository matches your origin. Asserted before anything leaves the machine, because branch protection fires only after a bad push is attempted and says nothing about which branch was targeted.
+- **The branch guard** refuses to push unless your checkout is on the pull request's own head branch, and not the repository default. Your configured remote must push to the head repository — resolving a fork pull request locally needs a remote pointing at the fork. Asserted before anything leaves the machine, because branch protection fires only after a bad push is attempted.
 - **`policy.max_passes_per_cycle`** caps the loop at 3 passes by default.
 - **The `crossrev/stop` label** halts the loop, and outranks a healthy verdict. It is checked first, every pass.
 
 To watch with no risk of a push at all, run `review` only.
 
-**Fork pull requests are refused, not skipped quietly.** GitHub withholds secrets from them, and a fork's head branch is not yours to push to. CrossRev says so and stops.
+**Fork pull requests can be reviewed locally, and resolved when maintainer edits are allowed.** `crossrev review` reads the diff and leaves comments without requiring write access. `crossrev resolve` pushes fixes directly to the fork branch if `maintainerCanModify` is enabled, and halts with an error if disabled. Automated mode refuses fork pull requests because GitHub withholds secrets from fork workflows.
 
 ## What a pass writes to the pull request
 
@@ -181,6 +181,22 @@ crossrev init          # prints an itemised plan, asks once, then sets it up
 `init` generates up to four workflows: the review leg, the resolve leg, a watchdog on a schedule, and — only when the pairing needs one — a credential refresher. Each pins CrossRev's composite action at a full 40-character SHA with the tag as a trailing comment.
 
 **Automated mode is unproven end to end.** No repository has had these workflows installed yet. That is what the `0.x` version records, and it is the [roadmap's](ROADMAP.md) first item.
+
+### Pull requests on a public repository
+
+On a public repository, CrossRev's automated mode reviews pull requests from branches in the repository — your team's, and Dependabot's — but not contributions from forks. GitHub withholds secrets from fork workflows, so CrossRev refuses them in CI rather than running unauthenticated.
+
+| Case | Works |
+|---|---|
+| Maintainer and collaborator pull requests | Yes — push access means the branch is in the repository |
+| Dependabot and Renovate | Yes — they push to in-repo branches (`dependabot/...`), not forks |
+| Public repositories where all contributors have push access | Yes |
+| Outside-contributor pull requests | No |
+
+Two workarounds exist for outside-contributor pull requests:
+
+- **Copy the contributor's branch into the repository and open an internal pull request from it.** CrossRev then reviews it normally. The review comments land on the copy, so the contributor never sees inline comments on their own pull request.
+- **Add the contributor as a collaborator so they push branches rather than forking.** A trust decision unrelated to CrossRev, and only sensible for repeat contributors.
 
 ### The watchdog
 

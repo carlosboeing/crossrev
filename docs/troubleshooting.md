@@ -90,7 +90,7 @@ crossrev watchdog --repo owner/name
 
 | Refusal | Why |
 |---|---|
-| It comes from a **fork** | GitHub withholds secrets from fork pull requests, so the loop would run unauthenticated rather than not at all — and a fork's head branch isn't this repository's to push to. Review it by hand |
+| It comes from a **fork**, and the trigger was automatic | GitHub withholds secrets from fork pull requests, so the loop would run unauthenticated rather than not at all. Review it locally or by hand |
 | It isn't **open** | CrossRev only runs on open pull requests |
 | It's a **draft**, and the trigger was automatic | Mark it ready for review, or ask for a review explicitly. A person asking always gets one |
 | It's **already reviewed at this head SHA** | Push a revision, or run the resolve leg |
