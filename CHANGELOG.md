@@ -4,6 +4,10 @@ All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepa
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-08-19
+
+The release where CrossRev's own review loop became its main source of bugs. Findings are now named by the location they point at, and the resolver writes a commit subject describing what it fixed. Both change the schemas, so both are breaking. A local resolve leg pushes to fork pull requests. A hosted leg with no harness credential stops rather than running a model unauthenticated. The push guard checks every URL a remote is configured with. **Automated mode is still built and unproven** — proving it end to end remains the `v1.0.0` bar.
+
 ### Added
 
 - **Push-target validation warns when a `url.<base>.pushInsteadOf` rewrite redirects an approved URL** ([#41](https://github.com/carlosboeing/crossrev/issues/41)). `legs_resolve_push_repo` compares configured URLs from `git config --get-all` against effective push URLs from `git remote get-url --push --all`. Git applies `pushInsteadOf` rewrites only when the remote sets no explicit `remote.<name>.pushurl`. When a `pushInsteadOf` rule redirects an approved address, CrossRev prints a warning naming both the configured URL and the rewritten destination. This fix is deliberately partial: the rewrite still redirects the push, but the operator is warned rather than the redirection occurring silently. The effective URLs decide whether to warn, not whether to validate. Offline test fixtures remain functional without a test-only route through the guard.
