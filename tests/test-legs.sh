@@ -458,7 +458,8 @@ pass_label() {
   [[ "$got" == "$want" ]] && ok "$desc" || notok "$desc" "$want" "$got"
 }
 
-pass_label converged           "a converged verdict converges, whatever is open" converged 0 2
+pass_label awaiting-resolution "a converged verdict with actionable findings is overridden" converged 2 0
+pass_label converged           "a converged verdict after an escalation still exits the halt" converged 0 2
 pass_label halted              "a blocked review halts"                          blocked 0 0
 pass_label awaiting-resolution "actionable findings owe the resolve leg"         issues-remain 2 0
 pass_label converged           "an empty pass with nothing open converges"       issues-remain 0 0
@@ -496,6 +497,24 @@ out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
 
 is  "the settled pass's empty review exits clean"     "$rc" "0"
 has "and converges, with nothing left open"           "$(calls)" "labels[]=crossrev/converged"
+
+# A reviewer that returns converged alongside actionable findings is overridden:
+# the count outranks the verdict, the pass is labelled awaiting-resolution, and
+# the call site warns naming both.
+CONVERGED_WITH_FINDINGS='{"verdict":"converged","blocked_reason":null,"prior":null,"findings":[{"path":"app.ts","line":2,"side":"RIGHT","severity":"high","category":"correctness","pre_existing":false,"title":"t","why":"w","fix":"f"}]}'
+
+fixture_repo; stub_reset
+routes_baseline "$(printf '[]' | payload)"
+route 'api --method POST repos/*/issues/42/comments*' '{"id":9001}'
+route '*reviewThreads*' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}'
+CROSSREV_REVIEW_PAYLOAD="$(printf '%s' "$CONVERGED_WITH_FINDINGS" | payload)"; export CROSSREV_REVIEW_PAYLOAD
+out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
+
+is  "a converged review with actionable findings exits clean" "$rc" "0"
+has "the pull request is labelled awaiting-resolution"        "$(calls)" "labels[]=crossrev/awaiting-resolution"
+hasnt "and is not labelled converged"                         "$(calls)" "labels[]=crossrev/converged"
+has "it warns that the converged verdict was overridden"      "$out" "the reviewer returned verdict 'converged' alongside 1 actionable finding"
+has "the warning names the awaiting-resolution label"         "$out" "awaiting-resolution"
 
 # --- the way out of the halt, driven by hand ---------------------------------
 #
