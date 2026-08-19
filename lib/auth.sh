@@ -534,7 +534,7 @@ auth_login() {
   local slug; slug="$(_auth_slug "$app_name")"
   if _auth_account_info "${slug}[bot]" >/dev/null 2>&1; then
     ui_die "a GitHub App named '$app_name' already exists" \
-      "To reuse the App, generate a fresh private key on GitHub and install it locally. To register a separate App, re-run with: crossrev auth login --name <name>"
+      "CrossRev cannot reuse an existing App when local metadata is missing. Register a separate App with: crossrev auth login --name <name>"
   fi
 
   local state; state="$(openssl rand -hex 16)"
@@ -718,7 +718,7 @@ HTML
     ui_no "Key    $pem_path — expected mode 0600, found $stored_mode"
   fi
 
-  _auth_install_flow "$owner" "$owner_type" "$owner_id" "$slug" "$app_id" "$pem_path"
+  _auth_install_flow "$owner" "$owner_type" "$owner_id" "$slug" "$app_id" "$pem_path" "Step 2 of 2: "
 }
 
 # crossrev auth install — run the install half on its own.
@@ -767,9 +767,10 @@ auth_install() {
 # is part of `login` rather than a link at the end of it.
 _auth_install_flow() {
   local owner="$1" owner_type="$2" owner_id="$3" slug="$4" app_id="$5" pem="$6"
+  local step_prefix="${7:-}"
   local url; url="$(_auth_install_url "$slug" "$owner_type" "$owner_id")"
 
-  ui_section "Step 2 of 2: Install the App on the repositories you want reviewed"
+  ui_section "${step_prefix}Install the App on the repositories you want reviewed"
   ui_line "The App exists on GitHub, but reaches nothing until it is installed."
   ui_line "Choose 'Only select repositories' unless you mean all of them."
   printf '\n'

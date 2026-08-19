@@ -241,8 +241,8 @@ XDG_CONFIG_HOME="$(mktemp -d)"; export XDG_CONFIG_HOME
 collision_out="$( (auth_login --owner ShoreLogic) 2>&1 || true )"
 has "collision detection refuses when the App exists on GitHub" \
   "$collision_out" "a GitHub App named 'CrossRev ShoreLogic' already exists"
-has "and names reuse by generating a fresh private key" \
-  "$collision_out" "generate a fresh private key"
+has "and explains that CrossRev cannot reuse an existing App without metadata" \
+  "$collision_out" "CrossRev cannot reuse an existing App when local metadata is missing"
 has "and names the --name override" \
   "$collision_out" "crossrev auth login --name"
 hasnt "and does not prompt to open a browser" \
@@ -275,6 +275,27 @@ has "and prompts before opening a browser" \
 custom_out="$( (echo "n" | auth_login --owner ShoreLogic --name "My Custom App") 2>&1 || true )"
 has "the panel reflects the custom name and override hint" \
   "$custom_out" "Name         My Custom App (override with --name)"
+
+# --- standalone auth install does not claim a step count --------------------
+#
+# Running auth install on its own is not halfway through a login flow, so it must
+# not print "Step 2 of 2".
+
+meta_fixture "CrossRev ShoreLogic" crossrev-shorelogic >/dev/null
+(umask 077; openssl genrsa -out "$(_auth_dir)/ShoreLogic.loop.pem" 2048 2>/dev/null)
+
+{
+  printf '%s\t%s\n' '*/app/installations*' \
+    '[{"account":{"login":"ShoreLogic"},"repository_selection":"selected"}]'
+} >"$CROSSREV_GH_ROUTES"
+
+install_out="$( (auth_install --owner ShoreLogic) 2>&1 || true )"
+has "standalone auth install prints install section" \
+  "$install_out" "Install the App on the repositories you want reviewed"
+hasnt "standalone auth install does not print a step count" \
+  "$install_out" "Step 2 of 2"
+hasnt "standalone auth install does not mention step 1" \
+  "$install_out" "Step 1 of 2"
 
 printf '\n  %d passed, %d failed\n' "$pass" "$fail"
 (( fail == 0 ))
