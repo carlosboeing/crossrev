@@ -312,7 +312,7 @@ is  "the re-drive exits clean"                        "$rc" "0"
 has "it says the pass is being driven again"          "$out" "driving pass 1 again"
 hasnt "rather than declining as already resolved"     "$out" "already resolved"
 has "the resolver actually runs"                      "$(cat "$PROMPT_LOG")" "You are the resolve leg"
-has "and its fix is committed" "$(git log -1 --format=%s)" "fix: resolve crossrev review findings (pass 1)"
+has "and its fix is committed" "$(git log -1 feature --format=%s)" "fix: resolve crossrev review findings (pass 1)"
 is  "both threads are answered again, over the first attempt's replies" \
   "$(count 'pulls/42/comments/5000/replies')" "2"
 has "and resolved once fixed"                         "$out" "resolved 2 thread(s)"
@@ -439,7 +439,7 @@ out="$("$CROSSREV" resolve --pr 42 2>&1)"; rc=$?
 
 is  "the no-change fixed pass exits clean"            "$rc" "0"
 has "the run says the fixes reached no files"         "$out" "changed no files"
-is  "nothing is committed over an unchanged tree"     "$(git log -1 --format=%s)" "feature"
+is  "nothing is committed over an unchanged tree"     "$(git log -1 feature --format=%s)" "feature"
 has "the pass is halted"                              "$(calls)" "labels[]=crossrev/halted"
 hasnt "never converged over an unkept promise"        "$(calls)" "labels[]=crossrev/converged"
 hasnt "nor handed to a reviewer with nothing to see"  "$(calls)" "labels[]=crossrev/awaiting-review"

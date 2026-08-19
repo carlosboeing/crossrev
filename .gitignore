@@ -10,6 +10,9 @@
 .worktrees/
 .claude/worktrees/
 
+# Transient quarantine directory
+.crossrev-quarantine/
+
 # package.json exists for npm distribution only. There is no dependency tree
 # to lock, and the repo has no package manager step.
 package-lock.json

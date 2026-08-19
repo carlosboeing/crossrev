@@ -25,6 +25,7 @@ hasnt() { [[ "$2" != *"$3"* ]] && ok "$1" || notok "$1" "does not contain '$3'" 
 # An operator config that is not the developer's own: a test reading the real
 # ~/.config would pass or fail depending on whose machine it ran on.
 XDG_CONFIG_HOME="$(mktemp -d)"; export XDG_CONFIG_HOME
+XDG_STATE_HOME="$(mktemp -d)"; export XDG_STATE_HOME
 
 # Fixture identities, so every route and assertion can name them.
 FIX_REPO="acme/widget"
@@ -100,12 +101,13 @@ fixture_repo() {
     printf 'export const ok = 1\nexport function refresh() { fetch("/t") }\n' >app.ts
     git add -A && git commit -q -m feature
     git push -q origin feature
+    git checkout -q main
   )
   cd "$d" || exit 1
   FIX_DIR="$d"
   FIX_ORIGIN="$bare"
   FIX_BASE="$(git rev-parse main)"
-  FIX_HEAD="$(git rev-parse HEAD)"
+  FIX_HEAD="$(git rev-parse feature)"
 }
 
 # Stub wiring. Call after fixture_repo, once per case, so each case gets a clean

@@ -27,6 +27,13 @@ CROSSREV_INTERRUPTED=0
 CROSSREV_LOCK=""
 CROSSREV_SANDBOXED=""
 CROSSREV_RESUME_HINT=""
+CROSSREV_WORKTREE=""
+
+_worktree_dir() {
+  local repo="$1" pr="$2" slug
+  slug="${repo//\//-}"
+  printf '%s/crossrev/worktrees/%s/pr-%s' "${XDG_STATE_HOME:-$HOME/.local/state}" "$slug" "$pr"
+}
 
 # ---------------------------------------------------------------------------
 # Interruption, locking and cleanup
@@ -42,13 +49,17 @@ run_trap_install() {
 }
 
 run_cleanup() {
+  local rc=$?
   [[ -n "$CROSSREV_SANDBOXED" ]] && sandbox_restore "$CROSSREV_SANDBOXED"
   [[ -n "$CROSSREV_LOCK" && -f "$CROSSREV_LOCK" ]] && rm -f "$CROSSREV_LOCK"
+  if (( rc != 0 )) && [[ -n "$CROSSREV_WORKTREE" && -d "$CROSSREV_WORKTREE" ]]; then
+    printf '  Worktree kept for debugging: %s\n' "$CROSSREV_WORKTREE" >&2
+  fi
   # A restored credential dies with the process that borrowed it, on the fatal
   # paths as much as the clean one. Leaving it on disk is how a second job finds
   # a copy of a token that only one holder may refresh.
   cred_discard
-  return 0
+  return "$rc"
 }
 
 # Called between outward writes. Nothing is half-written when this returns.
@@ -1414,14 +1425,38 @@ leg_resolve() {
     return 0
   fi
 
+  # Resolve runs in a dedicated worktree so the operator's checkout is untouched.
+  local orig_cwd wt_dir wt_err cur_common repo_common
+  orig_cwd="$(pwd)"
+  wt_dir="$(_worktree_dir "$CTX_REPO" "$CTX_PR")"
+  CROSSREV_WORKTREE="$wt_dir"
+
+  repo_common="$(cd . 2>/dev/null && cd "$(git rev-parse --git-common-dir 2>/dev/null)" 2>/dev/null && pwd -P)"
+  if [[ -d "$wt_dir" ]]; then
+    cur_common="$(cd "$wt_dir" 2>/dev/null && cd "$(git rev-parse --git-common-dir 2>/dev/null)" 2>/dev/null && pwd -P)"
+    if [[ -z "$cur_common" || "$cur_common" != "$repo_common" ]]; then
+      rm -rf "$wt_dir"
+      git worktree prune 2>/dev/null || true
+    fi
+  fi
+
+  if [[ ! -d "$wt_dir" ]]; then
+    mkdir -p "$(dirname "$wt_dir")"
+    if ! wt_err="$(git worktree add "$wt_dir" "$CTX_HEAD_BRANCH" 2>&1)"; then
+      ui_die "could not create worktree for branch '$CTX_HEAD_BRANCH' at $wt_dir" "$wt_err"
+    fi
+  fi
+
+  cd "$wt_dir" || ui_die "could not enter worktree at $wt_dir" "Check directory permissions."
+
   # The push guard runs before anything is invoked, not before the push. Finding
   # out after a model has run that the checkout is on the wrong branch wastes the
   # invocation and leaves changes in a tree nobody expected them in.
   local current_branch push_remote target_repo
   current_branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
-  push_remote="$(git config "branch.${current_branch}.pushRemote" 2>/dev/null || true)"
+  push_remote="$(git config "branch.${CTX_HEAD_BRANCH}.pushRemote" 2>/dev/null || true)"
   if [[ -z "$push_remote" ]]; then
-    push_remote="$(git config "branch.${current_branch}.remote" 2>/dev/null || true)"
+    push_remote="$(git config "branch.${CTX_HEAD_BRANCH}.remote" 2>/dev/null || true)"
   fi
   if [[ -z "$push_remote" ]]; then
     push_remote="$(git config "remote.pushDefault" 2>/dev/null || true)"
@@ -1433,7 +1468,7 @@ leg_resolve() {
   fi
   [[ -n "$push_remote" ]] || ui_die \
     "could not resolve the push remote for branch '$current_branch'" \
-    "Check out the pull request with \`gh pr checkout $CTX_PR\` to configure the remote."
+    "Check \`git remote -v\` in this checkout."
 
   legs_resolve_push_repo "$push_remote"
   target_repo="$LEGS_PUSH_REPO"
@@ -1958,6 +1993,11 @@ Pushed \`${commit_sha:0:7}\`; replying to each thread now.$(state_marker_encode 
     fi
   fi
   if (( no_tips == 0 )) && [[ "$next" != "awaiting-review" ]]; then run_upgrade_nudge; fi
+
+  cd "$orig_cwd" || true
+  git worktree remove --force "$wt_dir" 2>/dev/null || rm -rf "$wt_dir"
+  rmdir -p "$(dirname "$wt_dir")" 2>/dev/null || true
+  CROSSREV_WORKTREE=""
   return 0
 }
 
