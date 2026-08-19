@@ -10,6 +10,7 @@
 
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export PATH="$HERE/stub:$PATH"
 # shellcheck source=../lib/ui.sh
 source "$HERE/../lib/ui.sh"
 # shellcheck source=../lib/auth.sh
