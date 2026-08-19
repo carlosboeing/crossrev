@@ -537,11 +537,6 @@ has "and the summary comment still records it" \
 # An operator running a pass by hand beyond max_passes_per_cycle is driving, so
 # the cap no longer bounds the run. The terminal line and the pull request
 # comments must say which pass this is without an impossible denominator.
-# --- pass formatting beyond the cycle cap -----------------------------------
-#
-# An operator running a pass by hand beyond max_passes_per_cycle is driving, so
-# the cap no longer bounds the run. The terminal line and the pull request
-# comments must say which pass this is without an impossible denominator.
 pass4_review_marker() {
   jq -cn --arg sha "$FIX_HEAD" --argjson ts "$(( $(date +%s) - 100 ))" '
     {v:1, leg:"review", pass:4, state:"complete", ts:$ts, done_ts:($ts + 100), run_id:"1",
