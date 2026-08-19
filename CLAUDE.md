@@ -147,6 +147,20 @@ Versions are **cut deliberately, not per merge**. Changes accumulate under `## [
 - **To cut a release:** run `scripts/next-version.sh` for the bump the commit types imply, set `VERSION` and `package.json` to it together — `lint.sh` fails if they disagree — move the `[Unreleased]` entries under the new heading, commit, then tag `vX.Y.Z` and push the tag.
 - **Never choose major on your own.** `v1.0.0` is gated on proving automated mode end to end. Raise it rather than deciding it.
 - **A published version is permanent.** npm's unpublish is conditional and cannot be undone, and a `name@version` pair is never reusable. Treat a tag push as irreversible, because it is.
+- **Every tag gets a GitHub Release.** The tag publishes to npm; the Release is where a person finds out what changed. A tag alone renders nothing, and nobody can subscribe to one — GitHub's watch-for-releases needs a Release object.
+
+### Release notes
+
+Written by hand on top, generated underneath. The top half is for somebody deciding whether to upgrade; the bottom half is for somebody who already has.
+
+- **Title: `CrossRev vX.Y.Z`.** Product name capitalised per the writing rule, `v` kept so the title matches the tag, the compare link and the release page's own label. Never a marketing phrase.
+- **The generated list goes in unedited**, at the bottom: `gh api repos/<owner>/<repo>/releases/generate-notes -f tag_name=vX.Y.Z -f previous_tag_name=vW.X.Y --jq .body`. It carries `## What's Changed`, one line per pull request with its author, and the `Full Changelog` compare link. It is provenance, so do not curate it.
+- **The hand-written half is terse and technical.** The audience is software engineers, so schema keys, environment variables and flag names stay as they are. What does not belong: paragraphs of narration, the same point made twice, and a casual register that matches nothing else the project prints.
+- **Sections, in order:** two sentences on what the release is; the standing note that automated mode is unproven; `## Breaking` if there is any; `## Highlights`; `## Also fixed`; `## Install`.
+- **`## Breaking` is a table of old to new**, then one line naming who has to act, then one line on what happens to work already in flight. A rename nobody has to act on still gets a row.
+- **`## Highlights` uses `Was:` and `Now:`**, one line each under a bold claim. Six at most. A before-and-after states the change without narrating it, which is the whole reason the format is worth keeping.
+- **`## Also fixed` is one line per fix, no elaboration.** Anything needing more than a line is a highlight or belongs only in `CHANGELOG.md`.
+- **`CHANGELOG.md` stays as it is.** It is the technical record, linked once from the notes and never summarised into them.
 
 ## Working principles for agent sessions
 
