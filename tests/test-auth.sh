@@ -16,6 +16,15 @@ source "$HERE/../lib/ui.sh"
 # shellcheck source=../lib/auth.sh
 source "$HERE/../lib/auth.sh"
 
+# In offline test suites and CI, there is no controlling terminal (/dev/tty).
+# Stub the input source to /dev/stdin so _ui_input_source succeeds, and stub
+# ui_confirm to print the prompt and decline rather than blocking on /dev/tty.
+_ui_input_source() { printf '/dev/stdin'; }
+ui_confirm() {
+  printf '◆  %s  [y/N]\n' "$1"
+  return 1
+}
+
 pass=0 fail=0
 ok()    { printf '  ok    %s\n' "$1"; pass=$((pass+1)); }
 notok() { printf '  FAIL  %s\n    expected: %s\n    actual:   %s\n' "$1" "$2" "$3"; fail=$((fail+1)); }
@@ -228,11 +237,6 @@ is "_auth_account_info fails when the account does not exist" "$?" "1"
 # must detect the collision via the bot user existence probe before opening a
 # browser, refuse to proceed, and explain both ways forward (reuse and --name).
 
-# Decline confirmations in tests rather than waiting on /dev/tty
-ui_confirm() {
-  printf '◆  %s  [y/N]\n' "$1"
-  return 1
-}
 
 XDG_CONFIG_HOME="$(mktemp -d)"; export XDG_CONFIG_HOME
 
