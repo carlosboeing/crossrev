@@ -75,6 +75,8 @@ is "and still slugs to what the App is installed as" \
 XDG_CONFIG_HOME="$(mktemp -d)"; export XDG_CONFIG_HOME
 STUB_DIR="$(mktemp -d)"
 export CROSSREV_GH_ROUTES="$STUB_DIR/routes"
+export CROSSREV_BROWSER_LOG="$STUB_DIR/browser.log"
+: >"$CROSSREV_BROWSER_LOG"
 export PATH="$HERE/stub:$PATH"
 
 # The file `auth login` writes, with the identity it had at creation. Everything
@@ -297,6 +299,9 @@ hasnt "standalone auth install does not print a step count" \
   "$install_out" "Step 2 of 2"
 hasnt "standalone auth install does not mention step 1" \
   "$install_out" "Step 1 of 2"
+has "standalone auth install intercepted the browser call" \
+  "$(cat "$CROSSREV_BROWSER_LOG")" \
+  "https://github.com/apps/crossrev-shorelogic/installations/new/permissions?target_id=12345&target_type=Organization"
 
 printf '\n  %d passed, %d failed\n' "$pass" "$fail"
 (( fail == 0 ))

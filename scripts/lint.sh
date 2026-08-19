@@ -24,7 +24,7 @@ while IFS= read -r f; do
     bash -n "$f" 2>&1 | sed 's/^/        /'
     fail=1
   fi
-done < <(find . -name '*.sh' -o -name crossrev -path '*/bin/*' | sort)
+done < <(find . -type f \( -name '*.sh' -o -name crossrev -path '*/bin/*' -o -path './tests/stub/*' \) | sort)
 
 printf '\nshellcheck -S warning\n'
 if command -v shellcheck >/dev/null 2>&1; then
