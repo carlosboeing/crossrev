@@ -62,52 +62,95 @@ _state_comments() {
     | jq -c --arg a "$author" '.[] | select(.user.login == $a) | {id, body, created_at}' 2>/dev/null
 }
 
-# Pull the marker object out of a comment body, or nothing.
+# The whole of marker decoding, as one jq program both readers share.
 #
-# Old vocabulary is migrated here, at the single point every marker is decoded
-# through, rather than at each of the dozen places one is read. A read that
-# forgot the fallback would not fail loudly: it would report a pass as having
-# settled nothing, which is how a finished pull request gets driven again.
+# It is held in a variable rather than written out twice because the two callers
+# below must not be able to drift apart. `state_marker_of` decodes one body and
+# `state_markers` decodes a whole comment stream in a single process; a marker
+# that went through one path and not the other would read as a pass that settled
+# nothing, and the loop would drive a finished pull request again.
 #
+# `_marker_of` applies the same rule per line the previous `sed` did — the last
+# opening delimiter, and the last closing one after it. `<!-- crossrev:f` is not
+# matched, because the state prefix ends in a space the finding one lacks.
+#
+# A body carrying two markers concatenates to two JSON values, and `fromjson`
+# rejects that, so the comment is skipped. The previous path did not skip it: it
+# fed the concatenation to jq's own parser, which reads it as a stream and
+# printed both. The caller then rejected the pair and returned nothing at all,
+# losing every marker on the pull request rather than that one comment.
+#
+# `_migrate` is the vocabulary migration, at the single point every marker is
+# decoded through rather than at each of the dozen places one is read. A read
+# that forgot the fallback would not fail loudly, which is why it lives here.
 # `dispositions` became `resolutions` and `rebutted` became `disputed`, because
 # both were borrowed vocabulary — one from records management, one from
 # argumentation — for a field bug trackers have called a resolution for decades.
 # Reading the old keys is one jq clause; the new key is the only one written.
+#
+# `_decode` is the pair applied to one comment object, yielding one migrated
+# marker or nothing. An array, a string or a number payload makes `_migrate`
+# throw on `has`, and the `?` swallows it. A `null` payload needs the trailing
+# `select` instead, because `null | has(...)` answers `false` rather than
+# throwing, so the migration returns it untouched. Both end as nothing, which is
+# what a payload that is not one marker object should decode to.
+_CROSSREV_MARKER_JQ='
+  def _rename($from; $to):
+    if has($from) and (has($to) | not)
+    then .[$to] = .[$from] | del(.[$from]) else . end;
+  def _migrate:
+    _rename("dispositions"; "resolutions")
+    | if (.resolutions | type) == "array" then
+        .resolutions = [ .resolutions[]
+          | _rename("disposition"; "resolution")
+          | if .resolution == "rebutted" then .resolution = "disputed" else . end ]
+      else . end
+    | if (.findings | type) == "array" then
+        .findings = [ .findings[]
+          | _rename("disposition"; "resolution")
+          | if .resolution == "rebutted" then .resolution = "disputed" else . end ]
+      else . end;
+  def _marker_of:
+    [ (.body // "") | split("\n")[]
+      | split("<!-- crossrev: ") | select(length > 1) | last
+      | split(" -->") | select(length > 1) | .[:-1] | join(" -->") ]
+    | join("") | fromjson? ;
+  def _decode:
+    [ _marker_of | _migrate ]? | .[0] | select(. != null);
+'
+
+# Pull the marker object out of a comment body, or nothing.
 state_marker_of() {
-  local body="$1"
-  printf '%s' "$body" \
-    | sed -n 's/.*<!-- crossrev: \(.*\) -->.*/\1/p' \
-    | tr -d '\n' \
-    | jq -c '
-        def rename($from; $to):
-          if has($from) and (has($to) | not)
-          then .[$to] = .[$from] | del(.[$from]) else . end;
-        rename("dispositions"; "resolutions")
-        | if (.resolutions | type) == "array" then
-            .resolutions = [ .resolutions[]
-              | rename("disposition"; "resolution")
-              | if .resolution == "rebutted" then .resolution = "disputed" else . end ]
-          else . end
-        | if (.findings | type) == "array" then
-            .findings = [ .findings[]
-              | rename("disposition"; "resolution")
-              | if .resolution == "rebutted" then .resolution = "disputed" else . end ]
-          else . end
-      ' 2>/dev/null
+  jq -cn --arg body "$1" "$_CROSSREV_MARKER_JQ"'
+    {body: $body} | _decode
+  ' 2>/dev/null
 }
 
 # Every trusted marker on the PR, as a JSON array in chronological order.
+#
+# One jq for the whole stream, not six processes per comment. The per-comment
+# form read the body, extracted the marker, read the id and appended to the
+# accumulating array in separate invocations, so a pull request carrying forty
+# CrossRev comments spent about nine tenths of a second in process startup —
+# on every leg, because all four of them read pass numbering through here.
+#
+# Read as raw text and parsed line by line rather than slurped as JSON, so one
+# unparseable line is skipped the way the per-comment loop skipped it instead of
+# failing the whole read. `_state_comments` emits one compact object per line and
+# cannot produce a raw newline inside one, so a line is a comment.
 state_markers() {
-  local pr="$1" repo="$2" author="$3"
-  local out="[]" body m
-  while IFS= read -r c; do
-    [[ -n "$c" ]] || continue
-    body="$(jq -r .body <<<"$c")"
-    m="$(state_marker_of "$body")"
-    [[ -n "$m" ]] || continue
-    out="$(jq -c --argjson m "$m" --argjson id "$(jq .id <<<"$c")" \
-      '. + [$m + {comment_id: $id}]' <<<"$out")"
-  done < <(_state_comments "$pr" "$repo" "$author")
+  local pr="$1" repo="$2" author="$3" out
+  out="$(_state_comments "$pr" "$repo" "$author" \
+    | jq -Rsc "$_CROSSREV_MARKER_JQ"'
+        [ split("\n")[]
+          | select(length > 0)
+          | fromjson?
+          | select(type == "object")
+          | . as $c
+          | ($c | _decode)
+          | . + {comment_id: $c.id} ]
+      ')"
+  [[ -n "$out" ]] || out="[]"
   printf '%s' "$out"
 }
 
