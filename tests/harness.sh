@@ -27,6 +27,11 @@ hasnt() { [[ "$2" != *"$3"* ]] && ok "$1" || notok "$1" "does not contain '$3'" 
 XDG_CONFIG_HOME="$(mktemp -d)"; export XDG_CONFIG_HOME
 XDG_STATE_HOME="$(mktemp -d)"; export XDG_STATE_HOME
 
+# Every fixture calls `git init` twice, and git copies its sample hooks into each
+# new repository from the default template. Nothing here runs a hook, so the
+# fixtures init against an empty directory instead and skip the copy.
+FIX_TEMPLATE="$(mktemp -d)"
+
 # Fixture identities, so every route and assertion can name them.
 FIX_REPO="acme/widget"
 FIX_PR=42
@@ -84,10 +89,14 @@ fixture_repo() {
   local config="${1:-$(fixture_default_config)}"
   local d bare
   d="$(mktemp -d)"; bare="$(mktemp -d)/origin.git"
-  git init -q --bare "$bare"
+  git init -q --bare --template="$FIX_TEMPLATE" "$bare"
   (
     cd "$d" || exit 1
-    git init -q -b main .
+    git init -q -b main --template="$FIX_TEMPLATE" .
+    # The identity stays in the repository's own config rather than moving to
+    # GIT_AUTHOR_* in the environment. The resolve leg commits inside this
+    # checkout, and an exported identity would also override the one a test sets
+    # on a repository it builds itself.
     git config user.email t@example.com
     git config user.name Test
     printf 'export const ok = 1\n' >app.ts
@@ -96,18 +105,19 @@ fixture_repo() {
     git add -A && git commit -q -m base
     git remote add origin "https://github.com/$FIX_REPO.git"
     git config "url.$bare.pushInsteadOf" "https://github.com/$FIX_REPO.git"
-    git push -q origin main
     git checkout -q -b feature
     printf 'export const ok = 1\nexport function refresh() { fetch("/t") }\n' >app.ts
     git add -A && git commit -q -m feature
-    git push -q origin feature
+    # Both branches in one push. The bare repository ends up holding exactly what
+    # two pushes left it holding, and a push is the most expensive step here.
+    git push -q origin main feature
     git checkout -q main
   )
   cd "$d" || exit 1
   FIX_DIR="$d"
   FIX_ORIGIN="$bare"
-  FIX_BASE="$(git rev-parse main)"
-  FIX_HEAD="$(git rev-parse feature)"
+  # One rev-parse for both, in the order they are named.
+  { read -r FIX_BASE; read -r FIX_HEAD; } < <(git rev-parse main feature)
 }
 
 # Stub wiring. Call after fixture_repo, once per case, so each case gets a clean
