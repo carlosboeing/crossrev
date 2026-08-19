@@ -30,13 +30,13 @@ Options on `cycle`, `review` and `resolve`:
 
 **`resolve` and `cycle` commit and push to the pull request's branch.** That is the point of the tool. Three rails constrain it:
 
-- **The branch guard** refuses to push unless your checkout is on the pull request's own head branch, that branch is not the repository default, and the head repository matches your origin. Asserted before anything leaves the machine, because branch protection fires only after a bad push is attempted and says nothing about which branch was targeted.
+- **The branch guard** refuses to push unless your checkout is on the pull request's own head branch, and not the repository default. Your configured remote must push to the head repository — resolving a fork pull request locally needs a remote pointing at the fork. Asserted before anything leaves the machine, because branch protection fires only after a bad push is attempted.
 - **`policy.max_passes_per_cycle`** caps the loop at 3 passes by default.
 - **The `crossrev/stop` label** halts the loop, and outranks a healthy verdict. It is checked first, every pass.
 
 To watch with no risk of a push at all, run `review` only.
 
-**Fork pull requests work locally when maintainer edits are enabled.** `crossrev resolve` pushes fixes directly to the fork branch if `maintainerCanModify` is permitted on the pull request. If maintainer edits are disabled, the resolve leg refuses to push. Automated mode refuses fork pull requests because GitHub withholds secrets from fork workflows.
+**Fork pull requests can be reviewed locally, and resolved when maintainer edits are allowed.** `crossrev review` reads the diff and leaves comments without requiring write access. `crossrev resolve` pushes fixes directly to the fork branch if `maintainerCanModify` is enabled, and halts with an error if disabled. Automated mode refuses fork pull requests because GitHub withholds secrets from fork workflows.
 
 ## What a pass writes to the pull request
 

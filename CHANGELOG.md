@@ -6,7 +6,7 @@ All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepa
 
 ### Changed
 
-- **Document which pull requests CrossRev reviews on a public repository** ([#32](https://github.com/carlosboeing/crossrev/issues/32)). `README.md` now records that automated mode reviews pull requests from in-repo branches and not from forks. `docs/usage.md` adds the public repository breakdown and workarounds, and corrects the note that described fork pull requests as refused unconditionally — local runs from a terminal can review and resolve fork pull requests when maintainer edits are allowed. `docs/troubleshooting.md` scopes its fork refusal row to automatic triggers.
+- **Document which pull requests CrossRev reviews on a public repository** ([#32](https://github.com/carlosboeing/crossrev/issues/32)). `README.md` now records that automated mode reviews pull requests from in-repo branches and not from forks. `docs/usage.md` adds the public repository breakdown and workarounds, explains the remote requirement for local fork resolution, and clarifies that local runs review fork pull requests directly and resolve them when maintainer edits are allowed. `docs/troubleshooting.md` scopes its fork refusal row to automatic triggers.
 
 ### Fixed
 
