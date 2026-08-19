@@ -945,6 +945,11 @@ Findings recorded; posting them now.$(state_marker_encode "$(jq -c 'del(.comment
 
   local next
   next="$(legs_pass_label "$verdict" "$actionable" "$(_markers_escalated "$CTX_MARKERS")")"
+  if [[ "$verdict" == "converged" && "$next" != "converged" ]]; then
+    local finding_noun="findings"; (( actionable == 1 )) && finding_noun="finding"
+    ui_warn "the reviewer returned verdict '$verdict' alongside $actionable actionable $finding_noun" \
+      "The actionable count outranks the verdict, so the pass is labelled '$next' to run the resolve leg."
+  fi
   run_pass_labels "$pass" "$next"
 
   printf '  → verdict: %s\n\n' "$verdict"

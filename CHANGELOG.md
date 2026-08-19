@@ -4,6 +4,10 @@ All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepa
 
 ## [Unreleased]
 
+### Fixed
+
+- **Actionable findings outrank a reviewer's converged verdict** ([#60](https://github.com/carlosboeing/crossrev/issues/60)). `legs_pass_label` returned `converged` immediately on a converged verdict, ignoring the orchestrator's actionable count. A reviewer returning `converged` alongside actionable findings now yields `awaiting-resolution` instead, so the resolve leg addresses the findings. The call site warns when the verdict is overridden. A converged verdict with zero actionable findings remains authoritative as the exit from a human-settled escalation halt.
+
 ## [0.3.0] — 2026-08-19
 
 The release where CrossRev's own review loop became its main source of bugs. Findings are now named by the location they point at, and the resolver writes a commit subject describing what it fixed. Both change the schemas, so both are breaking. A local resolve leg pushes to fork pull requests. A hosted leg with no harness credential stops rather than running a model unauthenticated. The push guard checks every URL a remote is configured with. **Automated mode is still built and unproven** — proving it end to end remains the `v1.0.0` bar.

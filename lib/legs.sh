@@ -243,13 +243,14 @@ legs_resolve_pass_label() {
 # $1 verdict, $2 actionable finding count, $3 open escalations count.
 legs_pass_label() {
   local verdict="$1" actionable="$2" escalated="$3"
-  case "$verdict" in
-    converged) printf 'converged' ;;
-    blocked)   printf 'halted' ;;
-    *) if (( actionable > 0 )); then printf 'awaiting-resolution'
-       elif (( escalated > 0 )); then printf 'halted'
-       else printf 'converged'; fi ;;
-  esac
+  if [[ "$verdict" == "blocked" ]]; then printf 'halted'; return; fi
+  if (( actionable > 0 )); then
+    printf 'awaiting-resolution'
+  elif (( escalated > 0 )) && [[ "$verdict" != "converged" ]]; then
+    printf 'halted'
+  else
+    printf 'converged'
+  fi
 }
 
 # The colour a loop label is minted with.
