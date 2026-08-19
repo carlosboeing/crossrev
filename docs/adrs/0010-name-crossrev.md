@@ -66,3 +66,10 @@ The casing convention follows CodeRabbit's. It costs nothing and it moves the na
 - **No compatibility shim exists**, and none is planned. Nothing was ever published under the old name, so there is nothing to be compatible with.
 - **Two weaknesses were accepted knowingly**, rather than overlooked. The name has the cadence of an internal service — a prefix bolted to a truncation — which the camel-case convention softens without solving. And in developer vocabulary `cross-` most often primes cross-platform or cross-origin, so the cross-*model* reading is not the first one a developer reaches.
 - **The casing rule is stated in the repository's own agent brief**, so future sessions apply it to new prose, CLI output and comment text rather than rediscovering it.
+- **The npm package is `crossrev-ai`, because npm refuses `crossrev`.** The registry's similarity check runs at publish time only, with no advance query and no appeal. It rejects the name as *"too similar to existing package cross-env"*, which normalises to `crossenv` and differs from `crossrev` at two positions. `cross-env` is among the most-downloaded packages on npm, so its neighbourhood is guarded hard against typo-squatting.
+
+  Re-tested on 2026-08-19 in case the heuristic had relaxed. It has not, and it will not while `cross-env` exists, so this is settled rather than retryable. The bare name is unregistered and stays unclaimable.
+
+  The `-ai` suffix is therefore a collision workaround for this name, not a house convention. Its sibling project publishes as plain `copydesk`, because nothing on npm collides with that. A scoped `@carlosboeing/crossrev` was offered by npm in the rejection and declined: it would rename a shipped package to buy symmetry with a project that has no such constraint.
+
+  **The installed command is `crossrev` under either name**, because the `bin` field decides that rather than the package name. Nobody typing the command sees the suffix.
