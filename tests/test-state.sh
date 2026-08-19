@@ -137,6 +137,12 @@ truncated="$(state_prs_reviewed_today acme/widget trusted "$cutoff" 2000 42 '[]'
 has "a daily count truncated after ten pages announces itself" "$truncated" "first 10 pages"
 is "and the bounded read returns the distinct count it saw" "${truncated##*$'\n'}" "1000"
 
+# The cap is a stopping point rather than a tally. A whole page is folded in at
+# once, so the count can pass the cap inside one page and what gets reported must
+# still be the cap itself.
+is "a count that trips the cap reports the cap, not where it stopped" \
+  "$(state_prs_reviewed_today acme/widget trusted "$cutoff" 5 42 '[]')" "5"
+
 # --- finding markers -------------------------------------------------------
 fm="$(state_finding_marker "a1b2c3d4" 2 review)"
 is "a per-write finding marker carries its id" \
