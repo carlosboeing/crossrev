@@ -86,10 +86,10 @@ guard() {
   if ( legs_assert_push_target "$@" ) >/dev/null 2>&1; then got=allow; else got=refuse; fi
   [[ "$got" == "$want" ]] && ok "$desc" || notok "$desc" "$want" "$got"
 }
-guard allow  "pushes to the PR head branch"                     feat/x feat/x main o/r o/r
-guard refuse "refuses when the checkout is on another branch"   main   feat/x main o/r o/r
-guard refuse "refuses when the head branch is the default"      main   main   main o/r o/r
-guard refuse "refuses when the head repo is not the origin"     feat/x feat/x main fork/r o/r
+guard allow  "pushes when the tree is at the PR head revision"    sha1 sha1 feat/x main o/r o/r
+guard refuse "refuses when the tree is at another revision"       sha2 sha1 feat/x main o/r o/r
+guard refuse "refuses when the head branch is the default"        sha1 sha1 main   main o/r o/r
+guard refuse "refuses when the head repo is not the origin"       sha1 sha1 feat/x main fork/r o/r
 
 # --- the URL the guard is handed --------------------------------------------
 #
@@ -312,7 +312,7 @@ is  "the re-drive exits clean"                        "$rc" "0"
 has "it says the pass is being driven again"          "$out" "driving pass 1 again"
 hasnt "rather than declining as already resolved"     "$out" "already resolved"
 has "the resolver actually runs"                      "$(cat "$PROMPT_LOG")" "You are the resolve leg"
-has "and its fix is committed" "$(git log -1 feature --format=%s)" "fix: resolve crossrev review findings (pass 1)"
+has "and its fix is committed" "$(git --git-dir="$FIX_ORIGIN" log -1 refs/heads/feature --format=%s)" "fix: resolve crossrev review findings (pass 1)"
 is  "both threads are answered again, over the first attempt's replies" \
   "$(count 'pulls/42/comments/5000/replies')" "2"
 has "and resolved once fixed"                         "$out" "resolved 2 thread(s)"

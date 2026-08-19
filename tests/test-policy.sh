@@ -532,7 +532,7 @@ CROSSREV_RESOLVE_MODEL=resolver-model; export CROSSREV_RESOLVE_MODEL
 out="$("$CROSSREV" resolve --pr 42 2>&1)"; rc=$?
 is  "same-repo resolve exits clean" "$rc" "0"
 has "and pushes to the branch" "$out" "pushed"
-is  "and reaches origin bare repo" "$(git rev-parse feature)" "$(git -C "$FIX_ORIGIN" rev-parse refs/heads/feature)"
+has "and reaches origin bare repo" "$out" "$(git -C "$FIX_ORIGIN" rev-parse --short refs/heads/feature)"
 
 # Fork resolve with maintainerCanModify: true reaches the push and targets head repo
 fixture_repo; stub_reset
@@ -555,7 +555,7 @@ CROSSREV_RESOLVE_MODEL=resolver-model; export CROSSREV_RESOLVE_MODEL
 out="$("$CROSSREV" resolve --pr 42 2>&1)"; rc=$?
 is  "a fork resolve with maintainerCanModify: true exits clean" "$rc" "0"
 has "and reports the push" "$out" "pushed"
-is  "and targets the fork remote" "$(git rev-parse feature)" "$(git -C "$fork_bare" rev-parse refs/heads/feature)"
+has "and targets the fork remote" "$out" "$(git -C "$fork_bare" rev-parse --short refs/heads/feature)"
 
 # Fork resolve with maintainerCanModify: false refuses specifically
 fixture_repo; stub_reset

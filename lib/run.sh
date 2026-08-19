@@ -1426,34 +1426,11 @@ leg_resolve() {
   fi
 
   # Resolve runs in a dedicated worktree so the operator's checkout is untouched.
-  local orig_cwd wt_dir wt_err cur_common repo_common
+  local orig_cwd wt_dir wt_err wt_cur_sha push_remote target_repo current_sha
   orig_cwd="$(pwd)"
   wt_dir="$(_worktree_dir "$CTX_REPO" "$CTX_PR")"
   CROSSREV_WORKTREE="$wt_dir"
 
-  repo_common="$(cd . 2>/dev/null && cd "$(git rev-parse --git-common-dir 2>/dev/null)" 2>/dev/null && pwd -P)"
-  if [[ -d "$wt_dir" ]]; then
-    cur_common="$(cd "$wt_dir" 2>/dev/null && cd "$(git rev-parse --git-common-dir 2>/dev/null)" 2>/dev/null && pwd -P)"
-    if [[ -z "$cur_common" || "$cur_common" != "$repo_common" ]]; then
-      rm -rf "$wt_dir"
-      git worktree prune 2>/dev/null || true
-    fi
-  fi
-
-  if [[ ! -d "$wt_dir" ]]; then
-    mkdir -p "$(dirname "$wt_dir")"
-    if ! wt_err="$(git worktree add "$wt_dir" "$CTX_HEAD_BRANCH" 2>&1)"; then
-      ui_die "could not create worktree for branch '$CTX_HEAD_BRANCH' at $wt_dir" "$wt_err"
-    fi
-  fi
-
-  cd "$wt_dir" || ui_die "could not enter worktree at $wt_dir" "Check directory permissions."
-
-  # The push guard runs before anything is invoked, not before the push. Finding
-  # out after a model has run that the checkout is on the wrong branch wastes the
-  # invocation and leaves changes in a tree nobody expected them in.
-  local current_branch push_remote target_repo
-  current_branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
   push_remote="$(git config "branch.${CTX_HEAD_BRANCH}.pushRemote" 2>/dev/null || true)"
   if [[ -z "$push_remote" ]]; then
     push_remote="$(git config "branch.${CTX_HEAD_BRANCH}.remote" 2>/dev/null || true)"
@@ -1467,7 +1444,7 @@ leg_resolve() {
     fi
   fi
   [[ -n "$push_remote" ]] || ui_die \
-    "could not resolve the push remote for branch '$current_branch'" \
+    "could not resolve the push remote for branch '$CTX_HEAD_BRANCH'" \
     "Check \`git remote -v\` in this checkout."
 
   legs_resolve_push_repo "$push_remote"
@@ -1476,7 +1453,40 @@ leg_resolve() {
     "could not read the URL for remote '$push_remote'" \
     "Check \`git remote -v\` in this checkout."
 
-  legs_assert_push_target "$current_branch" "$CTX_HEAD_BRANCH" \
+  if ! git cat-file -e "${CTX_HEAD_SHA}^{commit}" 2>/dev/null; then
+    git fetch "$push_remote" "$CTX_HEAD_SHA" >/dev/null 2>&1 \
+      || git fetch "$push_remote" "refs/pull/${CTX_PR}/head" >/dev/null 2>&1 \
+      || git fetch "$push_remote" "$CTX_HEAD_BRANCH" >/dev/null 2>&1 \
+      || git fetch "$push_remote" >/dev/null 2>&1 || true
+    if ! git cat-file -e "${CTX_HEAD_SHA}^{commit}" 2>/dev/null; then
+      ui_die "could not find revision '$CTX_HEAD_SHA' for $CTX_REPO#$CTX_PR" \
+        "Fetching from remote '$push_remote' did not reach the pull request's head revision."
+    fi
+  fi
+
+  if [[ -d "$wt_dir" ]]; then
+    wt_cur_sha="$(git -C "$wt_dir" rev-parse HEAD 2>/dev/null || true)"
+    if [[ -z "$wt_cur_sha" || "$wt_cur_sha" != "$CTX_HEAD_SHA" ]]; then
+      rm -rf "$wt_dir"
+      git worktree prune 2>/dev/null || true
+    fi
+  fi
+
+  if [[ ! -d "$wt_dir" ]]; then
+    mkdir -p "$(dirname "$wt_dir")"
+    if ! wt_err="$(git worktree add --detach "$wt_dir" "$CTX_HEAD_SHA" 2>&1)"; then
+      ui_die "could not create worktree for revision '$CTX_HEAD_SHA' at $wt_dir" "$wt_err"
+    fi
+  fi
+
+  cd "$wt_dir" || ui_die "could not enter worktree at $wt_dir" "Check directory permissions."
+
+  # The push guard runs before anything is invoked, not before the push. Finding
+  # out after a model has run that the checkout is on the wrong revision wastes the
+  # invocation and leaves changes in a tree nobody expected them in.
+  current_sha="$(git rev-parse HEAD 2>/dev/null || true)"
+
+  legs_assert_push_target "$current_sha" "$CTX_HEAD_SHA" "$CTX_HEAD_BRANCH" \
     "$CTX_DEFAULT_BRANCH" "$CTX_HEAD_REPO" "$target_repo" "$CTX_MAINTAINER_CAN_MODIFY" "$CTX_IS_CROSS_REPOSITORY"
 
   run_leg_settings resolver "$harness_override"

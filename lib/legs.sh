@@ -421,21 +421,21 @@ EOF
   done
 }
 
-# Refuse to push anywhere except the PR's own head branch.
+# Refuse to push anywhere except the PR's own head revision and repository.
 #
 # Branch protection is a backstop, not a control: it fires after a bad push is
 # attempted and says nothing about which branch was targeted. This asserts the
 # target before anything leaves the machine.
 legs_assert_push_target() {
   # `${n-…}` rather than `${n:-…}`: the defaults are for a caller that passes
-  # five arguments, not for one that passes an empty value it could not read. An
+  # six arguments, not for one that passes an empty value it could not read. An
   # empty cross-repository flag has to stay empty, because "false" here means
   # "this repository's own branch" and would skip the maintainer-edit check.
-  local current_branch="$1" head_branch="$2" default_branch="$3" head_repo="$4" origin_repo="$5" maintainer_can_modify="${6-false}" is_cross_repo="${7-false}"
+  local current_sha="$1" head_sha="$2" head_branch="$3" default_branch="$4" head_repo="$5" origin_repo="$6" maintainer_can_modify="${7-false}" is_cross_repo="${8-false}"
 
-  [[ "$current_branch" == "$head_branch" ]] || ui_die \
-    "the checkout is on '$current_branch' but the pull request's head branch is '$head_branch'" \
-    "crossrev pushes only to the branch under review. Check out $head_branch first."
+  [[ "$current_sha" == "$head_sha" ]] || ui_die \
+    "the tree is at revision '$current_sha' but the pull request is at '$head_sha'" \
+    "crossrev pushes only to the revision under review."
 
   [[ "$head_branch" != "$default_branch" ]] || ui_die \
     "the pull request's head branch is the repository default branch ('$default_branch')" \

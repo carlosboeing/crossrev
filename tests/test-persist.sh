@@ -173,13 +173,13 @@ has "it commits and pushes the fix"                   "$out" "to feature"
 # change did. The generic one it replaces described the process rather than the
 # work, so four passes on one pull request left four indistinguishable commits.
 is  "the commit carries the subject the resolver wrote" \
-  "$(git log -1 feature --format=%s)" "fix(api): check the response status before reading it"
+  "$(git --git-dir="$FIX_ORIGIN" log -1 refs/heads/feature --format=%s)" "fix(api): check the response status before reading it"
 hasnt "rather than the generic one it replaces" \
-  "$(git log -1 feature --format=%s)" "resolve crossrev review findings"
+  "$(git --git-dir="$FIX_ORIGIN" log -1 refs/heads/feature --format=%s)" "resolve crossrev review findings"
 
 # The body is the orchestrator's: it already holds the titles and the locations,
 # so asking the model for text it would then have to validate buys nothing.
-body="$(git log -1 feature --format=%b)"
+body="$(git --git-dir="$FIX_ORIGIN" log -1 refs/heads/feature --format=%b)"
 has "the body names the finding by its title"         "$body" "Unchecked fetch response"
 has "and gives its location and thread"               "$body" "app.ts:2 - https://github.com/acme/widget/pull/42/files#r"
 has "a trailer names the pull request"                "$body" "Crossrev-pr: acme/widget#42"
@@ -203,7 +203,7 @@ CROSSREV_RESOLVE_PAYLOAD="$(resolve_payload | payload)"; export CROSSREV_RESOLVE
 CROSSREV_RESOLVE_EDIT="$(edit_script)"; export CROSSREV_RESOLVE_EDIT
 CROSSREV_RESOLVE_MODEL=resolver-model; export CROSSREV_RESOLVE_MODEL
 out="$("$CROSSREV" resolve --pr 42 2>&1)"
-body="$(git log -1 feature --format=%b)"
+body="$(git --git-dir="$FIX_ORIGIN" log -1 refs/heads/feature --format=%b)"
 
 is  "only crossrev's own trailer is a trailer" \
   "$(printf '%s\n' "$body" | grep -c '^Crossrev-pr:')" "1"
@@ -233,7 +233,7 @@ reject_case() {
   CROSSREV_RESOLVE_MODEL=resolver-model; export CROSSREV_RESOLVE_MODEL
   local o; o="$("$CROSSREV" resolve --pr 42 2>&1)"
   has "$name falls back to the generic subject" \
-    "$(git log -1 feature --format=%s)" "fix: resolve crossrev review findings (pass 1)"
+    "$(git --git-dir="$FIX_ORIGIN" log -1 refs/heads/feature --format=%s)" "fix: resolve crossrev review findings (pass 1)"
   has "and $name is reported rather than swallowed" "$o" "commit subject was rejected"
 }
 
@@ -258,7 +258,7 @@ CROSSREV_RESOLVE_EDIT="$(edit_script)"; export CROSSREV_RESOLVE_EDIT
 CROSSREV_RESOLVE_MODEL=resolver-model; export CROSSREV_RESOLVE_MODEL
 o="$("$CROSSREV" resolve --pr 42 2>&1)"
 has "a subject carrying NUL falls back to the generic subject" \
-  "$(git log -1 feature --format=%s)" "fix: resolve crossrev review findings (pass 1)"
+  "$(git --git-dir="$FIX_ORIGIN" log -1 refs/heads/feature --format=%s)" "fix: resolve crossrev review findings (pass 1)"
 has "and a subject carrying NUL is reported rather than swallowed" "$o" "commit subject was rejected"
 
 # An absent subject is not a rejection — the resolver simply did not write one,
@@ -271,7 +271,7 @@ CROSSREV_RESOLVE_EDIT="$(edit_script)"; export CROSSREV_RESOLVE_EDIT
 CROSSREV_RESOLVE_MODEL=resolver-model; export CROSSREV_RESOLVE_MODEL
 out="$("$CROSSREV" resolve --pr 42 2>&1)"
 has "no subject at all still commits, generically" \
-  "$(git log -1 feature --format=%s)" "fix: resolve crossrev review findings (pass 1)"
+  "$(git --git-dir="$FIX_ORIGIN" log -1 refs/heads/feature --format=%s)" "fix: resolve crossrev review findings (pass 1)"
 hasnt "and says nothing about a rejection"            "$out" "commit subject was rejected"
 
 # --- the convention the subject is meant to match --------------------------
@@ -297,8 +297,8 @@ has "a short history asks for Conventional Commits instead" \
 # Checked against the bare repo rather than `git ls-remote origin`: the fixture's
 # fetch URL is a real github.com address it must never contact, so ls-remote there
 # would fail and prove nothing either way.
-is  "and it is pushed, not just committed" \
-  "$(git rev-parse feature)" "$(git -C "$FIX_ORIGIN" rev-parse refs/heads/feature)"
+has "and it is pushed, not just committed" \
+  "$out" "$(git -C "$FIX_ORIGIN" rev-parse --short refs/heads/feature)"
 
 has "it files the deferred defect"                    "$out" "filed 1 issue(s) for deferred work"
 has "the issue carries the identity label"            "$(calls)" "labels[]=crossrev-review"
@@ -326,7 +326,7 @@ has "and the prompt tells it not to fix that one here" \
 has "the prompt marks it as one the resolver may not fix" \
   "$(cat "$PROMPT_LOG")" "May fix: no"
 hasnt "a high-severity pre-existing finding is not in the commit" \
-  "$(git log -1 feature --format=%B)" "$ID_DEFER"
+  "$(git --git-dir="$FIX_ORIGIN" log -1 refs/heads/feature --format=%B)" "$ID_DEFER"
 has  "it is filed to the backlog instead"             "$(calls)" "Legacy export is untyped"
 
 # The resolver is blind to the quarantined paths while the diff still carries
@@ -355,11 +355,11 @@ out="$("$CROSSREV" resolve --pr 42 2>&1)"; rc=$?
 is  "the repository-backlog leg exits clean"          "$rc" "0"
 has "the deferral is recorded to the repository backlog" "$out" "filed 1 issue(s) for deferred work"
 is  "the backlog file is in the commit, not just the tree" \
-  "$(git show --name-only --format= feature | grep -c '^\.crossrev/backlog/')" "1"
+  "$(git --git-dir="$FIX_ORIGIN" show --name-only --format= refs/heads/feature | grep -c '^\.crossrev/backlog/')" "1"
 is  "so nothing of it is left behind in the tree" \
   "$(git status --porcelain -- .crossrev | wc -l | tr -d ' ')" "0"
 is  "and the code fix rides in the same commit" \
-  "$(git show --name-only --format= feature | grep -c '^app\.ts$')" "1"
+  "$(git --git-dir="$FIX_ORIGIN" show --name-only --format= refs/heads/feature | grep -c '^app\.ts$')" "1"
 
 # The other half: a pass that defers and fixes nothing still has a tree write to
 # carry, and a commit guarded only on the fix count skipped exactly that case.
@@ -371,8 +371,8 @@ out="$("$CROSSREV" resolve --pr 42 2>&1)"; rc=$?
 
 is  "a deferral-only pass exits clean"                "$rc" "0"
 is  "it still commits, because the backlog wrote to the tree" \
-  "$(git show --name-only --format= feature | grep -c '^\.crossrev/backlog/')" "1"
-has "and says what the commit is for, not 'fix'"      "$(git log -1 feature --format=%s)" "chore: record deferred crossrev findings"
+  "$(git --git-dir="$FIX_ORIGIN" show --name-only --format= refs/heads/feature | grep -c '^\.crossrev/backlog/')" "1"
+has "and says what the commit is for, not 'fix'"      "$(git --git-dir="$FIX_ORIGIN" log -1 refs/heads/feature --format=%s)" "chore: record deferred crossrev findings"
 hasnt "no fix was claimed, so nothing warns about one" \
   "$out" "changed no files"
 
@@ -392,9 +392,9 @@ out="$("$CROSSREV" resolve --pr 42 2>&1)"; rc=$?
 
 is  "the default file layout exits clean"             "$rc" "0"
 is  "and the file it names is actually written" \
-  "$(git show --name-only --format= feature | grep -c '^\.crossrev/backlog\.md$')" "1"
+  "$(git --git-dir="$FIX_ORIGIN" show --name-only --format= refs/heads/feature | grep -c '^\.crossrev/backlog\.md$')" "1"
 has "carrying the deferred finding it claimed to file" \
-  "$(git show feature:.crossrev/backlog.md)" "Legacy export is untyped"
+  "$(git --git-dir="$FIX_ORIGIN" show refs/heads/feature:.crossrev/backlog.md)" "Legacy export is untyped"
 has "and the summary points at that path"             "$out" "filed 1 issue(s) for deferred work"
 
 # --- the review leg's own comments must not silence the resolver ---------
@@ -660,7 +660,7 @@ out="$("$CROSSREV" resolve --pr 42 2>&1)"; rc=$?
 
 is  "a leg that retried after editing files still exits clean" "$rc" "0"
 is  "the discarded attempt's edit is applied once, not twice" \
-  "$(git show feature:app.ts | grep -c 'const patched')" "1"
+  "$(git --git-dir="$FIX_ORIGIN" show refs/heads/feature:app.ts | grep -c 'const patched')" "1"
 is  "and nothing of it is left loose in the tree" \
   "$(git status --porcelain | wc -l | tr -d ' ')" "0"
 has "the run says the discarded edits were put back" "$out" "put back"

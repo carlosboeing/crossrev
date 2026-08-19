@@ -30,7 +30,7 @@ Options on `cycle`, `review` and `resolve`:
 
 **`resolve` and `cycle` commit and push to the pull request's branch.** That is the point of the tool. Three rails constrain it:
 
-- **The branch guard** refuses to push unless your checkout is on the pull request's own head branch, and not the repository default. Your configured remote must push to the head repository — resolving a fork pull request locally needs a remote pointing at the fork. Asserted before anything leaves the machine, because branch protection fires only after a bad push is attempted.
+- **The push guard** runs in a dedicated worktree at the pull request's head revision — so your checkout branch does not matter — and refuses to push to the repository default branch. Your configured remote must push to the head repository — resolving a fork pull request locally needs a remote pointing at the fork. Asserted before anything leaves the machine, because branch protection fires only after a bad push is attempted.
 - **`policy.max_passes_per_cycle`** caps the loop at 3 passes by default.
 - **The `crossrev/stop` label** halts the loop, and outranks a healthy verdict. It is checked first, every pass.
 

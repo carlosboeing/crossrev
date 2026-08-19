@@ -11,8 +11,13 @@
 # - doctor reports leftover worktrees and stranded quarantine
 
 set -uo pipefail
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=harness.sh
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/harness.sh"
+source "$HERE/harness.sh"
+# shellcheck source=../lib/ui.sh
+source "$HERE/../lib/ui.sh"
+# shellcheck source=../lib/legs.sh
+source "$HERE/../lib/legs.sh"
 
 gone()    { [[ ! -e "$2" ]] && ok "$1" || notok "$1" "$2 is still present"; }
 present() { [[ -e "$2" ]]   && ok "$1" || notok "$1" "$2 is missing"; }
@@ -150,7 +155,61 @@ printf 'evil instructions\n' > "$FIX_DIR/.crossrev-quarantine/CLAUDE.md"
   has "doctor names quarantined file" "$doc_q_out" "CLAUDE.md"
 )
 
+# --- 7. Resolve when operator has PR head branch checked out in main tree -----
+fixture_repo; stub_reset
+
+(
+  cd "$FIX_DIR" || exit 1
+  git checkout -q feature
+  printf '// dirty feature work\n' >> app.ts
+)
+
+rm_file="$(marker_comment 9001 "$(setup_review_marker)" | jq -cs . | payload)"
+setup_resolve_routes "$rm_file"
+
+edit_script_7="$(mktemp)"
+printf 'printf "export const ok = 1\\nexport function refresh() { /* fixed */ }\\n" > app.ts\n' > "$edit_script_7"
+CROSSREV_RESOLVE_EDIT="$edit_script_7"; export CROSSREV_RESOLVE_EDIT
+CROSSREV_RESOLVE_PAYLOAD="$(setup_resolve_payload | payload)"; export CROSSREV_RESOLVE_PAYLOAD
+CROSSREV_RESOLVE_MODEL="resolver-model"; export CROSSREV_RESOLVE_MODEL
+
+out="$("$CROSSREV" resolve --pr 42 2>&1)"; rc=$?
+is "resolve succeeds when operator checkout is on PR head branch" "$rc" "0"
+has "output reports resolved pass on head branch" "$out" "resolved pass 1"
+is "operator checkout stays on feature branch" "$(git -C "$FIX_DIR" rev-parse --abbrev-ref HEAD)" "feature"
+has "operator uncommitted changes on feature are preserved" "$(cat "$FIX_DIR/app.ts")" "dirty feature work"
+
+# --- 8. Stale worktree at wrong revision is recreated rather than reused -------
+fixture_repo; stub_reset
+
+# Create a leftover worktree at an old revision (FIX_BASE instead of FIX_HEAD)
+mkdir -p "$(dirname "$wt_expected")"
+git -C "$FIX_DIR" worktree add --detach "$wt_expected" "$FIX_BASE"
+printf 'stale leftover marker\n' > "$wt_expected/stale.txt"
+
+rm_file="$(marker_comment 9001 "$(setup_review_marker)" | jq -cs . | payload)"
+setup_resolve_routes "$rm_file"
+
+edit_script_8="$(mktemp)"
+printf 'printf "export const ok = 1\\nexport function refresh() { /* fixed */ }\\n" > app.ts\n' > "$edit_script_8"
+CROSSREV_RESOLVE_EDIT="$edit_script_8"; export CROSSREV_RESOLVE_EDIT
+CROSSREV_RESOLVE_PAYLOAD="$(setup_resolve_payload | payload)"; export CROSSREV_RESOLVE_PAYLOAD
+
+out="$("$CROSSREV" resolve --pr 42 2>&1)"; rc=$?
+is "resolve succeeds when leftover worktree was at stale revision" "$rc" "0"
+has "resolve output reports resolved pass for stale worktree" "$out" "resolved pass 1"
+gone "stale file from old worktree is gone" "$wt_expected/stale.txt"
+origin_head="$(git --git-dir="$FIX_ORIGIN" rev-parse refs/heads/feature)"
+head_content="$(git --git-dir="$FIX_ORIGIN" show "$origin_head:app.ts")"
+has "fix landed against the correct head revision" "$head_content" "/* fixed */"
+
+# --- 9. Revision guard fires when tree is not at pull request head -------------
+guard_rc=0
+guard_err="$(legs_assert_push_target "1111111111111111111111111111111111111111" "2222222222222222222222222222222222222222" "feature" "main" "acme/widget" "acme/widget" false false 2>&1)" || guard_rc=$?
+notok_if "revision guard refuses when tree is not at PR head" "$guard_rc"
+has "revision guard names the revision mismatch" "$guard_err" "crossrev pushes only to the revision under review"
+
 rm -rf "$FIX_DIR/.crossrev-quarantine"
-rm -f "$edit_script" "$bad_payload"
+rm -f "$edit_script" "$bad_payload" "$edit_script_7" "$edit_script_8"
 
 finish
