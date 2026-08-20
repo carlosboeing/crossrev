@@ -30,7 +30,6 @@
         "url": "https://claude.ai/install.sh",
         "command": "curl -fsSL https://claude.ai/install.sh | bash -s 2.1.237",
         "pinned_version": "2.1.237",
-        "integrity": "sha256",
         "needs_credential": false,
         "hint": "https://claude.com/claude-code"
       },
@@ -63,7 +62,6 @@
         "url": "https://chatgpt.com/codex/install.sh",
         "command": "curl -fsSL https://chatgpt.com/codex/install.sh | sh -s -- --release 0.148.0",
         "pinned_version": "0.148.0",
-        "integrity": "sha256",
         "needs_credential": false,
         "hint": "https://chatgpt.com/codex"
       },
@@ -96,7 +94,6 @@
         "url": "https://antigravity.google/cli/install.sh",
         "command": "curl -fsSL https://antigravity.google/cli/install.sh | bash",
         "pinned_version": null,
-        "integrity": "sha512",
         "needs_credential": false,
         "hint": "https://antigravity.google"
       },
