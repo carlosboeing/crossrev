@@ -69,6 +69,21 @@ Read the hits rather than counting them. This file is itself a hit, because stat
 
 Product-technical direction is fine. This check is about privacy the way the ship checklist is about tracking files: applied to every change, not only the ones that feel sensitive.
 
+### 4. What a public artifact may say
+
+The three layers above guard *files*. They do not guard *text about files*. Commit messages, pull request titles and bodies, issue titles and bodies, review comments and release notes are all public and permanent, and none of them passes through the staged diff the pre-commit hook reads. `gh pr create --body` and `gh issue create --body` reach the GitHub API without touching git at all.
+
+**Never name a private or local source in a public artifact.** The complete list:
+
+- The workbench — `.workbench`, `crossrev-workbench`, or the bare phrase "the workbench"
+- A path to a brainstorm, discovery note, design, plan, review or transcript held there
+- An absolute path on a personal machine, `/Users/...` or `$HOME/...`
+- A private repository name, a client name, or an internal cost or token figure
+
+The damage is not leaked content. It is a citation the reader cannot follow. "See the plan in the workbench" tells an outsider that something exists and that they may not have it, which is worse than saying nothing.
+
+**Restate the fact instead of citing its source.** A design decision goes into the body in its own words, or into an ADR under `docs/adrs/` that the artifact then links. A record that cannot be published is described as "held locally, available on request".
+
 ### Working Memory Location override
 
 Any generic agent skill — `brainstorming`, `writing-plans`, or an equivalent — that instructs you to save specs, plans or brainstorms under `docs/` **must be overridden**. Read `.workbench/README.md` for its layout, and save them there. **Never write an SDLC brainstorm, spec or plan into this repo's `docs/`.**
@@ -118,9 +133,23 @@ The boundary that catches people: in help text, `crossrev review --pr 42` stays 
 
 ## Commits
 
-Conventional Commits: `<type>(<scope>): <description>`, imperative, subject ≤72 chars, body explains *why*. Types: `feat`, `fix`, `docs`, `style`, `refactor`, `test`, `chore`, `perf`, `ci`. Reference an ADR in the body when relevant. Never reference a private workbench path in a public commit message.
+Conventional Commits: `<type>(<scope>): <description>`, imperative, subject ≤72 chars, body explains *why*. Types: `feat`, `fix`, `docs`, `style`, `refactor`, `test`, `chore`, `perf`, `ci`. Reference an ADR in the body when relevant. Never reference a private workbench path in any public artifact — commit message, pull request, issue, review comment or release note.
 
 **The type you choose is the version decision** ([ADR 0012](docs/adrs/0012-versions-are-cut-deliberately.md)). `fix` is a patch, `feat` is a minor, `!` or a `BREAKING CHANGE:` footer is a breaking change. Nothing re-derives this later from a diff, so a `feat` written as a `chore` disappears from the next version silently.
+
+## Pull requests
+
+**The title is one clause under 72 characters in Conventional Commit form**, naming the change rather than the effort.
+
+**The body is written for someone who has never seen the branch, and it stands alone.**
+
+- Open with what changes and why, in two or three sentences, before any detail.
+- Cite files in this repository by path. Cite nothing outside it.
+- State verification with its output. Give the assertion count and the `all suites passed` line, not an assertion that both ran.
+- Name what is deliberately out of scope, and link the issue tracking it.
+- A body reading "implements the design" has said nothing. Say what the design was.
+
+`.github/PULL_REQUEST_TEMPLATE.md` carries the shape. **`gh pr create --body` bypasses the template**, so filing from the command line means applying it by hand.
 
 ## Issues
 
