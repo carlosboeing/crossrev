@@ -140,3 +140,13 @@ harness_names_human() {
     }
   }'
 }
+
+harness_source_adapters() {
+  harness_load
+  local root="${ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+  local n
+  while IFS= read -r n; do
+    # shellcheck source=/dev/null
+    source "$root/lib/adapters/$n.sh"
+  done < <(harness_names)
+}

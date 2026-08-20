@@ -139,8 +139,5 @@ validate_resolve() {
 # --json-schema was tested against a two-field schema and came back conforming,
 # contradicting the amendment that asked for a fenced-JSON fallback.
 validate_harness_is_schema_native() {
-  case "$1" in
-    claude|codex|agy) return 0 ;;
-    *)                return 1 ;;
-  esac
+  [[ "$(harness_get "$1" .schema_native)" == "true" ]]
 }

@@ -56,17 +56,17 @@ source "$ROOT/lib/prompt.sh"
 source "$ROOT/lib/run.sh"
 # shellcheck source=lib/init.sh
 source "$ROOT/lib/init.sh"
-# shellcheck source=lib/adapters/claude.sh
-source "$ROOT/lib/adapters/claude.sh"
-# shellcheck source=lib/adapters/codex.sh
-source "$ROOT/lib/adapters/codex.sh"
-# shellcheck source=lib/adapters/agy.sh
-source "$ROOT/lib/adapters/agy.sh"
 
 crossrev_version() { tr -d '[:space:]' <"$ROOT/VERSION"; }
 
 usage() {
-  cat <<'EOF'
+  local harness_opt
+  if command -v jq >/dev/null 2>&1 && harness_names >/dev/null 2>&1; then
+    harness_opt="--harness <one of: $(harness_names | paste -sd'|' -)>"
+  else
+    harness_opt="--harness <harness>"
+  fi
+  cat <<EOF
 
   crossrev — cross-model PR review loop
 
@@ -93,7 +93,7 @@ usage() {
     version                  Print the installed version
 
   OPTIONS on cycle, review and resolve
-    --harness claude|codex   Override the harness the config names for that leg
+    $harness_opt   Override the harness the config names for that leg
     --repo owner/name        Target another repository than this checkout
     --no-tips                Suppress the automated-mode suggestion
 
@@ -118,6 +118,13 @@ main() {
     ""|help|--help|-h)    usage; return 0 ;;
     version|--version|-v) crossrev_version; echo; return 0 ;;
   esac
+
+  # Sourced dynamically per command so `crossrev version` and `crossrev help`
+  # work without jq. `doctor` also skips sourcing here because its whole job
+  # is to report missing dependencies, and preflight_check probes harnesses itself.
+  if [[ "${1:-}" != "doctor" ]]; then
+    harness_source_adapters
+  fi
 
   local cmd
   if [[ "$1" == -* ]]; then

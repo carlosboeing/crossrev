@@ -381,29 +381,35 @@ run_leg_settings() {
 
   # A harness needs an adapter, not just a binary on PATH — and this is checked
   # before the binary test precisely because being installed is what makes it
-  # reachable. `kimi` is the live case: the CLI sits on plenty of machines, so
-  # `command -v kimi` succeeds, the function returns here, and the dispatch
-  # three steps later dies on `adapter_kimi: command not found` with nothing
-  # pointing back at the configuration that asked for it. The fallback below was
-  # taught not to *choose* a harness with no adapter; it could not help when one
-  # was named outright.
+  # reachable.
   if ! declare -F "adapter_$LEG_HARNESS" >/dev/null 2>&1; then
-    ui_die "there is no adapter for the harness '$LEG_HARNESS'" \
-      "crossrev drives claude, codex and agy directly. Kimi is reached through the claude adapter instead: define it under endpoints: and set $leg.endpoint, not $leg.harness."
+    local not_driven_reason guide
+    if not_driven_reason="$(harness_not_driven "$LEG_HARNESS")"; then
+      local cap_harness; cap_harness="$(printf '%s' "${LEG_HARNESS:0:1}" | tr '[:lower:]' '[:upper:]')${LEG_HARNESS:1}"
+      guide="CrossRev drives $(harness_names_human) directly. $cap_harness is $not_driven_reason: define it under endpoints: and set $leg.endpoint, not $leg.harness."
+    else
+      guide="CrossRev drives $(harness_names_human) directly."
+    fi
+    ui_die "there is no adapter for the harness '$LEG_HARNESS'" "$guide"
   fi
 
-  command -v "$LEG_HARNESS" >/dev/null 2>&1 && return 0
+  local leg_binary; leg_binary="$(harness_get "$LEG_HARNESS" .binary)"
+  [[ -n "$leg_binary" ]] || leg_binary="$LEG_HARNESS"
+  command -v "$leg_binary" >/dev/null 2>&1 && return 0
 
-  # Only harnesses that have an adapter. `kimi` was in this list and should not
-  # have been: it is reached through the claude adapter as an endpoint, so
-  # falling back to it named a harness with no adapter_kimi behind it, and the
-  # leg died on "command not found" rather than on the missing harness.
-  for h in claude codex agy; do
-    command -v "$h" >/dev/null 2>&1 && { alt="$h"; break; }
-  done
+  # Only harnesses that have an adapter.
+  local h binary
+  while IFS= read -r h; do
+    binary="$(harness_get "$h" .binary)"
+    [[ -n "$binary" ]] || binary="$h"
+    if command -v "$binary" >/dev/null 2>&1; then
+      alt="$h"
+      break
+    fi
+  done < <(harness_names)
   [[ -n "$alt" ]] || ui_die \
     "the $leg is configured to use '$LEG_HARNESS', which is not installed, and no other harness is either" \
-    "Install one of claude, codex or agy. crossrev needs at least one, and two different ones is what makes the cross-model check mean anything."
+    "Install one of $(harness_names_human). CrossRev needs at least one, and two different ones is what makes the cross-model check mean anything."
 
   ui_warn "'$LEG_HARNESS' is not installed, so the $leg runs on '$alt' instead" \
     "Both legs now run on the same harness, so a bug it misses while reviewing it also misses while resolving. Install $LEG_HARNESS to get the second lineage back."
@@ -657,8 +663,15 @@ leg_review() {
       --continuation) continuation=1; shift ;;
       --no-tips) no_tips=1; shift ;;
       --pass)    shift 2 ;;   # accepted and ignored: the pass comes from the PR
-      *) ui_die "unknown option for review: $1" \
-           "Usage: crossrev review --pr <number> [--harness claude|codex] [--no-tips]" ;;
+      *)
+        local opt
+        if command -v jq >/dev/null 2>&1 && harness_names >/dev/null 2>&1; then
+          opt="--harness <one of: $(harness_names | paste -sd'|' -)>"
+        else
+          opt="--harness <harness>"
+        fi
+        ui_die "unknown option for review: $1" \
+          "Usage: crossrev review --pr <number> [$opt] [--no-tips]" ;;
     esac
   done
   [[ -n "$pr" ]] || ui_die "crossrev review needs a pull request number" "Usage: crossrev review --pr 42"
@@ -1351,8 +1364,15 @@ leg_resolve() {
       --trigger) trigger="${2:-}"; shift 2 ;;
       --no-tips) no_tips=1; shift ;;
       --pass)    shift 2 ;;
-      *) ui_die "unknown option for resolve: $1" \
-           "Usage: crossrev resolve --pr <number> [--harness claude|codex] [--trigger human|automatic]" ;;
+      *)
+        local opt
+        if command -v jq >/dev/null 2>&1 && harness_names >/dev/null 2>&1; then
+          opt="--harness <one of: $(harness_names | paste -sd'|' -)>"
+        else
+          opt="--harness <harness>"
+        fi
+        ui_die "unknown option for resolve: $1" \
+          "Usage: crossrev resolve --pr <number> [$opt] [--trigger human|automatic]" ;;
     esac
   done
   [[ -n "$pr" ]] || ui_die "crossrev resolve needs a pull request number" "Usage: crossrev resolve --pr 42"

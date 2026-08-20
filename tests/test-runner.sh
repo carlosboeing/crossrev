@@ -283,4 +283,12 @@ is "and runs-on survives as a list rather than a mangled string" \
   "$(yq -r '.jobs.review["runs-on"] | join(",")' .github/workflows/crossrev-review.yml)" \
   "self-hosted,crossrev"
 
+# --- unknown harness dies naming the harnesses that do exist ---------------
+fixture_repo; stub_reset
+routes_baseline "$(printf '[]' | payload)"
+route "*reviewThreads*" "$(threads_response)"
+out="$("$CROSSREV" review --pr 42 --harness nosuch 2>&1)" || true
+has "unknown harness dies naming the ones that exist" "$out" "there is no adapter for the harness 'nosuch'"
+has "and lists the valid harnesses" "$out" "claude, codex and agy"
+
 finish

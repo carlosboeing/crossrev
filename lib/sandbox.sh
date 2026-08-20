@@ -29,6 +29,11 @@
 # flagging. The diff still carries the text, and the files stay readable at a
 # path no harness auto-loads.
 
+if ! declare -F harness_load >/dev/null 2>&1; then
+  # shellcheck source=lib/harnesses.sh
+  source "${ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/harnesses.sh"
+fi
+
 CROSSREV_QUARANTINE=".crossrev-quarantine"
 
 # Every path a harness is known to load from a working directory.
@@ -39,19 +44,8 @@ CROSSREV_QUARANTINE=".crossrev-quarantine"
 # GitHub credential at all, so an injection that reaches tool use still cannot
 # post as the App, push a commit, or read a secret.
 _sandbox_paths() {
-  cat <<'PATHS'
-.claude
-.codex
-.agents
-.cursor
-.gemini
-.mcp.json
-CLAUDE.md
-AGENTS.md
-GEMINI.md
-.clauderc
-.github/copilot-instructions.md
-PATHS
+  harness_load
+  jq -r '([ .harnesses[].quarantine[]? ] + (.quarantine_shared // [])) | unique[]' <<<"$HARNESS_JSON"
 }
 
 # Move repository-provided harness configuration out of the way.
@@ -61,7 +55,11 @@ sandbox_quarantine() {
   mkdir -p "$root/$CROSSREV_QUARANTINE"
 
   while IFS= read -r p; do
-    [[ -e "$root/$p" ]] || continue
+    # `test -e` matches case-insensitively on macOS, so it cannot tell CLAUDE.md
+    # from claude.md and the mv below would rename the user's file. find is
+    # case-sensitive on both BSD and GNU, which is what makes listing every
+    # spelling safe.
+    [[ -n "$(find "$root/$(dirname "$p")" -maxdepth 1 -name "$(basename "$p")" 2>/dev/null)" ]] || continue
     mkdir -p "$root/$CROSSREV_QUARANTINE/$(dirname "$p")"
     mv "$root/$p" "$root/$CROSSREV_QUARANTINE/$p"
     printf 'quarantined %s\n' "$p"
@@ -80,7 +78,7 @@ sandbox_restore() {
   local root="${1:-.}" q="${1:-.}/$CROSSREV_QUARANTINE" p clobbered=""
   [[ -d "$q" ]] || return 0
   while IFS= read -r p; do
-    [[ -e "$q/$p" ]] || continue
+    [[ -n "$(find "$q/$(dirname "$p")" -maxdepth 1 -name "$(basename "$p")" 2>/dev/null)" ]] || continue
     mkdir -p "$root/$(dirname "$p")"
     # Anything sitting at this path now was written blind: the quarantine moved
     # the real file away before the harness started, so the agent never read it.
@@ -90,7 +88,7 @@ sandbox_restore() {
     # "fixed" by writing here is reported as fixed, lands in no commit, and the
     # "reported fixes but changed no files" guard stays quiet because other
     # files did change.
-    [[ -e "$root/$p" ]] && clobbered="$clobbered $p"
+    [[ -n "$(find "$root/$(dirname "$p")" -maxdepth 1 -name "$(basename "$p")" 2>/dev/null)" ]] && clobbered="$clobbered $p"
     rm -rf "${root:?}/$p"
     mv "$q/$p" "$root/$p"
   done < <(_sandbox_paths)
@@ -104,9 +102,6 @@ sandbox_restore() {
 # Arguments that harden a harness invocation without costing the billing model.
 # Empty for claude: --bare is the only isolation flag and it disables OAuth.
 sandbox_args_for() {
-  case "$1" in
-    codex)  printf '%s' "--ignore-user-config" ;;
-    claude) printf '' ;;
-    *)      printf '' ;;
-  esac
+  local harness="$1"
+  harness_get "$harness" '.sandbox_args // [] | join(" ")'
 }

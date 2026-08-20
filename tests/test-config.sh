@@ -61,7 +61,7 @@ flatten_config() {
   ' <<<"$1" | sort
 }
 
-defaults="$(bash -c 'source "$1"; _cfg_defaults' _ "$HERE/../lib/config.sh")"
+defaults="$(bash -c 'source "$1"; source "$2"; _cfg_defaults' _ "$HERE/../lib/harnesses.sh" "$HERE/../lib/config.sh")"
 template="$(yq -o=json -I=0 '.' "$HERE/../templates/crossrev.yml")"
 flat_defaults="$(flatten_config "$defaults")"
 flat_template="$(flatten_config "$template")"

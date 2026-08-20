@@ -334,8 +334,9 @@ has  "it is filed to the backlog instead"             "$(calls)" "Legacy export 
 # is only useful if the list is concrete: "instruction files" is not a path.
 has "the prompt says which paths are not in the checkout" \
   "$(cat "$PROMPT_LOG")" "deliberately not in the checkout"
-has "and names them rather than describing them" \
-  "$(cat "$PROMPT_LOG")" "CLAUDE.md, AGENTS.md, GEMINI.md"
+has "and names CLAUDE.md"                              "$(cat "$PROMPT_LOG")" "CLAUDE.md"
+has "and names AGENTS.md"                              "$(cat "$PROMPT_LOG")" "AGENTS.md"
+has "and names GEMINI.md"                              "$(cat "$PROMPT_LOG")" "GEMINI.md"
 has "and says what to return for one"                 "$(cat "$PROMPT_LOG")" "quarantined and the finding was reported rather than verified"
 
 # --- a repository backlog write has to be inside the commit ---------------

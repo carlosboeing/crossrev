@@ -57,7 +57,17 @@ _cfg_yaml_text_to_json() {
 # `crossrev review --pr 42` just works. So: no endpoints, two different local
 # harnesses, local mode, and nothing persisted anywhere uninvited.
 _cfg_defaults() {
-  jq -cn '{
+  if ! declare -F harness_field >/dev/null 2>&1; then
+    local here; here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    # shellcheck source=lib/harnesses.sh
+    [[ -f "$here/harnesses.sh" ]] && source "$here/harnesses.sh"
+  fi
+  local rev res
+  rev="$(harness_field .default_pairing.reviewer 2>/dev/null)"
+  [[ -n "$rev" ]] || rev="codex"
+  res="$(harness_field .default_pairing.resolver 2>/dev/null)"
+  [[ -n "$res" ]] || res="claude"
+  jq -cn --arg rev "$rev" --arg res "$res" '{
     version: 1,
     mode: "local",
     runner: "github-hosted",
@@ -78,8 +88,8 @@ _cfg_defaults() {
       },
       repository: { layout: "folder", path: null }
     },
-    reviewer: { harness: "codex",  model: null, effort: null, endpoint: null },
-    resolver: { harness: "claude", model: null, effort: null, endpoint: null },
+    reviewer: { harness: $rev, model: null, effort: null, endpoint: null },
+    resolver: { harness: $res, model: null, effort: null, endpoint: null },
     enable_automation_hint: true
   }'
 }
