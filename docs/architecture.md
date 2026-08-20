@@ -229,6 +229,8 @@ lib/
   auth.sh          GitHub App registration via the manifest flow, per owner and role
   config.sh        two-layer config, endpoint and backlog resolution
   credentials.sh   restoring a rotating subscription credential, read-only
+  harnesses.json   the single validated descriptor for every harness fact
+  harnesses.sh     loading, validating and querying harnesses.json
   sandbox.sh       quarantining repository-provided harness configuration
   diff.sh          the gutter, and re-deriving it before posting
   state.sh         labels, markers, trust, revision detection, finding ids

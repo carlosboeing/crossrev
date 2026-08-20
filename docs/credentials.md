@@ -79,7 +79,7 @@ GitHub-hosted runners are disposable, so each run restores the harness credentia
 |---|---|---|---|
 | `claude` | `claude setup-token`, purpose-built | 1 year | Works directly |
 | `codex` | OAuth access token in `~/.codex/auth.json` | 10 days | Works, with the refresher below |
-| `agy` | OAuth access token in `~/.gemini/oauth_creds.json` | about 1 hour | Use a self-hosted runner |
+| `agy` | macOS Keychain service `antigravity_token`, or file `~/.gemini/antigravity-cli/antigravity-oauth-token` on headless Linux | 56 minutes | Use a self-hosted runner |
 | `kimi` | OAuth access token | 15 minutes | Use a self-hosted runner, or a static endpoint token |
 
 CrossRev has adapters for Claude, Codex and Antigravity. Kimi is reached through the Claude adapter as a named endpoint.
