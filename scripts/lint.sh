@@ -93,6 +93,15 @@ else
   fi
 fi
 
+printf '\nrendered docs\n'
+if bash scripts/render-harness-docs.sh --check >/dev/null 2>&1; then
+  printf '  ok    generated harness tables in README.md and docs/ match lib/harnesses.json\n'
+else
+  printf '  FAIL  generated harness tables differ from lib/harnesses.json\n'
+  printf '        Run: bash scripts/render-harness-docs.sh\n'
+  fail=1
+fi
+
 # Codex's hook-trust bypass flag is asserted absent by tests/test-sandbox.sh, not
 # here. A grep for it in this file would match its own source and the test's, which
 # is how the first version of that assertion failed on its own documentation.
