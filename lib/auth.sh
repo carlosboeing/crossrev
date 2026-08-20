@@ -476,8 +476,16 @@ _auth_status_tokens() {
         ui_no "$repo — $name expired $(( -left )) days ago"
         ui_line "   Every run authenticating with it is failing. Re-issue it and set the secret again."
       elif (( left < 60 )); then
-        ui_warn "$name on $repo expires in $left days" \
-          "It cannot be re-read once issued, so nothing recovers it after the fact — the first sign of expiry is a CI failure on a day nobody is looking. Re-issue it with \`claude setup-token\` and set the secret again."
+        local h_name seed_cmd
+        h_name="$(jq -r --arg s "$name" '.harnesses[] | select(.credential.secret == $s) | .name // empty' <<<"$HARNESS_JSON")"
+        [[ -n "$h_name" ]] && seed_cmd="$(harness_get "$h_name" .credential.seed_command)" || seed_cmd=""
+        if [[ -n "$seed_cmd" ]]; then
+          ui_warn "$name on $repo expires in $left days" \
+            "It cannot be re-read once issued, so nothing recovers it after the fact — the first sign of expiry is a CI failure on a day nobody is looking. Re-issue it with \`$seed_cmd\` and set the secret again."
+        else
+          ui_warn "$name on $repo expires in $left days" \
+            "It cannot be re-read once issued, so nothing recovers it after the fact — the first sign of expiry is a CI failure on a day nobody is looking. Re-issue it and set the secret again."
+        fi
       else
         ui_ok "$repo — $name, $left days left"
       fi
@@ -942,7 +950,7 @@ auth_refresh() {
       --secret)  secret="${2:?--secret needs a value}"; shift 2 ;;
       --org)     scope="${2:?--org needs a value}"; shift 2 ;;
       *) ui_die "unknown option for auth refresh: $1" \
-           "Run: crossrev auth refresh [--harness codex] [--repo owner/name | --org owner] [--secret NAME]" ;;
+           "Run: crossrev auth refresh [--harness <name>] [--repo owner/name | --org owner] [--secret NAME]" ;;
     esac
   done
 
@@ -996,7 +1004,7 @@ auth_refresh() {
 
   local before after new
   before="$(cred_seconds_left "$harness" "$current")" || before=""
-  new="$(cred_refresh_codex "$current")" || ui_die \
+  new="$(cred_refresh "$harness" "$current")" || ui_die \
     "the refresh did not produce a new credential" \
     "The stored secret is untouched, so the chain still holds until it expires. Re-seed it by hand if this keeps failing: $seed_hint."
 
@@ -1017,7 +1025,7 @@ auth_refresh() {
   # and writing it back would burn a refresh token for nothing.
   if [[ -n "$before" ]] && (( after <= before )); then
     ui_die "the refreshed credential expires no later than the one it replaces" \
-      "The vendor answered but did not issue a new token. The stored secret is untouched. Check the account's session has not been revoked: codex login status"
+      "The vendor answered but did not issue a new token. The stored secret is untouched. Check the account's session has not been revoked: $harness login status"
   fi
 
   if [[ -n "$scope" ]]; then

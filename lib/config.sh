@@ -63,10 +63,8 @@ _cfg_defaults() {
     [[ -f "$here/harnesses.sh" ]] && source "$here/harnesses.sh"
   fi
   local rev res
-  rev="$(harness_field .default_pairing.reviewer 2>/dev/null)"
-  [[ -n "$rev" ]] || rev="codex"
-  res="$(harness_field .default_pairing.resolver 2>/dev/null)"
-  [[ -n "$res" ]] || res="claude"
+  rev="$(harness_field .default_pairing.reviewer)"
+  res="$(harness_field .default_pairing.resolver)"
   jq -cn --arg rev "$rev" --arg res "$res" '{
     version: 1,
     mode: "local",

@@ -542,7 +542,9 @@ _init_execute() {
       ui_ok "$s — already set"
       continue
     fi
-    if [[ "$s" == "CLAUDE_CODE_OAUTH_TOKEN" ]] && _init_set_claude_token; then
+    local h_a
+    h_a="$(jq -r --arg s "$s" '.harnesses[] | select(.credential.secret == $s and .credential.archetype == "A") | .name // empty' <<<"$HARNESS_JSON")"
+    if [[ -n "$h_a" ]] && _init_set_archetype_a_token "$h_a"; then
       continue
     fi
     ui_no "$s — not set, and CrossRev does not have the value to set it"
@@ -677,7 +679,7 @@ _init_harness_install_line() {
 }
 
 _init_render_workflow() {
-  local template="$1" runs_on refresh_scope
+  local template="$1" runs_on refresh_scope refresh_harness
   if [[ "$INIT_RUNNER" == "self-hosted" ]]; then
     # Two labels, not one: `self-hosted` alone matches every self-hosted runner
     # the owner has, including ones set up for something else entirely.
@@ -690,6 +692,7 @@ _init_render_workflow() {
   # repositories — so "one writer" would quietly become several, and the first to
   # refresh would invalidate the rest.
   refresh_scope="--repo $INIT_REPO"
+  refresh_harness="$(harness_field '.harnesses[] | select(.credential.refresher == true) | .name')"
 
   # The install block is several lines, and neither `sed s///` nor `awk -v` can
   # carry a newline in a replacement — awk rejects the assignment outright with
@@ -709,6 +712,7 @@ _init_render_workflow() {
       -e "s#__SOURCE_REF__#$INIT_SOURCE_REF#g" \
       -e "s#__RUNS_ON__#$runs_on#g" \
       -e "s#__REFRESH_SCOPE__#$refresh_scope#g" \
+      -e "s#__REFRESH_HARNESS__#$refresh_harness#g" \
     | awk -v want="$INIT_RUNNER" '
         /^[[:space:]]*# crossrev:only / { skip = ($3 != want); next }
         /^[[:space:]]*# crossrev:end/   { skip = 0; next }
@@ -725,16 +729,21 @@ _init_render_workflow() {
 # The terminal still sees the command's own output, with anything token-shaped
 # redacted on the way past: the URL and the prompts are what someone needs to
 # complete the flow, and the token is not.
-_init_set_claude_token() {
-  command -v claude >/dev/null 2>&1 || return 1
+_init_set_archetype_a_token() {
+  local h="$1"
+  command -v "$h" >/dev/null 2>&1 || return 1
   _ui_input_source >/dev/null 2>&1 || return 1   # no terminal, no browser flow
 
+  local secret cmd
+  secret="$(harness_get "$h" .credential.secret)"
+  cmd="$(harness_get "$h" .credential.seed_command)"
+
   ui_gap
-  ui_line "CLAUDE_CODE_OAUTH_TOKEN is missing, and both legs need it to authenticate."
-  ui_line "\`claude setup-token\` opens a browser once and prints a token valid for a"
+  ui_line "$secret is missing, and both legs need it to authenticate."
+  ui_line "\`$cmd\` opens a browser once and prints a token valid for a"
   ui_line "year. CrossRev captures it straight into the secret — it is never printed"
   ui_line "here, never written to a file, and never shown again by anything."
-  ui_confirm "Run \`claude setup-token\` now?" || return 1
+  ui_confirm "Run \`$cmd\` now?" || return 1
 
   local raw token; raw="$(mktemp)"
   chmod 600 "$raw"
@@ -751,22 +760,22 @@ _init_set_claude_token() {
   # `|| true` is load-bearing under `set -o pipefail`: a failed authorisation
   # would otherwise abort init entirely, halfway through, having already written
   # labels and secrets. The check below is what decides whether this worked.
-  claude setup-token 2>&1 | tee "$raw" \
+  $cmd 2>&1 | tee "$raw" \
     | sed -E 's/(sk-ant-[A-Za-z0-9_-]{6})[A-Za-z0-9_-]+/\1…[captured by crossrev, not shown]/g' \
     || true
 
   token="$(grep -oE 'sk-ant-[A-Za-z0-9_-]{20,}' "$raw" | tail -1)"
   if [[ -z "$token" ]]; then
-    ui_warn "\`claude setup-token\` finished without printing a token CrossRev could recognise" \
-      "The secret is not set, so CI cannot authenticate yet. Run it by hand and set the secret: claude setup-token, then gh secret set CLAUDE_CODE_OAUTH_TOKEN $(_init_secret_scope_flag)"
+    ui_warn "\`$cmd\` finished without printing a token CrossRev could recognise" \
+      "The secret is not set, so CI cannot authenticate yet. Run it by hand and set the secret: $cmd, then gh secret set $secret $(_init_secret_scope_flag)"
     return 1
   fi
 
-  _init_secret_set CLAUDE_CODE_OAUTH_TOKEN "$token" || return 1
+  _init_secret_set "$secret" "$token" || return 1
   # The one-year clock starts now, and this is the only moment the date exists:
   # the token cannot be read back, so nothing later can work out when it was
   # issued. Without this the first sign of expiry is a CI failure.
-  auth_token_record "$INIT_REPO" CLAUDE_CODE_OAUTH_TOKEN 365
+  auth_token_record "$INIT_REPO" "$secret" 365
   ui_line "   expires in 365 days — \`crossrev auth status\` warns as that closes"
   return 0
 }

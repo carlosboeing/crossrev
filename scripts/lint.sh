@@ -67,6 +67,32 @@ else
   fail=1
 fi
 
+# The permitted homes for a harness name are exactly three: lib/harnesses.json,
+# lib/adapters/<name>.sh, and tests/ — test fixtures name harnesses deliberately,
+# and tests/stub/codex is a tripwire that must keep naming one. Two files are
+# outside the scanned set on purpose: templates/crossrev.yml and
+# templates/operator-config.yml are example configuration whose job is to name a
+# harness, and a stale example there is a documentation bug rather than an
+# allowlist. Any other exemption is a design change, not a lint tweak.
+printf '\nharness names\n'
+names="$(jq -r '.harnesses[].name, .not_driven[].name' lib/harnesses.json 2>/dev/null | paste -sd'|' -)"
+if [[ -z "$names" ]]; then
+  printf '  FAIL  lib/harnesses.json could not be read, so the harness-name check did not run\n'
+  fail=1
+else
+  hits="$(grep -nEH "\\b($names)\\b" \
+      bin/crossrev lib/*.sh scripts/*.sh \
+      templates/crossrev-review.yml templates/crossrev-resolve.yml templates/crossrev-token-refresh.yml \
+      2>/dev/null | grep -vE ':[0-9]+:[[:space:]]*#' || true)"
+  if [[ -z "$hits" ]]; then
+    printf '  ok    no harness name outside its adapter, the descriptor and tests/\n'
+  else
+    printf '  FAIL  a harness name appears outside its permitted homes\n'
+    printf '%s\n' "$hits" | sed 's/^/        /'
+    fail=1
+  fi
+fi
+
 # Codex's hook-trust bypass flag is asserted absent by tests/test-sandbox.sh, not
 # here. A grep for it in this file would match its own source and the test's, which
 # is how the first version of that assertion failed on its own documentation.

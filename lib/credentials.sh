@@ -61,20 +61,9 @@ cred_access_token_claims() {
   cred_jwt_claims "$token"
 }
 
-# Compatibility alias for callers passing one argument
-cred_codex_claims() { cred_access_token_claims codex "$1"; }
-
 # Seconds until the stored access token expires. Negative when it already has.
 cred_seconds_left() {
-  local harness file
-  if (( $# == 1 )); then
-    harness="codex"
-    file="$1"
-  else
-    harness="$1"
-    file="$2"
-  fi
-  local claims exp now
+  local harness="$1" file="$2" claims exp now
   claims="$(cred_access_token_claims "$harness" "$file")" || return 1
   exp="$(jq -r '.exp // empty' <<<"$claims")"
   [[ -n "$exp" ]] || return 1
@@ -135,16 +124,16 @@ cred_assert_present() {
 cred_prepare() {
   local harness="$1" endpoint="${2:-}"
   cred_assert_present "$harness" "$endpoint"
-  case "$harness" in
-    codex)
-      [[ -n "${CROSSREV_CODEX_AUTH:-}" ]] || return 0
-      CRED_SCRATCH="$(mktemp -d)"
-      (umask 077; printf '%s' "$CROSSREV_CODEX_AUTH" >"$CRED_SCRATCH/auth.json")
-      cred_assert_fresh codex "$CRED_SCRATCH/auth.json"
-      export CODEX_HOME="$CRED_SCRATCH"
-      ;;
-    *) return 0 ;;
-  esac
+  local secret staging_env staging_path
+  secret="$(harness_get "$harness" .credential.secret)"
+  staging_env="$(harness_get "$harness" .credential.staging.env)"
+  staging_path="$(harness_get "$harness" .credential.staging.path)"
+  if [[ -n "$secret" && -n "$staging_env" && -n "${!secret:-}" ]]; then
+    CRED_SCRATCH="$(mktemp -d)"
+    (umask 077; printf '%s' "${!secret}" >"$CRED_SCRATCH/${staging_path:-auth.json}")
+    cred_assert_fresh "$harness" "$CRED_SCRATCH/${staging_path:-auth.json}"
+    export "$staging_env=$CRED_SCRATCH"
+  fi
 }
 
 # Which environment variables must not reach a given harness.
@@ -224,13 +213,13 @@ _cred_discovery_token_endpoint() {
 # the operator the generic failure and none of the detail — which defeats the
 # whole point of reading the body, since token_expired and invalid_client need
 # different fixes and the difference is only in there.
-cred_refresh_codex() {
-  local file="$1" claims issuer client_id endpoint refresh_token resp
+cred_refresh() {
+  local harness="$1" file="$2" claims issuer client_id endpoint refresh_token resp
   command -v curl >/dev/null 2>&1 || ui_die \
     "curl is not installed, and refreshing a credential is an HTTP call to the vendor" \
     "Install curl. Every runner family ships it; this is only reachable on an unusual image."
 
-  claims="$(cred_access_token_claims codex "$file")" || { ui_say "the stored credential has no readable access token" >&2; return 1; }
+  claims="$(cred_access_token_claims "$harness" "$file")" || { ui_say "the stored credential has no readable access token" >&2; return 1; }
   issuer="$(jq -r '.iss // empty' <<<"$claims")"
   client_id="$(jq -r '.client_id // empty' <<<"$claims")"
   refresh_token="$(jq -r '.tokens.refresh_token // empty' "$file")"
