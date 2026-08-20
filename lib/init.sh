@@ -679,7 +679,7 @@ _init_harness_install_line() {
 }
 
 _init_render_workflow() {
-  local template="$1" runs_on refresh_scope refresh_harness
+  local template="$1" runs_on refresh_scope refresh_harness refresh_secret
   if [[ "$INIT_RUNNER" == "self-hosted" ]]; then
     # Two labels, not one: `self-hosted` alone matches every self-hosted runner
     # the owner has, including ones set up for something else entirely.
@@ -693,6 +693,12 @@ _init_render_workflow() {
   # refresh would invalidate the rest.
   refresh_scope="--repo $INIT_REPO"
   refresh_harness="$(harness_field '.harnesses[] | select(.credential.refresher == true) | .name')"
+  # The environment key and the secret lookup are the same name, and both come
+  # from the descriptor rather than from the template. A refresher harness whose
+  # secret is not CROSSREV_CODEX_AUTH would otherwise render a workflow that
+  # passes one variable and looks up another, and `auth refresh` would die on a
+  # credential the workflow believed it had supplied.
+  refresh_secret="$(harness_get "$refresh_harness" .credential.secret)"
 
   # The install block is several lines, and neither `sed s///` nor `awk -v` can
   # carry a newline in a replacement — awk rejects the assignment outright with
@@ -713,6 +719,7 @@ _init_render_workflow() {
       -e "s#__RUNS_ON__#$runs_on#g" \
       -e "s#__REFRESH_SCOPE__#$refresh_scope#g" \
       -e "s#__REFRESH_HARNESS__#$refresh_harness#g" \
+      -e "s#__REFRESH_SECRET__#$refresh_secret#g" \
     | awk -v want="$INIT_RUNNER" '
         /^[[:space:]]*# crossrev:only / { skip = ($3 != want); next }
         /^[[:space:]]*# crossrev:end/   { skip = 0; next }

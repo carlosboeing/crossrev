@@ -183,6 +183,31 @@ has "a scripted run names the App it cannot register for you" \
   "$out" "crossrev auth login --owner acme --role refresher"
 has "and says why a blanket --yes did not cover it"  "$out" "needs a browser"
 
+# --- the refresher's secret name comes from the descriptor -------------------
+#
+# The job exports one environment variable and looks the same name up in
+# `secrets`, and `crossrev auth refresh` reads whichever name the descriptor
+# gives the refresher harness. A template that hardcoded one of the three would
+# pass a variable nothing reads and read a variable nothing passed, so the
+# refresh would die on an empty credential with the secret sitting right there.
+has "the rendered refresher exports the descriptor's secret" \
+  "$refresh" "CROSSREV_CODEX_AUTH: \${{ secrets.CROSSREV_CODEX_AUTH }}"
+
+alt_desc="$(mktemp)"
+jq '(.harnesses[] | select(.credential.refresher == true) | .credential.secret) = "CROSSREV_ALT_AUTH"
+    | (.harnesses[] | select(.credential.refresher == true) | .credential.env_names) = ["CROSSREV_ALT_AUTH"]' \
+  "$HERE/../lib/harnesses.json" >"$alt_desc"
+
+fixture_repo "$(config_for github-hosted codex claude)"; stub_reset
+routes_init
+CROSSREV_HARNESS_FILE="$alt_desc" "$CROSSREV" init --yes >/dev/null 2>&1
+alt_refresh="$(grep -v '^[[:space:]]*#' .github/workflows/crossrev-token-refresh.yml)"
+has "a differently named refresher secret reaches the environment key" \
+  "$alt_refresh" "CROSSREV_ALT_AUTH: \${{ secrets.CROSSREV_ALT_AUTH }}"
+hasnt "and no other secret name is left behind in the job" \
+  "$alt_refresh" "CROSSREV_CODEX_AUTH"
+rm -f "$alt_desc"
+
 # --- what init refuses -------------------------------------------------------
 #
 # Each of these installs cleanly and then fails at runtime if it is not caught

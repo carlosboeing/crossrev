@@ -72,7 +72,7 @@ jobs:
       - name: refresh
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
-          CROSSREV_CODEX_AUTH: ${{ secrets.CROSSREV_CODEX_AUTH }}
+          __REFRESH_SECRET__: ${{ secrets.__REFRESH_SECRET__ }}
         run: crossrev auth refresh --harness __REFRESH_HARNESS__ __REFRESH_SCOPE__
 
       - if: always()
