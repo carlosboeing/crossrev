@@ -305,4 +305,66 @@ is "a model from the resolved config is carried through" \
 is "while a leg with no model of its own gets none, not the template's" \
   "$(yq -r '.reviewer.model' <<<"$pol")" "null"
 
+# --- harness installer lines ---------------------------------------------
+#
+# Workflows install harnesses from vendor install scripts, never npm install -g.
+fixture_repo "$(config_with_issue_sink)"; stub_reset
+routes_init
+"$CROSSREV" init --yes >/dev/null 2>&1
+wf_review="$(cat .github/workflows/crossrev-review.yml)"
+has "rendered review workflow carries claude install script" "$wf_review" "curl -fsSL https://claude.ai/install.sh"
+hasnt "and no npm install -g" "$wf_review" "npm install -g"
+
+# Paired codex and claude
+paired_harness="$(config_with_issue_sink \
+  | awk '!d && $0=="  harness: claude" { $0="  harness: codex"; d=1 } 1')"
+fixture_repo "$paired_harness"; stub_reset
+routes_init
+"$CROSSREV" init --yes >/dev/null 2>&1
+wf_paired="$(cat .github/workflows/crossrev-review.yml)"
+has "codex/claude pairing renders codex install line" "$wf_paired" "curl -fsSL https://chatgpt.com/codex/install.sh"
+has "and claude install line" "$wf_paired" "curl -fsSL https://claude.ai/install.sh"
+
+install_line_for() {
+  local cfg="$1"
+  bash -c '
+    source "'"$HERE"'/../lib/ui.sh"
+    source "'"$HERE"'/../lib/harnesses.sh"
+    source "'"$HERE"'/../lib/config.sh"
+    source "'"$HERE"'/../lib/init.sh"
+    CFG_MERGED="$(jq -cn --argjson d "$(_cfg_defaults)" --argjson r "$(_cfg_yaml_text_to_json "$1")" '\''$d * $r'\'')"
+    export CFG_MERGED
+    _init_harness_install_line
+  ' _ "$cfg"
+}
+
+agy_cfg="$(cat <<'EOF'
+version: 1
+reviewer:
+  harness: agy
+resolver:
+  harness: agy
+EOF
+)"
+agy_line="$(install_line_for "$agy_cfg")"
+has "an agy leg renders Antigravity install script rather than nothing" "$agy_line" "curl -fsSL https://antigravity.google/cli/install.sh"
+
+ep_cfg="$(cat <<'EOF'
+version: 1
+reviewer:
+  harness: claude
+  endpoint: my-ep
+resolver:
+  harness: claude
+endpoints:
+  my-ep:
+    type: anthropic
+    base_url: https://api.example.com
+    secret: MY_EP_TOKEN
+EOF
+)"
+ep_line="$(install_line_for "$ep_cfg")"
+has "a leg on a named endpoint still renders the endpoint host installer" "$ep_line" "curl -fsSL https://claude.ai/install.sh"
+is  "and not a second one" "$(grep -c 'curl -fsSL' <<<"$ep_line" | tr -d ' ')" "1"
+
 finish

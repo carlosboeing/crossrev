@@ -195,5 +195,37 @@ is  "a missing tool still fails the check"    "$(status "$r")" "1"
 has "and is still reported as not found"      "$(report "$r")" "yq — not found"
 has "with the command that would install it"  "$(report "$r")" "Install with:"
 
+# ---------------------------------------------------------------------------
+# Pairing support and secrets from descriptor
+# ---------------------------------------------------------------------------
+# shellcheck source=lib/ui.sh
+source "$ROOT/lib/ui.sh"
+# shellcheck source=lib/harnesses.sh
+source "$ROOT/lib/harnesses.sh"
+# shellcheck source=lib/preflight.sh
+source "$ROOT/lib/preflight.sh"
+
+is "preflight_harness_secret claude" "$(preflight_harness_secret claude)" "CLAUDE_CODE_OAUTH_TOKEN"
+! preflight_harness_secret agy >/dev/null 2>&1
+is "preflight_harness_secret agy returns 1" "$?" 0
+
+msg="$(preflight_pairing_supported github-hosted agy)"
+rc=$?
+is "a hosted agy pairing is refused" "$rc" "1"
+has "hosted agy refusal names 56 minutes" "$msg" "56 minutes"
+has "hosted agy refusal says CrossRev cannot seed into hosted runner yet" "$msg" "CrossRev has no way to seed it into a hosted runner yet"
+
+preflight_pairing_supported github-hosted codex >/dev/null 2>&1
+is "a hosted codex pairing is supported" "$?" 0
+
+preflight_pairing_supported self-hosted agy >/dev/null 2>&1
+is "a self-hosted agy pairing is supported" "$?" 0
+
+preflight_needs_refresher github-hosted codex ""
+is "preflight_needs_refresher github-hosted codex is true" "$?" 0
+
+! preflight_needs_refresher github-hosted claude ""
+is "preflight_needs_refresher github-hosted claude is false" "$?" 0
+
 printf '\n  %d passed, %d failed\n' "$pass" "$fail"
 (( fail == 0 ))

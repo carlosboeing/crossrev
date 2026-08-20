@@ -476,8 +476,16 @@ _auth_status_tokens() {
         ui_no "$repo — $name expired $(( -left )) days ago"
         ui_line "   Every run authenticating with it is failing. Re-issue it and set the secret again."
       elif (( left < 60 )); then
-        ui_warn "$name on $repo expires in $left days" \
-          "It cannot be re-read once issued, so nothing recovers it after the fact — the first sign of expiry is a CI failure on a day nobody is looking. Re-issue it with \`claude setup-token\` and set the secret again."
+        local h_name seed_cmd
+        h_name="$(jq -r --arg s "$name" '.harnesses[] | select(.credential.secret == $s) | .name // empty' <<<"$HARNESS_JSON")"
+        [[ -n "$h_name" ]] && seed_cmd="$(harness_get "$h_name" .credential.seed_command)" || seed_cmd=""
+        if [[ -n "$seed_cmd" ]]; then
+          ui_warn "$name on $repo expires in $left days" \
+            "It cannot be re-read once issued, so nothing recovers it after the fact — the first sign of expiry is a CI failure on a day nobody is looking. Re-issue it with \`$seed_cmd\` and set the secret again."
+        else
+          ui_warn "$name on $repo expires in $left days" \
+            "It cannot be re-read once issued, so nothing recovers it after the fact — the first sign of expiry is a CI failure on a day nobody is looking. Re-issue it and set the secret again."
+        fi
       else
         ui_ok "$repo — $name, $left days left"
       fi
@@ -934,7 +942,7 @@ auth_rotate() {
 # one silently invalidates the rest.
 
 auth_refresh() {
-  local harness="codex" repo="" secret="CROSSREV_CODEX_AUTH" scope=""
+  local harness="" repo="" secret="" scope=""
   while (( $# )); do
     case "$1" in
       --harness) harness="${2:?--harness needs a value}"; shift 2 ;;
@@ -942,17 +950,43 @@ auth_refresh() {
       --secret)  secret="${2:?--secret needs a value}"; shift 2 ;;
       --org)     scope="${2:?--org needs a value}"; shift 2 ;;
       *) ui_die "unknown option for auth refresh: $1" \
-           "Run: crossrev auth refresh [--harness codex] [--repo owner/name | --org owner] [--secret NAME]" ;;
+           "Run: crossrev auth refresh [--harness <name>] [--repo owner/name | --org owner] [--secret NAME]" ;;
     esac
   done
 
-  [[ "$harness" == "codex" ]] || ui_die \
-    "crossrev refreshes codex credentials and no others" \
-    "Claude's setup-token is long-lived and needs no refresher; Antigravity and Kimi rotate too fast for a scheduler to keep ahead of, so they need runner: self-hosted instead."
+  harness_load
+  if [[ -z "$harness" ]]; then
+    local count refresh_harnesses
+    refresh_harnesses="$(jq -r '[ .harnesses[] | select(.credential.refresher == true) | .name ] | join(", ")' <<<"$HARNESS_JSON")"
+    count="$(jq -r '[ .harnesses[] | select(.credential.refresher == true) ] | length' <<<"$HARNESS_JSON")"
+    if (( count > 1 )); then
+      ui_die "more than one harness is configured with a refresher ($refresh_harnesses)" \
+        "Specify which harness to refresh with --harness <name>."
+    elif (( count == 1 )); then
+      harness="$(jq -r '.harnesses[] | select(.credential.refresher == true) | .name' <<<"$HARNESS_JSON")"
+    else
+      ui_die "no harness is configured with a refresher" \
+        "CrossRev only refreshes credentials that rotate on ephemeral runners."
+    fi
+  fi
 
-  [[ -n "${CROSSREV_CODEX_AUTH:-}" ]] || ui_die \
-    "CROSSREV_CODEX_AUTH is not set, so there is no credential to refresh" \
-    "The refresher workflow passes the secret in as this variable. Seed it once from a machine with a browser: codex login, then gh secret set CROSSREV_CODEX_AUTH < ~/.codex/auth.json"
+  if [[ "$(harness_get "$harness" .credential.refresher)" != "true" ]]; then
+    ui_die "crossrev only refreshes credentials that rotate on ephemeral runners, and '$harness' does not need a refresher" \
+      "Claude's setup-token is long-lived and needs no refresher; Antigravity uses seed-and-self-refresh; only single-writer rotating credentials use the refresher workflow."
+  fi
+
+  if [[ -z "$secret" ]]; then
+    secret="$(harness_get "$harness" .credential.secret)"
+    [[ -n "$secret" ]] || secret="CROSSREV_${harness^^}_AUTH"
+  fi
+
+  local seed_hint
+  seed_hint="$(harness_get "$harness" .credential.seed_hint)"
+  [[ -n "$seed_hint" ]] || seed_hint="re-seed the secret by hand"
+
+  [[ -n "${!secret:-}" ]] || ui_die \
+    "$secret is not set, so there is no credential to refresh" \
+    "The refresher workflow passes the secret in as this variable. $seed_hint"
 
   [[ -n "$repo" || -n "$scope" ]] || repo="$(gh_repo_slug)"
   [[ -n "$repo" || -n "$scope" ]] || ui_die \
@@ -966,13 +1000,13 @@ auth_refresh() {
   local current; current="$(mktemp)"
   # shellcheck disable=SC2064  # expand now, not at trap time
   trap "rm -f '$current'" EXIT
-  (umask 077; printf '%s' "$CROSSREV_CODEX_AUTH" >"$current")
+  (umask 077; printf '%s' "${!secret}" >"$current")
 
   local before after new
-  before="$(cred_seconds_left "$current")" || before=""
-  new="$(cred_refresh_codex "$current")" || ui_die \
+  before="$(cred_seconds_left "$harness" "$current")" || before=""
+  new="$(cred_refresh "$harness" "$current")" || ui_die \
     "the refresh did not produce a new credential" \
-    "The stored secret is untouched, so the chain still holds until it expires. Re-seed it by hand if this keeps failing: codex login, then set the secret from ~/.codex/auth.json."
+    "The stored secret is untouched, so the chain still holds until it expires. Re-seed it by hand if this keeps failing: $seed_hint."
 
   local check; check="$(mktemp)"
   # shellcheck disable=SC2064  # expand now, not at trap time
@@ -983,15 +1017,15 @@ auth_refresh() {
   # HTTP 200 with a malformed access token would otherwise be written back over a
   # working credential, reported as a success, and rejected by every leg from
   # then on. Refuse instead: the stored secret still holds something that works.
-  after="$(cred_seconds_left "$check")" || ui_die \
+  after="$(cred_seconds_left "$harness" "$check")" || ui_die \
     "the refreshed credential's expiry cannot be read, so crossrev will not write it back" \
-    "The vendor answered, but what came back does not parse as a token with an exp claim. The stored secret is untouched and still works until it expires. Re-seed it by hand if this repeats: codex login, then set the secret from ~/.codex/auth.json."
+    "The vendor answered, but what came back does not parse as a token with an exp claim. The stored secret is untouched and still works until it expires. Re-seed it by hand if this repeats: $seed_hint."
 
   # An expiry no later than the one it replaces means the refresh did not happen,
   # and writing it back would burn a refresh token for nothing.
   if [[ -n "$before" ]] && (( after <= before )); then
     ui_die "the refreshed credential expires no later than the one it replaces" \
-      "The vendor answered but did not issue a new token. The stored secret is untouched. Check the account's session has not been revoked: codex login status"
+      "The vendor answered but did not issue a new token. The stored secret is untouched. Check the account's session has not been revoked: $harness login status"
   fi
 
   if [[ -n "$scope" ]]; then

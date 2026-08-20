@@ -86,7 +86,7 @@ routes_init
 err="$("$CROSSREV" init --dry-run 2>&1 >/dev/null)"; rc=$?
 
 is  "agy by subscription on a hosted runner refuses" "$rc" "1"
-has "and names the token lifetime as the reason"     "$err" "about an hour"
+has "and names the token lifetime as the reason"     "$err" "56 minutes"
 has "and offers the self-hosted fix"                 "$err" "runner: self-hosted"
 has "and the change-the-harness fix"                 "$err" "name a different harness"
 
@@ -94,8 +94,8 @@ fixture_repo "$(config_for github-hosted kimi claude)"; stub_reset
 routes_init
 err="$("$CROSSREV" init --dry-run 2>&1 >/dev/null)"; rc=$?
 is  "kimi by subscription on a hosted runner refuses" "$rc" "1"
-has "and names its fifteen minutes"                   "$err" "15 minutes"
-has "against a scheduler that cannot keep up"         "$err" "five-minute floor"
+has "and names the missing adapter"                   "$err" "no adapter for 'kimi'"
+has "and points at the endpoint route"                "$err" "reached through the claude adapter"
 
 # The same harness reached through an endpoint is a static token in a secret,
 # which never rotates and so never cares what runner it is on. Refusing that too
@@ -132,7 +132,7 @@ has "the workflow asks for the self-hosted runner"  "$wf" "runs-on: [self-hosted
 # Two labels rather than one: `self-hosted` alone matches every self-hosted
 # runner the owner has, including ones set up for something else.
 has "by both labels"                                "$wf" "crossrev]"
-hasnt "it does not install a harness that is already there" "$wf" "npm install"
+hasnt "it does not install a harness that is already there" "$wf" "install.sh"
 hasnt "and passes no credential, since the machine is logged in" "$wf" "CLAUDE_CODE_OAUTH_TOKEN"
 hasnt "the fence markers are stripped, not left in the file" "$wf" "crossrev:only"
 
@@ -148,8 +148,8 @@ wf="$(cat .github/workflows/crossrev-review.yml)"
 # Neither is on GitHub's runner images, and installing only Claude does not fail:
 # `run_resolve_leg` falls back, warns in one line nobody reads in a CI log, and
 # both legs run Claude. The loop completes and the cross-model property is gone.
-has "a hosted workflow installs the resolver's harness"  "$wf" "npm install -g @anthropic-ai/claude-code"
-has "AND the reviewer's, which is a different one"        "$wf" "npm install -g @openai/codex"
+has "a hosted workflow installs the resolver's harness"  "$wf" "curl -fsSL https://claude.ai/install.sh"
+has "AND the reviewer's, which is a different one"        "$wf" "curl -fsSL https://chatgpt.com/codex/install.sh"
 has "and passes the credentials in as secrets"       "$wf" "CROSSREV_CODEX_AUTH"
 has "on GitHub's own runner"                         "$wf" "runs-on: ubuntu-latest"
 
@@ -158,9 +158,9 @@ fixture_repo "$(config_for github-hosted claude claude)"; stub_reset
 routes_init
 "$CROSSREV" init --yes >/dev/null 2>&1
 is  "a same-harness pairing installs it once, not twice" \
-  "$(grep -c 'npm install -g @anthropic-ai/claude-code' .github/workflows/crossrev-review.yml)" "1"
+  "$(grep -c 'curl -fsSL https://claude.ai/install.sh' .github/workflows/crossrev-review.yml)" "1"
 hasnt "and installs nothing it does not use" \
-  "$(cat .github/workflows/crossrev-review.yml)" "@openai/codex"
+  "$(cat .github/workflows/crossrev-review.yml)" "https://chatgpt.com/codex/install.sh"
 
 fixture_repo "$(config_for github-hosted codex claude)"; stub_reset
 routes_init
@@ -182,6 +182,31 @@ hasnt "no model runs in it"                             "$refresh" "crossrev rev
 has "a scripted run names the App it cannot register for you" \
   "$out" "crossrev auth login --owner acme --role refresher"
 has "and says why a blanket --yes did not cover it"  "$out" "needs a browser"
+
+# --- the refresher's secret name comes from the descriptor -------------------
+#
+# The job exports one environment variable and looks the same name up in
+# `secrets`, and `crossrev auth refresh` reads whichever name the descriptor
+# gives the refresher harness. A template that hardcoded one of the three would
+# pass a variable nothing reads and read a variable nothing passed, so the
+# refresh would die on an empty credential with the secret sitting right there.
+has "the rendered refresher exports the descriptor's secret" \
+  "$refresh" "CROSSREV_CODEX_AUTH: \${{ secrets.CROSSREV_CODEX_AUTH }}"
+
+alt_desc="$(mktemp)"
+jq '(.harnesses[] | select(.credential.refresher == true) | .credential.secret) = "CROSSREV_ALT_AUTH"
+    | (.harnesses[] | select(.credential.refresher == true) | .credential.env_names) = ["CROSSREV_ALT_AUTH"]' \
+  "$HERE/../lib/harnesses.json" >"$alt_desc"
+
+fixture_repo "$(config_for github-hosted codex claude)"; stub_reset
+routes_init
+CROSSREV_HARNESS_FILE="$alt_desc" "$CROSSREV" init --yes >/dev/null 2>&1
+alt_refresh="$(grep -v '^[[:space:]]*#' .github/workflows/crossrev-token-refresh.yml)"
+has "a differently named refresher secret reaches the environment key" \
+  "$alt_refresh" "CROSSREV_ALT_AUTH: \${{ secrets.CROSSREV_ALT_AUTH }}"
+hasnt "and no other secret name is left behind in the job" \
+  "$alt_refresh" "CROSSREV_CODEX_AUTH"
+rm -f "$alt_desc"
 
 # --- what init refuses -------------------------------------------------------
 #
@@ -282,5 +307,13 @@ done
 is "and runs-on survives as a list rather than a mangled string" \
   "$(yq -r '.jobs.review["runs-on"] | join(",")' .github/workflows/crossrev-review.yml)" \
   "self-hosted,crossrev"
+
+# --- unknown harness dies naming the harnesses that do exist ---------------
+fixture_repo; stub_reset
+routes_baseline "$(printf '[]' | payload)"
+route "*reviewThreads*" "$(threads_response)"
+out="$("$CROSSREV" review --pr 42 --harness nosuch 2>&1)" || true
+has "unknown harness dies naming the ones that exist" "$out" "there is no adapter for the harness 'nosuch'"
+has "and lists the valid harnesses" "$out" "claude, codex and agy"
 
 finish

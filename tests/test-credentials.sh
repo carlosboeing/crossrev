@@ -14,6 +14,8 @@ set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=../lib/ui.sh
 source "$HERE/../lib/ui.sh"
+# shellcheck source=../lib/harnesses.sh
+source "$HERE/../lib/harnesses.sh"
 # cred_assert_present asks preflight which secret a harness needs and whether
 # this runner is one that can only get it from a secret. bin/crossrev sources
 # both; this suite has to as well.
@@ -49,11 +51,11 @@ fake_credential() {
 # --- reading a token -------------------------------------------------------
 f="$(mktemp)"; fake_credential 86400 >"$f"
 
-left="$(cred_seconds_left "$f")"
+left="$(cred_seconds_left codex "$f")"
 (( left > 86000 && left <= 86400 )) && ok "the expiry is read out of the access token's own claims" \
   || notok "the expiry is read out of the access token's own claims" "about 86400" "$left"
 
-claims="$(cred_codex_claims "$f")"
+claims="$(cred_access_token_claims codex "$f")"
 is "and so is the issuer, so nothing about the vendor is hardcoded" \
   "$(jq -r .iss <<<"$claims")" "https://auth.example.com"
 is "and the client id, which is the other half of a refresh request" \
@@ -72,7 +74,7 @@ done
   || notok "a payload of any length decodes, whatever padding the encoder stripped" "every length" "failed at length $pad"
 
 bad="$(mktemp)"; printf '{"tokens":{"access_token":"not-a-jwt"}}' >"$bad"
-cred_seconds_left "$bad" >/dev/null 2>&1 \
+cred_seconds_left codex "$bad" >/dev/null 2>&1 \
   && notok "an unreadable token is not silently treated as fresh" "refuse" "allow" \
   || ok "an unreadable token is not silently treated as fresh"
 

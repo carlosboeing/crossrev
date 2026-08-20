@@ -1,0 +1,121 @@
+{
+  "version": 1,
+  "endpoint_host": "claude",
+  "default_pairing": { "reviewer": "codex", "resolver": "claude" },
+  "quarantine_shared": [
+    ".agents", ".cursor", ".mcp.json",
+    "AGENTS.md", "AGENT.md", "Agents.md", "agents.md",
+    "Claude.md", "claude.md", "CLAUDE.local.md",
+    "GEMINI.md", ".github/copilot-instructions.md"
+  ],
+  "not_driven": [
+    {
+      "name": "kimi",
+      "reason": "reached through the claude adapter as a named endpoint, so there is no adapter_kimi behind the name",
+      "archetype": "B", "provenance": "inferred", "access_token_seconds": 900
+    },
+    {
+      "name": "opencode",
+      "reason": "exposes no schema flag, so it needs the fenced-JSON fallback working first",
+      "archetype": null, "provenance": null, "access_token_seconds": null
+    }
+  ],
+  "harnesses": [
+    {
+      "name": "claude",
+      "binary": "claude",
+      "product_name": "Claude Code",
+      "install": {
+        "kind": "script",
+        "url": "https://claude.ai/install.sh",
+        "command": "curl -fsSL https://claude.ai/install.sh | bash -s 2.1.237",
+        "pinned_version": "2.1.237",
+        "needs_credential": false,
+        "hint": "https://claude.com/claude-code"
+      },
+      "schema_style": "inline",
+      "schema_native": true,
+      "sandbox_args": [],
+      "quarantine": [".claude", "CLAUDE.md", ".clauderc"],
+      "credential": {
+        "archetype": "A",
+        "provenance": "measured",
+        "access_token_seconds": 31536000,
+        "store": "issued by `claude setup-token`, held in a secret",
+        "secret": "CLAUDE_CODE_OAUTH_TOKEN",
+        "env_names": ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"],
+        "env_keep": ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"],
+        "seed_command": "claude setup-token",
+        "seed_hint": "crossrev runs `claude setup-token` and captures the output; the token is never printed",
+        "staging": { "kind": "none", "env": null, "path": null },
+        "access_token_jq": null,
+        "assert_fresh": false,
+        "refresher": false
+      }
+    },
+    {
+      "name": "codex",
+      "binary": "codex",
+      "product_name": "Codex",
+      "install": {
+        "kind": "script",
+        "url": "https://chatgpt.com/codex/install.sh",
+        "command": "curl -fsSL https://chatgpt.com/codex/install.sh | sh -s -- --release 0.148.0",
+        "pinned_version": "0.148.0",
+        "needs_credential": false,
+        "hint": "https://chatgpt.com/codex"
+      },
+      "schema_style": "path",
+      "schema_native": true,
+      "sandbox_args": ["--ignore-user-config"],
+      "quarantine": [".codex"],
+      "credential": {
+        "archetype": "B",
+        "provenance": "inferred",
+        "access_token_seconds": 864000,
+        "store": "`~/.codex/auth.json`",
+        "secret": "CROSSREV_CODEX_AUTH",
+        "env_names": ["CROSSREV_CODEX_AUTH"],
+        "env_keep": [],
+        "seed_command": "codex login",
+        "seed_hint": "seed once from a machine with a browser: `codex login`, then `gh secret set CROSSREV_CODEX_AUTH < ~/.codex/auth.json`",
+        "staging": { "kind": "file", "env": "CODEX_HOME", "path": "auth.json" },
+        "access_token_jq": ".tokens.access_token",
+        "assert_fresh": true,
+        "refresher": true
+      }
+    },
+    {
+      "name": "agy",
+      "binary": "agy",
+      "product_name": "Antigravity",
+      "install": {
+        "kind": "script",
+        "url": "https://antigravity.google/cli/install.sh",
+        "command": "curl -fsSL https://antigravity.google/cli/install.sh | bash",
+        "pinned_version": null,
+        "needs_credential": false,
+        "hint": "https://antigravity.google"
+      },
+      "schema_style": "path",
+      "schema_native": true,
+      "sandbox_args": [],
+      "quarantine": [".gemini"],
+      "credential": {
+        "archetype": "C",
+        "provenance": "measured",
+        "access_token_seconds": 3360,
+        "store": "the OS keyring on macOS (`Antigravity Safe Storage`); `~/.gemini/antigravity-cli/antigravity-oauth-token` on a host with no D-Bus session bus",
+        "secret": null,
+        "env_names": [],
+        "env_keep": [],
+        "seed_command": null,
+        "seed_hint": null,
+        "staging": { "kind": "none", "env": null, "path": null },
+        "access_token_jq": null,
+        "assert_fresh": false,
+        "refresher": false
+      }
+    }
+  ]
+}

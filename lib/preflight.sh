@@ -15,11 +15,9 @@ _install_hint() {
         yq)     echo "brew install yq" ;;
         git)    echo "xcode-select --install" ;;
         openssl) echo "already present on macOS; otherwise brew install openssl" ;;
-        claude) echo "https://claude.com/claude-code" ;;
-        codex)  echo "npm install -g @openai/codex" ;;
-        agy)    echo "https://antigravity.google" ;;
-        kimi)   echo "https://github.com/MoonshotAI/kimi-code" ;;
-        *)      echo "install $tool" ;;
+        *)
+          local hint; hint="$(harness_get "$tool" .install.hint)"
+          [[ -n "$hint" ]] && echo "$hint" || echo "install $tool" ;;
       esac ;;
     *)
       case "$tool" in
@@ -28,11 +26,9 @@ _install_hint() {
         yq)     echo "https://github.com/mikefarah/yq#install" ;;
         git)    echo "your package manager, e.g. apt install git" ;;
         openssl) echo "your package manager, e.g. apt install openssl" ;;
-        claude) echo "https://claude.com/claude-code" ;;
-        codex)  echo "npm install -g @openai/codex" ;;
-        agy)    echo "https://antigravity.google" ;;
-        kimi)   echo "https://github.com/MoonshotAI/kimi-code" ;;
-        *)      echo "install $tool" ;;
+        *)
+          local hint; hint="$(harness_get "$tool" .install.hint)"
+          [[ -n "$hint" ]] && echo "$hint" || echo "install $tool" ;;
       esac ;;
   esac
 }
@@ -141,27 +137,30 @@ preflight_check() {
 
   if [[ "$need" == "harness" ]]; then
     local found_harness=0
-    # The three with adapters. Kimi is not on this list because it is not a
-    # crossrev harness: it is reached through the claude adapter as a named
-    # endpoint, so the `kimi` binary being present says nothing about whether
-    # the loop can use it.
-    for t in claude codex agy; do
-      rc=0; v="$(_tool_version "$t")" || rc=$?
-      if (( rc == 0 )); then
-        ui_ok "$v"
-        found_harness=1
-      elif (( rc == 2 )); then
-        # Deliberately not counted as a harness. A CLI that will not say what it
-        # is has not been shown to work, and reporting "found" here means the
-        # loop discovers it at the first model invocation instead.
-        ui_opt "$t — installed, but it did not report a version"
-      else
-        ui_opt "$t — not found, optional"
+    if ! command -v jq >/dev/null 2>&1; then
+      ui_opt "harness check skipped — install jq to probe installed harnesses"
+    else
+      local t binary rc v
+      while IFS= read -r t; do
+        binary="$(harness_get "$t" .binary)"
+        [[ -n "$binary" ]] || binary="$t"
+        rc=0; v="$(_tool_version "$binary")" || rc=$?
+        if (( rc == 0 )); then
+          ui_ok "$v"
+          found_harness=1
+        elif (( rc == 2 )); then
+          # Deliberately not counted as a harness. A CLI that will not say what it
+          # is has not been shown to work, and reporting "found" here means the
+          # loop discovers it at the first model invocation instead.
+          ui_opt "$t — installed, but it did not report a version"
+        else
+          ui_opt "$t — not found, optional"
+        fi
+      done < <(harness_names)
+      if (( found_harness == 0 )); then
+        ui_no "no harness CLI found — CrossRev needs at least one of $(harness_names_human)"
+        missing+=("harness")
       fi
-    done
-    if (( found_harness == 0 )); then
-      ui_no "no harness CLI found — CrossRev needs at least one of claude, codex or agy"
-      missing+=("harness")
     fi
   fi
 
@@ -177,53 +176,50 @@ preflight_check() {
 # a repository secret. Saying so here — before anything is installed — beats
 # failing at the first API call with an authentication error that reads like a
 # wrong password.
-#
-# Measured lifetimes, read from installed credentials rather than documentation:
-#
-#   claude  `claude setup-token` issues a purpose-built token, 1 year
-#   codex   OAuth access token, 10 days (iat to exp on a stored credential)
-#   agy     OAuth access token, ~1 hour
-#   kimi    OAuth access token, 15 minutes
-#
-# GitHub's scheduler has a five-minute floor and runs late under load, so it can
-# keep a 10-day token warm comfortably and a 15-minute one not at all.
 
 # Can this harness authenticate by subscription on this runner? Prints the
 # reason when it cannot.
 preflight_pairing_supported() {
   local runner="$1" harness="$2"
   [[ "$runner" == "self-hosted" ]] && return 0
-  case "$harness" in
-    claude) return 0 ;;
-    codex)  return 0 ;;   # 10-day token, kept warm by the refresher workflow
-    agy)
-      printf "Antigravity's subscription token lives about an hour, so keeping it warm means refreshing every half hour, roughly 48 scheduled runs a day"
-      return 1 ;;
-    kimi)
-      printf "Kimi's subscription token lives 15 minutes, and a scheduler with a five-minute floor that runs late under load cannot stay ahead of it"
-      return 1 ;;
-    *)
+
+  if ! harness_known "$harness"; then
+    local not_driven
+    if not_driven="$(harness_not_driven "$harness")"; then
+      printf "CrossRev has no adapter for '%s' (%s)" "$harness" "$not_driven"
+    else
       printf "CrossRev has no adapter for '%s'" "$harness"
-      return 1 ;;
-  esac
+    fi
+    return 1
+  fi
+
+  local arch prov secret seconds p_name refresher
+  arch="$(harness_get "$harness" .credential.archetype)"
+  prov="$(harness_get "$harness" .credential.provenance)"
+  secret="$(harness_get "$harness" .credential.secret)"
+  seconds="$(harness_get "$harness" .credential.access_token_seconds)"
+  p_name="$(harness_get "$harness" .product_name)"
+  refresher="$(harness_get "$harness" .credential.refresher)"
+
+  [[ "$arch" == "A" ]] && return 0
+  if [[ "$arch" == "B" && "$refresher" == "true" ]]; then
+    return 0
+  fi
+  if [[ "$arch" == "C" && "$prov" == "measured" && -n "$secret" ]]; then
+    return 0
+  fi
+
+  local mins=$(( seconds / 60 ))
+  printf "%s's subscription token lives about %d minutes, and CrossRev has no way to seed it into a hosted runner yet" "$p_name" "$mins"
+  return 1
 }
 
 # Which secret carries a harness's subscription credential in automated mode.
-#
-# Non-zero for a harness that needs none, which is not the same as an unknown
-# one: agy and kimi have no secret because their tokens are too short-lived for a
-# scheduler to keep warm, and preflight_pairing_supported is what says so.
-#
-# One copy of this mapping, because the consequence of two is a repository whose
-# `init` asks for a secret nothing reads, or a leg demanding one `init` never
-# offered. lib/init.sh reads it to decide what to ask for; cred_assert_present
-# reads it to decide what is missing.
 preflight_harness_secret() {
-  case "$1" in
-    claude) printf 'CLAUDE_CODE_OAUTH_TOKEN' ;;
-    codex)  printf 'CROSSREV_CODEX_AUTH' ;;
-    *) return 1 ;;
-  esac
+  local s
+  s="$(harness_get "$1" .credential.secret)"
+  [[ -n "$s" ]] || return 1
+  printf '%s' "$s"
 }
 
 # Is this a runner where a credential can only arrive as a secret?
@@ -245,7 +241,7 @@ preflight_needs_refresher() {
   local runner="$1" harness="$2" endpoint="$3"
   [[ "$runner" == "github-hosted" ]] || return 1
   [[ -z "$endpoint" || "$endpoint" == "null" ]] || return 1   # static token, never rotates
-  [[ "$harness" == "codex" ]]
+  [[ "$(harness_get "$harness" .credential.refresher)" == "true" ]]
 }
 
 # One line per leg, for `crossrev doctor` and the `init` plan.

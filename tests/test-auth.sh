@@ -13,6 +13,10 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export PATH="$HERE/stub:$PATH"
 # shellcheck source=../lib/ui.sh
 source "$HERE/../lib/ui.sh"
+# shellcheck source=../lib/harnesses.sh
+source "$HERE/../lib/harnesses.sh"
+# shellcheck source=../lib/credentials.sh
+source "$HERE/../lib/credentials.sh"
 # shellcheck source=../lib/auth.sh
 source "$HERE/../lib/auth.sh"
 

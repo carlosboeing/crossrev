@@ -176,13 +176,14 @@ _init_assert_runner_serves_pairing() {
     # surface rather than in the middle of assembling a secret list.
     if [[ -n "$endpoint" && "$endpoint" != "null" ]]; then
       cfg_endpoint "$endpoint" >/dev/null
-      # Endpoints are Anthropic-compatible and only the claude adapter speaks
-      # them; the others refuse at invocation. Caught here, that is a config
+      local host; host="$(harness_field .endpoint_host)"
+      # Endpoints are Anthropic-compatible and reached through the endpoint host
+      # adapter; the others refuse at invocation. Caught here, that is a config
       # error before anything is installed. Caught there, it is a workflow that
       # installs cleanly, fires on the first pull request, and dies every time.
-      [[ "$harness" == "claude" ]] || ui_die \
+      [[ "$harness" == "$host" ]] || ui_die \
         "the $leg names the endpoint '$endpoint' but runs on '$harness', which cannot use one" \
-        "Named endpoints are Anthropic-compatible and reached through the claude adapter. Use harness: claude with endpoint: $endpoint, or drop the endpoint for this leg."
+        "Named endpoints are Anthropic-compatible and reached through the $host adapter. Use harness: $host with endpoint: $endpoint, or drop the endpoint for this leg."
       continue
     fi
     reason="$(preflight_pairing_supported "$INIT_RUNNER" "$harness")" && continue
@@ -277,9 +278,11 @@ _init_print_plan() {
   done
 
   if (( INIT_NEEDS_REFRESHER )); then
-    local refresher_meta; refresher_meta="$(_auth_meta "$INIT_OWNER" refresher)"
+    local refresher_meta refresher_harness
+    refresher_meta="$(_auth_meta "$INIT_OWNER" refresher)"
+    refresher_harness="$(harness_field '.harnesses[] | select(.credential.refresher == true) | .name')"
     ui_line ""
-    ui_line "refresher App     needed — codex authenticates by subscription on an"
+    ui_line "refresher App     needed — $refresher_harness authenticates by subscription on an"
     ui_line "                  ephemeral runner, and its credential rotates, so one"
     ui_line "                  scheduled job refreshes it and the legs only read"
     if [[ -f "$refresher_meta" ]]; then
@@ -373,12 +376,14 @@ _init_secret_note() {
     CROSSREV_REFRESH_APP_ID|CROSSREV_REFRESH_APP_PRIVATE_KEY)
       if [[ -f "$(_auth_meta "$INIT_OWNER" refresher)" ]]; then printf -- '— crossrev will set it'
       else printf -- '— crossrev will register the refresher App and set it'; fi ;;
-    CLAUDE_CODE_OAUTH_TOKEN)
-      printf -- '— crossrev runs `claude setup-token` and captures the output; the token is never printed' ;;
-    CROSSREV_CODEX_AUTH)
-      printf -- '— seed once from a machine with a browser: `codex login`, then `gh secret set CROSSREV_CODEX_AUTH < ~/.codex/auth.json`' ;;
     *)
-      printf -- '— the token an endpoint in the config names; set it yourself with `gh secret set %s`' "$1" ;;
+      local hint
+      hint="$(jq -r --arg s "$1" '.harnesses[] | select(.credential.secret == $s) | .credential.seed_hint // empty' <<<"$HARNESS_JSON")"
+      if [[ -n "$hint" ]]; then
+        printf -- '— %s' "$hint"
+      else
+        printf -- '— the token an endpoint in the config names; set it yourself with `gh secret set %s`' "$1"
+      fi ;;
   esac
 }
 
@@ -486,16 +491,20 @@ _init_execute() {
     # repositories, so an organisation-level copy of the rotating credential
     # means every repository that reads it also refreshes it — and the first one
     # to refresh invalidates it for all the others, permanently.
+    local refresher_harness refresher_secret refresher_cmd
+    refresher_harness="$(harness_field '.harnesses[] | select(.credential.refresher == true) | .name')"
+    refresher_secret="$(harness_get "$refresher_harness" .credential.secret)"
+    refresher_cmd="$(harness_get "$refresher_harness" .credential.seed_command)"
     if [[ "$INIT_OWNER_TYPE" == "organization" ]] \
-       && gh secret list --org "$INIT_OWNER" 2>/dev/null | grep -q '^CROSSREV_CODEX_AUTH\b'; then
-      ui_warn "CROSSREV_CODEX_AUTH exists as an organisation secret on $INIT_OWNER" \
-        "The refresher writes a repository secret, which takes precedence — so this repository will work and the organisation copy will go stale, breaking every other repository reading it. Each repository needs its own credential, seeded with its own \`codex login\`. Delete the organisation-level copy."
+       && gh secret list --org "$INIT_OWNER" 2>/dev/null | grep -q "^$refresher_secret\\b"; then
+      ui_warn "$refresher_secret exists as an organisation secret on $INIT_OWNER" \
+        "The refresher writes a repository secret, which takes precedence — so this repository will work and the organisation copy will go stale, breaking every other repository reading it. Each repository needs its own credential, seeded with its own \`$refresher_cmd\`. Delete the organisation-level copy."
     fi
 
     local rmeta; rmeta="$(_auth_meta "$INIT_OWNER" refresher)"
     if [[ ! -f "$rmeta" ]]; then
       ui_gap
-      ui_line "codex authenticates by subscription on an ephemeral runner, so one"
+      ui_line "$refresher_harness authenticates by subscription on an ephemeral runner, so one"
       ui_line "scheduled job has to refresh its credential. That job needs an App"
       ui_line "of its own carrying secrets:write — never the loop's App, which the"
       ui_line "review jobs use on attacker-controlled text."
@@ -533,7 +542,9 @@ _init_execute() {
       ui_ok "$s — already set"
       continue
     fi
-    if [[ "$s" == "CLAUDE_CODE_OAUTH_TOKEN" ]] && _init_set_claude_token; then
+    local h_a
+    h_a="$(jq -r --arg s "$s" '.harnesses[] | select(.credential.secret == $s and .credential.archetype == "A") | .name // empty' <<<"$HARNESS_JSON")"
+    if [[ -n "$h_a" ]] && _init_set_archetype_a_token "$h_a"; then
       continue
     fi
     ui_no "$s — not set, and CrossRev does not have the value to set it"
@@ -579,42 +590,50 @@ _init_execute() {
   # happens, which is the good kind of failure — but only if someone knows.
   for s in $unfinished; do
     case "$s" in
-      CLAUDE_CODE_OAUTH_TOKEN)
-        ui_no "CLAUDE_CODE_OAUTH_TOKEN — a leg runs on Claude, so it cannot authenticate"
-        ui_line "   claude setup-token"
-        ui_line "   gh secret set CLAUDE_CODE_OAUTH_TOKEN $(_init_secret_scope_flag)"
-        ui_line ""
-        ui_line "   That token is valid for a year and the command will not show it"
-        ui_line "   again, so put it in the secret in the same sitting. Re-run"
-        ui_line "   \`crossrev init\` from a terminal and it does both, and records the"
-        ui_line "   date so \`crossrev auth status\` can warn as the year closes." ;;
-      CROSSREV_CODEX_AUTH)
-        ui_no "CROSSREV_CODEX_AUTH — a leg runs on Codex, so it cannot authenticate"
-        ui_line "   codex login          # on a machine with a browser"
-        # --repo unconditionally, never _init_secret_scope_flag. On an org-owned
-        # repository that helper prints --org, and this is the one secret that
-        # must never be organisation-scoped — the same misconfiguration init
-        # warns about a few lines above. An instruction someone copies verbatim
-        # is not the place to be inconsistent with your own warning.
-        ui_line "   gh secret set CROSSREV_CODEX_AUTH --repo $INIT_REPO < ~/.codex/auth.json"
-        ui_line ""
-        ui_line "   Repository-scoped, not organisation-scoped, even on an org."
-        ui_line "   Concurrency groups do not span repositories, so an org-level"
-        ui_line "   copy is refreshed by every repository reading it and the first"
-        ui_line "   one to refresh invalidates it for all the rest."
-        ui_line ""
-        ui_line "   Seeded once. From then on the refresher workflow is the only"
-        ui_line "   thing that writes it, because using a refresh token consumes it"
-        ui_line "   and a second writer kills the chain for everyone." ;;
       CROSSREV_REFRESH_APP_ID|CROSSREV_REFRESH_APP_PRIVATE_KEY)
-        ui_no "$s — without the refresher App, codex's credential expires and stays expired"
+        local refresher_harness; refresher_harness="$(harness_field '.harnesses[] | select(.credential.refresher == true) | .name')"
+        ui_no "$s — without the refresher App, $refresher_harness's credential expires and stays expired"
         ui_line "   crossrev auth login --owner $INIT_OWNER --role refresher"
         ui_line "   crossrev init --upgrade" ;;
       APP_ID|APP_PRIVATE_KEY)
         : ;;   # already explained above
       *)
-        ui_no "$s — an endpoint in the config names it, and nothing sets it"
-        ui_line "   gh secret set $s $(_init_secret_scope_flag)" ;;
+        local h_name; h_name="$(jq -r --arg s "$s" '.harnesses[] | select(.credential.secret == $s) | .name // empty' <<<"$HARNESS_JSON")"
+        if [[ -n "$h_name" ]]; then
+          local p_name arch
+          p_name="$(harness_get "$h_name" .product_name)"
+          arch="$(harness_get "$h_name" .credential.archetype)"
+          ui_no "$s — a leg runs on $p_name, so it cannot authenticate"
+          if [[ "$arch" == "A" ]]; then
+            ui_line "   $h_name setup-token"
+            ui_line "   gh secret set $s $(_init_secret_scope_flag)"
+            ui_line ""
+            ui_line "   That token is valid for a year and the command will not show it"
+            ui_line "   again, so put it in the secret in the same sitting. Re-run"
+            ui_line "   \`crossrev init\` from a terminal and it does both, and records the"
+            ui_line "   date so \`crossrev auth status\` can warn as the year closes."
+          elif [[ "$arch" == "B" ]]; then
+            ui_line "   $h_name login          # on a machine with a browser"
+            # --repo unconditionally, never _init_secret_scope_flag. On an org-owned
+            # repository that helper prints --org, and this is the one secret that
+            # must never be organisation-scoped — the same misconfiguration init
+            # warns about a few lines above. An instruction someone copies verbatim
+            # is not the place to be inconsistent with your own warning.
+            ui_line "   gh secret set $s --repo $INIT_REPO < ~/.${h_name}/auth.json"
+            ui_line ""
+            ui_line "   Repository-scoped, not organisation-scoped, even on an org."
+            ui_line "   Concurrency groups do not span repositories, so an org-level"
+            ui_line "   copy is refreshed by every repository reading it and the first"
+            ui_line "   one to refresh invalidates it for all the rest."
+            ui_line ""
+            ui_line "   Seeded once. From then on the refresher workflow is the only"
+            ui_line "   thing that writes it, because using a refresh token consumes it"
+            ui_line "   and a second writer kills the chain for everyone."
+          fi
+        else
+          ui_no "$s — an endpoint in the config names it, and nothing sets it"
+          ui_line "   gh secret set $s $(_init_secret_scope_flag)"
+        fi ;;
     esac
   done
   ui_end "The workflows are installed but will fail at the first missing secret, before any review runs."
@@ -642,20 +661,17 @@ _init_execute() {
 # anywhere. Neither harness is on GitHub's runner images, so what gets installed
 # has to follow the pairing.
 _init_harness_install_line() {
-  local leg harness endpoint seen="" out=""
+  local leg harness endpoint cmd host seen="" out=""
+  host="$(harness_field .endpoint_host)"
   for leg in reviewer resolver; do
     harness="$(cfg_get ".$leg.harness")"
-    # A leg on an endpoint still runs through the claude binary.
+    # A leg on an endpoint still runs through the endpoint host binary.
     endpoint="$(cfg_get ".$leg.endpoint")"
-    [[ -n "$endpoint" && "$endpoint" != "null" ]] && harness="claude"
+    [[ -n "$endpoint" && "$endpoint" != "null" ]] && harness="$host"
     [[ "$seen" == *" $harness "* ]] && continue
     seen="$seen $harness "
-    # agy cannot appear here: it has no unattended installer, which is why the
-    # pairing check refuses it on a hosted runner before rendering happens.
-    case "$harness" in
-      claude) out="$out          npm install -g @anthropic-ai/claude-code"$'\n' ;;
-      codex)  out="$out          npm install -g @openai/codex"$'\n' ;;
-    esac
+    cmd="$(harness_get "$harness" .install.command)"
+    [[ -n "$cmd" ]] && out="$out          $cmd"$'\n'
   done
   # Indented to sit inside the template's `run: |` block, and trailing newline
   # trimmed so the substitution does not leave a blank line behind.
@@ -663,7 +679,7 @@ _init_harness_install_line() {
 }
 
 _init_render_workflow() {
-  local template="$1" runs_on refresh_scope
+  local template="$1" runs_on refresh_scope refresh_harness refresh_secret
   if [[ "$INIT_RUNNER" == "self-hosted" ]]; then
     # Two labels, not one: `self-hosted` alone matches every self-hosted runner
     # the owner has, including ones set up for something else entirely.
@@ -676,6 +692,13 @@ _init_render_workflow() {
   # repositories — so "one writer" would quietly become several, and the first to
   # refresh would invalidate the rest.
   refresh_scope="--repo $INIT_REPO"
+  refresh_harness="$(harness_field '.harnesses[] | select(.credential.refresher == true) | .name')"
+  # The environment key and the secret lookup are the same name, and both come
+  # from the descriptor rather than from the template. A refresher harness whose
+  # secret is not CROSSREV_CODEX_AUTH would otherwise render a workflow that
+  # passes one variable and looks up another, and `auth refresh` would die on a
+  # credential the workflow believed it had supplied.
+  refresh_secret="$(harness_get "$refresh_harness" .credential.secret)"
 
   # The install block is several lines, and neither `sed s///` nor `awk -v` can
   # carry a newline in a replacement — awk rejects the assignment outright with
@@ -695,6 +718,8 @@ _init_render_workflow() {
       -e "s#__SOURCE_REF__#$INIT_SOURCE_REF#g" \
       -e "s#__RUNS_ON__#$runs_on#g" \
       -e "s#__REFRESH_SCOPE__#$refresh_scope#g" \
+      -e "s#__REFRESH_HARNESS__#$refresh_harness#g" \
+      -e "s#__REFRESH_SECRET__#$refresh_secret#g" \
     | awk -v want="$INIT_RUNNER" '
         /^[[:space:]]*# crossrev:only / { skip = ($3 != want); next }
         /^[[:space:]]*# crossrev:end/   { skip = 0; next }
@@ -711,16 +736,21 @@ _init_render_workflow() {
 # The terminal still sees the command's own output, with anything token-shaped
 # redacted on the way past: the URL and the prompts are what someone needs to
 # complete the flow, and the token is not.
-_init_set_claude_token() {
-  command -v claude >/dev/null 2>&1 || return 1
+_init_set_archetype_a_token() {
+  local h="$1"
+  command -v "$h" >/dev/null 2>&1 || return 1
   _ui_input_source >/dev/null 2>&1 || return 1   # no terminal, no browser flow
 
+  local secret cmd
+  secret="$(harness_get "$h" .credential.secret)"
+  cmd="$(harness_get "$h" .credential.seed_command)"
+
   ui_gap
-  ui_line "CLAUDE_CODE_OAUTH_TOKEN is missing, and both legs need it to authenticate."
-  ui_line "\`claude setup-token\` opens a browser once and prints a token valid for a"
+  ui_line "$secret is missing, and both legs need it to authenticate."
+  ui_line "\`$cmd\` opens a browser once and prints a token valid for a"
   ui_line "year. CrossRev captures it straight into the secret — it is never printed"
   ui_line "here, never written to a file, and never shown again by anything."
-  ui_confirm "Run \`claude setup-token\` now?" || return 1
+  ui_confirm "Run \`$cmd\` now?" || return 1
 
   local raw token; raw="$(mktemp)"
   chmod 600 "$raw"
@@ -737,22 +767,22 @@ _init_set_claude_token() {
   # `|| true` is load-bearing under `set -o pipefail`: a failed authorisation
   # would otherwise abort init entirely, halfway through, having already written
   # labels and secrets. The check below is what decides whether this worked.
-  claude setup-token 2>&1 | tee "$raw" \
+  $cmd 2>&1 | tee "$raw" \
     | sed -E 's/(sk-ant-[A-Za-z0-9_-]{6})[A-Za-z0-9_-]+/\1…[captured by crossrev, not shown]/g' \
     || true
 
   token="$(grep -oE 'sk-ant-[A-Za-z0-9_-]{20,}' "$raw" | tail -1)"
   if [[ -z "$token" ]]; then
-    ui_warn "\`claude setup-token\` finished without printing a token CrossRev could recognise" \
-      "The secret is not set, so CI cannot authenticate yet. Run it by hand and set the secret: claude setup-token, then gh secret set CLAUDE_CODE_OAUTH_TOKEN $(_init_secret_scope_flag)"
+    ui_warn "\`$cmd\` finished without printing a token CrossRev could recognise" \
+      "The secret is not set, so CI cannot authenticate yet. Run it by hand and set the secret: $cmd, then gh secret set $secret $(_init_secret_scope_flag)"
     return 1
   fi
 
-  _init_secret_set CLAUDE_CODE_OAUTH_TOKEN "$token" || return 1
+  _init_secret_set "$secret" "$token" || return 1
   # The one-year clock starts now, and this is the only moment the date exists:
   # the token cannot be read back, so nothing later can work out when it was
   # issued. Without this the first sign of expiry is a CI failure.
-  auth_token_record "$INIT_REPO" CLAUDE_CODE_OAUTH_TOKEN 365
+  auth_token_record "$INIT_REPO" "$secret" 365
   ui_line "   expires in 365 days — \`crossrev auth status\` warns as that closes"
   return 0
 }

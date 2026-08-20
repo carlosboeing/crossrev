@@ -19,7 +19,7 @@ adapter_codex() {
 
   command -v codex >/dev/null 2>&1 || ui_die \
     "the codex CLI is not installed, and this leg is configured to use it" \
-    "Install it with: npm install -g @openai/codex, or point this leg at another harness with --harness."
+    "Install it from $(harness_get codex .install.hint), or point this leg at another harness with --harness."
 
   if [[ -n "$endpoint" && "$endpoint" != "null" ]]; then
     ui_die "the codex adapter cannot use the endpoint '$endpoint'" \
