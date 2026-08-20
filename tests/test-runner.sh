@@ -132,7 +132,7 @@ has "the workflow asks for the self-hosted runner"  "$wf" "runs-on: [self-hosted
 # Two labels rather than one: `self-hosted` alone matches every self-hosted
 # runner the owner has, including ones set up for something else.
 has "by both labels"                                "$wf" "crossrev]"
-hasnt "it does not install a harness that is already there" "$wf" "npm install"
+hasnt "it does not install a harness that is already there" "$wf" "install.sh"
 hasnt "and passes no credential, since the machine is logged in" "$wf" "CLAUDE_CODE_OAUTH_TOKEN"
 hasnt "the fence markers are stripped, not left in the file" "$wf" "crossrev:only"
 
@@ -148,8 +148,8 @@ wf="$(cat .github/workflows/crossrev-review.yml)"
 # Neither is on GitHub's runner images, and installing only Claude does not fail:
 # `run_resolve_leg` falls back, warns in one line nobody reads in a CI log, and
 # both legs run Claude. The loop completes and the cross-model property is gone.
-has "a hosted workflow installs the resolver's harness"  "$wf" "npm install -g @anthropic-ai/claude-code"
-has "AND the reviewer's, which is a different one"        "$wf" "npm install -g @openai/codex"
+has "a hosted workflow installs the resolver's harness"  "$wf" "curl -fsSL https://claude.ai/install.sh"
+has "AND the reviewer's, which is a different one"        "$wf" "curl -fsSL https://chatgpt.com/codex/install.sh"
 has "and passes the credentials in as secrets"       "$wf" "CROSSREV_CODEX_AUTH"
 has "on GitHub's own runner"                         "$wf" "runs-on: ubuntu-latest"
 
@@ -158,9 +158,9 @@ fixture_repo "$(config_for github-hosted claude claude)"; stub_reset
 routes_init
 "$CROSSREV" init --yes >/dev/null 2>&1
 is  "a same-harness pairing installs it once, not twice" \
-  "$(grep -c 'npm install -g @anthropic-ai/claude-code' .github/workflows/crossrev-review.yml)" "1"
+  "$(grep -c 'curl -fsSL https://claude.ai/install.sh' .github/workflows/crossrev-review.yml)" "1"
 hasnt "and installs nothing it does not use" \
-  "$(cat .github/workflows/crossrev-review.yml)" "@openai/codex"
+  "$(cat .github/workflows/crossrev-review.yml)" "https://chatgpt.com/codex/install.sh"
 
 fixture_repo "$(config_for github-hosted codex claude)"; stub_reset
 routes_init
