@@ -14,6 +14,8 @@ set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=../lib/ui.sh
 source "$HERE/../lib/ui.sh"
+# shellcheck source=../lib/harnesses.sh
+source "$HERE/../lib/harnesses.sh"
 # cred_assert_present asks preflight which secret a harness needs and whether
 # this runner is one that can only get it from a secret. bin/crossrev sources
 # both; this suite has to as well.

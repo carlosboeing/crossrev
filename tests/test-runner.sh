@@ -86,7 +86,7 @@ routes_init
 err="$("$CROSSREV" init --dry-run 2>&1 >/dev/null)"; rc=$?
 
 is  "agy by subscription on a hosted runner refuses" "$rc" "1"
-has "and names the token lifetime as the reason"     "$err" "about an hour"
+has "and names the token lifetime as the reason"     "$err" "56 minutes"
 has "and offers the self-hosted fix"                 "$err" "runner: self-hosted"
 has "and the change-the-harness fix"                 "$err" "name a different harness"
 
@@ -94,8 +94,8 @@ fixture_repo "$(config_for github-hosted kimi claude)"; stub_reset
 routes_init
 err="$("$CROSSREV" init --dry-run 2>&1 >/dev/null)"; rc=$?
 is  "kimi by subscription on a hosted runner refuses" "$rc" "1"
-has "and names its fifteen minutes"                   "$err" "15 minutes"
-has "against a scheduler that cannot keep up"         "$err" "five-minute floor"
+has "and names the missing adapter"                   "$err" "no adapter for 'kimi'"
+has "and points at the endpoint route"                "$err" "reached through the claude adapter"
 
 # The same harness reached through an endpoint is a static token in a secret,
 # which never rotates and so never cares what runner it is on. Refusing that too

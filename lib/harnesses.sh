@@ -16,7 +16,10 @@
 
 HARNESS_JSON=""
 
-_harness_file() { printf '%s' "${CROSSREV_HARNESS_FILE:-$ROOT/lib/harnesses.json}"; }
+_harness_file() {
+  local root="${ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+  printf '%s' "${CROSSREV_HARNESS_FILE:-$root/lib/harnesses.json}"
+}
 
 # Ten checks in one pass: the design's six, plus a version guard, an array-shape
 # guard, a duplicate-name guard and a not-driven-name guard.
@@ -92,14 +95,15 @@ harness_load() {
 
   # Every driven harness needs an adapter, and every adapter needs an entry.
   # Checked here rather than in jq, because it is a fact about the filesystem.
+  local root="${ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
   local n
   while IFS= read -r n; do
-    [[ -r "$ROOT/lib/adapters/$n.sh" ]] || ui_die \
+    [[ -r "$root/lib/adapters/$n.sh" ]] || ui_die \
       "the descriptor names the harness '$n', and there is no lib/adapters/$n.sh" \
       "Add the adapter, or remove the entry."
   done < <(harness_names)
   local f
-  for f in "$ROOT"/lib/adapters/*.sh; do
+  for f in "$root"/lib/adapters/*.sh; do
     n="$(basename "$f" .sh)"
     harness_known "$n" || ui_die \
       "lib/adapters/$n.sh exists, and the descriptor has no entry for '$n'" \

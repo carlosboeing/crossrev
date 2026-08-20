@@ -50,20 +50,32 @@ cred_jwt_claims() {
   _cred_b64url_decode "$payload" | jq -c . 2>/dev/null || return 1
 }
 
-# Codex stores its credential as {tokens:{access_token,refresh_token,id_token,
-# account_id}, OPENAI_API_KEY, auth_mode, last_refresh}. The access token is a
-# JWT and carries everything the refresher needs to address its own vendor.
-cred_codex_claims() {
-  local file="$1" token
-  token="$(jq -r '.tokens.access_token // empty' "$file" 2>/dev/null)"
+# Claims from the token at credential.access_token_jq.
+# Returns 1 when the field is null or missing.
+cred_access_token_claims() {
+  local harness="$1" file="$2" jq_path token
+  jq_path="$(harness_get "$harness" .credential.access_token_jq)"
+  [[ -n "$jq_path" ]] || return 1
+  token="$(jq -r "$jq_path // empty" "$file" 2>/dev/null)"
   [[ -n "$token" ]] || return 1
   cred_jwt_claims "$token"
 }
 
+# Compatibility alias for callers passing one argument
+cred_codex_claims() { cred_access_token_claims codex "$1"; }
+
 # Seconds until the stored access token expires. Negative when it already has.
 cred_seconds_left() {
-  local file="$1" claims exp now
-  claims="$(cred_codex_claims "$file")" || return 1
+  local harness file
+  if (( $# == 1 )); then
+    harness="codex"
+    file="$1"
+  else
+    harness="$1"
+    file="$2"
+  fi
+  local claims exp now
+  claims="$(cred_access_token_claims "$harness" "$file")" || return 1
   exp="$(jq -r '.exp // empty' <<<"$claims")"
   [[ -n "$exp" ]] || return 1
   now="$(date -u +%s)"
@@ -113,10 +125,8 @@ cred_assert_present() {
   secret="$(preflight_harness_secret "$harness")" || return 0
   [[ -z "${!secret:-}" ]] || return 0
 
-  case "$harness" in
-    claude) hint="Issue one with \`claude setup-token\`, then: gh secret set $secret" ;;
-    codex)  hint="Seed it from a machine with a browser: \`codex login\`, then: gh secret set $secret < ~/.codex/auth.json" ;;
-  esac
+  hint="$(harness_get "$harness" .credential.seed_hint)"
+  [[ -n "$hint" ]] || hint="Seed it with the vendor CLI"
 
   ui_die "$secret is not set, and this github-hosted runner has no other way to authenticate $harness" \
     "A hosted runner is a fresh container with no login on disk, so this secret is the only credential $harness has. It is empty here, which means it was never set, is named differently, or is scoped to an organisation this repository cannot read — GitHub expands a missing secret to an empty string rather than failing. CrossRev stops now instead of starting $harness unauthenticated, which surfaces as a vendor authentication error with nothing pointing back here. $hint. Check what is set with: gh secret list. A self-hosted runner needs none of this."
@@ -148,23 +158,16 @@ cred_prepare() {
 #
 # CROSSREV_CODEX_AUTH is stripped even from codex, because by then the credential
 # has been written into CODEX_HOME and the raw copy in the environment is a
-# second one nobody needs.
+# second one nobody needs. ANTHROPIC_API_KEY survives for claude so a local run
+# is not silently moved from API billing to subscription billing. Both facts
+# are expressed by the descriptor's env_keep array.
 cred_env_strip_for() {
-  local harness="$1" v
-  for v in CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY CROSSREV_CODEX_AUTH; do
-    case "$harness:$v" in
-      # What each harness legitimately needs, and nothing more.
-      #
-      # ANTHROPIC_API_KEY stays for claude deliberately. It is the operator's own
-      # environment rather than something a workflow injected, and stripping it
-      # would silently move a local run from API billing to subscription billing
-      # — a substitution nobody asked for, in a tool whose divergence guard
-      # exists to catch exactly that class of quiet swap. For the other harnesses
-      # it is a foreign vendor's credential and goes.
-      claude:CLAUDE_CODE_OAUTH_TOKEN|claude:ANTHROPIC_API_KEY) continue ;;
-    esac
-    printf '%s\n' "$v"
-  done
+  local harness="$1"
+  harness_load
+  jq -r --arg h "$harness" '
+    ([ .harnesses[].credential.env_names[]? ] | unique) as $all
+    | ([ .harnesses[] | select(.name == $h) | .credential.env_keep[]? ]) as $keep
+    | $all - $keep | .[]' <<<"$HARNESS_JSON"
 }
 
 cred_discard() {
@@ -182,7 +185,7 @@ cred_discard() {
 # here is loud, cheap and recoverable.
 cred_assert_fresh() {
   local harness="$1" file="$2" left
-  left="$(cred_seconds_left "$file")" || ui_die \
+  left="$(cred_seconds_left "$harness" "$file")" || ui_die \
     "the restored $harness credential does not carry a readable expiry" \
     "crossrev reads the access token's exp claim to decide whether it is safe to run. A credential it cannot read is one it cannot reason about, so it stops. Re-seed the secret from a fresh \`$harness login\`."
 
@@ -227,7 +230,7 @@ cred_refresh_codex() {
     "curl is not installed, and refreshing a credential is an HTTP call to the vendor" \
     "Install curl. Every runner family ships it; this is only reachable on an unusual image."
 
-  claims="$(cred_codex_claims "$file")" || { ui_say "the stored credential has no readable access token" >&2; return 1; }
+  claims="$(cred_access_token_claims codex "$file")" || { ui_say "the stored credential has no readable access token" >&2; return 1; }
   issuer="$(jq -r '.iss // empty' <<<"$claims")"
   client_id="$(jq -r '.client_id // empty' <<<"$claims")"
   refresh_token="$(jq -r '.tokens.refresh_token // empty' "$file")"
