@@ -28,6 +28,8 @@ All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepa
 
 ### Fixed
 
+- **A blocked review now says why it blocked** ([#91](https://github.com/carlosboeing/crossrev/issues/91)). `schemas/findings.schema.json` requires the reviewer to return `blocked_reason`, and the resolve leg has rendered its equivalent since it shipped. The review leg dropped the field between the payload and the marker, so a halted pass posted "The review could not be completed... a human is needed" and gave that human nothing to act on. The reason was not merely unprinted but unrecorded: `crossrev status` already read `.blocked_reason` off the review marker, and no review leg ever wrote it, so every later re-render fell back to a generic string. The reason now reaches the marker, the summary comment, `crossrev status` and the terminal line.
+
 - **The Grok adapter reads the schema payload from `structuredOutput`.** Live `grok --output-format json --json-schema` (1.0.5) puts the constrained object there. `.text` concatenates draft JSON objects, so `fromjson` returns null and a successful turn was rejected as "the payload is not a JSON object" with nothing written to the pull request. The stub now emits that live shape.
 
 - **Correct Antigravity credential store path documentation** ([#77](https://github.com/carlosboeing/crossrev/issues/77)). Corrected documented credential paths for Antigravity on macOS (`Antigravity Safe Storage` keyring) and headless Linux (`~/.gemini/antigravity-cli/antigravity-oauth-token`) to match what the CLI reads.
