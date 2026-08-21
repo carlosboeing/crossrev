@@ -2,7 +2,12 @@
 
 ## Summary
 
-<!-- What does this change and why? Reference the ADR when relevant. -->
+<!--
+What changes, and why, in two or three sentences before any detail.
+Cite files in this repository by path, and the ADR when relevant. Cite
+nothing outside it -- no private repository, no path on your own machine.
+Restate the reasoning here rather than pointing at where it was written down.
+-->
 
 ## Related issue
 
@@ -19,6 +24,7 @@
 ## Checklist
 
 - [ ] Conventional Commit subject (`type(scope): description`, imperative, <= 72 chars)
+- [ ] Nothing in the body names a private repository, a workbench path, or a path on a personal machine
 - [ ] No new runtime, package manager or dependency beyond bash, `gh`, `jq`, `yq`, `openssl`
 - [ ] No GitHub credential reaches the agent process
 - [ ] Policy still read from the pull request's base revision, never its head
