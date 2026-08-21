@@ -44,6 +44,7 @@ def survives_str:
   if .credential then
     if .credential.archetype == "A" then "Yes"
     elif .credential.archetype == "B" and .credential.refresher then "Yes, with the refresher below"
+    elif .credential.archetype == "C" and .credential.provenance == "measured" and (.credential.secret // "") != "" then "Yes, by self-refreshing"
     elif .credential.archetype == "C" then "No, CrossRev cannot seed into a hosted runner yet"
     else "No" end
   else "No" end;
@@ -79,6 +80,7 @@ def hosted_str:
   if .credential then
     if .credential.archetype == "A" then "Works directly"
     elif .credential.archetype == "B" and .credential.refresher then "Works, with the refresher below"
+    elif .credential.archetype == "C" and .credential.provenance == "measured" and (.credential.secret // "") != "" then "Works, by self-refreshing"
     elif .credential.archetype == "C" then "Use a self-hosted runner"
     else "Use a self-hosted runner" end
   elif .archetype == "B" then "Use a self-hosted runner, or a static endpoint token"

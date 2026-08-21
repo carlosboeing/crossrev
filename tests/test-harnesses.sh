@@ -66,6 +66,14 @@ for f in "$ROOT"/lib/adapters/*.sh; do
 done
 is "every lib/adapters/*.sh has a descriptor entry" "$orphan_adapter" 0
 
+# Generated runner guidance follows the same credential conditions as preflight.
+readme_harness_table="$(sed -n '/<!-- crossrev:harness-table:start -->/,/<!-- crossrev:harness-table:end -->/p' "$ROOT/README.md")"
+credentials_harness_table="$(sed -n '/<!-- crossrev:harness-table:start -->/,/<!-- crossrev:harness-table:end -->/p' "$ROOT/docs/credentials.md")"
+has "generated README says seedable grok survives a hosted runner" "$readme_harness_table" '| `grok` | `~/.grok/auth.json` | 6 hours | Yes, by self-refreshing |'
+has "generated README keeps unseedable agy off hosted runners" "$readme_harness_table" '| 56 minutes | No, CrossRev cannot seed into a hosted runner yet |'
+has "generated credentials say seedable grok works on hosted runners" "$credentials_harness_table" '| `grok` | `~/.grok/auth.json` | 6 hours | Works, by self-refreshing |'
+has "generated credentials keep unseedable agy on self-hosted runners" "$credentials_harness_table" '| 56 minutes | Use a self-hosted runner |'
+
 # --- validation contract (10 rejection cases) ------------------------------
 valid_json="$(<"$ROOT/lib/harnesses.json")"
 
