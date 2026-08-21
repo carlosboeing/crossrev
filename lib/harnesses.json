@@ -3,7 +3,7 @@
   "endpoint_host": "claude",
   "default_pairing": { "reviewer": "codex", "resolver": "claude" },
   "quarantine_shared": [
-    ".agents", ".cursor", ".mcp.json",
+    ".agents", ".cursor", ".mcp.json", ".grok",
     "AGENTS.md", "AGENT.md", "Agents.md", "agents.md",
     "Claude.md", "claude.md", "CLAUDE.local.md",
     "GEMINI.md", ".github/copilot-instructions.md"
