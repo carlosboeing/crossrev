@@ -86,7 +86,7 @@ GitHub-hosted runners are disposable, so each run restores the harness credentia
 | `kimi` | OAuth access token | 15 minutes | Use a self-hosted runner, or a static endpoint token |
 <!-- crossrev:harness-table:end -->
 
-CrossRev has adapters for Claude, Codex and Antigravity. Kimi is reached through the Claude adapter as a named endpoint.
+CrossRev has adapters for Claude, Codex, Antigravity and Grok. Kimi is reached through the Claude adapter as a named endpoint.
 
 **`crossrev init` refuses a pairing its runner cannot serve**, naming the lifetime and both fixes, rather than installing workflows that fail at the first API call. `crossrev doctor` reports the same thing before you get that far.
 
