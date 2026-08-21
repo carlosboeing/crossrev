@@ -71,18 +71,11 @@ Product-technical direction is fine. This check is about privacy the way the shi
 
 ### 4. What a public artifact may say
 
-The three layers above guard *files*. They do not guard *text about files*. Commit messages, pull request titles and bodies, issue titles and bodies, review comments and release notes are all public and permanent, and none of them passes through the staged diff the pre-commit hook reads. `gh pr create --body` and `gh issue create --body` reach the GitHub API without touching git at all.
+The three layers above guard *files*. They do not guard text *about* files. Commit messages, pull request and issue titles and bodies, review comments and release notes are public and permanent, and none of them passes through the staged diff the hook reads. `gh pr create --body` reaches the GitHub API without touching git at all.
 
-**Never name a private or local source in a public artifact.** The complete list:
+**Never name a private or local source in one.** Not `.workbench`, not `crossrev-workbench`, not the bare phrase "the workbench", not a path to a document held there, not `/Users/...`, not a client name or an internal cost figure.
 
-- The workbench — `.workbench`, `crossrev-workbench`, or the bare phrase "the workbench"
-- A path to a brainstorm, discovery note, design, plan, review or transcript held there
-- An absolute path on a personal machine, `/Users/...` or `$HOME/...`
-- A private repository name, a client name, or an internal cost or token figure
-
-The damage is not leaked content. It is a citation the reader cannot follow. "See the plan in the workbench" tells an outsider that something exists and that they may not have it, which is worse than saying nothing.
-
-**Restate the fact instead of citing its source.** A design decision goes into the body in its own words, or into an ADR under `docs/adrs/` that the artifact then links. A record that cannot be published is described as "held locally, available on request".
+The damage is a citation the reader cannot follow. "See the plan in the workbench" says something exists and withholds it, which is worse than saying nothing. **Restate the fact instead:** put the reasoning in the body in its own words, or in an ADR under `docs/adrs/` that the artifact then links.
 
 ### Working Memory Location override
 
@@ -139,17 +132,9 @@ Conventional Commits: `<type>(<scope>): <description>`, imperative, subject ≤7
 
 ## Pull requests
 
-**The title is one clause under 72 characters in Conventional Commit form**, naming the change rather than the effort.
+**The title is one clause under 72 characters in Conventional Commit form.** The body follows `.github/PULL_REQUEST_TEMPLATE.md`, which `gh pr create --body` bypasses, so filing from the command line means applying the template by hand.
 
-**The body is written for someone who has never seen the branch, and it stands alone.**
-
-- Open with what changes and why, in two or three sentences, before any detail.
-- Cite files in this repository by path. Cite nothing outside it.
-- State verification with its output. Give the assertion count and the `all suites passed` line, not an assertion that both ran.
-- Name what is deliberately out of scope, and link the issue tracking it.
-- A body reading "implements the design" has said nothing. Say what the design was.
-
-`.github/PULL_REQUEST_TEMPLATE.md` carries the shape. **`gh pr create --body` bypasses the template**, so filing from the command line means applying it by hand.
+A body reading "implements the design" has said nothing. Say what the design was, cite files in this repository by path, and give verification its output rather than asserting it ran.
 
 ## Issues
 
