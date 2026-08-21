@@ -16,7 +16,7 @@ Named 2026-08-13, renamed from the working title `revloop` ([ADR 0010](docs/adrs
 - **Board**: none
 - **Roadmap**: `docs/ROADMAP.md`
 - **Changelog**: `CHANGELOG.md` (repo root, not under `docs/`)
-- **Architecture**: `docs/architecture.md` (current state); `README.md` `## Layout` is the short version
+- **Architecture**: `docs/architecture.md` (current state, including the file-by-file layout under `## The layout`)
 - **Working memory**: `.workbench/` — a **separate private repository**, nested here as an independent clone. See the gate below.
 - **Other**:
   - No build step, no package manager, no lockfile. The checkout is the installation: `install.sh` symlinks `bin/crossrev` onto PATH and the tool reads its libraries, skills and templates from the checkout at runtime.
