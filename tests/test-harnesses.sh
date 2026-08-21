@@ -24,7 +24,7 @@ harness_load
 is "the shipped descriptor loads cleanly" "$?" 0
 
 names="$(harness_names | paste -sd, -)"
-is "harness_names prints claude,codex,agy in order" "$names" "claude,codex,agy"
+is "harness_names prints claude,codex,agy,grok in order" "$names" "claude,codex,agy,grok"
 
 is "harness_get codex secret" "$(harness_get codex .credential.secret)" "CROSSREV_CODEX_AUTH"
 is "harness_get agy secret is empty" "$(harness_get agy .credential.secret)" ""
@@ -35,6 +35,13 @@ hasnt "harness_get agy store does not contain oauth_creds" "$store_agy" "oauth_c
 
 is "harness_get agy archetype is C" "$(harness_get agy .credential.archetype)" "C"
 is "harness_get agy provenance is measured" "$(harness_get agy .credential.provenance)" "measured"
+
+is "harness_get grok archetype is C" "$(harness_get grok .credential.archetype)" "C"
+is "harness_get grok provenance is measured" "$(harness_get grok .credential.provenance)" "measured"
+is "harness_get grok secret" "$(harness_get grok .credential.secret)" "CROSSREV_GROK_AUTH"
+is "harness_get grok staging env is GROK_HOME" "$(harness_get grok .credential.staging.env)" "GROK_HOME"
+is "harness_get_json grok quarantine is .grok" "$(harness_get_json grok .quarantine)" '[".grok"]'
+hasnt "quarantine_shared no longer lists .grok" "$(harness_field .quarantine_shared)" ".grok"
 
 is "harness_field endpoint_host is claude" "$(harness_field .endpoint_host)" "claude"
 

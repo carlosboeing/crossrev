@@ -1,0 +1,142 @@
+#!/usr/bin/env bash
+#
+# A fake `grok` for the offline suite.
+#
+# It returns what the real CLI returns for `--output-format json` with
+# `--json-schema`: the constrained object on `structuredOutput`, a concatenated
+# draft string on `text` (which `fromjson` rejects), usage on `usage`, and
+# `modelUsage` keyed by model id. That shape is what lib/adapters/grok.sh parses.
+#
+# It also asserts the flags the adapter is supposed to pass. `--prompt-file`
+# takes a path; `-p` / `--print` / `--single` consume the next argv as the
+# prompt, so using them is the same class of bug as agy's `--print`. A blanket
+# bypass is never a CrossRev grant. Wrong flags exit 96.
+
+set -uo pipefail
+
+[[ "${1:-}" == "--version" ]] && { printf 'grok 1.0.5 (test stub)\n'; exit 0; }
+
+# Every flag the adapter built, so a suite can assert what a leg was and was not
+# granted. Appended, because one `crossrev run` invokes this twice.
+[[ -n "${CROSSREV_ARGV_LOG:-}" ]] && printf '%s\n' "$*" >>"$CROSSREV_ARGV_LOG"
+
+if [[ -n "${CROSSREV_GROK_UNAUTH:-}" ]]; then
+  printf 'Error: Not signed in. Alternatively, set the `XAI_API_KEY` environment variable or run `grok login`.\n' >&2
+  exit 1
+fi
+
+prompt_file=""
+schema=""
+perm=""
+sandbox=""
+allow_edit=0
+allow_write=0
+deny_edit=0
+deny_write=0
+requested=""
+
+while (( $# )); do
+  case "$1" in
+    -p|--print|--single)
+      printf 'test stub: %s consumes the next argv as the prompt; use --prompt-file\n' "$1" >&2
+      exit 96
+      ;;
+    --always-approve|--yolo|--dangerously-skip-permissions)
+      printf 'test stub: %s is a blanket bypass and must not be passed\n' "$1" >&2
+      exit 96
+      ;;
+    --prompt-file)
+      prompt_file="${2:-}"; shift 2 ;;
+    --json-schema)
+      schema="${2:-}"
+      if [[ "$schema" == /* ]]; then
+        printf 'test stub: --json-schema takes inline JSON, not a path\n' >&2
+        exit 96
+      fi
+      shift 2
+      ;;
+    --permission-mode)
+      perm="${2:-}"
+      if [[ "$perm" == "bypassPermissions" ]]; then
+        printf 'test stub: bypassPermissions is a blanket bypass and must not be passed\n' >&2
+        exit 96
+      fi
+      shift 2
+      ;;
+    --sandbox)
+      sandbox="${2:-}"; shift 2 ;;
+    --allow)
+      [[ "${2:-}" == "Edit" ]] && allow_edit=1
+      [[ "${2:-}" == "Write" ]] && allow_write=1
+      shift 2
+      ;;
+    --deny)
+      [[ "${2:-}" == "Edit" ]] && deny_edit=1
+      [[ "${2:-}" == "Write" ]] && deny_write=1
+      shift 2
+      ;;
+    --model)
+      requested="${2:-}"; shift 2 ;;
+    --output-format|--reasoning-effort|--effort|--tools|--disallowed-tools|--rules|--system-prompt-override|--system-prompt)
+      shift 2 ;;
+    *)
+      shift ;;
+  esac
+done
+
+if [[ -z "$prompt_file" || ! -f "$prompt_file" ]]; then
+  printf 'test stub: --prompt-file is required and must name a real file\n' >&2
+  exit 96
+fi
+if [[ "$perm" != "dontAsk" ]]; then
+  printf 'test stub: --permission-mode must be dontAsk, not %s\n' "${perm:-unset}" >&2
+  exit 96
+fi
+
+prompt="$(cat "$prompt_file")"
+[[ -n "${CROSSREV_PROMPT_LOG:-}" ]] && printf '%s' "$prompt" >"$CROSSREV_PROMPT_LOG"
+
+if [[ "$prompt" == *"You are the review leg"* ]]; then
+  if [[ "$sandbox" != "read-only" || "$deny_edit" -ne 1 || "$deny_write" -ne 1 ]]; then
+    printf 'test stub: a review leg needs --sandbox read-only --deny Edit --deny Write\n' >&2
+    exit 96
+  fi
+  if [[ "$allow_edit" -eq 1 || "$allow_write" -eq 1 ]]; then
+    printf 'test stub: a review leg must not pass --allow Edit or --allow Write\n' >&2
+    exit 96
+  fi
+elif [[ "$prompt" == *"You are the resolve leg"* ]]; then
+  if [[ "$sandbox" != "workspace" || "$allow_edit" -ne 1 || "$allow_write" -ne 1 ]]; then
+    printf 'test stub: a resolve leg needs --sandbox workspace --allow Edit --allow Write\n' >&2
+    exit 96
+  fi
+fi
+
+payload_file="${CROSSREV_HARNESS_PAYLOAD:-}"
+if [[ "$prompt" == *"You are the review leg"* ]]; then
+  [[ -n "${CROSSREV_REVIEW_PAYLOAD:-}" ]] && payload_file="$CROSSREV_REVIEW_PAYLOAD"
+elif [[ "$prompt" == *"You are the resolve leg"* ]]; then
+  [[ -n "${CROSSREV_RESOLVE_PAYLOAD:-}" ]] && payload_file="$CROSSREV_RESOLVE_PAYLOAD"
+fi
+
+if [[ -z "$payload_file" || ! -f "$payload_file" ]]; then
+  jq -cn '{text:"no canned payload was set for this stub invocation", stopReason:"error"}'
+  exit 1
+fi
+
+if [[ "$prompt" == *"You are the resolve leg"* && -n "${CROSSREV_RESOLVE_EDIT:-}" ]]; then
+  bash "$CROSSREV_RESOLVE_EDIT" || true
+fi
+
+model="${requested:-grok-test-model}"
+# text concatenates the payload twice the way live grok 1.0.5 concatenates
+# draft JSON objects. fromjson of that string is null; the adapter must read
+# structuredOutput instead.
+jq -cn --arg r "$(cat "$payload_file")" --arg m "$model" \
+  '{text:($r + $r), structuredOutput:($r | fromjson),
+    stopReason:"end_turn", sessionId:"stub", requestId:"stub",
+    num_turns:1,
+    usage:{input_tokens:3, output_tokens:4, cache_read_input_tokens:0,
+           cache_creation_input_tokens:0, reasoning_tokens:0, total_tokens:7},
+    modelUsage:{($m):{inputTokens:3, outputTokens:4,
+                      cacheReadInputTokens:0, modelCalls:1}}}'

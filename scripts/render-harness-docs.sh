@@ -26,6 +26,7 @@ render_readme() {
 def lifetime_str:
   if . == 31536000 then "1 year"
   elif . == 864000 then "10 days"
+  elif . == 21600 then "6 hours"
   elif . == 3360 then "56 minutes"
   elif . == 900 then "15 minutes"
   elif . == null then "—"
@@ -35,7 +36,7 @@ def cred_store_str:
   if .credential then
     if .credential.archetype == "A" then "`\(.credential.seed_command)`, purpose-built"
     elif .credential.archetype == "B" then "OAuth access token in \(.credential.store)"
-    elif .credential.archetype == "C" then "macOS Keychain service `antigravity_token`, or file `~/.gemini/antigravity-cli/antigravity-oauth-token` on headless Linux"
+    elif .credential.archetype == "C" then .credential.store
     else .credential.store end
   else "OAuth access token" end;
 
@@ -60,6 +61,7 @@ render_credentials() {
 def lifetime_str:
   if . == 31536000 then "1 year"
   elif . == 864000 then "10 days"
+  elif . == 21600 then "6 hours"
   elif . == 3360 then "56 minutes"
   elif . == 900 then "15 minutes"
   elif . == null then "—"
@@ -69,7 +71,7 @@ def cred_store_str:
   if .credential then
     if .credential.archetype == "A" then "`\(.credential.seed_command)`, purpose-built"
     elif .credential.archetype == "B" then "OAuth access token in \(.credential.store)"
-    elif .credential.archetype == "C" then "macOS Keychain service `antigravity_token`, or file `~/.gemini/antigravity-cli/antigravity-oauth-token` on headless Linux"
+    elif .credential.archetype == "C" then .credential.store
     else .credential.store end
   else "OAuth access token" end;
 

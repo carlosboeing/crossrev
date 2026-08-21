@@ -152,6 +152,7 @@ Each adapter takes a prompt file, a schema, a working directory, an optional mod
 | `lib/adapters/claude.sh` | Claude Code | Takes the schema **inline** as a JSON string. Also the path to any Anthropic-compatible endpoint |
 | `lib/adapters/codex.sh` | Codex | Takes the schema as a **file path**. Runs with `--ignore-user-config` |
 | `lib/adapters/agy.sh` | Antigravity | |
+| `lib/adapters/grok.sh` | Grok | Takes the schema **inline** as a JSON string. |
 <!-- crossrev:harness-table:end -->
 
 The inline-versus-path difference is not a detail: handing Claude a path fails with a JSON parse error about the leading slash, which reads like a corrupt schema rather than a wrong argument type.

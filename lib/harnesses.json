@@ -116,6 +116,38 @@
         "assert_fresh": false,
         "refresher": false
       }
+    },
+    {
+      "name": "grok",
+      "binary": "grok",
+      "product_name": "Grok",
+      "install": {
+        "kind": "script",
+        "url": "https://x.ai/cli/install.sh",
+        "command": "curl -fsSL https://x.ai/cli/install.sh | bash -s 1.0.5",
+        "pinned_version": "1.0.5",
+        "needs_credential": false,
+        "hint": "https://x.ai/cli"
+      },
+      "schema_style": "inline",
+      "schema_native": true,
+      "sandbox_args": [],
+      "quarantine": [".grok"],
+      "credential": {
+        "archetype": "C",
+        "provenance": "measured",
+        "access_token_seconds": 21600,
+        "store": "`~/.grok/auth.json`",
+        "secret": "CROSSREV_GROK_AUTH",
+        "env_names": ["CROSSREV_GROK_AUTH"],
+        "env_keep": [],
+        "seed_command": "grok login",
+        "seed_hint": "seed once from a machine with a browser: `grok login`, then `gh secret set CROSSREV_GROK_AUTH < ~/.grok/auth.json`",
+        "staging": { "kind": "file", "env": "GROK_HOME", "path": "auth.json" },
+        "access_token_jq": null,
+        "assert_fresh": false,
+        "refresher": false
+      }
     }
   ]
 }
