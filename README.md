@@ -160,7 +160,8 @@ CrossRev runs on the subscriptions you already pay for rather than per-token API
 |---|---|---|---|
 | `claude` | `claude setup-token`, purpose-built | 1 year | Yes |
 | `codex` | OAuth access token in `~/.codex/auth.json` | 10 days | Yes, with the refresher below |
-| `agy` | macOS Keychain service `antigravity_token`, or file `~/.gemini/antigravity-cli/antigravity-oauth-token` on headless Linux | 56 minutes | No, CrossRev cannot seed into a hosted runner yet |
+| `agy` | the OS keyring on macOS (`Antigravity Safe Storage`); `~/.gemini/antigravity-cli/antigravity-oauth-token` on a host with no D-Bus session bus | 56 minutes | No, CrossRev cannot seed into a hosted runner yet |
+| `grok` | `~/.grok/auth.json` | 6 hours | No, CrossRev cannot seed into a hosted runner yet |
 | `kimi` | OAuth access token | 15 minutes | No |
 <!-- crossrev:harness-table:end -->
 

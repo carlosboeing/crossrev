@@ -107,4 +107,152 @@ has "and the marker records it for a re-render"     "$(calls)" '"tokens":2'
 # One writer is the whole reason the refresh chain survives.
 is  "a leg writes no secret, ever"                "$(count 'secret set')" "0"
 
+# --- a review leg on the fourth harness -------------------------------------
+config_grok_reviews() {
+  cat <<'EOF'
+version: 1
+mode: local
+policy:
+  min_fix_severity: medium
+  max_passes_per_cycle: 3
+  max_files_changed_per_pr: 200
+  max_prs_per_day: 25
+reviewer:
+  harness: grok
+  model: reviewer-model
+resolver:
+  harness: claude
+  model: resolver-model
+backlog:
+  destination: none
+EOF
+}
+
+config_grok_resolves() {
+  cat <<'EOF'
+version: 1
+mode: local
+policy:
+  min_fix_severity: medium
+  max_passes_per_cycle: 3
+  max_files_changed_per_pr: 200
+  max_prs_per_day: 25
+reviewer:
+  harness: claude
+  model: reviewer-model
+resolver:
+  harness: grok
+  model: resolver-model
+backlog:
+  destination: none
+EOF
+}
+
+fixture_repo "$(config_grok_reviews)"; stub_reset
+routes_baseline "$(printf '[]' | payload)"
+route 'api --method POST repos/*/issues/42/comments*' '{"id":9001}'
+route '*reviewThreads*' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}'
+CROSSREV_REVIEW_PAYLOAD="$(printf '%s' "$REVIEW_PAYLOAD" | payload)"; export CROSSREV_REVIEW_PAYLOAD
+out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
+# Capture before the probes below invoke the stub and append to the same log.
+grok_review_argv="$(cat "$ARGV_LOG")"
+
+is  "a review leg runs on grok"                   "$rc" "0"
+has "and names it in the run header"              "$out" "Reviewer: grok"
+has "it reads the payload out of text"            "$out" "verdict: issues-remain"
+is  "and posts the finding it carried"            "$(count 'method POST repos/acme/widget/pulls/42/comments')" "1"
+has "the comment names the harness that produced it" "$(calls)" "grok"
+
+has "the grok review leg really did get the review prompt" \
+  "$(cat "$PROMPT_LOG")" "You are the review leg"
+
+( unset CROSSREV_REVIEW_PAYLOAD CROSSREV_HARNESS_PAYLOAD
+  "$HERE/stub/grok" -p "prompt" --output-format json >/dev/null 2>&1 )
+is  "the stub still refuses -p, which would swallow the next flag as the prompt" "$?" "96"
+
+tmp_prompt="$(mktemp)"
+printf 'You are the review leg\n' >"$tmp_prompt"
+( unset CROSSREV_REVIEW_PAYLOAD CROSSREV_HARNESS_PAYLOAD
+  "$HERE/stub/grok" --output-format json --permission-mode dontAsk \
+    --sandbox read-only --deny Edit --deny Write --prompt-file "$tmp_prompt" \
+    >/dev/null 2>&1 )
+is  "and accepts the flags the adapter uses" "$?" "1"
+rm -f "$tmp_prompt"
+
+has "the marker records the answering model from modelUsage" \
+  "$(calls)" '"model_reported":"reviewer-model"'
+has "the cell names grok and the answering model" \
+  "$(calls)" '`grok` · `reviewer-model`'
+hasnt "a reported model is not described as a gap" \
+  "$(calls)" "grok does not report which model answered"
+
+has "the token count reaches the run-details table" "$(calls)" "| review |"
+has "and the marker records grok's usage total"     "$(calls)" '"tokens":7'
+
+is  "a grok review leg writes no secret, ever"    "$(count 'secret set')" "0"
+
+has  "the grok review leg is pinned read-only"    "$grok_review_argv" "--sandbox read-only"
+has  "and denies Edit"                            "$grok_review_argv" "--deny Edit"
+has  "and denies Write"                           "$grok_review_argv" "--deny Write"
+has  "and runs dontAsk, not a promptable default" "$grok_review_argv" "--permission-mode dontAsk"
+hasnt "a grok review leg is granted no Edit"      "$grok_review_argv" "--allow Edit"
+hasnt "nor Write"                                 "$grok_review_argv" "--allow Write"
+hasnt "nor a blanket bypass"                      "$grok_review_argv" "bypassPermissions"
+hasnt "nor --always-approve"                      "$grok_review_argv" "--always-approve"
+hasnt "nor --yolo"                                "$grok_review_argv" "--yolo"
+hasnt "nor anything --dangerously"                "$grok_review_argv" "--dangerously"
+
+# --- grok resolve leg gets the write grant the review leg was denied --------
+ID_A="a1b2c3d4"
+
+review_marker_for_grok() {
+  jq -cn --arg sha "$FIX_HEAD" --argjson ts "$(( $(date +%s) - 192 ))" --arg a "$ID_A" '
+    {v:1, leg:"review", pass:1, state:"complete", ts:$ts, done_ts:($ts + 192), run_id:"1",
+     head_sha:$sha, harness:"claude", model:"reviewer-model", model_reported:"reviewer-model",
+     effort:null, endpoint:null, tokens:41205, verdict:"issues-remain",
+     findings:[
+       {id:$a, path:"app.ts", line:2, side:"RIGHT", severity:"high", category:"correctness",
+        pre_existing:false, title:"Unchecked fetch response", why:"w", fix:"f",
+        anchor:"", thread_id:"T_A", resolution:null, tracked_as:null}]}'
+}
+
+RESOLVE_PAYLOAD='{"blocked":false,"blocked_reason":null,"summary":"Checked the response.",
+  "resolutions":[{"finding_number":1,"resolution":"fixed","reply":"Checked response.ok.",
+                   "persist":null,"duplicate_of":null}]}'
+
+fixture_repo "$(config_grok_resolves)"; stub_reset
+routes_baseline "$(marker_comment 9001 "$(review_marker_for_grok)" | jq -cs . | payload)"
+route 'api --method POST repos/*/issues/42/comments*' '{"id":9002}'
+route '*reviewThreads*' "$(threads_response "$(thread_node T_A app.ts 2 false "$ID_A")")"
+route '*resolveReviewThread*' '{"data":{"resolveReviewThread":{"thread":{"isResolved":true}}}}'
+route 'api --method POST repos/*/pulls/42/comments/*/replies*' '{"id":6001}'
+CROSSREV_RESOLVE_PAYLOAD="$(printf '%s' "$RESOLVE_PAYLOAD" | payload)"; export CROSSREV_RESOLVE_PAYLOAD
+CROSSREV_RESOLVE_EDIT="$(mktemp)"
+printf 'printf "export const ok = 2\\n" >app.ts\n' >"$CROSSREV_RESOLVE_EDIT"
+export CROSSREV_RESOLVE_EDIT
+out="$("$CROSSREV" resolve --pr 42 2>&1)"; rc=$?
+
+is  "a resolve leg runs on grok"                  "$rc" "0"
+grok_resolve_argv="$(cat "$ARGV_LOG")"
+has  "the grok resolve leg gets a workspace sandbox" "$grok_resolve_argv" "--sandbox workspace"
+has  "and may Edit"                               "$grok_resolve_argv" "--allow Edit"
+has  "and may Write"                              "$grok_resolve_argv" "--allow Write"
+has  "and still runs dontAsk"                     "$grok_resolve_argv" "--permission-mode dontAsk"
+hasnt "a grok resolve leg is not pinned read-only" "$grok_resolve_argv" "--sandbox read-only"
+hasnt "nor given a blanket bypass"                "$grok_resolve_argv" "bypassPermissions"
+
+# --- grok authentication rejection is a credential failure ------------------
+fixture_repo "$(config_grok_reviews)"; stub_reset
+routes_baseline "$(printf '[]' | payload)"
+route 'api --method POST repos/*/issues/42/comments*' '{"id":9001}'
+route '*reviewThreads*' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}'
+CROSSREV_REVIEW_PAYLOAD="$(printf '%s' "$REVIEW_PAYLOAD" | payload)"; export CROSSREV_REVIEW_PAYLOAD
+CROSSREV_GROK_UNAUTH=1; export CROSSREV_GROK_UNAUTH
+out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
+unset CROSSREV_GROK_UNAUTH
+
+is  "an unauthenticated grok run fails"           "$rc" "1"
+has "and CrossRev names it a credential failure"  "$out" "credential failure"
+has "naming Grok in the diagnosis"                "$out" "Grok"
+
 finish
