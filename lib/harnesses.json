@@ -71,7 +71,7 @@
       "quarantine": [".codex"],
       "credential": {
         "archetype": "B",
-        "provenance": "inferred",
+        "provenance": "measured",
         "access_token_seconds": 864000,
         "store": "`~/.codex/auth.json`",
         "secret": "CROSSREV_CODEX_AUTH",

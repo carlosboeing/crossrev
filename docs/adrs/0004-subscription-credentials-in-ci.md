@@ -4,9 +4,12 @@ title: "Subscription credentials in CI: lifetimes drive runner pairing"
 type: adr
 status: approved
 scope: [credentials, ci, github-apps]
+superseded_by: 0015-seed-and-self-refresh-for-reusable-credentials.md
 ---
 
 # 0004 — Subscription credentials in CI: lifetimes drive runner pairing
+
+Superseded by [0015](0015-seed-and-self-refresh-for-reusable-credentials.md). Its rotation rule generalised from a single measurement against Kimi, and its Antigravity credential path is wrong. The body below is left as written, because an ADR records what was decided at the time.
 
 ## Context
 
