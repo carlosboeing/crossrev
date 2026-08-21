@@ -1,0 +1,210 @@
+name: release
+
+# Publishes to npm when a version tag is pushed.
+#
+# Authentication is trusted publishing, and nothing else. GitHub mints a
+# short-lived OIDC credential that npm verifies against a publisher configured
+# on the package. There is no npm token in this repository and none on
+# anybody's laptop, which is the point: a stored publish credential is the
+# thing worth not having. CopyDesk publishes the same way.
+#
+# Configure the publisher once, against this file:
+#
+#   npm trust github crossrev-ai --file release.yml \
+#     --repo carlosboeing/crossrev --allow-publish
+#
+# The filename is part of that record, case-sensitive and including the
+# extension, so renaming this file breaks publishing until the publisher is
+# revoked and recreated. `release.yml` is the name that survives adding a
+# second distribution channel; `npm-publish.yml`, which this replaces, would
+# have had to be renamed the day a Homebrew job arrived.
+#
+# No `environment:` on the publish job. npm matches the environment as an OIDC
+# claim, so a block here must be mirrored by --env there or the exchange fails.
+
+on:
+  push:
+    # Three components, so the floating `v0` tag never fires a publish. The
+    # previous `v*` pattern matched it, and a `v0` move would have started a
+    # run that failed its own version check.
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Pack and verify without publishing"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify the release is coherent
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install and verify dependencies
+        run: |
+          set -euo pipefail
+          command -v jq         >/dev/null || sudo apt-get install -y --no-install-recommends jq
+          command -v yq         >/dev/null || sudo snap install yq
+          command -v shellcheck >/dev/null || sudo apt-get install -y --no-install-recommends shellcheck
+
+          # Assert rather than assume. A missing shellcheck reads as clean.
+          for t in bash git jq yq shellcheck openssl; do
+            command -v "$t" >/dev/null || { echo "::error::$t is missing"; exit 1; }
+          done
+
+      - name: Lint
+        run: bash scripts/lint.sh
+
+      - name: The suite must pass on the exact commit being released
+        run: bash tests/run.sh
+
+      - name: VERSION, package.json and the tag must agree
+        id: version
+        run: |
+          set -euo pipefail
+          file_version="$(cat VERSION)"
+          json_version="$(jq -r .version package.json)"
+          cli_version="$(bash bin/crossrev version)"
+
+          echo "VERSION      $file_version"
+          echo "package.json $json_version"
+          echo "version      $cli_version"
+
+          if [ "$file_version" != "$json_version" ] || [ "$file_version" != "$cli_version" ]; then
+            echo "::error::VERSION, package.json and bin/crossrev version disagree"
+            exit 1
+          fi
+
+          if [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
+            tag_version="${GITHUB_REF_NAME#v}"
+            echo "tag          $tag_version"
+            if [ "$tag_version" != "$file_version" ]; then
+              echo "::error::tag ${GITHUB_REF_NAME} does not match version $file_version"
+              exit 1
+            fi
+          fi
+
+          echo "version=$file_version" >> "$GITHUB_OUTPUT"
+
+      - name: The tarball must carry the shipped surface and nothing else
+        run: |
+          set -euo pipefail
+          npm pack --dry-run --json > pack.json
+          node -e '
+            const [pack] = require("./pack.json");
+            const files = pack.files.map(f => f.path).sort();
+            console.log(files.join("\n"));
+
+            const required = [
+              "LICENSE", "README.md", "VERSION", "package.json",
+              "bin/crossrev", "lib/run.sh", "lib/config.sh", "lib/github.sh",
+            ];
+            const missing = required.filter(f => !files.includes(f));
+            if (missing.length) {
+              console.error("::error::missing from the tarball: " + missing.join(", "));
+              process.exit(1);
+            }
+
+            // An allowlist, not a blocklist. Every packed path must fall under
+            // package.json `files`, or be one npm always includes. A blocklist
+            // only catches the leaks somebody thought of; this catches any path
+            // that appears because `files` was widened.
+            const allowed = require("./package.json").files;
+            const always = ["LICENSE", "README.md", "package.json"];
+            const stray = files.filter(f =>
+              !always.includes(f) &&
+              !allowed.some(a => a.endsWith("/") ? f.startsWith(a) : f === a));
+            if (stray.length) {
+              console.error("::error::not covered by package.json files: " + stray.join(", "));
+              process.exit(1);
+            }
+
+            const kb = pack.size / 1024;
+            console.log(`tarball ${kb.toFixed(1)} kB across ${files.length} files`);
+            if (kb > 500) {
+              console.error("::error::tarball exceeds the 500 kB budget");
+              process.exit(1);
+            }
+          '
+
+  publish:
+    name: Publish to npm
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: github.event_name == 'push' || inputs.dry_run == false
+    permissions:
+      contents: write   # to create the GitHub Release
+      id-token: write   # to mint the OIDC credential for trusted publishing
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+          package-manager-cache: false   # never cache in a release build
+
+      - name: Trusted publishing needs npm 11.5.1 or later
+        run: |
+          npm install -g npm@latest
+          npm --version
+
+      - name: Publish
+        # No NODE_AUTH_TOKEN. With no secret it resolves to an empty string,
+        # and setup-node still writes an .npmrc declaring _authToken=, which
+        # reads as auth that is configured and wrong rather than absent.
+        # OIDC is the only credential, which is the point of trusted publishing.
+        run: npm publish --access public --provenance
+
+      - name: Create the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="${{ needs.verify.outputs.version }}"
+          # Lift this version's section out of the changelog for the release body.
+          awk -v v="$version" '
+            $0 ~ "^## \\[" v "\\]" { found = 1; next }
+            found && /^## \[/ { exit }
+            found { print }
+          ' CHANGELOG.md > body.md
+          if [ ! -s body.md ]; then
+            echo "See CHANGELOG.md." > body.md
+          fi
+          gh release create "v$version" --title "v$version" --notes-file body.md --verify-tag
+
+  smoke:
+    name: Install from the registry and run it
+    needs: [verify, publish]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+      # A publish nobody installed is a publish nobody verified. This runs the
+      # published artifact from a clean directory rather than the checkout.
+      - name: npx the published version
+        run: |
+          set -euo pipefail
+          version="${{ needs.verify.outputs.version }}"
+          for attempt in 1 2 3 4 5; do
+            if npx --yes "crossrev-ai@$version" version; then break; fi
+            echo "not on the registry yet, retrying in 15s"
+            sleep 15
+          done
+          test "$(npx --yes "crossrev-ai@$version" version)" = "$version"
+          # `--help` needs no credential, no network and no repository, so it
+          # exercises the shipped entrypoint without standing up a fixture.
+          npx --yes "crossrev-ai@$version" --help | grep -q "cross-model PR review loop"
+          echo "published artifact verified"
