@@ -99,7 +99,12 @@ jobs:
         run: |
           set -euo pipefail
           npm pack --dry-run --json > pack.json
-          node -e '
+          # The script reaches node on stdin through a quoted heredoc rather
+          # than inside `node -e '...'`. Nothing between the delimiters is
+          # parsed by the shell, so an apostrophe in a comment cannot close
+          # the string. One did exactly that in CopyDesk and killed a release
+          # with a syntax error before anything reached npm.
+          node <<'NODE'
             const [pack] = require("./pack.json");
             const files = pack.files.map(f => f.path).sort();
             console.log(files.join("\n"));
@@ -134,7 +139,7 @@ jobs:
               console.error("::error::tarball exceeds the 500 kB budget");
               process.exit(1);
             }
-          '
+          NODE
 
   publish:
     name: Publish to npm
