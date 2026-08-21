@@ -3,9 +3,9 @@
 # A fake `grok` for the offline suite.
 #
 # It returns what the real CLI returns for `--output-format json` with
-# `--json-schema`: the schema-constrained payload as a JSON string in `text`,
-# usage on `usage`, and `modelUsage` keyed by model id. That shape is what
-# lib/adapters/grok.sh parses.
+# `--json-schema`: the constrained object on `structuredOutput`, a concatenated
+# draft string on `text` (which `fromjson` rejects), usage on `usage`, and
+# `modelUsage` keyed by model id. That shape is what lib/adapters/grok.sh parses.
 #
 # It also asserts the flags the adapter is supposed to pass. `--prompt-file`
 # takes a path; `-p` / `--print` / `--single` consume the next argv as the
@@ -129,8 +129,12 @@ if [[ "$prompt" == *"You are the resolve leg"* && -n "${CROSSREV_RESOLVE_EDIT:-}
 fi
 
 model="${requested:-grok-test-model}"
+# text concatenates the payload twice the way live grok 1.0.5 concatenates
+# draft JSON objects. fromjson of that string is null; the adapter must read
+# structuredOutput instead.
 jq -cn --arg r "$(cat "$payload_file")" --arg m "$model" \
-  '{text:$r, stopReason:"end_turn", sessionId:"stub", requestId:"stub",
+  '{text:($r + $r), structuredOutput:($r | fromjson),
+    stopReason:"end_turn", sessionId:"stub", requestId:"stub",
     num_turns:1,
     usage:{input_tokens:3, output_tokens:4, cache_read_input_tokens:0,
            cache_creation_input_tokens:0, reasoning_tokens:0, total_tokens:7},

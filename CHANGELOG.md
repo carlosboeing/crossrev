@@ -26,6 +26,8 @@ All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepa
 
 ### Fixed
 
+- **The Grok adapter reads the schema payload from `structuredOutput`.** Live `grok --output-format json --json-schema` (1.0.5) puts the constrained object there. `.text` concatenates draft JSON objects, so `fromjson` returns null and a successful turn was rejected as "the payload is not a JSON object" with nothing written to the pull request. The stub now emits that live shape.
+
 - **Correct Antigravity credential store path documentation** ([#77](https://github.com/carlosboeing/crossrev/issues/77)). Corrected documented credential paths for Antigravity on macOS (`Antigravity Safe Storage` keyring) and headless Linux (`~/.gemini/antigravity-cli/antigravity-oauth-token`) to match what the CLI reads.
 
 - **`crossrev auth login` detects App name collisions on GitHub before opening a browser** ([#16](https://github.com/carlosboeing/crossrev/issues/16)). When local metadata under `~/.config/crossrev/apps/` is missing but an App already exists on GitHub, `auth login` previously sent the user to GitHub to register under the derived name, where GitHub rejected the registration with "Name is already taken". CrossRev now probes `GET /users/<slug>[bot]` before opening a browser, refuses the registration if the App exists, explains that an existing App cannot be reused without local metadata (tracked in [#67](https://github.com/carlosboeing/crossrev/issues/67)), and directs the user to register under a separate name with `--name`. The confirmation panel now makes `--name` discoverable, and the prompts and waiting screens in the login flow state their step and position clearly.

@@ -159,7 +159,7 @@ grok_review_argv="$(cat "$ARGV_LOG")"
 
 is  "a review leg runs on grok"                   "$rc" "0"
 has "and names it in the run header"              "$out" "Reviewer: grok"
-has "it reads the payload out of text"            "$out" "verdict: issues-remain"
+has "it reads the payload out of structuredOutput" "$out" "verdict: issues-remain"
 is  "and posts the finding it carried"            "$(count 'method POST repos/acme/widget/pulls/42/comments')" "1"
 has "the comment names the harness that produced it" "$(calls)" "grok"
 

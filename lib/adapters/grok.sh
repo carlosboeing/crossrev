@@ -86,11 +86,20 @@ adapter_grok() {
   fi
 
   local payload model_reported tokens
+  # Live grok 1.0.5 with --json-schema puts the constrained object on
+  # structuredOutput. .text is the model's prose, and on a schema run it is often
+  # several draft JSON objects concatenated — fromjson rejects that, which is
+  # how a successful turn was reported as "the payload is not a JSON object".
+  # structured_output is the snake_case sibling agy uses; keep it as a fallback
+  # in case a later grok release matches that spelling. .text remains last for
+  # a run with no schema.
   payload="$(jq -c '
-    .text
-    | if type == "object" or type == "array" then .
-      elif type == "string" then (fromjson? // null)
-      else null end' "$out" 2>/dev/null || echo null)"
+    .structuredOutput
+    // .structured_output
+    // (.text
+        | if type == "object" or type == "array" then .
+          elif type == "string" then (fromjson? // null)
+          else null end)' "$out" 2>/dev/null || echo null)"
   model_reported="$(jq -r '(.modelUsage // {}) | keys | .[0] // empty' "$out" 2>/dev/null)"
   tokens="$(jq -r '(.usage // {})
                    | .total_tokens
