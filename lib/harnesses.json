@@ -127,8 +127,7 @@
         "command": "curl -fsSL https://x.ai/cli/install.sh | bash -s 1.0.5",
         "pinned_version": "1.0.5",
         "needs_credential": false,
-        "hint": "https://x.ai/cli",
-        "integrity": null
+        "hint": "https://x.ai/cli"
       },
       "schema_style": "inline",
       "schema_native": true,
