@@ -82,7 +82,7 @@ GitHub-hosted runners are disposable, so each run restores the harness credentia
 | `claude` | `claude setup-token`, purpose-built | 1 year | Works directly |
 | `codex` | OAuth access token in `~/.codex/auth.json` | 10 days | Works, with the refresher below |
 | `agy` | the OS keyring on macOS (`Antigravity Safe Storage`); `~/.gemini/antigravity-cli/antigravity-oauth-token` on a host with no D-Bus session bus | 56 minutes | Use a self-hosted runner |
-| `grok` | `~/.grok/auth.json` | 6 hours | Use a self-hosted runner |
+| `grok` | `~/.grok/auth.json` | 6 hours | Works, by self-refreshing |
 | `kimi` | OAuth access token | 15 minutes | Use a self-hosted runner, or a static endpoint token |
 <!-- crossrev:harness-table:end -->
 

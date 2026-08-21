@@ -6,14 +6,84 @@
 [![platform: macOS | Linux](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-blue.svg)](docs/installation.md)
 [![status: pre-1.0](https://img.shields.io/badge/status-pre--1.0-orange.svg)](docs/ROADMAP.md)
 
-**Two AI models review your pull request, and the second is not asked to trust the first.** One reads the diff and posts findings. A different model checks each finding against the code, fixes what holds up, argues back on what does not, replies in every thread, and pushes. Then the first looks again.
+CrossRev is a cross-model pull request (PR) review and resolution loop. It coordinates independent reviewer and resolver agents around a pull request. The reviewer agent examines the changes and posts findings as inline PR comments. The resolver agent verifies each finding, fixes valid defects, and disputes false positives.
 
-CrossRev runs on the AI subscriptions you already pay for rather than per-token API keys. One command runs it from your terminal. The same command runs it from GitHub Actions.
+The reviewer agent then inspects the resulting revision, and the loop continues until it converges, reaches a configured limit, or needs a person.
 
-## How the loop works
+Agents can be configured with different harnesses, models, and effort levels. Configured harnesses authenticate through existing AI subscriptions or provider API keys.
 
-<!-- The edge declaration order below controls the layout. Declaring RES --> Q3 before
-     RES -- "finding deferred" --> BACKLOG is what keeps the arrows from crossing. -->
+CrossRev reviews a selected PR on demand from the CLI or starts review cycles automatically through GitHub Actions.
+
+## Features
+
+| Capability | What CrossRev does |
+|---|---|
+| Review and resolution | Reviews a change, verifies every finding, applies valid fixes, records disagreements, and reviews the new revision |
+| Agent configuration | Configures the reviewer and resolver agents independently by harness, model, and effort level |
+| Model access | Supports AI subscriptions, provider API keys, and compatible endpoints for cloud-hosted or self-hosted models |
+| Local and automated operation | Reviews a selected PR from the CLI or responds to GitHub events through GitHub Actions |
+| Pull-request state | Records every pass in comments and labels, with no database or local state file |
+| Credential separation | Keeps GitHub credentials in the orchestrator and out of the model process |
+
+## Quick start
+
+### Requirements
+
+CrossRev supports macOS and Linux. It requires `git`, authenticated `gh`, `jq`, `yq`, `openssl`, and at least one supported agent CLI. The default reviewer needs Codex, while the default full cycle needs Codex and Claude. The `npx` and npm routes also require Node.js.
+
+### Run without installing
+
+Run one review pass directly from npm:
+
+```bash
+npx crossrev-ai review --pr 42
+```
+
+The review command posts inline comments and a summary, but never edits or pushes the branch. CrossRev uses your existing `gh` authentication, so the comments appear under your GitHub account.
+
+### Install CrossRev
+
+The bootstrap installer creates a checkout and installs the complete command set, including automated-mode setup:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/carlosboeing/crossrev/main/bootstrap.sh | bash
+```
+
+Install the local CLI globally through npm:
+
+```bash
+npm install -g crossrev-ai
+```
+
+An npm installation supports local commands. `crossrev init` requires a checkout because it reads the Git commit used to pin generated workflows.
+
+From an existing checkout, run:
+
+```bash
+./install.sh
+```
+
+See [Installing CrossRev](docs/installation.md) for pinned revisions, custom installation directories, updates, and removal.
+
+### Review a pull request
+
+Check the machine, then run one review pass:
+
+```bash
+crossrev doctor
+crossrev review --pr 42
+```
+
+Run the complete review and resolution cycle when you are ready for CrossRev to apply fixes:
+
+```bash
+crossrev cycle --pr 42
+```
+
+> [!WARNING]
+> `crossrev cycle` and `crossrev resolve` can commit and push to the pull request branch.
+
+## Review loop
 
 ```mermaid
 %%{init: {'flowchart': {'wrappingWidth': 300, 'rankSpacing': 28, 'nodeSpacing': 40}}}%%
@@ -67,80 +137,94 @@ flowchart TD
     class BACKLOG sink
 ```
 
-The review limit is `policy.max_passes_per_cycle`, 3 by default. The diagram shows the common path. Six conditions can end a cycle, and [usage.md](docs/usage.md) lists all of them with their precedence.
+A cycle contains one or more passes. In each pass, the reviewer agent examines the current revision. The resolver agent follows when findings meet the configured severity threshold. The loop ends when it converges, reaches a limit, or needs a person.
 
-### The Reviewer Agent
+The review limit is `policy.max_passes_per_cycle`, which defaults to 3. [Using CrossRev](docs/usage.md) documents all six termination conditions and their precedence.
 
-Reads, and never touches the branch. It sees the diff and every CrossRev thread already on the pull request. It returns findings as JSON validated against [`schemas/findings.schema.json`](schemas/findings.schema.json).
+Every finding receives one resolution:
 
-- Anchors each finding to a file, a line, and a side of the diff.
-- Rates it `high`, `medium` or `low`.
-- Categorises it as correctness, security, performance, maintainability, testing or docs.
-- Re-judges the previous pass as `addressed`, `credibly-disputed`, `still-open` or `regressed`.
-- Posts one inline comment per finding, plus a summary comment carrying a hidden marker.
-
-### The Resolver Agent
-
-A different model, and it verifies each finding against the code before acting. Agreement is not assumed, and that disagreement is the reason for running two models. Every finding gets one of five dispositions:
-
-| Disposition | What it means |
+| Resolution | Meaning |
 |---|---|
-| `fixed` | The code changed |
-| `disputed` | Technically wrong for this codebase, with the reason in the thread |
-| `deferred` | Real and worth doing, but not here — written to the backlog |
-| `skipped` | Below the pass's `min_fix_severity`, so no code is changed |
-| `escalated` | Needs a person, so it applies `crossrev/stop` and leaves the thread open |
+| `fixed` | The resolver agent changed the code |
+| `disputed` | The finding is incorrect for this codebase, with the reason recorded in the review thread |
+| `deferred` | The finding is valid but belongs in the configured backlog |
+| `skipped` | Policy excludes the finding from changes, usually because it is below `min_fix_severity` |
+| `escalated` | A person must decide, so CrossRev applies `crossrev/stop` and leaves the thread open |
 
-It then replies in every thread, resolves the ones it settled, commits its fixes and pushes.
+## Configuration
 
-## Try it
+CrossRev needs no configuration for local use. The defaults use Codex as the reviewer agent and Claude as the resolver agent.
 
-A local run needs no setup. No GitHub App, no secrets, no workflows — CrossRev uses the `gh` authentication you already have, so its comments appear as **you**.
+To configure a repository:
 
-```bash
-npx crossrev-ai --pr 42        # nothing installed, nothing left behind
+1. Create `.github/crossrev.yml`, or let `crossrev init` generate it for automated mode.
+2. Configure the reviewer agent, resolver agent, and policy.
+3. Keep machine-specific endpoints in `~/.config/crossrev/config.yml`.
+
+The following example uses two Claude models in local mode:
+
+```yaml
+version: 1
+mode: local
+
+policy:
+  min_fix_severity: medium
+  max_passes_per_cycle: 3
+
+reviewer:
+  harness: claude
+  model: claude-fable-5
+  effort: medium
+
+resolver:
+  harness: claude
+  model: claude-opus-5
+  effort: high
 ```
 
-To keep it, install from the bootstrap script:
+`harness` names the agent CLI. `model` and `effort` pass through to that harness. The reviewer and resolver configurations must differ by harness, model, or endpoint.
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/carlosboeing/crossrev/main/bootstrap.sh | bash
-crossrev doctor                # checks every dependency and names the fix for each gap
-crossrev review --pr 42        # one review pass: comments only, nothing is pushed
-```
+Compatible endpoints extend CrossRev beyond a harness's default provider. CrossRev supports public providers such as Kimi, self-hosted models through Ollama, and LLM gateways such as LiteLLM. See the [operator configuration template](templates/operator-config.yml) for endpoint examples.
 
-No token and no credential of any kind. The repository is public, so raw.githubusercontent serves the script anonymously. [installation.md](docs/installation.md) covers the other routes, including installing from a checkout you already have.
-
-**Start with `review` on its own.** It only writes comments, so it is the cheapest way to find out whether the findings are any good. That is the question that decides whether the rest is worth it.
-
-```bash
-crossrev         --pr 42    # a cycle: both agents, alternating, up to the review limit
-crossrev cycle   --pr 42    # the same thing, spelled out
-crossrev review  --pr 42    # one review pass: inline comments plus a summary
-crossrev resolve --pr 42    # verify each finding, fix, reply, resolve, push
-crossrev status  --pr 42    # where the loop is, and how to resume it
-```
-
-### What it needs
-
-| Tool | Why |
-|---|---|
-| `git`, `gh` | Reading and writing the pull request. `gh` must be authenticated |
-| `jq` | The findings and resolve payloads are JSON |
-| `yq` | Both config layers are YAML, and `jq` cannot read YAML |
-| One of `claude`, `codex`, `agy`, `grok` | Something has to do the reviewing |
-
-`yq` is the one usually missing on macOS — `brew install yq`. It is preinstalled on both GitHub runner families.
-
-## Which models it drives
-
-Four harnesses, each driven through its own adapter. With no config file anywhere, `codex` reviews and `claude` resolves. Override per run without touching the repository:
+Override a harness for one command without changing repository policy:
 
 ```bash
 crossrev review --pr 42 --harness claude
 ```
 
-Whether a harness works in CI is a property of the **runner**. It comes down to whether that harness's credential can sit in a repository secret. These lifetimes were read off installed credentials, not documentation:
+CrossRev reads repository policy from the pull request's base revision. A branch under review cannot change the rules used to review itself. See [Configuring CrossRev](docs/configuration.md) for every field and merge rule.
+
+## Local and automated modes
+
+CrossRev uses the same agents and protocol in both modes. The trigger and trusted GitHub identity change:
+
+| | Local | Automated |
+|---|---|---|
+| Trigger | A terminal command | Pull request events and CrossRev labels |
+| GitHub identity | Your authenticated `gh` account | A repository-scoped GitHub App |
+| Setup | Install CrossRev and its dependencies | Run `crossrev auth login`, then `crossrev init` |
+| State | Pull request comments and labels | Pull request comments and labels |
+| Runner | Your machine | GitHub-hosted or self-hosted |
+
+> [!CAUTION]
+> Never use a self-hosted runner for a public repository. The runner is a persistent machine holding harness credentials.
+
+Automated mode starts with two commands. The second prints every file, secret, and label it would change before asking for confirmation:
+
+```bash
+crossrev auth login
+crossrev init
+```
+
+Automated mode reviews branches in the repository, including Dependabot branches. It refuses fork pull requests because GitHub withholds repository secrets from fork workflows. Local review supports forks, and local resolution supports them when maintainer edits are enabled.
+
+Automated mode remains unproven end to end. No repository has installed the generated workflows yet. Proving this path is the current `v1.0.0` requirement in the [roadmap](docs/ROADMAP.md).
+
+## Harness support
+
+CrossRev has adapters for Claude Code, Codex, Antigravity, and Grok. Kimi runs through the Claude adapter as a named endpoint.
+
+Whether a harness works in GitHub Actions depends on its credential lifetime and the selected runner:
 
 <!-- crossrev:harness-table:start -->
 <!-- Generated by scripts/render-harness-docs.sh — do not edit -->
@@ -149,86 +233,70 @@ Whether a harness works in CI is a property of the **runner**. It comes down to 
 | `claude` | `claude setup-token`, purpose-built | 1 year | Yes |
 | `codex` | OAuth access token in `~/.codex/auth.json` | 10 days | Yes, with the refresher below |
 | `agy` | the OS keyring on macOS (`Antigravity Safe Storage`); `~/.gemini/antigravity-cli/antigravity-oauth-token` on a host with no D-Bus session bus | 56 minutes | No, CrossRev cannot seed into a hosted runner yet |
-| `grok` | `~/.grok/auth.json` | 6 hours | No, CrossRev cannot seed into a hosted runner yet |
+| `grok` | `~/.grok/auth.json` | 6 hours | Yes, by self-refreshing |
 | `kimi` | OAuth access token | 15 minutes | No |
 <!-- crossrev:harness-table:end -->
 
-`crossrev init` refuses a pairing its runner cannot serve. It names the lifetime and both fixes, rather than installing workflows that fail at the first API call. `runner: self-hosted` serves every pairing, because the machine holds its own logins and refreshes them the ordinary way. [credentials.md](docs/credentials.md) covers what each secret holds and why Codex needs a second App.
+`crossrev init` refuses a pairing that its runner cannot serve. A self-hosted runner uses its installed logins and supports every pairing. [CrossRev credentials](docs/credentials.md) explains the hosted-runner requirements and the Codex refresher.
 
-## Two ways to run it
+## Commands
 
-|  | **Local** | **Automated** |
-|---|---|---|
-| Invoked by | You, in a terminal | GitHub events |
-| Setup | None beyond installing it | `crossrev init` |
-| Needs a GitHub App | No | Yes |
-| Needs repository secrets | No | Yes |
-| Typical command | `crossrev review --pr 42` | Nothing. It runs |
-
-**The local user never encounters the words "GitHub App".** Everything the App exists for — triggering the next workflow, proving a marker was written by a machine, minting scoped credentials — only matters once something runs unattended.
-
-Automated mode is two commands, and the second prints an itemised plan before it changes anything:
-
-```bash
-crossrev auth login          # register and install the GitHub App, two browser approvals
-crossrev init                # prints every path, secret and label it would touch, then asks once
-```
-
-Repository policy lives in `.github/crossrev.yml`, and **it is read from the base revision, never the branch under review**. A config committed on the pull request branch has no effect until it merges, so a pull request cannot rewrite the loop that reviews it. Every field is documented in [configuration.md](docs/configuration.md).
-
-## Before you point it at something you care about
-
-**`resolve` and `cycle` commit and push to the pull request's branch.** That is the point of the tool, and it is the thing to know first. Three rails constrain it:
-
-- **The branch guard** refuses to push unless the checkout is on the pull request's own head branch, that branch is not the repository default, and the head repository matches the origin.
-- **`policy.max_passes_per_cycle`** caps the loop at 3 by default.
-- **The `crossrev/stop` label** halts it and outranks a healthy verdict. It is checked first, every pass.
-
-To watch with no risk of a push at all, run `review` only.
-
-**Every pass is reconstructable from the pull request alone.** The markers are the state, so there is nothing to clean up locally and nothing to lose if a run dies mid-flight.
-
-**On a public repository, automated mode reviews pull requests from branches in the repository, including Dependabot's, and not contributions from forks.** GitHub withholds secrets from fork workflows, so CrossRev refuses them in automated mode rather than running unauthenticated. Local runs from a terminal can review fork pull requests directly, and resolve them when maintainer edits are allowed.
-
-## What works today
-
-| Command | State |
+| Command | Effect |
 |---|---|
-| `crossrev review --pr N` | One review pass: inline comments, a summary, the pass marker |
-| `crossrev resolve --pr N` | Verifies each finding, commits fixes, replies, resolves, files deferred work |
-| `crossrev cycle --pr N` | The whole loop in one process. Also what a bare `crossrev --pr N` runs |
-| `crossrev status --pr N` | The state in one word, every pass with both agents, and the command that resumes it |
-| `crossrev init` | Plan-then-confirm, `--dry-run`, `--yes`, `--upgrade` |
-| `crossrev watchdog` | Finds stuck passes, retries once, then halts and says why |
-| `crossrev doctor`, `crossrev version` | Dependency and version checks |
-| `crossrev auth login`, `install`, `status`, `rotate`, `refresh` | GitHub App registration, installation, verification and key rotation |
+| `crossrev --pr 42` | Runs the complete cycle, the same as `crossrev cycle --pr 42` |
+| `crossrev review --pr 42` | Runs one review pass and posts comments without changing the branch |
+| `crossrev resolve --pr 42` | Verifies the latest findings, then may commit and push fixes |
+| `crossrev status --pr 42` | Shows the current state, every pass, and the command that resumes the loop |
+| `crossrev watchdog --repo owner/name` | Finds stalled automated work, retries once, then halts it for inspection |
+| `crossrev doctor` | Checks dependencies, GitHub authentication, installed harnesses, and runner compatibility |
+| `crossrev init` | Plans and installs automated mode after confirmation |
 
-**Exercised offline, and run against real pull requests locally.** Every command above is asserted against a stubbed `gh` boundary — no network, no model, no pull request — which catches the deterministic half, the half that fails silently. Live local runs cover the other half. The loop has reviewed real pull requests, converged on its own, found real defects in the branch under review, and pushed back on findings that did not hold up.
+## Safety and limits
 
-**No repository has had the workflows installed yet, so automated mode is unproven end to end.** That is what the `0.x` version records.
+`crossrev review` writes comments but never changes the branch. `crossrev resolve` and `crossrev cycle` may commit and push fixes.
+
+CrossRev checks every push target before anything leaves the machine. The target must be the pull request's head branch, not the default branch, and its repository must match the configured remote.
+
+The loop enforces the configured severity threshold and pass limit. CrossRev checks the `crossrev/stop` label before starting each agent. The label prevents the next agent from starting but does not cancel one already in progress.
+
+Never use a self-hosted runner for a public repository. Use a GitHub-hosted runner so each job ends with the disposable runner that processed it.
+
+CrossRev reconstructs every pass from the pull request. Hidden markers record the revision, findings, resolutions, and execution details. A retry reads those markers and continues without duplicating completed writes.
+
+The model process never receives a GitHub credential. The orchestrator makes every GitHub API call and controls every git commit and push.
 
 ## Documentation
 
-| Page | What's in it |
+| Page | Contents |
 |---|---|
-| [installation.md](docs/installation.md) | Getting CrossRev onto your machine, updating it, removing it |
-| [usage.md](docs/usage.md) | Running the loop, what a pass writes, when it stops, where deferred work goes |
-| [configuration.md](docs/configuration.md) | `.github/crossrev.yml` field by field, machine-local endpoints, environment variables |
-| [credentials.md](docs/credentials.md) | Which secrets automated mode needs, and why Codex needs a second App |
-| [troubleshooting.md](docs/troubleshooting.md) | The failure modes, each under the name it reports itself with |
-| [architecture.md](docs/architecture.md) | The two legs, the orchestrator, the adapters, the marker and label contract, the layout |
-| [adrs/](docs/adrs/) | Decision records — what was decided, what was considered, what it costs |
-| [ROADMAP.md](docs/ROADMAP.md) | What's next, and what's deliberately deferred |
+| [Installation](docs/installation.md) | Install, update, and remove CrossRev |
+| [Usage](docs/usage.md) | Run the loop, inspect its output, and understand each terminal state |
+| [Configuration](docs/configuration.md) | Configure repository policy, local endpoints, and environment variables |
+| [Credentials](docs/credentials.md) | Understand the secrets required for automated mode |
+| [Troubleshooting](docs/troubleshooting.md) | Diagnose each reported failure and resume a stopped loop |
+| [Architecture](docs/architecture.md) | Follow the orchestrator, adapters, marker protocol, label contract, and security boundary |
+| [Decision records](docs/adrs/) | Read the decisions, alternatives, and consequences behind the design |
+| [Roadmap](docs/ROADMAP.md) | See current work and deferred directions |
+| [Changelog](CHANGELOG.md) | See what changed in each release |
+| [Releases](https://github.com/carlosboeing/crossrev/releases) | Download releases and read release notes |
 
-## Working on it
+## Contributing
+
+Contributions are welcome. See [Contributing to CrossRev](CONTRIBUTING.md) for development setup, project constraints, test layers, and the pull-request process. Participation follows the [Code of Conduct](CODE_OF_CONDUCT.md).
+
+Run both offline checks before opening a pull request:
 
 ```bash
-tests/run.sh      # the offline suite: no network, no model
-scripts/lint.sh   # syntax plus shellcheck -S warning
+bash tests/run.sh
+bash scripts/lint.sh
 ```
 
-Both are offline and take seconds. The suite stubs `gh` and `claude` onto PATH, then builds throwaway git repositories with real histories and real bare origins. So each assertion covers what CrossRev did, rather than what it printed.
+Use the repository's [issue templates](.github/ISSUE_TEMPLATE/) for bug reports and feature requests.
 
-`tests/stub/codex` is a deliberate tripwire. It exits loudly instead of running, because the no-config default names codex as reviewer. A fixture whose config failed to load would otherwise reach the real CLI and make a real billed call.
+## Security
 
-The repository root is the tool. `bin/crossrev` reads its libraries, skills and templates from alongside itself, so a checkout is a working installation. [architecture.md](docs/architecture.md) has the file-by-file layout.
+Report vulnerabilities privately through the process in the [security policy](SECURITY.md). Do not open a public issue for a security report.
+
+## License
+
+CrossRev is available under the [MIT License](LICENSE).
