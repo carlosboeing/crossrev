@@ -781,7 +781,7 @@ No review ran, so nothing here is a judgement about the code. Raising the cap in
         head_sha:$sha, harness:$h, model:(if $m == "" then null else $m end),
         effort:(if $e == "" then null else $e end),
         endpoint:(if $ep == "" then null else $ep end),
-        model_reported:null, tokens:null, verdict:null, findings:[]}')"
+        model_reported:null, tokens:null, verdict:null, blocked_reason:null, findings:[]}')"
     comment_id="$(gh_comment_create "$CTX_REPO" "$CTX_PR" \
 "**crossrev — reviewing, $(_pass_label "$pass" "$CTX_MAX_PASSES_PER_CYCLE")**
 
@@ -793,12 +793,13 @@ Reading the diff and any earlier review threads. This comment becomes the pass s
   run_checkpoint
 
   # --- the agent, unless a previous attempt already recorded its output -----
-  local findings verdict model_reported tokens
+  local findings verdict blocked_reason model_reported tokens
   if [[ "$(jq -r '(.findings // []) | length' <<<"$marker")" != "0" \
         && "$(jq -r '.verdict // "null"' <<<"$marker")" != "null" ]]; then
     ui_say "The previous attempt already recorded its findings, so the review is not run again."
     findings="$(jq -c '.findings' <<<"$marker")"
     verdict="$(jq -r '.verdict' <<<"$marker")"
+    blocked_reason="$(jq -r '.blocked_reason // "null"' <<<"$marker")"
     model_reported="$(jq -r '.model_reported // "null"' <<<"$marker")"
   else
     local tmp diff_file prompt_file review_md envelope_file meta prior threads payload
@@ -833,6 +834,7 @@ Reading the diff and any earlier review threads. This comment becomes the pass s
     model_reported="$(jq -r '.model_reported // "null"' "$envelope_file")"
     tokens="$(jq -c '.tokens // null' "$envelope_file")"
     verdict="$(jq -r .verdict <<<"$payload")"
+    blocked_reason="$(jq -r '.blocked_reason // "null"' <<<"$payload")"
 
     # Stable ids, so "already posted" is a set-membership test rather than a
     # guess. The anchor lets a finding still be matched after the line moves.
@@ -859,8 +861,9 @@ Reading the diff and any earlier review threads. This comment becomes the pass s
     # this point needs no second model invocation to recover, which is the
     # difference between a cheap retry and an expensive one.
     marker="$(jq -c --argjson f "$findings" --arg v "$verdict" --arg mr "$model_reported" \
-      --argjson tk "${tokens:-null}" \
+      --arg br "$blocked_reason" --argjson tk "${tokens:-null}" \
       '.findings = $f | .verdict = $v | .tokens = $tk
+       | .blocked_reason = (if $br == "null" then null else $br end)
        | .model_reported = (if $mr == "null" then null else $mr end)' <<<"$marker")"
     gh_comment_edit "$CTX_REPO" "$comment_id" \
 "**crossrev — reviewing, $(_pass_label "$pass" "$CTX_MAX_PASSES_PER_CYCLE")**
@@ -976,7 +979,14 @@ Findings recorded; posting them now.$(state_marker_encode "$(jq -c 'del(.comment
   fi
   run_pass_labels "$pass" "$next"
 
-  printf '  → verdict: %s\n\n' "$verdict"
+  # The reason on the terminal too, for the same reason the resolve leg prints
+  # it: the operator watching the run should not have to open the pull request
+  # to find out what stopped it.
+  if [[ "$verdict" == "blocked" && -n "$blocked_reason" && "$blocked_reason" != "null" ]]; then
+    printf '  → verdict: blocked — %s\n\n' "$blocked_reason"
+  else
+    printf '  → verdict: %s\n\n' "$verdict"
+  fi
   if [[ "$next" == "awaiting-resolution" ]]; then
     ui_say "Nothing was changed in your working tree. To act on these:"
     ui_say "  crossrev resolve --pr $CTX_PR"
@@ -1299,10 +1309,11 @@ _finding_location() {
 # effort, endpoint, timing, tokens — therefore has to live on the marker, and
 # passing the marker is what keeps the two renderings honest about that.
 _review_summary_body() {
-  local findings="$1" marker="$2" n actionable verdict pass
+  local findings="$1" marker="$2" n actionable verdict blocked_reason pass
   n="$(jq 'length' <<<"$findings")"
   actionable="$(run_actionable "$findings")"
   verdict="$(jq -r '.verdict // "issues-remain"' <<<"$marker")"
+  blocked_reason="$(jq -r '.blocked_reason // ""' <<<"$marker")"
   pass="$(jq -r '.pass // 1' <<<"$marker")"
 
   printf '## crossrev review — %s\n\n' "$(_pass_label "$pass" "$CTX_MAX_PASSES_PER_CYCLE")"
@@ -1318,7 +1329,11 @@ _review_summary_body() {
     converged)
       _alert TIP "$(printf '**Converged.** Nothing at or above `min_fix_severity` (%s) remains, so the loop stops here. Findings below the threshold, and pre-existing ones, are reported but cannot keep the loop alive — a loop that cannot converge because of a naming quibble is one nobody leaves switched on.' "$CTX_MIN_FIX_SEVERITY")" ;;
     blocked)
-      _alert WARNING '**The review could not be completed.** The loop halts here and a human is needed. Nothing in this comment is a judgement about the code.' ;;
+      # The reviewer is required by schemas/findings.schema.json to say why it
+      # could not finish, so say it. A halt that withholds its reason gives the
+      # human it is asking for nothing to act on.
+      _alert WARNING "$(printf '**The review could not be completed:** %s The loop halts here and a human is needed. Nothing in this comment is a judgement about the code.' \
+        "${blocked_reason:-No reason was given.}")" ;;
     *)
       _alert CAUTION "$(printf '**%s %s need resolving.** A second agent now verifies every finding below against the codebase and either fixes it, skips it, defers it, or explains why it is wrong. It may change code for the %s at or above `min_fix_severity` (%s); the rest are verified and reported, never silently dropped.' "$n" "$noun" "$actionable" "$CTX_MIN_FIX_SEVERITY")" ;;
   esac

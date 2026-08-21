@@ -317,6 +317,16 @@ is  "a blocked review carries exactly one alert"      "$(alerts_in "$blocked_bod
 has "and it is the amber one"                         "$blocked_body" "> [!WARNING]"
 has "saying a human is needed"                        "$blocked_body" "a human is needed"
 has "and that nothing here judges the code"           "$blocked_body" "Nothing in this comment is a judgement about the code"
+# The reviewer is required by schemas/findings.schema.json to say why it stopped,
+# and the resolve leg two blocks down has named its reason since it shipped. The
+# review leg used to drop the field between the payload and the marker, so the
+# comment asked for a human and told that human nothing.
+has "naming what stopped it"                          "$blocked_body" "the diff would not fetch"
+# On the marker as well as in the prose. `crossrev status` reads
+# `.blocked_reason` off the review marker, so a reason that renders once and is
+# not stored is gone from every later re-render.
+has "and recording it on the marker for a later re-render" \
+  "$blocked_body" '"blocked_reason":"the diff would not fetch"'
 
 run_resolve "$(resolve_payload)"
 resolve_body="$(last_body 9002)"
