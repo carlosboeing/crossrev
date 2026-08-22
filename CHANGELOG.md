@@ -4,6 +4,10 @@ All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepa
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-08-22
+
+Grok is the fourth harness, and the credential rule that shaped automated mode turned out to be one archetype rather than the rule: a refresh token that rotates and is consumed on use is Codex, measured, and not everybody. Harness facts now load from one validated descriptor, the resolve leg runs in its own worktree, and the two hottest marker reads fold into a single `jq`. The rest is the review loop reviewing itself — a blocked pass says why it blocked, a harness failure completes its own claim, and an Antigravity leg is told where the checkout is. **Automated mode is still built and unproven** — proving it end to end remains the `v1.0.0` bar.
+
 ### Added
 
 - **Grok is the fourth harness**, measured as credential archetype C (`expires_in` 21600). `lib/adapters/grok.sh` drives `grok` with `--prompt-file` and an inline `--json-schema`, `dontAsk` on both legs, `--sandbox read-only` plus `--deny Edit --deny Write` for the reviewer, and `--sandbox workspace` plus `--allow Edit --allow Write` for the resolver. `--always-approve`, `--yolo`, `bypassPermissions` and `--dangerously-skip-permissions` are never passed. An authentication rejection (`Not signed in` / `XAI_API_KEY`) is classified as a credential failure naming Grok. The install is pinned at `grok 1.0.5` (`grok --version`: `grok 1.0.5 (5115b46bc909)`). Staging is `{ "kind": "file", "env": "GROK_HOME", "path": "auth.json" }`; `GROK_HOME` relocates `auth.json`. `.grok` is quarantined on Grok's own descriptor entry rather than in `quarantine_shared`, covering `config.toml`, rules and skills a pull request could otherwise merge into the review.
