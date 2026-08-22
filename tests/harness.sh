@@ -262,6 +262,16 @@ marker_comment() {
       created_at:"2026-08-11T00:00:00Z"}'
 }
 
+# The last body written to an issue comment, reconstructed from the stub log.
+# The claim is posted then edited, so the whole log holds several copies.
+last_body() {
+  awk -v pat="issues/comments/$1 -f body=" '
+    index($0, pat)  { buf = substr($0, index($0, pat) + length(pat)); open = 1; next }
+    open && /^(api|gh|repo|pr|secret|issue) / { last = buf; open = 0 }
+    open            { buf = buf "\n" $0 }
+    END             { if (open) last = buf; print last }' "$GH_LOG"
+}
+
 finish() {
   printf '\n  %d passed, %d failed\n' "$pass" "$fail"
   (( fail == 0 ))

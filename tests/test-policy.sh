@@ -761,6 +761,51 @@ no_threads
 err="$("$CROSSREV" review --pr 42 --harness codex 2>&1 >/dev/null)"; rc=$?
 is  "--harness overrides the configured harness"  "$rc" "1"
 has "and the failure names the one that was asked for" "$err" "the codex harness failed"
+is  "and the failed review edits the claim it posted" \
+  "$(count 'method PATCH repos/acme/widget/issues/comments/9001')" "1"
+fail_review_body="$(last_body 9001)"
+has "the edited claim is complete rather than started" "$fail_review_body" '"state":"complete"'
+has "and records the harness error as a blocked review" "$fail_review_body" '"verdict":"blocked"'
+has "naming the tripwire in the comment a reader sees" "$fail_review_body" "test tripwire"
+has "and moves the label the way a blocked review already does" \
+  "$(calls)" "labels[]=crossrev/halted"
+
+# The same gap on the resolve leg: a claim of "resolving" with state started
+# is what a reader of the pull request still sees today.
+fixture_repo; stub_reset
+fail_review_marker="$(jq -cn --arg sha "$FIX_HEAD" --argjson ts "$(date +%s)" '
+  {v:1, leg:"review", pass:1, state:"complete", ts:$ts, done_ts:$ts, run_id:"1",
+   head_sha:$sha, harness:"claude", model:"reviewer-model", model_reported:"reviewer-model",
+   verdict:"issues-remain",
+   findings:[{id:"a1", path:"app.ts", line:2, side:"RIGHT", severity:"high",
+     category:"correctness", pre_existing:false, title:"t", why:"w", fix:"f",
+     anchor:"", thread_id:"T_A", resolution:null, tracked_as:null}]}')"
+routes_baseline "$(marker_comment 9001 "$fail_review_marker" | jq -cs . | payload)" \
+  '[{"name":"crossrev/awaiting-resolution"}]'
+route 'api --method POST repos/*/issues/42/comments*' '{"id":9002}'
+route '*reviewThreads*' "$(threads_response "$(thread_node T_A app.ts 2 false "a1")")"
+err="$("$CROSSREV" resolve --pr 42 --harness codex 2>&1 >/dev/null)"; rc=$?
+is  "a failed resolve still exits 1" "$rc" "1"
+has "and names the harness that failed" "$err" "the codex harness failed"
+is  "and the failed resolve edits the claim it posted" \
+  "$(count 'method PATCH repos/acme/widget/issues/comments/9002')" "1"
+fail_resolve_body="$(last_body 9002)"
+has "the edited resolve claim is complete" "$fail_resolve_body" '"state":"complete"'
+has "and blocked, so a later status read does not see it as mid-flight" \
+  "$fail_resolve_body" '"blocked":true'
+has "naming the tripwire on the resolve comment too" "$fail_resolve_body" "test tripwire"
+has "and replaces awaiting-resolution with halted" "$(calls)" "labels[]=crossrev/halted"
+
+# A failure to report the failure must not replace the harness error.
+fixture_repo; stub_reset
+routes_baseline "$(printf '[]' | payload)"
+route 'api --method POST repos/*/issues/42/comments*' '{"id":9001}'
+route 'api --method PATCH repos/*/issues/comments/*' '!fail'
+no_threads
+err="$("$CROSSREV" review --pr 42 --harness codex 2>&1 >/dev/null)"; rc=$?
+is  "a failed claim edit still exits 1" "$rc" "1"
+has "and still names the harness error first" "$err" "the codex harness failed"
+hasnt "rather than the comment-update error" "$err" "could not update comment"
 
 # --- an endpoint that resolves nowhere is fatal, never a fallback ------
 fixture_repo "$(fixture_default_config | sed 's/^  model: reviewer-model$/  model: reviewer-model\n  endpoint: ghost/')"

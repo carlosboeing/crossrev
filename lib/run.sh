@@ -536,6 +536,50 @@ _run_invoke_abort() {
   rm -f "$idx"
 }
 
+# Complete the claim after a harness failure the orchestrator already holds.
+#
+# A missing completion is the watchdog's mid-flight signal (ADR 0002).
+# A clean harness failure is not mid-flight: the orchestrator has the error and
+# is exiting on purpose. A crash still leaves `state: started`, because this
+# runs only on the known failure path — there is no EXIT trap.
+#
+# The write is best-effort. `gh_comment_edit` and `state_label_add` both call
+# `ui_die`, and a failure to report a failure must not mask the original error.
+# The second and third arguments are the caller's claim comment id and marker.
+_run_report_invoke_failure() {
+  local error="$1" cid="${2:-}" mk="${3:-}"
+  [[ -n "$cid" && -n "$mk" && -n "${CTX_REPO:-}" && -n "${CTX_PR:-}" ]] || return 0
+
+  local now next_marker body findings resolutions pass l
+  now="$(date +%s)"
+  if [[ "$(jq -r '.leg // ""' <<<"$mk")" == "resolve" ]]; then
+    next_marker="$(jq -c --argjson t "$now" --arg e "$error" \
+      '.state = "complete" | .done_ts = $t | .blocked = true | .blocked_reason = $e
+       | del(.comment_id)' <<<"$mk")"
+    resolutions="$(jq -c '.resolutions // []' <<<"$next_marker")"
+    findings="$(jq -c '.findings // []' <<<"$next_marker")"
+    body="$(_resolve_summary_body "$resolutions" "$findings" "" "$next_marker")"
+  else
+    next_marker="$(jq -c --argjson t "$now" --arg e "$error" \
+      '.state = "complete" | .done_ts = $t | .verdict = "blocked" | .blocked_reason = $e
+       | del(.comment_id)' <<<"$mk")"
+    findings="$(jq -c '.findings // []' <<<"$next_marker")"
+    body="$(_review_summary_body "$findings" "$next_marker")"
+  fi
+  gh api --method PATCH "repos/$CTX_REPO/issues/comments/$cid" \
+    -f body="${body}$(state_marker_encode "$next_marker")" >/dev/null 2>&1 || true
+
+  pass="$(jq -r '.pass // 1' <<<"$mk")"
+  for l in awaiting-review awaiting-resolution converged; do
+    gh api --method DELETE "repos/$CTX_REPO/issues/$CTX_PR/labels/crossrev/$l" >/dev/null 2>&1 || true
+  done
+  gh api --method POST "repos/$CTX_REPO/issues/$CTX_PR/labels" \
+    -f "labels[]=crossrev/halted" >/dev/null 2>&1 || true
+  gh api --method POST "repos/$CTX_REPO/issues/$CTX_PR/labels" \
+    -f "labels[]=crossrev/pass-$pass" >/dev/null 2>&1 || true
+  return 0
+}
+
 # run_invoke <out> <harness> <prompt> <schema> <workdir> <model> <effort> <endpoint> <write> <validator> [expect]
 #
 # `write` is yes or no and rides alongside the other leg-derived settings, so
@@ -610,8 +654,11 @@ run_invoke() {
       # failing. Same defect the gh check in preflight exists to avoid — installed
       # is not the same as usable. Authentication is what this fails on most
       # often, so it is what the advice names.
-      ui_die "the $harness harness failed: $(jq -r '.error // "no error reported"' "$out_file")" \
-        "Nothing has been written to the pull request. If the error above mentions authentication, a token or a 401, the harness is installed and cannot log in: on a GitHub-hosted runner its credential comes from a repository secret, so check \`gh secret list\`, and locally check the harness's own login. \`$harness --version\` cannot tell you either way — it answers without a credential."
+      local fail_err
+      fail_err="the $harness harness failed: $(jq -r '.error // "no error reported"' "$out_file")"
+      _run_report_invoke_failure "$fail_err" "${comment_id:-}" "${marker:-}"
+      ui_die "$fail_err" \
+        "If the error above mentions authentication, a token or a 401, the harness is installed and cannot log in: on a GitHub-hosted runner its credential comes from a repository secret, so check \`gh secret list\`, and locally check the harness's own login. \`$harness --version\` cannot tell you either way — it answers without a credential."
     fi
 
     payload="$(jq -c '.payload' "$out_file")"
