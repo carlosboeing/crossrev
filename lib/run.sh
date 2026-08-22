@@ -545,7 +545,9 @@ _run_invoke_abort() {
 #
 # The write is best-effort. `gh_comment_edit` and `state_label_add` both call
 # `ui_die`, and a failure to report a failure must not mask the original error.
-# The second and third arguments are the caller's claim comment id and marker.
+# Removals go through `state_label_remove`, which cannot die; the two adds stay
+# as `gh api` with `|| true` for the same reason. The second and third arguments
+# are the caller's claim comment id and marker.
 _run_report_invoke_failure() {
   local error="$1" cid="${2:-}" mk="${3:-}"
   [[ -n "$cid" && -n "$mk" && -n "${CTX_REPO:-}" && -n "${CTX_PR:-}" ]] || return 0
@@ -571,7 +573,15 @@ _run_report_invoke_failure() {
 
   pass="$(jq -r '.pass // 1' <<<"$mk")"
   for l in awaiting-review awaiting-resolution converged; do
-    gh api --method DELETE "repos/$CTX_REPO/issues/$CTX_PR/labels/crossrev/$l" >/dev/null 2>&1 || true
+    state_label_remove "$CTX_PR" "$CTX_REPO" "crossrev/$l"
+  done
+  state_label_remove "$CTX_PR" "$CTX_REPO" "crossrev/watchdog-retried"
+  # Same sweep `run_pass_labels` does: the grey pill is singular. CTX_LABELS is
+  # the set at ctx_load, which is the one that can still hold a stale pass-*.
+  # shellcheck disable=SC2086  # CTX_LABELS is a space-joined list; splitting is the point
+  for l in ${CTX_LABELS:-}; do
+    [[ "$l" == crossrev/pass-* && "$l" != "crossrev/pass-$pass" ]] || continue
+    state_label_remove "$CTX_PR" "$CTX_REPO" "$l"
   done
   gh api --method POST "repos/$CTX_REPO/issues/$CTX_PR/labels" \
     -f "labels[]=crossrev/halted" >/dev/null 2>&1 || true
@@ -744,7 +754,7 @@ leg_review() {
     return 0
   fi
 
-  local current pass claim stale recovering=0
+  local current pass claim stale recovering=0 redrive=0 done_marker
   current="$(state_current_review_pass "$CTX_MARKERS")"
   claim="$(state_open_claim "$CTX_MARKERS" "$current" review)" || claim=""
 
@@ -763,9 +773,25 @@ leg_review() {
   elif state_is_new_revision "$CTX_MARKERS" "$CTX_HEAD_SHA"; then
     pass=$(( current + 1 ))
   else
-    ui_say "$CTX_REPO#$CTX_PR is already reviewed at ${CTX_HEAD_SHA:0:7} — pass $current, and nothing has changed since."
-    ui_say "Push a revision, or run: crossrev resolve --pr $CTX_PR"
-    return 0
+    # Completing a harness failure takes the claim out of `state_open_claim`
+    # (`state == "started"`), and the head has not moved, so without this the
+    # only remaining arm is "already reviewed". Same shape as
+    # `legs_resolve_redrivable`: a blocked completion is not a settled pass.
+    done_marker="$(state_marker_for "$CTX_MARKERS" "$current" review)"
+    if (( current > 0 )) && legs_review_redrivable "$done_marker"; then
+      recovering=1
+      redrive=1
+      pass="$current"
+      claim="$(jq -c --argjson ts "$(date +%s)" --arg sha "$CTX_HEAD_SHA" \
+        --arg r "${GITHUB_RUN_ID:-local-$$}" \
+        '.state = "started" | .ts = $ts | .done_ts = null | .head_sha = $sha | .run_id = $r
+         | .findings = [] | .verdict = null | .blocked_reason = null
+         | .model_reported = null | .tokens = null' <<<"$done_marker")"
+    else
+      ui_say "$CTX_REPO#$CTX_PR is already reviewed at ${CTX_HEAD_SHA:0:7} — pass $current, and nothing has changed since."
+      ui_say "Push a revision, or run: crossrev resolve --pr $CTX_PR"
+      return 0
+    fi
   fi
 
   # Termination, asked as "should a pass after $((pass-1)) begin?". Pass 3 of a
@@ -830,7 +856,15 @@ ${halt_body}$(state_marker_encode "$(jq -cn --argjson p "$pass" --arg sha "$CTX_
   if (( recovering )); then
     comment_id="$(jq -r '.comment_id' <<<"$claim")"
     marker="$claim"
-    ui_say "Resuming pass $pass — the previous attempt recorded $(jq -r '(.findings // []) | length' <<<"$marker") finding(s)."
+    if (( redrive )); then
+      ui_say "Pass $pass's review ended blocked — driving pass $pass again."
+      gh_comment_edit "$CTX_REPO" "$comment_id" \
+"**crossrev — reviewing, $(_pass_label "$pass" "$CTX_MAX_PASSES_PER_CYCLE")**
+
+Driving the pass again: the previous attempt was blocked. Reading the diff and any earlier review threads. This comment becomes the pass summary when the review finishes.$(state_marker_encode "$(jq -c 'del(.comment_id)' <<<"$marker")")"
+    else
+      ui_say "Resuming pass $pass — the previous attempt recorded $(jq -r '(.findings // []) | length' <<<"$marker") finding(s)."
+    fi
   else
     marker="$(jq -cn --argjson p "$pass" --arg sha "$CTX_HEAD_SHA" \
       --arg r "${GITHUB_RUN_ID:-local-$$}" --argjson ts "$(date +%s)" \
@@ -1482,6 +1516,12 @@ leg_resolve() {
   [[ "$(jq -r '.state // ""' <<<"$review_marker")" == "complete" ]] || ui_die \
     "the pass-$pass review on $CTX_REPO#$CTX_PR did not finish" \
     "Resolving a half-posted review would reply to findings the reviewer may not have finished recording. Re-run: crossrev review --pr $CTX_PR"
+  # A blocked review is complete so this leg used to accept it, then treat an
+  # empty finding list as a convergence and paint the pull request green. The
+  # review is what has to run again, not this leg.
+  [[ "$(jq -r '.verdict // ""' <<<"$review_marker")" != "blocked" ]] || ui_die \
+    "the pass-$pass review on $CTX_REPO#$CTX_PR was blocked" \
+    "A blocked review is not a set of findings to resolve. Once whatever stopped it is fixed, re-run: crossrev review --pr $CTX_PR"
 
   local redrive=""
   if state_current_pass_complete "$CTX_MARKERS" "$pass" resolve; then

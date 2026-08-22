@@ -220,6 +220,25 @@ redrivable yes "a legacy pass with no resolutions recorded re-drives" \
 redrivable no  "a legacy pass that pushed stays refused" \
   '{"leg":"resolve","pass":1,"state":"complete","blocked":false,"commit_sha":"d81a3f2abc"}'
 
+# Completing a harness failure writes verdict blocked, which is what used to
+# make the next review answer "already reviewed" on the same head.
+review_redrivable() {
+  local want="$1" desc="$2"
+  local got; if legs_review_redrivable "$3"; then got=yes; else got=no; fi
+  [[ "$got" == "$want" ]] && ok "$desc" || notok "$desc" "$want" "$got"
+}
+
+review_redrivable yes "a blocked review re-drives once the harness can run" \
+  '{"leg":"review","pass":1,"state":"complete","verdict":"blocked","findings":[]}'
+review_redrivable no  "a review that found issues stays refused" \
+  '{"leg":"review","pass":1,"state":"complete","verdict":"issues-remain","findings":[{"severity":"high"}]}'
+review_redrivable no  "a converged review stays refused" \
+  '{"leg":"review","pass":1,"state":"complete","verdict":"converged","findings":[]}'
+review_redrivable no  "an unfinished review is recovery, not this re-drive" \
+  '{"leg":"review","pass":1,"state":"started","verdict":null,"findings":[]}'
+review_redrivable no  "an empty marker is not redrivable" \
+  ""
+
 # --- the guard itself, end to end -------------------------------------------
 #
 # The predicate is only worth anything wired into the resolve leg, so these

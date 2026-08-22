@@ -174,6 +174,23 @@ legs_resolve_redrivable() {
   [[ "$(jq '[(.resolutions // [])[] | select(.resolution == "deferred" and .crossrev_tracked == "")] | length' <<<"$marker")" != "0" ]]
 }
 
+# May a completed review pass be driven again?
+#
+# Completing a harness failure (or a reviewer returning blocked) is what keeps
+# the watchdog from treating it as mid-flight. Completion is also what the
+# re-run guard reads, so without this a blocked review on an unchanged head
+# answers "already reviewed" and never runs again. Only `verdict: "blocked"`
+# admits a re-drive: a review that recorded findings, or that converged, is
+# settled for this revision.
+#
+# $1 the completed review marker.
+legs_review_redrivable() {
+  local marker="$1"
+  [[ -n "$marker" ]] || return 1
+  [[ "$(jq -r '.state // ""' <<<"$marker")" == "complete" ]] || return 1
+  [[ "$(jq -r '.verdict // ""' <<<"$marker")" == "blocked" ]]
+}
+
 # The loop-state label a finished resolve pass leaves behind.
 #
 # Same question legs_pass_label answers for the review leg, asked of the
