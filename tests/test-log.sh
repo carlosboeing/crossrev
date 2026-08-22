@@ -21,8 +21,10 @@ RUNS_BASE="$XDG_STATE_HOME/crossrev/runs"
 log_init "acme/widget" 99
 is "log_init creates the run directory" \
   "$([[ -d "$RUNS_BASE/acme-widget/pr-99/$(log_run_id)" ]] && echo yes)" "yes"
+# log_run_id rather than a literal local-$$: on a GitHub runner the id is the
+# workflow run's, which is the whole point of the naming.
 is "and names it after the run id the markers carry" "$CROSSREV_RUN_DIR" \
-  "$RUNS_BASE/acme-widget/pr-99/local-$$"
+  "$RUNS_BASE/acme-widget/pr-99/$(log_run_id)"
 is "the run log opens with the run event" "$(wc -l <"$CROSSREV_RUN_DIR/run.log" | tr -d ' ')" "1"
 has "and the line names the repo and pull request" \
   "$(cat "$CROSSREV_RUN_DIR/run.log")" "run start repo=acme/widget pr=99"
