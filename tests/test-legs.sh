@@ -693,4 +693,54 @@ legs_harness_error "$empty" >/dev/null 2>&1 \
 
 rm -f "$cxerr" "$quiet" "$empty"
 
+# --- a review-only harness cannot serve the resolve leg ---------------------
+#
+# opencode names legs: ["review"]. The refusal is a configuration fact, so it
+# happens in run_leg_settings — before the worktree, before any credential is
+# staged, before a harness call can be billed — rather than being discovered
+# mid-run.
+config_opencode_resolves() {
+  cat <<'EOF'
+version: 1
+mode: local
+policy:
+  min_fix_severity: medium
+  max_passes_per_cycle: 3
+  max_files_changed_per_pr: 200
+  max_prs_per_day: 25
+reviewer:
+  harness: claude
+  model: reviewer-model
+resolver:
+  harness: opencode
+  model: resolver-model
+backlog:
+  destination: none
+EOF
+}
+
+ID_GATE="b4c5d6e7"
+gate_review_marker() {
+  jq -cn --arg sha "$FIX_HEAD" --argjson ts "$(( $(date +%s) - 192 ))" --arg a "$ID_GATE" '
+    {v:1, leg:"review", pass:1, state:"complete", ts:$ts, done_ts:($ts + 192), run_id:"1",
+     head_sha:$sha, harness:"claude", model:"reviewer-model", model_reported:null,
+     effort:null, endpoint:null, tokens:null, verdict:"issues-remain",
+     findings:[
+       {id:$a, path:"app.ts", line:2, side:"RIGHT", severity:"high", category:"correctness",
+        pre_existing:false, title:"Unchecked fetch response", why:"w", fix:"f",
+        anchor:"", thread_id:"T_GATE", resolution:null, tracked_as:null}]}'
+}
+
+fixture_repo "$(config_opencode_resolves)"; stub_reset
+routes_baseline "$(marker_comment 9001 "$(gate_review_marker)" | jq -cs . | payload)"
+route '*reviewThreads*' "$(threads_response "$(thread_node T_GATE app.ts 2 false "$ID_GATE")")"
+
+out="$("$CROSSREV" resolve --pr 42 --harness opencode 2>&1)"; rc=$?
+
+is  "the resolve leg refuses a review-only harness" "$rc" "1"
+has "naming the harness and the leg"                "$out" "cannot serve the resolve leg"
+has "and naming the harnesses that can serve it"    "$out" "claude, codex, agy and grok"
+is  "no harness ran on the way out"                 "$(cat "$PROMPT_LOG")" ""
+is  "and stages no credential"                      "$(count 'secret set')" "0"
+
 finish

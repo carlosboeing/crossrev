@@ -267,4 +267,153 @@ is  "an unauthenticated grok run fails"           "$rc" "1"
 has "and CrossRev names it a credential failure"  "$out" "credential failure"
 has "naming Grok in the diagnosis"                "$out" "Grok"
 
+# --- a review leg on the fifth harness --------------------------------------
+#
+# opencode constrains nothing: there is no schema flag, so the schema travels
+# inside the prompt and the adapter extracts JSON from the NDJSON event stream
+# itself. The stub emits what the real CLI measured at 1.18.21 emits, and its
+# tripwires carry the isolation story — this harness grants `edit` and `bash`
+# out of the box, so a leg that ran without the deny config would be the bug.
+config_opencode_reviews() {
+  cat <<'EOF'
+version: 1
+mode: local
+policy:
+  min_fix_severity: medium
+  max_passes_per_cycle: 3
+  max_files_changed_per_pr: 200
+  max_prs_per_day: 25
+reviewer:
+  harness: opencode
+  model: opencode/reviewer-model
+resolver:
+  harness: claude
+  model: resolver-model
+backlog:
+  destination: none
+EOF
+}
+
+# The five recorded stdout shapes feed through extraction: bare JSON, a fence,
+# prose around the JSON, an empty stream, and an error event alone. The first
+# three must yield the same payload; the last two must fail, saying different
+# things.
+
+fixture_repo "$(config_opencode_reviews)"; stub_reset
+routes_baseline "$(printf '[]' | payload)"
+route 'api --method POST repos/*/issues/42/comments*' '{"id":9001}'
+route '*reviewThreads*' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}'
+CROSSREV_REVIEW_PAYLOAD="$(printf '%s' "$REVIEW_PAYLOAD" | payload)"; export CROSSREV_REVIEW_PAYLOAD
+out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
+# Captured before the direct-stub probes below append to the same log.
+opencode_review_argv="$(cat "$ARGV_LOG")"
+
+is  "a review leg runs on opencode"               "$rc" "0"
+has "and names it in the run header"              "$out" "Reviewer: opencode"
+has "it reads the payload out of the concatenated text events" "$out" "verdict: issues-remain"
+is  "and posts the finding it carried"            "$(count 'method POST repos/acme/widget/pulls/42/comments')" "1"
+has "the comment names the harness that produced it" "$(calls)" "opencode"
+
+# The answering model and the whole-run token total come from one `export`
+# call against the sessionID the events carry: input 10 + output 2 +
+# reasoning 1 + cache.read 4 = 17, the arithmetic the CLI itself uses.
+has "the marker records the answering model from the session record" \
+  "$(calls)" '"model_reported":"stub-model"'
+has "the token count sums the whole-run figure"   "$(calls)" '"tokens":17'
+has "the cell names opencode and the answering model" \
+  "$(calls)" '`opencode` · `stub-model`'
+
+has "the leg really did get the review prompt" \
+  "$(cat "$PROMPT_LOG")" "You are the review leg"
+
+# The argument vector, asserted on what the adapter built rather than on the
+# stub's complaints: --format json selects the event stream, --dir names the
+# checkout, and --auto is a blanket bypass that is never passed.
+has "the leg asks for the json event stream"      "$opencode_review_argv" "--format json"
+has "the leg names the checkout as the workspace" "$opencode_review_argv" "--dir"
+has "the leg passes the configured model through" "$opencode_review_argv" "--model opencode/reviewer-model"
+hasnt "a leg is granted no blanket bypass"        "$opencode_review_argv" "--auto"
+
+( unset OPENCODE_CONFIG OPENCODE_CONFIG_DIR
+  "$HERE/stub/opencode" run --format json --dir "$HERE" "prompt" >/dev/null 2>&1 )
+is  "the stub refuses a run with no isolation config" "$?" "96"
+( unset OPENCODE_CONFIG OPENCODE_CONFIG_DIR
+  "$HERE/stub/opencode" run --format json --auto --dir "$HERE" "prompt" >/dev/null 2>&1 )
+is  "the stub still refuses --auto, which is a blanket bypass" "$?" "96"
+
+deny_cfg="$(mktemp)"
+printf '{"permission":{"edit":"deny","bash":"deny"}}' >"$deny_cfg"
+( export OPENCODE_CONFIG="$deny_cfg" OPENCODE_CONFIG_DIR="$HERE"
+  unset CROSSREV_REVIEW_PAYLOAD
+  "$HERE/stub/opencode" run --format json --dir "$HERE" "prompt" >/dev/null 2>&1 )
+is  "and accepts the flags and config the adapter uses" "$?" "1"
+rm -f "$deny_cfg"
+
+# A fence around the JSON must change nothing.
+fixture_repo "$(config_opencode_reviews)"; stub_reset
+routes_baseline "$(printf '[]' | payload)"
+route 'api --method POST repos/*/issues/42/comments*' '{"id":9001}'
+route '*reviewThreads*' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}'
+CROSSREV_REVIEW_PAYLOAD="$(printf '%s' "$REVIEW_PAYLOAD" | payload)"; export CROSSREV_REVIEW_PAYLOAD
+CROSSREV_OPENCODE_MODE=fenced; export CROSSREV_OPENCODE_MODE
+out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
+unset CROSSREV_OPENCODE_MODE
+is  "a fenced answer still reviews cleanly"       "$rc" "0"
+is  "and posts the same finding"                  "$(count 'method POST repos/acme/widget/pulls/42/comments')" "1"
+
+# Prose wrapped around the JSON must change nothing either — ladder step three.
+fixture_repo "$(config_opencode_reviews)"; stub_reset
+routes_baseline "$(printf '[]' | payload)"
+route 'api --method POST repos/*/issues/42/comments*' '{"id":9001}'
+route '*reviewThreads*' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}'
+CROSSREV_REVIEW_PAYLOAD="$(printf '%s' "$REVIEW_PAYLOAD" | payload)"; export CROSSREV_REVIEW_PAYLOAD
+CROSSREV_OPENCODE_MODE=prose; export CROSSREV_OPENCODE_MODE
+out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
+unset CROSSREV_OPENCODE_MODE
+is  "prose around the JSON still reviews cleanly" "$rc" "0"
+is  "and posts the same finding"                  "$(count 'method POST repos/acme/widget/pulls/42/comments')" "1"
+
+# An empty stream is not a malformed answer — there is no answer at all — and
+# the two are diagnosed differently. This is the shape the real CLI produces
+# when it answers nothing, and it must not read as a schema mismatch.
+fixture_repo "$(config_opencode_reviews)"; stub_reset
+routes_baseline "$(printf '[]' | payload)"
+route 'api --method POST repos/*/issues/42/comments*' '{"id":9001}'
+route '*reviewThreads*' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}'
+CROSSREV_REVIEW_PAYLOAD="$(printf '%s' "$REVIEW_PAYLOAD" | payload)"; export CROSSREV_REVIEW_PAYLOAD
+CROSSREV_OPENCODE_MODE=empty; export CROSSREV_OPENCODE_MODE
+out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
+unset CROSSREV_OPENCODE_MODE
+is  "a run that answered nothing fails"           "$rc" "1"
+has "and says there was no answer, distinctly"    "$out" "produced no answer"
+hasnt "and never calls it a schema mismatch"      "$out" "does not match the schema"
+
+# An error event alone is how an authentication rejection reaches stdout, with
+# AI_APICallError naming Unauthorized on stderr behind it. It is classified as
+# a credential failure naming opencode, not a generic harness error.
+fixture_repo "$(config_opencode_reviews)"; stub_reset
+routes_baseline "$(printf '[]' | payload)"
+route 'api --method POST repos/*/issues/42/comments*' '{"id":9001}'
+route '*reviewThreads*' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}'
+CROSSREV_REVIEW_PAYLOAD="$(printf '%s' "$REVIEW_PAYLOAD" | payload)"; export CROSSREV_REVIEW_PAYLOAD
+CROSSREV_OPENCODE_MODE=error; export CROSSREV_OPENCODE_MODE
+out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
+unset CROSSREV_OPENCODE_MODE
+is  "an unauthenticated opencode run fails"       "$rc" "1"
+has "and CrossRev names it a credential failure"  "$out" "credential failure"
+has "naming opencode in the diagnosis"            "$out" "rejected its credential"
+
+# The session record is telemetry, not the answer: if the export call fails,
+# both fields fall back to null and the review itself stands.
+fixture_repo "$(config_opencode_reviews)"; stub_reset
+routes_baseline "$(printf '[]' | payload)"
+route 'api --method POST repos/*/issues/42/comments*' '{"id":9001}'
+route '*reviewThreads*' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}'
+CROSSREV_REVIEW_PAYLOAD="$(printf '%s' "$REVIEW_PAYLOAD" | payload)"; export CROSSREV_REVIEW_PAYLOAD
+CROSSREV_OPENCODE_NO_EXPORT=1; export CROSSREV_OPENCODE_NO_EXPORT
+out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
+unset CROSSREV_OPENCODE_NO_EXPORT
+is  "a failed session export costs the leg nothing" "$rc" "0"
+has "and the marker records no answering model"   "$(calls)" '"model_reported":null'
+
 finish
