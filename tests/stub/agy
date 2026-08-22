@@ -23,15 +23,31 @@ set -uo pipefail
 
 prompt=""
 saw_print=0
+add_dir=""
 while (( $# )); do
   case "$1" in
     --print|--prompt) prompt="${2:-}"; saw_print=1; shift 2 ;;
+    --add-dir)
+      (( saw_print )) && { printf 'test stub: %s came after --print, so the real CLI would have read it as the prompt\n' "$1" >&2; exit 96; }
+      add_dir="${2:-}"; shift 2 ;;
     --output-format|--json-schema|--model|--effort|--mode)
       (( saw_print )) && { printf 'test stub: %s came after --print, so the real CLI would have read it as the prompt\n' "$1" >&2; exit 96; }
       shift 2 ;;
     *) shift ;;
   esac
 done
+
+# The real CLI keeps its own project root and ignores the shell's working
+# directory, so a leg without --add-dir resolves relative paths against $HOME
+# and cannot read the checkout. Refusing here is what stops that shipping again.
+if [[ -z "$add_dir" ]]; then
+  printf 'test stub: --add-dir is required; without it the real CLI roots itself at $HOME, not the checkout\n' >&2
+  exit 96
+fi
+if [[ ! -d "$add_dir" ]]; then
+  printf 'test stub: --add-dir must name a real directory, got %s\n' "$add_dir" >&2
+  exit 96
+fi
 
 [[ -n "${CROSSREV_PROMPT_LOG:-}" ]] && printf '%s' "$prompt" >"$CROSSREV_PROMPT_LOG"
 

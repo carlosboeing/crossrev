@@ -46,6 +46,8 @@ route 'api --method POST repos/*/issues/42/comments*' '{"id":9001}'
 route '*reviewThreads*' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}'
 CROSSREV_REVIEW_PAYLOAD="$(printf '%s' "$REVIEW_PAYLOAD" | payload)"; export CROSSREV_REVIEW_PAYLOAD
 out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
+# Captured before the direct-stub probes below append to the same log.
+agy_review_argv="$(cat "$ARGV_LOG")"
 
 is  "a review leg runs on agy"                    "$rc" "0"
 has "and names it in the run header"              "$out" "Reviewer: agy"
@@ -73,11 +75,21 @@ has "the leg really did get the review prompt" \
 ( unset CROSSREV_REVIEW_PAYLOAD CROSSREV_HARNESS_PAYLOAD
   "$HERE/stub/agy" --print "prompt" --output-format json >/dev/null 2>&1 )
 is  "the stub still refuses a flag placed after --print" "$?" "96"
+
+# Antigravity keeps its own project root and ignores the shell's working
+# directory. Without --add-dir it resolved a relative path against $HOME and the
+# permission layer refused it, which read as a harness that cannot resolve at
+# all. Asserted on the captured argv, because the leg only shows the stub's
+# stderr on the error path.
+has "the agy leg names the checkout as the workspace" "$agy_review_argv" "--add-dir"
+( unset CROSSREV_REVIEW_PAYLOAD CROSSREV_HARNESS_PAYLOAD
+  "$HERE/stub/agy" --output-format json --print "prompt" >/dev/null 2>&1 )
+is  "and the stub refuses a leg that omits it"        "$?" "96"
 # 1 rather than 0, and deliberately: the order is accepted, and it then fails for
 # the ordinary reason — no canned payload was set for a bare invocation. What
 # matters is that it is not 96.
 ( unset CROSSREV_REVIEW_PAYLOAD CROSSREV_HARNESS_PAYLOAD
-  "$HERE/stub/agy" --output-format json --print "prompt" >/dev/null 2>&1 )
+  "$HERE/stub/agy" --output-format json --add-dir "$HERE" --print "prompt" >/dev/null 2>&1 )
 is  "and accepts the order the adapter uses"            "$?" "1"
 
 # --- no model, and that is not a failure ------------------------------------
