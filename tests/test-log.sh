@@ -81,12 +81,16 @@ touch -t 202001010000 "$old_run/run.log" "$old_run"
 fresh_run="$RUNS_BASE/acme-widget/pr-7/local-88888"
 mkdir -p "$fresh_run"
 printf 'fresh\n' >"$fresh_run/run.log"
-log_sweep 14
+# shellcheck disable=SC2034  # read by log_sweep in lib/log.sh
+CROSSREV_LOG_RETENTION_DAYS=14
+log_sweep
 is "the sweep removes a run directory older than the window" \
   "$([[ -d "$old_run" ]] && echo present || echo gone)" "gone"
 is "and leaves a recent one alone" \
   "$([[ -f "$fresh_run/run.log" ]] && echo present || echo gone)" "present"
-log_sweep not-a-number
+# shellcheck disable=SC2034  # read by log_sweep in lib/log.sh
+CROSSREV_LOG_RETENTION_DAYS=not-a-number
+log_sweep
 is "a non-numeric window falls back to the default rather than failing" "$?" "0"
 is "and still leaves the recent directory alone" \
   "$([[ -f "$fresh_run/run.log" ]] && echo present || echo gone)" "present"

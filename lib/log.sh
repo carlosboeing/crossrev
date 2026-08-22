@@ -102,7 +102,7 @@ log_redact_file() {
 # mtime of the directory moves with every file written into it, so a run in
 # progress never reads as old.
 log_sweep() {
-  local days="${1:-${CROSSREV_LOG_RETENTION_DAYS:-14}}"
+  local days="${CROSSREV_LOG_RETENTION_DAYS:-14}"
   local base="${XDG_STATE_HOME:-$HOME/.local/state}/crossrev/runs"
   [[ -d "$base" ]] || return 0
   [[ "$days" =~ ^[0-9]+$ ]] || days=14
