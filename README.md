@@ -205,7 +205,7 @@ CrossRev uses the same agents and protocol in both modes. The trigger and truste
 | Runner | Your machine | GitHub-hosted or self-hosted |
 
 > [!CAUTION]
-> Do not use a **persistent self-hosted runner** for a public repository because public PRs may contain text designed to manipulate an AI agent. A successful prompt injection could expose local credentials or change files used by later jobs. GitHub warns that self-hosted runners can be persistently compromised and should almost never be used for public repositories in its [secure-use guidance](https://docs.github.com/en/actions/reference/security/secure-use#hardening-for-self-hosted-runners). Use a **GitHub-hosted runner** or a **disposable self-hosted runner** that isolates each job and erases all state afterward.
+> CrossRev **does not support self-hosted runners for public repositories** because self-hosted mode relies on harness logins stored on a persistent runner. Public PRs may contain text designed to manipulate an AI agent, and a successful prompt injection could expose those credentials or change files used by later jobs. GitHub warns that self-hosted runners can be persistently compromised and should almost never be used for public repositories in its [secure-use guidance](https://docs.github.com/en/actions/reference/security/secure-use#hardening-for-self-hosted-runners). Use a **GitHub-hosted runner** for public repositories.
 
 Automated mode starts with two commands. The second prints every file, secret, and label it would change before asking for confirmation:
 
@@ -257,7 +257,7 @@ CrossRev checks every push target before anything leaves the machine. The target
 
 The loop enforces the configured severity threshold and pass limit. CrossRev checks the `crossrev/stop` label before starting each agent. The label prevents the next agent from starting but does not cancel one already in progress.
 
-Do not use a **persistent self-hosted runner** for a public repository because public PRs may contain text designed to manipulate an AI agent. A successful prompt injection could expose local credentials or change files used by later jobs. GitHub warns that self-hosted runners can be persistently compromised and should almost never be used for public repositories in its [secure-use guidance](https://docs.github.com/en/actions/reference/security/secure-use#hardening-for-self-hosted-runners). Use a **GitHub-hosted runner** or a **disposable self-hosted runner** that isolates each job and erases all state afterward.
+CrossRev **does not support self-hosted runners for public repositories** because self-hosted mode relies on harness logins stored on a persistent runner. Public PRs may contain text designed to manipulate an AI agent, and a successful prompt injection could expose those credentials or change files used by later jobs. GitHub warns that self-hosted runners can be persistently compromised and should almost never be used for public repositories in its [secure-use guidance](https://docs.github.com/en/actions/reference/security/secure-use#hardening-for-self-hosted-runners). Use a **GitHub-hosted runner** for public repositories.
 
 CrossRev reconstructs every pass from the pull request. Hidden markers record the revision, findings, resolutions, and execution details. A retry reads those markers and continues without duplicating completed writes.
 
