@@ -779,7 +779,12 @@ run_invoke() {
     # branch below gets to look at the code.
     rc=0
     problem="$("$validator" "$payload" "$expect")" || rc=$?
-    if (( rc == 0 )); then cred_discard; rm -f "$snap_index"; log_transcripts_clear; return 0; fi
+    # Transcripts stay until the leg itself succeeds. Clearing here used to
+    # drop them before a later fatal path — a refused commit, a failed thread
+    # reply, a failed marker write — which is still the same failed leg the
+    # files exist to diagnose. log_transcripts_clear runs at the end of
+    # leg_review and leg_resolve, once the pass is recorded.
+    if (( rc == 0 )); then cred_discard; rm -f "$snap_index"; return 0; fi
 
     if (( rc == 2 )); then
       if (( semantic_budget > 0 )); then
@@ -1213,6 +1218,7 @@ Findings recorded; posting them now.$(state_marker_encode "$(jq -c 'del(.comment
   else
     (( no_tips )) || run_upgrade_nudge
   fi
+  log_transcripts_clear
   return 0
 }
 
@@ -2293,6 +2299,7 @@ Pushed \`${commit_sha:0:7}\`; replying to each thread now.$(state_marker_encode 
   # ~/.local. Four of those levels are ours to remove and two are not.
   rmdir "$(dirname "$wt_dir")" 2>/dev/null || true
   CROSSREV_WORKTREE=""
+  log_transcripts_clear
   return 0
 }
 

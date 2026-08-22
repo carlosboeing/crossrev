@@ -48,6 +48,16 @@ log_run_dir() {
     "${XDG_STATE_HOME:-$HOME/.local/state}" "$slug" "$pr" "$(log_run_id)"
 }
 
+# Create a file that is 0600 from birth. Callers that then `>"$f"` truncate in
+# place, so the mode is never briefly the process umask (0644 under 022).
+# Same convention as lib/auth.sh and lib/credentials.sh: umask rather than
+# create-then-chmod, so nothing ever reads a file that was briefly wider.
+log_create_private() {
+  local f="$1"
+  [[ -n "$f" ]] || return 0
+  (umask 077; : >"$f") 2>/dev/null || true
+}
+
 # Create the run directory and sweep expired ones. Idempotent within a process:
 # `crossrev cycle` runs both legs in one invocation, and the second leg's
 # ctx_load must not restart the record the first began.
@@ -55,7 +65,7 @@ log_init() {
   local repo="$1" pr="$2"
   [[ -z "$CROSSREV_RUN_DIR" ]] || return 0
   CROSSREV_RUN_DIR="$(log_run_dir "$repo" "$pr")"
-  mkdir -p "$CROSSREV_RUN_DIR" 2>/dev/null || { CROSSREV_RUN_DIR=""; return 0; }
+  (umask 077; mkdir -p "$CROSSREV_RUN_DIR") 2>/dev/null || { CROSSREV_RUN_DIR=""; return 0; }
   log_sweep
   log_event run "start repo=$repo pr=$pr"
   return 0
@@ -68,6 +78,7 @@ log_init() {
 log_event() {
   local phase="$1" detail="${2:-}"
   [[ -n "$CROSSREV_RUN_DIR" ]] || return 0
+  [[ -f "$CROSSREV_RUN_DIR/run.log" ]] || log_create_private "$CROSSREV_RUN_DIR/run.log"
   printf '%s %s %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$phase" "$detail" \
     | log_redact >>"$CROSSREV_RUN_DIR/run.log" 2>/dev/null || true
   return 0
@@ -79,7 +90,11 @@ log_event() {
 # expected to hold: a harness echoing its environment on a failure path is the
 # case this exists for.
 log_redact() {
-  sed -E \
+  # Byte-wise: under a UTF-8 locale, BSD and GNU sed abort on the first byte
+  # that is not valid UTF-8 (`illegal byte sequence`), which is exactly the
+  # binary noise a failing harness dumps. LC_ALL=C keeps the ASCII token
+  # patterns matching and lets the rest of the file through.
+  LC_ALL=C sed -E \
     -e 's/(sk-ant-[A-Za-z0-9_-]{6})[A-Za-z0-9_-]+/\1…[redacted]/g' \
     -e 's/(github_pat_[A-Za-z0-9_]{6})[A-Za-z0-9_]+/\1…[redacted]/g' \
     -e 's/(gh[pousr]_[A-Za-z0-9]{6})[A-Za-z0-9]+/\1…[redacted]/g' \
@@ -89,11 +104,22 @@ log_redact() {
 
 # Redact a file in place. Through a temp file rather than sed -i, because BSD
 # and GNU sed spell in-place editing differently and this runs on both.
+#
+# Fails closed: a filter error must not leave the original on disk. The
+# unredacted copy is replaced with a notice, and the caller still sees
+# return 0 — this file must not fail the EXIT trap or a harness-error path.
 log_redact_file() {
   local f="$1" tmp
   [[ -f "$f" ]] || return 0
   tmp="$(mktemp)" || return 0
-  log_redact <"$f" >"$tmp" && mv "$tmp" "$f" || rm -f "$tmp"
+  if log_redact <"$f" >"$tmp"; then
+    mv "$tmp" "$f"
+  else
+    rm -f "$tmp"
+    log_create_private "$f"
+    printf 'redaction failed; original discarded\n' >"$f"
+    log_event redact "failed $f"
+  fi
   return 0
 }
 
@@ -125,9 +151,16 @@ log_transcripts_kept() { [[ "$CROSSREV_KEEP_TRANSCRIPTS" == "1" ]]; }
 # adapters fall back to anonymous temp files then, which is the behaviour every
 # caller of an adapter outside a run already has.
 log_transcript_base() {
-  local attempt="$1"
+  local attempt="$1" base
   [[ -n "$CROSSREV_RUN_DIR" && -n "$CROSSREV_TRANSCRIPT_LEG" ]] || return 1
-  printf '%s/%s.attempt-%s' "$CROSSREV_RUN_DIR" "$CROSSREV_TRANSCRIPT_LEG" "$attempt"
+  printf -v base '%s/%s.attempt-%s' "$CROSSREV_RUN_DIR" "$CROSSREV_TRANSCRIPT_LEG" "$attempt"
+  # Pre-create so the adapters' `>"$out"` redirects inherit 0600. Codex also
+  # writes a .payload; the empty file is harmless for the others and is
+  # swept with the rest of the stem.
+  log_create_private "$base.stdout"
+  log_create_private "$base.stderr"
+  log_create_private "$base.payload"
+  printf '%s' "$base"
 }
 
 # Delete one attempt's transcripts, or every attempt's for the leg with no $1.

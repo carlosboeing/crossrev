@@ -25,7 +25,10 @@ is "log_init creates the run directory" \
 # workflow run's, which is the whole point of the naming.
 is "and names it after the run id the markers carry" "$CROSSREV_RUN_DIR" \
   "$RUNS_BASE/acme-widget/pr-99/$(log_run_id)"
+file_mode() { stat -c '%a' "$1" 2>/dev/null || stat -f '%Lp' "$1"; }
+is "the run directory is owner-only" "$(file_mode "$CROSSREV_RUN_DIR")" "700"
 is "the run log opens with the run event" "$(wc -l <"$CROSSREV_RUN_DIR/run.log" | tr -d ' ')" "1"
+is "and the run log is owner-only" "$(file_mode "$CROSSREV_RUN_DIR/run.log")" "600"
 has "and the line names the repo and pull request" \
   "$(cat "$CROSSREV_RUN_DIR/run.log")" "run start repo=acme/widget pr=99"
 
@@ -68,12 +71,29 @@ is  "ordinary text passes through unchanged" "$(printf '%s\n' "$plain" | log_red
 is  "a short lookalike is left alone" \
   "$(printf 'ghp_abc is too short\n' | log_redact)" "ghp_abc is too short"
 
+# Binary noise under a UTF-8 locale is the case the filter exists for: without
+# LC_ALL=C, sed aborts on the first invalid byte and the token after it survives.
+bin_leak="$(printf 'x \xff\xfe ghp_abc123def456ghi789TOKEN\n')"
+bin_redacted="$(printf '%s' "$bin_leak" | LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 log_redact)"
+hasnt "a token after non-UTF-8 bytes does not survive" "$bin_redacted" "ghi789TOKEN"
+has   "and the prefix still names the kind"            "$bin_redacted" "ghp_abc123…[redacted]"
+
 f="$(mktemp)"
 printf 'header\ntoken ghp_abc123def456ghi789TOKEN\nfooter\n' >"$f"
 log_redact_file "$f"
 hasnt "log_redact_file redacts in place" "$(cat "$f")" "ghi789TOKEN"
 has   "and keeps the surrounding lines"    "$(cat "$f")" "footer"
 rm -f "$f"
+
+f="$(mktemp)"
+printf 'token ghp_abc123def456ghi789TOKEN\n' >"$f"
+tmpbin="$(mktemp -d)"
+printf '#!/bin/sh\nexit 1\n' >"$tmpbin/sed"
+chmod +x "$tmpbin/sed"
+( PATH="$tmpbin:$PATH"; log_redact_file "$f" )
+hasnt "a failed filter does not leave the original" "$(cat "$f")" "ghi789TOKEN"
+has   "and records that the original was discarded" "$(cat "$f")" "redaction failed; original discarded"
+rm -rf "$f" "$tmpbin"
 
 # --- the sweep ---------------------------------------------------------------
 old_run="$RUNS_BASE/acme-widget/pr-7/local-99999"
@@ -135,6 +155,7 @@ rd="$(find "$RUNS_BASE/acme-widget/pr-42" -mindepth 1 -maxdepth 1 -type d | head
 is  "the transcript survives a successful leg under the flag" \
   "$([[ -s "$rd/review.attempt-1.stdout" ]] && echo yes)" "yes"
 has "and it holds what the harness printed" "$(cat "$rd/review.attempt-1.stdout")" "modelUsage"
+is  "and the transcript is owner-only" "$(file_mode "$rd/review.attempt-1.stdout")" "600"
 
 # --- logs.keep_transcripts: true keeps them without the flag ------------------
 rm -rf "$RUNS_BASE"
@@ -209,5 +230,33 @@ has "and exits clean"                  "$runlog" "push exit=0"
 has "and the worktree removal closes the record" "$runlog" "worktree removed"
 is  "and a successful resolve keeps no transcript" \
   "$(find "$rd" -name 'resolve.attempt-*' | wc -l | tr -d ' ')" "0"
+
+# --- a refused commit still keeps the transcript -----------------------------
+#
+# Clearing on a successful invoke used to drop the files before gh_commit_and_push
+# could fail, so a hook-refused commit — the case that motivated the record —
+# left nothing to read. The files now survive until the leg itself succeeds.
+rm -rf "$RUNS_BASE"
+fixture_repo "$(fixture_config local medium; printf 'git:\n  hooks: run\n')"
+stub_reset
+mkdir -p "$FIX_DIR/.git/hooks"
+printf '#!/usr/bin/env bash\nprintf "commit-msg hook says no\\n" >&2\nexit 1\n' \
+  >"$FIX_DIR/.git/hooks/commit-msg"
+chmod +x "$FIX_DIR/.git/hooks/commit-msg"
+routes_baseline "$(marker_comment 9001 "$(review_marker_done)" | jq -cs . | payload)"
+route 'api --method POST repos/*/issues/42/comments*' '{"id":9002}'
+route '*reviewThreads*' "$(threads_response "$(thread_node T_A app.ts 2 false "a1b2c3d4")")"
+route '*resolveReviewThread*' '{"data":{"resolveReviewThread":{"thread":{"isResolved":true}}}}'
+route 'api --method POST repos/*/pulls/42/comments/*/replies*' '{"id":6001}'
+CROSSREV_RESOLVE_PAYLOAD="$(printf '%s' "$RESOLVE_PAYLOAD" | payload)"; export CROSSREV_RESOLVE_PAYLOAD
+CROSSREV_RESOLVE_EDIT="$(mktemp)"
+printf 'printf "export const ok = 2\\n" >app.ts\n' >"$CROSSREV_RESOLVE_EDIT"
+export CROSSREV_RESOLVE_EDIT
+out="$("$CROSSREV" resolve --pr 42 2>&1)"; rc=$?
+
+is  "a refused commit still fails the leg" "$rc" "1"
+rd="$(find "$RUNS_BASE/acme-widget/pr-42" -mindepth 1 -maxdepth 1 -type d | head -1)"
+is  "and the resolve transcript is kept" \
+  "$([[ -f "$rd/resolve.attempt-1.stdout" ]] && echo yes)" "yes"
 
 finish
