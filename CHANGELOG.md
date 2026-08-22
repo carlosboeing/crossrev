@@ -4,6 +4,14 @@ All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepa
 
 ## [Unreleased]
 
+### Changed
+
+- **`--harness` is documented where a reader is deciding which harness to run, not only under configuration.** `README.md` showed the override once, in the configuration section, which is the section somebody reads after they have already committed to a setup. Trying a second harness against a real pull request is the cheapest way to find out whether the findings are any good, so the flag now appears twice more: in `### Review a pull request`, immediately after the first `crossrev review` example, and in `## Harness support`, as a two-line block passing it to `review` and `resolve` separately. The per-leg form is deliberate — a pairing is two choices, and the single-name form on `cycle` collapses it ([#102](https://github.com/carlosboeing/crossrev/issues/102)).
+
+- **Both documents now name the four harnesses `--harness` accepts, and say why `kimi` is not one of them.** `docs/usage.md` listed `claude|codex|agy`, which predates Grok and never covered Kimi. Kimi appears in the README's credential table but has no adapter behind it — `lib/run.sh` refuses it with "there is no adapter for the harness 'kimi'" and points at `endpoints:` — so a reader picking a name out of that table had no way to know which half of it the flag would take.
+
+- **`## Harness support` says what a local run needs before it shows the credential table.** The table's lifetime and ephemeral-runner columns are automated-mode facts, and a 56-minute row reads as a warning about Antigravity generally. Locally a harness needs its own CLI installed and logged in the way it already is: `lib/preflight.sh` checks only that the binary reports a version, and `lib/sandbox.sh` quarantines paths relative to the checkout rather than `$HOME`, so the operator's login is untouched. The table is now introduced as the separate question it is.
+
 ## [0.4.0] — 2026-08-22
 
 Grok is the fourth harness, and the credential rule that shaped automated mode turned out to be one archetype rather than the rule: a refresh token that rotates and is consumed on use is Codex, measured, and not everybody. Harness facts now load from one validated descriptor, the resolve leg runs in its own worktree, and the two hottest marker reads fold into a single `jq`. The rest is the review loop reviewing itself — a blocked pass says why it blocked, a harness failure completes its own claim, and an Antigravity leg is told where the checkout is. **Automated mode is still built and unproven** — proving it end to end remains the `v1.0.0` bar.
