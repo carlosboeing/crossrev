@@ -205,7 +205,7 @@ CrossRev uses the same agents and protocol in both modes. The trigger and truste
 | Runner | Your machine | GitHub-hosted or self-hosted |
 
 > [!CAUTION]
-> CrossRev **does not support self-hosted runners for public repositories** because self-hosted mode relies on harness logins stored on a persistent runner. Public PRs can carry prompt injections that expose credentials or change files used by later jobs. GitHub warns that self-hosted runners can be persistently compromised and should almost never be used for public repositories in its [secure-use guidance](https://docs.github.com/en/actions/reference/security/secure-use#hardening-for-self-hosted-runners). Use a **GitHub-hosted runner** for public repositories.
+> CrossRev **supports self-hosted runners**, but public repositories require stricter isolation. Public PRs can carry prompt injections that expose credentials or change files used by later jobs. GitHub warns that self-hosted runners can be persistently compromised and should generally not be used for public repositories in its [secure-use guidance](https://docs.github.com/en/actions/reference/security/secure-use#hardening-for-self-hosted-runners). For public repositories, use a **GitHub-hosted runner** or a fresh, [ephemeral self-hosted runner](https://docs.github.com/en/actions/reference/runners/self-hosted-runners#ephemeral-runners-for-autoscaling) that handles one job and is destroyed afterward. A container alone is not sufficient if it can reach host credentials or shared state.
 
 Automated mode starts with two commands. The second prints every file, secret, and label it would change before asking for confirmation:
 
@@ -215,8 +215,6 @@ crossrev init
 ```
 
 Automated mode reviews branches in the repository, including Dependabot branches. It refuses fork pull requests because GitHub withholds repository secrets from fork workflows. Local review supports forks, and local resolution supports them when maintainer edits are enabled.
-
-**Automated mode remains unproven end to end.** No repository has installed the generated workflows yet. Proving this path is the current `v1.0.0` requirement in the [roadmap](docs/ROADMAP.md).
 
 ## Harness support
 
@@ -257,7 +255,7 @@ CrossRev checks every push target before anything leaves the machine. The target
 
 The loop enforces the configured severity threshold and pass limit. CrossRev checks the `crossrev/stop` label before starting each agent. The label prevents the next agent from starting but does not cancel one already in progress.
 
-CrossRev **does not support self-hosted runners for public repositories** because self-hosted mode relies on harness logins stored on a persistent runner. Public PRs can carry prompt injections that expose credentials or change files used by later jobs. GitHub warns that self-hosted runners can be persistently compromised and should almost never be used for public repositories in its [secure-use guidance](https://docs.github.com/en/actions/reference/security/secure-use#hardening-for-self-hosted-runners). Use a **GitHub-hosted runner** for public repositories.
+CrossRev **supports self-hosted runners**, but public repositories require stricter isolation. Public PRs can carry prompt injections that expose credentials or change files used by later jobs. GitHub warns that self-hosted runners can be persistently compromised and should generally not be used for public repositories in its [secure-use guidance](https://docs.github.com/en/actions/reference/security/secure-use#hardening-for-self-hosted-runners). For public repositories, use a **GitHub-hosted runner** or a fresh, [ephemeral self-hosted runner](https://docs.github.com/en/actions/reference/runners/self-hosted-runners#ephemeral-runners-for-autoscaling) that handles one job and is destroyed afterward. A container alone is not sufficient if it can reach host credentials or shared state.
 
 CrossRev reconstructs every pass from the pull request. Hidden markers record the revision, findings, resolutions, and execution details. A retry reads those markers and continues without duplicating completed writes.
 
