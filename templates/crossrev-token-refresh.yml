@@ -50,6 +50,7 @@ jobs:
         with:
           app-id: ${{ secrets.CROSSREV_REFRESH_APP_ID }}
           private-key: ${{ secrets.CROSSREV_REFRESH_APP_PRIVATE_KEY }}
+          skip-token-revoke: true
 
       # Only CrossRev's own source is checked out. The repository under review
       # never appears in this job, which is what keeps it free of anything a

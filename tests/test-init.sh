@@ -152,6 +152,25 @@ hasnt "and no deploy key is referenced"             "$wf" "CROSSREV_SOURCE_KEY"
 has "the resolve workflow shares the review workflow's group" \
   "$(cat .github/workflows/crossrev-resolve.yml)" "group: crossrev-pr-\${{ github.event.pull_request.number }}"
 
+# The token is revoked once. The explicit `DELETE installation/token` step
+# closes the write window at the end of the job; `skip-token-revoke` stops the
+# action's post-job from trying a second time and annotating
+# "Token revocation failed: Bad credentials".
+for wf in review resolve token-refresh; do
+  src="$(cat "$HERE/../templates/crossrev-$wf.yml")"
+  has "crossrev-$wf.yml still revokes the token itself" "$src" "DELETE installation/token"
+  has "and tells the action not to revoke it again" "$src" "skip-token-revoke: true"
+done
+wd="$(cat "$HERE/../templates/crossrev-watchdog.yml")"
+hasnt "the watchdog has no explicit revoke of its own" "$wd" "DELETE installation/token"
+hasnt "so it does not skip the action's post-job revocation" "$wd" "skip-token-revoke"
+has "init keeps skip-token-revoke on the review workflow" \
+  "$(cat .github/workflows/crossrev-review.yml)" "skip-token-revoke: true"
+has "and on the resolve workflow" \
+  "$(cat .github/workflows/crossrev-resolve.yml)" "skip-token-revoke: true"
+hasnt "and does not add it to the watchdog" \
+  "$(cat .github/workflows/crossrev-watchdog.yml)" "skip-token-revoke"
+
 # The generated config states where deferred work goes, so `auto` is a bootstrap
 # convenience rather than a runtime mode.
 has "the generated config names the resolved backlog" "$(cat .github/crossrev.yml)" "destination: github_issues"
