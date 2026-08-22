@@ -87,7 +87,7 @@ Any generic agent skill — `brainstorming`, `writing-plans`, or an equivalent �
 docs/
 ├── README.md               — docs index
 ├── installation.md         — bootstrap, install.sh, doctor, the skills offer
-├── usage.md                — the loop, what it writes, the labels, the dispositions
+├── usage.md                — the loop, what it writes, the labels, the resolutions
 ├── configuration.md        — .github/crossrev.yml, endpoints, environment variables
 ├── credentials.md          — which secrets automated mode needs, and why
 ├── troubleshooting.md      — the failure modes, by the name each reports itself under
