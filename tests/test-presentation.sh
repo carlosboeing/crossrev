@@ -560,6 +560,13 @@ has "the review skill describes the pass number as which pass this is" \
   "$review_prompt" "Which pass this is"
 hasnt "and not as a fraction of the configured maximum" \
   "$review_prompt" "out of the configured maximum"
+# The prompt's own opening line, not just the skill it reproduces. It is the
+# surface the model reads, so a denominator here outlives one removed anywhere
+# else -- and past the cap it would render an impossible "pass 4 of 3".
+hasnt "the review prompt opens on the pass number alone" \
+  "$review_prompt" "pass 1 of 3"
+hasnt "and the resolve prompt does the same" \
+  "$resolve_prompt" "pass 1 of 3"
 
 # --- pass formatting beyond the cycle cap -----------------------------------
 #
