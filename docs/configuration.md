@@ -57,6 +57,23 @@ Two values are refused rather than accepted and misread:
 - **`min_fix_severity` must be `high`, `medium` or `low`.** A typo ranks zero, zero meets nothing, so every finding would count as non-actionable, the pass would report converged, and the cycle would stop with a high-severity finding sitting on the pull request. A typo would look exactly like a clean review.
 - **`max_passes_per_cycle` must be a whole number above zero.** Zero is already spoken for internally as "no pass bound applies to this invocation", which is what lets a person ask for one attended pass past the bound. To stop CrossRev reviewing a repository at all, remove its workflows rather than setting the bound to zero. The limit counts all passes on a pull request, manual and automatic. Three manual passes therefore leave no automatic passes.
 
+### git
+
+```yaml
+git:
+  hooks: skip               # skip | run
+```
+
+**The resolve leg commits without running the repository's own git hooks.** It works in a worktree CrossRev creates inside your checkout, and a worktree shares `.git/hooks/` with it, so every hook installed there would otherwise fire on an automated commit.
+
+The default matches what already happens in automated mode. A GitHub-hosted runner clones fresh, and a fresh clone carries only `.sample` files in `.git/hooks/`, because git hooks are never committed and never cloned. Left to run, the same pull request would commit on a runner and could fail on your laptop.
+
+`hooks: run` restores them, for the push as well as the commit. Set it where a hook enforces something you rely on — a privacy guard or a secret scan — and accept that a hook refusing the commit ends the pass with the fix sitting unpushed in the worktree. Client-side hooks were never enforcement in any case: `git commit --no-verify` bypasses them by git's own documented contract, and what holds on a CrossRev push is branch protection and required status checks.
+
+The value is refused rather than misread if it is neither `skip` nor `run`. A typo read leniently would commit without hooks in a repository that asked to keep them, and never say so.
+
+Full reasoning in [ADR 0017](adrs/0017-the-resolver-commits-without-host-git-hooks.md).
+
 ### The pairing
 
 ```yaml

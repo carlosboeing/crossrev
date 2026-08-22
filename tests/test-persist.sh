@@ -181,10 +181,71 @@ hasnt "rather than the generic one it replaces" \
 # so asking the model for text it would then have to validate buys nothing.
 body="$(git --git-dir="$FIX_ORIGIN" log -1 refs/heads/feature --format=%b)"
 has "the body names the finding by its title"         "$body" "Unchecked fetch response"
+# With a full stop, because a punctuation-free line is what a naive sentence
+# splitter runs into the line below it. One repository's commit-msg hook read a
+# subject and three bullets as a single over-long sentence and refused on that.
+has "and the bullet ends a sentence"                  "$body" "- Unchecked fetch response."
 has "and gives its location and thread"               "$body" "app.ts:2 - https://github.com/acme/widget/pull/42/files#r"
 has "a trailer names the pull request"                "$body" "Crossrev-pr: acme/widget#42"
 has "and another names the pass"                      "$body" "Crossrev-pass: 1"
 hasnt "the finding id is not in the body either"      "$body" "$ID_FIX"
+
+# --- the repository's own git hooks ----------------------------------------
+#
+# The resolver commits in a worktree of the repository under review, and a
+# worktree shares that repository's .git/hooks/. A GitHub-hosted runner clones
+# fresh and has no hooks at all, so hooks left running made the same pull request
+# behave one way in Actions and another on a laptop. ADR 0017 skips them by
+# default and keeps `git.hooks: run` for a repository that wants them.
+
+# Refuses every message, and says so on stderr the way a real one does.
+refusing_commit_msg_hook() {
+  mkdir -p "$FIX_DIR/.git/hooks"
+  printf '#!/usr/bin/env bash\nprintf "commit-msg hook says no\\n" >&2\nexit 1\n' \
+    >"$FIX_DIR/.git/hooks/commit-msg"
+  chmod +x "$FIX_DIR/.git/hooks/commit-msg"
+}
+
+config_running_hooks() { config_with_issue_sink; printf 'git:\n  hooks: run\n'; }
+
+fixture_repo "$(config_with_issue_sink)"; stub_reset
+refusing_commit_msg_hook
+routes_baseline "$(marker_comment 9001 "$(review_marker)" | jq -cs . | payload)"
+routes_resolve
+CROSSREV_RESOLVE_PAYLOAD="$(resolve_payload | payload)"; export CROSSREV_RESOLVE_PAYLOAD
+CROSSREV_RESOLVE_EDIT="$(edit_script)"; export CROSSREV_RESOLVE_EDIT
+out="$("$CROSSREV" resolve --pr 42 2>&1)"; rc=$?
+
+is  "a hook that refuses every message does not stop the default leg" "$rc" "0"
+has "and the fix reaches the branch"                  "$out" "to feature"
+is  "and the commit is really there" \
+  "$(git --git-dir="$FIX_ORIGIN" log -1 refs/heads/feature --format=%s)" "fix(api): check the response status before reading it"
+
+# --- the same hook, with git.hooks: run ------------------------------------
+#
+# The opt-in has to actually opt in, and the failure has to say what git said.
+# The reason used to reach the terminal only, so a commit refused in CI left
+# "could not commit the resolver's changes" and nothing else anywhere.
+fixture_repo "$(config_running_hooks)"; stub_reset
+refusing_commit_msg_hook
+routes_baseline "$(marker_comment 9001 "$(review_marker)" | jq -cs . | payload)"
+routes_resolve
+CROSSREV_RESOLVE_PAYLOAD="$(resolve_payload | payload)"; export CROSSREV_RESOLVE_PAYLOAD
+CROSSREV_RESOLVE_EDIT="$(edit_script)"; export CROSSREV_RESOLVE_EDIT
+out="$("$CROSSREV" resolve --pr 42 2>&1)"; rc=$?
+
+is  "git.hooks run lets the hook refuse the commit"   "$rc" "1"
+has "and the error carries what git printed"          "$out" "commit-msg hook says no"
+has "and it names the setting that put the hook in play" "$out" "git.hooks: run"
+is  "nothing reached the branch"                      "$(git --git-dir="$FIX_ORIGIN" log -1 refs/heads/feature --format=%s)" "feature"
+
+# The claim marker is completed with the reason rather than left reading
+# `started` — that is what `crossrev status` reads, and a dead pid can only tell
+# it that the leg ended, never why.
+resolve_body="$(last_body 9002)"
+has "the leg's marker is completed rather than left started" "$resolve_body" '"state":"complete"'
+has "and it records why the leg stopped"              "$resolve_body" "could not commit the resolver's changes"
+has "and the pull request is halted"                  "$(calls)" "labels[]=crossrev/halted"
 
 # --- a finding title that tries to write the body itself -------------------
 #

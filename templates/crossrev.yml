@@ -22,6 +22,14 @@ policy:
   max_files_changed_per_pr: 200
   max_prs_per_day: 25
 
+# The resolve leg commits in a worktree of this repository, and a worktree shares its .git/hooks/, so
+# hooks installed there would fire on an automated commit. They never fire on a GitHub-hosted runner:
+# a fresh clone has no hooks, because hooks are not repository content. skip makes both sides behave
+# the same. Set run where a hook enforces something you rely on, and accept that a refused commit ends
+# the pass with the fix unpushed. See docs/adrs/0017-the-resolver-commits-without-host-git-hooks.md.
+git:
+  hooks: skip                 # skip | run — whether the resolver's commit and push run this repository's hooks
+
 # Declared and working, but NOT the CI reviewer: Kimi's subscription credential
 # is a 15-minute OAuth access token with a rotating refresh token, not a static
 # key, so it cannot live in a repository secret. Point a leg at it locally, or in

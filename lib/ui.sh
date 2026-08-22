@@ -104,7 +104,15 @@ ui_warn() {
 }
 
 # Error, then exit. $1 is what went wrong, $2 is what to do about it — rule 4.
+#
+# The reason is kept as well as printed. A leg that dies here has a claim marker
+# open on the pull request, and the EXIT trap in lib/run.sh writes this text into
+# it — otherwise the marker reads `started` forever and the cause survives only
+# in the terminal that saw it.
+CROSSREV_DIE_REASON=""
 ui_die() {
+  # shellcheck disable=SC2034  # read by the EXIT trap in run.sh
+  CROSSREV_DIE_REASON="$1"
   printf '\n%serror%s  %s\n' "$_c_red" "$_c_reset" "$1" >&2
   printf '       %s\n\n' "$2" >&2
   exit 1

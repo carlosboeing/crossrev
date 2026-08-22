@@ -54,7 +54,7 @@ If that process is still running, wait for it or stop it. If it isn't, CrossRev 
 
 ## A halted loop
 
-`crossrev/halted` means the loop stopped short and a human is needed. **Nothing about a halt is a judgement on the code.** Five things cause one:
+`crossrev/halted` means the loop stopped short and a human is needed. **Nothing about a halt is a judgement on the code.** Six things cause one:
 
 | Cause | What to do |
 |---|---|
@@ -63,6 +63,9 @@ If that process is still running, wait for it or stop it. If it isn't, CrossRev 
 | The reviewer returned `blocked` | It could not complete the review at all. The comment says why |
 | The resolve leg returned `blocked` | Same, on the other leg |
 | A finding was `escalated` | It needs a human decision, so `crossrev/stop` went on and the thread stayed open |
+| **A leg stopped with an error** | The harness failed to answer, a commit was refused, a push was rejected. The claim comment and its marker carry the reason. Fix what it names, then run the same command again |
+
+The last row is why a marker never reads `started` after the process is gone. A leg that dies writes its reason into the claim it already posted, so `crossrev status` reports the cause rather than only that the run ended.
 
 Remove `crossrev/halted` once you've looked, then run the command `status` suggests.
 
@@ -104,6 +107,16 @@ The branch guard asserts three things before anything leaves the machine, and na
 - The pull request's head repository matches your origin.
 
 Branch protection is a backstop rather than a control: it fires after a bad push is attempted and says nothing about which branch was targeted. This checks the target beforehand.
+
+## The resolver's commit was refused
+
+The error names what git said, so read that line first. Two causes are common.
+
+**A hook refused it.** By default the resolve leg commits with the repository's own git hooks skipped, so this only happens where `git.hooks: run` is set. A `commit-msg` hook that lints prose is the usual one, because CrossRev composes the commit body from the finding titles and few linters expect a bullet list. Either fix what the hook objects to, or set `git.hooks: skip` — which is what already happens on a GitHub-hosted runner, since a fresh clone has no hooks installed at all. See [configuration](configuration.md#git).
+
+**The identity was rejected.** CrossRev commits as `crossrev <crossrev@users.noreply.github.com>` unless `CROSSREV_GIT_NAME` and `CROSSREV_GIT_EMAIL` say otherwise. A repository requiring signed commits or a verified address refuses that.
+
+Either way the fix is not lost. It stays in the worktree, which CrossRev keeps and names on its way out, and the pass halts with the reason recorded on the pull request rather than only in your terminal.
 
 ## Both legs ran the same model
 
