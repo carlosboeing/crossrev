@@ -6,9 +6,7 @@
 [![platform: macOS | Linux](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-blue.svg)](docs/installation.md)
 [![status: pre-1.0](https://img.shields.io/badge/status-pre--1.0-orange.svg)](docs/ROADMAP.md)
 
-CrossRev is a cross-model pull request (PR) review and resolution loop. It coordinates independent reviewer and resolver agents around a pull request. The reviewer agent examines the changes and posts findings as inline PR comments. The resolver agent verifies each finding, fixes valid defects, and disputes false positives.
-
-The reviewer agent then inspects the resulting revision, and the loop continues until it converges, reaches a configured limit, or needs a person.
+**CrossRev is a cross-model pull request (PR) review and resolution loop.** It coordinates independent reviewer and resolver agents around a pull request. The reviewer agent examines the changes and posts findings as inline PR comments. The resolver agent verifies each finding, fixes valid defects, and disputes false positives. The reviewer agent then inspects the resulting revision, and the loop continues until it converges, reaches a configured limit, or needs a person.
 
 Agents can be configured with different harnesses, models, and effort levels. Configured harnesses authenticate through existing AI subscriptions or provider API keys.
 
@@ -29,7 +27,7 @@ CrossRev reviews a selected PR on demand from the CLI or starts review cycles au
 
 ### Requirements
 
-CrossRev supports macOS and Linux. It requires `git`, authenticated `gh`, `jq`, `yq`, `openssl`, and at least one supported agent CLI. The default reviewer needs Codex, while the default full cycle needs Codex and Claude. The `npx` and npm routes also require Node.js.
+CrossRev currently supports macOS and Linux. It requires `git`, authenticated `gh`, `jq`, `yq`, `openssl`, and at least one supported agent CLI; the `npx` and npm routes also require Node.js. The **default configuration** uses Codex for the reviewer agent and Claude for the resolver agent, but you can choose different [harnesses](#harness-support) and [models](#configuration).
 
 ### Run without installing
 
@@ -39,7 +37,7 @@ Run one review pass directly from npm:
 npx crossrev-ai review --pr 42
 ```
 
-The review command posts inline comments and a summary, but never edits or pushes the branch. CrossRev uses your existing `gh` authentication, so the comments appear under your GitHub account.
+The review command posts inline comments and a summary, but **never edits or pushes the branch**. CrossRev uses your existing `gh` authentication, so the comments appear under your GitHub account.
 
 ### Install CrossRev
 
@@ -137,7 +135,7 @@ flowchart TD
     class BACKLOG sink
 ```
 
-A cycle contains one or more passes. In each pass, the reviewer agent examines the current revision. The resolver agent follows when findings meet the configured severity threshold. The loop ends when it converges, reaches a limit, or needs a person.
+A **cycle** contains one or more **passes**. In each pass, the reviewer agent examines the current revision. The resolver agent follows when findings meet the configured severity threshold. The loop ends when it converges, reaches a limit, or needs a person.
 
 The review limit is `policy.max_passes_per_cycle`, which defaults to 3. [Using CrossRev](docs/usage.md) documents all six termination conditions and their precedence.
 
@@ -192,7 +190,7 @@ Override a harness for one command without changing repository policy:
 crossrev review --pr 42 --harness claude
 ```
 
-CrossRev reads repository policy from the pull request's base revision. A branch under review cannot change the rules used to review itself. See [Configuring CrossRev](docs/configuration.md) for every field and merge rule.
+**CrossRev reads repository policy from the pull request's base revision.** A branch under review cannot change the rules used to review itself. See [Configuring CrossRev](docs/configuration.md) for every field and merge rule.
 
 ## Local and automated modes
 
@@ -207,7 +205,7 @@ CrossRev uses the same agents and protocol in both modes. The trigger and truste
 | Runner | Your machine | GitHub-hosted or self-hosted |
 
 > [!CAUTION]
-> Never use a self-hosted runner for a public repository. The runner is a persistent machine holding harness credentials.
+> CrossRev **supports self-hosted runners**, but public repositories require [stricter isolation](docs/adrs/0016-public-repositories-may-use-isolated-one-job-runners.md) because PRs can carry prompt injections that expose credentials or modify shared state. GitHub warns that self-hosted runners can be persistently compromised and should generally not be used for public repositories in its [secure-use guidance](https://docs.github.com/en/actions/reference/security/secure-use#hardening-for-self-hosted-runners). For public repositories, use a **GitHub-hosted runner** or a fresh, [ephemeral self-hosted runner](https://docs.github.com/en/actions/reference/runners/self-hosted-runners#ephemeral-runners-for-autoscaling) that handles one job and is destroyed afterward. A container alone is not sufficient if it can reach host credentials or shared state.
 
 Automated mode starts with two commands. The second prints every file, secret, and label it would change before asking for confirmation:
 
@@ -217,8 +215,6 @@ crossrev init
 ```
 
 Automated mode reviews branches in the repository, including Dependabot branches. It refuses fork pull requests because GitHub withholds repository secrets from fork workflows. Local review supports forks, and local resolution supports them when maintainer edits are enabled.
-
-Automated mode remains unproven end to end. No repository has installed the generated workflows yet. Proving this path is the current `v1.0.0` requirement in the [roadmap](docs/ROADMAP.md).
 
 ## Harness support
 
@@ -259,11 +255,11 @@ CrossRev checks every push target before anything leaves the machine. The target
 
 The loop enforces the configured severity threshold and pass limit. CrossRev checks the `crossrev/stop` label before starting each agent. The label prevents the next agent from starting but does not cancel one already in progress.
 
-Never use a self-hosted runner for a public repository. Use a GitHub-hosted runner so each job ends with the disposable runner that processed it.
+CrossRev **supports self-hosted runners**, but public repositories require [stricter isolation](docs/adrs/0016-public-repositories-may-use-isolated-one-job-runners.md) because PRs can carry prompt injections that expose credentials or modify shared state. GitHub warns that self-hosted runners can be persistently compromised and should generally not be used for public repositories in its [secure-use guidance](https://docs.github.com/en/actions/reference/security/secure-use#hardening-for-self-hosted-runners). For public repositories, use a **GitHub-hosted runner** or a fresh, [ephemeral self-hosted runner](https://docs.github.com/en/actions/reference/runners/self-hosted-runners#ephemeral-runners-for-autoscaling) that handles one job and is destroyed afterward. A container alone is not sufficient if it can reach host credentials or shared state.
 
 CrossRev reconstructs every pass from the pull request. Hidden markers record the revision, findings, resolutions, and execution details. A retry reads those markers and continues without duplicating completed writes.
 
-The model process never receives a GitHub credential. The orchestrator makes every GitHub API call and controls every git commit and push.
+**The model process never receives a GitHub credential.** The orchestrator makes every GitHub API call and controls every git commit and push.
 
 ## Documentation
 

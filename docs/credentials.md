@@ -12,6 +12,8 @@ The credential model depends on where the `crossrev` command runs:
 
 A self-hosted runner is still automated mode. It removes copied harness logins, not the GitHub credentials the workflows need.
 
+An ephemeral self-hosted runner for a public repository needs external provisioning. The provisioner must supply harness logins for one job and discard them with the runner. CrossRev selects the runner label but does not create or verify the isolation required by [ADR 0016](adrs/0016-public-repositories-may-use-isolated-one-job-runners.md).
+
 ## Find your exact secret set
 
 Each row is a complete set. Secrets within a row are not alternatives.

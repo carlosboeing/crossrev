@@ -29,6 +29,8 @@ runner: github-hosted       # github-hosted | self-hosted
 
 `runner` is what `init` renders the workflows to run on. It also decides which pairings are servable: a self-hosted runner holds its own harness logins, so it serves every pairing with no secrets, no refresher and no rotation chain at all.
 
+Public repositories require a fresh, isolated self-hosted runner for each job. CrossRev selects the runner label but does not provision that environment or its credentials. See [ADR 0016](adrs/0016-public-repositories-may-use-isolated-one-job-runners.md).
+
 ### policy
 
 ```yaml
