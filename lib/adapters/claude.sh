@@ -87,11 +87,27 @@ adapter_claude() {
   run+=(claude "${args[@]}")
 
   local out err rc payload model_reported
-  out="$(mktemp)"; err="$(mktemp)"
+  # When run_invoke names a transcript base the capture files ARE the record:
+  # they live in the run directory, are redacted in place, and their deletion
+  # is the orchestrator's decision rather than this adapter's. Without one the
+  # adapter runs exactly as it always has — anonymous temp files, deleted on
+  # both paths.
+  local keep_transcript=0
+  if [[ -n "${CROSSREV_TRANSCRIPT_BASE:-}" ]]; then
+    keep_transcript=1
+    out="$CROSSREV_TRANSCRIPT_BASE.stdout"; err="$CROSSREV_TRANSCRIPT_BASE.stderr"
+  else
+    out="$(mktemp)"; err="$(mktemp)"
+  fi
 
   # stdin from /dev/null: with a terminal attached the CLI waits for piped input.
   ( cd "$workdir" && "${run[@]}" "$(cat "$prompt_file")" ) >"$out" 2>"$err" </dev/null
   rc=$?
+
+  # Redaction before anything else reads the file: the harness was started
+  # with no GitHub credential, and this is the backstop for everything else a
+  # CLI might echo on its way to a failure.
+  if (( keep_transcript )); then log_redact_file "$out"; log_redact_file "$err"; fi
 
   if (( rc != 0 )) || [[ "$(jq -r '.is_error // false' "$out" 2>/dev/null)" == "true" ]]; then
     # Chosen on whether a message is there, not on jq's exit status. On an EMPTY
@@ -105,7 +121,7 @@ adapter_claude() {
     jq -cn --arg e "$msg" \
       '{ok:false, payload:null, harness:"claude", endpoint:null, model_reported:null,
         tokens:null, error:$e}'
-    rm -f "$out" "$err"; return 1
+    (( keep_transcript )) || rm -f "$out" "$err"; return 1
   fi
 
   payload="$(jq -r '.result // empty' "$out")"
@@ -123,7 +139,7 @@ adapter_claude() {
                  | (.inputTokens // 0) + (.outputTokens // 0)
                    + (.cacheReadInputTokens // 0) + (.cacheCreationInputTokens // 0)]
                 | add // null' "$out" 2>/dev/null)" || tokens=null
-  rm -f "$out" "$err"
+  (( keep_transcript )) || rm -f "$out" "$err"
 
   jq -cn --argjson p "$(jq -c . <<<"$payload" 2>/dev/null || echo null)" \
      --arg ep "$endpoint_label" --arg m "$model_reported" \

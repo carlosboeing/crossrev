@@ -12,6 +12,15 @@
 # test suite puts a fake `gh` earlier on PATH and asserts on the calls, so every
 # decision in here is exercised offline against fixtures.
 
+# Tests source this file without bin/crossrev's ordering. The log helpers are
+# no-ops until log_init runs. Same fallback config.sh uses for harnesses.sh.
+if ! declare -F log_event >/dev/null 2>&1; then
+  _gh_lib="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  # shellcheck source=log.sh
+  [[ -f "$_gh_lib/log.sh" ]] && source "$_gh_lib/log.sh"
+  unset _gh_lib
+fi
+
 # ---------------------------------------------------------------------------
 # Reads
 # ---------------------------------------------------------------------------
@@ -402,11 +411,17 @@ gh_commit_and_push() {
   # reports the status of `local`, which always succeeds, so the `||` below would
   # never fire and a refused commit would run on into the push.
   local commit_out commit_why
+  # The run log brackets the commit, so a stall inside it — a hook running the
+  # repository's test suite is the observed case — is attributable to this step
+  # rather than to the leg as a whole.
+  log_event commit "start branch=$branch"
   if ! commit_out="$("${commit_cmd[@]}" 2>&1)"; then
     commit_why="$(_gh_git_tail "$commit_out")" || commit_why="git printed nothing on either stream."
+    log_event commit "failed: $commit_why"
     ui_die "could not commit the resolver's changes — $commit_why" \
       "The working tree still holds them, so nothing is lost. $hooks_advice Check \`git status\` in the checkout."
   fi
+  log_event commit "exit=0"
 
   # Re-read the remote head immediately before pushing. A human pushing to the
   # same branch mid-leg is a normal event, and overwriting them is not.
@@ -428,11 +443,14 @@ gh_commit_and_push() {
   fi
 
   local push_out push_why
+  log_event push "start branch=$branch remote=$remote"
   if ! push_out="$("${push_cmd[@]}" "$remote" "HEAD:refs/heads/$branch" 2>&1)"; then
     push_why="$(_gh_git_tail "$push_out")" || push_why="git printed nothing on either stream."
+    log_event push "failed: $push_why"
     ui_die "could not push to $branch — $push_why" \
       "The commit exists locally. If branch protection refused it, that is the backstop working — check the rule, or push by hand."
   fi
+  log_event push "exit=0"
 
   sha="$(git rev-parse HEAD)"
   # shellcheck disable=SC2034  # read by run.sh after the call returns

@@ -76,6 +76,7 @@ _cfg_defaults() {
       max_prs_per_day: 25
     },
     git: { hooks: "skip" },
+    logs: { retention_days: 14, keep_transcripts: false },
     endpoints: {},
     backlog: {
       destination: "auto",
@@ -137,6 +138,29 @@ cfg_load() {
   cfg_assert_min_fix_severity
   cfg_assert_max_passes_per_cycle
   cfg_assert_git_hooks
+  cfg_assert_logs
+}
+
+# The run record lives under the state directory, and both keys shape what
+# survives there. Read leniently, `retention_days: fourteen` would sweep by a
+# default nobody stated and `keep_transcripts: yes` would read as false while
+# the config says keep — a typo landing silently in the direction that loses
+# evidence. Refuse the values where they can still be named.
+cfg_assert_logs() {
+  local days keep
+  days="$(jq -r '.logs.retention_days // empty' <<<"$CFG_MERGED")"
+  if [[ "$days" =~ ^[0-9]+$ ]] && (( days > 0 )); then :; else
+    ui_die "logs.retention_days is '${days:-unset}', which is not a whole number of days above zero" \
+      "It bounds how long run logs and kept transcripts stay under the state directory before a sweep removes them. Set it to 1 or more in the repository config, or remove it to take the default of 14."
+  fi
+  # `// empty` would collapse the legitimate default: jq's alternative operator
+  # treats false as empty, so `keep_transcripts: false` must be read explicitly.
+  keep="$(jq -r '.logs.keep_transcripts | if . == null then empty else tostring end' <<<"$CFG_MERGED")"
+  case "$keep" in
+    true|false) return 0 ;;
+    *) ui_die "logs.keep_transcripts is '${keep:-unset}', which is not true or false" \
+         "It decides whether harness transcripts survive a successful leg rather than only a failed one. Set it to true or false in the repository config, or remove it to take the default of false." ;;
+  esac
 }
 
 # An unrecognised threshold must not be representable.

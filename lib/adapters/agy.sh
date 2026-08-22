@@ -67,7 +67,17 @@ adapter_agy() {
   [[ -n "$effort" && "$effort" != "null" ]] && args+=(--effort "$effort")
 
   local out err rc
-  out="$(mktemp)"; err="$(mktemp)"
+  # When run_invoke names a transcript base the capture files ARE the record:
+  # they live in the run directory, are redacted in place, and their deletion
+  # is the orchestrator's decision. Without one — anonymous temp files,
+  # deleted on both paths, as before.
+  local keep_transcript=0
+  if [[ -n "${CROSSREV_TRANSCRIPT_BASE:-}" ]]; then
+    keep_transcript=1
+    out="$CROSSREV_TRANSCRIPT_BASE.stdout"; err="$CROSSREV_TRANSCRIPT_BASE.stderr"
+  else
+    out="$(mktemp)"; err="$(mktemp)"
+  fi
 
   # No GitHub credential, and none belonging to another harness: this process
   # reads attacker-controlled text, and a credential it never receives is one no
@@ -79,6 +89,10 @@ adapter_agy() {
   ( cd "$workdir" && "${run[@]}" agy "${args[@]}" --print "$(cat "$prompt_file")" ) \
     >"$out" 2>"$err" </dev/null
   rc=$?
+
+  # Redaction before anything else reads the files — the backstop for whatever
+  # a failing CLI echoes, since the harness itself holds no GitHub credential.
+  if (( keep_transcript )); then log_redact_file "$out"; log_redact_file "$err"; fi
 
   local status; status="$(jq -r '.status // empty' "$out" 2>/dev/null)"
   if (( rc != 0 )) || [[ "$status" != "SUCCESS" ]]; then
@@ -93,7 +107,7 @@ adapter_agy() {
     jq -cn --arg e "$msg" \
       '{ok:false, payload:null, harness:"agy", endpoint:null, model_reported:null,
         tokens:null, error:$e}'
-    rm -f "$out" "$err"; return 1
+    (( keep_transcript )) || rm -f "$out" "$err"; return 1
   fi
 
   # structured_output is the parsed object when a schema was given. The response
@@ -107,7 +121,7 @@ adapter_agy() {
                    | (.total_tokens // ((.input_tokens // 0) + (.output_tokens // 0)))
                    | if . == 0 then "null" else tostring end' "$out" 2>/dev/null)" || tokens=null
   [[ -n "$tokens" ]] || tokens=null
-  rm -f "$out" "$err"
+  (( keep_transcript )) || rm -f "$out" "$err"
 
   jq -cn --argjson p "${payload:-null}" --argjson t "$tokens" \
     '{ok:true, payload:$p, harness:"agy", endpoint:"vendor",

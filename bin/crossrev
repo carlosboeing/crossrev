@@ -28,6 +28,8 @@ readonly ROOT
 
 # shellcheck source=lib/ui.sh
 source "$ROOT/lib/ui.sh"
+# shellcheck source=lib/log.sh
+source "$ROOT/lib/log.sh"
 # shellcheck source=lib/harnesses.sh
 source "$ROOT/lib/harnesses.sh"
 # shellcheck source=lib/preflight.sh
@@ -96,6 +98,7 @@ usage() {
     $harness_opt   Override the harness the config names for that leg
     --repo owner/name        Target another repository than this checkout
     --no-tips                Suppress the automated-mode suggestion
+    --keep-transcripts       Keep the harness transcript even when the leg succeeds
 
   Automated mode needs a GitHub App. Local runs do not — they use the gh
   authentication you already have.

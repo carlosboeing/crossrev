@@ -62,6 +62,19 @@ jobs:
           CROSSREV_CODEX_AUTH: ${{ secrets.CROSSREV_CODEX_AUTH }}
           # crossrev:end
 
+      # The run log — and the transcripts, which survive only a failed leg —
+      # dies with the runner unless it leaves as an artifact. The pull request
+      # marker stays the durable record; this is the diagnosis for a leg that
+      # went wrong. No GitHub credential reaches these files: the harness never
+      # holds one, and the transcripts are redacted before they are kept.
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: crossrev-run-${{ github.run_id }}
+          path: ~/.local/state/crossrev/runs/
+          if-no-files-found: ignore
+          retention-days: 14
+
       - if: always()
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}

@@ -30,6 +30,13 @@ policy:
 git:
   hooks: skip                 # skip | run — whether the resolver's commit and push run this repository's hooks
 
+# The per-run record under ~/.local/state/crossrev/runs/: a run log for every run, and the harness
+# transcripts when a leg fails. The pull request marker stays the durable record in automated mode;
+# these files are the local diagnosis, swept by age.
+logs:
+  retention_days: 14          # run logs and kept transcripts older than this are swept
+  keep_transcripts: false     # true — keep the harness transcript even when a leg succeeds
+
 # Declared and working, but NOT the CI reviewer: Kimi's subscription credential
 # is a 15-minute OAuth access token with a rotating refresh token, not a static
 # key, so it cannot live in a repository secret. Point a leg at it locally, or in

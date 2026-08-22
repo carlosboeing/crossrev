@@ -23,6 +23,16 @@
 # ends the subshell and lets the caller carry on with an empty string, which is
 # how a fatal error becomes a silent one.
 
+# Tests source this file without bin/crossrev's ordering. The log helpers are
+# no-ops until log_init runs, so sourcing them here changes nothing for a
+# caller that never starts a run. Same fallback config.sh uses for harnesses.sh.
+if ! declare -F log_event >/dev/null 2>&1; then
+  _run_lib="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  # shellcheck source=log.sh
+  [[ -f "$_run_lib/log.sh" ]] && source "$_run_lib/log.sh"
+  unset _run_lib
+fi
+
 CROSSREV_INTERRUPTED=0
 CROSSREV_LOCK=""
 CROSSREV_SANDBOXED=""
@@ -62,6 +72,14 @@ run_cleanup() {
   [[ -n "$CROSSREV_LOCK" && -f "$CROSSREV_LOCK" ]] && rm -f "$CROSSREV_LOCK"
   if (( rc != 0 )) && [[ -n "$CROSSREV_WORKTREE" && -d "$CROSSREV_WORKTREE" ]]; then
     printf '  Worktree kept for debugging: %s\n' "$CROSSREV_WORKTREE" >&2
+    log_event worktree "kept $CROSSREV_WORKTREE"
+  fi
+  # The last line of the run log is where the run stopped, with the reason when
+  # ui_die supplied one. On a failure the directory is named on the terminal,
+  # the same courtesy the kept worktree above already gets.
+  log_event exit "code=$rc reason=${CROSSREV_DIE_REASON:-}"
+  if (( rc != 0 )) && [[ -n "${CROSSREV_RUN_DIR:-}" && -d "$CROSSREV_RUN_DIR" ]]; then
+    printf '  Run log and any kept transcripts: %s\n' "$CROSSREV_RUN_DIR" >&2
   fi
   _run_report_fatal "$rc"
   # A restored credential dies with the process that borrowed it, on the fatal
@@ -710,15 +728,27 @@ run_invoke() {
   snap_index="$(mktemp -u)"
   snap_tree="$(_run_tree_capture "$snap_index")" || snap_tree=""
 
+  # Each attempt gets its own transcript stem, so a retry never overwrites the
+  # evidence of the answer that was rejected. Empty when no run directory
+  # exists, and the adapters then capture to anonymous temp files as before.
+  local attempt=0 adapter_rc invoke_start
   while :; do
+    attempt=$(( attempt + 1 ))
+    CROSSREV_TRANSCRIPT_BASE="$(log_transcript_base "$attempt")" || CROSSREV_TRANSCRIPT_BASE=""
     CROSSREV_SANDBOXED="$workdir"
     sandbox_quarantine "$workdir" >/dev/null
     # Adapter stderr is NOT discarded. Each adapter already captures the harness
     # CLI's own noise into a temp file, so what reaches here is crossrev's own
     # messages — including a fatal one about an endpoint that does not resolve.
     # Swallowing those left the process exiting 1 with nothing printed.
+    invoke_start=$SECONDS
+    log_event invoke "harness=$harness attempt=$attempt start"
+    adapter_rc=0
     "adapter_$harness" "$prompt_file" "$schema_file" "$workdir" \
-      "$model" "$effort" "$endpoint" "$write" >"$out_file" || true
+      "$model" "$effort" "$endpoint" "$write" >"$out_file" || adapter_rc=$?
+    log_event invoke "harness=$harness attempt=$attempt exit=$adapter_rc duration=$(( SECONDS - invoke_start ))s"
+    # shellcheck disable=SC2034  # the adapters read it; cleared so nothing outside an attempt writes there
+    CROSSREV_TRANSCRIPT_BASE=""
     sandbox_restore "$workdir"
     CROSSREV_SANDBOXED=""
 
@@ -749,7 +779,7 @@ run_invoke() {
     # branch below gets to look at the code.
     rc=0
     problem="$("$validator" "$payload" "$expect")" || rc=$?
-    if (( rc == 0 )); then cred_discard; rm -f "$snap_index"; return 0; fi
+    if (( rc == 0 )); then cred_discard; rm -f "$snap_index"; log_transcripts_clear; return 0; fi
 
     if (( rc == 2 )); then
       if (( semantic_budget > 0 )); then
@@ -782,7 +812,7 @@ run_invoke() {
 # ---------------------------------------------------------------------------
 
 leg_review() {
-  local pr="" repo="" harness_override="" trigger="human" no_tips=0 continuation=0
+  local pr="" repo="" harness_override="" trigger="human" no_tips=0 continuation=0 keep_transcripts=0
   while (( $# )); do
     case "$1" in
       --pr)      pr="${2:-}"; shift 2 ;;
@@ -791,6 +821,7 @@ leg_review() {
       --trigger) trigger="${2:-}"; shift 2 ;;
       --continuation) continuation=1; shift ;;
       --no-tips) no_tips=1; shift ;;
+      --keep-transcripts) keep_transcripts=1; shift ;;
       --pass)    shift 2 ;;   # accepted and ignored: the pass comes from the PR
       *)
         local opt
@@ -800,7 +831,7 @@ leg_review() {
           opt="--harness <harness>"
         fi
         ui_die "unknown option for review: $1" \
-          "Usage: crossrev review --pr <number> [$opt] [--no-tips]" ;;
+          "Usage: crossrev review --pr <number> [$opt] [--no-tips] [--keep-transcripts]" ;;
     esac
   done
   [[ -n "$pr" ]] || ui_die "crossrev review needs a pull request number" "Usage: crossrev review --pr 42"
@@ -818,6 +849,17 @@ leg_review() {
   }
   run_lock_acquire "$CTX_PR" "$CTX_MODE"
   CROSSREV_RESUME_HINT="crossrev review --pr $CTX_PR"
+
+  # The per-run record starts here, ahead of every early return below, so even
+  # a run that stops at the stop-label or an already-reviewed revision leaves a
+  # line saying it looked. The flag outranks the config key: keeping everything
+  # is the debugging posture, and it is asked for per run.
+  CROSSREV_LOG_RETENTION_DAYS="$(cfg_get '.logs.retention_days')"
+  if (( keep_transcripts )) || [[ "$(cfg_get '.logs.keep_transcripts')" == "true" ]]; then
+    CROSSREV_KEEP_TRANSCRIPTS=1
+  fi
+  log_init "$CTX_REPO" "$CTX_PR"
+  log_event leg "review trigger=$trigger mode=$CTX_MODE head=${CTX_HEAD_SHA:0:7}"
 
   # A human's request outranks everything, including a healthy verdict.
   if grep -qw "crossrev/stop" <<<"$CTX_LABELS"; then
@@ -1001,6 +1043,7 @@ Reading the diff and any earlier review threads. This comment becomes the pass s
       "$meta" "$prior" "$threads" "$review_md"
 
     ui_say "Reading the diff and any prior review threads."
+    CROSSREV_TRANSCRIPT_LEG="review"
     run_invoke "$envelope_file" "$harness" "$prompt_file" \
       "$ROOT/schemas/findings.schema.json" "$(pwd)" \
       "$model" "$effort" "$endpoint" "$write" validate_findings
@@ -1546,7 +1589,7 @@ _review_summary_body() {
 # ---------------------------------------------------------------------------
 
 leg_resolve() {
-  local pr="" repo="" harness_override="" trigger="human" no_tips=0
+  local pr="" repo="" harness_override="" trigger="human" no_tips=0 keep_transcripts=0
   while (( $# )); do
     case "$1" in
       --pr)      pr="${2:-}"; shift 2 ;;
@@ -1554,6 +1597,7 @@ leg_resolve() {
       --harness) harness_override="${2:-}"; shift 2 ;;
       --trigger) trigger="${2:-}"; shift 2 ;;
       --no-tips) no_tips=1; shift ;;
+      --keep-transcripts) keep_transcripts=1; shift ;;
       --pass)    shift 2 ;;
       *)
         local opt
@@ -1563,7 +1607,7 @@ leg_resolve() {
           opt="--harness <harness>"
         fi
         ui_die "unknown option for resolve: $1" \
-          "Usage: crossrev resolve --pr <number> [$opt] [--trigger human|automatic]" ;;
+          "Usage: crossrev resolve --pr <number> [$opt] [--trigger human|automatic] [--keep-transcripts]" ;;
     esac
   done
   [[ -n "$pr" ]] || ui_die "crossrev resolve needs a pull request number" "Usage: crossrev resolve --pr 42"
@@ -1584,6 +1628,17 @@ leg_resolve() {
   }
   run_lock_acquire "$CTX_PR" "$CTX_MODE"
   CROSSREV_RESUME_HINT="crossrev resolve --pr $CTX_PR"
+
+  # Same record as the review leg: the flag outranks the config key, and the
+  # run starts logging ahead of every early return below.
+  # shellcheck disable=SC2034  # read by log_sweep in lib/log.sh
+  CROSSREV_LOG_RETENTION_DAYS="$(cfg_get '.logs.retention_days')"
+  if (( keep_transcripts )) || [[ "$(cfg_get '.logs.keep_transcripts')" == "true" ]]; then
+    # shellcheck disable=SC2034  # read by log_transcripts_kept in lib/log.sh
+    CROSSREV_KEEP_TRANSCRIPTS=1
+  fi
+  log_init "$CTX_REPO" "$CTX_PR"
+  log_event leg "resolve trigger=$trigger mode=$CTX_MODE head=${CTX_HEAD_SHA:0:7}"
 
   if grep -qw "crossrev/stop" <<<"$CTX_LABELS"; then
     ui_say "crossrev/stop is on $CTX_REPO#$CTX_PR, so nothing is resolved."
@@ -1694,6 +1749,7 @@ leg_resolve() {
     if ! wt_err="$(git worktree add --detach "$wt_dir" "$CTX_HEAD_SHA" 2>&1)"; then
       ui_die "could not create worktree for revision '$CTX_HEAD_SHA' at $wt_dir" "$wt_err"
     fi
+    log_event worktree "created $wt_dir"
   fi
 
   cd "$wt_dir" || ui_die "could not enter worktree at $wt_dir" "Check directory permissions."
@@ -1865,6 +1921,8 @@ Verifying each finding against the codebase. This comment becomes the pass summa
       '{findings: $n, candidates: [$c[]?[]?.number] | unique}')"
 
     ui_say "Verifying each finding against the codebase."
+    # shellcheck disable=SC2034  # read by log_transcript_base in lib/log.sh
+    CROSSREV_TRANSCRIPT_LEG="resolve"
     run_invoke "$envelope_file" "$harness" "$prompt_file" \
       "$ROOT/schemas/resolve.schema.json" "$(pwd)" \
       "$model" "$effort" "$endpoint" "$write" validate_resolve "$expect"
@@ -2228,6 +2286,7 @@ Pushed \`${commit_sha:0:7}\`; replying to each thread now.$(state_marker_encode 
 
   cd "$orig_cwd" || true
   git worktree remove --force "$wt_dir" 2>/dev/null || rm -rf "$wt_dir"
+  log_event worktree "removed $wt_dir"
   # One level, not `rmdir -p`. The `-p` form walks up removing every parent that
   # becomes empty, and stops only at the first non-empty one - which on a machine
   # where ~/.local holds nothing else means CrossRev deletes ~/.local/state and
@@ -2680,8 +2739,9 @@ cmd_cycle() {
       --harness) args+=(--harness "${2:-}"); shift 2 ;;
       --trigger) trigger="${2:-}"; args+=(--trigger "${2:-}"); shift 2 ;;
       --no-tips) no_tips=1; shift ;;
+      --keep-transcripts) args+=(--keep-transcripts); shift ;;
       *) ui_die "unknown option for cycle: $1" \
-           "Usage: crossrev cycle --pr <number> [--trigger human|automatic] [--no-tips]" ;;
+           "Usage: crossrev cycle --pr <number> [--trigger human|automatic] [--no-tips] [--keep-transcripts]" ;;
     esac
   done
   [[ -n "$pr" ]] || ui_die "crossrev cycle needs a pull request number" "Usage: crossrev cycle --pr 42"
