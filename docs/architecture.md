@@ -229,6 +229,7 @@ action.yml       the composite action consuming repositories call
 bin/crossrev     entrypoint: sources lib/, dispatches the subcommand
 lib/
   ui.sh            output voice — six rules, enforced by the helpers' shapes
+  log.sh           the per-run record: run log, transcripts, redaction, the age sweep
   preflight.sh     dependency checks that name the fix, not just the gap
   auth.sh          GitHub App registration via the manifest flow, per owner and role
   config.sh        two-layer config, endpoint and backlog resolution

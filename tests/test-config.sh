@@ -65,8 +65,8 @@ defaults="$(bash -c 'source "$1"; source "$2"; _cfg_defaults' _ "$HERE/../lib/ha
 template="$(yq -o=json -I=0 '.' "$HERE/../templates/crossrev.yml")"
 flat_defaults="$(flatten_config "$defaults")"
 flat_template="$(flatten_config "$template")"
-is "the drift comparison covers twelve behavior leaves in both documents" \
-  "$(printf '%s\n%s' "$(wc -l <<<"$flat_defaults" | tr -d ' ')" "$(wc -l <<<"$flat_template" | tr -d ' ')" | paste -sd / -)" "12/12"
+is "the drift comparison covers fourteen behavior leaves in both documents" \
+  "$(printf '%s\n%s' "$(wc -l <<<"$flat_defaults" | tr -d ' ')" "$(wc -l <<<"$flat_template" | tr -d ' ')" | paste -sd / -)" "14/14"
 is "every non-exempt default exists in the template with the same value" \
   "$(comm -23 <(printf '%s\n' "$flat_defaults") <(printf '%s\n' "$flat_template"))" ""
 is "every non-exempt template leaf is implemented by the defaults" \
@@ -124,6 +124,38 @@ for setting in skip run; do
   printf 'version: 1\ngit:\n  hooks: %s\n' "$setting" > .github/crossrev.yml
   is "git.hooks $setting is accepted" "$($CROSSREV config show | jq -r .git.hooks)" "$setting"
 done
+
+# --- the run record ----------------------------------------------------------
+#
+# `false` must survive the read: jq's `//` treats false as empty, so a lenient
+# read of the default would report the key unset and refuse every config.
+d="$(new_repo)"; cd "$d" || exit 1; mkdir -p .github
+printf 'version: 1\n' > .github/crossrev.yml
+out="$($CROSSREV config show)"; rc=$?
+is "no config: the log defaults load without error" "$rc" "0"
+is "no config: retention defaults to 14 days"       "$(jq -r .logs.retention_days <<<"$out")" "14"
+is "no config: transcripts default to failure-only" "$(jq -r .logs.keep_transcripts <<<"$out")" "false"
+
+for bad in 0 -1 fortnight; do
+  d="$(new_repo)"; cd "$d" || exit 1; mkdir -p .github
+  printf 'version: 1\nlogs:\n  retention_days: %s\n' "$bad" > .github/crossrev.yml
+  err="$($CROSSREV config show 2>&1 >/dev/null)"; rc=$?
+  is  "logs.retention_days $bad exits non-zero" "$rc" "1"
+  has "and the error names the bad value"       "$err" "logs.retention_days is '$bad'"
+done
+
+d="$(new_repo)"; cd "$d" || exit 1; mkdir -p .github
+printf 'version: 1\nlogs:\n  keep_transcripts: maybe\n' > .github/crossrev.yml
+err="$($CROSSREV config show 2>&1 >/dev/null)"; rc=$?
+is  "a non-boolean keep_transcripts exits non-zero" "$rc" "1"
+has "and the error names the bad value"             "$err" "logs.keep_transcripts is 'maybe'"
+has "and says what the valid values are"            "$err" "true or false"
+
+d="$(new_repo)"; cd "$d" || exit 1; mkdir -p .github
+printf 'version: 1\nlogs:\n  retention_days: 30\n  keep_transcripts: true\n' > .github/crossrev.yml
+out="$($CROSSREV config show)"
+is "logs.retention_days 30 is accepted"      "$(jq -r .logs.retention_days <<<"$out")" "30"
+is "logs.keep_transcripts true is accepted"  "$(jq -r .logs.keep_transcripts <<<"$out")" "true"
 
 # --- the pass bound --------------------------------------------------------
 #

@@ -67,7 +67,17 @@ adapter_agy() {
   [[ -n "$effort" && "$effort" != "null" ]] && args+=(--effort "$effort")
 
   local out err rc
-  out="$(mktemp)"; err="$(mktemp)"
+  # When run_invoke names a transcript base the capture files ARE the record:
+  # they live in the run directory, are redacted in place, and their deletion
+  # is the orchestrator's decision. Without one — anonymous temp files,
+  # deleted on both paths, as before.
+  local keep_transcript=0
+  if [[ -n "${CROSSREV_TRANSCRIPT_BASE:-}" ]]; then
+    keep_transcript=1
+    out="$CROSSREV_TRANSCRIPT_BASE.stdout"; err="$CROSSREV_TRANSCRIPT_BASE.stderr"
+  else
+    out="$(mktemp)"; err="$(mktemp)"
+  fi
 
   # No GitHub credential, and none belonging to another harness: this process
   # reads attacker-controlled text, and a credential it never receives is one no
@@ -90,10 +100,17 @@ adapter_agy() {
     local msg; msg="$(jq -r '.error // .response // empty' "$out" 2>/dev/null)"
     [[ -n "$msg" ]] || msg="$(legs_harness_error "$err")"
     [[ -n "$msg" ]] || msg="agy exited $rc with no output on either stream"
+    msg="$(log_redact_str "$msg")"
     jq -cn --arg e "$msg" \
       '{ok:false, payload:null, harness:"agy", endpoint:null, model_reported:null,
         tokens:null, error:$e}'
-    rm -f "$out" "$err"; return 1
+    # The capture files are the record, so they are filtered here — after every
+    # value has been read from them, never before. Redacting first would rewrite
+    # the payload this adapter parses, so identical harness output would yield
+    # different answers depending on whether a run directory exists.
+    if (( keep_transcript )); then log_redact_file "$out"; log_redact_file "$err"
+    else rm -f "$out" "$err"; fi
+    return 1
   fi
 
   # structured_output is the parsed object when a schema was given. The response
@@ -107,7 +124,12 @@ adapter_agy() {
                    | (.total_tokens // ((.input_tokens // 0) + (.output_tokens // 0)))
                    | if . == 0 then "null" else tostring end' "$out" 2>/dev/null)" || tokens=null
   [[ -n "$tokens" ]] || tokens=null
-  rm -f "$out" "$err"
+  # The capture files are the record, so they are filtered here — after every
+  # value has been read from them, never before. Redacting first would rewrite
+  # the payload this adapter parses, so identical harness output would yield
+  # different answers depending on whether a run directory exists.
+  if (( keep_transcript )); then log_redact_file "$out"; log_redact_file "$err"
+  else rm -f "$out" "$err"; fi
 
   jq -cn --argjson p "${payload:-null}" --argjson t "$tokens" \
     '{ok:true, payload:$p, harness:"agy", endpoint:"vendor",

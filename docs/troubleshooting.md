@@ -67,6 +67,8 @@ If that process is still running, wait for it or stop it. If it isn't, CrossRev 
 
 The last row is why a marker never reads `started` after the process is gone. A leg that dies writes its reason into the claim it already posted, so `crossrev status` reports the cause rather than only that the run ended.
 
+**The full record is on disk.** The error also names a directory under `~/.local/state/crossrev/runs/`: `run.log` says what the run did and where it stopped, and a failed leg's transcript — the harness's whole stdout and stderr — is kept beside it. The 400 bytes in the comment are the excerpt, not the record. In automated mode the same directory leaves the runner as the `crossrev-run-<run-id>` artifact.
+
 Remove `crossrev/halted` once you've looked, then run the command `status` suggests.
 
 **A declined pass leaves a marker too**, flagged `declined`, so `status` can render the refusal instead of inferring it from a label plus the prose of a comment. It doesn't count as a pass: raising the cap and re-running won't answer "already reviewed".

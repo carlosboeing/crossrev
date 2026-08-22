@@ -27,7 +27,20 @@ adapter_codex() {
   fi
 
   local out_file err events rc
-  out_file="$(mktemp)"; err="$(mktemp)"; events="$(mktemp)"
+  # When run_invoke names a transcript base the capture files ARE the record:
+  # the event stream (codex's stdout) and stderr land in the run directory
+  # alongside the payload file, are redacted in place, and their deletion is
+  # the orchestrator's decision. Without one the adapter runs as it always
+  # has — anonymous temp files, deleted on both paths.
+  local keep_transcript=0
+  if [[ -n "${CROSSREV_TRANSCRIPT_BASE:-}" ]]; then
+    keep_transcript=1
+    out_file="$CROSSREV_TRANSCRIPT_BASE.payload"
+    err="$CROSSREV_TRANSCRIPT_BASE.stderr"
+    events="$CROSSREV_TRANSCRIPT_BASE.stdout"
+  else
+    out_file="$(mktemp)"; err="$(mktemp)"; events="$(mktemp)"
+  fi
 
   # `--json` streams events on stdout while `-o` still writes the final payload to
   # a file, so this buys the token counts without changing where the payload comes
@@ -77,10 +90,17 @@ adapter_codex() {
   rc=$?
 
   if (( rc != 0 )) || [[ ! -s "$out_file" ]]; then
-    jq -cn --arg e "$(legs_harness_error "$err")" \
+    jq -cn --arg e "$(log_redact_str "$(legs_harness_error "$err")")" \
       '{ok:false, payload:null, harness:"codex", endpoint:null, model_reported:null,
         tokens:null, error:$e}'
-    rm -f "$out_file" "$err" "$events"; return 1
+    # The capture files are the record, so they are filtered here — after every
+    # value has been read from them, never before. Redacting first would rewrite
+    # the payload this adapter parses, so identical harness output would yield
+    # different answers depending on whether a run directory exists.
+    if (( keep_transcript )); then
+      log_redact_file "$out_file"; log_redact_file "$err"; log_redact_file "$events"
+    else rm -f "$out_file" "$err" "$events"; fi
+    return 1
   fi
 
   # The last turn.completed event, if one is there. Parsed leniently on purpose:
@@ -101,7 +121,14 @@ adapter_codex() {
       else ((.input_tokens // 0) + (.output_tokens // 0) | tostring) end' \
     "$events" 2>/dev/null)" || tokens=null
   [[ -n "$tokens" ]] || tokens=null
-  rm -f "$out_file" "$err" "$events"
+
+  # The capture files are the record, so they are filtered here — after every
+  # value has been read from them, never before. Redacting first would rewrite
+  # the payload this adapter parses, so identical harness output would yield
+  # different answers depending on whether a run directory exists.
+  if (( keep_transcript )); then
+    log_redact_file "$out_file"; log_redact_file "$err"; log_redact_file "$events"
+  else rm -f "$out_file" "$err" "$events"; fi
 
   jq -cn --argjson p "$payload" --argjson t "$tokens" \
     '{ok:true, payload:$p, harness:"codex", endpoint:"vendor",
