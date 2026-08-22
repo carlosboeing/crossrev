@@ -542,6 +542,25 @@ has "the resumed run still says a finding missed its line" \
 has "and the summary comment still records it" \
   "$(last_body 9001)" "One finding could not be anchored to a line of the diff"
 
+# --- pass formatting inside the cycle cap -----------------------------------
+#
+# The denominator is the automatic continuation cap, not a promise that this
+# many passes will run. A heading of "pass 1 of 3" on a single local review
+# reads as a cycle nobody started. Bare "pass N" on every trigger; the
+# past-the-cap form below is unchanged.
+has "a pass inside the cap is numbered without a denominator" \
+  "$review_body" "## crossrev review — pass 1"
+hasnt "and does not read as a planned cycle of three" \
+  "$review_body" "pass 1 of 3"
+has "the resolve heading matches" \
+  "$resolve_body" "## crossrev resolved pass 1"
+hasnt "and does not carry of N either" \
+  "$resolve_body" "pass 1 of 3"
+has "the review skill describes the pass number as which pass this is" \
+  "$review_prompt" "Which pass this is"
+hasnt "and not as a fraction of the configured maximum" \
+  "$review_prompt" "out of the configured maximum"
+
 # --- pass formatting beyond the cycle cap -----------------------------------
 #
 # An operator running a pass by hand beyond max_passes_per_cycle is driving, so

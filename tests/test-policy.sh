@@ -106,7 +106,8 @@ no_threads
 CROSSREV_REVIEW_PAYLOAD="$(printf '%s' "$CONVERGED" | payload)"; export CROSSREV_REVIEW_PAYLOAD
 out="$("$CROSSREV" review --pr 42 2>&1)"
 
-has "a max_passes_per_cycle raised only on the branch is ignored" "$out" "pass 1 of 3"
+has "a max_passes_per_cycle raised only on the branch is ignored" "$out" "Reviewing acme/widget#42 — pass 1"
+hasnt "and the heading does not imply a planned cycle length" "$out" "pass 1 of 3"
 hasnt "and the branch's model choice does not take effect" "$out" "hijacked-model"
 has "the base revision's reviewer is what runs"            "$out" "reviewer-model"
 

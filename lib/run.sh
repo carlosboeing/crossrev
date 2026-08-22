@@ -426,7 +426,7 @@ _pass_label() {
   if (( p > m )); then
     printf 'pass %s (past the cycle cap of %s)' "$p" "$m"
   else
-    printf 'pass %s of %s' "$p" "$m"
+    printf 'pass %s' "$p"
   fi
 }
 
