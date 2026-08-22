@@ -43,12 +43,18 @@ has "and the line carries the phase and detail" \
 has "and opens with a UTC timestamp" \
   "$(tail -1 "$CROSSREV_RUN_DIR/run.log" | cut -d' ' -f1)" "T"
 
+log_event commit $'failed: line one\nline two\r\nline three'
+is "a multi-line detail still writes one line" \
+  "$(wc -l <"$CROSSREV_RUN_DIR/run.log" | tr -d ' ')" "3"
+has "and the collapsed detail is on that line" \
+  "$(tail -1 "$CROSSREV_RUN_DIR/run.log")" "failed: line one line two  line three"
+
 CROSSREV_RUN_DIR_SAVED="$CROSSREV_RUN_DIR"
 CROSSREV_RUN_DIR=""
 log_event phase "should not land anywhere"
 is "an uninitialised log_event is a no-op" "$?" "0"
 is "and writes nothing" \
-  "$([[ -f "$CROSSREV_RUN_DIR_SAVED/run.log" ]] && wc -l <"$CROSSREV_RUN_DIR_SAVED/run.log" | tr -d ' ')" "2"
+  "$([[ -f "$CROSSREV_RUN_DIR_SAVED/run.log" ]] && wc -l <"$CROSSREV_RUN_DIR_SAVED/run.log" | tr -d ' ')" "3"
 CROSSREV_RUN_DIR="$CROSSREV_RUN_DIR_SAVED"
 
 # --- redaction ---------------------------------------------------------------
@@ -240,7 +246,7 @@ rm -rf "$RUNS_BASE"
 fixture_repo "$(fixture_config local medium; printf 'git:\n  hooks: run\n')"
 stub_reset
 mkdir -p "$FIX_DIR/.git/hooks"
-printf '#!/usr/bin/env bash\nprintf "commit-msg hook says no\\n" >&2\nexit 1\n' \
+printf '#!/usr/bin/env bash\nprintf "hook banner\\nhook body\\ncommit-msg hook says no\\n" >&2\nexit 1\n' \
   >"$FIX_DIR/.git/hooks/commit-msg"
 chmod +x "$FIX_DIR/.git/hooks/commit-msg"
 routes_baseline "$(marker_comment 9001 "$(review_marker_done)" | jq -cs . | payload)"
@@ -258,5 +264,10 @@ is  "a refused commit still fails the leg" "$rc" "1"
 rd="$(find "$RUNS_BASE/acme-widget/pr-42" -mindepth 1 -maxdepth 1 -type d | head -1)"
 is  "and the resolve transcript is kept" \
   "$([[ -f "$rd/resolve.attempt-1.stdout" ]] && echo yes)" "yes"
+is  "and every run.log line is one event" \
+  "$(grep -cE '^[0-9]{4}-[0-9]{2}-[0-9]{2}T' "$rd/run.log" | tr -d ' ')" \
+  "$(wc -l <"$rd/run.log" | tr -d ' ')"
+has "and the hook output is on the failed commit line" \
+  "$(grep ' commit failed:' "$rd/run.log")" "hook banner hook body commit-msg hook says no"
 
 finish

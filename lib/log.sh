@@ -79,6 +79,10 @@ log_event() {
   local phase="$1" detail="${2:-}"
   [[ -n "$CROSSREV_RUN_DIR" ]] || return 0
   [[ -f "$CROSSREV_RUN_DIR/run.log" ]] || log_create_private "$CROSSREV_RUN_DIR/run.log"
+  # Callers pass git tails and die reasons that already contain newlines.
+  # Collapse them so the one-line-per-event invariant holds regardless.
+  detail="${detail//$'\n'/ }"
+  detail="${detail//$'\r'/ }"
   printf '%s %s %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$phase" "$detail" \
     | log_redact >>"$CROSSREV_RUN_DIR/run.log" 2>/dev/null || true
   return 0

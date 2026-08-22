@@ -139,7 +139,7 @@ Markers are HTML comments in comment bodies. They carry the pass number, the leg
 
 ### The run record on disk
 
-Every run also writes locally, under `~/.local/state/crossrev/runs/<repo>/pr-<n>/<run-id>/` — beside the worktrees a failed resolve leg keeps, and named by the same run id the marker carries.
+Every run also writes locally, under `~/.local/state/crossrev/runs/<repo-slug>/pr-<n>/<run-id>/` (the slash in the repository name becomes a hyphen) — beside the worktrees a failed resolve leg keeps, and named by the same run id the marker carries.
 
 `run.log` is one line per event — timestamp, phase, subprocess, exit code, duration — so a stall inside a step is attributable to that step, and a dead run says where it stopped. A failed leg also keeps the harness transcript there (`<leg>.attempt-N.stdout` and `.stderr`), so what the model actually did can be read afterwards instead of being deleted by the code that noticed the failure. Successful legs delete their transcripts; `--keep-transcripts` keeps them, for the failure that is a wrong answer rather than an error.
 

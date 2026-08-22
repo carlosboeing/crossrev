@@ -82,7 +82,7 @@ logs:
   keep_transcripts: false   # true — keep the harness transcript even when a leg succeeds
 ```
 
-Every run writes a run log under `~/.local/state/crossrev/runs/<repo>/pr-<n>/<run-id>/` — one line per event: phase, subprocess, exit code, duration. A failed leg also keeps the harness's stdout and stderr there, so what the model actually did survives the failure that used to delete it. `keep_transcripts: true` keeps them for successful legs too — for the failure that is a wrong answer rather than an error — and `--keep-transcripts` does it for one run.
+Every run writes a run log under `~/.local/state/crossrev/runs/<repo-slug>/pr-<n>/<run-id>/` (the slash in the repository name becomes a hyphen) — one line per event: phase, subprocess, exit code, duration. A failed leg also keeps the harness's stdout and stderr there, so what the model actually did survives the failure that used to delete it. `keep_transcripts: true` keeps them for successful legs too — for the failure that is a wrong answer rather than an error — and `--keep-transcripts` does it for one run.
 
 One retention rule covers everything in the directory: `retention_days` sweeps run directories by age, logs and transcripts alike. Both values are refused rather than misread. A non-numeric `retention_days` would sweep by a default nobody stated, and a non-boolean `keep_transcripts` would read as `false` while the config says keep.
 
