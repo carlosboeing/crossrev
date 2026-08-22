@@ -857,6 +857,17 @@ ${halt_body}$(state_marker_encode "$(jq -cn --argjson p "$pass" --arg sha "$CTX_
     comment_id="$(jq -r '.comment_id' <<<"$claim")"
     marker="$claim"
     if (( redrive )); then
+      # `_run_details` and `crossrev status` read harness, model, effort and
+      # endpoint off the marker. The rebuild above copies the failed attempt's,
+      # and the later findings write never replaces them. A redrive that ran
+      # on a different pairing would then name the harness that failed, and a
+      # recorded model that is not the one that answered would print the
+      # substitution alert on a healthy pass. Same refresh the resolve redrive
+      # does; it happens here because `run_leg_settings` has just chosen them.
+      marker="$(jq -c --arg h "$harness" --arg m "$model" --arg e "$effort" --arg ep "$endpoint" \
+        '.harness = $h | .model = (if $m == "" then null else $m end)
+         | .effort = (if $e == "" then null else $e end)
+         | .endpoint = (if $ep == "" then null else $ep end)' <<<"$marker")"
       ui_say "Pass $pass's review ended blocked — driving pass $pass again."
       gh_comment_edit "$CTX_REPO" "$comment_id" \
 "**crossrev — reviewing, $(_pass_label "$pass" "$CTX_MAX_PASSES_PER_CYCLE")**

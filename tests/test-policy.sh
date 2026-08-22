@@ -787,7 +787,8 @@ has "and moves the label the way a blocked review already does" \
 fixture_repo; stub_reset
 blocked_review="$(jq -cn --arg sha "$FIX_HEAD" --argjson ts "$(date +%s)" '
   {v:1, leg:"review", pass:1, state:"complete", ts:$ts, done_ts:$ts, run_id:"1",
-   head_sha:$sha, harness:"codex", model:null, model_reported:null,
+   head_sha:$sha, harness:"codex", model:"codex-model", effort:"high",
+   model_reported:null,
    verdict:"blocked", blocked_reason:"the codex harness failed: test tripwire",
    findings:[]}')"
 routes_baseline "$(marker_comment 9001 "$blocked_review" | jq -cs . | payload)" \
@@ -801,6 +802,13 @@ hasnt "rather than declining as already reviewed"     "$out" "already reviewed"
 is  "and it reuses the blocked claim rather than posting another" \
   "$(count 'method POST repos/acme/widget/issues/42/comments')" "0"
 has "editing the claim it already holds"              "$(calls)" "PATCH repos/acme/widget/issues/comments/9001"
+redriven_body="$(last_body 9001)"
+has "the redriven summary names the harness that ran" \
+  "$redriven_body" '| review | `claude` · `reviewer-model`'
+hasnt "and does not flag a substitution that did not happen" \
+  "$redriven_body" "a different model answered"
+hasnt "nor keep the failed attempt's harness" \
+  "$redriven_body" '`codex`'
 
 fixture_repo; stub_reset
 routes_baseline "$(marker_comment 9001 "$blocked_review" | jq -cs . | payload)" \
