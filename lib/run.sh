@@ -105,6 +105,23 @@ _run_report_fatal() {
     "$CROSSREV_LEG_COMMENT_ID" "$CROSSREV_LEG_MARKER"
 }
 
+# The leg is finished and its completion is on the pull request. Nothing is open
+# for the EXIT trap to report any more.
+#
+# Called immediately after the complete edit lands, and not one line later. The
+# last checkpoint runs before that edit, so without this the snapshot still says
+# `started` for the rest of the process — and everything after it can still die.
+# `run_pass_labels` can, and under `cmd_cycle` so can the whole start-up of the
+# next leg: worktree creation, the push guard, the adapter lookup, the claim
+# comment. Any of those would fire the trap against a leg that already succeeded,
+# PATCH its comment to blocked and label the pull request halted over finished
+# work. Clearing says what is true — no leg is open — rather than leaving a stale
+# copy for a guard to interpret.
+run_leg_settled() {
+  CROSSREV_LEG_COMMENT_ID=""
+  CROSSREV_LEG_MARKER=""
+}
+
 # Called between outward writes. Nothing is half-written when this returns.
 #
 # It also snapshots the open leg for the EXIT trap. Here rather than at each of
@@ -1127,6 +1144,7 @@ Findings recorded; posting them now.$(state_marker_encode "$(jq -c 'del(.comment
   marker="$(jq -c '.state = "complete"' <<<"$marker")"
   gh_comment_edit "$CTX_REPO" "$comment_id" \
     "$summary_body$(state_marker_encode "$(jq -c 'del(.comment_id)' <<<"$marker")")"
+  run_leg_settled
 
   local next
   next="$(legs_pass_label "$verdict" "$actionable" "$(_markers_escalated "$CTX_MARKERS")")"
@@ -2174,6 +2192,7 @@ Pushed \`${commit_sha:0:7}\`; replying to each thread now.$(state_marker_encode 
   marker="$(jq -c '.state = "complete"' <<<"$marker")"
   gh_comment_edit "$CTX_REPO" "$comment_id" \
     "$summary_body$(state_marker_encode "$(jq -c 'del(.comment_id)' <<<"$marker")")"
+  run_leg_settled
 
   local next other_escalated
   # Escalations in OTHER passes stand too — the halt outlives the pass that
