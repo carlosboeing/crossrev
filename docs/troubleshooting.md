@@ -139,12 +139,21 @@ Falling back to the vendor's own API would mean running Claude while the config 
 
 Each endpoint needs both a `base_url` and a `token_env`. The variable name is required rather than assumed because it genuinely differs by service.
 
+## The harness can't serve this leg
+
+`the harness 'opencode' cannot serve the resolve leg`
+
+Some harnesses run one leg only. opencode is review-only: it can review a pull request and cannot resolve findings on one. Name it as `reviewer.harness`, or pass `--harness opencode` to `review`, and leave the resolve leg to one of `claude`, `codex`, `agy` or `grok` — the error names them.
+
+The refusal happens before anything is staged or billed. It is a configuration fact, not a transient failure, so re-running changes nothing; change the pairing instead.
+
 ## A credential problem in CI
 
 | Symptom | Cause |
 |---|---|
 | A leg stops saying the credential has under an hour left | Deliberate. Refreshing mid-flight is what breaks the rotation chain — the refresher workflow is the only writer. Let the refresher run |
 | A Codex leg fails to authenticate | The stored `auth.json` was probably refreshed elsewhere, invalidating this copy. Re-seed the secret from a fresh `codex login` |
+| An opencode leg says it rejected its credential | The staged `auth.json` no longer authenticates. Re-seed: `opencode auth login` locally, then `gh secret set CROSSREV_OPENCODE_AUTH < ~/.local/share/opencode/auth.json`. Beware that opencode falls through to a different provider when its configured one cannot authenticate, so the provider named in the failure may not be yours |
 | `crossrev init` refuses your pairing | The runner cannot serve it. It names the credential lifetime and both fixes |
 | The loop stops after one leg | Something is using the default `GITHUB_TOKEN` for a write that advances the loop. GitHub deliberately doesn't trigger another workflow from those writes; the App token is what chains them |
 

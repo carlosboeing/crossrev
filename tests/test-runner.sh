@@ -314,6 +314,6 @@ routes_baseline "$(printf '[]' | payload)"
 route "*reviewThreads*" "$(threads_response)"
 out="$("$CROSSREV" review --pr 42 --harness nosuch 2>&1)" || true
 has "unknown harness dies naming the ones that exist" "$out" "there is no adapter for the harness 'nosuch'"
-has "and lists the valid harnesses" "$out" "claude, codex, agy and grok"
+has "and lists the valid harnesses" "$out" "claude, codex, agy, grok and opencode"
 
 finish

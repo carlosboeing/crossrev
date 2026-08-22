@@ -153,6 +153,7 @@ Each adapter takes a prompt file, a schema, a working directory, an optional mod
 | `lib/adapters/codex.sh` | Codex | Takes the schema as a **file path**. Runs with `--ignore-user-config` |
 | `lib/adapters/agy.sh` | Antigravity | |
 | `lib/adapters/grok.sh` | Grok | Takes the schema **inline** as a JSON string. |
+| `lib/adapters/opencode.sh` | opencode | No schema flag: the schema travels inside the prompt, and CrossRev extracts the JSON from the answer text itself. Review-only |
 <!-- crossrev:harness-table:end -->
 
 The inline-versus-path difference is not a detail: handing Claude a path fails with a JSON parse error about the leading slash, which reads like a corrupt schema rather than a wrong argument type.

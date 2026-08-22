@@ -24,9 +24,10 @@ Each row is a complete set. Secrets within a row are not alternatives.
 | GitHub-hosted, Claude on both legs | `APP_ID`, `APP_PRIVATE_KEY`, `CLAUDE_CODE_OAUTH_TOKEN` |
 | GitHub-hosted, one Claude leg and one Codex leg | `APP_ID`, `APP_PRIVATE_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, `CROSSREV_CODEX_AUTH`, `CROSSREV_REFRESH_APP_ID`, `CROSSREV_REFRESH_APP_PRIVATE_KEY` |
 | GitHub-hosted, Codex on both legs | `APP_ID`, `APP_PRIVATE_KEY`, `CROSSREV_CODEX_AUTH`, `CROSSREV_REFRESH_APP_ID`, `CROSSREV_REFRESH_APP_PRIVATE_KEY` |
+| GitHub-hosted, one opencode leg | `APP_ID`, `APP_PRIVATE_KEY`, `CROSSREV_OPENCODE_AUTH` |
 | Self-hosted, both legs using logins already on the runner | `APP_ID`, `APP_PRIVATE_KEY` |
 
-Two legs on the same harness share one harness credential. Any GitHub-hosted Codex leg adds the Codex secret and both refresher App secrets. A leg pointed at a named endpoint adds whatever variable that endpoint's `token_env` names, on any runner.
+Two legs on the same harness share one harness credential. Any GitHub-hosted Codex leg adds the Codex secret and both refresher App secrets. Any GitHub-hosted opencode leg adds the opencode secret and nothing else — its credential is static, so there is no refresher to provision. A leg pointed at a named endpoint adds whatever variable that endpoint's `token_env` names, on any runner.
 
 **There is no source-checkout secret.** CrossRev is delivered as a public composite action pinned by SHA, so the workflows reach it with no credential — earlier versions needed a read-only deploy key because GitHub shares private actions only within one account. If you are looking for `CROSSREV_SOURCE_KEY` or a deploy key on a Deploy keys page, neither exists any more.
 
@@ -40,6 +41,7 @@ Run `crossrev init --dry-run` for the exact list derived from your current confi
 | `APP_PRIVATE_KEY` | Loop App RSA private key, PEM format | Same Actions scope as `APP_ID` | Every automated setup |
 | `CLAUDE_CODE_OAUTH_TOKEN` | Claude subscription token from `claude setup-token` | Organisation or repository secret | A hosted leg uses Claude by subscription |
 | `CROSSREV_CODEX_AUTH` | The complete Codex `auth.json`, including access and refresh tokens | Repository secret only | A hosted leg uses Codex by subscription |
+| `CROSSREV_OPENCODE_AUTH` | The complete opencode `auth.json`, one `{type, key}` entry per provider with no expiry inside | Repository secret only | A hosted leg uses opencode; the review leg only — opencode is review-only |
 | `CROSSREV_REFRESH_APP_ID` | Numeric ID of the refresher App | Repository secret only | A hosted leg uses Codex by subscription |
 | `CROSSREV_REFRESH_APP_PRIVATE_KEY` | Refresher App RSA private key, PEM format | Repository secret only | A hosted leg uses Codex by subscription |
 | Whatever an endpoint's `token_env` names | A static token that endpoint accepts | Your shell locally, an Actions secret in CI | A leg names that endpoint |
@@ -85,10 +87,11 @@ GitHub-hosted runners are disposable, so each run restores the harness credentia
 | `codex` | OAuth access token in `~/.codex/auth.json` | 10 days | Works, with the refresher below |
 | `agy` | the OS keyring on macOS (`Antigravity Safe Storage`); `~/.gemini/antigravity-cli/antigravity-oauth-token` on a host with no D-Bus session bus | 56 minutes | Use a self-hosted runner |
 | `grok` | `~/.grok/auth.json` | 6 hours | Works, by self-refreshing |
+| `opencode` | `opencode auth login`, purpose-built | — | Works directly |
 | `kimi` | OAuth access token | 15 minutes | Use a self-hosted runner, or a static endpoint token |
 <!-- crossrev:harness-table:end -->
 
-CrossRev has adapters for Claude, Codex, Antigravity and Grok. Kimi is reached through the Claude adapter as a named endpoint.
+CrossRev has adapters for Claude, Codex, Antigravity, Grok and opencode. The opencode credential stages under `XDG_DATA_HOME` rather than a home of its own, and the harness it serves is review-only. Kimi is reached through the Claude adapter as a named endpoint.
 
 **`crossrev init` refuses a pairing its runner cannot serve**, naming the lifetime and both fixes, rather than installing workflows that fail at the first API call. `crossrev doctor` reports the same thing before you get that far.
 

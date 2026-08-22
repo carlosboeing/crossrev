@@ -479,6 +479,18 @@ run_leg_settings() {
     ui_die "there is no adapter for the harness '$LEG_HARNESS'" "$guide"
   fi
 
+  # A harness may name the legs it serves, and an absent field means both. The
+  # refusal is a configuration fact rather than a failure to discover mid-run,
+  # so it lands here — before the binary test and long before anything is
+  # staged or billed. The leg names arrive as reviewer/resolver; the
+  # descriptor's vocabulary is review/resolve.
+  local leg_name="resolve"
+  [[ "$leg" == "reviewer" ]] && leg_name="review"
+  if ! harness_serves_leg "$LEG_HARNESS" "$leg_name"; then
+    ui_die "the harness '$LEG_HARNESS' cannot serve the $leg_name leg" \
+      "CrossRev runs the $leg_name leg on $(harness_names_for_leg "$leg_name" | _names_human). $(harness_get "$LEG_HARNESS" .product_name) is limited to the $(harness_get "$LEG_HARNESS" '.legs // [] | join(", ")') leg."
+  fi
+
   local leg_binary; leg_binary="$(harness_get "$LEG_HARNESS" .binary)"
   [[ -n "$leg_binary" ]] || leg_binary="$LEG_HARNESS"
   command -v "$leg_binary" >/dev/null 2>&1 && return 0
