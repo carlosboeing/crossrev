@@ -793,10 +793,21 @@ leg_review() {
     # label plus the prose of a comment body — which is how a readable state
     # becomes a guessed one. `state: "declined"` keeps it out of pass numbering,
     # revision detection and the daily cap: it records a pass that did not run.
+    local halt_body
+    if [[ "$reason" == *max_passes_per_cycle* ]]; then
+      # A push fires nothing: the review workflow listens for opened,
+      # ready_for_review and labeled, never synchronize. A revision was already
+      # pushed, or this refusal would not have a new pass number. Restart is a
+      # /crossrev review comment, the awaiting-review label, or a local run.
+      halt_body="$(printf 'CrossRev did not review this revision. It runs a maximum of %s passes automatically. To run another pass, comment `/crossrev review`, or run `crossrev review --pr %s` locally. To change the limit, set [`policy.max_passes_per_cycle`](https://github.com/carlosboeing/crossrev/blob/main/docs/configuration.md#policy) in `.github/crossrev.yml`.' \
+        "$CTX_MAX_PASSES_PER_CYCLE" "$CTX_PR")"
+    else
+      halt_body="No review ran, so nothing here is a judgement about the code. Raising the cap in \`.github/crossrev.yml\` and pushing a revision would start it again."
+    fi
     gh_comment_create "$CTX_REPO" "$CTX_PR" \
 "**crossrev stopped before pass $pass** — $reason.
 
-No review ran, so nothing here is a judgement about the code. Raising the cap in \`.github/crossrev.yml\` and pushing a revision would start it again.$(state_marker_encode "$(jq -cn --argjson p "$pass" --arg sha "$CTX_HEAD_SHA" \
+${halt_body}$(state_marker_encode "$(jq -cn --argjson p "$pass" --arg sha "$CTX_HEAD_SHA" \
   --arg r "${GITHUB_RUN_ID:-local-$$}" --argjson ts "$(date +%s)" --arg why "$reason" \
   '{v:1, leg:"review", pass:$p, state:"declined", ts:$ts, done_ts:$ts, run_id:$r,
     head_sha:$sha, harness:null, model:null, effort:null, endpoint:null,

@@ -55,7 +55,7 @@ A pull request consumes at most one daily unit however many passes it takes, bec
 Two values are refused rather than accepted and misread:
 
 - **`min_fix_severity` must be `high`, `medium` or `low`.** A typo ranks zero, zero meets nothing, so every finding would count as non-actionable, the pass would report converged, and the cycle would stop with a high-severity finding sitting on the pull request. A typo would look exactly like a clean review.
-- **`max_passes_per_cycle` must be a whole number above zero.** Zero is already spoken for internally as "no pass bound applies to this invocation", which is what lets a person ask for one attended pass past the bound. To stop CrossRev reviewing a repository at all, remove its workflows rather than setting the bound to zero.
+- **`max_passes_per_cycle` must be a whole number above zero.** Zero is already spoken for internally as "no pass bound applies to this invocation", which is what lets a person ask for one attended pass past the bound. To stop CrossRev reviewing a repository at all, remove its workflows rather than setting the bound to zero. The limit counts all passes on a pull request, manual and automatic. Three manual passes therefore leave no automatic passes.
 
 ### The pairing
 

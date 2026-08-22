@@ -241,6 +241,7 @@ route 'api --method POST repos/*/issues/42/comments*' '{"id":9001}'
 out="$("$CROSSREV" review --pr 42 --trigger automatic 2>&1)"
 has "a diff above max_files_changed_per_pr is not reviewed" "$out" "above max_files_changed_per_pr"
 has "and it says so on the pull request"             "$(calls)" "crossrev stopped before pass 1"
+hasnt "and does not describe a pass-cap restart"     "$(calls)" "did not review this revision"
 has "and marks the pull request halted"              "$(calls)" "labels[]=crossrev/halted"
 
 # A draft is unattended only when the invocation says so. The workflow supplies
@@ -317,6 +318,15 @@ routes_baseline "$(marker_comment 9001 "$three_done" | jq -cs . | payload)"
 route 'api --method POST repos/*/issues/42/comments*' '{"id":9001}'
 out="$("$CROSSREV" review --pr 42 --continuation 2>&1)"
 has "a generated pass at the bound does not start" "$out" "reached max_passes_per_cycle (3)"
+hasnt "the cap-halt comment does not recommend a push" "$(calls)" "pushing a revision"
+has "it says no review ran on this revision" "$(calls)" "CrossRev did not review this revision"
+has "it names the slash command that starts another pass" "$(calls)" "/crossrev review"
+has "and the local command with this pull request" "$(calls)" "crossrev review --pr 42"
+has "and links the policy key to the configuration docs" \
+  "$(calls)" "https://github.com/carlosboeing/crossrev/blob/main/docs/configuration.md#policy"
+has "configuration.md says the cap counts manual passes too" \
+  "$(cat "$HERE/../docs/configuration.md")" \
+  "The limit counts all passes on a pull request, manual and automatic"
 
 cycle_log="$(mktemp)"
 out="$(cycle_driver 0 "$cycle_log")"
