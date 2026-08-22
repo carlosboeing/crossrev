@@ -29,6 +29,14 @@ CROSSREV_SANDBOXED=""
 CROSSREV_RESUME_HINT=""
 CROSSREV_WORKTREE=""
 
+# The open leg, as of the last checkpoint, so the EXIT trap can record a fatal
+# error on the pull request rather than leaving the marker reading `started`
+# forever. Snapshotted in run_checkpoint because that is already the one place
+# every leg passes through between outward writes.
+CROSSREV_LEG_COMMENT_ID=""
+CROSSREV_LEG_MARKER=""
+CROSSREV_LEG_REPORTED=0
+
 _worktree_dir() {
   local repo="$1" pr="$2" slug
   slug="${repo//\//-}"
@@ -55,6 +63,7 @@ run_cleanup() {
   if (( rc != 0 )) && [[ -n "$CROSSREV_WORKTREE" && -d "$CROSSREV_WORKTREE" ]]; then
     printf '  Worktree kept for debugging: %s\n' "$CROSSREV_WORKTREE" >&2
   fi
+  _run_report_fatal "$rc"
   # A restored credential dies with the process that borrowed it, on the fatal
   # paths as much as the clean one. Leaving it on disk is how a second job finds
   # a copy of a token that only one holder may refresh.
@@ -62,8 +71,66 @@ run_cleanup() {
   return "$rc"
 }
 
+# Record a fatal error on the pull request, from the EXIT trap.
+#
+# `_run_report_invoke_failure` did the right thing from one call site: the
+# harness-failure branch of run_invoke. Every other fatal path left the claim
+# marker reading `started` with a null `blocked_reason`, so `crossrev status`
+# could report that the leg was abandoned — it tests whether the run_id's process
+# is still alive — and could not report why. The cause survived only in the
+# terminal that saw it.
+#
+# Mounted on the trap rather than on ui_die, because ui_die is not the only way a
+# leg dies: an unguarded failure under `set -e` and a SIGKILL to a child both
+# arrive here too, and both leave the same misleading marker.
+#
+# Guarded on the snapshot saying `started`. A leg that finished writes `complete`,
+# and reporting a completed leg as blocked because something failed afterwards
+# would replace an accurate record with a wrong one.
+_run_report_fatal() {
+  local rc="$1" state
+  (( rc == 0 )) && return 0
+  (( CROSSREV_LEG_REPORTED == 1 )) && return 0
+  [[ -n "$CROSSREV_LEG_MARKER" && -n "$CROSSREV_LEG_COMMENT_ID" ]] || return 0
+  state="$(jq -r '.state // ""' <<<"$CROSSREV_LEG_MARKER" 2>/dev/null)" || return 0
+  [[ "$state" == "started" ]] || return 0
+
+  # 130 is the interrupt path, which run_checkpoint already explains and which
+  # leaves a deliberately resumable claim. Naming it as a failure would turn
+  # every Ctrl-C into a halted pull request.
+  (( rc == 130 )) && return 0
+
+  _run_report_invoke_failure \
+    "${CROSSREV_DIE_REASON:-the leg stopped before it finished, and exited $rc without saying why}" \
+    "$CROSSREV_LEG_COMMENT_ID" "$CROSSREV_LEG_MARKER"
+}
+
+# The leg is finished and its completion is on the pull request. Nothing is open
+# for the EXIT trap to report any more.
+#
+# Called immediately after the complete edit lands, and not one line later. The
+# last checkpoint runs before that edit, so without this the snapshot still says
+# `started` for the rest of the process — and everything after it can still die.
+# `run_pass_labels` can, and under `cmd_cycle` so can the whole start-up of the
+# next leg: worktree creation, the push guard, the adapter lookup, the claim
+# comment. Any of those would fire the trap against a leg that already succeeded,
+# PATCH its comment to blocked and label the pull request halted over finished
+# work. Clearing says what is true — no leg is open — rather than leaving a stale
+# copy for a guard to interpret.
+run_leg_settled() {
+  CROSSREV_LEG_COMMENT_ID=""
+  CROSSREV_LEG_MARKER=""
+}
+
 # Called between outward writes. Nothing is half-written when this returns.
+#
+# It also snapshots the open leg for the EXIT trap. Here rather than at each of
+# the twenty-two places a marker is rebuilt: this function already sits at every
+# point where the leg's state is settled, and one snapshot cannot drift from
+# twenty-two.
 run_checkpoint() {
+  CROSSREV_LEG_COMMENT_ID="${comment_id:-}"
+  CROSSREV_LEG_MARKER="${marker:-}"
   (( CROSSREV_INTERRUPTED == 0 )) && return 0
   ui_warn "interrupted after the last completed write" \
     "The marker on the pull request records how far this got, so nothing is duplicated on the way back in. Resume with: ${CROSSREV_RESUME_HINT:-crossrev status --pr <n>}"
@@ -113,7 +180,7 @@ CTX_TITLE=""; CTX_BODY=""; CTX_LABELS=""; CTX_URL=""
 CTX_MODE=""; CTX_AUTHOR=""; CTX_MARKERS="[]"; CTX_MAX_PASSES_PER_CYCLE=3
 CTX_BACKLOG="none"; CTX_BACKLOG_LAYOUT=""; CTX_BACKLOG_PATH=""
 CTX_TRACKING_LABEL="crossrev-review"; CTX_BACKLOG_LABELS=""
-CTX_MIN_FIX_SEVERITY="medium"
+CTX_MIN_FIX_SEVERITY="medium"; CTX_GIT_HOOKS="skip"
 
 ctx_load() {
   local pr="$1" repo="${2:-}" trigger="${3:-human}" pr_json resolved
@@ -185,6 +252,7 @@ ctx_load() {
   CTX_MODE="$(cfg_get '.mode')"
   CTX_MAX_PASSES_PER_CYCLE="$(cfg_get '.policy.max_passes_per_cycle')"
   CTX_MIN_FIX_SEVERITY="$(cfg_get '.policy.min_fix_severity')"
+  CTX_GIT_HOOKS="$(cfg_get '.git.hooks')"
 
   resolved="$(cfg_resolve_backlog "$CTX_BASE_SHA" "$(cfg_get '.backlog.destination')")"
   read -r CTX_BACKLOG CTX_BACKLOG_LAYOUT CTX_BACKLOG_PATH <<<"$resolved"
@@ -551,6 +619,10 @@ _run_invoke_abort() {
 _run_report_invoke_failure() {
   local error="$1" cid="${2:-}" mk="${3:-}"
   [[ -n "$cid" && -n "$mk" && -n "${CTX_REPO:-}" && -n "${CTX_PR:-}" ]] || return 0
+  # Set before the writes, not after. This runs from the EXIT trap as well as
+  # from run_invoke, and a second pass over the same leg would post the summary
+  # twice if a write below failed and left the flag unset.
+  CROSSREV_LEG_REPORTED=1
 
   local now next_marker body findings resolutions pass l
   now="$(date +%s)"
@@ -1072,6 +1144,7 @@ Findings recorded; posting them now.$(state_marker_encode "$(jq -c 'del(.comment
   marker="$(jq -c '.state = "complete"' <<<"$marker")"
   gh_comment_edit "$CTX_REPO" "$comment_id" \
     "$summary_body$(state_marker_encode "$(jq -c 'del(.comment_id)' <<<"$marker")")"
+  run_leg_settled
 
   local next
   next="$(legs_pass_label "$verdict" "$actionable" "$(_markers_escalated "$CTX_MARKERS")")"
@@ -1962,7 +2035,11 @@ $(_commit_body "$resolutions" "$findings" fixed "$CTX_HEAD_SHA" "$pass")"
 
 $(_commit_body "$resolutions" "$findings" deferred "$CTX_HEAD_SHA" "$pass")"
     fi
-    commit_sha="$(gh_commit_and_push "$CTX_HEAD_BRANCH" "$commit_msg" "$CTX_HEAD_SHA" "$push_remote" "$CTX_HEAD_REPO")"
+    # Called directly, per the rule in this file's header: it can ui_die, and
+    # inside `$( )` that exit would end a subshell instead of this process. The
+    # SHA comes back in GH_COMMIT_SHA.
+    gh_commit_and_push "$CTX_HEAD_BRANCH" "$commit_msg" "$CTX_HEAD_SHA" "$push_remote" "$CTX_HEAD_REPO" "$CTX_GIT_HOOKS"
+    commit_sha="$GH_COMMIT_SHA"
     if [[ -n "$commit_sha" ]]; then
       ui_ok "pushed ${commit_sha:0:7} to $CTX_HEAD_BRANCH"
       # Recorded immediately after the push, because the window between the two
@@ -2115,6 +2192,7 @@ Pushed \`${commit_sha:0:7}\`; replying to each thread now.$(state_marker_encode 
   marker="$(jq -c '.state = "complete"' <<<"$marker")"
   gh_comment_edit "$CTX_REPO" "$comment_id" \
     "$summary_body$(state_marker_encode "$(jq -c 'del(.comment_id)' <<<"$marker")")"
+  run_leg_settled
 
   local next other_escalated
   # Escalations in OTHER passes stand too — the halt outlives the pass that
@@ -2382,7 +2460,7 @@ _commit_line() {
 # buys nothing — and the reasoning belongs in the thread, which the body links.
 _commit_body() {
   local resolutions="$1" findings="$2" want="$3" sha="$4" pass="$5"
-  local n i r id f title path line root
+  local n i r id f title path line root bullet
   n="$(jq 'length' <<<"$resolutions")"
   for (( i = 0; i < n; i++ )); do
     r="$(jq -c ".[$i]" <<<"$resolutions")"
@@ -2393,7 +2471,15 @@ _commit_body() {
     path="$(jq -r '.path // ""' <<<"$f")"
     line="$(jq -r '.line // ""' <<<"$f")"
     root="$(jq -r '.root_comment_id // ""' <<<"$f")"
-    printf -- '- %s\n' "$(_commit_line "${title:-$id}")"
+    # A full stop unless the title already ends one. A finding title is a full
+    # clause, so it reads correctly either way — and a punctuation-free line is
+    # what a naive sentence splitter runs into the line below it. One repository's
+    # commit-msg hook did exactly that and refused a body of three bullets as a
+    # single over-long sentence. Cheap insurance rather than the fix, which is
+    # ADR 0017: the resolver does not run the host repository's hooks.
+    bullet="$(_commit_line "${title:-$id}")"
+    [[ "$bullet" == *[.!?] ]] || bullet="$bullet."
+    printf -- '- %s\n' "$bullet"
     [[ -n "$path" && "$path" != "null" ]] || continue
     # The path and the line go through it too. Both are the same model's text on
     # the same output line, and sanitising one of the three would be arbitrary.

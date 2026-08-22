@@ -317,16 +317,77 @@ gh_issue_comment() {
 # Writes — code
 # ---------------------------------------------------------------------------
 
+# The end of git's own output, for an error message that would otherwise state
+# only that git refused.
+#
+# The tail rather than the head, for the reason legs_harness_error takes the tail
+# of a harness stream: whatever ran last is the thing that failed, and anything a
+# hook printed on its way there is banner. A repository whose pre-commit hook
+# runs its test suite prints thousands of lines before the refusal, so a head cut
+# reads back the first assertion and none of the diagnosis.
+#
+# Not shared with legs_harness_error, which greps for error-shaped words first. A
+# hook's refusal need not contain one — the refusal that prompted this printed
+# `1:sentence-length:…` and matched none of that helper's keywords.
+_gh_git_tail() {
+  local text="$1" cap="${2:-400}" picked
+  picked="$(printf '%s' "$text" | grep -v '^[[:space:]]*$' | tail -5)"
+  [[ -n "$picked" ]] || return 1
+  (( ${#picked} > cap )) && picked="…${picked: -cap}"
+  printf '%s' "$picked"
+}
+
 # Commit whatever the resolver changed, and push it to the PR's own branch.
 #
 # The push guard in legs.sh runs first and is not optional. Branch protection is
 # a backstop behind it, not a substitute: it fires after a bad push is attempted
 # and says nothing about which branch was targeted.
+#
+# $6 is the repository's `git.hooks` setting. It defaults to skip here as well as
+# in the config, so a caller that has not been taught the parameter still gets
+# the documented behaviour rather than the opposite one. See ADR 0017.
+#
+# The new SHA comes back in GH_COMMIT_SHA rather than on stdout, and that is the
+# whole reason the global exists. lib/run.sh states the rule in its own header:
+# anything that can call ui_die is called directly, never inside a command
+# substitution, because `exit` inside `$( )` ends the subshell. Read from stdout,
+# this function was the exception — a refused commit exited a subshell, `set -e`
+# killed the process from the outside, and the fatal path never reached the code
+# that records why on the pull request.
+GH_COMMIT_SHA=""
 gh_commit_and_push() {
-  local branch="$1" message="$2" expected_head="$3" remote="${4:-origin}" expected_repo="${5:-}" sha
+  GH_COMMIT_SHA=""
+  local branch="$1" message="$2" expected_head="$3" remote="${4:-origin}" expected_repo="${5:-}"
+  local hooks="${6:-skip}" sha
+
+  # Whole commands rather than a flag array. bash 3.2 is the floor here, and
+  # `"${empty[@]}"` under `set -u` is an unbound-variable error there — so a
+  # repository setting `git.hooks: run` would die before git ran at all, with a
+  # bash message rather than the hook's. Built this way the array is never empty.
+  local -a commit_cmd=(git
+    -c user.name="${CROSSREV_GIT_NAME:-crossrev}"
+    -c user.email="${CROSSREV_GIT_EMAIL:-crossrev@users.noreply.github.com}"
+    commit -q)
+  local -a push_cmd=(git push)
+  if [[ "$hooks" != "run" ]]; then
+    commit_cmd+=(--no-verify)
+    # A pre-push hook is a host repository hook firing on an automated action for
+    # the same reason a pre-commit hook is, and git spells the two flags apart.
+    push_cmd+=(--no-verify)
+  fi
+  commit_cmd+=(-m "$message")
+
+  # What to tell someone whose commit was refused, which depends on whether their
+  # own hooks were in play at all.
+  local hooks_advice
+  if [[ "$hooks" == "run" ]]; then
+    hooks_advice="This repository sets git.hooks: run, so its own commit hooks ran on this commit and one of them may have refused it. Setting git.hooks: skip makes the resolver commit the way it already does on a GitHub-hosted runner, which has no hooks installed."
+  else
+    hooks_advice="The repository's own git hooks were skipped, so this is git itself refusing rather than a hook."
+  fi
 
   git add -A >/dev/null 2>&1 || true
-  if git diff --cached --quiet 2>/dev/null; then printf ''; return 0; fi
+  if git diff --cached --quiet 2>/dev/null; then return 0; fi
 
   # The remote's URLs are read again here rather than trusted from the guard
   # that ran before the model did. This is the last point before a commit leaves
@@ -337,11 +398,15 @@ gh_commit_and_push() {
     "remote '$remote' pushes to '${LEGS_PUSH_REPO:-a URL CrossRev could not read}', but the head repository of this pull request is '${expected_repo:-unknown}'" \
     "CrossRev pushes only to the head repository of the pull request under review. The resolver's changes are still in the working tree and nothing was pushed. Check \`git config --get-all remote.$remote.pushurl\`."
 
-  git -c user.name="${CROSSREV_GIT_NAME:-crossrev}" \
-      -c user.email="${CROSSREV_GIT_EMAIL:-crossrev@users.noreply.github.com}" \
-      commit -q -m "$message" || ui_die \
-    "could not commit the resolver's changes" \
-    "The working tree still holds them, so nothing is lost. Check \`git status\` in the checkout."
+  # Declared before the assignment, not on the same line. `local x="$(cmd)"`
+  # reports the status of `local`, which always succeeds, so the `||` below would
+  # never fire and a refused commit would run on into the push.
+  local commit_out commit_why
+  if ! commit_out="$("${commit_cmd[@]}" 2>&1)"; then
+    commit_why="$(_gh_git_tail "$commit_out")" || commit_why="git printed nothing on either stream."
+    ui_die "could not commit the resolver's changes — $commit_why" \
+      "The working tree still holds them, so nothing is lost. $hooks_advice Check \`git status\` in the checkout."
+  fi
 
   # Re-read the remote head immediately before pushing. A human pushing to the
   # same branch mid-leg is a normal event, and overwriting them is not.
@@ -362,10 +427,14 @@ gh_commit_and_push() {
       "Someone else pushed. The fix is committed locally and not pushed; rebase onto the new head and re-run: crossrev resolve --pr <n>"
   fi
 
-  git push "$remote" "HEAD:refs/heads/$branch" >/dev/null 2>&1 || ui_die \
-    "could not push to $branch" \
-    "The commit exists locally. If branch protection refused it, that is the backstop working — check the rule, or push by hand."
+  local push_out push_why
+  if ! push_out="$("${push_cmd[@]}" "$remote" "HEAD:refs/heads/$branch" 2>&1)"; then
+    push_why="$(_gh_git_tail "$push_out")" || push_why="git printed nothing on either stream."
+    ui_die "could not push to $branch — $push_why" \
+      "The commit exists locally. If branch protection refused it, that is the backstop working — check the rule, or push by hand."
+  fi
 
   sha="$(git rev-parse HEAD)"
-  printf '%s' "$sha"
+  # shellcheck disable=SC2034  # read by run.sh after the call returns
+  GH_COMMIT_SHA="$sha"
 }

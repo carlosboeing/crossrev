@@ -75,6 +75,7 @@ _cfg_defaults() {
       max_files_changed_per_pr: 200,
       max_prs_per_day: 25
     },
+    git: { hooks: "skip" },
     endpoints: {},
     backlog: {
       destination: "auto",
@@ -135,6 +136,7 @@ cfg_load() {
 
   cfg_assert_min_fix_severity
   cfg_assert_max_passes_per_cycle
+  cfg_assert_git_hooks
 }
 
 # An unrecognised threshold must not be representable.
@@ -170,6 +172,24 @@ cfg_assert_max_passes_per_cycle() {
   if [[ "$max" =~ ^[0-9]+$ ]] && (( max > 0 )); then return 0; fi
   ui_die "policy.max_passes_per_cycle is '${max:-unset}', which is not a whole number of passes above zero" \
     "It bounds how many passes the loop runs by itself before a person has to ask for another, so the smallest meaningful value is 1. Set it to 1 or more in the repository config, or remove it to take the default of 3. To stop crossrev reviewing a repository at all, remove its workflows rather than setting the bound to zero."
+}
+
+# Two values, and a third must not be representable.
+#
+# The failure mode a typo would cause is silent in the expensive direction. Read
+# leniently, `hooks: skipp` falls through to whichever branch is not `run`, so a
+# repository that meant to keep its hooks running keeps committing without them
+# and nothing ever says so. Refuse the value where it can still be named.
+#
+# See ADR 0017 for why the default is skip.
+cfg_assert_git_hooks() {
+  local hooks
+  hooks="$(jq -r '.git.hooks // empty' <<<"$CFG_MERGED")"
+  case "$hooks" in
+    skip|run) return 0 ;;
+    *) ui_die "git.hooks is '${hooks:-unset}', which is not one of skip or run" \
+         "It decides whether the resolver's commit and push run the repository's own git hooks. Set it to skip or run in the repository config, or remove it to take the default of skip." ;;
+  esac
 }
 
 # A version key that is present and not 1 is a refusal, not a warning. The whole

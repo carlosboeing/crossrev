@@ -535,6 +535,66 @@ hasnt "and is not labelled converged"                         "$(calls)" "labels
 has "it warns that the converged verdict was overridden"      "$out" "the reviewer returned verdict 'converged' alongside 1 actionable finding"
 has "the warning names the awaiting-resolution label"         "$out" "awaiting-resolution"
 
+# --- a finished leg is not rewritten when the next one dies ------------------
+#
+# The EXIT trap records a fatal error into whichever leg was open, and the last
+# checkpoint runs BEFORE the complete edit. Left alone, the snapshot went on
+# saying `started` for the rest of the process — so anything dying afterwards
+# would PATCH a finished review to blocked and label the pull request halted over
+# work that had succeeded. `cycle` is the real case: the review leg completes,
+# and the resolve leg's whole start-up can still die before it takes a checkpoint
+# of its own.
+#
+# kimi is on PATH as a stub and has no adapter, so the resolve leg dies in
+# run_leg_settings. That sits after the review leg's complete edit and before
+# resolve's first checkpoint, which is exactly the window.
+# Driven at the function boundary rather than through a leg. The window is
+# between one leg's complete edit and the next leg's first checkpoint, and the
+# offline `gh` stub answers the comment list from a fixed payload — so a cycle
+# here never reads back the marker its own review leg just posted, stops at pass
+# 0, and asserts nothing about the case. The probe below is the case.
+fatal_probe() {
+  local state="$1" rc="$2" settled="${3:-no}"
+  ROOT="$HERE/.." P_STATE="$state" P_RC="$rc" P_SETTLED="$settled" bash -c '
+    set -uo pipefail
+    source "$ROOT/lib/ui.sh"
+    source "$ROOT/lib/state.sh"
+    source "$ROOT/lib/legs.sh"
+    source "$ROOT/lib/github.sh"
+    source "$ROOT/lib/run.sh"
+    CTX_REPO="acme/widget"; CTX_PR=42; CTX_LABELS=""
+    comment_id=9001
+    marker="$(jq -cn --arg s "$P_STATE" "{v:1, leg:\"review\", pass:1, state:\$s,
+      verdict:\"issues-remain\", findings:[], comment_id:9001}")"
+    run_checkpoint
+    [[ "$P_SETTLED" == "yes" ]] && run_leg_settled
+    CROSSREV_DIE_REASON="the harness could not be driven"
+    _run_report_fatal "$P_RC"
+  ' 2>/dev/null
+}
+
+reports() {
+  local want="$1" desc="$2"; shift 2
+  stub_reset >/dev/null
+  fatal_probe "$@"
+  local got=no; grep -q "method PATCH" "$GH_LOG" 2>/dev/null && got=yes
+  [[ "$got" == "$want" ]] && ok "$desc" || notok "$desc" "$want" "$got"
+}
+
+reports yes "an open leg that dies is recorded"              started  1
+reports no  "a clean exit records nothing"                   started  0
+reports no  "an interrupt stays the resumable claim it is"   started  130
+reports no  "a marker already complete is never rewritten"   complete 1
+
+# The regression this exists for. run_checkpoint snapshots before the complete
+# edit, so without run_leg_settled the snapshot goes on saying `started` after
+# the leg has finished — and everything that runs afterwards can still die.
+# Under `cycle` that is run_pass_labels and the whole start-up of the next leg:
+# worktree creation, the push guard, the adapter lookup, the claim comment. Any
+# of them would have PATCHed a finished review to blocked and halted the pull
+# request over work that succeeded.
+reports no  "a settled leg is not rewritten when a later step dies" started 1 yes
+
 # --- the way out of the halt, driven by hand ---------------------------------
 #
 # A human settles the escalated thread and the next review returns converged,
