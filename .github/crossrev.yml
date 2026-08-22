@@ -1,0 +1,18 @@
+# crossrev — this repository's own review policy.
+#
+# Read from the BASE revision of every pull request, never from the branch under
+# review, so a pull request cannot rewrite the loop that reviews it. A change
+# here takes effect when it merges.
+#
+# Only what differs from the built-in defaults is set. Everything else — local
+# mode, the pass and file bounds, git.hooks — comes from lib/config.sh.
+version: 1
+
+policy:
+  # Lower than the shipped default of medium, and deliberately so. CrossRev is a
+  # pull request review tool, so its own loop should fix every finding its
+  # reviewer verifies as real rather than reporting a third of them and stopping.
+  # The medium default exists so a stranger's first `crossrev review --pr 42`
+  # does not rewrite their codebase uninvited; that reasoning does not apply to
+  # this repository. The cost is a longer resolve leg on every pull request.
+  min_fix_severity: low
