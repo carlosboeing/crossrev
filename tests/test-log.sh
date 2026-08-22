@@ -270,4 +270,36 @@ is  "and every run.log line is one event" \
 has "and the hook output is on the failed commit line" \
   "$(grep ' commit failed:' "$rd/run.log")" "hook banner hook body commit-msg hook says no"
 
+# --- the transcript is filtered, and the payload is not ----------------------
+#
+# The capture file is both the archived record and the file the adapter parses.
+# Redacting it before the parse rewrote the model's own answer, so a run with a
+# run directory and a run without produced different findings from identical
+# harness output. The order is now parse-then-filter, and this pins both halves:
+# the finding text survives verbatim, and the file on disk is masked.
+#
+# The token shape used here is the harness's own vendor key, never a GitHub one
+# — the harness process is started without a GitHub credential (ADR 0001), so a
+# GitHub token in its output is not a case that exists.
+rm -rf "$RUNS_BASE"
+fixture_repo; stub_reset
+routes_baseline "$(printf '[]' | payload)"
+route 'api --method POST repos/*/issues/42/comments*' '{"id":9001}'
+route '*reviewThreads*' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}'
+LEAK="sk-ant-api03-EXAMPLEONLYnotarealkey0123456789"
+CROSSREV_REVIEW_PAYLOAD="$(printf '%s' "$REVIEW_PAYLOAD" \
+  | jq -c --arg w "A failed request looks like a success near $LEAK" \
+      '.findings[0].why = $w' | payload)"
+export CROSSREV_REVIEW_PAYLOAD
+out="$("$CROSSREV" review --pr 42 --keep-transcripts 2>&1)"; rc=$?
+
+is  "the leg passes with a token shape in the payload" "$rc" "0"
+rd="$(find "$RUNS_BASE/acme-widget/pr-42" -mindepth 1 -maxdepth 1 -type d | head -1)"
+has "the kept transcript masks the token body" \
+  "$(cat "$rd/review.attempt-1.stdout")" "sk-ant-api03-…[redacted]"
+hasnt "and does not hold it in the clear" \
+  "$(cat "$rd/review.attempt-1.stdout")" "EXAMPLEONLYnotarealkey"
+has "the posted marker keeps the finding text verbatim" \
+  "$(last_body 9001)" "EXAMPLEONLYnotarealkey"
+
 finish

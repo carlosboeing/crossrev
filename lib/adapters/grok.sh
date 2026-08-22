@@ -75,10 +75,6 @@ adapter_grok() {
     >"$out" 2>"$err" </dev/null
   rc=$?
 
-  # Redaction before anything else reads the files — the backstop for whatever
-  # a failing CLI echoes, since the harness itself holds no GitHub credential.
-  if (( keep_transcript )); then log_redact_file "$out"; log_redact_file "$err"; fi
-
   if (( rc != 0 )); then
     # The message is chosen on whether one is actually there, not on jq's exit
     # status. `jq … || legs_harness_error "$err"` reads as a fallback and is not
@@ -89,6 +85,7 @@ adapter_grok() {
     msg="$(jq -r '.error // .text // empty' "$out" 2>/dev/null)"
     [[ -n "$msg" ]] || msg="$(legs_harness_error "$err")"
     [[ -n "$msg" ]] || msg="grok exited $rc with no output on either stream"
+    msg="$(log_redact_str "$msg")"
     if grep -qiE 'not signed in|XAI_API_KEY' "$err" 2>/dev/null \
        || [[ "$msg" == *"Not signed in"* || "$msg" == *"XAI_API_KEY"* ]]; then
       msg="Grok rejected the credential. CrossRev classifies this as a credential failure, not a generic harness error. ${msg}"
@@ -96,7 +93,13 @@ adapter_grok() {
     jq -cn --arg e "$msg" \
       '{ok:false, payload:null, harness:"grok", endpoint:null, model_reported:null,
         tokens:null, error:$e}'
-    (( keep_transcript )) || rm -f "$out" "$err"; return 1
+    # The capture files are the record, so they are filtered here — after every
+    # value has been read from them, never before. Redacting first would rewrite
+    # the payload this adapter parses, so identical harness output would yield
+    # different answers depending on whether a run directory exists.
+    if (( keep_transcript )); then log_redact_file "$out"; log_redact_file "$err"
+    else rm -f "$out" "$err"; fi
+    return 1
   fi
 
   local payload model_reported tokens
@@ -122,7 +125,12 @@ adapter_grok() {
                          + (.cache_creation_input_tokens // 0))
                    | if . == 0 then "null" else tostring end' "$out" 2>/dev/null)" || tokens=null
   [[ -n "$tokens" ]] || tokens=null
-  (( keep_transcript )) || rm -f "$out" "$err"
+  # The capture files are the record, so they are filtered here — after every
+  # value has been read from them, never before. Redacting first would rewrite
+  # the payload this adapter parses, so identical harness output would yield
+  # different answers depending on whether a run directory exists.
+  if (( keep_transcript )); then log_redact_file "$out"; log_redact_file "$err"
+  else rm -f "$out" "$err"; fi
 
   jq -cn --argjson p "${payload:-null}" --arg m "$model_reported" --argjson t "$tokens" \
     '{ok:true, payload:$p, harness:"grok", endpoint:"vendor",

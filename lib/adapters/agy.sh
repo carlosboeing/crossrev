@@ -90,10 +90,6 @@ adapter_agy() {
     >"$out" 2>"$err" </dev/null
   rc=$?
 
-  # Redaction before anything else reads the files — the backstop for whatever
-  # a failing CLI echoes, since the harness itself holds no GitHub credential.
-  if (( keep_transcript )); then log_redact_file "$out"; log_redact_file "$err"; fi
-
   local status; status="$(jq -r '.status // empty' "$out" 2>/dev/null)"
   if (( rc != 0 )) || [[ "$status" != "SUCCESS" ]]; then
     # The message is chosen on whether one is actually there, not on jq's exit
@@ -104,10 +100,17 @@ adapter_agy() {
     local msg; msg="$(jq -r '.error // .response // empty' "$out" 2>/dev/null)"
     [[ -n "$msg" ]] || msg="$(legs_harness_error "$err")"
     [[ -n "$msg" ]] || msg="agy exited $rc with no output on either stream"
+    msg="$(log_redact_str "$msg")"
     jq -cn --arg e "$msg" \
       '{ok:false, payload:null, harness:"agy", endpoint:null, model_reported:null,
         tokens:null, error:$e}'
-    (( keep_transcript )) || rm -f "$out" "$err"; return 1
+    # The capture files are the record, so they are filtered here — after every
+    # value has been read from them, never before. Redacting first would rewrite
+    # the payload this adapter parses, so identical harness output would yield
+    # different answers depending on whether a run directory exists.
+    if (( keep_transcript )); then log_redact_file "$out"; log_redact_file "$err"
+    else rm -f "$out" "$err"; fi
+    return 1
   fi
 
   # structured_output is the parsed object when a schema was given. The response
@@ -121,7 +124,12 @@ adapter_agy() {
                    | (.total_tokens // ((.input_tokens // 0) + (.output_tokens // 0)))
                    | if . == 0 then "null" else tostring end' "$out" 2>/dev/null)" || tokens=null
   [[ -n "$tokens" ]] || tokens=null
-  (( keep_transcript )) || rm -f "$out" "$err"
+  # The capture files are the record, so they are filtered here — after every
+  # value has been read from them, never before. Redacting first would rewrite
+  # the payload this adapter parses, so identical harness output would yield
+  # different answers depending on whether a run directory exists.
+  if (( keep_transcript )); then log_redact_file "$out"; log_redact_file "$err"
+  else rm -f "$out" "$err"; fi
 
   jq -cn --argjson p "${payload:-null}" --argjson t "$tokens" \
     '{ok:true, payload:$p, harness:"agy", endpoint:"vendor",

@@ -104,11 +104,6 @@ adapter_claude() {
   ( cd "$workdir" && "${run[@]}" "$(cat "$prompt_file")" ) >"$out" 2>"$err" </dev/null
   rc=$?
 
-  # Redaction before anything else reads the file: the harness was started
-  # with no GitHub credential, and this is the backstop for everything else a
-  # CLI might echo on its way to a failure.
-  if (( keep_transcript )); then log_redact_file "$out"; log_redact_file "$err"; fi
-
   if (( rc != 0 )) || [[ "$(jq -r '.is_error // false' "$out" 2>/dev/null)" == "true" ]]; then
     # Chosen on whether a message is there, not on jq's exit status. On an EMPTY
     # stdout jq exits 0 with no output, so a `jq … || head "$err"` fallback never
@@ -118,10 +113,17 @@ adapter_claude() {
     local msg; msg="$(jq -r '.result // empty' "$out" 2>/dev/null)"
     [[ -n "$msg" ]] || msg="$(legs_harness_error "$err")"
     [[ -n "$msg" ]] || msg="claude exited $rc with no output on either stream"
+    msg="$(log_redact_str "$msg")"
     jq -cn --arg e "$msg" \
       '{ok:false, payload:null, harness:"claude", endpoint:null, model_reported:null,
         tokens:null, error:$e}'
-    (( keep_transcript )) || rm -f "$out" "$err"; return 1
+    # The capture files are the record, so they are filtered here — after every
+    # value has been read from them, never before. Redacting first would rewrite
+    # the payload this adapter parses, so identical harness output would yield
+    # different answers depending on whether a run directory exists.
+    if (( keep_transcript )); then log_redact_file "$out"; log_redact_file "$err"
+    else rm -f "$out" "$err"; fi
+    return 1
   fi
 
   payload="$(jq -r '.result // empty' "$out")"
@@ -139,7 +141,12 @@ adapter_claude() {
                  | (.inputTokens // 0) + (.outputTokens // 0)
                    + (.cacheReadInputTokens // 0) + (.cacheCreationInputTokens // 0)]
                 | add // null' "$out" 2>/dev/null)" || tokens=null
-  (( keep_transcript )) || rm -f "$out" "$err"
+  # The capture files are the record, so they are filtered here — after every
+  # value has been read from them, never before. Redacting first would rewrite
+  # the payload this adapter parses, so identical harness output would yield
+  # different answers depending on whether a run directory exists.
+  if (( keep_transcript )); then log_redact_file "$out"; log_redact_file "$err"
+  else rm -f "$out" "$err"; fi
 
   jq -cn --argjson p "$(jq -c . <<<"$payload" 2>/dev/null || echo null)" \
      --arg ep "$endpoint_label" --arg m "$model_reported" \

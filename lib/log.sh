@@ -106,6 +106,17 @@ log_redact() {
     -e 's/(sk-[A-Za-z0-9_-]{6})[A-Za-z0-9_-]{12,}/\1…[redacted]/g'
 }
 
+# Redact a string rather than a file.
+#
+# The harness error message is extracted from the raw capture and then reaches a
+# pull request comment, so it is filtered whether or not a transcript is kept.
+# Filtering the file instead would mask the message only on runs that happen to
+# have a run directory, and would rewrite the payload the adapter parses from
+# that same file.
+log_redact_str() {
+  printf '%s' "$1" | log_redact
+}
+
 # Redact a file in place. Through a temp file rather than sed -i, because BSD
 # and GNU sed spell in-place editing differently and this runs on both.
 #
