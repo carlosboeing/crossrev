@@ -41,6 +41,20 @@ adapter_agy() {
   # Order matters: everything before --print, and the prompt as its value.
   local -a args=(--output-format json --disable-slash-commands)
 
+  # Antigravity does not take the shell's working directory as its workspace. It
+  # keeps its own project root, and without one it resolves against $HOME: a
+  # relative `read_file app.ts` was refused as `read_file(/Users/<name>)`, and a
+  # shell command ran from ~/.gemini/antigravity-cli/scratch rather than the
+  # checkout. So the leg could not see the code it was sent to work on, and the
+  # model reached for `pwd` and `git status` to find out where it was — which the
+  # permission layer then denied, because those were outside the workspace too.
+  #
+  # That reads as "this harness cannot resolve without a shell grant", and it is
+  # not. With the workspace named, `--mode accept-edits` alone edits the file on
+  # the first turn. The fix is telling it where the work is, not widening what it
+  # may do.
+  args+=(--add-dir "$workdir")
+
   # Same shape as the other two: the resolve leg has to change files and this
   # grants exactly that. `--mode` takes accept-edits or plan, and plan changes
   # what the model does rather than what it may touch, so a reading leg passes no

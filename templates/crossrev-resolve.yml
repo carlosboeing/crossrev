@@ -26,6 +26,7 @@ jobs:
         with:
           app-id: ${{ secrets.APP_ID }}
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          skip-token-revoke: true
 
       # The head branch by name, not by refs/pull/N/head: this leg pushes, and a
       # detached checkout of the merge ref has nothing to push to. crossrev's own

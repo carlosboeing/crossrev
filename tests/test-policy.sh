@@ -106,7 +106,8 @@ no_threads
 CROSSREV_REVIEW_PAYLOAD="$(printf '%s' "$CONVERGED" | payload)"; export CROSSREV_REVIEW_PAYLOAD
 out="$("$CROSSREV" review --pr 42 2>&1)"
 
-has "a max_passes_per_cycle raised only on the branch is ignored" "$out" "pass 1 of 3"
+has "a max_passes_per_cycle raised only on the branch is ignored" "$out" "Reviewing acme/widget#42 — pass 1"
+hasnt "and the heading does not imply a planned cycle length" "$out" "pass 1 of 3"
 hasnt "and the branch's model choice does not take effect" "$out" "hijacked-model"
 has "the base revision's reviewer is what runs"            "$out" "reviewer-model"
 
@@ -240,6 +241,7 @@ route 'api --method POST repos/*/issues/42/comments*' '{"id":9001}'
 out="$("$CROSSREV" review --pr 42 --trigger automatic 2>&1)"
 has "a diff above max_files_changed_per_pr is not reviewed" "$out" "above max_files_changed_per_pr"
 has "and it says so on the pull request"             "$(calls)" "crossrev stopped before pass 1"
+hasnt "and does not describe a pass-cap restart"     "$(calls)" "did not review this revision"
 has "and marks the pull request halted"              "$(calls)" "labels[]=crossrev/halted"
 
 # A draft is unattended only when the invocation says so. The workflow supplies
@@ -316,6 +318,15 @@ routes_baseline "$(marker_comment 9001 "$three_done" | jq -cs . | payload)"
 route 'api --method POST repos/*/issues/42/comments*' '{"id":9001}'
 out="$("$CROSSREV" review --pr 42 --continuation 2>&1)"
 has "a generated pass at the bound does not start" "$out" "reached max_passes_per_cycle (3)"
+hasnt "the cap-halt comment does not recommend a push" "$(calls)" "pushing a revision"
+has "it says no review ran on this revision" "$(calls)" "CrossRev did not review this revision"
+has "it names the slash command that starts another pass" "$(calls)" "/crossrev review"
+has "and the local command with this pull request" "$(calls)" "crossrev review --pr 42"
+has "and links the policy key to the configuration docs" \
+  "$(calls)" "https://github.com/carlosboeing/crossrev/blob/main/docs/configuration.md#policy"
+has "configuration.md says the cap counts manual passes too" \
+  "$(cat "$HERE/../docs/configuration.md")" \
+  "The limit counts all passes on a pull request, manual and automatic"
 
 cycle_log="$(mktemp)"
 out="$(cycle_driver 0 "$cycle_log")"
@@ -761,6 +772,106 @@ no_threads
 err="$("$CROSSREV" review --pr 42 --harness codex 2>&1 >/dev/null)"; rc=$?
 is  "--harness overrides the configured harness"  "$rc" "1"
 has "and the failure names the one that was asked for" "$err" "the codex harness failed"
+is  "and the failed review edits the claim it posted" \
+  "$(count 'method PATCH repos/acme/widget/issues/comments/9001')" "1"
+fail_review_body="$(last_body 9001)"
+has "the edited claim is complete rather than started" "$fail_review_body" '"state":"complete"'
+has "and records the harness error as a blocked review" "$fail_review_body" '"verdict":"blocked"'
+has "naming the tripwire in the comment a reader sees" "$fail_review_body" "test tripwire"
+has "and moves the label the way a blocked review already does" \
+  "$(calls)" "labels[]=crossrev/halted"
+
+# Completing the claim used to make the next review on this head a no-op, and
+# the message told the operator to resolve — which then treated the empty
+# finding list as a convergence and painted the pull request green.
+fixture_repo; stub_reset
+blocked_review="$(jq -cn --arg sha "$FIX_HEAD" --argjson ts "$(date +%s)" '
+  {v:1, leg:"review", pass:1, state:"complete", ts:$ts, done_ts:$ts, run_id:"1",
+   head_sha:$sha, harness:"codex", model:"codex-model", effort:"high",
+   model_reported:null,
+   verdict:"blocked", blocked_reason:"the codex harness failed: test tripwire",
+   findings:[]}')"
+routes_baseline "$(marker_comment 9001 "$blocked_review" | jq -cs . | payload)" \
+  '[{"name":"crossrev/halted"},{"name":"crossrev/pass-1"}]'
+no_threads
+CROSSREV_REVIEW_PAYLOAD="$(printf '%s' "$CONVERGED" | payload)"; export CROSSREV_REVIEW_PAYLOAD
+out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
+is  "a blocked review on this revision is driven again" "$rc" "0"
+has "it says the pass is being driven again"          "$out" "driving pass 1 again"
+hasnt "rather than declining as already reviewed"     "$out" "already reviewed"
+is  "and it reuses the blocked claim rather than posting another" \
+  "$(count 'method POST repos/acme/widget/issues/42/comments')" "0"
+has "editing the claim it already holds"              "$(calls)" "PATCH repos/acme/widget/issues/comments/9001"
+redriven_body="$(last_body 9001)"
+has "the redriven summary names the harness that ran" \
+  "$redriven_body" '| review | `claude` · `reviewer-model`'
+hasnt "and does not flag a substitution that did not happen" \
+  "$redriven_body" "a different model answered"
+hasnt "nor keep the failed attempt's harness" \
+  "$redriven_body" '`codex`'
+
+fixture_repo; stub_reset
+routes_baseline "$(marker_comment 9001 "$blocked_review" | jq -cs . | payload)" \
+  '[{"name":"crossrev/halted"},{"name":"crossrev/pass-1"}]'
+err="$("$CROSSREV" resolve --pr 42 2>&1 >/dev/null)"; rc=$?
+is  "resolve refuses a blocked review rather than converging it" "$rc" "1"
+has "and names the block"                             "$err" "was blocked"
+has "and points at the review leg"                    "$err" "crossrev review --pr 42"
+hasnt "without applying the green label"              "$(calls)" "labels[]=crossrev/converged"
+
+# A failed later pass must move the grey pill, not stack it, and the watchdog
+# retry marker is per-stall so it goes with the state it described.
+fixture_repo; stub_reset
+stale_pass1="$(jq -cn --argjson ts "$(date +%s)" '
+  {v:1, leg:"review", pass:1, state:"complete", ts:$ts, done_ts:$ts, run_id:"1",
+   head_sha:"0000000000000000000000000000000000000000", harness:"claude",
+   model:"reviewer-model", verdict:"issues-remain", findings:[]}')"
+routes_baseline "$(marker_comment 9001 "$stale_pass1" | jq -cs . | payload)" \
+  '[{"name":"crossrev/pass-1"},{"name":"crossrev/awaiting-review"},{"name":"crossrev/watchdog-retried"}]'
+route 'api --method POST repos/*/issues/42/comments*' '{"id":9002}'
+no_threads
+err="$("$CROSSREV" review --pr 42 --harness codex 2>&1 >/dev/null)"; rc=$?
+is  "a failed later pass still exits 1"               "$rc" "1"
+has "it applies the pass it failed on"                "$(calls)" "labels[]=crossrev/pass-2"
+has "and takes the earlier pass pill off"             "$(calls)" "DELETE repos/acme/widget/issues/42/labels/crossrev/pass-1"
+has "and drops the watchdog retry marker"             "$(calls)" "DELETE repos/acme/widget/issues/42/labels/crossrev/watchdog-retried"
+
+# The same gap on the resolve leg: a claim of "resolving" with state started
+# is what a reader of the pull request still sees today.
+fixture_repo; stub_reset
+fail_review_marker="$(jq -cn --arg sha "$FIX_HEAD" --argjson ts "$(date +%s)" '
+  {v:1, leg:"review", pass:1, state:"complete", ts:$ts, done_ts:$ts, run_id:"1",
+   head_sha:$sha, harness:"claude", model:"reviewer-model", model_reported:"reviewer-model",
+   verdict:"issues-remain",
+   findings:[{id:"a1", path:"app.ts", line:2, side:"RIGHT", severity:"high",
+     category:"correctness", pre_existing:false, title:"t", why:"w", fix:"f",
+     anchor:"", thread_id:"T_A", resolution:null, tracked_as:null}]}')"
+routes_baseline "$(marker_comment 9001 "$fail_review_marker" | jq -cs . | payload)" \
+  '[{"name":"crossrev/awaiting-resolution"}]'
+route 'api --method POST repos/*/issues/42/comments*' '{"id":9002}'
+route '*reviewThreads*' "$(threads_response "$(thread_node T_A app.ts 2 false "a1")")"
+err="$("$CROSSREV" resolve --pr 42 --harness codex 2>&1 >/dev/null)"; rc=$?
+is  "a failed resolve still exits 1" "$rc" "1"
+has "and names the harness that failed" "$err" "the codex harness failed"
+is  "and the failed resolve edits the claim it posted" \
+  "$(count 'method PATCH repos/acme/widget/issues/comments/9002')" "1"
+fail_resolve_body="$(last_body 9002)"
+has "the edited resolve claim is complete" "$fail_resolve_body" '"state":"complete"'
+has "and blocked, so a later status read does not see it as mid-flight" \
+  "$fail_resolve_body" '"blocked":true'
+has "naming the tripwire on the resolve comment too" "$fail_resolve_body" "test tripwire"
+has "and replaces awaiting-resolution with halted" "$(calls)" "labels[]=crossrev/halted"
+
+# A failure to report the failure must not replace the harness error.
+fixture_repo; stub_reset
+routes_baseline "$(printf '[]' | payload)"
+route 'api --method POST repos/*/issues/42/comments*' '{"id":9001}'
+route 'api --method PATCH repos/*/issues/comments/*' '!fail'
+no_threads
+err="$("$CROSSREV" review --pr 42 --harness codex 2>&1 >/dev/null)"; rc=$?
+is  "a failed claim edit still exits 1" "$rc" "1"
+has "and still names the harness error first" "$err" "the codex harness failed"
+hasnt "rather than the comment-update error" "$err" "could not update comment"
 
 # --- an endpoint that resolves nowhere is fatal, never a fallback ------
 fixture_repo "$(fixture_default_config | sed 's/^  model: reviewer-model$/  model: reviewer-model\n  endpoint: ghost/')"

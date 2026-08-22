@@ -20,7 +20,7 @@ The orchestrator supplies everything in the prompt. **You do not fetch anything.
 | Supplied | What it is |
 |---|---|
 | The diff | The changes under review, every hunk line prefixed with its old and new line number |
-| Pass number | Which pass this is, out of the configured maximum |
+| Pass number | Which pass this is |
 | Prior findings | From pass 2 onward: earlier findings, their ids, and how the resolve leg settled each |
 | Open threads | Existing review conversation, including any disputes |
 | `REVIEW.md` | Per-repository review instruction, when the repository has one |
