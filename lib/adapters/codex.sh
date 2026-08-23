@@ -125,8 +125,13 @@ adapter_codex() {
   # The event stream names neither model nor effort; the newest session rollout
   # carries both. Any failure here is a miss — null and null — never a failed
   # leg: the payload has already been read by the time this runs.
+  #
+  # CODEX_HOME wins when it is set and ~/.codex is the fallback, which is what
+  # the CLI itself does. The fallback is not a convenience: cred_prepare exports
+  # CODEX_HOME only when a staging secret is present, so a local run never has
+  # it and would otherwise report no model on every leg.
   model_reported=""; effort_reported=""
-  got="$(usage_read_codex_rollout)" || got='{"model":null,"effort":null}'
+  got="$(usage_read_codex_rollout "${CODEX_HOME:-$HOME/.codex}")" || got='{"model":null,"effort":null}'
   [[ -n "$got" ]] && {
     model_reported="$(jq -r '.model // empty' <<<"$got")"
     effort_reported="$(jq -r '.effort // empty' <<<"$got")"

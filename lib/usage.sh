@@ -234,10 +234,16 @@ usage_parse_opencode_export() {
 }
 
 # Codex's event stream names neither model nor effort; its session rollout
-# carries both. Three rules keep reading it safe: derive the path from
-# CODEX_HOME rather than assuming ~/.codex, treat any failure as a miss, and
-# never fail a leg on rollout trouble — the payload has been read by the time
-# this runs, so the answer exists even when the telemetry does not.
+# carries both. Two rules keep reading it safe: treat any failure as a miss,
+# and never fail a leg on rollout trouble — the payload has been read by the
+# time this runs, so the answer exists even when the telemetry does not.
+#
+# The home directory to search is the caller's argument, because the default
+# path is harness knowledge and this file holds none. Reading CODEX_HOME here
+# and stopping when it was empty made the function dead in local mode:
+# cred_prepare exports that variable only when a staging secret is present,
+# which is automated mode alone, so every local run missed a rollout that was
+# on disk the whole time. The adapter now passes the fallback.
 #
 # A rollout line is an envelope — {timestamp, type, payload} — and the fields
 # live inside `payload`, on the `turn_context` record. Reading the envelope's
@@ -247,7 +253,7 @@ usage_parse_opencode_export() {
 # same value carries elsewhere in Codex's own output.
 usage_read_codex_rollout() {
   local miss='{"model":null,"effort":null}'
-  local home="${CODEX_HOME:-}"
+  local home="${1:-${CODEX_HOME:-}}"
   [[ -n "$home" && -d "$home/sessions" ]] || { printf '%s' "$miss"; return 0; }
   local f
   f="$(find "$home/sessions" -type f 2>/dev/null | sort | tail -n 1)"

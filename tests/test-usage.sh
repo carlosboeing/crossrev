@@ -146,9 +146,20 @@ is "codex total is 57773" "$(jq -r .total <<<"$u")" "57773"
 is "codex reasoning is stored" "$(jq -r .reasoning <<<"$u")" "101"
 is "codex writes are unsplit" "$(jq -r .cache_write_unsplit <<<"$u")" "0"
 
-# Rollout miss: no CODEX_HOME
+# Rollout miss: nothing passed and no CODEX_HOME to fall back to.
 unset CODEX_HOME
 is "rollout miss is a null model" "$(usage_read_codex_rollout | jq -c .)" '{"model":null,"effort":null}'
+
+# An argued home wins, and it is how the adapter passes its own fallback. The
+# adapter reaches ~/.codex on a local run, where CODEX_HOME is never exported.
+_usage_argued="$(mktemp -d)"
+mkdir -p "$_usage_argued/sessions/2026/08/23"
+cp "$ROOT/tests/fixtures/usage/codex-rollout.jsonl" "$_usage_argued/sessions/2026/08/23/rollout.jsonl"
+got="$(usage_read_codex_rollout "$_usage_argued")"
+is "an argued home is searched with no CODEX_HOME set" "$(jq -r .model <<<"$got")" "gpt-5.6-terra"
+is "a missing argued home is a miss, not a failure" \
+  "$(usage_read_codex_rollout "$_usage_argued/nope" | jq -c .)" '{"model":null,"effort":null}'
+rm -rf "$_usage_argued"; unset _usage_argued
 
 # Rollout hit. The fixture carries the envelope a real rollout writes —
 # {timestamp, type, payload} with the fields inside payload — so a reader that
