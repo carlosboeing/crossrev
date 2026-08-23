@@ -320,12 +320,15 @@ has "it reads the payload out of the concatenated text events" "$out" "verdict: 
 is  "and posts the finding it carried"            "$(count 'method POST repos/acme/widget/pulls/42/comments')" "1"
 has "the comment names the harness that produced it" "$(calls)" "opencode"
 
-# The answering model and the whole-run token total come from one `export`
+# The answering model and the whole-run usage record come from one `export`
 # call against the sessionID the events carry: input 10 + output 2 +
-# reasoning 1 + cache.read 4 = 17, the arithmetic the CLI itself uses.
+# cache.read 4 = 16, with reasoning 1 stored beside the total and never added
+# to it — the nesting every other harness shows and no vendor total confirms.
 has "the marker records the answering model from the session record" \
   "$(calls)" '"model_reported":"stub-model"'
-has "the token count sums the whole-run figure"   "$(calls)" '"tokens":17'
+has "the token count excludes reasoning"         "$(calls)" '"tokens":16'
+has "and the marker stores reasoning beside it, not inside the total" \
+  "$(calls)" '"reasoning":1'
 has "the cell names opencode and the answering model" \
   "$(calls)" '`opencode` · `stub-model`'
 
@@ -517,6 +520,100 @@ out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
 unset CROSSREV_OPENCODE_NO_EXPORT
 is  "a failed session export costs the leg nothing" "$rc" "0"
 has "and the marker records no answering model"   "$(calls)" '"model_reported":null'
+
+# --- billing attach, through run_invoke --------------------------------------
+#
+# Billing is attached inside run_invoke — after the adapter returns and before
+# cred_discard throws the scratch credential away — because ANTHROPIC_API_KEY
+# is the billing signal and discard is what removes it. Asserted on the marker
+# a real leg posts, not on the helper in isolation: the unit tests already pin
+# the precedence table, this pins that the orchestrator actually calls attach
+# where it must.
+
+config_claude_reviews() {
+  cat <<'EOF'
+version: 1
+mode: local
+policy:
+  min_fix_severity: medium
+  max_passes_per_cycle: 3
+  max_files_changed_per_pr: 200
+  max_prs_per_day: 25
+reviewer:
+  harness: claude
+  model: reviewer-model
+resolver:
+  harness: claude
+  model: resolver-model
+backlog:
+  destination: none
+EOF
+}
+
+run_claude_review() {
+  fixture_repo "$(config_claude_reviews)"; stub_reset
+  routes_baseline "$(printf '[]' | payload)"
+  route 'api --method POST repos/*/issues/42/comments*' '{"id":9001}'
+  route '*reviewThreads*' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}'
+  CROSSREV_REVIEW_PAYLOAD="$(printf '%s' "$REVIEW_PAYLOAD" | payload)"; export CROSSREV_REVIEW_PAYLOAD
+}
+
+# Both names present is the precedence case: the oauth token is set too and
+# must not flip the answer once the API key is visible.
+unset ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN
+run_claude_review
+out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
+is  "a default local review runs"                 "$rc" "0"
+has "and records subscription billing"            "$(calls)" '"billing":"subscription"'
+has "keeping the harness's own cost figure"       "$(calls)" '"cost_usd":0.12'
+
+export ANTHROPIC_API_KEY=sk-test CLAUDE_CODE_OAUTH_TOKEN=oauth-test
+run_claude_review
+out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
+unset ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN
+is  "a review with both credential names present runs" "$rc" "0"
+has "and records api billing, not subscription"   "$(calls)" '"billing":"api"'
+hasnt "and never claims subscription on an api run" "$(calls)" '"billing":"subscription"'
+has "keeping the harness's own cost figure"       "$(calls)" '"cost_source":"harness"'
+
+# A named endpoint wipes the harness cost: Claude Code prices its figure
+# against Anthropic's rate card whichever endpoint served the call, so the
+# number CrossRev would display was charged by nobody.
+config_claude_endpoint_reviews() {
+  cat <<'EOF'
+version: 1
+mode: local
+policy:
+  min_fix_severity: medium
+  max_passes_per_cycle: 3
+  max_files_changed_per_pr: 200
+  max_prs_per_day: 25
+reviewer:
+  harness: claude
+  model: reviewer-model
+  endpoint: kimi
+resolver:
+  harness: claude
+  model: resolver-model
+endpoints:
+  kimi:
+    base_url: https://public.example/
+    token_env: KIMI_API_KEY
+backlog:
+  destination: none
+EOF
+}
+fixture_repo "$(config_claude_endpoint_reviews)"; stub_reset
+routes_baseline "$(printf '[]' | payload)"
+route 'api --method POST repos/*/issues/42/comments*' '{"id":9001}'
+route '*reviewThreads*' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}'
+CROSSREV_REVIEW_PAYLOAD="$(printf '%s' "$REVIEW_PAYLOAD" | payload)"; export CROSSREV_REVIEW_PAYLOAD
+export KIMI_API_KEY=stub-endpoint-token
+out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
+unset KIMI_API_KEY CROSSREV_REVIEW_PAYLOAD
+is  "a review through a named endpoint runs"      "$rc" "0"
+has "and records endpoint billing"                "$(calls)" '"billing":"endpoint"'
+has "and the harness cost did not survive"        "$(calls)" '"cost_usd":null'
 
 # --- the resolve leg on opencode ---------------------------------------------
 #

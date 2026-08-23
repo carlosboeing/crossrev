@@ -43,7 +43,7 @@ To watch with no risk of a push at all, run `review` only.
 The review leg writes:
 
 - **One inline comment per finding**, on the line it affects. Each heading carries a coloured circle for severity and the category as a word — `🔴 **High · Security** — <title>` — followed by what goes wrong and how to fix it.
-- **One summary comment**, opening with exactly one native GitHub alert carrying the verdict, then a table of findings with a pictogram per category, and closing with a run-details table naming the agent that ran, how long it took and what it cost in tokens. One row, for that comment's own leg.
+- **One summary comment**, opening with exactly one native GitHub alert carrying the verdict, then a table of findings with a pictogram per category, and closing with a run-details table naming the agent that ran, how long it took, what it cost in tokens, how much of that was cached, and an estimated cost — labelled as an API equivalence, never as an amount charged. One row, for that comment's own leg.
 - **A hidden marker** inside the summary comment, and one inside each inline comment.
 
 The resolve leg adds threaded replies, resolves the threads it settled, commits any fixes, files deferred defects to the configured backlog, and posts its own summary comment.

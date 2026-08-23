@@ -32,6 +32,8 @@ source "$ROOT/lib/ui.sh"
 source "$ROOT/lib/log.sh"
 # shellcheck source=lib/harnesses.sh
 source "$ROOT/lib/harnesses.sh"
+# shellcheck source=lib/usage.sh
+source "$ROOT/lib/usage.sh"
 # shellcheck source=lib/preflight.sh
 source "$ROOT/lib/preflight.sh"
 # shellcheck source=lib/auth.sh

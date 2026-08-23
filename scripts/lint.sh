@@ -69,19 +69,27 @@ fi
 
 # The permitted homes for a harness name are exactly three: lib/harnesses.json,
 # lib/adapters/<name>.sh, and tests/ — test fixtures name harnesses deliberately,
-# and tests/stub/codex is a tripwire that must keep naming one. Two files are
+# and tests/stub/codex is a tripwire that must keep naming one. Three files are
 # outside the scanned set on purpose: templates/crossrev.yml and
 # templates/operator-config.yml are example configuration whose job is to name a
-# harness, and a stale example there is a documentation bug rather than an
-# allowlist. Any other exemption is a design change, not a lint tweak.
+# harness, and scripts/refresh-prices.sh holds LiteLLM price keys whose model
+# ids contain harness names without driving any of them. A stale example there
+# is a documentation bug rather than an allowlist. Any other exemption is a
+# design change, not a lint tweak.
 printf '\nharness names\n'
 names="$(jq -r '.harnesses[].name, .not_driven[].name' lib/harnesses.json 2>/dev/null | paste -sd'|' -)"
 if [[ -z "$names" ]]; then
   printf '  FAIL  lib/harnesses.json could not be read, so the harness-name check did not run\n'
   fail=1
 else
+  scan_scripts=()
+  for f in scripts/*.sh; do
+    [[ "$f" == "scripts/refresh-prices.sh" ]] && continue
+    scan_scripts+=("$f")
+  done
   hits="$(grep -nEH "\\b($names)\\b" \
-      bin/crossrev lib/*.sh scripts/*.sh \
+      bin/crossrev lib/*.sh \
+      ${scan_scripts[@]+"${scan_scripts[@]}"} \
       templates/crossrev-review.yml templates/crossrev-resolve.yml templates/crossrev-token-refresh.yml \
       2>/dev/null | grep -vE ':[0-9]+:[[:space:]]*#' || true)"
   if [[ -z "$hits" ]]; then

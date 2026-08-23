@@ -1,0 +1,2 @@
+{"id":"0","msg":{"type":"session_configured","session_id":"0199cf3a-4d21-7c05-9b1e-2f6c8a41d0e7"}}
+{"type":"turn.completed","usage":{"input_tokens":10,"cached_input_tokens":0,"output_tokens":2}}

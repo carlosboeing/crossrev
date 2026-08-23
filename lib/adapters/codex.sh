@@ -4,9 +4,11 @@
 # Same contract as the claude adapter: payload plus execution metadata, no
 # GitHub credential in the environment.
 #
-# Codex reports no model at all. `codex exec --json` carries token counts on
-# turn.completed and nothing identifying the model, so this adapter writes
-# model_reported: null rather than echoing back the model it requested. Halting
+# The event stream reports no model. `codex exec --json` carries token counts
+# on turn.completed and nothing identifying the model, so model_reported comes
+# from the rollout this session wrote — matched by the session id the events
+# carry, never by whichever file is newest — and stays null when no rollout
+# matches. A miss never fails a leg whose answer already exists. Halting
 # whenever the model is unreported would be the stricter rule and it is the
 # wrong one — it would disqualify this adapter on the evidence that Codex does
 # not emit the field. Layer one of the divergence guard already catches the
@@ -92,7 +94,7 @@ adapter_codex() {
   if (( rc != 0 )) || [[ ! -s "$out_file" ]]; then
     jq -cn --arg e "$(log_redact_str "$(legs_harness_error "$err")")" \
       '{ok:false, payload:null, harness:"codex", endpoint:null, model_reported:null,
-        tokens:null, error:$e}'
+        effort_reported:null, tokens:null, usage:null, error:$e}'
     # The capture files are the record, so they are filtered here — after every
     # value has been read from them, never before. Redacting first would rewrite
     # the payload this adapter parses, so identical harness output would yield
@@ -112,15 +114,35 @@ adapter_codex() {
   # `total=T input=I (+ C cached) output=O`, where the cached count sits inside
   # the input figure it qualifies. Adding it would overstate every run that hits
   # the prompt cache, which is exactly the context-heavy pass this table exists
-  # to report on.
-  local payload tokens
+  # to report on. The parser keeps that rule and turns the rest into buckets:
+  # fresh input is the subtraction, writes land unsplit, and no vendor total is
+  # read.
+  local payload usage tokens got sid model_reported effort_reported
   payload="$(jq -c . "$out_file" 2>/dev/null || echo null)"
-  tokens="$(jq -s -r '
-    [ .[] | select(.type == "turn.completed") | .usage // empty ] | last
-    | if . == null then "null"
-      else ((.input_tokens // 0) + (.output_tokens // 0) | tostring) end' \
-    "$events" 2>/dev/null)" || tokens=null
-  [[ -n "$tokens" ]] || tokens=null
+  usage="$(usage_parse_codex_events "$events")"
+  [[ -n "$usage" ]] || usage=null
+  tokens="$(jq -r '.total // "null"' <<<"$usage")"
+
+  # The event stream names neither model nor effort; this session's rollout
+  # carries both. Any failure here is a miss — null and null — never a failed
+  # leg: the payload has already been read by the time this runs.
+  #
+  # The rollout is chosen by the session id this run's own events carry, not by
+  # being the newest file on disk. A local machine can have a second Codex
+  # running beside the leg, and both write into the same sessions directory, so
+  # "newest" is a claim about the machine rather than about this invocation.
+  #
+  # CODEX_HOME wins when it is set and ~/.codex is the fallback, which is what
+  # the CLI itself does. The fallback is not a convenience: cred_prepare exports
+  # CODEX_HOME only when a staging secret is present, so a local run never has
+  # it and would otherwise report no model on every leg.
+  model_reported=""; effort_reported=""
+  sid="$(usage_codex_session_id "$events")" || sid=""
+  got="$(usage_read_codex_rollout "${CODEX_HOME:-$HOME/.codex}" "$sid")" || got='{"model":null,"effort":null}'
+  [[ -n "$got" ]] && {
+    model_reported="$(jq -r '.model // empty' <<<"$got")"
+    effort_reported="$(jq -r '.effort // empty' <<<"$got")"
+  }
 
   # The capture files are the record, so they are filtered here — after every
   # value has been read from them, never before. Redacting first would rewrite
@@ -130,7 +152,11 @@ adapter_codex() {
     log_redact_file "$out_file"; log_redact_file "$err"; log_redact_file "$events"
   else rm -f "$out_file" "$err" "$events"; fi
 
-  jq -cn --argjson p "$payload" --argjson t "$tokens" \
+  jq -cn --argjson p "$payload" --argjson t "${tokens:-null}" \
+     --argjson u "${usage:-null}" --arg m "$model_reported" --arg e "$effort_reported" \
     '{ok:true, payload:$p, harness:"codex", endpoint:"vendor",
-      model_reported:null, tokens:$t, error:null}'
+      model_reported:(if $m == "" then null else $m end),
+      effort_reported:(if $e == "" then null else $e end),
+      tokens:(if $t == "null" then null else $t end),
+      usage:$u, error:null}'
 }

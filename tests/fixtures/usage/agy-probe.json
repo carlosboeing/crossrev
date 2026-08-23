@@ -1,0 +1,13 @@
+{
+  "type": "result",
+  "is_error": false,
+  "num_turns": 2,
+  "result": "A-B-C",
+  "usage": {
+    "input_tokens": 47369,
+    "cache_read_tokens": 85668,
+    "thinking_tokens": 477,
+    "output_tokens": 793,
+    "total_tokens": 48162
+  }
+}

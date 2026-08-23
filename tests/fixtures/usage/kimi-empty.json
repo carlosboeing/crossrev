@@ -1,0 +1,7 @@
+{
+  "type": "result",
+  "subtype": "success",
+  "is_error": false,
+  "num_turns": 2,
+  "result": "A-B-C"
+}

@@ -1,0 +1,26 @@
+{
+  "type": "result",
+  "subtype": "success",
+  "is_error": false,
+  "num_turns": 3,
+  "modelUsage": {
+    "claude-haiku-4-5": {
+      "inputTokens": 100,
+      "outputTokens": 20,
+      "cacheReadInputTokens": 500,
+      "cacheCreationInputTokens": 10,
+      "canonicalModel": "claude-haiku-4-5"
+    },
+    "claude-opus-5[1m]": {
+      "inputTokens": 4000,
+      "outputTokens": 800,
+      "cacheReadInputTokens": 20000,
+      "cacheCreationInputTokens": 400,
+      "canonicalModel": "claude-opus-5"
+    }
+  },
+  "usage": {
+    "cache_creation": {"ephemeral_5m_input_tokens": 410, "ephemeral_1h_input_tokens": 0},
+    "output_tokens_details": {"thinking_tokens": 0}
+  }
+}

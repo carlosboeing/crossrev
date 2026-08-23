@@ -352,7 +352,7 @@ is  "and the halt is stated once, not once in the alert and again below it" \
 rows_in() { grep -c '^| \(review\|resolve\) |' <<<"$1" || true; }
 
 has "the review comment carries a run-details block" "$review_body" "**Run details**"
-has "with the four columns"                          "$review_body" "| Leg | Agent | Duration | Tokens |"
+has "with the six columns" "$review_body" "| Leg | Agent | Duration | Tokens | Cached | Est. cost |"
 is  "and exactly one row"                            "$(rows_in "$review_body")" "1"
 has "for its own leg"                                "$review_body" "| review | \`claude\`"
 # Harness, model and effort describe one thing — which agent ran — so they are
@@ -360,6 +360,12 @@ has "for its own leg"                                "$review_body" "| review | 
 has "harness and model share the cell"               "$review_body" "\`claude\` · \`reviewer-model\`"
 # Six figures of tokens is the one cell a reader would otherwise have to count.
 has "the token count is grouped"                     "$review_body" "41,505"
+# Cached is the read-plus-write subset of tokens — a subset, never an addition:
+# the stub's cache reads are 40,000 and its unsplit writes are 5.
+has "Cached is the read-plus-write subset"           "$review_body" "40,005"
+has "Est. cost is a tilde dollar figure"             "$review_body" '~$0.12'
+# Billing joins the Agent cell rather than claiming a seventh column.
+has "billing joins the Agent cell"                   "$review_body" "· subscription"
 
 # Unconditional. A pass that finds nothing still spends time and tokens, and that
 # is exactly when you want to know — so the block appears on a converged comment
@@ -368,15 +374,16 @@ has "a converged pass still reports what it cost"    "$converged_body" "**Run de
 is  "with the same single row"                       "$(rows_in "$converged_body")" "1"
 has "and a blocked one does as well"                 "$blocked_body" "**Run details**"
 
-# Cost is deliberately absent rather than a blank column that reads as zero, and
-# the sentence says what crossrev knows rather than what the run cost. A leg can
-# be authenticated as a subscription, as a vendor API key, or as a named
-# endpoint that charges per token, so a footnote claiming there is nothing to pay
-# would be wrong on two of the three.
-has "cost is named as absent rather than left blank" \
-  "$review_body" "crossrev is given no billing figure by the harness"
-hasnt "and the absence is not explained by a claim about how the leg was paid for" \
-  "$review_body" "subscription"
+# The stub's claude leg reports a harness cost, so the footnote takes the
+# harness opening clause. It omits the nearest-model wording that belongs to
+# the table path alone, carries the cache-rate sentence in both directions,
+# and closes on what a subscription actually invoices.
+has "the harness footnote omits nearest-model"       "$review_body" "harness's own estimate"
+hasnt "the harness footnote has no nearest-model clause" \
+  "$review_body" "nearest listed model"
+has "a subscription row closes invoiced nothing"     "$review_body" "invoiced nothing"
+has "the cache-rate sentence is always there when a cost prints" \
+  "$review_body" "token columns alone do not indicate cost"
 
 # One row per leg, and only its own. The two comments sit adjacent on the pull
 # request, so nothing is lost by not duplicating — and duplicated rows can
@@ -417,6 +424,74 @@ has "and the cell names the model that actually answered" \
 # the config happened to type does not need repeating beside it.
 hasnt "nor does it echo the alias back alongside the id it resolved to" \
   "$alias_body" "requested \`opus\`"
+
+# --- a mixed-model session --------------------------------------------------
+#
+# A claude leg can run more than one model, and the cell names the one that did
+# the work — the largest token share — not whichever key sorted first. The stub
+# answers as Haiku (small) alongside Opus (large) with the config still asking
+# for Opus, so a `keys | .[0]` read would name Haiku and warn about a
+# substitution on a healthy run.
+config_opus_reviews() {
+  cat <<'EOF'
+version: 1
+mode: local
+policy:
+  min_fix_severity: medium
+  max_passes_per_cycle: 3
+  max_files_changed_per_pr: 200
+  max_prs_per_day: 25
+reviewer:
+  harness: claude
+  model: claude-opus-5
+resolver:
+  harness: claude
+  model: resolver-model
+backlog:
+  destination: none
+EOF
+}
+# Built with jq rather than as a JSON literal: --argjson parses it in the stub,
+# and a literal this dense is one escaped quote away from not being JSON.
+# The map key carries the [1m] suffix and canonicalModel does not, which is
+# what the real CLI reports on a long-context session.
+mixed_usage="$(jq -cn --arg h claude-haiku-4-5 --arg o 'claude-opus-5[1m]' --arg oc claude-opus-5 '
+  {($h):{inputTokens:100, outputTokens:20, cacheReadInputTokens:500,
+         cacheCreationInputTokens:10, canonicalModel:$h},
+   ($o):{inputTokens:4000, outputTokens:800, cacheReadInputTokens:20000,
+         cacheCreationInputTokens:400, canonicalModel:$oc}}')"
+export CROSSREV_REVIEW_MODEL_USAGE="$mixed_usage"
+run_review "$REVIEW_PAYLOAD" "$(config_opus_reviews)"
+mixed_body="$(last_body 9001)"
+unset CROSSREV_REVIEW_MODEL_USAGE
+
+has "the cell names the larger model" "$mixed_body" '`claude` · `claude-opus-5`'
+has "and appends +1 more"             "$mixed_body" "+1 more"
+hasnt "the substitution warning does not fire on a mixed session" \
+  "$mixed_body" "a different model answered"
+
+# --- markers from before the usage record -----------------------------------
+#
+# Pull requests open across the change carry v:1 markers with no usage object.
+# Sourcing run.sh and calling _run_details directly is the honest test here: the
+# claude stub always emits usage, so a through-the-leg fixture cannot produce a
+# marker that reports nothing.
+source "$HERE/../lib/run.sh"
+
+dash_marker='{"harness":"kimi","model":null,"model_reported":null,"effort":null,"endpoint":null,"tokens":null,"usage":null,"billing":"endpoint","ts":1,"done_ts":2}'
+got="$(_run_details "$dash_marker" review)"
+row="$(grep '^| review |' <<<"$got")"
+is "the kimi-shaped row is three dashes in Tokens, Cached and Est. cost" \
+  "$row" '| review | `kimi` · endpoint | 1s | — | — | — |'
+hasnt "endpoint billing prints no cost clause" "$got" "harness's own estimate"
+hasnt "and prints no footnote at all beyond the gap sentence" "$got" "<sub></sub>"
+
+old='{"v":1,"harness":"claude","model":"reviewer-model","model_reported":"reviewer-model","effort":"high","endpoint":null,"tokens":41205,"ts":1,"done_ts":2}'
+got="$(_run_details "$old" review)"
+row="$(grep '^| review |' <<<"$got")"
+is "a v1 marker with no usage still renders Tokens and dashes Cached and cost" \
+  "$row" '| review | `claude` · `reviewer-model` · high effort | 1s | 41,205 | — | — |'
+
 
 # --- a finding that missed the diff by a line ------------------------------
 #

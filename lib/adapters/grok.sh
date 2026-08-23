@@ -92,7 +92,7 @@ adapter_grok() {
     fi
     jq -cn --arg e "$msg" \
       '{ok:false, payload:null, harness:"grok", endpoint:null, model_reported:null,
-        tokens:null, error:$e}'
+        effort_reported:null, tokens:null, usage:null, error:$e}'
     # The capture files are the record, so they are filtered here — after every
     # value has been read from them, never before. Redacting first would rewrite
     # the payload this adapter parses, so identical harness output would yield
@@ -102,7 +102,7 @@ adapter_grok() {
     return 1
   fi
 
-  local payload model_reported tokens
+  local payload usage tokens model_reported
   # Live grok 1.0.5 with --json-schema puts the constrained object on
   # structuredOutput. .text is the model's prose, and on a schema run it is often
   # several draft JSON objects concatenated — fromjson rejects that, which is
@@ -117,14 +117,17 @@ adapter_grok() {
         | if type == "object" or type == "array" then .
           elif type == "string" then (fromjson? // null)
           else null end)' "$out" 2>/dev/null || echo null)"
-  model_reported="$(jq -r '(.modelUsage // {}) | keys | .[0] // empty' "$out" 2>/dev/null)"
-  tokens="$(jq -r '(.usage // {})
-                   | .total_tokens
-                     // ((.input_tokens // 0) + (.output_tokens // 0)
-                         + (.cache_read_input_tokens // 0)
-                         + (.cache_creation_input_tokens // 0))
-                   | if . == 0 then "null" else tostring end' "$out" 2>/dev/null)" || tokens=null
-  [[ -n "$tokens" ]] || tokens=null
+  # Buckets summed from the parts: grok's own total_tokens happens to
+  # reconcile today, but reading it would trust a vendor field the identity
+  # replaces. The harness cost rides along; the answering model comes from the
+  # models list the parser built out of modelUsage — its entries carry call
+  # counts rather than token totals, so there is no share to rank and first is
+  # the only report.
+  usage="$(usage_parse_grok "$out")"
+  [[ -n "$usage" ]] || usage=null
+  tokens="$(jq -r '.total // "null"' <<<"$usage")"
+  model_reported="$(usage_model_reported_from_models "$(jq -c '.models // []' <<<"$usage")")"
+
   # The capture files are the record, so they are filtered here — after every
   # value has been read from them, never before. Redacting first would rewrite
   # the payload this adapter parses, so identical harness output would yield
@@ -132,7 +135,11 @@ adapter_grok() {
   if (( keep_transcript )); then log_redact_file "$out"; log_redact_file "$err"
   else rm -f "$out" "$err"; fi
 
-  jq -cn --argjson p "${payload:-null}" --arg m "$model_reported" --argjson t "$tokens" \
+  jq -cn --argjson p "${payload:-null}" --arg m "$model_reported" \
+     --argjson t "${tokens:-null}" --argjson u "${usage:-null}" \
     '{ok:true, payload:$p, harness:"grok", endpoint:"vendor",
-      model_reported:(if $m == "" then null else $m end), tokens:$t, error:null}'
+      model_reported:(if $m == "" then null else $m end),
+      effort_reported:null,
+      tokens:(if $t == "null" then null else $t end),
+      usage:$u, error:null}'
 }

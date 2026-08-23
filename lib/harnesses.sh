@@ -21,9 +21,9 @@ _harness_file() {
   printf '%s' "${CROSSREV_HARNESS_FILE:-$root/lib/harnesses.json}"
 }
 
-# Eleven checks in one pass: the design's six, plus a version guard, an array-shape
-# guard, a duplicate-name guard, a not-driven-name guard and a legs guard.
-# Prints the first problem, or nothing.
+# Twelve checks in one pass: the design's six, plus a version guard, an
+# array-shape guard, a duplicate-name guard, a not-driven-name guard, a legs
+# guard and a credential-billing guard. Prints the first problem, or nothing.
 harness_validate() {
   jq -r '
     def bad(m): m;
@@ -58,6 +58,10 @@ harness_validate() {
                     or (.install.kind | IN("script","npm") | not)
                     or (.credential.staging.kind | IN("none","file","home","env") | not)) ] | length) > 0
         then bad("harness \([ $h[] | select((.credential.archetype | IN("A","B","C") | not) or (.credential.provenance | IN("measured","inferred","vendor-documented") | not) or (.schema_style | IN("inline","path","prompt") | not) or (.install.kind | IN("script","npm") | not) or (.credential.staging.kind | IN("none","file","home","env") | not)) | .name ][0]) carries an out-of-range archetype, provenance, schema_style, install kind or staging kind")
+      elif ([ $h[]
+              | select((.credential.billing? // "unknown")
+                       | IN("subscription","api","unknown") | not) ] | length) > 0
+        then bad("harness \([ $h[] | select((.credential.billing? // "unknown") | IN("subscription","api","unknown") | not) | .name ][0]) carries a credential billing that is not subscription, api or unknown")
       elif ([ $h[]
               | select(has("legs"))
               | select((.legs | type) != "array"
