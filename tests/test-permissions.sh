@@ -188,8 +188,8 @@ for _k in bash task skill webfetch websearch external_directory; do
   has "with $_k denied in the write shape" "$(probe opencode yes)" "$_k=deny"
   has "with $_k denied in the read shape"  "$(probe opencode no)"  "$_k=deny"
 done
-has "and both shapes run without external plugins" \
-  "$(probe opencode yes) $(probe opencode no)" "--pure"
+has "with the write shape running without external plugins" "$(probe opencode yes)" "--pure"
+has "and the read shape running without them too"           "$(probe opencode no)"  "--pure"
 
 # agy's --print takes the prompt as its VALUE, so a mode flag written after it
 # becomes the prompt. The stub refuses that order; this is the assertion that
