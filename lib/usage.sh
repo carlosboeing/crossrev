@@ -349,9 +349,10 @@ usage_price_key() {
 
 # Table pricing. Rates are per-token dollars upstream; the arithmetic scales
 # each rate to nano-dollars so the sum stays in integers well below float
-# precision and one division rounds once. Two rules refuse to price rather
-# than guess: an unresolvable cache-write TTL whose rates differ, and a
-# per-request long-context break a cumulative total cannot rule out.
+# precision and one division rounds once. Three rules refuse to price rather
+# than guess: a bucket with tokens in it whose rate the extract does not list,
+# an unresolvable cache-write TTL whose rates differ, and a per-request
+# long-context break a cumulative total cannot rule out.
 usage_price() {
   local u="$1" model="$2"
   local key pf r version
@@ -366,7 +367,22 @@ usage_price() {
     _usage_clear_cost <<<"$u"; return 0
   fi
   jq -c --argjson r "$r" --arg v "$version" '
-    (if (.cache_write_unsplit // 0) > 0
+    # A bucket holding tokens whose rate the extract does not list is a
+    # refusal, never a zero: an entry can omit a rate entirely — gpt-5.5 lists
+    # no cache-write rate at all — and defaulting the missing one to zero
+    # prices those tokens free and understates the leg without saying so. Only
+    # a nonzero bucket counts, so an entry that omits a rate it never needs
+    # still prices.
+    ([ {b: (.input_fresh // 0), r: $r.input_cost_per_token},
+       {b: (.output // 0), r: $r.output_cost_per_token},
+       {b: (.cache_read // 0), r: $r.cache_read_input_token_cost},
+       {b: (.cache_write_5m // 0), r: $r.cache_creation_input_token_cost},
+       {b: (.cache_write_1h // 0),
+        r: ($r.cache_creation_input_token_cost_above_1hr
+            // $r.cache_creation_input_token_cost)},
+       {b: (.cache_write_unsplit // 0), r: $r.cache_creation_input_token_cost} ]
+     | any(.[]; .b > 0 and ((.r | type) != "number"))) as $refuse_unlisted
+    | (if (.cache_write_unsplit // 0) > 0
          and ($r | has("cache_creation_input_token_cost_above_1hr"))
          and ($r.cache_creation_input_token_cost_above_1hr
               != $r.cache_creation_input_token_cost)
@@ -380,13 +396,17 @@ usage_price() {
     | ((.input_fresh // 0) + (.cache_read // 0) + (.cache_write_5m // 0)
        + (.cache_write_1h // 0) + (.cache_write_unsplit // 0)) as $cum
     | (if $bn != null and $cum >= ($bn * 1000) then true else false end) as $refuse_break
-    | if $refuse_unsplit or $refuse_break then
+    | if $refuse_unlisted or $refuse_unsplit or $refuse_break then
         .cost_usd = null | .cost_source = null | .price_table = null
       else
+        # Every `// 0` below is reached only for a bucket that is already zero,
+        # because a nonzero one with no listed rate refused above. It stays so
+        # that a zero bucket meeting a missing rate is arithmetic rather than a
+        # jq error that would take the whole record down.
         ((((.input_fresh // 0)
-           * (($r.input_cost_per_token * 1e9) | round))
+           * ((($r.input_cost_per_token // 0) * 1e9) | round))
           + ((.output // 0)
-             * (($r.output_cost_per_token * 1e9) | round))
+             * ((($r.output_cost_per_token // 0) * 1e9) | round))
           + ((.cache_read // 0)
              * ((($r.cache_read_input_token_cost // 0) * 1e9) | round))
           + ((.cache_write_5m // 0)

@@ -37,6 +37,19 @@ is "unsplit writes refuse when the two write rates differ" \
   "$(usage_price "$(usage_with_total "$unsplit")" "claude-opus-5" | jq -c '{cost_usd,cost_source}')" \
   '{"cost_usd":null,"cost_source":null}'
 
+# gpt-5.5 lists no cache-write rate at all, so a Codex run reporting writes has
+# a bucket the extract cannot price. Refusing is the promise; defaulting the
+# missing rate to zero would show an understated figure instead.
+no_write_rate='{"input_fresh":1000,"cache_read":1000,"cache_write_5m":0,"cache_write_1h":0,"cache_write_unsplit":5000,"output":10,"reasoning":0}'
+is "a nonzero bucket with no listed rate refuses" \
+  "$(usage_price "$(usage_with_total "$no_write_rate")" "gpt-5.5" | jq -c '{cost_usd,cost_source}')" \
+  '{"cost_usd":null,"cost_source":null}'
+# The same entry still prices when the unpriceable bucket is empty: 1000 * 5e-6
+# + 1000 * 5e-7 + 10 * 3e-5 = 0.0058.
+no_writes='{"input_fresh":1000,"cache_read":1000,"cache_write_5m":0,"cache_write_1h":0,"cache_write_unsplit":0,"output":10,"reasoning":0}'
+is "an absent rate the record never needs still prices" \
+  "$(usage_price "$(usage_with_total "$no_writes")" "gpt-5.5" | jq -r '.cost_usd')" "0.0058"
+
 # Context break on gpt-5.6-terra. Standard input 2e-6, cache_read 2e-7, output 1.2e-5.
 below='{"input_fresh":1000,"cache_read":1000,"cache_write_5m":0,"cache_write_1h":0,"cache_write_unsplit":0,"output":10,"reasoning":0}'
 is "cumulative input below 272k prices at standard terra rates" \
