@@ -4,35 +4,71 @@
 #
 # It returns what the real CLI returns for `run --format json`: an NDJSON event
 # stream whose answer rides on `.part.text` of `type == "text"` events, with a
-# sessionID on every line. That shape is what lib/adapters/opencode.sh parses.
+# sessionID on every line. That shape is what lib/adapters/opencode.sh parses,
+# for the review leg and the resolve leg alike.
 #
-# It also asserts the contract the adapter is supposed to meet. The isolation
-# config is the whole read-only story for this harness — its own defaults grant
-# `edit` and `bash`, so a run without OPENCODE_CONFIG denying them is the bug —
-# and `--auto` is a blanket bypass that is never passed. Violations exit 96.
+# It also asserts the contract the adapter is supposed to meet. This harness
+# grants `edit` and `bash` out of the box, so the isolation config IS the
+# security story, and which shape a leg gets is the write-grant question.
+# Violations exit 96.
 
 set -uo pipefail
 
 [[ "${1:-}" == "--version" ]] && { printf '1.18.21 (test stub)\n'; exit 0; }
 
-# Isolation is the whole read-only story for this harness. Shared by `run` and
-# `export`: the adapter reuses the same env for the session-record call, and a
-# check only on `run` would miss deleting that config before export.
+# Isolation is checked identically for `run` and `export`: the adapter reuses
+# the same env for the session-record call, and a check only on `run` would
+# miss deleting that config before export.
+#
+# Every shape carries the fail-closed `"*": "deny"` base rule, and which leg
+# runs decides one key under it:
+#
+#   read-only — `"edit": "deny"`;
+#   write     — `"edit": "allow"` beside the base rule, measured at 1.18.21
+#               editing files in this exact form.
+#
+# The base rule is what holds the surface no key names: a tool a future
+# opencode adds, a custom tool, and whatever an MCP server or plugin
+# registers all match "*" and are denied. Dropping it to make room for an
+# edit grant was tried and reverted — it left every one of those allowed —
+# so a config without the rule is the bug this stub refuses. bash, task,
+# skill, webfetch, websearch and external_directory stay denied in both
+# shapes, and so does the .env denial inside the read map.
 _assert_isolation() {
-  local cfg="${OPENCODE_CONFIG:-}" cfg_content
+  local cfg="${OPENCODE_CONFIG:-}" cfg_content key
   cfg_content="$(tr -d '[:space:]' <"$cfg" 2>/dev/null || true)"
-  if [[ -z "$cfg" || ! -r "$cfg" ]] \
-     || [[ "$cfg_content" != *'"edit":"deny"'* ]] \
-     || [[ "$cfg_content" != *'"bash":"deny"'* ]] \
-     || [[ "$cfg_content" != *'"*":"deny"'* ]] \
-     || [[ "$cfg_content" != *'"*.env":"deny"'* ]]; then
-    printf 'test stub: OPENCODE_CONFIG must name a readable file denying edit, bash, unknown tools, and .env reads\n' >&2
+  if [[ -z "$cfg" || ! -r "$cfg" ]]; then
+    printf 'test stub: OPENCODE_CONFIG must name a readable isolation config\n' >&2
+    exit 96
+  fi
+  for key in bash task skill webfetch websearch external_directory; do
+    if [[ "$cfg_content" != *"\"$key\":\"deny\""* ]]; then
+      printf 'test stub: %s must stay denied in every shape\n' "$key" >&2
+      exit 96
+    fi
+  done
+  if [[ "$cfg_content" != *'"*.env":"deny"'* ]]; then
+    printf 'test stub: the read map must keep the .env denial\n' >&2
+    exit 96
+  fi
+  if [[ "$cfg_content" != *'"*":"deny"'* ]]; then
+    printf 'test stub: the fail-closed base rule must be present in every shape\n' >&2
+    exit 96
+  fi
+  local edit_deny=0 edit_allow=0
+  [[ "$cfg_content" == *'"edit":"deny"'* ]]  && edit_deny=1
+  [[ "$cfg_content" == *'"edit":"allow"'* ]] && edit_allow=1
+  if (( edit_deny == edit_allow )); then
+    printf 'test stub: edit must be exactly one of deny or allow\n' >&2
     exit 96
   fi
   if [[ -z "${OPENCODE_CONFIG_DIR:-}" || ! -d "${OPENCODE_CONFIG_DIR:-}" ]]; then
     printf 'test stub: OPENCODE_CONFIG_DIR must name an existing directory\n' >&2
     exit 96
   fi
+  # What a leg was actually granted beats what the adapter meant to grant, so
+  # every accepted config is handed to the suite, compacted onto its own line.
+  [[ -n "${CROSSREV_OPENCODE_CFG_LOG:-}" ]] && jq -c . "$cfg" >>"${CROSSREV_OPENCODE_CFG_LOG}"
 }
 
 # The export subcommand answers from the local session database in the real CLI,
@@ -57,7 +93,7 @@ shift
 # granted. Appended, because one `crossrev review` invokes this twice on a retry.
 [[ -n "${CROSSREV_ARGV_LOG:-}" ]] && printf '%s\n' "run $*" >>"$CROSSREV_ARGV_LOG"
 
-fmt="" dir=""
+fmt="" dir="" pure=""
 while (( $# )); do
   case "$1" in
     --auto)
@@ -65,6 +101,7 @@ while (( $# )); do
       exit 96 ;;
     --format) fmt="${2:-}"; shift 2 ;;
     --dir) dir="${2:-}"; shift 2 ;;
+    --pure) pure=1; shift ;;
     --model)
       # The real CLI takes provider/model, not a bare id — the configuration
       # docs say so, so the stub enforces it.
@@ -82,12 +119,15 @@ done
 prompt="${*:-}"
 [[ -n "${CROSSREV_PROMPT_LOG:-}" ]] && printf '%s' "$prompt" >"$CROSSREV_PROMPT_LOG"
 
-# A reading leg holds `edit` and `bash` unless something takes them away, so the
-# config the adapter points at has to deny both. Denying removes the tool from
-# the session entirely rather than refusing it at call time — there is nothing
-# for a headless run to block on. Matched on whitespace-stripped content, so
-# the check is about the keys and not about how the file was printed.
+# A reading leg holds `edit` and `bash` unless something takes them away, and a
+# writing leg must hold edit without losing the denials. Matched on
+# whitespace-stripped content, so the check is about the keys and not about how
+# the file was printed.
 _assert_isolation
+if [[ -z "$pure" ]]; then
+  printf 'test stub: --pure is required so external plugins never load\n' >&2
+  exit 96
+fi
 if [[ "$fmt" != "json" ]]; then
   printf 'test stub: --format json is required, got %s\n' "${fmt:-nothing}" >&2
   exit 96
@@ -100,9 +140,17 @@ fi
 payload_file=""
 if [[ "$prompt" == *"You are the review leg"* ]]; then
   [[ -n "${CROSSREV_REVIEW_PAYLOAD:-}" ]] && payload_file="$CROSSREV_REVIEW_PAYLOAD"
+elif [[ "$prompt" == *"You are the resolve leg"* ]]; then
+  [[ -n "${CROSSREV_RESOLVE_PAYLOAD:-}" ]] && payload_file="$CROSSREV_RESOLVE_PAYLOAD"
 fi
 [[ -n "$payload_file" && -f "$payload_file" ]] \
   || { printf 'test stub: no canned payload was set for this stub invocation\n' >&2; exit 1; }
+
+# A resolve leg changes code in the working tree; the orchestrator commits what
+# it changed. Same mechanism the other stubs use.
+if [[ "$prompt" == *"You are the resolve leg"* && -n "${CROSSREV_RESOLVE_EDIT:-}" ]]; then
+  bash "$CROSSREV_RESOLVE_EDIT" || true
+fi
 
 body="$(cat "$payload_file")"
 mode="${CROSSREV_OPENCODE_MODE:-bare}"

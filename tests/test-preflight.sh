@@ -221,29 +221,27 @@ is "a hosted codex pairing is supported" "$?" 0
 preflight_pairing_supported self-hosted agy >/dev/null 2>&1
 is "a self-hosted agy pairing is supported" "$?" 0
 
-# A review-only harness is a pairing fact before it is a credential fact:
-# doctor must report the leg limit for automated mode rather than leave it to a
-# failing job, even though the credential itself would be fine. The third
-# argument speaks the descriptor's vocabulary, review and resolve.
+# The leg argument is checked against the descriptor before any credential
+# question: a harness that lists its legs is refused for the others on every
+# runner, which is what keeps doctor honest about automated mode. opencode now
+# names both legs, so both pairings pass on both runners.
 preflight_pairing_supported github-hosted opencode review >/dev/null 2>&1
 is "a hosted opencode review pairing is supported" "$?" 0
-msg="$(preflight_pairing_supported github-hosted opencode resolve)"; rc=$?
-is "a hosted opencode resolve pairing is refused" "$rc" "1"
-has "and the refusal names the legs the descriptor lists" "$msg" "limited to the review"
+preflight_pairing_supported github-hosted opencode resolve >/dev/null 2>&1
+is "a hosted opencode resolve pairing is supported" "$?" 0
 
 # Without naming a leg — the historical call shape — the credential answer is
 # unchanged.
 preflight_pairing_supported github-hosted opencode >/dev/null 2>&1
 is "a hosted opencode pairing with no leg named still passes on its archetype" "$?" 0
 
-# The same limit is a descriptor fact, not a runner fact: self-hosted skips
-# the credential checks because the machine already holds the login, but a
-# harness that does not serve the leg is still refused.
+# Whether a harness serves a leg is a descriptor fact, not a runner fact:
+# self-hosted skips the credential checks because the machine already holds the
+# login, but it still answers the leg question from the descriptor.
 preflight_pairing_supported self-hosted opencode review >/dev/null 2>&1
 is "a self-hosted opencode review pairing is supported" "$?" 0
-msg="$(preflight_pairing_supported self-hosted opencode resolve)"; rc=$?
-is "a self-hosted opencode resolve pairing is refused" "$rc" "1"
-has "because the descriptor limit is the same on every runner" "$msg" "limited to the review"
+preflight_pairing_supported self-hosted opencode resolve >/dev/null 2>&1
+is "a self-hosted opencode resolve pairing is supported" "$?" 0
 
 preflight_needs_refresher github-hosted codex ""
 is "preflight_needs_refresher github-hosted codex is true" "$?" 0

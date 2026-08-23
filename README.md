@@ -224,7 +224,7 @@ Automated mode reviews branches in the repository, including Dependabot branches
 
 ## Harness support
 
-CrossRev has adapters for Claude Code, Codex, Antigravity, Grok, and opencode — the last of those review-only: it may take `reviewer.harness`, never `resolver.harness`. Kimi runs through the Claude adapter as a named endpoint.
+CrossRev has adapters for Claude Code, Codex, Antigravity, Grok, and opencode, and any of them may take either leg. Kimi runs through the Claude adapter as a named endpoint.
 
 Running a harness locally needs nothing beyond its own CLI installed and logged in the way you already use it. CrossRev shells out to the CLI and never handles the credential itself, and `crossrev doctor` reports which harnesses it found.
 

@@ -97,14 +97,17 @@ is  "kimi by subscription on a hosted runner refuses" "$rc" "1"
 has "and names the missing adapter"                   "$err" "no adapter for 'kimi'"
 has "and points at the endpoint route"                "$err" "reached through the claude adapter"
 
-# A review-only harness as resolver is a pairing no runner can serve, even
-# though the credential itself would be fine (archetype A). Caught here, that
-# is a config error before anything is installed.
+# opencode as resolver is now a pairing the descriptor serves on both legs, and
+# its credential is archetype A — a static file, no refresher. The plan should
+# say what each leg authenticates as and name the one secret it needs.
 fixture_repo "$(config_for github-hosted claude opencode)"; stub_reset
 routes_init
-err="$("$CROSSREV" init --dry-run 2>&1 >/dev/null)"; rc=$?
-is  "opencode as resolver is refused at init"          "$rc" "1"
-has "and the reason is the descriptor's leg limit"     "$err" "limited to the review"
+out="$("$CROSSREV" init --dry-run 2>&1)"; rc=$?
+
+is  "opencode as resolver plans clean at init"               "$rc" "0"
+has "and the plan names what the resolver authenticates as"  "$out" "resolver: opencode by subscription"
+has "and the one secret an opencode leg needs"               "$out" "CROSSREV_OPENCODE_AUTH"
+hasnt "with no refresher, because its credential is static"   "$out" "refresher App"
 
 # The same harness reached through an endpoint is a static token in a secret,
 # which never rotates and so never cares what runner it is on. Refusing that too

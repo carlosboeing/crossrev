@@ -41,7 +41,7 @@ Run `crossrev init --dry-run` for the exact list derived from your current confi
 | `APP_PRIVATE_KEY` | Loop App RSA private key, PEM format | Same Actions scope as `APP_ID` | Every automated setup |
 | `CLAUDE_CODE_OAUTH_TOKEN` | Claude subscription token from `claude setup-token` | Organisation or repository secret | A hosted leg uses Claude by subscription |
 | `CROSSREV_CODEX_AUTH` | The complete Codex `auth.json`, including access and refresh tokens | Repository secret only | A hosted leg uses Codex by subscription |
-| `CROSSREV_OPENCODE_AUTH` | The complete opencode `auth.json`, one `{type, key}` entry per provider with no expiry inside | Repository secret only | A hosted leg uses opencode; the review leg only — opencode is review-only |
+| `CROSSREV_OPENCODE_AUTH` | The complete opencode `auth.json`, one `{type, key}` entry per provider with no expiry inside | Repository secret only | A hosted leg uses opencode, on either one |
 | `CROSSREV_REFRESH_APP_ID` | Numeric ID of the refresher App | Repository secret only | A hosted leg uses Codex by subscription |
 | `CROSSREV_REFRESH_APP_PRIVATE_KEY` | Refresher App RSA private key, PEM format | Repository secret only | A hosted leg uses Codex by subscription |
 | Whatever an endpoint's `token_env` names | A static token that endpoint accepts | Your shell locally, an Actions secret in CI | A leg names that endpoint |
@@ -91,7 +91,7 @@ GitHub-hosted runners are disposable, so each run restores the harness credentia
 | `kimi` | OAuth access token | 15 minutes | Use a self-hosted runner, or a static endpoint token |
 <!-- crossrev:harness-table:end -->
 
-CrossRev has adapters for Claude, Codex, Antigravity, Grok and opencode. The opencode credential stages under `XDG_DATA_HOME` rather than a home of its own, and the harness it serves is review-only. Kimi is reached through the Claude adapter as a named endpoint.
+CrossRev has adapters for Claude, Codex, Antigravity, Grok and opencode. The opencode credential stages under `XDG_DATA_HOME` rather than a home of its own, and serves either leg. Kimi is reached through the Claude adapter as a named endpoint.
 
 **`crossrev init` refuses a pairing its runner cannot serve**, naming the lifetime and both fixes, rather than installing workflows that fail at the first API call. `crossrev doctor` reports the same thing before you get that far.
 

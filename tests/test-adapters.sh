@@ -305,9 +305,14 @@ routes_baseline "$(printf '[]' | payload)"
 route 'api --method POST repos/*/issues/42/comments*' '{"id":9001}'
 route '*reviewThreads*' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}'
 CROSSREV_REVIEW_PAYLOAD="$(printf '%s' "$REVIEW_PAYLOAD" | payload)"; export CROSSREV_REVIEW_PAYLOAD
+# The stub hands back every isolation config it accepted, so the assertions
+# below read what a leg was actually granted rather than what the adapter
+# meant to write.
+CROSSREV_OPENCODE_CFG_LOG="$(mktemp)"; export CROSSREV_OPENCODE_CFG_LOG
 out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
 # Captured before the direct-stub probes below append to the same log.
 opencode_review_argv="$(cat "$ARGV_LOG")"
+opencode_review_cfg="$(jq -sc '.[0]' "$CROSSREV_OPENCODE_CFG_LOG")"
 
 is  "a review leg runs on opencode"               "$rc" "0"
 has "and names it in the run header"              "$out" "Reviewer: opencode"
@@ -335,26 +340,70 @@ has "and the append corrects the native-constraint claim" \
 
 # The argument vector, asserted on what the adapter built rather than on the
 # stub's complaints: --format json selects the event stream, --dir names the
-# checkout, and --auto is a blanket bypass that is never passed.
+# checkout, --pure keeps external plugins out, and --auto is a blanket bypass
+# that is never passed.
 has "the leg asks for the json event stream"      "$opencode_review_argv" "--format json"
 has "the leg names the checkout as the workspace" "$opencode_review_argv" "--dir"
 has "the leg passes the configured model through" "$opencode_review_argv" "--model opencode/reviewer-model"
+has "and runs without external plugins"           "$opencode_review_argv" "--pure"
 hasnt "a leg is granted no blanket bypass"        "$opencode_review_argv" "--auto"
 
+# The permission block is the whole security story for a reading leg, so it is
+# asserted from the config the stub received: fail-closed base rule, edit
+# denied with it, the six standing denials, and opencode's own .env denial
+# kept in the read map.
+is  "the read-only block keeps the fail-closed base rule" \
+  "$(jq -r '.permission."*" // "absent"' <<<"$opencode_review_cfg")" "deny"
+is  "and denies edit" "$(jq -r '.permission.edit' <<<"$opencode_review_cfg")" "deny"
+for key in bash task skill webfetch websearch external_directory; do
+  is "and denies $key" \
+    "$(jq -r --arg k "$key" '.permission[$k] // "absent"' <<<"$opencode_review_cfg")" "deny"
+done
+is  "and keeps the .env denial in the read map" \
+  "$(jq -r '.permission.read["*.env"] // "absent"' <<<"$opencode_review_cfg")" "deny"
+
+read_only_cfg="$(mktemp)"
+printf '{"permission":{"*":"deny","edit":"deny","bash":"deny","task":"deny","skill":"deny","webfetch":"deny","websearch":"deny","external_directory":"deny","read":{"*.env":"deny"}}}' >"$read_only_cfg"
 ( unset OPENCODE_CONFIG OPENCODE_CONFIG_DIR
   "$HERE/stub/opencode" run --format json --dir "$HERE" "prompt" >/dev/null 2>&1 )
 is  "the stub refuses a run with no isolation config" "$?" "96"
 ( unset OPENCODE_CONFIG OPENCODE_CONFIG_DIR
   "$HERE/stub/opencode" run --format json --auto --dir "$HERE" "prompt" >/dev/null 2>&1 )
 is  "the stub still refuses --auto, which is a blanket bypass" "$?" "96"
-
-deny_cfg="$(mktemp)"
-printf '{"permission":{"*":"deny","edit":"deny","bash":"deny","read":{"*.env":"deny"}}}' >"$deny_cfg"
-( export OPENCODE_CONFIG="$deny_cfg" OPENCODE_CONFIG_DIR="$HERE"
+( export OPENCODE_CONFIG="$read_only_cfg" OPENCODE_CONFIG_DIR="$HERE"
   unset CROSSREV_REVIEW_PAYLOAD
   "$HERE/stub/opencode" run --format json --dir "$HERE" "prompt" >/dev/null 2>&1 )
+is  "and refuses a run with no --pure" "$?" "96"
+
+( export OPENCODE_CONFIG="$read_only_cfg" OPENCODE_CONFIG_DIR="$HERE"
+  "$HERE/stub/opencode" run --pure --format json --dir "$HERE" "prompt" >/dev/null 2>&1 )
 is  "and accepts the flags and config the adapter uses" "$?" "1"
-rm -f "$deny_cfg"
+
+# The write shape is the read shape with one key flipped: edit allowed BESIDE
+# the base rule, measured at 1.18.21 writing files in exactly this form. The
+# rule stays because it is what denies every tool no key names — a future
+# built-in, a custom tool, whatever a plugin or MCP server registers.
+write_cfg="$(mktemp)"
+printf '{"permission":{"*":"deny","edit":"allow","bash":"deny","task":"deny","skill":"deny","webfetch":"deny","websearch":"deny","external_directory":"deny","read":{"*.env":"deny"}}}' >"$write_cfg"
+( export OPENCODE_CONFIG="$write_cfg" OPENCODE_CONFIG_DIR="$HERE"
+  "$HERE/stub/opencode" run --pure --format json --dir "$HERE" "prompt" >/dev/null 2>&1 )
+is  "the stub accepts the write shape beside the base rule" "$?" "1"
+
+# Dropping the base rule to make room for a grant is the bug that leaks every
+# unnamed tool: the rule must be present in both shapes.
+nostar_cfg="$(mktemp)"
+printf '{"permission":{"edit":"allow","bash":"deny","task":"deny","skill":"deny","webfetch":"deny","websearch":"deny","external_directory":"deny","read":{"*.env":"deny"}}}' >"$nostar_cfg"
+( export OPENCODE_CONFIG="$nostar_cfg" OPENCODE_CONFIG_DIR="$HERE"
+  "$HERE/stub/opencode" run --pure --format json --dir "$HERE" "prompt" >/dev/null 2>&1 )
+is  "and refuses any shape without the fail-closed base rule" "$?" "96"
+
+# A shape that loses one of the standing denials is not a grant, it is a leak.
+leaky_cfg="$(mktemp)"
+printf '{"permission":{"*":"deny","edit":"allow","bash":"allow","task":"deny","skill":"deny","webfetch":"deny","websearch":"deny","external_directory":"deny","read":{"*.env":"deny"}}}' >"$leaky_cfg"
+( export OPENCODE_CONFIG="$leaky_cfg" OPENCODE_CONFIG_DIR="$HERE"
+  "$HERE/stub/opencode" run --pure --format json --dir "$HERE" "prompt" >/dev/null 2>&1 )
+is  "and refuses a write shape without the bash denial" "$?" "96"
+rm -f "$read_only_cfg" "$write_cfg" "$nostar_cfg" "$leaky_cfg"
 
 # A fence around the JSON must change nothing.
 fixture_repo "$(config_opencode_reviews)"; stub_reset
@@ -454,7 +503,7 @@ has "and warns once about a mismatch"             "$out" "it is being retried on
 has "and the second mismatch names the JSON instruction" "$out" "JSON instruction"
 hasnt "and never blames a native schema check"    "$out" "validates output against the schema natively"
 is  "and the stub was invoked twice" \
-  "$(grep -c '^run --format json' "$ARGV_LOG" | tr -d ' ')" "2"
+  "$(grep -c '^run --pure --format json' "$ARGV_LOG" | tr -d ' ')" "2"
 
 # The session record is telemetry, not the answer: if the export call fails,
 # both fields fall back to null and the review itself stands.
@@ -468,5 +517,90 @@ out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
 unset CROSSREV_OPENCODE_NO_EXPORT
 is  "a failed session export costs the leg nothing" "$rc" "0"
 has "and the marker records no answering model"   "$(calls)" '"model_reported":null'
+
+# --- the resolve leg on opencode ---------------------------------------------
+#
+# The descriptor names both legs, so resolver.harness: opencode is a pairing
+# CrossRev serves. The adapter is reached with write=yes and hands the model
+# an edit grant BESIDE the fail-closed base rule — measured at 1.18.21
+# writing files in exactly that form, and the rule is what denies every tool
+# no key names. bash, task, skill, webfetch, websearch and external_directory
+# stay denied.
+config_opencode_resolves() {
+  cat <<'EOF'
+version: 1
+mode: local
+policy:
+  min_fix_severity: medium
+  max_passes_per_cycle: 3
+  max_files_changed_per_pr: 200
+  max_prs_per_day: 25
+reviewer:
+  harness: claude
+  model: reviewer-model
+resolver:
+  harness: opencode
+  model: opencode/resolver-model
+backlog:
+  destination: none
+EOF
+}
+
+OCX_ID="b4c5d6e7"
+ocx_review_marker() {
+  jq -cn --arg sha "$FIX_HEAD" --arg a "$OCX_ID" '
+    {v:1, leg:"review", pass:1, state:"complete", ts:100, done_ts:200, run_id:"1",
+     head_sha:$sha, harness:"claude", model:"reviewer-model", effort:null, endpoint:null,
+     model_reported:"reviewer-model", tokens:100, verdict:"issues-remain",
+     findings:[
+       {id:$a, path:"app.ts", line:2, side:"RIGHT", severity:"high", category:"correctness",
+        pre_existing:false, title:"Unchecked fetch response", why:"w", fix:"check it",
+        anchor:"", thread_id:"T_OC", resolution:null, tracked_as:null}]}'
+}
+
+ocx_resolve_payload() {
+  jq -cn '{blocked:false, blocked_reason:null,
+    commit_subject:"fix(api): check the response status before reading it",
+    summary:"Fixed the unchecked response.",
+    resolutions:[{finding_number:1, resolution:"fixed", reply:"Added the ok check.",
+      persist:null, duplicate_of:null}]}'
+}
+
+fixture_repo "$(config_opencode_resolves)"; stub_reset
+routes_baseline "$(marker_comment 9001 "$(ocx_review_marker)" | jq -cs . | payload)"
+route 'api --method POST repos/*/issues/42/comments*' '{"id":9002}'
+route '*reviewThreads*' "$(threads_response "$(thread_node T_OC app.ts 2 false "$OCX_ID")")"
+route '*resolveReviewThread*' '{"data":{"resolveReviewThread":{"thread":{"isResolved":true}}}}'
+route 'api --method POST repos/*/pulls/42/comments/*/replies*' '{"id":6001}'
+CROSSREV_RESOLVE_PAYLOAD="$(ocx_resolve_payload | payload)"; export CROSSREV_RESOLVE_PAYLOAD
+ocx_edit_script="$(mktemp)"
+printf 'printf "export const patched = 1\\n" >> app.ts\n' >"$ocx_edit_script"
+CROSSREV_RESOLVE_EDIT="$ocx_edit_script"; export CROSSREV_RESOLVE_EDIT
+CROSSREV_OPENCODE_CFG_LOG="$(mktemp)"; export CROSSREV_OPENCODE_CFG_LOG
+out="$("$CROSSREV" resolve --pr 42 2>&1)"; rc=$?
+ocx_resolve_argv="$(cat "$ARGV_LOG")"
+ocx_write_cfg="$(jq -sc '.[0]' "$CROSSREV_OPENCODE_CFG_LOG")"
+
+is  "the resolve leg runs on opencode"             "$rc" "0"
+has "and reports the pass it resolved"              "$out" "resolved pass 1"
+is  "the commit carries the subject the resolver wrote" \
+  "$(git --git-dir="$FIX_ORIGIN" log -1 refs/heads/feature --format=%s)" "fix(api): check the response status before reading it"
+
+has "the resolve leg asks for the json event stream" "$ocx_resolve_argv" "--format json"
+has "names a workspace as before"                    "$ocx_resolve_argv" "--dir"
+has "and passes the configured model through"        "$ocx_resolve_argv" "--model opencode/resolver-model"
+has "and runs without external plugins"              "$ocx_resolve_argv" "--pure"
+hasnt "while no blanket bypass appears"              "$ocx_resolve_argv" "--auto"
+
+is  "the write block keeps the fail-closed base rule" \
+  "$(jq -r '.permission."*" // "absent"' <<<"$ocx_write_cfg")" "deny"
+is  "and grants edit beside it" \
+  "$(jq -r '.permission.edit // "absent"' <<<"$ocx_write_cfg")" "allow"
+for key in bash task skill webfetch websearch external_directory; do
+  is "and still denies $key" \
+    "$(jq -r --arg k "$key" '.permission[$k] // "absent"' <<<"$ocx_write_cfg")" "deny"
+done
+is  "and keeps the .env denial in the read map" \
+  "$(jq -r '.permission.read["*.env"] // "absent"' <<<"$ocx_write_cfg")" "deny"
 
 finish
