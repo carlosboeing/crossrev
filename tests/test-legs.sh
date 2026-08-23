@@ -715,6 +715,30 @@ has   "a cycle --harness naming a both-legs harness starts" "$out" "Reviewing ac
 has   "with the override on the leg it named"                 "$out" "Reviewer: opencode"
 hasnt "and nothing refuses it for using one harness twice"    "$out" "both legs"
 
+# The start assertion never reaches the resolve leg: the stub answers the
+# comment list from a fixed payload, so cycle cannot read back the marker
+# its own review just posted. Pre-seeding a complete review at this SHA
+# lets the review decline as already-reviewed and the resolve leg run —
+# which is where the divergence guard used to die, because it still read
+# the config and a two-harness file prints "different" while both legs
+# report stub-model.
+two_harness_cfg="$(fixture_default_config | awk '
+  $1 == "resolver:" { r = 1 }
+  r && $1 == "harness:" { sub(/claude/, "codex"); r = 0 }
+  { print }
+')"
+fixture_repo "$two_harness_cfg"; stub_reset
+cycle_override_review="$(rd_review_marker | jq -c \
+  '.harness = "opencode" | .model = null | .model_reported = "stub-model"')"
+routes_baseline "$(marker_comment 9001 "$cycle_override_review" | jq -cs . | payload)"
+rd_routes
+CROSSREV_RESOLVE_PAYLOAD="$(printf '%s' "$RD_FIX_PAYLOAD" | payload)"; export CROSSREV_RESOLVE_PAYLOAD
+out="$("$CROSSREV" cycle --pr 42 --harness opencode 2>&1)"; rc=$?
+
+is    "a cycle --harness over a two-harness config completes" "$rc" "0"
+has   "having run the resolve leg"                            "$out" "Resolving acme/widget#42"
+hasnt "and the divergence guard does not fire"                "$out" "the same model answered each"
+
 # A harness that serves only one leg is still refused, and before the pass loop
 # rather than when that leg starts. No shipped harness is review-only now, so
 # the case needs a descriptor of its own: the real one with grok cut back.
@@ -731,6 +755,45 @@ is  "a cycle --harness naming a review-only harness is refused" "$rc" "1"
 has "naming the leg it cannot serve"                            "$out" "cannot serve the resolve leg"
 is  "no harness ran on the way out"                             "$(cat "$PROMPT_LOG")" ""
 is  "and nothing was posted"                                    "$(count 'method POST repos/acme/widget/pulls/42/comments')" "0"
+
+# The per-leg gate in run_leg_settings is the backstop for a bare
+# `crossrev resolve --harness` that cycle's pairing check never sees.
+fixture_repo; stub_reset
+routes_baseline "$(marker_comment 9001 "$(rd_review_marker)" | jq -cs . | payload)"
+route '*reviewThreads*' "$(threads_response "$(thread_node T_A app.ts 2 false "$RD_ID_A")")"
+out="$(CROSSREV_HARNESS_FILE="$review_only_desc" "$CROSSREV" resolve --pr 42 --harness grok 2>&1)"; rc=$?
+
+is  "a bare resolve --harness naming a review-only harness is refused" "$rc" "1"
+has "naming the leg it cannot serve"                                  "$out" "cannot serve the resolve leg"
+is  "no harness ran on that path either"                              "$(cat "$PROMPT_LOG")" ""
+is  "and stages no credential"                                        "$(count 'secret set')" "0"
+
+# The fallback iterates only harnesses that serve the leg. On a machine
+# where the configured resolver is absent and the only installed harness
+# is review-only, substituting it would stage a credential for a leg it
+# can never run.
+path_only_grok() {
+  local keep src
+  keep="$(mktemp -d)"
+  ln -s "$HERE/stub/grok" "$keep/grok"
+  ln -s "$HERE/stub/gh" "$keep/gh"
+  for src in jq yq; do
+    ln -s "$(command -v "$src")" "$keep/$src"
+  done
+  PATH="$keep:/usr/bin:/bin"
+  export PATH
+}
+
+fixture_repo; stub_reset
+routes_baseline "$(marker_comment 9001 "$(rd_review_marker)" | jq -cs . | payload)"
+route '*reviewThreads*' "$(threads_response "$(thread_node T_A app.ts 2 false "$RD_ID_A")")"
+path_only_grok
+out="$(CROSSREV_HARNESS_FILE="$review_only_desc" "$CROSSREV" resolve --pr 42 2>&1)"; rc=$?
+
+is  "the resolve fallback refuses when the only installed harness cannot serve the leg" "$rc" "1"
+has "and says no other resolve-capable harness is installed"                             "$out" "no other harness that can serve the resolve leg"
+is  "no harness ran on the fallback path either"                                         "$(cat "$PROMPT_LOG")" ""
+is  "and still stages no credential"                                                     "$(count 'secret set')" "0"
 
 rm -f "$review_only_desc"
 

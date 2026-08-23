@@ -2036,10 +2036,24 @@ Resolutions recorded; committing and replying now.$(state_marker_encode "$(jq -c
   # Layer two of the divergence guard: compare answering models, where both
   # harnesses report one. Absence is not a halt — that would disqualify the codex
   # adapter for a field Codex does not emit.
+  #
+  # --harness rewrites both of a cycle's legs, and this one of a bare resolve,
+  # after the config is read. run_leg_settings also clears model and endpoint,
+  # so a comparison that kept the config's models would still print "different"
+  # and halt after the resolve ran — the mid-cycle death this file elsewhere
+  # works to avoid. Passing the override on both sides with those fields empty
+  # is what the operator asked for, which is the same pairing the configured
+  # one-harness form has always been allowed to run.
   local configured
-  configured="$(legs_configured_difference \
-    "$(cfg_get '.reviewer.harness')"  "$(cfg_get '.reviewer.endpoint')"  "$(cfg_get '.reviewer.model')" \
-    "$(cfg_get '.resolver.harness')" "$(cfg_get '.resolver.endpoint')" "$(cfg_get '.resolver.model')")"
+  if [[ -n "$harness_override" ]]; then
+    configured="$(legs_configured_difference \
+      "$harness_override" "" "" \
+      "$harness_override" "" "")"
+  else
+    configured="$(legs_configured_difference \
+      "$(cfg_get '.reviewer.harness')"  "$(cfg_get '.reviewer.endpoint')"  "$(cfg_get '.reviewer.model')" \
+      "$(cfg_get '.resolver.harness')" "$(cfg_get '.resolver.endpoint')" "$(cfg_get '.resolver.model')")"
+  fi
   legs_assert_models_diverged "$configured" \
     "$(jq -r '.model_reported // "null"' <<<"$review_marker")" "${model_reported:-null}"
 

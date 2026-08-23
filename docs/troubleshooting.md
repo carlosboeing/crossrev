@@ -141,11 +141,11 @@ Each endpoint needs both a `base_url` and a `token_env`. The variable name is re
 
 ## A harness was refused for a leg
 
-`the harness 'opencode' cannot serve the review leg`
+`the harness '<name>' cannot serve the resolve leg`
 
 A harness may declare which legs it serves, and one that does not serve the leg you named is refused before anything is staged or billed. Each leg checks the descriptor before it runs, and a cycle checks both after the config loads, so a cycle stops without paying for a review it cannot follow with a resolve.
 
-It is a configuration fact rather than a transient failure, so re-running changes nothing. Name a harness that serves the leg.
+No shipped harness currently restricts its legs, so this refusal only appears for a harness whose descriptor carries a `legs` field that omits the one you named. It is a configuration fact rather than a transient failure, so re-running changes nothing. Name a harness that serves the leg.
 
 `--harness` on `cycle` lands on both legs, which is how an operator with a single harness installed runs the loop. It is refused only when that harness cannot serve one of them.
 

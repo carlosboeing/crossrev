@@ -184,7 +184,8 @@ hasnt "and carries no fail-closed base rule beside it" "$(probe opencode yes)" "
 has  "a reading opencode leg denies edit"          "$(probe opencode no)" "edit=deny"
 has  "under the fail-closed base rule"             "$(probe opencode no)" "*=deny"
 for _k in bash task skill webfetch websearch external_directory; do
-  has "with $_k denied in both shapes" "$(probe opencode yes) $(probe opencode no)" "$_k=deny"
+  has "with $_k denied in the write shape" "$(probe opencode yes)" "$_k=deny"
+  has "with $_k denied in the read shape"  "$(probe opencode no)"  "$_k=deny"
 done
 
 # agy's --print takes the prompt as its VALUE, so a mode flag written after it
