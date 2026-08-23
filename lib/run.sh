@@ -32,6 +32,14 @@ if ! declare -F log_event >/dev/null 2>&1; then
   [[ -f "$_run_lib/log.sh" ]] && source "$_run_lib/log.sh"
   unset _run_lib
 fi
+# Same fallback for the usage helpers: _run_details and run_invoke call them,
+# and a test sourcing run.sh alone still has to see them.
+if ! declare -F usage_with_total >/dev/null 2>&1; then
+  _run_lib="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  # shellcheck source=usage.sh
+  [[ -f "$_run_lib/usage.sh" ]] && source "$_run_lib/usage.sh"
+  unset _run_lib
+fi
 
 CROSSREV_INTERRUPTED=0
 CROSSREV_LOCK=""

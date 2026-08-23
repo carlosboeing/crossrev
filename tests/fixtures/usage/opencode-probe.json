@@ -1,0 +1,13 @@
+{
+  "info": {
+    "id": "ses_probe_2026-08-23",
+    "title": "probe",
+    "model": {"id": "x-preview-f-free"},
+    "tokens": {
+      "input": 31344,
+      "output": 289,
+      "reasoning": 73,
+      "cache": {"read": 31616, "write": 0}
+    }
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "modelUsage": {
+    "grok-4.6-build": {"modelCalls": 2}
+  },
+  "usage": {
+    "input_tokens": 31466,
+    "cache_read_input_tokens": 98816,
+    "cache_creation_input_tokens": 0,
+    "output_tokens": 341,
+    "reasoning_tokens": 290,
+    "total_tokens": 130623
+  },
+  "total_cost_usd": 0.01944562
+}
