@@ -59,6 +59,18 @@ is "API key beats the oauth token" "$(usage_billing_for claude vendor)" "api"
 is "named endpoint beats the API key" "$(usage_billing_for claude kimi)" "endpoint"
 unset ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN
 
+# opencode's stored credential is a {type, key} entry that can be either an
+# oauth grant or a provider API key, so its descriptor records `unknown` and
+# the leg makes no claim at all rather than the wrong one.
+is "an unknown credential form claims no billing" "$(usage_billing_for opencode vendor)" ""
+is "and a harness absent from the descriptor claims none either" \
+  "$(usage_billing_for not-a-harness vendor)" ""
+is "an endpoint still names itself on an unknown-billing harness" \
+  "$(usage_billing_for opencode kimi)" "endpoint"
+is "attach leaves billing null rather than guessing" \
+  "$(usage_attach '{"input_fresh":1,"output":1,"total":2,"cost_usd":null}' opencode vendor unlisted-model | jq -r '.billing')" \
+  "null"
+
 # Attach: endpoint discards a harness cost.
 harnessed='{"input_fresh":8,"cache_read":0,"cache_write_5m":0,"cache_write_1h":0,"cache_write_unsplit":0,"output":1,"reasoning":0,"total":9,"cost_usd":0.4041205,"cost_source":"harness","price_table":null}'
 cleared="$(usage_attach "$harnessed" claude kimi claude-opus-5)"
@@ -125,10 +137,14 @@ is "codex writes are unsplit" "$(jq -r .cache_write_unsplit <<<"$u")" "0"
 unset CODEX_HOME
 is "rollout miss is a null model" "$(usage_read_codex_rollout | jq -c .)" '{"model":null,"effort":null}'
 
-# Rollout hit
+# Rollout hit. The fixture carries the envelope a real rollout writes —
+# {timestamp, type, payload} with the fields inside payload — so a reader that
+# looks for a top-level `model` finds nothing and the assertions below fail.
 CODEX_HOME="$(mktemp -d)"
 mkdir -p "$CODEX_HOME/sessions/2026/08/23"
 cp "$ROOT/tests/fixtures/usage/codex-rollout.jsonl" "$CODEX_HOME/sessions/2026/08/23/rollout.jsonl"
+is "the fixture keeps the model inside the envelope, not at the top level" \
+  "$(jq -sr '[ .[] | select(has("model")) ] | length' "$CODEX_HOME/sessions/2026/08/23/rollout.jsonl")" "0"
 got="$(usage_read_codex_rollout)"
 is "rollout model is gpt-5.6-terra" "$(jq -r .model <<<"$got")" "gpt-5.6-terra"
 is "rollout effort is medium" "$(jq -r .effort <<<"$got")" "medium"

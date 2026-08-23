@@ -145,6 +145,10 @@ test_validation_reject "rejects invalid env var name" "$bad" "is not [A-Z_][A-Z0
 bad="$(jq '.harnesses[0].credential.archetype = "Z"' <<<"$valid_json")"
 test_validation_reject "rejects out-of-range archetype" "$bad" "out-of-range"
 
+# 8b. a credential billing outside the three it may name
+bad="$(jq '.harnesses[0].credential.billing = "free"' <<<"$valid_json")"
+test_validation_reject "rejects out-of-range credential billing" "$bad" "not subscription, api or unknown"
+
 # 9. path absolute or containing ..
 bad="$(jq '.harnesses[0].quarantine += ["../etc/passwd"]' <<<"$valid_json")"
 test_validation_reject "rejects path with .." "$bad" "contains a .. segment"

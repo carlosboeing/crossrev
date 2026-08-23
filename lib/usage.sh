@@ -238,6 +238,13 @@ usage_parse_opencode_export() {
 # CODEX_HOME rather than assuming ~/.codex, treat any failure as a miss, and
 # never fail a leg on rollout trouble — the payload has been read by the time
 # this runs, so the answer exists even when the telemetry does not.
+#
+# A rollout line is an envelope — {timestamp, type, payload} — and the fields
+# live inside `payload`, on the `turn_context` record. Reading the envelope's
+# own keys finds nothing on a real rollout, so `.payload // .` unwraps first
+# and falls through for any line that carries no envelope. Effort is spelled
+# `effort` there; `reasoning_effort` is read too, because that is the name the
+# same value carries elsewhere in Codex's own output.
 usage_read_codex_rollout() {
   local miss='{"model":null,"effort":null}'
   local home="${CODEX_HOME:-}"
@@ -246,13 +253,20 @@ usage_read_codex_rollout() {
   f="$(find "$home/sessions" -type f 2>/dev/null | sort | tail -n 1)"
   [[ -n "$f" ]] || { printf '%s' "$miss"; return 0; }
   local model effort
-  model="$(jq -sr '[ .[]? | objects | select(has("model")) | .model ]
+  model="$(jq -sr '[ .[]? | objects | (.payload // .) | objects
+                    | .model? | select(type == "string") ]
                    | first // empty' "$f" 2>/dev/null)" || model=""
-  effort="$(jq -sr '[ .[]? | objects | select(has("reasoning_effort")) | .reasoning_effort ]
+  effort="$(jq -sr '[ .[]? | objects | (.payload // .) | objects
+                     | (.effort? // .reasoning_effort?) | select(type == "string") ]
                     | first // empty' "$f" 2>/dev/null)" || effort=""
   jq -cn --arg m "$model" --arg e "$effort" \
     '{model: (if $m == "" then null else $m end),
       effort: (if $e == "" then null else $e end)}'
+}
+
+_usage_harness_file() {
+  local root="${ROOT:-$_USAGE_LIB_ROOT}"
+  printf '%s' "${CROSSREV_HARNESS_FILE:-$root/lib/harnesses.json}"
 }
 
 # Which harnesses keep a vendor API key alive is recorded per harness in the
@@ -260,9 +274,8 @@ usage_read_codex_rollout() {
 # of the descriptor and the endpoint name, which is what keeps this file from
 # hardcoding a harness.
 _usage_keeps_api_key() {
-  local harness="$1" root hf
-  root="${ROOT:-$_USAGE_LIB_ROOT}"
-  hf="${CROSSREV_HARNESS_FILE:-$root/lib/harnesses.json}"
+  local harness="$1" hf
+  hf="$(_usage_harness_file)"
   [[ -f "$hf" ]] || return 1
   jq -e --arg h "$harness" --arg k "ANTHROPIC_API_KEY" '
     any(.harnesses[];
@@ -270,11 +283,32 @@ _usage_keeps_api_key() {
     "$hf" >/dev/null 2>&1
 }
 
+# What the harness's own credential bills as, recorded in its descriptor. Only
+# subscription and api are claims; unknown and a missing field both print
+# nothing, which is what a credential whose form CrossRev cannot tell apart
+# deserves.
+_usage_credential_billing() {
+  local harness="$1" hf
+  hf="$(_usage_harness_file)"
+  [[ -f "$hf" ]] || return 0
+  jq -r --arg h "$harness" '
+    [ (.harnesses // [])[] | select(.name == $h) | .credential.billing? ]
+    | first // ""
+    | if . == "subscription" or . == "api" then . else "" end' \
+    "$hf" 2>/dev/null
+}
+
 # Billing mode is derived from what the orchestrator already holds, never
 # detected. A named endpoint wins first because it changes what a cost means;
 # a descriptor that keeps the vendor API key wins over an oauth token because
 # env_keep lets both survive into one run and the key is what the run was
 # charged to.
+#
+# Everything else comes from the credential descriptor rather than from a
+# subscription default. A harness whose stored credential can be either an
+# oauth grant or a provider API key — opencode's `{type, key}` entry is one —
+# records `unknown` and gets no billing claim at all, because naming the wrong
+# one is worse than naming none.
 usage_billing_for() {
   local harness="$1" endpoint="$2"
   if [[ -n "$endpoint" && "$endpoint" != "null" && "$endpoint" != "vendor" ]]; then
@@ -283,7 +317,9 @@ usage_billing_for() {
   if _usage_keeps_api_key "$harness" && [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
     printf 'api'; return 0
   fi
-  printf 'subscription'
+  # `|| true` because this is the tail call and the caller runs under set -e:
+  # an unreadable descriptor is a missing billing claim, never a dead leg.
+  _usage_credential_billing "$harness" || true
 }
 
 # The listed key for a reported model id: lowercased, any [...] suffix
@@ -382,10 +418,12 @@ usage_attach() {
   isnum="$(jq -r '.cost_usd | if type == "number" then "y" else "n" end' <<<"$u")"
   if [[ "$isnum" == "y" ]]; then
     jq -c --arg b "$billing" \
-      '.billing = $b | .cost_source = "harness" | .price_table = null' <<<"$u"
+      '.billing = (if $b == "" then null else $b end)
+       | .cost_source = "harness" | .price_table = null' <<<"$u"
     return 0
   fi
-  usage_price "$u" "$model" | jq -c --arg b "$billing" '.billing = $b'
+  usage_price "$u" "$model" \
+    | jq -c --arg b "$billing" '.billing = (if $b == "" then null else $b end)'
 }
 
 # Called inside run_invoke after the adapter returns and before cred_discard:
