@@ -233,6 +233,25 @@ usage_parse_opencode_export() {
   printf '%s' "${rec:-null}"
 }
 
+# The session this invocation ran, read from its own event stream. Codex names
+# the session in an event of its own before the first turn, and the rollout it
+# writes carries the same identifier — in `session_meta` and in the rollout's
+# filename. That identifier is the only thing tying a file under `sessions/` to
+# the process that wrote it.
+#
+# Both spellings are read, at any depth. Codex has renamed the field once
+# already — `session_configured.session_id` became `thread.started.thread_id` —
+# and a rename this function does not know about costs a dash in the model
+# column, never a wrong model name. That is the direction a miss should fail in.
+usage_codex_session_id() {
+  local f="${1:-}"
+  [[ -n "$f" && -s "$f" ]] || return 0
+  jq -sr '[ .[]? | objects | .. | objects
+            | (.thread_id? // .session_id? // empty)
+            | select(type == "string") ]
+          | first // empty' "$f" 2>/dev/null
+}
+
 # Codex's event stream names neither model nor effort; its session rollout
 # carries both. Two rules keep reading it safe: treat any failure as a miss,
 # and never fail a leg on rollout trouble — the payload has been read by the
@@ -245,6 +264,21 @@ usage_parse_opencode_export() {
 # which is automated mode alone, so every local run missed a rollout that was
 # on disk the whole time. The adapter now passes the fallback.
 #
+# The session id is required, and the rollout has to carry it. `~/.codex/sessions`
+# is one directory shared by every Codex process on the machine, so the newest
+# file in it belongs to whichever session wrote last — which, with a second
+# Codex running alongside the leg, is not this one. Reading that file names
+# another process's model, prices the leg at its rates, and fires the
+# substitution warning on a run that never substituted anything. An
+# uncorrelated rollout is therefore a miss, in line with the rule the billing
+# derivation already follows: naming the wrong one is worse than naming none.
+#
+# Two ways to match, because one of them is free. A Codex rollout filename
+# embeds the session id, so the common case never opens a file; where the name
+# does not carry it, `session_meta` is read instead, and that read is capped so
+# a sessions directory holding thousands of rollouts cannot turn a miss into a
+# long scan.
+#
 # A rollout line is an envelope — {timestamp, type, payload} — and the fields
 # live inside `payload`, on the `turn_context` record. Reading the envelope's
 # own keys finds nothing on a real rollout, so `.payload // .` unwraps first
@@ -254,9 +288,20 @@ usage_parse_opencode_export() {
 usage_read_codex_rollout() {
   local miss='{"model":null,"effort":null}'
   local home="${1:-${CODEX_HOME:-}}"
+  local sid="${2:-}"
   [[ -n "$home" && -d "$home/sessions" ]] || { printf '%s' "$miss"; return 0; }
-  local f
-  f="$(find "$home/sessions" -type f 2>/dev/null | sort | tail -n 1)"
+  [[ -n "$sid" ]] || { printf '%s' "$miss"; return 0; }
+  local f="" cand rid opened=0
+  while IFS= read -r cand; do
+    [[ -n "$cand" ]] || continue
+    case "${cand##*/}" in *"$sid"*) f="$cand"; break ;; esac
+    (( opened >= 25 )) && continue
+    opened=$(( opened + 1 ))
+    rid="$(jq -sr '[ .[]? | objects | (.payload // .) | objects
+                    | .id? | select(type == "string") ]
+                   | first // empty' "$cand" 2>/dev/null)" || rid=""
+    [[ "$rid" == "$sid" ]] && { f="$cand"; break; }
+  done < <(find "$home/sessions" -type f 2>/dev/null | sort -r)
   [[ -n "$f" ]] || { printf '%s' "$miss"; return 0; }
   local model effort
   model="$(jq -sr '[ .[]? | objects | (.payload // .) | objects

@@ -6,8 +6,9 @@
 #
 # The event stream reports no model. `codex exec --json` carries token counts
 # on turn.completed and nothing identifying the model, so model_reported comes
-# from the newest session rollout when one can be read, and stays null when it
-# cannot — a miss never fails a leg whose answer already exists. Halting
+# from the rollout this session wrote — matched by the session id the events
+# carry, never by whichever file is newest — and stays null when no rollout
+# matches. A miss never fails a leg whose answer already exists. Halting
 # whenever the model is unreported would be the stricter rule and it is the
 # wrong one — it would disqualify this adapter on the evidence that Codex does
 # not emit the field. Layer one of the divergence guard already catches the
@@ -116,22 +117,28 @@ adapter_codex() {
   # to report on. The parser keeps that rule and turns the rest into buckets:
   # fresh input is the subtraction, writes land unsplit, and no vendor total is
   # read.
-  local payload usage tokens got model_reported effort_reported
+  local payload usage tokens got sid model_reported effort_reported
   payload="$(jq -c . "$out_file" 2>/dev/null || echo null)"
   usage="$(usage_parse_codex_events "$events")"
   [[ -n "$usage" ]] || usage=null
   tokens="$(jq -r '.total // "null"' <<<"$usage")"
 
-  # The event stream names neither model nor effort; the newest session rollout
+  # The event stream names neither model nor effort; this session's rollout
   # carries both. Any failure here is a miss — null and null — never a failed
   # leg: the payload has already been read by the time this runs.
+  #
+  # The rollout is chosen by the session id this run's own events carry, not by
+  # being the newest file on disk. A local machine can have a second Codex
+  # running beside the leg, and both write into the same sessions directory, so
+  # "newest" is a claim about the machine rather than about this invocation.
   #
   # CODEX_HOME wins when it is set and ~/.codex is the fallback, which is what
   # the CLI itself does. The fallback is not a convenience: cred_prepare exports
   # CODEX_HOME only when a staging secret is present, so a local run never has
   # it and would otherwise report no model on every leg.
   model_reported=""; effort_reported=""
-  got="$(usage_read_codex_rollout "${CODEX_HOME:-$HOME/.codex}")" || got='{"model":null,"effort":null}'
+  sid="$(usage_codex_session_id "$events")" || sid=""
+  got="$(usage_read_codex_rollout "${CODEX_HOME:-$HOME/.codex}" "$sid")" || got='{"model":null,"effort":null}'
   [[ -n "$got" ]] && {
     model_reported="$(jq -r '.model // empty' <<<"$got")"
     effort_reported="$(jq -r '.effort // empty' <<<"$got")"

@@ -146,33 +146,69 @@ is "codex total is 57773" "$(jq -r .total <<<"$u")" "57773"
 is "codex reasoning is stored" "$(jq -r .reasoning <<<"$u")" "101"
 is "codex writes are unsplit" "$(jq -r .cache_write_unsplit <<<"$u")" "0"
 
+# The session id comes out of the leg's own event stream, under either of the
+# two names Codex has given it. The rollout is then chosen by that id, so the
+# stream is what ties a file on disk to this invocation.
+_usage_sid="0199cf3a-4d21-7c05-9b1e-2f6c8a41d0e7"
+is "the session id is read from thread.started" \
+  "$(usage_codex_session_id "$ROOT/tests/fixtures/usage/codex-events.ndjson")" "$_usage_sid"
+is "and from the older session_configured spelling, nested under msg" \
+  "$(usage_codex_session_id "$ROOT/tests/fixtures/usage/codex-events-legacy.ndjson")" "$_usage_sid"
+is "a stream naming no session yields no id" \
+  "$(usage_codex_session_id "$ROOT/tests/fixtures/usage/codex-probe.ndjson")" ""
+is "and a missing stream yields no id" "$(usage_codex_session_id "$ROOT/nope.ndjson")" ""
+
 # Rollout miss: nothing passed and no CODEX_HOME to fall back to.
 unset CODEX_HOME
-is "rollout miss is a null model" "$(usage_read_codex_rollout | jq -c .)" '{"model":null,"effort":null}'
+is "rollout miss is a null model" \
+  "$(usage_read_codex_rollout "" "$_usage_sid" | jq -c .)" '{"model":null,"effort":null}'
 
 # An argued home wins, and it is how the adapter passes its own fallback. The
 # adapter reaches ~/.codex on a local run, where CODEX_HOME is never exported.
+# The rollout's filename here does not carry the session id, so this is the
+# session_meta path rather than the free filename match.
 _usage_argued="$(mktemp -d)"
 mkdir -p "$_usage_argued/sessions/2026/08/23"
 cp "$ROOT/tests/fixtures/usage/codex-rollout.jsonl" "$_usage_argued/sessions/2026/08/23/rollout.jsonl"
-got="$(usage_read_codex_rollout "$_usage_argued")"
+got="$(usage_read_codex_rollout "$_usage_argued" "$_usage_sid")"
 is "an argued home is searched with no CODEX_HOME set" "$(jq -r .model <<<"$got")" "gpt-5.6-terra"
 is "a missing argued home is a miss, not a failure" \
-  "$(usage_read_codex_rollout "$_usage_argued/nope" | jq -c .)" '{"model":null,"effort":null}'
+  "$(usage_read_codex_rollout "$_usage_argued/nope" "$_usage_sid" | jq -c .)" '{"model":null,"effort":null}'
+
+# The defect this correlation exists to stop: a second Codex process writing a
+# newer rollout into the same shared sessions directory. Sorting by name would
+# take gpt-other from the newer file; matching on the session id takes this
+# leg's own model out of the older one.
+cat >"$_usage_argued/sessions/2026/08/23/zz-newer.jsonl" <<'EOF'
+{"timestamp":"2026-08-23T11:00:00.000Z","type":"session_meta","payload":{"id":"aaaaaaaa-0000-0000-0000-000000000000","cwd":"/tmp/other"}}
+{"timestamp":"2026-08-23T11:00:00.100Z","type":"turn_context","payload":{"cwd":"/tmp/other","model":"gpt-other","effort":"high"}}
+EOF
+got="$(usage_read_codex_rollout "$_usage_argued" "$_usage_sid")"
+is "a newer rollout from another session does not win" "$(jq -r .model <<<"$got")" "gpt-5.6-terra"
+is "and its effort is not borrowed either" "$(jq -r .effort <<<"$got")" "medium"
+is "a session id matching no rollout is a miss, not the newest file" \
+  "$(usage_read_codex_rollout "$_usage_argued" "no-such-session" | jq -c .)" \
+  '{"model":null,"effort":null}'
+is "and no session id at all is a miss, whatever is on disk" \
+  "$(usage_read_codex_rollout "$_usage_argued" "" | jq -c .)" '{"model":null,"effort":null}'
 rm -rf "$_usage_argued"; unset _usage_argued
 
 # Rollout hit. The fixture carries the envelope a real rollout writes —
 # {timestamp, type, payload} with the fields inside payload — so a reader that
 # looks for a top-level `model` finds nothing and the assertions below fail.
+# The filename embeds the session id here, the way a real rollout names itself,
+# which is the match that costs no file read.
 CODEX_HOME="$(mktemp -d)"
 mkdir -p "$CODEX_HOME/sessions/2026/08/23"
-cp "$ROOT/tests/fixtures/usage/codex-rollout.jsonl" "$CODEX_HOME/sessions/2026/08/23/rollout.jsonl"
+cp "$ROOT/tests/fixtures/usage/codex-rollout.jsonl" \
+   "$CODEX_HOME/sessions/2026/08/23/rollout-2026-08-23T10-00-00-$_usage_sid.jsonl"
 is "the fixture keeps the model inside the envelope, not at the top level" \
-  "$(jq -sr '[ .[] | select(has("model")) ] | length' "$CODEX_HOME/sessions/2026/08/23/rollout.jsonl")" "0"
-got="$(usage_read_codex_rollout)"
+  "$(jq -sr '[ .[] | select(has("model")) ] | length' \
+     "$CODEX_HOME/sessions/2026/08/23/rollout-2026-08-23T10-00-00-$_usage_sid.jsonl")" "0"
+got="$(usage_read_codex_rollout "" "$_usage_sid")"
 is "rollout model is gpt-5.6-terra" "$(jq -r .model <<<"$got")" "gpt-5.6-terra"
 is "rollout effort is medium" "$(jq -r .effort <<<"$got")" "medium"
-rm -rf "$CODEX_HOME"; unset CODEX_HOME
+rm -rf "$CODEX_HOME"; unset CODEX_HOME _usage_sid
 
 # --- Grok, agy, opencode: summing beats every vendor total ---
 
