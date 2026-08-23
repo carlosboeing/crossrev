@@ -693,26 +693,46 @@ legs_harness_error "$empty" >/dev/null 2>&1 \
 
 rm -f "$cxerr" "$quiet" "$empty"
 
-# --- a cycle cannot take --harness -------------------------------------------
+# --- a cycle may take --harness ----------------------------------------------
 #
 # --harness on cycle is forwarded into both legs, so the override puts one
-# harness on both sides of the loop. That is not a pairing CrossRev can serve:
-# the loop alternates two lineages so one can catch what the other misses, and
-# one harness reviewing its own fixes removes exactly that. The refusal happens
-# in run_assert_cycle_pairing, before any leg can be billed, and names that
-# reason — not the leg gate, which has nothing left to refuse here.
+# harness on both sides of the loop. That is a pairing CrossRev serves rather
+# than refuses, and refusing it would contradict the tool twice over: the same
+# pairing named through reviewer.harness and resolver.harness has always run,
+# because legs_assert_models_diverged returns early when one model was asked
+# for; and run_leg_settings already puts both legs on one harness by itself
+# when only one is installed. An operator with a single harness has no other
+# pairing available.
+#
+# So the override is checked for the one thing the configured names are checked
+# for: whether that harness serves the leg.
 fixture_repo; stub_reset
 routes_baseline "$(printf '[]' | payload)"
 route '*reviewThreads*' "$(threads_response)"
 out="$("$CROSSREV" cycle --pr 42 --harness opencode 2>&1)"; rc=$?
 
-is  "a cycle --harness override is refused before any leg" "$rc" "1"
-has "naming the override that would cause it"              "$out" "--harness opencode"
-has "and naming the harness it puts on both legs"          "$out" "both legs"
-hasnt "not the leg-gate reason, which no longer applies"   "$out" "cannot serve the resolve leg"
-hasnt "and the cycle never announced it had started"       "$out" "Cycling"
-is  "no harness ran on the way out"                        "$(cat "$PROMPT_LOG")" ""
-is  "and nothing was posted"                               "$(count 'method POST repos/acme/widget/pulls/42/comments')" "0"
+has   "a cycle --harness naming a both-legs harness starts" "$out" "Reviewing acme/widget#42"
+has   "with the override on the leg it named"                 "$out" "Reviewer: opencode"
+hasnt "and nothing refuses it for using one harness twice"    "$out" "both legs"
+
+# A harness that serves only one leg is still refused, and before the pass loop
+# rather than when that leg starts. No shipped harness is review-only now, so
+# the case needs a descriptor of its own: the real one with grok cut back.
+review_only_desc="$(mktemp)"
+jq '(.harnesses[] | select(.name == "grok")).legs = ["review"]' \
+  "$HERE/../lib/harnesses.json" >"$review_only_desc"
+
+fixture_repo; stub_reset
+routes_baseline "$(printf '[]' | payload)"
+route '*reviewThreads*' "$(threads_response)"
+out="$(CROSSREV_HARNESS_FILE="$review_only_desc" "$CROSSREV" cycle --pr 42 --harness grok 2>&1)"; rc=$?
+
+is  "a cycle --harness naming a review-only harness is refused" "$rc" "1"
+has "naming the leg it cannot serve"                            "$out" "cannot serve the resolve leg"
+is  "no harness ran on the way out"                             "$(cat "$PROMPT_LOG")" ""
+is  "and nothing was posted"                                    "$(count 'method POST repos/acme/widget/pulls/42/comments')" "0"
+
+rm -f "$review_only_desc"
 
 # The single-harness fallback now reaches opencode too. With the descriptor
 # naming both legs, a machine where only opencode is installed substitutes it
