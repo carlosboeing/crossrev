@@ -269,5 +269,26 @@ grep -q 'openssl base64 -d' "$HERE/../lib/credentials.sh" \
   || notok "and the leg-path decode is what requires it" \
            "an openssl decode in credentials.sh" "not found"
 
+# --- an archetype-A credential stages without an expiry to read -------------
+#
+# opencode's auth.json holds {type, key} entries with no JWT inside, so there
+# is no exp claim to reason about and the descriptor says so: assert_fresh is
+# false. Staging one must not be a freshness question. Its staging path also
+# carries a directory — opencode/auth.json, not a bare auth.json — so the
+# staging write has to create that directory rather than assume it.
+save_data="${XDG_DATA_HOME:-}"; unset XDG_DATA_HOME
+unset CODEX_HOME
+CROSSREV_OPENCODE_AUTH="$(jq -cn '.opencode = {type:"api", key:"stub"}')"; export CROSSREV_OPENCODE_AUTH
+cred_prepare opencode; rc=$?
+is "staging an archetype-A credential does not demand an expiry" "$rc" "0"
+staged="${XDG_DATA_HOME:-}"
+is  "and lands under the env var the descriptor names, inside its directory" \
+    "$(jq -r '.opencode.key' "$staged/opencode/auth.json" 2>/dev/null)" "stub"
+is  "readable by nobody else" \
+    "$(stat -c '%a' "$staged/opencode/auth.json" 2>/dev/null || stat -f '%Lp' "$staged/opencode/auth.json")" "600"
+rm -rf "$CRED_SCRATCH"; CRED_SCRATCH=""
+unset CROSSREV_OPENCODE_AUTH XDG_DATA_HOME
+[[ -n "$save_data" ]] && export XDG_DATA_HOME="$save_data" || true
+
 printf '\n  %d passed, %d failed\n' "$pass" "$fail"
 (( fail == 0 ))

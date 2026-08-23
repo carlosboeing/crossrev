@@ -24,7 +24,7 @@ harness_load
 is "the shipped descriptor loads cleanly" "$?" 0
 
 names="$(harness_names | paste -sd, -)"
-is "harness_names prints claude,codex,agy,grok in order" "$names" "claude,codex,agy,grok"
+is "harness_names prints claude,codex,agy,grok,opencode in order" "$names" "claude,codex,agy,grok,opencode"
 
 is "harness_get codex secret" "$(harness_get codex .credential.secret)" "CROSSREV_CODEX_AUTH"
 is "harness_get agy secret is empty" "$(harness_get agy .credential.secret)" ""
@@ -44,6 +44,32 @@ is "harness_get_json grok quarantine is .grok" "$(harness_get_json grok .quarant
 hasnt "quarantine_shared no longer lists .grok" "$(harness_field .quarantine_shared)" ".grok"
 
 is "harness_field endpoint_host is claude" "$(harness_field .endpoint_host)" "claude"
+
+# --- the fifth harness: opencode, review-only and not schema-native ---------
+#
+# Everything asserted here is a measurement recorded in the descriptor rather
+# than an opinion about the CLI. schema_native false is what arms the extra
+# shape-retry in run_invoke; legs is what keeps it off the resolve leg.
+reason="$(harness_not_driven opencode)"
+is "opencode has left not_driven" "$?" "1"
+
+is "harness_get opencode product_name stays lowercase" "$(harness_get opencode .product_name)" "opencode"
+is "harness_get opencode schema_style is prompt" "$(harness_get opencode .schema_style)" "prompt"
+is "harness_get opencode schema_native is false" "$(harness_get_json opencode .schema_native)" "false"
+is "harness_get_json missing key stays null" "$(harness_get_json opencode .no_such_key)" "null"
+is "harness_get_json unknown harness stays null" "$(harness_get_json nosuch .schema_native)" "null"
+is "harness_get opencode serves the review leg only" "$(harness_get_json opencode .legs)" '["review"]'
+is "harness_get opencode secret" "$(harness_get opencode .credential.secret)" "CROSSREV_OPENCODE_AUTH"
+is "harness_get opencode archetype is A" "$(harness_get opencode .credential.archetype)" "A"
+is "harness_get opencode provenance is measured" "$(harness_get opencode .credential.provenance)" "measured"
+is "harness_get opencode stages under XDG_DATA_HOME" "$(harness_get opencode .credential.staging.env)" "XDG_DATA_HOME"
+is "harness_get opencode staging path carries a directory" \
+  "$(harness_get opencode .credential.staging.path)" "opencode/auth.json"
+is "harness_get opencode asserts no freshness it cannot read" \
+  "$(harness_get_json opencode .credential.assert_fresh)" "false"
+
+# The quarantine list rides on every harness through _sandbox_paths.
+has "opencode quarantines its own config paths" "$(harness_get_json opencode .quarantine)" '"opencode.json"'
 
 reason="$(harness_not_driven kimi)"
 is "harness_not_driven kimi exits 0" "$?" 0
@@ -126,5 +152,18 @@ test_validation_reject "rejects path with .." "$bad" "contains a .. segment"
 # 10. installer whose command omits the version it claims to pin
 bad="$(jq '.harnesses[0].install.pinned_version = "9.9.9"' <<<"$valid_json")"
 test_validation_reject "rejects installer command omitting pinned version" "$bad" "pinned version its command does not carry"
+
+# 11. a legs array naming something that is not a leg
+bad="$(jq '.harnesses[0].legs = ["review", "deploy"]' <<<"$valid_json")"
+test_validation_reject "rejects a legs element outside review and resolve" "$bad" "drawn from review and resolve"
+
+# 12. a legs array that is present but empty — absent means both, empty means
+# nothing, and those are different facts
+bad="$(jq '.harnesses[0].legs = []' <<<"$valid_json")"
+test_validation_reject "rejects an empty legs array" "$bad" "drawn from review and resolve"
+
+# 13. legs given as a bare string rather than an array
+bad="$(jq '.harnesses[0].legs = "review"' <<<"$valid_json")"
+test_validation_reject "rejects legs as a string" "$bad" "non-empty array drawn from review and resolve"
 
 finish

@@ -13,11 +13,6 @@
       "name": "kimi",
       "reason": "reached through the claude adapter as a named endpoint, so there is no adapter_kimi behind the name",
       "archetype": "B", "provenance": "inferred", "access_token_seconds": 900
-    },
-    {
-      "name": "opencode",
-      "reason": "exposes no schema flag, so it needs the fenced-JSON fallback working first",
-      "archetype": null, "provenance": null, "access_token_seconds": null
     }
   ],
   "harnesses": [
@@ -144,6 +139,39 @@
         "seed_command": "grok login",
         "seed_hint": "seed once from a machine with a browser: `grok login`, then `gh secret set CROSSREV_GROK_AUTH < ~/.grok/auth.json`",
         "staging": { "kind": "file", "env": "GROK_HOME", "path": "auth.json" },
+        "access_token_jq": null,
+        "assert_fresh": false,
+        "refresher": false
+      }
+    },
+    {
+      "name": "opencode",
+      "binary": "opencode",
+      "product_name": "opencode",
+      "install": {
+        "kind": "npm",
+        "url": "https://opencode.ai",
+        "command": "npm install -g opencode-ai@1.18.21",
+        "pinned_version": "1.18.21",
+        "needs_credential": false,
+        "hint": "https://opencode.ai"
+      },
+      "schema_style": "prompt",
+      "schema_native": false,
+      "legs": ["review"],
+      "sandbox_args": [],
+      "quarantine": [".opencode", "opencode.json", "opencode.jsonc"],
+      "credential": {
+        "archetype": "A",
+        "provenance": "measured",
+        "access_token_seconds": null,
+        "store": "`~/.local/share/opencode/auth.json`, or `$XDG_DATA_HOME/opencode/auth.json`",
+        "secret": "CROSSREV_OPENCODE_AUTH",
+        "env_names": ["CROSSREV_OPENCODE_AUTH"],
+        "env_keep": [],
+        "seed_command": "opencode auth login",
+        "seed_hint": "seed once from a machine with a browser: `opencode auth login`, then `gh secret set CROSSREV_OPENCODE_AUTH < ~/.local/share/opencode/auth.json`",
+        "staging": { "kind": "file", "env": "XDG_DATA_HOME", "path": "opencode/auth.json" },
         "access_token_jq": null,
         "assert_fresh": false,
         "refresher": false

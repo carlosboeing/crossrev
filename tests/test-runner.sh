@@ -97,6 +97,15 @@ is  "kimi by subscription on a hosted runner refuses" "$rc" "1"
 has "and names the missing adapter"                   "$err" "no adapter for 'kimi'"
 has "and points at the endpoint route"                "$err" "reached through the claude adapter"
 
+# A review-only harness as resolver is a pairing no runner can serve, even
+# though the credential itself would be fine (archetype A). Caught here, that
+# is a config error before anything is installed.
+fixture_repo "$(config_for github-hosted claude opencode)"; stub_reset
+routes_init
+err="$("$CROSSREV" init --dry-run 2>&1 >/dev/null)"; rc=$?
+is  "opencode as resolver is refused at init"          "$rc" "1"
+has "and the reason is the descriptor's leg limit"     "$err" "limited to the review"
+
 # The same harness reached through an endpoint is a static token in a secret,
 # which never rotates and so never cares what runner it is on. Refusing that too
 # would be refusing the one route that actually works.
@@ -314,6 +323,6 @@ routes_baseline "$(printf '[]' | payload)"
 route "*reviewThreads*" "$(threads_response)"
 out="$("$CROSSREV" review --pr 42 --harness nosuch 2>&1)" || true
 has "unknown harness dies naming the ones that exist" "$out" "there is no adapter for the harness 'nosuch'"
-has "and lists the valid harnesses" "$out" "claude, codex, agy and grok"
+has "and lists the valid harnesses" "$out" "claude, codex, agy, grok and opencode"
 
 finish

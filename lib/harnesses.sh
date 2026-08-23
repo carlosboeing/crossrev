@@ -21,8 +21,8 @@ _harness_file() {
   printf '%s' "${CROSSREV_HARNESS_FILE:-$root/lib/harnesses.json}"
 }
 
-# Ten checks in one pass: the design's six, plus a version guard, an array-shape
-# guard, a duplicate-name guard and a not-driven-name guard.
+# Eleven checks in one pass: the design's six, plus a version guard, an array-shape
+# guard, a duplicate-name guard, a not-driven-name guard and a legs guard.
 # Prints the first problem, or nothing.
 harness_validate() {
   jq -r '
@@ -54,10 +54,16 @@ harness_validate() {
       elif ([ $h[]
               | select((.credential.archetype | IN("A","B","C") | not)
                     or (.credential.provenance | IN("measured","inferred","vendor-documented") | not)
-                    or (.schema_style | IN("inline","path") | not)
+                    or (.schema_style | IN("inline","path","prompt") | not)
                     or (.install.kind | IN("script","npm") | not)
                     or (.credential.staging.kind | IN("none","file","home","env") | not)) ] | length) > 0
-        then bad("harness \([ $h[] | select((.credential.archetype | IN("A","B","C") | not) or (.credential.provenance | IN("measured","inferred","vendor-documented") | not) or (.schema_style | IN("inline","path") | not) or (.install.kind | IN("script","npm") | not) or (.credential.staging.kind | IN("none","file","home","env") | not)) | .name ][0]) carries an out-of-range archetype, provenance, schema_style, install kind or staging kind")
+        then bad("harness \([ $h[] | select((.credential.archetype | IN("A","B","C") | not) or (.credential.provenance | IN("measured","inferred","vendor-documented") | not) or (.schema_style | IN("inline","path","prompt") | not) or (.install.kind | IN("script","npm") | not) or (.credential.staging.kind | IN("none","file","home","env") | not)) | .name ][0]) carries an out-of-range archetype, provenance, schema_style, install kind or staging kind")
+      elif ([ $h[]
+              | select(has("legs"))
+              | select((.legs | type) != "array"
+                       or (.legs | length) == 0
+                       or ([ .legs[] | select(IN("review","resolve")) ] | length) != (.legs | length)) ] | length) > 0
+        then bad("harness \([ $h[] | select(has("legs")) | select((.legs | type) != "array" or (.legs | length) == 0 or ([ .legs[] | select(IN("review","resolve")) ] | length) != (.legs | length)) | .name ][0]) carries a legs field that is not a non-empty array drawn from review and resolve")
       elif ([ $h[] | .quarantine[]?, .credential.staging.path? | select(. != null) | select(relative(.) | not) ]
              + [ (.quarantine_shared // [])[] | select(relative(.) | not) ] | length) > 0
         then bad("quarantine or destination path \(([ $h[] | .quarantine[]?, .credential.staging.path? | select(. != null) | select(relative(.) | not) ] + [ (.quarantine_shared // [])[] | select(relative(.) | not) ])[0] | tojson) is absolute, empty, or contains a .. segment")
@@ -119,7 +125,13 @@ harness_names() {
 }
 
 harness_get()      { harness_load; jq -r --arg n "$1" ".harnesses[] | select(.name == \$n) | $2 // empty" <<<"$HARNESS_JSON"; }
-harness_get_json() { harness_load; jq -c --arg n "$1" "(.harnesses[] | select(.name == \$n) | $2) // null" <<<"$HARNESS_JSON"; }
+# The JSON sibling exists because `// empty` and `// null` cannot return a
+# boolean: jq reads false as falsy, so schema_native: false was invisible to
+# both until the first non-schema-native harness arrived. Wrapping the
+# lookup in an array and taking `first` is what keeps that false: an empty
+# array yields null for an absent key or an unknown name, while `//` would
+# have collapsed false to the default.
+harness_get_json() { harness_load; jq -c --arg n "$1" "[ .harnesses[] | select(.name == \$n) | ($2) ] | first" <<<"$HARNESS_JSON"; }
 harness_field()    { harness_load; jq -r "$1 // empty" <<<"$HARNESS_JSON"; }
 harness_known()    { harness_load; [[ "$(jq -r --arg n "$1" 'any(.harnesses[]; .name == $n)' <<<"$HARNESS_JSON")" == "true" ]]; }
 
@@ -131,14 +143,38 @@ harness_not_driven() {
   printf '%s' "$reason"
 }
 
-# "claude, codex and agy" — for message text that has to name the set.
-harness_names_human() {
-  harness_names | awk '{n[NR]=$0} END {
+# Does this harness serve this leg? The descriptor's vocabulary is review and
+# resolve; run_leg_settings and preflight receive reviewer and resolver, so the
+# callers normalise. An absent legs field means both, which is why the four
+# entries that predate the field carry no edit.
+harness_serves_leg() {
+  harness_load
+  [[ "$(jq -r --arg n "$1" --arg l "$2" \
+       '((.harnesses[] | select(.name == $n) | .legs) // ["review","resolve"]) | index($l) != null' \
+       <<<"$HARNESS_JSON")" == "true" ]]
+}
+
+# The harnesses that may serve a leg — one per line for piping, and through
+# _names_human when a message has to name the set.
+harness_names_for_leg() {
+  harness_load
+  jq -r --arg l "$1" \
+    '.harnesses[] | select(((.legs // ["review","resolve"]) | index($l)) != null) | .name' \
+    <<<"$HARNESS_JSON"
+}
+
+# "claude, codex, agy and grok" — for message text that has to name the set.
+_names_human() {
+  awk '{n[NR]=$0} END {
     for (i = 1; i <= NR; i++) {
       printf "%s", n[i]
       if (i == NR - 1) printf " and "; else if (i < NR) printf ", "
     }
   }'
+}
+
+harness_names_human() {
+  harness_names | _names_human
 }
 
 harness_source_adapters() {

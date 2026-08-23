@@ -224,7 +224,7 @@ Automated mode reviews branches in the repository, including Dependabot branches
 
 ## Harness support
 
-CrossRev has adapters for Claude Code, Codex, Antigravity, and Grok. Kimi runs through the Claude adapter as a named endpoint.
+CrossRev has adapters for Claude Code, Codex, Antigravity, Grok, and opencode — the last of those review-only: it may take `reviewer.harness`, never `resolver.harness`. Kimi runs through the Claude adapter as a named endpoint.
 
 Running a harness locally needs nothing beyond its own CLI installed and logged in the way you already use it. CrossRev shells out to the CLI and never handles the credential itself, and `crossrev doctor` reports which harnesses it found.
 
@@ -238,12 +238,13 @@ Whether a harness works in GitHub Actions is a separate question, because a host
 | `codex` | OAuth access token in `~/.codex/auth.json` | 10 days | Yes, with the refresher below |
 | `agy` | the OS keyring on macOS (`Antigravity Safe Storage`); `~/.gemini/antigravity-cli/antigravity-oauth-token` on a host with no D-Bus session bus | 56 minutes | No, CrossRev cannot seed into a hosted runner yet |
 | `grok` | `~/.grok/auth.json` | 6 hours | Yes, by self-refreshing |
+| `opencode` | `opencode auth login`, purpose-built | — | Yes |
 | `kimi` | OAuth access token | 15 minutes | No |
 <!-- crossrev:harness-table:end -->
 
 `crossrev init` refuses a pairing that its runner cannot serve. A self-hosted runner uses its installed logins and supports every pairing. [CrossRev credentials](docs/credentials.md) explains the hosted-runner requirements and the Codex refresher.
 
-`--harness` overrides one leg for one run, and takes any of the four adapter names — `claude`, `codex`, `agy`, `grok`. Kimi is not one of them: it is reached through an `endpoints:` entry rather than an adapter, so it is named by `endpoint` in the configuration. Pass the flag to `review` and `resolve` separately, because a pairing is two choices:
+`--harness` overrides one leg for one run, and takes any of the five adapter names — `claude`, `codex`, `agy`, `grok`, `opencode`; `opencode` on `review` only. Kimi is not one of them: it is reached through an `endpoints:` entry rather than an adapter, so it is named by `endpoint` in the configuration. Pass the flag to `review` and `resolve` separately, because a pairing is two choices:
 
 ```bash
 crossrev review  --pr 42 --harness codex    # reviewer leg on codex

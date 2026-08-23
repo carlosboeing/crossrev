@@ -20,7 +20,7 @@ Options on `cycle`, `review` and `resolve`:
 
 | Option | What it does |
 |---|---|
-| `--harness claude\|codex\|agy\|grok` | Override the harness the config names for that leg, for this run. Not `kimi`, which is an endpoint rather than an adapter |
+| `--harness claude\|codex\|agy\|grok\|opencode` | Override the harness the config names for that leg, for this run. Not `kimi`, which is an endpoint rather than an adapter; not opencode on the resolve leg, which is review-only |
 | `--repo owner/name` | Target a repository other than this checkout |
 | `--no-tips` | Suppress the closing suggestion about automated mode |
 

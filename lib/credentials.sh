@@ -130,8 +130,13 @@ cred_prepare() {
   staging_path="$(harness_get "$harness" .credential.staging.path)"
   if [[ -n "$secret" && -n "$staging_env" && -n "${!secret:-}" ]]; then
     CRED_SCRATCH="$(mktemp -d)"
-    (umask 077; printf '%s' "${!secret}" >"$CRED_SCRATCH/${staging_path:-auth.json}")
-    cred_assert_fresh "$harness" "$CRED_SCRATCH/${staging_path:-auth.json}"
+    local staging_file="$CRED_SCRATCH/${staging_path:-auth.json}"
+    # The staging path may carry a directory of its own — opencode stages under
+    # opencode/auth.json — and every shipped path before it was a bare
+    # auth.json, which is why the write below never needed this until now.
+    mkdir -p "$(dirname "$staging_file")"
+    (umask 077; printf '%s' "${!secret}" >"$staging_file")
+    cred_assert_fresh "$harness" "$staging_file"
     export "$staging_env=$CRED_SCRATCH"
   fi
 }
@@ -168,12 +173,15 @@ cred_discard() {
 
 # Refuse rather than refresh in flight.
 #
-# An in-flight rotation invalidates the stored copy silently: this job carries
-# on with the replacement it never saved, the secret still holds the consumed
-# one, and the next scheduled refresh fails with nothing to point at. Stopping
-# here is loud, cheap and recoverable.
+# Only a credential the descriptor marks assert_fresh is a freshness question:
+# an archetype-A store holds no expiry to read — Claude Code's setup token, and
+# opencode's {type, key} auth.json both — and demanding one here would stop
+# exactly the harnesses that cannot answer it. The check below reads the access
+# token's exp claim to decide whether running is safe; a rotating token under
+# its floor means the stored copy is one use from dead.
 cred_assert_fresh() {
   local harness="$1" file="$2" left
+  [[ "$(harness_get "$harness" .credential.assert_fresh)" == "true" ]] || return 0
   left="$(cred_seconds_left "$harness" "$file")" || ui_die \
     "the restored $harness credential does not carry a readable expiry" \
     "crossrev reads the access token's exp claim to decide whether it is safe to run. A credential it cannot read is one it cannot reason about, so it stops. Re-seed the secret from a fresh \`$harness login\`."

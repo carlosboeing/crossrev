@@ -1,0 +1,170 @@
+#!/usr/bin/env bash
+#
+# A fake `opencode` for the offline suite.
+#
+# It returns what the real CLI returns for `run --format json`: an NDJSON event
+# stream whose answer rides on `.part.text` of `type == "text"` events, with a
+# sessionID on every line. That shape is what lib/adapters/opencode.sh parses.
+#
+# It also asserts the contract the adapter is supposed to meet. The isolation
+# config is the whole read-only story for this harness — its own defaults grant
+# `edit` and `bash`, so a run without OPENCODE_CONFIG denying them is the bug —
+# and `--auto` is a blanket bypass that is never passed. Violations exit 96.
+
+set -uo pipefail
+
+[[ "${1:-}" == "--version" ]] && { printf '1.18.21 (test stub)\n'; exit 0; }
+
+# Isolation is the whole read-only story for this harness. Shared by `run` and
+# `export`: the adapter reuses the same env for the session-record call, and a
+# check only on `run` would miss deleting that config before export.
+_assert_isolation() {
+  local cfg="${OPENCODE_CONFIG:-}" cfg_content
+  cfg_content="$(tr -d '[:space:]' <"$cfg" 2>/dev/null || true)"
+  if [[ -z "$cfg" || ! -r "$cfg" ]] \
+     || [[ "$cfg_content" != *'"edit":"deny"'* ]] \
+     || [[ "$cfg_content" != *'"bash":"deny"'* ]] \
+     || [[ "$cfg_content" != *'"*":"deny"'* ]] \
+     || [[ "$cfg_content" != *'"*.env":"deny"'* ]]; then
+    printf 'test stub: OPENCODE_CONFIG must name a readable file denying edit, bash, unknown tools, and .env reads\n' >&2
+    exit 96
+  fi
+  if [[ -z "${OPENCODE_CONFIG_DIR:-}" || ! -d "${OPENCODE_CONFIG_DIR:-}" ]]; then
+    printf 'test stub: OPENCODE_CONFIG_DIR must name an existing directory\n' >&2
+    exit 96
+  fi
+}
+
+# The export subcommand answers from the local session database in the real CLI,
+# costing no model call. The adapter reads both the answering model and the
+# whole-run token total from it.
+if [[ "${1:-}" == "export" ]]; then
+  _assert_isolation
+  if [[ -n "${CROSSREV_OPENCODE_NO_EXPORT:-}" ]]; then
+    printf 'export failed\n' >&2
+    exit 1
+  fi
+  jq -cn '{info:{
+    model:{id:"stub-model", providerID:"stub"},
+    tokens:{input:10, output:2, reasoning:1, cache:{read:4, write:0}}}}'
+  exit 0
+fi
+
+[[ "${1:-}" == "run" ]] || { printf 'test stub: unexpected invocation: %s\n' "$*" >&2; exit 96; }
+shift
+
+# Every flag the adapter built, so a suite can assert what a leg was and was not
+# granted. Appended, because one `crossrev review` invokes this twice on a retry.
+[[ -n "${CROSSREV_ARGV_LOG:-}" ]] && printf '%s\n' "run $*" >>"$CROSSREV_ARGV_LOG"
+
+fmt="" dir=""
+while (( $# )); do
+  case "$1" in
+    --auto)
+      printf 'test stub: %s is a blanket bypass and must not be passed\n' "$1" >&2
+      exit 96 ;;
+    --format) fmt="${2:-}"; shift 2 ;;
+    --dir) dir="${2:-}"; shift 2 ;;
+    --model)
+      # The real CLI takes provider/model, not a bare id — the configuration
+      # docs say so, so the stub enforces it.
+      case "${2:-}" in
+        */*) ;;
+        *) printf 'test stub: %s takes provider/model, not a bare id\n' "$1" >&2; exit 96 ;;
+      esac
+      shift 2 ;;
+    --variant) shift 2 ;;
+    --*) shift 2 ;;
+    *) break ;;
+  esac
+done
+
+prompt="${*:-}"
+[[ -n "${CROSSREV_PROMPT_LOG:-}" ]] && printf '%s' "$prompt" >"$CROSSREV_PROMPT_LOG"
+
+# A reading leg holds `edit` and `bash` unless something takes them away, so the
+# config the adapter points at has to deny both. Denying removes the tool from
+# the session entirely rather than refusing it at call time — there is nothing
+# for a headless run to block on. Matched on whitespace-stripped content, so
+# the check is about the keys and not about how the file was printed.
+_assert_isolation
+if [[ "$fmt" != "json" ]]; then
+  printf 'test stub: --format json is required, got %s\n' "${fmt:-nothing}" >&2
+  exit 96
+fi
+if [[ -z "$dir" || ! -d "$dir" ]]; then
+  printf 'test stub: --dir is required and must name a real directory\n' >&2
+  exit 96
+fi
+
+payload_file=""
+if [[ "$prompt" == *"You are the review leg"* ]]; then
+  [[ -n "${CROSSREV_REVIEW_PAYLOAD:-}" ]] && payload_file="$CROSSREV_REVIEW_PAYLOAD"
+fi
+[[ -n "$payload_file" && -f "$payload_file" ]] \
+  || { printf 'test stub: no canned payload was set for this stub invocation\n' >&2; exit 1; }
+
+body="$(cat "$payload_file")"
+mode="${CROSSREV_OPENCODE_MODE:-bare}"
+
+case "$mode" in
+  # The measured default: the model returns the schema-shaped JSON bare.
+  bare|fenced|prose)
+    case "$mode" in
+      bare)   text="$body" ;;
+      fenced) text=$'\`\`\`json\n'"$body"$'\n\`\`\`' ;;
+      prose)  text="Here is the answer you asked for:
+$body
+Let me know if you need anything else." ;;
+    esac
+    jq -cn --arg t "$text" '{type:"step_start", part:{}, sessionID:"stub-session"}'
+    jq -cn --arg t "$text" '{type:"text", part:{text:$t}, sessionID:"stub-session"}'
+    jq -cn '{type:"step_finish", part:{tokens:{input:3, output:1}}, sessionID:"stub-session"}'
+    ;;
+  # Two text events with the seam inside a JSON string. jq -r would inject a
+  # newline there; join-output concatenates so extraction still parses.
+  split)
+    case "$body" in
+      *"Unchecked fetch response"*)
+        left="${body%%Unchecked fetch response*}Unchecked "
+        right="fetch response${body#*Unchecked fetch response}" ;;
+      *)
+        printf 'test stub: split mode needs Unchecked fetch response in the payload\n' >&2
+        exit 96 ;;
+    esac
+    jq -cn '{type:"step_start", part:{}, sessionID:"stub-session"}'
+    jq -cn --arg t "$left" '{type:"text", part:{text:$t}, sessionID:"stub-session"}'
+    jq -cn --arg t "$right" '{type:"text", part:{text:$t}, sessionID:"stub-session"}'
+    jq -cn '{type:"step_finish", part:{tokens:{input:3, output:1}}, sessionID:"stub-session"}'
+    ;;
+  # No answer at all: the stream carries events but no text event.
+  empty)
+    jq -cn '{type:"step_start", part:{}, sessionID:"stub-session"}'
+    jq -cn '{type:"step_finish", part:{tokens:{input:3, output:0}}, sessionID:"stub-session"}'
+    ;;
+  # An authentication failure, as measured: a single error event on stdout and
+  # AI_APICallError naming Unauthorized on stderr.
+  error)
+    printf '{"type":"error"}\n'
+    printf 'AI_APICallError: Unauthorized\n' >&2
+    exit 1
+    ;;
+  # An error event that is not a credential rejection: rate limit, overload,
+  # tool failure. Must not be classified as opencode auth login.
+  error-other)
+    printf '{"type":"error"}\n'
+    printf 'Error: Provider overloaded\n' >&2
+    exit 1
+    ;;
+  # Prose with no braces anywhere. Extraction returns null; that is the
+  # handoff that spends the extra shape-retry schema_native: false arms.
+  nojson)
+    jq -cn '{type:"step_start", part:{}, sessionID:"stub-session"}'
+    jq -cn --arg t "I cannot produce JSON for this. Here is a review in prose with no object at all." \
+      '{type:"text", part:{text:$t}, sessionID:"stub-session"}'
+    jq -cn '{type:"step_finish", part:{tokens:{input:3, output:1}}, sessionID:"stub-session"}'
+    ;;
+  *)
+    printf 'test stub: unknown CROSSREV_OPENCODE_MODE %s\n' "$mode" >&2
+    exit 96 ;;
+esac

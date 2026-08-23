@@ -100,9 +100,11 @@ render_architecture() {
 def notes_str:
   (if .schema_style == "inline" then "Takes the schema **inline** as a JSON string."
    elif .schema_style == "path" and (.sandbox_args | length > 0) then "Takes the schema as a **file path**."
+   elif .schema_style == "prompt" then "No schema flag: the schema travels inside the prompt, and CrossRev extracts the JSON from the answer text itself."
    else "" end) +
   (if .name == $ep then " Also the path to any Anthropic-compatible endpoint" else "" end) +
-  (if (.sandbox_args | length > 0) then " Runs with `\((.sandbox_args | join(" ")))`" else "" end);
+  (if (.sandbox_args | length > 0) then " Runs with `\((.sandbox_args | join(" ")))`" else "" end) +
+  (if (.legs // ["review","resolve"]) == ["review"] then " Review-only" else "" end);
 
 "| Adapter | Harness | Notes |",
 "|---|---|---|",

@@ -479,11 +479,24 @@ run_leg_settings() {
     ui_die "there is no adapter for the harness '$LEG_HARNESS'" "$guide"
   fi
 
+  # A harness may name the legs it serves, and an absent field means both. The
+  # refusal is a configuration fact rather than a failure to discover mid-run,
+  # so it lands here — before the binary test and long before anything is
+  # staged or billed. The leg names arrive as reviewer/resolver; the
+  # descriptor's vocabulary is review/resolve. Cycle also calls this for both
+  # legs before the pass loop, so a review-only resolver dies without a billed
+  # review; this copy remains the backstop for a bare `crossrev resolve`.
+  local leg_name="resolve"
+  [[ "$leg" == "reviewer" ]] && leg_name="review"
+  _run_assert_harness_serves_leg "$LEG_HARNESS" "$leg_name"
+
   local leg_binary; leg_binary="$(harness_get "$LEG_HARNESS" .binary)"
   [[ -n "$leg_binary" ]] || leg_binary="$LEG_HARNESS"
   command -v "$leg_binary" >/dev/null 2>&1 && return 0
 
-  # Only harnesses that have an adapter.
+  # Only harnesses that have an adapter and that serve this leg. Picking a
+  # review-only binary because it is the one thing on PATH would stage a
+  # credential and build a worktree, then die in the adapter's write backstop.
   local h binary
   while IFS= read -r h; do
     binary="$(harness_get "$h" .binary)"
@@ -492,10 +505,10 @@ run_leg_settings() {
       alt="$h"
       break
     fi
-  done < <(harness_names)
+  done < <(harness_names_for_leg "$leg_name")
   [[ -n "$alt" ]] || ui_die \
-    "the $leg is configured to use '$LEG_HARNESS', which is not installed, and no other harness is either" \
-    "Install one of $(harness_names_human). CrossRev needs at least one, and two different ones is what makes the cross-model check mean anything."
+    "the $leg is configured to use '$LEG_HARNESS', which is not installed, and no other harness that can serve the $leg_name leg is either" \
+    "Install one of $(harness_names_for_leg "$leg_name" | _names_human). CrossRev needs at least one, and two different ones is what makes the cross-model check mean anything."
 
   ui_warn "'$LEG_HARNESS' is not installed, so the $leg runs on '$alt' instead" \
     "Both legs now run on the same harness, so a bug it misses while reviewing it also misses while resolving. Install $LEG_HARNESS to get the second lineage back."
@@ -503,6 +516,34 @@ run_leg_settings() {
   # A model id for the harness that was asked for is wrong for a different one.
   LEG_MODEL=""; LEG_ENDPOINT=""
   return 0
+}
+
+# Shared by run_leg_settings and by the cycle pairing check. The message is
+# the product: it names the harness, the leg, the harnesses that can take
+# the leg, and the legs the refused harness actually serves.
+_run_assert_harness_serves_leg() {
+  local harness="$1" leg_name="$2"
+  harness_serves_leg "$harness" "$leg_name" && return 0
+  ui_die "the harness '$harness' cannot serve the $leg_name leg" \
+    "CrossRev runs the $leg_name leg on $(harness_names_for_leg "$leg_name" | _names_human). $(harness_get "$harness" .product_name) is limited to the $(harness_get "$harness" '.legs // [] | join(", ")') leg."
+}
+
+# Cycle forwards --harness into both legs, and otherwise reads each leg's
+# configured harness. Either way a review-only resolver would otherwise pay
+# for the review, post comments, and only then die in run_leg_settings.
+# Check both after the config is loaded and before the pass loop.
+run_assert_cycle_pairing() {
+  local override="${1:-}"
+  local reviewer resolver
+  if [[ -n "$override" ]]; then
+    reviewer="$override"
+    resolver="$override"
+  else
+    reviewer="$(cfg_get ".reviewer.harness")"
+    resolver="$(cfg_get ".resolver.harness")"
+  fi
+  _run_assert_harness_serves_leg "$reviewer" review
+  _run_assert_harness_serves_leg "$resolver" resolve
 }
 
 _nullable() { [[ "$1" == "null" ]] && printf '' || printf '%s' "$1"; }
@@ -807,8 +848,13 @@ run_invoke() {
       continue
     fi
     _run_invoke_abort "$snap_index" "$snap_tree"
-    ui_die "$harness returned an object that does not match the schema — $problem" \
-      "This harness validates output against the schema natively, so a mismatch is an adapter or harness bug rather than model drift. Nothing has been written to the pull request, and the rejected attempt's edits have been put back."
+    if validate_harness_is_schema_native "$harness"; then
+      ui_die "$harness returned an object that does not match the schema — $problem" \
+        "This harness validates output against the schema natively, so a mismatch is an adapter or harness bug rather than model drift. Nothing has been written to the pull request, and the rejected attempt's edits have been put back."
+    else
+      ui_die "$harness returned an object that does not match the schema — $problem" \
+        "That harness does not constrain its own output, so two mismatches in a row is the model failing the JSON instruction rather than an adapter bug. Name a model that follows a JSON instruction. Nothing has been written to the pull request, and the rejected attempt's edits have been put back."
+    fi
   done
 }
 
@@ -2737,13 +2783,13 @@ _cycle_finish_at_bound() {
 # same legs the workflows invoke, and the two modes can be A/B tested on real
 # pull requests without touching leg code.
 cmd_cycle() {
-  local pr="" repo="" trigger="human" no_tips=0
+  local pr="" repo="" trigger="human" no_tips=0 harness_override=""
   local -a args=()
   while (( $# )); do
     case "$1" in
       --pr)      pr="${2:-}"; args+=(--pr "${2:-}"); shift 2 ;;
       --repo)    repo="${2:-}"; args+=(--repo "${2:-}"); shift 2 ;;
-      --harness) args+=(--harness "${2:-}"); shift 2 ;;
+      --harness) harness_override="${2:-}"; args+=(--harness "${2:-}"); shift 2 ;;
       --trigger) trigger="${2:-}"; args+=(--trigger "${2:-}"); shift 2 ;;
       --no-tips) no_tips=1; shift ;;
       --keep-transcripts) args+=(--keep-transcripts); shift ;;
@@ -2767,6 +2813,7 @@ cmd_cycle() {
     (( load_rc == 2 )) && return 0
     return "$load_rc"
   }
+  run_assert_cycle_pairing "$harness_override"
   local max="$CTX_MAX_PASSES_PER_CYCLE" i pass marker rmarker rlabel verdict actionable
   ui_say "Cycling $CTX_REPO#$CTX_PR, up to $max passes. Ctrl-C is safe — each leg finishes the write in flight."
 

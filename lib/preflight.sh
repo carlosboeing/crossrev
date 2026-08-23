@@ -179,8 +179,26 @@ preflight_check() {
 
 # Can this harness authenticate by subscription on this runner? Prints the
 # reason when it cannot.
+#
+# The third argument is optional and names a leg in the descriptor's vocabulary
+# — review or resolve. A harness that lists its legs is refused for the others
+# here, so doctor reports the limit for automated mode rather than leaving it
+# to be discovered by a failing job; without the argument the answer stays the
+# credential-only question it always was.
 preflight_pairing_supported() {
-  local runner="$1" harness="$2"
+  local runner="$1" harness="$2" leg="${3:-}"
+
+  # A descriptor fact, not a runner fact: self-hosted skips the credential
+  # checks below because the machine already holds the login, but a harness
+  # that does not serve this leg is refused on every runner.
+  if [[ -n "$leg" ]] && ! harness_serves_leg "$harness" "$leg"; then
+    printf "%s is limited to the %s leg, and cannot serve the %s leg" \
+      "$(harness_get "$harness" .product_name)" \
+      "$(harness_get "$harness" '.legs // [] | join(", ")')" \
+      "$leg"
+    return 1
+  fi
+
   [[ "$runner" == "self-hosted" ]] && return 0
 
   if ! harness_known "$harness"; then
@@ -251,9 +269,13 @@ preflight_report_pairings() {
   for leg in reviewer resolver; do
     harness="$(cfg_get ".$leg.harness")"
     endpoint="$(cfg_get ".$leg.endpoint")"
+    # The loop names the config keys; preflight_pairing_supported speaks the
+    # descriptor's vocabulary.
+    local leg_name="resolve"
+    [[ "$leg" == "reviewer" ]] && leg_name="review"
     if [[ -n "$endpoint" && "$endpoint" != "null" ]]; then
       ui_ok "$leg — $harness via the '$endpoint' endpoint, a static token in a secret"
-    elif reason="$(preflight_pairing_supported "$runner" "$harness")"; then
+    elif reason="$(preflight_pairing_supported "$runner" "$harness" "$leg_name")"; then
       if preflight_needs_refresher "$runner" "$harness" "$endpoint"; then
         ui_ok "$leg — $harness by subscription, kept warm by the refresher workflow"
       else
