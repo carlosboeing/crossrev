@@ -53,6 +53,21 @@ _worktree_dir() {
   printf '%s/crossrev/worktrees/%s/pr-%s' "${XDG_STATE_HOME:-$HOME/.local/state}" "$slug" "$pr"
 }
 
+# Which repository a directory belongs to, as an absolute path with symlinks
+# resolved. The worktree path above is keyed on the repository slug and the
+# pull request number alone, so two checkouts of one repository collide on it,
+# and the head sha cannot tell them apart -- two checkouts at the same pull
+# request hold the same commit by definition. Reusing the wrong one commits in
+# a checkout the operator is not standing in and pushes where that checkout's
+# remote points.
+_worktree_repo_root() {
+  local dir="${1:-.}" common
+  common="$(git -C "$dir" rev-parse --git-common-dir 2>/dev/null)" || return 1
+  [[ -n "$common" ]] || return 1
+  # A relative --git-common-dir is relative to $dir, so resolve it from there.
+  ( cd "$dir" && cd "$common" && pwd -P ) 2>/dev/null
+}
+
 # ---------------------------------------------------------------------------
 # Interruption, locking and cleanup
 # ---------------------------------------------------------------------------
@@ -1762,7 +1777,7 @@ leg_resolve() {
   fi
 
   # Resolve runs in a dedicated worktree so the operator's checkout is untouched.
-  local orig_cwd wt_dir wt_err wt_cur_sha push_remote target_repo current_sha
+  local orig_cwd wt_dir wt_err wt_cur_sha wt_owner this_repo push_remote target_repo current_sha
   orig_cwd="$(pwd)"
   wt_dir="$(_worktree_dir "$CTX_REPO" "$CTX_PR")"
   CROSSREV_WORKTREE="$wt_dir"
@@ -1802,7 +1817,10 @@ leg_resolve() {
 
   if [[ -d "$wt_dir" ]]; then
     wt_cur_sha="$(git -C "$wt_dir" rev-parse HEAD 2>/dev/null || true)"
-    if [[ -z "$wt_cur_sha" || "$wt_cur_sha" != "$CTX_HEAD_SHA" ]]; then
+    wt_owner="$(_worktree_repo_root "$wt_dir" || true)"
+    this_repo="$(_worktree_repo_root . || true)"
+    if [[ -z "$wt_cur_sha" || "$wt_cur_sha" != "$CTX_HEAD_SHA" \
+       || -z "$wt_owner" || -z "$this_repo" || "$wt_owner" != "$this_repo" ]]; then
       rm -rf "$wt_dir"
       git worktree prune 2>/dev/null || true
     fi
