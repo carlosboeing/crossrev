@@ -693,82 +693,31 @@ legs_harness_error "$empty" >/dev/null 2>&1 \
 
 rm -f "$cxerr" "$quiet" "$empty"
 
-# --- a review-only harness cannot serve the resolve leg ---------------------
+# --- a cycle cannot take --harness -------------------------------------------
 #
-# opencode names legs: ["review"]. The refusal is a configuration fact, so it
-# happens in run_leg_settings — before the worktree, before any credential is
-# staged, before a harness call can be billed — rather than being discovered
-# mid-run.
-config_opencode_resolves() {
-  cat <<'EOF'
-version: 1
-mode: local
-policy:
-  min_fix_severity: medium
-  max_passes_per_cycle: 3
-  max_files_changed_per_pr: 200
-  max_prs_per_day: 25
-reviewer:
-  harness: claude
-  model: reviewer-model
-resolver:
-  harness: opencode
-  model: resolver-model
-backlog:
-  destination: none
-EOF
-}
-
-ID_GATE="b4c5d6e7"
-gate_review_marker() {
-  jq -cn --arg sha "$FIX_HEAD" --argjson ts "$(( $(date +%s) - 192 ))" --arg a "$ID_GATE" '
-    {v:1, leg:"review", pass:1, state:"complete", ts:$ts, done_ts:($ts + 192), run_id:"1",
-     head_sha:$sha, harness:"claude", model:"reviewer-model", model_reported:null,
-     effort:null, endpoint:null, tokens:null, verdict:"issues-remain",
-     findings:[
-       {id:$a, path:"app.ts", line:2, side:"RIGHT", severity:"high", category:"correctness",
-        pre_existing:false, title:"Unchecked fetch response", why:"w", fix:"f",
-        anchor:"", thread_id:"T_GATE", resolution:null, tracked_as:null}]}'
-}
-
-fixture_repo "$(config_opencode_resolves)"; stub_reset
-routes_baseline "$(marker_comment 9001 "$(gate_review_marker)" | jq -cs . | payload)"
-route '*reviewThreads*' "$(threads_response "$(thread_node T_GATE app.ts 2 false "$ID_GATE")")"
-
-out="$("$CROSSREV" resolve --pr 42 --harness opencode 2>&1)"; rc=$?
-
-is  "the resolve leg refuses a review-only harness" "$rc" "1"
-has "naming the harness and the leg"                "$out" "cannot serve the resolve leg"
-has "and naming the harnesses that can serve it"    "$out" "claude, codex, agy and grok"
-is  "no harness ran on the way out"                 "$(cat "$PROMPT_LOG")" ""
-is  "and stages no credential"                      "$(count 'secret set')" "0"
-
-# The same pairing under cycle would otherwise pay for the review, post
-# comments, and only then die in run_leg_settings. The cycle entry checks
-# both legs after the config loads and before the pass loop.
-fixture_repo "$(config_opencode_resolves)"; stub_reset
-routes_baseline "$(printf '[]' | payload)"
-route '*reviewThreads*' "$(threads_response)"
-out="$("$CROSSREV" cycle --pr 42 2>&1)"; rc=$?
-is  "a cycle with a review-only resolver is refused before any leg" "$rc" "1"
-has "naming the harness and the resolve leg"                       "$out" "cannot serve the resolve leg"
-is  "no harness ran on that cycle either"                          "$(cat "$PROMPT_LOG")" ""
-hasnt "and the cycle never announced it had started"               "$out" "Cycling"
-
-# --harness is forwarded into both legs, so a review-only override is the
-# same pairing even when the config itself is valid.
+# --harness on cycle is forwarded into both legs, so the override puts one
+# harness on both sides of the loop. That is not a pairing CrossRev can serve:
+# the loop alternates two lineages so one can catch what the other misses, and
+# one harness reviewing its own fixes removes exactly that. The refusal happens
+# in run_assert_cycle_pairing, before any leg can be billed, and names that
+# reason — not the leg gate, which has nothing left to refuse here.
 fixture_repo; stub_reset
 routes_baseline "$(printf '[]' | payload)"
 route '*reviewThreads*' "$(threads_response)"
 out="$("$CROSSREV" cycle --pr 42 --harness opencode 2>&1)"; rc=$?
-is  "a cycle --harness opencode is refused before any leg" "$rc" "1"
-has "naming the override as unable to resolve"            "$out" "cannot serve the resolve leg"
-is  "and still invokes no harness"                        "$(cat "$PROMPT_LOG")" ""
 
-# The single-harness fallback iterates only harnesses that serve the leg. On a
-# machine where the configured resolver is absent and only opencode is on
-# PATH, substituting it would stage a credential and die in the write
-# backstop — the opposite of the refusal-before-staging promise.
+is  "a cycle --harness override is refused before any leg" "$rc" "1"
+has "naming the override that would cause it"              "$out" "--harness opencode"
+has "and naming the harness it puts on both legs"          "$out" "both legs"
+hasnt "not the leg-gate reason, which no longer applies"   "$out" "cannot serve the resolve leg"
+hasnt "and the cycle never announced it had started"       "$out" "Cycling"
+is  "no harness ran on the way out"                        "$(cat "$PROMPT_LOG")" ""
+is  "and nothing was posted"                               "$(count 'method POST repos/acme/widget/pulls/42/comments')" "0"
+
+# The single-harness fallback now reaches opencode too. With the descriptor
+# naming both legs, a machine where only opencode is installed substitutes it
+# for the resolve leg under the standing warning, instead of refusing a
+# resolver that can now actually serve.
 path_only_opencode() {
   local keep src
   keep="$(mktemp -d)"
@@ -782,14 +731,18 @@ path_only_opencode() {
 }
 
 fixture_repo; stub_reset
-routes_baseline "$(marker_comment 9001 "$(gate_review_marker)" | jq -cs . | payload)"
-route '*reviewThreads*' "$(threads_response "$(thread_node T_GATE app.ts 2 false "$ID_GATE")")"
+routes_baseline "$(rd_comments "$(rd_resolutions escalated)" true | payload)"
+rd_routes
+route_first 'api --paginate repos/*/pulls/42/comments*' "$(rd_prior_replies)"
+CROSSREV_RESOLVE_PAYLOAD="$(printf '%s' "$RD_FIX_PAYLOAD" | payload)"; export CROSSREV_RESOLVE_PAYLOAD
+CROSSREV_RESOLVE_EDIT="$(rd_edit_script)"; export CROSSREV_RESOLVE_EDIT
 path_only_opencode
 out="$("$CROSSREV" resolve --pr 42 2>&1)"; rc=$?
 
-is  "the resolve fallback does not substitute a review-only harness" "$rc" "1"
-has "and says no other resolve-capable harness is installed"         "$out" "no other harness that can serve the resolve leg"
-is  "no harness ran on that path either"                             "$(cat "$PROMPT_LOG")" ""
-is  "and still stages no credential"                                 "$(count 'secret set')" "0"
+is  "the resolve fallback substitutes opencode when nothing else is installed" "$rc" "0"
+has "under the standing substitution warning"    "$out" "runs on 'opencode' instead"
+has "and the resolver really runs"               "$(cat "$PROMPT_LOG")" "You are the resolve leg"
+has "and its fix lands" \
+  "$(git --git-dir="$FIX_ORIGIN" log -1 refs/heads/feature --format=%s)" "fix: resolve crossrev review findings (pass 1)"
 
 finish

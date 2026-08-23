@@ -15,7 +15,11 @@
 # otherwise configures the thing reviewing it. A settings file written into the
 # workspace to grant permission would be moved out of the way before the harness
 # started, and any mechanism that survived the quarantine would have reopened the
-# hole the quarantine exists to close.
+# hole the quarantine exists to close. opencode is the exception in mechanism,
+# not in spirit: its grant travels as OPENCODE_CONFIG pointing at a file the
+# adapter writes OUTSIDE the workspace, so there is nothing for a branch to
+# move and nothing auto-loaded from the checkout to win on precedence —
+# measured twice against permissive global configs.
 #
 # The review leg must NOT carry the grant. It has no reason to write, and write
 # access widens the blast radius of a prompt injection carried in a diff for no
@@ -67,6 +71,15 @@ PROMPT_FILE="$(mktemp)"; printf 'prompt\n' >"$PROMPT_FILE"
 cat >"$FAKE/_record" <<'REC'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >>"$CROSSREV_ARGV_LOG"
+# One harness carries its grant in a config file named by the environment
+# rather than in a flag. Summarising the permission block onto the same log
+# keeps the class assertion below honest for it: two legs that differ only in
+# what they may touch must log differently, wherever the grant rides.
+if [[ -n "${OPENCODE_CONFIG:-}" ]]; then
+  printf 'permission ' >>"$CROSSREV_ARGV_LOG"
+  jq -r '.permission | to_entries | map(.key + "=" + (.value | tostring)) | join(" ")' \
+    "$OPENCODE_CONFIG" >>"$CROSSREV_ARGV_LOG"
+fi
 exit 0
 REC
 chmod +x "$FAKE/_record"
@@ -163,6 +176,16 @@ has "a missing codex hardening argument fails loudly" \
 
 has  "a writing agy leg accepts edits"           "$(probe agy yes)" "--mode accept-edits"
 hasnt "a reading agy leg asks for no mode at all" "$(probe agy no)" "--mode"
+
+# opencode's grant is the config shape, not a flag: edit allowed only beside
+# an absent base rule, because the rule suppresses edit in every form.
+has  "a writing opencode leg grants edit outright" "$(probe opencode yes)" "edit=allow"
+hasnt "and carries no fail-closed base rule beside it" "$(probe opencode yes)" "*=deny"
+has  "a reading opencode leg denies edit"          "$(probe opencode no)" "edit=deny"
+has  "under the fail-closed base rule"             "$(probe opencode no)" "*=deny"
+for _k in bash task skill webfetch websearch external_directory; do
+  has "with $_k denied in both shapes" "$(probe opencode yes) $(probe opencode no)" "$_k=deny"
+done
 
 # agy's --print takes the prompt as its VALUE, so a mode flag written after it
 # becomes the prompt. The stub refuses that order; this is the assertion that

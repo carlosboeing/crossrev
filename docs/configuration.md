@@ -106,7 +106,7 @@ resolver:
 
 opencode carries two facts worth knowing before the first run:
 
-- **opencode is review-only.** It may review a pull request and may not resolve one — naming it as `resolver.harness` is refused before anything runs, not discovered mid-leg. Its `--model` also takes `provider/model`, not a bare id: `opencode/grok-code`, never `grok-code`.
+- **opencode serves either leg.** Its isolation config denies `edit` to a review leg and grants it to a resolve leg, while `bash`, `task`, `skill`, `webfetch`, `websearch` and `external_directory` stay denied on both. Its `--model` takes `provider/model`, not a bare id: `opencode/grok-code`, never `grok-code`.
 - **opencode gets no schema enforcement from its CLI**, so CrossRev carries the schema inside the prompt and checks the shape itself, retrying once when the answer does not fit. Pick an opencode model that follows a JSON instruction; a model that answers in prose will fail its pass after that retry.
 
 With no config file anywhere the defaults are `codex` reviewing and `claude` resolving, in `local` mode, with no endpoints. Those defaults are deliberately not what `init` writes: a local user who has never heard of the CI pairing would otherwise be told to set an API key before their first review.
@@ -117,7 +117,7 @@ Cross-vendor is the strongest arrangement, because a bug one model family misses
 |---|---|---|
 | `codex` / `claude` | Hosted, cross-vendor | Codex's token rotates, so it adds a credential secret, a second App with `Secrets: write`, and a scheduled refresher |
 | `claude` / `claude` | Hosted, one vendor two models | One secret, no refresher. Weaker, and doubles Claude usage |
-| `opencode` / `claude` | Hosted or local, cross-vendor, reviewer side only | opencode cannot take the resolve leg, so the resolver stays Claude. Adds the opencode secret on top of Claude's subscription secret; no refresher |
+| `opencode` / `claude` | Hosted or local, cross-vendor | Adds the opencode secret on top of Claude's subscription secret; no refresher |
 | `agy` / `claude` | Self-hosted only | Antigravity's token lives 56 minutes, and CrossRev cannot seed into a hosted runner yet |
 | `kimi` / `claude` | Local only | Kimi is an endpoint on the Claude adapter, and its credential is a 15-minute OAuth token |
 

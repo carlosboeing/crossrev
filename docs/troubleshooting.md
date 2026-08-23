@@ -139,13 +139,13 @@ Falling back to the vendor's own API would mean running Claude while the config 
 
 Each endpoint needs both a `base_url` and a `token_env`. The variable name is required rather than assumed because it genuinely differs by service.
 
-## The harness can't serve this leg
+## The cycle won't take --harness
 
-`the harness 'opencode' cannot serve the resolve leg`
+`crossrev cycle cannot take --harness opencode: it would put the same harness on both legs`
 
-Some harnesses run one leg only. opencode is review-only: it can review a pull request and cannot resolve findings on one. Name it as `reviewer.harness`, or pass `--harness opencode` to `review`, and leave the resolve leg to one of `claude`, `codex`, `agy` or `grok` — the error names them.
+`--harness` overrides the harness for one leg. On `cycle` it would reach both, and one harness reviewing its own fixes is the failure the loop exists to prevent. Name the pairing per leg under `reviewer.harness` and `resolver.harness`, or run `crossrev review` / `crossrev resolve` individually with `--harness`.
 
-The refusal happens before anything is staged or billed. A cycle checks both legs after the config loads, so a review-only resolver is refused without a billed review. It is a configuration fact, not a transient failure, so re-running changes nothing; change the pairing instead.
+A pairing a harness cannot serve is refused before anything is staged or billed: each leg checks the descriptor before it runs, and a cycle checks both after the config loads. It is a configuration fact, not a transient failure, so re-running changes nothing; change the pairing instead.
 
 ## A credential problem in CI
 

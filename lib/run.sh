@@ -483,9 +483,9 @@ run_leg_settings() {
   # refusal is a configuration fact rather than a failure to discover mid-run,
   # so it lands here — before the binary test and long before anything is
   # staged or billed. The leg names arrive as reviewer/resolver; the
-  # descriptor's vocabulary is review/resolve. Cycle also calls this for both
-  # legs before the pass loop, so a review-only resolver dies without a billed
-  # review; this copy remains the backstop for a bare `crossrev resolve`.
+  # descriptor's vocabulary is review/resolve. Cycle refuses a --harness
+  # override beside these checks, since it would put one harness on both legs;
+  # this copy remains the backstop for a bare `crossrev resolve`.
   local leg_name="resolve"
   [[ "$leg" == "reviewer" ]] && leg_name="review"
   _run_assert_harness_serves_leg "$LEG_HARNESS" "$leg_name"
@@ -494,9 +494,9 @@ run_leg_settings() {
   [[ -n "$leg_binary" ]] || leg_binary="$LEG_HARNESS"
   command -v "$leg_binary" >/dev/null 2>&1 && return 0
 
-  # Only harnesses that have an adapter and that serve this leg. Picking a
-  # review-only binary because it is the one thing on PATH would stage a
-  # credential and build a worktree, then die in the adapter's write backstop.
+  # Only harnesses that have an adapter and that serve this leg. Substituting
+  # one that cannot serve it would stage a credential and build a worktree for
+  # a leg it can never run.
   local h binary
   while IFS= read -r h; do
     binary="$(harness_get "$h" .binary)"
@@ -528,22 +528,23 @@ _run_assert_harness_serves_leg() {
     "CrossRev runs the $leg_name leg on $(harness_names_for_leg "$leg_name" | _names_human). $(harness_get "$harness" .product_name) is limited to the $(harness_get "$harness" '.legs // [] | join(", ")') leg."
 }
 
-# Cycle forwards --harness into both legs, and otherwise reads each leg's
-# configured harness. Either way a review-only resolver would otherwise pay
-# for the review, post comments, and only then die in run_leg_settings.
-# Check both after the config is loaded and before the pass loop.
+# Cycle forwards --harness into both legs, so an override always puts one
+# harness on both sides of the loop — there is no way to express a two-lineage
+# cycle through the flag. That is a refusal, not a fallback: the loop
+# alternates review and resolve so one lineage can catch what the other misses,
+# and one harness reviewing its own fixes removes exactly that. Refused here,
+# after the config loads and before the pass loop, so nothing is billed before
+# the answer; the per-leg gates below stay as the backstop for a bare resolve.
 run_assert_cycle_pairing() {
   local override="${1:-}"
-  local reviewer resolver
+
   if [[ -n "$override" ]]; then
-    reviewer="$override"
-    resolver="$override"
-  else
-    reviewer="$(cfg_get ".reviewer.harness")"
-    resolver="$(cfg_get ".resolver.harness")"
+    ui_die "crossrev cycle cannot take --harness $override: it would put the same harness on both legs" \
+      "A cycle runs the resolve on a different lineage from the review, because one model checking its own work is the failure CrossRev exists to prevent. Name different harnesses under reviewer.harness and resolver.harness, or run crossrev review / crossrev resolve individually with --harness."
   fi
-  _run_assert_harness_serves_leg "$reviewer" review
-  _run_assert_harness_serves_leg "$resolver" resolve
+
+  _run_assert_harness_serves_leg "$(cfg_get '.reviewer.harness')" review
+  _run_assert_harness_serves_leg "$(cfg_get '.resolver.harness')" resolve
 }
 
 _nullable() { [[ "$1" == "null" ]] && printf '' || printf '%s' "$1"; }

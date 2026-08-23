@@ -15,13 +15,24 @@
 # enforced.
 #
 # **The permission defaults are inverted.** Most permissions default to allow,
-# so unlike every other reading leg, an opencode review holds `edit` and
-# `bash` unless something takes them away. The isolation config below takes
-# them away. A denied tool is absent from the session rather than refused at
-# call time, and nothing prompts for approval, so there is nothing for a
-# headless run to block on. OPENCODE_CONFIG merges on top of the operator's own
-# global config and wins on these keys — measured twice, against a global
-# `edit: allow` and again against ~/.opencode/opencode.json, which loads later.
+# so unlike every other harness, an opencode leg holds `edit` and `bash`
+# unless something takes them away. The isolation config below is that
+# something, in one of two shapes chosen by the write flag. A reading leg
+# keeps the `"*": "deny"` base rule with edit denied under it. A writing leg
+# drops the base rule and grants edit outright, because measured against
+# 1.18.21 the base rule suppresses edit in every form — shorthand or map — so
+# no grant can survive beside it. The standing denials (bash, task, skill,
+# webfetch, websearch, external_directory) hold in both shapes. The trade the
+# write shape makes is recorded rather than hidden: without the base rule it
+# does not fail closed on a permission key a future opencode adds, which the
+# read shape catches by default. That is the price of a grant the base rule
+# makes unreachable, and bash staying denied is what keeps the exposure small
+# — files inside the worktree, not commands. A denied tool is absent from the
+# session rather than refused at call time, and nothing prompts for approval,
+# so there is nothing for a headless run to block on. OPENCODE_CONFIG merges
+# on top of the operator's own global config and wins on these keys —
+# measured twice, against a global `edit: allow` and again against
+# ~/.opencode/opencode.json, which loads later.
 #
 # **stdin must be /dev/null.** With stdin held open the CLI blocks on it and
 # prints nothing — five minutes of silence was measured, with zero bytes on
@@ -67,14 +78,6 @@ adapter_opencode() {
       "Named endpoints are Anthropic-compatible and reached through the claude adapter. opencode has its own provider layer, so an endpoint name means nothing to it. Use harness: claude with endpoint: $endpoint, or drop the endpoint for this leg."
   fi
 
-  # A review leg never writes, and the leg gate refuses opencode as a resolver
-  # before this adapter is reached. This is the backstop that keeps the adapter
-  # correct read on its own, not the mechanism.
-  if [[ "$write" == "yes" ]]; then
-    ui_die "the opencode adapter cannot serve a leg that writes" \
-      "opencode is configured as a review-only harness in CrossRev. Name it as reviewer.harness, and leave the resolve leg to one of the harnesses that can serve it."
-  fi
-
   # The schema travels inside the prompt: a copy of the prompt with the schema
   # in a fenced block under an instruction that also corrects the skill's
   # "the harness constrains your output" claim — true for the other four,
@@ -91,48 +94,54 @@ adapter_opencode() {
     leg_prompt="$prompt_copy"
   fi
 
-  # Read-only isolation, layered over whatever the operator already has. task
-  # is denied for predictability — the model spawns a subagent unprompted,
-  # which multiplies token spend without being asked for — and skill because
-  # it is the door to the operator's own skill library. "*" deny is the
-  # fail-closed default so a tool opencode adds later does not inherit the
-  # product's allow. read is a map, not the string "allow": a string would
-  # replace opencode's own *.env deny and let the reviewing model quote an
-  # untracked .env into a public comment. OPENCODE_CONFIG_DIR at an empty
-  # directory removes the agents, commands and plugins that would otherwise
-  # load from beside the operator's global config.
-  local iso cfg_dir
+  # Isolation, layered over whatever the operator already has, in one of the
+  # two shapes the header describes: the write flag chooses between the
+  # fail-closed read shape and the edit-granting resolve shape. question and
+  # doom_loop are named denials in both shapes rather than casualties of "*":
+  # the write shape has no "*" to hide them under, and doom_loop otherwise
+  # falls back to ask — a prompt a headless leg cannot answer. task is denied
+  # for predictability (the model spawns a subagent unprompted, which
+  # multiplies token spend without being asked for) and skill because it is
+  # the door to the operator's own skill library. read stays a map in both:
+  # the string "allow" would replace opencode's own *.env deny and let the
+  # model quote an untracked .env into a public comment. OPENCODE_CONFIG_DIR
+  # at an empty directory removes the agents, commands and plugins that would
+  # otherwise load from beside the operator's global config.
+  local iso cfg_dir star_rule="true" edit_perm="deny"
+  if [[ "$write" == "yes" ]]; then
+    star_rule="false"
+    edit_perm="allow"
+  fi
   iso="$(mktemp -d)"
   cfg_dir="$iso/config-home"
   mkdir "$cfg_dir"
-  cat >"$iso/config.json" <<'EOF'
-{
-  "$schema": "https://opencode.ai/config.json",
-  "permission": {
-    "*": "deny",
-    "read": {
-      "*": "allow",
-      "*.env": "deny",
-      "*.env.*": "deny",
-      "*.env.example": "allow"
-    },
-    "glob": "allow",
-    "grep": "allow",
-    "list": "allow",
-    "lsp": "allow",
-    "todowrite": "allow",
-    "edit": "deny",
-    "bash": "deny",
-    "task": "deny",
-    "skill": "deny",
-    "webfetch": "deny",
-    "websearch": "deny",
-    "external_directory": "deny",
-    "question": "deny",
-    "doom_loop": "deny"
-  }
-}
-EOF
+  jq -n --arg edit "$edit_perm" --argjson star "$star_rule" '
+    {
+      "$schema": "https://opencode.ai/config.json",
+      "permission": ((if $star then {"*": "deny"} else {} end)
+        + {
+            "read": {
+              "*": "allow",
+              "*.env": "deny",
+              "*.env.*": "deny",
+              "*.env.example": "allow"
+            },
+            "glob": "allow",
+            "grep": "allow",
+            "list": "allow",
+            "lsp": "allow",
+            "todowrite": "allow",
+            "edit": $edit,
+            "bash": "deny",
+            "task": "deny",
+            "skill": "deny",
+            "webfetch": "deny",
+            "websearch": "deny",
+            "external_directory": "deny",
+            "question": "deny",
+            "doom_loop": "deny"
+          })
+    }' >"$iso/config.json"
 
   local -a args=(run --format json --dir "$workdir")
   [[ -n "$model"  && "$model"  != "null" ]] && args+=(--model "$model")

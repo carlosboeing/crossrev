@@ -158,7 +158,7 @@
       },
       "schema_style": "prompt",
       "schema_native": false,
-      "legs": ["review"],
+      "legs": ["review", "resolve"],
       "sandbox_args": [],
       "quarantine": [".opencode", "opencode.json", "opencode.jsonc"],
       "credential": {
