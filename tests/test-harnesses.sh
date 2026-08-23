@@ -45,11 +45,11 @@ hasnt "quarantine_shared no longer lists .grok" "$(harness_field .quarantine_sha
 
 is "harness_field endpoint_host is claude" "$(harness_field .endpoint_host)" "claude"
 
-# --- the fifth harness: opencode, review-only and not schema-native ---------
+# --- the fifth harness: opencode, both legs and not schema-native -----------
 #
 # Everything asserted here is a measurement recorded in the descriptor rather
 # than an opinion about the CLI. schema_native false is what arms the extra
-# shape-retry in run_invoke; legs is what keeps it off the resolve leg.
+# shape-retry in run_invoke; legs names the resolve leg it may now serve.
 reason="$(harness_not_driven opencode)"
 is "opencode has left not_driven" "$?" "1"
 
@@ -58,7 +58,9 @@ is "harness_get opencode schema_style is prompt" "$(harness_get opencode .schema
 is "harness_get opencode schema_native is false" "$(harness_get_json opencode .schema_native)" "false"
 is "harness_get_json missing key stays null" "$(harness_get_json opencode .no_such_key)" "null"
 is "harness_get_json unknown harness stays null" "$(harness_get_json nosuch .schema_native)" "null"
-is "harness_get opencode serves the review leg only" "$(harness_get_json opencode .legs)" '["review"]'
+is "harness_get opencode serves both legs" "$(harness_get_json opencode .legs)" '["review","resolve"]'
+harness_serves_leg opencode review; is "harness_serves_leg answers review" "$?" "0"
+harness_serves_leg opencode resolve; is "harness_serves_leg answers resolve" "$?" "0"
 is "harness_get opencode secret" "$(harness_get opencode .credential.secret)" "CROSSREV_OPENCODE_AUTH"
 is "harness_get opencode archetype is A" "$(harness_get opencode .credential.archetype)" "A"
 is "harness_get opencode provenance is measured" "$(harness_get opencode .credential.provenance)" "measured"

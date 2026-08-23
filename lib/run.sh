@@ -61,6 +61,21 @@ _worktree_dir() {
   printf '%s/crossrev/worktrees/%s/pr-%s' "${XDG_STATE_HOME:-$HOME/.local/state}" "$slug" "$pr"
 }
 
+# Which repository a directory belongs to, as an absolute path with symlinks
+# resolved. The worktree path above is keyed on the repository slug and the
+# pull request number alone, so two checkouts of one repository collide on it,
+# and the head sha cannot tell them apart -- two checkouts at the same pull
+# request hold the same commit by definition. Reusing the wrong one commits in
+# a checkout the operator is not standing in and pushes where that checkout's
+# remote points.
+_worktree_repo_root() {
+  local dir="${1:-.}" common
+  common="$(git -C "$dir" rev-parse --git-common-dir 2>/dev/null)" || return 1
+  [[ -n "$common" ]] || return 1
+  # A relative --git-common-dir is relative to $dir, so resolve it from there.
+  ( cd "$dir" && cd "$common" && pwd -P ) 2>/dev/null
+}
+
 # ---------------------------------------------------------------------------
 # Interruption, locking and cleanup
 # ---------------------------------------------------------------------------
@@ -491,8 +506,8 @@ run_leg_settings() {
   # refusal is a configuration fact rather than a failure to discover mid-run,
   # so it lands here — before the binary test and long before anything is
   # staged or billed. The leg names arrive as reviewer/resolver; the
-  # descriptor's vocabulary is review/resolve. Cycle also calls this for both
-  # legs before the pass loop, so a review-only resolver dies without a billed
+  # descriptor's vocabulary is review/resolve. Cycle runs the same check for
+  # both legs before its pass loop, so a cycle is refused without a billed
   # review; this copy remains the backstop for a bare `crossrev resolve`.
   local leg_name="resolve"
   [[ "$leg" == "reviewer" ]] && leg_name="review"
@@ -502,9 +517,9 @@ run_leg_settings() {
   [[ -n "$leg_binary" ]] || leg_binary="$LEG_HARNESS"
   command -v "$leg_binary" >/dev/null 2>&1 && return 0
 
-  # Only harnesses that have an adapter and that serve this leg. Picking a
-  # review-only binary because it is the one thing on PATH would stage a
-  # credential and build a worktree, then die in the adapter's write backstop.
+  # Only harnesses that have an adapter and that serve this leg. Substituting
+  # one that cannot serve it would stage a credential and build a worktree for
+  # a leg it can never run.
   local h binary
   while IFS= read -r h; do
     binary="$(harness_get "$h" .binary)"
@@ -536,10 +551,21 @@ _run_assert_harness_serves_leg() {
     "CrossRev runs the $leg_name leg on $(harness_names_for_leg "$leg_name" | _names_human). $(harness_get "$harness" .product_name) is limited to the $(harness_get "$harness" '.legs // [] | join(", ")') leg."
 }
 
-# Cycle forwards --harness into both legs, and otherwise reads each leg's
-# configured harness. Either way a review-only resolver would otherwise pay
-# for the review, post comments, and only then die in run_leg_settings.
-# Check both after the config is loaded and before the pass loop.
+# Cycle forwards --harness into both legs, so an override puts one harness on
+# both sides of the loop. That is served rather than refused, and refusing it
+# would contradict this file twice: run_leg_settings above already puts both
+# legs on one harness when only one is installed, and legs_assert_models_diverged
+# returns early when one model was asked for, so the same pairing named through
+# reviewer.harness and resolver.harness has always run. An operator with one
+# harness installed has no other pairing to name.
+#
+# It is not warned about either, because the configured form is not. A warning
+# here would restore the asymmetry this removes, in the other direction.
+#
+# What the override IS checked for is what the configured names are checked
+# for: whether the harness serves the leg. Checked after the config loads and
+# before the pass loop, so a harness that cannot resolve is refused without a
+# billed review; the per-leg gate above stays the backstop for a bare resolve.
 run_assert_cycle_pairing() {
   local override="${1:-}"
   local reviewer resolver
@@ -547,9 +573,10 @@ run_assert_cycle_pairing() {
     reviewer="$override"
     resolver="$override"
   else
-    reviewer="$(cfg_get ".reviewer.harness")"
-    resolver="$(cfg_get ".resolver.harness")"
+    reviewer="$(cfg_get '.reviewer.harness')"
+    resolver="$(cfg_get '.resolver.harness')"
   fi
+
   _run_assert_harness_serves_leg "$reviewer" review
   _run_assert_harness_serves_leg "$resolver" resolve
 }
@@ -1804,7 +1831,7 @@ leg_resolve() {
   fi
 
   # Resolve runs in a dedicated worktree so the operator's checkout is untouched.
-  local orig_cwd wt_dir wt_err wt_cur_sha push_remote target_repo current_sha
+  local orig_cwd wt_dir wt_err wt_cur_sha wt_owner this_repo push_remote target_repo current_sha
   orig_cwd="$(pwd)"
   wt_dir="$(_worktree_dir "$CTX_REPO" "$CTX_PR")"
   CROSSREV_WORKTREE="$wt_dir"
@@ -1844,7 +1871,10 @@ leg_resolve() {
 
   if [[ -d "$wt_dir" ]]; then
     wt_cur_sha="$(git -C "$wt_dir" rev-parse HEAD 2>/dev/null || true)"
-    if [[ -z "$wt_cur_sha" || "$wt_cur_sha" != "$CTX_HEAD_SHA" ]]; then
+    wt_owner="$(_worktree_repo_root "$wt_dir" || true)"
+    this_repo="$(_worktree_repo_root . || true)"
+    if [[ -z "$wt_cur_sha" || "$wt_cur_sha" != "$CTX_HEAD_SHA" \
+       || -z "$wt_owner" || -z "$this_repo" || "$wt_owner" != "$this_repo" ]]; then
       rm -rf "$wt_dir"
       git worktree prune 2>/dev/null || true
     fi
@@ -2085,10 +2115,23 @@ Resolutions recorded; committing and replying now.$(state_marker_encode "$(jq -c
   # Layer two of the divergence guard: compare answering models, where both
   # harnesses report one. Absence is not a halt — that would disqualify the codex
   # adapter for a field Codex does not emit.
+  #
+  # The comparison reads what each side actually ran, not what the config says,
+  # because --harness rewrites legs after the config is read: both of a cycle's
+  # legs, and this one of a bare resolve. The review marker records its leg's
+  # post-substitution harness, model and endpoint (lib/run.sh writes them after
+  # run_leg_settings), and this leg's effective triple is in the locals below.
+  # Under a cycle override both sides carry one harness with model and endpoint
+  # cleared, so the pairing prints "same" and the guard stands down — the
+  # single-lineage run the operator asked for. Under a bare resolve the review
+  # side keeps what it ran while this side carries the override, so a flag that
+  # changed nothing still compares honestly and the guard stays armed.
   local configured
   configured="$(legs_configured_difference \
-    "$(cfg_get '.reviewer.harness')"  "$(cfg_get '.reviewer.endpoint')"  "$(cfg_get '.reviewer.model')" \
-    "$(cfg_get '.resolver.harness')" "$(cfg_get '.resolver.endpoint')" "$(cfg_get '.resolver.model')")"
+    "$(jq -r '.harness // ""' <<<"$review_marker")" \
+    "$(jq -r '.endpoint // ""' <<<"$review_marker")" \
+    "$(jq -r '.model // ""' <<<"$review_marker")" \
+    "$harness" "$endpoint" "$model")"
   legs_assert_models_diverged "$configured" \
     "$(jq -r '.model_reported // "null"' <<<"$review_marker")" "${model_reported:-null}"
 

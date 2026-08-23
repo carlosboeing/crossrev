@@ -209,7 +209,43 @@ guard_err="$(legs_assert_push_target "1111111111111111111111111111111111111111" 
 notok_if "revision guard refuses when tree is not at PR head" "$guard_rc"
 has "revision guard names the revision mismatch" "$guard_err" "crossrev pushes only to the revision under review"
 
+# --- 10. Leftover worktree belonging to another checkout ----------------------
+# The worktree path is keyed on the repository slug and the pull request number,
+# so two checkouts of one repository collide on it. Section 8's revision check
+# cannot separate them: both hold the pull request's head by definition. Pinning
+# the commit dates gives the two fixtures byte-identical commits, and therefore
+# one sha, so the collision is reproduced rather than waited for.
+export GIT_AUTHOR_DATE="2026-01-01T00:00:00+00:00"
+export GIT_COMMITTER_DATE="2026-01-01T00:00:00+00:00"
+
+fixture_repo; stub_reset
+other_dir="$FIX_DIR"; other_origin="$FIX_ORIGIN"; shared_head="$FIX_HEAD"
+mkdir -p "$(dirname "$wt_expected")"
+git -C "$other_dir" worktree add --detach "$wt_expected" "$shared_head"
+printf 'belongs to the other checkout\n' > "$wt_expected/other.txt"
+
+fixture_repo; stub_reset
+unset GIT_AUTHOR_DATE GIT_COMMITTER_DATE
+is "the two checkouts share a head revision" "$FIX_HEAD" "$shared_head"
+
+rm_file="$(marker_comment 9001 "$(setup_review_marker)" | jq -cs . | payload)"
+setup_resolve_routes "$rm_file"
+
+edit_script_10="$(mktemp)"
+printf 'printf "export const ok = 1\nexport function refresh() { /* fixed */ }\n" > app.ts
+' > "$edit_script_10"
+CROSSREV_RESOLVE_EDIT="$edit_script_10"; export CROSSREV_RESOLVE_EDIT
+CROSSREV_RESOLVE_PAYLOAD="$(setup_resolve_payload | payload)"; export CROSSREV_RESOLVE_PAYLOAD
+
+out="$("$CROSSREV" resolve --pr 42 2>&1)"; rc=$?
+is "resolve succeeds beside another checkout's leftover worktree" "$rc" "0"
+gone "the other checkout's worktree is not reused" "$wt_expected/other.txt"
+has "the fix reaches the checkout the leg ran from" \
+  "$(git --git-dir="$FIX_ORIGIN" show "refs/heads/feature:app.ts")" "/* fixed */"
+hasnt "and nothing reaches the other checkout" \
+  "$(git --git-dir="$other_origin" show "refs/heads/feature:app.ts")" "/* fixed */"
+
 rm -rf "$FIX_DIR/.crossrev-quarantine"
-rm -f "$edit_script" "$bad_payload" "$edit_script_7" "$edit_script_8"
+rm -f "$edit_script" "$bad_payload" "$edit_script_7" "$edit_script_8" "$edit_script_10"
 
 finish

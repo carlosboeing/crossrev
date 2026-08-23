@@ -58,9 +58,7 @@ endpoints:
 #                    CROSSREV_CODEX_AUTH, a second App with Secrets: write, and a cron
 #   claude / claude  one vendor, two models — fable reviewing, opus resolving. One
 #                    secret, no cron. Weaker, and doubles Claude usage
-#   opencode / claude  hosted or local, cross-vendor, reviewer side only:
-#                    opencode is review-only in CrossRev, so it can take
-#                    reviewer.harness but never resolver.harness. Its --model
+#   opencode / claude  hosted or local, cross-vendor, either side. Its --model
 #                    takes provider/model, not a bare id
 #   agy / claude     cross-vendor, self-hosted only: agy's token lives about an hour
 #   kimi / claude    local only. kimi is an endpoint on the claude adapter, and its

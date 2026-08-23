@@ -139,13 +139,15 @@ Falling back to the vendor's own API would mean running Claude while the config 
 
 Each endpoint needs both a `base_url` and a `token_env`. The variable name is required rather than assumed because it genuinely differs by service.
 
-## The harness can't serve this leg
+## A harness was refused for a leg
 
-`the harness 'opencode' cannot serve the resolve leg`
+`the harness '<name>' cannot serve the resolve leg`
 
-Some harnesses run one leg only. opencode is review-only: it can review a pull request and cannot resolve findings on one. Name it as `reviewer.harness`, or pass `--harness opencode` to `review`, and leave the resolve leg to one of `claude`, `codex`, `agy` or `grok` — the error names them.
+A harness may declare which legs it serves, and one that does not serve the leg you named is refused before anything is staged or billed. Each leg checks the descriptor before it runs, and a cycle checks both after the config loads, so a cycle stops without paying for a review it cannot follow with a resolve.
 
-The refusal happens before anything is staged or billed. A cycle checks both legs after the config loads, so a review-only resolver is refused without a billed review. It is a configuration fact, not a transient failure, so re-running changes nothing; change the pairing instead.
+No shipped harness currently restricts its legs, so this refusal only appears for a harness whose descriptor carries a `legs` field that omits the one you named. It is a configuration fact rather than a transient failure, so re-running changes nothing. Name a harness that serves the leg.
+
+`--harness` on `cycle` lands on both legs, which is how an operator with a single harness installed runs the loop. It is refused only when that harness cannot serve one of them.
 
 ## A credential problem in CI
 
