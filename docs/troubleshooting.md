@@ -145,7 +145,7 @@ Each endpoint needs both a `base_url` and a `token_env`. The variable name is re
 
 Some harnesses run one leg only. opencode is review-only: it can review a pull request and cannot resolve findings on one. Name it as `reviewer.harness`, or pass `--harness opencode` to `review`, and leave the resolve leg to one of `claude`, `codex`, `agy` or `grok` — the error names them.
 
-The refusal happens before anything is staged or billed. It is a configuration fact, not a transient failure, so re-running changes nothing; change the pairing instead.
+The refusal happens before anything is staged or billed. A cycle checks both legs after the config loads, so a review-only resolver is refused without a billed review. It is a configuration fact, not a transient failure, so re-running changes nothing; change the pairing instead.
 
 ## A credential problem in CI
 

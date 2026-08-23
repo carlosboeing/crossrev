@@ -483,13 +483,12 @@ run_leg_settings() {
   # refusal is a configuration fact rather than a failure to discover mid-run,
   # so it lands here — before the binary test and long before anything is
   # staged or billed. The leg names arrive as reviewer/resolver; the
-  # descriptor's vocabulary is review/resolve.
+  # descriptor's vocabulary is review/resolve. Cycle also calls this for both
+  # legs before the pass loop, so a review-only resolver dies without a billed
+  # review; this copy remains the backstop for a bare `crossrev resolve`.
   local leg_name="resolve"
   [[ "$leg" == "reviewer" ]] && leg_name="review"
-  if ! harness_serves_leg "$LEG_HARNESS" "$leg_name"; then
-    ui_die "the harness '$LEG_HARNESS' cannot serve the $leg_name leg" \
-      "CrossRev runs the $leg_name leg on $(harness_names_for_leg "$leg_name" | _names_human). $(harness_get "$LEG_HARNESS" .product_name) is limited to the $(harness_get "$LEG_HARNESS" '.legs // [] | join(", ")') leg."
-  fi
+  _run_assert_harness_serves_leg "$LEG_HARNESS" "$leg_name"
 
   local leg_binary; leg_binary="$(harness_get "$LEG_HARNESS" .binary)"
   [[ -n "$leg_binary" ]] || leg_binary="$LEG_HARNESS"
@@ -517,6 +516,34 @@ run_leg_settings() {
   # A model id for the harness that was asked for is wrong for a different one.
   LEG_MODEL=""; LEG_ENDPOINT=""
   return 0
+}
+
+# Shared by run_leg_settings and by the cycle pairing check. The message is
+# the product: it names the harness, the leg, the harnesses that can take
+# the leg, and the legs the refused harness actually serves.
+_run_assert_harness_serves_leg() {
+  local harness="$1" leg_name="$2"
+  harness_serves_leg "$harness" "$leg_name" && return 0
+  ui_die "the harness '$harness' cannot serve the $leg_name leg" \
+    "CrossRev runs the $leg_name leg on $(harness_names_for_leg "$leg_name" | _names_human). $(harness_get "$harness" .product_name) is limited to the $(harness_get "$harness" '.legs // [] | join(", ")') leg."
+}
+
+# Cycle forwards --harness into both legs, and otherwise reads each leg's
+# configured harness. Either way a review-only resolver would otherwise pay
+# for the review, post comments, and only then die in run_leg_settings.
+# Check both after the config is loaded and before the pass loop.
+run_assert_cycle_pairing() {
+  local override="${1:-}"
+  local reviewer resolver
+  if [[ -n "$override" ]]; then
+    reviewer="$override"
+    resolver="$override"
+  else
+    reviewer="$(cfg_get ".reviewer.harness")"
+    resolver="$(cfg_get ".resolver.harness")"
+  fi
+  _run_assert_harness_serves_leg "$reviewer" review
+  _run_assert_harness_serves_leg "$resolver" resolve
 }
 
 _nullable() { [[ "$1" == "null" ]] && printf '' || printf '%s' "$1"; }
@@ -2756,13 +2783,13 @@ _cycle_finish_at_bound() {
 # same legs the workflows invoke, and the two modes can be A/B tested on real
 # pull requests without touching leg code.
 cmd_cycle() {
-  local pr="" repo="" trigger="human" no_tips=0
+  local pr="" repo="" trigger="human" no_tips=0 harness_override=""
   local -a args=()
   while (( $# )); do
     case "$1" in
       --pr)      pr="${2:-}"; args+=(--pr "${2:-}"); shift 2 ;;
       --repo)    repo="${2:-}"; args+=(--repo "${2:-}"); shift 2 ;;
-      --harness) args+=(--harness "${2:-}"); shift 2 ;;
+      --harness) harness_override="${2:-}"; args+=(--harness "${2:-}"); shift 2 ;;
       --trigger) trigger="${2:-}"; args+=(--trigger "${2:-}"); shift 2 ;;
       --no-tips) no_tips=1; shift ;;
       --keep-transcripts) args+=(--keep-transcripts); shift ;;
@@ -2786,6 +2813,7 @@ cmd_cycle() {
     (( load_rc == 2 )) && return 0
     return "$load_rc"
   }
+  run_assert_cycle_pairing "$harness_override"
   local max="$CTX_MAX_PASSES_PER_CYCLE" i pass marker rmarker rlabel verdict actionable
   ui_say "Cycling $CTX_REPO#$CTX_PR, up to $max passes. Ctrl-C is safe — each leg finishes the write in flight."
 

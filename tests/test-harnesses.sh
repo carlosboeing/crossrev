@@ -56,6 +56,8 @@ is "opencode has left not_driven" "$?" "1"
 is "harness_get opencode product_name stays lowercase" "$(harness_get opencode .product_name)" "opencode"
 is "harness_get opencode schema_style is prompt" "$(harness_get opencode .schema_style)" "prompt"
 is "harness_get opencode schema_native is false" "$(harness_get_json opencode .schema_native)" "false"
+is "harness_get_json missing key stays null" "$(harness_get_json opencode .no_such_key)" "null"
+is "harness_get_json unknown harness stays null" "$(harness_get_json nosuch .schema_native)" "null"
 is "harness_get opencode serves the review leg only" "$(harness_get_json opencode .legs)" '["review"]'
 is "harness_get opencode secret" "$(harness_get opencode .credential.secret)" "CROSSREV_OPENCODE_AUTH"
 is "harness_get opencode archetype is A" "$(harness_get opencode .credential.archetype)" "A"

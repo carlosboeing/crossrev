@@ -78,6 +78,9 @@ cycle_driver() {
     ui_say() { :; }
     ui_end() { printf "%s\n" "$*"; }
     run_upgrade_nudge() { :; }
+    # The pairing check reads cfg_get; this driver is about the pass
+    # bound, not the pairing, so the check is a no-op here.
+    run_assert_cycle_pairing() { :; }
     cmd_cycle --pr 42 --no-tips
   '
 }

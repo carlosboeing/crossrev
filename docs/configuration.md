@@ -117,7 +117,7 @@ Cross-vendor is the strongest arrangement, because a bug one model family misses
 |---|---|---|
 | `codex` / `claude` | Hosted, cross-vendor | Codex's token rotates, so it adds a credential secret, a second App with `Secrets: write`, and a scheduled refresher |
 | `claude` / `claude` | Hosted, one vendor two models | One secret, no refresher. Weaker, and doubles Claude usage |
-| `opencode` / `claude` | Hosted or local, cross-vendor, reviewer side only | opencode cannot take the resolve leg, so the resolver stays Claude. One static credential secret, no refresher |
+| `opencode` / `claude` | Hosted or local, cross-vendor, reviewer side only | opencode cannot take the resolve leg, so the resolver stays Claude. Adds the opencode secret on top of Claude's subscription secret; no refresher |
 | `agy` / `claude` | Self-hosted only | Antigravity's token lives 56 minutes, and CrossRev cannot seed into a hosted runner yet |
 | `kimi` / `claude` | Local only | Kimi is an endpoint on the Claude adapter, and its credential is a 15-minute OAuth token |
 

@@ -127,9 +127,11 @@ harness_names() {
 harness_get()      { harness_load; jq -r --arg n "$1" ".harnesses[] | select(.name == \$n) | $2 // empty" <<<"$HARNESS_JSON"; }
 # The JSON sibling exists because `// empty` and `// null` cannot return a
 # boolean: jq reads false as falsy, so schema_native: false was invisible to
-# both until the first non-schema-native harness arrived. The if keeps a
-# missing key at null while letting false through as false.
-harness_get_json() { harness_load; jq -c --arg n "$1" "( [ .harnesses[] | select(.name == \$n) | ($2) ] | first ) | if . == null then null else . end" <<<"$HARNESS_JSON"; }
+# both until the first non-schema-native harness arrived. Wrapping the
+# lookup in an array and taking `first` is what keeps that false: an empty
+# array yields null for an absent key or an unknown name, while `//` would
+# have collapsed false to the default.
+harness_get_json() { harness_load; jq -c --arg n "$1" "[ .harnesses[] | select(.name == \$n) | ($2) ] | first" <<<"$HARNESS_JSON"; }
 harness_field()    { harness_load; jq -r "$1 // empty" <<<"$HARNESS_JSON"; }
 harness_known()    { harness_load; [[ "$(jq -r --arg n "$1" 'any(.harnesses[]; .name == $n)' <<<"$HARNESS_JSON")" == "true" ]]; }
 

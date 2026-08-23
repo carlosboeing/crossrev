@@ -743,6 +743,28 @@ has "and naming the harnesses that can serve it"    "$out" "claude, codex, agy a
 is  "no harness ran on the way out"                 "$(cat "$PROMPT_LOG")" ""
 is  "and stages no credential"                      "$(count 'secret set')" "0"
 
+# The same pairing under cycle would otherwise pay for the review, post
+# comments, and only then die in run_leg_settings. The cycle entry checks
+# both legs after the config loads and before the pass loop.
+fixture_repo "$(config_opencode_resolves)"; stub_reset
+routes_baseline "$(printf '[]' | payload)"
+route '*reviewThreads*' "$(threads_response)"
+out="$("$CROSSREV" cycle --pr 42 2>&1)"; rc=$?
+is  "a cycle with a review-only resolver is refused before any leg" "$rc" "1"
+has "naming the harness and the resolve leg"                       "$out" "cannot serve the resolve leg"
+is  "no harness ran on that cycle either"                          "$(cat "$PROMPT_LOG")" ""
+hasnt "and the cycle never announced it had started"               "$out" "Cycling"
+
+# --harness is forwarded into both legs, so a review-only override is the
+# same pairing even when the config itself is valid.
+fixture_repo; stub_reset
+routes_baseline "$(printf '[]' | payload)"
+route '*reviewThreads*' "$(threads_response)"
+out="$("$CROSSREV" cycle --pr 42 --harness opencode 2>&1)"; rc=$?
+is  "a cycle --harness opencode is refused before any leg" "$rc" "1"
+has "naming the override as unable to resolve"            "$out" "cannot serve the resolve leg"
+is  "and still invokes no harness"                        "$(cat "$PROMPT_LOG")" ""
+
 # The single-harness fallback iterates only harnesses that serve the leg. On a
 # machine where the configured resolver is absent and only opencode is on
 # PATH, substituting it would stage a credential and die in the write

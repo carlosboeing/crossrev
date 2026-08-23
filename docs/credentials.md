@@ -24,7 +24,7 @@ Each row is a complete set. Secrets within a row are not alternatives.
 | GitHub-hosted, Claude on both legs | `APP_ID`, `APP_PRIVATE_KEY`, `CLAUDE_CODE_OAUTH_TOKEN` |
 | GitHub-hosted, one Claude leg and one Codex leg | `APP_ID`, `APP_PRIVATE_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, `CROSSREV_CODEX_AUTH`, `CROSSREV_REFRESH_APP_ID`, `CROSSREV_REFRESH_APP_PRIVATE_KEY` |
 | GitHub-hosted, Codex on both legs | `APP_ID`, `APP_PRIVATE_KEY`, `CROSSREV_CODEX_AUTH`, `CROSSREV_REFRESH_APP_ID`, `CROSSREV_REFRESH_APP_PRIVATE_KEY` |
-| GitHub-hosted, one opencode leg | `APP_ID`, `APP_PRIVATE_KEY`, `CROSSREV_OPENCODE_AUTH` |
+| GitHub-hosted, one opencode leg and one Claude leg | `APP_ID`, `APP_PRIVATE_KEY`, `CROSSREV_OPENCODE_AUTH`, `CLAUDE_CODE_OAUTH_TOKEN` |
 | Self-hosted, both legs using logins already on the runner | `APP_ID`, `APP_PRIVATE_KEY` |
 
 Two legs on the same harness share one harness credential. Any GitHub-hosted Codex leg adds the Codex secret and both refresher App secrets. Any GitHub-hosted opencode leg adds the opencode secret and nothing else — its credential is static, so there is no refresher to provision. A leg pointed at a named endpoint adds whatever variable that endpoint's `token_env` names, on any runner.
