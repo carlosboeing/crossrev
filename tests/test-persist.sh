@@ -885,4 +885,17 @@ is  "the same answering model on both legs halts"     "$rc" "1"
 has "and the error names the model that answered both" "$err" "the same model answered each: reviewer-model"
 export CROSSREV_RESOLVE_MODEL=resolver-model
 
+# --harness on a bare resolve rewrites this leg only — the review already ran
+# on whatever the config named. The comparison has to read what each side
+# actually ran, or the flag silently switches the layer-two guard off.
+fixture_repo "$(config_with_issue_sink)"; stub_reset
+routes_baseline "$(marker_comment 9001 "$(review_marker)" | jq -cs . | payload)"
+routes_resolve
+CROSSREV_RESOLVE_PAYLOAD="$(resolve_payload | payload)"; export CROSSREV_RESOLVE_PAYLOAD
+CROSSREV_RESOLVE_MODEL=reviewer-model; export CROSSREV_RESOLVE_MODEL
+err="$("$CROSSREV" resolve --pr 42 --harness claude 2>&1 >/dev/null)"; rc=$?
+is  "an override that changes nothing keeps the guard armed" "$rc" "1"
+has "and still names the model that answered both"           "$err" "the same model answered each: reviewer-model"
+export CROSSREV_RESOLVE_MODEL=resolver-model
+
 finish

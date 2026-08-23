@@ -787,6 +787,10 @@ path_only_grok() {
 fixture_repo; stub_reset
 routes_baseline "$(marker_comment 9001 "$(rd_review_marker)" | jq -cs . | payload)"
 route '*reviewThreads*' "$(threads_response "$(thread_node T_A app.ts 2 false "$RD_ID_A")")"
+# The helper rewrites PATH for everything after it, so it is bracketed: the
+# fallback blocks are not the last statements in this file, and a leaked PATH
+# would quietly change what every later command resolves.
+_path_before_fallback="$PATH"
 path_only_grok
 out="$(CROSSREV_HARNESS_FILE="$review_only_desc" "$CROSSREV" resolve --pr 42 2>&1)"; rc=$?
 
@@ -794,6 +798,8 @@ is  "the resolve fallback refuses when the only installed harness cannot serve t
 has "and says no other resolve-capable harness is installed"                             "$out" "no other harness that can serve the resolve leg"
 is  "no harness ran on the fallback path either"                                         "$(cat "$PROMPT_LOG")" ""
 is  "and still stages no credential"                                                     "$(count 'secret set')" "0"
+
+PATH="$_path_before_fallback"; export PATH
 
 rm -f "$review_only_desc"
 
@@ -819,6 +825,7 @@ rd_routes
 route_first 'api --paginate repos/*/pulls/42/comments*' "$(rd_prior_replies)"
 CROSSREV_RESOLVE_PAYLOAD="$(printf '%s' "$RD_FIX_PAYLOAD" | payload)"; export CROSSREV_RESOLVE_PAYLOAD
 CROSSREV_RESOLVE_EDIT="$(rd_edit_script)"; export CROSSREV_RESOLVE_EDIT
+_path_before_fallback="$PATH"
 path_only_opencode
 out="$("$CROSSREV" resolve --pr 42 2>&1)"; rc=$?
 
@@ -827,5 +834,7 @@ has "under the standing substitution warning"    "$out" "runs on 'opencode' inst
 has "and the resolver really runs"               "$(cat "$PROMPT_LOG")" "You are the resolve leg"
 has "and its fix lands" \
   "$(git --git-dir="$FIX_ORIGIN" log -1 refs/heads/feature --format=%s)" "fix: resolve crossrev review findings (pass 1)"
+
+PATH="$_path_before_fallback"; export PATH
 
 finish

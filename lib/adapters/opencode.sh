@@ -17,21 +17,31 @@
 # **The permission defaults are inverted.** Most permissions default to allow,
 # so unlike every other harness, an opencode leg holds `edit` and `bash`
 # unless something takes them away. The isolation config below is that
-# something, in one of two shapes chosen by the write flag. A reading leg
-# keeps the `"*": "deny"` base rule with edit denied under it. A writing leg
-# drops the base rule and grants edit outright, because measured against
-# 1.18.21 the base rule suppresses edit in every form — shorthand or map — so
-# no grant can survive beside it. The standing denials (bash, task, skill,
-# webfetch, websearch, external_directory) hold in both shapes. The trade the
-# write shape makes is recorded rather than hidden: without the base rule it
-# does not fail closed on a permission key a future opencode adds, which the
-# read shape catches by default. That is the price of a grant the base rule
-# makes unreachable, and bash staying denied is what keeps the exposure small
-# — files inside the worktree, not commands. A denied tool is absent from the
-# session rather than refused at call time, and nothing prompts for approval,
-# so there is nothing for a headless run to block on. OPENCODE_CONFIG merges
-# on top of the operator's own global config and wins on these keys —
-# measured twice, against a global `edit: allow` and again against
+# something, and it is fail-closed in both directions the write flag names:
+# `"*": "deny"` as the base rule, with every useful tool allowed under it, and
+# exactly one key flipped by the leg — a reading leg denies `edit`, a writing
+# leg allows it beside the rule, which at 1.18.21 writes files. An earlier
+# contrary measurement had this build dropping the base rule to make room for
+# the grant; re-measured while resolving review on that change, the rule plus
+# an explicit edit allow wrote the file, so the grant lives under the rule
+# after all — and the rule is what holds the surface no key names. Permission
+# keys match as wildcard patterns against tool names, which covers custom
+# tools and whatever a plugin or MCP server registers; without `"*": "deny"`
+# all of those inherit opencode's allow-by-default, on the one leg that reads
+# attacker-authored diff text holding a write grant. A denied tool is absent
+# from the session rather than refused at call time, and nothing prompts for
+# approval, so there is nothing for a headless run to block on.
+#
+# Two more doors are closed beside the permission block. `run --pure` keeps
+# external plugins from loading at all — belt for the base rule's braces,
+# since a plugin's registered tools would be denied anyway but its code would
+# still run. And `OPENCODE_CONFIG_DIR` at an empty directory displaces the
+# agents and commands that would otherwise load from beside the operator's
+# global config; plugins are NOT displaced by it — opencode resolves them
+# from its own directories regardless — which is why the base rule and
+# --pure, not the empty directory, are what answer them. OPENCODE_CONFIG
+# itself merges on top of the operator's global config and wins on these
+# keys — measured twice, against a global `edit: allow` and again against
 # ~/.opencode/opencode.json, which loads later.
 #
 # **stdin must be /dev/null.** With stdin held open the CLI blocks on it and
@@ -94,56 +104,52 @@ adapter_opencode() {
     leg_prompt="$prompt_copy"
   fi
 
-  # Isolation, layered over whatever the operator already has, in one of the
-  # two shapes the header describes: the write flag chooses between the
-  # fail-closed read shape and the edit-granting resolve shape. question and
-  # doom_loop are named denials in both shapes rather than casualties of "*":
-  # the write shape has no "*" to hide them under, and doom_loop otherwise
-  # falls back to ask — a prompt a headless leg cannot answer. task is denied
-  # for predictability (the model spawns a subagent unprompted, which
-  # multiplies token spend without being asked for) and skill because it is
-  # the door to the operator's own skill library. read stays a map in both:
-  # the string "allow" would replace opencode's own *.env deny and let the
-  # model quote an untracked .env into a public comment. OPENCODE_CONFIG_DIR
-  # at an empty directory removes the agents, commands and plugins that would
-  # otherwise load from beside the operator's global config.
-  local iso cfg_dir star_rule="true" edit_perm="deny"
-  if [[ "$write" == "yes" ]]; then
-    star_rule="false"
-    edit_perm="allow"
-  fi
+  # One fail-closed shape for both legs: `"*": "deny"` under everything, the
+  # write flag flipping exactly one key. question and doom_loop are named
+  # denials rather than casualties of "*" so the intent survives anyone
+  # reading only this block; doom_loop otherwise falls back to ask — a prompt
+  # a headless leg cannot answer. task is denied for predictability (the
+  # model spawns a subagent unprompted, which multiplies token spend without
+  # being asked for) and skill because it is the door to the operator's own
+  # skill library. read stays a map, not the string "allow": a string would
+  # replace opencode's own *.env deny and let the model quote an untracked
+  # .env into a public comment.
+  local iso cfg_dir edit_perm="deny"
+  [[ "$write" == "yes" ]] && edit_perm="allow"
   iso="$(mktemp -d)"
   cfg_dir="$iso/config-home"
   mkdir "$cfg_dir"
-  jq -n --arg edit "$edit_perm" --argjson star "$star_rule" '
+  jq -n --arg edit "$edit_perm" '
     {
       "$schema": "https://opencode.ai/config.json",
-      "permission": ((if $star then {"*": "deny"} else {} end)
-        + {
-            "read": {
-              "*": "allow",
-              "*.env": "deny",
-              "*.env.*": "deny",
-              "*.env.example": "allow"
-            },
-            "glob": "allow",
-            "grep": "allow",
-            "list": "allow",
-            "lsp": "allow",
-            "todowrite": "allow",
-            "edit": $edit,
-            "bash": "deny",
-            "task": "deny",
-            "skill": "deny",
-            "webfetch": "deny",
-            "websearch": "deny",
-            "external_directory": "deny",
-            "question": "deny",
-            "doom_loop": "deny"
-          })
+      "permission": {
+        "*": "deny",
+        "read": {
+          "*": "allow",
+          "*.env": "deny",
+          "*.env.*": "deny",
+          "*.env.example": "allow"
+        },
+        "glob": "allow",
+        "grep": "allow",
+        "list": "allow",
+        "lsp": "allow",
+        "todowrite": "allow",
+        "edit": $edit,
+        "bash": "deny",
+        "task": "deny",
+        "skill": "deny",
+        "webfetch": "deny",
+        "websearch": "deny",
+        "external_directory": "deny",
+        "question": "deny",
+        "doom_loop": "deny"
+      }
     }' >"$iso/config.json"
 
-  local -a args=(run --format json --dir "$workdir")
+  # --pure keeps external plugins out of the session entirely; see the header
+  # for why the permission block alone does not answer them.
+  local -a args=(run --pure --format json --dir "$workdir")
   [[ -n "$model"  && "$model"  != "null" ]] && args+=(--model "$model")
   [[ -n "$effort" && "$effort" != "null" ]] && args+=(--variant "$effort")
 

@@ -177,16 +177,19 @@ has "a missing codex hardening argument fails loudly" \
 has  "a writing agy leg accepts edits"           "$(probe agy yes)" "--mode accept-edits"
 hasnt "a reading agy leg asks for no mode at all" "$(probe agy no)" "--mode"
 
-# opencode's grant is the config shape, not a flag: edit allowed only beside
-# an absent base rule, because the rule suppresses edit in every form.
-has  "a writing opencode leg grants edit outright" "$(probe opencode yes)" "edit=allow"
-hasnt "and carries no fail-closed base rule beside it" "$(probe opencode yes)" "*=deny"
-has  "a reading opencode leg denies edit"          "$(probe opencode no)" "edit=deny"
-has  "under the fail-closed base rule"             "$(probe opencode no)" "*=deny"
+# opencode's grant is the config shape, not a flag, and every shape keeps the
+# fail-closed base rule — it is what denies tools no key names. The write
+# shape flips edit beside it; the read shape denies edit under it.
+has  "a writing opencode leg grants edit"           "$(probe opencode yes)" "edit=allow"
+has  "under the fail-closed base rule"              "$(probe opencode yes)" "*=deny"
+has  "a reading opencode leg denies edit"           "$(probe opencode no)" "edit=deny"
+has  "with the same fail-closed base rule"          "$(probe opencode no)" "*=deny"
 for _k in bash task skill webfetch websearch external_directory; do
   has "with $_k denied in the write shape" "$(probe opencode yes)" "$_k=deny"
   has "with $_k denied in the read shape"  "$(probe opencode no)"  "$_k=deny"
 done
+has "and both shapes run without external plugins" \
+  "$(probe opencode yes) $(probe opencode no)" "--pure"
 
 # agy's --print takes the prompt as its VALUE, so a mode flag written after it
 # becomes the prompt. The stub refuses that order; this is the assertion that

@@ -2037,23 +2037,22 @@ Resolutions recorded; committing and replying now.$(state_marker_encode "$(jq -c
   # harnesses report one. Absence is not a halt — that would disqualify the codex
   # adapter for a field Codex does not emit.
   #
-  # --harness rewrites both of a cycle's legs, and this one of a bare resolve,
-  # after the config is read. run_leg_settings also clears model and endpoint,
-  # so a comparison that kept the config's models would still print "different"
-  # and halt after the resolve ran — the mid-cycle death this file elsewhere
-  # works to avoid. Passing the override on both sides with those fields empty
-  # is what the operator asked for, which is the same pairing the configured
-  # one-harness form has always been allowed to run.
+  # The comparison reads what each side actually ran, not what the config says,
+  # because --harness rewrites legs after the config is read: both of a cycle's
+  # legs, and this one of a bare resolve. The review marker records its leg's
+  # post-substitution harness, model and endpoint (lib/run.sh writes them after
+  # run_leg_settings), and this leg's effective triple is in the locals below.
+  # Under a cycle override both sides carry one harness with model and endpoint
+  # cleared, so the pairing prints "same" and the guard stands down — the
+  # single-lineage run the operator asked for. Under a bare resolve the review
+  # side keeps what it ran while this side carries the override, so a flag that
+  # changed nothing still compares honestly and the guard stays armed.
   local configured
-  if [[ -n "$harness_override" ]]; then
-    configured="$(legs_configured_difference \
-      "$harness_override" "" "" \
-      "$harness_override" "" "")"
-  else
-    configured="$(legs_configured_difference \
-      "$(cfg_get '.reviewer.harness')"  "$(cfg_get '.reviewer.endpoint')"  "$(cfg_get '.reviewer.model')" \
-      "$(cfg_get '.resolver.harness')" "$(cfg_get '.resolver.endpoint')" "$(cfg_get '.resolver.model')")"
-  fi
+  configured="$(legs_configured_difference \
+    "$(jq -r '.harness // ""' <<<"$review_marker")" \
+    "$(jq -r '.endpoint // ""' <<<"$review_marker")" \
+    "$(jq -r '.model // ""' <<<"$review_marker")" \
+    "$harness" "$endpoint" "$model")"
   legs_assert_models_diverged "$configured" \
     "$(jq -r '.model_reported // "null"' <<<"$review_marker")" "${model_reported:-null}"
 

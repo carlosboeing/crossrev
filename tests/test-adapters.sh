@@ -340,10 +340,12 @@ has "and the append corrects the native-constraint claim" \
 
 # The argument vector, asserted on what the adapter built rather than on the
 # stub's complaints: --format json selects the event stream, --dir names the
-# checkout, and --auto is a blanket bypass that is never passed.
+# checkout, --pure keeps external plugins out, and --auto is a blanket bypass
+# that is never passed.
 has "the leg asks for the json event stream"      "$opencode_review_argv" "--format json"
 has "the leg names the checkout as the workspace" "$opencode_review_argv" "--dir"
 has "the leg passes the configured model through" "$opencode_review_argv" "--model opencode/reviewer-model"
+has "and runs without external plugins"           "$opencode_review_argv" "--pure"
 hasnt "a leg is granted no blanket bypass"        "$opencode_review_argv" "--auto"
 
 # The permission block is the whole security story for a reading leg, so it is
@@ -360,38 +362,48 @@ done
 is  "and keeps the .env denial in the read map" \
   "$(jq -r '.permission.read["*.env"] // "absent"' <<<"$opencode_review_cfg")" "deny"
 
+read_only_cfg="$(mktemp)"
+printf '{"permission":{"*":"deny","edit":"deny","bash":"deny","task":"deny","skill":"deny","webfetch":"deny","websearch":"deny","external_directory":"deny","read":{"*.env":"deny"}}}' >"$read_only_cfg"
 ( unset OPENCODE_CONFIG OPENCODE_CONFIG_DIR
   "$HERE/stub/opencode" run --format json --dir "$HERE" "prompt" >/dev/null 2>&1 )
 is  "the stub refuses a run with no isolation config" "$?" "96"
 ( unset OPENCODE_CONFIG OPENCODE_CONFIG_DIR
   "$HERE/stub/opencode" run --format json --auto --dir "$HERE" "prompt" >/dev/null 2>&1 )
 is  "the stub still refuses --auto, which is a blanket bypass" "$?" "96"
-
-read_only_cfg="$(mktemp)"
-printf '{"permission":{"*":"deny","edit":"deny","bash":"deny","task":"deny","skill":"deny","webfetch":"deny","websearch":"deny","external_directory":"deny","read":{"*.env":"deny"}}}' >"$read_only_cfg"
 ( export OPENCODE_CONFIG="$read_only_cfg" OPENCODE_CONFIG_DIR="$HERE"
   unset CROSSREV_REVIEW_PAYLOAD
   "$HERE/stub/opencode" run --format json --dir "$HERE" "prompt" >/dev/null 2>&1 )
+is  "and refuses a run with no --pure" "$?" "96"
+
+( export OPENCODE_CONFIG="$read_only_cfg" OPENCODE_CONFIG_DIR="$HERE"
+  "$HERE/stub/opencode" run --pure --format json --dir "$HERE" "prompt" >/dev/null 2>&1 )
 is  "and accepts the flags and config the adapter uses" "$?" "1"
 
-# The mixed case is the measured trap: with the base rule present, opencode
-# suppresses edit in every form, so this config looks like a grant and removes
-# the tool. The stub must refuse it loudly rather than let a resolve leg
-# discover the silence mid-run.
-mixed_cfg="$(mktemp)"
-printf '{"permission":{"*":"deny","edit":"allow","bash":"deny","task":"deny","skill":"deny","webfetch":"deny","websearch":"deny","external_directory":"deny","read":{"*.env":"deny"}}}' >"$mixed_cfg"
-( export OPENCODE_CONFIG="$mixed_cfg" OPENCODE_CONFIG_DIR="$HERE"
-  "$HERE/stub/opencode" run --format json --dir "$HERE" "prompt" >/dev/null 2>&1 )
-is  "the stub refuses the base rule beside an edit grant" "$?" "96"
+# The write shape is the read shape with one key flipped: edit allowed BESIDE
+# the base rule, measured at 1.18.21 writing files in exactly this form. The
+# rule stays because it is what denies every tool no key names — a future
+# built-in, a custom tool, whatever a plugin or MCP server registers.
+write_cfg="$(mktemp)"
+printf '{"permission":{"*":"deny","edit":"allow","bash":"deny","task":"deny","skill":"deny","webfetch":"deny","websearch":"deny","external_directory":"deny","read":{"*.env":"deny"}}}' >"$write_cfg"
+( export OPENCODE_CONFIG="$write_cfg" OPENCODE_CONFIG_DIR="$HERE"
+  "$HERE/stub/opencode" run --pure --format json --dir "$HERE" "prompt" >/dev/null 2>&1 )
+is  "the stub accepts the write shape beside the base rule" "$?" "1"
 
-# A write shape that loses one of the standing denials is not a write grant,
-# it is a leak.
+# Dropping the base rule to make room for a grant is the bug that leaks every
+# unnamed tool: the rule must be present in both shapes.
+nostar_cfg="$(mktemp)"
+printf '{"permission":{"edit":"allow","bash":"deny","task":"deny","skill":"deny","webfetch":"deny","websearch":"deny","external_directory":"deny","read":{"*.env":"deny"}}}' >"$nostar_cfg"
+( export OPENCODE_CONFIG="$nostar_cfg" OPENCODE_CONFIG_DIR="$HERE"
+  "$HERE/stub/opencode" run --pure --format json --dir "$HERE" "prompt" >/dev/null 2>&1 )
+is  "and refuses any shape without the fail-closed base rule" "$?" "96"
+
+# A shape that loses one of the standing denials is not a grant, it is a leak.
 leaky_cfg="$(mktemp)"
-printf '{"permission":{"edit":"allow","task":"deny","skill":"deny","webfetch":"deny","websearch":"deny","external_directory":"deny","read":{"*.env":"deny"}}}' >"$leaky_cfg"
+printf '{"permission":{"*":"deny","edit":"allow","bash":"allow","task":"deny","skill":"deny","webfetch":"deny","websearch":"deny","external_directory":"deny","read":{"*.env":"deny"}}}' >"$leaky_cfg"
 ( export OPENCODE_CONFIG="$leaky_cfg" OPENCODE_CONFIG_DIR="$HERE"
-  "$HERE/stub/opencode" run --format json --dir "$HERE" "prompt" >/dev/null 2>&1 )
+  "$HERE/stub/opencode" run --pure --format json --dir "$HERE" "prompt" >/dev/null 2>&1 )
 is  "and refuses a write shape without the bash denial" "$?" "96"
-rm -f "$read_only_cfg" "$mixed_cfg" "$leaky_cfg"
+rm -f "$read_only_cfg" "$write_cfg" "$nostar_cfg" "$leaky_cfg"
 
 # A fence around the JSON must change nothing.
 fixture_repo "$(config_opencode_reviews)"; stub_reset
@@ -491,7 +503,7 @@ has "and warns once about a mismatch"             "$out" "it is being retried on
 has "and the second mismatch names the JSON instruction" "$out" "JSON instruction"
 hasnt "and never blames a native schema check"    "$out" "validates output against the schema natively"
 is  "and the stub was invoked twice" \
-  "$(grep -c '^run --format json' "$ARGV_LOG" | tr -d ' ')" "2"
+  "$(grep -c '^run --pure --format json' "$ARGV_LOG" | tr -d ' ')" "2"
 
 # The session record is telemetry, not the answer: if the export call fails,
 # both fields fall back to null and the review itself stands.
@@ -509,10 +521,11 @@ has "and the marker records no answering model"   "$(calls)" '"model_reported":n
 # --- the resolve leg on opencode ---------------------------------------------
 #
 # The descriptor names both legs, so resolver.harness: opencode is a pairing
-# CrossRev serves. The adapter is reached with write=yes and must hand the
-# model an edit grant WITHOUT the fail-closed base rule — measured against
-# 1.18.21, that rule suppresses edit in every form, grant or no grant — while
-# bash, task, skill, webfetch, websearch and external_directory stay denied.
+# CrossRev serves. The adapter is reached with write=yes and hands the model
+# an edit grant BESIDE the fail-closed base rule — measured at 1.18.21
+# writing files in exactly that form, and the rule is what denies every tool
+# no key names. bash, task, skill, webfetch, websearch and external_directory
+# stay denied.
 config_opencode_resolves() {
   cat <<'EOF'
 version: 1
@@ -576,11 +589,13 @@ is  "the commit carries the subject the resolver wrote" \
 has "the resolve leg asks for the json event stream" "$ocx_resolve_argv" "--format json"
 has "names a workspace as before"                    "$ocx_resolve_argv" "--dir"
 has "and passes the configured model through"        "$ocx_resolve_argv" "--model opencode/resolver-model"
+has "and runs without external plugins"              "$ocx_resolve_argv" "--pure"
 hasnt "while no blanket bypass appears"              "$ocx_resolve_argv" "--auto"
 
-is  "the write block drops the fail-closed base rule" \
-  "$(jq -r '.permission."*" // "absent"' <<<"$ocx_write_cfg")" "absent"
-is  "and grants edit" "$(jq -r '.permission.edit // "absent"' <<<"$ocx_write_cfg")" "allow"
+is  "the write block keeps the fail-closed base rule" \
+  "$(jq -r '.permission."*" // "absent"' <<<"$ocx_write_cfg")" "deny"
+is  "and grants edit beside it" \
+  "$(jq -r '.permission.edit // "absent"' <<<"$ocx_write_cfg")" "allow"
 for key in bash task skill webfetch websearch external_directory; do
   is "and still denies $key" \
     "$(jq -r --arg k "$key" '.permission[$k] // "absent"' <<<"$ocx_write_cfg")" "deny"
