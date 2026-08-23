@@ -4,9 +4,10 @@
 # Same contract as the claude adapter: payload plus execution metadata, no
 # GitHub credential in the environment.
 #
-# Codex reports no model at all. `codex exec --json` carries token counts on
-# turn.completed and nothing identifying the model, so this adapter writes
-# model_reported: null rather than echoing back the model it requested. Halting
+# The event stream reports no model. `codex exec --json` carries token counts
+# on turn.completed and nothing identifying the model, so model_reported comes
+# from the newest session rollout when one can be read, and stays null when it
+# cannot — a miss never fails a leg whose answer already exists. Halting
 # whenever the model is unreported would be the stricter rule and it is the
 # wrong one — it would disqualify this adapter on the evidence that Codex does
 # not emit the field. Layer one of the divergence guard already catches the
@@ -92,7 +93,7 @@ adapter_codex() {
   if (( rc != 0 )) || [[ ! -s "$out_file" ]]; then
     jq -cn --arg e "$(log_redact_str "$(legs_harness_error "$err")")" \
       '{ok:false, payload:null, harness:"codex", endpoint:null, model_reported:null,
-        tokens:null, error:$e}'
+        effort_reported:null, tokens:null, usage:null, error:$e}'
     # The capture files are the record, so they are filtered here — after every
     # value has been read from them, never before. Redacting first would rewrite
     # the payload this adapter parses, so identical harness output would yield
@@ -112,15 +113,24 @@ adapter_codex() {
   # `total=T input=I (+ C cached) output=O`, where the cached count sits inside
   # the input figure it qualifies. Adding it would overstate every run that hits
   # the prompt cache, which is exactly the context-heavy pass this table exists
-  # to report on.
-  local payload tokens
+  # to report on. The parser keeps that rule and turns the rest into buckets:
+  # fresh input is the subtraction, writes land unsplit, and no vendor total is
+  # read.
+  local payload usage tokens got model_reported effort_reported
   payload="$(jq -c . "$out_file" 2>/dev/null || echo null)"
-  tokens="$(jq -s -r '
-    [ .[] | select(.type == "turn.completed") | .usage // empty ] | last
-    | if . == null then "null"
-      else ((.input_tokens // 0) + (.output_tokens // 0) | tostring) end' \
-    "$events" 2>/dev/null)" || tokens=null
-  [[ -n "$tokens" ]] || tokens=null
+  usage="$(usage_parse_codex_events "$events")"
+  [[ -n "$usage" ]] || usage=null
+  tokens="$(jq -r '.total // "null"' <<<"$usage")"
+
+  # The event stream names neither model nor effort; the newest session rollout
+  # carries both. Any failure here is a miss — null and null — never a failed
+  # leg: the payload has already been read by the time this runs.
+  model_reported=""; effort_reported=""
+  got="$(usage_read_codex_rollout)" || got='{"model":null,"effort":null}'
+  [[ -n "$got" ]] && {
+    model_reported="$(jq -r '.model // empty' <<<"$got")"
+    effort_reported="$(jq -r '.effort // empty' <<<"$got")"
+  }
 
   # The capture files are the record, so they are filtered here — after every
   # value has been read from them, never before. Redacting first would rewrite
@@ -130,7 +140,11 @@ adapter_codex() {
     log_redact_file "$out_file"; log_redact_file "$err"; log_redact_file "$events"
   else rm -f "$out_file" "$err" "$events"; fi
 
-  jq -cn --argjson p "$payload" --argjson t "$tokens" \
+  jq -cn --argjson p "$payload" --argjson t "${tokens:-null}" \
+     --argjson u "${usage:-null}" --arg m "$model_reported" --arg e "$effort_reported" \
     '{ok:true, payload:$p, harness:"codex", endpoint:"vendor",
-      model_reported:null, tokens:$t, error:null}'
+      model_reported:(if $m == "" then null else $m end),
+      effort_reported:(if $e == "" then null else $e end),
+      tokens:(if $t == "null" then null else $t end),
+      usage:$u, error:null}'
 }

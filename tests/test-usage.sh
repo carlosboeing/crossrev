@@ -112,4 +112,26 @@ is "a split larger than the sum invents no unsplit tokens" \
   "$(jq -c '{a:.cache_write_5m,b:.cache_write_1h,c:.cache_write_unsplit}' <<<"$u")" \
   '{"a":40,"b":50,"c":0}'
 
+# --- Codex parsing: the subtraction, and the rollout that names the model ---
+
+u="$(usage_parse_codex_events "$ROOT/tests/fixtures/usage/codex-probe.ndjson")"
+is "codex input_fresh is input minus cached" "$(jq -r .input_fresh <<<"$u")" "19044"
+is "codex derived names the subtraction" "$(jq -c '.derived' <<<"$u")" '["input_fresh"]'
+is "codex total is 57773" "$(jq -r .total <<<"$u")" "57773"
+is "codex reasoning is stored" "$(jq -r .reasoning <<<"$u")" "101"
+is "codex writes are unsplit" "$(jq -r .cache_write_unsplit <<<"$u")" "0"
+
+# Rollout miss: no CODEX_HOME
+unset CODEX_HOME
+is "rollout miss is a null model" "$(usage_read_codex_rollout | jq -c .)" '{"model":null,"effort":null}'
+
+# Rollout hit
+CODEX_HOME="$(mktemp -d)"
+mkdir -p "$CODEX_HOME/sessions/2026/08/23"
+cp "$ROOT/tests/fixtures/usage/codex-rollout.jsonl" "$CODEX_HOME/sessions/2026/08/23/rollout.jsonl"
+got="$(usage_read_codex_rollout)"
+is "rollout model is gpt-5.6-terra" "$(jq -r .model <<<"$got")" "gpt-5.6-terra"
+is "rollout effort is medium" "$(jq -r .effort <<<"$got")" "medium"
+rm -rf "$CODEX_HOME"; unset CODEX_HOME
+
 finish
