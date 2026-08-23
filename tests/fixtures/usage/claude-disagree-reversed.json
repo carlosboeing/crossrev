@@ -1,0 +1,19 @@
+{
+  "type": "result",
+  "subtype": "success",
+  "is_error": false,
+  "num_turns": 2,
+  "modelUsage": {
+    "claude-opus-5[1m]": {
+      "inputTokens": 12,
+      "outputTokens": 30,
+      "cacheReadInputTokens": 140,
+      "cacheCreationInputTokens": 80,
+      "canonicalModel": "claude-opus-5"
+    }
+  },
+  "usage": {
+    "cache_creation": {"ephemeral_5m_input_tokens": 40, "ephemeral_1h_input_tokens": 50},
+    "output_tokens_details": {"thinking_tokens": 9}
+  }
+}

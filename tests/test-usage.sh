@@ -82,4 +82,34 @@ is "nearest-match prices grok-4.6-build as grok-4.6" \
 is "bracket suffix does not need a heuristic when the key is listed" \
   "$(usage_price_key claude-opus-5)" "claude-opus-5"
 
+# --- Claude parsing: buckets from two objects, split wins, largest share ---
+
+u="$(usage_parse_claude "$ROOT/tests/fixtures/usage/claude-probe.json")"
+is "claude probe input_fresh comes from modelUsage" "$(jq -r .input_fresh <<<"$u")" "8"
+is "claude probe cache_read comes from modelUsage" "$(jq -r .cache_read <<<"$u")" "158501"
+is "claude probe writes land apart by TTL" \
+  "$(jq -c '{five:.cache_write_5m,one:.cache_write_1h}' <<<"$u")" '{"five":0,"one":31848}'
+is "claude probe unsplit stays empty when the split reconciles" \
+  "$(jq -r .cache_write_unsplit <<<"$u")" "0"
+is "claude probe total is the identity" "$(jq -r .total <<<"$u")" "190611"
+is "claude probe copies the harness cost" "$(jq -r .cost_usd <<<"$u")" "0.4041205"
+is "claude probe names the canonical model" "$(jq -r '.models[0].id' <<<"$u")" "claude-opus-5"
+is "pricing the probe buckets reproduces its own cost" \
+  "$(usage_price "$u" "$(jq -r '.models[0].id' <<<"$u")" | jq -r .cost_usd)" "0.4041205"
+
+u="$(usage_parse_claude "$ROOT/tests/fixtures/usage/claude-mixed.json")"
+is "mixed session reports the larger share, not the first sorted key" \
+  "$(usage_model_reported_from_models "$(jq -c '.models // []' <<<"$u")")" "claude-opus-5"
+is "mixed session keeps both models" "$(jq -r '.models | length' <<<"$u")" "2"
+
+u="$(usage_parse_claude "$ROOT/tests/fixtures/usage/claude-disagree.json")"
+is "split wins over a larger sum; excess becomes unsplit" \
+  "$(jq -c '{a:.cache_write_5m,b:.cache_write_1h,c:.cache_write_unsplit}' <<<"$u")" \
+  '{"a":40,"b":50,"c":10}'
+
+u="$(usage_parse_claude "$ROOT/tests/fixtures/usage/claude-disagree-reversed.json")"
+is "a split larger than the sum invents no unsplit tokens" \
+  "$(jq -c '{a:.cache_write_5m,b:.cache_write_1h,c:.cache_write_unsplit}' <<<"$u")" \
+  '{"a":40,"b":50,"c":0}'
+
 finish

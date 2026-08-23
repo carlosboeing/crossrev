@@ -3,13 +3,15 @@
 #
 # Returns two things, not one: the payload, and execution metadata naming the
 # harness, the resolved endpoint, the answering model where the harness reports
-# one, and what the turn cost in tokens. Invoked with no GitHub credential in its
-# environment, and with repository-provided harness customisation disabled.
+# one, a normalized usage record of token buckets (lib/usage.sh), and what the
+# turn cost in tokens. Invoked with no GitHub credential in its environment,
+# and with repository-provided harness customisation disabled.
 
 # adapter_claude <prompt_file> <schema_file> <workdir> <model> <effort> <endpoint_name> <write>
 #
 # `write` is yes or no, derived from the leg rather than configured. Prints a JSON
-# object: {payload, harness, endpoint, model_reported, tokens, ok, error}
+# object: {payload, harness, endpoint, model_reported, effort_reported, tokens,
+# usage, ok, error}
 adapter_claude() {
   local prompt_file="$1" schema_file="$2" workdir="$3"
   local model="${4:-}" effort="${5:-}" endpoint="${6:-}" write="${7:-no}"
@@ -116,7 +118,7 @@ adapter_claude() {
     msg="$(log_redact_str "$msg")"
     jq -cn --arg e "$msg" \
       '{ok:false, payload:null, harness:"claude", endpoint:null, model_reported:null,
-        tokens:null, error:$e}'
+        effort_reported:null, tokens:null, usage:null, error:$e}'
     # The capture files are the record, so they are filtered here — after every
     # value has been read from them, never before. Redacting first would rewrite
     # the payload this adapter parses, so identical harness output would yield
@@ -127,20 +129,18 @@ adapter_claude() {
   fi
 
   payload="$(jq -r '.result // empty' "$out")"
-  # The harness's accounting of what served the turn, never the model's own
-  # claim about itself — a substituted endpoint would get a self-report wrong in
-  # precisely the case this exists to catch.
-  model_reported="$(jq -r '(.modelUsage // {}) | keys | .[0] // empty' "$out")"
 
-  # Every token the turn cost, summed across models and across the four ways
-  # Claude Code counts them. Cache reads are included deliberately: they are
-  # cheaper, not free, and a number that quietly omits them under-reports the
-  # passes that reuse the most context.
-  local tokens
-  tokens="$(jq '[(.modelUsage // {}) | to_entries[] | .value
-                 | (.inputTokens // 0) + (.outputTokens // 0)
-                   + (.cacheReadInputTokens // 0) + (.cacheCreationInputTokens // 0)]
-                | add // null' "$out" 2>/dev/null)" || tokens=null
+  # Buckets, not one number: the normalized usage record comes from four sums
+  # across modelUsage plus the write-TTL split and thinking count that only
+  # top-level .usage carries. The answering model is the canonicalModel of the
+  # key holding the largest token share — `keys | .[0]` sorts lexically, and a
+  # session where Haiku helped an Opus run would otherwise name Haiku.
+  local usage model_reported tokens
+  usage="$(usage_parse_claude "$out")"
+  [[ -n "$usage" ]] || usage=null
+  model_reported="$(jq -r '.models[0].id // empty' <<<"$usage")"
+  tokens="$(jq -r '.total // "null"' <<<"$usage")"
+
   # The capture files are the record, so they are filtered here — after every
   # value has been read from them, never before. Redacting first would rewrite
   # the payload this adapter parses, so identical harness output would yield
@@ -150,7 +150,10 @@ adapter_claude() {
 
   jq -cn --argjson p "$(jq -c . <<<"$payload" 2>/dev/null || echo null)" \
      --arg ep "$endpoint_label" --arg m "$model_reported" \
-     --argjson t "${tokens:-null}" \
+     --argjson t "${tokens:-null}" --argjson u "${usage:-null}" \
     '{ok:true, payload:$p, harness:"claude", endpoint:$ep,
-      model_reported:(if $m == "" then null else $m end), tokens:$t, error:null}'
+      model_reported:(if $m == "" then null else $m end),
+      effort_reported:null,
+      tokens:(if $t == "null" then null else $t end),
+      usage:$u, error:null}'
 }
