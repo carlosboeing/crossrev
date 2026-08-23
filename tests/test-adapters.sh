@@ -315,12 +315,13 @@ has "it reads the payload out of the concatenated text events" "$out" "verdict: 
 is  "and posts the finding it carried"            "$(count 'method POST repos/acme/widget/pulls/42/comments')" "1"
 has "the comment names the harness that produced it" "$(calls)" "opencode"
 
-# The answering model and the whole-run token total come from one `export`
+# The answering model and the whole-run usage record come from one `export`
 # call against the sessionID the events carry: input 10 + output 2 +
-# reasoning 1 + cache.read 4 = 17, the arithmetic the CLI itself uses.
+# cache.read 4 = 16, with reasoning 1 stored beside the total and never added
+# to it — the nesting every other harness shows and no vendor total confirms.
 has "the marker records the answering model from the session record" \
   "$(calls)" '"model_reported":"stub-model"'
-has "the token count sums the whole-run figure"   "$(calls)" '"tokens":17'
+has "the token count excludes reasoning"         "$(calls)" '"tokens":16'
 has "the cell names opencode and the answering model" \
   "$(calls)" '`opencode` · `stub-model`'
 

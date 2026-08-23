@@ -134,4 +134,23 @@ is "rollout model is gpt-5.6-terra" "$(jq -r .model <<<"$got")" "gpt-5.6-terra"
 is "rollout effort is medium" "$(jq -r .effort <<<"$got")" "medium"
 rm -rf "$CODEX_HOME"; unset CODEX_HOME
 
+# --- Grok, agy, opencode: summing beats every vendor total ---
+
+u="$(usage_parse_agy "$ROOT/tests/fixtures/usage/agy-probe.json")"
+is "agy ignores a vendor total that excludes cache reads" "$(jq -r .total <<<"$u")" "133830"
+is "agy stores thinking as reasoning" "$(jq -r .reasoning <<<"$u")" "477"
+[[ "$(jq -r .total <<<"$u")" != "48162" ]] \
+  && ok "agy total is not the vendor 48162" \
+  || notok "agy total is not the vendor 48162" "not 48162" "$(jq -r .total <<<"$u")"
+
+u="$(usage_parse_grok "$ROOT/tests/fixtures/usage/grok-probe.json")"
+is "grok total matches the vendor total by summing" "$(jq -r .total <<<"$u")" "130623"
+is "grok copies the harness cost" "$(jq -r .cost_usd <<<"$u")" "0.01944562"
+is "grok reasoning is not added" "$(jq -r .reasoning <<<"$u")" "290"
+
+u="$(usage_parse_opencode_export "$ROOT/tests/fixtures/usage/opencode-probe.json")"
+is "opencode total excludes reasoning" "$(jq -r .total <<<"$u")" "63249"
+is "opencode stores reasoning" "$(jq -r .reasoning <<<"$u")" "73"
+is "opencode writes are unsplit" "$(jq -r .cache_write_unsplit <<<"$u")" "0"
+
 finish

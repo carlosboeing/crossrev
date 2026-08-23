@@ -103,7 +103,7 @@ adapter_agy() {
     msg="$(log_redact_str "$msg")"
     jq -cn --arg e "$msg" \
       '{ok:false, payload:null, harness:"agy", endpoint:null, model_reported:null,
-        tokens:null, error:$e}'
+        effort_reported:null, tokens:null, usage:null, error:$e}'
     # The capture files are the record, so they are filtered here — after every
     # value has been read from them, never before. Redacting first would rewrite
     # the payload this adapter parses, so identical harness output would yield
@@ -116,14 +116,15 @@ adapter_agy() {
   # structured_output is the parsed object when a schema was given. The response
   # string is the same JSON, and parsing it is the fallback for a run with no
   # schema rather than a second-guess of the first.
-  local payload tokens
+  local payload usage tokens
   payload="$(jq -c '.structured_output // (.response | fromjson? // null)' "$out" 2>/dev/null || echo null)"
-  # It reports no answering model and does report usage, so this is the one number
-  # it can contribute to the run-details table.
-  tokens="$(jq -r '(.usage // {})
-                   | (.total_tokens // ((.input_tokens // 0) + (.output_tokens // 0)))
-                   | if . == 0 then "null" else tostring end' "$out" 2>/dev/null)" || tokens=null
-  [[ -n "$tokens" ]] || tokens=null
+  # Buckets summed from the parts, cache reads included. The vendor's own
+  # total_tokens excludes cache reads — on the measured run it reported 48,162
+  # of the 133,830 the parts sum to, dropping 64 per cent of the work the leg
+  # did — so no vendor total is read at all.
+  usage="$(usage_parse_agy "$out")"
+  [[ -n "$usage" ]] || usage=null
+  tokens="$(jq -r '.total // "null"' <<<"$usage")"
   # The capture files are the record, so they are filtered here — after every
   # value has been read from them, never before. Redacting first would rewrite
   # the payload this adapter parses, so identical harness output would yield
@@ -131,7 +132,11 @@ adapter_agy() {
   if (( keep_transcript )); then log_redact_file "$out"; log_redact_file "$err"
   else rm -f "$out" "$err"; fi
 
-  jq -cn --argjson p "${payload:-null}" --argjson t "$tokens" \
+  jq -cn --argjson p "${payload:-null}" --argjson t "${tokens:-null}" \
+     --argjson u "${usage:-null}" \
     '{ok:true, payload:$p, harness:"agy", endpoint:"vendor",
-      model_reported:null, tokens:$t, error:null}'
+      model_reported:null,
+      effort_reported:null,
+      tokens:(if $t == "null" then null else $t end),
+      usage:$u, error:null}'
 }

@@ -66,4 +66,5 @@ fi
 jq -cn --argjson p "$(cat "$payload_file")" --arg r "$(cat "$payload_file")" \
   '{conversation_id:"stub", status:"SUCCESS", response:$r, structured_output:$p,
     duration_seconds:1, num_turns:1,
-    usage:{input_tokens:1, output_tokens:1, total_tokens:2}}'
+    usage:{input_tokens:1, output_tokens:1, cache_read_tokens:0,
+           thinking_tokens:0, total_tokens:2}}'

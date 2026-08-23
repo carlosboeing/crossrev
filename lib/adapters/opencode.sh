@@ -28,10 +28,13 @@
 # either stream — which in CI means hanging until the workflow timeout with no
 # diagnosis at all.
 #
-# The answering model and a whole-run token total come from
+# The answering model and a whole-run usage record come from
 # `opencode export <sessionID>`, which reads the local session database and
 # costs no model call. That makes this the third harness able to report which
-# model answered, alongside claude and grok.
+# model answered, alongside claude and grok. Reasoning is persisted beside the
+# total and never added to it: every other harness that reports reasoning nests
+# it inside output, and opencode publishes no vendor total to check against —
+# so consistency decides, and the stored count keeps the assumption correctable.
 
 # Concatenated answer text in, extracted JSON out. Four rungs, stopping at the
 # first that parses: the text as-is, a stripped markdown fence, the span from
@@ -186,7 +189,7 @@ EOF
     auth_msg="$(log_redact_str "$auth_msg")"
     jq -cn --arg e "$auth_msg" \
       '{ok:false, payload:null, harness:"opencode", endpoint:null, model_reported:null,
-        tokens:null, error:$e}'
+        effort_reported:null, tokens:null, usage:null, error:$e}'
     rm -rf "$iso"
     if (( keep_transcript )); then log_redact_file "$out"; log_redact_file "$err"
     else rm -f "$out" "$err"; fi
@@ -202,7 +205,7 @@ EOF
     msg="$(log_redact_str "$msg")"
     jq -cn --arg e "$msg" \
       '{ok:false, payload:null, harness:"opencode", endpoint:null, model_reported:null,
-        tokens:null, error:$e}'
+        effort_reported:null, tokens:null, usage:null, error:$e}'
     rm -rf "$iso"
     if (( keep_transcript )); then log_redact_file "$out"; log_redact_file "$err"
     else rm -f "$out" "$err"; fi
@@ -220,7 +223,7 @@ EOF
     local empty_msg="opencode produced no answer: the run finished without a single text event."
     jq -cn --arg e "$empty_msg" \
       '{ok:false, payload:null, harness:"opencode", endpoint:null, model_reported:null,
-        tokens:null, error:$e}'
+        effort_reported:null, tokens:null, usage:null, error:$e}'
     rm -rf "$iso"
     if (( keep_transcript )); then log_redact_file "$out"; log_redact_file "$err"
     else rm -f "$out" "$err"; fi
@@ -234,20 +237,18 @@ EOF
   payload="$(_opencode_extract_json <<<"$text")"
   [[ -n "$payload" ]] || payload="null"
 
-  # One export call supplies both the answering model and the whole-run token
-  # total, summed the way the CLI sums its own steps: input + output +
-  # reasoning + cache.read. Telemetry, not the answer — if the export fails,
-  # both fall back to null and the review stands.
-  local sid exported model_reported="" tokens="null"
+  # One export call supplies the answering model and the whole-run usage
+  # record. Telemetry, not the answer — if the export fails, both fall back to
+  # null and the review stands.
+  local sid exported model_reported="" usage="null" tokens="null"
   sid="$(jq -Rr 'fromjson? | .sessionID // empty' "$out" 2>/dev/null | head -n 1)"
   if [[ -n "$sid" ]]; then
     exported="$("${run[@]}" opencode export "$sid" </dev/null 2>/dev/null)" || exported=""
     if [[ -n "$exported" ]]; then
       model_reported="$(jq -r '.info.model.id // empty' <<<"$exported" 2>/dev/null)"
-      tokens="$(jq -r '((.info.tokens // {})
-                        | ((.input // 0) + (.output // 0) + (.reasoning // 0) + (.cache.read // 0)))
-                       | if . == 0 then "null" else tostring end' <<<"$exported" 2>/dev/null)" || tokens=null
-      [[ -n "$tokens" ]] || tokens=null
+      usage="$(usage_parse_opencode_export - <<<"$exported")"
+      [[ -n "$usage" ]] || usage=null
+      tokens="$(jq -r '.total // "null"' <<<"$usage")"
     fi
   fi
   rm -rf "$iso"
@@ -255,7 +256,11 @@ EOF
   if (( keep_transcript )); then log_redact_file "$out"; log_redact_file "$err"
   else rm -f "$out" "$err"; fi
 
-  jq -cn --argjson p "$payload" --arg m "$model_reported" --argjson t "$tokens" \
+  jq -cn --argjson p "$payload" --arg m "$model_reported" \
+     --argjson t "${tokens:-null}" --argjson u "${usage:-null}" \
     '{ok:true, payload:$p, harness:"opencode", endpoint:"vendor",
-      model_reported:(if $m == "" then null else $m end), tokens:$t, error:null}'
+      model_reported:(if $m == "" then null else $m end),
+      effort_reported:null,
+      tokens:(if $t == "null" then null else $t end),
+      usage:$u, error:null}'
 }
