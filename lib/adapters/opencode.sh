@@ -92,9 +92,13 @@ adapter_opencode() {
   # Read-only isolation, layered over whatever the operator already has. task
   # is denied for predictability — the model spawns a subagent unprompted,
   # which multiplies token spend without being asked for — and skill because
-  # it is the door to the operator's own skill library. OPENCODE_CONFIG_DIR at
-  # an empty directory removes the agents, commands and plugins that would
-  # otherwise load from beside the operator's global config.
+  # it is the door to the operator's own skill library. "*" deny is the
+  # fail-closed default so a tool opencode adds later does not inherit the
+  # product's allow. read is a map, not the string "allow": a string would
+  # replace opencode's own *.env deny and let the reviewing model quote an
+  # untracked .env into a public comment. OPENCODE_CONFIG_DIR at an empty
+  # directory removes the agents, commands and plugins that would otherwise
+  # load from beside the operator's global config.
   local iso cfg_dir
   iso="$(mktemp -d)"
   cfg_dir="$iso/config-home"
@@ -103,7 +107,13 @@ adapter_opencode() {
 {
   "$schema": "https://opencode.ai/config.json",
   "permission": {
-    "read": "allow",
+    "*": "deny",
+    "read": {
+      "*": "allow",
+      "*.env": "deny",
+      "*.env.*": "deny",
+      "*.env.example": "allow"
+    },
     "glob": "allow",
     "grep": "allow",
     "list": "allow",

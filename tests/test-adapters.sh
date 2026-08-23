@@ -296,8 +296,9 @@ EOF
 
 # The recorded stdout shapes feed through extraction: bare JSON, a fence,
 # prose around the JSON, a payload split across two text events, an empty
-# stream, an auth error, and a non-auth error. The first four must yield the
-# same payload; the last three must fail, saying different things.
+# stream, an auth error, a non-auth error, and prose with no braces. The
+# first four must yield the same payload; empty and the two errors fail
+# before extraction; nojson is a null payload that spends the shape retry.
 
 fixture_repo "$(config_opencode_reviews)"; stub_reset
 routes_baseline "$(printf '[]' | payload)"
@@ -342,7 +343,7 @@ is  "the stub refuses a run with no isolation config" "$?" "96"
 is  "the stub still refuses --auto, which is a blanket bypass" "$?" "96"
 
 deny_cfg="$(mktemp)"
-printf '{"permission":{"edit":"deny","bash":"deny"}}' >"$deny_cfg"
+printf '{"permission":{"*":"deny","edit":"deny","bash":"deny","read":{"*.env":"deny"}}}' >"$deny_cfg"
 ( export OPENCODE_CONFIG="$deny_cfg" OPENCODE_CONFIG_DIR="$HERE"
   unset CROSSREV_REVIEW_PAYLOAD
   "$HERE/stub/opencode" run --format json --dir "$HERE" "prompt" >/dev/null 2>&1 )
@@ -430,6 +431,24 @@ unset CROSSREV_OPENCODE_MODE
 is  "a non-auth error event fails"                "$rc" "1"
 has "and reports the harness error"               "$out" "Provider overloaded"
 hasnt "without calling it a credential failure"   "$out" "credential failure"
+
+# Prose with no braces is a null payload: extraction hands off rather than
+# failing here, run_invoke warns once and retries, then dies naming the model
+# rather than claiming the harness validates output natively.
+fixture_repo "$(config_opencode_reviews)"; stub_reset
+routes_baseline "$(printf '[]' | payload)"
+route 'api --method POST repos/*/issues/42/comments*' '{"id":9001}'
+route '*reviewThreads*' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}'
+CROSSREV_REVIEW_PAYLOAD="$(printf '%s' "$REVIEW_PAYLOAD" | payload)"; export CROSSREV_REVIEW_PAYLOAD
+CROSSREV_OPENCODE_MODE=nojson; export CROSSREV_OPENCODE_MODE
+out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
+unset CROSSREV_OPENCODE_MODE
+is  "a no-JSON answer fails after the shape retry" "$rc" "1"
+has "and warns once about a mismatch"             "$out" "it is being retried once"
+has "and the second mismatch names the JSON instruction" "$out" "JSON instruction"
+hasnt "and never blames a native schema check"    "$out" "validates output against the schema natively"
+is  "and the stub was invoked twice" \
+  "$(grep -c '^run --format json' "$ARGV_LOG" | tr -d ' ')" "2"
 
 # The session record is telemetry, not the answer: if the export call fails,
 # both fields fall back to null and the review itself stands.

@@ -821,8 +821,13 @@ run_invoke() {
       continue
     fi
     _run_invoke_abort "$snap_index" "$snap_tree"
-    ui_die "$harness returned an object that does not match the schema — $problem" \
-      "This harness validates output against the schema natively, so a mismatch is an adapter or harness bug rather than model drift. Nothing has been written to the pull request, and the rejected attempt's edits have been put back."
+    if validate_harness_is_schema_native "$harness"; then
+      ui_die "$harness returned an object that does not match the schema — $problem" \
+        "This harness validates output against the schema natively, so a mismatch is an adapter or harness bug rather than model drift. Nothing has been written to the pull request, and the rejected attempt's edits have been put back."
+    else
+      ui_die "$harness returned an object that does not match the schema — $problem" \
+        "That harness does not constrain its own output, so two mismatches in a row is the model failing the JSON instruction rather than an adapter bug. Name a model that follows a JSON instruction. Nothing has been written to the pull request, and the rejected attempt's edits have been put back."
+    fi
   done
 }
 

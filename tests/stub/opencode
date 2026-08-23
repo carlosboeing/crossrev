@@ -23,8 +23,10 @@ _assert_isolation() {
   cfg_content="$(tr -d '[:space:]' <"$cfg" 2>/dev/null || true)"
   if [[ -z "$cfg" || ! -r "$cfg" ]] \
      || [[ "$cfg_content" != *'"edit":"deny"'* ]] \
-     || [[ "$cfg_content" != *'"bash":"deny"'* ]]; then
-    printf 'test stub: OPENCODE_CONFIG must name a readable file denying edit and bash\n' >&2
+     || [[ "$cfg_content" != *'"bash":"deny"'* ]] \
+     || [[ "$cfg_content" != *'"*":"deny"'* ]] \
+     || [[ "$cfg_content" != *'"*.env":"deny"'* ]]; then
+    printf 'test stub: OPENCODE_CONFIG must name a readable file denying edit, bash, unknown tools, and .env reads\n' >&2
     exit 96
   fi
   if [[ -z "${OPENCODE_CONFIG_DIR:-}" || ! -d "${OPENCODE_CONFIG_DIR:-}" ]]; then
@@ -153,6 +155,14 @@ Let me know if you need anything else." ;;
     printf '{"type":"error"}\n'
     printf 'Error: Provider overloaded\n' >&2
     exit 1
+    ;;
+  # Prose with no braces anywhere. Extraction returns null; that is the
+  # handoff that spends the extra shape-retry schema_native: false arms.
+  nojson)
+    jq -cn '{type:"step_start", part:{}, sessionID:"stub-session"}'
+    jq -cn --arg t "I cannot produce JSON for this. Here is a review in prose with no object at all." \
+      '{type:"text", part:{text:$t}, sessionID:"stub-session"}'
+    jq -cn '{type:"step_finish", part:{tokens:{input:3, output:1}}, sessionID:"stub-session"}'
     ;;
   *)
     printf 'test stub: unknown CROSSREV_OPENCODE_MODE %s\n' "$mode" >&2

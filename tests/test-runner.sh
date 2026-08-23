@@ -104,7 +104,7 @@ fixture_repo "$(config_for github-hosted claude opencode)"; stub_reset
 routes_init
 err="$("$CROSSREV" init --dry-run 2>&1 >/dev/null)"; rc=$?
 is  "opencode as resolver is refused at init"          "$rc" "1"
-has "and the reason is the leg limit"                  "$err" "review-only"
+has "and the reason is the descriptor's leg limit"     "$err" "limited to the review"
 
 # The same harness reached through an endpoint is a static token in a secret,
 # which never rotates and so never cares what runner it is on. Refusing that too

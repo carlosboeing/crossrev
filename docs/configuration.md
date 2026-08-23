@@ -104,7 +104,7 @@ resolver:
 
 `harness` is one of `claude`, `codex`, `agy`, `grok` or `opencode`. `model` reaches the harness as given, so it must be **fully qualified** — `claude-fable-5`, never `fable-5`, which fails as an entitlement error rather than as a typo. `effort` is passed through verbatim. Either leg may name an `endpoint` instead of relying on the harness's own vendor.
 
-Two of them carry per-harness facts worth knowing before the first run:
+opencode carries two facts worth knowing before the first run:
 
 - **opencode is review-only.** It may review a pull request and may not resolve one — naming it as `resolver.harness` is refused before anything runs, not discovered mid-leg. Its `--model` also takes `provider/model`, not a bare id: `opencode/grok-code`, never `grok-code`.
 - **opencode gets no schema enforcement from its CLI**, so CrossRev carries the schema inside the prompt and checks the shape itself, retrying once when the answer does not fit. Pick an opencode model that follows a JSON instruction; a model that answers in prose will fail its pass after that retry.

@@ -192,8 +192,10 @@ preflight_pairing_supported() {
   # checks below because the machine already holds the login, but a harness
   # that does not serve this leg is refused on every runner.
   if [[ -n "$leg" ]] && ! harness_serves_leg "$harness" "$leg"; then
-    printf "%s is review-only, and cannot serve the %s leg" \
-      "$(harness_get "$harness" .product_name)" "$leg"
+    printf "%s is limited to the %s leg, and cannot serve the %s leg" \
+      "$(harness_get "$harness" .product_name)" \
+      "$(harness_get "$harness" '.legs // [] | join(", ")')" \
+      "$leg"
     return 1
   fi
 

@@ -229,7 +229,7 @@ preflight_pairing_supported github-hosted opencode review >/dev/null 2>&1
 is "a hosted opencode review pairing is supported" "$?" 0
 msg="$(preflight_pairing_supported github-hosted opencode resolve)"; rc=$?
 is "a hosted opencode resolve pairing is refused" "$rc" "1"
-has "and the refusal says the harness is review-only" "$msg" "review-only"
+has "and the refusal names the legs the descriptor lists" "$msg" "limited to the review"
 
 # Without naming a leg — the historical call shape — the credential answer is
 # unchanged.
@@ -243,7 +243,7 @@ preflight_pairing_supported self-hosted opencode review >/dev/null 2>&1
 is "a self-hosted opencode review pairing is supported" "$?" 0
 msg="$(preflight_pairing_supported self-hosted opencode resolve)"; rc=$?
 is "a self-hosted opencode resolve pairing is refused" "$rc" "1"
-has "because the harness is review-only on every runner" "$msg" "review-only"
+has "because the descriptor limit is the same on every runner" "$msg" "limited to the review"
 
 preflight_needs_refresher github-hosted codex ""
 is "preflight_needs_refresher github-hosted codex is true" "$?" 0
