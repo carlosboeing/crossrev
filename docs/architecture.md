@@ -141,7 +141,7 @@ If the harness writes to a quarantined path anyway, that write was made blind an
 
 ## The harness seam
 
-Each adapter takes a prompt file, a schema, a working directory, an optional model, effort and endpoint, and whether the leg may write to the working tree. Each returns **two things**: the payload, and execution metadata naming the harness, the resolved endpoint, the answering model where the harness reports one, and what the turn cost in tokens.
+Each adapter takes a prompt file, a schema, a working directory, an optional model, effort and endpoint, and whether the leg may write to the working tree. Each returns **two things**: the payload, and execution metadata naming the harness, the resolved endpoint, the answering model where the harness reports one, and a normalized usage record — fresh input, cache read, cache writes split by TTL with an unsplit remainder for harnesses that name none, and output, with `total` defined as their sum rather than read from the vendor, and reasoning persisted beside the total and never added to it. `lib/usage.sh` owns the record's identity, table pricing against the vendored extract at `lib/prices.json`, the two rules that refuse to price rather than guess, billing-mode derivation and footnote composition. Adapters parse vendor fields into buckets and read neither credentials nor price data.
 
 **Write permission is derived from the leg, not configured.** The resolve leg has to change files, so it is granted file edits — `--permission-mode acceptEdits` on Claude Code, `--sandbox workspace-write` on Codex, `--mode accept-edits` on Antigravity. The review leg is granted nothing: it has no reason to write, and write access widens the blast radius of a prompt injection carried in a diff for nothing in return. The line held is between editing files and running arbitrary commands, so `bypassPermissions` and `danger-full-access` are never passed. The grant is a flag rather than a settings file because the quarantine above would move a settings file out of the way before the harness started — and a grant that survived it would be the hole the quarantine exists to close.
 
@@ -237,6 +237,8 @@ lib/
   credentials.sh   restoring a rotating subscription credential, read-only
   harnesses.json   the single validated descriptor for every harness fact
   harnesses.sh     loading, validating and querying harnesses.json
+  usage.sh         the normalized token record: parse, total, price, refuse, billing
+  prices.json      vendored rate extract for the table-priced estimate, stamped with its upstream revision
   sandbox.sh       quarantining repository-provided harness configuration
   diff.sh          the gutter, and re-deriving it before posting
   state.sh         labels, markers, trust, revision detection, finding ids
@@ -246,11 +248,11 @@ lib/
   prompt.sh        what each leg is given
   run.sh           the two legs, the drivers, the watchdog
   init.sh          the plan-then-confirm upgrade to automated mode
-  adapters/        claude.sh, codex.sh, agy.sh
+  adapters/        claude.sh, codex.sh, agy.sh, grok.sh, opencode.sh
 schemas/         findings.schema.json, resolve.schema.json
 skills/          pr-review/, pr-resolve/
 templates/       workflows, starter config, example operator config
-scripts/         lint.sh — syntax and shellcheck across everything
+scripts/         lint.sh — syntax and shellcheck across everything; refresh-prices.sh regenerates the rate extract
 tests/           the stubbed-gh suite. tests/run.sh runs all of it
 ```
 
