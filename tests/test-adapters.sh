@@ -326,6 +326,12 @@ has "the cell names opencode and the answering model" \
 
 has "the leg really did get the review prompt" \
   "$(cat "$PROMPT_LOG")" "You are the review leg"
+has "and the schema travelled inside it" \
+  "$(cat "$PROMPT_LOG")" "matching exactly this schema"
+has "and the schema body is the review schema" \
+  "$(cat "$PROMPT_LOG")" "pre_existing"
+has "and the append corrects the native-constraint claim" \
+  "$(cat "$PROMPT_LOG")" "This harness does not constrain your output"
 
 # The argument vector, asserted on what the adapter built rather than on the
 # stub's complaints: --format json selects the event stream, --dir names the

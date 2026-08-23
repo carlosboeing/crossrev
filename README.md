@@ -244,7 +244,7 @@ Whether a harness works in GitHub Actions is a separate question, because a host
 
 `crossrev init` refuses a pairing that its runner cannot serve. A self-hosted runner uses its installed logins and supports every pairing. [CrossRev credentials](docs/credentials.md) explains the hosted-runner requirements and the Codex refresher.
 
-`--harness` overrides one leg for one run, and takes any of the four adapter names — `claude`, `codex`, `agy`, `grok`. Kimi is not one of them: it is reached through an `endpoints:` entry rather than an adapter, so it is named by `endpoint` in the configuration. Pass the flag to `review` and `resolve` separately, because a pairing is two choices:
+`--harness` overrides one leg for one run, and takes any of the five adapter names — `claude`, `codex`, `agy`, `grok`, `opencode`; `opencode` on `review` only. Kimi is not one of them: it is reached through an `endpoints:` entry rather than an adapter, so it is named by `endpoint` in the configuration. Pass the flag to `review` and `resolve` separately, because a pairing is two choices:
 
 ```bash
 crossrev review  --pr 42 --harness codex    # reviewer leg on codex

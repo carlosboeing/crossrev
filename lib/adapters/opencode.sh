@@ -76,15 +76,17 @@ adapter_opencode() {
   fi
 
   # The schema travels inside the prompt: a copy of the prompt with the schema
-  # in a fenced block under one instruction line. This keeps lib/prompt.sh
-  # unaware of which harness will read what it built — the same class of
-  # per-CLI fact as Antigravity's flag order or Codex's schema path.
+  # in a fenced block under an instruction that also corrects the skill's
+  # "the harness constrains your output" claim — true for the other four,
+  # false here. This keeps lib/prompt.sh unaware of which harness will read
+  # what it built — the same class of per-CLI fact as Antigravity's flag
+  # order or Codex's schema path.
   local leg_prompt="$prompt_file" prompt_copy=""
   if [[ -n "$schema_file" ]]; then
     prompt_copy="$(mktemp)"
     {
       cat "$prompt_file"
-      printf '\n\nReturn your answer as a single JSON object matching exactly this schema, with no markdown fence and no commentary:\n\n```json\n%s\n```\n' "$(cat "$schema_file")"
+      printf '\n\nThis harness does not constrain your output. The answer text itself is what is parsed, so return a single JSON object matching exactly this schema, with no markdown fence and no commentary:\n\n```json\n%s\n```\n' "$(cat "$schema_file")"
     } >"$prompt_copy"
     leg_prompt="$prompt_copy"
   fi
