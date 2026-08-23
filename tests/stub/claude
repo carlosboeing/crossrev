@@ -62,6 +62,19 @@ if [[ "$prompt" == *"You are the resolve leg"* && -n "${CROSSREV_RESOLVE_EDIT:-}
   bash "$CROSSREV_RESOLVE_EDIT" || true
 fi
 
+# CROSSREV_REVIEW_MODEL_USAGE replaces the single-key modelUsage with a whole
+# map, for the mixed-session case: two models on one leg, where the answering
+# model has to be the largest token share rather than the first sorted key.
+if [[ -n "${CROSSREV_REVIEW_MODEL_USAGE:-}" && "$prompt" == *"You are the review leg"* ]]; then
+  jq -cn --arg r "$(cat "$payload_file")" --argjson mu "$CROSSREV_REVIEW_MODEL_USAGE" \
+    '{result:$r, is_error:false, provider:"stub", total_cost_usd:0.12,
+      modelUsage:$mu,
+      usage:{cache_creation:{ephemeral_5m_input_tokens:0,
+                             ephemeral_1h_input_tokens:0},
+             output_tokens_details:{thinking_tokens:0}}}'
+  exit 0
+fi
+
 # modelUsage carries all four counters the real CLI reports, because pricing
 # sums them into the usage record and a fixture with only one would let a
 # regression through that drops the other three. The .usage block carries the

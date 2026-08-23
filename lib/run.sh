@@ -1438,11 +1438,15 @@ _same_model() {
 # exactly when you want to know.
 _run_details() {
   local marker="$1" leg="$2" harness model reported effort endpoint agent gaps=""
+  local usage_json models_n effort_reported billing cached cost cost_source foot
   harness="$(jq -r '.harness // "?"' <<<"$marker")"
   model="$(jq -r '.model // ""' <<<"$marker")"
   reported="$(jq -r '.model_reported // ""' <<<"$marker")"
   effort="$(jq -r '.effort // ""' <<<"$marker")"
+  effort_reported="$(jq -r '.effort_reported // ""' <<<"$marker")"
   endpoint="$(jq -r '.endpoint // ""' <<<"$marker")"
+  billing="$(jq -r '.billing // ""' <<<"$marker")"
+  usage_json="$(jq -c '.usage // null' <<<"$marker")"
 
   agent="\`$harness\`"
   if [[ -n "$reported" && "$reported" != "null" ]]; then
@@ -1457,28 +1461,52 @@ _run_details() {
     agent="$agent · \`$model\`"
     gaps="$harness does not report which model answered, so the model above is the one crossrev requested."
   fi
+  # A leg can run more than one model, and the cell shows that rather than
+  # hiding it behind whichever name sorted first.
+  models_n=0
+  [[ "$usage_json" != "null" ]] && models_n="$(jq -r '((.models // []) | length)' <<<"$usage_json")"
+  (( models_n > 1 )) && agent="$agent +$(( models_n - 1 )) more"
+
+  # Where the rollout supplies it, it is the effort that applied rather than
+  # the one CrossRev asked for, which is the more useful of the two.
+  [[ -n "$effort_reported" && "$effort_reported" != "null" ]] && effort="$effort_reported"
   [[ -n "$effort" && "$effort" != "null" ]] && agent="$agent · $effort effort"
+  [[ -n "$billing" && "$billing" != "null" ]] && agent="$agent · $billing"
   [[ -n "$endpoint" && "$endpoint" != "null" && "$endpoint" != "vendor" ]] \
     && agent="$agent · via \`$endpoint\`"
 
   printf '**Run details**\n\n'
-  printf '| Leg | Agent | Duration | Tokens |\n|---|---|---|---|\n'
-  printf '| %s | %s | %s | %s |\n\n' "$leg" "$agent" \
+  printf '| Leg | Agent | Duration | Tokens | Cached | Est. cost |\n|---|---|---|---|---|---|\n'
+  # A dash reads as "not reported" and a zero reads as a measurement, so a
+  # harness with no usage renders dashes in all three rather than zeroes.
+  if [[ "$usage_json" != "null" ]]; then
+    cached="$(_thousands "$(usage_cached "$usage_json")")"
+    cost="$(usage_format_cost "$(jq -r '.cost_usd // ""' <<<"$usage_json")")"
+  else
+    cached="$(_thousands "")"
+    cost="$(usage_format_cost "")"
+  fi
+  printf '| %s | %s | %s | %s | %s | %s |\n\n' "$leg" "$agent" \
     "$(_elapsed "$(jq -r '.ts // ""' <<<"$marker")" "$(jq -r '.done_ts // ""' <<<"$marker")")" \
-    "$(_thousands "$(jq -r '.tokens // ""' <<<"$marker")")"
+    "$(_thousands "$(jq -r '.tokens // ""' <<<"$marker")")" "$cached" "$cost"
 
   # Named once, under the table, rather than annotated in every cell: the gap is
   # the same every pass, so repeating it is noise.
   #
-  # Cost is deliberately absent rather than left as a blank column that reads as
-  # zero, and the sentence says what crossrev knows rather than what the run cost.
-  # A leg can be authenticated as a subscription, as a vendor API key, or as a
-  # named Anthropic-compatible endpoint that charges per token — and crossrev is
-  # handed no billing figure in any of them, so claiming there is nothing to pay
-  # would be wrong on two of the three. Computing one from tokens times a price
-  # table means maintaining a price table that goes stale.
-  printf '<sub>%sNo cost is shown: crossrev is given no billing figure by the harness, whichever credential the leg ran on.</sub>\n\n' \
-    "${gaps:+$gaps }"
+  # The rest of the footnote is composed from three clauses rather than written
+  # as one string, because no single sentence is true of every combination of
+  # cost_source and billing. Where no cost clause applies — an endpoint whose
+  # figure was discarded, or a harness that reports none — only the gap
+  # sentence prints.
+  cost_source=""
+  [[ "$usage_json" != "null" ]] && cost_source="$(jq -r '.cost_source // ""' <<<"$usage_json")"
+  foot="${gaps:+$gaps }$(usage_footnote "$cost_source" "$billing")"
+  # An if rather than a trailing `&&`: as the function's last statement its
+  # failure would become the return value, and a leg with nothing to say here
+  # would die after it had already answered.
+  if [[ -n "$foot" ]]; then
+    printf '<sub>%s</sub>\n\n' "$foot"
+  fi
 }
 
 # The summary table. Severity and category carry emoji, and provenance sits in
