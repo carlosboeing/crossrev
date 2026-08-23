@@ -294,10 +294,10 @@ backlog:
 EOF
 }
 
-# The five recorded stdout shapes feed through extraction: bare JSON, a fence,
-# prose around the JSON, an empty stream, and an error event alone. The first
-# three must yield the same payload; the last two must fail, saying different
-# things.
+# The recorded stdout shapes feed through extraction: bare JSON, a fence,
+# prose around the JSON, a payload split across two text events, an empty
+# stream, an auth error, and a non-auth error. The first four must yield the
+# same payload; the last three must fail, saying different things.
 
 fixture_repo "$(config_opencode_reviews)"; stub_reset
 routes_baseline "$(printf '[]' | payload)"
@@ -373,6 +373,20 @@ unset CROSSREV_OPENCODE_MODE
 is  "prose around the JSON still reviews cleanly" "$rc" "0"
 is  "and posts the same finding"                  "$(count 'method POST repos/acme/widget/pulls/42/comments')" "1"
 
+# Two text events with the seam inside a string value. Concatenation, not
+# newline-joining: a newline there is an unescaped control character and
+# every extraction rung misses.
+fixture_repo "$(config_opencode_reviews)"; stub_reset
+routes_baseline "$(printf '[]' | payload)"
+route 'api --method POST repos/*/issues/42/comments*' '{"id":9001}'
+route '*reviewThreads*' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}'
+CROSSREV_REVIEW_PAYLOAD="$(printf '%s' "$REVIEW_PAYLOAD" | payload)"; export CROSSREV_REVIEW_PAYLOAD
+CROSSREV_OPENCODE_MODE='split'; export CROSSREV_OPENCODE_MODE
+out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
+unset CROSSREV_OPENCODE_MODE
+is  "a payload split across two text events still reviews cleanly" "$rc" "0"
+is  "and posts the same finding"                  "$(count 'method POST repos/acme/widget/pulls/42/comments')" "1"
+
 # An empty stream is not a malformed answer — there is no answer at all — and
 # the two are diagnosed differently. This is the shape the real CLI produces
 # when it answers nothing, and it must not read as a schema mismatch.
@@ -402,6 +416,20 @@ unset CROSSREV_OPENCODE_MODE
 is  "an unauthenticated opencode run fails"       "$rc" "1"
 has "and CrossRev names it a credential failure"  "$out" "credential failure"
 has "naming opencode in the diagnosis"            "$out" "rejected its credential"
+
+# A rate limit, overload or tool failure is an error event without Unauthorized
+# on stderr. It is a harness error, not a credential rejection.
+fixture_repo "$(config_opencode_reviews)"; stub_reset
+routes_baseline "$(printf '[]' | payload)"
+route 'api --method POST repos/*/issues/42/comments*' '{"id":9001}'
+route '*reviewThreads*' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}'
+CROSSREV_REVIEW_PAYLOAD="$(printf '%s' "$REVIEW_PAYLOAD" | payload)"; export CROSSREV_REVIEW_PAYLOAD
+CROSSREV_OPENCODE_MODE=error-other; export CROSSREV_OPENCODE_MODE
+out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
+unset CROSSREV_OPENCODE_MODE
+is  "a non-auth error event fails"                "$rc" "1"
+has "and reports the harness error"               "$out" "Provider overloaded"
+hasnt "without calling it a credential failure"   "$out" "credential failure"
 
 # The session record is telemetry, not the answer: if the export call fails,
 # both fields fall back to null and the review itself stands.

@@ -495,7 +495,9 @@ run_leg_settings() {
   [[ -n "$leg_binary" ]] || leg_binary="$LEG_HARNESS"
   command -v "$leg_binary" >/dev/null 2>&1 && return 0
 
-  # Only harnesses that have an adapter.
+  # Only harnesses that have an adapter and that serve this leg. Picking a
+  # review-only binary because it is the one thing on PATH would stage a
+  # credential and build a worktree, then die in the adapter's write backstop.
   local h binary
   while IFS= read -r h; do
     binary="$(harness_get "$h" .binary)"
@@ -504,10 +506,10 @@ run_leg_settings() {
       alt="$h"
       break
     fi
-  done < <(harness_names)
+  done < <(harness_names_for_leg "$leg_name")
   [[ -n "$alt" ]] || ui_die \
-    "the $leg is configured to use '$LEG_HARNESS', which is not installed, and no other harness is either" \
-    "Install one of $(harness_names_human). CrossRev needs at least one, and two different ones is what makes the cross-model check mean anything."
+    "the $leg is configured to use '$LEG_HARNESS', which is not installed, and no other harness that can serve the $leg_name leg is either" \
+    "Install one of $(harness_names_for_leg "$leg_name" | _names_human). CrossRev needs at least one, and two different ones is what makes the cross-model check mean anything."
 
   ui_warn "'$LEG_HARNESS' is not installed, so the $leg runs on '$alt' instead" \
     "Both legs now run on the same harness, so a bug it misses while reviewing it also misses while resolving. Install $LEG_HARNESS to get the second lineage back."

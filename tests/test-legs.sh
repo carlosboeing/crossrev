@@ -743,4 +743,31 @@ has "and naming the harnesses that can serve it"    "$out" "claude, codex, agy a
 is  "no harness ran on the way out"                 "$(cat "$PROMPT_LOG")" ""
 is  "and stages no credential"                      "$(count 'secret set')" "0"
 
+# The single-harness fallback iterates only harnesses that serve the leg. On a
+# machine where the configured resolver is absent and only opencode is on
+# PATH, substituting it would stage a credential and die in the write
+# backstop — the opposite of the refusal-before-staging promise.
+path_only_opencode() {
+  local keep src
+  keep="$(mktemp -d)"
+  ln -s "$HERE/stub/opencode" "$keep/opencode"
+  ln -s "$HERE/stub/gh" "$keep/gh"
+  for src in jq yq; do
+    ln -s "$(command -v "$src")" "$keep/$src"
+  done
+  PATH="$keep:/usr/bin:/bin"
+  export PATH
+}
+
+fixture_repo; stub_reset
+routes_baseline "$(marker_comment 9001 "$(gate_review_marker)" | jq -cs . | payload)"
+route '*reviewThreads*' "$(threads_response "$(thread_node T_GATE app.ts 2 false "$ID_GATE")")"
+path_only_opencode
+out="$("$CROSSREV" resolve --pr 42 2>&1)"; rc=$?
+
+is  "the resolve fallback does not substitute a review-only harness" "$rc" "1"
+has "and says no other resolve-capable harness is installed"         "$out" "no other harness that can serve the resolve leg"
+is  "no harness ran on that path either"                             "$(cat "$PROMPT_LOG")" ""
+is  "and still stages no credential"                                 "$(count 'secret set')" "0"
+
 finish

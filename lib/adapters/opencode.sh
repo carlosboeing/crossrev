@@ -153,19 +153,21 @@ EOF
     >"$out" 2>"$err" </dev/null
   rc=$?
   rm -f "$prompt_copy"
-  rm -rf "$iso"
+  # $iso stays until after export: ${run[@]} names OPENCODE_CONFIG and
+  # OPENCODE_CONFIG_DIR under it, and export is the same invocation shape.
 
   # An authentication rejection has a shape of its own: an error event on
   # stdout, AI_APICallError naming Unauthorized behind it on stderr. Naming it
   # matters more than usual here, because opencode falls through to a DIFFERENT
   # provider when the configured one cannot authenticate — measured — so "the
-  # harness failed" sends the reader looking in the wrong place entirely.
-  local error_events=0 auth_rejected=0
-  [[ -n "$(jq -Rr 'fromjson? | select(.type == "error") | 1' "$out" 2>/dev/null)" ]] && error_events=1
+  # harness failed" sends the reader looking in the wrong place entirely. A
+  # bare error event is not that shape — rate limits, overloads, tool failures
+  # — and falls through to the generic harness-error branch below.
+  local auth_rejected=0
   grep -q 'AI_APICallError' "$err" 2>/dev/null \
     && grep -Eqi 'Unauthorized|(^|[^0-9])401([^0-9]|$)' "$err" 2>/dev/null && auth_rejected=1
 
-  if (( error_events )) || (( auth_rejected )); then
+  if (( auth_rejected )); then
     local auth_msg="opencode rejected its credential. CrossRev classifies this as a credential failure, not a generic harness error."
     local detail; detail="$(legs_harness_error "$err")"
     [[ -n "$detail" ]] && auth_msg="$auth_msg $detail"
@@ -173,6 +175,7 @@ EOF
     jq -cn --arg e "$auth_msg" \
       '{ok:false, payload:null, harness:"opencode", endpoint:null, model_reported:null,
         tokens:null, error:$e}'
+    rm -rf "$iso"
     if (( keep_transcript )); then log_redact_file "$out"; log_redact_file "$err"
     else rm -f "$out" "$err"; fi
     return 1
@@ -188,6 +191,7 @@ EOF
     jq -cn --arg e "$msg" \
       '{ok:false, payload:null, harness:"opencode", endpoint:null, model_reported:null,
         tokens:null, error:$e}'
+    rm -rf "$iso"
     if (( keep_transcript )); then log_redact_file "$out"; log_redact_file "$err"
     else rm -f "$out" "$err"; fi
     return 1
@@ -195,14 +199,17 @@ EOF
 
   # No text event at all is a different fault from a malformed answer: the run
   # finished and said nothing, and the diagnosis should say so rather than
-  # dressing it up as a schema mismatch.
+  # dressing it up as a schema mismatch. Join-output, not raw-output: -r
+  # terminates every event with a newline, and a seam inside a JSON string is
+  # then an unescaped control character that fails every extraction rung.
   local text
-  text="$(jq -Rr 'fromjson? | select(.type == "text") | .part.text // empty' "$out" 2>/dev/null)"
+  text="$(jq -Rj 'fromjson? | select(.type == "text") | .part.text // empty' "$out" 2>/dev/null)"
   if [[ -z "$text" ]]; then
     local empty_msg="opencode produced no answer: the run finished without a single text event."
     jq -cn --arg e "$empty_msg" \
       '{ok:false, payload:null, harness:"opencode", endpoint:null, model_reported:null,
         tokens:null, error:$e}'
+    rm -rf "$iso"
     if (( keep_transcript )); then log_redact_file "$out"; log_redact_file "$err"
     else rm -f "$out" "$err"; fi
     return 1
@@ -231,6 +238,7 @@ EOF
       [[ -n "$tokens" ]] || tokens=null
     fi
   fi
+  rm -rf "$iso"
 
   if (( keep_transcript )); then log_redact_file "$out"; log_redact_file "$err"
   else rm -f "$out" "$err"; fi

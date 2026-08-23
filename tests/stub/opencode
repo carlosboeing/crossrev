@@ -15,10 +15,29 @@ set -uo pipefail
 
 [[ "${1:-}" == "--version" ]] && { printf '1.18.21 (test stub)\n'; exit 0; }
 
+# Isolation is the whole read-only story for this harness. Shared by `run` and
+# `export`: the adapter reuses the same env for the session-record call, and a
+# check only on `run` would miss deleting that config before export.
+_assert_isolation() {
+  local cfg="${OPENCODE_CONFIG:-}" cfg_content
+  cfg_content="$(tr -d '[:space:]' <"$cfg" 2>/dev/null || true)"
+  if [[ -z "$cfg" || ! -r "$cfg" ]] \
+     || [[ "$cfg_content" != *'"edit":"deny"'* ]] \
+     || [[ "$cfg_content" != *'"bash":"deny"'* ]]; then
+    printf 'test stub: OPENCODE_CONFIG must name a readable file denying edit and bash\n' >&2
+    exit 96
+  fi
+  if [[ -z "${OPENCODE_CONFIG_DIR:-}" || ! -d "${OPENCODE_CONFIG_DIR:-}" ]]; then
+    printf 'test stub: OPENCODE_CONFIG_DIR must name an existing directory\n' >&2
+    exit 96
+  fi
+}
+
 # The export subcommand answers from the local session database in the real CLI,
 # costing no model call. The adapter reads both the answering model and the
 # whole-run token total from it.
 if [[ "${1:-}" == "export" ]]; then
+  _assert_isolation
   if [[ -n "${CROSSREV_OPENCODE_NO_EXPORT:-}" ]]; then
     printf 'export failed\n' >&2
     exit 1
@@ -66,18 +85,7 @@ prompt="${*:-}"
 # the session entirely rather than refusing it at call time — there is nothing
 # for a headless run to block on. Matched on whitespace-stripped content, so
 # the check is about the keys and not about how the file was printed.
-cfg="${OPENCODE_CONFIG:-}"
-cfg_content="$(tr -d '[:space:]' <"$cfg" 2>/dev/null || true)"
-if [[ -z "$cfg" || ! -r "$cfg" ]] \
-   || [[ "$cfg_content" != *'"edit":"deny"'* ]] \
-   || [[ "$cfg_content" != *'"bash":"deny"'* ]]; then
-  printf 'test stub: OPENCODE_CONFIG must name a readable file denying edit and bash\n' >&2
-  exit 96
-fi
-if [[ -z "${OPENCODE_CONFIG_DIR:-}" || ! -d "${OPENCODE_CONFIG_DIR:-}" ]]; then
-  printf 'test stub: OPENCODE_CONFIG_DIR must name an existing directory\n' >&2
-  exit 96
-fi
+_assert_isolation
 if [[ "$fmt" != "json" ]]; then
   printf 'test stub: --format json is required, got %s\n' "${fmt:-nothing}" >&2
   exit 96
@@ -111,6 +119,22 @@ Let me know if you need anything else." ;;
     jq -cn --arg t "$text" '{type:"text", part:{text:$t}, sessionID:"stub-session"}'
     jq -cn '{type:"step_finish", part:{tokens:{input:3, output:1}}, sessionID:"stub-session"}'
     ;;
+  # Two text events with the seam inside a JSON string. jq -r would inject a
+  # newline there; join-output concatenates so extraction still parses.
+  split)
+    case "$body" in
+      *"Unchecked fetch response"*)
+        left="${body%%Unchecked fetch response*}Unchecked "
+        right="fetch response${body#*Unchecked fetch response}" ;;
+      *)
+        printf 'test stub: split mode needs Unchecked fetch response in the payload\n' >&2
+        exit 96 ;;
+    esac
+    jq -cn '{type:"step_start", part:{}, sessionID:"stub-session"}'
+    jq -cn --arg t "$left" '{type:"text", part:{text:$t}, sessionID:"stub-session"}'
+    jq -cn --arg t "$right" '{type:"text", part:{text:$t}, sessionID:"stub-session"}'
+    jq -cn '{type:"step_finish", part:{tokens:{input:3, output:1}}, sessionID:"stub-session"}'
+    ;;
   # No answer at all: the stream carries events but no text event.
   empty)
     jq -cn '{type:"step_start", part:{}, sessionID:"stub-session"}'
@@ -121,6 +145,13 @@ Let me know if you need anything else." ;;
   error)
     printf '{"type":"error"}\n'
     printf 'AI_APICallError: Unauthorized\n' >&2
+    exit 1
+    ;;
+  # An error event that is not a credential rejection: rate limit, overload,
+  # tool failure. Must not be classified as opencode auth login.
+  error-other)
+    printf '{"type":"error"}\n'
+    printf 'Error: Provider overloaded\n' >&2
     exit 1
     ;;
   *)

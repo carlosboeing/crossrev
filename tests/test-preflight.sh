@@ -236,6 +236,15 @@ has "and the refusal says the harness is review-only" "$msg" "review-only"
 preflight_pairing_supported github-hosted opencode >/dev/null 2>&1
 is "a hosted opencode pairing with no leg named still passes on its archetype" "$?" 0
 
+# The same limit is a descriptor fact, not a runner fact: self-hosted skips
+# the credential checks because the machine already holds the login, but a
+# harness that does not serve the leg is still refused.
+preflight_pairing_supported self-hosted opencode review >/dev/null 2>&1
+is "a self-hosted opencode review pairing is supported" "$?" 0
+msg="$(preflight_pairing_supported self-hosted opencode resolve)"; rc=$?
+is "a self-hosted opencode resolve pairing is refused" "$rc" "1"
+has "because the harness is review-only on every runner" "$msg" "review-only"
+
 preflight_needs_refresher github-hosted codex ""
 is "preflight_needs_refresher github-hosted codex is true" "$?" 0
 

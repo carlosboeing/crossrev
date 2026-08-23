@@ -187,6 +187,16 @@ preflight_check() {
 # credential-only question it always was.
 preflight_pairing_supported() {
   local runner="$1" harness="$2" leg="${3:-}"
+
+  # A descriptor fact, not a runner fact: self-hosted skips the credential
+  # checks below because the machine already holds the login, but a harness
+  # that does not serve this leg is refused on every runner.
+  if [[ -n "$leg" ]] && ! harness_serves_leg "$harness" "$leg"; then
+    printf "%s is review-only, and cannot serve the %s leg" \
+      "$(harness_get "$harness" .product_name)" "$leg"
+    return 1
+  fi
+
   [[ "$runner" == "self-hosted" ]] && return 0
 
   if ! harness_known "$harness"; then
@@ -196,12 +206,6 @@ preflight_pairing_supported() {
     else
       printf "CrossRev has no adapter for '%s'" "$harness"
     fi
-    return 1
-  fi
-
-  if [[ -n "$leg" ]] && ! harness_serves_leg "$harness" "$leg"; then
-    printf "%s is review-only, and cannot serve the %s leg" \
-      "$(harness_get "$harness" .product_name)" "$leg"
     return 1
   fi
 

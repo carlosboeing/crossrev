@@ -186,7 +186,13 @@ _init_assert_runner_serves_pairing() {
         "Named endpoints are Anthropic-compatible and reached through the $host adapter. Use harness: $host with endpoint: $endpoint, or drop the endpoint for this leg."
       continue
     fi
-    reason="$(preflight_pairing_supported "$INIT_RUNNER" "$harness")" && continue
+    # The loop names the config keys; preflight_pairing_supported speaks the
+    # descriptor's vocabulary. Without the leg, a review-only harness passes
+    # on its credential archetype and init installs workflows that die on
+    # every resolve.
+    local leg_name="resolve"
+    [[ "$leg" == "reviewer" ]] && leg_name="review"
+    reason="$(preflight_pairing_supported "$INIT_RUNNER" "$harness" "$leg_name")" && continue
     ui_die "the $leg is configured to run $harness by subscription, and a $INIT_RUNNER runner cannot serve that" \
       "$reason. Two fixes: set runner: self-hosted in the config, where every harness refreshes its own credential on disk; or name a different harness for this leg."
   done
