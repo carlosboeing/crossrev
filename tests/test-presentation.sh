@@ -375,8 +375,11 @@ has "and a blocked one does as well"                 "$blocked_body" "**Run deta
 # would be wrong on two of the three.
 has "cost is named as absent rather than left blank" \
   "$review_body" "crossrev is given no billing figure by the harness"
+# The guard is on the footnote's wording, not on the whole body: the hidden
+# marker now carries a billing field, which is data rather than prose.
+footnote_line="$(grep '<sub>' <<<"$review_body")"
 hasnt "and the absence is not explained by a claim about how the leg was paid for" \
-  "$review_body" "subscription"
+  "$footnote_line" "subscription"
 
 # One row per leg, and only its own. The two comments sit adjacent on the pull
 # request, so nothing is lost by not duplicating — and duplicated rows can

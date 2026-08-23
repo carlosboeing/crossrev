@@ -822,6 +822,13 @@ run_invoke() {
         "If the error above mentions authentication, a token or a 401, the harness is installed and cannot log in: on a GitHub-hosted runner its credential comes from a repository secret, so check \`gh secret list\`, and locally check the harness's own login. \`$harness --version\` cannot tell you either way — it answers without a credential."
     fi
 
+    # Billing and the table cost attach here, not inside the adapter: the
+    # credential descriptor and the endpoint name are the orchestrator's
+    # knowledge, and cred_discard below is what throws ANTHROPIC_API_KEY away.
+    # A named endpoint wipes whatever cost the harness reported, priced against
+    # a rate card that never served the call. Telemetry never fails a leg.
+    usage_attach_envelope "$out_file" "$harness" "$endpoint" || true
+
     payload="$(jq -c '.payload' "$out_file")"
     # `|| rc=$?` rather than reading $? on the next line: this runs under
     # `set -e`, which kills the process on a bare failing assignment before any
@@ -959,7 +966,8 @@ leg_review() {
         --arg r "${GITHUB_RUN_ID:-local-$$}" \
         '.state = "started" | .ts = $ts | .done_ts = null | .head_sha = $sha | .run_id = $r
          | .findings = [] | .verdict = null | .blocked_reason = null
-         | .model_reported = null | .tokens = null' <<<"$done_marker")"
+         | .model_reported = null | .tokens = null
+         | .usage = null | .billing = null' <<<"$done_marker")"
     else
       ui_say "$CTX_REPO#$CTX_PR is already reviewed at ${CTX_HEAD_SHA:0:7} — pass $current, and nothing has changed since."
       ui_say "Push a revision, or run: crossrev resolve --pr $CTX_PR"
@@ -1010,7 +1018,8 @@ ${halt_body}$(state_marker_encode "$(jq -cn --argjson p "$pass" --arg sha "$CTX_
   --arg r "${GITHUB_RUN_ID:-local-$$}" --argjson ts "$(date +%s)" --arg why "$reason" \
   '{v:1, leg:"review", pass:$p, state:"declined", ts:$ts, done_ts:$ts, run_id:$r,
     head_sha:$sha, harness:null, model:null, effort:null, endpoint:null,
-    model_reported:null, tokens:null, verdict:"declined", reason:$why, findings:[]}')")" >/dev/null
+    model_reported:null, tokens:null, usage:null, billing:null,
+    verdict:"declined", reason:$why, findings:[]}')")" >/dev/null
     run_pass_labels "$(( pass > 1 ? pass - 1 : 1 ))" halted
     return 0
   fi
@@ -1057,7 +1066,8 @@ Driving the pass again: the previous attempt was blocked. Reading the diff and a
         head_sha:$sha, harness:$h, model:(if $m == "" then null else $m end),
         effort:(if $e == "" then null else $e end),
         endpoint:(if $ep == "" then null else $ep end),
-        model_reported:null, tokens:null, verdict:null, blocked_reason:null, findings:[]}')"
+        model_reported:null, tokens:null, usage:null, billing:null,
+        verdict:null, blocked_reason:null, findings:[]}')"
     comment_id="$(gh_comment_create "$CTX_REPO" "$CTX_PR" \
 "**crossrev — reviewing, $(_pass_label "$pass" "$CTX_MAX_PASSES_PER_CYCLE")**
 
@@ -1109,7 +1119,12 @@ Reading the diff and any earlier review threads. This comment becomes the pass s
 
     payload="$(jq -c .payload "$envelope_file")"
     model_reported="$(jq -r '.model_reported // "null"' "$envelope_file")"
+    effort_reported="$(jq -r '.effort_reported // "null"' "$envelope_file")"
     tokens="$(jq -c '.tokens // null' "$envelope_file")"
+    usage="$(jq -c '.usage // null' "$envelope_file")"
+    # Top-level marker billing even when usage is null, so a harness that
+    # reports nothing still names how the leg was paid for.
+    billing="$(usage_billing_for "$harness" "$endpoint")"
     verdict="$(jq -r .verdict <<<"$payload")"
     blocked_reason="$(jq -r '.blocked_reason // "null"' <<<"$payload")"
 
@@ -1139,7 +1154,10 @@ Reading the diff and any earlier review threads. This comment becomes the pass s
     # difference between a cheap retry and an expensive one.
     marker="$(jq -c --argjson f "$findings" --arg v "$verdict" --arg mr "$model_reported" \
       --arg br "$blocked_reason" --argjson tk "${tokens:-null}" \
+      --argjson u "$usage" --arg b "$billing" --arg er "$effort_reported" \
       '.findings = $f | .verdict = $v | .tokens = $tk
+       | .usage = $u | .billing = (if $b == "" then null else $b end)
+       | .effort_reported = (if $er == "null" then null else $er end)
        | .blocked_reason = (if $br == "null" then null else $br end)
        | .model_reported = (if $mr == "null" then null else $mr end)' <<<"$marker")"
     gh_comment_edit "$CTX_REPO" "$comment_id" \
@@ -1849,7 +1867,9 @@ leg_resolve() {
       | .effort = (if $e == "" then null else $e end)
       | .endpoint = (if $ep == "" then null else $ep end)
       | .blocked = false | .blocked_reason = null | .commit_sha = null
-      | .model_reported = null | .tokens = null | .summary = "" | .resolutions = []
+      | .model_reported = null | .tokens = null
+      | .usage = null | .billing = null
+      | .summary = "" | .resolutions = []
       | .commit_subject = null
       | del(.unthreaded)' <<<"$redrive")"
     ui_say "Pass $pass's resolve leg ended without settling its findings — driving pass $pass again."
@@ -1877,7 +1897,7 @@ Driving the pass again: the previous attempt ended without settling its findings
         head_sha:$sha, harness:$h, model:(if $m == "" then null else $m end),
         effort:(if $e == "" then null else $e end),
         endpoint:(if $ep == "" then null else $ep end),
-        model_reported:null, tokens:null,
+        model_reported:null, tokens:null, usage:null, billing:null,
         blocked:false, blocked_reason:null, commit_sha:null, commit_subject:null,
         summary:"", resolutions:[]}')"
     comment_id="$(gh_comment_create "$CTX_REPO" "$CTX_PR" \
@@ -1989,6 +2009,7 @@ Verifying each finding against the codebase. This comment becomes the pass summa
 
     payload="$(jq -c .payload "$envelope_file")"
     model_reported="$(jq -r '.model_reported // "null"' "$envelope_file")"
+    effort_reported="$(jq -r '.effort_reported // "null"' "$envelope_file")"
     resolutions="$(jq -c '.resolutions' <<<"$payload")"
 
     # The number stops existing here. Everything below — the marker, the thread
@@ -2009,6 +2030,8 @@ Verifying each finding against the codebase. This comment becomes the pass summa
     blocked="$(jq -r '.blocked // false' <<<"$payload")"
     blocked_reason="$(jq -r '.blocked_reason // "null"' <<<"$payload")"
     tokens="$(jq -c '.tokens // null' "$envelope_file")"
+    usage="$(jq -c '.usage // null' "$envelope_file")"
+    billing="$(usage_billing_for "$harness" "$endpoint")"
     # Onto the marker rather than into a local, for the reason every other field
     # here is: the commit happens after a checkpoint, so a run that dies between
     # the two comes back needing the subject the resolver wrote, and a local is
@@ -2017,9 +2040,11 @@ Verifying each finding against the codebase. This comment becomes the pass summa
 
     marker="$(jq -c --argjson d "$resolutions" --arg w "$summary" --argjson b "$blocked" \
       --arg br "$blocked_reason" --arg mr "$model_reported" --argjson tk "${tokens:-null}" \
-      --argjson p "$payload" '
+      --argjson p "$payload" --argjson u "$usage" --arg bl "$billing" --arg er "$effort_reported" '
       .resolutions = $d | .summary = $w | .blocked = $b | .tokens = $tk
       | .commit_subject = ($p.commit_subject // null)
+      | .usage = $u | .billing = (if $bl == "" then null else $bl end)
+      | .effort_reported = (if $er == "null" then null else $er end)
       | .blocked_reason = (if $br == "null" then null else $br end)
       | .model_reported = (if $mr == "null" then null else $mr end)' <<<"$marker")"
     gh_comment_edit "$CTX_REPO" "$comment_id" \
