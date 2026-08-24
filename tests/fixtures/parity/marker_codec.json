@@ -1,0 +1,41 @@
+{
+  "captured": {
+    "platform": "Darwin 25.5.0 arm64",
+    "tr_implementation": "/usr/bin/tr (BSD tr)",
+    "locale": "en_AU.UTF-8",
+    "note": "state_finding_id and state_anchor pin LC_ALL=C internally, so ids and anchors are byte-oriented whatever locale this file was captured under."
+  },
+  "function": "state_marker_of",
+  "cases": [
+    {
+      "name": "one-marker",
+      "body": "Summary.\n\n<!-- crossrev: {\"v\":1,\"leg\":\"review\",\"pass\":1,\"state\":\"complete\",\"head_sha\":\"abc1234\"} -->",
+      "decoded": "{\"v\":1,\"leg\":\"review\",\"pass\":1,\"state\":\"complete\",\"head_sha\":\"abc1234\"}"
+    },
+    {
+      "name": "two-markers-one-body",
+      "body": "A.\n\n<!-- crossrev: {\"v\":1,\"leg\":\"review\",\"pass\":1,\"state\":\"complete\",\"head_sha\":\"abc1234\"} -->\n\n<!-- crossrev: {\"v\":1,\"leg\":\"resolve\",\"pass\":1,\"state\":\"complete\"} -->",
+      "decoded": ""
+    },
+    {
+      "name": "marker-split-across-lines",
+      "body": "Summary.\n<!-- crossrev: {\"v\":1,\"leg\":\"rev\niew\",\"pass\":1} -->",
+      "decoded": ""
+    },
+    {
+      "name": "migration-top-level-dispositions",
+      "body": "Pass.\n\n<!-- crossrev: {\"v\":1,\"leg\":\"resolve\",\"pass\":1,\"state\":\"complete\",\"dispositions\":[{\"finding_id\":\"aaaa000000000001\",\"resolution\":\"fixed\"}]} -->",
+      "decoded": "{\"v\":1,\"leg\":\"resolve\",\"pass\":1,\"state\":\"complete\",\"resolutions\":[{\"finding_id\":\"aaaa000000000001\",\"resolution\":\"fixed\"}]}"
+    },
+    {
+      "name": "migration-per-finding-disposition",
+      "body": "Pass.\n\n<!-- crossrev: {\"v\":1,\"leg\":\"resolve\",\"pass\":1,\"state\":\"complete\",\"resolutions\":[{\"finding_id\":\"aaaa000000000001\",\"disposition\":\"rebutted\"}]} -->",
+      "decoded": "{\"v\":1,\"leg\":\"resolve\",\"pass\":1,\"state\":\"complete\",\"resolutions\":[{\"finding_id\":\"aaaa000000000001\",\"resolution\":\"disputed\"}]}"
+    },
+    {
+      "name": "migration-finding-disposition",
+      "body": "Findings.\n\n<!-- crossrev: {\"v\":1,\"leg\":\"review\",\"pass\":1,\"findings\":[{\"id\":\"aaaa000000000001\",\"disposition\":\"rebutted\"}]} -->",
+      "decoded": "{\"v\":1,\"leg\":\"review\",\"pass\":1,\"findings\":[{\"id\":\"aaaa000000000001\",\"resolution\":\"disputed\"}]}"
+    }
+  ]
+}

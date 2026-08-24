@@ -1,0 +1,88 @@
+{
+  "captured": {
+    "platform": "Darwin 25.5.0 arm64",
+    "tr_implementation": "/usr/bin/tr (BSD tr)",
+    "locale": "en_AU.UTF-8",
+    "note": "state_finding_id and state_anchor pin LC_ALL=C internally, so ids and anchors are byte-oriented whatever locale this file was captured under."
+  },
+  "function": "state_finding_id",
+  "cases": [
+    {
+      "name": "ascii-basic",
+      "path": "lib/auth.ts",
+      "title": "Token refresh races with logout",
+      "anchor": "abcd1234",
+      "id": "1f3b64041e298591"
+    },
+    {
+      "name": "ascii-mixed-case-and-padding",
+      "path": "lib/auth.ts",
+      "title": "  token   REFRESH races with logout ",
+      "anchor": "abcd1234",
+      "id": "1f3b64041e298591"
+    },
+    {
+      "name": "ascii-empty-anchor",
+      "path": "lib/auth.ts",
+      "title": "Token refresh races with logout",
+      "anchor": "",
+      "id": "dcc38801a9fbc293"
+    },
+    {
+      "name": "tab-in-title",
+      "path": "lib/x.ts",
+      "title": "Token\trefresh\traces",
+      "anchor": "abcd1234",
+      "id": "29f958dbcedead44"
+    },
+    {
+      "name": "newline-in-title",
+      "path": "lib/x.ts",
+      "title": "Token\nrefresh\nraces",
+      "anchor": "abcd1234",
+      "id": "29f958dbcedead44"
+    },
+    {
+      "name": "vertical-tab-in-title",
+      "path": "lib/x.ts",
+      "title": "Token\u000brefresh\u000braces",
+      "anchor": "abcd1234",
+      "id": "29f958dbcedead44"
+    },
+    {
+      "name": "form-feed-in-title",
+      "path": "lib/x.ts",
+      "title": "Token\fraces\fagain",
+      "anchor": "abcd1234",
+      "id": "af7f121c3df81d6f"
+    },
+    {
+      "name": "carriage-return-in-title",
+      "path": "lib/x.ts",
+      "title": "Token\rraces\rhere",
+      "anchor": "abcd1234",
+      "id": "86ec306832daa111"
+    },
+    {
+      "name": "non-ascii-upper-case-title",
+      "path": "greek/x.ts",
+      "title": "ΣIGMA refresh races",
+      "anchor": "",
+      "id": "6def6e1830924124"
+    },
+    {
+      "name": "non-breaking-space-in-title",
+      "path": "w/x.ts",
+      "title": "token refresh",
+      "anchor": "",
+      "id": "967a3623a5014f93"
+    },
+    {
+      "name": "leading-tab-title",
+      "path": "lib/x.ts",
+      "title": "\tLeading tab title",
+      "anchor": "abcd1234",
+      "id": "137f837318a3a685"
+    }
+  ]
+}

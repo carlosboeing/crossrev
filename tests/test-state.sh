@@ -114,6 +114,46 @@ c="$(state_finding_id "lib/other.ts" "Token refresh races with logout" "abcd1234
 [[ "$a" != "$c" ]] && ok "a different path is a different finding" \
   || notok "a different path is a different finding" "different ids" "both $a"
 
+# The normalisation is pinned to LC_ALL=C so macOS, whose BSD tr folds
+# multibyte letters under a UTF-8 locale, and Linux, whose GNU tr works on
+# bytes, hash one title to one id. Unpinned, a finding gets an id from a local
+# run and a different one from the automated run of the same pull request: it
+# posts twice and threads neither.
+sigma="$(state_finding_id "greek/x.ts" "ΣIGMA refresh races" "")"
+is "the id does not move with the ambient locale" \
+  "$(LC_ALL=C state_finding_id "greek/x.ts" "ΣIGMA refresh races" "")" "$sigma"
+lowered="$(state_finding_id "greek/x.ts" "σigma refresh races" "")"
+[[ "$sigma" != "$lowered" ]] && ok "an upper-case sigma is hashed as its own bytes" \
+  || notok "an upper-case sigma is hashed as its own bytes" "different ids" "both $sigma"
+
+nbsp_id="$(state_finding_id "w/x.ts" "$(printf 'a\xc2\xa0b')" "")"
+space_id="$(state_finding_id "w/x.ts" "a b" "")"
+[[ "$nbsp_id" != "$space_id" ]] && ok "a non-breaking space survives squeezing as itself" \
+  || notok "a non-breaking space survives squeezing as itself" "different ids" "both $nbsp_id"
+
+is "an all-ASCII id keeps the value every existing marker carries" \
+  "$(state_finding_id "lib/auth.ts" "Token refresh races with logout" "abcd1234")" "1f3b64041e298591"
+
+# --- anchor fingerprints ----------------------------------------------------
+anchor_file="$(mktemp)"
+printf 'alpha beta\ngamma delta\nepsilon zeta\neta theta\niota kappa\nlambda mu\n' >"$anchor_file"
+is "the anchor at line 1 covers the three lines the window allows" \
+  "$(state_anchor "$anchor_file" 1)" "90d296e8"
+is "the anchor at line 2 covers the first four lines" \
+  "$(state_anchor "$anchor_file" 2)" "18c8382b"
+is "a missing file yields an empty anchor" "$(state_anchor "$(dirname "$anchor_file")/absent.ts" 3)" ""
+printf 'only\n' >"$anchor_file"
+is "a file shorter than the window hashes the empty read" \
+  "$(state_anchor "$anchor_file" 9)" "e3b0c442"
+
+nbsp_file="$(mktemp)"; plain_file="$(mktemp)"
+printf 'x\xc2\xa0y\n' >"$nbsp_file"; printf 'xy\n' >"$plain_file"
+[[ "$(state_anchor "$nbsp_file" 1)" != "$(state_anchor "$plain_file" 1)" ]] \
+  && ok "an anchor keeps a non-breaking space rather than stripping it" \
+  || notok "an anchor keeps a non-breaking space rather than stripping it" \
+       "different anchors" "both $(state_anchor "$nbsp_file" 1)"
+rm -f "$anchor_file" "$nbsp_file" "$plain_file"
+
 # --- pass numbering --------------------------------------------------------
 is "no trusted marker means pass 1" "$(state_pass '[]')" "1"
 is "one completed review means pass 2" \

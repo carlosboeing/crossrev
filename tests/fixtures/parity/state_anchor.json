@@ -1,0 +1,39 @@
+{
+  "captured": {
+    "platform": "Darwin 25.5.0 arm64",
+    "tr_implementation": "/usr/bin/tr (BSD tr)",
+    "locale": "en_AU.UTF-8",
+    "note": "state_finding_id and state_anchor pin LC_ALL=C internally, so ids and anchors are byte-oriented whatever locale this file was captured under."
+  },
+  "function": "state_anchor",
+  "cases": [
+    {
+      "name": "six-line-file-line-1",
+      "line": 1,
+      "exists": "true",
+      "content": "alpha beta\ngamma delta\nepsilon zeta\neta theta\niota kappa\nlambda mu\n",
+      "anchor": "90d296e8"
+    },
+    {
+      "name": "six-line-file-line-2",
+      "line": 2,
+      "exists": "true",
+      "content": "alpha beta\ngamma delta\nepsilon zeta\neta theta\niota kappa\nlambda mu\n",
+      "anchor": "18c8382b"
+    },
+    {
+      "name": "missing-file",
+      "line": 3,
+      "exists": "false",
+      "content": null,
+      "anchor": ""
+    },
+    {
+      "name": "short-file-past-window",
+      "line": 9,
+      "exists": "true",
+      "content": "only\n",
+      "anchor": "e3b0c442"
+    }
+  ]
+}

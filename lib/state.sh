@@ -228,19 +228,27 @@ _state_finding_ids() {
 # Stable across passes so "already posted" is a set-membership test. Path and
 # normalised title carry the identity; the anchor lets a finding still be
 # matched after the line moves.
+#
+# Both normalisations run under LC_ALL=C. BSD tr folds multibyte letters under
+# a UTF-8 locale and GNU tr works on bytes, so an unpinned `tr` hashes one
+# title to two ids — one from a local run, another from the automated run of
+# the same pull request, and neither copy threads. C gives macOS the byte
+# answer Linux already produces, so every id ever minted by automated mode
+# stays valid.
 state_finding_id() {
   local path="$1" title="$2" anchor="${3:-}"
   local norm
-  norm="$(printf '%s' "$title" | tr '[:upper:]' '[:lower:]' | tr -s '[:space:]' ' ' | sed 's/^ *//; s/ *$//')"
+  norm="$(printf '%s' "$title" | LC_ALL=C tr '[:upper:]' '[:lower:]' | LC_ALL=C tr -s '[:space:]' ' ' | sed 's/^ *//; s/ *$//')"
   printf '%s\n%s\n%s' "$path" "$norm" "$anchor" | shasum -a 256 | cut -c1-16
 }
 
-# Fingerprint of the commented line and its neighbours.
+# Fingerprint of the commented line and its neighbours. LC_ALL=C for the same
+# reason state_finding_id pins its tr.
 state_anchor() {
   local file="$1" line="$2"
   [[ -f "$file" ]] || { printf ''; return 0; }
   sed -n "$((line > 2 ? line - 2 : 1)),$((line + 2))p" "$file" 2>/dev/null \
-    | tr -d '[:space:]' | shasum -a 256 | cut -c1-8
+    | LC_ALL=C tr -d '[:space:]' | shasum -a 256 | cut -c1-8
 }
 
 # ---------------------------------------------------------------------------
