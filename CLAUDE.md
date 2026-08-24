@@ -8,7 +8,9 @@ Operator-facing brief for AI coding assistants working on this repo; `README.md`
 
 Named 2026-08-13, renamed from the working title `revloop` ([ADR 0010](docs/adrs/0010-name-crossrev.md)). Key decisions live in `docs/adrs/0001`–`0010`.
 
-**Pre-1.0, and honest about which half is proven.** Every command is covered by an offline suite and the local path has run against real pull requests. **Automated mode has never had its workflows installed in a repository.** That is what the `0.x` version records — do not describe automated mode as working.
+**Pre-1.0, and honest about how far the proof reaches.** Every command is covered by an offline suite and the local path has run against real pull requests. **Automated mode's workflows are installed in one repository, [`carlosboeing/crossrev-testbed`](https://github.com/carlosboeing/crossrev-testbed), and the loop has chained leg to leg there on GitHub's runners** — at v0.2.0 on 2026-08-17 and again at v0.5.0 on 2026-08-24.
+
+That is a named set of runs on one repository with one pairing, not a general guarantee. Nothing has run on a self-hosted runner, under any pairing other than codex reviewing and claude resolving, or at any volume. A draft pull request is still resolved and never reviewed ([#122](https://github.com/carlosboeing/crossrev/issues/122)). `0.x` records that gap — describe the runs that happened, not automated mode as working.
 
 ## Project Map
 
@@ -170,7 +172,7 @@ Written by hand on top, generated underneath. The top half is for somebody decid
 - **Title: `CrossRev vX.Y.Z`.** Product name capitalised per the writing rule, `v` kept so the title matches the tag, the compare link and the release page's own label. Never a marketing phrase.
 - **The generated list goes in unedited**, at the bottom: `gh api repos/<owner>/<repo>/releases/generate-notes -f tag_name=vX.Y.Z -f previous_tag_name=vW.X.Y --jq .body`. It carries `## What's Changed`, one line per pull request with its author, and the `Full Changelog` compare link. It is provenance, so do not curate it.
 - **The hand-written half is terse and technical.** The audience is software engineers, so schema keys, environment variables and flag names stay as they are. What does not belong: paragraphs of narration, the same point made twice, and a casual register that matches nothing else the project prints.
-- **Sections, in order:** two sentences on what the release is; the standing note that automated mode is unproven; `## Breaking` if there is any; `## Highlights`; `## Also fixed`; `## Install`.
+- **Sections, in order:** two sentences on what the release is; the standing note on automated mode, which says which runs prove it and which gaps remain rather than that it is unproven; `## Breaking` if there is any; `## Highlights`; `## Also fixed`; `## Install`.
 - **`## Breaking` is a table of old to new**, then one line naming who has to act, then one line on what happens to work already in flight. A rename nobody has to act on still gets a row.
 - **`## Highlights` uses `Was:` and `Now:`**, one line each under a bold claim. Six at most. A before-and-after states the change without narrating it, which is the whole reason the format is worth keeping.
 - **`## Also fixed` is one line per fix, no elaboration.** Anything needing more than a line is a highlight or belongs only in `CHANGELOG.md`.
