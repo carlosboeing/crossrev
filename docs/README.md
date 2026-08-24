@@ -13,4 +13,4 @@ Start with [installation](installation.md), then [usage](usage.md). Everything e
 | [adrs/](adrs/) | Decision records — what was decided, what was considered, what it costs |
 | [ROADMAP.md](ROADMAP.md) | What's next, and what's deliberately deferred |
 
-**CrossRev is a work in progress.** Every command is built and covered by an offline test suite, and the local path has been run against real pull requests. Automated mode has never had its workflows installed in a repository, which is why the version is `0.x`. The docs say so wherever it matters rather than only here.
+**CrossRev is a work in progress.** Every command is built and covered by an offline test suite, and the local path has been run against real pull requests. Automated mode's workflows are installed in one repository and the loop has chained leg to leg there on GitHub's runners, most recently at v0.5.0 on 2026-08-24 — one repository, one harness pairing, hosted runners only. That is why the version is `0.x`: the proof covers the runs it covers and nothing wider. [ROADMAP.md](ROADMAP.md) names what is observed and what is not, and the docs repeat it wherever it matters rather than only here.
