@@ -245,5 +245,59 @@ printf 'version: 1\nbacklog:\n  destination: repository\n  repository:\n    layo
 is "an explicit file layout skips a folder convention" \
   "$($CROSSREV config backlog)" "  deferred work would go to: repository file .crossrev/backlog.md"
 
+# --- the backlog path guard -------------------------------------------------
+#
+# The value ends in a file write, so it is bounded rather than trusted. The
+# guard used to resolve it with python3 and fall back to raw concatenation
+# whenever that call failed, which let `../` traversal through on every host
+# where python3 is absent — and python3 appears in none of CrossRev's
+# dependency lists.
+source "$HERE/../lib/ui.sh"
+# shellcheck source=../lib/config.sh
+source "$HERE/../lib/config.sh"
+
+d="$(new_repo)"; cd "$d" || exit 1
+
+cfg_assert_path_inside_repo "backlog/tasks" 2>/dev/null \
+  && ok "a plain relative path is allowed" \
+  || notok "a plain relative path is allowed" "exit 0" "exit $?"
+
+cfg_assert_path_inside_repo "sub/../sibling" 2>/dev/null \
+  && ok "a path that re-enters and stays inside is allowed" \
+  || notok "a path that re-enters and stays inside is allowed" "exit 0" "exit $?"
+
+cfg_assert_path_inside_repo "." 2>/dev/null \
+  && ok "the checkout root itself is allowed" \
+  || notok "the checkout root itself is allowed" "exit 0" "exit $?"
+
+err="$(cfg_assert_path_inside_repo "../../etc" 2>&1 >/dev/null)"; rc=$?
+is  "traversal above the checkout exits non-zero" "$rc" "1"
+has "and names the configured path"               "$err" "'../../etc'"
+
+err="$(cfg_assert_path_inside_repo "/etc" 2>&1 >/dev/null)"; rc=$?
+is "an absolute path exits non-zero" "$rc" "1"
+
+err="$(cfg_assert_path_inside_repo "sub/../../outside" 2>&1 >/dev/null)"; rc=$?
+is "traversal that re-enters and then leaves exits non-zero" "$rc" "1"
+
+# Resolution may not lean on python3: it is not a dependency anywhere, and a
+# fallback that fires whenever it is missing turns the guard off entirely.
+no_py_bin="$(mktemp -d)"
+ln -s "$(command -v git)" "$no_py_bin/git"
+ln -s "$(command -v jq)" "$no_py_bin/jq"
+BASH_ABS="$(command -v bash)"
+repo_lib="$(cd "$HERE/.." && pwd)"
+err="$(PATH="$no_py_bin" "$BASH_ABS" -c '
+  source "$1/lib/ui.sh"; source "$1/lib/config.sh"
+  cfg_assert_path_inside_repo "../../etc"' _ "$repo_lib" 2>&1)"; rc=$?
+is  "traversal is refused with nothing but git and jq on PATH" "$rc" "1"
+has "and the refusal says why"                                 "$err" "outside the repository"
+
+PATH="$no_py_bin" "$BASH_ABS" -c '
+  source "$1/lib/ui.sh"; source "$1/lib/config.sh"
+  cfg_assert_path_inside_repo "backlog/tasks"' _ "$repo_lib" 2>/dev/null \
+  && ok "and a plain path is still accepted there" \
+  || notok "and a plain path is still accepted there" "exit 0" "exit $?"
+
 printf '\n  %d passed, %d failed\n' "$pass" "$fail"
 (( fail == 0 ))

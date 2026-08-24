@@ -391,16 +391,35 @@ _cfg_sniff_repository_backlog() {
 # sequence or an absolute path must fail loudly instead of landing somewhere
 # surprising. Same reasoning as the branch guard: the check is cheap and the
 # failure it prevents is not.
+#
+# Resolution is lexical and uses jq alone. It used to call python3's normpath
+# with a fallback to raw concatenation whenever that call failed — and since
+# python3 is in no dependency list, on most hosts every call failed, the
+# fallback fired, and `../` traversal matched the containment pattern below.
+# Nothing here can fail into an allowed answer: jq missing or erroring
+# resolves to "", which dies.
 cfg_assert_path_inside_repo() {
   local path="$1" root resolved
   root="$(git rev-parse --show-toplevel 2>/dev/null)" || ui_die \
     "not inside a git repository" "Run crossrev from a checkout of the repository under review."
   [[ "$path" != /* ]] || ui_die \
     "the backlog path '$path' is absolute" "Backlog paths are repository-relative, so that crossrev cannot write outside the checkout."
-  resolved="$(cd "$root" && python3 -c 'import os,sys; print(os.path.normpath(os.path.join(os.getcwd(), sys.argv[1])))' "$path" 2>/dev/null)" \
-    || resolved="$root/$path"
+  case "$path" in
+    ""|".") resolved="$root" ;;
+    *) resolved="$(jq -rn --arg c "$root/$path" '
+         [ $c | split("/")[] | select(. != "" and . != ".") ]
+         | reduce .[] as $part ({stack: [], escaped: false};
+             if .escaped then .
+             elif $part == ".." then
+               if (.stack | length) > 0 then .stack |= .[:-1] else .escaped = true end
+             else .stack += [$part] end)
+         | if .escaped or (.stack | length) == 0 then ""
+           else "/" + (.stack | join("/")) end')" ;;
+  esac
   case "$resolved" in
     "$root"|"$root"/*) return 0 ;;
+    "") ui_die "the backlog path '$path' escapes the repository" \
+      "It climbs above the checkout root. Backlog paths must stay inside the repository." ;;
     *) ui_die "the backlog path '$path' resolves outside the repository" \
          "It resolves to $resolved. Backlog paths must stay inside the checkout." ;;
   esac
