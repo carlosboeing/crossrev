@@ -13,8 +13,10 @@
 # decision in here is exercised offline against fixtures.
 
 # Tests source this file without bin/crossrev's ordering. The log helpers are
-# no-ops until log_init runs. Same fallback config.sh uses for harnesses.sh.
-if ! declare -F log_event >/dev/null 2>&1; then
+# no-ops until log_init runs, but log_redact_publish is not optional: every write
+# below filters its body through it, so a file sourced alone has to bring it in.
+# Same fallback config.sh uses for harnesses.sh.
+if ! declare -F log_event >/dev/null 2>&1 || ! declare -F log_redact_publish >/dev/null 2>&1; then
   _gh_lib="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   # shellcheck source=log.sh
   [[ -f "$_gh_lib/log.sh" ]] && source "$_gh_lib/log.sh"
@@ -146,6 +148,7 @@ gh_review_threads() {
 # write to it is an edit of that id.
 gh_comment_create() {
   local repo="$1" pr="$2" body="$3" id
+  body="$(log_redact_publish "$body")"
   id="$(gh api --method POST "repos/$repo/issues/$pr/comments" \
         -f body="$body" --jq .id 2>/dev/null)" \
     || ui_die "could not post a comment on $repo#$pr" \
@@ -155,6 +158,7 @@ gh_comment_create() {
 
 gh_comment_edit() {
   local repo="$1" id="$2" body="$3"
+  body="$(log_redact_publish "$body")"
   gh api --method PATCH "repos/$repo/issues/comments/$id" -f body="$body" >/dev/null 2>&1 \
     || ui_die "could not update comment $id on $repo" \
        "The pass marker lives in that comment, so leaving it stale would misreport what happened. Retry, or check the token's permissions."
@@ -168,6 +172,7 @@ gh_comment_edit() {
 # names the location, and says it did.
 gh_review_comment_create() {
   local repo="$1" pr="$2" commit="$3" path="$4" line="$5" side="$6" body="$7"
+  body="$(log_redact_publish "$body")"
   if gh api --method POST "repos/$repo/pulls/$pr/comments" \
        -f body="$body" -f commit_id="$commit" -f path="$path" \
        -F line="$line" -f side="$side" >/dev/null 2>&1; then
@@ -186,6 +191,7 @@ $body" >/dev/null
 # comment. Replying at top level instead is what makes a PR unreadable.
 gh_review_reply() {
   local repo="$1" pr="$2" root_comment_id="$3" body="$4"
+  body="$(log_redact_publish "$body")"
   gh api --method POST "repos/$repo/pulls/$pr/comments/$root_comment_id/replies" \
     -f body="$body" >/dev/null 2>&1 && return 0
   ui_warn "could not reply in the thread rooted at comment $root_comment_id on $repo#$pr" \
@@ -301,6 +307,11 @@ gh_issue_candidates() {
 # so each one is its own repeated field.
 gh_issue_create() {
   local repo="$1" title="$2" body="$3" labels="$4" n l
+  # The title masks through log_redact_str rather than log_redact_publish: an
+  # issue title is one line and the publish notice is a paragraph, so the note
+  # rides on the body where a reader can act on it.
+  title="$(log_redact_str "$title")"
+  body="$(log_redact_publish "$body")"
   local -a args=(-f "title=$title" -f "body=$body") split=()
   read -ra split <<<"$labels"
   if (( ${#split[@]} > 0 )); then
@@ -319,7 +330,8 @@ gh_issue_create() {
 }
 
 gh_issue_comment() {
-  gh api --method POST "repos/$1/issues/$2/comments" -f body="$3" >/dev/null 2>&1 || true
+  gh api --method POST "repos/$1/issues/$2/comments" \
+    -f body="$(log_redact_publish "$3")" >/dev/null 2>&1 || true
 }
 
 # ---------------------------------------------------------------------------

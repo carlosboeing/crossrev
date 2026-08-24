@@ -101,6 +101,42 @@ hasnt "a failed filter does not leave the original" "$(cat "$f")" "ghi789TOKEN"
 has   "and records that the original was discarded" "$(cat "$f")" "redaction failed; original discarded"
 rm -rf "$f" "$tmpbin"
 
+# --- the publish filter ------------------------------------------------------
+#
+# The third route out of a run. A successful leg's findings text is parsed from
+# the raw capture and published verbatim, so a model quoting a .env example or a
+# fixture puts the matched string straight onto the pull request. Filtering here
+# rather than at the parse keeps the payload identical whether or not a run
+# directory exists.
+pub_leak='why: tests/fixtures/.env.example holds sk-ant-api03-LmNoPqRsTuVwXyZ1234'
+pub="$(log_redact_publish "$pub_leak")"
+hasnt "log_redact_publish masks a key in a published body" "$pub" "LmNoPqRsTuVwXyZ1234"
+has   "and keeps the prefix that names the kind"            "$pub" "sk-ant-api03-…[redacted]"
+has   "and the reader is told why the text is masked"       "$pub" "$LOG_REDACT_NOTICE"
+has   "and the surrounding text survives"                   "$pub" "tests/fixtures/.env.example"
+
+# gh_review_comment_create falls back through gh_comment_create when GitHub
+# will not anchor the line, so a body passes the filter twice on that path.
+is "a second pass changes nothing" "$(log_redact_publish "$pub")" "$pub"
+
+pub_clean='a finding with nothing token-shaped in it'
+is "a clean body is returned unchanged" "$(log_redact_publish "$pub_clean")" "$pub_clean"
+hasnt "and carries no notice" "$(log_redact_publish "$pub_clean")" "CrossRev masked"
+
+# A body built with blank lines between its sections keeps them: the marker sits
+# at the end of one and `crossrev status` reads it back off the same string.
+pub_multi="$(printf 'line one\n\nline two\n')"
+is "an unmasked body keeps its own newlines" "$(log_redact_publish "$pub_multi" | od -c | tail -3)" \
+   "$(printf '%s' "$pub_multi" | od -c | tail -3)"
+
+tmpbin="$(mktemp -d)"
+printf '#!/bin/sh\nexit 1\n' >"$tmpbin/sed"
+chmod +x "$tmpbin/sed"
+pub_failed="$( PATH="$tmpbin:$PATH"; log_redact_publish "$pub_leak" )"
+hasnt "a failed filter publishes nothing of the body" "$pub_failed" "LmNoPqRsTuVwXyZ1234"
+has   "and says the text was withheld"                 "$pub_failed" "withheld it rather than publishing it"
+rm -rf "$tmpbin"
+
 # --- the sweep ---------------------------------------------------------------
 old_run="$RUNS_BASE/acme-widget/pr-7/local-99999"
 mkdir -p "$old_run"
@@ -299,7 +335,18 @@ has "the kept transcript masks the token body" \
   "$(cat "$rd/review.attempt-1.stdout")" "sk-ant-api03-…[redacted]"
 hasnt "and does not hold it in the clear" \
   "$(cat "$rd/review.attempt-1.stdout")" "EXAMPLEONLYnotarealkey"
-has "the posted marker keeps the finding text verbatim" \
+# The parse still reads the raw capture, so identical harness output produces an
+# identical finding whether or not a run directory exists — that is what #110
+# fixed and it is unchanged. What is new is one transform at the far end: the
+# body reaching GitHub is filtered, because a comment on a public pull request is
+# the one copy of this text a stranger can read.
+hasnt "the published body does not carry the key in the clear" \
   "$(last_body 9001)" "EXAMPLEONLYnotarealkey"
+has "and masks it where the model wrote it" \
+  "$(last_body 9001)" "sk-ant-api03-…[redacted]"
+has "and the rest of the finding text survives" \
+  "$(last_body 9001)" "A failed request looks like a success near"
+has "and the comment says why the text is masked" \
+  "$(last_body 9001)" "CrossRev masked a string"
 
 finish

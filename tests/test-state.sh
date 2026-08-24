@@ -22,6 +22,7 @@ ok()    { printf '  ok    %s\n' "$1"; pass=$((pass+1)); }
 notok() { printf '  FAIL  %s\n    expected: %s\n    actual:   %s\n' "$1" "$2" "$3"; fail=$((fail+1)); }
 is()    { [[ "$2" == "$3" ]] && ok "$1" || notok "$1" "$3" "$2"; }
 has()   { [[ "$2" == *"$3"* ]] && ok "$1" || notok "$1" "contains '$3'" "$2"; }
+hasnt() { [[ "$2" != *"$3"* ]] && ok "$1" || notok "$1" "does not contain '$3'" "$2"; }
 
 # --- marker round-trip -----------------------------------------------------
 m='{"v":1,"leg":"review","pass":2,"state":"complete","verdict":"issues-remain","head_sha":"9f3c1ab"}'
@@ -35,6 +36,41 @@ Text.$(state_marker_encode "$m")
 is "a marker parses beside adjacent HTML comments" "$(state_marker_of "$body2" | jq -r .pass)" "2"
 
 is "a body with no marker yields nothing" "$(state_marker_of "just a comment")" ""
+
+# --- a marker that passed through the publish filter ------------------------
+#
+# The marker travels inside the comment body, so filtering the body on its way
+# to GitHub filters the durable record `crossrev status` reads back. That is the
+# intended trade: a finding title quoting a credential shape is masked on the
+# pull request and masked in the marker, and the two agree. What must not change
+# is that the marker still parses, still carries every field, and still reads
+# back — so the round trip is pinned here rather than assumed.
+leaky='{"v":1,"leg":"review","pass":3,"state":"complete","verdict":"issues-remain",
+  "head_sha":"9f3c1ab","findings":[{"id":"aaaa000000000001","severity":"high",
+  "title":"the fixture holds sk-ant-api03-LmNoPqRsTuVwXyZ1234"}]}'
+leaky_body="Pass summary.$(state_marker_encode "$leaky")"
+filtered_body="$(log_redact_publish "$leaky_body")"
+filtered="$(state_marker_of "$filtered_body")"
+
+is "a filtered marker still parses"  "$(jq -r '.pass' <<<"$filtered")" "3"
+is "and keeps every other field"     "$(jq -r '.verdict + " " + .head_sha' <<<"$filtered")" \
+   "issues-remain 9f3c1ab"
+is "and the finding id is untouched" "$(jq -r '.findings[0].id' <<<"$filtered")" "aaaa000000000001"
+is "and the marker is valid JSON"    "$(jq -e 'type' <<<"$filtered")" '"object"'
+hasnt "and the key body is gone from the record" \
+  "$(jq -r '.findings[0].title' <<<"$filtered")" "LmNoPqRsTuVwXyZ1234"
+has "while the title still names what it found" \
+  "$(jq -r '.findings[0].title' <<<"$filtered")" "the fixture holds sk-ant-api03-…[redacted]"
+
+# The per-finding marker is matched by a literal prefix and a regex that stops at
+# the first `}`, so anything the filter inserts into a body has to leave it
+# readable. `…[redacted]` carries no brace and no `-->`.
+fbody="A reply.$(state_finding_marker "aaaa000000000001" 3 resolve)
+Quoting sk-ant-api03-LmNoPqRsTuVwXyZ1234 from the diff."
+ffiltered="$(log_redact_publish "$fbody")"
+is "a finding marker survives the filter beside a masked string" \
+  "$(printf '%s' "$ffiltered" | _state_finding_ids resolve 3)" "aaaa000000000001"
+hasnt "and the reply itself no longer carries the key" "$ffiltered" "LmNoPqRsTuVwXyZ1234"
 
 # --- old vocabulary on a marker already on a pull request ------------------
 #
