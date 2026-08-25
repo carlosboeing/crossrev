@@ -34,6 +34,8 @@ All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepa
 
 ### Changed
 
+- **The native rewrite remains pre-1.0.** The native foundation will settle distribution and behavioural parity before later Review Intelligence releases and share-ready reliability proof; the exact 0.x version remains a deliberate release decision.
+
 - **`--harness` is documented where a reader is deciding which harness to run, not only under configuration.** `README.md` showed the override once, in the configuration section, which is the section somebody reads after they have already committed to a setup. Trying a second harness against a real pull request is the cheapest way to find out whether the findings are any good, so the flag now appears twice more: in `### Review a pull request`, immediately after the first `crossrev review` example, and in `## Harness support`, as a two-line block passing it to `review` and `resolve` separately. The per-leg form is deliberate — a pairing is two choices, and the single-name form on `cycle` collapses it ([#102](https://github.com/carlosboeing/crossrev/issues/102)).
 
 - **Both documents now name the four harnesses `--harness` accepts, and say why `kimi` is not one of them.** `docs/usage.md` listed `claude|codex|agy`, which predates Grok and never covered Kimi. Kimi appears in the README's credential table but has no adapter behind it — `lib/run.sh` refuses it with "there is no adapter for the harness 'kimi'" and points at `endpoints:` — so a reader picking a name out of that table had no way to know which half of it the flag would take.
