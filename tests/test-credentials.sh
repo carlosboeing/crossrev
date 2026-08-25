@@ -286,8 +286,52 @@ is  "and lands under the env var the descriptor names, inside its directory" \
     "$(jq -r '.opencode.key' "$staged/opencode/auth.json" 2>/dev/null)" "stub"
 is  "readable by nobody else" \
     "$(stat -c '%a' "$staged/opencode/auth.json" 2>/dev/null || stat -f '%Lp' "$staged/opencode/auth.json")" "600"
-rm -rf "$CRED_SCRATCH"; CRED_SCRATCH=""
-unset CROSSREV_OPENCODE_AUTH XDG_DATA_HOME
+
+# --- the discard clears the variable it exported ----------------------------
+#
+# cred_prepare exports whatever name the descriptor gives it. cred_discard used
+# to unset one name written out by hand, CODEX_HOME, so the discard worked for
+# codex and for no other harness. XDG_DATA_HOME is the worst of the rest: it is
+# not CrossRev's variable, so a stale value pointing at a deleted directory
+# reaches everything XDG-aware the same process runs next. Under `crossrev
+# cycle` one process runs both legs, and run_invoke wraps each of them with a
+# prepare and a discard, so this is the ordinary path.
+cred_discard
+is "the discard clears the staging variable the descriptor named" \
+   "${XDG_DATA_HOME:-unset}" "unset"
+is "and takes the scratch directory with it" \
+   "$([[ -d "$staged" ]] && echo "still there" || echo gone)" "gone"
+
+# A variable the operator set before CrossRev ran is theirs. XDG_DATA_HOME is
+# the case that makes the difference visible: unsetting it would hand the rest
+# of the process a different answer than it started with.
+export XDG_DATA_HOME="/tmp/crossrev-operator-data.$$"
+cred_prepare opencode
+is "a staged run overrides an operator's own value" \
+   "$([[ "$XDG_DATA_HOME" == "/tmp/crossrev-operator-data.$$" ]] && echo same || echo overridden)" "overridden"
+cred_discard
+is "and the discard puts the operator's value back rather than unsetting it" \
+   "${XDG_DATA_HOME:-unset}" "/tmp/crossrev-operator-data.$$"
+unset XDG_DATA_HOME
+
+# The repro from the issue, at the boundary the run takes it: two legs in one
+# process, staging two different harnesses. Before the fix the first leg's
+# variable was still exported while the second ran, pointing at a directory the
+# first discard had already removed.
+unset CODEX_HOME
+CROSSREV_CODEX_AUTH="$(fake_credential 86400)"; export CROSSREV_CODEX_AUTH
+cred_prepare opencode
+first_staged="$XDG_DATA_HOME"
+cred_discard
+cred_prepare codex
+is "the second leg does not inherit the first leg's staging variable" \
+   "${XDG_DATA_HOME:-unset}" "unset"
+is "and the first leg's directory is gone rather than still pointed at" \
+   "$([[ -d "$first_staged" ]] && echo "still there" || echo gone)" "gone"
+cred_discard
+is "and the second leg's own variable clears in turn" "${CODEX_HOME:-unset}" "unset"
+
+unset CROSSREV_OPENCODE_AUTH CROSSREV_CODEX_AUTH XDG_DATA_HOME
 [[ -n "$save_data" ]] && export XDG_DATA_HOME="$save_data" || true
 
 printf '\n  %d passed, %d failed\n' "$pass" "$fail"

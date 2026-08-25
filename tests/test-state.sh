@@ -22,6 +22,7 @@ ok()    { printf '  ok    %s\n' "$1"; pass=$((pass+1)); }
 notok() { printf '  FAIL  %s\n    expected: %s\n    actual:   %s\n' "$1" "$2" "$3"; fail=$((fail+1)); }
 is()    { [[ "$2" == "$3" ]] && ok "$1" || notok "$1" "$3" "$2"; }
 has()   { [[ "$2" == *"$3"* ]] && ok "$1" || notok "$1" "contains '$3'" "$2"; }
+hasnt() { [[ "$2" != *"$3"* ]] && ok "$1" || notok "$1" "does not contain '$3'" "$2"; }
 
 # --- marker round-trip -----------------------------------------------------
 m='{"v":1,"leg":"review","pass":2,"state":"complete","verdict":"issues-remain","head_sha":"9f3c1ab"}'
@@ -35,6 +36,71 @@ Text.$(state_marker_encode "$m")
 is "a marker parses beside adjacent HTML comments" "$(state_marker_of "$body2" | jq -r .pass)" "2"
 
 is "a body with no marker yields nothing" "$(state_marker_of "just a comment")" ""
+
+# --- a marker that passed through the publish filter ------------------------
+#
+# The marker travels inside the comment body, so filtering the body on its way
+# to GitHub filters the durable record `crossrev status` reads back. That is the
+# intended trade: a finding title quoting a credential shape is masked on the
+# pull request and masked in the marker, and the two agree. What must not change
+# is that the marker still parses, still carries every field, and still reads
+# back — so the round trip is pinned here rather than assumed.
+leaky='{"v":1,"leg":"review","pass":3,"state":"complete","verdict":"issues-remain",
+  "head_sha":"9f3c1ab","findings":[{"id":"aaaa000000000001","severity":"high",
+  "title":"the fixture holds sk-ant-api03-LmNoPqRsTuVwXyZ1234"}]}'
+leaky_body="Pass summary.$(state_marker_encode "$leaky")"
+filtered_body="$(log_redact_publish "$leaky_body")"
+filtered="$(state_marker_of "$filtered_body")"
+
+is "a filtered marker still parses"  "$(jq -r '.pass' <<<"$filtered")" "3"
+is "and keeps every other field"     "$(jq -r '.verdict + " " + .head_sha' <<<"$filtered")" \
+   "issues-remain 9f3c1ab"
+is "and the finding id is untouched" "$(jq -r '.findings[0].id' <<<"$filtered")" "aaaa000000000001"
+is "and the marker is valid JSON"    "$(jq -e 'type' <<<"$filtered")" '"object"'
+hasnt "and the key body is gone from the record" \
+  "$(jq -r '.findings[0].title' <<<"$filtered")" "LmNoPqRsTuVwXyZ1234"
+has "while the title still names what it found" \
+  "$(jq -r '.findings[0].title' <<<"$filtered")" "the fixture holds sk-ant-api03-…[redacted]"
+
+# The per-finding marker is matched by a literal prefix and a regex that stops at
+# the first `}`, so anything the filter inserts into a body has to leave it
+# --- a body the publish filter could not process -----------------------------
+#
+# log_redact_publish withholds the text and returns a notice in its place. That
+# is the right body for findings text and the wrong one for a body carrying a
+# pass marker: publishing the notice instead would leave `crossrev status`
+# reading `passes none yet` on a pull request that ran. gh_comment_edit is the
+# write that carries the marker, and it already refuses when the API write
+# fails for the same reason.
+failbin="$(mktemp -d)"
+printf '#!/bin/sh\nexit 1\n' >"$failbin/sed"; chmod +x "$failbin/sed"
+printf '#!/bin/sh\nexit 0\n' >"$failbin/gh";  chmod +x "$failbin/gh"
+
+refused="$( PATH="$failbin:$PATH"; gh_comment_edit acme/widget 1 "$leaky_body" 2>&1 )"; refused_rc=$?
+is  "a marker-carrying body the filter refused stops the run" "$refused_rc" "1"
+has "and says the marker is what was at stake"                "$refused" "record of what ran"
+
+( PATH="$failbin:$PATH"; gh_comment_edit acme/widget 1 'a finding with no marker in it' >/dev/null 2>&1 ); plain_rc=$?
+is  "a body with no marker publishes the withheld notice instead" "$plain_rc" "0"
+
+# The severity follows the write, not the body. gh_comment_edit already dies
+# when the API refuses and the pass marker lives in the comment it writes.
+# gh_review_reply warns and its caller re-posts at top level, so a filter
+# failure there must not take the run down with it — a lost pass marker costs
+# the record of what ran, a lost finding marker costs a repeated comment.
+reply_out="$( PATH="$failbin:$PATH"; gh_review_reply acme/widget 1 99 "$leaky_body" 2>&1 >/dev/null )"; reply_rc=$?
+is    "a reply the filter refused degrades instead of stopping the run" "$reply_rc" "0"
+has   "and warns that the marker did not reach the pull request"        "$reply_out" "not on the pull request"
+hasnt "without making the refusal gh_comment_edit makes"                "$reply_out" "record of what ran"
+rm -rf "$failbin"
+
+# readable. `…[redacted]` carries no brace and no `-->`.
+fbody="A reply.$(state_finding_marker "aaaa000000000001" 3 resolve)
+Quoting sk-ant-api03-LmNoPqRsTuVwXyZ1234 from the diff."
+ffiltered="$(log_redact_publish "$fbody")"
+is "a finding marker survives the filter beside a masked string" \
+  "$(printf '%s' "$ffiltered" | _state_finding_ids resolve 3)" "aaaa000000000001"
+hasnt "and the reply itself no longer carries the key" "$ffiltered" "LmNoPqRsTuVwXyZ1234"
 
 # --- old vocabulary on a marker already on a pull request ------------------
 #

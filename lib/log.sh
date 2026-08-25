@@ -117,6 +117,54 @@ log_redact_str() {
   printf '%s' "$1" | log_redact
 }
 
+# The line appended to a published body the filter changed. A masked string on
+# its own — `sk-ant-api03…[redacted]` inside a review comment — reads as a
+# CrossRev defect to whoever finds it on the pull request, so the body says what
+# happened to it.
+LOG_REDACT_NOTICE='_CrossRev masked a string in this comment that matched a credential pattern._'
+
+# Redact a body on its way to GitHub.
+#
+# The three routes out of a run are not the same one. log_redact_file covers the
+# transcript kept on disk, log_redact_str covers the harness error message, and
+# this covers the third: on a successful leg the findings text is parsed from the
+# raw capture and published verbatim into inline review comments, replies, filed
+# issues and the pass marker.
+#
+# The filter runs at the publish boundary rather than at the parse, so a leg's
+# payload does not depend on whether a run directory exists — the fault the
+# parse-then-filter order was introduced to remove.
+#
+# Idempotent. A masked string no longer matches any of the patterns, so a body
+# that passes through twice is masked once and noted once — which is the case
+# gh_review_comment_create creates every time GitHub refuses to anchor a line and
+# it falls back through gh_comment_create.
+#
+# Fails closed, and says so to its caller. A filter that errors withholds the
+# text rather than publishing it, because a body that could not be filtered is
+# exactly the body that might carry the credential. The notice is printed in its
+# place and the return is non-zero, so a caller that cannot afford to lose the
+# body it was given can refuse instead of publishing the notice as the body.
+log_redact_publish() {
+  local body="$1" out
+  # `&& printf 'x'` twice over: it carries the pipeline's exit status out of the
+  # command substitution, and the sentinel byte survives the substitution's
+  # trailing-newline strip so a body keeps the newlines it was built with.
+  if ! out="$(printf '%s' "$body" | log_redact && printf 'x')"; then
+    log_event redact "publish filter failed; body withheld"
+    printf 'CrossRev could not filter this text for credential shapes, so it withheld it rather than publishing it.'
+    return 1
+  fi
+  out="${out%x}"
+  # BSD and GNU sed disagree about a final line that carries no newline, so the
+  # comparison ignores one trailing newline: the note must mean a mask happened,
+  # not that a platform added a byte.
+  [[ "${out%$'\n'}" == "${body%$'\n'}" ]] || out="$out
+
+$LOG_REDACT_NOTICE"
+  printf '%s' "$out"
+}
+
 # Redact a file in place. Through a temp file rather than sed -i, because BSD
 # and GNU sed spell in-place editing differently and this runs on both.
 #

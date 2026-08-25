@@ -19,6 +19,18 @@
 
 CRED_SCRATCH=""
 
+# The staging variable cred_prepare exported, and what it held before, so
+# cred_discard can put the environment back rather than unsetting a name written
+# out by hand. That name used to be CODEX_HOME, which meant the discard worked
+# for codex and for no other harness: GROK_HOME stayed exported at a directory
+# that had just been removed, and XDG_DATA_HOME — opencode's staging lever, and
+# not CrossRev's variable at all — reached everything XDG-aware the same process
+# ran afterwards. One process runs both legs under `crossrev cycle`, so that is
+# the ordinary path and not an edge case.
+CRED_STAGING_ENV=""
+CRED_STAGING_ENV_WAS_SET=""
+CRED_STAGING_ENV_PREV=""
+
 # An hour. A leg with less than this refuses rather than running, because the
 # refresh it would trigger mid-flight is the one that breaks the chain.
 CRED_MIN_SECONDS=3600
@@ -137,6 +149,14 @@ cred_prepare() {
     mkdir -p "$(dirname "$staging_file")"
     (umask 077; printf '%s' "${!secret}" >"$staging_file")
     cred_assert_fresh "$harness" "$staging_file"
+    if [[ -n "${!staging_env+set}" ]]; then
+      CRED_STAGING_ENV_WAS_SET=1
+      CRED_STAGING_ENV_PREV="${!staging_env}"
+    else
+      CRED_STAGING_ENV_WAS_SET=""
+      CRED_STAGING_ENV_PREV=""
+    fi
+    CRED_STAGING_ENV="$staging_env"
     export "$staging_env=$CRED_SCRATCH"
   fi
 }
@@ -168,7 +188,16 @@ cred_discard() {
   [[ -n "$CRED_SCRATCH" ]] || return 0
   rm -rf "$CRED_SCRATCH"
   CRED_SCRATCH=""
-  unset CODEX_HOME
+  if [[ -n "$CRED_STAGING_ENV" ]]; then
+    if [[ -n "$CRED_STAGING_ENV_WAS_SET" ]]; then
+      export "$CRED_STAGING_ENV=$CRED_STAGING_ENV_PREV"
+    else
+      unset "$CRED_STAGING_ENV"
+    fi
+  fi
+  CRED_STAGING_ENV=""
+  CRED_STAGING_ENV_WAS_SET=""
+  CRED_STAGING_ENV_PREV=""
 }
 
 # Refuse rather than refresh in flight.

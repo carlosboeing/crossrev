@@ -88,6 +88,18 @@ One retention rule covers everything in the directory: `retention_days` sweeps r
 
 No credential reaches either file. The harness process holds no GitHub token, and everything captured from it passes the same redaction `crossrev init` uses before it lands.
 
+The same filter runs on what CrossRev publishes, so "redacted" names three outputs rather than one:
+
+| Output | What is filtered |
+|---|---|
+| The transcript kept under the run directory | The whole file, on its way to disk |
+| A harness error message quoted on the pull request | The message string |
+| Every body written to GitHub | Comments, inline review comments, thread replies, comment edits, the pass marker they carry, and a filed issue's title and body |
+
+The masked shapes are `sk-ant-`, `github_pat_`, `ghp_`, `gho_`, `ghu_`, `ghs_`, `ghr_`, `xai-` and `sk-`. Each keeps its prefix, so a masked string still names the kind of token it held, and a published body the filter changed carries a line saying a string was masked — a bare `sk-ant-api03-…[redacted]` otherwise reads as a CrossRev defect.
+
+The filter runs at the publish boundary and nowhere earlier. A finding's text is parsed from the raw capture and its identity is computed from the raw text, so a run with a run directory and a run without produce the same finding. The diff CrossRev reads, the prompt it assembles and the commit it makes are not filtered.
+
 ### The pairing
 
 ```yaml
