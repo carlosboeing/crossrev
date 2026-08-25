@@ -64,6 +64,26 @@ has "while the title still names what it found" \
 
 # The per-finding marker is matched by a literal prefix and a regex that stops at
 # the first `}`, so anything the filter inserts into a body has to leave it
+# --- a body the publish filter could not process -----------------------------
+#
+# log_redact_publish withholds the text and returns a notice in its place. That
+# is the right body for findings text and the wrong one for a body carrying a
+# pass marker: publishing the notice instead would leave `crossrev status`
+# reading `passes none yet` on a pull request that ran. gh_comment_edit is the
+# write that carries the marker, and it already refuses when the API write
+# fails for the same reason.
+failbin="$(mktemp -d)"
+printf '#!/bin/sh\nexit 1\n' >"$failbin/sed"; chmod +x "$failbin/sed"
+printf '#!/bin/sh\nexit 0\n' >"$failbin/gh";  chmod +x "$failbin/gh"
+
+refused="$( PATH="$failbin:$PATH"; gh_comment_edit acme/widget 1 "$leaky_body" 2>&1 )"; refused_rc=$?
+is  "a marker-carrying body the filter refused stops the run" "$refused_rc" "1"
+has "and says the marker is what was at stake"                "$refused" "record of what ran"
+
+( PATH="$failbin:$PATH"; gh_comment_edit acme/widget 1 'a finding with no marker in it' >/dev/null 2>&1 ); plain_rc=$?
+is  "a body with no marker publishes the withheld notice instead" "$plain_rc" "0"
+rm -rf "$failbin"
+
 # readable. `…[redacted]` carries no brace and no `-->`.
 fbody="A reply.$(state_finding_marker "aaaa000000000001" 3 resolve)
 Quoting sk-ant-api03-LmNoPqRsTuVwXyZ1234 from the diff."

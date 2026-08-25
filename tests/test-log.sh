@@ -135,6 +135,10 @@ chmod +x "$tmpbin/sed"
 pub_failed="$( PATH="$tmpbin:$PATH"; log_redact_publish "$pub_leak" )"
 hasnt "a failed filter publishes nothing of the body" "$pub_failed" "LmNoPqRsTuVwXyZ1234"
 has   "and says the text was withheld"                 "$pub_failed" "withheld it rather than publishing it"
+# The notice is the right body for findings text and the wrong one for a body
+# carrying a pass marker, so the caller is told rather than left to guess.
+( PATH="$tmpbin:$PATH"; log_redact_publish "$pub_leak" >/dev/null ); pub_rc=$?
+is "and tells the caller the filter failed" "$pub_rc" "1"
 rm -rf "$tmpbin"
 
 # --- the sweep ---------------------------------------------------------------

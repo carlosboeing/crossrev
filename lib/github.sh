@@ -145,10 +145,30 @@ gh_review_threads() {
 # ---------------------------------------------------------------------------
 
 # Post an overall comment. Prints the new comment's id, because every later
+# What to do when the publish filter could not process a body.
+#
+# log_redact_publish withholds the text and returns the notice in its place.
+# That is the right trade for findings text and the wrong one for a body
+# carrying a pass marker: the marker is crossrev's record of what ran (ADR
+# 0002), so publishing the notice instead of it would leave `crossrev status`
+# reading `passes none yet` on a pull request that did run. Refuse there, for
+# the same reason gh_comment_edit refuses when the API write fails.
+#
+# Called outside a command substitution deliberately. ui_die inside one exits
+# the subshell, and the caller carries on with whatever the substitution
+# captured, which is the opposite of stopping.
+_gh_refuse_unfiltered() {
+  case "$1" in
+    *'<!-- crossrev:'*)
+      ui_die "could not filter a comment body for credential shapes" \
+        "That comment carries the pass marker, which is crossrev's record of what ran, so it stopped rather than publishing a body without it." ;;
+  esac
+}
+
 # write to it is an edit of that id.
 gh_comment_create() {
   local repo="$1" pr="$2" body="$3" id
-  body="$(log_redact_publish "$body")"
+  body="$(log_redact_publish "$body")" || _gh_refuse_unfiltered "$3"
   id="$(gh api --method POST "repos/$repo/issues/$pr/comments" \
         -f body="$body" --jq .id 2>/dev/null)" \
     || ui_die "could not post a comment on $repo#$pr" \
@@ -158,7 +178,7 @@ gh_comment_create() {
 
 gh_comment_edit() {
   local repo="$1" id="$2" body="$3"
-  body="$(log_redact_publish "$body")"
+  body="$(log_redact_publish "$body")" || _gh_refuse_unfiltered "$3"
   gh api --method PATCH "repos/$repo/issues/comments/$id" -f body="$body" >/dev/null 2>&1 \
     || ui_die "could not update comment $id on $repo" \
        "The pass marker lives in that comment, so leaving it stale would misreport what happened. Retry, or check the token's permissions."
@@ -172,7 +192,7 @@ gh_comment_edit() {
 # names the location, and says it did.
 gh_review_comment_create() {
   local repo="$1" pr="$2" commit="$3" path="$4" line="$5" side="$6" body="$7"
-  body="$(log_redact_publish "$body")"
+  body="$(log_redact_publish "$body")" || _gh_refuse_unfiltered "$7"
   if gh api --method POST "repos/$repo/pulls/$pr/comments" \
        -f body="$body" -f commit_id="$commit" -f path="$path" \
        -F line="$line" -f side="$side" >/dev/null 2>&1; then
@@ -191,7 +211,7 @@ $body" >/dev/null
 # comment. Replying at top level instead is what makes a PR unreadable.
 gh_review_reply() {
   local repo="$1" pr="$2" root_comment_id="$3" body="$4"
-  body="$(log_redact_publish "$body")"
+  body="$(log_redact_publish "$body")" || _gh_refuse_unfiltered "$4"
   gh api --method POST "repos/$repo/pulls/$pr/comments/$root_comment_id/replies" \
     -f body="$body" >/dev/null 2>&1 && return 0
   ui_warn "could not reply in the thread rooted at comment $root_comment_id on $repo#$pr" \
@@ -311,7 +331,7 @@ gh_issue_create() {
   # issue title is one line and the publish notice is a paragraph, so the note
   # rides on the body where a reader can act on it.
   title="$(log_redact_str "$title")"
-  body="$(log_redact_publish "$body")"
+  body="$(log_redact_publish "$body")" || _gh_refuse_unfiltered "$3"
   local -a args=(-f "title=$title" -f "body=$body") split=()
   read -ra split <<<"$labels"
   if (( ${#split[@]} > 0 )); then
@@ -330,8 +350,10 @@ gh_issue_create() {
 }
 
 gh_issue_comment() {
+  local body
+  body="$(log_redact_publish "$3")" || _gh_refuse_unfiltered "$3"
   gh api --method POST "repos/$1/issues/$2/comments" \
-    -f body="$(log_redact_publish "$3")" >/dev/null 2>&1 || true
+    -f body="$body" >/dev/null 2>&1 || true
 }
 
 # ---------------------------------------------------------------------------

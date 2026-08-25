@@ -140,9 +140,11 @@ LOG_REDACT_NOTICE='_CrossRev masked a string in this comment that matched a cred
 # gh_review_comment_create creates every time GitHub refuses to anchor a line and
 # it falls back through gh_comment_create.
 #
-# Fails closed. A filter that errors withholds the text rather than publishing
-# it, because a body that could not be filtered is exactly the body that might
-# carry the credential.
+# Fails closed, and says so to its caller. A filter that errors withholds the
+# text rather than publishing it, because a body that could not be filtered is
+# exactly the body that might carry the credential. The notice is printed in its
+# place and the return is non-zero, so a caller that cannot afford to lose the
+# body it was given can refuse instead of publishing the notice as the body.
 log_redact_publish() {
   local body="$1" out
   # `&& printf 'x'` twice over: it carries the pipeline's exit status out of the
@@ -151,7 +153,7 @@ log_redact_publish() {
   if ! out="$(printf '%s' "$body" | log_redact && printf 'x')"; then
     log_event redact "publish filter failed; body withheld"
     printf 'CrossRev could not filter this text for credential shapes, so it withheld it rather than publishing it.'
-    return 0
+    return 1
   fi
   out="${out%x}"
   # BSD and GNU sed disagree about a final line that carries no newline, so the
