@@ -144,27 +144,45 @@ gh_review_threads() {
 # Writes — comments
 # ---------------------------------------------------------------------------
 
-# Post an overall comment. Prints the new comment's id, because every later
 # What to do when the publish filter could not process a body.
 #
-# log_redact_publish withholds the text and returns the notice in its place.
-# That is the right trade for findings text and the wrong one for a body
-# carrying a pass marker: the marker is crossrev's record of what ran (ADR
-# 0002), so publishing the notice instead of it would leave `crossrev status`
-# reading `passes none yet` on a pull request that did run. Refuse there, for
-# the same reason gh_comment_edit refuses when the API write fails.
+# log_redact_publish withholds the text and returns a notice in its place. For
+# findings text that is the right body. For a body carrying a marker it is not:
+# the marker is what crossrev reads its own state back from (ADR 0002), so the
+# notice standing in for it loses the record rather than masking it.
 #
-# Called outside a command substitution deliberately. ui_die inside one exits
-# the subshell, and the caller carries on with whatever the substitution
+# The severity follows the write rather than the body, because the six writes do
+# not share one. gh_comment_create and gh_comment_edit already ui_die when the
+# API refuses, and the pass marker lives in the comment they write. The other
+# four degrade on purpose — gh_issue_create says so in its own words, and
+# gh_review_reply's caller counts the failure and re-posts at top level — so a
+# filter failure there warns and lets the degradation the caller already handles
+# run. A lost pass marker costs crossrev its record of what ran; a lost finding
+# marker costs a repeated comment on the next retry.
+#
+# Both are called outside a command substitution deliberately. ui_die inside one
+# exits the subshell, and the caller carries on with whatever the substitution
 # captured, which is the opposite of stopping.
-_gh_refuse_unfiltered() {
+_gh_marker_body() {
   case "$1" in
-    *'<!-- crossrev:'*)
-      ui_die "could not filter a comment body for credential shapes" \
-        "That comment carries the pass marker, which is crossrev's record of what ran, so it stopped rather than publishing a body without it." ;;
+    *'<!-- crossrev:'*) return 0 ;;
   esac
+  return 1
 }
 
+_gh_refuse_unfiltered() {
+  _gh_marker_body "$1" || return 0
+  ui_die "could not filter a comment body for credential shapes" \
+    "That comment carries the pass marker, which is crossrev's record of what ran, so it stopped rather than publishing a body without it."
+}
+
+_gh_warn_unfiltered() {
+  _gh_marker_body "$1" || return 0
+  ui_warn "could not filter a comment body for credential shapes" \
+    "The text was withheld, so the marker it carried is not on the pull request. This pass still completes, and a later retry may repeat a comment it would otherwise have skipped."
+}
+
+# Post an overall comment. Prints the new comment's id, because every later
 # write to it is an edit of that id.
 gh_comment_create() {
   local repo="$1" pr="$2" body="$3" id
@@ -192,7 +210,7 @@ gh_comment_edit() {
 # names the location, and says it did.
 gh_review_comment_create() {
   local repo="$1" pr="$2" commit="$3" path="$4" line="$5" side="$6" body="$7"
-  body="$(log_redact_publish "$body")" || _gh_refuse_unfiltered "$7"
+  body="$(log_redact_publish "$body")" || _gh_warn_unfiltered "$7"
   if gh api --method POST "repos/$repo/pulls/$pr/comments" \
        -f body="$body" -f commit_id="$commit" -f path="$path" \
        -F line="$line" -f side="$side" >/dev/null 2>&1; then
@@ -211,7 +229,7 @@ $body" >/dev/null
 # comment. Replying at top level instead is what makes a PR unreadable.
 gh_review_reply() {
   local repo="$1" pr="$2" root_comment_id="$3" body="$4"
-  body="$(log_redact_publish "$body")" || _gh_refuse_unfiltered "$4"
+  body="$(log_redact_publish "$body")" || _gh_warn_unfiltered "$4"
   gh api --method POST "repos/$repo/pulls/$pr/comments/$root_comment_id/replies" \
     -f body="$body" >/dev/null 2>&1 && return 0
   ui_warn "could not reply in the thread rooted at comment $root_comment_id on $repo#$pr" \
@@ -331,7 +349,7 @@ gh_issue_create() {
   # issue title is one line and the publish notice is a paragraph, so the note
   # rides on the body where a reader can act on it.
   title="$(log_redact_str "$title")"
-  body="$(log_redact_publish "$body")" || _gh_refuse_unfiltered "$3"
+  body="$(log_redact_publish "$body")" || _gh_warn_unfiltered "$3"
   local -a args=(-f "title=$title" -f "body=$body") split=()
   read -ra split <<<"$labels"
   if (( ${#split[@]} > 0 )); then
@@ -351,7 +369,7 @@ gh_issue_create() {
 
 gh_issue_comment() {
   local body
-  body="$(log_redact_publish "$3")" || _gh_refuse_unfiltered "$3"
+  body="$(log_redact_publish "$3")" || _gh_warn_unfiltered "$3"
   gh api --method POST "repos/$1/issues/$2/comments" \
     -f body="$body" >/dev/null 2>&1 || true
 }

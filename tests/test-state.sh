@@ -82,6 +82,16 @@ has "and says the marker is what was at stake"                "$refused" "record
 
 ( PATH="$failbin:$PATH"; gh_comment_edit acme/widget 1 'a finding with no marker in it' >/dev/null 2>&1 ); plain_rc=$?
 is  "a body with no marker publishes the withheld notice instead" "$plain_rc" "0"
+
+# The severity follows the write, not the body. gh_comment_edit already dies
+# when the API refuses and the pass marker lives in the comment it writes.
+# gh_review_reply warns and its caller re-posts at top level, so a filter
+# failure there must not take the run down with it — a lost pass marker costs
+# the record of what ran, a lost finding marker costs a repeated comment.
+reply_out="$( PATH="$failbin:$PATH"; gh_review_reply acme/widget 1 99 "$leaky_body" 2>&1 >/dev/null )"; reply_rc=$?
+is    "a reply the filter refused degrades instead of stopping the run" "$reply_rc" "0"
+has   "and warns that the marker did not reach the pull request"        "$reply_out" "not on the pull request"
+hasnt "without making the refusal gh_comment_edit makes"                "$reply_out" "record of what ran"
 rm -rf "$failbin"
 
 # readable. `…[redacted]` carries no brace and no `-->`.
