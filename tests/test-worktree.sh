@@ -9,6 +9,7 @@
 # - a failed run leaves the worktree and prints its path
 # - a retry reuses the existing worktree
 # - doctor reports leftover worktrees and stranded quarantine
+# - the run lock resolves to the clone's shared git directory, whichever working tree acquires it
 
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -18,6 +19,8 @@ source "$HERE/harness.sh"
 source "$HERE/../lib/ui.sh"
 # shellcheck source=../lib/legs.sh
 source "$HERE/../lib/legs.sh"
+# shellcheck source=../lib/run.sh
+source "$HERE/../lib/run.sh"
 
 gone()    { [[ ! -e "$2" ]] && ok "$1" || notok "$1" "$2 is still present"; }
 present() { [[ -e "$2" ]]   && ok "$1" || notok "$1" "$2 is missing"; }
@@ -247,5 +250,98 @@ hasnt "and nothing reaches the other checkout" \
 
 rm -rf "$FIX_DIR/.crossrev-quarantine"
 rm -f "$edit_script" "$bad_payload" "$edit_script_7" "$edit_script_8" "$edit_script_10"
+
+# --- 11. The run lock keys on the shared git directory ----------------------
+# Every working tree of one clone must agree on one lock path, or two of them
+# could drive the same pull request at once. A linked worktree keeps a private
+# git dir under <clone>/.git/worktrees/, which is what --git-dir answers there;
+# the lock has to come from the shared directory instead.
+
+# Supplying --repo lets a caller run outside any checkout. The lock helper must
+# remain a no-op there rather than treating the caller's directory as gitdir.
+outside_dir="$(mktemp -d)"
+outside_lock="$(
+  cd "$outside_dir" || exit 1
+  CROSSREV_LOCK=""
+  run_lock_acquire 42 local || exit 1
+  printf '%s' "${CROSSREV_LOCK:-}"
+)"
+outside_rc=$?
+is "run lock succeeds outside a git repository" "$outside_rc" "0"
+is "run lock stays empty outside a git repository" "$outside_lock" ""
+if [[ ! -e "$outside_dir/crossrev" ]]; then
+  ok "run lock does not create a crossrev directory outside a git repository"
+else
+  notok "run lock does not create a crossrev directory outside a git repository" \
+    "directory absent" "$outside_dir/crossrev exists"
+fi
+rm -rf "$outside_dir"
+
+fixture_repo; stub_reset
+
+linked_wt="$(mktemp -d)/linked"
+git -C "$FIX_DIR" worktree add -q -b run-lock-wt "$linked_wt" >/dev/null
+
+# Acquire in the named tree and report the path the function computed. Each call
+# runs in a subshell, so neither inherits the other's CROSSREV_LOCK, and $$ names
+# the same process in both — which is why the lock file goes away between calls.
+run_lock_path() {
+  (
+    cd "$1" || exit 1
+    rm -f "$2/crossrev/pr-42.lock"
+    CROSSREV_LOCK=""
+    run_lock_acquire 42 local || exit 1
+    [[ -n "$CROSSREV_LOCK" ]] || exit 1
+    printf '%s' "$CROSSREV_LOCK"
+  )
+}
+
+shared_git="$FIX_DIR/.git"
+main_lock="$(run_lock_path "$FIX_DIR" "$shared_git")"
+wt_lock="$(run_lock_path "$linked_wt" "$shared_git")"
+
+# Stand in the named tree and ask the liveness check whether this process is
+# running, by its answer variable rather than its silence on a missed lock.
+liveness_from() {
+  (
+    cd "$1" || exit 1
+    # Read by _status_liveness_local from lib/run.sh.
+    # shellcheck disable=SC2034
+    CTX_PR=42
+    _status_liveness_local "$$"
+    [[ "${STATUS_LIVENESS:-}" == "running" ]] && printf 'yes' || printf 'no'
+  )
+}
+
+is "main checkout and linked worktree compute one lock path" "$wt_lock" "$main_lock"
+if [[ "$main_lock" == /* && "$wt_lock" == /* ]]; then
+  ok "the computed lock paths are absolute"
+else
+  notok "the computed lock paths are absolute" "both starting with /" "$main_lock / $wt_lock"
+fi
+has "the lock lives under the clone's shared git directory" "$main_lock" "$shared_git/"
+if [[ -f "$shared_git/crossrev/pr-42.lock" ]]; then
+  ok "acquiring writes the lock into the shared git directory"
+else
+  notok "acquiring writes the lock into the shared git directory" "lock file exists" "missing"
+fi
+wt_private="$(git -C "$linked_wt" rev-parse --git-dir)"
+if [[ ! -e "$wt_private/crossrev/pr-42.lock" ]]; then
+  ok "no lock lands in the linked worktree's private git directory"
+else
+  notok "no lock lands in the linked worktree's private git directory" \
+    "nothing at $wt_private/crossrev" "lock file exists"
+fi
+
+# The status liveness check corroborates a local run against the same lock file.
+# Standing in the worktree, it must read the lock the main checkout's run took.
+holder_line="$(printf '%s on %s since %s\n' "$$" \
+  "$(hostname 2>/dev/null || printf 'local')" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')")"
+printf '%s\n' "$holder_line" >"$shared_git/crossrev/pr-42.lock"
+liveness="$(liveness_from "$linked_wt")"
+is "status from a linked worktree reads the lock another tree wrote" "$liveness" "yes"
+
+git -C "$FIX_DIR" worktree remove --force "$linked_wt"
+rm -f "$shared_git/crossrev/pr-42.lock"
 
 finish

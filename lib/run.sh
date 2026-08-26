@@ -178,13 +178,19 @@ run_checkpoint() {
   exit 130
 }
 
-# Automated mode uses one concurrency group per pull request. Locally, two
-# terminals against the same PR would interleave writes, so take a lock and name
-# the holder rather than failing opaquely.
+# Automated mode uses one concurrency group per pull request. Locally, two runs
+# against the same PR would interleave writes, so take a lock and name the holder
+# rather than failing opaquely. The lock keys on the repository's shared git
+# directory rather than the working tree's private one: every working tree of a
+# clone must find the same lock, whichever tree took it. The directory comes from
+# --git-common-dir and is resolved to an absolute path before use, because git
+# can answer it relative to the current directory ("../.git" from a subdirectory)
+# and the lock path is built by concatenation below.
 run_lock_acquire() {
   local pr="$1" mode="$2" gitdir lock holder pid
   [[ "$mode" == "automated" ]] && return 0
-  gitdir="$(git rev-parse --git-dir 2>/dev/null)" || return 0
+  gitdir="$(git rev-parse --git-common-dir 2>/dev/null)" || return 0
+  gitdir="$(cd "$gitdir" 2>/dev/null && pwd -P)" || return 0
   mkdir -p "$gitdir/crossrev"
   lock="$gitdir/crossrev/pr-$pr.lock"
   if [[ -f "$lock" ]]; then
@@ -3305,7 +3311,9 @@ _status_liveness() {
 _status_liveness_local() {
   local pid="$1" gitdir lock holder lock_pid lock_host rest
   [[ "$pid" =~ ^[0-9]+$ ]] || return 0
-  gitdir="$(git rev-parse --git-dir 2>/dev/null)" || return 0
+  # Keyed on the shared git directory for the reason run_lock_acquire gives.
+  gitdir="$(git rev-parse --git-common-dir 2>/dev/null)" || return 0
+  gitdir="$(cd "$gitdir" 2>/dev/null && pwd -P)" || return 0
   lock="$gitdir/crossrev/pr-$CTX_PR.lock"
   [[ -f "$lock" ]] || return 0
   holder="$(cat "$lock" 2>/dev/null)" || return 0
