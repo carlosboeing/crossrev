@@ -256,6 +256,27 @@ rm -f "$edit_script" "$bad_payload" "$edit_script_7" "$edit_script_8" "$edit_scr
 # could drive the same pull request at once. A linked worktree keeps a private
 # git dir under <clone>/.git/worktrees/, which is what --git-dir answers there;
 # the lock has to come from the shared directory instead.
+
+# Supplying --repo lets a caller run outside any checkout. The lock helper must
+# remain a no-op there rather than treating the caller's directory as gitdir.
+outside_dir="$(mktemp -d)"
+outside_lock="$(
+  cd "$outside_dir" || exit 1
+  CROSSREV_LOCK=""
+  run_lock_acquire 42 local || exit 1
+  printf '%s' "${CROSSREV_LOCK:-}"
+)"
+outside_rc=$?
+is "run lock succeeds outside a git repository" "$outside_rc" "0"
+is "run lock stays empty outside a git repository" "$outside_lock" ""
+if [[ ! -e "$outside_dir/crossrev" ]]; then
+  ok "run lock does not create a crossrev directory outside a git repository"
+else
+  notok "run lock does not create a crossrev directory outside a git repository" \
+    "directory absent" "$outside_dir/crossrev exists"
+fi
+rm -rf "$outside_dir"
+
 fixture_repo; stub_reset
 
 linked_wt="$(mktemp -d)/linked"

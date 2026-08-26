@@ -189,7 +189,8 @@ run_checkpoint() {
 run_lock_acquire() {
   local pr="$1" mode="$2" gitdir lock holder pid
   [[ "$mode" == "automated" ]] && return 0
-  gitdir="$(cd "$(git rev-parse --git-common-dir 2>/dev/null)" 2>/dev/null && pwd -P)" || return 0
+  gitdir="$(git rev-parse --git-common-dir 2>/dev/null)" || return 0
+  gitdir="$(cd "$gitdir" 2>/dev/null && pwd -P)" || return 0
   mkdir -p "$gitdir/crossrev"
   lock="$gitdir/crossrev/pr-$pr.lock"
   if [[ -f "$lock" ]]; then
@@ -3311,7 +3312,8 @@ _status_liveness_local() {
   local pid="$1" gitdir lock holder lock_pid lock_host rest
   [[ "$pid" =~ ^[0-9]+$ ]] || return 0
   # Keyed on the shared git directory for the reason run_lock_acquire gives.
-  gitdir="$(cd "$(git rev-parse --git-common-dir 2>/dev/null)" 2>/dev/null && pwd -P)" || return 0
+  gitdir="$(git rev-parse --git-common-dir 2>/dev/null)" || return 0
+  gitdir="$(cd "$gitdir" 2>/dev/null && pwd -P)" || return 0
   lock="$gitdir/crossrev/pr-$CTX_PR.lock"
   [[ -f "$lock" ]] || return 0
   holder="$(cat "$lock" 2>/dev/null)" || return 0
