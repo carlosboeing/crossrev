@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Build the native Go crossrev binary.
+# Build the native Go CrossRev binary.
 #
 # Usage:
 #   scripts/build-native.sh <output-path>

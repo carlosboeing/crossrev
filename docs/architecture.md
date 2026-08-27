@@ -1,3 +1,13 @@
+---
+title: "CrossRev architecture"
+type: architecture
+authors:
+  - "Carlos Boeing"
+  - "gemini-2.5-pro (agy)"
+  - "GPT-5 (Codex)"
+last_reviewed: 2026-08-27
+---
+
 # Architecture
 
 How CrossRev is built, as it stands today. For *why* a decision went the way it did, see the [decision records](adrs/).

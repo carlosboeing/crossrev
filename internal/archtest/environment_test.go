@@ -11,11 +11,11 @@ import (
 	"testing"
 )
 
-func TestEnvironCallBoundary(t *testing.T) {
+func TestEnvironReferenceBoundary(t *testing.T) {
 	root := findRepoRoot(t)
 	fset := token.NewFileSet()
 
-	foundPermittedCall := false
+	foundPermittedReference := false
 
 	scanDirs := []string{"cmd", "internal"}
 
@@ -65,36 +65,14 @@ func TestEnvironCallBoundary(t *testing.T) {
 				return nil
 			}
 
-			ast.Inspect(node, func(n ast.Node) bool {
-				call, ok := n.(*ast.CallExpr)
-				if !ok {
-					return true
+			for _, pos := range environReferencePositions(node, osLocalNames, dotImportedOS) {
+				if relSlash == "internal/exec/env.go" {
+					foundPermittedReference = true
+				} else {
+					position := fset.Position(pos)
+					t.Errorf("forbidden reference to os.Environ in %s:%d (os.Environ is only permitted in internal/exec/env.go)", relSlash, position.Line)
 				}
-
-				isEnvironCall := false
-
-				if sel, ok := call.Fun.(*ast.SelectorExpr); ok {
-					if ident, ok := sel.X.(*ast.Ident); ok {
-						if osLocalNames[ident.Name] && sel.Sel.Name == "Environ" {
-							isEnvironCall = true
-						}
-					}
-				} else if ident, ok := call.Fun.(*ast.Ident); ok && dotImportedOS {
-					if ident.Name == "Environ" {
-						isEnvironCall = true
-					}
-				}
-
-				if isEnvironCall {
-					if relSlash == "internal/exec/env.go" {
-						foundPermittedCall = true
-					} else {
-						pos := fset.Position(call.Pos())
-						t.Errorf("forbidden call to os.Environ() in %s:%d (os.Environ is only permitted in internal/exec/env.go)", relSlash, pos.Line)
-					}
-				}
-				return true
-			})
+			}
 
 			return nil
 		})
@@ -104,8 +82,60 @@ func TestEnvironCallBoundary(t *testing.T) {
 		}
 	}
 
-	if !foundPermittedCall {
-		t.Errorf("expected to find permitted call to os.Environ() in internal/exec/env.go")
+	if !foundPermittedReference {
+		t.Errorf("expected to find permitted reference to os.Environ in internal/exec/env.go")
+	}
+}
+
+func environReferencePositions(node *ast.File, osLocalNames map[string]bool, dotImportedOS bool) []token.Pos {
+	var positions []token.Pos
+	ast.Inspect(node, func(n ast.Node) bool {
+		switch expression := n.(type) {
+		case *ast.SelectorExpr:
+			if ident, ok := expression.X.(*ast.Ident); ok && osLocalNames[ident.Name] && expression.Sel.Name == "Environ" {
+				positions = append(positions, expression.Pos())
+				return false
+			}
+		case *ast.Ident:
+			if dotImportedOS && expression.Name == "Environ" {
+				positions = append(positions, expression.Pos())
+			}
+		}
+		return true
+	})
+	return positions
+}
+
+func TestEnvironBoundaryDetectsFunctionValues(t *testing.T) {
+	tests := []struct {
+		name          string
+		source        string
+		osLocalNames  map[string]bool
+		dotImportedOS bool
+	}{
+		{
+			name:         "aliased selector",
+			source:       "package sample\nimport environment \"os\"\nvar inherit = environment.Environ\n",
+			osLocalNames: map[string]bool{"environment": true},
+		},
+		{
+			name:          "dot import",
+			source:        "package sample\nimport . \"os\"\nvar inherit = Environ\n",
+			dotImportedOS: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fset := token.NewFileSet()
+			node, err := parser.ParseFile(fset, "sample.go", tt.source, 0)
+			if err != nil {
+				t.Fatalf("parse fixture: %v", err)
+			}
+			if got := len(environReferencePositions(node, tt.osLocalNames, tt.dotImportedOS)); got != 1 {
+				t.Fatalf("environment references = %d, want 1", got)
+			}
+		})
 	}
 }
 

@@ -142,11 +142,10 @@ func parseStateCases(lines []string, fnName string) ([]StateTestCase, error) {
 		afterDesc = strings.TrimSpace(afterDesc)
 
 		prefix := fmt.Sprintf("\"$(%s '", fnName)
-		idx := strings.Index(afterDesc, prefix)
-		if idx == -1 {
+		if !strings.HasPrefix(afterDesc, prefix) {
 			return nil, fmt.Errorf("failed to find function call %q in state case: %q", prefix, stmt)
 		}
-		afterPrefix := afterDesc[idx+len(prefix):]
+		afterPrefix := afterDesc[len(prefix):]
 
 		quoteEnd := strings.Index(afterPrefix, "')\"")
 		if quoteEnd == -1 {
@@ -154,9 +153,12 @@ func parseStateCases(lines []string, fnName string) ([]StateTestCase, error) {
 		}
 		inputJSON := afterPrefix[:quoteEnd]
 		afterCall := strings.TrimSpace(afterPrefix[quoteEnd+len("')\""):])
-		expStr, _, ok := extractQuoted(afterCall)
+		expStr, trailing, ok := extractQuoted(afterCall)
 		if !ok {
 			return nil, fmt.Errorf("failed to extract expected value in state case: %q", stmt)
+		}
+		if strings.TrimSpace(trailing) != "" {
+			return nil, fmt.Errorf("unexpected trailing content in state case: %q", stmt)
 		}
 		expVal, err := strconv.Atoi(expStr)
 		if err != nil {
@@ -167,6 +169,12 @@ func parseStateCases(lines []string, fnName string) ([]StateTestCase, error) {
 			Input:    inputJSON,
 			Expected: expVal,
 		})
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("scan state cases: %w", err)
+	}
+	if currentStatement != "" {
+		return nil, fmt.Errorf("dangling continuation in state cases: %q", currentStatement)
 	}
 	if len(cases) == 0 {
 		return nil, fmt.Errorf("zero test cases parsed for function %s", fnName)
@@ -213,32 +221,16 @@ func parseShouldContinueCases(lines []string) ([]ShouldContinueTestCase, error) 
 				return nil, fmt.Errorf("failed to extract description in decides statement: %q", stmt)
 			}
 			args := strings.Fields(afterDesc)
-			if len(args) < 9 {
-				return nil, fmt.Errorf("expected 9 arguments in decides statement, got %d: %q", len(args), stmt)
+			if action != "continue" && action != "converged" && action != "halt" {
+				return nil, fmt.Errorf("invalid action %q in decides statement: %q", action, stmt)
 			}
-			verdict := args[0]
-			pass, _ := strconv.Atoi(args[1])
-			maxPasses, _ := strconv.Atoi(args[2])
-			stop := args[3] == "true"
-			blocked := args[4] == "true"
-			otherPRs, _ := strconv.Atoi(args[5])
-			maxPRs, _ := strconv.Atoi(args[6])
-			files, _ := strconv.Atoi(args[7])
-			maxFiles, _ := strconv.Atoi(args[8])
-
-			cases = append(cases, ShouldContinueTestCase{
-				Desc:           desc,
-				Verdict:        verdict,
-				Pass:           pass,
-				MaxPasses:      maxPasses,
-				Stop:           stop,
-				Blocked:        blocked,
-				OtherPRsToday:  otherPRs,
-				MaxPRsPerDay:   maxPRs,
-				Files:          files,
-				MaxFiles:       maxFiles,
-				ExpectedAction: action,
-			})
+			parsed, err := parseShouldContinueArgs(args, stmt)
+			if err != nil {
+				return nil, err
+			}
+			parsed.Desc = desc
+			parsed.ExpectedAction = action
+			cases = append(cases, parsed)
 		} else if strings.HasPrefix(stmt, "is ") {
 			rest := strings.TrimPrefix(stmt, "is ")
 			desc, afterDesc, ok := extractQuoted(rest)
@@ -257,46 +249,102 @@ func parseShouldContinueCases(lines []string) ([]ShouldContinueTestCase, error) 
 			}
 			argsStr := afterPrefix[:endIdx]
 			afterCall := strings.TrimSpace(afterPrefix[endIdx+2:])
-			expFull, _, ok := extractQuoted(afterCall)
+			expFull, trailing, ok := extractQuoted(afterCall)
 			if !ok {
 				return nil, fmt.Errorf("failed to extract expected string in is statement: %q", stmt)
 			}
-			args := strings.Fields(argsStr)
-			if len(args) < 9 {
-				return nil, fmt.Errorf("expected 9 arguments in legs_should_continue call, got %d: %q", len(args), stmt)
+			if strings.TrimSpace(trailing) != "" {
+				return nil, fmt.Errorf("unexpected trailing content in is statement: %q", stmt)
 			}
-			verdict := args[0]
-			pass, _ := strconv.Atoi(args[1])
-			maxPasses, _ := strconv.Atoi(args[2])
-			stop := args[3] == "true"
-			blocked := args[4] == "true"
-			otherPRs, _ := strconv.Atoi(args[5])
-			maxPRs, _ := strconv.Atoi(args[6])
-			files, _ := strconv.Atoi(args[7])
-			maxFiles, _ := strconv.Atoi(args[8])
-
-			cases = append(cases, ShouldContinueTestCase{
-				Desc:           desc,
-				Verdict:        verdict,
-				Pass:           pass,
-				MaxPasses:      maxPasses,
-				Stop:           stop,
-				Blocked:        blocked,
-				OtherPRsToday:  otherPRs,
-				MaxPRsPerDay:   maxPRs,
-				Files:          files,
-				MaxFiles:       maxFiles,
-				ExpectedAction: "halt",
-				ExpectedFull:   expFull,
-			})
+			args := strings.Fields(argsStr)
+			parsed, err := parseShouldContinueArgs(args, stmt)
+			if err != nil {
+				return nil, err
+			}
+			parsed.Desc = desc
+			parsed.ExpectedAction = "halt"
+			parsed.ExpectedFull = expFull
+			cases = append(cases, parsed)
 		} else {
 			return nil, fmt.Errorf("unsupported statement in should_continue cases: %q", stmt)
 		}
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("scan should_continue cases: %w", err)
+	}
+	if currentStatement != "" {
+		return nil, fmt.Errorf("dangling continuation in should_continue cases: %q", currentStatement)
 	}
 	if len(cases) == 0 {
 		return nil, fmt.Errorf("zero test cases parsed for should_continue")
 	}
 	return cases, nil
+}
+
+func parseShouldContinueArgs(args []string, stmt string) (ShouldContinueTestCase, error) {
+	if len(args) != 9 {
+		return ShouldContinueTestCase{}, fmt.Errorf("expected exactly 9 arguments, got %d: %q", len(args), stmt)
+	}
+
+	pass, err := parseIntArg("pass", args[1], stmt)
+	if err != nil {
+		return ShouldContinueTestCase{}, err
+	}
+	maxPasses, err := parseIntArg("max passes", args[2], stmt)
+	if err != nil {
+		return ShouldContinueTestCase{}, err
+	}
+	stop, err := parseBoolArg("stop", args[3], stmt)
+	if err != nil {
+		return ShouldContinueTestCase{}, err
+	}
+	blocked, err := parseBoolArg("blocked", args[4], stmt)
+	if err != nil {
+		return ShouldContinueTestCase{}, err
+	}
+	otherPRs, err := parseIntArg("other pull requests", args[5], stmt)
+	if err != nil {
+		return ShouldContinueTestCase{}, err
+	}
+	maxPRs, err := parseIntArg("maximum pull requests", args[6], stmt)
+	if err != nil {
+		return ShouldContinueTestCase{}, err
+	}
+	files, err := parseIntArg("files", args[7], stmt)
+	if err != nil {
+		return ShouldContinueTestCase{}, err
+	}
+	maxFiles, err := parseIntArg("maximum files", args[8], stmt)
+	if err != nil {
+		return ShouldContinueTestCase{}, err
+	}
+
+	return ShouldContinueTestCase{
+		Verdict:       args[0],
+		Pass:          pass,
+		MaxPasses:     maxPasses,
+		Stop:          stop,
+		Blocked:       blocked,
+		OtherPRsToday: otherPRs,
+		MaxPRsPerDay:  maxPRs,
+		Files:         files,
+		MaxFiles:      maxFiles,
+	}, nil
+}
+
+func parseIntArg(name, value, stmt string) (int, error) {
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return 0, fmt.Errorf("invalid %s integer %q in statement: %q", name, value, stmt)
+	}
+	return parsed, nil
+}
+
+func parseBoolArg(name, value, stmt string) (bool, error) {
+	if value != "true" && value != "false" {
+		return false, fmt.Errorf("invalid %s boolean %q in statement: %q", name, value, stmt)
+	}
+	return value == "true", nil
 }
 
 func parseRedrivableCases(lines []string, prefix string) ([]RedrivableTestCase, error) {
@@ -335,6 +383,9 @@ func parseRedrivableCases(lines []string, prefix string) ([]RedrivableTestCase, 
 			return nil, fmt.Errorf("empty redrivable statement: %q", stmt)
 		}
 		wantStr := parts[0]
+		if wantStr != "yes" && wantStr != "no" {
+			return nil, fmt.Errorf("invalid redrivable expectation %q in statement: %q", wantStr, stmt)
+		}
 		expected := wantStr == "yes"
 		afterWant := strings.TrimSpace(strings.TrimPrefix(rest, wantStr))
 		desc, afterDesc, ok := extractQuoted(afterWant)
@@ -342,12 +393,8 @@ func parseRedrivableCases(lines []string, prefix string) ([]RedrivableTestCase, 
 			return nil, fmt.Errorf("failed to extract description in redrivable statement: %q", stmt)
 		}
 		afterDesc = strings.TrimSpace(afterDesc)
-		var inputJSON string
-		if strings.HasPrefix(afterDesc, "'") && strings.HasSuffix(afterDesc, "'") {
-			inputJSON = strings.Trim(afterDesc, "'")
-		} else if strings.HasPrefix(afterDesc, "\"") && strings.HasSuffix(afterDesc, "\"") {
-			inputJSON = strings.Trim(afterDesc, "\"")
-		} else {
+		inputJSON, trailing, ok := extractQuoted(afterDesc)
+		if !ok || strings.TrimSpace(trailing) != "" {
 			return nil, fmt.Errorf("failed to parse input JSON in redrivable statement: %q", stmt)
 		}
 		cases = append(cases, RedrivableTestCase{
@@ -355,6 +402,12 @@ func parseRedrivableCases(lines []string, prefix string) ([]RedrivableTestCase, 
 			Input:    inputJSON,
 			Expected: expected,
 		})
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("scan redrivable cases: %w", err)
+	}
+	if currentStatement != "" {
+		return nil, fmt.Errorf("dangling continuation in redrivable cases: %q", currentStatement)
 	}
 	if len(cases) == 0 {
 		return nil, fmt.Errorf("zero test cases parsed for redrivable prefix %s", prefix)
@@ -388,11 +441,72 @@ func extractQuoted(s string) (string, string, bool) {
 	return "", "", false
 }
 
+func renderPrstateFixtures(passCases, maxPassCases, currentReviewPassCases []StateTestCase) []byte {
+	var buf bytes.Buffer
+	buf.WriteString("// Code generated by internal/testgen/policy; DO NOT EDIT.\n\n")
+	buf.WriteString("package prstate_test\n\n")
+	buf.WriteString("type stateParityCase struct {\n\tdesc string\n\tmarkers string\n\twant int\n}\n\n")
+
+	writeStateCases := func(name string, cases []StateTestCase) {
+		buf.WriteString("var " + name + " = []stateParityCase{\n")
+		for _, tc := range cases {
+			buf.WriteString(fmt.Sprintf("\t{desc: %q, markers: %q, want: %d},\n", tc.Desc, tc.Input, tc.Expected))
+		}
+		buf.WriteString("}\n\n")
+	}
+
+	writeStateCases("parityStatePassCases", passCases)
+	writeStateCases("parityStateMaxPassCases", maxPassCases)
+	writeStateCases("parityStateCurrentReviewPassCases", currentReviewPassCases)
+	return buf.Bytes()
+}
+
+func renderPolicyFixtures(shouldContinueCases []ShouldContinueTestCase, resolveRedrivableCases, reviewRedrivableCases []RedrivableTestCase) []byte {
+	var buf bytes.Buffer
+	buf.WriteString("// Code generated by internal/testgen/policy; DO NOT EDIT.\n\n")
+	buf.WriteString("package policy_test\n\n")
+	buf.WriteString("type shouldContinueParityCase struct {\n")
+	buf.WriteString("\tdesc string\n\tverdict string\n\tpass int\n\tmaxPasses int\n")
+	buf.WriteString("\tstop bool\n\tblocked bool\n\totherPRsToday int\n\tmaxPRsPerDay int\n")
+	buf.WriteString("\tfiles int\n\tmaxFilesChangedPerPR int\n\twantAction string\n\twantFull string\n}\n\n")
+	buf.WriteString("var parityShouldContinueCases = []shouldContinueParityCase{\n")
+	for _, tc := range shouldContinueCases {
+		buf.WriteString(fmt.Sprintf("\t{desc: %q, verdict: %q, pass: %d, maxPasses: %d, stop: %t, blocked: %t, otherPRsToday: %d, maxPRsPerDay: %d, files: %d, maxFilesChangedPerPR: %d, wantAction: %q, wantFull: %q},\n",
+			tc.Desc, tc.Verdict, tc.Pass, tc.MaxPasses, tc.Stop, tc.Blocked, tc.OtherPRsToday, tc.MaxPRsPerDay, tc.Files, tc.MaxFiles, tc.ExpectedAction, tc.ExpectedFull))
+	}
+	buf.WriteString("}\n\n")
+
+	buf.WriteString("type redrivableParityCase struct {\n\tdesc string\n\tmarker string\n\twant bool\n}\n\n")
+	writeRedrivableCases := func(name string, cases []RedrivableTestCase) {
+		buf.WriteString("var " + name + " = []redrivableParityCase{\n")
+		for _, tc := range cases {
+			buf.WriteString(fmt.Sprintf("\t{desc: %q, marker: %q, want: %t},\n", tc.Desc, tc.Input, tc.Expected))
+		}
+		buf.WriteString("}\n\n")
+	}
+
+	writeRedrivableCases("parityResolveRedrivableCases", resolveRedrivableCases)
+	writeRedrivableCases("parityReviewRedrivableCases", reviewRedrivableCases)
+	return buf.Bytes()
+}
+
+func writeGenerated(filename string, source []byte) error {
+	formatted, err := format.Source(source)
+	if err != nil {
+		return fmt.Errorf("format generated code for %s: %w", filename, err)
+	}
+	if err := os.WriteFile(filename, formatted, 0644); err != nil {
+		return fmt.Errorf("write %s: %w", filename, err)
+	}
+	return nil
+}
+
 func main() {
 	root := findRepoRoot()
 	stateFile := filepath.Join(root, "tests", "test-state.sh")
 	legsFile := filepath.Join(root, "tests", "test-legs.sh")
-	outFile := filepath.Join(root, "internal", "policy", "parity_generated_test.go")
+	policyOutFile := filepath.Join(root, "internal", "policy", "parity_generated_test.go")
+	prstateOutFile := filepath.Join(root, "internal", "prstate", "parity_generated_test.go")
 
 	passLines, err := extractSection(stateFile, "[policy-table: state_pass]", "[policy-table-end: state_pass]")
 	if err != nil {
@@ -456,121 +570,14 @@ func main() {
 		os.Exit(1)
 	}
 
-	var buf bytes.Buffer
-	buf.WriteString("// Code generated by internal/testgen/policy; DO NOT EDIT.\n\n")
-	buf.WriteString("package policy_test\n\n")
-	buf.WriteString("import (\n")
-	buf.WriteString("\t\"testing\"\n\n")
-	buf.WriteString("\t\"github.com/carlosboeing/crossrev/internal/policy\"\n")
-	buf.WriteString(")\n\n")
-
-	// TestParityStatePass
-	buf.WriteString("func TestParityStatePass(t *testing.T) {\n")
-	buf.WriteString("\ttests := []struct {\n\t\tdesc string\n\t\tmarkers string\n\t\twant int\n\t}{\n")
-	for _, tc := range passCases {
-		buf.WriteString(fmt.Sprintf("\t\t{desc: %q, markers: %q, want: %d},\n", tc.Desc, tc.Input, tc.Expected))
-	}
-	buf.WriteString("\t}\n\tfor _, tt := range tests {\n")
-	buf.WriteString("\t\tt.Run(tt.desc, func(t *testing.T) {\n")
-	buf.WriteString("\t\t\tgot := policy.Pass(tt.markers)\n")
-	buf.WriteString("\t\t\tif got != tt.want {\n")
-	buf.WriteString("\t\t\t\tt.Errorf(\"policy.Pass() = %d, want %d\", got, tt.want)\n")
-	buf.WriteString("\t\t\t}\n\t\t})\n\t}\n}\n\n")
-
-	// TestParityStateMaxPass
-	buf.WriteString("func TestParityStateMaxPass(t *testing.T) {\n")
-	buf.WriteString("\ttests := []struct {\n\t\tdesc string\n\t\tmarkers string\n\t\twant int\n\t}{\n")
-	for _, tc := range maxPassCases {
-		buf.WriteString(fmt.Sprintf("\t\t{desc: %q, markers: %q, want: %d},\n", tc.Desc, tc.Input, tc.Expected))
-	}
-	buf.WriteString("\t}\n\tfor _, tt := range tests {\n")
-	buf.WriteString("\t\tt.Run(tt.desc, func(t *testing.T) {\n")
-	buf.WriteString("\t\t\tgot := policy.MaxPass(tt.markers)\n")
-	buf.WriteString("\t\t\tif got != tt.want {\n")
-	buf.WriteString("\t\t\t\tt.Errorf(\"policy.MaxPass() = %d, want %d\", got, tt.want)\n")
-	buf.WriteString("\t\t\t}\n\t\t})\n\t}\n}\n\n")
-
-	// TestParityStateCurrentReviewPass
-	buf.WriteString("func TestParityStateCurrentReviewPass(t *testing.T) {\n")
-	buf.WriteString("\ttests := []struct {\n\t\tdesc string\n\t\tmarkers string\n\t\twant int\n\t}{\n")
-	for _, tc := range currentReviewPassCases {
-		buf.WriteString(fmt.Sprintf("\t\t{desc: %q, markers: %q, want: %d},\n", tc.Desc, tc.Input, tc.Expected))
-	}
-	buf.WriteString("\t}\n\tfor _, tt := range tests {\n")
-	buf.WriteString("\t\tt.Run(tt.desc, func(t *testing.T) {\n")
-	buf.WriteString("\t\t\tgot := policy.CurrentReviewPass(tt.markers)\n")
-	buf.WriteString("\t\t\tif got != tt.want {\n")
-	buf.WriteString("\t\t\t\tt.Errorf(\"policy.CurrentReviewPass() = %d, want %d\", got, tt.want)\n")
-	buf.WriteString("\t\t\t}\n\t\t})\n\t}\n}\n\n")
-
-	// TestParityShouldContinue
-	buf.WriteString("func TestParityShouldContinue(t *testing.T) {\n")
-	buf.WriteString("\ttests := []struct {\n")
-	buf.WriteString("\t\tdesc string\n")
-	buf.WriteString("\t\tverdict string\n")
-	buf.WriteString("\t\tpass int\n")
-	buf.WriteString("\t\tmaxPasses int\n")
-	buf.WriteString("\t\tstop bool\n")
-	buf.WriteString("\t\tblocked bool\n")
-	buf.WriteString("\t\totherPRsToday int\n")
-	buf.WriteString("\t\tmaxPRsPerDay int\n")
-	buf.WriteString("\t\tfiles int\n")
-	buf.WriteString("\t\tmaxFilesChangedPerPR int\n")
-	buf.WriteString("\t\twantAction string\n")
-	buf.WriteString("\t\twantFull string\n")
-	buf.WriteString("\t}{\n")
-	for _, tc := range shouldContinueCases {
-		buf.WriteString(fmt.Sprintf("\t\t{desc: %q, verdict: %q, pass: %d, maxPasses: %d, stop: %t, blocked: %t, otherPRsToday: %d, maxPRsPerDay: %d, files: %d, maxFilesChangedPerPR: %d, wantAction: %q, wantFull: %q},\n",
-			tc.Desc, tc.Verdict, tc.Pass, tc.MaxPasses, tc.Stop, tc.Blocked, tc.OtherPRsToday, tc.MaxPRsPerDay, tc.Files, tc.MaxFiles, tc.ExpectedAction, tc.ExpectedFull))
-	}
-	buf.WriteString("\t}\n\tfor _, tt := range tests {\n")
-	buf.WriteString("\t\tt.Run(tt.desc, func(t *testing.T) {\n")
-	buf.WriteString("\t\t\tgot := policy.ShouldContinue(tt.verdict, tt.pass, tt.maxPasses, tt.stop, tt.blocked, tt.otherPRsToday, tt.maxPRsPerDay, tt.files, tt.maxFilesChangedPerPR)\n")
-	buf.WriteString("\t\t\tif got.Action != tt.wantAction {\n")
-	buf.WriteString("\t\t\t\tt.Errorf(\"ShouldContinue().Action = %q, want %q\", got.Action, tt.wantAction)\n")
-	buf.WriteString("\t\t\t}\n")
-	buf.WriteString("\t\t\tif tt.wantFull != \"\" && got.String() != tt.wantFull {\n")
-	buf.WriteString("\t\t\t\tt.Errorf(\"ShouldContinue().String() = %q, want %q\", got.String(), tt.wantFull)\n")
-	buf.WriteString("\t\t\t}\n")
-	buf.WriteString("\t\t})\n\t}\n}\n\n")
-
-	// TestParityResolveRedrivable
-	buf.WriteString("func TestParityResolveRedrivable(t *testing.T) {\n")
-	buf.WriteString("\ttests := []struct {\n\t\tdesc string\n\t\tmarker string\n\t\twant bool\n\t}{\n")
-	for _, tc := range resolveRedrivableCases {
-		buf.WriteString(fmt.Sprintf("\t\t{desc: %q, marker: %q, want: %t},\n", tc.Desc, tc.Input, tc.Expected))
-	}
-	buf.WriteString("\t}\n\tfor _, tt := range tests {\n")
-	buf.WriteString("\t\tt.Run(tt.desc, func(t *testing.T) {\n")
-	buf.WriteString("\t\t\tgot := policy.ResolveRedrivable(tt.marker)\n")
-	buf.WriteString("\t\t\tif got != tt.want {\n")
-	buf.WriteString("\t\t\t\tt.Errorf(\"ResolveRedrivable() = %t, want %t\", got, tt.want)\n")
-	buf.WriteString("\t\t\t}\n\t\t})\n\t}\n}\n\n")
-
-	// TestParityReviewRedrivable
-	buf.WriteString("func TestParityReviewRedrivable(t *testing.T) {\n")
-	buf.WriteString("\ttests := []struct {\n\t\tdesc string\n\t\tmarker string\n\t\twant bool\n\t}{\n")
-	for _, tc := range reviewRedrivableCases {
-		buf.WriteString(fmt.Sprintf("\t\t{desc: %q, marker: %q, want: %t},\n", tc.Desc, tc.Input, tc.Expected))
-	}
-	buf.WriteString("\t}\n\tfor _, tt := range tests {\n")
-	buf.WriteString("\t\tt.Run(tt.desc, func(t *testing.T) {\n")
-	buf.WriteString("\t\t\tgot := policy.ReviewRedrivable(tt.marker)\n")
-	buf.WriteString("\t\t\tif got != tt.want {\n")
-	buf.WriteString("\t\t\t\tt.Errorf(\"ReviewRedrivable() = %t, want %t\", got, tt.want)\n")
-	buf.WriteString("\t\t\t}\n\t\t})\n\t}\n}\n")
-
-	formatted, err := format.Source(buf.Bytes())
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed to format generated code: %v\n", err)
-		os.WriteFile(outFile, buf.Bytes(), 0644)
+	if err := writeGenerated(prstateOutFile, renderPrstateFixtures(passCases, maxPassCases, currentReviewPassCases)); err != nil {
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-
-	if err := os.WriteFile(outFile, formatted, 0644); err != nil {
-		fmt.Fprintf(os.Stderr, "failed to write %s: %v\n", outFile, err)
+	if err := writeGenerated(policyOutFile, renderPolicyFixtures(shouldContinueCases, resolveRedrivableCases, reviewRedrivableCases)); err != nil {
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	fmt.Printf("Generated %s successfully (%d pass, %d max_pass, %d current_review_pass, %d should_continue, %d resolve_redrive, %d review_redrive cases)\n",
-		outFile, len(passCases), len(maxPassCases), len(currentReviewPassCases), len(shouldContinueCases), len(resolveRedrivableCases), len(reviewRedrivableCases))
+	fmt.Printf("Generated data-only parity fixtures successfully (%d pass, %d max_pass, %d current_review_pass, %d should_continue, %d resolve_redrive, %d review_redrive cases)\n",
+		len(passCases), len(maxPassCases), len(currentReviewPassCases), len(shouldContinueCases), len(resolveRedrivableCases), len(reviewRedrivableCases))
 }

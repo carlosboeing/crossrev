@@ -5,7 +5,7 @@ import (
 	"os"
 )
 
-// Main is the skeleton entry point for the native crossrev CLI.
+// Main is the skeleton entry point for the native CrossRev CLI.
 func Main() int {
 	fmt.Fprintln(os.Stderr, "CrossRev: native binary not yet ready; use bin/crossrev")
 	return 1

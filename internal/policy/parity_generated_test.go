@@ -2,160 +2,59 @@
 
 package policy_test
 
-import (
-	"testing"
-
-	"github.com/carlosboeing/crossrev/internal/policy"
-)
-
-func TestParityStatePass(t *testing.T) {
-	tests := []struct {
-		desc    string
-		markers string
-		want    int
-	}{
-		{desc: "no trusted marker means pass 1", markers: "[]", want: 1},
-		{desc: "one completed review means pass 2", markers: "[{\"leg\":\"review\",\"pass\":1,\"state\":\"complete\"}]", want: 2},
-		{desc: "the resolve leg does not advance the pass number", markers: "[{\"leg\":\"review\",\"pass\":1,\"state\":\"complete\"},{\"leg\":\"resolve\",\"pass\":1,\"state\":\"complete\"}]", want: 2},
-		{desc: "a declined pass does not advance the pass number", markers: "[{\"leg\":\"review\",\"pass\":1,\"state\":\"complete\"},{\"leg\":\"review\",\"pass\":2,\"state\":\"declined\"}]", want: 2},
-	}
-	for _, tt := range tests {
-		t.Run(tt.desc, func(t *testing.T) {
-			got := policy.Pass(tt.markers)
-			if got != tt.want {
-				t.Errorf("policy.Pass() = %d, want %d", got, tt.want)
-			}
-		})
-	}
+type shouldContinueParityCase struct {
+	desc                 string
+	verdict              string
+	pass                 int
+	maxPasses            int
+	stop                 bool
+	blocked              bool
+	otherPRsToday        int
+	maxPRsPerDay         int
+	files                int
+	maxFilesChangedPerPR int
+	wantAction           string
+	wantFull             string
 }
 
-func TestParityStateMaxPass(t *testing.T) {
-	tests := []struct {
-		desc    string
-		markers string
-		want    int
-	}{
-		{desc: "no markers means max pass 0", markers: "[]", want: 0},
-		{desc: "one completed review means max pass 1", markers: "[{\"leg\":\"review\",\"pass\":1,\"state\":\"complete\"}]", want: 1},
-		{desc: "a declined pass counts for max pass", markers: "[{\"leg\":\"review\",\"pass\":1,\"state\":\"complete\"},{\"leg\":\"review\",\"pass\":2,\"state\":\"declined\"}]", want: 2},
-	}
-	for _, tt := range tests {
-		t.Run(tt.desc, func(t *testing.T) {
-			got := policy.MaxPass(tt.markers)
-			if got != tt.want {
-				t.Errorf("policy.MaxPass() = %d, want %d", got, tt.want)
-			}
-		})
-	}
+var parityShouldContinueCases = []shouldContinueParityCase{
+	{desc: "issues remain below every cap", verdict: "issues-remain", pass: 1, maxPasses: 3, stop: false, blocked: false, otherPRsToday: 0, maxPRsPerDay: 12, files: 10, maxFilesChangedPerPR: 200, wantAction: "continue", wantFull: ""},
+	{desc: "converged stops the loop", verdict: "converged", pass: 1, maxPasses: 3, stop: false, blocked: false, otherPRsToday: 0, maxPRsPerDay: 12, files: 10, maxFilesChangedPerPR: 200, wantAction: "converged", wantFull: ""},
+	{desc: "crossrev/stop outranks a healthy verdict", verdict: "converged", pass: 1, maxPasses: 3, stop: true, blocked: false, otherPRsToday: 0, maxPRsPerDay: 12, files: 10, maxFilesChangedPerPR: 200, wantAction: "halt", wantFull: ""},
+	{desc: "the resolver reporting blocked halts", verdict: "issues-remain", pass: 1, maxPasses: 3, stop: false, blocked: true, otherPRsToday: 0, maxPRsPerDay: 12, files: 10, maxFilesChangedPerPR: 200, wantAction: "halt", wantFull: ""},
+	{desc: "one below the pass cap continues", verdict: "issues-remain", pass: 2, maxPasses: 3, stop: false, blocked: false, otherPRsToday: 0, maxPRsPerDay: 12, files: 10, maxFilesChangedPerPR: 200, wantAction: "continue", wantFull: ""},
+	{desc: "exactly at the pass cap halts", verdict: "issues-remain", pass: 3, maxPasses: 3, stop: false, blocked: false, otherPRsToday: 0, maxPRsPerDay: 12, files: 10, maxFilesChangedPerPR: 200, wantAction: "halt", wantFull: ""},
+	{desc: "beyond the pass cap halts", verdict: "issues-remain", pass: 4, maxPasses: 3, stop: false, blocked: false, otherPRsToday: 0, maxPRsPerDay: 12, files: 10, maxFilesChangedPerPR: 200, wantAction: "halt", wantFull: ""},
+	{desc: "one below the daily cap continues", verdict: "issues-remain", pass: 1, maxPasses: 3, stop: false, blocked: false, otherPRsToday: 11, maxPRsPerDay: 12, files: 10, maxFilesChangedPerPR: 200, wantAction: "continue", wantFull: ""},
+	{desc: "exactly at the daily cap halts", verdict: "issues-remain", pass: 1, maxPasses: 3, stop: false, blocked: false, otherPRsToday: 12, maxPRsPerDay: 12, files: 10, maxFilesChangedPerPR: 200, wantAction: "halt", wantFull: ""},
+	{desc: "the daily halt names the other pull requests already reviewed", verdict: "issues-remain", pass: 1, maxPasses: 3, stop: false, blocked: false, otherPRsToday: 12, maxPRsPerDay: 12, files: 10, maxFilesChangedPerPR: 200, wantAction: "halt", wantFull: "halt reached max_prs_per_day (12) — 12 other pull requests were already reviewed in the last 24 hours"},
+	{desc: "exactly at the file cap still runs", verdict: "issues-remain", pass: 1, maxPasses: 3, stop: false, blocked: false, otherPRsToday: 0, maxPRsPerDay: 12, files: 200, maxFilesChangedPerPR: 200, wantAction: "continue", wantFull: ""},
+	{desc: "above the file cap halts", verdict: "issues-remain", pass: 1, maxPasses: 3, stop: false, blocked: false, otherPRsToday: 0, maxPRsPerDay: 12, files: 201, maxFilesChangedPerPR: 200, wantAction: "halt", wantFull: ""},
+	{desc: "a file cap of zero is no cap", verdict: "issues-remain", pass: 1, maxPasses: 3, stop: false, blocked: false, otherPRsToday: 0, maxPRsPerDay: 12, files: 9999, maxFilesChangedPerPR: 0, wantAction: "continue", wantFull: ""},
 }
 
-func TestParityStateCurrentReviewPass(t *testing.T) {
-	tests := []struct {
-		desc    string
-		markers string
-		want    int
-	}{
-		{desc: "no markers means current review pass 0", markers: "[]", want: 0},
-		{desc: "one completed review means current review pass 1", markers: "[{\"leg\":\"review\",\"pass\":1,\"state\":\"complete\"}]", want: 1},
-		{desc: "the resolve leg does not advance current review pass", markers: "[{\"leg\":\"review\",\"pass\":1,\"state\":\"complete\"},{\"leg\":\"resolve\",\"pass\":1,\"state\":\"complete\"}]", want: 1},
-		{desc: "a declined review pass is not current review pass", markers: "[{\"leg\":\"review\",\"pass\":1,\"state\":\"complete\"},{\"leg\":\"review\",\"pass\":2,\"state\":\"declined\"}]", want: 1},
-	}
-	for _, tt := range tests {
-		t.Run(tt.desc, func(t *testing.T) {
-			got := policy.CurrentReviewPass(tt.markers)
-			if got != tt.want {
-				t.Errorf("policy.CurrentReviewPass() = %d, want %d", got, tt.want)
-			}
-		})
-	}
+type redrivableParityCase struct {
+	desc   string
+	marker string
+	want   bool
 }
 
-func TestParityShouldContinue(t *testing.T) {
-	tests := []struct {
-		desc                 string
-		verdict              string
-		pass                 int
-		maxPasses            int
-		stop                 bool
-		blocked              bool
-		otherPRsToday        int
-		maxPRsPerDay         int
-		files                int
-		maxFilesChangedPerPR int
-		wantAction           string
-		wantFull             string
-	}{
-		{desc: "issues remain below every cap", verdict: "issues-remain", pass: 1, maxPasses: 3, stop: false, blocked: false, otherPRsToday: 0, maxPRsPerDay: 12, files: 10, maxFilesChangedPerPR: 200, wantAction: "continue", wantFull: ""},
-		{desc: "converged stops the loop", verdict: "converged", pass: 1, maxPasses: 3, stop: false, blocked: false, otherPRsToday: 0, maxPRsPerDay: 12, files: 10, maxFilesChangedPerPR: 200, wantAction: "converged", wantFull: ""},
-		{desc: "crossrev/stop outranks a healthy verdict", verdict: "converged", pass: 1, maxPasses: 3, stop: true, blocked: false, otherPRsToday: 0, maxPRsPerDay: 12, files: 10, maxFilesChangedPerPR: 200, wantAction: "halt", wantFull: ""},
-		{desc: "the resolver reporting blocked halts", verdict: "issues-remain", pass: 1, maxPasses: 3, stop: false, blocked: true, otherPRsToday: 0, maxPRsPerDay: 12, files: 10, maxFilesChangedPerPR: 200, wantAction: "halt", wantFull: ""},
-		{desc: "one below the pass cap continues", verdict: "issues-remain", pass: 2, maxPasses: 3, stop: false, blocked: false, otherPRsToday: 0, maxPRsPerDay: 12, files: 10, maxFilesChangedPerPR: 200, wantAction: "continue", wantFull: ""},
-		{desc: "exactly at the pass cap halts", verdict: "issues-remain", pass: 3, maxPasses: 3, stop: false, blocked: false, otherPRsToday: 0, maxPRsPerDay: 12, files: 10, maxFilesChangedPerPR: 200, wantAction: "halt", wantFull: ""},
-		{desc: "beyond the pass cap halts", verdict: "issues-remain", pass: 4, maxPasses: 3, stop: false, blocked: false, otherPRsToday: 0, maxPRsPerDay: 12, files: 10, maxFilesChangedPerPR: 200, wantAction: "halt", wantFull: ""},
-		{desc: "one below the daily cap continues", verdict: "issues-remain", pass: 1, maxPasses: 3, stop: false, blocked: false, otherPRsToday: 11, maxPRsPerDay: 12, files: 10, maxFilesChangedPerPR: 200, wantAction: "continue", wantFull: ""},
-		{desc: "exactly at the daily cap halts", verdict: "issues-remain", pass: 1, maxPasses: 3, stop: false, blocked: false, otherPRsToday: 12, maxPRsPerDay: 12, files: 10, maxFilesChangedPerPR: 200, wantAction: "halt", wantFull: ""},
-		{desc: "the daily halt names the other pull requests already reviewed", verdict: "issues-remain", pass: 1, maxPasses: 3, stop: false, blocked: false, otherPRsToday: 12, maxPRsPerDay: 12, files: 10, maxFilesChangedPerPR: 200, wantAction: "halt", wantFull: "halt reached max_prs_per_day (12) — 12 other pull requests were already reviewed in the last 24 hours"},
-		{desc: "exactly at the file cap still runs", verdict: "issues-remain", pass: 1, maxPasses: 3, stop: false, blocked: false, otherPRsToday: 0, maxPRsPerDay: 12, files: 200, maxFilesChangedPerPR: 200, wantAction: "continue", wantFull: ""},
-		{desc: "above the file cap halts", verdict: "issues-remain", pass: 1, maxPasses: 3, stop: false, blocked: false, otherPRsToday: 0, maxPRsPerDay: 12, files: 201, maxFilesChangedPerPR: 200, wantAction: "halt", wantFull: ""},
-		{desc: "a file cap of zero is no cap", verdict: "issues-remain", pass: 1, maxPasses: 3, stop: false, blocked: false, otherPRsToday: 0, maxPRsPerDay: 12, files: 9999, maxFilesChangedPerPR: 0, wantAction: "continue", wantFull: ""},
-	}
-	for _, tt := range tests {
-		t.Run(tt.desc, func(t *testing.T) {
-			got := policy.ShouldContinue(tt.verdict, tt.pass, tt.maxPasses, tt.stop, tt.blocked, tt.otherPRsToday, tt.maxPRsPerDay, tt.files, tt.maxFilesChangedPerPR)
-			if got.Action != tt.wantAction {
-				t.Errorf("ShouldContinue().Action = %q, want %q", got.Action, tt.wantAction)
-			}
-			if tt.wantFull != "" && got.String() != tt.wantFull {
-				t.Errorf("ShouldContinue().String() = %q, want %q", got.String(), tt.wantFull)
-			}
-		})
-	}
+var parityResolveRedrivableCases = []redrivableParityCase{
+	{desc: "a blocked pass re-drives once what stopped it is fixed", marker: "{\"leg\":\"resolve\",\"pass\":1,\"state\":\"complete\",\"blocked\":true,\"resolutions\":[]}", want: true},
+	{desc: "an escalated pass re-drives once a human has settled it", marker: "{\"leg\":\"resolve\",\"pass\":1,\"state\":\"complete\",\"blocked\":false,\"resolutions\":[{\"resolution\":\"fixed\"},{\"resolution\":\"escalated\"}]}", want: true},
+	{desc: "a settled pass stays refused", marker: "{\"leg\":\"resolve\",\"pass\":1,\"state\":\"complete\",\"blocked\":false,\"commit_sha\":\"d81a3f2abc\",\"resolutions\":[{\"resolution\":\"fixed\"},{\"resolution\":\"skipped\"}]}", want: false},
+	{desc: "a pass that recorded no resolutions re-drives", marker: "{\"leg\":\"resolve\",\"pass\":1,\"state\":\"complete\",\"blocked\":false,\"resolutions\":[]}", want: true},
+	{desc: "an all-disputed pass stays refused", marker: "{\"leg\":\"resolve\",\"pass\":1,\"state\":\"complete\",\"blocked\":false,\"resolutions\":[{\"resolution\":\"disputed\"}]}", want: false},
+	{desc: "an unpersisted deferral re-drives once the filing is fixed", marker: "{\"leg\":\"resolve\",\"pass\":1,\"state\":\"complete\",\"blocked\":false,\"resolutions\":[{\"resolution\":\"deferred\",\"crossrev_tracked\":\"\"}]}", want: true},
+	{desc: "a fix that reached no commit re-drives", marker: "{\"leg\":\"resolve\",\"pass\":1,\"state\":\"complete\",\"blocked\":false,\"commit_sha\":null,\"resolutions\":[{\"resolution\":\"fixed\"},{\"resolution\":\"disputed\"}]}", want: true},
+	{desc: "a legacy pass with no resolutions recorded re-drives", marker: "{\"leg\":\"resolve\",\"pass\":1,\"state\":\"complete\",\"blocked\":false,\"commit_sha\":null}", want: true},
+	{desc: "a legacy pass that pushed stays refused", marker: "{\"leg\":\"resolve\",\"pass\":1,\"state\":\"complete\",\"blocked\":false,\"commit_sha\":\"d81a3f2abc\"}", want: false},
 }
 
-func TestParityResolveRedrivable(t *testing.T) {
-	tests := []struct {
-		desc   string
-		marker string
-		want   bool
-	}{
-		{desc: "a blocked pass re-drives once what stopped it is fixed", marker: "{\"leg\":\"resolve\",\"pass\":1,\"state\":\"complete\",\"blocked\":true,\"resolutions\":[]}", want: true},
-		{desc: "an escalated pass re-drives once a human has settled it", marker: "{\"leg\":\"resolve\",\"pass\":1,\"state\":\"complete\",\"blocked\":false,\"resolutions\":[{\"resolution\":\"fixed\"},{\"resolution\":\"escalated\"}]}", want: true},
-		{desc: "a settled pass stays refused", marker: "{\"leg\":\"resolve\",\"pass\":1,\"state\":\"complete\",\"blocked\":false,\"commit_sha\":\"d81a3f2abc\",\"resolutions\":[{\"resolution\":\"fixed\"},{\"resolution\":\"skipped\"}]}", want: false},
-		{desc: "a pass that recorded no resolutions re-drives", marker: "{\"leg\":\"resolve\",\"pass\":1,\"state\":\"complete\",\"blocked\":false,\"resolutions\":[]}", want: true},
-		{desc: "an all-disputed pass stays refused", marker: "{\"leg\":\"resolve\",\"pass\":1,\"state\":\"complete\",\"blocked\":false,\"resolutions\":[{\"resolution\":\"disputed\"}]}", want: false},
-		{desc: "an unpersisted deferral re-drives once the filing is fixed", marker: "{\"leg\":\"resolve\",\"pass\":1,\"state\":\"complete\",\"blocked\":false,\"resolutions\":[{\"resolution\":\"deferred\",\"crossrev_tracked\":\"\"}]}", want: true},
-		{desc: "a fix that reached no commit re-drives", marker: "{\"leg\":\"resolve\",\"pass\":1,\"state\":\"complete\",\"blocked\":false,\"commit_sha\":null,\"resolutions\":[{\"resolution\":\"fixed\"},{\"resolution\":\"disputed\"}]}", want: true},
-		{desc: "a legacy pass with no resolutions recorded re-drives", marker: "{\"leg\":\"resolve\",\"pass\":1,\"state\":\"complete\",\"blocked\":false,\"commit_sha\":null}", want: true},
-		{desc: "a legacy pass that pushed stays refused", marker: "{\"leg\":\"resolve\",\"pass\":1,\"state\":\"complete\",\"blocked\":false,\"commit_sha\":\"d81a3f2abc\"}", want: false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.desc, func(t *testing.T) {
-			got := policy.ResolveRedrivable(tt.marker)
-			if got != tt.want {
-				t.Errorf("ResolveRedrivable() = %t, want %t", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestParityReviewRedrivable(t *testing.T) {
-	tests := []struct {
-		desc   string
-		marker string
-		want   bool
-	}{
-		{desc: "a blocked review re-drives once the harness can run", marker: "{\"leg\":\"review\",\"pass\":1,\"state\":\"complete\",\"verdict\":\"blocked\",\"findings\":[]}", want: true},
-		{desc: "a review that found issues stays refused", marker: "{\"leg\":\"review\",\"pass\":1,\"state\":\"complete\",\"verdict\":\"issues-remain\",\"findings\":[{\"severity\":\"high\"}]}", want: false},
-		{desc: "a converged review stays refused", marker: "{\"leg\":\"review\",\"pass\":1,\"state\":\"complete\",\"verdict\":\"converged\",\"findings\":[]}", want: false},
-		{desc: "an unfinished review is recovery, not this re-drive", marker: "{\"leg\":\"review\",\"pass\":1,\"state\":\"started\",\"verdict\":null,\"findings\":[]}", want: false},
-		{desc: "an empty marker is not redrivable", marker: "", want: false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.desc, func(t *testing.T) {
-			got := policy.ReviewRedrivable(tt.marker)
-			if got != tt.want {
-				t.Errorf("ReviewRedrivable() = %t, want %t", got, tt.want)
-			}
-		})
-	}
+var parityReviewRedrivableCases = []redrivableParityCase{
+	{desc: "a blocked review re-drives once the harness can run", marker: "{\"leg\":\"review\",\"pass\":1,\"state\":\"complete\",\"verdict\":\"blocked\",\"findings\":[]}", want: true},
+	{desc: "a review that found issues stays refused", marker: "{\"leg\":\"review\",\"pass\":1,\"state\":\"complete\",\"verdict\":\"issues-remain\",\"findings\":[{\"severity\":\"high\"}]}", want: false},
+	{desc: "a converged review stays refused", marker: "{\"leg\":\"review\",\"pass\":1,\"state\":\"complete\",\"verdict\":\"converged\",\"findings\":[]}", want: false},
+	{desc: "an unfinished review is recovery, not this re-drive", marker: "{\"leg\":\"review\",\"pass\":1,\"state\":\"started\",\"verdict\":null,\"findings\":[]}", want: false},
+	{desc: "an empty marker is not redrivable", marker: "", want: false},
 }
