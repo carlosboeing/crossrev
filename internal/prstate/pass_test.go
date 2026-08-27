@@ -51,7 +51,7 @@ func TestParityStateCurrentReviewPass(t *testing.T) {
 }
 
 // state_current_pass_complete asks for one (pass, leg) pair
-// (lib/state.sh:288-293).
+// (lib/state.sh:287-291).
 func TestCurrentPassComplete(t *testing.T) {
 	markers := mustMarkers(t, `[{"leg":"review","pass":1,"state":"complete"},{"leg":"resolve","pass":1,"state":"started"}]`)
 	if !prstate.CurrentPassComplete(markers, 1, core.LegReview) {
@@ -66,15 +66,15 @@ func TestCurrentPassComplete(t *testing.T) {
 }
 
 // state_marker_for takes the newest marker for a (pass, leg), whatever its
-// state (lib/state.sh:297-302).
+// state (lib/state.sh:301-305).
 func TestMarkerForTakesTheNewestWhateverItsState(t *testing.T) {
 	markers := mustMarkers(t, `[{"leg":"review","pass":2,"state":"started","run_id":"1"},{"leg":"review","pass":2,"state":"complete","run_id":"2"}]`)
 	got, ok := prstate.MarkerFor(markers, 2, core.LegReview)
 	if !ok {
 		t.Fatal("no marker found")
 	}
-	if got.RunID != "2" {
-		t.Errorf("got run_id %q, want the newest", got.RunID)
+	if got.RunID.Value() != "2" {
+		t.Errorf("got run_id %q, want the newest", got.RunID.Value())
 	}
 	if _, ok := prstate.MarkerFor(markers, 3, core.LegReview); ok {
 		t.Error("a pass with no marker returned one")
@@ -82,7 +82,7 @@ func TestMarkerForTakesTheNewestWhateverItsState(t *testing.T) {
 }
 
 // state_is_new_revision compares the pull request head against the last
-// non-declined review marker's head_sha (lib/state.sh:344-350).
+// non-declined review marker's head_sha (lib/state.sh:344-349).
 func TestIsNewRevision(t *testing.T) {
 	markers := mustMarkers(t, `[{"leg":"review","pass":1,"state":"complete","head_sha":"aaa111"}]`)
 	if prstate.IsNewRevision(markers, "aaa111") {
@@ -110,7 +110,92 @@ func TestIsNewRevisionSkipsADeclinedMarker(t *testing.T) {
 // decoder that refused them would drop real markers.
 func TestMarkerHeadSHAAcceptsAnAbbreviatedValue(t *testing.T) {
 	markers := mustMarkers(t, `[{"leg":"review","pass":1,"state":"complete","head_sha":"9f3c1ab"}]`)
-	if markers[0].HeadSHA != "9f3c1ab" {
-		t.Errorf("got %q", markers[0].HeadSHA)
+	if markers[0].HeadSHA.Value() != "9f3c1ab" {
+		t.Errorf("got %q", markers[0].HeadSHA.Value())
+	}
+}
+
+// M1. Marker is returned by value, but its four payloads are json.RawMessage
+// and a slice header copies the backing array. A caller editing what it was
+// handed must not be able to reach the marker list it came from.
+func TestMarkerForDoesNotShareItsPayloads(t *testing.T) {
+	markers := mustMarkers(t, `[{"leg":"review","pass":1,"findings":[{"id":"a"}],"tokens":{"in":1},"usage":{"u":1},"resolutions":[]}]`)
+	got, ok := prstate.MarkerFor(markers, 1, core.LegReview)
+	if !ok {
+		t.Fatal("no marker found")
+	}
+	before := string(markers[0].Findings)
+	got.Findings[2] = 'X'
+	got.Tokens[1] = 'X'
+	got.Usage[1] = 'X'
+	got.Resolutions[0] = ' '
+	if string(markers[0].Findings) != before {
+		t.Errorf("editing the returned findings reached the list: %s", markers[0].Findings)
+	}
+	if string(markers[0].Tokens) != `{"in":1}` || string(markers[0].Usage) != `{"u":1}` {
+		t.Errorf("tokens %s usage %s", markers[0].Tokens, markers[0].Usage)
+	}
+	if string(markers[0].Resolutions) != `[]` {
+		t.Errorf("resolutions %s", markers[0].Resolutions)
+	}
+}
+
+// M6. The `last == ""` arm is the whole reason the shell writes
+// `[[ -z "$last" || ... ]]` at lib/state.sh:348: with no marker to compare
+// against, every revision is new, including the empty one.
+func TestIsNewRevisionWithNoMarkerAndNoHead(t *testing.T) {
+	if !prstate.IsNewRevision(nil, "") {
+		t.Error("a pull request with no review marker read as already reviewed")
+	}
+}
+
+// M5. Opt distinguishes three states, and Value alone cannot: a present null
+// and a present empty string both answer "". Get is what a caller reads when
+// the difference matters.
+func TestOptValueAndGet(t *testing.T) {
+	set := prstate.Some("codex")
+	if got := set.Value(); got != "codex" {
+		t.Errorf("Value on a set option is %q", got)
+	}
+	if got, ok := set.Get(); !ok || got != "codex" {
+		t.Errorf("Get on a set option is %q, %v", got, ok)
+	}
+	null := prstate.Null[string]()
+	if got := null.Value(); got != "" {
+		t.Errorf("Value on a null option is %q", got)
+	}
+	if got, ok := null.Get(); ok || got != "" {
+		t.Errorf("Get on a null option is %q, %v", got, ok)
+	}
+	var absent prstate.Opt[string]
+	if got, ok := absent.Get(); ok || got != "" {
+		t.Errorf("Get on an absent option is %q, %v", got, ok)
+	}
+	empty := prstate.Some("")
+	if got, ok := empty.Get(); !ok || got != "" {
+		t.Errorf("Get on a present empty string is %q, %v", got, ok)
+	}
+}
+
+// M5. DecodeFindings is the review leg's route into the payload the resolve leg
+// reads, and a marker with no findings leaves the destination alone.
+func TestDecodeFindings(t *testing.T) {
+	markers := mustMarkers(t, `[{"leg":"review","pass":1,"findings":[{"id":"aaaa000000000001","title":"a < b"}]},{"leg":"review","pass":2}]`)
+	var findings []struct {
+		ID    string `json:"id"`
+		Title string `json:"title"`
+	}
+	if err := markers[0].DecodeFindings(&findings); err != nil {
+		t.Fatalf("decoding findings: %v", err)
+	}
+	if len(findings) != 1 || findings[0].ID != "aaaa000000000001" || findings[0].Title != "a < b" {
+		t.Errorf("got %+v", findings)
+	}
+	untouched := findings
+	if err := markers[1].DecodeFindings(&untouched); err != nil {
+		t.Fatalf("decoding an empty findings payload: %v", err)
+	}
+	if len(untouched) != 1 {
+		t.Errorf("a marker with no findings overwrote the destination: %+v", untouched)
 	}
 }

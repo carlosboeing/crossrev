@@ -4,65 +4,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"reflect"
+	"strings"
 
 	"github.com/carlosboeing/crossrev/internal/core"
 )
-
-// Opt is a marker field in all three of the states a marker distinguishes:
-// absent, present and null, present and set.
-//
-// Every marker writer in lib/run.sh writes an explicit null for a value it does
-// not have yet, and a later edit fills it in. A plain pointer collapses absent
-// into null, and a plain value collapses both into the zero value; either one
-// rewrites bytes that are already on a public pull request.
-type Opt[T any] struct {
-	present bool
-	null    bool
-	value   T
-}
-
-// Some records a present value.
-func Some[T any](v T) Opt[T] { return Opt[T]{present: true, value: v} }
-
-// Null records a present null, which is what a writer puts in a field it has
-// not filled in yet.
-func Null[T any]() Opt[T] { return Opt[T]{present: true, null: true} }
-
-// Present reports whether the marker carried the key at all.
-func (o Opt[T]) Present() bool { return o.present }
-
-// IsNull reports the present-and-null state.
-func (o Opt[T]) IsNull() bool { return o.present && o.null }
-
-// Value is what the key held, or the zero value when it was absent or null.
-func (o Opt[T]) Value() T { return o.value }
-
-// IsZero reports the absent state, and is what the `omitzero` struct tag reads.
-func (o Opt[T]) IsZero() bool { return !o.present }
-
-// MarshalJSON writes null for a present null and the value otherwise. The
-// absent state never reaches this method, because `omitzero` drops the field.
-func (o Opt[T]) MarshalJSON() ([]byte, error) {
-	if o.null {
-		return []byte("null"), nil
-	}
-	return marshalNoEscape(o.value)
-}
-
-// UnmarshalJSON reads a null as present-and-null. A missing key never reaches
-// this method and leaves the zero value, which is the absent state.
-func (o *Opt[T]) UnmarshalJSON(b []byte) error {
-	if string(b) == "null" {
-		*o = Opt[T]{present: true, null: true}
-		return nil
-	}
-	var v T
-	if err := json.Unmarshal(b, &v); err != nil {
-		return err
-	}
-	*o = Opt[T]{present: true, value: v}
-	return nil
-}
 
 // Marker is one pass marker, with its fields in the order the writers in
 // lib/run.sh build them.
@@ -76,10 +22,28 @@ func (o *Opt[T]) UnmarshalJSON(b []byte) error {
 // resolve claim at lib/run.sh:1957 and the declined marker at lib/run.sh:1050.
 // A field one writer never sets is absent from its marker, not null.
 //
+// A union orders fields no single writer orders. Three pairs never co-occur —
+// `verdict` with `blocked`, `findings` with `resolutions`, `unanchored` with
+// `unthreaded` — because the first of each is the review leg's and the second
+// is the resolve leg's. Their relative order here is a choice with nothing to
+// check it against, and no test can pin it, because no marker carries both.
+// Every other neighbouring pair is observable, and the round-trip tables in
+// marker_struct_test.go hold the bytes.
+//
 // Payload fields stay as raw bytes. `findings` and `resolutions` carry the
 // model's own key order through unchanged, and `tokens` and `usage` are
-// accounted for elsewhere; remarshalling any of them here would reorder bytes
-// this package has no reason to touch.
+// accounted for elsewhere; remarshalling any of them through a Go type here
+// would reorder bytes this package has no reason to touch. They are still
+// normalised on the way out, because `jq -c .` normalises them in Bash too, and
+// normalise says what that covers.
+//
+// The comment id is not a field. Every one of the twelve marker writes in
+// lib/run.sh wraps its marker in `jq -c 'del(.comment_id)'` first, so the id
+// exists on the in-memory marker and never on the wire. Keeping it unexported
+// and reachable only through CommentID means encoding/json cannot see it at
+// all, so the natural edit — read a marker, change one field, write it back —
+// cannot add a key to a public comment. The alternative, stripping it inside
+// Encode, would stop it happening today without making it impossible.
 type Marker struct {
 	Version        int             `json:"v,omitzero"`
 	Leg            core.Leg        `json:"leg,omitzero"`
@@ -87,8 +51,8 @@ type Marker struct {
 	State          core.PassState  `json:"state,omitzero"`
 	TS             int64           `json:"ts,omitzero"`
 	DoneTS         Opt[int64]      `json:"done_ts,omitzero"`
-	RunID          string          `json:"run_id,omitzero"`
-	HeadSHA        string          `json:"head_sha,omitzero"`
+	RunID          Opt[string]     `json:"run_id,omitzero"`
+	HeadSHA        Opt[string]     `json:"head_sha,omitzero"`
 	Harness        Opt[string]     `json:"harness,omitzero"`
 	Model          Opt[string]     `json:"model,omitzero"`
 	Effort         Opt[string]     `json:"effort,omitzero"`
@@ -100,7 +64,7 @@ type Marker struct {
 	Verdict        Opt[string]     `json:"verdict,omitzero"`
 	Blocked        Opt[bool]       `json:"blocked,omitzero"`
 	BlockedReason  Opt[string]     `json:"blocked_reason,omitzero"`
-	Reason         string          `json:"reason,omitzero"`
+	Reason         Opt[string]     `json:"reason,omitzero"`
 	CommitSHA      Opt[string]     `json:"commit_sha,omitzero"`
 	CommitSubject  Opt[string]     `json:"commit_subject,omitzero"`
 	Summary        Opt[string]     `json:"summary,omitzero"`
@@ -109,18 +73,109 @@ type Marker struct {
 	EffortReported Opt[string]     `json:"effort_reported,omitzero"`
 	Unanchored     Opt[int]        `json:"unanchored,omitzero"`
 	Unthreaded     Opt[int]        `json:"unthreaded,omitzero"`
-	CommentID      int64           `json:"comment_id,omitzero"`
+
+	// commentID is which comment the marker was read off, and raw is the
+	// bytes it was read as. Both are unexported so no encoder can reach
+	// them; the accessors below are the only route.
+	commentID int64
+	raw       json.RawMessage
 }
+
+// The string fields above are Opt rather than plain strings for the reason Opt
+// exists: `omitzero` on a plain string drops a present empty value, and
+// lib/run.sh:1050 and :1095 write `run_id`, `head_sha` and `reason`
+// unconditionally, so an empty one is present on the wire. The numeric and
+// enum fields keep the plain form, because no writer produces a zero version, a
+// zero pass, a zero timestamp or an empty leg or state: for those the zero
+// value really does mean absent.
 
 // markerFields is Marker under a name with no methods, so MarshalJSON can hand
 // the struct to the encoder without calling itself.
 type markerFields Marker
 
-// MarshalJSON writes the marker in the writers' field order, without Go's HTML
-// escaping. A finding title carrying `<`, `>` or `&` reaches the comment body
-// as the reviewer wrote it, which is what jq produces.
+// CommentID is which comment the marker was read off, or zero for a marker that
+// was built rather than read.
+func (m Marker) CommentID() int64 { return m.commentID }
+
+// Raw is the marker exactly as DecodeMarker read it, before the struct dropped
+// the keys it does not declare.
+//
+// The struct view is lossy on purpose — it is a fixed field list — so a caller
+// continuing state an older writer left behind reads it from here and edits it
+// with EditMarker. `wrap_up` is the live example: lib/run.sh:1993-1999 still
+// migrates it on resume, and no field on Marker holds it.
+//
+// The bytes are a copy, so editing them cannot reach the marker.
+func (m Marker) Raw() json.RawMessage { return bytes.Clone(m.raw) }
+
+// MarshalJSON writes the marker in the writers' field order, in `jq -c`'s form.
 func (m Marker) MarshalJSON() ([]byte, error) {
-	return marshalNoEscape(markerFields(m))
+	return jqMarshal(markerFields(m))
+}
+
+// UnmarshalJSON reads a marker field by field, keeping the marker when one
+// field carries a JSON type the struct cannot hold.
+//
+// Decoding straight into the struct fails the whole marker on the first
+// mismatch, and the caller above drops it. jq does not: the field stays in the
+// object with whatever type it has, and every reader that guards with `// null`
+// carries on. The difference is not academic — `commit_subject` is
+// model-supplied at lib/run.sh:2109 — and it fails in the worst way, because
+// nothing errors: every marker on the pull request stops decoding at once, Pass
+// answers 1 forever, and the loop reviews a finished pull request again.
+//
+// So a field the struct cannot hold reads as absent and the marker survives.
+// The value itself is not lost: Raw returns the bytes it was read with.
+//
+// The walk is reflective rather than a hand-written field list because the list
+// would rot. A field added to Marker without a matching line would decode
+// strictly again, and nothing would say so.
+func (m *Marker) UnmarshalJSON(b []byte) error {
+	// A JSON null leaves a struct untouched, which is encoding/json's own
+	// convention and what the strict decode did.
+	if string(b) == "null" {
+		return nil
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(b, &fields); err != nil {
+		return err
+	}
+	raw, err := compactValue(b)
+	if err != nil {
+		return err
+	}
+
+	*m = Marker{raw: raw}
+	v := reflect.ValueOf(m).Elem()
+	t := v.Type()
+	for i := range t.NumField() {
+		name, _, _ := strings.Cut(t.Field(i).Tag.Get("json"), ",")
+		if name == "" || name == "-" {
+			continue
+		}
+		value, ok := fields[name]
+		if !ok {
+			continue
+		}
+		// A mismatch leaves the field at its zero value, which is the
+		// absent state. Opt and the plain types all assign only after
+		// their own decode succeeds, so nothing is half written.
+		_ = json.Unmarshal(value, v.Field(i).Addr().Interface())
+	}
+	return nil
+}
+
+// clone copies the four payloads a marker carries as raw bytes.
+//
+// Marker is returned by value, but a slice header shares its backing array, so
+// a caller editing what a reader handed it would reach the marker list the
+// reader read from.
+func (m Marker) clone() Marker {
+	m.Tokens = bytes.Clone(m.Tokens)
+	m.Usage = bytes.Clone(m.Usage)
+	m.Findings = bytes.Clone(m.Findings)
+	m.Resolutions = bytes.Clone(m.Resolutions)
+	return m
 }
 
 // Encode renders the marker for embedding in a comment body.
@@ -198,12 +253,12 @@ func ran(markers []Marker) []Marker {
 	return kept
 }
 
-// Pass is the pass number the next review belongs to (lib/state.sh:272-277).
+// Pass is the pass number the next review belongs to (lib/state.sh:273-278).
 // No trusted marker means pass 1.
 func Pass(markers []Marker) int { return CurrentReviewPass(markers) + 1 }
 
 // MaxPass is the highest pass number any marker mentions, refused passes
-// included (lib/state.sh:281-283). `status` renders every pass, and a refused
+// included (lib/state.sh:283-285). `status` renders every pass, and a refused
 // one is among the things it has to show.
 func MaxPass(markers []Marker) int {
 	highest := 0
@@ -216,7 +271,7 @@ func MaxPass(markers []Marker) int {
 }
 
 // CurrentReviewPass is the pass the resolve leg belongs to: the newest review
-// pass, not the next one (lib/state.sh:286-288).
+// pass, not the next one (lib/state.sh:294-296).
 func CurrentReviewPass(markers []Marker) int {
 	highest := 0
 	for _, m := range ran(markers) {
@@ -228,7 +283,7 @@ func CurrentReviewPass(markers []Marker) int {
 }
 
 // CurrentPassComplete reports whether one leg of one pass settled
-// (lib/state.sh:290-295).
+// (lib/state.sh:287-291).
 func CurrentPassComplete(markers []Marker, pass int, leg core.Leg) bool {
 	for _, m := range markers {
 		if m.Pass == pass && m.Leg == leg && m.State == core.PassComplete {
@@ -239,7 +294,7 @@ func CurrentPassComplete(markers []Marker, pass int, leg core.Leg) bool {
 }
 
 // MarkerFor is the newest marker for a (pass, leg), whatever its state
-// (lib/state.sh:297-302).
+// (lib/state.sh:301-305).
 //
 // The resolve leg needs the review leg's to read the finding list, and recovery
 // needs its own to reuse the comment id rather than posting a second claim.
@@ -251,11 +306,14 @@ func MarkerFor(markers []Marker, pass int, leg core.Leg) (Marker, bool) {
 			newest, found = m, true
 		}
 	}
-	return newest, found
+	if !found {
+		return Marker{}, false
+	}
+	return newest.clone(), true
 }
 
 // IsNewRevision compares the pull request head against the last non-declined
-// review marker's head SHA (lib/state.sh:344-350).
+// review marker's head SHA (lib/state.sh:344-349).
 //
 // GitHub has no "new revision" event and `synchronize` fires per push, so the
 // marker is the comparison rather than the event.
@@ -263,7 +321,7 @@ func IsNewRevision(markers []Marker, headSHA string) bool {
 	last := ""
 	for _, m := range ran(markers) {
 		if m.Leg == core.LegReview {
-			last = m.HeadSHA
+			last = m.HeadSHA.Value()
 		}
 	}
 	return last == "" || last != headSHA

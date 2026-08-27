@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-// anchorWidth is the digest cut lib/state.sh:253 takes: the first 8 characters
+// anchorWidth is the digest cut lib/state.sh:251 takes: the first 8 characters
 // of a lowercase hexadecimal sha256.
 const anchorWidth = 8
 
@@ -25,7 +25,7 @@ type Anchor string
 func (a Anchor) String() string { return string(a) }
 
 // AnchorAt fingerprints the five-line window around line
-// (lib/state.sh:248-254).
+// (lib/state.sh:247-252).
 //
 // The window is line-2 through line+2, with the start clamped to the first
 // line, so lines 1, 2 and 3 all start at line 1. Every ASCII whitespace byte is

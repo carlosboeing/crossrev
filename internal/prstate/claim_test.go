@@ -11,15 +11,15 @@ import (
 
 // state_open_claim finds an unfinished claim for the same (pass, leg), and
 // only when the newest marker for that pair is still started
-// (lib/state.sh:306-313).
+// (lib/state.sh:309-314).
 func TestOpenClaim(t *testing.T) {
 	claim := mustMarkers(t, `[{"leg":"review","pass":2,"state":"started","run_id":"7"}]`)
 	got, ok := prstate.OpenClaim(claim, 2, core.LegReview)
 	if !ok {
 		t.Fatal("the unfinished claim was not found")
 	}
-	if got.RunID != "7" {
-		t.Errorf("got run_id %q", got.RunID)
+	if got.RunID.Value() != "7" {
+		t.Errorf("got run_id %q", got.RunID.Value())
 	}
 
 	settled := mustMarkers(t, `[{"leg":"review","pass":2,"state":"started"},{"leg":"review","pass":2,"state":"complete"}]`)
@@ -29,7 +29,7 @@ func TestOpenClaim(t *testing.T) {
 }
 
 // A moved revision is stale whatever the clock says, and the message names both
-// abbreviated SHAs (lib/state.sh:325-331).
+// abbreviated SHAs (lib/state.sh:329-332).
 func TestClaimIsStaleOnAMovedRevision(t *testing.T) {
 	claim := mustMarkers(t, `[{"leg":"review","pass":1,"state":"started","ts":1000,"head_sha":"aaaaaaa111"}]`)[0]
 	reason, stale := prstate.ClaimIsStale(claim, "bbbbbbb222", time.Unix(1000, 0), prstate.DefaultClaimWindow)
@@ -43,7 +43,7 @@ func TestClaimIsStaleOnAMovedRevision(t *testing.T) {
 }
 
 // Past the window is stale, and the message counts whole minutes
-// (lib/state.sh:332-336).
+// (lib/state.sh:333-337).
 func TestClaimIsStalePastTheWindow(t *testing.T) {
 	claim := mustMarkers(t, `[{"leg":"review","pass":1,"state":"started","ts":1000,"head_sha":"aaa111"}]`)[0]
 	now := time.Unix(1000+3601+59, 0)

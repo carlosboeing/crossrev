@@ -81,7 +81,7 @@ func TestMarkerPrefixesAreLiteralAndLowercase(t *testing.T) {
 }
 
 // The extraction rule is per line: the last opening delimiter, then the last
-// closing one after it (lib/state.sh:104-108).
+// closing one after it (lib/state.sh:113-117).
 func TestDecodeMarkerTakesTheLastDelimitersOnALine(t *testing.T) {
 	body := `noise <!-- crossrev: {"leg":"first"} --> and <!-- crossrev: {"leg":"second"} --> tail`
 	got, ok := prstate.DecodeMarker(body)
@@ -105,7 +105,7 @@ func TestDecodeMarkerKeepsEverythingBeforeTheLastClose(t *testing.T) {
 }
 
 // A finding marker's prefix ends where the state marker's has a space, so the
-// state decoder must not see one (lib/state.sh:83).
+// state decoder must not see one (lib/state.sh:74-75).
 func TestDecodeMarkerIgnoresAFindingMarker(t *testing.T) {
 	id := prstate.NewFindingID("app.ts", "a title", prstate.AnchorAt([]byte("x\n"), 1))
 	body := "text" + prstate.EncodeFindingMarker(id, 2, "review")
@@ -115,7 +115,7 @@ func TestDecodeMarkerIgnoresAFindingMarker(t *testing.T) {
 }
 
 // Every payload that is not one JSON object decodes to nothing, whichever kind
-// it is (lib/state.sh:110-119, and the fixture's two-markers case).
+// it is (lib/state.sh:118-119, and the fixture's two-markers case).
 func TestDecodeMarkerRefusesAPayloadThatIsNotOneObject(t *testing.T) {
 	for _, payload := range []string{"null", "[1,2]", `"text"`, "7", "true", "", "{"} {
 		body := `<!-- crossrev: ` + payload + ` -->`
@@ -139,7 +139,7 @@ func TestDecodeMarkerRefusesANonObjectInsideAMigratedArray(t *testing.T) {
 }
 
 // A non-array under either key is left alone, because the migration guards on
-// `type == "array"` (lib/state.sh:100 and :105).
+// `type == "array"` (lib/state.sh:103 and :108).
 func TestDecodeMarkerLeavesANonArrayUnderAMigratedKey(t *testing.T) {
 	body := `<!-- crossrev: {"resolutions":"none","findings":4} -->`
 	got, ok := prstate.DecodeMarker(body)
@@ -165,7 +165,7 @@ func TestDecodeMarkerRenamesToTheEndOfTheObject(t *testing.T) {
 }
 
 // A marker already carrying the new key keeps it, and the old one is left
-// where it is: jq renames only when the new key is absent (lib/state.sh:92).
+// where it is: jq renames only when the new key is absent (lib/state.sh:99).
 func TestDecodeMarkerDoesNotRenameOverAnExistingKey(t *testing.T) {
 	body := `<!-- crossrev: {"dispositions":[],"resolutions":[]} -->`
 	got, ok := prstate.DecodeMarker(body)
@@ -204,24 +204,19 @@ func TestEncodeMarkerCompactsWithoutReordering(t *testing.T) {
 	}
 }
 
-func TestEncodeMarkerRefusesInvalidJSON(t *testing.T) {
-	if _, err := prstate.EncodeMarker(json.RawMessage("{oops")); err == nil {
-		t.Error("invalid JSON encoded without an error")
-	}
+// writtenMarkers are the finished markers of the three writers in lib/run.sh,
+// produced by sourcing lib/state.sh and running state_marker_encode. Every
+// marker CrossRev writes goes out through `jq -c`, so a marker read back off a
+// pull request is already in this form.
+var writtenMarkers = []string{
+	`{"v":1,"leg":"review","pass":2,"state":"complete","ts":1700000000,"done_ts":1700000900,"run_id":"run-77","head_sha":"9f3c1abdeadbeef","harness":"codex","model":"gpt-5","effort":"high","endpoint":null,"model_reported":"gpt-5","tokens":1234,"usage":null,"billing":"subscription","verdict":"issues","blocked_reason":null,"findings":[{"id":"aaaa000000000001","title":"a < b && c > d","path":"lib/auth.ts"}],"effort_reported":null,"unanchored":0}`,
+	`{"v":1,"leg":"resolve","pass":2,"state":"complete","ts":1700000000,"done_ts":1700000900,"run_id":"run-77","head_sha":"9f3c1abdeadbeef","harness":"claude","model":null,"effort":null,"endpoint":null,"model_reported":null,"tokens":null,"usage":null,"billing":null,"blocked":false,"blocked_reason":null,"commit_sha":"abc1234","commit_subject":"fix: a thing","summary":"one fix","resolutions":[{"finding_id":"aaaa000000000001","resolution":"fixed","crossrev_tracked":""}],"effort_reported":null,"unthreaded":0}`,
+	`{"v":1,"leg":"review","pass":3,"state":"declined","ts":1700000000,"done_ts":1700000000,"run_id":"run-77","head_sha":"9f3c1abdeadbeef","harness":null,"model":null,"effort":null,"endpoint":null,"model_reported":null,"tokens":null,"usage":null,"billing":null,"verdict":"declined","reason":"reached max_passes_per_cycle (3)","findings":[]}`,
 }
 
-// Every marker CrossRev writes goes out through `jq -c`, so a marker read back
-// off a pull request is already in that form and a decode followed by an encode
-// must reproduce it byte for byte. The three strings below are the finished
-// markers of the three writers, produced by sourcing lib/state.sh and running
-// state_marker_encode.
+// A decode followed by an encode must reproduce a written marker byte for byte.
 func TestDecodeThenEncodeReproducesAWrittenMarker(t *testing.T) {
-	written := []string{
-		`{"v":1,"leg":"review","pass":2,"state":"complete","ts":1700000000,"done_ts":1700000900,"run_id":"run-77","head_sha":"9f3c1abdeadbeef","harness":"codex","model":"gpt-5","effort":"high","endpoint":null,"model_reported":"gpt-5","tokens":1234,"usage":null,"billing":"subscription","verdict":"issues","blocked_reason":null,"findings":[{"id":"aaaa000000000001","title":"a < b && c > d","path":"lib/auth.ts"}],"effort_reported":null,"unanchored":0}`,
-		`{"v":1,"leg":"resolve","pass":2,"state":"complete","ts":1700000000,"done_ts":1700000900,"run_id":"run-77","head_sha":"9f3c1abdeadbeef","harness":"claude","model":null,"effort":null,"endpoint":null,"model_reported":null,"tokens":null,"usage":null,"billing":null,"blocked":false,"blocked_reason":null,"commit_sha":"abc1234","commit_subject":"fix: a thing","summary":"one fix","resolutions":[{"finding_id":"aaaa000000000001","resolution":"fixed","crossrev_tracked":""}],"effort_reported":null,"unthreaded":0}`,
-		`{"v":1,"leg":"review","pass":3,"state":"declined","ts":1700000000,"done_ts":1700000000,"run_id":"run-77","head_sha":"9f3c1abdeadbeef","harness":null,"model":null,"effort":null,"endpoint":null,"model_reported":null,"tokens":null,"usage":null,"billing":null,"verdict":"declined","reason":"reached max_passes_per_cycle (3)","findings":[]}`,
-	}
-	for _, payload := range written {
+	for _, payload := range writtenMarkers {
 		body := "Summary.\n\n" + prstate.MarkerPrefix + " " + payload + " -->"
 		raw, ok := prstate.DecodeMarker(body)
 		if !ok {
@@ -246,6 +241,30 @@ func TestDecodeMarkerKeepsTheFirstPositionOfADuplicateKey(t *testing.T) {
 		t.Fatal("decoded nothing")
 	}
 	if string(got) != `{"a":2,"b":0}` {
+		t.Errorf("got %q", string(got))
+	}
+}
+
+// M3. A marker written by somebody else can carry `<`, `>` or `&` in a key, and
+// the decoder re-emits the key. jq escapes none of the three.
+func TestDecodeMarkerDoesNotEscapeHTMLInAKey(t *testing.T) {
+	got, ok := prstate.DecodeMarker(`<!-- crossrev: {"a<b&c>d":1} -->`)
+	if !ok {
+		t.Fatal("decoded nothing")
+	}
+	if string(got) != `{"a<b&c>d":1}` {
+		t.Errorf("got %q", string(got))
+	}
+}
+
+// M4. `jq -c` drops insignificant whitespace inside a payload, nested included.
+// Measured: state_marker_of on this body prints the compacted form below.
+func TestDecodeMarkerCompactsInsideAPayload(t *testing.T) {
+	got, ok := prstate.DecodeMarker(`<!-- crossrev: {"a": [1, 2], "b": {"c": 3}} -->`)
+	if !ok {
+		t.Fatal("decoded nothing")
+	}
+	if string(got) != `{"a":[1,2],"b":{"c":3}}` {
 		t.Errorf("got %q", string(got))
 	}
 }

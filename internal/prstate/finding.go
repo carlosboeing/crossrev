@@ -3,18 +3,22 @@ package prstate
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/carlosboeing/crossrev/internal/core"
 )
 
-// findingIDWidth is the digest cut lib/state.sh:246 takes: the first 16
+// findingIDWidth is the digest cut lib/state.sh:242 takes: the first 16
 // characters of a lowercase hexadecimal sha256.
 const findingIDWidth = 16
 
+// ErrFindingID is returned for a string the hash could not have produced.
+var ErrFindingID = errors.New("a finding id is 16 lowercase hexadecimal characters")
+
 // NewFindingID derives a finding's identity from its path, its normalised
-// title and its anchor (lib/state.sh:240-247).
+// title and its anchor (lib/state.sh:238-243).
 //
 // The identity has to be stable across passes, because "already posted" is a
 // set-membership test rather than a guess. The anchor is what still matches a
@@ -38,13 +42,13 @@ func NewFindingID(path string, title string, anchor Anchor) core.FindingID {
 func ParseFindingID(s string) (core.FindingID, error) {
 	id := core.FindingID(s)
 	if !id.Valid() {
-		return "", fmt.Errorf("a finding id is %d lowercase hexadecimal characters: %q", findingIDWidth, s)
+		return "", fmt.Errorf("%w: %q", ErrFindingID, s)
 	}
 	return id, nil
 }
 
 // normaliseTitle folds and squeezes a title exactly as the two `tr` calls and
-// the `sed` at lib/state.sh:243 do, under LC_ALL=C.
+// the `sed` at lib/state.sh:241 do, under LC_ALL=C.
 //
 // Byte-oriented on purpose, in all three steps:
 //

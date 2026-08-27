@@ -29,8 +29,8 @@ func TestMarkerEncodesInTheWritersOrder(t *testing.T) {
 				State:         core.PassStarted,
 				TS:            1700000000,
 				DoneTS:        prstate.Null[int64](),
-				RunID:         "run-77",
-				HeadSHA:       "9f3c1abdeadbeef",
+				RunID:         prstate.Some("run-77"),
+				HeadSHA:       prstate.Some("9f3c1abdeadbeef"),
 				Harness:       prstate.Some("codex"),
 				Model:         prstate.Some("gpt-5"),
 				Effort:        prstate.Some("high"),
@@ -55,8 +55,8 @@ func TestMarkerEncodesInTheWritersOrder(t *testing.T) {
 				State:         core.PassStarted,
 				TS:            1700000000,
 				DoneTS:        prstate.Null[int64](),
-				RunID:         "run-77",
-				HeadSHA:       "9f3c1abdeadbeef",
+				RunID:         prstate.Some("run-77"),
+				HeadSHA:       prstate.Some("9f3c1abdeadbeef"),
 				Harness:       prstate.Some("codex"),
 				Model:         prstate.Some("gpt-5"),
 				Effort:        prstate.Some("high"),
@@ -84,8 +84,8 @@ func TestMarkerEncodesInTheWritersOrder(t *testing.T) {
 				State:         core.PassDeclined,
 				TS:            1700000000,
 				DoneTS:        prstate.Some[int64](1700000000),
-				RunID:         "run-77",
-				HeadSHA:       "9f3c1abdeadbeef",
+				RunID:         prstate.Some("run-77"),
+				HeadSHA:       prstate.Some("9f3c1abdeadbeef"),
 				Harness:       prstate.Null[string](),
 				Model:         prstate.Null[string](),
 				Effort:        prstate.Null[string](),
@@ -95,7 +95,7 @@ func TestMarkerEncodesInTheWritersOrder(t *testing.T) {
 				Usage:         json.RawMessage("null"),
 				Billing:       prstate.Null[string](),
 				Verdict:       prstate.Some(string(core.PassDeclined)),
-				Reason:        "reached max_passes_per_cycle (3)",
+				Reason:        prstate.Some("reached max_passes_per_cycle (3)"),
 				Findings:      json.RawMessage("[]"),
 			},
 			want: `{"v":1,"leg":"review","pass":3,"state":"declined","ts":1700000000,"done_ts":1700000000,"run_id":"run-77","head_sha":"9f3c1abdeadbeef","harness":null,"model":null,"effort":null,"endpoint":null,"model_reported":null,"tokens":null,"usage":null,"billing":null,"verdict":"declined","reason":"reached max_passes_per_cycle (3)","findings":[]}`,
@@ -153,5 +153,84 @@ func TestMarkerDoesNotEscapeHTML(t *testing.T) {
 	}
 	if string(raw) != `{"v":1,"leg":"resolve","pass":1,"summary":"a < b && c > d"}` {
 		t.Errorf("got %s", raw)
+	}
+}
+
+// F1. A marker read off a comment carries the id of the comment it came from,
+// and every writer in lib/run.sh strips that key before encoding: twelve call
+// sites wrap the marker in `jq -c 'del(.comment_id)'`. The id must not be able
+// to reach a public comment body.
+func TestEncodeNeverWritesTheCommentID(t *testing.T) {
+	stream := `{"id":4242,"body":"Pass.\n\n<!-- crossrev: {\"v\":1,\"leg\":\"review\",\"pass\":1,\"state\":\"complete\",\"unanchored\":0} -->"}`
+	markers := prstate.Markers([]byte(stream))
+	if len(markers) != 1 {
+		t.Fatalf("got %d markers", len(markers))
+	}
+	encoded, err := markers[0].Encode()
+	if err != nil {
+		t.Fatalf("encoding: %v", err)
+	}
+	want := "\n\n<!-- crossrev: {\"v\":1,\"leg\":\"review\",\"pass\":1,\"state\":\"complete\",\"unanchored\":0} -->"
+	if encoded != want {
+		t.Errorf("encoded\n got %q\nwant %q", encoded, want)
+	}
+}
+
+// F2. `jq -c` prints U+2028 and U+2029 as the raw three bytes; Go's
+// encoding/json escapes both unconditionally, escape-HTML off or not. All three
+// of summary, reason and blocked_reason carry model and harness text.
+func TestMarkerDoesNotEscapeTheLineSeparators(t *testing.T) {
+	// The two separators are written as Go escapes so the source stays plain
+	// ASCII; the value they build is the raw three bytes each, which is what
+	// jq prints.
+	m := prstate.Marker{Version: 1, Leg: core.LegResolve, Pass: 1, Summary: prstate.Some("a\u2028b\u2029c")}
+	raw, err := m.MarshalJSON()
+	if err != nil {
+		t.Fatalf("marshalling: %v", err)
+	}
+	want := "{\"v\":1,\"leg\":\"resolve\",\"pass\":1,\"summary\":\"a\u2028b\u2029c\"}"
+	if string(raw) != want {
+		t.Errorf("marshalled\n got % x\nwant % x", raw, want)
+	}
+}
+
+// F4. marker_test.go holds the three finished markers as byte strings but only
+// runs them through the byte path, so the struct's field order is pinned for
+// the three fresh claims and unpinned for everything a completed marker adds.
+func TestCompletedMarkersRoundTripThroughTheStruct(t *testing.T) {
+	for _, payload := range writtenMarkers {
+		m, err := prstate.ParseMarker([]byte(payload))
+		if err != nil {
+			t.Fatalf("parsing %s: %v", payload, err)
+		}
+		raw, err := m.MarshalJSON()
+		if err != nil {
+			t.Fatalf("marshalling: %v", err)
+		}
+		if string(raw) != payload {
+			t.Errorf("round trip changed the bytes\n got %s\nwant %s", raw, payload)
+		}
+	}
+}
+
+// X3. `omitzero` on a plain string collapses present-and-empty into absent, so
+// a marker carrying an empty head_sha, run_id or reason re-encodes without the
+// key. lib/run.sh:1050 and :1095 write all three unconditionally.
+func TestMarkerKeepsAnEmptyStringField(t *testing.T) {
+	for _, payload := range []string{
+		`{"v":1,"leg":"review","pass":1,"run_id":"","head_sha":""}`,
+		`{"v":1,"leg":"review","pass":3,"state":"declined","reason":""}`,
+	} {
+		m, err := prstate.ParseMarker([]byte(payload))
+		if err != nil {
+			t.Fatalf("parsing %s: %v", payload, err)
+		}
+		raw, err := m.MarshalJSON()
+		if err != nil {
+			t.Fatalf("marshalling: %v", err)
+		}
+		if string(raw) != payload {
+			t.Errorf("an empty value was dropped\n got %s\nwant %s", raw, payload)
+		}
 	}
 }

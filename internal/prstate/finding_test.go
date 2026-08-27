@@ -54,7 +54,7 @@ func TestFindingIDSqueezesASCIIWhitespaceOnly(t *testing.T) {
 }
 
 // The preimage is three fields joined by newlines with no trailing newline
-// (lib/state.sh:245). A trailing newline changes every id ever minted.
+// (lib/state.sh:242). A trailing newline changes every id ever minted.
 func TestFindingIDHashesThreeFieldsWithNoTrailingNewline(t *testing.T) {
 	// sha256("lib/auth.ts\ntoken refresh races with logout\nabcd1234"), first
 	// 16 hexadecimal characters, taken from the frozen oracle's ascii-basic

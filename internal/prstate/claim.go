@@ -41,9 +41,9 @@ func OpenClaim(markers []Marker, pass int, leg core.Leg) (Marker, bool) {
 // before either field existed carries neither: an absent head SHA is not a
 // moved revision, and an absent timestamp is not an expired one.
 func ClaimIsStale(claim Marker, headSHA string, now time.Time, window time.Duration) (string, bool) {
-	if claim.HeadSHA != "" && claim.HeadSHA != headSHA {
+	if sha := claim.HeadSHA.Value(); sha != "" && sha != headSHA {
 		return fmt.Sprintf("it started against %s and the pull request is now at %s",
-			abbreviate(claim.HeadSHA), abbreviate(headSHA)), true
+			abbreviate(sha), abbreviate(headSHA)), true
 	}
 	age := now.Unix() - claim.TS
 	if claim.TS > 0 && age > int64(window.Seconds()) {

@@ -12,7 +12,7 @@ import (
 // state_markers decodes a whole comment stream in one pass, keeps only the
 // comments carrying a marker, attaches each comment's id, migrates the old
 // vocabulary and skips a line it cannot read without losing the markers around
-// it (lib/state.sh:139-152, pinned by tests/test-state.sh).
+// it (lib/state.sh:141-155, pinned by tests/test-state.sh).
 func TestMarkersOverACommentStream(t *testing.T) {
 	stream := strings.Join([]string{
 		`{"id":11,"body":"Pass 1.\n\n<!-- crossrev: {\"v\":1,\"leg\":\"review\",\"pass\":1,\"state\":\"complete\"} -->"}`,
@@ -25,8 +25,8 @@ func TestMarkersOverACommentStream(t *testing.T) {
 	if len(markers) != 2 {
 		t.Fatalf("kept %d markers, want 2", len(markers))
 	}
-	if markers[0].CommentID != 11 || markers[1].CommentID != 12 {
-		t.Errorf("comment ids are %d and %d", markers[0].CommentID, markers[1].CommentID)
+	if markers[0].CommentID() != 11 || markers[1].CommentID() != 12 {
+		t.Errorf("comment ids are %d and %d", markers[0].CommentID(), markers[1].CommentID())
 	}
 	if markers[0].Leg != core.LegReview || markers[1].Leg != core.LegResolve {
 		t.Errorf("legs are %q and %q", markers[0].Leg, markers[1].Leg)
@@ -48,7 +48,7 @@ func TestMarkersOverACommentStream(t *testing.T) {
 func TestMarkersSkipsANonObjectLine(t *testing.T) {
 	stream := "[1,2]\n\"text\"\n" + `{"id":9,"body":"x<!-- crossrev: {\"leg\":\"review\"} -->"}`
 	markers := prstate.Markers([]byte(stream))
-	if len(markers) != 1 || markers[0].CommentID != 9 {
+	if len(markers) != 1 || markers[0].CommentID() != 9 {
 		t.Fatalf("got %d markers", len(markers))
 	}
 }
@@ -66,7 +66,7 @@ func TestEncodeFindingMarker(t *testing.T) {
 
 // _state_finding_ids reads the ids back out of comment bodies, narrowed to one
 // leg and optionally one pass, and returns them sorted and deduplicated
-// (lib/state.sh:210-217).
+// (lib/state.sh:216-222).
 func TestFindingIDsFilterByLegAndPass(t *testing.T) {
 	bodies := []string{
 		"a" + markFor(t, "bbbb", 1, core.LegReview),
@@ -93,7 +93,7 @@ func TestFindingIDsFilterByLegAndPass(t *testing.T) {
 }
 
 // The extraction is per line, taking the last opening delimiter and the last
-// closing one after it, exactly as the sed at lib/state.sh:212 does.
+// closing one after it, exactly as the sed at lib/state.sh:218 does.
 func TestFindingIDsTakesTheLastDelimitersOnALine(t *testing.T) {
 	first := markFor(t, "aaaa", 1, core.LegReview)
 	second := markFor(t, "bbbb", 1, core.LegReview)
@@ -166,7 +166,7 @@ func TestMarkersSkipsABodyWithAMarkerOnTwoLines(t *testing.T) {
 		`{"id":2,"body":"<!-- crossrev: {\"leg\":\"review\",\"pass\":2} -->"}`,
 	}, "\n")
 	markers := prstate.Markers([]byte(stream))
-	if len(markers) != 1 || markers[0].CommentID != 2 {
+	if len(markers) != 1 || markers[0].CommentID() != 2 {
 		t.Fatalf("got %+v", markers)
 	}
 }
@@ -205,5 +205,44 @@ func TestFindingIDsSkipsANonObjectPayload(t *testing.T) {
 	}
 	if got := prstate.FindingIDs(bodies, core.LegReview, 0); len(got) != 1 {
 		t.Errorf("got %v", strs(got))
+	}
+}
+
+// F3. jq keeps a marker whose field carries the wrong JSON type; the typed view
+// must not throw the marker away for it. `commit_subject` is model-supplied at
+// lib/run.sh:2109, so a future writer changing any field's type would otherwise
+// stop every marker on the pull request from decoding, leave Pass at 1 forever,
+// and report nothing wrong.
+func TestMarkersKeepsAMarkerWithAWrongTypedField(t *testing.T) {
+	stream := strings.Join([]string{
+		`{"id":1,"body":"<!-- crossrev: {\"v\":1,\"leg\":\"review\",\"pass\":1,\"commit_subject\":7} -->"}`,
+		`{"id":2,"body":"<!-- crossrev: {\"v\":1,\"leg\":\"review\",\"pass\":2} -->"}`,
+	}, "\n")
+	markers := prstate.Markers([]byte(stream))
+	if len(markers) != 2 {
+		t.Fatalf("kept %d markers, want 2", len(markers))
+	}
+	if prstate.Pass(markers) != 3 {
+		t.Errorf("pass numbering restarted: got %d", prstate.Pass(markers))
+	}
+	// The field the struct cannot hold reads as absent, and the bytes survive
+	// on the raw view.
+	if markers[0].CommitSubject.Present() {
+		t.Error("a wrong-typed field read as present")
+	}
+	if !strings.Contains(string(markers[0].Raw()), `"commit_subject":7`) {
+		t.Errorf("the original bytes were lost: %s", markers[0].Raw())
+	}
+}
+
+// lib/state.sh:153 forces an empty read to `[]` rather than nothing, so a
+// caller marshalling the result writes an empty array and not a null.
+func TestMarkersOverAnEmptyStreamIsAnEmptySlice(t *testing.T) {
+	got := prstate.Markers(nil)
+	if got == nil {
+		t.Error("an empty stream returned a nil slice")
+	}
+	if len(got) != 0 {
+		t.Errorf("got %d markers", len(got))
 	}
 }

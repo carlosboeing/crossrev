@@ -48,7 +48,7 @@ func TestParityAnchor(t *testing.T) {
 }
 
 // The window is line-2 through line+2, clamped to the first line
-// (lib/state.sh:251). Lines 1, 2 and 3 all start at line 1.
+// (lib/state.sh:250). Lines 1, 2 and 3 all start at line 1.
 func TestAnchorWindowClampsToTheFirstLine(t *testing.T) {
 	content := []byte("a\nb\nc\nd\ne\nf\n")
 	if prstate.AnchorAt(content, 3) != prstate.AnchorAt(content, 3) {

@@ -29,9 +29,11 @@ type Comment struct {
 // survive.
 //
 // Nothing here reports an error, because nothing in Bash does: a marker that
-// cannot be read is a comment somebody else wrote.
+// cannot be read is a comment somebody else wrote. An empty read is an empty
+// slice rather than nil, because lib/state.sh:153 forces `[]` for the same
+// reason: a caller that marshals the result writes an empty array, not a null.
 func Markers(stream []byte) []Marker {
-	var markers []Marker
+	markers := []Marker{}
 	for line := range strings.SplitSeq(string(stream), "\n") {
 		if line == "" {
 			continue
@@ -51,7 +53,7 @@ func Markers(stream []byte) []Marker {
 		if err != nil {
 			continue
 		}
-		marker.CommentID = comment.ID
+		marker.commentID = comment.ID
 		markers = append(markers, marker)
 	}
 	return markers
@@ -95,6 +97,14 @@ func EncodeFindingMarker(id core.FindingID, pass int, leg core.Leg) string {
 //
 // A pass of zero reads every pass, which is the empty `$pass` argument Bash
 // passes: pass numbers start at 1, so no real pass is excluded by the sentinel.
+//
+// One divergence, deliberately left: on a line where a second ` -->` follows
+// the marker, the greedy extraction hands both the payload and the trailing
+// text to the reader. jq reads that as a stream, emits `.id` from the object
+// and only then errors, and `2>/dev/null` keeps the id; Go refuses the whole
+// value and drops it. CrossRev appends the marker last on every line it writes,
+// so only a hand-written body reaches it, and reproducing jq's stream parser to
+// recover a forged id is not worth the code.
 func FindingIDs(bodies []string, leg core.Leg, pass int) []core.FindingID {
 	seen := map[string]bool{}
 	for _, body := range bodies {
