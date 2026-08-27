@@ -260,6 +260,8 @@ tests/           the stubbed-gh suite. tests/run.sh runs all of it
 
 `tests/run.sh` runs the whole suite offline, with no network, no model and no pull request. It stubs `gh` and `claude` onto PATH and builds throwaway git repositories with real histories and real bare origins, so the assertions are about what CrossRev actually did rather than what it printed.
 
+Suites run in parallel, one job per core up to eight, because nothing is shared between them: each suite gets its own `XDG_CONFIG_HOME` and `XDG_STATE_HOME`, each case gets its own `gh` route table and call log, and `fixture_repo` builds a fresh checkout and bare origin per case. Output keeps glob order whatever the job count, so a parallel run and a sequential one print the same bytes. `-j 1` runs them one at a time. The time goes on starting processes rather than on computing — `fixture_repo` alone starts about thirteen git processes, and `tests/test-policy.sh` calls it 53 times.
+
 `tests/stub/codex` is a deliberate tripwire: it exits loudly instead of running, because the no-config default names codex as reviewer, and a fixture whose config failed to load would otherwise reach the real CLI and make a real billed call.
 
 `scripts/lint.sh` runs syntax checks plus `shellcheck -S warning` across everything. Both take seconds.

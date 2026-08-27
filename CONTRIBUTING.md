@@ -31,8 +31,14 @@ missing — `brew install yq shellcheck`.
 
 ```bash
 bash tests/run.sh      # the offline suite: no network, no model, no PR
+bash tests/run.sh -j 1 # the same suites, one at a time
 bash scripts/lint.sh   # bash -n syntax plus shellcheck -S warning
 ```
+
+Suites run in parallel, one job per core up to eight. Nothing is shared between
+them, so the order means nothing and the output stays in glob order whatever the
+job count. `-j 1` runs them one at a time and streams as it goes, which is easier
+to read when you are watching one suite. `CROSSREV_TEST_JOBS` sets the default.
 
 Both are offline and take seconds. **Run both before opening a pull request**;
 CI runs the same two commands.
