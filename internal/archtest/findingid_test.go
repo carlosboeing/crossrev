@@ -34,13 +34,13 @@ func TestFindingIDConversionBoundary(t *testing.T) {
 			relSlash := filepath.ToSlash(relPath)
 			dirSlash := filepath.ToSlash(filepath.Dir(relPath))
 
-			// Conversion to FindingID is ONLY permitted inside internal/prstate
-			isPermittedPackage := dirSlash == "internal/prstate"
-
 			node, err := parser.ParseFile(fset, path, nil, 0)
 			if err != nil {
 				t.Fatalf("failed to parse %s: %v", path, err)
 			}
+
+			// Conversion to FindingID is ONLY permitted in package prstate.
+			isPermittedPackage := findingIDConversionPermitted(dirSlash, node.Name.Name)
 
 			coreLocalNames, dotImportedCore := importLocalNames(node, "github.com/carlosboeing/crossrev/internal/core", "core")
 
@@ -78,5 +78,18 @@ func TestFindingIDConversionBoundary(t *testing.T) {
 		if err != nil {
 			t.Fatalf("walk failed for %s: %v", d, err)
 		}
+	}
+}
+
+func findingIDConversionPermitted(dir, packageName string) bool {
+	return dir == "internal/prstate" && packageName == "prstate"
+}
+
+func TestFindingIDPermissionExcludesExternalTestPackage(t *testing.T) {
+	if !findingIDConversionPermitted("internal/prstate", "prstate") {
+		t.Fatal("package prstate must retain FindingID construction authority")
+	}
+	if findingIDConversionPermitted("internal/prstate", "prstate_test") {
+		t.Fatal("external package prstate_test must not inherit FindingID construction authority from its directory")
 	}
 }
