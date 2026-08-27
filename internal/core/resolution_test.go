@@ -1,6 +1,9 @@
 package core
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
 // schemas/resolve.schema.json enumerates the five resolutions.
 func TestResolutionVocabularyMatchesTheResolveSchema(t *testing.T) {
@@ -87,5 +90,98 @@ func TestZeroTrackedIsAbsent(t *testing.T) {
 	}
 	if zero != TrackedAbsent() {
 		t.Fatal("the zero Tracked is not the absent state")
+	}
+}
+
+// The three states the marker distinguishes have to survive a round trip
+// through encoding/json, or internal/prstate reimplements the
+// absent-versus-present-empty test that lib/legs.sh:171-174 and lib/legs.sh:241
+// both depend on.
+func TestTrackedRoundTripsAllThreeMarkerStates(t *testing.T) {
+	type deferral struct {
+		Resolution Resolution `json:"resolution"`
+		Tracked    Tracked    `json:"crossrev_tracked,omitzero"`
+	}
+
+	tests := []struct {
+		name    string
+		value   Tracked
+		want    string
+		present bool
+		unfiled bool
+	}{
+		{
+			name:  "absent",
+			value: TrackedAbsent(),
+			want:  `{"resolution":"deferred"}`,
+		},
+		{
+			name:    "present and empty",
+			value:   TrackedUnfiled(),
+			want:    `{"resolution":"deferred","crossrev_tracked":""}`,
+			present: true,
+			unfiled: true,
+		},
+		{
+			name:    "present and filed",
+			value:   NewTracked("acme/widget#7"),
+			want:    `{"resolution":"deferred","crossrev_tracked":"acme/widget#7"}`,
+			present: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b, err := json.Marshal(deferral{Resolution: ResolutionDeferred, Tracked: tt.value})
+			if err != nil {
+				t.Fatalf("Marshal: %v", err)
+			}
+			if got := string(b); got != tt.want {
+				t.Fatalf("Marshal = %s, want %s", got, tt.want)
+			}
+			var back deferral
+			if err := json.Unmarshal(b, &back); err != nil {
+				t.Fatalf("Unmarshal: %v", err)
+			}
+			if back.Tracked.Present() != tt.present {
+				t.Fatalf("Present() = %t, want %t", back.Tracked.Present(), tt.present)
+			}
+			if back.Tracked.Unfiled() != tt.unfiled {
+				t.Fatalf("Unfiled() = %t, want %t", back.Tracked.Unfiled(), tt.unfiled)
+			}
+			if back.Tracked.Value() != tt.value.Value() {
+				t.Fatalf("Value() = %q, want %q", back.Tracked.Value(), tt.value.Value())
+			}
+		})
+	}
+}
+
+// jq answers `.crossrev_tracked == ""` false for null, exactly as it does for a
+// missing key, so a null decodes to the absent state rather than the unfiled
+// one that keeps the cycle alive.
+func TestTrackedReadsNullAsAbsentAndRefusesANonString(t *testing.T) {
+	var t1 Tracked
+	if err := json.Unmarshal([]byte(`null`), &t1); err != nil {
+		t.Fatalf("Unmarshal(null): %v", err)
+	}
+	if t1.Present() || t1.Unfiled() {
+		t.Fatalf("null decoded as present=%t unfiled=%t", t1.Present(), t1.Unfiled())
+	}
+	var t2 Tracked
+	if err := json.Unmarshal([]byte(`7`), &t2); err == nil {
+		t.Fatal("Unmarshal(7) = nil error, want a refusal")
+	}
+}
+
+// IsZero is the genuine zero-value test the `omitzero` tag reads.
+func TestTrackedIsZeroOnlyForTheAbsentState(t *testing.T) {
+	if !TrackedAbsent().IsZero() {
+		t.Fatal("IsZero() = false for the absent state")
+	}
+	if TrackedUnfiled().IsZero() {
+		t.Fatal("IsZero() = true for the present-and-empty state")
+	}
+	if NewTracked("acme/widget#7").IsZero() {
+		t.Fatal("IsZero() = true for a filed deferral")
 	}
 }

@@ -7,7 +7,7 @@ func TestParseSlugSplitsOwnerFromName(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseSlug: %v", err)
 	}
-	if s.Owner != "carlosboeing" || s.Name != "crossrev" {
+	if s.Owner() != "carlosboeing" || s.Name() != "crossrev" {
 		t.Fatalf("ParseSlug = %+v, want owner carlosboeing and name crossrev", s)
 	}
 	if got := s.String(); got != "carlosboeing/crossrev" {
@@ -25,62 +25,99 @@ func TestParseSlugRefusesAnythingThatIsNotOwnerSlashName(t *testing.T) {
 	}
 }
 
+// The fields are unexported, so NewSlug and ParseSlug are the only routes to a
+// value and the refusal below cannot be walked around with a struct literal.
+func TestNewSlugRefusesAHalfThatWouldReachTheFilesystem(t *testing.T) {
+	for _, tt := range []struct{ owner, name string }{
+		{owner: "", name: "widget"},
+		{owner: "acme", name: ""},
+		{owner: "acme", name: "team/widget"},
+		{owner: "acme", name: "../evil"},
+		{owner: "a b", name: "widget"},
+		{owner: "acme", name: "wid\tget"},
+	} {
+		t.Run(tt.owner+"|"+tt.name, func(t *testing.T) {
+			if _, err := NewSlug(tt.owner, tt.name); err == nil {
+				t.Fatalf("NewSlug(%q, %q) = nil error, want a refusal", tt.owner, tt.name)
+			}
+		})
+	}
+	// `..` on its own carries no separator, so it is a name GitHub could not
+	// issue but PathKey would render harmlessly as one segment.
+	if _, err := NewSlug("acme", ".."); err != nil {
+		t.Fatalf("NewSlug(acme, ..) = %v, want no error", err)
+	}
+}
+
 // PathKey is the single implementation of the slug rule the run log and the
 // worktree path already share: `slug="${repo//\//-}"` at lib/log.sh:46 and
 // lib/run.sh:60.
 func TestPathKeyReplacesTheSlashWithAHyphen(t *testing.T) {
 	tests := []struct {
-		name string
-		slug Slug
-		want string
+		name  string
+		owner string
+		repo  string
+		want  string
 	}{
-		{name: "ordinary", slug: Slug{Owner: "carlosboeing", Name: "crossrev"}, want: "carlosboeing-crossrev"},
-		{name: "owner already hyphenated", slug: Slug{Owner: "acme-corp", Name: "widget"}, want: "acme-corp-widget"},
-		{name: "name with a dot", slug: Slug{Owner: "acme", Name: "widget.js"}, want: "acme-widget.js"},
+		{name: "ordinary", owner: "carlosboeing", repo: "crossrev", want: "carlosboeing-crossrev"},
+		{name: "owner already hyphenated", owner: "acme-corp", repo: "widget", want: "acme-corp-widget"},
+		{name: "name with a dot", owner: "acme", repo: "widget.js", want: "acme-widget.js"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.slug.PathKey(); got != tt.want {
+			s, err := NewSlug(tt.owner, tt.repo)
+			if err != nil {
+				t.Fatalf("NewSlug: %v", err)
+			}
+			if got := s.PathKey(); got != tt.want {
 				t.Fatalf("PathKey() = %q, want %q", got, tt.want)
 			}
 		})
 	}
 }
 
-func TestPathKeyLeavesNoSlashBehind(t *testing.T) {
-	// The Bash form is a global replacement, so a slug carrying more than one
-	// slash still yields a single path segment. Reproducing that keeps the Go
-	// path key from ever growing a directory the Bash one did not.
-	s := Slug{Owner: "acme", Name: "team/widget"}
-	if got, want := s.PathKey(), "acme-team-widget"; got != want {
-		t.Fatalf("PathKey() = %q, want %q", got, want)
+func TestSlugIsIncompleteOnlyWhenAConstructorDidNotProduceIt(t *testing.T) {
+	if !(Slug{}).Incomplete() {
+		t.Fatal("Incomplete() = false for the zero slug")
+	}
+	s, err := NewSlug("acme", "widget")
+	if err != nil {
+		t.Fatalf("NewSlug: %v", err)
+	}
+	if s.Incomplete() {
+		t.Fatal("Incomplete() = true for a constructed slug")
 	}
 }
 
-func TestSlugIsZeroWhenEitherHalfIsMissing(t *testing.T) {
-	if !(Slug{}).IsZero() {
-		t.Fatal("IsZero() = false for the zero slug")
+// A Repository with no slug shares one run-log directory and one reusable
+// worktree with every other repository that has none, because PathKey collapses
+// both to the same string.
+func TestNewRepositoryRefusesASlugOrARootItCannotUse(t *testing.T) {
+	good, err := NewSlug("acme", "widget")
+	if err != nil {
+		t.Fatalf("NewSlug: %v", err)
 	}
-	if !(Slug{Owner: "acme"}).IsZero() {
-		t.Fatal("IsZero() = false for a slug with no name")
+	if _, err := NewRepository(Slug{}, "/checkout", "main", nil); err == nil {
+		t.Fatal("NewRepository with no slug = nil error, want a refusal")
 	}
-	if (Slug{Owner: "acme", Name: "widget"}).IsZero() {
-		t.Fatal("IsZero() = true for a complete slug")
+	if _, err := NewRepository(good, "", "main", nil); err == nil {
+		t.Fatal("NewRepository with no root = nil error, want a refusal")
 	}
 }
 
-func TestRepositoryCarriesTheSlugAndItsCheckoutFacts(t *testing.T) {
-	repo := Repository{
-		Slug:          Slug{Owner: "acme", Name: "widget"},
-		Root:          "/checkout",
-		DefaultBranch: "main",
-		Remotes:       []string{"origin"},
+func TestNewRepositoryCarriesTheSlugAndItsCheckoutFacts(t *testing.T) {
+	slug, err := NewSlug("acme", "widget")
+	if err != nil {
+		t.Fatalf("NewSlug: %v", err)
+	}
+	// The default branch and the remotes are not required: a checkout read
+	// before either has been discovered is still a repository.
+	repo, err := NewRepository(slug, "/checkout", "", nil)
+	if err != nil {
+		t.Fatalf("NewRepository: %v", err)
 	}
 	if got, want := repo.Slug.PathKey(), "acme-widget"; got != want {
 		t.Fatalf("Slug.PathKey() = %q, want %q", got, want)
-	}
-	if repo.Root != "/checkout" || repo.DefaultBranch != "main" || len(repo.Remotes) != 1 {
-		t.Fatalf("Repository = %+v, want the fields it was built with", repo)
 	}
 }

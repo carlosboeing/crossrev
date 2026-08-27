@@ -14,9 +14,15 @@ const findingIDLength = 16
 // across passes.
 //
 // The type is declared here so every tier can name one. Only internal/prstate
-// may mint one, and an architecture test fails on a conversion to this type
-// anywhere else: an id derived by a second implementation would look like a new
-// finding on the next pass and get posted again.
+// may mint one, and internal/archtest/findingid_test.go fails on every route
+// from a string to this type anywhere else: the conversion, a var or const
+// declared as this type, a struct field or map value of it, an assignment to
+// one, and an element of a slice of them. An id derived by a second
+// implementation would look like a new finding on the next pass and get posted
+// again.
+//
+// Decoding one off a marker is not a mint and is not caught, which is what
+// makes an id readable outside internal/prstate at all.
 type FindingID string
 
 // Valid reports whether the id has the shape lib/state.sh:242 produces.
@@ -91,10 +97,19 @@ func Categories() []Category {
 
 // ParseCategory accepts only the schema's six values.
 func ParseCategory(s string) (Category, error) {
-	for _, c := range Categories() {
-		if Category(s) == c {
-			return c, nil
-		}
+	switch Category(s) {
+	case CategoryCorrectness:
+		return CategoryCorrectness, nil
+	case CategorySecurity:
+		return CategorySecurity, nil
+	case CategoryPerformance:
+		return CategoryPerformance, nil
+	case CategoryMaintainability:
+		return CategoryMaintainability, nil
+	case CategoryTesting:
+		return CategoryTesting, nil
+	case CategoryDocs:
+		return CategoryDocs, nil
 	}
 	return "", fmt.Errorf("%w: %q", ErrCategory, s)
 }
@@ -155,10 +170,15 @@ func PriorStatuses() []PriorStatus {
 
 // ParsePriorStatus accepts only the schema's four values.
 func ParsePriorStatus(s string) (PriorStatus, error) {
-	for _, p := range PriorStatuses() {
-		if PriorStatus(s) == p {
-			return p, nil
-		}
+	switch PriorStatus(s) {
+	case PriorAddressed:
+		return PriorAddressed, nil
+	case PriorCrediblyDisputed:
+		return PriorCrediblyDisputed, nil
+	case PriorStillOpen:
+		return PriorStillOpen, nil
+	case PriorRegressed:
+		return PriorRegressed, nil
 	}
 	return "", fmt.Errorf("%w: %q", ErrPriorStatus, s)
 }

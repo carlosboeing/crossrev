@@ -21,8 +21,15 @@ const (
 	VerdictDeclined     Verdict = "declined"
 )
 
-// ErrVerdict is returned for a verdict outside the set being parsed.
+// ErrVerdict is returned for a verdict a harness may not return: anything
+// outside the findings schema's three.
 var ErrVerdict = errors.New("a verdict is not one the findings schema lists")
+
+// ErrMarkerVerdict is returned for a verdict no marker may carry: anything
+// outside the schema's three plus `declined`. A separate sentinel from
+// ErrVerdict because the two parse different sets, and `declined` is a value
+// one accepts and the other refuses.
+var ErrMarkerVerdict = errors.New("a marker verdict is not one a marker may carry")
 
 // Verdicts lists the three verdicts a harness may return.
 func Verdicts() []Verdict { return []Verdict{VerdictConverged, VerdictIssuesRemain, VerdictBlocked} }
@@ -36,22 +43,30 @@ func MarkerVerdicts() []Verdict {
 // ParseVerdict accepts only what a harness may return. Use ParseMarkerVerdict
 // to read a verdict back off a marker.
 func ParseVerdict(s string) (Verdict, error) {
-	for _, v := range Verdicts() {
-		if Verdict(s) == v {
-			return v, nil
-		}
+	switch Verdict(s) {
+	case VerdictConverged:
+		return VerdictConverged, nil
+	case VerdictIssuesRemain:
+		return VerdictIssuesRemain, nil
+	case VerdictBlocked:
+		return VerdictBlocked, nil
 	}
 	return "", fmt.Errorf("%w: %q", ErrVerdict, s)
 }
 
 // ParseMarkerVerdict accepts the schema's three plus `declined`.
 func ParseMarkerVerdict(s string) (Verdict, error) {
-	for _, v := range MarkerVerdicts() {
-		if Verdict(s) == v {
-			return v, nil
-		}
+	switch Verdict(s) {
+	case VerdictConverged:
+		return VerdictConverged, nil
+	case VerdictIssuesRemain:
+		return VerdictIssuesRemain, nil
+	case VerdictBlocked:
+		return VerdictBlocked, nil
+	case VerdictDeclined:
+		return VerdictDeclined, nil
 	}
-	return "", fmt.Errorf("%w: %q", ErrVerdict, s)
+	return "", fmt.Errorf("%w: %q", ErrMarkerVerdict, s)
 }
 
 // String renders the verdict as the marker holds it.
@@ -75,7 +90,7 @@ const (
 )
 
 // ErrLoopState is returned for a word `crossrev status` never prints.
-var ErrLoopState = errors.New("that is not a loop state crossrev prints")
+var ErrLoopState = errors.New("that is not a loop state CrossRev prints")
 
 // LoopStates lists the five states in precedence order.
 func LoopStates() []LoopState {
@@ -90,10 +105,17 @@ func LoopStates() []LoopState {
 
 // ParseLoopState accepts only the five printed words.
 func ParseLoopState(s string) (LoopState, error) {
-	for _, l := range LoopStates() {
-		if LoopState(s) == l {
-			return l, nil
-		}
+	switch LoopState(s) {
+	case LoopStopped:
+		return LoopStopped, nil
+	case LoopHalted:
+		return LoopHalted, nil
+	case LoopConverged:
+		return LoopConverged, nil
+	case LoopAwaitingResolution:
+		return LoopAwaitingResolution, nil
+	case LoopAwaitingReview:
+		return LoopAwaitingReview, nil
 	}
 	return "", fmt.Errorf("%w: %q", ErrLoopState, s)
 }

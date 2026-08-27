@@ -1,6 +1,9 @@
 package core
 
-import "testing"
+import (
+	"errors"
+	"testing"
+)
 
 // schemas/findings.schema.json enumerates the three verdicts a review leg may
 // return.
@@ -84,5 +87,25 @@ func TestParseLoopStateRefusesTheLabelSpellings(t *testing.T) {
 		if _, err := ParseLoopState(in); err != nil {
 			t.Fatalf("ParseLoopState(%q): %v", in, err)
 		}
+	}
+}
+
+// The two parsers accept different sets, so they refuse with different
+// sentinels. One error text cannot describe both: `declined` is a value
+// ParseMarkerVerdict accepts and ParseVerdict refuses.
+func TestTheTwoVerdictParsersRefuseWithDifferentSentinels(t *testing.T) {
+	_, err := ParseVerdict("declined")
+	if !errors.Is(err, ErrVerdict) {
+		t.Fatalf("ParseVerdict(\"declined\") error = %v, want ErrVerdict", err)
+	}
+	if errors.Is(err, ErrMarkerVerdict) {
+		t.Fatal("ParseVerdict refused with the marker sentinel")
+	}
+	_, err = ParseMarkerVerdict("halted")
+	if !errors.Is(err, ErrMarkerVerdict) {
+		t.Fatalf("ParseMarkerVerdict(\"halted\") error = %v, want ErrMarkerVerdict", err)
+	}
+	if errors.Is(err, ErrVerdict) {
+		t.Fatal("ParseMarkerVerdict refused with the findings-schema sentinel")
 	}
 }

@@ -60,6 +60,13 @@ var ErrLegRole = errors.New("a leg role is either reviewer or resolver")
 func Roles() []LegRole { return []LegRole{RoleReviewer, RoleResolver} }
 
 // Leg maps the configuration key onto the marker vocabulary.
+//
+// It returns an error rather than defaulting, and the branch at the call site
+// is the price of that. A total function has to answer something for a role
+// nobody declared, and the only two answers are a leg: returning LegResolve is
+// returning the write-capable one, and returning LegReview quietly reviews
+// under a role that was meant to resolve. Failing closed is the cheaper
+// mistake.
 func (r LegRole) Leg() (Leg, error) {
 	switch r {
 	case RoleReviewer:
@@ -132,6 +139,14 @@ func NewPassNumber(n int) (PassNumber, error) {
 	}
 	return PassNumber(n), nil
 }
+
+// Valid reports whether this is a pass number rather than the absence of one.
+//
+// Go cannot block the conversion, so `PassNumber(0)` is constructible whatever
+// NewPassNumber refuses; this is what a reader that did not build the value
+// itself checks. Zero is the absence of a pass, not a pass: no trusted marker
+// means pass 1 (lib/state.sh:273).
+func (p PassNumber) Valid() bool { return p >= 1 }
 
 // Int is the pass number as an ordinary integer.
 func (p PassNumber) Int() int { return int(p) }

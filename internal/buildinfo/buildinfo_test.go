@@ -125,10 +125,31 @@ func TestPinRefusesARevisionThatIsNotFortyLowercaseHex(t *testing.T) {
 }
 
 // Ordinary commands still run from a development build, so the exported
-// readers must never panic on the test binary, which carries no vcs settings.
-func TestReadAndPinRunFromADevelopmentBuild(t *testing.T) {
+// readers have to answer on the test binary too. The three arms make the
+// assertion bite whichever kind of build this is: `go test` carries no vcs
+// settings, and a stamped binary running the same test is checked against its
+// own stamp rather than skipped.
+func TestPinAgreesWithReadAboutTheBuildItRanFrom(t *testing.T) {
 	info := Read()
-	if _, err := Pin(); err == nil && !info.Stamped() {
-		t.Fatal("Pin() succeeded on a build with no revision")
+	rev, err := Pin()
+	switch {
+	case !info.Stamped():
+		if err == nil {
+			t.Fatalf("Pin() = %q on a build with no revision", rev)
+		}
+		if !errors.Is(err, ErrRevisionAbsent) {
+			t.Fatalf("Pin() error = %v, want ErrRevisionAbsent", err)
+		}
+	case info.Modified:
+		if !errors.Is(err, ErrRevisionModified) {
+			t.Fatalf("Pin() error = %v on a modified build, want ErrRevisionModified", err)
+		}
+	default:
+		if err != nil {
+			t.Fatalf("Pin() = %v on a clean stamped build", err)
+		}
+		if rev != info.Revision {
+			t.Fatalf("Pin() = %q, want the stamped revision %q", rev, info.Revision)
+		}
 	}
 }

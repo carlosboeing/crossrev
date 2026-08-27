@@ -1,6 +1,7 @@
 package core
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 )
@@ -38,18 +39,6 @@ func NewRevision(sha string) (Revision, error) {
 	return Revision{sha: sha}, nil
 }
 
-// NewRevisionWithRef validates the object name and records the ref it was read
-// through. The ref is provenance for a person reading a log; it never takes
-// part in equality.
-func NewRevisionWithRef(sha, ref string) (Revision, error) {
-	r, err := NewRevision(sha)
-	if err != nil {
-		return Revision{}, err
-	}
-	r.ref = ref
-	return r, nil
-}
-
 // SHA is the full 40-character object name, or the empty string on the zero
 // value.
 func (r Revision) SHA() string { return r.sha }
@@ -73,10 +62,49 @@ func (r Revision) IsZero() bool { return r.sha == "" }
 func (r Revision) Equal(other Revision) bool { return r.sha == other.sha }
 
 // WithRef records a ref against an existing revision without touching its
-// identity.
+// identity. It is the only route to a ref: NewRevision plus WithRef and a
+// two-argument constructor were the same two lines, and neither validated the
+// ref.
+//
+// The ref is not validated at all. It is provenance for a person reading a log,
+// it never takes part in equality, and nothing reads it back as a ref.
 func (r Revision) WithRef(ref string) Revision {
 	r.ref = ref
 	return r
+}
+
+// MarshalJSON writes the object name, which is the form every marker's
+// `head_sha` holds (lib/run.sh:1098).
+//
+// The zero revision is refused rather than written as "". A marker carrying an
+// empty head SHA is embedded verbatim in a public pull-request comment and
+// compared against a real revision on every later pass. A field that is
+// genuinely optional carries `omitzero`, which leaves it out without reaching
+// this method.
+func (r Revision) MarshalJSON() ([]byte, error) {
+	if r.IsZero() {
+		return nil, fmt.Errorf("%w: the revision is unset", ErrRevisionSHA)
+	}
+	return json.Marshal(r.sha)
+}
+
+// UnmarshalJSON routes the wire form through NewRevision, so a revision
+// arriving off a marker is validated at the same single point as one built in
+// code.
+//
+// The ref is not on the wire. Nothing writes it to a marker, so a decoded
+// revision carries identity alone.
+func (r *Revision) UnmarshalJSON(b []byte) error {
+	var s string
+	if err := json.Unmarshal(b, &s); err != nil {
+		return err
+	}
+	rev, err := NewRevision(s)
+	if err != nil {
+		return err
+	}
+	*r = rev
+	return nil
 }
 
 // String renders the object name, which is what a log line wants.
@@ -98,8 +126,12 @@ func (p RevisionPair) Equal(other RevisionPair) bool {
 	return p.Base.Equal(other.Base) && p.Head.Equal(other.Head)
 }
 
-// IsZero reports whether either side is unset.
-func (p RevisionPair) IsZero() bool { return p.Base.IsZero() || p.Head.IsZero() }
+// Incomplete reports whether either side is unset.
+//
+// Deliberately not named IsZero. Go 1.24 and later call IsZero to implement the
+// `omitzero` struct tag, and a pair holding one real 40-character SHA is not a
+// zero value: under that tag it would be dropped from a marker in silence.
+func (p RevisionPair) Incomplete() bool { return p.Base.IsZero() || p.Head.IsZero() }
 
 // isHex reports whether s is exactly n lowercase hexadecimal characters.
 //

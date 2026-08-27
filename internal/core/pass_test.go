@@ -100,8 +100,27 @@ func TestPassNumbersStartAtOne(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewPassNumber(3): %v", err)
 	}
-	if int(p) != 3 {
-		t.Fatalf("NewPassNumber(3) = %d", p)
+	if p.Int() != 3 {
+		t.Fatalf("NewPassNumber(3).Int() = %d, want 3", p.Int())
+	}
+}
+
+// Go cannot block the conversion, so a value that never went through
+// NewPassNumber still has to be checkable. Zero is the absence of a pass
+// (lib/state.sh:273), not a pass.
+func TestPassNumberValidRefusesWhatNewPassNumberRefuses(t *testing.T) {
+	for _, n := range []int{0, -1, -7} {
+		if PassNumber(n).Valid() {
+			t.Fatalf("PassNumber(%d).Valid() = true, want false", n)
+		}
+	}
+	for _, n := range []int{1, 2, 99} {
+		if !PassNumber(n).Valid() {
+			t.Fatalf("PassNumber(%d).Valid() = false, want true", n)
+		}
+		if got := PassNumber(n).Int(); got != n {
+			t.Fatalf("PassNumber(%d).Int() = %d", n, got)
+		}
 	}
 }
 

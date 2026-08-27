@@ -1,6 +1,10 @@
 package core
 
-import "testing"
+import (
+	"encoding/json"
+	"errors"
+	"testing"
+)
 
 const (
 	shaA = "0123456789abcdef0123456789abcdef01234567"
@@ -50,7 +54,7 @@ func TestRevisionShortIsTheSevenCharacterPrefix(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRevision: %v", err)
 	}
-	// lib/run.sh:330 and lib/run.sh:2271 both print "${sha:0:7}".
+	// lib/state.sh:330 and lib/run.sh:2271 both print "${sha:0:7}".
 	if got, want := r.Short(), "0123456"; got != want {
 		t.Fatalf("Short() = %q, want %q", got, want)
 	}
@@ -67,25 +71,22 @@ func TestZeroRevisionIsZeroAndShortensToNothing(t *testing.T) {
 }
 
 func TestRevisionRefIsProvenanceAndNeverIdentity(t *testing.T) {
-	base, err := NewRevisionWithRef(shaA, "refs/heads/main")
-	if err != nil {
-		t.Fatalf("NewRevisionWithRef: %v", err)
-	}
 	bare, err := NewRevision(shaA)
 	if err != nil {
 		t.Fatalf("NewRevision: %v", err)
 	}
+	base := bare.WithRef("refs/heads/main")
 	if got := base.Ref(); got != "refs/heads/main" {
 		t.Fatalf("Ref() = %q, want refs/heads/main", got)
 	}
 	if !base.Equal(bare) {
 		t.Fatal("Equal() = false for one SHA carrying two different refs")
 	}
-	other, err := NewRevisionWithRef(shaB, "refs/heads/main")
+	otherSHA, err := NewRevision(shaB)
 	if err != nil {
-		t.Fatalf("NewRevisionWithRef: %v", err)
+		t.Fatalf("NewRevision: %v", err)
 	}
-	if base.Equal(other) {
+	if base.Equal(otherSHA.WithRef("refs/heads/main")) {
 		t.Fatal("Equal() = true for two different SHAs sharing one ref")
 	}
 }
@@ -105,16 +106,16 @@ func TestWithRefKeepsIdentityAndReplacesProvenance(t *testing.T) {
 }
 
 func TestRevisionPairEqualityIgnoresRefs(t *testing.T) {
-	base, err := NewRevisionWithRef(shaA, "refs/heads/main")
+	bareBase, err := NewRevision(shaA)
 	if err != nil {
-		t.Fatalf("NewRevisionWithRef: %v", err)
+		t.Fatalf("NewRevision: %v", err)
 	}
-	head, err := NewRevisionWithRef(shaB, "refs/pull/42/head")
+	bareHead, err := NewRevision(shaB)
 	if err != nil {
-		t.Fatalf("NewRevisionWithRef: %v", err)
+		t.Fatalf("NewRevision: %v", err)
 	}
-	bareBase, _ := NewRevision(shaA)
-	bareHead, _ := NewRevision(shaB)
+	base := bareBase.WithRef("refs/heads/main")
+	head := bareHead.WithRef("refs/pull/42/head")
 
 	withRefs := RevisionPair{Base: base, Head: head}
 	withoutRefs := RevisionPair{Base: bareBase, Head: bareHead}
@@ -127,13 +128,89 @@ func TestRevisionPairEqualityIgnoresRefs(t *testing.T) {
 	}
 }
 
-func TestRevisionPairIsZeroWhenEitherSideIsUnset(t *testing.T) {
+func TestRevisionPairIsIncompleteWhenEitherSideIsUnset(t *testing.T) {
 	head, _ := NewRevision(shaB)
-	if !(RevisionPair{Head: head}).IsZero() {
-		t.Fatal("IsZero() = false for a pair with no base")
+	if !(RevisionPair{Head: head}).Incomplete() {
+		t.Fatal("Incomplete() = false for a pair with no base")
 	}
 	base, _ := NewRevision(shaA)
-	if (RevisionPair{Base: base, Head: head}).IsZero() {
-		t.Fatal("IsZero() = true for a complete pair")
+	if (RevisionPair{Base: base, Head: head}).Incomplete() {
+		t.Fatal("Incomplete() = true for a complete pair")
+	}
+}
+
+// Every marker carries head_sha (lib/run.sh:1098), so a Revision has to be able
+// to appear in one. Unexported fields marshal to {} and decode to nothing at
+// all without a codec.
+func TestRevisionMarshalsAsItsSHA(t *testing.T) {
+	r, err := NewRevision(shaA)
+	if err != nil {
+		t.Fatalf("NewRevision: %v", err)
+	}
+	b, err := json.Marshal(struct {
+		HeadSHA Revision `json:"head_sha"`
+	}{HeadSHA: r.WithRef("refs/pull/42/head")})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if got, want := string(b), `{"head_sha":"`+shaA+`"}`; got != want {
+		t.Fatalf("Marshal = %s, want %s", got, want)
+	}
+}
+
+// The wire form validates at the same single point the constructor does, so a
+// malformed SHA cannot enter through a marker either.
+func TestRevisionUnmarshalRoutesThroughNewRevision(t *testing.T) {
+	var v struct {
+		HeadSHA Revision `json:"head_sha"`
+	}
+	if err := json.Unmarshal([]byte(`{"head_sha":"`+shaA+`"}`), &v); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if got := v.HeadSHA.SHA(); got != shaA {
+		t.Fatalf("SHA() = %q, want %q", got, shaA)
+	}
+	for _, raw := range []string{
+		`{"head_sha":""}`,
+		`{"head_sha":"0123456"}`,
+		`{"head_sha":"0123456789ABCDEF0123456789abcdef01234567"}`,
+	} {
+		var bad struct {
+			HeadSHA Revision `json:"head_sha"`
+		}
+		err := json.Unmarshal([]byte(raw), &bad)
+		if err == nil {
+			t.Fatalf("Unmarshal(%s) = nil error, want a refusal", raw)
+		}
+		if !errors.Is(err, ErrRevisionSHA) {
+			t.Fatalf("Unmarshal(%s) error = %v, want ErrRevisionSHA", raw, err)
+		}
+	}
+	// A non-string is refused too, rather than decoding as the zero revision.
+	var wrongType struct {
+		HeadSHA Revision `json:"head_sha"`
+	}
+	if err := json.Unmarshal([]byte(`{"head_sha":42}`), &wrongType); err == nil {
+		t.Fatal("Unmarshal of a number = nil error, want a refusal")
+	}
+}
+
+// A marker with no head SHA is not a marker, so the zero revision refuses to
+// become one. A field that is genuinely optional carries `omitzero`, which
+// leaves it out without reaching MarshalJSON at all.
+func TestTheZeroRevisionRefusesToReachTheWireAndOmitzeroOmitsIt(t *testing.T) {
+	if _, err := json.Marshal(struct {
+		HeadSHA Revision `json:"head_sha"`
+	}{}); err == nil {
+		t.Fatal("Marshal of the zero revision = nil error, want a refusal")
+	}
+	b, err := json.Marshal(struct {
+		Base Revision `json:"base_sha,omitzero"`
+	}{})
+	if err != nil {
+		t.Fatalf("Marshal with omitzero: %v", err)
+	}
+	if got := string(b); got != "{}" {
+		t.Fatalf("Marshal with omitzero = %s, want {}", got)
 	}
 }
