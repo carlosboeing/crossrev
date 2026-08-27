@@ -1,6 +1,8 @@
 module github.com/carlosboeing/crossrev
 
-go 1.27.0
+go 1.27
+
+toolchain go1.27.0
 
 require (
 	github.com/tree-sitter/go-tree-sitter v0.25.0
