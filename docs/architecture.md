@@ -237,6 +237,8 @@ The **credential refresher** is the one workflow that still checks CrossRev out 
 
 CrossRev maintains an authoritative Bash implementation alongside a compiling Go package graph during its native parity transition. `bin/crossrev` remains the active production entrypoint.
 
+The `internal/` entries below name reserved package responsibilities, not completed implementations. In Phase 0, production Go code is limited to the not-ready CLI, the environment boundary wrapper, the `FindingID` type, build-time dependency pins, and the `WorkerMain` stub. The generated files under `policy` and `prstate` contain data-only parity cases with no test runners; the remaining package directories are documentation skeletons.
+
 ```
 action.yml       the composite action consuming repositories call
 bin/crossrev     authoritative entrypoint: sources lib/, dispatches the subcommand

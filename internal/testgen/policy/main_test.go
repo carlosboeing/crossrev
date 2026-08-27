@@ -37,6 +37,27 @@ func TestParseRedrivableRejectsUnknownExpectedValue(t *testing.T) {
 	}
 }
 
+func TestParseStateRejectsMalformedMarkerJSON(t *testing.T) {
+	line := `is "malformed marker" "$(state_pass '{')" "1"`
+	if _, err := parseStateCases([]string{line}, "state_pass"); err == nil {
+		t.Fatal("expected malformed marker JSON to be rejected")
+	}
+}
+
+func TestParseRedrivableValidatesNonemptyMarkerJSON(t *testing.T) {
+	if _, err := parseRedrivableCases([]string{`redrivable no "malformed marker" '{'`}, "redrivable"); err == nil {
+		t.Fatal("expected malformed nonempty marker JSON to be rejected")
+	}
+
+	cases, err := parseRedrivableCases([]string{`redrivable no "empty marker" ''`}, "redrivable")
+	if err != nil {
+		t.Fatalf("empty marker is a parity case and must remain accepted: %v", err)
+	}
+	if len(cases) != 1 || cases[0].Input != "" {
+		t.Fatalf("empty marker cases = %#v, want one empty input", cases)
+	}
+}
+
 func TestParsersRejectDanglingContinuation(t *testing.T) {
 	tests := []struct {
 		name  string

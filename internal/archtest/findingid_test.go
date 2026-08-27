@@ -6,7 +6,6 @@ import (
 	"go/token"
 	"io/fs"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -22,13 +21,12 @@ func TestFindingIDConversionBoundary(t *testing.T) {
 				return err
 			}
 			if entry.IsDir() {
-				name := entry.Name()
-				if name == "archtest" || name == "testgen" {
+				if excludeBoundaryEntry(path, true) {
 					return filepath.SkipDir
 				}
 				return nil
 			}
-			if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			if excludeBoundaryEntry(path, false) {
 				return nil
 			}
 
@@ -44,22 +42,7 @@ func TestFindingIDConversionBoundary(t *testing.T) {
 				t.Fatalf("failed to parse %s: %v", path, err)
 			}
 
-			// Map local import aliases to package path for internal/core
-			coreLocalNames := make(map[string]bool)
-			dotImportedCore := false
-
-			for _, imp := range node.Imports {
-				importPath := strings.Trim(imp.Path.Value, `"`)
-				if importPath == "github.com/carlosboeing/crossrev/internal/core" {
-					if imp.Name == nil {
-						coreLocalNames["core"] = true
-					} else if imp.Name.Name == "." {
-						dotImportedCore = true
-					} else if imp.Name.Name != "_" {
-						coreLocalNames[imp.Name.Name] = true
-					}
-				}
-			}
+			coreLocalNames, dotImportedCore := importLocalNames(node, "github.com/carlosboeing/crossrev/internal/core", "core")
 
 			ast.Inspect(node, func(n ast.Node) bool {
 				call, ok := n.(*ast.CallExpr)

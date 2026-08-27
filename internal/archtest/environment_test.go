@@ -7,7 +7,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -26,13 +25,12 @@ func TestEnvironReferenceBoundary(t *testing.T) {
 				return err
 			}
 			if d.IsDir() {
-				name := d.Name()
-				if name == "archtest" || name == "testgen" {
+				if excludeBoundaryEntry(path, true) {
 					return filepath.SkipDir
 				}
 				return nil
 			}
-			if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			if excludeBoundaryEntry(path, false) {
 				return nil
 			}
 
@@ -44,22 +42,7 @@ func TestEnvironReferenceBoundary(t *testing.T) {
 			relPath, _ := filepath.Rel(root, path)
 			relSlash := filepath.ToSlash(relPath)
 
-			// Resolve local name(s) bound to import path "os"
-			osLocalNames := make(map[string]bool)
-			dotImportedOS := false
-
-			for _, imp := range node.Imports {
-				importPath := strings.Trim(imp.Path.Value, `"`)
-				if importPath == "os" {
-					if imp.Name == nil {
-						osLocalNames["os"] = true
-					} else if imp.Name.Name == "." {
-						dotImportedOS = true
-					} else if imp.Name.Name != "_" {
-						osLocalNames[imp.Name.Name] = true
-					}
-				}
-			}
+			osLocalNames, dotImportedOS := importLocalNames(node, "os", "os")
 
 			if len(osLocalNames) == 0 && !dotImportedOS {
 				return nil

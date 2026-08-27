@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"go/format"
 	"os"
@@ -152,6 +153,9 @@ func parseStateCases(lines []string, fnName string) ([]StateTestCase, error) {
 			return nil, fmt.Errorf("failed to find end of argument in state case: %q", stmt)
 		}
 		inputJSON := afterPrefix[:quoteEnd]
+		if !json.Valid([]byte(inputJSON)) {
+			return nil, fmt.Errorf("invalid marker JSON in state case: %q", stmt)
+		}
 		afterCall := strings.TrimSpace(afterPrefix[quoteEnd+len("')\""):])
 		expStr, trailing, ok := extractQuoted(afterCall)
 		if !ok {
@@ -396,6 +400,9 @@ func parseRedrivableCases(lines []string, prefix string) ([]RedrivableTestCase, 
 		inputJSON, trailing, ok := extractQuoted(afterDesc)
 		if !ok || strings.TrimSpace(trailing) != "" {
 			return nil, fmt.Errorf("failed to parse input JSON in redrivable statement: %q", stmt)
+		}
+		if inputJSON != "" && !json.Valid([]byte(inputJSON)) {
+			return nil, fmt.Errorf("invalid marker JSON in redrivable statement: %q", stmt)
 		}
 		cases = append(cases, RedrivableTestCase{
 			Desc:     desc,

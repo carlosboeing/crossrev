@@ -47,8 +47,8 @@ The eleven surfaces forming the parity contract are:
 
 Two active divergences from the Bash implementation are authorized:
 
-1. **Path containment and symlink evaluation** — In `cfg_assert_path_inside_repo`, the Go implementation evaluates symlinks using physical path resolution (`filepath.EvalSymlinks`) alongside lexical containment checks, preventing symlink traversal out of the repository checkout even when complex directory structures exist.
-2. **Honest daily count pagination** — When querying GitHub comment and event counts for rate tracking, the Go implementation traverses paginated API responses across all pages rather than stopping at the first API page.
+1. **Path containment and symlink evaluation** — Bash resolves the configured path lexically, so a symlink through an existing ancestor can escape the checkout. Go resolves the deepest existing ancestor with `filepath.EvalSymlinks`, rejoins the nonexistent remainder lexically, and then compares containment against the resolved repository root.
+2. **Honest daily count pagination** — Bash stops after ten pages of repository issue comments and reports that the distinct pull-request count may be rounded down. Go follows pagination until no next page remains and reports the exact distinct pull-request count.
 
 ### Toolchain, signing, and reproducibility
 
