@@ -25,7 +25,7 @@ func TestWorkerNetworkIsolation(t *testing.T) {
 		Tests: false,
 	}
 
-	pkgs, err := packages.Load(cfg, "github.com/carlosboeing/crossrev/internal/symbols")
+	pkgs, err := packages.Load(cfg, "github.com/carlosboeing/crossrev/internal/...")
 	if err != nil {
 		t.Fatalf("failed to load packages: %v", err)
 	}
