@@ -6,17 +6,26 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/carlosboeing/crossrev/internal/core"
 )
 
 // FileStatus is what a read found at a path.
 //
-// Three states rather than two, because the Bash implementation asks two
-// different questions. Configuration is read behind `[[ -f ]]`
-// (lib/config.sh:37), so a directory at `.github/crossrev.yml` states no
-// policy; backlog discovery is read behind `[[ -e ]]` (lib/config.sh:443), so
-// anything at `backlog/config.yml` counts as the convention being installed.
+// Three states rather than two, because the Bash implementation asks three
+// different questions of the same kind of path.
+//
+//   - Working-tree configuration is read behind `[[ -f ]]` (lib/config.sh:37),
+//     so a directory at `.github/crossrev.yml` states no policy and the next
+//     file is tried.
+//   - Base-revision configuration is read with `git show`
+//     (lib/config.sh:93-95), which succeeds on a tree and prints its listing.
+//     yq reads that listing as a plain multi-line string, so the file is found
+//     and then refused for its shape rather than skipped.
+//   - Backlog discovery is read behind `[[ -e ]]` (lib/config.sh:443), so
+//     anything at `backlog/config.yml` counts as the convention being
+//     installed.
 type FileStatus int
 
 const (
@@ -124,7 +133,15 @@ func Load(ctx context.Context, base core.Revision, show ShowFile) (*Config, erro
 	// while you point the same name at your own instance locally without
 	// touching the repository (lib/config.sh:174-184).
 	merged := deepMerge(Defaults(), repoLayer)
-	merged.Set("endpoints", deepMerge(objectAt(merged, "endpoints"), objectAt(operatorLayer, "endpoints")))
+	repoEndpoints, err := endpointsOf(merged, "endpoints")
+	if err != nil {
+		return nil, err
+	}
+	operatorEndpoints, err := endpointsOf(operatorLayer, "endpoints")
+	if err != nil {
+		return nil, err
+	}
+	merged.Set("endpoints", deepMerge(repoEndpoints, operatorEndpoints))
 
 	loaded := &Config{Repo: repoLayer, Operator: operatorLayer, Merged: merged, show: show}
 	for _, assert := range []func() error{
@@ -148,6 +165,16 @@ func loadRepoLayer(ctx context.Context, base core.Revision, show ShowFile) (*Obj
 		source, status, err := show(ctx, base, path)
 		if err != nil {
 			return nil, fmt.Errorf("read %s: %w", path, err)
+		}
+		if status == IsOther {
+			// A tree is absent to `[[ -f ]]` and present to `git show`, which
+			// prints its listing. yq reads the listing as one multi-line
+			// string, the shape test refuses it, and the second file is never
+			// reached (lib/config.sh:93-95, 48-81).
+			if base.IsZero() {
+				continue
+			}
+			return nil, refuseNotMappingAtBase(path, base)
 		}
 		if status != IsFile {
 			continue
@@ -180,14 +207,81 @@ func loadRepoLayer(ctx context.Context, base core.Revision, show ShowFile) (*Obj
 	return NewObject(), nil
 }
 
-// objectAt reads one key as an object, treating anything else as empty. jq
-// would raise a type error on `endpoints:` holding a scalar; Go declines to
-// crash over it and merges nothing instead.
-func objectAt(layer *Object, key string) *Object {
-	if nested := layer.Object(key); nested != nil {
-		return nested
+// endpointsOf reads one layer's `endpoints` as the mapping the merge needs, and
+// refuses anything else by name.
+//
+// It is `($x.endpoints // {})` with the type error the multiplication after it
+// raises. jq's `//` reads null and false as absent, so both become an empty
+// mapping and the layer contributes nothing; a string, a list, a number or
+// `true` reaches `*` and stops the run there with jq's own message
+// (lib/config.sh:181-184).
+//
+// Reading it leniently is the worst of the family this refusal covers. Bash
+// will not run at all, and Go ran with every named endpoint dropped — so the
+// next Endpoint call reported the name as defined nowhere, which reads as a
+// config error when the truth is that a whole layer was discarded. That is the
+// substitution endpoint.go says must never happen.
+func endpointsOf(layer *Object, where string) (*Object, error) {
+	value := layer.Value("endpoints")
+	if boolean, ok := value.(bool); ok && !boolean {
+		return NewObject(), nil
 	}
-	return NewObject()
+	if err := requireMapping(value, where); err != nil {
+		return nil, err
+	}
+	if nested, _ := value.(*Object); nested != nil {
+		return nested, nil
+	}
+	return NewObject(), nil
+}
+
+// requireMapping refuses a key that holds something jq cannot read keys out of.
+//
+// Every nested value the loader reaches is read by a jq path expression, and
+// jq raises a type error rather than answering null when the container is not
+// one: `.policy.min_fix_severity` against `policy: "x"` is `Cannot index string
+// with string`, and the run stops with nothing loaded. Go answered null, so a
+// configuration Bash refuses to run loaded here — silently for `backlog`, and
+// under a refusal naming the wrong key for `policy`, `git` and `logs`.
+//
+// null is not refused, because `null.foo` is null in jq and every one of these
+// keys has a default underneath it.
+//
+// The message names the key rather than reproducing jq's, which says what type
+// it found and never where it found it. In a config of any length that is the
+// half a reader needs, and it is the half the shell does not give them.
+func requireMapping(value any, where string) error {
+	if value == nil {
+		return nil
+	}
+	if _, ok := value.(*Object); ok {
+		return nil
+	}
+	return &Refusal{
+		Message: where + " is " + shapeOf(value) + ", which is not a mapping",
+		Hint:    "CrossRev reads configuration keys out of " + where + ", so it must hold keys of its own rather than a list or a single value. Correct it where it is set, or remove it to take the defaults.",
+	}
+}
+
+// requireMappingAt is requireMapping over a dotted path into the merge.
+func requireMappingAt(root *Object, path string) error {
+	return requireMapping(lookup(root, path), strings.TrimPrefix(path, "."))
+}
+
+// shapeOf names a value's shape in the words a config file is written in.
+func shapeOf(value any) string {
+	switch value.(type) {
+	case []any:
+		return "a list"
+	case string:
+		return "a string"
+	case Number:
+		return "a number"
+	case bool:
+		return "true or false"
+	default:
+		return "a single value"
+	}
 }
 
 // refuseUnparsable refuses a working-tree file that will not parse

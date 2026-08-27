@@ -155,7 +155,13 @@ func TestBrokenGithubConfigIsNamedRatherThanSkipped(t *testing.T) {
 // review, resolve or cycle run reads whether or not there is a base revision
 // (lib/config.sh:166).
 func TestOperatorConfigIsRefusedByItsOwnPath(t *testing.T) {
-	operatorPath := config.OperatorPath()
+	// The path is pinned rather than substituted from OperatorPath on both
+	// sides of the assertion, which would hold however wrong OperatorPath was.
+	t.Setenv("XDG_CONFIG_HOME", "/xdg")
+	const operatorPath = "/xdg/crossrev/config.yml"
+	if got := config.OperatorPath(); got != operatorPath {
+		t.Fatalf("OperatorPath() = %q, want %q", got, operatorPath)
+	}
 	broken := "version: 1\npolicy:\n  - this is not\n  a mapping: [unclosed\n"
 	base := revision(t, baseSHA)
 	refusal := refusalFrom(t, base, files{"": {operatorPath: broken}, baseSHA: {}})
@@ -375,5 +381,33 @@ func TestBothLayersAreKeptSeparately(t *testing.T) {
 	}
 	if loaded.Operator.Object("endpoints").Object("mine") == nil {
 		t.Error("the operator layer lost its endpoint")
+	}
+}
+
+// A tree at the configuration path is two different answers, because the Bash
+// asks two different questions. `[[ -f ]]` in the working tree says no file, so
+// the next path is tried; `git show <sha>:<path>` at a revision succeeds and
+// prints the tree's listing, which yq reads as one multi-line string and the
+// shape test then refuses. Reading both as absent loaded `.crossrev.yml` at
+// exit 0 where the Bash exits 1.
+func TestATreeAtTheConfigPathIsRefusedAtTheBaseRevision(t *testing.T) {
+	base := revision(t, baseSHA)
+	tree := files{"": {}, baseSHA: {
+		".github/crossrev.yml": isDirectory,
+		".crossrev.yml":        "version: 1\nmode: automated\n",
+	}}
+	refusal := refusalFrom(t, base, tree)
+	want := ".github/crossrev.yml is not a mapping at base revision " + baseSHA
+	if refusal.Message != want {
+		t.Errorf("message = %q, want %q", refusal.Message, want)
+	}
+	// And the working tree still skips it, because there the question is
+	// `[[ -f ]]`.
+	working := files{"": {
+		".github/crossrev.yml": isDirectory,
+		".crossrev.yml":        "version: 1\nmode: automated\n",
+	}}
+	if got := mustLoad(t, core.Revision{}, working).Get(".mode"); got != "automated" {
+		t.Errorf("mode = %q, want the fallback file read", got)
 	}
 }

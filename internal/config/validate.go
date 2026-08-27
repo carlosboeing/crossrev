@@ -57,7 +57,15 @@ func checkVersion(layer *Object, where string) error {
 // reports converged, and the cycle stops with a high-severity finding still on
 // the pull request. A typo would look exactly like a clean review
 // (lib/config.sh:245-253).
+//
+// The container is checked here rather than once before the assertions,
+// because the Bash reaches each one only when the assertion above it passed. A
+// config that is wrong twice must be answered for whichever fault the run meets
+// first.
 func (c *Config) assertMinFixSeverity() error {
+	if err := requireMappingAt(c.Merged, ".policy"); err != nil {
+		return err
+	}
 	value := c.Get(".policy.min_fix_severity")
 	if _, err := core.ParseSeverity(value); err == nil {
 		return nil
@@ -92,6 +100,9 @@ func (c *Config) assertMaxPassesPerCycle() error {
 // `run`, so a repository that meant to keep its hooks running keeps committing
 // without them and nothing ever says so (lib/config.sh:274-290, ADR 0017).
 func (c *Config) assertGitHooks() error {
+	if err := requireMappingAt(c.Merged, ".git"); err != nil {
+		return err
+	}
 	switch value := c.Get(".git.hooks"); value {
 	case "skip", "run":
 		return nil
@@ -110,6 +121,9 @@ func (c *Config) assertGitHooks() error {
 // keep — a typo landing silently in the direction that loses evidence
 // (lib/config.sh:217-237).
 func (c *Config) assertLogs() error {
+	if err := requireMappingAt(c.Merged, ".logs"); err != nil {
+		return err
+	}
 	days := c.Get(".logs.retention_days")
 	if !wholeAboveZero(days) {
 		return &Refusal{
@@ -141,6 +155,9 @@ func (c *Config) assertLogs() error {
 // resolution (lib/config.sh:193-215). The Go port keeps the refusal in the same
 // place so the two implementations refuse at the same moment.
 func (c *Config) assertBacklog() error {
+	if err := requireMappingAt(c.Merged, ".backlog"); err != nil {
+		return err
+	}
 	want := alternativeString(lookup(c.Merged, ".backlog.destination"), string(DestinationAuto))
 	switch want {
 	case "", string(DestinationNone), string(DestinationGitHubIssues), string(DestinationRepository), string(DestinationAuto):
@@ -148,6 +165,9 @@ func (c *Config) assertBacklog() error {
 		return unknownDestination(want)
 	}
 
+	if err := requireMappingAt(c.Merged, ".backlog.repository"); err != nil {
+		return err
+	}
 	layout := alternativeString(lookup(c.Merged, ".backlog.repository.layout"), string(LayoutFolder))
 	switch layout {
 	case string(LayoutFolder), string(LayoutFile):

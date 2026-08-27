@@ -144,8 +144,9 @@ func TestNumbersArriveAsTheTextJqReads(t *testing.T) {
 }
 
 // go-yaml's own resolution is not yq's, and the Bash reads every value back
-// through jq as the text yq wrote. The literals below are the ones where the
-// two differ, measured against `yq -o=json -I=0 '.'` directly.
+// through jq as the text jq wrote after yq wrote it. The literals below are the
+// ones where the readings differ, measured against `yq -o=json -I=0 '.' | jq -c`
+// directly.
 func TestNumbersAreResolvedTheWayYqResolvesThem(t *testing.T) {
 	tests := []struct {
 		literal string
@@ -172,10 +173,49 @@ func TestNumbersAreResolvedTheWayYqResolvesThem(t *testing.T) {
 		// as written, because a refusal quotes it.
 		{"5.0", "5.0"},
 		{"5.00", "5.00"},
-		{"1e3", "1e3"},
-		{"1E3", "1E3"},
-		{"1.0e3", "1.0e3"},
 		{"1_0.5", "10.5"},
+		// An exponent is where yq's text and jq's part company. jq keeps the
+		// decimal and prints it in the to-scientific-string form, so the
+		// exponent is signed, the case is fixed, and a small enough one is
+		// written out in full instead.
+		{"1e3", "1E+3"},
+		{"1E3", "1E+3"},
+		{"1E+3", "1E+3"},
+		{"1e+3", "1E+3"},
+		{"1e0003", "1E+3"},
+		{"1.0e3", "1.0E+3"},
+		{"1.5e3", "1.5E+3"},
+		{"-1e3", "-1E+3"},
+		{"6.02e23", "6.02E+23"},
+		{"1e100", "1E+100"},
+		{"1e1", "1E+1"},
+		{"1e-3", "0.001"},
+		{"1E-3", "0.001"},
+		{"-1e-3", "-0.001"},
+		{"1e-5", "0.00001"},
+		{"1e-6", "0.000001"},
+		{"1e-7", "1E-7"},
+		{"1e0", "1"},
+		{"0e0", "0"},
+		{"-0e0", "-0"},
+		{"0.5e1", "5"},
+		// The digits past a float64 are kept, because the rewrite is textual.
+		{"1.23456789012345678e3", "1234.56789012345678"},
+		// Underscores are not JSON, so the literal is not the one kept: yq
+		// writes the number back out rather than dropping the underscore.
+		{"1_0e3", "10000.0"},
+		{"+1e3", "1000.0"},
+		{"5.e3", "5000.0"},
+		{".5e3", "500.0"},
+		// yq resolves the exact literal `-0` as a float; longer spellings of a
+		// negative zero stay integers.
+		{"-0", "-0.0"},
+		{"-00", "0"},
+		{"-0_0", "0"},
+		{"-000", "0"},
+		{"1000000.0", "1000000.0"},
+		{"0.0001", "0.0001"},
+		{"3.14", "3.14"},
 		// The bases yq names, and the sign it drops.
 		{"0x10", "16"},
 		{"0xFF", "255"},
@@ -238,16 +278,30 @@ func TestALeadingZeroFloatIsRefusedAsTheShellRefusesIt(t *testing.T) {
 	}
 }
 
-// jq would raise a type error on `endpoints:` holding a scalar. Go declines to
-// crash over it and merges nothing instead, which is what objectAt documents.
-func TestAScalarEndpointsKeyMergesNothing(t *testing.T) {
-	tree := files{"": {".github/crossrev.yml": "version: 1\nendpoints: nope\n"}}
-	loaded := mustLoad(t, core.Revision{}, tree)
-	if got := loaded.Merged.Object("endpoints").Len(); got != 0 {
-		t.Errorf("the merge kept %d endpoints, want none", got)
+// `endpoints:` holding a scalar is jq's `string and object cannot be
+// multiplied`, and the Bash stops there with nothing loaded. Reading it
+// leniently loaded a config with every named endpoint dropped.
+func TestANonMappingEndpointsKeyIsRefused(t *testing.T) {
+	for _, test := range []struct{ name, document, wants string }{
+		{"a string", "version: 1\nendpoints: nope\n", "endpoints is a string, which is not a mapping"},
+		{"a list", "version: 1\nendpoints:\n  - a\n", "endpoints is a list, which is not a mapping"},
+		{"a number", "version: 1\nendpoints: 5\n", "endpoints is a number, which is not a mapping"},
+		{"true", "version: 1\nendpoints: true\n", "endpoints is true or false, which is not a mapping"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			tree := files{"": {".github/crossrev.yml": test.document}}
+			if got := refusalFrom(t, core.Revision{}, tree).Message; got != test.wants {
+				t.Errorf("message = %q, want %q", got, test.wants)
+			}
+		})
 	}
-	if got := string(mustJSON(t, loaded)); !strings.Contains(got, `"endpoints":{}`) {
-		t.Errorf("endpoints = %s, want an empty object", got)
+	// `null` and `false` are jq's `// {}`, so both contribute nothing and the
+	// run carries on. Measured on both sides.
+	for _, document := range []string{"version: 1\nendpoints: null\n", "version: 1\nendpoints: false\n"} {
+		loaded := mustLoad(t, core.Revision{}, files{"": {".github/crossrev.yml": document}})
+		if got := string(mustJSON(t, loaded)); !strings.Contains(got, `"endpoints":{}`) {
+			t.Errorf("endpoints = %s, want an empty object", got)
+		}
 	}
 }
 
@@ -308,7 +362,9 @@ func TestGetRendersTheWayJqDoes(t *testing.T) {
 		{".reviewer.model", ""},
 		{".logs.keep_transcripts", ""},
 		{".policy.max_passes_per_cycle", "3"},
-		{".backlog.github_issues.labels", `["a","b"]`},
+		// `jq -r` pretty-prints a composite, and a refusal quoting one reads
+		// it through here.
+		{".backlog.github_issues.labels", "[\n  \"a\",\n  \"b\"\n]"},
 		{".nothing.here.at.all", ""},
 	}
 	for _, test := range tests {
@@ -349,4 +405,248 @@ func mustJSON(t *testing.T, loaded *config.Config) []byte {
 		t.Fatalf("MergedJSON: %v", err)
 	}
 	return encoded
+}
+
+// A nested key holding something other than a mapping is a jq type error, and
+// the Bash stops with nothing loaded. `.policy.min_fix_severity` against
+// `policy: "x"` is `Cannot index string with string`, not null.
+//
+// The values were run through `crossrev config show` on both sides. Bash exits
+// 5 for every row below; Go loaded three of them at exit 0 and answered two
+// more under a refusal naming a key nobody had written.
+func TestANestedNonMappingIsRefusedByName(t *testing.T) {
+	for _, test := range []struct{ name, document, wants string }{
+		{"policy a string", "version: 1\npolicy: \"x\"\n", "policy is a string, which is not a mapping"},
+		{"policy a list", "version: 1\npolicy:\n  - a\n", "policy is a list, which is not a mapping"},
+		{"git a number", "version: 1\ngit: 5\n", "git is a number, which is not a mapping"},
+		{"logs a list", "version: 1\nlogs:\n  - 1\n", "logs is a list, which is not a mapping"},
+		{"backlog a string", "version: 1\nbacklog: hello\n", "backlog is a string, which is not a mapping"},
+		{"backlog.repository a string", "version: 1\nbacklog:\n  repository: hello\n", "backlog.repository is a string, which is not a mapping"},
+		{"a boolean", "version: 1\ngit: true\n", "git is true or false, which is not a mapping"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			tree := files{"": {".github/crossrev.yml": test.document}}
+			if got := refusalFrom(t, core.Revision{}, tree).Message; got != test.wants {
+				t.Errorf("message = %q, want %q", got, test.wants)
+			}
+		})
+	}
+}
+
+// null is not the container refusal, because `null.foo` is null in jq rather
+// than a type error. It reaches the value assertion underneath instead, and
+// what happens there depends on whether that key has a fallback: jq's `*`
+// replaces the defaults' mapping with the null, so the key below it is unset.
+// Measured on both sides.
+func TestANestedNullReachesTheValueAssertion(t *testing.T) {
+	for _, test := range []struct{ name, document, wants string }{
+		{"policy", "version: 1\npolicy: null\n", "policy.min_fix_severity is 'unset', which is not one of high, medium or low"},
+		{"git", "version: 1\ngit:\n", "git.hooks is 'unset', which is not one of skip or run"},
+		{"logs", "version: 1\nlogs: null\n", "logs.retention_days is 'unset', which is not a whole number of days above zero"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			tree := files{"": {".github/crossrev.yml": test.document}}
+			if got := refusalFrom(t, core.Revision{}, tree).Message; got != test.wants {
+				t.Errorf("message = %q, want %q", got, test.wants)
+			}
+		})
+	}
+	// The two backlog keys each read through a fallback, so a null there loads.
+	for _, document := range []string{
+		"version: 1\nbacklog: null\n",
+		"version: 1\nbacklog:\n  repository: null\n",
+	} {
+		if got := mustLoad(t, core.Revision{}, files{"": {".github/crossrev.yml": document}}).Get(".mode"); got != "local" {
+			t.Errorf("%q did not load: mode = %q", document, got)
+		}
+	}
+}
+
+// Which fault is named is the one the run meets first, because the Bash reaches
+// each assertion only when the one above it passed.
+func TestTheFirstFaultInTheReadingOrderIsTheOneNamed(t *testing.T) {
+	tree := files{"": {".github/crossrev.yml": "version: 1\ngit: 5\npolicy:\n  min_fix_severity: medum\n"}}
+	want := "policy.min_fix_severity is 'medum', which is not one of high, medium or low"
+	if got := refusalFrom(t, core.Revision{}, tree).Message; got != want {
+		t.Errorf("message = %q, want the severity named before the container", got)
+	}
+}
+
+// A merge key is resolved, not carried. go-yaml resolves an alias and leaves
+// `<<` alone, so the anchor's keys landed under a literal `<<` and the default
+// underneath survived — a repository sharing a policy block through an anchor
+// got one effective policy from Bash and another from Go, both at exit 0.
+func TestAMergeKeyIsResolvedTheWayYqResolvesIt(t *testing.T) {
+	for _, test := range []struct{ name, document, path, want string }{
+		{
+			"one source", "version: 1\ndefaults: &d\n  hooks: run\ngit:\n  <<: *d\n",
+			".git.hooks", "run",
+		},
+		{
+			"a key written after the merge wins",
+			"version: 1\na: &a\n  hooks: run\ngit:\n  <<: *a\n  hooks: skip\n",
+			".git.hooks", "skip",
+		},
+		{
+			"a key written before it does not",
+			"version: 1\na: &a\n  hooks: run\ngit:\n  hooks: skip\n  <<: *a\n",
+			".git.hooks", "run",
+		},
+		{
+			"a chain resolves through its own merge",
+			"version: 1\nb: &b\n  hooks: run\na: &a\n  <<: *b\ngit:\n  <<: *a\n",
+			".git.hooks", "run",
+		},
+		{
+			"the earliest of a sequence of sources wins",
+			"version: 1\na: &a\n  hooks: run\nb: &b\n  hooks: skip\ngit:\n  <<: [*a, *b]\n",
+			".git.hooks", "run",
+		},
+		{
+			"a source yq will not follow merges nothing",
+			"version: 1\ngit:\n  hooks: run\n  <<:\n    hooks: skip\n",
+			".git.hooks", "run",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			loaded := mustLoad(t, core.Revision{}, files{"": {".github/crossrev.yml": test.document}})
+			if got := loaded.Get(test.path); got != test.want {
+				t.Errorf("%s = %q, want %q", test.path, got, test.want)
+			}
+			if got := string(mustJSON(t, loaded)); strings.Contains(got, `"<<"`) {
+				t.Errorf("a literal merge key reached the merge: %s", got)
+			}
+		})
+	}
+}
+
+// A sequence of merge sources is applied last to first, so the keys the
+// earliest entry does not set come from the ones after it, in that order.
+// Measured against yq, which answers `{"k":"a","pc":3,"pb":2,"pa":1}`.
+func TestASequenceOfMergeSourcesKeepsYqsOrder(t *testing.T) {
+	document := "version: 1\n" +
+		"a: &a {k: a, pa: 1}\nb: &b {k: b, pb: 2}\nc: &c {k: c, pc: 3}\n" +
+		"d:\n  <<: [*a, *b, *c]\n"
+	loaded := mustLoad(t, core.Revision{}, files{"": {".github/crossrev.yml": document}})
+	if got := string(loaded.GetJSON(".d")); got != `{"k":"a","pc":3,"pb":2,"pa":1}` {
+		t.Errorf("the merged sequence = %s", got)
+	}
+}
+
+// A merge key naming something that is not a mapping is an error in yq, so the
+// Bash refuses the whole file for it.
+func TestAMergeKeyNamingANonMappingRefusesTheFile(t *testing.T) {
+	for name, document := range map[string]string{
+		"an alias to a list":   "version: 1\na: &a [1, 2]\ngit:\n  <<: *a\n",
+		"an alias to a scalar": "version: 1\na: &a 5\ngit:\n  <<: *a\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			tree := files{"": {".github/crossrev.yml": document}}
+			if got := refusalFrom(t, core.Revision{}, tree).Message; got != "could not parse .github/crossrev.yml" {
+				t.Errorf("message = %q, want the file refused as unparsable", got)
+			}
+		})
+	}
+}
+
+// A mapping key is the scalar's source text, resolved no further. yq writes the
+// key `~` rather than `null`, and a key that is itself a list or a mapping is
+// the empty string.
+func TestAMappingKeyIsTheTextYqWrites(t *testing.T) {
+	for _, test := range []struct{ name, document, wants string }{
+		{"a tilde", "version: 1\nq:\n  ~: v\n", `"q":{"~":"v"}`},
+		{"the word null", "version: 1\nq:\n  null: v\n", `"q":{"null":"v"}`},
+		{"a list key", "version: 1\nq:\n  ? [a, b]\n  : v\n", `"q":{"":"v"}`},
+		{"a mapping key", "version: 1\nq:\n  ? {a: b}\n  : v\n", `"q":{"":"v"}`},
+		{"an integer", "version: 1\nq:\n  5: v\n", `"q":{"5":"v"}`},
+		{"a boolean", "version: 1\nq:\n  true: v\n", `"q":{"true":"v"}`},
+		{"an unresolved base", "version: 1\nq:\n  0x10: v\n", `"q":{"0x10":"v"}`},
+		{"an exponent", "version: 1\nq:\n  1e3: v\n", `"q":{"1e3":"v"}`},
+		{"a negative zero", "version: 1\nq:\n  -0: v\n", `"q":{"-0":"v"}`},
+		{"an alias key", "version: 1\na: &x 1\nq:\n  *x : v\n", `"q":{"1":"v"}`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			loaded := mustLoad(t, core.Revision{}, files{"": {".github/crossrev.yml": test.document}})
+			if got := string(mustJSON(t, loaded)); !strings.Contains(got, test.wants) {
+				t.Errorf("the merge = %s, want it to contain %s", got, test.wants)
+			}
+		})
+	}
+}
+
+// A document of nothing but whitespace states no policy, which is what an
+// absent file states. yq reads one holding a tab as null and exits 0, and
+// go-yaml handed the same bytes reports a character that cannot start a token —
+// so the Bash loaded the defaults and Go refused the file.
+//
+// yq holds a file's leading blank and comment lines aside before it parses, and
+// this drops the same region. Tab-indented content is still refused by both,
+// and so is a tab on any line below content.
+func TestAWhitespaceOnlyDocumentStatesNoPolicy(t *testing.T) {
+	for name, document := range map[string]string{
+		"a tab":                      "\t\n",
+		"spaces and a tab":           "   \n\t\n",
+		"spaces":                     "   \n",
+		"a carriage return":          "\r\n",
+		"a tab before a comment":     "\t# nothing\n",
+		"a tab above real content":   "\t\nversion: 1\n",
+		"a blank above a comment":    "\t\n# nothing\n",
+		"a comment after a tab line": "\t# one\n# two\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			loaded := mustLoad(t, core.Revision{}, files{"": {".github/crossrev.yml": document}})
+			if got := loaded.Get(".policy.min_fix_severity"); got != "medium" {
+				t.Errorf("min_fix_severity = %q, want the default", got)
+			}
+		})
+	}
+}
+
+// A tab that reaches the parser is an error on both sides.
+func TestATabInContentStillRefusesTheFile(t *testing.T) {
+	for name, document := range map[string]string{
+		"a tab indenting a value":       "version: 1\ngit:\n\thooks: run\n",
+		"a tab line below content":      "version: 1\n\t\n",
+		"a tab under a leading comment": "# c\n\tversion: 1\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			tree := files{"": {".github/crossrev.yml": document}}
+			if got := refusalFrom(t, core.Revision{}, tree).Message; got != "could not parse .github/crossrev.yml" {
+				t.Errorf("message = %q, want the file refused as unparsable", got)
+			}
+		})
+	}
+}
+
+// A file holding more than one document is not a mapping. `yq -o=json -I=0`
+// writes one line per document and the shape test reads the whole stream, so
+// two documents never answer `object`. Taking the first would load a policy the
+// other implementation refuses to run at all.
+func TestAMultiDocumentFileIsNotAMapping(t *testing.T) {
+	for name, document := range map[string]string{
+		"two mappings":         "mode: ci\n---\nmode: two\n",
+		"a mapping then empty": "mode: ci\n---\n",
+		"markers only":         "---\n---\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			tree := files{"": {".github/crossrev.yml": document}}
+			if got := refusalFrom(t, core.Revision{}, tree).Message; got != ".github/crossrev.yml is not a mapping" {
+				t.Errorf("message = %q, want the shape refusal", got)
+			}
+		})
+	}
+	// One document with a leading marker is still one document.
+	loaded := mustLoad(t, core.Revision{}, files{"": {".github/crossrev.yml": "---\nversion: 1\nmode: automated\n"}})
+	if got := loaded.Get(".mode"); got != "automated" {
+		t.Errorf("mode = %q, want the single document read", got)
+	}
+}
+
+// A refusal quotes what `jq -r` writes, and `jq -r` pretty-prints a composite.
+func TestARefusalQuotesACompositeTheWayJqPrintsIt(t *testing.T) {
+	tree := files{"": {".github/crossrev.yml": "version: 1\npolicy:\n  min_fix_severity: [a, b]\n"}}
+	want := "policy.min_fix_severity is '[\n  \"a\",\n  \"b\"\n]', which is not one of high, medium or low"
+	if got := refusalFrom(t, core.Revision{}, tree).Message; got != want {
+		t.Errorf("message = %q, want %q", got, want)
+	}
 }
