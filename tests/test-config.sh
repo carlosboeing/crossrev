@@ -508,5 +508,193 @@ has "broken .github at the base revision: it is named, not skipped" "$err" ".git
 is  "broken .github at the base revision: the other file is not read" \
     "$(grep -c 'max=5' <<<"$err")" "0"
 
+# --- a document that parses but is not a mapping ----------------------------
+#
+# yq maps a comment-only or whitespace-only document to null and exits 0, so
+# nothing upstream calls it a parse failure. cfg_load then handed that null to
+# the merge, where jq's `$d * $r` refuses to multiply an object by null: the
+# merge produced nothing, jq's own error text reached the terminal, and the
+# next assertion blamed a key nobody had set.
+#
+# Two answers, because these are two different files. A document that resolves
+# to null states no policy, which is what an absent file states, so the
+# defaults apply in silence. A document that resolves to a sequence or a scalar
+# is a malformed config, and is refused by name the way an unparsable one is.
+#
+# An existing empty file resolved to null too, so the working-tree path failed
+# on it where the base-revision path had always been silent about it. Both
+# paths now say the same thing about the same file.
+
+# The exit status, which `guarded` deliberately swallows, on the working tree.
+wt_status() { # <xdg_home> <repo_dir> -> exit code
+  XDG_CONFIG_HOME="$1" "$BASH_ABS" -c '
+    set -euo pipefail
+    cd "$2"
+    source "$1/lib/ui.sh"; source "$1/lib/harnesses.sh"; source "$1/lib/config.sh"
+    cfg_load ""
+  ' _ "$repo_lib" "$2" >/dev/null 2>&1
+  printf '%s' "$?"
+}
+
+wt_report='cfg_load ""; echo "REACHED max=$(cfg_get .policy.max_passes_per_cycle) min=$(cfg_get .policy.min_fix_severity)"'
+
+# Working tree, states no policy: defaults, exit 0, nothing printed.
+wt_no_policy() { # <label> <content>
+  local d xdg err
+  d="$(new_repo)"; mkdir -p "$d/.github"
+  printf '%s' "$2" > "$d/.github/crossrev.yml"
+  xdg="$(mktemp -d)"
+  err="$(guarded "$xdg" "$d" "$wt_report")"
+  has "$1: the caller runs on"          "$err" "REACHED"
+  has "$1: defaults apply"              "$err" "max=3 min=medium"
+  is  "$1: nothing is reported"         "$(grep -c 'error ' <<<"$err")" "0"
+  is  "$1: no raw jq error escapes"     "$(grep -c 'jq:' <<<"$err")" "0"
+  is  "$1: the run exits zero"          "$(wt_status "$xdg" "$d")" "0"
+}
+
+# Working tree, malformed: one refusal naming the file, and the caller stops.
+wt_refused() { # <label> <content>
+  local d xdg err
+  d="$(new_repo)"; mkdir -p "$d/.github"
+  printf '%s' "$2" > "$d/.github/crossrev.yml"
+  xdg="$(mktemp -d)"
+  err="$(guarded "$xdg" "$d" "$wt_report")"
+  has "$1: the refusal names the file"  "$err" ".github/crossrev.yml"
+  has "$1: the refusal says what is wrong" "$err" "is not a mapping"
+  is  "$1: the caller stops"            "$(grep -c 'REACHED' <<<"$err")" "0"
+  is  "$1: nothing else is reported"    "$(grep -c 'error ' <<<"$err")" "1"
+  is  "$1: no raw jq error escapes"     "$(grep -c 'jq:' <<<"$err")" "0"
+  is  "$1: no unrelated key is blamed"  "$(grep -c 'min_fix_severity is' <<<"$err")" "0"
+  is  "$1: the run exits non-zero"      "$(wt_status "$xdg" "$d")" "1"
+}
+
+# Base revision, states no policy.
+base_no_policy() { # <label> <content>
+  local d sha xdg err
+  read -r d sha <<<"$(new_base_repo .github/crossrev.yml "$2")"
+  xdg="$(mktemp -d)"
+  # shellcheck disable=SC2059  # report is a format string by design
+  err="$(guarded "$xdg" "$d" "$(printf "$report" "$sha")")"
+  has "$1: the caller runs on"      "$err" "REACHED"
+  has "$1: defaults apply"          "$err" "max=3 min=medium"
+  is  "$1: nothing is reported"     "$(grep -c 'error ' <<<"$err")" "0"
+  is  "$1: no raw jq error escapes" "$(grep -c 'jq:' <<<"$err")" "0"
+  is  "$1: the run exits zero"      "$(base_status "$xdg" "$d" "$sha")" "0"
+}
+
+# Base revision, malformed.
+base_refused() { # <label> <content>
+  local d sha xdg err
+  read -r d sha <<<"$(new_base_repo .github/crossrev.yml "$2")"
+  xdg="$(mktemp -d)"
+  # shellcheck disable=SC2059
+  err="$(guarded "$xdg" "$d" "$(printf "$report" "$sha")")"
+  has "$1: the refusal names the file"     "$err" ".github/crossrev.yml"
+  has "$1: the refusal names the revision" "$err" "base revision $sha"
+  has "$1: the refusal says what is wrong" "$err" "is not a mapping"
+  is  "$1: the caller stops"               "$(grep -c 'REACHED' <<<"$err")" "0"
+  is  "$1: nothing else is reported"       "$(grep -c 'error ' <<<"$err")" "1"
+  is  "$1: no raw jq error escapes"        "$(grep -c 'jq:' <<<"$err")" "0"
+  is  "$1: no unrelated key is blamed"     "$(grep -c 'min_fix_severity is' <<<"$err")" "0"
+  is  "$1: the run exits non-zero"         "$(base_status "$xdg" "$d" "$sha")" "1"
+}
+
+only_comment='# just a comment
+'
+only_space='   
+	
+'
+a_sequence='- a
+- b
+'
+a_number='42
+'
+a_boolean='true
+'
+a_string='hello
+'
+
+# 1. Null documents state no policy, on both paths.
+wt_no_policy   "comment-only config"        "$only_comment"
+wt_no_policy   "whitespace-only config"     "$only_space"
+base_no_policy "comment-only base config"    "$only_comment"
+base_no_policy "whitespace-only base config" "$only_space"
+
+# 2. Everything else that is not a mapping is refused, on both paths.
+wt_refused   "sequence config"       "$a_sequence"
+wt_refused   "number config"         "$a_number"
+wt_refused   "boolean config"        "$a_boolean"
+wt_refused   "string config"         "$a_string"
+base_refused "sequence base config"  "$a_sequence"
+base_refused "number base config"    "$a_number"
+base_refused "boolean base config"   "$a_boolean"
+base_refused "string base config"    "$a_string"
+
+# 3. An existing empty file is a null document, so it states no policy too.
+#    The base-revision path short-circuits empty text before yq and has always
+#    been silent here; the working-tree path went through yq and was not.
+wt_no_policy   "empty config"      ""
+base_no_policy "empty base config" ""
+
+# 4. The .crossrev.yml fallback, refused by its own name.
+d="$(new_repo)"
+printf '%s' "$a_sequence" > "$d/.crossrev.yml"
+xdg="$(mktemp -d)"
+err="$(guarded "$xdg" "$d" "$wt_report")"
+has "sequence .crossrev.yml: the refusal names the file" "$err" ".crossrev.yml"
+has "sequence .crossrev.yml: the refusal says what is wrong" "$err" "is not a mapping"
+is  "sequence .crossrev.yml: nothing else is reported" "$(grep -c 'error ' <<<"$err")" "1"
+is  "sequence .crossrev.yml: the caller stops" "$(grep -c 'REACHED' <<<"$err")" "0"
+
+read -r d sha <<<"$(new_base_repo .crossrev.yml "$a_sequence")"
+xdg="$(mktemp -d)"
+# shellcheck disable=SC2059
+err="$(guarded "$xdg" "$d" "$(printf "$report" "$sha")")"
+has "sequence base .crossrev.yml: the refusal names the file" "$err" ".crossrev.yml"
+is  "sequence base .crossrev.yml: nothing else is reported" "$(grep -c 'error ' <<<"$err")" "1"
+is  "sequence base .crossrev.yml: the caller stops" "$(grep -c 'REACHED' <<<"$err")" "0"
+
+# 5. The operator file goes through the same reader, and must name its own path.
+#    cfg_load reads it whether or not a base revision was given, so this is on
+#    the path a review, resolve or cycle run takes as well.
+d="$(new_repo)"
+xdg="$(mktemp -d)"; mkdir -p "$xdg/crossrev"
+printf '%s' "$a_sequence" > "$xdg/crossrev/config.yml"
+err="$(guarded "$xdg" "$d" "$wt_report")"
+has "sequence operator config: the refusal names the file" "$err" "$xdg/crossrev/config.yml"
+has "sequence operator config: the refusal says what is wrong" "$err" "is not a mapping"
+is  "sequence operator config: the caller stops"           "$(grep -c 'REACHED' <<<"$err")" "0"
+is  "sequence operator config: nothing else is reported"   "$(grep -c 'error ' <<<"$err")" "1"
+is  "sequence operator config: no raw jq error escapes"    "$(grep -c 'jq:' <<<"$err")" "0"
+
+d="$(new_repo)"
+xdg="$(mktemp -d)"; mkdir -p "$xdg/crossrev"
+printf '%s' "$only_comment" > "$xdg/crossrev/config.yml"
+err="$(guarded "$xdg" "$d" "$wt_report")"
+has "comment-only operator config: the caller runs on"  "$err" "REACHED"
+has "comment-only operator config: defaults apply"      "$err" "max=3 min=medium"
+is  "comment-only operator config: nothing is reported" "$(grep -c 'error ' <<<"$err")" "0"
+
+# 6. The unchanged cases, restated here so a regression lands in this section.
+d="$(new_repo)"
+xdg="$(mktemp -d)"
+err="$(guarded "$xdg" "$d" "$wt_report")"
+has "absent config: defaults apply"      "$err" "max=3 min=medium"
+is  "absent config: nothing is reported" "$(grep -c 'error ' <<<"$err")" "0"
+
+d="$(new_repo)"; mkdir -p "$d/.github"
+printf '%s' "$good_policy" > "$d/.github/crossrev.yml"
+xdg="$(mktemp -d)"
+err="$(guarded "$xdg" "$d" "$wt_report")"
+has "valid mapping config: the stated policy applies" "$err" "max=7 min=high"
+is  "valid mapping config: nothing is reported"       "$(grep -c 'error ' <<<"$err")" "0"
+
+read -r d sha <<<"$(new_base_repo .github/crossrev.yml "$good_policy")"
+xdg="$(mktemp -d)"
+# shellcheck disable=SC2059
+err="$(guarded "$xdg" "$d" "$(printf "$report" "$sha")")"
+has "valid mapping base config: the stated policy applies" "$err" "max=7 min=high"
+is  "valid mapping base config: nothing is reported"       "$(grep -c 'error ' <<<"$err")" "0"
+
 printf '\n  %d passed, %d failed\n' "$pass" "$fail"
 (( fail == 0 ))
