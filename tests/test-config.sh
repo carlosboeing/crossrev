@@ -299,5 +299,82 @@ PATH="$no_py_bin" "$BASH_ABS" -c '
   && ok "and a plain path is still accepted there" \
   || notok "and a plain path is still accepted there" "exit 0" "exit $?"
 
+# --- a fatal inside a command substitution stops the caller ------------------
+#
+# ui_die ends with `exit 1`, which inside `$( )` ends only that subshell. The
+# caller then carries on with whatever the substitution captured. bin/crossrev
+# sets -e, but bash suppresses it for the whole body of a function invoked as
+# part of an || list, and ctx_load is invoked exactly that way at lib/run.sh:944,
+# 1763 and 2921. So the guard set -e appears to give these paths is not there.
+#
+# Each case below reproduces that shape: a function called with || that reaches
+# the substitution. One refusal must print, and nothing after it.
+repo_lib="$(cd "$HERE/.." && pwd)"
+
+guarded() { # <xdg_home> <repo_dir> <body>
+  XDG_CONFIG_HOME="$1" "$BASH_ABS" -c '
+    set -euo pipefail
+    cd "$2"
+    source "$1/lib/ui.sh"; source "$1/lib/harnesses.sh"; source "$1/lib/config.sh"
+    source "$1/lib/github.sh" 2>/dev/null || true
+    # Captured first: inside a function, $3 means that function third argument.
+    body="$3"
+    guarded_caller() { eval "$body"; }
+    guarded_caller || true
+  ' _ "$repo_lib" "$2" "$3" 2>&1
+}
+
+# 1. The repository config, at lib/config.sh:112.
+d="$(new_repo)"; mkdir -p "$d/.github"
+printf 'version: 1\npolicy:\n  - not\n  a mapping: [unclosed\n' > "$d/.github/crossrev.yml"
+xdg="$(mktemp -d)"
+err="$(guarded "$xdg" "$d" 'cfg_load ""')"
+has  "unparsable repository config: the refusal names the file" "$err" "could not parse"
+is   "unparsable repository config: nothing else is reported" \
+     "$(grep -c 'error ' <<<"$err")" "1"
+is   "unparsable repository config: jq is never handed the empty string" \
+     "$(grep -c 'jq:' <<<"$err")" "0"
+is   "unparsable repository config: no unrelated key is blamed" \
+     "$(grep -c 'min_fix_severity' <<<"$err")" "0"
+
+# 2. The .crossrev.yml fallback, at lib/config.sh:113.
+d="$(new_repo)"
+printf 'version: 1\npolicy:\n  - not\n  a mapping: [unclosed\n' > "$d/.crossrev.yml"
+xdg="$(mktemp -d)"
+err="$(guarded "$xdg" "$d" 'cfg_load ""')"
+has "unparsable .crossrev.yml: the refusal names the file" "$err" ".crossrev.yml"
+is  "unparsable .crossrev.yml: nothing else is reported" \
+    "$(grep -c 'error ' <<<"$err")" "1"
+
+# 3. The operator config, at lib/config.sh:118. This is the one a review, resolve
+#    or cycle run reaches, because cfg_load reads it whether or not a base
+#    revision was given.
+d="$(new_repo)"
+xdg="$(mktemp -d)"; mkdir -p "$xdg/crossrev"
+printf 'version: 1\npolicy:\n  - not\n  a mapping: [unclosed\n' > "$xdg/crossrev/config.yml"
+err="$(guarded "$xdg" "$d" 'cfg_load ""')"
+has "unparsable operator config: the refusal names the file" "$err" "could not parse"
+is  "unparsable operator config: nothing else is reported" \
+    "$(grep -c 'error ' <<<"$err")" "1"
+is  "unparsable operator config: no unrelated key is blamed" \
+    "$(grep -c 'min_fix_severity' <<<"$err")" "0"
+
+# 4. A refused backlog value, at lib/run.sh:304, lib/init.sh:115 and
+#    bin/crossrev:159. The caller must not proceed on an empty resolution.
+d="$(new_repo)"; mkdir -p "$d/.github"
+printf 'version: 1\nbacklog:\n  destination: elsewhere\n' > "$d/.github/crossrev.yml"
+xdg="$(mktemp -d)"
+# The substitution is the shape that matters: lib/run.sh:304 captures the result.
+err="$(guarded "$xdg" "$d" 'cfg_load ""; resolved="$(cfg_resolve_backlog "" "$(cfg_get ".backlog.destination")")"; echo "REACHED_PAST_THE_REFUSAL resolved=[$resolved]"')"
+has "refused backlog destination: the refusal names the value" "$err" "elsewhere"
+is  "refused backlog destination: the caller stops"            "$(grep -c 'REACHED_PAST_THE_REFUSAL' <<<"$err")" "0"
+
+d="$(new_repo)"; mkdir -p "$d/.github"
+printf 'version: 1\nbacklog:\n  destination: repository\n  repository:\n    layout: flat\n' > "$d/.github/crossrev.yml"
+xdg="$(mktemp -d)"
+err="$(guarded "$xdg" "$d" 'cfg_load ""; resolved="$(cfg_resolve_backlog "" repository)"; echo "REACHED_PAST_THE_REFUSAL resolved=[$resolved]"')"
+has "refused backlog layout: the refusal names the value" "$err" "flat"
+is  "refused backlog layout: the caller stops"            "$(grep -c 'REACHED_PAST_THE_REFUSAL' <<<"$err")" "0"
+
 printf '\n  %d passed, %d failed\n' "$pass" "$fail"
 (( fail == 0 ))

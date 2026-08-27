@@ -282,26 +282,37 @@ gh_label_colour() {
 # migration: `init --upgrade` on a repository minted under the old single purple
 # brings all six into line. A failed recolour is a warning rather than a fatal,
 # because a label with the wrong colour still drives the chain.
+# The state also lands in GH_LABEL_STATE, for the reason GH_COMMIT_SHA exists:
+# this function can ui_die, so a caller that needs the word must call it directly
+# and read the global. Reading it from stdout means a command substitution, where
+# the exit ends the subshell and the caller continues on a failed label.
+GH_LABEL_STATE=""
+# shellcheck disable=SC2034  # GH_LABEL_STATE is read by _init_execute in lib/init.sh
 gh_label_ensure() {
   local repo="$1" name="$2" colour="${3:-ededed}" desc="${4:-}" current
+  GH_LABEL_STATE=""
   current="$(gh_label_colour "$repo" "$name")"
   if [[ -z "$current" ]]; then
     gh api --method POST "repos/$repo/labels" \
       -f name="$name" -f color="$colour" -f description="$desc" >/dev/null 2>&1 \
       || ui_die "could not create the label '$name' on $repo" \
          "Init could not establish the declared colour and description. Create it by hand, or grant the token issues write."
+    GH_LABEL_STATE="created"
     printf 'created'
     return 0
   fi
   if [[ "$current" == "$(tr '[:upper:]' '[:lower:]' <<<"$colour")" ]]; then
+    GH_LABEL_STATE="exists"
     printf 'exists'
     return 0
   fi
   if gh api --method PATCH "repos/$repo/labels/$name" -f color="$colour" >/dev/null 2>&1; then
+    GH_LABEL_STATE="recoloured"
     printf 'recoloured'
   else
     ui_warn "could not update the colour of '$name' on $repo" \
       "The label still exists and the loop still runs on it, so this is cosmetic — the pull request's label row just carries less signal than it should. Recolour it by hand, or grant the token issues write."
+    GH_LABEL_STATE="exists"
     printf 'exists'
   fi
 }
