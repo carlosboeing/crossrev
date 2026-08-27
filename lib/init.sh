@@ -439,7 +439,11 @@ _init_execute() {
   # --- labels --------------------------------------------------------------
   local created=0 existed=0 recoloured=0 l state
   for l in $INIT_PASS_LABELS $INIT_FIXED_LABELS; do
-    state="$(gh_label_ensure "$INIT_REPO" "$l" "$(legs_label_colour "$l")" "$(legs_label_description "$l")")"
+    # Called directly, never through a substitution: gh_label_ensure can ui_die,
+    # and inside `$( )` that exit would end the subshell and leave init counting
+    # a label it never created. The word comes back in GH_LABEL_STATE.
+    gh_label_ensure "$INIT_REPO" "$l" "$(legs_label_colour "$l")" "$(legs_label_description "$l")" >/dev/null
+    state="$GH_LABEL_STATE"
     case "$state" in
       created)    created=$(( created + 1 )) ;;
       recoloured) recoloured=$(( recoloured + 1 )) ;;
