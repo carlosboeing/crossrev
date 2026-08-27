@@ -545,21 +545,22 @@ config_refusal_cases() {
   config_refusal_case "git-hooks-invalid" "git_hooks" $'version: 1\ngit:\n  hooks: skipp\n'
   config_refusal_case "log-retention-invalid" "log_retention" $'version: 1\nlogs:\n  retention_days: 0\n'
   config_refusal_case "keep-transcripts-invalid" "log_transcripts" $'version: 1\nlogs:\n  keep_transcripts: yes please\n'
-  # A malformed repository config is deliberately absent. cfg_load does not stop on
-  # the parse failure: _cfg_yaml_to_json dies inside a command substitution, so the
-  # exit ends that subshell only and the load continues on an empty config, then
-  # reports two further errors naming a key the operator never set. Its bytes
-  # include jq's own version-specific message, so freezing them would make the
-  # oracle depend on the jq build. The vector waits for the behaviour to be fixed.
+  # One refusal, no jq noise, no unrelated key. That is only true since the
+  # command-substitution fix; before it this capture recorded three errors, the
+  # last of them wrong, and jq's own version-specific text with them.
+  config_refusal_case "malformed-yaml" "parse" $'version: 1\npolicy:\n  - this is not\n  a mapping: [unclosed\n'
   config_refusal_base_case "version-mismatch-at-base" "version" $'version: 99\n'
   config_refusal_call_case "endpoint-without-base-url" "endpoint" \
     $'version: 1\nendpoints:\n  local:\n    token_env: LOCAL_TOKEN\n' cfg_endpoint local
   config_refusal_call_case "endpoint-without-token-env" "endpoint" \
     $'version: 1\nendpoints:\n  local:\n    base_url: http://127.0.0.1:11434\n' cfg_endpoint local
-  config_refusal_call_case "backlog-layout-invalid" "backlog" \
-    $'version: 1\nbacklog:\n  destination: repository\n  repository:\n    layout: flat\n' cfg_resolve_backlog "" repository
-  config_refusal_call_case "backlog-destination-invalid" "backlog" \
-    $'version: 1\nbacklog:\n  destination: elsewhere\n' cfg_resolve_backlog "" elsewhere
+  # cfg_assert_backlog refuses both of these from cfg_load, before anything
+  # resolves them. They were `call` vectors while cfg_resolve_backlog owned the
+  # refusal, and a command substitution swallowed its exit.
+  config_refusal_case "backlog-layout-invalid" "backlog" \
+    $'version: 1\nbacklog:\n  destination: repository\n  repository:\n    layout: flat\n'
+  config_refusal_case "backlog-destination-invalid" "backlog" \
+    $'version: 1\nbacklog:\n  destination: elsewhere\n'
 }
 
 cfg_cases="[$(cat "$config_capture_dir/case_defaults.json"), $(cat "$config_capture_dir/case_repo_over.json"), $(cat "$config_capture_dir/case_op_override.json"), $(cat "$config_capture_dir/case_base_fallback.json")]"

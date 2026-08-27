@@ -280,6 +280,14 @@
       "error": "\nerror  logs.keep_transcripts is 'yes please', which is not true or false\n       It decides whether harness transcripts survive a successful leg rather than only a failed one. Set it to true or false in the repository config, or remove it to take the default of false."
     },
     {
+      "name": "malformed-yaml",
+      "family": "parse",
+      "driver": "load",
+      "call": [],
+      "config": "version: 1\npolicy:\n  - this is not\n  a mapping: [unclosed\n",
+      "error": "\nerror  could not parse .github/crossrev.yml\n       It must be valid YAML. Check it with: yq '.' .github/crossrev.yml"
+    },
+    {
       "name": "version-mismatch-at-base",
       "family": "version",
       "driver": "load_at_base",
@@ -312,24 +320,16 @@
     {
       "name": "backlog-layout-invalid",
       "family": "backlog",
-      "driver": "call",
-      "call": [
-        "cfg_resolve_backlog",
-        "",
-        "repository"
-      ],
+      "driver": "load",
+      "call": [],
       "config": "version: 1\nbacklog:\n  destination: repository\n  repository:\n    layout: flat\n",
       "error": "\nerror  backlog.repository.layout is 'flat', which is not folder or file\n       Set it to folder or file in the repository config."
     },
     {
       "name": "backlog-destination-invalid",
       "family": "backlog",
-      "driver": "call",
-      "call": [
-        "cfg_resolve_backlog",
-        "",
-        "elsewhere"
-      ],
+      "driver": "load",
+      "call": [],
       "config": "version: 1\nbacklog:\n  destination: elsewhere\n",
       "error": "\nerror  backlog.destination is 'elsewhere', which CrossRev does not recognise\n       Set it to github_issues, repository, none or auto in the repository config."
     }
