@@ -58,10 +58,30 @@ cfg_show_at_base() {
   git show "$base_sha:$path" 2>/dev/null || return 1
 }
 
+# Read YAML text into JSON, or emit {} when there is none.
+#
+# Returns 1 without a message when the text will not parse, for the reason
+# _cfg_yaml_to_json gives above: the caller reads this through a command
+# substitution, so the refusal has to happen outside it.
+#
+# Empty text is not a parse failure. A file that exists at the base revision
+# and holds nothing states no policy, which is the same answer as no file.
 _cfg_yaml_text_to_json() {
   local text="$1"
   [[ -n "$text" ]] || { printf '{}'; return 0; }
-  printf '%s' "$text" | yq -o=json -I=0 '.' 2>/dev/null || printf '{}'
+  printf '%s' "$text" | yq -o=json -I=0 '.' 2>/dev/null || return 1
+}
+
+# Refuse a base-revision file that will not parse.
+#
+# Separate from _cfg_refuse_unparsable because the hint has to read the
+# revision rather than the working tree. The file on disk may parse, may differ
+# from what the base revision holds, or may not be there at all, so `yq '.'
+# .github/crossrev.yml` would check the wrong bytes.
+_cfg_refuse_unparsable_at_base() {
+  local path="$1" base_sha="$2"
+  ui_die "could not parse $path at base revision $base_sha" \
+    "It must be valid YAML. Check it with: git show $base_sha:$path | yq '.'"
 }
 
 # Defaults with no config file anywhere.
@@ -119,10 +139,20 @@ cfg_load() {
   local repo_json operator_json
 
   if [[ -n "$base_sha" ]]; then
-    local text
-    text="$(cfg_show_at_base "$base_sha" ".github/crossrev.yml" \
-         || cfg_show_at_base "$base_sha" ".crossrev.yml" || true)"
-    repo_json="$(_cfg_yaml_text_to_json "$text")"
+    # Which file was found has to be tracked separately. cfg_show_at_base
+    # returns 1 for a path that is not at that revision, and an empty string is
+    # also what a file that exists and holds nothing returns, so the text alone
+    # cannot say whether there was a file to parse.
+    local text found=""
+    if   text="$(cfg_show_at_base "$base_sha" ".github/crossrev.yml")"; then found=".github/crossrev.yml"
+    elif text="$(cfg_show_at_base "$base_sha" ".crossrev.yml")";        then found=".crossrev.yml"
+    fi
+    if [[ -n "$found" ]]; then
+      repo_json="$(_cfg_yaml_text_to_json "$text")" \
+        || _cfg_refuse_unparsable_at_base "$found" "$base_sha"
+    else
+      repo_json='{}'
+    fi
   else
     if   [[ -f .github/crossrev.yml ]]; then
       repo_json="$(_cfg_yaml_to_json .github/crossrev.yml)" || _cfg_refuse_unparsable .github/crossrev.yml
