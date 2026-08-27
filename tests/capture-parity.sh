@@ -478,6 +478,44 @@ policy:
     '{name:"base-fallback-crossrev-yml", repo_yaml:$r, operator_yaml:null, base_sha:$b, merged:$merged}'
 ) >"$config_capture_dir/case_base_fallback.json"
 
+# No config at the base revision at all. This is what most repositories look
+# like, and it must stay silent: defaults apply and nothing is reported. Frozen
+# because cfg_load can no longer tell absent from broken by the text alone, so
+# the two answers are now produced by different code.
+(
+  cd "$config_capture_dir"
+  mkdir -p r_absent && cd r_absent && git init -q .
+  GIT_AUTHOR_NAME="crossrev" GIT_AUTHOR_EMAIL="test@example.com" \
+  GIT_COMMITTER_NAME="crossrev" GIT_COMMITTER_EMAIL="test@example.com" \
+  GIT_AUTHOR_DATE="2026-01-01T00:00:00Z" GIT_COMMITTER_DATE="2026-01-01T00:00:00Z" \
+  git commit -q --allow-empty -m "base with no config"
+  base_sha="$(git rev-parse HEAD)"
+  XDG_CONFIG_HOME="$config_capture_dir/xdg_absent"; export XDG_CONFIG_HOME
+  cfg_load "$base_sha"
+  jq -n --arg b "$base_sha" --argjson merged "$CFG_MERGED" \
+    '{name:"base-absent", repo_yaml:null, operator_yaml:null, base_sha:$b, merged:$merged}'
+) >"$config_capture_dir/case_base_absent.json"
+
+# A config that exists at the base revision and holds nothing. git show returns
+# exit 0 and no bytes, which reads as no policy rather than as a parse failure.
+# It is the case that made absent and broken indistinguishable before the fix.
+(
+  cd "$config_capture_dir"
+  mkdir -p r_empty && cd r_empty && git init -q .
+  mkdir -p .github
+  : > .github/crossrev.yml
+  git add .github/crossrev.yml
+  GIT_AUTHOR_NAME="crossrev" GIT_AUTHOR_EMAIL="test@example.com" \
+  GIT_COMMITTER_NAME="crossrev" GIT_COMMITTER_EMAIL="test@example.com" \
+  GIT_AUTHOR_DATE="2026-01-01T00:00:00Z" GIT_COMMITTER_DATE="2026-01-01T00:00:00Z" \
+  git commit -q -m "base with an empty config"
+  base_sha="$(git rev-parse HEAD)"
+  XDG_CONFIG_HOME="$config_capture_dir/xdg_empty"; export XDG_CONFIG_HOME
+  cfg_load "$base_sha"
+  jq -n --arg b "$base_sha" --argjson merged "$CFG_MERGED" \
+    '{name:"base-empty", repo_yaml:"", operator_yaml:null, base_sha:$b, merged:$merged}'
+) >"$config_capture_dir/case_base_empty.json"
+
 config_refusal_case() { # name family yaml
   local name="$1" family="$2" yaml="$3"
   local d; d="$(mktemp -d "$config_capture_dir/refusal_XXXXXX")"
@@ -533,6 +571,11 @@ config_refusal_base_case() { # name family yaml
     XDG_CONFIG_HOME="$d/xdg"; export XDG_CONFIG_HOME
     local err
     err="$({ cfg_load "$base_sha" >/dev/null; } 2>&1 || true)"
+    # The refusal names the revision it read, so the message holds a commit SHA.
+    # That SHA is a property of how this repository was built, not of the
+    # behaviour being frozen, and a Go port is handed a different revision.
+    # Record the placeholder; tests/test-parity.sh normalises the same way.
+    err="${err//$base_sha/<base_sha>}"
     jq -cn --arg n "$name" --arg f "$family" --arg y "$yaml" --arg e "$err" \
       '{name:$n, family:$f, driver:"load_at_base", call:[], config:$y, error:$e}'
   )
@@ -550,6 +593,12 @@ config_refusal_cases() {
   # last of them wrong, and jq's own version-specific text with them.
   config_refusal_case "malformed-yaml" "parse" $'version: 1\npolicy:\n  - this is not\n  a mapping: [unclosed\n'
   config_refusal_base_case "version-mismatch-at-base" "version" $'version: 99\n'
+  # The base revision is the path automated mode takes. A file that will not
+  # parse there used to fall back to {} and revert every stated policy value to
+  # a default, with exit 0 and nothing printed. It refuses now, with one message
+  # naming both the file and the revision, and a hint that reads the revision.
+  config_refusal_base_case "malformed-yaml-at-base" "parse" \
+    $'version: 1\npolicy:\n  - this is not\n  a mapping: [unclosed\n'
   config_refusal_call_case "endpoint-without-base-url" "endpoint" \
     $'version: 1\nendpoints:\n  local:\n    token_env: LOCAL_TOKEN\n' cfg_endpoint local
   config_refusal_call_case "endpoint-without-token-env" "endpoint" \
@@ -563,7 +612,7 @@ config_refusal_cases() {
     $'version: 1\nbacklog:\n  destination: elsewhere\n'
 }
 
-cfg_cases="[$(cat "$config_capture_dir/case_defaults.json"), $(cat "$config_capture_dir/case_repo_over.json"), $(cat "$config_capture_dir/case_op_override.json"), $(cat "$config_capture_dir/case_base_fallback.json")]"
+cfg_cases="[$(cat "$config_capture_dir/case_defaults.json"), $(cat "$config_capture_dir/case_repo_over.json"), $(cat "$config_capture_dir/case_op_override.json"), $(cat "$config_capture_dir/case_base_fallback.json"), $(cat "$config_capture_dir/case_base_absent.json"), $(cat "$config_capture_dir/case_base_empty.json")]"
 
 jq -n --argjson captured "$(captured_json)" \
   --argjson cases "$cfg_cases" \

@@ -228,6 +228,108 @@
         },
         "enable_automation_hint": true
       }
+    },
+    {
+      "name": "base-absent",
+      "repo_yaml": null,
+      "operator_yaml": null,
+      "base_sha": "2c4a46cb321db01826d116b5ef2add6b0284d68c",
+      "merged": {
+        "version": 1,
+        "mode": "local",
+        "runner": "github-hosted",
+        "policy": {
+          "min_fix_severity": "medium",
+          "max_passes_per_cycle": 3,
+          "max_files_changed_per_pr": 200,
+          "max_prs_per_day": 25
+        },
+        "git": {
+          "hooks": "skip"
+        },
+        "logs": {
+          "retention_days": 14,
+          "keep_transcripts": false
+        },
+        "endpoints": {},
+        "backlog": {
+          "destination": "auto",
+          "github_issues": {
+            "labels": [],
+            "tracking_label": "crossrev-review",
+            "create_missing_labels": true,
+            "comment_on_existing_issue": false
+          },
+          "repository": {
+            "layout": "folder",
+            "path": null
+          }
+        },
+        "reviewer": {
+          "harness": "codex",
+          "model": null,
+          "effort": null,
+          "endpoint": null
+        },
+        "resolver": {
+          "harness": "claude",
+          "model": null,
+          "effort": null,
+          "endpoint": null
+        },
+        "enable_automation_hint": true
+      }
+    },
+    {
+      "name": "base-empty",
+      "repo_yaml": "",
+      "operator_yaml": null,
+      "base_sha": "82fae556b53da84286825eba0a5e07138fca782a",
+      "merged": {
+        "version": 1,
+        "mode": "local",
+        "runner": "github-hosted",
+        "policy": {
+          "min_fix_severity": "medium",
+          "max_passes_per_cycle": 3,
+          "max_files_changed_per_pr": 200,
+          "max_prs_per_day": 25
+        },
+        "git": {
+          "hooks": "skip"
+        },
+        "logs": {
+          "retention_days": 14,
+          "keep_transcripts": false
+        },
+        "endpoints": {},
+        "backlog": {
+          "destination": "auto",
+          "github_issues": {
+            "labels": [],
+            "tracking_label": "crossrev-review",
+            "create_missing_labels": true,
+            "comment_on_existing_issue": false
+          },
+          "repository": {
+            "layout": "folder",
+            "path": null
+          }
+        },
+        "reviewer": {
+          "harness": "codex",
+          "model": null,
+          "effort": null,
+          "endpoint": null
+        },
+        "resolver": {
+          "harness": "claude",
+          "model": null,
+          "effort": null,
+          "endpoint": null
+        },
+        "enable_automation_hint": true
+      }
     }
   ],
   "refusals": [
@@ -294,6 +396,14 @@
       "call": [],
       "config": "version: 99\n",
       "error": "\nerror  base revision .github/crossrev.yml declares version 99, and this crossrev understands version 1\n       Upgrade crossrev, or set version: 1 in that file if it really is the current shape."
+    },
+    {
+      "name": "malformed-yaml-at-base",
+      "family": "parse",
+      "driver": "load_at_base",
+      "call": [],
+      "config": "version: 1\npolicy:\n  - this is not\n  a mapping: [unclosed\n",
+      "error": "\nerror  could not parse .github/crossrev.yml at base revision <base_sha>\n       It must be valid YAML. Check it with: git show <base_sha>:.github/crossrev.yml | yq '.'"
     },
     {
       "name": "endpoint-without-base-url",

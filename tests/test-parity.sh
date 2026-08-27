@@ -203,6 +203,12 @@ while IFS= read -r ref; do
     esac
   ) >"$d/err.txt" 2>&1; rc=$?
   err="$(cat "$d/err.txt")"
+  # A base-revision refusal names the revision it read. The SHA depends on how
+  # this replay built its repository, not on the behaviour, so both sides carry
+  # the placeholder that capture-parity.sh recorded.
+  if [[ "$driver" == "load_at_base" ]]; then
+    err="$(sed -E 's/[0-9a-f]{40}/<base_sha>/g' <<<"$err")"
+  fi
   expected_err="$(jq -r .error <<<"$ref")"
   [[ $rc -ne 0 ]] && ok "config refusal exits non-zero: $name" \
     || notok "config refusal exits non-zero: $name" "non-zero exit" "$rc"
