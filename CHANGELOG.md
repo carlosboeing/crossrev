@@ -4,6 +4,10 @@ All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepa
 
 ## [Unreleased]
 
+### Added
+
+- **Go native parity contract and Phase 0 toolchain baseline.** The eleven-surface parity contract and frozen oracle vectors are established (`tests/fixtures/parity/`), ADR 0018 records the Go 1.27.0 native architecture and binary delivery decisions ([ADR 0018](docs/adrs/0018-go-native-parity-contract.md)), and the Go package graph is established. Toolchain verification (`scripts/verify-native-toolchain.sh`) confirms Darwin arm64 and amd64 compilation, code signing, and binary reproducibility against Go 1.27.0 before review semantics or CLI behavior change.
+
 ### Fixed
 
 - **The local run lock is keyed on the clone's shared git directory** ([#132](https://github.com/carlosboeing/crossrev/issues/132)). `run_lock_acquire` built its lock path from `git rev-parse --git-dir`. Inside a linked worktree that names the tree's own private directory under `<clone>/.git/worktrees/<name>/`. Two working trees of one clone therefore computed two different locks. Neither saw the other's, so both could drive one pull request at once — the interleaving the lock exists to prevent. `run_lock_acquire` and the status liveness check that corroborates a local run against its lock now both key on `--git-common-dir`. Both resolve an absolute physical path with `cd … && pwd -P` rather than using the value as git answers it. From a subdirectory of the main checkout git answers `../.git`, relative to the current directory; used as-is it would break the concatenated path. On macOS a logical `pwd` keeps `/var/…` where git has already answered `/private/var/…`; that would split the two trees' paths again. Automated mode is unaffected: the function returns before any of this, and GitHub's per-pull-request concurrency group is the guard there.
