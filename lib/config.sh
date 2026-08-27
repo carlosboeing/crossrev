@@ -45,6 +45,43 @@ _cfg_refuse_unparsable() {
     "It must be valid YAML. Check it with: yq '.' $1"
 }
 
+# Reduce a parsed document to the mapping the merge can take.
+#
+# Parsing is not the same question as shape. yq maps a comment-only or a
+# whitespace-only document to null and exits 0, so the readers above correctly
+# report success — and jq's `$d * $r` then refuses to multiply an object by
+# anything that is not one. The merge produced nothing, jq's own error reached
+# the terminal, and the next assertion blamed a key nobody had set.
+#
+# Two answers, because these are two different files:
+#
+#   null    — a comment, some whitespace, or nothing at all. It states no
+#             policy, which is exactly what an absent file states, so it
+#             becomes {} and the run carries on in silence.
+#   object  — configuration. Passed through.
+#   anything else — a sequence, a string, a number, a boolean. That is a
+#             malformed config, so this returns 1 without a message and the
+#             caller refuses it by name.
+#
+# Returns 1 rather than refusing here for the reason _cfg_yaml_to_json gives
+# above: every caller reads this through a command substitution, where ui_die
+# would end the subshell alone. The jq error is discarded because it can only
+# fire on input the readers above never emit, and the caller refuses either way.
+_cfg_as_mapping() {
+  case "$(jq -r 'type' <<<"$1" 2>/dev/null)" in
+    object) printf '%s' "$1" ;;
+    null)   printf '{}' ;;
+    *)      return 1 ;;
+  esac
+}
+
+# Refuse a file that parses but holds something other than a mapping. Called
+# outside the substitution that read it, like _cfg_refuse_unparsable.
+_cfg_refuse_not_mapping() {
+  ui_die "$1 is not a mapping" \
+    "It must hold configuration keys at its top level, not a list or a single value. Check it with: yq '.' $1"
+}
+
 # Read a path from a git revision rather than the working tree.
 #
 # Policy comes from the base revision, never the PR head. Read from the head, a
@@ -82,6 +119,15 @@ _cfg_refuse_unparsable_at_base() {
   local path="$1" base_sha="$2"
   ui_die "could not parse $path at base revision $base_sha" \
     "It must be valid YAML. Check it with: git show $base_sha:$path | yq '.'"
+}
+
+# Refuse a base-revision file that parses but is not a mapping. Separate from
+# _cfg_refuse_not_mapping for the reason _cfg_refuse_unparsable_at_base gives:
+# the hint has to read the revision rather than the working tree.
+_cfg_refuse_not_mapping_at_base() {
+  local path="$1" base_sha="$2"
+  ui_die "$path is not a mapping at base revision $base_sha" \
+    "It must hold configuration keys at its top level, not a list or a single value. Check it with: git show $base_sha:$path | yq '.'"
 }
 
 # Defaults with no config file anywhere.
@@ -150,20 +196,25 @@ cfg_load() {
     if [[ -n "$found" ]]; then
       repo_json="$(_cfg_yaml_text_to_json "$text")" \
         || _cfg_refuse_unparsable_at_base "$found" "$base_sha"
+      repo_json="$(_cfg_as_mapping "$repo_json")" \
+        || _cfg_refuse_not_mapping_at_base "$found" "$base_sha"
     else
       repo_json='{}'
     fi
   else
     if   [[ -f .github/crossrev.yml ]]; then
       repo_json="$(_cfg_yaml_to_json .github/crossrev.yml)" || _cfg_refuse_unparsable .github/crossrev.yml
+      repo_json="$(_cfg_as_mapping "$repo_json")" || _cfg_refuse_not_mapping .github/crossrev.yml
     elif [[ -f .crossrev.yml ]]; then
       repo_json="$(_cfg_yaml_to_json .crossrev.yml)" || _cfg_refuse_unparsable .crossrev.yml
+      repo_json="$(_cfg_as_mapping "$repo_json")" || _cfg_refuse_not_mapping .crossrev.yml
     else repo_json='{}'
     fi
   fi
 
   local operator_path; operator_path="$(_cfg_operator_path)"
   operator_json="$(_cfg_yaml_to_json "$operator_path")" || _cfg_refuse_unparsable "$operator_path"
+  operator_json="$(_cfg_as_mapping "$operator_json")" || _cfg_refuse_not_mapping "$operator_path"
 
   cfg_check_version "$repo_json" "$(basename "${base_sha:+base revision }").github/crossrev.yml"
   cfg_check_version "$operator_json" "$(_cfg_operator_path)"
