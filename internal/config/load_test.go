@@ -231,6 +231,53 @@ func TestADirectoryAtAConfigPathStatesNoPolicy(t *testing.T) {
 	}
 }
 
+// A document that parses and holds a sequence, a string, a number or a boolean
+// is a malformed config rather than an empty one, and is refused by name.
+//
+// The vectors replay this through `.github/crossrev.yml` on both paths. Two
+// files they do not replay take the same working-tree form under their own
+// path: the fallback `.crossrev.yml` and the operator file, which is always
+// read from the working tree however the run was invoked (lib/config.sh:204,
+// 213-214). Their expected text is derived from the frozen vector rather than
+// written out again.
+func TestANonMappingIsRefusedByTheNameOfTheFileThatHeldIt(t *testing.T) {
+	vector := refusalVectorNamed(t, "non-mapping-sequence")
+	operatorPath := config.OperatorPath()
+
+	for _, test := range []struct {
+		name string
+		path string
+		tree files
+	}{
+		{"the fallback file", ".crossrev.yml", files{"": {".crossrev.yml": vector.Config}}},
+		{"the operator file", operatorPath, files{"": {operatorPath: vector.Config}}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			want := strings.ReplaceAll(vector.Error, ".github/crossrev.yml", test.path)
+			if got := refusalFrom(t, core.Revision{}, test.tree).Rendered(); got != want {
+				t.Errorf("refusal text differs\n want: %q\n  got: %q", want, got)
+			}
+		})
+	}
+
+	// Every non-mapping shape reaches it, and the shape refusal comes before
+	// the version check, which would otherwise index a document it cannot.
+	for name, document := range map[string]string{
+		"a sequence":                   "- a\n- b\n",
+		"a string":                     "hello\n",
+		"a number":                     "42\n",
+		"a boolean":                    "true\n",
+		"a versioned-looking sequence": "- version: 99\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			tree := files{"": {".github/crossrev.yml": document}}
+			if got := refusalFrom(t, core.Revision{}, tree).Message; got != ".github/crossrev.yml is not a mapping" {
+				t.Errorf("message = %q", got)
+			}
+		})
+	}
+}
+
 // Skipped and parsed-as-empty are different answers, and only a case where the
 // two differ separates them: a directory at `.github/crossrev.yml` states no
 // policy and the search moves on, so the valid `.crossrev.yml` beside it is
@@ -274,19 +321,34 @@ func TestAReadFailureNamesThePath(t *testing.T) {
 	}
 }
 
-// Issue 143: a comment-only or whitespace-only config maps to YAML null. The
-// Bash implementation hands that null to jq, which cannot multiply an object by
-// it, so the run dies with a raw jq error and exit 5. Go treats a null document
-// as an empty one, which is what an empty file already does, and adds no
-// refusal the Bash does not have.
+// A document resolving to null states no policy, which is exactly what an
+// absent file states: the defaults, exit 0, nothing printed. This is the half
+// of the shape question that is not a refusal, and the two halves have to stay
+// apart — a null document is the one an empty file produces, and refusing it
+// would refuse a file most repositories could legitimately hold.
+//
+// The empty file is worth its own case on both paths. The Bash reaches it two
+// different ways: the working tree tests `[[ -f ]]`, which an existing empty
+// file passes, so yq runs and answers null; the base revision tests the text,
+// which is empty, and short-circuits before yq. The two paths used to disagree
+// on that one file and now agree (lib/config.sh:36-37, 187-193).
 func TestANullDocumentStatesNoPolicy(t *testing.T) {
-	for name, document := range map[string]string{
-		"comment only":    "# just a comment\n",
-		"whitespace only": "   \n\n",
-		"explicit null":   "null\n",
-	} {
+	documents := map[string]string{
+		"an existing empty file": "",
+		"comment only":           "# just a comment\n",
+		"whitespace only":        "   \n\n",
+		"explicit null":          "null\n",
+	}
+	for name, document := range documents {
 		t.Run(name, func(t *testing.T) {
 			loaded := mustLoad(t, core.Revision{}, files{"": {".github/crossrev.yml": document}})
+			if got := loaded.Get(".policy.max_passes_per_cycle"); got != "3" {
+				t.Errorf("max_passes_per_cycle = %q, want the default %q", got, "3")
+			}
+		})
+		t.Run(name+" at the base revision", func(t *testing.T) {
+			base := revision(t, baseSHA)
+			loaded := mustLoad(t, base, files{"": {}, baseSHA: {".github/crossrev.yml": document}})
 			if got := loaded.Get(".policy.max_passes_per_cycle"); got != "3" {
 				t.Errorf("max_passes_per_cycle = %q, want the default %q", got, "3")
 			}

@@ -2,6 +2,7 @@ package config
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -93,6 +94,12 @@ func Load(ctx context.Context, base core.Revision, show ShowFile) (*Config, erro
 	if status == IsFile {
 		operatorLayer, err = decodeDocument(operatorSource)
 		if err != nil {
+			// The operator file is always read from the working tree, so it
+			// takes the working-tree form of both refusals under its own path
+			// (lib/config.sh:213-214).
+			if errors.Is(err, errNotMapping) {
+				return nil, refuseNotMapping(operatorPath)
+			}
 			return nil, refuseUnparsable(operatorPath)
 		}
 	}
@@ -152,10 +159,21 @@ func loadRepoLayer(ctx context.Context, base core.Revision, show ShowFile) (*Obj
 		// (lib/config.sh:142-145 and lib/config.sh:67-68).
 		layer, err := decodeDocument(source)
 		if err != nil {
-			if base.IsZero() {
+			// Both refusals name the file that was actually read rather than
+			// the composed `.github/crossrev.yml` the version refusal uses,
+			// because this one is about the bytes on the other end of that
+			// path (lib/config.sh:199-208).
+			notMapping := errors.Is(err, errNotMapping)
+			switch {
+			case notMapping && base.IsZero():
+				return nil, refuseNotMapping(path)
+			case notMapping:
+				return nil, refuseNotMappingAtBase(path, base)
+			case base.IsZero():
 				return nil, refuseUnparsable(path)
+			default:
+				return nil, refuseUnparsableAtBase(path, base)
 			}
-			return nil, refuseUnparsableAtBase(path, base)
 		}
 		return layer, nil
 	}
@@ -192,6 +210,32 @@ func refuseUnparsableAtBase(path string, base core.Revision) *Refusal {
 	return &Refusal{
 		Message: "could not parse " + path + " at base revision " + base.SHA(),
 		Hint:    "It must be valid YAML. Check it with: git show " + base.SHA() + ":" + path + " | yq '.'",
+	}
+}
+
+// refuseNotMapping refuses a working-tree file that parses and holds something
+// other than a mapping (_cfg_refuse_not_mapping, lib/config.sh:78-81).
+//
+// Separate from refuseUnparsable because the two are different faults and a
+// reader has to be told which one they have: the file is valid YAML, and what
+// is wrong is that its top level is a list or a single value rather than
+// configuration keys.
+func refuseNotMapping(path string) *Refusal {
+	return &Refusal{
+		Message: path + " is not a mapping",
+		Hint:    "It must hold configuration keys at its top level, not a list or a single value. Check it with: yq '.' " + path,
+	}
+}
+
+// refuseNotMappingAtBase refuses a base-revision file that is not a mapping.
+//
+// Separate from refuseNotMapping for the reason refuseUnparsableAtBase gives:
+// the hint has to read the revision rather than the working tree
+// (_cfg_refuse_not_mapping_at_base, lib/config.sh:124-129).
+func refuseNotMappingAtBase(path string, base core.Revision) *Refusal {
+	return &Refusal{
+		Message: path + " is not a mapping at base revision " + base.SHA(),
+		Hint:    "It must hold configuration keys at its top level, not a list or a single value. Check it with: git show " + base.SHA() + ":" + path + " | yq '.'",
 	}
 }
 

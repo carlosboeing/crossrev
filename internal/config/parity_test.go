@@ -36,14 +36,30 @@ type parityFile struct {
 		BaseSHA      json.RawMessage `json:"base_sha"`
 		Merged       json.RawMessage `json:"merged"`
 	} `json:"cases"`
-	Refusals []struct {
-		Name   string   `json:"name"`
-		Family string   `json:"family"`
-		Driver string   `json:"driver"`
-		Call   []string `json:"call"`
-		Config string   `json:"config"`
-		Error  string   `json:"error"`
-	} `json:"refusals"`
+	Refusals []refusalVector `json:"refusals"`
+}
+
+// refusalVector is one frozen refusal, named so that a test covering a path the
+// vectors do not replay can derive its expected text from one rather than write
+// the same string out a second time.
+type refusalVector struct {
+	Name   string   `json:"name"`
+	Family string   `json:"family"`
+	Driver string   `json:"driver"`
+	Call   []string `json:"call"`
+	Config string   `json:"config"`
+	Error  string   `json:"error"`
+}
+
+func refusalVectorNamed(t *testing.T, name string) refusalVector {
+	t.Helper()
+	for _, vector := range loadParity(t).Refusals {
+		if vector.Name == name {
+			return vector
+		}
+	}
+	t.Fatalf("the fixture records no refusal named %q", name)
+	return refusalVector{}
 }
 
 func repoRoot(t *testing.T) string {

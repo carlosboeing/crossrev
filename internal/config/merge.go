@@ -3,6 +3,7 @@ package config
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -132,19 +133,30 @@ func (c *Config) MergedJSON() ([]byte, error) {
 	return c.Merged.MarshalJSON()
 }
 
+// errNotMapping reports a document that parsed and holds something other than a
+// mapping. It is a sentinel rather than a refusal because the refusal text
+// names the file, and only the caller knows which file it read and whether it
+// read the working tree or a revision.
+var errNotMapping = errors.New("the document is not a mapping")
+
 // decodeDocument reads YAML into the document shape the merge works on.
 //
-// A document that resolves to null decodes to an empty object rather than to
-// null. The Bash implementation hands yq's `null` straight to jq, which cannot
-// multiply an object by null, so a comment-only or whitespace-only config dies
-// with a raw jq error and exit 5 (issue 143). That defect is not reproduced and
-// no refusal is added in its place: an empty document states no policy, which
-// is what an absent file states.
+// Parsing is not the same question as shape, and the two shapes that are not a
+// mapping get two different answers because they are two different files
+// (_cfg_as_mapping, lib/config.sh:48-81).
 //
-// A document that resolves to a list or a scalar takes the same path and loads
-// as empty. What should happen to one is an open question rather than a settled
-// divergence: it is being decided against lib/config.sh first, and this follows
-// that decision rather than leads it.
+//	null   — a comment, some whitespace, or an existing empty file. It states
+//	         no policy, which is exactly what an absent file states, so it
+//	         becomes an empty object and the run carries on in silence.
+//	object — configuration. Passed through.
+//	other  — a sequence, a string, a number or a boolean. That is a malformed
+//	         config, and errNotMapping asks the caller to refuse it by name.
+//
+// Reading a non-mapping leniently is what made this worth splitting out. yq
+// exits 0 for every one of these, so both readers report success and the merge
+// receives something jq's `*` cannot multiply an object by: the merge produced
+// nothing, jq's own error text reached the terminal, and the next assertion
+// blamed a key nobody had set (issue 143).
 func decodeDocument(source []byte) (*Object, error) {
 	var document yaml.Node
 	if err := yaml.Unmarshal(source, &document); err != nil {
@@ -154,14 +166,23 @@ func decodeDocument(source []byte) (*Object, error) {
 	if err != nil {
 		return nil, err
 	}
-	if object, ok := value.(*Object); ok {
-		return object, nil
+	switch shaped := value.(type) {
+	case *Object:
+		return shaped, nil
+	case nil:
+		return NewObject(), nil
+	default:
+		return nil, errNotMapping
 	}
-	return NewObject(), nil
 }
 
 func decodeNode(node *yaml.Node) (any, error) {
-	if node == nil {
+	// A zero node is not a scalar, and reading it as one is what let a
+	// comment-only file through as the empty string. An empty, comment-only or
+	// whitespace-only source has no document in it at all, so yaml.Unmarshal
+	// leaves the node zero rather than building a DocumentNode — and that is
+	// the null yq prints for the same three inputs.
+	if node == nil || node.Kind == 0 {
 		return nil, nil
 	}
 	switch node.Kind {
