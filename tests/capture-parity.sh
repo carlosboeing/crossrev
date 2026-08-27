@@ -369,6 +369,81 @@ exclude_diff_cases() {
   exclude_diff_case "exclude-none"
 }
 
+# A second corpus, of shapes git does not produce and the awk still has to
+# answer for. The rich corpus above is well-formed on purpose, so nothing in it
+# says what a truncated hunk or an unreadable header does. Those answers were
+# hand-written in the port instead of captured, which is the one thing the
+# oracle exists to stop.
+#
+# It is a separate corpus rather than more sections in the first one, because
+# appending to that one would move every line number the 31 frozen anchor
+# queries name.
+malformed_file="$diff_workdir/malformed.diff"
+malformed_corpus='diff --git a/src/truncated.ts b/src/truncated.ts
+--- a/src/truncated.ts
++++ b/src/truncated.ts
+@@ -1,9 +1,9 @@
+ one
+-two
++deux
+diff --git a/src/unreadable.ts b/src/unreadable.ts
+--- a/src/unreadable.ts
++++ b/src/unreadable.ts
+@@ garbage @@
+ ctx after an unreadable header
++added after an unreadable header
+diff --git a/src/nospace.ts b/src/nospace.ts
+--- a/src/nospace.ts
++++ b/src/nospace.ts
+@@-1,2 +1,2 @@
+ ctx after a header with no space
+diff --git a/src/bare.ts b/src/bare.ts
+--- a/src/bare.ts
++++ b/src/bare.ts
+@@
+ ctx after a bare at-at
+diff --git a/src/nosides.ts b/src/nosides.ts
+index 3333333..4444444 100644
+Binary files a/src/nosides.ts and b/src/nosides.ts differ
+\ weird line outside any hunk
+diff --git a/src/inhunk.ts b/src/inhunk.ts
+--- a/src/inhunk.ts
++++ b/src/inhunk.ts
+@@ -1,3 +1,3 @@
+ before
+--- a side line appearing inside a hunk
++++ its added counterpart
+ after'
+printf '%s' "$malformed_corpus" >"$malformed_file"
+
+malformed_anchor_case() { # name path side line bound
+  local res
+  res="$(diff_anchor "$malformed_file" "$2" "$3" "$4" "$5")"
+  jq -cn --arg n "$1" --arg p "$2" --arg s "$3" --argjson l "$4" --argjson b "$5" --arg r "$res" \
+    '{name:$n, path:$p, side:$s, line:$l, bound:$b, result:$r}'
+}
+
+malformed_anchor_cases() {
+  # A hunk whose header claims nine lines and holds three still numbers the
+  # three it has, from the start the header names.
+  malformed_anchor_case "truncated-first-line"      "src/truncated.ts" RIGHT 1 3
+  malformed_anchor_case "truncated-past-what-it-has" "src/truncated.ts" RIGHT 9 3
+  # An unreadable header numbers from zero, because awk reads no number at all.
+  malformed_anchor_case "unreadable-header-right"   "src/unreadable.ts" RIGHT 0 3
+  malformed_anchor_case "unreadable-header-line-one" "src/unreadable.ts" RIGHT 1 3
+  # No space after the at-at reads the fields shifted.
+  malformed_anchor_case "nospace-header-right"      "src/nospace.ts" RIGHT 1 3
+  malformed_anchor_case "bare-at-at-right"          "src/bare.ts" RIGHT 0 3
+  # A section with no side lines names no path, so nothing anchors to it.
+  malformed_anchor_case "no-side-lines"             "src/nosides.ts" RIGHT 1 3
+  # in_hunk is cleared only by a diff --git line, so a --- inside a hunk is a
+  # deletion rather than a header.
+  malformed_anchor_case "side-line-inside-hunk-left" "src/inhunk.ts" LEFT 2 3
+  malformed_anchor_case "side-line-inside-hunk-right" "src/inhunk.ts" RIGHT 2 3
+}
+
+malformed_numbered="$(diff_number "$malformed_file")"
+
 numbered="$(diff_number "$diff_file")"
 
 jq -n --argjson captured "$(captured_json)" \
@@ -376,7 +451,10 @@ jq -n --argjson captured "$(captured_json)" \
   --arg diff_number "$numbered" \
   --argjson anchors "$(anchor_diff_cases | jq -s .)" \
   --argjson excludes "$(exclude_diff_cases | jq -s .)" \
-  '{captured:$captured, function:"diff_views", corpus:$corpus, diff_number:$diff_number, anchors:$anchors, excludes:$excludes}' \
+  --arg malformed_corpus "$malformed_corpus" \
+  --arg malformed_diff_number "$malformed_numbered" \
+  --argjson malformed_anchors "$(malformed_anchor_cases | jq -s .)" \
+  '{captured:$captured, function:"diff_views", corpus:$corpus, diff_number:$diff_number, anchors:$anchors, excludes:$excludes, malformed:{corpus:$malformed_corpus, diff_number:$malformed_diff_number, anchors:$malformed_anchors}}' \
   >"$FIXDIR/diff_views.json"
 
 rm -rf "$diff_workdir"

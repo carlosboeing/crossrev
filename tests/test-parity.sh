@@ -109,6 +109,28 @@ while IFS= read -r a; do
     "$(jq -r .result <<<"$a")"
 done < <(jq -c '.anchors[]' "$PARITY/diff_views.json")
 
+# The malformed corpus. Shapes git does not produce and the awk still answers
+# for: a hunk header that claims more lines than it holds, one that reads as no
+# number at all, a section with no side lines, and a side line inside a hunk.
+# Frozen because a port would otherwise hand-write these answers.
+malformed_file="$workdir/parity_malformed.diff"
+jq -j .malformed.corpus "$PARITY/diff_views.json" >"$malformed_file"
+
+is "diff views: malformed diff_number" \
+  "$(diff_number "$malformed_file")" \
+  "$(jq -j .malformed.diff_number "$PARITY/diff_views.json")"
+
+while IFS= read -r a; do
+  name="$(jq -r .name <<<"$a")"
+  path="$(jq -r .path <<<"$a")"
+  side="$(jq -r .side <<<"$a")"
+  line="$(jq -r .line <<<"$a")"
+  bound="$(jq -r .bound <<<"$a")"
+  is "diff anchor, malformed: $name" \
+    "$(diff_anchor "$malformed_file" "$path" "$side" "$line" "$bound")" \
+    "$(jq -r .result <<<"$a")"
+done < <(jq -c '.malformed.anchors[]' "$PARITY/diff_views.json")
+
 while IFS= read -r ex; do
   name="$(jq -r .name <<<"$ex")"
   ex_list=()

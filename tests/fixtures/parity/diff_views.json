@@ -321,5 +321,83 @@
       "exclusions": [],
       "output": "diff --git a/tools/crossrev/CHANGELOG.md b/tools/crossrev/CHANGELOG.md\nindex e773ac4..0b34128 100644\n--- a/tools/crossrev/CHANGELOG.md\n+++ b/tools/crossrev/CHANGELOG.md\n@@ -6,6 +6,8 @@ All notable changes to crossrev.\n\n ### Added\n\n+- **A two-direction template/default drift test.** Eleven behavior leaves must agree.\n+\n - `crossrev review --pr N` — one review pass. Claims before working.\n - `crossrev resolve --pr N` — verifies every finding whatever its severity.\n - `crossrev cycle --pr N` — the whole loop in one process, up to `max_passes`.\n@@ -33,3 +35,4 @@ All notable changes to crossrev.\n - `crossrev status --pr N` — position and interruption.\n-- `runs_per_day` bounded a number that was not runs.\n+- `max_prs_per_day` counts distinct pull requests repository-wide.\n+- `max_passes_per_cycle` replaces the scattered caps.\n - `crossrev watchdog` — finds pull requests stuck waiting on a leg.\ndiff --git a/docs/my notes.md b/docs/my notes.md\nindex 1111111..2222222 100644\n--- a/docs/my notes.md\t\n+++ b/docs/my notes.md\t\n@@ -6,2 +6,3 @@ heading\n  existing line\n+added line\n  context line\ndiff --git \"a/docs/caf\\303\\251.md\" \"b/docs/caf\\303\\251.md\"\nindex 3333333..4444444 100644\n--- \"a/docs/caf\\303\\251.md\"\n+++ \"b/docs/caf\\303\\251.md\"\n@@ -20,1 +20,2 @@ heading\n  kept line\n+new line\ndiff --git a/src/old_name.ts b/src/new_name.ts\nsimilarity index 85%\nrename from src/old_name.ts\nrename to src/new_name.ts\n--- a/src/old_name.ts\n+++ b/src/new_name.ts\n@@ -1,2 +1,2 @@\n-old version\n+new version\n  shared context\ndiff --git a/src/created.ts b/src/created.ts\nnew file mode 100644\n--- /dev/null\n+++ b/src/created.ts\n@@ -0,0 +1,2 @@\n+export const first = 1;\n+export const second = 2;\ndiff --git a/src/deleted.ts b/src/deleted.ts\ndeleted file mode 100644\n--- a/src/deleted.ts\n+++ /dev/null\n@@ -1,2 +0,0 @@\n-export const old1 = 1;\n-export const old2 = 2;\ndiff --git a/src/edges.ts b/src/edges.ts\nindex 5555555..6666666 100644\n--- a/src/edges.ts\n+++ b/src/edges.ts\n@@ -1 +1 @@\n-const only = 1;\n+const only = 2;\n@@ -10,3 +10,5 @@ a heading\n kept context\n--- a removed line whose own text starts with two dashes\n+++ an added line whose own text starts with two pluses\n last kept line\n\\ No newline at end of file\ndiff --git a/BACKLOG.md b/BACKLOG.md\nindex 1111111..2222222 100644\n--- a/BACKLOG.md\n+++ b/BACKLOG.md\n@@ -1,1 +1,2 @@\n  kept\n+added\ndiff --git a/BACKLOG.md.old b/BACKLOG.md.old\nindex 1111111..2222222 100644\n--- a/BACKLOG.md.old\n+++ b/BACKLOG.md.old\n@@ -1,1 +1,2 @@\n  kept\n+added\ndiff --git a/BACKLOGxmd b/BACKLOGxmd\nindex 1111111..2222222 100644\n--- a/BACKLOGxmd\n+++ b/BACKLOGxmd\n@@ -1,1 +1,2 @@\n  kept\n+added\ndiff --git a/docs/backlog/item.md b/docs/backlog/item.md\nindex 1111111..2222222 100644\n--- a/docs/backlog/item.md\n+++ b/docs/backlog/item.md\n@@ -1,1 +1,2 @@\n  kept\n+added\ndiff --git a/docs/backlogged.md b/docs/backlogged.md\nindex 1111111..2222222 100644\n--- a/docs/backlogged.md\n+++ b/docs/backlogged.md\n@@ -1,1 +1,2 @@\n  kept\n+added\ndiff --git a/docs/backlog(new).md b/docs/backlog(new).md\nindex 1111111..2222222 100644\n--- a/docs/backlog(new).md\n+++ b/docs/backlog(new).md\n@@ -1,1 +1,2 @@\n  kept\n+added"
     }
-  ]
+  ],
+  "malformed": {
+    "corpus": "diff --git a/src/truncated.ts b/src/truncated.ts\n--- a/src/truncated.ts\n+++ b/src/truncated.ts\n@@ -1,9 +1,9 @@\n one\n-two\n+deux\ndiff --git a/src/unreadable.ts b/src/unreadable.ts\n--- a/src/unreadable.ts\n+++ b/src/unreadable.ts\n@@ garbage @@\n ctx after an unreadable header\n+added after an unreadable header\ndiff --git a/src/nospace.ts b/src/nospace.ts\n--- a/src/nospace.ts\n+++ b/src/nospace.ts\n@@-1,2 +1,2 @@\n ctx after a header with no space\ndiff --git a/src/bare.ts b/src/bare.ts\n--- a/src/bare.ts\n+++ b/src/bare.ts\n@@\n ctx after a bare at-at\ndiff --git a/src/nosides.ts b/src/nosides.ts\nindex 3333333..4444444 100644\nBinary files a/src/nosides.ts and b/src/nosides.ts differ\n\\ weird line outside any hunk\ndiff --git a/src/inhunk.ts b/src/inhunk.ts\n--- a/src/inhunk.ts\n+++ b/src/inhunk.ts\n@@ -1,3 +1,3 @@\n before\n--- a side line appearing inside a hunk\n+++ its added counterpart\n after",
+    "diff_number": "diff --git a/src/truncated.ts b/src/truncated.ts\n--- a/src/truncated.ts\n+++ b/src/truncated.ts\n@@ -1,9 +1,9 @@\n   1    1 | one\n   2    - |-two\n   -    2 |+deux\ndiff --git a/src/unreadable.ts b/src/unreadable.ts\n--- a/src/unreadable.ts\n+++ b/src/unreadable.ts\n@@ garbage @@\n   0    0 | ctx after an unreadable header\n   -    1 |+added after an unreadable header\ndiff --git a/src/nospace.ts b/src/nospace.ts\n--- a/src/nospace.ts\n+++ b/src/nospace.ts\n@@-1,2 +1,2 @@\n   1    0 | ctx after a header with no space\ndiff --git a/src/bare.ts b/src/bare.ts\n--- a/src/bare.ts\n+++ b/src/bare.ts\n@@\n   0    0 | ctx after a bare at-at\ndiff --git a/src/nosides.ts b/src/nosides.ts\nindex 3333333..4444444 100644\nBinary files a/src/nosides.ts and b/src/nosides.ts differ\n\\ weird line outside any hunk\ndiff --git a/src/inhunk.ts b/src/inhunk.ts\n--- a/src/inhunk.ts\n+++ b/src/inhunk.ts\n@@ -1,3 +1,3 @@\n   1    1 | before\n   2    - |--- a side line appearing inside a hunk\n   -    2 |+++ its added counterpart\n   3    3 | after",
+    "anchors": [
+      {
+        "name": "truncated-first-line",
+        "path": "src/truncated.ts",
+        "side": "RIGHT",
+        "line": 1,
+        "bound": 3,
+        "result": "1"
+      },
+      {
+        "name": "truncated-past-what-it-has",
+        "path": "src/truncated.ts",
+        "side": "RIGHT",
+        "line": 9,
+        "bound": 3,
+        "result": ""
+      },
+      {
+        "name": "unreadable-header-right",
+        "path": "src/unreadable.ts",
+        "side": "RIGHT",
+        "line": 0,
+        "bound": 3,
+        "result": "0"
+      },
+      {
+        "name": "unreadable-header-line-one",
+        "path": "src/unreadable.ts",
+        "side": "RIGHT",
+        "line": 1,
+        "bound": 3,
+        "result": "1"
+      },
+      {
+        "name": "nospace-header-right",
+        "path": "src/nospace.ts",
+        "side": "RIGHT",
+        "line": 1,
+        "bound": 3,
+        "result": "0"
+      },
+      {
+        "name": "bare-at-at-right",
+        "path": "src/bare.ts",
+        "side": "RIGHT",
+        "line": 0,
+        "bound": 3,
+        "result": "0"
+      },
+      {
+        "name": "no-side-lines",
+        "path": "src/nosides.ts",
+        "side": "RIGHT",
+        "line": 1,
+        "bound": 3,
+        "result": ""
+      },
+      {
+        "name": "side-line-inside-hunk-left",
+        "path": "src/inhunk.ts",
+        "side": "LEFT",
+        "line": 2,
+        "bound": 3,
+        "result": "2"
+      },
+      {
+        "name": "side-line-inside-hunk-right",
+        "path": "src/inhunk.ts",
+        "side": "RIGHT",
+        "line": 2,
+        "bound": 3,
+        "result": "2"
+      }
+    ]
+  }
 }
