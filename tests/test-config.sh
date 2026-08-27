@@ -376,5 +376,137 @@ err="$(guarded "$xdg" "$d" 'cfg_load ""; resolved="$(cfg_resolve_backlog "" repo
 has "refused backlog layout: the refusal names the value" "$err" "flat"
 is  "refused backlog layout: the caller stops"            "$(grep -c 'REACHED_PAST_THE_REFUSAL' <<<"$err")" "0"
 
+
+# --- the base revision's config, and a broken one there ---------------------
+#
+# Policy is read from the pull request's base revision, never its head
+# (ADR 0003), so this is the path automated mode takes. A file that will not
+# parse there used to fall back to {}: every value the repository stated
+# reverted to a default, with exit 0 and nothing printed. min_fix_severity
+# dropping from high to medium is the cost — it names the lowest severity the
+# resolve leg may change code for unattended.
+#
+# Absent and empty must stay silent, because most repositories have no config
+# at their base revision at all, and cfg_show_at_base cannot tell an absent
+# file from a broken one on its own.
+
+new_base_repo() { # <relpath> <content> [<relpath> <content> ...] -> "<dir> <sha>"
+  local d; d="$(mktemp -d)"
+  (
+    cd "$d" || exit 1
+    git init -q .
+    git config user.email t@example.com
+    git config user.name t
+    while (( $# >= 2 )); do
+      mkdir -p "$(dirname "$1")"
+      printf '%s' "$2" > "$1"
+      shift 2
+    done
+    git add -A
+    git commit -q --allow-empty -m base
+  ) >/dev/null 2>&1
+  printf '%s %s' "$d" "$(git -C "$d" rev-parse HEAD)"
+}
+
+# The exit status, which `guarded` deliberately swallows. Run the plain shape
+# here: what matters for this case is that the process stops non-zero.
+base_status() { # <xdg_home> <repo_dir> <base_sha> -> exit code
+  XDG_CONFIG_HOME="$1" "$BASH_ABS" -c '
+    set -euo pipefail
+    cd "$2"
+    source "$1/lib/ui.sh"; source "$1/lib/harnesses.sh"; source "$1/lib/config.sh"
+    cfg_load "$3"
+  ' _ "$repo_lib" "$2" "$3" >/dev/null 2>&1
+  printf '%s' "$?"
+}
+
+good_policy='version: 1
+policy:
+  max_passes_per_cycle: 7
+  min_fix_severity: high
+'
+bad_policy='version: 1
+policy:
+  max_passes_per_cycle: 7
+  min_fix_severity: high
+  - broken: [unclosed
+'
+report='cfg_load "%s"; echo "REACHED max=$(cfg_get .policy.max_passes_per_cycle) min=$(cfg_get .policy.min_fix_severity)"'
+
+# 1. No config at the base revision. Today's behaviour exactly: defaults, no word.
+read -r d sha <<<"$(new_base_repo)"
+xdg="$(mktemp -d)"
+# shellcheck disable=SC2059  # report is a format string by design
+err="$(guarded "$xdg" "$d" "$(printf "$report" "$sha")")"
+has "no config at the base revision: the caller runs on"    "$err" "REACHED"
+has "no config at the base revision: defaults apply"        "$err" "max=3 min=medium"
+is  "no config at the base revision: nothing is reported"   "$(grep -c 'error ' <<<"$err")" "0"
+
+# 2. Present but empty at the base revision. git show returns exit 0 and no
+#    bytes, which must read as no policy rather than as a parse failure.
+read -r d sha <<<"$(new_base_repo .github/crossrev.yml '')"
+xdg="$(mktemp -d)"
+# shellcheck disable=SC2059
+err="$(guarded "$xdg" "$d" "$(printf "$report" "$sha")")"
+has "empty config at the base revision: the caller runs on"  "$err" "REACHED"
+has "empty config at the base revision: defaults apply"      "$err" "max=3 min=medium"
+is  "empty config at the base revision: nothing is reported" "$(grep -c 'error ' <<<"$err")" "0"
+
+# 3. Valid at the base revision. The stated policy is what applies.
+read -r d sha <<<"$(new_base_repo .github/crossrev.yml "$good_policy")"
+xdg="$(mktemp -d)"
+# shellcheck disable=SC2059
+err="$(guarded "$xdg" "$d" "$(printf "$report" "$sha")")"
+has "valid config at the base revision: the stated policy applies" "$err" "max=7 min=high"
+
+# 4. Malformed at the base revision. One refusal, and the caller stops.
+read -r d sha <<<"$(new_base_repo .github/crossrev.yml "$bad_policy")"
+xdg="$(mktemp -d)"
+# shellcheck disable=SC2059
+err="$(guarded "$xdg" "$d" "$(printf "$report" "$sha")")"
+has "unparsable base config: the refusal names the file"     "$err" ".github/crossrev.yml"
+has "unparsable base config: the refusal names the revision" "$err" "base revision $sha"
+is  "unparsable base config: the caller stops"               "$(grep -c 'REACHED' <<<"$err")" "0"
+is  "unparsable base config: nothing else is reported"       "$(grep -c 'error ' <<<"$err")" "1"
+is  "unparsable base config: jq is never handed the empty string" \
+    "$(grep -c 'jq:' <<<"$err")" "0"
+is  "unparsable base config: no unrelated key is blamed" \
+    "$(grep -c 'min_fix_severity is' <<<"$err")" "0"
+is  "unparsable base config: the run exits non-zero"         "$(base_status "$xdg" "$d" "$sha")" "1"
+
+# 5. The .crossrev.yml fallback at the base revision, refused the same way.
+read -r d sha <<<"$(new_base_repo .crossrev.yml "$bad_policy")"
+xdg="$(mktemp -d)"
+# shellcheck disable=SC2059
+err="$(guarded "$xdg" "$d" "$(printf "$report" "$sha")")"
+has "unparsable base .crossrev.yml: the refusal names the file" "$err" ".crossrev.yml"
+is  "unparsable base .crossrev.yml: the caller stops"           "$(grep -c 'REACHED' <<<"$err")" "0"
+is  "unparsable base .crossrev.yml: nothing else is reported"   "$(grep -c 'error ' <<<"$err")" "1"
+
+# 6. Precedence at the base revision: .github/crossrev.yml is read and
+#    .crossrev.yml is not, whether the first one parses or not. A broken
+#    .github file must not fall through to the other file's policy.
+read -r d sha <<<"$(new_base_repo .github/crossrev.yml "$good_policy" .crossrev.yml 'version: 1
+policy:
+  max_passes_per_cycle: 5
+  min_fix_severity: low
+')"
+xdg="$(mktemp -d)"
+# shellcheck disable=SC2059
+err="$(guarded "$xdg" "$d" "$(printf "$report" "$sha")")"
+has "base revision precedence: .github/crossrev.yml wins" "$err" "max=7 min=high"
+
+read -r d sha <<<"$(new_base_repo .github/crossrev.yml "$bad_policy" .crossrev.yml 'version: 1
+policy:
+  max_passes_per_cycle: 5
+'
+)"
+xdg="$(mktemp -d)"
+# shellcheck disable=SC2059
+err="$(guarded "$xdg" "$d" "$(printf "$report" "$sha")")"
+has "broken .github at the base revision: it is named, not skipped" "$err" ".github/crossrev.yml"
+is  "broken .github at the base revision: the other file is not read" \
+    "$(grep -c 'max=5' <<<"$err")" "0"
+
 printf '\n  %d passed, %d failed\n' "$pass" "$fail"
 (( fail == 0 ))
