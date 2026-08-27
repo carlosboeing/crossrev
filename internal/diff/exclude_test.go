@@ -65,7 +65,7 @@ func excludeCorpus(t *testing.T) *Diff {
 	return Parse([]byte(b.String()), testRevisions(t))
 }
 
-// lib/diff.sh:98-104 and lib/diff.sh:221-224. The paths are operator-supplied
+// lib/diff.sh:102-108 and lib/diff.sh:219-221. The paths are operator-supplied
 // configuration and are compared literally: a pattern that looks like a glob
 // names the one file actually called that, and matches nothing else.
 func TestExcludedComparesPatternsLiterally(t *testing.T) {
@@ -100,6 +100,22 @@ func TestExcludedComparesPatternsLiterally(t *testing.T) {
 	}
 }
 
+// The verbatim return is a copy. Excluded hands back d.raw when nothing
+// survives the empty-string filter, and a caller that writes into that slice
+// would edit the parsed diff itself, so the next call answers differently.
+func TestExcludedReturnsACopyOfTheRawDiff(t *testing.T) {
+	const in = "diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1,1 +1,1 @@\n k"
+	d := Parse([]byte(in), testRevisions(t))
+
+	out := d.Excluded(nil)
+	for i := range out {
+		out[i] = 'Z'
+	}
+	if got := string(d.Excluded(nil)); got != in {
+		t.Fatalf("after writing into the returned slice, excluded = %q, want %q", got, in)
+	}
+}
+
 // lib/diff.sh:229 short-circuits to `cat` when no path survives the empty-string
 // filter, so the diff passes through byte for byte. Once awk runs, every line it
 // keeps ends with a newline, whether the input's last line did or not.
@@ -122,7 +138,7 @@ func TestExcludedTerminalNewline(t *testing.T) {
 }
 
 // Either side of a section is checked, not the new one alone, so a rename out of
-// an excluded directory is still dropped (lib/diff.sh:106-108).
+// an excluded directory is still dropped (lib/diff.sh:117-119, code at :122).
 func TestExcludedDropsEitherSideOfARename(t *testing.T) {
 	d := parseCorpus(t)
 	for _, p := range []string{"src/old_name.ts", "src/new_name.ts"} {

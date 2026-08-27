@@ -4,13 +4,13 @@ import "strings"
 
 // Excluded is the diff with whole file sections dropped: a path that equals one
 // of the given paths, or sits under one of them as a directory. Everything else
-// passes through byte for byte (lib/diff.sh:213-231).
+// passes through byte for byte (lib/diff.sh:211-231).
 //
 // This exists because the backlog destination can be a path inside the
 // repository under review, and a leg that reviews the file its own findings are
 // written to reviews its own output.
 //
-// The patterns are operator-supplied configuration and are compared literally
+// The paths are operator-supplied configuration and are compared literally
 // rather than as patterns. Interpolating one into a regular expression made a
 // dot match any character, dropped the end anchor so `BACKLOG.md` also matched
 // `BACKLOG.md.old`, and turned an unbalanced bracket in a filename into a syntax
@@ -21,9 +21,9 @@ import "strings"
 // verbatim, terminal newline or not, because the shell short-circuits to `cat`.
 // Once the parser does the work every kept line ends with a newline, whether the
 // input's last line did or not.
-func (d *Diff) Excluded(patterns []string) []byte {
-	list := make([]string, 0, len(patterns))
-	for _, p := range patterns {
+func (d *Diff) Excluded(paths []string) []byte {
+	list := make([]string, 0, len(paths))
+	for _, p := range paths {
 		if p != "" {
 			list = append(list, p)
 		}
@@ -62,9 +62,12 @@ func (d *Diff) Excluded(patterns []string) []byte {
 }
 
 // hits answers whether a path names an excluded file, or sits inside an excluded
-// directory (lib/diff.sh:110-118). A section with no path on that side is never
+// directory (lib/diff.sh:109-116). A section with no path on that side is never
 // excluded by it.
 func hits(path string, ex []string) bool {
+	// Redundant, and kept to mirror lib/diff.sh:110: the empty entries the loop
+	// below skips are the only ones an empty path could equal, so it would return
+	// false regardless.
 	if path == "" {
 		return false
 	}

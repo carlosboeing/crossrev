@@ -29,11 +29,22 @@ type excludeCase struct {
 	Output     string   `json:"output"`
 }
 
+// malformedViews is the second frozen corpus: shapes git does not produce and
+// the awk still has to answer for. It is captured beside the well-formed one and
+// read through the same constant, so a malformed expectation is the shell's
+// answer rather than the port author's reading of the shell.
+type malformedViews struct {
+	Corpus     string       `json:"corpus"`
+	DiffNumber string       `json:"diff_number"`
+	Anchors    []anchorCase `json:"anchors"`
+}
+
 type diffViews struct {
-	Corpus     string        `json:"corpus"`
-	DiffNumber string        `json:"diff_number"`
-	Anchors    []anchorCase  `json:"anchors"`
-	Excludes   []excludeCase `json:"excludes"`
+	Corpus     string         `json:"corpus"`
+	DiffNumber string         `json:"diff_number"`
+	Anchors    []anchorCase   `json:"anchors"`
+	Excludes   []excludeCase  `json:"excludes"`
+	Malformed  malformedViews `json:"malformed"`
 }
 
 func loadViews(t *testing.T) diffViews {
@@ -49,7 +60,17 @@ func loadViews(t *testing.T) diffViews {
 	if v.Corpus == "" || v.DiffNumber == "" {
 		t.Fatalf("%s carries no corpus or no numbered view", fixturePath)
 	}
+	if v.Malformed.Corpus == "" || v.Malformed.DiffNumber == "" {
+		t.Fatalf("%s carries no malformed corpus or no numbered view for it", fixturePath)
+	}
 	return v
+}
+
+// parseMalformed is the malformed corpus parsed, the way parseCorpus is the
+// well-formed one.
+func parseMalformed(t *testing.T) *Diff {
+	t.Helper()
+	return Parse([]byte(loadViews(t).Malformed.Corpus), testRevisions(t))
 }
 
 // testRevisions is a plausible base/head pair. The three views do not read it;
@@ -73,6 +94,22 @@ func parseCorpus(t *testing.T) *Diff {
 	return Parse([]byte(loadViews(t).Corpus), testRevisions(t))
 }
 
+// Parse copies the bytes it is given. The caller owns that buffer and may reuse
+// it — an io.Reader loop hands the same one back on the next read — and the
+// verbatim path through Excluded returns d.raw, so a diff parsed from a shared
+// buffer would answer with whatever landed in it since.
+func TestParseCopiesTheRawDiff(t *testing.T) {
+	const in = "diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1,1 +1,1 @@\n k"
+	buf := []byte(in)
+	d := Parse(buf, testRevisions(t))
+	for i := range buf {
+		buf[i] = 'Z'
+	}
+	if got := string(d.Excluded(nil)); got != in {
+		t.Fatalf("after overwriting the caller's buffer, excluded = %q, want %q", got, in)
+	}
+}
+
 func TestParseCarriesTheRevisionPair(t *testing.T) {
 	want := testRevisions(t)
 	got := Parse([]byte("diff --git a/x b/x\n"), want).Revisions()
@@ -82,7 +119,7 @@ func TestParseCarriesTheRevisionPair(t *testing.T) {
 }
 
 // The `---` and `+++` lines carry one path each and are the only ones read.
-// lib/diff.sh:88-96 decodes git's C-style quoting, drops a trailing tab, maps
+// lib/diff.sh:87-101 decodes git's C-style quoting, drops a trailing tab, maps
 // /dev/null to no path at all, and strips the a/ or b/ prefix last.
 func TestParseReadsPathsOffTheSideLines(t *testing.T) {
 	d := parseCorpus(t)
@@ -113,7 +150,7 @@ func TestParseReadsPathsOffTheSideLines(t *testing.T) {
 	}
 }
 
-// lib/diff.sh:61-84. The whole path is wrapped in double quotes, with \\ and \"
+// lib/diff.sh:60-86. The whole path is wrapped in double quotes, with \\ and \"
 // escaped, the usual control-character escapes, and \### octal for every byte
 // outside printable ASCII. Bytes are rebuilt one at a time, so a two-byte UTF-8
 // character arrives as its two octal escapes.
@@ -140,7 +177,7 @@ func TestUnquoteUndoesGitCStyleQuoting(t *testing.T) {
 	}
 }
 
-// lib/diff.sh:151-157. Counts are omitted when they are 1, so only the text up
+// lib/diff.sh:152-158. Counts are omitted when they are 1, so only the text up
 // to the comma is read. A header the parser cannot read is not refused: it
 // yields zero and the hunk renumbers from there. Every expectation below is the
 // shipped Bash answer, not a better one.
@@ -157,6 +194,16 @@ func TestHunkHeaderCountsAreReadUpToTheComma(t *testing.T) {
 		{"unreadable text yields zero", "-arbage", 0},
 		{"an absent field yields zero", "", 0},
 		{"a second @@ read as a count yields zero", "@@", 0},
+		// `@@ --5,2 +1,2 @@` numbers a hunk from -5, and diff_anchor answers -5
+		// for it. The sign is read, not discarded.
+		{"a negative start is carried through", "--5,2", -5},
+		// `@@ - + @@` offers a one-byte field, where awk's substr answers "" and
+		// a slice would run past the end.
+		{"a one-byte field yields zero", "-", 0},
+		// A start too wide for an int saturates rather than wrapping. The awk
+		// prints 100000000000000000000; either way the number is wrong, but this
+		// one stays positive.
+		{"an oversized start saturates", "-99999999999999999999,1", maxInt},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

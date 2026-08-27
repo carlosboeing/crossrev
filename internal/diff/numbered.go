@@ -6,7 +6,7 @@ import (
 )
 
 // gutterFloor is the narrowest the two number columns are ever printed
-// (lib/diff.sh:179). Four holds a four-digit line number, which is more than
+// (lib/diff.sh:178). Four holds a four-digit line number, which is more than
 // most files reach, so the gutter reads as a column rather than as ragged text.
 const gutterFloor = 4
 
@@ -29,10 +29,8 @@ func (d *Diff) Numbered() []byte {
 	}
 
 	w := gutterFloor
-	if d.widestSet {
-		if n := len(strconv.Itoa(d.widest)); n > w {
-			w = n
-		}
+	if n := len(strconv.Itoa(d.widest)); n > w {
+		w = n
 	}
 
 	var out []byte
