@@ -22,6 +22,17 @@ source "$HERE/../lib/sandbox.sh"
 source "$HERE/../lib/prompt.sh"
 # shellcheck source=../lib/state.sh
 source "$HERE/../lib/state.sh"
+# shellcheck source=../lib/harnesses.sh
+source "$HERE/../lib/harnesses.sh"
+# shellcheck source=../lib/config.sh
+source "$HERE/../lib/config.sh"
+# shellcheck source=../lib/legs.sh
+source "$HERE/../lib/legs.sh"
+
+export GIT_AUTHOR_NAME="crossrev"
+export GIT_AUTHOR_EMAIL="test@example.com"
+export GIT_COMMITTER_NAME="crossrev"
+export GIT_COMMITTER_EMAIL="test@example.com"
 
 PARITY="$HERE/fixtures/parity"
 
@@ -71,6 +82,138 @@ while IFS= read -r c; do
     "$(state_marker_of "$(jq -jr .body <<<"$c")")" \
     "$(jq -r .decoded <<<"$c")"
 done < <(jq -c '.cases[]' "$PARITY/marker_codec.json")
+
+while IFS= read -r c; do
+  name="$(jq -r .name <<<"$c")"
+  inp="$(jq -c .input <<<"$c")"
+  is "marker encode: $name" \
+    "$(state_marker_encode "$inp")" \
+    "$(jq -r .encoded <<<"$c")"
+done < <(jq -c '.cases[]' "$PARITY/marker_encode.json")
+
+diff_corpus_file="$workdir/parity_corpus.diff"
+jq -j .corpus "$PARITY/diff_views.json" >"$diff_corpus_file"
+
+is "diff views: diff_number" \
+  "$(diff_number "$diff_corpus_file")" \
+  "$(jq -j .diff_number "$PARITY/diff_views.json")"
+
+while IFS= read -r a; do
+  name="$(jq -r .name <<<"$a")"
+  path="$(jq -r .path <<<"$a")"
+  side="$(jq -r .side <<<"$a")"
+  line="$(jq -r .line <<<"$a")"
+  bound="$(jq -r .bound <<<"$a")"
+  is "diff anchor: $name" \
+    "$(diff_anchor "$diff_corpus_file" "$path" "$side" "$line" "$bound")" \
+    "$(jq -r .result <<<"$a")"
+done < <(jq -c '.anchors[]' "$PARITY/diff_views.json")
+
+while IFS= read -r ex; do
+  name="$(jq -r .name <<<"$ex")"
+  ex_list=()
+  while IFS= read -r item; do
+    [[ -n "$item" ]] && ex_list+=("$item")
+  done < <(jq -r '.exclusions[]' <<<"$ex")
+  if [[ ${#ex_list[@]} -eq 0 ]]; then
+    actual_ex="$(diff_exclude "$diff_corpus_file")"
+  else
+    actual_ex="$(diff_exclude "$diff_corpus_file" "${ex_list[@]}")"
+  fi
+  expected_ex="$(jq -j .output <<<"$ex")"
+  is "diff exclude: $name" "$actual_ex" "$expected_ex"
+done < <(jq -c '.excludes[]' "$PARITY/diff_views.json")
+
+while IFS= read -r c; do
+  name="$(jq -r .name <<<"$c")"
+  d="$(mktemp -d "$workdir/cfg_test_XXXXXX")"
+  (
+    cd "$d" && git init -q . && git commit -q --allow-empty -m init
+    repo_yaml="$(jq -r '.repo_yaml // empty' <<<"$c")"
+    op_yaml="$(jq -r '.operator_yaml // empty' <<<"$c")"
+    base_sha="$(jq -r '.base_sha // empty' <<<"$c")"
+    if [[ -n "$base_sha" ]]; then
+      printf '%s\n' "$repo_yaml" > .crossrev.yml
+      git add .crossrev.yml && git commit -q -m "base policy"
+      real_base="$(git rev-parse HEAD)"
+      rm -f .crossrev.yml
+      git commit -q --allow-empty -m "head commit"
+      XDG_CONFIG_HOME="$d/xdg"; export XDG_CONFIG_HOME
+      cfg_load "$real_base"
+    else
+      if [[ -n "$repo_yaml" ]]; then
+        mkdir -p .github
+        printf '%s\n' "$repo_yaml" > .github/crossrev.yml
+      fi
+      if [[ -n "$op_yaml" ]]; then
+        mkdir -p "$d/xdg/crossrev"
+        printf '%s\n' "$op_yaml" > "$d/xdg/crossrev/config.yml"
+      fi
+      XDG_CONFIG_HOME="$d/xdg"; export XDG_CONFIG_HOME
+      cfg_load
+    fi
+    printf '%s' "$CFG_MERGED"
+  ) >"$d/actual_merged.json"
+  expected_merged="$(jq -c .merged <<<"$c")"
+  actual_merged="$(jq -c . <"$d/actual_merged.json")"
+  is "config merge: $name" "$actual_merged" "$expected_merged"
+done < <(jq -c '.cases[]' "$PARITY/config_merge.json")
+
+# Each vector records the driver that produced it. cfg_load alone reaches only the
+# values it validates itself; an endpoint or a backlog value is refused at the
+# point a caller asks for it, and the base-revision arm of the version check
+# composes a different message from the working-tree one.
+while IFS= read -r ref; do
+  name="$(jq -r .name <<<"$ref")"
+  driver="$(jq -r '.driver // "load"' <<<"$ref")"
+  d="$(mktemp -d "$workdir/cfg_refusal_XXXXXX")"
+  (
+    cd "$d" && git init -q .
+    mkdir -p .github
+    jq -j .config <<<"$ref" > .github/crossrev.yml
+    XDG_CONFIG_HOME="$d/xdg"; export XDG_CONFIG_HOME
+
+    case "$driver" in
+      load_at_base)
+        git add .github/crossrev.yml
+        GIT_AUTHOR_NAME="crossrev" GIT_AUTHOR_EMAIL="test@example.com" \
+        GIT_COMMITTER_NAME="crossrev" GIT_COMMITTER_EMAIL="test@example.com" \
+        GIT_AUTHOR_DATE="2026-01-01T00:00:00Z" GIT_COMMITTER_DATE="2026-01-01T00:00:00Z" \
+        git commit -q -m "base config"
+        base_sha="$(git rev-parse HEAD)"
+        rm -f .github/crossrev.yml
+        GIT_AUTHOR_NAME="crossrev" GIT_AUTHOR_EMAIL="test@example.com" \
+        GIT_COMMITTER_NAME="crossrev" GIT_COMMITTER_EMAIL="test@example.com" \
+        GIT_AUTHOR_DATE="2026-01-01T00:00:00Z" GIT_COMMITTER_DATE="2026-01-01T00:00:00Z" \
+        git commit -q --allow-empty -m "head commit"
+        cfg_load "$base_sha" >/dev/null
+        ;;
+      call)
+        git commit -q --allow-empty -m init
+        # @sh quotes every element, so an empty argument survives as one.
+        # Declared first because shellcheck cannot see an assignment through eval.
+        call=()
+        eval "call=( $(jq -r '.call | @sh' <<<"$ref") )"
+        cfg_load >/dev/null && "${call[@]}" >/dev/null
+        ;;
+      *)
+        git commit -q --allow-empty -m init
+        cfg_load >/dev/null
+        ;;
+    esac
+  ) >"$d/err.txt" 2>&1; rc=$?
+  err="$(cat "$d/err.txt")"
+  expected_err="$(jq -r .error <<<"$ref")"
+  [[ $rc -ne 0 ]] && ok "config refusal exits non-zero: $name" \
+    || notok "config refusal exits non-zero: $name" "non-zero exit" "$rc"
+  is "config refusal error: $name" "$err" "$expected_err"
+done < <(jq -c '.refusals[]' "$PARITY/config_merge.json")
+
+while IFS= read -r l; do
+  label="$(jq -r .label <<<"$l")"
+  is "label colour: $label" "$(legs_label_colour "$label")" "$(jq -r .colour <<<"$l")"
+  is "label description: $label" "$(legs_label_description "$label")" "$(jq -r .description <<<"$l")"
+done < <(jq -c '.labels[]' "$PARITY/labels.json")
 
 rebuild_prompt() {
   local fixture="$1" leg="$2" out="$3" skill diff meta threads

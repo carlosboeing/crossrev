@@ -221,11 +221,33 @@ printf 'x\xc2\xa0y\n' >"$nbsp_file"; printf 'xy\n' >"$plain_file"
 rm -f "$anchor_file" "$nbsp_file" "$plain_file"
 
 # --- pass numbering --------------------------------------------------------
+# [policy-table: state_pass]
 is "no trusted marker means pass 1" "$(state_pass '[]')" "1"
 is "one completed review means pass 2" \
   "$(state_pass '[{"leg":"review","pass":1,"state":"complete"}]')" "2"
 is "the resolve leg does not advance the pass number" \
   "$(state_pass '[{"leg":"review","pass":1,"state":"complete"},{"leg":"resolve","pass":1,"state":"complete"}]')" "2"
+is "a declined pass does not advance the pass number" \
+  "$(state_pass '[{"leg":"review","pass":1,"state":"complete"},{"leg":"review","pass":2,"state":"declined"}]')" "2"
+# [policy-table-end: state_pass]
+
+# [policy-table: state_max_pass]
+is "no markers means max pass 0" "$(state_max_pass '[]')" "0"
+is "one completed review means max pass 1" \
+  "$(state_max_pass '[{"leg":"review","pass":1,"state":"complete"}]')" "1"
+is "a declined pass counts for max pass" \
+  "$(state_max_pass '[{"leg":"review","pass":1,"state":"complete"},{"leg":"review","pass":2,"state":"declined"}]')" "2"
+# [policy-table-end: state_max_pass]
+
+# [policy-table: state_current_review_pass]
+is "no markers means current review pass 0" "$(state_current_review_pass '[]')" "0"
+is "one completed review means current review pass 1" \
+  "$(state_current_review_pass '[{"leg":"review","pass":1,"state":"complete"}]')" "1"
+is "the resolve leg does not advance current review pass" \
+  "$(state_current_review_pass '[{"leg":"review","pass":1,"state":"complete"},{"leg":"resolve","pass":1,"state":"complete"}]')" "1"
+is "a declined review pass is not current review pass" \
+  "$(state_current_review_pass '[{"leg":"review","pass":1,"state":"complete"},{"leg":"review","pass":2,"state":"declined"}]')" "1"
+# [policy-table-end: state_current_review_pass]
 
 # --- recovery --------------------------------------------------------------
 claim='[{"leg":"review","pass":2,"state":"started","run_id":"7"}]'
