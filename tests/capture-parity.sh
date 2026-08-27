@@ -29,6 +29,12 @@ source "$REPO_ROOT/lib/sandbox.sh"
 source "$REPO_ROOT/lib/prompt.sh"
 # shellcheck source=../lib/state.sh
 source "$REPO_ROOT/lib/state.sh"
+# shellcheck source=../lib/harnesses.sh
+source "$REPO_ROOT/lib/harnesses.sh"
+# shellcheck source=../lib/config.sh
+source "$REPO_ROOT/lib/config.sh"
+# shellcheck source=../lib/legs.sh
+source "$REPO_ROOT/lib/legs.sh"
 
 platform="$(uname -s -r -m)"
 tr_path="$(command -v tr)"
@@ -134,6 +140,377 @@ jq -n --argjson captured "$(captured_json)" \
   --argjson cases "$(codec_cases | jq -s .)" \
   '{captured:$captured, function:"state_marker_of", cases:$cases}' \
   >"$FIXDIR/marker_codec.json"
+
+# --- state_marker_encode over ordered marker objects ------------------------
+
+encode_case() { # name input_json
+  local encoded
+  encoded="$(state_marker_encode "$2")"
+  jq -cn --arg n "$1" --argjson inp "$2" --arg enc "$encoded" \
+    '{name:$n, input:$inp, encoded:$enc}'
+}
+
+encode_cases() {
+  encode_case "review-complete" \
+    '{"v":1,"leg":"review","pass":2,"state":"complete","verdict":"issues-remain","head_sha":"9f3c1ab","findings":[{"id":"aaaa000000000001","severity":"high","category":"security","pre_existing":false,"path":"app.ts","line":2,"title":"Fetch timeout missing"}]}'
+  encode_case "review-minimal" \
+    '{"v":1,"leg":"review","pass":1,"state":"complete"}'
+  encode_case "resolve-complete" \
+    '{"v":1,"leg":"resolve","pass":2,"state":"complete","commit_sha":"d81a3f2abc","resolutions":[{"finding_id":"aaaa000000000001","resolution":"fixed"},{"finding_id":"bbbb000000000002","resolution":"deferred","crossrev_tracked":"#45"}]}'
+  encode_case "resolve-minimal" \
+    '{"v":1,"leg":"resolve","pass":1,"state":"complete"}'
+  encode_case "declined" \
+    '{"v":1,"leg":"review","pass":3,"state":"declined","reason":"reached max_passes_per_cycle (3)"}'
+  encode_case "missing-optional-fields" \
+    '{"v":1,"leg":"resolve","pass":1,"state":"started","head_sha":"abc1234"}'
+  encode_case "present-empty-crossrev-tracked" \
+    '{"v":1,"leg":"resolve","pass":1,"state":"complete","resolutions":[{"finding_id":"aaaa000000000001","resolution":"deferred","crossrev_tracked":""}]}'
+}
+
+jq -n --argjson captured "$(captured_json)" \
+  --argjson cases "$(encode_cases | jq -s .)" \
+  '{captured:$captured, function:"state_marker_encode", cases:$cases}' \
+  >"$FIXDIR/marker_encode.json"
+
+# --- diff views over a single rich corpus -----------------------------------
+
+diff_workdir="$(mktemp -d)"
+diff_file="$diff_workdir/corpus.diff"
+
+diff_corpus='diff --git a/tools/crossrev/CHANGELOG.md b/tools/crossrev/CHANGELOG.md
+index e773ac4..0b34128 100644
+--- a/tools/crossrev/CHANGELOG.md
++++ b/tools/crossrev/CHANGELOG.md
+@@ -6,6 +6,8 @@ All notable changes to crossrev.
+
+ ### Added
+
++- **A two-direction template/default drift test.** Eleven behavior leaves must agree.
++
+ - `crossrev review --pr N` — one review pass. Claims before working.
+ - `crossrev resolve --pr N` — verifies every finding whatever its severity.
+ - `crossrev cycle --pr N` — the whole loop in one process, up to `max_passes`.
+@@ -33,3 +35,4 @@ All notable changes to crossrev.
+ - `crossrev status --pr N` — position and interruption.
+-- `runs_per_day` bounded a number that was not runs.
++- `max_prs_per_day` counts distinct pull requests repository-wide.
++- `max_passes_per_cycle` replaces the scattered caps.
+ - `crossrev watchdog` — finds pull requests stuck waiting on a leg.
+diff --git a/docs/my notes.md b/docs/my notes.md
+index 1111111..2222222 100644
+--- a/docs/my notes.md	
++++ b/docs/my notes.md	
+@@ -6,2 +6,3 @@ heading
+  existing line
++added line
+  context line
+diff --git "a/docs/caf\303\251.md" "b/docs/caf\303\251.md"
+index 3333333..4444444 100644
+--- "a/docs/caf\303\251.md"
++++ "b/docs/caf\303\251.md"
+@@ -20,1 +20,2 @@ heading
+  kept line
++new line
+diff --git a/src/old_name.ts b/src/new_name.ts
+similarity index 85%
+rename from src/old_name.ts
+rename to src/new_name.ts
+--- a/src/old_name.ts
++++ b/src/new_name.ts
+@@ -1,2 +1,2 @@
+-old version
++new version
+  shared context
+diff --git a/dev/null b/src/created.ts
+new file mode 100644
+--- /dev/null
++++ b/src/created.ts
+@@ -0,0 +1,2 @@
++export const first = 1;
++export const second = 2;
+diff --git a/src/deleted.ts b/dev/null
+deleted file mode 100644
+--- a/src/deleted.ts
++++ /dev/null
+@@ -1,2 +0,0 @@
+-export const old1 = 1;
+-export const old2 = 2;
+diff --git a/BACKLOG.md b/BACKLOG.md
+index 1111111..2222222 100644
+--- a/BACKLOG.md
++++ b/BACKLOG.md
+@@ -1,1 +1,2 @@
+  kept
++added
+diff --git a/BACKLOG.md.old b/BACKLOG.md.old
+index 1111111..2222222 100644
+--- a/BACKLOG.md.old
++++ b/BACKLOG.md.old
+@@ -1,1 +1,2 @@
+  kept
++added
+diff --git a/BACKLOGxmd b/BACKLOGxmd
+index 1111111..2222222 100644
+--- a/BACKLOGxmd
++++ b/BACKLOGxmd
+@@ -1,1 +1,2 @@
+  kept
++added
+diff --git a/docs/backlog/item.md b/docs/backlog/item.md
+index 1111111..2222222 100644
+--- a/docs/backlog/item.md
++++ b/docs/backlog/item.md
+@@ -1,1 +1,2 @@
+  kept
++added
+diff --git a/docs/backlogged.md b/docs/backlogged.md
+index 1111111..2222222 100644
+--- a/docs/backlogged.md
++++ b/docs/backlogged.md
+@@ -1,1 +1,2 @@
+  kept
++added
+diff --git a/docs/backlog(new).md b/docs/backlog(new).md
+index 1111111..2222222 100644
+--- a/docs/backlog(new).md
++++ b/docs/backlog(new).md
+@@ -1,1 +1,2 @@
+  kept
++added'
+printf '%s' "$diff_corpus" >"$diff_file"
+
+anchor_diff_case() { # name path side line bound
+  local res
+  res="$(diff_anchor "$diff_file" "$2" "$3" "$4" "$5")"
+  jq -cn --arg n "$1" --arg p "$2" --arg s "$3" --argjson l "$4" --argjson b "$5" --arg r "$res" \
+    '{name:$n, path:$p, side:$s, line:$l, bound:$b, result:$r}'
+}
+
+anchor_diff_cases() {
+  local CH="tools/crossrev/CHANGELOG.md"
+  anchor_diff_case "changelog-right-inside-hunk" "$CH" RIGHT 13 3
+  anchor_diff_case "changelog-right-added-line" "$CH" RIGHT 9 3
+  anchor_diff_case "changelog-left-inside-hunk" "$CH" LEFT 11 3
+  anchor_diff_case "changelog-left-deleted-line" "$CH" LEFT 34 3
+  anchor_diff_case "changelog-right-snap-dist-1" "$CH" RIGHT 14 3
+  anchor_diff_case "changelog-right-snap-forward" "$CH" RIGHT 5 3
+  anchor_diff_case "changelog-right-snap-dist-2" "$CH" RIGHT 15 3
+  anchor_diff_case "changelog-right-snap-dist-3" "$CH" RIGHT 16 3
+  anchor_diff_case "changelog-right-past-bound-3" "$CH" RIGHT 17 3
+  anchor_diff_case "changelog-right-snap-bound-4" "$CH" RIGHT 17 4
+  anchor_diff_case "changelog-right-bound-0-exact" "$CH" RIGHT 13 0
+  anchor_diff_case "changelog-right-bound-0-miss" "$CH" RIGHT 14 0
+  anchor_diff_case "changelog-right-tie-earlier" "$CH" RIGHT 24 11
+  anchor_diff_case "changelog-right-far-miss" "$CH" RIGHT 24 3
+  anchor_diff_case "changelog-left-added-misses" "$CH" LEFT 37 3
+  anchor_diff_case "changelog-right-deleted-misses" "$CH" RIGHT 33 3
+  anchor_diff_case "spaced-path-inside-hunk" "docs/my notes.md" RIGHT 7 3
+  anchor_diff_case "spaced-path-snap" "docs/my notes.md" RIGHT 9 3
+  anchor_diff_case "quoted-path-inside-hunk" "docs/café.md" RIGHT 21 3
+  anchor_diff_case "quoted-path-snap" "docs/café.md" RIGHT 22 3
+  anchor_diff_case "quoted-path-escaped-literal-misses" "docs/caf\\303\\251.md" RIGHT 21 3
+  anchor_diff_case "rename-old-path" "src/old_name.ts" LEFT 1 3
+  anchor_diff_case "rename-new-path" "src/new_name.ts" RIGHT 1 3
+  anchor_diff_case "created-file" "src/created.ts" RIGHT 1 3
+  anchor_diff_case "deleted-file" "src/deleted.ts" LEFT 1 3
+  anchor_diff_case "absent-file" "absent.ts" RIGHT 1 3
+}
+
+exclude_diff_case() { # name exclusion_args...
+  local name="$1"; shift
+  local out
+  out="$(diff_exclude "$diff_file" "$@")"
+  local ex_json
+  if [[ $# -eq 0 ]]; then
+    ex_json="[]"
+  else
+    ex_json="$(jq -cn '$ARGS.positional' --args "$@")"
+  fi
+  jq -cn --arg n "$name" --argjson ex "$ex_json" --arg out "$out" \
+    '{name:$n, exclusions:$ex, output:$out}'
+}
+
+exclude_diff_cases() {
+  exclude_diff_case "exclude-backlog-file" "BACKLOG.md"
+  exclude_diff_case "exclude-backlog-prefix-dir" "docs/backlog"
+  exclude_diff_case "exclude-backlog-trailing-slash" "docs/backlog/"
+  exclude_diff_case "exclude-multiple" "BACKLOG.md" "docs/backlog"
+  exclude_diff_case "exclude-spaced-path" "docs/my notes.md"
+  exclude_diff_case "exclude-regex-metachar" "docs/backlog(new).md"
+  exclude_diff_case "exclude-rename-source" "src/old_name.ts"
+  exclude_diff_case "exclude-rename-target" "src/new_name.ts"
+  exclude_diff_case "exclude-none"
+}
+
+numbered="$(diff_number "$diff_file")"
+
+jq -n --argjson captured "$(captured_json)" \
+  --arg corpus "$diff_corpus" \
+  --arg diff_number "$numbered" \
+  --argjson anchors "$(anchor_diff_cases | jq -s .)" \
+  --argjson excludes "$(exclude_diff_cases | jq -s .)" \
+  '{captured:$captured, function:"diff_views", corpus:$corpus, diff_number:$diff_number, anchors:$anchors, excludes:$excludes}' \
+  >"$FIXDIR/diff_views.json"
+
+rm -rf "$diff_workdir"
+
+# --- configuration merge and refusals ---------------------------------------
+
+config_capture_dir="$(mktemp -d)"
+
+(
+  cd "$config_capture_dir"
+  mkdir -p r_def && cd r_def && git init -q . && git commit -q --allow-empty -m init
+  XDG_CONFIG_HOME="$config_capture_dir/xdg_def"; export XDG_CONFIG_HOME
+  cfg_load
+  jq -n --argjson merged "$CFG_MERGED" \
+    '{name:"defaults", repo_yaml:null, operator_yaml:null, base_sha:null, merged:$merged}'
+) >"$config_capture_dir/case_defaults.json"
+
+(
+  cd "$config_capture_dir"
+  mkdir -p r_over && cd r_over && git init -q . && git commit -q --allow-empty -m init
+  mkdir -p .github
+  repo_yaml='version: 1
+mode: automated
+runner: self-hosted
+policy:
+  min_fix_severity: high
+  max_passes_per_cycle: 5
+  max_prs_per_day: 50
+git:
+  hooks: run
+logs:
+  retention_days: 30
+  keep_transcripts: true
+reviewer:
+  harness: claude
+  model: claude-3-7-sonnet
+resolver:
+  harness: codex
+  model: o3
+endpoints:
+  repo_ep:
+    base_url: https://repo.example.com/v1
+    token_env: REPO_KEY'
+  printf '%s\n' "$repo_yaml" > .github/crossrev.yml
+  XDG_CONFIG_HOME="$config_capture_dir/xdg_over"; export XDG_CONFIG_HOME
+  cfg_load
+  jq -n --arg r "$repo_yaml" --argjson merged "$CFG_MERGED" \
+    '{name:"repo-over-defaults", repo_yaml:$r, operator_yaml:null, base_sha:null, merged:$merged}'
+) >"$config_capture_dir/case_repo_over.json"
+
+(
+  cd "$config_capture_dir"
+  mkdir -p r_op && cd r_op && git init -q . && git commit -q --allow-empty -m init
+  mkdir -p .github
+  repo_yaml='version: 1
+endpoints:
+  kimi:
+    base_url: https://public.example/
+    token_env: KIMI_API_KEY
+  repo_only:
+    base_url: https://repo.example/
+    token_env: REPO_KEY'
+  printf '%s\n' "$repo_yaml" > .github/crossrev.yml
+  xdg="$config_capture_dir/xdg_op"
+  mkdir -p "$xdg/crossrev"
+  op_yaml='version: 1
+endpoints:
+  kimi:
+    base_url: http://mine.local/
+    token_env: KIMI_API_KEY
+  operator_only:
+    base_url: http://operator.local/
+    token_env: OP_KEY'
+  printf '%s\n' "$op_yaml" > "$xdg/crossrev/config.yml"
+  XDG_CONFIG_HOME="$xdg"; export XDG_CONFIG_HOME
+  cfg_load
+  jq -n --arg r "$repo_yaml" --arg o "$op_yaml" --argjson merged "$CFG_MERGED" \
+    '{name:"operator-endpoint-override", repo_yaml:$r, operator_yaml:$o, base_sha:null, merged:$merged}'
+) >"$config_capture_dir/case_op_override.json"
+
+(
+  cd "$config_capture_dir"
+  mkdir -p r_fall && cd r_fall && git init -q .
+  repo_yaml='version: 1
+policy:
+  max_passes_per_cycle: 7'
+  printf '%s\n' "$repo_yaml" > .crossrev.yml
+  git add .crossrev.yml
+  GIT_AUTHOR_NAME="crossrev" GIT_AUTHOR_EMAIL="test@example.com" \
+  GIT_COMMITTER_NAME="crossrev" GIT_COMMITTER_EMAIL="test@example.com" \
+  GIT_AUTHOR_DATE="2026-01-01T00:00:00Z" GIT_COMMITTER_DATE="2026-01-01T00:00:00Z" \
+  git commit -q -m "base policy"
+  base_sha="$(git rev-parse HEAD)"
+  rm -f .crossrev.yml
+  git commit -q --allow-empty -m "head commit"
+  XDG_CONFIG_HOME="$config_capture_dir/xdg_fall"; export XDG_CONFIG_HOME
+  cfg_load "$base_sha"
+  jq -n --arg r "$repo_yaml" --arg b "$base_sha" --argjson merged "$CFG_MERGED" \
+    '{name:"base-fallback-crossrev-yml", repo_yaml:$r, operator_yaml:null, base_sha:$b, merged:$merged}'
+) >"$config_capture_dir/case_base_fallback.json"
+
+config_refusal_case() { # name family yaml
+  local name="$1" family="$2" yaml="$3"
+  local d; d="$(mktemp -d "$config_capture_dir/refusal_XXXXXX")"
+  (
+    cd "$d" && git init -q . && git commit -q --allow-empty -m init
+    mkdir -p .github
+    printf '%s\n' "$yaml" > .github/crossrev.yml
+    XDG_CONFIG_HOME="$d/xdg"; export XDG_CONFIG_HOME
+    local err
+    err="$({ cfg_load >/dev/null; } 2>&1 || true)"
+    jq -cn --arg n "$name" --arg f "$family" --arg y "$yaml" --arg e "$err" \
+      '{name:$n, family:$f, config:$y, error:$e}'
+  )
+}
+
+config_refusal_cases() {
+  config_refusal_case "version-mismatch" "version" $'version: 99\n'
+  config_refusal_case "severity-invalid" "severity" $'version: 1\npolicy:\n  min_fix_severity: medum\n'
+  config_refusal_case "pass-count-invalid" "pass_count" $'version: 1\npolicy:\n  max_passes_per_cycle: 0\n'
+  config_refusal_case "git-hooks-invalid" "git_hooks" $'version: 1\ngit:\n  hooks: skipp\n'
+  config_refusal_case "log-retention-invalid" "log_retention" $'version: 1\nlogs:\n  retention_days: 0\n'
+}
+
+cfg_cases="[$(cat "$config_capture_dir/case_defaults.json"), $(cat "$config_capture_dir/case_repo_over.json"), $(cat "$config_capture_dir/case_op_override.json"), $(cat "$config_capture_dir/case_base_fallback.json")]"
+
+jq -n --argjson captured "$(captured_json)" \
+  --argjson cases "$cfg_cases" \
+  --argjson refusals "$(config_refusal_cases | jq -s .)" \
+  '{captured:$captured, function:"cfg_load", cases:$cases, refusals:$refusals}' \
+  >"$FIXDIR/config_merge.json"
+
+rm -rf "$config_capture_dir"
+
+# --- labels colour and description ------------------------------------------
+
+label_case() { # label
+  local l="$1"
+  local c d
+  c="$(legs_label_colour "$l")"
+  d="$(legs_label_description "$l")"
+  jq -cn --arg l "$l" --arg c "$c" --arg d "$d" \
+    '{label:$l, colour:$c, description:$d}'
+}
+
+label_cases() {
+  label_case "crossrev/awaiting-review"
+  label_case "crossrev/awaiting-resolution"
+  label_case "crossrev/converged"
+  label_case "crossrev/halted"
+  label_case "crossrev/stop"
+  label_case "crossrev/pass-1"
+  label_case "crossrev/pass-7"
+  label_case "crossrev/watchdog-retried"
+  label_case "crossrev/unknown-fallback"
+}
+
+jq -n --argjson captured "$(captured_json)" \
+  --argjson labels "$(label_cases | jq -s .)" \
+  '{captured:$captured, function:"legs_label", labels:$labels}' \
+  >"$FIXDIR/labels.json"
 
 # --- both assembled prompts, byte for byte -----------------------------------
 

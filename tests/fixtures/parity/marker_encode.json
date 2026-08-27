@@ -1,0 +1,115 @@
+{
+  "captured": {
+    "platform": "Darwin 25.5.0 arm64",
+    "tr_implementation": "/usr/bin/tr (BSD tr)",
+    "locale": "en_AU.UTF-8",
+    "note": "state_finding_id and state_anchor pin LC_ALL=C internally, so ids and anchors are byte-oriented whatever locale this file was captured under."
+  },
+  "function": "state_marker_encode",
+  "cases": [
+    {
+      "name": "review-complete",
+      "input": {
+        "v": 1,
+        "leg": "review",
+        "pass": 2,
+        "state": "complete",
+        "verdict": "issues-remain",
+        "head_sha": "9f3c1ab",
+        "findings": [
+          {
+            "id": "aaaa000000000001",
+            "severity": "high",
+            "category": "security",
+            "pre_existing": false,
+            "path": "app.ts",
+            "line": 2,
+            "title": "Fetch timeout missing"
+          }
+        ]
+      },
+      "encoded": "\n\n<!-- crossrev: {\"v\":1,\"leg\":\"review\",\"pass\":2,\"state\":\"complete\",\"verdict\":\"issues-remain\",\"head_sha\":\"9f3c1ab\",\"findings\":[{\"id\":\"aaaa000000000001\",\"severity\":\"high\",\"category\":\"security\",\"pre_existing\":false,\"path\":\"app.ts\",\"line\":2,\"title\":\"Fetch timeout missing\"}]} -->"
+    },
+    {
+      "name": "review-minimal",
+      "input": {
+        "v": 1,
+        "leg": "review",
+        "pass": 1,
+        "state": "complete"
+      },
+      "encoded": "\n\n<!-- crossrev: {\"v\":1,\"leg\":\"review\",\"pass\":1,\"state\":\"complete\"} -->"
+    },
+    {
+      "name": "resolve-complete",
+      "input": {
+        "v": 1,
+        "leg": "resolve",
+        "pass": 2,
+        "state": "complete",
+        "commit_sha": "d81a3f2abc",
+        "resolutions": [
+          {
+            "finding_id": "aaaa000000000001",
+            "resolution": "fixed"
+          },
+          {
+            "finding_id": "bbbb000000000002",
+            "resolution": "deferred",
+            "crossrev_tracked": "#45"
+          }
+        ]
+      },
+      "encoded": "\n\n<!-- crossrev: {\"v\":1,\"leg\":\"resolve\",\"pass\":2,\"state\":\"complete\",\"commit_sha\":\"d81a3f2abc\",\"resolutions\":[{\"finding_id\":\"aaaa000000000001\",\"resolution\":\"fixed\"},{\"finding_id\":\"bbbb000000000002\",\"resolution\":\"deferred\",\"crossrev_tracked\":\"#45\"}]} -->"
+    },
+    {
+      "name": "resolve-minimal",
+      "input": {
+        "v": 1,
+        "leg": "resolve",
+        "pass": 1,
+        "state": "complete"
+      },
+      "encoded": "\n\n<!-- crossrev: {\"v\":1,\"leg\":\"resolve\",\"pass\":1,\"state\":\"complete\"} -->"
+    },
+    {
+      "name": "declined",
+      "input": {
+        "v": 1,
+        "leg": "review",
+        "pass": 3,
+        "state": "declined",
+        "reason": "reached max_passes_per_cycle (3)"
+      },
+      "encoded": "\n\n<!-- crossrev: {\"v\":1,\"leg\":\"review\",\"pass\":3,\"state\":\"declined\",\"reason\":\"reached max_passes_per_cycle (3)\"} -->"
+    },
+    {
+      "name": "missing-optional-fields",
+      "input": {
+        "v": 1,
+        "leg": "resolve",
+        "pass": 1,
+        "state": "started",
+        "head_sha": "abc1234"
+      },
+      "encoded": "\n\n<!-- crossrev: {\"v\":1,\"leg\":\"resolve\",\"pass\":1,\"state\":\"started\",\"head_sha\":\"abc1234\"} -->"
+    },
+    {
+      "name": "present-empty-crossrev-tracked",
+      "input": {
+        "v": 1,
+        "leg": "resolve",
+        "pass": 1,
+        "state": "complete",
+        "resolutions": [
+          {
+            "finding_id": "aaaa000000000001",
+            "resolution": "deferred",
+            "crossrev_tracked": ""
+          }
+        ]
+      },
+      "encoded": "\n\n<!-- crossrev: {\"v\":1,\"leg\":\"resolve\",\"pass\":1,\"state\":\"complete\",\"resolutions\":[{\"finding_id\":\"aaaa000000000001\",\"resolution\":\"deferred\",\"crossrev_tracked\":\"\"}]} -->"
+    }
+  ]
+}
