@@ -23,10 +23,25 @@ CROSSREV_CONFIG_VERSION=1
 _cfg_operator_path() { printf '%s/crossrev/config.yml' "${XDG_CONFIG_HOME:-$HOME/.config}"; }
 
 # Read a YAML file into JSON, or emit {} when it is absent.
+#
+# Returns 1 without a message when the file will not parse, and the caller
+# refuses. The refusal cannot live here: every caller reads this through a
+# command substitution, and ui_die ends with `exit 1`, which inside `$( )` ends
+# only that subshell. lib/github.sh states the rule twice and lib/run.sh states
+# it in its own header. bin/crossrev sets -e, but bash suppresses that for the
+# whole body of a function invoked as part of an || list, and ctx_load is invoked
+# exactly that way at lib/run.sh:944, 1763 and 2921. So the caller carried on
+# with an empty string, jq refused it, and the next assertion blamed a key
+# nobody had set.
 _cfg_yaml_to_json() {
   [[ -f "$1" ]] || { printf '{}'; return 0; }
-  yq -o=json -I=0 '.' "$1" 2>/dev/null || ui_die \
-    "could not parse $1" \
+  yq -o=json -I=0 '.' "$1" 2>/dev/null || return 1
+}
+
+# Refuse a file that will not parse. Called outside the substitution that reads
+# it, so the exit ends the run rather than a subshell.
+_cfg_refuse_unparsable() {
+  ui_die "could not parse $1" \
     "It must be valid YAML. Check it with: yq '.' $1"
 }
 
@@ -109,13 +124,16 @@ cfg_load() {
          || cfg_show_at_base "$base_sha" ".crossrev.yml" || true)"
     repo_json="$(_cfg_yaml_text_to_json "$text")"
   else
-    if   [[ -f .github/crossrev.yml ]]; then repo_json="$(_cfg_yaml_to_json .github/crossrev.yml)"
-    elif [[ -f .crossrev.yml ]];        then repo_json="$(_cfg_yaml_to_json .crossrev.yml)"
+    if   [[ -f .github/crossrev.yml ]]; then
+      repo_json="$(_cfg_yaml_to_json .github/crossrev.yml)" || _cfg_refuse_unparsable .github/crossrev.yml
+    elif [[ -f .crossrev.yml ]]; then
+      repo_json="$(_cfg_yaml_to_json .crossrev.yml)" || _cfg_refuse_unparsable .crossrev.yml
     else repo_json='{}'
     fi
   fi
 
-  operator_json="$(_cfg_yaml_to_json "$(_cfg_operator_path)")"
+  local operator_path; operator_path="$(_cfg_operator_path)"
+  operator_json="$(_cfg_yaml_to_json "$operator_path")" || _cfg_refuse_unparsable "$operator_path"
 
   cfg_check_version "$repo_json" "$(basename "${base_sha:+base revision }").github/crossrev.yml"
   cfg_check_version "$operator_json" "$(_cfg_operator_path)"
@@ -139,6 +157,31 @@ cfg_load() {
   cfg_assert_max_passes_per_cycle
   cfg_assert_git_hooks
   cfg_assert_logs
+  cfg_assert_backlog
+}
+
+# Refuse a backlog destination or layout CrossRev does not recognise.
+#
+# The refusal lives here rather than in cfg_resolve_backlog for the reason
+# _cfg_yaml_to_json gives above: every caller reads that function through a
+# command substitution, where ui_die would end the subshell and let the caller
+# continue on an empty resolution. cfg_load runs before any of them resolve, so
+# a bad value is named here, once, outside a substitution.
+cfg_assert_backlog() {
+  local want layout
+  want="$(jq -r '.backlog.destination // "auto"' <<<"$CFG_MERGED")"
+  case "$want" in
+    none|""|github_issues|repository|auto) : ;;
+    *) ui_die "backlog.destination is '$want', which CrossRev does not recognise" \
+         "Set it to github_issues, repository, none or auto in the repository config." ;;
+  esac
+
+  layout="$(jq -r '.backlog.repository.layout // "folder"' <<<"$CFG_MERGED")"
+  case "$layout" in
+    folder|file) : ;;
+    *) ui_die "backlog.repository.layout is '$layout', which is not folder or file" \
+         "Set it to folder or file in the repository config." ;;
+  esac
 }
 
 # The run record lives under the state directory, and both keys shape what
@@ -295,6 +338,12 @@ cfg_project_map_tracker() {
 # Resolve `backlog.destination` to a concrete destination.
 #
 # Prints "github_issues", "repository <layout> <path>", or "none".
+#
+# Every caller reads this through a command substitution, so the two ui_die arms
+# below cannot refuse a configured value: the exit would end the subshell and the
+# caller would carry on with an empty resolution. cfg_assert_backlog refuses both
+# values from cfg_load instead, and all three callers load before they resolve.
+# The arms stay as a guard against a caller passing a literal this does not know.
 cfg_resolve_backlog() {
   local base_sha="${1:-}" want="${2:-auto}"
 

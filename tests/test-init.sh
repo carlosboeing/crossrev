@@ -386,4 +386,36 @@ ep_line="$(install_line_for "$ep_cfg")"
 has "a leg on a named endpoint still renders the endpoint host installer" "$ep_line" "curl -fsSL https://claude.ai/install.sh"
 is  "and not a second one" "$(grep -c 'curl -fsSL' <<<"$ep_line" | tr -d ' ')" "1"
 
+# --- a label that will not create stops init --------------------------------
+#
+# cmd_init is called plainly from bin/crossrev, so set -e already ends the run
+# here. That guard is the only thing standing between this path and the cascade
+# lib/config.sh describes: gh_label_ensure can ui_die, and reading its word
+# through a command substitution swallows that exit. One || added to a caller
+# upstream would turn the guard off for the whole function body.
+#
+# So two assertions. The first pins the behaviour a user sees. The second pins
+# the contract that removes the dependence on set -e: the word comes back in
+# GH_LABEL_STATE, and _init_execute calls the function directly to read it.
+fixture_repo "$(config_with_issue_sink)"; stub_reset
+routes_init
+route_first 'api --method POST repos/*/labels*' '!fail'
+out="$("$CROSSREV" init --yes 2>&1)"; rc=$?
+
+is    "a label that will not create exits non-zero" "$rc" "1"
+has   "and the refusal names the label"             "$out" "could not create the label"
+
+repo_lib="$(cd "$HERE/.." && pwd)"
+state_out="$(CROSSREV_GH_ROUTES="$GH_ROUTES" CROSSREV_GH_LOG="$GH_LOG" \
+  PATH="$repo_lib/tests/stub:$PATH" bash -c '
+    set -uo pipefail
+    source "$1/lib/ui.sh"; source "$1/lib/github.sh"
+    gh_label_ensure "acme/widgets" "crossrev/stop" "cf222e" "stop" >/dev/null
+    printf "%s" "$GH_LABEL_STATE"
+  ' _ "$repo_lib" 2>/dev/null)"
+is "gh_label_ensure reports its outcome in GH_LABEL_STATE" "$state_out" "exists"
+
+hasnt "_init_execute never reads the label word through a substitution" \
+  "$(grep -n 'gh_label_ensure' "$repo_lib/lib/init.sh" | grep 'state=')" "\$(gh_label_ensure"
+
 finish
