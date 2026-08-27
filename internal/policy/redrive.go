@@ -13,9 +13,9 @@ type ResolutionRecord struct {
 // pass-label decisions read.
 //
 // Absent, null and empty `commit_sha` are one state here, because jq's
-// `.commit_sha // ""` collapses all three (lib/legs.sh:111). An absent
+// `.commit_sha // ""` collapses all three (lib/legs.sh:117). An absent
 // `resolutions` array and an empty one are likewise one state, for the same
-// reason at lib/legs.sh:138.
+// reason at lib/legs.sh:140.
 type ResolveMarker struct {
 	Blocked     bool
 	CommitSHA   string
@@ -29,7 +29,7 @@ type ReviewMarker struct {
 }
 
 // ResolveUnpushedFix reports a fix the resolver claimed and never committed
-// (lib/legs.sh:110-114).
+// (lib/legs.sh:115-119).
 //
 // `gh_commit_and_push` produces no commit when the tree is unchanged, so a
 // `fixed` resolution on a marker carrying no commit is a promise about the code
@@ -43,7 +43,7 @@ func ResolveUnpushedFix(m ResolveMarker) bool {
 }
 
 // ResolveUnrecorded reports a completed pass that recorded no resolutions and
-// pushed no commit (lib/legs.sh:135-139).
+// pushed no commit (lib/legs.sh:137-141).
 //
 // The leg returns before it writes a resolve marker when its review pass raised
 // nothing, so a marker that reached `complete` answered at least one finding.
@@ -57,7 +57,7 @@ func ResolveUnrecorded(m ResolveMarker) bool {
 }
 
 // ResolveRedrivable reports whether a completed resolve pass may be driven again
-// (lib/legs.sh:157-176).
+// (lib/legs.sh:157-175).
 //
 // Escalating or reporting blocked completes a pass rather than abandoning it,
 // and completion is what the re-run guard reads, so without this a pass that

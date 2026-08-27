@@ -21,9 +21,19 @@ func (r *Refusal) Error() string { return r.Message }
 // Flag is a boolean read off pull request metadata, in the three states the push
 // guard distinguishes: explicitly true, explicitly false, and unreadable.
 //
-// lib/legs.sh:449-451 uses `${n-…}` rather than `${n:-…}` for exactly this: an
+// lib/legs.sh:447-451 uses `${n-…}` rather than `${n:-…}` for exactly this: an
 // empty cross-repository flag has to stay empty, because "false" means "this
 // repository's own branch" and would skip the maintainer-edit check.
+//
+// The zero value is FlagUnknown, which is the opposite of the Bash default for
+// an argument that is absent rather than empty: `is_cross_repo="${8-false}"`
+// treats an eighth argument nobody passed as "this repository's own branch" and
+// skips the maintainer-edit check, while an unset CrossRepo here requires the
+// contributor's permission. Neither default is reachable in a shipped run —
+// lib/run.sh:1904-1905 is the only caller and it always passes all eight
+// arguments — so this is a divergence between two unreachable branches rather
+// than a divergence in behaviour. Requiring permission is the safe reading of a
+// field nobody filled in, so Go keeps it.
 type Flag string
 
 // The three states a Flag distinguishes.
@@ -46,11 +56,16 @@ type PushTarget struct {
 }
 
 // AssertPushTarget refuses a push anywhere except the pull request's own head
-// revision and repository (lib/legs.sh:447-479).
+// revision and repository (lib/legs.sh:446-478).
 //
 // Branch protection is a backstop, not a control: it fires after a bad push is
 // attempted and says nothing about which branch was targeted. This asserts the
 // target before anything leaves the machine.
+//
+// Two unread revisions compare equal and pass the first guard, the way Bash's
+// `[[ "" == "" ]]` does. That arm is a revision check, not a presence check: the
+// caller reads both halves from the same pull request metadata, and a reader
+// that got neither has a problem this refusal would misname.
 func AssertPushTarget(t PushTarget) error {
 	if !t.Current.Equal(t.Head) {
 		return &Refusal{
@@ -66,7 +81,17 @@ func AssertPushTarget(t PushTarget) error {
 			Hint: "crossrev refuses to push to a default branch. Re-open the pull request from a feature branch.",
 		}
 	}
-	if t.HeadRepo == (core.Slug{}) {
+	// Incomplete rather than a comparison against the zero value: a half-read
+	// slug carrying an owner and no name is exactly as unusable as an empty one,
+	// and it would otherwise skip this refusal and reach the origin comparison,
+	// which reports "the pull request's head is in 'o/'" and sends the operator
+	// to the wrong diagnosis.
+	//
+	// core.Slug's halves are unexported and both constructors refuse a half, so
+	// no caller outside core can hand this guard that value today. This does not
+	// rely on that: the guard states which values it rejects rather than
+	// inheriting the answer from an invariant another package enforces.
+	if t.HeadRepo.Incomplete() {
 		return &Refusal{
 			Message: "could not determine the head repository for this pull request",
 			Hint:    "The pull request metadata is missing head repository information.",
@@ -90,12 +115,20 @@ func AssertPushTarget(t PushTarget) error {
 	return nil
 }
 
-// EndpointVariables are the variables that redirect a harness process-wide, in
-// the order lib/legs.sh:491-492 checks them.
-var EndpointVariables = []string{"ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN"}
+// EndpointVariables lists the variables that redirect a harness process-wide, in
+// the order lib/legs.sh:489-490 checks them.
+//
+// A function returning a fresh slice rather than an exported package variable,
+// for the same reason FixedLabels is one. A `var` here is writable by every
+// importer, and `policy.EndpointVariables = nil` would leave AssertEnvClean
+// approving a leaked ANTHROPIC_AUTH_TOKEN — the one thing it exists to catch,
+// silently disabled from outside the package that owns the rule.
+func EndpointVariables() []string {
+	return []string{"ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN"}
+}
 
 // AssertEnvClean refuses an inherited environment carrying either endpoint
-// variable with a value (lib/legs.sh:490-497).
+// variable with a value (lib/legs.sh:487-494).
 //
 // This is layer one of the divergence guard and the specific failure it exists
 // for: the variables are process-scoped, so a leg that leaks one silently
@@ -106,7 +139,7 @@ var EndpointVariables = []string{"ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN"}
 // internal/exec/env.go is the only file allowed to call os.Environ.
 func AssertEnvClean(env map[string]string) error {
 	var leaked []string
-	for _, name := range EndpointVariables {
+	for _, name := range EndpointVariables() {
 		if env[name] != "" {
 			leaked = append(leaked, name)
 		}
@@ -146,15 +179,22 @@ func (d Difference) String() string { return string(d) }
 //
 // The comparison reads what each side actually ran, not what the config says,
 // because --harness rewrites legs after the config is read.
+//
+// The three fields are named rather than compared with struct equality. Bash
+// compares exactly these three, and `reviewer != resolver` would enrol a fourth
+// comparable field the moment somebody added one — quietly widening what counts
+// as a difference, with no test to fail.
 func ConfiguredDifference(reviewer, resolver LegSettings) Difference {
-	if reviewer != resolver {
+	if reviewer.Harness != resolver.Harness ||
+		reviewer.Endpoint != resolver.Endpoint ||
+		reviewer.Model != resolver.Model {
 		return DifferenceDifferent
 	}
 	return DifferenceSame
 }
 
 // AssertModelsDiverged refuses when two legs configured to differ were answered
-// by the same model (lib/legs.sh:548-555).
+// by the same model (lib/legs.sh:547-555).
 //
 // Layer two, where the harness reports it. Do not halt merely because a harness
 // reports none — that would disqualify the codex adapter for a field Codex does

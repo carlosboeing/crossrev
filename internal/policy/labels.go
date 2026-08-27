@@ -20,7 +20,7 @@ const (
 
 	// LabelWatchdogRetried is not a loop state and not one of the six. It is
 	// the watchdog's own bookkeeping, and it reads as a qualifier on whatever
-	// state it sits beside (ADR 0008, lib/legs.sh:305-307).
+	// state it sits beside (ADR 0008, lib/legs.sh:303-305).
 	LabelWatchdogRetried = "crossrev/watchdog-retried"
 )
 
@@ -53,7 +53,25 @@ const (
 func (p PassLabelState) String() string { return string(p) }
 
 // Label is the label the word names, as lib/run.sh:464 forms it.
-func (p PassLabelState) Label() string { return "crossrev/" + string(p) }
+//
+// The constants rather than `"crossrev/" + string(p)`: the four labels are
+// declared ten lines above, and a second spelling of them here is how a rename
+// lands in one place and not the other. An unknown word gets the concatenation,
+// which is what lib/run.sh:464 would also produce.
+func (p PassLabelState) Label() string {
+	switch p {
+	case PassAwaitingReview:
+		return LabelAwaitingReview
+	case PassAwaitingResolution:
+		return LabelAwaitingResolution
+	case PassConverged:
+		return LabelConverged
+	case PassHalted:
+		return LabelHalted
+	default:
+		return "crossrev/" + string(p)
+	}
+}
 
 // AwaitingLabel is the label a leg waits behind (lib/legs.sh:95-101).
 //
@@ -96,7 +114,7 @@ func PassLabel(verdict core.Verdict, actionable, escalated int) PassLabelState {
 }
 
 // ResolvePassLabel is the loop-state label a finished resolve pass leaves behind
-// (lib/legs.sh:234-249), read off the marker rather than recomputed beside it so
+// (lib/legs.sh:234-248), read off the marker rather than recomputed beside it so
 // the label and the marker cannot disagree.
 //
 // A pass that pushed hands back to the reviewer, because the head moved and
@@ -130,7 +148,7 @@ func ResolvePassLabel(m ResolveMarker, otherEscalated int) PassLabelState {
 	}
 }
 
-// LabelColour is the colour a loop label is minted with (lib/legs.sh:295-310).
+// LabelColour is the colour a loop label is minted with (lib/legs.sh:295-308).
 //
 // Six hues, no two adjacent on the wheel, so the label row on a pull request
 // carries state at a glance rather than a row of identical purple pills. Red is
@@ -163,7 +181,7 @@ func LabelColour(label string) string {
 }
 
 // LabelDescription is what the label means, in the words the design uses for it
-// (lib/legs.sh:322-334).
+// (lib/legs.sh:322-333).
 //
 // Per label rather than one string for all of them, because a label description
 // is the only place GitHub shows a reader what a label means without them going
@@ -185,7 +203,10 @@ func LabelDescription(label string) string {
 		return "crossrev: the watchdog retried this leg once"
 	}
 	if strings.HasPrefix(label, LabelPassPrefix) {
-		// `${1##*-}` is the text after the LAST hyphen, not after the prefix.
+		// `${1##*-}` is the text after the LAST hyphen. PassLabelName appends a
+		// decimal number to the prefix, so no label it mints carries a second
+		// hyphen and the two readings cannot disagree — this matches the Bash
+		// character for character rather than claiming a distinction.
 		return "crossrev: reached pass " + label[strings.LastIndex(label, "-")+1:]
 	}
 	return "crossrev loop state"

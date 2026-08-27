@@ -28,8 +28,9 @@ func TestSeverityRank(t *testing.T) {
 	}
 }
 
-// TestShouldFix transcribes lib/legs.sh:81-88 and the `fixes` block at
-// tests/test-legs.sh:51-76.
+// TestShouldFix transcribes lib/legs.sh:81-87 and the `fixes` block at
+// tests/test-legs.sh:57-71, case for case and in the shell's order, plus one
+// case the shell has no counterpart for: an empty threshold.
 func TestShouldFix(t *testing.T) {
 	cases := []struct {
 		desc        string
@@ -42,10 +43,16 @@ func TestShouldFix(t *testing.T) {
 		{"above it too", core.SeverityHigh, core.SeverityMedium, false, true},
 		{"below it, the finding is reported and left", core.SeverityLow, core.SeverityMedium, false, false},
 		{"min_fix_severity low takes everything", core.SeverityLow, core.SeverityLow, false, true},
-		{"a pre-existing defect is never fixed here", core.SeverityHigh, core.SeverityLow, true, false},
-		{"an unrecognised threshold fixes nothing", core.SeverityHigh, core.Severity("critical"), false, false},
+		{"min_fix_severity high takes only the top rung", core.SeverityMedium, core.SeverityHigh, false, false},
+		{"a pre-existing finding is never fixed", core.SeverityHigh, core.SeverityLow, true, false},
+		{"even with the threshold at its lowest", core.SeverityMedium, core.SeverityLow, true, false},
+		{"an unrecognised severity meets no threshold", core.Severity("important"), core.SeverityMedium, false, false},
+		{"an unrecognised threshold fixes nothing", core.SeverityHigh, core.Severity("urgent"), false, false},
+		// No shell counterpart: the block above never passes an empty
+		// min_fix_severity, though legs_should_fix ranks one 0 and refuses the
+		// same way. An unset core.Severity is the Go zero value, so a caller
+		// reaches this here by writing nothing at all.
 		{"an empty threshold fixes nothing", core.SeverityHigh, core.Severity(""), false, false},
-		{"an unrecognised severity meets no threshold", core.Severity("nit"), core.SeverityLow, false, false},
 	}
 	for _, tc := range cases {
 		if got := policy.ShouldFix(tc.severity, tc.bar, tc.preExisting); got != tc.want {

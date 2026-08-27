@@ -32,8 +32,8 @@ func slug(t *testing.T, s string) core.Slug {
 	return v
 }
 
-// TestAssertPushTarget transcribes lib/legs.sh:447-479 and the `guard` block at
-// tests/test-legs.sh:90-93, plus the two cross-repository arms the Bash block
+// TestAssertPushTarget transcribes lib/legs.sh:446-478 and the `guard` block at
+// tests/test-legs.sh:91-94, plus the two cross-repository arms the Bash block
 // leaves to its six-argument default.
 func TestAssertPushTarget(t *testing.T) {
 	base := func() policy.PushTarget {
@@ -60,6 +60,12 @@ func TestAssertPushTarget(t *testing.T) {
 			func(p *policy.PushTarget) { p.HeadBranch = "main" }, "is the repository default branch"},
 		{"refuses when the head repo is unreadable",
 			func(p *policy.PushTarget) { p.HeadRepo = core.Slug{} }, "could not determine the head repository"},
+		// Both revisions unread compare equal, the way Bash's `[[ "" == "" ]]`
+		// does. The first guard is a revision check, not a presence check.
+		{"two unread revisions pass the revision guard", func(p *policy.PushTarget) {
+			p.Current = core.Revision{}
+			p.Head = core.Revision{}
+		}, ""},
 		{"refuses when the head repo is not the origin",
 			func(p *policy.PushTarget) { p.HeadRepo = slug(t, "fork/r") }, "but this checkout pushes to"},
 		{"refuses a fork without maintainer edits",
@@ -103,7 +109,7 @@ func TestAssertPushTarget(t *testing.T) {
 	}
 }
 
-// TestAssertEnvClean transcribes lib/legs.sh:490-497 and the leakage block at
+// TestAssertEnvClean transcribes lib/legs.sh:487-494 and the leakage block at
 // tests/test-legs.sh:176-182. Only a non-empty value leaks.
 func TestAssertEnvClean(t *testing.T) {
 	cases := []struct {
@@ -141,7 +147,7 @@ func TestAssertEnvClean(t *testing.T) {
 }
 
 // TestConfiguredDifference transcribes the `is_diff` block at
-// tests/test-legs.sh:154-158 over lib/legs.sh:531-539.
+// tests/test-legs.sh:159-162 over lib/legs.sh:531-539.
 func TestConfiguredDifference(t *testing.T) {
 	cases := []struct {
 		desc               string
@@ -172,8 +178,8 @@ func TestConfiguredDifference(t *testing.T) {
 	}
 }
 
-// TestAssertModelsDiverged transcribes tests/test-legs.sh:162-172 over
-// lib/legs.sh:548-555. Absence is not a halt: it would disqualify the codex
+// TestAssertModelsDiverged transcribes tests/test-legs.sh:166-174 over
+// lib/legs.sh:547-555. Absence is not a halt: it would disqualify the codex
 // adapter for a field Codex does not emit.
 func TestAssertModelsDiverged(t *testing.T) {
 	cases := []struct {
@@ -186,6 +192,15 @@ func TestAssertModelsDiverged(t *testing.T) {
 			policy.DifferenceDifferent, "claude-opus-5", "", false},
 		{"the jq spelling of an absent model does not halt either",
 			policy.DifferenceDifferent, "claude-opus-5", "null", false},
+		// Both sides "null" is the real codex shape, not a contrived one:
+		// lib/run.sh:2142 defaults both reads with jq's `// "null"` and Codex
+		// reports no model_reported at all. The mixed case above never reaches
+		// the absence check — the two models differ, so it returns one arm
+		// earlier — so only this pairing pins it.
+		{"neither leg reporting a model does not halt either",
+			policy.DifferenceDifferent, "null", "null", false},
+		{"nor does neither leg reporting anything at all",
+			policy.DifferenceDifferent, "", "", false},
 		{"two legs configured to differ but answered by one model halts",
 			policy.DifferenceDifferent, "claude-opus-5", "claude-opus-5", true},
 		{"one configured model answering both legs is fine",
@@ -201,5 +216,78 @@ func TestAssertModelsDiverged(t *testing.T) {
 		if tc.refuse && err != nil && !strings.Contains(err.Error(), tc.reviewer) {
 			t.Errorf("%s: message %q does not name the model", tc.desc, err.Error())
 		}
+	}
+}
+
+// TestEndpointVariablesCannotBeShrunk pins the guard against its own caller. A
+// package-level `var` would let any importer write policy.EndpointVariables =
+// nil, after which AssertEnvClean approves a leaked ANTHROPIC_AUTH_TOKEN — the
+// single failure the cross-model design exists to catch, switched off from
+// outside the package that owns the rule.
+func TestEndpointVariablesCannotBeShrunk(t *testing.T) {
+	got := policy.EndpointVariables()
+	want := []string{"ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN"}
+	if len(got) != len(want) {
+		t.Fatalf("EndpointVariables() = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("EndpointVariables() = %v, want %v", got, want)
+		}
+	}
+
+	// Whatever a caller does to the slice it was handed — overwrite it, shrink
+	// it — the next call gets the full list back.
+	for i := range got {
+		got[i] = "IRRELEVANT"
+	}
+	got = got[:0]
+	again := policy.EndpointVariables()
+	if len(again) != len(want) {
+		t.Fatalf("a caller shrank the guard's list to %d entries: %v", len(again), again)
+	}
+	for i := range want {
+		if again[i] != want[i] {
+			t.Fatalf("a caller rewrote the guard's list to %v", again)
+		}
+	}
+
+	// And the guard still refuses a leak of either variable.
+	for _, name := range want {
+		if err := policy.AssertEnvClean(map[string]string{name: "leaked"}); err == nil {
+			t.Errorf("AssertEnvClean approved a leaked %s", name)
+		}
+	}
+}
+
+// TestPushTargetZeroCrossRepoNeedsPermission pins the Go zero value of
+// CrossRepo to the require-permission branch, by leaving the field out of the
+// literal rather than naming FlagUnknown.
+//
+// This is the opposite of the Bash default for an absent eighth argument
+// (`is_cross_repo="${8-false}"` at lib/legs.sh:451, which skips the
+// maintainer-edit check). Neither default ships: lib/run.sh:1904-1905 is the
+// only caller and always passes all eight arguments, so the Bash default is as
+// unreachable in production as this zero value is. Requiring permission is the
+// safe reading of a field nobody filled in.
+func TestPushTargetZeroCrossRepoNeedsPermission(t *testing.T) {
+	target := policy.PushTarget{
+		Current:       rev(t, shaA),
+		Head:          rev(t, shaA),
+		HeadBranch:    "feat/x",
+		DefaultBranch: "main",
+		HeadRepo:      slug(t, "o/r"),
+		OriginRepo:    slug(t, "o/r"),
+		// MaintainerCanModify and CrossRepo deliberately unset.
+	}
+	if policy.FlagUnknown != "" {
+		t.Fatalf("FlagUnknown is %q, not the zero value", policy.FlagUnknown)
+	}
+	err := policy.AssertPushTarget(target)
+	if err == nil {
+		t.Fatal("an unset CrossRepo allowed the push, want a refusal")
+	}
+	if !strings.Contains(err.Error(), "has not allowed maintainer edits") {
+		t.Errorf("refusal %q is not the maintainer-edit one", err)
 	}
 }

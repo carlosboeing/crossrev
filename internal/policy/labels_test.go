@@ -25,7 +25,7 @@ type labelsFixture struct {
 
 // TestLabelsMatchParityFixture compares every triple in labels.json against
 // LabelColour and LabelDescription. Nine entries cover the seven mapped arms of
-// lib/legs.sh:295-334 plus the fallback.
+// lib/legs.sh:295-333 plus the fallback.
 func TestLabelsMatchParityFixture(t *testing.T) {
 	path := filepath.Join("..", "..", "tests", "fixtures", "parity", "labels.json")
 	raw, err := os.ReadFile(path)
@@ -87,7 +87,7 @@ func TestLabelsColourContract(t *testing.T) {
 	}
 }
 
-// TestLabelsPassArm pins the wildcard arms of lib/legs.sh:301 and 328: every
+// TestLabelsPassArm pins the wildcard arms of lib/legs.sh:302 and 329: every
 // pass number takes the grey and a description naming its own number.
 func TestLabelsPassArm(t *testing.T) {
 	for _, n := range []int{1, 3, 7, 42} {
@@ -102,7 +102,8 @@ func TestLabelsPassArm(t *testing.T) {
 	}
 }
 
-// TestLabelsAwaiting transcribes lib/legs.sh:95-101 and tests/test-legs.sh:82.
+// TestLabelsAwaiting transcribes lib/legs.sh:95-101 and the `label` block at
+// tests/test-legs.sh:82-83.
 // The leg is named for the verb and the label for the noun, so resolve waits
 // behind awaiting-resolution.
 func TestLabelsAwaiting(t *testing.T) {
@@ -122,7 +123,7 @@ func TestLabelsAwaiting(t *testing.T) {
 }
 
 // TestLabelsPassLabel transcribes the `pass_label` block at
-// tests/test-legs.sh:487-492 over lib/legs.sh:261-271.
+// tests/test-legs.sh:486-491 over lib/legs.sh:261-271.
 func TestLabelsPassLabel(t *testing.T) {
 	cases := []struct {
 		desc       string
@@ -147,7 +148,7 @@ func TestLabelsPassLabel(t *testing.T) {
 }
 
 // TestLabelsResolvePassLabel transcribes the `resolve_label` block at
-// tests/test-legs.sh:376-412 over lib/legs.sh:234-249.
+// tests/test-legs.sh:376-412 over lib/legs.sh:234-248.
 func TestLabelsResolvePassLabel(t *testing.T) {
 	rec := func(r core.Resolution) policy.ResolutionRecord {
 		return policy.ResolutionRecord{Resolution: r}
@@ -204,7 +205,7 @@ func TestLabelsResolvePassLabel(t *testing.T) {
 }
 
 // TestLabelsPassLabelStateNames pins the four words run_pass_labels
-// (lib/run.sh:439-465) removes and re-adds by name, and the label each forms.
+// (lib/run.sh:439-466) removes and re-adds by name, and the label each forms.
 func TestLabelsPassLabelStateNames(t *testing.T) {
 	cases := []struct {
 		state policy.PassLabelState

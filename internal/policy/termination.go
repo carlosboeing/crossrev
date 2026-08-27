@@ -7,7 +7,7 @@ import (
 )
 
 // Action is the first word `legs_should_continue` prints, and the word every
-// caller reads with `cut -d' ' -f1` (lib/legs.sh:17-49).
+// caller reads with `cut -d' ' -f1` (lib/legs.sh:17-48).
 type Action string
 
 // The three actions a termination decision can carry.
@@ -19,9 +19,17 @@ const (
 
 // Termination is the state ShouldContinue decides over, in the order
 // lib/legs.sh:18-19 takes its nine positional arguments.
+//
+// Pass is a core.PassNumber and the three caps are plain ints, which is one
+// vocabulary rather than two: a pass number counts from one and names a
+// particular pass, and PassLabelName already spells it that way. A cap is a
+// bound on a count, and zero is its load-bearing sentinel for "no bound applies"
+// (lib/config.sh:258) — a value core.NewPassNumber refuses by construction, so
+// typing the caps as pass numbers would put a live sentinel inside the band the
+// type exists to exclude.
 type Termination struct {
 	Verdict              core.Verdict
-	Pass                 int
+	Pass                 core.PassNumber
 	MaxPassesPerCycle    int
 	Stop                 bool
 	Blocked              bool
@@ -48,7 +56,7 @@ func (d Decision) String() string { return string(d.Action) + " " + d.Reason }
 // ShouldContinue decides whether the loop runs another pass.
 //
 // The order of the six terminating checks is the contract, not an
-// implementation detail. lib/legs.sh:22-45 asks them as stop, blocked,
+// implementation detail. lib/legs.sh:23-44 asks them as stop, blocked,
 // converged, the pass cap, the daily cap and the file cap, and a run that trips
 // two of them reports the first. Reordering them changes the halt reason a
 // person reads without changing whether the loop stopped, which is exactly the
@@ -59,7 +67,7 @@ func (d Decision) String() string { return string(d.Action) + " " + d.Reason }
 // guard against a missing value.
 func ShouldContinue(t Termination) Decision {
 	// A human's request outranks everything, including a healthy verdict:
-	// crossrev/stop is an instruction, not a state (lib/legs.sh:22-23).
+	// crossrev/stop is an instruction, not a state (lib/legs.sh:21-23).
 	if t.Stop {
 		return Decision{ActionHalt, "a human applied crossrev/stop"}
 	}
@@ -70,8 +78,8 @@ func ShouldContinue(t Termination) Decision {
 		return Decision{ActionConverged, "nothing at or above min_fix_severity remains"}
 	}
 	// At exactly the cap, stop. Pass 3 of max_passes_per_cycle 3 is the last
-	// pass, not the one after which a fourth begins (lib/legs.sh:32-35).
-	if t.MaxPassesPerCycle > 0 && t.Pass >= t.MaxPassesPerCycle {
+	// pass, not the one after which a fourth begins (lib/legs.sh:31-35).
+	if t.MaxPassesPerCycle > 0 && t.Pass.Int() >= t.MaxPassesPerCycle {
 		return Decision{ActionHalt, fmt.Sprintf("reached max_passes_per_cycle (%d)", t.MaxPassesPerCycle)}
 	}
 	if t.MaxPRsPerDay > 0 && t.OtherPRsToday >= t.MaxPRsPerDay {

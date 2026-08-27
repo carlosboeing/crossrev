@@ -109,7 +109,72 @@ func TestTrackedTriState(t *testing.T) {
 	}
 }
 
-// TestResolveUnpushedFix transcribes lib/legs.sh:110-114.
+// TestUnfiledDeferralsReadsTheResolutionWord pins the other half of
+// lib/legs.sh:174, which ANDs the empty tracking field with `.resolution ==
+// "deferred"`. A skip carrying a present-and-empty crossrev_tracked is not an
+// unfiled deferral: nothing was deferred, so nothing was owed a backlog record.
+//
+// Without the word in the condition ResolvePassLabel reports halted for this
+// marker where lib/legs.sh:234-248 reports awaiting-review, which parks the loop
+// on a pass that pushed and settled.
+func TestUnfiledDeferralsReadsTheResolutionWord(t *testing.T) {
+	m := policy.ResolveMarker{
+		CommitSHA: "d81a3f2abc",
+		Resolutions: []policy.ResolutionRecord{
+			{Resolution: core.ResolutionSkipped, Tracked: core.TrackedUnfiled()},
+		},
+	}
+	if got := policy.UnfiledDeferrals(m); got != 0 {
+		t.Errorf("UnfiledDeferrals counted %d, want 0: a skip is not a deferral", got)
+	}
+	if policy.ResolveRedrivable(m) {
+		t.Error("a settled pushed pass re-drove on a skip's empty tracking field")
+	}
+	if got := policy.ResolvePassLabel(m, 0); got != policy.PassAwaitingReview {
+		t.Errorf("ResolvePassLabel = %q, want %q", got, policy.PassAwaitingReview)
+	}
+}
+
+// TestResolveRedrivableBlockedAndEscalatedAlone isolates the two arms
+// lib/legs.sh:159-160 checks first. The generated table names both, but its
+// markers carry no commit_sha and either an empty resolutions array or a `fixed`
+// entry, so ResolveUnrecorded or ResolveUnpushedFix answers true before the arm
+// under test is reached and neither is actually pinned.
+//
+// Both shapes here are real: a resolver that pushed its fix and then reported
+// blocked, and one that pushed its fix and escalated what it could not settle.
+func TestResolveRedrivableBlockedAndEscalatedAlone(t *testing.T) {
+	fixed := policy.ResolutionRecord{Resolution: core.ResolutionFixed}
+	escalated := policy.ResolutionRecord{Resolution: core.ResolutionEscalated}
+	cases := []struct {
+		desc string
+		in   policy.ResolveMarker
+	}{
+		{"blocked alone re-drives, with the fix pushed and recorded",
+			policy.ResolveMarker{Blocked: true, CommitSHA: "d81a3f2abc",
+				Resolutions: []policy.ResolutionRecord{fixed}}},
+		{"an escalation alone re-drives, with the fix pushed and recorded",
+			policy.ResolveMarker{CommitSHA: "d81a3f2abc",
+				Resolutions: []policy.ResolutionRecord{fixed, escalated}}},
+	}
+	for _, tc := range cases {
+		// The masking predicates must be silent, or the case proves nothing.
+		if policy.ResolveUnrecorded(tc.in) {
+			t.Fatalf("%s: ResolveUnrecorded already answers true", tc.desc)
+		}
+		if policy.ResolveUnpushedFix(tc.in) {
+			t.Fatalf("%s: ResolveUnpushedFix already answers true", tc.desc)
+		}
+		if policy.UnfiledDeferrals(tc.in) != 0 {
+			t.Fatalf("%s: UnfiledDeferrals already answers non-zero", tc.desc)
+		}
+		if !policy.ResolveRedrivable(tc.in) {
+			t.Errorf("%s: ResolveRedrivable = false, want true", tc.desc)
+		}
+	}
+}
+
+// TestResolveUnpushedFix transcribes lib/legs.sh:115-119.
 func TestResolveUnpushedFix(t *testing.T) {
 	fixed := []policy.ResolutionRecord{{Resolution: core.ResolutionFixed}}
 	skipped := []policy.ResolutionRecord{{Resolution: core.ResolutionSkipped}}
@@ -130,7 +195,7 @@ func TestResolveUnpushedFix(t *testing.T) {
 	}
 }
 
-// TestResolveUnrecorded transcribes lib/legs.sh:135-139.
+// TestResolveUnrecorded transcribes lib/legs.sh:137-141.
 func TestResolveUnrecorded(t *testing.T) {
 	cases := []struct {
 		desc string
@@ -172,7 +237,7 @@ func TestReviewRedrivableFailsClosed(t *testing.T) {
 }
 
 // TestResolveRedrivableUnknownResolution pins the closed side of
-// lib/legs.sh:157-176: a resolution word the schema does not list matches no
+// lib/legs.sh:157-175: a resolution word the schema does not list matches no
 // re-drive arm, so a pass carrying one stays refused.
 func TestResolveRedrivableUnknownResolution(t *testing.T) {
 	m := policy.ResolveMarker{

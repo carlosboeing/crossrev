@@ -21,7 +21,7 @@ func SeverityRank(s core.Severity) int {
 }
 
 // ShouldFix reports whether the resolve leg may change code for one finding
-// (lib/legs.sh:81-88).
+// (lib/legs.sh:81-87).
 //
 // Two rules, in order. A pre-existing defect is never fixed here whatever its
 // severity — that is the one guardrail deliberately not configurable, because a

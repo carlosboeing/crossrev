@@ -15,7 +15,7 @@ func TestParityShouldContinue(t *testing.T) {
 		t.Run(tc.desc, func(t *testing.T) {
 			got := policy.ShouldContinue(policy.Termination{
 				Verdict:              core.Verdict(tc.verdict),
-				Pass:                 tc.pass,
+				Pass:                 core.PassNumber(tc.pass),
 				MaxPassesPerCycle:    tc.maxPasses,
 				Stop:                 tc.stop,
 				Blocked:              tc.blocked,
@@ -38,7 +38,7 @@ func TestParityShouldContinue(t *testing.T) {
 }
 
 // TestHaltOrder pins the order of the six terminating checks, which the
-// generated table cannot: it never sets two of them at once. lib/legs.sh:22-45
+// generated table cannot: it never sets two of them at once. lib/legs.sh:23-44
 // checks stop, blocked, converged, the pass cap, the daily cap and the file cap
 // in that order, and a run that trips two reports the first.
 func TestHaltOrder(t *testing.T) {
@@ -46,7 +46,7 @@ func TestHaltOrder(t *testing.T) {
 	// the order and names the reason each level is expected to report.
 	all := policy.Termination{
 		Verdict:              core.VerdictConverged,
-		Pass:                 9,
+		Pass:                 core.PassNumber(9),
 		MaxPassesPerCycle:    3,
 		Stop:                 true,
 		Blocked:              true,
@@ -91,7 +91,7 @@ func TestHaltOrder(t *testing.T) {
 // TestZeroCapsAreNoCap pins the sentinel lib/config.sh:258 relies on: a cap of
 // zero bounds nothing. The generated table covers only the file cap.
 func TestZeroCapsAreNoCap(t *testing.T) {
-	base := policy.Termination{Verdict: core.VerdictIssuesRemain, Pass: 9999, MaxPassesPerCycle: 0,
+	base := policy.Termination{Verdict: core.VerdictIssuesRemain, Pass: core.PassNumber(9999), MaxPassesPerCycle: 0,
 		OtherPRsToday: 9999, MaxPRsPerDay: 0, FilesChanged: 9999, MaxFilesChangedPerPR: 0}
 	if got := policy.ShouldContinue(base); got.Action != policy.ActionContinue {
 		t.Errorf("all caps zero: got %q, want continue", got.String())
