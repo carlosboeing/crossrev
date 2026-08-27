@@ -166,6 +166,21 @@ encode_case() { # name input_json
     '{name:$n, input:$inp, encoded:$enc}'
 }
 
+# The same capture, recording the input as raw text rather than through
+# --argjson.
+#
+# state_marker_encode is `jq -c .`, which parses and re-prints, so it
+# normalises scalars. --argjson would normalise the recorded input too, and a
+# reader replaying from it would start from bytes the shell had already
+# rewritten. These cases exist to pin the rewriting itself, so the input has to
+# survive verbatim.
+encode_raw_case() { # name raw_payload
+  local encoded
+  encoded="$(state_marker_encode "$2")"
+  jq -cn --arg n "$1" --arg inp "$2" --arg enc "$encoded" \
+    '{name:$n, input_raw:$inp, encoded:$enc}'
+}
+
 encode_cases() {
   encode_case "review-complete" \
     '{"v":1,"leg":"review","pass":2,"state":"complete","verdict":"issues-remain","head_sha":"9f3c1ab","findings":[{"id":"aaaa000000000001","severity":"high","category":"security","pre_existing":false,"path":"app.ts","line":2,"title":"Fetch timeout missing"}]}'
@@ -179,6 +194,47 @@ encode_cases() {
     '{"v":1,"leg":"review","pass":3,"state":"declined","reason":"reached max_passes_per_cycle (3)"}'
   encode_case "missing-optional-fields" \
     '{"v":1,"leg":"resolve","pass":1,"state":"started","head_sha":"abc1234"}'
+
+  # What jq rewrites on the way out. A harness writes the payload and it has
+  # never met jq before this call, so these are the bytes that reach a public
+  # comment rather than a hypothetical.
+  encode_raw_case "raw-escaped-solidus" \
+    '{"v":1,"leg":"review","pass":1,"findings":[{"path":"a\/b.ts"}]}'
+  encode_raw_case "raw-escape-printable-ascii" \
+    '{"v":1,"leg":"review","pass":1,"summary":"\u0041\u007e"}'
+  encode_raw_case "raw-escape-control" \
+    '{"v":1,"leg":"review","pass":1,"summary":"\u0007"}'
+  encode_raw_case "raw-escape-delete" \
+    '{"v":1,"leg":"review","pass":1,"summary":"\u007f"}'
+  encode_raw_case "raw-escape-non-ascii" \
+    '{"v":1,"leg":"review","pass":1,"summary":"\u00e9\u4e2d"}'
+  encode_raw_case "raw-escape-surrogate-pair" \
+    '{"v":1,"leg":"review","pass":1,"summary":"\ud83d\ude00"}'
+  encode_raw_case "raw-escape-line-separators" \
+    '{"v":1,"leg":"review","pass":1,"summary":"a\u2028b\u2029c"}'
+  encode_raw_case "raw-duplicate-key" \
+    '{"v":1,"leg":"review","pass":1,"pass":2}'
+  encode_raw_case "raw-insignificant-whitespace" \
+    '{ "v" : 1, "leg" : "review", "pass" : [1, 2] }'
+  encode_raw_case "raw-html-characters" \
+    '{"v":1,"leg":"review","pass":1,"summary":"a<b&c>d"}'
+  # Numbers. Every literal below is one jq preserves, which is why the port
+  # passes them through verbatim rather than reformatting.
+  encode_raw_case "raw-number-trailing-zero" \
+    '{"v":1,"leg":"review","pass":1,"n":1.50}'
+  encode_raw_case "raw-number-negative-zero" \
+    '{"v":1,"leg":"review","pass":1,"n":-0.0}'
+  encode_raw_case "raw-number-past-float-precision" \
+    '{"v":1,"leg":"review","pass":1,"n":12345678901234567890}'
+  # The one shape the port deliberately does not reproduce. jq rewrites an
+  # exponent into its own canonical form, and which form that is changed
+  # between jq 1.6 and 1.7, so reproducing it would pin one jq family into the
+  # contract. No marker CrossRev writes carries an exponent. Frozen so the
+  # divergence is visible in the oracle rather than only in a code comment.
+  encode_raw_case "raw-number-exponent-divergent" \
+    '{"v":1,"leg":"review","pass":1,"n":1e2}'
+  encode_raw_case "raw-number-exponent-negative-divergent" \
+    '{"v":1,"leg":"review","pass":1,"n":1e-2}'
   encode_case "present-empty-crossrev-tracked" \
     '{"v":1,"leg":"resolve","pass":1,"state":"complete","resolutions":[{"finding_id":"aaaa000000000001","resolution":"deferred","crossrev_tracked":""}]}'
 }

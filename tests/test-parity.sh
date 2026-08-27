@@ -86,7 +86,15 @@ done < <(jq -c '.cases[]' "$PARITY/marker_codec.json")
 
 while IFS= read -r c; do
   name="$(jq -r .name <<<"$c")"
-  inp="$(jq -c .input <<<"$c")"
+  # A case records its input one of two ways. `input` is a JSON value, which jq
+  # normalised when it was captured; `input_raw` is the text verbatim, which is
+  # what the cases that pin the normalisation itself need. Feeding a normalised
+  # input back would test nothing about the rewriting.
+  if [[ "$(jq 'has("input_raw")' <<<"$c")" == "true" ]]; then
+    inp="$(jq -r .input_raw <<<"$c")"
+  else
+    inp="$(jq -c .input <<<"$c")"
+  fi
   is "marker encode: $name" \
     "$(state_marker_encode "$inp")" \
     "$(jq -r .encoded <<<"$c")"

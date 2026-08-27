@@ -96,6 +96,81 @@
       "encoded": "\n\n<!-- crossrev: {\"v\":1,\"leg\":\"resolve\",\"pass\":1,\"state\":\"started\",\"head_sha\":\"abc1234\"} -->"
     },
     {
+      "name": "raw-escaped-solidus",
+      "input_raw": "{\"v\":1,\"leg\":\"review\",\"pass\":1,\"findings\":[{\"path\":\"a\\/b.ts\"}]}",
+      "encoded": "\n\n<!-- crossrev: {\"v\":1,\"leg\":\"review\",\"pass\":1,\"findings\":[{\"path\":\"a/b.ts\"}]} -->"
+    },
+    {
+      "name": "raw-escape-printable-ascii",
+      "input_raw": "{\"v\":1,\"leg\":\"review\",\"pass\":1,\"summary\":\"\\u0041\\u007e\"}",
+      "encoded": "\n\n<!-- crossrev: {\"v\":1,\"leg\":\"review\",\"pass\":1,\"summary\":\"A~\"} -->"
+    },
+    {
+      "name": "raw-escape-control",
+      "input_raw": "{\"v\":1,\"leg\":\"review\",\"pass\":1,\"summary\":\"\\u0007\"}",
+      "encoded": "\n\n<!-- crossrev: {\"v\":1,\"leg\":\"review\",\"pass\":1,\"summary\":\"\\u0007\"} -->"
+    },
+    {
+      "name": "raw-escape-delete",
+      "input_raw": "{\"v\":1,\"leg\":\"review\",\"pass\":1,\"summary\":\"\\u007f\"}",
+      "encoded": "\n\n<!-- crossrev: {\"v\":1,\"leg\":\"review\",\"pass\":1,\"summary\":\"\\u007f\"} -->"
+    },
+    {
+      "name": "raw-escape-non-ascii",
+      "input_raw": "{\"v\":1,\"leg\":\"review\",\"pass\":1,\"summary\":\"\\u00e9\\u4e2d\"}",
+      "encoded": "\n\n<!-- crossrev: {\"v\":1,\"leg\":\"review\",\"pass\":1,\"summary\":\"é中\"} -->"
+    },
+    {
+      "name": "raw-escape-surrogate-pair",
+      "input_raw": "{\"v\":1,\"leg\":\"review\",\"pass\":1,\"summary\":\"\\ud83d\\ude00\"}",
+      "encoded": "\n\n<!-- crossrev: {\"v\":1,\"leg\":\"review\",\"pass\":1,\"summary\":\"😀\"} -->"
+    },
+    {
+      "name": "raw-escape-line-separators",
+      "input_raw": "{\"v\":1,\"leg\":\"review\",\"pass\":1,\"summary\":\"a\\u2028b\\u2029c\"}",
+      "encoded": "\n\n<!-- crossrev: {\"v\":1,\"leg\":\"review\",\"pass\":1,\"summary\":\"a b c\"} -->"
+    },
+    {
+      "name": "raw-duplicate-key",
+      "input_raw": "{\"v\":1,\"leg\":\"review\",\"pass\":1,\"pass\":2}",
+      "encoded": "\n\n<!-- crossrev: {\"v\":1,\"leg\":\"review\",\"pass\":2} -->"
+    },
+    {
+      "name": "raw-insignificant-whitespace",
+      "input_raw": "{ \"v\" : 1, \"leg\" : \"review\", \"pass\" : [1, 2] }",
+      "encoded": "\n\n<!-- crossrev: {\"v\":1,\"leg\":\"review\",\"pass\":[1,2]} -->"
+    },
+    {
+      "name": "raw-html-characters",
+      "input_raw": "{\"v\":1,\"leg\":\"review\",\"pass\":1,\"summary\":\"a<b&c>d\"}",
+      "encoded": "\n\n<!-- crossrev: {\"v\":1,\"leg\":\"review\",\"pass\":1,\"summary\":\"a<b&c>d\"} -->"
+    },
+    {
+      "name": "raw-number-trailing-zero",
+      "input_raw": "{\"v\":1,\"leg\":\"review\",\"pass\":1,\"n\":1.50}",
+      "encoded": "\n\n<!-- crossrev: {\"v\":1,\"leg\":\"review\",\"pass\":1,\"n\":1.50} -->"
+    },
+    {
+      "name": "raw-number-negative-zero",
+      "input_raw": "{\"v\":1,\"leg\":\"review\",\"pass\":1,\"n\":-0.0}",
+      "encoded": "\n\n<!-- crossrev: {\"v\":1,\"leg\":\"review\",\"pass\":1,\"n\":-0.0} -->"
+    },
+    {
+      "name": "raw-number-past-float-precision",
+      "input_raw": "{\"v\":1,\"leg\":\"review\",\"pass\":1,\"n\":12345678901234567890}",
+      "encoded": "\n\n<!-- crossrev: {\"v\":1,\"leg\":\"review\",\"pass\":1,\"n\":12345678901234567890} -->"
+    },
+    {
+      "name": "raw-number-exponent-divergent",
+      "input_raw": "{\"v\":1,\"leg\":\"review\",\"pass\":1,\"n\":1e2}",
+      "encoded": "\n\n<!-- crossrev: {\"v\":1,\"leg\":\"review\",\"pass\":1,\"n\":1E+2} -->"
+    },
+    {
+      "name": "raw-number-exponent-negative-divergent",
+      "input_raw": "{\"v\":1,\"leg\":\"review\",\"pass\":1,\"n\":1e-2}",
+      "encoded": "\n\n<!-- crossrev: {\"v\":1,\"leg\":\"review\",\"pass\":1,\"n\":0.01} -->"
+    },
+    {
       "name": "present-empty-crossrev-tracked",
       "input": {
         "v": 1,
