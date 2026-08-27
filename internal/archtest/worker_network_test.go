@@ -13,7 +13,15 @@ import (
 
 func TestWorkerNetworkIsolation(t *testing.T) {
 	cfg := &packages.Config{
-		Mode:  packages.LoadAllSyntax,
+		Mode: packages.NeedName |
+			packages.NeedFiles |
+			packages.NeedCompiledGoFiles |
+			packages.NeedImports |
+			packages.NeedTypes |
+			packages.NeedTypesSizes |
+			packages.NeedSyntax |
+			packages.NeedTypesInfo |
+			packages.NeedDeps,
 		Tests: false,
 	}
 
