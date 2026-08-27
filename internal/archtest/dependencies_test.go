@@ -49,23 +49,21 @@ var tier3 = map[string]bool{
 	"internal/cli":       true,
 }
 
+var allowedThirdParty = map[string]map[string]bool{
+	"internal/config": {
+		"go.yaml.in/yaml/v3": true,
+	},
+	"internal/symbols": {
+		"github.com/tree-sitter/go-tree-sitter": true,
+	},
+}
+
 func getAllowedInternalImports(pkgRel string) map[string]bool {
 	allowed := make(map[string]bool)
 
-	// Excluded / entry
+	// Entrypoint: cmd/crossrev may ONLY import internal/cli
 	if pkgRel == "cmd/crossrev" {
-		for p := range tier0 {
-			allowed[p] = true
-		}
-		for p := range tier1 {
-			allowed[p] = true
-		}
-		for p := range tier2IntraEdges {
-			allowed[p] = true
-		}
-		for p := range tier3 {
-			allowed[p] = true
-		}
+		allowed["internal/cli"] = true
 		return allowed
 	}
 
@@ -75,7 +73,7 @@ func getAllowedInternalImports(pkgRel string) map[string]bool {
 	}
 
 	if tier1[pkgRel] {
-		// Tier 1 may import Tier 0
+		// Tier 1 may import Tier 0 only (no peer tier 1 imports)
 		for p := range tier0 {
 			allowed[p] = true
 		}
@@ -98,7 +96,7 @@ func getAllowedInternalImports(pkgRel string) map[string]bool {
 	}
 
 	if tier3[pkgRel] {
-		// Tier 3 may import Tier 0, 1, 2, and Tier 3
+		// Tier 3 may import lower tiers (Tier 0, 1, 2) only; NO tier-3 peer imports
 		for p := range tier0 {
 			allowed[p] = true
 		}
@@ -108,13 +106,19 @@ func getAllowedInternalImports(pkgRel string) map[string]bool {
 		for p := range tier2IntraEdges {
 			allowed[p] = true
 		}
-		for p := range tier3 {
-			allowed[p] = true
-		}
 		return allowed
 	}
 
 	return nil
+}
+
+func isStdLib(importPath string) bool {
+	// Standard library packages do not have a domain with a dot in the first path component
+	firstSlash := strings.Index(importPath, "/")
+	if firstSlash == -1 {
+		return !strings.Contains(importPath, ".")
+	}
+	return !strings.Contains(importPath[:firstSlash], ".")
 }
 
 func TestProductionTierDAG(t *testing.T) {
@@ -157,11 +161,18 @@ func TestProductionTierDAG(t *testing.T) {
 
 		for impPath := range pkg.Imports {
 			if !strings.HasPrefix(impPath, modulePrefix) {
-				// Third party or stdlib
-				if tier0[relPath] {
-					// Tier 0 may import stdlib only (check standard library: no '.' in domain)
-					if strings.Contains(impPath, ".") {
-						t.Errorf("Tier 0 package %s imports non-stdlib external package %s", relPath, impPath)
+				// Non-module import: must be stdlib or explicitly allowed third-party package
+				if !isStdLib(impPath) {
+					allowedExternal := allowedThirdParty[relPath]
+					isAllowed := false
+					for extPrefix := range allowedExternal {
+						if impPath == extPrefix || strings.HasPrefix(impPath, extPrefix+"/") {
+							isAllowed = true
+							break
+						}
+					}
+					if !isAllowed {
+						t.Errorf("package %s imports unapproved external package %s", relPath, impPath)
 					}
 				}
 				continue

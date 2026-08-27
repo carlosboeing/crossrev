@@ -4,6 +4,9 @@ title: "Go native parity contract and binary delivery"
 type: adr
 status: approved
 scope: [architecture, go-migration, parity, release]
+authors:
+  - "Carlos Boeing"
+  - "gemini-2.5-pro (agy)"
 ---
 
 # 0018 — Go native parity contract and binary delivery

@@ -33,7 +33,7 @@ func TestWorkerNetworkIsolation(t *testing.T) {
 		t.Fatalf("package loading reported errors")
 	}
 
-	prog, ssaPkgs := ssautil.Packages(pkgs, 0)
+	prog, ssaPkgs := ssautil.AllPackages(pkgs, 0)
 	prog.Build()
 
 	var workerMain *ssa.Function

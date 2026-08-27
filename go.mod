@@ -4,8 +4,8 @@ go 1.27.0
 
 require (
 	github.com/tree-sitter/go-tree-sitter v0.25.0
+	go.yaml.in/yaml/v3 v3.0.5
 	golang.org/x/tools v0.42.0
-	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (

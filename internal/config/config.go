@@ -1,5 +1,5 @@
 package config
 
 import (
-	_ "gopkg.in/yaml.v3"
+	_ "go.yaml.in/yaml/v3"
 )

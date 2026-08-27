@@ -33,22 +33,30 @@ func TestFindingIDConversionBoundary(t *testing.T) {
 			}
 
 			relPath, _ := filepath.Rel(root, path)
-			dirRel := filepath.Dir(relPath)
+			relSlash := filepath.ToSlash(relPath)
+			dirSlash := filepath.ToSlash(filepath.Dir(relPath))
 
-			// Conversion to FindingID is only permitted inside internal/prstate (and internal/core where type is defined)
-			isPermittedPackage := dirRel == filepath.Join("internal", "prstate") || dirRel == filepath.Join("internal", "core")
+			// Conversion to FindingID is ONLY permitted inside internal/prstate
+			isPermittedPackage := dirSlash == "internal/prstate"
 
 			node, err := parser.ParseFile(fset, path, nil, 0)
 			if err != nil {
 				t.Fatalf("failed to parse %s: %v", path, err)
 			}
 
-			// Map local import aliases to package path
-			coreAlias := "core"
+			// Map local import aliases to package path for internal/core
+			coreLocalNames := make(map[string]bool)
+			dotImportedCore := false
+
 			for _, imp := range node.Imports {
-				if imp.Path != nil && strings.Contains(imp.Path.Value, "internal/core") {
-					if imp.Name != nil {
-						coreAlias = imp.Name.Name
+				importPath := strings.Trim(imp.Path.Value, `"`)
+				if importPath == "github.com/carlosboeing/crossrev/internal/core" {
+					if imp.Name == nil {
+						coreLocalNames["core"] = true
+					} else if imp.Name.Name == "." {
+						dotImportedCore = true
+					} else if imp.Name.Name != "_" {
+						coreLocalNames[imp.Name.Name] = true
 					}
 				}
 			}
@@ -61,23 +69,23 @@ func TestFindingIDConversionBoundary(t *testing.T) {
 
 				var isFindingIDConversion bool
 
-				// e.g. core.FindingID(...)
+				// e.g. core.FindingID(...) or alias.FindingID(...)
 				if sel, ok := call.Fun.(*ast.SelectorExpr); ok {
 					if ident, ok := sel.X.(*ast.Ident); ok {
-						if ident.Name == coreAlias && sel.Sel.Name == "FindingID" {
+						if coreLocalNames[ident.Name] && sel.Sel.Name == "FindingID" {
 							isFindingIDConversion = true
 						}
 					}
 				} else if ident, ok := call.Fun.(*ast.Ident); ok {
-					// e.g. FindingID(...) inside core package
-					if ident.Name == "FindingID" && dirRel == filepath.Join("internal", "core") {
+					// e.g. FindingID(...) inside internal/core or with dot import
+					if ident.Name == "FindingID" && (dotImportedCore || dirSlash == "internal/core") {
 						isFindingIDConversion = true
 					}
 				}
 
 				if isFindingIDConversion && !isPermittedPackage {
 					pos := fset.Position(call.Pos())
-					t.Errorf("forbidden conversion to core.FindingID in %s:%d (FindingID conversion is only permitted in internal/prstate)", relPath, pos.Line)
+					t.Errorf("forbidden conversion to core.FindingID in %s:%d (FindingID conversion is only permitted in internal/prstate)", relSlash, pos.Line)
 				}
 				return true
 			})

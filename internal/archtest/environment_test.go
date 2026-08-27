@@ -17,58 +17,91 @@ func TestEnvironCallBoundary(t *testing.T) {
 
 	foundPermittedCall := false
 
-	err := filepath.WalkDir(filepath.Join(root, "internal"), func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			name := d.Name()
-			if name == "archtest" || name == "testgen" {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
-			return nil
-		}
+	scanDirs := []string{"cmd", "internal"}
 
-		node, err := parser.ParseFile(fset, path, nil, 0)
-		if err != nil {
-			t.Fatalf("failed to parse %s: %v", path, err)
-		}
-
-		relPath, _ := filepath.Rel(root, path)
-
-		ast.Inspect(node, func(n ast.Node) bool {
-			call, ok := n.(*ast.CallExpr)
-			if !ok {
-				return true
+	for _, scanDir := range scanDirs {
+		dirPath := filepath.Join(root, scanDir)
+		err := filepath.WalkDir(dirPath, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
 			}
-			sel, ok := call.Fun.(*ast.SelectorExpr)
-			if !ok {
-				return true
+			if d.IsDir() {
+				name := d.Name()
+				if name == "archtest" || name == "testgen" {
+					return filepath.SkipDir
+				}
+				return nil
 			}
-			ident, ok := sel.X.(*ast.Ident)
-			if !ok {
-				return true
+			if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+				return nil
 			}
 
-			if ident.Name == "os" && sel.Sel.Name == "Environ" {
-				if relPath == filepath.Join("internal", "exec", "env.go") || filepath.Dir(relPath) == filepath.Join("internal", "exec") {
-					foundPermittedCall = true
-				} else {
-					pos := fset.Position(call.Pos())
-					t.Errorf("forbidden call to os.Environ() in %s:%d (os.Environ is only permitted in internal/exec/env.go)", relPath, pos.Line)
+			node, err := parser.ParseFile(fset, path, nil, 0)
+			if err != nil {
+				t.Fatalf("failed to parse %s: %v", path, err)
+			}
+
+			relPath, _ := filepath.Rel(root, path)
+			relSlash := filepath.ToSlash(relPath)
+
+			// Resolve local name(s) bound to import path "os"
+			osLocalNames := make(map[string]bool)
+			dotImportedOS := false
+
+			for _, imp := range node.Imports {
+				importPath := strings.Trim(imp.Path.Value, `"`)
+				if importPath == "os" {
+					if imp.Name == nil {
+						osLocalNames["os"] = true
+					} else if imp.Name.Name == "." {
+						dotImportedOS = true
+					} else if imp.Name.Name != "_" {
+						osLocalNames[imp.Name.Name] = true
+					}
 				}
 			}
-			return true
+
+			if len(osLocalNames) == 0 && !dotImportedOS {
+				return nil
+			}
+
+			ast.Inspect(node, func(n ast.Node) bool {
+				call, ok := n.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+
+				isEnvironCall := false
+
+				if sel, ok := call.Fun.(*ast.SelectorExpr); ok {
+					if ident, ok := sel.X.(*ast.Ident); ok {
+						if osLocalNames[ident.Name] && sel.Sel.Name == "Environ" {
+							isEnvironCall = true
+						}
+					}
+				} else if ident, ok := call.Fun.(*ast.Ident); ok && dotImportedOS {
+					if ident.Name == "Environ" {
+						isEnvironCall = true
+					}
+				}
+
+				if isEnvironCall {
+					if relSlash == "internal/exec/env.go" {
+						foundPermittedCall = true
+					} else {
+						pos := fset.Position(call.Pos())
+						t.Errorf("forbidden call to os.Environ() in %s:%d (os.Environ is only permitted in internal/exec/env.go)", relSlash, pos.Line)
+					}
+				}
+				return true
+			})
+
+			return nil
 		})
 
-		return nil
-	})
-
-	if err != nil {
-		t.Fatalf("error walking internal directory: %v", err)
+		if err != nil {
+			t.Fatalf("error walking %s directory: %v", scanDir, err)
+		}
 	}
 
 	if !foundPermittedCall {

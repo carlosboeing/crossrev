@@ -71,35 +71,40 @@ func extractSection(filename, startMarker, endMarker string) ([]string, error) {
 
 	var lines []string
 	scanner := bufio.NewScanner(bytes.NewReader(content))
-	inSection := false
+	foundStart := false
+	foundEnd := false
 
 	for scanner.Scan() {
 		line := scanner.Text()
 		trimmed := strings.TrimSpace(line)
 		if strings.Contains(trimmed, startMarker) {
-			inSection = true
+			foundStart = true
 			continue
 		}
-		if inSection && strings.Contains(trimmed, endMarker) {
-			inSection = false
+		if foundStart && strings.Contains(trimmed, endMarker) {
+			foundEnd = true
 			break
 		}
-		if inSection {
+		if foundStart {
 			lines = append(lines, line)
 		}
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, err
 	}
+	if !foundStart {
+		return nil, fmt.Errorf("start marker %q not found in %s", startMarker, filename)
+	}
+	if !foundEnd {
+		return nil, fmt.Errorf("end marker %q not found in %s", endMarker, filename)
+	}
+	if len(lines) == 0 {
+		return nil, fmt.Errorf("section %q in %s is empty", startMarker, filename)
+	}
 	return lines, nil
 }
 
-func parseStateCases(lines []string, fnName string) []StateTestCase {
-	// Lines look like:
-	// is "desc" "$(state_pass '[]')" "1"
-	// or multiline:
-	// is "desc" \
-	//   "$(state_pass '[{"leg":"review","pass":1,"state":"complete"}]')" "2"
+func parseStateCases(lines []string, fnName string) ([]StateTestCase, error) {
 	var cases []StateTestCase
 	joined := strings.Join(lines, "\n")
 	scanner := bufio.NewScanner(strings.NewReader(joined))
@@ -122,49 +127,54 @@ func parseStateCases(lines []string, fnName string) []StateTestCase {
 			continue
 		}
 
-		// Process statement
 		stmt := currentStatement
 		currentStatement = ""
 
-		// Format: is "desc" "$(fn 'input')" "expected"
-		if strings.HasPrefix(stmt, "is ") {
-			rest := strings.TrimPrefix(stmt, "is ")
-			// extract first quoted string: desc
-			desc, afterDesc, ok := extractQuoted(rest)
-			if !ok {
-				continue
-			}
-			afterDesc = strings.TrimSpace(afterDesc)
-			// Now afterDesc should start with "$(" + fnName
-			prefix := fmt.Sprintf("\"$(%s '", fnName)
-			idx := strings.Index(afterDesc, prefix)
-			if idx == -1 {
-				continue
-			}
-			afterPrefix := afterDesc[idx+len(prefix):]
-			// find end of single quote
-			quoteEnd := strings.Index(afterPrefix, "')\"")
-			if quoteEnd == -1 {
-				continue
-			}
-			inputJSON := afterPrefix[:quoteEnd]
-			afterCall := strings.TrimSpace(afterPrefix[quoteEnd+len("')\""):])
-			expStr, _, ok := extractQuoted(afterCall)
-			if !ok {
-				continue
-			}
-			expVal, _ := strconv.Atoi(expStr)
-			cases = append(cases, StateTestCase{
-				Desc:     desc,
-				Input:    inputJSON,
-				Expected: expVal,
-			})
+		if !strings.HasPrefix(stmt, "is ") {
+			return nil, fmt.Errorf("unexpected statement format in state cases (expected 'is ...'): %q", stmt)
 		}
+
+		rest := strings.TrimPrefix(stmt, "is ")
+		desc, afterDesc, ok := extractQuoted(rest)
+		if !ok {
+			return nil, fmt.Errorf("failed to extract description in state case: %q", stmt)
+		}
+		afterDesc = strings.TrimSpace(afterDesc)
+
+		prefix := fmt.Sprintf("\"$(%s '", fnName)
+		idx := strings.Index(afterDesc, prefix)
+		if idx == -1 {
+			return nil, fmt.Errorf("failed to find function call %q in state case: %q", prefix, stmt)
+		}
+		afterPrefix := afterDesc[idx+len(prefix):]
+
+		quoteEnd := strings.Index(afterPrefix, "')\"")
+		if quoteEnd == -1 {
+			return nil, fmt.Errorf("failed to find end of argument in state case: %q", stmt)
+		}
+		inputJSON := afterPrefix[:quoteEnd]
+		afterCall := strings.TrimSpace(afterPrefix[quoteEnd+len("')\""):])
+		expStr, _, ok := extractQuoted(afterCall)
+		if !ok {
+			return nil, fmt.Errorf("failed to extract expected value in state case: %q", stmt)
+		}
+		expVal, err := strconv.Atoi(expStr)
+		if err != nil {
+			return nil, fmt.Errorf("invalid expected int %q in state case: %q", expStr, stmt)
+		}
+		cases = append(cases, StateTestCase{
+			Desc:     desc,
+			Input:    inputJSON,
+			Expected: expVal,
+		})
 	}
-	return cases
+	if len(cases) == 0 {
+		return nil, fmt.Errorf("zero test cases parsed for function %s", fnName)
+	}
+	return cases, nil
 }
 
-func parseShouldContinueCases(lines []string) []ShouldContinueTestCase {
+func parseShouldContinueCases(lines []string) ([]ShouldContinueTestCase, error) {
 	var cases []ShouldContinueTestCase
 	joined := strings.Join(lines, "\n")
 	scanner := bufio.NewScanner(strings.NewReader(joined))
@@ -194,17 +204,17 @@ func parseShouldContinueCases(lines []string) []ShouldContinueTestCase {
 			rest := strings.TrimPrefix(stmt, "decides ")
 			parts := strings.Fields(rest)
 			if len(parts) == 0 {
-				continue
+				return nil, fmt.Errorf("empty decides statement: %q", stmt)
 			}
 			action := parts[0]
 			afterAction := strings.TrimSpace(strings.TrimPrefix(rest, action))
 			desc, afterDesc, ok := extractQuoted(afterAction)
 			if !ok {
-				continue
+				return nil, fmt.Errorf("failed to extract description in decides statement: %q", stmt)
 			}
 			args := strings.Fields(afterDesc)
 			if len(args) < 9 {
-				continue
+				return nil, fmt.Errorf("expected 9 arguments in decides statement, got %d: %q", len(args), stmt)
 			}
 			verdict := args[0]
 			pass, _ := strconv.Atoi(args[1])
@@ -233,27 +243,27 @@ func parseShouldContinueCases(lines []string) []ShouldContinueTestCase {
 			rest := strings.TrimPrefix(stmt, "is ")
 			desc, afterDesc, ok := extractQuoted(rest)
 			if !ok {
-				continue
+				return nil, fmt.Errorf("failed to extract description in is statement: %q", stmt)
 			}
 			afterDesc = strings.TrimSpace(afterDesc)
 			prefix := "\"$(legs_should_continue "
 			if !strings.HasPrefix(afterDesc, prefix) {
-				continue
+				return nil, fmt.Errorf("missing legs_should_continue call in statement: %q", stmt)
 			}
 			afterPrefix := afterDesc[len(prefix):]
 			endIdx := strings.Index(afterPrefix, ")\"")
 			if endIdx == -1 {
-				continue
+				return nil, fmt.Errorf("unclosed legs_should_continue call in statement: %q", stmt)
 			}
 			argsStr := afterPrefix[:endIdx]
 			afterCall := strings.TrimSpace(afterPrefix[endIdx+2:])
 			expFull, _, ok := extractQuoted(afterCall)
 			if !ok {
-				continue
+				return nil, fmt.Errorf("failed to extract expected string in is statement: %q", stmt)
 			}
 			args := strings.Fields(argsStr)
 			if len(args) < 9 {
-				continue
+				return nil, fmt.Errorf("expected 9 arguments in legs_should_continue call, got %d: %q", len(args), stmt)
 			}
 			verdict := args[0]
 			pass, _ := strconv.Atoi(args[1])
@@ -279,12 +289,17 @@ func parseShouldContinueCases(lines []string) []ShouldContinueTestCase {
 				ExpectedAction: "halt",
 				ExpectedFull:   expFull,
 			})
+		} else {
+			return nil, fmt.Errorf("unsupported statement in should_continue cases: %q", stmt)
 		}
 	}
-	return cases
+	if len(cases) == 0 {
+		return nil, fmt.Errorf("zero test cases parsed for should_continue")
+	}
+	return cases, nil
 }
 
-func parseRedrivableCases(lines []string, prefix string) []RedrivableTestCase {
+func parseRedrivableCases(lines []string, prefix string) ([]RedrivableTestCase, error) {
 	var cases []RedrivableTestCase
 	joined := strings.Join(lines, "\n")
 	scanner := bufio.NewScanner(strings.NewReader(joined))
@@ -310,34 +325,41 @@ func parseRedrivableCases(lines []string, prefix string) []RedrivableTestCase {
 		stmt := currentStatement
 		currentStatement = ""
 
-		if strings.HasPrefix(stmt, prefix+" ") {
-			rest := strings.TrimPrefix(stmt, prefix+" ")
-			parts := strings.Fields(rest)
-			if len(parts) == 0 {
-				continue
-			}
-			wantStr := parts[0]
-			expected := wantStr == "yes"
-			afterWant := strings.TrimSpace(strings.TrimPrefix(rest, wantStr))
-			desc, afterDesc, ok := extractQuoted(afterWant)
-			if !ok {
-				continue
-			}
-			afterDesc = strings.TrimSpace(afterDesc)
-			var inputJSON string
-			if strings.HasPrefix(afterDesc, "'") && strings.HasSuffix(afterDesc, "'") {
-				inputJSON = strings.Trim(afterDesc, "'")
-			} else if strings.HasPrefix(afterDesc, "\"") && strings.HasSuffix(afterDesc, "\"") {
-				inputJSON = strings.Trim(afterDesc, "\"")
-			}
-			cases = append(cases, RedrivableTestCase{
-				Desc:     desc,
-				Input:    inputJSON,
-				Expected: expected,
-			})
+		if !strings.HasPrefix(stmt, prefix+" ") {
+			return nil, fmt.Errorf("unexpected statement format (expected %q prefix): %q", prefix, stmt)
 		}
+
+		rest := strings.TrimPrefix(stmt, prefix+" ")
+		parts := strings.Fields(rest)
+		if len(parts) == 0 {
+			return nil, fmt.Errorf("empty redrivable statement: %q", stmt)
+		}
+		wantStr := parts[0]
+		expected := wantStr == "yes"
+		afterWant := strings.TrimSpace(strings.TrimPrefix(rest, wantStr))
+		desc, afterDesc, ok := extractQuoted(afterWant)
+		if !ok {
+			return nil, fmt.Errorf("failed to extract description in redrivable statement: %q", stmt)
+		}
+		afterDesc = strings.TrimSpace(afterDesc)
+		var inputJSON string
+		if strings.HasPrefix(afterDesc, "'") && strings.HasSuffix(afterDesc, "'") {
+			inputJSON = strings.Trim(afterDesc, "'")
+		} else if strings.HasPrefix(afterDesc, "\"") && strings.HasSuffix(afterDesc, "\"") {
+			inputJSON = strings.Trim(afterDesc, "\"")
+		} else {
+			return nil, fmt.Errorf("failed to parse input JSON in redrivable statement: %q", stmt)
+		}
+		cases = append(cases, RedrivableTestCase{
+			Desc:     desc,
+			Input:    inputJSON,
+			Expected: expected,
+		})
 	}
-	return cases
+	if len(cases) == 0 {
+		return nil, fmt.Errorf("zero test cases parsed for redrivable prefix %s", prefix)
+	}
+	return cases, nil
 }
 
 func extractQuoted(s string) (string, string, bool) {
@@ -403,12 +425,36 @@ func main() {
 		os.Exit(1)
 	}
 
-	passCases := parseStateCases(passLines, "state_pass")
-	maxPassCases := parseStateCases(maxPassLines, "state_max_pass")
-	currentReviewPassCases := parseStateCases(currentReviewPassLines, "state_current_review_pass")
-	shouldContinueCases := parseShouldContinueCases(shouldContinueLines)
-	resolveRedrivableCases := parseRedrivableCases(resolveRedrivableLines, "redrivable")
-	reviewRedrivableCases := parseRedrivableCases(reviewRedrivableLines, "review_redrivable")
+	passCases, err := parseStateCases(passLines, "state_pass")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to parse state_pass: %v\n", err)
+		os.Exit(1)
+	}
+	maxPassCases, err := parseStateCases(maxPassLines, "state_max_pass")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to parse state_max_pass: %v\n", err)
+		os.Exit(1)
+	}
+	currentReviewPassCases, err := parseStateCases(currentReviewPassLines, "state_current_review_pass")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to parse state_current_review_pass: %v\n", err)
+		os.Exit(1)
+	}
+	shouldContinueCases, err := parseShouldContinueCases(shouldContinueLines)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to parse should_continue: %v\n", err)
+		os.Exit(1)
+	}
+	resolveRedrivableCases, err := parseRedrivableCases(resolveRedrivableLines, "redrivable")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to parse resolve_redrivable: %v\n", err)
+		os.Exit(1)
+	}
+	reviewRedrivableCases, err := parseRedrivableCases(reviewRedrivableLines, "review_redrivable")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to parse review_redrivable: %v\n", err)
+		os.Exit(1)
+	}
 
 	var buf bytes.Buffer
 	buf.WriteString("// Code generated by internal/testgen/policy; DO NOT EDIT.\n\n")

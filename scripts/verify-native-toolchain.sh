@@ -88,10 +88,10 @@ printf '  amd64 lipo:   confirmed x86_64 architecture\n'
 
 cs_amd64_pre="$(codesign -dv "$workdir/probe_amd64_1" 2>&1 || true)"
 if [[ "$cs_amd64_pre" =~ Signature=adhoc ]]; then
-  printf '  amd64 pre:    already signed\n'
-else
-  printf '  amd64 pre:    confirmed initial unsigned binary\n'
+  printf 'Error: amd64 binary was unexpectedly signed before explicit codesign step (expected initial unsigned binary):\n%s\n' "$cs_amd64_pre" >&2
+  exit 1
 fi
+printf '  amd64 pre:    confirmed initial unsigned binary\n'
 
 codesign -s - -i crossrev -f "$workdir/probe_amd64_1"
 codesign -s - -i crossrev -f "$workdir/probe_amd64_2"
