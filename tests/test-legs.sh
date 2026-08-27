@@ -24,6 +24,7 @@ decides() {
   [[ "$got" == "$want" ]] && ok "$desc" || notok "$desc" "$want" "$got"
 }
 
+# [policy-table: legs_should_continue]
 decides continue "issues remain below every cap"        issues-remain 1 3 false false 0 12 10 200
 decides converged "converged stops the loop"            converged     1 3 false false 0 12 10 200
 decides halt     "crossrev/stop outranks a healthy verdict" converged  1 3 true  false 0 12 10 200
@@ -44,6 +45,7 @@ is "the daily halt names the other pull requests already reviewed" \
 decides continue "exactly at the file cap still runs"   issues-remain 1 3 false false 0 12 200 200
 decides halt     "above the file cap halts"             issues-remain 1 3 false false 0 12 201 200
 decides continue "a file cap of zero is no cap"         issues-remain 1 3 false false 0 12 9999 0
+# [policy-table-end: legs_should_continue]
 
 # --- the fixing threshold --------------------------------------------------
 fixes() {
@@ -191,6 +193,7 @@ redrivable() {
   [[ "$got" == "$want" ]] && ok "$desc" || notok "$desc" "$want" "$got"
 }
 
+# [policy-table: legs_resolve_redrivable]
 redrivable yes "a blocked pass re-drives once what stopped it is fixed" \
   '{"leg":"resolve","pass":1,"state":"complete","blocked":true,"resolutions":[]}'
 redrivable yes "an escalated pass re-drives once a human has settled it" \
@@ -219,6 +222,7 @@ redrivable yes "a legacy pass with no resolutions recorded re-drives" \
 # moved, the reviewer has something to see, and re-deciding it settles nothing.
 redrivable no  "a legacy pass that pushed stays refused" \
   '{"leg":"resolve","pass":1,"state":"complete","blocked":false,"commit_sha":"d81a3f2abc"}'
+# [policy-table-end: legs_resolve_redrivable]
 
 # Completing a harness failure writes verdict blocked, which is what used to
 # make the next review answer "already reviewed" on the same head.
@@ -228,6 +232,7 @@ review_redrivable() {
   [[ "$got" == "$want" ]] && ok "$desc" || notok "$desc" "$want" "$got"
 }
 
+# [policy-table: legs_review_redrivable]
 review_redrivable yes "a blocked review re-drives once the harness can run" \
   '{"leg":"review","pass":1,"state":"complete","verdict":"blocked","findings":[]}'
 review_redrivable no  "a review that found issues stays refused" \
@@ -238,6 +243,7 @@ review_redrivable no  "an unfinished review is recovery, not this re-drive" \
   '{"leg":"review","pass":1,"state":"started","verdict":null,"findings":[]}'
 review_redrivable no  "an empty marker is not redrivable" \
   ""
+# [policy-table-end: legs_review_redrivable]
 
 # --- the guard itself, end to end -------------------------------------------
 #

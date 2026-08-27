@@ -1,0 +1,285 @@
+{
+  "captured": {
+    "platform": "Darwin 25.5.0 arm64",
+    "tr_implementation": "/usr/bin/tr (BSD tr)",
+    "locale": "en_AU.UTF-8",
+    "note": "state_finding_id and state_anchor pin LC_ALL=C internally, so ids and anchors are byte-oriented whatever locale this file was captured under."
+  },
+  "function": "diff_views",
+  "corpus": "diff --git a/tools/crossrev/CHANGELOG.md b/tools/crossrev/CHANGELOG.md\nindex e773ac4..0b34128 100644\n--- a/tools/crossrev/CHANGELOG.md\n+++ b/tools/crossrev/CHANGELOG.md\n@@ -6,6 +6,8 @@ All notable changes to crossrev.\n\n ### Added\n\n+- **A two-direction template/default drift test.** Eleven behavior leaves must agree.\n+\n - `crossrev review --pr N` — one review pass. Claims before working.\n - `crossrev resolve --pr N` — verifies every finding whatever its severity.\n - `crossrev cycle --pr N` — the whole loop in one process, up to `max_passes`.\n@@ -33,3 +35,4 @@ All notable changes to crossrev.\n - `crossrev status --pr N` — position and interruption.\n-- `runs_per_day` bounded a number that was not runs.\n+- `max_prs_per_day` counts distinct pull requests repository-wide.\n+- `max_passes_per_cycle` replaces the scattered caps.\n - `crossrev watchdog` — finds pull requests stuck waiting on a leg.\ndiff --git a/docs/my notes.md b/docs/my notes.md\nindex 1111111..2222222 100644\n--- a/docs/my notes.md\t\n+++ b/docs/my notes.md\t\n@@ -6,2 +6,3 @@ heading\n  existing line\n+added line\n  context line\ndiff --git \"a/docs/caf\\303\\251.md\" \"b/docs/caf\\303\\251.md\"\nindex 3333333..4444444 100644\n--- \"a/docs/caf\\303\\251.md\"\n+++ \"b/docs/caf\\303\\251.md\"\n@@ -20,1 +20,2 @@ heading\n  kept line\n+new line\ndiff --git a/src/old_name.ts b/src/new_name.ts\nsimilarity index 85%\nrename from src/old_name.ts\nrename to src/new_name.ts\n--- a/src/old_name.ts\n+++ b/src/new_name.ts\n@@ -1,2 +1,2 @@\n-old version\n+new version\n  shared context\ndiff --git a/dev/null b/src/created.ts\nnew file mode 100644\n--- /dev/null\n+++ b/src/created.ts\n@@ -0,0 +1,2 @@\n+export const first = 1;\n+export const second = 2;\ndiff --git a/src/deleted.ts b/dev/null\ndeleted file mode 100644\n--- a/src/deleted.ts\n+++ /dev/null\n@@ -1,2 +0,0 @@\n-export const old1 = 1;\n-export const old2 = 2;\ndiff --git a/BACKLOG.md b/BACKLOG.md\nindex 1111111..2222222 100644\n--- a/BACKLOG.md\n+++ b/BACKLOG.md\n@@ -1,1 +1,2 @@\n  kept\n+added\ndiff --git a/BACKLOG.md.old b/BACKLOG.md.old\nindex 1111111..2222222 100644\n--- a/BACKLOG.md.old\n+++ b/BACKLOG.md.old\n@@ -1,1 +1,2 @@\n  kept\n+added\ndiff --git a/BACKLOGxmd b/BACKLOGxmd\nindex 1111111..2222222 100644\n--- a/BACKLOGxmd\n+++ b/BACKLOGxmd\n@@ -1,1 +1,2 @@\n  kept\n+added\ndiff --git a/docs/backlog/item.md b/docs/backlog/item.md\nindex 1111111..2222222 100644\n--- a/docs/backlog/item.md\n+++ b/docs/backlog/item.md\n@@ -1,1 +1,2 @@\n  kept\n+added\ndiff --git a/docs/backlogged.md b/docs/backlogged.md\nindex 1111111..2222222 100644\n--- a/docs/backlogged.md\n+++ b/docs/backlogged.md\n@@ -1,1 +1,2 @@\n  kept\n+added\ndiff --git a/docs/backlog(new).md b/docs/backlog(new).md\nindex 1111111..2222222 100644\n--- a/docs/backlog(new).md\n+++ b/docs/backlog(new).md\n@@ -1,1 +1,2 @@\n  kept\n+added",
+  "diff_number": "diff --git a/tools/crossrev/CHANGELOG.md b/tools/crossrev/CHANGELOG.md\nindex e773ac4..0b34128 100644\n--- a/tools/crossrev/CHANGELOG.md\n+++ b/tools/crossrev/CHANGELOG.md\n@@ -6,6 +6,8 @@ All notable changes to crossrev.\n   6    6 |\n   7    7 | ### Added\n   8    8 |\n   -    9 |+- **A two-direction template/default drift test.** Eleven behavior leaves must agree.\n   -   10 |+\n   9   11 | - `crossrev review --pr N` — one review pass. Claims before working.\n  10   12 | - `crossrev resolve --pr N` — verifies every finding whatever its severity.\n  11   13 | - `crossrev cycle --pr N` — the whole loop in one process, up to `max_passes`.\n@@ -33,3 +35,4 @@ All notable changes to crossrev.\n  33   35 | - `crossrev status --pr N` — position and interruption.\n  34    - |-- `runs_per_day` bounded a number that was not runs.\n   -   36 |+- `max_prs_per_day` counts distinct pull requests repository-wide.\n   -   37 |+- `max_passes_per_cycle` replaces the scattered caps.\n  35   38 | - `crossrev watchdog` — finds pull requests stuck waiting on a leg.\ndiff --git a/docs/my notes.md b/docs/my notes.md\nindex 1111111..2222222 100644\n--- a/docs/my notes.md\t\n+++ b/docs/my notes.md\t\n@@ -6,2 +6,3 @@ heading\n   6    6 |  existing line\n   -    7 |+added line\n   7    8 |  context line\ndiff --git \"a/docs/caf\\303\\251.md\" \"b/docs/caf\\303\\251.md\"\nindex 3333333..4444444 100644\n--- \"a/docs/caf\\303\\251.md\"\n+++ \"b/docs/caf\\303\\251.md\"\n@@ -20,1 +20,2 @@ heading\n  20   20 |  kept line\n   -   21 |+new line\ndiff --git a/src/old_name.ts b/src/new_name.ts\nsimilarity index 85%\nrename from src/old_name.ts\nrename to src/new_name.ts\n--- a/src/old_name.ts\n+++ b/src/new_name.ts\n@@ -1,2 +1,2 @@\n   1    - |-old version\n   -    1 |+new version\n   2    2 |  shared context\ndiff --git a/dev/null b/src/created.ts\nnew file mode 100644\n--- /dev/null\n+++ b/src/created.ts\n@@ -0,0 +1,2 @@\n   -    1 |+export const first = 1;\n   -    2 |+export const second = 2;\ndiff --git a/src/deleted.ts b/dev/null\ndeleted file mode 100644\n--- a/src/deleted.ts\n+++ /dev/null\n@@ -1,2 +0,0 @@\n   1    - |-export const old1 = 1;\n   2    - |-export const old2 = 2;\ndiff --git a/BACKLOG.md b/BACKLOG.md\nindex 1111111..2222222 100644\n--- a/BACKLOG.md\n+++ b/BACKLOG.md\n@@ -1,1 +1,2 @@\n   1    1 |  kept\n   -    2 |+added\ndiff --git a/BACKLOG.md.old b/BACKLOG.md.old\nindex 1111111..2222222 100644\n--- a/BACKLOG.md.old\n+++ b/BACKLOG.md.old\n@@ -1,1 +1,2 @@\n   1    1 |  kept\n   -    2 |+added\ndiff --git a/BACKLOGxmd b/BACKLOGxmd\nindex 1111111..2222222 100644\n--- a/BACKLOGxmd\n+++ b/BACKLOGxmd\n@@ -1,1 +1,2 @@\n   1    1 |  kept\n   -    2 |+added\ndiff --git a/docs/backlog/item.md b/docs/backlog/item.md\nindex 1111111..2222222 100644\n--- a/docs/backlog/item.md\n+++ b/docs/backlog/item.md\n@@ -1,1 +1,2 @@\n   1    1 |  kept\n   -    2 |+added\ndiff --git a/docs/backlogged.md b/docs/backlogged.md\nindex 1111111..2222222 100644\n--- a/docs/backlogged.md\n+++ b/docs/backlogged.md\n@@ -1,1 +1,2 @@\n   1    1 |  kept\n   -    2 |+added\ndiff --git a/docs/backlog(new).md b/docs/backlog(new).md\nindex 1111111..2222222 100644\n--- a/docs/backlog(new).md\n+++ b/docs/backlog(new).md\n@@ -1,1 +1,2 @@\n   1    1 |  kept\n   -    2 |+added",
+  "anchors": [
+    {
+      "name": "changelog-right-inside-hunk",
+      "path": "tools/crossrev/CHANGELOG.md",
+      "side": "RIGHT",
+      "line": 13,
+      "bound": 3,
+      "result": "13"
+    },
+    {
+      "name": "changelog-right-added-line",
+      "path": "tools/crossrev/CHANGELOG.md",
+      "side": "RIGHT",
+      "line": 9,
+      "bound": 3,
+      "result": "9"
+    },
+    {
+      "name": "changelog-left-inside-hunk",
+      "path": "tools/crossrev/CHANGELOG.md",
+      "side": "LEFT",
+      "line": 11,
+      "bound": 3,
+      "result": "11"
+    },
+    {
+      "name": "changelog-left-deleted-line",
+      "path": "tools/crossrev/CHANGELOG.md",
+      "side": "LEFT",
+      "line": 34,
+      "bound": 3,
+      "result": "34"
+    },
+    {
+      "name": "changelog-right-snap-dist-1",
+      "path": "tools/crossrev/CHANGELOG.md",
+      "side": "RIGHT",
+      "line": 14,
+      "bound": 3,
+      "result": "13"
+    },
+    {
+      "name": "changelog-right-snap-forward",
+      "path": "tools/crossrev/CHANGELOG.md",
+      "side": "RIGHT",
+      "line": 5,
+      "bound": 3,
+      "result": "6"
+    },
+    {
+      "name": "changelog-right-snap-dist-2",
+      "path": "tools/crossrev/CHANGELOG.md",
+      "side": "RIGHT",
+      "line": 15,
+      "bound": 3,
+      "result": "13"
+    },
+    {
+      "name": "changelog-right-snap-dist-3",
+      "path": "tools/crossrev/CHANGELOG.md",
+      "side": "RIGHT",
+      "line": 16,
+      "bound": 3,
+      "result": "13"
+    },
+    {
+      "name": "changelog-right-past-bound-3",
+      "path": "tools/crossrev/CHANGELOG.md",
+      "side": "RIGHT",
+      "line": 17,
+      "bound": 3,
+      "result": ""
+    },
+    {
+      "name": "changelog-right-snap-bound-4",
+      "path": "tools/crossrev/CHANGELOG.md",
+      "side": "RIGHT",
+      "line": 17,
+      "bound": 4,
+      "result": "13"
+    },
+    {
+      "name": "changelog-right-bound-0-exact",
+      "path": "tools/crossrev/CHANGELOG.md",
+      "side": "RIGHT",
+      "line": 13,
+      "bound": 0,
+      "result": "13"
+    },
+    {
+      "name": "changelog-right-bound-0-miss",
+      "path": "tools/crossrev/CHANGELOG.md",
+      "side": "RIGHT",
+      "line": 14,
+      "bound": 0,
+      "result": ""
+    },
+    {
+      "name": "changelog-right-tie-earlier",
+      "path": "tools/crossrev/CHANGELOG.md",
+      "side": "RIGHT",
+      "line": 24,
+      "bound": 11,
+      "result": "13"
+    },
+    {
+      "name": "changelog-right-far-miss",
+      "path": "tools/crossrev/CHANGELOG.md",
+      "side": "RIGHT",
+      "line": 24,
+      "bound": 3,
+      "result": ""
+    },
+    {
+      "name": "changelog-left-added-misses",
+      "path": "tools/crossrev/CHANGELOG.md",
+      "side": "LEFT",
+      "line": 37,
+      "bound": 3,
+      "result": "35"
+    },
+    {
+      "name": "changelog-right-deleted-misses",
+      "path": "tools/crossrev/CHANGELOG.md",
+      "side": "RIGHT",
+      "line": 33,
+      "bound": 3,
+      "result": "35"
+    },
+    {
+      "name": "spaced-path-inside-hunk",
+      "path": "docs/my notes.md",
+      "side": "RIGHT",
+      "line": 7,
+      "bound": 3,
+      "result": "7"
+    },
+    {
+      "name": "spaced-path-snap",
+      "path": "docs/my notes.md",
+      "side": "RIGHT",
+      "line": 9,
+      "bound": 3,
+      "result": "8"
+    },
+    {
+      "name": "quoted-path-inside-hunk",
+      "path": "docs/café.md",
+      "side": "RIGHT",
+      "line": 21,
+      "bound": 3,
+      "result": "21"
+    },
+    {
+      "name": "quoted-path-snap",
+      "path": "docs/café.md",
+      "side": "RIGHT",
+      "line": 22,
+      "bound": 3,
+      "result": "21"
+    },
+    {
+      "name": "quoted-path-escaped-literal-misses",
+      "path": "docs/caf\\303\\251.md",
+      "side": "RIGHT",
+      "line": 21,
+      "bound": 3,
+      "result": ""
+    },
+    {
+      "name": "rename-old-path",
+      "path": "src/old_name.ts",
+      "side": "LEFT",
+      "line": 1,
+      "bound": 3,
+      "result": "1"
+    },
+    {
+      "name": "rename-new-path",
+      "path": "src/new_name.ts",
+      "side": "RIGHT",
+      "line": 1,
+      "bound": 3,
+      "result": "1"
+    },
+    {
+      "name": "created-file",
+      "path": "src/created.ts",
+      "side": "RIGHT",
+      "line": 1,
+      "bound": 3,
+      "result": "1"
+    },
+    {
+      "name": "deleted-file",
+      "path": "src/deleted.ts",
+      "side": "LEFT",
+      "line": 1,
+      "bound": 3,
+      "result": "1"
+    },
+    {
+      "name": "absent-file",
+      "path": "absent.ts",
+      "side": "RIGHT",
+      "line": 1,
+      "bound": 3,
+      "result": ""
+    }
+  ],
+  "excludes": [
+    {
+      "name": "exclude-backlog-file",
+      "exclusions": [
+        "BACKLOG.md"
+      ],
+      "output": "diff --git a/tools/crossrev/CHANGELOG.md b/tools/crossrev/CHANGELOG.md\nindex e773ac4..0b34128 100644\n--- a/tools/crossrev/CHANGELOG.md\n+++ b/tools/crossrev/CHANGELOG.md\n@@ -6,6 +6,8 @@ All notable changes to crossrev.\n\n ### Added\n\n+- **A two-direction template/default drift test.** Eleven behavior leaves must agree.\n+\n - `crossrev review --pr N` — one review pass. Claims before working.\n - `crossrev resolve --pr N` — verifies every finding whatever its severity.\n - `crossrev cycle --pr N` — the whole loop in one process, up to `max_passes`.\n@@ -33,3 +35,4 @@ All notable changes to crossrev.\n - `crossrev status --pr N` — position and interruption.\n-- `runs_per_day` bounded a number that was not runs.\n+- `max_prs_per_day` counts distinct pull requests repository-wide.\n+- `max_passes_per_cycle` replaces the scattered caps.\n - `crossrev watchdog` — finds pull requests stuck waiting on a leg.\ndiff --git a/docs/my notes.md b/docs/my notes.md\nindex 1111111..2222222 100644\n--- a/docs/my notes.md\t\n+++ b/docs/my notes.md\t\n@@ -6,2 +6,3 @@ heading\n  existing line\n+added line\n  context line\ndiff --git \"a/docs/caf\\303\\251.md\" \"b/docs/caf\\303\\251.md\"\nindex 3333333..4444444 100644\n--- \"a/docs/caf\\303\\251.md\"\n+++ \"b/docs/caf\\303\\251.md\"\n@@ -20,1 +20,2 @@ heading\n  kept line\n+new line\ndiff --git a/src/old_name.ts b/src/new_name.ts\nsimilarity index 85%\nrename from src/old_name.ts\nrename to src/new_name.ts\n--- a/src/old_name.ts\n+++ b/src/new_name.ts\n@@ -1,2 +1,2 @@\n-old version\n+new version\n  shared context\ndiff --git a/dev/null b/src/created.ts\nnew file mode 100644\n--- /dev/null\n+++ b/src/created.ts\n@@ -0,0 +1,2 @@\n+export const first = 1;\n+export const second = 2;\ndiff --git a/src/deleted.ts b/dev/null\ndeleted file mode 100644\n--- a/src/deleted.ts\n+++ /dev/null\n@@ -1,2 +0,0 @@\n-export const old1 = 1;\n-export const old2 = 2;\ndiff --git a/BACKLOG.md.old b/BACKLOG.md.old\nindex 1111111..2222222 100644\n--- a/BACKLOG.md.old\n+++ b/BACKLOG.md.old\n@@ -1,1 +1,2 @@\n  kept\n+added\ndiff --git a/BACKLOGxmd b/BACKLOGxmd\nindex 1111111..2222222 100644\n--- a/BACKLOGxmd\n+++ b/BACKLOGxmd\n@@ -1,1 +1,2 @@\n  kept\n+added\ndiff --git a/docs/backlog/item.md b/docs/backlog/item.md\nindex 1111111..2222222 100644\n--- a/docs/backlog/item.md\n+++ b/docs/backlog/item.md\n@@ -1,1 +1,2 @@\n  kept\n+added\ndiff --git a/docs/backlogged.md b/docs/backlogged.md\nindex 1111111..2222222 100644\n--- a/docs/backlogged.md\n+++ b/docs/backlogged.md\n@@ -1,1 +1,2 @@\n  kept\n+added\ndiff --git a/docs/backlog(new).md b/docs/backlog(new).md\nindex 1111111..2222222 100644\n--- a/docs/backlog(new).md\n+++ b/docs/backlog(new).md\n@@ -1,1 +1,2 @@\n  kept\n+added"
+    },
+    {
+      "name": "exclude-backlog-prefix-dir",
+      "exclusions": [
+        "docs/backlog"
+      ],
+      "output": "diff --git a/tools/crossrev/CHANGELOG.md b/tools/crossrev/CHANGELOG.md\nindex e773ac4..0b34128 100644\n--- a/tools/crossrev/CHANGELOG.md\n+++ b/tools/crossrev/CHANGELOG.md\n@@ -6,6 +6,8 @@ All notable changes to crossrev.\n\n ### Added\n\n+- **A two-direction template/default drift test.** Eleven behavior leaves must agree.\n+\n - `crossrev review --pr N` — one review pass. Claims before working.\n - `crossrev resolve --pr N` — verifies every finding whatever its severity.\n - `crossrev cycle --pr N` — the whole loop in one process, up to `max_passes`.\n@@ -33,3 +35,4 @@ All notable changes to crossrev.\n - `crossrev status --pr N` — position and interruption.\n-- `runs_per_day` bounded a number that was not runs.\n+- `max_prs_per_day` counts distinct pull requests repository-wide.\n+- `max_passes_per_cycle` replaces the scattered caps.\n - `crossrev watchdog` — finds pull requests stuck waiting on a leg.\ndiff --git a/docs/my notes.md b/docs/my notes.md\nindex 1111111..2222222 100644\n--- a/docs/my notes.md\t\n+++ b/docs/my notes.md\t\n@@ -6,2 +6,3 @@ heading\n  existing line\n+added line\n  context line\ndiff --git \"a/docs/caf\\303\\251.md\" \"b/docs/caf\\303\\251.md\"\nindex 3333333..4444444 100644\n--- \"a/docs/caf\\303\\251.md\"\n+++ \"b/docs/caf\\303\\251.md\"\n@@ -20,1 +20,2 @@ heading\n  kept line\n+new line\ndiff --git a/src/old_name.ts b/src/new_name.ts\nsimilarity index 85%\nrename from src/old_name.ts\nrename to src/new_name.ts\n--- a/src/old_name.ts\n+++ b/src/new_name.ts\n@@ -1,2 +1,2 @@\n-old version\n+new version\n  shared context\ndiff --git a/dev/null b/src/created.ts\nnew file mode 100644\n--- /dev/null\n+++ b/src/created.ts\n@@ -0,0 +1,2 @@\n+export const first = 1;\n+export const second = 2;\ndiff --git a/src/deleted.ts b/dev/null\ndeleted file mode 100644\n--- a/src/deleted.ts\n+++ /dev/null\n@@ -1,2 +0,0 @@\n-export const old1 = 1;\n-export const old2 = 2;\ndiff --git a/BACKLOG.md b/BACKLOG.md\nindex 1111111..2222222 100644\n--- a/BACKLOG.md\n+++ b/BACKLOG.md\n@@ -1,1 +1,2 @@\n  kept\n+added\ndiff --git a/BACKLOG.md.old b/BACKLOG.md.old\nindex 1111111..2222222 100644\n--- a/BACKLOG.md.old\n+++ b/BACKLOG.md.old\n@@ -1,1 +1,2 @@\n  kept\n+added\ndiff --git a/BACKLOGxmd b/BACKLOGxmd\nindex 1111111..2222222 100644\n--- a/BACKLOGxmd\n+++ b/BACKLOGxmd\n@@ -1,1 +1,2 @@\n  kept\n+added\ndiff --git a/docs/backlogged.md b/docs/backlogged.md\nindex 1111111..2222222 100644\n--- a/docs/backlogged.md\n+++ b/docs/backlogged.md\n@@ -1,1 +1,2 @@\n  kept\n+added\ndiff --git a/docs/backlog(new).md b/docs/backlog(new).md\nindex 1111111..2222222 100644\n--- a/docs/backlog(new).md\n+++ b/docs/backlog(new).md\n@@ -1,1 +1,2 @@\n  kept\n+added"
+    },
+    {
+      "name": "exclude-backlog-trailing-slash",
+      "exclusions": [
+        "docs/backlog/"
+      ],
+      "output": "diff --git a/tools/crossrev/CHANGELOG.md b/tools/crossrev/CHANGELOG.md\nindex e773ac4..0b34128 100644\n--- a/tools/crossrev/CHANGELOG.md\n+++ b/tools/crossrev/CHANGELOG.md\n@@ -6,6 +6,8 @@ All notable changes to crossrev.\n\n ### Added\n\n+- **A two-direction template/default drift test.** Eleven behavior leaves must agree.\n+\n - `crossrev review --pr N` — one review pass. Claims before working.\n - `crossrev resolve --pr N` — verifies every finding whatever its severity.\n - `crossrev cycle --pr N` — the whole loop in one process, up to `max_passes`.\n@@ -33,3 +35,4 @@ All notable changes to crossrev.\n - `crossrev status --pr N` — position and interruption.\n-- `runs_per_day` bounded a number that was not runs.\n+- `max_prs_per_day` counts distinct pull requests repository-wide.\n+- `max_passes_per_cycle` replaces the scattered caps.\n - `crossrev watchdog` — finds pull requests stuck waiting on a leg.\ndiff --git a/docs/my notes.md b/docs/my notes.md\nindex 1111111..2222222 100644\n--- a/docs/my notes.md\t\n+++ b/docs/my notes.md\t\n@@ -6,2 +6,3 @@ heading\n  existing line\n+added line\n  context line\ndiff --git \"a/docs/caf\\303\\251.md\" \"b/docs/caf\\303\\251.md\"\nindex 3333333..4444444 100644\n--- \"a/docs/caf\\303\\251.md\"\n+++ \"b/docs/caf\\303\\251.md\"\n@@ -20,1 +20,2 @@ heading\n  kept line\n+new line\ndiff --git a/src/old_name.ts b/src/new_name.ts\nsimilarity index 85%\nrename from src/old_name.ts\nrename to src/new_name.ts\n--- a/src/old_name.ts\n+++ b/src/new_name.ts\n@@ -1,2 +1,2 @@\n-old version\n+new version\n  shared context\ndiff --git a/dev/null b/src/created.ts\nnew file mode 100644\n--- /dev/null\n+++ b/src/created.ts\n@@ -0,0 +1,2 @@\n+export const first = 1;\n+export const second = 2;\ndiff --git a/src/deleted.ts b/dev/null\ndeleted file mode 100644\n--- a/src/deleted.ts\n+++ /dev/null\n@@ -1,2 +0,0 @@\n-export const old1 = 1;\n-export const old2 = 2;\ndiff --git a/BACKLOG.md b/BACKLOG.md\nindex 1111111..2222222 100644\n--- a/BACKLOG.md\n+++ b/BACKLOG.md\n@@ -1,1 +1,2 @@\n  kept\n+added\ndiff --git a/BACKLOG.md.old b/BACKLOG.md.old\nindex 1111111..2222222 100644\n--- a/BACKLOG.md.old\n+++ b/BACKLOG.md.old\n@@ -1,1 +1,2 @@\n  kept\n+added\ndiff --git a/BACKLOGxmd b/BACKLOGxmd\nindex 1111111..2222222 100644\n--- a/BACKLOGxmd\n+++ b/BACKLOGxmd\n@@ -1,1 +1,2 @@\n  kept\n+added\ndiff --git a/docs/backlogged.md b/docs/backlogged.md\nindex 1111111..2222222 100644\n--- a/docs/backlogged.md\n+++ b/docs/backlogged.md\n@@ -1,1 +1,2 @@\n  kept\n+added\ndiff --git a/docs/backlog(new).md b/docs/backlog(new).md\nindex 1111111..2222222 100644\n--- a/docs/backlog(new).md\n+++ b/docs/backlog(new).md\n@@ -1,1 +1,2 @@\n  kept\n+added"
+    },
+    {
+      "name": "exclude-multiple",
+      "exclusions": [
+        "BACKLOG.md",
+        "docs/backlog"
+      ],
+      "output": "diff --git a/tools/crossrev/CHANGELOG.md b/tools/crossrev/CHANGELOG.md\nindex e773ac4..0b34128 100644\n--- a/tools/crossrev/CHANGELOG.md\n+++ b/tools/crossrev/CHANGELOG.md\n@@ -6,6 +6,8 @@ All notable changes to crossrev.\n\n ### Added\n\n+- **A two-direction template/default drift test.** Eleven behavior leaves must agree.\n+\n - `crossrev review --pr N` — one review pass. Claims before working.\n - `crossrev resolve --pr N` — verifies every finding whatever its severity.\n - `crossrev cycle --pr N` — the whole loop in one process, up to `max_passes`.\n@@ -33,3 +35,4 @@ All notable changes to crossrev.\n - `crossrev status --pr N` — position and interruption.\n-- `runs_per_day` bounded a number that was not runs.\n+- `max_prs_per_day` counts distinct pull requests repository-wide.\n+- `max_passes_per_cycle` replaces the scattered caps.\n - `crossrev watchdog` — finds pull requests stuck waiting on a leg.\ndiff --git a/docs/my notes.md b/docs/my notes.md\nindex 1111111..2222222 100644\n--- a/docs/my notes.md\t\n+++ b/docs/my notes.md\t\n@@ -6,2 +6,3 @@ heading\n  existing line\n+added line\n  context line\ndiff --git \"a/docs/caf\\303\\251.md\" \"b/docs/caf\\303\\251.md\"\nindex 3333333..4444444 100644\n--- \"a/docs/caf\\303\\251.md\"\n+++ \"b/docs/caf\\303\\251.md\"\n@@ -20,1 +20,2 @@ heading\n  kept line\n+new line\ndiff --git a/src/old_name.ts b/src/new_name.ts\nsimilarity index 85%\nrename from src/old_name.ts\nrename to src/new_name.ts\n--- a/src/old_name.ts\n+++ b/src/new_name.ts\n@@ -1,2 +1,2 @@\n-old version\n+new version\n  shared context\ndiff --git a/dev/null b/src/created.ts\nnew file mode 100644\n--- /dev/null\n+++ b/src/created.ts\n@@ -0,0 +1,2 @@\n+export const first = 1;\n+export const second = 2;\ndiff --git a/src/deleted.ts b/dev/null\ndeleted file mode 100644\n--- a/src/deleted.ts\n+++ /dev/null\n@@ -1,2 +0,0 @@\n-export const old1 = 1;\n-export const old2 = 2;\ndiff --git a/BACKLOG.md.old b/BACKLOG.md.old\nindex 1111111..2222222 100644\n--- a/BACKLOG.md.old\n+++ b/BACKLOG.md.old\n@@ -1,1 +1,2 @@\n  kept\n+added\ndiff --git a/BACKLOGxmd b/BACKLOGxmd\nindex 1111111..2222222 100644\n--- a/BACKLOGxmd\n+++ b/BACKLOGxmd\n@@ -1,1 +1,2 @@\n  kept\n+added\ndiff --git a/docs/backlogged.md b/docs/backlogged.md\nindex 1111111..2222222 100644\n--- a/docs/backlogged.md\n+++ b/docs/backlogged.md\n@@ -1,1 +1,2 @@\n  kept\n+added\ndiff --git a/docs/backlog(new).md b/docs/backlog(new).md\nindex 1111111..2222222 100644\n--- a/docs/backlog(new).md\n+++ b/docs/backlog(new).md\n@@ -1,1 +1,2 @@\n  kept\n+added"
+    },
+    {
+      "name": "exclude-spaced-path",
+      "exclusions": [
+        "docs/my notes.md"
+      ],
+      "output": "diff --git a/tools/crossrev/CHANGELOG.md b/tools/crossrev/CHANGELOG.md\nindex e773ac4..0b34128 100644\n--- a/tools/crossrev/CHANGELOG.md\n+++ b/tools/crossrev/CHANGELOG.md\n@@ -6,6 +6,8 @@ All notable changes to crossrev.\n\n ### Added\n\n+- **A two-direction template/default drift test.** Eleven behavior leaves must agree.\n+\n - `crossrev review --pr N` — one review pass. Claims before working.\n - `crossrev resolve --pr N` — verifies every finding whatever its severity.\n - `crossrev cycle --pr N` — the whole loop in one process, up to `max_passes`.\n@@ -33,3 +35,4 @@ All notable changes to crossrev.\n - `crossrev status --pr N` — position and interruption.\n-- `runs_per_day` bounded a number that was not runs.\n+- `max_prs_per_day` counts distinct pull requests repository-wide.\n+- `max_passes_per_cycle` replaces the scattered caps.\n - `crossrev watchdog` — finds pull requests stuck waiting on a leg.\ndiff --git \"a/docs/caf\\303\\251.md\" \"b/docs/caf\\303\\251.md\"\nindex 3333333..4444444 100644\n--- \"a/docs/caf\\303\\251.md\"\n+++ \"b/docs/caf\\303\\251.md\"\n@@ -20,1 +20,2 @@ heading\n  kept line\n+new line\ndiff --git a/src/old_name.ts b/src/new_name.ts\nsimilarity index 85%\nrename from src/old_name.ts\nrename to src/new_name.ts\n--- a/src/old_name.ts\n+++ b/src/new_name.ts\n@@ -1,2 +1,2 @@\n-old version\n+new version\n  shared context\ndiff --git a/dev/null b/src/created.ts\nnew file mode 100644\n--- /dev/null\n+++ b/src/created.ts\n@@ -0,0 +1,2 @@\n+export const first = 1;\n+export const second = 2;\ndiff --git a/src/deleted.ts b/dev/null\ndeleted file mode 100644\n--- a/src/deleted.ts\n+++ /dev/null\n@@ -1,2 +0,0 @@\n-export const old1 = 1;\n-export const old2 = 2;\ndiff --git a/BACKLOG.md b/BACKLOG.md\nindex 1111111..2222222 100644\n--- a/BACKLOG.md\n+++ b/BACKLOG.md\n@@ -1,1 +1,2 @@\n  kept\n+added\ndiff --git a/BACKLOG.md.old b/BACKLOG.md.old\nindex 1111111..2222222 100644\n--- a/BACKLOG.md.old\n+++ b/BACKLOG.md.old\n@@ -1,1 +1,2 @@\n  kept\n+added\ndiff --git a/BACKLOGxmd b/BACKLOGxmd\nindex 1111111..2222222 100644\n--- a/BACKLOGxmd\n+++ b/BACKLOGxmd\n@@ -1,1 +1,2 @@\n  kept\n+added\ndiff --git a/docs/backlog/item.md b/docs/backlog/item.md\nindex 1111111..2222222 100644\n--- a/docs/backlog/item.md\n+++ b/docs/backlog/item.md\n@@ -1,1 +1,2 @@\n  kept\n+added\ndiff --git a/docs/backlogged.md b/docs/backlogged.md\nindex 1111111..2222222 100644\n--- a/docs/backlogged.md\n+++ b/docs/backlogged.md\n@@ -1,1 +1,2 @@\n  kept\n+added\ndiff --git a/docs/backlog(new).md b/docs/backlog(new).md\nindex 1111111..2222222 100644\n--- a/docs/backlog(new).md\n+++ b/docs/backlog(new).md\n@@ -1,1 +1,2 @@\n  kept\n+added"
+    },
+    {
+      "name": "exclude-regex-metachar",
+      "exclusions": [
+        "docs/backlog(new).md"
+      ],
+      "output": "diff --git a/tools/crossrev/CHANGELOG.md b/tools/crossrev/CHANGELOG.md\nindex e773ac4..0b34128 100644\n--- a/tools/crossrev/CHANGELOG.md\n+++ b/tools/crossrev/CHANGELOG.md\n@@ -6,6 +6,8 @@ All notable changes to crossrev.\n\n ### Added\n\n+- **A two-direction template/default drift test.** Eleven behavior leaves must agree.\n+\n - `crossrev review --pr N` — one review pass. Claims before working.\n - `crossrev resolve --pr N` — verifies every finding whatever its severity.\n - `crossrev cycle --pr N` — the whole loop in one process, up to `max_passes`.\n@@ -33,3 +35,4 @@ All notable changes to crossrev.\n - `crossrev status --pr N` — position and interruption.\n-- `runs_per_day` bounded a number that was not runs.\n+- `max_prs_per_day` counts distinct pull requests repository-wide.\n+- `max_passes_per_cycle` replaces the scattered caps.\n - `crossrev watchdog` — finds pull requests stuck waiting on a leg.\ndiff --git a/docs/my notes.md b/docs/my notes.md\nindex 1111111..2222222 100644\n--- a/docs/my notes.md\t\n+++ b/docs/my notes.md\t\n@@ -6,2 +6,3 @@ heading\n  existing line\n+added line\n  context line\ndiff --git \"a/docs/caf\\303\\251.md\" \"b/docs/caf\\303\\251.md\"\nindex 3333333..4444444 100644\n--- \"a/docs/caf\\303\\251.md\"\n+++ \"b/docs/caf\\303\\251.md\"\n@@ -20,1 +20,2 @@ heading\n  kept line\n+new line\ndiff --git a/src/old_name.ts b/src/new_name.ts\nsimilarity index 85%\nrename from src/old_name.ts\nrename to src/new_name.ts\n--- a/src/old_name.ts\n+++ b/src/new_name.ts\n@@ -1,2 +1,2 @@\n-old version\n+new version\n  shared context\ndiff --git a/dev/null b/src/created.ts\nnew file mode 100644\n--- /dev/null\n+++ b/src/created.ts\n@@ -0,0 +1,2 @@\n+export const first = 1;\n+export const second = 2;\ndiff --git a/src/deleted.ts b/dev/null\ndeleted file mode 100644\n--- a/src/deleted.ts\n+++ /dev/null\n@@ -1,2 +0,0 @@\n-export const old1 = 1;\n-export const old2 = 2;\ndiff --git a/BACKLOG.md b/BACKLOG.md\nindex 1111111..2222222 100644\n--- a/BACKLOG.md\n+++ b/BACKLOG.md\n@@ -1,1 +1,2 @@\n  kept\n+added\ndiff --git a/BACKLOG.md.old b/BACKLOG.md.old\nindex 1111111..2222222 100644\n--- a/BACKLOG.md.old\n+++ b/BACKLOG.md.old\n@@ -1,1 +1,2 @@\n  kept\n+added\ndiff --git a/BACKLOGxmd b/BACKLOGxmd\nindex 1111111..2222222 100644\n--- a/BACKLOGxmd\n+++ b/BACKLOGxmd\n@@ -1,1 +1,2 @@\n  kept\n+added\ndiff --git a/docs/backlog/item.md b/docs/backlog/item.md\nindex 1111111..2222222 100644\n--- a/docs/backlog/item.md\n+++ b/docs/backlog/item.md\n@@ -1,1 +1,2 @@\n  kept\n+added\ndiff --git a/docs/backlogged.md b/docs/backlogged.md\nindex 1111111..2222222 100644\n--- a/docs/backlogged.md\n+++ b/docs/backlogged.md\n@@ -1,1 +1,2 @@\n  kept\n+added"
+    },
+    {
+      "name": "exclude-rename-source",
+      "exclusions": [
+        "src/old_name.ts"
+      ],
+      "output": "diff --git a/tools/crossrev/CHANGELOG.md b/tools/crossrev/CHANGELOG.md\nindex e773ac4..0b34128 100644\n--- a/tools/crossrev/CHANGELOG.md\n+++ b/tools/crossrev/CHANGELOG.md\n@@ -6,6 +6,8 @@ All notable changes to crossrev.\n\n ### Added\n\n+- **A two-direction template/default drift test.** Eleven behavior leaves must agree.\n+\n - `crossrev review --pr N` — one review pass. Claims before working.\n - `crossrev resolve --pr N` — verifies every finding whatever its severity.\n - `crossrev cycle --pr N` — the whole loop in one process, up to `max_passes`.\n@@ -33,3 +35,4 @@ All notable changes to crossrev.\n - `crossrev status --pr N` — position and interruption.\n-- `runs_per_day` bounded a number that was not runs.\n+- `max_prs_per_day` counts distinct pull requests repository-wide.\n+- `max_passes_per_cycle` replaces the scattered caps.\n - `crossrev watchdog` — finds pull requests stuck waiting on a leg.\ndiff --git a/docs/my notes.md b/docs/my notes.md\nindex 1111111..2222222 100644\n--- a/docs/my notes.md\t\n+++ b/docs/my notes.md\t\n@@ -6,2 +6,3 @@ heading\n  existing line\n+added line\n  context line\ndiff --git \"a/docs/caf\\303\\251.md\" \"b/docs/caf\\303\\251.md\"\nindex 3333333..4444444 100644\n--- \"a/docs/caf\\303\\251.md\"\n+++ \"b/docs/caf\\303\\251.md\"\n@@ -20,1 +20,2 @@ heading\n  kept line\n+new line\ndiff --git a/dev/null b/src/created.ts\nnew file mode 100644\n--- /dev/null\n+++ b/src/created.ts\n@@ -0,0 +1,2 @@\n+export const first = 1;\n+export const second = 2;\ndiff --git a/src/deleted.ts b/dev/null\ndeleted file mode 100644\n--- a/src/deleted.ts\n+++ /dev/null\n@@ -1,2 +0,0 @@\n-export const old1 = 1;\n-export const old2 = 2;\ndiff --git a/BACKLOG.md b/BACKLOG.md\nindex 1111111..2222222 100644\n--- a/BACKLOG.md\n+++ b/BACKLOG.md\n@@ -1,1 +1,2 @@\n  kept\n+added\ndiff --git a/BACKLOG.md.old b/BACKLOG.md.old\nindex 1111111..2222222 100644\n--- a/BACKLOG.md.old\n+++ b/BACKLOG.md.old\n@@ -1,1 +1,2 @@\n  kept\n+added\ndiff --git a/BACKLOGxmd b/BACKLOGxmd\nindex 1111111..2222222 100644\n--- a/BACKLOGxmd\n+++ b/BACKLOGxmd\n@@ -1,1 +1,2 @@\n  kept\n+added\ndiff --git a/docs/backlog/item.md b/docs/backlog/item.md\nindex 1111111..2222222 100644\n--- a/docs/backlog/item.md\n+++ b/docs/backlog/item.md\n@@ -1,1 +1,2 @@\n  kept\n+added\ndiff --git a/docs/backlogged.md b/docs/backlogged.md\nindex 1111111..2222222 100644\n--- a/docs/backlogged.md\n+++ b/docs/backlogged.md\n@@ -1,1 +1,2 @@\n  kept\n+added\ndiff --git a/docs/backlog(new).md b/docs/backlog(new).md\nindex 1111111..2222222 100644\n--- a/docs/backlog(new).md\n+++ b/docs/backlog(new).md\n@@ -1,1 +1,2 @@\n  kept\n+added"
+    },
+    {
+      "name": "exclude-rename-target",
+      "exclusions": [
+        "src/new_name.ts"
+      ],
+      "output": "diff --git a/tools/crossrev/CHANGELOG.md b/tools/crossrev/CHANGELOG.md\nindex e773ac4..0b34128 100644\n--- a/tools/crossrev/CHANGELOG.md\n+++ b/tools/crossrev/CHANGELOG.md\n@@ -6,6 +6,8 @@ All notable changes to crossrev.\n\n ### Added\n\n+- **A two-direction template/default drift test.** Eleven behavior leaves must agree.\n+\n - `crossrev review --pr N` — one review pass. Claims before working.\n - `crossrev resolve --pr N` — verifies every finding whatever its severity.\n - `crossrev cycle --pr N` — the whole loop in one process, up to `max_passes`.\n@@ -33,3 +35,4 @@ All notable changes to crossrev.\n - `crossrev status --pr N` — position and interruption.\n-- `runs_per_day` bounded a number that was not runs.\n+- `max_prs_per_day` counts distinct pull requests repository-wide.\n+- `max_passes_per_cycle` replaces the scattered caps.\n - `crossrev watchdog` — finds pull requests stuck waiting on a leg.\ndiff --git a/docs/my notes.md b/docs/my notes.md\nindex 1111111..2222222 100644\n--- a/docs/my notes.md\t\n+++ b/docs/my notes.md\t\n@@ -6,2 +6,3 @@ heading\n  existing line\n+added line\n  context line\ndiff --git \"a/docs/caf\\303\\251.md\" \"b/docs/caf\\303\\251.md\"\nindex 3333333..4444444 100644\n--- \"a/docs/caf\\303\\251.md\"\n+++ \"b/docs/caf\\303\\251.md\"\n@@ -20,1 +20,2 @@ heading\n  kept line\n+new line\ndiff --git a/dev/null b/src/created.ts\nnew file mode 100644\n--- /dev/null\n+++ b/src/created.ts\n@@ -0,0 +1,2 @@\n+export const first = 1;\n+export const second = 2;\ndiff --git a/src/deleted.ts b/dev/null\ndeleted file mode 100644\n--- a/src/deleted.ts\n+++ /dev/null\n@@ -1,2 +0,0 @@\n-export const old1 = 1;\n-export const old2 = 2;\ndiff --git a/BACKLOG.md b/BACKLOG.md\nindex 1111111..2222222 100644\n--- a/BACKLOG.md\n+++ b/BACKLOG.md\n@@ -1,1 +1,2 @@\n  kept\n+added\ndiff --git a/BACKLOG.md.old b/BACKLOG.md.old\nindex 1111111..2222222 100644\n--- a/BACKLOG.md.old\n+++ b/BACKLOG.md.old\n@@ -1,1 +1,2 @@\n  kept\n+added\ndiff --git a/BACKLOGxmd b/BACKLOGxmd\nindex 1111111..2222222 100644\n--- a/BACKLOGxmd\n+++ b/BACKLOGxmd\n@@ -1,1 +1,2 @@\n  kept\n+added\ndiff --git a/docs/backlog/item.md b/docs/backlog/item.md\nindex 1111111..2222222 100644\n--- a/docs/backlog/item.md\n+++ b/docs/backlog/item.md\n@@ -1,1 +1,2 @@\n  kept\n+added\ndiff --git a/docs/backlogged.md b/docs/backlogged.md\nindex 1111111..2222222 100644\n--- a/docs/backlogged.md\n+++ b/docs/backlogged.md\n@@ -1,1 +1,2 @@\n  kept\n+added\ndiff --git a/docs/backlog(new).md b/docs/backlog(new).md\nindex 1111111..2222222 100644\n--- a/docs/backlog(new).md\n+++ b/docs/backlog(new).md\n@@ -1,1 +1,2 @@\n  kept\n+added"
+    },
+    {
+      "name": "exclude-none",
+      "exclusions": [],
+      "output": "diff --git a/tools/crossrev/CHANGELOG.md b/tools/crossrev/CHANGELOG.md\nindex e773ac4..0b34128 100644\n--- a/tools/crossrev/CHANGELOG.md\n+++ b/tools/crossrev/CHANGELOG.md\n@@ -6,6 +6,8 @@ All notable changes to crossrev.\n\n ### Added\n\n+- **A two-direction template/default drift test.** Eleven behavior leaves must agree.\n+\n - `crossrev review --pr N` — one review pass. Claims before working.\n - `crossrev resolve --pr N` — verifies every finding whatever its severity.\n - `crossrev cycle --pr N` — the whole loop in one process, up to `max_passes`.\n@@ -33,3 +35,4 @@ All notable changes to crossrev.\n - `crossrev status --pr N` — position and interruption.\n-- `runs_per_day` bounded a number that was not runs.\n+- `max_prs_per_day` counts distinct pull requests repository-wide.\n+- `max_passes_per_cycle` replaces the scattered caps.\n - `crossrev watchdog` — finds pull requests stuck waiting on a leg.\ndiff --git a/docs/my notes.md b/docs/my notes.md\nindex 1111111..2222222 100644\n--- a/docs/my notes.md\t\n+++ b/docs/my notes.md\t\n@@ -6,2 +6,3 @@ heading\n  existing line\n+added line\n  context line\ndiff --git \"a/docs/caf\\303\\251.md\" \"b/docs/caf\\303\\251.md\"\nindex 3333333..4444444 100644\n--- \"a/docs/caf\\303\\251.md\"\n+++ \"b/docs/caf\\303\\251.md\"\n@@ -20,1 +20,2 @@ heading\n  kept line\n+new line\ndiff --git a/src/old_name.ts b/src/new_name.ts\nsimilarity index 85%\nrename from src/old_name.ts\nrename to src/new_name.ts\n--- a/src/old_name.ts\n+++ b/src/new_name.ts\n@@ -1,2 +1,2 @@\n-old version\n+new version\n  shared context\ndiff --git a/dev/null b/src/created.ts\nnew file mode 100644\n--- /dev/null\n+++ b/src/created.ts\n@@ -0,0 +1,2 @@\n+export const first = 1;\n+export const second = 2;\ndiff --git a/src/deleted.ts b/dev/null\ndeleted file mode 100644\n--- a/src/deleted.ts\n+++ /dev/null\n@@ -1,2 +0,0 @@\n-export const old1 = 1;\n-export const old2 = 2;\ndiff --git a/BACKLOG.md b/BACKLOG.md\nindex 1111111..2222222 100644\n--- a/BACKLOG.md\n+++ b/BACKLOG.md\n@@ -1,1 +1,2 @@\n  kept\n+added\ndiff --git a/BACKLOG.md.old b/BACKLOG.md.old\nindex 1111111..2222222 100644\n--- a/BACKLOG.md.old\n+++ b/BACKLOG.md.old\n@@ -1,1 +1,2 @@\n  kept\n+added\ndiff --git a/BACKLOGxmd b/BACKLOGxmd\nindex 1111111..2222222 100644\n--- a/BACKLOGxmd\n+++ b/BACKLOGxmd\n@@ -1,1 +1,2 @@\n  kept\n+added\ndiff --git a/docs/backlog/item.md b/docs/backlog/item.md\nindex 1111111..2222222 100644\n--- a/docs/backlog/item.md\n+++ b/docs/backlog/item.md\n@@ -1,1 +1,2 @@\n  kept\n+added\ndiff --git a/docs/backlogged.md b/docs/backlogged.md\nindex 1111111..2222222 100644\n--- a/docs/backlogged.md\n+++ b/docs/backlogged.md\n@@ -1,1 +1,2 @@\n  kept\n+added\ndiff --git a/docs/backlog(new).md b/docs/backlog(new).md\nindex 1111111..2222222 100644\n--- a/docs/backlog(new).md\n+++ b/docs/backlog(new).md\n@@ -1,1 +1,2 @@\n  kept\n+added"
+    }
+  ]
+}
