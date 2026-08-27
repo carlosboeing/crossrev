@@ -103,3 +103,51 @@ func TestParsersRejectDanglingContinuation(t *testing.T) {
 		})
 	}
 }
+
+// The `is` branch used to hardcode "halt". A continue or converged row would
+// have been written into the Go vectors as its opposite, with every check green.
+func TestParseShouldContinueReadsTheIsRowActionFromItsExpectedString(t *testing.T) {
+	tests := []struct {
+		name       string
+		line       string
+		wantAction string
+	}{
+		{
+			name:       "halt",
+			line:       `is "the daily halt names the others" "$(legs_should_continue issues-remain 1 3 false false 12 12 10 200)" "halt reached max_prs_per_day (12)"`,
+			wantAction: "halt",
+		},
+		{
+			name:       "continue",
+			line:       `is "a healthy verdict continues" "$(legs_should_continue issues-remain 1 3 false false 0 12 10 200)" "continue issues remain"`,
+			wantAction: "continue",
+		},
+		{
+			name:       "converged",
+			line:       `is "convergence stops the loop" "$(legs_should_continue converged 1 3 false false 0 12 10 200)" "converged nothing left to fix"`,
+			wantAction: "converged",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cases, err := parseShouldContinueCases([]string{tt.line})
+			if err != nil {
+				t.Fatalf("parse failed: %v", err)
+			}
+			if len(cases) != 1 {
+				t.Fatalf("expected 1 case, got %d", len(cases))
+			}
+			if cases[0].ExpectedAction != tt.wantAction {
+				t.Errorf("expected action %q, got %q", tt.wantAction, cases[0].ExpectedAction)
+			}
+		})
+	}
+}
+
+func TestParseShouldContinueRejectsAnUnknownIsRowAction(t *testing.T) {
+	line := `is "an invented verdict" "$(legs_should_continue issues-remain 1 3 false false 0 12 10 200)" "perhaps something happened"`
+	if _, err := parseShouldContinueCases([]string{line}); err == nil {
+		t.Fatal("expected an unknown action in the expected string to be rejected")
+	}
+}

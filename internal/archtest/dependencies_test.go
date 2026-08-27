@@ -131,6 +131,13 @@ func TestProductionTierDAG(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to load packages: %v", err)
 	}
+	// err reports only a driver failure. A package that fails to type-check or
+	// parse loads with an empty import list, so every tier rule below would pass
+	// on it vacuously and the DAG would report green over a package it never
+	// examined. TestWorkerNetworkIsolation already checks this; so must this one.
+	if packages.PrintErrors(pkgs) > 0 {
+		t.Fatal("packages failed to load; the tier rules cannot be checked against them")
+	}
 
 	seenPackages := make(map[string]bool)
 

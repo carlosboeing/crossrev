@@ -6,23 +6,32 @@
 
 set -euo pipefail
 
+# What the operator installed, before any switch. GOTOOLCHAIN=local forbids the
+# download-and-switch, so this is the real local toolchain rather than the pin.
+# It is reported rather than enforced: go.mod's `toolchain go1.27.0` directive is
+# meant to select the release toolchain on a machine running something else, and
+# refusing that would make the script unrunnable for most contributors.
+local_version="$(GOTOOLCHAIN=local go env GOVERSION 2>/dev/null || true)"
+
+# Pin the release toolchain, then read back what the pin actually selected.
+# Reading after the export is deliberate: the measurements below have to run on
+# go1.27.0 exactly, and this proves the switch happened rather than assuming it.
+# Reading GOVERSION before the export would report the operator's version and
+# say nothing about what the probe is compiled with.
 export GOTOOLCHAIN="go1.27.0"
-
-raw_version="$(go version)"
 go_version="$(go env GOVERSION 2>/dev/null || true)"
-host_os="$(go env GOHOSTOS 2>/dev/null || true)"
-host_arch="$(go env GOHOSTARCH 2>/dev/null || true)"
 
+# An exact string comparison. "go1.27.0rc1" and "go1.28.0" both fail it, so no
+# separate beta or release-candidate arm is needed.
 if [[ "$go_version" != "go1.27.0" ]]; then
-  printf 'Error: expected Go version go1.27.0, got "%s"\n' "$go_version" >&2
+  printf 'Error: the go1.27.0 pin selected "%s"\n' "$go_version" >&2
   printf 'Refusing beta, release candidate, or mismatched Go toolchain.\n' >&2
   exit 1
 fi
 
-if [[ "$go_version" =~ (beta|rc) ]]; then
-  printf 'Error: refusing beta or release candidate: %s\n' "$go_version" >&2
-  exit 1
-fi
+raw_version="$(go version)"
+host_os="$(go env GOHOSTOS 2>/dev/null || true)"
+host_arch="$(go env GOHOSTARCH 2>/dev/null || true)"
 
 if [[ "$host_os" != "darwin" ]]; then
   printf 'Error: Darwin toolchain verification must run on macOS (darwin), host is %s\n' "$host_os" >&2
@@ -30,6 +39,7 @@ if [[ "$host_os" != "darwin" ]]; then
 fi
 
 printf 'Go toolchain verification\n'
+printf '  installed:    %s\n' "$local_version"
 printf '  version:      %s\n' "$raw_version"
 printf '  GOVERSION:    %s\n' "$go_version"
 printf '  GOHOSTOS:     %s\n' "$host_os"

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"go/format"
 	"os"
@@ -265,8 +266,22 @@ func parseShouldContinueCases(lines []string) ([]ShouldContinueTestCase, error) 
 			if err != nil {
 				return nil, err
 			}
+			// Read the verdict from the expected string rather than assuming it.
+			// legs_should_continue answers "continue", "converged" or "halt", and
+			// every `is` row in the table today happens to be a halt. Hardcoding
+			// that would make the generator write the opposite of the oracle the
+			// first time somebody adds a continue row, silently.
+			expectedFields := strings.Fields(expFull)
+			if len(expectedFields) == 0 {
+				return nil, fmt.Errorf("empty expected string in is statement: %q", stmt)
+			}
+			action := expectedFields[0]
+			if action != "continue" && action != "converged" && action != "halt" {
+				return nil, fmt.Errorf("invalid action %q in expected string of is statement: %q", action, stmt)
+			}
+
 			parsed.Desc = desc
-			parsed.ExpectedAction = "halt"
+			parsed.ExpectedAction = action
 			parsed.ExpectedFull = expFull
 			cases = append(cases, parsed)
 		} else {
@@ -497,11 +512,27 @@ func renderPolicyFixtures(shouldContinueCases []ShouldContinueTestCase, resolveR
 	return buf.Bytes()
 }
 
-func writeGenerated(filename string, source []byte) error {
+// writeGenerated writes the fixture, or in check mode compares it and reports a
+// difference without touching the file. Check mode is what CI and the linter run,
+// so an edit to a Bash policy table that nobody regenerated fails a check instead
+// of leaving the Go vectors quietly disagreeing with the oracle they came from.
+func writeGenerated(filename string, source []byte, checkOnly bool) error {
 	formatted, err := format.Source(source)
 	if err != nil {
 		return fmt.Errorf("format generated code for %s: %w", filename, err)
 	}
+
+	if checkOnly {
+		existing, err := os.ReadFile(filename)
+		if err != nil {
+			return fmt.Errorf("read %s for comparison: %w", filename, err)
+		}
+		if !bytes.Equal(existing, formatted) {
+			return fmt.Errorf("%s is stale: regenerate it with `go run ./internal/testgen/policy`", filename)
+		}
+		return nil
+	}
+
 	if err := os.WriteFile(filename, formatted, 0644); err != nil {
 		return fmt.Errorf("write %s: %w", filename, err)
 	}
@@ -509,6 +540,9 @@ func writeGenerated(filename string, source []byte) error {
 }
 
 func main() {
+	checkOnly := flag.Bool("check", false, "compare the generated fixtures against the Bash tables without writing them")
+	flag.Parse()
+
 	root := findRepoRoot()
 	stateFile := filepath.Join(root, "tests", "test-state.sh")
 	legsFile := filepath.Join(root, "tests", "test-legs.sh")
@@ -577,14 +611,18 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := writeGenerated(prstateOutFile, renderPrstateFixtures(passCases, maxPassCases, currentReviewPassCases)); err != nil {
+	if err := writeGenerated(prstateOutFile, renderPrstateFixtures(passCases, maxPassCases, currentReviewPassCases), *checkOnly); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	if err := writeGenerated(policyOutFile, renderPolicyFixtures(shouldContinueCases, resolveRedrivableCases, reviewRedrivableCases)); err != nil {
+	if err := writeGenerated(policyOutFile, renderPolicyFixtures(shouldContinueCases, resolveRedrivableCases, reviewRedrivableCases), *checkOnly); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	fmt.Printf("Generated data-only parity fixtures successfully (%d pass, %d max_pass, %d current_review_pass, %d should_continue, %d resolve_redrive, %d review_redrive cases)\n",
-		len(passCases), len(maxPassCases), len(currentReviewPassCases), len(shouldContinueCases), len(resolveRedrivableCases), len(reviewRedrivableCases))
+	verb := "Generated"
+	if *checkOnly {
+		verb = "Verified"
+	}
+	fmt.Printf("%s data-only parity fixtures successfully (%d pass, %d max_pass, %d current_review_pass, %d should_continue, %d resolve_redrive, %d review_redrive cases)\n",
+		verb, len(passCases), len(maxPassCases), len(currentReviewPassCases), len(shouldContinueCases), len(resolveRedrivableCases), len(reviewRedrivableCases))
 }

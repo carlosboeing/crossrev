@@ -57,7 +57,7 @@ Go 1.27.0 is the required toolchain. Darwin builds and code signing reproducibil
 - **Darwin arm64**: CGO builds (`CGO_ENABLED=1`, `GOOS=darwin`, `GOARCH=arm64`, `-trimpath`) produce Mach-O thin binaries automatically signed with linker ad-hoc signatures (`Signature=adhoc`, `flags=...adhoc`).
 - **Darwin amd64**: CGO cross-compilation (`CC="clang -arch x86_64"`, `GOARCH=amd64`, `-trimpath`) produces unsigned binaries that require explicit ad-hoc signing via `codesign -s - -i crossrev -f <bin>` (`Signature=adhoc`, `flags=0x2(adhoc)`).
 - **Reproducibility**: Repeated builds of both architectures produce byte-identical post-sign SHA-256 digests.
-- **Verification**: `scripts/verify-native-toolchain.sh` enforces the exact `go1.27.0` pin, rejecting beta or release candidate toolchains, and verifies Darwin arm64 and amd64 compilation, architecture headers via `lipo`, ad-hoc signatures, and digest reproducibility.
+- **Verification**: `scripts/verify-native-toolchain.sh` reports the operator's installed toolchain, applies the `go1.27.0` pin, and refuses to measure anything unless the pin selected exactly that version — a beta, a release candidate or another release all fail the comparison. It then verifies Darwin arm64 and amd64 compilation, architecture headers via `lipo`, ad-hoc signatures, and digest reproducibility. It does not require the operator to have 1.27.0 installed: `go.mod`'s `toolchain` directive exists to select the release toolchain on a machine running a different one, and the script prints both versions so the switch is visible rather than silent.
 
 ### Versioning and release gate
 

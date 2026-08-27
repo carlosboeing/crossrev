@@ -234,32 +234,104 @@
     {
       "name": "version-mismatch",
       "family": "version",
+      "driver": "load",
+      "call": [],
       "config": "version: 99\n",
       "error": "\nerror  .github/crossrev.yml declares version 99, and this crossrev understands version 1\n       Upgrade crossrev, or set version: 1 in that file if it really is the current shape."
     },
     {
       "name": "severity-invalid",
       "family": "severity",
+      "driver": "load",
+      "call": [],
       "config": "version: 1\npolicy:\n  min_fix_severity: medum\n",
       "error": "\nerror  policy.min_fix_severity is 'medum', which is not one of high, medium or low\n       It names the lowest severity the resolve leg may change code for unattended. Set it to high, medium or low in the repository config, or remove it to take the default of medium."
     },
     {
       "name": "pass-count-invalid",
       "family": "pass_count",
+      "driver": "load",
+      "call": [],
       "config": "version: 1\npolicy:\n  max_passes_per_cycle: 0\n",
       "error": "\nerror  policy.max_passes_per_cycle is '0', which is not a whole number of passes above zero\n       It bounds how many passes the loop runs by itself before a person has to ask for another, so the smallest meaningful value is 1. Set it to 1 or more in the repository config, or remove it to take the default of 3. To stop crossrev reviewing a repository at all, remove its workflows rather than setting the bound to zero."
     },
     {
       "name": "git-hooks-invalid",
       "family": "git_hooks",
+      "driver": "load",
+      "call": [],
       "config": "version: 1\ngit:\n  hooks: skipp\n",
       "error": "\nerror  git.hooks is 'skipp', which is not one of skip or run\n       It decides whether the resolver's commit and push run the repository's own git hooks. Set it to skip or run in the repository config, or remove it to take the default of skip."
     },
     {
       "name": "log-retention-invalid",
       "family": "log_retention",
+      "driver": "load",
+      "call": [],
       "config": "version: 1\nlogs:\n  retention_days: 0\n",
       "error": "\nerror  logs.retention_days is '0', which is not a whole number of days above zero\n       It bounds how long run logs and kept transcripts stay under the state directory before a sweep removes them. Set it to 1 or more in the repository config, or remove it to take the default of 14."
+    },
+    {
+      "name": "keep-transcripts-invalid",
+      "family": "log_transcripts",
+      "driver": "load",
+      "call": [],
+      "config": "version: 1\nlogs:\n  keep_transcripts: yes please\n",
+      "error": "\nerror  logs.keep_transcripts is 'yes please', which is not true or false\n       It decides whether harness transcripts survive a successful leg rather than only a failed one. Set it to true or false in the repository config, or remove it to take the default of false."
+    },
+    {
+      "name": "version-mismatch-at-base",
+      "family": "version",
+      "driver": "load_at_base",
+      "call": [],
+      "config": "version: 99\n",
+      "error": "\nerror  base revision .github/crossrev.yml declares version 99, and this crossrev understands version 1\n       Upgrade crossrev, or set version: 1 in that file if it really is the current shape."
+    },
+    {
+      "name": "endpoint-without-base-url",
+      "family": "endpoint",
+      "driver": "call",
+      "call": [
+        "cfg_endpoint",
+        "local"
+      ],
+      "config": "version: 1\nendpoints:\n  local:\n    token_env: LOCAL_TOKEN\n",
+      "error": "\nerror  the endpoint 'local' has no base_url\n       Add base_url: to its definition."
+    },
+    {
+      "name": "endpoint-without-token-env",
+      "family": "endpoint",
+      "driver": "call",
+      "call": [
+        "cfg_endpoint",
+        "local"
+      ],
+      "config": "version: 1\nendpoints:\n  local:\n    base_url: http://127.0.0.1:11434\n",
+      "error": "\nerror  the endpoint 'local' has no token_env\n       Add token_env: naming the environment variable that carries its token. Ollama's docs use ANTHROPIC_AUTH_TOKEN where Kimi's use ANTHROPIC_API_KEY, which is why the name is not assumed."
+    },
+    {
+      "name": "backlog-layout-invalid",
+      "family": "backlog",
+      "driver": "call",
+      "call": [
+        "cfg_resolve_backlog",
+        "",
+        "repository"
+      ],
+      "config": "version: 1\nbacklog:\n  destination: repository\n  repository:\n    layout: flat\n",
+      "error": "\nerror  backlog.repository.layout is 'flat', which is not folder or file\n       Set it to folder or file in the repository config."
+    },
+    {
+      "name": "backlog-destination-invalid",
+      "family": "backlog",
+      "driver": "call",
+      "call": [
+        "cfg_resolve_backlog",
+        "",
+        "elsewhere"
+      ],
+      "config": "version: 1\nbacklog:\n  destination: elsewhere\n",
+      "error": "\nerror  backlog.destination is 'elsewhere', which CrossRev does not recognise\n       Set it to github_issues, repository, none or auto in the repository config."
     }
   ]
 }

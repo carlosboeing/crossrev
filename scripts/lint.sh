@@ -116,6 +116,7 @@ if command -v go >/dev/null 2>&1; then
     printf '  ok    go mod verified\n'
   else
     printf '  FAIL  go mod verify failed\n'
+    GOTOOLCHAIN=go1.27.0 go mod verify 2>&1 | sed 's/^/        /'
     fail=1
   fi
   if GOTOOLCHAIN=go1.27.0 go vet ./... >/dev/null 2>&1; then
@@ -123,6 +124,18 @@ if command -v go >/dev/null 2>&1; then
   else
     printf '  FAIL  go vet found problems\n'
     GOTOOLCHAIN=go1.27.0 go vet ./... 2>&1 | sed 's/^/        /'
+    fail=1
+  fi
+  # The generated Go parity vectors come from the Bash policy tables in
+  # tests/test-state.sh and tests/test-legs.sh. Nothing else compares them, so an
+  # edit to a table that nobody regenerated would leave the vectors disagreeing
+  # with the oracle they were cut from, with every other check green.
+  if GOTOOLCHAIN=go1.27.0 go run ./internal/testgen/policy -check >/dev/null 2>&1; then
+    printf '  ok    generated parity vectors match the Bash policy tables\n'
+  else
+    printf '  FAIL  generated parity vectors differ from the Bash policy tables\n'
+    GOTOOLCHAIN=go1.27.0 go run ./internal/testgen/policy -check 2>&1 | sed 's/^/        /'
+    printf '        Run: go run ./internal/testgen/policy\n'
     fail=1
   fi
 else

@@ -273,7 +273,8 @@ internal/        native Go package graph
   validate/        Tier 1: payload validation
   intel/           Tier 1: Review Intelligence contracts
   config/          Tier 2: configuration loading
-  exec/            Tier 2: command execution, environment sanitization
+  prompt/          Tier 2: assembled prompt text
+  exec/            Tier 2: command execution and the environment allowlist
   ui/              Tier 2: output and formatting
   runlog/          Tier 2: logging and redaction
   vcs/             Tier 2: git operations
@@ -295,7 +296,9 @@ internal/        native Go package graph
 schemas/         findings.schema.json, resolve.schema.json
 skills/          pr-review/, pr-resolve/
 templates/       workflows, starter config, example operator config
-scripts/         lint.sh, build-native.sh, test-native.sh, next-version.sh
+scripts/         lint.sh, check-changelog.sh, next-version.sh, refresh-prices.sh,
+                 render-harness-docs.sh, build-native.sh, test-native.sh,
+                 verify-native-toolchain.sh
 tests/           the stubbed-gh suite. tests/run.sh runs all of it
 ```
 

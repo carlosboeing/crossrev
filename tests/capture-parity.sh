@@ -226,20 +226,33 @@ rename to src/new_name.ts
 -old version
 +new version
   shared context
-diff --git a/dev/null b/src/created.ts
+diff --git a/src/created.ts b/src/created.ts
 new file mode 100644
 --- /dev/null
 +++ b/src/created.ts
 @@ -0,0 +1,2 @@
 +export const first = 1;
 +export const second = 2;
-diff --git a/src/deleted.ts b/dev/null
+diff --git a/src/deleted.ts b/src/deleted.ts
 deleted file mode 100644
 --- a/src/deleted.ts
 +++ /dev/null
 @@ -1,2 +0,0 @@
 -export const old1 = 1;
 -export const old2 = 2;
+diff --git a/src/edges.ts b/src/edges.ts
+index 5555555..6666666 100644
+--- a/src/edges.ts
++++ b/src/edges.ts
+@@ -1 +1 @@
+-const only = 1;
++const only = 2;
+@@ -10,3 +10,5 @@ a heading
+ kept context
+--- a removed line whose own text starts with two dashes
++++ an added line whose own text starts with two pluses
+ last kept line
+\ No newline at end of file
 diff --git a/BACKLOG.md b/BACKLOG.md
 index 1111111..2222222 100644
 --- a/BACKLOG.md
@@ -319,6 +332,15 @@ anchor_diff_cases() {
   anchor_diff_case "created-file" "src/created.ts" RIGHT 1 3
   anchor_diff_case "deleted-file" "src/deleted.ts" LEFT 1 3
   anchor_diff_case "absent-file" "absent.ts" RIGHT 1 3
+  # The three shapes lib/diff.sh calls out in its own comments. A hunk header
+  # with counts omitted (lib/diff.sh:152), an in-hunk line whose own text opens
+  # with -- or ++ (lib/diff.sh:159), and the no-newline annotation (lib/diff.sh:164).
+  local ED="src/edges.ts"
+  anchor_diff_case "edges-omitted-counts-right" "$ED" RIGHT 1 3
+  anchor_diff_case "edges-omitted-counts-left" "$ED" LEFT 1 3
+  anchor_diff_case "edges-dashdash-body-line-left" "$ED" LEFT 11 3
+  anchor_diff_case "edges-plusplus-body-line-right" "$ED" RIGHT 11 3
+  anchor_diff_case "edges-context-before-no-newline" "$ED" RIGHT 12 3
 }
 
 exclude_diff_case() { # name exclusion_args...
@@ -467,7 +489,52 @@ config_refusal_case() { # name family yaml
     local err
     err="$({ cfg_load >/dev/null; } 2>&1 || true)"
     jq -cn --arg n "$name" --arg f "$family" --arg y "$yaml" --arg e "$err" \
-      '{name:$n, family:$f, config:$y, error:$e}'
+      '{name:$n, family:$f, driver:"load", call:[], config:$y, error:$e}'
+  )
+}
+
+# Some values are only refused at the point a caller asks for them, so cfg_load
+# alone never reaches them. The vector has to ask.
+config_refusal_call_case() { # name family yaml call...
+  local name="$1" family="$2" yaml="$3"; shift 3
+  local d; d="$(mktemp -d "$config_capture_dir/refusal_XXXXXX")"
+  (
+    cd "$d" && git init -q . && git commit -q --allow-empty -m init
+    mkdir -p .github
+    printf '%s\n' "$yaml" > .github/crossrev.yml
+    XDG_CONFIG_HOME="$d/xdg"; export XDG_CONFIG_HOME
+    local err
+    err="$({ cfg_load >/dev/null && "$@" >/dev/null; } 2>&1 || true)"
+    jq -cn --arg n "$name" --arg f "$family" --arg y "$yaml" --arg e "$err" \
+      --args '{name:$n, family:$f, driver:"call", call:$ARGS.positional, config:$y, error:$e}' "$@"
+  )
+}
+
+# The version refusal composes its "where" from the base revision rather than the
+# working tree. That arm builds a different string and no vector covered it.
+config_refusal_base_case() { # name family yaml
+  local name="$1" family="$2" yaml="$3"
+  local d; d="$(mktemp -d "$config_capture_dir/refusal_XXXXXX")"
+  (
+    cd "$d" && git init -q .
+    mkdir -p .github
+    printf '%s\n' "$yaml" > .github/crossrev.yml
+    git add .github/crossrev.yml
+    GIT_AUTHOR_NAME="crossrev" GIT_AUTHOR_EMAIL="test@example.com" \
+    GIT_COMMITTER_NAME="crossrev" GIT_COMMITTER_EMAIL="test@example.com" \
+    GIT_AUTHOR_DATE="2026-01-01T00:00:00Z" GIT_COMMITTER_DATE="2026-01-01T00:00:00Z" \
+    git commit -q -m "base config"
+    local base_sha; base_sha="$(git rev-parse HEAD)"
+    rm -f .github/crossrev.yml
+    GIT_AUTHOR_NAME="crossrev" GIT_AUTHOR_EMAIL="test@example.com" \
+    GIT_COMMITTER_NAME="crossrev" GIT_COMMITTER_EMAIL="test@example.com" \
+    GIT_AUTHOR_DATE="2026-01-01T00:00:00Z" GIT_COMMITTER_DATE="2026-01-01T00:00:00Z" \
+    git commit -q --allow-empty -m "head commit"
+    XDG_CONFIG_HOME="$d/xdg"; export XDG_CONFIG_HOME
+    local err
+    err="$({ cfg_load "$base_sha" >/dev/null; } 2>&1 || true)"
+    jq -cn --arg n "$name" --arg f "$family" --arg y "$yaml" --arg e "$err" \
+      '{name:$n, family:$f, driver:"load_at_base", call:[], config:$y, error:$e}'
   )
 }
 
@@ -477,6 +544,22 @@ config_refusal_cases() {
   config_refusal_case "pass-count-invalid" "pass_count" $'version: 1\npolicy:\n  max_passes_per_cycle: 0\n'
   config_refusal_case "git-hooks-invalid" "git_hooks" $'version: 1\ngit:\n  hooks: skipp\n'
   config_refusal_case "log-retention-invalid" "log_retention" $'version: 1\nlogs:\n  retention_days: 0\n'
+  config_refusal_case "keep-transcripts-invalid" "log_transcripts" $'version: 1\nlogs:\n  keep_transcripts: yes please\n'
+  # A malformed repository config is deliberately absent. cfg_load does not stop on
+  # the parse failure: _cfg_yaml_to_json dies inside a command substitution, so the
+  # exit ends that subshell only and the load continues on an empty config, then
+  # reports two further errors naming a key the operator never set. Its bytes
+  # include jq's own version-specific message, so freezing them would make the
+  # oracle depend on the jq build. The vector waits for the behaviour to be fixed.
+  config_refusal_base_case "version-mismatch-at-base" "version" $'version: 99\n'
+  config_refusal_call_case "endpoint-without-base-url" "endpoint" \
+    $'version: 1\nendpoints:\n  local:\n    token_env: LOCAL_TOKEN\n' cfg_endpoint local
+  config_refusal_call_case "endpoint-without-token-env" "endpoint" \
+    $'version: 1\nendpoints:\n  local:\n    base_url: http://127.0.0.1:11434\n' cfg_endpoint local
+  config_refusal_call_case "backlog-layout-invalid" "backlog" \
+    $'version: 1\nbacklog:\n  destination: repository\n  repository:\n    layout: flat\n' cfg_resolve_backlog "" repository
+  config_refusal_call_case "backlog-destination-invalid" "backlog" \
+    $'version: 1\nbacklog:\n  destination: elsewhere\n' cfg_resolve_backlog "" elsewhere
 }
 
 cfg_cases="[$(cat "$config_capture_dir/case_defaults.json"), $(cat "$config_capture_dir/case_repo_over.json"), $(cat "$config_capture_dir/case_op_override.json"), $(cat "$config_capture_dir/case_base_fallback.json")]"

@@ -159,15 +159,48 @@ while IFS= read -r c; do
   is "config merge: $name" "$actual_merged" "$expected_merged"
 done < <(jq -c '.cases[]' "$PARITY/config_merge.json")
 
+# Each vector records the driver that produced it. cfg_load alone reaches only the
+# values it validates itself; an endpoint or a backlog value is refused at the
+# point a caller asks for it, and the base-revision arm of the version check
+# composes a different message from the working-tree one.
 while IFS= read -r ref; do
   name="$(jq -r .name <<<"$ref")"
+  driver="$(jq -r '.driver // "load"' <<<"$ref")"
   d="$(mktemp -d "$workdir/cfg_refusal_XXXXXX")"
   (
-    cd "$d" && git init -q . && git commit -q --allow-empty -m init
+    cd "$d" && git init -q .
     mkdir -p .github
     jq -j .config <<<"$ref" > .github/crossrev.yml
     XDG_CONFIG_HOME="$d/xdg"; export XDG_CONFIG_HOME
-    cfg_load >/dev/null
+
+    case "$driver" in
+      load_at_base)
+        git add .github/crossrev.yml
+        GIT_AUTHOR_NAME="crossrev" GIT_AUTHOR_EMAIL="test@example.com" \
+        GIT_COMMITTER_NAME="crossrev" GIT_COMMITTER_EMAIL="test@example.com" \
+        GIT_AUTHOR_DATE="2026-01-01T00:00:00Z" GIT_COMMITTER_DATE="2026-01-01T00:00:00Z" \
+        git commit -q -m "base config"
+        base_sha="$(git rev-parse HEAD)"
+        rm -f .github/crossrev.yml
+        GIT_AUTHOR_NAME="crossrev" GIT_AUTHOR_EMAIL="test@example.com" \
+        GIT_COMMITTER_NAME="crossrev" GIT_COMMITTER_EMAIL="test@example.com" \
+        GIT_AUTHOR_DATE="2026-01-01T00:00:00Z" GIT_COMMITTER_DATE="2026-01-01T00:00:00Z" \
+        git commit -q --allow-empty -m "head commit"
+        cfg_load "$base_sha" >/dev/null
+        ;;
+      call)
+        git commit -q --allow-empty -m init
+        # @sh quotes every element, so an empty argument survives as one.
+        # Declared first because shellcheck cannot see an assignment through eval.
+        call=()
+        eval "call=( $(jq -r '.call | @sh' <<<"$ref") )"
+        cfg_load >/dev/null && "${call[@]}" >/dev/null
+        ;;
+      *)
+        git commit -q --allow-empty -m init
+        cfg_load >/dev/null
+        ;;
+    esac
   ) >"$d/err.txt" 2>&1; rc=$?
   err="$(cat "$d/err.txt")"
   expected_err="$(jq -r .error <<<"$ref")"
