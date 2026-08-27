@@ -29,6 +29,11 @@ source "$HERE/../lib/config.sh"
 # shellcheck source=../lib/legs.sh
 source "$HERE/../lib/legs.sh"
 
+export GIT_AUTHOR_NAME="crossrev"
+export GIT_AUTHOR_EMAIL="test@example.com"
+export GIT_COMMITTER_NAME="crossrev"
+export GIT_COMMITTER_EMAIL="test@example.com"
+
 PARITY="$HERE/fixtures/parity"
 
 pass=0 fail=0

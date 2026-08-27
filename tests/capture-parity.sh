@@ -19,6 +19,11 @@ REPO_ROOT="$HERE/.."
 FIXDIR="$REPO_ROOT/tests/fixtures/parity"
 mkdir -p "$FIXDIR"
 
+export GIT_AUTHOR_NAME="crossrev"
+export GIT_AUTHOR_EMAIL="test@example.com"
+export GIT_COMMITTER_NAME="crossrev"
+export GIT_COMMITTER_EMAIL="test@example.com"
+
 # shellcheck source=../lib/ui.sh
 source "$REPO_ROOT/lib/ui.sh"
 # shellcheck source=../lib/diff.sh
