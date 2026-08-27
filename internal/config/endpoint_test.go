@@ -1,6 +1,8 @@
 package config_test
 
 import (
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -46,10 +48,68 @@ func TestAnUndefinedEndpointIsRefusedRatherThanFallenBackFrom(t *testing.T) {
 func TestNoEndpointNamedIsNotARefusal(t *testing.T) {
 	loaded := mustLoad(t, core.Revision{}, files{"": {}})
 	for _, name := range []string{"", "null"} {
-		_, err := loaded.Endpoint(name)
-		if _, ok := err.(config.ErrNoEndpointNamed); !ok {
-			t.Errorf("Endpoint(%q) returned %T, want ErrNoEndpointNamed", name, err)
+		// A sentinel matched with errors.Is, so a caller that wraps it still
+		// reads it as the same condition.
+		if err := fmt.Errorf("resolve the reviewer endpoint: %w", mustEndpointError(t, loaded, name)); !errors.Is(err, config.ErrNoEndpointNamed) {
+			t.Errorf("Endpoint(%q) returned %v, want ErrNoEndpointNamed", name, err)
 		}
+	}
+	if got := config.ErrNoEndpointNamed.Error(); got != "no endpoint is named" {
+		t.Errorf("Error() = %q", got)
+	}
+}
+
+func mustEndpointError(t *testing.T, loaded *config.Config, name string) error {
+	t.Helper()
+	_, err := loaded.Endpoint(name)
+	if err == nil {
+		t.Fatalf("Endpoint(%q) returned no error", name)
+	}
+	return err
+}
+
+// An endpoint defined as a scalar is malformed, and the Bash reaches the
+// missing-base_url refusal for it rather than the defined-nowhere one:
+// `.endpoints[$n] // empty` is non-empty for a string, and the base_url read
+// off that string comes back empty (lib/config.sh:317-323).
+func TestAScalarEndpointHasNoBaseURL(t *testing.T) {
+	tree := files{"": {".github/crossrev.yml": "version: 1\nendpoints:\n  ollama: \"http://x\"\n"}}
+	_, err := mustLoad(t, core.Revision{}, tree).Endpoint("ollama")
+	refusal, ok := err.(*config.Refusal)
+	if !ok {
+		t.Fatalf("expected a *config.Refusal, got %T: %v", err, err)
+	}
+	if want := "the endpoint 'ollama' has no base_url"; refusal.Message != want {
+		t.Errorf("message = %q, want %q", refusal.Message, want)
+	}
+}
+
+// A definition that is null or false is empty to jq's alternative operator, so
+// it reads as no definition at all.
+func TestANullEndpointIsDefinedNowhere(t *testing.T) {
+	for _, document := range []string{
+		"version: 1\nendpoints:\n  ollama: null\n",
+		"version: 1\nendpoints:\n  ollama: false\n",
+	} {
+		tree := files{"": {".github/crossrev.yml": document}}
+		_, err := mustLoad(t, core.Revision{}, tree).Endpoint("ollama")
+		refusal, ok := err.(*config.Refusal)
+		if !ok {
+			t.Fatalf("expected a *config.Refusal, got %T: %v", err, err)
+		}
+		if want := "the endpoint 'ollama' is named in the config but defined nowhere"; refusal.Message != want {
+			t.Errorf("message = %q, want %q", refusal.Message, want)
+		}
+	}
+}
+
+// An endpoint defined as an empty mapping is present to jq, so it reaches the
+// missing-base_url refusal rather than the defined-nowhere one.
+func TestAnEmptyEndpointHasNoBaseURL(t *testing.T) {
+	tree := files{"": {".github/crossrev.yml": "version: 1\nendpoints:\n  ollama: {}\n"}}
+	_, err := mustLoad(t, core.Revision{}, tree).Endpoint("ollama")
+	if err == nil || err.Error() != "the endpoint 'ollama' has no base_url" {
+		t.Errorf("error = %v, want the missing base_url refusal", err)
 	}
 }
 

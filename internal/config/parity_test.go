@@ -3,6 +3,7 @@ package config_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -93,6 +94,18 @@ func optionalString(t *testing.T, raw json.RawMessage) (string, bool) {
 
 // files is a ShowFile over an in-memory tree. The empty revision key holds the
 // working tree; a revision key holds what that revision has.
+//
+// Two contents are sentinels rather than bytes, because a map of strings cannot
+// otherwise reach two states a real read has. isDirectory is a path that exists
+// and holds no file content: configuration is read behind `[[ -f ]]` and so
+// ignores it (lib/config.sh:37), and backlog discovery is read behind `[[ -e ]]`
+// and so counts it (lib/config.sh:443). readFails is a read that errors, which
+// is the only way any error path in this package is reached at all.
+const (
+	isDirectory = "\x00directory"
+	readFails   = "\x00read fails"
+)
+
 type files map[string]map[string]string
 
 func (f files) show() config.ShowFile {
@@ -104,6 +117,12 @@ func (f files) show() config.ShowFile {
 		content, ok := tree[path]
 		if !ok {
 			return nil, config.NotFound, nil
+		}
+		switch content {
+		case isDirectory:
+			return nil, config.IsOther, nil
+		case readFails:
+			return nil, config.NotFound, errors.New("permission denied")
 		}
 		return []byte(content), config.IsFile, nil
 	}
@@ -195,7 +214,13 @@ func TestConfigRefusalParity(t *testing.T) {
 			}
 
 			loaded, err := config.Load(context.Background(), base, tree.show())
-			if err == nil && vector.Driver == "call" {
+			if vector.Driver == "call" {
+				// The vector's refusal comes from the call, so a Load that
+				// refused first is a surprise to report rather than an error
+				// to compare against the vector's text.
+				if err != nil {
+					t.Fatalf("Load refused before the vector's call could run: %v", err)
+				}
 				err = callRefusal(t, loaded, vector.Call)
 			}
 			if err == nil {

@@ -231,6 +231,49 @@ func TestADirectoryAtAConfigPathStatesNoPolicy(t *testing.T) {
 	}
 }
 
+// Skipped and parsed-as-empty are different answers, and only a case where the
+// two differ separates them: a directory at `.github/crossrev.yml` states no
+// policy and the search moves on, so the valid `.crossrev.yml` beside it is
+// what gets read (lib/config.sh:147-160).
+func TestADirectoryAtTheFirstConfigPathFallsThroughToTheSecond(t *testing.T) {
+	tree := files{"": {
+		".github/crossrev.yml": isDirectory,
+		".crossrev.yml":        "version: 1\npolicy:\n  max_passes_per_cycle: 9\n",
+	}}
+	if got := mustLoad(t, core.Revision{}, tree).Get(".policy.max_passes_per_cycle"); got != "9" {
+		t.Errorf("max_passes_per_cycle = %q, want the second file's %q", got, "9")
+	}
+}
+
+// A read that fails is reported rather than read as an absent file, and names
+// the path it was reading. Nothing in the Bash can fail this way — `git show`
+// failing means the path is not at that revision — but a native implementation
+// reads the filesystem and can.
+func TestAReadFailureNamesThePath(t *testing.T) {
+	operatorPath := config.OperatorPath()
+	for name, tree := range map[string]files{
+		"the repository layer": {"": {".github/crossrev.yml": readFails}},
+		"the fallback file":    {"": {".crossrev.yml": readFails}},
+		"the operator layer":   {"": {operatorPath: readFails}},
+	} {
+		want := ".github/crossrev.yml"
+		if name == "the fallback file" {
+			want = ".crossrev.yml"
+		} else if name == "the operator layer" {
+			want = operatorPath
+		}
+		t.Run(name, func(t *testing.T) {
+			_, err := config.Load(context.Background(), core.Revision{}, tree.show())
+			if err == nil {
+				t.Fatal("expected the read failure to be reported")
+			}
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("error = %q, want it to name %q", err, want)
+			}
+		})
+	}
+}
+
 // Issue 143: a comment-only or whitespace-only config maps to YAML null. The
 // Bash implementation hands that null to jq, which cannot multiply an object by
 // it, so the run dies with a raw jq error and exit 5. Go treats a null document

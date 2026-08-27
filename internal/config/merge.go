@@ -2,6 +2,8 @@ package config
 
 import (
 	"bytes"
+	"encoding/json"
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -138,6 +140,11 @@ func (c *Config) MergedJSON() ([]byte, error) {
 // with a raw jq error and exit 5 (issue 143). That defect is not reproduced and
 // no refusal is added in its place: an empty document states no policy, which
 // is what an absent file states.
+//
+// A document that resolves to a list or a scalar takes the same path and loads
+// as empty. What should happen to one is an open question rather than a settled
+// divergence: it is being decided against lib/config.sh first, and this follows
+// that decision rather than leads it.
 func decodeDocument(source []byte) (*Object, error) {
 	var document yaml.Node
 	if err := yaml.Unmarshal(source, &document); err != nil {
@@ -196,10 +203,20 @@ func decodeNode(node *yaml.Node) (any, error) {
 
 // decodeScalar turns one YAML scalar into the value yq would have printed.
 //
-// yq resolves an integer before it prints, so `0x10`, `0o17`, `+5` and `1_000`
-// arrive at jq as 16, 15, 5 and 1000. It prints a float as written, so `5.0`
-// stays `5.0` — and `logs.retention_days: 5.0` is refused at lib/config.sh:225
-// for exactly that reason.
+// The tag is go-yaml's and the rendering is yq's, because the Bash reads YAML
+// through `yq -o=json` and reads values back out through `jq -r`: a number
+// reaches a comparison as the text yq wrote, which is why
+// `logs.retention_days: 5.0` is refused at lib/config.sh:225. The two
+// resolutions differ on more than formatting. go-yaml reads a leading zero as
+// octal where yq reads it as decimal, so `0777` is 511 to one and 777 to the
+// other; go-yaml accepts `0b101` where yq errors and the Bash then refuses the
+// whole file; and go-yaml tags `08` a float whose literal is not JSON at all,
+// which would put `crossrev config show` outside its own format.
+//
+// One case is left as it decodes: go-yaml tags `-0` an integer and renders it
+// `0`, where yq tags it a float and renders it `-0.0`. Both sides refuse it
+// wherever a whole number is required, so only the text a refusal quotes
+// differs.
 func decodeScalar(node *yaml.Node) (any, error) {
 	switch node.Tag {
 	case "!!null":
@@ -211,16 +228,58 @@ func decodeScalar(node *yaml.Node) (any, error) {
 		}
 		return boolean, nil
 	case "!!int":
-		var whole int64
-		if err := node.Decode(&whole); err != nil {
-			// A value too wide for int64 keeps its own text rather than
-			// failing the load, which is what yq does with it.
-			return Number(strings.ReplaceAll(node.Value, "_", "")), nil
-		}
-		return Number(strconv.FormatInt(whole, 10)), nil
+		return decodeInteger(node.Value)
 	case "!!float":
-		return Number(strings.ReplaceAll(node.Value, "_", "")), nil
+		return decodeFloat(node.Value)
 	default:
 		return node.Value, nil
 	}
+}
+
+// decodeInteger renders an integer the way yq renders one: underscores dropped,
+// `0x` and `0o` read as the bases they name, and everything else read as
+// decimal, so `0777` is 777 and `007` is 7.
+//
+// A literal yq cannot read that way — `0b101`, `0O17`, or a value wider than
+// int64 — is an error here, and the caller refuses the file as unparsable. That
+// is what the Bash does with it too: yq exits non-zero, _cfg_yaml_to_json
+// returns 1, and the caller refuses (lib/config.sh:36-38, 43-46).
+func decodeInteger(literal string) (any, error) {
+	text := strings.ReplaceAll(literal, "_", "")
+	base, digits := 10, text
+	switch {
+	case strings.HasPrefix(text, "0x"), strings.HasPrefix(text, "0X"):
+		base, digits = 16, text[2:]
+	case strings.HasPrefix(text, "0o"):
+		base, digits = 8, text[2:]
+	}
+	whole, err := strconv.ParseInt(digits, base, 64)
+	if err != nil {
+		return nil, fmt.Errorf("cannot read %q as an integer: %w", literal, err)
+	}
+	return Number(strconv.FormatInt(whole, 10)), nil
+}
+
+// decodeFloat renders a float the way yq renders one.
+//
+// yq keeps the literal where the literal is already a JSON number carrying a
+// decimal point or an exponent, so `5.00` stays `5.00` and `1e3` stays `1e3`.
+// Anything else it parses and writes back with a decimal point, which is where
+// `08` becomes `8.0` and `.5` becomes `0.5`. Keeping the literal is the half
+// that matters: a refusal quotes it, and reformatting every float would turn
+// `5.0` into `5` and accept a value lib/config.sh:225 refuses.
+func decodeFloat(literal string) (any, error) {
+	text := strings.ReplaceAll(literal, "_", "")
+	if strings.ContainsAny(text, ".eE") && json.Valid([]byte(text)) {
+		return Number(text), nil
+	}
+	value, err := strconv.ParseFloat(text, 64)
+	if err != nil {
+		return nil, fmt.Errorf("cannot read %q as a number: %w", literal, err)
+	}
+	rendered := strconv.FormatFloat(value, 'f', -1, 64)
+	if !strings.ContainsAny(rendered, ".eE") {
+		rendered += ".0"
+	}
+	return Number(rendered), nil
 }

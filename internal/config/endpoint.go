@@ -1,6 +1,9 @@
 package config
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+)
 
 // Endpoint is a named endpoint resolved out of the merge.
 type Endpoint struct {
@@ -15,11 +18,9 @@ func (e Endpoint) String() string { return e.BaseURL + " " + e.TokenEnv }
 
 // ErrNoEndpointNamed reports that nothing named an endpoint, which is not a
 // failure: most configurations name none, and the caller then runs the harness
-// against its own vendor.
-type ErrNoEndpointNamed struct{}
-
-// Error names the condition.
-func (ErrNoEndpointNamed) Error() string { return "no endpoint is named" }
+// against its own vendor. A sentinel rather than a type, so a caller that wraps
+// it can still match it with errors.Is.
+var ErrNoEndpointNamed = errors.New("no endpoint is named")
 
 // Endpoint resolves a named endpoint to its base URL and token variable.
 //
@@ -35,15 +36,24 @@ func (ErrNoEndpointNamed) Error() string { return "no endpoint is named" }
 // refusal.
 func (c *Config) Endpoint(name string) (Endpoint, error) {
 	if name == "" || name == "null" {
-		return Endpoint{}, ErrNoEndpointNamed{}
+		return Endpoint{}, ErrNoEndpointNamed
 	}
-	defined := c.Merged.Object("endpoints").Object(name)
-	if defined == nil {
+	// `defined nowhere` is the answer to `.endpoints[$n] // empty` coming back
+	// empty at lib/config.sh:317, so it covers an absent key and a key holding
+	// null or false, and nothing else. A definition that is present and not a
+	// mapping — `ollama: "http://x"` — is not empty there: the Bash reads
+	// base_url off a string, gets nothing, and refuses for the missing
+	// base_url instead (lib/config.sh:321-323). Object(name) is nil for that
+	// definition, and Value on a nil object reads every field as absent, so
+	// the same refusal is reached here.
+	value := c.Merged.Object("endpoints").Value(name)
+	if boolean, isBoolean := value.(bool); value == nil || (isBoolean && !boolean) {
 		return Endpoint{}, &Refusal{
 			Message: fmt.Sprintf("the endpoint '%s' is named in the config but defined nowhere", name),
 			Hint:    fmt.Sprintf("Define it under endpoints: in the repository config, or in %s if it is machine-local. crossrev will not silently fall back to the vendor's own API.", OperatorPath()),
 		}
 	}
+	defined, _ := value.(*Object)
 	baseURL := alternative(defined.Value("base_url"))
 	tokenEnv := alternative(defined.Value("token_env"))
 	if baseURL == "" {

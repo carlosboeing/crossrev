@@ -2,6 +2,7 @@ package config
 
 import (
 	"context"
+	"fmt"
 	"regexp"
 	"strings"
 
@@ -13,6 +14,12 @@ import (
 // is matched case-insensitively and two or more hashes open a section
 // (lib/config.sh:351).
 var projectMapHeading = regexp.MustCompile(`^##+[[:space:]]*project (map|context)`)
+
+// projectMapClose is the awk rule that closes the section, `/^##[[:space:]]/`
+// at lib/config.sh:352. Written as the same character class rather than as two
+// literal prefixes, because POSIX [[:space:]] holds a carriage return and a
+// CRLF instruction file otherwise leaves a `##` line failing to close it.
+var projectMapClose = regexp.MustCompile(`^##[[:space:]]`)
 
 // trackerField is the Tracker line inside that section. The Bash sed carries
 // the `I` flag, so the field name is matched case-insensitively
@@ -33,12 +40,16 @@ func ProjectMapTracker(ctx context.Context, base core.Revision, show ShowFile) (
 	for _, path := range projectMapFiles {
 		source, status, err := show(ctx, base, path)
 		if err != nil {
-			return "", false, err
+			return "", false, fmt.Errorf("read %s: %w", path, err)
 		}
 		if status != IsFile || len(source) == 0 {
 			continue
 		}
-		if tracker, found := trackerIn(string(source)); found {
+		// A field that strips to nothing does not end the search. The Bash
+		// returns only when the stripped value is non-empty and otherwise
+		// moves to the next file (lib/config.sh:363-365), so `- **Tracker**:
+		// (see the board)` in AGENTS.md leaves CLAUDE.md to decide.
+		if tracker, found := trackerIn(string(source)); found && tracker != "" {
 			return tracker, true, nil
 		}
 	}
@@ -56,7 +67,7 @@ func trackerIn(document string) (string, bool) {
 		}
 		// Exactly two hashes and a space closes the section, so a `###`
 		// sub-heading inside it does not (lib/config.sh:352).
-		if inMap && (strings.HasPrefix(line, "## ") || strings.HasPrefix(line, "##\t")) {
+		if inMap && projectMapClose.MatchString(line) {
 			inMap = false
 		}
 		if !inMap {
@@ -81,5 +92,10 @@ func stripGloss(value string) string {
 	if at := strings.Index(value, "("); at >= 0 {
 		value = value[:at]
 	}
-	return strings.TrimRight(value, " \t")
+	// The Bash sed is `s/[[:space:]]*$//` at lib/config.sh:362, and POSIX
+	// [[:space:]] holds the carriage return. Trimming space and tab alone
+	// leaves the CR of a CRLF instruction file on the value, `none` stops
+	// matching `none`, and the caller picks a backlog location the repository
+	// just declared it does not have.
+	return strings.TrimRight(value, " \t\r\v\f")
 }

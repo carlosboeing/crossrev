@@ -1,6 +1,7 @@
 package config_test
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -139,6 +140,135 @@ func TestNumbersArriveAsTheTextJqReads(t *testing.T) {
 				t.Errorf("%s = %q, want %q", test.path, got, test.want)
 			}
 		})
+	}
+}
+
+// go-yaml's own resolution is not yq's, and the Bash reads every value back
+// through jq as the text yq wrote. The literals below are the ones where the
+// two differ, measured against `yq -o=json -I=0 '.'` directly.
+func TestNumbersAreResolvedTheWayYqResolvesThem(t *testing.T) {
+	tests := []struct {
+		literal string
+		want    string
+	}{
+		// A leading zero is decimal to yq and octal to go-yaml.
+		{"0777", "777"},
+		{"007", "7"},
+		{"00", "0"},
+		{"-07", "-7"},
+		{"0_1", "1"},
+		// A leading zero the octal reading cannot hold is a float, whose
+		// literal is not valid JSON and has to be written back out.
+		{"08", "8.0"},
+		{"09", "9.0"},
+		{"018", "18.0"},
+		{"0800", "800.0"},
+		{".5", "0.5"},
+		{"-.5", "-0.5"},
+		{"+0.0", "0.0"},
+		{"08.0", "8.0"},
+		{"0_8", "8.0"},
+		// A literal already carrying a decimal point or an exponent is kept
+		// as written, because a refusal quotes it.
+		{"5.0", "5.0"},
+		{"5.00", "5.00"},
+		{"1e3", "1e3"},
+		{"1E3", "1E3"},
+		{"1.0e3", "1.0e3"},
+		{"1_0.5", "10.5"},
+		// The bases yq names, and the sign it drops.
+		{"0x10", "16"},
+		{"0xFF", "255"},
+		{"0XFF", "255"},
+		{"0o17", "15"},
+		{"+5", "5"},
+		{"1_000", "1000"},
+	}
+	for _, test := range tests {
+		t.Run(test.literal, func(t *testing.T) {
+			document := "version: 1\npolicy:\n  max_prs_per_day: " + test.literal + "\n"
+			loaded := mustLoad(t, core.Revision{}, files{"": {".github/crossrev.yml": document}})
+			if got := loaded.Get(".policy.max_prs_per_day"); got != test.want {
+				t.Errorf("max_prs_per_day = %q, want %q", got, test.want)
+			}
+			if merged := mustJSON(t, loaded); !json.Valid(merged) {
+				t.Errorf("the merge is not JSON, which is what config show prints: %s", merged)
+			}
+		})
+	}
+}
+
+// A literal yq cannot read is an error there, so the Bash refuses the whole
+// file for it (lib/config.sh:36-38, 43-46).
+func TestALiteralYqCannotReadRefusesTheFile(t *testing.T) {
+	for name, literal := range map[string]string{
+		"a binary literal":        "0b101",
+		"a zero binary literal":   "0b0",
+		"an uppercase octal":      "0O17",
+		"an integer beyond int64": "9223372036854775808",
+		"an infinity":             ".inf",
+		"a not-a-number":          ".nan",
+	} {
+		t.Run(name, func(t *testing.T) {
+			document := "version: 1\npolicy:\n  max_prs_per_day: " + literal + "\n"
+			tree := files{"": {".github/crossrev.yml": document}}
+			if got := refusalFrom(t, core.Revision{}, tree).Message; got != "could not parse .github/crossrev.yml" {
+				t.Errorf("message = %q, want the file refused as unparsable", got)
+			}
+		})
+	}
+}
+
+// The value families see the text yq wrote, so `08` is refused as the 8.0 it
+// resolves to rather than accepted as three digits (lib/config.sh:225, 262).
+func TestALeadingZeroFloatIsRefusedAsTheShellRefusesIt(t *testing.T) {
+	for _, test := range []struct{ document, wants string }{
+		{"version: 1\nlogs:\n  retention_days: 08\n", "logs.retention_days is '8.0'"},
+		{"version: 1\npolicy:\n  max_passes_per_cycle: 08\n", "policy.max_passes_per_cycle is '8.0'"},
+	} {
+		tree := files{"": {".github/crossrev.yml": test.document}}
+		if got := refusalFrom(t, core.Revision{}, tree).Message; !strings.Contains(got, test.wants) {
+			t.Errorf("message = %q, want it to contain %q", got, test.wants)
+		}
+	}
+	// And a leading-zero integer is decimal, so the bound is the one written.
+	tree := files{"": {".github/crossrev.yml": "version: 1\npolicy:\n  max_passes_per_cycle: 0777\n"}}
+	if got := mustLoad(t, core.Revision{}, tree).Get(".policy.max_passes_per_cycle"); got != "777" {
+		t.Errorf("max_passes_per_cycle = %q, want %q", got, "777")
+	}
+}
+
+// jq would raise a type error on `endpoints:` holding a scalar. Go declines to
+// crash over it and merges nothing instead, which is what objectAt documents.
+func TestAScalarEndpointsKeyMergesNothing(t *testing.T) {
+	tree := files{"": {".github/crossrev.yml": "version: 1\nendpoints: nope\n"}}
+	loaded := mustLoad(t, core.Revision{}, tree)
+	if got := loaded.Merged.Object("endpoints").Len(); got != 0 {
+		t.Errorf("the merge kept %d endpoints, want none", got)
+	}
+	if got := string(mustJSON(t, loaded)); !strings.Contains(got, `"endpoints":{}`) {
+		t.Errorf("endpoints = %s, want an empty object", got)
+	}
+}
+
+// Defaults builds a fresh tree per call and deepMerge clones what it starts
+// from, so a loaded config can never write back into the defaults a later load
+// will read. Clone's own comment states the guarantee and nothing else pins it.
+func TestTheMergeNeverAliasesTheDefaults(t *testing.T) {
+	tree := files{"": {".github/crossrev.yml": "version: 1\n"}}
+	loaded := mustLoad(t, core.Revision{}, tree)
+	loaded.Merged.Object("policy").Set("min_fix_severity", "changed")
+	loaded.Merged.Object("backlog").Object("github_issues").Set("tracking_label", "changed")
+
+	fresh := config.Defaults()
+	if got := fresh.Object("policy").Value("min_fix_severity"); got != "medium" {
+		t.Errorf("the merge wrote through to a default: min_fix_severity = %v", got)
+	}
+	if got := fresh.Object("backlog").Object("github_issues").Value("tracking_label"); got != "crossrev-review" {
+		t.Errorf("the merge wrote through to a nested default: %v", got)
+	}
+	if got := mustLoad(t, core.Revision{}, tree).Get(".policy.min_fix_severity"); got != "medium" {
+		t.Errorf("a second load inherited the first load's mutation: %q", got)
 	}
 }
 

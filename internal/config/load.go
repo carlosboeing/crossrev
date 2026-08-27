@@ -2,6 +2,7 @@ package config
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -38,6 +39,14 @@ const (
 // read (lib/config.sh:134-136). A non-zero revision means the pull request's
 // base revision, which is where every leg reads policy from and never the head
 // (ADR 0003, lib/config.sh:50-55).
+//
+// A zero-revision read is therefore a plain filesystem read, and the path it is
+// given is not always repository-relative: Load reads the operator layer at
+// OperatorPath(), an absolute path outside the repository, with a zero revision
+// however the run was invoked (lib/config.sh:166). An implementation that
+// resolved every path against the checkout would drop that layer silently, and
+// every operator-only endpoint would then refuse with "defined nowhere" —
+// which reads as a config error rather than the plumbing error it is.
 type ShowFile func(ctx context.Context, revision core.Revision, path string) ([]byte, FileStatus, error)
 
 // Config is one loaded configuration: the two layers that produced it, and the
@@ -78,7 +87,7 @@ func Load(ctx context.Context, base core.Revision, show ShowFile) (*Config, erro
 	operatorPath := OperatorPath()
 	operatorSource, status, err := show(ctx, core.Revision{}, operatorPath)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read %s: %w", operatorPath, err)
 	}
 	operatorLayer := NewObject()
 	if status == IsFile {
@@ -131,7 +140,7 @@ func loadRepoLayer(ctx context.Context, base core.Revision, show ShowFile) (*Obj
 	for _, path := range repoConfigPaths {
 		source, status, err := show(ctx, base, path)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("read %s: %w", path, err)
 		}
 		if status != IsFile {
 			continue

@@ -2,6 +2,7 @@ package config_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/carlosboeing/crossrev/internal/config"
@@ -34,6 +35,13 @@ func TestProjectMapTrackerReadsTheField(t *testing.T) {
 		{"a glossed path keeps the path", "## Project Map\n\n- **Tracker**: docs/BACKLOG.md (newest first)\n", "docs/BACKLOG.md", true},
 		{"a sub-heading does not close the section", "## Project Map\n\n### Detail\n\n- **Tracker**: none\n", "none", true},
 		{"a two-hash heading closes it", "## Project Map\n\n## Other\n\n- **Tracker**: none\n", "", false},
+		// POSIX [[:space:]] holds the carriage return, so awk's
+		// /^##[[:space:]]/ closes the section on a bare `##` before a CRLF
+		// break (lib/config.sh:352), and the sed trims the CR off the value
+		// (lib/config.sh:362). Trimming space and tab alone leaves `none\r`,
+		// which stops matching `none`.
+		{"a carriage return is trimmed off the value", "## Project Map\r\n\r\n- **Tracker**: none\r\n", "none", true},
+		{"a carriage return closes the section", "## Project Map\n##\r\n- **Tracker**: none\n", "", false},
 		{"a field outside any section is not read", "- **Tracker**: none\n", "", false},
 		{"no Project Map at all", "# x\n\nnothing here\n", "", false},
 	}
@@ -63,6 +71,45 @@ func TestProjectMapTrackerReadsTheThreeFilesInOrder(t *testing.T) {
 	}
 	if !found || tracker != "from CLAUDE" {
 		t.Errorf("tracker = %q found = %v, want CLAUDE.md to win", tracker, found)
+	}
+}
+
+// A Tracker field that strips to nothing does not end the search either. The
+// Bash returns only when the stripped value is non-empty, and otherwise moves
+// to the next file (lib/config.sh:363-365).
+func TestATrackerThatStripsToNothingFallsThroughToTheNextFile(t *testing.T) {
+	tree := files{"": {
+		"AGENTS.md": "## Project Map\n\n- **Tracker**: (see the board)\n",
+		"CLAUDE.md": "## Project Map\n\n- **Tracker**: GitHub Issues\n",
+	}}
+	tracker, found, err := config.ProjectMapTracker(context.Background(), core.Revision{}, tree.show())
+	if err != nil {
+		t.Fatalf("ProjectMapTracker: %v", err)
+	}
+	if !found || tracker != "GitHub Issues" {
+		t.Errorf("tracker = %q found = %v, want CLAUDE.md to decide", tracker, found)
+	}
+
+	// And with nothing else to read, nothing is declared at all, so the
+	// resolution falls to the sniff rather than to an empty declaration.
+	only := files{"": {
+		"AGENTS.md": "## Project Map\n\n- **Tracker**: (see the board)\n",
+		"TODO.md":   "",
+	}}
+	if got := resolveBacklog(t, only, "", core.Revision{}); got != "repository file TODO.md" {
+		t.Errorf("resolved to %q, want the sniff to decide", got)
+	}
+}
+
+// A read that fails names the path it was reading.
+func TestAProjectMapReadFailureNamesThePath(t *testing.T) {
+	tree := files{"": {"AGENTS.md": readFails}}
+	_, _, err := config.ProjectMapTracker(context.Background(), core.Revision{}, tree.show())
+	if err == nil {
+		t.Fatal("expected the read failure to be reported")
+	}
+	if !strings.Contains(err.Error(), "AGENTS.md") {
+		t.Errorf("error = %q, want it to name the path", err)
 	}
 }
 
@@ -101,6 +148,16 @@ func TestTheTrackerDecidesTheDestination(t *testing.T) {
 		{"http://jira.example/browse/ENG", "none"},
 		// Linear, Jira and friends: somewhere real, nothing to write to yet.
 		{"Linear", "none"},
+		// lib/config.sh:413 is the glob `*github*issue*`, which is ordered.
+		// A test for the two substrings in any order says GitHub Issues where
+		// the Bash says nothing to write to.
+		{"Issues on GitHub", "none"},
+		{"github issue tracker", "github_issues"},
+		// lib/config.sh:420 matches `*/*|*.md` on the lowercased value and
+		// then branches on the original at lib/config.sh:421, which is
+		// case-sensitive. `docs/TODO.MD` is a folder there.
+		{"docs/TODO.MD", "repository folder docs/TODO.MD"},
+		{"NOTES.MD", "repository folder NOTES.MD"},
 	}
 	for _, test := range tests {
 		t.Run(test.tracker, func(t *testing.T) {
