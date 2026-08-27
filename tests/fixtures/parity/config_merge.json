@@ -2,6 +2,7 @@
   "captured": {
     "platform": "Darwin 25.5.0 arm64",
     "tr_implementation": "/usr/bin/tr (BSD tr)",
+    "awk_implementation": "/usr/bin/awk (one true awk (BWK))",
     "locale": "en_AU.UTF-8",
     "note": "state_finding_id and state_anchor pin LC_ALL=C internally, so ids and anchors are byte-oriented whatever locale this file was captured under."
   },
@@ -330,6 +331,108 @@
         },
         "enable_automation_hint": true
       }
+    },
+    {
+      "name": "wt-empty-file",
+      "repo_yaml": "",
+      "operator_yaml": null,
+      "base_sha": null,
+      "merged": {
+        "version": 1,
+        "mode": "local",
+        "runner": "github-hosted",
+        "policy": {
+          "min_fix_severity": "medium",
+          "max_passes_per_cycle": 3,
+          "max_files_changed_per_pr": 200,
+          "max_prs_per_day": 25
+        },
+        "git": {
+          "hooks": "skip"
+        },
+        "logs": {
+          "retention_days": 14,
+          "keep_transcripts": false
+        },
+        "endpoints": {},
+        "backlog": {
+          "destination": "auto",
+          "github_issues": {
+            "labels": [],
+            "tracking_label": "crossrev-review",
+            "create_missing_labels": true,
+            "comment_on_existing_issue": false
+          },
+          "repository": {
+            "layout": "folder",
+            "path": null
+          }
+        },
+        "reviewer": {
+          "harness": "codex",
+          "model": null,
+          "effort": null,
+          "endpoint": null
+        },
+        "resolver": {
+          "harness": "claude",
+          "model": null,
+          "effort": null,
+          "endpoint": null
+        },
+        "enable_automation_hint": true
+      }
+    },
+    {
+      "name": "wt-comment-only",
+      "repo_yaml": "# nothing\n",
+      "operator_yaml": null,
+      "base_sha": null,
+      "merged": {
+        "version": 1,
+        "mode": "local",
+        "runner": "github-hosted",
+        "policy": {
+          "min_fix_severity": "medium",
+          "max_passes_per_cycle": 3,
+          "max_files_changed_per_pr": 200,
+          "max_prs_per_day": 25
+        },
+        "git": {
+          "hooks": "skip"
+        },
+        "logs": {
+          "retention_days": 14,
+          "keep_transcripts": false
+        },
+        "endpoints": {},
+        "backlog": {
+          "destination": "auto",
+          "github_issues": {
+            "labels": [],
+            "tracking_label": "crossrev-review",
+            "create_missing_labels": true,
+            "comment_on_existing_issue": false
+          },
+          "repository": {
+            "layout": "folder",
+            "path": null
+          }
+        },
+        "reviewer": {
+          "harness": "codex",
+          "model": null,
+          "effort": null,
+          "endpoint": null
+        },
+        "resolver": {
+          "harness": "claude",
+          "model": null,
+          "effort": null,
+          "endpoint": null
+        },
+        "enable_automation_hint": true
+      }
     }
   ],
   "refusals": [
@@ -404,6 +507,38 @@
       "call": [],
       "config": "version: 1\npolicy:\n  - this is not\n  a mapping: [unclosed\n",
       "error": "\nerror  could not parse .github/crossrev.yml at base revision <base_sha>\n       It must be valid YAML. Check it with: git show <base_sha>:.github/crossrev.yml | yq '.'"
+    },
+    {
+      "name": "non-mapping-sequence",
+      "family": "shape",
+      "driver": "load",
+      "call": [],
+      "config": "- a\n- b\n",
+      "error": "\nerror  .github/crossrev.yml is not a mapping\n       It must hold configuration keys at its top level, not a list or a single value. Check it with: yq '.' .github/crossrev.yml"
+    },
+    {
+      "name": "non-mapping-scalar",
+      "family": "shape",
+      "driver": "load",
+      "call": [],
+      "config": "42\n",
+      "error": "\nerror  .github/crossrev.yml is not a mapping\n       It must hold configuration keys at its top level, not a list or a single value. Check it with: yq '.' .github/crossrev.yml"
+    },
+    {
+      "name": "non-mapping-boolean",
+      "family": "shape",
+      "driver": "load",
+      "call": [],
+      "config": "true\n",
+      "error": "\nerror  .github/crossrev.yml is not a mapping\n       It must hold configuration keys at its top level, not a list or a single value. Check it with: yq '.' .github/crossrev.yml"
+    },
+    {
+      "name": "non-mapping-at-base",
+      "family": "shape",
+      "driver": "load_at_base",
+      "call": [],
+      "config": "- a\n- b\n",
+      "error": "\nerror  .github/crossrev.yml is not a mapping at base revision <base_sha>\n       It must hold configuration keys at its top level, not a list or a single value. Check it with: git show <base_sha>:.github/crossrev.yml | yq '.'"
     },
     {
       "name": "endpoint-without-base-url",

@@ -45,11 +45,22 @@ platform="$(uname -s -r -m)"
 tr_path="$(command -v tr)"
 if tr --version </dev/null 2>/dev/null | grep -q GNU; then tr_flavor="GNU coreutils tr"; else tr_flavor="BSD tr"; fi
 locale="${LC_ALL:-${LC_CTYPE:-${LANG:-unset}}}"
+awk_path="$(command -v awk)"
+# The diff oracle is entirely awk, and the three common implementations disagree
+# on substr past the end, sprintf("%c", n) above 255, and reading a hex or
+# exponent string as a number. A reader checking diff_views.json against their
+# own awk needs to know which one answered here.
+if awk --version </dev/null 2>/dev/null | grep -qi 'gnu awk'; then awk_flavor="GNU awk"
+elif awk -W version </dev/null 2>&1 | grep -qi mawk;    then awk_flavor="mawk"
+elif awk --version </dev/null 2>&1 | grep -qi 'awk version'; then awk_flavor="one true awk (BWK)"
+else awk_flavor="unidentified awk"; fi
 
 captured_json() {
-  jq -n --arg p "$platform" --arg t "$tr_path ($tr_flavor)" --arg l "$locale" '{
+  jq -n --arg p "$platform" --arg t "$tr_path ($tr_flavor)" --arg l "$locale" \
+        --arg a "$awk_path ($awk_flavor)" '{
     platform: $p,
     tr_implementation: $t,
+    awk_implementation: $a,
     locale: $l,
     note: "state_finding_id and state_anchor pin LC_ALL=C internally, so ids and anchors are byte-oriented whatever locale this file was captured under."
   }'
@@ -594,6 +605,25 @@ policy:
     '{name:"base-empty", repo_yaml:"", operator_yaml:null, base_sha:$b, merged:$merged}'
 ) >"$config_capture_dir/case_base_empty.json"
 
+# An existing empty file, and a comment-only one, on the WORKING-TREE path.
+# Both resolve to null through yq, where an absent file never reaches it. They
+# state no policy, which is what an absent file states, so they are silent.
+# Frozen because both were a jq type error and a misdirected assertion before.
+wt_null_case() { # name file_body -> case json
+  local d; d="$(mktemp -d "$config_capture_dir/wtnull_XXXXXX")"
+  (
+    cd "$d" && git init -q . && git commit -q --allow-empty -m init
+    mkdir -p .github
+    printf '%s' "$2" > .github/crossrev.yml
+    XDG_CONFIG_HOME="$d/xdg"; export XDG_CONFIG_HOME
+    cfg_load
+    jq -n --arg n "$1" --arg r "$2" --argjson merged "$CFG_MERGED" \
+      '{name:$n, repo_yaml:$r, operator_yaml:null, base_sha:null, merged:$merged}'
+  )
+}
+wt_null_case "wt-empty-file"   ''            >"$config_capture_dir/case_wt_empty.json"
+wt_null_case "wt-comment-only" $'# nothing\n' >"$config_capture_dir/case_wt_comment.json"
+
 config_refusal_case() { # name family yaml
   local name="$1" family="$2" yaml="$3"
   local d; d="$(mktemp -d "$config_capture_dir/refusal_XXXXXX")"
@@ -677,6 +707,13 @@ config_refusal_cases() {
   # naming both the file and the revision, and a hint that reads the revision.
   config_refusal_base_case "malformed-yaml-at-base" "parse" \
     $'version: 1\npolicy:\n  - this is not\n  a mapping: [unclosed\n'
+  # A document that parses and is not a mapping. yq answers 0 and returns a
+  # sequence or a scalar, so the parse refusal never fires; the merge used to
+  # die with jq's own type error and two more lines after it.
+  config_refusal_case "non-mapping-sequence" "shape" $'- a\n- b\n'
+  config_refusal_case "non-mapping-scalar"   "shape" $'42\n'
+  config_refusal_case "non-mapping-boolean"  "shape" $'true\n'
+  config_refusal_base_case "non-mapping-at-base" "shape" $'- a\n- b\n'
   config_refusal_call_case "endpoint-without-base-url" "endpoint" \
     $'version: 1\nendpoints:\n  local:\n    token_env: LOCAL_TOKEN\n' cfg_endpoint local
   config_refusal_call_case "endpoint-without-token-env" "endpoint" \
@@ -690,7 +727,7 @@ config_refusal_cases() {
     $'version: 1\nbacklog:\n  destination: elsewhere\n'
 }
 
-cfg_cases="[$(cat "$config_capture_dir/case_defaults.json"), $(cat "$config_capture_dir/case_repo_over.json"), $(cat "$config_capture_dir/case_op_override.json"), $(cat "$config_capture_dir/case_base_fallback.json"), $(cat "$config_capture_dir/case_base_absent.json"), $(cat "$config_capture_dir/case_base_empty.json")]"
+cfg_cases="[$(cat "$config_capture_dir/case_defaults.json"), $(cat "$config_capture_dir/case_repo_over.json"), $(cat "$config_capture_dir/case_op_override.json"), $(cat "$config_capture_dir/case_base_fallback.json"), $(cat "$config_capture_dir/case_base_absent.json"), $(cat "$config_capture_dir/case_base_empty.json"), $(cat "$config_capture_dir/case_wt_empty.json"), $(cat "$config_capture_dir/case_wt_comment.json")]"
 
 jq -n --argjson captured "$(captured_json)" \
   --argjson cases "$cfg_cases" \

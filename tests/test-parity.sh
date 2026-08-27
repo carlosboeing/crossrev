@@ -53,8 +53,9 @@ provenance_is_recorded() {
     [[ -n "$(jq -r '.captured.platform // empty' "$f")" ]] \
       && [[ -n "$(jq -r '.captured.tr_implementation // empty' "$f")" ]] \
       && [[ -n "$(jq -r '.captured.locale // empty' "$f")" ]] \
-      && ok "$name records platform, tr implementation and locale" \
-      || notok "$name records platform, tr implementation and locale" "all three present" "$(jq -c .captured "$f")"
+      && [[ -n "$(jq -r '.captured.awk_implementation // empty' "$f")" ]] \
+      && ok "$name records the tools and locale it was captured under" \
+      || notok "$name records the tools and locale it was captured under" "all four present" "$(jq -c .captured "$f")"
   done
 }
 
