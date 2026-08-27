@@ -28,6 +28,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.0'
+          check-latest: false
+
       - name: Install and verify dependencies
         run: |
           set -euo pipefail
@@ -38,15 +44,18 @@ jobs:
           command -v shellcheck >/dev/null || sudo apt-get install -y --no-install-recommends shellcheck
 
           # Assert rather than assume. A missing shellcheck reads as clean.
-          for t in bash git jq yq shellcheck openssl; do
+          for t in bash git jq yq shellcheck openssl go; do
             command -v "$t" >/dev/null || { echo "::error::$t is missing"; exit 1; }
           done
           printf '%s\n' "bash $BASH_VERSION" "$(jq --version)" "$(yq --version)" \
             "$(shellcheck --version | sed -n 's/^version: /shellcheck /p')" \
-            "$(openssl version)"
+            "$(openssl version)" "$(go version)"
 
       - name: Lint
         run: bash scripts/lint.sh
+
+      - name: Native tests
+        run: bash scripts/test-native.sh
 
       - name: Tests
         run: bash tests/run.sh

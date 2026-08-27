@@ -110,6 +110,26 @@ else
   fail=1
 fi
 
+printf '\ngo\n'
+if command -v go >/dev/null 2>&1; then
+  if GOTOOLCHAIN=go1.27.0 go mod verify >/dev/null 2>&1; then
+    printf '  ok    go mod verified\n'
+  else
+    printf '  FAIL  go mod verify failed\n'
+    fail=1
+  fi
+  if GOTOOLCHAIN=go1.27.0 go vet ./... >/dev/null 2>&1; then
+    printf '  ok    go vet clean\n'
+  else
+    printf '  FAIL  go vet found problems\n'
+    GOTOOLCHAIN=go1.27.0 go vet ./... 2>&1 | sed 's/^/        /'
+    fail=1
+  fi
+else
+  printf '  FAIL  go is not installed\n'
+  fail=1
+fi
+
 # Codex's hook-trust bypass flag is asserted absent by tests/test-sandbox.sh, not
 # here. A grep for it in this file would match its own source and the test's, which
 # is how the first version of that assertion failed on its own documentation.

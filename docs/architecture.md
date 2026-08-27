@@ -225,10 +225,13 @@ The **credential refresher** is the one workflow that still checks CrossRev out 
 
 ## The layout
 
+CrossRev maintains an authoritative Bash implementation alongside a compiling Go package graph during its native parity transition. `bin/crossrev` remains the active production entrypoint.
+
 ```
 action.yml       the composite action consuming repositories call
-bin/crossrev     entrypoint: sources lib/, dispatches the subcommand
-lib/
+bin/crossrev     authoritative entrypoint: sources lib/, dispatches the subcommand
+cmd/crossrev/    native Go entrypoint skeleton
+lib/             authoritative Bash implementation
   ui.sh            output voice — six rules, enforced by the helpers' shapes
   log.sh           the per-run record: run log, transcripts, redaction, the age sweep
   preflight.sh     dependency checks that name the fix, not just the gap
@@ -249,10 +252,38 @@ lib/
   run.sh           the two legs, the drivers, the watchdog
   init.sh          the plan-then-confirm upgrade to automated mode
   adapters/        claude.sh, codex.sh, agy.sh, grok.sh, opencode.sh
+internal/        native Go package graph
+  core/            Tier 0: domain primitives and FindingID
+  buildinfo/       Tier 1: version and build metadata
+  policy/          Tier 1: pure policy functions and termination rules
+  prstate/         Tier 1: marker parsing and finding identity
+  diff/            Tier 1: gutter mapping and hunk snapping
+  validate/        Tier 1: payload validation
+  intel/           Tier 1: Review Intelligence contracts
+  config/          Tier 2: configuration loading
+  exec/            Tier 2: command execution, environment sanitization
+  ui/              Tier 2: output and formatting
+  runlog/          Tier 2: logging and redaction
+  vcs/             Tier 2: git operations
+  sandbox/         Tier 2: harness quarantine
+  forge/           Tier 2: forge abstractions
+  forge/ghexec/    Tier 2: GitHub CLI adapter
+  cred/            Tier 2: credential resolution
+  harness/         Tier 2: model harness adapters
+  symbols/         Tier 2: symbol indexing and worker entrypoint
+  verify/          Tier 2: verification runner
+  verify/ghactions/ Tier 2: GitHub Actions simulation
+  review/          Tier 3: review leg orchestration
+  resolve/         Tier 3: resolve leg orchestration
+  cycle/           Tier 3: multi-pass cycle driver
+  app/             Tier 3: application lifecycle
+  initcmd/         Tier 3: init command
+  preflight/       Tier 3: dependency checks
+  cli/             Tier 3: CLI command router
 schemas/         findings.schema.json, resolve.schema.json
 skills/          pr-review/, pr-resolve/
 templates/       workflows, starter config, example operator config
-scripts/         lint.sh — syntax and shellcheck across everything; refresh-prices.sh regenerates the rate extract
+scripts/         lint.sh, build-native.sh, test-native.sh, next-version.sh
 tests/           the stubbed-gh suite. tests/run.sh runs all of it
 ```
 
