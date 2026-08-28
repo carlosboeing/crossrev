@@ -2,6 +2,7 @@ package prstate_test
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/carlosboeing/crossrev/internal/core"
@@ -176,6 +177,59 @@ func TestEncodeNeverWritesTheCommentID(t *testing.T) {
 	}
 }
 
+// state_markers adds `comment_id` INTO every marker object in the array it
+// prints (lib/state.sh:151), which is the shape ParseMarkers reads. Left in the
+// bytes it hands back, the key rides the documented edit route — Raw,
+// EditMarker, EncodeMarker — straight onto a public comment, which is the one
+// thing every marker write in lib/run.sh deletes first; ignored without being
+// read, the recovery id is lost and the leg posts a second claim.
+func TestParseMarkersAdoptsTheCommentID(t *testing.T) {
+	const in = `[{"v":1,"leg":"review","pass":1,"state":"complete","wrap_up":"old summary","comment_id":12345}]`
+	markers, err := prstate.ParseMarkers([]byte(in))
+	if err != nil {
+		t.Fatalf("parsing: %v", err)
+	}
+	if len(markers) != 1 {
+		t.Fatalf("read %d markers, want 1", len(markers))
+	}
+	if got := markers[0].CommentID(); got != 12345 {
+		t.Errorf("comment id %d, want 12345", got)
+	}
+	const wantRaw = `{"v":1,"leg":"review","pass":1,"state":"complete","wrap_up":"old summary"}`
+	if got := string(markers[0].Raw()); got != wantRaw {
+		t.Errorf("raw\n got %s\nwant %s", got, wantRaw)
+	}
+	edited, err := prstate.EditMarker(markers[0].Raw(),
+		prstate.MarkerEdit{Key: "state", Value: json.RawMessage(`"started"`)})
+	if err != nil {
+		t.Fatalf("editing: %v", err)
+	}
+	body, err := prstate.EncodeMarker(edited)
+	if err != nil {
+		t.Fatalf("encoding: %v", err)
+	}
+	if strings.Contains(body, "comment_id") {
+		t.Errorf("the edit route wrote comment_id onto a comment: %s", body)
+	}
+}
+
+// A marker with no `comment_id` keeps the bytes it was read with, so Raw stays
+// what DecodeMarker would have produced either way.
+func TestParseMarkersWithoutACommentIDKeepsItsBytes(t *testing.T) {
+	const in = `[{"v":1,"leg":"review","pass":1,"state":"complete"}]`
+	markers, err := prstate.ParseMarkers([]byte(in))
+	if err != nil {
+		t.Fatalf("parsing: %v", err)
+	}
+	if got := markers[0].CommentID(); got != 0 {
+		t.Errorf("comment id %d, want 0", got)
+	}
+	const wantRaw = `{"v":1,"leg":"review","pass":1,"state":"complete"}`
+	if got := string(markers[0].Raw()); got != wantRaw {
+		t.Errorf("raw\n got %s\nwant %s", got, wantRaw)
+	}
+}
+
 // F2. `jq -c` prints U+2028 and U+2029 as the raw three bytes; Go's
 // encoding/json escapes both unconditionally, escape-HTML off or not. All three
 // of summary, reason and blocked_reason carry model and harness text.
@@ -210,6 +264,32 @@ func TestCompletedMarkersRoundTripThroughTheStruct(t *testing.T) {
 		if string(raw) != payload {
 			t.Errorf("round trip changed the bytes\n got %s\nwant %s", raw, payload)
 		}
+	}
+}
+
+// json.RawMessage marshals its bytes verbatim, so a payload field that is empty
+// but not nil is not a JSON value at all and fails the whole encode with
+// "unexpected end of JSON input". A nil one is absent, and so is this.
+func TestMarkerEncodesAnEmptyPayloadAsAbsent(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		in   prstate.Marker
+	}{
+		{"findings", prstate.Marker{Version: 1, Findings: json.RawMessage{}}},
+		{"resolutions", prstate.Marker{Version: 1, Resolutions: json.RawMessage{}}},
+		{"tokens", prstate.Marker{Version: 1, Tokens: json.RawMessage{}}},
+		{"usage", prstate.Marker{Version: 1, Usage: json.RawMessage{}}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			got, err := c.in.Encode()
+			if err != nil {
+				t.Fatalf("encoding: %v", err)
+			}
+			want := "\n\n" + prstate.MarkerPrefix + ` {"v":1} -->`
+			if got != want {
+				t.Errorf("encoded\n got %q\nwant %q", got, want)
+			}
+		})
 	}
 }
 

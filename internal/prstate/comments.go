@@ -98,13 +98,29 @@ func EncodeFindingMarker(id core.FindingID, pass int, leg core.Leg) string {
 // A pass of zero reads every pass, which is the empty `$pass` argument Bash
 // passes: pass numbers start at 1, so no real pass is excluded by the sentinel.
 //
-// One divergence, deliberately left: on a line where a second ` -->` follows
-// the marker, the greedy extraction hands both the payload and the trailing
-// text to the reader. jq reads that as a stream, emits `.id` from the object
-// and only then errors, and `2>/dev/null` keeps the id; Go refuses the whole
-// value and drops it. CrossRev appends the marker last on every line it writes,
-// so only a hand-written body reaches it, and reproducing jq's stream parser to
-// recover a forged id is not worth the code.
+// Two divergences, both deliberately left, and both in the same direction: Go
+// finds ids the shell misses. That is the safe direction, because an id already
+// in the set is one the leg does not reply to again — so a Go resolve leg skips
+// a reply a shell one would repeat, and never posts one twice.
+//
+// The larger of the two is jq's error handling. `_state_finding_ids` pipes
+// every extracted payload into ONE jq process, and jq aborts the whole stream
+// on the first parse error, so the shell loses every id after an unreadable
+// marker. Measured by sourcing lib/state.sh over these two lines:
+//
+//	bad  <!-- crossrev:f {oops} -->
+//	good <!-- crossrev:f {"id":"aaaa000000000001","pass":1,"leg":"review"} -->
+//
+// In that order `_state_finding_ids review ""` printed nothing at all;
+// reversed, it printed the id. Go reads line by line and keeps it either way.
+//
+// The smaller one is the greedy extraction: on a line where a second ` -->`
+// follows the marker, it hands both the payload and the trailing text to the
+// reader. jq reads that as a stream, emits `.id` from the object and only then
+// errors, and `2>/dev/null` keeps the id; Go refuses the whole value and drops
+// it. CrossRev appends the marker last on every line it writes, so only a
+// hand-written body reaches it, and reproducing jq's stream parser to recover a
+// forged id is not worth the code.
 func FindingIDs(bodies []string, leg core.Leg, pass int) []core.FindingID {
 	seen := map[string]bool{}
 	for _, body := range bodies {

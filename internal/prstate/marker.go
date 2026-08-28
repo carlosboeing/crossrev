@@ -7,6 +7,9 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"unicode"
+	"unicode/utf16"
+	"unicode/utf8"
 )
 
 // MarkerPrefix opens a pass marker, and FindingMarkerPrefix opens the
@@ -52,9 +55,10 @@ var ErrMarkerPayload = errors.New("a marker payload is not one JSON object")
 // not build works from these bytes, which Marker.Raw hands back and EditMarker
 // edits in place.
 //
-// A scalar is preserved as it was written rather than re-serialised. jq parses
-// and prints, so it also rewrites an escaped code point to the character it
-// names, an escaped solidus to a bare one, and `1e2` to `1E+2`. Every marker
+// A scalar VALUE is preserved as it was written rather than re-serialised; a
+// key is re-printed, because the object is rebuilt around it. jq parses and
+// prints, so it also rewrites an escaped code point to the character it names,
+// an escaped solidus to a bare one, and `1e2` to `1E+2`. Every marker
 // CrossRev writes has already been through `jq -c`, so it is in that form when
 // it is read back and the two agree; a marker written by hand in another form
 // keeps its own bytes here. Chasing the difference would mean reproducing one
@@ -91,6 +95,12 @@ func DecodeMarker(body string) (json.RawMessage, bool) {
 // prints "\n\n<!-- crossrev:  -->". That is the worse answer, because an empty
 // marker on a public comment reads as a pass that settled nothing and every
 // later read of the pull request agrees with it.
+//
+// One more divergence, and Go is right about it too: jq-1.8.1 stops printing at
+// a nesting depth of 256 and writes the literal text `<skipped: too deep>` in
+// place of the value, then exits 0 — so the shell writes an invalid marker and
+// says nothing, where Go writes the correct bytes. Measured by nesting one key
+// 257 deep. A marker nests three deep, so nothing reaches it.
 func EncodeMarker(payload json.RawMessage) (string, error) {
 	normalised, err := normalise(payload)
 	if err != nil {
@@ -252,13 +262,29 @@ func parseObject(b []byte) (object, error) {
 	}
 	var obj object
 	for dec.More() {
+		// The key is taken from the input bytes rather than from the token.
+		// A token is a Go string, and encoding/json has already replaced any
+		// invalid UTF-8 in it one U+FFFD per byte where jq replaces one per
+		// sequence; unquoteJSONString leaves those bytes alone so that the
+		// one rule lives in appendJSONString and applies to keys and values
+		// alike. InputOffset brackets the token, and the only bytes it can
+		// hold ahead of the literal are whitespace and one comma, so the
+		// first quote in the bracket opens the key.
+		start := dec.InputOffset()
 		keyTok, err := dec.Token()
 		if err != nil {
 			return nil, err
 		}
-		key, ok := keyTok.(string)
-		if !ok {
+		if _, ok := keyTok.(string); !ok {
 			return nil, ErrMarkerPayload
+		}
+		lit := b[start:dec.InputOffset()]
+		if q := bytes.IndexByte(lit, '"'); q >= 0 {
+			lit = lit[q:]
+		}
+		key, err := unquoteJSONString(lit)
+		if err != nil {
+			return nil, err
 		}
 		var raw json.RawMessage
 		if err := dec.Decode(&raw); err != nil {
@@ -330,8 +356,8 @@ func normalise(raw json.RawMessage) (json.RawMessage, error) {
 	case '[':
 		return normaliseArray(b)
 	case '"':
-		var s string
-		if err := json.Unmarshal(b, &s); err != nil {
+		s, err := unquoteJSONString(b)
+		if err != nil {
 			return nil, err
 		}
 		return appendJSONString(nil, s), nil
@@ -444,8 +470,15 @@ func migrateEntries(raw json.RawMessage) (json.RawMessage, error) {
 			return nil, err
 		}
 		entry = rename(entry, "disposition", "resolution")
-		if value, ok := entry.get("resolution"); ok && string(value) == `"rebutted"` {
-			entry = entry.set("resolution", json.RawMessage(`"disputed"`))
+		// The value is decoded before it is compared, because jq compares
+		// strings and not the bytes they were written with: `"\u0072ebutted"`
+		// is the retired value and migrates in the shell. Keys a few lines up
+		// are decoded for the same reason, and comparing one side raw and the
+		// other decoded is the inconsistency this avoids.
+		if value, ok := entry.get("resolution"); ok {
+			if s, err := unquoteJSONString(value); err == nil && s == "rebutted" {
+				entry = entry.set("resolution", json.RawMessage(`"disputed"`))
+			}
 		}
 		if !first {
 			out = append(out, ',')
@@ -454,6 +487,20 @@ func migrateEntries(raw json.RawMessage) (json.RawMessage, error) {
 		out = append(out, entry.marshal()...)
 	}
 	return append(out, ']'), nil
+}
+
+// stripKey removes one key from a compact JSON object, leaving the rest in the
+// order and the bytes they were read with. An object that does not carry the
+// key is returned untouched rather than re-printed.
+func stripKey(raw json.RawMessage, key string) (json.RawMessage, error) {
+	obj, err := parseObject(raw)
+	if err != nil {
+		return nil, err
+	}
+	if obj.index(key) < 0 {
+		return raw, nil
+	}
+	return obj.del(key).marshal(), nil
 }
 
 func isJSONArray(raw json.RawMessage) bool {
@@ -475,12 +522,11 @@ const hexDigits = "0123456789abcdef"
 // off, it writes DEL raw, and it escapes U+2028 and U+2029 whatever
 // SetEscapeHTML says. Hence the loop rather than a call into encoding/json.
 //
-// The walk is byte-oriented, which is safe because every byte of a multi-byte
-// rune is at or above 0x80 and falls through unchanged. The strings that reach
-// here have all been through encoding/json, which has already replaced any
-// invalid UTF-8 with U+FFFD, so there is nothing left for jq's own replacement
-// to disagree with.
+// Invalid UTF-8 is replaced first, by replaceInvalidUTF8, so the walk itself
+// can stay byte-oriented: after that every byte at or above 0x80 belongs to a
+// valid multi-byte rune and falls through unchanged.
 func appendJSONString(dst []byte, s string) []byte {
+	s = replaceInvalidUTF8(s)
 	dst = append(dst, '"')
 	for i := 0; i < len(s); i++ {
 		switch c := s[i]; c {
@@ -507,4 +553,222 @@ func appendJSONString(dst []byte, s string) []byte {
 		}
 	}
 	return append(dst, '"')
+}
+
+// errNotJSONString is what unquoteJSONString refuses with. It is unexported
+// because no caller distinguishes it: every one of them is reading a literal
+// encoding/json has already accepted, so a refusal here is a bug rather than a
+// payload a user wrote.
+var errNotJSONString = errors.New("a value is not a JSON string")
+
+// unquoteJSONString reads one JSON string literal back to the bytes it stands
+// for, leaving every byte that is not part of an escape exactly as it was.
+//
+// encoding/json's own unquote cannot be used for this. It replaces invalid
+// UTF-8 on the way through, one U+FFFD per byte, and jq replaces one per
+// sequence; keeping the bytes intact until appendJSONString writes them is what
+// lets that single rule cover keys and values alike.
+//
+// A lone surrogate escape becomes U+FFFD here, which is what encoding/json does
+// and what jq-1.8.1 does for a lone LOW surrogate. jq refuses the whole payload
+// for a lone HIGH one — measured on `{"s":"\ud800"}`, which is a parse error,
+// against `{"s":"\udc00"}`, which is one U+FFFD. Under the shell that refusal
+// prints the 21-byte empty marker EncodeMarker exists to avoid, and Go can
+// never emit a lone surrogate escape of its own, so the divergence is left
+// where it is rather than reproduced.
+func unquoteJSONString(lit []byte) (string, error) {
+	if len(lit) < 2 || lit[0] != '"' || lit[len(lit)-1] != '"' {
+		return "", errNotJSONString
+	}
+	body := lit[1 : len(lit)-1]
+	if bytes.IndexByte(body, '\\') < 0 {
+		return string(body), nil
+	}
+	out := make([]byte, 0, len(body))
+	for i := 0; i < len(body); {
+		if body[i] != '\\' {
+			out = append(out, body[i])
+			i++
+			continue
+		}
+		if i+1 >= len(body) {
+			return "", errNotJSONString
+		}
+		switch body[i+1] {
+		case '"', '\\', '/':
+			out = append(out, body[i+1])
+			i += 2
+		case 'b':
+			out = append(out, '\b')
+			i += 2
+		case 'f':
+			out = append(out, '\f')
+			i += 2
+		case 'n':
+			out = append(out, '\n')
+			i += 2
+		case 'r':
+			out = append(out, '\r')
+			i += 2
+		case 't':
+			out = append(out, '\t')
+			i += 2
+		case 'u':
+			r, next, ok := unicodeEscape(body, i)
+			if !ok {
+				return "", errNotJSONString
+			}
+			out = utf8.AppendRune(out, r)
+			i = next
+		default:
+			return "", errNotJSONString
+		}
+	}
+	return string(out), nil
+}
+
+// unicodeEscape reads the \uXXXX escape whose backslash is body[i], joining a
+// surrogate pair when the escape after it completes one, and answers the rune
+// and the index just past what it consumed.
+func unicodeEscape(body []byte, i int) (rune, int, bool) {
+	r, ok := hex4(body, i+2)
+	if !ok {
+		return 0, 0, false
+	}
+	i += 6
+	if !utf16.IsSurrogate(r) {
+		return r, i, true
+	}
+	if i+6 <= len(body) && body[i] == '\\' && body[i+1] == 'u' {
+		if low, ok := hex4(body, i+2); ok {
+			if joined := utf16.DecodeRune(r, low); joined != unicode.ReplacementChar {
+				return joined, i + 6, true
+			}
+		}
+	}
+	return unicode.ReplacementChar, i, true
+}
+
+// hex4 reads the four hex digits at body[i:i+4].
+func hex4(body []byte, i int) (rune, bool) {
+	if i+4 > len(body) {
+		return 0, false
+	}
+	var r rune
+	for _, c := range body[i : i+4] {
+		var v rune
+		switch {
+		case c >= '0' && c <= '9':
+			v = rune(c - '0')
+		case c >= 'a' && c <= 'f':
+			v = rune(c-'a') + 10
+		case c >= 'A' && c <= 'F':
+			v = rune(c-'A') + 10
+		default:
+			return 0, false
+		}
+		r = r<<4 | v
+	}
+	return r, true
+}
+
+// utf8LeadLength is how many bytes a lead byte claims, or zero for a byte that
+// can never lead a sequence: a continuation byte, the two overlong-only leads
+// 0xC0 and 0xC1, and 0xF5 upwards, which lead either a code point past U+10FFFF
+// or one of the withdrawn five and six byte forms.
+//
+// The boundaries decide how many U+FFFD an invalid run produces, so each was
+// measured rather than assumed: `\xc0\x80` is two U+FFFD under jq and
+// `\xe0\x80\x80` is one, which is 0xC0 leading nothing where 0xE0 leads three.
+func utf8LeadLength(c byte) int {
+	switch {
+	case c < 0x80:
+		return 1
+	case c < 0xc2:
+		return 0
+	case c < 0xe0:
+		return 2
+	case c < 0xf0:
+		return 3
+	case c < 0xf5:
+		return 4
+	default:
+		return 0
+	}
+}
+
+// replaceInvalidUTF8 rewrites s the way jq's own string constructor does, so a
+// harness that emits a truncated multi-byte sequence produces the same marker
+// bytes under Go as under the shell.
+//
+// Go and jq both replace invalid UTF-8 with U+FFFD and disagree on how much
+// each U+FFFD stands for. encoding/json replaces one per BYTE, so `\xe4\xb8`
+// becomes two; jq replaces one per SEQUENCE, so it becomes one. Measured
+// against jq-1.8.1, feeding raw bytes through `jq -c .`:
+//
+//	\xe4\xb8         one U+FFFD        (truncated 3-byte sequence)
+//	\xf0\x9f\x98     one U+FFFD        (truncated 4-byte sequence)
+//	\xe4\xb8Z        one U+FFFD then Z
+//	\xc3\xc3         two U+FFFD        (neither byte continues the other)
+//	\xf0Z            one U+FFFD, no Z  (a truncated tail is consumed whole)
+//	\xe0\x80\x80     one U+FFFD        (overlong, structurally complete)
+//	\xf7\xbf\xbf\xbf  four U+FFFD       (0xF7 leads nothing, nor do the rest)
+//
+// The rule those measurements give, applied at each position:
+//
+//   - a lead byte that leads nothing is one U+FFFD and one byte consumed;
+//   - a sequence that runs past the end of the string is one U+FFFD and the
+//     rest of the string consumed, whatever those bytes are;
+//   - a sequence whose continuation bytes stop early is one U+FFFD and the
+//     lead plus the continuation bytes it did have consumed;
+//   - a structurally complete sequence encoding an overlong form, a surrogate
+//     or a code point past U+10FFFF is one U+FFFD and the whole sequence
+//     consumed.
+//
+// The rule is derived from what jq does rather than from Unicode's
+// maximal-subpart recommendation, which the fifth line above departs from: the
+// recommendation would keep the Z.
+//
+// One route it cannot reach: jqMarshal marshals a struct through encoding/json
+// before normalise re-reads it, so a Go string field carrying invalid UTF-8 has
+// already been replaced byte by byte before it arrives. Closing that would mean
+// replacing encoding/json's struct encoder. The payload fields — `findings`,
+// `resolutions`, `tokens` and `usage`, where a harness's own bytes land — are
+// raw JSON, and they reach unquoteJSONString untouched.
+func replaceInvalidUTF8(s string) string {
+	if utf8.ValidString(s) {
+		return s
+	}
+	out := make([]byte, 0, len(s))
+	for i := 0; i < len(s); {
+		n := utf8LeadLength(s[i])
+		switch {
+		case n == 1:
+			out = append(out, s[i])
+			i++
+		case n == 0:
+			out = utf8.AppendRune(out, utf8.RuneError)
+			i++
+		case i+n > len(s):
+			out = utf8.AppendRune(out, utf8.RuneError)
+			i = len(s)
+		default:
+			k := 1
+			for k < n && s[i+k]&0xc0 == 0x80 {
+				k++
+			}
+			if k < n {
+				out = utf8.AppendRune(out, utf8.RuneError)
+				i += k
+				continue
+			}
+			if r, size := utf8.DecodeRuneInString(s[i : i+n]); r == utf8.RuneError && size == 1 {
+				out = utf8.AppendRune(out, utf8.RuneError)
+			} else {
+				out = append(out, s[i:i+n]...)
+			}
+			i += n
+		}
+	}
+	return string(out)
 }

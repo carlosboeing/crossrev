@@ -196,6 +196,26 @@ func TestFindingIDsDropsAnIDTheHashCouldNotProduce(t *testing.T) {
 	}
 }
 
+// `_state_finding_ids` pipes every extracted payload into one jq process, and
+// jq aborts the whole stream on the first parse error, so the shell loses every
+// id BELOW an unreadable marker as well as that one. Measured by sourcing
+// lib/state.sh: with the bad line first, `_state_finding_ids review ""` printed
+// nothing; with the two lines reversed it printed the id.
+//
+// Go's answer is the one this port keeps. The direction is the reason it is
+// safe: Go finds ids the shell misses, and an id already in the set is one the
+// leg does not reply to again, so a Go resolve leg skips a reply a shell one
+// would repeat rather than posting one twice.
+func TestFindingIDsSurviveAnUnreadableMarkerAboveThem(t *testing.T) {
+	bodies := []string{
+		"bad  <!-- crossrev:f {oops} -->\ngood <!-- crossrev:f {\"id\":\"aaaa000000000001\",\"pass\":1,\"leg\":\"review\"} -->",
+	}
+	got := prstate.FindingIDs(bodies, core.LegReview, 0)
+	if len(got) != 1 || string(got[0]) != "aaaa000000000001" {
+		t.Errorf("read %v, want [aaaa000000000001]", got)
+	}
+}
+
 // A payload that is not an object contributes nothing and the markers around it
 // survive, which is what jq does with `2>/dev/null` on the same stream.
 func TestFindingIDsSkipsANonObjectPayload(t *testing.T) {

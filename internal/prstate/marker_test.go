@@ -170,6 +170,22 @@ func TestDecodeMarkerRefusesANonObjectInsideAMigratedArray(t *testing.T) {
 	}
 }
 
+// jq compares the string a value stands for, not the bytes it was written
+// with, so `"\u0072ebutted"` is the retired value and migrates. Measured by
+// sourcing lib/state.sh and running state_marker_of over the body below, which
+// printed `{"v":1,"resolutions":[{"resolution":"disputed"}]}`.
+func TestDecodeMarkerMigratesAnEscapedRetiredValue(t *testing.T) {
+	body := `<!-- crossrev: {"v":1,"resolutions":[{"resolution":"\u0072ebutted"}]} -->`
+	got, ok := prstate.DecodeMarker(body)
+	if !ok {
+		t.Fatal("decoded nothing")
+	}
+	want := `{"v":1,"resolutions":[{"resolution":"disputed"}]}`
+	if string(got) != want {
+		t.Errorf("decoded\n got %s\nwant %s", got, want)
+	}
+}
+
 // A non-array under either key is left alone, because the migration guards on
 // `type == "array"` (lib/state.sh:103 and :108).
 func TestDecodeMarkerLeavesANonArrayUnderAMigratedKey(t *testing.T) {

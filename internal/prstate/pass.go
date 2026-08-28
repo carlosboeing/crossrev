@@ -44,6 +44,11 @@ import (
 // all, so the natural edit — read a marker, change one field, write it back —
 // cannot add a key to a public comment. The alternative, stripping it inside
 // Encode, would stop it happening today without making it impossible.
+//
+// It still has to be READ, because state_markers writes it into the marker
+// object rather than beside it (lib/state.sh:151). UnmarshalJSON lifts it out
+// of the bytes into commentID, so the byte route through Raw cannot carry it
+// back either.
 type Marker struct {
 	Version        int             `json:"v,omitzero"`
 	Leg            core.Leg        `json:"leg,omitzero"`
@@ -105,11 +110,28 @@ func (m Marker) CommentID() int64 { return m.commentID }
 // with EditMarker. `wrap_up` is the live example: lib/run.sh:1993-1999 still
 // migrates it on resume, and no field on Marker holds it.
 //
+// `comment_id` is not one of those keys, even though lib/state.sh:151 adds it
+// to every marker in the array ParseMarkers reads. UnmarshalJSON lifts it into
+// commentID and takes it back out of these bytes, so the documented edit route
+// — Raw, EditMarker, EncodeMarker — cannot put on a public comment the one key
+// all twelve marker writes in lib/run.sh delete first.
+//
 // The bytes are a copy, so editing them cannot reach the marker.
 func (m Marker) Raw() json.RawMessage { return bytes.Clone(m.raw) }
 
 // MarshalJSON writes the marker in the writers' field order, in `jq -c`'s form.
+//
+// A payload field that is empty but not nil is dropped rather than written.
+// json.RawMessage marshals its bytes verbatim, so a zero-length one is not a
+// JSON value at all and fails the whole encode with "unexpected end of JSON
+// input". Every reader here already reads a zero-length payload as absent —
+// DecodeFindings and DecodeResolutions both — so the writer agrees with them.
 func (m Marker) MarshalJSON() ([]byte, error) {
+	for _, payload := range []*json.RawMessage{&m.Tokens, &m.Usage, &m.Findings, &m.Resolutions} {
+		if len(*payload) == 0 {
+			*payload = nil
+		}
+	}
 	return jqMarshal(markerFields(m))
 }
 
@@ -127,9 +149,21 @@ func (m Marker) MarshalJSON() ([]byte, error) {
 // So a field the struct cannot hold reads as absent and the marker survives.
 // The value itself is not lost: Raw returns the bytes it was read with.
 //
+// One number form is absent here where jq reads a value: `{"pass":2.0}` leaves
+// Pass at zero, because Go refuses a fractional literal for an int, where jq's
+// `.pass == 2` is true. Every writer sets `pass` through `--argjson` with an
+// integer, so only a hand-edited marker reaches it.
+//
 // The walk is reflective rather than a hand-written field list because the list
 // would rot. A field added to Marker without a matching line would decode
-// strictly again, and nothing would say so.
+// strictly again, and nothing would say so. The lookup is exact where
+// encoding/json's is case-insensitive, which is the closer answer: jq's `.pass`
+// is null for `{"PASS":3}`.
+//
+// `comment_id` is read here rather than by the walk, because it is not a field:
+// state_markers puts it into every marker object it prints (lib/state.sh:151)
+// and every marker write in lib/run.sh deletes it again, so it is lifted into
+// commentID and taken out of the bytes Raw hands back.
 func (m *Marker) UnmarshalJSON(b []byte) error {
 	// A JSON null leaves a struct untouched, which is encoding/json's own
 	// convention and what the strict decode did.
@@ -146,21 +180,47 @@ func (m *Marker) UnmarshalJSON(b []byte) error {
 	}
 
 	*m = Marker{raw: raw}
+	if id, ok := fields[commentIDKey]; ok {
+		// A type mismatch leaves the id at zero, the rule the walk below
+		// applies to every other field.
+		_ = json.Unmarshal(id, &m.commentID)
+		if stripped, err := stripKey(raw, commentIDKey); err == nil {
+			m.raw = stripped
+		}
+	}
 	v := reflect.ValueOf(m).Elem()
 	t := v.Type()
 	for i := range t.NumField() {
-		name, _, _ := strings.Cut(t.Field(i).Tag.Get("json"), ",")
-		if name == "" || name == "-" {
+		field := t.Field(i)
+		// An unexported field has no json tag today, but tagging raw or
+		// commentID would make Set below panic — on the path that writes a
+		// public comment. The check is on what actually stops that rather
+		// than on the missing tag standing in for it.
+		if !field.IsExported() {
 			continue
+		}
+		name, _, _ := strings.Cut(field.Tag.Get("json"), ",")
+		if name == "-" {
+			continue
+		}
+		if name == "" {
+			// `json:",omitzero"` names no key, and encoding/json falls
+			// back to the Go name. Skipping instead would decode the
+			// field never, and say nothing.
+			name = field.Name
 		}
 		value, ok := fields[name]
 		if !ok {
 			continue
 		}
-		// A mismatch leaves the field at its zero value, which is the
-		// absent state. Opt and the plain types all assign only after
-		// their own decode succeeds, so nothing is half written.
-		_ = json.Unmarshal(value, v.Field(i).Addr().Interface())
+		// Decoded into a fresh value and assigned only once that
+		// succeeded, so a field is never left half written whatever type
+		// it grows into. Today every field is scalar-atomic and assigns
+		// at the end anyway; a slice or a map would not be.
+		scratch := reflect.New(field.Type)
+		if json.Unmarshal(value, scratch.Interface()) == nil {
+			v.Field(i).Set(scratch.Elem())
+		}
 	}
 	return nil
 }
@@ -214,8 +274,13 @@ func ParseMarker(raw json.RawMessage) (Marker, error) {
 	return m, nil
 }
 
+// commentIDKey is the key state_markers adds to every marker object it prints,
+// and the one every marker write in lib/run.sh deletes before the bytes reach a
+// comment.
+const commentIDKey = "comment_id"
+
 // ParseMarkers reads a JSON array of markers, which is the shape every reader
-// below takes.
+// below takes: the array state_markers prints, `comment_id` and all.
 func ParseMarkers(raw []byte) ([]Marker, error) {
 	var markers []Marker
 	if err := json.Unmarshal(raw, &markers); err != nil {

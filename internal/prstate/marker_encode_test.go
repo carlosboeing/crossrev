@@ -56,6 +56,49 @@ func TestEncodeMarkerNormalisesTheWayJQDoes(t *testing.T) {
 	}
 }
 
+// jq replaces one U+FFFD per invalid UTF-8 SEQUENCE and encoding/json replaces
+// one per BYTE, so a harness emitting a truncated multi-byte sequence in
+// `findings`, `summary` or `usage` used to write different marker bytes under
+// Go than under the shell. Every want below was measured by feeding the same
+// raw bytes through `jq -c .` on jq-1.8.1.
+//
+// The last two rows are the ones a recommendation would get wrong: jq consumes
+// a truncated tail whole, dropping the byte after it, and treats 0xF7 as a lead
+// that leads nothing rather than as the head of a four-byte sequence.
+func TestEncodeMarkerReplacesInvalidUTF8LikeJQ(t *testing.T) {
+	const bad = "\ufffd"
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"truncated-three-byte-sequence", "{\"s\":\"\xe4\xb8\"}", "{\"s\":\"" + bad + "\"}"},
+		{"truncated-four-byte-sequence", "{\"s\":\"\xf0\x9f\x98\"}", "{\"s\":\"" + bad + "\"}"},
+		{"truncated-sequence-then-ASCII", "{\"s\":\"\xe4\xb8Z\"}", "{\"s\":\"" + bad + "Z\"}"},
+		{"two-leads-neither-continued", "{\"s\":\"\xc3\xc3\"}", "{\"s\":\"" + bad + bad + "\"}"},
+		{"a-stray-continuation-byte", "{\"s\":\"\x80\x80\"}", "{\"s\":\"" + bad + bad + "\"}"},
+		{"an-overlong-sequence", "{\"s\":\"\xe0\x80\x80\"}", "{\"s\":\"" + bad + "\"}"},
+		{"a-surrogate-encoded-as-UTF-8", "{\"s\":\"\xed\xa0\x80\"}", "{\"s\":\"" + bad + "\"}"},
+		{"a-code-point-past-U+10FFFF", "{\"s\":\"\xf4\x90\x80\x80\"}", "{\"s\":\"" + bad + "\"}"},
+		{"invalid-UTF-8-in-a-key", "{\"\xe4\xb8\":1}", "{\"" + bad + "\":1}"},
+		{"valid-UTF-8-is-untouched", "{\"s\":\"\U0001f600\u4e2d\"}", "{\"s\":\"\U0001f600\u4e2d\"}"},
+		{"a-truncated-tail-swallows-what-follows", "{\"s\":\"\xf0Z\"}", "{\"s\":\"" + bad + "\"}"},
+		{"a-lead-byte-that-leads-nothing", "{\"s\":\"\xf7\xbf\xbf\xbf\"}", "{\"s\":\"" + bad + bad + bad + bad + "\"}"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, err := prstate.EncodeMarker(json.RawMessage(c.in))
+			if err != nil {
+				t.Fatalf("encoding: %v", err)
+			}
+			want := "\n\n" + prstate.MarkerPrefix + " " + c.want + " -->"
+			if got != want {
+				t.Errorf("encoded\n got % x\nwant % x", got, want)
+			}
+		})
+	}
+}
+
 // X4. The shell does not refuse an unparseable payload: `jq -c .` fails, the
 // command substitution comes back empty, and state_marker_encode prints the 21
 // bytes "\n\n<!-- crossrev:  -->". Go refuses instead, which is the better
@@ -89,7 +132,7 @@ func TestEditMarkerKeepsUnknownKeysAndTheirOrder(t *testing.T) {
 	}
 }
 
-// jq's `del(.k)` is the other half of what the writers do, at lib/run.sh:1995
+// jq's `del(.k)` is the other half of what the writers do, at lib/run.sh:1938
 // and :1999.
 func TestEditMarkerDeletesAKey(t *testing.T) {
 	got, err := prstate.EditMarker(json.RawMessage(`{"a":1,"wrap_up":"old","z":9}`),
