@@ -53,8 +53,9 @@ provenance_is_recorded() {
     [[ -n "$(jq -r '.captured.platform // empty' "$f")" ]] \
       && [[ -n "$(jq -r '.captured.tr_implementation // empty' "$f")" ]] \
       && [[ -n "$(jq -r '.captured.locale // empty' "$f")" ]] \
-      && ok "$name records platform, tr implementation and locale" \
-      || notok "$name records platform, tr implementation and locale" "all three present" "$(jq -c .captured "$f")"
+      && [[ -n "$(jq -r '.captured.awk_implementation // empty' "$f")" ]] \
+      && ok "$name records the tools and locale it was captured under" \
+      || notok "$name records the tools and locale it was captured under" "all four present" "$(jq -c .captured "$f")"
   done
 }
 
@@ -85,7 +86,15 @@ done < <(jq -c '.cases[]' "$PARITY/marker_codec.json")
 
 while IFS= read -r c; do
   name="$(jq -r .name <<<"$c")"
-  inp="$(jq -c .input <<<"$c")"
+  # A case records its input one of two ways. `input` is a JSON value, which jq
+  # normalised when it was captured; `input_raw` is the text verbatim, which is
+  # what the cases that pin the normalisation itself need. Feeding a normalised
+  # input back would test nothing about the rewriting.
+  if [[ "$(jq 'has("input_raw")' <<<"$c")" == "true" ]]; then
+    inp="$(jq -r .input_raw <<<"$c")"
+  else
+    inp="$(jq -c .input <<<"$c")"
+  fi
   is "marker encode: $name" \
     "$(state_marker_encode "$inp")" \
     "$(jq -r .encoded <<<"$c")"
@@ -108,6 +117,28 @@ while IFS= read -r a; do
     "$(diff_anchor "$diff_corpus_file" "$path" "$side" "$line" "$bound")" \
     "$(jq -r .result <<<"$a")"
 done < <(jq -c '.anchors[]' "$PARITY/diff_views.json")
+
+# The malformed corpus. Shapes git does not produce and the awk still answers
+# for: a hunk header that claims more lines than it holds, one that reads as no
+# number at all, a section with no side lines, and a side line inside a hunk.
+# Frozen because a port would otherwise hand-write these answers.
+malformed_file="$workdir/parity_malformed.diff"
+jq -j .malformed.corpus "$PARITY/diff_views.json" >"$malformed_file"
+
+is "diff views: malformed diff_number" \
+  "$(diff_number "$malformed_file")" \
+  "$(jq -j .malformed.diff_number "$PARITY/diff_views.json")"
+
+while IFS= read -r a; do
+  name="$(jq -r .name <<<"$a")"
+  path="$(jq -r .path <<<"$a")"
+  side="$(jq -r .side <<<"$a")"
+  line="$(jq -r .line <<<"$a")"
+  bound="$(jq -r .bound <<<"$a")"
+  is "diff anchor, malformed: $name" \
+    "$(diff_anchor "$malformed_file" "$path" "$side" "$line" "$bound")" \
+    "$(jq -r .result <<<"$a")"
+done < <(jq -c '.malformed.anchors[]' "$PARITY/diff_views.json")
 
 while IFS= read -r ex; do
   name="$(jq -r .name <<<"$ex")"
@@ -252,6 +283,52 @@ for leg in review resolve; do
 done
 
 provenance_is_recorded
+
+# The commit convention, over a real base revision.
+#
+# The resolve prompt fixture records an empty base_sha, so this section
+# contributes nothing to it. Replaying these rebuilds each repository with the
+# same pinned author and dates the capture used, so the base revision and every
+# byte come back the same.
+cc_replay() { # <n_repo> <n_mine> <template>
+  local n_repo="$1" n_mine="$2" template="$3" d i base
+  d="$(mktemp -d "$workdir/ccr_XXXXXX")"
+  (
+    cd "$d" && git init -q .
+    _cc() {
+      GIT_AUTHOR_NAME="capture" GIT_AUTHOR_EMAIL="$1" \
+      GIT_COMMITTER_NAME="capture" GIT_COMMITTER_EMAIL="$1" \
+      GIT_AUTHOR_DATE="2026-01-01T00:00:00Z" GIT_COMMITTER_DATE="2026-01-01T00:00:00Z" \
+      git commit -q --allow-empty -m "$2"
+    }
+    for (( i = 1; i <= n_mine; i++ )); do
+      _cc "crossrev@example.com" "chore(crossrev): a subject the leg must not learn from $i"
+    done
+    for (( i = 1; i <= n_repo; i++ )); do
+      _cc "dev@example.com" "feat(api): add the $i-th endpoint"
+    done
+    if [[ -n "$template" ]]; then
+      printf '%s' "$template" > .gitmessage
+      git add .gitmessage
+      _cc "dev@example.com" "chore: add a commit template"
+    fi
+    base="$(git rev-parse HEAD)"
+    prompt_commit_convention "$base" "crossrev@example.com"
+  )
+}
+
+while IFS= read -r c; do
+  name="$(jq -r .name <<<"$c")"
+  if [[ "$name" == "no-base" ]]; then
+    is "commit convention: $name" \
+      "$(prompt_commit_convention "" "crossrev@example.com")" \
+      "$(jq -r .rendered <<<"$c")"
+    continue
+  fi
+  is "commit convention: $name" \
+    "$(cc_replay "$(jq -r .repo_subjects <<<"$c")" "$(jq -r .own_subjects <<<"$c")" "$(jq -r .template <<<"$c")")" \
+    "$(jq -r .rendered <<<"$c")"
+done < <(jq -c '.cases[]' "$PARITY/prompt_commit_convention.json")
 
 printf '\n  %d passed, %d failed\n' "$pass" "$fail"
 (( fail == 0 ))

@@ -1,0 +1,148 @@
+{
+  "title": "crossrev review findings",
+  "description": "What the review leg returns. Both v1 harnesses constrain output to this natively, so the orchestrator receives validated JSON rather than scraping a fenced block out of prose. Two shapes here are forced by the harnesses rather than chosen: no $schema or $id key, because Claude Code's --json-schema rejects a schema naming the 2020-12 meta-schema and fails before the model is called; and every property listed in 'required', because Codex enforces OpenAI strict mode, which demands it. Genuinely optional fields are therefore nullable rather than absent.",
+  "type": "object",
+  "required": [
+    "verdict",
+    "findings",
+    "prior",
+    "blocked_reason"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "verdict": {
+      "type": "string",
+      "enum": [
+        "converged",
+        "issues-remain",
+        "blocked"
+      ],
+      "description": "converged when no finding at or above the pass's min_fix_severity threshold remains, counting only findings this pull request introduced. Findings below the threshold, and pre-existing ones at any severity, are reported but cannot keep the loop alive. blocked when the review could not be completed at all."
+    },
+    "findings": {
+      "type": "array",
+      "description": "Every finding, whatever its severity. An empty array with verdict converged is a valid and common result.",
+      "items": {
+        "type": "object",
+        "required": [
+          "path",
+          "line",
+          "side",
+          "severity",
+          "category",
+          "pre_existing",
+          "title",
+          "why",
+          "fix"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Repository-relative path, exactly as it appears in the diff."
+          },
+          "line": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Line the comment anchors to, copied from the diff's line-number gutter — the first column for LEFT, the second for RIGHT. Never counted up from a @@ header: a number the gutter does not show is not part of the diff, GitHub refuses a comment on it, and the finding leaves the thread it belongs in."
+          },
+          "side": {
+            "type": "string",
+            "enum": [
+              "LEFT",
+              "RIGHT"
+            ],
+            "description": "Which side of the diff. RIGHT for additions and unchanged lines, LEFT for deletions shown in red. The gutter is the check: it shows a dash in place of a number wherever the line does not exist on that side, so a finding on a deleted line posted as RIGHT targets a line that does not exist and is rejected by GitHub."
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "high",
+              "medium",
+              "low"
+            ],
+            "description": "How bad it is, and nothing else. high: a bug that should be fixed before merging. medium: worth fixing, not alarming. low: minor. The pass's min_fix_severity threshold decides which of these the resolve leg may change code for; severity itself says only how bad the defect is."
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "correctness",
+              "security",
+              "performance",
+              "maintainability",
+              "testing",
+              "docs"
+            ],
+            "description": "What kind of defect it is. correctness covers logic bugs, edge cases and race conditions. A closed set on purpose: free text turns the summary table to mush."
+          },
+          "pre_existing": {
+            "type": "boolean",
+            "description": "True when the defect would still exist if this pull request were reverted. Reported and, if confirmed, filed to the backlog — never fixed here, whatever its severity, because a pull request that fixes old bugs is one nobody can review. The test is simple: would this defect survive a revert?"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "description": "One line naming the defect. Becomes the comment heading and part of the finding's stable id, so keep it stable for the same defect across passes."
+          },
+          "why": {
+            "type": "string",
+            "minLength": 1,
+            "description": "What goes wrong as a result. Consequence, not restatement of the title."
+          },
+          "fix": {
+            "type": "string",
+            "minLength": 1,
+            "description": "How to fix it, concretely enough to act on."
+          }
+        }
+      }
+    },
+    "prior": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "description": "From pass 2 onward, one entry per finding carried in from an earlier pass, classified before any new reviewing happens. Null on pass 1.",
+      "items": {
+        "type": "object",
+        "required": [
+          "finding_number",
+          "status",
+          "note"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "finding_number": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The number in the first column of the earlier-findings table in the prompt. A small integer rather than the finding's 16-character id, for the same reason the resolve leg uses one: copying a hash accurately is clerical work, and the harness can enforce a number."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "addressed",
+              "credibly-disputed",
+              "still-open",
+              "regressed"
+            ],
+            "description": "addressed: the code changed and the defect is gone. credibly-disputed: the reply gave a technical reason this was wrong, and it holds. still-open: nothing changed at that location. regressed: it was fixed and has come back."
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "One line of reasoning, or null. Expected for credibly-disputed and regressed, where the classification is a judgement rather than an observation."
+          }
+        }
+      }
+    },
+    "blocked_reason": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Why the review could not be completed, or null. Only meaningful with verdict blocked."
+    }
+  }
+}

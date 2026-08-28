@@ -45,11 +45,22 @@ platform="$(uname -s -r -m)"
 tr_path="$(command -v tr)"
 if tr --version </dev/null 2>/dev/null | grep -q GNU; then tr_flavor="GNU coreutils tr"; else tr_flavor="BSD tr"; fi
 locale="${LC_ALL:-${LC_CTYPE:-${LANG:-unset}}}"
+awk_path="$(command -v awk)"
+# The diff oracle is entirely awk, and the three common implementations disagree
+# on substr past the end, sprintf("%c", n) above 255, and reading a hex or
+# exponent string as a number. A reader checking diff_views.json against their
+# own awk needs to know which one answered here.
+if awk --version </dev/null 2>/dev/null | grep -qi 'gnu awk'; then awk_flavor="GNU awk"
+elif awk -W version </dev/null 2>&1 | grep -qi mawk;    then awk_flavor="mawk"
+elif awk --version </dev/null 2>&1 | grep -qi 'awk version'; then awk_flavor="one true awk (BWK)"
+else awk_flavor="unidentified awk"; fi
 
 captured_json() {
-  jq -n --arg p "$platform" --arg t "$tr_path ($tr_flavor)" --arg l "$locale" '{
+  jq -n --arg p "$platform" --arg t "$tr_path ($tr_flavor)" --arg l "$locale" \
+        --arg a "$awk_path ($awk_flavor)" '{
     platform: $p,
     tr_implementation: $t,
+    awk_implementation: $a,
     locale: $l,
     note: "state_finding_id and state_anchor pin LC_ALL=C internally, so ids and anchors are byte-oriented whatever locale this file was captured under."
   }'
@@ -155,6 +166,21 @@ encode_case() { # name input_json
     '{name:$n, input:$inp, encoded:$enc}'
 }
 
+# The same capture, recording the input as raw text rather than through
+# --argjson.
+#
+# state_marker_encode is `jq -c .`, which parses and re-prints, so it
+# normalises scalars. --argjson would normalise the recorded input too, and a
+# reader replaying from it would start from bytes the shell had already
+# rewritten. These cases exist to pin the rewriting itself, so the input has to
+# survive verbatim.
+encode_raw_case() { # name raw_payload
+  local encoded
+  encoded="$(state_marker_encode "$2")"
+  jq -cn --arg n "$1" --arg inp "$2" --arg enc "$encoded" \
+    '{name:$n, input_raw:$inp, encoded:$enc}'
+}
+
 encode_cases() {
   encode_case "review-complete" \
     '{"v":1,"leg":"review","pass":2,"state":"complete","verdict":"issues-remain","head_sha":"9f3c1ab","findings":[{"id":"aaaa000000000001","severity":"high","category":"security","pre_existing":false,"path":"app.ts","line":2,"title":"Fetch timeout missing"}]}'
@@ -168,6 +194,47 @@ encode_cases() {
     '{"v":1,"leg":"review","pass":3,"state":"declined","reason":"reached max_passes_per_cycle (3)"}'
   encode_case "missing-optional-fields" \
     '{"v":1,"leg":"resolve","pass":1,"state":"started","head_sha":"abc1234"}'
+
+  # What jq rewrites on the way out. A harness writes the payload and it has
+  # never met jq before this call, so these are the bytes that reach a public
+  # comment rather than a hypothetical.
+  encode_raw_case "raw-escaped-solidus" \
+    '{"v":1,"leg":"review","pass":1,"findings":[{"path":"a\/b.ts"}]}'
+  encode_raw_case "raw-escape-printable-ascii" \
+    '{"v":1,"leg":"review","pass":1,"summary":"\u0041\u007e"}'
+  encode_raw_case "raw-escape-control" \
+    '{"v":1,"leg":"review","pass":1,"summary":"\u0007"}'
+  encode_raw_case "raw-escape-delete" \
+    '{"v":1,"leg":"review","pass":1,"summary":"\u007f"}'
+  encode_raw_case "raw-escape-non-ascii" \
+    '{"v":1,"leg":"review","pass":1,"summary":"\u00e9\u4e2d"}'
+  encode_raw_case "raw-escape-surrogate-pair" \
+    '{"v":1,"leg":"review","pass":1,"summary":"\ud83d\ude00"}'
+  encode_raw_case "raw-escape-line-separators" \
+    '{"v":1,"leg":"review","pass":1,"summary":"a\u2028b\u2029c"}'
+  encode_raw_case "raw-duplicate-key" \
+    '{"v":1,"leg":"review","pass":1,"pass":2}'
+  encode_raw_case "raw-insignificant-whitespace" \
+    '{ "v" : 1, "leg" : "review", "pass" : [1, 2] }'
+  encode_raw_case "raw-html-characters" \
+    '{"v":1,"leg":"review","pass":1,"summary":"a<b&c>d"}'
+  # Numbers. Every literal below is one jq preserves, which is why the port
+  # passes them through verbatim rather than reformatting.
+  encode_raw_case "raw-number-trailing-zero" \
+    '{"v":1,"leg":"review","pass":1,"n":1.50}'
+  encode_raw_case "raw-number-negative-zero" \
+    '{"v":1,"leg":"review","pass":1,"n":-0.0}'
+  encode_raw_case "raw-number-past-float-precision" \
+    '{"v":1,"leg":"review","pass":1,"n":12345678901234567890}'
+  # The one shape the port deliberately does not reproduce. jq rewrites an
+  # exponent into its own canonical form, and which form that is changed
+  # between jq 1.6 and 1.7, so reproducing it would pin one jq family into the
+  # contract. No marker CrossRev writes carries an exponent. Frozen so the
+  # divergence is visible in the oracle rather than only in a code comment.
+  encode_raw_case "raw-number-exponent-divergent" \
+    '{"v":1,"leg":"review","pass":1,"n":1e2}'
+  encode_raw_case "raw-number-exponent-negative-divergent" \
+    '{"v":1,"leg":"review","pass":1,"n":1e-2}'
   encode_case "present-empty-crossrev-tracked" \
     '{"v":1,"leg":"resolve","pass":1,"state":"complete","resolutions":[{"finding_id":"aaaa000000000001","resolution":"deferred","crossrev_tracked":""}]}'
 }
@@ -369,6 +436,81 @@ exclude_diff_cases() {
   exclude_diff_case "exclude-none"
 }
 
+# A second corpus, of shapes git does not produce and the awk still has to
+# answer for. The rich corpus above is well-formed on purpose, so nothing in it
+# says what a truncated hunk or an unreadable header does. Those answers were
+# hand-written in the port instead of captured, which is the one thing the
+# oracle exists to stop.
+#
+# It is a separate corpus rather than more sections in the first one, because
+# appending to that one would move every line number the 31 frozen anchor
+# queries name.
+malformed_file="$diff_workdir/malformed.diff"
+malformed_corpus='diff --git a/src/truncated.ts b/src/truncated.ts
+--- a/src/truncated.ts
++++ b/src/truncated.ts
+@@ -1,9 +1,9 @@
+ one
+-two
++deux
+diff --git a/src/unreadable.ts b/src/unreadable.ts
+--- a/src/unreadable.ts
++++ b/src/unreadable.ts
+@@ garbage @@
+ ctx after an unreadable header
++added after an unreadable header
+diff --git a/src/nospace.ts b/src/nospace.ts
+--- a/src/nospace.ts
++++ b/src/nospace.ts
+@@-1,2 +1,2 @@
+ ctx after a header with no space
+diff --git a/src/bare.ts b/src/bare.ts
+--- a/src/bare.ts
++++ b/src/bare.ts
+@@
+ ctx after a bare at-at
+diff --git a/src/nosides.ts b/src/nosides.ts
+index 3333333..4444444 100644
+Binary files a/src/nosides.ts and b/src/nosides.ts differ
+\ weird line outside any hunk
+diff --git a/src/inhunk.ts b/src/inhunk.ts
+--- a/src/inhunk.ts
++++ b/src/inhunk.ts
+@@ -1,3 +1,3 @@
+ before
+--- a side line appearing inside a hunk
++++ its added counterpart
+ after'
+printf '%s' "$malformed_corpus" >"$malformed_file"
+
+malformed_anchor_case() { # name path side line bound
+  local res
+  res="$(diff_anchor "$malformed_file" "$2" "$3" "$4" "$5")"
+  jq -cn --arg n "$1" --arg p "$2" --arg s "$3" --argjson l "$4" --argjson b "$5" --arg r "$res" \
+    '{name:$n, path:$p, side:$s, line:$l, bound:$b, result:$r}'
+}
+
+malformed_anchor_cases() {
+  # A hunk whose header claims nine lines and holds three still numbers the
+  # three it has, from the start the header names.
+  malformed_anchor_case "truncated-first-line"      "src/truncated.ts" RIGHT 1 3
+  malformed_anchor_case "truncated-past-what-it-has" "src/truncated.ts" RIGHT 9 3
+  # An unreadable header numbers from zero, because awk reads no number at all.
+  malformed_anchor_case "unreadable-header-right"   "src/unreadable.ts" RIGHT 0 3
+  malformed_anchor_case "unreadable-header-line-one" "src/unreadable.ts" RIGHT 1 3
+  # No space after the at-at reads the fields shifted.
+  malformed_anchor_case "nospace-header-right"      "src/nospace.ts" RIGHT 1 3
+  malformed_anchor_case "bare-at-at-right"          "src/bare.ts" RIGHT 0 3
+  # A section with no side lines names no path, so nothing anchors to it.
+  malformed_anchor_case "no-side-lines"             "src/nosides.ts" RIGHT 1 3
+  # in_hunk is cleared only by a diff --git line, so a --- inside a hunk is a
+  # deletion rather than a header.
+  malformed_anchor_case "side-line-inside-hunk-left" "src/inhunk.ts" LEFT 2 3
+  malformed_anchor_case "side-line-inside-hunk-right" "src/inhunk.ts" RIGHT 2 3
+}
+
+malformed_numbered="$(diff_number "$malformed_file")"
+
 numbered="$(diff_number "$diff_file")"
 
 jq -n --argjson captured "$(captured_json)" \
@@ -376,7 +518,10 @@ jq -n --argjson captured "$(captured_json)" \
   --arg diff_number "$numbered" \
   --argjson anchors "$(anchor_diff_cases | jq -s .)" \
   --argjson excludes "$(exclude_diff_cases | jq -s .)" \
-  '{captured:$captured, function:"diff_views", corpus:$corpus, diff_number:$diff_number, anchors:$anchors, excludes:$excludes}' \
+  --arg malformed_corpus "$malformed_corpus" \
+  --arg malformed_diff_number "$malformed_numbered" \
+  --argjson malformed_anchors "$(malformed_anchor_cases | jq -s .)" \
+  '{captured:$captured, function:"diff_views", corpus:$corpus, diff_number:$diff_number, anchors:$anchors, excludes:$excludes, malformed:{corpus:$malformed_corpus, diff_number:$malformed_diff_number, anchors:$malformed_anchors}}' \
   >"$FIXDIR/diff_views.json"
 
 rm -rf "$diff_workdir"
@@ -516,6 +661,25 @@ policy:
     '{name:"base-empty", repo_yaml:"", operator_yaml:null, base_sha:$b, merged:$merged}'
 ) >"$config_capture_dir/case_base_empty.json"
 
+# An existing empty file, and a comment-only one, on the WORKING-TREE path.
+# Both resolve to null through yq, where an absent file never reaches it. They
+# state no policy, which is what an absent file states, so they are silent.
+# Frozen because both were a jq type error and a misdirected assertion before.
+wt_null_case() { # name file_body -> case json
+  local d; d="$(mktemp -d "$config_capture_dir/wtnull_XXXXXX")"
+  (
+    cd "$d" && git init -q . && git commit -q --allow-empty -m init
+    mkdir -p .github
+    printf '%s' "$2" > .github/crossrev.yml
+    XDG_CONFIG_HOME="$d/xdg"; export XDG_CONFIG_HOME
+    cfg_load
+    jq -n --arg n "$1" --arg r "$2" --argjson merged "$CFG_MERGED" \
+      '{name:$n, repo_yaml:$r, operator_yaml:null, base_sha:null, merged:$merged}'
+  )
+}
+wt_null_case "wt-empty-file"   ''            >"$config_capture_dir/case_wt_empty.json"
+wt_null_case "wt-comment-only" $'# nothing\n' >"$config_capture_dir/case_wt_comment.json"
+
 config_refusal_case() { # name family yaml
   local name="$1" family="$2" yaml="$3"
   local d; d="$(mktemp -d "$config_capture_dir/refusal_XXXXXX")"
@@ -599,6 +763,13 @@ config_refusal_cases() {
   # naming both the file and the revision, and a hint that reads the revision.
   config_refusal_base_case "malformed-yaml-at-base" "parse" \
     $'version: 1\npolicy:\n  - this is not\n  a mapping: [unclosed\n'
+  # A document that parses and is not a mapping. yq answers 0 and returns a
+  # sequence or a scalar, so the parse refusal never fires; the merge used to
+  # die with jq's own type error and two more lines after it.
+  config_refusal_case "non-mapping-sequence" "shape" $'- a\n- b\n'
+  config_refusal_case "non-mapping-scalar"   "shape" $'42\n'
+  config_refusal_case "non-mapping-boolean"  "shape" $'true\n'
+  config_refusal_base_case "non-mapping-at-base" "shape" $'- a\n- b\n'
   config_refusal_call_case "endpoint-without-base-url" "endpoint" \
     $'version: 1\nendpoints:\n  local:\n    token_env: LOCAL_TOKEN\n' cfg_endpoint local
   config_refusal_call_case "endpoint-without-token-env" "endpoint" \
@@ -612,7 +783,7 @@ config_refusal_cases() {
     $'version: 1\nbacklog:\n  destination: elsewhere\n'
 }
 
-cfg_cases="[$(cat "$config_capture_dir/case_defaults.json"), $(cat "$config_capture_dir/case_repo_over.json"), $(cat "$config_capture_dir/case_op_override.json"), $(cat "$config_capture_dir/case_base_fallback.json"), $(cat "$config_capture_dir/case_base_absent.json"), $(cat "$config_capture_dir/case_base_empty.json")]"
+cfg_cases="[$(cat "$config_capture_dir/case_defaults.json"), $(cat "$config_capture_dir/case_repo_over.json"), $(cat "$config_capture_dir/case_op_override.json"), $(cat "$config_capture_dir/case_base_fallback.json"), $(cat "$config_capture_dir/case_base_absent.json"), $(cat "$config_capture_dir/case_base_empty.json"), $(cat "$config_capture_dir/case_wt_empty.json"), $(cat "$config_capture_dir/case_wt_comment.json")]"
 
 jq -n --argjson captured "$(captured_json)" \
   --argjson cases "$cfg_cases" \
@@ -739,4 +910,77 @@ for leg in review resolve; do
 done
 
 rm -rf "$workdir"
+
+# --- prompt_commit_convention over a real base revision ---------------------
+#
+# The resolve prompt fixture above records an empty base_sha, so the commit
+# convention contributes nothing to it and a port could restate lib/prompt.sh
+# instead of reproducing it. These vectors give it its own oracle.
+#
+# The repository is built with pinned author, committer and dates, so the base
+# revision and every recorded byte are the same on any machine.
+
+cc_workdir="$(mktemp -d)"
+
+cc_commit() { # <email> <subject>
+  GIT_AUTHOR_NAME="capture" GIT_AUTHOR_EMAIL="$1" \
+  GIT_COMMITTER_NAME="capture" GIT_COMMITTER_EMAIL="$1" \
+  GIT_AUTHOR_DATE="2026-01-01T00:00:00Z" GIT_COMMITTER_DATE="2026-01-01T00:00:00Z" \
+  git commit -q --allow-empty -m "$2"
+}
+
+cc_case() { # name <n_repo_subjects> <n_mine> <template|"">
+  local name="$1" n_repo="$2" n_mine="$3" template="$4"
+  local d out base
+  d="$(mktemp -d "$cc_workdir/cc_XXXXXX")"
+  (
+    cd "$d" && git init -q .
+    local i
+    for (( i = 1; i <= n_mine; i++ )); do
+      cc_commit "crossrev@example.com" "chore(crossrev): a subject the leg must not learn from $i"
+    done
+    for (( i = 1; i <= n_repo; i++ )); do
+      cc_commit "dev@example.com" "feat(api): add the $i-th endpoint"
+    done
+    if [[ -n "$template" ]]; then
+      printf '%s' "$template" > .gitmessage
+      git add .gitmessage
+      cc_commit "dev@example.com" "chore: add a commit template"
+    fi
+    base="$(git rev-parse HEAD)"
+    out="$(prompt_commit_convention "$base" "crossrev@example.com")"
+    jq -cn --arg n "$name" --argjson r "$n_repo" --argjson m "$n_mine" \
+      --arg t "$template" --arg o "$out" \
+      '{name:$n, repo_subjects:$r, own_subjects:$m, template:$t, rendered:$o}'
+  )
+}
+
+cc_cases() {
+  # No base revision at all prints nothing, which is the arm every other case
+  # would otherwise hide.
+  jq -cn --arg o "$(prompt_commit_convention "" "crossrev@example.com")" \
+    '{name:"no-base", repo_subjects:0, own_subjects:0, template:"", rendered:$o}'
+  # Under the floor takes the fallback; at and above it takes the log. The two
+  # sides of that boundary were both untested.
+  cc_case "four-subjects-under-the-floor"  4  0 ""
+  cc_case "five-subjects-at-the-floor"     5  0 ""
+  cc_case "six-subjects-above-the-floor"   6  0 ""
+  # The cap is on the sample, not on how far back the filter looks: twelve of
+  # crossrev's own commits sit above twenty-five repository ones.
+  cc_case "twenty-of-twenty-five"         25 12 ""
+  # A template is quoted, and capped at twenty lines of its own.
+  cc_case "with-a-short-template"          6  0 "$(printf 'A subject line\n\nWhy, not what.\n')"
+  cc_case "with-a-long-template"           6  0 "$(printf 'line %s\n' $(seq 1 25))"
+  # Repository text reaches a prompt, so the quoting has to hold.
+  cc_case "template-carrying-a-fence"      6  0 "$(printf 'A subject\n\n```\ncode\n```\n')"
+  cc_case "own-commits-only"               0  6 ""
+}
+
+jq -n --argjson captured "$(captured_json)" \
+  --argjson cases "$(cc_cases | jq -s .)" \
+  '{captured:$captured, function:"prompt_commit_convention", cases:$cases}' \
+  >"$FIXDIR/prompt_commit_convention.json"
+
+rm -rf "$cc_workdir"
+
 printf 'parity vectors written to %s\n' "$FIXDIR"
