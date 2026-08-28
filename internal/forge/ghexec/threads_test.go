@@ -101,6 +101,28 @@ func TestReviewThreadsKeepsThreadsAroundAnUnreadableMarker(t *testing.T) {
 	}
 }
 
+// A readable marker with no usable id yields nothing. jq carries a null into
+// the array and carries a malformed id as written; neither could ever match an
+// id the review leg minted.
+func TestReviewThreadsDropsAMarkerWithNoUsableID(t *testing.T) {
+	body := `{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[
+	  {"id":"T1","isResolved":false,"isOutdated":false,"path":"a.ts","line":1,
+	   "comments":{"nodes":[
+	     {"databaseId":1,"author":{"login":"a"},"body":"no id <!-- crossrev:f {\"pass\":1} -->"},
+	     {"databaseId":2,"author":{"login":"a"},"body":"short <!-- crossrev:f {\"id\":\"abc\"} -->"},
+	     {"databaseId":3,"author":{"login":"a"},
+	      "body":"good <!-- crossrev:f {\"id\":\"aaaa000000000003\"} -->"}]}}]}}}}}`
+
+	c, _ := client(t, out(body))
+	got := c.ReviewThreads(context.Background(), testSlug(t), 42)
+	if len(got) != 1 {
+		t.Fatalf("threads = %+v", got)
+	}
+	if len(got[0].FindingIDs) != 1 || got[0].FindingIDs[0].String() != "aaaa000000000003" {
+		t.Errorf("finding ids = %v, want the minted one alone", got[0].FindingIDs)
+	}
+}
+
 // An author GitHub reports as null is a deleted account, not a parse failure.
 func TestReviewThreadsReadsACommentWithNoAuthor(t *testing.T) {
 	body := `{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[

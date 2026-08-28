@@ -45,7 +45,7 @@ type DailyCount struct {
 // # It paginates to exhaustion
 //
 // This is the one place the Go port answers differently from the shell, and it
-// answers with the number. lib/state.sh:356 loops `for page in 1 2 3 4 5 6 7 8
+// answers with the number. lib/state.sh:366 loops `for page in 1 2 3 4 5 6 7 8
 // 9 10` and then warns that the count covers only what it inspected, so a busy
 // repository past a thousand comments in the window reported a total it knew
 // was short. Here the read follows pagination until a page comes back shorter
@@ -64,7 +64,27 @@ type DailyCount struct {
 //
 // An unreadable page answers zero and reports why. The backstop rounds down
 // rather than stopping a healthy automatic review early, so the caller warns
-// and carries on with zero — which is what lib/state.sh:381-385 does.
+// and carries on with zero — which is what lib/state.sh:367-372 does. Printing
+// that warning is the caller's, because this package has no reporter and the
+// text is the shell's.
+//
+// # A timestamp that is not a number
+//
+// A marker whose `ts` is a JSON string counts in the shell and not here. jq
+// orders every number below every string, so `"123" > $cutoff` is true whatever
+// the cutoff; prstate.Marker decodes field by field and a type mismatch leaves
+// the field at its zero (internal/prstate/pass.go:167-200), so the marker fails
+// the window test and is skipped.
+//
+// It is left as it is rather than reproduced. Reaching it takes the trusted
+// author writing a malformed marker — the App writes `ts` with jq's `now |
+// floor`, so nothing CrossRev ships produces one — and the difference rounds
+// the count down, which is the direction lib/state.sh:367-372 already documents
+// as the intended one for a read that cannot answer. Reproducing it would mean
+// decoding `ts` a second time as raw JSON and implementing jq's total ordering
+// across types for one comparison, because the shared marker type is an int64
+// and the count may not have its own. That is a jq implementation detail
+// carried into Go to make one malformed marker count for more.
 func PRsReviewedToday(ctx context.Context, f Forge, req DailyCount) (int, error) {
 	for _, m := range req.CurrentMarkers {
 		if countsAsReview(m.Leg, m.State, m.TS, req.Cutoff) {
@@ -122,7 +142,7 @@ func countsAsReview(leg core.Leg, state core.PassState, ts int64, cutoff time.Ti
 
 // reviewMarkerOf pulls the pass marker out of one comment body.
 //
-// It reads leg, state and ts only, which is why lib/state.sh:369-372 says this
+// It reads leg, state and ts only, which is why lib/state.sh:378-383 says this
 // read never touches a migrated key. It goes through the shared decoder anyway:
 // the extraction rule is the thing that has to match — per line, the last
 // opening delimiter and the last closing one after it, so a body carrying two

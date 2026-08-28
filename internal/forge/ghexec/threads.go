@@ -37,7 +37,7 @@ const resolveMutation = `
       resolveReviewThread(input:{threadId:$threadId}) { thread { isResolved } }
     }`
 
-// findingMarker is the scan lib/github.sh:130 and :334 both apply: the payload
+// findingMarker is the scan lib/github.sh:137 and :335 both apply: the payload
 // of a finding marker, with no closing brace inside it.
 var findingMarker = regexp.MustCompile(`<!-- crossrev:f (\{[^}]*\}) -->`)
 
@@ -129,14 +129,28 @@ func (c *Client) ReviewThreads(ctx context.Context, repo core.Slug, number int) 
 // findingIDsIn reads the finding ids out of one comment body, in the order they
 // appear.
 //
-// One divergence from the shell, and it is the one internal/prstate already
-// took at comments.go:100-123 for the same reason. jq aborts the whole program
-// on the first payload `fromjson` refuses, so a single unreadable marker
-// anywhere in a pull request costs the shell every thread on it — the
-// `|| printf '[]'` catches the failure and the caller reads no threads at all.
-// Here the unreadable marker costs its own id and nothing else. Go finding ids
-// the shell misses is the safe direction: an id already in the set is one the
-// leg does not act on twice.
+// Two differences from the shell, both of them Go keeping less than jq keeps.
+//
+// The first is the one internal/prstate already took at comments.go:100-123 for
+// the same reason. jq aborts the whole program on the first payload `fromjson`
+// refuses, so a single unreadable marker anywhere in a pull request costs the
+// shell every thread on it — the `|| printf '[]'` catches the failure and the
+// caller reads no threads at all. Here the unreadable marker costs its own id
+// and nothing else. Go finding ids the shell misses is the safe direction: an
+// id already in the set is one the leg does not act on twice.
+//
+// The second is what a readable marker with no usable id decodes to. jq's `.id`
+// on a payload that has no `id` key yields null and the array carries it, and a
+// payload whose id is not sixteen lowercase hexadecimal characters is carried
+// as written. Both are dropped here — the null by the emptiness test below, the
+// malformed one by ParseFindingID at the call site.
+//
+// Traced rather than assumed harmless. All four consumers of a thread's finding
+// ids — lib/run.sh:1275, :1986, :2321 and :2322 — compare them against an id
+// the review leg minted, and every minted id is sixteen lowercase hexadecimal
+// characters (internal/prstate/finding.go:34), so neither a null nor a
+// malformed id could ever have matched one. Dropping them loses no match and
+// keeps a value that is not an id out of a type that says it is one.
 func findingIDsIn(body string) []string {
 	matches := findingMarker.FindAllStringSubmatch(body, -1)
 	ids := make([]string, 0, len(matches))

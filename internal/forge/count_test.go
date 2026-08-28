@@ -280,3 +280,23 @@ func TestPRsReviewedTodaySkipsACommentWithNoMarkerAndNoIssueURL(t *testing.T) {
 		t.Errorf("count = %d, want 0", got)
 	}
 }
+
+// A marker whose ts is a JSON string counts in jq, which orders every number
+// below every string, and not here: the shared decoder leaves a field it cannot
+// read at its zero, so the marker fails the window test.
+func TestPRsReviewedTodaySkipsAMarkerWhoseTimestampIsAString(t *testing.T) {
+	stringTS := forge.IssueComment{
+		AuthorLogin: countAuthor,
+		IssueURL:    "https://api.github.com/repos/acme/widget/issues/7",
+		Body:        `<!-- crossrev: {"v":1,"leg":"review","pass":1,"ts":"1700000060"} -->`,
+	}
+	f := &fakeForge{pages: [][]forge.IssueComment{{stringTS}}}
+
+	got, err := forge.PRsReviewedToday(context.Background(), f, request(t, 0, nil))
+	if err != nil {
+		t.Fatalf("PRsReviewedToday: %v", err)
+	}
+	if got != 0 {
+		t.Errorf("count = %d, want 0; the shell counts it and rounding down is the safe direction", got)
+	}
+}

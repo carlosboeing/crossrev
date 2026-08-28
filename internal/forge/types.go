@@ -98,7 +98,7 @@ type IssueComment struct {
 }
 
 // IssueCandidate is one issue the fuzzy dedupe offers a model to judge, with
-// its body cut to the first 500 characters the way lib/github.sh:352 cuts it.
+// its body cut to the first 500 characters the way lib/github.sh:351 cuts it.
 type IssueCandidate struct {
 	Number int
 	Title  string

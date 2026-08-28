@@ -235,3 +235,25 @@ func TestPullRequestLabelsAnswersEmptyOnARefusal(t *testing.T) {
 		t.Errorf("labels = %q, want none", got)
 	}
 }
+
+// The shell loses a trailing newline through the command substitution
+// gh_pr_diff captures the diff in; these are the bytes gh printed.
+func TestPullRequestDiffKeepsTheTrailingNewline(t *testing.T) {
+	base, err := core.NewRevision("2222222222222222222222222222222222222222")
+	if err != nil {
+		t.Fatalf("base: %v", err)
+	}
+	head, err := core.NewRevision("1111111111111111111111111111111111111111")
+	if err != nil {
+		t.Fatalf("head: %v", err)
+	}
+
+	c, _ := client(t, out("+b\n"))
+	got, err := c.PullRequestDiff(context.Background(), testSlug(t), base, head)
+	if err != nil {
+		t.Fatalf("PullRequestDiff: %v", err)
+	}
+	if string(got) != "+b\n" {
+		t.Errorf("diff = %q, want the byte gh printed last", got)
+	}
+}

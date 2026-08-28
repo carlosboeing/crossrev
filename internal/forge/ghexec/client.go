@@ -164,7 +164,7 @@ func (c *Client) publish(body string) (send string, lost bool, err error) {
 }
 
 // markerBody reports that a body carries one of CrossRev's own markers
-// (lib/github.sh:160-165).
+// (lib/github.sh:166-171).
 //
 // The prefix comes from internal/prstate rather than from a second spelling
 // here, because it is the same delimiter the marker readers split on and one

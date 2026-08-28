@@ -10,7 +10,7 @@ import (
 	"github.com/carlosboeing/crossrev/internal/forge"
 )
 
-// defaultLabelColour is the grey lib/github.sh:283 falls back to.
+// defaultLabelColour is the grey lib/github.sh:292 falls back to.
 const defaultLabelColour = "ededed"
 
 // LabelColour is the hex a label currently carries, lowercased, or nothing if
@@ -97,7 +97,7 @@ func (c *Client) PullRequestLabelAdd(ctx context.Context, repo core.Slug, number
 }
 
 // PullRequestLabelRemove removes a label. A label that was not there is not a
-// failure, and lib/state.sh:437-440 discards the outcome.
+// failure, and lib/state.sh:436-439 discards the outcome.
 func (c *Client) PullRequestLabelRemove(ctx context.Context, repo core.Slug, number int, label string) {
 	c.run(ctx, "api", "--method", "DELETE", issuePath(repo, number)+"/labels/"+label)
 }

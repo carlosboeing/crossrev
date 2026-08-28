@@ -141,7 +141,7 @@ type Forge interface {
 	// the next workflow with no event to hear.
 	PullRequestLabelAdd(ctx context.Context, repo core.Slug, number int, label string) error
 
-	// PullRequestLabelRemove removes one (lib/state.sh:437-440). A label that
+	// PullRequestLabelRemove removes one (lib/state.sh:436-439). A label that
 	// was not there is not a failure, and the shell discards the outcome.
 	PullRequestLabelRemove(ctx context.Context, repo core.Slug, number int, label string)
 }

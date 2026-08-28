@@ -10,7 +10,7 @@ import (
 )
 
 // Read with a bare `gh api` and no --jq, so the call is byte-identical to the
-// existence check it replaces (lib/github.sh:266-269).
+// existence check it replaces (lib/github.sh:267-270).
 func TestLabelColourArgv(t *testing.T) {
 	c, r := client(t, out(`{"name":"bug","color":"D73A4A"}`))
 
@@ -98,7 +98,7 @@ func TestLabelEnsureWarnsOnAFailedRecolour(t *testing.T) {
 	}
 }
 
-// The colour a caller leaves empty is the one lib/github.sh:283 defaults to.
+// The colour a caller leaves empty is the one lib/github.sh:292 defaults to.
 func TestLabelEnsureDefaultsTheColour(t *testing.T) {
 	c, r := client(t, bad(), out("{}"))
 	if _, err := c.LabelEnsure(context.Background(), testSlug(t), forge.Label{Name: "bug"}); err != nil {

@@ -12,7 +12,7 @@ import (
 	"github.com/carlosboeing/crossrev/internal/forge"
 )
 
-// candidateBodyChars is the cut lib/github.sh:352 makes with `(.body // "")
+// candidateBodyChars is the cut lib/github.sh:351 makes with `(.body // "")
 // [0:500]`. jq slices a string by codepoint, so this counts characters and not
 // bytes.
 const candidateBodyChars = 500
@@ -130,7 +130,7 @@ func (c *Client) IssueCreate(ctx context.Context, repo core.Slug, title, body st
 	args := []string{"api", "--method", "POST", "repos/" + repo.String() + "/issues",
 		"-f", "title=" + c.filter.Mask(title), "-f", "body=" + filteredBody}
 	// GitHub's issue API takes labels as an array, so each one is its own
-	// repeated field (lib/github.sh:356-357).
+	// repeated field (lib/github.sh:355-356).
 	for _, label := range labels {
 		if label != "" {
 			args = append(args, "-f", "labels[]="+label)

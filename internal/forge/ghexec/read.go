@@ -145,6 +145,19 @@ func revisionOf(sha string) (core.Revision, error) {
 // Pinned to the pair the leg already loaded rather than asked for by pull
 // request number, because `repos/{repo}/pulls/{n}` returns whatever the diff is
 // at the moment of the call (lib/github.sh:78-95).
+//
+// # It keeps the trailing newline the shell strips
+//
+// gh_pr_diff captures the diff in a command substitution and prints it with
+// `printf '%s'` (lib/github.sh:103 and :109). A command substitution drops
+// every trailing newline and printf does not put one back, so the shell hands
+// on a diff one byte shorter than gh printed. Measured against a fixture ending
+// `62 0a`: the shell returns `62`. These are the bytes gh printed.
+//
+// Harmless, and traced rather than assumed. The diff reaches two places — the
+// prompt built at lib/run.sh:1144 and diff_anchor at lib/run.sh:1354 — and
+// internal/diff already has a test proving both forms round-trip byte-exactly,
+// so no anchor and no prompt reads differently for the extra byte.
 func (c *Client) PullRequestDiff(ctx context.Context, repo core.Slug, base, head core.Revision) ([]byte, error) {
 	res := c.run(ctx, "api", "-H", "Accept: application/vnd.github.diff",
 		"repos/"+repo.String()+"/compare/"+base.SHA()+"..."+head.SHA())
