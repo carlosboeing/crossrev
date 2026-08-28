@@ -74,3 +74,36 @@ func helperSpawn(msArg string) {
 	ms, _ := strconv.Atoi(msArg)
 	time.Sleep(time.Duration(ms) * time.Millisecond)
 }
+
+// helperOrphan starts a grandchild that INHERITS the captured streams, prints
+// the grandchild's pid, and exits at once.
+//
+// The pipes then outlive the process the runner holds a handle on, which is the
+// one thing Cmd.WaitDelay exists to bound. The pid goes to stdout so the test
+// can clean up whatever the kill did not reach.
+func helperOrphan(msArg string) {
+	if _, err := strconv.Atoi(msArg); err != nil {
+		fmt.Fprintln(os.Stderr, "helper: bad duration", msArg)
+		os.Exit(2)
+	}
+	null, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "helper:", err)
+		os.Exit(2)
+	}
+	grandchild := osexec.Command(os.Args[0], "-test.run=TestHelperProcess", "--", "hold", msArg)
+	grandchild.Env = []string{helperMarker + "=" + helperOn}
+	grandchild.Stdin = null
+	grandchild.Stdout = os.Stdout
+	grandchild.Stderr = os.Stderr
+	// Its own group, so the runner's cancellation kill does not reach it. This
+	// case is about a child that exited cleanly and left its pipes held, not
+	// about a cancellation.
+	grandchild.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := grandchild.Start(); err != nil {
+		fmt.Fprintln(os.Stderr, "helper:", err)
+		os.Exit(2)
+	}
+	fmt.Fprint(os.Stdout, grandchild.Process.Pid)
+	os.Exit(0)
+}

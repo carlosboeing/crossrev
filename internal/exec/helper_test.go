@@ -139,6 +139,19 @@ func TestHelperProcess(t *testing.T) {
 	case "spawn":
 		helperSpawn(rest[0])
 
+	case "orphan":
+		helperOrphan(rest[0])
+
+	case "hold":
+		// A grandchild that holds whatever descriptors it inherited and says
+		// nothing, so the parent's captured streams stay open with no output to
+		// confuse an assertion.
+		ms, err := strconv.Atoi(rest[0])
+		if err != nil {
+			os.Exit(2)
+		}
+		time.Sleep(time.Duration(ms) * time.Millisecond)
+
 	default:
 		fmt.Fprintln(os.Stderr, "helper: unknown command", command)
 		os.Exit(2)

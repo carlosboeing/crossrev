@@ -49,19 +49,11 @@ func (c *capture) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// snapshot returns a copy of what has been retained. A copy, because the caller
-// keeps it in a Result while an abandoned copier may still append.
-func (c *capture) snapshot() []byte {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	out := make([]byte, len(c.buf))
-	copy(out, c.buf)
-	return out
-}
-
-// state returns the retained bytes with the counters that describe them, read
-// under one lock so the three cannot disagree.
+// state returns a copy of the retained bytes with the counters that describe
+// them, read under one lock so the three cannot disagree.
+//
+// A copy, not the buffer: the caller keeps it in a Result while an abandoned
+// copier may still append to c.buf.
 func (c *capture) state() (data []byte, total int, truncated bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()

@@ -5,7 +5,6 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -30,14 +29,18 @@ import (
 // confined nowhere at all rather than alongside os.Environ, because nothing
 // needs the lower-level call and the higher-level one already has a home.
 //
-// os.Getenv and os.LookupEnv are deliberately NOT confined, and that is a
-// finding rather than an omission. They read one variable the caller has
-// already named, which is an allowlist of one by construction — the property
-// Inherit exists to impose. They cannot leak a credential nobody wrote down,
-// which is the failure mode the rule is for. Confining them would also break
-// two files that read configuration correctly today: internal/config/load.go
-// resolves XDG_CONFIG_HOME and HOME through them. syscall.Getenv is the same
-// shape and is left alone for the same reason.
+// os.Getenv and os.LookupEnv are deliberately NOT confined. Calling that an
+// allowlist of one would overstate it: an allowlist of one is safe only when
+// the one is not a credential, and os.LookupEnv("GH_TOKEN") is exactly the
+// route a review found. The reason to leave them alone is that the guard
+// belongs at the destination rather than the read. The shell itself does a
+// named single read — lib/adapters/claude.sh:77 reads an endpoint token out of
+// the environment and :86 puts it into the child — so a rule forbidding the
+// read would be stricter than the thing being ported, and would break
+// internal/config/load.go, which resolves XDG_CONFIG_HOME and HOME this way.
+// What stops a named credential reaching a harness is Spec.Audience, which
+// refuses it at Run. syscall.Getenv is the same shape and left alone for the
+// same reason.
 //
 // /proc/self/environ is the kernel's own copy, and reading it would sidestep
 // every rule above on the Linux that CI runs on. The literal path is caught
@@ -47,16 +50,19 @@ import (
 //
 // # What this test cannot close
 //
-//   - cgo. `extern char **environ` reaches the same array with no Go symbol to
-//     match on. Adding cgo to a package here would be visible in review and in
-//     the build, which is the only guard there is.
+//   - What cgo does once admitted. `extern char **environ` reaches the same
+//     array with no Go symbol to match on. Whether cgo is admitted at all IS
+//     closable, and is closed below: `import "C"` is an ordinary import.
 //   - A path to /proc built at run time, as above.
-//   - go:linkname is caught as a source directive (below), but the guarantee is
-//     the Go linker's rather than this test's: since Go 1.23 a pull-linkname to
-//     an unexported-to-linkname standard library symbol fails to link at all.
-//     Verified on this module: the link refuses with "invalid reference to
+//   - Nothing about go:linkname, in the end. The directive is caught below, but
+//     the real guard is the Go linker: since Go 1.23 a pull-linkname to a
+//     standard library symbol that is not marked linkname-able fails to link.
+//     Verified on this module — the link refuses with "invalid reference to
 //     os.Environ" unless the build passes -ldflags=-checklinkname=0, which
-//     nothing here does.
+//     nothing here does. The source check is a second guard that fires at test
+//     time instead of link time, and it is deliberately literal: a directive
+//     naming some other lowercase symbol would pass it, and the linker would
+//     still refuse.
 type environRule struct {
 	// importPath and defaultName identify the package holding the symbol.
 	importPath  string
@@ -88,69 +94,24 @@ type environReference struct {
 
 func TestEnvironReferenceBoundary(t *testing.T) {
 	root := findRepoRoot(t)
-	fset := token.NewFileSet()
 
 	permittedSeen := make(map[string]bool)
-	scannedDirs := make(map[string]bool)
-
-	// Every directory in the module, not a hand-written pair. A rule that
-	// applies to two directories is defeated by adding a third, and a package
-	// outside cmd/ and internal/ compiles into the same binary.
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+	walkBoundarySources(t, root, func(relSlash string, src []byte) {
+		violations, permitted, err := auditEnvironSource(relSlash, src)
 		if err != nil {
-			return err
+			t.Fatalf("failed to parse %s: %v", relSlash, err)
 		}
-		if d.IsDir() {
-			if path != root && excludeBoundaryEntry(path, true) {
-				return filepath.SkipDir
-			}
-			return nil
+		for _, violation := range violations {
+			t.Error(violation)
 		}
-		if excludeBoundaryEntry(path, false) {
-			return nil
+		for _, held := range permitted {
+			permittedSeen[held] = true
 		}
-
-		relPath, relErr := filepath.Rel(root, path)
-		if relErr != nil {
-			t.Fatalf("failed to locate %s under %s: %v", path, root, relErr)
-		}
-		relSlash := filepath.ToSlash(relPath)
-		scannedDirs[filepath.ToSlash(filepath.Dir(relPath))] = true
-
-		// ParseComments, because //go:linkname is a comment that the compiler
-		// reads as a declaration.
-		node, parseErr := parser.ParseFile(fset, path, nil, parser.ParseComments)
-		if parseErr != nil {
-			t.Fatalf("failed to parse %s: %v", relSlash, parseErr)
-		}
-
-		for _, reference := range environReferences(node) {
-			if reference.permittedIn != "" && reference.permittedIn == relSlash {
-				permittedSeen[relSlash] = true
-				continue
-			}
-			position := fset.Position(reference.pos)
-			where := "no file may hold one"
-			if reference.permittedIn != "" {
-				where = "only " + reference.permittedIn + " may hold one"
-			}
-			t.Errorf("%s:%d reaches the whole process environment through %s; %s",
-				relSlash, position.Line, reference.what, where)
-		}
-		return nil
 	})
-	if err != nil {
-		t.Fatalf("error walking %s: %v", root, err)
-	}
 
-	// The rule must not pass because the scan found nothing. Both halves are
-	// checked: the directories that hold the code, and the reference the one
-	// permitted file is supposed to contain.
-	for _, required := range []string{"cmd/crossrev", "internal/exec", "internal/archtest"} {
-		if !scannedDirs[required] {
-			t.Errorf("the scan never entered %s, so it proves nothing about it", required)
-		}
-	}
+	// The rule must not pass because the scan found nothing. The permitted file
+	// is supposed to hold the reference the rule exists to allow; if it does
+	// not, the scanner is not looking where it thinks it is.
 	for _, rule := range environRules {
 		if rule.permittedIn == "" {
 			continue
@@ -159,6 +120,138 @@ func TestEnvironReferenceBoundary(t *testing.T) {
 			t.Errorf("expected %s to reference %s.%s; the scan is not looking where it thinks it is",
 				rule.permittedIn, rule.defaultName, rule.symbol)
 		}
+	}
+}
+
+// auditEnvironSource is the whole verdict for one file: the parse, the routes,
+// and the decision about which file may hold which.
+//
+// It takes source rather than a parsed file so that the parse mode is inside
+// the function its own fixtures exercise. A file parsed without
+// parser.ParseComments holds no linker directives, and a scanner that lost the
+// mode would report a clean module.
+func auditEnvironSource(relSlash string, src []byte) (violations []string, permitted []string, err error) {
+	fset := token.NewFileSet()
+	node, err := parser.ParseFile(fset, relSlash, src, parser.ParseComments)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	for _, reference := range environReferences(node) {
+		// Exact equality, never a suffix. "vendor/internal/exec/env.go" ends
+		// with the permitted name and is a different file.
+		if reference.permittedIn != "" && reference.permittedIn == relSlash {
+			permitted = append(permitted, relSlash)
+			continue
+		}
+		where := "no file may hold one"
+		if reference.permittedIn != "" {
+			where = "only " + reference.permittedIn + " may hold one"
+		}
+		violations = append(violations, fmt.Sprintf(
+			"%s:%d reaches the whole process environment through %s; %s",
+			relSlash, fset.Position(reference.pos).Line, reference.what, where))
+	}
+	return violations, permitted, nil
+}
+
+// The verdict itself, over sources held in memory. TestEnvironBoundaryDetectsEveryRoute
+// below checks the detector; this checks what the walk does with what the
+// detector found, which is the half that decides whether anything is reported
+// at all.
+func TestEnvironAuditVerdict(t *testing.T) {
+	linkname := "//go:" + "linkname pulled os.Environ"
+
+	tests := []struct {
+		name          string
+		file          string
+		source        string
+		wantViolation bool
+		wantPermitted bool
+		mustMention   string
+	}{
+		{
+			name:          "the permitted file holds the permitted reference",
+			file:          "internal/exec/env.go",
+			source:        "package exec\nimport \"os\"\nvar v = os.Environ()\n",
+			wantPermitted: true,
+		},
+		{
+			name:          "the same reference anywhere else",
+			file:          "internal/harness/harness.go",
+			source:        "package harness\nimport \"os\"\nvar v = os.Environ()\n",
+			wantViolation: true,
+			mustMention:   "only internal/exec/env.go may hold one",
+		},
+		{
+			// A path that ends with the permitted name is a different file. A
+			// suffix match here would grant every one of them the exemption.
+			name:          "a file whose path merely ends with the permitted one",
+			file:          "vendored/internal/exec/env.go",
+			source:        "package exec\nimport \"os\"\nvar v = os.Environ()\n",
+			wantViolation: true,
+		},
+		{
+			// Needs parser.ParseComments. Without it this file is clean.
+			name:          "a linker directive",
+			file:          "internal/harness/link.go",
+			source:        "package harness\n\nimport _ \"unsafe\"\n\n" + linkname + "\nfunc pulled() []string\n",
+			wantViolation: true,
+			mustMention:   "linker directive",
+		},
+		{
+			// Needs strings.Contains. An equality test misses every path that
+			// merely holds the needle.
+			name:          "the kernel's copy inside a longer path",
+			file:          "internal/harness/host.go",
+			source:        "package harness\nimport \"os\"\nvar v, _ = os.ReadFile(\"/host" + procEnvironPath + "\")\n",
+			wantViolation: true,
+		},
+		{
+			name:          "cgo",
+			file:          "internal/harness/bridge.go",
+			source:        "package harness\n\nimport \"C\"\n\nvar v = 1\n",
+			wantViolation: true,
+			mustMention:   "cgo",
+		},
+		{
+			name:   "a file with nothing to say",
+			file:   "internal/harness/plain.go",
+			source: "package harness\nimport \"strings\"\nvar v = strings.TrimSpace(\" x \")\n",
+		},
+		{
+			// Even in the permitted file: syscall.Environ is permitted nowhere.
+			name:          "the syscall underneath, in the permitted file",
+			file:          "internal/exec/env.go",
+			source:        "package exec\nimport \"syscall\"\nvar v = syscall.Environ()\n",
+			wantViolation: true,
+			mustMention:   "no file may hold one",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			violations, permitted, err := auditEnvironSource(tt.file, []byte(tt.source))
+			if err != nil {
+				t.Fatalf("parse fixture: %v", err)
+			}
+
+			if got := len(violations) > 0; got != tt.wantViolation {
+				t.Fatalf("violations = %v, want a violation: %t", violations, tt.wantViolation)
+			}
+			if got := len(permitted) > 0; got != tt.wantPermitted {
+				t.Errorf("permitted = %v, want a permitted reference: %t", permitted, tt.wantPermitted)
+			}
+			if tt.mustMention == "" {
+				return
+			}
+			if !strings.Contains(violations[0], tt.mustMention) {
+				t.Errorf("violation %q does not mention %q", violations[0], tt.mustMention)
+			}
+			if !strings.HasPrefix(violations[0], tt.file+":") {
+				t.Errorf("violation %q does not name the file and line", violations[0])
+			}
+		})
 	}
 }
 
@@ -204,6 +297,7 @@ func environReferences(node *ast.File) []environReference {
 
 	found = append(found, environLinknameReferences(node)...)
 	found = append(found, environLiteralReferences(node)...)
+	found = append(found, cgoImportReferences(node)...)
 
 	sort.Slice(found, func(i, j int) bool { return found[i].pos < found[j].pos })
 	return found
@@ -392,6 +486,29 @@ func describe(references []environReference) []string {
 		out = append(out, fmt.Sprintf("%s(permitted in %q)", reference.what, reference.permittedIn))
 	}
 	return out
+}
+
+// cgoImportReferences finds a file that admits cgo.
+//
+// `extern char **environ` is a C global that every rule above is blind to, and
+// no test that reads Go source can follow what a cgo preamble does. What it can
+// do is refuse the door: `import "C"` is an ordinary import declaration, and
+// nothing in this module holds one — `grep -rln 'import "C"' --include='*.go'`
+// returns nothing — so the rule costs no exemption. The tree-sitter dependency
+// is a separate module and is unaffected.
+func cgoImportReferences(node *ast.File) []environReference {
+	var found []environReference
+	for _, imported := range node.Imports {
+		path, err := strconv.Unquote(imported.Path.Value)
+		if err != nil || path != "C" {
+			continue
+		}
+		found = append(found, environReference{
+			pos:  imported.Pos(),
+			what: `cgo, which reaches the environment as the C global "environ"`,
+		})
+	}
+	return found
 }
 
 func findRepoRoot(t *testing.T) string {

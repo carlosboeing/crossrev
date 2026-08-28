@@ -52,10 +52,17 @@ type Result struct {
 	// Duration is wall time from start to the last byte captured.
 	Duration time.Duration
 
-	// Err is set when the child produced no exit status of its own: a
-	// *StartError when it never started, or the context's error when a
-	// cancellation or a deadline killed it. A non-zero ExitCode alone leaves
-	// this nil.
+	// Err is set when the child produced no exit status of its own, or when the
+	// status it produced does not describe the whole outcome:
+	//
+	//   - *CredentialError, when a model-facing Spec carried a forge credential
+	//     and no child was started.
+	//   - *StartError, when the child could not be started.
+	//   - The context's error, when a cancellation or a deadline killed it.
+	//   - ErrPipesAbandoned, when the child exited but its output was cut short
+	//     because something it started still held the streams open.
+	//
+	// A non-zero ExitCode alone leaves this nil.
 	Err error
 }
 

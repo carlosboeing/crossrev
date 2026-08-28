@@ -20,6 +20,10 @@ func killProcessGroup(cmd *osexec.Cmd) error {
 	return cmd.Process.Kill()
 }
 
+// Always nil here, which has one visible consequence: cancellationError asks
+// about the signal, so a cancelled child would report no Err on this host. That
+// is acceptable for the same reason this file exists at all — crossrev drives
+// unix programs from Bash and nobody runs it here.
 func signalOf(*os.ProcessState) os.Signal { return nil }
 
 func signalNumber(os.Signal) (int, bool) { return 0, false }

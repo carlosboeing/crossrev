@@ -18,7 +18,9 @@ import (
 // orphan holding the pipes open, and a process that ignored the kill. The Bash
 // adapters cannot hit either, because they redirect to files
 // (lib/adapters/claude.sh:106) and a file needs no reader.
-const pipeDrainGrace = 10 * time.Second
+// A var rather than a const only so the abandoned-pipe test can shrink it;
+// nothing outside this package can reach it, and nothing changes it at run time.
+var pipeDrainGrace = 10 * time.Second
 
 // OSRunner starts real processes. It is the only place in the codebase that
 // calls os/exec.
@@ -33,9 +35,9 @@ var _ Runner = (*OSRunner)(nil)
 //
 // It builds an argument array and never a command string. Nothing here is
 // handed to a shell, so a prompt containing a semicolon, a backtick or a
-// newline is one argument and not an injection — which is the whole reason the
-// Bash side builds `local -a run=(...)` arrays rather than concatenating
-// (lib/adapters/claude.sh:57).
+// newline is one argument and not an injection. lib/adapters/codex.sh:79-82
+// says why that matters: the harness is "the process that reads
+// attacker-controlled text".
 func (r *OSRunner) Run(ctx context.Context, spec Spec) Result {
 	started := time.Now()
 
@@ -45,6 +47,19 @@ func (r *OSRunner) Run(ctx context.Context, spec Spec) Result {
 			Stdout:   []byte{},
 			Stderr:   []byte{},
 			Err:      &StartError{Path: spec.Path, Dir: spec.Dir, Err: errors.New("no program named")},
+		}
+	}
+
+	// Before anything is started, and before any environment is built. A
+	// refusal after Start would already have handed the token over.
+	if spec.Audience == AudienceModelFacing {
+		if name, found := forgeCredentialIn(spec.Env); found {
+			return Result{
+				ExitCode: -1,
+				Stdout:   []byte{},
+				Stderr:   []byte{},
+				Err:      &CredentialError{Name: name, Path: spec.Path},
+			}
 		}
 	}
 
@@ -66,10 +81,15 @@ func (r *OSRunner) Run(ctx context.Context, spec Spec) Result {
 		cmd.Env = []string{}
 	}
 
-	// A reader over the caller's bytes, empty when there are none. os/exec
-	// gives the child a closed descriptor when Stdin is nil, and an empty
-	// reader when it is set; either way the child sees EOF at once rather than
-	// a terminal, which is the `</dev/null` of every adapter.
+	// A reader over the caller's bytes, empty when there are none.
+	//
+	// Set on every path rather than left nil. os/exec opens os.DevNull for a
+	// nil Stdin, which would answer the same way, but saying it here is what
+	// keeps the rule readable at the one place it matters. One difference from
+	// Bash worth naming: the adapters give the child the literal /dev/null
+	// (lib/adapters/claude.sh:106) and this gives it a pipe closed at once. A
+	// child cannot tell the two apart — both read EOF on the first call — but
+	// they are not the same file.
 	cmd.Stdin = bytes.NewReader(spec.Stdin)
 
 	stdout := &capture{limit: spec.MaxOutputBytes}
@@ -106,13 +126,24 @@ func (r *OSRunner) Run(ctx context.Context, spec Spec) Result {
 		return result
 	}
 
-	// A cancellation is reported only when it actually stopped the child. A
-	// child that finished on its own in the same instant the context expired
-	// produced a real answer, and calling that a cancellation would discard it.
-	if ctxErr := ctx.Err(); ctxErr != nil && !cmd.ProcessState.Success() {
-		result.Err = ctxErr
-	}
+	result.Err = cancellationError(ctx.Err(), result.Signal)
 	return result
+}
+
+// cancellationError decides whether a finished child was stopped by the context
+// or answered on its own.
+//
+// The test is the signal, not the exit status. A cancellation always kills the
+// group with SIGKILL, which cannot be caught, so a cancelled child is always
+// signalled; a child that returned from main never is. Asking instead whether
+// the child failed would label a child that exited non-zero in the same instant
+// the deadline fired a timeout, and Result.Err is documented as covering only
+// the cases where the child produced no status of its own.
+func cancellationError(ctxErr error, signal os.Signal) error {
+	if ctxErr != nil && signal != nil {
+		return ctxErr
+	}
+	return nil
 }
 
 // exitCodeOf maps a finished child onto the number a shell reports in $?.

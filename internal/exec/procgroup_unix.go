@@ -12,10 +12,16 @@ import (
 //
 // One parity consequence is worth naming: a Ctrl-C at a terminal is delivered
 // to the foreground process group, so with the child in a group of its own the
-// keystroke reaches crossrev and not the harness. The Bash side runs the
-// harness in the caller's group and both receive it (lib/run.sh:87). Relaying
-// the signal is the caller's job, and it is the trade for being able to kill
-// the whole tree on cancellation.
+// keystroke reaches crossrev and not the harness.
+//
+// Two separate facts on the Bash side, each with its own line. The harness
+// shares crossrev's process group because lib/adapters/claude.sh:106 runs it in
+// a plain subshell and nothing under lib/ or bin/ calls setsid, so the
+// keystroke reaches both. What crossrev then does with its own copy is
+// lib/run.sh:87-88, which traps INT and TERM into a flag rather than dying.
+//
+// Relaying the signal is the caller's job, and it is the trade for being able
+// to kill the whole tree on cancellation.
 func setProcessGroup(cmd *osexec.Cmd) {
 	if cmd.SysProcAttr == nil {
 		cmd.SysProcAttr = &syscall.SysProcAttr{}
