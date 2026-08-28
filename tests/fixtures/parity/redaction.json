@@ -12,169 +12,261 @@
     {
       "name": "no-credential-plain-text",
       "text": "a review finding about lib/auth.ts:42",
+      "text_b64": "YSByZXZpZXcgZmluZGluZyBhYm91dCBsaWIvYXV0aC50czo0Mg==",
       "redacted": "a review finding about lib/auth.ts:42",
+      "redacted_b64": "YSByZXZpZXcgZmluZGluZyBhYm91dCBsaWIvYXV0aC50czo0Mg==",
       "published": "a review finding about lib/auth.ts:42",
+      "published_b64": "YSByZXZpZXcgZmluZGluZyBhYm91dCBsaWIvYXV0aC50czo0Mg==",
       "published_rc": 0
     },
     {
       "name": "empty-string",
       "text": "",
+      "text_b64": "",
       "redacted": "",
+      "redacted_b64": "",
       "published": "",
+      "published_b64": "",
       "published_rc": 0
     },
     {
       "name": "anthropic-key",
       "text": "token sk-ant-api03-AAAAAAAAAAAAAAAAAAAA end",
+      "text_b64": "dG9rZW4gc2stYW50LWFwaTAzLUFBQUFBQUFBQUFBQUFBQUFBQUFBIGVuZA==",
       "redacted": "token sk-ant-api03-…[redacted] end",
+      "redacted_b64": "dG9rZW4gc2stYW50LWFwaTAzLeKApltyZWRhY3RlZF0gZW5k",
       "published": "token sk-ant-api03-…[redacted] end\n\n_CrossRev masked a string in this comment that matched a credential pattern._",
+      "published_b64": "dG9rZW4gc2stYW50LWFwaTAzLeKApltyZWRhY3RlZF0gZW5kCgpfQ3Jvc3NSZXYgbWFza2VkIGEgc3RyaW5nIGluIHRoaXMgY29tbWVudCB0aGF0IG1hdGNoZWQgYSBjcmVkZW50aWFsIHBhdHRlcm4uXw==",
       "published_rc": 0
     },
     {
       "name": "anthropic-key-at-prefix-length",
       "text": "sk-ant-abcdef",
+      "text_b64": "c2stYW50LWFiY2RlZg==",
       "redacted": "sk-ant-abcdef",
+      "redacted_b64": "c2stYW50LWFiY2RlZg==",
       "published": "sk-ant-abcdef",
+      "published_b64": "c2stYW50LWFiY2RlZg==",
       "published_rc": 0
     },
     {
       "name": "anthropic-key-one-past-prefix",
       "text": "sk-ant-abcdefg",
+      "text_b64": "c2stYW50LWFiY2RlZmc=",
       "redacted": "sk-ant-abcdef…[redacted]",
+      "redacted_b64": "c2stYW50LWFiY2RlZuKApltyZWRhY3RlZF0=",
       "published": "sk-ant-abcdef…[redacted]\n\n_CrossRev masked a string in this comment that matched a credential pattern._",
+      "published_b64": "c2stYW50LWFiY2RlZuKApltyZWRhY3RlZF0KCl9Dcm9zc1JldiBtYXNrZWQgYSBzdHJpbmcgaW4gdGhpcyBjb21tZW50IHRoYXQgbWF0Y2hlZCBhIGNyZWRlbnRpYWwgcGF0dGVybi5f",
       "published_rc": 0
     },
     {
       "name": "github-fine-grained-pat",
       "text": "github_pat_11ABCDEF0_aaaaaaaaaaaaaaaaaaaaaaaa",
+      "text_b64": "Z2l0aHViX3BhdF8xMUFCQ0RFRjBfYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFh",
       "redacted": "github_pat_11ABCD…[redacted]",
+      "redacted_b64": "Z2l0aHViX3BhdF8xMUFCQ0TigKZbcmVkYWN0ZWRd",
       "published": "github_pat_11ABCD…[redacted]\n\n_CrossRev masked a string in this comment that matched a credential pattern._",
+      "published_b64": "Z2l0aHViX3BhdF8xMUFCQ0TigKZbcmVkYWN0ZWRdCgpfQ3Jvc3NSZXYgbWFza2VkIGEgc3RyaW5nIGluIHRoaXMgY29tbWVudCB0aGF0IG1hdGNoZWQgYSBjcmVkZW50aWFsIHBhdHRlcm4uXw==",
       "published_rc": 0
     },
     {
       "name": "github-classic-pat",
       "text": "ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "text_b64": "Z2hwX0FBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQQ==",
       "redacted": "ghp_AAAAAA…[redacted]",
+      "redacted_b64": "Z2hwX0FBQUFBQeKApltyZWRhY3RlZF0=",
       "published": "ghp_AAAAAA…[redacted]\n\n_CrossRev masked a string in this comment that matched a credential pattern._",
+      "published_b64": "Z2hwX0FBQUFBQeKApltyZWRhY3RlZF0KCl9Dcm9zc1JldiBtYXNrZWQgYSBzdHJpbmcgaW4gdGhpcyBjb21tZW50IHRoYXQgbWF0Y2hlZCBhIGNyZWRlbnRpYWwgcGF0dGVybi5f",
       "published_rc": 0
     },
     {
       "name": "github-oauth-token",
       "text": "gho_BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+      "text_b64": "Z2hvX0JCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQg==",
       "redacted": "gho_BBBBBB…[redacted]",
+      "redacted_b64": "Z2hvX0JCQkJCQuKApltyZWRhY3RlZF0=",
       "published": "gho_BBBBBB…[redacted]\n\n_CrossRev masked a string in this comment that matched a credential pattern._",
+      "published_b64": "Z2hvX0JCQkJCQuKApltyZWRhY3RlZF0KCl9Dcm9zc1JldiBtYXNrZWQgYSBzdHJpbmcgaW4gdGhpcyBjb21tZW50IHRoYXQgbWF0Y2hlZCBhIGNyZWRlbnRpYWwgcGF0dGVybi5f",
       "published_rc": 0
     },
     {
       "name": "github-user-token",
       "text": "ghu_CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
+      "text_b64": "Z2h1X0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQw==",
       "redacted": "ghu_CCCCCC…[redacted]",
+      "redacted_b64": "Z2h1X0NDQ0NDQ+KApltyZWRhY3RlZF0=",
       "published": "ghu_CCCCCC…[redacted]\n\n_CrossRev masked a string in this comment that matched a credential pattern._",
+      "published_b64": "Z2h1X0NDQ0NDQ+KApltyZWRhY3RlZF0KCl9Dcm9zc1JldiBtYXNrZWQgYSBzdHJpbmcgaW4gdGhpcyBjb21tZW50IHRoYXQgbWF0Y2hlZCBhIGNyZWRlbnRpYWwgcGF0dGVybi5f",
       "published_rc": 0
     },
     {
       "name": "github-server-token",
       "text": "ghs_DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD",
+      "text_b64": "Z2hzX0RERERERERERERERERERERERERERERERERERERERERERERERA==",
       "redacted": "ghs_DDDDDD…[redacted]",
+      "redacted_b64": "Z2hzX0REREREROKApltyZWRhY3RlZF0=",
       "published": "ghs_DDDDDD…[redacted]\n\n_CrossRev masked a string in this comment that matched a credential pattern._",
+      "published_b64": "Z2hzX0REREREROKApltyZWRhY3RlZF0KCl9Dcm9zc1JldiBtYXNrZWQgYSBzdHJpbmcgaW4gdGhpcyBjb21tZW50IHRoYXQgbWF0Y2hlZCBhIGNyZWRlbnRpYWwgcGF0dGVybi5f",
       "published_rc": 0
     },
     {
       "name": "github-refresh-token",
       "text": "ghr_EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE",
+      "text_b64": "Z2hyX0VFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRQ==",
       "redacted": "ghr_EEEEEE…[redacted]",
+      "redacted_b64": "Z2hyX0VFRUVFReKApltyZWRhY3RlZF0=",
       "published": "ghr_EEEEEE…[redacted]\n\n_CrossRev masked a string in this comment that matched a credential pattern._",
+      "published_b64": "Z2hyX0VFRUVFReKApltyZWRhY3RlZF0KCl9Dcm9zc1JldiBtYXNrZWQgYSBzdHJpbmcgaW4gdGhpcyBjb21tZW50IHRoYXQgbWF0Y2hlZCBhIGNyZWRlbnRpYWwgcGF0dGVybi5f",
       "published_rc": 0
     },
     {
       "name": "xai-key",
       "text": "xai-abcdef0123456789ABCDEF",
+      "text_b64": "eGFpLWFiY2RlZjAxMjM0NTY3ODlBQkNERUY=",
       "redacted": "xai-abcdef…[redacted]",
+      "redacted_b64": "eGFpLWFiY2RlZuKApltyZWRhY3RlZF0=",
       "published": "xai-abcdef…[redacted]\n\n_CrossRev masked a string in this comment that matched a credential pattern._",
+      "published_b64": "eGFpLWFiY2RlZuKApltyZWRhY3RlZF0KCl9Dcm9zc1JldiBtYXNrZWQgYSBzdHJpbmcgaW4gdGhpcyBjb21tZW50IHRoYXQgbWF0Y2hlZCBhIGNyZWRlbnRpYWwgcGF0dGVybi5f",
       "published_rc": 0
     },
     {
       "name": "generic-sk-eleven-after-prefix",
       "text": "sk-abcdef01234567890",
+      "text_b64": "c2stYWJjZGVmMDEyMzQ1Njc4OTA=",
       "redacted": "sk-abcdef01234567890",
+      "redacted_b64": "c2stYWJjZGVmMDEyMzQ1Njc4OTA=",
       "published": "sk-abcdef01234567890",
+      "published_b64": "c2stYWJjZGVmMDEyMzQ1Njc4OTA=",
       "published_rc": 0
     },
     {
       "name": "generic-sk-twelve-after-prefix",
       "text": "sk-abcdef01234567890a",
+      "text_b64": "c2stYWJjZGVmMDEyMzQ1Njc4OTBh",
       "redacted": "sk-abcdef…[redacted]",
+      "redacted_b64": "c2stYWJjZGVm4oCmW3JlZGFjdGVkXQ==",
       "published": "sk-abcdef…[redacted]\n\n_CrossRev masked a string in this comment that matched a credential pattern._",
+      "published_b64": "c2stYWJjZGVm4oCmW3JlZGFjdGVkXQoKX0Nyb3NzUmV2IG1hc2tlZCBhIHN0cmluZyBpbiB0aGlzIGNvbW1lbnQgdGhhdCBtYXRjaGVkIGEgY3JlZGVudGlhbCBwYXR0ZXJuLl8=",
       "published_rc": 0
     },
     {
       "name": "two-credentials-one-line",
       "text": "ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA and sk-ant-api03-BBBBBBBBBBBBBBBBBBBB",
+      "text_b64": "Z2hwX0FBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQSBhbmQgc2stYW50LWFwaTAzLUJCQkJCQkJCQkJCQkJCQkJCQkJC",
       "redacted": "ghp_AAAAAA…[redacted] and sk-ant-api03-…[redacted]",
+      "redacted_b64": "Z2hwX0FBQUFBQeKApltyZWRhY3RlZF0gYW5kIHNrLWFudC1hcGkwMy3igKZbcmVkYWN0ZWRd",
       "published": "ghp_AAAAAA…[redacted] and sk-ant-api03-…[redacted]\n\n_CrossRev masked a string in this comment that matched a credential pattern._",
+      "published_b64": "Z2hwX0FBQUFBQeKApltyZWRhY3RlZF0gYW5kIHNrLWFudC1hcGkwMy3igKZbcmVkYWN0ZWRdCgpfQ3Jvc3NSZXYgbWFza2VkIGEgc3RyaW5nIGluIHRoaXMgY29tbWVudCB0aGF0IG1hdGNoZWQgYSBjcmVkZW50aWFsIHBhdHRlcm4uXw==",
       "published_rc": 0
     },
     {
       "name": "credential-inside-a-sentence",
       "text": "the token is ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA, so rotate it",
+      "text_b64": "dGhlIHRva2VuIGlzIGdocF9BQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUEsIHNvIHJvdGF0ZSBpdA==",
       "redacted": "the token is ghp_AAAAAA…[redacted], so rotate it",
+      "redacted_b64": "dGhlIHRva2VuIGlzIGdocF9BQUFBQUHigKZbcmVkYWN0ZWRdLCBzbyByb3RhdGUgaXQ=",
       "published": "the token is ghp_AAAAAA…[redacted], so rotate it\n\n_CrossRev masked a string in this comment that matched a credential pattern._",
+      "published_b64": "dGhlIHRva2VuIGlzIGdocF9BQUFBQUHigKZbcmVkYWN0ZWRdLCBzbyByb3RhdGUgaXQKCl9Dcm9zc1JldiBtYXNrZWQgYSBzdHJpbmcgaW4gdGhpcyBjb21tZW50IHRoYXQgbWF0Y2hlZCBhIGNyZWRlbnRpYWwgcGF0dGVybi5f",
       "published_rc": 0
     },
     {
       "name": "multiline-with-a-credential",
       "text": "line one\nghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\nline three",
+      "text_b64": "bGluZSBvbmUKZ2hwX0FBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQQpsaW5lIHRocmVl",
       "redacted": "line one\nghp_AAAAAA…[redacted]\nline three",
+      "redacted_b64": "bGluZSBvbmUKZ2hwX0FBQUFBQeKApltyZWRhY3RlZF0KbGluZSB0aHJlZQ==",
       "published": "line one\nghp_AAAAAA…[redacted]\nline three\n\n_CrossRev masked a string in this comment that matched a credential pattern._",
+      "published_b64": "bGluZSBvbmUKZ2hwX0FBQUFBQeKApltyZWRhY3RlZF0KbGluZSB0aHJlZQoKX0Nyb3NzUmV2IG1hc2tlZCBhIHN0cmluZyBpbiB0aGlzIGNvbW1lbnQgdGhhdCBtYXRjaGVkIGEgY3JlZGVudGlhbCBwYXR0ZXJuLl8=",
       "published_rc": 0
     },
     {
       "name": "trailing-newline-no-credential",
       "text": "a body\n",
+      "text_b64": "YSBib2R5Cg==",
       "redacted": "a body\n",
+      "redacted_b64": "YSBib2R5Cg==",
       "published": "a body\n",
+      "published_b64": "YSBib2R5Cg==",
       "published_rc": 0
     },
     {
       "name": "trailing-newline-with-a-credential",
       "text": "ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n",
+      "text_b64": "Z2hwX0FBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQQo=",
       "redacted": "ghp_AAAAAA…[redacted]\n",
+      "redacted_b64": "Z2hwX0FBQUFBQeKApltyZWRhY3RlZF0K",
       "published": "ghp_AAAAAA…[redacted]\n\n\n_CrossRev masked a string in this comment that matched a credential pattern._",
+      "published_b64": "Z2hwX0FBQUFBQeKApltyZWRhY3RlZF0KCgpfQ3Jvc3NSZXYgbWFza2VkIGEgc3RyaW5nIGluIHRoaXMgY29tbWVudCB0aGF0IG1hdGNoZWQgYSBjcmVkZW50aWFsIHBhdHRlcm4uXw==",
       "published_rc": 0
     },
     {
       "name": "already-redacted-text",
       "text": "ghp_AAAAAA…[redacted]",
+      "text_b64": "Z2hwX0FBQUFBQeKApltyZWRhY3RlZF0=",
       "redacted": "ghp_AAAAAA…[redacted]",
+      "redacted_b64": "Z2hwX0FBQUFBQeKApltyZWRhY3RlZF0=",
       "published": "ghp_AAAAAA…[redacted]",
+      "published_b64": "Z2hwX0FBQUFBQeKApltyZWRhY3RlZF0=",
       "published_rc": 0
     },
     {
       "name": "invalid-utf8-bytes",
       "text": "before �� after ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "text_b64": "YmVmb3JlIP/+IGFmdGVyIGdocF9BQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUE=",
       "redacted": "before �� after ghp_AAAAAA…[redacted]",
+      "redacted_b64": "YmVmb3JlIP/+IGFmdGVyIGdocF9BQUFBQUHigKZbcmVkYWN0ZWRd",
       "published": "before �� after ghp_AAAAAA…[redacted]\n\n_CrossRev masked a string in this comment that matched a credential pattern._",
+      "published_b64": "YmVmb3JlIP/+IGFmdGVyIGdocF9BQUFBQUHigKZbcmVkYWN0ZWRdCgpfQ3Jvc3NSZXYgbWFza2VkIGEgc3RyaW5nIGluIHRoaXMgY29tbWVudCB0aGF0IG1hdGNoZWQgYSBjcmVkZW50aWFsIHBhdHRlcm4uXw==",
       "published_rc": 0
     },
     {
       "name": "nul-adjacent-high-bytes",
       "text": "��� ghp_BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+      "text_b64": "gIGCIGdocF9CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkI=",
       "redacted": "��� ghp_BBBBBB…[redacted]",
+      "redacted_b64": "gIGCIGdocF9CQkJCQkLigKZbcmVkYWN0ZWRd",
       "published": "��� ghp_BBBBBB…[redacted]\n\n_CrossRev masked a string in this comment that matched a credential pattern._",
+      "published_b64": "gIGCIGdocF9CQkJCQkLigKZbcmVkYWN0ZWRdCgpfQ3Jvc3NSZXYgbWFza2VkIGEgc3RyaW5nIGluIHRoaXMgY29tbWVudCB0aGF0IG1hdGNoZWQgYSBjcmVkZW50aWFsIHBhdHRlcm4uXw==",
+      "published_rc": 0
+    },
+    {
+      "name": "high-byte-inside-the-token-prefix",
+      "text": "ghp_AAAAAA�BBBBBBBBBBBB",
+      "text_b64": "Z2hwX0FBQUFBQf9CQkJCQkJCQkJCQkI=",
+      "redacted": "ghp_AAAAAA�BBBBBBBBBBBB",
+      "redacted_b64": "Z2hwX0FBQUFBQf9CQkJCQkJCQkJCQkI=",
+      "published": "ghp_AAAAAA�BBBBBBBBBBBB",
+      "published_b64": "Z2hwX0FBQUFBQf9CQkJCQkJCQkJCQkI=",
+      "published_rc": 0
+    },
+    {
+      "name": "high-byte-after-the-token-prefix",
+      "text": "ghp_AAAAAAA�BBBB",
+      "text_b64": "Z2hwX0FBQUFBQUH/QkJCQg==",
+      "redacted": "ghp_AAAAAA…[redacted]�BBBB",
+      "redacted_b64": "Z2hwX0FBQUFBQeKApltyZWRhY3RlZF3/QkJCQg==",
+      "published": "ghp_AAAAAA…[redacted]�BBBB\n\n_CrossRev masked a string in this comment that matched a credential pattern._",
+      "published_b64": "Z2hwX0FBQUFBQeKApltyZWRhY3RlZF3/QkJCQgoKX0Nyb3NzUmV2IG1hc2tlZCBhIHN0cmluZyBpbiB0aGlzIGNvbW1lbnQgdGhhdCBtYXRjaGVkIGEgY3JlZGVudGlhbCBwYXR0ZXJuLl8=",
       "published_rc": 0
     },
     {
       "name": "classic-github-stops-at-underscore",
       "text": "ghp_AAAAAA_BBBBBBBBBBBBBBBBBBBBBBBB",
+      "text_b64": "Z2hwX0FBQUFBQV9CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkI=",
       "redacted": "ghp_AAAAAA_BBBBBBBBBBBBBBBBBBBBBBBB",
+      "redacted_b64": "Z2hwX0FBQUFBQV9CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkI=",
       "published": "ghp_AAAAAA_BBBBBBBBBBBBBBBBBBBBBBBB",
+      "published_b64": "Z2hwX0FBQUFBQV9CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkI=",
       "published_rc": 0
     },
     {
       "name": "anthropic-continues-through-hyphen",
       "text": "sk-ant-api03-AAAA-BBBB-CCCC",
+      "text_b64": "c2stYW50LWFwaTAzLUFBQUEtQkJCQi1DQ0ND",
       "redacted": "sk-ant-api03-…[redacted]",
+      "redacted_b64": "c2stYW50LWFwaTAzLeKApltyZWRhY3RlZF0=",
       "published": "sk-ant-api03-…[redacted]\n\n_CrossRev masked a string in this comment that matched a credential pattern._",
+      "published_b64": "c2stYW50LWFwaTAzLeKApltyZWRhY3RlZF0KCl9Dcm9zc1JldiBtYXNrZWQgYSBzdHJpbmcgaW4gdGhpcyBjb21tZW50IHRoYXQgbWF0Y2hlZCBhIGNyZWRlbnRpYWwgcGF0dGVybi5f",
       "published_rc": 0
     }
   ]

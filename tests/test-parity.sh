@@ -345,15 +345,20 @@ done < <(jq -c '.cases[]' "$PARITY/prompt_commit_convention.json")
 
 # --- redaction ---------------------------------------------------------------
 
+# The _b64 fields are read rather than the plain ones. A body carrying bytes
+# that are not valid UTF-8 cannot round-trip through a JSON string, and that is
+# exactly the body log_redact pins LC_ALL=C for.
+unb64() { printf '%s' "$1" | openssl base64 -d -A; }
+
 while IFS= read -r c; do
   name="$(jq -r .name <<<"$c")"
-  text="$(jq -jr .text <<<"$c"; printf 'x')"; text="${text%x}"
+  text="$(unb64 "$(jq -r .text_b64 <<<"$c")"; printf 'x')"; text="${text%x}"
   got="$(log_redact_str "$text"; printf 'x')"; got="${got%x}"
-  want="$(jq -jr .redacted <<<"$c"; printf 'x')"; want="${want%x}"
+  want="$(unb64 "$(jq -r .redacted_b64 <<<"$c")"; printf 'x')"; want="${want%x}"
   is "redact string: $name" "$got" "$want"
   if pub="$(log_redact_publish "$text"; printf 'x')"; then rc=0; else rc=$?; fi
   pub="${pub%x}"
-  wantpub="$(jq -jr .published <<<"$c"; printf 'x')"; wantpub="${wantpub%x}"
+  wantpub="$(unb64 "$(jq -r .published_b64 <<<"$c")"; printf 'x')"; wantpub="${wantpub%x}"
   is "redact publish: $name" "$pub" "$wantpub"
   is "redact publish rc: $name" "$rc" "$(jq -r .published_rc <<<"$c")"
 done < <(jq -c '.cases[]' "$PARITY/redaction.json")

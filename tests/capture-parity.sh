@@ -1003,6 +1003,11 @@ rm -rf "$cc_workdir"
 # a run are captured: the string filter that reaches a harness error message,
 # and the publish filter that appends a notice and fails closed.
 
+# base64 of arbitrary bytes, on one line. Through openssl because it is already
+# a dependency and spells the flag the same way on both platforms, where the
+# base64 command does not.
+b64() { printf '%s' "$1" | openssl base64 -A; }
+
 redact_case() { # name text
   local filtered published published_rc
   # A sentinel byte on both captures, stripped afterwards. Command substitution
@@ -1011,9 +1016,17 @@ redact_case() { # name text
   filtered="$(log_redact_str "$2"; printf 'x')"; filtered="${filtered%x}"
   if published="$(log_redact_publish "$2"; printf 'x')"; then published_rc=0; else published_rc=$?; fi
   published="${published%x}"
+  # The _b64 fields are the authoritative ones and the plain fields are a
+  # reading aid. jq --arg demands valid UTF-8 and replaces every other byte
+  # with U+FFFD, so the two cases built from raw \xff and \x80 bytes froze as
+  # replacement characters and asserted nothing about the bytes they name. The
+  # filter pins LC_ALL=C precisely because a failing harness dumps bytes that
+  # are not text, so that is the case worth freezing exactly.
   jq -cn --arg n "$1" --arg t "$2" --arg f "$filtered" \
         --arg p "$published" --argjson rc "$published_rc" \
-    '{name:$n, text:$t, redacted:$f, published:$p, published_rc:$rc}'
+        --arg tb "$(b64 "$2")" --arg fb "$(b64 "$filtered")" --arg pb "$(b64 "$published")" \
+    '{name:$n, text:$t, text_b64:$tb, redacted:$f, redacted_b64:$fb,
+      published:$p, published_b64:$pb, published_rc:$rc}'
 }
 
 redact_cases() {
@@ -1045,6 +1058,11 @@ redact_cases() {
   # Bytes that are not valid UTF-8 are exactly what a failing harness dumps.
   redact_case "invalid-utf8-bytes" "$(printf 'before \xff\xfe after ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA')"
   redact_case "nul-adjacent-high-bytes" "$(printf '\x80\x81\x82 ghp_BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB')"
+  # A byte that is not text, landing inside a token rather than beside one. The
+  # first ends the six-character prefix one byte early so nothing matches; the
+  # second lets the prefix complete and stops the body at the byte.
+  redact_case "high-byte-inside-the-token-prefix" "$(printf 'ghp_AAAAAA\xffBBBBBBBBBBBB')"
+  redact_case "high-byte-after-the-token-prefix" "$(printf 'ghp_AAAAAAA\xffBBBB')"
   # A hyphen and an underscore are both in the anthropic and xai classes and
   # neither is in the classic-github one, which is the difference between the
   # patterns most easily lost in a port.
