@@ -25,9 +25,10 @@ func loadFixture(t *testing.T, name string, v any) {
 	}
 }
 
-// captured is the provenance block every oracle file carries. Task 0.1 records
-// the platform, the tr implementation and the locale the Bash run happened
-// under, because two of the three decide whether an id is byte-oriented.
+// captured is the provenance block every oracle file carries. The capture
+// script records the platform, the tr implementation and the locale the Bash
+// run happened under, because two of the three decide whether an id is
+// byte-oriented.
 type captured struct {
 	Platform         string `json:"platform"`
 	TrImplementation string `json:"tr_implementation"`
