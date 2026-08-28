@@ -42,8 +42,8 @@ const (
 // ShowFile reads one path, at a revision or from the working tree.
 //
 // It is a function type owned by this package so that `config` imports no other
-// tier-2 package: the git-backed implementation lands in Task 2.3 and the unit
-// tests here supply bytes directly.
+// tier-2 package: the git-backed implementation lands with the git adapter,
+// and the unit tests here supply bytes directly.
 //
 // A zero revision means the working tree, which is what `init` and `doctor`
 // read (lib/config.sh:134-136). A non-zero revision means the pull request's
