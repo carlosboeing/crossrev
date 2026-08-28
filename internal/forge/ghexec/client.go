@@ -66,16 +66,21 @@ func WithEnv(env []string) Option {
 	return func(c *Client) { c.env = env }
 }
 
-// WithWarn installs the report for the failures this package can see and the
-// caller cannot.
+// WithWarn installs the report for a fact with no other route out.
 //
-// lib/github.sh calls ui_warn at six places. Four of them are also reported to
-// the caller — a returned error, or a Placement saying the comment landed
-// somewhere else — and those are left to the caller to print, so the message is
-// not printed twice. The two that are not reportable any other way go through
-// here: a body whose marker was withheld by the publish filter, and a label
-// that exists but could not be recoloured. Both continue rather than fail, so
-// without this they would be silent.
+// That is the rule, and it is worth stating as one rather than as the list
+// below: a fact already carried in a returned value never comes through here.
+// The caller has to read that value to know what happened, so a warning beside
+// it reports the same thing twice. The anchor fallback settles it — Placement
+// names where the comment landed, and the fallback is the common path rather
+// than the edge case, so a provider warning there would double-report on every
+// one of them.
+//
+// lib/github.sh calls ui_warn at six places. Four are reported to the caller as
+// a returned error or a Placement, and are left to it. The two with no other
+// route go through here: a body whose marker was withheld by the publish
+// filter, and a label that exists but could not be recoloured. Both continue
+// rather than fail, so without this they would be silent.
 //
 // The default is a no-op, which makes a Client with no reporter quiet rather
 // than broken.
