@@ -1,0 +1,176 @@
+package runlog
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"time"
+)
+
+// eventTimestamp is the format every event line opens with: UTC, to the second,
+// spelled the way `date -u '+%Y-%m-%dT%H:%M:%SZ'` spells it (lib/log.sh:86).
+const eventTimestamp = "2006-01-02T15:04:05Z"
+
+// logFile is the one file every run writes, whether or not it keeps a
+// transcript.
+const logFile = "run.log"
+
+// Options is everything a run log needs that it must not work out for itself.
+//
+// Dir and SweepBase are handed in rather than resolved here, so nothing that
+// creates a directory reads HOME. RunDir and RunsBase resolve them for a real
+// run; a test hands in a temporary directory and never touches the state
+// directory the developer is using.
+type Options struct {
+	// Dir is the run directory, from RunDir. Required.
+	Dir string
+
+	// SweepBase is the directory the retention sweep walks, from RunsBase.
+	// Empty skips the sweep, which is what a test wants when its Dir is not
+	// underneath a runs base at all.
+	SweepBase string
+
+	// RetentionDays is how long a run directory survives. Use RetentionDays to
+	// turn a configured string into one.
+	RetentionDays int
+
+	// Repo and PR name the run in its opening event.
+	Repo string
+	PR   string
+
+	// KeepTranscripts asks for the transcripts of a successful invocation to
+	// survive. The flag and the config key both reach here through
+	// KeepTranscripts, which is where the string comparison lives.
+	KeepTranscripts bool
+
+	// Leg is the leg the invocation belongs to, so the transcript files name
+	// review or resolve rather than the harness that happened to serve them.
+	// SetLeg changes it, because one invocation of `crossrev cycle` runs both.
+	Leg string
+
+	// Now is the clock the event timestamps and the sweep read. Nil means
+	// time.Now.
+	Now func() time.Time
+}
+
+// Log is the per-run record on disk.
+//
+// A nil *Log is the disabled state, and every method tolerates it. That is the
+// port of the empty CROSSREV_RUN_DIR the Bash library carries until log_init
+// runs and falls back to whenever a directory cannot be made (lib/log.sh:26-30):
+// a library consumer that never asked for a run directory shares the code
+// without scattering directories, and nothing in this package may fail its
+// caller, because it is called from the paths whose own failure is what is
+// being recorded.
+type Log struct {
+	dir             string
+	keepTranscripts bool
+	now             func() time.Time
+
+	mu  sync.Mutex
+	leg string
+	// redact is the credential filter. It is a field so that a test can supply
+	// one that fails and reach the fail-closed branches; production never
+	// replaces it.
+	redact filter
+}
+
+// Open creates the run directory, sweeps the expired ones and writes the
+// opening event (log_init, lib/log.sh:64).
+//
+// A directory that cannot be created returns a nil *Log and an error. Both
+// halves matter: the error is there for a caller that wants to say so, and the
+// nil Log is usable as-is, so a caller that follows the Bash library and
+// degrades to a no-op can ignore the error and keep going.
+func Open(opts Options) (*Log, error) {
+	if opts.Dir == "" {
+		return nil, os.ErrInvalid
+	}
+	if err := os.MkdirAll(opts.Dir, dirMode); err != nil {
+		return nil, err
+	}
+	now := opts.Now
+	if now == nil {
+		now = time.Now
+	}
+	l := &Log{
+		dir:             opts.Dir,
+		keepTranscripts: opts.KeepTranscripts,
+		now:             now,
+		leg:             opts.Leg,
+	}
+	if opts.SweepBase != "" {
+		Sweep(opts.SweepBase, opts.RetentionDays, now())
+	}
+	l.Event("run", "start repo="+opts.Repo+" pr="+opts.PR)
+	return l, nil
+}
+
+// Dir is the run directory, or the empty string when there is none.
+func (l *Log) Dir() string {
+	if l == nil {
+		return ""
+	}
+	return l.dir
+}
+
+// SetLeg names the leg the following invocations belong to.
+func (l *Log) SetLeg(leg string) {
+	if l == nil {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.leg = leg
+}
+
+// Leg is the leg the current invocation belongs to.
+func (l *Log) Leg() string {
+	if l == nil {
+		return ""
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.leg
+}
+
+// filter is the credential filter this log writes through, defaulting to the
+// package one.
+func (l *Log) filter() filter {
+	if l == nil || l.redact == nil {
+		return filterBytes
+	}
+	return l.redact
+}
+
+// Event appends one line to the run log: timestamp, phase, detail
+// (log_event, lib/log.sh:78).
+//
+// Every line goes through the credential filter even though the callers build
+// these strings from names and exit codes, so the rule "nothing reaches the
+// file unfiltered" has no exceptions to remember. Callers pass git tails and
+// die reasons that already contain newlines, so those are collapsed and the
+// one-line-per-event invariant holds regardless.
+func (l *Log) Event(phase, detail string) {
+	if l == nil || l.dir == "" {
+		return
+	}
+	detail = eventDetail.Replace(detail)
+	path := filepath.Join(l.dir, logFile)
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if info, err := os.Stat(path); err != nil || !info.Mode().IsRegular() {
+		_ = CreatePrivate(path)
+	}
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND|os.O_CREATE, fileMode)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	line := l.now().UTC().Format(eventTimestamp) + " " + phase + " " + detail + "\n"
+	_, _ = f.WriteString(Redact(line))
+}
+
+var eventDetail = strings.NewReplacer("\n", " ", "\r", " ")
