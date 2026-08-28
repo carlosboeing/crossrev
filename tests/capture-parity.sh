@@ -1340,8 +1340,16 @@ billing_cases() {
 }
 
 format_cost_cases() {
+  # No value on an exact half-cent boundary. usage_format_cost is printf %.2f,
+  # and bash's builtin converts its argument with strtold, so the rounding is
+  # decided in long double. That type is 80-bit on x86-64 and 64-bit on arm64,
+  # and 0.005 lands on opposite sides of the boundary in the two: one answers
+  # ~$0.01 and the other ~$0.00. Freezing either would make the vector a
+  # property of the machine that captured it. 0.0049 and 0.0051 sit either side
+  # with room to spare and answer the same everywhere. 0.125 is exactly
+  # representable, so both widths agree on it and it stays.
   local v
-  for v in "" "0" "0.004" "0.005" "0.125" "1" "12.345" "-1.5" "1e-3" "1E3" "abc" "0.1.2" " 1"; do
+  for v in "" "0" "0.004" "0.0049" "0.0051" "0.125" "1" "12.345" "-1.5" "1e-3" "1E3" "abc" "0.1.2" " 1"; do
     jq -cn --arg v "$v" --arg o "$(usage_format_cost "$v")" '{value:$v, formatted:$o}'
   done
 }
