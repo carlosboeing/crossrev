@@ -3,6 +3,7 @@ package runlog
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 )
 
@@ -10,20 +11,54 @@ import (
 // otherwise (lib/log.sh:194).
 const DefaultRetentionDays = 14
 
+// KeepEverything is the window that sweeps nothing, and it is what an
+// unrepresentable one becomes.
+//
+// The Bash guard is a regular expression, `^[0-9]+$` (lib/log.sh:197), which a
+// twenty-digit number passes. That number reaches `find -mtime +<it>`, and
+// neither find deletes anything for it: BSD find accepts the argument and
+// matches nothing, GNU find refuses it and the `2>/dev/null || true` at
+// lib/log.sh:205 swallows the refusal. Measured on this platform's BSD find, a
+// forty-year-old run directory survives 9223372036854775808,
+// 18446744073709551616 and 99999999999999999999999999 alike.
+//
+// So the parity answer for a value too large to represent is to keep
+// everything, and it is emphatically NOT to fall back to DefaultRetentionDays:
+// that would delete every run past a fortnight for an input the shell deletes
+// nothing at all for. TestRetentionOverflowIsNotTheDefault exists to say so.
+//
+// Sweep refuses any negative window, not only this one. A window that says
+// nothing meaningful must not authorise a deletion, and a negative one would
+// otherwise delete every run directory including the one in progress — the
+// exact thing the mtime rule at lib/log.sh:189-192 exists to protect.
+const KeepEverything = -1
+
 // RetentionDays reads a configured window. Anything that is not a run of
 // digits falls back to the default rather than failing: the sweep runs from
 // log_init, and a typo in a config key must not stop a run from starting
-// (lib/log.sh:197).
+// (lib/log.sh:197). A run of digits too large for an int is a different case
+// and becomes KeepEverything; see there for why.
+//
+// Leading zeros are decimal, not octal, because find reads the argument as
+// decimal: 007 is seven on both sides.
 func RetentionDays(value string) int {
 	if value == "" {
 		return DefaultRetentionDays
 	}
-	days := 0
+	// The Bash regex, digit by digit. strconv would accept a sign and a
+	// leading space that `^[0-9]+$` rejects, so the shape is checked before
+	// the value is read.
 	for _, c := range value {
 		if c < '0' || c > '9' {
 			return DefaultRetentionDays
 		}
-		days = days*10 + int(c-'0')
+	}
+	days, err := strconv.Atoi(value)
+	if err != nil {
+		// Non-empty and digits only, so the only error strconv has left is
+		// that the number does not fit. Accumulating it by hand would wrap,
+		// and a wrapped window goes negative and deletes everything.
+		return KeepEverything
 	}
 	return days
 }
@@ -45,8 +80,13 @@ func RetentionDays(value string) int {
 // It reports nothing. The Bash function is called from log_init and returns
 // zero whatever happens, because a sweep that cannot read a directory must not
 // stop the run that triggered it.
+//
+// A negative window sweeps nothing at all. See KeepEverything: no configured
+// value can produce one through RetentionDays, and a window arriving negative
+// from anywhere else is a bug that must not be allowed to spend its way
+// through a directory of run records.
 func Sweep(base string, days int, now time.Time) {
-	if base == "" {
+	if base == "" || days < 0 {
 		return
 	}
 	if info, err := os.Stat(base); err != nil || !info.IsDir() {

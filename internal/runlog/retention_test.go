@@ -1,8 +1,10 @@
 package runlog_test
 
 import (
+	"math"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -22,6 +24,12 @@ func TestRetentionDays(t *testing.T) {
 		{"-1", 14},
 		{"7.5", 14},
 		{" 7", 14},
+		{"+7", 14},
+		// Decimal, not octal. find reads the argument as decimal and so must
+		// this: measured, the shell deletes a forty-year-old run for 007 and
+		// keeps a fresh one, which is seven days exactly.
+		{"007", 7},
+		{"00000000000000000000014", 14},
 	}
 	for _, tt := range tests {
 		t.Run(tt.value, func(t *testing.T) {
@@ -29,6 +37,122 @@ func TestRetentionDays(t *testing.T) {
 				t.Errorf("RetentionDays(%q) = %d, want %d", tt.value, got, tt.want)
 			}
 		})
+	}
+}
+
+// unrepresentable are windows that pass the Bash regex and are too large for an
+// int. Measured against lib/log.sh on this platform: each one leaves a
+// forty-year-old run directory in place, because BSD find accepts the argument
+// and matches nothing while GNU find refuses it and lib/log.sh:205 swallows the
+// refusal. Neither deletes anything.
+var unrepresentable = []string{
+	"9223372036854775808",
+	"18446744073709551616",
+	"99999999999999999999999999",
+}
+
+// TestRetentionDaysOverflow: a window too large to represent becomes
+// KeepEverything, not a wrapped number.
+//
+// Accumulating the digits by hand wraps, and the wrap goes negative: the three
+// values below produced -9223372036854775808, 0 and -2537764290115403777. A
+// negative window makes every run directory older than the window, including
+// the one the current run is writing into.
+func TestRetentionDaysOverflow(t *testing.T) {
+	for _, value := range unrepresentable {
+		t.Run(value, func(t *testing.T) {
+			got := runlog.RetentionDays(value)
+			if got != runlog.KeepEverything {
+				t.Errorf("RetentionDays(%q) = %d, want KeepEverything (%d)", value, got, runlog.KeepEverything)
+			}
+			if got >= 0 {
+				t.Errorf("RetentionDays(%q) = %d, which authorises a sweep", value, got)
+			}
+		})
+	}
+}
+
+// TestRetentionOverflowIsNotTheDefault is the test that catches the obvious
+// wrong fix.
+//
+// Falling back to DefaultRetentionDays for an unrepresentable window looks like
+// the safe reading and is a data-loss bug: it deletes every run past a
+// fortnight for an input the shell deletes nothing at all for. Measured, the
+// shell keeps a forty-year-old run directory for each of these. Anyone changing
+// the overflow answer to the default has to delete this test to do it.
+func TestRetentionOverflowIsNotTheDefault(t *testing.T) {
+	for _, value := range unrepresentable {
+		if got := runlog.RetentionDays(value); got == runlog.DefaultRetentionDays {
+			t.Errorf("RetentionDays(%q) = %d, the default; the shell sweeps nothing for this value, and the default sweeps everything past a fortnight",
+				value, got)
+		}
+	}
+}
+
+// TestRetentionDaysBoundary pins the largest window that fits and the first one
+// that does not, rather than approaching them. Both are built from math.MaxInt
+// so the boundary is the running platform's, not a 64-bit assumption.
+func TestRetentionDaysBoundary(t *testing.T) {
+	largest := strconv.Itoa(math.MaxInt)
+	if got := runlog.RetentionDays(largest); got != math.MaxInt {
+		t.Errorf("RetentionDays(%q) = %d, want %d", largest, got, math.MaxInt)
+	}
+
+	onePast := strconv.FormatUint(uint64(math.MaxInt)+1, 10)
+	if got := runlog.RetentionDays(onePast); got != runlog.KeepEverything {
+		t.Errorf("RetentionDays(%q) = %d, want KeepEverything (%d)", onePast, got, runlog.KeepEverything)
+	}
+}
+
+// TestSweepKeepsAFreshRunForEveryConfiguredWindow is the invariant underneath
+// all of it: measured against lib/log.sh, no value of
+// CROSSREV_LOG_RETENTION_DAYS deletes a run directory created a moment ago.
+// Not the default, not zero, not a typo, and not a number too large to
+// represent.
+func TestSweepKeepsAFreshRunForEveryConfiguredWindow(t *testing.T) {
+	windows := append([]string{"", "14", "0", "007", "1e3", "-1", "not-a-number", "365"}, unrepresentable...)
+	for _, value := range windows {
+		t.Run(value, func(t *testing.T) {
+			now := time.Now()
+			base := filepath.Join(t.TempDir(), "runs")
+			run := filepath.Join(base, "acme-widget", "pr-7", "local-1")
+			if err := os.MkdirAll(run, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			// One millisecond old, which is the age of a run that is still
+			// being written into.
+			when := now.Add(-time.Millisecond)
+			if err := os.Chtimes(run, when, when); err != nil {
+				t.Fatal(err)
+			}
+
+			runlog.Sweep(base, runlog.RetentionDays(value), now)
+
+			if !exists(run) {
+				t.Errorf("a run created one millisecond ago was deleted for retention %q, which parsed to %d",
+					value, runlog.RetentionDays(value))
+			}
+		})
+	}
+}
+
+// TestSweepRefusesANegativeWindow: a window that says nothing meaningful must
+// not authorise a deletion. No configured value produces one, so this is the
+// guard against one arriving from anywhere else.
+func TestSweepRefusesANegativeWindow(t *testing.T) {
+	now := time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC)
+	base := filepath.Join(t.TempDir(), "runs")
+	old := filepath.Join(base, "acme-widget", "pr-7", "local-1")
+	if err := os.MkdirAll(old, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	age(t, old, 4000, now)
+
+	for _, days := range []int{runlog.KeepEverything, -14, math.MinInt} {
+		runlog.Sweep(base, days, now)
+		if !exists(old) {
+			t.Fatalf("a window of %d deleted a run directory", days)
+		}
 	}
 }
 
