@@ -1,6 +1,7 @@
 package runlog_test
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -60,15 +61,43 @@ func TestParityFixturesCarryProvenance(t *testing.T) {
 	}
 }
 
+// redactionOracle is the frozen redaction vectors.
+//
+// The bytes are read from the base64 fields and nowhere else. The plain text,
+// redacted and published fields beside them are a reading aid for a human
+// opening the file, and they are lossy: a vector built from bytes that are not
+// valid UTF-8 cannot survive a round trip through a JSON string, and four of
+// these are. Reading the aid would assert nothing about exactly the cases the
+// filter has to be byte-oriented for.
+//
+// The base64 fields are pointers so that a missing one is an error rather than
+// an empty string. Every case would pass vacuously against a field that decodes
+// to nothing on both sides.
 type redactionOracle struct {
-	Notice string `json:"notice"`
-	Cases  []struct {
-		Name        string `json:"name"`
-		Text        string `json:"text"`
-		Redacted    string `json:"redacted"`
-		Published   string `json:"published"`
-		PublishedRC int    `json:"published_rc"`
-	} `json:"cases"`
+	Notice string          `json:"notice"`
+	Cases  []redactionCase `json:"cases"`
+}
+
+type redactionCase struct {
+	Name         string  `json:"name"`
+	TextB64      *string `json:"text_b64"`
+	RedactedB64  *string `json:"redacted_b64"`
+	PublishedB64 *string `json:"published_b64"`
+	PublishedRC  int     `json:"published_rc"`
+}
+
+// bytes decodes one base64 field, and fails the test rather than the decode
+// when the field is not there at all.
+func (c redactionCase) bytes(t *testing.T, name string, field *string) string {
+	t.Helper()
+	if field == nil {
+		t.Fatalf("%s: the oracle case carries no %s", c.Name, name)
+	}
+	raw, err := base64.StdEncoding.DecodeString(*field)
+	if err != nil {
+		t.Fatalf("%s: decoding %s: %v", c.Name, name, err)
+	}
+	return string(raw)
 }
 
 func loadRedaction(t *testing.T) redactionOracle {
@@ -92,11 +121,20 @@ func TestRedactNoticeParity(t *testing.T) {
 
 // TestRedactStringParity replays every credential shape the oracle froze
 // through the string filter (log_redact_str, lib/log.sh:116).
+//
+// Four of the vectors carry bytes that are not valid UTF-8, and they are the
+// reason the filter operates on bytes rather than on runes: that is what a
+// failing harness dumps, and a UTF-8 sed aborts on the first such byte with
+// "illegal byte sequence", losing the whole line rather than the credential in
+// it (lib/log.sh:97-100). Two of the four sit either side of a token prefix, so
+// they also pin where a masked body starts and stops.
 func TestRedactStringParity(t *testing.T) {
 	for _, c := range loadRedaction(t).Cases {
 		t.Run(c.Name, func(t *testing.T) {
-			if got := runlog.Redact(c.Text); got != c.Redacted {
-				t.Errorf("Redact(%q) = %q, want %q", c.Text, got, c.Redacted)
+			text := c.bytes(t, "text_b64", c.TextB64)
+			want := c.bytes(t, "redacted_b64", c.RedactedB64)
+			if got := runlog.Redact(text); got != want {
+				t.Errorf("Redact(%q) = %q, want %q", text, got, want)
 			}
 		})
 	}
@@ -112,16 +150,18 @@ func TestRedactPublishParity(t *testing.T) {
 	var noLog *runlog.Log
 	for _, c := range loadRedaction(t).Cases {
 		t.Run(c.Name, func(t *testing.T) {
-			got, err := noLog.Publish(c.Text)
+			text := c.bytes(t, "text_b64", c.TextB64)
+			want := c.bytes(t, "published_b64", c.PublishedB64)
+			got, err := noLog.Publish(text)
 			rc := 0
 			if err != nil {
 				rc = 1
 			}
-			if got != c.Published {
-				t.Errorf("Publish(%q) = %q, want %q", c.Text, got, c.Published)
+			if got != want {
+				t.Errorf("Publish(%q) = %q, want %q", text, got, want)
 			}
 			if rc != c.PublishedRC {
-				t.Errorf("Publish(%q) rc = %d, want %d", c.Text, rc, c.PublishedRC)
+				t.Errorf("Publish(%q) rc = %d, want %d", text, rc, c.PublishedRC)
 			}
 		})
 	}
