@@ -92,7 +92,7 @@ func notNull(value any) string {
 	if value == nil {
 		return ""
 	}
-	return renderScalar(value)
+	return renderCompact(value)
 }
 
 // renderScalar is what `jq -r` writes for one value: a string bare, everything
@@ -117,6 +117,27 @@ func renderScalar(value any) string {
 		return buf.String()
 	}
 	return indented.String()
+}
+
+// renderCompact is what `tostring` writes for one value: a string bare, and
+// everything else as its JSON on a single line.
+//
+// jq pretty-prints a container it writes as output and does not pretty-print
+// one it converts with `tostring`, and both readings are live here. Five of the
+// six refused keys are read through `// empty`, which is output, so
+// `min_fix_severity: [a, b]` is named across four lines. The sixth is
+// logs.keep_transcripts, read through `tostring` at lib/config.sh:231 because
+// `//` would report the legitimate default of false as unset — and a list there
+// is named on one line.
+func renderCompact(value any) string {
+	if text, ok := value.(string); ok {
+		return text
+	}
+	var buf bytes.Buffer
+	if err := encodeJSON(&buf, value); err != nil {
+		return ""
+	}
+	return buf.String()
 }
 
 // Get reads one dotted path out of the merge and renders it the way `cfg_get`
@@ -211,7 +232,7 @@ func decodeDocuments(source []byte) ([]any, error) {
 		if err != nil {
 			return nil, err
 		}
-		value, err := decodeNode(&document)
+		value, err := decodeNode(&document, newDecodeState())
 		if err != nil {
 			return nil, err
 		}
@@ -219,8 +240,8 @@ func decodeDocuments(source []byte) ([]any, error) {
 	}
 }
 
-// withoutLeadingContent drops the blank and comment lines a file opens with,
-// which is what yq does before it parses.
+// withoutLeadingContent drops the blank lines, comment lines and bare document
+// markers a file opens with, which is what yq drops before it parses.
 //
 // yq holds that region aside so it can print it back out, and only what follows
 // reaches the YAML parser. The difference is visible wherever a tab appears in
@@ -234,6 +255,26 @@ func decodeDocuments(source []byte) ([]any, error) {
 // on a content line, a tab on a line below content and a tab under a comment
 // that follows content are all errors there, and this drops none of them. For
 // every file that opens with a key the region is empty and nothing changes.
+//
+// A bare `---` above the first content line goes with them, and that is the
+// half that decides a shape rather than a message. yq swallows every empty
+// document there and prints one JSON line, so `---`, `---` and then `mode: ci`
+// loads. go-yaml handed the same bytes builds three documents, and the
+// multi-document guard in decodeDocument then refuses a file whose own refusal
+// hint tells the reader to check it with a command that parses it. Measured
+// against yq over `---\n---\nmode: ci`, `---\n---`, three markers, a marker
+// around a comment and a marker around a blank line, which all load there.
+//
+// Only a marker alone on its line is dropped, and only while the region lasts.
+// A marker below content opens a second document on both sides and is still
+// refused, and `---x` is not a marker on either side.
+//
+// A marker carrying content on the same line is a separate region of yq's
+// behaviour and is left alone here. yq removes the `---` and reads the rest, so
+// `--- mode: ci` is a mapping there and go-yaml refuses it — but the rule is
+// not the same one: yq errors on `--- mode: ci` followed by `x: 1`, and reads
+// `--- !!map` above `mode: ci` as the string `ci`. Nothing rewrites the line
+// here until that is measured rather than guessed at.
 func withoutLeadingContent(source []byte) []byte {
 	rest := source
 	for len(rest) > 0 {
@@ -242,7 +283,7 @@ func withoutLeadingContent(source []byte) []byte {
 			line = rest[:end+1]
 		}
 		trimmed := bytes.Trim(line, " \t\r\n")
-		if len(trimmed) > 0 && trimmed[0] != '#' {
+		if len(trimmed) > 0 && trimmed[0] != '#' && !bytes.Equal(trimmed, documentMarker) {
 			break
 		}
 		rest = rest[len(line):]
@@ -250,7 +291,10 @@ func withoutLeadingContent(source []byte) []byte {
 	return rest
 }
 
-func decodeNode(node *yaml.Node) (any, error) {
+// documentMarker is the bare `---` that opens a YAML document.
+var documentMarker = []byte("---")
+
+func decodeNode(node *yaml.Node, state *decodeState) (any, error) {
 	// A zero node is not a scalar, and reading it as one is what let a
 	// comment-only file through as the empty string. An empty, comment-only or
 	// whitespace-only source has no document in it at all, so yaml.Unmarshal
@@ -259,24 +303,36 @@ func decodeNode(node *yaml.Node) (any, error) {
 	if node == nil || node.Kind == 0 {
 		return nil, nil
 	}
+	if err := state.enter(); err != nil {
+		return nil, err
+	}
+	defer state.leave()
 	switch node.Kind {
 	case yaml.DocumentNode:
 		if len(node.Content) == 0 {
 			return nil, nil
 		}
-		return decodeNode(node.Content[0])
+		return decodeNode(node.Content[0], state)
 	case yaml.AliasNode:
-		return decodeNode(node.Alias)
+		return decodeNode(node.Alias, state)
 	case yaml.MappingNode:
+		if err := state.open(node); err != nil {
+			return nil, err
+		}
+		defer state.close(node)
 		out := NewObject()
-		if err := decodeMapping(out, node, 0); err != nil {
+		if err := decodeMapping(out, node, state); err != nil {
 			return nil, err
 		}
 		return out, nil
 	case yaml.SequenceNode:
+		if err := state.open(node); err != nil {
+			return nil, err
+		}
+		defer state.close(node)
 		out := make([]any, 0, len(node.Content))
 		for _, item := range node.Content {
-			value, err := decodeNode(item)
+			value, err := decodeNode(item, state)
 			if err != nil {
 				return nil, err
 			}
@@ -288,11 +344,91 @@ func decodeNode(node *yaml.Node) (any, error) {
 	}
 }
 
-// maxMergeDepth bounds how far a chain of merge keys is followed. An anchor has
-// to be defined before it is named, so a cycle is not writable in YAML — but
-// the bound is what makes that a fact of this function rather than a fact about
-// somebody else's parser.
-const maxMergeDepth = 64
+// maxDecodeDepth bounds every recursive step taken through a document: a
+// container entered, an alias followed to its anchor, and a merge key followed
+// to its source all count against the same budget.
+//
+// One budget rather than one per path, because a bound carried by one function
+// and reset by the next bounds nothing. The earlier bound counted merge keys
+// only, and decodeMapping passed it to itself alone, so any hop back through
+// decodeNode started again from zero.
+//
+// A Go stack overflow is a fatal error that no recover() catches, so a document
+// that recursed without a bound would end the process with a runtime dump
+// instead of a refusal — and Load reads the operator file on every invocation,
+// whatever revision it was asked for, so no caller could route around it.
+//
+// The value is high enough that no configuration meets it: yq reads a thousand
+// levels of nesting and is already unusable well below ten thousand, so a file
+// that nests past this has no answer from the other implementation either.
+const maxDecodeDepth = 1000
+
+// errAliasCycle reports an anchor that is named from inside its own value.
+//
+// Such a cycle is writable in YAML, contrary to what this file used to claim.
+// An anchor is registered when its node opens rather than when it closes, so
+// the `*a` in `m: &a` / `  b: *a` resolves to the mapping still being built.
+//
+// There is no value to reproduce. yq answers the family inconsistently because
+// it rewrites the anchored node in place while expanding it. One self-reference
+// prints an expansion two levels deep and then an empty container, and exits 0.
+// Two of them in the same mapping overflow yq's own stack and exit 2, and so
+// does a `<<: *a` written one level inside `&a` — while the same `<<: *a`
+// written directly inside `&a` exits 0 and prints a literal `<<` key. So every
+// cycle is refused here, under a message that says what is actually wrong
+// rather than calling a file unparsable that yq parses.
+var errAliasCycle = errors.New("an anchor refers to itself")
+
+// errTooDeep reports a document nested past maxDecodeDepth.
+var errTooDeep = errors.New("the document nests too deeply")
+
+// decodeState is the budget carried through every recursive path.
+//
+// depth counts the steps open above the current node. active holds the
+// container nodes on that path, which is what makes a second arrival at one a
+// cycle rather than a second expansion — the depth bound alone would answer a
+// cycle with the wrong refusal, and only after a thousand wasted steps.
+type decodeState struct {
+	depth  int
+	active map[*yaml.Node]bool
+}
+
+func newDecodeState() *decodeState {
+	return &decodeState{active: map[*yaml.Node]bool{}}
+}
+
+// enter takes one step down, or reports the bound.
+func (s *decodeState) enter() error {
+	if s.depth >= maxDecodeDepth {
+		return errTooDeep
+	}
+	s.depth++
+	return nil
+}
+
+// leave gives the step back.
+func (s *decodeState) leave() { s.depth-- }
+
+// open marks one container as being decoded, and reports a cycle when it
+// already is.
+func (s *decodeState) open(node *yaml.Node) error {
+	if node == nil {
+		return nil
+	}
+	if s.active[node] {
+		return errAliasCycle
+	}
+	s.active[node] = true
+	return nil
+}
+
+// close unmarks one container, so a second alias to it beside the first is an
+// expansion rather than a cycle.
+func (s *decodeState) close(node *yaml.Node) {
+	if node != nil {
+		delete(s.active, node)
+	}
+}
 
 // decodeMapping writes one mapping's pairs into out, resolving the merge key.
 //
@@ -309,22 +445,50 @@ const maxMergeDepth = 64
 // the one whose keys survive — `<<: [*a, *b, *c]` with a `k` in each answers
 // with a's `k` and b's and c's other keys in that order.
 //
-// Which side wins is the half that is not settled forever. yq warns on every
-// file holding a merge key that its `--yaml-fix-merge-anchor-to-spec` default
-// is going to flip, and the flip reverses the two middle rows above: under the
-// specification a key written beside the merge wins wherever it sits. Nothing
-// CrossRev's own config shapes depend on it, and the rest of this — that the
-// key resolves at all, and does not reach the merge as a literal `<<` — is the
-// same under either setting.
+// What the merge key answers is the half that is not settled forever. yq warns
+// on every file holding one that its `--yaml-fix-merge-anchor-to-spec` default
+// is going to flip, and running it with the flag set changes three things
+// rather than the one this used to name. A key written beside the merge wins
+// wherever it sits, which reverses the two middle rows above. A sequence of
+// sources applies first to last rather than last to first, so `<<: [*x, *y]`
+// answers with x's keys before y's. And a mapping written out inside a `<<`
+// sequence is applied rather than dropped, as is one written out on its own.
+//
+// Nothing CrossRev's own config shapes depend on any of it. What is the same
+// under either setting is that the key resolves at all, and that no `<<` a
+// merge loads survives as a literal key: yq drops the key wherever it will not
+// follow it. The one file where a literal `<<` does reach yq's output is a
+// self-referential one, `m: &a` / `  <<: *a`, and refuseAliasCycle refuses that
+// whole family rather than reproducing it.
+//
+// This is written down in a code comment and nowhere a reader looks. After the
+// cutover the durable record for the coming flip belongs in the public
+// documentation, and is still owed.
 //
 // yq follows a chain, so a source that itself merges resolves too, and the
 // recursion here does the same. What yq will not follow it drops in silence:
 // `<<` holding a mapping written out rather than an alias, holding null, or
 // holding a scalar leaves the key out and merges nothing. An alias naming
 // something that is not a mapping is an error there, so the file is refused.
-func decodeMapping(out *Object, node *yaml.Node, depth int) error {
-	if depth > maxMergeDepth {
-		return fmt.Errorf("merge keys nest more than %d deep", maxMergeDepth)
+//
+// Where a key is repeated, the merge key also decides which of its two
+// positions the key keeps. yq rebuilds a mapping that holds a `<<` and
+// rewrites nothing else, so a repeated key in that mapping moves to the end
+// while the same repetition anywhere else keeps its first position — which is
+// what jq does with the literal duplicate yq prints for it. The two rules are
+// measured against yq over twelve shapes and are picked between per mapping,
+// on whether that mapping holds a `<<` at all: `<<: 1`, `<<:` null and an
+// inline `<<: {x: 1}` all merge nothing and all still move the repeat. Keys a
+// merge source contributes are written in the source's own order, so its
+// repeats follow the source's rule and not this mapping's.
+func decodeMapping(out *Object, node *yaml.Node, state *decodeState) error {
+	if err := state.enter(); err != nil {
+		return err
+	}
+	defer state.leave()
+	set := out.Set
+	if holdsMergeKey(node) {
+		set = out.SetLast
 	}
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		key, value := node.Content[i], node.Content[i+1]
@@ -334,19 +498,35 @@ func decodeMapping(out *Object, node *yaml.Node, depth int) error {
 				return err
 			}
 			for _, source := range sources {
-				if err := decodeMapping(out, source, depth+1); err != nil {
+				if err := state.open(source); err != nil {
+					return err
+				}
+				err := decodeMapping(out, source, state)
+				state.close(source)
+				if err != nil {
 					return err
 				}
 			}
 			continue
 		}
-		decoded, err := decodeNode(value)
+		decoded, err := decodeNode(value, state)
 		if err != nil {
 			return err
 		}
-		out.Set(keyName(key), decoded)
+		set(keyName(key), decoded)
 	}
 	return nil
+}
+
+// holdsMergeKey reports whether one mapping writes a `<<` of its own, which is
+// what decides how it positions a repeated key.
+func holdsMergeKey(node *yaml.Node) bool {
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		if keyName(node.Content[i]) == "<<" {
+			return true
+		}
+	}
+	return false
 }
 
 // mergeSources lists the mappings one `<<` names, in the order yq applies them.
@@ -385,7 +565,7 @@ func mergeSources(node *yaml.Node) ([]*yaml.Node, error) {
 // holds.
 func keyName(node *yaml.Node) string {
 	for depth := 0; node != nil && node.Kind == yaml.AliasNode; depth++ {
-		if depth > maxMergeDepth {
+		if depth > maxDecodeDepth {
 			return ""
 		}
 		node = node.Alias
@@ -471,10 +651,20 @@ func decodeInteger(literal string) (any, error) {
 // The test is the literal as written, not the literal with its underscores
 // removed. `1_0e3` is not a JSON number, so yq writes it back as `10000.0`
 // rather than keeping `10e3`.
+//
+// The parse is the literal as written too, and for the same reason on the other
+// side of the question. yq hands the raw literal to strconv.ParseFloat, which
+// takes an underscore only between two digits, so `1_0e3` and `1_000.5` are
+// numbers there and `1e_3`, `1_e3`, `1.5_`, `1.0_` and `1e3_` are all errors
+// and the whole file is refused. Removing the underscores first accepted every
+// one of them, and `retention_days: 1.0_` then reached its assertion as the
+// number 1.0 and was refused for not being whole — a second wrong answer under
+// a message that names the wrong fault. The integer path already reads the
+// literal yq reads, over eighteen underscore forms that agree.
 func decodeFloat(literal string) (any, error) {
 	rendered := literal
 	if !(strings.ContainsAny(literal, ".eE") && json.Valid([]byte(literal))) {
-		value, err := strconv.ParseFloat(strings.ReplaceAll(literal, "_", ""), 64)
+		value, err := strconv.ParseFloat(literal, 64)
 		if err != nil {
 			return nil, fmt.Errorf("cannot read %q as a number: %w", literal, err)
 		}
@@ -511,10 +701,20 @@ func decodeFloat(literal string) (any, error) {
 // A literal this cannot take apart is returned unchanged rather than guessed
 // at, which is the same answer as leaving it alone.
 //
-// One case is left divergent and cannot be closed from here: jq can be built
-// without decNumber, and such a build reads every number into a double and
-// prints it back through that. The rule below follows the default build, which
-// is what every published binary is.
+// Two cases are left divergent and cannot be closed from here.
+//
+// jq can be built without decNumber, and such a build reads every number into a
+// double and prints it back through that. The rule below follows the default
+// build, which is what every published binary is.
+//
+// decNumber also clamps an exponent it cannot hold, at roughly -1.1e9, and this
+// does not. No configuration value carries an exponent within nine orders of
+// magnitude of that, so the divergence is recorded rather than reproduced.
+//
+// Both statements are true of the Bash implementation, and this comment is the
+// only place either is written down. After the cutover nobody reads this file
+// to find out how CrossRev reads a number, so the durable record for them
+// belongs in the public documentation and is still owed.
 func scientificString(literal string) string {
 	sign, rest := "", literal
 	if strings.HasPrefix(rest, "-") {

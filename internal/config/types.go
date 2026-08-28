@@ -115,6 +115,29 @@ func (o *Object) Set(key string, value any) {
 	o.vals[key] = value
 }
 
+// SetLast writes key, moving it to the end when it is already present.
+//
+// It is Set with the other of the two positions a repeated key can take, and
+// decodeMapping picks between them per mapping. yq rebuilds a mapping that
+// holds a merge key, and a repeat there lands where its last write sits; a
+// repeat in a mapping with no merge key reaches jq as a literal duplicate,
+// which jq answers with the first position and the last value — which is Set.
+func (o *Object) SetLast(key string, value any) {
+	if o.vals == nil {
+		o.vals = map[string]any{}
+	}
+	if _, ok := o.vals[key]; ok {
+		for i, existing := range o.keys {
+			if existing == key {
+				o.keys = append(o.keys[:i], o.keys[i+1:]...)
+				break
+			}
+		}
+	}
+	o.keys = append(o.keys, key)
+	o.vals[key] = value
+}
+
 // Clone is a deep copy, so a merge never aliases a default into its result.
 func (o *Object) Clone() *Object {
 	if o == nil {

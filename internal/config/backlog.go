@@ -229,12 +229,23 @@ func (c *Config) pathExists(ctx context.Context, base core.Revision, path string
 // sequence, an absolute path or a symlink out of the checkout must fail loudly
 // instead of landing somewhere surprising (lib/config.sh:468-505).
 //
-// This is one of the two deliberate divergences approved for the native port.
-// The Bash guard resolves lexically and asks the filesystem nothing, so a
-// symlink inside the checkout pointing outside it passes (issue 128). Here the
-// deepest resolvable ancestor is resolved physically, the remainder is rejoined
-// lexically, and the result is compared against the resolved repository root. A
-// containment check a symlink walks through is not doing its job.
+// Resolving physically rather than lexically is one of the two deliberate
+// divergences approved for the native port, and it answers differently in two
+// places rather than one.
+//
+// The first is the divergence itself. The Bash guard resolves lexically and
+// asks the filesystem nothing, so a symlink inside the checkout pointing
+// outside it passes (issue 128). Here the deepest resolvable ancestor is
+// resolved physically, the remainder is rejoined lexically, and the result is
+// compared against the resolved repository root. A containment check a symlink
+// walks through is not doing its job.
+//
+// The second follows from it and is refused under a different family. A loop of
+// symlinks that never leaves the checkout resolves to nothing here, so it takes
+// unresolvableRefusal — where the Bash, resolving lexically, sees a path inside
+// the checkout and allows it. That is not the same fault as a symlink pointing
+// outside the checkout, and it is not covered by the sentence above: a write to
+// a loop lands nowhere at all.
 //
 // root must be an absolute path, which is what `git rev-parse --show-toplevel`
 // prints and what every Bash caller passes (lib/config.sh:473). It is cleaned

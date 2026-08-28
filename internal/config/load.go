@@ -104,12 +104,9 @@ func Load(ctx context.Context, base core.Revision, show ShowFile) (*Config, erro
 		operatorLayer, err = decodeDocument(operatorSource)
 		if err != nil {
 			// The operator file is always read from the working tree, so it
-			// takes the working-tree form of both refusals under its own path
-			// (lib/config.sh:213-214).
-			if errors.Is(err, errNotMapping) {
-				return nil, refuseNotMapping(operatorPath)
-			}
-			return nil, refuseUnparsable(operatorPath)
+			// takes the working-tree form of every refusal in the family,
+			// under its own path (lib/config.sh:213-214).
+			return nil, refuseDocument(err, operatorPath, core.Revision{})
 		}
 	}
 
@@ -186,21 +183,11 @@ func loadRepoLayer(ctx context.Context, base core.Revision, show ShowFile) (*Obj
 		// (lib/config.sh:142-145 and lib/config.sh:67-68).
 		layer, err := decodeDocument(source)
 		if err != nil {
-			// Both refusals name the file that was actually read rather than
-			// the composed `.github/crossrev.yml` the version refusal uses,
-			// because this one is about the bytes on the other end of that
-			// path (lib/config.sh:199-208).
-			notMapping := errors.Is(err, errNotMapping)
-			switch {
-			case notMapping && base.IsZero():
-				return nil, refuseNotMapping(path)
-			case notMapping:
-				return nil, refuseNotMappingAtBase(path, base)
-			case base.IsZero():
-				return nil, refuseUnparsable(path)
-			default:
-				return nil, refuseUnparsableAtBase(path, base)
-			}
+			// Every refusal in the family names the file that was actually
+			// read rather than the composed `.github/crossrev.yml` the version
+			// refusal uses, because this one is about the bytes on the other
+			// end of that path (lib/config.sh:199-208).
+			return nil, refuseDocument(err, path, base)
 		}
 		return layer, nil
 	}
@@ -282,6 +269,72 @@ func shapeOf(value any) string {
 	default:
 		return "a single value"
 	}
+}
+
+// refuseDocument names the file a decodeDocument error came from, and picks the
+// refusal that says which of the four faults it was.
+//
+// Four rather than two, because a reader has to be told what to change. A file
+// that will not parse, a file that parses into something other than a mapping,
+// a file whose anchor names itself and a file that nests past what any reader
+// follows are four different edits, and the last two used to arrive under the
+// first one's text — which offers a `yq '.'` command that answers the file
+// perfectly well.
+func refuseDocument(err error, path string, base core.Revision) *Refusal {
+	switch {
+	case errors.Is(err, errAliasCycle):
+		return refuseAliasCycle(path, base)
+	case errors.Is(err, errTooDeep):
+		return refuseTooDeep(path, base)
+	case errors.Is(err, errNotMapping):
+		if base.IsZero() {
+			return refuseNotMapping(path)
+		}
+		return refuseNotMappingAtBase(path, base)
+	case base.IsZero():
+		return refuseUnparsable(path)
+	default:
+		return refuseUnparsableAtBase(path, base)
+	}
+}
+
+// refuseAliasCycle refuses a file holding an anchor that is named from inside
+// its own value.
+//
+// This is a deliberate divergence, and the only one in the family. yq loads
+// some of these files: `m: &a` / `  b: *a` prints a two-level expansion and
+// exits 0. It refuses others written the same way — a second `*a` beside the
+// first, or a `<<: *a` one level down, overflow yq's own stack and it exits 2,
+// which the Bash reads as unparsable. The loaded answer is an artefact of yq
+// rewriting the anchored node while it expands it rather than a value the
+// document states, so there is nothing here to match and every cycle is refused
+// instead.
+//
+// The message says what is wrong rather than borrowing the unparsable text,
+// because that refusal's hint would send the reader to a `yq '.'` that prints a
+// mapping and tells them nothing.
+func refuseAliasCycle(path string, base core.Revision) *Refusal {
+	return &Refusal{
+		Message: "an anchor in " + path + atRevision(base) + " refers to itself",
+		Hint:    "An anchor named from inside its own value has no end, so it states no configuration that can be read back. Break the loop where the anchor is defined.",
+	}
+}
+
+// refuseTooDeep refuses a file nested past what this reader follows.
+func refuseTooDeep(path string, base core.Revision) *Refusal {
+	return &Refusal{
+		Message: fmt.Sprintf("%s%s nests more than %d levels deep", path, atRevision(base), maxDecodeDepth),
+		Hint:    "CrossRev follows a bounded depth of nesting, anchors and merge keys included. Flatten it.",
+	}
+}
+
+// atRevision is the clause a base-revision refusal adds to say which bytes it
+// read.
+func atRevision(base core.Revision) string {
+	if base.IsZero() {
+		return ""
+	}
+	return " at base revision " + base.SHA()
 }
 
 // refuseUnparsable refuses a working-tree file that will not parse

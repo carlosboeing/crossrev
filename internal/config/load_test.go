@@ -411,3 +411,61 @@ func TestATreeAtTheConfigPathIsRefusedAtTheBaseRevision(t *testing.T) {
 		t.Errorf("mode = %q, want the fallback file read", got)
 	}
 }
+
+// The cycle refusal reaches Load from both layers, and names the bytes it read.
+//
+// The operator file is the half a caller cannot route around: Load reads it on
+// every invocation whatever revision it was asked for, so three lines there
+// would have ended every run.
+func TestARecursiveAnchorIsRefusedInEitherLayer(t *testing.T) {
+	const document = "m: &a\n  b: *a\n"
+	t.Setenv("XDG_CONFIG_HOME", "/xdg")
+	const operatorPath = "/xdg/crossrev/config.yml"
+	base := revision(t, baseSHA)
+
+	for _, test := range []struct {
+		name string
+		base core.Revision
+		tree files
+		want string
+	}{
+		{
+			"the working tree", core.Revision{},
+			files{"": {".github/crossrev.yml": document}},
+			"an anchor in .github/crossrev.yml refers to itself",
+		},
+		{
+			"the base revision", base,
+			files{"": {}, baseSHA: {".github/crossrev.yml": document}},
+			"an anchor in .github/crossrev.yml at base revision " + baseSHA + " refers to itself",
+		},
+		{
+			"the operator file", base,
+			files{"": {operatorPath: document}, baseSHA: {}},
+			"an anchor in " + operatorPath + " refers to itself",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := refusalFrom(t, test.base, test.tree).Message; got != test.want {
+				t.Errorf("message = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
+// A document nested past the bound is refused rather than followed.
+//
+// The bound is the second half of what keeps the stack finite: a cycle is
+// caught by name, and everything else is caught by depth. Neither the message
+// nor the hint calls the file unparsable, because it parses.
+func TestADocumentNestedPastTheBoundIsRefused(t *testing.T) {
+	deep := "x: " + strings.Repeat("[", 2000) + strings.Repeat("]", 2000) + "\n"
+	refusal := refusalFrom(t, core.Revision{}, files{"": {".github/crossrev.yml": deep}})
+	if want := ".github/crossrev.yml nests more than 1000 levels deep"; refusal.Message != want {
+		t.Errorf("message = %q, want %q", refusal.Message, want)
+	}
+	// A document inside the bound is read, so the bound is not simply refusing
+	// everything nested.
+	shallow := "x: " + strings.Repeat("[", 100) + strings.Repeat("]", 100) + "\n"
+	mustLoad(t, core.Revision{}, files{"": {".github/crossrev.yml": shallow}})
+}

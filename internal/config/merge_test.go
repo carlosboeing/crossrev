@@ -2,6 +2,8 @@ package config_test
 
 import (
 	"encoding/json"
+	"os"
+	"os/exec"
 	"strings"
 	"testing"
 
@@ -624,9 +626,10 @@ func TestATabInContentStillRefusesTheFile(t *testing.T) {
 // other implementation refuses to run at all.
 func TestAMultiDocumentFileIsNotAMapping(t *testing.T) {
 	for name, document := range map[string]string{
-		"two mappings":         "mode: ci\n---\nmode: two\n",
-		"a mapping then empty": "mode: ci\n---\n",
-		"markers only":         "---\n---\n",
+		"two mappings":             "mode: ci\n---\nmode: two\n",
+		"a mapping then empty":     "mode: ci\n---\n",
+		"a marker below content":   "mode: ci\n---\nx: 1\n",
+		"a marker above and below": "---\nmode: ci\n---\nx: 1\n",
 	} {
 		t.Run(name, func(t *testing.T) {
 			tree := files{"": {".github/crossrev.yml": document}}
@@ -642,11 +645,284 @@ func TestAMultiDocumentFileIsNotAMapping(t *testing.T) {
 	}
 }
 
+// An empty document above the first content line is not a second document.
+//
+// yq holds the leading region aside before it parses and swallows every bare
+// `---` in it, so it prints one JSON line and the Bash loads the file. go-yaml
+// handed the same bytes builds a document per marker, and the multi-document
+// guard above then refused a file whose own hint sent the reader to a `yq '.'`
+// that prints a good mapping. Each document here loads under yq, measured.
+func TestLeadingDocumentMarkersAreDroppedTheWayYqDropsThem(t *testing.T) {
+	for name, document := range map[string]string{
+		"one empty document":     "---\n---\nmode: ci\n",
+		"two empty documents":    "---\n---\n---\nmode: ci\n",
+		"a comment between them": "---\n# c\n---\nmode: ci\n",
+		"a blank between them":   "---\n\n---\nmode: ci\n",
+		"a tab between them":     "---\n\t\n---\nmode: ci\n",
+		"a marker with a space":  "--- \n---\nmode: ci\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			loaded := mustLoad(t, core.Revision{}, files{"": {".github/crossrev.yml": document}})
+			if got := loaded.Get(".mode"); got != "ci" {
+				t.Errorf("mode = %q, want the one document read", got)
+			}
+		})
+	}
+
+	// Markers with nothing after them state no policy, which is what an absent
+	// file states. yq prints `null` for each of these, measured.
+	for name, document := range map[string]string{
+		"markers only":           "---\n---\n",
+		"one marker only":        "---\n",
+		"markers then a comment": "---\n---\n# only\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			loaded := mustLoad(t, core.Revision{}, files{"": {".github/crossrev.yml": document}})
+			if got := loaded.Get(".policy.min_fix_severity"); got != "medium" {
+				t.Errorf("min_fix_severity = %q, want the default", got)
+			}
+		})
+	}
+
+	// Only a marker alone on its line is dropped. `---x` is not one, and both
+	// sides refuse it.
+	tree := files{"": {".github/crossrev.yml": "---x\nmode: ci\n"}}
+	if got := refusalFrom(t, core.Revision{}, tree).Message; got != "could not parse .github/crossrev.yml" {
+		t.Errorf("message = %q, want the file refused as unparsable", got)
+	}
+}
+
 // A refusal quotes what `jq -r` writes, and `jq -r` pretty-prints a composite.
 func TestARefusalQuotesACompositeTheWayJqPrintsIt(t *testing.T) {
 	tree := files{"": {".github/crossrev.yml": "version: 1\npolicy:\n  min_fix_severity: [a, b]\n"}}
 	want := "policy.min_fix_severity is '[\n  \"a\",\n  \"b\"\n]', which is not one of high, medium or low"
 	if got := refusalFrom(t, core.Revision{}, tree).Message; got != want {
 		t.Errorf("message = %q, want %q", got, want)
+	}
+}
+
+// recursiveAnchorCase is the env var a child process reads to say which
+// document it should try to load.
+const recursiveAnchorCase = "CROSSREV_TEST_RECURSIVE_ANCHOR"
+
+// recursiveAnchors are the four shapes that reach a node from inside itself.
+//
+// The yq column is measured, and it is not one answer. `yq -o=json -I=0` loads
+// three of these and exits 0, printing an expansion two levels deep and then an
+// empty container; on the fourth it overflows its own stack and exits 2, which
+// _cfg_yaml_to_json turns into the unparsable refusal. Two self-references in
+// one mapping overflow it as well. The loaded answers are an artefact of yq
+// rewriting the anchored node while expanding it, so there is no value here to
+// reproduce and all four are refused.
+var recursiveAnchors = []struct{ name, document, yq string }{
+	{"an alias to the mapping holding it", "m: &a\n  b: *a\n", `{"m":{"b":{"b":{}}}}`},
+	{"an alias to the sequence holding it", "m: &a [*a]\n", `{"m":[[[]]]}`},
+	{"a merge key naming its own mapping", "m: &a\n  <<: *a\n", `{"m":{"<<":{"<<":{}}}}`},
+	{"a merge key one level inside its own mapping", "m: &a\n  b:\n    <<: *a\n", "exit 2, overflowed"},
+	{"a pair of anchors naming each other", "a: &x\n  p: &y\n    q: *x\n", `{"a":{"p":{"q":{"p":{"q":{}}}}}}`},
+}
+
+// A self-referential anchor is refused, and the process survives to say so.
+//
+// It used to end the process instead. decodeNode carried no bound at all and
+// the merge bound was reset by every hop through it, so three lines of YAML
+// reached Load from either configuration layer and killed it with a Go stack
+// overflow — a fatal error no recover() catches, so no caller could have turned
+// it into a refusal. Load reads the operator file on every invocation whatever
+// revision it was asked for, so no caller could avoid it either.
+//
+// Each case runs in a child process. A stack overflow takes the whole test
+// binary with it, so a regression asserted in-process would report every other
+// test in the package as a failure and bury this one; out of process it reports
+// itself, and the child's exit status is the assertion.
+func TestARecursiveAnchorIsRefusedRatherThanEndingTheProcess(t *testing.T) {
+	if name := os.Getenv(recursiveAnchorCase); name != "" {
+		runRecursiveAnchorChild(t, name)
+		return
+	}
+	for _, test := range recursiveAnchors {
+		t.Run(test.name, func(t *testing.T) {
+			command := exec.Command(os.Args[0], "-test.run=^"+t.Name()[:strings.Index(t.Name(), "/")]+"$")
+			// The child's environment is built rather than inherited.
+			// os.Environ is confined to internal/exec/env.go, which is the
+			// boundary that keeps a GitHub credential out of every process
+			// this repository starts, and archtest holds it over the tests
+			// too. Nothing here reads anything else: the documents are
+			// in-memory and no case resolves the operator path.
+			command.Env = []string{recursiveAnchorCase + "=" + test.name}
+			out, err := command.CombinedOutput()
+			if err != nil {
+				t.Fatalf("the decoder did not survive %q (yq: %s): %v\n%s", test.document, test.yq, err, out)
+			}
+		})
+	}
+}
+
+// runRecursiveAnchorChild is the half that runs in the child process.
+func runRecursiveAnchorChild(t *testing.T, name string) {
+	for _, test := range recursiveAnchors {
+		if test.name != name {
+			continue
+		}
+		tree := files{"": {".github/crossrev.yml": test.document}}
+		refusal := refusalFrom(t, core.Revision{}, tree)
+		want := "an anchor in .github/crossrev.yml refers to itself"
+		if refusal.Message != want {
+			t.Fatalf("message = %q, want %q", refusal.Message, want)
+		}
+		// The hint must not send the reader to a command that answers the
+		// file, which is what the unparsable refusal's hint does.
+		if strings.Contains(refusal.Hint, "yq") {
+			t.Fatalf("hint = %q, which offers a command that parses the file", refusal.Hint)
+		}
+		return
+	}
+	t.Fatalf("no recursive anchor case named %q", name)
+}
+
+// An anchor named twice beside itself is two expansions, not a cycle. The bound
+// has to close over the path through the document and not over the document, or
+// every shared anchor — the whole point of writing one — would be refused.
+func TestARepeatedAnchorIsNotACycle(t *testing.T) {
+	document := "version: 1\nd: &d\n  hooks: run\nq:\n  one: *d\n  two: *d\ngit:\n  <<: *d\n"
+	loaded := mustLoad(t, core.Revision{}, files{"": {".github/crossrev.yml": document}})
+	if got := string(loaded.GetJSON(".q")); got != `{"one":{"hooks":"run"},"two":{"hooks":"run"}}` {
+		t.Errorf("the repeated anchor = %s", got)
+	}
+	if got := loaded.Get(".git.hooks"); got != "run" {
+		t.Errorf("git.hooks = %q, want the merged value", got)
+	}
+}
+
+// The one key read through `tostring` is quoted on one line.
+//
+// jq pretty-prints a container it writes as output and leaves one it converts
+// with `tostring` compact, and both readings are live in lib/config.sh. Five
+// refused keys are read through `// empty`, so a list there is named across
+// four lines; logs.keep_transcripts is read through `tostring` at
+// lib/config.sh:231, because `//` would report the legitimate default of false
+// as unset. Measured: the Bash names this value `[1,{"a":"b"}]`.
+func TestTheTranscriptSwitchIsQuotedCompact(t *testing.T) {
+	tree := files{"": {".github/crossrev.yml": "version: 1\nlogs:\n  keep_transcripts: [1, {a: b}]\n"}}
+	want := `logs.keep_transcripts is '[1,{"a":"b"}]', which is not true or false`
+	if got := refusalFrom(t, core.Revision{}, tree).Message; got != want {
+		t.Errorf("message = %q, want %q", got, want)
+	}
+	// The other five keys keep the pretty-printed form, so the two renderings
+	// cannot be collapsed into one.
+	pretty := files{"": {".github/crossrev.yml": "version: 1\ngit:\n  hooks: [1, {a: b}]\n"}}
+	wantPretty := "git.hooks is '[\n  1,\n  {\n    \"a\": \"b\"\n  }\n]', which is not one of skip or run"
+	if got := refusalFrom(t, core.Revision{}, pretty).Message; got != wantPretty {
+		t.Errorf("message = %q, want %q", got, wantPretty)
+	}
+}
+
+// A float literal whose underscores yq cannot read refuses the file.
+//
+// yq hands the raw literal to strconv.ParseFloat, which takes an underscore
+// only between two digits. Removing the underscores before the parse accepted
+// six literals yq refuses, and `retention_days: 1.0_` then reached its own
+// assertion as the number 1.0 and was refused for not being a whole number —
+// the wrong fault named for a file the other implementation will not parse at
+// all. Every literal here is measured against `yq -o=json`.
+func TestAFloatWithMisplacedUnderscoresRefusesTheFile(t *testing.T) {
+	for _, literal := range []string{"1e_3", "1_e3", "1.5_", "1.0_", "1e3_", "1.5__", "1_0e3_"} {
+		t.Run(literal, func(t *testing.T) {
+			tree := files{"": {".github/crossrev.yml": "version: 1\nx: " + literal + "\n"}}
+			if got := refusalFrom(t, core.Revision{}, tree).Message; got != "could not parse .github/crossrev.yml" {
+				t.Errorf("message = %q, want the file refused as unparsable", got)
+			}
+		})
+	}
+	// The refusal a misplaced underscore used to produce, on the key that made
+	// it visible: yq will not read this file, so nothing reaches the assertion.
+	tree := files{"": {".github/crossrev.yml": "version: 1\nlogs:\n  retention_days: 1.0_\n"}}
+	if got := refusalFrom(t, core.Revision{}, tree).Message; got != "could not parse .github/crossrev.yml" {
+		t.Errorf("message = %q, want the parse refusal rather than the value refusal", got)
+	}
+	// An underscore between digits is a number to both, and keeps yq's text.
+	for _, test := range []struct{ literal, want string }{
+		{"1_0e3", "10000.0"},
+		{"1_000.5", "1000.5"},
+		{"1_0.5", "10.5"},
+		{"1.0_0", "1.0"},
+	} {
+		t.Run(test.literal, func(t *testing.T) {
+			tree := files{"": {".github/crossrev.yml": "version: 1\nx: " + test.literal + "\n"}}
+			loaded := mustLoad(t, core.Revision{}, tree)
+			if got := string(loaded.GetJSON(".x")); got != test.want {
+				t.Errorf("x = %s, want %s", got, test.want)
+			}
+		})
+	}
+}
+
+// A repeated key takes one of two positions, and the merge key decides which.
+//
+// yq rebuilds a mapping that holds a `<<` and rewrites nothing else, so a
+// repeat there lands where its last write sits. A repeat in a mapping with no
+// merge key reaches jq as a literal duplicate JSON key, which jq answers with
+// the first position and the last value. Every expectation here is the text
+// `yq -o=json -I=0` prints for the same document.
+func TestARepeatedKeyBesideAMergeKeyTakesItsLastPosition(t *testing.T) {
+	for _, test := range []struct{ name, document, path, want string }{
+		{
+			"a repeat after the merge",
+			"d: &d {z: 0}\nm:\n  a: 1\n  <<: *d\n  b: 2\n  a: 3\n",
+			".m", `{"z":0,"b":2,"a":3}`,
+		},
+		{
+			"a repeat before the merge",
+			"d: &d {z: 0}\nm:\n  a: 1\n  b: 2\n  a: 3\n  <<: *d\n",
+			".m", `{"b":2,"a":3,"z":0}`,
+		},
+		{
+			"a repeat either side of the merge",
+			"d: &d {z: 0}\nm:\n  a: 1\n  b: 2\n  <<: *d\n  a: 3\n",
+			".m", `{"b":2,"z":0,"a":3}`,
+		},
+		{
+			"a key the merge supplied, re-set after it",
+			"d: &d {z: 0}\nm:\n  <<: *d\n  b: 2\n  z: 9\n",
+			".m", `{"b":2,"z":9}`,
+		},
+		{
+			"a merge source's own repeat keeps its first position",
+			"d: &d {a: 1, b: 2, a: 3}\nm:\n  <<: *d\n",
+			".m", `{"a":3,"b":2}`,
+		},
+		{
+			"a merge that merges nothing still moves the repeat",
+			"m:\n  <<: 1\n  a: 1\n  b: 2\n  a: 3\n",
+			".m", `{"b":2,"a":3}`,
+		},
+		{
+			"a mapping with no merge key keeps the first position",
+			"n:\n  a: 1\n  b: 2\n  a: 3\n",
+			".n", `{"a":3,"b":2}`,
+		},
+		{
+			"a mapping beside one that holds a merge key is unaffected",
+			"d: &d {z: 0}\nm:\n  <<: *d\nn:\n  a: 1\n  b: 2\n  a: 3\n",
+			".n", `{"a":3,"b":2}`,
+		},
+		{
+			"a mapping nested inside one that holds a merge key is unaffected",
+			"d: &d {z: 0}\nm:\n  <<: *d\n  n:\n    a: 1\n    b: 2\n    a: 3\n",
+			".m", `{"z":0,"n":{"a":3,"b":2}}`,
+		},
+		{
+			"a merge source that holds its own merge key moves its own repeat",
+			"e: &e {q: 0}\nd: &d\n  <<: *e\n  a: 1\n  b: 2\n  a: 3\nm:\n  <<: *d\n",
+			".m", `{"q":0,"b":2,"a":3}`,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			tree := files{"": {".github/crossrev.yml": "version: 1\n" + test.document}}
+			loaded := mustLoad(t, core.Revision{}, tree)
+			if got := string(loaded.GetJSON(test.path)); got != test.want {
+				t.Errorf("%s = %s, want %s", test.path, got, test.want)
+			}
+		})
 	}
 }
