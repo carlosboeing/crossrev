@@ -213,10 +213,11 @@ func TestReviewStripsMarkersAndFlattensCommentBodies(t *testing.T) {
 		Diff:  []byte(o.Inputs.Diff),
 		Meta:  o.Inputs.Meta,
 		Threads: []prompt.Thread{{
-			Path: "a.ts", Line: 4,
+			Path: prompt.Str("a.ts"), Line: prompt.Num(4), IsResolved: prompt.Bool(false),
 			Comments: []prompt.Comment{{
 				Author: prompt.Login("carol"),
-				Body:   "first\nsecond <!-- crossrev:f {\"id\":\"aaaa000000000001\"} --> third",
+				Body: prompt.Str(
+					"first\nsecond <!-- crossrev:f {\"id\":\"aaaa000000000001\"} --> third"),
 			}},
 		}},
 	}

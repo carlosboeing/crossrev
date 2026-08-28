@@ -34,8 +34,8 @@ func Findings(payload []byte) error {
 	if len(bytes.TrimSpace(payload)) == 0 {
 		return nil
 	}
-	var top json.RawMessage
-	if err := json.Unmarshal(payload, &top); err != nil {
+	top, ok := jqParse(payload)
+	if !ok {
 		return shapef("the payload is not parseable JSON")
 	}
 

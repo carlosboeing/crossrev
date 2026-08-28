@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/carlosboeing/crossrev/internal/core"
@@ -26,30 +27,40 @@ import (
 // which findings are fixable, and a model that ranks them differently
 // contradicts a comment sitting on the pull request.
 type Finding struct {
-	Number      int    `json:"number"`
-	ID          string `json:"id"`
-	Severity    string `json:"severity"`
-	Category    string `json:"category"`
-	PreExisting bool   `json:"pre_existing"`
-	Path        string `json:"path"`
-	Line        int    `json:"line"`
-	Title       string `json:"title"`
-	MayFix      bool   `json:"may_fix"`
+	// Every field is a Value: the shell interpolates each one through jq, and
+	// an absent key prints `null` where a Go zero value prints nothing. Number
+	// and Line are Values for a second reason — lib/validate.sh accepts a
+	// fractional `line`, and jq renders `app.ts:1.5` where an int cannot hold
+	// it at all.
+	Number      Value `json:"number"`
+	ID          Value `json:"id"`
+	Severity    Value `json:"severity"`
+	Category    Value `json:"category"`
+	PreExisting Value `json:"pre_existing"`
+	Path        Value `json:"path"`
+	Line        Value `json:"line"`
+	Title       Value `json:"title"`
+	MayFix      Value `json:"may_fix"`
 
-	// Why and Fix each print "-" when the record carried nothing.
-	Why string `json:"why"`
-	Fix string `json:"fix"`
+	// Why and Fix each print "-" when the record carried nothing. An empty
+	// string is not nothing: jq counts "" as true, so `- Why it matters: `
+	// ends the line there.
+	Why Value `json:"why"`
+	Fix Value `json:"fix"`
 
 	// PriorResolution is how this leg settled the same finding in an earlier
-	// pass. Empty prints no line at all.
-	PriorResolution string `json:"prior_resolution"`
+	// pass. The shell's guard is `(.prior_resolution // null) != null`, which
+	// is true for exactly the truthy values — so an empty string prints the
+	// whole sentence with nothing inside the backticks, and false prints no
+	// line at all.
+	PriorResolution Value `json:"prior_resolution"`
 }
 
 // Issue is one existing issue offered as a duplicate candidate.
 type Issue struct {
-	Number int    `json:"number"`
-	State  string `json:"state"`
-	Title  string `json:"title"`
+	Number Value `json:"number"`
+	State  Value `json:"state"`
+	Title  Value `json:"title"`
 }
 
 // CandidateSet is the issues retrieved for one finding, keyed by that finding's
@@ -137,13 +148,23 @@ type Resolve struct {
 	Candidates Candidates
 
 	// QuarantinedPaths is every path the sandbox moved out of the checkout
-	// before this leg started, sorted and made unique by the caller. It is an
-	// input because the descriptor that lists them sits behind an effect
-	// boundary this package does not cross.
+	// before this leg started. It is an input because the descriptor that
+	// lists them sits behind an effect boundary this package does not cross.
+	//
+	// Render sorts it and makes it unique rather than asking the caller to.
+	// `_sandbox_paths` already answers sorted and unique, so doing it here
+	// costs no parity and removes one thing the leg after this one can get
+	// wrong in a way the prompt would not report.
 	QuarantinedPaths []string
 
 	// Convention is the repository's own commit style, read from the base
 	// revision. Its zero value prints nothing.
+	//
+	// It carries the base revision and the excluded address itself. The shell
+	// reads both off the metadata object and passes them to
+	// prompt_commit_convention; here they sit beside the bytes the two git
+	// commands wrote, because that is the one place a caller cannot set one
+	// and forget the other.
 	Convention CommitConvention
 }
 
@@ -155,12 +176,12 @@ func (r Resolve) Render() []byte {
 	b.WriteString("# Your task\n\n")
 	// Same reasoning as the review prompt: the pass number carries no
 	// denominator.
-	fmt.Fprintf(&b, "You are the resolve leg of CrossRev, running pass %d on %s pull request #%d. "+
+	fmt.Fprintf(&b, "You are the resolve leg of CrossRev, running pass %s on %s pull request #%s. "+
 		"The findings below came from the review leg — a separate agent, reviewing this diff "+
-		"without seeing your work.\n\n", r.Meta.Pass, r.Meta.Repo, r.Meta.PR)
+		"without seeing your work.\n\n", sub(r.Meta.Pass), sub(r.Meta.Repo), sub(r.Meta.PR))
 	fmt.Fprintf(&b, "You are in a checkout of the pull request's head branch at %s. Change code "+
 		"in the working tree; the orchestrator commits and pushes it. Make no GitHub call — you "+
-		"have no credential for one.\n\n", r.Meta.HeadSHA)
+		"have no credential for one.\n\n", sub(r.Meta.HeadSHA))
 	b.WriteString("Follow the skill reproduced immediately below.\n\n")
 	b.WriteString("---\n\n")
 	b.Write(SkillBody(r.Skill))
@@ -170,7 +191,7 @@ func (r Resolve) Render() []byte {
 	fmt.Fprintf(&b, "- `min_fix_severity` is **%s**. Every finding below carries `may fix: yes` "+
 		"or `may fix: no`, worked out from that threshold — do not re-derive it, and do not argue "+
 		"with it. A `no` finding is still verified and still gets a reply; what it does not get "+
-		"is a change to the code.\n", r.Meta.minFixSeverity())
+		"is a change to the code.\n", subAlt(r.Meta.MinFixSeverity, "medium"))
 	b.WriteString("- A finding you may not fix is `skipped` with a one-line reason, unless it is " +
 		"genuinely wrong, in which case it is `disputed`. Nothing is silently dropped.\n")
 	b.WriteString("- Pre-existing findings: verify, then stop. Confirmed real becomes `deferred`; " +
@@ -189,8 +210,8 @@ func (r Resolve) Render() []byte {
 		"A finding on one of these is `deferred`, with a reply saying the path is quarantined "+
 		"and the finding was reported rather than verified. Never return `fixed` for one: the "+
 		"write is discarded when the checkout is restored, and the reply would claim a change "+
-		"that exists nowhere.\n", joinPaths(r.QuarantinedPaths))
-	fmt.Fprintf(&b, "- Deferred work goes to: %s\n\n", r.Meta.Backlog)
+		"that exists nowhere.\n", joinPaths(sortedUnique(r.QuarantinedPaths)))
+	fmt.Fprintf(&b, "- Deferred work goes to: %s\n\n", sub(r.Meta.Backlog))
 
 	// Before the untrusted notice, because it is the orchestrator speaking about
 	// the repository rather than anything the pull request supplied. The
@@ -209,20 +230,20 @@ func (r Resolve) Render() []byte {
 		// translation back to ids on the other side reads the same field the
 		// model was shown.
 		preExisting := ""
-		if f.PreExisting {
+		if f.PreExisting.Truthy() {
 			preExisting = ", pre-existing"
 		}
-		fmt.Fprintf(&b, "### %d. `%s` — %s %s%s — %s:%d\n\n", f.Number, f.ID, f.Severity,
+		fmt.Fprintf(&b, "### %s. `%s` — %s %s%s — %s:%s\n\n", f.Number, f.ID, f.Severity,
 			f.Category, preExisting, f.Path, f.Line)
 		fmt.Fprintf(&b, "**%s**\n\n", f.Title)
-		fmt.Fprintf(&b, "- Why it matters: %s\n", dash(f.Why))
-		fmt.Fprintf(&b, "- Suggested fix: %s\n", dash(f.Fix))
+		fmt.Fprintf(&b, "- Why it matters: %s\n", f.Why.Or("-"))
+		fmt.Fprintf(&b, "- Suggested fix: %s\n", f.Fix.Or("-"))
 		mayFix := "no — reply and skip, or dispute if it is wrong"
-		if f.MayFix {
+		if f.MayFix.Truthy() {
 			mayFix = "yes"
 		}
 		fmt.Fprintf(&b, "- May fix: %s\n", mayFix)
-		if f.PriorResolution != "" {
+		if f.PriorResolution.Truthy() {
 			fmt.Fprintf(&b, "- **You settled this `%s` in an earlier pass.** If it is unchanged "+
 				"and re-raised, escalate rather than re-argue.\n", f.PriorResolution)
 		}
@@ -251,7 +272,7 @@ func (r Resolve) Render() []byte {
 				if i > 0 {
 					b.WriteByte('\n')
 				}
-				fmt.Fprintf(&b, "- **#%d** (%s) %s", issue.Number, issue.State, issue.Title)
+				fmt.Fprintf(&b, "- **#%s** (%s) %s", issue.Number, issue.State, issue.Title)
 			}
 			b.WriteString("\n\n")
 		}
@@ -264,7 +285,7 @@ func (r Resolve) Render() []byte {
 			// Every thread, resolved or not, and the resolved ones say so. The
 			// review prompt leaves them out instead.
 			suffix := ""
-			if t.IsResolved {
+			if t.IsResolved.Truthy() {
 				suffix = " (resolved)"
 			}
 			renderThread(&b, t, suffix)
@@ -293,8 +314,8 @@ func (r Resolve) Render() []byte {
 // finding carrying that id, or the null it prints when none does.
 func (r Resolve) numberFor(id string) string {
 	for _, f := range r.Findings {
-		if f.ID == id {
-			return itoa(f.Number)
+		if f.ID.EqualsString(id) {
+			return f.Number.String()
 		}
 	}
 	return "null"
@@ -306,4 +327,21 @@ func (r Resolve) numberFor(id string) string {
 // differing the same way.
 func joinPaths(paths []string) string {
 	return strings.ReplaceAll(strings.Join(paths, ","), ",", ", ")
+}
+
+// sortedUnique is what `_sandbox_paths` already answers with, applied again so
+// that a caller who forgets cannot change the prompt.
+func sortedUnique(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := append([]string(nil), in...)
+	sort.Strings(out)
+	kept := out[:1]
+	for _, p := range out[1:] {
+		if p != kept[len(kept)-1] {
+			kept = append(kept, p)
+		}
+	}
+	return kept
 }

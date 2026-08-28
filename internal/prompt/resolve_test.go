@@ -138,7 +138,7 @@ func TestResolveNamesAPriorResolution(t *testing.T) {
 	o := loadResolveOracle(t)
 	in := resolveFromOracle(o)
 	in.Findings = append([]prompt.Finding(nil), o.Inputs.Findings...)
-	in.Findings[0].PriorResolution = "skipped"
+	in.Findings[0].PriorResolution = prompt.Str("skipped")
 	got := string(in.Render())
 
 	want := "- **You settled this `skipped` in an earlier pass.** If it is unchanged and re-raised, " +
@@ -158,8 +158,10 @@ func TestResolveKeepsTheCandidateOrder(t *testing.T) {
 	o := loadResolveOracle(t)
 	in := resolveFromOracle(o)
 	in.Candidates = prompt.Candidates{
-		{FindingID: "cccc000000000003", Issues: []prompt.Issue{{Number: 31, State: "CLOSED", Title: "b"}}},
-		{FindingID: "aaaa000000000001", Issues: []prompt.Issue{{Number: 17, State: "OPEN", Title: "a"}}},
+		{FindingID: "cccc000000000003", Issues: []prompt.Issue{
+			{Number: prompt.Num(31), State: prompt.Str("CLOSED"), Title: prompt.Str("b")}}},
+		{FindingID: "aaaa000000000001", Issues: []prompt.Issue{
+			{Number: prompt.Num(17), State: prompt.Str("OPEN"), Title: prompt.Str("a")}}},
 	}
 	got := string(in.Render())
 
@@ -182,7 +184,8 @@ func TestResolvePrintsNullForACandidateNoFindingClaims(t *testing.T) {
 	o := loadResolveOracle(t)
 	in := resolveFromOracle(o)
 	in.Candidates = prompt.Candidates{
-		{FindingID: "dddd000000000004", Issues: []prompt.Issue{{Number: 5, State: "OPEN", Title: "x"}}},
+		{FindingID: "dddd000000000004", Issues: []prompt.Issue{
+			{Number: prompt.Num(5), State: prompt.Str("OPEN"), Title: prompt.Str("x")}}},
 	}
 	if !strings.Contains(string(in.Render()), "### candidates for finding null (`dddd000000000004`)") {
 		t.Fatal("wanted the null jq prints when no finding carries that id")

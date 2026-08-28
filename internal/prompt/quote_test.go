@@ -73,11 +73,37 @@ func TestQuoteBlockIndentsEveryLine(t *testing.T) {
 }
 
 // The multi-byte case tr is measured on. The oracle records that it ran under
-// BSD tr in a UTF-8 locale, and the ranges are byte ranges: a character whose
-// UTF-8 encoding holds no byte below 0x20 passes through whole.
+// BSD tr in a UTF-8 locale, and a character whose UTF-8 encoding is valid
+// passes through whole either way.
 func TestQuoteBlockLeavesMultiByteCharactersAlone(t *testing.T) {
 	if got := prompt.QuoteBlock([]byte("fix: café — reset")); string(got) != "    fix: café — reset" {
 		t.Fatalf("got %q", got)
+	}
+}
+
+// Where the two part company: invalid UTF-8.
+//
+// BSD tr in a UTF-8 locale is not byte-oriented, whatever the ranges look like.
+// Measured on the platform the oracle records:
+//
+//	$ printf 'ab\xc3\x28cd' | tr '\000-\011\013-\037\177' ' '
+//	ab
+//	tr: Illegal byte sequence
+//
+// It writes what it had, reports the error and stops, so the shell truncates a
+// `.gitmessage` at the first malformed byte and prints the rest of the section
+// as though the file ended there. Go passes the bytes through and quotes the
+// whole file.
+//
+// Go's answer is the better one, and it is the one this port keeps: a
+// repository's commit template is not the orchestrator's to silently truncate,
+// and the flattening exists to stop escape sequences reaching a terminal rather
+// than to police encodings. The bytes are not control characters, so nothing
+// the flattening is for is lost. Recorded here rather than closed.
+func TestQuoteBlockPassesInvalidUTF8ThroughWhereBSDTrTruncates(t *testing.T) {
+	got := string(prompt.QuoteBlock([]byte("ab\xc3(cd")))
+	if got != "    ab\xc3(cd" {
+		t.Fatalf("got %q, want the bytes passed through", got)
 	}
 }
 
@@ -112,8 +138,8 @@ func TestEmbeddedSkillsAreTheCanonicalFiles(t *testing.T) {
 		embedded []byte
 		path     string
 	}{
-		{"pr-review", prompt.ReviewSkill, "../../skills/pr-review/SKILL.md"},
-		{"pr-resolve", prompt.ResolveSkill, "../../skills/pr-resolve/SKILL.md"},
+		{"pr-review", prompt.ReviewSkill(), "../../skills/pr-review/SKILL.md"},
+		{"pr-resolve", prompt.ResolveSkill(), "../../skills/pr-resolve/SKILL.md"},
 	} {
 		canonical := readFile(t, tc.path)
 		if string(tc.embedded) != string(canonical) {

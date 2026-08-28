@@ -21,14 +21,25 @@
 
 package prompt
 
-import _ "embed"
+import (
+	"bytes"
+	_ "embed"
+)
+
+// The two are unexported, and the accessors below hand back a copy each time.
+// An exported `var x []byte` is writable from any package, and the whole rubric
+// is what a leg is judged against — one assignment anywhere in the binary
+// changes what every later prompt reproduces, with nothing to report it. A copy
+// costs one allocation per prompt and removes process-wide mutable state.
+
+//go:embed assets/pr-review.SKILL.md
+var reviewSkill []byte
+
+//go:embed assets/pr-resolve.SKILL.md
+var resolveSkill []byte
 
 // ReviewSkill is skills/pr-review/SKILL.md, byte for byte.
-//
-//go:embed assets/pr-review.SKILL.md
-var ReviewSkill []byte
+func ReviewSkill() []byte { return bytes.Clone(reviewSkill) }
 
 // ResolveSkill is skills/pr-resolve/SKILL.md, byte for byte.
-//
-//go:embed assets/pr-resolve.SKILL.md
-var ResolveSkill []byte
+func ResolveSkill() []byte { return bytes.Clone(resolveSkill) }

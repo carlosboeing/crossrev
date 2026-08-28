@@ -69,6 +69,102 @@ func semanticf(format string, a ...any) *SemanticError {
 // element reaches it through `tojson`. Neither is Go's `encoding/json` default
 // output, so the rules are reproduced here rather than approximated.
 
+// jqParse is the shell's `jq ... <<<"$payload"` up to the point it has a value:
+// nil when jq would refuse the document, which the shell reports as one line.
+//
+// Go's encoding/json is the more permissive of the two in exactly one way that
+// matters. A `\uXXXX` escape naming half a surrogate pair is accepted, and the
+// character is replaced with U+FFFD; jq stops with "Invalid \uXXXX\uXXXX
+// surrogate pair escape" and the shell prints "the payload is not parseable
+// JSON". The difference is not cosmetic: the shell's run stops there, and Go's
+// carried a mangled title on into a posted comment.
+//
+// Invalid UTF-8 *bytes* are not this case. jq accepts them and substitutes,
+// measured against jq 1.8.1, so Go accepting them is parity rather than drift.
+func jqParse(payload []byte) (json.RawMessage, bool) {
+	var top json.RawMessage
+	if err := json.Unmarshal(payload, &top); err != nil {
+		return nil, false
+	}
+	if hasLoneSurrogateEscape(payload) {
+		return nil, false
+	}
+	return top, true
+}
+
+// hasLoneSurrogateEscape walks the document's string literals and reports a
+// `\u` escape in the surrogate range that is not half of a well-formed pair.
+// It runs after encoding/json has accepted the document, so the string state it
+// tracks is the state of a document already known to be structurally valid.
+func hasLoneSurrogateEscape(payload []byte) bool {
+	inString := false
+	for i := 0; i < len(payload); i++ {
+		if !inString {
+			if payload[i] == '"' {
+				inString = true
+			}
+			continue
+		}
+		switch payload[i] {
+		case '"':
+			inString = false
+		case '\\':
+			if i+1 >= len(payload) {
+				return false
+			}
+			if payload[i+1] != 'u' {
+				// Any other escape is two bytes, and skipping the second
+				// keeps `\\` from reading as the start of an escape.
+				i++
+				continue
+			}
+			hi, ok := hex4(payload, i+2)
+			if !ok {
+				return false
+			}
+			i += 5
+			if hi >= 0xdc00 && hi <= 0xdfff {
+				// A low surrogate with no high one before it.
+				return true
+			}
+			if hi < 0xd800 || hi > 0xdbff {
+				continue
+			}
+			// A high surrogate needs a low one immediately after it.
+			if i+6 >= len(payload) || payload[i+1] != '\\' || payload[i+2] != 'u' {
+				return true
+			}
+			lo, ok := hex4(payload, i+3)
+			if !ok || lo < 0xdc00 || lo > 0xdfff {
+				return true
+			}
+			i += 6
+		}
+	}
+	return false
+}
+
+// hex4 reads the four hex digits of a `\uXXXX` escape starting at at.
+func hex4(b []byte, at int) (int, bool) {
+	if at+4 > len(b) {
+		return 0, false
+	}
+	v := 0
+	for _, c := range b[at : at+4] {
+		switch {
+		case c >= '0' && c <= '9':
+			v = v*16 + int(c-'0')
+		case c >= 'a' && c <= 'f':
+			v = v*16 + int(c-'a') + 10
+		case c >= 'A' && c <= 'F':
+			v = v*16 + int(c-'A') + 10
+		default:
+			return 0, false
+		}
+	}
+	return v, true
+}
+
 // jqType names a raw value the way jq's `type` does. An absent key is null,
 // because jq indexing an object for a key it does not hold yields null.
 func jqType(raw json.RawMessage) string {
@@ -280,9 +376,12 @@ func writeJQString(b *strings.Builder, s string) {
 			if r == utf8.RuneError {
 				// Go's decoder has already replaced each malformed byte with
 				// one replacement character, where jq replaces each malformed
-				// sequence with one. ADR 0019 records that difference and does
-				// not close it; a valid U+FFFD in the payload writes through
-				// here unchanged either way.
+				// sequence with one, so a two-byte truncation reaches a
+				// message as two U+FFFD here and as one under jq. The
+				// validator deliberately does not close that: ADR 0019's
+				// decision text scopes the same difference to the marker
+				// writer and does not name this package. A valid U+FFFD in
+				// the payload writes through here unchanged either way.
 				b.WriteRune(utf8.RuneError)
 				continue
 			}

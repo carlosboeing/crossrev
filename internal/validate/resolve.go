@@ -6,7 +6,9 @@ package validate
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"math"
+	"math/big"
 	"sort"
 	"strconv"
 	"strings"
@@ -24,7 +26,7 @@ import (
 // failure being designed out (tests/test-schemas.sh:236-242).
 type Expectations struct {
 	Findings   int
-	Candidates []float64
+	Candidates []int
 }
 
 // Resolve checks one resolve payload and returns nil, a ShapeError, or a
@@ -43,8 +45,8 @@ func Resolve(payload []byte, expect *Expectations) error {
 		// jq ran the filter on no input at all, printed nothing and exited 0.
 		return nil
 	}
-	var top json.RawMessage
-	if err := json.Unmarshal(payload, &top); err != nil {
+	top, ok := jqParse(payload)
+	if !ok {
 		return shapef("the payload is not parseable JSON")
 	}
 	if jqType(top) != "object" {
@@ -133,8 +135,19 @@ func resolutionIsBad(element json.RawMessage) bool {
 	// jq has one number type, so whole-ness is checked rather than assumed. A
 	// harness that constrains output cannot return 1.5 here, and the
 	// fenced-JSON path has no such guarantee (lib/validate.sh:94-98).
+	// `floor` is arithmetic, and jq's arithmetic is double precision: a
+	// literal beyond a double collapses first, so 1.0000000000000001 and 1E+19
+	// are both whole to jq and only 1.5 is not. Measured against jq 1.8.1
+	// rather than read off the filter, because `(.n | floor) == .n` answers
+	// true for 1.0000000000000001 while `.n == 1` answers false.
+	//
+	// float64(int64(n)) was the earlier spelling and is wrong twice over: Go's
+	// spec makes an out-of-range float-to-int conversion
+	// implementation-defined, so 1e30 took an undefined path, and the
+	// saturation at 2^63 called 1E+19 non-whole — a shape failure where the
+	// shell reports a semantic one, and the two carry different retry budgets.
 	n, ok := jqFloat(r["finding_number"])
-	if !ok || n != float64(int64(n)) {
+	if !ok || math.Floor(n) != n {
 		return true
 	}
 	if !jqIn(jqAlt(r["resolution"], `""`), "fixed", "skipped", "deferred", "disputed", "escalated") {
@@ -151,6 +164,10 @@ func resolutionIsBad(element json.RawMessage) bool {
 
 // resolveSemantic is the second jq program at lib/validate.sh:112-130, in its
 // order: out of range, settled twice, left out, then an invented duplicate.
+//
+// The order is the answer, not just the reading. A payload that is both out of
+// range and names an invented duplicate gets the range message, and a caller
+// deciding what to tell the model reads the first problem rather than a set.
 func resolveSemantic(elements []json.RawMessage, expect Expectations) error {
 	got := make([]number, 0, len(elements))
 	duplicates := make([]number, 0, len(elements))
@@ -181,9 +198,11 @@ func resolveSemantic(elements []json.RawMessage, expect Expectations) error {
 		duplicates = append(duplicates, asScalar(r["duplicate_of"]))
 	}
 
+	low := exactInt(1)
+	high := exactInt(expect.Findings)
 	var outOfRange []number
 	for _, n := range got {
-		if n.value < 1 || n.value > float64(expect.Findings) {
+		if n.exact.Cmp(low) < 0 || n.exact.Cmp(high) > 0 {
 			outOfRange = append(outOfRange, n)
 		}
 	}
@@ -192,14 +211,13 @@ func resolveSemantic(elements []json.RawMessage, expect Expectations) error {
 			"numbered 1 to %d", join(list), expect.Findings, expect.Findings)
 	}
 
-	counts := map[float64]int{}
-	for _, n := range got {
-		counts[n.value]++
-	}
 	var twice []number
-	for _, n := range got {
-		if counts[n.value] > 1 {
-			twice = append(twice, n)
+	for i, n := range got {
+		for j, m := range got {
+			if i != j && n.eq(m) {
+				twice = append(twice, n)
+				break
+			}
 		}
 	}
 	if list := unique(twice); len(list) > 0 {
@@ -208,25 +226,42 @@ func resolveSemantic(elements []json.RawMessage, expect Expectations) error {
 
 	var missing []number
 	for i := 1; i <= expect.Findings; i++ {
-		if counts[float64(i)] > 0 {
-			continue
+		// jq built these with `range`, which produces plain integers rather
+		// than anything the payload wrote, so the literal is the integer
+		// itself.
+		want := number{literal: strconv.Itoa(i), f: float64(i), exact: exactInt(i), numeric: true}
+		settled := false
+		for _, n := range got {
+			if n.eq(want) {
+				settled = true
+				break
+			}
 		}
-		// jq built these with `range`, which produces plain integers rather than
-		// anything the payload wrote, so the literal is the integer itself.
-		missing = append(missing, number{value: float64(i), literal: strconv.Itoa(i), numeric: true})
+		if !settled {
+			missing = append(missing, want)
+		}
 	}
 	if len(missing) > 0 {
 		return semanticf("finding(s) %s got no resolution at all, and a finding left out gets "+
 			"no reply and no thread resolution", join(missing))
 	}
 
-	offered := map[float64]bool{}
+	offered := make([]number, 0, len(expect.Candidates))
 	for _, c := range expect.Candidates {
-		offered[c] = true
+		offered = append(offered, number{
+			literal: strconv.Itoa(c), f: float64(c), exact: exactInt(c), numeric: true,
+		})
 	}
 	var invented []number
 	for _, d := range duplicates {
-		if d.numeric && offered[d.value] {
+		match := false
+		for _, c := range offered {
+			if d.eq(c) {
+				match = true
+				break
+			}
+		}
+		if match {
 			continue
 		}
 		invented = append(invented, d)
@@ -238,44 +273,102 @@ func resolveSemantic(elements []json.RawMessage, expect Expectations) error {
 	return nil
 }
 
-// number is one JSON number as both its value and the literal it was written as.
+// jqPrecision is how many bits of mantissa a payload's number is compared at.
 //
-// jq compares numbers by value and prints the literal, so the two travel
-// together: `unique` sorts and deduplicates on the value, and `join` writes back
-// what the payload said. See jqCompact for why the literal is kept.
+// jq keeps a number's literal and compares two literals at decNumber's
+// precision rather than a double's, which is why 1.0000000000000001 is greater
+// than 1 there and equal to it in float64. 1024 bits is about 308 decimal
+// digits, past anything a payload plausibly writes and past the 78 digits jq
+// was measured distinguishing.
+const jqPrecision = 1024
+
+// number is one JSON number as jq holds it: the literal it was written as, the
+// double its arithmetic collapses to, and the full-precision value its
+// comparisons use.
+//
+// The three are not interchangeable. `join` writes the literal back, the shape
+// half's `floor` reads the double, and the range, duplicate and candidate
+// checks read the exact value — a finding_number of 1.0000000000000001 is whole
+// to `floor` and greater than 1 to `>`, so it passes the shape half and fails
+// the range check, which is exactly what the shell does.
 type number struct {
-	value   float64
 	literal string
+	f       float64
+	exact   *big.Float
 	// numeric is false for the one non-number that reaches the semantic half:
 	// `duplicate_of: false`, which the shape half accepts because `// 0` reads
-	// false as absent. jq's own `join` renders it "false", and `-` never matches
-	// it against a candidate, so it is always invented.
+	// false as absent. jq's own `join` renders it "false", `-` never matches it
+	// against a candidate however the candidate is written, and jq's total
+	// order sorts it below every number.
 	numeric bool
 }
 
-func asNumber(raw json.RawMessage) (number, bool) {
-	v, ok := jqFloat(raw)
-	if !ok {
-		return number{}, false
+// eq is jq's `==` between two payload numbers: exact, so 17 and
+// 17.0000000000000001 are different issues and false is neither.
+func (n number) eq(m number) bool {
+	if n.numeric != m.numeric {
+		return false
 	}
-	return number{value: v, literal: string(bytes.TrimSpace(raw)), numeric: true}, true
+	if !n.numeric {
+		return true
+	}
+	return n.exact.Cmp(m.exact) == 0
 }
 
-// asScalar is asNumber with jq's sort and join behaviour for the non-number that
-// can reach it. false sorts below every number in jq's total order.
+// less is jq's sort order over the two kinds that reach here: false below every
+// number, and numbers by value.
+func (n number) less(m number) bool {
+	if n.numeric != m.numeric {
+		return !n.numeric
+	}
+	if !n.numeric {
+		return false
+	}
+	return n.exact.Cmp(m.exact) < 0
+}
+
+func exactInt(i int) *big.Float {
+	return new(big.Float).SetPrec(jqPrecision).SetInt64(int64(i))
+}
+
+func asNumber(raw json.RawMessage) (number, bool) {
+	if jqType(raw) != "number" {
+		return number{}, false
+	}
+	literal := string(bytes.TrimSpace(raw))
+	f, err := strconv.ParseFloat(literal, 64)
+	if err != nil && !errors.Is(err, strconv.ErrRange) {
+		// Not reachable through a document encoding/json has parsed, which
+		// admits only JSON number syntax.
+		return number{}, false
+	}
+	// A literal whose exponent is past big.Float's own range comes back as an
+	// infinity with ErrRange, which compares the way jq's does.
+	exact, _, perr := big.ParseFloat(literal, 10, jqPrecision, big.ToNearestEven)
+	if perr != nil && !errors.Is(perr, strconv.ErrRange) {
+		return number{}, false
+	}
+	return number{literal: literal, f: f, exact: exact, numeric: true}, true
+}
+
+// asScalar is asNumber with jq's sort and join behaviour for the non-number
+// that can reach it.
 func asScalar(raw json.RawMessage) number {
 	if n, ok := asNumber(raw); ok {
 		return n
 	}
-	return number{value: math.Inf(-1), literal: jqCompact(raw)}
+	return number{literal: jqCompact(raw), exact: exactInt(0)}
 }
 
+// jqFloat is the double jq's arithmetic works in. A literal past a double's
+// range comes back as an infinity rather than an error, which is what jq's own
+// `floor` answers for it.
 func jqFloat(raw json.RawMessage) (float64, bool) {
 	if jqType(raw) != "number" {
 		return 0, false
 	}
-	var f float64
-	if err := json.Unmarshal(raw, &f); err != nil {
+	f, err := strconv.ParseFloat(string(bytes.TrimSpace(raw)), 64)
+	if err != nil && !errors.Is(err, strconv.ErrRange) {
 		return 0, false
 	}
 	return f, true
@@ -287,10 +380,10 @@ func unique(in []number) []number {
 		return nil
 	}
 	sorted := append([]number(nil), in...)
-	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].value < sorted[j].value })
+	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].less(sorted[j]) })
 	out := sorted[:1]
 	for _, n := range sorted[1:] {
-		if n.value != out[len(out)-1].value || n.numeric != out[len(out)-1].numeric {
+		if !n.eq(out[len(out)-1]) {
 			out = append(out, n)
 		}
 	}

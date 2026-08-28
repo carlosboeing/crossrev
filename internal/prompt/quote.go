@@ -8,10 +8,8 @@ package prompt
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"regexp"
-	"strconv"
 	"strings"
 )
 
@@ -37,6 +35,12 @@ import (
 // sed appends a trailing newline that the caller's command substitution then
 // strips, so the joined form is the answer: lines indented, joined by newlines,
 // with nothing after the last one.
+//
+// The text's own trailing newline terminates its last line rather than opening
+// another, so it is dropped before the split. Text of "a\n" is one line to sed
+// and quotes to "    a"; splitting it first produced a second line of four
+// spaces that the shell never writes. Exactly one is dropped, because "a\n\n"
+// really does end on an empty line and the shell quotes that line too.
 func QuoteBlock(text []byte) []byte {
 	if len(text) == 0 {
 		return nil
@@ -49,6 +53,7 @@ func QuoteBlock(text []byte) []byte {
 		}
 		flat[i] = b
 	}
+	flat = bytes.TrimSuffix(flat, []byte("\n"))
 	lines := bytes.Split(flat, []byte("\n"))
 	var out []byte
 	for i, l := range lines {
@@ -69,14 +74,17 @@ func QuoteBlock(text []byte) []byte {
 // than inferred from the address syntax. The prompt prints its own `---` above and below,
 // so what the model reads is a fenced block with the skill's own frontmatter
 // keys inside it (lib/prompt.sh:147, 218).
+// The answer is a copy rather than a window onto the argument. A caller handing
+// over ReviewSkill() and writing through the result would otherwise be writing
+// into the rubric every later prompt reproduces.
 func SkillBody(skill []byte) []byte {
 	if bytes.HasPrefix(skill, []byte("---\n")) {
-		return skill[len("---\n"):]
+		return bytes.Clone(skill[len("---\n"):])
 	}
 	if bytes.Equal(skill, []byte("---")) {
 		return nil
 	}
-	return skill
+	return bytes.Clone(skill)
 }
 
 // untrustedNotice is the rule that outranks everything the pull request supplied
@@ -111,119 +119,90 @@ line showing a dash on one side cannot be commented on that side.
 // (lib/run.sh:1136-1140 for the review leg, lib/run.sh:2050-2055 for the
 // resolve leg).
 //
-// Every field here is one the orchestrator always sets. jq would print `null`
-// for a key that was absent; Go's zero value is the empty string, and the two
-// differ only on a call the shipped path does not make.
+// Every field is a Value rather than a string or an int, so an absent key
+// renders `null` the way jq renders it and an empty string renders empty. See
+// Value for why the two have to stay apart.
+//
+// Every one of these reaches the shell's prompt through `$(jq -r …)`, and a
+// command substitution strips every trailing newline off what it captured.
+// Render strips them too, through sub and subAlt, rather than leaving the next
+// caller to remember: the leg after this one builds Meta out of
+// `gh pr view --json body`, and a body ending in a newline is the ordinary
+// case rather than the exotic one.
+//
+// The commit convention's own two inputs, `base_sha` and `crossrev_email`, are
+// deliberately not here. The shell reads them off the same metadata object, but
+// the section they feed needs a `git log` and a `git show` that this package
+// holds no effects for, so they arrive on Resolve.Convention beside the bytes
+// those two commands wrote. Carrying them twice invited a caller to set them
+// here, leave Convention zero, and get no section and no error.
 type Meta struct {
-	Repo    string `json:"repo"`
-	PR      int    `json:"pr"`
-	Pass    int    `json:"pass"`
-	HeadSHA string `json:"head_sha"`
-	Title   string `json:"title"`
-	Body    string `json:"body"`
+	Repo    Value `json:"repo"`
+	PR      Value `json:"pr"`
+	Pass    Value `json:"pass"`
+	HeadSHA Value `json:"head_sha"`
+	Title   Value `json:"title"`
 
-	// MinFixSeverity empty takes the "medium" default, the way jq's
-	// `// "medium"` reads an absent or null key. cfg refuses an unset value
-	// before a leg runs, so the default is a belt rather than a branch.
-	MinFixSeverity string `json:"min_fix_severity"`
+	// Body is `jq -r '.body // ""'`, so a null or a false body prints nothing
+	// rather than the word.
+	Body Value `json:"body"`
+
+	// MinFixSeverity absent, null or false takes the "medium" default, the way
+	// jq's `// "medium"` reads it. An empty string is not absent: jq counts ""
+	// as true and prints it, so the prompt says `****`. cfg refuses an unset
+	// value before a leg runs, so the default is a belt rather than a branch.
+	MinFixSeverity Value `json:"min_fix_severity"`
 
 	// Backlog is where deferred work goes. Review prompts do not carry it.
-	Backlog string `json:"backlog"`
-
-	// BaseSHA and CrossrevEmail feed the commit convention: the subjects are
-	// sampled from the base revision, and the leg's own past commits are
-	// excluded so it does not learn the generic subject it is replacing.
-	BaseSHA       string `json:"base_sha"`
-	CrossrevEmail string `json:"crossrev_email"`
+	Backlog Value `json:"backlog"`
 }
 
-func (m Meta) minFixSeverity() string {
-	if m.MinFixSeverity == "" {
-		return "medium"
-	}
-	return m.MinFixSeverity
-}
+// sub is `$(jq -r .x)`: jq's own rendering of the value, with the trailing
+// newlines the command substitution strips already stripped.
+func sub(v Value) string { return strings.TrimRight(v.String(), "\n") }
+
+// subAlt is `$(jq -r '.x // "alt"')`, the same strip over jq's alternative
+// operator.
+func subAlt(v Value, alt string) string { return strings.TrimRight(v.Or(alt), "\n") }
 
 // Thread is one review conversation as the orchestrator read it back from
 // GitHub (lib/github.sh:133-139).
 type Thread struct {
-	Path       string    `json:"path"`
-	Line       int       `json:"line"`
-	IsResolved bool      `json:"isResolved"`
-	Comments   []Comment `json:"comments"`
+	Path Value `json:"path"`
+
+	// Line is `\(.line // 0)`, so a null line heads the block with a zero.
+	Line Value `json:"line"`
+
+	// IsResolved is compared with `== false` in the review prompt and read for
+	// truth in the resolve prompt, and jq's `==` is strict. An absent key is
+	// null, null is not equal to false, and the review prompt therefore drops
+	// the thread rather than showing it. A Go bool cannot hold that: its zero
+	// value is false, which is the state that shows the thread.
+	IsResolved Value `json:"isResolved"`
+
+	Comments []Comment `json:"comments"`
 }
 
 // Comment is one message in a thread.
 type Comment struct {
 	Author Author `json:"author"`
-	Body   string `json:"body"`
-}
-
-// Author is a comment's author as the orchestrator received it, kept as the JSON
-// it arrived as rather than as a string.
-//
-// gh_review_threads projects it to `.author.login`, so the shipped path supplies
-// a bare login. jq's interpolation renders whatever it is given, and the frozen
-// prompt oracle was captured from threads carrying the unprojected
-// `{"login":"alice"}` — which reaches the prompt as that object's compact JSON,
-// not as the login. Keeping the raw value is what reproduces both.
-type Author struct {
-	raw json.RawMessage
-}
-
-// Login is the shipped shape: an author the orchestrator already projected to a
-// login string.
-func Login(login string) Author {
-	raw, err := json.Marshal(login)
-	if err != nil {
-		// json.Marshal of a string fails only on invalid UTF-8, which it
-		// replaces rather than refusing.
-		return Author{raw: json.RawMessage(`""`)}
-	}
-	return Author{raw: raw}
-}
-
-// MarshalJSON writes the value back exactly as it arrived.
-func (a Author) MarshalJSON() ([]byte, error) {
-	if len(a.raw) == 0 {
-		return []byte("null"), nil
-	}
-	return a.raw, nil
-}
-
-// UnmarshalJSON keeps the bytes rather than a decoded shape.
-func (a *Author) UnmarshalJSON(b []byte) error {
-	a.raw = append(json.RawMessage(nil), b...)
-	return nil
-}
-
-// String is jq's `\(.author)`: a string arrives as its own content, and anything
-// else as compact JSON.
-func (a Author) String() string {
-	if len(bytes.TrimSpace(a.raw)) == 0 {
-		return "null"
-	}
-	var s string
-	if err := json.Unmarshal(a.raw, &s); err == nil {
-		return s
-	}
-	var compact bytes.Buffer
-	if err := json.Compact(&compact, a.raw); err != nil {
-		return string(a.raw)
-	}
-	return compact.String()
+	Body   Value  `json:"body"`
 }
 
 // htmlComment is jq's `<!--[^>]*-->`, which matches an HTML comment holding no
 // `>` — which every CrossRev marker is, because its payload is JSON with no
 // angle bracket in it (lib/prompt.sh:186, 279).
+//
+// The class is what keeps it from running two markers together: a body holding
+// two of them loses two comments and keeps the text between, where a `.*` would
+// take the lot.
 var htmlComment = regexp.MustCompile(`<!--[^>]*-->`)
 
 // commentLine is one row of a rendered thread: the marker stripped so it never
 // reaches the model, and the newlines flattened so a multi-line reply stays one
 // row.
 func commentLine(c Comment) string {
-	body := htmlComment.ReplaceAllString(c.Body, "")
+	body := htmlComment.ReplaceAllString(c.Body.String(), "")
 	body = strings.ReplaceAll(body, "\n", " ")
 	return "- **" + c.Author.String() + "**: " + body
 }
@@ -232,7 +211,7 @@ func commentLine(c Comment) string {
 // `(resolved)` suffix the resolve leg adds. jq -r writes a newline after the
 // value, which is the second of the two the block ends with.
 func renderThread(b *strings.Builder, t Thread, suffix string) {
-	fmt.Fprintf(b, "### %s:%d%s\n\n", t.Path, t.Line, suffix)
+	fmt.Fprintf(b, "### %s:%s%s\n\n", t.Path, t.Line.Or("0"), suffix)
 	for i, c := range t.Comments {
 		if i > 0 {
 			b.WriteByte('\n')
@@ -242,22 +221,9 @@ func renderThread(b *strings.Builder, t Thread, suffix string) {
 	b.WriteString("\n\n")
 }
 
-// dash is jq's `// "-"`, and the other defaults that stand in for a field the
-// record did not carry.
-func dash(s string) string {
-	if s == "" {
-		return "-"
-	}
-	return s
-}
-
 func yesNo(b bool) string {
 	if b {
 		return "yes"
 	}
 	return "no"
 }
-
-// itoa keeps the integer formatting in one place, so a line number and a pass
-// number are printed the same way jq -r prints them.
-func itoa(n int) string { return strconv.Itoa(n) }

@@ -18,18 +18,28 @@ import (
 // still be quoted in prose; what it is no longer used for is being copied back
 // accurately.
 type Prior struct {
-	ID          string `json:"id"`
-	Path        string `json:"path"`
-	Line        int    `json:"line"`
-	Severity    string `json:"severity"`
-	PreExisting bool   `json:"pre_existing"`
+	ID          Value `json:"id"`
+	Path        Value `json:"path"`
+	Line        Value `json:"line"`
+	Severity    Value `json:"severity"`
+	PreExisting Value `json:"pre_existing"`
 
 	// Category, Title, Resolution and TrackedAs each stand in for a field an
 	// older marker may not carry: jq's `//` prints "-", "-", "none" and "-".
-	Category   string `json:"category"`
-	Title      string `json:"title"`
-	Resolution string `json:"resolution"`
-	TrackedAs  string `json:"tracked_as"`
+	// The four above carry no such default, so an absent one prints the word
+	// `null` — which is what the Value type reproduces rather than flattening
+	// to an empty string or a zero.
+	//
+	// Line is the field where that matters beyond documentation.
+	// lib/validate.sh checks only that a finding's `line` is a number, so a
+	// payload writing 1.5 is accepted and the shell prints `app.ts:1.5`. A Go
+	// int cannot hold it, and decoding one into this struct used to fail
+	// outright — two packages in one commit disagreeing about what a line
+	// number is.
+	Category   Value `json:"category"`
+	Title      Value `json:"title"`
+	Resolution Value `json:"resolution"`
+	TrackedAs  Value `json:"tracked_as"`
 }
 
 // Review is everything the review leg's prompt is assembled from.
@@ -70,8 +80,8 @@ func (r Review) Render() []byte {
 	// No denominator. The cap it would name is enforced only for automatic
 	// triggers, so "pass 3 of 3" is wrong for an attended run and "pass 4 of 3"
 	// is impossible on its face.
-	fmt.Fprintf(&b, "You are the review leg of CrossRev, running pass %d on %s pull request #%d.\n\n",
-		r.Meta.Pass, r.Meta.Repo, r.Meta.PR)
+	fmt.Fprintf(&b, "You are the review leg of CrossRev, running pass %s on %s pull request #%s.\n\n",
+		sub(r.Meta.Pass), sub(r.Meta.Repo), sub(r.Meta.PR))
 	b.WriteString("Follow the skill reproduced immediately below. It is the whole rubric; " +
 		"there is no other.\n\n")
 	b.WriteString("---\n\n")
@@ -92,17 +102,17 @@ func (r Review) Render() []byte {
 	b.WriteString("\n")
 
 	b.WriteString("## The pull request\n\n")
-	fmt.Fprintf(&b, "- Repository: %s\n", r.Meta.Repo)
-	fmt.Fprintf(&b, "- Number: %d\n", r.Meta.PR)
-	fmt.Fprintf(&b, "- Head commit: %s\n", r.Meta.HeadSHA)
-	fmt.Fprintf(&b, "- Title: %s\n", r.Meta.Title)
+	fmt.Fprintf(&b, "- Repository: %s\n", sub(r.Meta.Repo))
+	fmt.Fprintf(&b, "- Number: %s\n", sub(r.Meta.PR))
+	fmt.Fprintf(&b, "- Head commit: %s\n", sub(r.Meta.HeadSHA))
+	fmt.Fprintf(&b, "- Title: %s\n", sub(r.Meta.Title))
 	// The verdict is a question about the threshold, not about severity alone,
 	// so the threshold is stated rather than left to be guessed from the rubric.
 	fmt.Fprintf(&b, "- `min_fix_severity` in force this pass: **%s**. A finding at or above that "+
 		"severity, and not pre-existing, keeps the loop alive; anything else is reported and "+
-		"cannot prevent convergence.\n\n", r.Meta.minFixSeverity())
+		"cannot prevent convergence.\n\n", subAlt(r.Meta.MinFixSeverity, "medium"))
 	b.WriteString("### Description as written by the author\n\n")
-	fmt.Fprintf(&b, "````\n%s\n````\n\n", r.Meta.Body)
+	fmt.Fprintf(&b, "````\n%s\n````\n\n", subAlt(r.Meta.Body, ""))
 
 	if len(r.Prior) > 0 {
 		b.WriteString("## Findings from earlier passes\n\n")
@@ -113,19 +123,24 @@ func (r Review) Render() []byte {
 		b.WriteString("| # | id | path:line | severity | category | pre-existing | title | " +
 			"resolution | tracked_as |\n|---|---|---|---|---|---|---|---|---|\n")
 		for i, p := range r.Prior {
-			fmt.Fprintf(&b, "| %d | %s | %s:%d | %s | %s | %s | %s | %s | %s |\n",
-				i+1, p.ID, p.Path, p.Line, p.Severity, dash(p.Category),
-				yesNo(p.PreExisting), dash(p.Title), resolutionOrNone(p.Resolution),
-				dash(p.TrackedAs))
+			fmt.Fprintf(&b, "| %d | %s | %s:%s | %s | %s | %s | %s | %s | %s |\n",
+				i+1, p.ID, p.Path, p.Line, p.Severity, p.Category.Or("-"),
+				yesNo(p.PreExisting.Truthy()), p.Title.Or("-"), p.Resolution.Or("none"),
+				p.TrackedAs.Or("-"))
 		}
 		b.WriteString("\n")
 	}
 
 	// Only the open threads. A resolved one is not conversation the reviewer is
 	// being asked to weigh.
+	//
+	// `select(.isResolved == false)` is strict, so a thread carrying no
+	// isResolved at all is dropped rather than shown: null is not equal to
+	// false. The shipped projection always sets the key, and the filter still
+	// decides what a model is shown, so it is reproduced rather than assumed.
 	open := make([]Thread, 0, len(r.Threads))
 	for _, t := range r.Threads {
-		if !t.IsResolved {
+		if t.IsResolved.IsFalse() {
 			open = append(open, t)
 		}
 	}
@@ -153,12 +168,4 @@ func (r Review) Render() []byte {
 		"`findings` array with verdict `converged` is a good and common result.\n")
 
 	return []byte(b.String())
-}
-
-// resolutionOrNone is jq's `// "none"` over a prior finding's resolution.
-func resolutionOrNone(s string) string {
-	if s == "" {
-		return "none"
-	}
-	return s
 }

@@ -19,8 +19,8 @@ func TestEmbeddedSchemasAreTheCanonicalFiles(t *testing.T) {
 		embedded []byte
 		path     string
 	}{
-		{"findings", validate.FindingsSchema, "../../schemas/findings.schema.json"},
-		{"resolve", validate.ResolveSchema, "../../schemas/resolve.schema.json"},
+		{"findings", validate.FindingsSchema(), "../../schemas/findings.schema.json"},
+		{"resolve", validate.ResolveSchema(), "../../schemas/resolve.schema.json"},
 	} {
 		canonical, err := os.ReadFile(tc.path)
 		if err != nil {
@@ -42,8 +42,8 @@ func TestEmbeddedSchemasCarryNoMetaSchemaKey(t *testing.T) {
 		name string
 		raw  []byte
 	}{
-		{"findings", validate.FindingsSchema},
-		{"resolve", validate.ResolveSchema},
+		{"findings", validate.FindingsSchema()},
+		{"resolve", validate.ResolveSchema()},
 	} {
 		var doc map[string]json.RawMessage
 		if err := json.Unmarshal(tc.raw, &doc); err != nil {
@@ -53,6 +53,30 @@ func TestEmbeddedSchemasCarryNoMetaSchemaKey(t *testing.T) {
 			if _, present := doc[key]; present {
 				t.Errorf("%s: carries %s, which Claude Code cannot resolve", tc.name, key)
 			}
+		}
+	}
+}
+
+// The schemas constrain a model's output, and an exported `var x []byte` is
+// writable from any package in the binary. The accessors answer a copy, so a
+// caller writing through one is not widening the schema for every later leg.
+func TestTheEmbeddedSchemasCannotBeWrittenThrough(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		read func() []byte
+	}{
+		{"findings", validate.FindingsSchema},
+		{"resolve", validate.ResolveSchema},
+	} {
+		got := tc.read()
+		if len(got) == 0 {
+			t.Fatalf("%s is empty", tc.name)
+		}
+		want := got[0]
+		got[0] = 'X'
+		if tc.read()[0] != want {
+			t.Errorf("%s: writing through the accessor's result changed the embedded copy",
+				tc.name)
 		}
 	}
 }

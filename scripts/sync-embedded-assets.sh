@@ -25,6 +25,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT" || exit 1
 
 check=0
+if (( $# > 1 )); then
+  printf 'usage: %s [--check]\n' "${0##*/}" >&2; exit 2
+fi
 case "${1:-}" in
   --check) check=1 ;;
   "")      ;;
@@ -39,7 +42,50 @@ ASSETS=(
   "skills/pr-resolve/SKILL.md"    "internal/prompt/assets/pr-resolve.SKILL.md"
 )
 
+# The list above is what gets copied. It is not what decides the list is
+# complete: a fifth `//go:embed` with no entry here would be copied by nobody
+# and checked by nobody, and `--check` would still print `embedded assets
+# match`. So the directives themselves are read back out of the Go source and
+# every destination they name has to appear above.
+#
+# A directive's pattern is package-relative, so the destination is the
+# directory of the file carrying it joined to the pattern. Patterns here are
+# plain paths; a glob is expanded so that one cannot hide a file either.
 fail=0
+missing_source=()
+
+declare -a embedded=()
+while IFS= read -r line; do
+  gofile="${line%%:*}"
+  pattern="${line#*://go:embed }"
+  [[ -n "$pattern" && "$pattern" != "$line" ]] || continue
+  pkgdir="$(dirname "$gofile")"
+  # A directive can name several patterns on one line.
+  for pat in $pattern; do
+    pat="${pat%\"}"; pat="${pat#\"}"
+    for match in "$pkgdir/"$pat; do
+      [[ -f "$match" ]] || continue
+      embedded+=("${match#./}")
+    done
+  done
+done < <(find . -name '*.go' -not -path './.git/*' -print0 \
+           | xargs -0 grep -n '^//go:embed ' 2>/dev/null \
+           | sed 's/:[0-9][0-9]*:/:/')
+
+for dst in "${embedded[@]}"; do
+  known=0
+  j=1
+  while (( j < ${#ASSETS[@]} )); do
+    [[ "${ASSETS[$j]}" == "$dst" ]] && known=1
+    j=$(( j + 2 ))
+  done
+  if (( ! known )); then
+    printf '  FAIL  %s is embedded and has no canonical source in this script\n' "$dst"
+    missing_source+=("$dst")
+    fail=1
+  fi
+done
+
 drift=()
 i=0
 while (( i < ${#ASSETS[@]} )); do
@@ -78,6 +124,10 @@ if (( fail )); then
   if (( ${#drift[@]} > 0 )); then
     printf '\n        The copies are generated. Edit the canonical file and run:\n'
     printf '        bash scripts/sync-embedded-assets.sh\n'
+  fi
+  if (( ${#missing_source[@]} > 0 )); then
+    printf '\n        Every //go:embed needs a canonical file at the repository root and a\n'
+    printf '        pair in ASSETS above, or nothing keeps the copy honest.\n'
   fi
   exit 1
 fi

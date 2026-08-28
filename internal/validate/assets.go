@@ -17,14 +17,24 @@
 
 package validate
 
-import _ "embed"
+import (
+	"bytes"
+	_ "embed"
+)
+
+// The two are unexported, and the accessors below hand back a copy each time.
+// An exported `var x []byte` is writable from any package, and these bytes are
+// what constrains a model's output — one assignment anywhere in the binary
+// widens the schema for every later leg, with nothing to report it.
+
+//go:embed assets/findings.schema.json
+var findingsSchema []byte
+
+//go:embed assets/resolve.schema.json
+var resolveSchema []byte
 
 // FindingsSchema is schemas/findings.schema.json, byte for byte.
-//
-//go:embed assets/findings.schema.json
-var FindingsSchema []byte
+func FindingsSchema() []byte { return bytes.Clone(findingsSchema) }
 
 // ResolveSchema is schemas/resolve.schema.json, byte for byte.
-//
-//go:embed assets/resolve.schema.json
-var ResolveSchema []byte
+func ResolveSchema() []byte { return bytes.Clone(resolveSchema) }

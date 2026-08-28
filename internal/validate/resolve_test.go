@@ -8,7 +8,7 @@ import (
 
 // threeFindings is what tests/test-schemas.sh:155 supplies: three findings were
 // numbered, and two issues were offered as duplicate candidates.
-var threeFindings = &validate.Expectations{Findings: 3, Candidates: []float64{19, 31}}
+var threeFindings = &validate.Expectations{Findings: 3, Candidates: []int{19, 31}}
 
 // resolutions wraps a resolutions array the way tests/test-schemas.sh:157-160
 // does.
