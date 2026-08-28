@@ -284,5 +284,51 @@ done
 
 provenance_is_recorded
 
+# The commit convention, over a real base revision.
+#
+# The resolve prompt fixture records an empty base_sha, so this section
+# contributes nothing to it. Replaying these rebuilds each repository with the
+# same pinned author and dates the capture used, so the base revision and every
+# byte come back the same.
+cc_replay() { # <n_repo> <n_mine> <template>
+  local n_repo="$1" n_mine="$2" template="$3" d i base
+  d="$(mktemp -d "$workdir/ccr_XXXXXX")"
+  (
+    cd "$d" && git init -q .
+    _cc() {
+      GIT_AUTHOR_NAME="capture" GIT_AUTHOR_EMAIL="$1" \
+      GIT_COMMITTER_NAME="capture" GIT_COMMITTER_EMAIL="$1" \
+      GIT_AUTHOR_DATE="2026-01-01T00:00:00Z" GIT_COMMITTER_DATE="2026-01-01T00:00:00Z" \
+      git commit -q --allow-empty -m "$2"
+    }
+    for (( i = 1; i <= n_mine; i++ )); do
+      _cc "crossrev@example.com" "chore(crossrev): a subject the leg must not learn from $i"
+    done
+    for (( i = 1; i <= n_repo; i++ )); do
+      _cc "dev@example.com" "feat(api): add the $i-th endpoint"
+    done
+    if [[ -n "$template" ]]; then
+      printf '%s' "$template" > .gitmessage
+      git add .gitmessage
+      _cc "dev@example.com" "chore: add a commit template"
+    fi
+    base="$(git rev-parse HEAD)"
+    prompt_commit_convention "$base" "crossrev@example.com"
+  )
+}
+
+while IFS= read -r c; do
+  name="$(jq -r .name <<<"$c")"
+  if [[ "$name" == "no-base" ]]; then
+    is "commit convention: $name" \
+      "$(prompt_commit_convention "" "crossrev@example.com")" \
+      "$(jq -r .rendered <<<"$c")"
+    continue
+  fi
+  is "commit convention: $name" \
+    "$(cc_replay "$(jq -r .repo_subjects <<<"$c")" "$(jq -r .own_subjects <<<"$c")" "$(jq -r .template <<<"$c")")" \
+    "$(jq -r .rendered <<<"$c")"
+done < <(jq -c '.cases[]' "$PARITY/prompt_commit_convention.json")
+
 printf '\n  %d passed, %d failed\n' "$pass" "$fail"
 (( fail == 0 ))

@@ -910,4 +910,77 @@ for leg in review resolve; do
 done
 
 rm -rf "$workdir"
+
+# --- prompt_commit_convention over a real base revision ---------------------
+#
+# The resolve prompt fixture above records an empty base_sha, so the commit
+# convention contributes nothing to it and a port could restate lib/prompt.sh
+# instead of reproducing it. These vectors give it its own oracle.
+#
+# The repository is built with pinned author, committer and dates, so the base
+# revision and every recorded byte are the same on any machine.
+
+cc_workdir="$(mktemp -d)"
+
+cc_commit() { # <email> <subject>
+  GIT_AUTHOR_NAME="capture" GIT_AUTHOR_EMAIL="$1" \
+  GIT_COMMITTER_NAME="capture" GIT_COMMITTER_EMAIL="$1" \
+  GIT_AUTHOR_DATE="2026-01-01T00:00:00Z" GIT_COMMITTER_DATE="2026-01-01T00:00:00Z" \
+  git commit -q --allow-empty -m "$2"
+}
+
+cc_case() { # name <n_repo_subjects> <n_mine> <template|"">
+  local name="$1" n_repo="$2" n_mine="$3" template="$4"
+  local d out base
+  d="$(mktemp -d "$cc_workdir/cc_XXXXXX")"
+  (
+    cd "$d" && git init -q .
+    local i
+    for (( i = 1; i <= n_mine; i++ )); do
+      cc_commit "crossrev@example.com" "chore(crossrev): a subject the leg must not learn from $i"
+    done
+    for (( i = 1; i <= n_repo; i++ )); do
+      cc_commit "dev@example.com" "feat(api): add the $i-th endpoint"
+    done
+    if [[ -n "$template" ]]; then
+      printf '%s' "$template" > .gitmessage
+      git add .gitmessage
+      cc_commit "dev@example.com" "chore: add a commit template"
+    fi
+    base="$(git rev-parse HEAD)"
+    out="$(prompt_commit_convention "$base" "crossrev@example.com")"
+    jq -cn --arg n "$name" --argjson r "$n_repo" --argjson m "$n_mine" \
+      --arg t "$template" --arg o "$out" \
+      '{name:$n, repo_subjects:$r, own_subjects:$m, template:$t, rendered:$o}'
+  )
+}
+
+cc_cases() {
+  # No base revision at all prints nothing, which is the arm every other case
+  # would otherwise hide.
+  jq -cn --arg o "$(prompt_commit_convention "" "crossrev@example.com")" \
+    '{name:"no-base", repo_subjects:0, own_subjects:0, template:"", rendered:$o}'
+  # Under the floor takes the fallback; at and above it takes the log. The two
+  # sides of that boundary were both untested.
+  cc_case "four-subjects-under-the-floor"  4  0 ""
+  cc_case "five-subjects-at-the-floor"     5  0 ""
+  cc_case "six-subjects-above-the-floor"   6  0 ""
+  # The cap is on the sample, not on how far back the filter looks: twelve of
+  # crossrev's own commits sit above twenty-five repository ones.
+  cc_case "twenty-of-twenty-five"         25 12 ""
+  # A template is quoted, and capped at twenty lines of its own.
+  cc_case "with-a-short-template"          6  0 "$(printf 'A subject line\n\nWhy, not what.\n')"
+  cc_case "with-a-long-template"           6  0 "$(printf 'line %s\n' $(seq 1 25))"
+  # Repository text reaches a prompt, so the quoting has to hold.
+  cc_case "template-carrying-a-fence"      6  0 "$(printf 'A subject\n\n```\ncode\n```\n')"
+  cc_case "own-commits-only"               0  6 ""
+}
+
+jq -n --argjson captured "$(captured_json)" \
+  --argjson cases "$(cc_cases | jq -s .)" \
+  '{captured:$captured, function:"prompt_commit_convention", cases:$cases}' \
+  >"$FIXDIR/prompt_commit_convention.json"
+
+rm -rf "$cc_workdir"
+
 printf 'parity vectors written to %s\n' "$FIXDIR"
