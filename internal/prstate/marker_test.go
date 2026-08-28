@@ -2,6 +2,7 @@ package prstate_test
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/carlosboeing/crossrev/internal/prstate"
@@ -47,19 +48,50 @@ func TestParityDecodeMarker(t *testing.T) {
 func TestParityEncodeMarker(t *testing.T) {
 	var f struct {
 		Cases []struct {
-			Name    string          `json:"name"`
-			Input   json.RawMessage `json:"input"`
-			Encoded string          `json:"encoded"`
+			Name string `json:"name"`
+			// A case records its input one of two ways. Input is a JSON value,
+			// which jq normalised when the vector was captured. InputRaw is the
+			// text verbatim, which is what the cases pinning the normalisation
+			// itself need: feeding a normalised input back would prove nothing
+			// about the rewriting.
+			Input    json.RawMessage `json:"input"`
+			InputRaw string          `json:"input_raw"`
+			Encoded  string          `json:"encoded"`
 		} `json:"cases"`
 	}
 	loadFixture(t, "marker_encode.json", &f)
 
+	// jq rewrites an exponent into its own canonical form. Which form that is
+	// changed between jq 1.6 and 1.7, so reproducing it would put one jq family
+	// into the frozen contract, and no marker CrossRev writes carries an
+	// exponent. These two cases assert the divergence rather than a match, so
+	// that closing it later fails here and is noticed.
+	divergent := map[string]string{
+		"raw-number-exponent-divergent":          `{"v":1,"leg":"review","pass":1,"n":1e2}`,
+		"raw-number-exponent-negative-divergent": `{"v":1,"leg":"review","pass":1,"n":1e-2}`,
+	}
+
 	for _, c := range f.Cases {
 		t.Run(c.Name, func(t *testing.T) {
 			recordCase("marker_encode.json", c.Name)
-			got, err := prstate.EncodeMarker(c.Input)
+			payload := c.Input
+			if c.InputRaw != "" {
+				payload = json.RawMessage(c.InputRaw)
+			}
+			got, err := prstate.EncodeMarker(payload)
 			if err != nil {
 				t.Fatalf("encoding: %v", err)
+			}
+			if want, ok := divergent[c.Name]; ok {
+				if got == c.Encoded {
+					t.Fatalf("this case records a divergence, and the port now matches the shell.\n"+
+						"Either the port started reproducing jq's exponent form, or the vector moved.\n"+
+						"Settle which, then move %s out of the divergent set.", c.Name)
+				}
+				if !strings.Contains(got, want) {
+					t.Errorf("the literal is meant to pass through verbatim\n got %q\nwant it to contain %q", got, want)
+				}
+				return
 			}
 			if got != c.Encoded {
 				t.Errorf("encoded\n got %q\nwant %q", got, c.Encoded)
