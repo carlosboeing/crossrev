@@ -1,0 +1,181 @@
+{
+  "captured": {
+    "platform": "Darwin 25.5.0 arm64",
+    "tr_implementation": "/usr/bin/tr (BSD tr)",
+    "awk_implementation": "/usr/bin/awk (one true awk (BWK))",
+    "locale": "en_AU.UTF-8",
+    "note": "state_finding_id and state_anchor pin LC_ALL=C internally, so ids and anchors are byte-oriented whatever locale this file was captured under."
+  },
+  "function": "log_redact_str and log_redact_publish",
+  "notice": "_CrossRev masked a string in this comment that matched a credential pattern._",
+  "cases": [
+    {
+      "name": "no-credential-plain-text",
+      "text": "a review finding about lib/auth.ts:42",
+      "redacted": "a review finding about lib/auth.ts:42",
+      "published": "a review finding about lib/auth.ts:42",
+      "published_rc": 0
+    },
+    {
+      "name": "empty-string",
+      "text": "",
+      "redacted": "",
+      "published": "",
+      "published_rc": 0
+    },
+    {
+      "name": "anthropic-key",
+      "text": "token sk-ant-api03-AAAAAAAAAAAAAAAAAAAA end",
+      "redacted": "token sk-ant-api03-…[redacted] end",
+      "published": "token sk-ant-api03-…[redacted] end\n\n_CrossRev masked a string in this comment that matched a credential pattern._",
+      "published_rc": 0
+    },
+    {
+      "name": "anthropic-key-at-prefix-length",
+      "text": "sk-ant-abcdef",
+      "redacted": "sk-ant-abcdef",
+      "published": "sk-ant-abcdef",
+      "published_rc": 0
+    },
+    {
+      "name": "anthropic-key-one-past-prefix",
+      "text": "sk-ant-abcdefg",
+      "redacted": "sk-ant-abcdef…[redacted]",
+      "published": "sk-ant-abcdef…[redacted]\n\n_CrossRev masked a string in this comment that matched a credential pattern._",
+      "published_rc": 0
+    },
+    {
+      "name": "github-fine-grained-pat",
+      "text": "github_pat_11ABCDEF0_aaaaaaaaaaaaaaaaaaaaaaaa",
+      "redacted": "github_pat_11ABCD…[redacted]",
+      "published": "github_pat_11ABCD…[redacted]\n\n_CrossRev masked a string in this comment that matched a credential pattern._",
+      "published_rc": 0
+    },
+    {
+      "name": "github-classic-pat",
+      "text": "ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "redacted": "ghp_AAAAAA…[redacted]",
+      "published": "ghp_AAAAAA…[redacted]\n\n_CrossRev masked a string in this comment that matched a credential pattern._",
+      "published_rc": 0
+    },
+    {
+      "name": "github-oauth-token",
+      "text": "gho_BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+      "redacted": "gho_BBBBBB…[redacted]",
+      "published": "gho_BBBBBB…[redacted]\n\n_CrossRev masked a string in this comment that matched a credential pattern._",
+      "published_rc": 0
+    },
+    {
+      "name": "github-user-token",
+      "text": "ghu_CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
+      "redacted": "ghu_CCCCCC…[redacted]",
+      "published": "ghu_CCCCCC…[redacted]\n\n_CrossRev masked a string in this comment that matched a credential pattern._",
+      "published_rc": 0
+    },
+    {
+      "name": "github-server-token",
+      "text": "ghs_DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD",
+      "redacted": "ghs_DDDDDD…[redacted]",
+      "published": "ghs_DDDDDD…[redacted]\n\n_CrossRev masked a string in this comment that matched a credential pattern._",
+      "published_rc": 0
+    },
+    {
+      "name": "github-refresh-token",
+      "text": "ghr_EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE",
+      "redacted": "ghr_EEEEEE…[redacted]",
+      "published": "ghr_EEEEEE…[redacted]\n\n_CrossRev masked a string in this comment that matched a credential pattern._",
+      "published_rc": 0
+    },
+    {
+      "name": "xai-key",
+      "text": "xai-abcdef0123456789ABCDEF",
+      "redacted": "xai-abcdef…[redacted]",
+      "published": "xai-abcdef…[redacted]\n\n_CrossRev masked a string in this comment that matched a credential pattern._",
+      "published_rc": 0
+    },
+    {
+      "name": "generic-sk-eleven-after-prefix",
+      "text": "sk-abcdef01234567890",
+      "redacted": "sk-abcdef01234567890",
+      "published": "sk-abcdef01234567890",
+      "published_rc": 0
+    },
+    {
+      "name": "generic-sk-twelve-after-prefix",
+      "text": "sk-abcdef01234567890a",
+      "redacted": "sk-abcdef…[redacted]",
+      "published": "sk-abcdef…[redacted]\n\n_CrossRev masked a string in this comment that matched a credential pattern._",
+      "published_rc": 0
+    },
+    {
+      "name": "two-credentials-one-line",
+      "text": "ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA and sk-ant-api03-BBBBBBBBBBBBBBBBBBBB",
+      "redacted": "ghp_AAAAAA…[redacted] and sk-ant-api03-…[redacted]",
+      "published": "ghp_AAAAAA…[redacted] and sk-ant-api03-…[redacted]\n\n_CrossRev masked a string in this comment that matched a credential pattern._",
+      "published_rc": 0
+    },
+    {
+      "name": "credential-inside-a-sentence",
+      "text": "the token is ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA, so rotate it",
+      "redacted": "the token is ghp_AAAAAA…[redacted], so rotate it",
+      "published": "the token is ghp_AAAAAA…[redacted], so rotate it\n\n_CrossRev masked a string in this comment that matched a credential pattern._",
+      "published_rc": 0
+    },
+    {
+      "name": "multiline-with-a-credential",
+      "text": "line one\nghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\nline three",
+      "redacted": "line one\nghp_AAAAAA…[redacted]\nline three",
+      "published": "line one\nghp_AAAAAA…[redacted]\nline three\n\n_CrossRev masked a string in this comment that matched a credential pattern._",
+      "published_rc": 0
+    },
+    {
+      "name": "trailing-newline-no-credential",
+      "text": "a body\n",
+      "redacted": "a body\n",
+      "published": "a body\n",
+      "published_rc": 0
+    },
+    {
+      "name": "trailing-newline-with-a-credential",
+      "text": "ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n",
+      "redacted": "ghp_AAAAAA…[redacted]\n",
+      "published": "ghp_AAAAAA…[redacted]\n\n\n_CrossRev masked a string in this comment that matched a credential pattern._",
+      "published_rc": 0
+    },
+    {
+      "name": "already-redacted-text",
+      "text": "ghp_AAAAAA…[redacted]",
+      "redacted": "ghp_AAAAAA…[redacted]",
+      "published": "ghp_AAAAAA…[redacted]",
+      "published_rc": 0
+    },
+    {
+      "name": "invalid-utf8-bytes",
+      "text": "before �� after ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "redacted": "before �� after ghp_AAAAAA…[redacted]",
+      "published": "before �� after ghp_AAAAAA…[redacted]\n\n_CrossRev masked a string in this comment that matched a credential pattern._",
+      "published_rc": 0
+    },
+    {
+      "name": "nul-adjacent-high-bytes",
+      "text": "��� ghp_BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+      "redacted": "��� ghp_BBBBBB…[redacted]",
+      "published": "��� ghp_BBBBBB…[redacted]\n\n_CrossRev masked a string in this comment that matched a credential pattern._",
+      "published_rc": 0
+    },
+    {
+      "name": "classic-github-stops-at-underscore",
+      "text": "ghp_AAAAAA_BBBBBBBBBBBBBBBBBBBBBBBB",
+      "redacted": "ghp_AAAAAA_BBBBBBBBBBBBBBBBBBBBBBBB",
+      "published": "ghp_AAAAAA_BBBBBBBBBBBBBBBBBBBBBBBB",
+      "published_rc": 0
+    },
+    {
+      "name": "anthropic-continues-through-hyphen",
+      "text": "sk-ant-api03-AAAA-BBBB-CCCC",
+      "redacted": "sk-ant-api03-…[redacted]",
+      "published": "sk-ant-api03-…[redacted]\n\n_CrossRev masked a string in this comment that matched a credential pattern._",
+      "published_rc": 0
+    }
+  ]
+}

@@ -1,0 +1,687 @@
+{
+  "captured": {
+    "platform": "Darwin 25.5.0 arm64",
+    "tr_implementation": "/usr/bin/tr (BSD tr)",
+    "awk_implementation": "/usr/bin/awk (one true awk (BWK))",
+    "locale": "en_AU.UTF-8",
+    "note": "state_finding_id and state_anchor pin LC_ALL=C internally, so ids and anchors are byte-oriented whatever locale this file was captured under."
+  },
+  "function": "usage normalization, price keys, table costs and presentation",
+  "price_table_version": "4e191273508e@2026-08-23",
+  "zero": {
+    "input_fresh": 0,
+    "cache_read": 0,
+    "cache_write_5m": 0,
+    "cache_write_1h": 0,
+    "cache_write_unsplit": 0,
+    "output": 0,
+    "reasoning": null,
+    "cost_usd": null,
+    "cost_source": null,
+    "price_table": null,
+    "billing": null,
+    "models": null,
+    "derived": []
+  },
+  "zero_with_total": {
+    "input_fresh": 0,
+    "cache_read": 0,
+    "cache_write_5m": 0,
+    "cache_write_1h": 0,
+    "cache_write_unsplit": 0,
+    "output": 0,
+    "reasoning": null,
+    "cost_usd": null,
+    "cost_source": null,
+    "price_table": null,
+    "billing": null,
+    "models": null,
+    "derived": [],
+    "total": 0
+  },
+  "parse_cases": [
+    {
+      "name": "claude-two-models-with-a-split",
+      "parser": "claude",
+      "input": "{\"modelUsage\":{\"claude-opus-5[1m]\":{\"inputTokens\":100,\"outputTokens\":50,\"cacheReadInputTokens\":900,\"cacheCreationInputTokens\":300},\"claude-sonnet-5\":{\"inputTokens\":10,\"outputTokens\":5,\"cacheReadInputTokens\":0,\"cacheCreationInputTokens\":0}},\"usage\":{\"cache_creation\":{\"ephemeral_5m_input_tokens\":200,\"ephemeral_1h_input_tokens\":50},\"output_tokens_details\":{\"thinking_tokens\":40}},\"total_cost_usd\":0.1234}",
+      "record": "{\"input_fresh\":110,\"cache_read\":900,\"cache_write_5m\":200,\"cache_write_1h\":50,\"cache_write_unsplit\":50,\"output\":55,\"reasoning\":40,\"cost_usd\":0.1234,\"cost_source\":\"harness\",\"price_table\":null,\"billing\":null,\"models\":[{\"id\":\"claude-opus-5\",\"total\":1350},{\"id\":\"claude-sonnet-5\",\"total\":15}],\"derived\":[],\"total\":1365}"
+    },
+    {
+      "name": "claude-split-covers-the-writes",
+      "parser": "claude",
+      "input": "{\"modelUsage\":{\"m\":{\"inputTokens\":1,\"outputTokens\":1,\"cacheReadInputTokens\":0,\"cacheCreationInputTokens\":100}},\"usage\":{\"cache_creation\":{\"ephemeral_5m_input_tokens\":100,\"ephemeral_1h_input_tokens\":0}}}",
+      "record": "{\"input_fresh\":1,\"cache_read\":0,\"cache_write_5m\":100,\"cache_write_1h\":0,\"cache_write_unsplit\":0,\"output\":1,\"reasoning\":null,\"cost_usd\":null,\"cost_source\":null,\"price_table\":null,\"billing\":null,\"models\":[{\"id\":\"m\",\"total\":102}],\"derived\":[],\"total\":102}"
+    },
+    {
+      "name": "claude-split-exceeds-the-writes",
+      "parser": "claude",
+      "input": "{\"modelUsage\":{\"m\":{\"inputTokens\":1,\"outputTokens\":1,\"cacheReadInputTokens\":0,\"cacheCreationInputTokens\":10}},\"usage\":{\"cache_creation\":{\"ephemeral_5m_input_tokens\":100,\"ephemeral_1h_input_tokens\":0}}}",
+      "record": "{\"input_fresh\":1,\"cache_read\":0,\"cache_write_5m\":100,\"cache_write_1h\":0,\"cache_write_unsplit\":0,\"output\":1,\"reasoning\":null,\"cost_usd\":null,\"cost_source\":null,\"price_table\":null,\"billing\":null,\"models\":[{\"id\":\"m\",\"total\":12}],\"derived\":[],\"total\":102}"
+    },
+    {
+      "name": "claude-no-split-at-all",
+      "parser": "claude",
+      "input": "{\"modelUsage\":{\"m\":{\"inputTokens\":1,\"outputTokens\":2,\"cacheReadInputTokens\":3,\"cacheCreationInputTokens\":4}}}",
+      "record": "{\"input_fresh\":1,\"cache_read\":3,\"cache_write_5m\":0,\"cache_write_1h\":0,\"cache_write_unsplit\":4,\"output\":2,\"reasoning\":null,\"cost_usd\":null,\"cost_source\":null,\"price_table\":null,\"billing\":null,\"models\":[{\"id\":\"m\",\"total\":10}],\"derived\":[],\"total\":10}"
+    },
+    {
+      "name": "claude-canonical-model-wins-over-the-key",
+      "parser": "claude",
+      "input": "{\"modelUsage\":{\"vendor/m[1m]\":{\"canonicalModel\":\"m-canonical\",\"inputTokens\":1,\"outputTokens\":1,\"cacheReadInputTokens\":0,\"cacheCreationInputTokens\":0}}}",
+      "record": "{\"input_fresh\":1,\"cache_read\":0,\"cache_write_5m\":0,\"cache_write_1h\":0,\"cache_write_unsplit\":0,\"output\":1,\"reasoning\":null,\"cost_usd\":null,\"cost_source\":null,\"price_table\":null,\"billing\":null,\"models\":[{\"id\":\"m-canonical\",\"total\":2}],\"derived\":[],\"total\":2}"
+    },
+    {
+      "name": "claude-bracket-suffix-stripped-from-the-key",
+      "parser": "claude",
+      "input": "{\"modelUsage\":{\"claude-opus-5[1m]\":{\"inputTokens\":1,\"outputTokens\":1,\"cacheReadInputTokens\":0,\"cacheCreationInputTokens\":0}}}",
+      "record": "{\"input_fresh\":1,\"cache_read\":0,\"cache_write_5m\":0,\"cache_write_1h\":0,\"cache_write_unsplit\":0,\"output\":1,\"reasoning\":null,\"cost_usd\":null,\"cost_source\":null,\"price_table\":null,\"billing\":null,\"models\":[{\"id\":\"claude-opus-5\",\"total\":2}],\"derived\":[],\"total\":2}"
+    },
+    {
+      "name": "claude-models-sorted-by-total-descending",
+      "parser": "claude",
+      "input": "{\"modelUsage\":{\"small\":{\"inputTokens\":1,\"outputTokens\":0,\"cacheReadInputTokens\":0,\"cacheCreationInputTokens\":0},\"large\":{\"inputTokens\":100,\"outputTokens\":0,\"cacheReadInputTokens\":0,\"cacheCreationInputTokens\":0}}}",
+      "record": "{\"input_fresh\":101,\"cache_read\":0,\"cache_write_5m\":0,\"cache_write_1h\":0,\"cache_write_unsplit\":0,\"output\":0,\"reasoning\":null,\"cost_usd\":null,\"cost_source\":null,\"price_table\":null,\"billing\":null,\"models\":[{\"id\":\"large\",\"total\":100},{\"id\":\"small\",\"total\":1}],\"derived\":[],\"total\":101}"
+    },
+    {
+      "name": "claude-cost-present-without-model-usage",
+      "parser": "claude",
+      "input": "{\"total_cost_usd\":0.5}",
+      "record": "{\"input_fresh\":0,\"cache_read\":0,\"cache_write_5m\":0,\"cache_write_1h\":0,\"cache_write_unsplit\":0,\"output\":0,\"reasoning\":null,\"cost_usd\":0.5,\"cost_source\":\"harness\",\"price_table\":null,\"billing\":null,\"models\":null,\"derived\":[],\"total\":0}"
+    },
+    {
+      "name": "claude-cost-is-not-a-number",
+      "parser": "claude",
+      "input": "{\"modelUsage\":{\"m\":{\"inputTokens\":1}},\"total_cost_usd\":\"0.5\"}",
+      "record": "{\"input_fresh\":1,\"cache_read\":0,\"cache_write_5m\":0,\"cache_write_1h\":0,\"cache_write_unsplit\":0,\"output\":0,\"reasoning\":null,\"cost_usd\":null,\"cost_source\":null,\"price_table\":null,\"billing\":null,\"models\":[{\"id\":\"m\",\"total\":1}],\"derived\":[],\"total\":1}"
+    },
+    {
+      "name": "claude-empty-object",
+      "parser": "claude",
+      "input": "{}",
+      "record": "null"
+    },
+    {
+      "name": "claude-not-json",
+      "parser": "claude",
+      "input": "not json at all",
+      "record": "null"
+    },
+    {
+      "name": "codex-last-turn-wins",
+      "parser": "codex",
+      "input": "{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":10,\"cached_input_tokens\":2,\"output_tokens\":3}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":100,\"cached_input_tokens\":40,\"output_tokens\":7}}",
+      "record": "{\"input_fresh\":60,\"cache_read\":40,\"cache_write_5m\":0,\"cache_write_1h\":0,\"cache_write_unsplit\":0,\"output\":7,\"reasoning\":null,\"cost_usd\":null,\"cost_source\":null,\"price_table\":null,\"billing\":null,\"models\":null,\"derived\":[\"input_fresh\"],\"total\":107}"
+    },
+    {
+      "name": "codex-no-cached-field",
+      "parser": "codex",
+      "input": "{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":10,\"output_tokens\":3}}",
+      "record": "{\"input_fresh\":10,\"cache_read\":0,\"cache_write_5m\":0,\"cache_write_1h\":0,\"cache_write_unsplit\":0,\"output\":3,\"reasoning\":null,\"cost_usd\":null,\"cost_source\":null,\"price_table\":null,\"billing\":null,\"models\":null,\"derived\":[\"input_fresh\"],\"total\":13}"
+    },
+    {
+      "name": "codex-cached-exceeds-input",
+      "parser": "codex",
+      "input": "{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":5,\"cached_input_tokens\":9,\"output_tokens\":1}}",
+      "record": "{\"input_fresh\":-4,\"cache_read\":9,\"cache_write_5m\":0,\"cache_write_1h\":0,\"cache_write_unsplit\":0,\"output\":1,\"reasoning\":null,\"cost_usd\":null,\"cost_source\":null,\"price_table\":null,\"billing\":null,\"models\":null,\"derived\":[\"input_fresh\"],\"total\":6}"
+    },
+    {
+      "name": "codex-no-completed-turn",
+      "parser": "codex",
+      "input": "{\"type\":\"turn.started\"}",
+      "record": "null"
+    },
+    {
+      "name": "codex-empty-stream",
+      "parser": "codex",
+      "input": "",
+      "record": "null"
+    },
+    {
+      "name": "grok-full-record",
+      "parser": "grok",
+      "input": "{\"modelUsage\":{\"grok-4.6-build\":{}},\"usage\":{\"input_tokens\":10,\"cache_read_input_tokens\":5,\"cache_creation_input_tokens\":2,\"output_tokens\":3,\"reasoning_tokens\":9},\"total_cost_usd\":0.25}",
+      "record": "{\"input_fresh\":10,\"cache_read\":5,\"cache_write_5m\":0,\"cache_write_1h\":0,\"cache_write_unsplit\":2,\"output\":3,\"reasoning\":9,\"cost_usd\":0.25,\"cost_source\":\"harness\",\"price_table\":null,\"billing\":null,\"models\":[{\"id\":\"grok-4.6-build\",\"total\":null}],\"derived\":[],\"total\":20}"
+    },
+    {
+      "name": "grok-no-usage",
+      "parser": "grok",
+      "input": "{\"modelUsage\":{\"grok-4.6-build\":{}}}",
+      "record": "null"
+    },
+    {
+      "name": "grok-no-model-usage",
+      "parser": "grok",
+      "input": "{\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}",
+      "record": "{\"input_fresh\":1,\"cache_read\":0,\"cache_write_5m\":0,\"cache_write_1h\":0,\"cache_write_unsplit\":0,\"output\":1,\"reasoning\":null,\"cost_usd\":null,\"cost_source\":null,\"price_table\":null,\"billing\":null,\"models\":null,\"derived\":[],\"total\":2}"
+    },
+    {
+      "name": "agy-vendor-total-ignored",
+      "parser": "agy",
+      "input": "{\"usage\":{\"input_tokens\":10,\"cache_read_tokens\":90,\"output_tokens\":5,\"thinking_tokens\":2,\"total_tokens\":15}}",
+      "record": "{\"input_fresh\":10,\"cache_read\":90,\"cache_write_5m\":0,\"cache_write_1h\":0,\"cache_write_unsplit\":0,\"output\":5,\"reasoning\":2,\"cost_usd\":null,\"cost_source\":null,\"price_table\":null,\"billing\":null,\"models\":null,\"derived\":[],\"total\":105}"
+    },
+    {
+      "name": "agy-no-usage",
+      "parser": "agy",
+      "input": "{}",
+      "record": "null"
+    },
+    {
+      "name": "opencode-full-export",
+      "parser": "opencode",
+      "input": "{\"info\":{\"model\":{\"id\":\"anthropic/claude-sonnet-5\"},\"tokens\":{\"input\":10,\"output\":20,\"reasoning\":5,\"cache\":{\"read\":100,\"write\":30}}}}",
+      "record": "{\"input_fresh\":10,\"cache_read\":100,\"cache_write_5m\":0,\"cache_write_1h\":0,\"cache_write_unsplit\":30,\"output\":20,\"reasoning\":5,\"cost_usd\":null,\"cost_source\":null,\"price_table\":null,\"billing\":null,\"models\":[{\"id\":\"anthropic/claude-sonnet-5\",\"total\":null}],\"derived\":[],\"total\":160}"
+    },
+    {
+      "name": "opencode-no-model-id",
+      "parser": "opencode",
+      "input": "{\"info\":{\"tokens\":{\"input\":1,\"output\":1,\"cache\":{\"read\":0,\"write\":0}}}}",
+      "record": "{\"input_fresh\":1,\"cache_read\":0,\"cache_write_5m\":0,\"cache_write_1h\":0,\"cache_write_unsplit\":0,\"output\":1,\"reasoning\":null,\"cost_usd\":null,\"cost_source\":null,\"price_table\":null,\"billing\":null,\"models\":null,\"derived\":[],\"total\":2}"
+    },
+    {
+      "name": "opencode-no-tokens",
+      "parser": "opencode",
+      "input": "{\"info\":{\"model\":{\"id\":\"m\"}}}",
+      "record": "null"
+    }
+  ],
+  "price_key_cases": [
+    {
+      "reported": "",
+      "key": ""
+    },
+    {
+      "reported": "claude-opus-5",
+      "key": "claude-opus-5"
+    },
+    {
+      "reported": "CLAUDE-OPUS-5",
+      "key": "claude-opus-5"
+    },
+    {
+      "reported": "claude-opus-5[1m]",
+      "key": "claude-opus-5"
+    },
+    {
+      "reported": "Claude-Opus-5[1M]",
+      "key": "claude-opus-5"
+    },
+    {
+      "reported": "grok-4.6",
+      "key": "xai/grok-4.6"
+    },
+    {
+      "reported": "xai/grok-4.6",
+      "key": "xai/grok-4.6"
+    },
+    {
+      "reported": "grok-4.6-build",
+      "key": "xai/grok-4.6"
+    },
+    {
+      "reported": "openai/gpt-5.6-terra",
+      "key": "gpt-5.6-terra"
+    },
+    {
+      "reported": "gpt-5.6-terra-preview",
+      "key": "gpt-5.6-terra"
+    },
+    {
+      "reported": "claude-opus-5-20260101",
+      "key": "claude-opus-5"
+    },
+    {
+      "reported": "anthropic/claude-sonnet-5",
+      "key": "claude-sonnet-5"
+    },
+    {
+      "reported": "a-model-nobody-listed",
+      "key": ""
+    },
+    {
+      "reported": "[only-a-suffix]",
+      "key": ""
+    },
+    {
+      "reported": "version",
+      "key": "version"
+    }
+  ],
+  "price_cases": [
+    {
+      "name": "unlisted-model-does-not-price",
+      "usage": "{\"input_fresh\":0,\"cache_read\":0,\"cache_write_5m\":0,\"cache_write_1h\":0,\"cache_write_unsplit\":0,\"output\":0,\"reasoning\":null,\"cost_usd\":null,\"cost_source\":null,\"price_table\":null,\"billing\":null,\"models\":null,\"derived\":[]}",
+      "model": "a-model-nobody-listed",
+      "priced": "{\"input_fresh\":0,\"cache_read\":0,\"cache_write_5m\":0,\"cache_write_1h\":0,\"cache_write_unsplit\":0,\"output\":0,\"reasoning\":null,\"cost_usd\":null,\"cost_source\":null,\"price_table\":null,\"billing\":null,\"models\":null,\"derived\":[]}"
+    },
+    {
+      "name": "empty-model-does-not-price",
+      "usage": "{\"input_fresh\":0,\"cache_read\":0,\"cache_write_5m\":0,\"cache_write_1h\":0,\"cache_write_unsplit\":0,\"output\":0,\"reasoning\":null,\"cost_usd\":null,\"cost_source\":null,\"price_table\":null,\"billing\":null,\"models\":null,\"derived\":[]}",
+      "model": "",
+      "priced": "{\"input_fresh\":0,\"cache_read\":0,\"cache_write_5m\":0,\"cache_write_1h\":0,\"cache_write_unsplit\":0,\"output\":0,\"reasoning\":null,\"cost_usd\":null,\"cost_source\":null,\"price_table\":null,\"billing\":null,\"models\":null,\"derived\":[]}"
+    },
+    {
+      "name": "zero-record-on-a-listed-model",
+      "usage": "{\"input_fresh\":0,\"cache_read\":0,\"cache_write_5m\":0,\"cache_write_1h\":0,\"cache_write_unsplit\":0,\"output\":0,\"reasoning\":null,\"cost_usd\":null,\"cost_source\":null,\"price_table\":null,\"billing\":null,\"models\":null,\"derived\":[]}",
+      "model": "claude-opus-5",
+      "priced": "{\"input_fresh\":0,\"cache_read\":0,\"cache_write_5m\":0,\"cache_write_1h\":0,\"cache_write_unsplit\":0,\"output\":0,\"reasoning\":null,\"cost_usd\":0,\"cost_source\":\"table\",\"price_table\":\"4e191273508e@2026-08-23\",\"billing\":null,\"models\":null,\"derived\":[]}"
+    },
+    {
+      "name": "input-output-and-cache-read",
+      "usage": "{\"input_fresh\":1000,\"cache_read\":2000,\"cache_write_5m\":0,\"cache_write_1h\":0,\"cache_write_unsplit\":0,\"output\":500,\"reasoning\":null,\"cost_usd\":null,\"cost_source\":null,\"price_table\":null,\"billing\":null,\"models\":null,\"derived\":[]}",
+      "model": "claude-opus-5",
+      "priced": "{\"input_fresh\":1000,\"cache_read\":2000,\"cache_write_5m\":0,\"cache_write_1h\":0,\"cache_write_unsplit\":0,\"output\":500,\"reasoning\":null,\"cost_usd\":0.0185,\"cost_source\":\"table\",\"price_table\":\"4e191273508e@2026-08-23\",\"billing\":null,\"models\":null,\"derived\":[]}"
+    },
+    {
+      "name": "one-input-token",
+      "usage": "{\"input_fresh\":1,\"cache_read\":0,\"cache_write_5m\":0,\"cache_write_1h\":0,\"cache_write_unsplit\":0,\"output\":0,\"reasoning\":null,\"cost_usd\":null,\"cost_source\":null,\"price_table\":null,\"billing\":null,\"models\":null,\"derived\":[]}",
+      "model": "claude-opus-5",
+      "priced": "{\"input_fresh\":1,\"cache_read\":0,\"cache_write_5m\":0,\"cache_write_1h\":0,\"cache_write_unsplit\":0,\"output\":0,\"reasoning\":null,\"cost_usd\":5e-06,\"cost_source\":\"table\",\"price_table\":\"4e191273508e@2026-08-23\",\"billing\":null,\"models\":null,\"derived\":[]}"
+    },
+    {
+      "name": "cache-write-5m",
+      "usage": "{\"input_fresh\":0,\"cache_read\":0,\"cache_write_5m\":1000,\"cache_write_1h\":0,\"cache_write_unsplit\":0,\"output\":0,\"reasoning\":null,\"cost_usd\":null,\"cost_source\":null,\"price_table\":null,\"billing\":null,\"models\":null,\"derived\":[]}",
+      "model": "claude-opus-5",
+      "priced": "{\"input_fresh\":0,\"cache_read\":0,\"cache_write_5m\":1000,\"cache_write_1h\":0,\"cache_write_unsplit\":0,\"output\":0,\"reasoning\":null,\"cost_usd\":0.00625,\"cost_source\":\"table\",\"price_table\":\"4e191273508e@2026-08-23\",\"billing\":null,\"models\":null,\"derived\":[]}"
+    },
+    {
+      "name": "cache-write-1h-uses-the-above-1hr-rate",
+      "usage": "{\"input_fresh\":0,\"cache_read\":0,\"cache_write_5m\":0,\"cache_write_1h\":1000,\"cache_write_unsplit\":0,\"output\":0,\"reasoning\":null,\"cost_usd\":null,\"cost_source\":null,\"price_table\":null,\"billing\":null,\"models\":null,\"derived\":[]}",
+      "model": "claude-opus-5",
+      "priced": "{\"input_fresh\":0,\"cache_read\":0,\"cache_write_5m\":0,\"cache_write_1h\":1000,\"cache_write_unsplit\":0,\"output\":0,\"reasoning\":null,\"cost_usd\":0.01,\"cost_source\":\"table\",\"price_table\":\"4e191273508e@2026-08-23\",\"billing\":null,\"models\":null,\"derived\":[]}"
+    },
+    {
+      "name": "unsplit-write-refuses-on-anthropic",
+      "usage": "{\"input_fresh\":0,\"cache_read\":0,\"cache_write_5m\":0,\"cache_write_1h\":0,\"cache_write_unsplit\":1000,\"output\":0,\"reasoning\":null,\"cost_usd\":null,\"cost_source\":null,\"price_table\":null,\"billing\":null,\"models\":null,\"derived\":[]}",
+      "model": "claude-opus-5",
+      "priced": "{\"input_fresh\":0,\"cache_read\":0,\"cache_write_5m\":0,\"cache_write_1h\":0,\"cache_write_unsplit\":1000,\"output\":0,\"reasoning\":null,\"cost_usd\":null,\"cost_source\":null,\"price_table\":null,\"billing\":null,\"models\":null,\"derived\":[]}"
+    },
+    {
+      "name": "unsplit-write-prices-where-no-1hr-rate-is-listed",
+      "usage": "{\"input_fresh\":0,\"cache_read\":0,\"cache_write_5m\":0,\"cache_write_1h\":0,\"cache_write_unsplit\":1000,\"output\":0,\"reasoning\":null,\"cost_usd\":null,\"cost_source\":null,\"price_table\":null,\"billing\":null,\"models\":null,\"derived\":[]}",
+      "model": "gpt-5.6",
+      "priced": "{\"input_fresh\":0,\"cache_read\":0,\"cache_write_5m\":0,\"cache_write_1h\":0,\"cache_write_unsplit\":1000,\"output\":0,\"reasoning\":null,\"cost_usd\":0.005,\"cost_source\":\"table\",\"price_table\":\"4e191273508e@2026-08-23\",\"billing\":null,\"models\":null,\"derived\":[]}"
+    },
+    {
+      "name": "write-bucket-with-no-listed-rate-refuses",
+      "usage": "{\"input_fresh\":0,\"cache_read\":0,\"cache_write_5m\":10,\"cache_write_1h\":0,\"cache_write_unsplit\":0,\"output\":0,\"reasoning\":null,\"cost_usd\":null,\"cost_source\":null,\"price_table\":null,\"billing\":null,\"models\":null,\"derived\":[]}",
+      "model": "gpt-5.5",
+      "priced": "{\"input_fresh\":0,\"cache_read\":0,\"cache_write_5m\":10,\"cache_write_1h\":0,\"cache_write_unsplit\":0,\"output\":0,\"reasoning\":null,\"cost_usd\":null,\"cost_source\":null,\"price_table\":null,\"billing\":null,\"models\":null,\"derived\":[]}"
+    },
+    {
+      "name": "same-entry-prices-with-that-bucket-empty",
+      "usage": "{\"input_fresh\":1000,\"cache_read\":0,\"cache_write_5m\":0,\"cache_write_1h\":0,\"cache_write_unsplit\":0,\"output\":100,\"reasoning\":null,\"cost_usd\":null,\"cost_source\":null,\"price_table\":null,\"billing\":null,\"models\":null,\"derived\":[]}",
+      "model": "gpt-5.5",
+      "priced": "{\"input_fresh\":1000,\"cache_read\":0,\"cache_write_5m\":0,\"cache_write_1h\":0,\"cache_write_unsplit\":0,\"output\":100,\"reasoning\":null,\"cost_usd\":0.008,\"cost_source\":\"table\",\"price_table\":\"4e191273508e@2026-08-23\",\"billing\":null,\"models\":null,\"derived\":[]}"
+    },
+    {
+      "name": "under-the-272k-break",
+      "usage": "{\"input_fresh\":271999,\"cache_read\":0,\"cache_write_5m\":0,\"cache_write_1h\":0,\"cache_write_unsplit\":0,\"output\":0,\"reasoning\":null,\"cost_usd\":null,\"cost_source\":null,\"price_table\":null,\"billing\":null,\"models\":null,\"derived\":[]}",
+      "model": "gpt-5.5",
+      "priced": "{\"input_fresh\":271999,\"cache_read\":0,\"cache_write_5m\":0,\"cache_write_1h\":0,\"cache_write_unsplit\":0,\"output\":0,\"reasoning\":null,\"cost_usd\":1.359995,\"cost_source\":\"table\",\"price_table\":\"4e191273508e@2026-08-23\",\"billing\":null,\"models\":null,\"derived\":[]}"
+    },
+    {
+      "name": "at-the-272k-break",
+      "usage": "{\"input_fresh\":272000,\"cache_read\":0,\"cache_write_5m\":0,\"cache_write_1h\":0,\"cache_write_unsplit\":0,\"output\":0,\"reasoning\":null,\"cost_usd\":null,\"cost_source\":null,\"price_table\":null,\"billing\":null,\"models\":null,\"derived\":[]}",
+      "model": "gpt-5.5",
+      "priced": "{\"input_fresh\":272000,\"cache_read\":0,\"cache_write_5m\":0,\"cache_write_1h\":0,\"cache_write_unsplit\":0,\"output\":0,\"reasoning\":null,\"cost_usd\":null,\"cost_source\":null,\"price_table\":null,\"billing\":null,\"models\":null,\"derived\":[]}"
+    },
+    {
+      "name": "break-counts-every-input-bucket",
+      "usage": "{\"input_fresh\":200000,\"cache_read\":72000,\"cache_write_5m\":0,\"cache_write_1h\":0,\"cache_write_unsplit\":0,\"output\":0,\"reasoning\":null,\"cost_usd\":null,\"cost_source\":null,\"price_table\":null,\"billing\":null,\"models\":null,\"derived\":[]}",
+      "model": "gpt-5.5",
+      "priced": "{\"input_fresh\":200000,\"cache_read\":72000,\"cache_write_5m\":0,\"cache_write_1h\":0,\"cache_write_unsplit\":0,\"output\":0,\"reasoning\":null,\"cost_usd\":null,\"cost_source\":null,\"price_table\":null,\"billing\":null,\"models\":null,\"derived\":[]}"
+    },
+    {
+      "name": "output-alone-does-not-reach-the-break",
+      "usage": "{\"input_fresh\":0,\"cache_read\":0,\"cache_write_5m\":0,\"cache_write_1h\":0,\"cache_write_unsplit\":0,\"output\":400000,\"reasoning\":null,\"cost_usd\":null,\"cost_source\":null,\"price_table\":null,\"billing\":null,\"models\":null,\"derived\":[]}",
+      "model": "gpt-5.5",
+      "priced": "{\"input_fresh\":0,\"cache_read\":0,\"cache_write_5m\":0,\"cache_write_1h\":0,\"cache_write_unsplit\":0,\"output\":400000,\"reasoning\":null,\"cost_usd\":12,\"cost_source\":\"table\",\"price_table\":\"4e191273508e@2026-08-23\",\"billing\":null,\"models\":null,\"derived\":[]}"
+    },
+    {
+      "name": "at-the-200k-break",
+      "usage": "{\"input_fresh\":200000,\"cache_read\":0,\"cache_write_5m\":0,\"cache_write_1h\":0,\"cache_write_unsplit\":0,\"output\":0,\"reasoning\":null,\"cost_usd\":null,\"cost_source\":null,\"price_table\":null,\"billing\":null,\"models\":null,\"derived\":[]}",
+      "model": "xai/grok-4.6",
+      "priced": "{\"input_fresh\":200000,\"cache_read\":0,\"cache_write_5m\":0,\"cache_write_1h\":0,\"cache_write_unsplit\":0,\"output\":0,\"reasoning\":null,\"cost_usd\":null,\"cost_source\":null,\"price_table\":null,\"billing\":null,\"models\":null,\"derived\":[]}"
+    },
+    {
+      "name": "under-the-200k-break",
+      "usage": "{\"input_fresh\":199999,\"cache_read\":0,\"cache_write_5m\":0,\"cache_write_1h\":0,\"cache_write_unsplit\":0,\"output\":0,\"reasoning\":null,\"cost_usd\":null,\"cost_source\":null,\"price_table\":null,\"billing\":null,\"models\":null,\"derived\":[]}",
+      "model": "xai/grok-4.6",
+      "priced": "{\"input_fresh\":199999,\"cache_read\":0,\"cache_write_5m\":0,\"cache_write_1h\":0,\"cache_write_unsplit\":0,\"output\":0,\"reasoning\":null,\"cost_usd\":0.399998,\"cost_source\":\"table\",\"price_table\":\"4e191273508e@2026-08-23\",\"billing\":null,\"models\":null,\"derived\":[]}"
+    },
+    {
+      "name": "reasoning-is-not-priced",
+      "usage": "{\"input_fresh\":0,\"cache_read\":0,\"cache_write_5m\":0,\"cache_write_1h\":0,\"cache_write_unsplit\":0,\"output\":500,\"reasoning\":400,\"cost_usd\":null,\"cost_source\":null,\"price_table\":null,\"billing\":null,\"models\":null,\"derived\":[]}",
+      "model": "claude-opus-5",
+      "priced": "{\"input_fresh\":0,\"cache_read\":0,\"cache_write_5m\":0,\"cache_write_1h\":0,\"cache_write_unsplit\":0,\"output\":500,\"reasoning\":400,\"cost_usd\":0.0125,\"cost_source\":\"table\",\"price_table\":\"4e191273508e@2026-08-23\",\"billing\":null,\"models\":null,\"derived\":[]}"
+    },
+    {
+      "name": "unlisted-model-clears-a-reported-cost",
+      "usage": "{\"input_fresh\":1000,\"cache_read\":0,\"cache_write_5m\":0,\"cache_write_1h\":0,\"cache_write_unsplit\":0,\"output\":0,\"reasoning\":null,\"cost_usd\":9,\"cost_source\":\"harness\",\"price_table\":\"x\",\"billing\":null,\"models\":null,\"derived\":[]}",
+      "model": "a-model-nobody-listed",
+      "priced": "{\"input_fresh\":1000,\"cache_read\":0,\"cache_write_5m\":0,\"cache_write_1h\":0,\"cache_write_unsplit\":0,\"output\":0,\"reasoning\":null,\"cost_usd\":null,\"cost_source\":null,\"price_table\":null,\"billing\":null,\"models\":null,\"derived\":[]}"
+    },
+    {
+      "name": "cache-read-at-half-a-nano-dollar",
+      "usage": "{\"input_fresh\":0,\"cache_read\":1,\"cache_write_5m\":0,\"cache_write_1h\":0,\"cache_write_unsplit\":0,\"output\":0,\"reasoning\":null,\"cost_usd\":null,\"cost_source\":null,\"price_table\":null,\"billing\":null,\"models\":null,\"derived\":[]}",
+      "model": "claude-opus-5",
+      "priced": "{\"input_fresh\":0,\"cache_read\":1,\"cache_write_5m\":0,\"cache_write_1h\":0,\"cache_write_unsplit\":0,\"output\":0,\"reasoning\":null,\"cost_usd\":5e-07,\"cost_source\":\"table\",\"price_table\":\"4e191273508e@2026-08-23\",\"billing\":null,\"models\":null,\"derived\":[]}"
+    },
+    {
+      "name": "cache-read-at-scale",
+      "usage": "{\"input_fresh\":0,\"cache_read\":1000000,\"cache_write_5m\":0,\"cache_write_1h\":0,\"cache_write_unsplit\":0,\"output\":0,\"reasoning\":null,\"cost_usd\":null,\"cost_source\":null,\"price_table\":null,\"billing\":null,\"models\":null,\"derived\":[]}",
+      "model": "claude-opus-5",
+      "priced": "{\"input_fresh\":0,\"cache_read\":1000000,\"cache_write_5m\":0,\"cache_write_1h\":0,\"cache_write_unsplit\":0,\"output\":0,\"reasoning\":null,\"cost_usd\":0.5,\"cost_source\":\"table\",\"price_table\":\"4e191273508e@2026-08-23\",\"billing\":null,\"models\":null,\"derived\":[]}"
+    }
+  ],
+  "billing_cases": [
+    {
+      "name": "claude-vendor-no-key",
+      "harness": "claude",
+      "endpoint": "vendor",
+      "anthropic_api_key_set": false,
+      "billing": "subscription"
+    },
+    {
+      "name": "claude-named-endpoint",
+      "harness": "claude",
+      "endpoint": "an-endpoint",
+      "anthropic_api_key_set": false,
+      "billing": "endpoint"
+    },
+    {
+      "name": "claude-vendor-with-anthropic-key",
+      "harness": "claude",
+      "endpoint": "vendor",
+      "anthropic_api_key_set": true,
+      "billing": "api"
+    },
+    {
+      "name": "codex-vendor-no-key",
+      "harness": "codex",
+      "endpoint": "vendor",
+      "anthropic_api_key_set": false,
+      "billing": "subscription"
+    },
+    {
+      "name": "codex-named-endpoint",
+      "harness": "codex",
+      "endpoint": "an-endpoint",
+      "anthropic_api_key_set": false,
+      "billing": "endpoint"
+    },
+    {
+      "name": "codex-vendor-with-anthropic-key",
+      "harness": "codex",
+      "endpoint": "vendor",
+      "anthropic_api_key_set": true,
+      "billing": "subscription"
+    },
+    {
+      "name": "agy-vendor-no-key",
+      "harness": "agy",
+      "endpoint": "vendor",
+      "anthropic_api_key_set": false,
+      "billing": "subscription"
+    },
+    {
+      "name": "agy-named-endpoint",
+      "harness": "agy",
+      "endpoint": "an-endpoint",
+      "anthropic_api_key_set": false,
+      "billing": "endpoint"
+    },
+    {
+      "name": "agy-vendor-with-anthropic-key",
+      "harness": "agy",
+      "endpoint": "vendor",
+      "anthropic_api_key_set": true,
+      "billing": "subscription"
+    },
+    {
+      "name": "grok-vendor-no-key",
+      "harness": "grok",
+      "endpoint": "vendor",
+      "anthropic_api_key_set": false,
+      "billing": "subscription"
+    },
+    {
+      "name": "grok-named-endpoint",
+      "harness": "grok",
+      "endpoint": "an-endpoint",
+      "anthropic_api_key_set": false,
+      "billing": "endpoint"
+    },
+    {
+      "name": "grok-vendor-with-anthropic-key",
+      "harness": "grok",
+      "endpoint": "vendor",
+      "anthropic_api_key_set": true,
+      "billing": "subscription"
+    },
+    {
+      "name": "opencode-vendor-no-key",
+      "harness": "opencode",
+      "endpoint": "vendor",
+      "anthropic_api_key_set": false,
+      "billing": ""
+    },
+    {
+      "name": "opencode-named-endpoint",
+      "harness": "opencode",
+      "endpoint": "an-endpoint",
+      "anthropic_api_key_set": false,
+      "billing": "endpoint"
+    },
+    {
+      "name": "opencode-vendor-with-anthropic-key",
+      "harness": "opencode",
+      "endpoint": "vendor",
+      "anthropic_api_key_set": true,
+      "billing": ""
+    },
+    {
+      "name": "empty-endpoint-string",
+      "harness": "claude",
+      "endpoint": "",
+      "anthropic_api_key_set": false,
+      "billing": "subscription"
+    },
+    {
+      "name": "null-endpoint-string",
+      "harness": "claude",
+      "endpoint": "null",
+      "anthropic_api_key_set": false,
+      "billing": "subscription"
+    },
+    {
+      "name": "unknown-harness",
+      "harness": "not-a-harness",
+      "endpoint": "vendor",
+      "anthropic_api_key_set": false,
+      "billing": ""
+    }
+  ],
+  "format_cost_cases": [
+    {
+      "value": "",
+      "formatted": "—"
+    },
+    {
+      "value": "0",
+      "formatted": "~$0.00"
+    },
+    {
+      "value": "0.004",
+      "formatted": "~$0.00"
+    },
+    {
+      "value": "0.005",
+      "formatted": "~$0.01"
+    },
+    {
+      "value": "0.125",
+      "formatted": "~$0.12"
+    },
+    {
+      "value": "1",
+      "formatted": "~$1.00"
+    },
+    {
+      "value": "12.345",
+      "formatted": "~$12.35"
+    },
+    {
+      "value": "-1.5",
+      "formatted": "~$-1.50"
+    },
+    {
+      "value": "1e-3",
+      "formatted": "~$0.00"
+    },
+    {
+      "value": "1E3",
+      "formatted": "~$1000.00"
+    },
+    {
+      "value": "abc",
+      "formatted": "—"
+    },
+    {
+      "value": "0.1.2",
+      "formatted": "—"
+    },
+    {
+      "value": " 1",
+      "formatted": "—"
+    }
+  ],
+  "footnote_cases": [
+    {
+      "cost_source": "",
+      "billing": "",
+      "footnote": ""
+    },
+    {
+      "cost_source": "",
+      "billing": "null",
+      "footnote": ""
+    },
+    {
+      "cost_source": "",
+      "billing": "subscription",
+      "footnote": ""
+    },
+    {
+      "cost_source": "",
+      "billing": "api",
+      "footnote": ""
+    },
+    {
+      "cost_source": "",
+      "billing": "endpoint",
+      "footnote": ""
+    },
+    {
+      "cost_source": "null",
+      "billing": "",
+      "footnote": ""
+    },
+    {
+      "cost_source": "null",
+      "billing": "null",
+      "footnote": ""
+    },
+    {
+      "cost_source": "null",
+      "billing": "subscription",
+      "footnote": ""
+    },
+    {
+      "cost_source": "null",
+      "billing": "api",
+      "footnote": ""
+    },
+    {
+      "cost_source": "null",
+      "billing": "endpoint",
+      "footnote": ""
+    },
+    {
+      "cost_source": "harness",
+      "billing": "",
+      "footnote": "Cost is the harness's own estimate, not an amount charged. Cache reads bill at about a tenth of the input rate and cache writes above it, so the token columns alone do not indicate cost."
+    },
+    {
+      "cost_source": "harness",
+      "billing": "null",
+      "footnote": "Cost is the harness's own estimate, not an amount charged. Cache reads bill at about a tenth of the input rate and cache writes above it, so the token columns alone do not indicate cost."
+    },
+    {
+      "cost_source": "harness",
+      "billing": "subscription",
+      "footnote": "Cost is the harness's own estimate, not an amount charged. Cache reads bill at about a tenth of the input rate and cache writes above it, so the token columns alone do not indicate cost. A leg on a subscription inside its included usage is invoiced nothing."
+    },
+    {
+      "cost_source": "harness",
+      "billing": "api",
+      "footnote": "Cost is the harness's own estimate, not an amount charged. Cache reads bill at about a tenth of the input rate and cache writes above it, so the token columns alone do not indicate cost. The provider's invoice remains authoritative."
+    },
+    {
+      "cost_source": "harness",
+      "billing": "endpoint",
+      "footnote": ""
+    },
+    {
+      "cost_source": "table",
+      "billing": "",
+      "footnote": "Cost is an estimate, not an amount charged, calculated from published API rates for the nearest listed model, which may not be the exact variant that answered. Cache reads bill at about a tenth of the input rate and cache writes above it, so the token columns alone do not indicate cost."
+    },
+    {
+      "cost_source": "table",
+      "billing": "null",
+      "footnote": "Cost is an estimate, not an amount charged, calculated from published API rates for the nearest listed model, which may not be the exact variant that answered. Cache reads bill at about a tenth of the input rate and cache writes above it, so the token columns alone do not indicate cost."
+    },
+    {
+      "cost_source": "table",
+      "billing": "subscription",
+      "footnote": "Cost is an estimate, not an amount charged, calculated from published API rates for the nearest listed model, which may not be the exact variant that answered. Cache reads bill at about a tenth of the input rate and cache writes above it, so the token columns alone do not indicate cost. A leg on a subscription inside its included usage is invoiced nothing."
+    },
+    {
+      "cost_source": "table",
+      "billing": "api",
+      "footnote": "Cost is an estimate, not an amount charged, calculated from published API rates for the nearest listed model, which may not be the exact variant that answered. Cache reads bill at about a tenth of the input rate and cache writes above it, so the token columns alone do not indicate cost. The provider's invoice remains authoritative."
+    },
+    {
+      "cost_source": "table",
+      "billing": "endpoint",
+      "footnote": ""
+    },
+    {
+      "cost_source": "other",
+      "billing": "",
+      "footnote": ""
+    },
+    {
+      "cost_source": "other",
+      "billing": "null",
+      "footnote": ""
+    },
+    {
+      "cost_source": "other",
+      "billing": "subscription",
+      "footnote": ""
+    },
+    {
+      "cost_source": "other",
+      "billing": "api",
+      "footnote": ""
+    },
+    {
+      "cost_source": "other",
+      "billing": "endpoint",
+      "footnote": ""
+    }
+  ]
+}
