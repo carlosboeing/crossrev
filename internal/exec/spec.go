@@ -49,6 +49,10 @@ type Spec struct {
 	// Audience says who the child is, and the zero value says a model.
 	Audience Audience
 
+	// Streams says whether the child's two output streams stay apart or arrive
+	// as one, and the zero value keeps them apart.
+	Streams Streams
+
 	// Stdin is the input handed to the child. Nil means the child reads EOF at
 	// once, which is the `</dev/null` every adapter redirects. It is required
 	// rather than defensive: lib/adapters/opencode.sh:47 and
@@ -99,6 +103,45 @@ const (
 	// and 120 among them — so the forge adapter this package will carry must be
 	// able to pass one. A blanket refusal in Run would break it.
 	AudienceOrchestrator
+)
+
+// Streams says how the child's stdout and stderr reach the caller.
+//
+// Two captures cannot be merged afterwards, which is the whole reason this
+// exists. A caller that concatenates them has invented an order: the child
+// wrote them interleaved, and nothing in either buffer records where one
+// stream's line sat relative to the other's.
+//
+// That is not a cosmetic loss. lib/github.sh:510 captures a failing push with
+// `2>&1` and hands the text to _gh_git_tail (lib/github.sh:404-410), which
+// keeps the last five non-blank lines — a selection by position. With a
+// pre-push hook writing to both streams, git sends the hook's stdout to git's
+// stdout and the hook's stderr plus its own `error: failed to push some refs`
+// to stderr; concatenating stdout ahead of stderr then pushes every stdout line
+// out of the five-line window, so the two implementations keep a different SET
+// of lines rather than the same lines in a different order. That text is
+// published: lib/github.sh:513 makes it the ui_die reason, lib/ui.sh:115 stores
+// it, and lib/run.sh:144-146 writes it into a pull request comment.
+type Streams int
+
+const (
+	// StreamsSeparate is the zero value: stdout and stderr are captured
+	// independently, into Result.Stdout and Result.Stderr.
+	//
+	// It is the zero value because it is what every caller had before this
+	// field existed, and because it is the answer that loses nothing a caller
+	// might want — a caller that needs the two apart cannot recover them from a
+	// merged stream either.
+	StreamsSeparate Streams = iota
+
+	// StreamsCombined puts both of the child's output descriptors on one pipe,
+	// so the capture is the child's own write order.
+	//
+	// It is `2>&1`, done the way the shell does it — at the descriptor, before
+	// the child starts — rather than by reordering afterwards. Result.Stdout
+	// carries the merged stream and Result.Stderr carries nothing, which is
+	// what `2>&1` leaves behind.
+	StreamsCombined
 )
 
 // forgeCredentialNames are the three the Bash adapters strip before starting a

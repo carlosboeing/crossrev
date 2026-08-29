@@ -96,6 +96,19 @@ func (r *OSRunner) Run(ctx context.Context, spec Spec) Result {
 	stderr := &capture{limit: spec.MaxOutputBytes}
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
+	if spec.Streams == StreamsCombined {
+		// One capture on both, which os/exec turns into one pipe: its stderr
+		// descriptor is the stdout one whenever the two writers are the same
+		// interface value. So the interleaving happens in the kernel, in the
+		// order the child wrote, and not in a merge here that would have to
+		// invent one.
+		//
+		// The capture's mutex is what makes this safe whatever os/exec decides:
+		// one pipe means one copier goroutine today, and a second one writing
+		// into the same buffer would still be serialised.
+		stderr = stdout
+		cmd.Stderr = stdout
+	}
 
 	// The child leads its own process group so a cancellation can kill
 	// everything it started. A harness that spawns helpers would otherwise
@@ -108,7 +121,13 @@ func (r *OSRunner) Run(ctx context.Context, spec Spec) Result {
 
 	result := Result{Duration: time.Since(started)}
 	result.Stdout, result.StdoutBytes, result.StdoutTruncated = stdout.state()
-	result.Stderr, result.StderrBytes, result.StderrTruncated = stderr.state()
+	if spec.Streams == StreamsCombined {
+		// Reading the same capture twice would report the merged byte count on
+		// both sides and say the stderr that carries nothing was truncated.
+		result.Stderr = []byte{}
+	} else {
+		result.Stderr, result.StderrBytes, result.StderrTruncated = stderr.state()
+	}
 
 	if cmd.ProcessState == nil {
 		// No child ever ran: an unresolvable program, a working directory that
