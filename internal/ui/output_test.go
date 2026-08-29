@@ -218,3 +218,66 @@ func TestZeroIODiscards(t *testing.T) {
 		t.Error("Die returned no error")
 	}
 }
+
+// TestNilIOTolerates is the tolerance the package doc promises, measured.
+//
+// The zero IO above is a value; this is the pointer, and the two are different
+// receivers. Every helper reads the palette through a nil check, Confirm reads
+// AssumeYes through another, and a command that gives up before wiring its
+// output holds nil rather than a zero value. Nothing here may panic, because
+// each of these runs from a path that is already reporting a failure.
+func TestNilIOTolerates(t *testing.T) {
+	var o *ui.IO
+
+	o.Section("a section")
+	o.SectionState("#3", "converged", ui.StateOK, "(retried once)")
+	o.Head("a heading")
+	o.Row("3 ", ui.StepOK, "review")
+	o.Cmd("crossrev review --pr 42")
+	o.Line("a line")
+	o.Gap()
+	o.End("done")
+	o.OK("ok")
+	o.No("no")
+	o.Opt("opt")
+	o.Next("next")
+	o.Say("say")
+	o.Warn("a condition", "what it costs")
+	if err := o.Die("reason", "action"); ui.Reason(err) != "reason" {
+		t.Errorf("Die on a nil IO returned %v, want a fatal error carrying the reason", err)
+	}
+
+	// Confirm reads AssumeYes before it reads anything else, and there is no
+	// struct to read it from.
+	confirmed, err := o.Confirm("Create 5 labels on acme/widget?")
+	if confirmed {
+		t.Error("Confirm said yes on a nil IO")
+	}
+	if ui.Reason(err) == "" {
+		t.Errorf("Confirm err = %v, want the no-terminal refusal", err)
+	}
+	if value, err := o.Prompt("Which repository?"); value != "" || ui.Reason(err) == "" {
+		t.Errorf("Prompt = %q, %v; want nothing and the no-terminal refusal", value, err)
+	}
+}
+
+// TestIOWithNoInputRefuses: an IO that is wired for output and not for answers
+// is the third arm of _ui_input_source, and it refuses rather than panicking on
+// the interface it was never given.
+func TestIOWithNoInputRefuses(t *testing.T) {
+	var r recorder
+	o := r.io(ui.Plain())
+	o.Input = nil
+
+	confirmed, err := o.Confirm("Create 5 labels on acme/widget?")
+	if confirmed {
+		t.Error("Confirm said yes with no Input")
+	}
+	want := "CrossRev needs to ask you something, but no terminal is attached"
+	if ui.Reason(err) != want {
+		t.Errorf("die reason = %q, want %q", ui.Reason(err), want)
+	}
+	if r.out.String() != "" {
+		t.Errorf("stdout = %q, want nothing asked", r.out.String())
+	}
+}

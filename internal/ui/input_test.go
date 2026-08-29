@@ -38,11 +38,27 @@ func tty(t *testing.T, text string) ui.Terminal {
 	return ui.Terminal{TTYPath: path}
 }
 
-// TestTerminalPrefersTheControllingTerminal: the first arm wins even when
-// stdin is available, because `curl … | sh` leaves the script on stdin.
+// TestTerminalPrefersTheControllingTerminal: with both arms available, the
+// controlling terminal is the one taken.
+//
+// Both arms have to be real for this to measure the order. The second is
+// guarded by IsTerminal, and under `go test` the process's stdin is not one, so
+// handing over os.Stdin exercises the first arm alone and passes just as
+// happily with the two swapped. Stdin here is a pseudo-terminal, which answers
+// the same ioctl a real one does.
+//
+// It asserts which source was chosen rather than reading from it: reading the
+// wrong one would block on an idle terminal rather than fail.
 func TestTerminalPrefersTheControllingTerminal(t *testing.T) {
+	stdin := openPTY(t)
+	if stdin == nil {
+		t.Skip("no pseudo-terminal on this platform, so only one arm is reachable")
+	}
+	if !ui.IsTerminal(stdin) {
+		t.Fatal("the pseudo-terminal does not read as a terminal")
+	}
 	source := tty(t, "from the terminal\n")
-	source.Stdin = os.Stdin
+	source.Stdin = stdin
 
 	reader, err := source.Open()
 	if err != nil {
@@ -50,12 +66,63 @@ func TestTerminalPrefersTheControllingTerminal(t *testing.T) {
 	}
 	defer reader.Close()
 
-	got, err := io.ReadAll(reader)
+	chosen, ok := reader.(*os.File)
+	if !ok || chosen.Name() != source.TTYPath {
+		t.Fatalf("Open chose %T, want the controlling terminal at %s", reader, source.TTYPath)
+	}
+	got, err := io.ReadAll(chosen)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if string(got) != "from the terminal\n" {
 		t.Errorf("read %q from the wrong source", got)
+	}
+}
+
+// TestTerminalRefusesAStdinThatIsNotATerminal is what protects `curl … | sh`:
+// the script is on stdin there, and it must never be read as an answer. The
+// guard rather than the arm order is what does it — a swapped Open refuses the
+// pipe just the same.
+func TestTerminalRefusesAStdinThatIsNotATerminal(t *testing.T) {
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+	defer writer.Close()
+	if _, err := writer.WriteString("y\n"); err != nil {
+		t.Fatal(err)
+	}
+
+	source := ui.Terminal{
+		TTYPath: filepath.Join(t.TempDir(), "no-such-terminal"),
+		Stdin:   reader,
+	}
+	if _, err := source.Open(); !errors.Is(err, ui.ErrNoInput) {
+		t.Errorf("Open err = %v, want ErrNoInput; a piped script is not an answer", err)
+	}
+}
+
+// TestTerminalDefaultsToTheControllingTerminal: an empty TTYPath is
+// DefaultTTYPath, and every test sets the field, so nothing else pins the
+// fallback. The two must reach the same place whether or not this machine has a
+// controlling terminal, which is what makes the check the same measurement on a
+// runner and in a session.
+func TestTerminalDefaultsToTheControllingTerminal(t *testing.T) {
+	if ui.DefaultTTYPath != "/dev/tty" {
+		t.Errorf("DefaultTTYPath = %q, want /dev/tty", ui.DefaultTTYPath)
+	}
+
+	unset, errUnset := ui.Terminal{}.Open()
+	if unset != nil {
+		unset.Close()
+	}
+	named, errNamed := ui.Terminal{TTYPath: ui.DefaultTTYPath}.Open()
+	if named != nil {
+		named.Close()
+	}
+	if (errUnset == nil) != (errNamed == nil) {
+		t.Errorf("an empty TTYPath answered %v and DefaultTTYPath answered %v", errUnset, errNamed)
 	}
 }
 
