@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/carlosboeing/crossrev/internal/core"
+	"github.com/carlosboeing/crossrev/internal/exec"
 )
 
 // Refusal is one fatal condition, in the two parts ui_die takes: what went
@@ -67,6 +68,17 @@ func (r *Repository) Run(ctx context.Context, args ...string) (Output, error) {
 // RunWithEnv makes one git call with extra environment entries appended.
 func (r *Repository) RunWithEnv(ctx context.Context, extraEnv []string, args ...string) (Output, error) {
 	return r.git.Run(ctx, Call{Dir: r.dir, Args: args, ExtraEnv: extraEnv})
+}
+
+// RunCombined makes one git call whose two output streams arrive as one, in the
+// order the child wrote them. Output.Stdout holds the whole of it.
+//
+// It is `$(git … 2>&1)`, which is how lib/github.sh:481 captures a commit,
+// lib/github.sh:510 a push and lib/run.sh:1891 a worktree creation. Use it only
+// where the output is a message for a person: a call whose stdout is read as
+// data must never have git's diagnostics mixed into it.
+func (r *Repository) RunCombined(ctx context.Context, args ...string) (Output, error) {
+	return r.git.Run(ctx, Call{Dir: r.dir, Args: args, Streams: exec.StreamsCombined})
 }
 
 // ErrNotARepository is returned when git answers that the directory is not one.

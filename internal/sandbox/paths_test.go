@@ -108,7 +108,7 @@ func TestSandboxArgsParity(t *testing.T) {
 }
 
 // A name no harness carries yields nothing, which is what jq's `// empty`
-// answers for an unknown selection (lib/harnesses.sh:106).
+// answers for an unknown selection (harness_get at lib/harnesses.sh:131).
 func TestSandboxArgsForAnUnknownHarness(t *testing.T) {
 	if got := shippedDescriptor(t).ArgsFor("nobody"); len(got) != 0 {
 		t.Errorf("args = %v, want none", got)

@@ -34,7 +34,7 @@ func TestShowReadsTheRevisionAndNotTheWorkingTree(t *testing.T) {
 	}
 
 	// And the zero revision is the working tree, which is what init and doctor
-	// read (lib/config.sh:134-136).
+	// read, behind the `[[ -f ]]` at lib/config.sh:36-38.
 	content, status, err = repo.Show(ctx, core.Revision{}, filepath.Join(repo.Dir(), ".github/crossrev.yml"))
 	if err != nil {
 		t.Fatalf("Show at the working tree: %v", err)
@@ -65,8 +65,9 @@ func TestShowStatuses(t *testing.T) {
 		content string
 	}{
 		// A file that exists at the base revision and holds nothing states no
-		// policy, which is the same answer as no file — but it is a different
-		// read, and the status has to keep them apart (lib/config.sh:105-107).
+		// policy, which is the same answer as no file (lib/config.sh:104-105) —
+		// but it is a different read, and the status has to keep them apart. The
+		// mechanism is the `[[ -n "$text" ]]` at lib/config.sh:108.
 		{name: "an empty file is found", path: "empty.yml", status: vcs.IsFile, content: ""},
 		// `[[ -f ]]` and `git show` disagree about a directory, and the shell
 		// keeps the disagreement: at a revision the tree is found and then
@@ -95,7 +96,7 @@ func TestShowStatuses(t *testing.T) {
 // A working-tree read is a plain filesystem read, and the path it is given is
 // not always repository-relative: the operator configuration layer is an
 // absolute path outside the checkout, and resolving it against the repository
-// would drop the layer without a word (lib/config.sh:166).
+// would drop the layer without a word (lib/config.sh:23, read at :215-216).
 func TestShowWorkingTreeReadsOutsideTheCheckout(t *testing.T) {
 	ctx := context.Background()
 	git := testGit(t)

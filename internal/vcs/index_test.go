@@ -92,7 +92,7 @@ func TestRestoreTreeLeavesTheRealIndexAlone(t *testing.T) {
 }
 
 // Ignored files are neither captured nor removed, which is right — they are not
-// committed either (lib/run.sh:650-651).
+// committed either (lib/run.sh:661-662).
 func TestRestoreTreeKeepsIgnoredFiles(t *testing.T) {
 	ctx := context.Background()
 	git := testGit(t)

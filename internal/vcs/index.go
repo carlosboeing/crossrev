@@ -65,15 +65,17 @@ func (r *Repository) CaptureTree(ctx context.Context, indexPath string) (string,
 	if output, err := r.RunWithEnv(ctx, env, "add", "-A"); err != nil {
 		return "", err
 	} else if !output.OK() {
-		return "", fmt.Errorf("%w: git add -A: %s", ErrTreeCapture, strings.TrimSpace(combinedOutput(output)))
+		return "", fmt.Errorf("%w: git add -A: %s", ErrTreeCapture, diagnostic(output))
 	}
 
+	// Separate streams, deliberately: this call's stdout is the tree object
+	// name, and a git warning merged into it would be returned as one.
 	output, err := r.RunWithEnv(ctx, env, "write-tree")
 	if err != nil {
 		return "", err
 	}
 	if !output.OK() {
-		return "", fmt.Errorf("%w: git write-tree: %s", ErrTreeCapture, strings.TrimSpace(combinedOutput(output)))
+		return "", fmt.Errorf("%w: git write-tree: %s", ErrTreeCapture, diagnostic(output))
 	}
 	return output.Text(), nil
 }
@@ -120,9 +122,12 @@ func (r *Repository) RestoreTree(ctx context.Context, indexPath, tree string) er
 		return err
 	}
 	if !output.OK() {
-		return fmt.Errorf("%w: git read-tree: %s", ErrTreeCapture, strings.TrimSpace(combinedOutput(output)))
+		return fmt.Errorf("%w: git read-tree: %s", ErrTreeCapture, diagnostic(output))
 	}
 
+	// Separate streams again, and here it decides what gets deleted: every line
+	// of this stdout is joined onto the top level and handed to os.RemoveAll,
+	// so a git diagnostic merged into it would become a path.
 	leftovers, err := r.git.Run(ctx, Call{
 		Dir:      top,
 		ExtraEnv: env,
@@ -132,7 +137,7 @@ func (r *Repository) RestoreTree(ctx context.Context, indexPath, tree string) er
 		return err
 	}
 	if !leftovers.OK() {
-		return fmt.Errorf("%w: git ls-files: %s", ErrTreeCapture, strings.TrimSpace(combinedOutput(leftovers)))
+		return fmt.Errorf("%w: git ls-files: %s", ErrTreeCapture, diagnostic(leftovers))
 	}
 
 	for _, path := range leftovers.Lines() {
@@ -195,4 +200,17 @@ func copyFile(source, destination string) error {
 		return err
 	}
 	return out.Close()
+}
+
+// diagnostic is what git said about a call whose streams were kept apart.
+//
+// stderr first, because that is where git puts a refusal, and stdout only when
+// stderr said nothing. These calls are not ported captures — the shell throws
+// their output away entirely (lib/run.sh:638, :667) — so there is no `2>&1` to
+// match and no order to preserve.
+func diagnostic(output Output) string {
+	if message := strings.TrimSpace(output.Stderr); message != "" {
+		return message
+	}
+	return strings.TrimSpace(output.Stdout)
 }

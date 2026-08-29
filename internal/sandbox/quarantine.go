@@ -32,6 +32,16 @@ import (
 // carries the text, and the files stay readable at a path no harness auto-loads
 // (lib/sandbox.sh:27-30).
 //
+// # os.Rename where the shell has mv, and it is stricter
+//
+// Not the same operation, in one case that matters. Where a stranded quarantine
+// already holds the path and the checkout holds it again, `mv .claude
+// .crossrev-quarantine/.claude` moves the second one INSIDE the first and exits
+// zero, leaving `.crossrev-quarantine/.claude/.claude` and no sign anything went
+// wrong. os.Rename refuses with "file exists", so Quarantine fails and says so.
+// Louder, and deliberately kept: silent nesting produces a restore that puts
+// back a directory holding a copy of itself.
+//
 // # Why the directory is listed rather than stat'ed
 //
 // `test -e` matches case-insensitively on macOS, so it cannot tell CLAUDE.md

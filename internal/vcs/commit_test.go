@@ -214,7 +214,7 @@ func TestPushRefused(t *testing.T) {
 }
 
 // The tail is the last five non-blank lines, capped, with the cut marked. It is
-// _gh_git_tail at lib/github.sh:412-418.
+// _gh_git_tail at lib/github.sh:404-410.
 func TestGitTail(t *testing.T) {
 	tests := []struct {
 		name  string

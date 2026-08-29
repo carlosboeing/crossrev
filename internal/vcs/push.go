@@ -14,7 +14,8 @@ const gitHubHost = "github.com"
 
 // ErrNotGitHubURL is returned for a remote URL that is not a github.com
 // repository URL. The shell spells it as a bare `return 1` from
-// legs_github_slug (lib/legs.sh:344), with the caller owning the message.
+// legs_github_slug (lib/legs.sh:351, :359 and :362), with the caller owning
+// the message.
 var ErrNotGitHubURL = errors.New("not a github.com repository URL")
 
 // GitHubSlug is the owner/repo a github.com remote URL names, or an error for
@@ -87,11 +88,19 @@ func authorityAndPath(url string) (string, bool) {
 
 // asciiLower folds A-Z and nothing else.
 //
-// The shell folds with `tr '[:upper:]' '[:lower:]'`, and the identity rules
-// elsewhere in CrossRev are byte-oriented for the reason core.isHex gives. Only
-// the seven-bit spelling of github.com can pass the comparison that follows, so
-// a fold that also touched non-ASCII could only ever admit a host this must
-// refuse.
+// ASCII-only by construction, which is the point rather than a simplification.
+// The host it produces is compared against the seven-bit spelling of
+// github.com, and only bytes that are already ASCII can reach that spelling by
+// being lowercased — so anything wider than A-Z can only ever turn a host that
+// is not github.com into one that looks like it.
+//
+// That is not hypothetical. `tr '[:upper:]' '[:lower:]'` is a byte fold under
+// GNU tr and under any tr running with LC_ALL=C, but BSD tr in a UTF-8 locale
+// folds multibyte letters as well: U+0130, LATIN CAPITAL LETTER I WITH DOT
+// ABOVE, comes out as ASCII `i`. Measured on macOS under en_AU.UTF-8, the
+// host `GİTHUB.COM` folds to `github.com` and the guard hands back a slug for a
+// host nobody owns; under LC_ALL=C the same input is refused. This function has
+// no locale to depend on, so it refuses either way.
 func asciiLower(s string) string {
 	var b strings.Builder
 	b.Grow(len(s))
@@ -129,7 +138,7 @@ type PushTarget struct {
 	// Repo is the repository every push URL of the remote resolves to. The
 	// zero value means the remote carries no URL at all, which
 	// legs_resolve_push_repo reports by leaving LEGS_PUSH_REPO empty
-	// (lib/legs.sh:383-385) and leaves the caller to describe, because what to
+	// (lib/legs.sh:386-389) and leaves the caller to describe, because what to
 	// say about it depends on how the remote was resolved.
 	Repo core.Slug
 
@@ -225,7 +234,7 @@ func (r *Repository) ResolvePushRepo(ctx context.Context, remote string) (PushTa
 			rewritten = effective[i]
 		}
 		// The two emptiness tests are unreachable and kept anyway. They are
-		// the shell's `[[ -n "$cfg" && -n "$eff" ]]` (lib/legs.sh:434), which
+		// the shell's `[[ -n "$cfg" && -n "$eff" ]]` (lib/legs.sh:433), which
 		// there guards against a blank line in a `while read` loop; here
 		// Output.Lines has already dropped every empty entry. Dropping them
 		// would make this and the shell differ on a line nobody can produce,

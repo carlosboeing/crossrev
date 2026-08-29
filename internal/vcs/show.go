@@ -49,7 +49,9 @@ const (
 //
 // A zero revision is a plain filesystem read, and the path it is given is not
 // always repository-relative: the operator configuration layer lives at an
-// absolute path outside the checkout (lib/config.sh:166). Resolving every path
+// absolute path outside the checkout, built by _cfg_operator_path
+// (lib/config.sh:23) and read from the working tree at lib/config.sh:215-216.
+// Resolving every path
 // against the repository would drop that layer without a word.
 //
 // # Why a tree is found rather than skipped

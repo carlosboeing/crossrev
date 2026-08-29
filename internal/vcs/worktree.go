@@ -67,14 +67,16 @@ func (r *Repository) AddWorktree(ctx context.Context, dir string, revision core.
 	if err := os.MkdirAll(filepath.Dir(dir), 0o755); err != nil {
 		return err
 	}
-	output, err := r.Run(ctx, "worktree", "add", "--detach", dir, revision.SHA())
+	// `2>&1`, as at lib/run.sh:1891: the hint is git's own words about why it
+	// refused, and there is nothing better to say than what git said.
+	output, err := r.RunCombined(ctx, "worktree", "add", "--detach", dir, revision.SHA())
 	if err != nil {
 		return err
 	}
 	if !output.OK() {
 		return &Refusal{
 			Message: fmt.Sprintf("could not create worktree for revision '%s' at %s", revision.SHA(), dir),
-			Hint:    combinedOutput(output),
+			Hint:    output.Stdout,
 		}
 	}
 	return nil
@@ -149,21 +151,4 @@ func (r *Repository) RemoveWorktree(ctx context.Context, dir string) error {
 	// request's worktree is supposed to survive.
 	_ = os.Remove(filepath.Dir(dir))
 	return nil
-}
-
-// combinedOutput is what a `2>&1` capture would have held.
-//
-// It is a stated divergence rather than an exact port. The shell captures one
-// interleaved stream (lib/run.sh:1891); this package captures two and cannot
-// know which line arrived first. git writes a refusal to stderr and progress to
-// stdout, so the order only shows where both said something, and the text is
-// the same text.
-func combinedOutput(output Output) string {
-	if output.Stdout == "" {
-		return output.Stderr
-	}
-	if output.Stderr == "" {
-		return output.Stdout
-	}
-	return output.Stdout + output.Stderr
 }

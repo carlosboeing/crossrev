@@ -50,6 +50,13 @@ type Call struct {
 	// (lib/run.sh:638-639 and :667-670) without the whole package holding a
 	// mutable environment.
 	ExtraEnv []string
+
+	// Streams says whether the child's two output streams arrive apart or as
+	// one. The zero value keeps them apart, which is what every call that reads
+	// stdout as data needs; a call whose output is only ever a human message
+	// asks for exec.StreamsCombined, and gets Output.Stdout holding what a
+	// `2>&1` capture would have held.
+	Streams exec.Streams
 }
 
 // Output is what one git invocation produced.
@@ -121,6 +128,7 @@ func (g *Git) Run(ctx context.Context, call Call) (Output, error) {
 		Dir:      call.Dir,
 		Env:      env,
 		Audience: exec.AudienceOrchestrator,
+		Streams:  call.Streams,
 	})
 
 	output := Output{

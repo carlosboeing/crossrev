@@ -149,7 +149,7 @@ func renderedWarnings(warnings []vcs.Warning) string {
 
 // A remote whose URL is fine but whose name is not configured at all answers
 // with no target and no warning, which is how the caller learns to print its
-// own message (lib/legs.sh:383-385, lib/run.sh:1863-1865).
+// own message (lib/legs.sh:386-389, lib/run.sh:1863-1865).
 func TestResolvePushRepoUnknownRemote(t *testing.T) {
 	git := testGit(t)
 	repo := initRepo(t, git, filepath.Join(realTempDir(t), "r"))

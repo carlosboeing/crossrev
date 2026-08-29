@@ -397,3 +397,34 @@ func TestQuarantineDirectoryModes(t *testing.T) {
 		t.Errorf(".github mode = %04o, want 0755", got)
 	}
 }
+
+// os.Rename is stricter than the shell's mv, and this pins the difference so it
+// stays declared rather than drifting back.
+//
+// Where a stranded quarantine already holds the path and the checkout holds it
+// again, `mv` moves the second inside the first and exits zero, leaving
+// .crossrev-quarantine/.claude/.claude. os.Rename refuses, so Quarantine fails
+// and says why.
+func TestQuarantineRefusesToNestOverAStrandedQuarantine(t *testing.T) {
+	root := realTempDir(t)
+	write(t, root, ".claude/settings.json", "the run that was interrupted\n")
+	paths := shippedDescriptor(t).Paths()
+
+	// A run that was killed between quarantine and restore.
+	if _, err := sandbox.Quarantine(root, paths); err != nil {
+		t.Fatalf("Quarantine: %v", err)
+	}
+	if !exists(t, filepath.Join(root, sandbox.QuarantineDir, ".claude/settings.json")) {
+		t.Fatal("the stranded quarantine was not created")
+	}
+	// The checkout holds the path again.
+	write(t, root, ".claude/settings.json", "the next run's\n")
+
+	_, err := sandbox.Quarantine(root, paths)
+	if err == nil {
+		t.Fatal("quarantining over a stranded quarantine succeeded")
+	}
+	if exists(t, filepath.Join(root, sandbox.QuarantineDir, ".claude/.claude")) {
+		t.Error("the second directory was nested inside the first")
+	}
+}
