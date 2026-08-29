@@ -23,10 +23,16 @@ func TestZeroSpecIsModelFacing(t *testing.T) {
 
 // Each of the four names the Bash adapters strip. An allowlist cannot stop
 // these, because a caller reached them by name.
+//
+// The list is forgeCredentials, written out in env_test.go in this same
+// package. It is deliberately not read from spec.go: a test that read the
+// production list would lose a name from itself in the edit that lost it from
+// production, and pass. tests/test-permissions.sh:264-271 keeps its own copy
+// of the same four names for the same reason.
 func TestRunRefusesAForgeCredentialForAModelFacingChild(t *testing.T) {
 	const secret = "ghp_a_token_that_must_never_be_printed"
 
-	for _, name := range []string{"GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"} {
+	for _, name := range forgeCredentials {
 		t.Run(name, func(t *testing.T) {
 			spec := helperSpec("lookup", name)
 			spec.Env = append(spec.Env, name+"="+secret)
@@ -67,7 +73,7 @@ func TestRunRefusesAForgeCredentialForAModelFacingChild(t *testing.T) {
 func TestRunAllowsAForgeCredentialForAnOrchestratorChild(t *testing.T) {
 	const secret = "ghp_orchestrator_only"
 
-	for _, name := range []string{"GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"} {
+	for _, name := range forgeCredentials {
 		t.Run(name, func(t *testing.T) {
 			spec := helperSpec("lookup", name)
 			spec.Env = append(spec.Env, name+"="+secret)
