@@ -59,7 +59,7 @@ func credentialWithToken(t *testing.T, token string) []byte {
 func codex(t *testing.T) cred.Descriptor {
 	t.Helper()
 	d := descriptors(t).For("codex")
-	if !d.Credential.AssertFresh || d.Credential.AccessTokenJQ == "" {
+	if !d.Credential.AssertFresh || d.Credential.AccessTokenPath == "" {
 		t.Fatalf("the codex descriptor no longer drives the freshness path: %+v", d.Credential)
 	}
 	return d
@@ -127,7 +127,7 @@ func TestSecondsLeftRefusesWhatItCannotRead(t *testing.T) {
 // read: `[[ -n "$jq_path" ]] || return 1` at lib/credentials.sh:70.
 func TestSecondsLeftRefusesAHarnessWithNoAccessTokenPath(t *testing.T) {
 	claude := descriptors(t).For("claude")
-	if claude.Credential.AccessTokenJQ != "" {
+	if claude.Credential.AccessTokenPath != "" {
 		t.Fatal("claude now carries an access token path, so this no longer covers the case")
 	}
 	if _, err := cred.SecondsLeft(claude, credential(t, 86400), epoch); !errors.Is(err, cred.ErrMalformedToken) {
@@ -143,12 +143,12 @@ func TestEveryShippedAccessTokenPathIsAPlainObjectPath(t *testing.T) {
 	checked := 0
 	for _, name := range doc.Names() {
 		d := doc.For(name)
-		if d.Credential.AccessTokenJQ == "" {
+		if d.Credential.AccessTokenPath == "" {
 			continue
 		}
 		checked++
 		if _, err := cred.AccessToken(d, credential(t, 60)); err != nil {
-			t.Errorf("%s: access token path %q is not usable: %v", name, d.Credential.AccessTokenJQ, err)
+			t.Errorf("%s: access token path %q is not usable: %v", name, d.Credential.AccessTokenPath, err)
 		}
 	}
 	if checked == 0 {
@@ -165,7 +165,7 @@ func TestAccessTokenRefusesAPathThisBuildCannotWalk(t *testing.T) {
 		".tokens | .access_token",
 		".tokens.access_token // empty",
 	} {
-		d := cred.Descriptor{Harness: "probe", Credential: cred.Credential{AccessTokenJQ: path}}
+		d := cred.Descriptor{Harness: "probe", Credential: cred.Credential{AccessTokenPath: path}}
 		if _, err := cred.AccessToken(d, credential(t, 60)); !errors.Is(err, cred.ErrDescriptor) {
 			t.Errorf("AccessToken(%q) error = %v, want ErrDescriptor", path, err)
 		}

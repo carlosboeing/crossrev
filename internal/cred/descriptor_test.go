@@ -69,8 +69,8 @@ func TestANullDescriptorFieldReadsAsEmpty(t *testing.T) {
 	}
 
 	claude := doc.For("claude")
-	if claude.Credential.AccessTokenJQ != "" {
-		t.Errorf("claude access token path = %q, want empty", claude.Credential.AccessTokenJQ)
+	if claude.Credential.AccessTokenPath != "" {
+		t.Errorf("claude access token path = %q, want empty", claude.Credential.AccessTokenPath)
 	}
 	if claude.Credential.AssertFresh {
 		t.Error("claude is marked assert_fresh; its setup token carries no expiry to read")

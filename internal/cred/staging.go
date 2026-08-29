@@ -68,7 +68,16 @@ type FS interface {
 	// os.MkdirTemp makes it 0700 too.
 	MkdirTemp(dir, pattern string) (string, error)
 	MkdirAll(path string, perm fs.FileMode) error
-	WriteFile(name string, data []byte, perm fs.FileMode) error
+	// WriteNew creates a file that did not exist and writes data into it at
+	// perm, refusing a name that is already there.
+	//
+	// os.WriteFile is the obvious call and it is the wrong one. Its perm
+	// applies at creation only, so an existing file keeps the mode it had, and
+	// it follows a symlink. Measured: a 0644 file rewritten with os.WriteFile
+	// at 0600 stayed 0644, and a write to a symlink landed on the target at
+	// 0644 with no error. Either turns "0600 from birth" — the property this
+	// package claims — into "0600 if nothing was there first".
+	WriteNew(name string, data []byte, perm fs.FileMode) error
 	RemoveAll(path string) error
 }
 
@@ -79,8 +88,20 @@ func (OSFileSystem) MkdirTemp(dir, pattern string) (string, error) {
 	return os.MkdirTemp(dir, pattern)
 }
 func (OSFileSystem) MkdirAll(path string, perm fs.FileMode) error { return os.MkdirAll(path, perm) }
-func (OSFileSystem) WriteFile(name string, data []byte, perm fs.FileMode) error {
-	return os.WriteFile(name, data, perm)
+
+// O_EXCL is what makes this exclusive, and it is what refuses the symlink too:
+// with O_CREATE, the kernel fails on an existing final component whether it is
+// a file or a link, so the credential cannot be written through one.
+func (OSFileSystem) WriteNew(name string, data []byte, perm fs.FileMode) error {
+	file, err := os.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, perm)
+	if err != nil {
+		return err
+	}
+	if _, err := file.Write(data); err != nil {
+		file.Close()
+		return err
+	}
+	return file.Close()
 }
 func (OSFileSystem) RemoveAll(path string) error { return os.RemoveAll(path) }
 
@@ -188,9 +209,24 @@ func Prepare(d Descriptor, endpoint string, o Options) (*Staged, error) {
 	// opencode/auth.json — and every shipped path before it was a bare
 	// auth.json, which is why the write never needed this until then
 	// (lib/credentials.sh:146-148).
+	//
+	// It is checked here as well as at Load, because this is the write. Load
+	// answers for the descriptor CrossRev ships; a Descriptor is an exported
+	// value any caller can build, and the one that escapes the scratch home is
+	// the one nobody parsed. `..` is the whole of the danger: filepath.Join
+	// folds a leading slash, so an absolute path stays inside, and a `..`
+	// segment does not — it puts the credential somewhere Discard's RemoveAll
+	// of the scratch home will not reach, which is how a restored credential
+	// outlives the leg that borrowed it.
 	path := d.Credential.Staging.Path
-	if path == "" {
-		path = "auth.json"
+	if !relativePath(path) {
+		_ = o.fs().RemoveAll(dir)
+		return &Staged{}, &Refusal{
+			Kind:   ErrStaging,
+			Err:    fmt.Errorf("%w: the %s staging path %q is absolute, empty, or contains a .. segment", ErrDescriptor, d.Harness, path),
+			Reason: fmt.Sprintf("the %s descriptor names a staging path outside the scratch home", d.Harness),
+			Action: "CrossRev writes a restored credential into a directory it throws away when the leg finishes, and a path that leaves it would be left behind. Fix the harness descriptor.",
+		}
 	}
 	file := filepath.Join(dir, path)
 
@@ -203,8 +239,9 @@ func Prepare(d Descriptor, endpoint string, o Options) (*Staged, error) {
 		return &Staged{}, stagingFailure(d, dir, o, err)
 	}
 	// 0600 is `(umask 077; printf … >"$staging_file")` at
-	// lib/credentials.sh:150.
-	if err := o.fs().WriteFile(file, []byte(value), 0o600); err != nil {
+	// lib/credentials.sh:150, and the write is exclusive so that it is 0600
+	// from birth rather than 0600 if nothing was there first.
+	if err := o.fs().WriteNew(file, []byte(value), 0o600); err != nil {
 		return &Staged{}, stagingFailure(d, dir, o, err)
 	}
 
@@ -213,6 +250,9 @@ func Prepare(d Descriptor, endpoint string, o Options) (*Staged, error) {
 	// which exits the process and leaves the scratch directory behind; a Go
 	// caller carries on, so the credential is removed rather than left on disk.
 	if err := AssertFresh(d, []byte(value), o.now()); err != nil {
+		// The removal's own error is discarded: the refusal a caller has to
+		// read is the freshness one, and a scratch directory that would not
+		// delete is a second fault that says nothing about the credential.
 		_ = o.fs().RemoveAll(dir)
 		return &Staged{}, err
 	}
@@ -220,6 +260,8 @@ func Prepare(d Descriptor, endpoint string, o Options) (*Staged, error) {
 	staged := &Staged{Dir: dir, File: file, Env: stagingEnv, options: o}
 	staged.envWas, staged.envWasSet = o.env().Lookup(stagingEnv)
 	if err := o.env().Set(stagingEnv, dir); err != nil {
+		// Discarded for the reason above: the export failure is what the
+		// caller acts on.
 		_ = o.fs().RemoveAll(dir)
 		return &Staged{}, &Refusal{
 			Kind:   ErrStaging,
@@ -232,6 +274,8 @@ func Prepare(d Descriptor, endpoint string, o Options) (*Staged, error) {
 }
 
 func stagingFailure(d Descriptor, dir string, o Options, err error) error {
+	// Discarded: err is the fault worth reporting, and it is already the
+	// reason the directory is being removed.
 	_ = o.fs().RemoveAll(dir)
 	return &Refusal{
 		Kind:   ErrStaging,
@@ -318,10 +362,10 @@ func assertPresent(d Descriptor, endpoint string, o Options) error {
 		return nil
 	}
 
+	// Every harness the descriptor gives a secret also gives a seed hint, and
+	// the check above has already returned for one with no secret — so there
+	// is no fallback here, because there is no case for it to cover.
 	hint := d.Credential.SeedHint
-	if hint == "" {
-		hint = "Seed it with the vendor CLI"
-	}
 
 	return &Refusal{
 		Kind: ErrSecretMissing,

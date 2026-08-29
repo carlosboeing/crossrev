@@ -522,11 +522,11 @@ func (f failingFS) MkdirAll(path string, perm fs.FileMode) error {
 	return f.OSFileSystem.MkdirAll(path, perm)
 }
 
-func (f failingFS) WriteFile(name string, data []byte, perm fs.FileMode) error {
+func (f failingFS) WriteNew(name string, data []byte, perm fs.FileMode) error {
 	if f.failWrite {
 		return fs.ErrPermission
 	}
-	return f.OSFileSystem.WriteFile(name, data, perm)
+	return f.OSFileSystem.WriteNew(name, data, perm)
 }
 
 func TestAStagingFailureRefusesRatherThanPassing(t *testing.T) {

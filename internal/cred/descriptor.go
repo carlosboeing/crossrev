@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strings"
 	"sync"
 )
 
@@ -44,10 +45,48 @@ type Staging struct {
 	Kind string `json:"kind"`
 	// Env is the variable Prepare exports, empty when the descriptor says null.
 	Env string `json:"env"`
-	// Path is the file inside the scratch directory, relative and never
-	// containing a `..` segment (lib/harnesses.sh:71-73). Empty means
-	// auth.json, which is the default lib/credentials.sh:145 applies.
+	// Path is the file inside the scratch directory: relative, non-empty, and
+	// never containing a `..` segment. Load refuses a descriptor that breaks
+	// that, and Prepare refuses the path again at the write.
+	//
+	// It is empty only for a harness whose descriptor writes null, which is
+	// every harness that stages nothing.
 	Path string `json:"path"`
+
+	// pathDeclared separates `"path": null` from `"path": ""`. The shell's
+	// validator skips the first and refuses the second
+	// (lib/harnesses.sh:71-73), and both decode into the same empty string.
+	pathDeclared bool
+}
+
+// UnmarshalJSON exists for pathDeclared and nothing else.
+func (s *Staging) UnmarshalJSON(raw []byte) error {
+	var wire struct {
+		Kind string  `json:"kind"`
+		Env  string  `json:"env"`
+		Path *string `json:"path"`
+	}
+	if err := json.Unmarshal(raw, &wire); err != nil {
+		return err
+	}
+	s.Kind, s.Env, s.Path, s.pathDeclared = wire.Kind, wire.Env, "", wire.Path != nil
+	if wire.Path != nil {
+		s.Path = *wire.Path
+	}
+	return nil
+}
+
+// relativePath is the `relative` filter lib/harnesses.sh:31-33 defines: a
+// non-empty string that does not start at the root and carries no `..` segment.
+//
+// A leading slash is refused for parity rather than for reach — filepath.Join
+// folds one, so an absolute staging path stays inside the scratch home. `..`
+// is the segment that leaves it.
+func relativePath(path string) bool {
+	if path == "" || strings.HasPrefix(path, "/") {
+		return false
+	}
+	return !slices.Contains(strings.Split(path, "/"), "..")
 }
 
 // Credential is one harness's `.credential` block.
@@ -75,10 +114,16 @@ type Credential struct {
 	SeedHint string `json:"seed_hint"`
 	// Staging is where a restored credential goes.
 	Staging Staging `json:"staging"`
-	// AccessTokenJQ is the path to the access token inside the stored
+	// AccessTokenPath is the path to the access token inside the stored
 	// credential, as the descriptor writes it: `.tokens.access_token`, or null
 	// for a store that holds no JWT.
-	AccessTokenJQ string `json:"access_token_jq"`
+	//
+	// The JSON key still says jq, because the descriptor is shared with the
+	// Bash side and renaming it would be a change to a file both read. The Go
+	// name does not, because this build has no jq and refuses anything jq could
+	// express that a dotted object path cannot — a field called AccessTokenJQ
+	// promises a program it will not run.
+	AccessTokenPath string `json:"access_token_jq"`
 	// AssertFresh is whether an expiry can be read out of this store at all.
 	// An archetype-A store holds none, and demanding one would stop exactly the
 	// harnesses that cannot answer it (lib/credentials.sh:205-210).
@@ -149,6 +194,11 @@ func Load(raw []byte) (Document, error) {
 		}
 		if _, duplicate := loaded.index[entry.Name]; duplicate {
 			return Document{}, fmt.Errorf("%w: harness name %q appears more than once", ErrDescriptor, entry.Name)
+		}
+		staging := entry.Credential.Staging
+		if staging.pathDeclared && !relativePath(staging.Path) {
+			return Document{}, fmt.Errorf("%w: the staging path %q for %s is absolute, empty, or contains a .. segment",
+				ErrDescriptor, staging.Path, entry.Name)
 		}
 		loaded.index[entry.Name] = len(loaded.entries)
 		loaded.entries = append(loaded.entries, Descriptor{Harness: entry.Name, Credential: entry.Credential})

@@ -32,7 +32,7 @@ const MinSeconds int64 = 3600
 // approximated, because a path this build silently read as something narrower
 // would read the wrong field out of a credential and report the answer as fact.
 func AccessToken(d Descriptor, credential []byte) (string, error) {
-	path := d.Credential.AccessTokenJQ
+	path := d.Credential.AccessTokenPath
 	if path == "" {
 		// `[[ -n "$jq_path" ]] || return 1` at lib/credentials.sh:70. A store
 		// with no access token path has no access token to read.
@@ -75,14 +75,32 @@ func objectPath(path string) ([]string, error) {
 		if key == "" {
 			return nil, fmt.Errorf("%w: the access token path %q carries an empty key", ErrDescriptor, path)
 		}
-		// A jq program can index with brackets, filter, or call a function.
-		// None of those is an object path, and reading one as a bare key would
-		// look for a field whose name is the program text.
-		if strings.ContainsAny(key, "[]|()\"' \t") {
+		// An allowlist, not a list of jq's punctuation. A blocklist names the
+		// characters somebody thought of, and `.tokens.access_token?` carries
+		// none of them: the `?` would have been read as part of a field name,
+		// the lookup would have missed, and the failure would arrive later as a
+		// malformed token rather than here as a descriptor error.
+		//
+		// A jq object key that is not this shape has to be quoted or bracketed,
+		// so what this refuses is exactly what jq itself would not accept bare.
+		if !bareKey(key) {
 			return nil, fmt.Errorf("%w: the access token path %q is not a plain object path", ErrDescriptor, path)
 		}
 	}
 	return keys, nil
+}
+
+// bareKey is one segment of a plain object path: `[A-Za-z_][A-Za-z0-9_]*`.
+func bareKey(key string) bool {
+	for at, r := range key {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r == '_':
+		case at > 0 && r >= '0' && r <= '9':
+		default:
+			return false
+		}
+	}
+	return key != ""
 }
 
 // TokenClaims reads the claims of the stored credential's access token, which
