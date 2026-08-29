@@ -20,7 +20,7 @@ const (
 	orchestratorName = "AudienceOrchestrator"
 )
 
-// The orchestrator audience may be asked for in one package.
+// The orchestrator audience may be asked for in two packages.
 //
 // # What it opts out of
 //
@@ -41,9 +41,11 @@ const (
 // program is on the other end of Spec.Path, and that is not visible at the line
 // where the constant is written.
 //
-// So the constant is confined to the package whose whole subject is running
-// `gh`, and adding a second consumer is a decision that has to be made here,
-// against this comment, rather than in the file that wants it.
+// So the constant is confined to the packages whose whole subject is running
+// one named program the orchestrator drives on its own behalf — `gh` in
+// internal/forge/ghexec, git in internal/vcs — and adding a third consumer is a
+// decision that has to be made here, against this comment, rather than in the
+// file that wants it.
 //
 // # Both routes
 //
@@ -58,7 +60,7 @@ const (
 // somewhere else, and nothing about internal/exec itself. The first is bounded
 // by that package having no exported route to a Spec; the second is the
 // declaration, which has to live somewhere.
-func TestOrchestratorAudienceIsConfinedToOnePackage(t *testing.T) {
+func TestOrchestratorAudienceIsConfinedToTwoPackages(t *testing.T) {
 	root := findRepoRoot(t)
 	pkgs := loadModulePackages(t)
 
@@ -146,7 +148,7 @@ func TestOrchestratorAudienceIsConfinedToOnePackage(t *testing.T) {
 			continue
 		}
 		last = v.where
-		t.Errorf("%s %s outside internal/forge/ghexec, which is the only package that may hand a forge credential to a child", v.where, v.what)
+		t.Errorf("%s %s outside internal/forge/ghexec and internal/vcs, the only packages that may hand a forge credential to a child", v.where, v.what)
 	}
 }
 
@@ -158,16 +160,25 @@ func isOrchestratorConst(obj types.Object) bool {
 	return konst.Pkg() != nil && konst.Pkg().Path() == execPackage
 }
 
-// audienceOptOutPermitted names the two directories the audience may be spelled
-// in, by directory rather than by package name: the external test package of
-// each shares the directory and inherits the permission deliberately, because a
-// test asserting the audience is set has to be able to say it.
+// audienceOptOutPermitted names the three directories the audience may be
+// spelled in, by directory rather than by package name: the external test
+// package of each shares the directory and inherits the permission
+// deliberately, because a test asserting the audience is set has to be able to
+// say it.
+//
+// internal/exec declares the constant, which has to live somewhere.
+// internal/forge/ghexec runs `gh`, which cannot authenticate without the
+// credential. internal/vcs runs git, which pushes over whatever credential
+// helper the environment configures — on a GitHub-hosted runner that is the
+// ambient token, and internal/vcs/git.go:93-107 states the case. Neither `gh`
+// nor git reads attacker-controlled text, which is the process ADR 0001 is
+// about.
 func audienceOptOutPermitted(dir string) bool {
-	return dir == "internal/exec" || dir == "internal/forge/ghexec"
+	return dir == "internal/exec" || dir == "internal/forge/ghexec" || dir == "internal/vcs"
 }
 
-func TestAudienceOptOutPermissionCoversTheTwoDirectories(t *testing.T) {
-	for _, dir := range []string{"internal/exec", "internal/forge/ghexec"} {
+func TestAudienceOptOutPermissionCoversTheThreeDirectories(t *testing.T) {
+	for _, dir := range []string{"internal/exec", "internal/forge/ghexec", "internal/vcs"} {
 		if !audienceOptOutPermitted(dir) {
 			t.Errorf("%s must keep the audience opt-out", dir)
 		}
@@ -176,8 +187,9 @@ func TestAudienceOptOutPermissionCoversTheTwoDirectories(t *testing.T) {
 		"internal/harness",
 		"internal/forge",
 		"internal/cred",
-		"internal/vcs",
+		"internal/sandbox",
 		"internal/forge/ghexec/nested",
+		"internal/vcs/nested",
 		"cmd/crossrev",
 	} {
 		if audienceOptOutPermitted(dir) {

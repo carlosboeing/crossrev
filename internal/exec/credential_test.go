@@ -21,12 +21,12 @@ func TestZeroSpecIsModelFacing(t *testing.T) {
 	}
 }
 
-// Each of the three names the Bash adapters strip. An allowlist cannot stop
+// Each of the four names the Bash adapters strip. An allowlist cannot stop
 // these, because a caller reached them by name.
 func TestRunRefusesAForgeCredentialForAModelFacingChild(t *testing.T) {
 	const secret = "ghp_a_token_that_must_never_be_printed"
 
-	for _, name := range []string{"GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN"} {
+	for _, name := range []string{"GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"} {
 		t.Run(name, func(t *testing.T) {
 			spec := helperSpec("lookup", name)
 			spec.Env = append(spec.Env, name+"="+secret)
@@ -67,7 +67,7 @@ func TestRunRefusesAForgeCredentialForAModelFacingChild(t *testing.T) {
 func TestRunAllowsAForgeCredentialForAnOrchestratorChild(t *testing.T) {
 	const secret = "ghp_orchestrator_only"
 
-	for _, name := range []string{"GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN"} {
+	for _, name := range []string{"GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"} {
 		t.Run(name, func(t *testing.T) {
 			spec := helperSpec("lookup", name)
 			spec.Env = append(spec.Env, name+"="+secret)
@@ -85,7 +85,7 @@ func TestRunAllowsAForgeCredentialForAnOrchestratorChild(t *testing.T) {
 	}
 }
 
-// A name that merely starts with one of the three is a different variable.
+// A name that merely starts with one of the four is a different variable.
 func TestRunAllowsANameThatOnlyResemblesACredential(t *testing.T) {
 	spec := helperSpec("lookup", "GH_TOKEN_PATH")
 	spec.Env = append(spec.Env, "GH_TOKEN_PATH=/tmp/nothing")

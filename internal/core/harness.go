@@ -104,8 +104,8 @@ const EndpointVendor = "vendor"
 // `run_invoke` passes through at lib/run.sh:774.
 //
 // The GitHub credential is not among them, and never is. The adapters strip
-// GH_TOKEN, GITHUB_TOKEN and GH_ENTERPRISE_TOKEN before starting the
-// model-facing process.
+// GH_TOKEN, GITHUB_TOKEN, GH_ENTERPRISE_TOKEN and GITHUB_ENTERPRISE_TOKEN
+// before starting the model-facing process.
 type InvocationRequest struct {
 	Harness    HarnessName
 	PromptPath string

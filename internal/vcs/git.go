@@ -94,8 +94,8 @@ func (o Output) Lines() []string {
 //
 // The spec is orchestrator-facing, and that is a decision rather than a
 // default. exec.Spec.Audience defaults to model-facing, which refuses a child
-// whose environment names GH_TOKEN, GITHUB_TOKEN or GH_ENTERPRISE_TOKEN — and
-// git is the one tool in this port that legitimately holds one. lib/github.sh
+// whose environment names GH_TOKEN, GITHUB_TOKEN, GH_ENTERPRISE_TOKEN or
+// GITHUB_ENTERPRISE_TOKEN — and git legitimately holds one. lib/github.sh
 // pushes with a plain `git push` (lib/github.sh:443 and :510) over whatever
 // credential helper the environment configures, which on a GitHub-hosted
 // runner is the ambient token. A model-facing spec here would refuse that push

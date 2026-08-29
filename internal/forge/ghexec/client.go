@@ -142,11 +142,12 @@ func New(runner exec.Runner, filter forge.Publisher, opts ...Option) *Client {
 // # Why the orchestrator audience is set here
 //
 // exec.Spec.Audience defaults to model-facing, and exec.Run refuses a
-// model-facing spec whose environment names GH_TOKEN, GITHUB_TOKEN or
-// GH_ENTERPRISE_TOKEN (internal/exec/osrunner.go:53-64). That default is
-// correct everywhere else in the tree and wrong exactly here: this is the one
-// package that legitimately hands a GitHub credential to a child, because the
-// child is `gh` and not a model. `gh` cannot authenticate without it, and
+// model-facing spec whose environment names GH_TOKEN, GITHUB_TOKEN,
+// GH_ENTERPRISE_TOKEN or GITHUB_ENTERPRISE_TOKEN
+// (internal/exec/osrunner.go:53-64). That default is correct almost everywhere
+// in the tree and wrong here: this package hands a GitHub credential to a
+// child, because the child is `gh` and not a model. `gh` cannot authenticate
+// without it, and
 // lib/github.sh never sets it at any of its call sites — lines 39, 74, 99 and
 // 120 among them — because a shell function inherits it ambiently from the
 // orchestrator that called it. This is that inheritance, written down.

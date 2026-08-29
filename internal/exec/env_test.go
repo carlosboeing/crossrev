@@ -7,9 +7,9 @@ import (
 	"github.com/carlosboeing/crossrev/internal/exec"
 )
 
-// The three names the Bash adapters strip before starting a model-facing
+// The four names the Bash adapters strip before starting a model-facing
 // process, in lib/adapters/*.sh. Parity means Go withholds the same ones.
-var forgeCredentials = []string{"GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN"}
+var forgeCredentials = []string{"GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"}
 
 func TestInheritWithholdsForgeCredentials(t *testing.T) {
 	for _, name := range forgeCredentials {
