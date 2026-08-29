@@ -2,6 +2,7 @@ package ghexec_test
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -37,6 +38,23 @@ func out(s string) exec.Result { return exec.Result{Stdout: []byte(s)} }
 // bad is an invocation that exited non-zero, which is how the stub reports a
 // route declared as `!fail`.
 func bad() exec.Result { return exec.Result{ExitCode: 1} }
+
+// errNoStatus is why a child produced no exit status at all.
+var errNoStatus = errors.New("gh could not be started")
+
+// unresolved is an invocation that never produced an exit status: an
+// unresolvable program, a child that was killed, a context that ended. The
+// runner reports all three the same way — Err set, and ExitCode left at its
+// zero — so a check reading the exit code alone reads every one of them as gh
+// answering nothing successfully.
+func unresolved() exec.Result { return exec.Result{Err: errNoStatus} }
+
+// cut is the same failure with output already captured, which is what a
+// cancelled read looks like: gh had printed part of a page when the context
+// ended.
+func cut(partial string) exec.Result {
+	return exec.Result{Stdout: []byte(partial), Err: errNoStatus}
+}
 
 // only returns the single Spec the recorder saw, failing if there was not
 // exactly one.
