@@ -356,7 +356,14 @@ legs_github_slug() {
   host="${rest%%/*}"
   host="${host%%:*}"
   path="${rest#*/}"
-  [[ "$(printf '%s' "$host" | tr '[:upper:]' '[:lower:]')" == "github.com" ]] || return 1
+  # LC_ALL=C, for the reason state_finding_id pins it. BSD tr folds multibyte
+  # letters under a UTF-8 locale, and one of them folds into this very host:
+  # U+0130 (I with a dot above) becomes ASCII i, so an unpinned compare accepts
+  # GITHUB.COM spelled with it and hands back a slug for a host that is not
+  # github.com. This function decides where a fix is allowed to be pushed, so
+  # that is the guard failing open. C gives macOS the byte answer GNU tr on
+  # Linux already produces.
+  [[ "$(printf '%s' "$host" | LC_ALL=C tr '[:upper:]' '[:lower:]')" == "github.com" ]] || return 1
   path="${path%/}"
   path="${path%.git}"
   [[ "$path" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]] || return 1
