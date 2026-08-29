@@ -87,6 +87,44 @@ func TestClearTranscriptsOneAttempt(t *testing.T) {
 	}
 }
 
+// TestClearTranscriptsDoesNotMatchALongerAttempt is the case attempts 1 and 2
+// cannot show. The glob is `<stem>.*` rather than `<stem>*`, and the dot is
+// what stops attempt 1 from also matching attempt 10 — whose transcripts a
+// later attempt is still writing into when the earlier one is cleared.
+func TestClearTranscriptsDoesNotMatchALongerAttempt(t *testing.T) {
+	l := openLog(t, runlog.Options{Repo: "acme/widget", PR: "7", Leg: "review"})
+	first, _ := l.TranscriptBase(1)
+	tenth, _ := l.TranscriptBase(10)
+
+	l.ClearTranscripts(first)
+
+	if exists(first + ".stdout") {
+		t.Error("the cleared attempt survived")
+	}
+	if !exists(tenth + ".stdout") {
+		t.Errorf("clearing %q also cleared %q", first, tenth)
+	}
+}
+
+// TestTranscriptBaseKeepsTheRunDirectoryVerbatim: the stem is a string handed
+// to a subprocess, so it must be the string the Bash helper builds. A run
+// directory carrying a doubled separator keeps it, exactly as RunDir does.
+func TestTranscriptBaseKeepsTheRunDirectoryVerbatim(t *testing.T) {
+	dir := t.TempDir() + "/"
+	l := openLog(t, runlog.Options{Dir: dir, Repo: "acme/widget", PR: "7", Leg: "review"})
+
+	base, ok := l.TranscriptBase(1)
+	if !ok {
+		t.Fatal("TranscriptBase reported no stem")
+	}
+	if want := dir + "/review.attempt-1"; base != want {
+		t.Errorf("base = %q, want %q", base, want)
+	}
+	if !exists(base + ".stdout") {
+		t.Errorf("nothing was pre-created at %q", base)
+	}
+}
+
 // TestClearTranscriptsWholeLeg removes every attempt of the current leg and
 // leaves the other leg's alone.
 func TestClearTranscriptsWholeLeg(t *testing.T) {

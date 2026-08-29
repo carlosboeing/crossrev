@@ -60,7 +60,8 @@ func Slug(repo string) string {
 // The segments are concatenated rather than joined. The Bash function builds
 // the path with printf, so an XDG_STATE_HOME that ends in a separator produces
 // a doubled one, and path.Join or filepath.Join would clean that away and
-// disagree with the frozen vector that records it.
+// disagree with the frozen vector that records it. TranscriptBase builds its
+// stem from this the same way, so the two never disagree about a separator.
 func RunDir(repo, pr string) string {
 	return RunsBase() + "/" + Slug(repo) + "/pr-" + pr + "/" + RunID()
 }

@@ -30,8 +30,16 @@ func (l *Log) TranscriptsKept() bool {
 // back to anonymous temporary files then — the behaviour every caller of an
 // adapter outside a run already has.
 //
+// The stem is concatenated rather than joined, for the reason RunDir is: the
+// Bash function builds it with printf, so a run directory carrying a doubled
+// separator keeps it here too. Cleaning the stem would hand an adapter a
+// different string from the one the shell hands it, and the stem is a string a
+// subprocess is given rather than only a path this package opens.
+//
 // The three files are pre-created so that the adapters' redirects inherit 0600
-// rather than the process umask.
+// rather than the process umask. That is best-effort on both sides — the Bash
+// helper swallows its own failure — so a pre-create that fails still yields a
+// stem, and the run log says which file the guarantee did not reach.
 func (l *Log) TranscriptBase(attempt int) (string, bool) {
 	if l == nil || l.dir == "" {
 		return "", false
@@ -40,9 +48,11 @@ func (l *Log) TranscriptBase(attempt int) (string, bool) {
 	if leg == "" {
 		return "", false
 	}
-	base := filepath.Join(l.dir, leg+".attempt-"+strconv.Itoa(attempt))
+	base := l.dir + "/" + leg + ".attempt-" + strconv.Itoa(attempt)
 	for _, stream := range transcriptStreams {
-		_ = CreatePrivate(base + stream)
+		if err := CreatePrivate(base + stream); err != nil {
+			l.Event("transcript", "could not pre-create "+base+stream+"; the adapter's redirect will use the process umask")
+		}
 	}
 	return base, true
 }
@@ -52,13 +62,18 @@ func (l *Log) TranscriptBase(attempt int) (string, bool) {
 //
 // Success-path hygiene only: the failure path is the reason the files exist,
 // and nothing on it calls this.
+//
+// The dot before the star is load-bearing in both patterns, and it is what
+// `rm -f "$base".*` has. Without it, clearing attempt 1 also matches
+// attempt-10, attempt-11 and every later attempt's transcripts, which are the
+// files another attempt is still writing into.
 func (l *Log) ClearTranscripts(base string) {
 	if l == nil || l.dir == "" || l.TranscriptsKept() {
 		return
 	}
 	pattern := base + ".*"
 	if base == "" {
-		pattern = filepath.Join(l.dir, l.Leg()+".attempt-*.*")
+		pattern = l.dir + "/" + l.Leg() + ".attempt-*.*"
 	}
 	matches, err := filepath.Glob(pattern)
 	if err != nil {
