@@ -111,12 +111,34 @@ func TestPRsReviewedTodayCountsDistinctPullRequests(t *testing.T) {
 	}
 }
 
-// A suffix match on the issue URL must not treat pull request 142 as 42.
+// The issue URL is matched by suffix, and 420 is the number that says so. 142
+// proves nothing on its own: `/42` is not a substring of `/142` either, so a
+// match testing containment rather than suffix passes over it. `/420` contains
+// `/42`, and pull request 420 is the one such a match would drop.
 func TestPRsReviewedTodayExcludesOnlyTheCurrentPullRequest(t *testing.T) {
 	after := countCutoff.Unix() + 60
 	f := &fakeForge{pages: [][]forge.IssueComment{{
 		markerComment(t, countAuthor, 42, "review", "complete", after),
 		markerComment(t, countAuthor, 142, "review", "complete", after),
+		markerComment(t, countAuthor, 420, "review", "complete", after),
+	}}}
+
+	got, err := forge.PRsReviewedToday(context.Background(), f, request(t, 0, nil))
+	if err != nil {
+		t.Fatalf("PRsReviewedToday: %v", err)
+	}
+	if got != 2 {
+		t.Errorf("count = %d, want 2: 142 and 420 are both other pull requests", got)
+	}
+}
+
+// The window is open at its lower edge, so a marker stamped exactly at the
+// cutoff is outside it. Every other fixture is a second either side, which the
+// comparison answers the same way whichever way round it is written.
+func TestPRsReviewedTodayExcludesAMarkerStampedAtTheCutoff(t *testing.T) {
+	f := &fakeForge{pages: [][]forge.IssueComment{{
+		markerComment(t, countAuthor, 7, "review", "complete", countCutoff.Unix()),
+		markerComment(t, countAuthor, 8, "review", "complete", countCutoff.Unix()+1),
 	}}}
 
 	got, err := forge.PRsReviewedToday(context.Background(), f, request(t, 0, nil))
@@ -124,7 +146,7 @@ func TestPRsReviewedTodayExcludesOnlyTheCurrentPullRequest(t *testing.T) {
 		t.Fatalf("PRsReviewedToday: %v", err)
 	}
 	if got != 1 {
-		t.Errorf("count = %d, want 1", got)
+		t.Errorf("count = %d, want 1: the marker at the cutoff is outside the window", got)
 	}
 }
 
@@ -180,6 +202,37 @@ func TestPRsReviewedTodayReportsTheCapAndStops(t *testing.T) {
 		page = append(page, markerComment(t, countAuthor, 100+i, "review", "complete", after))
 	}
 	f := &fakeForge{pages: [][]forge.IssueComment{page, page}}
+
+	got, err := forge.PRsReviewedToday(context.Background(), f, request(t, 5, nil))
+	if err != nil {
+		t.Fatalf("PRsReviewedToday: %v", err)
+	}
+	if got != 5 {
+		t.Errorf("count = %d, want the cap 5", got)
+	}
+	if len(f.asked) != 1 {
+		t.Errorf("pages read = %v, want the first only", f.asked)
+	}
+}
+
+// A count landing exactly on the cap stops there.
+//
+// The test above overshoots by 95, so it answers the same whether the cap is
+// tested with >= or with >. Landing on it exactly is the case that separates
+// them, and it is a live one: with >, this run reads a second page, and a
+// second page that cannot be read reports 0 rather than the cap — which lets
+// through the automatic review the backstop exists to stop.
+func TestPRsReviewedTodayStopsOnACountThatLandsExactlyOnTheCap(t *testing.T) {
+	after := countCutoff.Unix() + 60
+	// A full page, so nothing else ends the read: five distinct pull requests
+	// across a hundred comments.
+	page := make([]forge.IssueComment, 0, 100)
+	for i := range 100 {
+		page = append(page, markerComment(t, countAuthor, 100+i%5, "review", "complete", after))
+	}
+	// The page after it cannot be read, which is what a run that reads one
+	// page too many pays for.
+	f := &fakeForge{pages: [][]forge.IssueComment{page}, failOn: 2}
 
 	got, err := forge.PRsReviewedToday(context.Background(), f, request(t, 5, nil))
 	if err != nil {

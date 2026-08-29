@@ -3,12 +3,15 @@ package ghexec_test
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/carlosboeing/crossrev/internal/core"
 	"github.com/carlosboeing/crossrev/internal/exec"
+	"github.com/carlosboeing/crossrev/internal/forge"
 )
 
 const prViewFields = "number,title,body,url,headRefName,headRefOid,baseRefName,baseRefOid," +
@@ -186,6 +189,66 @@ func TestRepoIssueCommentsReportsARefusal(t *testing.T) {
 	if _, err := c.RepoIssueComments(context.Background(), testSlug(t), time.Unix(0, 0), 1); err == nil {
 		t.Error("a refused page read answered as an empty page")
 	}
+}
+
+// The page size this client asks GitHub for and the size the count treats as a
+// full page are one number written in two packages, and nothing pairs them.
+//
+// The count reads another page whenever a page comes back full. Ask for fewer
+// than it expects and every page reads as short, so the count stops at the
+// first one and reports a number it believes is exact. Both halves are read
+// here rather than restated: the size comes off the argv, and what the count
+// does with a page of exactly that many comments is measured.
+func TestThePageSizeAskedForIsThePageSizeTheCountExpects(t *testing.T) {
+	c, r := client(t, out("[]"))
+	if _, err := c.RepoIssueComments(context.Background(), testSlug(t), time.Unix(0, 0), 1); err != nil {
+		t.Fatalf("RepoIssueComments: %v", err)
+	}
+	asked := 0
+	for _, arg := range r.specs[0].Args {
+		if size, ok := strings.CutPrefix(arg, "per_page="); ok {
+			n, err := strconv.Atoi(size)
+			if err != nil {
+				t.Fatalf("per_page = %q, which is not a number", size)
+			}
+			asked = n
+		}
+	}
+	if asked <= 1 {
+		t.Fatalf("the read asked for per_page=%d; the argv is %q", asked, r.specs[0].Args)
+	}
+
+	count := func(t *testing.T, comments int) *recorder {
+		t.Helper()
+		full, rec := client(t, out(commentPage(comments)), out("[]"))
+		_, err := forge.PRsReviewedToday(context.Background(), full, forge.DailyCount{
+			Repo: testSlug(t), Author: "crossrev-acme[bot]", CurrentPR: 42,
+		})
+		if err != nil {
+			t.Fatalf("PRsReviewedToday: %v", err)
+		}
+		return rec
+	}
+
+	if got := len(count(t, asked).specs); got != 2 {
+		t.Errorf("a page of %d comments ended the read after %d page(s); the count treats a different size as full",
+			asked, got)
+	}
+	if got := len(count(t, asked-1).specs); got != 1 {
+		t.Errorf("a page of %d comments was read as full and cost %d page(s)", asked-1, got)
+	}
+}
+
+// commentPage is n issue comments carrying nothing the count reads, so only
+// the page's length matters.
+func commentPage(n int) string {
+	entries := make([]string, 0, n)
+	for i := range n {
+		entries = append(entries, fmt.Sprintf(
+			`{"id":%d,"body":"no marker","issue_url":"https://api.github.com/repos/acme/widget/issues/%d","user":{"login":"someone"}}`,
+			i+1, i+1))
+	}
+	return "[" + strings.Join(entries, ",") + "]"
 }
 
 // A cutoff is sent in UTC whatever zone the caller holds it in.
