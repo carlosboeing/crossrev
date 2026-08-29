@@ -1258,15 +1258,52 @@ duration_cases() {
   duration_case 86400; duration_case 604800
 }
 
+# The reason a vendor gave for refusing a refresh. Frozen after #165 and #167,
+# which were one defect reached from two sides. RFC 6749 section 5.2 defines
+# `error` as a string, and `.error.message` against a string is a jq error
+# rather than a null, so the common shape reported nothing at all. Three more
+# shapes reached the same empty answer by other routes.
+#
+# Both directions are captured, because both are wrong. A reason must be found
+# where one exists, and an object or an array must NOT reach the operator as raw
+# JSON inside a one-line status message. The message ends in a colon, so an
+# empty answer prints a dangling one, which is the symptom the issue was filed
+# for.
+refusal_case() { # name body
+  jq -cn --arg n "$1" --arg b "$2" --arg r "$(_cred_refusal_reason "$2")" \
+    '{name:$n, body:$b, reason:$r}'
+}
+
+refusal_cases() {
+  refusal_case "error-object-with-a-message" '{"error":{"message":"the client is not known"}}'
+  refusal_case "error-description-only" '{"error_description":"the refresh token expired"}'
+  refusal_case "error-as-a-string" '{"error":"invalid_client"}'
+  refusal_case "both-an-object-and-a-description" '{"error":{"message":"m"},"error_description":"d"}'
+  refusal_case "a-description-beside-a-string-error" '{"error":"invalid_client","error_description":"d"}'
+  refusal_case "error-object-with-no-message" '{"error":{"code":401}}'
+  refusal_case "error-as-an-array" '{"error":["invalid_client"]}'
+  refusal_case "error-as-a-number" '{"error":401}'
+  refusal_case "error-as-null" '{"error":null}'
+  refusal_case "an-empty-object" '{}'
+  refusal_case "not-json-at-all" 'not json'
+  refusal_case "an-empty-body" ''
+  refusal_case "a-json-array-body" '[1,2]'
+  refusal_case "an-empty-string-error" '{"error":""}'
+  refusal_case "an-empty-string-description" '{"error_description":""}'
+  refusal_case "a-numeric-description" '{"error_description":123}'
+}
+
 jq -n --argjson captured "$(captured_json)" \
   --argjson strip "$(cred_strip_cases | jq -s .)" \
   --argjson jwt "$(jwt_cases | jq -s .)" \
   --argjson durations "$(duration_cases | jq -s .)" \
+  --argjson refusals "$(refusal_cases | jq -s .)" \
   --argjson min_seconds "$CRED_MIN_SECONDS" \
   '{captured:$captured,
-    function:"cred_env_strip_for, cred_jwt_claims and _cred_human_duration",
+    function:"cred_env_strip_for, cred_jwt_claims, _cred_human_duration and _cred_refusal_reason",
     cred_min_seconds:$min_seconds,
-    strip_sets:$strip, jwt_cases:$jwt, duration_cases:$durations}' \
+    strip_sets:$strip, jwt_cases:$jwt, duration_cases:$durations,
+    refusal_cases:$refusals}' \
   >"$FIXDIR/credentials.json"
 
 usage_workdir="$(mktemp -d)"

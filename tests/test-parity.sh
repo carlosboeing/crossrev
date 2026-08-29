@@ -406,6 +406,16 @@ while IFS= read -r c; do
   is "credential duration: $s" "$(_cred_human_duration "$s")" "$(jq -r .human <<<"$c")"
 done < <(jq -c '.duration_cases[]' "$PARITY/credentials.json")
 
+# The reason a rejected refresh reports. Both directions are asserted: a body
+# that names a reason must yield it, and one that does not must yield the
+# sentence rather than an empty string or raw JSON. The message this feeds ends
+# in a colon, so an empty answer prints a dangling one.
+while IFS= read -r c; do
+  name="$(jq -r .name <<<"$c")"
+  body="$(jq -jr .body <<<"$c")"
+  is "refusal reason: $name" "$(_cred_refusal_reason "$body")" "$(jq -r .reason <<<"$c")"
+done < <(jq -c '.refusal_cases[]' "$PARITY/credentials.json")
+
 # --- usage -------------------------------------------------------------------
 
 is "usage zero record" "$(usage_zero)" "$(jq -c .zero "$PARITY/usage.json")"
