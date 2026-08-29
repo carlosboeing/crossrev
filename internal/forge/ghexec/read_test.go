@@ -2,6 +2,8 @@ package ghexec_test
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -255,5 +257,31 @@ func TestPullRequestDiffKeepsTheTrailingNewline(t *testing.T) {
 	}
 	if string(got) != "+b\n" {
 		t.Errorf("diff = %q, want the byte gh printed last", got)
+	}
+}
+
+// gh's stdout is the API's answer, and this is the only route from it into
+// text an operator reads.
+func TestRepoSlugBoundsWhatItQuotesBackFromGh(t *testing.T) {
+	page := "<html>" + strings.Repeat("A", 4000) + "\x1b[2J\x07</html>"
+
+	c, _ := client(t, out(page))
+	_, err := c.RepoSlug(context.Background())
+	if err == nil {
+		t.Fatal("a page of HTML was accepted as a repository slug")
+	}
+
+	// The refusal names the length and quotes a bounded excerpt, so it is
+	// short whatever gh printed. The page here is four thousand characters.
+	message := err.Error()
+	if len(message) > 300 {
+		t.Errorf("the refusal is %d bytes long for a %d-byte answer; gh's output is not bounded",
+			len(message), len(page))
+	}
+	if strings.ContainsAny(message, "\x1b\x07") {
+		t.Errorf("the refusal carries a terminal escape sequence: %q", message)
+	}
+	if !errors.Is(err, core.ErrSlug) {
+		t.Errorf("error = %v, want it to carry core.ErrSlug", err)
 	}
 }

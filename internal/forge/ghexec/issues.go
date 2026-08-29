@@ -23,6 +23,15 @@ const candidateBodyChars = 500
 // every other outward write uses. Deterministic, no model, no false positives —
 // this is what stops three pull requests touching one legacy bug filing it
 // three times (lib/github.sh:320-338).
+//
+// The label reaches a query string unescaped, exactly as lib/github.sh:332
+// interpolates it. A label carrying `&` or `#` therefore changes or truncates
+// the query. It is left as the shell has it and declared rather than fixed: the
+// request is a read, the label is configuration from the base revision
+// (ADR 0003) so setting one needs write access to the default branch, and the
+// worst answer is a dedupe that finds nothing and files an issue twice. The
+// three places the same name reaches a URL PATH are escaped, because two of
+// those are writes and one of them leaves the repository.
 func (c *Client) IssueByFinding(ctx context.Context, repo core.Slug, label string, id core.FindingID) (int, bool) {
 	res := c.run(ctx, "api", "--paginate",
 		"repos/"+repo.String()+"/issues?state=all&labels="+label+"&per_page=100")
@@ -56,6 +65,13 @@ func (c *Client) IssueByFinding(ctx context.Context, repo core.Slug, label strin
 // recently-closed both, because closing an issue is a decision and re-filing
 // something explicitly closed is the most irritating duplicate available
 // (lib/github.sh:340-354).
+//
+// The file name and the terms go into the search query as written, so a file
+// named `is:pr` narrows the search to pull requests and a term with a colon in
+// it means whatever GitHub's search grammar says it means. The shell builds the
+// same string at lib/github.sh:348-349. Declared rather than fixed for the same
+// reason: it is a read, and the worst answer is a candidate list that misses
+// the issue and a finding filed twice.
 func (c *Client) IssueCandidates(ctx context.Context, repo core.Slug, filePath, terms string) []forge.IssueCandidate {
 	query := "repo:" + repo.String() + " is:issue " + path.Base(filePath)
 	if terms != "" {

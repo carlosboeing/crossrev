@@ -2,11 +2,8 @@ package ghexec_test
 
 import (
 	"context"
-	"go/ast"
-	"go/parser"
-	"go/token"
-	"os"
-	"path/filepath"
+	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -33,38 +30,110 @@ func client(t *testing.T, results ...exec.Result) (*ghexec.Client, *recorder) {
 	return ghexec.New(r, passthrough{}, ghexec.WithEnv([]string{"PATH=/usr/bin", "GH_TOKEN=redacted"})), r
 }
 
-// Every call this package makes is the orchestrator's own tool, and gh is the
-// one child that legitimately holds a GitHub credential.
+// Every operation the interface declares is the orchestrator's own tool, and
+// `gh` is the one child that legitimately holds a GitHub credential.
+//
+// Driven off forge.Forge by reflection rather than off a list written here. A
+// list is a second copy of the interface, and the copy is what goes stale: a
+// twenty-fifth operation added to the interface is compiled, shipped and
+// unchecked in every respect — including whether it runs `gh` at all — while
+// this test goes on passing over the twenty-four it names.
 func TestEveryInvocationIsOrchestratorFacing(t *testing.T) {
-	c, r := client(t)
-	ctx := context.Background()
-	repo := testSlug(t)
+	env := []string{"PATH=/usr/bin", "GH_TOKEN=redacted"}
+	r := &recorder{}
+	c := ghexec.New(r, passthrough{}, ghexec.WithEnv(env))
 
-	// One call per file, so a new spec builder in any of them is caught.
-	_, _ = c.RepoSlug(ctx)
-	c.DefaultBranch(ctx, repo)
-	_, _ = c.PullRequest(ctx, repo, 42)
-	c.IssueComments(ctx, repo, 42)
-	c.ReviewThreads(ctx, repo, 42)
-	_, _ = c.CommentCreate(ctx, repo, 42, "hello")
-	c.LabelColour(ctx, repo, "bug")
-	c.IssueCandidates(ctx, repo, "app.ts", "")
-	c.WorkflowRunStatus(ctx, repo, "12345")
-	_ = c.PullRequestLabelAdd(ctx, repo, 42, "crossrev/pass-1")
+	forgeType := reflect.TypeFor[forge.Forge]()
+	client := reflect.ValueOf(c)
+
+	assertOverridesAreLive(t, forgeType)
+
+	for i := range forgeType.NumMethod() {
+		name := forgeType.Method(i).Name
+		method := client.MethodByName(name)
+		before := len(r.specs)
+
+		method.Call(callArgumentsFor(t, name, method.Type()))
+
+		if len(r.specs) == before {
+			// A method that reached no process is a method this test says
+			// nothing about. The fix is an entry in argumentOverrides that
+			// gets it past its own guard, not an exemption.
+			t.Errorf("%s started no process, so nothing about it was checked", name)
+		}
+	}
 
 	if len(r.specs) == 0 {
 		t.Fatal("no invocation was recorded")
 	}
 	for i, spec := range r.specs {
+		where := fmt.Sprintf("call %d (%q)", i, strings.Join(spec.Args, " "))
 		if spec.Audience != exec.AudienceOrchestrator {
-			t.Errorf("call %d (%q) is model-facing; gh needs the credential a model-facing spec is refused",
-				i, strings.Join(spec.Args, " "))
+			t.Errorf("%s is model-facing; gh needs the credential a model-facing spec is refused", where)
 		}
 		if spec.Path != "gh" {
-			t.Errorf("call %d runs %q, want gh resolved on the PATH", i, spec.Path)
+			t.Errorf("%s runs %q; the credential travels because the child is gh and nothing else", where, spec.Path)
 		}
 		if spec.Stdin != nil {
-			t.Errorf("call %d writes stdin; every argument gh needs travels on the argv", i)
+			t.Errorf("%s writes stdin; every argument gh needs travels on the argv", where)
+		}
+		if !slices.Equal(spec.Env, env) {
+			t.Errorf("%s builds its own environment %q rather than the client's", where, spec.Env)
+		}
+	}
+}
+
+// argumentOverrides carries the arguments a method needs to get past a guard of
+// its own and reach gh. Everything else is called with a zero value, because
+// what this test reads is the Spec and not the answer.
+var argumentOverrides = map[string]map[int]any{
+	// A run id that is not a number is never asked about (lib/github.sh:62).
+	"WorkflowRunStatus": {2: "12345"},
+	// A label name that cannot be put in a URL path is never asked for.
+	"LabelColour":            {2: "bug"},
+	"LabelEnsure":            {2: forge.Label{Name: "bug"}},
+	"PullRequestLabelRemove": {3: "bug"},
+}
+
+func callArgumentsFor(t *testing.T, name string, signature reflect.Type) []reflect.Value {
+	t.Helper()
+
+	args := make([]reflect.Value, 0, signature.NumIn())
+	for i := range signature.NumIn() {
+		paramType := signature.In(i)
+		if override, ok := argumentOverrides[name][i]; ok {
+			args = append(args, reflect.ValueOf(override))
+			continue
+		}
+		if i == 0 && paramType == reflect.TypeFor[context.Context]() {
+			args = append(args, reflect.ValueOf(context.Background()))
+			continue
+		}
+		args = append(args, reflect.Zero(paramType))
+	}
+	return args
+}
+
+// A stale override is a silent exemption: it names a method that no longer
+// exists, or an argument that moved, and the method it was meant to cover goes
+// back to being called with a zero value it guards against.
+func assertOverridesAreLive(t *testing.T, forgeType reflect.Type) {
+	t.Helper()
+
+	for name, positions := range argumentOverrides {
+		method, ok := forgeType.MethodByName(name)
+		if !ok {
+			t.Errorf("argumentOverrides names %s, which forge.Forge does not declare", name)
+			continue
+		}
+		for position, value := range positions {
+			if position >= method.Type.NumIn() {
+				t.Errorf("argumentOverrides[%s] sets argument %d, which the method does not take", name, position)
+				continue
+			}
+			if want := method.Type.In(position); reflect.TypeOf(value) != want {
+				t.Errorf("argumentOverrides[%s][%d] is a %T, and the method takes a %s", name, position, value, want)
+			}
 		}
 	}
 }
@@ -86,49 +155,6 @@ func TestTheEnvironmentThisClientBuildsWouldBeRefusedForAModel(t *testing.T) {
 	}
 	if !strings.Contains(res.Err.Error(), "GH_TOKEN") {
 		t.Errorf("refusal = %v, want it to name GH_TOKEN", res.Err)
-	}
-}
-
-// One spec builder, so the audience is set once and cannot be forgotten in the
-// next method somebody adds.
-func TestOnlyOneFileBuildsASpec(t *testing.T) {
-	entries, err := os.ReadDir(".")
-	if err != nil {
-		t.Fatalf("reading the package directory: %v", err)
-	}
-
-	var found []string
-	for _, e := range entries {
-		name := e.Name()
-		if !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
-			continue
-		}
-		src, err := os.ReadFile(filepath.Join(".", name))
-		if err != nil {
-			t.Fatalf("reading %s: %v", name, err)
-		}
-		file, err := parser.ParseFile(token.NewFileSet(), name, src, 0)
-		if err != nil {
-			t.Fatalf("parsing %s: %v", name, err)
-		}
-		ast.Inspect(file, func(n ast.Node) bool {
-			lit, ok := n.(*ast.CompositeLit)
-			if !ok {
-				return true
-			}
-			sel, ok := lit.Type.(*ast.SelectorExpr)
-			if !ok || sel.Sel.Name != "Spec" {
-				return true
-			}
-			if ident, ok := sel.X.(*ast.Ident); ok && ident.Name == "exec" && !slices.Contains(found, name) {
-				found = append(found, name)
-			}
-			return true
-		})
-	}
-
-	if !slices.Equal(found, []string{"client.go"}) {
-		t.Errorf("exec.Spec is built in %v, want client.go alone", found)
 	}
 }
 
@@ -162,3 +188,57 @@ func TestTheFilteredBodyIsWhatIsPublished(t *testing.T) {
 }
 
 var _ forge.Forge = (*ghexec.Client)(nil)
+
+// The default environment is the allowlist, and nothing else read it.
+//
+// Every other test in this package overrides it with WithEnv, so the list
+// itself was unexercised: it could be emptied of all four credential names, or
+// gain the one name that is excluded on purpose, and the suite would not
+// notice. This is the test that reads it.
+func TestTheDefaultEnvironmentIsTheAllowlist(t *testing.T) {
+	// Set the whole allowlist plus the two names it must not carry, so what
+	// reaches gh is decided by the allowlist and not by this process.
+	required := []string{
+		"PATH", "HOME",
+		"XDG_CONFIG_HOME", "GH_CONFIG_DIR", "GH_HOST",
+		"GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN",
+		"SSL_CERT_FILE", "SSL_CERT_DIR",
+		"HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY",
+		"http_proxy", "https_proxy", "no_proxy",
+	}
+	// GH_REPO would retarget RepoSlug and every write after it; GH_FORCE_TTY
+	// would put ANSI escapes in JSON these reads unmarshal.
+	excluded := []string{"GH_REPO", "GH_FORCE_TTY", "AWS_SECRET_ACCESS_KEY", "ANTHROPIC_API_KEY"}
+
+	for _, name := range append(append([]string{}, required...), excluded...) {
+		t.Setenv(name, "value-of-"+name)
+	}
+
+	r := &recorder{}
+	// No WithEnv: this is the constructor's own answer.
+	c := ghexec.New(r, passthrough{})
+	if _, err := c.RepoSlug(context.Background()); err == nil {
+		t.Fatal("the recorder answered a slug it was never given")
+	}
+
+	got := map[string]string{}
+	for _, entry := range r.only(t).Env {
+		name, value, _ := strings.Cut(entry, "=")
+		got[name] = value
+	}
+
+	for _, name := range required {
+		if got[name] != "value-of-"+name {
+			t.Errorf("%s is not in the environment gh receives; without it gh cannot authenticate, resolve its host or verify a certificate", name)
+		}
+	}
+	for _, name := range excluded {
+		if _, present := got[name]; present {
+			t.Errorf("%s reached gh; it is excluded on purpose", name)
+		}
+	}
+	if len(got) != len(required) {
+		t.Errorf("gh received %d names and the allowlist declares %d; a name added to the allowlist is declared in this test too",
+			len(got), len(required))
+	}
+}

@@ -85,7 +85,7 @@ func TestABodyWithNoMarkerPublishesTheNotice(t *testing.T) {
 		t.Fatalf("CommentCreate: %v", err)
 	}
 	r.wantArgs(t, 0, "api", "--method", "POST", "repos/acme/widget/issues/42/comments",
-		"-f", "body="+withheldNotice, "--jq", ".id")
+		"-f", "body="+wantNotice, "--jq", ".id")
 }
 
 func reviewComment(t *testing.T, body string) forge.ReviewComment {
@@ -192,7 +192,56 @@ func TestAWithheldMarkerWarnsOnTheWritesThatDegrade(t *testing.T) {
 			t.Errorf("warning = %q", w)
 		}
 	}
-	if got := strings.Join(r.specs[0].Args, " "); !strings.Contains(got, withheldNotice) {
+	if got := strings.Join(r.specs[0].Args, " "); !strings.Contains(got, wantNotice) {
 		t.Errorf("argv = %q, want the notice published in place of the body", got)
 	}
+}
+
+// A Publisher that reports failure and hands the original back must not get
+// the original published. The contract is stated on the interface; this is
+// what enforces it.
+func TestAFailingFilterCannotPublishTheOriginalBody(t *testing.T) {
+	const secret = "token sk-ant-api03-REAL"
+
+	// The marker case refuses, and the no-marker case is the dangerous one:
+	// nothing warns and nothing errors, so only the substituted body stops it.
+	t.Run("no marker", func(t *testing.T) {
+		r := &recorder{results: []exec.Result{out("9001\n")}}
+		c := ghexec.New(r, rogue{})
+
+		if _, err := c.CommentCreate(context.Background(), testSlug(t), 42, secret); err != nil {
+			t.Fatalf("CommentCreate: %v", err)
+		}
+		argv := strings.Join(r.specs[0].Args, " ")
+		if strings.Contains(argv, secret) {
+			t.Errorf("argv = %q, want the body withheld", argv)
+		}
+		if !strings.Contains(argv, wantNotice) {
+			t.Errorf("argv = %q, want the notice in its place", argv)
+		}
+	})
+
+	t.Run("review reply", func(t *testing.T) {
+		r := &recorder{}
+		c := ghexec.New(r, rogue{})
+
+		if err := c.ReviewReply(context.Background(), testSlug(t), 42, 5000, secret); err != nil {
+			t.Fatalf("ReviewReply: %v", err)
+		}
+		if argv := strings.Join(r.specs[0].Args, " "); strings.Contains(argv, secret) {
+			t.Errorf("argv = %q, want the body withheld", argv)
+		}
+	})
+
+	t.Run("issue body", func(t *testing.T) {
+		r := &recorder{results: []exec.Result{out("31\n")}}
+		c := ghexec.New(r, rogue{})
+
+		if _, err := c.IssueCreate(context.Background(), testSlug(t), "t", secret, nil); err != nil {
+			t.Fatalf("IssueCreate: %v", err)
+		}
+		if argv := strings.Join(r.specs[0].Args, " "); strings.Contains(argv, secret) {
+			t.Errorf("argv = %q, want the body withheld", argv)
+		}
+	})
 }

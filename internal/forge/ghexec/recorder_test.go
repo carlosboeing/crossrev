@@ -82,16 +82,28 @@ type passthrough struct{}
 func (passthrough) Filter(body string) (string, error) { return body, nil }
 func (passthrough) Mask(text string) string            { return text }
 
-// withheld is a Publisher that fails, returning the notice that stands in for
-// the body (lib/log.sh:153-157).
+// wantNotice is the text that must stand in for a body the filter could not
+// process. It is what log_redact_publish prints (lib/log.sh:155), and it is
+// written out here rather than read from the package so that a change to
+// operator-visible text has to be made twice.
+const wantNotice = "CrossRev could not filter this text for credential shapes, so it withheld it rather than publishing it."
+
+// withheld is a Publisher that fails and returns a notice of its own. The
+// string it returns is deliberately not the one the provider must publish, so a
+// test can tell which of the two reached gh.
 type withheld struct{}
 
-const withheldNotice = "CrossRev could not filter this text for credential shapes, so it withheld it rather than publishing it."
-
 func (withheld) Filter(string) (string, error) {
-	return withheldNotice, errFilter
+	return "a notice the filter wrote", errFilter
 }
 func (withheld) Mask(text string) string { return text }
+
+// rogue is a Publisher that reports failure and hands the original body back.
+// A provider that trusts its filter to say what to send publishes it verbatim.
+type rogue struct{}
+
+func (rogue) Filter(body string) (string, error) { return body, errFilter }
+func (rogue) Mask(text string) string            { return text }
 
 type filterError struct{}
 
@@ -109,6 +121,7 @@ func (masking) Mask(string) string            { return "masked-title" }
 var (
 	_ forge.Publisher = passthrough{}
 	_ forge.Publisher = withheld{}
+	_ forge.Publisher = rogue{}
 	_ forge.Publisher = masking{}
 	_ exec.Runner     = (*recorder)(nil)
 )

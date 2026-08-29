@@ -3,7 +3,9 @@ package ghexec
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/carlosboeing/crossrev/internal/core"
@@ -12,6 +14,46 @@ import (
 
 // defaultLabelColour is the grey lib/github.sh:292 falls back to.
 const defaultLabelColour = "ededed"
+
+// errLabelName is what a name that cannot be put in a URL path is refused with.
+var errLabelName = errors.New("a label name may not contain a path segment of . or ..")
+
+// labelPath renders a label name as the last part of a `gh api` path.
+//
+// A label name is configuration read from the base revision (ADR 0003), and it
+// reaches three paths here: the colour read, the recolour, and the removal —
+// two of them writes. lib/github.sh interpolates it raw, so `../../../orgs/x`
+// leaves the repository the caller named and asks for something else entirely.
+//
+// # Why this escapes per segment rather than escaping the whole name
+//
+// url.PathEscape on the whole name would close the traversal, but only as a
+// side effect of escaping the separator: CrossRev's own labels are
+// `crossrev/pass-1` and `crossrev/awaiting-review`, so every label call would
+// start sending `%2F` where the shell sends `/`. That is a changed request on a
+// live write path, measured against nothing.
+//
+// Traversal is a validation question rather than an escaping one — PathEscape
+// leaves `.` and `..` exactly as they are — so the two are handled separately.
+// Each segment is escaped for what it is, a segment, and a segment that is `.`
+// or `..` or empty is refused. A name with no character needing an escape comes
+// out byte-identical to what the shell sends, which is every label the tool
+// itself declares; `C#` comes out as `C%23`, where the shell sends a `#` that
+// starts a URL fragment and asks for the wrong label.
+func labelPath(name string) (string, error) {
+	if name == "" {
+		return "", fmt.Errorf("%w: the name is empty", errLabelName)
+	}
+	segments := strings.Split(name, "/")
+	for i, segment := range segments {
+		switch segment {
+		case "", ".", "..":
+			return "", fmt.Errorf("%w: %q", errLabelName, name)
+		}
+		segments[i] = url.PathEscape(segment)
+	}
+	return strings.Join(segments, "/"), nil
+}
 
 // LabelColour is the hex a label currently carries, lowercased, or nothing if
 // it does not exist.
@@ -26,7 +68,14 @@ const defaultLabelColour = "ededed"
 // suite matches routes on the whole argument string, and an extra flag would
 // silently miss every label fixture in it.
 func (c *Client) LabelColour(ctx context.Context, repo core.Slug, name string) string {
-	res := c.run(ctx, "api", "repos/"+repo.String()+"/labels/"+name)
+	path, err := labelPath(name)
+	if err != nil {
+		// A name that cannot be asked for reads as absent, which is the same
+		// answer this gives for a label that is not there. LabelEnsure refuses
+		// it below rather than creating one from it.
+		return ""
+	}
+	res := c.run(ctx, "api", "repos/"+repo.String()+"/labels/"+path)
 	if !answered(res) {
 		return ""
 	}
@@ -52,6 +101,11 @@ func (c *Client) LabelColour(ctx context.Context, repo core.Slug, name string) s
 // fatal, because a label with the wrong colour still drives the chain — so it
 // warns and answers LabelExists.
 func (c *Client) LabelEnsure(ctx context.Context, repo core.Slug, label forge.Label) (forge.LabelState, error) {
+	path, err := labelPath(label.Name)
+	if err != nil {
+		return "", fmt.Errorf("could not declare a label on %s: %w", repo, err)
+	}
+
 	colour := label.Colour
 	if colour == "" {
 		colour = defaultLabelColour
@@ -71,7 +125,7 @@ func (c *Client) LabelEnsure(ctx context.Context, repo core.Slug, label forge.La
 		return forge.LabelExists, nil
 	}
 
-	res := c.run(ctx, "api", "--method", "PATCH", "repos/"+repo.String()+"/labels/"+label.Name,
+	res := c.run(ctx, "api", "--method", "PATCH", "repos/"+repo.String()+"/labels/"+path,
 		"-f", "color="+colour)
 	if !answered(res) {
 		c.warn(fmt.Sprintf("could not update the colour of '%s' on %s", label.Name, repo),
@@ -99,5 +153,11 @@ func (c *Client) PullRequestLabelAdd(ctx context.Context, repo core.Slug, number
 // PullRequestLabelRemove removes a label. A label that was not there is not a
 // failure, and lib/state.sh:436-439 discards the outcome.
 func (c *Client) PullRequestLabelRemove(ctx context.Context, repo core.Slug, number int, label string) {
-	c.run(ctx, "api", "--method", "DELETE", issuePath(repo, number)+"/labels/"+label)
+	path, err := labelPath(label)
+	if err != nil {
+		// Nothing to report to, and nothing safe to ask for. A label that
+		// cannot be named cannot have been applied either.
+		return
+	}
+	c.run(ctx, "api", "--method", "DELETE", issuePath(repo, number)+"/labels/"+path)
 }

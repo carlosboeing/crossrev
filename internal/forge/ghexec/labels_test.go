@@ -131,3 +131,39 @@ func TestPullRequestLabelRemoveArgv(t *testing.T) {
 	r.wantArgs(t, 0, "api", "--method", "DELETE",
 		"repos/acme/widget/issues/42/labels/crossrev/awaiting-review")
 }
+
+// A label name reaches three URL paths, two of them writes, and it is
+// configuration rather than a constant.
+func TestLabelNamesReachThePathSafely(t *testing.T) {
+	t.Run("a name CrossRev declares is sent as the shell sends it", func(t *testing.T) {
+		c, r := client(t, out(`{"color":"57606a"}`))
+		c.LabelColour(context.Background(), testSlug(t), "crossrev/pass-1")
+		r.wantArgs(t, 0, "api", "repos/acme/widget/labels/crossrev/pass-1")
+	})
+
+	t.Run("a traversal never reaches gh", func(t *testing.T) {
+		const traversal = "../../../orgs/victim/teams"
+
+		c, r := client(t, out(`{"color":"57606a"}`), out("{}"))
+		if got := c.LabelColour(context.Background(), testSlug(t), traversal); got != "" {
+			t.Errorf("colour = %q, want none", got)
+		}
+		c.PullRequestLabelRemove(context.Background(), testSlug(t), 42, traversal)
+		if _, err := c.LabelEnsure(context.Background(), testSlug(t), forge.Label{Name: traversal}); err == nil {
+			t.Error("a label that cannot be named was declared anyway")
+		}
+		if len(r.specs) != 0 {
+			t.Errorf("gh was invoked %v, want not at all", r.argvs())
+		}
+	})
+
+	t.Run("a character that would change the request is escaped", func(t *testing.T) {
+		// The shell sends a bare # here, which starts a URL fragment and asks
+		// for the label named C.
+		c, r := client(t, bad(), out("{}"))
+		if _, err := c.LabelEnsure(context.Background(), testSlug(t), forge.Label{Name: "C#", Colour: "1a7f37"}); err != nil {
+			t.Fatalf("LabelEnsure: %v", err)
+		}
+		r.wantArgs(t, 0, "api", "repos/acme/widget/labels/C%23")
+	})
+}

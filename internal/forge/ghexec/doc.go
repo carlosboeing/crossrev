@@ -17,4 +17,10 @@
 //
 // Every Spec this package builds sets exec.AudienceOrchestrator. The reason is
 // in client.go, beside the code that sets it.
+//
+// Three rules in internal/archtest hold it, because the audience is the one
+// field in this tree whose misuse is silent: the constant may be named in this
+// package alone, a Spec may be built in client.go alone, and every Spec built
+// there runs the `program` constant. The first two read types rather than text,
+// so an aliased import or a var with no literal does not slip past them.
 package ghexec

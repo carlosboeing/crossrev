@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/carlosboeing/crossrev/internal/core"
 	"github.com/carlosboeing/crossrev/internal/forge"
@@ -23,6 +24,23 @@ const prViewFields = "number,title,body,url,headRefName,headRefOid,baseRefName,b
 	"changedFiles,labels,isCrossRepository,isDraft,headRepositoryOwner,headRepository," +
 	"maintainerCanModify,state"
 
+// stdoutExcerptChars bounds how much of gh's own output may appear in an error
+// a person reads. It is the only route from that output into operator-visible
+// text, and gh answers with whatever the API sent it.
+const stdoutExcerptChars = 80
+
+// maxSlugChars is the longest answer that can be a repository slug: GitHub caps
+// an owner at 39 characters and a repository name at 100, with one separator
+// between them.
+//
+// It is a bound on the ANSWER and not only on the message. core.ParseSlug
+// refuses a separator and whitespace in either half and nothing else, by
+// design — it is not a copy of GitHub's naming rules — so a page of HTML
+// carrying one slash parses: `<html>AAA…` becomes the owner and `html>` the
+// name, and PathKey then builds a directory from it. Whatever gh printed, an
+// answer longer than a slug can be is not the answer to this question.
+const maxSlugChars = 39 + 1 + 100
+
 // sinceLayout is the timestamp GitHub's `since` filter takes, which is what
 // `date -u '+%Y-%m-%dT%H:%M:%SZ'` prints at lib/github.sh:70-72.
 const sinceLayout = "2006-01-02T15:04:05Z"
@@ -35,12 +53,23 @@ func (c *Client) RepoSlug(ctx context.Context) (core.Slug, error) {
 	if !answered(res) {
 		return core.Slug{}, failure(summary, res)
 	}
-	slug, err := core.ParseSlug(strings.TrimSpace(string(res.Stdout)))
+	answer := strings.TrimSpace(string(res.Stdout))
+	if len([]rune(answer)) > maxSlugChars {
+		return core.Slug{}, fmt.Errorf("%s: %w: gh answered %d characters, and a slug is at most %d: %q",
+			summary, core.ErrSlug, len([]rune(answer)), maxSlugChars, excerpt(answer, stdoutExcerptChars))
+	}
+
+	slug, err := core.ParseSlug(answer)
 	if err != nil {
 		// The shell cannot reach this: it prints whatever gh printed. Go
 		// refuses instead, because a slug reaches PathKey and PathKey builds
 		// a directory under the state home (internal/core/repository.go:14-19).
-		return core.Slug{}, fmt.Errorf("%s: %w", summary, err)
+		//
+		// core.ErrSlug renders the whole answer with %q, so the message is
+		// built here instead: an unbounded page of API output — a proxy's
+		// error page, a terminal escape sequence — would otherwise go straight
+		// to a terminal and into the run log.
+		return core.Slug{}, fmt.Errorf("%s: %w: %q", summary, core.ErrSlug, excerpt(answer, stdoutExcerptChars))
 	}
 	return slug, nil
 }
@@ -300,4 +329,25 @@ func decodePages[T any](b []byte) []T {
 		all = append(all, page...)
 	}
 	return all
+}
+
+// excerpt bounds a piece of gh's output for a message a person reads.
+//
+// Cut by character rather than by byte, so a multi-byte rune is not halved, and
+// with anything that is not printable replaced. A terminal reads an escape
+// sequence rather than showing it, and gh's output is the API's answer rather
+// than anything CrossRev wrote.
+func excerpt(s string, limit int) string {
+	cleaned := strings.Map(func(r rune) rune {
+		if r == ' ' || unicode.IsGraphic(r) {
+			return r
+		}
+		return '\uFFFD'
+	}, s)
+
+	runes := []rune(cleaned)
+	if len(runes) <= limit {
+		return cleaned
+	}
+	return string(runes[:limit]) + "…"
 }

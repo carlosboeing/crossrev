@@ -17,19 +17,42 @@ const program = "gh"
 // ghEnvironment is what `gh` is allowed to inherit.
 //
 // The Bash boundary hands `gh` the whole environment, because a shell function
-// runs in the shell that called it. Go passes an exact environment instead
-// (exec.Spec.Env), so the names `gh` actually needs are written down:
+// runs in the shell that called it. Go passes an exact environment
+// (exec.Spec.Env), so the names `gh` actually needs are written down. Every one
+// of them is either documented by `gh help environment` or read by the Go
+// runtime `gh` is built on:
 //
 //   - PATH, HOME: finding the binary and its own config.
 //   - XDG_CONFIG_HOME, GH_CONFIG_DIR: where `gh auth login` left the host
 //     entry, and where the offline suite points it away from a real one.
 //   - GH_HOST: the enterprise host, when there is one.
-//   - GH_TOKEN, GITHUB_TOKEN, GH_ENTERPRISE_TOKEN: the credential itself.
+//   - GH_TOKEN, GITHUB_TOKEN, GH_ENTERPRISE_TOKEN, GITHUB_ENTERPRISE_TOKEN:
+//     the credential itself. `gh help environment` documents the enterprise
+//     pair "in order of precedence", so a GHES operator whose token is in the
+//     second name authenticates with it and no other.
+//   - SSL_CERT_FILE, SSL_CERT_DIR: the trust store. crypto/x509 reads both on
+//     Linux (crypto/x509/root_unix.go, which is build-tagged away on darwin),
+//     `gh` is a Go program, and CI and every container are Linux. Behind a
+//     TLS-inspecting proxy their absence is a total failure reported as an
+//     unverifiable certificate.
 //   - the proxy variables, in both cases, because Go's own
-//     http.ProxyFromEnvironment reads both and `gh` is a Go program.
+//     http.ProxyFromEnvironment reads both.
 //
-// GH_REPO is deliberately absent. Every call names its repository, and an
-// inherited default would silently retarget the ones that do not.
+// # Two names left out, and both are parity differences
+//
+// GH_REPO is excluded, and the reason is not that every call names its
+// repository — two do not. RepoSlug asks `gh` which repository the working
+// directory belongs to, and ViewerLogin asks who the operator is. GH_REPO
+// overrides exactly the first: with it inherited, RepoSlug answers the named
+// repository rather than the checkout, and every write the run then makes lands
+// there. The shell inherits it and behaves that way. Excluded, an explicit
+// instruction is ignored without a word — which is the lesser fault, because it
+// fails towards the repository the operator is standing in.
+//
+// GH_FORCE_TTY is excluded, and here Go is simply better than the shell. `gh`
+// honours it by rendering for a terminal, so a run carrying it hands back JSON
+// with ANSI escapes in it — into reads that unmarshal the bytes. The shell
+// inherits it and would.
 var ghEnvironment = []string{
 	"PATH",
 	"HOME",
@@ -39,6 +62,9 @@ var ghEnvironment = []string{
 	"GH_TOKEN",
 	"GITHUB_TOKEN",
 	"GH_ENTERPRISE_TOKEN",
+	"GITHUB_ENTERPRISE_TOKEN",
+	"SSL_CERT_FILE",
+	"SSL_CERT_DIR",
 	"HTTP_PROXY",
 	"HTTPS_PROXY",
 	"NO_PROXY",
@@ -143,11 +169,25 @@ func (c *Client) run(ctx context.Context, args ...string) exec.Result {
 	})
 }
 
+// publishNotice is what stands in for a body the filter could not process. It
+// is the text log_redact_publish prints in the same case (lib/log.sh:155).
+const publishNotice = "CrossRev could not filter this text for credential shapes, so it withheld it rather than publishing it."
+
 // publish runs a body through the injected filter.
 //
-// It returns the text to send: the filtered body, or — when the filter could
-// not process it — the notice that stands in for it, exactly as
-// log_redact_publish prints it (lib/log.sh:153-157).
+// It returns the text to send: the filtered body, or — when the filter reports
+// it could not process one — this package's own notice.
+//
+// The notice is this package's and not the filter's return value, and that is
+// the whole of the difference between a contract and a guarantee. A Publisher
+// is asked what is unsafe; it is not trusted to say what to send. One that
+// answers `(body, err)` on failure would otherwise publish the original text
+// verbatim, and the case that makes that worst is a body carrying no marker:
+// `lost` is false, so nothing warns and nothing refuses, and the unfiltered
+// text is simply on the pull request. The shell cannot reach that state at all
+// — log_redact_publish prints the notice itself and returns non-zero, so the
+// provider never holds the original (lib/log.sh:143-157) — and this is how that
+// structure is kept.
 //
 // lost says the filter failed on a body carrying a marker, which is the split
 // lib/github.sh:166-186 draws. The marker is what CrossRev reads its own state
@@ -163,7 +203,7 @@ func (c *Client) publish(body string) (send string, lost bool, err error) {
 	}
 	filtered, filterErr := c.filter.Filter(body)
 	if filterErr != nil {
-		return filtered, markerBody(body), nil
+		return publishNotice, markerBody(body), nil
 	}
 	return filtered, false, nil
 }

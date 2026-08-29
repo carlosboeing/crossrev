@@ -157,10 +157,13 @@ func (s RunStatus) String() string { return string(s) }
 // log_redact_publish at each of its six writes and never decides the rule
 // itself.
 //
-// Filter fails closed. On a non-nil error the string it returns is the notice
-// that stands in for the body, and the caller decides between publishing the
-// notice and refusing the write — the split lib/github.sh:166-186 draws between
-// a body carrying a marker and one that does not.
+// Filter fails closed, and an implementation of Forge must not depend on it
+// doing so. A non-nil error means the body could not be processed and must not
+// be published; the string returned alongside that error is not used, because a
+// provider that sent it would publish whatever a broken filter handed back. The
+// substitute text is the provider's, and so is the choice between publishing it
+// and refusing the write — the split lib/github.sh:166-186 draws between a body
+// carrying a marker and one that does not.
 //
 // Mask is the other half of the same filter, and the two are not
 // interchangeable. It masks a one-line string and cannot fail, which is what an
