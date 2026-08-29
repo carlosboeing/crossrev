@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"testing"
 
 	"github.com/carlosboeing/crossrev/internal/runlog"
@@ -218,6 +219,21 @@ func TestLocalRunIDShapeParity(t *testing.T) {
 	shape := localRunID.ReplaceAllString(got, "local-<pid>")
 	if want := loadPaths(t).LocalRunIDShape; shape != want {
 		t.Errorf("RunID() = %q, shape %q, want shape %q", got, shape, want)
+	}
+}
+
+// TestLocalRunIDIsThisProcess pins the value the frozen shape cannot.
+//
+// The oracle froze `local-<pid>` because a process id is not reproducible, and
+// a shape is satisfied by any process id at all — the parent's included. A
+// parent pid is shared by every sibling a shell starts, so two runs launched
+// from one script would claim the same run directory and overwrite each other's
+// record. `local-$$` in the shell is the shell's own pid (lib/log.sh:41), and
+// this is its counterpart.
+func TestLocalRunIDIsThisProcess(t *testing.T) {
+	t.Setenv("GITHUB_RUN_ID", "")
+	if got, want := runlog.RunID(), "local-"+strconv.Itoa(os.Getpid()); got != want {
+		t.Errorf("RunID() = %q, want %q", got, want)
 	}
 }
 

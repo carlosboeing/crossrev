@@ -31,8 +31,19 @@ type Options struct {
 	// underneath a runs base at all.
 	SweepBase string
 
-	// RetentionDays is how long a run directory survives. Use RetentionDays to
-	// turn a configured string into one.
+	// RetentionDays is how long a run directory survives. Zero means unset
+	// and Open sweeps with DefaultRetentionDays; use the RetentionDays
+	// function to turn a configured string into one, and KeepEverything to
+	// sweep nothing at all.
+	//
+	// The field and the function share a name and not a zero value, which is
+	// the misread to avoid: the function answers an empty string with
+	// DefaultRetentionDays, while this is a plain int that means nothing
+	// until Open reads it. A literal zero would be the most destructive
+	// window there is — agedOut takes it as "delete anything older than
+	// twenty-four hours" — and the shell cannot reach that state, because
+	// log_sweep defaults the window to 14 before its guard runs
+	// (lib/log.sh:194).
 	RetentionDays int
 
 	// Repo and PR name the run in its opening event.
@@ -52,6 +63,15 @@ type Options struct {
 	// Now is the clock the event timestamps and the sweep read. Nil means
 	// time.Now.
 	Now func() time.Time
+}
+
+// retentionWindow is the window Open sweeps with, with the unset field
+// resolved. See the RetentionDays field for why zero cannot mean a day.
+func (o Options) retentionWindow() int {
+	if o.RetentionDays == 0 {
+		return DefaultRetentionDays
+	}
+	return o.RetentionDays
 }
 
 // Log is the per-run record on disk.
@@ -83,6 +103,15 @@ type Log struct {
 // halves matter: the error is there for a caller that wants to say so, and the
 // nil Log is usable as-is, so a caller that follows the Bash library and
 // degrades to a no-op can ignore the error and keep going.
+//
+// log_init's idempotency guard has no equivalent here, and this is where it
+// went. The Bash function returns early when CROSSREV_RUN_DIR is already set,
+// so the second leg of `crossrev cycle` does not restart the record the first
+// began (lib/log.sh:66). The guard is there because the run directory is a
+// global any leg can re-derive; a *Log is a value one caller opens and hands to
+// both legs, and SetLeg is what moves it between them. Open is therefore called
+// once per invocation, not once per leg — calling it twice on one directory
+// appends a second `run start` event rather than being refused.
 func Open(opts Options) (*Log, error) {
 	if opts.Dir == "" {
 		return nil, os.ErrInvalid
@@ -101,7 +130,7 @@ func Open(opts Options) (*Log, error) {
 		leg:             opts.Leg,
 	}
 	if opts.SweepBase != "" {
-		Sweep(opts.SweepBase, opts.RetentionDays, now())
+		Sweep(opts.SweepBase, opts.retentionWindow(), now())
 	}
 	l.Event("run", "start repo="+opts.Repo+" pr="+opts.PR)
 	return l, nil
@@ -152,6 +181,18 @@ func (l *Log) filter() filter {
 // file unfiltered" has no exceptions to remember. Callers pass git tails and
 // die reasons that already contain newlines, so those are collapsed and the
 // one-line-per-event invariant holds regardless.
+//
+// The filter it writes through is the package one, Redact, and not l.filter().
+// That is the single deliberate difference from Publish and RedactFile, and it
+// is not an escape from the rule above: both filters are the same patterns, and
+// production never replaces either. The field exists so a test can supply a
+// filter that fails and reach the two fail-closed branches — and the events
+// those branches write are the record of the failure, so routing this through
+// the same failing filter would withhold the only account of what went wrong.
+//
+// The timestamp is converted to UTC rather than formatted in whatever zone the
+// clock is in, because eventTimestamp ends in a literal Z. A local clock
+// formatted directly would read hours off and still claim to be UTC.
 func (l *Log) Event(phase, detail string) {
 	if l == nil || l.dir == "" {
 		return

@@ -147,9 +147,71 @@ func TestEventAppends(t *testing.T) {
 	}
 }
 
+// TestEventStampsUTCWhateverTheClockSays: the format ends in a literal Z, so a
+// clock that is not already UTC has to be converted rather than formatted.
+//
+// Every other clock in this file is parsed from an RFC3339 string that is
+// already UTC, which makes the conversion a no-op and hides its removal. In
+// production the clock is time.Now, which is local, so this is the only test
+// that measures the difference: 11:02:03 in Brisbane is 01:02:03 UTC, and a
+// stamp reading 11:02:03Z would be ten hours wrong while claiming not to be.
+func TestEventStampsUTCWhateverTheClockSays(t *testing.T) {
+	brisbane := time.FixedZone("AEST", 10*60*60)
+	local := time.Date(2026, 8, 29, 11, 2, 3, 0, brisbane)
+	l := openLog(t, runlog.Options{
+		Repo: "acme/widget",
+		PR:   "7",
+		Now:  func() time.Time { return local },
+	})
+
+	if got, want := readLog(t, l), "2026-08-29T01:02:03Z run start repo=acme/widget pr=7\n"; got != want {
+		t.Errorf("run log = %q, want %q", got, want)
+	}
+}
+
+// TestOpenSweepsWithTheDefaultWindow: a zero RetentionDays is unset, not the
+// twenty-four hours a literal zero authorises.
+//
+// The shell cannot reach that state — log_sweep defaults its window to 14
+// before the guard that validates it (lib/log.sh:194) — so a zero-value
+// Options must not either. Nothing else in the package makes the distinction
+// visible: RetentionDays("") already answers with the default, and it is the
+// caller that never calls it that this covers.
+func TestOpenSweepsWithTheDefaultWindow(t *testing.T) {
+	now := time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC)
+	base := filepath.Join(t.TempDir(), "runs")
+	// Two days old: swept by a window of zero, kept by the fortnight.
+	older := filepath.Join(base, "acme-widget", "pr-7", "local-old")
+	if err := os.MkdirAll(older, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	twoDaysAgo := now.Add(-48 * time.Hour)
+	if err := os.Chtimes(older, twoDaysAgo, twoDaysAgo); err != nil {
+		t.Fatal(err)
+	}
+
+	openLog(t, runlog.Options{
+		Dir:       filepath.Join(base, "acme-widget", "pr-7", "local-1"),
+		SweepBase: base,
+		Repo:      "acme/widget",
+		PR:        "7",
+		Now:       func() time.Time { return now },
+	})
+
+	if !exists(older) {
+		t.Error("a two-day-old run was swept by an Options that never set a window")
+	}
+}
+
 // TestEventConcurrently: the Bash library cannot write two events at once and
-// Go can, so the file is guarded. Run under -race, this is the test that says
-// so.
+// Go can, so the write is guarded.
+//
+// What the mutex protects is the file, and the race detector cannot see a
+// file. Event touches no shared Go memory of its own, so this test passes
+// under -race with the mutex deleted; what it measures is that nine events
+// leave nine lines. The sequence being guarded is stat, create, open, append:
+// two unguarded goroutines can both find the log missing and both truncate it,
+// and the second truncation discards what the first had already written.
 func TestEventConcurrently(t *testing.T) {
 	l := openLog(t, runlog.Options{Repo: "acme/widget", PR: "7"})
 
