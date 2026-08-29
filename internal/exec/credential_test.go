@@ -1,6 +1,7 @@
 package exec_test
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"strconv"
@@ -18,6 +19,65 @@ func TestZeroSpecIsModelFacing(t *testing.T) {
 	}
 	if exec.AudienceModelFacing == exec.AudienceOrchestrator {
 		t.Fatal("the two audiences must be distinguishable")
+	}
+}
+
+// An Audience cannot be built out of an integer, a JSON document, or anything
+// else a package outside internal/exec can produce.
+//
+// This is the route that ended the enumeration of spellings. Audience was an
+// integer, the confinement rule in internal/archtest scanned for the syntax
+// that wrote the opt-out value, and
+//
+//	var a exec.Audience
+//	_ = json.Unmarshal([]byte("1"), &a)
+//
+// named nothing, converted nothing, declared no constant and assigned to no
+// target the scan could read, while leaving the child orchestrator-facing at
+// run time. The field is unexported now, so encoding/json ignores it — an
+// unmarshal that names it explicitly succeeds and changes nothing — and every
+// other spelling is a compile error. The value stays model-facing, so the run
+// is refused.
+func TestAnAudienceCannotBeUnmarshalled(t *testing.T) {
+	for _, document := range []string{`1`, `true`, `{"orchestrator":true}`} {
+		var audience exec.Audience
+		// The error is not asserted: `1` and `true` fail to decode and the
+		// object decodes cleanly into nothing. What matters is the value after.
+		_ = json.Unmarshal([]byte(document), &audience)
+
+		if audience != exec.AudienceModelFacing {
+			t.Errorf("unmarshalling %s produced audience %v, want AudienceModelFacing", document, audience)
+		}
+
+		spec := helperSpec("exit", "0")
+		spec.Audience = audience
+		spec.Env = append(spec.Env, "GH_TOKEN=not-a-real-token")
+		if result := run(t, spec); !errors.Is(result.Err, exec.ErrForgeCredential) {
+			t.Errorf("a child whose audience came from %s was not refused: %v", document, result.Err)
+		}
+	}
+}
+
+// Reassigning the exported audience variables cannot switch the refusal off.
+//
+// Audience is a struct, so its two values are variables rather than constants —
+// a struct value cannot be a Go constant — and an exported variable is writable
+// from any package in the binary. That would matter if Run compared against
+// one. It reads spec.Audience's own field instead (internal/exec/osrunner.go),
+// so a Spec that never set the field is refused whatever these two hold.
+func TestRunDoesNotDecideThroughTheExportedAudienceVariables(t *testing.T) {
+	modelFacing, orchestrator := exec.AudienceModelFacing, exec.AudienceOrchestrator
+	t.Cleanup(func() {
+		exec.AudienceModelFacing, exec.AudienceOrchestrator = modelFacing, orchestrator
+	})
+
+	exec.AudienceModelFacing = orchestrator
+	exec.AudienceOrchestrator = modelFacing
+
+	spec := helperSpec("exit", "0")
+	spec.Env = append(spec.Env, "GH_TOKEN=not-a-real-token")
+	if result := run(t, spec); !errors.Is(result.Err, exec.ErrForgeCredential) {
+		t.Errorf("a model-facing child was started after the audience variables were swapped: %v", result.Err)
 	}
 }
 

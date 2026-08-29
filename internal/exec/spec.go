@@ -82,9 +82,44 @@ type Spec struct {
 // with os.LookupEnv, or taking one as an argument and putting it in Env. None
 // of those is a mistake a type can prevent, so Run refuses them instead, and
 // this field says when to.
-type Audience int
+//
+// # Why a struct with an unexported field rather than an integer
+//
+// It was `type Audience int` with two constants, and the confinement rule in
+// internal/archtest scanned for the spellings that reach the opt-out value.
+// That scan can never be complete, because the value can be computed. Two
+// rounds of review planted eight spellings; the rule grew a clause for each of
+// the first seven, and the eighth walked past all of them:
+//
+//	var a exec.Audience
+//	_ = json.Unmarshal([]byte("1"), &a)   // orchestrator-facing at run time
+//
+// No name, no conversion, no constant, no assignment target a scan can read.
+// Enumerating spellings is a losing game, so the type plays a different one:
+// the orchestrator state lives in an unexported field, which no package outside
+// internal/exec can set by any means the language offers. A conversion from an
+// integer, arithmetic, an increment, a typed constant and an unmarshal are all
+// compile errors or no-ops now, and the archtest keeps only the job a name
+// check is good for — refusing a package that names AudienceOrchestrator.
+//
+// The zero value is still the strict one, which is the property the whole
+// design rests on: a caller that says nothing is refused a forge credential.
+type Audience struct {
+	// orchestrator is the whole value. Unexported, so the only route to a true
+	// is AudienceOrchestrator, declared below and confined by internal/archtest.
+	//
+	// encoding/json ignores an unexported field entirely, so unmarshalling into
+	// an Audience cannot set it — which is the route that motivated the change.
+	orchestrator bool
+}
 
-const (
+// The two audiences are variables rather than constants because a struct value
+// cannot be a Go constant. That trades away immutability, so nothing reads them
+// to make the decision: OSRunner.Run tests spec.Audience.orchestrator directly.
+// Reassigning either variable can therefore only change what a caller stores in
+// a Spec, and storing the orchestrator value already required naming it — which
+// is what the confinement rule reads.
+var (
 	// AudienceModelFacing is the zero value, and it is the strict one. Run
 	// refuses to hand this child a forge credential.
 	//
@@ -94,7 +129,7 @@ const (
 	// closed — the value a caller gets by saying nothing is the one that
 	// refuses — so the silent mistake is a refused run with a message naming
 	// the variable, not a leaked token with no message at all.
-	AudienceModelFacing Audience = iota
+	AudienceModelFacing = Audience{}
 
 	// AudienceOrchestrator is a tool crossrev drives on its own behalf, which
 	// may hold a forge credential.
@@ -103,8 +138,17 @@ const (
 	// anywhere — gh inherits it ambiently at every call site, lines 39, 74, 99
 	// and 120 among them — so the forge adapter this package will carry must be
 	// able to pass one. A blanket refusal in Run would break it.
-	AudienceOrchestrator
+	AudienceOrchestrator = Audience{orchestrator: true}
 )
+
+// String names the audience, so a test failure reads as the name a caller wrote
+// rather than as the struct's one field.
+func (a Audience) String() string {
+	if a.orchestrator {
+		return "AudienceOrchestrator"
+	}
+	return "AudienceModelFacing"
+}
 
 // Streams says how the child's stdout and stderr reach the caller.
 //

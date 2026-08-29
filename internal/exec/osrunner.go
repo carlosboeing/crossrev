@@ -52,7 +52,14 @@ func (r *OSRunner) Run(ctx context.Context, spec Spec) Result {
 
 	// Before anything is started, and before any environment is built. A
 	// refusal after Start would already have handed the token over.
-	if spec.Audience == AudienceModelFacing {
+	//
+	// The field is read rather than compared against AudienceModelFacing.
+	// Audience is a struct, so its two values are package variables rather than
+	// constants, and a comparison would put a writable variable in the path of
+	// the decision: setting AudienceModelFacing to the orchestrator value would
+	// then skip this check for every Spec that never set the field. Reading the
+	// field makes that reassignment inert here.
+	if !spec.Audience.orchestrator {
 		if name, found := forgeCredentialIn(spec.Env); found {
 			return Result{
 				ExitCode: -1,

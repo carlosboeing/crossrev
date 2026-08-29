@@ -14,7 +14,7 @@ import (
 // that this rule does not import the package it polices.
 const execPackage = "github.com/carlosboeing/crossrev/internal/exec"
 
-// audienceType and orchestratorConst are the two routes to the opt-out.
+// audienceType and orchestratorName identify the one object this rule reads.
 const (
 	audienceType     = execPackage + ".Audience"
 	orchestratorName = "AudienceOrchestrator"
@@ -41,18 +41,18 @@ const (
 // program is on the other end of Spec.Path, and that is not visible at the line
 // where the constant is written.
 //
-// So the constant is confined to the packages whose whole subject is running
-// one named program the orchestrator drives on its own behalf — `gh` in
+// So the name is confined to the packages whose whole subject is running one
+// named program the orchestrator drives on its own behalf — `gh` in
 // internal/forge/ghexec, git in internal/vcs — and adding a third consumer is a
 // decision that has to be made here, against this comment, rather than in the
 // file that wants it.
 //
-// # Three routes
+// # The type is the guard; this rule is the name check
 //
-// Naming the constant is one route. The value is the other, and it has more
-// spellings than a conversion: a rule that read `exec.Audience(1)` and nothing
-// else answered nothing about six of the seven a review planted, all of which
-// reach the same opt-out with the name left off.
+// This used to scan for the VALUE as well as the name, because exec.Audience
+// was an integer and the opt-out was the constant 1. Every spelling of that
+// integer reached the opt-out with the name left off, and the list kept growing
+// as reviews planted more:
 //
 //	exec.Audience(1)                      a conversion
 //	exec.Spec{Audience: 1}                a keyed field
@@ -61,13 +61,19 @@ const (
 //	exec.AudienceModelFacing + 1          arithmetic on the strict sibling
 //	s.Audience++                          an increment of the field
 //	table[1]++                            an increment of an array element
+//	json.Unmarshal([]byte("1"), &a)       a value computed at run time
 //
-// The first five are one fact to go/types: an expression whose TYPE is this one
-// and which is either a conversion or a constant, which is the clause
-// TestFindingIDMintingBoundary uses for the same reason. The last two carry no
-// constant value at the expression that matters — the target of the write is a
-// variable — so they are read off the assignment instead: any expression of
-// this type standing on the left of an assignment, or under an increment.
+// Two rounds of clauses caught the first seven; the eighth walked past all of
+// them, and would walk past any ninth clause too — a syntactic scan cannot see
+// a value that is computed. So exec.Audience is now a struct whose single field
+// is unexported (internal/exec/spec.go). Every line above is a compile error
+// outside internal/exec, and the unmarshal is a no-op there because
+// encoding/json cannot reach an unexported field. Nothing is left for a value
+// scan to find, so the clauses that looked for one are gone rather than kept as
+// dead checks.
+//
+// What remains is the job a name check is actually good for: the value exists,
+// it is reachable by name, and this says which directories may write that name.
 //
 // A read of an already-set value is deliberately not a violation. The opt-out
 // is the write.
@@ -113,9 +119,9 @@ func TestOrchestratorAudienceIsConfinedToTwoPackages(t *testing.T) {
 				filepath.ToSlash(filepath.Dir(relPath)), true
 		}
 
-		// Route one: the constant, by name.
+		// The one route left: the value, by name.
 		for ident, obj := range pkg.TypesInfo.Uses {
-			if !isOrchestratorConst(obj) {
+			if !namesOrchestratorAudience(obj) {
 				continue
 			}
 			if pos, dir, ok := locate(ident); ok {
@@ -123,76 +129,23 @@ func TestOrchestratorAudienceIsConfinedToTwoPackages(t *testing.T) {
 			}
 		}
 		for ident, obj := range pkg.TypesInfo.Defs {
-			if !isOrchestratorConst(obj) {
+			if !namesOrchestratorAudience(obj) {
 				continue
 			}
 			if pos, dir, ok := locate(ident); ok {
 				record(pos, "declares exec."+orchestratorName, dir)
 			}
 		}
-
-		// Route two: the type, converted or constant, which reaches the same
-		// value without naming it.
-		for expr, tv := range pkg.TypesInfo.Types {
-			if tv.IsType() || tv.Type == nil || tv.Type.String() != audienceType {
-				continue
-			}
-			what := ""
-			if call, ok := expr.(*ast.CallExpr); ok {
-				if ftv, ok := pkg.TypesInfo.Types[call.Fun]; ok && ftv.IsType() {
-					what = "converts to exec.Audience"
-				}
-			}
-			// A constant of this type is the same value written without the
-			// conversion, and it is what `Audience: 1` and every typed
-			// declaration produce.
-			if what == "" && tv.Value != nil {
-				what = "is a constant of type exec.Audience"
-			}
-			if what == "" {
-				continue
-			}
-			if pos, dir, ok := locate(expr); ok {
-				record(pos, what, dir)
-			}
-		}
-
-		// Route three: a write to something of this type. The target of an
-		// assignment or an increment is a variable, so it carries no constant
-		// value and route two cannot see it — `s.Audience++` and `table[1]++`
-		// both reach the opt-out that way.
-		for _, file := range pkg.Syntax {
-			ast.Inspect(file, func(n ast.Node) bool {
-				var targets []ast.Expr
-				switch statement := n.(type) {
-				case *ast.AssignStmt:
-					targets = statement.Lhs
-				case *ast.IncDecStmt:
-					targets = []ast.Expr{statement.X}
-				default:
-					return true
-				}
-				for _, target := range targets {
-					tv, ok := pkg.TypesInfo.Types[target]
-					if !ok || tv.Type == nil || tv.Type.String() != audienceType {
-						continue
-					}
-					if pos, dir, ok := locate(target); ok {
-						record(pos, "assigns to a value of type exec.Audience", dir)
-					}
-				}
-				return true
-			})
-		}
 	}
 
-	// A rule that matched nothing proves nothing. The constant is renamed or
+	// A rule that matched nothing proves nothing. The value is renamed or
 	// the loader stops resolving it and every package passes vacuously.
 	if permittedReferences == 0 {
 		t.Fatal("the scan found no reference to the orchestrator audience at all, so it proves nothing")
 	}
 
-	// One expression is recorded under both routes, so a position reports once.
+	// A declaration is both a Def and, in its own initialiser, a Use, so a
+	// position reports once.
 	sort.Slice(found, func(i, j int) bool { return found[i].where < found[j].where })
 	var last string
 	for _, v := range found {
@@ -204,12 +157,21 @@ func TestOrchestratorAudienceIsConfinedToTwoPackages(t *testing.T) {
 	}
 }
 
-func isOrchestratorConst(obj types.Object) bool {
-	konst, ok := obj.(*types.Const)
-	if !ok || konst.Name() != orchestratorName {
+// namesOrchestratorAudience matches the opt-out by name, package and type.
+//
+// The object kind is deliberately not asserted. It was a *types.Const and is now
+// a *types.Var, because a struct value cannot be a Go constant, and a rule that
+// pinned the kind would have gone quiet at that change rather than failing. The
+// type check is what stops a same-named object of some other type from being
+// mistaken for this one.
+func namesOrchestratorAudience(obj types.Object) bool {
+	if obj == nil || obj.Name() != orchestratorName {
 		return false
 	}
-	return konst.Pkg() != nil && konst.Pkg().Path() == execPackage
+	if obj.Pkg() == nil || obj.Pkg().Path() != execPackage {
+		return false
+	}
+	return obj.Type() != nil && obj.Type().String() == audienceType
 }
 
 // audienceOptOutPermitted names the three directories the audience may be
@@ -218,7 +180,7 @@ func isOrchestratorConst(obj types.Object) bool {
 // deliberately, because a test asserting the audience is set has to be able to
 // say it.
 //
-// internal/exec declares the constant, which has to live somewhere.
+// internal/exec declares the value, which has to live somewhere.
 // internal/forge/ghexec runs `gh`, which cannot authenticate without the
 // credential. internal/vcs runs git, which pushes over whatever credential
 // helper the environment configures — on a GitHub-hosted runner that is the
