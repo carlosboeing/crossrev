@@ -105,6 +105,36 @@
       "rc": 1
     },
     {
+      "name": "host-ending-in-the-real-host",
+      "url": "https://notgithub.com/a/b",
+      "slug": null,
+      "rc": 1
+    },
+    {
+      "name": "host-ending-in-the-real-host-as-a-word",
+      "url": "https://mygithub.com/a/b",
+      "slug": null,
+      "rc": 1
+    },
+    {
+      "name": "userinfo-at-in-the-path-before-the-real-host",
+      "url": "https://example.com/x@github.com/a/b",
+      "slug": null,
+      "rc": 1
+    },
+    {
+      "name": "double-slash-in-a-local-path",
+      "url": "/tmp//github.com/a/b",
+      "slug": null,
+      "rc": 1
+    },
+    {
+      "name": "colon-in-a-path-segment-after-a-slash",
+      "url": "github.com/a:b",
+      "slug": null,
+      "rc": 1
+    },
+    {
       "name": "gitlab",
       "url": "https://gitlab.com/a/b",
       "slug": null,

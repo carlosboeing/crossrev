@@ -1108,6 +1108,16 @@ slug_cases() {
   # Refusals.
   slug_case "host-that-only-contains-github" "https://github.com.example.net/a/b"
   slug_case "host-with-github-as-a-prefix" "https://github.community/a/b"
+  # Each of the three below fails a DIFFERENT way to reach the refusal, and
+  # every case above them fails for one reason. Without these, a rule that
+  # compared the host by suffix, stripped userinfo on any @ rather than only one
+  # in the authority, or split on // rather than ://, would refuse every frozen
+  # case for its own reason and admit a host that is not github.com.
+  slug_case "host-ending-in-the-real-host" "https://notgithub.com/a/b"
+  slug_case "host-ending-in-the-real-host-as-a-word" "https://mygithub.com/a/b"
+  slug_case "userinfo-at-in-the-path-before-the-real-host" "https://example.com/x@github.com/a/b"
+  slug_case "double-slash-in-a-local-path" "/tmp//github.com/a/b"
+  slug_case "colon-in-a-path-segment-after-a-slash" "github.com/a:b"
   slug_case "gitlab" "https://gitlab.com/a/b"
   slug_case "local-path-holding-the-host" "/home/dev/github.com/a/b"
   slug_case "relative-path" "../github.com/a/b"
