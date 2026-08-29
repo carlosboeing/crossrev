@@ -76,7 +76,7 @@ type Spec struct {
 //
 // ADR 0001 makes one promise: no GitHub credential reaches a process that reads
 // attacker-controlled text. Inherit is an allowlist, so it withholds every name
-// nobody wrote down — but the three names that matter are exactly the ones a
+// nobody wrote down — but the four names that matter are exactly the ones a
 // caller can write down, whether by naming one in an allowlist, reading one
 // with os.LookupEnv, or taking one as an argument and putting it in Env. None
 // of those is a mistake a type can prevent, so Run refuses them instead, and
@@ -144,10 +144,21 @@ const (
 	StreamsCombined
 )
 
-// forgeCredentialNames are the three the Bash adapters strip before starting a
-// model-facing process (lib/adapters/claude.sh:67, and the same line in
-// codex.sh:83, agy.sh:85, grok.sh:70 and opencode.sh:176).
-var forgeCredentialNames = []string{"GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN"}
+// forgeCredentialNames are the four the Bash adapters strip before starting a
+// model-facing process (lib/adapters/claude.sh:72, and the same line in
+// codex.sh:88, agy.sh:90, grok.sh:75 and opencode.sh:181).
+//
+// Four, not three. `gh help environment` documents GH_ENTERPRISE_TOKEN and
+// GITHUB_ENTERPRISE_TOKEN "in order of precedence", so on a GitHub Enterprise
+// Server installation the second name is the credential in use whenever the
+// first is unset. A list naming only the first hands it to the process that
+// reads attacker-controlled text.
+var forgeCredentialNames = []string{
+	"GH_TOKEN",
+	"GITHUB_TOKEN",
+	"GH_ENTERPRISE_TOKEN",
+	"GITHUB_ENTERPRISE_TOKEN",
+}
 
 // forgeCredentialIn returns the first forge credential named in env, and whether
 // there was one. It reads names only; the value never leaves this function.
