@@ -160,16 +160,55 @@ func TestTheEnvironmentThisClientBuildsWouldBeRefusedForAModel(t *testing.T) {
 
 // A Client with no filter refuses every write rather than publishing text
 // nothing inspected.
+//
+// Every write that publishes a body, not one of them: the five that can report
+// the refusal do, and IssueCommentCreate — which returns nothing and so cannot
+// — is the one where only the absence of a call says so. Its guard is the
+// difference between posting nothing and posting an empty body.
 func TestWritesRefuseWithoutAFilter(t *testing.T) {
-	r := &recorder{}
-	c := ghexec.New(r, nil)
+	writes := map[string]func(t *testing.T, c *ghexec.Client) error{
+		"CommentCreate": func(t *testing.T, c *ghexec.Client) error {
+			_, err := c.CommentCreate(context.Background(), testSlug(t), 42, "hello")
+			return err
+		},
+		"CommentEdit": func(t *testing.T, c *ghexec.Client) error {
+			return c.CommentEdit(context.Background(), testSlug(t), 9001, "hello")
+		},
+		"ReviewCommentCreate": func(t *testing.T, c *ghexec.Client) error {
+			_, err := c.ReviewCommentCreate(context.Background(), reviewComment(t, "hello"))
+			return err
+		},
+		"ReviewReply": func(t *testing.T, c *ghexec.Client) error {
+			return c.ReviewReply(context.Background(), testSlug(t), 42, 5000, "hello")
+		},
+		"IssueCreate": func(t *testing.T, c *ghexec.Client) error {
+			_, err := c.IssueCreate(context.Background(), testSlug(t), "title", "hello", nil)
+			return err
+		},
+	}
 
-	if _, err := c.CommentCreate(context.Background(), testSlug(t), 42, "hello"); err == nil {
-		t.Error("CommentCreate published with no filter")
+	for name, write := range writes {
+		t.Run(name, func(t *testing.T) {
+			r := &recorder{}
+			if err := write(t, ghexec.New(r, nil)); err == nil {
+				t.Errorf("%s published with no filter", name)
+			}
+			if len(r.specs) != 0 {
+				t.Errorf("gh was invoked %v, want not at all", r.argvs())
+			}
+		})
 	}
-	if len(r.specs) != 0 {
-		t.Errorf("gh was invoked %v, want not at all", r.argvs())
-	}
+
+	// The write with no return value. Nothing reports the refusal, so the
+	// absence of a call is the whole assertion — and without the guard this
+	// posts an empty body rather than not posting.
+	t.Run("IssueCommentCreate", func(t *testing.T) {
+		r := &recorder{}
+		ghexec.New(r, nil).IssueCommentCreate(context.Background(), testSlug(t), 31, "hello")
+		if len(r.specs) != 0 {
+			t.Errorf("gh was invoked %v, want not at all", r.argvs())
+		}
+	})
 }
 
 // The filtered body is what reaches gh, not the body the caller handed over.

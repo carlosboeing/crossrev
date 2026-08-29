@@ -170,6 +170,20 @@ func (c *Client) IssueCreate(ctx context.Context, repo core.Slug, title, body st
 
 // IssueCommentCreate comments on an issue. lib/github.sh:380-385 discards the
 // outcome, so there is nothing here to report.
+//
+// # The one write that returns without a word
+//
+// publish has exactly one error, errNoFilter, and this is the only caller that
+// drops it. Every other write reports it, and the difference is that this one
+// has nothing to report it with: no error, no returned value, and — by the
+// rule at WithWarn — no warning either, because a Client is built with its
+// filter once rather than per call, so the fact is a construction bug and not
+// something that happened to this comment.
+//
+// Silent is the right shape but not a free one, so it is written down: the
+// guard is what stops a nil filter publishing an empty body, and a test in
+// this package asserts that nothing reaches gh. Removing it does not fail to
+// post — it posts `-f body=` with the caller's text gone.
 func (c *Client) IssueCommentCreate(ctx context.Context, repo core.Slug, issue int, body string) {
 	filtered, lost, err := c.publish(body)
 	if err != nil {
