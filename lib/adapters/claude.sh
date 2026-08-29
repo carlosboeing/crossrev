@@ -64,7 +64,12 @@ adapter_claude() {
   # `"${prefix[@]:-}" env … claude` runs the command named "" and fails with
   # "command not found" and an empty error string. That broke every invocation
   # with no endpoint configured, which is the default local case.
-  local -a run=(env -u GH_TOKEN -u GITHUB_TOKEN -u GH_ENTERPRISE_TOKEN)
+  # Four names, not three. `gh` reads GH_ENTERPRISE_TOKEN and, when that is
+  # unset, GITHUB_ENTERPRISE_TOKEN — `gh help environment` lists both, "in order
+  # of precedence". A strip list naming only the first left the second in the
+  # agent's environment on a GitHub Enterprise Server setup, which is the one
+  # kind of installation where it is the credential in use.
+  local -a run=(env -u GH_TOKEN -u GITHUB_TOKEN -u GH_ENTERPRISE_TOKEN -u GITHUB_ENTERPRISE_TOKEN)
   # And every credential belonging to a harness that is not this one. The
   # workflow hands all of them to one process; only one of them is this leg's.
   local v
