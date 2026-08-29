@@ -57,7 +57,7 @@ The same rule governs anything distilled from a private artifact. An ADR records
 - any client or customer name
 - `.workbench` paths, or references to workbench files
 - internal cost or token figures
-- commercial-strategy vocabulary — hosted service or hosted tier, monetisation (and monetization), pricing in its commercial sense, per-seat or per-user figures, company naming
+- commercial-strategy vocabulary — hosted service or hosted tier, monetisation (and monetization), pricing, per-seat or per-user figures, company naming
 
 As a grep, which is worth running rather than eyeballing:
 
@@ -67,7 +67,7 @@ git diff --cached | grep -inE '\.workbench|hosted (service|tier)|monetiz|monetis
 
 Read the hits rather than counting them. This file is itself a hit, because stating a rule needs the words the rule forbids — which is exactly why the flip-time sweep excludes `CLAUDE.md`, `AGENTS.md` and `.gitignore` by name and then has a human read them.
 
-**`scripts/githooks/pre-commit` now runs this automatically** and refuses the commit, so it is enforced rather than remembered. Enable it once per clone — git will not do it for you — with `git config core.hooksPath scripts/githooks`. Two of its patterns are tighter than the grep above, for the same reason. A bare `\$[0-9]` also matches every shell positional parameter, which blocked 16 of 40 real commits when measured. And bare `pricing` matches the vendor-token-rate sense `lib/usage.sh` and its native port use throughout — CrossRev prices nothing, it reads a vendored table to tell an operator what a leg cost them — so the hook requires a commercial collocation (`our pricing`, `pricing model`, `pricing page`) instead. A gate people learn to bypass stops catching what it was written for. The override for a commit that is genuinely fine is `git commit --no-verify`.
+**`scripts/githooks/pre-commit` now runs this automatically** and refuses the commit, so it is enforced rather than remembered. Enable it once per clone — git will not do it for you — with `git config core.hooksPath scripts/githooks`. Its money pattern is tighter than the grep above: a bare `\$[0-9]` also matches every shell positional parameter, which blocked 16 of 40 real commits when measured. And it exempts one sense of `pricing` rather than denying less of it — CrossRev prices nothing, it reads a vendored table of vendor token rates to tell an operator what a leg cost them, and that wording is load-bearing in `lib/usage.sh`, `scripts/refresh-prices.sh`, `docs/architecture.md` and their native port. The exempt phrases are removed from a line before it is scanned, so a sentence carrying one beside a real leak still trips on the leak. `tests/test-githooks.sh` holds both sets and is the only thing that proves either. The override for a commit that is genuinely fine is `git commit --no-verify`.
 
 Product-technical direction is fine. This check is about privacy the way the ship checklist is about tracking files: applied to every change, not only the ones that feel sensitive.
 
