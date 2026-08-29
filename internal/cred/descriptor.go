@@ -240,14 +240,35 @@ func Descriptors() (Document, error) {
 // stages nothing, and cred_assert_fresh returns 0 because
 // `.credential.assert_fresh` is not the string "true"
 // (lib/credentials.sh:126, :143, :213).
+//
+// The two slices are cloned. Returning the struct copies it, but a struct copy
+// shares its slices' backing arrays, so a caller writing
+// `doc.For("claude").Credential.EnvKeep[0] = "…"` would edit the document and
+// change every later answer — including StripFor's and VendorStripFor's.
+//
+// This is not a route past ADR 0001. StripFor adds the four forge names
+// unconditionally rather than reading them out of the descriptor, so no edit to
+// these lists can leave a GitHub credential in a model-facing environment; a
+// descriptor naming all four in both its lists still strips all four. What it
+// can do is leave a VENDOR credential in one, which is a property this package
+// claims and has to keep.
+//
+// Names builds a fresh slice of its own and VendorNames already clones, so this
+// was the one accessor handing out a writable interior.
 func (d Document) For(harness string) Descriptor {
-	if at, found := d.index[harness]; found {
-		return d.entries[at]
+	at, found := d.index[harness]
+	if !found {
+		return Descriptor{}
 	}
-	return Descriptor{}
+	entry := d.entries[at]
+	entry.Credential.EnvNames = slices.Clone(entry.Credential.EnvNames)
+	entry.Credential.EnvKeep = slices.Clone(entry.Credential.EnvKeep)
+	return entry
 }
 
 // Names lists the harnesses in descriptor order.
+//
+// The slice is built here rather than shared, so writing to it changes nothing.
 func (d Document) Names() []string {
 	names := make([]string, 0, len(d.entries))
 	for _, entry := range d.entries {
@@ -256,5 +277,6 @@ func (d Document) Names() []string {
 	return names
 }
 
-// VendorNames is the sorted union of every harness's env_names.
+// VendorNames is the sorted union of every harness's env_names, cloned for the
+// reason For clones.
 func (d Document) VendorNames() []string { return slices.Clone(d.vendorNames) }

@@ -206,3 +206,53 @@ func TestAStagingPathMayCarryDotsThatAreNotASegment(t *testing.T) {
 		}
 	}
 }
+
+// A caller cannot write through what For returned.
+//
+// For returns a Descriptor by value, but a struct copy shares its slices'
+// backing arrays, so `doc.For("claude").Credential.EnvKeep[0] = …` edited the
+// document itself and changed every later VendorStripFor answer.
+//
+// The reach is a vendor credential, not a forge one: StripFor adds the four
+// forge names unconditionally rather than reading the descriptor, so an edit
+// here cannot leave a GitHub token in a model-facing environment. It can leave
+// the other vendor's, which is the property this package claims.
+func TestForHandsBackNoWritableInterior(t *testing.T) {
+	doc := descriptors(t)
+
+	before := slices.Clone(cred.VendorStripFor(doc, "claude"))
+	if len(before) == 0 {
+		t.Fatal("claude strips nothing, so this test would prove nothing")
+	}
+
+	keep := doc.For("claude").Credential.EnvKeep
+	if len(keep) == 0 {
+		t.Fatal("claude keeps nothing, so there is no slice to write through")
+	}
+	names := doc.For("claude").Credential.EnvNames
+	if len(names) == 0 {
+		t.Fatal("claude declares no env_names, so there is no slice to write through")
+	}
+
+	// Every entry, so a keep list of one is not passed over.
+	for at := range keep {
+		keep[at] = "OVERWRITTEN"
+	}
+	for at := range names {
+		names[at] = "OVERWRITTEN"
+	}
+
+	if after := doc.For("claude").Credential.EnvKeep; slices.Contains(after, "OVERWRITTEN") {
+		t.Errorf("writing through For's EnvKeep changed the document: %v", after)
+	}
+	if after := doc.For("claude").Credential.EnvNames; slices.Contains(after, "OVERWRITTEN") {
+		t.Errorf("writing through For's EnvNames changed the document: %v", after)
+	}
+	if after := cred.VendorStripFor(doc, "claude"); !slices.Equal(after, before) {
+		t.Errorf("VendorStripFor after the write = %v, want %v", after, before)
+	}
+	// And the union the strip list is subtracted from is unchanged too.
+	if got := doc.VendorNames(); slices.Contains(got, "OVERWRITTEN") {
+		t.Errorf("writing through For reached the vendor union: %v", got)
+	}
+}
