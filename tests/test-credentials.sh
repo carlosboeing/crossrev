@@ -363,6 +363,12 @@ is "an error array does not print raw JSON either" \
 is "a body that is not JSON at all says so rather than failing" \
    "$(_cred_refusal_reason 'not json')" \
    "no reason given"
+is "an empty body says so rather than leaving a dangling colon" \
+   "$(_cred_refusal_reason '')" \
+   "no reason given"
+is "an error that is the empty string says so too" \
+   "$(_cred_refusal_reason '{"error":""}')" \
+   "no reason given"
 
 printf '\n  %d passed, %d failed\n' "$pass" "$fail"
 (( fail == 0 ))
