@@ -157,13 +157,42 @@ func TestLabelNamesReachThePathSafely(t *testing.T) {
 		}
 	})
 
-	t.Run("a character that would change the request is escaped", func(t *testing.T) {
+	t.Run("a character that would change the request is escaped on all three paths", func(t *testing.T) {
 		// The shell sends a bare # here, which starts a URL fragment and asks
-		// for the label named C.
-		c, r := client(t, bad(), out("{}"))
-		if _, err := c.LabelEnsure(context.Background(), testSlug(t), forge.Label{Name: "C#", Colour: "1a7f37"}); err != nil {
+		// for the label named C. Two of the three paths are writes, so the
+		// read alone proves nothing: LabelEnsure builds its own path for the
+		// recolour and PullRequestLabelRemove builds a third for the removal.
+		c, r := client(t, out(`{"color":"5319e7"}`), out("{}"))
+
+		got, err := c.LabelEnsure(context.Background(), testSlug(t), forge.Label{Name: "C#", Colour: "1a7f37"})
+		if err != nil {
 			t.Fatalf("LabelEnsure: %v", err)
 		}
+		if got != forge.LabelRecoloured {
+			t.Fatalf("state = %q, want recoloured; the recolour is the write under test", got)
+		}
+		c.PullRequestLabelRemove(context.Background(), testSlug(t), 42, "C#")
+
 		r.wantArgs(t, 0, "api", "repos/acme/widget/labels/C%23")
+		r.wantArgs(t, 1, "api", "--method", "PATCH", "repos/acme/widget/labels/C%23", "-f", "color=1a7f37")
+		r.wantArgs(t, 2, "api", "--method", "DELETE", "repos/acme/widget/issues/42/labels/C%23")
 	})
+}
+
+// A colour is configuration, so the comparison lowercases both sides. Without
+// that, a repository declaring 1A7F37 recolours a label already at 1a7f37 on
+// every run.
+func TestLabelEnsureComparesTheColourCaseInsensitively(t *testing.T) {
+	c, r := client(t, out(`{"color":"1a7f37"}`))
+
+	got, err := c.LabelEnsure(context.Background(), testSlug(t), forge.Label{Name: "crossrev/converged", Colour: "1A7F37"})
+	if err != nil {
+		t.Fatalf("LabelEnsure: %v", err)
+	}
+	if got != forge.LabelExists {
+		t.Errorf("state = %q, want exists", got)
+	}
+	if len(r.specs) != 1 {
+		t.Errorf("gh was invoked %v, want the read alone", r.argvs())
+	}
 }
