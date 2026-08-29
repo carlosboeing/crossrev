@@ -112,16 +112,62 @@ func (l *Log) Publish(body string) (string, error) {
 	return filtered, nil
 }
 
+// discardNotice replaces a file that could not be redacted. The text is frozen:
+// a parity vector reads it back byte for byte (lib/log.sh:183,
+// tests/test-log.sh:101).
+const discardNotice = "redaction failed; original discarded\n"
+
+// tempFile is the temporary file RedactFile rewrites through, and the seam a
+// test fails one step of at a time. Three things can go wrong between an open
+// temporary file and a replaced original — the write, the close and the rename
+// — and each one has to end with the unredacted original gone, so each one has
+// to be reachable from a test rather than reasoned about.
+type tempFile interface {
+	Write(p []byte) (int, error)
+	Close() error
+	Rename(to string) error
+	Remove() error
+}
+
+// mkTemp opens a temporary file beside dir.
+type mkTemp func(dir string) (tempFile, error)
+
+// osTempFile is the production tempFile: what os.CreateTemp returns, plus the
+// two path operations that finish or abandon it.
+type osTempFile struct{ *os.File }
+
+func (f osTempFile) Rename(to string) error { return os.Rename(f.Name(), to) }
+
+func (f osTempFile) Remove() error { return os.Remove(f.Name()) }
+
+func createTempFile(dir string) (tempFile, error) {
+	f, err := os.CreateTemp(dir, ".crossrev-redact-*")
+	if err != nil {
+		return nil, err
+	}
+	return osTempFile{f}, nil
+}
+
+// discard replaces a file that could not be redacted with the notice, recreated
+// private, and records what happened to it (lib/log.sh:180-184).
+func (l *Log) discard(path string) {
+	_ = CreatePrivate(path)
+	_ = os.WriteFile(path, []byte(discardNotice), fileMode)
+	l.Event("redact", "failed "+path)
+}
+
 // RedactFile masks every credential shape in a file, in place.
 //
 // It reports nothing, because it runs from the paths whose own failure is the
-// thing being recorded: a filter error here must not fail an exiting run
+// thing being recorded: a failure here must not fail an exiting run
 // (lib/log.sh:174).
 //
-// Fails closed: a filter error must not leave the original on disk, so the
-// unredacted copy is replaced with a notice. The rewrite goes through a
-// neighbouring temporary file rather than an in-place edit, which is also what
-// leaves the file 0600 whatever it was before.
+// Fails closed: nothing that goes wrong may leave the original on disk, so
+// every failure after the file has been read replaces the unredacted copy with
+// a notice. The one exception is the temporary file that could not be opened,
+// which is called out where it happens. The rewrite goes through a neighbouring
+// temporary file rather than an in-place edit, which is also what leaves the
+// file 0600 whatever it was before.
 func (l *Log) RedactFile(path string) {
 	info, err := os.Stat(path)
 	if err != nil || !info.Mode().IsRegular() {
@@ -133,9 +179,7 @@ func (l *Log) RedactFile(path string) {
 	}
 	out, filterErr := l.filter()(raw)
 	if filterErr != nil {
-		_ = CreatePrivate(path)
-		_ = os.WriteFile(path, []byte("redaction failed; original discarded\n"), fileMode)
-		l.Event("redact", "failed "+path)
+		l.discard(path)
 		return
 	}
 	// The temporary file sits beside the target so the rename cannot cross a
@@ -143,21 +187,34 @@ func (l *Log) RedactFile(path string) {
 	// 0600 whatever the file's mode was before. No chmod runs anywhere in this
 	// package, which is what makes "never briefly wider" a property of the code
 	// rather than of the order two calls happen to be written in.
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".crossrev-redact-*")
+	tmp, err := l.createTemp()(filepath.Dir(path))
 	if err != nil {
+		// The one arm that leaves the file alone, and it follows the Bash:
+		// `tmp="$(mktemp)" || return 0` never reaches the discard
+		// (lib/log.sh:177). Nothing has been written or removed yet, so the
+		// file on disk is the one the caller already had.
 		return
 	}
-	name := tmp.Name()
 	if _, err := tmp.Write(out); err != nil {
 		tmp.Close()
-		os.Remove(name)
+		tmp.Remove()
+		l.discard(path)
 		return
 	}
 	if err := tmp.Close(); err != nil {
-		os.Remove(name)
+		tmp.Remove()
+		l.discard(path)
 		return
 	}
-	if err := os.Rename(name, path); err != nil {
-		os.Remove(name)
+	// The Bash diverges here and this deliberately does not follow it. `mv
+	// "$tmp" "$f"` runs inside the success branch, so a failed mv falls past
+	// the discard and returns 0, leaving the unredacted original on disk
+	// (lib/log.sh:178-179) — measured with an mv onto an impossible target, not
+	// read off the source. A rename is the arm most likely to fail on a full or
+	// read-only filesystem, and this runs on the transcript, so it discards
+	// like every other arm.
+	if err := tmp.Rename(path); err != nil {
+		tmp.Remove()
+		l.discard(path)
 	}
 }

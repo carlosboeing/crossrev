@@ -78,6 +78,128 @@ func TestRedactFileFailsClosed(t *testing.T) {
 	}
 }
 
+var errTempDied = errors.New("the temporary file died")
+
+// stubTemp wraps a real temporary file and fails exactly one of the three steps
+// between an open file and a replaced original, so each fail-closed arm is
+// reached rather than assumed.
+type stubTemp struct {
+	real        tempFile
+	failOn      string
+	removeCalls int
+}
+
+func (s *stubTemp) Write(p []byte) (int, error) {
+	if s.failOn == "write" {
+		return 0, errTempDied
+	}
+	return s.real.Write(p)
+}
+
+func (s *stubTemp) Close() error {
+	if s.failOn == "close" {
+		return errTempDied
+	}
+	return s.real.Close()
+}
+
+func (s *stubTemp) Rename(to string) error {
+	if s.failOn == "rename" {
+		return errTempDied
+	}
+	return s.real.Rename(to)
+}
+
+func (s *stubTemp) Remove() error {
+	s.removeCalls++
+	s.real.Close()
+	return s.real.Remove()
+}
+
+// TestRedactFileDiscardsWhenTheRewriteFails: the filter is not the only way
+// this path can fail. A write, a close or a rename that fails has to end where
+// a filter error ends — the unredacted original gone and the failure recorded —
+// because the file this runs on is the transcript, the one most likely to be
+// holding a credential.
+func TestRedactFileDiscardsWhenTheRewriteFails(t *testing.T) {
+	const credential = "ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+	for _, step := range []string{"write", "close", "rename"} {
+		t.Run(step, func(t *testing.T) {
+			dir := t.TempDir()
+			l, err := Open(Options{Dir: dir, Repo: "acme/widget", PR: "7"})
+			if err != nil {
+				t.Fatalf("opening the log: %v", err)
+			}
+			var stub *stubTemp
+			l.mktemp = func(d string) (tempFile, error) {
+				real, err := createTempFile(d)
+				if err != nil {
+					return nil, err
+				}
+				stub = &stubTemp{real: real, failOn: step}
+				return stub, nil
+			}
+			path := filepath.Join(dir, "review.attempt-1.stdout")
+			if err := os.WriteFile(path, []byte(credential+"\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			l.RedactFile(path)
+
+			got, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(got), credential) {
+				t.Errorf("the %s arm left the unredacted original on disk: %q", step, got)
+			}
+			if string(got) != discardNotice {
+				t.Errorf("file = %q, want the discard notice %q", got, discardNotice)
+			}
+			log, err := os.ReadFile(filepath.Join(dir, logFile))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(log), "redact failed "+path) {
+				t.Errorf("the run log does not record the %s failure:\n%s", step, log)
+			}
+			if stub == nil {
+				t.Fatal("the temporary-file seam was never called")
+			}
+			if stub.removeCalls != 1 {
+				t.Errorf("the temporary file was removed %d times, want once", stub.removeCalls)
+			}
+		})
+	}
+}
+
+// TestRedactFileKeepsTheFileWhenNoTemporaryOpens is the one arm that does not
+// discard, kept honest here rather than left to the reader. The Bash returns 0
+// from a failed mktemp without touching the file (lib/log.sh:177), and nothing
+// has been written at that point, so the file is the one the caller had.
+func TestRedactFileKeepsTheFileWhenNoTemporaryOpens(t *testing.T) {
+	dir := t.TempDir()
+	l, err := Open(Options{Dir: dir, Repo: "acme/widget", PR: "7"})
+	if err != nil {
+		t.Fatalf("opening the log: %v", err)
+	}
+	l.mktemp = func(string) (tempFile, error) { return nil, errTempDied }
+	path := filepath.Join(dir, "review.attempt-1.stdout")
+	if err := os.WriteFile(path, []byte("plain text\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	l.RedactFile(path)
+
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "plain text\n" {
+		t.Errorf("file = %q, want the original left alone", got)
+	}
+}
+
 // TestNothingInThisPackageChangesAMode is how "never briefly wider" is checked
 // rather than asserted.
 //

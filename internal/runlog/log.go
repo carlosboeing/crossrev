@@ -94,6 +94,11 @@ type Log struct {
 	// one that fails and reach the fail-closed branches; production never
 	// replaces it.
 	redact filter
+	// mktemp opens the temporary file RedactFile rewrites through. A field for
+	// the same reason redact is one: the three ways that rewrite can fail each
+	// have to discard the original, and a branch nothing can reach is a branch
+	// nobody has checked. Production never replaces it.
+	mktemp mkTemp
 }
 
 // Open creates the run directory, sweeps the expired ones and writes the
@@ -171,6 +176,15 @@ func (l *Log) filter() filter {
 		return filterBytes
 	}
 	return l.redact
+}
+
+// createTemp is the temporary-file opener RedactFile rewrites through,
+// defaulting to the package one.
+func (l *Log) createTemp() mkTemp {
+	if l == nil || l.mktemp == nil {
+		return createTempFile
+	}
+	return l.mktemp
 }
 
 // Event appends one line to the run log: timestamp, phase, detail
