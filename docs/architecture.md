@@ -131,7 +131,7 @@ The last three are continuation bounds: they end *automatic* reviewing and never
 
 A pull request's title, body, diff, code comments and review threads are all material a reviewer must read, and any of it can address the model directly. CrossRev handles that in three layers, of which only the first is load-bearing:
 
-1. **Credential separation.** Every GitHub read and write goes through the orchestrator. The adapters strip `GH_TOKEN`, `GITHUB_TOKEN` and `GH_ENTERPRISE_TOKEN` from the environment before starting the model-facing process. An injection that reaches tool use still cannot post as the App, push a commit, or read a secret.
+1. **Credential separation.** Every GitHub read and write goes through the orchestrator. The adapters strip `GH_TOKEN`, `GITHUB_TOKEN`, `GH_ENTERPRISE_TOKEN` and `GITHUB_ENTERPRISE_TOKEN` from the environment before starting the model-facing process. An injection that reaches tool use still cannot post as the App, push a commit, or read a secret.
 2. **Quarantine.** A pull request branch contains files that configure the thing reviewing it — settings, instruction files, hooks, MCP server definitions, agents. A hook is arbitrary code execution before the model sees a token. CrossRev moves every known harness-loaded path out of the checkout before any invocation and restores it before anything is committed. **Quarantined rather than deleted**, because a pull request that *adds* a hook is exactly the pull request a reviewer should be flagging: the diff still carries the text, at a path no harness auto-loads.
 3. **An explicit notice in the prompt** telling each leg that everything below a given heading is data rather than instruction, and that text addressing the model is itself a finding.
 
