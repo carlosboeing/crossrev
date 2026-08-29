@@ -68,22 +68,47 @@ const (
 // a value that is computed. So exec.Audience is now a struct whose single field
 // is unexported (internal/exec/spec.go). Every line above is a compile error
 // outside internal/exec, and the unmarshal is a no-op there because
-// encoding/json cannot reach an unexported field. Nothing is left for a value
-// scan to find, so the clauses that looked for one are gone rather than kept as
-// dead checks.
+// encoding/json cannot reach an unexported field, so the clauses that looked
+// for a written-out value are gone rather than kept as dead checks.
 //
 // What remains is the job a name check is actually good for: the value exists,
-// it is reachable by name, and this says which directories may write that name.
-//
-// A read of an already-set value is deliberately not a violation. The opt-out
-// is the write.
+// it is reachable by name, and this says which directories may name it.
 //
 // # What it does not close
 //
-// It says nothing about a Spec built inside internal/forge/ghexec and handed
-// somewhere else, and nothing about internal/exec itself. The first is bounded
-// by that package having no exported route to a Spec; the second is the
-// declaration, which has to live somewhere.
+// The type closed construction, not every route to the value, and saying
+// otherwise here would be worse than saying nothing — the next reviewer trusts
+// the comment and stops looking. Three things are open.
+//
+//   - Capture. Every Spec internal/vcs and internal/forge/ghexec build carries
+//     the opt-out and is handed to an injected Runner, so a fake Runner reads
+//     the value straight off the Spec and names nothing.
+//     TestAudienceFieldReferencesAreConfined below is the rule for that shape,
+//     and it is a name scan: reflection over the exported field walks past it.
+//   - unsafe. The value is one bool, so *(*bool)(unsafe.Pointer(&a)) = true
+//     forges it. TestProcessStartBoundary in process_test.go refuses the
+//     import outside internal/ui, and that rule reads import paths, so cgo or a
+//     linkname is not covered by it.
+//   - A Spec built inside internal/forge/ghexec and handed somewhere else, and
+//     internal/exec itself. The first is bounded by that package exporting no
+//     route to a Spec; the second is the declaration, which has to live
+//     somewhere.
+//
+// # What this rule is for, stated exactly
+//
+// Every route above needs a Go file committed to this repository, and anybody
+// who can add that file can add a directory to audienceOptOutPermitted in the
+// same commit. These rules sit at the trust level of the code they police. They
+// exist to make an accident visible in review — a Spec that picked up the
+// opt-out on the way somewhere it should not go reads as one line of diff in a
+// file the rule names — and they do not stop a committer who means it. Code
+// review stops that.
+//
+// The guard that runs is exec.Run's refusal, which reads the field directly
+// (internal/exec/osrunner.go) before it builds an environment or starts a
+// child. It cannot tell a captured opt-out from an honest one, which is exactly
+// why these rules are worth having and exactly why they must not be described
+// as a boundary.
 func TestOrchestratorAudienceIsConfinedToTwoPackages(t *testing.T) {
 	root := findRepoRoot(t)
 	pkgs := loadModulePackages(t)
@@ -210,6 +235,164 @@ func TestAudienceOptOutPermissionCoversTheThreeDirectories(t *testing.T) {
 			t.Errorf("%s must not inherit the audience opt-out", dir)
 		}
 	}
+}
+
+// audienceField is the Spec field the rule below reads.
+const audienceField = "Audience"
+
+// audienceFieldPermitted names the directories that may reference Spec.Audience
+// at all, in either direction.
+//
+// The first three are audienceOptOutPermitted's: internal/exec decides on the
+// field, internal/vcs and internal/forge/ghexec set it. internal/harness is the
+// fourth and it is a deliberate widening rather than an oversight, so the
+// reason is written down. internal/harness/adapter_test.go asserts that the
+// Spec it builds for a model-facing child was left at AudienceModelFacing,
+// which is a read this rule must not forbid — that assertion is the reason the
+// harness cannot regress. It is safe to widen for because the tier DAG
+// (dependencies_test.go) grants internal/harness edges to internal/exec,
+// internal/cred and internal/runlog and to nothing else, so it can never hold a
+// Spec that internal/vcs or internal/forge/ghexec built and therefore has no
+// opt-out to capture.
+func audienceFieldPermitted(dir string) bool {
+	return audienceOptOutPermitted(dir) || dir == "internal/harness"
+}
+
+func TestAudienceFieldPermissionCoversTheFourDirectories(t *testing.T) {
+	for _, dir := range []string{"internal/exec", "internal/forge/ghexec", "internal/vcs", "internal/harness"} {
+		if !audienceFieldPermitted(dir) {
+			t.Errorf("%s must keep the Spec.Audience reference permission", dir)
+		}
+	}
+	for _, dir := range []string{
+		"internal/cycle",
+		"internal/review",
+		"internal/resolve",
+		"internal/app",
+		"internal/sandbox",
+		"internal/harness/nested",
+		"cmd/crossrev",
+	} {
+		if audienceFieldPermitted(dir) {
+			t.Errorf("%s must not inherit the Spec.Audience reference permission", dir)
+		}
+	}
+}
+
+// Spec.Audience is referenced in four directories and nowhere else.
+//
+// # The shape this catches
+//
+// The rule above confines the NAME AudienceOrchestrator. It does not confine
+// the value once a Spec is carrying it, and every Spec internal/vcs and
+// internal/forge/ghexec build is carrying it. Both packages hand their Specs to
+// an injected exec.Runner, which is what makes them testable, and a package
+// that can supply that Runner takes the value off the Spec without writing the
+// name down:
+//
+//	func (t *thief) Run(_ context.Context, spec exec.Spec) exec.Result {
+//		t.stolen = spec.Audience
+//		return exec.Result{}
+//	}
+//
+// A tier-3 package may import internal/vcs and internal/forge/ghexec, so it may
+// supply that Runner. The stolen value then goes into a Spec of its own with a
+// forge credential in the environment and a harness on Path, and exec.Run has
+// nothing left to refuse with — the field is the whole decision.
+//
+// # It is a name scan, and reflection walks past it
+//
+// This reads type information for identifiers spelled Audience whose object is
+// the field declared on exec.Spec. Every ordinary reference is one of those,
+// including the assignment form and the read above. None of the following is,
+// and none is closed here:
+//
+//	reflect.ValueOf(spec).FieldByName("Audience")   the field by string
+//	reflect.ValueOf(spec).Field(4)                  the field by index
+//	*(*bool)(unsafe.Pointer(&a)) = true             the value forged outright
+//
+// The unsafe line is refused separately, by import path, in process_test.go.
+// The reflect lines are not refused at all. Saying this rule closes capture
+// would be false; it catches the shape a capture is actually written in, which
+// is a review aid, and internal/exec/spec.go states what that is worth.
+//
+// # Both directions, deliberately
+//
+// A write is a reference too, so `s.Audience = exec.AudienceModelFacing` in an
+// unpermitted directory fails this rule even though it sets the strict value.
+// That write is redundant — the zero value is already that — and treating the
+// field as untouchable outside the four directories is one sentence, where a
+// direction-aware rule is a second thing to get right.
+func TestAudienceFieldReferencesAreConfined(t *testing.T) {
+	root := findRepoRoot(t)
+	pkgs := loadModulePackages(t)
+
+	type violation struct {
+		where string
+		what  string
+	}
+	var found []violation
+	permittedReferences := 0
+
+	for _, pkg := range pkgs {
+		if pkg.TypesInfo == nil {
+			continue
+		}
+		for ident, obj := range pkg.TypesInfo.Uses {
+			if !namesAudienceField(obj) {
+				continue
+			}
+			position := pkg.Fset.Position(ident.Pos())
+			relPath, err := filepath.Rel(root, position.Filename)
+			if err != nil || strings.HasPrefix(relPath, "..") {
+				// A generated test main lives outside the checkout.
+				continue
+			}
+			relSlash := filepath.ToSlash(relPath)
+			if audienceFieldPermitted(filepath.ToSlash(filepath.Dir(relSlash))) {
+				permittedReferences++
+				continue
+			}
+			found = append(found, violation{
+				where: fmt.Sprintf("%s:%d", relSlash, position.Line),
+				what:  "references exec.Spec." + audienceField,
+			})
+		}
+	}
+
+	// A rule that matched nothing proves nothing: rename the field, or lose the
+	// type information, and every package passes vacuously.
+	if permittedReferences == 0 {
+		t.Fatal("the scan found no reference to exec.Spec.Audience at all, so it proves nothing")
+	}
+
+	sort.Slice(found, func(i, j int) bool { return found[i].where < found[j].where })
+	var last string
+	for _, v := range found {
+		if v.where == last {
+			continue
+		}
+		last = v.where
+		t.Errorf("%s %s outside internal/exec, internal/vcs, internal/forge/ghexec and internal/harness; a Spec built elsewhere carries the orchestrator opt-out, and copying it off the Spec never spells %s",
+			v.where, v.what, orchestratorName)
+	}
+}
+
+// namesAudienceField matches the Audience field declared on exec.Spec.
+//
+// The declaring package and the field's own type are both asserted, so a field
+// of the same name on some unrelated struct in this module is not mistaken for
+// it, and IsField distinguishes the field from the package-level variables,
+// which are Vars of the same type in the same package.
+func namesAudienceField(obj types.Object) bool {
+	variable, ok := obj.(*types.Var)
+	if !ok || !variable.IsField() || variable.Name() != audienceField {
+		return false
+	}
+	if variable.Pkg() == nil || variable.Pkg().Path() != execPackage {
+		return false
+	}
+	return variable.Type() != nil && variable.Type().String() == audienceType
 }
 
 // ghClientDir and ghClientFile are where a Spec may be built for `gh`.
