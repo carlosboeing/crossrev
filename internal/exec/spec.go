@@ -96,17 +96,69 @@ type Spec struct {
 //
 // No name, no conversion, no constant, no assignment target a scan can read.
 // Enumerating spellings is a losing game, so the type plays a different one:
-// the orchestrator state lives in an unexported field, which no package outside
-// internal/exec can set by any means the language offers. A conversion from an
-// integer, arithmetic, an increment, a typed constant and an unmarshal are all
-// compile errors or no-ops now, and the archtest keeps only the job a name
-// check is good for — refusing a package that names AudienceOrchestrator.
+// the orchestrator state lives in an unexported field.
+//
+// # What the type closes: building the value from nothing
+//
+// Outside internal/exec there is no expression that produces an Audience whose
+// field is true other than the variable declared below. A conversion from an
+// integer, arithmetic on the strict sibling, an increment of the field or of an
+// array element, a typed constant declaration, a typed variable declaration and
+// a keyed field in a Spec literal are all compile errors, because the field
+// cannot be named. The unmarshal is a no-op for the same reason: encoding/json
+// ignores an unexported field, so the value stays model-facing and Run refuses
+// the child. internal/exec/credential_test.go asserts that last one.
+//
+// # What the type does not close: capture, and unsafe
+//
+// Two routes reach the value without constructing it, both found by review.
+// They are written down here because an overstated security claim is worse than
+// no claim: the next reader trusts it and stops looking.
+//
+// The first is capture. internal/vcs and internal/forge/ghexec hand every Spec
+// they build to an injected Runner, and every one of those Specs carries
+// AudienceOrchestrator. A package that can supply the Runner copies the value
+// straight off the Spec, naming nothing:
+//
+//	func (t *thief) Run(_ context.Context, spec exec.Spec) exec.Result {
+//		t.stolen = spec.Audience
+//		return exec.Result{}
+//	}
+//
+// The second is unsafe. The value is one bool, so
+// *(*bool)(unsafe.Pointer(&a)) = true writes it from any package that may
+// import unsafe.
+//
+// internal/archtest answers the first with a rule on references to
+// Spec.Audience and the second with a rule on importing unsafe. Neither is
+// airtight and neither can be. A value that travels between packages through an
+// exported struct field can be copied by anything the field passes through, and
+// intercepting the Spec is exactly what the injected Runner is for; reflection
+// over an exported field walks past a scan that reads names.
+//
+// # What the confinement is worth, stated exactly
+//
+// Both routes need a Go file committed to this repository. Anyone who can add
+// that file can also edit internal/archtest, so those rules sit at the same
+// trust level as the thing they check. Their job is to catch an accident during
+// review — a Spec that picked up the opt-out on its way somewhere it should not
+// go — and they do not stop somebody who means it. Code review stops that.
+//
+// The guard that runs is Run's own refusal. OSRunner.Run reads
+// spec.Audience.orchestrator before it builds an environment and before it
+// starts a child, so a Spec that never obtained the opt-out is refused whatever
+// the rest of the tree looks like. What it cannot do is tell a stolen opt-out
+// from an honest one, because the field is the whole decision — which is why
+// the rules above are described as review aids rather than as a boundary.
 //
 // The zero value is still the strict one, which is the property the whole
 // design rests on: a caller that says nothing is refused a forge credential.
 type Audience struct {
-	// orchestrator is the whole value. Unexported, so the only route to a true
-	// is AudienceOrchestrator, declared below and confined by internal/archtest.
+	// orchestrator is the whole value. Unexported, so no package outside this
+	// one can write it: the only route the language offers to a true is
+	// AudienceOrchestrator, declared below and confined by internal/archtest.
+	// Copying a true off a Spec, and unsafe, are not routes the language
+	// offers — the type comment above says what that is worth.
 	//
 	// encoding/json ignores an unexported field entirely, so unmarshalling into
 	// an Audience cannot set it — which is the route that motivated the change.
