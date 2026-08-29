@@ -83,7 +83,7 @@ func (a *Agy) Spec(inv Invocation) (exec.Spec, error) {
 	if wanted(inv.Effort) {
 		args = append(args, "--effort", inv.Effort)
 	}
-	args = append(args, "--print", inv.Prompt.Text)
+	args = append(args, "--print", inv.Prompt.Argument())
 
 	return a.spec(inv, args), nil
 }
@@ -99,10 +99,7 @@ func (a *Agy) Envelope(_ Invocation, res exec.Result) Envelope {
 		// and is not one: on an EMPTY stdout jq exits 0 with no output, so the
 		// fallback never fires and the error becomes the empty string — which is
 		// precisely the case where the only diagnosis lives on stderr.
-		message, _ := answer.member("error").asString()
-		if message == "" {
-			message, _ = answer.member("response").asString()
-		}
+		message := firstAlternative(answer, "error", "response")
 		if message == "" {
 			message = HarnessError(res.Stderr)
 		}

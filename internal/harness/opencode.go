@@ -152,6 +152,14 @@ func (a *Opencode) Spec(inv Invocation) (exec.Spec, error) {
 	// the other four, false here. This keeps prompt building unaware of which
 	// harness will read what it built — the same class of per-CLI fact as
 	// Antigravity's flag order or Codex's schema path.
+	// The composition order matters, and this is the one adapter where it is
+	// not File.Argument. The Bash builds a copy — `cat "$prompt_file"` RAW,
+	// then the printf block — and only the finished copy goes through
+	// `"$(cat "$leg_prompt")"` at lib/adapters/opencode.sh:187. So the prompt
+	// file's own trailing newline survives into the middle of the composed
+	// string, and the block's closing `\n` after the fence is what gets
+	// stripped. Trimming the prompt first would lose a newline the model sees
+	// and keep one it does not.
 	prompt := inv.Prompt.Text
 	if inv.Schema.Present() {
 		if inv.Schema.Text == "" {
@@ -161,8 +169,9 @@ func (a *Opencode) Spec(inv Invocation) (exec.Spec, error) {
 				Kind:   ErrSchemaUnavailable,
 			}
 		}
-		prompt += fmt.Sprintf(schemaInstruction, inv.Schema.Text)
+		prompt += fmt.Sprintf(schemaInstruction, inv.Schema.Argument())
 	}
+	prompt = strings.TrimRight(prompt, "\n")
 
 	if err := a.writeIsolation(inv); err != nil {
 		return exec.Spec{}, err
@@ -297,6 +306,26 @@ func (a *Opencode) Envelope(_ Invocation, res exec.Result) Envelope {
 
 // SessionID is the id every event of the run carries
 // (lib/adapters/opencode.sh:264).
+//
+// `jq -Rr 'fromjson? | .sessionID // empty' | head -n 1` stops at the FIRST
+// line that produces output, and `//` produces output for the empty string
+// because only null and false are falsy in jq. So an event carrying
+// `"sessionID": ""` ends the search with nothing, and the export is skipped —
+// measured, against a file whose first event carries an empty id and whose
+// second carries a real one:
+//
+//	{"type":"text","sessionID":""}       -> (empty)
+//	{"type":"text"}                      -> ses_real, from the next line
+//	{"type":"text","sessionID":null}     -> ses_real, from the next line
+//
+// Scanning past the empty one found an id the shell does not export against.
+// The consequence is not symmetric: the export is telemetry, so the shell loses
+// a usage record and keeps the review, while a Go run that found an id the
+// shell would not have exports for a session the shell never named.
+//
+// A line that parses to something that is not an object — `5` — makes jq raise
+// a type error for that input only; jq reports it on the stderr this call
+// discards and carries on to the next line. Measured, and the same as skipping.
 func (a *Opencode) SessionID(res exec.Result) string {
 	for _, line := range strings.Split(string(res.Stdout), "\n") {
 		event, err := decodeOrdered([]byte(line))
@@ -304,9 +333,15 @@ func (a *Opencode) SessionID(res exec.Result) string {
 			// `fromjson?` skips a line that is not one JSON value.
 			continue
 		}
-		if id, ok := event.member("sessionID").asString(); ok && id != "" {
-			return id
+		id := event.member("sessionID")
+		if !id.truthy() {
+			continue
 		}
+		// Truthy, so this line ended the search whatever it holds. A
+		// non-string answers the empty string, which is the declared
+		// divergence firstAlternative records.
+		text, _ := id.asString()
+		return text
 	}
 	return ""
 }

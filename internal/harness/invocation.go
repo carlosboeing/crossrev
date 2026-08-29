@@ -41,6 +41,23 @@ type File struct {
 // `[[ -n "$schema_file" ]]` of every adapter.
 func (f File) Present() bool { return f.Path != "" }
 
+// Argument is the document as it reaches a command line, which is not the same
+// string as Text.
+//
+// Every adapter spells the read `"$(cat "$file")"` — lib/adapters/claude.sh:49
+// and :111, grok.sh:49, agy.sh:94, codex.sh:95, opencode.sh:105 and :187 — and
+// command substitution removes EVERY trailing newline. Both shipped schemas end
+// in one (measured: the last byte of each is 0x0a), so passing Text verbatim
+// sends the model a byte Bash never sent it.
+//
+// It is not cosmetic for one of the six. opencode.sh:105 interpolates the
+// schema between a ```json fence and its closing fence, so the extra newline
+// lands inside the fenced block in the prompt the model reads.
+//
+// Trailing spaces and tabs are kept, because command substitution keeps them:
+// `printf '%s' "$(printf 'a  \n')"` answers "a  ".
+func (f File) Argument() string { return strings.TrimRight(f.Text, "\n") }
+
 // Endpoint is a named Anthropic-compatible endpoint, resolved.
 //
 // The adapter is handed the resolved URL and token rather than the name alone,

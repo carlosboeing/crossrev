@@ -23,6 +23,47 @@
 // line, for a reason the operator cannot act on. Validate therefore reads the
 // same generic tree jq reads, in the same order, and Load decodes only after it
 // has passed.
+//
+// # The one divergence: where jq raises a type error
+//
+// harness_validate ends with `2>/dev/null || printf 'the descriptor is not
+// parseable JSON'`, so ANY type error inside the filter — not just a parse
+// failure — comes back as that sentence. jq raises one whenever a builtin meets
+// the wrong type, and the shipped filter has four that can:
+//
+//	$h[].name, $nd[].name        indexing a member that is not an object
+//	test(…)                      matching a name that is not a string
+//	contains(…)                  a pinned version that is not a string
+//	(.quarantine_shared // [])[] iterating something that is not an array
+//
+// Go reports the fault it found instead. Seventeen cases were measured across a
+// 71-case mutation sweep, and every one of them is one of those four:
+//
+//	harnesses: "review" | 3           bash: unparseable   go: must be arrays
+//	not_driven: "x" | 1               bash: unparseable   go: must be arrays
+//	harnesses: [1,2]                  bash: unparseable   go: name null twice
+//	not_driven: [1,2]                 bash: unparseable   go: a not_driven name
+//	harnesses: [… , "x"]              bash: unparseable   go: name null pattern
+//	credential.secret: 5 | true|false bash: unparseable   go: env name pattern
+//	credential.env_names: [5]         bash: unparseable   go: env name pattern
+//	credential.staging.env: 2         bash: unparseable   go: env name pattern
+//	credential: "x"                   bash: unparseable   go: out-of-range
+//	install: "x"                      bash: unparseable   go: out-of-range
+//	install.command: 1                bash: unparseable   go: installer
+//	install.pinned_version: 1         bash: unparseable   go: installer
+//	quarantine_shared: "x"            bash: unparseable   go: ACCEPTED
+//
+// Sixteen of the seventeen name the actual fault where the shell names none,
+// and that is a deliberate improvement rather than a slip: the shell's sentence
+// is an artefact of where jq's bindings sit, and it tells an operator with a
+// well-formed JSON file that their JSON does not parse.
+//
+// The seventeenth is not an improvement. A `quarantine_shared` that is not an
+// array is ACCEPTED here and refused there. It is left because inventing a
+// message the shell never prints is a larger divergence than this one, and
+// because Load fails immediately after: `[]string` cannot decode a string, so
+// the document is refused with encoding/json's error rather than reaching a
+// caller. Nothing gets a Document out of it either way.
 
 package harness
 
@@ -244,23 +285,27 @@ func Validate(raw []byte) string {
 	if err := json.Unmarshal(raw, &root); err != nil {
 		return ErrNotJSON.Error()
 	}
-	document, ok := root.(map[string]any)
-	if !ok {
-		// jq reaches `.version` on a non-object and errors, which the Bash
-		// function's `2>/dev/null || printf` turns into the same sentence.
+	document, isObject := root.(map[string]any)
+	if !isObject && root != nil {
+		// Indexing a null answers a null in jq rather than erroring, so a
+		// literal `null` document reaches the version check and is refused
+		// there. Measured: `echo null | jq -r .version` prints null and exits
+		// 0, where an array, a string, a number and a true each error. Only
+		// those four reach the Bash function's `2>/dev/null || printf` and come
+		// back as this sentence.
 		return ErrNotJSON.Error()
 	}
 
 	harnessList, harnessesAreArray := jsonArray(document["harnesses"])
 	notDrivenList, notDrivenIsArray := jsonArray(document["not_driven"])
 
-	// `[ $h[].name ]` runs before jq's `elif` chain, so `harnesses` set to a
-	// STRING makes jq error and report the unparseable-JSON sentence rather
-	// than check two. Go answers check two there instead: the sentence names
-	// the actual fault, and the shell's answer is an artefact of where the
-	// binding sits rather than a decision. No shipped or tested descriptor
-	// reaches it — tests/test-harnesses.sh:123 uses an object, which both
-	// implementations answer identically.
+	// `[ $h[].name ]` and `[ $nd[].name ]` run before jq's `elif` chain, so a
+	// `harnesses` OR a `not_driven` that is not an array of objects makes jq
+	// error before check two is reached. That is the head of the divergence
+	// family this file's header sets out in full; the answers below are the
+	// specific fault rather than the shell's unparseable-JSON sentence. No
+	// shipped or tested descriptor reaches it — tests/test-harnesses.sh:123
+	// uses an object, which both implementations answer identically.
 	names := memberNames(harnessList)
 	others := memberNames(notDrivenList)
 
@@ -274,10 +319,16 @@ func Validate(raw []byte) string {
 		return "the descriptor names no harnesses"
 	}
 	if duplicate, found := firstDuplicate(names); found {
-		return fmt.Sprintf("harness name %s appears more than once", duplicate)
+		// jq interpolates the duplicate bare, without tojson, so a string name
+		// prints unquoted here and the pattern message below prints quoted.
+		return fmt.Sprintf("harness name %s appears more than once", jqText(duplicate))
 	}
 	for _, name := range names {
-		if !harnessNamePattern.MatchString(name) {
+		// `select((type == "string") and test(…) | not)`: a name that is not a
+		// string fails the conjunction and is reported, with its own JSON in
+		// the message rather than an empty pair of quotes.
+		text, isText := name.(string)
+		if !isText || !harnessNamePattern.MatchString(text) {
 			return fmt.Sprintf("harness name %s is not [a-z][a-z0-9-]*", toJSON(name))
 		}
 	}
@@ -300,11 +351,21 @@ func Validate(raw []byte) string {
 		}
 	}
 	for _, entry := range harnessList {
-		// A missing billing key reads as unknown, which is what
-		// `(.credential.billing? // "unknown")` at lib/harnesses.sh:62 says.
-		billing := stringAt(entry, "credential", "billing")
-		if _, declared := valueAt(entry, "credential", "billing"); !declared {
-			billing = "unknown"
+		// `(.credential.billing? // "unknown")` at lib/harnesses.sh:62. jq's
+		// `//` steps past a null and a false as well as an absent key, so all
+		// three read as unknown and are accepted. Measured, because reading the
+		// key as merely DECLARED refused two documents the shell loads:
+		//
+		//	{"credential":{"billing":null}}  -> unknown
+		//	{"credential":{"billing":false}} -> unknown
+		//	{"credential":{"billing":""}}    -> (empty, and refused)
+		//
+		// The empty string is truthy in jq, so it is not one of the three and
+		// is refused by both. A non-string that is truthy is refused as well,
+		// which is what leaving billing empty here does.
+		billing := "unknown"
+		if value, declared := valueAt(entry, "credential", "billing"); declared && truthyJSON(value) {
+			billing, _ = value.(string)
 		}
 		if billing != "subscription" && billing != "api" && billing != "unknown" {
 			return fmt.Sprintf("harness %s carries a credential billing that is not subscription, api or unknown", entryName(entry))
@@ -552,24 +613,40 @@ func NamesHuman(names []string) string {
 func jsonArray(value any) ([]any, bool) {
 	list, ok := value.([]any)
 	if !ok {
-		// An absent key is jq's `// []`, which passes the array check.
-		return nil, value == nil
+		// `// []` reads an absent key, a null and a false alike as the empty
+		// array, so all three pass the array check.
+		return nil, !truthyJSON(value)
 	}
 	return list, true
 }
 
-// memberNames is `[ $h[].name ]`, which keeps a non-string name so that the
-// pattern check can report it.
-func memberNames(entries []any) []string {
-	names := make([]string, 0, len(entries))
+// truthyJSON is jq's own truth test, which is what every `//` alternative in
+// the validator turns on: null and false are false and everything else is true,
+// the empty string and the number zero included. An absent key reads as the
+// null jq answers for it.
+func truthyJSON(value any) bool {
+	boolean, isBool := value.(bool)
+	if isBool {
+		return boolean
+	}
+	return value != nil
+}
+
+// memberNames is `[ $h[].name ]`, keeping each name AS WRITTEN so the checks
+// above can report a null or a number as the document spells it.
+//
+// An entry that is not an object contributes a null. jq has no answer there —
+// `1 | .name` is a type error — so this is one of the cases the divergence note
+// in Validate covers.
+func memberNames(entries []any) []any {
+	names := make([]any, 0, len(entries))
 	for _, entry := range entries {
 		object, ok := entry.(map[string]any)
 		if !ok {
-			names = append(names, "")
+			names = append(names, nil)
 			continue
 		}
-		name, _ := object["name"].(string)
-		names = append(names, name)
+		names = append(names, object["name"])
 	}
 	return names
 }
@@ -585,15 +662,28 @@ func entryName(entry any) string {
 
 // firstDuplicate is jq's `dup`: `group_by(.)` sorts, so the answer is the
 // lowest-sorting repeated value rather than the first one encountered.
-func firstDuplicate(values []string) (string, bool) {
-	sorted := slices.Clone(values)
-	slices.Sort(sorted)
+//
+// Values are compared and ordered by their JSON, which is exact for the strings
+// every valid descriptor carries — `tojson` adds the same quote to every one,
+// so the order is the order of the names themselves. It is an approximation of
+// jq's cross-type ordering for a document whose names are not all strings, and
+// such a document is already inside the divergence note in Validate.
+func firstDuplicate(values []any) (any, bool) {
+	type keyed struct {
+		json  string
+		value any
+	}
+	sorted := make([]keyed, 0, len(values))
+	for _, value := range values {
+		sorted = append(sorted, keyed{json: toJSON(value), value: value})
+	}
+	slices.SortFunc(sorted, func(a, b keyed) int { return strings.Compare(a.json, b.json) })
 	for at := 1; at < len(sorted); at++ {
-		if sorted[at] == sorted[at-1] {
-			return sorted[at], true
+		if sorted[at].json == sorted[at-1].json {
+			return sorted[at].value, true
 		}
 	}
-	return "", false
+	return nil, false
 }
 
 // declaredEnvNames is the three sources lib/harnesses.sh:50-53 reads, in its
@@ -603,16 +693,20 @@ func declaredEnvNames(entry any) []string {
 	var names []string
 	if list, ok := valueAtList(entry, "credential", "env_names"); ok {
 		for _, name := range list {
-			if text, isText := name.(string); isText {
-				names = append(names, text)
+			// A non-string element is kept rather than dropped. Dropping it
+			// accepted `env_names: [5]`, which the shell refuses — a silent
+			// pass on a descriptor that names an environment variable the
+			// staging code will later interpolate.
+			if name != nil {
+				names = append(names, jqText(name))
 			}
 		}
 	}
 	if value, declared := valueAt(entry, "credential", "secret"); declared && value != nil {
-		names = append(names, fmt.Sprint(value))
+		names = append(names, jqText(value))
 	}
 	if value, declared := valueAt(entry, "credential", "staging", "env"); declared && value != nil {
-		names = append(names, fmt.Sprint(value))
+		names = append(names, jqText(value))
 	}
 	return names
 }
@@ -637,30 +731,41 @@ func everyLeg(legs []any) bool {
 
 // declaredPaths is the order lib/harnesses.sh:71-72 reads: per harness, the
 // quarantine entries then the staging path, and the shared list last.
-func declaredPaths(entries []any, shared any) []string {
-	var paths []string
+// The per-harness entries pass through `select(. != null)` and the shared list
+// does not, so a null in quarantine_shared is a violation and a null in a
+// harness's own quarantine list is skipped. That asymmetry is the shell's, and
+// it is reproduced rather than tidied.
+func declaredPaths(entries []any, shared any) []any {
+	var paths []any
 	for _, entry := range entries {
 		if list, ok := valueAtList(entry, "quarantine"); ok {
 			for _, path := range list {
-				paths = append(paths, fmt.Sprint(path))
+				if path != nil {
+					paths = append(paths, path)
+				}
 			}
 		}
 		if value, declared := valueAt(entry, "credential", "staging", "path"); declared && value != nil {
-			paths = append(paths, fmt.Sprint(value))
+			paths = append(paths, value)
 		}
 	}
 	if list, ok := shared.([]any); ok {
-		for _, path := range list {
-			paths = append(paths, fmt.Sprint(path))
-		}
+		paths = append(paths, list...)
 	}
 	return paths
 }
 
 // relativePath is the `relative` filter (lib/harnesses.sh:31-33): a non-empty
-// string that does not start at the root and carries no `..` segment.
-func relativePath(path string) bool {
-	if path == "" || strings.HasPrefix(path, "/") {
+// STRING that does not start at the root and carries no `..` segment.
+//
+// The string test is the filter's first clause and is load-bearing rather than
+// defensive. Stringifying the value first accepted `quarantine: [123]`, which
+// the shell refuses — and every one of these paths is handed to a move or a
+// remove (lib/harnesses.sh:2-8), so a value that is not a path at all must be
+// refused here rather than at the point of use.
+func relativePath(value any) bool {
+	path, isText := value.(string)
+	if !isText || path == "" || strings.HasPrefix(path, "/") {
 		return false
 	}
 	return !slices.Contains(strings.Split(path, "/"), "..")
@@ -677,7 +782,17 @@ func installerComplete(entry any) bool {
 	if !declared || pinned == nil {
 		return true
 	}
-	return strings.Contains(fmt.Sprint(command), fmt.Sprint(pinned))
+	// `$i.command | contains($i.pinned_version)` needs both to be strings; jq
+	// errors otherwise. A pinned version that is not a string is therefore not
+	// carried by any command, which refuses rather than stringifying it — the
+	// stringified form accepted `pinned_version: 1` against a command that
+	// happens to hold a 1 somewhere.
+	text, isText := pinned.(string)
+	line, lineIsText := command.(string)
+	if !isText || !lineIsText {
+		return false
+	}
+	return strings.Contains(line, text)
 }
 
 // emptyOrAbsent is jq's `(x // "") == ""`, which is true for a null, a false
@@ -732,6 +847,16 @@ func stringAt(value any, keys ...string) string {
 	}
 	text, _ := found.(string)
 	return text
+}
+
+// jqText is jq's `\(…)` interpolation, and its `-r` output: a string prints as
+// itself and every other value prints as its JSON. Measured against jq for
+// null, a number, a bool, an array and an object.
+func jqText(value any) string {
+	if text, ok := value.(string); ok {
+		return text
+	}
+	return toJSON(value)
 }
 
 // toJSON is jq's `tojson` for the values the messages interpolate.

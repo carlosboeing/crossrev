@@ -277,6 +277,13 @@ func mutations() []mutation {
 			apply: func(d map[string]any) {
 				harnessAt(d, 0)["install"].(map[string]any)["pinned_version"] = "9.9.9"
 			}},
+		{name: "a quarantine entry that is not a string", snippet: "is absolute, empty, or contains a .. segment",
+			apply: func(d map[string]any) {
+				entry := harnessAt(d, 0)
+				entry["quarantine"] = append(entry["quarantine"].([]any), float64(123))
+			}},
+		{name: "a harness name that is not a string", snippet: "is not [a-z][a-z0-9-]*",
+			apply: func(d map[string]any) { harnessAt(d, 0)["name"] = float64(5) }},
 		{name: "a legs element outside review and resolve", snippet: "drawn from review and resolve",
 			apply: func(d map[string]any) { harnessAt(d, 0)["legs"] = []any{"review", "deploy"} }},
 		{name: "an empty legs array", snippet: "drawn from review and resolve",
@@ -337,33 +344,6 @@ func TestValidatorMessagesMatchTheShell(t *testing.T) {
 		if _, err := exec.LookPath(tool); err != nil {
 			t.Skipf("%s is not on PATH, so the shell side cannot be run", tool)
 		}
-	}
-
-	// Nothing is spliced into this script: the descriptor arrives on stdin and
-	// the repository root arrives as an argument.
-	const script = `
-set -uo pipefail
-ROOT="$1"
-export ROOT
-# shellcheck source=/dev/null
-source "$ROOT/lib/ui.sh"
-# shellcheck source=/dev/null
-source "$ROOT/lib/harnesses.sh"
-harness_validate "$(cat)"
-`
-
-	shellValidate := func(t *testing.T, descriptor []byte) string {
-		t.Helper()
-		cmd := exec.Command("bash", "-c", script, "bash", repoRoot)
-		cmd.Stdin = strings.NewReader(string(descriptor))
-		out, err := cmd.Output()
-		if err != nil {
-			t.Fatalf("running harness_validate: %v", err)
-		}
-		// `jq -r` terminates its answer with a newline, and every caller reads
-		// the function through `$(…)`, which strips it (lib/harnesses.sh:101).
-		// The message is what is being compared, not jq's line ending.
-		return strings.TrimSuffix(string(out), "\n")
 	}
 
 	if got := shellValidate(t, harness.DescriptorJSON()); got != "" {

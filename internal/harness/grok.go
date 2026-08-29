@@ -66,7 +66,7 @@ func (a *Grok) Spec(inv Invocation) (exec.Spec, error) {
 				Kind:   ErrSchemaUnavailable,
 			}
 		}
-		args = append(args, "--json-schema", inv.Schema.Text)
+		args = append(args, "--json-schema", inv.Schema.Argument())
 	}
 	if wanted(inv.Model) {
 		args = append(args, "--model", inv.Model)
@@ -95,10 +95,7 @@ func (a *Grok) Envelope(_ Invocation, res exec.Result) Envelope {
 	answer, _ := decodeOrdered(res.Stdout)
 
 	if res.ExitCode != 0 {
-		message, _ := answer.member("error").asString()
-		if message == "" {
-			message, _ = answer.member("text").asString()
-		}
+		message := firstAlternative(answer, "error", "text")
 		if message == "" {
 			message = HarnessError(res.Stderr)
 		}

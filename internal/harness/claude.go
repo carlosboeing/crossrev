@@ -64,7 +64,7 @@ func (a *Claude) Spec(inv Invocation) (exec.Spec, error) {
 		if inv.Schema.Text == "" {
 			return exec.Spec{}, a.schemaTextMissing()
 		}
-		args = append(args, "--json-schema", inv.Schema.Text)
+		args = append(args, "--json-schema", inv.Schema.Argument())
 	}
 
 	// Model ids must be fully qualified. `--model sonnet-5` fails with "It may
@@ -76,7 +76,7 @@ func (a *Claude) Spec(inv Invocation) (exec.Spec, error) {
 	if wanted(inv.Effort) {
 		args = append(args, "--effort", inv.Effort)
 	}
-	args = append(args, inv.Prompt.Text)
+	args = append(args, inv.Prompt.Argument())
 
 	var additions []string
 	if inv.Endpoint.Named() {
@@ -120,7 +120,7 @@ func (a *Claude) Envelope(inv Invocation, res exec.Result) Envelope {
 		// fallback never fires and the error becomes the empty string — exactly
 		// when stderr holds the only diagnosis. Found by a reviewer in the agy
 		// adapter, which copied this line.
-		message, _ := answer.member("result").asString()
+		message := firstAlternative(answer, "result")
 		if message == "" {
 			message = HarnessError(res.Stderr)
 		}

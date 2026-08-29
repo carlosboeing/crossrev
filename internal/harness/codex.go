@@ -95,7 +95,7 @@ func (a *Codex) Spec(inv Invocation) (exec.Spec, error) {
 	if wanted(inv.Effort) {
 		args = append(args, "-c", "model_reasoning_effort="+inv.Effort)
 	}
-	args = append(args, inv.Prompt.Text)
+	args = append(args, inv.Prompt.Argument())
 
 	return a.spec(inv, args), nil
 }

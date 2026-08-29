@@ -229,6 +229,42 @@ func alternativeValue(raw json.RawMessage, found bool) (json.RawMessage, bool) {
 	return raw, true
 }
 
+// firstAlternative is `jq -r '.a // .b // empty'` over an answer's members.
+//
+// jq's `//` steps past a null and a false and NOTHING else, so a member that is
+// the empty string wins over every alternative after it. Measured:
+//
+//	{"error":"","response":"real"}    -> (empty)
+//	{"error":null,"response":"real"}  -> real
+//	{"error":false,"response":"real"} -> real
+//
+// The adapters then test the RESULT with `[[ -n "$msg" ]]`
+// (lib/adapters/agy.sh:106, grok.sh:91), so an empty `error` falls through to
+// the stderr diagnosis rather than to the next member. Reading the members as
+// "the first non-empty string" put the harness's own response text where the
+// stderr belonged, on exactly the runs where stderr holds the only diagnosis.
+//
+// # The declared divergence
+//
+// A member that is truthy but not a string answers the empty string here, where
+// `jq -r` renders it: `{"error":5}` gives `5` and an object gives its JSON
+// across several lines, because there is no `-c`. Both fall through to stderr
+// here. It is left as a divergence rather than fixed because reproducing jq's
+// multi-line rendering is more machinery than a case no harness produces is
+// worth, and because both implementations still report a failure — a different
+// sentence, never a success.
+func firstAlternative(answer node, keys ...string) string {
+	for _, key := range keys {
+		member := answer.member(key)
+		if !member.truthy() {
+			continue
+		}
+		text, _ := member.asString()
+		return text
+	}
+	return ""
+}
+
 // parseJSON is jq's `fromjson` followed by `jq -c .`: the text if it is one
 // JSON value, compacted, and nothing if it is not.
 func parseJSON(text string) (json.RawMessage, bool) {
