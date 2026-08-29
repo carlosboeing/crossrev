@@ -1118,6 +1118,11 @@ slug_cases() {
   slug_case "userinfo-at-in-the-path-before-the-real-host" "https://example.com/x@github.com/a/b"
   slug_case "double-slash-in-a-local-path" "/tmp//github.com/a/b"
   slug_case "colon-in-a-path-segment-after-a-slash" "github.com/a:b"
+  # A host that is not github.com and folds into it. BSD tr under a UTF-8 locale
+  # folds multibyte letters and U+0130 becomes ASCII i, so the comparison
+  # accepted this until it pinned LC_ALL=C. The vector freezes the refusal, and
+  # it is the one case here whose answer used to depend on the machine.
+  slug_case "host-spelled-with-a-folding-homoglyph" "$(printf 'https://G\xc4\xb0THUB.COM/o/r')"
   slug_case "gitlab" "https://gitlab.com/a/b"
   slug_case "local-path-holding-the-host" "/home/dev/github.com/a/b"
   slug_case "relative-path" "../github.com/a/b"

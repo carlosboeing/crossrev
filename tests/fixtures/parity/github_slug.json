@@ -135,6 +135,12 @@
       "rc": 1
     },
     {
+      "name": "host-spelled-with-a-folding-homoglyph",
+      "url": "https://GİTHUB.COM/o/r",
+      "slug": null,
+      "rc": 1
+    },
+    {
       "name": "gitlab",
       "url": "https://gitlab.com/a/b",
       "slug": null,
