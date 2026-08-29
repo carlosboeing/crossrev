@@ -113,6 +113,20 @@ func TestHelperProcess(t *testing.T) {
 		os.Stdout.WriteString(strings.Repeat("o", out))
 		os.Stderr.WriteString(strings.Repeat("e", errCount))
 
+	case "alternate":
+		// One line to each stream, in turn, unbuffered. os.Stdout.WriteString
+		// is a write syscall rather than a buffered print, so the order the
+		// child writes in is the order the descriptors receive — which is the
+		// only thing that makes an interleaving assertion deterministic.
+		pairs, err := strconv.Atoi(rest[0])
+		if err != nil {
+			os.Exit(2)
+		}
+		for i := 1; i <= pairs; i++ {
+			os.Stdout.WriteString(fmt.Sprintf("out %d\n", i))
+			os.Stderr.WriteString(fmt.Sprintf("err %d\n", i))
+		}
+
 	case "exit":
 		code, err := strconv.Atoi(rest[0])
 		if err != nil {
