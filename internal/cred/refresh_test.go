@@ -37,6 +37,10 @@ type vendor struct {
 	tokenLocation string
 	// discoveryLocation does the same for the well-known document.
 	discoveryLocation string
+	// reflectToken makes the token endpoint echo the refresh token it was
+	// given back in its error body. That is a real identity-provider shape and
+	// the reason a refusal redacts what it holds.
+	reflectToken bool
 
 	// requests records what the vendor was asked, so a test can assert on the
 	// grant rather than only on the answer.
@@ -80,6 +84,13 @@ func startVendor(t *testing.T, start func(http.Handler) *httptest.Server) *vendo
 			v.tokenBodySeen = string(raw)
 			v.tokenType = r.Header.Get("Content-Type")
 			v.tokenMethod = r.Method
+			if v.reflectToken {
+				var grant struct {
+					RefreshToken string `json:"refresh_token"`
+				}
+				_ = json.Unmarshal(raw, &grant)
+				v.tokenBody = `{"error_description":"the refresh token ` + grant.RefreshToken + ` is expired"}`
+			}
 			if v.tokenLocation != "" {
 				w.Header().Set("Location", v.tokenLocation)
 			}
@@ -992,5 +1003,124 @@ func TestAStatusBelowTwoHundredIsNotSuccess(t *testing.T) {
 				t.Errorf("the reason is %q, want it to carry %q", err, tc.want)
 			}
 		})
+	}
+}
+
+// storedTokens reads the two secrets out of a credential storedFor built, so a
+// test asserts against the real values rather than against a copy that could
+// drift from the fixture.
+func storedTokens(t *testing.T, credential []byte) (access, refresh string) {
+	t.Helper()
+	var stored struct {
+		Tokens struct {
+			AccessToken  string `json:"access_token"`
+			RefreshToken string `json:"refresh_token"`
+		} `json:"tokens"`
+	}
+	if err := json.Unmarshal(credential, &stored); err != nil {
+		t.Fatalf("reading the fixture's tokens: %v", err)
+	}
+	if stored.Tokens.AccessToken == "" || stored.Tokens.RefreshToken == "" {
+		t.Fatal("the fixture carries no tokens, so this test would prove nothing")
+	}
+	return stored.Tokens.AccessToken, stored.Tokens.RefreshToken
+}
+
+// A vendor that echoes the submitted refresh token does not get it printed.
+//
+// The refusal reaches the refresher's run log and CI output, so vendor text
+// arriving with a token in it would write that token somewhere permanent. This
+// is a declared divergence from lib/credentials.sh, which prints the reason
+// unredacted (lib/credentials.sh:265-268, :305).
+func TestARejectionDoesNotPrintTheSubmittedRefreshToken(t *testing.T) {
+	v := newVendor(t)
+	v.tokenStatus = 400
+	v.reflectToken = true
+
+	stored := storedFor(t, v)
+	_, refreshToken := storedTokens(t, stored)
+
+	_, err := cred.Refresh(context.Background(), codex(t), stored, refreshOptions())
+	if err == nil {
+		t.Fatal("a rejected refresh produced a credential")
+	}
+	if !strings.Contains(v.tokenBody, refreshToken) {
+		t.Fatalf("the vendor did not echo the token, so this test proves nothing: %q", v.tokenBody)
+	}
+	if strings.Contains(err.Error(), refreshToken) {
+		t.Errorf("the refusal printed the refresh token: %q", err.Error())
+	}
+	if !strings.Contains(err.Error(), "[redacted]") {
+		t.Errorf("the refusal does not say something was removed: %q", err.Error())
+	}
+	// The rest of the vendor's sentence survives, so the operator still learns
+	// what happened.
+	if !strings.Contains(err.Error(), "is expired") {
+		t.Errorf("redaction removed the reason as well as the token: %q", err.Error())
+	}
+}
+
+// The access token the refresh is replacing is redacted on the same terms. The
+// vendor is not sent it, but a provider that looks the session up can name it.
+func TestARejectionDoesNotPrintTheStoredAccessToken(t *testing.T) {
+	v := newVendor(t)
+	v.tokenStatus = 400
+
+	stored := storedFor(t, v)
+	accessToken, _ := storedTokens(t, stored)
+	v.tokenBody = `{"error_description":"the session for ` + accessToken + ` is gone"}`
+
+	_, err := cred.Refresh(context.Background(), codex(t), stored, refreshOptions())
+	if err == nil {
+		t.Fatal("a rejected refresh produced a credential")
+	}
+	if strings.Contains(err.Error(), accessToken) {
+		t.Errorf("the refusal printed the access token: %q", err.Error())
+	}
+	if !strings.Contains(err.Error(), "[redacted]") {
+		t.Errorf("the refusal does not say something was removed: %q", err.Error())
+	}
+}
+
+// Vendor text is bounded for a status line and stripped of anything a terminal
+// would act on rather than show.
+//
+// A megabyte is the cap on the response BODY. A one-line refusal that lands in
+// a run log needs its own, and a newline or an escape sequence in one is the
+// problem internal/forge/ghexec's excerpt exists for.
+func TestARejectionBoundsAndCleansTheVendorsText(t *testing.T) {
+	v := newVendor(t)
+	v.tokenStatus = 400
+	// A description carrying a newline, a carriage return, a tab and an ANSI
+	// escape, then far more text than a status line should hold.
+	v.tokenBody = "{\"error_description\":\"first\\nsecond\\r\\tthird\\u001b[31mred" +
+		strings.Repeat("x", 4000) + "\"}"
+
+	_, err := cred.Refresh(context.Background(), codex(t), storedFor(t, v), refreshOptions())
+	if err == nil {
+		t.Fatal("a rejected refresh produced a credential")
+	}
+	message := err.Error()
+
+	for name, forbidden := range map[string]string{
+		"a newline":         "\n",
+		"a carriage return": "\r",
+		"a tab":             "\t",
+		"an escape":         "\x1b",
+	} {
+		if strings.Contains(message, forbidden) {
+			t.Errorf("the refusal carries %s: %q", name, message)
+		}
+	}
+	if !strings.Contains(message, "first") {
+		t.Errorf("cleaning removed the reason as well: %q", message)
+	}
+	if !strings.Contains(message, "…") {
+		t.Errorf("the refusal does not mark the text as cut: %q", message)
+	}
+	// 200 characters of vendor text, plus the ellipsis, plus CrossRev's own
+	// sentences around it. A whole 4000-character run would be many times this.
+	if runes := []rune(message); len(runes) > 600 {
+		t.Errorf("the refusal is %d characters long: %q", len(runes), message)
 	}
 }

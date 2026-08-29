@@ -36,6 +36,7 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // HTTPClient is the one thing Refresh needs from net/http.
@@ -158,7 +159,13 @@ func Refresh(ctx context.Context, d Descriptor, credential []byte, o RefreshOpti
 		return nil, err
 	}
 
-	response, err := exchange(ctx, endpoint, claims.ClientID, refreshToken, o)
+	// The two secrets this exchange holds, so neither can come back out inside
+	// the vendor's own error text. AccessToken was already read by TokenClaims
+	// above and cannot fail differently here, so its error is the one already
+	// answered; an unreadable one leaves nothing to redact.
+	accessToken, _ := AccessToken(d, credential)
+
+	response, err := exchange(ctx, endpoint, claims.ClientID, refreshToken, []string{refreshToken, accessToken}, o)
 	if err != nil {
 		return nil, err
 	}
@@ -302,7 +309,11 @@ func readCapped(body io.Reader) (raw []byte, oversize bool, err error) {
 }
 
 // exchange posts the refresh grant and returns the vendor's answer.
-func exchange(ctx context.Context, endpoint, clientID, refreshToken string, o RefreshOptions) (*object, error) {
+//
+// secrets are the values that must not appear in a refusal built from the
+// vendor's own text: the refresh token this request submits, and the access
+// token it is replacing.
+func exchange(ctx context.Context, endpoint, clientID, refreshToken string, secrets []string, o RefreshOptions) (*object, error) {
 	body, err := json.Marshal(map[string]string{
 		"grant_type":    "refresh_token",
 		"client_id":     clientID,
@@ -354,7 +365,7 @@ func exchange(ctx context.Context, endpoint, clientID, refreshToken string, o Re
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		return nil, &Refusal{
 			Kind:   ErrRefresh,
-			Reason: fmt.Sprintf("the vendor rejected the refresh (HTTP %d): %s", resp.StatusCode, rejectionReason(raw)),
+			Reason: fmt.Sprintf("the vendor rejected the refresh (HTTP %d): %s", resp.StatusCode, vendorReason(raw, secrets)),
 			Action: "The stored secret is untouched, so the chain still holds until it expires. Re-seed it by hand if this keeps failing.",
 		}
 	}
@@ -375,6 +386,73 @@ func exchange(ctx context.Context, endpoint, clientID, refreshToken string, o Re
 			Action: "The stored secret is untouched. Re-seed it by hand if this repeats."}
 	}
 	return answer, nil
+}
+
+// vendorReasonChars bounds how much vendor text may reach a refusal.
+//
+// maxResponseBytes caps the response BODY, and a megabyte is the right size for
+// a body and the wrong one for a one-line status message that lands in a run
+// log and in CI output. Two hundred characters holds every OAuth
+// error_description a vendor actually writes — "the refresh token expired",
+// "the client is not known" — and cuts a page of HTML that arrived with a JSON
+// content type.
+const vendorReasonChars = 200
+
+// redactedSecret is what replaces a token the vendor echoed back.
+const redactedSecret = "[redacted]"
+
+// vendorReason is rejectionReason made safe to print.
+//
+// # A declared divergence from lib/credentials.sh, in the fail-closed direction
+//
+// The shell prints `_cred_refusal_reason "$body"` straight into ui_die
+// (lib/credentials.sh:265-268, :305) — unredacted, unbounded and unfiltered.
+// Three things are wrong with that, and this fixes all three. The earlier
+// security review left the first as a known residual.
+//
+//  1. An identity provider that echoes the submitted token in its error body
+//     — "the refresh token abc123… is expired" is a real shape — writes that
+//     token into the refresher's log and into CI output. The refresh token and
+//     the access token it is replacing are the two CrossRev holds at this
+//     point, so both are replaced wherever they appear.
+//  2. The text is bounded for its use rather than for its transport.
+//  3. A newline, a carriage return or an escape sequence in a status line is
+//     the same class of problem internal/forge/ghexec's excerpt exists for: a
+//     terminal acts on an escape rather than showing it, and this text is the
+//     vendor's rather than anything CrossRev wrote. unicode.IsGraphic is the
+//     whole test there and it is the whole test here, for the same reason — it
+//     keeps the ordinary space and refuses a tab, a newline and an escape.
+//
+// The order is redact, then normalise, then cut. Redacting first is what stops
+// a token that straddles the cut from leaving its prefix behind.
+//
+// What it cannot catch is a token the vendor re-encoded before echoing it —
+// percent-encoded, case-folded, or split across a line. The bound and the
+// filter still apply to those; the redaction does not.
+func vendorReason(raw []byte, secrets []string) string {
+	reason := rejectionReason(raw)
+
+	for _, secret := range secrets {
+		// An empty secret would match between every character.
+		if secret == "" {
+			continue
+		}
+		reason = strings.ReplaceAll(reason, secret, redactedSecret)
+	}
+
+	cleaned := strings.Map(func(r rune) rune {
+		if unicode.IsGraphic(r) {
+			return r
+		}
+		return '�'
+	}, reason)
+
+	// By character rather than by byte, so a multi-byte rune is not halved.
+	runes := []rune(cleaned)
+	if len(runes) <= vendorReasonChars {
+		return cleaned
+	}
+	return string(runes[:vendorReasonChars]) + "…"
 }
 
 // rejectionReason is what the vendor said, or "no reason given".
