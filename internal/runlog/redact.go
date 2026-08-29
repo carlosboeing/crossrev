@@ -162,12 +162,12 @@ func (l *Log) discard(path string) {
 // thing being recorded: a failure here must not fail an exiting run
 // (lib/log.sh:174).
 //
-// Fails closed: nothing that goes wrong may leave the original on disk, so
-// every failure after the file has been read replaces the unredacted copy with
-// a notice. The one exception is the temporary file that could not be opened,
-// which is called out where it happens. The rewrite goes through a neighbouring
-// temporary file rather than an in-place edit, which is also what leaves the
-// file 0600 whatever it was before.
+// Fails closed, under one rule: any failure to replace the file with its
+// redacted form discards the file. Two of the four arms this rule covers
+// diverge from the Bash, which keeps the original on both; each is declared
+// where it happens. The rewrite goes through a neighbouring temporary file
+// rather than an in-place edit, which is also what leaves the file 0600
+// whatever it was before.
 func (l *Log) RedactFile(path string) {
 	info, err := os.Stat(path)
 	if err != nil || !info.Mode().IsRegular() {
@@ -189,10 +189,15 @@ func (l *Log) RedactFile(path string) {
 	// rather than of the order two calls happen to be written in.
 	tmp, err := l.createTemp()(filepath.Dir(path))
 	if err != nil {
-		// The one arm that leaves the file alone, and it follows the Bash:
-		// `tmp="$(mktemp)" || return 0` never reaches the discard
-		// (lib/log.sh:177). Nothing has been written or removed yet, so the
-		// file on disk is the one the caller already had.
+		// A deliberate divergence from the Bash, which returns 0 here without
+		// touching the file: `tmp="$(mktemp)" || return 0` (lib/log.sh:177).
+		// By this point the file has been read and the filter has succeeded, so
+		// the redacted bytes are already in memory and the only thing missing
+		// is somewhere private to put them. A filesystem that cannot open a
+		// temporary file is the state where the transcript is worth least and
+		// the credential in it is worth no less. Losing a transcript costs a
+		// reader some context; keeping an unredacted one costs a credential.
+		l.discard(path)
 		return
 	}
 	if _, err := tmp.Write(out); err != nil {

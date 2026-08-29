@@ -173,30 +173,49 @@ func TestRedactFileDiscardsWhenTheRewriteFails(t *testing.T) {
 	}
 }
 
-// TestRedactFileKeepsTheFileWhenNoTemporaryOpens is the one arm that does not
-// discard, kept honest here rather than left to the reader. The Bash returns 0
-// from a failed mktemp without touching the file (lib/log.sh:177), and nothing
-// has been written at that point, so the file is the one the caller had.
-func TestRedactFileKeepsTheFileWhenNoTemporaryOpens(t *testing.T) {
+// TestRedactFileDiscardsWhenNoTemporaryOpens is the fourth arm, and the second
+// deliberate divergence from the Bash: `tmp="$(mktemp)" || return 0` keeps the
+// file (lib/log.sh:177) and this discards it. By the time the temporary file is
+// opened the filter has already succeeded, so what is lost is a transcript and
+// what would be kept is a credential.
+func TestRedactFileDiscardsWhenNoTemporaryOpens(t *testing.T) {
+	const credential = "ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 	dir := t.TempDir()
 	l, err := Open(Options{Dir: dir, Repo: "acme/widget", PR: "7"})
 	if err != nil {
 		t.Fatalf("opening the log: %v", err)
 	}
-	l.mktemp = func(string) (tempFile, error) { return nil, errTempDied }
+	called := 0
+	l.mktemp = func(string) (tempFile, error) {
+		called++
+		return nil, errTempDied
+	}
 	path := filepath.Join(dir, "review.attempt-1.stdout")
-	if err := os.WriteFile(path, []byte("plain text\n"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(credential+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
 	l.RedactFile(path)
 
+	if called != 1 {
+		t.Fatalf("the temporary-file seam was called %d times, want once", called)
+	}
 	got, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(got) != "plain text\n" {
-		t.Errorf("file = %q, want the original left alone", got)
+	if strings.Contains(string(got), credential) {
+		t.Errorf("no temporary file opened and the unredacted original survived: %q", got)
+	}
+	if string(got) != discardNotice {
+		t.Errorf("file = %q, want the discard notice %q", got, discardNotice)
+	}
+	log, err := os.ReadFile(filepath.Join(dir, logFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(log), "redact failed "+path) {
+		t.Errorf("the run log does not record the failure:\n%s", log)
 	}
 }
 

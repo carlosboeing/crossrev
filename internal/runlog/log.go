@@ -95,9 +95,9 @@ type Log struct {
 	// replaces it.
 	redact filter
 	// mktemp opens the temporary file RedactFile rewrites through. A field for
-	// the same reason redact is one: the three ways that rewrite can fail each
-	// have to discard the original, and a branch nothing can reach is a branch
-	// nobody has checked. Production never replaces it.
+	// the same reason redact is one: every way that rewrite can fail has to
+	// discard the original, and a branch nothing can reach is a branch nobody
+	// has checked. Production never replaces it.
 	mktemp mkTemp
 }
 
