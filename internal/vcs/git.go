@@ -28,6 +28,16 @@ type Git struct {
 	// would be a policy nobody wrote down — one that drops SSH_AUTH_SOCK on the
 	// day a push needs it, silently. The orchestrator builds the value with
 	// exec.Inherit and owns the names in it.
+	//
+	// Two names for whoever writes that list, because they are not the ones the
+	// gh client passes. GIT_SSL_CAINFO and GIT_SSL_CAPATH are git's own trust
+	// store, documented in git-config(1) as the overrides for http.sslCAInfo
+	// and http.sslCAPath. The SSL_CERT_FILE and SSL_CERT_DIR pair beside them
+	// in internal/forge/ghexec is Go's crypto/x509 contract, and git is a C
+	// program reaching TLS through libcurl, so whether those two reach it at
+	// all is a property of the backend it was built against rather than
+	// something git documents. Behind a TLS-inspecting proxy the git names are
+	// the ones that answer.
 	Env []string
 
 	// Runner starts the child.
