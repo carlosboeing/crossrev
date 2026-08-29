@@ -30,13 +30,18 @@ func TestGraphQLDocumentsMatchTheShell(t *testing.T) {
 }
 
 func TestReviewThreadsArgv(t *testing.T) {
+	// The two flags are set the opposite way round on the two threads, because
+	// they drive different decisions and a fixture that sets both the same way
+	// cannot tell them apart. An open thread on a line that has since changed
+	// is outdated and unresolved; a resolved thread on a line still in the
+	// diff is the reverse.
 	body := `{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[
-	  {"id":"THREAD1","isResolved":false,"isOutdated":false,"path":"app.ts","line":40,
+	  {"id":"THREAD1","isResolved":false,"isOutdated":true,"path":"app.ts","line":40,
 	   "comments":{"nodes":[
 	     {"databaseId":5000,"author":{"login":"carlosboeing"},
 	      "body":"finding <!-- crossrev:f {\"id\":\"aaaa000000000001\",\"pass\":1,\"leg\":\"review\"} -->"},
 	     {"databaseId":5001,"author":{"login":"someone"},"body":"agreed"}]}},
-	  {"id":"THREAD2","isResolved":true,"isOutdated":true,"path":"lib.ts","line":null,
+	  {"id":"THREAD2","isResolved":true,"isOutdated":false,"path":"lib.ts","line":null,
 	   "comments":{"nodes":[]}}]}}}}}`
 
 	c, r := client(t, out(body))
@@ -52,6 +57,9 @@ func TestReviewThreadsArgv(t *testing.T) {
 	if first.ID != "THREAD1" || first.Path != "app.ts" || first.Line != 40 {
 		t.Errorf("thread = %+v", first)
 	}
+	if first.IsResolved || !first.IsOutdated {
+		t.Errorf("thread = %+v, want open and outdated", first)
+	}
 	if first.RootCommentID != 5000 {
 		t.Errorf("root comment = %d, want the first comment in the thread", first.RootCommentID)
 	}
@@ -63,8 +71,8 @@ func TestReviewThreadsArgv(t *testing.T) {
 	}
 
 	second := got[1]
-	if !second.IsResolved || !second.IsOutdated {
-		t.Errorf("thread = %+v, want resolved and outdated", second)
+	if !second.IsResolved || second.IsOutdated {
+		t.Errorf("thread = %+v, want resolved and current", second)
 	}
 	if second.Line != 0 || second.RootCommentID != 0 {
 		t.Errorf("a null line and an empty thread should read as zero: %+v", second)
@@ -120,6 +128,32 @@ func TestReviewThreadsDropsAMarkerWithNoUsableID(t *testing.T) {
 	}
 	if len(got[0].FindingIDs) != 1 || got[0].FindingIDs[0].String() != "aaaa000000000003" {
 		t.Errorf("finding ids = %v, want the minted one alone", got[0].FindingIDs)
+	}
+}
+
+// Two markers in one comment are two ids.
+//
+// The payload class is `[^}]*` rather than `.*` on purpose, and this is the
+// body that says why: a greedy match runs from the first opening brace to the
+// last closing one, reads the pair plus the text between them as a single
+// payload, and loses both ids to one JSON failure.
+func TestReviewThreadsReadsTwoMarkersInOneComment(t *testing.T) {
+	body := `{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[
+	  {"id":"T1","isResolved":false,"isOutdated":false,"path":"a.ts","line":1,
+	   "comments":{"nodes":[{"databaseId":1,"author":{"login":"a"},
+	     "body":"first <!-- crossrev:f {\"id\":\"aaaa000000000001\"} --> and second <!-- crossrev:f {\"id\":\"aaaa000000000002\"} -->"}]}}]}}}}}`
+
+	c, _ := client(t, out(body))
+	got := c.ReviewThreads(context.Background(), testSlug(t), 42)
+	if len(got) != 1 {
+		t.Fatalf("threads = %+v", got)
+	}
+	ids := got[0].FindingIDs
+	if len(ids) != 2 {
+		t.Fatalf("finding ids = %v, want both", ids)
+	}
+	if ids[0].String() != "aaaa000000000001" || ids[1].String() != "aaaa000000000002" {
+		t.Errorf("finding ids = %v, want them in the order they appear", ids)
 	}
 }
 

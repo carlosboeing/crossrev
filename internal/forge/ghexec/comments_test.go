@@ -11,15 +11,20 @@ import (
 	"github.com/carlosboeing/crossrev/internal/forge/ghexec"
 )
 
+// The id is past 2^31, which GitHub's comment ids already are. Read into 32
+// bits it does not fit, and CommentCreate refuses a comment it had just
+// posted — the marker lost on a write that landed.
+const liveCommentID = 2946375510
+
 func TestCommentCreateArgv(t *testing.T) {
-	c, r := client(t, out("9001\n"))
+	c, r := client(t, out("2946375510\n"))
 
 	id, err := c.CommentCreate(context.Background(), testSlug(t), 42, "Summary.")
 	if err != nil {
 		t.Fatalf("CommentCreate: %v", err)
 	}
-	if id != 9001 {
-		t.Errorf("id = %d, want 9001", id)
+	if id != liveCommentID {
+		t.Errorf("id = %d, want %d", id, liveCommentID)
 	}
 	r.wantArgs(t, 0, "api", "--method", "POST", "repos/acme/widget/issues/42/comments",
 		"-f", "body=Summary.", "--jq", ".id")
@@ -121,6 +126,32 @@ func TestReviewCommentCreateArgv(t *testing.T) {
 		"-f", "path=app.ts",
 		"-F", "line=40",
 		"-f", "side=RIGHT")
+}
+
+// A finding on a deleted line is a LEFT comment, and every other fixture here
+// is on the right. The side travels twice — into the request and into the
+// fallback body's location — so a constant in either place mis-anchors exactly
+// the comment the fallback exists for.
+func TestReviewCommentCreateSendsTheSideItWasGiven(t *testing.T) {
+	comment := reviewComment(t, "Finding.")
+	comment.Side = core.SideLeft
+
+	c, r := client(t, bad(), out("9001\n"))
+	got, err := c.ReviewCommentCreate(context.Background(), comment)
+	if err != nil {
+		t.Fatalf("ReviewCommentCreate: %v", err)
+	}
+	if got != forge.PlacementFallback {
+		t.Fatalf("placement = %q, want fallback", got)
+	}
+	r.wantArgs(t, 0, "api", "--method", "POST", "repos/acme/widget/pulls/42/comments",
+		"-f", "body=Finding.",
+		"-f", "commit_id=1111111111111111111111111111111111111111",
+		"-f", "path=app.ts",
+		"-F", "line=40",
+		"-f", "side=LEFT")
+	r.wantArgs(t, 1, "api", "--method", "POST", "repos/acme/widget/issues/42/comments",
+		"-f", "body=**app.ts:40** (LEFT)\n\nFinding.", "--jq", ".id")
 }
 
 // GitHub refusing the anchor must not lose the finding: it goes up as a

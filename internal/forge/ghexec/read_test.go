@@ -107,6 +107,75 @@ func TestPullRequestReportsARefusal(t *testing.T) {
 	}
 }
 
+// An answer this cannot decode is refused rather than carried.
+//
+// A dropped unmarshal error hands the caller a zero PullRequest that reports
+// no error, and Number 0 then reaches anchoring and every write built from it.
+// The same is true of each revision: a SHA gh reported that is not one is not
+// a zero revision, and a message naming which of the two is wrong is the
+// difference between a five-minute diagnosis and an hour of one.
+func TestPullRequestRefusesAnAnswerItCannotRead(t *testing.T) {
+	const head = "1111111111111111111111111111111111111111"
+	const base = "2222222222222222222222222222222222222222"
+
+	cases := []struct {
+		name    string
+		body    string
+		mention string
+	}{
+		{
+			name: "output that is not JSON",
+			body: "gateway timeout",
+		},
+		{
+			name:    "a head oid that is not a revision",
+			body:    `{"number":42,"headRefOid":"not-a-sha","baseRefOid":"` + base + `"}`,
+			mention: "head",
+		},
+		{
+			name:    "a base oid that is not a revision",
+			body:    `{"number":42,"headRefOid":"` + head + `","baseRefOid":"not-a-sha"}`,
+			mention: "base",
+		},
+	}
+
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			c, _ := client(t, out(tt.body))
+			pr, err := c.PullRequest(context.Background(), testSlug(t), 42)
+			if err == nil {
+				t.Fatalf("an unreadable answer was accepted as %+v", pr)
+			}
+			if pr.Number != 0 {
+				t.Errorf("pull request = %+v, want nothing carried out of a refusal", pr)
+			}
+			if tt.mention != "" && !strings.Contains(err.Error(), tt.mention) {
+				t.Errorf("error = %v, want it to name which revision", err)
+			}
+		})
+	}
+}
+
+// A closed pull request whose head branch has been deleted reports an empty
+// oid, and that is an absent revision rather than a malformed one. Refusing it
+// would make every such pull request unreadable.
+func TestPullRequestReadsAPullRequestWhoseHeadBranchIsGone(t *testing.T) {
+	body := `{"number":42,"state":"CLOSED","headRefName":"feature","headRefOid":"",
+	  "baseRefName":"main","baseRefOid":""}`
+
+	c, _ := client(t, out(body))
+	pr, err := c.PullRequest(context.Background(), testSlug(t), 42)
+	if err != nil {
+		t.Fatalf("PullRequest: %v", err)
+	}
+	if pr.Number != 42 || pr.State != "CLOSED" {
+		t.Errorf("pull request = %+v", pr)
+	}
+	if pr.HeadRefOid.SHA() != "" || pr.BaseRefOid.SHA() != "" {
+		t.Errorf("revisions = %q/%q, want the zero revision", pr.HeadRefOid.SHA(), pr.BaseRefOid.SHA())
+	}
+}
+
 func TestPullRequestDiffArgv(t *testing.T) {
 	base, err := core.NewRevision("2222222222222222222222222222222222222222")
 	if err != nil {

@@ -35,15 +35,35 @@ func TestIssueByFindingArgv(t *testing.T) {
 }
 
 // A pull request is an issue in this API, and filing against one would be
-// nonsense.
+// nonsense. An issue that is not one carries the key as an explicit null,
+// which is a shape of its own: read as presence it would hide every issue
+// GitHub answers that way, and the dedupe would file each one again.
 func TestIssueByFindingSkipsPullRequests(t *testing.T) {
-	body := `[{"number":31,"pull_request":{"url":"x"},"body":"<!-- crossrev:f {\"id\":\"aaaa000000000001\"} -->"},
-	          {"number":32,"body":"<!-- crossrev:f {\"id\":\"aaaa000000000001\"} -->"}]`
-
-	c, _ := client(t, out(body))
-	got, ok := c.IssueByFinding(context.Background(), testSlug(t), "crossrev-review", findingID(t, "aaaa000000000001"))
-	if !ok || got != 32 {
-		t.Errorf("issue = %d, %v, want 32", got, ok)
+	for _, tt := range []struct {
+		name string
+		body string
+		want int
+	}{
+		{
+			name: "an issue with the key absent",
+			body: `[{"number":31,"pull_request":{"url":"x"},"body":"<!-- crossrev:f {\"id\":\"aaaa000000000001\"} -->"},
+			        {"number":32,"body":"<!-- crossrev:f {\"id\":\"aaaa000000000001\"} -->"}]`,
+			want: 32,
+		},
+		{
+			name: "an issue with the key an explicit null",
+			body: `[{"number":31,"pull_request":{"url":"x"},"body":"<!-- crossrev:f {\"id\":\"aaaa000000000001\"} -->"},
+			        {"number":33,"pull_request":null,"body":"<!-- crossrev:f {\"id\":\"aaaa000000000001\"} -->"}]`,
+			want: 33,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			c, _ := client(t, out(tt.body))
+			got, ok := c.IssueByFinding(context.Background(), testSlug(t), "crossrev-review", findingID(t, "aaaa000000000001"))
+			if !ok || got != tt.want {
+				t.Errorf("issue = %d, %v, want %d", got, ok, tt.want)
+			}
+		})
 	}
 }
 
@@ -137,6 +157,36 @@ func TestIssueCreateMasksTheTitleAndFiltersTheBody(t *testing.T) {
 	}
 	r.wantArgs(t, 0, "api", "--method", "POST", "repos/acme/widget/issues",
 		"-f", "title=masked-title", "-f", "body=masked", "--jq", ".number")
+}
+
+// A filed issue is one of the four writes that degrade rather than refuse when
+// the filter could not process a marker body. It still files, and the warning
+// is the only route that fact has out: IssueCreate answers with a number, and
+// a number says nothing about what the body lost.
+func TestIssueCreateWarnsWhenTheBodyLostItsMarker(t *testing.T) {
+	var warned []string
+	r := &recorder{results: []exec.Result{out("31\n")}}
+	c := ghexec.New(r, withheld{}, ghexec.WithWarn(func(summary, _ string) {
+		warned = append(warned, summary)
+	}))
+	body := "Deferred.\n\n<!-- crossrev:f {\"id\":\"aaaa000000000001\"} -->"
+
+	got, err := c.IssueCreate(context.Background(), testSlug(t), "Timing leak", body, nil)
+	if err != nil {
+		t.Fatalf("IssueCreate: %v", err)
+	}
+	if got != 31 {
+		t.Errorf("issue = %d, want it filed anyway", got)
+	}
+	if len(warned) != 1 {
+		t.Fatalf("warnings = %v, want one", warned)
+	}
+	if !strings.Contains(warned[0], "could not filter a comment body") {
+		t.Errorf("warning = %q", warned[0])
+	}
+	if argv := strings.Join(r.specs[0].Args, " "); !strings.Contains(argv, wantNotice) {
+		t.Errorf("argv = %q, want the notice in place of the body", argv)
+	}
 }
 
 // Not fatal to the leg and deliberately loud: the caller must leave the thread
