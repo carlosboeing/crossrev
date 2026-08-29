@@ -43,7 +43,7 @@ func TestRetentionDays(t *testing.T) {
 // unrepresentable are windows that pass the Bash regex and are too large for an
 // int. Measured against lib/log.sh on this platform: each one leaves a
 // forty-year-old run directory in place, because BSD find accepts the argument
-// and matches nothing while GNU find refuses it and lib/log.sh:205 swallows the
+// and matches nothing while GNU find refuses it and lib/log.sh:201 swallows the
 // refusal. Neither deletes anything.
 var unrepresentable = []string{
 	"9223372036854775808",

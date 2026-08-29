@@ -31,7 +31,8 @@ const (
 	blue   = "\033[34m"
 )
 
-// TestColouredOutput pins the exact bytes of every helper in lib/ui.sh:19-99.
+// TestColouredOutput pins the exact bytes of every output helper in
+// lib/ui.sh:28-119, ui_section through ui_die.
 // The box-drawing characters, the two-space gaps and the leading and trailing
 // newlines are all load-bearing: they are what makes a block read as a block.
 func TestColouredOutput(t *testing.T) {

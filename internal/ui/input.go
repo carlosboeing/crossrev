@@ -23,13 +23,13 @@ var ErrNoAnswer = errors.New("the answer ended before it was given")
 //
 // Open is called once per question rather than once per session, which is what
 // `read -r reply <"$src"` does: the redirection opens the source for that read
-// alone (lib/ui.sh:155 and :162).
+// alone (lib/ui.sh:152 and :161).
 type Input interface {
 	Open() (io.ReadCloser, error)
 }
 
 // Terminal resolves an answer source the way _ui_input_source does
-// (lib/ui.sh:129-146).
+// (lib/ui.sh:129-134).
 //
 // The controlling terminal first, so prompting still works with the tool on the
 // right-hand side of a pipe — `curl … | sh` is a supported install path and its
@@ -75,7 +75,7 @@ func (o *IO) open() (io.ReadCloser, error) {
 }
 
 // noInput is the refusal when there is nowhere to read an answer from
-// (_ui_no_input, lib/ui.sh:148-151).
+// (_ui_no_input, lib/ui.sh:136-139).
 func (o *IO) noInput() error {
 	return o.Die("CrossRev needs to ask you something, but no terminal is attached",
 		"Run this in a terminal directly. Editor-embedded and captured shells often have no controlling terminal, which is what this is.")

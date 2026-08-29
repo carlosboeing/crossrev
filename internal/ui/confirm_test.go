@@ -20,7 +20,7 @@ func TestAssumeYes(t *testing.T) {
 
 // TestConfirmAnswers pins what counts as a yes. Everything else, an empty line
 // included, is a no — a stray newline must not approve an outward-facing
-// action (lib/ui.sh:169).
+// action (lib/ui.sh:153).
 func TestConfirmAnswers(t *testing.T) {
 	tests := []struct {
 		answer string

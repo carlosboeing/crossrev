@@ -3,7 +3,7 @@ package ui
 import "os"
 
 // IsTerminal reports whether f is a terminal, which is what `[[ -t 1 ]]` and
-// `[[ -t 0 ]]` ask (lib/ui.sh:19 and :143).
+// `[[ -t 0 ]]` ask (lib/ui.sh:19 and :131).
 //
 // It asks the terminal driver rather than the file type, and the difference is
 // not academic. The usual Go shortcut — a character device by

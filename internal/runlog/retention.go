@@ -17,9 +17,10 @@ const DefaultRetentionDays = 14
 // The Bash guard is a regular expression, `^[0-9]+$` (lib/log.sh:197), which a
 // twenty-digit number passes. That number reaches `find -mtime +<it>`, and
 // neither find deletes anything for it: BSD find accepts the argument and
-// matches nothing, GNU find refuses it and the `2>/dev/null || true` at
-// lib/log.sh:205 swallows the refusal. Measured on this platform's BSD find, a
-// forty-year-old run directory survives 9223372036854775808,
+// matches nothing, GNU find refuses it and the `2>/dev/null || true` on each
+// of the two sweep passes (lib/log.sh:201 and :204) swallows the refusal.
+// Measured on this platform's BSD find, a forty-year-old run directory
+// survives 9223372036854775808,
 // 18446744073709551616 and 99999999999999999999999999 alike.
 //
 // So the parity answer for a value too large to represent is to keep

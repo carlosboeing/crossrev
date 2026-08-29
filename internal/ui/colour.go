@@ -3,7 +3,7 @@ package ui
 // Palette is the set of escape codes the helpers write around what they print.
 //
 // It is a value rather than a package variable, because the Bash library
-// decides colour once when it is sourced (lib/ui.sh:19-27) and that is exactly
+// decides colour once when it is sourced (lib/ui.sh:19-25) and that is exactly
 // what makes it hard to test: a suite that captures output through a pipe
 // freezes one answer and a session at a terminal freezes the other. Deciding
 // once is right; deciding once inside a global is what a caller cannot undo.

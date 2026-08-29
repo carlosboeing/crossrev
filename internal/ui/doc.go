@@ -1,7 +1,7 @@
 // Package ui handles terminal rendering, user output, and formatting.
 //
 // The design sets six rules for everything CrossRev prints. They live here
-// rather than in each caller's memory (lib/ui.sh:1-17):
+// rather than in each caller's memory (lib/ui.sh:4-15):
 //
 //  1. Name the thing — "created 5 labels on your-org/website", not "labels"
 //  2. Give the reason — nobody knows why labels matter until you say so

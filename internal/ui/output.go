@@ -72,7 +72,7 @@ const (
 	// neither of the other two: a tick would read as finished and a cross as
 	// failed, and it is neither. Blue rather than green for the same reason —
 	// the outcome is not in yet, and only the two settled glyphs get a verdict
-	// colour (lib/ui.sh:56-60).
+	// colour (lib/ui.sh:55-58).
 	StepRun
 )
 

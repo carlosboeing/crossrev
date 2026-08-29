@@ -9,11 +9,11 @@ import (
 var yes = regexp.MustCompile(`^[Yy]([Ee][Ss])?$`)
 
 // AssumeYes reads the raw value of CROSSREV_ASSUME_YES, which --yes sets. Only
-// "1" answers every question; unset and anything else ask (lib/ui.sh:159).
+// "1" answers every question; unset and anything else ask (lib/ui.sh:145).
 func AssumeYes(value string) bool { return value == "1" }
 
 // Confirm asks before an outward-facing action — rule 6. The caller explains
-// first; this only collects the answer (ui_confirm, lib/ui.sh:158-170).
+// first; this only collects the answer (ui_confirm, lib/ui.sh:144-154).
 //
 // Defaults to no, so a stray newline cannot approve something, and so does a
 // source that ends before the reader answers.
@@ -42,7 +42,7 @@ func (o *IO) Confirm(question string) (bool, error) {
 }
 
 // Prompt reads one value. The question goes to stderr so the value can be
-// captured from stdout (ui_prompt, lib/ui.sh:172-178).
+// captured from stdout (ui_prompt, lib/ui.sh:157-163).
 func (o *IO) Prompt(question string) (string, error) {
 	source, err := o.open()
 	if err != nil {

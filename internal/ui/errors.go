@@ -4,7 +4,7 @@ import "errors"
 
 // FatalError is what a Bash `ui_die` becomes on this side.
 //
-// The Bash function prints and then calls `exit 1` (lib/ui.sh:110-118). A Go
+// The Bash function prints and then calls `exit 1` (lib/ui.sh:113-119). A Go
 // library must not: os.Exit would end the process from inside a package whose
 // callers hold a lock on a pull request, an open run log and a working tree
 // that may still need putting back, and it skips every deferred cleanup that
