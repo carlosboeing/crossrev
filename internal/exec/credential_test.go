@@ -214,3 +214,49 @@ func TestRunReportsHowLongTheChildTook(t *testing.T) {
 		t.Errorf("Duration = %s, shorter than the %dms the child slept", slow.Duration, sleepFor)
 	}
 }
+
+// ForgeCredentialNames is the same four, in the same order, for a caller that
+// has to remove them from an environment before it reaches Run.
+//
+// It is compared against forgeCredentials, this package's own test-side copy,
+// for the reason stated above the test that uses it: a check that read the
+// production list would lose a name from itself in the edit that lost it from
+// production, and pass.
+func TestForgeCredentialNamesIsTheFourTheAdaptersStrip(t *testing.T) {
+	got := exec.ForgeCredentialNames()
+	if len(got) != len(forgeCredentials) {
+		t.Fatalf("ForgeCredentialNames = %v, want %v", got, forgeCredentials)
+	}
+	for at, want := range forgeCredentials {
+		if got[at] != want {
+			t.Errorf("ForgeCredentialNames()[%d] = %q, want %q", at, got[at], want)
+		}
+	}
+}
+
+// The accessor answers a fresh slice each time. An exported slice variable is
+// writable from any package in the binary, and shortening this one would widen
+// the ADR 0001 boundary everywhere at once.
+func TestForgeCredentialNamesCannotBeWrittenThrough(t *testing.T) {
+	got := exec.ForgeCredentialNames()
+	got[0] = "OVERWRITTEN"
+
+	if second := exec.ForgeCredentialNames(); second[0] != forgeCredentials[0] {
+		t.Errorf("writing through the accessor's result changed the list: %v", second)
+	}
+}
+
+// And the list it answers is still the one Run refuses on. A copy that drifted
+// from the private list would let a caller strip four names and be refused for
+// a fifth it never heard of — or worse, strip four that no longer matter.
+func TestEveryNameForgeCredentialNamesGivesIsOneRunRefuses(t *testing.T) {
+	for _, name := range exec.ForgeCredentialNames() {
+		spec := helperSpec("exit", "0")
+		spec.Env = append(spec.Env, name+"=irrelevant")
+
+		result := run(t, spec)
+		if !errors.Is(result.Err, exec.ErrForgeCredential) {
+			t.Errorf("a model-facing child carrying %s was not refused: %v", name, result.Err)
+		}
+	}
+}

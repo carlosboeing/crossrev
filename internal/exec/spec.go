@@ -1,6 +1,7 @@
 package exec
 
 import (
+	"slices"
 	"strings"
 	"time"
 )
@@ -159,6 +160,21 @@ var forgeCredentialNames = []string{
 	"GH_ENTERPRISE_TOKEN",
 	"GITHUB_ENTERPRISE_TOKEN",
 }
+
+// ForgeCredentialNames is the list above, for a caller that has to remove those
+// names from an environment before it reaches Run.
+//
+// Run refuses a model-facing Spec that still carries one, which is the guard
+// that cannot be forgotten. This is the list that lets a caller not get there:
+// lib/adapters/claude.sh:72 builds `env -u GH_TOKEN …` and the same line appears
+// in codex.sh:88, agy.sh:90, grok.sh:75 and opencode.sh:181. Exported rather
+// than copied into internal/cred, because two lists of credential names drift
+// apart silently and the whole point of the four is that none is missed.
+//
+// It answers a fresh slice each time, for the reason internal/validate's asset
+// accessors do: an exported slice variable is writable from any package in the
+// binary, and shortening this one would widen the boundary everywhere at once.
+func ForgeCredentialNames() []string { return slices.Clone(forgeCredentialNames) }
 
 // forgeCredentialIn returns the first forge credential named in env, and whether
 // there was one. It reads names only; the value never leaves this function.
