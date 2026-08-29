@@ -263,8 +263,14 @@ _cred_discovery_token_endpoint() {
 # printed raw, and a multi-line JSON blob inside a one-line status message is
 # worse than saying nothing.
 _cred_refusal_reason() {
-  jq -r '(.error.message? // .error_description // (.error | strings) // "no reason given")' <<<"$1" 2>/dev/null \
-    || printf 'no reason given'
+  local reason
+  reason="$(jq -r '(.error.message? // .error_description // (.error | strings) // "no reason given")' <<<"$1" 2>/dev/null)"
+  # Three ways to arrive here with nothing, and the caller cannot tell them
+  # apart or use any of them: jq refused the input, jq read a body that held no
+  # value at all, or jq read an `error` that is the empty string. The message
+  # this feeds ends in a colon, so an empty answer prints a dangling one.
+  [[ -n "$reason" ]] || reason="no reason given"
+  printf '%s' "$reason"
 }
 
 cred_refresh() {
