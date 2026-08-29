@@ -209,6 +209,23 @@ func TestCodexFailsOnAnEmptyPayloadFile(t *testing.T) {
 	adapter := codexAdapter(t)
 	inv := invocation(t, "codex", false)
 
+	// A file that exists and holds nothing, which is a different read from a
+	// file that is absent: the absent one errors and the empty one does not.
+	// The name of this test promised the first case and ran only the second.
+	if err := os.WriteFile(inv.PayloadPath, nil, 0o600); err != nil {
+		t.Fatalf("writing the empty payload: %v", err)
+	}
+	empty := adapter.Envelope(inv, exec.Result{Stderr: []byte("banner\nfatal: the model refused\n")})
+	if empty.OK {
+		t.Fatal("a run whose payload file is empty is a failure")
+	}
+	if got := deref(empty.Error); got != "fatal: the model refused" {
+		t.Errorf("error = %q", got)
+	}
+	if err := os.Remove(inv.PayloadPath); err != nil {
+		t.Fatalf("removing the payload: %v", err)
+	}
+
 	envelope := adapter.Envelope(inv, exec.Result{Stderr: []byte("banner\nfatal: the model refused\n")})
 	if envelope.OK {
 		t.Fatal("a run that wrote no payload is a failure")

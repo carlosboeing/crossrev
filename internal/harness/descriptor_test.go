@@ -2,6 +2,7 @@ package harness_test
 
 import (
 	"encoding/json"
+	"errors"
 	"os/exec"
 	"reflect"
 	"slices"
@@ -371,4 +372,172 @@ func entry(doc harness.Document, name string) harness.Descriptor {
 
 func credential(doc harness.Document, name string) harness.Credential {
 	return entry(doc, name).Credential
+}
+
+// Load refuses everything Validate rejects.
+//
+// descriptor.go's header says validation "runs at load and fails closed", and
+// that sentence was one line from being false with nothing to notice: replacing
+// `if problem := Validate(raw); problem != ""` with `; false` left the whole
+// package green. Validate has its own cross-check against the live shell; its
+// USE had none, and the use is what stands between a malformed descriptor and
+// the install commands, environment variable names and quarantine paths a
+// Document hands to callers.
+func TestLoadRefusesEveryDescriptorValidateRejects(t *testing.T) {
+	for _, tt := range mutations() {
+		t.Run(tt.name, func(t *testing.T) {
+			descriptor := mutate(t, tt.apply)
+			problem := harness.Validate(descriptor)
+			if problem == "" {
+				t.Fatalf("the mutation is accepted, so it cannot show that Load refuses one")
+			}
+
+			doc, err := harness.Load(descriptor)
+			if err == nil {
+				t.Fatalf("Load accepted a descriptor Validate rejects with %q", problem)
+			}
+			if !errors.Is(err, harness.ErrDescriptor) {
+				t.Errorf("err = %v, want it to wrap ErrDescriptor", err)
+			}
+			if !strings.Contains(err.Error(), problem) {
+				t.Errorf("err = %q, want it to carry the validator's own sentence %q", err, problem)
+			}
+			// A refused descriptor hands back nothing a caller could use.
+			if doc.Version() != 0 || len(doc.Names()) != 0 || len(doc.Raw()) != 0 {
+				t.Errorf("a refused Load answered a usable document: version %d, names %v",
+					doc.Version(), doc.Names())
+			}
+		})
+	}
+
+	// The unparseable case does not go through mutate, and reaches the same
+	// refusal by a different route.
+	if _, err := harness.Load([]byte("not json at all")); err == nil {
+		t.Error("Load accepted bytes that are not JSON")
+	}
+}
+
+// The order of the twelve checks is the Bash function's `elif` chain, and a
+// descriptor carrying two faults reports the earlier one.
+//
+// Validate's own comment says "the tests freeze which that is". Every mutation
+// above carries exactly ONE fault, so no ordering was ever exercised and
+// swapping two checks survived. These documents carry two, and the pair is
+// chosen so that each fault would produce a different sentence on its own —
+// the shell is the oracle for which one wins.
+func TestTheEarlierOfTwoFaultsIsTheOneReported(t *testing.T) {
+	for _, tool := range []string{"bash", "jq"} {
+		if _, err := exec.LookPath(tool); err != nil {
+			t.Skipf("%s is not on PATH, so the shell side cannot be run", tool)
+		}
+	}
+
+	harnessAt := func(document map[string]any, at int) map[string]any {
+		return document["harnesses"].([]any)[at].(map[string]any)
+	}
+	credentialAt := func(document map[string]any, at int) map[string]any {
+		return harnessAt(document, at)["credential"].(map[string]any)
+	}
+
+	tests := []struct {
+		name string
+		// earlier and later are the two faults, named by the check each trips.
+		earlier string
+		later   string
+		apply   func(map[string]any)
+	}{
+		{
+			name: "version before the array shape", earlier: "reads version 1", later: "must be arrays",
+			apply: func(d map[string]any) {
+				d["version"] = float64(2)
+				d["harnesses"] = map[string]any{}
+			},
+		},
+		{
+			name: "the array shape before the empty list", earlier: "must be arrays", later: "names no harnesses",
+			apply: func(d map[string]any) {
+				d["harnesses"] = []any{}
+				d["not_driven"] = map[string]any{}
+			},
+		},
+		{
+			name:    "a duplicate name before the name pattern",
+			earlier: "appears more than once", later: "is not [a-z][a-z0-9-]*",
+			apply: func(d map[string]any) {
+				list := d["harnesses"].([]any)
+				duplicate := map[string]any{}
+				for key, value := range harnessAt(d, 0) {
+					duplicate[key] = value
+				}
+				d["harnesses"] = append(list, duplicate)
+				harnessAt(d, 1)["name"] = "Claude_Code"
+			},
+		},
+		{
+			name:    "the environment variable name before the range check",
+			earlier: "is not [A-Z_][A-Z0-9_]*", later: "out-of-range",
+			apply: func(d map[string]any) {
+				credentialAt(d, 0)["secret"] = "bad-secret-name"
+				credentialAt(d, 0)["archetype"] = "Z"
+			},
+		},
+		{
+			name:    "the range check before billing",
+			earlier: "out-of-range", later: "not subscription, api or unknown",
+			apply: func(d map[string]any) {
+				credentialAt(d, 0)["archetype"] = "Z"
+				credentialAt(d, 0)["billing"] = "free"
+			},
+		},
+		{
+			name:    "billing before legs",
+			earlier: "not subscription, api or unknown", later: "drawn from review and resolve",
+			apply: func(d map[string]any) {
+				credentialAt(d, 0)["billing"] = "free"
+				harnessAt(d, 0)["legs"] = []any{}
+			},
+		},
+		{
+			name:    "legs before the quarantine path",
+			earlier: "drawn from review and resolve", later: "contains a .. segment",
+			apply: func(d map[string]any) {
+				harnessAt(d, 0)["legs"] = []any{}
+				entry := harnessAt(d, 0)
+				entry["quarantine"] = append(entry["quarantine"].([]any), "../etc/passwd")
+			},
+		},
+		{
+			name:    "the quarantine path before the installer",
+			earlier: "contains a .. segment", later: "pinned version its command does not carry",
+			apply: func(d map[string]any) {
+				entry := harnessAt(d, 0)
+				entry["quarantine"] = append(entry["quarantine"].([]any), "../etc/passwd")
+				entry["install"].(map[string]any)["pinned_version"] = "9.9.9"
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			descriptor := mutate(t, tt.apply)
+
+			// The two faults have to be distinguishable, or the case would
+			// pass whichever check answered.
+			if tt.earlier == tt.later {
+				t.Fatal("the two faults share a sentence, so this proves no ordering")
+			}
+			want := shellValidate(t, descriptor)
+			if !strings.Contains(want, tt.earlier) {
+				t.Fatalf("the shell answers %q, which does not carry the earlier fault %q", want, tt.earlier)
+			}
+			if strings.Contains(want, tt.later) {
+				t.Fatalf("the shell answers %q, which carries the later fault; the pair is not ordered", want)
+			}
+
+			got := harness.Validate(descriptor)
+			if got != want {
+				t.Errorf("Go  = %q\nBash = %q\nthe checks run in a different order", got, want)
+			}
+		})
+	}
 }

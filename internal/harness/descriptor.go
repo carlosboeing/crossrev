@@ -278,8 +278,11 @@ var (
 // pass, answering the first problem or the empty string.
 //
 // The order is the Bash function's `elif` chain and is load-bearing. A
-// descriptor with two faults reports the earlier one, and the tests freeze
-// which that is.
+// descriptor with two faults reports the earlier one, and
+// TestTheEarlierOfTwoFaultsIsTheOneReported freezes which that is — against the
+// live shell, over eight pairs whose two faults produce different sentences.
+// Until that test existed this comment named a guarantee nothing checked: every
+// fixture carried exactly one fault, so swapping two checks changed no answer.
 func Validate(raw []byte) string {
 	var root any
 	if err := json.Unmarshal(raw, &root); err != nil {

@@ -102,8 +102,11 @@ func (a *Codex) Spec(inv Invocation) (exec.Spec, error) {
 
 // Envelope reads what the child produced (lib/adapters/codex.sh:99-166).
 func (a *Codex) Envelope(inv Invocation, res exec.Result) Envelope {
-	payload, err := os.ReadFile(inv.PayloadPath) //nolint:gosec // the orchestrator named this path
-	if res.ExitCode != 0 || err != nil || len(payload) == 0 {
+	// The error is deliberately dropped: a failed read answers a nil payload,
+	// so the length test below already covers it, and a second clause for the
+	// same case would be error handling that cannot change an outcome.
+	payload, _ := os.ReadFile(inv.PayloadPath) //nolint:gosec // the orchestrator named this path
+	if res.ExitCode != 0 || len(payload) == 0 {
 		// No "exited N with no output" fallback here, unlike the other four:
 		// the Bash builds this message from stderr alone, so an empty stderr
 		// answers the empty string (lib/adapters/codex.sh:100).

@@ -275,3 +275,101 @@ if _same_model "$2" "$3"; then printf 'same'; else printf 'differ'; fi
 		})
 	}
 }
+
+// A harness that reports no model does not halt the run.
+//
+// AssertModelsDiverged's own comment says this in bold terms and names the
+// codex adapter, which emits no model field at all. Dropping the `wanted`
+// guard survived the suite: two legs that both report nothing then compare
+// "" against "", find them equal, and halt a run where nothing converged.
+//
+// The other half is the case the guard must NOT swallow: two legs configured
+// to differ, both reporting the same model, is the substitution the
+// cross-model design exists to catch.
+func TestAssertModelsDivergedIgnoresAnUnreportedModel(t *testing.T) {
+	tests := []struct {
+		name       string
+		configured string
+		reviewer   string
+		resolver   string
+		wantHalt   bool
+	}{
+		{name: "neither leg reports a model", configured: harness.ConfiguredDifferent,
+			reviewer: "", resolver: ""},
+		{name: "the reviewer reports none", configured: harness.ConfiguredDifferent,
+			reviewer: "", resolver: "claude-opus-4-5"},
+		{name: "the resolver reports none", configured: harness.ConfiguredDifferent,
+			reviewer: "gpt-5-codex", resolver: ""},
+		{name: "a literal null reads as unreported", configured: harness.ConfiguredDifferent,
+			reviewer: "null", resolver: "null"},
+		{name: "different models are the healthy case", configured: harness.ConfiguredDifferent,
+			reviewer: "gpt-5-codex", resolver: "claude-opus-4-5"},
+		{name: "one model was asked for, so a match is expected", configured: harness.ConfiguredSame,
+			reviewer: "claude-opus-4-5", resolver: "claude-opus-4-5"},
+		{name: "configured to differ and one model answered both",
+			configured: harness.ConfiguredDifferent,
+			reviewer:   "claude-opus-4-5", resolver: "claude-opus-4-5", wantHalt: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := harness.AssertModelsDiverged(tt.configured, tt.reviewer, tt.resolver)
+			if tt.wantHalt {
+				if err == nil {
+					t.Fatal("the same model answered both legs and the run was not halted")
+				}
+				var refusal *harness.Refusal
+				if !errors.As(err, &refusal) || refusal.Kind != harness.ErrModelsConverged {
+					t.Errorf("err = %v, want an ErrModelsConverged refusal", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Errorf("the run was halted on %q vs %q: %v", tt.reviewer, tt.resolver, err)
+			}
+		})
+	}
+}
+
+// Containment is tested in both directions.
+//
+// SameModel answers `strings.Contains(got, want) || strings.Contains(want, got)`
+// and every existing vector put the shorter string in `want`, so the second
+// clause was never the one that answered. An alias configured against a pinned
+// id and a pinned id configured against an alias are both real: lib/run.sh
+// compares what was asked for with what answered, and either can be the more
+// precise of the two.
+func TestSameModelHoldsInBothDirections(t *testing.T) {
+	pairs := []struct {
+		short string
+		long  string
+	}{
+		{short: "opus", long: "claude-opus-4-5-20251101"},
+		{short: "claude-opus-4-5", long: "claude-opus-4-5-20251101"},
+		{short: "gpt-5", long: "gpt-5-codex"},
+	}
+
+	for _, pair := range pairs {
+		t.Run(pair.short+" vs "+pair.long, func(t *testing.T) {
+			if !harness.SameModel(pair.short, pair.long) {
+				t.Errorf("SameModel(%q, %q) = false, want true", pair.short, pair.long)
+			}
+			if !harness.SameModel(pair.long, pair.short) {
+				t.Errorf("SameModel(%q, %q) = false; the shorter name is what was asked for in one direction and what answered in the other",
+					pair.long, pair.short)
+			}
+		})
+	}
+
+	// A substitution shares no token, in either order.
+	for _, pair := range [][2]string{
+		{"claude-opus-4-5", "gpt-5-codex"},
+		{"gpt-5-codex", "claude-opus-4-5"},
+		{"", "claude-opus-4-5"},
+		{"claude-opus-4-5", ""},
+	} {
+		if harness.SameModel(pair[0], pair[1]) {
+			t.Errorf("SameModel(%q, %q) = true, want false", pair[0], pair[1])
+		}
+	}
+}
