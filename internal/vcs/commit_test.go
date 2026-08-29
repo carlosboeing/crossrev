@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/carlosboeing/crossrev/internal/exec"
 	"github.com/carlosboeing/crossrev/internal/vcs"
 )
 
@@ -230,9 +231,12 @@ func TestGitTail(t *testing.T) {
 			found: true,
 		},
 		{
-			name:  "capped with the cut marked",
-			text:  strings.Repeat("x", 500),
-			want:  "…" + strings.Repeat("x", 400),
+			// Distinguishable at both ends. 500 identical characters cannot
+			// tell a tail from a head, and the tail is where git puts the
+			// reason a commit was refused.
+			name:  "capped with the cut marked, and it is the tail that is kept",
+			text:  "HEAD" + strings.Repeat("x", 496) + "TAIL",
+			want:  "…" + strings.Repeat("x", 396) + "TAIL",
 			found: true,
 		},
 	}
@@ -247,4 +251,78 @@ func TestGitTail(t *testing.T) {
 			}
 		})
 	}
+}
+
+// The push argv itself, which nothing pinned. A flag appended here reaches a
+// remote repository, and --force is one character class away from --no-verify
+// in a diff nobody reads closely.
+func TestPushArgv(t *testing.T) {
+	runner := &recorder{}
+	git := vcs.New(runner, nil)
+
+	if err := git.At("/somewhere").Push(context.Background(), "origin", "feature", false); err != nil {
+		t.Fatalf("Push: %v", err)
+	}
+	if err := git.At("/somewhere").Push(context.Background(), "origin", "feature", true); err != nil {
+		t.Fatalf("Push with hooks: %v", err)
+	}
+
+	want := []string{
+		"push --no-verify origin HEAD:refs/heads/feature",
+		"push origin HEAD:refs/heads/feature",
+	}
+	for i, spec := range runner.specs {
+		if got := strings.Join(spec.Args, " "); got != want[i] {
+			t.Errorf("argv[%d] = %q, want %q", i, got, want[i])
+		}
+	}
+}
+
+// The commit argv, for the same reason: the identity is passed with -c and the
+// hooks flag is the difference between running the operator's hooks and not.
+func TestCommitArgv(t *testing.T) {
+	runner := &recorder{}
+	git := vcs.New(runner, nil)
+
+	if err := git.At("/somewhere").Commit(context.Background(), vcs.CommitOptions{Message: "fix: one"}); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+	if err := git.At("/somewhere").Commit(context.Background(), vcs.CommitOptions{
+		Message: "fix: two", Name: "Someone", Email: "someone@example.com", RunHooks: true,
+	}); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+
+	want := []string{
+		"-c user.name=crossrev -c user.email=crossrev@users.noreply.github.com commit -q --no-verify -m fix: one",
+		"-c user.name=Someone -c user.email=someone@example.com commit -q -m fix: two",
+	}
+	for i, spec := range runner.specs {
+		if got := strings.Join(spec.Args, " "); got != want[i] {
+			t.Errorf("argv[%d] = %q, want %q", i, got, want[i])
+		}
+	}
+}
+
+// `cut -f1` over every line rather than the first. One exact ref answers with
+// one line; a second line means the guard is comparing against something it
+// cannot reduce to one revision, and joining with a space would hide that by
+// making two names look like a malformed one.
+func TestRemoteHeadOverSeveralRefs(t *testing.T) {
+	git := vcs.New(&fixedRunner{stdout: "aaa\trefs/heads/main\nbbb\trefs/heads/main\n"}, nil)
+
+	head, err := git.At("/somewhere").RemoteHead(context.Background(), "https://example.invalid/r.git", "main")
+	if err != nil {
+		t.Fatalf("RemoteHead: %v", err)
+	}
+	if head != "aaa\nbbb" {
+		t.Errorf("head = %q, want %q", head, "aaa\nbbb")
+	}
+}
+
+// fixedRunner answers every call the same way.
+type fixedRunner struct{ stdout string }
+
+func (f *fixedRunner) Run(_ context.Context, _ exec.Spec) exec.Result {
+	return exec.Result{Stdout: []byte(f.stdout)}
 }

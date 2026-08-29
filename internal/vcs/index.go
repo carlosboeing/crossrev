@@ -38,6 +38,13 @@ var ErrTreeCapture = errors.New("the working tree could not be captured")
 //
 // indexPath must be absolute: git resolves GIT_INDEX_FILE against the directory
 // each call runs in, and the calls here do not all run in the same one.
+//
+// # An ordering this package cannot enforce
+//
+// The quarantine must be restored before this runs, or the capture holds the
+// quarantine and the commit carries it. sandbox.Restore is the other half and
+// neither function can see the other, so the sequence belongs to the leg that
+// drives both — and so does the test for it.
 func (r *Repository) CaptureTree(ctx context.Context, indexPath string) (string, error) {
 	gitDir, err := r.GitDir(ctx)
 	if err != nil {

@@ -197,3 +197,67 @@ func TestRemoveWorktreeFallsBackToDeleting(t *testing.T) {
 		t.Errorf("the stray directory survived: %v", err)
 	}
 }
+
+// One level of parent, and one only.
+//
+// The `-p` form of rmdir walks up removing every parent that becomes empty and
+// stops at the first that is not, which deletes far more than CrossRev's own.
+// Between two pull requests of one repository the parent is shared, so a
+// sibling's worktree is what the single level protects.
+func TestRemoveWorktreeSparesASiblingPullRequest(t *testing.T) {
+	ctx := context.Background()
+	git := testGit(t)
+	root := realTempDir(t)
+	repo := initRepo(t, git, filepath.Join(root, "clone"))
+	head := commitFile(t, repo, "app.ts", "export const ok = 1\n", "init")
+
+	parent := filepath.Join(root, "state", "crossrev", "worktrees", "o-r")
+	first := filepath.Join(parent, "pr-42")
+	second := filepath.Join(parent, "pr-43")
+	for _, dir := range []string{first, second} {
+		if err := repo.AddWorktree(ctx, dir, head); err != nil {
+			t.Fatalf("AddWorktree(%s): %v", dir, err)
+		}
+	}
+
+	if err := repo.RemoveWorktree(ctx, first); err != nil {
+		t.Fatalf("RemoveWorktree: %v", err)
+	}
+	if _, err := os.Stat(first); !os.IsNotExist(err) {
+		t.Errorf("pr-42 survived removal: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(second, "app.ts")); err != nil {
+		t.Errorf("a sibling pull request's worktree was removed: %v", err)
+	}
+	if _, err := os.Stat(parent); err != nil {
+		t.Errorf("the shared parent was removed while it still held a worktree: %v", err)
+	}
+}
+
+// The question a caller asks before a worktree exists at all.
+//
+// It is the function's primary entry condition and nothing asked it, which left
+// the os.Stat error arm untested — and that arm is what stops a nil FileInfo
+// reaching IsDir.
+func TestWorktreeReusableOnSomethingThatIsNotAWorktree(t *testing.T) {
+	ctx := context.Background()
+	git := testGit(t)
+	root := realTempDir(t)
+	repo := initRepo(t, git, filepath.Join(root, "clone"))
+	head := commitFile(t, repo, "app.ts", "export const ok = 1\n", "init")
+
+	file := write(t, root, "not-a-directory", "x\n")
+
+	for _, dir := range []string{
+		filepath.Join(root, "never-created"),
+		file,
+	} {
+		reusable, err := repo.WorktreeReusable(ctx, dir, head)
+		if err != nil {
+			t.Fatalf("WorktreeReusable(%s): %v", dir, err)
+		}
+		if reusable {
+			t.Errorf("WorktreeReusable(%s) = true, want false", dir)
+		}
+	}
+}

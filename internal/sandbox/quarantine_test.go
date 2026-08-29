@@ -1,6 +1,7 @@
 package sandbox_test
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"sort"
@@ -104,6 +105,15 @@ func TestQuarantineAndRestoreRoundTrip(t *testing.T) {
 		}
 	}
 
+	// The contents first and the order second. Comparing the list to a sorted
+	// copy of itself asks only whether it is sorted, and the empty list is.
+	wantMoved := []string{
+		".claude", ".codex", ".gemini", ".github/copilot-instructions.md",
+		".grok", ".mcp.json", "AGENTS.md", "CLAUDE.md",
+	}
+	if strings.Join(moved, "|") != strings.Join(wantMoved, "|") {
+		t.Errorf("moved = %v, want %v", moved, wantMoved)
+	}
 	sorted := append([]string{}, moved...)
 	sort.Strings(sorted)
 	if strings.Join(sorted, "|") != strings.Join(moved, "|") {
@@ -269,5 +279,121 @@ func TestQuarantineStaysInsideTheRoot(t *testing.T) {
 	}
 	if !exists(t, neighbour) {
 		t.Error("a file outside the checkout was removed")
+	}
+}
+
+// The guard that stops a recursive delete of the checkout itself.
+//
+// `.` is the only input that reaches it. isRelativePath catches an absolute
+// path and a `..` segment first, and `filepath.Join(root, ".")` is root — so
+// without the guard, Restore reaches os.RemoveAll on the checkout.
+func TestQuarantinePathThatNamesTheRootItself(t *testing.T) {
+	root := realTempDir(t)
+	write(t, root, "src/app.ts", "real source\n")
+	write(t, root, "CLAUDE.md", "the repository's own\n")
+
+	if _, err := sandbox.Quarantine(root, []string{"."}); !errors.Is(err, sandbox.ErrDescriptor) {
+		t.Errorf("Quarantine(\".\") = %v, want an ErrDescriptor refusal", err)
+	}
+	if !exists(t, filepath.Join(root, "src/app.ts")) {
+		t.Fatal("quarantining \".\" moved the checkout")
+	}
+
+	// A real quarantine has to exist for Restore to get past its own entry
+	// check and reach the guard at all.
+	if _, err := sandbox.Quarantine(root, []string{"CLAUDE.md"}); err != nil {
+		t.Fatalf("Quarantine: %v", err)
+	}
+	if _, _, err := sandbox.Restore(root, []string{"."}); !errors.Is(err, sandbox.ErrDescriptor) {
+		t.Errorf("Restore(\".\") = %v, want an ErrDescriptor refusal", err)
+	}
+	if !exists(t, filepath.Join(root, "src/app.ts")) {
+		t.Fatal("restoring \".\" destroyed the checkout")
+	}
+	if !exists(t, filepath.Join(root, sandbox.QuarantineDir, "CLAUDE.md")) {
+		t.Error("the quarantine was removed by a refused restore")
+	}
+}
+
+// A quarantined path is a directory more often than not — .claude,
+// .codex, .cursor and .agents are all directories — and a harness recreating
+// one during a run is routine. os.Rename overwrites a file and refuses a
+// non-empty directory, so the clobbered path has to be removed first.
+func TestRestorePutsADirectoryBackOverOneTheHarnessRecreated(t *testing.T) {
+	root := realTempDir(t)
+	write(t, root, ".claude/settings.json", `{"hooks":{"SessionStart":[]}}`+"\n")
+	paths := shippedDescriptor(t).Paths()
+
+	if _, err := sandbox.Quarantine(root, paths); err != nil {
+		t.Fatalf("Quarantine: %v", err)
+	}
+	if exists(t, filepath.Join(root, ".claude")) {
+		t.Fatal(".claude was not quarantined")
+	}
+
+	// The harness writes into the path it could not read, blind.
+	write(t, root, ".claude/hooks/evil.sh", "#!/bin/sh\nexit 0\n")
+
+	clobbered, warning, err := sandbox.Restore(root, paths)
+	if err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	if strings.Join(clobbered, "|") != ".claude" {
+		t.Errorf("clobbered = %v, want [.claude]", clobbered)
+	}
+	if warning == nil {
+		t.Error("a discarded write into a quarantined directory said nothing")
+	}
+
+	raw, err := os.ReadFile(filepath.Join(root, ".claude/settings.json"))
+	if err != nil {
+		t.Fatalf("the operator's own settings file is gone: %v", err)
+	}
+	if !strings.Contains(string(raw), "SessionStart") {
+		t.Errorf("settings.json = %q, want the quarantined original", string(raw))
+	}
+	if exists(t, filepath.Join(root, ".claude/hooks/evil.sh")) {
+		t.Error("the harness's blind write survived the restore")
+	}
+	if exists(t, filepath.Join(root, sandbox.QuarantineDir)) {
+		t.Error("the quarantine was left stranded in the checkout")
+	}
+}
+
+// Nothing here asserts a mode anywhere else, and these two directories are
+// created inside a checkout the operator owns. A narrower mode would break a
+// second run under a different umask; a wider one is a permission change
+// CrossRev made without saying so.
+func TestQuarantineDirectoryModes(t *testing.T) {
+	root := realTempDir(t)
+	write(t, root, ".github/copilot-instructions.md", "x\n")
+	paths := shippedDescriptor(t).Paths()
+
+	if _, err := sandbox.Quarantine(root, paths); err != nil {
+		t.Fatalf("Quarantine: %v", err)
+	}
+	for _, path := range []string{sandbox.QuarantineDir, sandbox.QuarantineDir + "/.github"} {
+		info, err := os.Stat(filepath.Join(root, path))
+		if err != nil {
+			t.Fatalf("stat %s: %v", path, err)
+		}
+		if got := info.Mode().Perm(); got != 0o755 {
+			t.Errorf("%s mode = %04o, want 0755", path, got)
+		}
+	}
+
+	// And the parent the restore recreates for a nested path.
+	if err := os.RemoveAll(filepath.Join(root, ".github")); err != nil {
+		t.Fatalf("remove .github: %v", err)
+	}
+	if _, _, err := sandbox.Restore(root, paths); err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	info, err := os.Stat(filepath.Join(root, ".github"))
+	if err != nil {
+		t.Fatalf("stat the recreated parent: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o755 {
+		t.Errorf(".github mode = %04o, want 0755", got)
 	}
 }

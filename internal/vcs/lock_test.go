@@ -61,6 +61,24 @@ func TestRunLockHolderLine(t *testing.T) {
 		t.Errorf("since = %q, want an ISO 8601 instant in UTC", holder.Since)
 	}
 
+	// The lock lives inside the operator's own git directory, and a mode
+	// narrower than the one git itself uses would stop a second run by the
+	// same user under a different umask from reading the holder it must name.
+	info, err := os.Stat(lock.Path)
+	if err != nil {
+		t.Fatalf("stat the lock: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o644 {
+		t.Errorf("lock file mode = %04o, want 0644", got)
+	}
+	dir, err := os.Stat(filepath.Dir(lock.Path))
+	if err != nil {
+		t.Fatalf("stat the lock directory: %v", err)
+	}
+	if got := dir.Mode().Perm(); got != 0o755 {
+		t.Errorf("lock directory mode = %04o, want 0755", got)
+	}
+
 	if err := lock.Release(); err != nil {
 		t.Fatalf("Release: %v", err)
 	}

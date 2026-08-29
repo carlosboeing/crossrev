@@ -26,6 +26,16 @@ import (
 // and the "reported fixes but changed no files" guard stays quiet because other
 // files did change (lib/sandbox.sh:83-90).
 //
+// # An ordering this package cannot enforce
+//
+// The restore must run BEFORE any commit snapshot is taken, or the resolver
+// commits the quarantine. Nothing here can hold that: this package moves files
+// and knows nothing about a commit, and vcs.CaptureTree knows nothing about a
+// quarantine. The sequence lives in the leg that drives both, alongside the
+// cleanup path at lib/run.sh:94 that restores from the exit trap so an
+// interrupted leg still hands the checkout back intact. Whoever writes that
+// wiring owns the ordering, and owes it a test.
+//
 // Returns the clobbered paths in descriptor order and the warning that names
 // them, or nil when there were none.
 func Restore(root string, paths []string) ([]string, *vcs.Warning, error) {

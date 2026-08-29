@@ -2,7 +2,9 @@ package vcs_test
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -277,6 +279,12 @@ func TestNothingIsWrittenIntoTheCheckout(t *testing.T) {
 	}
 }
 
+// listing is every regular file in dir with a hash of its contents.
+//
+// Names alone catch a file that was added and miss one that was overwritten in
+// place, which is the more likely damage: every path here is built from a
+// temporary root, and a bug that dropped the root would land on a file that is
+// already there.
 func listing(t *testing.T, dir string) string {
 	t.Helper()
 	entries, err := os.ReadDir(dir)
@@ -285,8 +293,30 @@ func listing(t *testing.T, dir string) string {
 	}
 	names := make([]string, 0, len(entries))
 	for _, entry := range entries {
-		names = append(names, entry.Name())
+		if !entry.Type().IsRegular() {
+			names = append(names, entry.Name()+"/")
+			continue
+		}
+		content, err := os.ReadFile(filepath.Join(dir, entry.Name()))
+		if err != nil {
+			t.Fatalf("read %s: %v", entry.Name(), err)
+		}
+		names = append(names, fmt.Sprintf("%s@%x", entry.Name(), sha256.Sum256(content)))
 	}
 	sort.Strings(names)
 	return strings.Join(names, "|")
+}
+
+// The guard above is only as good as what listing compares. Names alone pass
+// while a file is overwritten in place, and an overwrite is the damage a path
+// that lost its temporary root would do.
+func TestListingDetectsAnInPlaceOverwrite(t *testing.T) {
+	dir := realTempDir(t)
+	write(t, dir, "app.ts", "export const ok = 1\n")
+	before := listing(t, dir)
+
+	write(t, dir, "app.ts", "export const ok = 2\n")
+	if after := listing(t, dir); after == before {
+		t.Errorf("an in-place overwrite left the listing unchanged: %s", after)
+	}
 }

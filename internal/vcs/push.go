@@ -224,6 +224,12 @@ func (r *Repository) ResolvePushRepo(ctx context.Context, remote string) (PushTa
 		if i < len(effective) {
 			rewritten = effective[i]
 		}
+		// The two emptiness tests are unreachable and kept anyway. They are
+		// the shell's `[[ -n "$cfg" && -n "$eff" ]]` (lib/legs.sh:434), which
+		// there guards against a blank line in a `while read` loop; here
+		// Output.Lines has already dropped every empty entry. Dropping them
+		// would make this and the shell differ on a line nobody can produce,
+		// which is a worse trade than one branch a coverage report calls dead.
 		if configured == "" || rewritten == "" || configured == rewritten {
 			continue
 		}
