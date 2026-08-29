@@ -173,7 +173,12 @@ adapter_opencode() {
   # config riding along on the same invocation. The unset flags come before
   # every VAR=value: env stops parsing options at the first assignment, so a
   # -u written after one becomes the command it tries to run.
-  local -a run=(env -u GH_TOKEN -u GITHUB_TOKEN -u GH_ENTERPRISE_TOKEN)
+  # Four names, not three. `gh` reads GH_ENTERPRISE_TOKEN and, when that is
+  # unset, GITHUB_ENTERPRISE_TOKEN — `gh help environment` lists both, "in order
+  # of precedence". A strip list naming only the first left the second in the
+  # agent's environment on a GitHub Enterprise Server setup, which is the one
+  # kind of installation where it is the credential in use.
+  local -a run=(env -u GH_TOKEN -u GITHUB_TOKEN -u GH_ENTERPRISE_TOKEN -u GITHUB_ENTERPRISE_TOKEN)
   local v
   while IFS= read -r v; do run+=(-u "$v"); done < <(cred_env_strip_for opencode)
   run+=("OPENCODE_CONFIG=$iso/config.json" "OPENCODE_CONFIG_DIR=$cfg_dir")

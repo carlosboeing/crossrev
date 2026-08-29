@@ -120,7 +120,7 @@ Each repository therefore needs its own `codex login` seed.
 
 Calling CrossRev through a harness skill doesn't change the credential model. The orchestrator owns every GitHub call.
 
-The `pr-review` and `pr-resolve` skills receive the diff and the rest of their context from the orchestrator. **They receive no GitHub token and make no GitHub call.** The adapters also remove `GH_TOKEN`, `GITHUB_TOKEN` and `GH_ENTERPRISE_TOKEN` from the environment before starting the model-facing process.
+The `pr-review` and `pr-resolve` skills receive the diff and the rest of their context from the orchestrator. **They receive no GitHub token and make no GitHub call.** The adapters also remove `GH_TOKEN`, `GITHUB_TOKEN`, `GH_ENTERPRISE_TOKEN` and `GITHUB_ENTERPRISE_TOKEN` from the environment before starting the model-facing process.
 
 That separation is the load-bearing one. The process reading attacker-controlled text — a pull request's title, body, diff and comments — is deliberately the process holding no credential, so an injection that reaches tool use still cannot post as the App, push a commit, or read a secret.
 

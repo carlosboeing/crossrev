@@ -115,6 +115,11 @@ slug refused "a local path holding the host name"     "/tmp/w/github.com/o/r.git
 slug refused "an https remote on another host"        "https://git.example.com/o/r.git"
 slug refused "a plain local path"                     "/tmp/w/origin.git"
 slug refused "a path deeper than owner/repo"          "https://github.com/o/r/x.git"
+# A host that is not github.com and folds into it. BSD tr under a UTF-8 locale
+# folds multibyte letters, and U+0130 becomes ASCII i, so an unpinned compare
+# accepted this and answered with a slug. The compare pins LC_ALL=C for the same
+# reason state_finding_id does.
+slug refused "a host spelled with a folding homoglyph" "$(printf 'https://G\xc4\xb0THUB.COM/o/r.git')"
 
 # --- push-target URL resolution and rewrite warning ------------------------
 err_file="$(mktemp)"
