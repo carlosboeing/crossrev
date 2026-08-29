@@ -842,4 +842,31 @@ has "and its fix lands" \
 
 PATH="$_path_before_fallback"; export PATH
 
+# --- the failure text a push publishes -------------------------------------
+#
+# _gh_git_tail selects the last five non-blank lines of git's output, and that
+# text reaches a pull request comment through ui_die and _run_report_invoke_failure.
+# A hook printing another encoding, or a filename in one, puts a byte that is not
+# valid UTF-8 into it. GNU grep under a UTF-8 locale treats such input as binary
+# and withholds it, so without a pinned locale this returned nothing on Linux and
+# the whole reason vanished from the comment — while macOS published it. The same
+# reason log_redact pins LC_ALL=C on its sed.
+# shellcheck source=../lib/log.sh
+source "$HERE/../lib/log.sh"
+# shellcheck source=../lib/github.sh
+source "$HERE/../lib/github.sh"
+
+tail_keeps() {
+  local desc="$1" text="$2" got
+  got="$(_gh_git_tail "$text")" || got="<refused>"
+  [[ -n "$got" && "$got" != "<refused>" ]] \
+    && ok "$desc" || notok "$desc" "non-empty output" "$got"
+}
+tail_keeps "a tail of bytes that are not valid UTF-8"   "$(printf 'error: \xff\xfe failed')"
+tail_keeps "a tail of continuation bytes"               "$(printf 'error: \x80\x81 failed')"
+tail_keeps "a tail of latin-1 text"                     "$(printf 'error: caf\xe9 not found')"
+is "and it keeps those bytes rather than replacing them" \
+   "$(_gh_git_tail "$(printf 'error: caf\xe9')" | od -An -tx1 | tr -d ' \n')" \
+   "$(printf 'error: caf\xe9' | od -An -tx1 | tr -d ' \n')"
+
 finish
