@@ -37,7 +37,7 @@ var (
 	ErrStale = errors.New("the credential is under CrossRev's one-hour floor")
 
 	// ErrRefresh is any failure on the refresher path
-	// (lib/credentials.sh:253-301).
+	// (lib/credentials.sh:270-318).
 	ErrRefresh = errors.New("the refresh did not produce a new credential")
 
 	// ErrStaging is a scratch directory or staged file that could not be

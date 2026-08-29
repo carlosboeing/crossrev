@@ -33,6 +33,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -44,14 +45,14 @@ type HTTPClient interface {
 
 // The two curl timeouts, kept as the shell writes them: `--max-time 20` on the
 // discovery read (lib/credentials.sh:238) and `--max-time 60` on the token
-// exchange (lib/credentials.sh:282).
+// exchange (lib/credentials.sh:299).
 const (
 	discoveryTimeout = 20 * time.Second
 	tokenTimeout     = 60 * time.Second
 )
 
 // refreshScope is the scope the token request asks for
-// (lib/credentials.sh:281).
+// (lib/credentials.sh:298).
 const refreshScope = "openid profile email offline_access"
 
 // maxResponseBytes bounds what a vendor response may be read into.
@@ -72,11 +73,32 @@ type RefreshOptions struct {
 	Now func() time.Time
 }
 
+// noRedirectClient is the real client, and it stops at the first answer.
+//
+// http.DefaultClient follows up to ten redirects, and a 307 or 308 replays the
+// request body — so a token endpoint that answered `308 Location: attacker`
+// would receive the whole refresh grant a second time, refresh token included,
+// at a host the vendor's discovery document did not name. The redirect was
+// measured doing exactly that, with Refresh returning success on the last hop's
+// answer: the caller then writes a credential back believing the chain is
+// intact while a third party holds the token.
+//
+// http.ErrUseLastResponse is what `curl` without `-L` does — the shell passes
+// `curl -sS` with no `-L` at lib/credentials.sh:299, so this is parity as well
+// as the fix. The redirect arrives as the vendor's final answer and the 2xx
+// check below refuses it.
+//
+// A caller that injects its own HTTPClient decides its own redirect policy,
+// which is the point of injecting one.
+var noRedirectClient = &http.Client{
+	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+}
+
 func (o RefreshOptions) client() HTTPClient {
 	if o.HTTP != nil {
 		return o.HTTP
 	}
-	return http.DefaultClient
+	return noRedirectClient
 }
 
 func (o RefreshOptions) now() time.Time {
@@ -87,7 +109,7 @@ func (o RefreshOptions) now() time.Time {
 }
 
 // Refresh exchanges a stored credential's refresh token for a new credential,
-// and returns the new one: cred_refresh (lib/credentials.sh:253-308).
+// and returns the new one: cred_refresh (lib/credentials.sh:270-326).
 //
 // It returns nothing on any failure, so a caller cannot mistake a half-answer
 // for a credential and write it back over the good one
@@ -125,14 +147,15 @@ func Refresh(ctx context.Context, d Descriptor, credential []byte, o RefreshOpti
 		}
 	}
 
+	// The refusal is built where the cause is known rather than flattened here.
+	// The shell prints one sentence for every discovery failure — "could not
+	// read a token endpoint from $issuer's discovery document"
+	// (lib/credentials.sh:291) — and it reads as a vendor fault whichever one
+	// happened, including the two that are not: a document larger than CrossRev
+	// reads, and one naming an http endpoint. That is a deliberate divergence.
 	endpoint, err := discoverTokenEndpoint(ctx, claims.Issuer, o)
 	if err != nil {
-		return nil, &Refusal{
-			Kind:   ErrRefresh,
-			Err:    err,
-			Reason: fmt.Sprintf("could not read a token endpoint from %s's discovery document", claims.Issuer),
-			Action: "The stored secret is untouched. Check that the runner can reach the vendor.",
-		}
+		return nil, err
 	}
 
 	response, err := exchange(ctx, endpoint, claims.ClientID, refreshToken, o)
@@ -150,7 +173,7 @@ func Refresh(ctx context.Context, d Descriptor, credential []byte, o RefreshOpti
 	}
 	// A response that returns no replacement refresh token means this one was
 	// not consumed, so keeping it is correct rather than a fallback
-	// (lib/credentials.sh:298-300).
+	// (lib/credentials.sh:315-317).
 	newRefresh := response.stringAt("refresh_token")
 	if newRefresh == "" {
 		newRefresh = refreshToken
@@ -160,60 +183,122 @@ func Refresh(ctx context.Context, d Descriptor, credential []byte, o RefreshOpti
 		newID = stored.stringAt("tokens", "id_token")
 	}
 
-	// The four assignments of lib/credentials.sh:303-308, in that order, over
+	// The four assignments of lib/credentials.sh:320-325, in that order, over
 	// the stored credential rather than a document built here — so every key
 	// the vendor's store carries and CrossRev knows nothing about survives.
-	if err := stored.setString([]string{"tokens", "access_token"}, newAccess); err != nil {
-		return nil, err
-	}
-	if err := stored.setString([]string{"tokens", "refresh_token"}, newRefresh); err != nil {
-		return nil, err
-	}
-	if err := stored.setString([]string{"tokens", "id_token"}, newID); err != nil {
-		return nil, err
-	}
-	if err := stored.setString([]string{"last_refresh"}, o.now().UTC().Format("2006-01-02T15:04:05Z")); err != nil {
-		return nil, err
-	}
-	return stored.marshal()
+	stored.setString([]string{"tokens", "access_token"}, newAccess)
+	stored.setString([]string{"tokens", "refresh_token"}, newRefresh)
+	stored.setString([]string{"tokens", "id_token"}, newID)
+	// .UTC() rather than the clock's own zone: `date -u` at
+	// lib/credentials.sh:321 stamps UTC whatever TZ the runner carries, and the
+	// trailing Z in the layout would otherwise be a lie about a local time.
+	stored.setString([]string{"last_refresh"}, o.now().UTC().Format("2006-01-02T15:04:05Z"))
+	return stored.marshal(), nil
 }
 
 // discoverTokenEndpoint reads `.token_endpoint` out of the issuer's OpenID
 // discovery document: _cred_discovery_token_endpoint (lib/credentials.sh:236-240).
+//
+// Every failure returns its own *Refusal naming its own cause, rather than one
+// sentence covering all of them.
+//
+// # What is checked about the endpoint, and what is not
+//
+// An https issuer may not name an http token endpoint. The refresh token is in
+// the request body, so a cleartext POST hands it to anybody on the path, and no
+// vendor serves one — a downgrade here is either a compromised discovery
+// document or a misconfiguration, and both are refusals rather than requests to
+// make. The shell checks neither and would post to it.
+//
+// The endpoint's HOST is deliberately not required to match the issuer's. A
+// vendor is entitled to serve its token endpoint from a different name, and
+// refusing that would break a working refresh to close a hole the issuer
+// already controls: the document is read from the issuer over TLS, so a host an
+// attacker chose means the issuer is already theirs.
 func discoverTokenEndpoint(ctx context.Context, issuer string, o RefreshOptions) (string, error) {
-	url := strings.TrimSuffix(issuer, "/") + "/.well-known/openid-configuration"
+	refuse := func(err error, reason, action string) (string, error) {
+		return "", &Refusal{Kind: ErrRefresh, Err: err,
+			Reason: fmt.Sprintf("%s's discovery document %s", issuer, reason),
+			Action: action}
+	}
+	const untouched = "The stored secret is untouched."
+	const reachable = "The stored secret is untouched. Check that the runner can reach the vendor."
+
+	address := strings.TrimSuffix(issuer, "/") + "/.well-known/openid-configuration"
 
 	ctx, cancel := context.WithTimeout(ctx, discoveryTimeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, address, nil)
 	if err != nil {
-		return "", err
+		return refuse(err, "could not be asked for", untouched)
 	}
 	resp, err := o.client().Do(req)
 	if err != nil {
-		return "", err
+		return refuse(err, "could not be reached at all", reachable)
 	}
 	defer resp.Body.Close()
 
 	// `curl -fsS` fails on a non-2xx and prints nothing, which is what makes
 	// the shell's `[[ -n "$endpoint" ]]` check catch a 404 as well as a
-	// document with no token_endpoint (lib/credentials.sh:238, :274).
+	// document with no token_endpoint (lib/credentials.sh:238, :291).
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return "", fmt.Errorf("the discovery document answered HTTP %d", resp.StatusCode)
+		return refuse(nil, fmt.Sprintf("answered HTTP %d", resp.StatusCode), reachable)
 	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
+	body, oversize, err := readCapped(resp.Body)
 	if err != nil {
-		return "", err
+		return refuse(err, "could not be read", untouched)
+	}
+	if oversize {
+		// Reported as its own cause rather than as a parse failure. A truncated
+		// document is not a document the vendor got wrong.
+		return refuse(nil, fmt.Sprintf("is larger than the %d bytes CrossRev reads", maxResponseBytes), untouched)
 	}
 	document, err := decodeObject(body)
 	if err != nil {
-		return "", err
+		return refuse(err, "is not a JSON object", untouched)
 	}
 	endpoint := document.stringAt("token_endpoint")
 	if endpoint == "" {
-		return "", fmt.Errorf("the discovery document names no token_endpoint")
+		return refuse(nil, "names no token_endpoint", untouched)
+	}
+	if err := refuseADowngrade(issuer, endpoint); err != nil {
+		return refuse(err, "names a token endpoint CrossRev will not post to",
+			"The stored secret is untouched. A refresh token in a cleartext request body is readable by anything on the path.")
 	}
 	return endpoint, nil
+}
+
+// refuseADowngrade refuses an http token endpoint named by an https issuer.
+func refuseADowngrade(issuer, endpoint string) error {
+	from, err := url.Parse(issuer)
+	if err != nil {
+		return err
+	}
+	to, err := url.Parse(endpoint)
+	if err != nil {
+		return err
+	}
+	if from.Scheme == "https" && to.Scheme != "https" {
+		return fmt.Errorf("an https issuer named a %q token endpoint", to.Scheme)
+	}
+	return nil
+}
+
+// readCapped reads a vendor response, and says whether it ran past the cap.
+//
+// One byte over the limit is read so that "as long as CrossRev reads" and
+// "longer than CrossRev reads" are told apart. Without it a body sitting
+// exactly on the cap and one ten times it are the same bytes, and the second is
+// reported as whatever the truncation failed to parse as.
+func readCapped(body io.Reader) (raw []byte, oversize bool, err error) {
+	raw, err = io.ReadAll(io.LimitReader(body, maxResponseBytes+1))
+	if err != nil {
+		return nil, false, err
+	}
+	if len(raw) > maxResponseBytes {
+		return nil, true, nil
+	}
+	return raw, false, nil
 }
 
 // exchange posts the refresh grant and returns the vendor's answer.
@@ -249,14 +334,23 @@ func exchange(ctx context.Context, endpoint, clientID, refreshToken string, o Re
 	// Read the body whatever the status. A rejection comes back as JSON naming
 	// the reason, and `token_expired` and `invalid_client` need different
 	// fixes: the difference is only in there, which is why the shell does not
-	// pass `-f` to curl (lib/credentials.sh:276-278).
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
+	// pass `-f` to curl (lib/credentials.sh:293-295).
+	raw, oversize, err := readCapped(resp.Body)
 	if err != nil {
 		return nil, &Refusal{Kind: ErrRefresh, Err: err,
 			Reason: fmt.Sprintf("the vendor's answer from %s could not be read", endpoint),
 			Action: "The stored secret is untouched."}
 	}
+	if oversize {
+		return nil, &Refusal{Kind: ErrRefresh,
+			Reason: fmt.Sprintf("the vendor's answer from %s is larger than the %d bytes CrossRev reads", endpoint, maxResponseBytes),
+			Action: "The stored secret is untouched."}
+	}
 
+	// 2xx and nothing else, which is `[[ "$http" != 2* ]]` at
+	// lib/credentials.sh:304. 300 is the boundary that matters: a redirect the
+	// client above did not follow arrives here as the vendor's answer, and
+	// treating it as success would read an empty body as a token response.
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		return nil, &Refusal{
 			Kind:   ErrRefresh,
@@ -265,6 +359,15 @@ func exchange(ctx context.Context, endpoint, clientID, refreshToken string, o Re
 		}
 	}
 
+	// A declared divergence, and this side is the better one. The shell hands
+	// a 2xx body straight to `jq -r '.access_token // empty'`
+	// (lib/credentials.sh:310): a body that is not a JSON object makes jq
+	// error, `new_access` comes back empty, and the operator is told "the
+	// vendor's response carried no access token" — which describes a vendor
+	// that answered correctly and left one field out. What happened is that
+	// the vendor did not answer with a token response at all, and an HTML
+	// error page from a proxy is the common way it happens. The two need
+	// different reactions, so they get different sentences.
 	answer, err := decodeObject(raw)
 	if err != nil {
 		return nil, &Refusal{Kind: ErrRefresh, Err: err,
@@ -276,24 +379,29 @@ func exchange(ctx context.Context, endpoint, clientID, refreshToken string, o Re
 
 // rejectionReason is what the vendor said, or "no reason given".
 //
-// The shell writes this as one jq filter,
-// `.error.message // .error_description // .error // "no reason given"`
-// (lib/credentials.sh:288), and that filter cannot reach its own third arm. A
-// body of `{"error":"invalid_client"}` — the shape RFC 6749 section 5.2
-// specifies, and the common one — makes `.error.message` a hard jq error rather
-// than null, so jq exits 5, prints nothing, and the message reads
-// `the vendor rejected the refresh (HTTP 400): ` with the reason missing.
-// Measured:
+// The shell is _cred_refusal_reason (lib/credentials.sh:265-268), and the three
+// arms below are its three arms. It reads
 //
-//	echo '{"error":{"message":"m"}}'   -> m
-//	echo '{"error_description":"d"}'   -> d
-//	echo '{"error":"e"}'               -> "", jq exit 5
-//	echo '{}'                          -> no reason given
+//	(.error.message? // .error_description // (.error | strings) // "no reason given")
 //
-// The three arms below are the filter's intent, with the third reached. That is
-// a deliberate divergence: the whole reason the shell reads the body at all is
-// the sentence above the filter, saying token_expired and invalid_client need
-// different fixes and the difference is only in there.
+// with `|| printf 'no reason given'` behind it. The `?` and the `strings` guard
+// are both recent: without the first, `.error.message` against a string is a
+// hard jq error rather than a null, so jq exited 5 having printed nothing and
+// `{"error":"invalid_client"}` — the shape RFC 6749 section 5.2 specifies, and
+// the common one — lost its reason entirely; without the second, an object or
+// an array `error` printed a raw multi-line JSON blob into a one-line status
+// message. This function matches the fixed filter, arm for arm, and
+// tests/test-credentials.sh asserts the same seven shapes against it.
+//
+// # One divergence, and it is this side that is right
+//
+// A value that is not a string reads as absent here and the shell prints it.
+// `{"error_description":123}` makes `jq -r` print `123`; stringAt answers "",
+// the chain falls through, and the message says "no reason given". A bare
+// number is not a reason, and the shell's own last arm already agrees — the
+// `strings` guard exists precisely so that a non-string prints nothing rather
+// than a JSON fragment inside a status message. This applies the same
+// judgement to the two arms above it as well as the one below.
 func rejectionReason(raw []byte) string {
 	document, err := decodeObject(raw)
 	if err != nil {
@@ -318,7 +426,7 @@ func rejectionReason(raw []byte) string {
 // ---------------------------------------------------------------------------
 //
 // The refreshed credential is written by `jq -c` over the stored one
-// (lib/credentials.sh:303-308), and jq keeps a document's own key order,
+// (lib/credentials.sh:320-325), and jq keeps a document's own key order,
 // appending a key it had to create. encoding/json cannot: a map marshals in
 // sorted order, so `{"OPENAI_API_KEY":…,"auth_mode":…}` would come back
 // reordered and every key the store carries would move.
@@ -416,72 +524,55 @@ func (o *object) stringAt(path ...string) string {
 // setString writes a string down a path of object keys, creating any object on
 // the way that is missing. `jq '.tokens.access_token = $a'` on `{}` produces
 // `{"tokens":{"access_token":…}}`, measured, and this does the same.
-func (o *object) setString(path []string, value string) error {
-	encoded, err := encodeString(value)
-	if err != nil {
-		return err
-	}
-	return o.setRaw(path, encoded)
+func (o *object) setString(path []string, value string) {
+	o.setRaw(path, encodeString(value))
 }
 
-func (o *object) setRaw(path []string, value json.RawMessage) error {
+func (o *object) setRaw(path []string, value json.RawMessage) {
 	key := path[0]
-	if len(path) == 1 {
-		if _, present := o.values[key]; !present {
-			o.keys = append(o.keys, key)
-		}
-		o.values[key] = value
-		return nil
-	}
-
-	child := &object{values: map[string]json.RawMessage{}}
-	if existing, present := o.values[key]; present {
-		decoded, err := decodeObject(existing)
-		if err != nil {
-			// jq replaces a non-object with an object here rather than failing.
-			// Refusing instead: a credential whose `.tokens` is not an object
-			// is one this build does not understand, and overwriting it would
-			// discard whatever it held.
-			return fmt.Errorf("%w: the credential's %q is not an object", ErrRefresh, key)
-		}
-		child = decoded
-	} else {
+	if _, present := o.values[key]; !present {
 		o.keys = append(o.keys, key)
 	}
-	if err := child.setRaw(path[1:], value); err != nil {
-		return err
+	if len(path) == 1 {
+		o.values[key] = value
+		return
 	}
-	nested, err := child.marshal()
+
+	// An existing value that is not an object is replaced by one, which is what
+	// jq does. There was a refusal here instead, and it was unreachable: the
+	// only nested path this package writes is `.tokens`, and Refresh has
+	// already refused a credential whose `.tokens.refresh_token` did not read
+	// as a string — which a `.tokens` that is not an object cannot produce.
+	child, err := decodeObject(o.values[key])
 	if err != nil {
-		return err
+		child = &object{values: map[string]json.RawMessage{}}
 	}
-	o.values[key] = nested
-	return nil
+	child.setRaw(path[1:], value)
+	o.values[key] = child.marshal()
 }
 
 // marshal renders the object compactly, in key order.
-func (o *object) marshal() ([]byte, error) {
+//
+// It cannot fail either. Every value it writes is one of two things: bytes the
+// decoder in UnmarshalJSON validated, or bytes this file produced. json.Compact
+// refuses neither, so a value that arrived with whitespace inside it is
+// compacted the way `jq -c` does and one that did not is copied.
+func (o *object) marshal() []byte {
 	var out bytes.Buffer
 	out.WriteByte('{')
 	for at, key := range o.keys {
 		if at > 0 {
 			out.WriteByte(',')
 		}
-		encoded, err := encodeString(key)
-		if err != nil {
-			return nil, err
-		}
-		out.Write(encoded)
+		out.Write(encodeString(key))
 		out.WriteByte(':')
 		// Compact rather than re-encode: an untouched value keeps its own
 		// literal, so a large integer stays an integer instead of being read
 		// into a float64 and written back in exponent form.
-		if err := json.Compact(&out, o.values[key]); err != nil {
-			return nil, err
-		}
+		_ = json.Compact(&out, o.values[key])
 	}
 	out.WriteByte('}')
-	return out.Bytes(), nil
+	return out.Bytes()
 }
 
 // encodeString renders one JSON string the way jq does.
@@ -489,13 +580,16 @@ func (o *object) marshal() ([]byte, error) {
 // SetEscapeHTML(false) is the whole point: encoding/json turns `<`, `>` and `&`
 // into <, > and & by default, and jq leaves them alone. Measured:
 // `jq -c .` on `{"x":"a<b>&c"}` prints it back unchanged.
-func encodeString(value string) ([]byte, error) {
+// It cannot fail, and says so rather than handing every caller an error to
+// carry: the encoder writes into a bytes.Buffer, whose Write never returns one,
+// and every Go string encodes — bytes that are not UTF-8 become U+FFFD rather
+// than an error. The chain above it was written around that impossible failure
+// and handled it six times.
+func encodeString(value string) []byte {
 	var out bytes.Buffer
 	encoder := json.NewEncoder(&out)
 	encoder.SetEscapeHTML(false)
-	if err := encoder.Encode(value); err != nil {
-		return nil, err
-	}
+	_ = encoder.Encode(value)
 	// Encode appends a newline.
-	return bytes.TrimRight(out.Bytes(), "\n"), nil
+	return bytes.TrimRight(out.Bytes(), "\n")
 }
