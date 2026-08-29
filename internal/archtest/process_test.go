@@ -21,18 +21,52 @@ import (
 // internal/harness, and the child received the whole parent environment with
 // the suite still green.
 //
-// # Four routes, one rule
+// # The routes, and the sweep that produced them
 //
 // The os/exec import is the obvious one. os.StartProcess is not: it lives in os
 // rather than os/exec, so an import rule naming one package cannot see it, and
-// a zero ProcAttr inherits everything. syscall.StartProcess and syscall.Exec
-// are the same fact one layer down.
+// a zero ProcAttr inherits everything. The syscall entries are the same fact one
+// layer down.
+//
+// The syscall list is a sweep of the package's exported surface rather than the
+// three names a review happened to think of — `go doc syscall` on darwin, linux,
+// plan9, windows and js/wasm, filtered for anything that could start a child:
+//
+//	Exec, ForkExec, StartProcess     unix and plan9; ForkExec is what
+//	                                 os.StartProcess itself calls
+//	CreateProcess, CreateProcessAsUser
+//	                                 windows only, and named anyway: this tree
+//	                                 does not build there today, and a rule that
+//	                                 waits for the port is a rule that is missing
+//	                                 when the port lands
+//
+// What the same sweep found and left out: FindProcess, OpenProcess, Wait4,
+// WaitProcess, TerminateProcess, ExitProcess, PtraceAttach and Process32First
+// all act on a process that already exists. CloseOnExec sets a descriptor flag.
+// os.Executable answers this process's own path.
+//
+// syscall.Syscall and its numbered siblings are deliberately absent, and that
+// is a real gap rather than an oversight: SYS_EXECVE through Syscall6 starts a
+// child and no name-based rule can tell it from an ioctl. internal/ui/terminal_unix.go:15
+// makes exactly that call for TIOCGETA, so forbidding the family would forbid
+// the terminal read as well. The gap is bounded by there being one such call in
+// the tree and by it not naming a process constant.
 //
 // Confining the os/exec import also closes (*exec.Cmd).Environ(), which falls
 // back to syscall.Environ whenever Cmd.Env is nil. That one is worth naming
 // because no selector rule could ever reach it: the receiver is a variable, so
 // there is no package identifier to match on. It is closed here only because a
 // caller that cannot name the type cannot hold the value.
+//
+// # plugin.Open, which is here and is not this rule
+//
+// It starts no child, so folding it into a rule called "only internal/exec may
+// start a process" would make the name say something the check does not — the
+// fault this file was reviewed for elsewhere. It gets its own entry, with its
+// own sentence, because the danger is real and worse in kind: a loaded plugin's
+// init functions run inside the process that holds every credential, with this
+// process's whole environment and no Spec between them. Nothing may load one,
+// so it has no permitted directory at all.
 //
 // # What this does not cover, and why
 //
@@ -44,17 +78,42 @@ type processRule struct {
 	// defaultName and symbol, when set, forbid one function in that package.
 	defaultName string
 	symbol      string
-	// permittedDir is the one repo-relative directory allowed to hold it.
+	// permittedDir is the one repo-relative directory allowed to hold it, or
+	// empty when no directory may.
 	permittedDir string
+	// action opens the violation sentence, and is empty for the child-process
+	// rules that share the default.
+	action string
+	// consequence completes the violation sentence after the semicolon.
+	consequence string
+	// provesTheScan marks the import whose presence in permittedDir shows the
+	// scan reached the package it is supposed to be reading.
+	provesTheScan bool
 }
 
 const processPermittedDir = "internal/exec"
 
+const startsAChild = "only " + processPermittedDir + " may, and every other caller goes through its Runner"
+
 var processRules = []processRule{
-	{importPath: "os/exec", defaultName: "exec", permittedDir: processPermittedDir},
-	{importPath: "os", defaultName: "os", symbol: "StartProcess", permittedDir: processPermittedDir},
-	{importPath: "syscall", defaultName: "syscall", symbol: "StartProcess", permittedDir: processPermittedDir},
-	{importPath: "syscall", defaultName: "syscall", symbol: "Exec", permittedDir: processPermittedDir},
+	{importPath: "os/exec", defaultName: "exec", permittedDir: processPermittedDir, consequence: startsAChild, provesTheScan: true},
+	{importPath: "os", defaultName: "os", symbol: "StartProcess", permittedDir: processPermittedDir, consequence: startsAChild},
+	{importPath: "syscall", defaultName: "syscall", symbol: "StartProcess", permittedDir: processPermittedDir, consequence: startsAChild},
+	{importPath: "syscall", defaultName: "syscall", symbol: "Exec", permittedDir: processPermittedDir, consequence: startsAChild},
+	{importPath: "syscall", defaultName: "syscall", symbol: "ForkExec", permittedDir: processPermittedDir, consequence: startsAChild},
+	{importPath: "syscall", defaultName: "syscall", symbol: "CreateProcess", permittedDir: processPermittedDir, consequence: startsAChild},
+	{importPath: "syscall", defaultName: "syscall", symbol: "CreateProcessAsUser", permittedDir: processPermittedDir, consequence: startsAChild},
+	{importPath: "plugin", defaultName: "plugin",
+		action:      "loads native code into this process through",
+		consequence: "no directory may, because a plugin's init functions run inside the process that holds every credential"},
+}
+
+// verb opens the violation sentence for one rule.
+func (r processRule) verb() string {
+	if r.action != "" {
+		return r.action
+	}
+	return "starts a child process through"
 }
 
 func TestProcessStartBoundary(t *testing.T) {
@@ -105,9 +164,8 @@ func auditProcessSource(relSlash string, src []byte) (violations []string, permi
 			permitted = permitted || reference.grantsPermission
 			continue
 		}
-		violations = append(violations, fmt.Sprintf(
-			"%s:%d starts a child process through %s; only %s may, and every other caller goes through its Runner",
-			relSlash, fset.Position(reference.pos).Line, reference.what, reference.permittedDir))
+		violations = append(violations, fmt.Sprintf("%s:%d %s; %s",
+			relSlash, fset.Position(reference.pos).Line, reference.what, reference.consequence))
 	}
 	return violations, permitted, nil
 }
@@ -115,6 +173,7 @@ func auditProcessSource(relSlash string, src []byte) (violations []string, permi
 type processReference struct {
 	pos          token.Pos
 	what         string
+	consequence  string
 	permittedDir string
 	// grantsPermission marks the import that proves the scan reached the
 	// permitted package, so the rule cannot pass vacuously.
@@ -133,9 +192,10 @@ func processReferences(node *ast.File) []processReference {
 				}
 				found = append(found, processReference{
 					pos:              imported.Pos(),
-					what:             "an import of " + rule.importPath,
+					what:             rule.verb() + " an import of " + rule.importPath,
+					consequence:      rule.consequence,
 					permittedDir:     rule.permittedDir,
-					grantsPermission: true,
+					grantsPermission: rule.provesTheScan,
 				})
 			}
 			continue
@@ -154,7 +214,8 @@ func processReferences(node *ast.File) []processReference {
 					localNames[ident.Name] && expression.Sel.Name == rule.symbol {
 					found = append(found, processReference{
 						pos:          expression.Pos(),
-						what:         qualified,
+						what:         rule.verb() + " " + qualified,
+						consequence:  rule.consequence,
 						permittedDir: rule.permittedDir,
 					})
 					return false
@@ -163,7 +224,8 @@ func processReferences(node *ast.File) []processReference {
 				if dotImported && expression.Name == rule.symbol {
 					found = append(found, processReference{
 						pos:          expression.Pos(),
-						what:         qualified + " under a dot import",
+						what:         rule.verb() + " " + qualified + " under a dot import",
+						consequence:  rule.consequence,
 						permittedDir: rule.permittedDir,
 					})
 				}
@@ -217,6 +279,54 @@ func TestProcessAuditVerdict(t *testing.T) {
 			source:        "package harness\nimport \"syscall\"\nvar v = syscall.Exec\n",
 			wantViolation: true,
 			mustMention:   "syscall.Exec",
+		},
+		{
+			// os.StartProcess calls this, so a caller can skip a layer and
+			// reach the same child.
+			name:          "syscall.ForkExec",
+			file:          "internal/harness/harness.go",
+			source:        "package harness\nimport \"syscall\"\nvar v, _ = syscall.ForkExec(\"/bin/sh\", nil, nil)\n",
+			wantViolation: true,
+			mustMention:   "syscall.ForkExec",
+		},
+		{
+			// Windows only. This tree does not build there, and the rule is
+			// written for the port rather than after it.
+			name:          "syscall.CreateProcess",
+			file:          "internal/harness/harness.go",
+			source:        "package harness\nimport \"syscall\"\nvar v = syscall.CreateProcess\n",
+			wantViolation: true,
+			mustMention:   "syscall.CreateProcess",
+		},
+		{
+			name:          "syscall.CreateProcessAsUser",
+			file:          "internal/harness/harness.go",
+			source:        "package harness\nimport \"syscall\"\nvar v = syscall.CreateProcessAsUser\n",
+			wantViolation: true,
+			mustMention:   "syscall.CreateProcessAsUser",
+		},
+		{
+			// A different rule sharing the walk: no child, and no permitted
+			// directory either.
+			name:          "an import of plugin",
+			file:          "internal/harness/harness.go",
+			source:        "package harness\nimport \"plugin\"\nvar v = plugin.Open\n",
+			wantViolation: true,
+			mustMention:   "loads native code into this process",
+		},
+		{
+			name:          "an import of plugin inside the permitted directory",
+			file:          "internal/exec/osrunner.go",
+			source:        "package exec\nimport \"plugin\"\nvar v = plugin.Open\n",
+			wantViolation: true,
+			mustMention:   "no directory may",
+		},
+		{
+			// A sibling in the same package that acts on a process which
+			// already exists is not a start.
+			name:   "syscall.Wait4",
+			file:   "internal/harness/harness.go",
+			source: "package harness\nimport \"syscall\"\nvar v = syscall.Wait4\n",
 		},
 		{
 			name:          "an aliased os/exec import",

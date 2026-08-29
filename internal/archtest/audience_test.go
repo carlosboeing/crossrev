@@ -14,7 +14,7 @@ import (
 // that this rule does not import the package it polices.
 const execPackage = "github.com/carlosboeing/crossrev/internal/exec"
 
-// audienceType and orchestratorConst are the two routes to the opt-out.
+// audienceType and orchestratorName identify the one object this rule reads.
 const (
 	audienceType     = execPackage + ".Audience"
 	orchestratorName = "AudienceOrchestrator"
@@ -41,18 +41,42 @@ const (
 // program is on the other end of Spec.Path, and that is not visible at the line
 // where the constant is written.
 //
-// So the constant is confined to the packages whose whole subject is running
-// one named program the orchestrator drives on its own behalf — `gh` in
+// So the name is confined to the packages whose whole subject is running one
+// named program the orchestrator drives on its own behalf — `gh` in
 // internal/forge/ghexec, git in internal/vcs — and adding a third consumer is a
 // decision that has to be made here, against this comment, rather than in the
 // file that wants it.
 //
-// # Both routes
+// # The type is the guard; this rule is the name check
 //
-// Naming the constant is one route. `exec.Audience(1)` is the other: it is the
-// same value with the name left off, and a rule that read only the constant
-// would answer nothing about it. Both are checked, which is the shape
-// TestFindingIDMintingBoundary uses for the same reason.
+// This used to scan for the VALUE as well as the name, because exec.Audience
+// was an integer and the opt-out was the constant 1. Every spelling of that
+// integer reached the opt-out with the name left off, and the list kept growing
+// as reviews planted more:
+//
+//	exec.Audience(1)                      a conversion
+//	exec.Spec{Audience: 1}                a keyed field
+//	const orch exec.Audience = 1          a typed constant declaration
+//	var orch exec.Audience = 1            a typed variable declaration
+//	exec.AudienceModelFacing + 1          arithmetic on the strict sibling
+//	s.Audience++                          an increment of the field
+//	table[1]++                            an increment of an array element
+//	json.Unmarshal([]byte("1"), &a)       a value computed at run time
+//
+// Two rounds of clauses caught the first seven; the eighth walked past all of
+// them, and would walk past any ninth clause too — a syntactic scan cannot see
+// a value that is computed. So exec.Audience is now a struct whose single field
+// is unexported (internal/exec/spec.go). Every line above is a compile error
+// outside internal/exec, and the unmarshal is a no-op there because
+// encoding/json cannot reach an unexported field. Nothing is left for a value
+// scan to find, so the clauses that looked for one are gone rather than kept as
+// dead checks.
+//
+// What remains is the job a name check is actually good for: the value exists,
+// it is reachable by name, and this says which directories may write that name.
+//
+// A read of an already-set value is deliberately not a violation. The opt-out
+// is the write.
 //
 // # What it does not close
 //
@@ -95,9 +119,9 @@ func TestOrchestratorAudienceIsConfinedToTwoPackages(t *testing.T) {
 				filepath.ToSlash(filepath.Dir(relPath)), true
 		}
 
-		// Route one: the constant, by name.
+		// The one route left: the value, by name.
 		for ident, obj := range pkg.TypesInfo.Uses {
-			if !isOrchestratorConst(obj) {
+			if !namesOrchestratorAudience(obj) {
 				continue
 			}
 			if pos, dir, ok := locate(ident); ok {
@@ -105,42 +129,23 @@ func TestOrchestratorAudienceIsConfinedToTwoPackages(t *testing.T) {
 			}
 		}
 		for ident, obj := range pkg.TypesInfo.Defs {
-			if !isOrchestratorConst(obj) {
+			if !namesOrchestratorAudience(obj) {
 				continue
 			}
 			if pos, dir, ok := locate(ident); ok {
 				record(pos, "declares exec."+orchestratorName, dir)
 			}
 		}
-
-		// Route two: the type, converted or constant, which reaches the same
-		// value without naming it.
-		for expr, tv := range pkg.TypesInfo.Types {
-			if tv.IsType() || tv.Type == nil || tv.Type.String() != audienceType {
-				continue
-			}
-			what := ""
-			if call, ok := expr.(*ast.CallExpr); ok {
-				if ftv, ok := pkg.TypesInfo.Types[call.Fun]; ok && ftv.IsType() {
-					what = "converts to exec.Audience"
-				}
-			}
-			if what == "" {
-				continue
-			}
-			if pos, dir, ok := locate(expr); ok {
-				record(pos, what, dir)
-			}
-		}
 	}
 
-	// A rule that matched nothing proves nothing. The constant is renamed or
+	// A rule that matched nothing proves nothing. The value is renamed or
 	// the loader stops resolving it and every package passes vacuously.
 	if permittedReferences == 0 {
 		t.Fatal("the scan found no reference to the orchestrator audience at all, so it proves nothing")
 	}
 
-	// One expression is recorded under both routes, so a position reports once.
+	// A declaration is both a Def and, in its own initialiser, a Use, so a
+	// position reports once.
 	sort.Slice(found, func(i, j int) bool { return found[i].where < found[j].where })
 	var last string
 	for _, v := range found {
@@ -152,12 +157,21 @@ func TestOrchestratorAudienceIsConfinedToTwoPackages(t *testing.T) {
 	}
 }
 
-func isOrchestratorConst(obj types.Object) bool {
-	konst, ok := obj.(*types.Const)
-	if !ok || konst.Name() != orchestratorName {
+// namesOrchestratorAudience matches the opt-out by name, package and type.
+//
+// The object kind is deliberately not asserted. It was a *types.Const and is now
+// a *types.Var, because a struct value cannot be a Go constant, and a rule that
+// pinned the kind would have gone quiet at that change rather than failing. The
+// type check is what stops a same-named object of some other type from being
+// mistaken for this one.
+func namesOrchestratorAudience(obj types.Object) bool {
+	if obj == nil || obj.Name() != orchestratorName {
 		return false
 	}
-	return konst.Pkg() != nil && konst.Pkg().Path() == execPackage
+	if obj.Pkg() == nil || obj.Pkg().Path() != execPackage {
+		return false
+	}
+	return obj.Type() != nil && obj.Type().String() == audienceType
 }
 
 // audienceOptOutPermitted names the three directories the audience may be
@@ -166,7 +180,7 @@ func isOrchestratorConst(obj types.Object) bool {
 // deliberately, because a test asserting the audience is set has to be able to
 // say it.
 //
-// internal/exec declares the constant, which has to live somewhere.
+// internal/exec declares the value, which has to live somewhere.
 // internal/forge/ghexec runs `gh`, which cannot authenticate without the
 // credential. internal/vcs runs git, which pushes over whatever credential
 // helper the environment configures — on a GitHub-hosted runner that is the
@@ -269,11 +283,33 @@ func TestSpecConstructionIsConfinedToTheGhClient(t *testing.T) {
 // a Path the caller chose would satisfy every other rule here and still be the
 // leak ADR 0001 forbids. Pinning the field to the package's own constant is
 // what ties the credential to the one program that may hold it.
+//
+// # Two shapes, because a literal is not the only way to set a field
+//
+// A review planted both of the ones a composite-literal walk cannot see, and
+// both passed:
+//
+//	s := exec.Spec{Path: program, …}; s.Path = elsewhere   set, then overwritten
+//	var s exec.Spec; s.Path = elsewhere; s.Audience = …    never a literal
+//
+// So the assignments are read as well. Inside client.go, a write to the Path or
+// the Audience of anything of this type has to be the same two values the
+// literal is held to. The check is the field rather than the variable, which is
+// what makes a Spec that never appears in a literal reach it.
+//
+// # What it still does not check
+//
+// The value on the right is matched by name — the identifier `program`, and a
+// selector ending in AudienceOrchestrator. A `const program = "curl"` would
+// satisfy it, and so would a local variable shadowing the constant. That is not
+// a scan's job to catch: the constant is declared in this file, fifteen lines
+// above the only Spec, and the diff that changed it would say so.
 func TestEveryGhSpecRunsTheGhProgram(t *testing.T) {
 	root := findRepoRoot(t)
 	pkgs := loadModulePackages(t)
 
-	literals := 0
+	// literals and writes together are what proves the scan reached something.
+	literals, writes := 0, 0
 	for _, pkg := range pkgs {
 		for _, file := range pkg.Syntax {
 			position := pkg.Fset.Position(file.Pos())
@@ -282,35 +318,89 @@ func TestEveryGhSpecRunsTheGhProgram(t *testing.T) {
 				continue
 			}
 			ast.Inspect(file, func(n ast.Node) bool {
-				lit, ok := n.(*ast.CompositeLit)
-				if !ok || pkg.TypesInfo == nil {
+				if pkg.TypesInfo == nil {
 					return true
 				}
-				tv, ok := pkg.TypesInfo.Types[lit]
-				if !ok || tv.Type == nil || tv.Type.String() != specType {
-					return true
-				}
-				literals++
-				fields := specFields(lit)
-
-				path, ok := fields["Path"].(*ast.Ident)
-				if !ok || path.Name != "program" {
-					t.Errorf("%s:%d builds a Spec whose Path is not the package's own `program` constant",
-						ghClientFile, pkg.Fset.Position(lit.Pos()).Line)
-				}
-				audience, ok := fields["Audience"].(*ast.SelectorExpr)
-				if !ok || audience.Sel.Name != orchestratorName {
-					t.Errorf("%s:%d builds a Spec that does not set the orchestrator audience",
-						ghClientFile, pkg.Fset.Position(lit.Pos()).Line)
+				switch node := n.(type) {
+				case *ast.CompositeLit:
+					tv, ok := pkg.TypesInfo.Types[node]
+					if !ok || tv.Type == nil || tv.Type.String() != specType {
+						return true
+					}
+					literals++
+					line := pkg.Fset.Position(node.Pos()).Line
+					fields := specFields(node)
+					if !isGhProgram(fields["Path"]) {
+						t.Errorf("%s:%d builds a Spec whose Path is not the package's own `program` constant",
+							ghClientFile, line)
+					}
+					if !isOrchestratorAudience(fields["Audience"]) {
+						t.Errorf("%s:%d builds a Spec that does not set the orchestrator audience",
+							ghClientFile, line)
+					}
+				case *ast.AssignStmt:
+					for at, target := range node.Lhs {
+						field, ok := target.(*ast.SelectorExpr)
+						if !ok || !isSpecTyped(pkg.TypesInfo, field.X) {
+							continue
+						}
+						if at >= len(node.Rhs) {
+							// A multi-value right-hand side assigns something
+							// this scan cannot name, so it is reported rather
+							// than skipped.
+							t.Errorf("%s:%d writes a Spec field from a call this rule cannot read",
+								ghClientFile, pkg.Fset.Position(target.Pos()).Line)
+							continue
+						}
+						value := node.Rhs[at]
+						line := pkg.Fset.Position(target.Pos()).Line
+						switch field.Sel.Name {
+						case "Path":
+							writes++
+							if !isGhProgram(value) {
+								t.Errorf("%s:%d sets a Spec's Path to something other than the package's own `program` constant",
+									ghClientFile, line)
+							}
+						case "Audience":
+							writes++
+							if !isOrchestratorAudience(value) {
+								t.Errorf("%s:%d sets a Spec's Audience to something other than the orchestrator audience",
+									ghClientFile, line)
+							}
+						}
+					}
 				}
 				return true
 			})
 		}
 	}
 
-	if literals == 0 {
-		t.Fatalf("no Spec literal was found in %s, so this rule checked nothing", ghClientFile)
+	if literals == 0 && writes == 0 {
+		t.Fatalf("no Spec literal or field write was found in %s, so this rule checked nothing", ghClientFile)
 	}
+}
+
+// isGhProgram reports the package's own `program` constant, by name.
+func isGhProgram(value ast.Expr) bool {
+	ident, ok := value.(*ast.Ident)
+	return ok && ident.Name == "program"
+}
+
+// isOrchestratorAudience reports exec.AudienceOrchestrator, by name.
+func isOrchestratorAudience(value ast.Expr) bool {
+	selector, ok := value.(*ast.SelectorExpr)
+	return ok && selector.Sel.Name == orchestratorName
+}
+
+// isSpecTyped reports an expression whose type is exec.Spec, whether it is the
+// value or a pointer to one.
+func isSpecTyped(info *types.Info, expr ast.Expr) bool {
+	tv, ok := info.Types[expr]
+	if !ok || tv.Type == nil {
+		return false
+	}
+	name := tv.Type.String()
+	return name == specType || name == "*"+specType
 }
 
 // specFields is the keyed fields of a composite literal, by name. A Spec built

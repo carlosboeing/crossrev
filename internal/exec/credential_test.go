@@ -1,6 +1,7 @@
 package exec_test
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"strconv"
@@ -18,6 +19,65 @@ func TestZeroSpecIsModelFacing(t *testing.T) {
 	}
 	if exec.AudienceModelFacing == exec.AudienceOrchestrator {
 		t.Fatal("the two audiences must be distinguishable")
+	}
+}
+
+// An Audience cannot be built out of an integer, a JSON document, or anything
+// else a package outside internal/exec can produce.
+//
+// This is the route that ended the enumeration of spellings. Audience was an
+// integer, the confinement rule in internal/archtest scanned for the syntax
+// that wrote the opt-out value, and
+//
+//	var a exec.Audience
+//	_ = json.Unmarshal([]byte("1"), &a)
+//
+// named nothing, converted nothing, declared no constant and assigned to no
+// target the scan could read, while leaving the child orchestrator-facing at
+// run time. The field is unexported now, so encoding/json ignores it — an
+// unmarshal that names it explicitly succeeds and changes nothing — and every
+// other spelling is a compile error. The value stays model-facing, so the run
+// is refused.
+func TestAnAudienceCannotBeUnmarshalled(t *testing.T) {
+	for _, document := range []string{`1`, `true`, `{"orchestrator":true}`} {
+		var audience exec.Audience
+		// The error is not asserted: `1` and `true` fail to decode and the
+		// object decodes cleanly into nothing. What matters is the value after.
+		_ = json.Unmarshal([]byte(document), &audience)
+
+		if audience != exec.AudienceModelFacing {
+			t.Errorf("unmarshalling %s produced audience %v, want AudienceModelFacing", document, audience)
+		}
+
+		spec := helperSpec("exit", "0")
+		spec.Audience = audience
+		spec.Env = append(spec.Env, "GH_TOKEN=not-a-real-token")
+		if result := run(t, spec); !errors.Is(result.Err, exec.ErrForgeCredential) {
+			t.Errorf("a child whose audience came from %s was not refused: %v", document, result.Err)
+		}
+	}
+}
+
+// Reassigning the exported audience variables cannot switch the refusal off.
+//
+// Audience is a struct, so its two values are variables rather than constants —
+// a struct value cannot be a Go constant — and an exported variable is writable
+// from any package in the binary. That would matter if Run compared against
+// one. It reads spec.Audience's own field instead (internal/exec/osrunner.go),
+// so a Spec that never set the field is refused whatever these two hold.
+func TestRunDoesNotDecideThroughTheExportedAudienceVariables(t *testing.T) {
+	modelFacing, orchestrator := exec.AudienceModelFacing, exec.AudienceOrchestrator
+	t.Cleanup(func() {
+		exec.AudienceModelFacing, exec.AudienceOrchestrator = modelFacing, orchestrator
+	})
+
+	exec.AudienceModelFacing = orchestrator
+	exec.AudienceOrchestrator = modelFacing
+
+	spec := helperSpec("exit", "0")
+	spec.Env = append(spec.Env, "GH_TOKEN=not-a-real-token")
+	if result := run(t, spec); !errors.Is(result.Err, exec.ErrForgeCredential) {
+		t.Errorf("a model-facing child was started after the audience variables were swapped: %v", result.Err)
 	}
 }
 
@@ -212,5 +272,51 @@ func TestRunReportsHowLongTheChildTook(t *testing.T) {
 	}
 	if slow.Duration.Milliseconds() < sleepFor-50 {
 		t.Errorf("Duration = %s, shorter than the %dms the child slept", slow.Duration, sleepFor)
+	}
+}
+
+// ForgeCredentialNames is the same four, in the same order, for a caller that
+// has to remove them from an environment before it reaches Run.
+//
+// It is compared against forgeCredentials, this package's own test-side copy,
+// for the reason stated above the test that uses it: a check that read the
+// production list would lose a name from itself in the edit that lost it from
+// production, and pass.
+func TestForgeCredentialNamesIsTheFourTheAdaptersStrip(t *testing.T) {
+	got := exec.ForgeCredentialNames()
+	if len(got) != len(forgeCredentials) {
+		t.Fatalf("ForgeCredentialNames = %v, want %v", got, forgeCredentials)
+	}
+	for at, want := range forgeCredentials {
+		if got[at] != want {
+			t.Errorf("ForgeCredentialNames()[%d] = %q, want %q", at, got[at], want)
+		}
+	}
+}
+
+// The accessor answers a fresh slice each time. An exported slice variable is
+// writable from any package in the binary, and shortening this one would widen
+// the ADR 0001 boundary everywhere at once.
+func TestForgeCredentialNamesCannotBeWrittenThrough(t *testing.T) {
+	got := exec.ForgeCredentialNames()
+	got[0] = "OVERWRITTEN"
+
+	if second := exec.ForgeCredentialNames(); second[0] != forgeCredentials[0] {
+		t.Errorf("writing through the accessor's result changed the list: %v", second)
+	}
+}
+
+// And the list it answers is still the one Run refuses on. A copy that drifted
+// from the private list would let a caller strip four names and be refused for
+// a fifth it never heard of — or worse, strip four that no longer matter.
+func TestEveryNameForgeCredentialNamesGivesIsOneRunRefuses(t *testing.T) {
+	for _, name := range exec.ForgeCredentialNames() {
+		spec := helperSpec("exit", "0")
+		spec.Env = append(spec.Env, name+"=irrelevant")
+
+		result := run(t, spec)
+		if !errors.Is(result.Err, exec.ErrForgeCredential) {
+			t.Errorf("a model-facing child carrying %s was not refused: %v", name, result.Err)
+		}
 	}
 }
