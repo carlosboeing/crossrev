@@ -334,12 +334,21 @@ func decodePages[T any](b []byte) []T {
 // excerpt bounds a piece of gh's output for a message a person reads.
 //
 // Cut by character rather than by byte, so a multi-byte rune is not halved, and
-// with anything that is not printable replaced. A terminal reads an escape
+// with anything that is not graphic replaced. A terminal reads an escape
 // sequence rather than showing it, and gh's output is the API's answer rather
 // than anything CrossRev wrote.
+//
+// unicode.IsGraphic is the whole test. It keeps the ordinary space, which is
+// category Zs and so graphic, and refuses a tab, a newline and an escape — so
+// a `r == ' '` arm beside it would never decide anything.
+//
+// Both call sites render the result with %q, which would escape a control
+// character rather than emit it, so this is the second of two. It is here
+// because the first is a property of one verb at one call site: the excerpt is
+// what is safe to print, and printing it with %s must not be the difference.
 func excerpt(s string, limit int) string {
 	cleaned := strings.Map(func(r rune) rune {
-		if r == ' ' || unicode.IsGraphic(r) {
+		if unicode.IsGraphic(r) {
 			return r
 		}
 		return '\uFFFD'

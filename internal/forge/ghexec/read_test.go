@@ -394,8 +394,15 @@ func TestPullRequestDiffKeepsTheTrailingNewline(t *testing.T) {
 
 // gh's stdout is the API's answer, and this is the only route from it into
 // text an operator reads.
+//
+// The escape sits inside the excerpt rather than past it, which is what makes
+// this measure the scrub: an escape at offset 4000 is cut away by the bound
+// and says nothing about what happens to one that is quoted. What the scrub
+// leaves in its place is the replacement character, and the assertion is on
+// that rather than on the absence of a raw byte, because %q would render a
+// surviving escape as four printable characters and pass either way.
 func TestRepoSlugBoundsWhatItQuotesBackFromGh(t *testing.T) {
-	page := "<html>" + strings.Repeat("A", 4000) + "\x1b[2J\x07</html>"
+	page := "<html>\x1b[2J\x07" + strings.Repeat("A", 4000) + "</html>"
 
 	c, _ := client(t, out(page))
 	_, err := c.RepoSlug(context.Background())
@@ -413,7 +420,31 @@ func TestRepoSlugBoundsWhatItQuotesBackFromGh(t *testing.T) {
 	if strings.ContainsAny(message, "\x1b\x07") {
 		t.Errorf("the refusal carries a terminal escape sequence: %q", message)
 	}
+	if !strings.Contains(message, "\uFFFD") {
+		t.Errorf("the escape was not replaced, so nothing scrubbed it: %q", message)
+	}
+	if strings.Contains(message, `\x1b`) || strings.Contains(message, `\a`) {
+		t.Errorf("the escape reached the message and only %%q kept it off the terminal: %q", message)
+	}
 	if !errors.Is(err, core.ErrSlug) {
 		t.Errorf("error = %v, want it to carry core.ErrSlug", err)
+	}
+}
+
+// The space is what makes the scrub's test one condition rather than two:
+// unicode.IsGraphic already keeps it, and the tab and newline beside it are
+// replaced.
+func TestRepoSlugKeepsTheSpacesInWhatItQuotes(t *testing.T) {
+	c, _ := client(t, out("not a slug\tafter a tab"))
+	_, err := c.RepoSlug(context.Background())
+	if err == nil {
+		t.Fatal("an unparseable answer was accepted")
+	}
+	message := err.Error()
+	if !strings.Contains(message, "not a slug") {
+		t.Errorf("the spaces were replaced: %q", message)
+	}
+	if !strings.Contains(message, "\uFFFD") {
+		t.Errorf("the tab was not replaced: %q", message)
 	}
 }
