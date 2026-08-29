@@ -110,13 +110,14 @@ else
   fail=1
 fi
 
-# The Go packages embed the schemas and the skills, and `go:embed` cannot reach a
+# The Go packages embed the schemas, the skills and the harness descriptor, and
+# `go:embed` cannot reach a
 # file above its own package. The copies under internal/*/assets/ are generated,
 # so a hand edit to one changes what a binary sends a harness while the file a
 # contributor edits stays as it was.
 printf '\nembedded assets\n'
 if bash scripts/sync-embedded-assets.sh --check >/dev/null 2>&1; then
-  printf '  ok    the embedded schemas and skills match schemas/ and skills/\n'
+  printf '  ok    the embedded schemas, skills and descriptor match their canonical files\n'
 else
   printf '  FAIL  an embedded copy differs from its canonical file\n'
   bash scripts/sync-embedded-assets.sh --check 2>&1 | sed 's/^/        /'
