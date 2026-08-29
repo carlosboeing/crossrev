@@ -403,7 +403,13 @@ gh_issue_comment() {
 # `1:sentence-length:…` and matched none of that helper's keywords.
 _gh_git_tail() {
   local text="$1" cap="${2:-400}" picked
-  picked="$(printf '%s' "$text" | grep -v '^[[:space:]]*$' | tail -5)"
+  # LC_ALL=C on the grep, for the reason log_redact pins it on its sed. GNU grep
+  # under a UTF-8 locale treats input holding a byte that is not valid UTF-8 as
+  # binary and withholds it, so on Linux this returned nothing at all for
+  # exactly the output worth publishing: a hook or a filename in another
+  # encoding. macOS passed the same bytes through, so the same push failure
+  # published a reason locally and none on a runner. C makes both byte-oriented.
+  picked="$(printf '%s' "$text" | LC_ALL=C grep -v '^[[:space:]]*$' | tail -5)"
   [[ -n "$picked" ]] || return 1
   (( ${#picked} > cap )) && picked="…${picked: -cap}"
   printf '%s' "$picked"
