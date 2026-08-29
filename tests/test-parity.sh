@@ -40,6 +40,8 @@ source "$HERE/../lib/log.sh"
 source "$HERE/../lib/credentials.sh"
 # shellcheck source=../lib/usage.sh
 source "$HERE/../lib/usage.sh"
+# shellcheck source=../lib/github.sh
+source "$HERE/../lib/github.sh"
 
 export GIT_AUTHOR_NAME="crossrev"
 export GIT_AUTHOR_EMAIL="test@example.com"
@@ -517,6 +519,19 @@ while IFS= read -r c; do
   h="$(jq -r .harness <<<"$c")"
   is "sandbox args: $h" "$(sandbox_args_for "$h")" "$(jq -r .args <<<"$c")"
 done < <(jq -c '.sandbox_args[]' "$PARITY/paths.json")
+
+
+# --- the failure text a push publishes --------------------------------------
+
+while IFS= read -r c; do
+  name="$(jq -r .name <<<"$c")"
+  text="$(unb64 "$(jq -r .text_b64 <<<"$c")"; printf 'x')"; text="${text%x}"
+  _gh_git_tail "$text" >/dev/null 2>&1 && rc=0 || rc=$?
+  got="$(_gh_git_tail "$text" 2>/dev/null; printf 'x')"; got="${got%x}"
+  want="$(unb64 "$(jq -r .tail_b64 <<<"$c")"; printf 'x')"; want="${want%x}"
+  is "git tail rc: $name" "$rc" "$(jq -r .rc <<<"$c")"
+  is "git tail: $name" "$got" "$want"
+done < <(jq -c '.cases[]' "$PARITY/git_tail.json")
 
 printf '\n  %d passed, %d failed\n' "$pass" "$fail"
 (( fail == 0 ))

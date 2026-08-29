@@ -52,6 +52,8 @@ source "$REPO_ROOT/lib/log.sh"
 source "$REPO_ROOT/lib/credentials.sh"
 # shellcheck source=../lib/usage.sh
 source "$REPO_ROOT/lib/usage.sh"
+# shellcheck source=../lib/github.sh
+source "$REPO_ROOT/lib/github.sh"
 
 platform="$(uname -s -r -m)"
 tr_path="$(command -v tr)"
@@ -1141,6 +1143,53 @@ jq -n --argjson captured "$(captured_json)" \
   --argjson cases "$(slug_cases | jq -s .)" \
   '{captured:$captured, function:"legs_github_slug", cases:$cases}' \
   >"$FIXDIR/github_slug.json"
+
+# --- the failure text a push publishes ---------------------------------------
+#
+# _gh_git_tail selects the last five non-blank lines of git's output, caps them
+# and hands them to a pull request comment. Its answers are frozen in base64
+# because the case worth freezing is the one that is not text: a hook printing
+# another encoding, or a filename in one. The function pins LC_ALL=C on its grep
+# for that reason, and an unpinned grep answered nothing at all on Linux.
+
+tail_case() { # name text
+  local out rc
+  # The status is taken from the function itself, not from a substitution that
+  # ends in a sentinel: `$( _gh_git_tail …; printf x )` succeeds whatever the
+  # function returned, because printf is the last command in it. The sentinel is
+  # still needed to keep a trailing newline, so the two are captured apart.
+  _gh_git_tail "$2" >/dev/null 2>&1 && rc=0 || rc=$?
+  out="$(_gh_git_tail "$2" 2>/dev/null; printf 'x')"
+  out="${out%x}"
+  jq -cn --arg n "$1" --arg tb "$(b64 "$2")" --arg ob "$(b64 "$out")" --argjson rc "$rc" \
+    '{name:$n, text_b64:$tb, tail_b64:$ob, rc:$rc}'
+}
+
+tail_cases() {
+  tail_case "one-line" "error: failed to push"
+  tail_case "five-lines" "$(printf 'a\nb\nc\nd\ne')"
+  tail_case "six-lines-keeps-the-last-five" "$(printf 'a\nb\nc\nd\ne\nf')"
+  tail_case "blank-lines-dropped" "$(printf 'a\n\n   \n\tb\nc')"
+  tail_case "only-blank-lines-refuses" "$(printf '\n   \n\t\n')"
+  tail_case "empty-refuses" ""
+  # The cap, on both sides of the boundary. It counts characters, not bytes.
+  tail_case "at-the-cap" "$(printf 'a%.0s' $(seq 1 400))"
+  tail_case "one-past-the-cap" "$(printf 'a%.0s' $(seq 1 401))"
+  tail_case "multibyte-at-the-cap" "$(printf '\xc3\xa9%.0s' $(seq 1 400))"
+  tail_case "multibyte-past-the-cap" "$(printf '\xc3\xa9%.0s' $(seq 1 401))"
+  # Bytes that are not text. These answered nothing at all under an unpinned
+  # grep on GNU, and the whole reason vanished from the published comment.
+  tail_case "bare-invalid-bytes" "$(printf '\xff%.0s' $(seq 1 500))"
+  tail_case "continuation-bytes" "$(printf '\x80\x81%.0s' $(seq 1 300))"
+  tail_case "latin-1-text" "$(printf 'caf\xe9 %.0s' $(seq 1 120))"
+  tail_case "a-truncated-sequence-mid-string" "$(printf 'a%.0s' $(seq 1 300))$(printf '\xc3')$(printf 'b%.0s' $(seq 1 200))"
+  tail_case "an-invalid-byte-under-the-cap" "$(printf 'error: \xff\xfe failed')"
+}
+
+jq -n --argjson captured "$(captured_json)" \
+  --argjson cases "$(tail_cases | jq -s .)" \
+  '{captured:$captured, function:"_gh_git_tail", cases:$cases}' \
+  >"$FIXDIR/git_tail.json"
 
 # --- credential reads: strip sets, JWT claims and durations -------------------
 #
