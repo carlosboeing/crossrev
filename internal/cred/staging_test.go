@@ -722,3 +722,126 @@ func TestTheStagingWriteRefusesAFileThatIsAlreadyThere(t *testing.T) {
 		t.Errorf("the credential is %q", got)
 	}
 }
+
+// flakyRemoveFS fails the first RemoveAll and then behaves.
+//
+// A full disk, a busy mount and a permission fixed a moment later all look like
+// this: one failure, then success.
+type flakyRemoveFS struct {
+	cred.OSFileSystem
+	failures int
+	calls    int
+}
+
+func (f *flakyRemoveFS) RemoveAll(path string) error {
+	f.calls++
+	if f.calls <= f.failures {
+		return fs.ErrPermission
+	}
+	return f.OSFileSystem.RemoveAll(path)
+}
+
+// envRefusingRestore is a fakeEnv that can be made to refuse every write after
+// Prepare has exported the staging variable, so only the restore fails.
+type envRefusingRestore struct {
+	*fakeEnv
+	refuse bool
+}
+
+func (e *envRefusingRestore) Set(name, value string) error {
+	if e.refuse {
+		return fs.ErrPermission
+	}
+	return e.fakeEnv.Set(name, value)
+}
+
+func (e *envRefusingRestore) Unset(name string) error {
+	if e.refuse {
+		return fs.ErrPermission
+	}
+	return e.fakeEnv.Unset(name)
+}
+
+// A Discard whose removal failed leaves the handle usable, so a caller that
+// retries gets a retry.
+//
+// The handle used to be cleared before the removal was attempted, on the
+// reasoning that a later failure must not be retried "into a second removal of
+// a path this handle no longer describes". A failed RemoveAll means the handle
+// does still describe it: the credential bytes are on disk, and clearing turned
+// the obvious repair — call Discard again — into a silent no-op.
+func TestARetriedDiscardRemovesADirectoryTheFirstCallCouldNot(t *testing.T) {
+	filesystem := &flakyRemoveFS{failures: 1}
+	env := newEnv(map[string]string{"CROSSREV_CODEX_AUTH": string(credential(t, 86400))})
+
+	staged, err := cred.Prepare(codex(t), "", cred.Options{
+		Env: env, FS: filesystem, Now: fixedNow, ScratchRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	dir := staged.Dir
+	if dir == "" {
+		t.Fatal("Prepare staged nothing, so this test would prove nothing")
+	}
+
+	if err := cred.Discard(staged); err == nil {
+		t.Fatal("the first Discard reported success while RemoveAll was failing")
+	}
+	if _, err := os.Stat(dir); err != nil {
+		t.Fatalf("the scratch home is gone after a failed removal: %v", err)
+	}
+	if staged.Dir != dir {
+		t.Fatalf("a failed Discard cleared the handle: Dir = %q", staged.Dir)
+	}
+
+	if err := cred.Discard(staged); err != nil {
+		t.Fatalf("the retried Discard: %v", err)
+	}
+	if _, err := os.Stat(dir); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("the scratch home survived the retry: %v", err)
+	}
+	if staged.Dir != "" {
+		t.Errorf("a Discard that succeeded left Dir = %q", staged.Dir)
+	}
+	// And a third call is the no-op it always was.
+	if err := cred.Discard(staged); err != nil {
+		t.Errorf("a third Discard: %v", err)
+	}
+	if filesystem.calls != 2 {
+		t.Errorf("RemoveAll was called %d times, want 2", filesystem.calls)
+	}
+}
+
+// When the removal and the environment restore both fail, both are reported.
+//
+// The environment failure used to be dropped: the removal error returned first,
+// and a caller told the directory is still there was not told the staging
+// variable still points at it.
+func TestADiscardThatFailsTwiceReportsBothFailures(t *testing.T) {
+	filesystem := &flakyRemoveFS{failures: 1}
+	env := &envRefusingRestore{fakeEnv: newEnv(map[string]string{
+		"CROSSREV_CODEX_AUTH": string(credential(t, 86400)),
+	})}
+
+	staged, err := cred.Prepare(codex(t), "", cred.Options{
+		Env: env, FS: filesystem, Now: fixedNow, ScratchRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	// The export has happened; from here every write refuses.
+	env.refuse = true
+
+	err = cred.Discard(staged)
+	if err == nil {
+		t.Fatal("a Discard that failed twice reported success")
+	}
+	message := err.Error()
+	if !strings.Contains(message, "removing the scratch credential home") {
+		t.Errorf("the error does not name the removal failure: %q", message)
+	}
+	if !strings.Contains(message, "restoring CODEX_HOME") {
+		t.Errorf("the error does not name the restore failure: %q", message)
+	}
+}

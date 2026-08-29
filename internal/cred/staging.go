@@ -10,6 +10,7 @@
 package cred
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -297,35 +298,54 @@ func stagingFailure(d Descriptor, dir string, o Options, err error) error {
 // (lib/credentials.sh:22-29). One process runs both legs under
 // `crossrev cycle`, so that is the ordinary path.
 //
-// It is idempotent and nil-safe: a second call, or a call on a leg that staged
-// nothing, does nothing at all.
+// It is nil-safe, and idempotent after it succeeds: a second call on a
+// discarded handle, or a call on a leg that staged nothing, does nothing at all.
+//
+// # A failed Discard leaves the handle usable
+//
+// The handle used to be cleared first, on the reasoning that a failure below
+// "cannot be retried into a second removal of a path this handle no longer
+// describes". That reasoned about a case the code does not reach: a RemoveAll
+// that failed means the handle DOES still describe the path, the credential
+// bytes are still on disk, and clearing turned the obvious repair — call
+// Discard again — into a silent no-op. RemoveAll on a path that is already gone
+// answers nil, so a second removal of a path that was removed costs nothing.
+//
+// So the fields are cleared only once the whole discard has succeeded, and both
+// failures are reported together: a caller that is told the directory is still
+// there also needs to know the variable still points at it.
 func Discard(s *Staged) error {
 	if s == nil || s.Dir == "" {
 		return nil
 	}
-	dir, name, was, wasSet, options := s.Dir, s.Env, s.envWas, s.envWasSet, s.options
 
-	// Cleared first, so a failure below cannot be retried into a second removal
-	// of a path this handle no longer describes.
-	s.Dir, s.File, s.Env, s.envWas, s.envWasSet = "", "", "", "", false
+	removeErr := s.options.fs().RemoveAll(s.Dir)
 
-	removeErr := options.fs().RemoveAll(dir)
-
+	// Attempted whatever the removal did. A staging variable left pointing at a
+	// directory is the fault lib/credentials.sh:22-29 records, and it is not
+	// made better by the directory still being there.
 	var envErr error
-	if name != "" {
-		if wasSet {
-			envErr = options.env().Set(name, was)
+	if s.Env != "" {
+		if s.envWasSet {
+			envErr = s.options.env().Set(s.Env, s.envWas)
 		} else {
-			envErr = options.env().Unset(name)
+			envErr = s.options.env().Unset(s.Env)
 		}
 	}
 
-	if removeErr != nil {
-		return fmt.Errorf("removing the scratch credential home: %w", removeErr)
+	if removeErr != nil || envErr != nil {
+		var failures []error
+		if removeErr != nil {
+			failures = append(failures, fmt.Errorf("removing the scratch credential home: %w", removeErr))
+		}
+		if envErr != nil {
+			failures = append(failures, fmt.Errorf("restoring %s: %w", s.Env, envErr))
+		}
+		// The handle is left as it was, so calling Discard again is a retry.
+		return errors.Join(failures...)
 	}
-	if envErr != nil {
-		return fmt.Errorf("restoring %s: %w", name, envErr)
-	}
+
+	s.Dir, s.File, s.Env, s.envWas, s.envWasSet = "", "", "", "", false
 	return nil
 }
 
