@@ -149,6 +149,12 @@ func TestParseClaimsRefusesAValueThatIsNotAToken(t *testing.T) {
 		{"empty", ""},
 		{"no dots", "abcdef"},
 		{"one dot", "abc.def"},
+		// One dot, and everything after it is a valid base64url payload that
+		// decodes to a JSON object. Without this the two-separator rule is
+		// unpinned: "abc.def" fails at the decode instead, so a build that
+		// accepted a one-dot token would still refuse that one.
+		{"one dot with a payload that would otherwise parse",
+			"aaa." + base64.RawURLEncoding.EncodeToString([]byte(`{"exp":1893456000}`))},
 		{"an empty payload segment", "aaa..ccc"},
 		{"a payload that is not base64url", "aaa.!!!!.ccc"},
 		{"a payload that decodes to something that is not JSON", "aaa.bm90IGpzb24.ccc"},
@@ -169,27 +175,46 @@ func TestParseClaimsRefusesAValueThatIsNotAToken(t *testing.T) {
 // byte of a credential is still a byte of a credential — which is why
 // decodeSegment drops it rather than wrapping it.
 func TestARefusalNeverQuotesTheToken(t *testing.T) {
-	secret := "s3cr3tCLAIMVALUE"
+	const secret = "s3cr3tCLAIMVALUE"
 	for _, tc := range []struct {
-		name    string
+		name string
+		// payload is base64url-encoded into the token. segment is used
+		// verbatim instead, for the arm where the segment is what fails.
 		payload string
+		segment string
 	}{
-		{"trailing content after the object", `{"iss":"` + secret + `"} trailing`},
-		{"not JSON at all", `iss=` + secret},
+		{name: "trailing content after the object", payload: `{"iss":"` + secret + `"} trailing`},
+		{name: "not JSON at all", payload: `iss=` + secret},
+		// The base64 arm. encoding/base64 answers CorruptInputError, whose
+		// message names the offset it stopped at — and decodeSegment drops it
+		// rather than wrapping it, because a byte of a credential is still a
+		// byte of a credential. Nothing enforced that: the two cases above
+		// both decode cleanly and fail one step later at the JSON, so the arm
+		// had no assertion at all.
+		{name: "a payload segment that is not base64url", segment: secret + "!!!!"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			// The control: a leak would have something to leak.
-			if !strings.Contains(tc.payload, secret) {
-				t.Fatalf("the fixture payload holds no secret, so this proves nothing")
+			encoded := tc.segment
+			if encoded == "" {
+				encoded = base64.RawURLEncoding.EncodeToString([]byte(tc.payload))
 			}
-			encoded := base64.RawURLEncoding.EncodeToString([]byte(tc.payload))
 			token := "header." + encoded + ".signature"
+
+			// The control: a leak would have something to leak. It is the
+			// payload that carries the secret where the token is encoded, and
+			// the token itself where the segment is verbatim.
+			if !strings.Contains(tc.payload+tc.segment, secret) {
+				t.Fatal("the fixture holds no secret, so this proves nothing")
+			}
 
 			_, err := cred.ParseClaims(token)
 			if err == nil {
 				t.Fatal("the payload parsed")
 			}
 			for _, forbidden := range []string{secret, tc.payload, encoded, token} {
+				if forbidden == "" {
+					continue
+				}
 				if strings.Contains(err.Error(), forbidden) {
 					t.Errorf("the refusal quotes the credential: %q", err.Error())
 				}

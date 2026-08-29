@@ -142,6 +142,18 @@ func TestLoadRefusesADescriptorItCannotReasonAbout(t *testing.T) {
 		{"an empty harnesses array", `{"version":1,"harnesses":[]}`},
 		{"an entry with no name", `{"harnesses":[{"credential":{}}]}`},
 		{"a duplicated name", `{"harnesses":[{"name":"a"},{"name":"a"}]}`},
+		// The staging path is where a restored credential is written, so a
+		// path that leaves the scratch home is refused at the descriptor
+		// rather than at the write. lib/harnesses.sh:71-73 refuses the same
+		// three shapes, and Load had none of them.
+		{"a staging path that escapes the scratch home",
+			`{"harnesses":[{"name":"a","credential":{"staging":{"path":"../../auth.json"}}}]}`},
+		{"a staging path with a .. segment in the middle",
+			`{"harnesses":[{"name":"a","credential":{"staging":{"path":"opencode/../../auth.json"}}}]}`},
+		{"an absolute staging path",
+			`{"harnesses":[{"name":"a","credential":{"staging":{"path":"/etc/auth.json"}}}]}`},
+		{"an empty staging path",
+			`{"harnesses":[{"name":"a","credential":{"staging":{"path":""}}}]}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if _, err := cred.Load([]byte(tc.raw)); !errors.Is(err, cred.ErrDescriptor) {
@@ -162,5 +174,35 @@ func TestLoadAcceptsTheShippedDescriptor(t *testing.T) {
 	}
 	if len(doc.Names()) != 5 {
 		t.Errorf("names = %v, want five harnesses", doc.Names())
+	}
+}
+
+// A null staging path is not an empty one. The shell's validator skips null and
+// refuses "" (lib/harnesses.sh:71-73), and both decode into the same Go string
+// — which is what Staging.pathDeclared is for. Every harness that stages
+// nothing writes null.
+func TestANullStagingPathIsSkippedRatherThanRefused(t *testing.T) {
+	doc, err := cred.Load([]byte(`{"harnesses":[{"name":"a","credential":{"staging":{"kind":"none","path":null}}}]}`))
+	if err != nil {
+		t.Fatalf("a null staging path was refused: %v", err)
+	}
+	if got := doc.For("a").Credential.Staging.Path; got != "" {
+		t.Errorf("staging path = %q, want empty", got)
+	}
+
+	// And an absent key, which is the same fact written differently.
+	if _, err := cred.Load([]byte(`{"harnesses":[{"name":"a","credential":{"staging":{"kind":"none"}}}]}`)); err != nil {
+		t.Fatalf("an absent staging path was refused: %v", err)
+	}
+}
+
+// A dot inside a segment is not a `..` segment, and refusing it would refuse
+// every dotfile a harness might stage into.
+func TestAStagingPathMayCarryDotsThatAreNotASegment(t *testing.T) {
+	for _, path := range []string{"auth.json", "opencode/auth.json", ".config/auth.json", "a..b/auth.json"} {
+		raw := `{"harnesses":[{"name":"a","credential":{"staging":{"path":"` + path + `"}}}]}`
+		if _, err := cred.Load([]byte(raw)); err != nil {
+			t.Errorf("Load refused the staging path %q: %v", path, err)
+		}
 	}
 }

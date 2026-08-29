@@ -624,3 +624,101 @@ func TestOSEnvironmentReadsAndWritesTheProcessEnvironment(t *testing.T) {
 		t.Error("Unset left the variable set")
 	}
 }
+
+// A staging path with a `..` segment writes the credential outside the scratch
+// home, and Discard's RemoveAll of that home never reaches it — so a restored
+// credential outlives the leg that borrowed it, on a disk nobody clears.
+//
+// Load refuses the descriptor. Prepare refuses the path again, because a
+// Descriptor is an exported value any caller can build and this is the write.
+func TestPrepareRefusesAStagingPathThatLeavesTheScratchHome(t *testing.T) {
+	for _, path := range []string{"../escaped.json", "opencode/../../escaped.json", "", "/etc/escaped.json"} {
+		t.Run(path, func(t *testing.T) {
+			root := t.TempDir()
+			env := newEnv(map[string]string{"CROSSREV_ESCAPE_AUTH": `{"any":"thing"}`})
+			d := cred.Descriptor{Harness: "probe", Credential: cred.Credential{
+				Secret:  "CROSSREV_ESCAPE_AUTH",
+				Staging: cred.Staging{Kind: "file", Env: "PROBE_HOME", Path: path},
+			}}
+
+			staged, err := cred.Prepare(d, "", cred.Options{Env: env, Now: fixedNow, ScratchRoot: root})
+			if !errors.Is(err, cred.ErrStaging) {
+				t.Fatalf("Prepare error = %v, want ErrStaging", err)
+			}
+			if !errors.Is(err, cred.ErrDescriptor) {
+				t.Errorf("the refusal does not name the descriptor as the fault: %v", err)
+			}
+			if staged.Dir != "" || staged.File != "" {
+				t.Errorf("a refused Prepare handed back %+v", staged)
+			}
+			if _, set := env.Lookup("PROBE_HOME"); set {
+				t.Error("a refused Prepare exported the staging variable anyway")
+			}
+			// Nothing written anywhere: not inside the scratch root, and not
+			// beside it either, which is where a `..` segment lands.
+			entries, err := os.ReadDir(root)
+			if err != nil {
+				t.Fatalf("reading the scratch root: %v", err)
+			}
+			if len(entries) != 0 {
+				t.Errorf("a refused Prepare left %d entries in the scratch root", len(entries))
+			}
+			if _, err := os.Stat(filepath.Join(filepath.Dir(root), "escaped.json")); !errors.Is(err, fs.ErrNotExist) {
+				t.Errorf("the credential was written beside the scratch root: %v", err)
+			}
+		})
+	}
+}
+
+// 0600 from birth, which is the property this package claims. os.WriteFile
+// applies its mode at creation only, so a file that was already there keeps the
+// mode it had — measured: a 0644 file rewritten at 0600 stayed 0644, and a
+// write to a symlink landed on the target at 0644 with no error.
+//
+// The scratch home is fresh from MkdirTemp, so neither should be reachable. The
+// write refuses them anyway, because "should not be reachable" is the sentence
+// that precedes every one of these.
+func TestTheStagingWriteRefusesAFileThatIsAlreadyThere(t *testing.T) {
+	var write cred.OSFileSystem
+	dir := t.TempDir()
+
+	existing := filepath.Join(dir, "existing.json")
+	if err := os.WriteFile(existing, []byte("older"), 0o644); err != nil {
+		t.Fatalf("building the fixture: %v", err)
+	}
+	if err := write.WriteNew(existing, []byte("s3cr3t"), 0o600); !errors.Is(err, fs.ErrExist) {
+		t.Errorf("WriteNew over an existing file = %v, want ErrExist", err)
+	}
+	if got, _ := os.ReadFile(existing); string(got) != "older" {
+		t.Errorf("the existing file was overwritten: %q", got)
+	}
+	if got := mode(t, existing); got != 0o644 {
+		t.Errorf("the existing file is mode %o, want its own 644 untouched", got)
+	}
+
+	target := filepath.Join(dir, "target.json")
+	if err := os.WriteFile(target, []byte("target"), 0o644); err != nil {
+		t.Fatalf("building the fixture: %v", err)
+	}
+	link := filepath.Join(dir, "link.json")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatalf("building the fixture: %v", err)
+	}
+	if err := write.WriteNew(link, []byte("s3cr3t"), 0o600); !errors.Is(err, fs.ErrExist) {
+		t.Errorf("WriteNew through a symlink = %v, want ErrExist", err)
+	}
+	if got, _ := os.ReadFile(target); string(got) != "target" {
+		t.Errorf("the credential was written through the symlink: %q", got)
+	}
+
+	fresh := filepath.Join(dir, "fresh.json")
+	if err := write.WriteNew(fresh, []byte("s3cr3t"), 0o600); err != nil {
+		t.Fatalf("WriteNew on a name that was free: %v", err)
+	}
+	if got := mode(t, fresh); got != 0o600 {
+		t.Errorf("a newly written credential is mode %o, want 600", got)
+	}
+	if got, _ := os.ReadFile(fresh); string(got) != "s3cr3t" {
+		t.Errorf("the credential is %q", got)
+	}
+}

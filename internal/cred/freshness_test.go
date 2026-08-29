@@ -156,6 +156,11 @@ func TestEveryShippedAccessTokenPathIsAPlainObjectPath(t *testing.T) {
 	}
 }
 
+// An allowlist, not a list of jq's punctuation. The blocklist this replaced
+// named the characters somebody thought of, and `.tokens.access_token?` carried
+// none of them: the `?` would have been read as part of a field name, the
+// lookup would have missed, and the failure would have arrived later as a
+// malformed token rather than here as a descriptor error.
 func TestAccessTokenRefusesAPathThisBuildCannotWalk(t *testing.T) {
 	for _, path := range []string{
 		"tokens.access_token",
@@ -164,11 +169,59 @@ func TestAccessTokenRefusesAPathThisBuildCannotWalk(t *testing.T) {
 		`.tokens["access_token"]`,
 		".tokens | .access_token",
 		".tokens.access_token // empty",
+		".tokens.access_token?",
+		".tokens?.access_token",
+		".tokens.access-token",
+		".tokens.access_token[]",
+		".0tokens.access_token",
+		".tokens.@base64d",
+		".tokens.access_token + 1",
 	} {
 		d := cred.Descriptor{Harness: "probe", Credential: cred.Credential{AccessTokenPath: path}}
 		if _, err := cred.AccessToken(d, credential(t, 60)); !errors.Is(err, cred.ErrDescriptor) {
 			t.Errorf("AccessToken(%q) error = %v, want ErrDescriptor", path, err)
 		}
+	}
+}
+
+// A path segment may be a bare jq key and nothing else, which is exactly what
+// jq itself accepts unquoted. Refusing more than that would refuse a descriptor
+// entry that works.
+func TestAccessTokenWalksEveryBareObjectPath(t *testing.T) {
+	for _, path := range []string{".a", ".tokens.access_token", "._private.X9", ".A_1.b2_c"} {
+		d := cred.Descriptor{Harness: "probe", Credential: cred.Credential{AccessTokenPath: path}}
+		if _, err := cred.AccessToken(d, []byte(`{}`)); errors.Is(err, cred.ErrDescriptor) {
+			t.Errorf("AccessToken refused the plain object path %q: %v", path, err)
+		}
+	}
+}
+
+// AccessToken never answers an empty token with a nil error. Its callers read
+// the answer as a JWT, and an empty one would reach ParseClaims as a value
+// rather than as the fault it is — which is the shell's `[[ -n "$token" ]] ||
+// return 1` at lib/credentials.sh:72, and where a JSON null lands too.
+func TestAccessTokenNeverAnswersAnEmptyTokenWithoutAnError(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		credential string
+	}{
+		{"an empty access token", `{"tokens":{"access_token":""}}`},
+		{"a null access token", `{"tokens":{"access_token":null}}`},
+		{"an access token that is not a string", `{"tokens":{"access_token":42}}`},
+		{"an access token that is an object", `{"tokens":{"access_token":{}}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := cred.AccessToken(codex(t), []byte(tc.credential))
+			if err == nil {
+				t.Fatalf("AccessToken = %q with no error", got)
+			}
+			if !errors.Is(err, cred.ErrMalformedToken) {
+				t.Errorf("error = %v, want ErrMalformedToken", err)
+			}
+			if got != "" {
+				t.Errorf("AccessToken returned %q alongside its error", got)
+			}
+		})
 	}
 }
 
@@ -248,11 +301,15 @@ func TestAnExpiredCredentialSaysExpired(t *testing.T) {
 	if !errors.Is(err, cred.ErrStale) {
 		t.Fatalf("AssertFresh error = %v, want ErrStale", err)
 	}
-	if !strings.Contains(err.Error(), "expired") {
-		t.Errorf("the reason does not say expired: %q", err.Error())
-	}
-	if strings.Contains(err.Error(), "-1 minutes") {
-		t.Errorf("the reason counts in negative minutes: %q", err.Error())
+	// The whole sentence, wart included. _cred_human_duration answers the bare
+	// word "expired" for a negative remainder, so the sentence it is
+	// interpolated into reads "has expired left" — which is what an operator
+	// sees and what tests/test-credentials.sh:102-105 matches on. Asserting the
+	// whole string is what makes a later well-meant correction of the grammar
+	// fail here rather than diverge from the shell in silence.
+	const want = "the restored codex credential has expired left, under CrossRev's one-hour floor"
+	if err.Error() != want {
+		t.Errorf("the reason is\n  %q\nwant\n  %q", err.Error(), want)
 	}
 }
 
