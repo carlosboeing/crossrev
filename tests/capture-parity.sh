@@ -1391,8 +1391,15 @@ price_key_cases() {
   price_key_case "anthropic/claude-sonnet-5"
   price_key_case "a-model-nobody-listed"
   price_key_case "[only-a-suffix]"
-  # `version` is a key in the table and is not a model. The exact-match arm
-  # answers it, which is a thing a port has to reproduce rather than fix.
+  # Two listed bare ids in one report. The nearest-match rung ranks by length,
+  # so the longer one wins under either word order — the rung answered the last
+  # match in the price file's order until #175, and no vector told the two
+  # rules apart.
+  price_key_case "gpt-5.6-cyber gpt-5.6-luna"
+  price_key_case "gpt-5.6-luna gpt-5.6-cyber"
+  price_key_case "claude-haiku-4-5-and-claude-opus-4-8"
+  # `version` is a key in the table and is not a model. Every rung requires the
+  # value to be an object, so no rung answers it (#170).
   price_key_case "version"
 }
 
