@@ -243,6 +243,18 @@
       "key": ""
     },
     {
+      "reported": "gpt-5.6-cyber gpt-5.6-luna",
+      "key": "gpt-5.6-cyber"
+    },
+    {
+      "reported": "gpt-5.6-luna gpt-5.6-cyber",
+      "key": "gpt-5.6-cyber"
+    },
+    {
+      "reported": "claude-haiku-4-5-and-claude-opus-4-8",
+      "key": "claude-haiku-4-5"
+    },
+    {
       "reported": "version",
       "key": ""
     }

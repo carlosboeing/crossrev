@@ -402,10 +402,18 @@ usage_price_key() {
        | select((.key | split("/") | last) == $k) | .key)' \
     "$pf" 2>/dev/null)"
   [[ -n "$hit" ]] && { printf '%s' "$hit"; return 0; }
+  # {key: .key, bare: $bare}, not {key, bare}. The shorthand reads .bare off
+  # the to_entries object, which has no such field, so every element's bare was
+  # null, `null | length` is 0 for all of them, and sort_by ranked nothing. The
+  # rung then answered the LAST match in the file's order rather than the
+  # longest bare id, which is what the comment above and the whole point of the
+  # rung say it does. The file happens to list a general id before its
+  # variants, so the two rules agree today; reordering it would have changed
+  # what a model prices at, silently.
   jq -r --arg k "$reported" \
     '[ to_entries[] | select((.value | type) == "object")
        | (.key | split("/") | last) as $bare
-       | select($k | contains($bare)) | {key, bare} ]
+       | select($k | contains($bare)) | {key: .key, bare: $bare} ]
      | sort_by(.bare | length) | last | .key // empty' "$pf" 2>/dev/null
 }
 
