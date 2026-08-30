@@ -107,6 +107,21 @@ is "nearest-match prices grok-4.6-build as grok-4.6" \
 is "bracket suffix does not need a heuristic when the key is listed" \
   "$(usage_price_key claude-opus-5)" "claude-opus-5"
 
+# A top-level key that is not a model prices as unlisted, not as itself.
+#
+# `version` holds a string. Matching it returned a key whose rates cannot be
+# read, and usage_price then asked a string for .input_cost_per_token — a hard
+# jq error rather than a null. jq printed its own message where a record was
+# expected and usage_attach passed it on with status 0, so the caller lost the
+# whole usage record. Every arm checks the shape now, so a later non-model key
+# behaves the same way without anyone remembering this one.
+is "a non-model top-level key prices as unlisted" \
+  "$(usage_price_key version)" ""
+is "and the record survives a model reported with that name" \
+  "$(usage_attach "$(usage_zero)" claude vendor version | jq -r '.cost_usd')" "null"
+is "and its buckets are still there" \
+  "$(usage_attach "$(usage_zero)" claude vendor version | jq -r '.output')" "0"
+
 # --- Claude parsing: buckets from two objects, split wins, largest share ---
 
 u="$(usage_parse_claude "$ROOT/tests/fixtures/usage/claude-probe.json")"

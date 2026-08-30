@@ -386,14 +386,25 @@ usage_price_key() {
   local pf hit
   pf="$(_usage_prices_file)"
   [[ -f "$pf" ]] || return 0
-  hit="$(jq -r --arg k "$reported" 'if has($k) then $k else empty end' "$pf" 2>/dev/null)"
+  # Every arm requires the value to be an object, because not every top-level
+  # key in the price file is a model. `version` is one: it holds a string, and
+  # matching it returned a key whose rates cannot be read. usage_price then
+  # asked a string for .input_cost_per_token, which is a hard jq error rather
+  # than a null — jq exited 5 having printed its own message where a record was
+  # expected, and usage_attach handed that message on with status 0. A model
+  # reported as `version` cost the caller the whole usage record. Any later
+  # non-model key at the top level would do the same, so the shape is checked
+  # rather than the name.
+  hit="$(jq -r --arg k "$reported" 'if (.[$k] | type) == "object" then $k else empty end' "$pf" 2>/dev/null)"
   [[ -n "$hit" ]] && { printf '%s' "$hit"; return 0; }
   hit="$(jq -r --arg k "$reported" \
-    'limit(1; to_entries[] | select((.key | split("/") | last) == $k) | .key)' \
+    'limit(1; to_entries[] | select((.value | type) == "object")
+       | select((.key | split("/") | last) == $k) | .key)' \
     "$pf" 2>/dev/null)"
   [[ -n "$hit" ]] && { printf '%s' "$hit"; return 0; }
   jq -r --arg k "$reported" \
-    '[ to_entries[] | (.key | split("/") | last) as $bare
+    '[ to_entries[] | select((.value | type) == "object")
+       | (.key | split("/") | last) as $bare
        | select($k | contains($bare)) | {key, bare} ]
      | sort_by(.bare | length) | last | .key // empty' "$pf" 2>/dev/null
 }
