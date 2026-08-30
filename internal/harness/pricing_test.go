@@ -209,7 +209,7 @@ func TestAttachMergesBillingAndCost(t *testing.T) {
 				t.Errorf("cost_source = %q, want %q", got, tt.costSource)
 			}
 			// A harness-supplied cost is not a table price, so it names no
-			// table (lib/usage.sh:493).
+			// table (lib/usage.sh:501).
 			if tt.costSource == "harness" && merged.PriceTable != nil {
 				t.Errorf("price_table = %q, want null for a harness cost", *merged.PriceTable)
 			}
@@ -260,3 +260,110 @@ func TestTotalIsTheSixBucketsAndNotReasoning(t *testing.T) {
 }
 
 func float64Ptr(value float64) *float64 { return &value }
+
+// A table is not a list of models. Every rung checks the shape of an entry's
+// value rather than its name, so a non-model key of any JSON type answers
+// nothing — not only the string one the shipped extract happens to hold.
+//
+// The shipped extract's only non-model key is `version`, a string, so a guard
+// reading `!= kindString`, or one naming `version` outright, passes every other
+// test in this file. Both are wrong the moment a key holds a number, a null, an
+// array or a bool, and this is what tells them apart.
+func TestEveryRungChecksTheShapeRatherThanTheName(t *testing.T) {
+	table := `{
+	  "schema":      4,
+	  "deprecated":  null,
+	  "aliases":     ["a", "b"],
+	  "beta":        true,
+	  "version":     "2026-08-01",
+	  "vendor/real": {"input_cost_per_token": 0.000001}
+	}`
+	prices, err := harness.LoadPrices([]byte(table))
+	if err != nil {
+		t.Fatalf("LoadPrices: %v", err)
+	}
+
+	// Rung one, the exact match.
+	for _, key := range []string{"schema", "deprecated", "aliases", "beta", "version"} {
+		if got := prices.Key(key); got != "" {
+			t.Errorf("Key(%q) = %q, want the empty string", key, got)
+		}
+	}
+	// Rung two, the bare id without its provider prefix.
+	if got := prices.Key("real"); got != "vendor/real" {
+		t.Errorf("Key(\"real\") = %q, want vendor/real", got)
+	}
+	// Rung three, the longest bare id the report contains. `schema` is longer
+	// than `real`, so it would win the tie if it were allowed to run at all.
+	if got := prices.Key("a-schema-and-real-report"); got != "vendor/real" {
+		t.Errorf("Key(\"a-schema-and-real-report\") = %q, want vendor/real", got)
+	}
+}
+
+// Rung three answers the LONGEST listed bare id the report contains, and the
+// length is what decides it — not the order the table lists them in.
+//
+// The shell ranked by a field that was always null until [#175], so it answered
+// the last match in document order. The two rules agree on every model the
+// shipped extract lists, because it names a general id before its variants, so
+// only a report naming two listed models tells them apart. The table below
+// lists the shorter id last on purpose.
+//
+// [#175]: https://github.com/carlosboeing/crossrev/issues/175
+func TestTheLongestBareIDWinsRegardlessOfTableOrder(t *testing.T) {
+	table := `{
+	  "vendor/a-very-long-model": {"input_cost_per_token": 0.000001},
+	  "vendor/tiny":              {"input_cost_per_token": 0.000002}
+	}`
+	prices, err := harness.LoadPrices([]byte(table))
+	if err != nil {
+		t.Fatalf("LoadPrices: %v", err)
+	}
+
+	if got := prices.Key("a-very-long-model-tiny"); got != "vendor/a-very-long-model" {
+		t.Errorf("Key = %q, want vendor/a-very-long-model", got)
+	}
+	// Equal lengths do fall back on order, and the LAST of a tie wins:
+	// `sort_by(.bare | length) | last` is a stable ascending sort.
+	tie := `{
+	  "vendor/aaa": {"input_cost_per_token": 0.000001},
+	  "vendor/bbb": {"input_cost_per_token": 0.000002}
+	}`
+	prices, err = harness.LoadPrices([]byte(tie))
+	if err != nil {
+		t.Fatalf("LoadPrices: %v", err)
+	}
+	if got := prices.Key("aaa-bbb"); got != "vendor/bbb" {
+		t.Errorf("Key on an equal-length tie = %q, want vendor/bbb", got)
+	}
+}
+
+// A key declared twice keeps its first position and takes its last value, which
+// is what jq answers for `.k`, `keys` and `to_entries` alike. Nothing in the
+// shipped extract duplicates a key; LoadPrices is exported, so a caller can
+// hand it one.
+//
+// The rungs and the cost arithmetic must agree on the entry they chose. They read
+// the table by two different routes before, so a duplicated key could be
+// matched as one entry and priced as another — a refusal became a record
+// costing zero dollars and labelled as table-priced.
+func TestADuplicatedKeyIsCollapsedTheWayJqCollapsesIt(t *testing.T) {
+	prices, err := harness.LoadPrices([]byte(
+		`{"m": {"input_cost_per_token": 0.000001}, "m": "not-an-object"}`))
+	if err != nil {
+		t.Fatalf("LoadPrices: %v", err)
+	}
+
+	// jq reads `.m` as the string, so `m` is not a model and nothing prices.
+	if got := prices.Key("m"); got != "" {
+		t.Errorf("Key(\"m\") = %q, want the empty string", got)
+	}
+	priced := prices.Price(harness.Usage{InputFresh: 1000}.WithTotal(), "m")
+	if priced.CostUSD != nil || priced.CostSource != nil {
+		t.Errorf("a duplicated key priced: cost=%v source=%v",
+			deref(priced.CostUSD), deref(priced.CostSource))
+	}
+	if priced.InputFresh != 1000 {
+		t.Error("the buckets did not survive")
+	}
+}

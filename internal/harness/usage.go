@@ -88,7 +88,7 @@ func (u Usage) WithTotal() Usage {
 	return u
 }
 
-// Cached is usage_cached (lib/usage.sh:520-523): every token that came from or
+// Cached is usage_cached (lib/usage.sh:539-542): every token that came from or
 // went into a cache.
 func (u Usage) Cached() int64 {
 	return u.CacheRead + u.CacheWrite5m + u.CacheWrite1h + u.CacheWriteUnsplit
@@ -582,6 +582,17 @@ func (n node) truthy() bool {
 	return n.kind != kindBool || n.boolean
 }
 
+// position answers where a key is declared among the members, which decoding
+// needs before lookup can be trusted to find it.
+func (n node) position(key string) (int, bool) {
+	for at, entry := range n.members {
+		if entry.key == key {
+			return at, true
+		}
+	}
+	return 0, false
+}
+
 // lookup answers a member and whether the key was declared at all, which is the
 // difference between `has("k")` and `.k == null`.
 func (n node) lookup(key string) (node, bool) {
@@ -713,6 +724,17 @@ func decodeFrom(decoder *json.Decoder, token json.Token) (node, error) {
 				value, err := decodeNode(decoder)
 				if err != nil {
 					return node{}, err
+				}
+				// A key declared twice keeps its first position and takes its
+				// last value, which is what jq does: `{"a":1,"b":2,"a":3}`
+				// answers 3 for `.a` and `[{"key":"a","value":3},{"key":"b",
+				// "value":2}]` for `to_entries`. Appending both would have let
+				// `.k` and `keys` disagree, and every reader here walks members
+				// directly. The input is a harness's own output, so a duplicate
+				// is the harness's to send.
+				if at, declared := object.position(name); declared {
+					object.members[at].value = value
+					continue
 				}
 				object.members = append(object.members, member{key: name, value: value})
 			}

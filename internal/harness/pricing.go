@@ -3,7 +3,7 @@
 //
 // Rates are per-token dollars upstream. The arithmetic scales each rate to
 // nano-dollars so the sum stays in integers well below float precision and one
-// division rounds once (lib/usage.sh:401-406).
+// division rounds once (lib/usage.sh:420-425).
 //
 // Three rules refuse to price rather than guess, and all three are reproduced
 // below: a bucket with tokens in it whose rate the extract does not list, an
@@ -101,7 +101,7 @@ func PriceTable() (Prices, error) {
 // says which table produced the figure.
 func (p Prices) Version() string { return p.version }
 
-// Key is usage_price_key (lib/usage.sh:381-399): the listed key for a reported
+// Key is usage_price_key (lib/usage.sh:381-418): the listed key for a reported
 // model id.
 //
 // Lowercased, any `[...]` suffix stripped, then three rungs: an exact match
@@ -165,10 +165,10 @@ func bareID(key string) string {
 var longContextBreak = regexp.MustCompile(`^input_cost_per_token_above_([0-9]+)k_tokens$`)
 
 // tieredRateName matches the price keys that describe a service tier rather than
-// the standard one (lib/usage.sh:443).
+// the standard one (lib/usage.sh:462).
 var tieredRateName = regexp.MustCompile(`flex|priority|batches`)
 
-// Price is usage_price (lib/usage.sh:407-473): the record with a table-priced
+// Price is usage_price (lib/usage.sh:426-492): the record with a table-priced
 // cost attached, or with the cost triple cleared.
 func (p Prices) Price(u Usage, model string) Usage {
 	key := p.Key(model)
@@ -249,7 +249,7 @@ func cacheWrite1hRate(rates node) node {
 	return rates.member("cache_creation_input_token_cost")
 }
 
-// longContextThreshold is the `$bn` of lib/usage.sh:441-446: the thousands
+// longContextThreshold is the `$bn` of lib/usage.sh:460-465: the thousands
 // figure of the first standard-tier long-context break the entry lists.
 //
 // jq's `keys` sorts, so "first" is the lowest-sorting name rather than the
@@ -348,7 +348,7 @@ func keepsAnthropicAPIKey(doc Document, harness string) bool {
 	return slices.Contains(entry.Credential.EnvKeep, anthropicAPIKeyName)
 }
 
-// Attach is usage_attach (lib/usage.sh:479-498): the orchestrator-side merge.
+// Attach is usage_attach (lib/usage.sh:498-517): the orchestrator-side merge.
 //
 // Billing always; the cost triple rewritten when the billing mode forbids one (a
 // named endpoint discards whatever the adapter reported), kept and marked when
@@ -379,10 +379,10 @@ func optionalString(value string) *string {
 }
 
 // costPattern is the guard usage_format_cost applies before printing
-// (lib/usage.sh:526).
+// (lib/usage.sh:545).
 var costPattern = regexp.MustCompile(`^-?[0-9]+(\.[0-9]+)?([eE][+-]?[0-9]+)?$`)
 
-// FormatCost is usage_format_cost (lib/usage.sh:525-531).
+// FormatCost is usage_format_cost (lib/usage.sh:544-550).
 //
 // It takes the value as text rather than as a number, because that is what it
 // is asked to render: the caller reads `.cost_usd` out of a record where the
@@ -399,7 +399,7 @@ func FormatCost(value string) string {
 	return fmt.Sprintf("~$%.2f", number)
 }
 
-// Footnote is usage_footnote (lib/usage.sh:537-559): the footnote's inner
+// Footnote is usage_footnote (lib/usage.sh:556-578): the footnote's inner
 // sentences, composed from three clauses because no one sentence is true of
 // every combination of cost source and billing mode.
 //
