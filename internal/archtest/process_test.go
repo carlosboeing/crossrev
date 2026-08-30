@@ -68,10 +68,41 @@ import (
 // process's whole environment and no Spec between them. Nothing may load one,
 // so it has no permitted directory at all.
 //
+// # unsafe, which is here and is also not this rule
+//
+// It starts no child either, and it is here for the same reason plugin is: the
+// walk is already reading every production file's import list, and the danger
+// is of a kind no other rule in this tree can see.
+//
+// exec.Audience is a struct whose one field is unexported, which is what makes
+// AudienceOrchestrator the only route the language offers to the forge-credential
+// opt-out (internal/exec/spec.go). The value is one bool, so
+//
+//	*(*bool)(unsafe.Pointer(&a)) = true
+//
+// forges it, naming neither the field nor the variable, and no rule that reads
+// names can see that. Confining the import is what is left.
+//
+// One directory needs it and keeps it. internal/ui/terminal_unix.go:16 passes
+// unsafe.Pointer(&settings) to the SYS_IOCTL that asks the terminal driver for
+// a file's line settings — the isatty every shell's `-t` is — and there is no
+// Go without it. internal/ui is safe to grant because the tier DAG
+// (dependencies_test.go) gives it no edge to internal/exec at all, so it cannot
+// name the type it would be forging.
+//
+// What this does not reach: cgo, which gets at the same memory with no Go
+// symbol to match on, and a go:linkname, which needs unsafe imported but is a
+// comment rather than a selector. Both are refused elsewhere —
+// environment_test.go rejects `import "C"` outright and reads linkname
+// directives — and neither is closed by this entry.
+//
 // # What this does not cover, and why
 //
 // Test files and internal/testgen — see productionSource, which carries the
-// reasoning and the counter-argument.
+// reasoning and the counter-argument. For unsafe that exclusion is load-bearing
+// rather than incidental: internal/ui/pty_linux_test.go and pty_darwin_test.go
+// both build a pseudo-terminal through unsafe.Pointer, and a test file compiles
+// into no released binary.
 type processRule struct {
 	// importPath, when set, forbids importing the package at all.
 	importPath string
@@ -93,6 +124,9 @@ type processRule struct {
 
 const processPermittedDir = "internal/exec"
 
+// unsafePermittedDir holds the one production call that needs unsafe.Pointer.
+const unsafePermittedDir = "internal/ui"
+
 const startsAChild = "only " + processPermittedDir + " may, and every other caller goes through its Runner"
 
 var processRules = []processRule{
@@ -106,6 +140,9 @@ var processRules = []processRule{
 	{importPath: "plugin", defaultName: "plugin",
 		action:      "loads native code into this process through",
 		consequence: "no directory may, because a plugin's init functions run inside the process that holds every credential"},
+	{importPath: "unsafe", defaultName: "unsafe", permittedDir: unsafePermittedDir,
+		action:      "can forge a value the type system protects, through",
+		consequence: "only " + unsafePermittedDir + " may, for the ioctl that asks whether a file is a terminal"},
 }
 
 // verb opens the violation sentence for one rule.
@@ -320,6 +357,29 @@ func TestProcessAuditVerdict(t *testing.T) {
 			source:        "package exec\nimport \"plugin\"\nvar v = plugin.Open\n",
 			wantViolation: true,
 			mustMention:   "no directory may",
+		},
+		{
+			// The third rule sharing the walk: no child either, and one
+			// permitted directory rather than none.
+			name:          "an import of unsafe",
+			file:          "internal/cycle/leg.go",
+			source:        "package cycle\nimport \"unsafe\"\nvar v unsafe.Pointer\n",
+			wantViolation: true,
+			mustMention:   "can forge a value the type system protects",
+		},
+		{
+			name:   "an import of unsafe in the directory that needs it",
+			file:   "internal/ui/terminal_unix.go",
+			source: "package ui\nimport \"unsafe\"\nvar v unsafe.Pointer\n",
+		},
+		{
+			// The permission is the directory, not the package that starts
+			// processes: internal/exec has no business forging one.
+			name:          "an import of unsafe in the process-start directory",
+			file:          "internal/exec/osrunner.go",
+			source:        "package exec\nimport \"unsafe\"\nvar v unsafe.Pointer\n",
+			wantViolation: true,
+			mustMention:   "only internal/ui may",
 		},
 		{
 			// A sibling in the same package that acts on a process which
