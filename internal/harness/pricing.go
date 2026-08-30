@@ -56,9 +56,9 @@ type Prices struct {
 type priceEntry struct {
 	key string
 	// rates is the entry's value as written. It is a node rather than a
-	// map[string]float64 because `version` is a STRING under the same top-level
-	// object, and PriceKey can answer it: `has("version")` is true, so the
-	// exact-match rung returns it (frozen in the oracle's price_key_cases).
+	// map[string]float64 because not every top-level key of the extract holds
+	// an object: `version` holds a string. Key reads this kind to skip such a
+	// key on all three rungs, which is what the shell now does too.
 	rates node
 }
 
@@ -109,6 +109,14 @@ func (p Prices) Version() string { return p.version }
 // `provider/` prefix, else the longest bare id the report contains — so
 // `grok-4.6-build` prices as `xai/grok-4.6`. Empty means unlisted, which prices
 // as a refusal rather than a guess.
+//
+// Every rung requires the value to be an object, because not every top-level
+// key of the extract is a model. `version` holds a string, and matching it
+// returned a key whose rates cannot be read, which cost the caller the whole
+// usage record ([#170]). The shape is checked rather than the name, so a later
+// non-model key behaves correctly without anyone remembering this one.
+//
+// [#170]: https://github.com/carlosboeing/crossrev/issues/170
 func (p Prices) Key(reported string) string {
 	reported = strings.ToLower(reported)
 	if at := strings.Index(reported, "["); at >= 0 {
@@ -119,16 +127,19 @@ func (p Prices) Key(reported string) string {
 	if reported == "" {
 		return ""
 	}
-	if _, listed := p.index[reported]; listed {
+	if at, listed := p.index[reported]; listed && p.entries[at].priceable() {
 		return reported
 	}
 	for _, entry := range p.entries {
-		if bareID(entry.key) == reported {
+		if entry.priceable() && bareID(entry.key) == reported {
 			return entry.key
 		}
 	}
 	best, bestLength := "", -1
 	for _, entry := range p.entries {
+		if !entry.priceable() {
+			continue
+		}
 		bare := bareID(entry.key)
 		// `sort_by(.bare | length) | last` is a stable ascending sort, so the
 		// last of an equal-length tie wins — hence >= rather than >.
@@ -138,6 +149,10 @@ func (p Prices) Key(reported string) string {
 	}
 	return best
 }
+
+// priceable is `select((.value | type) == "object")`: an entry whose value can
+// hold rates at all.
+func (e priceEntry) priceable() bool { return e.rates.kind == kindObject }
 
 // bareID is `.key | split("/") | last`.
 func bareID(key string) string {
@@ -164,18 +179,9 @@ func (p Prices) Price(u Usage, model string) Usage {
 	if !listed {
 		return clearCost(u)
 	}
+	// Key answers only a key whose value is an object, so rates always holds
+	// rates by the time it is read here.
 	rates := p.entries[at].rates
-	if rates.kind != kindObject {
-		// The shell reaches jq's "Cannot index string with string" here and
-		// prints nothing at all, so usage_attach's pipeline loses the whole
-		// record — measured against `usage_price "$u" version`, which exits 5
-		// with empty output. Only `version` can reach it, because it is the one
-		// non-object value under the extract's top-level object and PriceKey's
-		// exact-match rung answers it. Losing the record is a fault rather than
-		// a behaviour, so Go refuses to price instead, which is what every
-		// other unpriceable model already gets.
-		return clearCost(u)
-	}
 
 	buckets := []struct {
 		tokens int64

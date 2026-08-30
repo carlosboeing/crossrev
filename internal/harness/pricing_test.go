@@ -111,19 +111,22 @@ func TestReasoningIsNotPriced(t *testing.T) {
 	}
 }
 
-// `version` is the one key of the extract whose value is not a rate object, and
-// the exact-match rung answers it.
+// `version` is the one key of the extract whose value is not a rate object, so
+// no rung may answer it.
 //
-// The shell reaches jq's "Cannot index string with string" there and prints
-// nothing, so usage_attach's pipeline loses the whole record. Measured:
-// `usage_price "$record" version` exits 5 with empty output, and so does
-// `usage_attach "$record" claude vendor version`. Losing the record is a fault
-// rather than a behaviour, so Go refuses to price and keeps the buckets.
-func TestTheVersionKeyRefusesRatherThanLosingTheRecord(t *testing.T) {
+// It used to be answered by the exact-match rung, in the shell and here. The
+// shell then reached jq's "Cannot index string with string" and printed
+// nothing, so usage_attach's pipeline lost the whole record: `usage_price
+// "$record" version` exited 5 with empty output, and so did `usage_attach
+// "$record" claude vendor version`. That is fixed in the shell now ([#170]),
+// and the key answers nothing on both sides.
+//
+// [#170]: https://github.com/carlosboeing/crossrev/issues/170
+func TestTheVersionKeyIsNotAModel(t *testing.T) {
 	prices := priceTable(t)
 
-	if got := prices.Key("version"); got != "version" {
-		t.Fatalf("Key(\"version\") = %q, want version; the divergence below is about that answer", got)
+	if got := prices.Key("version"); got != "" {
+		t.Fatalf("Key(\"version\") = %q, want the empty string", got)
 	}
 	priced := prices.Price(harness.Usage{InputFresh: 10}.WithTotal(), "version")
 	if priced.CostUSD != nil || priced.CostSource != nil {
