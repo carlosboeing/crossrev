@@ -68,7 +68,11 @@ const maxResponseBytes = 1 << 20
 
 // RefreshOptions are Refresh's dependencies. Every zero value is the real one.
 type RefreshOptions struct {
-	// HTTP is the client both requests go through. Nil is http.DefaultClient.
+	// HTTP is the client both requests go through. Nil is noRedirectClient,
+	// which does not follow a redirect. Do not inject http.DefaultClient to
+	// "match production": it follows a 307 or 308 and replays the refresh
+	// grant, refresh token included, to whatever host answered. The comment
+	// below says what that costs.
 	HTTP HTTPClient
 	// Now stamps `.last_refresh`. Nil is time.Now.
 	Now func() time.Time
