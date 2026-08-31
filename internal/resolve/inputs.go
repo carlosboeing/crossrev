@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/carlosboeing/crossrev/internal/core"
@@ -15,7 +17,7 @@ import (
 	"github.com/carlosboeing/crossrev/internal/vcs"
 )
 
-// Outcome is how the resolve leg stopped before publication, commit and push.
+// Outcome is how the resolve leg stopped.
 type Outcome string
 
 // The outcomes this unit can return. Publication, persistence and the push
@@ -39,6 +41,9 @@ const (
 	// OutcomeSkipped means an automatic invocation met a draft
 	// (lib/run.sh:259-262, ctx_load return 2).
 	OutcomeSkipped Outcome = "skipped"
+	// OutcomeComplete means replies, persistence, the commit and the push
+	// finished (lib/run.sh:2412-2458).
+	OutcomeComplete Outcome = "complete"
 	// OutcomeRefused means the leg died the way ui_die does.
 	OutcomeRefused Outcome = "refused"
 )
@@ -61,8 +66,8 @@ type Request struct {
 	KeepTranscripts bool
 }
 
-// Result is what Run returns after selection, claim, invocation and
-// validation. It does not reply, commit or push.
+// Result is what Run returns after selection, claim, invocation, replies,
+// persistence, commit and push.
 type Result struct {
 	Outcome     Outcome
 	Pass        int
@@ -127,6 +132,13 @@ type Git interface {
 	CaptureTree(ctx context.Context, indexPath string) (string, error)
 	RestoreTree(ctx context.Context, indexPath, tree string) error
 	LogSubjects(ctx context.Context, revision core.Revision) ([]byte, error)
+	StageAll(ctx context.Context)
+	HasStagedChanges(ctx context.Context) (bool, error)
+	Commit(ctx context.Context, options vcs.CommitOptions) error
+	Push(ctx context.Context, remote, branch string, runHooks bool) error
+	PushURL(ctx context.Context, remote string) (string, error)
+	RemoteHead(ctx context.Context, url, branch string) (string, error)
+	RemoveWorktree(ctx context.Context, dir string) error
 }
 
 // GitFrom wraps a *vcs.Repository as Git.
@@ -187,6 +199,30 @@ func (g repoGit) LogSubjects(ctx context.Context, revision core.Revision) ([]byt
 		return nil, nil
 	}
 	return []byte(out.Stdout), nil
+}
+func (g repoGit) StageAll(ctx context.Context) { g.repo.StageAll(ctx) }
+func (g repoGit) HasStagedChanges(ctx context.Context) (bool, error) {
+	return g.repo.HasStagedChanges(ctx)
+}
+func (g repoGit) Commit(ctx context.Context, options vcs.CommitOptions) error {
+	return g.repo.Commit(ctx, options)
+}
+func (g repoGit) Push(ctx context.Context, remote, branch string, runHooks bool) error {
+	return g.repo.Push(ctx, remote, branch, runHooks)
+}
+func (g repoGit) PushURL(ctx context.Context, remote string) (string, error) {
+	return g.repo.PushURL(ctx, remote)
+}
+func (g repoGit) RemoteHead(ctx context.Context, url, branch string) (string, error) {
+	return g.repo.RemoteHead(ctx, url, branch)
+}
+func (g repoGit) RemoveWorktree(ctx context.Context, dir string) error {
+	out, err := g.repo.RunCombined(ctx, "worktree", "remove", "--force", dir)
+	if err != nil || !out.OK() {
+		_ = os.RemoveAll(dir)
+	}
+	_ = os.Remove(filepath.Dir(dir))
+	return nil
 }
 
 func refuse(msg, hint string) Result {

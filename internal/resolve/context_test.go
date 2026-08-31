@@ -100,8 +100,8 @@ func TestContext(t *testing.T) {
 		if got.Err != nil {
 			t.Fatalf("Run: %v", got.Err)
 		}
-		if got.Outcome != OutcomeInvoked {
-			t.Fatalf("Outcome = %q, want invoked; ViewerLogin=tester must not hide crossrev[bot] markers", got.Outcome)
+		if got.Outcome != OutcomeComplete {
+			t.Fatalf("Outcome = %q, want complete; ViewerLogin=tester must not hide crossrev[bot] markers", got.Outcome)
 		}
 		if got.Pass != 1 {
 			t.Errorf("Pass = %d, want 1", got.Pass)
@@ -115,8 +115,8 @@ func TestContext(t *testing.T) {
 		if got.Err != nil {
 			t.Fatalf("empty trigger: %v", got.Err)
 		}
-		if got.Outcome != OutcomeInvoked {
-			t.Fatalf("Outcome = %q, want invoked (lib/run.sh:1731 trigger=human)", got.Outcome)
+		if got.Outcome != OutcomeComplete {
+			t.Fatalf("Outcome = %q, want complete (lib/run.sh:1731 trigger=human)", got.Outcome)
 		}
 	})
 

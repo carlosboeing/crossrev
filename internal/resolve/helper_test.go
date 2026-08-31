@@ -33,6 +33,15 @@ func mustSlug(t *testing.T) core.Slug {
 	return s
 }
 
+func mustFinding(t *testing.T) core.FindingID {
+	t.Helper()
+	id, err := prstate.ParseFindingID(testFinding)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
 func mustRev(t *testing.T, sha string) core.Revision {
 	t.Helper()
 	r, err := core.NewRevision(sha)
@@ -109,6 +118,13 @@ func setup(t *testing.T) *testEnv {
 			slug:   slug,
 			pr:     pr,
 			viewer: "tester",
+			threads: []forge.ReviewThread{{
+				ID:            "thread-1",
+				Path:          "app.ts",
+				Line:          2,
+				RootCommentID: 55,
+				FindingIDs:    []core.FindingID{mustFinding(t)},
+			}},
 		},
 		git: &fakeGit{
 			dir:          workdir,
@@ -116,6 +132,7 @@ func setup(t *testing.T) *testEnv {
 			worktrees:    new([]string),
 			captureCalls: new(int),
 			restoreCalls: new(int),
+			gitMut:       &gitMut{},
 		},
 		runner:  &recordingRunner{},
 		adapter: &stubAdapter{payloads: []json.RawMessage{oneFindingPayload()}},
@@ -270,18 +287,47 @@ func shapePayload() json.RawMessage {
 // ---------------------------------------------------------------------------
 
 type fakeForge struct {
-	env          *testEnv
-	slug         core.Slug
-	pr           forge.PullRequest
-	viewer       string
-	comments     []forge.IssueComment
-	threads      []forge.ReviewThread
-	candidates   []forge.IssueCandidate
-	created      []createdComment
-	edits        []editedComment
-	createErr    error
-	zeroCreateID bool
-	order        []string
+	env            *testEnv
+	slug           core.Slug
+	pr             forge.PullRequest
+	viewer         string
+	comments       []forge.IssueComment
+	reviewComments []forge.IssueComment
+	threads        []forge.ReviewThread
+	candidates     []forge.IssueCandidate
+	created        []createdComment
+	edits          []editedComment
+	replies        []reviewReply
+	issues         []createdIssue
+	issueComments  []issueComment
+	addedLabels    []string
+	removedLabels  []string
+	byFinding      map[string]int
+	createErr      error
+	issueErr       error
+	zeroCreateID   bool
+	order          []string
+}
+
+type reviewReply struct {
+	Repo          core.Slug
+	PR            int
+	RootCommentID int64
+	Body          string
+}
+
+type createdIssue struct {
+	Repo   core.Slug
+	Title  string
+	Body   string
+	Labels []string
+	Number int
+}
+
+type issueComment struct {
+	Repo  core.Slug
+	Issue int
+	Body  string
 }
 
 type createdComment struct {
@@ -326,7 +372,8 @@ func (f *fakeForge) IssueComments(context.Context, core.Slug, int) []forge.Issue
 	return f.comments
 }
 func (f *fakeForge) ReviewComments(context.Context, core.Slug, int) []forge.IssueComment {
-	return nil
+	f.note("ReviewComments")
+	return f.reviewComments
 }
 func (f *fakeForge) RepoIssueComments(context.Context, core.Slug, time.Time, int) ([]forge.IssueComment, error) {
 	return nil, nil
@@ -336,8 +383,13 @@ func (f *fakeForge) WorkflowRunStatus(context.Context, core.Slug, string) forge.
 	return ""
 }
 func (f *fakeForge) LabelColour(context.Context, core.Slug, string) string { return "" }
-func (f *fakeForge) IssueByFinding(context.Context, core.Slug, string, core.FindingID) (int, bool) {
-	return 0, false
+func (f *fakeForge) IssueByFinding(_ context.Context, _ core.Slug, _ string, id core.FindingID) (int, bool) {
+	f.note("IssueByFinding")
+	if f.byFinding == nil {
+		return 0, false
+	}
+	n, ok := f.byFinding[string(id)]
+	return n, ok
 }
 func (f *fakeForge) IssueCandidates(_ context.Context, _ core.Slug, path, _ string) []forge.IssueCandidate {
 	f.note("IssueCandidates:" + path)
@@ -368,21 +420,40 @@ func (f *fakeForge) CommentEdit(_ context.Context, repo core.Slug, commentID int
 func (f *fakeForge) ReviewCommentCreate(context.Context, forge.ReviewComment) (forge.Placement, error) {
 	return forge.PlacementInline, nil
 }
-func (f *fakeForge) ReviewReply(context.Context, core.Slug, int, int64, string) error {
+func (f *fakeForge) ReviewReply(_ context.Context, repo core.Slug, number int, rootCommentID int64, body string) error {
+	f.note("ReviewReply")
+	f.replies = append(f.replies, reviewReply{Repo: repo, PR: number, RootCommentID: rootCommentID, Body: body})
 	return nil
 }
-func (f *fakeForge) ThreadResolve(context.Context, string) error { return nil }
+func (f *fakeForge) ThreadResolve(context.Context, string) error {
+	f.note("ThreadResolve")
+	return nil
+}
 func (f *fakeForge) LabelEnsure(context.Context, core.Slug, forge.Label) (forge.LabelState, error) {
 	return forge.LabelExists, nil
 }
-func (f *fakeForge) IssueCreate(context.Context, core.Slug, string, string, []string) (int, error) {
-	return 0, nil
+func (f *fakeForge) IssueCreate(_ context.Context, repo core.Slug, title, body string, labels []string) (int, error) {
+	f.note("IssueCreate")
+	if f.issueErr != nil {
+		return 0, f.issueErr
+	}
+	n := 77 + len(f.issues)
+	f.issues = append(f.issues, createdIssue{Repo: repo, Title: title, Body: body, Labels: labels, Number: n})
+	return n, nil
 }
-func (f *fakeForge) IssueCommentCreate(context.Context, core.Slug, int, string) {}
-func (f *fakeForge) PullRequestLabelAdd(context.Context, core.Slug, int, string) error {
+func (f *fakeForge) IssueCommentCreate(_ context.Context, repo core.Slug, issue int, body string) {
+	f.note("IssueCommentCreate")
+	f.issueComments = append(f.issueComments, issueComment{Repo: repo, Issue: issue, Body: body})
+}
+func (f *fakeForge) PullRequestLabelAdd(_ context.Context, _ core.Slug, _ int, label string) error {
+	f.note("LabelAdd:" + label)
+	f.addedLabels = append(f.addedLabels, label)
 	return nil
 }
-func (f *fakeForge) PullRequestLabelRemove(context.Context, core.Slug, int, string) {}
+func (f *fakeForge) PullRequestLabelRemove(_ context.Context, _ core.Slug, _ int, label string) {
+	f.note("LabelRemove:" + label)
+	f.removedLabels = append(f.removedLabels, label)
+}
 
 var _ forge.Forge = (*fakeForge)(nil)
 
@@ -393,6 +464,25 @@ var _ forge.Forge = (*fakeForge)(nil)
 type showCall struct {
 	Revision core.Revision
 	Path     string
+}
+
+type gitMut struct {
+	staged          bool
+	commitCalls     int
+	pushCalls       int
+	commitOpts      vcs.CommitOptions
+	pushHooks       bool
+	pushRemote      string
+	pushBranch      string
+	commitErr       error
+	pushErr         error
+	commitSHA       string
+	remoteHead      string
+	pushTarget      vcs.PushTarget
+	pushMismatch    core.Slug
+	beforeCommit    func(dir string)
+	removedWorktree bool
+	worktreeDir     string
 }
 
 type fakeGit struct {
@@ -407,6 +497,7 @@ type fakeGit struct {
 	captureCalls *int
 	restoreCalls *int
 	runAt        []string
+	*gitMut
 }
 
 func (g *fakeGit) Dir() string { return g.dir }
@@ -462,6 +553,16 @@ func (g *fakeGit) Fetch(_ context.Context, remote, refspec string) error {
 	return nil
 }
 func (g *fakeGit) ResolvePushRepo(context.Context, string) (vcs.PushTarget, error) {
+	if !g.pushMismatch.Incomplete() {
+		return vcs.PushTarget{Repo: g.pushMismatch}, nil
+	}
+	if !g.pushTarget.Repo.Incomplete() || len(g.pushTarget.Warnings) > 0 {
+		target := g.pushTarget
+		if target.Repo.Incomplete() {
+			target.Repo = g.env.slug
+		}
+		return target, nil
+	}
 	return vcs.PushTarget{Repo: g.env.slug}, nil
 }
 func (g *fakeGit) CaptureTree(context.Context, string) (string, error) {
@@ -474,6 +575,50 @@ func (g *fakeGit) RestoreTree(context.Context, string, string) error {
 }
 func (g *fakeGit) LogSubjects(context.Context, core.Revision) ([]byte, error) {
 	return nil, nil
+}
+func (g *fakeGit) StageAll(context.Context) {}
+func (g *fakeGit) HasStagedChanges(context.Context) (bool, error) {
+	return g.staged, nil
+}
+func (g *fakeGit) Commit(_ context.Context, options vcs.CommitOptions) error {
+	if g.beforeCommit != nil {
+		g.beforeCommit(g.dir)
+	}
+	g.commitCalls++
+	g.commitOpts = options
+	if g.commitErr != nil {
+		return g.commitErr
+	}
+	if g.commitSHA == "" {
+		g.commitSHA = "cccccccccccccccccccccccccccccccccccccccc"
+	}
+	if rev, err := core.NewRevision(g.commitSHA); err == nil {
+		g.head = rev
+	}
+	return nil
+}
+func (g *fakeGit) Push(_ context.Context, remote, branch string, runHooks bool) error {
+	g.pushCalls++
+	g.pushRemote = remote
+	g.pushBranch = branch
+	g.pushHooks = runHooks
+	if g.pushErr != nil {
+		return g.pushErr
+	}
+	return nil
+}
+func (g *fakeGit) PushURL(context.Context, string) (string, error) {
+	return "https://github.com/" + g.env.slug.String() + ".git", nil
+}
+func (g *fakeGit) RemoteHead(context.Context, string, string) (string, error) {
+	if g.remoteHead != "" {
+		return g.remoteHead, nil
+	}
+	return g.env.head.SHA(), nil
+}
+func (g *fakeGit) RemoveWorktree(context.Context, string) error {
+	g.removedWorktree = true
+	return nil
 }
 
 var _ Git = (*fakeGit)(nil)
