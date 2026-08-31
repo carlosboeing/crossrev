@@ -78,13 +78,15 @@ func newClaim(s *session, ts int64, head, runID string) prstate.Marker {
 		Effort:        optString(s.settings.Effort),
 		Endpoint:      optString(s.settings.Endpoint),
 		ModelReported: prstate.Null[string](),
+		Tokens:        json.RawMessage("null"),
+		Usage:         json.RawMessage("null"),
+		Billing:       prstate.Null[string](),
 		Blocked:       prstate.Some(false),
 		BlockedReason: prstate.Null[string](),
 		CommitSHA:     prstate.Null[string](),
 		CommitSubject: prstate.Null[string](),
 		Summary:       prstate.Some(""),
 		Resolutions:   json.RawMessage("[]"),
-		Billing:       prstate.Null[string](),
 	}
 }
 
@@ -103,8 +105,8 @@ func resetRedrive(done prstate.Marker, ts int64, head, runID string, set legSett
 	done.CommitSHA = prstate.Null[string]()
 	done.CommitSubject = prstate.Null[string]()
 	done.ModelReported = prstate.Null[string]()
-	done.Tokens = nil
-	done.Usage = nil
+	done.Tokens = json.RawMessage("null")
+	done.Usage = json.RawMessage("null")
 	done.Billing = prstate.Null[string]()
 	done.Summary = prstate.Some("")
 	done.Resolutions = json.RawMessage("[]")

@@ -157,3 +157,56 @@ func TestClaim(t *testing.T) {
 		}
 	})
 }
+
+func TestNewClaimParityKeys(t *testing.T) {
+	s := &session{
+		pass:     1,
+		settings: legSettings{Harness: "claude"},
+	}
+	m := newClaim(s, 1700000000, "abcdef0", "run-1")
+	raw, err := m.MarshalJSON()
+	if err != nil {
+		t.Fatalf("marshalling: %v", err)
+	}
+	const want = `{"v":1,"leg":"resolve","pass":1,"state":"started","ts":1700000000,"done_ts":null,"run_id":"run-1","head_sha":"abcdef0","harness":"claude","model":null,"effort":null,"endpoint":null,"model_reported":null,"tokens":null,"usage":null,"billing":null,"blocked":false,"blocked_reason":null,"commit_sha":null,"commit_subject":null,"summary":"","resolutions":[]}`
+	if string(raw) != want {
+		t.Errorf("marshalled\n got %s\nwant %s", string(raw), want)
+	}
+}
+
+func TestResetRedriveParityKeys(t *testing.T) {
+	done := prstate.Marker{
+		Version:       core.MarkerVersion,
+		Leg:           core.LegResolve,
+		Pass:          1,
+		State:         core.PassComplete,
+		TS:            1700000000,
+		DoneTS:        prstate.Some(int64(1700000010)),
+		RunID:         prstate.Some("run-1"),
+		HeadSHA:       prstate.Some("abcdef0"),
+		Harness:       prstate.Some("claude"),
+		Model:         prstate.Some("claude-3-5"),
+		Effort:        prstate.Some("medium"),
+		Endpoint:      prstate.Null[string](),
+		ModelReported: prstate.Some("claude-3-5-sonnet"),
+		Tokens:        json.RawMessage(`{"input":100}`),
+		Usage:         json.RawMessage(`{"input":100}`),
+		Billing:       prstate.Some("paid"),
+		Blocked:       prstate.Some(true),
+		BlockedReason: prstate.Some("some reason"),
+		CommitSHA:     prstate.Some("c123456"),
+		CommitSubject: prstate.Some("fix: something"),
+		Summary:       prstate.Some("did some work"),
+		Resolutions:   json.RawMessage(`[{"finding_id":"f1","resolution":"fixed"}]`),
+		Unthreaded:    prstate.Some(1),
+	}
+	m := resetRedrive(done, 1700000100, "abcdef0", "run-2", legSettings{Harness: "claude"})
+	raw, err := m.MarshalJSON()
+	if err != nil {
+		t.Fatalf("marshalling: %v", err)
+	}
+	const want = `{"v":1,"leg":"resolve","pass":1,"state":"started","ts":1700000100,"done_ts":null,"run_id":"run-2","head_sha":"abcdef0","harness":"claude","model":null,"effort":null,"endpoint":null,"model_reported":null,"tokens":null,"usage":null,"billing":null,"blocked":false,"blocked_reason":null,"commit_sha":null,"commit_subject":null,"summary":"","resolutions":[]}`
+	if string(raw) != want {
+		t.Errorf("marshalled\n got %s\nwant %s", string(raw), want)
+	}
+}
