@@ -1,14 +1,17 @@
 package resolve
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/carlosboeing/crossrev/internal/config"
 	"github.com/carlosboeing/crossrev/internal/core"
 	"github.com/carlosboeing/crossrev/internal/forge"
+	"github.com/carlosboeing/crossrev/internal/harness"
 )
 
 func deferredPayload(persist json.RawMessage, dup any) json.RawMessage {
@@ -241,6 +244,39 @@ func TestPersist(t *testing.T) {
 		}
 		if countOp(e.forge.order, "ThreadResolve") != 0 {
 			t.Fatal("resolved a thread with nowhere to track it")
+		}
+	})
+
+	t.Run("persistDeferred preserves resolutions key order when adding crossrev_tracked", func(t *testing.T) {
+		customResolution := `{"finding_id":"` + testFinding + `","reply":"needs a follow-up","resolution":"deferred","persist":{"title":"Legacy export is untyped","body":"Measured before filing."},"duplicate_of":null}`
+		recs, err := harness.DecodeStream([]byte(customResolution))
+		if err != nil {
+			t.Fatalf("decode recs: %v", err)
+		}
+		customFinding := `{"id":"` + testFinding + `","path":"app.ts","line":2,"severity":"medium","title":"Legacy export is untyped"}`
+		findings, err := harness.DecodeStream([]byte(customFinding))
+		if err != nil {
+			t.Fatalf("decode findings: %v", err)
+		}
+
+		e := setup(t)
+		s := &session{
+			pass:    1,
+			repo:    e.slug,
+			req:     Request{PR: 42},
+			backlog: config.Backlog{Destination: config.DestinationRepository, Layout: config.LayoutFolder, Path: ".crossrev/backlog"},
+		}
+		workdir := t.TempDir()
+		leg := &Leg{Forge: e.forge, Git: e.git}
+		filed, matched, wrote, lines, out := leg.persistDeferred(context.Background(), s, workdir, recs, findings, e.head.SHA())
+		if filed != 1 || !wrote {
+			t.Fatalf("filed=%d, wrote=%v, lines=%s", filed, wrote, lines)
+		}
+		_ = matched
+		marshaledOut := marshalResolutions(out)
+		wantOut := `[{"finding_id":"` + testFinding + `","reply":"needs a follow-up","resolution":"deferred","persist":{"title":"Legacy export is untyped","body":"Measured before filing."},"duplicate_of":null,"crossrev_tracked":".crossrev/backlog/` + testFinding + `.md"}]`
+		if string(marshaledOut) != wantOut {
+			t.Fatalf("marshaled out = %s, want %s", string(marshaledOut), wantOut)
 		}
 	})
 }

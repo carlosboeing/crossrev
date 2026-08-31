@@ -13,7 +13,7 @@ import (
 	"github.com/carlosboeing/crossrev/internal/vcs"
 )
 
-func (l *Leg) commitAndPush(ctx context.Context, s *session, workdir string, recs, findings []map[string]json.RawMessage, marker prstate.Marker, wrote bool, remote string) (sha string, messages []string, emptyRemote bool, err error) {
+func (l *Leg) commitAndPush(ctx context.Context, s *session, workdir string, recs, findings []harness.Node, marker prstate.Marker, wrote bool, remote string) (sha string, messages []string, emptyRemote bool, err error) {
 	existing, _ := marker.CommitSHA.Get()
 	if existing != "" && existing != "null" {
 		return existing, nil, false, nil
@@ -21,7 +21,7 @@ func (l *Leg) commitAndPush(ctx context.Context, s *session, workdir string, rec
 
 	fixed := 0
 	for _, d := range recs {
-		if jsonString(d["resolution"]) == "fixed" {
+		if d.Member("resolution").StringVal() == "fixed" {
 			fixed++
 		}
 	}
@@ -96,7 +96,7 @@ func (l *Leg) commitAndPush(ctx context.Context, s *session, workdir string, rec
 	return sha, messages, emptyRemote, err
 }
 
-func (l *Leg) commitMessage(s *session, recs, findings []map[string]json.RawMessage, marker prstate.Marker, fixed int) string {
+func (l *Leg) commitMessage(s *session, recs, findings []harness.Node, marker prstate.Marker, fixed int) string {
 	resolutions := marshalResolutions(recs)
 	findingsRaw, _ := json.Marshal(findings)
 	sha, _ := marker.HeadSHA.Get()

@@ -217,47 +217,43 @@ func locationLink(path, line, url string) string {
 	return "[`" + mdCell(path) + ":" + mdCell(line) + "`](" + url + ")"
 }
 
-func findingLocation(f map[string]json.RawMessage, sha string, repo core.Slug, pr int) string {
-	path := jsonString(f["path"])
-	line := jsonString(f["line"])
-	if line == "" {
-		line = string(f["line"])
-		line = strings.Trim(line, `"`)
-	}
-	root := jsonString(f["root_comment_id"])
+func findingLocation(f harness.Node, sha string, repo core.Slug, pr int) string {
+	path := f.Member("path").StringVal()
+	line := f.Member("line").StringVal()
+	root := f.Member("root_comment_id").StringVal()
 	if root != "" && root != "null" {
 		return locationLink(path, line, threadURL(repo, pr, root))
 	}
 	return locationLink(path, line, blobURL(repo, sha, path, line))
 }
 
-func findingByID(findings []map[string]json.RawMessage, id string) map[string]json.RawMessage {
+func findingByID(findings []harness.Node, id string) harness.Node {
 	for _, f := range findings {
-		if jsonString(f["id"]) == id {
+		if f.Member("id").StringVal() == id {
 			return f
 		}
 	}
-	return map[string]json.RawMessage{}
+	return harness.Node{}
 }
 
 // CommitBody is _commit_body at lib/run.sh:2683-2718.
 func CommitBody(resolutions, findings json.RawMessage, want, sha string, pass int, repo string, pr int) string {
-	var recs []map[string]json.RawMessage
+	var recs []harness.Node
 	_ = json.Unmarshal(resolutions, &recs)
-	var fs []map[string]json.RawMessage
+	var fs []harness.Node
 	_ = json.Unmarshal(findings, &fs)
 	slug, _ := core.ParseSlug(repo)
 	var b strings.Builder
 	for _, r := range recs {
-		if jsonString(r["resolution"]) != want {
+		if r.Member("resolution").StringVal() != want {
 			continue
 		}
-		id := jsonString(r["finding_id"])
+		id := r.Member("finding_id").StringVal()
 		f := findingByID(fs, id)
-		title := jsonString(f["title"])
-		path := jsonString(f["path"])
-		line := jsonString(f["line"])
-		root := jsonString(f["root_comment_id"])
+		title := f.Member("title").StringVal()
+		path := f.Member("path").StringVal()
+		line := f.Member("line").StringVal()
+		root := f.Member("root_comment_id").StringVal()
 		bullet := commitLine(title)
 		if bullet == "" {
 			bullet = commitLine(id)
@@ -351,20 +347,20 @@ func resolutionCounts(resolutions json.RawMessage) string {
 }
 
 func resolutionsTable(resolutions, findings json.RawMessage, sha string, repo core.Slug, pr int) string {
-	var recs []map[string]json.RawMessage
+	var recs []harness.Node
 	_ = json.Unmarshal(resolutions, &recs)
-	var fs []map[string]json.RawMessage
+	var fs []harness.Node
 	_ = json.Unmarshal(findings, &fs)
 	var b strings.Builder
 	b.WriteString("| Severity | Finding | Location | Resolution |\n|---|---|---|---|\n")
 	for _, d := range recs {
-		id := jsonString(d["finding_id"])
+		id := d.Member("finding_id").StringVal()
 		f := findingByID(fs, id)
-		sev := jsonString(f["severity"])
+		sev := f.Member("severity").StringVal()
 		if sev == "" {
 			sev = "?"
 		}
-		title := jsonString(f["title"])
+		title := f.Member("title").StringVal()
 		if title == "" {
 			title = "finding `" + id + "` is not in the review record"
 		}
@@ -372,7 +368,7 @@ func resolutionsTable(resolutions, findings json.RawMessage, sha string, repo co
 			severityEmoji(sev), ucfirst(sev),
 			mdCell(title),
 			findingLocation(f, sha, repo, pr),
-			jsonString(d["resolution"]))
+			d.Member("resolution").StringVal())
 	}
 	b.WriteByte('\n')
 	return b.String()
@@ -569,40 +565,40 @@ func ResolveSummaryBody(resolutions, findings json.RawMessage, deferredLines str
 }
 
 func findingsTable(findings json.RawMessage, sha string, repo core.Slug) string {
-	var fs []map[string]json.RawMessage
+	var fs []harness.Node
 	_ = json.Unmarshal(findings, &fs)
 	var b strings.Builder
 	b.WriteString("| Severity | Category | Finding | Location |\n|---|---|---|---|\n")
 	for _, f := range fs {
-		sev := jsonString(f["severity"])
+		sev := f.Member("severity").StringVal()
 		if sev == "" {
 			sev = "?"
 		}
-		kind := jsonString(f["category"])
+		kind := f.Member("category").StringVal()
 		if kind == "" {
 			kind = "?"
 		}
-		path := jsonString(f["path"])
-		line := jsonString(f["line"])
+		path := f.Member("path").StringVal()
+		line := f.Member("line").StringVal()
 		pre := ""
-		if jsonString(f["pre_existing"]) == "true" {
+		if f.Member("pre_existing").StringVal() == "true" {
 			pre = " <sub>· pre-existing</sub>"
 		}
 		fmt.Fprintf(&b, "| %s&nbsp;%s | %s&nbsp;%s | %s%s | %s |\n",
 			severityEmoji(sev), ucfirst(sev),
 			categoryEmoji(kind), ucfirst(kind),
-			mdCell(jsonString(f["title"])), pre,
+			mdCell(f.Member("title").StringVal()), pre,
 			locationLink(path, line, blobURL(repo, sha, path, line)))
 	}
 	b.WriteByte('\n')
 	return b.String()
 }
 
-func actionableCount(findings []map[string]json.RawMessage, minFix core.Severity) int {
+func actionableCount(findings []harness.Node, minFix core.Severity) int {
 	n := 0
 	for _, f := range findings {
-		sev := core.Severity(jsonString(f["severity"]))
-		pre := jsonString(f["pre_existing"]) == "true"
+		sev := core.Severity(f.Member("severity").StringVal())
+		pre := f.Member("pre_existing").StringVal() == "true"
 		if policy.ShouldFix(sev, minFix, pre) {
 			n++
 		}
@@ -611,7 +607,7 @@ func actionableCount(findings []map[string]json.RawMessage, minFix core.Severity
 }
 
 func reviewSummaryBody(findings json.RawMessage, marker prstate.Marker, repo core.Slug, minFix core.Severity, maxPasses int) string {
-	var fs []map[string]json.RawMessage
+	var fs []harness.Node
 	_ = json.Unmarshal(findings, &fs)
 	n := len(fs)
 	actionable := actionableCount(fs, minFix)

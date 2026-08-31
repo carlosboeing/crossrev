@@ -2,9 +2,9 @@ package resolve
 
 import (
 	"context"
-	"encoding/json"
 
 	"github.com/carlosboeing/crossrev/internal/core"
+	"github.com/carlosboeing/crossrev/internal/harness"
 	"github.com/carlosboeing/crossrev/internal/prstate"
 )
 
@@ -37,10 +37,10 @@ func (l *Leg) unthreadedFindingIDs(ctx context.Context, s *session) []core.Findi
 	return prstate.FindingIDs(bodies, core.LegResolve, s.pass)
 }
 
-func excludeCurrentFindings(already map[string]bool, findings []map[string]json.RawMessage) map[string]bool {
+func excludeCurrentFindings(already map[string]bool, findings []harness.Node) map[string]bool {
 	current := map[string]bool{}
 	for _, f := range findings {
-		current[jsonString(f["id"])] = true
+		current[f.Member("id").StringVal()] = true
 	}
 	out := map[string]bool{}
 	for id, ok := range already {

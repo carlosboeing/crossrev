@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/carlosboeing/crossrev/internal/core"
+	"github.com/carlosboeing/crossrev/internal/harness"
 	"github.com/carlosboeing/crossrev/internal/prstate"
 	"github.com/carlosboeing/crossrev/internal/sandbox"
 	"github.com/carlosboeing/crossrev/internal/vcs"
@@ -183,6 +184,44 @@ func TestCommit(t *testing.T) {
 		}
 		if !strings.HasPrefix(e.git.commitOpts.Message, "chore: record deferred crossrev findings (pass 1)") {
 			t.Fatalf("deferral subject = %q", e.git.commitOpts.Message)
+		}
+	})
+
+	t.Run("resolutions and findings key order is preserved in commit message", func(t *testing.T) {
+		customFinding := `{"id":"` + testFinding + `","path":"a.go","line":3,"severity":"high","title":"Bug title"}`
+		findings, err := harness.DecodeStream([]byte(customFinding))
+		if err != nil {
+			t.Fatalf("decode findings: %v", err)
+		}
+		customResolution := `{"finding_id":"` + testFinding + `","reply":"fixed bug","resolution":"fixed"}`
+		recs, err := harness.DecodeStream([]byte(customResolution))
+		if err != nil {
+			t.Fatalf("decode recs: %v", err)
+		}
+
+		l := &Leg{}
+		s := &session{
+			pass: 1,
+			repo: mustSlug(t),
+			req:  Request{PR: 42},
+		}
+		marker := prstate.Marker{
+			HeadSHA: prstate.Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+		}
+
+		msg := l.commitMessage(s, recs, findings, marker, 1)
+		if !strings.Contains(msg, "- Bug title.") {
+			t.Fatalf("missing title bullet in commit message: %s", msg)
+		}
+		marshaledRecs := marshalResolutions(recs)
+		wantRecs := `[{"finding_id":"` + testFinding + `","reply":"fixed bug","resolution":"fixed"}]`
+		if string(marshaledRecs) != wantRecs {
+			t.Fatalf("marshalResolutions = %s, want %s", string(marshaledRecs), wantRecs)
+		}
+		marshaledFindings, _ := json.Marshal(findings)
+		wantFindings := `[{"id":"` + testFinding + `","path":"a.go","line":3,"severity":"high","title":"Bug title"}]`
+		if string(marshaledFindings) != wantFindings {
+			t.Fatalf("marshalFindings = %s, want %s", string(marshaledFindings), wantFindings)
 		}
 	})
 }

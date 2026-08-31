@@ -6,6 +6,7 @@ import (
 
 	"github.com/carlosboeing/crossrev/internal/core"
 	"github.com/carlosboeing/crossrev/internal/forge"
+	"github.com/carlosboeing/crossrev/internal/harness"
 )
 
 type threadRef struct {
@@ -26,14 +27,14 @@ func threadsByFinding(threads []forge.ReviewThread) map[string]threadRef {
 	return out
 }
 
-func (l *Leg) replyAndResolve(ctx context.Context, s *session, recs []map[string]json.RawMessage, findings []map[string]json.RawMessage, threads []forge.ReviewThread, commitSHA string, already map[string]bool, unthreaded int) (resolved, escalated, unthreadedOut int, findingsOut json.RawMessage) {
+func (l *Leg) replyAndResolve(ctx context.Context, s *session, recs []harness.Node, findings []harness.Node, threads []forge.ReviewThread, commitSHA string, already map[string]bool, unthreaded int) (resolved, escalated, unthreadedOut int, findingsOut json.RawMessage) {
 	by := threadsByFinding(threads)
 	harnessName := s.settings.Harness
 	model := s.settings.Model
 	for _, d := range recs {
-		id := jsonString(d["finding_id"])
-		disp := jsonString(d["resolution"])
-		tracked := jsonString(d["crossrev_tracked"])
+		id := d.Member("finding_id").StringVal()
+		disp := d.Member("resolution").StringVal()
+		tracked := d.Member("crossrev_tracked").StringVal()
 		th := by[id]
 
 		if !already[id] {
@@ -67,21 +68,15 @@ func (l *Leg) replyAndResolve(ctx context.Context, s *session, recs []map[string
 			}
 		}
 
-		f := findingByID(findings, id)
-		if f != nil {
-			raw, _ := json.Marshal(disp)
-			f["resolution"] = raw
-			if tracked == "" {
-				f["tracked_as"] = json.RawMessage("null")
-			} else {
-				b, _ := json.Marshal(tracked)
-				f["tracked_as"] = b
-			}
-			for j := range findings {
-				if jsonString(findings[j]["id"]) == id {
-					findings[j] = f
-					break
+		for j := range findings {
+			if findings[j].Member("id").StringVal() == id {
+				findings[j].Set("resolution", harness.FromString(disp))
+				if tracked == "" {
+					findings[j].Set("tracked_as", harness.FromNull())
+				} else {
+					findings[j].Set("tracked_as", harness.FromString(tracked))
 				}
+				break
 			}
 		}
 	}
@@ -89,7 +84,7 @@ func (l *Leg) replyAndResolve(ctx context.Context, s *session, recs []map[string
 	return resolved, escalated, unthreaded, findingsOut
 }
 
-func mustMarshal(d map[string]json.RawMessage) json.RawMessage {
+func mustMarshal(d harness.Node) json.RawMessage {
 	b, err := json.Marshal(d)
 	if err != nil {
 		return json.RawMessage("{}")
