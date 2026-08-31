@@ -253,4 +253,24 @@ resolve_argv="$(cat "$ARGV_LOG")"
 has "the resolve leg really did reach the harness" "$resolve_argv" "--output-format json"
 has "and it may write to the working tree"         "$resolve_argv" "--permission-mode acceptEdits"
 
+# Every GitHub credential name is stripped by every adapter.
+#
+# Asserted statically rather than through a run, because the failure this
+# catches is a name nobody wrote down: a strip list is only as good as the list,
+# and `gh` reads four names where CrossRev long stripped three. A new adapter
+# copying an existing one inherits whatever that one names, so the check has to
+# be over all of them at once.
+#
+# The names come from `gh help environment`. GH_ENTERPRISE_TOKEN and
+# GITHUB_ENTERPRISE_TOKEN are both read, in that order of precedence, so a list
+# holding only the first leaves the second in the agent's environment on a
+# GitHub Enterprise Server installation.
+for adapter in "$HERE"/../lib/adapters/*.sh; do
+  name="$(basename "$adapter" .sh)"
+  strip_line="$(grep -m1 'local -a run=(env -u' "$adapter" || true)"
+  for credential in GH_TOKEN GITHUB_TOKEN GH_ENTERPRISE_TOKEN GITHUB_ENTERPRISE_TOKEN; do
+    has "the $name adapter strips \$$credential" "$strip_line" "-u $credential"
+  done
+done
+
 finish

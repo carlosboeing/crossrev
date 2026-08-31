@@ -250,6 +250,29 @@ _cred_discovery_token_endpoint() {
 # the operator the generic failure and none of the detail — which defeats the
 # whole point of reading the body, since token_expired and invalid_client need
 # different fixes and the difference is only in there.
+# Read the reason out of a rejected token response.
+#
+# Three shapes reach this, and the third is the common one. RFC 6749 section 5.2
+# defines `error` as a string, so `{"error":"invalid_client"}` is what a vendor
+# sends most often. `.error.message` against a string is a hard jq error rather
+# than a null, so a plain alternative chain never reaches its later arms: jq
+# exits 5 having printed nothing, and the caller reports a rejection with an
+# empty reason. The `?` makes that arm produce no output instead of an error.
+#
+# `strings` guards the last arm. Without it an object or an array `error` is
+# printed raw, and a multi-line JSON blob inside a one-line status message is
+# worse than saying nothing.
+_cred_refusal_reason() {
+  local reason
+  reason="$(jq -r '(.error.message? // .error_description // (.error | strings) // "no reason given")' <<<"$1" 2>/dev/null)"
+  # Three ways to arrive here with nothing, and the caller cannot tell them
+  # apart or use any of them: jq refused the input, jq read a body that held no
+  # value at all, or jq read an `error` that is the empty string. The message
+  # this feeds ends in a colon, so an empty answer prints a dangling one.
+  [[ -n "$reason" ]] || reason="no reason given"
+  printf '%s' "$reason"
+}
+
 cred_refresh() {
   local harness="$1" file="$2" claims issuer client_id endpoint refresh_token resp
   command -v curl >/dev/null 2>&1 || ui_die \
@@ -285,7 +308,7 @@ cred_refresh() {
   http="${resp##*$'\n'}"; resp="${resp%$'\n'*}"
 
   if [[ "$http" != 2* ]]; then
-    ui_say "the vendor rejected the refresh (HTTP $http): $(jq -r '.error.message // .error_description // .error // "no reason given"' <<<"$resp" 2>/dev/null)" >&2
+    ui_say "the vendor rejected the refresh (HTTP $http): $(_cred_refusal_reason "$resp")" >&2
     return 1
   fi
 

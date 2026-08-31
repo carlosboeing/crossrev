@@ -12,6 +12,12 @@
 
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Colour is decided when lib/ui.sh is sourced, from whether stdout is a terminal
+# at that moment. A vector holding refusal text would therefore carry escape
+# codes when captured from a terminal and none when captured through a pipe, so
+# the same behaviour would freeze two different ways. NO_COLOR settles it before
+# the decision is made.
+export NO_COLOR=1
 # shellcheck source=../lib/ui.sh
 source "$HERE/../lib/ui.sh"
 # shellcheck source=../lib/diff.sh
@@ -28,6 +34,14 @@ source "$HERE/../lib/harnesses.sh"
 source "$HERE/../lib/config.sh"
 # shellcheck source=../lib/legs.sh
 source "$HERE/../lib/legs.sh"
+# shellcheck source=../lib/log.sh
+source "$HERE/../lib/log.sh"
+# shellcheck source=../lib/credentials.sh
+source "$HERE/../lib/credentials.sh"
+# shellcheck source=../lib/usage.sh
+source "$HERE/../lib/usage.sh"
+# shellcheck source=../lib/github.sh
+source "$HERE/../lib/github.sh"
 
 export GIT_AUTHOR_NAME="crossrev"
 export GIT_AUTHOR_EMAIL="test@example.com"
@@ -329,6 +343,205 @@ while IFS= read -r c; do
     "$(cc_replay "$(jq -r .repo_subjects <<<"$c")" "$(jq -r .own_subjects <<<"$c")" "$(jq -r .template <<<"$c")")" \
     "$(jq -r .rendered <<<"$c")"
 done < <(jq -c '.cases[]' "$PARITY/prompt_commit_convention.json")
+
+
+# --- redaction ---------------------------------------------------------------
+
+# The _b64 fields are read rather than the plain ones. A body carrying bytes
+# that are not valid UTF-8 cannot round-trip through a JSON string, and that is
+# exactly the body log_redact pins LC_ALL=C for.
+unb64() { printf '%s' "$1" | openssl base64 -d -A; }
+
+while IFS= read -r c; do
+  name="$(jq -r .name <<<"$c")"
+  text="$(unb64 "$(jq -r .text_b64 <<<"$c")"; printf 'x')"; text="${text%x}"
+  got="$(log_redact_str "$text"; printf 'x')"; got="${got%x}"
+  want="$(unb64 "$(jq -r .redacted_b64 <<<"$c")"; printf 'x')"; want="${want%x}"
+  is "redact string: $name" "$got" "$want"
+  if pub="$(log_redact_publish "$text"; printf 'x')"; then rc=0; else rc=$?; fi
+  pub="${pub%x}"
+  wantpub="$(unb64 "$(jq -r .published_b64 <<<"$c")"; printf 'x')"; wantpub="${wantpub%x}"
+  is "redact publish: $name" "$pub" "$wantpub"
+  is "redact publish rc: $name" "$rc" "$(jq -r .published_rc <<<"$c")"
+done < <(jq -c '.cases[]' "$PARITY/redaction.json")
+
+is "redact publish notice text" "$LOG_REDACT_NOTICE" "$(jq -r .notice "$PARITY/redaction.json")"
+
+# --- legs_github_slug --------------------------------------------------------
+
+while IFS= read -r c; do
+  name="$(jq -r .name <<<"$c")"
+  url="$(jq -jr .url <<<"$c")"
+  got="$(legs_github_slug "$url")" && rc=0 || rc=$?
+  is "github slug rc: $name" "$rc" "$(jq -r .rc <<<"$c")"
+  if [[ "$rc" -eq 0 ]]; then
+    is "github slug: $name" "$got" "$(jq -r .slug <<<"$c")"
+  fi
+done < <(jq -c '.cases[]' "$PARITY/github_slug.json")
+
+# --- credentials -------------------------------------------------------------
+
+is "cred minimum freshness seconds" "$CRED_MIN_SECONDS" \
+  "$(jq -r .cred_min_seconds "$PARITY/credentials.json")"
+
+while IFS= read -r c; do
+  h="$(jq -r .harness <<<"$c")"
+  is "credential strip set: $h" \
+    "$(cred_env_strip_for "$h" | jq -Rs 'split("\n") | map(select(length > 0))' | jq -cS .)" \
+    "$(jq -cS .strip <<<"$c")"
+done < <(jq -c '.strip_sets[]' "$PARITY/credentials.json")
+
+while IFS= read -r c; do
+  name="$(jq -r .name <<<"$c")"
+  jwt="$(jq -jr .jwt <<<"$c")"
+  got="$(cred_jwt_claims "$jwt")" && rc=0 || rc=$?
+  is "jwt claims rc: $name" "$rc" "$(jq -r .rc <<<"$c")"
+  if [[ "$rc" -eq 0 ]]; then
+    is "jwt claims: $name" "$got" "$(jq -r .claims <<<"$c")"
+  fi
+done < <(jq -c '.jwt_cases[]' "$PARITY/credentials.json")
+
+while IFS= read -r c; do
+  s="$(jq -r .seconds <<<"$c")"
+  is "credential duration: $s" "$(_cred_human_duration "$s")" "$(jq -r .human <<<"$c")"
+done < <(jq -c '.duration_cases[]' "$PARITY/credentials.json")
+
+# The reason a rejected refresh reports. Both directions are asserted: a body
+# that names a reason must yield it, and one that does not must yield the
+# sentence rather than an empty string or raw JSON. The message this feeds ends
+# in a colon, so an empty answer prints a dangling one.
+while IFS= read -r c; do
+  name="$(jq -r .name <<<"$c")"
+  body="$(jq -jr .body <<<"$c")"
+  is "refusal reason: $name" "$(_cred_refusal_reason "$body")" "$(jq -r .reason <<<"$c")"
+done < <(jq -c '.refusal_cases[]' "$PARITY/credentials.json")
+
+# --- usage -------------------------------------------------------------------
+
+is "usage zero record" "$(usage_zero)" "$(jq -c .zero "$PARITY/usage.json")"
+is "usage zero record with total" "$(usage_with_total "$(usage_zero)")" \
+  "$(jq -c .zero_with_total "$PARITY/usage.json")"
+
+# A price table the vectors were not captured against would fail every price
+# case with no explanation, so it is named once rather than discovered twenty
+# times.
+is "price table version" "$(jq -r '.version // ""' "$HERE/../lib/prices.json")" \
+  "$(jq -r .price_table_version "$PARITY/usage.json")"
+
+usage_replay_file="$workdir/usage_input"
+while IFS= read -r c; do
+  name="$(jq -r .name <<<"$c")"
+  jq -jr .input <<<"$c" >"$usage_replay_file"
+  case "$(jq -r .parser <<<"$c")" in
+    claude)   got="$(usage_parse_claude "$usage_replay_file")" ;;
+    codex)    got="$(usage_parse_codex_events "$usage_replay_file")" ;;
+    grok)     got="$(usage_parse_grok "$usage_replay_file")" ;;
+    agy)      got="$(usage_parse_agy "$usage_replay_file")" ;;
+    opencode) got="$(usage_parse_opencode_export "$usage_replay_file")" ;;
+  esac
+  is "usage parse: $name" "$got" "$(jq -r .record <<<"$c")"
+done < <(jq -c '.parse_cases[]' "$PARITY/usage.json")
+
+while IFS= read -r c; do
+  r="$(jq -jr .reported <<<"$c")"
+  is "price key: ${r:-<empty>}" "$(usage_price_key "$r")" "$(jq -r .key <<<"$c")"
+done < <(jq -c '.price_key_cases[]' "$PARITY/usage.json")
+
+while IFS= read -r c; do
+  name="$(jq -r .name <<<"$c")"
+  is "usage price: $name" \
+    "$(usage_price "$(jq -r .usage <<<"$c")" "$(jq -r .model <<<"$c")")" \
+    "$(jq -r .priced <<<"$c")"
+done < <(jq -c '.price_cases[]' "$PARITY/usage.json")
+
+while IFS= read -r c; do
+  name="$(jq -r .name <<<"$c")"
+  h="$(jq -r .harness <<<"$c")"; e="$(jq -r .endpoint <<<"$c")"
+  if [[ "$(jq -r .anthropic_api_key_set <<<"$c")" == "true" ]]; then
+    got="$(ANTHROPIC_API_KEY="sk-ant-test" usage_billing_for "$h" "$e")"
+  else
+    got="$(ANTHROPIC_API_KEY="" usage_billing_for "$h" "$e")"
+  fi
+  is "usage billing: $name" "$got" "$(jq -r .billing <<<"$c")"
+done < <(jq -c '.billing_cases[]' "$PARITY/usage.json")
+
+while IFS= read -r c; do
+  v="$(jq -jr .value <<<"$c")"
+  is "cost format: ${v:-<empty>}" "$(usage_format_cost "$v")" "$(jq -r .formatted <<<"$c")"
+done < <(jq -c '.format_cost_cases[]' "$PARITY/usage.json")
+
+while IFS= read -r c; do
+  cs="$(jq -jr .cost_source <<<"$c")"; b="$(jq -jr .billing <<<"$c")"
+  is "usage footnote: ${cs:-<empty>}/${b:-<empty>}" \
+    "$(usage_footnote "$cs" "$b")" "$(jq -r .footnote <<<"$c")"
+done < <(jq -c '.footnote_cases[]' "$PARITY/usage.json")
+
+
+# --- push targets ------------------------------------------------------------
+
+push_replay() { # dir <config lines>
+  local d="$1"; shift
+  local line
+  (
+    cd "$d" && git init -q . 2>/dev/null
+    for line in "$@"; do
+      git config --add "${line%%$'\t'*}" "${line#*$'\t'}"
+    done
+    LEGS_PUSH_REPO=""
+    legs_resolve_push_repo origin 2>"$d/err"
+    printf '%s' "$LEGS_PUSH_REPO"
+  )
+}
+
+while IFS= read -r c; do
+  name="$(jq -r .name <<<"$c")"
+  cfg=(); while IFS= read -r line; do cfg+=("$line"); done < <(jq -r '.config[]' <<<"$c")
+  d="$(mktemp -d "$workdir/prr_XXXXXX")"
+  got="$(push_replay "$d" ${cfg+"${cfg[@]}"})" && rc=0 || rc=$?
+  is "push target rc: $name" "$rc" "$(jq -r .rc <<<"$c")"
+  is "push target repo: $name" "$got" "$(jq -r .push_repo <<<"$c")"
+  is "push target message: $name" "$(cat "$d/err" 2>/dev/null || true)" "$(jq -r .stderr <<<"$c")"
+done < <(jq -c '.cases[]' "$PARITY/push_target.json")
+
+# --- run-log paths and quarantine paths --------------------------------------
+
+is "local run id shape" \
+  "$(GITHUB_RUN_ID="" log_run_id | sed -E 's/^local-[0-9]+$/local-<pid>/')" \
+  "$(jq -r .local_run_id_shape "$PARITY/paths.json")"
+
+while IFS= read -r c; do
+  name="$(jq -r .name <<<"$c")"
+  is "run dir: $name" \
+    "$(XDG_STATE_HOME="$(jq -r .xdg_state_home <<<"$c")" \
+       HOME="$(jq -r .home <<<"$c")" \
+       GITHUB_RUN_ID="$(jq -r .github_run_id <<<"$c")" \
+       log_run_dir "$(jq -r .repo <<<"$c")" "$(jq -r .pr <<<"$c")")" \
+    "$(jq -r .dir <<<"$c")"
+done < <(jq -c '.run_dirs[]' "$PARITY/paths.json")
+
+is "quarantine directory name" "$CROSSREV_QUARANTINE" \
+  "$(jq -r .quarantine_dir "$PARITY/paths.json")"
+is "quarantined paths" \
+  "$(_sandbox_paths | jq -Rs 'split("\n")|map(select(length>0))' | jq -cS .)" \
+  "$(jq -cS .quarantined_paths "$PARITY/paths.json")"
+
+while IFS= read -r c; do
+  h="$(jq -r .harness <<<"$c")"
+  is "sandbox args: $h" "$(sandbox_args_for "$h")" "$(jq -r .args <<<"$c")"
+done < <(jq -c '.sandbox_args[]' "$PARITY/paths.json")
+
+
+# --- the failure text a push publishes --------------------------------------
+
+while IFS= read -r c; do
+  name="$(jq -r .name <<<"$c")"
+  text="$(unb64 "$(jq -r .text_b64 <<<"$c")"; printf 'x')"; text="${text%x}"
+  _gh_git_tail "$text" >/dev/null 2>&1 && rc=0 || rc=$?
+  got="$(_gh_git_tail "$text" 2>/dev/null; printf 'x')"; got="${got%x}"
+  want="$(unb64 "$(jq -r .tail_b64 <<<"$c")"; printf 'x')"; want="${want%x}"
+  is "git tail rc: $name" "$rc" "$(jq -r .rc <<<"$c")"
+  is "git tail: $name" "$got" "$want"
+done < <(jq -c '.cases[]' "$PARITY/git_tail.json")
 
 printf '\n  %d passed, %d failed\n' "$pass" "$fail"
 (( fail == 0 ))

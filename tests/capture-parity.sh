@@ -24,6 +24,12 @@ export GIT_AUTHOR_EMAIL="test@example.com"
 export GIT_COMMITTER_NAME="crossrev"
 export GIT_COMMITTER_EMAIL="test@example.com"
 
+# Colour is decided when lib/ui.sh is sourced, from whether stdout is a terminal
+# at that moment. A vector holding refusal text would therefore carry escape
+# codes when captured from a terminal and none when captured through a pipe, so
+# the same behaviour would freeze two different ways. NO_COLOR settles it before
+# the decision is made.
+export NO_COLOR=1
 # shellcheck source=../lib/ui.sh
 source "$REPO_ROOT/lib/ui.sh"
 # shellcheck source=../lib/diff.sh
@@ -40,6 +46,14 @@ source "$REPO_ROOT/lib/harnesses.sh"
 source "$REPO_ROOT/lib/config.sh"
 # shellcheck source=../lib/legs.sh
 source "$REPO_ROOT/lib/legs.sh"
+# shellcheck source=../lib/log.sh
+source "$REPO_ROOT/lib/log.sh"
+# shellcheck source=../lib/credentials.sh
+source "$REPO_ROOT/lib/credentials.sh"
+# shellcheck source=../lib/usage.sh
+source "$REPO_ROOT/lib/usage.sh"
+# shellcheck source=../lib/github.sh
+source "$REPO_ROOT/lib/github.sh"
 
 platform="$(uname -s -r -m)"
 tr_path="$(command -v tr)"
@@ -982,5 +996,637 @@ jq -n --argjson captured "$(captured_json)" \
   >"$FIXDIR/prompt_commit_convention.json"
 
 rm -rf "$cc_workdir"
+
+
+# --- log_redact_str and log_redact_publish over credential shapes ------------
+#
+# The filter is sed under LC_ALL=C, so its answers depend on the sed on the
+# machine and on the byte-oriented locale the function pins. Both routes out of
+# a run are captured: the string filter that reaches a harness error message,
+# and the publish filter that appends a notice and fails closed.
+
+# base64 of arbitrary bytes, on one line. Through openssl because it is already
+# a dependency and spells the flag the same way on both platforms, where the
+# base64 command does not.
+b64() { printf '%s' "$1" | openssl base64 -A; }
+
+redact_case() { # name text
+  local filtered published published_rc
+  # A sentinel byte on both captures, stripped afterwards. Command substitution
+  # eats every trailing newline, and a trailing newline is exactly what
+  # log_redact_publish compares to decide whether the notice is owed.
+  filtered="$(log_redact_str "$2"; printf 'x')"; filtered="${filtered%x}"
+  if published="$(log_redact_publish "$2"; printf 'x')"; then published_rc=0; else published_rc=$?; fi
+  published="${published%x}"
+  # The _b64 fields are the authoritative ones and the plain fields are a
+  # reading aid. jq --arg demands valid UTF-8 and replaces every other byte
+  # with U+FFFD, so the two cases built from raw \xff and \x80 bytes froze as
+  # replacement characters and asserted nothing about the bytes they name. The
+  # filter pins LC_ALL=C precisely because a failing harness dumps bytes that
+  # are not text, so that is the case worth freezing exactly.
+  jq -cn --arg n "$1" --arg t "$2" --arg f "$filtered" \
+        --arg p "$published" --argjson rc "$published_rc" \
+        --arg tb "$(b64 "$2")" --arg fb "$(b64 "$filtered")" --arg pb "$(b64 "$published")" \
+    '{name:$n, text:$t, text_b64:$tb, redacted:$f, redacted_b64:$fb,
+      published:$p, published_b64:$pb, published_rc:$rc}'
+}
+
+redact_cases() {
+  redact_case "no-credential-plain-text" "a review finding about lib/auth.ts:42"
+  redact_case "empty-string" ""
+  # Each shape at the exact prefix length the pattern keeps, then longer.
+  redact_case "anthropic-key" "token sk-ant-api03-AAAAAAAAAAAAAAAAAAAA end"
+  redact_case "anthropic-key-at-prefix-length" "sk-ant-abcdef"
+  redact_case "anthropic-key-one-past-prefix" "sk-ant-abcdefg"
+  redact_case "github-fine-grained-pat" "github_pat_11ABCDEF0_aaaaaaaaaaaaaaaaaaaaaaaa"
+  redact_case "github-classic-pat" "ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+  redact_case "github-oauth-token" "gho_BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+  redact_case "github-user-token" "ghu_CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC"
+  redact_case "github-server-token" "ghs_DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD"
+  redact_case "github-refresh-token" "ghr_EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE"
+  redact_case "xai-key" "xai-abcdef0123456789ABCDEF"
+  # The generic sk- rule needs twelve characters after the six-character
+  # prefix, so the two sides of that boundary are the cases worth freezing.
+  redact_case "generic-sk-eleven-after-prefix" "sk-abcdef01234567890"
+  redact_case "generic-sk-twelve-after-prefix" "sk-abcdef01234567890a"
+  redact_case "two-credentials-one-line" "ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA and sk-ant-api03-BBBBBBBBBBBBBBBBBBBB"
+  redact_case "credential-inside-a-sentence" "the token is ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA, so rotate it"
+  redact_case "multiline-with-a-credential" $'line one\nghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\nline three'
+  redact_case "trailing-newline-no-credential" $'a body\n'
+  redact_case "trailing-newline-with-a-credential" $'ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n'
+  # Idempotence: the notice must mean a mask happened on this pass, not that a
+  # masked string arrived already masked.
+  redact_case "already-redacted-text" "ghp_AAAAAA…[redacted]"
+  # Bytes that are not valid UTF-8 are exactly what a failing harness dumps.
+  redact_case "invalid-utf8-bytes" "$(printf 'before \xff\xfe after ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA')"
+  redact_case "nul-adjacent-high-bytes" "$(printf '\x80\x81\x82 ghp_BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB')"
+  # A byte that is not text, landing inside a token rather than beside one. The
+  # first ends the six-character prefix one byte early so nothing matches; the
+  # second lets the prefix complete and stops the body at the byte.
+  redact_case "high-byte-inside-the-token-prefix" "$(printf 'ghp_AAAAAA\xffBBBBBBBBBBBB')"
+  redact_case "high-byte-after-the-token-prefix" "$(printf 'ghp_AAAAAAA\xffBBBB')"
+  # A hyphen and an underscore are both in the anthropic and xai classes and
+  # neither is in the classic-github one, which is the difference between the
+  # patterns most easily lost in a port.
+  redact_case "classic-github-stops-at-underscore" "ghp_AAAAAA_BBBBBBBBBBBBBBBBBBBBBBBB"
+  redact_case "anthropic-continues-through-hyphen" "sk-ant-api03-AAAA-BBBB-CCCC"
+}
+
+jq -n --argjson captured "$(captured_json)" \
+  --argjson cases "$(redact_cases | jq -s .)" \
+  --arg notice "$LOG_REDACT_NOTICE" \
+  '{captured:$captured, function:"log_redact_str and log_redact_publish",
+    notice:$notice, cases:$cases}' \
+  >"$FIXDIR/redaction.json"
+
+# --- legs_github_slug over remote URLs ---------------------------------------
+#
+# Host isolation, not substring matching. The refusals are the point: a host
+# that merely contains github.com, a userinfo @ that lives in the path rather
+# than the authority, and a path that is not exactly two segments.
+
+slug_case() { # name url
+  local out rc
+  out="$(legs_github_slug "$2")" && rc=0 || rc=$?
+  jq -cn --arg n "$1" --arg u "$2" --arg o "$out" --argjson rc "$rc" \
+    '{name:$n, url:$u, slug:(if $rc == 0 then $o else null end), rc:$rc}'
+}
+
+slug_cases() {
+  slug_case "https" "https://github.com/carlosboeing/crossrev"
+  slug_case "https-dot-git" "https://github.com/carlosboeing/crossrev.git"
+  slug_case "https-trailing-slash" "https://github.com/carlosboeing/crossrev/"
+  slug_case "https-trailing-slash-and-git" "https://github.com/carlosboeing/crossrev.git/"
+  slug_case "https-with-userinfo" "https://token@github.com/carlosboeing/crossrev"
+  slug_case "https-with-user-and-password" "https://user:pass@github.com/carlosboeing/crossrev"
+  slug_case "https-with-port" "https://github.com:443/carlosboeing/crossrev"
+  slug_case "ssh-scheme" "ssh://git@github.com/carlosboeing/crossrev.git"
+  slug_case "git-scheme" "git://github.com/carlosboeing/crossrev.git"
+  slug_case "scp-style" "git@github.com:carlosboeing/crossrev.git"
+  slug_case "scp-style-no-user" "github.com:carlosboeing/crossrev"
+  slug_case "uppercase-host" "https://GitHub.COM/carlosboeing/crossrev"
+  slug_case "mixed-case-path-is-kept" "https://github.com/CarlosBoeing/CrossRev"
+  slug_case "dots-and-dashes-in-names" "https://github.com/some-org/some.repo_name"
+  # Refusals.
+  slug_case "host-that-only-contains-github" "https://github.com.example.net/a/b"
+  slug_case "host-with-github-as-a-prefix" "https://github.community/a/b"
+  # Each of the three below fails a DIFFERENT way to reach the refusal, and
+  # every case above them fails for one reason. Without these, a rule that
+  # compared the host by suffix, stripped userinfo on any @ rather than only one
+  # in the authority, or split on // rather than ://, would refuse every frozen
+  # case for its own reason and admit a host that is not github.com.
+  slug_case "host-ending-in-the-real-host" "https://notgithub.com/a/b"
+  slug_case "host-ending-in-the-real-host-as-a-word" "https://mygithub.com/a/b"
+  slug_case "userinfo-at-in-the-path-before-the-real-host" "https://example.com/x@github.com/a/b"
+  slug_case "double-slash-in-a-local-path" "/tmp//github.com/a/b"
+  slug_case "colon-in-a-path-segment-after-a-slash" "github.com/a:b"
+  # A host that is not github.com and folds into it. BSD tr under a UTF-8 locale
+  # folds multibyte letters and U+0130 becomes ASCII i, so the comparison
+  # accepted this until it pinned LC_ALL=C. The vector freezes the refusal, and
+  # it is the one case here whose answer used to depend on the machine.
+  slug_case "host-spelled-with-a-folding-homoglyph" "$(printf 'https://G\xc4\xb0THUB.COM/o/r')"
+  slug_case "gitlab" "https://gitlab.com/a/b"
+  slug_case "local-path-holding-the-host" "/home/dev/github.com/a/b"
+  slug_case "relative-path" "../github.com/a/b"
+  slug_case "userinfo-at-in-the-path" "https://example.com/github.com@a/b"
+  slug_case "one-path-segment" "https://github.com/onlyone"
+  slug_case "three-path-segments" "https://github.com/a/b/c"
+  slug_case "empty-path" "https://github.com/"
+  slug_case "no-path" "https://github.com"
+  slug_case "colon-after-a-slash-is-a-path" "/tmp/x:github.com/a/b"
+  slug_case "empty-string" ""
+  slug_case "path-segment-with-a-space" "https://github.com/a b/c"
+  slug_case "path-segment-with-a-tilde" "https://github.com/a~b/c"
+}
+
+jq -n --argjson captured "$(captured_json)" \
+  --argjson cases "$(slug_cases | jq -s .)" \
+  '{captured:$captured, function:"legs_github_slug", cases:$cases}' \
+  >"$FIXDIR/github_slug.json"
+
+# --- the failure text a push publishes ---------------------------------------
+#
+# _gh_git_tail selects the last five non-blank lines of git's output, caps them
+# and hands them to a pull request comment. Its answers are frozen in base64
+# because the case worth freezing is the one that is not text: a hook printing
+# another encoding, or a filename in one. The function pins LC_ALL=C on its grep
+# for that reason, and an unpinned grep answered nothing at all on Linux.
+
+tail_case() { # name text
+  local out rc
+  # The status is taken from the function itself, not from a substitution that
+  # ends in a sentinel: `$( _gh_git_tail …; printf x )` succeeds whatever the
+  # function returned, because printf is the last command in it. The sentinel is
+  # still needed to keep a trailing newline, so the two are captured apart.
+  _gh_git_tail "$2" >/dev/null 2>&1 && rc=0 || rc=$?
+  out="$(_gh_git_tail "$2" 2>/dev/null; printf 'x')"
+  out="${out%x}"
+  jq -cn --arg n "$1" --arg tb "$(b64 "$2")" --arg ob "$(b64 "$out")" --argjson rc "$rc" \
+    '{name:$n, text_b64:$tb, tail_b64:$ob, rc:$rc}'
+}
+
+tail_cases() {
+  tail_case "one-line" "error: failed to push"
+  tail_case "five-lines" "$(printf 'a\nb\nc\nd\ne')"
+  tail_case "six-lines-keeps-the-last-five" "$(printf 'a\nb\nc\nd\ne\nf')"
+  tail_case "blank-lines-dropped" "$(printf 'a\n\n   \n\tb\nc')"
+  tail_case "only-blank-lines-refuses" "$(printf '\n   \n\t\n')"
+  tail_case "empty-refuses" ""
+  # The cap, on both sides of the boundary. It counts characters, not bytes.
+  tail_case "at-the-cap" "$(printf 'a%.0s' $(seq 1 400))"
+  tail_case "one-past-the-cap" "$(printf 'a%.0s' $(seq 1 401))"
+  tail_case "multibyte-at-the-cap" "$(printf '\xc3\xa9%.0s' $(seq 1 400))"
+  tail_case "multibyte-past-the-cap" "$(printf '\xc3\xa9%.0s' $(seq 1 401))"
+  # Bytes that are not text. These answered nothing at all under an unpinned
+  # grep on GNU, and the whole reason vanished from the published comment.
+  tail_case "bare-invalid-bytes" "$(printf '\xff%.0s' $(seq 1 500))"
+  tail_case "continuation-bytes" "$(printf '\x80\x81%.0s' $(seq 1 300))"
+  tail_case "latin-1-text" "$(printf 'caf\xe9 %.0s' $(seq 1 120))"
+  tail_case "a-truncated-sequence-mid-string" "$(printf 'a%.0s' $(seq 1 300))$(printf '\xc3')$(printf 'b%.0s' $(seq 1 200))"
+  tail_case "an-invalid-byte-under-the-cap" "$(printf 'error: \xff\xfe failed')"
+}
+
+jq -n --argjson captured "$(captured_json)" \
+  --argjson cases "$(tail_cases | jq -s .)" \
+  '{captured:$captured, function:"_gh_git_tail", cases:$cases}' \
+  >"$FIXDIR/git_tail.json"
+
+# --- credential reads: strip sets, JWT claims and durations -------------------
+#
+# The strip set is a function of the descriptor, not a list held here: every
+# credential name any harness declares, minus the names this harness keeps.
+# Freezing it means a descriptor edit that widens what one harness sees is a
+# failed vector rather than a silent grant.
+
+cred_strip_case() { # harness
+  jq -cn --arg h "$1" --argjson names "$(cred_env_strip_for "$1" | jq -Rs 'split("\n") | map(select(length > 0))')" \
+    '{harness:$h, strip:$names}'
+}
+
+cred_strip_cases() {
+  local h
+  while IFS= read -r h; do cred_strip_case "$h"; done < <(harness_names)
+  # A name no descriptor declares strips everything and keeps nothing.
+  cred_strip_case "not-a-harness"
+}
+
+# A JWT the capture builds rather than one anybody issued: header and claims are
+# fixed text, and the signature segment is never read.
+cred_jwt() { # claims_json
+  local h p
+  h="$(printf '%s' '{"alg":"none","typ":"JWT"}' | openssl base64 -A | tr '/+' '_-' | tr -d '=')"
+  p="$(printf '%s' "$1" | openssl base64 -A | tr '/+' '_-' | tr -d '=')"
+  printf '%s.%s.%s' "$h" "$p" "c2ln"
+}
+
+jwt_case() { # name jwt
+  local claims rc
+  claims="$(cred_jwt_claims "$2")" && rc=0 || rc=$?
+  jq -cn --arg n "$1" --arg j "$2" --arg c "$claims" --argjson rc "$rc" \
+    '{name:$n, jwt:$j, claims:(if $rc == 0 then $c else null end), rc:$rc}'
+}
+
+jwt_cases() {
+  jwt_case "expiry-and-issuer" "$(cred_jwt '{"exp":1893456000,"iss":"https://example.test","aud":"crossrev"}')"
+  jwt_case "no-expiry" "$(cred_jwt '{"iss":"https://example.test"}')"
+  jwt_case "empty-claims-object" "$(cred_jwt '{}')"
+  jwt_case "unicode-in-a-claim" "$(cred_jwt '{"name":"été","exp":1}')"
+  # Padding: base64url drops the = signs, so the decoder restores them by
+  # length. A remainder of one is not a valid length and must refuse.
+  jwt_case "payload-needing-two-pad-bytes" "$(cred_jwt '{"a":1}')"
+  jwt_case "payload-needing-one-pad-byte" "$(cred_jwt '{"ab":1}')"
+  jwt_case "payload-needing-no-pad" "$(cred_jwt '{"abc":1}')"
+  # Refusals.
+  jwt_case "not-a-jwt-no-dots" "abcdef"
+  jwt_case "one-dot-only" "abc.def"
+  jwt_case "payload-is-not-base64url" "aaa.!!!!.ccc"
+  jwt_case "payload-decodes-to-non-json" "$(printf 'aaa.%s.ccc' "$(printf 'not json' | openssl base64 -A | tr '/+' '_-' | tr -d '=')")"
+  jwt_case "empty-payload-segment" "aaa..ccc"
+  jwt_case "empty-string" ""
+}
+
+duration_case() { # seconds
+  jq -cn --argjson s "$1" --arg d "$(_cred_human_duration "$1")" '{seconds:$s, human:$d}'
+}
+
+duration_cases() {
+  # Every boundary of the four-arm ladder, on both sides.
+  duration_case -1; duration_case 0; duration_case 1
+  duration_case 59; duration_case 60; duration_case 61
+  duration_case 3599; duration_case 3600; duration_case 3601
+  duration_case 172799; duration_case 172800; duration_case 172801
+  duration_case 86400; duration_case 604800
+}
+
+# The reason a vendor gave for refusing a refresh. Frozen after #165 and #167,
+# which were one defect reached from two sides. RFC 6749 section 5.2 defines
+# `error` as a string, and `.error.message` against a string is a jq error
+# rather than a null, so the common shape reported nothing at all. Three more
+# shapes reached the same empty answer by other routes.
+#
+# Both directions are captured, because both are wrong. A reason must be found
+# where one exists, and an object or an array must NOT reach the operator as raw
+# JSON inside a one-line status message. The message ends in a colon, so an
+# empty answer prints a dangling one, which is the symptom the issue was filed
+# for.
+refusal_case() { # name body
+  jq -cn --arg n "$1" --arg b "$2" --arg r "$(_cred_refusal_reason "$2")" \
+    '{name:$n, body:$b, reason:$r}'
+}
+
+refusal_cases() {
+  refusal_case "error-object-with-a-message" '{"error":{"message":"the client is not known"}}'
+  refusal_case "error-description-only" '{"error_description":"the refresh token expired"}'
+  refusal_case "error-as-a-string" '{"error":"invalid_client"}'
+  refusal_case "both-an-object-and-a-description" '{"error":{"message":"m"},"error_description":"d"}'
+  refusal_case "a-description-beside-a-string-error" '{"error":"invalid_client","error_description":"d"}'
+  refusal_case "error-object-with-no-message" '{"error":{"code":401}}'
+  refusal_case "error-as-an-array" '{"error":["invalid_client"]}'
+  refusal_case "error-as-a-number" '{"error":401}'
+  refusal_case "error-as-null" '{"error":null}'
+  refusal_case "an-empty-object" '{}'
+  refusal_case "not-json-at-all" 'not json'
+  refusal_case "an-empty-body" ''
+  refusal_case "a-json-array-body" '[1,2]'
+  refusal_case "an-empty-string-error" '{"error":""}'
+  refusal_case "an-empty-string-description" '{"error_description":""}'
+  refusal_case "a-numeric-description" '{"error_description":123}'
+}
+
+jq -n --argjson captured "$(captured_json)" \
+  --argjson strip "$(cred_strip_cases | jq -s .)" \
+  --argjson jwt "$(jwt_cases | jq -s .)" \
+  --argjson durations "$(duration_cases | jq -s .)" \
+  --argjson refusals "$(refusal_cases | jq -s .)" \
+  --argjson min_seconds "$CRED_MIN_SECONDS" \
+  '{captured:$captured,
+    function:"cred_env_strip_for, cred_jwt_claims, _cred_human_duration and _cred_refusal_reason",
+    cred_min_seconds:$min_seconds,
+    strip_sets:$strip, jwt_cases:$jwt, duration_cases:$durations,
+    refusal_cases:$refusals}' \
+  >"$FIXDIR/credentials.json"
+
+usage_workdir="$(mktemp -d)"
+
+# --- usage normalization, price keys and table costs -----------------------
+#
+# The most arithmetic-heavy surface in the tool. Rates are per-token dollars
+# scaled to nano-dollars so the sum stays integral, and three separate rules
+# refuse to price rather than guess. A port that rounds once more or once less
+# than jq does produces a different cost with no error anywhere, so the answers
+# are frozen rather than described.
+
+usage_file() { # json_text -> path
+  local f; f="$(mktemp "$usage_workdir/u_XXXXXX")"
+  printf '%s' "$1" >"$f"
+  printf '%s' "$f"
+}
+
+parse_case() { # name parser json_text
+  local f out
+  f="$(usage_file "$3")"
+  case "$2" in
+    claude)   out="$(usage_parse_claude "$f")" ;;
+    codex)    out="$(usage_parse_codex_events "$f")" ;;
+    grok)     out="$(usage_parse_grok "$f")" ;;
+    agy)      out="$(usage_parse_agy "$f")" ;;
+    opencode) out="$(usage_parse_opencode_export "$f")" ;;
+  esac
+  jq -cn --arg n "$1" --arg p "$2" --arg i "$3" --arg o "$out" \
+    '{name:$n, parser:$p, input:$i, record:$o}'
+}
+
+parse_cases() {
+  # claude: the split wins over the modelUsage write sum, and the excess lands
+  # in cache_write_unsplit rather than being dropped.
+  parse_case "claude-two-models-with-a-split" claude '{"modelUsage":{"claude-opus-5[1m]":{"inputTokens":100,"outputTokens":50,"cacheReadInputTokens":900,"cacheCreationInputTokens":300},"claude-sonnet-5":{"inputTokens":10,"outputTokens":5,"cacheReadInputTokens":0,"cacheCreationInputTokens":0}},"usage":{"cache_creation":{"ephemeral_5m_input_tokens":200,"ephemeral_1h_input_tokens":50},"output_tokens_details":{"thinking_tokens":40}},"total_cost_usd":0.1234}'
+  parse_case "claude-split-covers-the-writes" claude '{"modelUsage":{"m":{"inputTokens":1,"outputTokens":1,"cacheReadInputTokens":0,"cacheCreationInputTokens":100}},"usage":{"cache_creation":{"ephemeral_5m_input_tokens":100,"ephemeral_1h_input_tokens":0}}}'
+  parse_case "claude-split-exceeds-the-writes" claude '{"modelUsage":{"m":{"inputTokens":1,"outputTokens":1,"cacheReadInputTokens":0,"cacheCreationInputTokens":10}},"usage":{"cache_creation":{"ephemeral_5m_input_tokens":100,"ephemeral_1h_input_tokens":0}}}'
+  parse_case "claude-no-split-at-all" claude '{"modelUsage":{"m":{"inputTokens":1,"outputTokens":2,"cacheReadInputTokens":3,"cacheCreationInputTokens":4}}}'
+  parse_case "claude-canonical-model-wins-over-the-key" claude '{"modelUsage":{"vendor/m[1m]":{"canonicalModel":"m-canonical","inputTokens":1,"outputTokens":1,"cacheReadInputTokens":0,"cacheCreationInputTokens":0}}}'
+  parse_case "claude-bracket-suffix-stripped-from-the-key" claude '{"modelUsage":{"claude-opus-5[1m]":{"inputTokens":1,"outputTokens":1,"cacheReadInputTokens":0,"cacheCreationInputTokens":0}}}'
+  parse_case "claude-models-sorted-by-total-descending" claude '{"modelUsage":{"small":{"inputTokens":1,"outputTokens":0,"cacheReadInputTokens":0,"cacheCreationInputTokens":0},"large":{"inputTokens":100,"outputTokens":0,"cacheReadInputTokens":0,"cacheCreationInputTokens":0}}}'
+  parse_case "claude-cost-present-without-model-usage" claude '{"total_cost_usd":0.5}'
+  parse_case "claude-cost-is-not-a-number" claude '{"modelUsage":{"m":{"inputTokens":1}},"total_cost_usd":"0.5"}'
+  parse_case "claude-empty-object" claude '{}'
+  parse_case "claude-not-json" claude 'not json at all'
+  # codex: cached tokens are folded inside input_tokens, so fresh is a
+  # subtraction and the only derived field.
+  parse_case "codex-last-turn-wins" codex '{"type":"turn.completed","usage":{"input_tokens":10,"cached_input_tokens":2,"output_tokens":3}}
+{"type":"turn.completed","usage":{"input_tokens":100,"cached_input_tokens":40,"output_tokens":7}}'
+  parse_case "codex-no-cached-field" codex '{"type":"turn.completed","usage":{"input_tokens":10,"output_tokens":3}}'
+  parse_case "codex-cached-exceeds-input" codex '{"type":"turn.completed","usage":{"input_tokens":5,"cached_input_tokens":9,"output_tokens":1}}'
+  parse_case "codex-no-completed-turn" codex '{"type":"turn.started"}'
+  parse_case "codex-empty-stream" codex ''
+  # grok, agy and opencode.
+  parse_case "grok-full-record" grok '{"modelUsage":{"grok-4.6-build":{}},"usage":{"input_tokens":10,"cache_read_input_tokens":5,"cache_creation_input_tokens":2,"output_tokens":3,"reasoning_tokens":9},"total_cost_usd":0.25}'
+  parse_case "grok-no-usage" grok '{"modelUsage":{"grok-4.6-build":{}}}'
+  parse_case "grok-no-model-usage" grok '{"usage":{"input_tokens":1,"output_tokens":1}}'
+  parse_case "agy-vendor-total-ignored" agy '{"usage":{"input_tokens":10,"cache_read_tokens":90,"output_tokens":5,"thinking_tokens":2,"total_tokens":15}}'
+  parse_case "agy-no-usage" agy '{}'
+  parse_case "opencode-full-export" opencode '{"info":{"model":{"id":"anthropic/claude-sonnet-5"},"tokens":{"input":10,"output":20,"reasoning":5,"cache":{"read":100,"write":30}}}}'
+  parse_case "opencode-no-model-id" opencode '{"info":{"tokens":{"input":1,"output":1,"cache":{"read":0,"write":0}}}}'
+  parse_case "opencode-no-tokens" opencode '{"info":{"model":{"id":"m"}}}'
+}
+
+price_key_case() { # reported
+  jq -cn --arg r "$1" --arg k "$(usage_price_key "$1")" '{reported:$r, key:$k}'
+}
+
+price_key_cases() {
+  price_key_case ""
+  price_key_case "claude-opus-5"
+  price_key_case "CLAUDE-OPUS-5"
+  price_key_case "claude-opus-5[1m]"
+  price_key_case "Claude-Opus-5[1M]"
+  # A listed key carrying a provider prefix is matched by its bare id.
+  price_key_case "grok-4.6"
+  price_key_case "xai/grok-4.6"
+  # A reported id that merely contains a listed bare id takes the longest one,
+  # which is how grok-4.6-build prices as xai/grok-4.6 and not as xai/grok-4.5.
+  price_key_case "grok-4.6-build"
+  price_key_case "openai/gpt-5.6-terra"
+  price_key_case "gpt-5.6-terra-preview"
+  price_key_case "claude-opus-5-20260101"
+  price_key_case "anthropic/claude-sonnet-5"
+  price_key_case "a-model-nobody-listed"
+  price_key_case "[only-a-suffix]"
+  # Two listed bare ids in one report. The nearest-match rung ranks by length,
+  # so the longer one wins under either word order — the rung answered the last
+  # match in the price file's order until #175, and no vector told the two
+  # rules apart.
+  price_key_case "gpt-5.6-cyber gpt-5.6-luna"
+  price_key_case "gpt-5.6-luna gpt-5.6-cyber"
+  price_key_case "claude-haiku-4-5-and-claude-opus-4-8"
+  # `version` is a key in the table and is not a model. Every rung requires the
+  # value to be an object, so no rung answers it (#170).
+  price_key_case "version"
+}
+
+price_case() { # name usage_json model
+  jq -cn --arg n "$1" --arg u "$2" --arg m "$3" \
+    --arg o "$(usage_price "$2" "$3")" \
+    '{name:$n, usage:$u, model:$m, priced:$o}'
+}
+
+price_cases() {
+  local zero ph
+  zero="$(usage_zero)"
+  price_case "unlisted-model-does-not-price" "$zero" "a-model-nobody-listed"
+  price_case "empty-model-does-not-price" "$zero" ""
+  price_case "zero-record-on-a-listed-model" "$zero" "claude-opus-5"
+  # Every bucket the anthropic entry lists a rate for.
+  ph="$(jq -c '.input_fresh=1000|.output=500|.cache_read=2000' <<<"$zero")"
+  price_case "input-output-and-cache-read" "$ph" "claude-opus-5"
+  price_case "one-input-token" "$(jq -c '.input_fresh=1' <<<"$zero")" "claude-opus-5"
+  price_case "cache-write-5m" "$(jq -c '.cache_write_5m=1000' <<<"$zero")" "claude-opus-5"
+  price_case "cache-write-1h-uses-the-above-1hr-rate" "$(jq -c '.cache_write_1h=1000' <<<"$zero")" "claude-opus-5"
+  # An unresolvable write TTL refuses where the two write rates differ, and
+  # prices where the entry lists no separate above-1hr rate at all.
+  price_case "unsplit-write-refuses-on-anthropic" "$(jq -c '.cache_write_unsplit=1000' <<<"$zero")" "claude-opus-5"
+  price_case "unsplit-write-prices-where-no-1hr-rate-is-listed" "$(jq -c '.cache_write_unsplit=1000' <<<"$zero")" "gpt-5.6"
+  # A bucket holding tokens whose rate the entry omits refuses; the same bucket
+  # at zero still prices, because only a nonzero bucket counts.
+  price_case "write-bucket-with-no-listed-rate-refuses" "$(jq -c '.cache_write_5m=10' <<<"$zero")" "gpt-5.5"
+  price_case "same-entry-prices-with-that-bucket-empty" "$(jq -c '.input_fresh=1000|.output=100' <<<"$zero")" "gpt-5.5"
+  # A per-request long-context break a cumulative total cannot rule out.
+  price_case "under-the-272k-break" "$(jq -c '.input_fresh=271999' <<<"$zero")" "gpt-5.5"
+  price_case "at-the-272k-break" "$(jq -c '.input_fresh=272000' <<<"$zero")" "gpt-5.5"
+  price_case "break-counts-every-input-bucket" "$(jq -c '.input_fresh=200000|.cache_read=72000' <<<"$zero")" "gpt-5.5"
+  price_case "output-alone-does-not-reach-the-break" "$(jq -c '.output=400000' <<<"$zero")" "gpt-5.5"
+  price_case "at-the-200k-break" "$(jq -c '.input_fresh=200000' <<<"$zero")" "xai/grok-4.6"
+  price_case "under-the-200k-break" "$(jq -c '.input_fresh=199999' <<<"$zero")" "xai/grok-4.6"
+  # Reasoning is excluded from the total and therefore from the cost.
+  price_case "reasoning-is-not-priced" "$(jq -c '.output=500|.reasoning=400' <<<"$zero")" "claude-opus-5"
+  # An unlisted model clears a cost the adapter had already reported.
+  price_case "unlisted-model-clears-a-reported-cost" "$(jq -c '.input_fresh=1000|.cost_usd=9|.cost_source="harness"|.price_table="x"' <<<"$zero")" "a-model-nobody-listed"
+  # Rates below a nano-dollar round once, at the rate rather than at the sum.
+  price_case "cache-read-at-half-a-nano-dollar" "$(jq -c '.cache_read=1' <<<"$zero")" "claude-opus-5"
+  price_case "cache-read-at-scale" "$(jq -c '.cache_read=1000000' <<<"$zero")" "claude-opus-5"
+}
+
+billing_case() { # name harness endpoint api_key
+  local out
+  if [[ -n "$4" ]]; then out="$(ANTHROPIC_API_KEY="$4" usage_billing_for "$2" "$3")"
+  else out="$(ANTHROPIC_API_KEY="" usage_billing_for "$2" "$3")"; fi
+  jq -cn --arg n "$1" --arg h "$2" --arg e "$3" --arg k "$4" --arg o "$out" \
+    '{name:$n, harness:$h, endpoint:$e, anthropic_api_key_set:($k | length > 0), billing:$o}'
+}
+
+billing_cases() {
+  local h
+  while IFS= read -r h; do
+    billing_case "$h-vendor-no-key" "$h" "vendor" ""
+    billing_case "$h-named-endpoint" "$h" "an-endpoint" ""
+    billing_case "$h-vendor-with-anthropic-key" "$h" "vendor" "sk-ant-test"
+  done < <(harness_names)
+  billing_case "empty-endpoint-string" "claude" "" ""
+  billing_case "null-endpoint-string" "claude" "null" ""
+  billing_case "unknown-harness" "not-a-harness" "vendor" ""
+}
+
+format_cost_cases() {
+  # No value on an exact half-cent boundary. usage_format_cost is printf %.2f,
+  # and bash's builtin converts its argument with strtold, so the rounding is
+  # decided in long double. That type is 80-bit on x86-64 and 64-bit on arm64,
+  # and 0.005 lands on opposite sides of the boundary in the two: one answers
+  # ~$0.01 and the other ~$0.00. Freezing either would make the vector a
+  # property of the machine that captured it. 0.0049 and 0.0051 sit either side
+  # with room to spare and answer the same everywhere. 0.125 is exactly
+  # representable, so both widths agree on it and it stays.
+  local v
+  for v in "" "0" "0.004" "0.0049" "0.0051" "0.125" "1" "12.345" "-1.5" "1e-3" "1E3" "abc" "0.1.2" " 1"; do
+    jq -cn --arg v "$v" --arg o "$(usage_format_cost "$v")" '{value:$v, formatted:$o}'
+  done
+}
+
+footnote_cases() {
+  local cs b
+  for cs in "" "null" "harness" "table" "other"; do
+    for b in "" "null" "subscription" "api" "endpoint"; do
+      jq -cn --arg c "$cs" --arg b "$b" --arg o "$(usage_footnote "$cs" "$b")" \
+        '{cost_source:$c, billing:$b, footnote:$o}'
+    done
+  done
+}
+
+jq -n --argjson captured "$(captured_json)" \
+  --argjson zero "$(usage_zero)" \
+  --argjson with_total "$(usage_with_total "$(usage_zero)")" \
+  --argjson parses "$(parse_cases | jq -s .)" \
+  --argjson price_keys "$(price_key_cases | jq -s .)" \
+  --argjson prices "$(price_cases | jq -s .)" \
+  --argjson billing "$(billing_cases | jq -s .)" \
+  --argjson formats "$(format_cost_cases | jq -s .)" \
+  --argjson footnotes "$(footnote_cases | jq -s .)" \
+  --arg price_table_version "$(jq -r '.version // ""' "$(_usage_prices_file)")" \
+  '{captured:$captured,
+    function:"usage normalization, price keys, table costs and presentation",
+    price_table_version:$price_table_version,
+    zero:$zero, zero_with_total:$with_total,
+    parse_cases:$parses, price_key_cases:$price_keys, price_cases:$prices,
+    billing_cases:$billing, format_cost_cases:$formats, footnote_cases:$footnotes}' \
+  >"$FIXDIR/usage.json"
+
+rm -rf "$usage_workdir"
+
+
+# --- push targets, over real repositories -----------------------------------
+#
+# The one Phase-2 surface whose answer needs a repository rather than a string.
+# git pushes to every remote.<name>.pushurl entry, so a second entry pointing
+# somewhere else is a refusal rather than a value; and a pushInsteadOf rewrite
+# is a warning that does not stop the push. Each case builds its own repository
+# with pinned identity so the capture is reproducible.
+
+push_workdir="$(mktemp -d)"
+
+push_case() { # name <config lines, one per argument thereafter>
+  local name="$1"; shift
+  local d out err rc line
+  d="$(mktemp -d "$push_workdir/pr_XXXXXX")"
+  out="$(
+    cd "$d" && git init -q . 2>/dev/null
+    for line in "$@"; do
+      # Each line is `key<TAB>value`, added rather than set so a repeated key
+      # keeps both entries — which is the whole point of the two-pushurl cases.
+      git config --add "${line%%$'\t'*}" "${line#*$'\t'}"
+    done
+    LEGS_PUSH_REPO=""
+    legs_resolve_push_repo origin 2>"$d/err"
+    printf '%s' "$LEGS_PUSH_REPO"
+  )" && rc=0 || rc=$?
+  err="$(cat "$d/err" 2>/dev/null || true)"
+  jq -cn --arg n "$name" --argjson cfg "$(printf '%s\n' "$@" | jq -Rs 'split("\n")|map(select(length>0))')" \
+    --arg o "$out" --arg e "$err" --argjson rc "$rc" \
+    '{name:$n, config:$cfg, push_repo:$o, stderr:$e, rc:$rc}'
+}
+
+push_cases() {
+  push_case "one-fetch-url" "remote.origin.url	https://github.com/o/r.git"
+  push_case "one-push-url" \
+    "remote.origin.url	https://github.com/o/r.git" \
+    "remote.origin.pushurl	https://github.com/o/r.git"
+  push_case "push-url-overrides-a-different-fetch-url" \
+    "remote.origin.url	https://github.com/fetch-org/fetch-repo.git" \
+    "remote.origin.pushurl	https://github.com/push-org/push-repo.git"
+  push_case "two-push-urls-agreeing" \
+    "remote.origin.pushurl	https://github.com/o/r.git" \
+    "remote.origin.pushurl	git@github.com:o/r.git"
+  push_case "two-push-urls-disagreeing" \
+    "remote.origin.pushurl	https://github.com/o/r.git" \
+    "remote.origin.pushurl	https://github.com/o/other.git"
+  push_case "scp-style-fetch-url" "remote.origin.url	git@github.com:o/r.git"
+  push_case "non-github-url-refuses" "remote.origin.url	https://gitlab.com/o/r.git"
+  push_case "host-that-only-contains-github-refuses" \
+    "remote.origin.url	https://github.com.example.net/o/r.git"
+  push_case "no-remote-at-all"
+  push_case "remote-with-no-url" "remote.origin.fetch	+refs/heads/*:refs/remotes/origin/*"
+  # A rewrite reaches this code only where no explicit pushurl is set, so the
+  # two URL lists come from one source and pair positionally.
+  push_case "push-insteadof-rewrite-to-the-same-repository" \
+    "remote.origin.url	https://github.com/o/r.git" \
+    "url.git@github.com:o/r.git.pushInsteadOf	https://github.com/o/r.git"
+  push_case "push-insteadof-rewrite-to-another-repository" \
+    "remote.origin.url	https://github.com/o/r.git" \
+    "url.git@github.com:elsewhere/other.git.pushInsteadOf	https://github.com/o/r.git"
+  push_case "push-insteadof-rewrite-off-github" \
+    "remote.origin.url	https://github.com/o/r.git" \
+    "url.https://gitlab.com/o/r.git.pushInsteadOf	https://github.com/o/r.git"
+}
+
+jq -n --argjson captured "$(captured_json)" \
+  --argjson cases "$(push_cases | jq -s .)" \
+  '{captured:$captured, function:"legs_resolve_push_repo", cases:$cases}' \
+  >"$FIXDIR/push_target.json"
+
+rm -rf "$push_workdir"
+
+# --- run-log paths and quarantine paths --------------------------------------
+#
+# Surface 3 of the acceptance contract: the on-disk layout, and the owner/repo
+# to owner-repo slugging that names a run directory. Both are read from pinned
+# environment rather than from the operator's own home.
+
+runlog_case() { # name repo pr xdg_state home run_id
+  local d
+  d="$(XDG_STATE_HOME="$4" HOME="$5" GITHUB_RUN_ID="$6" log_run_dir "$2" "$3")"
+  jq -cn --arg n "$1" --arg r "$2" --arg p "$3" --arg x "$4" --arg h "$5" \
+    --arg g "$6" --arg d "$d" \
+    '{name:$n, repo:$r, pr:$p, xdg_state_home:$x, home:$h, github_run_id:$g, dir:$d}'
+}
+
+runlog_cases() {
+  runlog_case "xdg-state-set" "carlosboeing/crossrev" "42" "/state" "/home/dev" "12345"
+  runlog_case "xdg-state-unset-falls-back-to-home" "carlosboeing/crossrev" "42" "" "/home/dev" "12345"
+  # The slug replaces every slash, so a nested name flattens rather than nesting.
+  runlog_case "nested-repository-name" "org/team/repo" "1" "/state" "/home/dev" "9"
+  runlog_case "no-slash-in-the-name" "repo" "1" "/state" "/home/dev" "9"
+  runlog_case "dots-and-dashes-survive" "some-org/some.repo" "7" "/state" "/home/dev" "9"
+  runlog_case "trailing-slash-in-xdg-state" "o/r" "1" "/state/" "/home/dev" "9"
+}
+
+# The local run id is the process id, so it cannot be frozen as a literal. What
+# is frozen is the shape: GITHUB_RUN_ID wins where it is set, and local-<pid>
+# is the fallback.
+runlog_local_id_shape="$(GITHUB_RUN_ID="" bash -c 'source "'"$REPO_ROOT"'/lib/log.sh"; log_run_id' | sed -E 's/^local-[0-9]+$/local-<pid>/')"
+
+jq -n --argjson captured "$(captured_json)" \
+  --argjson cases "$(runlog_cases | jq -s .)" \
+  --arg local_id_shape "$runlog_local_id_shape" \
+  --arg quarantine_dir "$CROSSREV_QUARANTINE" \
+  --argjson quarantined "$(_sandbox_paths | jq -Rs 'split("\n")|map(select(length>0))')" \
+  --argjson sandbox_args "$(
+      { while IFS= read -r h; do
+          jq -cn --arg h "$h" --arg a "$(sandbox_args_for "$h")" '{harness:$h, args:$a}'
+        done < <(harness_names); } | jq -s .)" \
+  '{captured:$captured,
+    function:"log_run_dir, log_run_id, _sandbox_paths and sandbox_args_for",
+    local_run_id_shape:$local_id_shape,
+    run_dirs:$cases,
+    quarantine_dir:$quarantine_dir,
+    quarantined_paths:$quarantined,
+    sandbox_args:$sandbox_args}' \
+  >"$FIXDIR/paths.json"
 
 printf 'parity vectors written to %s\n' "$FIXDIR"

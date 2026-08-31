@@ -82,7 +82,12 @@ adapter_agy() {
   # No GitHub credential, and none belonging to another harness: this process
   # reads attacker-controlled text, and a credential it never receives is one no
   # injection can talk it into exfiltrating.
-  local -a run=(env -u GH_TOKEN -u GITHUB_TOKEN -u GH_ENTERPRISE_TOKEN)
+  # Four names, not three. `gh` reads GH_ENTERPRISE_TOKEN and, when that is
+  # unset, GITHUB_ENTERPRISE_TOKEN — `gh help environment` lists both, "in order
+  # of precedence". A strip list naming only the first left the second in the
+  # agent's environment on a GitHub Enterprise Server setup, which is the one
+  # kind of installation where it is the credential in use.
+  local -a run=(env -u GH_TOKEN -u GITHUB_TOKEN -u GH_ENTERPRISE_TOKEN -u GITHUB_ENTERPRISE_TOKEN)
   local v
   while IFS= read -r v; do run+=(-u "$v"); done < <(cred_env_strip_for agy)
 

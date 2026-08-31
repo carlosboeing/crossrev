@@ -386,15 +386,34 @@ usage_price_key() {
   local pf hit
   pf="$(_usage_prices_file)"
   [[ -f "$pf" ]] || return 0
-  hit="$(jq -r --arg k "$reported" 'if has($k) then $k else empty end' "$pf" 2>/dev/null)"
+  # Every arm requires the value to be an object, because not every top-level
+  # key in the price file is a model. `version` is one: it holds a string, and
+  # matching it returned a key whose rates cannot be read. usage_price then
+  # asked a string for .input_cost_per_token, which is a hard jq error rather
+  # than a null — jq exited 5 having printed its own message where a record was
+  # expected, and usage_attach handed that message on with status 0. A model
+  # reported as `version` cost the caller the whole usage record. Any later
+  # non-model key at the top level would do the same, so the shape is checked
+  # rather than the name.
+  hit="$(jq -r --arg k "$reported" 'if (.[$k] | type) == "object" then $k else empty end' "$pf" 2>/dev/null)"
   [[ -n "$hit" ]] && { printf '%s' "$hit"; return 0; }
   hit="$(jq -r --arg k "$reported" \
-    'limit(1; to_entries[] | select((.key | split("/") | last) == $k) | .key)' \
+    'limit(1; to_entries[] | select((.value | type) == "object")
+       | select((.key | split("/") | last) == $k) | .key)' \
     "$pf" 2>/dev/null)"
   [[ -n "$hit" ]] && { printf '%s' "$hit"; return 0; }
+  # {key: .key, bare: $bare}, not {key, bare}. The shorthand reads .bare off
+  # the to_entries object, which has no such field, so every element's bare was
+  # null, `null | length` is 0 for all of them, and sort_by ranked nothing. The
+  # rung then answered the LAST match in the file's order rather than the
+  # longest bare id, which is what the comment above and the whole point of the
+  # rung say it does. The file happens to list a general id before its
+  # variants, so the two rules agree today; reordering it would have changed
+  # what a model prices at, silently.
   jq -r --arg k "$reported" \
-    '[ to_entries[] | (.key | split("/") | last) as $bare
-       | select($k | contains($bare)) | {key, bare} ]
+    '[ to_entries[] | select((.value | type) == "object")
+       | (.key | split("/") | last) as $bare
+       | select($k | contains($bare)) | {key: .key, bare: $bare} ]
      | sort_by(.bare | length) | last | .key // empty' "$pf" 2>/dev/null
 }
 

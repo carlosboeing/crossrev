@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
 #
-# Copy the canonical schemas and skills into the Go packages that embed them.
+# Copy the canonical schemas, skills, harness descriptor and price extract into
+# the Go packages that embed them.
 #
 # `go:embed` patterns are package-relative and cannot contain `..`, so a Go
 # package cannot embed a file from the repository root. The canonical files stay
-# where every other reader already finds them — `schemas/` and `skills/` — and
-# this script keeps a byte-identical copy beside the package that embeds it.
+# where every other reader already finds them — `schemas/`, `skills/`,
+# `lib/harnesses.json` and `lib/prices.json` — and this script keeps a
+# byte-identical copy beside each package that embeds one. A source may appear
+# twice: the descriptor is embedded by two packages, and both copies are
+# compared against the canonical file rather than against each other.
 #
 # The copies are generated. Editing one by hand is the failure this exists to
 # catch: the skill text is reproduced into every prompt (ADR 0007), so a
@@ -40,10 +44,13 @@ ASSETS=(
   "schemas/resolve.schema.json"   "internal/validate/assets/resolve.schema.json"
   "skills/pr-review/SKILL.md"     "internal/prompt/assets/pr-review.SKILL.md"
   "skills/pr-resolve/SKILL.md"    "internal/prompt/assets/pr-resolve.SKILL.md"
+  "lib/harnesses.json"            "internal/cred/assets/harnesses.json"
+  "lib/harnesses.json"            "internal/harness/assets/harnesses.json"
+  "lib/prices.json"               "internal/harness/assets/prices.json"
 )
 
 # The list above is what gets copied. It is not what decides the list is
-# complete: a fifth `//go:embed` with no entry here would be copied by nobody
+# complete: a further `//go:embed` with no entry here would be copied by nobody
 # and checked by nobody, and `--check` would still print `embedded assets
 # match`. So the directives themselves are read back out of the Go source and
 # every destination they name has to appear above.

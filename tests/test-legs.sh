@@ -115,6 +115,11 @@ slug refused "a local path holding the host name"     "/tmp/w/github.com/o/r.git
 slug refused "an https remote on another host"        "https://git.example.com/o/r.git"
 slug refused "a plain local path"                     "/tmp/w/origin.git"
 slug refused "a path deeper than owner/repo"          "https://github.com/o/r/x.git"
+# A host that is not github.com and folds into it. BSD tr under a UTF-8 locale
+# folds multibyte letters, and U+0130 becomes ASCII i, so an unpinned compare
+# accepted this and answered with a slug. The compare pins LC_ALL=C for the same
+# reason state_finding_id does.
+slug refused "a host spelled with a folding homoglyph" "$(printf 'https://G\xc4\xb0THUB.COM/o/r.git')"
 
 # --- push-target URL resolution and rewrite warning ------------------------
 err_file="$(mktemp)"
@@ -842,5 +847,32 @@ has "and its fix lands" \
   "$(git --git-dir="$FIX_ORIGIN" log -1 refs/heads/feature --format=%s)" "fix: resolve crossrev review findings (pass 1)"
 
 PATH="$_path_before_fallback"; export PATH
+
+# --- the failure text a push publishes -------------------------------------
+#
+# _gh_git_tail selects the last five non-blank lines of git's output, and that
+# text reaches a pull request comment through ui_die and _run_report_invoke_failure.
+# A hook printing another encoding, or a filename in one, puts a byte that is not
+# valid UTF-8 into it. GNU grep under a UTF-8 locale treats such input as binary
+# and withholds it, so without a pinned locale this returned nothing on Linux and
+# the whole reason vanished from the comment — while macOS published it. The same
+# reason log_redact pins LC_ALL=C on its sed.
+# shellcheck source=../lib/log.sh
+source "$HERE/../lib/log.sh"
+# shellcheck source=../lib/github.sh
+source "$HERE/../lib/github.sh"
+
+tail_keeps() {
+  local desc="$1" text="$2" got
+  got="$(_gh_git_tail "$text")" || got="<refused>"
+  [[ -n "$got" && "$got" != "<refused>" ]] \
+    && ok "$desc" || notok "$desc" "non-empty output" "$got"
+}
+tail_keeps "a tail of bytes that are not valid UTF-8"   "$(printf 'error: \xff\xfe failed')"
+tail_keeps "a tail of continuation bytes"               "$(printf 'error: \x80\x81 failed')"
+tail_keeps "a tail of latin-1 text"                     "$(printf 'error: caf\xe9 not found')"
+is "and it keeps those bytes rather than replacing them" \
+   "$(_gh_git_tail "$(printf 'error: caf\xe9')" | od -An -tx1 | tr -d ' \n')" \
+   "$(printf 'error: caf\xe9' | od -An -tx1 | tr -d ' \n')"
 
 finish

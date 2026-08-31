@@ -334,5 +334,41 @@ is "and the second leg's own variable clears in turn" "${CODEX_HOME:-unset}" "un
 unset CROSSREV_OPENCODE_AUTH CROSSREV_CODEX_AUTH XDG_DATA_HOME
 [[ -n "$save_data" ]] && export XDG_DATA_HOME="$save_data" || true
 
+# A rejected refresh names its reason, whichever shape the vendor sent.
+#
+# RFC 6749 section 5.2 defines `error` as a string, so `{"error":"invalid_client"}`
+# is the shape that arrives most often. It is also the one an alternative chain
+# starting `.error.message` cannot read: against a string that is a hard jq
+# error, not a null, so jq exits without printing and the rejection reports no
+# reason at all. cred_refresh reads the body for exactly this, so losing it
+# leaves the operator with an HTTP status and nothing to act on.
+is "an error object names its message" \
+   "$(_cred_refusal_reason '{"error":{"message":"the client is not known"}}')" \
+   "the client is not known"
+is "an error_description is read when there is no object" \
+   "$(_cred_refusal_reason '{"error_description":"the refresh token expired"}')" \
+   "the refresh token expired"
+is "a string error is read rather than lost" \
+   "$(_cred_refusal_reason '{"error":"invalid_client"}')" \
+   "invalid_client"
+is "a body with no reason says so" \
+   "$(_cred_refusal_reason '{}')" \
+   "no reason given"
+is "an error object with no message does not print raw JSON" \
+   "$(_cred_refusal_reason '{"error":{"code":401}}')" \
+   "no reason given"
+is "an error array does not print raw JSON either" \
+   "$(_cred_refusal_reason '{"error":["invalid_client"]}')" \
+   "no reason given"
+is "a body that is not JSON at all says so rather than failing" \
+   "$(_cred_refusal_reason 'not json')" \
+   "no reason given"
+is "an empty body says so rather than leaving a dangling colon" \
+   "$(_cred_refusal_reason '')" \
+   "no reason given"
+is "an error that is the empty string says so too" \
+   "$(_cred_refusal_reason '{"error":""}')" \
+   "no reason given"
+
 printf '\n  %d passed, %d failed\n' "$pass" "$fail"
 (( fail == 0 ))

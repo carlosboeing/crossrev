@@ -34,7 +34,8 @@ attacker-controlled — and hands them to a model, while holding a GitHub App
 token elsewhere in the same job. Findings of particular interest:
 
 - **Any path that puts a GitHub credential into the agent process.** The
-  adapters strip `GH_TOKEN`, `GITHUB_TOKEN` and `GH_ENTERPRISE_TOKEN` before
+  adapters strip `GH_TOKEN`, `GITHUB_TOKEN`, `GH_ENTERPRISE_TOKEN` and
+  `GITHUB_ENTERPRISE_TOKEN` before
   starting the model-facing process, and every GitHub call is made by the
   orchestrator. That separation is the load-bearing control
   ([ADR 0001](docs/adrs/0001-cross-model-review-loop.md)).

@@ -107,6 +107,36 @@ is "nearest-match prices grok-4.6-build as grok-4.6" \
 is "bracket suffix does not need a heuristic when the key is listed" \
   "$(usage_price_key claude-opus-5)" "claude-opus-5"
 
+# The nearest-match rung answers the LONGEST listed bare id the report
+# contains, which is the only rule under which a more specific model wins.
+#
+# It ranked by `{key, bare}`, and that shorthand reads `.bare` off the
+# to_entries object rather than the `$bare` variable bound one line above it.
+# There is no such field, so every element ranked as null and the rung answered
+# the last match in the file's order instead. The price file lists a general id
+# before its variants, so the wrong rule agreed with the right one on every
+# real model; reordering the file would have changed what a model prices at
+# without changing any code. Both assertions fail against the old filter.
+is "the longest listed bare id wins, not the last one listed" \
+  "$(usage_price_key "gpt-5.6-cyber gpt-5.6-luna")" "gpt-5.6-cyber"
+is "and the report's own word order does not decide it" \
+  "$(usage_price_key "gpt-5.6-luna gpt-5.6-cyber")" "gpt-5.6-cyber"
+
+# A top-level key that is not a model prices as unlisted, not as itself.
+#
+# `version` holds a string. Matching it returned a key whose rates cannot be
+# read, and usage_price then asked a string for .input_cost_per_token — a hard
+# jq error rather than a null. jq printed its own message where a record was
+# expected and usage_attach passed it on with status 0, so the caller lost the
+# whole usage record. Every arm checks the shape now, so a later non-model key
+# behaves the same way without anyone remembering this one.
+is "a non-model top-level key prices as unlisted" \
+  "$(usage_price_key version)" ""
+is "and the record survives a model reported with that name" \
+  "$(usage_attach "$(usage_zero)" claude vendor version | jq -r '.cost_usd')" "null"
+is "and its buckets are still there" \
+  "$(usage_attach "$(usage_zero)" claude vendor version | jq -r '.output')" "0"
+
 # --- Claude parsing: buckets from two objects, split wins, largest share ---
 
 u="$(usage_parse_claude "$ROOT/tests/fixtures/usage/claude-probe.json")"
