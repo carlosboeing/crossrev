@@ -11,6 +11,7 @@ import (
 
 	"github.com/carlosboeing/crossrev/internal/config"
 	"github.com/carlosboeing/crossrev/internal/core"
+	"github.com/carlosboeing/crossrev/internal/harness"
 	"github.com/carlosboeing/crossrev/internal/prstate"
 )
 
@@ -19,14 +20,15 @@ type persistItem struct {
 	Body  string `json:"body"`
 }
 
-func (l *Leg) persistDeferred(ctx context.Context, s *session, workdir string, recs []map[string]json.RawMessage, findings []map[string]json.RawMessage, sha string) (filed, matched int, wrote bool, lines string, out []map[string]json.RawMessage) {
-	out = recs
+func (l *Leg) persistDeferred(ctx context.Context, s *session, workdir string, recs []harness.Node, findings []harness.Node, sha string) (filed, matched int, wrote bool, lines string, out []harness.Node) {
+	out = make([]harness.Node, len(recs))
+	copy(out, recs)
 	var b strings.Builder
 	for i, d := range recs {
-		if jsonString(d["resolution"]) != string(core.ResolutionDeferred) {
+		if d.Member("resolution").StringVal() != string(core.ResolutionDeferred) {
 			continue
 		}
-		id := jsonString(d["finding_id"])
+		id := d.Member("finding_id").StringVal()
 		f := findingByID(findings, id)
 		where := findingLocation(f, sha, s.repo, s.req.PR)
 
@@ -41,7 +43,7 @@ func (l *Leg) persistDeferred(ctx context.Context, s *session, workdir string, r
 				}
 			}
 		}
-		dup, hasDup := issueNumber(d["duplicate_of"])
+		dup, hasDup := issueNumber(d.Member("duplicate_of"))
 		switch {
 		case existing > 0:
 			tracked = s.repo.String() + "#" + strconv.Itoa(existing)
@@ -74,20 +76,24 @@ func (l *Leg) persistDeferred(ctx context.Context, s *session, workdir string, r
 			}
 		}
 		if s.backlog.Destination != config.DestinationNone {
-			raw, _ := json.Marshal(tracked)
-			d["crossrev_tracked"] = raw
+			d.Set("crossrev_tracked", harness.FromString(tracked))
 			out[i] = d
 		}
 	}
 	return filed, matched, wrote, b.String(), out
 }
 
-func (l *Leg) persistOne(ctx context.Context, s *session, workdir string, d map[string]json.RawMessage, id string) (string, bool) {
-	if len(d["persist"]) == 0 || string(d["persist"]) == "null" {
+func (l *Leg) persistOne(ctx context.Context, s *session, workdir string, d harness.Node, id string) (string, bool) {
+	persistNode := d.Member("persist")
+	if !persistNode.Present() || persistNode.IsNull() {
+		return "", false
+	}
+	raw, err := json.Marshal(persistNode)
+	if err != nil {
 		return "", false
 	}
 	var item persistItem
-	if err := json.Unmarshal(d["persist"], &item); err != nil {
+	if err := json.Unmarshal(raw, &item); err != nil {
 		return "", false
 	}
 
@@ -163,23 +169,21 @@ func (s *session) gitHooksRun() bool {
 	return s.cfg.Get(".git.hooks") == "run"
 }
 
-func issueNumber(raw json.RawMessage) (int, bool) {
-	if len(raw) == 0 || string(raw) == "null" {
+func issueNumber(node harness.Node) (int, bool) {
+	if !node.Present() || node.IsNull() {
 		return 0, false
 	}
-	var n int
-	if json.Unmarshal(raw, &n) == nil && n != 0 {
-		return n, true
+	if n, ok := node.AsInt(); ok && n != 0 {
+		return int(n), true
 	}
-	var s string
-	if json.Unmarshal(raw, &s) == nil && s != "" && s != "null" {
+	if s, ok := node.AsString(); ok && s != "" && s != "null" {
 		n, err := strconv.Atoi(s)
 		return n, err == nil && n != 0
 	}
 	return 0, false
 }
 
-func marshalResolutions(recs []map[string]json.RawMessage) json.RawMessage {
+func marshalResolutions(recs []harness.Node) json.RawMessage {
 	b, err := json.Marshal(recs)
 	if err != nil {
 		return json.RawMessage("[]")
@@ -187,18 +191,18 @@ func marshalResolutions(recs []map[string]json.RawMessage) json.RawMessage {
 	return b
 }
 
-func unmarshalResolutions(raw json.RawMessage) []map[string]json.RawMessage {
-	var recs []map[string]json.RawMessage
+func unmarshalResolutions(raw json.RawMessage) []harness.Node {
+	var recs []harness.Node
 	if err := json.Unmarshal(raw, &recs); err != nil || recs == nil {
-		return []map[string]json.RawMessage{}
+		return []harness.Node{}
 	}
 	return recs
 }
 
-func unmarshalFindings(raw json.RawMessage) []map[string]json.RawMessage {
-	var fs []map[string]json.RawMessage
+func unmarshalFindings(raw json.RawMessage) []harness.Node {
+	var fs []harness.Node
 	if err := json.Unmarshal(raw, &fs); err != nil || fs == nil {
-		return []map[string]json.RawMessage{}
+		return []harness.Node{}
 	}
 	return fs
 }

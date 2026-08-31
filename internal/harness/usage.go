@@ -37,6 +37,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -544,47 +545,72 @@ func firstIdentifier(value node, pick func(node) (string, bool)) (string, bool) 
 
 // --- an order-preserving JSON tree ------------------------------------------
 
-type nodeKind byte
+// NodeKind identifies the variant of a Node.
+type NodeKind byte
 
 const (
-	kindAbsent nodeKind = iota
-	kindNull
-	kindBool
-	kindNumber
-	kindString
-	kindArray
-	kindObject
+	KindAbsent NodeKind = iota
+	KindNull
+	KindBool
+	KindNumber
+	KindString
+	KindArray
+	KindObject
+)
+
+type nodeKind = NodeKind
+
+const (
+	kindAbsent = KindAbsent
+	kindNull   = KindNull
+	kindBool   = KindBool
+	kindNumber = KindNumber
+	kindString = KindString
+	kindArray  = KindArray
+	kindObject = KindObject
 )
 
 type member struct {
 	key   string
-	value node
+	value Node
 }
 
-type node struct {
+// Node is an order-preserving JSON tree.
+type Node struct {
 	kind    nodeKind
 	members []member
-	items   []node
+	items   []Node
 	text    string
 	number_ float64
 	boolean bool
 }
 
-func (n node) present() bool { return n.kind != kindAbsent && n.kind != kindNull }
+type node = Node
+
+func (n Node) present() bool { return n.kind != kindAbsent && n.kind != kindNull }
+
+// Present reports whether the node is not absent and not null.
+func (n Node) Present() bool { return n.present() }
+
+// IsNull reports whether the node is null or absent.
+func (n Node) IsNull() bool { return n.kind == kindAbsent || n.kind == kindNull }
 
 // truthy is jq's own test: everything except null and false, with an absent key
 // standing in for the null jq answers when a document does not carry it. It is
 // what decides every `//` alternative ported below.
-func (n node) truthy() bool {
+func (n Node) truthy() bool {
 	if !n.present() {
 		return false
 	}
 	return n.kind != kindBool || n.boolean
 }
 
+// Truthy reports whether the node is truthy under jq semantics.
+func (n Node) Truthy() bool { return n.truthy() }
+
 // position answers where a key is declared among the members, which decoding
 // needs before lookup can be trusted to find it.
-func (n node) position(key string) (int, bool) {
+func (n Node) position(key string) (int, bool) {
 	for at, entry := range n.members {
 		if entry.key == key {
 			return at, true
@@ -593,28 +619,40 @@ func (n node) position(key string) (int, bool) {
 	return 0, false
 }
 
+// Position answers where a key is declared among the members.
+func (n Node) Position(key string) (int, bool) { return n.position(key) }
+
 // lookup answers a member and whether the key was declared at all, which is the
 // difference between `has("k")` and `.k == null`.
-func (n node) lookup(key string) (node, bool) {
+func (n Node) lookup(key string) (Node, bool) {
 	if n.kind != kindObject {
-		return node{}, false
+		return Node{}, false
 	}
 	for _, entry := range n.members {
 		if entry.key == key {
 			return entry.value, true
 		}
 	}
-	return node{}, false
+	return Node{}, false
 }
+
+// Lookup answers a member and whether the key was declared at all.
+func (n Node) Lookup(key string) (Node, bool) { return n.lookup(key) }
+
+// Get is an alias for Lookup.
+func (n Node) Get(key string) (Node, bool) { return n.lookup(key) }
 
 // member is `.k`, answering an absent node for anything that is not an object
 // carrying the key — which is jq's own behaviour for indexing a null.
-func (n node) member(key string) node {
+func (n Node) member(key string) Node {
 	found, _ := n.lookup(key)
 	return found
 }
 
-func (n node) keys() []string {
+// Member returns the named object member, or an absent node if not found.
+func (n Node) Member(key string) Node { return n.member(key) }
+
+func (n Node) keys() []string {
 	keys := make([]string, 0, len(n.members))
 	for _, entry := range n.members {
 		keys = append(keys, entry.key)
@@ -622,19 +660,28 @@ func (n node) keys() []string {
 	return keys
 }
 
-func (n node) asString() (string, bool) {
+// Keys returns the declared object keys in order.
+func (n Node) Keys() []string { return n.keys() }
+
+func (n Node) asString() (string, bool) {
 	if n.kind != kindString {
 		return "", false
 	}
 	return n.text, true
 }
 
-func (n node) asFloat() (float64, bool) {
+// AsString returns the string value and whether the node is a string.
+func (n Node) AsString() (string, bool) { return n.asString() }
+
+func (n Node) asFloat() (float64, bool) {
 	if n.kind != kindNumber {
 		return 0, false
 	}
 	return n.number_, true
 }
+
+// AsFloat returns the float64 value and whether the node is a number.
+func (n Node) AsFloat() (float64, bool) { return n.asFloat() }
 
 // asInt reads a number as a whole count.
 //
@@ -642,7 +689,7 @@ func (n node) asFloat() (float64, bool) {
 // oracle records, so the truncation below is unreachable there. jq would keep a
 // fraction; this is the one place a made-up fractional count would read
 // differently, and it reads LOW rather than high.
-func (n node) asInt() (int64, bool) {
+func (n Node) asInt() (int64, bool) {
 	value, ok := n.asFloat()
 	if !ok {
 		return 0, false
@@ -650,33 +697,191 @@ func (n node) asInt() (int64, bool) {
 	return int64(math.Trunc(value)), true
 }
 
+// AsInt returns the int64 value and whether the node is a number.
+func (n Node) AsInt() (int64, bool) { return n.asInt() }
+
 // number is `.k // 0`.
-func (n node) number(key string) int64 {
+func (n Node) number(key string) int64 {
 	value, _ := n.member(key).asInt()
 	return value
 }
 
-func decodeOrdered(raw []byte) (node, error) {
+// Number returns the integer value of `.k // 0`.
+func (n Node) Number(key string) int64 { return n.number(key) }
+
+// StringVal returns the string representation of scalar nodes.
+func (n Node) StringVal() string {
+	switch n.kind {
+	case kindString:
+		return n.text
+	case kindNumber:
+		if n.text != "" {
+			return n.text
+		}
+		return strconv.FormatFloat(n.number_, 'f', -1, 64)
+	case kindBool:
+		if n.boolean {
+			return "true"
+		}
+		return "false"
+	default:
+		return ""
+	}
+}
+
+// Set sets or appends a member key-value pair, preserving existing position.
+func (n *Node) Set(key string, val Node) {
+	if n.kind != kindObject {
+		n.kind = kindObject
+	}
+	if at, declared := n.position(key); declared {
+		n.members[at].value = val
+		return
+	}
+	n.members = append(n.members, member{key: key, value: val})
+}
+
+// Delete removes a member by key, preserving the order of remaining members.
+func (n *Node) Delete(key string) {
+	if n.kind != kindObject {
+		return
+	}
+	for i, m := range n.members {
+		if m.key == key {
+			n.members = append(n.members[:i], n.members[i+1:]...)
+			return
+		}
+	}
+}
+
+// FromString creates a string Node.
+func FromString(s string) Node {
+	return Node{kind: kindString, text: s}
+}
+
+// FromInt creates a number Node from an int64.
+func FromInt(v int64) Node {
+	return Node{kind: kindNumber, number_: float64(v), text: strconv.FormatInt(v, 10)}
+}
+
+// FromFloat creates a number Node from a float64.
+func FromFloat(v float64) Node {
+	return Node{kind: kindNumber, number_: v, text: strconv.FormatFloat(v, 'f', -1, 64)}
+}
+
+// FromBool creates a bool Node.
+func FromBool(b bool) Node {
+	return Node{kind: kindBool, boolean: b}
+}
+
+// FromNull creates a null Node.
+func FromNull() Node {
+	return Node{kind: kindNull}
+}
+
+// ObjectNode creates an empty object Node.
+func ObjectNode() Node {
+	return Node{kind: kindObject}
+}
+
+// ArrayNode creates an array Node from items.
+func ArrayNode(items ...Node) Node {
+	return Node{kind: kindArray, items: items}
+}
+
+// MarshalJSON encodes the node to JSON preserving object member order.
+func (n Node) MarshalJSON() ([]byte, error) {
+	switch n.kind {
+	case kindAbsent, kindNull:
+		return []byte("null"), nil
+	case kindBool:
+		if n.boolean {
+			return []byte("true"), nil
+		}
+		return []byte("false"), nil
+	case kindNumber:
+		if n.text != "" {
+			return []byte(n.text), nil
+		}
+		return []byte(strconv.FormatFloat(n.number_, 'f', -1, 64)), nil
+	case kindString:
+		return json.Marshal(n.text)
+	case kindArray:
+		var b bytes.Buffer
+		b.WriteByte('[')
+		for i, item := range n.items {
+			if i > 0 {
+				b.WriteByte(',')
+			}
+			raw, err := item.MarshalJSON()
+			if err != nil {
+				return nil, err
+			}
+			b.Write(raw)
+		}
+		b.WriteByte(']')
+		return b.Bytes(), nil
+	case kindObject:
+		var b bytes.Buffer
+		b.WriteByte('{')
+		for i, m := range n.members {
+			if i > 0 {
+				b.WriteByte(',')
+			}
+			k, err := json.Marshal(m.key)
+			if err != nil {
+				return nil, err
+			}
+			b.Write(k)
+			b.WriteByte(':')
+			raw, err := m.value.MarshalJSON()
+			if err != nil {
+				return nil, err
+			}
+			b.Write(raw)
+		}
+		b.WriteByte('}')
+		return b.Bytes(), nil
+	}
+	return []byte("null"), nil
+}
+
+// UnmarshalJSON decodes JSON into Node while preserving declaration key order.
+func (n *Node) UnmarshalJSON(data []byte) error {
+	decoded, err := DecodeOrdered(data)
+	if err != nil {
+		return err
+	}
+	*n = decoded
+	return nil
+}
+
+// DecodeOrdered reads one JSON document into an order-preserving Node.
+func DecodeOrdered(raw []byte) (Node, error) {
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.UseNumber()
 	value, err := decodeNode(decoder)
 	if err != nil {
-		return node{}, err
+		return Node{}, err
 	}
 	// A second value on the same input is not one document. jq would read it as
 	// a stream; the single-value parsers here are handed one object.
 	if _, err := decoder.Token(); err != io.EOF {
-		return node{}, errTrailingJSON
+		return Node{}, errTrailingJSON
 	}
 	return value, nil
 }
 
-// decodeStream reads a whitespace-separated sequence of JSON values, which is
+func decodeOrdered(raw []byte) (Node, error) {
+	return DecodeOrdered(raw)
+}
+
+// DecodeStream reads a whitespace-separated sequence of JSON values, which is
 // what `jq -s` slurps and what every harness event stream is.
-func decodeStream(raw []byte) ([]node, error) {
+func DecodeStream(raw []byte) ([]Node, error) {
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.UseNumber()
-	var values []node
+	var values []Node
 	for {
 		value, err := decodeNode(decoder)
 		if err == io.EOF {
@@ -689,6 +894,10 @@ func decodeStream(raw []byte) ([]node, error) {
 	}
 }
 
+func decodeStream(raw []byte) ([]Node, error) {
+	return DecodeStream(raw)
+}
+
 var (
 	errTrailingJSON    = &jsonError{"the document carries more than one JSON value"}
 	errUnexpectedToken = &jsonError{"the document holds a token no JSON value begins with"}
@@ -698,32 +907,32 @@ type jsonError struct{ reason string }
 
 func (e *jsonError) Error() string { return e.reason }
 
-func decodeNode(decoder *json.Decoder) (node, error) {
+func decodeNode(decoder *json.Decoder) (Node, error) {
 	token, err := decoder.Token()
 	if err != nil {
-		return node{}, err
+		return Node{}, err
 	}
 	return decodeFrom(decoder, token)
 }
 
-func decodeFrom(decoder *json.Decoder, token json.Token) (node, error) {
+func decodeFrom(decoder *json.Decoder, token json.Token) (Node, error) {
 	switch typed := token.(type) {
 	case json.Delim:
 		switch typed {
 		case '{':
-			object := node{kind: kindObject}
+			object := Node{kind: kindObject}
 			for decoder.More() {
 				key, err := decoder.Token()
 				if err != nil {
-					return node{}, err
+					return Node{}, err
 				}
 				name, ok := key.(string)
 				if !ok {
-					return node{}, errUnexpectedToken
+					return Node{}, errUnexpectedToken
 				}
 				value, err := decodeNode(decoder)
 				if err != nil {
-					return node{}, err
+					return Node{}, err
 				}
 				// A key declared twice keeps its first position and takes its
 				// last value, which is what jq does: `{"a":1,"b":2,"a":3}`
@@ -739,36 +948,36 @@ func decodeFrom(decoder *json.Decoder, token json.Token) (node, error) {
 				object.members = append(object.members, member{key: name, value: value})
 			}
 			if _, err := decoder.Token(); err != nil {
-				return node{}, err
+				return Node{}, err
 			}
 			return object, nil
 		case '[':
-			array := node{kind: kindArray}
+			array := Node{kind: kindArray}
 			for decoder.More() {
 				value, err := decodeNode(decoder)
 				if err != nil {
-					return node{}, err
+					return Node{}, err
 				}
 				array.items = append(array.items, value)
 			}
 			if _, err := decoder.Token(); err != nil {
-				return node{}, err
+				return Node{}, err
 			}
 			return array, nil
 		}
-		return node{}, errUnexpectedToken
+		return Node{}, errUnexpectedToken
 	case string:
-		return node{kind: kindString, text: typed}, nil
+		return Node{kind: kindString, text: typed}, nil
 	case json.Number:
 		value, err := typed.Float64()
 		if err != nil {
-			return node{}, err
+			return Node{}, err
 		}
-		return node{kind: kindNumber, number_: value}, nil
+		return Node{kind: kindNumber, number_: value, text: string(typed)}, nil
 	case bool:
-		return node{kind: kindBool, boolean: typed}, nil
+		return Node{kind: kindBool, boolean: typed}, nil
 	case nil:
-		return node{kind: kindNull}, nil
+		return Node{kind: kindNull}, nil
 	}
-	return node{}, errUnexpectedToken
+	return Node{}, errUnexpectedToken
 }

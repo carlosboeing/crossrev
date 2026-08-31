@@ -1,12 +1,14 @@
 package resolve
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
 
 	"github.com/carlosboeing/crossrev/internal/core"
 	"github.com/carlosboeing/crossrev/internal/forge"
+	"github.com/carlosboeing/crossrev/internal/harness"
 	"github.com/carlosboeing/crossrev/internal/prstate"
 )
 
@@ -117,6 +119,44 @@ func TestReconcile(t *testing.T) {
 		}
 		if !firstOpBefore(e.forge.order, "ReviewReply", "ThreadResolve") {
 			t.Fatalf("thread resolved before the reply: %v", e.forge.order)
+		}
+	})
+
+	t.Run("replyAndResolve preserves findings key order when mutating resolution and tracked_as", func(t *testing.T) {
+		customFinding := `{"id":"` + testFinding + `","path":"a.go","line":3,"severity":"high"}`
+		findings, err := harness.DecodeStream([]byte(customFinding))
+		if err != nil {
+			t.Fatalf("decode findings: %v", err)
+		}
+		customResolution := `{"finding_id":"` + testFinding + `","reply":"fixed","resolution":"fixed","crossrev_tracked":""}`
+		recs, err := harness.DecodeStream([]byte(customResolution))
+		if err != nil {
+			t.Fatalf("decode recs: %v", err)
+		}
+
+		e := setup(t)
+		s := &session{
+			pass:     1,
+			repo:     e.slug,
+			req:      Request{PR: 42},
+			settings: legSettings{Harness: "claude", Model: "claude-3-7-sonnet"},
+		}
+		threads := []forge.ReviewThread{{
+			ID:            "thread-1",
+			RootCommentID: 55,
+			FindingIDs:    []core.FindingID{mustFindingID(t, testFinding)},
+		}}
+		already := map[string]bool{}
+		leg := &Leg{Forge: e.forge}
+		resolved, escalated, unthreaded, findingsOut := leg.replyAndResolve(context.Background(), s, recs, findings, threads, "sha123", already, 0)
+		if resolved != 1 {
+			t.Fatalf("resolved = %d, want 1", resolved)
+		}
+		_ = escalated
+		_ = unthreaded
+		wantFindingsOut := `[{"id":"` + testFinding + `","path":"a.go","line":3,"severity":"high","resolution":"fixed","tracked_as":null}]`
+		if string(findingsOut) != wantFindingsOut {
+			t.Fatalf("findingsOut = %s, want %s", string(findingsOut), wantFindingsOut)
 		}
 	})
 }

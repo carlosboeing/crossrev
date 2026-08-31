@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"time"
 
 	"github.com/carlosboeing/crossrev/internal/config"
@@ -363,12 +362,12 @@ func (l *Leg) candidates(ctx context.Context, s *session) (prompt.Candidates, er
 			break
 		}
 		searched++
-		path := jsonString(f["path"])
+		path := f.Member("path").StringVal()
 		issues := l.Forge.IssueCandidates(ctx, s.repo, path, "")
 		if len(issues) == 0 {
 			continue
 		}
-		set := prompt.CandidateSet{FindingID: jsonString(f["id"])}
+		set := prompt.CandidateSet{FindingID: f.Member("id").StringVal()}
 		for _, iss := range issues {
 			set.Issues = append(set.Issues, prompt.Issue{
 				Number: prompt.Num(iss.Number),
@@ -409,16 +408,16 @@ func lookupEnv(env []string, name string) string {
 	return ""
 }
 
-func backfillRoots(findings []map[string]json.RawMessage, threads []forge.ReviewThread) []map[string]json.RawMessage {
-	for _, f := range findings {
-		if _, ok := f["root_comment_id"]; ok && string(f["root_comment_id"]) != "null" {
+func backfillRoots(findings []harness.Node, threads []forge.ReviewThread) []harness.Node {
+	for i := range findings {
+		if root := findings[i].Member("root_comment_id"); root.Present() && !root.IsNull() {
 			continue
 		}
-		id := jsonString(f["id"])
+		id := findings[i].Member("id").StringVal()
 		for _, th := range threads {
 			for _, fid := range th.FindingIDs {
 				if string(fid) == id && th.RootCommentID != 0 {
-					f["root_comment_id"] = json.RawMessage(strconv.FormatInt(th.RootCommentID, 10))
+					findings[i].Set("root_comment_id", harness.FromInt(th.RootCommentID))
 				}
 			}
 		}
@@ -426,26 +425,20 @@ func backfillRoots(findings []map[string]json.RawMessage, threads []forge.Review
 	return findings
 }
 
-func enrichFindings(findings []map[string]json.RawMessage, markers []prstate.Marker, minFix core.Severity) []map[string]json.RawMessage {
+func enrichFindings(findings []harness.Node, markers []prstate.Marker, minFix core.Severity) []harness.Node {
 	priors := priorResolutions(markers)
-	for i, f := range findings {
+	for i := range findings {
 		n := i + 1
-		f["number"] = json.RawMessage(strconv.Itoa(n))
-		sev := core.Severity(jsonString(f["severity"]))
-		pre := jsonString(f["pre_existing"]) == "true"
+		findings[i].Set("number", harness.FromInt(int64(n)))
+		sev := core.Severity(findings[i].Member("severity").StringVal())
+		pre := findings[i].Member("pre_existing").StringVal() == "true"
 		may := policy.ShouldFix(sev, minFix, pre)
-		if may {
-			f["may_fix"] = json.RawMessage("true")
+		findings[i].Set("may_fix", harness.FromBool(may))
+		if prior, ok := priors[findings[i].Member("id").StringVal()]; ok {
+			findings[i].Set("prior_resolution", harness.FromString(prior))
 		} else {
-			f["may_fix"] = json.RawMessage("false")
+			findings[i].Set("prior_resolution", harness.FromNull())
 		}
-		if prior, ok := priors[jsonString(f["id"])]; ok {
-			b, _ := json.Marshal(prior)
-			f["prior_resolution"] = b
-		} else {
-			f["prior_resolution"] = json.RawMessage("null")
-		}
-		findings[i] = f
 	}
 	return findings
 }
@@ -470,7 +463,7 @@ func priorResolutions(markers []prstate.Marker) map[string]string {
 	return out
 }
 
-func toPromptFindings(in []map[string]json.RawMessage) ([]prompt.Finding, error) {
+func toPromptFindings(in []harness.Node) ([]prompt.Finding, error) {
 	raw, err := json.Marshal(in)
 	if err != nil {
 		return nil, err

@@ -29,7 +29,7 @@ type session struct {
 	author    string
 	pass      int
 	review    prstate.Marker
-	findings  []map[string]json.RawMessage
+	findings  []harness.Node
 	backlog   config.Backlog
 	minFix    core.Severity
 	maxPasses int
@@ -151,15 +151,8 @@ func (l *Leg) load(ctx context.Context, req Request) (*session, Result) {
 		}
 	}
 
-	var findings []map[string]json.RawMessage
-	if err := review.DecodeFindings(&findings); err != nil {
-		return nil, wrapErr(err)
-	}
-	if findings == nil {
-		findings = []map[string]json.RawMessage{}
-	}
-	s.findings = findings
-	if len(findings) == 0 {
+	s.findings = unmarshalFindings(review.Findings)
+	if len(s.findings) == 0 {
 		verdict, _ := review.Verdict.Get()
 		if verdict != string(core.VerdictConverged) && escalatedCount(s.markers) > 0 {
 			return s, Result{
