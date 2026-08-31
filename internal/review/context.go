@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/carlosboeing/crossrev/internal/config"
@@ -66,18 +67,18 @@ func (l *Leg) loadContext(ctx context.Context, req Request) (Context, string, er
 	}
 	loaded.Config = cfg
 
-	author := req.Author
-	if author == "" {
-		author, err = l.Forge.ViewerLogin(ctx)
-		if err != nil || author == "" {
-			return loaded, "", &ui.FatalError{
-				Reason: fmt.Sprintf("could not resolve whose markers to trust on %s#%d", repo, req.PR),
-				Action: "Pass numbering, revision detection and the daily cap all read from the trusted author. Run: gh auth login",
-			}
-		}
+	author, err := l.trustedAuthor(ctx, req)
+	if err != nil {
+		return loaded, "", err
 	}
 	loaded.Author = author
 	loaded.Markers = markersFromComments(l.Forge.IssueComments(ctx, repo, req.PR), author)
+
+	backlog, err := cfg.ResolveBacklog(ctx, pr.BaseRefOid, cfg.Get(".backlog.destination"))
+	if err != nil {
+		return loaded, "", err
+	}
+	loaded.Backlog = backlog
 
 	loaded.ReviewMD = l.fileAtBase(ctx, pr.BaseRefOid, "REVIEW.md")
 	loaded.GitMessage = firstLines(l.fileAtBase(ctx, pr.BaseRefOid, ".gitmessage"), 20)
@@ -93,6 +94,31 @@ func (l *Leg) loadContext(ctx context.Context, req Request) (Context, string, er
 		loaded.ProjectMapTracker = tracker
 	}
 	return loaded, "", nil
+}
+
+func (l *Leg) trustedAuthor(ctx context.Context, req Request) (string, error) {
+	if req.Author != "" {
+		return req.Author, nil
+	}
+	if req.Trigger == TriggerAutomatic {
+		// lib/state.sh:35-40. Measured: CROSSREV_APP_SLUG=crossrev → crossrev[bot].
+		slug := os.Getenv("CROSSREV_APP_SLUG")
+		if slug == "" {
+			return "", &ui.FatalError{
+				Reason: "cannot determine which App's markers to trust",
+				Action: "Automated mode reads markers only from the App that writes them. In a workflow, set CROSSREV_APP_SLUG from the token step's app-slug output. Locally, run: crossrev auth status",
+			}
+		}
+		return slug + "[bot]", nil
+	}
+	author, err := l.Forge.ViewerLogin(ctx)
+	if err != nil || author == "" {
+		return "", &ui.FatalError{
+			Reason: fmt.Sprintf("could not resolve whose markers to trust on %s#%d", req.Repo, req.PR),
+			Action: "Pass numbering, revision detection and the daily cap all read from the trusted author. Run: gh auth login",
+		}
+	}
+	return author, nil
 }
 
 func (l *Leg) fileAtBase(ctx context.Context, base core.Revision, path string) []byte {

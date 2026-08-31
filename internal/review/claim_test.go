@@ -31,6 +31,21 @@ func TestClaimCreateFailureStopsBeforeAHarnessProcess(t *testing.T) {
 	}
 }
 
+func TestClaimZeroIDStopsBeforeAHarnessProcess(t *testing.T) {
+	e := newEnv(t)
+	e.forge.zeroCreateID = true
+	got := runLeg(t, e, e.request(t))
+	if got.Err == nil {
+		t.Fatal("wanted a claim failure for CommentCreate (0, nil)")
+	}
+	if !strings.Contains(got.Err.Error(), "claim comment did not post") {
+		t.Errorf("err = %q, want it to name the failed claim", got.Err)
+	}
+	if len(e.runner.Specs()) != 0 {
+		t.Fatalf("harness started %d times after a zero claim id", len(e.runner.Specs()))
+	}
+}
+
 func TestClaimHappensBeforeTheHarness(t *testing.T) {
 	e := newEnv(t)
 	got := runLeg(t, e, e.request(t))

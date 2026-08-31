@@ -200,6 +200,7 @@ type fakeForge struct {
 	createErr    error
 	created      []string
 	createdIDs   []int64
+	zeroCreateID bool
 	edits        []string
 	editIDs      []int64
 	labelsAdded  []string
@@ -277,6 +278,9 @@ func (f *fakeForge) CommentCreate(_ context.Context, _ core.Slug, _ int, body st
 	if f.createErr != nil {
 		return 0, f.createErr
 	}
+	if f.zeroCreateID {
+		return 0, nil
+	}
 	f.created = append(f.created, body)
 	id := f.nextID
 	if id == 0 {
@@ -321,13 +325,14 @@ func (f *fakeForge) PullRequestLabelRemove(context.Context, core.Slug, int, stri
 var _ forge.Forge = (*fakeForge)(nil)
 
 type env struct {
-	forge  *fakeForge
-	vcs    *fakeVCS
-	runner *fakeRunner
-	log    *eventLog
-	cfg    *config.Config
-	doc    harness.Document
-	dir    string
+	forge    *fakeForge
+	vcs      *fakeVCS
+	runner   *fakeRunner
+	log      *eventLog
+	cfg      *config.Config
+	doc      harness.Document
+	dir      string
+	lookPath func(string) (string, error)
 }
 
 func newEnv(t *testing.T) *env {
@@ -376,15 +381,20 @@ func (e *env) leg(t *testing.T) review.Leg {
 	if err != nil {
 		t.Fatalf("runlog.Open: %v", err)
 	}
+	look := e.lookPath
+	if look == nil {
+		look = func(name string) (string, error) { return "/usr/bin/" + name, nil }
+	}
 	return review.Leg{
-		Forge:   e.forge,
-		VCS:     e.vcs,
-		Config:  e.cfg,
-		Harness: e.doc,
-		Log:     run,
-		Now:     func() time.Time { return frozenNow },
-		Runner:  e.runner,
-		Env:     []string{"PATH=/usr/bin:/bin", "HOME=" + e.dir},
+		Forge:    e.forge,
+		VCS:      e.vcs,
+		Config:   e.cfg,
+		Harness:  e.doc,
+		Log:      run,
+		Now:      func() time.Time { return frozenNow },
+		Runner:   e.runner,
+		Env:      []string{"PATH=/usr/bin:/bin", "HOME=" + e.dir},
+		LookPath: look,
 	}
 }
 

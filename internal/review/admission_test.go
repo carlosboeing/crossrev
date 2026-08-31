@@ -200,6 +200,39 @@ func TestAdmission(t *testing.T) {
 			wantPass:    1,
 			wantHarness: true,
 		},
+		{
+			name: "automatic fork is refused",
+			setup: func(_ *testing.T, e *env, req *review.Request) {
+				req.Trigger = review.TriggerAutomatic
+				e.forge.pr.IsCrossRepository = true
+			},
+			want:       review.OutcomeError,
+			wantReason: "comes from a fork",
+		},
+		{
+			name: "a pull request that is not open is refused",
+			setup: func(_ *testing.T, e *env, _ *review.Request) {
+				e.forge.pr.State = "CLOSED"
+			},
+			want:       review.OutcomeError,
+			wantReason: "is not open",
+		},
+		{
+			name: "PR 0 is refused",
+			setup: func(_ *testing.T, _ *env, req *review.Request) {
+				req.PR = 0
+			},
+			want:       review.OutcomeError,
+			wantReason: "needs a pull request number",
+		},
+		{
+			name: "unknown trigger is refused",
+			setup: func(_ *testing.T, _ *env, req *review.Request) {
+				req.Trigger = "cron"
+			},
+			want:       review.OutcomeError,
+			wantReason: "unknown review trigger",
+		},
 	}
 
 	for _, tt := range tests {
@@ -208,13 +241,20 @@ func TestAdmission(t *testing.T) {
 			req := e.request(t)
 			tt.setup(t, e, &req)
 			got := runLeg(t, e, req)
-			if got.Err != nil && tt.want != review.OutcomeError {
+			if tt.want == review.OutcomeError {
+				if got.Err == nil {
+					t.Fatal("wanted an error")
+				}
+				if tt.wantReason != "" && !strings.Contains(got.Err.Error(), tt.wantReason) && !strings.Contains(got.Reason, tt.wantReason) {
+					t.Errorf("err = %q reason = %q, want %q", got.Err, got.Reason, tt.wantReason)
+				}
+			} else if got.Err != nil {
 				t.Fatalf("Run err = %v", got.Err)
 			}
 			if got.Outcome != tt.want {
 				t.Errorf("Outcome = %q, want %q (reason %q)", got.Outcome, tt.want, got.Reason)
 			}
-			if tt.wantReason != "" && !strings.Contains(got.Reason, tt.wantReason) {
+			if tt.want != review.OutcomeError && tt.wantReason != "" && !strings.Contains(got.Reason, tt.wantReason) {
 				t.Errorf("Reason = %q, want it to contain %q", got.Reason, tt.wantReason)
 			}
 			if tt.wantPass != 0 && got.Pass != tt.wantPass {
@@ -253,8 +293,12 @@ func TestAdmission(t *testing.T) {
 					t.Errorf("labels added = %v, want %q", e.forge.labelsAdded, tt.wantLabel)
 				}
 			}
-			if e.forge.prCalls != 1 {
-				t.Errorf("PullRequest called %d times, want 1", e.forge.prCalls)
+			if req.PR != 0 && (req.Trigger == "" || req.Trigger == review.TriggerHuman || req.Trigger == review.TriggerAutomatic) {
+				if e.forge.prCalls != 1 {
+					t.Errorf("PullRequest called %d times, want 1", e.forge.prCalls)
+				}
+			} else if e.forge.prCalls != 0 {
+				t.Errorf("PullRequest called %d times, want 0 before context load", e.forge.prCalls)
 			}
 		})
 	}

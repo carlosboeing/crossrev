@@ -1,10 +1,12 @@
 package review_test
 
 import (
+	"context"
 	"strings"
 	"testing"
 
 	"github.com/carlosboeing/crossrev/internal/exec"
+	"github.com/carlosboeing/crossrev/internal/review"
 )
 
 func TestContextLoadsThePullRequestOnce(t *testing.T) {
@@ -78,6 +80,50 @@ func TestContextCarriesTheBaseAndHeadPair(t *testing.T) {
 	}
 	if got.Context.PR.HeadRefOid.SHA() != headSHA {
 		t.Errorf("head = %s, want %s", got.Context.PR.HeadRefOid.SHA(), headSHA)
+	}
+}
+
+func TestContextResolvesAppSlugOnAutomaticTrigger(t *testing.T) {
+	e := newEnv(t)
+	t.Setenv("CROSSREV_APP_SLUG", "crossrev")
+	req := e.request(t)
+	req.Author = ""
+	req.Trigger = review.TriggerAutomatic
+	leg := e.leg(t)
+	got := leg.Run(context.Background(), req)
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
+	if got.Context.Author != "crossrev[bot]" {
+		t.Errorf("Author = %q, want crossrev[bot] from CROSSREV_APP_SLUG (lib/state.sh:35-40)", got.Context.Author)
+	}
+}
+
+func TestContextExcludesRepositoryBacklogFromTheDiff(t *testing.T) {
+	e := newEnv(t)
+	e.cfg = mustConfig(t, "version: 1\nbacklog:\n  destination: repository\n  repository:\n    layout: file\n    path: BACKLOG.md\n")
+	e.forge.diff = []byte("diff --git a/app.go b/app.go\n--- a/app.go\n+++ b/app.go\n@@ -1,1 +1,2 @@\n context\n+added\ndiff --git a/BACKLOG.md b/BACKLOG.md\n--- a/BACKLOG.md\n+++ b/BACKLOG.md\n@@ -1,1 +1,2 @@\n old-backlog\n+UNIQUE_BACKLOG_HUNK\n")
+	var prompt string
+	e.runner.onSpec = func(spec exec.Spec) {
+		if len(spec.Args) > 0 {
+			prompt = spec.Args[len(spec.Args)-1]
+		}
+	}
+	got := runLeg(t, e, e.request(t))
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
+	if got.Context.Backlog.Destination != "repository" {
+		t.Errorf("Backlog.Destination = %q, want repository", got.Context.Backlog.Destination)
+	}
+	if got.Context.Backlog.Path != "BACKLOG.md" {
+		t.Errorf("Backlog.Path = %q, want BACKLOG.md", got.Context.Backlog.Path)
+	}
+	if !strings.Contains(prompt, "added") {
+		t.Error("prompt dropped the code diff")
+	}
+	if strings.Contains(prompt, "UNIQUE_BACKLOG_HUNK") {
+		t.Error("prompt carried the repository backlog (lib/run.sh:1130-1132)")
 	}
 }
 

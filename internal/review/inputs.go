@@ -71,6 +71,7 @@ type Context struct {
 	GitMessage        []byte
 	ProjectMapTracker string
 	Instructions      map[string][]byte
+	Backlog           config.Backlog
 }
 
 // VCS is the base-revision file reader. Production wires *vcs.Repository.
@@ -91,6 +92,9 @@ type Leg struct {
 	Now     func() time.Time
 	Runner  exec.Runner
 	Env     []string
+	// LookPath reports whether a harness binary is on PATH. Nil searches PATH
+	// the way command -v does (lib/run.sh:524).
+	LookPath func(string) (string, error)
 	// Validate checks the review payload. Nil means validate.Findings.
 	Validate func([]byte) error
 }

@@ -101,11 +101,14 @@ func (l *Leg) Run(ctx context.Context, req Request) Result {
 		out.Messages = append(out.Messages, msg)
 	}
 
-	settings, err := l.settings(req, loaded)
+	settings, warn, err := l.settings(req, loaded)
 	if err != nil {
 		out.Outcome = OutcomeError
 		out.Err = err
 		return out
+	}
+	if warn != "" {
+		out.Messages = append(out.Messages, warn)
 	}
 
 	marker, claimID, err := l.postClaim(ctx, req, loaded, ad, settings)
@@ -134,7 +137,7 @@ func (l *Leg) Run(ctx context.Context, req Request) Result {
 	out.Outcome = OutcomeInvoked
 
 	workdir := req.Workdir
-	diffBytes, _ := l.Forge.PullRequestDiff(ctx, loaded.Repo, loaded.PR.BaseRefOid, loaded.PR.HeadRefOid)
+	diffBytes, _ := l.reviewDiff(ctx, loaded)
 	findings, err := enrichFindings(payload, diffBytes, workdir)
 	if err == nil {
 		marker.Findings = findings

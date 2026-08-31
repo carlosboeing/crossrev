@@ -6,9 +6,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
+	"github.com/carlosboeing/crossrev/internal/config"
 	"github.com/carlosboeing/crossrev/internal/core"
 	"github.com/carlosboeing/crossrev/internal/cred"
+	"github.com/carlosboeing/crossrev/internal/diff"
 	"github.com/carlosboeing/crossrev/internal/exec"
 	"github.com/carlosboeing/crossrev/internal/forge"
 	"github.com/carlosboeing/crossrev/internal/harness"
@@ -25,7 +28,7 @@ type legSettings struct {
 	endpoint string
 }
 
-func (l *Leg) settings(req Request, loaded Context) (legSettings, error) {
+func (l *Leg) settings(req Request, loaded Context) (legSettings, string, error) {
 	cfg := loaded.Config
 	s := legSettings{
 		harness:  cfg.Get(".reviewer.harness"),
@@ -42,18 +45,71 @@ func (l *Leg) settings(req Request, loaded Context) (legSettings, error) {
 		s.harness = string(core.HarnessCodex)
 	}
 	if !l.Harness.Known(s.harness) {
-		return s, &ui.FatalError{
+		return s, "", &ui.FatalError{
 			Reason: fmt.Sprintf("there is no adapter for the harness '%s'", s.harness),
 			Action: "CrossRev drives the named harnesses directly.",
 		}
 	}
 	if !l.Harness.ServesLeg(s.harness, string(core.LegReview)) {
-		return s, &ui.FatalError{
+		return s, "", &ui.FatalError{
 			Reason: fmt.Sprintf("the harness '%s' cannot serve the review leg", s.harness),
 			Action: "Point reviewer.harness at a harness that serves review.",
 		}
 	}
-	return s, nil
+
+	asked := s.harness
+	if l.binaryInstalled(asked) {
+		return s, "", nil
+	}
+	for _, name := range l.Harness.NamesForLeg(string(core.LegReview)) {
+		if l.binaryInstalled(name) {
+			s.harness = name
+			s.model = ""
+			s.endpoint = ""
+			warn := fmt.Sprintf("'%s' is not installed, so the reviewer runs on '%s' instead", asked, name)
+			return s, warn, nil
+		}
+	}
+	return s, "", &ui.FatalError{
+		Reason: fmt.Sprintf("the reviewer is configured to use '%s', which is not installed, and no other harness that can serve the review leg is either", asked),
+		Action: "Install one of the harnesses that serve the review leg.",
+	}
+}
+
+func (l *Leg) binaryInstalled(name string) bool {
+	entry, ok := l.Harness.For(name)
+	binary := name
+	if ok && entry.Binary != "" {
+		binary = entry.Binary
+	}
+	look := l.LookPath
+	if look == nil {
+		look = lookPath
+	}
+	_, err := look(binary)
+	return err == nil
+}
+
+func lookPath(name string) (string, error) {
+	if name == "" {
+		return "", os.ErrNotExist
+	}
+	if strings.ContainsRune(name, os.PathSeparator) {
+		if _, err := os.Stat(name); err != nil {
+			return "", err
+		}
+		return name, nil
+	}
+	for _, dir := range filepath.SplitList(os.Getenv("PATH")) {
+		if dir == "" {
+			continue
+		}
+		candidate := filepath.Join(dir, name)
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate, nil
+		}
+	}
+	return "", os.ErrNotExist
 }
 
 func (l *Leg) invoke(ctx context.Context, req Request, loaded Context, settings legSettings, pass int) (harness.Envelope, json.RawMessage, error) {
@@ -82,7 +138,7 @@ func (l *Leg) invoke(ctx context.Context, req Request, loaded Context, settings 
 	}
 	defer os.RemoveAll(tmp)
 
-	diffBytes, err := l.Forge.PullRequestDiff(ctx, loaded.Repo, loaded.PR.BaseRefOid, loaded.PR.HeadRefOid)
+	diffBytes, err := l.reviewDiff(ctx, loaded)
 	if err != nil {
 		return harness.Envelope{}, nil, err
 	}
@@ -192,6 +248,17 @@ func (l *Leg) invoke(ctx context.Context, req Request, loaded Context, settings 
 			Action: "This harness validates output against the schema natively, so a mismatch is an adapter or harness bug rather than model drift.",
 		}
 	}
+}
+
+func (l *Leg) reviewDiff(ctx context.Context, loaded Context) ([]byte, error) {
+	raw, err := l.Forge.PullRequestDiff(ctx, loaded.Repo, loaded.PR.BaseRefOid, loaded.PR.HeadRefOid)
+	if err != nil {
+		return nil, err
+	}
+	if loaded.Backlog.Destination != config.DestinationRepository {
+		return raw, nil
+	}
+	return diff.Parse(raw, core.RevisionPair{}).Excluded([]string{loaded.Backlog.Path, ".crossrev"}), nil
 }
 
 func reviewMeta(loaded Context, req Request, pass int) prompt.Meta {
