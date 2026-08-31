@@ -303,6 +303,7 @@ type fakeForge struct {
 	addedLabels    []string
 	removedLabels  []string
 	byFinding      map[string]int
+	resolved       []string
 	createErr      error
 	issueErr       error
 	zeroCreateID   bool
@@ -425,8 +426,9 @@ func (f *fakeForge) ReviewReply(_ context.Context, repo core.Slug, number int, r
 	f.replies = append(f.replies, reviewReply{Repo: repo, PR: number, RootCommentID: rootCommentID, Body: body})
 	return nil
 }
-func (f *fakeForge) ThreadResolve(context.Context, string) error {
+func (f *fakeForge) ThreadResolve(_ context.Context, id string) error {
 	f.note("ThreadResolve")
+	f.resolved = append(f.resolved, id)
 	return nil
 }
 func (f *fakeForge) LabelEnsure(context.Context, core.Slug, forge.Label) (forge.LabelState, error) {
