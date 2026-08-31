@@ -337,6 +337,10 @@ type env struct {
 
 func newEnv(t *testing.T) *env {
 	t.Helper()
+	// cred.Prepare reads process RUNNER_ENVIRONMENT. GitHub-hosted runners set
+	// it to github-hosted, and a missing harness secret then stops the leg.
+	// Tests are not that runner: isolate them the way cred treats self-hosted.
+	t.Setenv("RUNNER_ENVIRONMENT", "self-hosted")
 	dir := t.TempDir()
 	events := &eventLog{}
 	head := mustRev(t, headSHA)

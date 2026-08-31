@@ -13,6 +13,22 @@ import (
 	"github.com/carlosboeing/crossrev/internal/validate"
 )
 
+func TestInvokeHostedRunnerWithoutTokenRefuses(t *testing.T) {
+	e := newEnv(t)
+	t.Setenv("RUNNER_ENVIRONMENT", "github-hosted")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
+	got := runLeg(t, e, e.request(t))
+	if got.Err == nil {
+		t.Fatal("wanted a missing-secret refusal on a github-hosted runner")
+	}
+	if !strings.Contains(got.Err.Error(), "CLAUDE_CODE_OAUTH_TOKEN") {
+		t.Errorf("err = %q, want it to name CLAUDE_CODE_OAUTH_TOKEN", got.Err)
+	}
+	if len(e.runner.Specs()) != 0 {
+		t.Fatalf("harness started after a missing hosted secret: %d specs", len(e.runner.Specs()))
+	}
+}
+
 func TestInvokeWriteCapabilityIsFalse(t *testing.T) {
 	e := newEnv(t)
 	got := runLeg(t, e, e.request(t))
