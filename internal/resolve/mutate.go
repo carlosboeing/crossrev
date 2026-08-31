@@ -185,6 +185,10 @@ func attachPayload(marker prstate.Marker, got Result) prstate.Marker {
 	if got.Envelope.ModelReported != nil && *got.Envelope.ModelReported != "" && *got.Envelope.ModelReported != "null" {
 		marker.ModelReported = prstate.Some(*got.Envelope.ModelReported)
 	}
+	// Bash assigns the key unconditionally (lib/run.sh:2111), so the marker
+	// always holds effort_reported, null when the harness reported none.
+	// omitzero drops an unset Opt entirely, which is different bytes.
+	marker.EffortReported = prstate.Null[string]()
 	if got.Envelope.EffortReported != nil && *got.Envelope.EffortReported != "" && *got.Envelope.EffortReported != "null" {
 		marker.EffortReported = prstate.Some(*got.Envelope.EffortReported)
 	}

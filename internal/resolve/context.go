@@ -263,8 +263,13 @@ func (l *Leg) settings(s *session) (*Refusal, string, error) {
 	effort := s.cfg.Get(".resolver.effort")
 	endpoint := s.cfg.Get(".resolver.endpoint")
 	if s.req.Harness != "" {
+		// Bash clears the model and the endpoint and keeps the effort
+		// (lib/run.sh:495): a model id for the harness that was asked for is
+		// wrong for a different one, but an effort level is not tied to a
+		// harness. Clearing effort here wrote "effort":null into the marker
+		// where Bash writes the configured value.
 		name = s.req.Harness
-		model, effort, endpoint = "", "", ""
+		model, endpoint = "", ""
 	}
 	doc, err := l.document()
 	if err != nil {
@@ -291,7 +296,8 @@ func (l *Leg) settings(s *session) (*Refusal, string, error) {
 	for _, alt := range doc.NamesForLeg("resolve") {
 		if l.binaryInstalled(alt) {
 			s.settings = legSettings{Harness: alt, Model: "", Effort: effort, Endpoint: ""}
-			warn := fmt.Sprintf("'%s' is not installed, so the resolver runs on '%s' instead", asked, alt)
+			warn := fmt.Sprintf("'%s' is not installed, so the resolver runs on '%s' instead"+"\n   "+
+				"Both legs now run on the same harness, so a bug it misses while reviewing it also misses while resolving. Install %s to get the second lineage back.", asked, alt, asked)
 			return nil, warn, nil
 		}
 	}

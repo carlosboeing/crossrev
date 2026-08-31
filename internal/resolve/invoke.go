@@ -226,6 +226,14 @@ func (l *Leg) invoke(ctx context.Context, s *session, marker prstate.Marker, wor
 
 	for attempt := 1; ; attempt++ {
 		if l.Log != nil {
+			// The payload path per attempt, as the review leg does. Bash writes
+			// "$CROSSREV_TRANSCRIPT_BASE.payload" for both legs (lib/run.sh:819).
+			// Without it the codex adapter refuses with ErrScratch, so a native
+			// resolve leg could not run under codex at all, and every other
+			// harness lost its per-attempt payload from the run log.
+			if base, ok := l.Log.TranscriptBase(attempt); ok {
+				inv.PayloadPath = base + ".payload"
+			}
 			l.Log.Event("invoke", fmt.Sprintf("harness=%s attempt=%d start", s.settings.Harness, attempt))
 		}
 		if _, err := sandbox.Quarantine(workdir, paths); err != nil {

@@ -257,8 +257,12 @@ func (l *Leg) postDeclined(ctx context.Context, req Request, loaded Context, ad 
 	} else {
 		labelPass = 1
 	}
-	_ = l.Forge.PullRequestLabelAdd(ctx, loaded.Repo, req.PR, policy.PassLabelName(mustPass(labelPass)))
-	_ = l.Forge.PullRequestLabelAdd(ctx, loaded.Repo, req.PR, policy.LabelHalted)
+	// Bash calls run_pass_labels ... halted here (lib/run.sh:1056), which adds
+	// the pass label and the halted label AND removes the three outcome labels
+	// that are mutually exclusive with it. Adding two labels without removing
+	// the others leaves awaiting-review or converged standing beside halted on
+	// the same pull request, and the loop is label-driven.
+	_, _ = l.applyPassLabels(ctx, req, loaded, labelPass, policy.PassHalted)
 	return nil
 }
 

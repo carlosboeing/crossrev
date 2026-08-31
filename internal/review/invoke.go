@@ -66,7 +66,8 @@ func (l *Leg) settings(req Request, loaded Context) (legSettings, string, error)
 			s.harness = name
 			s.model = ""
 			s.endpoint = ""
-			warn := fmt.Sprintf("'%s' is not installed, so the reviewer runs on '%s' instead", asked, name)
+			warn := fmt.Sprintf("'%s' is not installed, so the reviewer runs on '%s' instead"+"\n   "+
+				"Both legs now run on the same harness, so a bug it misses while reviewing it also misses while resolving. Install %s to get the second lineage back.", asked, name, asked)
 			return s, warn, nil
 		}
 	}
