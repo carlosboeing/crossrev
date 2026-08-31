@@ -15,12 +15,14 @@
 //
 // # The one place a GitHub credential is handed to a child
 //
-// Every Spec this package builds sets exec.AudienceOrchestrator. The reason is
-// in client.go, beside the code that sets it.
+// Production construction uses exec.NewOrchestratorRunner. The reason is in
+// client.go, beside the code that constructs it.
 //
-// Three rules in internal/archtest hold it, because the audience is the one
-// field in this tree whose misuse is silent: the constant may be named in this
-// package alone, a Spec may be built in client.go alone, and every Spec built
-// there runs the `program` constant. The first two read types rather than text,
-// so an aliased import or a var with no literal does not slip past them.
+// Two rules in internal/archtest hold it, because the opt-out is the one
+// construction in this tree whose misuse is silent: NewOrchestratorRunner may
+// be named in this package, internal/vcs and internal/exec, and a Spec may be
+// built in client.go alone, and every Spec built there runs the `program`
+// constant. The name check reads types rather than text, so an aliased import
+// does not slip past it. The remaining route is a wrapper that is given the
+// orchestrator runner.
 package ghexec

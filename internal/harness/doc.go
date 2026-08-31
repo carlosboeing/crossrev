@@ -10,12 +10,11 @@
 // # An adapter builds a child process and never starts one
 //
 // Every adapter here starts a model-facing process — the one that reads
-// attacker-controlled text off a pull request. exec.Spec.Audience is left at its
-// zero value on every Spec, which is the strict one, and internal/archtest
-// refuses this package if it ever names exec.AudienceOrchestrator. The
-// environment is built by subtracting cred.StripFor's answer, so no GitHub
-// credential and no other harness's vendor credential travels with the child
-// (ADR 0001, SECURITY.md).
+// attacker-controlled text off a pull request. The child is started through
+// NewOSRunner, and internal/archtest refuses this package if it ever names
+// exec.NewOrchestratorRunner. The environment is built by subtracting
+// cred.StripFor's answer, so no GitHub credential and no other harness's
+// vendor credential travels with the child (ADR 0001, SECURITY.md).
 //
 // # There is no fallback and no routing
 //

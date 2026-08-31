@@ -26,12 +26,12 @@ func (r *recorder) Run(_ context.Context, spec exec.Spec) exec.Result {
 	return exec.Result{}
 }
 
-// Every git spec is orchestrator-facing, and that decision is load-bearing
-// rather than cosmetic. exec.Spec.Audience defaults to model-facing, which
-// refuses a child whose environment names a forge credential — and
-// lib/github.sh pushes with a plain `git push` over whatever credential helper
-// the environment configures, which on a GitHub-hosted runner is the ambient
-// token. A model-facing spec here would refuse that push.
+// Production git construction uses NewOrchestratorRunner, and that decision
+// is load-bearing rather than cosmetic. NewOSRunner refuses a child whose
+// environment names a forge credential — and lib/github.sh pushes with a
+// plain `git push` over whatever credential helper the environment
+// configures, which on a GitHub-hosted runner is the ambient token. A
+// model-facing runner here would refuse that push.
 func TestGitSpecsAreOrchestratorFacing(t *testing.T) {
 	runner := &recorder{}
 	git := vcs.New(runner, []string{"PATH=/usr/bin", "GH_TOKEN=not-a-real-token"})
@@ -43,9 +43,6 @@ func TestGitSpecsAreOrchestratorFacing(t *testing.T) {
 		t.Fatalf("specs = %d, want 1", len(runner.specs))
 	}
 	spec := runner.specs[0]
-	if spec.Audience != exec.AudienceOrchestrator {
-		t.Errorf("audience = %v, want AudienceOrchestrator", spec.Audience)
-	}
 	if spec.Path != "git" {
 		t.Errorf("path = %q, want %q", spec.Path, "git")
 	}
@@ -56,9 +53,10 @@ func TestGitSpecsAreOrchestratorFacing(t *testing.T) {
 		t.Errorf("args = %v", spec.Args)
 	}
 
-	// And the real runner would have started it rather than refusing it.
-	if result := exec.NewOSRunner().Run(context.Background(), exec.Spec{
-		Path: "git", Args: []string{"--version"}, Env: spec.Env, Audience: spec.Audience,
+	// Production construction starts that child rather than refusing it.
+	prod := vcs.New(nil, spec.Env)
+	if result := prod.Runner.Run(context.Background(), exec.Spec{
+		Path: "git", Args: []string{"--version"}, Env: spec.Env,
 	}); errors.Is(result.Err, exec.ErrForgeCredential) {
 		t.Errorf("a git call carrying a forge credential was refused: %v", result.Err)
 	}

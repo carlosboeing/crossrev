@@ -93,7 +93,7 @@ func TestStreamsCombinedCapsTheMergedStream(t *testing.T) {
 	}
 }
 
-// The audience rule is unchanged by the new field: a model-facing child asking
+// NewOSRunner is unchanged by the new field: a model-facing child asking
 // for a merged stream is still refused before anything starts.
 func TestStreamsCombinedStillRefusesAForgeCredential(t *testing.T) {
 	spec := helperSpec("alternate", "1")

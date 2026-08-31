@@ -15,8 +15,8 @@ import (
 // so the Go runner stops waiting rather than hanging a leg forever.
 var ErrPipesAbandoned = errors.New("the child exited but left its output streams held open")
 
-// CredentialError reports that a model-facing Spec carried a forge credential
-// in its environment, so no child was started.
+// CredentialError reports that a model-facing runner was asked to start a
+// child whose environment carried a forge credential, so no child was started.
 //
 // The variable is named and its value is not, here and in every string this
 // type produces. A refusal that printed the token would put it in a run log, a

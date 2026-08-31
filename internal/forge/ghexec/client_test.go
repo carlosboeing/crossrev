@@ -68,9 +68,6 @@ func TestEveryInvocationIsOrchestratorFacing(t *testing.T) {
 	}
 	for i, spec := range r.specs {
 		where := fmt.Sprintf("call %d (%q)", i, strings.Join(spec.Args, " "))
-		if spec.Audience != exec.AudienceOrchestrator {
-			t.Errorf("%s is model-facing; gh needs the credential a model-facing spec is refused", where)
-		}
 		if spec.Path != "gh" {
 			t.Errorf("%s runs %q; the credential travels because the child is gh and nothing else", where, spec.Path)
 		}
@@ -138,8 +135,8 @@ func assertOverridesAreLive(t *testing.T, forgeType reflect.Type) {
 	}
 }
 
-// A model-facing spec carrying GH_TOKEN is refused by the runner, so the
-// audience is not decoration: the same environment through the zero value
+// A model-facing runner refuses the environment this client builds, so the
+// orchestrator runner is not decoration: the same Spec through NewOSRunner
 // fails closed.
 func TestTheEnvironmentThisClientBuildsWouldBeRefusedForAModel(t *testing.T) {
 	c, r := client(t, out("acme/widget\n"))
@@ -148,7 +145,6 @@ func TestTheEnvironmentThisClientBuildsWouldBeRefusedForAModel(t *testing.T) {
 	}
 
 	spec := r.only(t)
-	spec.Audience = exec.AudienceModelFacing
 	res := exec.NewOSRunner().Run(context.Background(), spec)
 	if res.Err == nil {
 		t.Fatal("the same spec was accepted as model-facing; the credential guard did not see GH_TOKEN")

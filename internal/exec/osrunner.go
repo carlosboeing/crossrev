@@ -24,10 +24,22 @@ var pipeDrainGrace = 10 * time.Second
 
 // OSRunner starts real processes. It is the only place in the codebase that
 // calls os/exec.
-type OSRunner struct{}
+//
+// orchestrator is the credential decision. Unexported, so a Spec cannot carry
+// it between packages and a fake Runner cannot copy it off one Spec onto
+// another. unsafe and reflection can still write the bool; a name scan
+// catches accidents, and code review catches a hostile commit. Run's
+// refusal is the guard that executes.
+type OSRunner struct {
+	orchestrator bool
+}
 
-// NewOSRunner returns the runner that starts real processes.
+// NewOSRunner returns a model-facing runner. It refuses a forge credential.
 func NewOSRunner() *OSRunner { return &OSRunner{} }
+
+// NewOrchestratorRunner returns a runner that may start a child holding a
+// forge credential. Production construction of git and gh uses this.
+func NewOrchestratorRunner() *OSRunner { return &OSRunner{orchestrator: true} }
 
 var _ Runner = (*OSRunner)(nil)
 
@@ -53,13 +65,10 @@ func (r *OSRunner) Run(ctx context.Context, spec Spec) Result {
 	// Before anything is started, and before any environment is built. A
 	// refusal after Start would already have handed the token over.
 	//
-	// The field is read rather than compared against AudienceModelFacing.
-	// Audience is a struct, so its two values are package variables rather than
-	// constants, and a comparison would put a writable variable in the path of
-	// the decision: setting AudienceModelFacing to the orchestrator value would
-	// then skip this check for every Spec that never set the field. Reading the
-	// field makes that reassignment inert here.
-	if !spec.Audience.orchestrator {
+	// The runner's own field is read rather than a field on Spec. A Spec
+	// that travelled through a fake Runner cannot carry the opt-out with it,
+	// and nothing package-level can switch this check off for every instance.
+	if !r.orchestrator {
 		if name, found := forgeCredentialIn(spec.Env); found {
 			return Result{
 				ExitCode: -1,

@@ -15,8 +15,9 @@ import (
 //
 // That package decides what environment a child receives (Spec.Env, set on
 // every path so os/exec cannot inherit this process's own), whether a forge
-// credential may travel with it (Spec.Audience), how its output is bounded, and
-// what happens on cancellation. Every one of those properties is bypassed by
+// credential may travel with it (the runner instance), how its output is
+// bounded, and what happens on cancellation. Every one of those properties is
+// bypassed by
 // four lines of os/exec somewhere else — a review built exactly that in
 // internal/harness, and the child received the whole parent environment with
 // the suite still green.
@@ -74,14 +75,15 @@ import (
 // walk is already reading every production file's import list, and the danger
 // is of a kind no other rule in this tree can see.
 //
-// exec.Audience is a struct whose one field is unexported, which is what makes
-// AudienceOrchestrator the only route the language offers to the forge-credential
-// opt-out (internal/exec/spec.go). The value is one bool, so
+// OSRunner.orchestrator is unexported, so the only ordinary route to the
+// forge-credential opt-out is NewOrchestratorRunner. The value is one bool, so
 //
-//	*(*bool)(unsafe.Pointer(&a)) = true
+//	*(*bool)(unsafe.Pointer(&r)) = true
 //
-// forges it, naming neither the field nor the variable, and no rule that reads
-// names can see that. Confining the import is what is left.
+// still writes it, naming neither the field nor the constructor, and no rule
+// that reads names can see that. Confining the import is what is left. A name
+// scan catches accidents; code review catches a hostile commit; Run's refusal
+// is the guard that executes.
 //
 // One directory needs it and keeps it. internal/ui/terminal_unix.go:16 passes
 // unsafe.Pointer(&settings) to the SYS_IOCTL that asks the terminal driver for

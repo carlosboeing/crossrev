@@ -53,7 +53,7 @@ func testGit(t *testing.T) *vcs.Git {
 		"GIT_TERMINAL_PROMPT=0",
 	}, pinnedDates...)
 	env = append(env, exec.Inherit([]string{"PATH"})...)
-	return vcs.New(exec.NewOSRunner(), env)
+	return vcs.New(nil, env)
 }
 
 // realTempDir is a temporary directory with every symlink already resolved.

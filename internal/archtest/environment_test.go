@@ -38,7 +38,7 @@ import (
 // the environment and :86 puts it into the child — so a rule forbidding the
 // read would be stricter than the thing being ported, and would break
 // internal/config/load.go, which resolves XDG_CONFIG_HOME and HOME this way.
-// What stops a named credential reaching a harness is Spec.Audience, which
+// What stops a named credential reaching a harness is NewOSRunner, which
 // refuses it at Run. syscall.Getenv is the same shape and left alone for the
 // same reason.
 //

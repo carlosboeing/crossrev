@@ -1,7 +1,6 @@
 package exec_test
 
 import (
-	"encoding/json"
 	"errors"
 	"os"
 	"strconv"
@@ -11,93 +10,24 @@ import (
 	"github.com/carlosboeing/crossrev/internal/exec"
 )
 
-// The value nobody sets is the one that refuses.
-func TestZeroSpecIsModelFacing(t *testing.T) {
-	var spec exec.Spec
-	if spec.Audience != exec.AudienceModelFacing {
-		t.Fatalf("the zero Spec is audience %v, want AudienceModelFacing", spec.Audience)
-	}
-	if exec.AudienceModelFacing == exec.AudienceOrchestrator {
-		t.Fatal("the two audiences must be distinguishable")
-	}
-}
-
-// An Audience cannot be built out of an integer, a JSON document, or anything
-// else a package outside internal/exec can produce.
+// NewOSRunner is model-facing: it refuses each of the four names the Bash
+// adapters strip. An allowlist cannot stop these, because a caller reached
+// them by name.
 //
-// This is the route that ended the enumeration of spellings. Audience was an
-// integer, the confinement rule in internal/archtest scanned for the syntax
-// that wrote the opt-out value, and
-//
-//	var a exec.Audience
-//	_ = json.Unmarshal([]byte("1"), &a)
-//
-// named nothing, converted nothing, declared no constant and assigned to no
-// target the scan could read, while leaving the child orchestrator-facing at
-// run time. The field is unexported now, so encoding/json ignores it — an
-// unmarshal that names it explicitly succeeds and changes nothing — and every
-// other spelling is a compile error. The value stays model-facing, so the run
-// is refused.
-func TestAnAudienceCannotBeUnmarshalled(t *testing.T) {
-	for _, document := range []string{`1`, `true`, `{"orchestrator":true}`} {
-		var audience exec.Audience
-		// The error is not asserted: `1` and `true` fail to decode and the
-		// object decodes cleanly into nothing. What matters is the value after.
-		_ = json.Unmarshal([]byte(document), &audience)
-
-		if audience != exec.AudienceModelFacing {
-			t.Errorf("unmarshalling %s produced audience %v, want AudienceModelFacing", document, audience)
-		}
-
-		spec := helperSpec("exit", "0")
-		spec.Audience = audience
-		spec.Env = append(spec.Env, "GH_TOKEN=not-a-real-token")
-		if result := run(t, spec); !errors.Is(result.Err, exec.ErrForgeCredential) {
-			t.Errorf("a child whose audience came from %s was not refused: %v", document, result.Err)
-		}
-	}
-}
-
-// Reassigning the exported audience variables cannot switch the refusal off.
-//
-// Audience is a struct, so its two values are variables rather than constants —
-// a struct value cannot be a Go constant — and an exported variable is writable
-// from any package in the binary. That would matter if Run compared against
-// one. It reads spec.Audience's own field instead (internal/exec/osrunner.go),
-// so a Spec that never set the field is refused whatever these two hold.
-func TestRunDoesNotDecideThroughTheExportedAudienceVariables(t *testing.T) {
-	modelFacing, orchestrator := exec.AudienceModelFacing, exec.AudienceOrchestrator
-	t.Cleanup(func() {
-		exec.AudienceModelFacing, exec.AudienceOrchestrator = modelFacing, orchestrator
-	})
-
-	exec.AudienceModelFacing = orchestrator
-	exec.AudienceOrchestrator = modelFacing
-
-	spec := helperSpec("exit", "0")
-	spec.Env = append(spec.Env, "GH_TOKEN=not-a-real-token")
-	if result := run(t, spec); !errors.Is(result.Err, exec.ErrForgeCredential) {
-		t.Errorf("a model-facing child was started after the audience variables were swapped: %v", result.Err)
-	}
-}
-
-// Each of the four names the Bash adapters strip. An allowlist cannot stop
-// these, because a caller reached them by name.
-//
-// The list is forgeCredentials, written out in env_test.go in this same
-// package. It is deliberately not read from spec.go: a test that read the
-// production list would lose a name from itself in the edit that lost it from
-// production, and pass. tests/test-permissions.sh:264-271 keeps its own copy
-// of the same four names for the same reason.
-func TestRunRefusesAForgeCredentialForAModelFacingChild(t *testing.T) {
+// The four names are written out here rather than read from spec.go or from
+// forgeCredentials. A test that read the production list would lose a name
+// from itself in the edit that lost it from production, and pass.
+// tests/test-permissions.sh:264-271 keeps its own copy of the same four
+// names for the same reason.
+func TestNewOSRunnerRefusesAForgeCredential(t *testing.T) {
 	const secret = "ghp_a_token_that_must_never_be_printed"
 
-	for _, name := range forgeCredentials {
+	for _, name := range []string{"GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"} {
 		t.Run(name, func(t *testing.T) {
 			spec := helperSpec("lookup", name)
 			spec.Env = append(spec.Env, name+"="+secret)
 
-			result := run(t, spec)
+			result := exec.NewOSRunner().Run(t.Context(), spec)
 
 			if !errors.Is(result.Err, exec.ErrForgeCredential) {
 				t.Fatalf("Err = %v, want a forge-credential refusal", result.Err)
@@ -127,19 +57,19 @@ func TestRunRefusesAForgeCredentialForAModelFacingChild(t *testing.T) {
 	}
 }
 
-// The orchestrator's own tools must be able to hold one. lib/github.sh sets
-// GH_TOKEN nowhere and gh inherits it ambiently at every call site, so refusing
-// here would break the forge adapter rather than protect anything.
-func TestRunAllowsAForgeCredentialForAnOrchestratorChild(t *testing.T) {
+// NewOrchestratorRunner may start a child that holds a forge credential.
+// lib/github.sh sets GH_TOKEN nowhere and gh inherits it ambiently at every
+// call site, so refusing here would break the forge adapter rather than
+// protect anything. The child is this test binary in helper mode, not gh.
+func TestNewOrchestratorRunnerStartsAChildWithAForgeCredential(t *testing.T) {
 	const secret = "ghp_orchestrator_only"
 
-	for _, name := range forgeCredentials {
+	for _, name := range []string{"GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"} {
 		t.Run(name, func(t *testing.T) {
 			spec := helperSpec("lookup", name)
 			spec.Env = append(spec.Env, name+"="+secret)
-			spec.Audience = exec.AudienceOrchestrator
 
-			result := run(t, spec)
+			result := exec.NewOrchestratorRunner().Run(t.Context(), spec)
 
 			if !result.OK() {
 				t.Fatalf("an orchestrator child was refused: exit=%d err=%v", result.ExitCode, result.Err)
@@ -148,6 +78,28 @@ func TestRunAllowsAForgeCredentialForAnOrchestratorChild(t *testing.T) {
 				t.Errorf("child saw %q, want %q", got, want)
 			}
 		})
+	}
+}
+
+// Run reads the runner's own field. A package-level switch would let a test
+// flip the refusal off for every NewOSRunner in the binary; constructing one
+// orchestrator runner and then a fresh model-facing one shows the two
+// instances do not share that decision.
+func TestRunReadsTheRunnerInstance(t *testing.T) {
+	spec := helperSpec("lookup", "GH_TOKEN")
+	spec.Env = append(spec.Env, "GH_TOKEN=not-a-real-token")
+
+	if result := exec.NewOSRunner().Run(t.Context(), spec); !errors.Is(result.Err, exec.ErrForgeCredential) {
+		t.Fatalf("NewOSRunner started the child: %v", result.Err)
+	}
+
+	started := exec.NewOrchestratorRunner().Run(t.Context(), spec)
+	if !started.OK() {
+		t.Fatalf("NewOrchestratorRunner refused the child: exit=%d err=%v", started.ExitCode, started.Err)
+	}
+
+	if result := exec.NewOSRunner().Run(t.Context(), spec); !errors.Is(result.Err, exec.ErrForgeCredential) {
+		t.Fatalf("a later NewOSRunner started the child, so Run is not reading the instance: %v", result.Err)
 	}
 }
 
