@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/carlosboeing/crossrev/internal/forge"
+	"github.com/carlosboeing/crossrev/internal/harness"
 )
 
 // TestContext pins context loading: one pull-request read, policy from the
@@ -87,6 +88,122 @@ func TestContext(t *testing.T) {
 		}
 		if !strings.Contains(string(got.Prompt), "**#19** (open) same crash") {
 			t.Fatalf("prompt is missing the candidate issue:\n%s", got.Prompt)
+		}
+	})
+
+	t.Run("automatic trigger trusts CROSSREV_APP_SLUG not ViewerLogin", func(t *testing.T) {
+		e := setup(t)
+		e.addReview(t, defaultFindings(), "issues-remain")
+		e.forge.comments[len(e.forge.comments)-1].AuthorLogin = "crossrev[bot]"
+		t.Setenv("CROSSREV_APP_SLUG", "crossrev")
+		got := e.runReq(t, Request{PR: 42, Repo: e.slug, Trigger: TriggerAutomatic})
+		if got.Err != nil {
+			t.Fatalf("Run: %v", got.Err)
+		}
+		if got.Outcome != OutcomeInvoked {
+			t.Fatalf("Outcome = %q, want invoked; ViewerLogin=tester must not hide crossrev[bot] markers", got.Outcome)
+		}
+		if got.Pass != 1 {
+			t.Errorf("Pass = %d, want 1", got.Pass)
+		}
+	})
+
+	t.Run("empty trigger is human", func(t *testing.T) {
+		e := setup(t)
+		e.addReview(t, defaultFindings(), "issues-remain")
+		got := e.runReq(t, Request{PR: 42, Repo: e.slug, Trigger: ""})
+		if got.Err != nil {
+			t.Fatalf("empty trigger: %v", got.Err)
+		}
+		if got.Outcome != OutcomeInvoked {
+			t.Fatalf("Outcome = %q, want invoked (lib/run.sh:1731 trigger=human)", got.Outcome)
+		}
+	})
+
+	t.Run("entry guards", func(t *testing.T) {
+		tests := []struct {
+			name        string
+			setup       func(*testing.T, *testEnv, *Request)
+			wantOutcome Outcome
+			wantErr     string
+		}{
+			{
+				name: "automatic fork is refused",
+				setup: func(_ *testing.T, e *testEnv, req *Request) {
+					req.Trigger = TriggerAutomatic
+					e.forge.pr.IsCrossRepository = true
+				},
+				wantOutcome: OutcomeRefused,
+				wantErr:     "comes from a fork",
+			},
+			{
+				name: "a pull request that is not OPEN is refused",
+				setup: func(_ *testing.T, e *testEnv, _ *Request) {
+					e.forge.pr.State = "CLOSED"
+				},
+				wantOutcome: OutcomeRefused,
+				wantErr:     "is not open",
+			},
+			{
+				name: "automatic draft skips",
+				setup: func(_ *testing.T, e *testEnv, req *Request) {
+					req.Trigger = TriggerAutomatic
+					e.forge.pr.IsDraft = true
+				},
+				wantOutcome: OutcomeSkipped,
+			},
+			{
+				name: "unknown trigger is refused",
+				setup: func(_ *testing.T, _ *testEnv, req *Request) {
+					req.Trigger = "cron"
+				},
+				wantOutcome: OutcomeRefused,
+				wantErr:     "unknown resolve trigger",
+			},
+			{
+				name: "ServesLeg refuses a review-only harness",
+				setup: func(t *testing.T, e *testEnv, req *Request) {
+					raw := strings.Replace(string(harness.DescriptorJSON()),
+						`"name": "grok"`, `"name": "grok", "legs": ["review"]`, 1)
+					doc, err := harness.Load([]byte(raw))
+					if err != nil {
+						t.Fatalf("Load review-only grok: %v", err)
+					}
+					e.doc = doc
+					req.Harness = "grok"
+					e.addReview(t, defaultFindings(), "issues-remain")
+				},
+				wantOutcome: OutcomeRefused,
+				wantErr:     "cannot serve the resolve leg",
+			},
+			{
+				name: "AssertPushTarget refuses a worktree at the wrong revision",
+				setup: func(t *testing.T, e *testEnv, _ *Request) {
+					e.addReview(t, defaultFindings(), "issues-remain")
+					e.git.wrongHead = e.base
+				},
+				wantOutcome: OutcomeRefused,
+				wantErr:     "the tree is at revision",
+			},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				e := setup(t)
+				req := Request{PR: 42, Repo: e.slug, Trigger: TriggerHuman}
+				tt.setup(t, e, &req)
+				got := e.runReq(t, req)
+				if got.Outcome != tt.wantOutcome {
+					t.Errorf("Outcome = %q, want %q (err=%v)", got.Outcome, tt.wantOutcome, got.Err)
+				}
+				if tt.wantErr != "" {
+					if got.Err == nil || !strings.Contains(got.Err.Error(), tt.wantErr) {
+						t.Errorf("Err = %v, want it to contain %q", got.Err, tt.wantErr)
+					}
+				}
+				if e.runner.specs != nil {
+					t.Errorf("harness started on a guard: %d specs", len(e.runner.specs))
+				}
+			})
 		}
 	})
 

@@ -42,6 +42,22 @@ func TestClaim(t *testing.T) {
 		}
 	})
 
+	t.Run("CommentCreate (0, nil) starts no harness", func(t *testing.T) {
+		e := setup(t)
+		e.addReview(t, defaultFindings(), "issues-remain")
+		e.forge.zeroCreateID = true
+		got := e.run(t)
+		if got.Outcome != OutcomeRefused {
+			t.Fatalf("Outcome = %q, want refused", got.Outcome)
+		}
+		if got.Err == nil || !strings.Contains(got.Err.Error(), "claim comment did not post") {
+			t.Errorf("Err = %v, want the failed claim", got.Err)
+		}
+		if e.runner.specs != nil {
+			t.Fatal("harness ran after CommentCreate (0, nil)")
+		}
+	})
+
 	t.Run("create failure stops before a harness process", func(t *testing.T) {
 		e := setup(t)
 		e.addReview(t, defaultFindings(), "issues-remain")
@@ -81,6 +97,28 @@ func TestClaim(t *testing.T) {
 		}
 		if got.Marker.CommentID() != 9002 {
 			t.Errorf("CommentID = %d, want 9002", got.Marker.CommentID())
+		}
+	})
+
+	t.Run("a recovered started claim with mapped resolutions starts no harness", func(t *testing.T) {
+		e := setup(t)
+		e.addReview(t, defaultFindings(), "issues-remain")
+		e.addResolve(t, prstate.Marker{
+			State:       core.PassStarted,
+			HeadSHA:     prstate.Some(e.head.SHA()),
+			TS:          e.now.Unix() - 10,
+			Harness:     prstate.Some("claude"),
+			Resolutions: json.RawMessage(`[{"finding_id":"` + testFinding + `","resolution":"fixed","reply":"done"}]`),
+		}, 9002)
+		got := e.run(t)
+		if got.Err != nil {
+			t.Fatalf("Run: %v", got.Err)
+		}
+		if got.Outcome != OutcomeInvoked {
+			t.Fatalf("Outcome = %q, want invoked with recorded resolutions", got.Outcome)
+		}
+		if e.runner.specs != nil {
+			t.Fatalf("harness ran over recorded resolutions: %d specs", len(e.runner.specs))
 		}
 	})
 

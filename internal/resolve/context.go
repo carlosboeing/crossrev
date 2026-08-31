@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 
 	"github.com/carlosboeing/crossrev/internal/config"
 	"github.com/carlosboeing/crossrev/internal/core"
+	"github.com/carlosboeing/crossrev/internal/cred"
 	"github.com/carlosboeing/crossrev/internal/forge"
 	"github.com/carlosboeing/crossrev/internal/harness"
 	"github.com/carlosboeing/crossrev/internal/policy"
@@ -68,7 +70,7 @@ func (l *Leg) load(ctx context.Context, req Request) (*session, Result) {
 	}
 	s.pr = pr
 
-	if req.Trigger == "automatic" && pr.IsCrossRepository {
+	if req.Trigger == TriggerAutomatic && pr.IsCrossRepository {
 		return nil, refuse(fmt.Sprintf("%s#%d comes from a fork", repo, req.PR),
 			"crossrev does not run on fork pull requests: GitHub withholds secrets from them. Review it locally or by hand.")
 	}
@@ -76,7 +78,7 @@ func (l *Leg) load(ctx context.Context, req Request) (*session, Result) {
 		return nil, refuse(fmt.Sprintf("%s#%d is not open", repo, req.PR),
 			"crossrev only runs on open pull requests. Reopen it, or pick another number.")
 	}
-	if req.Trigger == "automatic" && pr.IsDraft {
+	if req.Trigger == TriggerAutomatic && pr.IsDraft {
 		return s, Result{
 			Outcome: OutcomeSkipped,
 			Message: fmt.Sprintf("%s#%d is a draft pull request, so an automatic invocation does not review it.", repo, req.PR),
@@ -96,10 +98,9 @@ func (l *Leg) load(ctx context.Context, req Request) (*session, Result) {
 		return nil, wrapErr(err)
 	}
 
-	author, err := l.Forge.ViewerLogin(ctx)
-	if err != nil || author == "" {
-		return nil, refuse(fmt.Sprintf("could not resolve whose markers to trust on %s#%d", repo, req.PR),
-			"Pass numbering, revision detection and the daily cap all read from the trusted author. Run: gh auth login")
+	author, err := l.trustedAuthor(ctx, req)
+	if err != nil {
+		return nil, wrapErr(err)
 	}
 	s.author = author
 	s.markers = markersFromComments(l.Forge.IssueComments(ctx, repo, req.PR), author)
@@ -176,6 +177,31 @@ func (l *Leg) load(ctx context.Context, req Request) (*session, Result) {
 	return s, Result{}
 }
 
+func (l *Leg) trustedAuthor(ctx context.Context, req Request) (string, error) {
+	if req.Author != "" {
+		return req.Author, nil
+	}
+	if req.Trigger == TriggerAutomatic {
+		// lib/state.sh:35-40. Measured: CROSSREV_APP_SLUG=crossrev → crossrev[bot].
+		slug := os.Getenv("CROSSREV_APP_SLUG")
+		if slug == "" {
+			return "", &Refusal{
+				Message: "cannot determine which App's markers to trust",
+				Hint:    "Automated mode reads markers only from the App that writes them. In a workflow, set CROSSREV_APP_SLUG from the token step's app-slug output. Locally, run: crossrev auth status",
+			}
+		}
+		return slug + "[bot]", nil
+	}
+	author, err := l.Forge.ViewerLogin(ctx)
+	if err != nil || author == "" {
+		return "", &Refusal{
+			Message: fmt.Sprintf("could not resolve whose markers to trust on %s#%d", req.Repo, req.PR),
+			Hint:    "Pass numbering, revision detection and the daily cap all read from the trusted author. Run: gh auth login",
+		}
+	}
+	return author, nil
+}
+
 func (l *Leg) showFile(ctx context.Context, revision core.Revision, path string) ([]byte, config.FileStatus, error) {
 	b, st, err := l.Git.Show(ctx, revision, path)
 	return b, config.FileStatus(st), err
@@ -235,7 +261,7 @@ func escalatedCount(markers []prstate.Marker) int {
 	return n
 }
 
-func (l *Leg) settings(s *session) (*Refusal, error) {
+func (l *Leg) settings(s *session) (*Refusal, string, error) {
 	// Derived from the leg, not configured. lib/run.sh:488-489:
 	// LEG_WRITE=no
 	// [[ "$leg" == "resolver" ]] && LEG_WRITE=yes
@@ -249,22 +275,37 @@ func (l *Leg) settings(s *session) (*Refusal, error) {
 	}
 	doc, err := l.document()
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	if _, ok := harnessFor(doc, name); !ok {
 		return &Refusal{
 			Message: fmt.Sprintf("there is no adapter for the harness '%s'", name),
 			Hint:    "CrossRev drives claude, codex, agy, grok and opencode directly.",
-		}, nil
+		}, "", nil
 	}
 	if !doc.ServesLeg(name, "resolve") {
 		return &Refusal{
 			Message: fmt.Sprintf("the harness '%s' cannot serve the resolve leg", name),
 			Hint:    "Name a harness whose descriptor lists resolve, or omit --harness.",
-		}, nil
+		}, "", nil
 	}
-	s.settings = legSettings{Harness: name, Model: model, Effort: effort, Endpoint: endpoint}
-	return nil, nil
+
+	asked := name
+	if l.binaryInstalled(asked) {
+		s.settings = legSettings{Harness: name, Model: model, Effort: effort, Endpoint: endpoint}
+		return nil, "", nil
+	}
+	for _, alt := range doc.NamesForLeg("resolve") {
+		if l.binaryInstalled(alt) {
+			s.settings = legSettings{Harness: alt, Model: "", Effort: effort, Endpoint: ""}
+			warn := fmt.Sprintf("'%s' is not installed, so the resolver runs on '%s' instead", asked, alt)
+			return nil, warn, nil
+		}
+	}
+	return &Refusal{
+		Message: fmt.Sprintf("the resolver is configured to use '%s', which is not installed, and no other harness that can serve the resolve leg is either", asked),
+		Hint:    "Install one of the harnesses that serve the resolve leg.",
+	}, "", nil
 }
 
 func wrapErr(err error) Result {
@@ -284,6 +325,9 @@ func wrapErr(err error) Result {
 		return refuse(r.Message, r.Hint)
 	}
 	if r, ok := err.(*harness.Refusal); ok {
+		return refuse(r.Reason, r.Action)
+	}
+	if r, ok := err.(*cred.Refusal); ok {
 		return refuse(r.Reason, r.Action)
 	}
 	return refuse(err.Error(), "See the message above.")

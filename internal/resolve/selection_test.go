@@ -93,6 +93,32 @@ func TestSelection(t *testing.T) {
 		}
 	})
 
+	t.Run("newest of two complete reviews is the current pass", func(t *testing.T) {
+		e := setup(t)
+		e.addReviewPass(t, 1, defaultFindings(), "issues-remain", core.PassComplete)
+		e.addReviewPass(t, 2, defaultFindings(), "issues-remain", core.PassComplete)
+		got := e.run(t)
+		if got.Err != nil {
+			t.Fatalf("Run: %v", got.Err)
+		}
+		if got.Pass != 2 {
+			t.Fatalf("Pass = %d, want 2 (lib/state.sh:294-296)", got.Pass)
+		}
+	})
+
+	t.Run("a declined pass-2 review leaves resolve on pass 1", func(t *testing.T) {
+		e := setup(t)
+		e.addReviewPass(t, 1, defaultFindings(), "issues-remain", core.PassComplete)
+		e.addReviewPass(t, 2, json.RawMessage("[]"), "declined", core.PassDeclined)
+		got := e.run(t)
+		if got.Err != nil {
+			t.Fatalf("Run: %v", got.Err)
+		}
+		if got.Pass != 1 {
+			t.Fatalf("Pass = %d, want 1; declined pass 2 is not a review that ran", got.Pass)
+		}
+	})
+
 	t.Run("complete review invokes", func(t *testing.T) {
 		e := setup(t)
 		e.addReview(t, defaultFindings(), "issues-remain")

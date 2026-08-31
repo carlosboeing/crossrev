@@ -43,12 +43,21 @@ const (
 	OutcomeRefused Outcome = "refused"
 )
 
+// Trigger is who asked for the leg (lib/run.sh:1731-1756).
+type Trigger string
+
+const (
+	TriggerHuman     Trigger = "human"
+	TriggerAutomatic Trigger = "automatic"
+)
+
 // Request is one resolve-leg invocation.
 type Request struct {
 	PR              int
 	Repo            core.Slug
-	Trigger         string
+	Trigger         Trigger
 	Harness         string
+	Author          string
 	KeepTranscripts bool
 }
 
@@ -63,6 +72,7 @@ type Result struct {
 	Prompt      []byte
 	Invocation  harness.Invocation
 	Message     string
+	Messages    []string
 	Err         error
 }
 
@@ -88,6 +98,16 @@ type Leg struct {
 	// Adapter, when set, is used instead of harness.For. Tests inject one;
 	// production leaves it nil.
 	Adapter harness.Adapter
+	// LookPath reports whether a harness binary is on PATH. Nil searches PATH
+	// the way command -v does (lib/run.sh:524).
+	LookPath func(string) (string, error)
+}
+
+func (l *Leg) runner() exec.Runner {
+	if l != nil && l.Runner != nil {
+		return l.Runner
+	}
+	return exec.NewOSRunner()
 }
 
 // Git is the checkout the resolve leg uses. Production wraps *vcs.Repository

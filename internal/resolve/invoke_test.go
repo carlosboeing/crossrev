@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/carlosboeing/crossrev/internal/core"
@@ -135,6 +136,129 @@ func TestInvoke(t *testing.T) {
 		}
 		if e.adapter.calls != 1 {
 			t.Fatalf("adapter calls = %d, want 1 (no retry)", e.adapter.calls)
+		}
+	})
+
+	t.Run("missing configured resolver is substituted before the claim", func(t *testing.T) {
+		e := setup(t)
+		e.addReview(t, defaultFindings(), "issues-remain")
+		e.git.show = map[string][]byte{
+			e.base.SHA() + ":.github/crossrev.yml": []byte("version: 1\nresolver:\n  harness: codex\n  model: x\n"),
+		}
+		e.lookPath = func(name string) (string, error) {
+			if name == "claude" {
+				return "/usr/bin/claude", nil
+			}
+			return "", os.ErrNotExist
+		}
+		got := e.run(t)
+		if got.Err != nil {
+			t.Fatalf("Run: %v", got.Err)
+		}
+		if len(e.forge.created) == 0 {
+			t.Fatal("no claim")
+		}
+		if !strings.Contains(e.forge.created[0].Body, `"harness":"claude"`) {
+			t.Errorf("claim named the missing harness: %s", e.forge.created[0].Body)
+		}
+		found := false
+		for _, msg := range got.Messages {
+			if strings.Contains(msg, "is not installed") && strings.Contains(msg, "claude") {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("Messages = %v, want the substitute warning (lib/run.sh:542-543)", got.Messages)
+		}
+		if len(e.adapter.invs) == 0 || !e.adapter.invs[0].Write {
+			t.Fatal("substitute lost write permission")
+		}
+	})
+
+	t.Run("hosted runner without the secret refuses before a harness process", func(t *testing.T) {
+		e := setup(t)
+		e.addReview(t, defaultFindings(), "issues-remain")
+		t.Setenv("RUNNER_ENVIRONMENT", "github-hosted")
+		t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
+		got := e.run(t)
+		if got.Err == nil {
+			t.Fatal("wanted a missing-secret refusal on a github-hosted runner")
+		}
+		if !strings.Contains(got.Err.Error(), "CLAUDE_CODE_OAUTH_TOKEN") {
+			t.Errorf("err = %q, want it to name CLAUDE_CODE_OAUTH_TOKEN", got.Err)
+		}
+		if e.runner.specs != nil {
+			t.Fatalf("harness started after a missing hosted secret: %d specs", len(e.runner.specs))
+		}
+	})
+
+	t.Run("AssertEnvClean refuses a leaked ANTHROPIC_BASE_URL", func(t *testing.T) {
+		e := setup(t)
+		e.addReview(t, defaultFindings(), "issues-remain")
+		e.legEnv = []string{"PATH=/usr/bin", "HOME=/tmp", "ANTHROPIC_BASE_URL=https://example.invalid"}
+		got := e.run(t)
+		if got.Err == nil {
+			t.Fatal("wanted AssertEnvClean to refuse a leaked ANTHROPIC_BASE_URL")
+		}
+		if !strings.Contains(got.Err.Error(), "ANTHROPIC_BASE_URL") {
+			t.Errorf("err = %q, want it to name ANTHROPIC_BASE_URL", got.Err)
+		}
+		if e.runner.specs != nil {
+			t.Fatalf("harness started after an endpoint leak: %d specs", len(e.runner.specs))
+		}
+	})
+
+	t.Run("the spec passed to Run keeps PATH and HOME and omits GH_TOKEN", func(t *testing.T) {
+		e := setup(t)
+		e.addReview(t, defaultFindings(), "issues-remain")
+		e.adapter = nil
+		e.legEnv = []string{"PATH=/usr/bin:/bin", "HOME=" + e.workdir, "GH_TOKEN=should-never-reach-the-model"}
+		e.runner.stdout = claudeResolveStdout(string(oneFindingPayload()))
+		got := e.run(t)
+		if got.Err != nil {
+			t.Fatalf("Run: %v", got.Err)
+		}
+		if len(e.runner.specs) == 0 {
+			t.Fatal("no harness spec")
+		}
+		env := e.runner.specs[0].Env
+		if name, found := forgeCredentialIn(env); found {
+			t.Fatalf("harness env carried %s", name)
+		}
+		if !envHas(env, "PATH") {
+			t.Errorf("spec.Env dropped PATH: %v", env)
+		}
+		if !envHas(env, "HOME") {
+			t.Errorf("spec.Env dropped HOME: %v", env)
+		}
+	})
+
+	t.Run("opencode schema mismatch retries once", func(t *testing.T) {
+		e := setup(t)
+		e.addReview(t, defaultFindings(), "issues-remain")
+		e.adapter.payloads = []json.RawMessage{shapePayload(), oneFindingPayload()}
+		got := e.runReq(t, Request{PR: 42, Repo: e.slug, Trigger: TriggerHuman, Harness: "opencode"})
+		if got.Err != nil {
+			t.Fatalf("Run: %v", got.Err)
+		}
+		if e.adapter.calls != 2 {
+			t.Fatalf("adapter calls = %d, want 2 (schema_native false retries once)", e.adapter.calls)
+		}
+	})
+
+	t.Run("duplicate payload earns one retry then a good payload invokes", func(t *testing.T) {
+		e := setup(t)
+		e.addReview(t, defaultFindings(), "issues-remain")
+		e.adapter.payloads = []json.RawMessage{duplicatePayload(), oneFindingPayload()}
+		got := e.run(t)
+		if got.Err != nil {
+			t.Fatalf("Run after one duplicate retry: %v", got.Err)
+		}
+		if e.adapter.calls != 2 {
+			t.Fatalf("adapter calls = %d, want 2", e.adapter.calls)
+		}
+		if got.Outcome != OutcomeInvoked {
+			t.Fatalf("Outcome = %q, want invoked", got.Outcome)
 		}
 	})
 }

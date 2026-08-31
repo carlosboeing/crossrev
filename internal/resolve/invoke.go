@@ -8,9 +8,11 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"time"
 
 	"github.com/carlosboeing/crossrev/internal/config"
 	"github.com/carlosboeing/crossrev/internal/core"
+	"github.com/carlosboeing/crossrev/internal/cred"
 	"github.com/carlosboeing/crossrev/internal/diff"
 	"github.com/carlosboeing/crossrev/internal/exec"
 	"github.com/carlosboeing/crossrev/internal/forge"
@@ -183,6 +185,13 @@ func (l *Leg) invoke(ctx context.Context, s *session, marker prstate.Marker, wor
 	if err := harness.AssertEnvClean(l.Env); err != nil {
 		return wrapErr(err)
 	}
+	staged, err := cred.Prepare(doc.Credentials().For(s.settings.Harness), s.settings.Endpoint, cred.Options{
+		Now: func() time.Time { return l.now() },
+	})
+	if err != nil {
+		return wrapErr(err)
+	}
+	defer func() { _ = cred.Discard(staged) }()
 
 	inv := harness.Invocation{
 		Prompt:   harness.File{Path: promptPath, Text: string(promptBytes)},
@@ -228,7 +237,7 @@ func (l *Leg) invoke(ctx context.Context, s *session, marker prstate.Marker, wor
 			_, _, _ = sandbox.Restore(workdir, paths)
 			return wrapErr(err)
 		}
-		res := l.Runner.Run(ctx, spec)
+		res := l.runner().Run(ctx, spec)
 		_, _, _ = sandbox.Restore(workdir, paths)
 		if l.Log != nil {
 			l.Log.Event("invoke", fmt.Sprintf("harness=%s attempt=%d exit=%d", s.settings.Harness, attempt, res.ExitCode))

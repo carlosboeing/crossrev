@@ -52,16 +52,19 @@ func mustHarness(t *testing.T) harness.Document {
 }
 
 type testEnv struct {
-	forge   *fakeForge
-	git     *fakeGit
-	runner  *recordingRunner
-	adapter *stubAdapter
-	log     *runlog.Log
-	now     time.Time
-	slug    core.Slug
-	head    core.Revision
-	base    core.Revision
-	workdir string
+	forge    *fakeForge
+	git      *fakeGit
+	runner   *recordingRunner
+	adapter  *stubAdapter
+	log      *runlog.Log
+	now      time.Time
+	slug     core.Slug
+	head     core.Revision
+	base     core.Revision
+	workdir  string
+	lookPath func(string) (string, error)
+	legEnv   []string
+	doc      harness.Document
 }
 
 func setup(t *testing.T) *testEnv {
@@ -69,6 +72,10 @@ func setup(t *testing.T) *testEnv {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("GITHUB_RUN_ID", "test-run")
+	// cred.Prepare reads process RUNNER_ENVIRONMENT. GitHub-hosted runners set
+	// it to github-hosted, and a missing harness secret then stops the leg.
+	// Tests are not that runner: isolate them the way cred treats self-hosted.
+	t.Setenv("RUNNER_ENVIRONMENT", "self-hosted")
 
 	slug := mustSlug(t)
 	head := mustRev(t, testHeadSHA)
@@ -126,21 +133,66 @@ func setup(t *testing.T) *testEnv {
 
 func (e *testEnv) run(t *testing.T) Result {
 	t.Helper()
-	leg := &Leg{
-		Forge:   e.forge,
-		Git:     e.git,
-		Runner:  e.runner,
-		Log:     e.log,
-		Clock:   func() time.Time { return e.now },
-		Env:     []string{"PATH=/usr/bin", "HOME=/tmp", "GH_TOKEN=should-not-leak"},
-		Harness: mustHarness(t),
-		Adapter: e.adapter,
-	}
-	return leg.Run(context.Background(), Request{
+	return e.runReq(t, Request{
 		PR:      42,
 		Repo:    e.slug,
-		Trigger: "human",
+		Trigger: TriggerHuman,
 	})
+}
+
+func (e *testEnv) runReq(t *testing.T, req Request) Result {
+	t.Helper()
+	look := e.lookPath
+	if look == nil {
+		look = func(name string) (string, error) { return "/usr/bin/" + name, nil }
+	}
+	env := e.legEnv
+	if env == nil {
+		env = []string{"PATH=/usr/bin", "HOME=/tmp", "GH_TOKEN=should-not-leak"}
+	}
+	doc := e.doc
+	if len(doc.Names()) == 0 {
+		doc = mustHarness(t)
+	}
+	var adapter harness.Adapter
+	if e.adapter != nil {
+		adapter = e.adapter
+	}
+	leg := &Leg{
+		Forge:    e.forge,
+		Git:      e.git,
+		Runner:   e.runner,
+		Log:      e.log,
+		Clock:    func() time.Time { return e.now },
+		Env:      env,
+		Harness:  doc,
+		Adapter:  adapter,
+		LookPath: look,
+	}
+	return leg.Run(context.Background(), req)
+}
+
+func (e *testEnv) addReviewPass(t *testing.T, pass int, findings json.RawMessage, verdict string, state core.PassState) {
+	t.Helper()
+	if findings == nil {
+		findings = json.RawMessage("[]")
+	}
+	if state == "" {
+		state = core.PassComplete
+	}
+	m := prstate.Marker{
+		Version:  core.MarkerVersion,
+		Leg:      core.LegReview,
+		Pass:     pass,
+		State:    state,
+		TS:       e.now.Unix() - 60,
+		RunID:    prstate.Some("review-run"),
+		HeadSHA:  prstate.Some(e.head.SHA()),
+		Harness:  prstate.Some("codex"),
+		Verdict:  prstate.Some(verdict),
+		Findings: findings,
+	}
+	e.postMarker(t, 9000+int64(pass), m)
 }
 
 func (e *testEnv) addReview(t *testing.T, findings json.RawMessage, verdict string) {
@@ -218,17 +270,18 @@ func shapePayload() json.RawMessage {
 // ---------------------------------------------------------------------------
 
 type fakeForge struct {
-	env        *testEnv
-	slug       core.Slug
-	pr         forge.PullRequest
-	viewer     string
-	comments   []forge.IssueComment
-	threads    []forge.ReviewThread
-	candidates []forge.IssueCandidate
-	created    []createdComment
-	edits      []editedComment
-	createErr  error
-	order      []string
+	env          *testEnv
+	slug         core.Slug
+	pr           forge.PullRequest
+	viewer       string
+	comments     []forge.IssueComment
+	threads      []forge.ReviewThread
+	candidates   []forge.IssueCandidate
+	created      []createdComment
+	edits        []editedComment
+	createErr    error
+	zeroCreateID bool
+	order        []string
 }
 
 type createdComment struct {
@@ -295,6 +348,9 @@ func (f *fakeForge) CommentCreate(_ context.Context, repo core.Slug, number int,
 	if f.createErr != nil {
 		return 0, f.createErr
 	}
+	if f.zeroCreateID {
+		return 0, nil
+	}
 	f.created = append(f.created, createdComment{Repo: repo, PR: number, Body: body})
 	id := int64(9100 + len(f.created))
 	f.comments = append(f.comments, forge.IssueComment{
@@ -345,6 +401,7 @@ type fakeGit struct {
 	head         core.Revision
 	show         map[string][]byte
 	showCalls    []showCall
+	wrongHead    core.Revision
 	worktrees    *[]string
 	fetchCalls   []string
 	captureCalls *int
@@ -373,7 +430,12 @@ func (g *fakeGit) Show(_ context.Context, revision core.Revision, path string) (
 	return nil, vcs.NotFound, nil
 }
 func (g *fakeGit) HasCommit(context.Context, core.Revision) (bool, error) { return true, nil }
-func (g *fakeGit) Head(context.Context) (core.Revision, error)            { return g.head, nil }
+func (g *fakeGit) Head(context.Context) (core.Revision, error) {
+	if !g.wrongHead.IsZero() {
+		return g.wrongHead, nil
+	}
+	return g.head, nil
+}
 func (g *fakeGit) ConfigGet(_ context.Context, key string) (string, error) {
 	switch key {
 	case "branch.feature.pushRemote", "branch.feature.remote", "remote.pushDefault":
@@ -421,8 +483,9 @@ var _ Git = (*fakeGit)(nil)
 // ---------------------------------------------------------------------------
 
 type recordingRunner struct {
-	specs []exec.Spec
-	onRun func(exec.Spec)
+	specs  []exec.Spec
+	onRun  func(exec.Spec)
+	stdout []byte
 }
 
 func (r *recordingRunner) Run(_ context.Context, spec exec.Spec) exec.Result {
@@ -430,7 +493,22 @@ func (r *recordingRunner) Run(_ context.Context, spec exec.Spec) exec.Result {
 	if r.onRun != nil {
 		r.onRun(spec)
 	}
-	return exec.Result{ExitCode: 0, Stdout: []byte(`{"result":"{}"}`)}
+	out := r.stdout
+	if len(out) == 0 {
+		out = []byte(`{"result":"{}"}`)
+	}
+	return exec.Result{ExitCode: 0, Stdout: out}
+}
+
+func claudeResolveStdout(payload string) []byte {
+	raw, err := json.Marshal(map[string]any{
+		"result":   payload,
+		"is_error": false,
+	})
+	if err != nil {
+		panic(err)
+	}
+	return raw
 }
 
 type stubAdapter struct {
@@ -495,4 +573,16 @@ func envHas(env []string, name string) bool {
 		}
 	}
 	return false
+}
+
+func forgeCredentialIn(env []string) (string, bool) {
+	for _, name := range exec.ForgeCredentialNames() {
+		prefix := name + "="
+		for _, entry := range env {
+			if strings.HasPrefix(entry, prefix) {
+				return name, true
+			}
+		}
+	}
+	return "", false
 }
