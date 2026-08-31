@@ -42,6 +42,12 @@ source "$HERE/../lib/credentials.sh"
 source "$HERE/../lib/usage.sh"
 # shellcheck source=../lib/github.sh
 source "$HERE/../lib/github.sh"
+# shellcheck source=../lib/run.sh
+source "$HERE/../lib/run.sh"
+
+# usage.sh resolves lib/prices.json through ${ROOT:-…}. Replay without ROOT
+# reads a missing file and every price answer is empty.
+export ROOT="$HERE/.."
 
 export GIT_AUTHOR_NAME="crossrev"
 export GIT_AUTHOR_EMAIL="test@example.com"
@@ -542,6 +548,107 @@ while IFS= read -r c; do
   is "git tail rc: $name" "$rc" "$(jq -r .rc <<<"$c")"
   is "git tail: $name" "$got" "$want"
 done < <(jq -c '.cases[]' "$PARITY/git_tail.json")
+
+# --- review and resolve rendering ------------------------------------------
+
+# Sourced helpers in lib/run.sh read these. They look unused in this file.
+CTX_MIN_FIX_SEVERITY="$(jq -r .min_fix_severity "$PARITY/presentation.json")"
+CTX_MAX_PASSES_PER_CYCLE="$(jq -r .max_passes_per_cycle "$PARITY/presentation.json")"
+CTX_REPO="$(jq -r .repo "$PARITY/presentation.json")"
+CTX_PR="$(jq -r .pr "$PARITY/presentation.json")"
+export CTX_MIN_FIX_SEVERITY CTX_MAX_PASSES_PER_CYCLE CTX_REPO CTX_PR
+
+while IFS= read -r c; do
+  name="$(jq -r .name <<<"$c")"
+  is "severity emoji: $name" \
+    "$(run_severity_emoji "$(jq -r .value <<<"$c")")" \
+    "$(jq -r .out <<<"$c")"
+done < <(jq -c '.severity[]' "$PARITY/presentation.json")
+
+while IFS= read -r c; do
+  name="$(jq -r .name <<<"$c")"
+  is "category emoji: $name" \
+    "$(run_category_emoji "$(jq -r .value <<<"$c")")" \
+    "$(jq -r .out <<<"$c")"
+done < <(jq -c '.category[]' "$PARITY/presentation.json")
+
+while IFS= read -r c; do
+  name="$(jq -r .name <<<"$c")"
+  _same_model "$(jq -r .want <<<"$c")" "$(jq -r .got <<<"$c")" && rc=0 || rc=$?
+  is "same model: $name" "$rc" "$(jq -r .rc <<<"$c")"
+done < <(jq -c '.same_model[]' "$PARITY/presentation.json")
+
+while IFS= read -r c; do
+  name="$(jq -r .name <<<"$c")"
+  is "elapsed: $name" \
+    "$(_elapsed "$(jq -r .from <<<"$c")" "$(jq -r .to <<<"$c")")" \
+    "$(jq -r .out <<<"$c")"
+done < <(jq -c '.elapsed[]' "$PARITY/presentation.json")
+
+while IFS= read -r c; do
+  name="$(jq -r .name <<<"$c")"
+  is "thousands: $name" \
+    "$(_thousands "$(jq -r .in <<<"$c")")" \
+    "$(jq -r .out <<<"$c")"
+done < <(jq -c '.thousands[]' "$PARITY/presentation.json")
+
+while IFS= read -r c; do
+  name="$(jq -r .name <<<"$c")"
+  is "pass label: $name" \
+    "$(_pass_label "$(jq -r .pass <<<"$c")" "$(jq -r .cap <<<"$c")")" \
+    "$(jq -r .out <<<"$c")"
+done < <(jq -c '.pass_label[]' "$PARITY/presentation.json")
+
+while IFS= read -r c; do
+  name="$(jq -r .name <<<"$c")"
+  _commit_subject_ok "$(jq -r .subject <<<"$c")" && rc=0 || rc=$?
+  is "commit subject: $name" "$rc" "$(jq -r .rc <<<"$c")"
+done < <(jq -c '.commit_subject[]' "$PARITY/presentation.json")
+
+while IFS= read -r c; do
+  name="$(jq -r .name <<<"$c")"
+  is "url path: $name" \
+    "$(_url_path "$(jq -r .path <<<"$c")")" \
+    "$(jq -r .out <<<"$c")"
+done < <(jq -c '.url_path[]' "$PARITY/presentation.json")
+
+while IFS= read -r c; do
+  name="$(jq -r .name <<<"$c")"
+  is "finding label: $name" \
+    "$(run_finding_label "$(jq -c .finding <<<"$c")")" \
+    "$(jq -r .out <<<"$c")"
+done < <(jq -c '.finding_label[]' "$PARITY/presentation.json")
+
+while IFS= read -r c; do
+  name="$(jq -r .name <<<"$c")"
+  is "actionable: $name" \
+    "$(run_actionable "$(jq -c .findings <<<"$c")")" \
+    "$(jq -r .out <<<"$c")"
+done < <(jq -c '.actionable[]' "$PARITY/presentation.json")
+
+while IFS= read -r c; do
+  name="$(jq -r .name <<<"$c")"
+  got="$(_review_comment_body "$(jq -c .finding <<<"$c")" "$(jq -r .pass <<<"$c")" "$(jq -r .harness <<<"$c")" "$(jq -r .model <<<"$c")"; printf 'x')"
+  got="${got%x}"
+  want="$(unb64 "$(jq -r .body_b64 <<<"$c")"; printf 'x')"; want="${want%x}"
+  is "review comment: $name" "$got" "$want"
+done < <(jq -c '.comments[]' "$PARITY/presentation.json")
+
+while IFS= read -r c; do
+  name="$(jq -r .name <<<"$c")"
+  got="$(_resolve_reply_body "$(jq -c .disposition <<<"$c")" "$(jq -r .tracked <<<"$c")" "$(jq -r .pass <<<"$c")" "$(jq -r .harness <<<"$c")" "$(jq -r .model <<<"$c")"; printf 'x')"
+  got="${got%x}"
+  want="$(unb64 "$(jq -r .body_b64 <<<"$c")"; printf 'x')"; want="${want%x}"
+  is "resolve reply: $name" "$got" "$want"
+done < <(jq -c '.replies[]' "$PARITY/presentation.json")
+
+while IFS= read -r c; do
+  name="$(jq -r .name <<<"$c")"
+  got="$(_review_summary_body "$(jq -c .findings <<<"$c")" "$(jq -c .marker <<<"$c")"; printf 'x')"
+  got="${got%x}"
+  want="$(unb64 "$(jq -r .body_b64 <<<"$c")"; printf 'x')"; want="${want%x}"
+  is "review summary: $name" "$got" "$want"
+done < <(jq -c '.summaries[]' "$PARITY/presentation.json")
 
 printf '\n  %d passed, %d failed\n' "$pass" "$fail"
 (( fail == 0 ))
