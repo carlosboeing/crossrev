@@ -126,8 +126,8 @@ func TestSelection(t *testing.T) {
 		if got.Err != nil {
 			t.Fatalf("Run: %v", got.Err)
 		}
-		if got.Outcome != OutcomeInvoked {
-			t.Fatalf("Outcome = %q, want %q", got.Outcome, OutcomeInvoked)
+		if got.Outcome != OutcomeComplete {
+			t.Fatalf("Outcome = %q, want %q", got.Outcome, OutcomeComplete)
 		}
 		if got.Pass != 1 {
 			t.Errorf("Pass = %d, want 1", got.Pass)
@@ -177,8 +177,8 @@ func TestSelection(t *testing.T) {
 		if got.Err != nil {
 			t.Fatalf("Run: %v", got.Err)
 		}
-		if got.Outcome != OutcomeInvoked {
-			t.Fatalf("Outcome = %q, want invoked on unpushed fix, got %v", got.Outcome, got.Err)
+		if got.Outcome != OutcomeComplete {
+			t.Fatalf("Outcome = %q, want complete on unpushed fix, got %v", got.Outcome, got.Err)
 		}
 		if len(e.forge.edits) == 0 {
 			t.Fatal("redrive did not edit the finished claim")
@@ -200,8 +200,8 @@ func TestSelection(t *testing.T) {
 		if got.Err != nil {
 			t.Fatalf("Run: %v", got.Err)
 		}
-		if got.Outcome != OutcomeInvoked {
-			t.Fatalf("Outcome = %q, want invoked", got.Outcome)
+		if got.Outcome != OutcomeComplete {
+			t.Fatalf("Outcome = %q, want complete", got.Outcome)
 		}
 	})
 
@@ -221,8 +221,8 @@ func TestSelection(t *testing.T) {
 		if got.Err != nil {
 			t.Fatalf("Run: %v", got.Err)
 		}
-		if got.Outcome != OutcomeInvoked {
-			t.Fatalf("Outcome = %q, want invoked", got.Outcome)
+		if got.Outcome != OutcomeComplete {
+			t.Fatalf("Outcome = %q, want complete", got.Outcome)
 		}
 	})
 

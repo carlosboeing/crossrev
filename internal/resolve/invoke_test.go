@@ -257,8 +257,8 @@ func TestInvoke(t *testing.T) {
 		if e.adapter.calls != 2 {
 			t.Fatalf("adapter calls = %d, want 2", e.adapter.calls)
 		}
-		if got.Outcome != OutcomeInvoked {
-			t.Fatalf("Outcome = %q, want invoked", got.Outcome)
+		if got.Outcome != OutcomeComplete {
+			t.Fatalf("Outcome = %q, want complete", got.Outcome)
 		}
 	})
 }

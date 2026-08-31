@@ -114,8 +114,8 @@ func TestClaim(t *testing.T) {
 		if got.Err != nil {
 			t.Fatalf("Run: %v", got.Err)
 		}
-		if got.Outcome != OutcomeInvoked {
-			t.Fatalf("Outcome = %q, want invoked with recorded resolutions", got.Outcome)
+		if got.Outcome != OutcomeComplete {
+			t.Fatalf("Outcome = %q, want complete with recorded resolutions", got.Outcome)
 		}
 		if e.runner.specs != nil {
 			t.Fatalf("harness ran over recorded resolutions: %d specs", len(e.runner.specs))
@@ -136,8 +136,8 @@ func TestClaim(t *testing.T) {
 		if got.Err != nil {
 			t.Fatalf("Run: %v", got.Err)
 		}
-		if got.Outcome != OutcomeInvoked {
-			t.Fatalf("Outcome = %q, want invoked", got.Outcome)
+		if got.Outcome != OutcomeComplete {
+			t.Fatalf("Outcome = %q, want complete", got.Outcome)
 		}
 		if len(e.forge.created) != 0 {
 			t.Fatal("stale resume posted a new comment")

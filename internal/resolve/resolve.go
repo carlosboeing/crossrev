@@ -11,7 +11,7 @@ import (
 )
 
 // Run selects the current review pass, claims once, invokes a write-capable
-// resolver and validates the payload. It does not reply, commit or push.
+// resolver, then replies, persists, commits and pushes.
 func (l *Leg) Run(ctx context.Context, req Request) Result {
 	if req.PR == 0 {
 		return refuse("crossrev resolve needs a pull request number", "Usage: crossrev resolve --pr 42")
@@ -25,6 +25,9 @@ func (l *Leg) Run(ctx context.Context, req Request) Result {
 	}
 	s, early := l.load(ctx, req)
 	if early.Outcome != "" || early.Err != nil {
+		if early.Outcome == OutcomeNoFindings || early.Outcome == OutcomeHalted {
+			return l.finishEmpty(ctx, s, early)
+		}
 		return early
 	}
 	if l.Log != nil {
@@ -64,7 +67,12 @@ func (l *Leg) Run(ctx context.Context, req Request) Result {
 		got.Marker = marker
 	}
 	got.Messages = append(early.Messages, got.Messages...)
-	return got
+	if got.Outcome != OutcomeInvoked || got.Err != nil {
+		return got
+	}
+	published := l.publish(ctx, s, got, workdir)
+	published.Messages = append(early.Messages, published.Messages...)
+	return published
 }
 
 func (l *Leg) document() (harness.Document, error) {
