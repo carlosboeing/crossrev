@@ -3,6 +3,7 @@ package review
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -31,15 +32,16 @@ func validateCode(err error) int {
 	return 1
 }
 
-func enrichFindings(payload, diffBytes []byte, workdir string) (json.RawMessage, error) {
+func enrichFindings(payload, diffBytes []byte, workdir string) (json.RawMessage, []string, error) {
 	var doc struct {
 		Findings []json.RawMessage `json:"findings"`
 	}
 	if err := json.Unmarshal(payload, &doc); err != nil {
-		return json.RawMessage("[]"), nil
+		return json.RawMessage("[]"), nil, nil
 	}
 	parsed := diff.Parse(diffBytes, core.RevisionPair{})
 	out := make([]json.RawMessage, 0, len(doc.Findings))
+	var snaps []string
 	for _, raw := range doc.Findings {
 		var f map[string]json.RawMessage
 		if err := json.Unmarshal(raw, &f); err != nil {
@@ -54,6 +56,7 @@ func enrichFindings(payload, diffBytes []byte, workdir string) (json.RawMessage,
 		}
 		line := jsonInt(f["line"])
 		if moved, ok := parsed.Anchor(path, core.Side(side), line, diff.DefaultSnap); ok && moved != line {
+			snaps = append(snaps, fmt.Sprintf("%s:%d (%s) is not a line the diff shows; anchoring the finding to line %d instead.", path, line, side, moved))
 			f["line"] = json.RawMessage(strconv.Itoa(moved))
 			line = moved
 		}
@@ -68,11 +71,12 @@ func enrichFindings(payload, diffBytes []byte, workdir string) (json.RawMessage,
 		f["tracked_as"] = json.RawMessage("null")
 		enriched, err := json.Marshal(f)
 		if err != nil {
-			return nil, err
+			return nil, snaps, err
 		}
 		out = append(out, enriched)
 	}
-	return json.Marshal(out)
+	body, err := json.Marshal(out)
+	return body, snaps, err
 }
 
 func jsonString(raw json.RawMessage) (string, bool) {
