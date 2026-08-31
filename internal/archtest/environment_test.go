@@ -34,11 +34,11 @@ import (
 // the one is not a credential, and os.LookupEnv("GH_TOKEN") is exactly the
 // route a review found. The reason to leave them alone is that the guard
 // belongs at the destination rather than the read. The shell itself does a
-// named single read — lib/adapters/claude.sh:77 reads an endpoint token out of
-// the environment and :86 puts it into the child — so a rule forbidding the
+// named single read — lib/adapters/claude.sh:82 reads an endpoint token out of
+// the environment and :91 puts it into the child — so a rule forbidding the
 // read would be stricter than the thing being ported, and would break
 // internal/config/load.go, which resolves XDG_CONFIG_HOME and HOME this way.
-// What stops a named credential reaching a harness is Spec.Audience, which
+// What stops a named credential reaching a harness is NewOSRunner, which
 // refuses it at Run. syscall.Getenv is the same shape and left alone for the
 // same reason.
 //

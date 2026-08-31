@@ -177,9 +177,6 @@ func TestEveryAdapterStripsTheForgeCredentialsAndForeignVendorCredentials(t *tes
 			if !held["PATH"] || !held["HOME"] {
 				t.Error("the child lost a variable nothing asked to strip")
 			}
-			if spec.Audience != exec.AudienceModelFacing {
-				t.Error("the spec is not model-facing")
-			}
 			if spec.Stdin != nil {
 				t.Error("stdin has to be at EOF; the CLIs block on an open one")
 			}

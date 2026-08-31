@@ -21,12 +21,12 @@
 //     working tree of one clone finds it.
 //   - The working-tree capture a rejected resolve attempt is rolled back to.
 //
-// # The audience of every child
+// # The runner of every child
 //
-// Every spec this package builds is exec.AudienceOrchestrator. git is not the
+// A real git child is started through exec.NewOrchestratorRunner. git is not the
 // process the credential boundary exists for — that process is the harness,
 // which reads attacker-controlled text — and git is the one tool here that may
 // legitimately hold a forge credential, because a push over https uses whatever
-// credential helper the environment configures. Git.Run carries the full
+// credential helper the environment configures. Git.New carries the full
 // reasoning.
 package vcs

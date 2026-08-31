@@ -54,6 +54,13 @@ source "$REPO_ROOT/lib/credentials.sh"
 source "$REPO_ROOT/lib/usage.sh"
 # shellcheck source=../lib/github.sh
 source "$REPO_ROOT/lib/github.sh"
+# shellcheck source=../lib/run.sh
+source "$REPO_ROOT/lib/run.sh"
+
+# usage.sh resolves lib/prices.json through ${ROOT:-…}. A capture that sources
+# it without ROOT reads a path that does not exist and every price answer is
+# empty, which looks like agreement and is not.
+export ROOT="$REPO_ROOT"
 
 platform="$(uname -s -r -m)"
 tr_path="$(command -v tr)"
@@ -1628,5 +1635,255 @@ jq -n --argjson captured "$(captured_json)" \
     quarantined_paths:$quarantined,
     sandbox_args:$sandbox_args}' \
   >"$FIXDIR/paths.json"
+
+# --- review and resolve rendering --------------------------------------------
+#
+# Byte-exact comment text the legs print. Frozen as functions, not as a full
+# CLI run, so a port can assert each helper without standing up a pull request.
+# Command substitution still eats trailing newlines, so every body goes through
+# a sentinel byte and the _b64 field is authoritative.
+
+# Sourced helpers in lib/run.sh read these. They look unused in this file.
+export CTX_MIN_FIX_SEVERITY=medium
+export CTX_MAX_PASSES_PER_CYCLE=3
+export CTX_REPO=o/r
+export CTX_PR=42
+
+severity_cases() {
+  local v o
+  for v in high medium low other; do
+    o="$(run_severity_emoji "$v"; printf 'x')"; o="${o%x}"
+    jq -cn --arg n "severity-$v" --arg v "$v" --arg o "$o" '{name:$n, value:$v, out:$o}'
+  done
+}
+
+category_cases() {
+  local v o
+  for v in correctness security performance maintainability testing docs other; do
+    o="$(run_category_emoji "$v"; printf 'x')"; o="${o%x}"
+    jq -cn --arg n "category-$v" --arg v "$v" --arg o "$o" '{name:$n, value:$v, out:$o}'
+  done
+}
+
+same_case() { # name want got
+  local rc=0
+  _same_model "$2" "$3" || rc=$?
+  jq -cn --arg n "$1" --arg a "$2" --arg b "$3" --argjson rc "$rc" \
+    '{name:$n, want:$a, got:$b, rc:$rc}'
+}
+
+same_cases() {
+  # Containment, not equality: opus sits inside the canonical id.
+  same_case "alias-inside-canonical" "opus" "claude-opus-4-5-20251101"
+  same_case "canonical-inside-alias" "claude-opus-4-5-20251101" "opus"
+  same_case "date-pin-inside-family" "claude-opus-4-5" "claude-opus-4-5-20251101"
+  # Two family tokens, neither contains the other.
+  same_case "different-family" "sonnet" "claude-opus-4-5-20251101"
+  same_case "different-family-full" "claude-sonnet-4-5" "claude-opus-4-5-20251101"
+  same_case "case-fold" "OPUS" "claude-opus-4-5-20251101"
+  same_case "identical" "opus" "opus"
+  same_case "empty-want" "" "opus"
+  same_case "empty-got" "opus" ""
+}
+
+elapsed_case() { # name from to
+  local o
+  o="$(_elapsed "$2" "$3"; printf 'x')"; o="${o%x}"
+  jq -cn --arg n "$1" --arg f "$2" --arg t "$3" --arg o "$o" \
+    '{name:$n, from:$f, to:$t, out:$o}'
+}
+
+elapsed_cases() {
+  elapsed_case "twelve-seconds" 100 112
+  elapsed_case "exactly-one-minute" 100 160
+  elapsed_case "zero" 10 10
+  elapsed_case "missing-from" "" 10
+  elapsed_case "negative" 200 100
+}
+
+thousands_case() { # name n
+  local o
+  o="$(_thousands "$2"; printf 'x')"; o="${o%x}"
+  jq -cn --arg n "$1" --arg i "$2" --arg o "$o" '{name:$n, in:$i, out:$o}'
+}
+
+thousands_cases() {
+  thousands_case "five-digits" 41205
+  thousands_case "four-digits" 1000
+  thousands_case "three-digits" 12
+  thousands_case "non-digit" abc
+  thousands_case "empty" ""
+}
+
+pass_label_case() { # name p m
+  local o
+  o="$(_pass_label "$2" "$3"; printf 'x')"; o="${o%x}"
+  jq -cn --arg n "$1" --argjson p "$2" --argjson m "$3" --arg o "$o" \
+    '{name:$n, pass:$p, cap:$m, out:$o}'
+}
+
+pass_label_cases() {
+  pass_label_case "under-cap" 1 3
+  pass_label_case "on-cap" 3 3
+  pass_label_case "past-cap" 4 3
+}
+
+subj_case() { # name subject
+  local rc=0
+  _commit_subject_ok "$2" || rc=$?
+  jq -cn --arg n "$1" --arg s "$2" --argjson rc "$rc" '{name:$n, subject:$s, rc:$rc}'
+}
+
+subj_cases() {
+  subj_case "plain" "fix the thing"
+  subj_case "empty" ""
+  subj_case "newline" $'line\nbreak'
+  subj_case "exactly-100" "$(printf 'a%.0s' {1..100})"
+  subj_case "101-chars" "$(printf 'a%.0s' {1..101})"
+  subj_case "marker-prefix" "<!-- crossrev: x"
+  subj_case "literal-null" "null"
+}
+
+url_path_case() { # name path
+  local o
+  o="$(_url_path "$2"; printf 'x')"; o="${o%x}"
+  jq -cn --arg n "$1" --arg p "$2" --arg o "$o" '{name:$n, path:$p, out:$o}'
+}
+
+url_path_cases() {
+  url_path_case "plain" "src/app.ts"
+  url_path_case "space" "src/a file.ts"
+  url_path_case "closing-paren" "src/a)b.ts"
+  url_path_case "pipe" "src/a|b.ts"
+  url_path_case "slash-kept" "src/nested/x.ts"
+}
+
+label_case() { # name json
+  local o
+  o="$(run_finding_label "$2"; printf 'x')"; o="${o%x}"
+  jq -cn --arg n "$1" --argjson f "$2" --arg o "$o" '{name:$n, finding:$f, out:$o}'
+}
+
+label_cases() {
+  label_case "high-security" '{"severity":"high","category":"security"}'
+  label_case "unknown-both" '{"severity":"?","category":"?"}'
+  label_case "missing-keys" '{}'
+}
+
+actionable_case() { # name json
+  local o
+  o="$(run_actionable "$2"; printf 'x')"; o="${o%x}"
+  jq -cn --arg n "$1" --argjson f "$2" --arg o "$o" '{name:$n, findings:$f, out:$o}'
+}
+
+actionable_cases() {
+  # One above the bar, one below, one pre-existing above. The count is 1, not 2
+  # and not 3 — that is the case that tells the three filters apart.
+  actionable_case "mixed" '[{"severity":"high","pre_existing":false},{"severity":"low","pre_existing":false},{"severity":"high","pre_existing":true}]'
+  actionable_case "empty" '[]'
+  actionable_case "all-below" '[{"severity":"low","pre_existing":false}]'
+}
+
+comment_case() { # name finding_json pass harness model
+  local o
+  o="$(_review_comment_body "$2" "$3" "$4" "$5"; printf 'x')"; o="${o%x}"
+  jq -cn --arg n "$1" --argjson f "$2" --argjson p "$3" --arg h "$4" --arg m "$5" \
+        --arg tb "$(b64 "$o")" \
+    '{name:$n, finding:$f, pass:$p, harness:$h, model:$m, body_b64:$tb}'
+}
+
+comment_cases() {
+  comment_case "pre-existing" \
+    '{"id":"aaaaaaaaaaaaaaaa","path":"app.ts","line":2,"side":"RIGHT","severity":"high","category":"security","pre_existing":true,"title":"Token compared with ==","why":"A timing side channel","fix":"Use timingSafeEqual"}' \
+    1 claude opus
+  # Empty model: the suffix is "reviewed by claude." not "reviewed by claude ()."
+  comment_case "above-threshold-no-model" \
+    '{"id":"aaaaaaaaaaaaaaaa","path":"app.ts","line":2,"side":"RIGHT","severity":"high","category":"security","pre_existing":false,"title":"Token compared with ==","why":"A timing side channel","fix":"Use timingSafeEqual"}' \
+    1 claude ""
+  comment_case "below-threshold" \
+    '{"id":"aaaaaaaaaaaaaaaa","path":"app.ts","line":1,"side":"RIGHT","severity":"low","category":"maintainability","pre_existing":false,"title":"Third copy","why":"Drift","fix":"Extract one"}' \
+    1 claude opus
+  # Space after the closing bracket is the only thing that stops a title
+  # beginning with ( from becoming a markdown link.
+  comment_case "title-starts-with-paren" \
+    '{"id":"aaaaaaaaaaaaaaaa","path":"app.ts","line":1,"side":"RIGHT","severity":"high","category":"security","pre_existing":false,"title":"(leading paren) title","why":"w","fix":"f"}' \
+    1 claude opus
+}
+
+reply_case() { # name disposition_json tracked pass harness model
+  local o
+  o="$(_resolve_reply_body "$2" "$3" "$4" "$5" "$6"; printf 'x')"; o="${o%x}"
+  jq -cn --arg n "$1" --argjson d "$2" --arg t "$3" --argjson p "$4" --arg h "$5" --arg m "$6" \
+        --arg tb "$(b64 "$o")" \
+    '{name:$n, disposition:$d, tracked:$t, pass:$p, harness:$h, model:$m, body_b64:$tb}'
+}
+
+reply_cases() {
+  reply_case "fixed" '{"finding_id":"aaaaaaaaaaaaaaaa","resolution":"fixed","reply":"Replaced with a constant-time compare."}' "" 1 claude sonnet
+  reply_case "skipped" '{"finding_id":"aaaaaaaaaaaaaaaa","resolution":"skipped","reply":"Out of scope."}' "" 1 claude ""
+  reply_case "deferred" '{"finding_id":"aaaaaaaaaaaaaaaa","resolution":"deferred","reply":"Needs a follow-up."}' "" 1 claude ""
+  reply_case "disputed-tracked" '{"finding_id":"aaaaaaaaaaaaaaaa","resolution":"disputed","reply":"Not a bug."}' "owner/repo#99" 2 agy ""
+  reply_case "escalated" '{"finding_id":"aaaaaaaaaaaaaaaa","resolution":"escalated","reply":"Policy call."}' "" 1 claude ""
+  reply_case "unknown-word" '{"finding_id":"aaaaaaaaaaaaaaaa","resolution":"other","reply":"Something else."}' "" 1 claude ""
+  # The orchestrator lead replaces a model lead, it does not stack.
+  reply_case "model-already-led-fixed" '{"finding_id":"aaaaaaaaaaaaaaaa","resolution":"skipped","reply":"**Fixed.** already had the lead"}' "" 1 claude ""
+}
+
+summary_case() { # name findings_json marker_json
+  local o
+  o="$(_review_summary_body "$2" "$3"; printf 'x')"; o="${o%x}"
+  jq -cn --arg n "$1" --argjson f "$2" --argjson m "$3" --arg tb "$(b64 "$o")" \
+    '{name:$n, findings:$f, marker:$m, body_b64:$tb}'
+}
+
+summary_cases() {
+  # Alias containment: requested opus, reported canonical. Must not warn.
+  summary_case "converged-alias" '[]' \
+    '{"verdict":"converged","blocked_reason":"","pass":2,"head_sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","unanchored":0,"harness":"claude","model":"opus","model_reported":"claude-opus-4-5-20251101","effort":"high","ts":100,"done_ts":160,"tokens":41205}'
+  # A real substitution: requested sonnet, reported opus. Must warn.
+  summary_case "issues-substitution" '[]' \
+    '{"verdict":"issues-remain","blocked_reason":"","pass":1,"head_sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","unanchored":0,"harness":"claude","model":"sonnet","model_reported":"claude-opus-4-5-20251101","effort":"high","ts":100,"done_ts":112,"tokens":12}'
+  summary_case "blocked" '[]' \
+    '{"verdict":"blocked","blocked_reason":"the diff would not fetch","pass":1,"head_sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","unanchored":0,"harness":"claude","model":"opus","model_reported":"opus","effort":"high","ts":1,"done_ts":2,"tokens":1}'
+  summary_case "one-unanchored" '[]' \
+    '{"verdict":"issues-remain","blocked_reason":"","pass":1,"head_sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","unanchored":1,"harness":"claude","model":"opus","model_reported":"opus","effort":"high","ts":1,"done_ts":2,"tokens":1}'
+  summary_case "two-unanchored" '[]' \
+    '{"verdict":"issues-remain","blocked_reason":"","pass":1,"head_sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","unanchored":2,"harness":"claude","model":"opus","model_reported":"opus","effort":"high","ts":1,"done_ts":2,"tokens":1}'
+}
+
+jq -n --argjson captured "$(captured_json)" \
+  --argjson severity "$(severity_cases | jq -s .)" \
+  --argjson category "$(category_cases | jq -s .)" \
+  --argjson same_model "$(same_cases | jq -s .)" \
+  --argjson elapsed "$(elapsed_cases | jq -s .)" \
+  --argjson thousands "$(thousands_cases | jq -s .)" \
+  --argjson pass_label "$(pass_label_cases | jq -s .)" \
+  --argjson commit_subject "$(subj_cases | jq -s .)" \
+  --argjson url_path "$(url_path_cases | jq -s .)" \
+  --argjson finding_label "$(label_cases | jq -s .)" \
+  --argjson actionable "$(actionable_cases | jq -s .)" \
+  --argjson comments "$(comment_cases | jq -s .)" \
+  --argjson replies "$(reply_cases | jq -s .)" \
+  --argjson summaries "$(summary_cases | jq -s .)" \
+  '{captured:$captured,
+    function:"run_severity_emoji, run_category_emoji, run_finding_label, run_actionable, _same_model, _elapsed, _thousands, _pass_label, _commit_subject_ok, _url_path, _review_comment_body, _resolve_reply_body, _review_summary_body",
+    min_fix_severity:"medium",
+    max_passes_per_cycle:3,
+    repo:"o/r",
+    pr:42,
+    severity:$severity,
+    category:$category,
+    same_model:$same_model,
+    elapsed:$elapsed,
+    thousands:$thousands,
+    pass_label:$pass_label,
+    commit_subject:$commit_subject,
+    url_path:$url_path,
+    finding_label:$finding_label,
+    actionable:$actionable,
+    comments:$comments,
+    replies:$replies,
+    summaries:$summaries}' \
+  >"$FIXDIR/presentation.json"
 
 printf 'parity vectors written to %s\n' "$FIXDIR"

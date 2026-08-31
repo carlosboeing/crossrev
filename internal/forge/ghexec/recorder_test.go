@@ -11,8 +11,8 @@ import (
 )
 
 // recorder is a Runner that starts nothing and remembers everything it was
-// handed, so a test asserts on the argument array, the environment and the
-// audience without a process.
+// handed, so a test asserts on the argument array and the environment
+// without a process.
 type recorder struct {
 	specs []exec.Spec
 	// results answers the calls in order. A call past the end answers as a
