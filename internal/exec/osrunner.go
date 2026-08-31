@@ -17,13 +17,14 @@ import (
 // covers the two ways Wait can hang once the child's own life is over — an
 // orphan holding the pipes open, and a process that ignored the kill. The Bash
 // adapters cannot hit either, because they redirect to files
-// (lib/adapters/claude.sh:106) and a file needs no reader.
+// (lib/adapters/claude.sh:111) and a file needs no reader.
 // A var rather than a const only so the abandoned-pipe test can shrink it;
 // nothing outside this package can reach it, and nothing changes it at run time.
 var pipeDrainGrace = 10 * time.Second
 
-// OSRunner starts real processes. It is the only place in the codebase that
-// calls os/exec.
+// OSRunner starts real processes. Production process start is confined to
+// this package by the process-start AST walk in internal/archtest, which
+// does not cover syscall.Syscall.
 //
 // orchestrator is the credential decision. Unexported, so a Spec cannot carry
 // it between packages and a fake Runner cannot copy it off one Spec onto
@@ -34,7 +35,8 @@ type OSRunner struct {
 	orchestrator bool
 }
 
-// NewOSRunner returns a model-facing runner. It refuses a forge credential.
+// NewOSRunner returns a model-facing runner. It refuses a forge credential
+// in Spec.Env or Spec.Args.
 func NewOSRunner() *OSRunner { return &OSRunner{} }
 
 // NewOrchestratorRunner returns a runner that may start a child holding a
@@ -77,6 +79,14 @@ func (r *OSRunner) Run(ctx context.Context, spec Spec) Result {
 				Err:      &CredentialError{Name: name, Path: spec.Path},
 			}
 		}
+		if name, found := forgeCredentialIn(spec.Args); found {
+			return Result{
+				ExitCode: -1,
+				Stdout:   []byte{},
+				Stderr:   []byte{},
+				Err:      &CredentialError{Name: name, Path: spec.Path},
+			}
+		}
 	}
 
 	if spec.Timeout > 0 {
@@ -103,7 +113,7 @@ func (r *OSRunner) Run(ctx context.Context, spec Spec) Result {
 	// nil Stdin, which would answer the same way, but saying it here is what
 	// keeps the rule readable at the one place it matters. One difference from
 	// Bash worth naming: the adapters give the child the literal /dev/null
-	// (lib/adapters/claude.sh:106) and this gives it a pipe closed at once. A
+	// (lib/adapters/claude.sh:111) and this gives it a pipe closed at once. A
 	// child cannot tell the two apart — both read EOF on the first call — but
 	// they are not the same file.
 	cmd.Stdin = bytes.NewReader(spec.Stdin)

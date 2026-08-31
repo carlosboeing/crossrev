@@ -82,6 +82,28 @@ func TestNewPanicsOnANilRunner(t *testing.T) {
 	}
 }
 
+func TestNewWithNilEnvDoesNotPassTheParentEnvironment(t *testing.T) {
+	t.Setenv("CROSSREV_PARENT_ONLY", "parent")
+	runner := &recorder{}
+	git := vcs.New(runner, nil)
+
+	if _, err := git.At("").Run(context.Background(), "--version"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(runner.specs) != 1 {
+		t.Fatalf("specs = %d, want 1", len(runner.specs))
+	}
+	spec := runner.specs[0]
+	if len(spec.Env) != 0 {
+		t.Errorf("Env = %q, want nil or empty, not the parent environment", spec.Env)
+	}
+	for _, entry := range spec.Env {
+		if strings.HasPrefix(entry, "CROSSREV_PARENT_ONLY=") {
+			t.Errorf("parent environment reached the spec: %q", entry)
+		}
+	}
+}
+
 // ExtraEnv is appended rather than replacing the base, so GIT_INDEX_FILE can
 // reach one call without the package holding a mutable environment.
 func TestExtraEnvIsAppended(t *testing.T) {

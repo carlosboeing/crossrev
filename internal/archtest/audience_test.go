@@ -3,6 +3,8 @@ package archtest_test
 import (
 	"fmt"
 	"go/ast"
+	"go/parser"
+	"go/token"
 	"go/types"
 	"path/filepath"
 	"sort"
@@ -50,10 +52,13 @@ const orchestratorRunnerName = "NewOrchestratorRunner"
 // hold a GitHub client and a process start in one type; if that type is
 // given the orchestrator runner, it can start a model-facing child with a
 // forge credential. unsafe and reflection can still write the unexported
-// bool on OSRunner. The name check catches an accident that writes
-// NewOrchestratorRunner in the wrong package. Code review catches a
-// hostile commit. Run's refusal is the guard that executes: NewOSRunner
-// still refuses a forge credential, whatever wrapper holds it.
+// bool on OSRunner. The constructor scan uses default build tags, so a
+// file excluded by those tags is not read. testdata, race/windows tags,
+// /proc assembly and syscall.Syscall are not closed here. The name check
+// catches an accident that writes NewOrchestratorRunner in the wrong
+// package. Code review catches a hostile commit. Run's refusal is the
+// guard that executes: NewOSRunner still refuses a forge credential,
+// whatever wrapper holds it.
 //
 // # What this rule is for, stated exactly
 //
@@ -66,19 +71,16 @@ func TestOrchestratorRunnerIsConfined(t *testing.T) {
 	root := findRepoRoot(t)
 	pkgs := loadModulePackages(t)
 
-	type violation struct {
-		where string
-		what  string
-	}
-	var found []violation
+	var found []orchestratorRunnerViolation
 	permittedReferences := 0
 
 	record := func(pos string, what string, dir string) {
-		if orchestratorRunnerPermitted(dir) {
+		if permitted, v := recordOrchestratorRunner(pos, what, dir); permitted {
 			permittedReferences++
 			return
+		} else if v != nil {
+			found = append(found, *v)
 		}
-		found = append(found, violation{where: pos, what: what})
 	}
 
 	for _, pkg := range pkgs {
@@ -159,6 +161,110 @@ func namesNewOrchestratorRunner(obj types.Object) bool {
 // is the process ADR 0001 is about.
 func orchestratorRunnerPermitted(dir string) bool {
 	return dir == "internal/exec" || dir == "internal/forge/ghexec" || dir == "internal/vcs"
+}
+
+type orchestratorRunnerViolation struct {
+	where string
+	what  string
+}
+
+// recordOrchestratorRunner is the decision both the live scan and the
+// fixture table use. Exact directory equality: vendored/internal/exec is
+// not internal/exec.
+func recordOrchestratorRunner(pos, what, dir string) (permitted bool, v *orchestratorRunnerViolation) {
+	if orchestratorRunnerPermitted(dir) {
+		return true, nil
+	}
+	return false, &orchestratorRunnerViolation{where: pos, what: what}
+}
+
+func auditOrchestratorRunnerSource(relSlash, source string) (violations []string, permitted bool, err error) {
+	fset := token.NewFileSet()
+	node, err := parser.ParseFile(fset, relSlash, source, 0)
+	if err != nil {
+		return nil, false, err
+	}
+	dir := filepath.ToSlash(filepath.Dir(relSlash))
+	ast.Inspect(node, func(n ast.Node) bool {
+		var pos token.Pos
+		switch x := n.(type) {
+		case *ast.SelectorExpr:
+			if x.Sel == nil || x.Sel.Name != orchestratorRunnerName {
+				return true
+			}
+			pos = x.Sel.Pos()
+		case *ast.FuncDecl:
+			if x.Name == nil || x.Name.Name != orchestratorRunnerName {
+				return true
+			}
+			pos = x.Name.Pos()
+		default:
+			return true
+		}
+		where := fmt.Sprintf("%s:%d", relSlash, fset.Position(pos).Line)
+		if ok, v := recordOrchestratorRunner(where, "names exec."+orchestratorRunnerName, dir); ok {
+			permitted = true
+		} else if v != nil {
+			violations = append(violations, v.where+" "+v.what)
+		}
+		return true
+	})
+	return violations, permitted, nil
+}
+
+func TestOrchestratorRunnerAuditVerdict(t *testing.T) {
+	tests := []struct {
+		name          string
+		file          string
+		source        string
+		wantViolation bool
+		wantPermitted bool
+	}{
+		{
+			name:          "names the constructor in internal/harness",
+			file:          "internal/harness/adapter.go",
+			source:        "package harness\nimport crexec \"github.com/carlosboeing/crossrev/internal/exec\"\nvar v = crexec.NewOrchestratorRunner\n",
+			wantViolation: true,
+		},
+		{
+			name:          "a directory whose path merely ends with the permitted one",
+			file:          "vendored/internal/exec/runner.go",
+			source:        "package exec\nimport crexec \"github.com/carlosboeing/crossrev/internal/exec\"\nvar v = crexec.NewOrchestratorRunner\n",
+			wantViolation: true,
+		},
+		{
+			name:          "the permitted exec package names it",
+			file:          "internal/exec/osrunner.go",
+			source:        "package exec\nfunc NewOrchestratorRunner() {}\n",
+			wantPermitted: true,
+		},
+		{
+			name:          "the permitted vcs package names it",
+			file:          "internal/vcs/git.go",
+			source:        "package vcs\nimport crexec \"github.com/carlosboeing/crossrev/internal/exec\"\nvar v = crexec.NewOrchestratorRunner\n",
+			wantPermitted: true,
+		},
+		{
+			name:   "internal/harness without the constructor",
+			file:   "internal/harness/adapter.go",
+			source: "package harness\nimport crexec \"github.com/carlosboeing/crossrev/internal/exec\"\nvar v = crexec.NewOSRunner\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			violations, permitted, err := auditOrchestratorRunnerSource(tt.file, tt.source)
+			if err != nil {
+				t.Fatalf("parse fixture: %v", err)
+			}
+			if got := len(violations) > 0; got != tt.wantViolation {
+				t.Fatalf("violations = %v, want a violation: %t", violations, tt.wantViolation)
+			}
+			if permitted != tt.wantPermitted {
+				t.Errorf("permitted = %t, want %t", permitted, tt.wantPermitted)
+			}
+		})
+	}
 }
 
 func TestOrchestratorRunnerPermissionCoversTheThreeDirectories(t *testing.T) {

@@ -10,7 +10,7 @@ import (
 // spawned still held the captured streams open, so the capture was cut short.
 //
 // It has no Bash counterpart, because the adapters redirect to files
-// (lib/adapters/claude.sh:106) and a file needs no reader — an orphan writing
+// (lib/adapters/claude.sh:111) and a file needs no reader — an orphan writing
 // into it after the parent exits costs the shell nothing. A pipe does need one,
 // so the Go runner stops waiting rather than hanging a leg forever.
 var ErrPipesAbandoned = errors.New("the child exited but left its output streams held open")

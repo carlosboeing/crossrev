@@ -3,6 +3,7 @@ package exec_test
 import (
 	"errors"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -100,6 +101,127 @@ func TestRunReadsTheRunnerInstance(t *testing.T) {
 
 	if result := exec.NewOSRunner().Run(t.Context(), spec); !errors.Is(result.Err, exec.ErrForgeCredential) {
 		t.Fatalf("a later NewOSRunner started the child, so Run is not reading the instance: %v", result.Err)
+	}
+}
+
+// env(1) puts NAME=VALUE arguments into the child environment before it
+// execs the program. Spec.Env is not the only place a forge credential
+// can travel.
+func TestNewOSRunnerRefusesAForgeCredentialInArgs(t *testing.T) {
+	const envBinary = "/usr/bin/env"
+	if _, err := os.Stat(envBinary); err != nil {
+		t.Skipf("%s is not on this host: %v", envBinary, err)
+	}
+
+	spec := exec.Spec{
+		Path: envBinary,
+		Args: []string{"GH_TOKEN=leaked-via-argv", envBinary},
+		Env:  []string{"PATH=/usr/bin:/bin"},
+	}
+	result := exec.NewOSRunner().Run(t.Context(), spec)
+	if !errors.Is(result.Err, exec.ErrForgeCredential) {
+		t.Fatalf("Err = %v, want a forge-credential refusal; stdout %q", result.Err, result.Stdout)
+	}
+	var refused *exec.CredentialError
+	if !errors.As(result.Err, &refused) {
+		t.Fatalf("Err = %v (%T), want a *exec.CredentialError", result.Err, result.Err)
+	}
+	if refused.Name != "GH_TOKEN" {
+		t.Errorf("CredentialError.Name = %q, want GH_TOKEN", refused.Name)
+	}
+	if result.ExitCode != -1 {
+		t.Errorf("ExitCode = %d, want -1 for a child that never started", result.ExitCode)
+	}
+	if len(result.Stdout) != 0 {
+		t.Errorf("a refused Spec produced output, so a child ran: %q", result.Stdout)
+	}
+}
+
+func TestNewOSRunnerRefusesAnEmptyForgeCredentialInArgs(t *testing.T) {
+	const envBinary = "/usr/bin/env"
+	if _, err := os.Stat(envBinary); err != nil {
+		t.Skipf("%s is not on this host: %v", envBinary, err)
+	}
+
+	spec := exec.Spec{
+		Path: envBinary,
+		Args: []string{"GH_TOKEN=", envBinary},
+		Env:  []string{"PATH=/usr/bin:/bin"},
+	}
+	result := exec.NewOSRunner().Run(t.Context(), spec)
+	if !errors.Is(result.Err, exec.ErrForgeCredential) {
+		t.Fatalf("Err = %v, want a forge-credential refusal; stdout %q", result.Err, result.Stdout)
+	}
+}
+
+func TestNewOSRunnerAllowsEnvWithoutAForgeCredentialInArgs(t *testing.T) {
+	const envBinary = "/usr/bin/env"
+	if _, err := os.Stat(envBinary); err != nil {
+		t.Skipf("%s is not on this host: %v", envBinary, err)
+	}
+
+	spec := exec.Spec{
+		Path: envBinary,
+		Env:  []string{"PATH=/usr/bin:/bin"},
+	}
+	result := exec.NewOSRunner().Run(t.Context(), spec)
+	if result.Err != nil {
+		t.Fatalf("env with no credential in Args was refused: %v", result.Err)
+	}
+}
+
+func TestNewOSRunnerRefusesACredentialAmongOtherEnvEntries(t *testing.T) {
+	spec := helperSpec("lookup", "GH_TOKEN")
+	spec.Env = []string{"PATH=/usr/bin", "GH_TOKEN=secret", "HOME=/tmp"}
+	result := exec.NewOSRunner().Run(t.Context(), spec)
+	if !errors.Is(result.Err, exec.ErrForgeCredential) {
+		t.Fatalf("Err = %v, want a forge-credential refusal", result.Err)
+	}
+	var refused *exec.CredentialError
+	if !errors.As(result.Err, &refused) {
+		t.Fatalf("Err = %v (%T), want a *exec.CredentialError", result.Err, result.Err)
+	}
+	if refused.Name != "GH_TOKEN" {
+		t.Errorf("CredentialError.Name = %q, want GH_TOKEN", refused.Name)
+	}
+}
+
+func TestNewOSRunnerRefusesAnEmptyForgeCredentialInEnv(t *testing.T) {
+	spec := helperSpec("exit", "0")
+	spec.Env = append(spec.Env, "GH_TOKEN=")
+	result := exec.NewOSRunner().Run(t.Context(), spec)
+	if !errors.Is(result.Err, exec.ErrForgeCredential) {
+		t.Fatalf("Err = %v, want a forge-credential refusal", result.Err)
+	}
+}
+
+func TestNewOSRunnerDoesNotStartAChildOnRefusal(t *testing.T) {
+	dir := t.TempDir()
+	spec := helperSpec("touch", "started")
+	spec.Dir = dir
+	spec.Env = append(spec.Env, "GH_TOKEN=secret")
+
+	result := exec.NewOSRunner().Run(t.Context(), spec)
+	if !errors.Is(result.Err, exec.ErrForgeCredential) {
+		t.Fatalf("Err = %v, want a forge-credential refusal", result.Err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "started")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("the sentinel exists, so the child started before the refusal")
+	}
+}
+
+func TestNewOSRunnerDoesNotStartAChildWhenTheCredentialIsInArgs(t *testing.T) {
+	dir := t.TempDir()
+	spec := helperSpec("touch", "started")
+	spec.Dir = dir
+	spec.Args = append(spec.Args, "GH_TOKEN=leaked-via-argv")
+
+	result := exec.NewOSRunner().Run(t.Context(), spec)
+	if !errors.Is(result.Err, exec.ErrForgeCredential) {
+		t.Fatalf("Err = %v, want a forge-credential refusal", result.Err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "started")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("the sentinel exists, so the child started before the refusal")
 	}
 }
 

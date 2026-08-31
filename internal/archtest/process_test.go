@@ -11,14 +11,15 @@ import (
 	"testing"
 )
 
-// Starting a child process is internal/exec's job, and nothing else's.
+// Starting a child process is internal/exec's job in production source. The
+// process-start AST walk confines os/exec, os.StartProcess and the named
+// syscall start helpers to that package. It does not cover syscall.Syscall.
 //
 // That package decides what environment a child receives (Spec.Env, set on
 // every path so os/exec cannot inherit this process's own), whether a forge
 // credential may travel with it (the runner instance), how its output is
 // bounded, and what happens on cancellation. Every one of those properties is
-// bypassed by
-// four lines of os/exec somewhere else — a review built exactly that in
+// bypassed by four lines of os/exec somewhere else — a review built exactly that in
 // internal/harness, and the child received the whole parent environment with
 // the suite still green.
 //

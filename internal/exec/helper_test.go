@@ -166,6 +166,17 @@ func TestHelperProcess(t *testing.T) {
 		}
 		time.Sleep(time.Duration(ms) * time.Millisecond)
 
+	case "touch":
+		// Writes a sentinel in the working directory so a test can tell a
+		// refused Spec from a child that ran and was then labelled a refusal.
+		if len(rest) == 0 {
+			os.Exit(2)
+		}
+		if err := os.WriteFile(rest[0], []byte("started\n"), 0o600); err != nil {
+			fmt.Fprintln(os.Stderr, "helper:", err)
+			os.Exit(2)
+		}
+
 	default:
 		fmt.Fprintln(os.Stderr, "helper: unknown command", command)
 		os.Exit(2)

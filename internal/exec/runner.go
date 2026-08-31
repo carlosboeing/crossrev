@@ -15,7 +15,7 @@ type Runner interface {
 	// into the captured streams.
 	//
 	// It returns no error alongside the Result on purpose. A non-zero exit is
-	// ordinary: lib/adapters/claude.sh:109 reads rc and turns it into a reported
+	// ordinary: lib/adapters/claude.sh:112 reads rc and turns it into a reported
 	// harness failure rather than a crash, so the exit status is data. Result.Err
 	// is reserved for the cases where the child produced no status at all — it
 	// never started, or the context ended it.

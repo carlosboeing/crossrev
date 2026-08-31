@@ -14,7 +14,7 @@ import (
 //
 //	( cd "$workdir" && "${run[@]}" ... ) >"$out" 2>"$err" </dev/null
 //
-// in lib/adapters/claude.sh:106, and the same line appears in codex.sh:90,
+// in lib/adapters/claude.sh:111, and the same line appears in codex.sh:90,
 // agy.sh:89 and opencode.sh:182. There is no timeout in it and no head, tail or
 // truncation of either capture file. A default cap here would silently cut a
 // model payload that Bash delivered whole, and a default timeout would fail a
@@ -55,7 +55,7 @@ type Spec struct {
 	// Stdin is the input handed to the child. Nil means the child reads EOF at
 	// once, which is the `</dev/null` every adapter redirects. It is required
 	// rather than defensive: lib/adapters/opencode.sh:47 and
-	// lib/adapters/codex.sh:87 both record the CLI blocking indefinitely on an
+	// lib/adapters/codex.sh:92-94 both record the CLI blocking indefinitely on an
 	// open stdin, with no output on either stream.
 	Stdin []byte
 
@@ -77,7 +77,7 @@ type Spec struct {
 // wrote them interleaved, and nothing in either buffer records where one
 // stream's line sat relative to the other's.
 //
-// That is not a cosmetic loss. lib/github.sh:510 captures a failing push with
+// That is not a cosmetic loss. lib/github.sh:516 captures a failing push with
 // `2>&1` and hands the text to _gh_git_tail (lib/github.sh:404-410), which
 // keeps the last five non-blank lines — a selection by position. With a
 // pre-push hook writing to both streams, git sends the hook's stdout to git's
@@ -85,7 +85,7 @@ type Spec struct {
 // to stderr; concatenating stdout ahead of stderr then pushes every stdout line
 // out of the five-line window, so the two implementations keep a different SET
 // of lines rather than the same lines in a different order. That text is
-// published: lib/github.sh:513 makes it the ui_die reason, lib/ui.sh:115 stores
+// published: lib/github.sh:519 makes it the ui_die reason, lib/ui.sh:115 stores
 // it, and lib/run.sh:144-146 writes it into a pull request comment.
 type Streams int
 
@@ -140,10 +140,12 @@ var forgeCredentialNames = []string{
 // binary, and shortening this one would widen the boundary everywhere at once.
 func ForgeCredentialNames() []string { return slices.Clone(forgeCredentialNames) }
 
-// forgeCredentialIn returns the first forge credential named in env, and whether
-// there was one. It reads names only; the value never leaves this function.
-func forgeCredentialIn(env []string) (string, bool) {
-	for _, entry := range env {
+// forgeCredentialIn returns the first forge credential named in entries, and
+// whether there was one. Entries are NAME=VALUE, as Spec.Env and as the
+// NAME=VALUE arguments env(1) copies into the child environment. It reads
+// names only; the value never leaves this function.
+func forgeCredentialIn(entries []string) (string, bool) {
+	for _, entry := range entries {
 		name, _, found := strings.Cut(entry, "=")
 		if !found {
 			// An entry with no separator names nothing. Skipping it is safe:

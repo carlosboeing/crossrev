@@ -40,9 +40,9 @@ func TestStreamsSeparateIsTheZeroValue(t *testing.T) {
 // The alternation is the evidence. Two pipes are drained by two goroutines and
 // their relative order is whatever the scheduler decides, so exact alternation
 // over many writes is a thing only one pipe can produce. The shell gets one
-// stream the same way, at the descriptor: `2>&1` at lib/github.sh:481 for a
-// commit, lib/github.sh:510 for a push and lib/run.sh:1891 for a worktree.
-// The adapters are the other case and are left alone — lib/adapters/claude.sh:106
+// stream the same way, at the descriptor: `2>&1` at lib/github.sh:487 for a
+// commit, lib/github.sh:516 for a push and lib/run.sh:1891 for a worktree.
+// The adapters are the other case and are left alone — lib/adapters/claude.sh:111
 // sends the two streams to two files, and Spec's zero value is what matches it.
 func TestStreamsCombinedInterleavesOnOnePipe(t *testing.T) {
 	const pairs = 200

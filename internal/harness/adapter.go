@@ -6,10 +6,11 @@
 // The Bash adapters do both: they assemble `env -u … <cli> …` and then run it
 // inside a subshell (lib/adapters/claude.sh:111). Here the two halves are Spec
 // and Envelope, with internal/exec's Runner in between. That split is not
-// tidiness. internal/archtest forbids os/exec outside internal/exec, so an
-// adapter physically cannot start anything; and every property exec.Spec
-// carries — the exact environment, the closed stdin — is decided in one place
-// rather than five.
+// tidiness. Adapters build a Spec and start nothing themselves. Production
+// process start is confined to internal/exec by the process-start AST walk,
+// which does not cover syscall.Syscall. Every property exec.Spec carries —
+// the exact environment, the closed stdin — is decided in one place rather
+// than five.
 //
 // # Every adapter starts a model-facing process
 //
