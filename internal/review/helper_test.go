@@ -207,6 +207,7 @@ type fakeForge struct {
 	editIDs        []int64
 	labelsAdded    []string
 	labelsRemoved  []string
+	labelAddErr    error
 	threads        []forge.ReviewThread
 	diff           []byte
 	repoComments   []forge.IssueComment
@@ -360,6 +361,9 @@ func (f *fakeForge) IssueCreate(context.Context, core.Slug, string, string, []st
 func (f *fakeForge) IssueCommentCreate(context.Context, core.Slug, int, string) {}
 
 func (f *fakeForge) PullRequestLabelAdd(_ context.Context, _ core.Slug, _ int, label string) error {
+	if f.labelAddErr != nil {
+		return f.labelAddErr
+	}
 	f.labelsAdded = append(f.labelsAdded, label)
 	f.ops = append(f.ops, "label-add")
 	return nil

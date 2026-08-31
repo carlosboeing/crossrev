@@ -282,3 +282,25 @@ func TestPublishAttachesThreadIDsBeforeTheSummary(t *testing.T) {
 		}
 	}
 }
+
+func TestPublishLabelWarningContainsFullText(t *testing.T) {
+	e := newEnv(t)
+	writeAppGo(t, e.dir)
+	e.forge.labelAddErr = os.ErrPermission
+	e.runner.script = []exec.Result{{ExitCode: 0, Stdout: claudeStdout(issuesPayload(twoFindings))}}
+	got := runLeg(t, e, e.request(t))
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
+	wantWarning := "could not apply the label 'crossrev/pass-1' to acme/widget#42\n   Locally that is cosmetic, because this process drives both legs itself. In automated mode it would stall the chain, which is what `crossrev init` creates the labels for."
+	found := false
+	for _, msg := range got.Messages {
+		if msg == wantWarning {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("messages = %q, want warning %q", got.Messages, wantWarning)
+	}
+}

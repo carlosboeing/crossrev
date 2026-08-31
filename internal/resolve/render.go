@@ -485,9 +485,9 @@ func runDetails(m prstate.Marker, leg string) string {
 	b.WriteString("| Leg | Agent | Duration | Tokens | Cached | Est. cost |\n|---|---|---|---|---|---|\n")
 	fmt.Fprintf(&b, "| %s | %s | %s | %s | %s | %s |\n\n",
 		leg, agent, elapsed(m.TS, m.DoneTS.Value()), tokens, cached, cost)
-	foot := strings.TrimSpace(gaps + " " + harness.Footnote(costSource, billing))
+	var foot string
 	if gaps != "" {
-		foot = strings.TrimSpace(gaps + " " + harness.Footnote(costSource, billing))
+		foot = gaps + " " + harness.Footnote(costSource, billing)
 	} else {
 		foot = harness.Footnote(costSource, billing)
 	}

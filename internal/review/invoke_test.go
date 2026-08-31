@@ -263,6 +263,31 @@ func TestInvokeRedriveEditsTheClaim(t *testing.T) {
 	}
 }
 
+func TestInvokeRecordsEffortReportedNullWhenAbsent(t *testing.T) {
+	e := newEnv(t)
+	got := runLeg(t, e, e.request(t))
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
+	raw, err := got.Marker.MarshalJSON()
+	if err != nil {
+		t.Fatalf("MarshalJSON: %v", err)
+	}
+	if !strings.Contains(string(raw), `"effort_reported":null`) {
+		t.Errorf("marker JSON = %s, want effort_reported:null", string(raw))
+	}
+	found := false
+	for _, body := range e.forge.edits {
+		if strings.Contains(body, `"effort_reported":null`) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("claim edits = %v, want one containing \"effort_reported\":null", e.forge.edits)
+	}
+}
+
 func envHas(env []string, name string) bool {
 	prefix := name + "="
 	for _, entry := range env {

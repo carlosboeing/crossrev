@@ -62,5 +62,12 @@ func (l *Leg) addLabel(ctx context.Context, loaded Context, pr int, label string
 			Action: "The loop is label-driven, so this is fatal rather than cosmetic. Check the token's issues permission and GitHub's availability, then retry.",
 		}
 	}
-	return fmt.Sprintf("could not apply the label '%s' to %s#%d", label, loaded.Repo, pr), nil
+	// The guidance is joined to the condition with ui.Warn's own newline and
+	// three-space indent, because addLabel answers one string and ui.Warn takes
+	// two. Bash calls `ui_warn "$1" "$2"` here (lib/run.sh:326-327) and prints
+	// exactly these bytes. Nothing outside this package reads Result.Messages
+	// yet, so when Phase 4 wires a consumer, split this back into a pair and
+	// let ui.Warn do the joining. Until then a change to ui.Warn's indent
+	// diverges this line silently.
+	return fmt.Sprintf("could not apply the label '%s' to %s#%d\n   Locally that is cosmetic, because this process drives both legs itself. In automated mode it would stall the chain, which is what `crossrev init` creates the labels for.", label, loaded.Repo, pr), nil
 }

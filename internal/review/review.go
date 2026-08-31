@@ -165,6 +165,8 @@ func (l *Leg) Run(ctx context.Context, req Request) Result {
 		}
 		if envelope.EffortReported != nil && *envelope.EffortReported != "" {
 			marker.EffortReported = prstate.Some(*envelope.EffortReported)
+		} else {
+			marker.EffortReported = prstate.Null[string]()
 		}
 		l.attachUsage(&marker, envelope, settings)
 		out.Marker = marker

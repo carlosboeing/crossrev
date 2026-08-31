@@ -3,7 +3,6 @@ package review
 import (
 	"encoding/json"
 	"fmt"
-	"net/url"
 	"strconv"
 	"strings"
 
@@ -143,9 +142,33 @@ func Thousands(n string) string {
 func URLPath(path string) string {
 	parts := strings.Split(path, "/")
 	for i, p := range parts {
-		parts[i] = url.PathEscape(p)
+		parts[i] = encodeURI(p)
 	}
 	return strings.Join(parts, "/")
+}
+
+func encodeURI(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if isURIUnreserved(c) {
+			b.WriteByte(c)
+			continue
+		}
+		fmt.Fprintf(&b, "%%%02X", c)
+	}
+	return b.String()
+}
+
+func isURIUnreserved(c byte) bool {
+	switch {
+	case c >= 'A' && c <= 'Z', c >= 'a' && c <= 'z', c >= '0' && c <= '9':
+		return true
+	case c == '-' || c == '.' || c == '_' || c == '~':
+		return true
+	}
+	return false
 }
 
 // CommentBody is _review_comment_body (lib/run.sh:1367-1384).

@@ -139,6 +139,34 @@ func TestRenderURLPath(t *testing.T) {
 	}
 }
 
+func TestRenderURLPathDivergencesAndUnreserved(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{"a+b", "a%2Bb"},
+		{"a@b", "a%40b"},
+		{"a:b", "a%3Ab"},
+		{"a&b", "a%26b"},
+		{"a=b", "a%3Db"},
+		{"a$b", "a%24b"},
+		{"a+b/a@b/a:b/a&b/a=b/a$b", "a%2Bb/a%40b/a%3Ab/a%26b/a%3Db/a%24b"},
+		{
+			"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~",
+			"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~",
+		},
+		{
+			"dir/ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~/file.txt",
+			"dir/ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~/file.txt",
+		},
+	}
+	for _, tc := range cases {
+		if got := review.URLPath(tc.in); got != tc.want {
+			t.Errorf("URLPath(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
 func TestRenderFindingLabel(t *testing.T) {
 	for _, c := range loadPresentation(t).FindingLabel {
 		var f review.Finding

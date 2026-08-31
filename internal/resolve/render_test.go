@@ -126,6 +126,23 @@ func TestRender(t *testing.T) {
 			t.Errorf("summary missing: %s", got)
 		}
 	})
+
+	t.Run("empty footnote with non-empty gaps keeps trailing space", func(t *testing.T) {
+		resolutions := json.RawMessage(`[]`)
+		findings := json.RawMessage(`[]`)
+		marker := prstate.Marker{
+			Pass:    1,
+			HeadSHA: prstate.Some(testHeadSHA),
+			Harness: prstate.Some("claude"),
+			Model:   prstate.Some("claude-3-5-sonnet"),
+			Blocked: prstate.Some(false),
+		}
+		got := ResolveSummaryBody(resolutions, findings, "", marker, "acme/widget", 42, 3)
+		wantFootnote := "<sub>claude does not report which model answered, so the model above is the one crossrev requested. </sub>\n\n"
+		if !strings.Contains(got, wantFootnote) {
+			t.Errorf("summary footnote missing trailing space:\n got: %q\nwant containing: %q", got, wantFootnote)
+		}
+	})
 }
 
 func repoRoot(t *testing.T) string {
