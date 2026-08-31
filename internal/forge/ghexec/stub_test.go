@@ -50,7 +50,7 @@ func stubClient(t *testing.T, routes string) (*ghexec.Client, func() []string) {
 	env := append(crexec.Inherit([]string{"PATH", "HOME"}),
 		"CROSSREV_GH_LOG="+logPath, "CROSSREV_GH_ROUTES="+routesPath)
 
-	client := ghexec.New(crexec.NewOSRunner(), passthrough{}, ghexec.WithEnv(env))
+	client := ghexec.New(crexec.NewOrchestratorRunner(), passthrough{}, ghexec.WithEnv(env))
 	return client, func() []string {
 		raw, err := os.ReadFile(logPath)
 		if err != nil {

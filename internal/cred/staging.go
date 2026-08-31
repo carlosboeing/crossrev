@@ -55,7 +55,7 @@ type Environment interface {
 // The reads are os.LookupEnv, which internal/archtest deliberately leaves
 // unconfined: internal/archtest/environment_test.go:32-42 confines the bulk
 // read, os.Environ, and says why a named single read is not the boundary. The
-// guard on a named credential is exec.Spec.Audience, at the destination.
+// guard on a named credential is NewOSRunner, at the destination.
 type OSEnvironment struct{}
 
 func (OSEnvironment) Lookup(name string) (string, bool) { return os.LookupEnv(name) }

@@ -45,7 +45,15 @@ type Git struct {
 }
 
 // New returns a Git that starts children through runner with env.
+//
+// A nil runner panics. Substituting NewOrchestratorRunner would start a
+// child that may hold a forge credential, which is a wiring bug and not a
+// default. Tests that want a real child pass NewOrchestratorRunner;
+// tests that do not inject a fake.
 func New(runner exec.Runner, env []string) *Git {
+	if runner == nil {
+		panic("vcs.New: runner is nil")
+	}
 	return &Git{Runner: runner, Env: env}
 }
 
@@ -102,14 +110,14 @@ func (o Output) Lines() []string {
 
 // Run starts one git invocation and waits for it.
 //
-// The spec is orchestrator-facing, and that is a decision rather than a
-// default. exec.Spec.Audience defaults to model-facing, which refuses a child
-// whose environment names GH_TOKEN, GITHUB_TOKEN, GH_ENTERPRISE_TOKEN or
-// GITHUB_ENTERPRISE_TOKEN — and git legitimately holds one. lib/github.sh
-// pushes with a plain `git push` (lib/github.sh:443 and :510) over whatever
-// credential helper the environment configures, which on a GitHub-hosted
-// runner is the ambient token. A model-facing spec here would refuse that push
-// with a security message about a leak that is not happening.
+// The runner is orchestrator-facing, and that is a decision rather than a
+// default. NewOSRunner refuses a child whose environment names GH_TOKEN,
+// GITHUB_TOKEN, GH_ENTERPRISE_TOKEN or GITHUB_ENTERPRISE_TOKEN — and git
+// legitimately holds one. lib/github.sh pushes with a plain `git push`
+// (lib/github.sh:449 and :516) over whatever credential helper the
+// environment configures, which on a GitHub-hosted runner is the ambient
+// token. A model-facing runner here would refuse that push with a security
+// message about a leak that is not happening.
 //
 // git is also not the process the boundary exists for. That process is the
 // harness, described at lib/adapters/codex.sh:79-82 as "the process that reads
@@ -133,12 +141,11 @@ func (g *Git) Run(ctx context.Context, call Call) (Output, error) {
 	}
 
 	result := g.Runner.Run(ctx, exec.Spec{
-		Path:     path,
-		Args:     call.Args,
-		Dir:      call.Dir,
-		Env:      env,
-		Audience: exec.AudienceOrchestrator,
-		Streams:  call.Streams,
+		Path:    path,
+		Args:    call.Args,
+		Dir:     call.Dir,
+		Env:     env,
+		Streams: call.Streams,
 	})
 
 	output := Output{

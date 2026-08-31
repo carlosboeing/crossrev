@@ -36,7 +36,7 @@
 // for has a standard-library answer here — openssl base64 is encoding/base64,
 // jq is encoding/json, mktemp -d is os.MkdirTemp, and curl is net/http — so
 // this package needs no exec.Runner and holds none. That also keeps it clear of
-// the exec.AudienceOrchestrator opt-out, which internal/archtest confines to
+// exec.NewOrchestratorRunner, which internal/archtest confines to
 // internal/exec, internal/forge/ghexec and internal/vcs.
 //
 // It also holds no package-level state. lib/credentials.sh keeps four globals

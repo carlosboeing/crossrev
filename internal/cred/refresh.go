@@ -17,9 +17,9 @@
 //
 // The HTTP calls below go to the harness vendor's own OAuth endpoints on
 // crossrev's behalf. No model-facing process is started, no forge credential is
-// involved, and nothing here builds an exec.Spec — so the audience opt-out that
-// internal/archtest confines to internal/exec, internal/forge/ghexec and
-// internal/vcs is not needed and not taken.
+// involved, and nothing here builds an exec.Spec — so NewOrchestratorRunner,
+// which internal/archtest confines to internal/exec, internal/forge/ghexec and
+// internal/vcs, is not needed and not taken.
 //
 // The client is injected for the same reason the environment is: a test must
 // be able to exercise every branch without a vendor and without a network.

@@ -15,7 +15,7 @@ type Runner interface {
 	// into the captured streams.
 	//
 	// It returns no error alongside the Result on purpose. A non-zero exit is
-	// ordinary: lib/adapters/claude.sh:109 reads rc and turns it into a reported
+	// ordinary: lib/adapters/claude.sh:112 reads rc and turns it into a reported
 	// harness failure rather than a crash, so the exit status is data. Result.Err
 	// is reserved for the cases where the child produced no status at all — it
 	// never started, or the context ended it.
@@ -55,8 +55,8 @@ type Result struct {
 	// Err is set when the child produced no exit status of its own, or when the
 	// status it produced does not describe the whole outcome:
 	//
-	//   - *CredentialError, when a model-facing Spec carried a forge credential
-	//     and no child was started.
+	//   - *CredentialError, when a model-facing runner was asked to start a
+	//     child carrying a forge credential, and no child was started.
 	//   - *StartError, when the child could not be started.
 	//   - The context's error, when a cancellation or a deadline killed it.
 	//   - ErrPipesAbandoned, when the child exited but its output was cut short

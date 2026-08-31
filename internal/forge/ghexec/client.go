@@ -117,11 +117,19 @@ func WithWarn(warn func(summary, detail string)) Option {
 // New returns a Client that runs `gh` through runner and filters every
 // published body through filter.
 //
+// A nil runner panics. Substituting NewOrchestratorRunner would start a
+// child that may hold a forge credential, which is a wiring bug and not a
+// default. Tests that want a real child pass NewOrchestratorRunner;
+// tests that do not inject a fake.
+//
 // A nil filter is not a shortcut for "publish as written": every write refuses.
 // The filter is the last inspection a body gets before it is public, and a
 // missing one is exactly the case where a body might carry a credential
 // (lib/log.sh:143-147).
 func New(runner exec.Runner, filter forge.Publisher, opts ...Option) *Client {
+	if runner == nil {
+		panic("ghexec.New: runner is nil")
+	}
 	c := &Client{
 		runner: runner,
 		filter: filter,
@@ -139,34 +147,32 @@ func New(runner exec.Runner, filter forge.Publisher, opts ...Option) *Client {
 
 // run invokes `gh` with exactly these arguments.
 //
-// # Why the orchestrator audience is set here
+// # Why the runner is orchestrator-facing
 //
-// exec.Spec.Audience defaults to model-facing, and exec.Run refuses a
-// model-facing spec whose environment names GH_TOKEN, GITHUB_TOKEN,
+// NewOSRunner refuses a child whose environment names GH_TOKEN, GITHUB_TOKEN,
 // GH_ENTERPRISE_TOKEN or GITHUB_ENTERPRISE_TOKEN
-// (internal/exec/osrunner.go:53-64). That default is correct almost everywhere
-// in the tree and wrong here: this package hands a GitHub credential to a
-// child, because the child is `gh` and not a model. `gh` cannot authenticate
-// without it, and
-// lib/github.sh never sets it at any of its call sites — lines 39, 74, 99 and
-// 120 among them — because a shell function inherits it ambiently from the
-// orchestrator that called it. This is that inheritance, written down.
+// (internal/exec/osrunner.go). That default is correct almost everywhere in
+// the tree and wrong here: this package hands a GitHub credential to a child,
+// because the child is `gh` and not a model. `gh` cannot authenticate without
+// it, and lib/github.sh never sets it at any of its call sites — lines 39, 74,
+// 99 and 120 among them — because a shell function inherits it ambiently from
+// the orchestrator that called it. A real child is started through
+// NewOrchestratorRunner; a nil runner panics rather than inventing one.
 //
 // The promise ADR 0001 makes is about the process that reads
 // attacker-controlled text. `gh` does not read any: every argument it receives
 // is built here, and no model output reaches it except as a comment body, which
 // is data on its way out rather than an instruction. The model-facing side of
-// the boundary is internal/harness, and its specs keep the strict default.
+// the boundary is internal/harness, whose children are started through
+// NewOSRunner.
 //
-// It is set in this one function so that adding a method cannot forget it. A
-// test in this package fails the build if any other file constructs an
+// A test in this package fails the build if any other file constructs an
 // exec.Spec.
 func (c *Client) run(ctx context.Context, args ...string) exec.Result {
 	return c.runner.Run(ctx, exec.Spec{
-		Path:     program,
-		Args:     args,
-		Env:      c.env,
-		Audience: exec.AudienceOrchestrator,
+		Path: program,
+		Args: args,
+		Env:  c.env,
 	})
 }
 

@@ -6,24 +6,24 @@
 // The Bash adapters do both: they assemble `env -u … <cli> …` and then run it
 // inside a subshell (lib/adapters/claude.sh:111). Here the two halves are Spec
 // and Envelope, with internal/exec's Runner in between. That split is not
-// tidiness. internal/archtest forbids os/exec outside internal/exec, so an
-// adapter physically cannot start anything; and every property exec.Spec
-// carries — the exact environment, the audience, the closed stdin — is decided
-// in one place rather than five.
+// tidiness. Adapters build a Spec and start nothing themselves. Production
+// process start is confined to internal/exec by the process-start AST walk,
+// which does not cover syscall.Syscall. Every property exec.Spec carries —
+// the exact environment, the closed stdin — is decided in one place rather
+// than five.
 //
 // # Every adapter starts a model-facing process
 //
 // This is the process that reads attacker-controlled text
-// (lib/adapters/codex.sh:79-82). exec.Spec.Audience is left at its zero value in
-// every Spec below, which is the strict one: exec.Run refuses to start a child
-// whose environment names a forge credential. Nothing here may name
-// exec.AudienceOrchestrator, and internal/archtest refuses the package if it
-// does (internal/archtest/audience_test.go:190-192).
+// (lib/adapters/codex.sh:79-82). The child is started through NewOSRunner,
+// which refuses a forge credential. Nothing here may name
+// exec.NewOrchestratorRunner, and internal/archtest refuses the package if it
+// does (internal/archtest/audience_test.go).
 //
 // The environment is built by childEnv, which subtracts cred.StripFor's answer
 // — the four forge credentials plus every vendor credential belonging to a
-// harness that is not this one. exec.Run's refusal is the guard that cannot be
-// forgotten; childEnv is what stops a leg reaching it.
+// harness that is not this one. NewOSRunner's refusal is the guard that cannot
+// be forgotten; childEnv is what stops a leg reaching it.
 
 package harness
 
@@ -176,8 +176,6 @@ func (b base) endpointRefusal(endpoint Endpoint, host, extra string) *Refusal {
 // `codex exec` blocks indefinitely on "Reading additional input from stdin..."
 // (lib/adapters/codex.sh:92-94), and opencode was measured silent for five
 // minutes with zero bytes on either stream (lib/adapters/opencode.sh:47-50).
-//
-// The audience is left unset, which is exec.AudienceModelFacing.
 func (b base) spec(inv Invocation, args []string, additions ...string) exec.Spec {
 	return exec.Spec{
 		Path: b.descriptor.Binary,

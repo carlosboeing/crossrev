@@ -26,12 +26,12 @@ func (r *recorder) Run(_ context.Context, spec exec.Spec) exec.Result {
 	return exec.Result{}
 }
 
-// Every git spec is orchestrator-facing, and that decision is load-bearing
-// rather than cosmetic. exec.Spec.Audience defaults to model-facing, which
-// refuses a child whose environment names a forge credential — and
-// lib/github.sh pushes with a plain `git push` over whatever credential helper
-// the environment configures, which on a GitHub-hosted runner is the ambient
-// token. A model-facing spec here would refuse that push.
+// A real git child is started through NewOrchestratorRunner, and that decision
+// is load-bearing rather than cosmetic. NewOSRunner refuses a child whose
+// environment names a forge credential — and lib/github.sh pushes with a
+// plain `git push` over whatever credential helper the environment
+// configures, which on a GitHub-hosted runner is the ambient token. A
+// model-facing runner here would refuse that push.
 func TestGitSpecsAreOrchestratorFacing(t *testing.T) {
 	runner := &recorder{}
 	git := vcs.New(runner, []string{"PATH=/usr/bin", "GH_TOKEN=not-a-real-token"})
@@ -43,9 +43,6 @@ func TestGitSpecsAreOrchestratorFacing(t *testing.T) {
 		t.Fatalf("specs = %d, want 1", len(runner.specs))
 	}
 	spec := runner.specs[0]
-	if spec.Audience != exec.AudienceOrchestrator {
-		t.Errorf("audience = %v, want AudienceOrchestrator", spec.Audience)
-	}
 	if spec.Path != "git" {
 		t.Errorf("path = %q, want %q", spec.Path, "git")
 	}
@@ -56,11 +53,54 @@ func TestGitSpecsAreOrchestratorFacing(t *testing.T) {
 		t.Errorf("args = %v", spec.Args)
 	}
 
-	// And the real runner would have started it rather than refusing it.
-	if result := exec.NewOSRunner().Run(context.Background(), exec.Spec{
-		Path: "git", Args: []string{"--version"}, Env: spec.Env, Audience: spec.Audience,
+	// Production construction starts that child rather than refusing it.
+	prod := vcs.New(exec.NewOrchestratorRunner(), spec.Env)
+	if result := prod.Runner.Run(context.Background(), exec.Spec{
+		Path: "git", Args: []string{"--version"}, Env: spec.Env,
 	}); errors.Is(result.Err, exec.ErrForgeCredential) {
 		t.Errorf("a git call carrying a forge credential was refused: %v", result.Err)
+	}
+}
+
+// A nil runner is a wiring bug. Substituting NewOrchestratorRunner would start
+// a real child (measured: git version 2.50.1) rather than fail at the
+// constructor. Panic so the first Run cannot happen.
+func TestNewPanicsOnANilRunner(t *testing.T) {
+	defer func() {
+		rec := recover()
+		if rec == nil {
+			t.Fatal("vcs.New(nil, env) started a child; want a panic that names the constructor")
+		}
+		msg := fmt.Sprint(rec)
+		if !strings.Contains(msg, "vcs.New") {
+			t.Errorf("panic %q does not name vcs.New", msg)
+		}
+	}()
+	git := vcs.New(nil, exec.Inherit([]string{"PATH"}))
+	if _, err := git.At("").Run(context.Background(), "--version"); err == nil && git != nil {
+		t.Fatal("a git child ran")
+	}
+}
+
+func TestNewWithNilEnvDoesNotPassTheParentEnvironment(t *testing.T) {
+	t.Setenv("CROSSREV_PARENT_ONLY", "parent")
+	runner := &recorder{}
+	git := vcs.New(runner, nil)
+
+	if _, err := git.At("").Run(context.Background(), "--version"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(runner.specs) != 1 {
+		t.Fatalf("specs = %d, want 1", len(runner.specs))
+	}
+	spec := runner.specs[0]
+	if len(spec.Env) != 0 {
+		t.Errorf("Env = %q, want nil or empty, not the parent environment", spec.Env)
+	}
+	for _, entry := range spec.Env {
+		if strings.HasPrefix(entry, "CROSSREV_PARENT_ONLY=") {
+			t.Errorf("parent environment reached the spec: %q", entry)
+		}
 	}
 }
 
