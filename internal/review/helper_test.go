@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	osexec "os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -192,22 +194,28 @@ func (r *fakeRunner) Specs() []exec.Spec {
 }
 
 type fakeForge struct {
-	log          *eventLog
-	pr           forge.PullRequest
-	prErr        error
-	prCalls      int
-	comments     []forge.IssueComment
-	createErr    error
-	created      []string
-	createdIDs   []int64
-	zeroCreateID bool
-	edits        []string
-	editIDs      []int64
-	labelsAdded  []string
-	threads      []forge.ReviewThread
-	diff         []byte
-	repoComments []forge.IssueComment
-	nextID       int64
+	log            *eventLog
+	pr             forge.PullRequest
+	prErr          error
+	prCalls        int
+	comments       []forge.IssueComment
+	createErr      error
+	created        []string
+	createdIDs     []int64
+	zeroCreateID   bool
+	edits          []string
+	editIDs        []int64
+	labelsAdded    []string
+	labelsRemoved  []string
+	threads        []forge.ReviewThread
+	diff           []byte
+	repoComments   []forge.IssueComment
+	nextID         int64
+	ops            []string
+	reviewPosted   []forge.ReviewComment
+	reviewComments []forge.IssueComment
+	placements     []forge.Placement
+	forceFallback  bool
 }
 
 func (f *fakeForge) RepoSlug(context.Context) (core.Slug, error) {
@@ -248,7 +256,7 @@ func (f *fakeForge) IssueComments(context.Context, core.Slug, int) []forge.Issue
 }
 
 func (f *fakeForge) ReviewComments(context.Context, core.Slug, int) []forge.IssueComment {
-	return nil
+	return f.reviewComments
 }
 
 func (f *fakeForge) RepoIssueComments(context.Context, core.Slug, time.Time, int) ([]forge.IssueComment, error) {
@@ -272,7 +280,7 @@ func (f *fakeForge) IssueCandidates(context.Context, core.Slug, string, string) 
 }
 
 func (f *fakeForge) CommentCreate(_ context.Context, _ core.Slug, _ int, body string) (int64, error) {
-	if f.log != nil {
+	if f.log != nil && (strings.Contains(body, "**crossrev — reviewing") || strings.Contains(body, "**crossrev stopped")) {
 		f.log.add("claim")
 	}
 	if f.createErr != nil {
@@ -288,16 +296,52 @@ func (f *fakeForge) CommentCreate(_ context.Context, _ core.Slug, _ int, body st
 	}
 	f.nextID = id + 1
 	f.createdIDs = append(f.createdIDs, id)
+	f.comments = append(f.comments, forge.IssueComment{
+		ID:          id,
+		AuthorLogin: author,
+		Body:        body,
+	})
+	f.ops = append(f.ops, "comment-create")
 	return id, nil
 }
 
 func (f *fakeForge) CommentEdit(_ context.Context, _ core.Slug, commentID int64, body string) error {
 	f.editIDs = append(f.editIDs, commentID)
 	f.edits = append(f.edits, body)
+	f.ops = append(f.ops, "comment-edit")
 	return nil
 }
 
-func (f *fakeForge) ReviewCommentCreate(context.Context, forge.ReviewComment) (forge.Placement, error) {
+func (f *fakeForge) ReviewCommentCreate(_ context.Context, comment forge.ReviewComment) (forge.Placement, error) {
+	f.reviewPosted = append(f.reviewPosted, comment)
+	f.ops = append(f.ops, "review-comment")
+	if f.forceFallback {
+		body := fmt.Sprintf("**%s:%d** (%s)\n\n%s", comment.Path, comment.Line, comment.Side, comment.Body)
+		if _, err := f.CommentCreate(context.Background(), comment.Repo, comment.Number, body); err != nil {
+			return "", err
+		}
+		f.placements = append(f.placements, forge.PlacementFallback)
+		return forge.PlacementFallback, nil
+	}
+	id := f.nextID
+	if id == 0 {
+		id = 9001
+	}
+	f.nextID = id + 1
+	f.reviewComments = append(f.reviewComments, forge.IssueComment{
+		ID:          id,
+		AuthorLogin: author,
+		Body:        comment.Body,
+	})
+	ids := prstate.FindingIDs([]string{comment.Body}, core.LegReview, 0)
+	f.threads = append(f.threads, forge.ReviewThread{
+		ID:            fmt.Sprintf("PRRT_%d", id),
+		Path:          comment.Path,
+		Line:          comment.Line,
+		RootCommentID: id,
+		FindingIDs:    ids,
+	})
+	f.placements = append(f.placements, forge.PlacementInline)
 	return forge.PlacementInline, nil
 }
 
@@ -317,10 +361,14 @@ func (f *fakeForge) IssueCommentCreate(context.Context, core.Slug, int, string) 
 
 func (f *fakeForge) PullRequestLabelAdd(_ context.Context, _ core.Slug, _ int, label string) error {
 	f.labelsAdded = append(f.labelsAdded, label)
+	f.ops = append(f.ops, "label-add")
 	return nil
 }
 
-func (f *fakeForge) PullRequestLabelRemove(context.Context, core.Slug, int, string) {}
+func (f *fakeForge) PullRequestLabelRemove(_ context.Context, _ core.Slug, _ int, label string) {
+	f.labelsRemoved = append(f.labelsRemoved, label)
+	f.ops = append(f.ops, "label-remove")
+}
 
 var _ forge.Forge = (*fakeForge)(nil)
 
