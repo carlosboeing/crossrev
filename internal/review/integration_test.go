@@ -203,10 +203,10 @@ func TestIntegrationReviewPassPublishesTheMarkerResolveReads(t *testing.T) {
 	}
 
 	// The handoff itself: the durable marker bytes on the claim comment are
-	// the fixture the resolve leg reads. effort_reported is normalised out of
-	// both sides before the comparison — whether the recorded marker carries
-	// it is one of the five parity divergences being settled elsewhere, and
-	// this test must not assert on it.
+	// the fixture the resolve leg reads, compared with nothing normalised
+	// away. effort_reported is part of that comparison, because Bash assigns
+	// the key unconditionally and a marker that omits it is the defect this
+	// phase fixed.
 	assertSameMarkerBytes(t, e.forge.edits[len(e.forge.edits)-1], readFixture(t, handoffFixture))
 }
 
@@ -246,9 +246,9 @@ func decodeEditFindings(t *testing.T, body string) []map[string]json.RawMessage 
 }
 
 // assertSameMarkerBytes compares the serialised marker embedded in two comment
-// bodies byte for byte, with effort_reported deleted from both payloads first.
-// Key order is part of the comparison on purpose: the bytes are what every
-// pull request carries, so the two legs must agree on them exactly.
+// bodies byte for byte. Key order is part of the comparison on purpose: the
+// bytes are what every pull request carries, so the two legs must agree on
+// them exactly.
 func assertSameMarkerBytes(t *testing.T, gotBody, wantBody string) {
 	t.Helper()
 	envelope := func(body string) string {
@@ -256,10 +256,7 @@ func assertSameMarkerBytes(t *testing.T, gotBody, wantBody string) {
 		if !ok {
 			t.Fatalf("no marker in body: %q", body)
 		}
-		stripped, err := prstate.EditMarker(raw, prstate.MarkerEdit{Key: "effort_reported", Delete: true})
-		if err != nil {
-			t.Fatalf("EditMarker: %v", err)
-		}
+		stripped := raw
 		encoded, err := prstate.EncodeMarker(stripped)
 		if err != nil {
 			t.Fatalf("EncodeMarker: %v", err)

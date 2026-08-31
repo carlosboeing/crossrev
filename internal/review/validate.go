@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 
 	"github.com/carlosboeing/crossrev/internal/core"
 	"github.com/carlosboeing/crossrev/internal/diff"
+	"github.com/carlosboeing/crossrev/internal/harness"
 	"github.com/carlosboeing/crossrev/internal/prstate"
 	"github.com/carlosboeing/crossrev/internal/validate"
 )
@@ -43,32 +43,38 @@ func enrichFindings(payload, diffBytes []byte, workdir string) (json.RawMessage,
 	out := make([]json.RawMessage, 0, len(doc.Findings))
 	var snaps []string
 	for _, raw := range doc.Findings {
-		var f map[string]json.RawMessage
+		// harness.Node rather than a map, because encoding/json sorts a map's
+		// keys and jq does not. Bash writes `$f + {id:…, anchor:…, …}`
+		// (lib/run.sh:1178-1180), and jq's + keeps the model's own key order
+		// then appends the six in the order written. These bytes end up in the
+		// marker every pull request carries, so the order is not cosmetic.
+		var f harness.Node
 		if err := json.Unmarshal(raw, &f); err != nil {
 			out = append(out, raw)
 			continue
 		}
-		path, _ := jsonString(f["path"])
-		title, _ := jsonString(f["title"])
-		side, _ := jsonString(f["side"])
+		path, _ := f.Member("path").AsString()
+		title, _ := f.Member("title").AsString()
+		side, _ := f.Member("side").AsString()
 		if side == "" {
 			side = string(core.SideRight)
 		}
-		line := jsonInt(f["line"])
+		line64, _ := f.Member("line").AsInt()
+		line := int(line64)
 		if moved, ok := parsed.Anchor(path, core.Side(side), line, diff.DefaultSnap); ok && moved != line {
 			snaps = append(snaps, fmt.Sprintf("%s:%d (%s) is not a line the diff shows; anchoring the finding to line %d instead.", path, line, side, moved))
-			f["line"] = json.RawMessage(strconv.Itoa(moved))
+			f.Set("line", harness.FromInt(int64(moved)))
 			line = moved
 		}
 		content, _ := os.ReadFile(filepath.Join(workdir, path))
 		anchor := prstate.AnchorAt(content, line)
 		id := prstate.NewFindingID(path, title, anchor)
-		f["id"] = marshalString(string(id))
-		f["anchor"] = marshalString(anchor.String())
-		f["thread_id"] = json.RawMessage("null")
-		f["root_comment_id"] = json.RawMessage("null")
-		f["resolution"] = json.RawMessage("null")
-		f["tracked_as"] = json.RawMessage("null")
+		f.Set("id", harness.FromString(string(id)))
+		f.Set("anchor", harness.FromString(anchor.String()))
+		f.Set("thread_id", harness.FromNull())
+		f.Set("root_comment_id", harness.FromNull())
+		f.Set("resolution", harness.FromNull())
+		f.Set("tracked_as", harness.FromNull())
 		enriched, err := json.Marshal(f)
 		if err != nil {
 			return nil, snaps, err

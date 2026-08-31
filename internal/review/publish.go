@@ -4,10 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strconv"
 
 	"github.com/carlosboeing/crossrev/internal/core"
 	"github.com/carlosboeing/crossrev/internal/forge"
+	"github.com/carlosboeing/crossrev/internal/harness"
 	"github.com/carlosboeing/crossrev/internal/policy"
 	"github.com/carlosboeing/crossrev/internal/prstate"
 	"github.com/carlosboeing/crossrev/internal/ui"
@@ -166,23 +166,26 @@ func attachThreads(raw json.RawMessage, threads []forge.ReviewThread) json.RawMe
 	if len(raw) == 0 || string(raw) == "null" {
 		return raw
 	}
-	var findings []map[string]json.RawMessage
+	// harness.Node rather than a map: encoding/json sorts a map's keys and jq
+	// does not, and these bytes go into the marker. Set replaces a key in
+	// place, so thread_id and root_comment_id keep the position enrichment
+	// gave them rather than moving to where the alphabet would put them.
+	var findings []harness.Node
 	if err := json.Unmarshal(raw, &findings); err != nil {
 		return raw
 	}
-	for i, f := range findings {
-		id, _ := jsonString(f["id"])
+	for i := range findings {
+		id, _ := findings[i].Member("id").AsString()
 		for _, th := range threads {
 			if !threadHas(th, id) {
 				continue
 			}
 			if th.ID != "" {
-				f["thread_id"] = marshalString(th.ID)
+				findings[i].Set("thread_id", harness.FromString(th.ID))
 			}
 			if th.RootCommentID != 0 {
-				f["root_comment_id"] = json.RawMessage(strconv.FormatInt(th.RootCommentID, 10))
+				findings[i].Set("root_comment_id", harness.FromInt(th.RootCommentID))
 			}
-			findings[i] = f
 			break
 		}
 	}
