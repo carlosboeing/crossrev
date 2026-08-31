@@ -117,8 +117,10 @@ func WithWarn(warn func(summary, detail string)) Option {
 // New returns a Client that runs `gh` through runner and filters every
 // published body through filter.
 //
-// A nil runner becomes NewOrchestratorRunner. `gh` may hold a forge
-// credential, and a model-facing runner would refuse that child.
+// A nil runner panics. Substituting NewOrchestratorRunner would start a
+// child that may hold a forge credential, which is a wiring bug and not a
+// default. Tests that want a real child pass NewOrchestratorRunner;
+// tests that do not inject a fake.
 //
 // A nil filter is not a shortcut for "publish as written": every write refuses.
 // The filter is the last inspection a body gets before it is public, and a
@@ -126,7 +128,7 @@ func WithWarn(warn func(summary, detail string)) Option {
 // (lib/log.sh:143-147).
 func New(runner exec.Runner, filter forge.Publisher, opts ...Option) *Client {
 	if runner == nil {
-		runner = exec.NewOrchestratorRunner()
+		panic("ghexec.New: runner is nil")
 	}
 	c := &Client{
 		runner: runner,
@@ -154,8 +156,8 @@ func New(runner exec.Runner, filter forge.Publisher, opts ...Option) *Client {
 // because the child is `gh` and not a model. `gh` cannot authenticate without
 // it, and lib/github.sh never sets it at any of its call sites — lines 39, 74,
 // 99 and 120 among them — because a shell function inherits it ambiently from
-// the orchestrator that called it. This is that inheritance, written down:
-// New constructs NewOrchestratorRunner when no runner is injected.
+// the orchestrator that called it. A real child is started through
+// NewOrchestratorRunner; a nil runner panics rather than inventing one.
 //
 // The promise ADR 0001 makes is about the process that reads
 // attacker-controlled text. `gh` does not read any: every argument it receives

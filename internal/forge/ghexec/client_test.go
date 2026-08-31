@@ -154,6 +154,22 @@ func TestTheEnvironmentThisClientBuildsWouldBeRefusedForAModel(t *testing.T) {
 	}
 }
 
+// A nil runner is a wiring bug. Substituting NewOrchestratorRunner would start
+// a real child rather than fail at the constructor.
+func TestNewPanicsOnANilRunner(t *testing.T) {
+	defer func() {
+		rec := recover()
+		if rec == nil {
+			t.Fatal("ghexec.New(nil, …) accepted a nil runner; want a panic that names the constructor")
+		}
+		msg := fmt.Sprint(rec)
+		if !strings.Contains(msg, "ghexec.New") {
+			t.Errorf("panic %q does not name ghexec.New", msg)
+		}
+	}()
+	ghexec.New(nil, passthrough{})
+}
+
 // A Client with no filter refuses every write rather than publishing text
 // nothing inspected.
 //

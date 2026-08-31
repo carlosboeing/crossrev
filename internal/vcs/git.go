@@ -46,11 +46,13 @@ type Git struct {
 
 // New returns a Git that starts children through runner with env.
 //
-// A nil runner becomes NewOrchestratorRunner. git may hold a forge
-// credential, and a model-facing runner would refuse that child.
+// A nil runner panics. Substituting NewOrchestratorRunner would start a
+// child that may hold a forge credential, which is a wiring bug and not a
+// default. Tests that want a real child pass NewOrchestratorRunner;
+// tests that do not inject a fake.
 func New(runner exec.Runner, env []string) *Git {
 	if runner == nil {
-		runner = exec.NewOrchestratorRunner()
+		panic("vcs.New: runner is nil")
 	}
 	return &Git{Runner: runner, Env: env}
 }

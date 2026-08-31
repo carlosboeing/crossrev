@@ -15,8 +15,8 @@
 //
 // # The one place a GitHub credential is handed to a child
 //
-// Production construction uses exec.NewOrchestratorRunner. The reason is in
-// client.go, beside the code that constructs it.
+// A real `gh` child is started through exec.NewOrchestratorRunner. The reason
+// is in client.go, beside the constructor.
 //
 // Two rules in internal/archtest hold it, because the opt-out is the one
 // construction in this tree whose misuse is silent: NewOrchestratorRunner may

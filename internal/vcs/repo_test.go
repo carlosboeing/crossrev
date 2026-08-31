@@ -26,7 +26,7 @@ func (r *recorder) Run(_ context.Context, spec exec.Spec) exec.Result {
 	return exec.Result{}
 }
 
-// Production git construction uses NewOrchestratorRunner, and that decision
+// A real git child is started through NewOrchestratorRunner, and that decision
 // is load-bearing rather than cosmetic. NewOSRunner refuses a child whose
 // environment names a forge credential — and lib/github.sh pushes with a
 // plain `git push` over whatever credential helper the environment
@@ -54,11 +54,31 @@ func TestGitSpecsAreOrchestratorFacing(t *testing.T) {
 	}
 
 	// Production construction starts that child rather than refusing it.
-	prod := vcs.New(nil, spec.Env)
+	prod := vcs.New(exec.NewOrchestratorRunner(), spec.Env)
 	if result := prod.Runner.Run(context.Background(), exec.Spec{
 		Path: "git", Args: []string{"--version"}, Env: spec.Env,
 	}); errors.Is(result.Err, exec.ErrForgeCredential) {
 		t.Errorf("a git call carrying a forge credential was refused: %v", result.Err)
+	}
+}
+
+// A nil runner is a wiring bug. Substituting NewOrchestratorRunner would start
+// a real child (measured: git version 2.50.1) rather than fail at the
+// constructor. Panic so the first Run cannot happen.
+func TestNewPanicsOnANilRunner(t *testing.T) {
+	defer func() {
+		rec := recover()
+		if rec == nil {
+			t.Fatal("vcs.New(nil, env) started a child; want a panic that names the constructor")
+		}
+		msg := fmt.Sprint(rec)
+		if !strings.Contains(msg, "vcs.New") {
+			t.Errorf("panic %q does not name vcs.New", msg)
+		}
+	}()
+	git := vcs.New(nil, exec.Inherit([]string{"PATH"}))
+	if _, err := git.At("").Run(context.Background(), "--version"); err == nil && git != nil {
+		t.Fatal("a git child ran")
 	}
 }
 

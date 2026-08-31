@@ -23,7 +23,7 @@
 //
 // # The runner of every child
 //
-// Production construction uses exec.NewOrchestratorRunner. git is not the
+// A real git child is started through exec.NewOrchestratorRunner. git is not the
 // process the credential boundary exists for — that process is the harness,
 // which reads attacker-controlled text — and git is the one tool here that may
 // legitimately hold a forge credential, because a push over https uses whatever
