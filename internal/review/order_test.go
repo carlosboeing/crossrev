@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/carlosboeing/crossrev/internal/harness"
+	"github.com/carlosboeing/crossrev/internal/prstate"
 )
 
 // TestEnrichmentKeepsTheModelsKeyOrder pins the byte order of an enriched
@@ -43,5 +44,25 @@ func TestEnrichmentKeepsTheModelsKeyOrder(t *testing.T) {
 	}
 	if keys := got[0].Keys(); strings.Join(keys, ",") != strings.Join(want, ",") {
 		t.Errorf("key order\n got %v\nwant %v", keys, want)
+	}
+}
+
+// TestReviewFootnoteKeepsTheTrailingSpace covers the branch the resolve leg's
+// tests already cover and the review leg's did not: a gap sentence present and
+// the cost footnote empty. Bash writes `${gaps:+$gaps }` before a footnote that
+// may be empty (lib/run.sh:1536), so the rendered text ends with one space
+// inside the <sub> tag. A mutation dropping the `+ " "` here survived the whole
+// suite before this test existed.
+func TestReviewFootnoteKeepsTheTrailingSpace(t *testing.T) {
+	// model set and model_reported absent is what produces the gap sentence;
+	// no usage and no billing is what leaves harness.Footnote empty.
+	m := prstate.Marker{
+		Harness: prstate.Some("claude"),
+		Model:   prstate.Some("claude-opus-4-6"),
+	}
+	got := runDetails(m, "review")
+	const want = "<sub>claude does not report which model answered, so the model above is the one crossrev requested. </sub>"
+	if !strings.Contains(got, want) {
+		t.Errorf("run details footnote\n got %q\nwant it to contain %q", got, want)
 	}
 }

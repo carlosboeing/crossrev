@@ -251,20 +251,21 @@ func decodeEditFindings(t *testing.T, body string) []map[string]json.RawMessage 
 // them exactly.
 func assertSameMarkerBytes(t *testing.T, gotBody, wantBody string) {
 	t.Helper()
-	envelope := func(body string) string {
-		raw, ok := prstate.DecodeMarker(body)
-		if !ok {
-			t.Fatalf("no marker in body: %q", body)
-		}
-		stripped := raw
-		encoded, err := prstate.EncodeMarker(stripped)
-		if err != nil {
-			t.Fatalf("EncodeMarker: %v", err)
-		}
-		return encoded
+	// The raw marker text, not a decode-and-re-encode of it. Round-tripping
+	// through DecodeMarker and EncodeMarker normalises away exactly what this
+	// test exists to pin: a duplicated key, a difference in spacing, a number
+	// spelled another way. A mutation making Node.Set append instead of
+	// replace writes thread_id twice, and a round-tripping compare would not
+	// see it.
+	got, ok := prstate.DecodeMarker(gotBody)
+	if !ok {
+		t.Fatalf("no marker in body: %q", gotBody)
 	}
-	got, want := envelope(gotBody), envelope(wantBody)
-	if got != want {
+	want, ok := prstate.DecodeMarker(wantBody)
+	if !ok {
+		t.Fatalf("no marker in fixture: %q", wantBody)
+	}
+	if string(got) != string(want) {
 		t.Errorf("durable marker bytes differ from %s\ngot:  %s\nwant: %s", handoffFixture, got, want)
 	}
 }
