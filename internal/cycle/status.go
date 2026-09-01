@@ -46,6 +46,12 @@ const (
 // the git dir, an automated one from the Actions API (lib/run.sh:3295-3353).
 // The detail string carries the reason a `gone` is known, or the host an
 // `elsewhere` is on, and is empty for the other two.
+//
+// An implementation must memoise on the marker's `run_id`, which is what
+// lib/run.sh:3288-3290 does with a global rather than stdout: one report asks
+// about the same claim twice — once for its row and once for the NEXT line
+// under it — and for an automated leg an unmemoised answer is a second API
+// call per row.
 type Liveness interface {
 	Alive(ctx context.Context, claim prstate.Marker) (Life, string)
 }

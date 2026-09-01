@@ -503,10 +503,9 @@ func TestStatusReadsOnlyTheTrustedAuthorsMarkers(t *testing.T) {
 type statusLife struct {
 	life   cycle.Life
 	detail string
-	asked  []string
 }
 
-func (l statusLife) Alive(_ context.Context, m prstate.Marker) (cycle.Life, string) {
+func (l statusLife) Alive(context.Context, prstate.Marker) (cycle.Life, string) {
 	return l.life, l.detail
 }
 
