@@ -111,6 +111,10 @@ func TestCommit(t *testing.T) {
 		if strings.Contains(e.git.commitOpts.Message, "line\nbreak") {
 			t.Fatal("rejected subject was used")
 		}
+		want := "the resolver's commit subject was rejected, so the commit carries a generic one\n   A subject must be one line of at most 100 characters, with no control characters. The fix itself is unaffected."
+		if !strings.Contains(strings.Join(got.Messages, "\n"), want) {
+			t.Errorf("messages = %q, want warning %q", got.Messages, want)
+		}
 	})
 
 	t.Run("a prior commit_sha skips the fix step", func(t *testing.T) {
@@ -209,7 +213,7 @@ func TestCommit(t *testing.T) {
 			HeadSHA: prstate.Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
 		}
 
-		msg := l.commitMessage(s, recs, findings, marker, 1)
+		msg, _ := l.commitMessage(s, recs, findings, marker, 1)
 		if !strings.Contains(msg, "- Bug title.") {
 			t.Fatalf("missing title bullet in commit message: %s", msg)
 		}
@@ -222,6 +226,30 @@ func TestCommit(t *testing.T) {
 		wantFindings := `[{"id":"` + testFinding + `","path":"a.go","line":3,"severity":"high","title":"Bug title"}]`
 		if string(marshaledFindings) != wantFindings {
 			t.Fatalf("marshalFindings = %s, want %s", string(marshaledFindings), wantFindings)
+		}
+	})
+
+	t.Run("resolver claims a fix but leaves no staged changes warns", func(t *testing.T) {
+		e := setup(t)
+		e.addReview(t, defaultFindings(), "issues-remain")
+		e.git.staged = false
+		e.adapter.payloads = []json.RawMessage{json.RawMessage(
+			`{"blocked":false,"blocked_reason":null,"summary":"Fixed.","resolutions":[{"finding_number":1,"resolution":"fixed","reply":"done"}]}`,
+		)}
+		got := e.run(t)
+		if got.Err != nil {
+			t.Fatalf("Run: %v", got.Err)
+		}
+		want := "the resolver reported 1 fix(es) but changed no files\n   The replies below will claim a fix that is not in the diff, so their threads stay open and the pass halts for a person. Treat those resolutions as unverified and read the thread before merging."
+		found := false
+		for _, m := range got.Messages {
+			if m == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("messages = %q, want warning %q", got.Messages, want)
 		}
 	})
 }

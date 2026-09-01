@@ -32,8 +32,13 @@ func TestCommentCreateArgv(t *testing.T) {
 
 func TestCommentCreateReportsARefusal(t *testing.T) {
 	c, _ := client(t, bad())
-	if _, err := c.CommentCreate(context.Background(), testSlug(t), 42, "Summary."); err == nil {
-		t.Error("a refused post answered with an id")
+	_, err := c.CommentCreate(context.Background(), testSlug(t), 42, "Summary.")
+	if err == nil {
+		t.Fatal("a refused post answered with an id")
+	}
+	want := "could not post a comment on acme/widget#42\n   Every pass records itself in a comment, so crossrev stops rather than working without a record. Check the token has pull-requests write."
+	if !strings.Contains(err.Error(), want) {
+		t.Errorf("err = %q, want it to contain %q", err.Error(), want)
 	}
 }
 

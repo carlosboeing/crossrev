@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/carlosboeing/crossrev/internal/ui"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -20,7 +21,7 @@ type persistItem struct {
 	Body  string `json:"body"`
 }
 
-func (l *Leg) persistDeferred(ctx context.Context, s *session, workdir string, recs []harness.Node, findings []harness.Node, sha string) (filed, matched int, wrote bool, lines string, out []harness.Node) {
+func (l *Leg) persistDeferred(ctx context.Context, s *session, workdir string, recs []harness.Node, findings []harness.Node, sha string) (filed, matched int, wrote bool, lines string, out []harness.Node, messages []string) {
 	out = make([]harness.Node, len(recs))
 	copy(out, recs)
 	var b strings.Builder
@@ -62,7 +63,10 @@ func (l *Leg) persistDeferred(ctx context.Context, s *session, workdir string, r
 					fmt.Sprintf("Seen again while reviewing %s#%d (crossrev pass %d).%s", s.repo, s.req.PR, s.pass, marker))
 			}
 		default:
-			landed, ok := l.persistOne(ctx, s, workdir, d, id)
+			landed, ok, persistWarning := l.persistOne(ctx, s, workdir, d, id)
+			if persistWarning != "" {
+				messages = append(messages, persistWarning)
+			}
 			if ok {
 				tracked = landed
 				filed++
@@ -80,21 +84,21 @@ func (l *Leg) persistDeferred(ctx context.Context, s *session, workdir string, r
 			out[i] = d
 		}
 	}
-	return filed, matched, wrote, b.String(), out
+	return filed, matched, wrote, b.String(), out, messages
 }
 
-func (l *Leg) persistOne(ctx context.Context, s *session, workdir string, d harness.Node, id string) (string, bool) {
+func (l *Leg) persistOne(ctx context.Context, s *session, workdir string, d harness.Node, id string) (string, bool, string) {
 	persistNode := d.Member("persist")
 	if !persistNode.Present() || persistNode.IsNull() {
-		return "", false
+		return "", false, ""
 	}
 	raw, err := json.Marshal(persistNode)
 	if err != nil {
-		return "", false
+		return "", false, ""
 	}
 	var item persistItem
 	if err := json.Unmarshal(raw, &item); err != nil {
-		return "", false
+		return "", false, ""
 	}
 
 	footer := fmt.Sprintf("\n\n---\nFound by crossrev while reviewing %s#%d (pass %d). Verified against the codebase before filing: one model raised it, a second confirmed it is real, and it was left out of that pull request deliberately rather than missed.",
@@ -110,41 +114,44 @@ func (l *Leg) persistOne(ctx context.Context, s *session, workdir string, d harn
 		labels = append(labels, s.backlogLabels()...)
 		n, err := l.Forge.IssueCreate(ctx, s.repo, item.Title, body, labels)
 		if err != nil || n == 0 {
-			return "", false
+			return "", false, ui.Warning(
+				"could not file an issue on "+s.repo.String()+" for a deferred finding",
+				"The thread stays open and unresolved instead, so the finding is still visible on the pull request. Check that the backlog labels exist and the token has issues write.",
+			)
 		}
-		return s.repo.String() + "#" + strconv.Itoa(n), true
+		return s.repo.String() + "#" + strconv.Itoa(n), true, ""
 	case config.DestinationRepository:
 		dir := s.backlog.Path
 		if err := config.AssertPathInsideRepo(workdir, dir); err != nil {
-			return "", false
+			return "", false, ""
 		}
 		if s.backlog.Layout == config.LayoutFile {
 			full := filepath.Join(workdir, dir)
 			if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
-				return "", false
+				return "", false, ""
 			}
 			f, err := os.OpenFile(full, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 			if err != nil {
-				return "", false
+				return "", false, ""
 			}
 			_, err = fmt.Fprintf(f, "\n## %s\n\n%s\n", item.Title, body)
 			_ = f.Close()
 			if err != nil {
-				return "", false
+				return "", false, ""
 			}
-			return dir, true
+			return dir, true, ""
 		}
 		full := filepath.Join(workdir, dir)
 		if err := os.MkdirAll(full, 0o755); err != nil {
-			return "", false
+			return "", false, ""
 		}
 		target := filepath.Join(dir, id+".md")
 		if err := os.WriteFile(filepath.Join(workdir, target), []byte(fmt.Sprintf("# %s\n\n%s\n", item.Title, body)), 0o644); err != nil {
-			return "", false
+			return "", false, ""
 		}
-		return target, true
+		return target, true, ""
 	default:
-		return "", false
+		return "", false, ""
 	}
 }
 

@@ -417,6 +417,18 @@ func TestLoadRefusesEveryDescriptorValidateRejects(t *testing.T) {
 	}
 }
 
+func TestLoadRefusalCarriesConsequence(t *testing.T) {
+	badDesc := mutate(t, func(d map[string]any) { d["version"] = float64(2) })
+	_, err := harness.Load(badDesc)
+	if err == nil {
+		t.Fatal("Load accepted bad descriptor")
+	}
+	want := "the harness descriptor is invalid: the descriptor's version is 2, and this build reads version 1\n   It drives sourced paths, install commands, environment names and quarantine paths, so CrossRev stops rather than acting on it. Fix lib/harnesses.json."
+	if !strings.Contains(err.Error(), want) {
+		t.Errorf("err = %q, want %q", err.Error(), want)
+	}
+}
+
 // The order of the twelve checks is the Bash function's `elif` chain, and a
 // descriptor carrying two faults reports the earlier one.
 //

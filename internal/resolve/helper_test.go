@@ -305,6 +305,8 @@ type fakeForge struct {
 	byFinding      map[string]int
 	resolved       []string
 	createErr      error
+	replyErr       error
+	threadErr      error
 	issueErr       error
 	zeroCreateID   bool
 	order          []string
@@ -424,12 +426,12 @@ func (f *fakeForge) ReviewCommentCreate(context.Context, forge.ReviewComment) (f
 func (f *fakeForge) ReviewReply(_ context.Context, repo core.Slug, number int, rootCommentID int64, body string) error {
 	f.note("ReviewReply")
 	f.replies = append(f.replies, reviewReply{Repo: repo, PR: number, RootCommentID: rootCommentID, Body: body})
-	return nil
+	return f.replyErr
 }
 func (f *fakeForge) ThreadResolve(_ context.Context, id string) error {
 	f.note("ThreadResolve")
 	f.resolved = append(f.resolved, id)
-	return nil
+	return f.threadErr
 }
 func (f *fakeForge) LabelEnsure(context.Context, core.Slug, forge.Label) (forge.LabelState, error) {
 	return forge.LabelExists, nil
@@ -480,6 +482,7 @@ type gitMut struct {
 	pushErr         error
 	commitSHA       string
 	remoteHead      string
+	remoteHeadErr   error
 	pushTarget      vcs.PushTarget
 	pushMismatch    core.Slug
 	beforeCommit    func(dir string)
@@ -613,6 +616,9 @@ func (g *fakeGit) PushURL(context.Context, string) (string, error) {
 	return "https://github.com/" + g.env.slug.String() + ".git", nil
 }
 func (g *fakeGit) RemoteHead(context.Context, string, string) (string, error) {
+	if g.remoteHeadErr != nil {
+		return "", g.remoteHeadErr
+	}
 	if g.remoteHead != "" {
 		return g.remoteHead, nil
 	}
@@ -659,9 +665,12 @@ func claudeResolveStdout(payload string) []byte {
 }
 
 type stubAdapter struct {
-	invs     []harness.Invocation
-	payloads []json.RawMessage
-	calls    int
+	invs       []harness.Invocation
+	payloads   []json.RawMessage
+	calls      int
+	beforeSpec func(harness.Invocation)
+	specErr    error
+	envErr     string
 }
 
 func (a *stubAdapter) Name() string { return "claude" }
@@ -670,6 +679,12 @@ func (a *stubAdapter) NotInstalled() *harness.Refusal {
 }
 func (a *stubAdapter) Spec(inv harness.Invocation) (exec.Spec, error) {
 	a.invs = append(a.invs, inv)
+	if a.beforeSpec != nil {
+		a.beforeSpec(inv)
+	}
+	if a.specErr != nil {
+		return exec.Spec{}, a.specErr
+	}
 	return exec.Spec{
 		Path: "claude",
 		Args: []string{"-p", "--output-format", "json"},
@@ -680,6 +695,9 @@ func (a *stubAdapter) Spec(inv harness.Invocation) (exec.Spec, error) {
 func (a *stubAdapter) Envelope(_ harness.Invocation, _ exec.Result) harness.Envelope {
 	i := a.calls
 	a.calls++
+	if a.envErr != "" {
+		return harness.Envelope{Harness: "claude", Error: &a.envErr}
+	}
 	if i >= len(a.payloads) {
 		msg := "no canned payload"
 		return harness.Envelope{Harness: "claude", Error: &msg}

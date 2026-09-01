@@ -3,6 +3,8 @@ package resolve
 import (
 	"context"
 	"encoding/json"
+	"github.com/carlosboeing/crossrev/internal/ui"
+	"strconv"
 
 	"github.com/carlosboeing/crossrev/internal/core"
 	"github.com/carlosboeing/crossrev/internal/forge"
@@ -27,7 +29,7 @@ func threadsByFinding(threads []forge.ReviewThread) map[string]threadRef {
 	return out
 }
 
-func (l *Leg) replyAndResolve(ctx context.Context, s *session, recs []harness.Node, findings []harness.Node, threads []forge.ReviewThread, commitSHA string, already map[string]bool, unthreaded int) (resolved, escalated, unthreadedOut int, findingsOut json.RawMessage) {
+func (l *Leg) replyAndResolve(ctx context.Context, s *session, recs []harness.Node, findings []harness.Node, threads []forge.ReviewThread, commitSHA string, already map[string]bool, unthreaded int) (resolved, escalated, unthreadedOut int, findingsOut json.RawMessage, messages []string) {
 	by := threadsByFinding(threads)
 	harnessName := s.settings.Harness
 	model := s.settings.Model
@@ -42,10 +44,18 @@ func (l *Leg) replyAndResolve(ctx context.Context, s *session, recs []harness.No
 			if th.RootCommentID != 0 {
 				if err := l.Forge.ReviewReply(ctx, s.repo, s.req.PR, th.RootCommentID, body); err != nil {
 					unthreaded++
+					messages = append(messages, ui.Warning(
+						"could not reply in the thread rooted at comment "+strconv.FormatInt(th.RootCommentID, 10)+" on "+s.repo.String()+"#"+strconv.Itoa(s.req.PR),
+						"The resolution is still recorded in the pass marker, but the collaborator reading the thread will not see the reason. Check the token has pull-requests write.",
+					))
 					_, _ = l.Forge.CommentCreate(ctx, s.repo, s.req.PR, body)
 				}
 			} else {
 				unthreaded++
+				messages = append(messages, ui.Warning(
+					"no review thread was found for finding "+id+", so its reply is a top-level comment",
+					"The reply is on the pull request rather than under the code it answers. This is expected when GitHub refused to anchor the original inline comment, and unexpected otherwise.",
+				))
 				_, _ = l.Forge.CommentCreate(ctx, s.repo, s.req.PR, body)
 			}
 			already[id] = true
@@ -65,6 +75,11 @@ func (l *Leg) replyAndResolve(ctx context.Context, s *session, recs []harness.No
 		if should && th.ID != "" {
 			if err := l.Forge.ThreadResolve(ctx, th.ID); err == nil {
 				resolved++
+			} else {
+				messages = append(messages, ui.Warning(
+					"could not resolve review thread "+th.ID,
+					"The thread stays open, so the next pass sees it as unsettled and may raise it again. Resolve it by hand, or retry the leg.",
+				))
 			}
 		}
 
@@ -81,7 +96,7 @@ func (l *Leg) replyAndResolve(ctx context.Context, s *session, recs []harness.No
 		}
 	}
 	findingsOut, _ = json.Marshal(findings)
-	return resolved, escalated, unthreaded, findingsOut
+	return resolved, escalated, unthreaded, findingsOut, messages
 }
 
 func mustMarshal(d harness.Node) json.RawMessage {

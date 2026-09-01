@@ -54,11 +54,14 @@ func (l *Leg) Run(ctx context.Context, req Request) Result {
 		return r
 	}
 
-	marker, err := l.claim(ctx, s)
+	marker, claimWarning, err := l.claim(ctx, s)
 	if err != nil {
 		r := wrapErr(err)
 		r.Pass = s.pass
 		return r
+	}
+	if claimWarning != "" {
+		early.Messages = append(early.Messages, claimWarning)
 	}
 
 	got := l.invoke(ctx, s, marker, workdir)
@@ -71,7 +74,6 @@ func (l *Leg) Run(ctx context.Context, req Request) Result {
 		return got
 	}
 	published := l.publish(ctx, s, got, workdir)
-	published.Messages = append(early.Messages, published.Messages...)
 	return published
 }
 

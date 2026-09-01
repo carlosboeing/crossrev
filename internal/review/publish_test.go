@@ -78,8 +78,35 @@ func TestPublishFallsBackToATopLevelComment(t *testing.T) {
 		}
 	}
 	joined := strings.Join(got.Messages, "\n")
-	if !strings.Contains(joined, "could not be anchored") {
-		t.Errorf("messages = %q, want the unanchored warning", joined)
+	wantWarning := "2 findings could not be anchored to a line and landed as top-level comments\n   Each one names the location it faults, so nothing is lost, but it sits at the top of the pull request rather than beside the code — and the resolve leg has no thread to reply into either."
+	if !strings.Contains(joined, wantWarning) {
+		t.Errorf("messages = %q, want unanchored warning %q", joined, wantWarning)
+	}
+	want := "GitHub would not anchor a comment to app.go:2 (RIGHT) on acme/widget#42\n   The finding is posted as a top-level comment naming that location instead, so it is not lost. A finding on a deleted line needs side LEFT."
+	if !containsString(got.Messages, want) {
+		t.Errorf("messages = %q, want warning %q", got.Messages, want)
+	}
+}
+
+func TestPublishWarnsWhenVerdictIsConvergedAlongsideActionableFindings(t *testing.T) {
+	e := newEnv(t)
+	writeAppGo(t, e.dir)
+	convergedPayload := `{"verdict":"converged","blocked_reason":null,"findings":` + twoFindings + `}`
+	e.runner.script = []exec.Result{{ExitCode: 0, Stdout: claudeStdout(convergedPayload)}}
+	got := runLeg(t, e, e.request(t))
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
+	wantWarning := "the reviewer returned verdict 'converged' alongside 1 actionable finding\n   The actionable count outranks the verdict, so the pass is labelled 'awaiting-resolution' to run the resolve leg."
+	found := false
+	for _, msg := range got.Messages {
+		if msg == wantWarning {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("messages = %q, want warning %q", got.Messages, wantWarning)
 	}
 }
 

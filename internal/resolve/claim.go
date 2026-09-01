@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/carlosboeing/crossrev/internal/ui"
 	"os"
 	"strconv"
 
@@ -11,7 +12,7 @@ import (
 	"github.com/carlosboeing/crossrev/internal/prstate"
 )
 
-func (l *Leg) claim(ctx context.Context, s *session) (prstate.Marker, error) {
+func (l *Leg) claim(ctx context.Context, s *session) (prstate.Marker, string, error) {
 	now := l.now().Unix()
 	head := s.pr.HeadRefOid.SHA()
 	runID := os.Getenv("GITHUB_RUN_ID")
@@ -23,44 +24,47 @@ func (l *Leg) claim(ctx context.Context, s *session) (prstate.Marker, error) {
 		m := resetRedrive(s.redrive, now, head, runID, s.settings)
 		body, err := claimBody(s, m, true)
 		if err != nil {
-			return prstate.Marker{}, err
+			return prstate.Marker{}, "", err
 		}
 		id := s.redrive.CommentID()
 		if err := l.Forge.CommentEdit(ctx, s.repo, id, body); err != nil {
-			return prstate.Marker{}, &Refusal{
+			return prstate.Marker{}, "", &Refusal{
 				Message: fmt.Sprintf("the claim comment did not post on %s#%d", s.repo, s.req.PR),
 				Hint:    "The marker is what makes a retry safe, so crossrev stops rather than resolving without one.",
 			}
 		}
 		m = withCommentID(m, id)
-		return m, nil
+		return m, "", nil
 	}
 
 	if open, ok := prstate.OpenClaim(s.markers, s.pass, core.LegResolve); ok {
 		if reason, stale := prstate.ClaimIsStale(open, head, l.now(), prstate.DefaultClaimWindow); stale {
-			_ = reason
 			open.TS = now
 			open.HeadSHA = prstate.Some(head)
 			open.Resolutions = json.RawMessage("[]")
 			open.CommitSHA = prstate.Null[string]()
 			open.CommitSubject = prstate.Null[string]()
+			return open, ui.Warning(
+				"abandoning the unfinished pass-"+strconv.Itoa(s.pass)+" resolve — "+reason,
+				"Resuming it would reconcile replies against a revision that has moved. Starting the pass again instead.",
+			), nil
 		}
-		return open, nil
+		return open, "", nil
 	}
 
 	m := newClaim(s, now, head, runID)
 	body, err := claimBody(s, m, false)
 	if err != nil {
-		return prstate.Marker{}, err
+		return prstate.Marker{}, "", err
 	}
 	id, err := l.Forge.CommentCreate(ctx, s.repo, s.req.PR, body)
 	if err != nil || id == 0 {
-		return prstate.Marker{}, &Refusal{
+		return prstate.Marker{}, "", &Refusal{
 			Message: fmt.Sprintf("the claim comment did not post on %s#%d", s.repo, s.req.PR),
 			Hint:    "The marker is what makes a retry safe, so crossrev stops rather than resolving without one.",
 		}
 	}
-	return withCommentID(m, id), nil
+	return withCommentID(m, id), "", nil
 }
 
 func newClaim(s *session, ts int64, head, runID string) prstate.Marker {

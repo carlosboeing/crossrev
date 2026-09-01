@@ -351,3 +351,25 @@ _pass_label "$2" "$3"
 	out := bashOutput(t, script, root, strconv.Itoa(pass), strconv.Itoa(cap))
 	return strings.TrimRight(out, "\n")
 }
+
+func TestAdmissionStaleReviewWarningContainsFullText(t *testing.T) {
+	e := newEnv(t)
+	raw := fmt.Sprintf(`{"v":1,"leg":"review","pass":1,"state":"started","ts":%d,"comment_id":9001,"run_id":"x","head_sha":%q,"findings":[],"verdict":null}`, frozenNow.Unix(), oldSHA)
+	e.forge.comments = []forge.IssueComment{commentWithMarker(t, 9001, parseMarker(t, raw))}
+	req := e.request(t)
+	got := runLeg(t, e, req)
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
+	wantWarning := fmt.Sprintf("abandoning the unfinished pass-1 review — it started against %s and the pull request is now at %s\n   Resuming it would reconcile against findings that no longer describe this code. Starting the pass again instead.", oldSHA[:7], headSHA[:7])
+	found := false
+	for _, msg := range got.Messages {
+		if msg == wantWarning {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("messages = %q, want warning %q", got.Messages, wantWarning)
+	}
+}

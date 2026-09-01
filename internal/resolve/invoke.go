@@ -241,11 +241,26 @@ func (l *Leg) invoke(ctx context.Context, s *session, marker prstate.Marker, wor
 		}
 		spec, err := adapter.Spec(inv)
 		if err != nil {
-			_, _, _ = sandbox.Restore(workdir, paths)
+			if _, _, restoreErr := sandbox.Restore(workdir, paths); restoreErr != nil {
+				return restoreFailure(s.settings.Harness, err.Error(), restoreErr.Error())
+			}
 			return wrapErr(err)
 		}
 		res := l.runner().Run(ctx, spec)
-		_, _, _ = sandbox.Restore(workdir, paths)
+		if _, _, restoreErr := sandbox.Restore(workdir, paths); restoreErr != nil {
+			// The run's own failure is the cause, not a placeholder. Bash puts
+			// the reason the attempt is being abandoned in this slot
+			// (lib/run.sh:684, called from :881 and :893), so a runner that
+			// died must say so here rather than be replaced by the restore.
+			//
+			// The envelope is built here rather than before the restore, so the
+			// order of the two on the success path stays the shell's: Bash
+			// restores at lib/run.sh:834 and only then reads `.ok` at :840. It
+			// is safe to build after a failed restore because no adapter reads a
+			// quarantined path — the one that touches disk at all, codex, reads
+			// inv.PayloadPath, which runlog puts in the run directory.
+			return restoreFailure(s.settings.Harness, runFailureCause(adapter.Envelope(inv, res), res), restoreErr.Error())
+		}
 		if l.Log != nil {
 			l.Log.Event("invoke", fmt.Sprintf("harness=%s attempt=%d exit=%d", s.settings.Harness, attempt, res.ExitCode))
 		}

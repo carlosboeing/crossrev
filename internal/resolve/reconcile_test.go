@@ -3,6 +3,7 @@ package resolve
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -122,6 +123,63 @@ func TestReconcile(t *testing.T) {
 		}
 	})
 
+	t.Run("a failed thread reply warns that the top-level fallback is unthreaded", func(t *testing.T) {
+		e := setup(t)
+		e.addReview(t, defaultFindings(), "issues-remain")
+		e.forge.replyErr = errors.New("reply refused")
+		got := e.run(t)
+		if got.Err != nil {
+			t.Fatalf("Run: %v", got.Err)
+		}
+		want := "could not reply in the thread rooted at comment 55 on acme/widget#42\n   The resolution is still recorded in the pass marker, but the collaborator reading the thread will not see the reason. Check the token has pull-requests write."
+		if !strings.Contains(strings.Join(got.Messages, "\n"), want) {
+			t.Errorf("messages = %q, want warning %q", got.Messages, want)
+		}
+	})
+
+	t.Run("a missing review thread warns before replying at top level", func(t *testing.T) {
+		e := setup(t)
+		e.addReview(t, defaultFindings(), "issues-remain")
+		e.forge.threads = nil
+		got := e.run(t)
+		if got.Err != nil {
+			t.Fatalf("Run: %v", got.Err)
+		}
+		want := "no review thread was found for finding aaaaaaaaaaaaaaaa, so its reply is a top-level comment\n   The reply is on the pull request rather than under the code it answers. This is expected when GitHub refused to anchor the original inline comment, and unexpected otherwise."
+		if !strings.Contains(strings.Join(got.Messages, "\n"), want) {
+			t.Errorf("messages = %q, want warning %q", got.Messages, want)
+		}
+	})
+
+	t.Run("an unthreaded fallback reports the aggregate warning", func(t *testing.T) {
+		e := setup(t)
+		e.addReview(t, defaultFindings(), "issues-remain")
+		e.forge.replyErr = errors.New("reply refused")
+		got := e.run(t)
+		if got.Err != nil {
+			t.Fatalf("Run: %v", got.Err)
+		}
+		want := "1 reply could not be threaded and landed as top-level comments\n   Each one names the finding it answers, so nothing is lost, but a reader following the diff will not see it beside the code."
+		if !strings.Contains(strings.Join(got.Messages, "\n"), want) {
+			t.Errorf("messages = %q, want warning %q", got.Messages, want)
+		}
+	})
+
+	t.Run("a failed thread resolution warns that the thread remains open", func(t *testing.T) {
+		e := setup(t)
+		e.addReview(t, defaultFindings(), "issues-remain")
+		e.git.staged = true
+		e.forge.threadErr = errors.New("resolve refused")
+		got := e.run(t)
+		if got.Err != nil {
+			t.Fatalf("Run: %v", got.Err)
+		}
+		want := "could not resolve review thread thread-1\n   The thread stays open, so the next pass sees it as unsettled and may raise it again. Resolve it by hand, or retry the leg."
+		if !strings.Contains(strings.Join(got.Messages, "\n"), want) {
+			t.Errorf("messages = %q, want warning %q", got.Messages, want)
+		}
+	})
+
 	t.Run("replyAndResolve preserves findings key order when mutating resolution and tracked_as", func(t *testing.T) {
 		customFinding := `{"id":"` + testFinding + `","path":"a.go","line":3,"severity":"high"}`
 		findings, err := harness.DecodeStream([]byte(customFinding))
@@ -148,7 +206,7 @@ func TestReconcile(t *testing.T) {
 		}}
 		already := map[string]bool{}
 		leg := &Leg{Forge: e.forge}
-		resolved, escalated, unthreaded, findingsOut := leg.replyAndResolve(context.Background(), s, recs, findings, threads, "sha123", already, 0)
+		resolved, escalated, unthreaded, findingsOut, _ := leg.replyAndResolve(context.Background(), s, recs, findings, threads, "sha123", already, 0)
 		if resolved != 1 {
 			t.Fatalf("resolved = %d, want 1", resolved)
 		}

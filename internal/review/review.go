@@ -3,6 +3,7 @@ package review
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -75,6 +76,9 @@ func (l *Leg) Run(ctx context.Context, req Request) Result {
 		return out
 	}
 	out.Pass = ad.pass
+	if ad.warning != "" {
+		out.Messages = append(out.Messages, ad.warning)
+	}
 	if ad.already {
 		out.Outcome = OutcomeSkipped
 		out.Reason = "already reviewed"
@@ -97,7 +101,7 @@ func (l *Leg) Run(ctx context.Context, req Request) Result {
 	}
 	if ad.stale != "" {
 		out.Reason = "abandoning the unfinished pass-" + fmt.Sprint(ad.pass) + " review — " + ad.stale
-		out.Messages = append(out.Messages, out.Reason)
+		out.Messages = append(out.Messages, out.Reason+"\n   Resuming it would reconcile against findings that no longer describe this code. Starting the pass again instead.")
 	}
 	if ad.redrive {
 		msg := fmt.Sprintf("Pass %d's review ended blocked — driving pass %d again.", ad.pass, ad.pass)
@@ -132,6 +136,10 @@ func (l *Leg) Run(ctx context.Context, req Request) Result {
 	} else {
 		envelope, payload, err := l.invoke(ctx, req, loaded, settings, ad.pass)
 		if err != nil {
+			var restoreErr *sandboxRestoreFailure
+			if errors.As(err, &restoreErr) {
+				out.Messages = append(out.Messages, restoreErr.Warning())
+			}
 			out.Outcome = OutcomeError
 			out.Err = err
 			return out

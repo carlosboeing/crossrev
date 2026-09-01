@@ -206,3 +206,12 @@ func (o *IO) Die(reason, action string) error {
 	fmt.Fprintf(o.err(), "       %s\n\n", action)
 	return &FatalError{Reason: reason, Action: action}
 }
+
+// Warning joins a condition to its consequence with the newline and three-space
+// indent IO.Warn prints between them. A caller that answers one string rather
+// than two — every leg does, because Result.Messages is a []string — builds the
+// bytes here so a renderer arriving later has them. Split the pair apart at
+// that point and let Warn do the joining.
+func Warning(condition, consequence string) string {
+	return condition + "\n   " + consequence
+}

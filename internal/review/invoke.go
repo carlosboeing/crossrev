@@ -113,7 +113,7 @@ func lookPath(name string) (string, error) {
 	return "", os.ErrNotExist
 }
 
-func (l *Leg) invoke(ctx context.Context, req Request, loaded Context, settings legSettings, pass int) (harness.Envelope, json.RawMessage, error) {
+func (l *Leg) invoke(ctx context.Context, req Request, loaded Context, settings legSettings, pass int) (envelope harness.Envelope, payload json.RawMessage, retErr error) {
 	if err := harness.AssertEnvClean(l.Env); err != nil {
 		return harness.Envelope{}, nil, err
 	}
@@ -176,7 +176,18 @@ func (l *Leg) invoke(ctx context.Context, req Request, loaded Context, settings 
 	if err != nil {
 		return harness.Envelope{}, nil, err
 	}
-	defer func() { _, _, _ = sandbox.Restore(workdir, moved) }()
+	defer func() {
+		// The causal error stays in the message. Overwriting retErr outright
+		// lost why the harness never answered, which is the half a reader acts
+		// on; Bash keeps both (lib/run.sh:684, called from :881 and :893).
+		if _, _, err := sandbox.Restore(workdir, moved); err != nil {
+			cause := "the attempt finished and its answer was not read"
+			if retErr != nil {
+				cause = retErr.Error()
+			}
+			retErr = newSandboxRestoreFailure(settings.harness, cause, err.Error())
+		}
+	}()
 
 	inv := harness.Invocation{
 		Prompt:  harness.File{Path: promptPath, Text: string(promptBytes)},
@@ -195,7 +206,6 @@ func (l *Leg) invoke(ctx context.Context, req Request, loaded Context, settings 
 	}
 	semanticBudget := 1
 
-	var envelope harness.Envelope
 	for attempt := 1; ; attempt++ {
 		if l.Log != nil {
 			if base, ok := l.Log.TranscriptBase(attempt); ok {
