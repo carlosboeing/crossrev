@@ -1,0 +1,132 @@
+{
+  "name": "escalation-from-earlier-pass-no-labels",
+  "shell": "tests/test-status.sh:585-591",
+  "now": 1787000000,
+  "head_sha": "2c4a46cb321db01826d116b5ef2add6b0284d68c",
+  "min_fix_severity": "medium",
+  "max_passes_per_cycle": 3,
+  "liveness": {
+    "life": "",
+    "detail": ""
+  },
+  "labels": [],
+  "markers": [
+    {
+      "v": 1,
+      "leg": "review",
+      "pass": 1,
+      "state": "complete",
+      "ts": 1786999940,
+      "done_ts": 1786999970,
+      "run_id": "x",
+      "head_sha": "2c4a46cb321db01826d116b5ef2add6b0284d68c",
+      "harness": "claude",
+      "model": "m",
+      "effort": "high",
+      "endpoint": null,
+      "model_reported": "m",
+      "tokens": 1000,
+      "verdict": "issues-remain",
+      "findings": [
+        {
+          "severity": "medium"
+        }
+      ]
+    },
+    {
+      "v": 1,
+      "leg": "resolve",
+      "pass": 1,
+      "state": "complete",
+      "ts": 1786999940,
+      "done_ts": 1786999970,
+      "run_id": "x",
+      "head_sha": "2c4a46cb321db01826d116b5ef2add6b0284d68c",
+      "harness": "claude",
+      "model": "m",
+      "effort": "high",
+      "endpoint": null,
+      "model_reported": "m",
+      "tokens": 2000,
+      "blocked": false,
+      "blocked_reason": null,
+      "commit_sha": null,
+      "summary": "s",
+      "resolutions": [
+        {
+          "resolution": "fixed"
+        },
+        {
+          "resolution": "escalated"
+        }
+      ]
+    },
+    {
+      "v": 1,
+      "leg": "review",
+      "pass": 2,
+      "state": "complete",
+      "ts": 1786999940,
+      "done_ts": 1786999970,
+      "run_id": "x",
+      "head_sha": "2c4a46cb321db01826d116b5ef2add6b0284d68c",
+      "harness": "claude",
+      "model": "m",
+      "effort": "high",
+      "endpoint": null,
+      "model_reported": "m",
+      "tokens": 1000,
+      "verdict": "issues-remain",
+      "findings": []
+    }
+  ],
+  "want": {
+    "state": "halted",
+    "pass": 2,
+    "max_pass": 2,
+    "rows": [
+      {
+        "pass": 1,
+        "leg": "review",
+        "step": "ok",
+        "description": "1 medium",
+        "rendered": "1  ✓ review   1 medium"
+      },
+      {
+        "pass": 1,
+        "leg": "resolve",
+        "step": "no",
+        "description": "1 fixed, 1 escalated",
+        "rendered": "   ✗ resolve  1 fixed, 1 escalated"
+      },
+      {
+        "pass": 2,
+        "leg": "review",
+        "step": "ok",
+        "description": "no findings — issues-remain",
+        "rendered": "2  ✓ review   no findings — issues-remain"
+      },
+      {
+        "pass": 2,
+        "leg": "resolve",
+        "step": "opt",
+        "description": "not run yet",
+        "rendered": "   ○ resolve  not run yet"
+      }
+    ],
+    "next": [
+      {
+        "kind": "line",
+        "t": "1 finding need a human decision. The resolve leg left the"
+      },
+      {
+        "kind": "line",
+        "t": "thread open and said why in it. Once you have settled it:"
+      },
+      {
+        "kind": "cmd",
+        "t": "crossrev review --pr 42"
+      }
+    ]
+  }
+}

@@ -1,0 +1,153 @@
+{
+  "name": "unfinished-no-evidence",
+  "shell": "tests/test-status.sh:208-231",
+  "now": 1787000000,
+  "head_sha": "2c4a46cb321db01826d116b5ef2add6b0284d68c",
+  "min_fix_severity": "medium",
+  "max_passes_per_cycle": 3,
+  "liveness": {
+    "life": "",
+    "detail": ""
+  },
+  "labels": [
+    "crossrev/awaiting-review",
+    "crossrev/watchdog-retried",
+    "crossrev/pass-2"
+  ],
+  "markers": [
+    {
+      "v": 1,
+      "leg": "review",
+      "pass": 1,
+      "state": "complete",
+      "ts": 1786999940,
+      "done_ts": 1786999970,
+      "run_id": "x",
+      "head_sha": "2c4a46cb321db01826d116b5ef2add6b0284d68c",
+      "harness": "claude",
+      "model": "m",
+      "effort": "high",
+      "endpoint": null,
+      "model_reported": "m",
+      "tokens": 1000,
+      "verdict": "issues-remain",
+      "findings": [
+        {
+          "severity": "high"
+        },
+        {
+          "severity": "high"
+        },
+        {
+          "severity": "low"
+        }
+      ]
+    },
+    {
+      "v": 1,
+      "leg": "resolve",
+      "pass": 1,
+      "state": "complete",
+      "ts": 1786999940,
+      "done_ts": 1786999970,
+      "run_id": "x",
+      "head_sha": "2c4a46cb321db01826d116b5ef2add6b0284d68c",
+      "harness": "claude",
+      "model": "m",
+      "effort": "high",
+      "endpoint": null,
+      "model_reported": "m",
+      "tokens": 2000,
+      "blocked": false,
+      "blocked_reason": null,
+      "commit_sha": null,
+      "summary": "s",
+      "resolutions": [
+        {
+          "resolution": "fixed"
+        },
+        {
+          "resolution": "fixed"
+        },
+        {
+          "resolution": "skipped"
+        }
+      ]
+    },
+    {
+      "v": 1,
+      "leg": "review",
+      "pass": 2,
+      "state": "started",
+      "ts": 1786997180,
+      "done_ts": 1786997210,
+      "run_id": "x",
+      "head_sha": "2c4a46cb321db01826d116b5ef2add6b0284d68c",
+      "harness": "claude",
+      "model": "m",
+      "effort": "high",
+      "endpoint": null,
+      "model_reported": "m",
+      "tokens": 1000,
+      "verdict": "null",
+      "findings": []
+    }
+  ],
+  "want": {
+    "state": "awaiting review",
+    "pass": 2,
+    "max_pass": 2,
+    "rows": [
+      {
+        "pass": 1,
+        "leg": "review",
+        "step": "ok",
+        "description": "2 high, 1 low",
+        "rendered": "1  ✓ review   2 high, 1 low"
+      },
+      {
+        "pass": 1,
+        "leg": "resolve",
+        "step": "ok",
+        "description": "2 fixed, 1 skipped",
+        "rendered": "   ✓ resolve  2 fixed, 1 skipped"
+      },
+      {
+        "pass": 2,
+        "leg": "review",
+        "step": "opt",
+        "description": "started 47 minute(s) ago, no result yet",
+        "rendered": "2  ○ review   started 47 minute(s) ago, no result yet"
+      },
+      {
+        "pass": 2,
+        "leg": "resolve",
+        "step": "opt",
+        "description": "not run yet",
+        "rendered": "   ○ resolve  not run yet"
+      }
+    ],
+    "next": [
+      {
+        "kind": "cmd",
+        "t": "crossrev review --pr 42"
+      },
+      {
+        "kind": "line",
+        "t": "The head has not moved, so a re-run resumes pass 2 and posts"
+      },
+      {
+        "kind": "line",
+        "t": "only what is missing."
+      },
+      {
+        "kind": "line",
+        "t": "The watchdog has already retried this leg once — a second failure"
+      },
+      {
+        "kind": "line",
+        "t": "halts the loop rather than retrying again."
+      }
+    ]
+  }
+}

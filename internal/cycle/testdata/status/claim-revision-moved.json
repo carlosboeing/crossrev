@@ -1,0 +1,71 @@
+{
+  "name": "claim-revision-moved",
+  "shell": "tests/test-status.sh:301-305",
+  "now": 1787000000,
+  "head_sha": "2c4a46cb321db01826d116b5ef2add6b0284d68c",
+  "min_fix_severity": "medium",
+  "max_passes_per_cycle": 3,
+  "liveness": {
+    "life": "",
+    "detail": ""
+  },
+  "labels": [
+    "crossrev/awaiting-review",
+    "crossrev/pass-1"
+  ],
+  "markers": [
+    {
+      "v": 1,
+      "leg": "review",
+      "pass": 1,
+      "state": "started",
+      "ts": 1786999880,
+      "done_ts": 1786999910,
+      "run_id": "x",
+      "head_sha": "0000000000000000000000000000000000000000",
+      "harness": "claude",
+      "model": "m",
+      "effort": "high",
+      "endpoint": null,
+      "model_reported": "m",
+      "tokens": 1000,
+      "verdict": "null",
+      "findings": []
+    }
+  ],
+  "want": {
+    "state": "awaiting review",
+    "pass": 1,
+    "max_pass": 1,
+    "rows": [
+      {
+        "pass": 1,
+        "leg": "review",
+        "step": "no",
+        "description": "abandoned — it started against 0000000 and the pull request is now at 2c4a46c",
+        "rendered": "1  ✗ review   abandoned — it started against 0000000 and the pull request is now at 2c4a46c"
+      },
+      {
+        "pass": 1,
+        "leg": "resolve",
+        "step": "opt",
+        "description": "not run yet",
+        "rendered": "   ○ resolve  not run yet"
+      }
+    ],
+    "next": [
+      {
+        "kind": "cmd",
+        "t": "crossrev review --pr 42"
+      },
+      {
+        "kind": "line",
+        "t": "The unfinished pass is stale — it started against 0000000 and the pull request is now at 2c4a46c — so a re-run abandons it"
+      },
+      {
+        "kind": "line",
+        "t": "and starts pass 1 again."
+      }
+    ]
+  }
+}

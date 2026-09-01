@@ -1,0 +1,242 @@
+{
+  "name": "cap-reached",
+  "shell": "tests/test-status.sh:322-340",
+  "now": 1787000000,
+  "head_sha": "2c4a46cb321db01826d116b5ef2add6b0284d68c",
+  "min_fix_severity": "medium",
+  "max_passes_per_cycle": 3,
+  "liveness": {
+    "life": "",
+    "detail": ""
+  },
+  "labels": [
+    "crossrev/awaiting-review",
+    "crossrev/pass-3"
+  ],
+  "markers": [
+    {
+      "v": 1,
+      "leg": "review",
+      "pass": 1,
+      "state": "complete",
+      "ts": 1786999940,
+      "done_ts": 1786999970,
+      "run_id": "x",
+      "head_sha": "2c4a46cb321db01826d116b5ef2add6b0284d68c",
+      "harness": "claude",
+      "model": "m",
+      "effort": "high",
+      "endpoint": null,
+      "model_reported": "m",
+      "tokens": 1000,
+      "verdict": "issues-remain",
+      "findings": [
+        {
+          "severity": "high"
+        },
+        {
+          "severity": "high"
+        },
+        {
+          "severity": "low"
+        }
+      ]
+    },
+    {
+      "v": 1,
+      "leg": "resolve",
+      "pass": 1,
+      "state": "complete",
+      "ts": 1786999940,
+      "done_ts": 1786999970,
+      "run_id": "x",
+      "head_sha": "2c4a46cb321db01826d116b5ef2add6b0284d68c",
+      "harness": "claude",
+      "model": "m",
+      "effort": "high",
+      "endpoint": null,
+      "model_reported": "m",
+      "tokens": 2000,
+      "blocked": false,
+      "blocked_reason": null,
+      "commit_sha": null,
+      "summary": "s",
+      "resolutions": [
+        {
+          "resolution": "fixed"
+        },
+        {
+          "resolution": "fixed"
+        },
+        {
+          "resolution": "skipped"
+        }
+      ]
+    },
+    {
+      "v": 1,
+      "leg": "review",
+      "pass": 2,
+      "state": "complete",
+      "ts": 1786999940,
+      "done_ts": 1786999970,
+      "run_id": "x",
+      "head_sha": "2c4a46cb321db01826d116b5ef2add6b0284d68c",
+      "harness": "claude",
+      "model": "m",
+      "effort": "high",
+      "endpoint": null,
+      "model_reported": "m",
+      "tokens": 1000,
+      "verdict": "issues-remain",
+      "findings": [
+        {
+          "severity": "medium"
+        }
+      ]
+    },
+    {
+      "v": 1,
+      "leg": "resolve",
+      "pass": 2,
+      "state": "complete",
+      "ts": 1786999940,
+      "done_ts": 1786999970,
+      "run_id": "x",
+      "head_sha": "2c4a46cb321db01826d116b5ef2add6b0284d68c",
+      "harness": "claude",
+      "model": "m",
+      "effort": "high",
+      "endpoint": null,
+      "model_reported": "m",
+      "tokens": 2000,
+      "blocked": false,
+      "blocked_reason": null,
+      "commit_sha": "d81a3f2abc",
+      "summary": "s",
+      "resolutions": [
+        {
+          "resolution": "fixed"
+        }
+      ]
+    },
+    {
+      "v": 1,
+      "leg": "review",
+      "pass": 3,
+      "state": "complete",
+      "ts": 1786999940,
+      "done_ts": 1786999970,
+      "run_id": "x",
+      "head_sha": "2c4a46cb321db01826d116b5ef2add6b0284d68c",
+      "harness": "claude",
+      "model": "m",
+      "effort": "high",
+      "endpoint": null,
+      "model_reported": "m",
+      "tokens": 1000,
+      "verdict": "issues-remain",
+      "findings": [
+        {
+          "severity": "medium"
+        }
+      ]
+    },
+    {
+      "v": 1,
+      "leg": "resolve",
+      "pass": 3,
+      "state": "complete",
+      "ts": 1786999940,
+      "done_ts": 1786999970,
+      "run_id": "x",
+      "head_sha": "2c4a46cb321db01826d116b5ef2add6b0284d68c",
+      "harness": "claude",
+      "model": "m",
+      "effort": "high",
+      "endpoint": null,
+      "model_reported": "m",
+      "tokens": 2000,
+      "blocked": false,
+      "blocked_reason": null,
+      "commit_sha": "c02b418def",
+      "summary": "s",
+      "resolutions": [
+        {
+          "resolution": "fixed"
+        }
+      ]
+    }
+  ],
+  "want": {
+    "state": "awaiting review",
+    "pass": 3,
+    "max_pass": 3,
+    "rows": [
+      {
+        "pass": 1,
+        "leg": "review",
+        "step": "ok",
+        "description": "2 high, 1 low",
+        "rendered": "1  ✓ review   2 high, 1 low"
+      },
+      {
+        "pass": 1,
+        "leg": "resolve",
+        "step": "ok",
+        "description": "2 fixed, 1 skipped",
+        "rendered": "   ✓ resolve  2 fixed, 1 skipped"
+      },
+      {
+        "pass": 2,
+        "leg": "review",
+        "step": "ok",
+        "description": "1 medium",
+        "rendered": "2  ✓ review   1 medium"
+      },
+      {
+        "pass": 2,
+        "leg": "resolve",
+        "step": "ok",
+        "description": "1 fixed, pushed d81a3f2",
+        "rendered": "   ✓ resolve  1 fixed, pushed d81a3f2"
+      },
+      {
+        "pass": 3,
+        "leg": "review",
+        "step": "ok",
+        "description": "1 medium",
+        "rendered": "3  ✓ review   1 medium"
+      },
+      {
+        "pass": 3,
+        "leg": "resolve",
+        "step": "ok",
+        "description": "1 fixed, pushed c02b418",
+        "rendered": "   ✓ resolve  1 fixed, pushed c02b418"
+      }
+    ],
+    "next": [
+      {
+        "kind": "line",
+        "t": "pass 3 reached max_passes_per_cycle (3), so the loop will"
+      },
+      {
+        "kind": "line",
+        "t": "not start another pass on its own. Raise policy.max_passes_per_cycle in"
+      },
+      {
+        "kind": "line",
+        "t": ".github/crossrev.yml to let it continue by itself. Asking for one pass"
+      },
+      {
+        "kind": "line",
+        "t": "by hand runs it either way:"
+      },
+      {
+        "kind": "cmd",
+        "t": "crossrev review --pr 42"
+      }
+    ]
+  }
+}

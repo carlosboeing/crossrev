@@ -1,0 +1,82 @@
+{
+  "name": "stopped",
+  "shell": "tests/test-status.sh:643-652",
+  "now": 1787000000,
+  "head_sha": "2c4a46cb321db01826d116b5ef2add6b0284d68c",
+  "min_fix_severity": "medium",
+  "max_passes_per_cycle": 3,
+  "liveness": {
+    "life": "",
+    "detail": ""
+  },
+  "labels": [
+    "crossrev/stop",
+    "crossrev/awaiting-resolution",
+    "crossrev/pass-1"
+  ],
+  "markers": [
+    {
+      "v": 1,
+      "leg": "review",
+      "pass": 1,
+      "state": "complete",
+      "ts": 1786999940,
+      "done_ts": 1786999970,
+      "run_id": "x",
+      "head_sha": "2c4a46cb321db01826d116b5ef2add6b0284d68c",
+      "harness": "claude",
+      "model": "m",
+      "effort": "high",
+      "endpoint": null,
+      "model_reported": "m",
+      "tokens": 1000,
+      "verdict": "issues-remain",
+      "findings": [
+        {
+          "severity": "high"
+        },
+        {
+          "severity": "high"
+        },
+        {
+          "severity": "low"
+        }
+      ]
+    }
+  ],
+  "want": {
+    "state": "stopped",
+    "pass": 1,
+    "max_pass": 1,
+    "rows": [
+      {
+        "pass": 1,
+        "leg": "review",
+        "step": "ok",
+        "description": "2 high, 1 low",
+        "rendered": "1  ✓ review   2 high, 1 low"
+      },
+      {
+        "pass": 1,
+        "leg": "resolve",
+        "step": "opt",
+        "description": "not run — crossrev/stop is applied",
+        "rendered": "   ○ resolve  not run — crossrev/stop is applied"
+      }
+    ],
+    "next": [
+      {
+        "kind": "line",
+        "t": "someone applied crossrev/stop. To continue from pass 1:"
+      },
+      {
+        "kind": "cmd",
+        "t": "gh pr edit 42 --remove-label crossrev/stop"
+      },
+      {
+        "kind": "cmd",
+        "t": "crossrev resolve --pr 42"
+      }
+    ]
+  }
+}

@@ -1,0 +1,66 @@
+{
+  "name": "header-word-awaiting-review",
+  "shell": "tests/test-status.sh:659-668",
+  "now": 1787000000,
+  "head_sha": "2c4a46cb321db01826d116b5ef2add6b0284d68c",
+  "min_fix_severity": "medium",
+  "max_passes_per_cycle": 3,
+  "liveness": {
+    "life": "",
+    "detail": ""
+  },
+  "labels": [
+    "crossrev/awaiting-review"
+  ],
+  "markers": [
+    {
+      "v": 1,
+      "leg": "review",
+      "pass": 1,
+      "state": "complete",
+      "ts": 1786999940,
+      "done_ts": 1786999970,
+      "run_id": "x",
+      "head_sha": "2c4a46cb321db01826d116b5ef2add6b0284d68c",
+      "harness": "claude",
+      "model": "m",
+      "effort": "high",
+      "endpoint": null,
+      "model_reported": "m",
+      "tokens": 1000,
+      "verdict": "issues-remain",
+      "findings": [
+        {
+          "severity": "medium"
+        }
+      ]
+    }
+  ],
+  "want": {
+    "state": "awaiting review",
+    "pass": 1,
+    "max_pass": 1,
+    "rows": [
+      {
+        "pass": 1,
+        "leg": "review",
+        "step": "ok",
+        "description": "1 medium",
+        "rendered": "1  ✓ review   1 medium"
+      },
+      {
+        "pass": 1,
+        "leg": "resolve",
+        "step": "opt",
+        "description": "not run yet",
+        "rendered": "   ○ resolve  not run yet"
+      }
+    ],
+    "next": [
+      {
+        "kind": "cmd",
+        "t": "crossrev review --pr 42"
+      }
+    ]
+  }
+}

@@ -1,0 +1,210 @@
+{
+  "name": "cap-halt",
+  "shell": "tests/test-status.sh:504-524",
+  "now": 1787000000,
+  "head_sha": "2c4a46cb321db01826d116b5ef2add6b0284d68c",
+  "min_fix_severity": "medium",
+  "max_passes_per_cycle": 3,
+  "liveness": {
+    "life": "",
+    "detail": ""
+  },
+  "labels": [
+    "crossrev/halted",
+    "crossrev/pass-2"
+  ],
+  "markers": [
+    {
+      "v": 1,
+      "leg": "review",
+      "pass": 1,
+      "state": "complete",
+      "ts": 1786999940,
+      "done_ts": 1786999970,
+      "run_id": "x",
+      "head_sha": "2c4a46cb321db01826d116b5ef2add6b0284d68c",
+      "harness": "claude",
+      "model": "m",
+      "effort": "high",
+      "endpoint": null,
+      "model_reported": "m",
+      "tokens": 1000,
+      "verdict": "issues-remain",
+      "findings": [
+        {
+          "severity": "high"
+        },
+        {
+          "severity": "high"
+        },
+        {
+          "severity": "low"
+        }
+      ]
+    },
+    {
+      "v": 1,
+      "leg": "resolve",
+      "pass": 1,
+      "state": "complete",
+      "ts": 1786999940,
+      "done_ts": 1786999970,
+      "run_id": "x",
+      "head_sha": "2c4a46cb321db01826d116b5ef2add6b0284d68c",
+      "harness": "claude",
+      "model": "m",
+      "effort": "high",
+      "endpoint": null,
+      "model_reported": "m",
+      "tokens": 2000,
+      "blocked": false,
+      "blocked_reason": null,
+      "commit_sha": null,
+      "summary": "s",
+      "resolutions": [
+        {
+          "resolution": "fixed"
+        },
+        {
+          "resolution": "fixed"
+        },
+        {
+          "resolution": "skipped"
+        }
+      ]
+    },
+    {
+      "v": 1,
+      "leg": "review",
+      "pass": 2,
+      "state": "complete",
+      "ts": 1786999940,
+      "done_ts": 1786999970,
+      "run_id": "x",
+      "head_sha": "2c4a46cb321db01826d116b5ef2add6b0284d68c",
+      "harness": "claude",
+      "model": "m",
+      "effort": "high",
+      "endpoint": null,
+      "model_reported": "m",
+      "tokens": 1000,
+      "verdict": "issues-remain",
+      "findings": [
+        {
+          "severity": "medium"
+        }
+      ]
+    },
+    {
+      "v": 1,
+      "leg": "resolve",
+      "pass": 2,
+      "state": "complete",
+      "ts": 1786999940,
+      "done_ts": 1786999970,
+      "run_id": "x",
+      "head_sha": "2c4a46cb321db01826d116b5ef2add6b0284d68c",
+      "harness": "claude",
+      "model": "m",
+      "effort": "high",
+      "endpoint": null,
+      "model_reported": "m",
+      "tokens": 2000,
+      "blocked": false,
+      "blocked_reason": null,
+      "commit_sha": "d81a3f2abc",
+      "summary": "s",
+      "resolutions": [
+        {
+          "resolution": "fixed"
+        }
+      ]
+    },
+    {
+      "v": 1,
+      "leg": "review",
+      "pass": 3,
+      "state": "declined",
+      "ts": 1787000000,
+      "done_ts": 1787000000,
+      "run_id": "x",
+      "head_sha": "2c4a46cb321db01826d116b5ef2add6b0284d68c",
+      "harness": null,
+      "model": null,
+      "effort": null,
+      "endpoint": null,
+      "model_reported": null,
+      "tokens": null,
+      "verdict": "declined",
+      "reason": "reached max_prs_per_day (25) — 25 other pull requests were already reviewed in the last 24 hours",
+      "findings": []
+    }
+  ],
+  "want": {
+    "state": "halted",
+    "pass": 2,
+    "max_pass": 3,
+    "rows": [
+      {
+        "pass": 1,
+        "leg": "review",
+        "step": "ok",
+        "description": "2 high, 1 low",
+        "rendered": "1  ✓ review   2 high, 1 low"
+      },
+      {
+        "pass": 1,
+        "leg": "resolve",
+        "step": "ok",
+        "description": "2 fixed, 1 skipped",
+        "rendered": "   ✓ resolve  2 fixed, 1 skipped"
+      },
+      {
+        "pass": 2,
+        "leg": "review",
+        "step": "ok",
+        "description": "1 medium",
+        "rendered": "2  ✓ review   1 medium"
+      },
+      {
+        "pass": 2,
+        "leg": "resolve",
+        "step": "ok",
+        "description": "1 fixed, pushed d81a3f2",
+        "rendered": "   ✓ resolve  1 fixed, pushed d81a3f2"
+      },
+      {
+        "pass": 3,
+        "leg": "review",
+        "step": "no",
+        "description": "never started — reached max_prs_per_day (25) — 25 other pull requests were already reviewed in the last 24 hours",
+        "rendered": "3  ✗ review   never started — reached max_prs_per_day (25) — 25 other pull requests were already reviewed in the last 24 hours"
+      },
+      {
+        "pass": 3,
+        "leg": "resolve",
+        "step": "opt",
+        "description": "not run",
+        "rendered": "   ○ resolve  not run"
+      }
+    ],
+    "next": [
+      {
+        "kind": "line",
+        "t": "pass 3 never began — reached max_prs_per_day (25) — 25 other pull requests were already reviewed in the last 24 hours."
+      },
+      {
+        "kind": "line",
+        "t": "So anything pass 2 changed is unverified. Raise the cap in"
+      },
+      {
+        "kind": "line",
+        "t": ".github/crossrev.yml, then:"
+      },
+      {
+        "kind": "cmd",
+        "t": "crossrev review --pr 42"
+      }
+    ]
+  }
+}

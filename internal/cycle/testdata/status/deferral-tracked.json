@@ -1,0 +1,94 @@
+{
+  "name": "deferral-tracked",
+  "shell": "tests/test-status.sh:391-395",
+  "now": 1787000000,
+  "head_sha": "2c4a46cb321db01826d116b5ef2add6b0284d68c",
+  "min_fix_severity": "medium",
+  "max_passes_per_cycle": 3,
+  "liveness": {
+    "life": "",
+    "detail": ""
+  },
+  "labels": [],
+  "markers": [
+    {
+      "v": 1,
+      "leg": "review",
+      "pass": 1,
+      "state": "complete",
+      "ts": 1786999940,
+      "done_ts": 1786999970,
+      "run_id": "x",
+      "head_sha": "2c4a46cb321db01826d116b5ef2add6b0284d68c",
+      "harness": "claude",
+      "model": "m",
+      "effort": "high",
+      "endpoint": null,
+      "model_reported": "m",
+      "tokens": 1000,
+      "verdict": "issues-remain",
+      "findings": [
+        {
+          "severity": "medium"
+        }
+      ]
+    },
+    {
+      "v": 1,
+      "leg": "resolve",
+      "pass": 1,
+      "state": "complete",
+      "ts": 1786999940,
+      "done_ts": 1786999970,
+      "run_id": "x",
+      "head_sha": "2c4a46cb321db01826d116b5ef2add6b0284d68c",
+      "harness": "claude",
+      "model": "m",
+      "effort": "high",
+      "endpoint": null,
+      "model_reported": "m",
+      "tokens": 2000,
+      "blocked": false,
+      "blocked_reason": null,
+      "commit_sha": null,
+      "summary": "s",
+      "resolutions": [
+        {
+          "resolution": "deferred",
+          "crossrev_tracked": "acme/widget#7"
+        }
+      ]
+    }
+  ],
+  "want": {
+    "state": "converged",
+    "pass": 1,
+    "max_pass": 1,
+    "rows": [
+      {
+        "pass": 1,
+        "leg": "review",
+        "step": "ok",
+        "description": "1 medium",
+        "rendered": "1  ✓ review   1 medium"
+      },
+      {
+        "pass": 1,
+        "leg": "resolve",
+        "step": "ok",
+        "description": "1 deferred",
+        "rendered": "   ✓ resolve  1 deferred"
+      }
+    ],
+    "next": [
+      {
+        "kind": "line",
+        "t": "nothing to run — the loop converged on pass 1: nothing at or"
+      },
+      {
+        "kind": "line",
+        "t": "above min_fix_severity (medium) remains."
+      }
+    ]
+  }
+}

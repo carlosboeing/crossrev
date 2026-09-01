@@ -1,0 +1,75 @@
+{
+  "name": "workflow-in-progress",
+  "shell": "tests/test-status.sh:267-271",
+  "now": 1787000000,
+  "head_sha": "2c4a46cb321db01826d116b5ef2add6b0284d68c",
+  "min_fix_severity": "medium",
+  "max_passes_per_cycle": 3,
+  "liveness": {
+    "life": "running",
+    "detail": ""
+  },
+  "labels": [
+    "crossrev/awaiting-review",
+    "crossrev/pass-1"
+  ],
+  "markers": [
+    {
+      "v": 1,
+      "leg": "review",
+      "pass": 1,
+      "state": "started",
+      "ts": 1786999580,
+      "done_ts": 1786999610,
+      "run_id": "55501",
+      "head_sha": "2c4a46cb321db01826d116b5ef2add6b0284d68c",
+      "harness": "claude",
+      "model": "m",
+      "effort": "high",
+      "endpoint": null,
+      "model_reported": "m",
+      "tokens": 1000,
+      "verdict": "null",
+      "findings": []
+    }
+  ],
+  "want": {
+    "state": "awaiting review",
+    "pass": 1,
+    "max_pass": 1,
+    "rows": [
+      {
+        "pass": 1,
+        "leg": "review",
+        "step": "run",
+        "description": "running now — started 7 minute(s) ago",
+        "rendered": "1  ◐ review   running now — started 7 minute(s) ago"
+      },
+      {
+        "pass": 1,
+        "leg": "resolve",
+        "step": "opt",
+        "description": "not run yet",
+        "rendered": "   ○ resolve  not run yet"
+      }
+    ],
+    "next": [
+      {
+        "kind": "cmd",
+        "t": "crossrev review --pr 42"
+      },
+      {
+        "kind": "line",
+        "t": "Pass 1 is running now, so wait for it rather than starting a"
+      },
+      {
+        "kind": "line",
+        "t": "second run over the same pull request. The command above resumes"
+      },
+      {
+        "kind": "line",
+        "t": "the pass if that one dies."
+      }
+    ]
+  }
+}
