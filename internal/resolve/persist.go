@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/carlosboeing/crossrev/internal/ui"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -113,7 +114,7 @@ func (l *Leg) persistOne(ctx context.Context, s *session, workdir string, d harn
 		labels = append(labels, s.backlogLabels()...)
 		n, err := l.Forge.IssueCreate(ctx, s.repo, item.Title, body, labels)
 		if err != nil || n == 0 {
-			return "", false, warning(
+			return "", false, ui.Warning(
 				"could not file an issue on "+s.repo.String()+" for a deferred finding",
 				"The thread stays open and unresolved instead, so the finding is still visible on the pull request. Check that the backlog labels exist and the token has issues write.",
 			)

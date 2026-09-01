@@ -3,6 +3,7 @@ package resolve
 import (
 	"context"
 	"encoding/json"
+	"github.com/carlosboeing/crossrev/internal/ui"
 	"strconv"
 
 	"github.com/carlosboeing/crossrev/internal/core"
@@ -112,7 +113,7 @@ func (l *Leg) publish(ctx context.Context, s *session, got Result, workdir strin
 		if unthreaded == 1 {
 			noun = "reply"
 		}
-		got.Messages = append(got.Messages, warning(
+		got.Messages = append(got.Messages, ui.Warning(
 			strconv.Itoa(unthreaded)+" "+noun+" could not be threaded and landed as top-level comments",
 			"Each one names the finding it answers, so nothing is lost, but a reader following the diff will not see it beside the code.",
 		))
@@ -210,7 +211,16 @@ func (l *Leg) attachPayload(marker prstate.Marker, got Result) prstate.Marker {
 		marker.Tokens = b
 	}
 	marker.Billing = prstate.Null[string]()
-	billing := harness.BillingFor(l.Harness, marker.Harness.Value(), marker.Endpoint.Value(), lookupEnv(l.Env, "ANTHROPIC_API_KEY") != "")
+	// document() rather than l.Harness: a Leg built without a descriptor falls
+	// back to the embedded one, and invoke already takes that path. Reading
+	// l.Harness directly hands BillingFor a zero-value document, which answers
+	// "" for every harness, so the marker went back to billing:null — the
+	// defect this line exists to close.
+	descriptor, descErr := l.document()
+	if descErr != nil {
+		descriptor = harness.Document{}
+	}
+	billing := harness.BillingFor(descriptor, marker.Harness.Value(), marker.Endpoint.Value(), lookupEnv(l.Env, "ANTHROPIC_API_KEY") != "")
 	if billing != "" {
 		marker.Billing = prstate.Some(billing)
 	}

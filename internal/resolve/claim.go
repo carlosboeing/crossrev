@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/carlosboeing/crossrev/internal/ui"
 	"os"
 	"strconv"
 
@@ -43,7 +44,7 @@ func (l *Leg) claim(ctx context.Context, s *session) (prstate.Marker, string, er
 			open.Resolutions = json.RawMessage("[]")
 			open.CommitSHA = prstate.Null[string]()
 			open.CommitSubject = prstate.Null[string]()
-			return open, warning(
+			return open, ui.Warning(
 				"abandoning the unfinished pass-"+strconv.Itoa(s.pass)+" resolve — "+reason,
 				"Resuming it would reconcile replies against a revision that has moved. Starting the pass again instead.",
 			), nil

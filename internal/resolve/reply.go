@@ -3,6 +3,7 @@ package resolve
 import (
 	"context"
 	"encoding/json"
+	"github.com/carlosboeing/crossrev/internal/ui"
 	"strconv"
 
 	"github.com/carlosboeing/crossrev/internal/core"
@@ -43,7 +44,7 @@ func (l *Leg) replyAndResolve(ctx context.Context, s *session, recs []harness.No
 			if th.RootCommentID != 0 {
 				if err := l.Forge.ReviewReply(ctx, s.repo, s.req.PR, th.RootCommentID, body); err != nil {
 					unthreaded++
-					messages = append(messages, warning(
+					messages = append(messages, ui.Warning(
 						"could not reply in the thread rooted at comment "+strconv.FormatInt(th.RootCommentID, 10)+" on "+s.repo.String()+"#"+strconv.Itoa(s.req.PR),
 						"The resolution is still recorded in the pass marker, but the collaborator reading the thread will not see the reason. Check the token has pull-requests write.",
 					))
@@ -51,7 +52,7 @@ func (l *Leg) replyAndResolve(ctx context.Context, s *session, recs []harness.No
 				}
 			} else {
 				unthreaded++
-				messages = append(messages, warning(
+				messages = append(messages, ui.Warning(
 					"no review thread was found for finding "+id+", so its reply is a top-level comment",
 					"The reply is on the pull request rather than under the code it answers. This is expected when GitHub refused to anchor the original inline comment, and unexpected otherwise.",
 				))
@@ -75,7 +76,7 @@ func (l *Leg) replyAndResolve(ctx context.Context, s *session, recs []harness.No
 			if err := l.Forge.ThreadResolve(ctx, th.ID); err == nil {
 				resolved++
 			} else {
-				messages = append(messages, warning(
+				messages = append(messages, ui.Warning(
 					"could not resolve review thread "+th.ID,
 					"The thread stays open, so the next pass sees it as unsettled and may raise it again. Resolve it by hand, or retry the leg.",
 				))

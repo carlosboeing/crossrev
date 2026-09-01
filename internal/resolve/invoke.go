@@ -242,13 +242,13 @@ func (l *Leg) invoke(ctx context.Context, s *session, marker prstate.Marker, wor
 		spec, err := adapter.Spec(inv)
 		if err != nil {
 			if _, _, restoreErr := sandbox.Restore(workdir, paths); restoreErr != nil {
-				return restoreFailure(s.settings.Harness, restoreErr.Error())
+				return restoreFailure(s.settings.Harness, err.Error(), restoreErr.Error())
 			}
 			return wrapErr(err)
 		}
 		res := l.runner().Run(ctx, spec)
 		if _, _, restoreErr := sandbox.Restore(workdir, paths); restoreErr != nil {
-			return restoreFailure(s.settings.Harness, restoreErr.Error())
+			return restoreFailure(s.settings.Harness, "the attempt finished and its answer was not read", restoreErr.Error())
 		}
 		if l.Log != nil {
 			l.Log.Event("invoke", fmt.Sprintf("harness=%s attempt=%d exit=%d", s.settings.Harness, attempt, res.ExitCode))

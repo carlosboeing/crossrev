@@ -111,7 +111,7 @@ func (l *Leg) admit(ctx context.Context, req Request, loaded Context) (admission
 			if err == nil {
 				ad.otherToday = count
 			} else {
-				ad.warning = warning(
+				ad.warning = ui.Warning(
 					"could not read repository comments while checking max_prs_per_day",
 					"The backstop rounds down to zero rather than stopping a healthy automatic review early. Check GitHub availability and the token's issues read permission.",
 				)

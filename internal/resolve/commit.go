@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/carlosboeing/crossrev/internal/ui"
 	"os"
 
 	"github.com/carlosboeing/crossrev/internal/core"
@@ -109,7 +110,7 @@ func (l *Leg) commitMessage(s *session, recs, findings []harness.Node, marker pr
 		if !CommitSubjectOK(subject, string(raw)) {
 			commitWarning := ""
 			if subject != "" && subject != "null" {
-				commitWarning = warning(
+				commitWarning = ui.Warning(
 					"the resolver's commit subject was rejected, so the commit carries a generic one",
 					"A subject must be one line of at most 100 characters, with no control characters. The fix itself is unaffected.",
 				)

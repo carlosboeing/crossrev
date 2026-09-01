@@ -2,6 +2,7 @@ package resolve
 
 import (
 	"encoding/json"
+	"github.com/carlosboeing/crossrev/internal/harness"
 	"os"
 	"strings"
 	"testing"
@@ -150,5 +151,23 @@ func TestResolveCompletionMarkerHoldsEffortReportedNull(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("forge comment edits did not contain \"effort_reported\":null: %v", e.forge.edits)
+	}
+}
+
+// TestBillingUsesTheResolvedDescriptor pins the fallback document() takes when a
+// Leg is built without a descriptor. Reading l.Harness directly hands BillingFor
+// a zero-value document, which answers "" for every harness, so the marker went
+// back to billing:null — the defect the unconditional billing line closed.
+func TestBillingUsesTheResolvedDescriptor(t *testing.T) {
+	var zero harness.Document
+	if got := harness.BillingFor(zero, "claude", "", false); got != "" {
+		t.Fatalf("a zero-value document answered %q; the test below assumes it answers nothing", got)
+	}
+	loaded, err := harness.Load(harness.DescriptorJSON())
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := harness.BillingFor(loaded, "claude", "", false); got == "" {
+		t.Error("the embedded descriptor answered nothing for claude; billing would be null")
 	}
 }

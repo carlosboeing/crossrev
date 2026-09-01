@@ -177,8 +177,15 @@ func (l *Leg) invoke(ctx context.Context, req Request, loaded Context, settings 
 		return harness.Envelope{}, nil, err
 	}
 	defer func() {
+		// The causal error stays in the message. Overwriting retErr outright
+		// lost why the harness never answered, which is the half a reader acts
+		// on; Bash keeps both (lib/run.sh:684, called from :881 and :893).
 		if _, _, err := sandbox.Restore(workdir, moved); err != nil {
-			retErr = newSandboxRestoreFailure(settings.harness, err.Error())
+			cause := "the attempt finished and its answer was not read"
+			if retErr != nil {
+				cause = retErr.Error()
+			}
+			retErr = newSandboxRestoreFailure(settings.harness, cause, err.Error())
 		}
 	}()
 
