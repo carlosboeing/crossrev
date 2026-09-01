@@ -194,29 +194,30 @@ func (r *fakeRunner) Specs() []exec.Spec {
 }
 
 type fakeForge struct {
-	log            *eventLog
-	pr             forge.PullRequest
-	prErr          error
-	prCalls        int
-	comments       []forge.IssueComment
-	createErr      error
-	created        []string
-	createdIDs     []int64
-	zeroCreateID   bool
-	edits          []string
-	editIDs        []int64
-	labelsAdded    []string
-	labelsRemoved  []string
-	labelAddErr    error
-	threads        []forge.ReviewThread
-	diff           []byte
-	repoComments   []forge.IssueComment
-	nextID         int64
-	ops            []string
-	reviewPosted   []forge.ReviewComment
-	reviewComments []forge.IssueComment
-	placements     []forge.Placement
-	forceFallback  bool
+	log             *eventLog
+	pr              forge.PullRequest
+	prErr           error
+	prCalls         int
+	comments        []forge.IssueComment
+	createErr       error
+	created         []string
+	createdIDs      []int64
+	zeroCreateID    bool
+	edits           []string
+	editIDs         []int64
+	labelsAdded     []string
+	labelsRemoved   []string
+	labelAddErr     error
+	threads         []forge.ReviewThread
+	diff            []byte
+	repoComments    []forge.IssueComment
+	repoCommentsErr error
+	nextID          int64
+	ops             []string
+	reviewPosted    []forge.ReviewComment
+	reviewComments  []forge.IssueComment
+	placements      []forge.Placement
+	forceFallback   bool
 }
 
 func (f *fakeForge) RepoSlug(context.Context) (core.Slug, error) {
@@ -261,7 +262,7 @@ func (f *fakeForge) ReviewComments(context.Context, core.Slug, int) []forge.Issu
 }
 
 func (f *fakeForge) RepoIssueComments(context.Context, core.Slug, time.Time, int) ([]forge.IssueComment, error) {
-	return f.repoComments, nil
+	return f.repoComments, f.repoCommentsErr
 }
 
 func (f *fakeForge) ViewerLogin(context.Context) (string, error) { return author, nil }

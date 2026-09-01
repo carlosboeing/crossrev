@@ -77,9 +77,9 @@ func TestPublishFallsBackToATopLevelComment(t *testing.T) {
 			t.Errorf("placement = %q, want fallback", p)
 		}
 	}
-	joined := strings.Join(got.Messages, "\n")
-	if !strings.Contains(joined, "could not be anchored") {
-		t.Errorf("messages = %q, want the unanchored warning", joined)
+	want := "GitHub would not anchor a comment to app.go:2 (RIGHT) on acme/widget#42\n   The finding is posted as a top-level comment naming that location instead, so it is not lost. A finding on a deleted line needs side LEFT."
+	if !containsString(got.Messages, want) {
+		t.Errorf("messages = %q, want warning %q", got.Messages, want)
 	}
 }
 

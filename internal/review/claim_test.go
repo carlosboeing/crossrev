@@ -149,3 +149,19 @@ func TestClaimWriteCapabilityIsFalse(t *testing.T) {
 		t.Fatal("WriteCapabilityFor(reviewer) is not no")
 	}
 }
+
+func TestClaimWarnsWhenTheDailyReviewBackstopCannotReadComments(t *testing.T) {
+	e := newEnv(t)
+	e.cfg = mustConfig(t, "version: 1\npolicy:\n  max_prs_per_day: 3\n")
+	e.forge.repoCommentsErr = errors.New("comments unavailable")
+	req := e.request(t)
+	req.Trigger = review.TriggerAutomatic
+	got := runLeg(t, e, req)
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
+	want := "could not read repository comments while checking max_prs_per_day\n   The backstop rounds down to zero rather than stopping a healthy automatic review early. Check GitHub availability and the token's issues read permission."
+	if !containsString(got.Messages, want) {
+		t.Errorf("messages = %q, want warning %q", got.Messages, want)
+	}
+}

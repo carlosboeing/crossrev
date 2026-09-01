@@ -111,6 +111,10 @@ func TestCommit(t *testing.T) {
 		if strings.Contains(e.git.commitOpts.Message, "line\nbreak") {
 			t.Fatal("rejected subject was used")
 		}
+		want := "the resolver's commit subject was rejected, so the commit carries a generic one\n   A subject must be one line of at most 100 characters, with no control characters. The fix itself is unaffected."
+		if !strings.Contains(strings.Join(got.Messages, "\n"), want) {
+			t.Errorf("messages = %q, want warning %q", got.Messages, want)
+		}
 	})
 
 	t.Run("a prior commit_sha skips the fix step", func(t *testing.T) {
@@ -209,7 +213,7 @@ func TestCommit(t *testing.T) {
 			HeadSHA: prstate.Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
 		}
 
-		msg := l.commitMessage(s, recs, findings, marker, 1)
+		msg, _ := l.commitMessage(s, recs, findings, marker, 1)
 		if !strings.Contains(msg, "- Bug title.") {
 			t.Fatalf("missing title bullet in commit message: %s", msg)
 		}

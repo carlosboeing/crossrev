@@ -3,6 +3,7 @@ package review
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -75,6 +76,9 @@ func (l *Leg) Run(ctx context.Context, req Request) Result {
 		return out
 	}
 	out.Pass = ad.pass
+	if ad.warning != "" {
+		out.Messages = append(out.Messages, ad.warning)
+	}
 	if ad.already {
 		out.Outcome = OutcomeSkipped
 		out.Reason = "already reviewed"
@@ -132,6 +136,10 @@ func (l *Leg) Run(ctx context.Context, req Request) Result {
 	} else {
 		envelope, payload, err := l.invoke(ctx, req, loaded, settings, ad.pass)
 		if err != nil {
+			var restoreErr *sandboxRestoreFailure
+			if errors.As(err, &restoreErr) {
+				out.Messages = append(out.Messages, restoreErr.Warning())
+			}
 			out.Outcome = OutcomeError
 			out.Err = err
 			return out

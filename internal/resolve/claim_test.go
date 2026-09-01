@@ -145,6 +145,10 @@ func TestClaim(t *testing.T) {
 		if got.Marker.CommentID() != 9002 {
 			t.Errorf("CommentID = %d, want 9002", got.Marker.CommentID())
 		}
+		want := "abandoning the unfinished pass-1 resolve — it was made 120 minutes ago, past the 60-minute window\n   Resuming it would reconcile replies against a revision that has moved. Starting the pass again instead."
+		if !strings.Contains(strings.Join(got.Messages, "\n"), want) {
+			t.Errorf("messages = %q, want warning %q", got.Messages, want)
+		}
 		var recs []map[string]json.RawMessage
 		if err := json.Unmarshal(got.Resolutions, &recs); err != nil {
 			t.Fatalf("resolutions: %v", err)
@@ -156,6 +160,21 @@ func TestClaim(t *testing.T) {
 			t.Fatalf("new attempt did not map finding_id: %s", got.Resolutions)
 		}
 	})
+}
+
+func TestResolveRecordsBillingWithoutUsage(t *testing.T) {
+	e := setup(t)
+	e.addReview(t, defaultFindings(), "issues-remain")
+	got := e.run(t)
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
+	if got.Envelope.Usage != nil {
+		t.Fatal("test harness unexpectedly reported usage")
+	}
+	if billing := got.Marker.Billing.Value(); billing == "" {
+		t.Errorf("billing = %q, want the configured billing mode even without usage", billing)
+	}
 }
 
 func TestNewClaimParityKeys(t *testing.T) {

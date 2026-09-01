@@ -78,6 +78,10 @@ func (l *Leg) publish(ctx context.Context, req Request, loaded Context, settings
 		posted++
 		if placement == forge.PlacementFallback {
 			unanchored++
+			msgs = append(msgs, warning(
+				fmt.Sprintf("GitHub would not anchor a comment to %s:%d (%s) on %s#%d", f.Path, f.Line, side, loaded.Repo, req.PR),
+				"The finding is posted as a top-level comment naming that location instead, so it is not lost. A finding on a deleted line needs side LEFT.",
+			))
 		}
 	}
 	if posted > 0 {
