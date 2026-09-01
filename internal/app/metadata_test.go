@@ -1,11 +1,15 @@
 package app_test
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/carlosboeing/crossrev/internal/app"
+	"github.com/carlosboeing/crossrev/internal/exec"
 )
 
 // --- the name CrossRev proposes, and the slug it implies --------------------
@@ -403,3 +407,309 @@ func read(t *testing.T, path string) string {
 	}
 	return string(b)
 }
+
+// --- the `gh` calls the identity is read through ---------------------------
+
+// recorder is a Runner that starts nothing and remembers everything it was
+// handed, so a test asserts on the argument array and the environment without a
+// process.
+type recorder struct {
+	specs   []exec.Spec
+	results []exec.Result
+	calls   int
+}
+
+func (r *recorder) Run(_ context.Context, spec exec.Spec) exec.Result {
+	r.specs = append(r.specs, spec)
+	i := r.calls
+	r.calls++
+	if i < len(r.results) {
+		return r.results[i]
+	}
+	return exec.Result{Stdout: []byte("{}\n")}
+}
+
+// out is a successful invocation printing s.
+func out(s string) exec.Result { return exec.Result{Stdout: []byte(s)} }
+
+// bad is an invocation that exited non-zero, which is how the stub reports a
+// route declared as `!fail`, and how gh reports a refused API call.
+func bad() exec.Result { return exec.Result{ExitCode: 1} }
+
+// errNoStatus is why a child produced no exit status at all.
+var errNoStatus = errors.New("gh could not be started")
+
+// unresolved is an invocation that never produced an exit status: an
+// unresolvable program, a child that was killed, a context that ended.
+func unresolved() exec.Result { return exec.Result{Err: errNoStatus} }
+
+func (r *recorder) only(t *testing.T) exec.Spec {
+	t.Helper()
+	if len(r.specs) != 1 {
+		t.Fatalf("gh was invoked %d times, want once", len(r.specs))
+	}
+	return r.specs[0]
+}
+
+// wantArgv asserts the whole argument array of the single recorded invocation,
+// and that the program was gh.
+func (r *recorder) wantArgv(t *testing.T, want ...string) {
+	t.Helper()
+	spec := r.only(t)
+	if spec.Path != "gh" {
+		t.Fatalf("program = %q, want %q", spec.Path, "gh")
+	}
+	if len(spec.Args) != len(want) {
+		t.Fatalf("argv = %q\nwant   %q", spec.Args, want)
+	}
+	for i := range want {
+		if spec.Args[i] != want[i] {
+			t.Fatalf("argv = %q\nwant   %q", spec.Args, want)
+		}
+	}
+}
+
+func TestDetectOwnerAsksWhichRepositoryThisIs(t *testing.T) {
+	rec := &recorder{results: []exec.Result{out("acme\n")}}
+
+	owner, err := app.NewGH(rec).DetectOwner(context.Background())
+	if err != nil {
+		t.Fatalf("DetectOwner: %v", err)
+	}
+	if owner != "acme" {
+		t.Fatalf("owner = %q, want %q", owner, "acme")
+	}
+	rec.wantArgv(t, "repo", "view", "--json", "owner", "--jq", ".owner.login")
+}
+
+func TestDetectOwnerFailsWhenGhDoes(t *testing.T) {
+	for name, res := range map[string]exec.Result{"refused": bad(), "never started": unresolved()} {
+		t.Run(name, func(t *testing.T) {
+			rec := &recorder{results: []exec.Result{res}}
+			if _, err := app.NewGH(rec).DetectOwner(context.Background()); err == nil {
+				t.Fatal("DetectOwner returned no error")
+			}
+		})
+	}
+}
+
+// The shell checks gh's exit status and not its output, so a successful call
+// printing nothing yields an empty owner. Its callers then fail on the empty
+// value rather than here. Pinned so the port does not invent a check the
+// shipped tool does not make.
+func TestDetectOwnerAnswersEmptyWhenGhPrintsNothing(t *testing.T) {
+	rec := &recorder{results: []exec.Result{out("")}}
+
+	owner, err := app.NewGH(rec).DetectOwner(context.Background())
+	if err != nil {
+		t.Fatalf("DetectOwner: %v", err)
+	}
+	if owner != "" {
+		t.Fatalf("owner = %q, want empty", owner)
+	}
+}
+
+func TestAccountInfoResolvesAnAccount(t *testing.T) {
+	for _, tc := range []struct {
+		login    string
+		stdout   string
+		wantType string
+		wantID   string
+	}{
+		{"ShoreLogic", "Organization 12345\n", "Organization", "12345"},
+		{"carlosboeing", "User 3394597\n", "User", "3394597"},
+		// A bot login carries brackets, and /users/ resolves it like any other.
+		{"crossrev-acme[bot]", "Bot 99999\n", "Bot", "99999"},
+	} {
+		rec := &recorder{results: []exec.Result{out(tc.stdout)}}
+
+		account, err := app.NewGH(rec).AccountInfo(context.Background(), tc.login)
+		if err != nil {
+			t.Fatalf("AccountInfo(%q): %v", tc.login, err)
+		}
+		if account.Type != tc.wantType || account.ID != tc.wantID {
+			t.Fatalf("AccountInfo(%q) = %+v, want {%s %s}", tc.login, account, tc.wantType, tc.wantID)
+		}
+		rec.wantArgv(t, "api", "users/"+tc.login, "--jq", `"\(.type // empty) \(.id // empty)"`)
+	}
+}
+
+// jq's `\(empty)` produces no output at all, so a response missing either half
+// prints an empty line rather than half an answer. The shell reads that as a
+// failure, and so does this.
+func TestAccountInfoRefusesAHalfAnswer(t *testing.T) {
+	for name, stdout := range map[string]string{
+		"nothing":         "",
+		"a newline alone": "\n",
+		// Both fields present and empty is the one case that reaches the
+		// shell's `!= " "` guard.
+		"two empty fields": " \n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			rec := &recorder{results: []exec.Result{out(stdout)}}
+			if _, err := app.NewGH(rec).AccountInfo(context.Background(), "nobody"); err == nil {
+				t.Fatal("AccountInfo returned no error")
+			}
+		})
+	}
+}
+
+func TestAccountInfoFailsWhenTheAccountDoesNotExist(t *testing.T) {
+	rec := &recorder{results: []exec.Result{bad()}}
+	if _, err := app.NewGH(rec).AccountInfo(context.Background(), "nonexistent"); err == nil {
+		t.Fatal("AccountInfo returned no error")
+	}
+}
+
+// GET /app is authoritative and reachable with the key already on disk: the
+// name on the first line, the slug on the second.
+func TestAppIdentityReadsNameThenSlug(t *testing.T) {
+	rec := &recorder{results: []exec.Result{out("CrossRev ShoreLogic\ncrossrev-shorelogic\n")}}
+
+	identity, err := app.NewGH(rec).AppIdentity(context.Background(), "the-jwt")
+	if err != nil {
+		t.Fatalf("AppIdentity: %v", err)
+	}
+	if identity.Name != "CrossRev ShoreLogic" || identity.Slug != "crossrev-shorelogic" {
+		t.Fatalf("identity = %+v", identity)
+	}
+	rec.wantArgv(t, "api", "-H", "Authorization: Bearer the-jwt", "/app", "--jq", ".name, .slug")
+}
+
+// A reachable API that answered with neither is not evidence of anything, and
+// an empty slug written back would be worse than the stale one it replaced.
+func TestAppIdentityRefusesAnIncompleteAnswer(t *testing.T) {
+	for name, stdout := range map[string]string{
+		"nothing":        "",
+		"the name alone": "CrossRev ShoreLogic\n",
+		"an empty name":  "\ncrossrev-shorelogic\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			rec := &recorder{results: []exec.Result{out(stdout)}}
+			if _, err := app.NewGH(rec).AppIdentity(context.Background(), "the-jwt"); err == nil {
+				t.Fatal("AppIdentity returned no error")
+			}
+		})
+	}
+}
+
+func TestAppIdentityFailsWhenTheAPICannotBeReached(t *testing.T) {
+	rec := &recorder{results: []exec.Result{bad()}}
+	if _, err := app.NewGH(rec).AppIdentity(context.Background(), "the-jwt"); err == nil {
+		t.Fatal("AppIdentity returned no error")
+	}
+}
+
+// The JWT is the App's proof that it is the App: whoever holds one can act as
+// it until it expires. It travels in an argument, so it must not travel into an
+// error string, a terminal or a run log.
+func TestAppIdentityKeepsTheJWTOutOfItsError(t *testing.T) {
+	const jwt = "header.payload.signature-that-must-not-be-printed"
+	rec := &recorder{results: []exec.Result{bad()}}
+
+	_, err := app.NewGH(rec).AppIdentity(context.Background(), jwt)
+	if err == nil {
+		t.Fatal("AppIdentity returned no error")
+	}
+	if strings.Contains(err.Error(), jwt) || strings.Contains(err.Error(), "signature-that-must-not-be-printed") {
+		t.Fatalf("the error carries the JWT: %v", err)
+	}
+}
+
+// Sync is the whole of what `auth status` does before it prints a line: read
+// the authoritative identity, and correct the cache against it.
+func TestSyncCorrectsTheCacheFromTheAuthoritativeIdentity(t *testing.T) {
+	path := writeMeta(t, t.TempDir(), metaFixture)
+	rec := &recorder{results: []exec.Result{out("CrossRev ShoreLogic\ncrossrev-shorelogic\n")}}
+
+	drift, err := app.NewGH(rec).Sync(context.Background(), path, "the-jwt")
+	if err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+	if len(drift) != 2 {
+		t.Fatalf("drift = %+v, want the name and the slug", drift)
+	}
+	meta, err := app.ReadMetadata(path)
+	if err != nil {
+		t.Fatalf("ReadMetadata: %v", err)
+	}
+	if meta.Slug != "crossrev-shorelogic" || meta.Name != "CrossRev ShoreLogic" {
+		t.Fatalf("the cache was not corrected: %+v", meta)
+	}
+}
+
+// An unreachable API is not evidence the cached identity is wrong, so nothing
+// is corrected and nothing is claimed.
+func TestSyncLeavesTheCacheAloneWhenTheAPIFails(t *testing.T) {
+	path := writeMeta(t, t.TempDir(), metaFixture)
+	rec := &recorder{results: []exec.Result{bad()}}
+
+	if _, err := app.NewGH(rec).Sync(context.Background(), path, "the-jwt"); err == nil {
+		t.Fatal("Sync returned no error")
+	}
+	if got := read(t, path); got != metaFixture {
+		t.Fatalf("the cache was rewritten:\n%s", got)
+	}
+}
+
+// A GH with no runner is a wiring bug, not a default: inventing one would start
+// a real child holding a real credential.
+func TestNewGHPanicsWithoutARunner(t *testing.T) {
+	defer func() {
+		if recovered := recover(); recovered == nil {
+			t.Fatal("NewGH(nil) did not panic")
+		}
+	}()
+	app.NewGH(nil)
+}
+
+// The environment gh receives is an allowlist read from this process, not this
+// process's whole environment.
+func TestNewGHPassesAnAllowlistedEnvironment(t *testing.T) {
+	t.Setenv("GH_HOST", "github.example.com")
+	t.Setenv("CROSSREV_NOT_ON_THE_LIST", "present")
+
+	rec := &recorder{results: []exec.Result{out("acme\n")}}
+	if _, err := app.NewGH(rec).DetectOwner(context.Background()); err != nil {
+		t.Fatalf("DetectOwner: %v", err)
+	}
+
+	env := rec.only(t).Env
+	var sawHost, sawPath, sawStray bool
+	for _, entry := range env {
+		switch {
+		case entry == "GH_HOST=github.example.com":
+			sawHost = true
+		case strings.HasPrefix(entry, "PATH="):
+			sawPath = true
+		case strings.HasPrefix(entry, "CROSSREV_NOT_ON_THE_LIST="):
+			sawStray = true
+		}
+	}
+	if !sawHost {
+		t.Error("gh did not receive GH_HOST")
+	}
+	if !sawPath && os.Getenv("PATH") != "" {
+		t.Error("gh did not receive PATH")
+	}
+	if sawStray {
+		t.Error("gh received a variable that is not on the allowlist")
+	}
+}
+
+// WithEnv is what a caller uses to hand gh an environment of its own, which is
+// the only route this package offers to one.
+func TestWithEnvReplacesTheEnvironment(t *testing.T) {
+	rec := &recorder{results: []exec.Result{out("acme\n")}}
+
+	client := app.NewGH(rec, app.WithEnv([]string{"PATH=/only/this"}))
+	if _, err := client.DetectOwner(context.Background()); err != nil {
+		t.Fatalf("DetectOwner: %v", err)
+	}
+	env := rec.only(t).Env
+	if len(env) != 1 || env[0] != "PATH=/only/this" {
+		t.Fatalf("env = %q, want the one entry it was given", env)
+	}
+}
+
+var _ exec.Runner = (*recorder)(nil)

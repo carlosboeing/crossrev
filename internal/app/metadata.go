@@ -2,10 +2,13 @@ package app
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/carlosboeing/crossrev/internal/exec"
 )
 
 // RoleDefaultName is the App name CrossRev proposes for an owner
@@ -344,4 +347,207 @@ func mustEncodeString(s string) json.RawMessage {
 		return json.RawMessage(`""`)
 	}
 	return json.RawMessage(bytes.TrimRight(buf.Bytes(), "\n"))
+}
+
+// --- the `gh` calls the identity is read through ---------------------------
+
+// program is the CLI these reads drive. A bare name, resolved on the PATH of
+// the calling process, which is what the offline suite relies on: it puts
+// tests/stub/gh earlier on the PATH.
+const program = "gh"
+
+// ghEnvironment is what `gh` is allowed to inherit.
+//
+// It is the list internal/forge/ghexec/client.go:56-75 documents, written out
+// again because that one is unexported and this package may not reach into it.
+// The reasoning is that file's, in full; the short form is that every name here
+// is either documented by `gh help environment` or read by the Go runtime `gh`
+// is built on, and that GH_REPO and GH_FORCE_TTY are left out on purpose.
+//
+// This is the orchestrator side of the ADR 0001 boundary, so the four
+// credential names are on the list rather than stripped from it: the child is
+// `gh`, not a model, and `gh` cannot authenticate without one. Nothing here
+// reads attacker-controlled text — every argument is built in this package.
+var ghEnvironment = []string{
+	"PATH",
+	"HOME",
+	"XDG_CONFIG_HOME",
+	"GH_CONFIG_DIR",
+	"GH_HOST",
+	"GH_TOKEN",
+	"GITHUB_TOKEN",
+	"GH_ENTERPRISE_TOKEN",
+	"GITHUB_ENTERPRISE_TOKEN",
+	"SSL_CERT_FILE",
+	"SSL_CERT_DIR",
+	"HTTP_PROXY",
+	"HTTPS_PROXY",
+	"NO_PROXY",
+	"http_proxy",
+	"https_proxy",
+	"no_proxy",
+}
+
+// GH reads GitHub through the `gh` CLI, for the facts an App's identity is
+// checked against.
+type GH struct {
+	runner exec.Runner
+	env    []string
+}
+
+// GHOption adjusts a GH at construction.
+type GHOption func(*GH)
+
+// WithEnv replaces the environment `gh` receives. The default is the allowlist
+// above, read from this process.
+func WithEnv(env []string) GHOption {
+	return func(g *GH) { g.env = env }
+}
+
+// NewGH returns a GH that runs `gh` through runner.
+//
+// A nil runner panics. Inventing one would start a child that may hold a forge
+// credential, which is a wiring bug and not a default. A real child is started
+// through exec.NewOrchestratorRunner, because these calls are the orchestrator's
+// and the credential is what `gh` authenticates with; a test injects a fake.
+func NewGH(runner exec.Runner, opts ...GHOption) *GH {
+	if runner == nil {
+		panic("app.NewGH: runner is nil")
+	}
+	g := &GH{runner: runner, env: exec.Inherit(ghEnvironment)}
+	for _, opt := range opts {
+		opt(g)
+	}
+	return g
+}
+
+// run invokes `gh` with exactly these arguments.
+func (g *GH) run(ctx context.Context, args ...string) exec.Result {
+	return g.runner.Run(ctx, exec.Spec{Path: program, Args: args, Env: g.env})
+}
+
+// answered reports that gh ran and exited zero.
+//
+// The two halves are one question: a non-zero exit is how gh reports a refused
+// API call, and Result.Err is how the runner reports that no child produced a
+// status at all. The shell cannot tell them apart either — `2>/dev/null ||
+// return 1` fires for both.
+func answered(res exec.Result) bool { return res.Err == nil && res.ExitCode == 0 }
+
+// output is gh's stdout with the trailing newlines command substitution would
+// have stripped.
+func output(res exec.Result) string {
+	return strings.TrimRight(string(res.Stdout), "\n")
+}
+
+// ghFailure turns a refused invocation into an error carrying summary.
+//
+// Neither the arguments nor the captured streams are in it, and here that is a
+// requirement rather than a convention: one of these calls carries the App's
+// JWT in an argument, and whoever holds one can act as the App until it
+// expires. An error string reaches a terminal and a run log.
+func ghFailure(summary string, res exec.Result) error {
+	if res.Err != nil {
+		return fmt.Errorf("%s: %w", summary, res.Err)
+	}
+	return fmt.Errorf("%s: gh exited %d", summary, res.ExitCode)
+}
+
+// DetectOwner is the owner of the repository the working directory belongs to
+// (_auth_detect_owner, lib/auth.sh:111).
+//
+// The owner is detected, not asked, because the repository's owner is the trust
+// boundary the private key should sit on.
+//
+// An empty answer is not refused here, because the shell does not refuse one:
+// it checks gh's exit status alone, and its callers fail on the empty value.
+func (g *GH) DetectOwner(ctx context.Context) (string, error) {
+	res := g.run(ctx, "repo", "view", "--json", "owner", "--jq", ".owner.login")
+	if !answered(res) {
+		return "", ghFailure("could not work out which owner this repository belongs to", res)
+	}
+	return output(res), nil
+}
+
+// Account is what GitHub says an account is: a user, an organisation or a bot,
+// and the numeric id that prefills the install page with the right target.
+//
+// The id stays a string. It is read as text, printed as text into an install
+// URL, and handed back to GitHub as text.
+type Account struct {
+	Type string
+	ID   string
+}
+
+// AccountInfo resolves an account by login (_auth_account_info,
+// lib/auth.sh:118).
+//
+// /users/ resolves all three kinds. The `\(…)` interpolation is jq's, so a
+// response missing either half prints nothing at all rather than half an
+// answer: `"\(empty)"` produces no output. That is why an empty line is a
+// failure here and not an account with a missing field.
+func (g *GH) AccountInfo(ctx context.Context, login string) (Account, error) {
+	summary := "could not resolve the account " + login
+
+	res := g.run(ctx, "api", "users/"+login, "--jq", `"\(.type // empty) \(.id // empty)"`)
+	if !answered(res) {
+		return Account{}, ghFailure(summary, res)
+	}
+	info := output(res)
+	// `[[ "$info" != " " && -n "$info" ]]`: a single space is both fields
+	// present and empty, which jq can produce and which answers nothing.
+	if info == "" || info == " " {
+		return Account{}, fmt.Errorf("%s: GitHub answered with neither a type nor an id", summary)
+	}
+	accountType, id, _ := strings.Cut(info, " ")
+	return Account{Type: accountType, ID: id}, nil
+}
+
+// Identity is what an App calls itself, as GitHub has it.
+type Identity struct {
+	Name string
+	Slug string
+}
+
+// AppIdentity reads the authoritative identity with the App's own JWT
+// (_auth_app_identity, lib/auth.sh:183).
+//
+// Authoritative, and reachable with the key already on disk. A reachable API
+// that answered with neither field is not evidence of anything, and an empty
+// slug written back would be worse than the stale one it replaced.
+func (g *GH) AppIdentity(ctx context.Context, jwt string) (Identity, error) {
+	const summary = "could not read the App's identity from GitHub"
+
+	res := g.run(ctx, "api", "-H", "Authorization: Bearer "+jwt, "/app", "--jq", ".name, .slug")
+	if !answered(res) {
+		return Identity{}, ghFailure(summary, res)
+	}
+	// `{ read -r name; read -r slug; }`: the first line and the second, and
+	// nothing if there is no second line.
+	lines := strings.Split(strings.TrimRight(string(res.Stdout), "\n"), "\n")
+	var name, slug string
+	if len(lines) > 0 {
+		name = lines[0]
+	}
+	if len(lines) > 1 {
+		slug = lines[1]
+	}
+	if name == "" || slug == "" {
+		return Identity{}, fmt.Errorf("%s: GitHub answered with no name or no slug", summary)
+	}
+	return Identity{Name: name, Slug: slug}, nil
+}
+
+// Sync reads the authoritative identity and corrects the cache at metaPath
+// against it, returning one entry per field that moved.
+//
+// It is the pair `auth status` performs before it prints a line
+// (lib/auth.sh:398-403). An unreachable API returns an error and leaves the
+// cache alone: it is not evidence the cached identity is wrong.
+func (g *GH) Sync(ctx context.Context, metaPath, jwt string) ([]Drift, error) {
+	identity, err := g.AppIdentity(ctx, jwt)
+	if err != nil {
+		return nil, err
+	}
+	return SyncMeta(metaPath, identity.Name, identity.Slug)
 }
