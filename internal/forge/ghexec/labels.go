@@ -116,7 +116,7 @@ func (c *Client) LabelEnsure(ctx context.Context, repo core.Slug, label forge.La
 		res := c.run(ctx, "api", "--method", "POST", "repos/"+repo.String()+"/labels",
 			"-f", "name="+label.Name, "-f", "color="+colour, "-f", "description="+label.Description)
 		if !answered(res) {
-			return "", failure(fmt.Sprintf("could not create the label '%s' on %s", label.Name, repo), res)
+			return "", failure(fmt.Sprintf("could not create the label '%s' on %s\n   Init could not establish the declared colour and description. Create it by hand, or grant the token issues write.", label.Name, repo), res)
 		}
 		return forge.LabelCreated, nil
 	}

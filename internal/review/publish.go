@@ -91,7 +91,7 @@ func (l *Leg) publish(ctx context.Context, req Request, loaded Context, settings
 		if unanchored == 1 {
 			noun = "finding"
 		}
-		msgs = append(msgs, fmt.Sprintf("%d %s could not be anchored to a line and landed as top-level comments", unanchored, noun))
+		msgs = append(msgs, fmt.Sprintf("%d %s could not be anchored to a line and landed as top-level comments\n   Each one names the location it faults, so nothing is lost, but it sits at the top of the pull request rather than beside the code — and the resolve leg has no thread to reply into either.", unanchored, noun))
 	}
 
 	marker.Findings = attachThreads(marker.Findings, l.Forge.ReviewThreads(ctx, loaded.Repo, req.PR))
@@ -122,7 +122,7 @@ func (l *Leg) publish(ctx context.Context, req Request, loaded Context, settings
 		if actionable == 1 {
 			noun = "finding"
 		}
-		msgs = append(msgs, fmt.Sprintf("the reviewer returned verdict '%s' alongside %d actionable %s", verdict, actionable, noun))
+		msgs = append(msgs, fmt.Sprintf("the reviewer returned verdict '%s' alongside %d actionable %s\n   The actionable count outranks the verdict, so the pass is labelled '%s' to run the resolve leg.", verdict, actionable, noun, next))
 	}
 	warns, err := l.applyPassLabels(ctx, req, loaded, pass, next)
 	msgs = append(msgs, warns...)

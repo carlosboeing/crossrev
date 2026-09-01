@@ -404,7 +404,7 @@ func Validate(raw []byte) string {
 // different file.
 func Load(raw []byte) (Document, error) {
 	if problem := Validate(raw); problem != "" {
-		return Document{}, fmt.Errorf("%w: %s", ErrDescriptor, problem)
+		return Document{}, fmt.Errorf("%w: %s\n   It drives sourced paths, install commands, environment names and quarantine paths, so CrossRev stops rather than acting on it. Fix lib/harnesses.json.", ErrDescriptor, problem)
 	}
 
 	var wire struct {

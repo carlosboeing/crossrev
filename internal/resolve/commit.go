@@ -45,7 +45,7 @@ func (l *Leg) commitAndPush(ctx context.Context, s *session, workdir string, rec
 	}
 	if !staged {
 		if fixed > 0 {
-			messages = append(messages, fmt.Sprintf("the resolver reported %d fix(es) but changed no files", fixed))
+			messages = append(messages, fmt.Sprintf("the resolver reported %d fix(es) but changed no files\n   The replies below will claim a fix that is not in the diff, so their threads stay open and the pass halts for a person. Treat those resolutions as unverified and read the thread before merging.", fixed))
 		}
 		return "", messages, false, nil
 	}

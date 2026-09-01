@@ -191,7 +191,7 @@ func (c *Client) PullRequestDiff(ctx context.Context, repo core.Slug, base, head
 	res := c.run(ctx, "api", "-H", "Accept: application/vnd.github.diff",
 		"repos/"+repo.String()+"/compare/"+base.SHA()+"..."+head.SHA())
 	if !answered(res) {
-		return nil, failure(fmt.Sprintf("could not fetch the diff for %s at %s", repo, head.SHA()), res)
+		return nil, failure(fmt.Sprintf("could not fetch the diff for %s at %s\n   The review leg has nothing to reason about without it. Check network access and `gh auth status`.", repo, head.SHA()), res)
 	}
 	return res.Stdout, nil
 }

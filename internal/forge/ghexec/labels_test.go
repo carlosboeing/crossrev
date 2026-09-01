@@ -2,6 +2,7 @@ package ghexec_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/carlosboeing/crossrev/internal/exec"
@@ -45,8 +46,13 @@ func TestLabelEnsureCreatesAMissingLabel(t *testing.T) {
 
 func TestLabelEnsureReportsAFailedCreation(t *testing.T) {
 	c, _ := client(t, bad(), bad())
-	if _, err := c.LabelEnsure(context.Background(), testSlug(t), forge.Label{Name: "x", Colour: "1a7f37"}); err == nil {
-		t.Error("a refused creation reported success")
+	_, err := c.LabelEnsure(context.Background(), testSlug(t), forge.Label{Name: "x", Colour: "1a7f37"})
+	if err == nil {
+		t.Fatal("a refused creation reported success")
+	}
+	want := "could not create the label 'x' on acme/widget\n   Init could not establish the declared colour and description. Create it by hand, or grant the token issues write."
+	if !strings.Contains(err.Error(), want) {
+		t.Errorf("err = %q, want it to contain %q", err.Error(), want)
 	}
 }
 

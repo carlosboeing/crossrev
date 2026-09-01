@@ -480,6 +480,7 @@ type gitMut struct {
 	pushErr         error
 	commitSHA       string
 	remoteHead      string
+	remoteHeadErr   error
 	pushTarget      vcs.PushTarget
 	pushMismatch    core.Slug
 	beforeCommit    func(dir string)
@@ -613,6 +614,9 @@ func (g *fakeGit) PushURL(context.Context, string) (string, error) {
 	return "https://github.com/" + g.env.slug.String() + ".git", nil
 }
 func (g *fakeGit) RemoteHead(context.Context, string, string) (string, error) {
+	if g.remoteHeadErr != nil {
+		return "", g.remoteHeadErr
+	}
 	if g.remoteHead != "" {
 		return g.remoteHead, nil
 	}

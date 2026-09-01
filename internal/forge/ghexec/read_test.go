@@ -198,6 +198,27 @@ func TestPullRequestDiffArgv(t *testing.T) {
 		"repos/acme/widget/compare/"+base.SHA()+"..."+head.SHA())
 }
 
+func TestPullRequestDiffReportsAFailedFetch(t *testing.T) {
+	base, err := core.NewRevision("2222222222222222222222222222222222222222")
+	if err != nil {
+		t.Fatalf("base: %v", err)
+	}
+	head, err := core.NewRevision("1111111111111111111111111111111111111111")
+	if err != nil {
+		t.Fatalf("head: %v", err)
+	}
+
+	c, _ := client(t, bad())
+	_, err = c.PullRequestDiff(context.Background(), testSlug(t), base, head)
+	if err == nil {
+		t.Fatal("a refused diff fetch reported success")
+	}
+	want := "could not fetch the diff for acme/widget at 1111111111111111111111111111111111111111\n   The review leg has nothing to reason about without it. Check network access and `gh auth status`."
+	if !strings.Contains(err.Error(), want) {
+		t.Errorf("err = %q, want it to contain %q", err.Error(), want)
+	}
+}
+
 func TestIssueCommentsArgvAndOrder(t *testing.T) {
 	page1 := `[{"id":1,"body":"first","created_at":"2026-01-01T00:00:00Z","user":{"login":"carlosboeing"}}]`
 	page2 := `[{"id":2,"body":"second","created_at":"2026-01-02T00:00:00Z","user":{"login":"other"}}]`

@@ -75,7 +75,7 @@ func (l *Leg) publish(ctx context.Context, s *session, got Result, workdir strin
 	commitSHA, msgs, emptyRemote, err := l.commitAndPush(ctx, s, workdir, recs, findings, marker, wrote, remote)
 	got.Messages = append(got.Messages, msgs...)
 	if emptyRemote {
-		got.Messages = append(got.Messages, "could not read "+s.pr.HeadRefName+" on "+remote+", so the check for a concurrent push did not run")
+		got.Messages = append(got.Messages, "could not read "+s.pr.HeadRefName+" on "+remote+", so the check for a concurrent push did not run\n   If someone pushed to that branch while this leg was working, this push may not include their commit. Confirm the branch looks right before merging.")
 	}
 	if err != nil {
 		return fail(err)

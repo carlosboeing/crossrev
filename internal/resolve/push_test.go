@@ -1,6 +1,7 @@
 package resolve
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -31,6 +32,28 @@ func TestPush(t *testing.T) {
 		}
 		if got.Marker.CommitSHA.Value() != e.git.commitSHA {
 			t.Fatalf("marker commit = %q, want %q", got.Marker.CommitSHA.Value(), e.git.commitSHA)
+		}
+	})
+
+	t.Run("an unreadable remote head produces the full concurrent push warning", func(t *testing.T) {
+		e := setup(t)
+		e.addReview(t, defaultFindings(), "issues-remain")
+		e.git.staged = true
+		e.git.remoteHeadErr = errors.New("remote unreachable")
+		got := e.run(t)
+		if got.Err != nil {
+			t.Fatalf("Run: %v", got.Err)
+		}
+		want := "could not read feature on origin, so the check for a concurrent push did not run\n   If someone pushed to that branch while this leg was working, this push may not include their commit. Confirm the branch looks right before merging."
+		found := false
+		for _, m := range got.Messages {
+			if m == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("messages = %q, want warning %q", got.Messages, want)
 		}
 	})
 

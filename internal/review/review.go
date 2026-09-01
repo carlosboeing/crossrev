@@ -97,7 +97,7 @@ func (l *Leg) Run(ctx context.Context, req Request) Result {
 	}
 	if ad.stale != "" {
 		out.Reason = "abandoning the unfinished pass-" + fmt.Sprint(ad.pass) + " review — " + ad.stale
-		out.Messages = append(out.Messages, out.Reason)
+		out.Messages = append(out.Messages, out.Reason+"\n   Resuming it would reconcile against findings that no longer describe this code. Starting the pass again instead.")
 	}
 	if ad.redrive {
 		msg := fmt.Sprintf("Pass %d's review ended blocked — driving pass %d again.", ad.pass, ad.pass)
