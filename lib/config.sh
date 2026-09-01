@@ -319,7 +319,7 @@ cfg_assert_max_passes_per_cycle() {
   max="$(jq -r '.policy.max_passes_per_cycle // empty' <<<"$CFG_MERGED")"
   if [[ "$max" =~ ^[0-9]+$ ]] && (( max > 0 )); then return 0; fi
   ui_die "policy.max_passes_per_cycle is '${max:-unset}', which is not a whole number of passes above zero" \
-    "It bounds how many passes the loop runs by itself before a person has to ask for another, so the smallest meaningful value is 1. Set it to 1 or more in the repository config, or remove it to take the default of 3. To stop crossrev reviewing a repository at all, remove its workflows rather than setting the bound to zero."
+    "It bounds how many passes the loop runs by itself before a person has to ask for another, so the smallest meaningful value is 1. Set it to 1 or more in the repository config, or remove it to take the default of 3. To stop CrossRev reviewing a repository at all, remove its workflows rather than setting the bound to zero."
 }
 
 # Two values, and a third must not be representable.
@@ -367,7 +367,7 @@ cfg_endpoint() {
   ep="$(jq -c --arg n "$name" '.endpoints[$n] // empty' <<<"$CFG_MERGED")"
   [[ -n "$ep" ]] || ui_die \
     "the endpoint '$name' is named in the config but defined nowhere" \
-    "Define it under endpoints: in the repository config, or in $(_cfg_operator_path) if it is machine-local. crossrev will not silently fall back to the vendor's own API."
+    "Define it under endpoints: in the repository config, or in $(_cfg_operator_path) if it is machine-local. CrossRev will not silently fall back to the vendor's own API."
   local url tok
   url="$(jq -r '.base_url // empty' <<<"$ep")"
   tok="$(jq -r '.token_env // empty' <<<"$ep")"
@@ -533,7 +533,7 @@ cfg_assert_path_inside_repo() {
   root="$(git rev-parse --show-toplevel 2>/dev/null)" || ui_die \
     "not inside a git repository" "Run crossrev from a checkout of the repository under review."
   [[ "$path" != /* ]] || ui_die \
-    "the backlog path '$path' is absolute" "Backlog paths are repository-relative, so that crossrev cannot write outside the checkout."
+    "the backlog path '$path' is absolute" "Backlog paths are repository-relative, so that CrossRev cannot write outside the checkout."
   case "$path" in
     ""|".") resolved="$root" ;;
     *) resolved="$(jq -rn --arg c "$root/$path" '

@@ -414,7 +414,7 @@ state_prs_reviewed_today() {
   done
 
   ui_warn "the daily review count stopped after the first 10 pages of repository comments" \
-    "The bound intentionally rounds down rather than stopping healthy automatic reviews early. The count below includes only the comments crossrev inspected."
+    "The bound intentionally rounds down rather than stopping healthy automatic reviews early. The count below includes only the comments CrossRev inspected."
   printf '%s' "$count"
 }
 

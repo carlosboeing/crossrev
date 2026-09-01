@@ -468,7 +468,7 @@ _init_execute() {
       # A repository that governs its own label set is one where inventing labels
       # is worse than stopping.
       ui_die "the GitHub issues destination needs these labels and create_missing_labels is false:$missing" \
-        "The repository asked crossrev to use existing labels only. Create them by hand, or set backlog.github_issues.create_missing_labels: true."
+        "The repository asked CrossRev to use existing labels only. Create them by hand, or set backlog.github_issues.create_missing_labels: true."
     fi
     ui_ok "created $created and found $existed already for filed issues"
   fi
