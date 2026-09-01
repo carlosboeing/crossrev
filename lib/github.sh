@@ -190,7 +190,7 @@ gh_comment_create() {
   id="$(gh api --method POST "repos/$repo/issues/$pr/comments" \
         -f body="$body" --jq .id 2>/dev/null)" \
     || ui_die "could not post a comment on $repo#$pr" \
-       "Every pass records itself in a comment, so crossrev stops rather than working without a record. Check the token has pull-requests write."
+       "Every pass records itself in a comment, so CrossRev stops rather than working without a record. Check the token has pull-requests write."
   printf '%s' "$id"
 }
 

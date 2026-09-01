@@ -880,12 +880,12 @@ run_invoke() {
         semantic_budget=$(( semantic_budget - 1 ))
         _run_retry_reset "$snap_index" "$snap_tree" "$harness" "$problem"
         ui_warn "$harness returned an answer that contradicts what it was given — $problem" \
-          "The shape is right, so this is the model drifting rather than a bug in crossrev or the harness. Anything it edited has been put back, and it is being asked once more; a second one is fatal."
+          "The shape is right, so this is the model drifting rather than a bug in CrossRev or the harness. Anything it edited has been put back, and it is being asked once more; a second one is fatal."
         continue
       fi
       _run_invoke_abort "$snap_index" "$snap_tree"
       ui_die "$harness twice returned an answer that contradicts what it was given — $problem" \
-        "The shape was right both times, so the schema cannot catch this and crossrev will not guess which finding was meant. Nothing has been written to the pull request, and the edits both rejected attempts made have been put back. Re-run the leg, or try the other harness."
+        "The shape was right both times, so the schema cannot catch this and CrossRev will not guess which finding was meant. Nothing has been written to the pull request, and the edits both rejected attempts made have been put back. Re-run the leg, or try the other harness."
     fi
 
     shape_budget=$(( shape_budget - 1 ))
@@ -1106,7 +1106,7 @@ Driving the pass again: the previous attempt was blocked. Reading the diff and a
 
 Reading the diff and any earlier review threads. This comment becomes the pass summary when the review finishes.$(state_marker_encode "$marker")")"
     [[ -n "$comment_id" ]] || ui_die "the claim comment did not post on $CTX_REPO#$CTX_PR" \
-      "The marker is what makes a retry safe, so crossrev stops rather than reviewing without one."
+      "The marker is what makes a retry safe, so CrossRev stops rather than reviewing without one."
     marker="$(jq -c --argjson id "$comment_id" '. + {comment_id: $id}' <<<"$marker")"
   fi
   run_checkpoint
@@ -1492,7 +1492,7 @@ _run_details() {
     fi
   elif [[ -n "$model" && "$model" != "null" ]]; then
     agent="$agent · \`$model\`"
-    gaps="$harness does not report which model answered, so the model above is the one crossrev requested."
+    gaps="$harness does not report which model answered, so the model above is the one CrossRev requested."
   fi
   # A leg can run more than one model, and the cell shows that rather than
   # hiding it behind whichever name sorted first.
@@ -1969,7 +1969,7 @@ Driving the pass again: the previous attempt ended without settling its findings
 
 Verifying each finding against the codebase. This comment becomes the pass summary when the resolve leg finishes.$(state_marker_encode "$marker")")"
     [[ -n "$comment_id" ]] || ui_die "the claim comment did not post on $CTX_REPO#$CTX_PR" \
-      "The marker is what makes a retry safe, so crossrev stops rather than resolving without one."
+      "The marker is what makes a retry safe, so CrossRev stops rather than resolving without one."
   fi
   marker="$(jq -c --argjson id "$comment_id" '. + {comment_id: $id}' <<<"$marker")"
   run_checkpoint
@@ -2188,7 +2188,7 @@ Resolutions recorded; committing and replying now.$(state_marker_encode "$(jq -c
 - $where — matches the existing issue #$dup, so nothing was filed"
       if [[ "$(jq -r '.backlog.github_issues.comment_on_existing_issue' <<<"$CFG_MERGED")" == "true" ]]; then
         gh_issue_comment "$CTX_REPO" "$dup" \
-          "Seen again while reviewing $CTX_REPO#$CTX_PR (crossrev pass $pass).$(state_finding_marker "$id" "$pass" resolve)"
+          "Seen again while reviewing $CTX_REPO#$CTX_PR (CrossRev pass $pass).$(state_finding_marker "$id" "$pass" resolve)"
       fi
     else
       tracked="$(_resolve_persist "$d" "$id" "$pass")" || tracked=""
