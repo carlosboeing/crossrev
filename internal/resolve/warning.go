@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/carlosboeing/crossrev/internal/exec"
+	"github.com/carlosboeing/crossrev/internal/harness"
 
 	"github.com/carlosboeing/crossrev/internal/ui"
 )
@@ -28,14 +29,28 @@ func restoreFailure(harness, problem, restoreErr string) Result {
 }
 
 // runFailureCause names why an attempt is being abandoned, for the message a
-// failed restore prints. It reads the runner's own error first, then a non-zero
-// exit, and falls back to a neutral phrase only when the run itself looks fine.
-func runFailureCause(res exec.Result) string {
+// failed restore prints.
+//
+// Four rungs, in the order a reader can act on. The runner's own error comes
+// first because it means no process ran, which no envelope can describe. Then
+// the harness's own words: every adapter answers Envelope{OK:false} with its
+// diagnostic on a non-zero exit AND on a clean exit that reported failure —
+// claude's is_error, agy's non-SUCCESS status, opencode's empty response. That
+// rung outranks the exit code because "the model refused: no credit" beats "the
+// harness exited 1". The exit code is what is left when the adapter had nothing
+// to quote, and the neutral phrase fires only when the run itself looks fine.
+func runFailureCause(env harness.Envelope, res exec.Result) string {
 	if res.Err != nil {
 		return res.Err.Error()
 	}
+	if !env.OK && env.Error != nil && *env.Error != "" {
+		return *env.Error
+	}
 	if res.ExitCode != 0 {
 		return fmt.Sprintf("the harness exited %d", res.ExitCode)
+	}
+	if !env.OK {
+		return "the harness reported failure and named no reason"
 	}
 	return "the attempt finished and its answer was not read"
 }

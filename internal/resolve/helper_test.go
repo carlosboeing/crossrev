@@ -670,6 +670,7 @@ type stubAdapter struct {
 	calls      int
 	beforeSpec func(harness.Invocation)
 	specErr    error
+	envErr     string
 }
 
 func (a *stubAdapter) Name() string { return "claude" }
@@ -694,6 +695,9 @@ func (a *stubAdapter) Spec(inv harness.Invocation) (exec.Spec, error) {
 func (a *stubAdapter) Envelope(_ harness.Invocation, _ exec.Result) harness.Envelope {
 	i := a.calls
 	a.calls++
+	if a.envErr != "" {
+		return harness.Envelope{Harness: "claude", Error: &a.envErr}
+	}
 	if i >= len(a.payloads) {
 		msg := "no canned payload"
 		return harness.Envelope{Harness: "claude", Error: &msg}

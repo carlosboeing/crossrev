@@ -186,18 +186,28 @@ func TestBillingUsesTheResolvedDescriptor(t *testing.T) {
 // (lib/run.sh:684), so replacing it with a placeholder loses the half a reader
 // acts on.
 func TestRestoreFailureNamesTheRunsOwnFailure(t *testing.T) {
+	refused := "the model refused: no credit on this account"
+	empty := ""
 	cases := []struct {
 		name string
+		env  harness.Envelope
 		res  exec.Result
 		want string
 	}{
-		{"runner error", exec.Result{Err: errors.New("exec: signal killed")}, "exec: signal killed"},
-		{"non-zero exit", exec.Result{ExitCode: 3}, "the harness exited 3"},
-		{"clean run", exec.Result{}, "the attempt finished and its answer was not read"},
+		{"runner error", harness.Envelope{}, exec.Result{Err: errors.New("exec: signal killed")}, "exec: signal killed"},
+		// The harness's own words outrank the exit code. An adapter answers
+		// Envelope{OK:false} on a clean exit too — claude's is_error, agy's
+		// non-SUCCESS status — so reading only the process result returns the
+		// neutral phrase for a run that reported exactly why it failed.
+		{"envelope failure on a clean exit", harness.Envelope{Error: &refused}, exec.Result{}, refused},
+		{"envelope failure beats the exit code", harness.Envelope{Error: &refused}, exec.Result{ExitCode: 1}, refused},
+		{"non-zero exit", harness.Envelope{}, exec.Result{ExitCode: 3}, "the harness exited 3"},
+		{"envelope failure with no words", harness.Envelope{Error: &empty}, exec.Result{}, "the harness reported failure and named no reason"},
+		{"clean run", harness.Envelope{OK: true}, exec.Result{}, "the attempt finished and its answer was not read"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := runFailureCause(c.res); got != c.want {
+			if got := runFailureCause(c.env, c.res); got != c.want {
 				t.Errorf("runFailureCause = %q, want %q", got, c.want)
 			}
 		})
@@ -216,9 +226,52 @@ func TestRestoreFailureCallSiteDerivesTheCause(t *testing.T) {
 	}
 	const placeholder = `"the attempt finished and its answer was not read"`
 	if bytes.Contains(src, []byte(placeholder)) {
-		t.Errorf("invoke.go names the neutral cause directly; it must call runFailureCause(res) so a runner error or a non-zero exit reaches the message")
+		t.Errorf("invoke.go names the neutral cause directly; it must call runFailureCause so a runner error, a harness failure or a non-zero exit reaches the message")
 	}
-	if !bytes.Contains(src, []byte("runFailureCause(res)")) {
-		t.Error("invoke.go no longer derives the cause from the run")
+	// The envelope argument is pinned, not just the call: dropping it is the
+	// regression the exit-0 harness failure escapes through, and it still
+	// compiles as runFailureCause(harness.Envelope{}, res).
+	if !bytes.Contains(src, []byte("runFailureCause(adapter.Envelope(inv, res), res)")) {
+		t.Error("invoke.go no longer derives the cause from both the envelope and the run")
+	}
+}
+
+// TestExitZeroHarnessFailureSurvivesAFailedRestore drives the whole leg rather
+// than runFailureCause, because the unit test above cannot see the argument the
+// call site passes. A harness that exits 0 and reports its own failure — the
+// shape claude's is_error and agy's non-SUCCESS status both take — leaves the
+// process result clean, so a cause read from exec.Result alone answers the
+// neutral phrase and the operator never learns why the harness failed.
+//
+// The restore is made to fail for real: the run makes the worktree read-only,
+// so sandbox.Restore cannot rename CLAUDE.md back out of the quarantine.
+func TestExitZeroHarnessFailureSurvivesAFailedRestore(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores the directory mode this test relies on")
+	}
+	const harnessSaid = "the model refused: no credit on this account"
+
+	e := setup(t)
+	e.addReview(t, defaultFindings(), "issues-remain")
+	e.adapter = &stubAdapter{envErr: harnessSaid}
+	e.runner.onRun = func(spec exec.Spec) {
+		// After the quarantine, before the restore. Renaming CLAUDE.md back
+		// needs write on its parent, and this takes it away.
+		if err := os.Chmod(spec.Dir, 0o500); err != nil {
+			t.Fatalf("chmod %s: %v", spec.Dir, err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(spec.Dir, 0o700) })
+	}
+
+	got := e.run(t)
+	if got.Err == nil {
+		t.Fatal("the leg succeeded; the restore was meant to fail")
+	}
+	message := got.Err.Error()
+	if !strings.Contains(message, "could not be put back") {
+		t.Fatalf("this is not the failed-restore refusal: %s", message)
+	}
+	if !strings.Contains(message, harnessSaid) {
+		t.Errorf("the refusal drops what the harness said.\n got: %s\nwant it to name: %s", message, harnessSaid)
 	}
 }
