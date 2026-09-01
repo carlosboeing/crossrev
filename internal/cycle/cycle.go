@@ -118,18 +118,21 @@ type BoundInput struct {
 	Leg   LegRequest
 }
 
-// BoundResult is how it stopped. Only the failure is read, because the shell
-// writes `_cycle_finish_at_bound … || return 1`.
+// BoundResult is how it stopped. The shell writes
+// `_cycle_finish_at_bound … || return 1`, so the failure is the whole of what
+// it reports; Err carries a context-load refusal the caller has to print, the
+// way Result.Err does.
 type BoundResult struct {
 	Failed bool
+	Err    error
 }
 
 // Bound finishes a cycle whose newest review pass already sits at or past the
-// cap (lib/run.sh:2795-2893).
+// cap (lib/run.sh:2795-2889).
 //
-// It is a seam rather than a method so the port can arrive in its own file. A
-// nil Bound runs nothing and reports no failure, which is silence: it is not
-// what the shell does, and a command wiring this driver has to set it.
+// It is a seam rather than a method so the port can arrive in its own file and
+// so a test can watch the driver hand over. A nil Bound is finishAtBound, which
+// is what the shell calls.
 type Bound func(ctx context.Context, d *Driver, in BoundInput) BoundResult
 
 // Driver is cmd_cycle: the local-mode loop that runs the two legs in sequence
@@ -226,13 +229,17 @@ func (d *Driver) Run(ctx context.Context, req Request) Result {
 	pass := prstate.CurrentReviewPass(state.Markers)
 	if pass >= max {
 		// lib/run.sh:2931-2934
-		if d.Bound != nil && d.Bound(ctx, d, BoundInput{
+		bound := d.Bound
+		if bound == nil {
+			bound = finishAtBound
+		}
+		if res := bound(ctx, d, BoundInput{
 			Pass:  pass,
 			Max:   max,
 			State: state,
 			Leg:   d.legRequest(req, false),
-		}).Failed {
-			return Result{ExitCode: 1}
+		}); res.Failed {
+			return Result{ExitCode: 1, Err: res.Err}
 		}
 		return Result{ExitCode: 0}
 	}
@@ -247,8 +254,7 @@ func (d *Driver) Run(ctx context.Context, req Request) Result {
 			}
 			pass = prstate.CurrentReviewPass(state.Markers)
 			if pass >= max {
-				out.End(fmt.Sprintf("Reached max_passes_per_cycle (%d) on %s#%d without starting another pass.",
-					max, state.Repo, state.PR))
+				out.End(capWithoutStarting(max, state))
 				return Result{ExitCode: 0}
 			}
 		}
@@ -266,30 +272,14 @@ func (d *Driver) Run(ctx context.Context, req Request) Result {
 			return Result{ExitCode: 1, Err: err}
 		}
 		pass = prstate.CurrentReviewPass(state.Markers)
-		reviewMarker, _ := prstate.MarkerFor(state.Markers, pass, core.LegReview)
-		verdict := core.Verdict(reviewMarker.Verdict.Value())
-		if verdict == "" {
-			verdict = core.VerdictBlocked
-		}
-		actionable := actionableCount(reviewMarker.Findings, state.MinFixSeverity)
-
-		if verdict == core.VerdictBlocked {
-			// lib/run.sh:2956-2958
-			out.End(fmt.Sprintf("Halted after pass %d — the reviewer could not complete.", pass))
+		// lib/run.sh:2952-2967, shared with the bound so a byte can only be
+		// wrong in one place.
+		switch readReview(out, state, pass) {
+		case reviewHalted:
 			return Result{ExitCode: 0}
-		}
-		if verdict == core.VerdictConverged || actionable == 0 {
-			// Same agreement the review leg's label keeps: an empty pass while
-			// an escalation stands is a halt, not a convergence
-			// (lib/run.sh:2960-2969).
-			if verdict != core.VerdictConverged && escalatedCount(state.Markers) > 0 {
-				out.End(fmt.Sprintf("Halted after pass %d — the pass raised nothing new, and the escalated findings still need a human decision.", pass))
-			} else {
-				out.End(fmt.Sprintf("Converged after pass %d — nothing at or above min_fix_severity (%s) remains.",
-					pass, state.MinFixSeverity))
-			}
-			// The tip sits after the pair, not inside the converged arm
-			// (lib/run.sh:2968), so this halt nudges and the others do not.
+		case reviewFinished:
+			// The tip sits after the inner if/else, not inside the converged
+			// arm (lib/run.sh:2968), so the escalation halt nudges too.
 			if !req.NoTips {
 				d.nudge()
 			}
@@ -306,47 +296,17 @@ func (d *Driver) Run(ctx context.Context, req Request) Result {
 		if err != nil {
 			return Result{ExitCode: 1, Err: err}
 		}
-		resolveMarker, resolveFound := prstate.MarkerFor(state.Markers, pass, core.LegResolve)
-		if blocked, _ := resolveMarker.Blocked.Get(); blocked {
-			// lib/run.sh:2976-2978
-			out.End(fmt.Sprintf("Halted after pass %d — the resolver reported blocked.", pass))
+		// lib/run.sh:2975-3010, shared with the bound. Without the halt arm the
+		// driver would read a pass the resolve leg labelled halted, start
+		// another one anyway, and re-drive the resolver over work that is
+		// waiting on a person.
+		switch readResolve(out, state, pass) {
+		case resolveHalted:
 			return Result{ExitCode: 0}
-		}
-		if hasStop(state.Labels) {
-			// lib/run.sh:2980-2982
-			out.End(fmt.Sprintf("Halted after pass %d — a point needs a human decision, so crossrev/stop is applied.", pass))
-			return Result{ExitCode: 0}
-		}
-		// The label the resolve leg just applied, read here by the same rule it
-		// wrote it with, so the terminal and the pull request cannot disagree
-		// about how the pass ended. Read once: two calls are two chances to
-		// answer differently (lib/run.sh:2984-2991).
-		label := policy.PassLabelState("")
-		if resolveFound && resolveMarker.State == core.PassComplete {
-			label = policy.ResolvePassLabel(asPolicyResolve(resolveMarker), escalatedCount(state.Markers))
-		}
-		// A pass that settled every finding without pushing is done: the next
-		// review would decline the unchanged head, so the loop stops here rather
-		// than spinning declines until the cap and reporting a convergence as a
-		// failure to converge (lib/run.sh:2993-2999).
-		if label == policy.PassConverged {
-			out.End(fmt.Sprintf("Converged after pass %d — nothing at or above min_fix_severity (%s) remains.",
-				pass, state.MinFixSeverity))
+		case resolveConverged:
 			if !req.NoTips {
 				d.nudge()
 			}
-			return Result{ExitCode: 0}
-		}
-		// And a halt ends the cycle too. Blocked and escalated are caught above,
-		// each by the thing that records them; the halts left here — a deferral
-		// nobody filed, a fix that reached no commit — apply no crossrev/stop,
-		// because nobody pulled the brake. Without this the driver reads a pass
-		// the resolve leg labelled halted, starts another one anyway, and
-		// re-drives the resolver over work that is waiting on a person
-		// (lib/run.sh:3001-3009).
-		if label == policy.PassHalted {
-			out.End(fmt.Sprintf("Halted after pass %d — the resolve leg left something a person has to settle. `crossrev status --pr %d` says what.",
-				pass, state.PR))
 			return Result{ExitCode: 0}
 		}
 	}
