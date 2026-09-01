@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/carlosboeing/crossrev/internal/app"
 	"github.com/carlosboeing/crossrev/internal/exec"
@@ -713,3 +714,244 @@ func TestWithEnvReplacesTheEnvironment(t *testing.T) {
 }
 
 var _ exec.Runner = (*recorder)(nil)
+
+// --- the ledger of long-lived tokens ---------------------------------------
+//
+// `claude setup-token` prints a token valid for a year and says plainly that
+// you will not see it again, so there is nothing to inspect eleven months later
+// and the first sign of expiry is a CI failure on a day nobody is looking.
+// Recording the creation date at the moment it is set is the only point at
+// which the information exists. The ledger holds dates, never tokens.
+
+// stamped is a fixed instant, so a recorded date is an assertion rather than a
+// moving target.
+var stamped = time.Date(2026, 9, 1, 22, 28, 33, 0, time.UTC)
+
+func TestTokenRecordWritesTheLedger(t *testing.T) {
+	env := fakeEnv{"XDG_CONFIG_HOME": t.TempDir()}
+
+	if err := app.TokenRecord(env, "acme/repo", "CLAUDE_CODE_OAUTH_TOKEN", 365, stamped); err != nil {
+		t.Fatalf("TokenRecord: %v", err)
+	}
+
+	// Compact, with a trailing newline: `jq -c` writes it.
+	const want = `{"acme/repo":{"CLAUDE_CODE_OAUTH_TOKEN":{"created":"2026-09-01T22:28:33Z","valid_days":365}}}` + "\n"
+	if got := read(t, app.TokensPath(env)); got != want {
+		t.Fatalf("ledger = %s\nwant     %s", got, want)
+	}
+}
+
+// The ledger names which repositories hold a credential and when each stops
+// working. It is created 0600 in a directory `mkdir -p` leaves at the umask's
+// default, which is what the shell does.
+func TestTokenRecordCreatesTheFile0600(t *testing.T) {
+	env := fakeEnv{"XDG_CONFIG_HOME": t.TempDir()}
+
+	if err := app.TokenRecord(env, "acme/repo", "TOKEN", 365, stamped); err != nil {
+		t.Fatalf("TokenRecord: %v", err)
+	}
+	info, err := os.Stat(app.TokensPath(env))
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("mode = %04o, want 0600", got)
+	}
+	dir, err := os.Stat(filepath.Dir(app.TokensPath(env)))
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if !dir.IsDir() {
+		t.Fatal("the ledger's directory was not created")
+	}
+}
+
+// A second secret in the same repository, and a second repository, land after
+// what is already there. jq appends a key it has not seen.
+func TestTokenRecordAppends(t *testing.T) {
+	env := fakeEnv{"XDG_CONFIG_HOME": t.TempDir()}
+
+	for _, r := range []struct {
+		repo, name string
+		days       int
+	}{
+		{"acme/repo", "FIRST", 365},
+		{"acme/repo", "SECOND", 30},
+		{"other/repo", "THIRD", 1},
+	} {
+		if err := app.TokenRecord(env, r.repo, r.name, r.days, stamped); err != nil {
+			t.Fatalf("TokenRecord: %v", err)
+		}
+	}
+
+	const want = `{"acme/repo":{"FIRST":{"created":"2026-09-01T22:28:33Z","valid_days":365},` +
+		`"SECOND":{"created":"2026-09-01T22:28:33Z","valid_days":30}},` +
+		`"other/repo":{"THIRD":{"created":"2026-09-01T22:28:33Z","valid_days":1}}}` + "\n"
+	if got := read(t, app.TokensPath(env)); got != want {
+		t.Fatalf("ledger = %s\nwant     %s", got, want)
+	}
+}
+
+// Re-recording a secret restamps it where it already sits. Reordering the
+// ledger on every rotation would make a diff of it unreadable.
+func TestTokenRecordUpdatesInPlace(t *testing.T) {
+	env := fakeEnv{"XDG_CONFIG_HOME": t.TempDir()}
+	seedLedger(t, env, `{"r":{"a":{"created":"x","valid_days":1},"b":{"created":"y","valid_days":2}}}`)
+
+	if err := app.TokenRecord(env, "r", "a", 9, stamped); err != nil {
+		t.Fatalf("TokenRecord: %v", err)
+	}
+	const want = `{"r":{"a":{"created":"2026-09-01T22:28:33Z","valid_days":9},"b":{"created":"y","valid_days":2}}}` + "\n"
+	if got := read(t, app.TokensPath(env)); got != want {
+		t.Fatalf("ledger = %s\nwant     %s", got, want)
+	}
+}
+
+// An empty file is `{}`, which is what `[[ -n "$existing" ]] || existing='{}'`
+// says. A file somebody truncated is not a reason to refuse.
+func TestTokenRecordTreatsAnEmptyLedgerAsEmpty(t *testing.T) {
+	env := fakeEnv{"XDG_CONFIG_HOME": t.TempDir()}
+	seedLedger(t, env, "")
+
+	if err := app.TokenRecord(env, "r", "n", 5, stamped); err != nil {
+		t.Fatalf("TokenRecord: %v", err)
+	}
+	const want = `{"r":{"n":{"created":"2026-09-01T22:28:33Z","valid_days":5}}}` + "\n"
+	if got := read(t, app.TokensPath(env)); got != want {
+		t.Fatalf("ledger = %s\nwant     %s", got, want)
+	}
+}
+
+// jq refuses both of these and the write never runs, so the ledger on disk is
+// the one that was there. Overwriting it would lose every date it holds.
+func TestTokenRecordRefusesALedgerItCannotRead(t *testing.T) {
+	for name, seed := range map[string]string{
+		"unparseable":                  "garbage",
+		"a repo that is not an object": `{"r":"str"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			env := fakeEnv{"XDG_CONFIG_HOME": t.TempDir()}
+			seedLedger(t, env, seed)
+
+			if err := app.TokenRecord(env, "r", "n", 5, stamped); err == nil {
+				t.Fatal("TokenRecord returned no error")
+			}
+			if got := read(t, app.TokensPath(env)); got != seed {
+				t.Fatalf("the ledger was rewritten: %s", got)
+			}
+		})
+	}
+}
+
+func TestTokenDaysLeft(t *testing.T) {
+	env := fakeEnv{"XDG_CONFIG_HOME": t.TempDir()}
+	if err := app.TokenRecord(env, "acme/repo", "TOKEN", 365, stamped); err != nil {
+		t.Fatalf("TokenRecord: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name string
+		now  time.Time
+		want int
+	}{
+		{"on the day it was recorded", stamped, 365},
+		// Integer division truncates, so a partial day counts for nothing
+		// until it completes.
+		{"most of a day later", stamped.Add(23 * time.Hour), 365},
+		{"a day later", stamped.Add(24 * time.Hour), 364},
+		// Elapsed 24-hour periods, not calendar years: two years from this
+		// instant is 731 days because 2028 has a leap day. Cross-checked
+		// against the shell's own arithmetic.
+		{"long past expiry", stamped.AddDate(2, 0, 0), 365 - 731},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			left, err := app.TokenDaysLeft(env, "acme/repo", "TOKEN", tc.now)
+			if err != nil {
+				t.Fatalf("TokenDaysLeft: %v", err)
+			}
+			if left != tc.want {
+				t.Fatalf("days left = %d, want %d", left, tc.want)
+			}
+		})
+	}
+}
+
+func TestTokenDaysLeftFailsWhenNothingWasRecorded(t *testing.T) {
+	env := fakeEnv{"XDG_CONFIG_HOME": t.TempDir()}
+
+	// No ledger at all.
+	if _, err := app.TokenDaysLeft(env, "acme/repo", "TOKEN", stamped); err == nil {
+		t.Fatal("TokenDaysLeft returned no error with no ledger")
+	}
+
+	seedLedger(t, env, `{"acme/repo":{"OTHER":{"created":"2026-09-01T22:28:33Z","valid_days":365}}}`)
+	if _, err := app.TokenDaysLeft(env, "acme/repo", "TOKEN", stamped); err == nil {
+		t.Fatal("TokenDaysLeft returned no error for a secret nobody recorded")
+	}
+	if _, err := app.TokenDaysLeft(env, "other/repo", "OTHER", stamped); err == nil {
+		t.Fatal("TokenDaysLeft returned no error for a repository nobody recorded")
+	}
+}
+
+// The shell parses the date with BSD `date -j -f`, which takes this layout and
+// no other, before falling back to GNU `date -d`. A date it cannot read is a
+// failure rather than a guess.
+func TestTokenDaysLeftRefusesADateItCannotRead(t *testing.T) {
+	for name, created := range map[string]string{
+		"not a date":              `"nope"`,
+		"absent":                  ``,
+		"an offset rather than Z": `"2026-01-01T00:00:00+10:00"`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			env := fakeEnv{"XDG_CONFIG_HOME": t.TempDir()}
+			entry := `{"valid_days":5}`
+			if created != "" {
+				entry = `{"created":` + created + `,"valid_days":5}`
+			}
+			seedLedger(t, env, `{"r":{"n":`+entry+`}}`)
+
+			if _, err := app.TokenDaysLeft(env, "r", "n", stamped); err == nil {
+				t.Fatal("TokenDaysLeft returned no error")
+			}
+		})
+	}
+}
+
+// `$(( 0.5 - 3 ))` is a bash syntax error, so a fractional validity refuses
+// rather than rounding.
+func TestTokenDaysLeftRefusesAFractionalValidity(t *testing.T) {
+	env := fakeEnv{"XDG_CONFIG_HOME": t.TempDir()}
+	seedLedger(t, env, `{"r":{"n":{"created":"2026-09-01T22:28:33Z","valid_days":0.5}}}`)
+
+	if _, err := app.TokenDaysLeft(env, "r", "n", stamped); err == nil {
+		t.Fatal("TokenDaysLeft returned no error")
+	}
+}
+
+// An entry with no validity counts as zero days: bash reads the bare word
+// `null` as an unset variable and arithmetic on one is zero. Measured, not
+// assumed — the answer is the elapsed days, negated.
+func TestTokenDaysLeftReadsAnAbsentValidityAsZero(t *testing.T) {
+	env := fakeEnv{"XDG_CONFIG_HOME": t.TempDir()}
+	seedLedger(t, env, `{"r":{"n":{"created":"2026-09-01T22:28:33Z"}}}`)
+
+	left, err := app.TokenDaysLeft(env, "r", "n", stamped.AddDate(0, 0, 10))
+	if err != nil {
+		t.Fatalf("TokenDaysLeft: %v", err)
+	}
+	if left != -10 {
+		t.Fatalf("days left = %d, want -10", left)
+	}
+}
+
+// seedLedger puts content at the ledger's path, creating its directory.
+func seedLedger(t *testing.T, env app.Environment, content string) {
+	t.Helper()
+	path := app.TokensPath(env)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("writing the ledger: %v", err)
+	}
+}

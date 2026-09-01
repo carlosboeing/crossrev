@@ -6,7 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/carlosboeing/crossrev/internal/exec"
 )
@@ -550,4 +553,128 @@ func (g *GH) Sync(ctx context.Context, metaPath, jwt string) ([]Drift, error) {
 		return nil, err
 	}
 	return SyncMeta(metaPath, identity.Name, identity.Slug)
+}
+
+// --- the ledger of long-lived tokens ---------------------------------------
+//
+// `claude setup-token` prints a token valid for a year and says plainly that
+// you will not see it again. So there is nothing to inspect eleven months later
+// and no way to recover it — the first sign of expiry is a CI failure on a day
+// nobody is looking. Recording the creation date at the moment it is set is the
+// only point at which the information exists.
+//
+// The ledger holds dates, never tokens.
+
+// stampLayout is the timestamp the ledger records and reads back, which is what
+// `date -u +%Y-%m-%dT%H:%M:%SZ` prints (lib/auth.sh:338).
+//
+// Reading it back is BSD `date -j -f`, which takes this layout and no other,
+// with GNU `date -d` as the fallback. time.Parse is the strict reading: an
+// offset in place of the Z is refused rather than guessed at.
+const stampLayout = "2006-01-02T15:04:05Z"
+
+// TokenRecord writes down that a token was set, and how long it is good for
+// (auth_token_record, lib/auth.sh:332).
+//
+// now is injected rather than read, so what the ledger says is a fact a caller
+// chose and a test can assert.
+func TokenRecord(env Environment, repo, name string, days int, now time.Time) error {
+	path := TokensPath(env)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("could not create the token ledger's directory: %w", err)
+	}
+
+	// `existing="$(cat "$file" 2>/dev/null)"; [[ -n "$existing" ]] || existing='{}'`:
+	// a missing or empty ledger is an empty object, and anything else jq
+	// cannot read refuses below rather than being overwritten.
+	data, readErr := os.ReadFile(path)
+	if readErr != nil || len(bytes.TrimSpace(data)) == 0 {
+		data = []byte("{}")
+	}
+	ledger, err := decodeObject(data)
+	if err != nil {
+		return fmt.Errorf("could not read the token ledger at %s: %w", path, err)
+	}
+
+	// `.[$r] = ((.[$r] // {}) | .[$n] = {...})`: a repository that is absent or
+	// null starts empty, and one holding anything but an object refuses.
+	secrets := &object{values: make(map[string]json.RawMessage)}
+	if raw, held := ledger.get(repo); held && !isJSONNull(raw) {
+		secrets, err = decodeObject(raw)
+		if err != nil {
+			return fmt.Errorf("could not read the token ledger at %s: %w", path, err)
+		}
+	}
+
+	entry := &object{values: make(map[string]json.RawMessage)}
+	entry.set("created", mustEncodeString(now.UTC().Format(stampLayout)))
+	entry.set("valid_days", json.RawMessage(strconv.Itoa(days)))
+	secrets.set(name, bytes.TrimRight(entry.compact(), "\n"))
+	ledger.set(repo, bytes.TrimRight(secrets.compact(), "\n"))
+
+	if err := writeFile0600(path, ledger.compact()); err != nil {
+		return fmt.Errorf("could not write the token ledger at %s: %w", path, err)
+	}
+	return nil
+}
+
+// TokenDaysLeft is how many days a recorded token has before it expires
+// (auth_token_days_left, lib/auth.sh:344).
+//
+// It fails when nothing was recorded for that repository and secret, which is
+// what its caller treats as "no date to report" rather than as an error.
+func TokenDaysLeft(env Environment, repo, name string, now time.Time) (int, error) {
+	path := TokensPath(env)
+	summary := fmt.Sprintf("no recorded date for %s in %s", name, repo)
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0, fmt.Errorf("%s: %w", summary, err)
+	}
+	ledger, err := decodeObject(data)
+	if err != nil {
+		return 0, fmt.Errorf("%s: %w", summary, err)
+	}
+	rawRepo, held := ledger.get(repo)
+	if !held || isJSONNull(rawRepo) {
+		return 0, fmt.Errorf("%s", summary)
+	}
+	secrets, err := decodeObject(rawRepo)
+	if err != nil {
+		return 0, fmt.Errorf("%s: %w", summary, err)
+	}
+	rawEntry, held := secrets.get(name)
+	if !held || isJSONNull(rawEntry) {
+		return 0, fmt.Errorf("%s", summary)
+	}
+	entry, err := decodeObject(rawEntry)
+	if err != nil {
+		return 0, fmt.Errorf("%s: %w", summary, err)
+	}
+
+	start, err := time.Parse(stampLayout, entry.stringValue("created"))
+	if err != nil {
+		return 0, fmt.Errorf("the recorded date for %s in %s cannot be read: %w", name, repo, err)
+	}
+
+	// `$(( days - ... ))`: an absent or null validity is the bare word `null`,
+	// which bash arithmetic reads as an unset variable and therefore as zero. A
+	// fractional one is a syntax error, so it refuses here too.
+	days := 0
+	if raw, held := entry.get("valid_days"); held && !isJSONNull(raw) {
+		days, err = strconv.Atoi(string(bytes.TrimSpace(raw)))
+		if err != nil {
+			return 0, fmt.Errorf("the recorded validity for %s in %s is not a whole number of days", name, repo)
+		}
+	}
+
+	// Integer division truncates, so a partial day counts for nothing until it
+	// completes.
+	return days - int(now.UTC().Sub(start)/(24*time.Hour)), nil
+}
+
+// isJSONNull reports that a raw value is JSON null, which `//` treats as
+// absent.
+func isJSONNull(raw json.RawMessage) bool {
+	return string(bytes.TrimSpace(raw)) == "null"
 }
