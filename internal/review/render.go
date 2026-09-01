@@ -316,7 +316,7 @@ func runDetails(marker prstate.Marker, leg string) string {
 		}
 	} else if model != "" {
 		agent += " · `" + model + "`"
-		gaps = harn + " does not report which model answered, so the model above is the one crossrev requested."
+		gaps = harn + " does not report which model answered, so the model above is the one CrossRev requested."
 	}
 
 	var usage *harness.Usage

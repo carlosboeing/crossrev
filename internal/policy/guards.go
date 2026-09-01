@@ -150,7 +150,7 @@ func AssertEnvClean(env map[string]string) error {
 	return &Refusal{
 		Message: "these endpoint variables are set in the environment CrossRev inherited: " +
 			strings.Join(leaked, " "),
-		Hint: "They redirect the harness process-wide, so a leg would silently run on the wrong model and the loop would complete normally with no error anywhere. Unset them; crossrev sets them per invocation.",
+		Hint: "They redirect the harness process-wide, so a leg would silently run on the wrong model and the loop would complete normally with no error anywhere. Unset them; CrossRev sets them per invocation.",
 	}
 }
 

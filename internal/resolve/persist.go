@@ -60,7 +60,7 @@ func (l *Leg) persistDeferred(ctx context.Context, s *session, workdir string, r
 					marker = prstate.EncodeFindingMarker(fid, s.pass, core.LegResolve)
 				}
 				l.Forge.IssueCommentCreate(ctx, s.repo, dup,
-					fmt.Sprintf("Seen again while reviewing %s#%d (crossrev pass %d).%s", s.repo, s.req.PR, s.pass, marker))
+					fmt.Sprintf("Seen again while reviewing %s#%d (CrossRev pass %d).%s", s.repo, s.req.PR, s.pass, marker))
 			}
 		default:
 			landed, ok, persistWarning := l.persistOne(ctx, s, workdir, d, id)

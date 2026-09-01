@@ -247,7 +247,7 @@ func (l *Leg) invoke(ctx context.Context, req Request, loaded Context, settings 
 			}
 			return envelope, nil, &ui.FatalError{
 				Reason: fmt.Sprintf("%s twice returned an answer that contradicts what it was given — %s", settings.harness, problem),
-				Action: "The shape was right both times, so the schema cannot catch this and crossrev will not guess which finding was meant.",
+				Action: "The shape was right both times, so the schema cannot catch this and CrossRev will not guess which finding was meant.",
 			}
 		}
 		shapeBudget--

@@ -50,7 +50,7 @@ func (c *Config) Endpoint(name string) (Endpoint, error) {
 	if boolean, isBoolean := value.(bool); value == nil || (isBoolean && !boolean) {
 		return Endpoint{}, &Refusal{
 			Message: fmt.Sprintf("the endpoint '%s' is named in the config but defined nowhere", name),
-			Hint:    fmt.Sprintf("Define it under endpoints: in the repository config, or in %s if it is machine-local. crossrev will not silently fall back to the vendor's own API.", OperatorPath()),
+			Hint:    fmt.Sprintf("Define it under endpoints: in the repository config, or in %s if it is machine-local. CrossRev will not silently fall back to the vendor's own API.", OperatorPath()),
 		}
 	}
 	defined, _ := value.(*Object)

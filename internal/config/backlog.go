@@ -269,7 +269,7 @@ func AssertPathInsideRepo(root, path string) error {
 	if strings.HasPrefix(path, "/") {
 		return &Refusal{
 			Message: fmt.Sprintf("the backlog path '%s' is absolute", path),
-			Hint:    "Backlog paths are repository-relative, so that crossrev cannot write outside the checkout.",
+			Hint:    "Backlog paths are repository-relative, so that CrossRev cannot write outside the checkout.",
 		}
 	}
 

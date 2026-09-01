@@ -256,7 +256,7 @@ routes_init
 err="$("$CROSSREV" init --yes 2>&1 >/dev/null)"; rc=$?
 is  "init stops when a backlog label is missing" "$rc" "1"
 has "and names the label it will not invent"    "$err" "needs-triage"
-has "and says why it stops"                     "$err" "asked crossrev to use existing labels only"
+has "and says why it stops"                     "$err" "asked CrossRev to use existing labels only"
 
 # --- reading the secrets that are already there --------------------------
 #

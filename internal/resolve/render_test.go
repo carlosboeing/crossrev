@@ -138,7 +138,7 @@ func TestRender(t *testing.T) {
 			Blocked: prstate.Some(false),
 		}
 		got := ResolveSummaryBody(resolutions, findings, "", marker, "acme/widget", 42, 3)
-		wantFootnote := "<sub>claude does not report which model answered, so the model above is the one crossrev requested. </sub>\n\n"
+		wantFootnote := "<sub>claude does not report which model answered, so the model above is the one CrossRev requested. </sub>\n\n"
 		if !strings.Contains(got, wantFootnote) {
 			t.Errorf("summary footnote missing trailing space:\n got: %q\nwant containing: %q", got, wantFootnote)
 		}

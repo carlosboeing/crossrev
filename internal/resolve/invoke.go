@@ -302,7 +302,7 @@ func (l *Leg) invoke(ctx context.Context, s *session, marker prstate.Marker, wor
 				continue
 			}
 			return refuse(fmt.Sprintf("%s twice returned an answer that contradicts what it was given — %s", s.settings.Harness, sem.Problem),
-				"The shape was right both times, so the schema cannot catch this and crossrev will not guess which finding was meant. Nothing has been written to the pull request, and the edits both rejected attempts made have been put back. Re-run the leg, or try the other harness.")
+				"The shape was right both times, so the schema cannot catch this and CrossRev will not guess which finding was meant. Nothing has been written to the pull request, and the edits both rejected attempts made have been put back. Re-run the leg, or try the other harness.")
 		}
 		shapeBudget--
 		if shapeBudget > 0 {

@@ -36,7 +36,7 @@ func TestCommentCreateReportsARefusal(t *testing.T) {
 	if err == nil {
 		t.Fatal("a refused post answered with an id")
 	}
-	want := "could not post a comment on acme/widget#42\n   Every pass records itself in a comment, so crossrev stops rather than working without a record. Check the token has pull-requests write."
+	want := "could not post a comment on acme/widget#42\n   Every pass records itself in a comment, so CrossRev stops rather than working without a record. Check the token has pull-requests write."
 	if !strings.Contains(err.Error(), want) {
 		t.Errorf("err = %q, want it to contain %q", err.Error(), want)
 	}

@@ -90,7 +90,7 @@ func (c *Config) assertMaxPassesPerCycle() error {
 	}
 	return &Refusal{
 		Message: fmt.Sprintf("policy.max_passes_per_cycle is '%s', which is not a whole number of passes above zero", named(value)),
-		Hint:    "It bounds how many passes the loop runs by itself before a person has to ask for another, so the smallest meaningful value is 1. Set it to 1 or more in the repository config, or remove it to take the default of 3. To stop crossrev reviewing a repository at all, remove its workflows rather than setting the bound to zero.",
+		Hint:    "It bounds how many passes the loop runs by itself before a person has to ask for another, so the smallest meaningful value is 1. Set it to 1 or more in the repository config, or remove it to take the default of 3. To stop CrossRev reviewing a repository at all, remove its workflows rather than setting the bound to zero.",
 	}
 }
 

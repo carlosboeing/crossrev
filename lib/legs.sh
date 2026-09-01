@@ -497,7 +497,7 @@ legs_assert_env_clean() {
   [[ -n "${ANTHROPIC_AUTH_TOKEN:-}" ]] && leaked+=("ANTHROPIC_AUTH_TOKEN")
   (( ${#leaked[@]} == 0 )) && return 0
   ui_die "these endpoint variables are set in the environment CrossRev inherited: ${leaked[*]}" \
-    "They redirect the harness process-wide, so a leg would silently run on the wrong model and the loop would complete normally with no error anywhere. Unset them; crossrev sets them per invocation."
+    "They redirect the harness process-wide, so a leg would silently run on the wrong model and the loop would complete normally with no error anywhere. Unset them; CrossRev sets them per invocation."
 }
 
 # The part of a harness's stderr worth showing, capped at $2 bytes.
