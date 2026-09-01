@@ -89,6 +89,38 @@ func TestInvokeSemanticRetryRunsTheHarnessOnceMore(t *testing.T) {
 	}
 }
 
+func TestInvokeWarnsWhenSandboxRestoreFails(t *testing.T) {
+	e := newEnv(t)
+	if err := os.WriteFile(e.dir+"/CLAUDE.md", []byte("quarantine me\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var workdir string
+	defer func() {
+		if workdir != "" {
+			if err := os.Chmod(workdir, 0o700); err != nil {
+				t.Errorf("restore workdir permissions: %v", err)
+			}
+		}
+	}()
+	e.runner.onSpec = func(spec exec.Spec) {
+		workdir = spec.Dir
+		if err := os.Chmod(workdir, 0o500); err != nil {
+			t.Errorf("make sandbox restore fail: %v", err)
+		}
+	}
+	got := runLeg(t, e, e.request(t))
+	if got.Err == nil {
+		t.Fatal("Run succeeded after the sandbox restore failed")
+	}
+	if !strings.Contains(got.Err.Error(), "could not be put back") {
+		t.Errorf("error = %q, want the restore refusal", got.Err)
+	}
+	want := "the rejected attempt's edits could not be put back\n   They are still in the checkout, and a later run would capture them as its own baseline. Check `git status` before re-running the leg."
+	if !strings.Contains(strings.Join(got.Messages, "\n"), want) {
+		t.Errorf("messages = %q, want warning %q", got.Messages, want)
+	}
+}
+
 func TestInvokeSchemaNativeShapeErrorDoesNotRetry(t *testing.T) {
 	e := newEnv(t)
 	leg := e.leg(t)

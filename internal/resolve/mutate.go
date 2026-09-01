@@ -3,6 +3,7 @@ package resolve
 import (
 	"context"
 	"encoding/json"
+	"strconv"
 
 	"github.com/carlosboeing/crossrev/internal/core"
 	"github.com/carlosboeing/crossrev/internal/harness"
@@ -36,7 +37,7 @@ func (l *Leg) publish(ctx context.Context, s *session, got Result, workdir strin
 	}
 
 	if resolutionCount(marker) == 0 {
-		marker = attachPayload(marker, got)
+		marker = l.attachPayload(marker, got)
 		body, err := l.encodeClaim(marker, passHeading(s), "Resolutions recorded; committing and replying now.")
 		if err != nil {
 			return fail(err)
@@ -66,9 +67,10 @@ func (l *Leg) publish(ctx context.Context, s *session, got Result, workdir strin
 	recs := unmarshalResolutions(marker.Resolutions)
 	findings := s.findings
 	sha, _ := marker.HeadSHA.Get()
-	filed, matched, wrote, deferredLines, recs := l.persistDeferred(ctx, s, workdir, recs, findings, sha)
+	filed, matched, wrote, deferredLines, recs, persistMessages := l.persistDeferred(ctx, s, workdir, recs, findings, sha)
 	_ = filed
 	_ = matched
+	got.Messages = append(got.Messages, persistMessages...)
 	marker.Resolutions = marshalResolutions(recs)
 	got.Resolutions = marker.Resolutions
 
@@ -103,7 +105,18 @@ func (l *Leg) publish(ctx context.Context, s *session, got Result, workdir strin
 	unthreaded := len(unthreadedIDs)
 
 	threads := l.Forge.ReviewThreads(ctx, s.repo, s.req.PR)
-	resolvedN, escalated, unthreaded, findingsRaw := l.replyAndResolve(ctx, s, recs, findings, threads, commitSHA, already, unthreaded)
+	resolvedN, escalated, unthreaded, findingsRaw, replyMessages := l.replyAndResolve(ctx, s, recs, findings, threads, commitSHA, already, unthreaded)
+	got.Messages = append(got.Messages, replyMessages...)
+	if unthreaded > 0 {
+		noun := "replies"
+		if unthreaded == 1 {
+			noun = "reply"
+		}
+		got.Messages = append(got.Messages, warning(
+			strconv.Itoa(unthreaded)+" "+noun+" could not be threaded and landed as top-level comments",
+			"Each one names the finding it answers, so nothing is lost, but a reader following the diff will not see it beside the code.",
+		))
+	}
 
 	reviewBody := reviewSummaryBody(findingsRaw, s.review, s.repo, s.minFix, s.maxPasses)
 	updated := s.review
@@ -157,7 +170,7 @@ func (l *Leg) publish(ctx context.Context, s *session, got Result, workdir strin
 	return got
 }
 
-func attachPayload(marker prstate.Marker, got Result) prstate.Marker {
+func (l *Leg) attachPayload(marker prstate.Marker, got Result) prstate.Marker {
 	marker.Resolutions = got.Resolutions
 	var doc map[string]json.RawMessage
 	_ = json.Unmarshal(got.Envelope.Payload, &doc)
@@ -196,6 +209,11 @@ func attachPayload(marker prstate.Marker, got Result) prstate.Marker {
 		b, _ := json.Marshal(*got.Envelope.Tokens)
 		marker.Tokens = b
 	}
+	marker.Billing = prstate.Null[string]()
+	billing := harness.BillingFor(l.Harness, marker.Harness.Value(), marker.Endpoint.Value(), lookupEnv(l.Env, "ANTHROPIC_API_KEY") != "")
+	if billing != "" {
+		marker.Billing = prstate.Some(billing)
+	}
 	if got.Envelope.Usage != nil {
 		usage := *got.Envelope.Usage
 		if table, err := harness.PriceTable(); err == nil {
@@ -203,9 +221,6 @@ func attachPayload(marker prstate.Marker, got Result) prstate.Marker {
 		}
 		b, _ := json.Marshal(usage)
 		marker.Usage = b
-		if usage.Billing != nil {
-			marker.Billing = prstate.Some(*usage.Billing)
-		}
 	}
 	return marker
 }

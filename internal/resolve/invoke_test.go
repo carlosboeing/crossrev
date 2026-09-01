@@ -2,6 +2,7 @@ package resolve
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -136,6 +137,37 @@ func TestInvoke(t *testing.T) {
 		}
 		if e.adapter.calls != 1 {
 			t.Fatalf("adapter calls = %d, want 1 (no retry)", e.adapter.calls)
+		}
+	})
+
+	t.Run("a sandbox restore failure warns before refusing the attempt", func(t *testing.T) {
+		e := setup(t)
+		e.addReview(t, defaultFindings(), "issues-remain")
+		var workdir string
+		defer func() {
+			if workdir != "" {
+				if err := os.Chmod(workdir, 0o700); err != nil {
+					t.Errorf("restore workdir permissions: %v", err)
+				}
+			}
+		}()
+		e.adapter.beforeSpec = func(inv harness.Invocation) {
+			workdir = inv.Workdir
+			if err := os.Chmod(workdir, 0o500); err != nil {
+				t.Errorf("make sandbox restore fail: %v", err)
+			}
+		}
+		e.adapter.specErr = errors.New("adapter setup failed")
+		got := e.run(t)
+		if got.Err == nil {
+			t.Fatal("Run succeeded after the sandbox restore failed")
+		}
+		if !strings.Contains(got.Err.Error(), "could not be put back") {
+			t.Errorf("error = %q, want the restore refusal", got.Err)
+		}
+		want := "the rejected attempt's edits could not be put back\n   They are still in the checkout, and a later run would capture them as its own baseline. Check `git status` before re-running the leg."
+		if !strings.Contains(strings.Join(got.Messages, "\n"), want) {
+			t.Errorf("messages = %q, want warning %q", got.Messages, want)
 		}
 	})
 

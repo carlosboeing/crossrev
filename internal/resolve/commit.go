@@ -71,7 +71,10 @@ func (l *Leg) commitAndPush(ctx context.Context, s *session, workdir string, rec
 		}
 	}
 
-	msg := l.commitMessage(s, recs, findings, marker, fixed)
+	msg, commitWarning := l.commitMessage(s, recs, findings, marker, fixed)
+	if commitWarning != "" {
+		messages = append(messages, commitWarning)
+	}
 	runHooks := s.gitHooksRun()
 	if l.Log != nil {
 		l.Log.Event("commit", "start branch="+s.pr.HeadRefName)
@@ -96,7 +99,7 @@ func (l *Leg) commitAndPush(ctx context.Context, s *session, workdir string, rec
 	return sha, messages, emptyRemote, err
 }
 
-func (l *Leg) commitMessage(s *session, recs, findings []harness.Node, marker prstate.Marker, fixed int) string {
+func (l *Leg) commitMessage(s *session, recs, findings []harness.Node, marker prstate.Marker, fixed int) (string, string) {
 	resolutions := marshalResolutions(recs)
 	findingsRaw, _ := json.Marshal(findings)
 	sha, _ := marker.HeadSHA.Get()
@@ -104,12 +107,20 @@ func (l *Leg) commitMessage(s *session, recs, findings []harness.Node, marker pr
 		subject, _ := marker.CommitSubject.Get()
 		raw, _ := marker.MarshalJSON()
 		if !CommitSubjectOK(subject, string(raw)) {
+			commitWarning := ""
+			if subject != "" && subject != "null" {
+				commitWarning = warning(
+					"the resolver's commit subject was rejected, so the commit carries a generic one",
+					"A subject must be one line of at most 100 characters, with no control characters. The fix itself is unaffected.",
+				)
+			}
 			subject = fmt.Sprintf("fix: resolve crossrev review findings (pass %d)", s.pass)
+			return subject + "\n\n" + CommitBody(resolutions, findingsRaw, "fixed", sha, s.pass, s.repo.String(), s.req.PR), commitWarning
 		}
-		return subject + "\n\n" + CommitBody(resolutions, findingsRaw, "fixed", sha, s.pass, s.repo.String(), s.req.PR)
+		return subject + "\n\n" + CommitBody(resolutions, findingsRaw, "fixed", sha, s.pass, s.repo.String(), s.req.PR), ""
 	}
 	return fmt.Sprintf("chore: record deferred crossrev findings (pass %d)\n\n%s",
-		s.pass, CommitBody(resolutions, findingsRaw, "deferred", sha, s.pass, s.repo.String(), s.req.PR))
+		s.pass, CommitBody(resolutions, findingsRaw, "deferred", sha, s.pass, s.repo.String(), s.req.PR)), ""
 }
 
 func (l *Leg) pushHead(ctx context.Context, work Git, s *session, remote string, runHooks bool) (string, bool, error) {

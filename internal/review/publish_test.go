@@ -82,6 +82,10 @@ func TestPublishFallsBackToATopLevelComment(t *testing.T) {
 	if !strings.Contains(joined, wantWarning) {
 		t.Errorf("messages = %q, want unanchored warning %q", joined, wantWarning)
 	}
+	want := "GitHub would not anchor a comment to app.go:2 (RIGHT) on acme/widget#42\n   The finding is posted as a top-level comment naming that location instead, so it is not lost. A finding on a deleted line needs side LEFT."
+	if !containsString(got.Messages, want) {
+		t.Errorf("messages = %q, want warning %q", got.Messages, want)
+	}
 }
 
 func TestPublishWarnsWhenVerdictIsConvergedAlongsideActionableFindings(t *testing.T) {

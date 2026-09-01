@@ -168,6 +168,10 @@ func TestPersist(t *testing.T) {
 		if strings.Contains(string(got.Resolutions), `"crossrev_tracked":"acme/widget#`) {
 			t.Fatalf("recorded a landing that did not happen: %s", got.Resolutions)
 		}
+		want := "could not file an issue on acme/widget for a deferred finding\n   The thread stays open and unresolved instead, so the finding is still visible on the pull request. Check that the backlog labels exist and the token has issues write."
+		if !strings.Contains(strings.Join(got.Messages, "\n"), want) {
+			t.Errorf("messages = %q, want warning %q", got.Messages, want)
+		}
 	})
 
 	t.Run("a repository folder write is one file per finding", func(t *testing.T) {
@@ -268,7 +272,7 @@ func TestPersist(t *testing.T) {
 		}
 		workdir := t.TempDir()
 		leg := &Leg{Forge: e.forge, Git: e.git}
-		filed, matched, wrote, lines, out := leg.persistDeferred(context.Background(), s, workdir, recs, findings, e.head.SHA())
+		filed, matched, wrote, lines, out, _ := leg.persistDeferred(context.Background(), s, workdir, recs, findings, e.head.SHA())
 		if filed != 1 || !wrote {
 			t.Fatalf("filed=%d, wrote=%v, lines=%s", filed, wrote, lines)
 		}

@@ -241,11 +241,15 @@ func (l *Leg) invoke(ctx context.Context, s *session, marker prstate.Marker, wor
 		}
 		spec, err := adapter.Spec(inv)
 		if err != nil {
-			_, _, _ = sandbox.Restore(workdir, paths)
+			if _, _, restoreErr := sandbox.Restore(workdir, paths); restoreErr != nil {
+				return restoreFailure(s.settings.Harness, restoreErr.Error())
+			}
 			return wrapErr(err)
 		}
 		res := l.runner().Run(ctx, spec)
-		_, _, _ = sandbox.Restore(workdir, paths)
+		if _, _, restoreErr := sandbox.Restore(workdir, paths); restoreErr != nil {
+			return restoreFailure(s.settings.Harness, restoreErr.Error())
+		}
 		if l.Log != nil {
 			l.Log.Event("invoke", fmt.Sprintf("harness=%s attempt=%d exit=%d", s.settings.Harness, attempt, res.ExitCode))
 		}
