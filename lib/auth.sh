@@ -1018,7 +1018,7 @@ auth_refresh() {
   # working credential, reported as a success, and rejected by every leg from
   # then on. Refuse instead: the stored secret still holds something that works.
   after="$(cred_seconds_left "$harness" "$check")" || ui_die \
-    "the refreshed credential's expiry cannot be read, so crossrev will not write it back" \
+    "the refreshed credential's expiry cannot be read, so CrossRev will not write it back" \
     "The vendor answered, but what came back does not parse as a token with an exp claim. The stored secret is untouched and still works until it expires. Re-seed it by hand if this repeats: $seed_hint."
 
   # An expiry no later than the one it replaces means the refresh did not happen,
