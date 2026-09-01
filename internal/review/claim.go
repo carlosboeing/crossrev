@@ -187,7 +187,7 @@ func (l *Leg) postClaim(ctx context.Context, req Request, loaded Context, ad adm
 	if err != nil || id == 0 {
 		return prstate.Marker{}, 0, &ui.FatalError{
 			Reason: fmt.Sprintf("the claim comment did not post on %s#%d", loaded.Repo, req.PR),
-			Action: "The marker is what makes a retry safe, so crossrev stops rather than reviewing without one.",
+			Action: "The marker is what makes a retry safe, so CrossRev stops rather than reviewing without one.",
 		}
 	}
 	return marker, id, nil

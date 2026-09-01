@@ -22,7 +22,7 @@ const (
 
 // CommentCreate posts an overall comment and returns its id.
 func (c *Client) CommentCreate(ctx context.Context, repo core.Slug, number int, body string) (int64, error) {
-	summary := fmt.Sprintf("could not post a comment on %s#%d\n   Every pass records itself in a comment, so crossrev stops rather than working without a record. Check the token has pull-requests write.", repo, number)
+	summary := fmt.Sprintf("could not post a comment on %s#%d\n   Every pass records itself in a comment, so CrossRev stops rather than working without a record. Check the token has pull-requests write.", repo, number)
 
 	filtered, lost, err := c.publish(body)
 	if err != nil {

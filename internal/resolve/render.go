@@ -427,7 +427,7 @@ func runDetails(m prstate.Marker, leg string) string {
 		}
 	} else if model != "" && model != "null" {
 		agent += " · `" + model + "`"
-		gaps = harnessName + " does not report which model answered, so the model above is the one crossrev requested."
+		gaps = harnessName + " does not report which model answered, so the model above is the one CrossRev requested."
 	}
 	var usage *harness.Usage
 	if len(m.Usage) > 0 && string(m.Usage) != "null" {

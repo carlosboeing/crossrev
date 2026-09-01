@@ -61,7 +61,7 @@ func TestReviewFootnoteKeepsTheTrailingSpace(t *testing.T) {
 		Model:   prstate.Some("claude-opus-4-6"),
 	}
 	got := runDetails(m, "review")
-	const want = "<sub>claude does not report which model answered, so the model above is the one crossrev requested. </sub>"
+	const want = "<sub>claude does not report which model answered, so the model above is the one CrossRev requested. </sub>"
 	if !strings.Contains(got, want) {
 		t.Errorf("run details footnote\n got %q\nwant it to contain %q", got, want)
 	}

@@ -30,7 +30,7 @@ func (l *Leg) claim(ctx context.Context, s *session) (prstate.Marker, string, er
 		if err := l.Forge.CommentEdit(ctx, s.repo, id, body); err != nil {
 			return prstate.Marker{}, "", &Refusal{
 				Message: fmt.Sprintf("the claim comment did not post on %s#%d", s.repo, s.req.PR),
-				Hint:    "The marker is what makes a retry safe, so crossrev stops rather than resolving without one.",
+				Hint:    "The marker is what makes a retry safe, so CrossRev stops rather than resolving without one.",
 			}
 		}
 		m = withCommentID(m, id)
@@ -61,7 +61,7 @@ func (l *Leg) claim(ctx context.Context, s *session) (prstate.Marker, string, er
 	if err != nil || id == 0 {
 		return prstate.Marker{}, "", &Refusal{
 			Message: fmt.Sprintf("the claim comment did not post on %s#%d", s.repo, s.req.PR),
-			Hint:    "The marker is what makes a retry safe, so crossrev stops rather than resolving without one.",
+			Hint:    "The marker is what makes a retry safe, so CrossRev stops rather than resolving without one.",
 		}
 	}
 	return withCommentID(m, id), "", nil

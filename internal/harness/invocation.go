@@ -222,7 +222,7 @@ func AssertEnvClean(env []string) error {
 	return &Refusal{
 		Reason: fmt.Sprintf("these endpoint variables are set in the environment CrossRev inherited: %s",
 			strings.Join(leaked, " ")),
-		Action: "They redirect the harness process-wide, so a leg would silently run on the wrong model and the loop would complete normally with no error anywhere. Unset them; crossrev sets them per invocation.",
+		Action: "They redirect the harness process-wide, so a leg would silently run on the wrong model and the loop would complete normally with no error anywhere. Unset them; CrossRev sets them per invocation.",
 		Kind:   ErrEndpointLeaked,
 	}
 }
