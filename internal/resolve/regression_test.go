@@ -1,8 +1,11 @@
 package resolve
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"github.com/carlosboeing/crossrev/internal/harness"
+	"github.com/carlosboeing/crossrev/internal/prstate"
 	"os"
 	"strings"
 	"testing"
@@ -154,20 +157,68 @@ func TestResolveCompletionMarkerHoldsEffortReportedNull(t *testing.T) {
 	}
 }
 
-// TestBillingUsesTheResolvedDescriptor pins the fallback document() takes when a
-// Leg is built without a descriptor. Reading l.Harness directly hands BillingFor
-// a zero-value document, which answers "" for every harness, so the marker went
-// back to billing:null — the defect the unconditional billing line closed.
+// TestBillingUsesTheResolvedDescriptor drives the marker path on a Leg built
+// with no descriptor, which is the case document() exists for: it falls back to
+// the embedded one. Reading l.Harness directly hands BillingFor a zero-value
+// document, which answers "" for every harness, so the marker reads
+// billing:null — the defect the unconditional billing line closed.
+//
+// Asserting on BillingFor alone would not catch that, because the substitution
+// happens in attachPayload rather than in BillingFor.
 func TestBillingUsesTheResolvedDescriptor(t *testing.T) {
-	var zero harness.Document
-	if got := harness.BillingFor(zero, "claude", "", false); got != "" {
-		t.Fatalf("a zero-value document answered %q; the test below assumes it answers nothing", got)
+	leg := &Leg{} // no Harness: document() must fall back to the embedded one
+	marker := prstate.Marker{
+		Harness:  prstate.Some("claude"),
+		Endpoint: prstate.Null[string](),
 	}
-	loaded, err := harness.Load(harness.DescriptorJSON())
+	got := leg.attachPayload(marker, Result{Envelope: harness.Envelope{}})
+	billing, ok := got.Billing.Get()
+	if !ok || billing == "" {
+		t.Fatalf("billing = %v (present=%v), want a mode from the embedded descriptor", billing, ok)
+	}
+	if got.Billing.IsNull() {
+		t.Error("billing is null; the zero-value document was used instead of the fallback")
+	}
+}
+
+// TestRestoreFailureNamesTheRunsOwnFailure pins that a runner failure survives a
+// failed restore. Bash puts the reason the attempt is abandoned in that message
+// (lib/run.sh:684), so replacing it with a placeholder loses the half a reader
+// acts on.
+func TestRestoreFailureNamesTheRunsOwnFailure(t *testing.T) {
+	cases := []struct {
+		name string
+		res  exec.Result
+		want string
+	}{
+		{"runner error", exec.Result{Err: errors.New("exec: signal killed")}, "exec: signal killed"},
+		{"non-zero exit", exec.Result{ExitCode: 3}, "the harness exited 3"},
+		{"clean run", exec.Result{}, "the attempt finished and its answer was not read"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := runFailureCause(c.res); got != c.want {
+				t.Errorf("runFailureCause = %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
+// TestRestoreFailureCallSiteDerivesTheCause is a source assertion, because the
+// unit test above pins runFailureCause and not the call that uses it: reverting
+// the call site to a literal leaves that test green. The neutral phrase belongs
+// inside runFailureCause and nowhere else, so finding it in invoke.go means the
+// call site stopped reading the run's own failure.
+func TestRestoreFailureCallSiteDerivesTheCause(t *testing.T) {
+	src, err := os.ReadFile("invoke.go")
 	if err != nil {
-		t.Fatalf("Load: %v", err)
+		t.Fatalf("read invoke.go: %v", err)
 	}
-	if got := harness.BillingFor(loaded, "claude", "", false); got == "" {
-		t.Error("the embedded descriptor answered nothing for claude; billing would be null")
+	const placeholder = `"the attempt finished and its answer was not read"`
+	if bytes.Contains(src, []byte(placeholder)) {
+		t.Errorf("invoke.go names the neutral cause directly; it must call runFailureCause(res) so a runner error or a non-zero exit reaches the message")
+	}
+	if !bytes.Contains(src, []byte("runFailureCause(res)")) {
+		t.Error("invoke.go no longer derives the cause from the run")
 	}
 }

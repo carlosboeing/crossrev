@@ -3,6 +3,8 @@ package resolve
 import (
 	"fmt"
 
+	"github.com/carlosboeing/crossrev/internal/exec"
+
 	"github.com/carlosboeing/crossrev/internal/ui"
 )
 
@@ -23,4 +25,17 @@ func restoreFailure(harness, problem, restoreErr string) Result {
 			Hint:    "Retrying on top of a discarded attempt's edits would commit changes no accepted answer describes. Nothing has been written to the pull request; check `git status` in the checkout and re-run the leg.",
 		},
 	}
+}
+
+// runFailureCause names why an attempt is being abandoned, for the message a
+// failed restore prints. It reads the runner's own error first, then a non-zero
+// exit, and falls back to a neutral phrase only when the run itself looks fine.
+func runFailureCause(res exec.Result) string {
+	if res.Err != nil {
+		return res.Err.Error()
+	}
+	if res.ExitCode != 0 {
+		return fmt.Sprintf("the harness exited %d", res.ExitCode)
+	}
+	return "the attempt finished and its answer was not read"
 }
