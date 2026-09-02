@@ -116,7 +116,7 @@ type Redirect struct {
 	// Code is the value of the last ?code= or &code= on the line.
 	Code string
 	// State is the same for state=. Comparing it against the value CrossRev
-	// sent is the caller's (lib/auth.sh:670-673); nothing here checks it,
+	// sent is the caller's (lib/auth.sh:679-682); nothing here checks it,
 	// because _listen_for_code does not either.
 	State string
 }

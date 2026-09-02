@@ -120,7 +120,7 @@ type Metadata struct {
 // ReadMetadata reads one App's cached identity.
 //
 // An absent role is the loop's: anything registered before roles existed has no
-// role key, and `auth status` reads it as `.role // "loop"` (lib/auth.sh:382).
+// role key, and `auth status` reads it as `.role // "loop"` (lib/auth.sh:384).
 func ReadMetadata(path string) (Metadata, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
