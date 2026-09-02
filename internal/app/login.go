@@ -185,7 +185,11 @@ func (c *Commands) Login(ctx context.Context, req LoginRequest) error {
 	// what the shell uses (lib/auth.sh:613).
 	defer os.Remove(page)
 
+	// fromListener records which of the two paths produced the code, because
+	// only a redirect can be required to send the state back
+	// (lib/auth.sh:664-666).
 	var code, returnedState string
+	fromListener := false
 	if listenErr == nil {
 		c.IO.Section("Step 1 of 2: Create the GitHub App")
 		c.IO.Line("A browser tab is open on GitHub's App registration page.")
@@ -198,6 +202,12 @@ func (c *Commands) Login(ctx context.Context, req LoginRequest) error {
 		redirected, err := listener.Wait(ctx, WaitTimeout)
 		if err == nil {
 			code, returnedState = redirected.Code, redirected.State
+			// `if [[ -n "$code" ]]; then from_listener=1; fi`
+			// (lib/auth.sh:683). A wait that ended on a decoy request leaves
+			// an empty code, and that is the paste path rather than a redirect.
+			if code != "" {
+				fromListener = true
+			}
 		} else {
 			c.IO.Warn(
 				fmt.Sprintf("nothing arrived on localhost:%d within five minutes", port),
@@ -240,8 +250,27 @@ func (c *Commands) Login(ctx context.Context, req LoginRequest) error {
 			"no code found",
 			"Paste the full URL from the address bar, or just the value after code=")
 	}
-	if returnedState != "" && returnedState != state {
-		// The lowercase `crossrev` is the shell's own byte (lib/auth.sh:681).
+	// The two paths make different claims, so they are checked differently
+	// (lib/auth.sh:715-736).
+	//
+	// A request on the listener is a redirect. The listener binds loopback
+	// only, so any request to it came from a process on this machine, and
+	// separating that from the page CrossRev opened is the whole job of the
+	// state. A request without one has not made the claim, so it is refused.
+	//
+	// The paste is a person reading their own address bar, and the prompt
+	// above documents the bare code as an answer. An absent state there is
+	// that documented fallback rather than a forgery.
+	//
+	// Either way, a state that came back wrong is refused.
+	stateOK := true
+	if fromListener {
+		stateOK = returnedState == state
+	} else if returnedState != "" && returnedState != state {
+		stateOK = false
+	}
+	if !stateOK {
+		// The lowercase `crossrev` is the shell's own byte (lib/auth.sh:735).
 		return c.IO.Die(
 			"the state value GitHub returned does not match the one CrossRev sent",
 			"This request did not come from the page crossrev opened. Start again: crossrev auth login --owner "+owner)
