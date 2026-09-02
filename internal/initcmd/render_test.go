@@ -265,7 +265,7 @@ resolver:
 
 // TestRenderLeavesNoBlankLineWhenNothingInstalls pins awk's answer for an empty
 // install block: `split("", a, "\n")` yields no fields, so the placeholder line
-// leaves nothing at all rather than one blank line (lib/init.sh:720-725).
+// leaves nothing at all rather than one blank line (lib/init.sh:740-745).
 //
 // The whole document is compared, because the blank line the wrong answer
 // leaves is invisible to an assertion that only looks at the install lines.
@@ -279,5 +279,31 @@ func TestRenderLeavesNoBlankLineWhenNothingInstalls(t *testing.T) {
 		"tail\n"
 	if got != want {
 		t.Errorf("rendered:\n%q\nwant:\n%q", got, want)
+	}
+}
+
+// TestRenderEndsADocumentTheTemplateLeftUnterminated: awk's `print` ends every
+// record with ORS, so the pipeline writes a final newline whether or not the
+// template carried one, and the last `!skip` of the fence filter prints through
+// the same `print`. Measured on the shell: a file holding `foo\nbar`, seven
+// bytes with no final newline, comes out of `awk | sed | awk` as eight bytes
+// ending `bar\n`.
+//
+// An empty template stays empty: awk reads no records from it and prints
+// nothing, so there is no newline to add.
+func TestRenderEndsADocumentTheTemplateLeftUnterminated(t *testing.T) {
+	configuration := "version: 1\nreviewer:\n  harness: codex\nresolver:\n  harness: claude\n"
+	for _, row := range []struct{ name, template, want string }{
+		{"no final newline", "head __RUNS_ON__\ntail", "head ubuntu-latest\ntail\n"},
+		{"a final newline already", "head __RUNS_ON__\ntail\n", "head ubuntu-latest\ntail\n"},
+		{"one unterminated line", "tail", "tail\n"},
+		{"nothing at all", "", ""},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			got := rendering(t, configuration, "github-hosted", []byte(row.template))
+			if got != row.want {
+				t.Errorf("rendered %q as %q, want %q", row.template, got, row.want)
+			}
+		})
 	}
 }

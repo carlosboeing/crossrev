@@ -9,8 +9,8 @@ import (
 	"github.com/carlosboeing/crossrev/internal/harness"
 )
 
-// The placeholder the install block replaces, and the two fence markers
-// (lib/init.sh:662-664, 720-736).
+// The placeholder the install block replaces (lib/init.sh:741), and the two
+// fence markers (lib/init.sh:754-755, documented at :662-664).
 const installPlaceholder = "__HARNESS_INSTALL__"
 
 var (
@@ -19,7 +19,7 @@ var (
 )
 
 // RenderWorkflow renders one workflow template for this plan's runner and
-// pairing (_init_render_workflow, lib/init.sh:691-737).
+// pairing (_init_render_workflow, lib/init.sh:711-757).
 //
 // Two mechanisms, and the split is deliberate. Scalars are substituted; whole
 // steps and env entries are fenced, because a hosted runner installs the
@@ -36,13 +36,14 @@ var (
 // substitutions are applied to the install block the first stage inserted, and
 // the fences are evaluated after both.
 //
-// # Where this is not the shell
-//
-// The Bash substitutes with `sed s#…#…#g`, where `&` in the replacement means
-// the whole match and `#` ends the expression. Both are replaced literally
-// here. Of the six values only the described ref can carry either character,
-// and a tag named `v1&2` renders differently in the two implementations. That
-// is a defect in the Bash rather than behaviour worth reproducing.
+// The six substitutions are literal on both sides. `strings.NewReplacer`
+// writes a replacement as given, and the Bash — which substitutes with
+// `sed s#…#…#g`, where `&` stands for the whole match and `#` closes the command
+// — escapes `\`, `&` and the delimiter through `_init_sed_replacement`
+// (lib/init.sh:703-709) before sed reads them. Of the six values only the
+// described ref can carry any of the three, because it is whatever
+// `git describe --tags` reported. Measured: `_init_sed_replacement 'v1&2'`
+// gives `v1\&2`, and sed writes `v1&2`, which is what this writes.
 func (p Plan) RenderWorkflow(req Request, template []byte) []byte {
 	runsOn := "ubuntu-latest"
 	if p.Runner == "self-hosted" {
@@ -80,14 +81,14 @@ func (p Plan) RenderWorkflow(req Request, template []byte) []byte {
 }
 
 // expandInstall replaces the whole placeholder line with the install block
-// (lib/init.sh:720-726).
+// (lib/init.sh:740-746).
 //
 // The line is replaced, not the placeholder within it: awk matches the record
 // and calls `next`, so anything else on that line goes with it. An empty
 // install block leaves nothing at all rather than a blank line, because awk's
 // split of an empty string yields no fields.
 func expandInstall(document, install string) string {
-	lines, trailing := records(document)
+	lines := records(document)
 	out := make([]string, 0, len(lines))
 	for _, line := range lines {
 		if !strings.Contains(line, installPlaceholder) {
@@ -99,13 +100,13 @@ func expandInstall(document, install string) string {
 		}
 		out = append(out, strings.Split(install, "\n")...)
 	}
-	return join(out, trailing)
+	return join(out)
 }
 
 // filterFences keeps a fenced block only for the runner it names, and drops
-// both markers (lib/init.sh:733-736).
+// both markers (lib/init.sh:753-756).
 func filterFences(document, runner string) string {
-	lines, trailing := records(document)
+	lines := records(document)
 	out := make([]string, 0, len(lines))
 	skip := false
 	for _, line := range lines {
@@ -125,7 +126,7 @@ func filterFences(document, runner string) string {
 		}
 		out = append(out, line)
 	}
-	return join(out, trailing)
+	return join(out)
 }
 
 // harnessInstallLine is the install commands for the harnesses this
@@ -170,32 +171,25 @@ func harnessInstallLine(doc harness.Document, cfg *config.Config) string {
 	return strings.TrimSuffix(out.String(), "\n")
 }
 
-// records splits a document the way awk reads it: one record per line, with the
-// final newline noted rather than becoming an empty record. An empty document
-// holds no records at all.
-func records(document string) (lines []string, trailing bool) {
+// records splits a document the way awk reads it: one record per line, with a
+// final newline ending the last record rather than starting an empty one. An
+// empty document holds no records at all.
+func records(document string) []string {
 	if document == "" {
-		return nil, false
+		return nil
 	}
-	trailing = strings.HasSuffix(document, "\n")
-	if trailing {
-		document = strings.TrimSuffix(document, "\n")
-	}
-	return strings.Split(document, "\n"), trailing
+	return strings.Split(strings.TrimSuffix(document, "\n"), "\n")
 }
 
-// join writes records back out. awk's `print` ends every record with a newline,
-// so a document that carried one keeps it and one that never had any stays
-// empty.
-func join(lines []string, trailing bool) string {
+// join writes records back out, and every record ends with a newline because
+// awk's `print` ends every record with ORS. A template that carried no final
+// newline therefore comes out of the pipeline with one — measured, a template of
+// `foo\nbar` renders as `foo\nbar\n`. A document with no records prints nothing.
+func join(lines []string) string {
 	if len(lines) == 0 {
 		return ""
 	}
-	joined := strings.Join(lines, "\n")
-	if trailing {
-		joined += "\n"
-	}
-	return joined
+	return strings.Join(lines, "\n") + "\n"
 }
 
 // field is awk's `$n` under the default field separator: fields are runs of
