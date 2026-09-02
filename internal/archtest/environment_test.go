@@ -137,7 +137,7 @@ func auditEnvironSource(relSlash string, src []byte) (violations []string, permi
 		return nil, nil, err
 	}
 
-	for _, reference := range environReferences(node) {
+	for _, reference := range environReferences(relSlash, node) {
 		// Exact equality, never a suffix. "vendor/internal/exec/env.go" ends
 		// with the permitted name and is a different file.
 		if reference.permittedIn != "" && reference.permittedIn == relSlash {
@@ -274,7 +274,10 @@ func TestEnvironAuditVerdict(t *testing.T) {
 
 // environReferences finds every route in one file from source to the whole
 // process environment.
-func environReferences(node *ast.File) []environReference {
+//
+// relSlash is the repo-relative path, which one rule needs: the Cmd method
+// below is confined by directory as well as by import.
+func environReferences(relSlash string, node *ast.File) []environReference {
 	var found []environReference
 
 	for _, rule := range environRules {
@@ -312,7 +315,7 @@ func environReferences(node *ast.File) []environReference {
 		})
 	}
 
-	found = append(found, cmdEnvironReferences(node)...)
+	found = append(found, cmdEnvironReferences(relSlash, node)...)
 	found = append(found, environLinknameReferences(node)...)
 	found = append(found, environLiteralReferences(node)...)
 	found = append(found, cgoImportReferences(node)...)
@@ -331,22 +334,43 @@ func environReferences(node *ast.File) []environReference {
 // found `command.Environ` in a second file there passing every rule. This is
 // that hole.
 //
-// The detector is name-based, because the AST carries no types: any selector
-// spelled `.Environ` in a file that imports os/exec is reported, whatever the
-// receiver is. That covers the call, the method value and the method
-// expression `(*osexec.Cmd).Environ` in one rule, since all three are the same
-// selector to the parser. A selector on the confined packages' own local names
-// is skipped, because environRules has already reported it and one fact should
-// not be two failures.
+// # Where it looks, and why it is two conditions rather than one
+//
+// A file is in scope when it imports os/exec, OR when it sits under
+// internal/exec at all. Either alone leaves a hole the review walked through:
+//
+//   - Import alone misses a file that declares its own interface and takes the
+//     value from somewhere else in the package. `type reader interface {
+//     Environ() []string }` needs no os/exec import to hold a *exec.Cmd.
+//   - Directory alone would stop guarding every other package, which the
+//     process rule closes today but which should not depend on that rule
+//     staying as it is.
+//
+// # How it decides, and what that costs
+//
+// By the method name, because the AST carries no types. Any selector spelled
+// `.Environ` in scope is reported whatever the receiver is, which covers the
+// call, the method value and the method expression `(*osexec.Cmd).Environ` in
+// one rule — the parser sees one selector for all three — and covers a call
+// through an interface, which no receiver-typed rule could. Nothing in
+// internal/exec declares an Environ of its own, so the name check costs no
+// exemption; a package that later wants one has to say so here.
+//
+// A selector on the confined packages' own local names is skipped, because
+// environRules has already reported it and one fact should not be two failures.
 //
 // Unlike os.Environ, this reference is not required to appear anywhere:
 // internal/exec/env.go reaches the environment through os.Environ and holds no
 // Cmd at all, so a `permittedSeen` check would demand a call nothing should
 // make. The permitted file is named so that a future Inherit built on a Cmd
 // has one legal home rather than none.
-func cmdEnvironReferences(node *ast.File) []environReference {
+func cmdEnvironReferences(relSlash string, node *ast.File) []environReference {
+	const permitted = "internal/exec/env.go"
+
 	osExecNames, osExecDotImported := importLocalNames(node, "os/exec", "exec")
-	if len(osExecNames) == 0 && !osExecDotImported {
+	inScope := len(osExecNames) > 0 || osExecDotImported ||
+		strings.HasPrefix(relSlash, "internal/exec/")
+	if !inScope {
 		return nil
 	}
 
@@ -370,7 +394,7 @@ func cmdEnvironReferences(node *ast.File) []environReference {
 		found = append(found, environReference{
 			pos:         selector.Pos(),
 			what:        "(*exec.Cmd).Environ",
-			permittedIn: "internal/exec/env.go",
+			permittedIn: permitted,
 		})
 		return true
 	})
@@ -435,8 +459,11 @@ func environLiteralReferences(node *ast.File) []environReference {
 func TestEnvironBoundaryDetectsEveryRoute(t *testing.T) {
 	linkname := "//go:" + "linkname pulled os.Environ"
 	tests := []struct {
-		name        string
-		source      string
+		name   string
+		source string
+		// file is the repo-relative path the source is judged at. Empty means
+		// a file outside internal/exec, which is what most rows want.
+		file        string
 		wantCount   int
 		wantWhat    string
 		permittedIn string
@@ -553,6 +580,38 @@ func TestEnvironBoundaryDetectsEveryRoute(t *testing.T) {
 			permittedIn: "internal/exec/env.go",
 		},
 		{
+			// The scratch file a security review of this tree built, spelling
+			// one: a method value on a Cmd, in a second file of the permitted
+			// package.
+			name:        "the review's method-value scratch file",
+			file:        "internal/exec/scratch.go",
+			source:      "package exec\nimport child \"os/exec\"\nvar command = child.Command(\"/usr/bin/true\")\nvar read = command.Environ\n",
+			wantCount:   1,
+			wantWhat:    "(*exec.Cmd).Environ",
+			permittedIn: "internal/exec/env.go",
+		},
+		{
+			// Spelling two: the call goes through an interface the file
+			// declares itself, so nothing names *exec.Cmd at the call site.
+			name:        "the review's interface-call scratch file",
+			file:        "internal/exec/scratch.go",
+			source:      "package exec\nimport child \"os/exec\"\ntype reader interface{ Environ() []string }\nfunc f() []string {\n\tvar r reader = child.Command(\"/usr/bin/true\")\n\treturn r.Environ()\n}\n",
+			wantCount:   1,
+			wantWhat:    "(*exec.Cmd).Environ",
+			permittedIn: "internal/exec/env.go",
+		},
+		{
+			// The same interface call with no os/exec import at all. The
+			// directory is the second half of the scope, and without it this
+			// row passes.
+			name:        "an interface call inside internal/exec with no os/exec import",
+			file:        "internal/exec/scratch.go",
+			source:      "package exec\ntype reader interface{ Environ() []string }\nfunc f(r reader) []string { return r.Environ() }\n",
+			wantCount:   1,
+			wantWhat:    "(*exec.Cmd).Environ",
+			permittedIn: "internal/exec/env.go",
+		},
+		{
 			// os.Environ inside a file that also imports os/exec is one fact,
 			// not two. It stays os.Environ's violation.
 			name:        "os.Environ beside an os/exec import",
@@ -570,7 +629,11 @@ func TestEnvironBoundaryDetectsEveryRoute(t *testing.T) {
 				t.Fatalf("parse fixture: %v", err)
 			}
 
-			found := environReferences(node)
+			file := tt.file
+			if file == "" {
+				file = "internal/sample/sample.go"
+			}
+			found := environReferences(file, node)
 			if len(found) != tt.wantCount {
 				t.Fatalf("environment references = %d %v, want %d", len(found), describe(found), tt.wantCount)
 			}
