@@ -145,8 +145,7 @@ func TestExecuteDeclaresEveryLabelWithItsOwnColourAndDescription(t *testing.T) {
 
 // TestExecuteRecolourssLabelsMintedInTheOldColour is the --upgrade migration:
 // every loop label already there in another colour is recoloured, and the run
-// says how many (lib/init.sh:448-455, tests/test-runner.sh has the same case in
-// tests/test-init.sh:205-222).
+// says how many (lib/init.sh:448-455, tests/test-init.sh:205-222).
 func TestExecuteRecoloursLabelsMintedInTheOldColour(t *testing.T) {
 	old := map[string]string{}
 	for _, label := range []string{
@@ -231,7 +230,7 @@ func TestExecuteRefusesToInventALabelTheRepositoryGovernsItself(t *testing.T) {
 
 // TestExecuteCarriesAFailedLabelCreationUp pins that a label that will not
 // create ends the run rather than being counted (lib/init.sh:445,
-// tests/test-init.sh:405-406).
+// tests/test-init.sh:442-443).
 func TestExecuteCarriesAFailedLabelCreationUp(t *testing.T) {
 	labels := &fakeLabels{fail: map[string]bool{"crossrev/pass-2": true}}
 	plan, req, _, buffer := planned(t, issueSinkConfig, nil)
