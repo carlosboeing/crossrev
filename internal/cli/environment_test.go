@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
 	"strconv"
@@ -347,6 +348,129 @@ type shellVariable struct {
 	Why        string   `json:"why"`
 }
 
+// shellDefaultRead is one place the Bash reads a name through a default
+// operator, and one place it assigns one.
+type shellDefaultRead struct {
+	// name is the variable.
+	name string
+	// where is "<file>:<line>", for the failure message.
+	where string
+}
+
+// shellDefaultOperator matches `${NAME:-`, `${NAME:=`, `${NAME:?` and `${NAME+`.
+//
+// Those four are the whole of "read this, and here is what to do when it is
+// unset". A read written `$NAME` or `${NAME}` with no operator is not in scope:
+// the shell sets most of its own globals unconditionally before reading them,
+// and a bare read says nothing about where the value came from.
+var shellDefaultOperator = regexp.MustCompile(`\$\{([A-Z_][A-Z0-9_]*)(?::-|:=|:\?|\+)`)
+
+// shellAssignment matches `NAME=` at the start of a word, which covers a plain
+// assignment, `local NAME=`, `export NAME=`, and a one-command prefix such as
+// `LC_ALL=C awk …`. The leading class is what stops `CROSSREV_X=` also counting
+// as an assignment of `X`.
+var shellAssignment = regexp.MustCompile(`(?:^|[\s;(&|])([A-Z_][A-Z0-9_]*)=`)
+
+// shellSources is every Bash file the tool ships.
+func shellSources(t *testing.T, root string) []string {
+	t.Helper()
+	files := []string{filepath.Join(root, "bin", "crossrev")}
+	for _, pattern := range []string{
+		filepath.Join(root, "lib", "*.sh"),
+		filepath.Join(root, "lib", "adapters", "*.sh"),
+	} {
+		matched, err := filepath.Glob(pattern)
+		if err != nil {
+			t.Fatalf("glob %s: %v", pattern, err)
+		}
+		files = append(files, matched...)
+	}
+	if len(files) < 10 {
+		t.Fatalf("found %d shell sources, which is too few to be looking at this tool", len(files))
+	}
+	return files
+}
+
+// inheritedShellReads answers every name the Bash reads through a default
+// operator and assigns nowhere.
+//
+// That pair is the contract's own scan rule for "this value can only have come
+// from outside the process". A name the shell assigns somewhere — the CTX_*
+// block, CROSSREV_RUN_DIR, ROOT — is a global the process sets for itself, and
+// an inherited value never survives to be read.
+func inheritedShellReads(t *testing.T, root string) []shellDefaultRead {
+	t.Helper()
+
+	var reads []shellDefaultRead
+	assigned := map[string]bool{}
+	for _, path := range shellSources(t, root) {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			t.Fatalf("locate %s under %s: %v", path, root, err)
+		}
+		relSlash := filepath.ToSlash(rel)
+		for i, line := range strings.Split(string(raw), "\n") {
+			for _, m := range shellDefaultOperator.FindAllStringSubmatch(line, -1) {
+				reads = append(reads, shellDefaultRead{name: m[1], where: fmt.Sprintf("%s:%d", relSlash, i+1)})
+			}
+			for _, m := range shellAssignment.FindAllStringSubmatch(line, -1) {
+				assigned[m[1]] = true
+			}
+		}
+	}
+
+	var inherited []shellDefaultRead
+	for _, read := range reads {
+		if !assigned[read.name] {
+			inherited = append(inherited, read)
+		}
+	}
+	return inherited
+}
+
+func TestInheritedShellReadsSeparatesTheTwoKinds(t *testing.T) {
+	dir := t.TempDir()
+	for _, sub := range []string{filepath.Join("lib", "adapters"), "bin"} {
+		if err := os.MkdirAll(filepath.Join(dir, sub), 0o755); err != nil {
+			t.Fatalf("make the fixture tree: %v", err)
+		}
+	}
+	write := func(rel, body string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, rel), []byte(body), 0o644); err != nil {
+			t.Fatalf("write %s: %v", rel, err)
+		}
+	}
+	// Nine library files, because shellSources refuses fewer than ten sources.
+	for i := 0; i < 8; i++ {
+		write(filepath.Join("lib", fmt.Sprintf("filler%d.sh", i)), "\n")
+	}
+	write(filepath.Join("lib", "sample.sh"),
+		"CROSSREV_RUN_DIR=\"\"\n"+
+			"printf '%s' \"${CROSSREV_RUN_DIR:-none}\"\n"+
+			"printf '%s' \"${TMPDIR:-/tmp}\"\n"+
+			"printf '%s' \"$HOME/x\"\n")
+	write(filepath.Join("lib", "adapters", "sample.sh"),
+		"  local dir=\"${XDG_STATE_HOME:-$HOME/.local/state}\"\n")
+
+	write(filepath.Join("bin", "crossrev"), "LC_ALL=C sort\n")
+
+	var names []string
+	for _, read := range inheritedShellReads(t, dir) {
+		names = append(names, read.name+" "+read.where)
+	}
+	sort.Strings(names)
+	got := strings.Join(names, ", ")
+	want := "TMPDIR lib/sample.sh:3, XDG_STATE_HOME lib/adapters/sample.sh:1"
+	if got != want {
+		t.Fatalf("inherited = %q, want %q: the assigned global and the bare $HOME are not inherited reads", got, want)
+	}
+}
+
 func loadShellInventory(t *testing.T) shellInventory {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join("testdata", "environment", "shell-inventory.json"))
@@ -550,6 +674,24 @@ func TestEnvironmentContract(t *testing.T) {
 			}
 			if measured.Why == "" {
 				t.Errorf("%s carries no reason", measured.Name)
+			}
+		}
+	})
+
+	t.Run("a name the shell reads with a default and never assigns is in the contract", func(t *testing.T) {
+		// The rule that catches a variable arriving on the Bash side. The Go
+		// walk above cannot: a name the port has not reached yet is read by no
+		// Go source, and the inventory is hand-written, so nothing else reads
+		// the shell back. TMPDIR arrived at lib/auth.sh:626 with the login
+		// fix and no rule failed.
+		inherited := inheritedShellReads(t, root)
+		if len(inherited) < len(table)/4 {
+			t.Fatalf("the shell scan found %d inherited reads, which is too few to be looking at this tool", len(inherited))
+		}
+		for _, read := range inherited {
+			if _, held := byName[read.name]; !held {
+				t.Errorf("%s reads %s with a default and the shell assigns it nowhere, and the contract does not carry it",
+					read.where, read.name)
 			}
 		}
 	})

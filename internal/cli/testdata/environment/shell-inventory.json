@@ -1,6 +1,6 @@
 {
   "note": "Every environment variable the shipped Bash reads, sets for a child, or strips from one. Derived from bin/crossrev, lib/*.sh and lib/adapters/*.sh, and from lib/harnesses.json for the names an adapter resolves at run time. Bash's own variables (BASH_SOURCE, SECONDS, IFS, the positional parameters) are out, and so is every shell global initialised at source time, because an inherited value cannot survive the assignment. Each `shell` entry was read back with sed before it was written down. A variable whose `spelled` is false is never written out in the shell: the shell reaches it through an indirect expansion of a descriptor field, or — for PATH — through `command -v`.",
-  "count": 39,
+  "count": 40,
   "classes": [
     "operator input",
     "runner signal",
@@ -55,7 +55,7 @@
       "shell": [
         "lib/credentials.sh:127",
         "lib/credentials.sh:143",
-        "lib/auth.sh:997"
+        "lib/auth.sh:1041"
       ],
       "why": "Claude's subscription credential. The shell never writes the name: it comes from .credential.secret and is read through `${!secret}`.",
       "spelled": false
@@ -100,7 +100,7 @@
       "shell": [
         "lib/credentials.sh:127",
         "lib/credentials.sh:143",
-        "lib/auth.sh:997"
+        "lib/auth.sh:1041"
       ],
       "why": "Codex's rotating credential, named by the descriptor and read through `${!secret}`. Stripped even from codex, because by then it has been written into CODEX_HOME.",
       "spelled": false
@@ -360,7 +360,7 @@
         "lib/config.sh:23",
         "lib/auth.sh:23",
         "lib/auth.sh:339",
-        "lib/auth.sh:889",
+        "lib/auth.sh:933",
         "lib/log.sh:48",
         "lib/log.sh:195",
         "lib/preflight.sh:329",
@@ -435,6 +435,16 @@
         "lib/preflight.sh:251"
       ],
       "why": "The only signal separating a GitHub-hosted runner from a self-hosted one and from a laptop, and so the one that decides whether a missing secret is a refusal.",
+      "spelled": true
+    },
+    {
+      "name": "TMPDIR",
+      "class": "path override",
+      "descriptor": false,
+      "shell": [
+        "lib/auth.sh:626"
+      ],
+      "why": "Where auth_login writes the App registration page and the redirect file it waits on. Read as ${TMPDIR:-/tmp} with the trailing slash trimmed, and assigned nowhere in the shell, so the value is the operator's.",
       "spelled": true
     },
     {

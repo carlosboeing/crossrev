@@ -27,7 +27,7 @@ package cli
 //     The name is the operator's own — templates/operator-config.yml:25 ships
 //     KIMI_API_KEY as the worked example — so the port reads it the same way,
 //     at internal/resolve/invoke.go:415.
-//   - A harness secret the descriptor does not name. lib/auth.sh:990 falls back
+//   - A harness secret the descriptor does not name. lib/auth.sh:1034 falls back
 //     to CROSSREV_<HARNESS>_AUTH. Measured against lib/harnesses.json, the only
 //     harness declaring `refresher: true` is codex and codex declares
 //     CROSSREV_CODEX_AUTH, so the fallback is unreachable in the shipped
@@ -205,12 +205,12 @@ var environment = []Variable{
 	{
 		Name:    "GH_ENTERPRISE_TOKEN",
 		Class:   ClassCredential,
-		Readers: []string{"internal/app", "internal/exec", "internal/forge/ghexec", "internal/preflight", "cmd/crossrev"},
+		Readers: []string{"internal/exec", "internal/forge/ghexec", "internal/preflight", "cmd/crossrev"},
 	},
 	{
 		Name:    "GH_TOKEN",
 		Class:   ClassCredential,
-		Readers: []string{"internal/app", "internal/exec", "internal/forge/ghexec", "internal/preflight", "cmd/crossrev"},
+		Readers: []string{"internal/exec", "internal/forge/ghexec", "internal/preflight", "cmd/crossrev"},
 	},
 	{
 		Name:    "GITHUB_ACTIONS",
@@ -220,7 +220,7 @@ var environment = []Variable{
 	{
 		Name:    "GITHUB_ENTERPRISE_TOKEN",
 		Class:   ClassCredential,
-		Readers: []string{"internal/app", "internal/exec", "internal/forge/ghexec", "internal/preflight", "cmd/crossrev"},
+		Readers: []string{"internal/exec", "internal/forge/ghexec", "internal/preflight", "cmd/crossrev"},
 	},
 	{
 		Name:    "GITHUB_RUN_ID",
@@ -230,7 +230,7 @@ var environment = []Variable{
 	{
 		Name:    "GITHUB_TOKEN",
 		Class:   ClassCredential,
-		Readers: []string{"internal/app", "internal/exec", "internal/forge/ghexec", "internal/preflight", "cmd/crossrev"},
+		Readers: []string{"internal/exec", "internal/forge/ghexec", "internal/preflight", "cmd/crossrev"},
 	},
 	{
 		Name:    "GIT_INDEX_FILE",
@@ -285,6 +285,22 @@ var environment = []Variable{
 		Name:    "RUNNER_ENVIRONMENT",
 		Class:   ClassRunnerSignal,
 		Readers: []string{"internal/cred", "internal/preflight"},
+	},
+	{
+		// Where auth_login writes the registration page and the redirect file
+		// (lib/auth.sh:626). Read with a default and assigned nowhere in the
+		// shell, so it is an inherited value the operator sets.
+		//
+		// The readers are the two allowlists that hand it to a child —
+		// internal/app/listener.go:356 for the browser opener and
+		// cmd/crossrev/legs.go:43 for a harness. The port's own use of it is
+		// internal/app/login.go:363 and :368, which reach it through
+		// os.CreateTemp and os.TempDir rather than by name, so the contract's
+		// os.Getenv walk does not see it and internal/app is a reader here on
+		// the strength of the allowlist alone.
+		Name:    "TMPDIR",
+		Class:   ClassPathOverride,
+		Readers: []string{"internal/app", "cmd/crossrev"},
 	},
 	{
 		Name:    "XDG_CONFIG_HOME",
