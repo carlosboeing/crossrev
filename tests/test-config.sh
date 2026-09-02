@@ -9,7 +9,11 @@
 
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CROSSREV="$HERE/../bin/crossrev"
+
+# This suite does not source tests/harness.sh, so it makes the same choice
+# itself: CROSSREV_TEST_BIN names the binary the CLI-driven cases invoke, and
+# absence selects bin/crossrev.
+CROSSREV="${CROSSREV_TEST_BIN:-$HERE/../bin/crossrev}"
 
 pass=0 fail=0
 ok()    { printf '  ok    %s\n' "$1"; pass=$((pass+1)); }

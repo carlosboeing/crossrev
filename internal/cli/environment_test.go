@@ -422,7 +422,8 @@ func TestEnvironmentContract(t *testing.T) {
 		//   the second argument      internal/review/review.go:210
 		//   an injected reader       internal/app/path.go:50
 		shapes := []struct{ name, pkg string }{
-			{"NO_COLOR", "internal/cli"},
+			{"NO_COLOR", "cmd/crossrev"},
+			{"CROSSREV_ASSUME_YES", "cmd/crossrev"},
 			{"RUNNER_ENVIRONMENT", "internal/cred"},
 			{"ANTHROPIC_API_KEY", "internal/review"},
 			{"XDG_CONFIG_HOME", "internal/app"},
@@ -488,9 +489,12 @@ func TestEnvironmentContract(t *testing.T) {
 		for name, packages := range mentions {
 			entry := byName[name]
 			for pkg := range packages {
-				if pkg == "internal/cli" && name != "NO_COLOR" {
+				if pkg == "internal/cli" {
 					// environment.go and this test name every variable in the
-					// table, which is what the table is.
+					// table, which is what the table is. internal/cli reads
+					// none of them: the process's own reads moved to
+					// cmd/crossrev with the composition root, which is where a
+					// process's environment is decided.
 					continue
 				}
 				if !slices.Contains(entry.Readers, pkg) {

@@ -13,6 +13,11 @@
 # Transient quarantine directory
 .crossrev-quarantine/
 
+# Native build output. scripts/build-native.sh takes the path as an argument and
+# scripts/test-native.sh passes .tmp/crossrev-native; a 12 MB binary is not a
+# tracked file.
+.tmp/
+
 # package.json exists for npm distribution only. There is no dependency tree
 # to lock, and the repo has no package manager step.
 package-lock.json

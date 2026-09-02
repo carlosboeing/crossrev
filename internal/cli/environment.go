@@ -101,39 +101,43 @@ var environment = []Variable{
 		Name:       "ANTHROPIC_API_KEY",
 		Class:      ClassCredential,
 		Descriptor: true,
-		Readers:    []string{"internal/harness", "internal/resolve", "internal/review"},
+		Readers:    []string{"internal/harness", "internal/resolve", "internal/review", "cmd/crossrev"},
 	},
 	{
 		Name:    "ANTHROPIC_AUTH_TOKEN",
 		Class:   ClassEndpoint,
-		Readers: []string{"internal/harness", "internal/policy"},
+		Readers: []string{"internal/harness", "internal/policy", "cmd/crossrev"},
 	},
 	{
 		Name:    "ANTHROPIC_BASE_URL",
 		Class:   ClassEndpoint,
-		Readers: []string{"internal/harness", "internal/policy"},
+		Readers: []string{"internal/harness", "internal/policy", "cmd/crossrev"},
 	},
 	{
 		Name:       "CLAUDE_CODE_OAUTH_TOKEN",
+		Readers:    []string{"cmd/crossrev"},
 		Class:      ClassCredential,
 		Descriptor: true,
 	},
 	{
 		Name:       "CODEX_HOME",
+		Readers:    []string{"cmd/crossrev"},
 		Class:      ClassPathOverride,
 		Descriptor: true,
 	},
 	{
 		Name:    "CROSSREV_APP_SLUG",
 		Class:   ClassOperatorInput,
-		Readers: []string{"internal/resolve", "internal/review"},
+		Readers: []string{"internal/resolve", "internal/review", "cmd/crossrev"},
 	},
 	{
-		Name:  "CROSSREV_ASSUME_YES",
-		Class: ClassOperatorInput,
+		Name:    "CROSSREV_ASSUME_YES",
+		Readers: []string{"cmd/crossrev"},
+		Class:   ClassOperatorInput,
 	},
 	{
 		Name:       "CROSSREV_CODEX_AUTH",
+		Readers:    []string{"cmd/crossrev"},
 		Class:      ClassCredential,
 		Descriptor: true,
 	},
@@ -161,6 +165,7 @@ var environment = []Variable{
 	},
 	{
 		Name:       "CROSSREV_GROK_AUTH",
+		Readers:    []string{"cmd/crossrev"},
 		Class:      ClassCredential,
 		Descriptor: true,
 	},
@@ -177,17 +182,20 @@ var environment = []Variable{
 		Class: ClassOperatorInput,
 	},
 	{
-		Name:  "CROSSREV_NO_TIPS",
-		Class: ClassOperatorInput,
+		Name:    "CROSSREV_NO_TIPS",
+		Readers: []string{"cmd/crossrev"},
+		Class:   ClassOperatorInput,
 	},
 	{
 		Name:       "CROSSREV_OPENCODE_AUTH",
+		Readers:    []string{"cmd/crossrev"},
 		Class:      ClassCredential,
 		Descriptor: true,
 	},
 	{
-		Name:  "CROSSREV_OWNER",
-		Class: ClassOperatorInput,
+		Name:    "CROSSREV_OWNER",
+		Readers: []string{"cmd/crossrev"},
+		Class:   ClassOperatorInput,
 	},
 	{
 		Name:  "CROSSREV_TRANSCRIPT_BASE",
@@ -196,12 +204,12 @@ var environment = []Variable{
 	{
 		Name:    "GH_ENTERPRISE_TOKEN",
 		Class:   ClassCredential,
-		Readers: []string{"internal/app", "internal/exec", "internal/forge/ghexec", "internal/preflight"},
+		Readers: []string{"internal/app", "internal/exec", "internal/forge/ghexec", "internal/preflight", "cmd/crossrev"},
 	},
 	{
 		Name:    "GH_TOKEN",
 		Class:   ClassCredential,
-		Readers: []string{"internal/app", "internal/exec", "internal/forge/ghexec", "internal/preflight"},
+		Readers: []string{"internal/app", "internal/exec", "internal/forge/ghexec", "internal/preflight", "cmd/crossrev"},
 	},
 	{
 		Name:    "GITHUB_ACTIONS",
@@ -211,7 +219,7 @@ var environment = []Variable{
 	{
 		Name:    "GITHUB_ENTERPRISE_TOKEN",
 		Class:   ClassCredential,
-		Readers: []string{"internal/app", "internal/exec", "internal/forge/ghexec", "internal/preflight"},
+		Readers: []string{"internal/app", "internal/exec", "internal/forge/ghexec", "internal/preflight", "cmd/crossrev"},
 	},
 	{
 		Name:    "GITHUB_RUN_ID",
@@ -221,7 +229,7 @@ var environment = []Variable{
 	{
 		Name:    "GITHUB_TOKEN",
 		Class:   ClassCredential,
-		Readers: []string{"internal/app", "internal/exec", "internal/forge/ghexec", "internal/preflight"},
+		Readers: []string{"internal/app", "internal/exec", "internal/forge/ghexec", "internal/preflight", "cmd/crossrev"},
 	},
 	{
 		Name:    "GIT_INDEX_FILE",
@@ -230,6 +238,7 @@ var environment = []Variable{
 	},
 	{
 		Name:       "GROK_HOME",
+		Readers:    []string{"cmd/crossrev"},
 		Class:      ClassPathOverride,
 		Descriptor: true,
 	},
@@ -239,27 +248,28 @@ var environment = []Variable{
 		Readers: []string{
 			"internal/app", "internal/config", "internal/forge/ghexec",
 			"internal/preflight", "internal/runlog", "internal/vcs",
+			"cmd/crossrev",
 		},
 	},
 	{
 		Name:    "LC_ALL",
 		Class:   ClassChildOutput,
-		Readers: []string{"internal/app"},
+		Readers: []string{"internal/app", "cmd/crossrev"},
 	},
 	{
 		Name:    "NO_COLOR",
 		Class:   ClassOperatorInput,
-		Readers: []string{"internal/cli"},
+		Readers: []string{"cmd/crossrev"},
 	},
 	{
 		Name:    "OPENCODE_CONFIG",
 		Class:   ClassChildOutput,
-		Readers: []string{"internal/harness"},
+		Readers: []string{"internal/harness", "cmd/crossrev"},
 	},
 	{
 		Name:    "OPENCODE_CONFIG_DIR",
 		Class:   ClassChildOutput,
-		Readers: []string{"internal/harness"},
+		Readers: []string{"internal/harness", "cmd/crossrev"},
 	},
 	{
 		Name:  "PATH",
@@ -267,6 +277,7 @@ var environment = []Variable{
 		Readers: []string{
 			"internal/app", "internal/exec", "internal/forge/ghexec",
 			"internal/preflight",
+			"cmd/crossrev",
 		},
 	},
 	{
@@ -277,18 +288,18 @@ var environment = []Variable{
 	{
 		Name:    "XDG_CONFIG_HOME",
 		Class:   ClassPathOverride,
-		Readers: []string{"internal/app", "internal/config", "internal/forge/ghexec", "internal/preflight"},
+		Readers: []string{"internal/app", "internal/config", "internal/forge/ghexec", "internal/preflight", "cmd/crossrev"},
 	},
 	{
 		Name:       "XDG_DATA_HOME",
 		Class:      ClassPathOverride,
 		Descriptor: true,
-		Readers:    []string{"internal/app"},
+		Readers:    []string{"internal/app", "cmd/crossrev"},
 	},
 	{
 		Name:    "XDG_STATE_HOME",
 		Class:   ClassPathOverride,
-		Readers: []string{"internal/preflight", "internal/runlog", "internal/vcs"},
+		Readers: []string{"internal/preflight", "internal/runlog", "internal/vcs", "cmd/crossrev"},
 	},
 }
 

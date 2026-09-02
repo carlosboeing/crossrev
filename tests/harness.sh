@@ -13,7 +13,29 @@
 # shellcheck disable=SC2034
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Which crossrev the CLI-driven cases invoke.
+#
+# CROSSREV_TEST_BIN names an executable to run instead of the shell entry point,
+# which is how scripts/test-native.sh points these suites at the Go binary. It
+# has to be an absolute path: every fixture cds into a throwaway checkout, so a
+# relative one would resolve against a different directory in every case.
+#
+# Absence selects bin/crossrev, so a plain `bash tests/run.sh` tests the shell
+# and nothing about the shipped tool depends on this variable. There is no
+# production flag that chooses between the two.
 CROSSREV="$HERE/../bin/crossrev"
+if [[ -n "${CROSSREV_TEST_BIN:-}" ]]; then
+  [[ "$CROSSREV_TEST_BIN" = /* ]] || {
+    printf 'CROSSREV_TEST_BIN must be an absolute path, and it is: %s\n' "$CROSSREV_TEST_BIN" >&2
+    exit 2
+  }
+  [[ -x "$CROSSREV_TEST_BIN" ]] || {
+    printf 'CROSSREV_TEST_BIN is not an executable: %s\n' "$CROSSREV_TEST_BIN" >&2
+    exit 2
+  }
+  CROSSREV="$CROSSREV_TEST_BIN"
+fi
 
 pass=0; fail=0
 ok()    { printf '  ok    %s\n' "$1"; pass=$((pass+1)); }

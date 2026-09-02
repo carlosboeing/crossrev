@@ -375,24 +375,31 @@ func TestRefusalsCoverEveryRefusedMatrixRow(t *testing.T) {
 	}
 }
 
-// TestComposeWiresHelpAndVersion pins the two fields the composition root fills
-// today. Every other field is step 4's, and Dispatch already refuses a nil one.
-func TestComposeWiresHelpAndVersion(t *testing.T) {
+// TestTheCompositionRootHasBothHalvesOfHelpAndVersion pins what cmd/crossrev
+// builds the table out of: the harness names come from the descriptor rather
+// than a literal, and the version comes off the embedded file rather than
+// nothing.
+//
+// The table itself is built in cmd/crossrev, which this package may not import
+// — it is the composition root and holds every tier-3 package. What can be
+// pinned from here is that both halves answer.
+func TestTheCompositionRootHasBothHalvesOfHelpAndVersion(t *testing.T) {
 	io, out, _ := captureIO()
-	cmds, names := compose(io)
 
-	if cmds.Help == nil {
-		t.Fatal("compose left Help unwired")
+	document, err := harness.Descriptors()
+	if err != nil {
+		t.Fatalf("harness.Descriptors: %v", err)
 	}
-	if cmds.Version == nil {
-		t.Fatal("compose left Version unwired")
-	}
+	names := document.Names()
 	if got, want := strings.Join(names, "|"), strings.Join(descriptorNames(t), "|"); got != want {
 		t.Errorf("harnesses = %q, want the descriptor's %q", got, want)
 	}
+	if InstalledVersion() == "" {
+		t.Error("InstalledVersion answers nothing, so `crossrev version` refuses in every build")
+	}
 
-	if _, err := cmds.Help(context.Background(), HelpRequest{}); err != nil {
-		t.Fatalf("the wired Help = %v", err)
+	if _, err := Help(io, names); err != nil {
+		t.Fatalf("Help = %v", err)
 	}
 	if got, want := out.String(), golden(t, "help.txt"); got != want {
 		t.Errorf("stdout =\n%q\nwant\n%q", got, want)
