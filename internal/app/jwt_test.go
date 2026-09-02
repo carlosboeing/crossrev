@@ -60,7 +60,7 @@ func writePKCS1(t *testing.T, k *rsa.PrivateKey) string {
 // writePKCS8 writes the same key the way OpenSSL 3's `genrsa` does: a PKCS#8
 // body under `BEGIN PRIVATE KEY`. `openssl dgst -sign` reads both, so a port
 // that read only one would refuse a key the shell accepts — the offline suite
-// generates its fixture key with exactly this command (tests/test-auth.sh:184).
+// generates its fixture key with exactly this command (tests/test-auth.sh:185).
 func writePKCS8(t *testing.T, k *rsa.PrivateKey) string {
 	t.Helper()
 	der, err := x509.MarshalPKCS8PrivateKey(k)
