@@ -53,6 +53,9 @@ var allowedThirdParty = map[string]map[string]bool{
 	"internal/config": {
 		"go.yaml.in/yaml/v3": true,
 	},
+	"internal/initcmd": {
+		"go.yaml.in/yaml/v3": true,
+	},
 	"internal/symbols": {
 		"github.com/tree-sitter/go-tree-sitter": true,
 	},
