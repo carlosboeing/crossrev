@@ -351,6 +351,8 @@ func TestEnvironmentNamesCannotBeWrittenThrough(t *testing.T) {
 	got[0] = "OVERWRITTEN"
 	if second := ghexec.EnvironmentNames(); second[0] != first {
 		t.Errorf("EnvironmentNames()[0] = %q after a caller wrote to an earlier answer, want %q", second[0], first)
+	}
+}
 
 // A call gh answered with no id at all is not a refusal.
 //
