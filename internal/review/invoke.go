@@ -308,6 +308,12 @@ func (l *Leg) invoke(ctx context.Context, req Request, loaded Context, settings 
 				Action: "If the error above mentions authentication, a token or a 401, the harness is installed and cannot log in.",
 			}
 		}
+		// The second child, for the one adapter whose telemetry is not in its
+		// own output (lib/adapters/opencode.sh:261-273). Telemetry, not the
+		// answer: an export that will not build or will not run leaves the
+		// fields unset and the leg stands.
+		l.mergeExport(ctx, adapter, inv, res, &envelope)
+
 		problem := l.checkPayload(envelope.Payload)
 		if problem == nil {
 			return envelope, envelope.Payload, msgs, nil
@@ -433,4 +439,26 @@ func (s legSettings) describe() string {
 		out += ", " + s.effort + " effort"
 	}
 	return out
+}
+
+// mergeExport runs an adapter's export child and folds its answer in, for an
+// adapter that has one (lib/adapters/opencode.sh:261-273).
+func (l *Leg) mergeExport(ctx context.Context, adapter harness.Adapter, inv harness.Invocation, res exec.Result, envelope *harness.Envelope) {
+	exporter, ok := adapter.(harness.Exporter)
+	if !ok || !envelope.OK {
+		return
+	}
+	session := exporter.SessionID(res)
+	if session == "" {
+		return
+	}
+	spec, err := exporter.ExportSpec(inv, session)
+	if err != nil {
+		return
+	}
+	exported := l.runner().Run(ctx, spec)
+	if exported.Err != nil || exported.ExitCode != 0 {
+		return
+	}
+	exporter.MergeExport(envelope, exported.Stdout)
 }

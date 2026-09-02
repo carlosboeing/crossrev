@@ -343,8 +343,12 @@ func TestOpencodeMissingPayloadIsAHandoffNotAFailure(t *testing.T) {
 	if !envelope.OK {
 		t.Fatalf("prose with no braces is not a harness failure: %+v", envelope)
 	}
-	if envelope.Payload != nil {
-		t.Errorf("payload = %s, want null", envelope.Payload)
+	// The JSON literal, which is what lib/adapters/opencode.sh:257-258
+	// substitutes. A Go nil is a different value: the validator rejects `null`
+	// as "the payload is not a JSON object" and accepts an absent one, so a
+	// nil here published prose as an empty review instead of retrying.
+	if string(envelope.Payload) != "null" {
+		t.Errorf("payload = %q, want the JSON literal null", envelope.Payload)
 	}
 }
 

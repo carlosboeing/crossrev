@@ -300,6 +300,9 @@ func (l *Leg) invoke(ctx context.Context, s *session, marker prstate.Marker, wor
 		// Archived after the parse and filtered in place, the order
 		// lib/adapters/claude.sh:126-130 and :148-154 keep.
 		l.Log.WriteTranscript(transcript, res.Stdout, res.Stderr)
+		// The second child, for the one adapter whose telemetry is not in its
+		// own output (lib/adapters/opencode.sh:261-273).
+		l.mergeExport(ctx, adapter, inv, res, &env)
 		if !env.OK {
 			msg := "no error reported"
 			if env.Error != nil && *env.Error != "" {
@@ -623,4 +626,29 @@ func jsonString(raw json.RawMessage) string {
 		return s
 	}
 	return string(raw)
+}
+
+// mergeExport runs an adapter's export child and folds its answer in, for an
+// adapter that has one (lib/adapters/opencode.sh:261-273).
+//
+// Telemetry, not the answer: an export that will not build or will not run
+// leaves the fields unset and the leg stands.
+func (l *Leg) mergeExport(ctx context.Context, adapter harness.Adapter, inv harness.Invocation, res exec.Result, env *harness.Envelope) {
+	exporter, ok := adapter.(harness.Exporter)
+	if !ok || !env.OK {
+		return
+	}
+	session := exporter.SessionID(res)
+	if session == "" {
+		return
+	}
+	spec, err := exporter.ExportSpec(inv, session)
+	if err != nil {
+		return
+	}
+	exported := l.runner().Run(ctx, spec)
+	if exported.Err != nil || exported.ExitCode != 0 {
+		return
+	}
+	exporter.MergeExport(env, exported.Stdout)
 }
