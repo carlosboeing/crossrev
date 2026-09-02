@@ -389,6 +389,11 @@ type env struct {
 	doc      harness.Document
 	dir      string
 	lookPath func(string) (string, error)
+	// nilLookPath leaves review.Leg.LookPath nil so the case drives the
+	// production PATH search rather than the substitute below. Without it no
+	// case here reaches exec.LookPath at all, and the fallback the helper
+	// fills in would hide whatever the real one does.
+	nilLookPath bool
 }
 
 func newEnv(t *testing.T) *env {
@@ -442,7 +447,7 @@ func (e *env) leg(t *testing.T) review.Leg {
 		t.Fatalf("runlog.Open: %v", err)
 	}
 	look := e.lookPath
-	if look == nil {
+	if look == nil && !e.nilLookPath {
 		look = func(name string) (string, error) { return "/usr/bin/" + name, nil }
 	}
 	return review.Leg{

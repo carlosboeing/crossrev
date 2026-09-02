@@ -480,77 +480,43 @@ func TestRequireYq(t *testing.T) {
 	}
 }
 
-// TestLookPathPrefersAnExecutableAndFallsBackToTheFirstFile drives the
-// production PATH search, the one every other case here replaces with onPath.
+// TestRequireYqWithNoLookPathUsesTheSharedSearch is the one case here that
+// leaves LookPath nil and drives the production search.
 //
-// bash's search is executable-preferred, not first-match, and it does not skip
-// a directory named like the tool — the directory takes the fallback slot and
-// then loses it, because the fallback is an answer only when it is a regular
-// file. Every row below was measured with `zzt` planted three ways: a directory
-// (nd), a mode-0644 file (f1) and a mode-0755 file (x1).
-//
-//	$ PATH=nd    bash -c 'command -v zzt'  → nothing, exit 1
-//	$ PATH=f1    bash -c 'command -v zzt'  → f1/zzt, exit 0
-//	$ PATH=nd:f1 bash -c 'command -v zzt'  → nothing, exit 1
-//	$ PATH=f1:nd bash -c 'command -v zzt'  → f1/zzt, exit 0
-//	$ PATH=nd:x1 bash -c 'command -v zzt'  → x1/zzt
-//	$ PATH=f1:x1 bash -c 'command -v zzt'  → x1/zzt
-//	$ PATH=x1:f1 bash -c 'command -v zzt'  → x1/zzt
-//
-// The path lookPath returns is not observable through any exported method,
-// because installed() keeps only whether the error was nil. So "the executable
-// wins over an earlier non-executable" is pinned as the pair of rows that
-// differ only in whether the executable directory is on the list.
+// Every other case substitutes one through onPath, so without this the
+// fallback is untested and whatever it does is invisible from here. The whole
+// contract of that search — executable-preferred, the directory that takes the
+// fallback slot and loses it, the name carrying a separator — is measured
+// against bash once, in internal/exec, and not repeated per caller.
 //
 // RequireYq is the driver because it reaches installed() and starts no process.
-func TestLookPathPrefersAnExecutableAndFallsBackToTheFirstFile(t *testing.T) {
+func TestRequireYqWithNoLookPathUsesTheSharedSearch(t *testing.T) {
 	root := t.TempDir()
-	directory := filepath.Join(root, "nd")
-	unreadable := filepath.Join(root, "f1")
-	program := filepath.Join(root, "x1")
-	if err := os.MkdirAll(filepath.Join(directory, "yq"), 0o755); err != nil {
+	asDirectory := filepath.Join(root, "d")
+	asProgram := filepath.Join(root, "x")
+	if err := os.MkdirAll(filepath.Join(asDirectory, "yq"), 0o755); err != nil {
 		t.Fatalf("make the directory named like the tool: %v", err)
 	}
-	for path, mode := range map[string]os.FileMode{unreadable: 0o644, program: 0o755} {
-		if err := os.MkdirAll(path, 0o755); err != nil {
-			t.Fatalf("make %s: %v", path, err)
-		}
-		if err := os.WriteFile(filepath.Join(path, "yq"), []byte("#!/bin/sh\n"), mode); err != nil {
-			t.Fatalf("write %s/yq: %v", path, err)
-		}
+	if err := os.MkdirAll(asProgram, 0o755); err != nil {
+		t.Fatalf("make %s: %v", asProgram, err)
+	}
+	if err := os.WriteFile(filepath.Join(asProgram, "yq"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write yq: %v", err)
 	}
 
-	// A symlink to a program is a program, which is why the search stats
-	// through the link rather than at it.
-	linked := filepath.Join(root, "sl")
-	if err := os.MkdirAll(linked, 0o755); err != nil {
-		t.Fatalf("make %s: %v", linked, err)
-	}
-	if err := os.Symlink(filepath.Join(program, "yq"), filepath.Join(linked, "yq")); err != nil {
-		t.Fatalf("link yq: %v", err)
-	}
-
-	list := func(dirs ...string) string { return strings.Join(dirs, string(os.PathListSeparator)) }
 	for _, row := range []struct {
 		name  string
 		path  string
 		found bool
 	}{
-		{"a directory named like the tool", list(directory), false},
-		{"a file with no execute bit", list(unreadable), true},
-		{"the directory ahead of that file", list(directory, unreadable), false},
-		{"that file ahead of the directory", list(unreadable, directory), true},
-		{"an executable behind a directory", list(directory, program), true},
-		{"an executable behind a file with no execute bit", list(unreadable, program), true},
-		{"an executable ahead of both", list(program, unreadable, directory), true},
-		{"a symlink to an executable", list(linked), true},
+		{"a directory named like the tool", asDirectory, false},
+		{"the executable behind it", asDirectory + string(os.PathListSeparator) + asProgram, true},
 		{"an empty PATH", "", false},
 	} {
 		t.Run(row.name, func(t *testing.T) {
 			t.Setenv("PATH", row.path)
 			io, _ := capture()
-			// LookPath is left nil, which is the whole point: this
-			// is the only case that runs the production search.
+			// LookPath is left nil, which is the whole point.
 			c := &preflight.Checker{IO: io, Harness: document(t), OS: "Darwin"}
 			err := c.RequireYq()
 			if row.found && err != nil {

@@ -12,8 +12,6 @@ package initcmd
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -105,7 +103,9 @@ func (s *SecretStore) set(ctx context.Context, args []string, value string) bool
 type SeedCommands struct {
 	Runner exec.Runner
 	Env    []string
-	// LookPath is `command -v` (lib/init.sh:771). Nil searches PATH.
+	// LookPath is `command -v` (lib/init.sh:771). Nil is exec.LookPath, the
+	// shared search: the first PATH entry holding an executable regular file
+	// wins, and a directory named like the harness is not one.
 	LookPath func(string) (string, error)
 }
 
@@ -113,7 +113,7 @@ type SeedCommands struct {
 func (s SeedCommands) Available(name string) bool {
 	look := s.LookPath
 	if look == nil {
-		look = lookPath
+		look = exec.LookPath
 	}
 	_, err := look(name)
 	return err == nil
@@ -494,28 +494,4 @@ func hasInput(out *ui.IO) bool {
 	}
 	source.Close()
 	return true
-}
-
-// lookPath is `command -v` over PATH. os/exec is confined to internal/exec, so
-// the search is written out here, the way internal/preflight writes it out.
-func lookPath(name string) (string, error) {
-	if name == "" {
-		return "", os.ErrNotExist
-	}
-	if strings.ContainsRune(name, os.PathSeparator) {
-		if _, err := os.Stat(name); err != nil {
-			return "", err
-		}
-		return name, nil
-	}
-	for _, dir := range filepath.SplitList(os.Getenv("PATH")) {
-		if dir == "" {
-			continue
-		}
-		candidate := filepath.Join(dir, name)
-		if _, err := os.Stat(candidate); err == nil {
-			return candidate, nil
-		}
-	}
-	return "", os.ErrNotExist
 }

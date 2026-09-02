@@ -72,8 +72,11 @@ type testEnv struct {
 	base     core.Revision
 	workdir  string
 	lookPath func(string) (string, error)
-	legEnv   []string
-	doc      harness.Document
+	// nilLookPath leaves Leg.LookPath nil so the case drives the production
+	// PATH search rather than the substitute below.
+	nilLookPath bool
+	legEnv      []string
+	doc         harness.Document
 }
 
 func setup(t *testing.T) *testEnv {
@@ -160,7 +163,7 @@ func (e *testEnv) run(t *testing.T) Result {
 func (e *testEnv) runReq(t *testing.T, req Request) Result {
 	t.Helper()
 	look := e.lookPath
-	if look == nil {
+	if look == nil && !e.nilLookPath {
 		look = func(name string) (string, error) { return "/usr/bin/" + name, nil }
 	}
 	env := e.legEnv

@@ -265,8 +265,8 @@ var environment = []Variable{
 		Name:  "PATH",
 		Class: ClassPathOverride,
 		Readers: []string{
-			"internal/app", "internal/forge/ghexec", "internal/initcmd",
-			"internal/preflight", "internal/resolve", "internal/review",
+			"internal/app", "internal/exec", "internal/forge/ghexec",
+			"internal/preflight",
 		},
 	},
 	{

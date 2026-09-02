@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -470,4 +471,52 @@ func TestCapitaliseName(t *testing.T) {
 			t.Errorf("capitaliseName(%q) = %q, want %q", tt.in, got, tt.want)
 		}
 	}
+}
+
+// The one case that leaves LookPath nil and drives the production search.
+//
+// Every other case here substitutes one, so without this the fallback is
+// untested. The private copy this package carried until now answered with a
+// directory named like the harness.
+func TestBinaryInstalledWithNoLookPathUsesTheSharedSearch(t *testing.T) {
+	root := t.TempDir()
+	asDirectory := filepath.Join(root, "d")
+	asProgram := filepath.Join(root, "x")
+	if err := os.MkdirAll(filepath.Join(asDirectory, "claude"), 0o755); err != nil {
+		t.Fatalf("make the directory named like the harness: %v", err)
+	}
+	if err := os.MkdirAll(asProgram, 0o755); err != nil {
+		t.Fatalf("make %s: %v", asProgram, err)
+	}
+	if err := os.WriteFile(filepath.Join(asProgram, "claude"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write the harness binary: %v", err)
+	}
+
+	const refusal = "the resolver is configured to use 'claude', which is not installed, and no other harness that can serve the resolve leg is either"
+
+	t.Run("a directory named like the harness is not the harness", func(t *testing.T) {
+		t.Setenv("PATH", asDirectory)
+		e := setup(t)
+		e.nilLookPath = true
+		e.addReview(t, defaultFindings(), "issues-remain")
+
+		got := e.runReq(t, Request{PR: 42, Repo: e.slug, Trigger: TriggerHuman, Harness: "claude"})
+
+		if got.Err == nil || !strings.Contains(got.Err.Error(), refusal) {
+			t.Fatalf("err = %v, want the not-installed refusal", got.Err)
+		}
+	})
+
+	t.Run("the executable is found behind it", func(t *testing.T) {
+		t.Setenv("PATH", asDirectory+string(os.PathListSeparator)+asProgram)
+		e := setup(t)
+		e.nilLookPath = true
+		e.addReview(t, defaultFindings(), "issues-remain")
+
+		got := e.runReq(t, Request{PR: 42, Repo: e.slug, Trigger: TriggerHuman, Harness: "claude"})
+
+		if got.Err != nil && strings.Contains(got.Err.Error(), refusal) {
+			t.Fatalf("the harness behind the directory was not found: %v", got.Err)
+		}
+	})
 }

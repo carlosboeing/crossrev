@@ -3,10 +3,8 @@ package resolve
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
-	"strings"
 
+	"github.com/carlosboeing/crossrev/internal/exec"
 	"github.com/carlosboeing/crossrev/internal/harness"
 )
 
@@ -109,30 +107,8 @@ func (l *Leg) binaryInstalled(name string) bool {
 	}
 	look := l.LookPath
 	if look == nil {
-		look = lookPath
+		look = exec.LookPath
 	}
 	_, err = look(binary)
 	return err == nil
-}
-
-func lookPath(name string) (string, error) {
-	if name == "" {
-		return "", os.ErrNotExist
-	}
-	if strings.ContainsRune(name, os.PathSeparator) {
-		if _, err := os.Stat(name); err != nil {
-			return "", err
-		}
-		return name, nil
-	}
-	for _, dir := range filepath.SplitList(os.Getenv("PATH")) {
-		if dir == "" {
-			continue
-		}
-		candidate := filepath.Join(dir, name)
-		if _, err := os.Stat(candidate); err == nil {
-			return candidate, nil
-		}
-	}
-	return "", os.ErrNotExist
 }
