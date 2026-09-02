@@ -34,6 +34,12 @@ func cycleCommand(ctx context.Context, out *ui.IO, doc harness.Document, req cli
 	if err != nil {
 		return cli.ExitFailure, reportFatal(out, err)
 	}
+	lock, err := acquireRunLock(ctx, out, d, req.PR, cfg.Get(".mode"))
+	if err != nil {
+		return cli.ExitFailure, reportFatal(out, err)
+	}
+	defer func() { _ = lock.Release() }()
+
 	d.log = openLog(repo, req.PR, cfg.Get(".logs.retention_days"),
 		keepTranscripts(req.KeepTranscripts, cfg), "review")
 	client = d.forgeClient()

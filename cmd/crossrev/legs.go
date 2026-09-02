@@ -136,6 +136,12 @@ func reviewCommand(ctx context.Context, out *ui.IO, doc harness.Document, req cl
 	if err != nil {
 		return cli.ExitFailure, reportFatal(out, err)
 	}
+	lock, err := acquireRunLock(ctx, out, d, req.PR, cfg.Get(".mode"))
+	if err != nil {
+		return cli.ExitFailure, reportFatal(out, err)
+	}
+	defer func() { _ = lock.Release() }()
+
 	d.log = openLog(repo, req.PR, cfg.Get(".logs.retention_days"),
 		keepTranscripts(req.KeepTranscripts, cfg), "review")
 	client = d.forgeClient()
@@ -165,6 +171,12 @@ func resolveCommand(ctx context.Context, out *ui.IO, doc harness.Document, req c
 	if err != nil {
 		return cli.ExitFailure, reportFatal(out, err)
 	}
+	lock, err := acquireRunLock(ctx, out, d, req.PR, cfg.Get(".mode"))
+	if err != nil {
+		return cli.ExitFailure, reportFatal(out, err)
+	}
+	defer func() { _ = lock.Release() }()
+
 	d.log = openLog(repo, req.PR, cfg.Get(".logs.retention_days"),
 		keepTranscripts(req.KeepTranscripts, cfg), "resolve")
 	client = d.forgeClient()
@@ -194,6 +206,24 @@ func resolveCommand(ctx context.Context, out *ui.IO, doc harness.Document, req c
 	worktree, _ := vcs.WorktreeDir(repo, req.PR)
 	closeRun(out, d.log, status, result.Err, worktree)
 	return status, err
+}
+
+// acquireRunLock is run_lock_acquire (lib/run.sh:949 and :1768), taken after
+// the context is loaded and before the run log opens.
+//
+// Automated mode takes none: GitHub Actions gives one concurrency group per
+// pull request, which is the same guarantee. Locally two runs would interleave
+// comments and replies, so a live holder is a refusal naming it, and a dead
+// holder's lock is taken over with a warning that says so.
+func acquireRunLock(ctx context.Context, out *ui.IO, d *deps, pr int, mode string) (vcs.RunLock, error) {
+	lock, err := d.repo.AcquireRunLock(ctx, pr, mode)
+	if err != nil {
+		return lock, err
+	}
+	if lock.Warning != nil {
+		out.Warn(lock.Warning.Message, lock.Warning.Hint)
+	}
+	return lock, nil
 }
 
 // closeRun is run_cleanup's closing half (lib/run.sh:92-108): the kept

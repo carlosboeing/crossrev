@@ -1,6 +1,7 @@
 package main_test
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -473,4 +474,59 @@ func lastRunLog(t *testing.T, f fixture) string {
 		t.Fatalf("read %s: %v", matches[0], err)
 	}
 	return string(body)
+}
+
+// The local run lock, run_lock_acquire at lib/run.sh:949 and :1768.
+//
+// vcs.Repository.AcquireRunLock had no caller, so two terminals could drive the
+// same pull request at once and interleave their comments and replies.
+func TestALegTakesTheLocalRunLock(t *testing.T) {
+	bin := binary(t)
+	fixture := newFixture(t)
+
+	gitDir := strings.TrimSpace(gitOutput(t, ".", fixture.home(t), "rev-parse", "--git-dir"))
+	if err := os.MkdirAll(filepath.Join(gitDir, "crossrev"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	// This test process is alive, so it is a live holder.
+	held := fmt.Sprintf("%d on other since now\n", os.Getpid())
+	write(t, filepath.Join(gitDir, "crossrev", "pr-42.lock"), held)
+
+	got := invoke(t, bin, fixture.env, "review", "--pr", "42", "--repo", "acme/widget")
+
+	if got.status != 1 {
+		t.Fatalf("status = %d, want 1: a live holder is a refusal\nstdout: %q", got.status, got.stdout)
+	}
+	want := fmt.Sprintf("already holds pull request 42 — %d on other since now", os.Getpid())
+	if !strings.Contains(got.stderr, want) {
+		t.Errorf("stderr =\n%q\nwant it to name the holder %q", got.stderr, want)
+	}
+}
+
+// A lock left by a process that is gone is taken over, with a warning that says
+// so (lib/run.sh:210-212).
+func TestALegTakesOverADeadHoldersLock(t *testing.T) {
+	bin := binary(t)
+	fixture := newFixture(t)
+
+	gitDir := strings.TrimSpace(gitOutput(t, ".", fixture.home(t), "rev-parse", "--git-dir"))
+	if err := os.MkdirAll(filepath.Join(gitDir, "crossrev"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	lock := filepath.Join(gitDir, "crossrev", "pr-42.lock")
+	// PID 2^22 is above every Linux and macOS pid_max, so it cannot be alive.
+	write(t, lock, "4194304 on other since now\n")
+
+	got := invoke(t, bin, fixture.env, "review", "--pr", "42", "--repo", "acme/widget")
+
+	if got.status != 0 {
+		t.Fatalf("status = %d, want 0\nstderr: %q", got.status, got.stderr)
+	}
+	if !strings.Contains(got.stderr, "no longer running") {
+		t.Errorf("taking the lock over was not announced:\n%q", got.stderr)
+	}
+	// And it is released, so the next run is not blocked by this one.
+	if _, err := os.Stat(lock); !os.IsNotExist(err) {
+		t.Errorf("the lock survived the run: %v", err)
+	}
 }
