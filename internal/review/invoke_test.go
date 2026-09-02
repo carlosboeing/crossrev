@@ -346,7 +346,7 @@ func forgeCredentialIn(env []string) (string, bool) {
 	return "", false
 }
 
-// --- the two refusals run_leg_settings prints before anything is billed ------
+// --- the three refusals run_leg_settings prints before anything is billed ------
 
 // legsRewritten is the shipped lib/harnesses.json with the named harnesses'
 // `legs` rewritten, which is how every refusal below was measured:

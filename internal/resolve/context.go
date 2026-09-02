@@ -381,7 +381,7 @@ func servesLegRefusal(doc harness.Document, name string) *Refusal {
 }
 
 // capitaliseName is the Bash
-// `$(printf '%s' "${h:0:1}" | tr '[:lower:]' '[:upper:]')${h:1}`
+// `$(printf '%s' "${LEG_HARNESS:0:1}" | tr '[:lower:]' '[:upper:]')${LEG_HARNESS:1}`
 // at lib/run.sh:503: the first character upper-cased, the rest untouched.
 func capitaliseName(name string) string {
 	runes := []rune(name)
