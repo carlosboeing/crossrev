@@ -40,6 +40,17 @@
 //     runs `preflight_require_yq` and `cfg_load` first (bin/crossrev:155-156),
 //     so on a machine with no yq the two refusals arrive in the other order.
 //
+// # Where the version comes from
+//
+// The shell reads `$ROOT/VERSION` at run time, where ROOT is the checkout it
+// was invoked from (bin/crossrev:26, :64). A binary has no checkout, so the
+// bytes are compiled in from a generated copy beside this package — assets.go,
+// kept in step by scripts/sync-embedded-assets.sh. That is the same route
+// internal/harness takes for the descriptor and internal/initcmd for the
+// workflow templates. The printed bytes are identical; the source is not, so a
+// binary reports the version it was built from rather than the version of
+// whatever checkout it is standing in.
+//
 // One shell behaviour is reproduced rather than improved on. An argument loop
 // that reaches `shift 2` with one argument left fails the shift, and `set -euo
 // pipefail` ends the process without printing a word: `crossrev review --pr`

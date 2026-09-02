@@ -68,9 +68,7 @@ func compose(out *ui.IO) (Commands, []string) {
 // installedVersion is the text `crossrev version` prints.
 //
 // The shell reads it out of the VERSION file at the root of its checkout
-// (bin/crossrev:26, :64), and a binary has no checkout to read. Carrying the
-// bytes instead means a generated file beside this package and a line in
-// scripts/sync-embedded-assets.sh, the way internal/harness carries the
-// descriptor; that has not been done, so this answers nothing yet and Version
-// refuses rather than printing a blank line.
-func installedVersion() string { return "" }
+// (bin/crossrev:26, :64), and a binary has no checkout to read, so the bytes
+// are compiled in — see assets.go. Version deletes the whitespace, which is
+// where the shell's `tr -d` happens.
+func installedVersion() string { return embeddedVersion }
