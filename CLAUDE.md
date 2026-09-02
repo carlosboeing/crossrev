@@ -24,7 +24,7 @@ That is a named set of runs on one repository with one pairing, not a general gu
   - No build step, no package manager, no lockfile. The checkout is the installation: `install.sh` symlinks `bin/crossrev` onto PATH and the tool reads its libraries, skills and templates from the checkout at runtime.
   - Dependencies are `git`, `gh`, `jq`, `yq`, `openssl`, plus `shellcheck` and Go 1.21 or newer for the linter. `go.mod` pins the exact `go1.27.0` toolchain, which any Go from 1.21 downloads and switches to on first use, so the installed version does not have to match. Go arrived with the native parity port and is authorised by [ADR 0018](docs/adrs/0018-go-native-parity-contract.md). Adding any other language runtime needs an ADR first.
   - Delivery to consuming repositories is a composite action pinned by full 40-character SHA ([ADR 0009](docs/adrs/0009-delivery-via-sha-pinned-composite-action.md)). `crossrev init` generates the pinned form; the floating `@v0` exists only in the README's copy-paste example.
-  - CI runs `scripts/lint.sh` and `tests/run.sh` on push and pull request, plus `scripts/check-changelog.sh` on pull requests only. A release is a tag, and the tag triggers `.github/workflows/release.yml`, which verifies the version, publishes to npm and creates the GitHub Release.
+  - CI runs `scripts/lint.sh`, `go test ./...`, `scripts/test-native.sh` and `tests/run.sh` on push and pull request, plus `scripts/check-changelog.sh` on pull requests only. A release is a tag, and the tag triggers `.github/workflows/release.yml`, which verifies the version, publishes to npm and creates the GitHub Release.
 
 ## The public/private gate
 
