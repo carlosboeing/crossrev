@@ -443,7 +443,7 @@ func wantMode(t *testing.T, path string, want os.FileMode) {
 }
 
 // A state value that is not the one CrossRev sent means the request did not
-// come from the page it opened (lib/auth.sh:679-682).
+// come from the page it opened (lib/auth.sh:733-736).
 func TestLoginRefusesAStateItDidNotSend(t *testing.T) {
 	b := newBench(t, out("Organization 12345\n"), bad())
 	b.browser(&opener{})
@@ -460,9 +460,40 @@ func TestLoginRefusesAStateItDidNotSend(t *testing.T) {
 	}
 }
 
-// A redirect carrying no state at all is not a mismatch: the check is
-// `[[ -n "$returned_state" && … ]]`.
-func TestLoginAcceptsARedirectCarryingNoState(t *testing.T) {
+// A redirect carrying a code and no state at all is refused, because the
+// listener path is the one path that can be required to send the state back
+// (lib/auth.sh:727-736).
+//
+// The listener binds loopback only, so any request reaching it came from a
+// process on this machine — which is exactly what the state exists to tell
+// apart from the page CrossRev opened. A request that sent no state has not
+// made that claim.
+//
+// `attacker-code` is the shape the probe used: a request the operator's
+// browser never made, arriving with a code and nothing else
+// (tests/test-auth.sh:444-451).
+func TestLoginRefusesAListenerRedirectCarryingNoState(t *testing.T) {
+	b := newBench(t, out("Organization 12345\n"), bad())
+	b.browser(&opener{})
+	b.assumeYes(t)
+	b.cmds.Random = strings.NewReader(string(stateSeed))
+	b.redirects("GET /crossrev-auth?code=attacker-code")
+
+	err := b.cmds.Login(context.Background(), app.LoginRequest{Owner: "ShoreLogic", Role: "loop"})
+	wantRefusal(t, err,
+		"the state value GitHub returned does not match the one CrossRev sent",
+		"This request did not come from the page crossrev opened. Start again: crossrev auth login --owner ShoreLogic")
+	if len(b.gh.specs) != 2 {
+		t.Fatalf("gh ran %d times, so the code was exchanged despite the missing state", len(b.gh.specs))
+	}
+	if _, statErr := os.Stat(filepath.Join(b.dir, "ShoreLogic.loop.pem")); !os.IsNotExist(statErr) {
+		t.Fatal("a key was written for a redirect that carried no state")
+	}
+}
+
+// The positive control for the arm above. Without it, "refused" could just as
+// well mean the listener path never completes at all (tests/test-auth.sh:435-440).
+func TestLoginAcceptsAListenerRedirectCarryingTheStateItSent(t *testing.T) {
 	b := newBench(t,
 		out("Organization 12345\n"),
 		bad(),
@@ -472,11 +503,15 @@ func TestLoginAcceptsARedirectCarryingNoState(t *testing.T) {
 	b.assumeYes(t)
 	b.noWait()
 	b.cmds.Random = strings.NewReader(string(stateSeed))
-	b.redirects("GET /crossrev-auth?code=abc123")
+	b.redirects("GET /crossrev-auth?code=abc123&state=" + stateValue())
 
 	if err := b.cmds.Login(context.Background(), app.LoginRequest{Owner: "ShoreLogic", Role: "loop"}); err != nil {
 		t.Fatalf("Login: %v", err)
 	}
+	if got, want := b.gh.specs[2].Args[3], "app-manifests/abc123/conversions"; got != want {
+		t.Fatalf("exchanged %q, want %q", got, want)
+	}
+	wantMode(t, filepath.Join(b.dir, "ShoreLogic.loop.pem"), 0o600)
 }
 
 // --- the paste fallback -----------------------------------------------------
@@ -532,6 +567,26 @@ func TestLoginTakesABarePastedValueAsTheCode(t *testing.T) {
 	}
 	if got, want := b.gh.specs[2].Args[3], "app-manifests/just-the-code/conversions"; got != want {
 		t.Fatalf("exchanged %q, want %q", got, want)
+	}
+}
+
+// The paste is held to the state it carries. An absent one is the documented
+// fallback; one that came back wrong is a mismatch on either path
+// (lib/auth.sh:730-731, tests/test-auth.sh:472-479).
+func TestLoginRefusesAPastedURLCarryingTheWrongState(t *testing.T) {
+	b := newBench(t, out("Organization 12345\n"), bad())
+	b.browser(&opener{})
+	b.noListener()
+	b.cmds.Random = strings.NewReader(string(stateSeed))
+	b.answers(t, "http://localhost:33517/crossrev-auth?code=c&state=not-the-one")
+	b.cmds.IO.AssumeYes = true
+
+	err := b.cmds.Login(context.Background(), app.LoginRequest{Owner: "ShoreLogic", Role: "loop"})
+	wantRefusal(t, err,
+		"the state value GitHub returned does not match the one CrossRev sent",
+		"This request did not come from the page crossrev opened. Start again: crossrev auth login --owner ShoreLogic")
+	if _, statErr := os.Stat(filepath.Join(b.dir, "ShoreLogic.loop.pem")); !os.IsNotExist(statErr) {
+		t.Fatal("a key was written for a paste carrying the wrong state")
 	}
 }
 
@@ -652,6 +707,24 @@ func TestLoginKeepsThePrivateKeyOutOfEveryPrintedLineAndEveryArgument(t *testing
 	if strings.Contains(b.text(), "abc123") {
 		t.Fatal("the registration code was printed")
 	}
+}
+
+// A temporary directory the page cannot be written into stops the flow with
+// the shell's own two sentences (lib/auth.sh:628-630), rather than an internal
+// error nobody can act on. Measured from the shell with NO_COLOR=1 and
+// TMPDIR=/nonexistent-abc/, which also proves the trailing slash is trimmed off
+// the directory the action line names (`${tmpdir%/}`, lib/auth.sh:626).
+func TestLoginRefusesWhenTheRegistrationPageCannotBeWritten(t *testing.T) {
+	b := newBench(t, out("Organization 12345\n"), bad())
+	b.browser(&opener{})
+	b.assumeYes(t)
+	// Set last: newBench and assumeYes both take a t.TempDir under the real one.
+	t.Setenv("TMPDIR", "/nonexistent-abc/")
+
+	err := b.cmds.Login(context.Background(), app.LoginRequest{Owner: "ShoreLogic", Role: "loop"})
+	wantRefusal(t, err,
+		"could not create a temporary file for the registration page",
+		"Check that the temporary directory /nonexistent-abc is writable.")
 }
 
 // The page carrying the manifest is opened with file:// and lives in a
