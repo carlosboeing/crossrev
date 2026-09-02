@@ -213,7 +213,7 @@ func TestStatusState(t *testing.T) {
 // TestStatusStateIsOneOfFive keeps the header vocabulary closed. A sixth word
 // would be a place for the terminal and the label to disagree, which is the
 // thing reading the header off the label was meant to stop
-// (tests/test-status.sh:655-668).
+// (tests/test-status.sh:613-626).
 func TestStatusStateIsOneOfFive(t *testing.T) {
 	for _, c := range statusCases(t) {
 		t.Run(c.Name, func(t *testing.T) {

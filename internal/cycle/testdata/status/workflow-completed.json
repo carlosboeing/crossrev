@@ -1,6 +1,6 @@
 {
   "name": "workflow-completed",
-  "shell": "tests/test-status.sh:273-276",
+  "shell": "tests/test-status.sh:267-270",
   "now": 1787000000,
   "head_sha": "2c4a46cb321db01826d116b5ef2add6b0284d68c",
   "min_fix_severity": "medium",

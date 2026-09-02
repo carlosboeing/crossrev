@@ -1,6 +1,6 @@
 {
   "name": "review-blocked",
-  "shell": "tests/test-status.sh:596-598",
+  "shell": "tests/test-status.sh:561-563",
   "now": 1787000000,
   "head_sha": "2c4a46cb321db01826d116b5ef2add6b0284d68c",
   "min_fix_severity": "medium",

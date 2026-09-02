@@ -1,6 +1,6 @@
 {
   "name": "resolve-blocked",
-  "shell": "tests/test-status.sh:546-557",
+  "shell": "tests/test-status.sh:515-525",
   "now": 1787000000,
   "head_sha": "2c4a46cb321db01826d116b5ef2add6b0284d68c",
   "min_fix_severity": "medium",

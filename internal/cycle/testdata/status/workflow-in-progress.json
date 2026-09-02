@@ -1,6 +1,6 @@
 {
   "name": "workflow-in-progress",
-  "shell": "tests/test-status.sh:267-271",
+  "shell": "tests/test-status.sh:262-265",
   "now": 1787000000,
   "head_sha": "2c4a46cb321db01826d116b5ef2add6b0284d68c",
   "min_fix_severity": "medium",

@@ -1,6 +1,6 @@
 {
   "name": "settled-stale-review-label",
-  "shell": "tests/test-status.sh:373-377",
+  "shell": "tests/test-status.sh:360-363",
   "now": 1787000000,
   "head_sha": "2c4a46cb321db01826d116b5ef2add6b0284d68c",
   "min_fix_severity": "medium",

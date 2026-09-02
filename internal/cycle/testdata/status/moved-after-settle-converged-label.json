@@ -1,6 +1,6 @@
 {
   "name": "moved-after-settle-converged-label",
-  "shell": "tests/test-status.sh:478-482",
+  "shell": "tests/test-status.sh:453-456",
   "now": 1787000000,
   "head_sha": "2c4a46cb321db01826d116b5ef2add6b0284d68c",
   "min_fix_severity": "medium",
