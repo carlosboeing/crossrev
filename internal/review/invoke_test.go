@@ -2,6 +2,8 @@ package review_test
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -9,7 +11,9 @@ import (
 
 	"github.com/carlosboeing/crossrev/internal/exec"
 	"github.com/carlosboeing/crossrev/internal/forge"
+	"github.com/carlosboeing/crossrev/internal/harness"
 	"github.com/carlosboeing/crossrev/internal/review"
+	"github.com/carlosboeing/crossrev/internal/ui"
 	"github.com/carlosboeing/crossrev/internal/validate"
 )
 
@@ -340,4 +344,314 @@ func forgeCredentialIn(env []string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// --- the three refusals run_leg_settings prints before anything is billed ------
+
+// legsRewritten is the shipped lib/harnesses.json with the named harnesses'
+// `legs` rewritten, which is how every refusal below was measured:
+//
+//	$ jq '(.harnesses[] | select(.name=="grok") | .legs) |= ["resolve"]' \
+//	    lib/harnesses.json > /tmp/d.json
+//	$ NO_COLOR=1 CROSSREV_HARNESS_FILE=/tmp/d.json bash -c 'ROOT=$PWD;
+//	    source lib/ui.sh; source lib/harnesses.sh; source lib/run.sh;
+//	    _run_assert_harness_serves_leg grok review'
+//
+// Rewriting the shipped file rather than writing a small one keeps the names,
+// the product names and the descriptor order the operator's message is built
+// from, and every shipped entry serves both legs, so nothing here could be
+// measured against the file as it ships.
+func legsRewritten(t *testing.T, legs map[string][]string) harness.Document {
+	t.Helper()
+	var tree map[string]any
+	if err := json.Unmarshal(harness.DescriptorJSON(), &tree); err != nil {
+		t.Fatalf("decode the shipped descriptor: %v", err)
+	}
+	entries, ok := tree["harnesses"].([]any)
+	if !ok {
+		t.Fatal("the shipped descriptor has no harnesses array")
+	}
+	for _, entry := range entries {
+		object, ok := entry.(map[string]any)
+		if !ok {
+			t.Fatal("a harness entry is not an object")
+		}
+		name, _ := object["name"].(string)
+		if serves, found := legs[name]; found {
+			object["legs"] = serves
+		}
+	}
+	raw, err := json.Marshal(tree)
+	if err != nil {
+		t.Fatalf("re-encode the descriptor: %v", err)
+	}
+	doc, err := harness.Load(raw)
+	if err != nil {
+		t.Fatalf("harness.Load: %v", err)
+	}
+	return doc
+}
+
+func wantFatal(t *testing.T, err error, reason, action string) {
+	t.Helper()
+	var fatal *ui.FatalError
+	if !errors.As(err, &fatal) {
+		t.Fatalf("err = %v, want a *ui.FatalError", err)
+	}
+	if fatal.Reason != reason {
+		t.Errorf("reason\n got %q\nwant %q", fatal.Reason, reason)
+	}
+	if fatal.Action != action {
+		t.Errorf("action\n got %q\nwant %q", fatal.Action, action)
+	}
+}
+
+// TestSettingsRefusesAHarnessThatCannotReview pins
+// _run_assert_harness_serves_leg (lib/run.sh:553-558), reached from
+// run_leg_settings at lib/run.sh:520. The hint is built from the descriptor
+// rather than written into the sentence: it names the harnesses that can take
+// the leg and reads the refused harness's product name and declared legs back
+// off its entry. Measured with grok rewritten to legs ["resolve"]:
+//
+//	error  the harness 'grok' cannot serve the review leg
+//	       CrossRev runs the review leg on claude, codex, agy and opencode. Grok is limited to the resolve leg.
+func TestSettingsRefusesAHarnessThatCannotReview(t *testing.T) {
+	e := newEnv(t)
+	e.doc = legsRewritten(t, map[string][]string{"grok": {"resolve"}})
+	req := e.request(t)
+	req.HarnessOverride = "grok"
+
+	got := runLeg(t, e, req)
+
+	wantFatal(t, got.Err,
+		"the harness 'grok' cannot serve the review leg",
+		"CrossRev runs the review leg on claude, codex, agy and opencode. Grok is limited to the resolve leg.")
+	if len(e.runner.Specs()) != 0 {
+		t.Errorf("harness started on a refusal: %d specs", len(e.runner.Specs()))
+	}
+}
+
+// TestSettingsRefusesAReviewOnlyListThatOmitsReview pins that the list of
+// harnesses that can take the leg shrinks with the descriptor rather than being
+// a constant. Measured with claude, codex and agy rewritten to legs
+// ["resolve"]:
+//
+//	error  the harness 'codex' cannot serve the review leg
+//	       CrossRev runs the review leg on grok and opencode. Codex is limited to the resolve leg.
+//
+// Two names here and four above is what pins _names_human's "a and b" against
+// its "a, b, c and d" (lib/harnesses.sh:171-178).
+func TestSettingsRefusesAReviewOnlyListThatOmitsReview(t *testing.T) {
+	e := newEnv(t)
+	e.doc = legsRewritten(t, map[string][]string{
+		"claude": {"resolve"}, "codex": {"resolve"}, "agy": {"resolve"},
+	})
+	req := e.request(t)
+	req.HarnessOverride = "codex"
+
+	got := runLeg(t, e, req)
+
+	wantFatal(t, got.Err,
+		"the harness 'codex' cannot serve the review leg",
+		"CrossRev runs the review leg on grok and opencode. Codex is limited to the resolve leg.")
+}
+
+// TestSettingsSendsANotDrivenHarnessToEndpoints pins the branch at
+// lib/run.sh:502-504: a name the descriptor lists under not_driven is refused
+// with the reason it carries and the key that would work instead. The leg word
+// in "reviewer.endpoint" is the config key, not the descriptor's review/resolve
+// vocabulary. Measured:
+//
+//	$ bash -c 'ROOT=$PWD; source lib/ui.sh; source lib/harnesses.sh;
+//	    source lib/config.sh; source lib/run.sh; harness_source_adapters;
+//	    CFG_MERGED="{}"; run_leg_settings reviewer kimi'
+//	error  there is no adapter for the harness 'kimi'
+//	       CrossRev drives claude, codex, agy, grok and opencode directly. Kimi is reached through the claude adapter as a named endpoint, so there is no adapter_kimi behind the name: define it under endpoints: and set reviewer.endpoint, not reviewer.harness.
+func TestSettingsSendsANotDrivenHarnessToEndpoints(t *testing.T) {
+	e := newEnv(t)
+	req := e.request(t)
+	req.HarnessOverride = "kimi"
+
+	got := runLeg(t, e, req)
+
+	wantFatal(t, got.Err,
+		"there is no adapter for the harness 'kimi'",
+		"CrossRev drives claude, codex, agy, grok and opencode directly. Kimi is reached through the claude adapter as a named endpoint, so there is no adapter_kimi behind the name: define it under endpoints: and set reviewer.endpoint, not reviewer.harness.")
+	if len(e.runner.Specs()) != 0 {
+		t.Errorf("harness started on a refusal: %d specs", len(e.runner.Specs()))
+	}
+}
+
+// TestSettingsNamesTheDrivenHarnessesForAnUnknownName pins the else arm at
+// lib/run.sh:505-506: a name the descriptor does not carry at all gets the same
+// sentence without the endpoints half, and the names come from the descriptor.
+// Measured:
+//
+//	$ … run_leg_settings reviewer nosuch
+//	error  there is no adapter for the harness 'nosuch'
+//	       CrossRev drives claude, codex, agy, grok and opencode directly.
+//
+// This is also the case ServesLeg is deliberately lax about: the adapter test
+// at lib/run.sh:500 refuses the name before the serves-leg gate at :520 ever
+// reads it, so the refusal names the fault rather than printing a sentence
+// built from an empty product name.
+func TestSettingsNamesTheDrivenHarnessesForAnUnknownName(t *testing.T) {
+	e := newEnv(t)
+	req := e.request(t)
+	req.HarnessOverride = "nosuch"
+
+	got := runLeg(t, e, req)
+
+	wantFatal(t, got.Err,
+		"there is no adapter for the harness 'nosuch'",
+		"CrossRev drives claude, codex, agy, grok and opencode directly.")
+}
+
+// TestSettingsRefusesWhenNothingThatCanReviewIsInstalled pins the last refusal
+// in run_leg_settings (lib/run.sh:538-540), reached once the configured harness
+// has no binary and the substitution loop at :531-537 finds no other harness
+// that serves the leg. The hint names the harnesses that could take the leg,
+// read off the descriptor. Measured on the shipped descriptor with a PATH that
+// carries jq and yq but no harness binary:
+//
+//	$ NO_COLOR=1 env PATH=/usr/bin:/bin:/usr/sbin:/sbin:/tmp/tools bash -c 'ROOT=$PWD;
+//	    source lib/ui.sh; source lib/harnesses.sh; source lib/config.sh;
+//	    source lib/run.sh; harness_source_adapters; CFG_MERGED="{}";
+//	    run_leg_settings reviewer claude'
+//	error  the reviewer is configured to use 'claude', which is not installed, and no other harness that can serve the review leg is either
+//	       Install one of claude, codex, agy, grok and opencode. CrossRev needs at least one, and two different ones is what makes the cross-model check mean anything.
+//
+// The refused harness is named in the list it is told to install from, because
+// the list is every harness that serves the leg rather than every alternative.
+func TestSettingsRefusesWhenNothingThatCanReviewIsInstalled(t *testing.T) {
+	e := newEnv(t)
+	e.lookPath = func(string) (string, error) { return "", os.ErrNotExist }
+	req := e.request(t)
+	req.HarnessOverride = "claude"
+
+	got := runLeg(t, e, req)
+
+	wantFatal(t, got.Err,
+		"the reviewer is configured to use 'claude', which is not installed, and no other harness that can serve the review leg is either",
+		"Install one of claude, codex, agy, grok and opencode. CrossRev needs at least one, and two different ones is what makes the cross-model check mean anything.")
+	if len(e.runner.Specs()) != 0 {
+		t.Errorf("harness started on a refusal: %d specs", len(e.runner.Specs()))
+	}
+}
+
+// TestSettingsNamesOnlyTheHarnessesThatCanReview pins that the install list is
+// harness_names_for_leg rather than every driven harness. Measured with codex,
+// agy and grok rewritten to legs ["resolve"] and the same binary-free PATH:
+//
+//	error  the reviewer is configured to use 'claude', which is not installed, and no other harness that can serve the review leg is either
+//	       Install one of claude and opencode. CrossRev needs at least one, and two different ones is what makes the cross-model check mean anything.
+//
+// Two names here against five above is what pins _names_human's "a and b"
+// (lib/harnesses.sh:171-178), and claude is asked for because a harness that
+// cannot serve the leg is refused at lib/run.sh:520 before this line.
+func TestSettingsNamesOnlyTheHarnessesThatCanReview(t *testing.T) {
+	e := newEnv(t)
+	e.doc = legsRewritten(t, map[string][]string{
+		"codex": {"resolve"}, "agy": {"resolve"}, "grok": {"resolve"},
+	})
+	e.lookPath = func(string) (string, error) { return "", os.ErrNotExist }
+	req := e.request(t)
+	req.HarnessOverride = "claude"
+
+	got := runLeg(t, e, req)
+
+	wantFatal(t, got.Err,
+		"the reviewer is configured to use 'claude', which is not installed, and no other harness that can serve the review leg is either",
+		"Install one of claude and opencode. CrossRev needs at least one, and two different ones is what makes the cross-model check mean anything.")
+}
+
+// TestInvokeRefusesADescriptorEntryWithNoCompiledAdapter reaches the SECOND
+// no-adapter guard, the one inside invoke (invoke.go, after AssertEnvClean).
+//
+// The two guards do not test the same predicate. settings asks
+// Document.Known — is the name in the descriptor — while invoke asks
+// harness.For, which is that AND one of the five names this binary compiles an
+// adapter for (internal/harness/adapter.go:92-111). The gap between them is a
+// descriptor entry naming a harness this build has no adapter for, which is
+// what this test constructs: a sixth entry copied from claude and renamed.
+//
+// Bash has no second guard because it cannot reach this state. harness_load
+// refuses the document outright, before run_leg_settings is ever called:
+//
+//	$ NO_COLOR=1 CROSSREV_HARNESS_FILE=/tmp/d-sixth.json bash -c 'ROOT=$PWD;
+//	    source lib/ui.sh; source lib/harnesses.sh; source lib/config.sh;
+//	    source lib/run.sh; harness_source_adapters; CFG_MERGED="{}";
+//	    run_leg_settings reviewer newharness'
+//	error  the descriptor names the harness 'newharness', and there is no lib/adapters/newharness.sh
+//	       Add the adapter, or remove the entry.
+//
+// That check is lib/harnesses.sh:106-114 and its Go port is harness.Adapters
+// (internal/harness/adapter.go:119-127), which nothing outside a test calls —
+// so this refusal is the only thing standing between an adapter-less entry and
+// a nil adapter. The sentence it prints is the one measured at lib/run.sh:500-508;
+// the descriptor that reaches it is one Bash would have rejected at load.
+func TestInvokeRefusesADescriptorEntryWithNoCompiledAdapter(t *testing.T) {
+	e := newEnv(t)
+	e.doc = withSixthEntry(t)
+	req := e.request(t)
+	req.HarnessOverride = "newharness"
+
+	got := runLeg(t, e, req)
+
+	wantFatal(t, got.Err,
+		"there is no adapter for the harness 'newharness'",
+		"CrossRev drives claude, codex, agy, grok, opencode and newharness directly.")
+	if len(e.runner.Specs()) != 0 {
+		t.Errorf("harness started with no adapter: %d specs", len(e.runner.Specs()))
+	}
+}
+
+// withSixthEntry is the shipped descriptor with claude's entry copied under a
+// name this binary compiles no adapter for. It is the jq
+//
+//	.harnesses += [(.harnesses[] | select(.name=="claude")
+//	   | .name="newharness" | .product_name="New Harness" | .binary="newharness")]
+//
+// that the measurement above ran against Bash.
+func withSixthEntry(t *testing.T) harness.Document {
+	t.Helper()
+	var tree map[string]any
+	if err := json.Unmarshal(harness.DescriptorJSON(), &tree); err != nil {
+		t.Fatalf("decode the shipped descriptor: %v", err)
+	}
+	entries, ok := tree["harnesses"].([]any)
+	if !ok {
+		t.Fatal("the shipped descriptor has no harnesses array")
+	}
+	var copied map[string]any
+	for _, entry := range entries {
+		object, ok := entry.(map[string]any)
+		if !ok {
+			t.Fatal("a harness entry is not an object")
+		}
+		if object["name"] != "claude" {
+			continue
+		}
+		copied = make(map[string]any, len(object))
+		for key, value := range object {
+			copied[key] = value
+		}
+	}
+	if copied == nil {
+		t.Fatal("the shipped descriptor has no claude entry to copy")
+	}
+	copied["name"] = "newharness"
+	copied["product_name"] = "New Harness"
+	copied["binary"] = "newharness"
+	tree["harnesses"] = append(entries, copied)
+
+	raw, err := json.Marshal(tree)
+	if err != nil {
+		t.Fatalf("re-encode the descriptor: %v", err)
+	}
+	doc, err := harness.Load(raw)
+	if err != nil {
+		t.Fatalf("harness.Load: %v", err)
+	}
+	return doc
 }

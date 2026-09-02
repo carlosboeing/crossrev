@@ -276,16 +276,10 @@ func (l *Leg) settings(s *session) (*Refusal, string, error) {
 		return nil, "", err
 	}
 	if _, ok := harnessFor(doc, name); !ok {
-		return &Refusal{
-			Message: fmt.Sprintf("there is no adapter for the harness '%s'", name),
-			Hint:    "CrossRev drives claude, codex, agy, grok and opencode directly.",
-		}, "", nil
+		return noAdapterRefusal(doc, name), "", nil
 	}
 	if !doc.ServesLeg(name, "resolve") {
-		return &Refusal{
-			Message: fmt.Sprintf("the harness '%s' cannot serve the resolve leg", name),
-			Hint:    "Name a harness whose descriptor lists resolve, or omit --harness.",
-		}, "", nil
+		return servesLegRefusal(doc, name), "", nil
 	}
 
 	asked := name
@@ -301,10 +295,100 @@ func (l *Leg) settings(s *session) (*Refusal, string, error) {
 			return nil, warn, nil
 		}
 	}
+	return notInstalledRefusal(doc, asked), "", nil
+}
+
+// notInstalledRefusal is the last refusal in run_leg_settings
+// (lib/run.sh:538-540), reached once the configured harness has no binary and
+// the substitution loop at lib/run.sh:531-537 finds no other harness that
+// serves the leg.
+//
+// The hint names every harness that CAN take the leg, read off the descriptor
+// with harness_names_for_leg — which is why the refused harness appears in the
+// list it is told to install from. Measured on the shipped descriptor with a
+// PATH carrying jq and yq but no harness binary:
+//
+//	Install one of claude, codex, agy, grok and opencode. CrossRev needs at least one, and two different ones is what makes the cross-model check mean anything.
+//
+// and with codex, agy and grok rewritten to legs ["review"]:
+//
+//	Install one of claude and opencode. CrossRev needs at least one, and two different ones is what makes the cross-model check mean anything.
+func notInstalledRefusal(doc harness.Document, asked string) *Refusal {
+	const leg = "resolve"
 	return &Refusal{
-		Message: fmt.Sprintf("the resolver is configured to use '%s', which is not installed, and no other harness that can serve the resolve leg is either", asked),
-		Hint:    "Install one of the harnesses that serve the resolve leg.",
-	}, "", nil
+		Message: fmt.Sprintf("the resolver is configured to use '%s', which is not installed, and no other harness that can serve the %s leg is either", asked, leg),
+		Hint: fmt.Sprintf("Install one of %s. CrossRev needs at least one, and two different ones is what makes the cross-model check mean anything.",
+			harness.NamesHuman(doc.NamesForLeg(leg))),
+	}
+}
+
+// noAdapterRefusal is the refusal run_leg_settings prints when no adapter
+// function exists for the configured name (lib/run.sh:500-508).
+//
+// The hint names the harnesses CrossRev drives, read off the descriptor rather
+// than written into the sentence. A name the descriptor lists under not_driven
+// gets a second half carrying the reason it has no adapter and the key that
+// would work instead — and the leg word there is the CONFIG key (resolver),
+// not the descriptor's review/resolve vocabulary. Measured:
+//
+//	resolver kimi   -> CrossRev drives claude, codex, agy, grok and opencode directly. Kimi is reached through the claude adapter as a named endpoint, so there is no adapter_kimi behind the name: define it under endpoints: and set resolver.endpoint, not resolver.harness.
+//	resolver nosuch -> CrossRev drives claude, codex, agy, grok and opencode directly.
+//
+// The review leg builds the same two sentences from the same descriptor reads.
+// Sharing one function would mean one tier-3 package importing another, which
+// internal/archtest refuses, so each leg carries its own copy against this
+// citation.
+func noAdapterRefusal(doc harness.Document, name string) *Refusal {
+	hint := fmt.Sprintf("CrossRev drives %s directly.", doc.NamesHuman())
+	if reason, notDriven := doc.NotDrivenReason(name); notDriven {
+		hint += fmt.Sprintf(" %s is %s: define it under endpoints: and set resolver.endpoint, not resolver.harness.",
+			capitaliseName(name), reason)
+	}
+	return &Refusal{
+		Message: fmt.Sprintf("there is no adapter for the harness '%s'", name),
+		Hint:    hint,
+	}
+}
+
+// servesLegRefusal is _run_assert_harness_serves_leg for the resolve leg
+// (lib/run.sh:553-558), reached from run_leg_settings at lib/run.sh:520.
+//
+// The message is the product: it names the harness, the leg, the harnesses that
+// can take the leg, and the legs the refused harness actually serves. Measured
+// with grok rewritten to legs ["review"]:
+//
+//	the harness 'grok' cannot serve the resolve leg
+//	CrossRev runs the resolve leg on claude, codex, agy and opencode. Grok is limited to the review leg.
+//
+// The leg list is `harness_get "$harness" '.legs // [] | join(", ")'`, whose
+// default is the EMPTY array rather than the review-resolve pair
+// harness_serves_leg defaults to. The difference cannot show: an entry that
+// declares no legs serves both and never reaches this line, and the validator
+// refuses a legs field that is not a non-empty array drawn from review and
+// resolve (lib/harnesses.sh:66-70). So a refused entry has declared exactly one
+// leg, and Descriptor.Legs is its declared list.
+func servesLegRefusal(doc harness.Document, name string) *Refusal {
+	const leg = "resolve"
+	entry, _ := doc.For(name)
+	return &Refusal{
+		Message: fmt.Sprintf("the harness '%s' cannot serve the %s leg", name, leg),
+		Hint: fmt.Sprintf("CrossRev runs the %s leg on %s. %s is limited to the %s leg.",
+			leg,
+			harness.NamesHuman(doc.NamesForLeg(leg)),
+			entry.ProductName,
+			strings.Join(entry.Legs(), ", ")),
+	}
+}
+
+// capitaliseName is the Bash
+// `$(printf '%s' "${LEG_HARNESS:0:1}" | tr '[:lower:]' '[:upper:]')${LEG_HARNESS:1}`
+// at lib/run.sh:503: the first character upper-cased, the rest untouched.
+func capitaliseName(name string) string {
+	runes := []rune(name)
+	if len(runes) == 0 {
+		return ""
+	}
+	return strings.ToUpper(string(runes[0])) + string(runes[1:])
 }
 
 func wrapErr(err error) Result {

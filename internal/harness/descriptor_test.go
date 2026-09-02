@@ -104,8 +104,40 @@ func TestLegsDefaultToBothWhenTheKeyIsAbsent(t *testing.T) {
 			t.Errorf("NamesForLeg(%q) = %v, want every harness", leg, got)
 		}
 	}
-	if doc.ServesLeg("not-a-harness", "review") {
-		t.Error("a harness the descriptor does not carry serves nothing")
+}
+
+// TestAnUnknownHarnessServesEveryLeg pins jq's answer for a name the descriptor
+// does not carry. harness_serves_leg reads
+//
+//	((.harnesses[] | select(.name == $n) | .legs) // ["review","resolve"])
+//	  | index($l) != null
+//
+// and the parenthesised selection produces NO values for an unknown name, so
+// `//` yields the default rather than false and the name serves both legs
+// (lib/harnesses.sh:154-159). Measured against the shipped descriptor:
+//
+//	$ bash -c 'source lib/ui.sh; source lib/harnesses.sh;
+//	    harness_serves_leg nosuch review;  echo rc=$?
+//	    harness_serves_leg nosuch resolve; echo rc=$?
+//	    harness_serves_leg "" review;      echo rc=$?'
+//	rc=0
+//	rc=0
+//	rc=0
+//
+// A leg name that is in neither the default nor a declared list is still false,
+// which is what keeps this the `//` default rather than an unconditional true.
+func TestAnUnknownHarnessServesEveryLeg(t *testing.T) {
+	doc := descriptors(t)
+
+	for _, name := range []string{"not-a-harness", "nosuch", ""} {
+		for _, leg := range []string{"review", "resolve"} {
+			if !doc.ServesLeg(name, leg) {
+				t.Errorf("ServesLeg(%q, %q) = false, want true", name, leg)
+			}
+		}
+		if doc.ServesLeg(name, "deploy") {
+			t.Errorf("ServesLeg(%q, \"deploy\") = true, want false", name)
+		}
 	}
 }
 
