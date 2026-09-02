@@ -1,0 +1,36 @@
+name: Feature request
+description: Suggest an enhancement for CrossRev
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before filing, check docs/ROADMAP.md and docs/adrs/ - the feature may already be planned, parked, or declined.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to do that CrossRev does not support today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What should CrossRev do? Sketch the behavior if you can.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Workarounds you tried or other approaches you weighed.
+    validations:
+      required: false
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope check
+      description: Check ROADMAP and ADRs. If this contradicts a decision record, name it.
+    validations:
+      required: false

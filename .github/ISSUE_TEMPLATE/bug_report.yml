@@ -1,0 +1,46 @@
+name: Bug report
+description: Report a defect in CrossRev (review loop, doctor, install)
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a bug. Do not include private data or security details - see SECURITY.md for private disclosure.
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: What you ran and what it did. Paste output rather than describing it.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      description: The command and the state it ran against. Include `crossrev status --pr N` where relevant and redact private data.
+      placeholder: |
+        1. Run `crossrev review --pr 42`
+        2. ...
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Paste the output of `crossrev version`, `crossrev doctor`, and `uname -sr && bash --version | head -1`. Note local vs automated and reviewer/resolver pairing if automated.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / output
+      render: shell
+    validations:
+      required: false
