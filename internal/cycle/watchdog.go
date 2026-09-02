@@ -16,10 +16,12 @@ import (
 //
 // Bash builds this list itself, from one `gh api repos/<slug>/pulls?state=open`
 // filtered to the pull requests carrying a `crossrev/awaiting-` label
-// (lib/run.sh:3691-3693). There is no forge method for that read, so the list is
-// an argument here and the caller performs it. Nothing else about the sweep
-// changes: every decision below is made from these three fields and the markers
-// on the pull request, which is what makes the watchdog answerable offline.
+// (lib/run.sh:3691-3693). forge.AwaitingPullRequests is that read, and the
+// composition root performs it before calling Run, so the list arrives as an
+// argument rather than through a forge call made here. Nothing else about the
+// sweep changes: every decision below is made from these three fields and the
+// markers on the pull request, which is what makes the watchdog answerable
+// offline.
 type Waiting struct {
 	// PR is the pull request number.
 	PR int
