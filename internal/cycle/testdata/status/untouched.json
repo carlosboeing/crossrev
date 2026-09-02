@@ -1,0 +1,26 @@
+{
+  "name": "untouched",
+  "shell": "tests/test-status.sh:165-171",
+  "now": 1787000000,
+  "head_sha": "2c4a46cb321db01826d116b5ef2add6b0284d68c",
+  "min_fix_severity": "medium",
+  "max_passes_per_cycle": 3,
+  "liveness": {
+    "life": "",
+    "detail": ""
+  },
+  "labels": [],
+  "markers": [],
+  "want": {
+    "state": "awaiting review",
+    "pass": 0,
+    "max_pass": 0,
+    "rows": [],
+    "next": [
+      {
+        "kind": "cmd",
+        "t": "crossrev review --pr 42"
+      }
+    ]
+  }
+}

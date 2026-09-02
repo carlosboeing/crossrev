@@ -1,0 +1,173 @@
+{
+  "name": "resolve-blocked",
+  "shell": "tests/test-status.sh:515-525",
+  "now": 1787000000,
+  "head_sha": "2c4a46cb321db01826d116b5ef2add6b0284d68c",
+  "min_fix_severity": "medium",
+  "max_passes_per_cycle": 3,
+  "liveness": {
+    "life": "",
+    "detail": ""
+  },
+  "labels": [
+    "crossrev/halted",
+    "crossrev/pass-2"
+  ],
+  "markers": [
+    {
+      "v": 1,
+      "leg": "review",
+      "pass": 1,
+      "state": "complete",
+      "ts": 1786999940,
+      "done_ts": 1786999970,
+      "run_id": "x",
+      "head_sha": "2c4a46cb321db01826d116b5ef2add6b0284d68c",
+      "harness": "claude",
+      "model": "m",
+      "effort": "high",
+      "endpoint": null,
+      "model_reported": "m",
+      "tokens": 1000,
+      "verdict": "issues-remain",
+      "findings": [
+        {
+          "severity": "high"
+        },
+        {
+          "severity": "high"
+        },
+        {
+          "severity": "low"
+        }
+      ]
+    },
+    {
+      "v": 1,
+      "leg": "resolve",
+      "pass": 1,
+      "state": "complete",
+      "ts": 1786999940,
+      "done_ts": 1786999970,
+      "run_id": "x",
+      "head_sha": "2c4a46cb321db01826d116b5ef2add6b0284d68c",
+      "harness": "claude",
+      "model": "m",
+      "effort": "high",
+      "endpoint": null,
+      "model_reported": "m",
+      "tokens": 2000,
+      "blocked": false,
+      "blocked_reason": null,
+      "commit_sha": null,
+      "summary": "s",
+      "resolutions": [
+        {
+          "resolution": "fixed"
+        },
+        {
+          "resolution": "fixed"
+        },
+        {
+          "resolution": "skipped"
+        }
+      ]
+    },
+    {
+      "v": 1,
+      "leg": "review",
+      "pass": 2,
+      "state": "complete",
+      "ts": 1786999940,
+      "done_ts": 1786999970,
+      "run_id": "x",
+      "head_sha": "2c4a46cb321db01826d116b5ef2add6b0284d68c",
+      "harness": "claude",
+      "model": "m",
+      "effort": "high",
+      "endpoint": null,
+      "model_reported": "m",
+      "tokens": 1000,
+      "verdict": "issues-remain",
+      "findings": [
+        {
+          "severity": "medium"
+        }
+      ]
+    },
+    {
+      "v": 1,
+      "leg": "resolve",
+      "pass": 2,
+      "state": "complete",
+      "ts": 1786999940,
+      "done_ts": 1786999970,
+      "run_id": "x",
+      "head_sha": "2c4a46cb321db01826d116b5ef2add6b0284d68c",
+      "harness": "claude",
+      "model": "m",
+      "effort": "high",
+      "endpoint": null,
+      "model_reported": "m",
+      "tokens": 2000,
+      "blocked": true,
+      "blocked_reason": "one fix needs a schema migration nobody has approved",
+      "commit_sha": null,
+      "summary": "s",
+      "resolutions": [
+        {
+          "resolution": "fixed"
+        }
+      ]
+    }
+  ],
+  "want": {
+    "state": "halted",
+    "pass": 2,
+    "max_pass": 2,
+    "rows": [
+      {
+        "pass": 1,
+        "leg": "review",
+        "step": "ok",
+        "description": "2 high, 1 low",
+        "rendered": "1  ✓ review   2 high, 1 low"
+      },
+      {
+        "pass": 1,
+        "leg": "resolve",
+        "step": "ok",
+        "description": "2 fixed, 1 skipped",
+        "rendered": "   ✓ resolve  2 fixed, 1 skipped"
+      },
+      {
+        "pass": 2,
+        "leg": "review",
+        "step": "ok",
+        "description": "1 medium",
+        "rendered": "2  ✓ review   1 medium"
+      },
+      {
+        "pass": 2,
+        "leg": "resolve",
+        "step": "no",
+        "description": "blocked — one fix needs a schema migration nobody has approved",
+        "rendered": "   ✗ resolve  blocked — one fix needs a schema migration nobody has approved"
+      }
+    ],
+    "next": [
+      {
+        "kind": "line",
+        "t": "the resolve leg reported blocked and left its reasoning in the thread"
+      },
+      {
+        "kind": "line",
+        "t": "it belongs to. Once that is settled:"
+      },
+      {
+        "kind": "cmd",
+        "t": "crossrev resolve --pr 42"
+      }
+    ]
+  }
+}

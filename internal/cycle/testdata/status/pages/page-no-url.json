@@ -1,0 +1,53 @@
+{
+  "name": "page-no-url",
+  "shell": "lib/run.sh:3071",
+  "now": 1788303165,
+  "config_yaml": "version: 1\nmode: local\npolicy:\n  min_fix_severity: medium\n  max_passes_per_cycle: 3\n  max_files_changed_per_pr: 200\n  max_prs_per_day: 25\nreviewer:\n  harness: claude\n  model: reviewer-model\nresolver:\n  harness: claude\n  model: resolver-model\nbacklog:\n  destination: none",
+  "author": "tester",
+  "head_sha": "6abe5b2d66341b88c315098c65c81590d859cc1a",
+  "base_sha": "7905a31a036b69310172b3ae9ce9070a93e2d94d",
+  "url": "",
+  "title": "Add refresh",
+  "head_branch": "feature",
+  "changed_files": 1,
+  "labels": [
+    "crossrev/awaiting-resolution",
+    "crossrev/pass-1"
+  ],
+  "markers": [
+    {
+      "v": 1,
+      "leg": "review",
+      "pass": 1,
+      "state": "complete",
+      "ts": 1788303105,
+      "done_ts": 1788303135,
+      "run_id": "x",
+      "head_sha": "6abe5b2d66341b88c315098c65c81590d859cc1a",
+      "harness": "claude",
+      "model": "m",
+      "effort": "high",
+      "endpoint": null,
+      "model_reported": "m",
+      "tokens": 1000,
+      "verdict": "issues-remain",
+      "findings": [
+        {
+          "severity": "high"
+        },
+        {
+          "severity": "high"
+        },
+        {
+          "severity": "low"
+        }
+      ]
+    }
+  ],
+  "liveness": {
+    "life": "",
+    "detail": ""
+  },
+  "page": "\n◇  acme/widget#42 — awaiting resolution\n│\n│  PULL REQUEST\n│  title      Add refresh\n│  head       6abe5b2 on feature, 1 file(s)\n│  labels     crossrev/awaiting-resolution crossrev/pass-1\n│\n│  LOOP\n│  mode       local, markers by tester\n│  passes     1 of 3\n│  deferred   none\n│\n│  PASSES\n│  1  ✓ review   2 high, 1 low\n│     ○ resolve  not run yet\n│\n│  NEXT\n│  crossrev resolve --pr 42\n└  State is read from the pull request itself, so this is the same view a workflow gets.\n\n",
+  "page_colour": "\n\u001b[34m◇  acme/widget#42\u001b[0m — \u001b[34mawaiting resolution\u001b[0m\n\u001b[2m│\u001b[0m\n\u001b[2m│\u001b[0m  \u001b[1mPULL REQUEST\u001b[0m\n\u001b[2m│\u001b[0m  title      Add refresh\n\u001b[2m│\u001b[0m  head       6abe5b2 on feature, 1 file(s)\n\u001b[2m│\u001b[0m  labels     crossrev/awaiting-resolution crossrev/pass-1\n\u001b[2m│\u001b[0m\n\u001b[2m│\u001b[0m  \u001b[1mLOOP\u001b[0m\n\u001b[2m│\u001b[0m  mode       local, markers by tester\n\u001b[2m│\u001b[0m  passes     1 of 3\n\u001b[2m│\u001b[0m  deferred   none\n\u001b[2m│\u001b[0m\n\u001b[2m│\u001b[0m  \u001b[1mPASSES\u001b[0m\n\u001b[2m│\u001b[0m  1  \u001b[32m✓\u001b[0m review   2 high, 1 low\n\u001b[2m│\u001b[0m     \u001b[2m○\u001b[0m resolve  not run yet\n\u001b[2m│\u001b[0m\n\u001b[2m│\u001b[0m  \u001b[1mNEXT\u001b[0m\n\u001b[2m│\u001b[0m  \u001b[34mcrossrev resolve --pr 42\u001b[0m\n\u001b[2m└\u001b[0m  State is read from the pull request itself, so this is the same view a workflow gets.\n\n"
+}

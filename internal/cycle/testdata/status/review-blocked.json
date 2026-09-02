@@ -1,0 +1,71 @@
+{
+  "name": "review-blocked",
+  "shell": "tests/test-status.sh:561-563",
+  "now": 1787000000,
+  "head_sha": "2c4a46cb321db01826d116b5ef2add6b0284d68c",
+  "min_fix_severity": "medium",
+  "max_passes_per_cycle": 3,
+  "liveness": {
+    "life": "",
+    "detail": ""
+  },
+  "labels": [
+    "crossrev/halted",
+    "crossrev/pass-1"
+  ],
+  "markers": [
+    {
+      "v": 1,
+      "leg": "review",
+      "pass": 1,
+      "state": "complete",
+      "ts": 1786999940,
+      "done_ts": 1786999970,
+      "run_id": "x",
+      "head_sha": "2c4a46cb321db01826d116b5ef2add6b0284d68c",
+      "harness": "claude",
+      "model": "m",
+      "effort": "high",
+      "endpoint": null,
+      "model_reported": "m",
+      "tokens": 1000,
+      "verdict": "blocked",
+      "findings": []
+    }
+  ],
+  "want": {
+    "state": "halted",
+    "pass": 1,
+    "max_pass": 1,
+    "rows": [
+      {
+        "pass": 1,
+        "leg": "review",
+        "step": "no",
+        "description": "blocked — the reviewer could not complete",
+        "rendered": "1  ✗ review   blocked — the reviewer could not complete"
+      },
+      {
+        "pass": 1,
+        "leg": "resolve",
+        "step": "opt",
+        "description": "not needed, the review blocked",
+        "rendered": "   ○ resolve  not needed, the review blocked"
+      }
+    ],
+    "next": [
+      {
+        "kind": "line",
+        "t": "the review leg reported blocked, so what happens next is a human's"
+      },
+      {
+        "kind": "line",
+        "t": "call. Once you have looked:"
+      },
+      {
+        "kind": "cmd",
+        "t": "crossrev review --pr 42"
+      }
+    ]
+  }
+}

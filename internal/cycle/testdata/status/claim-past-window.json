@@ -1,0 +1,71 @@
+{
+  "name": "claim-past-window",
+  "shell": "tests/test-status.sh:284-288",
+  "now": 1787000000,
+  "head_sha": "2c4a46cb321db01826d116b5ef2add6b0284d68c",
+  "min_fix_severity": "medium",
+  "max_passes_per_cycle": 3,
+  "liveness": {
+    "life": "",
+    "detail": ""
+  },
+  "labels": [
+    "crossrev/awaiting-review",
+    "crossrev/pass-1"
+  ],
+  "markers": [
+    {
+      "v": 1,
+      "leg": "review",
+      "pass": 1,
+      "state": "started",
+      "ts": 1786992800,
+      "done_ts": 1786992830,
+      "run_id": "x",
+      "head_sha": "2c4a46cb321db01826d116b5ef2add6b0284d68c",
+      "harness": "claude",
+      "model": "m",
+      "effort": "high",
+      "endpoint": null,
+      "model_reported": "m",
+      "tokens": 1000,
+      "verdict": "null",
+      "findings": []
+    }
+  ],
+  "want": {
+    "state": "awaiting review",
+    "pass": 1,
+    "max_pass": 1,
+    "rows": [
+      {
+        "pass": 1,
+        "leg": "review",
+        "step": "no",
+        "description": "abandoned — it was made 120 minutes ago, past the 60-minute window",
+        "rendered": "1  ✗ review   abandoned — it was made 120 minutes ago, past the 60-minute window"
+      },
+      {
+        "pass": 1,
+        "leg": "resolve",
+        "step": "opt",
+        "description": "not run yet",
+        "rendered": "   ○ resolve  not run yet"
+      }
+    ],
+    "next": [
+      {
+        "kind": "cmd",
+        "t": "crossrev review --pr 42"
+      },
+      {
+        "kind": "line",
+        "t": "The unfinished pass is stale — it was made 120 minutes ago, past the 60-minute window — so a re-run abandons it"
+      },
+      {
+        "kind": "line",
+        "t": "and starts pass 1 again."
+      }
+    ]
+  }
+}

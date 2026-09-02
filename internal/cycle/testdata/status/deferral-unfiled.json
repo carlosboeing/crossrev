@@ -1,0 +1,98 @@
+{
+  "name": "deferral-unfiled",
+  "shell": "tests/test-status.sh:385-390",
+  "now": 1787000000,
+  "head_sha": "2c4a46cb321db01826d116b5ef2add6b0284d68c",
+  "min_fix_severity": "medium",
+  "max_passes_per_cycle": 3,
+  "liveness": {
+    "life": "",
+    "detail": ""
+  },
+  "labels": [],
+  "markers": [
+    {
+      "v": 1,
+      "leg": "review",
+      "pass": 1,
+      "state": "complete",
+      "ts": 1786999940,
+      "done_ts": 1786999970,
+      "run_id": "x",
+      "head_sha": "2c4a46cb321db01826d116b5ef2add6b0284d68c",
+      "harness": "claude",
+      "model": "m",
+      "effort": "high",
+      "endpoint": null,
+      "model_reported": "m",
+      "tokens": 1000,
+      "verdict": "issues-remain",
+      "findings": [
+        {
+          "severity": "medium"
+        }
+      ]
+    },
+    {
+      "v": 1,
+      "leg": "resolve",
+      "pass": 1,
+      "state": "complete",
+      "ts": 1786999940,
+      "done_ts": 1786999970,
+      "run_id": "x",
+      "head_sha": "2c4a46cb321db01826d116b5ef2add6b0284d68c",
+      "harness": "claude",
+      "model": "m",
+      "effort": "high",
+      "endpoint": null,
+      "model_reported": "m",
+      "tokens": 2000,
+      "blocked": false,
+      "blocked_reason": null,
+      "commit_sha": null,
+      "summary": "s",
+      "resolutions": [
+        {
+          "resolution": "deferred",
+          "crossrev_tracked": ""
+        }
+      ]
+    }
+  ],
+  "want": {
+    "state": "halted",
+    "pass": 1,
+    "max_pass": 1,
+    "rows": [
+      {
+        "pass": 1,
+        "leg": "review",
+        "step": "ok",
+        "description": "1 medium",
+        "rendered": "1  ✓ review   1 medium"
+      },
+      {
+        "pass": 1,
+        "leg": "resolve",
+        "step": "ok",
+        "description": "1 deferred",
+        "rendered": "   ✓ resolve  1 deferred"
+      }
+    ],
+    "next": [
+      {
+        "kind": "line",
+        "t": "a deferred finding was never filed anywhere durable, so its thread"
+      },
+      {
+        "kind": "line",
+        "t": "stays open. Put the work somewhere tracked, then drive the pass again:"
+      },
+      {
+        "kind": "cmd",
+        "t": "crossrev resolve --pr 42"
+      }
+    ]
+  }
+}

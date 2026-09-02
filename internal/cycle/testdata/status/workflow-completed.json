@@ -1,0 +1,71 @@
+{
+  "name": "workflow-completed",
+  "shell": "tests/test-status.sh:267-270",
+  "now": 1787000000,
+  "head_sha": "2c4a46cb321db01826d116b5ef2add6b0284d68c",
+  "min_fix_severity": "medium",
+  "max_passes_per_cycle": 3,
+  "liveness": {
+    "life": "gone",
+    "detail": "the workflow run finished without it"
+  },
+  "labels": [
+    "crossrev/awaiting-review",
+    "crossrev/pass-1"
+  ],
+  "markers": [
+    {
+      "v": 1,
+      "leg": "review",
+      "pass": 1,
+      "state": "started",
+      "ts": 1786999880,
+      "done_ts": 1786999910,
+      "run_id": "55501",
+      "head_sha": "2c4a46cb321db01826d116b5ef2add6b0284d68c",
+      "harness": "claude",
+      "model": "m",
+      "effort": "high",
+      "endpoint": null,
+      "model_reported": "m",
+      "tokens": 1000,
+      "verdict": "null",
+      "findings": []
+    }
+  ],
+  "want": {
+    "state": "awaiting review",
+    "pass": 1,
+    "max_pass": 1,
+    "rows": [
+      {
+        "pass": 1,
+        "leg": "review",
+        "step": "no",
+        "description": "started 2 minute(s) ago, abandoned — the workflow run finished without it",
+        "rendered": "1  ✗ review   started 2 minute(s) ago, abandoned — the workflow run finished without it"
+      },
+      {
+        "pass": 1,
+        "leg": "resolve",
+        "step": "opt",
+        "description": "not run yet",
+        "rendered": "   ○ resolve  not run yet"
+      }
+    ],
+    "next": [
+      {
+        "kind": "cmd",
+        "t": "crossrev review --pr 42"
+      },
+      {
+        "kind": "line",
+        "t": "The head has not moved, so a re-run resumes pass 1 and posts"
+      },
+      {
+        "kind": "line",
+        "t": "only what is missing."
+      }
+    ]
+  }
+}
