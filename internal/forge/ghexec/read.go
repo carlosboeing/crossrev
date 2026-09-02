@@ -108,8 +108,15 @@ func (c *Client) PullRequest(ctx context.Context, repo core.Slug, number int) (f
 			Color       string `json:"color"`
 			Description string `json:"description"`
 		} `json:"labels"`
-		IsCrossRepository   bool `json:"isCrossRepository"`
-		IsDraft             bool `json:"isDraft"`
+		// A pointer, because absence is a third answer. lib/run.sh:284
+		// records a missing isCrossRepository as `unknown`, and every
+		// reader then tests for an explicit `false`: the automatic-trigger
+		// fork refusal (lib/run.sh:249), the head-repository branch
+		// (lib/run.sh:285) and the maintainer-edit guard (lib/legs.sh:478).
+		// A plain bool collapses `unknown` onto the one value that means
+		// "this repository's own branch", which is the permissive one.
+		IsCrossRepository   *bool `json:"isCrossRepository"`
+		IsDraft             bool  `json:"isDraft"`
 		HeadRepositoryOwner struct {
 			Login string `json:"login"`
 		} `json:"headRepositoryOwner"`
@@ -133,16 +140,19 @@ func (c *Client) PullRequest(ctx context.Context, repo core.Slug, number int) (f
 	}
 
 	pr := forge.PullRequest{
-		Number:              view.Number,
-		Title:               view.Title,
-		Body:                view.Body,
-		URL:                 view.URL,
-		HeadRefName:         view.HeadRefName,
-		HeadRefOid:          head,
-		BaseRefName:         view.BaseRefName,
-		BaseRefOid:          base,
-		ChangedFiles:        view.ChangedFiles,
-		IsCrossRepository:   view.IsCrossRepository,
+		Number:       view.Number,
+		Title:        view.Title,
+		Body:         view.Body,
+		URL:          view.URL,
+		HeadRefName:  view.HeadRefName,
+		HeadRefOid:   head,
+		BaseRefName:  view.BaseRefName,
+		BaseRefOid:   base,
+		ChangedFiles: view.ChangedFiles,
+		// Absent reads as a fork, which is the fail-closed half of the
+		// shell's tri-state: `unknown` and `true` take the same branch
+		// everywhere they are read.
+		IsCrossRepository:   view.IsCrossRepository == nil || *view.IsCrossRepository,
 		IsDraft:             view.IsDraft,
 		HeadRepositoryOwner: view.HeadRepositoryOwner.Login,
 		HeadRepository:      view.HeadRepository.Name,

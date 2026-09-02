@@ -107,6 +107,10 @@ type Leg struct {
 	// LookPath reports whether a harness binary is on PATH. Nil searches PATH
 	// the way command -v does (lib/run.sh:524).
 	LookPath func(string) (string, error)
+
+	// reported is CROSSREV_LEG_REPORTED (lib/run.sh:725): the fatal record has
+	// been written for this leg, and a second attempt must not write it again.
+	reported bool
 }
 
 func (l *Leg) runner() exec.Runner {

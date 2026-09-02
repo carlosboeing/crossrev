@@ -12,16 +12,21 @@ import (
 // push between two of them validates lines from one revision and posts them
 // against another.
 type PullRequest struct {
-	Number              int
-	Title               string
-	Body                string
-	URL                 string
-	HeadRefName         string
-	HeadRefOid          core.Revision
-	BaseRefName         string
-	BaseRefOid          core.Revision
-	ChangedFiles        int
-	Labels              []Label
+	Number       int
+	Title        string
+	Body         string
+	URL          string
+	HeadRefName  string
+	HeadRefOid   core.Revision
+	BaseRefName  string
+	BaseRefOid   core.Revision
+	ChangedFiles int
+	Labels       []Label
+	// IsCrossRepository is true for a fork AND for a payload that did not
+	// carry the field at all. lib/run.sh:284 records the second case as
+	// `unknown`, and every reader tests for an explicit `false`, so the two
+	// take the same branch everywhere. Only a payload saying `false` means
+	// this repository's own branch.
 	IsCrossRepository   bool
 	IsDraft             bool
 	HeadRepositoryOwner string

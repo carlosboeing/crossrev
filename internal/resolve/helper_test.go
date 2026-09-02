@@ -77,6 +77,9 @@ type testEnv struct {
 	nilLookPath bool
 	legEnv      []string
 	doc         harness.Document
+	// runCtx is what Run is given. Nil means context.Background(); a case
+	// that needs a cancelled one sets it.
+	runCtx context.Context
 }
 
 func setup(t *testing.T) *testEnv {
@@ -189,7 +192,11 @@ func (e *testEnv) runReq(t *testing.T, req Request) Result {
 		Adapter:  adapter,
 		LookPath: look,
 	}
-	return leg.Run(context.Background(), req)
+	ctx := e.runCtx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return leg.Run(ctx, req)
 }
 
 func (e *testEnv) addReviewPass(t *testing.T, pass int, findings json.RawMessage, verdict string, state core.PassState) {

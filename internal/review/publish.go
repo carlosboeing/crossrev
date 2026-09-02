@@ -13,7 +13,10 @@ import (
 	"github.com/carlosboeing/crossrev/internal/ui"
 )
 
-func (l *Leg) publish(ctx context.Context, req Request, loaded Context, settings legSettings, pass int, claimID int64, marker prstate.Marker) (prstate.Marker, []ui.Line, error) {
+// The bool is whether the complete edit landed, which is run_leg_settled
+// (lib/run.sh:160-163): from that instant nothing may rewrite the claim as
+// blocked, because the record on the pull request is accurate.
+func (l *Leg) publish(ctx context.Context, req Request, loaded Context, settings legSettings, pass int, claimID int64, marker prstate.Marker) (prstate.Marker, []ui.Line, bool, error) {
 	var msgs []ui.Line
 	findings := parseFindings(marker.Findings)
 	minFix := loaded.Config.Get(".policy.min_fix_severity")
@@ -74,7 +77,7 @@ func (l *Leg) publish(ctx context.Context, req Request, loaded Context, settings
 			Body:   body,
 		})
 		if err != nil {
-			return marker, msgs, err
+			return marker, msgs, false, err
 		}
 		posted++
 		if placement == forge.PlacementFallback {
@@ -113,15 +116,19 @@ func (l *Leg) publish(ctx context.Context, req Request, loaded Context, settings
 		MaxPass: cap,
 	})
 	if err := l.editClaim(ctx, loaded.Repo, claimID, summary, marker); err != nil {
-		return marker, msgs, err
+		return marker, msgs, false, err
 	}
 	// ui_ok: the comment is on the pull request (lib/run.sh:1293).
 	msgs = append(msgs, ui.OK("posted a summary comment"))
 
 	marker.State = core.PassComplete
 	if err := l.editClaim(ctx, loaded.Repo, claimID, summary, marker); err != nil {
-		return marker, msgs, err
+		return marker, msgs, false, err
 	}
+	// run_leg_settled, immediately after the complete edit lands and not one
+	// line later (lib/run.sh:160-163). Everything below can still fail, and
+	// none of it may rewrite this record.
+	settled := true
 
 	verdict := core.Verdict(marker.Verdict.Value())
 	escalated := escalatedCount(loaded.Markers)
@@ -138,7 +145,7 @@ func (l *Leg) publish(ctx context.Context, req Request, loaded Context, settings
 	warns, err := l.applyPassLabels(ctx, req, loaded, pass, next)
 	msgs = append(msgs, warns...)
 	if err != nil {
-		return marker, msgs, err
+		return marker, msgs, settled, err
 	}
 
 	// Two bare printfs, each with a trailing blank line
@@ -153,7 +160,7 @@ func (l *Leg) publish(ctx context.Context, req Request, loaded Context, settings
 			ui.Say(fmt.Sprintf("  crossrev resolve --pr %d", req.PR)),
 			ui.Blank())
 	}
-	return marker, msgs, nil
+	return marker, msgs, settled, nil
 }
 
 func (l *Leg) editClaim(ctx context.Context, repo core.Slug, claimID int64, body string, marker prstate.Marker) error {

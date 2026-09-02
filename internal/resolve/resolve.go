@@ -2,6 +2,7 @@ package resolve
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/carlosboeing/crossrev/internal/exec"
@@ -11,7 +12,7 @@ import (
 
 // Run selects the current review pass, claims once, invokes a write-capable
 // resolver, then replies, persists, commits and pushes.
-func (l *Leg) Run(ctx context.Context, req Request) Result {
+func (l *Leg) Run(ctx context.Context, req Request) (out Result) {
 	if req.PR == 0 {
 		return refuse("crossrev resolve needs a pull request number", "Usage: crossrev resolve --pr 42")
 	}
@@ -73,6 +74,28 @@ func (l *Leg) Run(ctx context.Context, req Request) Result {
 	if claimMessage.Text != "" {
 		early.Messages = append(early.Messages, claimMessage)
 	}
+
+	// The EXIT trap, from here on (lib/run.sh:87-89, :131-146). The claim is
+	// open, so every way out of the leg below records the failure on it until
+	// the complete edit lands. publish's own fail path reports as well, so the
+	// flag stops the pair reporting twice — CROSSREV_LEG_REPORTED at
+	// lib/run.sh:725.
+	//
+	// 130 is not a failure: the claim it leaves is deliberately resumable
+	// (lib/run.sh:141-143).
+	defer func() {
+		if l.reported || out.Err == nil {
+			return
+		}
+		if ctx.Err() != nil || errors.Is(out.Err, context.Canceled) {
+			return
+		}
+		reported := out.Marker
+		if reported.CommentID() == 0 {
+			reported = marker
+		}
+		l.reportFatal(ctx, s, reported, refusalReason(out.Err), workdir, true)
+	}()
 
 	got := l.invoke(ctx, s, marker, workdir)
 	got.Pass = s.pass

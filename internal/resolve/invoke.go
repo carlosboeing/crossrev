@@ -83,7 +83,14 @@ func (l *Leg) prepareWorktree(ctx context.Context, s *session) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	headRepo := s.repo
+	// lib/run.sh:285-291. Only an explicit `isCrossRepository: false` means
+	// this repository's own branch and lets the head repository default to it.
+	// Every other case — a fork, or provenance the payload did not carry —
+	// reads the head repository out of the payload and leaves it EMPTY when it
+	// is not there, which lib/legs.sh:468 refuses. Defaulting to the origin
+	// repository here skipped that refusal and the maintainer-edit check with
+	// it.
+	var headRepo core.Slug
 	cross := policy.FlagFalse
 	maint := policy.FlagFalse
 	if s.pr.IsCrossRepository {
@@ -98,6 +105,8 @@ func (l *Leg) prepareWorktree(ctx context.Context, s *session) (string, error) {
 		} else {
 			maint = policy.FlagFalse
 		}
+	} else {
+		headRepo = s.repo
 	}
 	defaultBranch := l.Forge.DefaultBranch(ctx, s.repo)
 	if defaultBranch == "" {

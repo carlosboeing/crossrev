@@ -15,8 +15,7 @@ import (
 
 // Run loads context, admits the pass, posts the claim, invokes the reviewer,
 // then publishes findings and completes the original claim.
-func (l *Leg) Run(ctx context.Context, req Request) Result {
-	var out Result
+func (l *Leg) Run(ctx context.Context, req Request) (out Result) {
 	if req.PR == 0 {
 		out.Outcome = OutcomeError
 		out.Err = &ui.FatalError{
@@ -151,6 +150,27 @@ func (l *Leg) Run(ctx context.Context, req Request) Result {
 	}
 	out.ClaimID = claimID
 	out.Marker = marker
+
+	// The EXIT trap, from here on. run_checkpoint snapshots the open leg at
+	// every settled point and run_leg_settled clears it, so the report fires on
+	// every way out of the leg between the claim landing and the complete edit
+	// (lib/run.sh:87-89, :167-179). `settled` is that snapshot.
+	//
+	// 130 is not a failure: run_checkpoint has already explained the interrupt
+	// and the claim it leaves is deliberately resumable, so naming it here would
+	// turn every Ctrl-C into a halted pull request (lib/run.sh:141-143). This
+	// package cannot see internal/cli's ErrInterrupted — a tier-3 peer — so the
+	// cancellation is read off the context, which is where it came from.
+	settled := false
+	defer func() {
+		if settled || out.Err == nil {
+			return
+		}
+		if ctx.Err() != nil || errors.Is(out.Err, context.Canceled) {
+			return
+		}
+		l.reportFatal(ctx, req, loaded, out.Marker, claimID, out.Err)
+	}()
 	if ad.recovering && !ad.redrive {
 		// ui_say (lib/run.sh:1092).
 		out.Messages = append(out.Messages, ui.Say(resumeMessage(ad.pass, marker.Findings)))
@@ -220,7 +240,8 @@ func (l *Leg) Run(ctx context.Context, req Request) Result {
 		}
 	}
 
-	marker, pubMsgs, err := l.publish(ctx, req, loaded, settings, ad.pass, claimID, marker)
+	marker, pubMsgs, complete, err := l.publish(ctx, req, loaded, settings, ad.pass, claimID, marker)
+	settled = complete
 	out.Messages = append(out.Messages, pubMsgs...)
 	out.Marker = marker
 	if err != nil {
