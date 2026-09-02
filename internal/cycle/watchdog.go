@@ -124,6 +124,9 @@ func (w *Watchdog) Run(ctx context.Context, repo core.Slug, waiting []Waiting) (
 		// Bash asks whether the space-joined label list CONTAINS the
 		// awaiting-resolution name (lib/run.sh:3707), not whether one
 		// label equals it, so the substring test is the parity one.
+		// The stop test two lines up is different on purpose: lib/run.sh:3705
+		// is `grep -qw`, a whole-label match, which is what watchdogHasLabel,
+		// statusHasLabel (status.go) and hasStop (cycle.go) reproduce.
 		if strings.Contains(strings.Join(pr.Labels, " "), policy.LabelAwaitingResolution) {
 			leg = core.LegResolve
 		}
