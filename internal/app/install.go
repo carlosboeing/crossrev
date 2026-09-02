@@ -154,7 +154,7 @@ func (c *Commands) installFlow(ctx context.Context, req installFlowRequest) erro
 //
 // ui.IO has no helper for it because the Bash library has no function for it
 // either — the four call sites in lib/auth.sh write the newline themselves
-// (:606, :638, :664, :784).
+// (:606, :638, :664, :784, :869).
 func (c *Commands) blank() {
 	if c.IO == nil || c.IO.Out == nil {
 		return
