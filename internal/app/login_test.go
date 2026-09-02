@@ -709,6 +709,24 @@ func TestLoginKeepsThePrivateKeyOutOfEveryPrintedLineAndEveryArgument(t *testing
 	}
 }
 
+// A temporary directory the page cannot be written into stops the flow with
+// the shell's own two sentences (lib/auth.sh:628-630), rather than an internal
+// error nobody can act on. Measured from the shell with NO_COLOR=1 and
+// TMPDIR=/nonexistent-abc/, which also proves the trailing slash is trimmed off
+// the directory the action line names (`${tmpdir%/}`, lib/auth.sh:626).
+func TestLoginRefusesWhenTheRegistrationPageCannotBeWritten(t *testing.T) {
+	b := newBench(t, out("Organization 12345\n"), bad())
+	b.browser(&opener{})
+	b.assumeYes(t)
+	// Set last: newBench and assumeYes both take a t.TempDir under the real one.
+	t.Setenv("TMPDIR", "/nonexistent-abc/")
+
+	err := b.cmds.Login(context.Background(), app.LoginRequest{Owner: "ShoreLogic", Role: "loop"})
+	wantRefusal(t, err,
+		"could not create a temporary file for the registration page",
+		"Check that the temporary directory /nonexistent-abc is writable.")
+}
+
 // The page carrying the manifest is opened with file:// and lives in a
 // directory the process owns, so nothing it holds is served to a network.
 func TestLoginOpensTheManifestPageFromDisk(t *testing.T) {

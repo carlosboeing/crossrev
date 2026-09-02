@@ -352,7 +352,9 @@ func (c *Commands) openPage(path string) {
 }
 
 // writeLoginPage puts the page somewhere a browser can open it, which is
-// `mktemp -t crossrev-manifest` with `.html` appended (lib/auth.sh:610).
+// `mktemp "$tmpdir/crossrev-manifest.XXXXXX"` renamed to end in `.html`
+// (lib/auth.sh:626-640). os.CreateTemp puts the suffix on for us, so there is
+// no rename here and no counterpart to the shell's guard on it.
 //
 // It is created 0600. The shell's mktemp does the same, and it matters: the
 // page holds the state value, and anything that can read it can forge the
@@ -360,7 +362,13 @@ func (c *Commands) openPage(path string) {
 func (c *Commands) writeLoginPage(body string) (string, error) {
 	file, err := os.CreateTemp("", "crossrev-manifest-*.html")
 	if err != nil {
-		return "", fmt.Errorf("could not write the registration page: %w", err)
+		// The shell trims one trailing slash off $TMPDIR before naming it
+		// (`${tmpdir%/}`, lib/auth.sh:626), so the action line reads the same
+		// either way the reader set it.
+		dir := strings.TrimSuffix(os.TempDir(), "/")
+		return "", c.IO.Die(
+			"could not create a temporary file for the registration page",
+			"Check that the temporary directory "+dir+" is writable.")
 	}
 	defer file.Close()
 	if _, err := io.WriteString(file, body); err != nil {
