@@ -1,0 +1,631 @@
+{
+  "note": "Measured with `NO_COLOR=1 bash bin/crossrev <args>` in a checkout. shell is what the shell printed on stderr and the status it ended with, with any absolute checkout path replaced by <checkout>; native is what this package prints where it cannot reproduce the shell byte for byte, with the reason recorded beside it. A row with no native block must match its shell block exactly. Every row printed nothing on stdout.",
+  "rows": [
+    {
+      "name": "a mistyped sub-command is named rather than run",
+      "args": [
+        "reviw",
+        "--pr",
+        "3"
+      ],
+      "shell": {
+        "exit": 1,
+        "stderr": "\nerror  unknown command: reviw\n       Run: crossrev help\n\n"
+      }
+    },
+    {
+      "name": "an unknown auth sub-command",
+      "args": [
+        "auth",
+        "bogus"
+      ],
+      "shell": {
+        "exit": 1,
+        "stderr": "\nerror  unknown auth command: bogus\n       Try: crossrev auth status | login | install | rotate | refresh\n\n"
+      }
+    },
+    {
+      "name": "a flag where the auth sub-command belongs",
+      "args": [
+        "auth",
+        "--foo"
+      ],
+      "shell": {
+        "exit": 1,
+        "stderr": "\nerror  unknown auth command: --foo\n       Try: crossrev auth status | login | install | rotate | refresh\n\n"
+      }
+    },
+    {
+      "name": "an unknown config sub-command",
+      "args": [
+        "config",
+        "bogus"
+      ],
+      "shell": {
+        "exit": 1,
+        "stderr": "\nerror  unknown config command: bogus\n       Try: crossrev config show | backlog\n\n"
+      }
+    },
+    {
+      "name": "an unknown option for review names the harnesses",
+      "args": [
+        "review",
+        "--bogus"
+      ],
+      "shell": {
+        "exit": 1,
+        "stderr": "\nerror  unknown option for review: --bogus\n       Usage: crossrev review --pr <number> [--harness <one of: claude|codex|agy|grok|opencode>] [--no-tips] [--keep-transcripts]\n\n"
+      }
+    },
+    {
+      "name": "an unknown option for resolve names the harnesses",
+      "args": [
+        "resolve",
+        "--bogus"
+      ],
+      "shell": {
+        "exit": 1,
+        "stderr": "\nerror  unknown option for resolve: --bogus\n       Usage: crossrev resolve --pr <number> [--harness <one of: claude|codex|agy|grok|opencode>] [--trigger human|automatic] [--keep-transcripts]\n\n"
+      }
+    },
+    {
+      "name": "an unknown option for cycle",
+      "args": [
+        "cycle",
+        "--bogus"
+      ],
+      "shell": {
+        "exit": 1,
+        "stderr": "\nerror  unknown option for cycle: --bogus\n       Usage: crossrev cycle --pr <number> [--trigger human|automatic] [--no-tips] [--keep-transcripts]\n\n"
+      }
+    },
+    {
+      "name": "an unknown leading option is the cycle's, not an unknown command",
+      "args": [
+        "--bogus"
+      ],
+      "shell": {
+        "exit": 1,
+        "stderr": "\nerror  unknown option for cycle: --bogus\n       Usage: crossrev cycle --pr <number> [--trigger human|automatic] [--no-tips] [--keep-transcripts]\n\n"
+      }
+    },
+    {
+      "name": "cycle does not take --continuation",
+      "args": [
+        "cycle",
+        "--pr",
+        "3",
+        "--continuation"
+      ],
+      "shell": {
+        "exit": 1,
+        "stderr": "\nerror  unknown option for cycle: --continuation\n       Usage: crossrev cycle --pr <number> [--trigger human|automatic] [--no-tips] [--keep-transcripts]\n\n"
+      }
+    },
+    {
+      "name": "cycle does not take --pass",
+      "args": [
+        "cycle",
+        "--pr",
+        "3",
+        "--pass",
+        "2"
+      ],
+      "shell": {
+        "exit": 1,
+        "stderr": "\nerror  unknown option for cycle: --pass\n       Usage: crossrev cycle --pr <number> [--trigger human|automatic] [--no-tips] [--keep-transcripts]\n\n"
+      }
+    },
+    {
+      "name": "resolve does not take --continuation",
+      "args": [
+        "resolve",
+        "--pr",
+        "3",
+        "--continuation"
+      ],
+      "shell": {
+        "exit": 1,
+        "stderr": "\nerror  unknown option for resolve: --continuation\n       Usage: crossrev resolve --pr <number> [--harness <one of: claude|codex|agy|grok|opencode>] [--trigger human|automatic] [--keep-transcripts]\n\n"
+      }
+    },
+    {
+      "name": "an unknown option for status",
+      "args": [
+        "status",
+        "--bogus"
+      ],
+      "shell": {
+        "exit": 1,
+        "stderr": "\nerror  unknown option for status: --bogus\n       Usage: crossrev status --pr <number>\n\n"
+      }
+    },
+    {
+      "name": "an unknown option for watchdog",
+      "args": [
+        "watchdog",
+        "--bogus"
+      ],
+      "shell": {
+        "exit": 1,
+        "stderr": "\nerror  unknown option for watchdog: --bogus\n       Usage: crossrev watchdog [--repo owner/name] [--timeout <seconds>]\n\n"
+      }
+    },
+    {
+      "name": "an unknown option for init",
+      "args": [
+        "init",
+        "--bogus"
+      ],
+      "shell": {
+        "exit": 1,
+        "stderr": "\nerror  unknown option for init: --bogus\n       Usage: crossrev init [--owner <owner>] [--upgrade] [--dry-run] [--yes]\n\n"
+      }
+    },
+    {
+      "name": "an unknown option for auth login",
+      "args": [
+        "auth",
+        "login",
+        "--bogus"
+      ],
+      "shell": {
+        "exit": 1,
+        "stderr": "\nerror  unknown option for auth login: --bogus\n       Run: crossrev auth login [--owner <owner>] [--role loop|refresher] [--name <name>]\n\n"
+      }
+    },
+    {
+      "name": "an unknown option for auth install",
+      "args": [
+        "auth",
+        "install",
+        "--bogus"
+      ],
+      "shell": {
+        "exit": 1,
+        "stderr": "\nerror  unknown option for auth install: --bogus\n       Run: crossrev auth install [--owner <owner>] [--role loop|refresher]\n\n"
+      }
+    },
+    {
+      "name": "an unknown option for auth rotate",
+      "args": [
+        "auth",
+        "rotate",
+        "--bogus"
+      ],
+      "shell": {
+        "exit": 1,
+        "stderr": "\nerror  unknown option for auth rotate: --bogus\n       Run: crossrev auth rotate [--owner <owner>] [--role loop|refresher] [--key <downloaded.pem>]\n\n"
+      }
+    },
+    {
+      "name": "an unknown option for auth refresh",
+      "args": [
+        "auth",
+        "refresh",
+        "--bogus"
+      ],
+      "shell": {
+        "exit": 1,
+        "stderr": "\nerror  unknown option for auth refresh: --bogus\n       Run: crossrev auth refresh [--harness <name>] [--repo owner/name | --org owner] [--secret NAME]\n\n"
+      }
+    },
+    {
+      "name": "review without a pull request number",
+      "args": [
+        "review"
+      ],
+      "shell": {
+        "exit": 1,
+        "stderr": "\nerror  crossrev review needs a pull request number\n       Usage: crossrev review --pr 42\n\n"
+      }
+    },
+    {
+      "name": "an empty --pr is no --pr",
+      "args": [
+        "review",
+        "--pr",
+        ""
+      ],
+      "shell": {
+        "exit": 1,
+        "stderr": "\nerror  crossrev review needs a pull request number\n       Usage: crossrev review --pr 42\n\n"
+      }
+    },
+    {
+      "name": "resolve without a pull request number",
+      "args": [
+        "resolve"
+      ],
+      "shell": {
+        "exit": 1,
+        "stderr": "\nerror  crossrev resolve needs a pull request number\n       Usage: crossrev resolve --pr 42\n\n"
+      }
+    },
+    {
+      "name": "cycle without a pull request number",
+      "args": [
+        "cycle"
+      ],
+      "shell": {
+        "exit": 1,
+        "stderr": "\nerror  crossrev cycle needs a pull request number\n       Usage: crossrev cycle --pr 42\n\n"
+      }
+    },
+    {
+      "name": "status without a pull request number",
+      "args": [
+        "status"
+      ],
+      "shell": {
+        "exit": 1,
+        "stderr": "\nerror  crossrev status needs a pull request number\n       Usage: crossrev status --pr 42\n\n"
+      }
+    },
+    {
+      "name": "an unknown review trigger",
+      "args": [
+        "review",
+        "--pr",
+        "3",
+        "--trigger",
+        "bogus"
+      ],
+      "shell": {
+        "exit": 1,
+        "stderr": "\nerror  unknown review trigger: bogus\n       Use --trigger human or --trigger automatic.\n\n"
+      }
+    },
+    {
+      "name": "an empty review trigger is not human",
+      "args": [
+        "review",
+        "--pr",
+        "3",
+        "--trigger",
+        ""
+      ],
+      "shell": {
+        "exit": 1,
+        "stderr": "\nerror  unknown review trigger: \n       Use --trigger human or --trigger automatic.\n\n"
+      }
+    },
+    {
+      "name": "an unknown resolve trigger",
+      "args": [
+        "resolve",
+        "--pr",
+        "3",
+        "--trigger",
+        "bogus"
+      ],
+      "shell": {
+        "exit": 1,
+        "stderr": "\nerror  unknown resolve trigger: bogus\n       Use --trigger human or --trigger automatic.\n\n"
+      }
+    },
+    {
+      "name": "an unknown cycle trigger",
+      "args": [
+        "cycle",
+        "--pr",
+        "3",
+        "--trigger",
+        "bogus"
+      ],
+      "shell": {
+        "exit": 1,
+        "stderr": "\nerror  unknown cycle trigger: bogus\n       Use --trigger human or --trigger automatic.\n\n"
+      }
+    },
+    {
+      "name": "an unknown cycle trigger reached by the dash rule",
+      "args": [
+        "--trigger",
+        "bogus",
+        "--pr",
+        "3"
+      ],
+      "shell": {
+        "exit": 1,
+        "stderr": "\nerror  unknown cycle trigger: bogus\n       Use --trigger human or --trigger automatic.\n\n"
+      }
+    },
+    {
+      "name": "review --pr with nothing after it stops without a word",
+      "args": [
+        "review",
+        "--pr"
+      ],
+      "shell": {
+        "exit": 1,
+        "stderr": ""
+      }
+    },
+    {
+      "name": "an ignored flag missing its value stops without a word too",
+      "args": [
+        "review",
+        "--pass"
+      ],
+      "shell": {
+        "exit": 1,
+        "stderr": ""
+      }
+    },
+    {
+      "name": "status --harness with nothing after it",
+      "args": [
+        "status",
+        "--harness"
+      ],
+      "shell": {
+        "exit": 1,
+        "stderr": ""
+      }
+    },
+    {
+      "name": "cycle --trigger with nothing after it",
+      "args": [
+        "cycle",
+        "--trigger"
+      ],
+      "shell": {
+        "exit": 1,
+        "stderr": ""
+      }
+    },
+    {
+      "name": "watchdog --timeout with nothing after it",
+      "args": [
+        "watchdog",
+        "--timeout"
+      ],
+      "shell": {
+        "exit": 1,
+        "stderr": ""
+      }
+    },
+    {
+      "name": "the dash rule reaches the cycle's own silent stop",
+      "args": [
+        "--repo"
+      ],
+      "shell": {
+        "exit": 1,
+        "stderr": ""
+      }
+    },
+    {
+      "name": "init --owner with nothing after it says so",
+      "args": [
+        "init",
+        "--owner"
+      ],
+      "shell": {
+        "exit": 1,
+        "stderr": "<checkout>/lib/init.sh: line 38: 2: --owner needs a value\n"
+      },
+      "native": {
+        "exit": 1,
+        "stderr": "\nerror  --owner needs a value\n       Usage: crossrev init [--owner <owner>] [--upgrade] [--dry-run] [--yes]\n\n"
+      },
+      "note": "The shell reads this value with ${2:?...}, so Bash prints its own error naming the library file and a line inside it. The path is elided above because it is absolute. The reason string is kept; the frame around it is this tool's voice."
+    },
+    {
+      "name": "an empty init --repo is no value at all",
+      "args": [
+        "init",
+        "--repo",
+        ""
+      ],
+      "shell": {
+        "exit": 1,
+        "stderr": "<checkout>/lib/init.sh: line 39: 2: --repo needs a value\n"
+      },
+      "native": {
+        "exit": 1,
+        "stderr": "\nerror  --repo needs a value\n       Usage: crossrev init [--owner <owner>] [--upgrade] [--dry-run] [--yes]\n\n"
+      },
+      "note": "The shell reads this value with ${2:?...}, so Bash prints its own error naming the library file and a line inside it. The path is elided above because it is absolute. The reason string is kept; the frame around it is this tool's voice."
+    },
+    {
+      "name": "auth login --owner with nothing after it",
+      "args": [
+        "auth",
+        "login",
+        "--owner"
+      ],
+      "shell": {
+        "exit": 1,
+        "stderr": "<checkout>/lib/auth.sh: line 515: 2: --owner needs a value\n"
+      },
+      "native": {
+        "exit": 1,
+        "stderr": "\nerror  --owner needs a value\n       Run: crossrev auth login [--owner <owner>] [--role loop|refresher] [--name <name>]\n\n"
+      },
+      "note": "The shell reads this value with ${2:?...}, so Bash prints its own error naming the library file and a line inside it. The path is elided above because it is absolute. The reason string is kept; the frame around it is this tool's voice."
+    },
+    {
+      "name": "an empty auth login --name",
+      "args": [
+        "auth",
+        "login",
+        "--name",
+        ""
+      ],
+      "shell": {
+        "exit": 1,
+        "stderr": "<checkout>/lib/auth.sh: line 516: 2: --name needs a value\n"
+      },
+      "native": {
+        "exit": 1,
+        "stderr": "\nerror  --name needs a value\n       Run: crossrev auth login [--owner <owner>] [--role loop|refresher] [--name <name>]\n\n"
+      },
+      "note": "The shell reads this value with ${2:?...}, so Bash prints its own error naming the library file and a line inside it. The path is elided above because it is absolute. The reason string is kept; the frame around it is this tool's voice."
+    },
+    {
+      "name": "an empty auth login --role",
+      "args": [
+        "auth",
+        "login",
+        "--role",
+        ""
+      ],
+      "shell": {
+        "exit": 1,
+        "stderr": "<checkout>/lib/auth.sh: line 517: 2: --role needs a value\n"
+      },
+      "native": {
+        "exit": 1,
+        "stderr": "\nerror  --role needs a value\n       Run: crossrev auth login [--owner <owner>] [--role loop|refresher] [--name <name>]\n\n"
+      },
+      "note": "The shell reads this value with ${2:?...}, so Bash prints its own error naming the library file and a line inside it. The path is elided above because it is absolute. The reason string is kept; the frame around it is this tool's voice."
+    },
+    {
+      "name": "auth install --role with nothing after it",
+      "args": [
+        "auth",
+        "install",
+        "--role"
+      ],
+      "shell": {
+        "exit": 1,
+        "stderr": "<checkout>/lib/auth.sh: line 753: 2: --role needs a value\n"
+      },
+      "native": {
+        "exit": 1,
+        "stderr": "\nerror  --role needs a value\n       Run: crossrev auth install [--owner <owner>] [--role loop|refresher]\n\n"
+      },
+      "note": "The shell reads this value with ${2:?...}, so Bash prints its own error naming the library file and a line inside it. The path is elided above because it is absolute. The reason string is kept; the frame around it is this tool's voice."
+    },
+    {
+      "name": "auth rotate --key with nothing after it",
+      "args": [
+        "auth",
+        "rotate",
+        "--key"
+      ],
+      "shell": {
+        "exit": 1,
+        "stderr": "<checkout>/lib/auth.sh: line 841: 2: --key needs a value\n"
+      },
+      "native": {
+        "exit": 1,
+        "stderr": "\nerror  --key needs a value\n       Run: crossrev auth rotate [--owner <owner>] [--role loop|refresher] [--key <downloaded.pem>]\n\n"
+      },
+      "note": "The shell reads this value with ${2:?...}, so Bash prints its own error naming the library file and a line inside it. The path is elided above because it is absolute. The reason string is kept; the frame around it is this tool's voice."
+    },
+    {
+      "name": "auth refresh --harness with nothing after it",
+      "args": [
+        "auth",
+        "refresh",
+        "--harness"
+      ],
+      "shell": {
+        "exit": 1,
+        "stderr": "<checkout>/lib/auth.sh: line 958: 2: --harness needs a value\n"
+      },
+      "native": {
+        "exit": 1,
+        "stderr": "\nerror  --harness needs a value\n       Run: crossrev auth refresh [--harness <name>] [--repo owner/name | --org owner] [--secret NAME]\n\n"
+      },
+      "note": "The shell reads this value with ${2:?...}, so Bash prints its own error naming the library file and a line inside it. The path is elided above because it is absolute. The reason string is kept; the frame around it is this tool's voice."
+    },
+    {
+      "name": "an empty auth refresh --org",
+      "args": [
+        "auth",
+        "refresh",
+        "--org",
+        ""
+      ],
+      "shell": {
+        "exit": 1,
+        "stderr": "<checkout>/lib/auth.sh: line 961: 2: --org needs a value\n"
+      },
+      "native": {
+        "exit": 1,
+        "stderr": "\nerror  --org needs a value\n       Run: crossrev auth refresh [--harness <name>] [--repo owner/name | --org owner] [--secret NAME]\n\n"
+      },
+      "note": "The shell reads this value with ${2:?...}, so Bash prints its own error naming the library file and a line inside it. The path is elided above because it is absolute. The reason string is kept; the frame around it is this tool's voice."
+    },
+    {
+      "name": "an empty auth refresh --secret",
+      "args": [
+        "auth",
+        "refresh",
+        "--secret",
+        ""
+      ],
+      "shell": {
+        "exit": 1,
+        "stderr": "<checkout>/lib/auth.sh: line 960: 2: --secret needs a value\n"
+      },
+      "native": {
+        "exit": 1,
+        "stderr": "\nerror  --secret needs a value\n       Run: crossrev auth refresh [--harness <name>] [--repo owner/name | --org owner] [--secret NAME]\n\n"
+      },
+      "note": "The shell reads this value with ${2:?...}, so Bash prints its own error naming the library file and a line inside it. The path is elided above because it is absolute. The reason string is kept; the frame around it is this tool's voice."
+    },
+    {
+      "name": "a pull request number that is not a number",
+      "args": [
+        "review",
+        "--pr",
+        "abc"
+      ],
+      "shell": null,
+      "native": {
+        "exit": 1,
+        "stderr": "\nerror  --pr must be a number, and it was: abc\n       Pass the pull request number, for example: --pr 42\n\n"
+      },
+      "note": "The shell keeps this value as a string and lets a later call fail on it, so it has no refusal here to copy. This one is the parser's own."
+    },
+    {
+      "name": "a repository that is not owner/name",
+      "args": [
+        "review",
+        "--pr",
+        "3",
+        "--repo",
+        "garbage"
+      ],
+      "shell": null,
+      "native": {
+        "exit": 1,
+        "stderr": "\nerror  --repo must be owner/name, and it was: garbage\n       Pass the repository as owner/name, for example: --repo carlosboeing/crossrev\n\n"
+      },
+      "note": "The shell keeps this value as a string and lets a later call fail on it, so it has no refusal here to copy. This one is the parser's own."
+    },
+    {
+      "name": "an init repository that is not owner/name",
+      "args": [
+        "init",
+        "--repo",
+        "garbage"
+      ],
+      "shell": null,
+      "native": {
+        "exit": 1,
+        "stderr": "\nerror  --repo must be owner/name, and it was: garbage\n       Pass the repository as owner/name, for example: --repo carlosboeing/crossrev\n\n"
+      },
+      "note": "The shell keeps this value as a string and lets a later call fail on it, so it has no refusal here to copy. This one is the parser's own."
+    },
+    {
+      "name": "a watchdog timeout that is not a number",
+      "args": [
+        "watchdog",
+        "--timeout",
+        "abc"
+      ],
+      "shell": null,
+      "native": {
+        "exit": 1,
+        "stderr": "\nerror  --timeout must be a number of seconds, and it was: abc\n       Pass the timeout in seconds, for example: --timeout 1800\n\n"
+      },
+      "note": "The shell keeps this value as a string and lets a later call fail on it, so it has no refusal here to copy. This one is the parser's own."
+    }
+  ]
+}
