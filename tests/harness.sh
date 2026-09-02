@@ -35,6 +35,19 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # printf %q for the value, so a space, a quote or a newline survives and no line
 # is ever split. compgen -e rather than printenv, for the same reason: it lists
 # names, and a multi-line value cannot be mistaken for two of them.
+#
+# Two rules keep a credential out of it, because the developer running the suite
+# usually has one exported and the snapshot would otherwise hold the value in
+# plain text:
+#
+#   - Every name ending _AUTH is dropped. No stub reads one: `grep -rn AUTH
+#     tests/stub/` answers only comment headers, and the tripwire tests/stub/codex
+#     reads nothing at all. The suffix rather than the three names shipped today,
+#     so a harness added later is covered without anyone remembering this file.
+#   - The file is created under umask 077 rather than the process umask, which on
+#     a developer's machine is 022 and left it world-readable.
+#
+# tests/test-stub-env.sh holds both, and is the only thing that does.
 _stub_env_wrapper() {
   local target="$1" dir
   dir="$(mktemp -d)"
@@ -43,10 +56,13 @@ _stub_env_wrapper() {
 set -uo pipefail
 _base="\${XDG_CONFIG_HOME:-\$HOME/.config}"
 mkdir -p "\$_base" 2>/dev/null
+_umask=\$(umask)
+umask 077
 : >"\$_base/crossrev-stub.env"
+umask "\$_umask"
 while IFS= read -r _name; do
   printf 'export %s=%q\\n' "\$_name" "\${!_name}" >>"\$_base/crossrev-stub.env"
-done < <(compgen -e | grep '^CROSSREV_' || true)
+done < <(compgen -e | grep '^CROSSREV_' | grep -v '_AUTH\$' || true)
 # Not exec: the snapshot exists to serve THIS invocation's children, and it is
 # removed the moment the binary exits. Left behind, it outlives the run and a
 # stub the suite then invokes directly — with a variable deliberately unset —
