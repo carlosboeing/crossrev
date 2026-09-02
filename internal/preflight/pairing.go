@@ -3,7 +3,6 @@ package preflight
 import (
 	"fmt"
 	"os"
-	"slices"
 	"strings"
 
 	"github.com/carlosboeing/crossrev/internal/harness"
@@ -31,7 +30,11 @@ func PairingSupported(doc harness.Document, runner, name, leg string) (string, b
 	// A descriptor fact, not a runner fact: self-hosted skips the credential
 	// checks below because the machine already holds the login, but a harness
 	// that does not serve this leg is refused on every runner.
-	if leg != "" && !servesLeg(doc, name, leg) {
+	//
+	// A name the descriptor does not carry serves every leg, so it falls to the
+	// adapter refusal below rather than to this one — jq's answer, and the
+	// reason is on harness.Document.ServesLeg.
+	if leg != "" && !doc.ServesLeg(name, leg) {
 		return fmt.Sprintf("%s is limited to the %s leg, and cannot serve the %s leg",
 			productName(doc, name), strings.Join(declaredLegs(doc, name), ", "), leg), false
 	}
@@ -65,25 +68,6 @@ func PairingSupported(doc harness.Document, runner, name, leg string) (string, b
 	return fmt.Sprintf(
 		"%s's subscription token lives about %d minutes, and CrossRev has no way to seed it into a hosted runner yet",
 		entry.ProductName, seconds/60), false
-}
-
-// servesLeg is harness_serves_leg as jq answers it (lib/harnesses.sh:154-159).
-//
-// The jq expression is `((.harnesses[] | select(.name == $n) | .legs) //
-// ["review","resolve"]) | index($l) != null`. An unknown name selects nothing,
-// and `//` supplies its default over an empty stream as well as over a null —
-// so an unknown harness serves both legs, and `preflight_pairing_supported
-// github-hosted bogus review` falls through to the adapter refusal below
-// rather than to the leg refusal above. Measured against the shell.
-//
-// harness.Document.ServesLeg answers false for an unknown name instead, which
-// is a different question. It is not used here for that reason.
-func servesLeg(doc harness.Document, name, leg string) bool {
-	legs := []string{harness.LegReview, harness.LegResolve}
-	if entry, found := doc.For(name); found {
-		legs = entry.Legs()
-	}
-	return slices.Contains(legs, leg)
 }
 
 // declaredLegs is `.legs // []`: the legs the descriptor writes down, and
