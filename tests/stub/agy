@@ -18,7 +18,11 @@ set -uo pipefail
 # The CROSSREV_* configuration this stub reads, restored when the parent handed
 # it an allowlist rather than the whole environment. See the file for why.
 # shellcheck source=tests/stub/_stub-env.sh
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_stub-env.sh"
+# tests/test-legs.sh builds a PATH of symlinks to these stubs, and BSD readlink
+# has no -f, so the link is walked by hand the way bin/crossrev:16-24 does. Left
+# unresolved, dirname answers the symlink's directory, _stub-env.sh is not there,
+# the source fails, and the stub runs with no route table at all.
+source "$(_s="${BASH_SOURCE[0]}"; while [[ -L "$_s" ]]; do _d="$(cd -P "$(dirname "$_s")" && pwd)"; _s="$(readlink "$_s")"; [[ "$_s" != /* ]] && _s="$_d/$_s"; done; cd -P "$(dirname "$_s")" && pwd)/_stub-env.sh"
 
 
 [[ "${1:-}" == "--version" ]] && { printf '9.9.9 (test stub)\n'; exit 0; }

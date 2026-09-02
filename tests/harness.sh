@@ -28,8 +28,9 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # tests/stub/_stub-env.sh reads them back on the way out.
 #
 # The snapshot goes beside the suite's own XDG_CONFIG_HOME, which is already on
-# every allowlist the binary builds, so the child can find it. It is rewritten
-# on every invocation, so a per-case export made after stub_reset is carried.
+# every allowlist the binary builds, so the child can find it. It is written
+# before every invocation and removed after it, so a per-case export made after
+# stub_reset is carried and nothing outlives the run that wrote it.
 #
 # printf %q for the value, so a space, a quote or a newline survives and no line
 # is ever split. compgen -e rather than printenv, for the same reason: it lists
@@ -46,7 +47,15 @@ mkdir -p "\$_base" 2>/dev/null
 while IFS= read -r _name; do
   printf 'export %s=%q\\n' "\$_name" "\${!_name}" >>"\$_base/crossrev-stub.env"
 done < <(compgen -e | grep '^CROSSREV_' || true)
-exec "$target" "\$@"
+# Not exec: the snapshot exists to serve THIS invocation's children, and it is
+# removed the moment the binary exits. Left behind, it outlives the run and a
+# stub the suite then invokes directly — with a variable deliberately unset —
+# reads the value back out of it, because "already set wins" cannot see an unset
+# name.
+"$target" "\$@"
+_rc=\$?
+rm -f "\$_base/crossrev-stub.env"
+exit "\$_rc"
 WRAP
   chmod +x "$dir/crossrev"
   printf '%s' "$dir/crossrev"
