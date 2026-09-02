@@ -227,7 +227,7 @@ func TestStatusStateIsOneOfFive(t *testing.T) {
 
 // TestStatusPassCounts pins the two numbers the LOOP section reads: the current
 // review pass and the highest pass any marker mentions, refused passes included
-// (lib/run.sh:3067-3068).
+// (lib/run.sh:3065-3066).
 func TestStatusPassCounts(t *testing.T) {
 	for _, c := range statusCases(t) {
 		t.Run(c.Name, func(t *testing.T) {
@@ -414,7 +414,7 @@ func TestStatusPullRequestFacts(t *testing.T) {
 }
 
 // TestStatusRefusesAClosedPullRequest pins the one refusal cmd_status inherits
-// from ctx_load: crossrev only runs on open pull requests (lib/run.sh:3025-3027).
+// from ctx_load: crossrev only runs on open pull requests (lib/run.sh:255-257).
 func TestStatusRefusesAClosedPullRequest(t *testing.T) {
 	c := statusCases(t)[0]
 	head, err := core.NewRevision(c.HeadSHA)

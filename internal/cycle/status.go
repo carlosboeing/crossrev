@@ -76,7 +76,7 @@ type LegRow struct {
 // NextLine is one line of the NEXT section, and whether it is a command.
 //
 // The two are printed differently — `ui_cmd` colours a command and gives it no
-// glyph (lib/ui.sh:62) — and the difference is the section's contract: NEXT
+// glyph (lib/ui.sh:72) — and the difference is the section's contract: NEXT
 // always ends in something the reader can type.
 type NextLine struct {
 	Text    string
@@ -131,7 +131,7 @@ type Status struct {
 	Forge    forge.Forge
 	Liveness Liveness
 	// Now is the clock the age of an open claim is measured against. The
-	// shell reads `date +%s` at each row (lib/run.sh:3248).
+	// shell reads `date +%s` at each row (lib/run.sh:3246).
 	Now func() time.Time
 	// Show reads the configuration from the pull request's base revision,
 	// which is where policy is read from and never the head (ADR 0003).
@@ -816,7 +816,7 @@ func statusResolutionCounts(resolutions json.RawMessage) string {
 }
 
 // statusSeverityCounts is the review row's finding summary: the severities that
-// appear, highest first, with the count of each (lib/run.sh:3389-3394).
+// appear, highest first, with the count of each (lib/run.sh:3384-3389).
 func statusSeverityCounts(findings json.RawMessage) string {
 	by := map[string]int{}
 	for _, f := range statusFindings(findings) {
