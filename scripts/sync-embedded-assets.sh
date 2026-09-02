@@ -59,6 +59,13 @@ ASSETS=(
   "templates/crossrev-watchdog.yml"     "internal/initcmd/assets/templates/crossrev-watchdog.yml"
   "templates/crossrev-token-refresh.yml" "internal/initcmd/assets/templates/crossrev-token-refresh.yml"
   "templates/operator-config.yml"       "internal/initcmd/assets/templates/operator-config.yml"
+
+  # The version `crossrev version` prints. bin/crossrev:64 reads it out of
+  # "$ROOT/VERSION", where ROOT is the checkout the shell was invoked from
+  # (bin/crossrev:26); a binary has no checkout, so internal/cli carries the
+  # bytes. Copied rather than rendered, so the trailing newline the file holds
+  # survives and internal/cli deletes whitespace the way `tr -d` does.
+  "VERSION"                             "internal/cli/assets/VERSION"
 )
 
 # The list above is what gets copied. It is not what decides the list is

@@ -8,6 +8,8 @@ import (
 	"github.com/carlosboeing/crossrev/internal/core"
 	"github.com/carlosboeing/crossrev/internal/forge"
 	"github.com/carlosboeing/crossrev/internal/prstate"
+
+	"github.com/carlosboeing/crossrev/internal/ui"
 )
 
 func startedClaimWithFindings(t *testing.T, id1, id2 core.FindingID) prstate.Marker {
@@ -31,7 +33,7 @@ func TestRecoveryDoesNotRerunTheModel(t *testing.T) {
 	if len(e.runner.Specs()) != 0 {
 		t.Fatalf("harness ran %d times on recovery, want 0", len(e.runner.Specs()))
 	}
-	joined := strings.Join(got.Messages, "\n")
+	joined := ui.Joined(got.Messages)
 	if !strings.Contains(joined, "Resuming pass 1") {
 		t.Errorf("messages = %q, want Resuming pass 1", joined)
 	}
@@ -65,7 +67,7 @@ func TestRecoverySkipsACommentThatAlreadyCarriesAMarker(t *testing.T) {
 	if strings.Contains(e.forge.reviewPosted[0].Body, string(id1)) {
 		t.Error("re-posted the finding that already carried a marker")
 	}
-	joined := strings.Join(got.Messages, "\n")
+	joined := ui.Joined(got.Messages)
 	if !strings.Contains(joined, "already on the pull request from an earlier attempt") {
 		t.Errorf("messages = %q, want the skip announcement", joined)
 	}

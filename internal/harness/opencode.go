@@ -298,9 +298,22 @@ func (a *Opencode) Envelope(_ Invocation, res exec.Result) Envelope {
 	}
 
 	// Extraction can legitimately miss — prose with no braces anywhere — and
-	// that is a handoff, not a failure: a nil payload lets the orchestrator spend
-	// the extra attempt a non-schema-native harness is granted before reporting.
+	// that is a handoff, not a failure: the orchestrator then spends the extra
+	// attempt a non-schema-native harness is granted before reporting.
+	//
+	// The miss is carried as the JSON literal `null`, which is what
+	// lib/adapters/opencode.sh:257-258 substitutes:
+	//
+	//	payload="$(_opencode_extract_json <<<"$text")"
+	//	[[ -n "$payload" ]] || payload="null"
+	//
+	// A Go nil is not the same value. The validator rejects `null` as "the
+	// payload is not a JSON object" and accepts an absent one, so prose with no
+	// object in it was published as an empty review instead of being retried.
 	payload, _ := ExtractJSON(text)
+	if len(payload) == 0 {
+		payload = json.RawMessage("null")
+	}
 	return succeeded(a.Name(), vendorEndpoint, payload, nil)
 }
 

@@ -17,7 +17,7 @@ func TestReconcileSkipsAFindingAlreadyCarryingItsMarker(t *testing.T) {
 		Body:        "inline" + prstate.EncodeFindingMarker(id, 1, core.LegReview),
 	}}
 	got := review.PostedFindingIDs(reviewComments, nil, author)
-	if len(got) != 1 || got[0] != id {
+	if len(got) != 1 || got[0] != id.String() {
 		t.Fatalf("PostedFindingIDs = %v, want [%s]", got, id)
 	}
 }
@@ -30,11 +30,11 @@ func TestReconcileReadsAFallbackFromIssueComments(t *testing.T) {
 		Body:        "**app.go:2** (RIGHT)\n\nfallback" + prstate.EncodeFindingMarker(id, 1, core.LegReview),
 	}}
 	posted := review.PostedFindingIDs(nil, issue, author)
-	if len(posted) != 1 || posted[0] != id {
+	if len(posted) != 1 || posted[0] != id.String() {
 		t.Fatalf("PostedFindingIDs = %v, want [%s]", posted, id)
 	}
 	unthreaded := review.UnthreadedFindingIDs(issue, author, 1)
-	if len(unthreaded) != 1 || unthreaded[0] != id {
+	if len(unthreaded) != 1 || unthreaded[0] != id.String() {
 		t.Fatalf("UnthreadedFindingIDs = %v, want [%s]", unthreaded, id)
 	}
 }
@@ -76,4 +76,23 @@ func mustFindingID(t *testing.T, s string) core.FindingID {
 		t.Fatal(err)
 	}
 	return id
+}
+
+// A marker carrying an id the current hash could not have minted is still a
+// duplicate.
+//
+// _state_finding_ids (lib/state.sh:216-222) is sed plus jq: it dedupes on the
+// literal string and validates nothing. Dropping an id that will not parse made
+// the leg re-post an inline comment already on the pull request, which is the
+// one thing the recovery read exists to prevent.
+func TestReconcileTreatsAnUnparseableIDAsPosted(t *testing.T) {
+	comments := []forge.IssueComment{{
+		ID:          33,
+		AuthorLogin: author,
+		Body:        `posted <!-- crossrev:f {"id":"other000","pass":1,"leg":"review"} -->`,
+	}}
+	got := review.PostedFindingIDs(comments, nil, author)
+	if len(got) != 1 || got[0] != "other000" {
+		t.Fatalf("PostedFindingIDs = %v, want [other000]", got)
+	}
 }

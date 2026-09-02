@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -741,4 +743,45 @@ func containsCall(calls []string, want string) bool {
 		}
 	}
 	return false
+}
+
+// TestSeedCommandsWithNoLookPathUsesTheSharedSearch is the one case that
+// leaves LookPath nil and drives the production search.
+//
+// Every other case here substitutes one, so the fallback had no test at all.
+// The private copy this file carried until now answered with a directory named
+// like the harness, so a machine with a `claude/` directory anywhere on PATH
+// was offered the seed command for a binary that is not there.
+func TestSeedCommandsWithNoLookPathUsesTheSharedSearch(t *testing.T) {
+	root := t.TempDir()
+	asDirectory := filepath.Join(root, "d")
+	asProgram := filepath.Join(root, "x")
+	if err := os.MkdirAll(filepath.Join(asDirectory, "claude"), 0o755); err != nil {
+		t.Fatalf("make the directory named like the harness: %v", err)
+	}
+	if err := os.MkdirAll(asProgram, 0o755); err != nil {
+		t.Fatalf("make %s: %v", asProgram, err)
+	}
+	if err := os.WriteFile(filepath.Join(asProgram, "claude"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write the harness binary: %v", err)
+	}
+
+	for _, row := range []struct {
+		name  string
+		path  string
+		found bool
+	}{
+		{"a directory named like the harness", asDirectory, false},
+		{"the executable behind it", asDirectory + string(os.PathListSeparator) + asProgram, true},
+		{"an empty PATH", "", false},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			t.Setenv("PATH", row.path)
+			// LookPath is left nil, which is the whole point.
+			seeds := initcmd.SeedCommands{Runner: refusingRunner{t}}
+			if got := seeds.Available("claude"); got != row.found {
+				t.Errorf("Available with PATH=%q = %t, want %t", row.path, got, row.found)
+			}
+		})
+	}
 }

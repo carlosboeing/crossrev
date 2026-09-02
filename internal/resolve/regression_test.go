@@ -11,6 +11,8 @@ import (
 	"testing"
 
 	"github.com/carlosboeing/crossrev/internal/exec"
+
+	"github.com/carlosboeing/crossrev/internal/ui"
 )
 
 // TestInvokeSetsPayloadPathPerAttempt pins that the resolve invoke loop sets
@@ -118,7 +120,7 @@ func TestResolveSubstituteHarnessWarningKeepsSecondSentence(t *testing.T) {
 	}
 	const wantSentence = "Both legs now run on the same harness, so a bug it misses while reviewing it also misses while resolving. Install codex to get the second lineage back."
 	found := false
-	for _, msg := range got.Messages {
+	for _, msg := range ui.Texts(got.Messages) {
 		if strings.Contains(msg, wantSentence) {
 			found = true
 			break

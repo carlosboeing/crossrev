@@ -9,17 +9,20 @@ import (
 // PostedFindingIDs is state_posted_finding_ids (lib/state.sh:184-190): every
 // finding id already written out by the review leg, read back from inline and
 // top-level comments.
-func PostedFindingIDs(reviewComments, issueComments []forge.IssueComment, author string) []core.FindingID {
+// The ids are read as written rather than parsed: _state_finding_ids validates
+// no shape, and an id dropped here reads as never posted, so the leg posts a
+// second inline comment over the one already on the pull request.
+func PostedFindingIDs(reviewComments, issueComments []forge.IssueComment, author string) []string {
 	bodies := authoredBodies(reviewComments, author)
 	bodies = append(bodies, authoredBodies(issueComments, author)...)
-	return prstate.FindingIDs(bodies, core.LegReview, 0)
+	return prstate.FindingIDStrings(bodies, core.LegReview, 0)
 }
 
 // UnthreadedFindingIDs is state_unthreaded_finding_ids (lib/state.sh:206-211):
 // review-leg findings whose marker landed as an issue comment, which is the
 // record of a fallback post.
-func UnthreadedFindingIDs(issueComments []forge.IssueComment, author string, pass int) []core.FindingID {
-	return prstate.FindingIDs(authoredBodies(issueComments, author), core.LegReview, pass)
+func UnthreadedFindingIDs(issueComments []forge.IssueComment, author string, pass int) []string {
+	return prstate.FindingIDStrings(authoredBodies(issueComments, author), core.LegReview, pass)
 }
 
 func authoredBodies(comments []forge.IssueComment, author string) []string {
@@ -32,10 +35,10 @@ func authoredBodies(comments []forge.IssueComment, author string) []string {
 	return out
 }
 
-func postedSet(ids []core.FindingID) map[string]bool {
+func postedSet(ids []string) map[string]bool {
 	out := make(map[string]bool, len(ids))
 	for _, id := range ids {
-		out[id.String()] = true
+		out[id] = true
 	}
 	return out
 }

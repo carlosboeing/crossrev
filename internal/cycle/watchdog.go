@@ -16,10 +16,12 @@ import (
 //
 // Bash builds this list itself, from one `gh api repos/<slug>/pulls?state=open`
 // filtered to the pull requests carrying a `crossrev/awaiting-` label
-// (lib/run.sh:3691-3693). There is no forge method for that read, so the list is
-// an argument here and the caller performs it. Nothing else about the sweep
-// changes: every decision below is made from these three fields and the markers
-// on the pull request, which is what makes the watchdog answerable offline.
+// (lib/run.sh:3691-3693). forge.AwaitingPullRequests is that read, and the
+// composition root performs it before calling Run, so the list arrives as an
+// argument rather than through a forge call made here. Nothing else about the
+// sweep changes: every decision below is made from these three fields and the
+// markers on the pull request, which is what makes the watchdog answerable
+// offline.
 type Waiting struct {
 	// PR is the pull request number.
 	PR int
@@ -65,6 +67,15 @@ type Watchdog struct {
 	// Timeout is how long a leg may be waiting before it counts as stuck.
 	// Zero means the 1800 seconds lib/run.sh:3667 defaults the flag to.
 	Timeout time.Duration
+	// TimeoutRefusal is a `--timeout` the caller could not convert, held
+	// rather than raised.
+	//
+	// Bash keeps the flag as a string (lib/run.sh:3671) and evaluates it only
+	// at `(( age < timeout ))` (lib/run.sh:3719), so a sweep that reaches no
+	// pull request never dies on a nonsense value, and one that reaches a
+	// stopped or marker-less pull request does not either. Raising this where
+	// the arithmetic is, rather than at the flag, is what reproduces that.
+	TimeoutRefusal error
 	// Author is whose markers are loop state. Bash resolves it per pull
 	// request with `state_trusted_author automated` (lib/run.sh:3709); here
 	// the caller resolves it once and hands it in.
@@ -133,6 +144,11 @@ func (w *Watchdog) Run(ctx context.Context, repo core.Slug, waiting []Waiting) (
 		// A marker with no `ts` reads as 0, which is `.ts // 0` at
 		// lib/run.sh:3718 and makes the leg past any timeout.
 		age := time.Duration(now.Unix()-markers[len(markers)-1].TS) * time.Second
+		// The first read of the timeout, and so the first place a `--timeout`
+		// that is not a number can stop anything (lib/run.sh:3719).
+		if w.TimeoutRefusal != nil {
+			return summary, w.TimeoutRefusal
+		}
 		if age < timeout {
 			w.Out.Opt(watchdogInsideLine(pr.PR, leg, age, timeout))
 			continue

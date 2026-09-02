@@ -434,6 +434,70 @@ func TestWatchdogDefaultTimeout(t *testing.T) {
 	}
 }
 
+// TestWatchdogTimeoutRefusalWaitsForTheComparison pins where a `--timeout` that
+// is not a number stops the sweep.
+//
+// Bash keeps the flag as a string (lib/run.sh:3671) and reads it only at
+// `(( age < timeout ))` (lib/run.sh:3719), which three shapes never reach: no
+// pull request waiting, one carrying crossrev/stop, and one with no marker
+// behind its label. Measured against bin/crossrev with `--timeout abc`: exit 0
+// for each of those, exit 1 for a pull request that is waiting with a marker.
+// Raising the refusal any earlier turns all four into exit 1.
+func TestWatchdogTimeoutRefusalWaitsForTheComparison(t *testing.T) {
+	const head = "d81a3f2abc0000000000000000000000000000ab"
+	refusal := errors.New("--timeout must be a number of seconds, and it was: abc")
+
+	marker := watchdogMarker(t, 9001, watchdogAuthor, core.LegReview, watchdogNow-60, head)
+
+	for _, tc := range []struct {
+		name     string
+		comments []forge.IssueComment
+		waiting  []cycle.Waiting
+		wantErr  bool
+	}{
+		{
+			name:    "nothing waiting never reads it",
+			waiting: nil,
+		},
+		{
+			name:     "a stopped pull request never reads it",
+			comments: []forge.IssueComment{marker},
+			waiting: []cycle.Waiting{
+				{PR: 42, Labels: []string{"crossrev/awaiting-review", "crossrev/stop"}, HeadSHA: head},
+			},
+		},
+		{
+			name:    "a label with no marker behind it never reads it",
+			waiting: []cycle.Waiting{{PR: 42, Labels: []string{"crossrev/awaiting-review"}, HeadSHA: head}},
+		},
+		{
+			name:     "a waiting pull request with a marker does",
+			comments: []forge.IssueComment{marker},
+			waiting:  []cycle.Waiting{{PR: 42, Labels: []string{"crossrev/awaiting-review"}, HeadSHA: head}},
+			wantErr:  true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := &watchdogForge{comments: tc.comments}
+			var out bytes.Buffer
+			w := watchdogSweeper(f, &out, 0)
+			w.TimeoutRefusal = refusal
+
+			_, err := w.Run(context.Background(), watchdogSlug(t), tc.waiting)
+
+			switch {
+			case tc.wantErr && !errors.Is(err, refusal):
+				t.Errorf("Run = %v, want the held refusal", err)
+			case !tc.wantErr && err != nil:
+				t.Errorf("Run = %v, want the sweep to finish without reading the timeout", err)
+			}
+			if !tc.wantErr && !strings.Contains(out.String(), "waiting on a leg — retried") {
+				t.Errorf("output = %q, want the closing summary", out.String())
+			}
+		})
+	}
+}
+
 // TestWatchdogEveryShellCaseIsCovered guards against a fixture that loads and
 // asserts nothing: every case in tests/test-watchdog.sh has to be represented.
 func TestWatchdogEveryShellCaseIsCovered(t *testing.T) {
@@ -583,6 +647,9 @@ func (f *watchdogForge) RepoIssueComments(context.Context, core.Slug, time.Time,
 	return nil, nil
 }
 func (f *watchdogForge) ViewerLogin(context.Context) (string, error) { return watchdogAuthor, nil }
+func (f *watchdogForge) AwaitingPullRequests(context.Context, core.Slug) []forge.AwaitingPullRequest {
+	return nil
+}
 func (f *watchdogForge) WorkflowRunStatus(context.Context, core.Slug, string) forge.RunStatus {
 	return ""
 }

@@ -159,8 +159,25 @@ func namesNewOrchestratorRunner(obj types.Object) bool {
 // helper the environment configures — on a GitHub-hosted runner that is the
 // ambient token. Neither `gh` nor git reads attacker-controlled text, which
 // is the process ADR 0001 is about.
+//
+// # The fourth, added deliberately, against the comment above
+//
+// cmd/crossrev is the composition root. ghexec.New, vcs.New and
+// preflight.Checker.Runner all TAKE a runner and every one of them panics or
+// misbehaves on the wrong one — ghexec.New panics on nil rather than inventing
+// a runner, and preflight's nil default is the model-facing one, which would
+// have `crossrev doctor` report the operator unauthenticated. Somebody has to
+// construct the value, and the three directories above document why they may
+// hold it rather than constructing it for production.
+//
+// What keeps this from being a hole is that cmd/crossrev holds no Spec.Path of
+// its own except `gh` (initcmd.go's secret reads), and that Run's refusal still
+// executes: exec.NewOSRunner refuses a forge credential whatever wrapper holds
+// it. The line to read in review is which runner reaches a harness — it is
+// d.model, in cmd/crossrev/legs.go, and it is exec.NewOSRunner.
 func orchestratorRunnerPermitted(dir string) bool {
-	return dir == "internal/exec" || dir == "internal/forge/ghexec" || dir == "internal/vcs"
+	return dir == "internal/exec" || dir == "internal/forge/ghexec" ||
+		dir == "internal/vcs" || dir == "cmd/crossrev"
 }
 
 type orchestratorRunnerViolation struct {
@@ -267,8 +284,8 @@ func TestOrchestratorRunnerAuditVerdict(t *testing.T) {
 	}
 }
 
-func TestOrchestratorRunnerPermissionCoversTheThreeDirectories(t *testing.T) {
-	for _, dir := range []string{"internal/exec", "internal/forge/ghexec", "internal/vcs"} {
+func TestOrchestratorRunnerPermissionCoversTheFourDirectories(t *testing.T) {
+	for _, dir := range []string{"internal/exec", "internal/forge/ghexec", "internal/vcs", "cmd/crossrev"} {
 		if !orchestratorRunnerPermitted(dir) {
 			t.Errorf("%s must keep the orchestrator runner", dir)
 		}
@@ -282,7 +299,7 @@ func TestOrchestratorRunnerPermissionCoversTheThreeDirectories(t *testing.T) {
 		"internal/forge/ghexec/nested",
 		"internal/vcs/nested",
 		"internal/exec/nested",
-		"cmd/crossrev",
+		"cmd/crossrev/nested",
 	} {
 		if orchestratorRunnerPermitted(dir) {
 			t.Errorf("%s must not inherit the orchestrator runner", dir)

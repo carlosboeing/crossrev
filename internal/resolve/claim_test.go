@@ -9,6 +9,8 @@ import (
 
 	"github.com/carlosboeing/crossrev/internal/core"
 	"github.com/carlosboeing/crossrev/internal/prstate"
+
+	"github.com/carlosboeing/crossrev/internal/ui"
 )
 
 // TestClaim pins claim-before-model, create failure, stale versus fresh
@@ -146,7 +148,7 @@ func TestClaim(t *testing.T) {
 			t.Errorf("CommentID = %d, want 9002", got.Marker.CommentID())
 		}
 		want := "abandoning the unfinished pass-1 resolve — it was made 120 minutes ago, past the 60-minute window\n   Resuming it would reconcile replies against a revision that has moved. Starting the pass again instead."
-		if !strings.Contains(strings.Join(got.Messages, "\n"), want) {
+		if !strings.Contains(ui.Joined(got.Messages), want) {
 			t.Errorf("messages = %q, want warning %q", got.Messages, want)
 		}
 		var recs []map[string]json.RawMessage

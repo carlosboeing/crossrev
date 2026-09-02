@@ -122,6 +122,30 @@ func EncodeFindingMarker(id core.FindingID, pass int, leg core.Leg) string {
 // hand-written body reaches it, and reproducing jq's stream parser to recover a
 // forged id is not worth the code.
 func FindingIDs(bodies []string, leg core.Leg, pass int) []core.FindingID {
+	raw := FindingIDStrings(bodies, leg, pass)
+	ids := make([]core.FindingID, 0, len(raw))
+	for _, id := range raw {
+		// Reading an id off a marker is not minting one, so a value the hash
+		// could not have produced is dropped rather than carried.
+		parsed, err := ParseFindingID(id)
+		if err != nil {
+			continue
+		}
+		ids = append(ids, parsed)
+	}
+	return ids
+}
+
+// FindingIDStrings is the same read with the shape check left off: every id a
+// marker carries, sorted and deduplicated, whatever it looks like.
+//
+// _state_finding_ids (lib/state.sh:216-222) is sed into jq into `sort -u`, and
+// validates nothing. That matters for the one question asked of the set — has
+// this finding already been posted — because an id dropped for its shape reads
+// as absent, and the leg posts a second inline comment over the one already on
+// the pull request. Callers that MINT an id, or that hand one to a hash, want
+// FindingIDs above.
+func FindingIDStrings(bodies []string, leg core.Leg, pass int) []string {
 	seen := map[string]bool{}
 	for _, body := range bodies {
 		for line := range strings.SplitSeq(body, "\n") {
@@ -144,19 +168,7 @@ func FindingIDs(bodies []string, leg core.Leg, pass int) []core.FindingID {
 		}
 	}
 
-	sorted := slices.Sorted(maps.Keys(seen))
-
-	ids := make([]core.FindingID, 0, len(sorted))
-	for _, id := range sorted {
-		// Reading an id off a marker is not minting one, so a value the hash
-		// could not have produced is dropped rather than carried.
-		parsed, err := ParseFindingID(id)
-		if err != nil {
-			continue
-		}
-		ids = append(ids, parsed)
-	}
-	return ids
+	return slices.Sorted(maps.Keys(seen))
 }
 
 // extractFindingPayload applies the rule the sed at lib/state.sh:218 applies:

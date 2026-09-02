@@ -152,6 +152,12 @@ func (o *IO) Gap() {
 	fmt.Fprintf(o.out(), "%s│%s\n", p.Dim, p.Reset)
 }
 
+// Blank is a bare newline, the `printf '\n'` a leg prints between blocks. Gap
+// is the other one and is not interchangeable: it draws the dim gutter rule.
+func (o *IO) Blank() {
+	fmt.Fprint(o.out(), "\n")
+}
+
 // End is the terminal line, closing a block.
 func (o *IO) End(text string) {
 	p := o.palette()

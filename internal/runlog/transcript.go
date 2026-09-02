@@ -83,3 +83,34 @@ func (l *Log) ClearTranscripts(base string) {
 		_ = os.Remove(match)
 	}
 }
+
+// WriteTranscript archives one attempt's two streams under its stem and masks
+// every credential shape in them.
+//
+// The Bash adapters redirect the harness's stdout and stderr straight into
+// these files and parse the answer back out of them, then call log_redact_file
+// on each (lib/adapters/claude.sh:95-106, :148-154). A Go adapter parses the
+// bytes it already holds, so the write happens here instead — after the parse,
+// which is the order that matters: filtering first would rewrite the model's
+// own answer, and identical harness output would then produce different
+// findings depending on whether a run directory exists.
+//
+// An empty base means the run has no directory, which is the anonymous
+// temporary file the Bash adapters fall back to and then delete. Nothing is
+// written in that case.
+func (l *Log) WriteTranscript(base string, stdout, stderr []byte) {
+	if l == nil || base == "" {
+		return
+	}
+	for _, stream := range []struct {
+		suffix string
+		body   []byte
+	}{{".stdout", stdout}, {".stderr", stderr}} {
+		path := base + stream.suffix
+		if err := os.WriteFile(path, stream.body, 0o600); err != nil {
+			l.Event("transcript", "could not write "+path)
+			continue
+		}
+		l.RedactFile(path)
+	}
+}

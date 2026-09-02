@@ -14,6 +14,7 @@ import (
 	"github.com/carlosboeing/crossrev/internal/harness"
 	"github.com/carlosboeing/crossrev/internal/prstate"
 	"github.com/carlosboeing/crossrev/internal/runlog"
+	"github.com/carlosboeing/crossrev/internal/ui"
 	"github.com/carlosboeing/crossrev/internal/vcs"
 )
 
@@ -77,8 +78,12 @@ type Result struct {
 	Prompt      []byte
 	Invocation  harness.Invocation
 	Message     string
-	Messages    []string
-	Err         error
+	Messages    []ui.Line
+	// Nudge asks the caller to print the upgrade tip. run_upgrade_nudge is a
+	// terminal write and a leg holds no terminal, so the decision travels and
+	// the composition root does the printing (lib/run.sh:2447).
+	Nudge bool
+	Err   error
 }
 
 // Refusal is the two strings ui_die prints (lib/ui.sh:113).
@@ -106,6 +111,10 @@ type Leg struct {
 	// LookPath reports whether a harness binary is on PATH. Nil searches PATH
 	// the way command -v does (lib/run.sh:524).
 	LookPath func(string) (string, error)
+
+	// reported is CROSSREV_LEG_REPORTED (lib/run.sh:725): the fatal record has
+	// been written for this leg, and a second attempt must not write it again.
+	reported bool
 }
 
 func (l *Leg) runner() exec.Runner {

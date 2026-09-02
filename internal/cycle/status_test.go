@@ -534,6 +534,9 @@ func (f *statusForge) IssueComments(context.Context, core.Slug, int) []forge.Iss
 }
 
 func (f *statusForge) ViewerLogin(context.Context) (string, error) { return statusAuthor, nil }
+func (f *statusForge) AwaitingPullRequests(context.Context, core.Slug) []forge.AwaitingPullRequest {
+	return nil
+}
 
 func (f *statusForge) DefaultBranch(context.Context, core.Slug) string { return "main" }
 
@@ -615,3 +618,52 @@ func (f *statusForge) PullRequestLabelRemove(context.Context, core.Slug, int, st
 
 var _ forge.Forge = (*statusForge)(nil)
 var _ cycle.Liveness = statusLife{}
+
+// TestStatusKeysTheTrustedAuthorOnTheMode pins that cmd_status reads the
+// author the same way every other leg does.
+//
+// lib/run.sh:3051 calls ctx_load, and ctx_load's lib/run.sh:309 is
+// state_trusted_author "$CTX_MODE". lib/state.sh:26 branches on `automated`,
+// where the author is the App's <slug>[bot] and nothing else; every other mode
+// is the invoking user. Keyed on ViewerLogin alone, `crossrev status` in an
+// automated repository reported the operator's own markers as loop state and
+// named the operator on the page where the App belongs.
+func TestStatusKeysTheTrustedAuthorOnTheMode(t *testing.T) {
+	c := statusCases(t)[0]
+	head, err := core.NewRevision(c.HeadSHA)
+	if err != nil {
+		t.Fatalf("head revision: %v", err)
+	}
+	base, err := core.NewRevision(statusBase)
+	if err != nil {
+		t.Fatalf("base revision: %v", err)
+	}
+	slug, err := core.ParseSlug(statusRepo)
+	if err != nil {
+		t.Fatalf("slug: %v", err)
+	}
+	s := &cycle.Status{
+		AppSlug: "crossrev-acme",
+		Forge: &statusForge{pr: forge.PullRequest{
+			Number:     statusPR,
+			HeadRefOid: head,
+			BaseRefOid: base,
+			State:      "OPEN",
+		}},
+		Liveness: statusLife{},
+		Now:      func() time.Time { return time.Unix(c.Now, 0) },
+		Show: func(_ context.Context, _ core.Revision, path string) ([]byte, config.FileStatus, error) {
+			if path != ".github/crossrev.yml" {
+				return nil, config.NotFound, nil
+			}
+			return []byte("version: 1\nmode: automated\n"), config.IsFile, nil
+		},
+	}
+	report, err := s.Load(context.Background(), slug, statusPR)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if report.Author != "crossrev-acme[bot]" {
+		t.Errorf("Author = %q, want crossrev-acme[bot] from CROSSREV_APP_SLUG (lib/state.sh:35-40)", report.Author)
+	}
+}

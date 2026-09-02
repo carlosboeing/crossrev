@@ -266,6 +266,9 @@ func (f *fakeForge) RepoIssueComments(context.Context, core.Slug, time.Time, int
 }
 
 func (f *fakeForge) ViewerLogin(context.Context) (string, error) { return author, nil }
+func (f *fakeForge) AwaitingPullRequests(context.Context, core.Slug) []forge.AwaitingPullRequest {
+	return nil
+}
 
 func (f *fakeForge) WorkflowRunStatus(context.Context, core.Slug, string) forge.RunStatus {
 	return ""
@@ -386,6 +389,19 @@ type env struct {
 	doc      harness.Document
 	dir      string
 	lookPath func(string) (string, error)
+	// nilLookPath leaves review.Leg.LookPath nil so the case drives the
+	// production PATH search rather than the substitute below. Without it no
+	// case here reaches exec.LookPath at all, and the fallback the helper
+	// fills in would hide whatever the real one does.
+	nilLookPath bool
+	// keepTranscripts is the --keep-transcripts posture, which the run log
+	// carries rather than the leg.
+	keepTranscripts bool
+	// validate replaces validate.Findings, so a case can drive the retry
+	// budgets without building a payload that fails for the right reason.
+	validate func([]byte) error
+	// legEnv is what the leg hands a child. Nil is the default pair below.
+	legEnv []string
 }
 
 func newEnv(t *testing.T) *env {
@@ -429,20 +445,22 @@ func newEnv(t *testing.T) *env {
 func (e *env) leg(t *testing.T) review.Leg {
 	t.Helper()
 	run, err := runlog.Open(runlog.Options{
-		Dir:  filepath.Join(e.dir, "run"),
-		Now:  func() time.Time { return frozenNow },
-		Leg:  "review",
-		Repo: "acme/widget",
-		PR:   "42",
+		Dir:             filepath.Join(e.dir, "run"),
+		Now:             func() time.Time { return frozenNow },
+		Leg:             "review",
+		Repo:            "acme/widget",
+		PR:              "42",
+		KeepTranscripts: e.keepTranscripts,
 	})
 	if err != nil {
 		t.Fatalf("runlog.Open: %v", err)
 	}
 	look := e.lookPath
-	if look == nil {
+	if look == nil && !e.nilLookPath {
 		look = func(name string) (string, error) { return "/usr/bin/" + name, nil }
 	}
 	return review.Leg{
+		Validate: e.validate,
 		Forge:    e.forge,
 		VCS:      e.vcs,
 		Config:   e.cfg,
@@ -450,7 +468,7 @@ func (e *env) leg(t *testing.T) review.Leg {
 		Log:      run,
 		Now:      func() time.Time { return frozenNow },
 		Runner:   e.runner,
-		Env:      []string{"PATH=/usr/bin:/bin", "HOME=" + e.dir},
+		Env:      e.env(),
 		LookPath: look,
 	}
 }
@@ -526,4 +544,12 @@ func bashOutput(t *testing.T, script string, args ...string) string {
 		t.Fatalf("bash: %v\nstderr: %s", err, stderr.String())
 	}
 	return string(out)
+}
+
+// env is what the leg hands a child.
+func (e *env) env() []string {
+	if e.legEnv != nil {
+		return e.legEnv
+	}
+	return []string{"PATH=/usr/bin:/bin", "HOME=" + e.dir}
 }

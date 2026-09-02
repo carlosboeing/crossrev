@@ -12,16 +12,21 @@ import (
 // push between two of them validates lines from one revision and posts them
 // against another.
 type PullRequest struct {
-	Number              int
-	Title               string
-	Body                string
-	URL                 string
-	HeadRefName         string
-	HeadRefOid          core.Revision
-	BaseRefName         string
-	BaseRefOid          core.Revision
-	ChangedFiles        int
-	Labels              []Label
+	Number       int
+	Title        string
+	Body         string
+	URL          string
+	HeadRefName  string
+	HeadRefOid   core.Revision
+	BaseRefName  string
+	BaseRefOid   core.Revision
+	ChangedFiles int
+	Labels       []Label
+	// IsCrossRepository is true for a fork AND for a payload that did not
+	// carry the field at all. lib/run.sh:284 records the second case as
+	// `unknown`, and every reader tests for an explicit `false`, so the two
+	// take the same branch everywhere. Only a payload saying `false` means
+	// this repository's own branch.
 	IsCrossRepository   bool
 	IsDraft             bool
 	HeadRepositoryOwner string
@@ -95,6 +100,21 @@ type IssueComment struct {
 	AuthorLogin string
 	IssueURL    string
 	CreatedAt   string
+}
+
+// AwaitingPullRequest is one open pull request the watchdog was handed: its
+// number, every label on it, and the revision it points at.
+//
+// It is the three fields lib/run.sh:3692 selects and nothing else. The sweep
+// decides from marker and label state alone, so a wider read would carry
+// nothing it could use.
+type AwaitingPullRequest struct {
+	Number int
+	// Labels is every label on the pull request, including the awaiting label
+	// it is waiting behind and any bookkeeping label a previous sweep left.
+	Labels []string
+	// HeadSHA is `.head.sha`, printed abbreviated on the retry line.
+	HeadSHA string
 }
 
 // IssueCandidate is one issue the fuzzy dedupe offers a model to judge, with

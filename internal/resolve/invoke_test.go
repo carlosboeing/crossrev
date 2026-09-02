@@ -11,6 +11,8 @@ import (
 	"github.com/carlosboeing/crossrev/internal/core"
 	"github.com/carlosboeing/crossrev/internal/exec"
 	"github.com/carlosboeing/crossrev/internal/harness"
+
+	"github.com/carlosboeing/crossrev/internal/ui"
 )
 
 // TestInvoke pins write capability, the no-arbitrary-command grant, quarantine
@@ -166,7 +168,7 @@ func TestInvoke(t *testing.T) {
 			t.Errorf("error = %q, want the restore refusal", got.Err)
 		}
 		want := "the rejected attempt's edits could not be put back\n   They are still in the checkout, and a later run would capture them as its own baseline. Check `git status` before re-running the leg."
-		if !strings.Contains(strings.Join(got.Messages, "\n"), want) {
+		if !strings.Contains(ui.Joined(got.Messages), want) {
 			t.Errorf("messages = %q, want warning %q", got.Messages, want)
 		}
 	})
@@ -194,7 +196,7 @@ func TestInvoke(t *testing.T) {
 			t.Errorf("claim named the missing harness: %s", e.forge.created[0].Body)
 		}
 		found := false
-		for _, msg := range got.Messages {
+		for _, msg := range ui.Texts(got.Messages) {
 			if strings.Contains(msg, "is not installed") && strings.Contains(msg, "claude") {
 				found = true
 			}

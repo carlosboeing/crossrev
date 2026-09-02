@@ -8,6 +8,8 @@ import (
 
 	"github.com/carlosboeing/crossrev/internal/core"
 	"github.com/carlosboeing/crossrev/internal/review"
+
+	"github.com/carlosboeing/crossrev/internal/ui"
 )
 
 func TestClaimCreateFailureStopsBeforeAHarnessProcess(t *testing.T) {
@@ -161,7 +163,7 @@ func TestClaimWarnsWhenTheDailyReviewBackstopCannotReadComments(t *testing.T) {
 		t.Fatalf("Run: %v", got.Err)
 	}
 	want := "could not read repository comments while checking max_prs_per_day\n   The backstop rounds down to zero rather than stopping a healthy automatic review early. Check GitHub availability and the token's issues read permission."
-	if !containsString(got.Messages, want) {
+	if !containsString(ui.Texts(got.Messages), want) {
 		t.Errorf("messages = %q, want warning %q", got.Messages, want)
 	}
 }

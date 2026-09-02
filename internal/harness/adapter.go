@@ -74,6 +74,26 @@ type Adapter interface {
 	Envelope(Invocation, exec.Result) Envelope
 }
 
+// Exporter is the adapter that answers its telemetry from a SECOND child.
+//
+// Only opencode does: the answering model and the whole-run usage record come
+// from `opencode export <sessionID>`, which reads the local session database
+// and costs no model call (lib/adapters/opencode.sh:261-273). Every other
+// adapter reads both out of the run's own output, so this is an optional
+// interface rather than three more methods on Adapter.
+//
+// The leg runs it, not the adapter: an adapter builds Specs and starts nothing
+// (see Spec above). It is telemetry, so a failed export leaves the fields unset
+// and the leg stands.
+type Exporter interface {
+	// SessionID is the id every event of the run carries, or empty.
+	SessionID(exec.Result) string
+	// ExportSpec is the second child.
+	ExportSpec(Invocation, string) (exec.Spec, error)
+	// MergeExport folds the export's bytes into the envelope.
+	MergeExport(*Envelope, []byte)
+}
+
 // endpointHostName is the harness a named endpoint is reached through, as the
 // three adapters that hardcode it spell it (lib/adapters/codex.sh:28,
 // agy.sh:38, opencode.sh:91). The grok adapter reads `.endpoint_host` from the

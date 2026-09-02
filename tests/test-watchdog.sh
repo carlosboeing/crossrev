@@ -100,4 +100,25 @@ out="$("$CROSSREV" watchdog 2>&1)"
 has "a marker authored by anyone but the App is treated as absent" \
   "$out" "with no marker at all, so it never started"
 
+# --- a --timeout that is not a number dies where it is used, not at the flag ---
+#
+# The shell stores the string (lib/run.sh:3671) and only evaluates it at
+# `(( age < timeout ))` (lib/run.sh:3719), which a sweep reaches only for a
+# pull request that is waiting, not stopped, and has a marker. So the same
+# nonsense value is harmless on a repository with nothing waiting and fatal on
+# one with something waiting. Measured against bin/crossrev: exit 0 with the
+# summary, then exit 1 with `line 3719: abc: unbound variable`.
+fixture_repo; stub_reset
+routes_watchdog '[]' "$(printf '[]' | payload)"
+out="$("$CROSSREV" watchdog --timeout abc 2>&1)"; rc=$?
+is  "a nonsense --timeout is not read when nothing is waiting" "$rc" "0"
+has "and the sweep reports what it looked at"     "$out" "checked 0 pull request(s) waiting on a leg"
+
+fixture_repo; stub_reset
+routes_watchdog "$(waiting_prs '[{"name":"crossrev/awaiting-review"}]')" \
+  "$(marker_comment 9001 "$fresh" "$FIX_APP" | jq -cs . | payload)"
+out="$("$CROSSREV" watchdog --timeout abc 2>&1)"; rc=$?
+is  "and it is fatal once a pull request is waiting" "$rc" "1"
+has "the sweep names the repository before it dies" "$out" "CrossRev watchdog on acme/widget"
+
 finish

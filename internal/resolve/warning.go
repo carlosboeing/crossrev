@@ -17,7 +17,7 @@ import (
 func restoreFailure(harness, problem, restoreErr string) Result {
 	return Result{
 		Outcome: OutcomeRefused,
-		Messages: []string{ui.Warning(
+		Messages: []ui.Line{ui.Warn(
 			"the rejected attempt's edits could not be put back",
 			"They are still in the checkout, and a later run would capture them as its own baseline. Check `git status` before re-running the leg.",
 		)},

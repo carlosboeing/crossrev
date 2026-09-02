@@ -42,12 +42,20 @@ func TestCommentCreateReportsARefusal(t *testing.T) {
 	}
 }
 
-// Every later write to a comment is an edit of its id, so an id that cannot be
-// read is refused rather than carried as zero.
-func TestCommentCreateRefusesAnUnreadableID(t *testing.T) {
+// An id that cannot be read is carried as zero, not refused: gh_comment_create
+// dies on `gh` failing and carries an unreadable id through as the empty string
+// (lib/github.sh:187-195). The two callers that must edit the comment later —
+// both claim sites — refuse on id == 0 for themselves; the callers that discard
+// it, the watchdog halt and the inline-comment fallback, carry on the way the
+// shell's `>/dev/null` does.
+func TestCommentCreateCarriesAnUnreadableIDAsZero(t *testing.T) {
 	c, _ := client(t, out("null\n"))
-	if _, err := c.CommentCreate(context.Background(), testSlug(t), 42, "Summary."); err == nil {
-		t.Error("an unreadable id was accepted")
+	id, err := c.CommentCreate(context.Background(), testSlug(t), 42, "Summary.")
+	if err != nil {
+		t.Errorf("an unreadable id was refused: %v", err)
+	}
+	if id != 0 {
+		t.Errorf("id = %d, want 0", id)
 	}
 }
 

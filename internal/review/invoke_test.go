@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -120,7 +121,7 @@ func TestInvokeWarnsWhenSandboxRestoreFails(t *testing.T) {
 		t.Errorf("error = %q, want the restore refusal", got.Err)
 	}
 	want := "the rejected attempt's edits could not be put back\n   They are still in the checkout, and a later run would capture them as its own baseline. Check `git status` before re-running the leg."
-	if !strings.Contains(strings.Join(got.Messages, "\n"), want) {
+	if !strings.Contains(ui.Joined(got.Messages), want) {
 		t.Errorf("messages = %q, want warning %q", got.Messages, want)
 	}
 }
@@ -249,7 +250,7 @@ func TestInvokeSubstitutesAMissingConfiguredHarnessBeforeTheClaim(t *testing.T) 
 		t.Errorf("claim named the missing harness: %s", e.forge.created[0])
 	}
 	found := false
-	for _, msg := range got.Messages {
+	for _, msg := range ui.Texts(got.Messages) {
 		if strings.Contains(msg, "is not installed") && strings.Contains(msg, "claude") {
 			found = true
 			break
@@ -654,4 +655,56 @@ func withSixthEntry(t *testing.T) harness.Document {
 		t.Fatalf("harness.Load: %v", err)
 	}
 	return doc
+}
+
+// The one case that leaves LookPath nil and drives the production search.
+//
+// Every other case here substitutes one, so without this the fallback is
+// untested and the defect the substitute masks is invisible. The private copy
+// this package carried until now answered with a directory named like the
+// harness, so a machine with a `claude/` directory on PATH reported claude
+// installed and then failed at exec.
+func TestBinaryInstalledWithNoLookPathUsesTheSharedSearch(t *testing.T) {
+	root := t.TempDir()
+	asDirectory := filepath.Join(root, "d")
+	asProgram := filepath.Join(root, "x")
+	if err := os.MkdirAll(filepath.Join(asDirectory, "claude"), 0o755); err != nil {
+		t.Fatalf("make the directory named like the harness: %v", err)
+	}
+	if err := os.MkdirAll(asProgram, 0o755); err != nil {
+		t.Fatalf("make %s: %v", asProgram, err)
+	}
+	if err := os.WriteFile(filepath.Join(asProgram, "claude"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write the harness binary: %v", err)
+	}
+
+	const refusal = "the reviewer is configured to use 'claude', which is not installed, and no other harness that can serve the review leg is either"
+
+	t.Run("a directory named like the harness is not the harness", func(t *testing.T) {
+		t.Setenv("PATH", asDirectory)
+		e := newEnv(t)
+		e.nilLookPath = true
+		req := e.request(t)
+		req.HarnessOverride = "claude"
+
+		got := runLeg(t, e, req)
+
+		if got.Err == nil || !strings.Contains(got.Err.Error(), refusal) {
+			t.Fatalf("err = %v, want the not-installed refusal", got.Err)
+		}
+	})
+
+	t.Run("the executable is found behind it", func(t *testing.T) {
+		t.Setenv("PATH", asDirectory+string(os.PathListSeparator)+asProgram)
+		e := newEnv(t)
+		e.nilLookPath = true
+		req := e.request(t)
+		req.HarnessOverride = "claude"
+
+		got := runLeg(t, e, req)
+
+		if got.Err != nil && strings.Contains(got.Err.Error(), refusal) {
+			t.Fatalf("the harness behind the directory was not found: %v", got.Err)
+		}
+	})
 }
