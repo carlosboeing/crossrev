@@ -53,7 +53,7 @@ func TestCountActionableMatchesTheShellBar(t *testing.T) {
 }
 
 // TestCountActionableReadsPreExistingAsJqDoes pins the truthiness rule behind
-// `select((.pre_existing // false) | not)` (lib/run.sh:359). jq calls everything
+// `select((.pre_existing // false) | not)` (lib/run.sh:358). jq calls everything
 // except false and null true, so a zero and an empty string both mark a finding
 // pre-existing. Measured:
 //
@@ -92,7 +92,7 @@ func TestCountActionableReadsPreExistingAsJqDoes(t *testing.T) {
 //	rc=5, stdout empty
 //
 // cmd_cycle assigns that empty string to `actionable` and then tests
-// `(( actionable == 0 ))` (lib/run.sh:2955), where bash reads an empty operand
+// `(( actionable == 0 ))` (lib/run.sh:2960), where bash reads an empty operand
 // as zero — so the driver behaves as though nothing were actionable. Counting
 // the finding as unranked gives the same answer for an array whose findings all
 // lack a severity, and a different one for an array that mixes a valid finding
@@ -109,7 +109,7 @@ func TestCountActionableTreatsAMissingSeverityAsUnranked(t *testing.T) {
 
 // TestCountActionableReadsAnAbsentFindingsPayload covers the marker whose
 // `findings` key is absent. cmd_cycle reads it as `jq -c '.findings // []'`
-// (lib/run.sh:2956), so absent is the empty array.
+// (lib/run.sh:2954), so absent is the empty array.
 func TestCountActionableReadsAnAbsentFindingsPayload(t *testing.T) {
 	if got := actionableCount(nil, core.SeverityMedium); got != 0 {
 		t.Errorf("actionableCount(nil) = %d, want 0", got)
