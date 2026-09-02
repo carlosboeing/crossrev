@@ -311,6 +311,62 @@ has "standalone auth install intercepted the browser call" \
   "$(cat "$CROSSREV_BROWSER_LOG")" \
   "https://github.com/apps/crossrev-shorelogic/installations/new/permissions?target_id=12345&target_type=Organization"
 
+# --- a key that cannot sign is refused before it is installed ---------------
+#
+# `auth rotate` proves the new key before replacing the old one, with
+# `jwt="$(_auth_jwt "$keyfile" "$app_id")" || ui_die "could not sign a token"`.
+# _auth_jwt ended in printf, so its status was printf's and that guard could not
+# fire: a file openssl refused to sign with still produced a token, with an empty
+# signature segment, and the operator was told GitHub had rejected the key rather
+# than that nothing had signed it.
+
+XDG_CONFIG_HOME="$(mktemp -d)"; export XDG_CONFIG_HOME
+meta_fixture "CrossRev ShoreLogic" crossrev-shorelogic >/dev/null
+(umask 077; openssl genrsa -out "$(_auth_dir)/ShoreLogic.loop.pem" 2048 2>/dev/null)
+installed_key="$(cat "$(_auth_dir)/ShoreLogic.loop.pem")"
+: >"$CROSSREV_GH_ROUTES"
+
+not_a_key="$STUB_DIR/not-a-key.pem"
+printf 'this is not a private key\n' >"$not_a_key"
+
+# The unit the guard reads. A signature openssl never produced must not come back
+# as a token, and must not come back as success.
+jwt_out="$(_auth_jwt "$not_a_key" 987 2>/dev/null)"; jwt_rc=$?
+is "_auth_jwt fails when openssl cannot sign" "$jwt_rc" "1"
+is "and prints nothing rather than a token with an empty signature" "$jwt_out" ""
+
+# jq --argjson rejects a non-numeric iss, which left the claims empty and the
+# token malformed in the same silent way.
+jwt_out="$(_auth_jwt "$(_auth_dir)/ShoreLogic.loop.pem" "not-a-number" 2>/dev/null)"; jwt_rc=$?
+is "_auth_jwt fails when the App id is not a whole number" "$jwt_rc" "1"
+is "and prints nothing for a non-numeric App id" "$jwt_out" ""
+
+# The positive control, so the refusals above are not just a function that always
+# fails: a real key and a real id still mint a three-segment JWT.
+jwt_out="$(_auth_jwt "$(_auth_dir)/ShoreLogic.loop.pem" 987 2>/dev/null)"; jwt_rc=$?
+is "a real key still signs" "$jwt_rc" "0"
+is "and the token still has three segments" \
+  "$(awk -F. '{print NF}' <<<"$jwt_out")" "3"
+is "carrying a signature segment rather than an empty one" \
+  "$(awk -F. '{print ($3 == "") ? "empty" : "signed"}' <<<"$jwt_out")" "signed"
+
+# And the command an operator runs. The stubbed gh answers every route, so a
+# token that reached GitHub would be accepted and the bad key installed.
+rotate_out="$( (auth_rotate --owner ShoreLogic --key "$not_a_key") 2>&1 || true )"
+has "auth rotate refuses a key it cannot sign with" \
+  "$rotate_out" "could not sign a token with $not_a_key"
+hasnt "and does not report the rotation done" "$rotate_out" "Rotated"
+hasnt "nor blames GitHub for a token that was never signed" \
+  "$rotate_out" "GitHub rejected a token"
+is "the key already installed is left untouched" \
+  "$(cat "$(_auth_dir)/ShoreLogic.loop.pem")" "$installed_key"
+
+# A path with no file at all is caught one guard earlier, by the -f test, so it
+# names the missing path rather than the signing failure.
+missing_out="$( (auth_rotate --owner ShoreLogic --key "$STUB_DIR/absent.pem") 2>&1 || true )"
+has "a key file that does not exist reports the path instead" \
+  "$missing_out" "there is no file at $STUB_DIR/absent.pem"
+
 printf '\n  %d passed, %d failed\n' "$pass" "$fail"
 (( fail == 0 ))
 
