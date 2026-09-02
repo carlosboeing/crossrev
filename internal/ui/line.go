@@ -26,6 +26,12 @@ const (
 	// KindWarn is ui_warn: a condition and what it costs you (lib/ui.sh:101).
 	// It goes to stderr, and both halves are required.
 	KindWarn
+	// KindBlank is a bare `printf '\n'`. Several leg sites print one directly
+	// rather than through a helper: above the run header (lib/run.sh:1066) and
+	// below the closing report (lib/run.sh:2434, :2439). ui_gap is a different
+	// line — it prints the dim gutter rule that spaces a section — so a blank
+	// cannot be spelled with it.
+	KindBlank
 )
 
 // Line is one line a leg reported, with the helper that must print it.
@@ -54,6 +60,10 @@ func Warn(condition, consequence string) Line {
 	return Line{Kind: KindWarn, Text: condition, Action: consequence}
 }
 
+// Blank is the bare newline the legs print between blocks. Its Text is empty
+// and is never read.
+func Blank() Line { return Line{Kind: KindBlank} }
+
 // SayLines turns a run of plain lines into Lines, for a site that answers
 // several at once.
 func SayLines(texts ...string) []Line {
@@ -71,6 +81,8 @@ func (o *IO) Print(line Line) {
 		o.OK(line.Text)
 	case KindWarn:
 		o.Warn(line.Text, line.Action)
+	case KindBlank:
+		o.Blank()
 	default:
 		o.Say(line.Text)
 	}
@@ -91,6 +103,9 @@ func (o *IO) PrintAll(lines []Line) {
 // a leg reported reads the same whether it looks at one line or at the joined
 // run.
 func (l Line) String() string {
+	if l.Kind == KindBlank {
+		return ""
+	}
 	if l.Kind == KindWarn && l.Action != "" {
 		return l.Text + "\n   " + l.Action
 	}

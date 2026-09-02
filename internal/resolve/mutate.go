@@ -69,8 +69,6 @@ func (l *Leg) publish(ctx context.Context, s *session, got Result, workdir strin
 	findings := s.findings
 	sha, _ := marker.HeadSHA.Get()
 	filed, matched, wrote, deferredLines, recs, persistMessages := l.persistDeferred(ctx, s, workdir, recs, findings, sha)
-	_ = filed
-	_ = matched
 	got.Messages = append(got.Messages, persistMessages...)
 	marker.Resolutions = marshalResolutions(recs)
 	got.Resolutions = marker.Resolutions
@@ -111,6 +109,20 @@ func (l *Leg) publish(ctx context.Context, s *session, got Result, workdir strin
 	threads := l.Forge.ReviewThreads(ctx, s.repo, s.req.PR)
 	resolvedN, escalated, unthreaded, findingsRaw, replyMessages := l.replyAndResolve(ctx, s, recs, findings, threads, commitSHA, already, unthreaded)
 	got.Messages = append(got.Messages, replyMessages...)
+
+	// The three counts the pass reports, in the shell's order and with the
+	// shell's helper at each (lib/run.sh:2375-2377). A filing and a resolved
+	// thread are verified successes; a match is a statement of fact, so it is
+	// ui_say and not ui_ok.
+	if filed > 0 {
+		got.Messages = append(got.Messages, ui.OK("filed "+strconv.Itoa(filed)+" issue(s) for deferred work"))
+	}
+	if matched > 0 {
+		got.Messages = append(got.Messages, ui.Say(strconv.Itoa(matched)+" deferred finding(s) already had an issue, so nothing was filed for them."))
+	}
+	if resolvedN > 0 {
+		got.Messages = append(got.Messages, ui.OK("resolved "+strconv.Itoa(resolvedN)+" thread(s)"))
+	}
 	if unthreaded > 0 {
 		noun := "replies"
 		if unthreaded == 1 {
@@ -145,6 +157,8 @@ func (l *Leg) publish(ctx context.Context, s *session, got Result, workdir strin
 	if err := l.Forge.CommentEdit(ctx, s.repo, commentID, summary+encoded); err != nil {
 		return fail(err)
 	}
+	// ui_ok (lib/run.sh:2408).
+	got.Messages = append(got.Messages, ui.OK("posted a summary comment"))
 
 	marker.State = core.PassComplete
 	encoded, err = marker.Encode()
@@ -164,15 +178,48 @@ func (l *Leg) publish(ctx context.Context, s *session, got Result, workdir strin
 	}
 	if escalated > 0 {
 		_ = l.addLabel(ctx, s, policy.LabelStop)
+		// ui_say (lib/run.sh:2428).
+		got.Messages = append(got.Messages, ui.Say(strconv.Itoa(escalated)+" finding(s) need a human decision, so crossrev/stop is applied and the loop halts."))
 	}
+
+	got.Messages = append(got.Messages, closingReport(marker, next, s.pass, s.req.PR)...)
 
 	got.Outcome = OutcomeComplete
 	got.Marker = marker
 	got.Resolutions = marker.Resolutions
 	got.Pass = s.pass
-	_ = resolvedN
 	keep = false
 	return got
+}
+
+// closingReport is the block the leg ends on (lib/run.sh:2431-2446).
+//
+// The first line is a bare printf carrying an arrow and a trailing blank line,
+// and each of the three endings below it is a ui_say followed by its own blank.
+// Only one ending can apply, because they are branches of the same `if`.
+func closingReport(marker prstate.Marker, next policy.PassLabelState, pass, pr int) []ui.Line {
+	blocked, _ := marker.Blocked.Get()
+	if blocked {
+		reason, _ := marker.BlockedReason.Get()
+		return []ui.Line{ui.Say("→ blocked: " + reason), ui.Blank()}
+	}
+	out := []ui.Line{ui.Say("→ resolved pass " + strconv.Itoa(pass)), ui.Blank()}
+	switch {
+	case next == policy.PassAwaitingReview:
+		out = append(out,
+			ui.Say("To look again with the reviewer:"),
+			ui.Say("  crossrev review --pr "+strconv.Itoa(pr)),
+			ui.Blank())
+	case next == policy.PassConverged:
+		out = append(out,
+			ui.Say("Every finding settled without a change to the code, so the loop is done."),
+			ui.Blank())
+	case next == policy.PassHalted && policy.ResolveUnpushedFix(asPolicyResolve(marker)):
+		out = append(out,
+			ui.Say("A claimed fix reached no commit, so its thread stays open and the pass halts."),
+			ui.Blank())
+	}
+	return out
 }
 
 func (l *Leg) attachPayload(marker prstate.Marker, got Result) prstate.Marker {

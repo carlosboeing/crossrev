@@ -40,6 +40,15 @@ func TestPrintRendersEachKindTheWayItsHelperDoes(t *testing.T) {
 			line:       ui.Warn("C", "Q"),
 			wantStderr: "\n⚠  C\n   Q\n\n",
 		},
+		{
+			// The legs print several `printf '\n'` blank lines of their own —
+			// above the run header (lib/run.sh:1066) and below the closing
+			// report (lib/run.sh:2434). ui_gap is NOT this line: it prints the
+			// dim gutter rule, which is a section's spacing and not a blank.
+			name:       "a bare printf newline",
+			line:       ui.Blank(),
+			wantStdout: "\n",
+		},
 	} {
 		t.Run(row.name, func(t *testing.T) {
 			var out, err bytes.Buffer
@@ -100,5 +109,16 @@ func TestStringJoinsAWarningsTwoHalves(t *testing.T) {
 	}
 	if got := ui.Joined([]ui.Line{ui.Say("a"), ui.OK("b")}); got != "a\nb" {
 		t.Errorf("Joined = %q", got)
+	}
+}
+
+// A blank line contributes nothing to the joined report, so an assertion about
+// what a leg said reads the same whether the run carries one or not.
+func TestBlankRendersAsNoTextWhenJoined(t *testing.T) {
+	if got := ui.Joined([]ui.Line{ui.Say("a"), ui.Blank(), ui.Say("b")}); got != "a\n\nb" {
+		t.Errorf("Joined = %q, want the blank between them", got)
+	}
+	if got := ui.Blank().String(); got != "" {
+		t.Errorf("String() = %q, want the empty string", got)
 	}
 }

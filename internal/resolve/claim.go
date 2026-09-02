@@ -34,7 +34,10 @@ func (l *Leg) claim(ctx context.Context, s *session) (prstate.Marker, ui.Line, e
 			}
 		}
 		m = withCommentID(m, id)
-		return m, ui.Line{}, nil
+		// ui_say (lib/run.sh:1939). The shell says it before the edit; the
+		// order that reaches a terminal is the order of Messages, and this is
+		// the first line the claim step contributes either way.
+		return m, ui.Say(fmt.Sprintf("Pass %d's resolve leg ended without settling its findings — driving pass %d again.", s.pass, s.pass)), nil
 	}
 
 	if open, ok := prstate.OpenClaim(s.markers, s.pass, core.LegResolve); ok {

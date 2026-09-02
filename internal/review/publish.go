@@ -141,16 +141,17 @@ func (l *Leg) publish(ctx context.Context, req Request, loaded Context, settings
 		return marker, msgs, err
 	}
 
+	// Two bare printfs, each with a trailing blank line
+	// (lib/run.sh:1315-1317, :1319-1322).
 	if blocked, ok := marker.BlockedReason.Get(); ok && blocked != "" && verdict == core.VerdictBlocked {
-		msgs = append(msgs, ui.Say("verdict: blocked — "+blocked))
+		msgs = append(msgs, ui.Say("→ verdict: blocked — "+blocked), ui.Blank())
 	} else {
-		msgs = append(msgs, ui.Say("verdict: "+string(verdict)))
+		msgs = append(msgs, ui.Say("→ verdict: "+string(verdict)), ui.Blank())
 	}
 	if next == policy.PassAwaitingResolution {
-		msgs = append(msgs, ui.SayLines(
-			"Nothing was changed in your working tree. To act on these:",
-			fmt.Sprintf("  crossrev resolve --pr %d", req.PR),
-		)...)
+		msgs = append(msgs, ui.Say("Nothing was changed in your working tree. To act on these:"),
+			ui.Say(fmt.Sprintf("  crossrev resolve --pr %d", req.PR)),
+			ui.Blank())
 	}
 	return marker, msgs, nil
 }

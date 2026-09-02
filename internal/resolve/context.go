@@ -437,3 +437,18 @@ func (s *session) expect(candidates prompt.Candidates) *validate.Expectations {
 	}
 	return &validate.Expectations{Findings: len(s.findings), Candidates: nums}
 }
+
+// describe is the harness half of the run header's Resolver line
+// (lib/run.sh:1914). `${model:+, $model}` and `${effort:+, $effort effort}`
+// expand to nothing when unset, so an empty half is omitted rather than
+// printed as a trailing comma.
+func (s legSettings) describe() string {
+	out := s.Harness
+	if s.Model != "" {
+		out += ", " + s.Model
+	}
+	if s.Effort != "" {
+		out += ", " + s.Effort + " effort"
+	}
+	return out
+}

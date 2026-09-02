@@ -6,6 +6,7 @@ import (
 
 	"github.com/carlosboeing/crossrev/internal/exec"
 	"github.com/carlosboeing/crossrev/internal/harness"
+	"github.com/carlosboeing/crossrev/internal/ui"
 )
 
 // Run selects the current review pass, claims once, invokes a write-capable
@@ -45,6 +46,17 @@ func (l *Leg) Run(ctx context.Context, req Request) Result {
 		early.Messages = append(early.Messages, warn)
 	}
 
+	// The run header, two bare printfs after the settings are chosen and
+	// before the claim (lib/run.sh:1913-1914):
+	//
+	//	printf '\n  Resolving %s#%s — %s\n' …
+	//	printf '  Resolver: %s%s%s\n' "$harness" "${model:+, $model}" "${effort:+, $effort effort}"
+	early.Messages = append(early.Messages,
+		ui.Blank(),
+		ui.Say(fmt.Sprintf("Resolving %s#%d — %s", s.repo, req.PR, passLabel(s.pass, s.maxPasses))),
+		ui.Say("Resolver: "+s.settings.describe()),
+	)
+
 	workdir, err := l.prepareWorktree(ctx, s)
 	if err != nil {
 		r := wrapErr(err)
@@ -52,14 +64,14 @@ func (l *Leg) Run(ctx context.Context, req Request) Result {
 		return r
 	}
 
-	marker, claimWarning, err := l.claim(ctx, s)
+	marker, claimMessage, err := l.claim(ctx, s)
 	if err != nil {
 		r := wrapErr(err)
 		r.Pass = s.pass
 		return r
 	}
-	if claimWarning.Text != "" {
-		early.Messages = append(early.Messages, claimWarning)
+	if claimMessage.Text != "" {
+		early.Messages = append(early.Messages, claimMessage)
 	}
 
 	got := l.invoke(ctx, s, marker, workdir)

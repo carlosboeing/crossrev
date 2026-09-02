@@ -17,7 +17,8 @@ import (
 func (l *Leg) commitAndPush(ctx context.Context, s *session, workdir string, recs, findings []harness.Node, marker prstate.Marker, wrote bool, remote string) (sha string, messages []ui.Line, emptyRemote bool, err error) {
 	existing, _ := marker.CommitSHA.Get()
 	if existing != "" && existing != "null" {
-		return existing, nil, false, nil
+		// ui_say (lib/run.sh:2231).
+		return existing, []ui.Line{ui.Say("The previous attempt already pushed " + shortSHA(existing) + ", so the fix step is skipped.")}, false, nil
 	}
 
 	fixed := 0
@@ -101,7 +102,19 @@ func (l *Leg) commitAndPush(ctx context.Context, s *session, workdir string, rec
 	}
 
 	sha, emptyRemote, err = l.pushHead(ctx, work, s, remote, runHooks)
+	if sha != "" {
+		// ui_ok (lib/run.sh:2264).
+		messages = append(messages, ui.OK("pushed "+shortSHA(sha)+" to "+s.pr.HeadRefName))
+	}
 	return sha, messages, emptyRemote, err
+}
+
+// shortSHA is `${commit_sha:0:7}`.
+func shortSHA(sha string) string {
+	if len(sha) > 7 {
+		return sha[:7]
+	}
+	return sha
 }
 
 func (l *Leg) commitMessage(s *session, recs, findings []harness.Node, marker prstate.Marker, fixed int) (string, ui.Line) {

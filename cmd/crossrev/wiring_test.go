@@ -198,17 +198,25 @@ func TestALegsReportIsSplitAcrossTheStreamsByKind(t *testing.T) {
 		t.Fatalf("status = %d\nstdout: %q\nstderr: %q", got.status, got.stdout, got.stderr)
 	}
 
-	// The whole block, byte for byte. Three ui_say lines, two ui_ok lines with
-	// the glyph, then three more ui_say. The two-space indent and the `│  ✓ `
-	// prefix are the shell's, measured above.
-	want := "  Found 1 issue(s) — 1 high, 0 medium, 0 low, of which 0 pre-existing.\n" +
+	// The whole block, byte for byte: the run header's blank line and two
+	// ui_say lines (lib/run.sh:1066-1067), three more ui_say, two ui_ok lines
+	// with the glyph, the verdict printf with its arrow and trailing blank
+	// (lib/run.sh:1317), then the resolve tip and its blank
+	// (lib/run.sh:1319-1322). The two-space indent and the `│  ✓ ` prefix are
+	// the shell's, measured above.
+	want := "\n" +
+		"  Reviewing acme/widget#42 — pass 1\n" +
+		"  Reviewer: claude, reviewer-model\n" +
+		"  Found 1 issue(s) — 1 high, 0 medium, 0 low, of which 0 pre-existing.\n" +
 		"  1 at or above min_fix_severity (medium); the rest are reported and left alone.\n" +
 		"  Posting them as inline comments on the lines they affect.\n" +
 		"│  ✓ posted 1 finding comment(s)\n" +
 		"│  ✓ posted a summary comment\n" +
-		"  verdict: issues-remain\n" +
+		"  → verdict: issues-remain\n" +
+		"\n" +
 		"  Nothing was changed in your working tree. To act on these:\n" +
-		"    crossrev resolve --pr 42\n"
+		"    crossrev resolve --pr 42\n" +
+		"\n"
 	if got.stdout != want {
 		t.Errorf("stdout =\n%q\nwant\n%q", got.stdout, want)
 	}

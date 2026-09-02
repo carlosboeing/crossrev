@@ -109,13 +109,6 @@ func (l *Leg) Run(ctx context.Context, req Request) Result {
 		out.Messages = append(out.Messages, ui.Warn(out.Reason,
 			"Resuming it would reconcile against findings that no longer describe this code. Starting the pass again instead."))
 	}
-	if ad.redrive {
-		msg := fmt.Sprintf("Pass %d's review ended blocked — driving pass %d again.", ad.pass, ad.pass)
-		// ui_say (lib/run.sh:1086).
-		out.Reason = msg
-		out.Messages = append(out.Messages, ui.Say(msg))
-	}
-
 	settings, warn, err := l.settings(req, loaded)
 	if err != nil {
 		out.Outcome = OutcomeError
@@ -124,6 +117,30 @@ func (l *Leg) Run(ctx context.Context, req Request) Result {
 	}
 	if warn.Text != "" {
 		out.Messages = append(out.Messages, warn)
+	}
+
+	// The run header, two bare printfs after the settings are chosen and
+	// before the claim is posted (lib/run.sh:1066-1067):
+	//
+	//	printf '\n  Reviewing %s#%s — %s\n' …
+	//	printf '  Reviewer: %s%s%s\n' "$harness" "${model:+, $model}" "${effort:+, $effort effort}"
+	//
+	// The leading newline is its own line, and the two text lines carry the
+	// same two-space prefix ui_say prints, so they are Say lines.
+	cap := atoi(loaded.Config.Get(".policy.max_passes_per_cycle"))
+	out.Messages = append(out.Messages,
+		ui.Blank(),
+		ui.Say(fmt.Sprintf("Reviewing %s#%d — %s", loaded.Repo, req.PR, PassLabel(ad.pass, cap))),
+		ui.Say("Reviewer: "+settings.describe()),
+	)
+
+	// lib/run.sh:1086, which the shell prints BELOW the header because the
+	// redrive branch sits inside the claim block that follows it.
+	if ad.redrive {
+		msg := fmt.Sprintf("Pass %d's review ended blocked — driving pass %d again.", ad.pass, ad.pass)
+		// ui_say (lib/run.sh:1086).
+		out.Reason = msg
+		out.Messages = append(out.Messages, ui.Say(msg))
 	}
 
 	marker, claimID, err := l.postClaim(ctx, req, loaded, ad, settings)
@@ -188,7 +205,6 @@ func (l *Leg) Run(ctx context.Context, req Request) Result {
 		}
 		l.attachUsage(&marker, envelope, settings)
 		out.Marker = marker
-		cap := atoi(loaded.Config.Get(".policy.max_passes_per_cycle"))
 		raw, err := marker.MarshalJSON()
 		if err != nil {
 			out.Outcome = OutcomeError

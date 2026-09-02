@@ -385,3 +385,18 @@ func promptThreads(threads []forge.ReviewThread) []prompt.Thread {
 	}
 	return out
 }
+
+// describe is the harness half of the run header's Reviewer line
+// (lib/run.sh:1067). `${model:+, $model}` and `${effort:+, $effort effort}`
+// expand to nothing when unset, so an empty half is omitted rather than
+// printed as a trailing comma.
+func (s legSettings) describe() string {
+	out := s.harness
+	if s.model != "" {
+		out += ", " + s.model
+	}
+	if s.effort != "" {
+		out += ", " + s.effort + " effort"
+	}
+	return out
+}
