@@ -119,6 +119,39 @@ func TestCountActionableReadsAnAbsentFindingsPayload(t *testing.T) {
 	}
 }
 
+// TestCountActionableReadsMalformedJSONAsZero pins the jq failure path of
+// run_actionable (lib/run.sh:357-360). Measured:
+//
+//	$ run_actionable "{"   -> (no output), rc=5
+//
+// and `(( actionable == 0 ))` in cmd_cycle reads that empty output as zero.
+func TestCountActionableReadsMalformedJSONAsZero(t *testing.T) {
+	for _, raw := range []string{`{`, `[{"severity":`, `"x"`, `7`} {
+		if got := actionableCount(json.RawMessage(raw), core.SeverityMedium); got != 0 {
+			t.Errorf("actionableCount(%s) = %d, want 0", raw, got)
+		}
+	}
+}
+
+// TestCountEscalatedReadsAnUndecodableResolutionsAsZero pins the jq failure
+// path of _markers_escalated (lib/run.sh:3192) for a `resolutions` value that
+// is not iterable. Measured:
+//
+//	$ _markers_escalated '[{"leg":"resolve","resolutions":"escalated"}]' -> (no output), rc=5
+//	$ _markers_escalated '[{"leg":"resolve","resolutions":7}]'           -> (no output), rc=5
+//
+// and every caller reads the empty output as zero. An object is different: jq
+// iterates its values, so `{"a":{"resolution":"escalated"}}` counts one in the
+// shell where this port skips the marker. No writer produces that shape, and
+// the difference is recorded rather than reproduced.
+func TestCountEscalatedReadsAnUndecodableResolutionsAsZero(t *testing.T) {
+	markers := parseMarkers(t, `[{"v":1,"leg":"resolve","pass":1,"state":"complete","resolutions":"escalated"},
+		{"v":1,"leg":"resolve","pass":2,"state":"complete","resolutions":7}]`)
+	if got := escalatedCount(markers); got != 0 {
+		t.Errorf("escalatedCount = %d, want 0", got)
+	}
+}
+
 // TestCountEscalatedSkipsReviewMarkers pins _markers_escalated
 // (lib/run.sh:3191-3193): the filter is `select(.leg == "resolve")`, so an
 // escalation recorded on a review marker is not counted. Measured:
