@@ -367,6 +367,117 @@ missing_out="$( (auth_rotate --owner ShoreLogic --key "$STUB_DIR/absent.pem") 2>
 has "a key file that does not exist reports the path instead" \
   "$missing_out" "there is no file at $STUB_DIR/absent.pem"
 
+# --- a login redirect must carry the state CrossRev generated ---------------
+#
+# auth_login posts a random state with the manifest and reads it back off the
+# redirect. The loopback listener binds localhost only, so a request reaching it
+# came from a process on the operator's own machine — which is precisely what the
+# state exists to tell apart from the browser CrossRev opened. Checking it only
+# when one came back accepted a request carrying a code and no state at all: the
+# code was exchanged and the App's private key written to disk.
+#
+# The listener socket is stood in for here. What these cases drive is the parsing
+# and the check around it, which is where the defect was and what changed.
+
+XDG_CONFIG_HOME="$(mktemp -d)"; export XDG_CONFIG_HOME
+export CROSSREV_GH_LOG="$STUB_DIR/gh.log"
+
+# A real key, because the flow signs with it before reporting the install.
+conv_pem="$(openssl genrsa 2048 2>/dev/null)"
+jq -n --arg pem "$conv_pem" \
+  '{id:987, slug:"crossrev-shorelogic", name:"CrossRev ShoreLogic", pem:$pem}' \
+  >"$STUB_DIR/conversion.json"
+
+login_routes() {
+  {
+    printf '%s\t%s\n' '*users/ShoreLogic*' '{"type":"Organization","id":12345}'
+    printf '%s\t%s\n' '*users/crossrev-shorelogic\[bot\]*' '!fail'
+    printf '%s\t%s\n' '*app-manifests*' "@$STUB_DIR/conversion.json"
+    printf '%s\t%s\n' '*/app/installations*' \
+      '[{"account":{"login":"ShoreLogic"},"repository_selection":"selected"}]'
+  } >"$CROSSREV_GH_ROUTES"
+  : >"$CROSSREV_GH_LOG"
+  XDG_CONFIG_HOME="$(mktemp -d)"; export XDG_CONFIG_HOME
+}
+
+# The confirmation stub above declines, which is right for every case before
+# this one. These have to get past it.
+ui_confirm() { printf '◆  %s  [y/N]\n' "$1"; return 0; }
+
+# The state is generated inside auth_login and never printed, so the stand-in
+# browser reads it off the page it was handed, the way a real one does before
+# posting the manifest to GitHub.
+browser_state=""
+_open_browser() {
+  printf '%s\n' "$1" >>"$CROSSREV_BROWSER_LOG"
+  # The install step opens a github.com URL through the same helper; only the
+  # manifest page is a local file with a state on it.
+  [[ "$1" == file://* ]] &&
+    browser_state="$(sed -n 's/.*name="state" value="\([^"]*\)".*/\1/p' "${1#file://}")"
+  return 0
+}
+
+# What the redirect put on the wire. %STATE% stands for the value the page
+# carried, so a case can echo it back, alter it, or leave it out entirely.
+listener_query=""
+_listener_available() { [[ -n "$listener_query" ]]; }
+_free_port() { printf '33517'; }
+_listen_for_code() {
+  [[ -n "$listener_query" ]] || return 1
+  printf 'GET /crossrev-auth?%s HTTP/1.1\r\n' "${listener_query//%STATE%/$browser_state}" >"$2"
+  return 0
+}
+
+key_written() { [[ -f "$(_auth_dir)/ShoreLogic.loop.pem" ]] && printf 'yes' || printf 'no'; }
+
+# The positive control. Without it, "refused" below could just as well mean the
+# listener path never completes at all.
+login_routes
+listener_query='code=good-code&state=%STATE%'
+matched_out="$( (auth_login --owner ShoreLogic </dev/null) 2>&1 || true )"
+has "a redirect carrying the state CrossRev sent registers the App" \
+  "$matched_out" "App    CrossRev ShoreLogic (id 987)"
+is "and the private key is written" "$(key_written)" "yes"
+
+# The defect. A code with no state reached the conversion call and the key landed
+# on disk.
+login_routes
+listener_query='code=attacker-code'
+nostate_out="$( (auth_login --owner ShoreLogic </dev/null) 2>&1 || true )"
+has "a redirect with a code and no state is refused" \
+  "$nostate_out" "the state value GitHub returned does not match the one CrossRev sent"
+hasnt "and the App is not registered" "$nostate_out" "App    CrossRev ShoreLogic"
+is "and no private key is written" "$(key_written)" "no"
+hasnt "and the code is never exchanged" "$(cat "$CROSSREV_GH_LOG")" "app-manifests"
+
+# A state that came back wrong was already refused, and still is.
+login_routes
+listener_query='code=good-code&state=not-the-one'
+wrongstate_out="$( (auth_login --owner ShoreLogic </dev/null) 2>&1 || true )"
+has "a redirect carrying the wrong state is still refused" \
+  "$wrongstate_out" "the state value GitHub returned does not match the one CrossRev sent"
+is "and writes no key either" "$(key_written)" "no"
+
+# The paste fallback is a person reading their own address bar, not a redirect,
+# and the prompt documents the bare code as an answer. It stays accepted.
+login_routes
+listener_query=''
+paste_out="$( (printf 'pasted-bare-code\n' | auth_login --owner ShoreLogic) 2>&1 || true )"
+has "a pasted bare code still registers the App" \
+  "$paste_out" "App    CrossRev ShoreLogic (id 987)"
+is "and still writes the private key" "$(key_written)" "yes"
+has "and it is the pasted code that was exchanged" \
+  "$(cat "$CROSSREV_GH_LOG")" "app-manifests/pasted-bare-code/conversions"
+
+# A pasted URL is still held to the state it carries.
+login_routes
+listener_query=''
+pastebad_out="$( (printf 'http://localhost:33517/crossrev-auth?code=c&state=not-the-one\n' \
+  | auth_login --owner ShoreLogic) 2>&1 || true )"
+has "a pasted URL carrying the wrong state is refused" \
+  "$pastebad_out" "the state value GitHub returned does not match the one CrossRev sent"
+is "and writes no key" "$(key_written)" "no"
+
 printf '\n  %d passed, %d failed\n' "$pass" "$fail"
 (( fail == 0 ))
 

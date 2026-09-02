@@ -6,8 +6,8 @@ CrossRev is pre-1.0. Only the latest released version receives security fixes.
 
 | Version | Supported |
 | ------- | --------- |
-| 0.1.x   | Yes       |
-| < 0.1   | No        |
+| 0.5.x   | Yes       |
+| < 0.5   | No        |
 
 ## Reporting a vulnerability
 
@@ -20,8 +20,9 @@ Report privately through GitHub's private vulnerability reporting:
 2. Select **Report a vulnerability** under **Advisories**.
 3. Provide a description, reproduction steps, affected version, and impact.
 
-If you cannot use private reporting, email **carlosboeing@gmail.com** with the
-same detail and `CrossRev security` in the subject.
+If you cannot use private reporting, contact [@carlosboeing](https://github.com/carlosboeing)
+via GitHub with the same detail. Include `CrossRev security` in the subject, or
+open a draft advisory at https://github.com/carlosboeing/crossrev/security/advisories/new.
 
 You can expect an initial acknowledgement within 7 days. Once a report is
 triaged, the fix and disclosure timeline will be coordinated with you before any
