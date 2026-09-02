@@ -124,20 +124,33 @@ func reviewLeg(d *deps, client forge.Forge, cfg *config.Config) *review.Leg {
 // docs use ANTHROPIC_AUTH_TOKEN where Kimi's use ANTHROPIC_API_KEY, which is
 // why lib/config.sh:375 refuses to assume one. So the names come out of the
 // config the leg is about to run under, and nothing wider is opened.
+//
+// A forge credential named there is dropped rather than carried. Nothing leaked
+// when it was carried — exec.NewOSRunner refuses any Spec whose environment
+// names one of the four — but the refusal it raised reads as a runner fault
+// where the fault is the config's. Whether such a config should be refused when
+// it is read, naming the file and the key, is a design decision left open;
+// dropping the name here is not that refusal and does not stand in for it.
 func legEnvironment(cfg *config.Config) []string {
 	if cfg == nil {
 		return harnessEnvironment
 	}
 	names := slices.Clone(harnessEnvironment)
+	forgeCredentials := exec.ForgeCredentialNames()
 	endpoints := cfg.Merged.Object("endpoints")
 	for _, name := range endpoints.Keys() {
 		defined, _ := endpoints.Value(name).(*config.Object)
 		if defined == nil {
 			continue
 		}
-		if tokenEnv, ok := defined.Value("token_env").(string); ok && tokenEnv != "" && !slices.Contains(names, tokenEnv) {
-			names = append(names, tokenEnv)
+		tokenEnv, ok := defined.Value("token_env").(string)
+		if !ok || tokenEnv == "" || slices.Contains(names, tokenEnv) {
+			continue
 		}
+		if slices.Contains(forgeCredentials, tokenEnv) {
+			continue
+		}
+		names = append(names, tokenEnv)
 	}
 	return names
 }
