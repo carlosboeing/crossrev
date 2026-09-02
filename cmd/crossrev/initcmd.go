@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/carlosboeing/crossrev/internal/app"
-	"github.com/carlosboeing/crossrev/internal/buildinfo"
 	"github.com/carlosboeing/crossrev/internal/cli"
 	"github.com/carlosboeing/crossrev/internal/core"
 	"github.com/carlosboeing/crossrev/internal/exec"
@@ -18,6 +17,7 @@ import (
 	"github.com/carlosboeing/crossrev/internal/initcmd"
 	"github.com/carlosboeing/crossrev/internal/preflight"
 	"github.com/carlosboeing/crossrev/internal/ui"
+	"github.com/carlosboeing/crossrev/internal/vcs"
 )
 
 // initCommand is cmd_init (lib/init.sh:34-64).
@@ -55,7 +55,7 @@ func initCommand(ctx context.Context, doc harness.Document, req cli.InitRequest)
 		GitHub:  initGitHub{forge: client, gh: ghApp, secrets: &secretLister{runner: d.orchestrator, env: exec.Inherit(ghSecretEnvironment)}},
 		Apps:    initApps{env: env},
 		Pairing: initPairing{doc: doc},
-		Source:  initSource{},
+		Source:  initSource{repo: d.git.At(crossrevCheckout())},
 		Files:   initFiles{},
 		Out:     out,
 	}
@@ -235,25 +235,78 @@ func (p initPairing) NeedsRefresher(runner, name, endpoint string) bool {
 // initSource is initcmd.Source: which commit of CrossRev the generated
 // workflows pin (lib/init.sh:141-147).
 //
-// The shell runs `git -C "$ROOT" rev-parse HEAD` against its own checkout. A
-// binary has no checkout, so the revision comes from the build: internal/
-// buildinfo reads it out of debug.ReadBuildInfo, which is what `go build`
-// stamps from the VCS it was built in.
+// The shell runs `git -C "$ROOT" rev-parse HEAD` and `git -C "$ROOT" describe
+// --tags` against its OWN checkout rather than the repository being set up, and
+// ROOT is the directory `bin/crossrev` was invoked from with its symlinks
+// resolved (bin/crossrev:16-27). This does the same, over os.Executable: the
+// binary sits at <root>/<something>/crossrev, so <dir>/.. is the checkout, and
+// os.Executable answers the real path rather than the symlink install.sh made.
+//
+// internal/buildinfo.Pin() is not used, and that is the difference between this
+// phase and the next one. Pin reads the VCS revision `go build` stamped and
+// refuses a build made from a modified tree, which is the right answer for a
+// released binary and the wrong one here: the shell does not care whether its
+// tree is dirty, and refusing would make `init` unusable from every build that
+// is not from a clean tag. The release phase that ships a binary with no
+// checkout beside it is where Pin belongs.
 //
 // The two answers fail differently, which is why the interface has two methods.
 // A SHA that cannot be read stops the run — a workflow pinned to nothing would
 // be pinned to whatever `main` is on the day it runs. A ref that cannot be read
-// is the word `untagged`, which is a comment in the generated file.
-type initSource struct{}
+// is the word `untagged`, which the plan prints as a comment beside the pin.
+type initSource struct{ repo *vcs.Repository }
 
-func (initSource) SHA(ctx context.Context) (string, error) { return buildinfo.Pin() }
-
-func (initSource) Ref(ctx context.Context) (string, error) {
-	info := buildinfo.Read()
-	if info.Version == "" {
-		return "untagged", nil
+func (s initSource) SHA(ctx context.Context) (string, error) {
+	if s.repo == nil {
+		return "", nil
 	}
-	return info.Version, nil
+	head, err := s.repo.Head(ctx)
+	if err != nil {
+		// `|| INIT_SOURCE_SHA=""` at lib/init.sh:141. The empty answer is what
+		// initcmd refuses on, with the shell's own words.
+		return "", nil
+	}
+	return head.SHA(), nil
+}
+
+func (s initSource) Ref(ctx context.Context) (string, error) {
+	if s.repo == nil {
+		return untaggedRef, nil
+	}
+	out, err := s.repo.Run(ctx, "describe", "--tags")
+	if err != nil || !out.OK() {
+		// `|| INIT_SOURCE_REF="untagged"` at lib/init.sh:142-143.
+		return untaggedRef, nil
+	}
+	described := strings.TrimSpace(out.Text())
+	if described == "" {
+		return untaggedRef, nil
+	}
+	return described, nil
+}
+
+// untaggedRef is what `git describe --tags` answering nothing leaves behind
+// (lib/init.sh:143).
+const untaggedRef = "untagged"
+
+// crossrevCheckout is $ROOT: the CrossRev checkout this binary was built in,
+// found the way bin/crossrev finds it.
+//
+// os.Executable resolves the symlink install.sh puts on PATH, which is the
+// whole of what `_resolve` at bin/crossrev:16-24 does by hand because BSD
+// readlink has no -f. A binary that is not inside a checkout answers a
+// directory with no git repository in it, and initSource then answers the empty
+// SHA that initcmd refuses on.
+func crossrevCheckout() string {
+	path, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		resolved = path
+	}
+	return filepath.Dir(filepath.Dir(resolved))
 }
 
 // initFiles is the working tree of the repository being set up, on both sides
