@@ -100,7 +100,7 @@ func TestExecuteCreatesEveryLoopLabelAndCountsWhatItDid(t *testing.T) {
 			"bug":           "d4c5f9",
 		}
 	})
-	if err := plan.Labels(context.Background(), req, initcmd.Execution{Labels: labels}); err != nil {
+	if err := plan.EnsureLabels(context.Background(), req, initcmd.Execution{Labels: labels}); err != nil {
 		t.Fatalf("Labels: %v", err)
 	}
 
@@ -119,7 +119,7 @@ func TestExecuteCreatesEveryLoopLabelAndCountsWhatItDid(t *testing.T) {
 func TestExecuteDeclaresEveryLabelWithItsOwnColourAndDescription(t *testing.T) {
 	labels := &fakeLabels{}
 	plan, req, _, _ := planned(t, issueSinkConfig, nil)
-	if err := plan.Labels(context.Background(), req, initcmd.Execution{Labels: labels}); err != nil {
+	if err := plan.EnsureLabels(context.Background(), req, initcmd.Execution{Labels: labels}); err != nil {
 		t.Fatalf("Labels: %v", err)
 	}
 
@@ -162,7 +162,7 @@ func TestExecuteRecoloursLabelsMintedInTheOldColour(t *testing.T) {
 		}
 		r.GitHub.(*fakeGitHub).colours = colours
 	})
-	if err := plan.Labels(context.Background(), req, initcmd.Execution{Labels: labels}); err != nil {
+	if err := plan.EnsureLabels(context.Background(), req, initcmd.Execution{Labels: labels}); err != nil {
 		t.Fatalf("Labels: %v", err)
 	}
 
@@ -184,7 +184,7 @@ func TestExecuteRecoloursLabelsMintedInTheOldColour(t *testing.T) {
 // at lib/init.sh:455: the second line appears only above zero.
 func TestExecuteSaysNothingAboutRecolouringWhenItRecolouredNothing(t *testing.T) {
 	plan, req, _, buffer := planned(t, issueSinkConfig, nil)
-	if err := plan.Labels(context.Background(), req, initcmd.Execution{Labels: &fakeLabels{}}); err != nil {
+	if err := plan.EnsureLabels(context.Background(), req, initcmd.Execution{Labels: &fakeLabels{}}); err != nil {
 		t.Fatalf("Labels: %v", err)
 	}
 	if strings.Contains(buffer.String(), "recoloured") {
@@ -203,7 +203,7 @@ func TestExecuteRefusesToInventALabelTheRepositoryGovernsItself(t *testing.T) {
 
 	labels := &fakeLabels{}
 	plan, req, _, buffer := planned(t, strict, nil)
-	err := plan.Labels(context.Background(), req, initcmd.Execution{Labels: labels})
+	err := plan.EnsureLabels(context.Background(), req, initcmd.Execution{Labels: labels})
 	if err == nil {
 		t.Fatal("a missing label the repository will not have invented was created anyway")
 	}
@@ -232,7 +232,7 @@ func TestExecuteRefusesToInventALabelTheRepositoryGovernsItself(t *testing.T) {
 func TestExecuteCarriesAFailedLabelCreationUp(t *testing.T) {
 	labels := &fakeLabels{fail: map[string]bool{"crossrev/pass-2": true}}
 	plan, req, _, buffer := planned(t, issueSinkConfig, nil)
-	err := plan.Labels(context.Background(), req, initcmd.Execution{Labels: labels})
+	err := plan.EnsureLabels(context.Background(), req, initcmd.Execution{Labels: labels})
 	if err == nil {
 		t.Fatal("a label that would not create was not reported")
 	}
@@ -261,7 +261,7 @@ func TestExecuteSaysNothingAboutFiledIssuesWhenThereAreNoBacklogLabels(t *testin
 `, "backlog:\n  destination: none\n", 1)
 
 	plan, req, _, buffer := planned(t, none, nil)
-	if err := plan.Labels(context.Background(), req, initcmd.Execution{Labels: &fakeLabels{}}); err != nil {
+	if err := plan.EnsureLabels(context.Background(), req, initcmd.Execution{Labels: &fakeLabels{}}); err != nil {
 		t.Fatalf("Labels: %v", err)
 	}
 	if strings.Contains(buffer.String(), "for filed issues") {
@@ -274,7 +274,7 @@ func TestExecuteSaysNothingAboutFiledIssuesWhenThereAreNoBacklogLabels(t *testin
 // silently changes nothing.
 func TestExecuteRefusesAnUnwiredLabelWriter(t *testing.T) {
 	plan, req, _, _ := planned(t, issueSinkConfig, nil)
-	err := plan.Labels(context.Background(), req, initcmd.Execution{})
+	err := plan.EnsureLabels(context.Background(), req, initcmd.Execution{})
 	if err == nil || !strings.Contains(err.Error(), "Labels") {
 		t.Fatalf("err = %v, want a refusal naming the missing port", err)
 	}

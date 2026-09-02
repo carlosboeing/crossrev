@@ -41,13 +41,13 @@ const (
 	backlogLabelDescription = "filed by crossrev"
 )
 
-// Labels declares every label this repository needs and says what it did
+// EnsureLabels declares every label this repository needs and says what it did
 // (lib/init.sh:439-474).
 //
 // The declarations all run before the section is opened, which is the shell's
 // order and is observable: a label that will not create ends the run with
 // nothing printed under a heading promising a count.
-func (p Plan) Labels(ctx context.Context, req Request, ex Execution) error {
+func (p Plan) EnsureLabels(ctx context.Context, req Request, ex Execution) error {
 	if ex.Labels == nil {
 		return fmt.Errorf("initcmd: the execution is missing Labels")
 	}

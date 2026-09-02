@@ -20,4 +20,26 @@ package initcmd
 type Execution struct {
 	// Labels declares the loop's labels and the filed issues' labels.
 	Labels LabelWriter
+
+	// Secrets writes a repository or organisation secret through `gh`. It
+	// is a struct rather than an interface because the argv is the parity
+	// surface: the offline suite matches routes on the whole argument
+	// string, so the flags belong to this package and only the Runner under
+	// them is wired in.
+	Secrets *SecretStore
+
+	// Keys is the App private key on disk.
+	Keys Keys
+
+	// Register registers the refresher App, and is reached only after
+	// somebody at a terminal has agreed to it.
+	Register Registrar
+
+	// Tokens starts the one-year clock on a captured token.
+	Tokens TokenRecorder
+
+	// Seeds runs a harness's own credential seed command. Nil is not a
+	// failure: it is a run with no way to open a browser, which is what
+	// `command -v` answering nothing means at lib/init.sh:751.
+	Seeds Seeder
 }
