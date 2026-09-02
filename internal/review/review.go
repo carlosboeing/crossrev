@@ -180,7 +180,8 @@ func (l *Leg) Run(ctx context.Context, req Request) (out Result) {
 		// ui_say (lib/run.sh:1118).
 		out.Messages = append(out.Messages, ui.Say("The previous attempt already recorded its findings, so the review is not run again."))
 	} else {
-		envelope, payload, err := l.invoke(ctx, req, loaded, settings, ad.pass)
+		envelope, payload, invokeMsgs, err := l.invoke(ctx, req, loaded, settings, ad.pass)
+		out.Messages = append(out.Messages, invokeMsgs...)
 		if err != nil {
 			var restoreErr *sandboxRestoreFailure
 			if errors.As(err, &restoreErr) {

@@ -397,6 +397,9 @@ type env struct {
 	// keepTranscripts is the --keep-transcripts posture, which the run log
 	// carries rather than the leg.
 	keepTranscripts bool
+	// validate replaces validate.Findings, so a case can drive the retry
+	// budgets without building a payload that fails for the right reason.
+	validate func([]byte) error
 }
 
 func newEnv(t *testing.T) *env {
@@ -455,6 +458,7 @@ func (e *env) leg(t *testing.T) review.Leg {
 		look = func(name string) (string, error) { return "/usr/bin/" + name, nil }
 	}
 	return review.Leg{
+		Validate: e.validate,
 		Forge:    e.forge,
 		VCS:      e.vcs,
 		Config:   e.cfg,

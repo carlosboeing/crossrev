@@ -504,17 +504,18 @@ type gitMut struct {
 }
 
 type fakeGit struct {
-	env          *testEnv
-	dir          string
-	head         core.Revision
-	show         map[string][]byte
-	showCalls    []showCall
-	wrongHead    core.Revision
-	worktrees    *[]string
-	fetchCalls   []string
-	captureCalls *int
-	restoreCalls *int
-	runAt        []string
+	env            *testEnv
+	dir            string
+	head           core.Revision
+	show           map[string][]byte
+	showCalls      []showCall
+	wrongHead      core.Revision
+	worktrees      *[]string
+	fetchCalls     []string
+	captureCalls   *int
+	restoreCalls   *int
+	restoreTreeErr error
+	runAt          []string
 	*gitMut
 }
 
@@ -589,7 +590,7 @@ func (g *fakeGit) CaptureTree(context.Context, string) (string, error) {
 }
 func (g *fakeGit) RestoreTree(context.Context, string, string) error {
 	*g.restoreCalls++
-	return nil
+	return g.restoreTreeErr
 }
 func (g *fakeGit) LogSubjects(context.Context, core.Revision) ([]byte, error) {
 	return nil, nil

@@ -241,6 +241,10 @@ func (l *Leg) invoke(ctx context.Context, s *session, marker prstate.Marker, wor
 	}
 	paths := sbx.Paths()
 
+	// What the retry loop said, carried out with whatever it answers. Bash
+	// prints these as it goes; a leg here answers its lines (internal/ui).
+	var msgs []ui.Line
+
 	for attempt := 1; ; attempt++ {
 		transcript := ""
 		if l.Log != nil {
@@ -301,8 +305,10 @@ func (l *Leg) invoke(ctx context.Context, s *session, marker prstate.Marker, wor
 			if env.Error != nil && *env.Error != "" {
 				msg = *env.Error
 			}
-			return refuse(fmt.Sprintf("the %s harness failed: %s", s.settings.Harness, msg),
+			out := refuse(fmt.Sprintf("the %s harness failed: %s", s.settings.Harness, msg),
 				"If the error above mentions authentication, a token or a 401, the harness is installed and cannot log in.")
+			out.Messages = append(msgs, out.Messages...)
+			return out
 		}
 		err = validate.Resolve(env.Payload, s.expect(candidates))
 		if err == nil {
@@ -318,27 +324,94 @@ func (l *Leg) invoke(ctx context.Context, s *session, marker prstate.Marker, wor
 				Envelope:    env,
 				Prompt:      promptBytes,
 				Invocation:  inv,
+				Messages:    msgs,
 			}
 		}
 		var sem *validate.SemanticError
 		if errors.As(err, &sem) {
 			if semanticBudget > 0 {
 				semanticBudget--
-				_ = work.RestoreTree(ctx, snapIndex, snapTree)
+				if reset := l.retryReset(ctx, work, snapIndex, snapTree, s.settings.Harness, sem.Problem); reset != nil {
+					reset.Messages = append(msgs, reset.Messages...)
+					return *reset
+				}
+				// ui_warn, the pair kept apart (lib/run.sh:882-883).
+				msgs = append(msgs, ui.Warn(
+					fmt.Sprintf("%s returned an answer that contradicts what it was given — %s", s.settings.Harness, sem.Problem),
+					"The shape is right, so this is the model drifting rather than a bug in CrossRev or the harness. Anything it edited has been put back, and it is being asked once more; a second one is fatal."))
 				continue
 			}
-			return refuse(fmt.Sprintf("%s twice returned an answer that contradicts what it was given — %s", s.settings.Harness, sem.Problem),
+			msgs = append(msgs, l.invokeAbort(ctx, work, snapIndex, snapTree)...)
+			out := refuse(fmt.Sprintf("%s twice returned an answer that contradicts what it was given — %s", s.settings.Harness, sem.Problem),
 				"The shape was right both times, so the schema cannot catch this and CrossRev will not guess which finding was meant. Nothing has been written to the pull request, and the edits both rejected attempts made have been put back. Re-run the leg, or try the other harness.")
-		}
-		shapeBudget--
-		if shapeBudget > 0 {
-			_ = work.RestoreTree(ctx, snapIndex, snapTree)
-			continue
+			out.Messages = append(msgs, out.Messages...)
+			return out
 		}
 		problem := err.Error()
-		return refuse(fmt.Sprintf("%s returned an object that does not match the schema — %s", s.settings.Harness, problem),
-			"This harness validates output against the schema natively, so a mismatch is an adapter or harness bug rather than model drift. Nothing has been written to the pull request, and the rejected attempt's edits have been put back.")
+		shapeBudget--
+		if shapeBudget > 0 {
+			if reset := l.retryReset(ctx, work, snapIndex, snapTree, s.settings.Harness, problem); reset != nil {
+				reset.Messages = append(msgs, reset.Messages...)
+				return *reset
+			}
+			// ui_warn (lib/run.sh:894-895). Only a harness that does not
+			// constrain its own output reaches here: a native one starts with
+			// a budget of 1.
+			msgs = append(msgs, ui.Warn(
+				fmt.Sprintf("%s returned an object that does not match the schema — %s", s.settings.Harness, problem),
+				"That harness does not constrain its own output, so this is the expected failure rather than a bug. Anything it edited has been put back, and it is being retried once; a second mismatch is fatal."))
+			continue
+		}
+		msgs = append(msgs, l.invokeAbort(ctx, work, snapIndex, snapTree)...)
+		// Two endings, and the difference is whose bug it is
+		// (lib/run.sh:899-905).
+		out := refuse(fmt.Sprintf("%s returned an object that does not match the schema — %s", s.settings.Harness, problem),
+			shapeExhaustedAction(entry.SchemaNative))
+		out.Messages = append(msgs, out.Messages...)
+		return out
 	}
+}
+
+// shapeExhaustedAction is lib/run.sh:901 and :904.
+func shapeExhaustedAction(schemaNative bool) string {
+	if schemaNative {
+		return "This harness validates output against the schema natively, so a mismatch is an adapter or harness bug rather than model drift. Nothing has been written to the pull request, and the rejected attempt's edits have been put back."
+	}
+	return "That harness does not constrain its own output, so two mismatches in a row is the model failing the JSON instruction rather than an adapter bug. Name a model that follows a JSON instruction. Nothing has been written to the pull request, and the rejected attempt's edits have been put back."
+}
+
+// retryReset is _run_retry_reset (lib/run.sh:680-686): put the tree back, or
+// refuse to ask again at all.
+//
+// Asking again on top of a discarded attempt's edits is worse than losing the
+// pass — the accepted answer is then recorded against changes it never made,
+// and the commit carries both. A nil answer means the reset held and the retry
+// may run.
+func (l *Leg) retryReset(ctx context.Context, work Git, index, tree, harnessName, problem string) *Result {
+	if work.RestoreTree(ctx, index, tree) == nil {
+		return nil
+	}
+	out := refuse(
+		fmt.Sprintf("%s needs asking again, and the working tree it already edited could not be put back — %s", harnessName, problem),
+		"Retrying on top of a discarded attempt's edits would commit changes no accepted answer describes. Nothing has been written to the pull request; check `git status` in the checkout and re-run the leg.")
+	return &out
+}
+
+// invokeAbort is _run_invoke_abort (lib/run.sh:698-704): the way out when an
+// answer is rejected and there is no attempt left to make.
+//
+// The exhausted path restores too. Without it the last rejected attempt's edits
+// sit in the checkout with nothing on the pull request to say so, and the next
+// run captures them as its own baseline. A restore that will not apply is
+// warned about rather than hidden: the leg is dying anyway, and the operator is
+// the one who has to deal with what is left.
+func (l *Leg) invokeAbort(ctx context.Context, work Git, index, tree string) []ui.Line {
+	if tree == "" || work.RestoreTree(ctx, index, tree) == nil {
+		return nil
+	}
+	return []ui.Line{ui.Warn(
+		"the rejected attempt's edits could not be put back",
+		"They are still in the checkout, and a later run would capture them as its own baseline. Check `git status` before re-running the leg.")}
 }
 
 func (l *Leg) renderPrompt(ctx context.Context, s *session, threads []forge.ReviewThread, candidates prompt.Candidates, workdir string) ([]byte, error) {

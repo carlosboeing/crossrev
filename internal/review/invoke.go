@@ -177,32 +177,32 @@ func (l *Leg) binaryInstalled(name string) bool {
 	return err == nil
 }
 
-func (l *Leg) invoke(ctx context.Context, req Request, loaded Context, settings legSettings, pass int) (envelope harness.Envelope, payload json.RawMessage, retErr error) {
+func (l *Leg) invoke(ctx context.Context, req Request, loaded Context, settings legSettings, pass int) (envelope harness.Envelope, payload json.RawMessage, msgs []ui.Line, retErr error) {
 	if err := harness.AssertEnvClean(l.Env); err != nil {
-		return harness.Envelope{}, nil, err
+		return harness.Envelope{}, nil, msgs, err
 	}
 
 	adapter, known := harness.For(l.Harness, settings.harness)
 	if !known {
-		return harness.Envelope{}, nil, noAdapterRefusal(l.Harness, settings.harness)
+		return harness.Envelope{}, nil, msgs, noAdapterRefusal(l.Harness, settings.harness)
 	}
 
 	entry, _ := l.Harness.For(settings.harness)
 	staged, err := cred.Prepare(l.Harness.Credentials().For(settings.harness), settings.endpoint, cred.Options{Now: l.Now})
 	if err != nil {
-		return harness.Envelope{}, nil, err
+		return harness.Envelope{}, nil, msgs, err
 	}
 	defer func() { _ = cred.Discard(staged) }()
 
 	tmp, err := os.MkdirTemp("", "crossrev-review-")
 	if err != nil {
-		return harness.Envelope{}, nil, err
+		return harness.Envelope{}, nil, msgs, err
 	}
 	defer os.RemoveAll(tmp)
 
 	diffBytes, err := l.reviewDiff(ctx, loaded)
 	if err != nil {
-		return harness.Envelope{}, nil, err
+		return harness.Envelope{}, nil, msgs, err
 	}
 
 	promptBytes := prompt.Review{
@@ -217,11 +217,11 @@ func (l *Leg) invoke(ctx context.Context, req Request, loaded Context, settings 
 	promptPath := filepath.Join(tmp, "prompt")
 	schemaPath := filepath.Join(tmp, "schema.json")
 	if err := os.WriteFile(promptPath, promptBytes, 0o600); err != nil {
-		return harness.Envelope{}, nil, err
+		return harness.Envelope{}, nil, msgs, err
 	}
 	schemaBytes := validate.FindingsSchema()
 	if err := os.WriteFile(schemaPath, schemaBytes, 0o600); err != nil {
-		return harness.Envelope{}, nil, err
+		return harness.Envelope{}, nil, msgs, err
 	}
 
 	workdir := req.Workdir
@@ -230,12 +230,12 @@ func (l *Leg) invoke(ctx context.Context, req Request, loaded Context, settings 
 	}
 	desc, err := sandbox.LoadDescriptor(l.Harness.Raw())
 	if err != nil {
-		return harness.Envelope{}, nil, err
+		return harness.Envelope{}, nil, msgs, err
 	}
 	paths := desc.Paths()
 	moved, err := sandbox.Quarantine(workdir, paths)
 	if err != nil {
-		return harness.Envelope{}, nil, err
+		return harness.Envelope{}, nil, msgs, err
 	}
 	defer func() {
 		// The causal error stays in the message. Overwriting retErr outright
@@ -278,7 +278,7 @@ func (l *Leg) invoke(ctx context.Context, req Request, loaded Context, settings 
 		}
 		spec, err := adapter.Spec(inv)
 		if err != nil {
-			return harness.Envelope{}, nil, err
+			return harness.Envelope{}, nil, msgs, err
 		}
 		started := l.now()
 		res := l.runner().Run(ctx, spec)
@@ -289,7 +289,7 @@ func (l *Leg) invoke(ctx context.Context, req Request, loaded Context, settings 
 				settings.harness, attempt, res.ExitCode, int(l.now().Sub(started).Seconds())))
 		}
 		if res.Err != nil && exec.IsNotFound(res.Err) {
-			return harness.Envelope{}, nil, adapter.NotInstalled()
+			return harness.Envelope{}, nil, msgs, adapter.NotInstalled()
 		}
 		envelope = adapter.Envelope(inv, res)
 		// The two streams are archived AFTER the envelope has been parsed out
@@ -303,35 +303,57 @@ func (l *Leg) invoke(ctx context.Context, req Request, loaded Context, settings 
 			if envelope.Error != nil && *envelope.Error != "" {
 				msg = *envelope.Error
 			}
-			return envelope, nil, &ui.FatalError{
+			return envelope, nil, msgs, &ui.FatalError{
 				Reason: fmt.Sprintf("the %s harness failed: %s", settings.harness, msg),
 				Action: "If the error above mentions authentication, a token or a 401, the harness is installed and cannot log in.",
 			}
 		}
 		problem := l.checkPayload(envelope.Payload)
 		if problem == nil {
-			return envelope, envelope.Payload, nil
+			return envelope, envelope.Payload, msgs, nil
 		}
 		code := validateCode(problem)
 		if code == 2 {
 			if semanticBudget > 0 {
 				semanticBudget--
+				// ui_warn, the pair kept apart (lib/run.sh:882-883).
+				msgs = append(msgs, ui.Warn(
+					fmt.Sprintf("%s returned an answer that contradicts what it was given — %s", settings.harness, problem),
+					"The shape is right, so this is the model drifting rather than a bug in CrossRev or the harness. Anything it edited has been put back, and it is being asked once more; a second one is fatal."))
 				continue
 			}
-			return envelope, nil, &ui.FatalError{
+			return envelope, nil, msgs, &ui.FatalError{
 				Reason: fmt.Sprintf("%s twice returned an answer that contradicts what it was given — %s", settings.harness, problem),
-				Action: "The shape was right both times, so the schema cannot catch this and CrossRev will not guess which finding was meant.",
+				Action: "The shape was right both times, so the schema cannot catch this and CrossRev will not guess which finding was meant. Nothing has been written to the pull request, and the edits both rejected attempts made have been put back. Re-run the leg, or try the other harness.",
 			}
 		}
 		shapeBudget--
 		if shapeBudget > 0 {
+			// ui_warn (lib/run.sh:894-895). Only a harness that does not
+			// constrain its own output ever reaches here, because a native one
+			// starts with a budget of 1.
+			msgs = append(msgs, ui.Warn(
+				fmt.Sprintf("%s returned an object that does not match the schema — %s", settings.harness, problem),
+				"That harness does not constrain its own output, so this is the expected failure rather than a bug. Anything it edited has been put back, and it is being retried once; a second mismatch is fatal."))
 			continue
 		}
-		return envelope, nil, &ui.FatalError{
+		// Two endings, and the difference is whose bug it is
+		// (lib/run.sh:899-905). Printing the native-schema one for a harness
+		// that has no native schema sends the reader to the adapter over a
+		// model that simply did not follow the instruction.
+		return envelope, nil, msgs, &ui.FatalError{
 			Reason: fmt.Sprintf("%s returned an object that does not match the schema — %s", settings.harness, problem),
-			Action: "This harness validates output against the schema natively, so a mismatch is an adapter or harness bug rather than model drift.",
+			Action: shapeExhaustedAction(entry.SchemaNative),
 		}
 	}
+}
+
+// shapeExhaustedAction is lib/run.sh:901 and :904.
+func shapeExhaustedAction(schemaNative bool) string {
+	if schemaNative {
+		return "This harness validates output against the schema natively, so a mismatch is an adapter or harness bug rather than model drift. Nothing has been written to the pull request, and the rejected attempt's edits have been put back."
+	}
+	return "That harness does not constrain its own output, so two mismatches in a row is the model failing the JSON instruction rather than an adapter bug. Name a model that follows a JSON instruction. Nothing has been written to the pull request, and the rejected attempt's edits have been put back."
 }
 
 func (l *Leg) reviewDiff(ctx context.Context, loaded Context) ([]byte, error) {
