@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	crexec "github.com/carlosboeing/crossrev/internal/exec"
+	"github.com/carlosboeing/crossrev/internal/harness"
 )
 
 // The names a child started here may inherit, spelled out rather than taken
@@ -528,5 +529,31 @@ func TestALegTakesOverADeadHoldersLock(t *testing.T) {
 	// And it is released, so the next run is not blocked by this one.
 	if _, err := os.Stat(lock); !os.IsNotExist(err) {
 		t.Errorf("the lock survived the run: %v", err)
+	}
+}
+
+// CROSSREV_HARNESS_FILE names the descriptor the whole run reads, which is
+// _harness_file at lib/harnesses.sh:19-22.
+//
+// The binary read only the compiled-in one, so `init` rendered the
+// token-refresh workflow with the embedded refresher's secret name whatever the
+// operator's descriptor said, and the job then passed one variable and looked
+// up another.
+func TestTheDescriptorPathOverrideIsRead(t *testing.T) {
+	bin := binary(t)
+	fixture := newFixture(t)
+
+	// A harness renamed to one no adapter serves. main's descriptor check
+	// refuses before any command runs and names it, so the refusal is proof
+	// the file was read.
+	embedded := harness.DescriptorJSON()
+	alt := filepath.Join(fixture.home(t), "alt-harnesses.json")
+	write(t, alt, strings.ReplaceAll(string(embedded), `"name": "grok"`, `"name": "zzz"`))
+
+	env := append([]string{"CROSSREV_HARNESS_FILE=" + alt}, fixture.env...)
+	got := invoke(t, bin, env, "doctor")
+
+	if !strings.Contains(got.stderr, "zzz") {
+		t.Errorf("the override descriptor was not read:\nstdout %q\nstderr %q", got.stdout, got.stderr)
 	}
 }

@@ -170,8 +170,9 @@ var environment = []Variable{
 		Descriptor: true,
 	},
 	{
-		Name:  "CROSSREV_HARNESS_FILE",
-		Class: ClassPathOverride,
+		Name:    "CROSSREV_HARNESS_FILE",
+		Class:   ClassPathOverride,
+		Readers: []string{"cmd/crossrev"},
 	},
 	{
 		Name:  "CROSSREV_HARNESS_INSTALL",

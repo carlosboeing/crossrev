@@ -74,7 +74,7 @@ func interruptible() (context.Context, func()) {
 // list at all (bin/crossrev:68-72), so the parse failure is not fatal here and
 // the commands that need a working descriptor refuse for themselves.
 func descriptor(out *ui.IO) (harness.Document, error) {
-	doc, err := harness.Descriptors()
+	doc, err := descriptorDocument()
 	if err != nil {
 		return doc, nil
 	}
@@ -86,4 +86,29 @@ func descriptor(out *ui.IO) (harness.Document, error) {
 		return doc, out.Die(err.Error(), "Add the adapter, or remove the entry.")
 	}
 	return doc, nil
+}
+
+// descriptorDocument is _harness_file (lib/harnesses.sh:19-22): the compiled-in
+// descriptor unless CROSSREV_HARNESS_FILE names another.
+//
+// The shell reads the override for everything the descriptor decides — which
+// harnesses exist, which credential each one carries, which secret the
+// token-refresh workflow passes. Reading only the embedded one made `crossrev
+// init` render that workflow with the embedded refresher's secret name whatever
+// the operator's file said, so the job passed one variable and looked up
+// another.
+//
+// A path that cannot be read answers the same as a descriptor that fails to
+// parse: the error travels, and the caller decides. help and version still
+// answer with no harness list at all.
+func descriptorDocument() (harness.Document, error) {
+	path := os.Getenv("CROSSREV_HARNESS_FILE")
+	if path == "" {
+		return harness.Descriptors()
+	}
+	raw, err := os.ReadFile(path) //nolint:gosec // the operator named this path
+	if err != nil {
+		return harness.Document{}, err
+	}
+	return harness.Load(raw)
 }
