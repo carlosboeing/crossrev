@@ -15,8 +15,26 @@ import (
 //
 // The rows are the shell's parse rule (bin/crossrev:111-190) and every argument
 // loop it dispatches to (lib/run.sh:913, :1730, :2895, :3034, :3666,
-// lib/init.sh:34, lib/auth.sh:511, :748, :835, :954). Each was measured with
-// `NO_COLOR=1 bash bin/crossrev …` before it was written down.
+// lib/init.sh:34, lib/auth.sh:511, :792, :879, :998).
+//
+// Most rows were measured with `NO_COLOR=1 bash bin/crossrev …` before they
+// were written down, and testdata/help/refusals.json holds the bytes. Two
+// groups were not, both by a recorded ruling that doc.go's "Where this diverges
+// from the shell, and why" lists:
+//
+//   - `review --pr abc`, `review --repo garbage` and `init --repo garbage` have
+//     no shell refusal to measure. Bash keeps the value as a string and lets a
+//     later `gh` call fail on it; these request types hold an int and a
+//     core.Slug, so the parser refuses at the flag. Their refusals.json rows
+//     carry a native block and a null shell one.
+//   - `init --owner`, `init --repo ""` and every `auth` flag using `${2:?…}`
+//     were measured, but the reason and action here are the port's own words.
+//     The shell prints bash's `lib/auth.sh: line N: 2: …` frame, which names a
+//     library file and a line number to an operator who has neither.
+//
+// A third divergence was removed rather than recorded: `watchdog --timeout abc`
+// parses, because the shell does not read the value until it compares against
+// it (lib/run.sh:3671, :3719).
 func TestParseRuleMatrix(t *testing.T) {
 	file := loadMatrix(t)
 	for _, row := range file.Rows {

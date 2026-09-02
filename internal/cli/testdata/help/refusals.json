@@ -612,20 +612,6 @@
         "stderr": "\nerror  --repo must be owner/name, and it was: garbage\n       Pass the repository as owner/name, for example: --repo carlosboeing/crossrev\n\n"
       },
       "note": "The shell keeps this value as a string and lets a later call fail on it, so it has no refusal here to copy. This one is the parser's own."
-    },
-    {
-      "name": "a watchdog timeout that is not a number",
-      "args": [
-        "watchdog",
-        "--timeout",
-        "abc"
-      ],
-      "shell": null,
-      "native": {
-        "exit": 1,
-        "stderr": "\nerror  --timeout must be a number of seconds, and it was: abc\n       Pass the timeout in seconds, for example: --timeout 1800\n\n"
-      },
-      "note": "The shell keeps this value as a string and lets a later call fail on it, so it has no refusal here to copy. This one is the parser's own."
     }
   ]
 }

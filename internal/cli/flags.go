@@ -3,7 +3,6 @@ package cli
 import (
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/carlosboeing/crossrev/internal/core"
 	"github.com/carlosboeing/crossrev/internal/ui"
@@ -69,10 +68,18 @@ type InitRequest struct {
 // WatchdogRequest is `crossrev watchdog` (lib/run.sh:3666-3681).
 type WatchdogRequest struct {
 	Repo core.Slug
-	// Timeout is `--timeout` in seconds, and it is never zero: the shell
-	// starts the variable at 1800 and `${2:-1800}` puts the same number back
-	// when the flag arrives empty (lib/run.sh:3667, :3671).
-	Timeout time.Duration
+	// Timeout is `--timeout` as the shell's `timeout` variable holds it: the
+	// raw string, never empty, because the variable starts at 1800 and
+	// `${2:-1800}` puts the same digits back when the flag arrives empty
+	// (lib/run.sh:3667, :3671).
+	//
+	// It is a string and not a number because the shell does not convert it
+	// here. The value is only evaluated at `(( age < timeout ))`
+	// (lib/run.sh:3719), which a sweep reaches only once a pull request is
+	// waiting, so `--timeout abc` is harmless on a repository with nothing
+	// waiting. Converting at the flag would refuse a command the shell runs.
+	// cmd/crossrev converts it where bash's arithmetic does.
+	Timeout string
 }
 
 // ConfigRequest is `crossrev config show` and `crossrev config backlog`. The
@@ -97,20 +104,20 @@ type AuthLoginRequest struct {
 	Role string
 }
 
-// AuthInstallRequest is `crossrev auth install` (lib/auth.sh:748-756).
+// AuthInstallRequest is `crossrev auth install` (lib/auth.sh:792-800).
 type AuthInstallRequest struct {
 	Owner string
 	Role  string
 }
 
-// AuthRotateRequest is `crossrev auth rotate` (lib/auth.sh:835-845).
+// AuthRotateRequest is `crossrev auth rotate` (lib/auth.sh:879-889).
 type AuthRotateRequest struct {
 	Owner   string
 	Role    string
 	KeyFile string
 }
 
-// AuthRefreshRequest is `crossrev auth refresh` (lib/auth.sh:954-964).
+// AuthRefreshRequest is `crossrev auth refresh` (lib/auth.sh:998-1009).
 //
 // Repo is a string rather than a slug because the refresher writes a secret
 // through `gh` against whatever it is given, and `--org` is the other half of
@@ -269,23 +276,10 @@ func optionalSlug(out *ui.IO, raw string) (core.Slug, error) {
 	return slug, nil
 }
 
-// watchdogTimeout converts `--timeout`, whose default is 1800 seconds and whose
-// empty value is the same 1800 (lib/run.sh:3667, :3671).
+// WatchdogDefaultTimeout is `timeout=1800` at lib/run.sh:3667, and the same
+// digits `${2:-1800}` puts back for an empty `--timeout` at lib/run.sh:3671.
 //
-// A value that is not a number reaches `(( age < timeout ))` in the shell and
-// dies there with `abc: unbound variable`, which is a stop rather than a
-// message. It is refused here instead.
-func watchdogTimeout(out *ui.IO, raw string) (time.Duration, error) {
-	if raw == "" {
-		return watchdogDefaultTimeout, nil
-	}
-	seconds, err := strconv.Atoi(raw)
-	if err != nil {
-		return 0, out.Die("--timeout must be a number of seconds, and it was: "+raw,
-			"Pass the timeout in seconds, for example: --timeout 1800")
-	}
-	return time.Duration(seconds) * time.Second, nil
-}
-
-// watchdogDefaultTimeout is `timeout=1800` at lib/run.sh:3667.
-const watchdogDefaultTimeout = 1800 * time.Second
+// It is the string the shell holds rather than a duration, because nothing
+// converts it until the sweep compares against it. cmd/crossrev does that
+// conversion, and it exports this so the number is written down once.
+const WatchdogDefaultTimeout = "1800"

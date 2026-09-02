@@ -569,10 +569,10 @@
       "action": "Pass the repository as owner/name, for example: --repo carlosboeing/crossrev"
     },
     {
-      "name": "a watchdog timeout that is not a number",
+      "name": "a watchdog timeout that is not a number is kept, not refused",
       "args": ["watchdog", "--timeout", "abc"],
-      "reason": "--timeout must be a number of seconds, and it was: abc",
-      "action": "Pass the timeout in seconds, for example: --timeout 1800"
+      "command": "watchdog",
+      "request": {"Repo": "", "Timeout": "abc"}
     }
   ]
 }

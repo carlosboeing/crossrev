@@ -26,7 +26,7 @@
 //
 // # Where this diverges from the shell, and why
 //
-// Four places, each because a Go value is stricter than a Bash string:
+// Three places, each because a Go value is stricter than a Bash string:
 //
 //   - `--pr` is converted here. Bash keeps it as a string and lets `gh` fail on
 //     it, so `--pr abc` comes back as "could not read owner/name#abc". Every
@@ -34,11 +34,15 @@
 //     is refused at the flag.
 //   - `--repo` is parsed into a core.Slug here, for the same reason.
 //     internal/initcmd's Request already says this is where it happens.
-//   - `--timeout` is converted here. A non-numeric value reaches `(( age <
-//     timeout ))` in the shell and dies as `abc: unbound variable`.
 //   - `config` looks at its sub-command before anything is loaded. The shell
 //     runs `preflight_require_yq` and `cfg_load` first (bin/crossrev:155-156),
 //     so on a machine with no yq the two refusals arrive in the other order.
+//
+// `--timeout` was a fourth and is not one any more. Converting it here refused
+// `crossrev watchdog --timeout abc` on a repository the shell sweeps to a clean
+// exit, because bash stores the flag as written (lib/run.sh:3671) and only
+// evaluates it at `(( age < timeout ))` (lib/run.sh:3719). WatchdogRequest
+// carries the raw string and cmd/crossrev converts it where the arithmetic is.
 //
 // # Where the version comes from
 //

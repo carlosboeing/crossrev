@@ -341,8 +341,8 @@ func parseStatus(args []string, out *ui.IO) (Invocation, error) {
 // harness, and it only ever runs on a schedule, so `--pr`, `--harness`,
 // `--trigger` and `--no-tips` are accepted and thrown away.
 func parseWatchdog(args []string, out *ui.IO) (Invocation, error) {
-	var req WatchdogRequest
-	var repo, timeout string
+	req := WatchdogRequest{Timeout: WatchdogDefaultTimeout}
+	var repo string
 	s := &scanner{args: args}
 	for s.more() {
 		var err error
@@ -350,7 +350,11 @@ func parseWatchdog(args []string, out *ui.IO) (Invocation, error) {
 		case "--repo":
 			repo, err = s.value()
 		case "--timeout":
-			timeout, err = s.value()
+			// `timeout="${2:-1800}"` (lib/run.sh:3671): an empty value is
+			// the default, and any other value is kept as written.
+			if req.Timeout, err = s.value(); err == nil && req.Timeout == "" {
+				req.Timeout = WatchdogDefaultTimeout
+			}
 		case "--pr", "--harness", "--trigger":
 			err = s.discard()
 		case "--no-tips":
@@ -364,9 +368,6 @@ func parseWatchdog(args []string, out *ui.IO) (Invocation, error) {
 	}
 	var err error
 	if req.Repo, err = optionalSlug(out, repo); err != nil {
-		return Invocation{}, err
-	}
-	if req.Timeout, err = watchdogTimeout(out, timeout); err != nil {
 		return Invocation{}, err
 	}
 	return Invocation{Command: CommandWatchdog, Request: req}, nil
@@ -430,7 +431,7 @@ func parseAuthLogin(args []string, out *ui.IO) (Invocation, error) {
 	return Invocation{Command: CommandAuthLogin, Request: req}, nil
 }
 
-// parseAuthInstall is auth_install's argument loop (lib/auth.sh:749-756).
+// parseAuthInstall is auth_install's argument loop (lib/auth.sh:793-800).
 func parseAuthInstall(args []string, out *ui.IO) (Invocation, error) {
 	req := AuthInstallRequest{Role: "loop"}
 	s := &scanner{args: args}
@@ -451,7 +452,7 @@ func parseAuthInstall(args []string, out *ui.IO) (Invocation, error) {
 	return Invocation{Command: CommandAuthInstall, Request: req}, nil
 }
 
-// parseAuthRotate is auth_rotate's argument loop (lib/auth.sh:836-845).
+// parseAuthRotate is auth_rotate's argument loop (lib/auth.sh:880-889).
 func parseAuthRotate(args []string, out *ui.IO) (Invocation, error) {
 	req := AuthRotateRequest{Role: "loop"}
 	s := &scanner{args: args}
@@ -474,7 +475,7 @@ func parseAuthRotate(args []string, out *ui.IO) (Invocation, error) {
 	return Invocation{Command: CommandAuthRotate, Request: req}, nil
 }
 
-// parseAuthRefresh is auth_refresh's argument loop (lib/auth.sh:955-964).
+// parseAuthRefresh is auth_refresh's argument loop (lib/auth.sh:999-1009).
 func parseAuthRefresh(args []string, out *ui.IO) (Invocation, error) {
 	var req AuthRefreshRequest
 	s := &scanner{args: args}

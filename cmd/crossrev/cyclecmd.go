@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"strconv"
 	"time"
 
 	"github.com/carlosboeing/crossrev/internal/app"
@@ -97,17 +98,45 @@ func watchdog(ctx context.Context, out *ui.IO, doc harness.Document, req cli.Wat
 		return cli.ExitFailure, reportFatal(out, err)
 	}
 
+	timeout, timeoutRefusal := watchdogTimeout(req.Timeout)
+
 	w := &cycle.Watchdog{
-		Forge:   client,
-		Now:     time.Now,
-		Out:     out,
-		Timeout: req.Timeout,
-		Author:  author,
+		Forge:          client,
+		Now:            time.Now,
+		Out:            out,
+		Timeout:        timeout,
+		TimeoutRefusal: timeoutRefusal,
+		Author:         author,
 	}
 	if _, err := w.Run(ctx, repo, waiting); err != nil {
 		return cli.ExitFailure, reportFatal(out, err)
 	}
 	return cli.ExitOK, nil
+}
+
+// watchdogTimeout converts the `--timeout` string the parser kept, and answers
+// the refusal rather than raising it.
+//
+// This is where bash's arithmetic reads the variable. The shell stores the flag
+// as written (lib/run.sh:3671) and only evaluates it at `(( age < timeout ))`
+// (lib/run.sh:3719), where a non-number ends the process with bash's own
+// `abc: unbound variable`. Measured against bin/crossrev with `--timeout abc`:
+// exit 0 and the closing summary on a repository with nothing waiting, exit 1
+// on one with a pull request waiting. Converting at the flag refused both.
+//
+// The refusal is built and not printed, because internal/cycle raises it at the
+// comparison and the caller's reportFatal prints it once. The words are this
+// tool's rather than bash's, by the same ruling that covers the `${2:?…}`
+// frames: a library path and a line number say nothing to an operator.
+func watchdogTimeout(raw string) (time.Duration, error) {
+	seconds, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, &ui.FatalError{
+			Reason: "--timeout must be a number of seconds, and it was: " + raw,
+			Action: "Pass the timeout in seconds, for example: --timeout 1800",
+		}
+	}
+	return time.Duration(seconds) * time.Second, nil
 }
 
 // automatedAuthor is `state_trusted_author automated` (lib/state.sh:27-40).
