@@ -382,6 +382,9 @@ func (f *fakeForge) RepoIssueComments(context.Context, core.Slug, time.Time, int
 	return nil, nil
 }
 func (f *fakeForge) ViewerLogin(context.Context) (string, error) { return f.viewer, nil }
+func (f *fakeForge) AwaitingPullRequests(context.Context, core.Slug) []forge.AwaitingPullRequest {
+	return nil
+}
 func (f *fakeForge) WorkflowRunStatus(context.Context, core.Slug, string) forge.RunStatus {
 	return ""
 }

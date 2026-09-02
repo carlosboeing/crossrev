@@ -534,6 +534,9 @@ func (f *statusForge) IssueComments(context.Context, core.Slug, int) []forge.Iss
 }
 
 func (f *statusForge) ViewerLogin(context.Context) (string, error) { return statusAuthor, nil }
+func (f *statusForge) AwaitingPullRequests(context.Context, core.Slug) []forge.AwaitingPullRequest {
+	return nil
+}
 
 func (f *statusForge) DefaultBranch(context.Context, core.Slug) string { return "main" }
 

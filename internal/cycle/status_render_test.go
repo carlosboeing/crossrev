@@ -149,6 +149,9 @@ type statusPageForge struct {
 }
 
 func (f *statusPageForge) ViewerLogin(context.Context) (string, error) { return f.login, nil }
+func (f *statusPageForge) AwaitingPullRequests(context.Context, core.Slug) []forge.AwaitingPullRequest {
+	return nil
+}
 
 // TestStatusRendersThePageTheShellPrints asserts the whole page byte for byte
 // against what `crossrev status` wrote (lib/run.sh:3055-3103): the five

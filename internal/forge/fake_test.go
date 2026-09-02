@@ -44,11 +44,14 @@ func (f *fakeForge) PullRequest(context.Context, core.Slug, int) (forge.PullRequ
 func (f *fakeForge) PullRequestDiff(context.Context, core.Slug, core.Revision, core.Revision) ([]byte, error) {
 	return nil, nil
 }
-func (f *fakeForge) PullRequestLabels(context.Context, core.Slug, int) []string           { return nil }
-func (f *fakeForge) ReviewThreads(context.Context, core.Slug, int) []forge.ReviewThread   { return nil }
-func (f *fakeForge) IssueComments(context.Context, core.Slug, int) []forge.IssueComment   { return nil }
-func (f *fakeForge) ReviewComments(context.Context, core.Slug, int) []forge.IssueComment  { return nil }
-func (f *fakeForge) ViewerLogin(context.Context) (string, error)                          { return "", nil }
+func (f *fakeForge) PullRequestLabels(context.Context, core.Slug, int) []string          { return nil }
+func (f *fakeForge) ReviewThreads(context.Context, core.Slug, int) []forge.ReviewThread  { return nil }
+func (f *fakeForge) IssueComments(context.Context, core.Slug, int) []forge.IssueComment  { return nil }
+func (f *fakeForge) ReviewComments(context.Context, core.Slug, int) []forge.IssueComment { return nil }
+func (f *fakeForge) ViewerLogin(context.Context) (string, error)                         { return "", nil }
+func (f *fakeForge) AwaitingPullRequests(context.Context, core.Slug) []forge.AwaitingPullRequest {
+	return nil
+}
 func (f *fakeForge) WorkflowRunStatus(context.Context, core.Slug, string) forge.RunStatus { return "" }
 func (f *fakeForge) LabelColour(context.Context, core.Slug, string) string                { return "" }
 func (f *fakeForge) IssueByFinding(context.Context, core.Slug, string, core.FindingID) (int, bool) {

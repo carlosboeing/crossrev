@@ -583,6 +583,9 @@ func (f *watchdogForge) RepoIssueComments(context.Context, core.Slug, time.Time,
 	return nil, nil
 }
 func (f *watchdogForge) ViewerLogin(context.Context) (string, error) { return watchdogAuthor, nil }
+func (f *watchdogForge) AwaitingPullRequests(context.Context, core.Slug) []forge.AwaitingPullRequest {
+	return nil
+}
 func (f *watchdogForge) WorkflowRunStatus(context.Context, core.Slug, string) forge.RunStatus {
 	return ""
 }

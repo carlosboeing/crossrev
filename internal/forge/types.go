@@ -97,6 +97,21 @@ type IssueComment struct {
 	CreatedAt   string
 }
 
+// AwaitingPullRequest is one open pull request the watchdog was handed: its
+// number, every label on it, and the revision it points at.
+//
+// It is the three fields lib/run.sh:3692 selects and nothing else. The sweep
+// decides from marker and label state alone, so a wider read would carry
+// nothing it could use.
+type AwaitingPullRequest struct {
+	Number int
+	// Labels is every label on the pull request, including the awaiting label
+	// it is waiting behind and any bookkeeping label a previous sweep left.
+	Labels []string
+	// HeadSHA is `.head.sha`, printed abbreviated on the retry line.
+	HeadSHA string
+}
+
 // IssueCandidate is one issue the fuzzy dedupe offers a model to judge, with
 // its body cut to the first 500 characters the way lib/github.sh:351 cuts it.
 type IssueCandidate struct {

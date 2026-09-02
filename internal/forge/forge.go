@@ -76,6 +76,13 @@ type Forge interface {
 	// ViewerLogin is whose markers a local run trusts (lib/state.sh:43-46).
 	ViewerLogin(ctx context.Context) (string, error)
 
+	// AwaitingPullRequests is every open pull request carrying a label that
+	// starts `crossrev/awaiting-`, which is the list the watchdog sweeps
+	// (lib/run.sh:3691-3693). A failed read answers as none, because the
+	// shell's `|| stuck="[]"` cannot tell an empty repository from an
+	// unreachable API either.
+	AwaitingPullRequests(ctx context.Context, repo core.Slug) []AwaitingPullRequest
+
 	// WorkflowRunStatus turns the run id a marker carries into an answer about
 	// whether that leg is still going (lib/github.sh:61-64).
 	WorkflowRunStatus(ctx context.Context, repo core.Slug, runID string) RunStatus
