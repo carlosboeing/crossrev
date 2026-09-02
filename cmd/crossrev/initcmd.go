@@ -71,7 +71,7 @@ func initCommand(ctx context.Context, doc harness.Document, req cli.InitRequest)
 	}
 
 	if err := initcmd.Run(ctx, request, execution); err != nil {
-		return cli.ExitFailure, err
+		return cli.ExitFailure, reportFatal(out, err)
 	}
 	return cli.ExitOK, nil
 }

@@ -41,7 +41,7 @@ func doctor(ctx context.Context, out *ui.IO, doc harness.Document) (int, error) 
 	if _, err := exec.LookPath("yq"); err == nil {
 		cfg, err := d.loadConfig(ctx, core.Revision{})
 		if err != nil {
-			return cli.ExitFailure, err
+			return cli.ExitFailure, reportFatal(out, err)
 		}
 		checker.Config = cfg
 		if !checker.ReportPairings(cfg.Get(".runner")) {
@@ -70,15 +70,15 @@ func configShow(ctx context.Context, out *ui.IO, doc harness.Document) (int, err
 	}
 	cfg, err := d.loadConfig(ctx, core.Revision{})
 	if err != nil {
-		return cli.ExitFailure, err
+		return cli.ExitFailure, reportFatal(out, err)
 	}
 	compact, err := cfg.MergedJSON()
 	if err != nil {
-		return cli.ExitFailure, err
+		return cli.ExitFailure, reportFatal(out, err)
 	}
 	var pretty bytes.Buffer
 	if err := json.Indent(&pretty, compact, "", "  "); err != nil {
-		return cli.ExitFailure, err
+		return cli.ExitFailure, reportFatal(out, err)
 	}
 	pretty.WriteByte('\n')
 	fmt.Fprint(out.Out, pretty.String())
@@ -93,11 +93,11 @@ func configBacklog(ctx context.Context, out *ui.IO, doc harness.Document) (int, 
 	}
 	cfg, err := d.loadConfig(ctx, core.Revision{})
 	if err != nil {
-		return cli.ExitFailure, err
+		return cli.ExitFailure, reportFatal(out, err)
 	}
 	backlog, err := cfg.ResolveBacklog(ctx, core.Revision{}, cfg.Get(".backlog.destination"))
 	if err != nil {
-		return cli.ExitFailure, err
+		return cli.ExitFailure, reportFatal(out, err)
 	}
 	out.Say("deferred work would go to: " + backlog.String())
 	return cli.ExitOK, nil

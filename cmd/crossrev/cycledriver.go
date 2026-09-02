@@ -32,15 +32,15 @@ func cycleCommand(ctx context.Context, out *ui.IO, doc harness.Document, req cli
 
 	repo, cfg, err := legContext(ctx, d, client, req.Repo, req.PR)
 	if err != nil {
-		return cli.ExitFailure, err
+		return cli.ExitFailure, reportFatal(out, err)
 	}
 	d.log = openLog(repo, req.PR, cfg.Get(".logs.retention_days"),
 		req.KeepTranscripts || runlog.KeepTranscripts(cfg.Get(".logs.keep_transcripts")), "review")
 	client = d.forgeClient()
 
-	author, err := trustedAuthor(ctx, client, cfg.Get(".mode"), out)
+	author, err := trustedAuthor(ctx, client, cfg.Get(".mode"))
 	if err != nil {
-		return cli.ExitFailure, err
+		return cli.ExitFailure, reportFatal(out, err)
 	}
 
 	driver := &cycle.Driver{
@@ -61,7 +61,7 @@ func cycleCommand(ctx context.Context, out *ui.IO, doc harness.Document, req cli
 		NoTips:          req.NoTips,
 	})
 	if result.Err != nil {
-		return cli.ExitFailure, result.Err
+		return cli.ExitFailure, reportFatal(out, result.Err)
 	}
 	return result.ExitCode, nil
 }
@@ -90,7 +90,7 @@ func (a reviewAdapter) Run(ctx context.Context, req cycle.LegRequest) cycle.LegR
 	})
 	a.out.PrintAll(result.Messages)
 	if result.Err != nil {
-		a.out.Say(ui.Reason(result.Err))
+		_ = reportFatal(a.out, result.Err)
 		return cycle.LegResult{Failed: true}
 	}
 	return cycle.LegResult{Failed: result.Outcome == review.OutcomeError}
@@ -117,7 +117,7 @@ func (a resolveAdapter) Run(ctx context.Context, req cycle.LegRequest) cycle.Leg
 		a.out.Say(result.Message)
 	}
 	if result.Err != nil {
-		a.out.Say(ui.Reason(result.Err))
+		_ = reportFatal(a.out, result.Err)
 		return cycle.LegResult{Failed: true}
 	}
 	return cycle.LegResult{Failed: false}

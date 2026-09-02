@@ -34,7 +34,7 @@ func authCommands(out *ui.IO, doc harness.Document) *app.Commands {
 
 func authStatus(ctx context.Context, out *ui.IO, doc harness.Document) (int, error) {
 	if err := authCommands(out, doc).Status(ctx); err != nil {
-		return cli.ExitFailure, err
+		return cli.ExitFailure, reportFatal(out, err)
 	}
 	return cli.ExitOK, nil
 }
@@ -46,7 +46,7 @@ func authLogin(ctx context.Context, out *ui.IO, doc harness.Document, req cli.Au
 		Role:  req.Role,
 	})
 	if err != nil {
-		return cli.ExitFailure, err
+		return cli.ExitFailure, reportFatal(out, err)
 	}
 	return cli.ExitOK, nil
 }
@@ -57,7 +57,7 @@ func authInstall(ctx context.Context, out *ui.IO, doc harness.Document, req cli.
 		Role:  req.Role,
 	})
 	if err != nil {
-		return cli.ExitFailure, err
+		return cli.ExitFailure, reportFatal(out, err)
 	}
 	return cli.ExitOK, nil
 }
@@ -69,7 +69,7 @@ func authRotate(ctx context.Context, out *ui.IO, doc harness.Document, req cli.A
 		KeyFile: req.KeyFile,
 	})
 	if err != nil {
-		return cli.ExitFailure, err
+		return cli.ExitFailure, reportFatal(out, err)
 	}
 	return cli.ExitOK, nil
 }
@@ -82,7 +82,7 @@ func authRefresh(ctx context.Context, out *ui.IO, doc harness.Document, req cli.
 		Secret:  req.Secret,
 	})
 	if err != nil {
-		return cli.ExitFailure, err
+		return cli.ExitFailure, reportFatal(out, err)
 	}
 	return cli.ExitOK, nil
 }

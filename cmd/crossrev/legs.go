@@ -16,6 +16,7 @@ import (
 	"github.com/carlosboeing/crossrev/internal/review"
 	"github.com/carlosboeing/crossrev/internal/runlog"
 	"github.com/carlosboeing/crossrev/internal/ui"
+	"github.com/carlosboeing/crossrev/internal/vcs"
 )
 
 // harnessEnvironment is what a harness child may inherit.
@@ -131,7 +132,7 @@ func reviewCommand(ctx context.Context, out *ui.IO, doc harness.Document, req cl
 
 	repo, cfg, err := legContext(ctx, d, client, req.Repo, req.PR)
 	if err != nil {
-		return cli.ExitFailure, err
+		return cli.ExitFailure, reportFatal(out, err)
 	}
 	d.log = openLog(repo, req.PR, cfg.Get(".logs.retention_days"),
 		req.KeepTranscripts || runlog.KeepTranscripts(cfg.Get(".logs.keep_transcripts")), "review")
@@ -158,13 +159,13 @@ func resolveCommand(ctx context.Context, out *ui.IO, doc harness.Document, req c
 
 	repo, cfg, err := legContext(ctx, d, client, req.Repo, req.PR)
 	if err != nil {
-		return cli.ExitFailure, err
+		return cli.ExitFailure, reportFatal(out, err)
 	}
 	d.log = openLog(repo, req.PR, cfg.Get(".logs.retention_days"),
 		req.KeepTranscripts || runlog.KeepTranscripts(cfg.Get(".logs.keep_transcripts")), "resolve")
 	client = d.forgeClient()
 
-	author, err := trustedAuthor(ctx, client, cfg.Get(".mode"), out)
+	author, err := trustedAuthor(ctx, client, cfg.Get(".mode"))
 	if err != nil {
 		return cli.ExitFailure, err
 	}
@@ -198,15 +199,19 @@ func legContext(ctx context.Context, d *deps, client forge.Forge, want core.Slug
 	if repo.Incomplete() {
 		slug, err := client.RepoSlug(ctx)
 		if err != nil {
-			return repo, nil, d.out.Die("could not work out which repository this is",
-				"Run crossrev from a checkout with a GitHub remote, or pass --repo owner/name.")
+			return repo, nil, &ui.FatalError{
+				Reason: "could not work out which repository this is",
+				Action: "Run crossrev from a checkout with a GitHub remote, or pass --repo owner/name.",
+			}
 		}
 		repo = slug
 	}
 	pull, err := client.PullRequest(ctx, repo, pr)
 	if err != nil {
-		return repo, nil, d.out.Die("could not read "+repo.String()+"#"+strconv.Itoa(pr),
-			"Check the number, and that `gh auth status` passes for that repository.")
+		return repo, nil, &ui.FatalError{
+			Reason: "could not read " + repo.String() + "#" + strconv.Itoa(pr),
+			Action: "Check the number, and that `gh auth status` passes for that repository.",
+		}
 	}
 	cfg, err := d.loadConfig(ctx, pull.BaseRefOid)
 	if err != nil {
@@ -217,13 +222,16 @@ func legContext(ctx context.Context, d *deps, client forge.Forge, want core.Slug
 
 // trustedAuthor is state_trusted_author (lib/state.sh:24-47), whose answer
 // depends on the mode: the App in automated mode, the invoking user otherwise.
-func trustedAuthor(ctx context.Context, client forge.Forge, mode string, out *ui.IO) (string, error) {
+func trustedAuthor(ctx context.Context, client forge.Forge, mode string) (string, error) {
 	if mode == "automated" {
-		return automatedAuthor(osEnv{}, out)
+		return automatedAuthor(osEnv{})
 	}
 	login, err := client.ViewerLogin(ctx)
 	if err != nil {
-		return "", out.Die("could not resolve your GitHub identity", "Run: gh auth login")
+		return "", &ui.FatalError{
+			Reason: "could not resolve your GitHub identity",
+			Action: "Run: gh auth login",
+		}
 	}
 	return login, nil
 }
@@ -241,28 +249,61 @@ func reportLeg(out *ui.IO, messages []ui.Line, err error) (int, error) {
 	return cli.ExitOK, nil
 }
 
-// reportFatal prints a leg's refusal the way ui_die prints one.
+// reportFatal prints a command's refusal the way ui_die prints one.
 //
-// internal/review and internal/resolve hold no terminal, so every error they
-// answer is unprinted — they build a *ui.FatalError as a value rather than
-// calling IO.Die. Without this the process ended at status 1 with an empty
-// terminal, which is the shell's silent-stop defect reproduced somewhere the
-// shell does not have it: `ui_die` prints at every one of these sites.
+// Every package under internal/ answers a refusal as a VALUE rather than
+// printing it, because none of them holds a terminal: internal/config builds a
+// config.Refusal, internal/resolve a resolve.Refusal, internal/harness a
+// harness.Refusal, and internal/review a *ui.FatalError. All four are the same
+// two strings ui_die takes (lib/ui.sh:113-119), and all four were reaching
+// internal/cli, which folds an error into status 1 without a word.
 //
-// The error is returned unchanged so the caller still has it. IO.Die answers a
-// *ui.FatalError carrying the same two halves, which is why the returned value
-// is this function's argument and not Die's answer.
+// So `crossrev config show` over a config naming an invalid severity ended at
+// status 1 with an empty terminal, where the shell prints the value it rejected
+// and the values it accepts. Sixteen of tests/test-config.sh's assertions were
+// that one silence.
+//
+// This is the single exit for every command in this package, so nothing here
+// may call IO.Die and then return what it answered: that would print twice. A
+// command builds a *ui.FatalError instead.
+//
+// The error is returned unchanged, so a caller still has it.
 func reportFatal(out *ui.IO, err error) error {
 	if err == nil {
 		return nil
 	}
+	reason, action := refusalText(err)
+	_ = out.Die(reason, action)
+	return err
+}
+
+// refusalText is the two halves of whichever refusal this is.
+//
+// The four types are not one shared type because each package is a tier that
+// imports no peer; the shape is identical on purpose, and this is the one place
+// that has to know all four.
+func refusalText(err error) (reason, action string) {
 	var fatal *ui.FatalError
 	if errors.As(err, &fatal) {
-		_ = out.Die(fatal.Reason, fatal.Action)
-		return err
+		return fatal.Reason, fatal.Action
 	}
-	// A plain error has no second half to print. The action is the one a
-	// reader can always take, and it is what lib/run.sh's own fallback says.
-	_ = out.Die(err.Error(), "Run `crossrev doctor`, then try again.")
-	return err
+	var cfg *config.Refusal
+	if errors.As(err, &cfg) {
+		return cfg.Message, cfg.Hint
+	}
+	var res *resolve.Refusal
+	if errors.As(err, &res) {
+		return res.Message, res.Hint
+	}
+	var vcsRefusal *vcs.Refusal
+	if errors.As(err, &vcsRefusal) {
+		return vcsRefusal.Message, vcsRefusal.Hint
+	}
+	var harnessRefusal *harness.Refusal
+	if errors.As(err, &harnessRefusal) {
+		return harnessRefusal.Reason, harnessRefusal.Action
+	}
+	// A plain error has no second half. The action is the one a reader can
+	// always take.
+	return err.Error(), "Run `crossrev doctor`, then try again."
 }

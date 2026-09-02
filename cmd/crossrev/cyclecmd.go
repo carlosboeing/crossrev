@@ -26,8 +26,10 @@ func status(ctx context.Context, out *ui.IO, doc harness.Document, req cli.Statu
 	if repo.Incomplete() {
 		slug, err := client.RepoSlug(ctx)
 		if err != nil {
-			return cli.ExitFailure, out.Die("could not work out which repository this is",
-				"Run crossrev from a checkout with a GitHub remote, or pass --repo owner/name.")
+			return cli.ExitFailure, reportFatal(out, &ui.FatalError{
+				Reason: "could not work out which repository this is",
+				Action: "Run crossrev from a checkout with a GitHub remote, or pass --repo owner/name.",
+			})
 		}
 		repo = slug
 	}
@@ -46,7 +48,7 @@ func status(ctx context.Context, out *ui.IO, doc harness.Document, req cli.Statu
 	}
 	report, err := reader.Load(ctx, repo, req.PR)
 	if err != nil {
-		return cli.ExitFailure, err
+		return cli.ExitFailure, reportFatal(out, err)
 	}
 	cycle.Render(out, report)
 	return cli.ExitOK, nil
@@ -72,8 +74,10 @@ func watchdog(ctx context.Context, out *ui.IO, doc harness.Document, req cli.Wat
 	if repo.Incomplete() {
 		slug, err := client.RepoSlug(ctx)
 		if err != nil || slug.Incomplete() {
-			return cli.ExitFailure, out.Die("could not work out which repository to watch",
-				"Run the watchdog from a checkout with a GitHub remote, or pass --repo owner/name.")
+			return cli.ExitFailure, reportFatal(out, &ui.FatalError{
+				Reason: "could not work out which repository to watch",
+				Action: "Run the watchdog from a checkout with a GitHub remote, or pass --repo owner/name.",
+			})
 		}
 		repo = slug
 	}
@@ -87,9 +91,9 @@ func watchdog(ctx context.Context, out *ui.IO, doc harness.Document, req cli.Wat
 		})
 	}
 
-	author, err := automatedAuthor(osEnv{}, out)
+	author, err := automatedAuthor(osEnv{})
 	if err != nil {
-		return cli.ExitFailure, err
+		return cli.ExitFailure, reportFatal(out, err)
 	}
 
 	w := &cycle.Watchdog{
@@ -100,7 +104,7 @@ func watchdog(ctx context.Context, out *ui.IO, doc harness.Document, req cli.Wat
 		Author:  author,
 	}
 	if _, err := w.Run(ctx, repo, waiting); err != nil {
-		return cli.ExitFailure, err
+		return cli.ExitFailure, reportFatal(out, err)
 	}
 	return cli.ExitOK, nil
 }
@@ -116,7 +120,7 @@ func watchdog(ctx context.Context, out *ui.IO, doc harness.Document, req cli.Wat
 // It is `<slug>[bot]` and never `gh api user`. That read is the OTHER arm of
 // the same function — the invoking user, for a local run — and using it here
 // would have the watchdog trust whichever account the runner authenticated as.
-func automatedAuthor(env processEnv, out *ui.IO) (string, error) {
+func automatedAuthor(env processEnv) (string, error) {
 	if slug := env.Getenv("CROSSREV_APP_SLUG"); slug != "" {
 		return slug + "[bot]", nil
 	}
@@ -124,6 +128,8 @@ func automatedAuthor(env processEnv, out *ui.IO) (string, error) {
 	if err == nil && meta.Slug != "" {
 		return meta.Slug + "[bot]", nil
 	}
-	return "", out.Die("cannot determine which App's markers to trust",
-		"Automated mode reads markers only from the App that writes them. In a workflow, set CROSSREV_APP_SLUG from the token step's app-slug output. Locally, run: crossrev auth status")
+	return "", &ui.FatalError{
+		Reason: "cannot determine which App's markers to trust",
+		Action: "Automated mode reads markers only from the App that writes them. In a workflow, set CROSSREV_APP_SLUG from the token step's app-slug output. Locally, run: crossrev auth status",
+	}
 }
