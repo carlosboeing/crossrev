@@ -123,6 +123,10 @@ func coreVersions(r *recorder) *recorder {
 }
 
 // checker is a Checker wired to a recorder, a stub PATH and a captured IO.
+//
+// LookPath is always injected here, so no case built through this helper runs
+// the production PATH search. TestLookPathTakesOnlyAnExecutableFile is the one
+// that leaves the field nil and drives it.
 func checker(t *testing.T, r *recorder, look func(string) (string, error)) (*preflight.Checker, *bytes.Buffer) {
 	t.Helper()
 	io, buf := capture()

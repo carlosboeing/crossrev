@@ -69,7 +69,8 @@ type Checker struct {
 
 	// Config is the merged configuration the pairing report reads. `doctor`
 	// loads it from the working tree with no base revision, which is what
-	// cfg_load does for a command that is not a leg (lib/config.sh:137-191).
+	// cfg_load does for a command that is not a leg (lib/config.sh:183-242;
+	// the base-SHA contract is stated at :180-182).
 	// Its refusal belongs to the caller that loaded it.
 	Config *config.Config
 
@@ -163,13 +164,23 @@ func (c *Checker) installed(name string) bool {
 // lookPath is `command -v` over PATH, the same walk internal/review and
 // internal/resolve do (lib/run.sh:524). os/exec is confined to internal/exec,
 // so the search is written out here.
+//
+// The first entry that is a program, not the first entry that exists. A
+// directory named like the tool is not a program, and `command -v` walks past
+// one: measured with a directory `<d>/git` alone on PATH, `command -v git`
+// exits 1, and with `/usr/bin` after it the answer is /usr/bin/git. It walks
+// past a regular file with no execute bit the same way.
+//
+// os.Stat rather than os.Lstat, because a symlink to a program is a program:
+// measured, `command -v gh` over a symlink pointing at an executable answers
+// with the symlink's own path.
 func lookPath(name string) (string, error) {
 	if name == "" {
 		return "", os.ErrNotExist
 	}
 	if strings.ContainsRune(name, os.PathSeparator) {
-		if _, err := os.Stat(name); err != nil {
-			return "", err
+		if !isProgram(name) {
+			return "", os.ErrNotExist
 		}
 		return name, nil
 	}
@@ -177,12 +188,21 @@ func lookPath(name string) (string, error) {
 		if dir == "" {
 			continue
 		}
-		candidate := filepath.Join(dir, name)
-		if _, err := os.Stat(candidate); err == nil {
+		if candidate := filepath.Join(dir, name); isProgram(candidate) {
 			return candidate, nil
 		}
 	}
 	return "", os.ErrNotExist
+}
+
+// isProgram reports whether a path names a regular file somebody may execute.
+//
+// Any of the three execute bits, not the caller's own: the shell's search asks
+// the same question of the mode and lets the exec fail if the bit that is set
+// belongs to a group the caller is not in.
+func isProgram(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.Mode().IsRegular() && info.Mode().Perm()&0o111 != 0
 }
 
 // InstallHint is how to install a given tool, phrased for the platform we are

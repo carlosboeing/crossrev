@@ -3,6 +3,8 @@ package preflight_test
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -475,5 +477,83 @@ func TestRequireYq(t *testing.T) {
 		"       jq cannot read YAML. Install it with: brew install yq\n\n"
 	if got := buf.String(); got != want {
 		t.Errorf("printed\n%q\nwant\n%q", got, want)
+	}
+}
+
+// TestLookPathTakesOnlyAnExecutableFile drives the production PATH search, the
+// one every other case here replaces with onPath.
+//
+// `command -v` will not answer with a directory that happens to be named like
+// the tool, and it walks past one to a real program later on PATH. Measured on
+// this branch with a directory `<d>/git` first on PATH:
+//
+//	$ PATH="$d/a" bash -c 'command -v git >/dev/null 2>&1; echo $?'   → 1
+//	$ PATH="$d/a:/usr/bin:/bin" bash -c 'command -v git'              → /usr/bin/git
+//
+// and the same walk past a `git` with no execute bit:
+//
+//	$ PATH="$d/b:$d/c" bash -c 'command -v git'   → $d/c/git, the executable one
+//
+// The path lookPath returns is not observable through any exported method,
+// because installed() keeps only whether the error was nil. So "the executable
+// wins" is pinned as: found when the executable is on PATH, and not found when
+// only the directory and the unreadable file are.
+//
+// RequireYq is the driver because it reaches installed() and starts no process.
+func TestLookPathTakesOnlyAnExecutableFile(t *testing.T) {
+	root := t.TempDir()
+	directory := filepath.Join(root, "a")
+	unreadable := filepath.Join(root, "b")
+	program := filepath.Join(root, "c")
+	if err := os.MkdirAll(filepath.Join(directory, "yq"), 0o755); err != nil {
+		t.Fatalf("make the directory named like the tool: %v", err)
+	}
+	for path, mode := range map[string]os.FileMode{unreadable: 0o644, program: 0o755} {
+		if err := os.MkdirAll(path, 0o755); err != nil {
+			t.Fatalf("make %s: %v", path, err)
+		}
+		if err := os.WriteFile(filepath.Join(path, "yq"), []byte("#!/bin/sh\n"), mode); err != nil {
+			t.Fatalf("write %s/yq: %v", path, err)
+		}
+	}
+
+	// A symlink to a program is a program, which is why the search stats
+	// through the link rather than at it.
+	linked := filepath.Join(root, "d")
+	if err := os.MkdirAll(linked, 0o755); err != nil {
+		t.Fatalf("make %s: %v", linked, err)
+	}
+	if err := os.Symlink(filepath.Join(program, "yq"), filepath.Join(linked, "yq")); err != nil {
+		t.Fatalf("link yq: %v", err)
+	}
+
+	list := func(dirs ...string) string { return strings.Join(dirs, string(os.PathListSeparator)) }
+	for _, row := range []struct {
+		name  string
+		path  string
+		found bool
+	}{
+		{"a directory named like the tool", list(directory), false},
+		{"a file with no execute bit", list(unreadable), false},
+		{"both of those and nothing else", list(directory, unreadable), false},
+		{"an executable behind both of them", list(directory, unreadable, program), true},
+		{"an executable on its own", list(program), true},
+		{"a symlink to an executable", list(linked), true},
+		{"an empty PATH", "", false},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			t.Setenv("PATH", row.path)
+			io, _ := capture()
+			// LookPath is left nil, which is the whole point: this
+			// is the only case that runs the production search.
+			c := &preflight.Checker{IO: io, Harness: document(t), OS: "Darwin"}
+			err := c.RequireYq()
+			if row.found && err != nil {
+				t.Errorf("RequireYq with PATH=%q = %v, want nil", row.path, err)
+			}
+			if !row.found && err == nil {
+				t.Errorf("RequireYq with PATH=%q found yq, want a refusal", row.path)
+			}
+		})
 	}
 }
