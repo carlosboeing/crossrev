@@ -205,8 +205,9 @@ func TestPairingRefusesTheReviewLegFirst(t *testing.T) {
 //	harness_serves_leg nosuch resolve -> true
 //	run_assert_cycle_pairing nosuch   -> rc=0, nothing printed
 //
-// harness.Document.ServesLeg answers false for the same name, so this check
-// cannot be built on it. The shell is not lax by accident: an unknown name is
+// harness.Document.ServesLeg answered false for the same name when this was
+// written and now answers the shell's true; the check reads the entry itself
+// and is right either way. The shell is not lax by accident: an unknown name is
 // refused a few lines later by run_leg_settings' adapter test (lib/run.sh:500),
 // with a message that names the fault. Refusing it here would print
 // "Codex is limited to the  leg" with two blanks in it instead.

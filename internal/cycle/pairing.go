@@ -67,8 +67,9 @@ func Pairing(doc harness.Document, cfg *config.Config) func(override string) err
 // default and the name serves both legs (lib/harnesses.sh:154-159). Measured
 // against the shipped descriptor: `harness_serves_leg nosuch review` and
 // `… nosuch resolve` are both true, and `run_assert_cycle_pairing nosuch`
-// returns 0 printing nothing. harness.Document.ServesLeg answers false for the
-// same name, so this check cannot be built on it.
+// returns 0 printing nothing. harness.Document.ServesLeg answered false for
+// the same name when this was written and now answers the shell's true; this
+// check reads the entry itself and is right either way.
 //
 // The laxness is load-bearing rather than accidental. An unknown name is
 // refused a few lines later by run_leg_settings' adapter test (lib/run.sh:500)
