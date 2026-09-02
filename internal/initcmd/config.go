@@ -1,5 +1,5 @@
 // config.go — the policy file `init` commits (_init_write_config,
-// lib/init.sh:875-913, and _init_policy_pairing, :914-927).
+// lib/init.sh:875-895, and _init_policy_pairing, :914-927).
 //
 // The generated config states plainly where deferred work goes and which
 // pairing was provisioned for, because `auto` is a bootstrap convenience rather
@@ -72,6 +72,42 @@ func (p Plan) WriteConfig(template []byte) []byte {
 	return out.Bytes()
 }
 
+// readLayoutAndPath is `read -r _ layout path <<<"$resolved"` under the default
+// IFS (lib/init.sh:881).
+//
+// The last variable of a `read` takes the whole remainder, so a path holding a
+// space is not cut at it. Measured:
+//
+//	repository folder docs/backlog folder/findings → path=[docs/backlog folder/findings]
+//	repository folder   a   b                      → path=[a   b]
+//	repository folder trail (three trailing spaces) → path=[trail]
+//	(two leading spaces) repository   folder   a b   → path=[a b]
+//	repository folder                              → path=[]
+//
+// Which is: blanks before a field are skipped, the remainder keeps its interior
+// runs verbatim, and only its own leading and trailing blanks are stripped.
+//
+// Blanks are space and tab. Newline is the third character in the default IFS,
+// and `read` without -d stops at the first one, so a resolved value carrying a
+// newline would lose everything after it — cfg_resolve_backlog builds one line,
+// so nothing can put one there.
+func readLayoutAndPath(resolved string) (layout, path string) {
+	rest := strings.TrimLeft(resolved, " \t")
+	_, rest = cutField(rest)
+	layout, rest = cutField(rest)
+	return layout, strings.Trim(rest, " \t")
+}
+
+// cutField takes the leading run of non-blank characters, and the rest with the
+// blanks that separated them removed.
+func cutField(line string) (field, rest string) {
+	end := strings.IndexAny(line, " \t")
+	if end < 0 {
+		return line, ""
+	}
+	return line[:end], strings.TrimLeft(line[end:], " \t")
+}
+
 // yamlEdit is one clause of the yq expression the shell builds.
 type yamlEdit struct {
 	path   []string
@@ -85,17 +121,22 @@ type yamlEdit struct {
 // end of its mapping, so two edits that both create a key land in the order
 // they were applied.
 func (p Plan) policyEdits() []yamlEdit {
-	// `read -r _ layout path <<<"$resolved"` after a `repository *` match.
-	// `repository` with nothing after it matches neither arm and falls
-	// through to none, which is what the shell's `case` does with it.
+	// The shell's `case` (lib/init.sh:877-883). `repository` with nothing
+	// after it matches neither arm and falls through to none; `repository `
+	// with anything after it matches whether or not a path follows the
+	// layout, and the destination is written either way. Measured through
+	// _init_write_config: `repository folder` alone writes
+	// `destination: repository` and leaves layout and path at the
+	// template's values, because the shell only builds the layout and path
+	// clauses when `$path` is non-empty.
 	destination := "none"
 	layout, path := "", ""
-	fields := strings.Fields(p.BacklogResolved)
 	switch {
 	case p.BacklogResolved == "github_issues":
 		destination = "github_issues"
-	case strings.HasPrefix(p.BacklogResolved, "repository ") && len(fields) >= 3:
-		destination, layout, path = "repository", fields[1], fields[2]
+	case strings.HasPrefix(p.BacklogResolved, "repository "):
+		destination = "repository"
+		layout, path = readLayoutAndPath(p.BacklogResolved)
 	}
 
 	var edits []yamlEdit

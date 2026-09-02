@@ -436,6 +436,64 @@ func TestRunAnswersTheGateWithYes(t *testing.T) {
 	}
 }
 
+// TestRunAnswersTheGateWithYesWithNoOutputInjected: --yes is the Bash exporting
+// CROSSREV_ASSUME_YES, and an environment variable is not something an absent
+// output writer can withhold. Measured:
+//
+//	$ source lib/ui.sh
+//	$ CROSSREV_ASSUME_YES=1 ui_confirm "Proceed?" </dev/null
+//	◆  Proceed?  yes (--yes)
+//	exit=0
+//
+// Run used to set the flag only when the caller had injected an IO, so
+// `crossrev init --yes` writing to the real terminal — a nil Out, which is what
+// a caller that has not overridden anything leaves — asked the question and then
+// died with nowhere to read the answer from. stdin is closed here so the case
+// fails rather than blocks if the guard ever comes back.
+func TestRunAnswersTheGateWithYesWithNoOutputInjected(t *testing.T) {
+	root := t.TempDir()
+	req := request(t, issueSinkConfig)
+	req.Yes = true
+	req.Files = initcmd.Dir(root)
+	req.Out = nil
+
+	withClosedStdin(t)
+	if err := initcmd.Run(context.Background(), req, wired(t, root)); err != nil {
+		t.Fatalf("Run with --yes and no injected output: %v", err)
+	}
+	// The gate was answered rather than skipped: Run only reaches the
+	// sections past a yes, and the workflows are what they leave behind.
+	if _, err := os.Stat(filepath.Join(root, ".github", "crossrev.yml")); err != nil {
+		t.Errorf("the run stopped at the gate: %v", err)
+	}
+}
+
+// withClosedStdin points os.Stdin at a closed pipe for one test, so a question
+// asked without --yes has nowhere to read from rather than waiting on whatever
+// the suite was started with.
+func withClosedStdin(t *testing.T) {
+	t.Helper()
+	read, write, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	write.Close()
+	read.Close()
+	saved := os.Stdin
+	os.Stdin = read
+	t.Cleanup(func() { os.Stdin = saved })
+}
+
+// TestWriteFilesRefusesAnUnwiredFileWriter: a nil port is a wiring fault named
+// where it is needed, not a default that quietly writes nowhere.
+func TestWriteFilesRefusesAnUnwiredFileWriter(t *testing.T) {
+	plan, req, _, _ := planned(t, issueSinkConfig, nil)
+	err := plan.WriteFiles(context.Background(), req, initcmd.Execution{})
+	if err == nil || !strings.Contains(err.Error(), "Files") {
+		t.Fatalf("err = %v, want a refusal naming the missing port", err)
+	}
+}
+
 // TestExecuteRunsTheSectionsInTheShellsOrder. The order is what an operator
 // sees when something goes wrong: a label that will not create stops the run
 // before a secret is written, and a secret nobody can set is reported after the

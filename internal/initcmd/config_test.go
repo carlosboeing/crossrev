@@ -276,6 +276,81 @@ resolver:
 	}
 }
 
+// TestWriteConfigKeepsABacklogPathWhoseSpacesAreInIt: the shell reads the
+// resolved backlog with `read -r _ layout path`, and the last variable of a
+// read takes the whole remainder — so a directory name holding a space is a
+// path, not a path and a stray word.
+//
+// Every row was measured by calling _init_write_config with that
+// INIT_BACKLOG_RESOLVED and reading the three lines out of the file it wrote:
+//
+//	repository folder docs/backlog folder/findings
+//	  destination: repository / layout: folder / path: docs/backlog folder/findings
+//	repository folder   a   b   (three spaces each side of b)
+//	  destination: repository / layout: folder / path: a   b
+//	repository folder
+//	  destination: repository, and layout and path left at the template's own
+//	  values — the shell builds no clause for either when the path is empty
+//	repository
+//	  destination: none, template layout and path
+//	(two leading spaces) repository   file   a b
+//	  destination: none — the case pattern is anchored, so the read never runs
+func TestWriteConfigKeepsABacklogPathWhoseSpacesAreInIt(t *testing.T) {
+	// The template's own values, which a case that writes no clause leaves
+	// exactly where they were.
+	const templateLayout, templatePath = "folder", "backlog/findings"
+	for _, row := range []struct{ name, resolved, destination, layout, path string }{
+		{
+			name: "a path holding a space", resolved: "repository folder docs/backlog folder/findings",
+			destination: "repository", layout: "folder", path: "docs/backlog folder/findings",
+		},
+		{
+			name: "runs of spaces around and inside it", resolved: "repository folder   a   b   ",
+			destination: "repository", layout: "folder", path: "a   b",
+		},
+		{
+			name: "runs of blanks between the fields", resolved: "repository   file   a b  ",
+			destination: "repository", layout: "file", path: "a b",
+		},
+		{
+			// The case pattern is anchored, so a leading blank
+			// stops `repository *` matching at all and the read
+			// never runs. Measured, not reasoned about: the same
+			// line without the two leading spaces resolves to
+			// repository/file/`a b`.
+			name: "a blank before the whole line", resolved: "  repository   file   a b  ",
+			destination: "none", layout: templateLayout, path: templatePath,
+		},
+		{
+			name: "a layout and no path at all", resolved: "repository folder",
+			destination: "repository", layout: templateLayout, path: templatePath,
+		},
+		{
+			name: "repository with nothing after it", resolved: "repository",
+			destination: "none", layout: templateLayout, path: templatePath,
+		},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			plan := initcmd.Plan{BacklogResolved: row.resolved, Config: configFrom(t, `version: 1
+reviewer:
+  harness: claude
+resolver:
+  harness: claude`)}
+			written := string(plan.WriteConfig(initcmd.PolicyTemplate()))
+			for _, want := range []string{
+				"\n  destination: " + row.destination + " ",
+				"\n    layout: " + row.layout + " ",
+				"\n    path: " + row.path + " ",
+			} {
+				if !strings.Contains(written, want) {
+					t.Errorf("the backlog block is\n%s\nand does not carry\n%q",
+						blockOf(written, "backlog:"), want)
+				}
+			}
+		})
+	}
+}
+
 // TestWriteConfigWritesTheLegsInTheShellsOrder: policyEdits walks reviewer then
 // resolver, and the order is observable whenever the document does not already
 // carry the two mappings — a created key is appended, so the first leg written

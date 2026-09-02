@@ -12,6 +12,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/carlosboeing/crossrev/internal/ui"
 )
 
 // Execution is every port `init` needs to change something.
@@ -117,7 +119,16 @@ func Run(ctx context.Context, req Request, ex Execution) error {
 	// answering this one question, and that is observable further in: the
 	// refresher registration reads the same flag and declines to open a
 	// browser under it (lib/init.sh:57-60 against :524).
-	if req.Yes && req.Out != nil {
+	//
+	// It takes effect whether or not the caller injected an IO: the Bash
+	// exports an environment variable, which no absent writer can withhold.
+	// Measured: `CROSSREV_ASSUME_YES=1 ui_confirm "Proceed?" </dev/null`
+	// prints `yes (--yes)` and exits 0, where the same call without it dies
+	// with nowhere to read from.
+	if req.Yes {
+		if req.Out == nil {
+			req.Out = &ui.IO{}
+		}
 		req.Out.AssumeYes = true
 	}
 	agreed, err := req.io().Confirm("Proceed?")
