@@ -25,8 +25,9 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install and verify dependencies
         run: |
@@ -56,11 +57,12 @@ jobs:
   changelog:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       # fetch-depth: 0 is load-bearing. The default shallow clone shares no
       # history with the base branch, so `git diff base...HEAD` dies with
       # "no merge base" rather than returning a diff.
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
@@ -83,3 +85,41 @@ jobs:
         env:
           BASE_REF: ${{ github.base_ref }}
         run: bash scripts/check-changelog.sh "origin/$BASE_REF"
+
+  required:
+    name: required
+    if: always()
+    needs:
+      - test
+      - changelog
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify status of required CI jobs
+        run: |
+          set -euo pipefail
+          test_result="${{ needs.test.result }}"
+          changelog_result="${{ needs.changelog.result }}"
+          event_name="${{ github.event_name }}"
+
+          echo "test job result:      $test_result"
+          echo "changelog job result: $changelog_result (event: $event_name)"
+
+          if [ "$test_result" != "success" ]; then
+            echo "::error::mandatory job 'test' did not succeed (result: $test_result)"
+            exit 1
+          fi
+
+          if [ "$event_name" = "pull_request" ]; then
+            if [ "$changelog_result" != "success" ]; then
+              echo "::error::mandatory job 'changelog' did not succeed on pull request (result: $changelog_result)"
+              exit 1
+            fi
+          else
+            if [ "$changelog_result" != "success" ] && [ "$changelog_result" != "skipped" ]; then
+              echo "::error::job 'changelog' had unexpected status (result: $changelog_result)"
+              exit 1
+            fi
+          fi
+
+          echo "All required checks passed."
