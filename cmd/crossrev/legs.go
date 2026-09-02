@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
 	"strconv"
 	"time"
 
@@ -135,7 +137,7 @@ func reviewCommand(ctx context.Context, out *ui.IO, doc harness.Document, req cl
 		return cli.ExitFailure, reportFatal(out, err)
 	}
 	d.log = openLog(repo, req.PR, cfg.Get(".logs.retention_days"),
-		req.KeepTranscripts || runlog.KeepTranscripts(cfg.Get(".logs.keep_transcripts")), "review")
+		keepTranscripts(req.KeepTranscripts, cfg), "review")
 	client = d.forgeClient()
 
 	leg := reviewLeg(d, client)
@@ -149,7 +151,9 @@ func reviewCommand(ctx context.Context, out *ui.IO, doc harness.Document, req cl
 		Workdir:         d.repo.Dir(),
 		RunID:           runlog.RunID(),
 	})
-	return reportLeg(out, result.Messages, result.Err)
+	status, err := reportLeg(out, result.Messages, result.Err)
+	closeRun(out, d.log, status, result.Err, "")
+	return status, err
 }
 
 // resolveCommand is `crossrev resolve` once the flags are parsed.
@@ -162,7 +166,7 @@ func resolveCommand(ctx context.Context, out *ui.IO, doc harness.Document, req c
 		return cli.ExitFailure, reportFatal(out, err)
 	}
 	d.log = openLog(repo, req.PR, cfg.Get(".logs.retention_days"),
-		req.KeepTranscripts || runlog.KeepTranscripts(cfg.Get(".logs.keep_transcripts")), "resolve")
+		keepTranscripts(req.KeepTranscripts, cfg), "resolve")
 	client = d.forgeClient()
 
 	author, err := trustedAuthor(ctx, client, cfg.Get(".mode"))
@@ -183,7 +187,56 @@ func resolveCommand(ctx context.Context, out *ui.IO, doc harness.Document, req c
 	if result.Message != "" {
 		messages = append(messages, ui.Say(result.Message))
 	}
-	return reportLeg(out, messages, result.Err)
+	status, err := reportLeg(out, messages, result.Err)
+	// The worktree the resolve leg works in is named from the same two facts
+	// the leg derives it from, because run_cleanup reads CROSSREV_WORKTREE and
+	// this process holds no such variable (lib/run.sh:96-99).
+	worktree, _ := vcs.WorktreeDir(repo, req.PR)
+	closeRun(out, d.log, status, result.Err, worktree)
+	return status, err
+}
+
+// closeRun is run_cleanup's closing half (lib/run.sh:92-108): the kept
+// worktree, the run log's own last line, and the directory a failed run left
+// its record in.
+//
+// The shell runs this from an EXIT trap, so it fires on every path out of a
+// leg. Here it is called at the one return each leg command has, which is the
+// same set of paths: internal/* answers a refusal as a value rather than
+// exiting, so nothing below leaves by any other route.
+//
+// The reason is the first half of whatever refusal ended the run, which is what
+// ui_die puts in CROSSREV_DIE_REASON.
+func closeRun(out *ui.IO, log *runlog.Log, status int, err error, worktree string) {
+	failed := status != cli.ExitOK
+	if failed && worktree != "" && isDir(worktree) {
+		fmt.Fprintf(out.Err, "  Worktree kept for debugging: %s\n", worktree)
+		log.Event("worktree", "kept "+worktree)
+	}
+	reason := ""
+	if err != nil {
+		reason, _ = refusalText(err)
+	}
+	log.Event("exit", fmt.Sprintf("code=%d reason=%s", status, reason))
+	if failed && log.Dir() != "" && isDir(log.Dir()) {
+		fmt.Fprintf(out.Err, "  Run log and any kept transcripts: %s\n", log.Dir())
+	}
+}
+
+// keepTranscripts is lib/run.sh:957 and :1775, which is the flag OR the config
+// key spelled `true`.
+//
+// runlog.KeepTranscripts is the OTHER half of the same decision: it reads
+// CROSSREV_KEEP_TRANSCRIPTS, which the shell sets to `1` once either of these
+// is satisfied. Handing it the config key compared `true` against `1`, so
+// `logs.keep_transcripts: true` deleted the transcripts it asked to keep.
+func keepTranscripts(flag bool, cfg *config.Config) bool {
+	return flag || cfg.Get(".logs.keep_transcripts") == "true"
+}
+
+func isDir(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
 }
 
 // legContext resolves the repository and loads the configuration from the pull

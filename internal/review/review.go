@@ -228,6 +228,12 @@ func (l *Leg) Run(ctx context.Context, req Request) Result {
 		out.Err = err
 		return out
 	}
+	// log_transcripts_clear, at the end of leg_review and nowhere earlier
+	// (lib/run.sh:1326). A failed leg keeps them: they are the reason the files
+	// exist.
+	if l.Log != nil {
+		l.Log.ClearTranscripts("")
+	}
 	out.Outcome = OutcomeInvoked
 	return out
 }

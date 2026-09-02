@@ -401,3 +401,76 @@ func gitOutput(t *testing.T, dir, home string, args ...string) string {
 // shellQuote is printf %q for the one shape this file produces: a filesystem
 // path with no quote in it. Single quotes, so nothing inside is expanded.
 func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
+
+// The run log's last line and the two stderr notices that close a run
+// (run_cleanup, lib/run.sh:92-108).
+//
+// The trap writes `exit code=$rc reason=...` on every path, and on a failure it
+// names the run directory so a reader can find the transcripts the failure
+// kept. Neither reached the native binary, so a run log ended mid-leg and a
+// failed leg said nothing about where its record was.
+func TestARunClosesItsLogAndNamesTheRecordOnFailure(t *testing.T) {
+	bin := binary(t)
+
+	t.Run("a clean leg records its own exit", func(t *testing.T) {
+		fixture := newFixture(t)
+		got := invoke(t, bin, fixture.env, "review", "--pr", "42", "--repo", "acme/widget")
+		if got.status != 0 {
+			t.Fatalf("status = %d\nstderr: %q", got.status, got.stderr)
+		}
+		if log := lastRunLog(t, fixture); !strings.Contains(log, "exit code=0") {
+			t.Errorf("the run log does not close with the exit event:\n%s", log)
+		}
+	})
+
+	t.Run("a failed leg records the code and names the record", func(t *testing.T) {
+		// No payload file for the stub, so the harness exits 1.
+		fixture := newFixtureWith(t, fixturePayload)
+		if err := os.Remove(filepath.Join(fixture.home(t), "payload.json")); err != nil {
+			t.Fatalf("remove the canned payload: %v", err)
+		}
+		got := invoke(t, bin, fixture.env, "review", "--pr", "42", "--repo", "acme/widget")
+		if got.status != 1 {
+			t.Fatalf("status = %d, want 1\nstdout: %q\nstderr: %q", got.status, got.stdout, got.stderr)
+		}
+		if !strings.Contains(got.stderr, "Run log and any kept transcripts:") {
+			t.Errorf("the failure does not name where the record is:\n%q", got.stderr)
+		}
+		if log := lastRunLog(t, fixture); !strings.Contains(log, "exit code=1") {
+			t.Errorf("the run log does not carry the failing exit:\n%s", log)
+		}
+	})
+}
+
+// home is the fixture's temporary root, which is the parent of every path it
+// wrote.
+func (f fixture) home(t *testing.T) string {
+	t.Helper()
+	for _, entry := range f.env {
+		if strings.HasPrefix(entry, "HOME=") {
+			return strings.TrimPrefix(entry, "HOME=")
+		}
+	}
+	t.Fatal("the fixture set no HOME")
+	return ""
+}
+
+// lastRunLog reads run.log out of the one run directory the leg created.
+func lastRunLog(t *testing.T, f fixture) string {
+	t.Helper()
+	var state string
+	for _, entry := range f.env {
+		if strings.HasPrefix(entry, "XDG_STATE_HOME=") {
+			state = strings.TrimPrefix(entry, "XDG_STATE_HOME=")
+		}
+	}
+	matches, err := filepath.Glob(filepath.Join(state, "crossrev", "runs", "acme-widget", "pr-42", "*", "run.log"))
+	if err != nil || len(matches) == 0 {
+		t.Fatalf("no run log under %s: %v %v", state, matches, err)
+	}
+	body, err := os.ReadFile(matches[0])
+	if err != nil {
+		t.Fatalf("read %s: %v", matches[0], err)
+	}
+	return string(body)
+}

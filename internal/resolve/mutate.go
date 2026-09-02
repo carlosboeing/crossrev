@@ -21,6 +21,8 @@ func (l *Leg) publish(ctx context.Context, s *session, got Result, workdir strin
 		if settled {
 			_ = l.Git.RemoveWorktree(ctx, workdir)
 			if l.Log != nil {
+				// lib/run.sh:2451, then :2458.
+				l.Log.Event("worktree", "removed "+workdir)
 				l.Log.ClearTranscripts("")
 			}
 		}

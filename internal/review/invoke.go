@@ -268,8 +268,10 @@ func (l *Leg) invoke(ctx context.Context, req Request, loaded Context, settings 
 	semanticBudget := 1
 
 	for attempt := 1; ; attempt++ {
+		transcript := ""
 		if l.Log != nil {
 			if base, ok := l.Log.TranscriptBase(attempt); ok {
+				transcript = base
 				inv.PayloadPath = base + ".payload"
 			}
 			l.Log.Event("invoke", fmt.Sprintf("harness=%s attempt=%d start", settings.harness, attempt))
@@ -278,14 +280,24 @@ func (l *Leg) invoke(ctx context.Context, req Request, loaded Context, settings 
 		if err != nil {
 			return harness.Envelope{}, nil, err
 		}
+		started := l.now()
 		res := l.runner().Run(ctx, spec)
 		if l.Log != nil {
-			l.Log.Event("invoke", fmt.Sprintf("harness=%s attempt=%d exit=%d", settings.harness, attempt, res.ExitCode))
+			// duration in whole seconds, which is what `$SECONDS` counts
+			// (lib/run.sh:825, :831).
+			l.Log.Event("invoke", fmt.Sprintf("harness=%s attempt=%d exit=%d duration=%ds",
+				settings.harness, attempt, res.ExitCode, int(l.now().Sub(started).Seconds())))
 		}
 		if res.Err != nil && exec.IsNotFound(res.Err) {
 			return harness.Envelope{}, nil, adapter.NotInstalled()
 		}
 		envelope = adapter.Envelope(inv, res)
+		// The two streams are archived AFTER the envelope has been parsed out
+		// of them, then filtered in place. Filtering first would rewrite the
+		// model's own answer, so identical harness output would produce
+		// different findings depending on whether a run directory exists
+		// (lib/adapters/claude.sh:126-130, :148-154).
+		l.Log.WriteTranscript(transcript, res.Stdout, res.Stderr)
 		if !envelope.OK {
 			msg := "no error reported"
 			if envelope.Error != nil && *envelope.Error != "" {

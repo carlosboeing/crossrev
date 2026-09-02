@@ -394,6 +394,9 @@ type env struct {
 	// case here reaches exec.LookPath at all, and the fallback the helper
 	// fills in would hide whatever the real one does.
 	nilLookPath bool
+	// keepTranscripts is the --keep-transcripts posture, which the run log
+	// carries rather than the leg.
+	keepTranscripts bool
 }
 
 func newEnv(t *testing.T) *env {
@@ -437,11 +440,12 @@ func newEnv(t *testing.T) *env {
 func (e *env) leg(t *testing.T) review.Leg {
 	t.Helper()
 	run, err := runlog.Open(runlog.Options{
-		Dir:  filepath.Join(e.dir, "run"),
-		Now:  func() time.Time { return frozenNow },
-		Leg:  "review",
-		Repo: "acme/widget",
-		PR:   "42",
+		Dir:             filepath.Join(e.dir, "run"),
+		Now:             func() time.Time { return frozenNow },
+		Leg:             "review",
+		Repo:            "acme/widget",
+		PR:              "42",
+		KeepTranscripts: e.keepTranscripts,
 	})
 	if err != nil {
 		t.Fatalf("runlog.Open: %v", err)

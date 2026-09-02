@@ -35,7 +35,7 @@ func cycleCommand(ctx context.Context, out *ui.IO, doc harness.Document, req cli
 		return cli.ExitFailure, reportFatal(out, err)
 	}
 	d.log = openLog(repo, req.PR, cfg.Get(".logs.retention_days"),
-		req.KeepTranscripts || runlog.KeepTranscripts(cfg.Get(".logs.keep_transcripts")), "review")
+		keepTranscripts(req.KeepTranscripts, cfg), "review")
 	client = d.forgeClient()
 
 	author, err := trustedAuthor(ctx, client, cfg.Get(".mode"))

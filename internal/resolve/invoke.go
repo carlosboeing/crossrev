@@ -64,6 +64,9 @@ func (l *Leg) prepareWorktree(ctx context.Context, s *session) (string, error) {
 		if err := l.Git.AddWorktree(ctx, wt, head); err != nil {
 			return "", err
 		}
+		if l.Log != nil {
+			l.Log.Event("worktree", "created "+wt)
+		}
 	}
 	work := l.Git.WithDir(wt)
 	current, err := work.Head(ctx)
@@ -225,6 +228,7 @@ func (l *Leg) invoke(ctx context.Context, s *session, marker prstate.Marker, wor
 	paths := sbx.Paths()
 
 	for attempt := 1; ; attempt++ {
+		transcript := ""
 		if l.Log != nil {
 			// The payload path per attempt, as the review leg does. Bash writes
 			// "$CROSSREV_TRANSCRIPT_BASE.payload" for both legs (lib/run.sh:819).
@@ -232,6 +236,7 @@ func (l *Leg) invoke(ctx context.Context, s *session, marker prstate.Marker, wor
 			// resolve leg could not run under codex at all, and every other
 			// harness lost its per-attempt payload from the run log.
 			if base, ok := l.Log.TranscriptBase(attempt); ok {
+				transcript = base
 				inv.PayloadPath = base + ".payload"
 			}
 			l.Log.Event("invoke", fmt.Sprintf("harness=%s attempt=%d start", s.settings.Harness, attempt))
@@ -246,6 +251,7 @@ func (l *Leg) invoke(ctx context.Context, s *session, marker prstate.Marker, wor
 			}
 			return wrapErr(err)
 		}
+		started := l.now()
 		res := l.runner().Run(ctx, spec)
 		if _, _, restoreErr := sandbox.Restore(workdir, paths); restoreErr != nil {
 			// The run's own failure is the cause, not a placeholder. Bash puts
@@ -262,7 +268,10 @@ func (l *Leg) invoke(ctx context.Context, s *session, marker prstate.Marker, wor
 			return restoreFailure(s.settings.Harness, runFailureCause(adapter.Envelope(inv, res), res), restoreErr.Error())
 		}
 		if l.Log != nil {
-			l.Log.Event("invoke", fmt.Sprintf("harness=%s attempt=%d exit=%d", s.settings.Harness, attempt, res.ExitCode))
+			// duration in whole seconds, which is what `$SECONDS` counts
+			// (lib/run.sh:825, :831).
+			l.Log.Event("invoke", fmt.Sprintf("harness=%s attempt=%d exit=%d duration=%ds",
+				s.settings.Harness, attempt, res.ExitCode, int(l.now().Sub(started).Seconds())))
 		}
 		if res.Err != nil && exec.IsNotFound(res.Err) {
 			if r := adapter.NotInstalled(); r != nil {
@@ -270,6 +279,9 @@ func (l *Leg) invoke(ctx context.Context, s *session, marker prstate.Marker, wor
 			}
 		}
 		env := adapter.Envelope(inv, res)
+		// Archived after the parse and filtered in place, the order
+		// lib/adapters/claude.sh:126-130 and :148-154 keep.
+		l.Log.WriteTranscript(transcript, res.Stdout, res.Stderr)
 		if !env.OK {
 			msg := "no error reported"
 			if env.Error != nil && *env.Error != "" {

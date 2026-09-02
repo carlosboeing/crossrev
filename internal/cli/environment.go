@@ -128,7 +128,7 @@ var environment = []Variable{
 	{
 		Name:    "CROSSREV_APP_SLUG",
 		Class:   ClassOperatorInput,
-		Readers: []string{"internal/resolve", "internal/review", "cmd/crossrev"},
+		Readers: []string{"internal/cycle", "internal/resolve", "internal/review", "cmd/crossrev"},
 	},
 	{
 		Name:    "CROSSREV_ASSUME_YES",

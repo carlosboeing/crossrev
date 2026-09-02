@@ -2,6 +2,9 @@ package resolve
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/carlosboeing/crossrev/internal/core"
@@ -165,5 +168,33 @@ func TestTheResolveLegSaysItIsDrivingThePassAgain(t *testing.T) {
 	}
 	if !containsRun(got.Messages, want) {
 		t.Fatalf("the redrive line is missing or out of order:\n got %#v", got.Messages)
+	}
+}
+
+// The run log's worktree pair and the invoke duration, measured from
+// lib/run.sh:1894, :2451 and :831.
+func TestTheResolveLegBracketsTheWorktreeInTheRunLog(t *testing.T) {
+	e := setup(t)
+	e.git.staged = true
+	e.addReview(t, defaultFindings(), "issues-remain")
+
+	got := e.run(t)
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
+
+	body, err := os.ReadFile(filepath.Join(e.log.Dir(), "run.log"))
+	if err != nil {
+		t.Fatalf("read run log: %v", err)
+	}
+	log := string(body)
+	for _, want := range []string{
+		"worktree created ",
+		"worktree removed ",
+		"invoke harness=claude attempt=1 exit=0 duration=",
+	} {
+		if !strings.Contains(log, want) {
+			t.Errorf("the run log has no %q:\n%s", want, log)
+		}
 	}
 }
