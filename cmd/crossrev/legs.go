@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strconv"
 	"time"
 
@@ -102,7 +103,7 @@ func openLog(repo core.Slug, pr int, retention string, keep bool, leg string) *r
 // Runner is the model-facing one, which refuses a Spec whose environment names
 // a forge credential. Env is the allowlist above rather than this process's
 // environment, so a credential nobody named never reaches the child at all.
-func reviewLeg(d *deps, client forge.Forge) *review.Leg {
+func reviewLeg(d *deps, client forge.Forge, cfg *config.Config) *review.Leg {
 	return &review.Leg{
 		Forge:   client,
 		VCS:     d.repo,
@@ -110,19 +111,46 @@ func reviewLeg(d *deps, client forge.Forge) *review.Leg {
 		Log:     d.log,
 		Now:     time.Now,
 		Runner:  d.model,
-		Env:     exec.Inherit(harnessEnvironment),
+		Env:     exec.Inherit(legEnvironment(cfg)),
 	}
 }
 
+// legEnvironment is the allowlist plus the environment variables the configured
+// endpoints name.
+//
+// The Bash child inherits the whole environment minus a strip list, so an
+// endpoint's `token_env` is simply there (lib/adapters/claude.sh:83). An
+// allowlist cannot name it in advance — the operator chooses it, and Ollama's
+// docs use ANTHROPIC_AUTH_TOKEN where Kimi's use ANTHROPIC_API_KEY, which is
+// why lib/config.sh:375 refuses to assume one. So the names come out of the
+// config the leg is about to run under, and nothing wider is opened.
+func legEnvironment(cfg *config.Config) []string {
+	if cfg == nil {
+		return harnessEnvironment
+	}
+	names := slices.Clone(harnessEnvironment)
+	endpoints := cfg.Merged.Object("endpoints")
+	for _, name := range endpoints.Keys() {
+		defined, _ := endpoints.Value(name).(*config.Object)
+		if defined == nil {
+			continue
+		}
+		if tokenEnv, ok := defined.Value("token_env").(string); ok && tokenEnv != "" && !slices.Contains(names, tokenEnv) {
+			names = append(names, tokenEnv)
+		}
+	}
+	return names
+}
+
 // resolveLeg builds the resolve orchestrator (leg_resolve, lib/run.sh:1730).
-func resolveLeg(d *deps, client forge.Forge) *resolve.Leg {
+func resolveLeg(d *deps, client forge.Forge, cfg *config.Config) *resolve.Leg {
 	return &resolve.Leg{
 		Forge:   client,
 		Git:     resolve.GitFrom(d.repo),
 		Runner:  d.model,
 		Log:     d.log,
 		Clock:   time.Now,
-		Env:     exec.Inherit(harnessEnvironment),
+		Env:     exec.Inherit(legEnvironment(cfg)),
 		Harness: d.harnessDoc,
 	}
 }
@@ -146,7 +174,20 @@ func reviewCommand(ctx context.Context, out *ui.IO, doc harness.Document, req cl
 		keepTranscripts(req.KeepTranscripts, cfg), "review")
 	client = d.forgeClient()
 
-	leg := reviewLeg(d, client)
+	// Automated mode's author is the App and nothing else, and its slug can
+	// come from the App metadata file (lib/state.sh:35-36) — which internal/app
+	// holds, and which the leg packages may not import. So the composition root
+	// resolves it and hands it in. Local mode is left empty deliberately: the
+	// leg reads `gh api user` for itself, at the point in the call order
+	// ctx_load reads it (lib/run.sh:309).
+	author := ""
+	if cfg.Get(".mode") == "automated" {
+		if author, err = trustedAuthor(ctx, client, "automated"); err != nil {
+			return cli.ExitFailure, reportFatal(out, err)
+		}
+	}
+
+	leg := reviewLeg(d, client, cfg)
 	leg.Config = cfg
 	result := leg.Run(ctx, review.Request{
 		PR:              req.PR,
@@ -154,10 +195,14 @@ func reviewCommand(ctx context.Context, out *ui.IO, doc harness.Document, req cl
 		Trigger:         review.Trigger(req.Trigger),
 		Continuation:    req.Continuation,
 		HarnessOverride: req.HarnessOverride,
+		Author:          author,
 		Workdir:         d.repo.Dir(),
 		RunID:           runlog.RunID(),
 	})
 	status, err := reportLeg(out, result.Messages, result.Err)
+	if result.Nudge && !req.NoTips {
+		upgradeNudge(out, cfg)
+	}
 	closeRun(out, d.log, status, result.Err, "")
 	return status, err
 }
@@ -183,10 +228,10 @@ func resolveCommand(ctx context.Context, out *ui.IO, doc harness.Document, req c
 
 	author, err := trustedAuthor(ctx, client, cfg.Get(".mode"))
 	if err != nil {
-		return cli.ExitFailure, err
+		return cli.ExitFailure, reportFatal(out, err)
 	}
 
-	leg := resolveLeg(d, client)
+	leg := resolveLeg(d, client, cfg)
 	result := leg.Run(ctx, resolve.Request{
 		PR:              req.PR,
 		Repo:            repo,
@@ -200,6 +245,9 @@ func resolveCommand(ctx context.Context, out *ui.IO, doc harness.Document, req c
 		messages = append(messages, ui.Say(result.Message))
 	}
 	status, err := reportLeg(out, messages, result.Err)
+	if result.Nudge && !req.NoTips {
+		upgradeNudge(out, cfg)
+	}
 	// The worktree the resolve leg works in is named from the same two facts
 	// the leg derives it from, because run_cleanup reads CROSSREV_WORKTREE and
 	// this process holds no such variable (lib/run.sh:96-99).

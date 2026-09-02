@@ -241,8 +241,9 @@ func (l *Leg) Run(ctx context.Context, req Request) (out Result) {
 		}
 	}
 
-	marker, pubMsgs, complete, err := l.publish(ctx, req, loaded, settings, ad.pass, claimID, marker)
-	settled = complete
+	marker, pubMsgs, published, err := l.publish(ctx, req, loaded, settings, ad.pass, claimID, marker)
+	settled = published.settled
+	out.Nudge = published.nudge
 	out.Messages = append(out.Messages, pubMsgs...)
 	out.Marker = marker
 	if err != nil {

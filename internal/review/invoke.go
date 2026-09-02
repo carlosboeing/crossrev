@@ -250,15 +250,27 @@ func (l *Leg) invoke(ctx context.Context, req Request, loaded Context, settings 
 		}
 	}()
 
+	// The endpoint is resolved here rather than in the adapter, because an
+	// adapter reads no configuration. The Bash adapter calls cfg_endpoint
+	// itself (lib/adapters/claude.sh:78-92), and an unresolved name stops the
+	// leg: falling back to the vendor would run Claude while the config says
+	// Ollama, which is the silent substitution the divergence guard exists to
+	// catch arriving through a different door (lib/config.sh:358-363).
+	endpoint, err := l.endpoint(loaded, settings)
+	if err != nil {
+		return harness.Envelope{}, nil, msgs, err
+	}
+
 	inv := harness.Invocation{
-		Prompt:  harness.File{Path: promptPath, Text: string(promptBytes)},
-		Schema:  harness.File{Path: schemaPath, Text: string(schemaBytes)},
-		Workdir: workdir,
-		Model:   settings.model,
-		Effort:  settings.effort,
-		Write:   false,
-		Env:     l.Env,
-		Scratch: tmp,
+		Prompt:   harness.File{Path: promptPath, Text: string(promptBytes)},
+		Schema:   harness.File{Path: schemaPath, Text: string(schemaBytes)},
+		Workdir:  workdir,
+		Model:    settings.model,
+		Effort:   settings.effort,
+		Endpoint: endpoint,
+		Write:    false,
+		Env:      l.Env,
+		Scratch:  tmp,
 	}
 
 	shapeBudget := 1
@@ -461,4 +473,37 @@ func (l *Leg) mergeExport(ctx context.Context, adapter harness.Adapter, inv harn
 		return
 	}
 	exporter.MergeExport(envelope, exported.Stdout)
+}
+
+// endpoint resolves the configured endpoint name against the config, the way
+// cfg_endpoint does for the Bash adapter (lib/config.sh:364-376).
+//
+// An unset name is not an endpoint at all: cfg_endpoint returns 1 without a
+// message for it (lib/config.sh:366), which is the vendor's own API.
+func (l *Leg) endpoint(loaded Context, settings legSettings) (harness.Endpoint, error) {
+	name := settings.endpoint
+	if name == "" || name == "null" || loaded.Config == nil {
+		return harness.Endpoint{}, nil
+	}
+	resolved, err := loaded.Config.Endpoint(name)
+	if err != nil {
+		return harness.Endpoint{}, err
+	}
+	return harness.Endpoint{
+		Name:     resolved.Name,
+		URL:      resolved.BaseURL,
+		TokenVar: resolved.TokenEnv,
+		Token:    envValue(l.Env, resolved.TokenEnv),
+	}, nil
+}
+
+// envValue reads one name out of the allowlist the leg hands a child.
+func envValue(env []string, name string) string {
+	prefix := name + "="
+	for _, e := range env {
+		if strings.HasPrefix(e, prefix) {
+			return e[len(prefix):]
+		}
+	}
+	return ""
 }

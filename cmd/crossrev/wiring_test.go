@@ -557,3 +557,77 @@ func TestTheDescriptorPathOverrideIsRead(t *testing.T) {
 		t.Errorf("the override descriptor was not read:\nstdout %q\nstderr %q", got.stdout, got.stderr)
 	}
 }
+
+// state_trusted_author falls back to the App metadata file when
+// CROSSREV_APP_SLUG is unset (lib/state.sh:36):
+//
+//	[[ -n "$slug" ]] || slug="$(jq -r '.slug // empty' "$(_auth_meta "${CROSSREV_OWNER:-}")")"
+//
+// That is the case of an automated run started from a machine rather than a
+// runner. The leg packages cannot read it — internal/app is a tier-3 peer of
+// both — so the composition root reads it and hands the slug in.
+func TestTheAppMetadataFileSuppliesTheSlugWhenTheVariableIsUnset(t *testing.T) {
+	bin := binary(t)
+	fixture := newFixtureAutomated(t)
+
+	apps := filepath.Join(fixture.home(t), "cfg", "crossrev", "apps")
+	mkdirs(t, apps)
+	write(t, filepath.Join(apps, "acme.loop.json"), `{"slug":"crossrev-acme","role":"loop","owner":"acme"}`)
+
+	env := append([]string{"CROSSREV_OWNER=acme"}, fixture.env...)
+	got := invoke(t, bin, env, "status", "--pr", "42", "--repo", "acme/widget")
+
+	if got.status != 0 {
+		t.Fatalf("status = %d\nstdout: %q\nstderr: %q", got.status, got.stdout, got.stderr)
+	}
+	if !strings.Contains(got.stdout, "crossrev-acme[bot]") {
+		t.Errorf("the page does not name the App the metadata file declares:\n%s", got.stdout)
+	}
+}
+
+// newFixtureAutomated is the fixture with `mode: automated` in the committed
+// config, which is what keys the trusted author on the App.
+func newFixtureAutomated(t *testing.T) fixture {
+	t.Helper()
+	f := newFixture(t)
+	home := f.home(t)
+	write(t, filepath.Join(home, "repo", ".github", "crossrev.yml"),
+		strings.Replace(fixtureConfig, "mode: local", "mode: automated", 1))
+	git := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = filepath.Join(home, "repo")
+		cmd.Env = append(crexec.Inherit(childEnvironment),
+			"HOME="+home, "GIT_CONFIG_GLOBAL="+filepath.Join(home, "gitconfig"))
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	git("add", "-A")
+	git("commit", "-q", "-m", "automated")
+	base := strings.TrimSpace(gitOutput(t, filepath.Join(home, "repo"), home, "rev-parse", "HEAD"))
+	write(t, filepath.Join(home, "routes"), fixtureRoutes(base))
+	return f
+}
+
+// The same fallback reaching the review leg: without it, an automated run
+// started from a machine refuses after two gh calls where the shell reads the
+// slug off disk.
+func TestTheReviewLegGetsTheSlugFromTheMetadataFile(t *testing.T) {
+	bin := binary(t)
+	fixture := newFixtureAutomated(t)
+
+	apps := filepath.Join(fixture.home(t), "cfg", "crossrev", "apps")
+	mkdirs(t, apps)
+	write(t, filepath.Join(apps, "acme.loop.json"), `{"slug":"crossrev-acme","role":"loop","owner":"acme"}`)
+
+	env := append([]string{"CROSSREV_OWNER=acme"}, fixture.env...)
+	got := invoke(t, bin, env, "review", "--pr", "42", "--repo", "acme/widget")
+
+	if strings.Contains(got.stderr, "cannot determine which App's markers to trust") {
+		t.Fatalf("the review leg did not read the metadata file:\n%s", got.stderr)
+	}
+	if got.status != 0 {
+		t.Fatalf("status = %d\nstdout: %q\nstderr: %q", got.status, got.stdout, got.stderr)
+	}
+}

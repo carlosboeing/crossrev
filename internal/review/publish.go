@@ -13,10 +13,23 @@ import (
 	"github.com/carlosboeing/crossrev/internal/ui"
 )
 
-// The bool is whether the complete edit landed, which is run_leg_settled
+// publishState is what the caller has to know beyond the marker and the lines.
+//
+// settled is run_leg_settled (lib/run.sh:160-163): from the instant the
+// complete edit lands, nothing may rewrite the claim as blocked, because the
+// record on the pull request is accurate.
+//
+// nudge is the upgrade tip's half of the `if` at lib/run.sh:1319-1324. The leg
+// holds no terminal, so the decision travels and the composition root prints.
+type publishState struct {
+	settled bool
+	nudge   bool
+}
+
+// The state is whether the complete edit landed, which is run_leg_settled
 // (lib/run.sh:160-163): from that instant nothing may rewrite the claim as
 // blocked, because the record on the pull request is accurate.
-func (l *Leg) publish(ctx context.Context, req Request, loaded Context, settings legSettings, pass int, claimID int64, marker prstate.Marker) (prstate.Marker, []ui.Line, bool, error) {
+func (l *Leg) publish(ctx context.Context, req Request, loaded Context, settings legSettings, pass int, claimID int64, marker prstate.Marker) (prstate.Marker, []ui.Line, publishState, error) {
 	var msgs []ui.Line
 	findings := parseFindings(marker.Findings)
 	minFix := loaded.Config.Get(".policy.min_fix_severity")
@@ -77,7 +90,7 @@ func (l *Leg) publish(ctx context.Context, req Request, loaded Context, settings
 			Body:   body,
 		})
 		if err != nil {
-			return marker, msgs, false, err
+			return marker, msgs, publishState{}, err
 		}
 		posted++
 		if placement == forge.PlacementFallback {
@@ -116,19 +129,19 @@ func (l *Leg) publish(ctx context.Context, req Request, loaded Context, settings
 		MaxPass: cap,
 	})
 	if err := l.editClaim(ctx, loaded.Repo, claimID, summary, marker); err != nil {
-		return marker, msgs, false, err
+		return marker, msgs, publishState{}, err
 	}
 	// ui_ok: the comment is on the pull request (lib/run.sh:1293).
 	msgs = append(msgs, ui.OK("posted a summary comment"))
 
 	marker.State = core.PassComplete
 	if err := l.editClaim(ctx, loaded.Repo, claimID, summary, marker); err != nil {
-		return marker, msgs, false, err
+		return marker, msgs, publishState{}, err
 	}
 	// run_leg_settled, immediately after the complete edit lands and not one
 	// line later (lib/run.sh:160-163). Everything below can still fail, and
 	// none of it may rewrite this record.
-	settled := true
+	state := publishState{settled: true}
 
 	verdict := core.Verdict(marker.Verdict.Value())
 	escalated := escalatedCount(loaded.Markers)
@@ -145,7 +158,7 @@ func (l *Leg) publish(ctx context.Context, req Request, loaded Context, settings
 	warns, err := l.applyPassLabels(ctx, req, loaded, pass, next)
 	msgs = append(msgs, warns...)
 	if err != nil {
-		return marker, msgs, settled, err
+		return marker, msgs, state, err
 	}
 
 	// Two bare printfs, each with a trailing blank line
@@ -159,8 +172,12 @@ func (l *Leg) publish(ctx context.Context, req Request, loaded Context, settings
 		msgs = append(msgs, ui.Say("Nothing was changed in your working tree. To act on these:"),
 			ui.Say(fmt.Sprintf("  crossrev resolve --pr %d", req.PR)),
 			ui.Blank())
+	} else {
+		// The other arm of the same `if`, so a pass gets the handover or the
+		// tip and never both (lib/run.sh:1319-1324).
+		state.nudge = true
 	}
-	return marker, msgs, settled, nil
+	return marker, msgs, state, nil
 }
 
 func (l *Leg) editClaim(ctx context.Context, repo core.Slug, claimID int64, body string, marker prstate.Marker) error {

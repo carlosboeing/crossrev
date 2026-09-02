@@ -79,7 +79,11 @@ type Result struct {
 	Invocation  harness.Invocation
 	Message     string
 	Messages    []ui.Line
-	Err         error
+	// Nudge asks the caller to print the upgrade tip. run_upgrade_nudge is a
+	// terminal write and a leg holds no terminal, so the decision travels and
+	// the composition root does the printing (lib/run.sh:2447).
+	Nudge bool
+	Err   error
 }
 
 // Refusal is the two strings ui_die prints (lib/ui.sh:113).

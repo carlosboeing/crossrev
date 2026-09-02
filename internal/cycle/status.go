@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -137,6 +136,14 @@ type Status struct {
 	// Show reads the configuration from the pull request's base revision,
 	// which is where policy is read from and never the head (ADR 0003).
 	Show config.ShowFile
+	// AppSlug is the App whose markers are loop state in automated mode.
+	//
+	// state_trusted_author reads it from CROSSREV_APP_SLUG and falls back to
+	// the App metadata file (lib/state.sh:35-36). The second half lives in
+	// internal/app, a tier-3 peer this package may not import, so the
+	// composition root resolves both and hands the answer in. Empty in
+	// automated mode is the refusal, never a fallback to the invoking user.
+	AppSlug string
 }
 
 // Load reads the pull request and derives the whole report.
@@ -179,7 +186,7 @@ func (s *Status) Load(ctx context.Context, repo core.Slug, pr int) (Report, erro
 	if err != nil {
 		return report, err
 	}
-	author, err := trustedAuthor(ctx, s.Forge, cfg.Get(".mode"), repo, pr)
+	author, err := s.trustedAuthor(ctx, cfg.Get(".mode"), repo, pr)
 	if err != nil {
 		return report, err
 	}
@@ -937,21 +944,19 @@ func statusAbbreviate(sha string) string {
 // forged marker there makes an agent push a commit or believe a leg finished.
 // Every other mode is the invoking user, whose worst case is being misled
 // about work they asked for.
-func trustedAuthor(ctx context.Context, client forge.Forge, mode string, repo core.Slug, pr int) (string, error) {
+func (s *Status) trustedAuthor(ctx context.Context, mode string, repo core.Slug, pr int) (string, error) {
 	if mode == "automated" {
-		// lib/state.sh:35-38. The metadata-file fallback the shell reads for an
-		// automated run started from a machine lives in internal/app, which is
-		// a tier-3 peer this package may not import.
-		slug := os.Getenv("CROSSREV_APP_SLUG")
-		if slug == "" {
+		// lib/state.sh:35-38, with both halves of the slug resolved by the
+		// caller: the variable and the App metadata file.
+		if s.AppSlug == "" {
 			return "", &ui.FatalError{
 				Reason: "cannot determine which App's markers to trust",
 				Action: "Automated mode reads markers only from the App that writes them. In a workflow, set CROSSREV_APP_SLUG from the token step's app-slug output. Locally, run: crossrev auth status",
 			}
 		}
-		return slug + "[bot]", nil
+		return s.AppSlug + "[bot]", nil
 	}
-	author, err := client.ViewerLogin(ctx)
+	author, err := s.Forge.ViewerLogin(ctx)
 	if err != nil || author == "" {
 		return "", &ui.FatalError{
 			Reason: fmt.Sprintf("could not resolve whose markers to trust on %s#%d", repo, pr),

@@ -57,7 +57,11 @@ type Result struct {
 	Envelope *harness.Envelope
 	Payload  json.RawMessage
 	Messages []ui.Line
-	Err      error
+	// Nudge asks the caller to print the upgrade tip. run_upgrade_nudge is a
+	// terminal write and a leg holds no terminal, so the decision travels and
+	// the composition root does the printing (lib/run.sh:1319-1324).
+	Nudge bool
+	Err   error
 }
 
 // Context is the one base/head load a review starts from (lib/run.sh:232-313).

@@ -223,3 +223,37 @@ func TestTheResolveLegSaysItIsNotRunningTheResolverAgain(t *testing.T) {
 		t.Fatalf("the recovery line is missing:\n got %#v", got.Messages)
 	}
 }
+
+// A pass that does not hand back to the reviewer asks for the upgrade tip
+// (lib/run.sh:2447: `next != awaiting-review`).
+func TestAConvergedResolvePassAsksForTheUpgradeTip(t *testing.T) {
+	e := setup(t)
+	e.addReview(t, defaultFindings(), "issues-remain")
+	e.adapter.payloads = []json.RawMessage{json.RawMessage(
+		`{"blocked":false,"blocked_reason":null,"summary":"Not a bug.","commit_subject":null,` +
+			`"resolutions":[{"finding_number":1,"resolution":"skipped","reply":"no",` +
+			`"persist":null,"duplicate_of":null}]}`)}
+
+	got := e.run(t)
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
+	if !got.Nudge {
+		t.Fatal("a converged pass did not ask for the upgrade tip")
+	}
+}
+
+// A pass that hands back to the reviewer prints the handover instead.
+func TestAResolvePassHandingBackDoesNotAskForTheTip(t *testing.T) {
+	e := setup(t)
+	e.git.staged = true
+	e.addReview(t, defaultFindings(), "issues-remain")
+
+	got := e.run(t)
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
+	if got.Nudge {
+		t.Fatal("a pass handing back to the reviewer asked for the tip too")
+	}
+}

@@ -400,6 +400,8 @@ type env struct {
 	// validate replaces validate.Findings, so a case can drive the retry
 	// budgets without building a payload that fails for the right reason.
 	validate func([]byte) error
+	// legEnv is what the leg hands a child. Nil is the default pair below.
+	legEnv []string
 }
 
 func newEnv(t *testing.T) *env {
@@ -466,7 +468,7 @@ func (e *env) leg(t *testing.T) review.Leg {
 		Log:      run,
 		Now:      func() time.Time { return frozenNow },
 		Runner:   e.runner,
-		Env:      []string{"PATH=/usr/bin:/bin", "HOME=" + e.dir},
+		Env:      e.env(),
 		LookPath: look,
 	}
 }
@@ -542,4 +544,12 @@ func bashOutput(t *testing.T, script string, args ...string) string {
 		t.Fatalf("bash: %v\nstderr: %s", err, stderr.String())
 	}
 	return string(out)
+}
+
+// env is what the leg hands a child.
+func (e *env) env() []string {
+	if e.legEnv != nil {
+		return e.legEnv
+	}
+	return []string{"PATH=/usr/bin:/bin", "HOME=" + e.dir}
 }

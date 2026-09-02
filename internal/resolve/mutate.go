@@ -185,6 +185,9 @@ func (l *Leg) publish(ctx context.Context, s *session, got Result, workdir strin
 	}
 
 	got.Messages = append(got.Messages, closingReport(marker, next, s.pass, s.req.PR)...)
+	// lib/run.sh:2447: the tip fires on every ending except the handover back
+	// to the reviewer, which already names the next command.
+	got.Nudge = next != policy.PassAwaitingReview
 
 	got.Outcome = OutcomeComplete
 	got.Marker = marker

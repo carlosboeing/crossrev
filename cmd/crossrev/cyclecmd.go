@@ -45,6 +45,7 @@ func status(ctx context.Context, out *ui.IO, doc harness.Document, req cli.Statu
 		Liveness: probe,
 		Now:      time.Now,
 		Show:     d.show(),
+		AppSlug:  appSlug(osEnv{}),
 	}
 	report, err := reader.Load(ctx, repo, req.PR)
 	if err != nil {
@@ -121,15 +122,30 @@ func watchdog(ctx context.Context, out *ui.IO, doc harness.Document, req cli.Wat
 // the same function — the invoking user, for a local run — and using it here
 // would have the watchdog trust whichever account the runner authenticated as.
 func automatedAuthor(env processEnv) (string, error) {
+	slug := appSlug(env)
+	if slug == "" {
+		return "", &ui.FatalError{
+			Reason: "cannot determine which App's markers to trust",
+			Action: "Automated mode reads markers only from the App that writes them. In a workflow, set CROSSREV_APP_SLUG from the token step's app-slug output. Locally, run: crossrev auth status",
+		}
+	}
+	return slug + "[bot]", nil
+}
+
+// appSlug is the two halves of the slug lib/state.sh:35-36 reads, in its order:
+// the variable a workflow passes from the token step's app-slug output, then
+// the App metadata file an automated run started from a machine has.
+//
+// It lives here because internal/app is a tier-3 package, so neither leg nor
+// internal/cycle may read the file. The composition root resolves it once and
+// hands the answer into whichever of them needs it.
+func appSlug(env processEnv) string {
 	if slug := env.Getenv("CROSSREV_APP_SLUG"); slug != "" {
-		return slug + "[bot]", nil
+		return slug
 	}
 	meta, err := app.ReadMetadata(app.MetaPath(app.Dir(env), env.Getenv("CROSSREV_OWNER"), app.RoleLoop))
-	if err == nil && meta.Slug != "" {
-		return meta.Slug + "[bot]", nil
+	if err == nil {
+		return meta.Slug
 	}
-	return "", &ui.FatalError{
-		Reason: "cannot determine which App's markers to trust",
-		Action: "Automated mode reads markers only from the App that writes them. In a workflow, set CROSSREV_APP_SLUG from the token step's app-slug output. Locally, run: crossrev auth status",
-	}
+	return ""
 }

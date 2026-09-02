@@ -50,8 +50,8 @@ func cycleCommand(ctx context.Context, out *ui.IO, doc harness.Document, req cli
 	}
 
 	driver := &cycle.Driver{
-		Review:  reviewAdapter{leg: reviewLeg(d, client), out: out, workdir: d.repo.Dir()},
-		Resolve: resolveAdapter{leg: resolveLeg(d, client), out: out, author: author},
+		Review:  reviewAdapter{leg: reviewLeg(d, client, cfg), out: out, workdir: d.repo.Dir()},
+		Resolve: resolveAdapter{leg: resolveLeg(d, client, cfg), out: out, author: author},
 		Loader:  &contextLoader{forge: client, show: d.show(), author: author},
 		Out:     out.Out,
 		Nudge:   func() { upgradeNudge(out, cfg) },

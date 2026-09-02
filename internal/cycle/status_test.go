@@ -642,8 +642,8 @@ func TestStatusKeysTheTrustedAuthorOnTheMode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("slug: %v", err)
 	}
-	t.Setenv("CROSSREV_APP_SLUG", "crossrev-acme")
 	s := &cycle.Status{
+		AppSlug: "crossrev-acme",
 		Forge: &statusForge{pr: forge.PullRequest{
 			Number:     statusPR,
 			HeadRefOid: head,
