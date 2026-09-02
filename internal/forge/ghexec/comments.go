@@ -38,13 +38,19 @@ func (c *Client) CommentCreate(ctx context.Context, repo core.Slug, number int, 
 		return 0, failure(summary, res)
 	}
 
+	// An id that will not parse answers zero rather than a refusal, which is
+	// what gh_comment_create does: it dies on `gh` failing and carries an
+	// unreadable id through as the empty string (lib/github.sh:187-195).
+	//
+	// Refusing here was fail-closed for the claim comment, whose marker CrossRev
+	// must be able to edit later — and both claim sites already refuse on id ==
+	// 0 for themselves. It was wrong for every caller that discards the id: the
+	// watchdog's halt comment and the inline-comment fallback are both `>/dev/
+	// null` in the shell, and a halt that had done all its label work then
+	// stopped before saying so.
 	id, convErr := strconv.ParseInt(strings.TrimSpace(string(res.Stdout)), 10, 64)
 	if convErr != nil {
-		// The shell carries an unreadable id as an empty string and edits
-		// `issues/comments/` later. Refusing here is the fail-closed answer to
-		// the same fact: the pass marker lives in this comment, and an id
-		// nothing can address is a record CrossRev cannot update.
-		return 0, fmt.Errorf("%s: gh named no comment id", summary)
+		return 0, nil
 	}
 	return id, nil
 }
