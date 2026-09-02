@@ -26,7 +26,10 @@ type fakeLabels struct {
 func (f *fakeLabels) LabelEnsure(_ context.Context, repo core.Slug, label forge.Label) (forge.LabelState, error) {
 	f.calls = append(f.calls, fmt.Sprintf("%s %s %s %s", repo, label.Name, label.Colour, label.Description))
 	if f.fail[label.Name] {
-		return "", fmt.Errorf("could not create the label '%s' on %s", label.Name, repo)
+		// The forge's own refusal, byte for byte, so a test asserting on it
+		// is asserting on what a person reads (lib/github.sh:298-299,
+		// internal/forge/ghexec/labels.go:119).
+		return "", fmt.Errorf("could not create the label '%s' on %s\n   Init could not establish the declared colour and description. Create it by hand, or grant the token issues write.", label.Name, repo)
 	}
 	current := f.colours[label.Name]
 	switch {
@@ -142,8 +145,7 @@ func TestExecuteDeclaresEveryLabelWithItsOwnColourAndDescription(t *testing.T) {
 
 // TestExecuteRecolourssLabelsMintedInTheOldColour is the --upgrade migration:
 // every loop label already there in another colour is recoloured, and the run
-// says how many (lib/init.sh:448-455, tests/test-runner.sh has the same case in
-// tests/test-init.sh:205-222).
+// says how many (lib/init.sh:448-455, tests/test-init.sh:205-222).
 func TestExecuteRecoloursLabelsMintedInTheOldColour(t *testing.T) {
 	old := map[string]string{}
 	for _, label := range []string{
@@ -228,7 +230,7 @@ func TestExecuteRefusesToInventALabelTheRepositoryGovernsItself(t *testing.T) {
 
 // TestExecuteCarriesAFailedLabelCreationUp pins that a label that will not
 // create ends the run rather than being counted (lib/init.sh:445,
-// tests/test-init.sh:405-406).
+// tests/test-init.sh:442-443).
 func TestExecuteCarriesAFailedLabelCreationUp(t *testing.T) {
 	labels := &fakeLabels{fail: map[string]bool{"crossrev/pass-2": true}}
 	plan, req, _, buffer := planned(t, issueSinkConfig, nil)
@@ -244,6 +246,70 @@ func TestExecuteCarriesAFailedLabelCreationUp(t *testing.T) {
 	}
 	if len(labels.calls) != 2 {
 		t.Errorf("it kept declaring labels after one failed: %q", labels.calls)
+	}
+}
+
+// TestExecuteCarriesAFailedBacklogLabelCreationUp is the same guard on the other
+// set: a label filed issues will carry that will not create ends the run rather
+// than being counted (lib/init.sh:464).
+//
+// tests/test-init.sh refuses a loop label's POST and not a backlog one, so this
+// was measured against `_init_execute` directly with a `gh` stub refusing the
+// POST that mints a backlog label. The run exits 1 under a Labels section it has
+// already opened, prints the loop line, then the forge's refusal, and never
+// declares the backlog label after the one that failed. Both the tracking label
+// and a configured extra are pinned, because the check is inside the loop and a
+// case that only ever fails on the first label would not notice it moving out.
+func TestExecuteCarriesAFailedBacklogLabelCreationUp(t *testing.T) {
+	for _, testcase := range []struct {
+		name          string
+		configuration string
+		label         string
+		declared      []string
+	}{
+		{
+			name:          "the tracking label",
+			configuration: issueSinkConfig,
+			label:         "crossrev-review",
+			declared:      []string{"acme/widget crossrev-review d4c5f9 filed by crossrev"},
+		},
+		{
+			name:          "a configured extra",
+			configuration: strings.Replace(issueSinkConfig, "    labels: [bug]", "    labels: [needs-triage]", 1),
+			label:         "needs-triage",
+			declared: []string{
+				"acme/widget crossrev-review d4c5f9 filed by crossrev",
+				"acme/widget needs-triage d4c5f9 filed by crossrev",
+			},
+		},
+	} {
+		t.Run(testcase.name, func(t *testing.T) {
+			labels := &fakeLabels{fail: map[string]bool{testcase.label: true}}
+			plan, req, _, buffer := planned(t, testcase.configuration, nil)
+			err := plan.EnsureLabels(context.Background(), req, initcmd.Execution{Labels: labels})
+			if err == nil {
+				t.Fatal("a backlog label that would not create was not reported")
+			}
+			want := fmt.Sprintf("could not create the label '%s' on acme/widget", testcase.label)
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("error = %v, want the forge's own refusal %q", err, want)
+			}
+			if !strings.Contains(buffer.String(), "created 8 and found 0 already on acme/widget for the loop") {
+				t.Errorf("the loop's own line was not printed before the refusal:\n%s", buffer.String())
+			}
+			if strings.Contains(buffer.String(), "for filed issues") {
+				t.Errorf("a count was claimed over a label that never landed:\n%s", buffer.String())
+			}
+			// The first eight declarations are the loop's own labels, so
+			// what the backlog set declared is everything after them.
+			if len(labels.calls) < 8 {
+				t.Fatalf("the loop labels were not declared first: %q", labels.calls)
+			}
+			if got := labels.calls[8:]; strings.Join(got, "\n") != strings.Join(testcase.declared, "\n") {
+				t.Errorf("the backlog declarations are\n%s\nwant\n%s",
+					strings.Join(got, "\n"), strings.Join(testcase.declared, "\n"))
+			}
+		})
 	}
 }
 
