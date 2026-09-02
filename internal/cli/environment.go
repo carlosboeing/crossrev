@@ -96,7 +96,201 @@ type Variable struct {
 //
 // Sorted rather than grouped by class: an order a reader can predict is what
 // makes a diff to this list readable, and TestEnvironmentContract enforces it.
-var environment = []Variable{}
+var environment = []Variable{
+	{
+		Name:       "ANTHROPIC_API_KEY",
+		Class:      ClassCredential,
+		Descriptor: true,
+		Readers:    []string{"internal/harness", "internal/resolve", "internal/review"},
+	},
+	{
+		Name:    "ANTHROPIC_AUTH_TOKEN",
+		Class:   ClassEndpoint,
+		Readers: []string{"internal/harness", "internal/policy"},
+	},
+	{
+		Name:    "ANTHROPIC_BASE_URL",
+		Class:   ClassEndpoint,
+		Readers: []string{"internal/harness", "internal/policy"},
+	},
+	{
+		Name:       "CLAUDE_CODE_OAUTH_TOKEN",
+		Class:      ClassCredential,
+		Descriptor: true,
+	},
+	{
+		Name:       "CODEX_HOME",
+		Class:      ClassPathOverride,
+		Descriptor: true,
+	},
+	{
+		Name:    "CROSSREV_APP_SLUG",
+		Class:   ClassOperatorInput,
+		Readers: []string{"internal/resolve", "internal/review"},
+	},
+	{
+		Name:  "CROSSREV_ASSUME_YES",
+		Class: ClassOperatorInput,
+	},
+	{
+		Name:       "CROSSREV_CODEX_AUTH",
+		Class:      ClassCredential,
+		Descriptor: true,
+	},
+	{
+		Name:  "CROSSREV_DIFF_EXCLUDE",
+		Class: ClassChildOutput,
+	},
+	{
+		Name:  "CROSSREV_DIFF_PATH",
+		Class: ClassChildOutput,
+	},
+	{
+		Name:  "CROSSREV_DIFF_SIDE",
+		Class: ClassChildOutput,
+	},
+	{
+		Name:    "CROSSREV_GIT_EMAIL",
+		Class:   ClassOperatorInput,
+		Readers: []string{"internal/resolve"},
+	},
+	{
+		Name:    "CROSSREV_GIT_NAME",
+		Class:   ClassOperatorInput,
+		Readers: []string{"internal/resolve"},
+	},
+	{
+		Name:       "CROSSREV_GROK_AUTH",
+		Class:      ClassCredential,
+		Descriptor: true,
+	},
+	{
+		Name:  "CROSSREV_HARNESS_FILE",
+		Class: ClassPathOverride,
+	},
+	{
+		Name:  "CROSSREV_HARNESS_INSTALL",
+		Class: ClassChildOutput,
+	},
+	{
+		Name:  "CROSSREV_LOG_RETENTION_DAYS",
+		Class: ClassOperatorInput,
+	},
+	{
+		Name:  "CROSSREV_NO_TIPS",
+		Class: ClassOperatorInput,
+	},
+	{
+		Name:       "CROSSREV_OPENCODE_AUTH",
+		Class:      ClassCredential,
+		Descriptor: true,
+	},
+	{
+		Name:  "CROSSREV_OWNER",
+		Class: ClassOperatorInput,
+	},
+	{
+		Name:  "CROSSREV_TRANSCRIPT_BASE",
+		Class: ClassPathOverride,
+	},
+	{
+		Name:    "GH_ENTERPRISE_TOKEN",
+		Class:   ClassCredential,
+		Readers: []string{"internal/app", "internal/exec", "internal/forge/ghexec", "internal/preflight"},
+	},
+	{
+		Name:    "GH_TOKEN",
+		Class:   ClassCredential,
+		Readers: []string{"internal/app", "internal/exec", "internal/forge/ghexec", "internal/preflight"},
+	},
+	{
+		Name:    "GITHUB_ACTIONS",
+		Class:   ClassRunnerSignal,
+		Readers: []string{"internal/preflight"},
+	},
+	{
+		Name:    "GITHUB_ENTERPRISE_TOKEN",
+		Class:   ClassCredential,
+		Readers: []string{"internal/app", "internal/exec", "internal/forge/ghexec", "internal/preflight"},
+	},
+	{
+		Name:    "GITHUB_RUN_ID",
+		Class:   ClassRunnerSignal,
+		Readers: []string{"internal/resolve", "internal/runlog"},
+	},
+	{
+		Name:    "GITHUB_TOKEN",
+		Class:   ClassCredential,
+		Readers: []string{"internal/app", "internal/exec", "internal/forge/ghexec", "internal/preflight"},
+	},
+	{
+		Name:    "GIT_INDEX_FILE",
+		Class:   ClassChildOutput,
+		Readers: []string{"internal/vcs"},
+	},
+	{
+		Name:       "GROK_HOME",
+		Class:      ClassPathOverride,
+		Descriptor: true,
+	},
+	{
+		Name:  "HOME",
+		Class: ClassPathOverride,
+		Readers: []string{
+			"internal/app", "internal/config", "internal/forge/ghexec",
+			"internal/preflight", "internal/runlog", "internal/vcs",
+		},
+	},
+	{
+		Name:    "LC_ALL",
+		Class:   ClassChildOutput,
+		Readers: []string{"internal/app"},
+	},
+	{
+		Name:    "NO_COLOR",
+		Class:   ClassOperatorInput,
+		Readers: []string{"internal/cli"},
+	},
+	{
+		Name:    "OPENCODE_CONFIG",
+		Class:   ClassChildOutput,
+		Readers: []string{"internal/harness"},
+	},
+	{
+		Name:    "OPENCODE_CONFIG_DIR",
+		Class:   ClassChildOutput,
+		Readers: []string{"internal/harness"},
+	},
+	{
+		Name:  "PATH",
+		Class: ClassPathOverride,
+		Readers: []string{
+			"internal/app", "internal/forge/ghexec", "internal/initcmd",
+			"internal/preflight", "internal/resolve", "internal/review",
+		},
+	},
+	{
+		Name:    "RUNNER_ENVIRONMENT",
+		Class:   ClassRunnerSignal,
+		Readers: []string{"internal/cred", "internal/preflight"},
+	},
+	{
+		Name:    "XDG_CONFIG_HOME",
+		Class:   ClassPathOverride,
+		Readers: []string{"internal/app", "internal/config", "internal/forge/ghexec", "internal/preflight"},
+	},
+	{
+		Name:       "XDG_DATA_HOME",
+		Class:      ClassPathOverride,
+		Descriptor: true,
+		Readers:    []string{"internal/app"},
+	},
+	{
+		Name:    "XDG_STATE_HOME",
+		Class:   ClassPathOverride,
+		Readers: []string{"internal/preflight", "internal/runlog", "internal/vcs"},
+	},
+}
 
 // Environment answers the contract, sorted by name.
 //
