@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/carlosboeing/crossrev/internal/config"
 	"github.com/carlosboeing/crossrev/internal/exec"
 	"github.com/carlosboeing/crossrev/internal/harness"
 	"github.com/carlosboeing/crossrev/internal/ui"
@@ -65,6 +66,12 @@ type Checker struct {
 	// Harness is the descriptor the harness probes and the install hints are
 	// read from.
 	Harness harness.Document
+
+	// Config is the merged configuration the pairing report reads. `doctor`
+	// loads it from the working tree with no base revision, which is what
+	// cfg_load does for a command that is not a leg (lib/config.sh:137-191).
+	// Its refusal belongs to the caller that loaded it.
+	Config *config.Config
 
 	// OS is what `uname -s` answers (lib/preflight.sh:10). Empty asks the
 	// platform this binary was built for, where "darwin" is Darwin.
