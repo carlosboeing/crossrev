@@ -688,6 +688,26 @@ _init_harness_install_line() {
   printf '%s' "${out%$'\n'}"
 }
 
+# One value, escaped so `sed` writes it rather than reading it.
+#
+# A `sed` replacement is an expression, not bytes: `&` stands for the whole
+# match, `\` escapes whatever follows, and `#` — the delimiter every
+# substitution below uses — closes the command. The source ref is whatever
+# `git describe --tags` reported, so it carries a tag name, and a tag name may
+# hold any of the three. Measured before this existed: a ref of `v1&2` rendered
+# as `v1__SOURCE_REF__2`, and a ref holding `#` ended the script early and left
+# sed refusing the command outright, so the workflow came out empty.
+#
+# A newline cannot reach here — every value is a single line by construction —
+# and would fail loudly rather than render wrong if one ever did.
+_init_sed_replacement() {
+  local v="$1"
+  v="${v//\\/\\\\}"
+  v="${v//&/\\&}"
+  v="${v//\#/\\#}"
+  printf '%s' "$v"
+}
+
 _init_render_workflow() {
   local template="$1" runs_on refresh_scope refresh_harness refresh_secret
   if [[ "$INIT_RUNNER" == "self-hosted" ]]; then
@@ -724,12 +744,12 @@ _init_render_workflow() {
       next
     }
     { print }' "$template" \
-    | sed -e "s#__SOURCE_SHA__#$INIT_SOURCE_SHA#g" \
-      -e "s#__SOURCE_REF__#$INIT_SOURCE_REF#g" \
-      -e "s#__RUNS_ON__#$runs_on#g" \
-      -e "s#__REFRESH_SCOPE__#$refresh_scope#g" \
-      -e "s#__REFRESH_HARNESS__#$refresh_harness#g" \
-      -e "s#__REFRESH_SECRET__#$refresh_secret#g" \
+    | sed -e "s#__SOURCE_SHA__#$(_init_sed_replacement "$INIT_SOURCE_SHA")#g" \
+      -e "s#__SOURCE_REF__#$(_init_sed_replacement "$INIT_SOURCE_REF")#g" \
+      -e "s#__RUNS_ON__#$(_init_sed_replacement "$runs_on")#g" \
+      -e "s#__REFRESH_SCOPE__#$(_init_sed_replacement "$refresh_scope")#g" \
+      -e "s#__REFRESH_HARNESS__#$(_init_sed_replacement "$refresh_harness")#g" \
+      -e "s#__REFRESH_SECRET__#$(_init_sed_replacement "$refresh_secret")#g" \
     | awk -v want="$INIT_RUNNER" '
         /^[[:space:]]*# crossrev:only / { skip = ($3 != want); next }
         /^[[:space:]]*# crossrev:end/   { skip = 0; next }
