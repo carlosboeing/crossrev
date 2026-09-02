@@ -293,3 +293,63 @@ func TestTheDefaultEnvironmentIsTheAllowlist(t *testing.T) {
 			len(got), len(required))
 	}
 }
+
+// EnvironmentNames is the allowlist itself, for the one other caller that
+// builds `gh` invocations.
+//
+// internal/app runs `gh` too, and it held a second copy of these seventeen
+// names. Two lists of the same thing drift: a name added to one widens or
+// narrows only that side's environment, nothing errors, and no test on either
+// side reads the other. This accessor is what makes there be one list, and
+// internal/archtest is where the two constructors are compared.
+//
+// The list is read from the constructor rather than written out here, so that
+// this test cannot agree with a wrong answer that a matching copy would.
+func TestEnvironmentNamesIsTheDefaultTheConstructorReads(t *testing.T) {
+	declared := ghexec.EnvironmentNames()
+	if len(declared) == 0 {
+		t.Fatal("EnvironmentNames answered nothing; gh would inherit an empty environment")
+	}
+
+	// Set every declared name, plus two that are not on the list, so what
+	// reaches gh is decided by the allowlist and not by this process.
+	for _, name := range declared {
+		t.Setenv(name, "value-of-"+name)
+	}
+	t.Setenv("GH_REPO", "acme/other")
+	t.Setenv("CROSSREV_NOT_ON_THE_LIST", "present")
+
+	r := &recorder{}
+	// No WithEnv: this is the constructor's own answer.
+	c := ghexec.New(r, passthrough{})
+	if _, err := c.RepoSlug(context.Background()); err == nil {
+		t.Fatal("the recorder answered a slug it was never given")
+	}
+
+	var got []string
+	for _, entry := range r.only(t).Env {
+		name, _, _ := strings.Cut(entry, "=")
+		got = append(got, name)
+	}
+	slices.Sort(got)
+	want := slices.Clone(declared)
+	slices.Sort(want)
+	if !slices.Equal(got, want) {
+		t.Errorf("gh received %q and EnvironmentNames declares %q; the accessor is not the list the constructor reads", got, want)
+	}
+}
+
+// The accessor answers a fresh slice each time, for the reason
+// exec.ForgeCredentialNames does: an exported slice variable is writable from
+// any package in the binary, and a package that shortened this one would narrow
+// the environment `gh` receives everywhere at once — silently, because a `gh`
+// that cannot find its config or its trust store fails as a network or auth
+// error rather than as a missing name.
+func TestEnvironmentNamesCannotBeWrittenThrough(t *testing.T) {
+	got := ghexec.EnvironmentNames()
+	first := got[0]
+	got[0] = "OVERWRITTEN"
+	if second := ghexec.EnvironmentNames(); second[0] != first {
+		t.Errorf("EnvironmentNames()[0] = %q after a caller wrote to an earlier answer, want %q", second[0], first)
+	}
+}

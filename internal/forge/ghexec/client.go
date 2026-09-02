@@ -2,6 +2,7 @@ package ghexec
 
 import (
 	"context"
+	"slices"
 	"strings"
 
 	"github.com/carlosboeing/crossrev/internal/exec"
@@ -72,6 +73,23 @@ var ghEnvironment = []string{
 	"https_proxy",
 	"no_proxy",
 }
+
+// EnvironmentNames is the list above, for the other caller in the tree that
+// builds `gh` invocations of its own.
+//
+// Exported rather than copied into internal/app, for the reason
+// exec.ForgeCredentialNames is exported rather than copied into internal/cred:
+// two lists of the same names drift apart in silence. A name added to one side
+// widens or narrows only that side's environment, and the failure that follows
+// arrives as an unauthenticated call, an unverifiable certificate or a
+// retargeted write rather than as a missing name. internal/archtest compares
+// what the two constructors pass, which is the test neither package could hold.
+//
+// It answers a fresh slice each time, for the reason internal/validate's asset
+// accessors do: an exported slice variable is writable from any package in the
+// binary, and shortening this one would narrow what `gh` receives everywhere at
+// once.
+func EnvironmentNames() []string { return slices.Clone(ghEnvironment) }
 
 // Client is the `gh`-on-PATH implementation of forge.Forge.
 type Client struct {
