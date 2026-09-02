@@ -234,6 +234,27 @@ func TestBoundReturnsTheLoadRefusal(t *testing.T) {
 	}
 }
 
+// TestBoundReturnsTheLoadRefusalAfterTheResolveLeg pins the second reload
+// (lib/run.sh:2858): a refusal there exits 1 with its message, the same as the
+// first reload's, rather than reading as a clean stop.
+func TestBoundReturnsTheLoadRefusalAfterTheResolveLeg(t *testing.T) {
+	refusal := &ui.FatalError{Reason: "could not read acme/widget#42", Action: "Check the number."}
+	r := newRig(t, []loadStep{
+		{state: loaded(t, marker(reviewIssues, 3), marker(resolveStarted, 3))},
+		{err: refusal},
+	})
+
+	got := r.driver.Run(context.Background(), request())
+
+	r.wantOrder(t, "load", "resolve", "load")
+	if got.ExitCode != 1 {
+		t.Errorf("exit code = %d, want 1", got.ExitCode)
+	}
+	if !errors.Is(got.Err, error(refusal)) {
+		t.Errorf("Err = %v, want the loader's refusal", got.Err)
+	}
+}
+
 // --- the verdict reading, shared with the loop -------------------------------
 
 // TestBoundHaltsOnABlockedReview pins lib/run.sh:2833-2836.

@@ -222,7 +222,7 @@ func TestPairingServesAHarnessTheDescriptorDoesNotName(t *testing.T) {
 
 // TestPairingReadsAnAbsentConfiguredNameAsServing goes through Config.Get on a
 // merge that carries neither key, without configWith. cfg_get renders an absent
-// value as the empty string (lib/config.sh:303), and the empty string is a name
+// value as the empty string (lib/config.sh:354), and the empty string is a name
 // the descriptor does not carry, so it serves. Measured:
 //
 //	no override, cfg empty/empty -> rc=0, nothing printed
