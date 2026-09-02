@@ -28,7 +28,7 @@ type legSettings struct {
 	endpoint string
 }
 
-func (l *Leg) settings(req Request, loaded Context) (legSettings, string, error) {
+func (l *Leg) settings(req Request, loaded Context) (legSettings, ui.Line, error) {
 	cfg := loaded.Config
 	s := legSettings{
 		harness:  cfg.Get(".reviewer.harness"),
@@ -45,27 +45,29 @@ func (l *Leg) settings(req Request, loaded Context) (legSettings, string, error)
 		s.harness = string(core.HarnessCodex)
 	}
 	if !l.Harness.Known(s.harness) {
-		return s, "", noAdapterRefusal(l.Harness, s.harness)
+		return s, ui.Line{}, noAdapterRefusal(l.Harness, s.harness)
 	}
 	if !l.Harness.ServesLeg(s.harness, string(core.LegReview)) {
-		return s, "", servesLegRefusal(l.Harness, s.harness)
+		return s, ui.Line{}, servesLegRefusal(l.Harness, s.harness)
 	}
 
 	asked := s.harness
 	if l.binaryInstalled(asked) {
-		return s, "", nil
+		return s, ui.Line{}, nil
 	}
 	for _, name := range l.Harness.NamesForLeg(string(core.LegReview)) {
 		if l.binaryInstalled(name) {
 			s.harness = name
 			s.model = ""
 			s.endpoint = ""
-			warn := fmt.Sprintf("'%s' is not installed, so the reviewer runs on '%s' instead"+"\n   "+
-				"Both legs now run on the same harness, so a bug it misses while reviewing it also misses while resolving. Install %s to get the second lineage back.", asked, name, asked)
+			// ui_warn, condition and consequence apart (lib/run.sh:542-543).
+			warn := ui.Warn(
+				fmt.Sprintf("'%s' is not installed, so the reviewer runs on '%s' instead", asked, name),
+				fmt.Sprintf("Both legs now run on the same harness, so a bug it misses while reviewing it also misses while resolving. Install %s to get the second lineage back.", asked))
 			return s, warn, nil
 		}
 	}
-	return s, "", notInstalledRefusal(l.Harness, asked)
+	return s, ui.Line{}, notInstalledRefusal(l.Harness, asked)
 }
 
 // notInstalledRefusal is the last refusal in run_leg_settings

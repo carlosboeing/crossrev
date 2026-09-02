@@ -16,6 +16,7 @@ import (
 	"github.com/carlosboeing/crossrev/internal/policy"
 	"github.com/carlosboeing/crossrev/internal/prompt"
 	"github.com/carlosboeing/crossrev/internal/prstate"
+	"github.com/carlosboeing/crossrev/internal/ui"
 	"github.com/carlosboeing/crossrev/internal/validate"
 	"github.com/carlosboeing/crossrev/internal/vcs"
 )
@@ -254,7 +255,7 @@ func escalatedCount(markers []prstate.Marker) int {
 	return n
 }
 
-func (l *Leg) settings(s *session) (*Refusal, string, error) {
+func (l *Leg) settings(s *session) (*Refusal, ui.Line, error) {
 	// Derived from the leg, not configured. lib/run.sh:488-489:
 	// LEG_WRITE=no
 	// [[ "$leg" == "resolver" ]] && LEG_WRITE=yes
@@ -273,29 +274,31 @@ func (l *Leg) settings(s *session) (*Refusal, string, error) {
 	}
 	doc, err := l.document()
 	if err != nil {
-		return nil, "", err
+		return nil, ui.Line{}, err
 	}
 	if _, ok := harnessFor(doc, name); !ok {
-		return noAdapterRefusal(doc, name), "", nil
+		return noAdapterRefusal(doc, name), ui.Line{}, nil
 	}
 	if !doc.ServesLeg(name, "resolve") {
-		return servesLegRefusal(doc, name), "", nil
+		return servesLegRefusal(doc, name), ui.Line{}, nil
 	}
 
 	asked := name
 	if l.binaryInstalled(asked) {
 		s.settings = legSettings{Harness: name, Model: model, Effort: effort, Endpoint: endpoint}
-		return nil, "", nil
+		return nil, ui.Line{}, nil
 	}
 	for _, alt := range doc.NamesForLeg("resolve") {
 		if l.binaryInstalled(alt) {
 			s.settings = legSettings{Harness: alt, Model: "", Effort: effort, Endpoint: ""}
-			warn := fmt.Sprintf("'%s' is not installed, so the resolver runs on '%s' instead"+"\n   "+
-				"Both legs now run on the same harness, so a bug it misses while reviewing it also misses while resolving. Install %s to get the second lineage back.", asked, alt, asked)
+			// ui_warn, condition and consequence apart (lib/run.sh:542-543).
+			warn := ui.Warn(
+				fmt.Sprintf("'%s' is not installed, so the resolver runs on '%s' instead", asked, alt),
+				fmt.Sprintf("Both legs now run on the same harness, so a bug it misses while reviewing it also misses while resolving. Install %s to get the second lineage back.", asked))
 			return nil, warn, nil
 		}
 	}
-	return notInstalledRefusal(doc, asked), "", nil
+	return notInstalledRefusal(doc, asked), ui.Line{}, nil
 }
 
 // notInstalledRefusal is the last refusal in run_leg_settings

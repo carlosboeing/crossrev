@@ -11,6 +11,8 @@ import (
 	"github.com/carlosboeing/crossrev/internal/forge"
 	"github.com/carlosboeing/crossrev/internal/harness"
 	"github.com/carlosboeing/crossrev/internal/prstate"
+
+	"github.com/carlosboeing/crossrev/internal/ui"
 )
 
 // TestReconcile pins that an already-settled finding is not answered twice,
@@ -132,7 +134,7 @@ func TestReconcile(t *testing.T) {
 			t.Fatalf("Run: %v", got.Err)
 		}
 		want := "could not reply in the thread rooted at comment 55 on acme/widget#42\n   The resolution is still recorded in the pass marker, but the collaborator reading the thread will not see the reason. Check the token has pull-requests write."
-		if !strings.Contains(strings.Join(got.Messages, "\n"), want) {
+		if !strings.Contains(ui.Joined(got.Messages), want) {
 			t.Errorf("messages = %q, want warning %q", got.Messages, want)
 		}
 	})
@@ -146,7 +148,7 @@ func TestReconcile(t *testing.T) {
 			t.Fatalf("Run: %v", got.Err)
 		}
 		want := "no review thread was found for finding aaaaaaaaaaaaaaaa, so its reply is a top-level comment\n   The reply is on the pull request rather than under the code it answers. This is expected when GitHub refused to anchor the original inline comment, and unexpected otherwise."
-		if !strings.Contains(strings.Join(got.Messages, "\n"), want) {
+		if !strings.Contains(ui.Joined(got.Messages), want) {
 			t.Errorf("messages = %q, want warning %q", got.Messages, want)
 		}
 	})
@@ -160,7 +162,7 @@ func TestReconcile(t *testing.T) {
 			t.Fatalf("Run: %v", got.Err)
 		}
 		want := "1 reply could not be threaded and landed as top-level comments\n   Each one names the finding it answers, so nothing is lost, but a reader following the diff will not see it beside the code."
-		if !strings.Contains(strings.Join(got.Messages, "\n"), want) {
+		if !strings.Contains(ui.Joined(got.Messages), want) {
 			t.Errorf("messages = %q, want warning %q", got.Messages, want)
 		}
 	})
@@ -175,7 +177,7 @@ func TestReconcile(t *testing.T) {
 			t.Fatalf("Run: %v", got.Err)
 		}
 		want := "could not resolve review thread thread-1\n   The thread stays open, so the next pass sees it as unsettled and may raise it again. Resolve it by hand, or retry the leg."
-		if !strings.Contains(strings.Join(got.Messages, "\n"), want) {
+		if !strings.Contains(ui.Joined(got.Messages), want) {
 			t.Errorf("messages = %q, want warning %q", got.Messages, want)
 		}
 	})

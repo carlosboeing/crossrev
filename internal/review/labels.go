@@ -10,8 +10,8 @@ import (
 	"github.com/carlosboeing/crossrev/internal/ui"
 )
 
-func (l *Leg) applyPassLabels(ctx context.Context, req Request, loaded Context, pass int, next policy.PassLabelState) ([]string, error) {
-	var msgs []string
+func (l *Leg) applyPassLabels(ctx context.Context, req Request, loaded Context, pass int, next policy.PassLabelState) ([]ui.Line, error) {
+	var msgs []ui.Line
 	for _, word := range []policy.PassLabelState{
 		policy.PassAwaitingReview,
 		policy.PassAwaitingResolution,
@@ -33,7 +33,7 @@ func (l *Leg) applyPassLabels(ctx context.Context, req Request, loaded Context, 
 		}
 	}
 	warn, err := l.addLabel(ctx, loaded, req.PR, wantPass)
-	if warn != "" {
+	if warn.Text != "" {
 		msgs = append(msgs, warn)
 	}
 	if err != nil {
@@ -41,7 +41,7 @@ func (l *Leg) applyPassLabels(ctx context.Context, req Request, loaded Context, 
 	}
 	if next != "" {
 		warn, err = l.addLabel(ctx, loaded, req.PR, next.Label())
-		if warn != "" {
+		if warn.Text != "" {
 			msgs = append(msgs, warn)
 		}
 		if err != nil {
@@ -51,23 +51,20 @@ func (l *Leg) applyPassLabels(ctx context.Context, req Request, loaded Context, 
 	return msgs, nil
 }
 
-func (l *Leg) addLabel(ctx context.Context, loaded Context, pr int, label string) (string, error) {
+func (l *Leg) addLabel(ctx context.Context, loaded Context, pr int, label string) (ui.Line, error) {
 	err := l.Forge.PullRequestLabelAdd(ctx, loaded.Repo, pr, label)
 	if err == nil {
-		return "", nil
+		return ui.Line{}, nil
 	}
 	if loaded.Config != nil && loaded.Config.Get(".mode") == "automated" {
-		return "", &ui.FatalError{
+		return ui.Line{}, &ui.FatalError{
 			Reason: fmt.Sprintf("could not apply the label '%s' to %s#%d", label, loaded.Repo, pr),
 			Action: "The loop is label-driven, so this is fatal rather than cosmetic. Check the token's issues permission and GitHub's availability, then retry.",
 		}
 	}
-	// The guidance is joined to the condition with ui.Warn's own newline and
-	// three-space indent, because addLabel answers one string and ui.Warn takes
-	// two. Bash calls `ui_warn "$1" "$2"` here (lib/run.sh:326-327) and prints
-	// exactly these bytes. Nothing outside this package reads Result.Messages
-	// yet, so when Phase 4 wires a consumer, split this back into a pair and
-	// let ui.Warn do the joining. Until then a change to ui.Warn's indent
-	// diverges this line silently.
-	return fmt.Sprintf("could not apply the label '%s' to %s#%d\n   Locally that is cosmetic, because this process drives both legs itself. In automated mode it would stall the chain, which is what `crossrev init` creates the labels for.", label, loaded.Repo, pr), nil
+	// The pair, kept apart, so ui.Warn does its own joining. Bash calls
+	// `ui_warn "$1" "$2"` here (lib/run.sh:326-327).
+	return ui.Warn(
+		fmt.Sprintf("could not apply the label '%s' to %s#%d", label, loaded.Repo, pr),
+		"Locally that is cosmetic, because this process drives both legs itself. In automated mode it would stall the chain, which is what `crossrev init` creates the labels for."), nil
 }

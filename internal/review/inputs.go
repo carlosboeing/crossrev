@@ -12,6 +12,7 @@ import (
 	"github.com/carlosboeing/crossrev/internal/harness"
 	"github.com/carlosboeing/crossrev/internal/prstate"
 	"github.com/carlosboeing/crossrev/internal/runlog"
+	"github.com/carlosboeing/crossrev/internal/ui"
 	"github.com/carlosboeing/crossrev/internal/vcs"
 )
 
@@ -55,7 +56,7 @@ type Result struct {
 	Context  Context
 	Envelope *harness.Envelope
 	Payload  json.RawMessage
-	Messages []string
+	Messages []ui.Line
 	Err      error
 }
 

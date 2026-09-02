@@ -88,9 +88,7 @@ func (a reviewAdapter) Run(ctx context.Context, req cycle.LegRequest) cycle.LegR
 		Workdir:         a.workdir,
 		RunID:           runlog.RunID(),
 	})
-	for _, message := range result.Messages {
-		a.out.Say(message)
-	}
+	a.out.PrintAll(result.Messages)
 	if result.Err != nil {
 		a.out.Say(ui.Reason(result.Err))
 		return cycle.LegResult{Failed: true}
@@ -114,9 +112,7 @@ func (a resolveAdapter) Run(ctx context.Context, req cycle.LegRequest) cycle.Leg
 		Author:          a.author,
 		KeepTranscripts: req.KeepTranscripts,
 	})
-	for _, message := range result.Messages {
-		a.out.Say(message)
-	}
+	a.out.PrintAll(result.Messages)
 	if result.Message != "" {
 		a.out.Say(result.Message)
 	}

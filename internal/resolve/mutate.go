@@ -78,7 +78,10 @@ func (l *Leg) publish(ctx context.Context, s *session, got Result, workdir strin
 	commitSHA, msgs, emptyRemote, err := l.commitAndPush(ctx, s, workdir, recs, findings, marker, wrote, remote)
 	got.Messages = append(got.Messages, msgs...)
 	if emptyRemote {
-		got.Messages = append(got.Messages, "could not read "+s.pr.HeadRefName+" on "+remote+", so the check for a concurrent push did not run\n   If someone pushed to that branch while this leg was working, this push may not include their commit. Confirm the branch looks right before merging.")
+		// ui_warn, the pair kept apart (lib/run.sh:2385-2386).
+		got.Messages = append(got.Messages, ui.Warn(
+			"could not read "+s.pr.HeadRefName+" on "+remote+", so the check for a concurrent push did not run",
+			"If someone pushed to that branch while this leg was working, this push may not include their commit. Confirm the branch looks right before merging."))
 	}
 	if err != nil {
 		return fail(err)
@@ -113,7 +116,7 @@ func (l *Leg) publish(ctx context.Context, s *session, got Result, workdir strin
 		if unthreaded == 1 {
 			noun = "reply"
 		}
-		got.Messages = append(got.Messages, ui.Warning(
+		got.Messages = append(got.Messages, ui.Warn(
 			strconv.Itoa(unthreaded)+" "+noun+" could not be threaded and landed as top-level comments",
 			"Each one names the finding it answers, so nothing is lost, but a reader following the diff will not see it beside the code.",
 		))
@@ -156,7 +159,8 @@ func (l *Leg) publish(ctx context.Context, s *session, got Result, workdir strin
 	other := otherEscalated(s.markers, s.pass)
 	next := policy.ResolvePassLabel(asPolicyResolve(marker), other)
 	if err := l.applyPassLabels(ctx, s, s.pass, next); err != nil {
-		got.Messages = append(got.Messages, err.Error())
+		// ui_warn: applyPassLabels answers the pair already joined by addLabel.
+		got.Messages = append(got.Messages, ui.Say(err.Error()))
 	}
 	if escalated > 0 {
 		_ = l.addLabel(ctx, s, policy.LabelStop)

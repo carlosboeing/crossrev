@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"time"
 
@@ -179,7 +180,7 @@ func resolveCommand(ctx context.Context, out *ui.IO, doc harness.Document, req c
 	})
 	messages := result.Messages
 	if result.Message != "" {
-		messages = append(messages, result.Message)
+		messages = append(messages, ui.Say(result.Message))
 	}
 	return reportLeg(out, messages, result.Err)
 }
@@ -229,17 +230,39 @@ func trustedAuthor(ctx context.Context, client forge.Forge, mode string, out *ui
 
 // reportLeg prints what a leg reported and answers the status.
 //
-// The kind of each line is lost on the way here: internal/review and
-// internal/resolve answer a []string, and the shell prints some of those with
-// ui_say and some with ui_ok. Every line is printed with ui_say, which is the
-// commonest of the two, and the difference is the one place this wiring cannot
-// be byte-exact against the shell.
-func reportLeg(out *ui.IO, messages []string, err error) (int, error) {
-	for _, message := range messages {
-		out.Say(message)
-	}
+// Each line carries the helper the shell used at that site, so a verified
+// success prints as ui_ok and a warning as ui_warn on stderr rather than
+// everything arriving as ui_say. ui.IO.PrintAll is the dispatch.
+func reportLeg(out *ui.IO, messages []ui.Line, err error) (int, error) {
+	out.PrintAll(messages)
 	if err != nil {
-		return cli.ExitFailure, err
+		return cli.ExitFailure, reportFatal(out, err)
 	}
 	return cli.ExitOK, nil
+}
+
+// reportFatal prints a leg's refusal the way ui_die prints one.
+//
+// internal/review and internal/resolve hold no terminal, so every error they
+// answer is unprinted — they build a *ui.FatalError as a value rather than
+// calling IO.Die. Without this the process ended at status 1 with an empty
+// terminal, which is the shell's silent-stop defect reproduced somewhere the
+// shell does not have it: `ui_die` prints at every one of these sites.
+//
+// The error is returned unchanged so the caller still has it. IO.Die answers a
+// *ui.FatalError carrying the same two halves, which is why the returned value
+// is this function's argument and not Die's answer.
+func reportFatal(out *ui.IO, err error) error {
+	if err == nil {
+		return nil
+	}
+	var fatal *ui.FatalError
+	if errors.As(err, &fatal) {
+		_ = out.Die(fatal.Reason, fatal.Action)
+		return err
+	}
+	// A plain error has no second half to print. The action is the one a
+	// reader can always take, and it is what lib/run.sh's own fallback says.
+	_ = out.Die(err.Error(), "Run `crossrev doctor`, then try again.")
+	return err
 }

@@ -12,6 +12,8 @@ import (
 	"github.com/carlosboeing/crossrev/internal/prstate"
 	"github.com/carlosboeing/crossrev/internal/sandbox"
 	"github.com/carlosboeing/crossrev/internal/vcs"
+
+	"github.com/carlosboeing/crossrev/internal/ui"
 )
 
 // TestCommit pins restore-before-commit, git.hooks, one commit for the
@@ -112,7 +114,7 @@ func TestCommit(t *testing.T) {
 			t.Fatal("rejected subject was used")
 		}
 		want := "the resolver's commit subject was rejected, so the commit carries a generic one\n   A subject must be one line of at most 100 characters, with no control characters. The fix itself is unaffected."
-		if !strings.Contains(strings.Join(got.Messages, "\n"), want) {
+		if !strings.Contains(ui.Joined(got.Messages), want) {
 			t.Errorf("messages = %q, want warning %q", got.Messages, want)
 		}
 	})
@@ -242,7 +244,7 @@ func TestCommit(t *testing.T) {
 		}
 		want := "the resolver reported 1 fix(es) but changed no files\n   The replies below will claim a fix that is not in the diff, so their threads stay open and the pass halts for a person. Treat those resolutions as unverified and read the thread before merging."
 		found := false
-		for _, m := range got.Messages {
+		for _, m := range ui.Texts(got.Messages) {
 			if m == want {
 				found = true
 				break

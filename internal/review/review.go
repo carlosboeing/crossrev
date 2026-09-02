@@ -47,10 +47,11 @@ func (l *Leg) Run(ctx context.Context, req Request) Result {
 	if skip != "" {
 		out.Outcome = OutcomeSkipped
 		out.Reason = skip
-		out.Messages = []string{
+		// Two ui_say lines (lib/run.sh:260-261).
+		out.Messages = ui.SayLines(
 			fmt.Sprintf("%s#%d is a draft pull request, so an automatic invocation does not review it.", loaded.Repo, req.PR),
 			"Mark it ready for review, or ask for a review explicitly.",
-		}
+		)
 		return out
 	}
 
@@ -62,10 +63,11 @@ func (l *Leg) Run(ctx context.Context, req Request) Result {
 	if hasStop(loaded.PR) {
 		out.Outcome = OutcomeSkipped
 		out.Reason = "crossrev/stop"
-		out.Messages = []string{
+		// Two ui_say lines (lib/run.sh:965-966).
+		out.Messages = ui.SayLines(
 			fmt.Sprintf("crossrev/stop is on %s#%d, so this run stops without reviewing.", loaded.Repo, req.PR),
 			"Remove the label to let the loop continue.",
-		}
+		)
 		return out
 	}
 
@@ -76,23 +78,25 @@ func (l *Leg) Run(ctx context.Context, req Request) Result {
 		return out
 	}
 	out.Pass = ad.pass
-	if ad.warning != "" {
+	if ad.warning.Text != "" {
 		out.Messages = append(out.Messages, ad.warning)
 	}
 	if ad.already {
 		out.Outcome = OutcomeSkipped
 		out.Reason = "already reviewed"
-		out.Messages = []string{
+		// Two ui_say lines (lib/run.sh:1005-1006).
+		out.Messages = ui.SayLines(
 			fmt.Sprintf("%s#%d is already reviewed at %s — pass %d, and nothing has changed since.",
 				loaded.Repo, req.PR, loaded.PR.HeadRefOid.Short(), ad.pass),
 			fmt.Sprintf("Push a revision, or run: crossrev resolve --pr %d", req.PR),
-		}
+		)
 		return out
 	}
 	if ad.decline != "" {
 		out.Outcome = OutcomeDeclined
 		out.Reason = ad.decline
-		out.Messages = []string{fmt.Sprintf("not reviewing %s#%d — %s", loaded.Repo, req.PR, ad.decline)}
+		// ui_say (lib/run.sh:1030).
+		out.Messages = []ui.Line{ui.Say(fmt.Sprintf("not reviewing %s#%d — %s", loaded.Repo, req.PR, ad.decline))}
 		if err := l.postDeclined(ctx, req, loaded, ad); err != nil {
 			out.Outcome = OutcomeError
 			out.Err = err
@@ -100,13 +104,16 @@ func (l *Leg) Run(ctx context.Context, req Request) Result {
 		return out
 	}
 	if ad.stale != "" {
+		// ui_warn, the pair kept apart (lib/run.sh:976-977).
 		out.Reason = "abandoning the unfinished pass-" + fmt.Sprint(ad.pass) + " review — " + ad.stale
-		out.Messages = append(out.Messages, out.Reason+"\n   Resuming it would reconcile against findings that no longer describe this code. Starting the pass again instead.")
+		out.Messages = append(out.Messages, ui.Warn(out.Reason,
+			"Resuming it would reconcile against findings that no longer describe this code. Starting the pass again instead."))
 	}
 	if ad.redrive {
 		msg := fmt.Sprintf("Pass %d's review ended blocked — driving pass %d again.", ad.pass, ad.pass)
+		// ui_say (lib/run.sh:1086).
 		out.Reason = msg
-		out.Messages = append(out.Messages, msg)
+		out.Messages = append(out.Messages, ui.Say(msg))
 	}
 
 	settings, warn, err := l.settings(req, loaded)
@@ -115,7 +122,7 @@ func (l *Leg) Run(ctx context.Context, req Request) Result {
 		out.Err = err
 		return out
 	}
-	if warn != "" {
+	if warn.Text != "" {
 		out.Messages = append(out.Messages, warn)
 	}
 
@@ -128,11 +135,13 @@ func (l *Leg) Run(ctx context.Context, req Request) Result {
 	out.ClaimID = claimID
 	out.Marker = marker
 	if ad.recovering && !ad.redrive {
-		out.Messages = append(out.Messages, resumeMessage(ad.pass, marker.Findings))
+		// ui_say (lib/run.sh:1092).
+		out.Messages = append(out.Messages, ui.Say(resumeMessage(ad.pass, marker.Findings)))
 	}
 
 	if hasRecordedFindings(marker) {
-		out.Messages = append(out.Messages, "The previous attempt already recorded its findings, so the review is not run again.")
+		// ui_say (lib/run.sh:1118).
+		out.Messages = append(out.Messages, ui.Say("The previous attempt already recorded its findings, so the review is not run again."))
 	} else {
 		envelope, payload, err := l.invoke(ctx, req, loaded, settings, ad.pass)
 		if err != nil {
@@ -153,7 +162,8 @@ func (l *Leg) Run(ctx context.Context, req Request) Result {
 		if err == nil {
 			marker.Findings = findings
 		}
-		out.Messages = append(out.Messages, snaps...)
+		// ui_say, one per finding the anchor moved (lib/run.sh:1173).
+		out.Messages = append(out.Messages, ui.SayLines(snaps...)...)
 		var doc struct {
 			Verdict       string  `json:"verdict"`
 			BlockedReason *string `json:"blocked_reason"`

@@ -8,6 +8,8 @@ import (
 
 	"github.com/carlosboeing/crossrev/internal/policy"
 	"github.com/carlosboeing/crossrev/internal/review"
+
+	"github.com/carlosboeing/crossrev/internal/ui"
 )
 
 // TestReviewSubstituteHarnessWarningKeepsSecondSentence pins that when a missing
@@ -31,7 +33,7 @@ func TestReviewSubstituteHarnessWarningKeepsSecondSentence(t *testing.T) {
 	}
 	const wantSentence = "Both legs now run on the same harness, so a bug it misses while reviewing it also misses while resolving. Install codex to get the second lineage back."
 	found := false
-	for _, msg := range got.Messages {
+	for _, msg := range ui.Texts(got.Messages) {
 		if strings.Contains(msg, wantSentence) {
 			found = true
 			break

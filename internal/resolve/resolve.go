@@ -41,7 +41,7 @@ func (l *Leg) Run(ctx context.Context, req Request) Result {
 		return wrapErr(err)
 	} else if refusal != nil {
 		return Result{Outcome: OutcomeRefused, Err: refusal, Pass: s.pass}
-	} else if warn != "" {
+	} else if warn.Text != "" {
 		early.Messages = append(early.Messages, warn)
 	}
 
@@ -58,7 +58,7 @@ func (l *Leg) Run(ctx context.Context, req Request) Result {
 		r.Pass = s.pass
 		return r
 	}
-	if claimWarning != "" {
+	if claimWarning.Text != "" {
 		early.Messages = append(early.Messages, claimWarning)
 	}
 

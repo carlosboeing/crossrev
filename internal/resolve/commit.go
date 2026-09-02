@@ -14,7 +14,7 @@ import (
 	"github.com/carlosboeing/crossrev/internal/vcs"
 )
 
-func (l *Leg) commitAndPush(ctx context.Context, s *session, workdir string, recs, findings []harness.Node, marker prstate.Marker, wrote bool, remote string) (sha string, messages []string, emptyRemote bool, err error) {
+func (l *Leg) commitAndPush(ctx context.Context, s *session, workdir string, recs, findings []harness.Node, marker prstate.Marker, wrote bool, remote string) (sha string, messages []ui.Line, emptyRemote bool, err error) {
 	existing, _ := marker.CommitSHA.Get()
 	if existing != "" && existing != "null" {
 		return existing, nil, false, nil
@@ -34,7 +34,8 @@ func (l *Leg) commitAndPush(ctx context.Context, s *session, workdir string, rec
 		if _, warn, restoreErr := sandbox.Restore(workdir, sbx.Paths()); restoreErr != nil {
 			return "", nil, false, restoreErr
 		} else if warn != nil {
-			messages = append(messages, warn.Message)
+			// ui_warn: sandbox.Restore answers both halves (lib/sandbox.sh).
+			messages = append(messages, ui.Warn(warn.Message, warn.Hint))
 		}
 	}
 
@@ -46,7 +47,10 @@ func (l *Leg) commitAndPush(ctx context.Context, s *session, workdir string, rec
 	}
 	if !staged {
 		if fixed > 0 {
-			messages = append(messages, fmt.Sprintf("the resolver reported %d fix(es) but changed no files\n   The replies below will claim a fix that is not in the diff, so their threads stay open and the pass halts for a person. Treat those resolutions as unverified and read the thread before merging.", fixed))
+			// ui_warn, the pair kept apart (lib/run.sh:2249-2250).
+			messages = append(messages, ui.Warn(
+				fmt.Sprintf("the resolver reported %d fix(es) but changed no files", fixed),
+				"The replies below will claim a fix that is not in the diff, so their threads stay open and the pass halts for a person. Treat those resolutions as unverified and read the thread before merging."))
 		}
 		return "", messages, false, nil
 	}
@@ -56,7 +60,7 @@ func (l *Leg) commitAndPush(ctx context.Context, s *session, workdir string, rec
 		return "", messages, false, targetErr
 	}
 	for _, w := range target.Warnings {
-		messages = append(messages, w.Message)
+		messages = append(messages, ui.Warn(w.Message, w.Hint))
 	}
 	headRepo := s.repo
 	if s.pr.IsCrossRepository && s.pr.HeadRepositoryOwner != "" && s.pr.HeadRepository != "" {
@@ -73,7 +77,7 @@ func (l *Leg) commitAndPush(ctx context.Context, s *session, workdir string, rec
 	}
 
 	msg, commitWarning := l.commitMessage(s, recs, findings, marker, fixed)
-	if commitWarning != "" {
+	if commitWarning.Text != "" {
 		messages = append(messages, commitWarning)
 	}
 	runHooks := s.gitHooksRun()
@@ -100,7 +104,7 @@ func (l *Leg) commitAndPush(ctx context.Context, s *session, workdir string, rec
 	return sha, messages, emptyRemote, err
 }
 
-func (l *Leg) commitMessage(s *session, recs, findings []harness.Node, marker prstate.Marker, fixed int) (string, string) {
+func (l *Leg) commitMessage(s *session, recs, findings []harness.Node, marker prstate.Marker, fixed int) (string, ui.Line) {
 	resolutions := marshalResolutions(recs)
 	findingsRaw, _ := json.Marshal(findings)
 	sha, _ := marker.HeadSHA.Get()
@@ -108,9 +112,9 @@ func (l *Leg) commitMessage(s *session, recs, findings []harness.Node, marker pr
 		subject, _ := marker.CommitSubject.Get()
 		raw, _ := marker.MarshalJSON()
 		if !CommitSubjectOK(subject, string(raw)) {
-			commitWarning := ""
+			var commitWarning ui.Line
 			if subject != "" && subject != "null" {
-				commitWarning = ui.Warning(
+				commitWarning = ui.Warn(
 					"the resolver's commit subject was rejected, so the commit carries a generic one",
 					"A subject must be one line of at most 100 characters, with no control characters. The fix itself is unaffected.",
 				)
@@ -118,10 +122,10 @@ func (l *Leg) commitMessage(s *session, recs, findings []harness.Node, marker pr
 			subject = fmt.Sprintf("fix: resolve crossrev review findings (pass %d)", s.pass)
 			return subject + "\n\n" + CommitBody(resolutions, findingsRaw, "fixed", sha, s.pass, s.repo.String(), s.req.PR), commitWarning
 		}
-		return subject + "\n\n" + CommitBody(resolutions, findingsRaw, "fixed", sha, s.pass, s.repo.String(), s.req.PR), ""
+		return subject + "\n\n" + CommitBody(resolutions, findingsRaw, "fixed", sha, s.pass, s.repo.String(), s.req.PR), ui.Line{}
 	}
 	return fmt.Sprintf("chore: record deferred crossrev findings (pass %d)\n\n%s",
-		s.pass, CommitBody(resolutions, findingsRaw, "deferred", sha, s.pass, s.repo.String(), s.req.PR)), ""
+		s.pass, CommitBody(resolutions, findingsRaw, "deferred", sha, s.pass, s.repo.String(), s.req.PR)), ui.Line{}
 }
 
 func (l *Leg) pushHead(ctx context.Context, work Git, s *session, remote string, runHooks bool) (string, bool, error) {

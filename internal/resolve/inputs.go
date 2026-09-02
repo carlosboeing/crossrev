@@ -14,6 +14,7 @@ import (
 	"github.com/carlosboeing/crossrev/internal/harness"
 	"github.com/carlosboeing/crossrev/internal/prstate"
 	"github.com/carlosboeing/crossrev/internal/runlog"
+	"github.com/carlosboeing/crossrev/internal/ui"
 	"github.com/carlosboeing/crossrev/internal/vcs"
 )
 
@@ -77,7 +78,7 @@ type Result struct {
 	Prompt      []byte
 	Invocation  harness.Invocation
 	Message     string
-	Messages    []string
+	Messages    []ui.Line
 	Err         error
 }
 
