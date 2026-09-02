@@ -83,12 +83,17 @@ func TestContextCarriesTheBaseAndHeadPair(t *testing.T) {
 	}
 }
 
-func TestContextResolvesAppSlugOnAutomaticTrigger(t *testing.T) {
+// The shell keys the trusted author on the MODE, not on who asked for the leg:
+// lib/run.sh:309 is state_trusted_author "$CTX_MODE", and CTX_MODE comes from
+// the configuration at lib/run.sh:299. lib/state.sh:26 then branches on
+// `automated` alone.
+func TestContextResolvesAppSlugInAutomatedMode(t *testing.T) {
 	e := newEnv(t)
+	e.cfg = mustConfig(t, "version: 1\nmode: automated\n")
 	t.Setenv("CROSSREV_APP_SLUG", "crossrev")
 	req := e.request(t)
 	req.Author = ""
-	req.Trigger = review.TriggerAutomatic
+	req.Trigger = review.TriggerHuman
 	leg := e.leg(t)
 	got := leg.Run(context.Background(), req)
 	if got.Err != nil {
@@ -96,6 +101,27 @@ func TestContextResolvesAppSlugOnAutomaticTrigger(t *testing.T) {
 	}
 	if got.Context.Author != "crossrev[bot]" {
 		t.Errorf("Author = %q, want crossrev[bot] from CROSSREV_APP_SLUG (lib/state.sh:35-40)", got.Context.Author)
+	}
+}
+
+// The mirror of it: an automatic trigger against a `mode: local` repository is
+// the invoking user, because lib/state.sh's `*)` arm covers every mode that is
+// not `automated`. Keyed on the trigger instead, this refuses with "cannot
+// determine which App's markers to trust" after two gh calls.
+func TestContextKeysTheTrustedAuthorOnTheModeNotTheTrigger(t *testing.T) {
+	e := newEnv(t)
+	e.cfg = mustConfig(t, "version: 1\nmode: local\n")
+	t.Setenv("CROSSREV_APP_SLUG", "")
+	req := e.request(t)
+	req.Author = ""
+	req.Trigger = review.TriggerAutomatic
+	leg := e.leg(t)
+	got := leg.Run(context.Background(), req)
+	if got.Err != nil {
+		t.Fatalf("Run: %v (lib/run.sh:309 keys on the mode)", got.Err)
+	}
+	if got.Context.Author != author {
+		t.Errorf("Author = %q, want the invoking user %q (lib/state.sh:44)", got.Context.Author, author)
 	}
 }
 
