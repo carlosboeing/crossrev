@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/carlosboeing/crossrev/internal/ui"
+
 	"github.com/carlosboeing/crossrev/internal/config"
 	"github.com/carlosboeing/crossrev/internal/core"
 	"github.com/carlosboeing/crossrev/internal/cred"
@@ -140,6 +142,9 @@ func (l *Leg) invoke(ctx context.Context, s *session, marker prstate.Marker, wor
 			Pass:        s.pass,
 			Marker:      marker,
 			Resolutions: marker.Resolutions,
+			// ui_say (lib/run.sh:1991). Said before the commit and reply
+			// steps, which is where the shell says it.
+			Messages: []ui.Line{ui.Say("The previous attempt already recorded its resolutions, so the resolver is not run again.")},
 		}
 	}
 

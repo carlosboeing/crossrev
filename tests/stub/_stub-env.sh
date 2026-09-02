@@ -37,7 +37,12 @@ _stub_env_load() {
   file="$(_stub_env_file)"
   [[ -r "$file" ]] || return 0
   while IFS= read -r line; do
-    name="${line%%=*}"
+    # The `export ` prefix comes off before the name is read back. Left on, the
+    # name is `export CROSSREV_GH_LOG`, `${!name}` is empty for every line, and
+    # the already-set rule below never fires — so a stale snapshot silently
+    # replaced a value the caller had just set.
+    name="${line#export }"
+    name="${name%%=*}"
     [[ -n "$name" && "$name" != "$line" ]] || continue
     [[ -n "${!name:-}" ]] && continue
     eval "export $line"

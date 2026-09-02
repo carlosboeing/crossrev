@@ -198,3 +198,28 @@ func TestTheResolveLegBracketsTheWorktreeInTheRunLog(t *testing.T) {
 		}
 	}
 }
+
+// A pass whose resolutions are already on the marker says so rather than
+// resolving in silence (lib/run.sh:1991).
+func TestTheResolveLegSaysItIsNotRunningTheResolverAgain(t *testing.T) {
+	e := setup(t)
+	e.addReview(t, defaultFindings(), "issues-remain")
+	e.addResolve(t, prstate.Marker{
+		State:       core.PassStarted,
+		TS:          e.now.Unix(),
+		HeadSHA:     prstate.Some(e.head.SHA()),
+		Harness:     prstate.Some("claude"),
+		CommitSHA:   prstate.Some("cafe000cafe000cafe000cafe000cafe000cafe0"),
+		Summary:     prstate.Some("done"),
+		Resolutions: json.RawMessage(`[{"finding_id":"` + testFinding + `","resolution":"fixed","reply":"done"}]`),
+	}, 9002)
+
+	got := e.run(t)
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
+	want := ui.Say("The previous attempt already recorded its resolutions, so the resolver is not run again.")
+	if !containsRun(got.Messages, []ui.Line{want}) {
+		t.Fatalf("the recovery line is missing:\n got %#v", got.Messages)
+	}
+}
