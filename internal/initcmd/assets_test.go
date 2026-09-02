@@ -13,7 +13,7 @@ import (
 const repoRoot = "../.."
 
 // templateDir is the one directory lib/init.sh renders from, as
-// "$ROOT/templates/" (lib/init.sh:570, lib/init.sh:874).
+// "$ROOT/templates/" (lib/init.sh:570, lib/init.sh:894).
 const templateDir = "templates"
 
 // embedded pairs each canonical file under templates/ with the accessor that

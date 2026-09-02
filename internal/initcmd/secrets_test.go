@@ -180,7 +180,7 @@ func TestSecretsSetsTheAppCredentialsAtRepositoryScope(t *testing.T) {
 }
 
 // TestSecretsSendsTheValueOnStdinRatherThanTheCommandLine: the shell pipes it
-// (`printf '%s' "$value" | gh secret set …`, lib/init.sh:828), and a value on
+// (`printf '%s' "$value" | gh secret set …`, lib/init.sh:848), and a value on
 // argv is readable from the process table by every user on the machine.
 //
 // The trailing newlines go, because the shell reads the key file through
@@ -212,7 +212,7 @@ func TestSecretsSendsTheValueOnStdinRatherThanTheCommandLine(t *testing.T) {
 
 // TestSecretsSetsAnOrganisationsSecretsAtOrganisationScope, and falls back to
 // the repository when the login has no admin access — with the warning saying
-// what that costs (lib/init.sh:835-848).
+// what that costs (lib/init.sh:855-868).
 func TestSecretsSetsAnOrganisationsSecretsAtOrganisationScope(t *testing.T) {
 	for _, row := range []struct {
 		name     string
@@ -406,7 +406,7 @@ func TestSecretsRegistersTheRefresherAppOnlyWithSomeoneToApproveIt(t *testing.T)
 // TestSecretsKeepsTheRotatingCredentialRepositoryScopedEvenOnAnOrganisation:
 // concurrency groups do not span repositories, so an organisation copy is
 // refreshed by every repository reading it and the first to refresh invalidates
-// it for the rest (lib/init.sh:534-538 and :811-824).
+// it for the rest (lib/init.sh:534-538 and :831-844).
 func TestSecretsKeepsTheRotatingCredentialRepositoryScopedEvenOnAnOrganisation(t *testing.T) {
 	runner := &runRecorder{}
 	apps := fakeApps{
@@ -508,7 +508,7 @@ func TestSecretsReportsOneThatIsAlreadyThereRatherThanSettingItAgain(t *testing.
 
 // TestSecretsCapturesAnArchetypeATokenRatherThanAskingForAPaste closes the last
 // place in the hosted setup where a credential would otherwise pass through a
-// clipboard (lib/init.sh:749-798).
+// clipboard (lib/init.sh:769-818).
 func TestSecretsCapturesAnArchetypeATokenRatherThanAskingForAPaste(t *testing.T) {
 	seeds := &fakeSeeder{
 		available: map[string]bool{"claude": true},
@@ -563,7 +563,7 @@ func TestSecretsCapturesAnArchetypeATokenRatherThanAskingForAPaste(t *testing.T)
 }
 
 // TestSecretsDoesNotOpenABrowserFlowWithNobodyThere pins the two guards at
-// lib/init.sh:751-752, each on its own.
+// lib/init.sh:771-772, each on its own.
 func TestSecretsDoesNotOpenABrowserFlowWithNobodyThere(t *testing.T) {
 	for _, row := range []struct {
 		name      string
@@ -604,7 +604,7 @@ func TestSecretsDoesNotOpenABrowserFlowWithNobodyThere(t *testing.T) {
 }
 
 // TestSecretsWarnsWhenTheSeedCommandPrintedNoTokenItRecognises
-// (lib/init.sh:785-789). The secret is not set, so the warning has to say so.
+// (lib/init.sh:805-809). The secret is not set, so the warning has to say so.
 func TestSecretsWarnsWhenTheSeedCommandPrintedNoTokenItRecognises(t *testing.T) {
 	seeds := &fakeSeeder{
 		available: map[string]bool{"claude": true},
@@ -637,7 +637,7 @@ func TestSecretsWarnsWhenTheSeedCommandPrintedNoTokenItRecognises(t *testing.T) 
 	}
 }
 
-// TestSecretsRefusesTheSeedFlowRatherThanRunningItUnasked (lib/init.sh:763).
+// TestSecretsRefusesTheSeedFlowRatherThanRunningItUnasked (lib/init.sh:783).
 func TestSecretsRefusesTheSeedFlowRatherThanRunningItUnasked(t *testing.T) {
 	seeds := &fakeSeeder{available: map[string]bool{"claude": true}}
 	plan, req, out, _ := planned(t, hostedPairing("claude", "claude"), func(r *initcmd.Request) {
@@ -658,7 +658,7 @@ func TestSecretsRefusesTheSeedFlowRatherThanRunningItUnasked(t *testing.T) {
 }
 
 // TestSecretStoreArgvForTheSeedCommand: the seed command is split on
-// whitespace the way `$cmd` is at lib/init.sh:780, so each word reaches the
+// whitespace the way `$cmd` is at lib/init.sh:800, so each word reaches the
 // child as one argv entry.
 func TestSecretStoreArgvForTheSeedCommand(t *testing.T) {
 	runner := &runRecorder{stdout: map[string]string{"claude setup-token": "ok"}}

@@ -1,5 +1,5 @@
 // secrets.go — the secret half of `_init_execute` (lib/init.sh:476-562), and
-// the three helpers it reaches for (lib/init.sh:749-849).
+// the three helpers it reaches for (lib/init.sh:769-869).
 //
 // Every value here is a credential, so two rules hold throughout. A value goes
 // to the child on stdin and never onto a command line, where the process table
@@ -39,7 +39,7 @@ type Registrar interface {
 }
 
 // TokenRecorder starts the clock on a token that cannot be read back
-// (auth_token_record, lib/init.sh:795).
+// (auth_token_record, lib/init.sh:815).
 //
 // The one-year clock starts at capture and this is the only moment the date
 // exists: the token cannot be read back, so nothing later can work out when it
@@ -49,9 +49,9 @@ type TokenRecorder interface {
 }
 
 // Seeder runs a harness's own credential seed command
-// (_init_set_archetype_a_token, lib/init.sh:749-798).
+// (_init_set_archetype_a_token, lib/init.sh:769-818).
 type Seeder interface {
-	// Available is `command -v <harness>` (lib/init.sh:751).
+	// Available is `command -v <harness>` (lib/init.sh:771).
 	Available(harness string) bool
 	// Run starts the command and answers everything it wrote on both
 	// streams, which is what `$cmd 2>&1 | tee` captures.
@@ -72,13 +72,13 @@ type SecretStore struct {
 	Env []string
 }
 
-// SetRepo is `gh secret set <name> --repo <repo>` (lib/init.sh:828 and :843).
+// SetRepo is `gh secret set <name> --repo <repo>` (lib/init.sh:848 and :863).
 func (s *SecretStore) SetRepo(ctx context.Context, repo core.Slug, name, value string) bool {
 	return s.set(ctx, []string{"secret", "set", name, "--repo", repo.String()}, value)
 }
 
 // SetOrg is `gh secret set <name> --org <owner> --visibility all`
-// (lib/init.sh:836).
+// (lib/init.sh:856).
 func (s *SecretStore) SetOrg(ctx context.Context, owner, name, value string) bool {
 	return s.set(ctx, []string{"secret", "set", name, "--org", owner, "--visibility", "all"}, value)
 }
@@ -105,7 +105,7 @@ func (s *SecretStore) set(ctx context.Context, args []string, value string) bool
 type SeedCommands struct {
 	Runner exec.Runner
 	Env    []string
-	// LookPath is `command -v` (lib/init.sh:751). Nil searches PATH.
+	// LookPath is `command -v` (lib/init.sh:771). Nil searches PATH.
 	LookPath func(string) (string, error)
 }
 
@@ -122,12 +122,12 @@ func (s SeedCommands) Available(name string) bool {
 // Run starts the seed command and answers everything it wrote.
 //
 // The command is split on whitespace because the shell runs it as a bare `$cmd`
-// (lib/init.sh:780), where the word split is what turns `claude setup-token`
+// (lib/init.sh:800), where the word split is what turns `claude setup-token`
 // into a program and an argument. Both streams arrive as one, which is the
 // `2>&1` in front of the tee.
 //
 // A failure answers with whatever was captured rather than an error, because
-// the `|| true` at lib/init.sh:782 is load-bearing: without it a cancelled
+// the `|| true` at lib/init.sh:802 is load-bearing: without it a cancelled
 // authorisation would abort `init` halfway through, having already written
 // labels and secrets. The token check below is what decides whether it worked.
 func (s SeedCommands) Run(ctx context.Context, command string) string {
@@ -144,7 +144,7 @@ func (s SeedCommands) Run(ctx context.Context, command string) string {
 	return string(result.Stdout)
 }
 
-// The two patterns the capture flow uses (lib/init.sh:781 and :784).
+// The two patterns the capture flow uses (lib/init.sh:801 and :804).
 //
 // The first redacts what reaches the terminal, keeping the first six characters
 // after the prefix so a reader can see something happened. The second is the
@@ -308,7 +308,7 @@ func (p Plan) refresherSecrets(ctx context.Context, req Request, ex Execution) (
 }
 
 // setSecret writes one secret and says where it landed (_init_secret_set,
-// lib/init.sh:825-849).
+// lib/init.sh:845-869).
 //
 // Organisation level where the owner is an organisation, so later repositories
 // in it need only config, labels and the App install. forceRepo is the
@@ -349,7 +349,7 @@ func (p Plan) setSecret(ctx context.Context, req Request, ex Execution, name, va
 }
 
 // seedArchetypeAToken captures the harness's own token rather than asking for a
-// paste (_init_set_archetype_a_token, lib/init.sh:749-798).
+// paste (_init_set_archetype_a_token, lib/init.sh:769-818).
 //
 // The command opens a browser for one authorisation and then prints the token
 // to stdout, saying plainly that it will not show it again. Capturing it here
@@ -422,7 +422,7 @@ func (p Plan) seedArchetypeAToken(ctx context.Context, req Request, ex Execution
 }
 
 // secretScopeFlag is the scope an operator should set a secret at by hand
-// (_init_secret_scope_flag, lib/init.sh:800-806).
+// (_init_secret_scope_flag, lib/init.sh:820-826).
 func (p Plan) secretScopeFlag() string {
 	if p.OwnerType == "organization" {
 		return "--org " + p.Owner
@@ -478,7 +478,7 @@ func lastMatch(pattern *regexp.Regexp, text string) string {
 	return matches[len(matches)-1]
 }
 
-// hasInput is `_ui_input_source >/dev/null 2>&1` (lib/init.sh:524 and :752):
+// hasInput is `_ui_input_source >/dev/null 2>&1` (lib/init.sh:524 and :772):
 // whether there is anywhere to read an answer from at all.
 //
 // It opens the source and closes it, which is what the shell's subshell test

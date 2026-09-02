@@ -101,7 +101,7 @@ endpoints:
 		{
 			// `repository` with nothing after it is not the
 			// `repository <layout> <path>` the case arm matches, so
-			// it falls through to none (lib/init.sh:857-863).
+			// it falls through to none (lib/init.sh:877-883).
 			name:     "unresolvable.yml",
 			resolved: "repository",
 			body: `version: 1
@@ -124,7 +124,7 @@ resolver:
 // TestWriteConfigStatesThePairingItProvisionedFor: init derives the secret list
 // and whether a refresher App is needed from the resolved pairing, so a policy
 // file naming a different one leaves the repository provisioned for a leg that
-// never runs (lib/init.sh:877-907, tests/test-init.sh:298-325).
+// never runs (lib/init.sh:897-927, tests/test-init.sh:298-325).
 func TestWriteConfigStatesThePairingItProvisionedFor(t *testing.T) {
 	plan := initcmd.Plan{BacklogResolved: "github_issues", Config: configFrom(t, `version: 1
 reviewer:
@@ -143,7 +143,7 @@ resolver:
 	}
 	// A field resolving to nothing is deleted rather than left at the
 	// template's value, so a leg cannot inherit a model under a harness that
-	// never had it (lib/init.sh:891-893). Asserted on the two blocks rather
+	// never had it (lib/init.sh:911-913). Asserted on the two blocks rather
 	// than the document, whose comments name the template's own model.
 	for _, leg := range []string{"reviewer:", "resolver:"} {
 		block := blockOf(written, leg)
@@ -186,7 +186,7 @@ func TestWriteConfigQuotesAValueTheWayYqDoes(t *testing.T) {
 		{"12:30", "12:30"},
 		// A value of `null` is not here: _init_policy_pairing treats it
 		// as a field that resolved to nothing and deletes the key
-		// (lib/init.sh:899), so it never reaches the emitter.
+		// (lib/init.sh:919), so it never reaches the emitter.
 		{"true", `"true"`},
 		{"False", `"False"`},
 		{"~", `"~"`},

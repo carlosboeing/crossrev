@@ -47,7 +47,7 @@ type Execution struct {
 
 	// Seeds runs a harness's own credential seed command. Nil is not a
 	// failure: it is a run with no way to open a browser, which is what
-	// `command -v` answering nothing means at lib/init.sh:751.
+	// `command -v` answering nothing means at lib/init.sh:771.
 	Seeds Seeder
 
 	// Files is the working tree of the repository being set up.

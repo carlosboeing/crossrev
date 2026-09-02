@@ -1,5 +1,5 @@
 // config.go — the policy file `init` commits (_init_write_config,
-// lib/init.sh:855-893, and _init_policy_pairing, :894-907).
+// lib/init.sh:875-913, and _init_policy_pairing, :914-927).
 //
 // The generated config states plainly where deferred work goes and which
 // pairing was provisioned for, because `auto` is a bootstrap convenience rather
@@ -33,13 +33,13 @@ import (
 )
 
 // WriteConfig renders the policy file from the template
-// (_init_write_config, lib/init.sh:855-875).
+// (_init_write_config, lib/init.sh:875-895).
 //
 // The template bytes are not written through: the caller's copy is the
 // binary's own, and every later run renders from it.
 //
 // The one document this is ever handed is templates/crossrev.yml, compiled in
-// (lib/init.sh:874). A document that will not parse or will not print is a
+// (lib/init.sh:894). A document that will not parse or will not print is a
 // mistake in this package fixed by a recompile, not something a caller can
 // cause, so it panics rather than growing an error return, the way
 // assets.go's template() does.
@@ -79,7 +79,7 @@ type yamlEdit struct {
 	remove bool
 }
 
-// policyEdits is the expression at lib/init.sh:865-874, in its order.
+// policyEdits is the expression at lib/init.sh:885-894, in its order.
 //
 // The order is observable: a key the template does not carry is appended to the
 // end of its mapping, so two edits that both create a key land in the order
@@ -112,7 +112,7 @@ func (p Plan) policyEdits() []yamlEdit {
 	// The pairing init actually provisioned for, written down. A field
 	// resolving to nothing is deleted rather than left at the template's
 	// value, so a leg cannot inherit `model: claude-fable-5` under a harness
-	// that never had it (lib/init.sh:894-907).
+	// that never had it (lib/init.sh:914-927).
 	for _, leg := range []string{"reviewer", "resolver"} {
 		for _, field := range []string{"harness", "model", "effort", "endpoint"} {
 			value := p.Config.Get("." + leg + "." + field)

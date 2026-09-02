@@ -2,7 +2,7 @@
 //
 // A checkout renders these from the tree it was installed from: the workflow
 // loop reads "$ROOT/templates/crossrev-$t.yml" (lib/init.sh:570) and the policy
-// file is yq'd out of "$ROOT/templates/crossrev.yml" (lib/init.sh:874).
+// file is yq'd out of "$ROOT/templates/crossrev.yml" (lib/init.sh:894).
 // templates/operator-config.yml is the local-mode config an operator copies by
 // hand (docs/installation.md:114). A binary has no checkout, so it carries the
 // bytes.
