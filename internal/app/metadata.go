@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/carlosboeing/crossrev/internal/exec"
+	"github.com/carlosboeing/crossrev/internal/forge/ghexec"
 )
 
 // RoleDefaultName is the App name CrossRev proposes for an owner
@@ -359,37 +360,20 @@ func mustEncodeString(s string) json.RawMessage {
 // tests/stub/gh earlier on the PATH.
 const program = "gh"
 
-// ghEnvironment is what `gh` is allowed to inherit.
+// The environment `gh` is allowed to inherit is ghexec.EnvironmentNames, and
+// this package reads it rather than keeping a list of its own. A second copy
+// drifts: a name added to either one changed only that side's environment, and
+// every test in both packages stayed green.
 //
-// It is the list internal/forge/ghexec/client.go:56-75 documents, written out
-// again because that one is unexported and this package may not reach into it.
-// The reasoning is that file's, in full; the short form is that every name here
-// is either documented by `gh help environment` or read by the Go runtime `gh`
-// is built on, and that GH_REPO and GH_FORCE_TTY are left out on purpose.
+// The reasoning for each name is documented once, at that list. The short form
+// is that every one is either documented by `gh help environment` or read by
+// the Go runtime `gh` is built on, and that GH_REPO and GH_FORCE_TTY are left
+// out on purpose.
 //
 // This is the orchestrator side of the ADR 0001 boundary, so the four
 // credential names are on the list rather than stripped from it: the child is
 // `gh`, not a model, and `gh` cannot authenticate without one. Nothing here
 // reads attacker-controlled text — every argument is built in this package.
-var ghEnvironment = []string{
-	"PATH",
-	"HOME",
-	"XDG_CONFIG_HOME",
-	"GH_CONFIG_DIR",
-	"GH_HOST",
-	"GH_TOKEN",
-	"GITHUB_TOKEN",
-	"GH_ENTERPRISE_TOKEN",
-	"GITHUB_ENTERPRISE_TOKEN",
-	"SSL_CERT_FILE",
-	"SSL_CERT_DIR",
-	"HTTP_PROXY",
-	"HTTPS_PROXY",
-	"NO_PROXY",
-	"http_proxy",
-	"https_proxy",
-	"no_proxy",
-}
 
 // GH reads GitHub through the `gh` CLI, for the facts an App's identity is
 // checked against.
@@ -401,8 +385,8 @@ type GH struct {
 // GHOption adjusts a GH at construction.
 type GHOption func(*GH)
 
-// WithEnv replaces the environment `gh` receives. The default is the allowlist
-// above, read from this process.
+// WithEnv replaces the environment `gh` receives. The default is
+// ghexec.EnvironmentNames, read from this process.
 func WithEnv(env []string) GHOption {
 	return func(g *GH) { g.env = env }
 }
@@ -417,7 +401,7 @@ func NewGH(runner exec.Runner, opts ...GHOption) *GH {
 	if runner == nil {
 		panic("app.NewGH: runner is nil")
 	}
-	g := &GH{runner: runner, env: exec.Inherit(ghEnvironment)}
+	g := &GH{runner: runner, env: exec.Inherit(ghexec.EnvironmentNames())}
 	for _, opt := range opts {
 		opt(g)
 	}
