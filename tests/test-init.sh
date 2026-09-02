@@ -386,6 +386,43 @@ ep_line="$(install_line_for "$ep_cfg")"
 has "a leg on a named endpoint still renders the endpoint host installer" "$ep_line" "curl -fsSL https://claude.ai/install.sh"
 is  "and not a second one" "$(grep -c 'curl -fsSL' <<<"$ep_line" | tr -d ' ')" "1"
 
+# --- a substituted value is written as given ------------------------------
+#
+# The source ref is whatever `git describe --tags` reports, so it carries a tag
+# name, and a tag name may hold `&` or `#`. Both are syntax to `sed` in a
+# replacement: `&` stands for the whole match, so `v1&2` rendered as
+# `v1__SOURCE_REF__2`, and `#` is the delimiter the substitution uses, so a ref
+# holding one killed `sed` and left the workflow empty.
+#
+# A shipped template rather than an invented one, so the assertion reads the
+# bytes an operator gets. No default for the ref: a helper that supplies a safe
+# value when none is passed would hide exactly the defect this pins.
+render_workflow_with_ref() {
+  local ref="$1"
+  bash -c '
+    source "'"$HERE"'/../lib/ui.sh"
+    source "'"$HERE"'/../lib/harnesses.sh"
+    source "'"$HERE"'/../lib/config.sh"
+    source "'"$HERE"'/../lib/init.sh"
+    CFG_MERGED="$(jq -cn --argjson d "$(_cfg_defaults)" --argjson r "$(_cfg_yaml_text_to_json "version: 1")" '\''$d * $r'\'')"
+    export CFG_MERGED
+    INIT_RUNNER="ubuntu-latest"
+    INIT_REPO="acme/widget"
+    INIT_SOURCE_SHA="0000000000000000000000000000000000000000"
+    INIT_SOURCE_REF="$1"
+    _init_render_workflow "'"$HERE"'/../templates/crossrev-review.yml"
+  ' _ "$ref" 2>&1
+}
+
+amp_wf="$(render_workflow_with_ref 'v0.5.0-1-g&abc1234')"
+has "a source ref holding & is written into the workflow as given" \
+  "$amp_wf" "# v0.5.0-1-g&abc1234"
+hasnt "so no placeholder survives the substitution" "$amp_wf" "__SOURCE_REF__"
+
+hash_wf="$(render_workflow_with_ref 'v0.5.0#1')"
+has "and a ref holding the substitution delimiter renders too" \
+  "$hash_wf" "# v0.5.0#1"
+
 # --- a label that will not create stops init --------------------------------
 #
 # cmd_init is called plainly from bin/crossrev, so set -e already ends the run
