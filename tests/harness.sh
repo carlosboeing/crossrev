@@ -14,6 +14,44 @@
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# The wrapper a native run is invoked through, and why one is needed.
+#
+# The stubs are configured through the environment: tests/stub/gh reads its
+# route table from CROSSREV_GH_ROUTES, the harness stubs read their payload from
+# CROSSREV_REVIEW_PAYLOAD. bin/crossrev hands every child the whole environment
+# it holds, so a stub it starts already carries all of them.
+#
+# The native binary hands each child an exact allowlist — Inherit, in
+# internal/exec, which is the ADR 0001 boundary — and a test-only name is not on
+# it and must not be. Widening a production allowlist for a fixture would make
+# the boundary a fiction. So the wrapper snapshots the names on the way in, and
+# tests/stub/_stub-env.sh reads them back on the way out.
+#
+# The snapshot goes beside the suite's own XDG_CONFIG_HOME, which is already on
+# every allowlist the binary builds, so the child can find it. It is rewritten
+# on every invocation, so a per-case export made after stub_reset is carried.
+#
+# printf %q for the value, so a space, a quote or a newline survives and no line
+# is ever split. compgen -e rather than printenv, for the same reason: it lists
+# names, and a multi-line value cannot be mistaken for two of them.
+_stub_env_wrapper() {
+  local target="$1" dir
+  dir="$(mktemp -d)"
+  cat >"$dir/crossrev" <<WRAP
+#!/usr/bin/env bash
+set -uo pipefail
+_base="\${XDG_CONFIG_HOME:-\$HOME/.config}"
+mkdir -p "\$_base" 2>/dev/null
+: >"\$_base/crossrev-stub.env"
+while IFS= read -r _name; do
+  printf 'export %s=%q\\n' "\$_name" "\${!_name}" >>"\$_base/crossrev-stub.env"
+done < <(compgen -e | grep '^CROSSREV_' || true)
+exec "$target" "\$@"
+WRAP
+  chmod +x "$dir/crossrev"
+  printf '%s' "$dir/crossrev"
+}
+
 # Which crossrev the CLI-driven cases invoke.
 #
 # CROSSREV_TEST_BIN names an executable to run instead of the shell entry point,
@@ -34,7 +72,7 @@ if [[ -n "${CROSSREV_TEST_BIN:-}" ]]; then
     printf 'CROSSREV_TEST_BIN is not an executable: %s\n' "$CROSSREV_TEST_BIN" >&2
     exit 2
   }
-  CROSSREV="$CROSSREV_TEST_BIN"
+  CROSSREV="$(_stub_env_wrapper "$CROSSREV_TEST_BIN")"
 fi
 
 pass=0; fail=0

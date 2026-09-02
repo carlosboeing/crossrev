@@ -7,5 +7,11 @@
 
 set -uo pipefail
 
+# The CROSSREV_* configuration this stub reads, restored when the parent handed
+# it an allowlist rather than the whole environment. See the file for why.
+# shellcheck source=tests/stub/_stub-env.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_stub-env.sh"
+
+
 [[ -n "${CROSSREV_BROWSER_LOG:-}" ]] && printf '%s\n' "${1:-}" >>"$CROSSREV_BROWSER_LOG"
 exit 0
