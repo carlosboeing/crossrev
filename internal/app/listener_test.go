@@ -539,6 +539,14 @@ func TestOpenBrowserRefusesWhenNeitherOpenerIsInstalled(t *testing.T) {
 
 // _open_browser's status is the opener's own, so a non-zero exit is a failure
 // the caller warns about rather than an ignored one.
+// TestErrNoOpenerText pins the sentinel's bytes: a caller that prints the
+// error directly would otherwise print changed text with no test failing.
+func TestErrNoOpenerText(t *testing.T) {
+	if got := app.ErrNoOpener.Error(); got != "neither open nor xdg-open is installed" {
+		t.Errorf("ErrNoOpener = %q", got)
+	}
+}
+
 func TestOpenBrowserReportsTheOpenersOwnFailure(t *testing.T) {
 	rec := &recorder{results: []exec.Result{{ExitCode: 1}}}
 	b := app.NewBrowser(rec, app.WithLookPath(stubLook("open")))
