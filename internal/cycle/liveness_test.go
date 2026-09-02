@@ -168,7 +168,7 @@ func TestLivenessLocal(t *testing.T) {
 			f := &livenessForge{}
 			probe := livenessProbe(gitdir, f)
 			probe.PIDAlive = func(int) bool { return c.alive }
-			probe.Hostname = func() string { return c.hostname }
+			probe.Hostname = func() (string, error) { return c.hostname, nil }
 
 			life, detail := probe.Alive(context.Background(), livenessMarker(t, c.runID))
 			if life != c.wantLife || detail != c.wantDetail {
@@ -247,6 +247,71 @@ func TestLivenessProbesTheRealProcessAndHost(t *testing.T) {
 		livenessMarker(t, "local-"+strconv.Itoa(pid)))
 	if life != cycle.LifeRunning || detail != "" {
 		t.Fatalf("this test's own process: life=%q detail=%q, want running", life, detail)
+	}
+}
+
+// TestLivenessHostnameFallsBackToLocal pins the `|| printf 'local'` half of
+// `hostname 2>/dev/null || printf 'local'` (lib/run.sh:3327).
+//
+// The successful half is covered by TestLivenessProbesTheRealProcessAndHost,
+// which reads this machine's own name. That name is never "local" on a machine
+// that has one, so nothing there reads the fallback and a defect in the word
+// would pass. Hostname therefore answers a name and an error, and a probe told
+// that the machine will not name itself compares the lock's host against the
+// literal the shell prints.
+func TestLivenessHostnameFallsBackToLocal(t *testing.T) {
+	pid := strconv.Itoa(os.Getpid())
+	cases := []struct {
+		name       string
+		answer     string
+		err        error
+		lockHost   string
+		wantLife   cycle.Life
+		wantDetail string
+	}{
+		{
+			name: "the machine will not name itself", err: errors.New("no hostname"),
+			lockHost: "local", wantLife: cycle.LifeRunning,
+		},
+		{
+			// `hostname` printing nothing exits zero, so the shell keeps
+			// the empty answer and compares against it. Go's os.Hostname
+			// does not do that, and the arm is here so the two agree.
+			name: "the machine names itself empty", answer: "",
+			lockHost: "local", wantLife: cycle.LifeRunning,
+		},
+		{
+			// A Go-side rule with no shell counterpart, because os.Hostname
+			// never answers this way: a name that came back beside an error
+			// is not a name to compare a lock against. Bash would concatenate
+			// the two, and nothing produces the input that would show it.
+			name: "a name beside an error is not trusted", answer: "box",
+			err:      errors.New("no hostname"),
+			lockHost: "local", wantLife: cycle.LifeRunning,
+		},
+		{
+			// The fallback is a name to compare, not a reason to stop
+			// comparing: a lock written on another machine still reads as
+			// elsewhere when this one cannot name itself.
+			name: "the fallback is still compared against the lock", err: errors.New("no hostname"),
+			lockHost: "buildbox",
+			wantLife: cycle.LifeElsewhere, wantDetail: "buildbox",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			gitdir := livenessLock(t, statusPR,
+				pid+" on "+c.lockHost+" since 2026-08-12T00:00:00Z")
+			probe := livenessProbe(gitdir, &livenessForge{})
+			probe.PIDAlive = func(int) bool { return true }
+			probe.Hostname = func() (string, error) { return c.answer, c.err }
+
+			life, detail := probe.Alive(context.Background(), livenessMarker(t, "local-"+pid))
+			if life != c.wantLife || detail != c.wantDetail {
+				t.Errorf("life=%q detail=%q, want %q %q",
+					life, detail, c.wantLife, c.wantDetail)
+			}
+		})
 	}
 }
 

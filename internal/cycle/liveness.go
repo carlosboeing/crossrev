@@ -60,9 +60,15 @@ type LivenessProbe struct {
 	// PIDAlive is `kill -0` (lib/run.sh:3331). Nil means the real signal.
 	PIDAlive func(pid int) bool
 
-	// Hostname is `hostname 2>/dev/null || printf 'local'`
-	// (lib/run.sh:3327). Nil means this machine's own.
-	Hostname func() string
+	// Hostname is the `hostname` half of
+	// `hostname 2>/dev/null || printf 'local'` (lib/run.sh:3327). Nil means
+	// os.Hostname, this machine's own.
+	//
+	// It answers an error rather than a bare name so the `|| printf 'local'`
+	// half has a caller a test can reach. A machine that has a name never
+	// calls it, so a probe that only ever read a real one would leave that
+	// literal unpinned.
+	Hostname func() (string, error)
 
 	// askedFor, life and detail are _STATUS_LIVENESS_FOR, STATUS_LIVENESS and
 	// STATUS_LIVENESS_DETAIL at lib/run.sh:3281-3283. The memo holds one run
@@ -167,11 +173,16 @@ func (p *LivenessProbe) workflow(ctx context.Context, runID string) (Life, strin
 }
 
 // hostname is `hostname 2>/dev/null || printf 'local'` (lib/run.sh:3327).
+//
+// An empty answer takes the fallback too. `hostname` printing nothing exits
+// zero, so the shell would compare against the empty string; os.Hostname does
+// not do that, and reading both the same way keeps the two in step.
 func (p *LivenessProbe) hostname() string {
-	if p.Hostname != nil {
-		return p.Hostname()
+	ask := p.Hostname
+	if ask == nil {
+		ask = os.Hostname
 	}
-	name, err := os.Hostname()
+	name, err := ask()
 	if err != nil || name == "" {
 		return "local"
 	}
