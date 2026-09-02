@@ -506,3 +506,61 @@ func TestSettingsNamesTheDrivenHarnessesForAnUnknownName(t *testing.T) {
 		"there is no adapter for the harness 'nosuch'",
 		"CrossRev drives claude, codex, agy, grok and opencode directly.")
 }
+
+// TestSettingsRefusesWhenNothingThatCanReviewIsInstalled pins the last refusal
+// in run_leg_settings (lib/run.sh:538-540), reached once the configured harness
+// has no binary and the substitution loop at :531-537 finds no other harness
+// that serves the leg. The hint names the harnesses that could take the leg,
+// read off the descriptor. Measured on the shipped descriptor with a PATH that
+// carries jq and yq but no harness binary:
+//
+//	$ NO_COLOR=1 env PATH=/usr/bin:/bin:/usr/sbin:/sbin:/tmp/tools bash -c 'ROOT=$PWD;
+//	    source lib/ui.sh; source lib/harnesses.sh; source lib/config.sh;
+//	    source lib/run.sh; harness_source_adapters; CFG_MERGED="{}";
+//	    run_leg_settings reviewer claude'
+//	error  the reviewer is configured to use 'claude', which is not installed, and no other harness that can serve the review leg is either
+//	       Install one of claude, codex, agy, grok and opencode. CrossRev needs at least one, and two different ones is what makes the cross-model check mean anything.
+//
+// The refused harness is named in the list it is told to install from, because
+// the list is every harness that serves the leg rather than every alternative.
+func TestSettingsRefusesWhenNothingThatCanReviewIsInstalled(t *testing.T) {
+	e := newEnv(t)
+	e.lookPath = func(string) (string, error) { return "", os.ErrNotExist }
+	req := e.request(t)
+	req.HarnessOverride = "claude"
+
+	got := runLeg(t, e, req)
+
+	wantFatal(t, got.Err,
+		"the reviewer is configured to use 'claude', which is not installed, and no other harness that can serve the review leg is either",
+		"Install one of claude, codex, agy, grok and opencode. CrossRev needs at least one, and two different ones is what makes the cross-model check mean anything.")
+	if len(e.runner.Specs()) != 0 {
+		t.Errorf("harness started on a refusal: %d specs", len(e.runner.Specs()))
+	}
+}
+
+// TestSettingsNamesOnlyTheHarnessesThatCanReview pins that the install list is
+// harness_names_for_leg rather than every driven harness. Measured with codex,
+// agy and grok rewritten to legs ["resolve"] and the same binary-free PATH:
+//
+//	error  the reviewer is configured to use 'claude', which is not installed, and no other harness that can serve the review leg is either
+//	       Install one of claude and opencode. CrossRev needs at least one, and two different ones is what makes the cross-model check mean anything.
+//
+// Two names here against five above is what pins _names_human's "a and b"
+// (lib/harnesses.sh:171-178), and claude is asked for because a harness that
+// cannot serve the leg is refused at lib/run.sh:520 before this line.
+func TestSettingsNamesOnlyTheHarnessesThatCanReview(t *testing.T) {
+	e := newEnv(t)
+	e.doc = legsRewritten(t, map[string][]string{
+		"codex": {"resolve"}, "agy": {"resolve"}, "grok": {"resolve"},
+	})
+	e.lookPath = func(string) (string, error) { return "", os.ErrNotExist }
+	req := e.request(t)
+	req.HarnessOverride = "claude"
+
+	got := runLeg(t, e, req)
+
+	wantFatal(t, got.Err,
+		"the reviewer is configured to use 'claude', which is not installed, and no other harness that can serve the review leg is either",
+		"Install one of claude and opencode. CrossRev needs at least one, and two different ones is what makes the cross-model check mean anything.")
+}

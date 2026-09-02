@@ -65,9 +65,30 @@ func (l *Leg) settings(req Request, loaded Context) (legSettings, string, error)
 			return s, warn, nil
 		}
 	}
-	return s, "", &ui.FatalError{
-		Reason: fmt.Sprintf("the reviewer is configured to use '%s', which is not installed, and no other harness that can serve the review leg is either", asked),
-		Action: "Install one of the harnesses that serve the review leg.",
+	return s, "", notInstalledRefusal(l.Harness, asked)
+}
+
+// notInstalledRefusal is the last refusal in run_leg_settings
+// (lib/run.sh:538-540), reached once the configured harness has no binary and
+// the substitution loop at lib/run.sh:531-537 finds no other harness that
+// serves the leg.
+//
+// The hint names every harness that CAN take the leg, read off the descriptor
+// with harness_names_for_leg — which is why the refused harness appears in the
+// list it is told to install from. Measured on the shipped descriptor with a
+// PATH carrying jq and yq but no harness binary:
+//
+//	Install one of claude, codex, agy, grok and opencode. CrossRev needs at least one, and two different ones is what makes the cross-model check mean anything.
+//
+// and with codex, agy and grok rewritten to legs ["resolve"]:
+//
+//	Install one of claude and opencode. CrossRev needs at least one, and two different ones is what makes the cross-model check mean anything.
+func notInstalledRefusal(doc harness.Document, asked string) *ui.FatalError {
+	leg := string(core.LegReview)
+	return &ui.FatalError{
+		Reason: fmt.Sprintf("the reviewer is configured to use '%s', which is not installed, and no other harness that can serve the %s leg is either", asked, leg),
+		Action: fmt.Sprintf("Install one of %s. CrossRev needs at least one, and two different ones is what makes the cross-model check mean anything.",
+			harness.NamesHuman(doc.NamesForLeg(leg))),
 	}
 }
 
