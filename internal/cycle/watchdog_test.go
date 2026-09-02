@@ -23,7 +23,7 @@ import (
 // Nothing under `want` is written by hand. Each fixture was recorded by running
 // the shipped cmd_watchdog with lib/*.sh sourced, a frozen clock, and the two
 // reads it makes answered with the payload GitHub would return — so the real
-// --jq filters in lib/run.sh:3692-3693 and lib/state.sh:63 ran. `page` is the
+// --jq filters in lib/run.sh:3692-3693 and lib/state.sh:62 ran. `page` is the
 // bytes it printed with stdout on a file, and `calls` is the four write
 // functions and the comment read it called, in order, named for the forge
 // operation each one is.

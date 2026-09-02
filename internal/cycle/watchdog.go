@@ -50,7 +50,7 @@ type Summary struct {
 // converged pull request look identical from outside. So something has to go
 // looking, and it retries once before giving up — a dropped event is fixed by
 // re-firing it, and re-applying a label GitHub already holds fires nothing,
-// which is why the retry removes it first (lib/run.sh:3659-3665).
+// which is why the retry removes it first (lib/run.sh:3660-3665).
 //
 // It decides from marker and label state alone. No event payload reaches it,
 // and it reads no pull request body, diff or thread.

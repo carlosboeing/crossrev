@@ -30,7 +30,7 @@ const (
 )
 
 // LivenessProbe answers whether the run behind one open claim is still working
-// (lib/run.sh:3284-3352).
+// (lib/run.sh:3284-3350).
 //
 // Empty is a real answer and the common one. Anything that cannot be shown is
 // not claimed: an unreadable lock, a run in another checkout, a pull request
@@ -49,7 +49,7 @@ type LivenessProbe struct {
 	Forge forge.Forge
 
 	// GitDir is `git rev-parse --git-common-dir` put through `pwd -P`
-	// (lib/run.sh:3316-3318), which production wires to
+	// (lib/run.sh:3315-3316), which production wires to
 	// (*vcs.Repository).CommonDir. The lock keys on the shared git directory
 	// so that every working tree of a clone finds the same one.
 	//
@@ -147,7 +147,7 @@ func (p *LivenessProbe) local(ctx context.Context, pid string) (Life, string) {
 }
 
 // workflow answers from the Actions API, which reaches a run from anywhere
-// (lib/run.sh:3341-3352).
+// (lib/run.sh:3341-3350).
 //
 // `completed` is the useful half: the run is over and the marker never reached
 // `complete`, so the leg died inside it however recently that was. Every other
@@ -214,7 +214,7 @@ func statusIsPID(pid string) bool {
 }
 
 // statusLockHost is `rest="${holder#* on }"; lock_host="${rest%% since *}"`
-// (lib/run.sh:3325).
+// (lib/run.sh:3322).
 //
 // vcs.ParseHolder answers the same host for every line run_lock_acquire writes,
 // and it is what reads the line everywhere else. It differs on one shape the
