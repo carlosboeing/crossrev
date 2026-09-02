@@ -90,10 +90,7 @@ func (l *Leg) adapterFor(doc harness.Document, name string) (harness.Adapter, er
 	}
 	a, ok := harness.For(doc, name)
 	if !ok {
-		return nil, &Refusal{
-			Message: fmt.Sprintf("there is no adapter for the harness '%s'", name),
-			Hint:    "CrossRev drives claude, codex, agy, grok and opencode directly.",
-		}
+		return nil, noAdapterRefusal(doc, name)
 	}
 	return a, nil
 }

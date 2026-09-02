@@ -1,6 +1,8 @@
 package resolve
 
 import (
+	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -161,22 +163,6 @@ func TestContext(t *testing.T) {
 				wantErr:     "unknown resolve trigger",
 			},
 			{
-				name: "ServesLeg refuses a review-only harness",
-				setup: func(t *testing.T, e *testEnv, req *Request) {
-					raw := strings.Replace(string(harness.DescriptorJSON()),
-						`"name": "grok"`, `"name": "grok", "legs": ["review"]`, 1)
-					doc, err := harness.Load([]byte(raw))
-					if err != nil {
-						t.Fatalf("Load review-only grok: %v", err)
-					}
-					e.doc = doc
-					req.Harness = "grok"
-					e.addReview(t, defaultFindings(), "issues-remain")
-				},
-				wantOutcome: OutcomeRefused,
-				wantErr:     "cannot serve the resolve leg",
-			},
-			{
 				name: "AssertPushTarget refuses a worktree at the wrong revision",
 				setup: func(t *testing.T, e *testEnv, _ *Request) {
 					e.addReview(t, defaultFindings(), "issues-remain")
@@ -240,4 +226,167 @@ func containsPrefix(order []string, prefix string) bool {
 		}
 	}
 	return false
+}
+
+// --- the two refusals run_leg_settings prints before anything is billed ------
+
+// legsRewritten is the shipped lib/harnesses.json with the named harnesses'
+// `legs` rewritten, which is how every refusal below was measured:
+//
+//	$ jq '(.harnesses[] | select(.name=="grok") | .legs) |= ["review"]' \
+//	    lib/harnesses.json > /tmp/d.json
+//	$ NO_COLOR=1 CROSSREV_HARNESS_FILE=/tmp/d.json bash -c 'ROOT=$PWD;
+//	    source lib/ui.sh; source lib/harnesses.sh; source lib/run.sh;
+//	    _run_assert_harness_serves_leg grok resolve'
+//
+// Rewriting the shipped file rather than writing a small one keeps the names,
+// the product names and the descriptor order the operator's message is built
+// from, and every shipped entry serves both legs, so nothing here could be
+// measured against the file as it ships.
+func legsRewritten(t *testing.T, legs map[string][]string) harness.Document {
+	t.Helper()
+	var tree map[string]any
+	if err := json.Unmarshal(harness.DescriptorJSON(), &tree); err != nil {
+		t.Fatalf("decode the shipped descriptor: %v", err)
+	}
+	entries, ok := tree["harnesses"].([]any)
+	if !ok {
+		t.Fatal("the shipped descriptor has no harnesses array")
+	}
+	for _, entry := range entries {
+		object, ok := entry.(map[string]any)
+		if !ok {
+			t.Fatal("a harness entry is not an object")
+		}
+		name, _ := object["name"].(string)
+		if serves, found := legs[name]; found {
+			object["legs"] = serves
+		}
+	}
+	raw, err := json.Marshal(tree)
+	if err != nil {
+		t.Fatalf("re-encode the descriptor: %v", err)
+	}
+	doc, err := harness.Load(raw)
+	if err != nil {
+		t.Fatalf("harness.Load: %v", err)
+	}
+	return doc
+}
+
+func wantRefusal(t *testing.T, err error, message, hint string) {
+	t.Helper()
+	var refusal *Refusal
+	if !errors.As(err, &refusal) {
+		t.Fatalf("err = %v, want a *Refusal", err)
+	}
+	if refusal.Message != message {
+		t.Errorf("message\n got %q\nwant %q", refusal.Message, message)
+	}
+	if refusal.Hint != hint {
+		t.Errorf("hint\n got %q\nwant %q", refusal.Hint, hint)
+	}
+}
+
+// TestSettingsRefusesAHarnessThatCannotResolve pins
+// _run_assert_harness_serves_leg (lib/run.sh:553-558), reached from
+// run_leg_settings at lib/run.sh:520. The hint is built from the descriptor
+// rather than written into the sentence: it names the harnesses that can take
+// the leg and reads the refused harness's product name and declared legs back
+// off its entry. Measured with grok rewritten to legs ["review"]:
+//
+//	error  the harness 'grok' cannot serve the resolve leg
+//	       CrossRev runs the resolve leg on claude, codex, agy and opencode. Grok is limited to the review leg.
+func TestSettingsRefusesAHarnessThatCannotResolve(t *testing.T) {
+	e := setup(t)
+	e.doc = legsRewritten(t, map[string][]string{"grok": {"review"}})
+	e.addReview(t, defaultFindings(), "issues-remain")
+
+	got := e.runReq(t, Request{PR: 42, Repo: e.slug, Trigger: TriggerHuman, Harness: "grok"})
+
+	if got.Outcome != OutcomeRefused {
+		t.Errorf("Outcome = %q, want %q", got.Outcome, OutcomeRefused)
+	}
+	wantRefusal(t, got.Err,
+		"the harness 'grok' cannot serve the resolve leg",
+		"CrossRev runs the resolve leg on claude, codex, agy and opencode. Grok is limited to the review leg.")
+	if e.runner.specs != nil {
+		t.Errorf("harness started on a refusal: %d specs", len(e.runner.specs))
+	}
+}
+
+// TestSettingsRefusesWhenMostOfTheDescriptorCannotResolve pins that the list of
+// harnesses that can take the leg shrinks with the descriptor rather than being
+// a constant. Measured with claude, codex and agy rewritten to legs ["review"]:
+//
+//	error  the harness 'agy' cannot serve the resolve leg
+//	       CrossRev runs the resolve leg on grok and opencode. Antigravity is limited to the review leg.
+//
+// Two names here and four above is what pins _names_human's "a and b" against
+// its "a, b, c and d" (lib/harnesses.sh:171-178), and Antigravity against agy
+// is what pins the product name as a descriptor read.
+func TestSettingsRefusesWhenMostOfTheDescriptorCannotResolve(t *testing.T) {
+	e := setup(t)
+	e.doc = legsRewritten(t, map[string][]string{
+		"claude": {"review"}, "codex": {"review"}, "agy": {"review"},
+	})
+	e.addReview(t, defaultFindings(), "issues-remain")
+
+	got := e.runReq(t, Request{PR: 42, Repo: e.slug, Trigger: TriggerHuman, Harness: "agy"})
+
+	wantRefusal(t, got.Err,
+		"the harness 'agy' cannot serve the resolve leg",
+		"CrossRev runs the resolve leg on grok and opencode. Antigravity is limited to the review leg.")
+}
+
+// TestSettingsSendsANotDrivenHarnessToEndpoints pins the branch at
+// lib/run.sh:502-504: a name the descriptor lists under not_driven is refused
+// with the reason it carries and the key that would work instead. The leg word
+// in "resolver.endpoint" is the config key, not the descriptor's review/resolve
+// vocabulary. Measured:
+//
+//	$ bash -c 'ROOT=$PWD; source lib/ui.sh; source lib/harnesses.sh;
+//	    source lib/config.sh; source lib/run.sh; harness_source_adapters;
+//	    CFG_MERGED="{}"; run_leg_settings resolver kimi'
+//	error  there is no adapter for the harness 'kimi'
+//	       CrossRev drives claude, codex, agy, grok and opencode directly. Kimi is reached through the claude adapter as a named endpoint, so there is no adapter_kimi behind the name: define it under endpoints: and set resolver.endpoint, not resolver.harness.
+func TestSettingsSendsANotDrivenHarnessToEndpoints(t *testing.T) {
+	e := setup(t)
+	e.addReview(t, defaultFindings(), "issues-remain")
+
+	got := e.runReq(t, Request{PR: 42, Repo: e.slug, Trigger: TriggerHuman, Harness: "kimi"})
+
+	if got.Outcome != OutcomeRefused {
+		t.Errorf("Outcome = %q, want %q", got.Outcome, OutcomeRefused)
+	}
+	wantRefusal(t, got.Err,
+		"there is no adapter for the harness 'kimi'",
+		"CrossRev drives claude, codex, agy, grok and opencode directly. Kimi is reached through the claude adapter as a named endpoint, so there is no adapter_kimi behind the name: define it under endpoints: and set resolver.endpoint, not resolver.harness.")
+	if e.runner.specs != nil {
+		t.Errorf("harness started on a refusal: %d specs", len(e.runner.specs))
+	}
+}
+
+// TestSettingsNamesTheDrivenHarnessesForAnUnknownName pins the else arm at
+// lib/run.sh:505-506: a name the descriptor does not carry at all gets the same
+// sentence without the endpoints half, and the names come from the descriptor.
+// Measured:
+//
+//	$ ... run_leg_settings resolver nosuch
+//	error  there is no adapter for the harness 'nosuch'
+//	       CrossRev drives claude, codex, agy, grok and opencode directly.
+//
+// This is also the case ServesLeg is deliberately lax about: the adapter test
+// at lib/run.sh:500 refuses the name before the serves-leg gate at :520 ever
+// reads it, so the refusal names the fault rather than printing a sentence
+// built from an empty product name.
+func TestSettingsNamesTheDrivenHarnessesForAnUnknownName(t *testing.T) {
+	e := setup(t)
+	e.addReview(t, defaultFindings(), "issues-remain")
+
+	got := e.runReq(t, Request{PR: 42, Repo: e.slug, Trigger: TriggerHuman, Harness: "nosuch"})
+
+	wantRefusal(t, got.Err,
+		"there is no adapter for the harness 'nosuch'",
+		"CrossRev drives claude, codex, agy, grok and opencode directly.")
 }
