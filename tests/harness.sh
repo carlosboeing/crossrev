@@ -98,6 +98,14 @@ if [[ -n "${CROSSREV_TEST_BIN:-}" ]]; then
     exit 2
   }
   CROSSREV="$(_stub_env_wrapper "$CROSSREV_TEST_BIN")"
+  # The wrapper stays live for the whole suite, so its directory goes when
+  # the suite exits, not per invocation. None of the CLI-driven suites sets
+  # its own EXIT trap (measured: `grep -n 'trap ' tests/test-*.sh` finds one
+  # only in test-diff.sh, test-githooks.sh and test-parity.sh, none of which
+  # runs against the binary). A suite that adds one replaces this and the
+  # directory leaks as it did before, which is no worse.
+  _stub_env_dir="${CROSSREV%/crossrev}"
+  trap 'rm -rf "$_stub_env_dir"' EXIT
 fi
 
 pass=0; fail=0

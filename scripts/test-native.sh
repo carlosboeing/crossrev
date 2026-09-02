@@ -22,13 +22,13 @@ cd "$ROOT" || exit 1
 
 # The CLI-driven suites, written out rather than globbed.
 #
-# A glob would sweep in every direct-source suite, and a suite added later would
-# join silently either way. The list is what a grep answers today:
+# A glob would sweep in every direct-source suite, which have no counterpart in
+# the binary. The list is what this grep answers, run from the repository root:
 #
-#   for f in tests/test-*.sh; do grep -q '"\$CROSSREV"' "$f" && echo "$f"; done
+#   grep -lE '\$\{?CROSSREV([^_A-Za-z0-9]|$)' tests/test-*.sh
 #
-# plus tests/test-config.sh, which spells it `$CROSSREV` unquoted. Re-run that
-# grep when a suite is added, and add the file here.
+# The check below fails the run when that grep finds a CLI-driven suite the
+# list above does not name.
 SUITES=(
   test-action.sh
   test-adapters.sh
@@ -46,6 +46,24 @@ SUITES=(
   test-watchdog.sh
   test-worktree.sh
 )
+
+# The list is checked the other way too. A CLI-driven suite added later
+# would otherwise never run against the binary, and nothing would say so.
+unlisted=()
+while IFS= read -r found; do
+  found="${found#tests/}"
+  listed=0
+  for suite in "${SUITES[@]}"; do
+    [[ "$suite" == "$found" ]] && { listed=1; break; }
+  done
+  (( listed )) || unlisted+=("$found")
+done < <(grep -lE '\$\{?CROSSREV([^_A-Za-z0-9]|$)' tests/test-*.sh)
+if (( ${#unlisted[@]} )); then
+  for found in "${unlisted[@]}"; do
+    printf 'CLI-driven suite not listed in %s: %s\n' "${0##*/}" "$found" >&2
+  done
+  exit 2
+fi
 
 if (( $# )); then
   SUITES=("$@")
