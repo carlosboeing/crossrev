@@ -159,6 +159,10 @@ _b64url() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
 
 _auth_jwt() {
   local pem="$1" app_id="$2" now header payload signing_input sig
+  # jq --argjson reads the id as JSON. Anything that is not a whole number makes
+  # jq exit with a usage message and the claims come out empty, which used to
+  # travel on as a token nobody could tell from a good one.
+  [[ "$app_id" =~ ^[0-9]+$ ]] || return 1
   now="$(date +%s)"
   header='{"alg":"RS256","typ":"JWT"}'
   # Backdated 60s because GitHub rejects a JWT whose iat is in the future, and
@@ -166,7 +170,13 @@ _auth_jwt() {
   payload="$(jq -cn --argjson iat "$((now - 60))" --argjson exp "$((now + 540))" \
     --argjson iss "$app_id" '{iat:$iat, exp:$exp, iss:$iss}')"
   signing_input="$(printf '%s' "$header" | _b64url).$(printf '%s' "$payload" | _b64url)"
-  sig="$(printf '%s' "$signing_input" | openssl dgst -sha256 -sign "$pem" -binary | _b64url)"
+  # openssl is on the left of a pipe, so the pipeline reports _b64url's status and
+  # a key openssl refused to sign with came back as an empty signature segment on
+  # a token that looked whole. pipefail goes inside the substitution, which is a
+  # subshell and so cannot move the caller's options.
+  sig="$(set -o pipefail
+    printf '%s' "$signing_input" | openssl dgst -sha256 -sign "$pem" -binary | _b64url)" \
+    || return 1
   printf '%s.%s' "$signing_input" "$sig"
 }
 
