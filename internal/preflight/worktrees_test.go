@@ -35,7 +35,7 @@ func TestReportWorktreesIsSilentWithNothingToReport(t *testing.T) {
 
 // A clean resolve run removes its worktree; a failed run leaves it behind. The
 // accumulation is reported so it is discoverable rather than silent
-// (lib/preflight.sh:328-341).
+// (lib/preflight.sh:328-342).
 func TestReportWorktreesNamesEveryLeftoverWorktree(t *testing.T) {
 	state := t.TempDir()
 	t.Setenv("XDG_STATE_HOME", state)

@@ -3,7 +3,7 @@ package preflight
 import "context"
 
 // Doctor is the whole `crossrev doctor` report and its exit code
-// (bin/crossrev:162-179).
+// (bin/crossrev:163-180).
 //
 // Four probes in this order, because the reader works down the page: what is
 // installed, what a killed run left in the checkout, what the configured runner

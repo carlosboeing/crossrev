@@ -6,7 +6,7 @@ import (
 )
 
 // ReportWorktrees names the tool-owned worktrees left behind by failed resolve
-// runs (preflight_report_worktrees, lib/preflight.sh:328-341).
+// runs (preflight_report_worktrees, lib/preflight.sh:328-342).
 //
 // A clean resolve run removes its worktree; a failed run leaves it behind so
 // the uncommitted edits and reflog can be inspected. Accumulation is reported

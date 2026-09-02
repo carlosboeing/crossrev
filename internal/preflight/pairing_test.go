@@ -64,6 +64,43 @@ func TestPairingSupported(t *testing.T) {
 	}
 }
 
+// TestPairingSupportedNamesWhyANotDrivenHarnessHasNoAdapter: the descriptor
+// carries names it deliberately does not drive, each with the reason, and the
+// refusal says it rather than leaving the operator to guess why a harness they
+// can run locally is missing from CI (lib/preflight.sh:204-212).
+//
+// kimi is the descriptor's only not_driven entry. Measured on the shell:
+//
+//	$ preflight_pairing_supported github-hosted kimi ""
+//	CrossRev has no adapter for 'kimi' (reached through the claude adapter as a
+//	named endpoint, so there is no adapter_kimi behind the name)
+//	rc=1
+//
+// The bare form is already pinned above by `bogus`, a name the descriptor does
+// not carry at all. Without this case the parenthesised half is dead: the
+// branch can be replaced with the bare form and the package stays green.
+func TestPairingSupportedNamesWhyANotDrivenHarnessHasNoAdapter(t *testing.T) {
+	doc := document(t)
+	want := "CrossRev has no adapter for 'kimi' (reached through the claude adapter " +
+		"as a named endpoint, so there is no adapter_kimi behind the name)"
+
+	for _, leg := range []string{"", "review", "resolve"} {
+		reason, ok := preflight.PairingSupported(doc, "github-hosted", "kimi", leg)
+		if ok {
+			t.Errorf("PairingSupported(github-hosted, kimi, %q) = true, want false", leg)
+		}
+		if reason != want {
+			t.Errorf("PairingSupported(github-hosted, kimi, %q) reason =\n%q\nwant\n%q", leg, reason, want)
+		}
+	}
+
+	// The branch sits below the self-hosted return, so a machine that
+	// already holds the login never reaches it (lib/preflight.sh:202).
+	if reason, ok := preflight.PairingSupported(doc, "self-hosted", "kimi", ""); !ok || reason != "" {
+		t.Errorf("PairingSupported(self-hosted, kimi) = (%q, %v), want (\"\", true)", reason, ok)
+	}
+}
+
 // A harness that lists its legs is refused for the others on every runner,
 // which is a descriptor fact rather than a runner fact (lib/preflight.sh:194-200).
 //

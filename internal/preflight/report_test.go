@@ -159,7 +159,7 @@ func TestDoctorReportsWorktreesWithoutFailing(t *testing.T) {
 }
 
 // The runner the pairings are reported against is the one the config names, and
-// an unset key is the default (lib/config.sh:303 reads it through `// empty`,
+// an unset key is the default (lib/config.sh:354 reads it through `// empty`,
 // and the defaults supply github-hosted).
 func TestDoctorReportsPairingsAgainstTheConfiguredRunner(t *testing.T) {
 	r := coreVersions(newRecorder())

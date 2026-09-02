@@ -480,31 +480,34 @@ func TestRequireYq(t *testing.T) {
 	}
 }
 
-// TestLookPathTakesOnlyAnExecutableFile drives the production PATH search, the
-// one every other case here replaces with onPath.
+// TestLookPathPrefersAnExecutableAndFallsBackToTheFirstFile drives the
+// production PATH search, the one every other case here replaces with onPath.
 //
-// `command -v` will not answer with a directory that happens to be named like
-// the tool, and it walks past one to a real program later on PATH. Measured on
-// this branch with a directory `<d>/git` first on PATH:
+// bash's search is executable-preferred, not first-match, and it does not skip
+// a directory named like the tool — the directory takes the fallback slot and
+// then loses it, because the fallback is an answer only when it is a regular
+// file. Every row below was measured with `zzt` planted three ways: a directory
+// (nd), a mode-0644 file (f1) and a mode-0755 file (x1).
 //
-//	$ PATH="$d/a" bash -c 'command -v git >/dev/null 2>&1; echo $?'   → 1
-//	$ PATH="$d/a:/usr/bin:/bin" bash -c 'command -v git'              → /usr/bin/git
-//
-// and the same walk past a `git` with no execute bit:
-//
-//	$ PATH="$d/b:$d/c" bash -c 'command -v git'   → $d/c/git, the executable one
+//	$ PATH=nd    bash -c 'command -v zzt'  → nothing, exit 1
+//	$ PATH=f1    bash -c 'command -v zzt'  → f1/zzt, exit 0
+//	$ PATH=nd:f1 bash -c 'command -v zzt'  → nothing, exit 1
+//	$ PATH=f1:nd bash -c 'command -v zzt'  → f1/zzt, exit 0
+//	$ PATH=nd:x1 bash -c 'command -v zzt'  → x1/zzt
+//	$ PATH=f1:x1 bash -c 'command -v zzt'  → x1/zzt
+//	$ PATH=x1:f1 bash -c 'command -v zzt'  → x1/zzt
 //
 // The path lookPath returns is not observable through any exported method,
 // because installed() keeps only whether the error was nil. So "the executable
-// wins" is pinned as: found when the executable is on PATH, and not found when
-// only the directory and the unreadable file are.
+// wins over an earlier non-executable" is pinned as the pair of rows that
+// differ only in whether the executable directory is on the list.
 //
 // RequireYq is the driver because it reaches installed() and starts no process.
-func TestLookPathTakesOnlyAnExecutableFile(t *testing.T) {
+func TestLookPathPrefersAnExecutableAndFallsBackToTheFirstFile(t *testing.T) {
 	root := t.TempDir()
-	directory := filepath.Join(root, "a")
-	unreadable := filepath.Join(root, "b")
-	program := filepath.Join(root, "c")
+	directory := filepath.Join(root, "nd")
+	unreadable := filepath.Join(root, "f1")
+	program := filepath.Join(root, "x1")
 	if err := os.MkdirAll(filepath.Join(directory, "yq"), 0o755); err != nil {
 		t.Fatalf("make the directory named like the tool: %v", err)
 	}
@@ -519,7 +522,7 @@ func TestLookPathTakesOnlyAnExecutableFile(t *testing.T) {
 
 	// A symlink to a program is a program, which is why the search stats
 	// through the link rather than at it.
-	linked := filepath.Join(root, "d")
+	linked := filepath.Join(root, "sl")
 	if err := os.MkdirAll(linked, 0o755); err != nil {
 		t.Fatalf("make %s: %v", linked, err)
 	}
@@ -534,10 +537,12 @@ func TestLookPathTakesOnlyAnExecutableFile(t *testing.T) {
 		found bool
 	}{
 		{"a directory named like the tool", list(directory), false},
-		{"a file with no execute bit", list(unreadable), false},
-		{"both of those and nothing else", list(directory, unreadable), false},
-		{"an executable behind both of them", list(directory, unreadable, program), true},
-		{"an executable on its own", list(program), true},
+		{"a file with no execute bit", list(unreadable), true},
+		{"the directory ahead of that file", list(directory, unreadable), false},
+		{"that file ahead of the directory", list(unreadable, directory), true},
+		{"an executable behind a directory", list(directory, program), true},
+		{"an executable behind a file with no execute bit", list(unreadable, program), true},
+		{"an executable ahead of both", list(program, unreadable, directory), true},
 		{"a symlink to an executable", list(linked), true},
 		{"an empty PATH", "", false},
 	} {

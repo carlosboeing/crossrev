@@ -77,9 +77,12 @@ func TestWriteFilesWritesEveryWorkflowAndThePolicy(t *testing.T) {
 	if want := string(plan.RenderWorkflow(req, initcmd.ReviewWorkflowTemplate())); review != want {
 		t.Error("the review workflow on disk is not what the renderer produced")
 	}
+	// Against the shell's own bytes rather than against WriteConfig, which
+	// would agree with itself whatever it appended. issueSinkConfig is the
+	// pairing testdata/config/github-issues.yml was rendered for.
 	policy := readUnder(t, root, ".github/crossrev.yml")
-	if want := string(plan.WriteConfig(initcmd.PolicyTemplate())); policy != want {
-		t.Error("the policy file on disk is not what WriteConfig produced")
+	if want := golden(t, "github-issues.yml"); policy != want {
+		t.Errorf("the policy file on disk differs from the shell's:\n%s", firstDifference(policy, want))
 	}
 	if strings.Contains(review, "__RUNS_ON__") {
 		t.Error("a placeholder survived into the file that was written")

@@ -165,11 +165,23 @@ func (c *Checker) installed(name string) bool {
 // internal/resolve do (lib/run.sh:524). os/exec is confined to internal/exec,
 // so the search is written out here.
 //
-// The first entry that is a program, not the first entry that exists. A
-// directory named like the tool is not a program, and `command -v` walks past
-// one: measured with a directory `<d>/git` alone on PATH, `command -v git`
-// exits 1, and with `/usr/bin` after it the answer is /usr/bin/git. It walks
-// past a regular file with no execute bit the same way.
+// bash's search is executable-preferred rather than first-match, and the whole
+// contract was measured rather than reasoned about. With `zzt` planted as a
+// directory (nd), a mode-0644 file (f1) and a mode-0755 file (x1):
+//
+//	PATH=nd          → exit 1        PATH=f1          → f1/zzt
+//	PATH=nd:f1       → exit 1        PATH=f1:nd       → f1/zzt
+//	PATH=nd:x1       → x1/zzt        PATH=f1:x1       → x1/zzt
+//	PATH=nd:f1:x1    → x1/zzt        PATH=x1:f1       → x1/zzt
+//
+// Which is: the first PATH entry holding an executable regular file wins, from
+// anywhere in the list. With none, the answer is the first entry holding
+// anything at all — and it is an answer only if that first thing is a regular
+// file. A directory is not skipped; it takes the fallback slot and then loses
+// it, which is why `nd:f1` finds nothing while `f1:nd` finds f1.
+//
+// A name carrying a separator is not searched and takes no fallback: measured,
+// `command -v ./f` on a mode-0644 file exits 1 where `./x` answers `./x`.
 //
 // os.Stat rather than os.Lstat, because a symlink to a program is a program:
 // measured, `command -v gh` over a symlink pointing at an executable answers
@@ -184,13 +196,25 @@ func lookPath(name string) (string, error) {
 		}
 		return name, nil
 	}
+	fallback, fallbackIsFile := "", false
 	for _, dir := range filepath.SplitList(os.Getenv("PATH")) {
 		if dir == "" {
 			continue
 		}
-		if candidate := filepath.Join(dir, name); isProgram(candidate) {
+		candidate := filepath.Join(dir, name)
+		info, err := os.Stat(candidate)
+		if err != nil {
+			continue
+		}
+		if isExecutableFile(info) {
 			return candidate, nil
 		}
+		if fallback == "" {
+			fallback, fallbackIsFile = candidate, info.Mode().IsRegular()
+		}
+	}
+	if fallbackIsFile {
+		return fallback, nil
 	}
 	return "", os.ErrNotExist
 }
@@ -202,7 +226,12 @@ func lookPath(name string) (string, error) {
 // belongs to a group the caller is not in.
 func isProgram(path string) bool {
 	info, err := os.Stat(path)
-	return err == nil && info.Mode().IsRegular() && info.Mode().Perm()&0o111 != 0
+	return err == nil && isExecutableFile(info)
+}
+
+// isExecutableFile is the same question asked of a mode already read.
+func isExecutableFile(info os.FileInfo) bool {
+	return info.Mode().IsRegular() && info.Mode().Perm()&0o111 != 0
 }
 
 // InstallHint is how to install a given tool, phrased for the platform we are

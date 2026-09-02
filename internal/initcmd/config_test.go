@@ -276,6 +276,44 @@ resolver:
 	}
 }
 
+// TestWriteConfigWritesTheLegsInTheShellsOrder: policyEdits walks reviewer then
+// resolver, and the order is observable whenever the document does not already
+// carry the two mappings — a created key is appended, so the first leg written
+// is the first leg in the file.
+//
+// The shipped template carries both, so no other case here can see it: swapping
+// the two names leaves the package green. Measured by handing yq the expression
+// _init_write_config builds, over a one-line document:
+//
+//	$ yq '.backlog.destination = "none" | .reviewer.harness = "codex" |
+//	      del(.reviewer.model) | del(.reviewer.effort) | del(.reviewer.endpoint) |
+//	      .resolver.harness = "claude" | del(.resolver.model) |
+//	      del(.resolver.effort) | del(.resolver.endpoint)' min.yml
+//	version: 1
+//	backlog:
+//	  destination: none
+//	reviewer:
+//	  harness: codex
+//	resolver:
+//	  harness: claude
+func TestWriteConfigWritesTheLegsInTheShellsOrder(t *testing.T) {
+	plan := initcmd.Plan{BacklogResolved: "none", Config: configFrom(t, `version: 1
+reviewer:
+  harness: codex
+resolver:
+  harness: claude`)}
+	want := "version: 1\n" +
+		"backlog:\n" +
+		"  destination: none\n" +
+		"reviewer:\n" +
+		"  harness: codex\n" +
+		"resolver:\n" +
+		"  harness: claude\n"
+	if got := string(plan.WriteConfig([]byte("version: 1\n"))); got != want {
+		t.Errorf("got\n%q\nwant\n%q", got, want)
+	}
+}
+
 // TestWriteConfigLeavesTheEmbeddedTemplateAlone: the bytes handed in are the
 // binary's own copy, and a caller that wrote through them would change what
 // every later run renders.
