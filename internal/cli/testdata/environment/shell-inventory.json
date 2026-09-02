@@ -11,7 +11,7 @@
   ],
   "dynamic": {
     "endpoint token": "lib/adapters/claude.sh:82 reads `${!tok_env:-}`, where tok_env is the endpoint block's token_env key (lib/config.sh:375). The name is the operator's, so no table can hold it. templates/operator-config.yml:25 ships KIMI_API_KEY as the worked example.",
-    "harness secret fallback": "lib/auth.sh:990 falls back to CROSSREV_<HARNESS>_AUTH when the descriptor names no secret. Measured against lib/harnesses.json: the only harness with `refresher: true` is codex, and codex declares CROSSREV_CODEX_AUTH, so the fallback is unreachable in the shipped descriptor. CROSSREV_CLAUDE_AUTH and CROSSREV_AGY_AUTH are therefore not listed."
+    "harness secret fallback": "lib/auth.sh:1034 falls back to CROSSREV_<HARNESS>_AUTH when the descriptor names no secret. Measured against lib/harnesses.json: the only harness with `refresher: true` is codex, and codex declares CROSSREV_CODEX_AUTH, so the fallback is unreachable in the shipped descriptor. CROSSREV_CLAUDE_AUTH and CROSSREV_AGY_AUTH are therefore not listed."
   },
   "variables": [
     {

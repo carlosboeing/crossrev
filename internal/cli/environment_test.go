@@ -27,10 +27,11 @@ import (
 // deliberately short. os.Getenv and os.LookupEnv are the process environment.
 // Getenv and Lookup unqualified are the two injected readers this module has —
 // app.Environment.Getenv (internal/app/path.go:26) and cred.Environment.Lookup
-// (internal/cred/staging.go:60) — and nothing else in the module declares a
+// (internal/cred/staging.go:61) — and nothing else in the module declares a
 // method by either name. lookupEnv and envValueSet read the environment a leg
-// was started with (internal/resolve/invoke.go:424,
-// internal/review/review.go:246), which is the same contract one process later.
+// was started with (internal/resolve/invoke.go:517 through the helper at :526,
+// internal/review/review.go:265 through the helper at :301), which is the same
+// contract one process later.
 //
 // Set and Unset are left out. Both write a name for a child rather than reading
 // one, and the only name either is ever given is the staging variable, which
@@ -357,13 +358,22 @@ type shellDefaultRead struct {
 	where string
 }
 
-// shellDefaultOperator matches `${NAME:-`, `${NAME:=`, `${NAME:?` and `${NAME+`.
+// shellDefaultOperator matches every parameter expansion that branches on
+// whether the name is set: `-`, `=`, `?` and `+`, each with or without the
+// leading colon that also treats an empty value as unset.
 //
-// Those four are the whole of "read this, and here is what to do when it is
+// Those eight are the whole of "read this, and here is what to do when it is
 // unset". A read written `$NAME` or `${NAME}` with no operator is not in scope:
 // the shell sets most of its own globals unconditionally before reading them,
 // and a bare read says nothing about where the value came from.
-var shellDefaultOperator = regexp.MustCompile(`\$\{([A-Z_][A-Z0-9_]*)(?::-|:=|:\?|\+)`)
+//
+// `:+` was missing and is a read like the rest — `${NAME:+alt}` asks whether
+// NAME is set exactly as `${NAME:-alt}` does. Adding it surfaced two reads,
+// CTX_BACKLOG_LAYOUT and CTX_BACKLOG_PATH at lib/run.sh:3085, and both are
+// assigned at lib/run.sh:228, so both filter out as globals the process sets
+// for itself and the table's count does not move. The colon-less `-`, `=` and
+// `?` forms match nothing in the shipped shell at all.
+var shellDefaultOperator = regexp.MustCompile(`\$\{([A-Z_][A-Z0-9_]*)(?::?[-=?+])`)
 
 // shellAssignment matches `NAME=` at the start of a word, which covers a plain
 // assignment, `local NAME=`, `export NAME=`, and a one-command prefix such as
@@ -536,14 +546,14 @@ func TestEnvironmentContract(t *testing.T) {
 	})
 
 	t.Run("the walk found each shape of read", func(t *testing.T) {
-		// Four reads, one per shape the walk has to handle, each pinned to the
-		// package it lives in. Without these the walk can stop resolving a
-		// shape and every rule below still passes, because a read it never
-		// finds is a read it never has to place.
+		// Five reads across the four shapes the walk has to handle, each
+		// pinned to the package it lives in. Without these the walk can stop
+		// resolving a shape and every rule below still passes, because a read
+		// it never finds is a read it never has to place.
 		//
-		//   a plain literal          internal/cli/cli.go:38
+		//   a plain literal          cmd/crossrev/deps.go:164 and :166
 		//   a named constant         internal/cred/staging.go:367
-		//   the second argument      internal/review/review.go:210
+		//   the second argument      internal/review/review.go:265
 		//   an injected reader       internal/app/path.go:50
 		shapes := []struct{ name, pkg string }{
 			{"NO_COLOR", "cmd/crossrev"},
@@ -803,6 +813,27 @@ func TestEnvironmentContract(t *testing.T) {
 		got, held := EnvironmentFor("NO_COLOR")
 		if !held || got.Class != ClassOperatorInput {
 			t.Errorf("EnvironmentFor(NO_COLOR) = %+v, %t", got, held)
+		}
+	})
+
+	t.Run("EnvironmentFor's answer is a copy too", func(t *testing.T) {
+		// Environment's copy is covered below and this accessor's was not, so
+		// deleting the Readers copy at environment.go:342 passed the whole
+		// suite. A caller writing through the returned slice would rewrite the
+		// package table for every other caller in the binary.
+		const name = "NO_COLOR"
+		first, held := EnvironmentFor(name)
+		if !held {
+			t.Fatalf("the contract does not carry %s", name)
+		}
+		if len(first.Readers) == 0 {
+			t.Fatalf("%s names no reader, so writing through it proves nothing", name)
+		}
+		first.Readers[0] = "mutated"
+
+		second, _ := EnvironmentFor(name)
+		if second.Readers[0] == "mutated" {
+			t.Error("writing through EnvironmentFor's result changed the contract's reader list")
 		}
 	})
 

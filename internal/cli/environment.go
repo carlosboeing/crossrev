@@ -26,7 +26,7 @@ package cli
 //     where tok_env is the endpoint block's token_env key (lib/config.sh:375).
 //     The name is the operator's own — templates/operator-config.yml:25 ships
 //     KIMI_API_KEY as the worked example — so the port reads it the same way,
-//     at internal/resolve/invoke.go:415.
+//     at internal/resolve/invoke.go:517.
 //   - A harness secret the descriptor does not name. lib/auth.sh:1034 falls back
 //     to CROSSREV_<HARNESS>_AUTH. Measured against lib/harnesses.json, the only
 //     harness declaring `refresher: true` is codex and codex declares
