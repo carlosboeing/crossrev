@@ -1,5 +1,6 @@
 {
   "note": "Measured with `NO_COLOR=1 bash bin/crossrev <args>` in a checkout. shell is what the shell printed on stderr and the status it ended with, with any absolute checkout path replaced by <checkout>; native is what this package prints where it cannot reproduce the shell byte for byte, with the reason recorded beside it. A row with no native block must match its shell block exactly. Every row printed nothing on stdout.",
+  "on the bash frames": "A shell block reading `<checkout>/lib/<file>.sh: line N: 2: ...` is a `${2:?...}` refusal, which Bash prints itself. Those blocks are a record of what the shell did and never a contract: the row carries a native block, so the test compares against that and nothing reads the shell bytes. N moves with any edit above it in the library file, and it has gone stale twice already. Re-measure it when you touch the file rather than trusting it, and never derive one number from another by adding an offset.",
   "rows": [
     {
       "name": "a mistyped sub-command is named rather than run",
@@ -491,7 +492,7 @@
       ],
       "shell": {
         "exit": 1,
-        "stderr": "<checkout>/lib/auth.sh: line 753: 2: --role needs a value\n"
+        "stderr": "<checkout>/lib/auth.sh: line 797: 2: --role needs a value\n"
       },
       "native": {
         "exit": 1,
@@ -508,7 +509,7 @@
       ],
       "shell": {
         "exit": 1,
-        "stderr": "<checkout>/lib/auth.sh: line 841: 2: --key needs a value\n"
+        "stderr": "<checkout>/lib/auth.sh: line 885: 2: --key needs a value\n"
       },
       "native": {
         "exit": 1,
@@ -525,7 +526,7 @@
       ],
       "shell": {
         "exit": 1,
-        "stderr": "<checkout>/lib/auth.sh: line 958: 2: --harness needs a value\n"
+        "stderr": "<checkout>/lib/auth.sh: line 1002: 2: --harness needs a value\n"
       },
       "native": {
         "exit": 1,
@@ -543,7 +544,7 @@
       ],
       "shell": {
         "exit": 1,
-        "stderr": "<checkout>/lib/auth.sh: line 961: 2: --org needs a value\n"
+        "stderr": "<checkout>/lib/auth.sh: line 1005: 2: --org needs a value\n"
       },
       "native": {
         "exit": 1,
@@ -561,7 +562,7 @@
       ],
       "shell": {
         "exit": 1,
-        "stderr": "<checkout>/lib/auth.sh: line 960: 2: --secret needs a value\n"
+        "stderr": "<checkout>/lib/auth.sh: line 1004: 2: --secret needs a value\n"
       },
       "native": {
         "exit": 1,

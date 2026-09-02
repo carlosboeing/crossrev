@@ -161,6 +161,11 @@ func TestVersionDeletesEveryWhitespaceByte(t *testing.T) {
 		{"\t0.5.0\r\n", "0.5.0\n"},
 		{"0. 5 .0\n", "0.5.0\n"},
 		{"1.2.3-rc.1\n", "1.2.3-rc.1\n"},
+		// The two of the six a set written by hand is likeliest to drop.
+		// Measured: `printf '0.\v5\f.0\n' | tr -d '[:space:]'` answers
+		// `0.5.0`, so both are deleted rather than kept.
+		{"\v0.5.0\f\n", "0.5.0\n"},
+		{"0.\v5\f.0\n", "0.5.0\n"},
 	} {
 		t.Run(fmt.Sprintf("%q", tc.raw), func(t *testing.T) {
 			io, out, _ := captureIO()
