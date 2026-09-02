@@ -564,3 +564,94 @@ func TestSettingsNamesOnlyTheHarnessesThatCanReview(t *testing.T) {
 		"the reviewer is configured to use 'claude', which is not installed, and no other harness that can serve the review leg is either",
 		"Install one of claude and opencode. CrossRev needs at least one, and two different ones is what makes the cross-model check mean anything.")
 }
+
+// TestInvokeRefusesADescriptorEntryWithNoCompiledAdapter reaches the SECOND
+// no-adapter guard, the one inside invoke (invoke.go, after AssertEnvClean).
+//
+// The two guards do not test the same predicate. settings asks
+// Document.Known — is the name in the descriptor — while invoke asks
+// harness.For, which is that AND one of the five names this binary compiles an
+// adapter for (internal/harness/adapter.go:92-111). The gap between them is a
+// descriptor entry naming a harness this build has no adapter for, which is
+// what this test constructs: a sixth entry copied from claude and renamed.
+//
+// Bash has no second guard because it cannot reach this state. harness_load
+// refuses the document outright, before run_leg_settings is ever called:
+//
+//	$ NO_COLOR=1 CROSSREV_HARNESS_FILE=/tmp/d-sixth.json bash -c 'ROOT=$PWD;
+//	    source lib/ui.sh; source lib/harnesses.sh; source lib/config.sh;
+//	    source lib/run.sh; harness_source_adapters; CFG_MERGED="{}";
+//	    run_leg_settings reviewer newharness'
+//	error  the descriptor names the harness 'newharness', and there is no lib/adapters/newharness.sh
+//	       Add the adapter, or remove the entry.
+//
+// That check is lib/harnesses.sh:106-114 and its Go port is harness.Adapters
+// (internal/harness/adapter.go:119-127), which nothing outside a test calls —
+// so this refusal is the only thing standing between an adapter-less entry and
+// a nil adapter. The sentence it prints is the one measured at lib/run.sh:500-508;
+// the descriptor that reaches it is one Bash would have rejected at load.
+func TestInvokeRefusesADescriptorEntryWithNoCompiledAdapter(t *testing.T) {
+	e := newEnv(t)
+	e.doc = withSixthEntry(t)
+	req := e.request(t)
+	req.HarnessOverride = "newharness"
+
+	got := runLeg(t, e, req)
+
+	wantFatal(t, got.Err,
+		"there is no adapter for the harness 'newharness'",
+		"CrossRev drives claude, codex, agy, grok, opencode and newharness directly.")
+	if len(e.runner.Specs()) != 0 {
+		t.Errorf("harness started with no adapter: %d specs", len(e.runner.Specs()))
+	}
+}
+
+// withSixthEntry is the shipped descriptor with claude's entry copied under a
+// name this binary compiles no adapter for. It is the jq
+//
+//	.harnesses += [(.harnesses[] | select(.name=="claude")
+//	   | .name="newharness" | .product_name="New Harness" | .binary="newharness")]
+//
+// that the measurement above ran against Bash.
+func withSixthEntry(t *testing.T) harness.Document {
+	t.Helper()
+	var tree map[string]any
+	if err := json.Unmarshal(harness.DescriptorJSON(), &tree); err != nil {
+		t.Fatalf("decode the shipped descriptor: %v", err)
+	}
+	entries, ok := tree["harnesses"].([]any)
+	if !ok {
+		t.Fatal("the shipped descriptor has no harnesses array")
+	}
+	var copied map[string]any
+	for _, entry := range entries {
+		object, ok := entry.(map[string]any)
+		if !ok {
+			t.Fatal("a harness entry is not an object")
+		}
+		if object["name"] != "claude" {
+			continue
+		}
+		copied = make(map[string]any, len(object))
+		for key, value := range object {
+			copied[key] = value
+		}
+	}
+	if copied == nil {
+		t.Fatal("the shipped descriptor has no claude entry to copy")
+	}
+	copied["name"] = "newharness"
+	copied["product_name"] = "New Harness"
+	copied["binary"] = "newharness"
+	tree["harnesses"] = append(entries, copied)
+
+	raw, err := json.Marshal(tree)
+	if err != nil {
+		t.Fatalf("re-encode the descriptor: %v", err)
+	}
+	doc, err := harness.Load(raw)
+	if err != nil {
+		t.Fatalf("harness.Load: %v", err)
+	}
+	return doc
+}

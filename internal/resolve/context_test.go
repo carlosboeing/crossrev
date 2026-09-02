@@ -450,3 +450,24 @@ func TestSettingsNamesOnlyTheHarnessesThatCanResolve(t *testing.T) {
 		"the resolver is configured to use 'claude', which is not installed, and no other harness that can serve the resolve leg is either",
 		"Install one of claude and opencode. CrossRev needs at least one, and two different ones is what makes the cross-model check mean anything.")
 }
+
+// TestCapitaliseName pins the Bash
+// `$(printf '%s' "${h:0:1}" | tr '[:lower:]' '[:upper:]')${h:1}` at
+// lib/run.sh:503, including the two edges the not-driven refusal never reaches
+// on the shipped descriptor: an empty name, where `${h:0:1}` is empty and the
+// expansion is the empty string, and a one-character name, where `${h:1}` is
+// empty rather than out of range. The review leg carries the same function and
+// pins it the same way.
+func TestCapitaliseName(t *testing.T) {
+	for _, tt := range []struct{ in, want string }{
+		{"", ""},
+		{"k", "K"},
+		{"kimi", "Kimi"},
+		{"Kimi", "Kimi"},
+		{"opencode", "Opencode"},
+	} {
+		if got := capitaliseName(tt.in); got != tt.want {
+			t.Errorf("capitaliseName(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
