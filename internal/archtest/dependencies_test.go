@@ -64,9 +64,29 @@ var allowedThirdParty = map[string]map[string]bool{
 func getAllowedInternalImports(pkgRel string) map[string]bool {
 	allowed := make(map[string]bool)
 
-	// Entrypoint: cmd/crossrev may ONLY import internal/cli
+	// Entrypoint: cmd/crossrev is the composition root, so it may import every
+	// internal package and no other package may import it.
+	//
+	// The rule used to name internal/cli alone, which held while the command
+	// table was empty. Filling it means opening a forge client, a run log, a
+	// harness adapter, the two legs, the cycle driver, the App services,
+	// preflight and init — every tier there is. That widening is confined to
+	// this one package: the tier-3 rule below is untouched, so no tier-3
+	// package gains a peer import from it, and cmd/crossrev is the only path
+	// on which two tier-3 packages meet.
 	if pkgRel == "cmd/crossrev" {
-		allowed["internal/cli"] = true
+		for p := range tier0 {
+			allowed[p] = true
+		}
+		for p := range tier1 {
+			allowed[p] = true
+		}
+		for p := range tier2IntraEdges {
+			allowed[p] = true
+		}
+		for p := range tier3 {
+			allowed[p] = true
+		}
 		return allowed
 	}
 

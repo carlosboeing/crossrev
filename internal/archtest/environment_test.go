@@ -227,6 +227,23 @@ func TestEnvironAuditVerdict(t *testing.T) {
 			wantViolation: true,
 			mustMention:   "no file may hold one",
 		},
+		{
+			// The scratch file a security review of this tree built: a second
+			// file inside the permitted package holding the Cmd method as a
+			// value. Every other rule passes it.
+			name:          "a Cmd method value in another file of internal/exec",
+			file:          "internal/exec/osrunner.go",
+			source:        "package exec\nimport osexec \"os/exec\"\nvar command = osexec.Command(\"true\")\nvar read = command.Environ\n",
+			wantViolation: true,
+			mustMention:   "only internal/exec/env.go may hold one",
+		},
+		{
+			// A file that never imports os/exec cannot hold a Cmd, so a local
+			// method spelled the same way is not this rule.
+			name:   "a local Environ method in a file with no os/exec import",
+			file:   "internal/harness/box.go",
+			source: "package harness\ntype box struct{}\nfunc (box) Environ() []string { return nil }\nvar v = box{}.Environ()\n",
+		},
 	}
 
 	for _, tt := range tests {
@@ -295,11 +312,68 @@ func environReferences(node *ast.File) []environReference {
 		})
 	}
 
+	found = append(found, cmdEnvironReferences(node)...)
 	found = append(found, environLinknameReferences(node)...)
 	found = append(found, environLiteralReferences(node)...)
 	found = append(found, cgoImportReferences(node)...)
 
 	sort.Slice(found, func(i, j int) bool { return found[i].pos < found[j].pos })
+	return found
+}
+
+// cmdEnvironReferences finds the fourth bulk read: (*os/exec.Cmd).Environ.
+//
+// It answers the whole environment of the calling process whenever Cmd.Env is
+// nil, which makes it exactly what Inherit exists to prevent. The process rule
+// in process_test.go says confining the os/exec import "also closes" it, and
+// that is true of every package except the one holding the import. Inside
+// internal/exec any file may build a Cmd, so a security review of this tree
+// found `command.Environ` in a second file there passing every rule. This is
+// that hole.
+//
+// The detector is name-based, because the AST carries no types: any selector
+// spelled `.Environ` in a file that imports os/exec is reported, whatever the
+// receiver is. That covers the call, the method value and the method
+// expression `(*osexec.Cmd).Environ` in one rule, since all three are the same
+// selector to the parser. A selector on the confined packages' own local names
+// is skipped, because environRules has already reported it and one fact should
+// not be two failures.
+//
+// Unlike os.Environ, this reference is not required to appear anywhere:
+// internal/exec/env.go reaches the environment through os.Environ and holds no
+// Cmd at all, so a `permittedSeen` check would demand a call nothing should
+// make. The permitted file is named so that a future Inherit built on a Cmd
+// has one legal home rather than none.
+func cmdEnvironReferences(node *ast.File) []environReference {
+	osExecNames, osExecDotImported := importLocalNames(node, "os/exec", "exec")
+	if len(osExecNames) == 0 && !osExecDotImported {
+		return nil
+	}
+
+	alreadyReported := make(map[string]bool)
+	for _, rule := range environRules {
+		names, _ := importLocalNames(node, rule.importPath, rule.defaultName)
+		for name := range names {
+			alreadyReported[name] = true
+		}
+	}
+
+	var found []environReference
+	ast.Inspect(node, func(n ast.Node) bool {
+		selector, ok := n.(*ast.SelectorExpr)
+		if !ok || selector.Sel.Name != "Environ" {
+			return true
+		}
+		if ident, ok := selector.X.(*ast.Ident); ok && alreadyReported[ident.Name] {
+			return true
+		}
+		found = append(found, environReference{
+			pos:         selector.Pos(),
+			what:        "(*exec.Cmd).Environ",
+			permittedIn: "internal/exec/env.go",
+		})
+		return true
+	})
 	return found
 }
 
@@ -453,6 +527,39 @@ func TestEnvironBoundaryDetectsEveryRoute(t *testing.T) {
 			name:      "a local method that happens to be called Environ",
 			source:    "package sample\ntype box struct{}\nfunc (box) Environ() []string { return nil }\nvar v = box{}.Environ()\n",
 			wantCount: 0,
+		},
+		{
+			// The three spellings of the Cmd method, one per case, because the
+			// parser sees one selector for all three and a detector that lost
+			// two of them would still pass the first.
+			name:        "the Cmd method called",
+			source:      "package sample\nimport \"os/exec\"\nfunc f() []string { return exec.Command(\"true\").Environ() }\n",
+			wantCount:   1,
+			wantWhat:    "(*exec.Cmd).Environ",
+			permittedIn: "internal/exec/env.go",
+		},
+		{
+			name:        "the Cmd method as a value",
+			source:      "package sample\nimport osexec \"os/exec\"\nvar command = osexec.Command(\"true\")\nvar read = command.Environ\n",
+			wantCount:   1,
+			wantWhat:    "(*exec.Cmd).Environ",
+			permittedIn: "internal/exec/env.go",
+		},
+		{
+			name:        "the Cmd method as a method expression",
+			source:      "package sample\nimport osexec \"os/exec\"\nvar read = (*osexec.Cmd).Environ\n",
+			wantCount:   1,
+			wantWhat:    "(*exec.Cmd).Environ",
+			permittedIn: "internal/exec/env.go",
+		},
+		{
+			// os.Environ inside a file that also imports os/exec is one fact,
+			// not two. It stays os.Environ's violation.
+			name:        "os.Environ beside an os/exec import",
+			source:      "package sample\nimport (\n\t\"os\"\n\t_ \"os/exec\"\n)\n\nvar v = os.Environ()\n",
+			wantCount:   1,
+			wantWhat:    "os.Environ",
+			permittedIn: "internal/exec/env.go",
 		},
 	}
 
