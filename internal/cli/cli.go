@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 
+	"github.com/carlosboeing/crossrev/internal/harness"
 	"github.com/carlosboeing/crossrev/internal/ui"
 )
 
@@ -40,13 +41,36 @@ func Main() int {
 }
 
 // compose is the composition root: it opens what each command needs and returns
-// the table Run dispatches over.
+// the table Run dispatches over, and the harness names the usage lines carry.
 //
-// It is empty here, and every command reports itself unwired until it is
-// filled. It has to live in this package because cmd/crossrev may import
+// Help and version are wired. Every other command reports itself unwired until
+// it is filled. It has to live in this package because cmd/crossrev may import
 // internal/cli and nothing else, and wiring a leg means reaching a forge
 // client, a harness adapter and a run log.
 func compose(out *ui.IO) (Commands, []string) {
-	_ = out
-	return Commands{}, nil
+	// The names the `--harness` lines render. A descriptor that failed to
+	// parse leaves the list empty, which prints the shape of the flag instead
+	// — the arm the shell takes when jq is missing (bin/crossrev:68-72). The
+	// command that needs a working descriptor refuses on its own.
+	document, _ := harness.Descriptors()
+	names := document.Names()
+
+	return Commands{
+		Help: func(context.Context, HelpRequest) (int, error) {
+			return Help(out, names)
+		},
+		Version: func(context.Context, VersionRequest) (int, error) {
+			return Version(out, installedVersion())
+		},
+	}, names
 }
+
+// installedVersion is the text `crossrev version` prints.
+//
+// The shell reads it out of the VERSION file at the root of its checkout
+// (bin/crossrev:26, :64), and a binary has no checkout to read. Carrying the
+// bytes instead means a generated file beside this package and a line in
+// scripts/sync-embedded-assets.sh, the way internal/harness carries the
+// descriptor; that has not been done, so this answers nothing yet and Version
+// refuses rather than printing a blank line.
+func installedVersion() string { return "" }
