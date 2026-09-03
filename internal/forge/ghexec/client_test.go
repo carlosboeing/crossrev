@@ -240,6 +240,31 @@ func TestTheFilteredBodyIsWhatIsPublished(t *testing.T) {
 
 var _ forge.Forge = (*ghexec.Client)(nil)
 
+// declaredAllowlist is the environment `gh` is allowed to inherit, written out
+// here rather than read from the package, so a test cannot agree with a wrong
+// answer.
+//
+// There is no line of the shell to take it from: bin/crossrev hands `gh` the
+// whole environment it was started with, so this list is a narrowing the port
+// makes and the reasoning for every name is at ghEnvironment in client.go. That
+// makes an independent statement of it the only check there can be. The rule
+// comparing what the two `gh` constructors in this tree pass is in
+// internal/archtest, which is above both packages and holds a third copy for
+// the same reason.
+var declaredAllowlist = []string{
+	"PATH", "HOME",
+	"XDG_CONFIG_HOME", "GH_CONFIG_DIR", "GH_HOST",
+	"GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN",
+	"SSL_CERT_FILE", "SSL_CERT_DIR",
+	"HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY",
+	"http_proxy", "https_proxy", "no_proxy",
+}
+
+// declaredExcluded are the names that must not reach `gh`. GH_REPO would
+// retarget RepoSlug and every write after it; GH_FORCE_TTY would put ANSI
+// escapes in JSON these reads unmarshal. The other two are ordinary secrets.
+var declaredExcluded = []string{"GH_REPO", "GH_FORCE_TTY", "AWS_SECRET_ACCESS_KEY", "ANTHROPIC_API_KEY"}
+
 // The default environment is the allowlist, and nothing else read it.
 //
 // Every other test in this package overrides it with WithEnv, so the list
@@ -249,17 +274,8 @@ var _ forge.Forge = (*ghexec.Client)(nil)
 func TestTheDefaultEnvironmentIsTheAllowlist(t *testing.T) {
 	// Set the whole allowlist plus the two names it must not carry, so what
 	// reaches gh is decided by the allowlist and not by this process.
-	required := []string{
-		"PATH", "HOME",
-		"XDG_CONFIG_HOME", "GH_CONFIG_DIR", "GH_HOST",
-		"GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN",
-		"SSL_CERT_FILE", "SSL_CERT_DIR",
-		"HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY",
-		"http_proxy", "https_proxy", "no_proxy",
-	}
-	// GH_REPO would retarget RepoSlug and every write after it; GH_FORCE_TTY
-	// would put ANSI escapes in JSON these reads unmarshal.
-	excluded := []string{"GH_REPO", "GH_FORCE_TTY", "AWS_SECRET_ACCESS_KEY", "ANTHROPIC_API_KEY"}
+	required := declaredAllowlist
+	excluded := declaredExcluded
 
 	for _, name := range append(append([]string{}, required...), excluded...) {
 		t.Setenv(name, "value-of-"+name)
@@ -303,17 +319,24 @@ func TestTheDefaultEnvironmentIsTheAllowlist(t *testing.T) {
 // side reads the other. This accessor is what makes there be one list, and
 // internal/archtest is where the two constructors are compared.
 //
-// The list is read from the constructor rather than written out here, so that
-// this test cannot agree with a wrong answer that a matching copy would.
+// What the accessor answers is compared against declaredAllowlist above, not
+// against itself. Reading the expected value out of EnvironmentNames made this
+// test agree with every answer: a name dropped from the accessor was then never
+// set in this process either, so gh did not receive it and the comparison held.
+// Measured — deleting "no_proxy" from ghEnvironment passed this package and
+// failed only internal/archtest.
 func TestEnvironmentNamesIsTheDefaultTheConstructorReads(t *testing.T) {
 	declared := ghexec.EnvironmentNames()
 	if len(declared) == 0 {
 		t.Fatal("EnvironmentNames answered nothing; gh would inherit an empty environment")
 	}
+	if want := sorted(declaredAllowlist); !slices.Equal(sorted(declared), want) {
+		t.Errorf("EnvironmentNames answers %q and the allowlist this test declares is %q", sorted(declared), want)
+	}
 
-	// Set every declared name, plus two that are not on the list, so what
-	// reaches gh is decided by the allowlist and not by this process.
-	for _, name := range declared {
+	// Set every name the allowlist declares, plus two that are not on it, so
+	// what reaches gh is decided by the allowlist and not by this process.
+	for _, name := range declaredAllowlist {
 		t.Setenv(name, "value-of-"+name)
 	}
 	t.Setenv("GH_REPO", "acme/other")
@@ -332,11 +355,18 @@ func TestEnvironmentNamesIsTheDefaultTheConstructorReads(t *testing.T) {
 		got = append(got, name)
 	}
 	slices.Sort(got)
-	want := slices.Clone(declared)
-	slices.Sort(want)
+	want := sorted(declaredAllowlist)
 	if !slices.Equal(got, want) {
-		t.Errorf("gh received %q and EnvironmentNames declares %q; the accessor is not the list the constructor reads", got, want)
+		t.Errorf("gh received %q and the allowlist declares %q; the accessor is not the list the constructor reads", got, want)
 	}
+}
+
+// sorted is a sorted copy, so neither the package's slice nor this file's is
+// reordered by a comparison.
+func sorted(names []string) []string {
+	out := slices.Clone(names)
+	slices.Sort(out)
+	return out
 }
 
 // The accessor answers a fresh slice each time, for the reason

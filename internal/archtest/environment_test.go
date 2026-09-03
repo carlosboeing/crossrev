@@ -612,6 +612,27 @@ func TestEnvironBoundaryDetectsEveryRoute(t *testing.T) {
 			permittedIn: "internal/exec/env.go",
 		},
 		{
+			// A dot import brings Command into the file's own scope, so
+			// nothing spells `exec.` anywhere and the import's local-name list
+			// is empty. The dot flag is the second half of the import half of
+			// the scope, and without it this row passes on a file outside
+			// internal/exec.
+			name:        "a dot-imported os/exec outside the permitted directory",
+			source:      "package sample\nimport . \"os/exec\"\nfunc f() []string { return Command(\"true\").Environ() }\n",
+			wantCount:   1,
+			wantWhat:    "(*exec.Cmd).Environ",
+			permittedIn: "internal/exec/env.go",
+		},
+		{
+			// The method value through the same dot import, for the reason the
+			// three spellings above are three rows.
+			name:        "a dot-imported os/exec method value",
+			source:      "package sample\nimport . \"os/exec\"\nvar command = Command(\"true\")\nvar read = command.Environ\n",
+			wantCount:   1,
+			wantWhat:    "(*exec.Cmd).Environ",
+			permittedIn: "internal/exec/env.go",
+		},
+		{
 			// os.Environ inside a file that also imports os/exec is one fact,
 			// not two. It stays os.Environ's violation.
 			name:        "os.Environ beside an os/exec import",

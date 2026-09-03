@@ -2,6 +2,8 @@ package archtest_test
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -117,17 +119,128 @@ func TestBothGhConstructorsPassTheSameAllowlist(t *testing.T) {
 	fromProvider := ghEnvironmentNames(t, "internal/forge/ghexec", provider)
 	fromIdentity := ghEnvironmentNames(t, "internal/app", identity)
 
-	want := slices.Sorted(slices.Values(ghAllowlist))
+	for _, violation := range ghAllowlistVerdict(fromProvider, fromIdentity, slices.Sorted(slices.Values(ghAllowlist))) {
+		t.Error(violation)
+	}
 
+	// The exclusion half of the rule, which the seeding above exists for.
+	//
+	// "GH_REPO did not reach gh" is true of a process that never held one, so
+	// without this the seeding could be dropped and every assertion would still
+	// hold — over an environment where there was nothing to exclude.
+	for _, name := range ghExcluded {
+		if _, set := os.LookupEnv(name); !set {
+			t.Errorf("%s is not set in this process, so nothing here shows the allowlist kept it from gh", name)
+		}
+		if slices.Contains(fromProvider, name) {
+			t.Errorf("internal/forge/ghexec passed %s to gh; it is excluded on purpose", name)
+		}
+		if slices.Contains(fromIdentity, name) {
+			t.Errorf("internal/app passed %s to gh; it is excluded on purpose", name)
+		}
+	}
+}
+
+// ghAllowlistVerdict is the comparison itself: the two constructors against
+// each other, and each against the allowlist this file declares.
+//
+// Three clauses, and each was removable with the suite green. Agreement between
+// the two constructors does not follow from both matching the allowlist when
+// the allowlist comparison is the clause that went, and neither comparison
+// against the allowlist follows from the two agreeing — two constructors that
+// leaked the same name agree with each other perfectly.
+func ghAllowlistVerdict(fromProvider, fromIdentity, want []string) []string {
+	var violations []string
 	if !slices.Equal(fromProvider, fromIdentity) {
-		t.Errorf("the two gh constructors pass different environments:\n  internal/forge/ghexec: %q\n  internal/app:          %q",
-			fromProvider, fromIdentity)
+		violations = append(violations, fmt.Sprintf("the two gh constructors pass different environments:\n  internal/forge/ghexec: %q\n  internal/app:          %q",
+			fromProvider, fromIdentity))
 	}
 	if !slices.Equal(fromProvider, want) {
-		t.Errorf("internal/forge/ghexec passes %q, and the allowlist this rule declares is %q", fromProvider, want)
+		violations = append(violations, fmt.Sprintf("internal/forge/ghexec passes %q, and the allowlist this rule declares is %q", fromProvider, want))
 	}
 	if !slices.Equal(fromIdentity, want) {
-		t.Errorf("internal/app passes %q, and the allowlist this rule declares is %q", fromIdentity, want)
+		violations = append(violations, fmt.Sprintf("internal/app passes %q, and the allowlist this rule declares is %q", fromIdentity, want))
+	}
+	return violations
+}
+
+// One fixture per clause, standing in for two constructors this module does not
+// have. The rule above reads the real ones, which agree with each other and
+// with the allowlist, so no clause of it is reached on this tree and any one of
+// them could be deleted in silence.
+func TestGhAllowlistVerdict(t *testing.T) {
+	want := []string{"GH_TOKEN", "HOME", "PATH"}
+
+	tests := []struct {
+		name           string
+		fromProvider   []string
+		fromIdentity   []string
+		wantCount      int
+		mustMention    []string
+		mustNotMention string
+	}{
+		{
+			name:         "both constructors match the allowlist",
+			fromProvider: want,
+			fromIdentity: want,
+		},
+		{
+			// The case the pairwise clause is the only one to name. One side
+			// matches the allowlist, so only one allowlist comparison fires,
+			// and dropping the pairwise clause loses the sentence that says
+			// the two disagree.
+			name:         "one constructor carries a name the other does not",
+			fromProvider: want,
+			fromIdentity: []string{"APP_LEAKED_VAR", "GH_TOKEN", "HOME", "PATH"},
+			wantCount:    2,
+			mustMention:  []string{"pass different environments", "internal/app passes"},
+		},
+		{
+			// The case the two allowlist comparisons are the only ones to
+			// name. Both constructors leaked the same name, so they agree with
+			// each other and the pairwise clause says nothing.
+			name:           "both constructors leak the same name",
+			fromProvider:   []string{"GH_REPO", "GH_TOKEN", "HOME", "PATH"},
+			fromIdentity:   []string{"GH_REPO", "GH_TOKEN", "HOME", "PATH"},
+			wantCount:      2,
+			mustMention:    []string{"internal/forge/ghexec passes", "internal/app passes"},
+			mustNotMention: "pass different environments",
+		},
+		{
+			// And the same shape with a name dropped rather than added: a
+			// narrowed environment is as silent a failure as a widened one.
+			name:           "both constructors drop the same name",
+			fromProvider:   []string{"HOME", "PATH"},
+			fromIdentity:   []string{"HOME", "PATH"},
+			wantCount:      2,
+			mustMention:    []string{"internal/forge/ghexec passes", "internal/app passes"},
+			mustNotMention: "pass different environments",
+		},
+		{
+			name:         "the provider alone diverges",
+			fromProvider: []string{"GH_TOKEN", "HOME"},
+			fromIdentity: want,
+			wantCount:    2,
+			mustMention:  []string{"pass different environments", "internal/forge/ghexec passes"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ghAllowlistVerdict(tt.fromProvider, tt.fromIdentity, want)
+			if len(got) != tt.wantCount {
+				t.Fatalf("violations = %q, want %d", got, tt.wantCount)
+			}
+			joined := strings.Join(got, "\n")
+			for _, phrase := range tt.mustMention {
+				if !strings.Contains(joined, phrase) {
+					t.Errorf("violations %q do not mention %q", got, phrase)
+				}
+			}
+			if tt.mustNotMention != "" && strings.Contains(joined, tt.mustNotMention) {
+				t.Errorf("violations %q mention %q, and the two constructors agree", got, tt.mustNotMention)
+			}
+		})
 	}
 }
 

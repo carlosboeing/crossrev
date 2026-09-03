@@ -63,12 +63,28 @@ func TestAwaitingPullRequestsReadsTheThreeFields(t *testing.T) {
 // A read that fails answers as no pull requests, because the shell's
 // `|| stuck="[]"` cannot tell an unreachable API from an empty repository
 // (lib/run.sh:3693).
+//
+// The last two rows are the ones that separate the exit code from the bytes.
+// `stuck` is assigned from a command substitution, so the shell's `||` fires on
+// the exit status alone: `gh` that printed a whole array and then exited
+// non-zero leaves `stuck="[]"` and the watchdog loop runs zero times, whatever
+// arrived on stdout. Without them the first two rows prove nothing about the
+// exit code, because empty stdout fails to unmarshal anyway.
 func TestAwaitingPullRequestsAnswersNoneWhenTheReadFails(t *testing.T) {
+	answeredBody := `[{"number":42,"labels":["crossrev/awaiting-review"],"head":"abc123"}]`
 	cases := map[string]exec.Result{
 		"gh exited non-zero": bad(),
 		"gh never started":   unresolved(),
 		"gh printed junk":    out("not json"),
 		"gh printed nothing": out(""),
+		"gh printed the array and then exited non-zero": {
+			ExitCode: 1,
+			Stdout:   []byte(answeredBody),
+		},
+		"gh printed the array and never started": {
+			Err:    errNoStatus,
+			Stdout: []byte(answeredBody),
+		},
 	}
 	for name, res := range cases {
 		t.Run(name, func(t *testing.T) {
