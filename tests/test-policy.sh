@@ -293,6 +293,11 @@ out="$("$CROSSREV" resolve --pr 42 --trigger automatic 2>&1)"; rc=$?
 has "a draft pull request is not resolved automatically"  "$out" "draft pull request"
 is  "and declining it is not a workflow failure"          "$rc" "0"
 is  "and it writes nothing"                               "$(count 'method POST')" "0"
+# One message serves both legs, so it may not name either. It told a declined
+# resolve leg that nothing would "review" the pull request and to "ask for a
+# review", which is the wrong instruction for the leg that was refused.
+hasnt "and the refusal does not name the other leg"       "$out" "does not review it"
+has   "it names what was refused instead"                 "$out" "does not run on it"
 
 stub_reset
 routes_baseline "$(printf '[]' | payload)"

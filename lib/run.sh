@@ -223,6 +223,7 @@ run_lock_acquire() {
 CTX_REPO=""; CTX_PR=""; CTX_HEAD_SHA=""; CTX_BASE_SHA=""
 CTX_HEAD_BRANCH=""; CTX_DEFAULT_BRANCH=""; CTX_CHANGED=0
 CTX_HEAD_REPO=""; CTX_MAINTAINER_CAN_MODIFY=false; CTX_IS_CROSS_REPOSITORY=false
+CTX_DRAFT=false
 CTX_TITLE=""; CTX_BODY=""; CTX_LABELS=""; CTX_URL=""
 CTX_MODE=""; CTX_AUTHOR=""; CTX_MARKERS="[]"; CTX_MAX_PASSES_PER_CYCLE=3
 CTX_BACKLOG="none"; CTX_BACKLOG_LAYOUT=""; CTX_BACKLOG_PATH=""
@@ -256,9 +257,14 @@ ctx_load() {
     "$repo#$pr is not open" \
     "crossrev only runs on open pull requests. Reopen it, or pick another number."
 
-  if [[ "$trigger" == "automatic" && "$(jq -r '.isDraft // false' <<<"$pr_json")" == "true" ]]; then
-    ui_say "$repo#$pr is a draft pull request, so an automatic invocation does not review it."
-    ui_say "Mark it ready for review, or ask for a review explicitly."
+  # Read before the refusal below rather than inside it, because `status` loads
+  # the context as a human and still has to say that no workflow will run a leg.
+  CTX_DRAFT="$(jq -r '.isDraft // false' <<<"$pr_json")"
+  # Both legs, not just review: a resolve leg that ran here would push a fix to a
+  # draft the review leg refused to look at.
+  if [[ "$trigger" == "automatic" && "$CTX_DRAFT" == "true" ]]; then
+    ui_say "$repo#$pr is a draft pull request, so an automatic invocation does not run on it."
+    ui_say "Mark it ready for review, or run the leg yourself."
     return 2
   fi
 
@@ -3071,6 +3077,7 @@ cmd_status() {
   [[ -n "$CTX_URL" ]] && ui_line "url        $CTX_URL"
   ui_line "head       ${CTX_HEAD_SHA:0:7} on $CTX_HEAD_BRANCH, $CTX_CHANGED file(s)"
   ui_line "labels     ${CTX_LABELS:-none}"
+  [[ "$CTX_DRAFT" == "true" ]] && ui_line "draft      yes — no workflow runs a leg on it"
 
   ui_gap
   ui_head "LOOP"
@@ -3420,6 +3427,14 @@ _status_leg_complete() {
 # tool whose job is telling you what to do next should not end on a dead end.
 _status_next() {
   local state="$1" pass="$2" m stale
+  # The one state the labels cannot show. A draft is refused by every automatic
+  # invocation, and the review workflow's job condition skips before that even
+  # runs, so the label sits there and no event moves it. The command below is
+  # the only thing that will, and nothing else on this screen says so.
+  if [[ "$CTX_DRAFT" == "true" && "$state" == awaiting* ]]; then
+    ui_line "this is a draft pull request, so no workflow starts a leg on it."
+    ui_line "Mark it ready for review, or run the leg yourself:"
+  fi
   case "$state" in
     stopped)
       # The second command is the leg that was owed when the brake went on,
@@ -3686,25 +3701,38 @@ cmd_watchdog() {
       "Run the watchdog from a checkout with a GitHub remote, or pass --repo owner/name."
   fi
 
-  local stuck now checked=0 retried=0 halted=0
+  local stuck now checked=0 retried=0 halted=0 drafts=0
   now="$(date +%s)"
+  # `draft` rides along in the list response, so reading it costs no extra call.
   stuck="$(gh api "repos/$repo/pulls?state=open&per_page=100" \
     --jq '[.[] | select([.labels[].name] | any(startswith("crossrev/awaiting-")))
-           | {number, labels: [.labels[].name], head: .head.sha}]' 2>/dev/null)" || stuck="[]"
+           | {number, labels: [.labels[].name], head: .head.sha, draft}]' 2>/dev/null)" || stuck="[]"
 
   ui_section "CrossRev watchdog on $repo"
 
-  local n i pr labels head author markers marker age leg
+  local n i pr labels head draft author markers marker age leg
   n="$(jq 'length' <<<"$stuck")"
   for (( i = 0; i < n; i++ )); do
     pr="$(jq -r ".[$i].number" <<<"$stuck")"
     labels="$(jq -r ".[$i].labels | join(\" \")" <<<"$stuck")"
     head="$(jq -r ".[$i].head" <<<"$stuck")"
+    draft="$(jq -r ".[$i].draft // false" <<<"$stuck")"
     checked=$(( checked + 1 ))
 
     grep -qw "crossrev/stop" <<<"$labels" && continue
 
     if [[ "$labels" == *"crossrev/awaiting-resolution"* ]]; then leg="resolve"; else leg="review"; fi
+
+    # A draft waits on its author, so neither the retry nor the halt applies.
+    # Re-firing the label would meet the same refusal, and the sweep after that
+    # would report a leg that "is still not finishing" — a leg that never
+    # started. Saying the true reason once a sweep beats a retry that cannot work.
+    if [[ "$draft" == "true" ]]; then
+      ui_opt "#$pr — a draft pull request, so no automatic $leg leg runs on it"
+      ui_line "   mark it ready for review, or run \`crossrev $leg --pr $pr\` yourself"
+      drafts=$(( drafts + 1 ))
+      continue
+    fi
 
     author="$(state_trusted_author automated)"
     markers="$(state_markers "$pr" "$repo" "$author")"
@@ -3730,7 +3758,7 @@ cmd_watchdog() {
   done
 
   ui_gap
-  ui_line "checked $checked pull request(s) waiting on a leg — retried $retried, halted $halted"
+  ui_line "checked $checked pull request(s) waiting on a leg — retried $retried, halted $halted, $drafts in draft"
   ui_end "A pass that never fired and a pass that converged look identical from outside, which is why this runs on a schedule."
 }
 
