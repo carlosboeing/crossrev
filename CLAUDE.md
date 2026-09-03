@@ -10,7 +10,7 @@ Named 2026-08-13, renamed from the working title `revloop` ([ADR 0010](docs/adrs
 
 **Pre-1.0, and honest about how far the proof reaches.** Every command is covered by an offline suite and the local path has run against real pull requests. **Automated mode's workflows are installed in one repository, [`carlosboeing/crossrev-testbed`](https://github.com/carlosboeing/crossrev-testbed), and the loop has chained leg to leg there on GitHub's runners** — at v0.2.0 on 2026-08-17 and again at v0.5.0 on 2026-08-24.
 
-That is a named set of runs on one repository with one pairing, not a general guarantee. Nothing has run on a self-hosted runner, under any pairing other than codex reviewing and claude resolving, or at any volume. A draft pull request is still resolved and never reviewed ([#122](https://github.com/carlosboeing/crossrev/issues/122)). `0.x` records that gap — describe the runs that happened, not automated mode as working.
+That is a named set of runs on one repository with one pairing, not a general guarantee. Nothing has run on a self-hosted runner, under any pairing other than codex reviewing and claude resolving, or at any volume. The draft defect ([#122](https://github.com/carlosboeing/crossrev/issues/122)) is fixed and covered offline, and has not been watched run on a draft in CI. `0.x` records that gap — describe the runs that happened, not automated mode as working.
 
 ## Project Map
 

@@ -190,7 +190,7 @@ crossrev init          # prints an itemised plan, asks once, then sets it up
 
 `init` generates up to four workflows: the review leg, the resolve leg, a watchdog on a schedule, and — only when the pairing needs one — a credential refresher. Each pins CrossRev's composite action at a full 40-character SHA with the tag as a trailing comment.
 
-**Automated mode is proven for a narrow set of runs, not in general.** These workflows are installed in one repository, where the loop has chained review to resolve to review on GitHub's hosted runners with codex reviewing and claude resolving. No self-hosted runner, no other pairing and no volume beyond single-digit pull requests has been exercised, and a draft pull request is resolved and never reviewed ([#122](https://github.com/carlosboeing/crossrev/issues/122)). That is what the `0.x` version records, and closing the gap is the [roadmap's](ROADMAP.md) first item.
+**Automated mode is proven for a narrow set of runs, not in general.** These workflows are installed in one repository, where the loop has chained review to resolve to review on GitHub's hosted runners with codex reviewing and claude resolving. No self-hosted runner, no other pairing and no volume beyond single-digit pull requests has been exercised. The one defect those runs found — a draft pull request resolved and never reviewed ([#122](https://github.com/carlosboeing/crossrev/issues/122)) — is fixed and covered by the suite, but the fix has not been watched run in CI. That is what the `0.x` version records, and closing the gap is the [roadmap's](ROADMAP.md) first item.
 
 ### Pull requests on a public repository
 
