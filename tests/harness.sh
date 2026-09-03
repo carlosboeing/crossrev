@@ -26,6 +26,14 @@ CROSSREV="$HERE/../bin/crossrev"
 # system temp directory, not under $L), so only rewriting the command itself
 # reaches every call.
 HARNESS_TMP="$(command mktemp -d)"; export HARNESS_TMP
+# Also exported as TMPDIR: the wrapper below passes an explicit template
+# through unchanged, and shell code that composes its own path from TMPDIR
+# before calling mktemp with such a template (lib/auth.sh:626's
+# ${TMPDIR:-/tmp}) needs TMPDIR itself pointed at the root. Costs nothing on
+# macOS, where mktemp ignores an inherited TMPDIR and the wrapper already does
+# the work; on Linux it is what makes the whole mechanism work through mktemp
+# itself.
+export TMPDIR="$HARNESS_TMP"
 _harness_cleanup() { rm -rf "$HARNESS_TMP"; }
 trap '_harness_cleanup' EXIT
 
