@@ -191,6 +191,8 @@ endpoints:
 
 An endpoint block is a `base_url` and a `token_env`. **Tokens are never in either file**: `token_env` names an environment variable, and its value comes from your shell locally or from a repository secret in CI. The variable name is named rather than assumed because it genuinely differs by service — Ollama's documentation uses `ANTHROPIC_AUTH_TOKEN` where Kimi's uses `ANTHROPIC_API_KEY`.
 
+**`token_env` may not name a GitHub credential.** `GH_TOKEN`, `GITHUB_TOKEN`, `GH_ENTERPRISE_TOKEN` and `GITHUB_ENTERPRISE_TOKEN` are refused when the config loads, so `crossrev config show`, `crossrev doctor` and every leg say so before anything runs. CrossRev reads `token_env`'s value and hands it to the model process as that vendor's own token variable, and the model process must hold no GitHub credential ([ADR 0001](adrs/0001-cross-model-review-loop.md), [SECURITY.md](../SECURITY.md)). Stripping the GitHub name would not help: the value arrives under a different name.
+
 **Endpoint definitions merge by name, and the operator file wins.** So a repository can declare a public endpoint while you point the same name at your own instance, with no change to the repository.
 
 Claude Code talks to anything exposing an Anthropic-compatible `/v1/messages` endpoint, which is what makes the harness and the model separate choices.
