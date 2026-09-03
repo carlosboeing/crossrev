@@ -107,3 +107,33 @@ func isRegularFile(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && info.Mode().IsRegular()
 }
+
+// write0600 writes body to dest so that the file is 0600 once the write
+// finishes, whatever mode the path held before (_auth_write_0600,
+// lib/auth.sh:47-57).
+//
+// os.WriteFile applies its mode argument on create only, exactly like the
+// shell's umask. A write onto an existing file truncates it and keeps the mode
+// it already had, so writing a key over a path somebody had widened to 0644
+// left it at 0644. The rename replaces the inode, so the mode comes from the
+// file this created rather than from whatever was there. It also means nothing
+// ever reads a half-written key.
+//
+// A write it cannot make returns an error and removes its own temporary file,
+// so a failed call leaves the destination and its sibling as they were.
+func write0600(dest string, body []byte) error {
+	tmp := dest + ".tmp"
+	// A temporary left behind by an interrupted run would be written onto
+	// rather than created, which is the defect this helper exists to close.
+	// Removing it first means the write below always creates.
+	os.Remove(tmp)
+	if err := os.WriteFile(tmp, body, 0o600); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	if err := os.Rename(tmp, dest); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	return nil
+}

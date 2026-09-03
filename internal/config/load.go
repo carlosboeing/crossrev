@@ -147,6 +147,7 @@ func Load(ctx context.Context, base core.Revision, show ShowFile) (*Config, erro
 		loaded.assertGitHooks,
 		loaded.assertLogs,
 		loaded.assertBacklog,
+		loaded.assertEndpoints,
 	} {
 		if err := assert(); err != nil {
 			return nil, err

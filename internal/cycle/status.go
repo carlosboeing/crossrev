@@ -105,6 +105,11 @@ type Report struct {
 	HeadBranch   string
 	ChangedFiles int
 	Labels       []string
+	// Draft is the pull request's own `isDraft`, read whatever the trigger
+	// is (lib/run.sh:262). It is the one state the labels cannot show: every
+	// automatic invocation refuses a draft, so an awaiting label on one is a
+	// loop that stops with nothing wrong anywhere.
+	Draft bool
 
 	Mode              string
 	Author            string
@@ -198,6 +203,7 @@ func (s *Status) Load(ctx context.Context, repo core.Slug, pr int) (Report, erro
 		labels:    statusLabelNames(pull.Labels),
 		markers:   statusMarkers(s.Forge.IssueComments(ctx, repo, pr), author),
 		headSHA:   pull.HeadRefOid.SHA(),
+		draft:     pull.IsDraft,
 		minFix:    core.Severity(cfg.Get(".policy.min_fix_severity")),
 		maxPasses: maxPasses,
 		now:       s.Now(),
@@ -214,6 +220,7 @@ func (s *Status) Load(ctx context.Context, repo core.Slug, pr int) (Report, erro
 		HeadBranch:        pull.HeadRefName,
 		ChangedFiles:      pull.ChangedFiles,
 		Labels:            in.labels,
+		Draft:             in.draft,
 		Mode:              cfg.Get(".mode"),
 		Author:            author,
 		Pass:              prstate.CurrentReviewPass(in.markers),
@@ -245,6 +252,7 @@ type statusInput struct {
 	labels    []string
 	markers   []prstate.Marker
 	headSHA   string
+	draft     bool
 	minFix    core.Severity
 	maxPasses int
 	now       time.Time
@@ -546,6 +554,17 @@ func statusNext(ctx context.Context, in statusInput, state core.LoopState, pass 
 	var next statusLines
 	review := "crossrev review --pr " + strconv.Itoa(in.pr)
 	resolve := "crossrev resolve --pr " + strconv.Itoa(in.pr)
+
+	// The one state the labels cannot show. A draft is refused by every
+	// automatic invocation, and the review workflow's job condition skips
+	// before that even runs, so the label sits there and no event moves it.
+	// The command below is the only thing that will, and nothing else on this
+	// screen says so (lib/run.sh:3434-3437). A converged draft is finished, so
+	// it gets the fact in the PULL REQUEST block and not this instruction.
+	if in.draft && strings.HasPrefix(string(state), "awaiting") {
+		next.line("this is a draft pull request, so no workflow starts a leg on it.")
+		next.line("Mark it ready for review, or run the leg yourself:")
+	}
 
 	switch state {
 	case core.LoopStopped:

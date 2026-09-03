@@ -1,9 +1,11 @@
 package config_test
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/carlosboeing/crossrev/internal/config"
 	"github.com/carlosboeing/crossrev/internal/core"
 )
 
@@ -100,5 +102,134 @@ func TestTheAcceptedValuesLoad(t *testing.T) {
 	}
 	for _, document := range documents {
 		mustLoad(t, core.Revision{}, files{"": {".github/crossrev.yml": document}})
+	}
+}
+
+// An endpoint may not borrow a GitHub credential.
+//
+// token_env is read with ${!name} and its value handed to the harness process
+// as that vendor's own token variable. So `token_env: GH_TOKEN` carries a
+// GitHub credential across the boundary the adapters exist to hold, and past
+// their strip list — the strip removes GH_TOKEN, and the same value arrives as
+// ANTHROPIC_AUTH_TOKEN. Nothing refused it, at any layer (ADR 0001).
+//
+// All four names, because `gh` reads four: a list holding only the first leaves
+// the enterprise pair usable for the same trick.
+func TestAnEndpointMayNotNameAForgeCredentialAsItsTokenEnv(t *testing.T) {
+	for _, credential := range config.ForgeCredentialNames() {
+		t.Run(credential, func(t *testing.T) {
+			document := "version: 1\nendpoints:\n  mine:\n    base_url: https://api.example/\n    token_env: " + credential + "\n"
+			refusal := refusalFrom(t, core.Revision{}, files{"": {".github/crossrev.yml": document}})
+
+			want := "the endpoint 'mine' names $" + credential + " as its token_env"
+			if refusal.Message != want {
+				t.Errorf("message = %q, want %q", refusal.Message, want)
+			}
+			wantHint := "That is a GitHub credential, and CrossRev hands token_env's value to the model process, " +
+				"which must hold none. Point token_env at the endpoint's own token."
+			if refusal.Hint != wantHint {
+				t.Errorf("hint = %q, want %q", refusal.Hint, wantHint)
+			}
+		})
+	}
+}
+
+// Refused at load, so it does not wait for a leg that selects it. An endpoint
+// nothing points at is still a config asking CrossRev to do the one thing it
+// must not — and Load is the moment `config show`, `doctor` and every leg pass
+// through, so all three say it before anything runs.
+func TestAnEndpointNoLegSelectsIsRefusedToo(t *testing.T) {
+	document := "version: 1\nendpoints:\n  unused:\n    base_url: https://api.example/\n    token_env: GH_TOKEN\n"
+	if got := refusalFrom(t, core.Revision{}, files{"": {".github/crossrev.yml": document}}).Message; !strings.Contains(got, "the endpoint 'unused'") {
+		t.Errorf("message = %q, want the unselected endpoint refused by name", got)
+	}
+}
+
+// The operator file merges into the same mapping, so it is checked on the same
+// pass rather than trusted for being local.
+func TestAnOperatorFileEndpointIsRefusedTheSameWay(t *testing.T) {
+	operator := "version: 1\nendpoints:\n  local:\n    base_url: http://mine.local/\n    token_env: GITHUB_TOKEN\n"
+	tree := files{"": {
+		".github/crossrev.yml": "version: 1\n",
+		config.OperatorPath():  operator,
+	}}
+	if got := refusalFrom(t, core.Revision{}, tree).Message; got != "the endpoint 'local' names $GITHUB_TOKEN as its token_env" {
+		t.Errorf("message = %q, want the operator-file endpoint refused by name", got)
+	}
+}
+
+// A name that merely looks like one is a different variable, and refusing it
+// would break a real endpoint for no gain. Environment names are case-sensitive.
+func TestALowercaseForgeCredentialNameIsADifferentVariable(t *testing.T) {
+	document := "version: 1\nendpoints:\n  kimi:\n    base_url: https://api.example/\n    token_env: gh_token\n"
+	loaded := mustLoad(t, core.Revision{}, files{"": {".github/crossrev.yml": document}})
+	endpoint, err := loaded.Endpoint("kimi")
+	if err != nil {
+		t.Fatalf("Endpoint: %v", err)
+	}
+	if endpoint.TokenEnv != "gh_token" {
+		t.Errorf("token_env = %q, want it to survive the load as %q", endpoint.TokenEnv, "gh_token")
+	}
+}
+
+// And the ordinary case still loads, or the check above would pass against a
+// port that had stopped reading token_env at all.
+func TestAnEndpointWithItsOwnTokenStillLoads(t *testing.T) {
+	document := "version: 1\nendpoints:\n  kimi:\n    base_url: https://api.example/\n    token_env: KIMI_API_KEY\n"
+	loaded := mustLoad(t, core.Revision{}, files{"": {".github/crossrev.yml": document}})
+	endpoint, err := loaded.Endpoint("kimi")
+	if err != nil {
+		t.Fatalf("Endpoint: %v", err)
+	}
+	if endpoint.TokenEnv != "KIMI_API_KEY" {
+		t.Errorf("token_env = %q, want %q", endpoint.TokenEnv, "KIMI_API_KEY")
+	}
+}
+
+// A definition that is not a mapping holds no token_env to read. The jq asks
+// `(.value | type) == "object"` before it reads the key, so a string definition
+// passes this assertion and is refused later, by Endpoint, for the base_url it
+// does not have (lib/config.sh:321-323).
+func TestANonMappingEndpointDefinitionPassesTheCredentialCheck(t *testing.T) {
+	document := "version: 1\nendpoints:\n  ollama: GH_TOKEN\n"
+	loaded := mustLoad(t, core.Revision{}, files{"": {".github/crossrev.yml": document}})
+	_, err := loaded.Endpoint("ollama")
+	refusal, ok := err.(*config.Refusal)
+	if !ok {
+		t.Fatalf("expected a *config.Refusal, got %T: %v", err, err)
+	}
+	if want := "the endpoint 'ollama' has no base_url"; refusal.Message != want {
+		t.Errorf("message = %q, want %q", refusal.Message, want)
+	}
+}
+
+// The endpoint check is last in the assert chain, where lib/config.sh:245 puts
+// it, so a config wrong twice reports the same fault Bash reports.
+func TestTheEndpointCheckIsLastInTheAssertChain(t *testing.T) {
+	document := "version: 1\nbacklog:\n  destination: elsewhere\n" +
+		"endpoints:\n  mine:\n    base_url: https://api.example/\n    token_env: GH_TOKEN\n"
+	if got := refusalFrom(t, core.Revision{}, files{"": {".github/crossrev.yml": document}}).Message; !strings.Contains(got, "backlog.destination") {
+		t.Errorf("message = %q, want the backlog refused first", got)
+	}
+}
+
+// The four names, written out here rather than read from the production list.
+// A test that read the list it checks agrees with whatever the list says, and
+// the whole point of the four is that none is missed. internal/archtest binds
+// this list to the one a model-facing process is stripped of.
+func TestForgeCredentialNamesAreTheFourGhReads(t *testing.T) {
+	want := []string{"GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"}
+	if got := config.ForgeCredentialNames(); !slices.Equal(got, want) {
+		t.Errorf("ForgeCredentialNames() = %v, want %v", got, want)
+	}
+}
+
+// The accessor answers a fresh slice, so a caller that shortens its copy does
+// not shorten the boundary for every other caller in the binary.
+func TestForgeCredentialNamesCannotBeShortenedByACaller(t *testing.T) {
+	taken := config.ForgeCredentialNames()
+	clear(taken)
+	if got := config.ForgeCredentialNames(); !slices.Contains(got, "GH_TOKEN") {
+		t.Errorf("ForgeCredentialNames() = %v after a caller cleared its copy", got)
 	}
 }

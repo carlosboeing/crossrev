@@ -46,10 +46,13 @@ func (l *Leg) Run(ctx context.Context, req Request) (out Result) {
 	if skip != "" {
 		out.Outcome = OutcomeSkipped
 		out.Reason = skip
-		// Two ui_say lines (lib/run.sh:260-261).
+		// Two ui_say lines (lib/run.sh:266-267). One message serves both legs,
+		// so it names neither: a refused resolve leg was being told that
+		// nothing would "review" the pull request, which is the wrong
+		// instruction for the leg that was refused.
 		out.Messages = ui.SayLines(
-			fmt.Sprintf("%s#%d is a draft pull request, so an automatic invocation does not review it.", loaded.Repo, req.PR),
-			"Mark it ready for review, or ask for a review explicitly.",
+			fmt.Sprintf("%s#%d is a draft pull request, so an automatic invocation does not run on it.", loaded.Repo, req.PR),
+			"Mark it ready for review, or run the leg yourself.",
 		)
 		return out
 	}

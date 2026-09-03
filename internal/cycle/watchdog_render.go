@@ -41,15 +41,27 @@ func watchdogRetriedLine(label, head string) string {
 	return "   retried by re-firing " + label + " at " + statusAbbreviate(head)
 }
 
+// watchdogDraftLine is lib/run.sh:3731, printed with ui_opt.
+func watchdogDraftLine(pr int, leg core.Leg) string {
+	return fmt.Sprintf("#%d — a draft pull request, so no automatic %s leg runs on it", pr, leg)
+}
+
+// watchdogDraftRecoveryLine is lib/run.sh:3732. The three leading spaces are
+// the indent under the pull request's own line, and the backticks are the
+// shell's own: the command is code, so it stays lowercase.
+func watchdogDraftRecoveryLine(pr int, leg core.Leg) string {
+	return fmt.Sprintf("   mark it ready for review, or run `crossrev %s --pr %d` yourself", leg, pr)
+}
+
 // watchdogHaltedLine is lib/run.sh:3753.
 func watchdogHaltedLine() string {
 	return "   halted — it had already been retried once"
 }
 
-// watchdogSummaryLine is lib/run.sh:3733.
+// watchdogSummaryLine is lib/run.sh:3761.
 func watchdogSummaryLine(s Summary) string {
-	return fmt.Sprintf("checked %d pull request(s) waiting on a leg — retried %d, halted %d",
-		s.Checked, s.Retried, s.Halted)
+	return fmt.Sprintf("checked %d pull request(s) waiting on a leg — retried %d, halted %d, %d in draft",
+		s.Checked, s.Retried, s.Halted, s.Drafts)
 }
 
 // watchdogHaltComment is the comment the halt posts (lib/run.sh:3747-3752).

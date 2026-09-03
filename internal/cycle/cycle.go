@@ -208,9 +208,12 @@ func (d *Driver) Run(ctx context.Context, req Request) Result {
 		return Result{ExitCode: 1, Err: err}
 	}
 	if state.Draft {
-		// lib/run.sh:260-261
-		out.Say(fmt.Sprintf("%s#%d is a draft pull request, so an automatic invocation does not review it.", state.Repo, state.PR))
-		out.Say("Mark it ready for review, or ask for a review explicitly.")
+		// lib/run.sh:266-267. One message serves both legs, so it names
+		// neither: a declined resolve leg told to "ask for a review" is
+		// given the wrong instruction. internal/review and internal/resolve
+		// print the same two lines for the same reason.
+		out.Say(fmt.Sprintf("%s#%d is a draft pull request, so an automatic invocation does not run on it.", state.Repo, state.PR))
+		out.Say("Mark it ready for review, or run the leg yourself.")
 		return Result{ExitCode: 0}
 	}
 

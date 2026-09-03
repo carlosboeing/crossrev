@@ -1,6 +1,7 @@
 package cycle_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -665,5 +666,168 @@ func TestStatusKeysTheTrustedAuthorOnTheMode(t *testing.T) {
 	}
 	if report.Author != "crossrev-acme[bot]" {
 		t.Errorf("Author = %q, want crossrev-acme[bot] from CROSSREV_APP_SLUG (lib/state.sh:35-40)", report.Author)
+	}
+}
+
+// statusLoadDraft loads a report for a pull request whose `isDraft` and labels
+// are the subject, with no markers behind them.
+//
+// ctx_load records the draft flag whatever the trigger is (lib/run.sh:259), so
+// status sees it on a plain local read. The fixtures above carry no draft field
+// because every one of them was measured from a ready pull request; this builds
+// the forge directly rather than adding a column to all of them.
+func statusLoadDraft(t *testing.T, labels []string, draft bool) cycle.Report {
+	t.Helper()
+	c := statusCases(t)[0]
+	head, err := core.NewRevision(c.HeadSHA)
+	if err != nil {
+		t.Fatalf("head revision: %v", err)
+	}
+	base, err := core.NewRevision(statusBase)
+	if err != nil {
+		t.Fatalf("base revision: %v", err)
+	}
+	slug, err := core.ParseSlug(statusRepo)
+	if err != nil {
+		t.Fatalf("slug: %v", err)
+	}
+	forgeLabels := make([]forge.Label, 0, len(labels))
+	for _, name := range labels {
+		forgeLabels = append(forgeLabels, forge.Label{Name: name})
+	}
+	s := &cycle.Status{
+		Forge: &statusForge{pr: forge.PullRequest{
+			Number:       statusPR,
+			Title:        "Add refresh",
+			URL:          "https://github.com/x",
+			HeadRefName:  "feature",
+			HeadRefOid:   head,
+			BaseRefName:  "main",
+			BaseRefOid:   base,
+			ChangedFiles: 1,
+			Labels:       forgeLabels,
+			IsDraft:      draft,
+			State:        "OPEN",
+		}},
+		Liveness: statusLife{},
+		Now:      func() time.Time { return time.Unix(c.Now, 0) },
+		Show:     statusShow(c),
+	}
+	report, err := s.Load(context.Background(), slug, statusPR)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	return report
+}
+
+// statusNextText flattens a NEXT section to the prose and commands it holds.
+func statusNextText(report cycle.Report) string {
+	var b strings.Builder
+	for _, line := range report.Next {
+		b.WriteString(line.Text)
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+// TestStatusReportsADraft pins the fact status gained at lib/run.sh:3078: a
+// draft carries the flag onto the report, and a ready pull request does not.
+func TestStatusReportsADraft(t *testing.T) {
+	if got := statusLoadDraft(t, []string{"crossrev/awaiting-review"}, true); !got.Draft {
+		t.Error("a draft pull request loaded with Draft false")
+	}
+	if got := statusLoadDraft(t, []string{"crossrev/awaiting-review"}, false); got.Draft {
+		t.Error("a ready pull request loaded with Draft true")
+	}
+}
+
+// TestStatusRendersTheDraftLineUnderTheLabels pins where the line goes and what
+// it says (lib/run.sh:3078). It sits immediately under `labels`, and it is
+// omitted rather than printed as "no" on every other pull request.
+func TestStatusRendersTheDraftLineUnderTheLabels(t *testing.T) {
+	const want = "│  labels     crossrev/awaiting-review\n│  draft      yes — no workflow runs a leg on it\n"
+
+	var draft bytes.Buffer
+	cycle.Render(&ui.IO{Out: &draft}, statusLoadDraft(t, []string{"crossrev/awaiting-review"}, true))
+	if !strings.Contains(draft.String(), want) {
+		t.Errorf("page = %q, want %q under the labels", draft.String(), want)
+	}
+
+	var ready bytes.Buffer
+	cycle.Render(&ui.IO{Out: &ready}, statusLoadDraft(t, []string{"crossrev/awaiting-review"}, false))
+	if strings.Contains(ready.String(), "draft      yes") {
+		t.Errorf("page = %q, want no draft line on a ready pull request", ready.String())
+	}
+}
+
+// TestStatusNextExplainsADraftOnAnAwaitingState pins the two lines
+// lib/run.sh:3434-3437 puts above the state's own answer.
+//
+// They go on either awaiting state, because both are a label no event will
+// move, and on neither terminal state: a converged draft is finished, and
+// telling its author to run a leg would be noise. The command underneath is
+// unchanged, so the section still ends in something typable.
+func TestStatusNextExplainsADraftOnAnAwaitingState(t *testing.T) {
+	const why = "this is a draft pull request, so no workflow starts a leg on it."
+	const how = "Mark it ready for review, or run the leg yourself:"
+
+	for _, tc := range []struct {
+		name    string
+		labels  []string
+		draft   bool
+		want    bool
+		wantCmd string
+	}{
+		{
+			name:    "awaiting review",
+			labels:  []string{"crossrev/awaiting-review"},
+			draft:   true,
+			want:    true,
+			wantCmd: "crossrev review --pr 42",
+		},
+		{
+			name:    "awaiting resolution",
+			labels:  []string{"crossrev/awaiting-resolution"},
+			draft:   true,
+			want:    true,
+			wantCmd: "crossrev resolve --pr 42",
+		},
+		{
+			name:   "converged",
+			labels: []string{"crossrev/converged"},
+			draft:  true,
+		},
+		{
+			name:   "a ready pull request awaiting review",
+			labels: []string{"crossrev/awaiting-review"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			report := statusLoadDraft(t, tc.labels, tc.draft)
+			next := statusNextText(report)
+			if got := strings.Contains(next, why) && strings.Contains(next, how); got != tc.want {
+				t.Errorf("NEXT = %q, want the draft explanation: %v", next, tc.want)
+			}
+			if tc.want {
+				// The two lines are prose, above whatever the state
+				// itself says, and they never replace the command.
+				if len(report.Next) < 3 {
+					t.Fatalf("NEXT = %+v, want the two prose lines and the command", report.Next)
+				}
+				if report.Next[0].Text != why || report.Next[0].Command {
+					t.Errorf("first NEXT line = %+v, want the prose %q", report.Next[0], why)
+				}
+				if report.Next[1].Text != how || report.Next[1].Command {
+					t.Errorf("second NEXT line = %+v, want the prose %q", report.Next[1], how)
+				}
+				if !strings.Contains(next, tc.wantCmd) {
+					t.Errorf("NEXT = %q, want it to still offer %q", next, tc.wantCmd)
+				}
+			}
+			// The fact belongs on the pull request whatever the state is.
+			if report.Draft != tc.draft {
+				t.Errorf("Draft = %v, want %v", report.Draft, tc.draft)
+			}
+		})
 	}
 }

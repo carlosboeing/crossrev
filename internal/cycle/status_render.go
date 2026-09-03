@@ -44,6 +44,11 @@ func Render(out *ui.IO, report Report) {
 	out.Line(fmt.Sprintf("head       %s on %s, %d file(s)",
 		statusAbbreviate(report.HeadSHA), report.HeadBranch, report.ChangedFiles))
 	out.Line("labels     " + statusLabelList(report.Labels))
+	// Only when it is one: a line reading "draft no" on every other pull
+	// request would say nothing (lib/run.sh:3080).
+	if report.Draft {
+		out.Line("draft      yes — no workflow runs a leg on it")
+	}
 
 	out.Gap()
 	out.Head("LOOP")

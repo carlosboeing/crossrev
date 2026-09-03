@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"slices"
 
 	"github.com/carlosboeing/crossrev/internal/core"
 )
@@ -189,4 +190,75 @@ func unknownLayout(layout string) *Refusal {
 		Message: fmt.Sprintf("backlog.repository.layout is '%s', which is not folder or file", layout),
 		Hint:    "Set it to folder or file in the repository config.",
 	}
+}
+
+// forgeCredentialNames are the GitHub credential names `gh` reads, in its own
+// order of precedence (`gh help environment`). They are CFG_FORGE_CREDENTIALS
+// at lib/config.sh:246.
+//
+// This package is tier 2 and imports no other tier-2 package, so it cannot read
+// internal/exec's copy — which is the same separation the Bash keeps, where the
+// list sits in lib/config.sh and the adapters hold their own. The two are bound
+// by a rule in internal/archtest rather than by an import, so a fifth name
+// added to the adapters and not here fails a test instead of leaving the config
+// layer accepting the one thing the adapters strip.
+var forgeCredentialNames = []string{
+	"GH_TOKEN",
+	"GITHUB_TOKEN",
+	"GH_ENTERPRISE_TOKEN",
+	"GITHUB_ENTERPRISE_TOKEN",
+}
+
+// ForgeCredentialNames is the list above, for the rule that binds it to the
+// list a model-facing process is stripped of.
+//
+// It answers a fresh slice each time, for the reason exec.ForgeCredentialNames
+// does: an exported slice variable is writable from any package in the binary,
+// and shortening this one would widen the boundary everywhere at once.
+func ForgeCredentialNames() []string {
+	return slices.Clone(forgeCredentialNames)
+}
+
+// assertEndpoints refuses an endpoint whose token_env names a GitHub
+// credential.
+//
+// An endpoint's token_env is read with ${!name} and its value handed to the
+// harness process as that vendor's own token variable. So a token_env of
+// GH_TOKEN carries a GitHub credential across the boundary the adapters exist
+// to hold — and past their strip list, which removes GH_TOKEN while the same
+// value arrives as ANTHROPIC_AUTH_TOKEN (ADR 0001, SECURITY.md).
+//
+// Refused here rather than in Endpoint, for the reason assertBacklog gives:
+// every Bash caller reads that function through a command substitution, where
+// ui_die ends the subshell rather than the run. At load it is named once,
+// outside a substitution, so `init` and `doctor` say it before any leg does —
+// and an endpoint no leg selects today is still refused, because a config
+// asking for this is wrong whether or not it is reached. The operator file is
+// checked on the same pass, because it merges into this same mapping
+// (lib/config.sh:255-275).
+//
+// A definition that is not a mapping holds no token_env to read, which is the
+// `if (.value | type) == "object"` arm of the jq. And the comparison is exact:
+// a lowercase `gh_token` is a different environment variable, and refusing it
+// would break a real endpoint for no gain.
+func (c *Config) assertEndpoints() error {
+	endpoints := c.Merged.Object("endpoints")
+	for _, name := range endpoints.Keys() {
+		defined, isMapping := endpoints.Value(name).(*Object)
+		if !isMapping {
+			continue
+		}
+		tokenEnv := alternative(defined.Value("token_env"))
+		if tokenEnv == "" {
+			continue
+		}
+		if !slices.Contains(forgeCredentialNames, tokenEnv) {
+			continue
+		}
+		return &Refusal{
+			Message: fmt.Sprintf("the endpoint '%s' names $%s as its token_env", name, tokenEnv),
+			Hint:    "That is a GitHub credential, and CrossRev hands token_env's value to the model process, which must hold none. Point token_env at the endpoint's own token.",
+		}
+	}
+	return nil
 }

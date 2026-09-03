@@ -75,9 +75,12 @@ type Variable struct {
 	Class Class
 
 	// Readers are the Go packages whose production sources name it, whether
-	// they read it, strip it, or set it on a child. Empty means no package
-	// does yet, which for a name the shell reads is a gap rather than a fact
-	// about the design.
+	// they read it, strip it, set it on a child, or refuse a config that names
+	// it. internal/config is on the four credentials for that last reason: it
+	// reads none of them and refuses an endpoint whose token_env is one, which
+	// would otherwise hand the value to a model-facing process under a vendor
+	// variable name. Empty means no package does yet, which for a name the
+	// shell reads is a gap rather than a fact about the design.
 	//
 	// A list rather than the single package the plan text asked for: HOME is
 	// named in six packages and XDG_STATE_HOME in three, and one field would
@@ -205,12 +208,12 @@ var environment = []Variable{
 	{
 		Name:    "GH_ENTERPRISE_TOKEN",
 		Class:   ClassCredential,
-		Readers: []string{"internal/exec", "internal/forge/ghexec", "internal/preflight", "cmd/crossrev"},
+		Readers: []string{"internal/config", "internal/exec", "internal/forge/ghexec", "internal/preflight", "cmd/crossrev"},
 	},
 	{
 		Name:    "GH_TOKEN",
 		Class:   ClassCredential,
-		Readers: []string{"internal/exec", "internal/forge/ghexec", "internal/preflight", "cmd/crossrev"},
+		Readers: []string{"internal/config", "internal/exec", "internal/forge/ghexec", "internal/preflight", "cmd/crossrev"},
 	},
 	{
 		Name:    "GITHUB_ACTIONS",
@@ -220,7 +223,7 @@ var environment = []Variable{
 	{
 		Name:    "GITHUB_ENTERPRISE_TOKEN",
 		Class:   ClassCredential,
-		Readers: []string{"internal/exec", "internal/forge/ghexec", "internal/preflight", "cmd/crossrev"},
+		Readers: []string{"internal/config", "internal/exec", "internal/forge/ghexec", "internal/preflight", "cmd/crossrev"},
 	},
 	{
 		Name:    "GITHUB_RUN_ID",
@@ -230,7 +233,7 @@ var environment = []Variable{
 	{
 		Name:    "GITHUB_TOKEN",
 		Class:   ClassCredential,
-		Readers: []string{"internal/exec", "internal/forge/ghexec", "internal/preflight", "cmd/crossrev"},
+		Readers: []string{"internal/config", "internal/exec", "internal/forge/ghexec", "internal/preflight", "cmd/crossrev"},
 	},
 	{
 		Name:    "GIT_INDEX_FILE",

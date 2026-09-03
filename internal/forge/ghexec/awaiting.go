@@ -16,7 +16,7 @@ import (
 // compared if the program is the same program. jq ignores the layout; the
 // comparison does not.
 const awaitingJQ = "[.[] | select([.labels[].name] | any(startswith(\"crossrev/awaiting-\")))\n" +
-	"           | {number, labels: [.labels[].name], head: .head.sha}]"
+	"           | {number, labels: [.labels[].name], head: .head.sha, draft}]"
 
 // AwaitingPullRequests is every open pull request carrying a
 // `crossrev/awaiting-` label (lib/run.sh:3691-3693).
@@ -36,6 +36,7 @@ func (c *Client) AwaitingPullRequests(ctx context.Context, repo core.Slug) []for
 		Number int      `json:"number"`
 		Labels []string `json:"labels"`
 		Head   string   `json:"head"`
+		Draft  bool     `json:"draft"`
 	}
 	if err := json.Unmarshal(res.Stdout, &rows); err != nil {
 		return nil
@@ -46,6 +47,7 @@ func (c *Client) AwaitingPullRequests(ctx context.Context, repo core.Slug) []for
 			Number:  row.Number,
 			Labels:  row.Labels,
 			HeadSHA: row.Head,
+			Draft:   row.Draft,
 		})
 	}
 	return out

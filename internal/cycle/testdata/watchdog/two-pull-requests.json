@@ -29,7 +29,7 @@
     }
   ],
   "want": {
-    "page": "\n◇  CrossRev watchdog on acme/widget\n│  ✗ #42 — waiting on the review leg for 60 minutes, past the 30-minute timeout\n│     retried by re-firing crossrev/awaiting-review at 64b4400\n│  ✗ #43 — waiting on the review leg for 60 minutes, past the 30-minute timeout\n│     retried by re-firing crossrev/awaiting-review at 64b4400\n│\n│  checked 2 pull request(s) waiting on a leg — retried 2, halted 0\n└  A pass that never fired and a pass that converged look identical from outside, which is why this runs on a schedule.\n\n",
+    "page": "\n◇  CrossRev watchdog on acme/widget\n│  ✗ #42 — waiting on the review leg for 60 minutes, past the 30-minute timeout\n│     retried by re-firing crossrev/awaiting-review at 64b4400\n│  ✗ #43 — waiting on the review leg for 60 minutes, past the 30-minute timeout\n│     retried by re-firing crossrev/awaiting-review at 64b4400\n│\n│  checked 2 pull request(s) waiting on a leg — retried 2, halted 0, 0 in draft\n└  A pass that never fired and a pass that converged look identical from outside, which is why this runs on a schedule.\n\n",
     "calls": [
       "issue-comments 42",
       "label-ensure crossrev/watchdog-retried fbca04 crossrev: the watchdog retried this leg once",

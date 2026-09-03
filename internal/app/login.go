@@ -300,10 +300,13 @@ func (c *Commands) Login(ctx context.Context, req LoginRequest) error {
 	// New registrations always take the roled path, never the legacy one, so
 	// the unroled name dies out on its own.
 	pemPath := dir + "/" + owner + "." + role + ".pem"
-	// 0600 at creation rather than created and then chmodded, so the key is
-	// never briefly readable — which is what the shell's umask subshell buys.
-	if err := os.WriteFile(pemPath, []byte(registration.PEM), 0o600); err != nil {
-		return fmt.Errorf("could not write the private key to %s: %w", pemPath, err)
+	// Rename rather than create-then-chmod, so the key is never briefly
+	// readable and never inherits a wide mode from a file already at that path
+	// (lib/auth.sh:770-774).
+	if err := write0600(pemPath, []byte(registration.PEM)); err != nil {
+		return c.IO.Die(
+			"could not write the private key to "+pemPath,
+			"Check the directory is writable. Nothing was stored.")
 	}
 
 	metaBytes, err := loginMetadata(owner, account.Type, account.ID,

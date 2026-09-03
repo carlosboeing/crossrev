@@ -115,6 +115,10 @@ type AwaitingPullRequest struct {
 	Labels []string
 	// HeadSHA is `.head.sha`, printed abbreviated on the retry line.
 	HeadSHA string
+	// Draft is `draft`, which rides along in the same list response
+	// (lib/run.sh:3708). The watchdog reports a draft and skips it rather
+	// than retrying a leg no automatic invocation will run.
+	Draft bool
 }
 
 // IssueCandidate is one issue the fuzzy dedupe offers a model to judge, with

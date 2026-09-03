@@ -80,9 +80,16 @@ func (l *Leg) load(ctx context.Context, req Request) (*session, Result) {
 			"crossrev only runs on open pull requests. Reopen it, or pick another number.")
 	}
 	if req.Trigger == TriggerAutomatic && pr.IsDraft {
+		// Two ui_say lines (lib/run.sh:266-267). One message serves both legs,
+		// so it names neither: a refused resolve leg was being told that
+		// nothing would "review" the pull request and to ask for a review,
+		// which is the wrong instruction for the leg that was refused.
 		return s, Result{
 			Outcome: OutcomeSkipped,
-			Message: fmt.Sprintf("%s#%d is a draft pull request, so an automatic invocation does not review it.", repo, req.PR),
+			Messages: ui.SayLines(
+				fmt.Sprintf("%s#%d is a draft pull request, so an automatic invocation does not run on it.", repo, req.PR),
+				"Mark it ready for review, or run the leg yourself.",
+			),
 		}
 	}
 

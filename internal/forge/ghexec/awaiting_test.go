@@ -16,7 +16,7 @@ import (
 // bytes: `gh` hands the whole string to jq, so the layout is part of what the
 // stub's `jq -r "$jq_expr"` receives rather than decoration.
 const wantAwaitingJQ = "[.[] | select([.labels[].name] | any(startswith(\"crossrev/awaiting-\")))\n" +
-	"           | {number, labels: [.labels[].name], head: .head.sha}]"
+	"           | {number, labels: [.labels[].name], head: .head.sha, draft}]"
 
 var fixtureSlug = mustSlug("acme/widget")
 

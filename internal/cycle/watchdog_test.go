@@ -46,6 +46,7 @@ type watchdogWaiting struct {
 	PR     int      `json:"pr"`
 	Labels []string `json:"labels"`
 	Head   string   `json:"head"`
+	Draft  bool     `json:"draft"`
 }
 
 type watchdogComment struct {
@@ -64,6 +65,7 @@ type watchdogSummary struct {
 	Checked int `json:"checked"`
 	Retried int `json:"retried"`
 	Halted  int `json:"halted"`
+	Drafts  int `json:"drafts"`
 }
 
 func watchdogCases(t *testing.T) []watchdogCase {
@@ -119,7 +121,7 @@ func watchdogRun(t *testing.T, c watchdogCase) (*watchdogForge, *bytes.Buffer, c
 	}
 	waiting := make([]cycle.Waiting, 0, len(c.Waiting))
 	for _, w := range c.Waiting {
-		waiting = append(waiting, cycle.Waiting{PR: w.PR, Labels: w.Labels, HeadSHA: w.Head})
+		waiting = append(waiting, cycle.Waiting{PR: w.PR, Labels: w.Labels, HeadSHA: w.Head, Draft: w.Draft})
 	}
 	summary, err := w.Run(context.Background(), slug, waiting)
 	return f, &out, summary, err
@@ -178,6 +180,7 @@ func TestWatchdogCounts(t *testing.T) {
 				Checked: c.Want.Summary.Checked,
 				Retried: c.Want.Summary.Retried,
 				Halted:  c.Want.Summary.Halted,
+				Drafts:  c.Want.Summary.Drafts,
 			}
 			if summary != want {
 				t.Errorf("summary = %+v, want %+v", summary, want)
@@ -672,3 +675,107 @@ func (f *watchdogForge) IssueCreate(context.Context, core.Slug, string, string, 
 func (f *watchdogForge) IssueCommentCreate(context.Context, core.Slug, int, string) {}
 
 var _ forge.Forge = (*watchdogForge)(nil)
+
+// TestWatchdogReportsADraftRatherThanRetryingIt pins the branch at
+// lib/run.sh:3727-3735.
+//
+// A draft is waiting on its author, not on a leg: every automatic invocation
+// refuses it and the review workflow's job condition skips before that runs, so
+// re-firing the awaiting label meets the same refusal and the sweep after it
+// would report a leg that "is still not finishing" — a leg that never started.
+// Both legs are covered because the resolve half is the one that pushes, and so
+// is a pull request an older version already retried, whose watchdog-retried
+// label must not turn the report into a halt.
+func TestWatchdogReportsADraftRatherThanRetryingIt(t *testing.T) {
+	const head = "d81a3f2abc0000000000000000000000000000ab"
+	for _, tc := range []struct {
+		name    string
+		labels  []string
+		wantOpt string
+		wantCmd string
+	}{
+		{
+			name:    "awaiting review",
+			labels:  []string{"crossrev/awaiting-review"},
+			wantOpt: "│  ○ #42 — a draft pull request, so no automatic review leg runs on it\n",
+			wantCmd: "│     mark it ready for review, or run `crossrev review --pr 42` yourself\n",
+		},
+		{
+			name:    "awaiting resolution",
+			labels:  []string{"crossrev/awaiting-resolution"},
+			wantOpt: "│  ○ #42 — a draft pull request, so no automatic resolve leg runs on it\n",
+			wantCmd: "│     mark it ready for review, or run `crossrev resolve --pr 42` yourself\n",
+		},
+		{
+			name:    "already retried once",
+			labels:  []string{"crossrev/awaiting-review", "crossrev/watchdog-retried"},
+			wantOpt: "│  ○ #42 — a draft pull request, so no automatic review leg runs on it\n",
+			wantCmd: "│     mark it ready for review, or run `crossrev review --pr 42` yourself\n",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := &watchdogForge{comments: []forge.IssueComment{
+				watchdogMarker(t, 9001, watchdogAuthor, core.LegReview, watchdogNow-3600, head),
+			}}
+			var out bytes.Buffer
+			w := watchdogSweeper(f, &out, 30*time.Minute)
+
+			summary, err := w.Run(context.Background(), watchdogSlug(t), []cycle.Waiting{
+				{PR: 42, Labels: tc.labels, HeadSHA: head, Draft: true},
+			})
+			if err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+
+			page := out.String()
+			if !strings.Contains(page, tc.wantOpt) {
+				t.Errorf("page = %q, want the draft line %q", page, tc.wantOpt)
+			}
+			if !strings.Contains(page, tc.wantCmd) {
+				t.Errorf("page = %q, want the recovery line %q", page, tc.wantCmd)
+			}
+			if want := "checked 1 pull request(s) waiting on a leg — retried 0, halted 0, 1 in draft\n"; !strings.Contains(page, want) {
+				t.Errorf("page = %q, want the summary %q", page, want)
+			}
+			if summary != (cycle.Summary{Checked: 1, Drafts: 1}) {
+				t.Errorf("summary = %+v, want one checked and one draft", summary)
+			}
+			// The draft is decided before the markers are read, so the
+			// sweep makes no forge call at all for it — not the comment
+			// read, and none of the label writes a retry or a halt makes.
+			if len(f.calls) != 0 {
+				t.Errorf("a draft was written to or read for: %v", f.calls)
+			}
+			if strings.Contains(page, "retried by re-firing") || strings.Contains(page, "halted — it had already been retried once") {
+				t.Errorf("page = %q, want neither a retry nor a halt", page)
+			}
+		})
+	}
+}
+
+// TestWatchdogCountsDraftsApartFromTheRest pins the third counter: a sweep over
+// one draft and one stuck pull request retries the second and reports the first,
+// and the closing line names all three numbers (lib/run.sh:3733).
+func TestWatchdogCountsDraftsApartFromTheRest(t *testing.T) {
+	const head = "d81a3f2abc0000000000000000000000000000ab"
+	f := &watchdogForge{comments: []forge.IssueComment{
+		watchdogMarker(t, 9001, watchdogAuthor, core.LegReview, watchdogNow-3600, head),
+	}}
+	var out bytes.Buffer
+	w := watchdogSweeper(f, &out, 30*time.Minute)
+
+	summary, err := w.Run(context.Background(), watchdogSlug(t), []cycle.Waiting{
+		{PR: 42, Labels: []string{"crossrev/awaiting-review"}, HeadSHA: head, Draft: true},
+		{PR: 43, Labels: []string{"crossrev/awaiting-review"}, HeadSHA: head},
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if summary != (cycle.Summary{Checked: 2, Retried: 1, Drafts: 1}) {
+		t.Errorf("summary = %+v", summary)
+	}
+	want := "checked 2 pull request(s) waiting on a leg — retried 1, halted 0, 1 in draft\n"
+	if !strings.Contains(out.String(), want) {
+		t.Errorf("page = %q, want the summary %q", out.String(), want)
+	}
+}

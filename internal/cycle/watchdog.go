@@ -31,10 +31,13 @@ type Waiting struct {
 	// HeadSHA is the revision the pull request points at. It is printed
 	// abbreviated on the retry line and read nowhere else.
 	HeadSHA string
+	// Draft is `draft` off the same list response, so reading it costs no
+	// extra call (lib/run.sh:3706, :3719). A draft is waiting on its author
+	// rather than on a leg, so neither the retry nor the halt applies to it.
+	Draft bool
 }
 
-// Summary is the three counters the closing line reports
-// (lib/run.sh:3689, :3733).
+// Summary is the counters the closing line reports (lib/run.sh:3704, :3761).
 type Summary struct {
 	// Checked is every pull request the sweep looked at, including the ones
 	// it then skipped: lib/run.sh:3703 increments before lib/run.sh:3705
@@ -44,6 +47,10 @@ type Summary struct {
 	Retried int
 	// Halted is how many were given up on.
 	Halted int
+	// Drafts is how many were reported as drafts and left alone. Counted
+	// apart from the other two because a draft is neither: nothing was
+	// re-fired and nothing was given up on (lib/run.sh:3704).
+	Drafts int
 }
 
 // Watchdog is the sweep that goes looking for a leg that never finished.
@@ -129,6 +136,19 @@ func (w *Watchdog) Run(ctx context.Context, repo core.Slug, waiting []Waiting) (
 		// statusHasLabel (status.go) and hasStop (cycle.go) reproduce.
 		if strings.Contains(strings.Join(pr.Labels, " "), policy.LabelAwaitingResolution) {
 			leg = core.LegResolve
+		}
+
+		// A draft waits on its author, so neither the retry nor the halt
+		// applies. Re-firing the label would meet the same refusal, and the
+		// sweep after that would report a leg that "is still not finishing" —
+		// a leg that never started. Saying the true reason once a sweep beats
+		// a retry that cannot work (lib/run.sh:3726-3735). It is decided
+		// above the marker read, so a draft costs no forge call at all.
+		if pr.Draft {
+			w.Out.Opt(watchdogDraftLine(pr.PR, leg))
+			w.Out.Line(watchdogDraftRecoveryLine(pr.PR, leg))
+			summary.Drafts++
+			continue
 		}
 
 		markers := statusMarkers(w.Forge.IssueComments(ctx, repo, pr.PR), w.Author)

@@ -744,3 +744,40 @@ func TestLoginOpensTheManifestPageFromDisk(t *testing.T) {
 		t.Fatalf("browser opened %q", o.urls[0])
 	}
 }
+
+// auth login writes its key onto a path that may already exist, so it carries
+// the same defect as the rotation: the write kept the mode the file already
+// had, and the "Key ... (0600)" line below it read the mode back and reported
+// the wide one (lib/auth.sh:770-774).
+func TestLoginNarrowsAKeyPathSomebodyHadWidened(t *testing.T) {
+	b := newBench(t,
+		out("Organization 12345\n"),
+		bad(),
+		conversion("4242", "crossrev-shorelogic", "CrossRev ShoreLogic", fixturePEM),
+		out("ShoreLogic selected\n"))
+	b.browser(&opener{})
+	b.assumeYes(t)
+	b.noWait()
+	b.cmds.Random = strings.NewReader(string(stateSeed))
+	b.redirects("GET /crossrev-auth?code=abc123&state=" + stateValue())
+
+	pem := filepath.Join(b.dir, "ShoreLogic.loop.pem")
+	if err := os.WriteFile(pem, []byte("a key from an earlier registration\n"), 0o644); err != nil {
+		t.Fatalf("seeding the key path: %v", err)
+	}
+	if err := os.Chmod(pem, 0o644); err != nil {
+		t.Fatalf("widening the key path: %v", err)
+	}
+
+	if err := b.cmds.Login(context.Background(), app.LoginRequest{Owner: "ShoreLogic", Role: "loop"}); err != nil {
+		t.Fatalf("Login: %v", err)
+	}
+
+	wantMode(t, pem, 0o600)
+	if _, err := os.Stat(pem + ".tmp"); !os.IsNotExist(err) {
+		t.Fatalf("the temporary file survived the registration: %v", err)
+	}
+	if !strings.Contains(b.text(), "✓ Key    "+pem+" (0600)\n") {
+		t.Fatalf("printed:\n%s", b.text())
+	}
+}

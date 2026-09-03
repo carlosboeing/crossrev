@@ -176,15 +176,20 @@ func (c *Commands) Rotate(ctx context.Context, req RotateRequest) error {
 		if err != nil {
 			return fmt.Errorf("could not read the key being replaced at %s: %w", pem, err)
 		}
-		if err := os.WriteFile(backup, previous, 0o600); err != nil {
-			return fmt.Errorf("could not keep a copy of the previous key at %s: %w", backup, err)
-		}
-		if err := os.Chmod(backup, 0o600); err != nil {
-			return fmt.Errorf("could not set the mode of %s: %w", backup, err)
+		// Both writes go through the same helper. A write followed by a chmod
+		// left the backup at the source's mode for the width of two calls, and
+		// a write onto an existing dest kept whatever mode that file already
+		// had (lib/auth.sh:978-987).
+		if err := write0600(backup, previous); err != nil {
+			return c.IO.Die(
+				"could not write the backup key to "+backup,
+				"Check the directory is writable. The existing key is untouched.")
 		}
 	}
-	if err := os.WriteFile(dest, body, 0o600); err != nil {
-		return fmt.Errorf("could not install the new key at %s: %w", dest, err)
+	if err := write0600(dest, body); err != nil {
+		return c.IO.Die(
+			"could not write the new key to "+dest,
+			"Check the directory is writable. The previous key is at "+backup+".")
 	}
 	// The legacy unroled path would otherwise keep winning for the loop role
 	// and the rotation would look successful while nothing had changed.

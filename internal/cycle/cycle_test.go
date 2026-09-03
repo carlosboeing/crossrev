@@ -238,12 +238,15 @@ func TestDriverRefusesAnUnknownTrigger(t *testing.T) {
 // --- the draft decision, applied once and upfront ---------------------------
 
 // TestDriverStopsOnADraftBeforeAnythingRuns pins the return-2 arm of ctx_load
-// (lib/run.sh:259-263) as cmd_cycle consumes it (lib/run.sh:2918-2925): two
+// (lib/run.sh:265-269) as cmd_cycle consumes it (lib/run.sh:2918-2925): two
 // lines, exit 0, and no pairing check and no leg, because the shell returns
 // before run_assert_cycle_pairing.
 //
 // The rule is applied here rather than left to the first leg because a cycle
 // that declined mid-loop would report the reviewer as unable to finish.
+//
+// The wording names neither leg, because one message serves both: a declined
+// resolve leg told to "ask for a review" is given the wrong instruction.
 func TestDriverStopsOnADraftBeforeAnythingRuns(t *testing.T) {
 	state := loaded(t)
 	state.Draft = true
@@ -260,8 +263,8 @@ func TestDriverStopsOnADraftBeforeAnythingRuns(t *testing.T) {
 	}
 	r.wantOrder(t, "load")
 	r.wantOut(t,
-		"  acme/widget#42 is a draft pull request, so an automatic invocation does not review it.\n"+
-			"  Mark it ready for review, or ask for a review explicitly.\n")
+		"  acme/widget#42 is a draft pull request, so an automatic invocation does not run on it.\n"+
+			"  Mark it ready for review, or run the leg yourself.\n")
 }
 
 // TestDriverStopsWhenTheContextLoadRefuses pins the other arm: ctx_load's

@@ -90,6 +90,7 @@ func watchdog(ctx context.Context, out *ui.IO, doc harness.Document, req cli.Wat
 			PR:      pr.Number,
 			Labels:  pr.Labels,
 			HeadSHA: pr.HeadSHA,
+			Draft:   pr.Draft,
 		})
 	}
 

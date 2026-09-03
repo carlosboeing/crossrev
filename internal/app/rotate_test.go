@@ -567,3 +567,38 @@ func TestRotateRefusesWhenTheAnswerNeverCame(t *testing.T) {
 		"no key file was named",
 		"Re-run: crossrev auth rotate --owner ShoreLogic --role loop --key <path>")
 }
+
+// --- the mode is set by the write, not inherited from the path -------------
+
+// A key somebody had widened to 0644 stayed at 0644 through a rotation, and the
+// backup beside it kept the mode whatever file was already at that name had.
+// Both writes go through the rename now, so the mode comes from the file the
+// write created (lib/auth.sh:47-57, :978-987, tests/test-auth.sh).
+func TestRotateNarrowsAWidenedKeyAndAWidenedBackup(t *testing.T) {
+	b := newBench(t, out("crossrev-shorelogic\n"))
+	b.meta(t, "CrossRev ShoreLogic", "crossrev-shorelogic")
+	dest := b.pem(t, 0o644)
+	backup := dest + ".previous"
+	if err := os.WriteFile(backup, []byte("an older backup\n"), 0o666); err != nil {
+		t.Fatalf("seeding the backup: %v", err)
+	}
+	if err := os.Chmod(backup, 0o666); err != nil {
+		t.Fatalf("widening the backup: %v", err)
+	}
+	downloaded := newKey(t, filepath.Join(t.TempDir(), "downloaded.pem"))
+	b.browser(&opener{})
+
+	if err := b.cmds.Rotate(context.Background(), app.RotateRequest{
+		Owner: "ShoreLogic", Role: "loop", KeyFile: downloaded,
+	}); err != nil {
+		t.Fatalf("Rotate: %v", err)
+	}
+
+	wantMode(t, dest, 0o600)
+	wantMode(t, backup, 0o600)
+	for _, path := range []string{dest + ".tmp", backup + ".tmp"} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("a temporary file survived the rotation at %s: %v", path, err)
+		}
+	}
+}

@@ -7,6 +7,7 @@ import (
 	"github.com/carlosboeing/crossrev/internal/harness"
 	"github.com/carlosboeing/crossrev/internal/prstate"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -275,5 +276,33 @@ func TestExitZeroHarnessFailureSurvivesAFailedRestore(t *testing.T) {
 	}
 	if !strings.Contains(message, harnessSaid) {
 		t.Errorf("the refusal drops what the harness said.\n got: %s\nwant it to name: %s", message, harnessSaid)
+	}
+}
+
+// One message serves both legs, so it names neither. A declined resolve leg was
+// being told that an automatic invocation "does not review it" and to ask for a
+// review, which is the wrong instruction for the leg that was refused
+// (lib/run.sh:266-267).
+func TestAutomaticDraftRefusalNamesNeitherLeg(t *testing.T) {
+	e := setup(t)
+	e.forge.pr.IsDraft = true
+
+	got := e.runReq(t, Request{
+		PR:      42,
+		Repo:    e.slug,
+		Trigger: TriggerAutomatic,
+	})
+	if got.Outcome != OutcomeSkipped {
+		t.Fatalf("outcome = %v, want %v", got.Outcome, OutcomeSkipped)
+	}
+	if got.Message != "" {
+		t.Fatalf("Message = %q, want the two lines in Messages instead", got.Message)
+	}
+	want := []string{
+		"acme/widget#42 is a draft pull request, so an automatic invocation does not run on it.",
+		"Mark it ready for review, or run the leg yourself.",
+	}
+	if texts := ui.Texts(got.Messages); !reflect.DeepEqual(texts, want) {
+		t.Fatalf("messages = %q, want %q", texts, want)
 	}
 }

@@ -23,7 +23,7 @@
     }
   ],
   "want": {
-    "page": "\n◇  CrossRev watchdog on acme/widget\n│  ✗ #42 — waiting on the resolve leg for 60 minutes, past the 30-minute timeout\n│     halted — it had already been retried once\n│\n│  checked 1 pull request(s) waiting on a leg — retried 0, halted 1\n└  A pass that never fired and a pass that converged look identical from outside, which is why this runs on a schedule.\n\n",
+    "page": "\n◇  CrossRev watchdog on acme/widget\n│  ✗ #42 — waiting on the resolve leg for 60 minutes, past the 30-minute timeout\n│     halted — it had already been retried once\n│\n│  checked 1 pull request(s) waiting on a leg — retried 0, halted 1, 0 in draft\n└  A pass that never fired and a pass that converged look identical from outside, which is why this runs on a schedule.\n\n",
     "calls": [
       "issue-comments 42",
       "label-remove 42 crossrev/awaiting-resolution",

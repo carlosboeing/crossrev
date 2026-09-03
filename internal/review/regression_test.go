@@ -3,6 +3,7 @@ package review_test
 import (
 	"context"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -94,5 +95,29 @@ func TestDeclinedPassRemovesMutuallyExclusiveLabels(t *testing.T) {
 		if !found {
 			t.Errorf("labelsRemoved = %v, want it to contain %q", e.forge.labelsRemoved, want)
 		}
+	}
+}
+
+// One message serves both legs, so it names neither. It told a declined resolve
+// leg that nothing would "review" the pull request and to ask for a review,
+// which is the wrong instruction for the leg that was refused
+// (lib/run.sh:266-267).
+func TestAutomaticDraftRefusalNamesNeitherLeg(t *testing.T) {
+	e := newEnv(t)
+	e.forge.pr.IsDraft = true
+	req := e.request(t)
+	req.Trigger = review.TriggerAutomatic
+
+	leg := e.leg(t)
+	got := leg.Run(context.Background(), req)
+	if got.Outcome != review.OutcomeSkipped {
+		t.Fatalf("outcome = %v, want %v", got.Outcome, review.OutcomeSkipped)
+	}
+	want := []string{
+		"acme/widget#42 is a draft pull request, so an automatic invocation does not run on it.",
+		"Mark it ready for review, or run the leg yourself.",
+	}
+	if got := ui.Texts(got.Messages); !reflect.DeepEqual(got, want) {
+		t.Fatalf("messages = %q, want %q", got, want)
 	}
 }
