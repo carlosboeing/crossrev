@@ -63,7 +63,7 @@ func (l *Leg) addLabel(ctx context.Context, loaded Context, pr int, label string
 		}
 	}
 	// The pair, kept apart, so ui.Warn does its own joining. Bash calls
-	// `ui_warn "$1" "$2"` here (lib/run.sh:326-327).
+	// `ui_warn "$1" "$2"` here (lib/run.sh:332-333).
 	return ui.Warn(
 		fmt.Sprintf("could not apply the label '%s' to %s#%d", label, loaded.Repo, pr),
 		"Locally that is cosmetic, because this process drives both legs itself. In automated mode it would stall the chain, which is what `crossrev init` creates the labels for."), nil

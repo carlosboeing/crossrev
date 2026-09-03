@@ -283,7 +283,7 @@ func TestResolveComparesPastDoublePrecision(t *testing.T) {
 
 // A whole number past 2^63 is whole, and the failure it earns is semantic. The
 // earlier `n != float64(int64(n))` saturated and called it non-whole, which is
-// a shape failure — a different exit code, and lib/run.sh:804-805 spends a
+// a shape failure — a different exit code, and lib/run.sh:810-811 spends a
 // different retry budget on each.
 func TestResolveCallsAHugeWholeNumberSemanticRatherThanMalformed(t *testing.T) {
 	one := &validate.Expectations{Findings: 1}

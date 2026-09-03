@@ -13,7 +13,7 @@ type Verdict string
 //
 // VerdictDeclined is never returned by a harness. A pass a cap refused to start
 // gets a marker so `crossrev status` has something to render the refusal from,
-// and that marker carries `verdict:"declined"` (lib/run.sh:1055).
+// and that marker carries `verdict:"declined"` (lib/run.sh:1061).
 const (
 	VerdictConverged    Verdict = "converged"
 	VerdictIssuesRemain Verdict = "issues-remain"
@@ -75,7 +75,7 @@ func (v Verdict) String() string { return string(v) }
 // LoopState is the word `crossrev status` prints for the loop as a whole.
 type LoopState string
 
-// The five states, in the precedence order lib/run.sh:3112 reads them: a stop
+// The five states, in the precedence order lib/run.sh:3119 reads them: a stop
 // request outranks a halt, a halt outranks convergence, and convergence
 // outranks whichever leg is owed.
 //

@@ -10,7 +10,7 @@ import (
 	"github.com/carlosboeing/crossrev/internal/ui"
 )
 
-// The run header, measured from lib/run.sh:1066-1067:
+// The run header, measured from lib/run.sh:1072-1073:
 //
 //	printf '\n  Reviewing %s#%s — %s\n' "$CTX_REPO" "$CTX_PR" "$(_pass_label …)"
 //	printf '  Reviewer: %s%s%s\n' "$harness" "${model:+, $model}" "${effort:+, $effort effort}"
@@ -67,7 +67,7 @@ func TestTheRunHeaderOmitsAnUnsetModelAndEffort(t *testing.T) {
 }
 
 // A pass past the cycle cap says so rather than printing "pass 4 of 3", which
-// is _pass_label at lib/run.sh:592-599.
+// is _pass_label at lib/run.sh:598-605.
 func TestTheRunHeaderNamesTheCycleCapItPassed(t *testing.T) {
 	e := newEnv(t)
 	e.cfg = mustConfig(t, "version: 1\npolicy:\n  max_passes_per_cycle: 3\n")

@@ -141,13 +141,13 @@ func renderCompact(value any) string {
 }
 
 // Get reads one dotted path out of the merge and renders it the way `cfg_get`
-// does at lib/config.sh:303, where an absent, null or false value is empty.
+// does at lib/config.sh:339, where an absent, null or false value is empty.
 func (c *Config) Get(path string) string {
 	return alternative(lookup(c.Merged, path))
 }
 
 // GetJSON reads one dotted path out of the merge as compact JSON, which is
-// `cfg_get_json` at lib/config.sh:304. An absent value reads as `null`.
+// `cfg_get_json` at lib/config.sh:340. An absent value reads as `null`.
 func (c *Config) GetJSON(path string) []byte {
 	value := lookup(c.Merged, path)
 	if boolean, ok := value.(bool); ok && !boolean {

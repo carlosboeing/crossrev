@@ -116,7 +116,7 @@ line showing a dash on one side cannot be commented on that side.
 
 // Meta is the orchestrator's own description of the pull request, and the only
 // part of a prompt that neither the repository nor the model wrote
-// (lib/run.sh:1136-1140 for the review leg, lib/run.sh:2050-2055 for the
+// (lib/run.sh:1142-1146 for the review leg, lib/run.sh:2056-2061 for the
 // resolve leg).
 //
 // Every field is a Value rather than a string or an int, so an absent key

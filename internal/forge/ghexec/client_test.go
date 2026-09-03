@@ -389,7 +389,7 @@ func TestEnvironmentNamesCannotBeWrittenThrough(t *testing.T) {
 // gh_comment_create dies when `gh` fails and never when the id is unreadable:
 // it carries the empty string through (lib/github.sh:187-195). Refusing here
 // stopped the watchdog's halt, which discards the id — the shell posts that
-// comment with `>/dev/null` (lib/run.sh:3747). The two callers that need an id
+// comment with `>/dev/null` (lib/run.sh:3775). The two callers that need an id
 // refuse for themselves on id == 0.
 func TestCommentCreateAnswersNoIdRatherThanRefusing(t *testing.T) {
 	r := &recorder{results: []exec.Result{out("")}}

@@ -108,11 +108,11 @@ func (c *Client) PullRequest(ctx context.Context, repo core.Slug, number int) (f
 			Color       string `json:"color"`
 			Description string `json:"description"`
 		} `json:"labels"`
-		// A pointer, because absence is a third answer. lib/run.sh:284
+		// A pointer, because absence is a third answer. lib/run.sh:290
 		// records a missing isCrossRepository as `unknown`, and every
 		// reader then tests for an explicit `false`: the automatic-trigger
-		// fork refusal (lib/run.sh:249), the head-repository branch
-		// (lib/run.sh:285) and the maintainer-edit guard (lib/legs.sh:478).
+		// fork refusal (lib/run.sh:250), the head-repository branch
+		// (lib/run.sh:291) and the maintainer-edit guard (lib/legs.sh:478).
 		// A plain bool collapses `unknown` onto the one value that means
 		// "this repository's own branch", which is the permissive one.
 		IsCrossRepository   *bool `json:"isCrossRepository"`
@@ -194,7 +194,7 @@ func revisionOf(sha string) (core.Revision, error) {
 // `62 0a`: the shell returns `62`. These are the bytes gh printed.
 //
 // Harmless, and traced rather than assumed. The diff reaches two places — the
-// prompt built at lib/run.sh:1144 and diff_anchor at lib/run.sh:1354 — and
+// prompt built at lib/run.sh:1150 and diff_anchor at lib/run.sh:1360 — and
 // internal/diff already has a test proving both forms round-trip byte-exactly,
 // so no anchor and no prompt reads differently for the extra byte.
 func (c *Client) PullRequestDiff(ctx context.Context, repo core.Slug, base, head core.Revision) ([]byte, error) {

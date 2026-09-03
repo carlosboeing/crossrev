@@ -10,7 +10,7 @@ import (
 )
 
 // actionableCount is how many findings the resolve leg may change code for:
-// at or above min_fix_severity, and not pre-existing (lib/run.sh:350-361).
+// at or above min_fix_severity, and not pre-existing (lib/run.sh:356-367).
 //
 // The driver reads this to decide whether a finished review pass has anything
 // left to resolve, so it is the number that separates "converged" from another
@@ -47,7 +47,7 @@ func actionableCount(findings json.RawMessage, minFix core.Severity) int {
 }
 
 // escalatedCount is how many findings across every resolve marker on the pull
-// request were handed to a human (lib/run.sh:3191-3193).
+// request were handed to a human (lib/run.sh:3198-3200).
 //
 // Which pass escalated one stops mattering once a newer pass runs: the halt it
 // caused still stands until that pass is re-driven or the thread is settled by

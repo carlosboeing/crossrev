@@ -10,7 +10,7 @@ import (
 )
 
 // The resolve leg's retries say what they are doing, and say the discarded
-// attempt's edits were put back (lib/run.sh:882-883 and :894-895).
+// attempt's edits were put back (lib/run.sh:888-889 and :894-895).
 //
 // A resolver edits the working tree, so a silent retry left the operator with
 // no account of a pass that cost two invocations and rewrote the checkout twice.
@@ -34,7 +34,7 @@ func TestAResolveSemanticRetryWarnsOnceAndAsksAgain(t *testing.T) {
 		t.Fatalf("the semantic retry was silent: %q", ui.Texts(got.Messages))
 	}
 	if warned.Kind != ui.KindWarn {
-		t.Errorf("kind = %v, want KindWarn: lib/run.sh:882 is ui_warn", warned.Kind)
+		t.Errorf("kind = %v, want KindWarn: lib/run.sh:888 is ui_warn", warned.Kind)
 	}
 	for _, want := range []string{"asked once more", "put back"} {
 		if !strings.Contains(warned.Action, want) {
@@ -44,7 +44,7 @@ func TestAResolveSemanticRetryWarnsOnceAndAsksAgain(t *testing.T) {
 }
 
 // A capture that will not go back stops the leg rather than asking again on top
-// of the discarded attempt's edits (_run_retry_reset, lib/run.sh:680-686).
+// of the discarded attempt's edits (_run_retry_reset, lib/run.sh:686-692).
 func TestAResolveRetryRefusesWhenTheTreeCannotBePutBack(t *testing.T) {
 	e := setup(t)
 	e.addReview(t, defaultFindings(), "issues-remain")
@@ -67,7 +67,7 @@ func TestAResolveRetryRefusesWhenTheTreeCannotBePutBack(t *testing.T) {
 }
 
 // An exhausted budget restores too, and warns when it cannot
-// (_run_invoke_abort, lib/run.sh:698-704).
+// (_run_invoke_abort, lib/run.sh:704-710).
 func TestAnExhaustedResolveBudgetWarnsWhenTheTreeStays(t *testing.T) {
 	e := setup(t)
 	e.addReview(t, defaultFindings(), "issues-remain")

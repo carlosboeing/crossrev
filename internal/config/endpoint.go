@@ -13,7 +13,7 @@ type Endpoint struct {
 }
 
 // String is the "<base_url> <token_env>" pair cfg_endpoint prints at
-// lib/config.sh:325.
+// lib/config.sh:361.
 func (e Endpoint) String() string { return e.BaseURL + " " + e.TokenEnv }
 
 // ErrNoEndpointNamed reports that nothing named an endpoint, which is not a
@@ -28,22 +28,22 @@ var ErrNoEndpointNamed = errors.New("no endpoint is named")
 // does not resolve because the run is on a runner that cannot see it, the leg
 // stops and says so. Falling back to Anthropic would mean running Claude while
 // the config says Ollama — the same silent substitution the divergence guard
-// exists to catch, arriving through a different door (lib/config.sh:306-326).
+// exists to catch, arriving through a different door (lib/config.sh:342-362).
 //
 // An empty name, or the literal "null" that jq prints for an unset key, is not
 // an endpoint at all: cfg_endpoint returns 1 without a message for it
-// (lib/config.sh:315), so this returns ErrNoEndpointNamed rather than a
+// (lib/config.sh:351), so this returns ErrNoEndpointNamed rather than a
 // refusal.
 func (c *Config) Endpoint(name string) (Endpoint, error) {
 	if name == "" || name == "null" {
 		return Endpoint{}, ErrNoEndpointNamed
 	}
 	// `defined nowhere` is the answer to `.endpoints[$n] // empty` coming back
-	// empty at lib/config.sh:317, so it covers an absent key and a key holding
+	// empty at lib/config.sh:353, so it covers an absent key and a key holding
 	// null or false, and nothing else. A definition that is present and not a
 	// mapping — `ollama: "http://x"` — is not empty there: the Bash reads
 	// base_url off a string, gets nothing, and refuses for the missing
-	// base_url instead (lib/config.sh:321-323). Object(name) is nil for that
+	// base_url instead (lib/config.sh:357-359). Object(name) is nil for that
 	// definition, and Value on a nil object reads every field as absent, so
 	// the same refusal is reached here.
 	value := c.Merged.Object("endpoints").Value(name)

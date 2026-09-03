@@ -7,7 +7,7 @@ import (
 )
 
 // InstallRequest is `crossrev auth install`'s parsed options
-// (lib/auth.sh:739-746).
+// (lib/auth.sh:753-760).
 type InstallRequest struct {
 	// Owner is --owner. Empty means detect it from the repository the working
 	// directory belongs to.
@@ -18,7 +18,7 @@ type InstallRequest struct {
 	Role string
 }
 
-// Install runs the install half on its own (auth_install, lib/auth.sh:738).
+// Install runs the install half on its own (auth_install, lib/auth.sh:752).
 //
 // `login` does both halves, but the two can be separated by a closed tab, a
 // declined permission prompt, or a new repository a year later. Re-running
@@ -66,7 +66,7 @@ func (c *Commands) Install(ctx context.Context, req InstallRequest) error {
 	pem := PEMPath(dir, owner, role)
 	if !isRegularFile(pem) {
 		// The lowercase `crossrev` here is the shell's own byte
-		// (lib/auth.sh:767), copied rather than restyled: parity wins over the
+		// (lib/auth.sh:784), copied rather than restyled: parity wins over the
 		// naming rule for a string that already ships.
 		return c.IO.Die(
 			fmt.Sprintf("the %s private key for %s is missing at %s", role, owner, pem),
@@ -84,7 +84,7 @@ func (c *Commands) Install(ctx context.Context, req InstallRequest) error {
 }
 
 // installFlowRequest is what the second half of the flow needs to know
-// (_auth_install_flow's six positional arguments, lib/auth.sh:777).
+// (_auth_install_flow's six positional arguments, lib/auth.sh:794).
 type installFlowRequest struct {
 	Owner     string
 	OwnerType string
@@ -98,7 +98,7 @@ type installFlowRequest struct {
 	StepPrefix string
 }
 
-// installWaitSeconds is the five minutes at lib/auth.sh:792, and
+// installWaitSeconds is the five minutes at lib/auth.sh:809, and
 // installPollInterval the three at :802.
 const (
 	installWaitSeconds  = 300
@@ -106,7 +106,7 @@ const (
 )
 
 // installFlow is the second half: install the App, then confirm it landed
-// (_auth_install_flow, lib/auth.sh:776).
+// (_auth_install_flow, lib/auth.sh:793).
 //
 // Registering an App that reaches no repository is not a finished job, so this
 // is part of `login` rather than a link at the end of it.

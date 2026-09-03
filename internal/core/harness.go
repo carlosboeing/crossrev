@@ -52,7 +52,7 @@ func (h HarnessName) String() string { return string(h) }
 type WriteCapability string
 
 // The two capabilities, spelled as the adapters receive them from
-// lib/run.sh:488.
+// lib/run.sh:494.
 const (
 	WriteNo  WriteCapability = "no"
 	WriteYes WriteCapability = "yes"
@@ -64,7 +64,7 @@ var ErrWriteCapability = errors.New("a write capability is either no or yes")
 // WriteCapabilities lists both capabilities, least capable first.
 func WriteCapabilities() []WriteCapability { return []WriteCapability{WriteNo, WriteYes} }
 
-// ParseWriteCapability accepts only the two words lib/run.sh:488-489 writes.
+// ParseWriteCapability accepts only the two words lib/run.sh:494-495 writes.
 //
 // The empty string is refused rather than read as `no`. The Bash default is the
 // word `no`, so an unset capability is a value that went missing on the way
@@ -86,7 +86,7 @@ func (w WriteCapability) String() string { return string(w) }
 //
 // Deliberately not configurable. Only the resolver changes files; granting the
 // reviewer write access widens the blast radius of a prompt injection carried
-// in a diff for nothing in return (lib/run.sh:484-489). Anything that is not
+// in a diff for nothing in return (lib/run.sh:490-495). Anything that is not
 // the resolver reads `no`, which is the Bash default.
 func WriteCapabilityFor(role LegRole) WriteCapability {
 	if role == RoleResolver {
@@ -101,7 +101,7 @@ func WriteCapabilityFor(role LegRole) WriteCapability {
 const EndpointVendor = "vendor"
 
 // InvocationRequest is what the orchestrator hands an adapter: the arguments
-// `run_invoke` passes through at lib/run.sh:774.
+// `run_invoke` passes through at lib/run.sh:780.
 //
 // The GitHub credential is not among them, and never is. The adapters strip
 // GH_TOKEN, GITHUB_TOKEN, GH_ENTERPRISE_TOKEN and GITHUB_ENTERPRISE_TOKEN
@@ -123,7 +123,7 @@ var ErrInvocationRequest = errors.New("an invocation is incomplete")
 
 // NewInvocationRequest validates an invocation before an adapter is started.
 //
-// The arguments are run_invoke's, in its order (lib/run.sh:774). The prompt,
+// The arguments are run_invoke's, in its order (lib/run.sh:780). The prompt,
 // the schema and the workdir are required because adapter_claude takes all
 // three positionally and defaults none of them (lib/adapters/claude.sh:16). The
 // model, the effort and the endpoint are optional for the same reason: the
@@ -171,7 +171,7 @@ func NewInvocationRequest(harness HarnessName, promptPath, schemaPath, workdir, 
 // the adapter already wrote, then refreshes `tokens` from it.
 //
 // No field carries omitempty. Every adapter writes all nine keys explicitly,
-// null included — lib/run.sh:838 writes `{"ok":false,"payload":null,...}` when
+// null included — lib/run.sh:844 writes `{"ok":false,"payload":null,...}` when
 // an adapter produces nothing at all — so a key dropped for being empty is a
 // shape the shipped tool never emits. Each optional field is a pointer for the
 // same reason: a harness that reported nothing and one that reported an empty

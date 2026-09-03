@@ -15,7 +15,7 @@ import (
 
 // A leg that dies after posting its claim records the failure on the pull
 // request: _run_report_fatal (lib/run.sh:131-146) through
-// _run_report_invoke_failure (lib/run.sh:719-763).
+// _run_report_invoke_failure (lib/run.sh:725-769).
 //
 // Without it the claim stays `started` with a null blocked_reason, so
 // `crossrev status` reports the leg as abandoned — it probes whether the run
@@ -54,7 +54,7 @@ func TestAFailedReviewLegRecordsTheFailureOnTheClaim(t *testing.T) {
 }
 
 // A later pass moves the grey pill rather than stacking it: the failing pass's
-// own label goes on and the earlier one comes off (lib/run.sh:746-761).
+// own label goes on and the earlier one comes off (lib/run.sh:752-767).
 func TestAFailedLaterReviewPassMovesThePassLabel(t *testing.T) {
 	e := newEnv(t)
 	writeAppGo(t, e.dir)

@@ -19,7 +19,7 @@ import (
 // complete edit lands, nothing may rewrite the claim as blocked, because the
 // record on the pull request is accurate.
 //
-// nudge is the upgrade tip's half of the `if` at lib/run.sh:1319-1324. The leg
+// nudge is the upgrade tip's half of the `if` at lib/run.sh:1325-1330. The leg
 // holds no terminal, so the decision travels and the composition root prints.
 type publishState struct {
 	settled bool
@@ -61,7 +61,7 @@ func (l *Leg) publish(ctx context.Context, req Request, loaded Context, settings
 	}
 	actionable := ActionableCount(findings, minFix)
 	if len(findings) > 0 {
-		// Three ui_say lines (lib/run.sh:1228-1230).
+		// Three ui_say lines (lib/run.sh:1234-1236).
 		msgs = append(msgs, ui.SayLines(
 			fmt.Sprintf("Found %d issue(s) — %d high, %d medium, %d low, of which %d pre-existing.", len(findings), high, medium, low, pre),
 			fmt.Sprintf("%d at or above min_fix_severity (%s); the rest are reported and left alone.", actionable, minFix),
@@ -102,7 +102,7 @@ func (l *Leg) publish(ctx context.Context, req Request, loaded Context, settings
 		}
 	}
 	if posted > 0 {
-		// ui_ok, not ui_say: the comments are on the pull request (lib/run.sh:1255).
+		// ui_ok, not ui_say: the comments are on the pull request (lib/run.sh:1261).
 		msgs = append(msgs, ui.OK(fmt.Sprintf("posted %d finding comment(s)", posted)))
 	}
 	if skipped > 0 {
@@ -131,7 +131,7 @@ func (l *Leg) publish(ctx context.Context, req Request, loaded Context, settings
 	if err := l.editClaim(ctx, loaded.Repo, claimID, summary, marker); err != nil {
 		return marker, msgs, publishState{}, err
 	}
-	// ui_ok: the comment is on the pull request (lib/run.sh:1293).
+	// ui_ok: the comment is on the pull request (lib/run.sh:1299).
 	msgs = append(msgs, ui.OK("posted a summary comment"))
 
 	marker.State = core.PassComplete
@@ -162,7 +162,7 @@ func (l *Leg) publish(ctx context.Context, req Request, loaded Context, settings
 	}
 
 	// Two bare printfs, each with a trailing blank line
-	// (lib/run.sh:1315-1317, :1319-1322).
+	// (lib/run.sh:1321-1323, :1319-1322).
 	if blocked, ok := marker.BlockedReason.Get(); ok && blocked != "" && verdict == core.VerdictBlocked {
 		msgs = append(msgs, ui.Say("→ verdict: blocked — "+blocked), ui.Blank())
 	} else {
@@ -174,7 +174,7 @@ func (l *Leg) publish(ctx context.Context, req Request, loaded Context, settings
 			ui.Blank())
 	} else {
 		// The other arm of the same `if`, so a pass gets the handover or the
-		// tip and never both (lib/run.sh:1319-1324).
+		// tip and never both (lib/run.sh:1325-1330).
 		state.nudge = true
 	}
 	return marker, msgs, state, nil

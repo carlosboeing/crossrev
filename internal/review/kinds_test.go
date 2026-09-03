@@ -10,9 +10,9 @@ import (
 // Three sites, each measured against the shell, each pinned to the helper the
 // shell used at it.
 //
-//	lib/run.sh:1255  ui_ok   "posted $posted finding comment(s)"
-//	lib/run.sh:1293  ui_ok   "posted a summary comment"
-//	lib/run.sh:1305  ui_warn "the reviewer returned verdict …" "The actionable count outranks …"
+//	lib/run.sh:1261  ui_ok   "posted $posted finding comment(s)"
+//	lib/run.sh:1299  ui_ok   "posted a summary comment"
+//	lib/run.sh:1311  ui_warn "the reviewer returned verdict …" "The actionable count outranks …"
 //
 // The kind is not decoration. A leg's lines reach a terminal through
 // internal/ui's Print, and until this existed every one of them printed as a
@@ -85,7 +85,7 @@ func TestTheVerdictWarningKeepsItsTwoHalvesApart(t *testing.T) {
 		t.Fatalf("no verdict warning among %q", ui.Texts(got.Messages))
 	}
 	if warning.Kind != ui.KindWarn {
-		t.Errorf("kind = %v, want KindWarn: lib/run.sh:1305 is ui_warn", warning.Kind)
+		t.Errorf("kind = %v, want KindWarn: lib/run.sh:1311 is ui_warn", warning.Kind)
 	}
 	if warning.Action != wantConsequence {
 		t.Errorf("consequence = %q, want %q", warning.Action, wantConsequence)

@@ -369,8 +369,8 @@ type shellDefaultRead struct {
 //
 // `:+` was missing and is a read like the rest — `${NAME:+alt}` asks whether
 // NAME is set exactly as `${NAME:-alt}` does. Adding it surfaced two reads,
-// CTX_BACKLOG_LAYOUT and CTX_BACKLOG_PATH at lib/run.sh:3085, and both are
-// assigned at lib/run.sh:228, so both filter out as globals the process sets
+// CTX_BACKLOG_LAYOUT and CTX_BACKLOG_PATH at lib/run.sh:3092, and both are
+// assigned at lib/run.sh:229, so both filter out as globals the process sets
 // for itself and the table's count does not move. The colon-less `-`, `=` and
 // `?` forms match nothing in the shipped shell at all.
 var shellDefaultOperator = regexp.MustCompile(`\$\{([A-Z_][A-Z0-9_]*)(?::?[-=?+])`)
@@ -692,7 +692,7 @@ func TestEnvironmentContract(t *testing.T) {
 		// The rule that catches a variable arriving on the Bash side. The Go
 		// walk above cannot: a name the port has not reached yet is read by no
 		// Go source, and the inventory is hand-written, so nothing else reads
-		// the shell back. TMPDIR arrived at lib/auth.sh:626 with the login
+		// the shell back. TMPDIR arrived at lib/auth.sh:640 with the login
 		// fix and no rule failed.
 		inherited := inheritedShellReads(t, root)
 		if len(inherited) < len(table)/4 {

@@ -24,7 +24,7 @@ func TestEndpointResolvesToItsPair(t *testing.T) {
 // An unresolved name is a hard failure, never a fallback. Falling back to the
 // vendor's own API would mean running one model while the config names another
 // — the same silent substitution the divergence guard exists to catch, arriving
-// through a different door (lib/config.sh:308-312).
+// through a different door (lib/config.sh:344-348).
 func TestAnUndefinedEndpointIsRefusedRatherThanFallenBackFrom(t *testing.T) {
 	tree := files{"": {".github/crossrev.yml": "version: 1\n"}}
 	_, err := mustLoad(t, core.Revision{}, tree).Endpoint("ollama")
@@ -44,7 +44,7 @@ func TestAnUndefinedEndpointIsRefusedRatherThanFallenBackFrom(t *testing.T) {
 }
 
 // No endpoint named is not a failure: most configurations name none, and the
-// Bash cfg_endpoint returns 1 without a message for it (lib/config.sh:315).
+// Bash cfg_endpoint returns 1 without a message for it (lib/config.sh:351).
 func TestNoEndpointNamedIsNotARefusal(t *testing.T) {
 	loaded := mustLoad(t, core.Revision{}, files{"": {}})
 	for _, name := range []string{"", "null"} {
@@ -71,7 +71,7 @@ func mustEndpointError(t *testing.T, loaded *config.Config, name string) error {
 // An endpoint defined as a scalar is malformed, and the Bash reaches the
 // missing-base_url refusal for it rather than the defined-nowhere one:
 // `.endpoints[$n] // empty` is non-empty for a string, and the base_url read
-// off that string comes back empty (lib/config.sh:317-323).
+// off that string comes back empty (lib/config.sh:353-359).
 func TestAScalarEndpointHasNoBaseURL(t *testing.T) {
 	tree := files{"": {".github/crossrev.yml": "version: 1\nendpoints:\n  ollama: \"http://x\"\n"}}
 	_, err := mustLoad(t, core.Revision{}, tree).Endpoint("ollama")

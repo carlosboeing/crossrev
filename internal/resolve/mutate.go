@@ -21,7 +21,7 @@ func (l *Leg) publish(ctx context.Context, s *session, got Result, workdir strin
 		if settled {
 			_ = l.Git.RemoveWorktree(ctx, workdir)
 			if l.Log != nil {
-				// lib/run.sh:2451, then :2458.
+				// lib/run.sh:2457, then :2458.
 				l.Log.Event("worktree", "removed "+workdir)
 				l.Log.ClearTranscripts("")
 			}
@@ -78,7 +78,7 @@ func (l *Leg) publish(ctx context.Context, s *session, got Result, workdir strin
 	commitSHA, msgs, emptyRemote, err := l.commitAndPush(ctx, s, workdir, recs, findings, marker, wrote, remote)
 	got.Messages = append(got.Messages, msgs...)
 	if emptyRemote {
-		// ui_warn, the pair kept apart (lib/run.sh:2385-2386).
+		// ui_warn, the pair kept apart (lib/run.sh:2391-2392).
 		got.Messages = append(got.Messages, ui.Warn(
 			"could not read "+s.pr.HeadRefName+" on "+remote+", so the check for a concurrent push did not run",
 			"If someone pushed to that branch while this leg was working, this push may not include their commit. Confirm the branch looks right before merging."))
@@ -113,7 +113,7 @@ func (l *Leg) publish(ctx context.Context, s *session, got Result, workdir strin
 	got.Messages = append(got.Messages, replyMessages...)
 
 	// The three counts the pass reports, in the shell's order and with the
-	// shell's helper at each (lib/run.sh:2375-2377). A filing and a resolved
+	// shell's helper at each (lib/run.sh:2381-2383). A filing and a resolved
 	// thread are verified successes; a match is a statement of fact, so it is
 	// ui_say and not ui_ok.
 	if filed > 0 {
@@ -159,7 +159,7 @@ func (l *Leg) publish(ctx context.Context, s *session, got Result, workdir strin
 	if err := l.Forge.CommentEdit(ctx, s.repo, commentID, summary+encoded); err != nil {
 		return fail(err)
 	}
-	// ui_ok (lib/run.sh:2408).
+	// ui_ok (lib/run.sh:2414).
 	got.Messages = append(got.Messages, ui.OK("posted a summary comment"))
 
 	marker.State = core.PassComplete
@@ -180,12 +180,12 @@ func (l *Leg) publish(ctx context.Context, s *session, got Result, workdir strin
 	}
 	if escalated > 0 {
 		_ = l.addLabel(ctx, s, policy.LabelStop)
-		// ui_say (lib/run.sh:2428).
+		// ui_say (lib/run.sh:2434).
 		got.Messages = append(got.Messages, ui.Say(strconv.Itoa(escalated)+" finding(s) need a human decision, so crossrev/stop is applied and the loop halts."))
 	}
 
 	got.Messages = append(got.Messages, closingReport(marker, next, s.pass, s.req.PR)...)
-	// lib/run.sh:2447: the tip fires on every ending except the handover back
+	// lib/run.sh:2453: the tip fires on every ending except the handover back
 	// to the reviewer, which already names the next command.
 	got.Nudge = next != policy.PassAwaitingReview
 
@@ -197,7 +197,7 @@ func (l *Leg) publish(ctx context.Context, s *session, got Result, workdir strin
 	return got
 }
 
-// closingReport is the block the leg ends on (lib/run.sh:2431-2446).
+// closingReport is the block the leg ends on (lib/run.sh:2437-2452).
 //
 // The first line is a bare printf carrying an arrow and a trailing blank line,
 // and each of the three endings below it is a ui_say followed by its own blank.
@@ -255,7 +255,7 @@ func (l *Leg) attachPayload(marker prstate.Marker, got Result) prstate.Marker {
 	if got.Envelope.ModelReported != nil && *got.Envelope.ModelReported != "" && *got.Envelope.ModelReported != "null" {
 		marker.ModelReported = prstate.Some(*got.Envelope.ModelReported)
 	}
-	// Bash assigns the key unconditionally (lib/run.sh:2111), so the marker
+	// Bash assigns the key unconditionally (lib/run.sh:2117), so the marker
 	// always holds effort_reported, null when the harness reported none.
 	// omitzero drops an unset Opt entirely, which is different bytes.
 	marker.EffortReported = prstate.Null[string]()

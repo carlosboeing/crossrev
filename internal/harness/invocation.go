@@ -275,7 +275,7 @@ func AssertModelsDiverged(configured, reviewerModel, resolverModel string) error
 	}
 }
 
-// SameModel is _same_model (lib/run.sh:1449-1455): is the model that answered
+// SameModel is _same_model (lib/run.sh:1455-1461): is the model that answered
 // the one that was asked for, written at a different precision?
 //
 // Containment rather than an alias table, deliberately — an alias-to-id table

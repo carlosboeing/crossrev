@@ -205,7 +205,7 @@ func TestLabelsResolvePassLabel(t *testing.T) {
 }
 
 // TestLabelsPassLabelStateNames pins the four words run_pass_labels
-// (lib/run.sh:439-466) removes and re-adds by name, and the label each forms.
+// (lib/run.sh:445-472) removes and re-adds by name, and the label each forms.
 func TestLabelsPassLabelStateNames(t *testing.T) {
 	cases := []struct {
 		state policy.PassLabelState

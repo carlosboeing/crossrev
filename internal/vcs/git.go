@@ -65,7 +65,7 @@ type Call struct {
 	Args []string
 	// ExtraEnv is appended to Git.Env for this call alone. It is how
 	// GIT_INDEX_FILE reaches the two index operations that need it
-	// (lib/run.sh:638-639 and :667-670) without the whole package holding a
+	// (lib/run.sh:644-645 and :667-670) without the whole package holding a
 	// mutable environment.
 	ExtraEnv []string
 
@@ -125,7 +125,7 @@ func (o Output) Lines() []string {
 // decided to run in.
 //
 // A non-zero exit is data, not an error: `git cat-file -e` answers a question
-// with its status and lib/run.sh:1867 reads it as one. The error return covers
+// with its status and lib/run.sh:1873 reads it as one. The error return covers
 // only the cases exec.Result.Err covers, where no status was produced at all.
 func (g *Git) Run(ctx context.Context, call Call) (Output, error) {
 	path := g.Path

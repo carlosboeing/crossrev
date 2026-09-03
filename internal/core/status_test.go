@@ -31,7 +31,7 @@ func TestVerdictVocabularyMatchesTheFindingsSchema(t *testing.T) {
 }
 
 // A pass a cap refused writes `verdict:"declined"` onto the marker
-// (lib/run.sh:1055). No harness ever returns it, so it is a marker value
+// (lib/run.sh:1061). No harness ever returns it, so it is a marker value
 // rather than a schema one.
 func TestMarkerVerdictsAddDeclinedToTheSchemaThree(t *testing.T) {
 	want := []string{"converged", "issues-remain", "blocked", "declined"}
@@ -56,7 +56,7 @@ func TestMarkerVerdictsAddDeclinedToTheSchemaThree(t *testing.T) {
 }
 
 // `crossrev status` prints one of five words for the loop, in the precedence
-// order at lib/run.sh:3112. The two-word states carry a space, not a hyphen:
+// order at lib/run.sh:3119. The two-word states carry a space, not a hyphen:
 // the hyphenated forms are label names, which policy owns.
 func TestLoopStateVocabularyMatchesWhatStatusPrints(t *testing.T) {
 	want := []string{"stopped", "halted", "converged", "awaiting resolution", "awaiting review"}

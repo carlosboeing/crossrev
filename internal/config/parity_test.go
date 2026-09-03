@@ -115,7 +115,7 @@ func optionalString(t *testing.T, raw json.RawMessage) (string, bool) {
 // otherwise reach two states a real read has. isDirectory is a path that exists
 // and holds no file content: configuration is read behind `[[ -f ]]` and so
 // ignores it (lib/config.sh:37), and backlog discovery is read behind `[[ -e ]]`
-// and so counts it (lib/config.sh:443). readFails is a read that errors, which
+// and so counts it (lib/config.sh:479). readFails is a read that errors, which
 // is the only way any error path in this package is reached at all.
 const (
 	isDirectory = "\x00directory"

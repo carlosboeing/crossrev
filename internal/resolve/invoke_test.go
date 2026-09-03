@@ -18,7 +18,7 @@ import (
 // TestInvoke pins write capability, the no-arbitrary-command grant, quarantine
 // and worktree before the model, and one semantic retry.
 //
-// Write flag measured from lib/run.sh:488-489:
+// Write flag measured from lib/run.sh:494-495:
 //
 //	LEG_WRITE=no
 //	[[ "$leg" == "resolver" ]] && LEG_WRITE=yes
@@ -202,7 +202,7 @@ func TestInvoke(t *testing.T) {
 			}
 		}
 		if !found {
-			t.Errorf("Messages = %v, want the substitute warning (lib/run.sh:542-543)", got.Messages)
+			t.Errorf("Messages = %v, want the substitute warning (lib/run.sh:548-549)", got.Messages)
 		}
 		if len(e.adapter.invs) == 0 || !e.adapter.invs[0].Write {
 			t.Fatal("substitute lost write permission")

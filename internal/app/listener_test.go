@@ -19,7 +19,7 @@ import (
 
 // --- the escaping the manifest page needs ----------------------------------
 
-// The four substitutions, measured by running _html_attr_escape (lib/auth.sh:137)
+// The four substitutions, measured by running _html_attr_escape (lib/auth.sh:151)
 // on each input. The apostrophe row is the one that matters: the sed pipeline
 // has four -e clauses and none of them names ', so it survives.
 func TestHTMLAttrEscapeReplacesFourCharactersAndLeavesTheApostrophe(t *testing.T) {
@@ -63,7 +63,7 @@ func TestHTMLAttrEscapeLeavesEverythingElseAlone(t *testing.T) {
 
 // --- the page the browser lands on -----------------------------------------
 
-// wantDonePage is the heredoc at lib/auth.sh:253-269, written out again rather
+// wantDonePage is the heredoc at lib/auth.sh:267-283, written out again rather
 // than derived, so a change to either side fails here.
 const wantDonePage = `<!doctype html>
 <html><head><meta charset="utf-8"><title>crossrev</title><style>
@@ -95,7 +95,7 @@ func TestDonePageIsTheHeredocByteForByte(t *testing.T) {
 
 // --- the one-shot loopback listener ----------------------------------------
 
-// wantResponseHead is the printf at lib/auth.sh:298, with the length the shell
+// wantResponseHead is the printf at lib/auth.sh:312, with the length the shell
 // computes at :295 — `printf '%s' "$body" | wc -c` over a body that command
 // substitution has already stripped the heredoc's final newline from, so 697
 // rather than 698.
@@ -203,7 +203,7 @@ func TestListenOnZeroAsksTheKernelForAPort(t *testing.T) {
 }
 
 // _free_port walks 33517 33518 33519 33520 33521 33522 in order and answers the
-// first free one (lib/auth.sh:242).
+// first free one (lib/auth.sh:256).
 func TestListenWalksTheShellsPortListInOrder(t *testing.T) {
 	held, err := net.Listen("tcp", "127.0.0.1:33517")
 	if err != nil {
@@ -226,7 +226,7 @@ func TestListenWalksTheShellsPortListInOrder(t *testing.T) {
 }
 
 // With every candidate taken the shell's `_free_port` returns 1 and auth_login
-// falls back to the paste flow on port 33517 (lib/auth.sh:554-558). The port
+// falls back to the paste flow on port 33517 (lib/auth.sh:568-572). The port
 // reports that as an error rather than binding something else.
 func TestListenRefusesWhenEveryCandidatePortIsHeld(t *testing.T) {
 	var held []net.Listener
@@ -275,7 +275,7 @@ func TestWaitAnswersTheRedirectWithTheDonePage(t *testing.T) {
 	}
 }
 
-// The sed at lib/auth.sh:646-647 reads the last [?&]code= on the line, stops the
+// The sed at lib/auth.sh:660-661 reads the last [?&]code= on the line, stops the
 // value at & or a space, and decodes nothing. Every row was measured against it.
 func TestWaitReadsTheCodeTheWayTheShellsSedDoes(t *testing.T) {
 	cases := []struct {
@@ -314,7 +314,7 @@ func TestWaitReadsTheCodeTheWayTheShellsSedDoes(t *testing.T) {
 }
 
 // A request with no code at all leaves the wait running until the deadline, the
-// way `grep -q 'code='` never matching does (lib/auth.sh:303-310).
+// way `grep -q 'code='` never matching does (lib/auth.sh:317-324).
 func TestWaitIgnoresARequestCarryingNoCode(t *testing.T) {
 	l := listen(t)
 	collect := waiting(t, l, 700*time.Millisecond)
@@ -332,13 +332,13 @@ func TestWaitIgnoresARequestCarryingNoCode(t *testing.T) {
 }
 
 // `nc -k` keeps accepting after the first connection, and only the first
-// receives the body because nc's stdin is consumed once (lib/auth.sh:281-285).
+// receives the body because nc's stdin is consumed once (lib/auth.sh:295-299).
 // Measured against the shell: a favicon request followed a second later by the
 // real redirect gets 796 bytes and 0 bytes respectively.
 //
 // The second half of the row is the shell's defect, kept because a person can
 // see it: auth_login reads `head -1` of the concatenated requests
-// (lib/auth.sh:645), so the code on the *second* request line is never
+// (lib/auth.sh:659), so the code on the *second* request line is never
 // extracted and the flow drops to the paste prompt with an empty code.
 func TestWaitAnswersOnlyTheFirstConnection(t *testing.T) {
 	l := listen(t)
@@ -390,7 +390,7 @@ func TestWaitStopsOnACodeAnywhereInTheRequest(t *testing.T) {
 	}
 }
 
-// The deadline is the caller's. lib/auth.sh:644 passes 300, and the function's
+// The deadline is the caller's. lib/auth.sh:658 passes 300, and the function's
 // own default at :290 is the same number.
 func TestWaitGivesUpAtTheDeadlineWithNothingConnecting(t *testing.T) {
 	l := listen(t)
@@ -412,7 +412,7 @@ func TestWaitGivesUpAtTheDeadlineWithNothingConnecting(t *testing.T) {
 	}
 }
 
-// `${3:-300}` at lib/auth.sh:290 fills in an absent argument, not a zero one:
+// `${3:-300}` at lib/auth.sh:304 fills in an absent argument, not a zero one:
 // `_listen_for_code p f 0` runs no iteration of the wait loop. Go has no absent
 // argument, so a zero here waits not at all rather than silently becoming five
 // minutes.
@@ -502,7 +502,7 @@ func stubLook(names ...string) func(string) (string, error) {
 	}
 }
 
-// lib/auth.sh:144 — `open "$url"`, and nothing else on the command line.
+// lib/auth.sh:158 — `open "$url"`, and nothing else on the command line.
 func TestOpenBrowserRunsOpenWithTheURLAlone(t *testing.T) {
 	rec := &recorder{}
 	b := app.NewBrowser(rec, app.WithLookPath(stubLook("open", "xdg-open")))
@@ -512,7 +512,7 @@ func TestOpenBrowserRunsOpenWithTheURLAlone(t *testing.T) {
 	rec.wantArgvFor(t, "open", "file:///tmp/x.html")
 }
 
-// lib/auth.sh:145 — the elif arm, reached only when open is absent.
+// lib/auth.sh:159 — the elif arm, reached only when open is absent.
 func TestOpenBrowserFallsBackToXdgOpen(t *testing.T) {
 	rec := &recorder{}
 	b := app.NewBrowser(rec, app.WithLookPath(stubLook("xdg-open")))
@@ -522,8 +522,8 @@ func TestOpenBrowserFallsBackToXdgOpen(t *testing.T) {
 	rec.wantArgvFor(t, "xdg-open", "https://github.com/apps/x")
 }
 
-// `else return 1` at lib/auth.sh:146. auth_login turns it into a ui_warn naming
-// the file to open by hand (lib/auth.sh:640-642), so the error has to be
+// `else return 1` at lib/auth.sh:160. auth_login turns it into a ui_warn naming
+// the file to open by hand (lib/auth.sh:654-656), so the error has to be
 // distinguishable and nothing may be started.
 func TestOpenBrowserRefusesWhenNeitherOpenerIsInstalled(t *testing.T) {
 	rec := &recorder{}
@@ -623,7 +623,7 @@ func TestOpenBrowserSearchesTheProcessPathWhenNoLookupIsInjected(t *testing.T) {
 	if err := b.Open(context.Background(), "file:///tmp/x.html"); err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	// open first, xdg-open second: the if/elif order at lib/auth.sh:144-145.
+	// open first, xdg-open second: the if/elif order at lib/auth.sh:158-159.
 	rec.wantArgvFor(t, "open", "file:///tmp/x.html")
 }
 

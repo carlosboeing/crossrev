@@ -123,7 +123,7 @@ type MarkerEdit struct {
 // This is the route the struct view cannot offer. Marker keeps only the fields
 // it declares, so reading a marker into it and writing it back drops whatever a
 // future writer added and whatever an older one left behind — `wrap_up` is a
-// live example, still migrated on resume at lib/run.sh:1993-1999. Every marker
+// live example, still migrated on resume at lib/run.sh:1999-2005. Every marker
 // writer in lib/run.sh edits in place on a jq object for exactly that reason,
 // and this is that operation.
 //
@@ -412,7 +412,7 @@ func jqMarshal(v any) ([]byte, error) {
 // as having settled nothing.
 //
 // The `wrap_up` to `summary` fallback is deliberately NOT here, and the reason
-// is the boundary this function sits on. Bash does that one at lib/run.sh:1999,
+// is the boundary this function sits on. Bash does that one at lib/run.sh:2005,
 // inside the resolve leg's resume, not in state_marker_of. Moving it here would
 // make DecodeMarker print a key state_marker_of does not, on a marker written
 // before the rename — a divergence in the frozen decode contract, to save one

@@ -15,13 +15,13 @@ import (
 )
 
 // statusLocalRunPrefix marks a run id written by a local leg, whose remainder
-// is the pid (lib/run.sh:3291-3292). The shape of the run id picks the probe,
+// is the pid (lib/run.sh:3298-3299). The shape of the run id picks the probe,
 // not the configured mode: a marker written on a runner reads the same from a
 // laptop.
 const statusLocalRunPrefix = "local-"
 
 // statusGoneLocally and statusGoneInWorkflow are the two reasons a `gone` is
-// known (lib/run.sh:3334 and lib/run.sh:3348). They are the whole of what the
+// known (lib/run.sh:3341 and lib/run.sh:3355). They are the whole of what the
 // row prints after the dash, so they are strings rather than a rendering
 // decision made later.
 const (
@@ -30,7 +30,7 @@ const (
 )
 
 // LivenessProbe answers whether the run behind one open claim is still working
-// (lib/run.sh:3284-3350).
+// (lib/run.sh:3291-3357).
 //
 // Empty is a real answer and the common one. Anything that cannot be shown is
 // not claimed: an unreadable lock, a run in another checkout, a pull request
@@ -49,7 +49,7 @@ type LivenessProbe struct {
 	Forge forge.Forge
 
 	// GitDir is `git rev-parse --git-common-dir` put through `pwd -P`
-	// (lib/run.sh:3315-3316), which production wires to
+	// (lib/run.sh:3322-3323), which production wires to
 	// (*vcs.Repository).CommonDir. The lock keys on the shared git directory
 	// so that every working tree of a clone finds the same one.
 	//
@@ -57,11 +57,11 @@ type LivenessProbe struct {
 	// a claim that the leg died.
 	GitDir func(ctx context.Context) (string, error)
 
-	// PIDAlive is `kill -0` (lib/run.sh:3331). Nil means the real signal.
+	// PIDAlive is `kill -0` (lib/run.sh:3338). Nil means the real signal.
 	PIDAlive func(pid int) bool
 
 	// Hostname is the `hostname` half of
-	// `hostname 2>/dev/null || printf 'local'` (lib/run.sh:3327). Nil means
+	// `hostname 2>/dev/null || printf 'local'` (lib/run.sh:3334). Nil means
 	// os.Hostname, this machine's own.
 	//
 	// It answers an error rather than a bare name so the `|| printf 'local'`
@@ -71,7 +71,7 @@ type LivenessProbe struct {
 	Hostname func() (string, error)
 
 	// askedFor, life and detail are _STATUS_LIVENESS_FOR, STATUS_LIVENESS and
-	// STATUS_LIVENESS_DETAIL at lib/run.sh:3281-3283. The memo holds one run
+	// STATUS_LIVENESS_DETAIL at lib/run.sh:3288-3290. The memo holds one run
 	// id, exactly as the globals do, so a third question about an earlier
 	// claim is asked again rather than answered from a cache the shell does
 	// not have.
@@ -80,7 +80,7 @@ type LivenessProbe struct {
 	detail   string
 }
 
-// Alive answers for one claim, and remembers the answer (lib/run.sh:3284-3297).
+// Alive answers for one claim, and remembers the answer (lib/run.sh:3291-3304).
 //
 // The memo is not an optimisation added here: one report asks about the same
 // claim twice, once for its row and once for the NEXT line under it, and for an
@@ -104,7 +104,7 @@ func (p *LivenessProbe) Alive(ctx context.Context, claim prstate.Marker) (Life, 
 }
 
 // local answers from the lock file the run took over the same pull request
-// (lib/run.sh:3311-3338).
+// (lib/run.sh:3318-3345).
 //
 // `kill -0` on the marker's pid alone would be cheaper, but it is only sound
 // where the pid means what the marker meant by it. Pids are recycled and every
@@ -153,7 +153,7 @@ func (p *LivenessProbe) local(ctx context.Context, pid string) (Life, string) {
 }
 
 // workflow answers from the Actions API, which reaches a run from anywhere
-// (lib/run.sh:3341-3350).
+// (lib/run.sh:3348-3357).
 //
 // `completed` is the useful half: the run is over and the marker never reached
 // `complete`, so the leg died inside it however recently that was. Every other
@@ -172,7 +172,7 @@ func (p *LivenessProbe) workflow(ctx context.Context, runID string) (Life, strin
 	}
 }
 
-// hostname is `hostname 2>/dev/null || printf 'local'` (lib/run.sh:3327).
+// hostname is `hostname 2>/dev/null || printf 'local'` (lib/run.sh:3334).
 //
 // An empty answer takes the fallback too. `hostname` printing nothing exits
 // zero, so the shell would compare against the empty string; os.Hostname does
@@ -189,7 +189,7 @@ func (p *LivenessProbe) hostname() string {
 	return name
 }
 
-// alive is `kill -0 "$pid" 2>/dev/null` (lib/run.sh:3331).
+// alive is `kill -0 "$pid" 2>/dev/null` (lib/run.sh:3338).
 //
 // Signal zero delivers nothing and reports whether the process could be
 // signalled. A process owned by another user answers "permission denied", which
@@ -211,7 +211,7 @@ func (p *LivenessProbe) alive(pid string) bool {
 	return process.Signal(syscall.Signal(0)) == nil
 }
 
-// statusIsPID is `[[ "$pid" =~ ^[0-9]+$ ]]` (lib/run.sh:3313).
+// statusIsPID is `[[ "$pid" =~ ^[0-9]+$ ]]` (lib/run.sh:3320).
 func statusIsPID(pid string) bool {
 	if pid == "" {
 		return false
@@ -225,7 +225,7 @@ func statusIsPID(pid string) bool {
 }
 
 // statusLockHost is `rest="${holder#* on }"; lock_host="${rest%% since *}"`
-// (lib/run.sh:3322).
+// (lib/run.sh:3329).
 //
 // vcs.ParseHolder answers the same host for every line run_lock_acquire writes,
 // and it is what reads the line everywhere else. It differs on one shape the

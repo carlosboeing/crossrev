@@ -69,7 +69,7 @@ func shippedDescriptor(t *testing.T) harness.Document {
 }
 
 // configWith is a merge carrying only the two keys run_assert_cycle_pairing
-// reads (lib/run.sh:582-583). It sets both explicitly rather than defaulting
+// reads (lib/run.sh:588-589). It sets both explicitly rather than defaulting
 // either, so no case here passes because the helper filled a blank in;
 // TestPairingReadsAnAbsentConfiguredNameAsServing uses an empty merge instead.
 func configWith(reviewer, resolver string) *config.Config {
@@ -102,7 +102,7 @@ func wantFatal(t *testing.T, err error, reason, action string) {
 // --- the check itself -------------------------------------------------------
 
 // TestPairingServesAnOverrideOnBothLegs pins the decision the comment block at
-// lib/run.sh:560-569 records: an override puts one harness on both sides of the
+// lib/run.sh:566-575 records: an override puts one harness on both sides of the
 // loop, and that is served rather than refused. Measured:
 //
 //	override=claude   cfg codex/claude -> rc=0, nothing printed
@@ -153,7 +153,7 @@ func TestPairingRefusesAnOverrideThatCannotReview(t *testing.T) {
 }
 
 // TestPairingChecksTheConfiguredNamesWithoutAnOverride pins the else arm at
-// lib/run.sh:581-584. Measured with codex rewritten to legs ["review"]:
+// lib/run.sh:587-590. Measured with codex rewritten to legs ["review"]:
 //
 //	no override, cfg codex/claude -> rc=0
 //	no override, cfg claude/codex -> rc=1, the resolve refusal naming codex
@@ -180,7 +180,7 @@ func TestPairingIgnoresTheConfiguredNamesWhenAnOverrideIsGiven(t *testing.T) {
 	}
 }
 
-// TestPairingRefusesTheReviewLegFirst pins the order of lib/run.sh:586-587.
+// TestPairingRefusesTheReviewLegFirst pins the order of lib/run.sh:592-593.
 // Measured with codex rewritten to ["review"] and agy to ["resolve"], reviewer
 // agy and resolver codex — both fail, and the review one is what prints:
 //
@@ -208,7 +208,7 @@ func TestPairingRefusesTheReviewLegFirst(t *testing.T) {
 // harness.Document.ServesLeg answered false for the same name when this was
 // written and now answers the shell's true; the check reads the entry itself
 // and is right either way. The shell is not lax by accident: an unknown name is
-// refused a few lines later by run_leg_settings' adapter test (lib/run.sh:500),
+// refused a few lines later by run_leg_settings' adapter test (lib/run.sh:506),
 // with a message that names the fault. Refusing it here would print
 // "Codex is limited to the  leg" with two blanks in it instead.
 func TestPairingServesAHarnessTheDescriptorDoesNotName(t *testing.T) {
@@ -223,7 +223,7 @@ func TestPairingServesAHarnessTheDescriptorDoesNotName(t *testing.T) {
 
 // TestPairingReadsAnAbsentConfiguredNameAsServing goes through Config.Get on a
 // merge that carries neither key, without configWith. cfg_get renders an absent
-// value as the empty string (lib/config.sh:354), and the empty string is a name
+// value as the empty string (lib/config.sh:390), and the empty string is a name
 // the descriptor does not carry, so it serves. Measured:
 //
 //	no override, cfg empty/empty -> rc=0, nothing printed
@@ -247,9 +247,9 @@ func TestPairingDoesNotReadTheConfigWhenAnOverrideIsGiven(t *testing.T) {
 // --- the check inside the driver --------------------------------------------
 
 // TestPairingRefusesBeforeAnyLegIsBilled wires the real check into the driver
-// and pins what lib/run.sh:2926 buys: the refusal lands after the context load
+// and pins what lib/run.sh:2932 buys: the refusal lands after the context load
 // and before the first leg, so a cycle whose resolver cannot resolve costs no
-// review. The `Cycling …` line is printed after the check (lib/run.sh:2928), so
+// review. The `Cycling …` line is printed after the check (lib/run.sh:2934), so
 // a refused cycle prints nothing on stdout either.
 func TestPairingRefusesBeforeAnyLegIsBilled(t *testing.T) {
 	doc := descriptorWith(t, map[string][]string{"codex": {"review"}})
@@ -269,7 +269,7 @@ func TestPairingRefusesBeforeAnyLegIsBilled(t *testing.T) {
 }
 
 // TestPairingAddsNothingToTheCycleOutput pins the other half of the comment at
-// lib/run.sh:568-569: a served pairing is not warned about. One harness on both
+// lib/run.sh:574-575: a served pairing is not warned about. One harness on both
 // legs runs the loop and prints exactly what a cycle without an override
 // prints.
 func TestPairingAddsNothingToTheCycleOutput(t *testing.T) {

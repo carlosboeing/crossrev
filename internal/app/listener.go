@@ -19,7 +19,7 @@ import (
 
 // --- escaping a value into an HTML attribute -------------------------------
 
-// htmlAttrEscaper is the sed pipeline at lib/auth.sh:138-139, which has four
+// htmlAttrEscaper is the sed pipeline at lib/auth.sh:152-153, which has four
 // -e clauses and no fifth.
 //
 // One pass rather than four is the same answer here and only here: every
@@ -34,17 +34,17 @@ var htmlAttrEscaper = strings.NewReplacer(
 )
 
 // HTMLAttrEscape prepares a value for an HTML attribute (_html_attr_escape,
-// lib/auth.sh:137).
+// lib/auth.sh:151).
 //
 // The apostrophe is not escaped, and that is the shell's list rather than an
-// omission here: every attribute it feeds is double-quoted (lib/auth.sh:622-624),
+// omission here: every attribute it feeds is double-quoted (lib/auth.sh:636-638),
 // so ' cannot end one. A caller that writes a single-quoted attribute would
 // need more than this function offers.
 func HTMLAttrEscape(s string) string { return htmlAttrEscaper.Replace(s) }
 
 // --- the page the browser lands on -----------------------------------------
 
-// donePage is the heredoc at lib/auth.sh:253-269, byte for byte, trailing
+// donePage is the heredoc at lib/auth.sh:267-283, byte for byte, trailing
 // newline included: `cat` of a heredoc ends with one, and `_auth_done_page |
 // wc -c` is 698.
 //
@@ -68,13 +68,13 @@ p{margin:.5rem 0;opacity:.75}
 </div></body></html>
 `
 
-// DonePage is what _auth_done_page prints (lib/auth.sh:252).
+// DonePage is what _auth_done_page prints (lib/auth.sh:266).
 func DonePage() string { return donePage }
 
 // doneResponse is the whole HTTP reply, exactly as the printf at
-// lib/auth.sh:298 builds it.
+// lib/auth.sh:312 builds it.
 //
-// The body is the page without its final newline, because lib/auth.sh:292
+// The body is the page without its final newline, because lib/auth.sh:306
 // captures the heredoc through command substitution and that strips it; the
 // Content-Length at :295 is measured over the stripped bytes, so it is 697 and
 // not 698. There is no Date and no Server header: nc sends what it is given and
@@ -90,20 +90,20 @@ func doneResponse() string {
 
 // --- the one-shot loopback listener ----------------------------------------
 
-// listenPorts is the list _free_port walks, in order (lib/auth.sh:242).
+// listenPorts is the list _free_port walks, in order (lib/auth.sh:256).
 var listenPorts = []int{33517, 33518, 33519, 33520, 33521, 33522}
 
 // FallbackPort is the port auth_login names in redirect_url when no listener
-// could be bound (lib/auth.sh:557). Nothing listens on it: the browser lands on
+// could be bound (lib/auth.sh:571). Nothing listens on it: the browser lands on
 // a connection refused and the person pastes the address bar.
 const FallbackPort = 33517
 
-// WaitTimeout is how long auth_login waits for the redirect (lib/auth.sh:644,
+// WaitTimeout is how long auth_login waits for the redirect (lib/auth.sh:658,
 // and the same number as the default at :290).
 const WaitTimeout = 300 * time.Second
 
 // ErrNoCode is what Wait reports when no request carrying a code arrived before
-// the deadline — the non-zero return of _listen_for_code (lib/auth.sh:314).
+// the deadline — the non-zero return of _listen_for_code (lib/auth.sh:328).
 //
 // It carries nothing from the request. The OAuth code is exchanged for the
 // App's private key, so a request line has no business in an error string,
@@ -111,23 +111,23 @@ const WaitTimeout = 300 * time.Second
 var ErrNoCode = errors.New("no registration code arrived on the loopback listener")
 
 // Redirect is what auth_login pulls out of the first request line
-// (lib/auth.sh:645-647).
+// (lib/auth.sh:659-661).
 type Redirect struct {
 	// Code is the value of the last ?code= or &code= on the line.
 	Code string
 	// State is the same for state=. Comparing it against the value CrossRev
-	// sent is the caller's (lib/auth.sh:679-682); nothing here checks it,
+	// sent is the caller's (lib/auth.sh:693-696); nothing here checks it,
 	// because _listen_for_code does not either.
 	State string
 }
 
 // Listener is the loopback socket the GitHub redirect lands on
-// (_listen_for_code, lib/auth.sh:289).
+// (_listen_for_code, lib/auth.sh:303).
 //
 // The Bash version shells out to `nc -k -l`, and _listener_available
-// (lib/auth.sh:248) asks whether nc is installed at all. There is no such
+// (lib/auth.sh:262) asks whether nc is installed at all. There is no such
 // question here — the process binds the socket itself — so the decision
-// auth_login makes at lib/auth.sh:554 becomes the error from Listen.
+// auth_login makes at lib/auth.sh:568 becomes the error from Listen.
 type Listener struct {
 	ln net.Listener
 
@@ -138,7 +138,7 @@ type Listener struct {
 // Listen binds the first free port in the shell's list.
 //
 // It binds rather than probing, which _port_free could not: `nc -z localhost`
-// (lib/auth.sh:238) reports a port free and leaves it free for whatever binds
+// (lib/auth.sh:252) reports a port free and leaves it free for whatever binds
 // it in the next millisecond. The port is held from here on.
 func Listen() (*Listener, error) {
 	var last error
@@ -192,30 +192,30 @@ const maxRequestBytes = 64 << 10
 // Wait accepts connections until one of them carries a registration code, or
 // until timeout elapses or ctx ends.
 //
-// It is _listen_for_code (lib/auth.sh:289-315) plus the two sed lines its caller
-// runs on the result (lib/auth.sh:645-647), and it keeps three properties of the
+// It is _listen_for_code (lib/auth.sh:303-329) plus the two sed lines its caller
+// runs on the result (lib/auth.sh:659-661), and it keeps three properties of the
 // shell that are easy to lose:
 //
 //   - It keeps accepting after the first connection, which is what `nc -k`
-//     does and why (lib/auth.sh:275-280): browsers open speculative
+//     does and why (lib/auth.sh:289-294): browsers open speculative
 //     connections and anything on the machine can probe a listening port.
 //     Serving one connection and re-binding loses a request that arrives in
 //     the gap, which is the failure the listener exists to remove.
 //
 //   - Only the first connection receives the page. nc's stdin is consumed
-//     once, so the shell answers one connection and no more; lib/auth.sh:281-285
+//     once, so the shell answers one connection and no more; lib/auth.sh:295-299
 //     records that as a deliberate trade. Measured against the shell: a
 //     favicon request followed by the real redirect got 796 bytes and 0.
 //
 //   - The code comes from the first request line of the whole stream, because
 //     auth_login reads `head -1` of the file nc wrote every connection into
-//     (lib/auth.sh:645). A decoy arriving first therefore ends the wait with an
-//     empty Code and the caller drops to the paste prompt at lib/auth.sh:660.
+//     (lib/auth.sh:659). A decoy arriving first therefore ends the wait with an
+//     empty Code and the caller drops to the paste prompt at lib/auth.sh:674.
 //     That is a fault in the shipped shell rather than a design, and it is kept
 //     here because a person sees the difference.
 //
 // A timeout of zero or less waits not at all. The shell's `${3:-300}` at
-// lib/auth.sh:290 defaults an *absent* argument, and Go has no absent argument;
+// lib/auth.sh:304 defaults an *absent* argument, and Go has no absent argument;
 // inventing a default here would hide a caller that forgot to pass one.
 func (l *Listener) Wait(ctx context.Context, timeout time.Duration) (Redirect, error) {
 	deadline := time.Now().Add(timeout)
@@ -254,7 +254,7 @@ func (l *Listener) Wait(ctx context.Context, timeout time.Duration) (Redirect, e
 
 		raw = append(raw, request...)
 		// `grep -q 'code='` reads the whole file, headers included
-		// (lib/auth.sh:304), so a code= anywhere ends the wait.
+		// (lib/auth.sh:318), so a code= anywhere ends the wait.
 		if bytes.Contains(raw, []byte("code=")) {
 			line := firstLine(raw)
 			return Redirect{
@@ -302,7 +302,7 @@ func firstLine(raw []byte) string {
 }
 
 // lastQueryValue is `sed -n 's/.*[?&]NAME=\([^& ]*\).*/\1/p'`
-// (lib/auth.sh:646-647).
+// (lib/auth.sh:660-661).
 //
 // Three details of that expression are load-bearing and were measured rather
 // than read: the leading .* is greedy, so the LAST ?NAME= or &NAME= on the line
@@ -332,7 +332,7 @@ func lastQueryValue(line, name string) string {
 
 // --- the browser handoff ---------------------------------------------------
 
-// browserOpeners is the if/elif order at lib/auth.sh:144-145. The shell
+// browserOpeners is the if/elif order at lib/auth.sh:158-159. The shell
 // switches on which of the two is installed rather than on the platform, so
 // this list is not per-GOOS either.
 var browserOpeners = []string{"open", "xdg-open"}
@@ -368,13 +368,13 @@ var browserEnvironment = []string{
 	"DE",
 }
 
-// ErrNoOpener is `else return 1` at lib/auth.sh:146: neither opener is
+// ErrNoOpener is `else return 1` at lib/auth.sh:160: neither opener is
 // installed. auth_login turns it into a warning naming the URL to open by hand
-// (lib/auth.sh:640-642), so it never stops the flow.
+// (lib/auth.sh:654-656), so it never stops the flow.
 var ErrNoOpener = errors.New("neither open nor xdg-open is installed")
 
 // Browser opens a URL in whatever the machine calls a browser (_open_browser,
-// lib/auth.sh:142).
+// lib/auth.sh:156).
 type Browser struct {
 	runner exec.Runner
 	env    []string
@@ -427,7 +427,7 @@ func (b *Browser) Open(ctx context.Context, url string) error {
 }
 
 // lookPath reports whether a program is on PATH, the way `command -v` does
-// (lib/auth.sh:144-145).
+// (lib/auth.sh:158-159).
 //
 // It is the helper internal/review/invoke.go:93 already carries, which this
 // package may not import, plus a directory check: `command -v` answers absent

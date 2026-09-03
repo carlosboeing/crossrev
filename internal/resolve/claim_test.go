@@ -14,7 +14,7 @@ import (
 )
 
 // TestClaim pins claim-before-model, create failure, stale versus fresh
-// resume, measured from lib/run.sh:1916-1973 and lib/state.sh:322-339.
+// resume, measured from lib/run.sh:1922-1979 and lib/state.sh:322-339.
 func TestClaim(t *testing.T) {
 	t.Run("create is posted before the harness process", func(t *testing.T) {
 		e := setup(t)

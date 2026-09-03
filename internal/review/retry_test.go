@@ -13,7 +13,7 @@ import (
 )
 
 // A harness that does not constrain its own output gets one more attempt, and
-// the run says so (lib/run.sh:891-896):
+// the run says so (lib/run.sh:897-902):
 //
 //	ui_warn "$harness returned an object that does not match the schema — $problem" \
 //	  "That harness does not constrain its own output, so this is the expected
@@ -48,7 +48,7 @@ func TestAShapeRetryWarnsOnceAndAsksAgain(t *testing.T) {
 		t.Fatalf("the retry was silent; the leg said %q", ui.Texts(got.Messages))
 	}
 	if warned.Kind != ui.KindWarn {
-		t.Errorf("kind = %v, want KindWarn: lib/run.sh:894 is ui_warn", warned.Kind)
+		t.Errorf("kind = %v, want KindWarn: lib/run.sh:900 is ui_warn", warned.Kind)
 	}
 	if !strings.Contains(warned.Action, "it is being retried once") {
 		t.Errorf("consequence = %q, want the retry sentence", warned.Action)
@@ -57,7 +57,7 @@ func TestAShapeRetryWarnsOnceAndAsksAgain(t *testing.T) {
 
 // A second mismatch from a harness that does not constrain its output names the
 // model failing the JSON instruction, never a native schema check
-// (lib/run.sh:900-905).
+// (lib/run.sh:906-911).
 func TestASecondShapeMismatchNamesTheJSONInstruction(t *testing.T) {
 	e := newEnv(t)
 	writeAppGo(t, e.dir)
@@ -81,7 +81,7 @@ func TestASecondShapeMismatchNamesTheJSONInstruction(t *testing.T) {
 }
 
 // A harness that DOES validate natively gets no shape retry, and the refusal
-// says the mismatch is an adapter or harness bug (lib/run.sh:899-901).
+// says the mismatch is an adapter or harness bug (lib/run.sh:905-907).
 func TestASchemaNativeHarnessGetsNoShapeRetry(t *testing.T) {
 	e := newEnv(t)
 	writeAppGo(t, e.dir)
@@ -101,7 +101,7 @@ func TestASchemaNativeHarnessGetsNoShapeRetry(t *testing.T) {
 }
 
 // Semantic drift earns one more attempt, and the run says why
-// (lib/run.sh:880-884).
+// (lib/run.sh:886-890).
 func TestASemanticRetryWarnsOnceAndAsksAgain(t *testing.T) {
 	e := newEnv(t)
 	writeAppGo(t, e.dir)

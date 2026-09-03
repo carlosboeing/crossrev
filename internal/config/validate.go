@@ -39,7 +39,7 @@ func wholeAboveZero(value string) bool {
 //
 // A version that is present and wrong is a refusal, not a warning: the whole
 // point of the key is that a future shape can be rejected by an old binary
-// (cfg_check_version, lib/config.sh:294-301).
+// (cfg_check_version, lib/config.sh:330-337).
 func checkVersion(layer *Object, where string) error {
 	declared := alternative(lookup(layer, ".version"))
 	if declared == "" || declared == Version {
@@ -57,7 +57,7 @@ func checkVersion(layer *Object, where string) error {
 // so `min_fix_severity: medum` counts no finding as actionable, the pass
 // reports converged, and the cycle stops with a high-severity finding still on
 // the pull request. A typo would look exactly like a clean review
-// (lib/config.sh:245-253).
+// (lib/config.sh:326-331).
 //
 // The container is checked here rather than once before the assertions,
 // because the Bash reaches each one only when the assertion above it passed. A
@@ -83,7 +83,7 @@ func (c *Config) assertMinFixSeverity() error {
 // "no pass bound applies to this invocation". An operator writing 0 or -1 lands
 // on that sentinel from the other direction, and the two readers then disagree:
 // the automatic loop takes it as no bound and keeps starting passes, while the
-// cycle command stops before the first one (lib/config.sh:255-272).
+// cycle command stops before the first one (lib/config.sh:291-308).
 func (c *Config) assertMaxPassesPerCycle() error {
 	value := c.Get(".policy.max_passes_per_cycle")
 	if wholeAboveZero(value) {
@@ -99,7 +99,7 @@ func (c *Config) assertMaxPassesPerCycle() error {
 //
 // Read leniently, `hooks: skipp` falls through to whichever branch is not
 // `run`, so a repository that meant to keep its hooks running keeps committing
-// without them and nothing ever says so (lib/config.sh:274-290, ADR 0017).
+// without them and nothing ever says so (lib/config.sh:310-326, ADR 0017).
 func (c *Config) assertGitHooks() error {
 	if err := requireMappingAt(c.Merged, ".git"); err != nil {
 		return err
@@ -194,7 +194,7 @@ func unknownLayout(layout string) *Refusal {
 
 // forgeCredentialNames are the GitHub credential names `gh` reads, in its own
 // order of precedence (`gh help environment`). They are CFG_FORGE_CREDENTIALS
-// at lib/config.sh:246.
+// at lib/config.sh:282.
 //
 // This package is tier 2 and imports no other tier-2 package, so it cannot read
 // internal/exec's copy — which is the same separation the Bash keeps, where the
@@ -235,7 +235,7 @@ func ForgeCredentialNames() []string {
 // and an endpoint no leg selects today is still refused, because a config
 // asking for this is wrong whether or not it is reached. The operator file is
 // checked on the same pass, because it merges into this same mapping
-// (lib/config.sh:255-275).
+// (lib/config.sh:291-311).
 //
 // A definition that is not a mapping holds no token_env to read, which is the
 // `if (.value | type) == "object"` arm of the jq. And the comparison is exact:

@@ -23,11 +23,11 @@ package cli
 // than left out silently:
 //
 //   - An endpoint's token. lib/adapters/claude.sh:82 reads `${!tok_env:-}`,
-//     where tok_env is the endpoint block's token_env key (lib/config.sh:375).
+//     where tok_env is the endpoint block's token_env key (lib/config.sh:411).
 //     The name is the operator's own — templates/operator-config.yml:25 ships
 //     KIMI_API_KEY as the worked example — so the port reads it the same way,
 //     at internal/resolve/invoke.go:517.
-//   - A harness secret the descriptor does not name. lib/auth.sh:1034 falls back
+//   - A harness secret the descriptor does not name. lib/auth.sh:1058 falls back
 //     to CROSSREV_<HARNESS>_AUTH. Measured against lib/harnesses.json, the only
 //     harness declaring `refresher: true` is codex and codex declares
 //     CROSSREV_CODEX_AUTH, so the fallback is unreachable in the shipped
@@ -291,7 +291,7 @@ var environment = []Variable{
 	},
 	{
 		// Where auth_login writes the registration page and the redirect file
-		// (lib/auth.sh:626). Read with a default and assigned nowhere in the
+		// (lib/auth.sh:640). Read with a default and assigned nowhere in the
 		// shell, so it is an inherited value the operator sets.
 		//
 		// The readers are the two allowlists that hand it to a child —

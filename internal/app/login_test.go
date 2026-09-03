@@ -40,7 +40,7 @@ func (b *bench) answers(t *testing.T, line string) {
 }
 
 // assumeYes is --yes: every confirmation is answered without asking, and the
-// input source is still required (lib/auth.sh:513 runs before ui_confirm does).
+// input source is still required (lib/auth.sh:527 runs before ui_confirm does).
 func (b *bench) assumeYes(t *testing.T) {
 	t.Helper()
 	b.answers(t, "")
@@ -70,7 +70,7 @@ func (b *bench) redirects(request string) {
 }
 
 // noListener is the machine with no free port, which is the arm that falls
-// through to the paste prompt (lib/auth.sh:556-558).
+// through to the paste prompt (lib/auth.sh:570-572).
 func (b *bench) noListener() {
 	b.cmds.Listen = func() (*app.Listener, error) {
 		return nil, errors.New("no free port")
@@ -89,7 +89,7 @@ const fixturePEM = `-----BEGIN RSA PRIVATE KEY-----\nQUJD\n-----END RSA PRIVATE 
 // --- what happens before anything opens -------------------------------------
 
 // An unknown role is caught while nothing has happened yet, which is why the
-// permissions read runs for its exit status alone (lib/auth.sh:511).
+// permissions read runs for its exit status alone (lib/auth.sh:525).
 func TestLoginRefusesAnUnknownRoleBeforeAnythingOpens(t *testing.T) {
 	b := newBench(t)
 	o := b.browser(&opener{})
@@ -106,7 +106,7 @@ func TestLoginRefusesAnUnknownRoleBeforeAnythingOpens(t *testing.T) {
 
 // With nowhere to read an answer from, nothing is asked and nothing is
 // created — and the check runs before the account lookups, not after them
-// (lib/auth.sh:513).
+// (lib/auth.sh:527).
 func TestLoginRefusesWithNoTerminalAttached(t *testing.T) {
 	b := newBench(t)
 	b.browser(&opener{})
@@ -161,7 +161,7 @@ func TestLoginRefusesWhenTheOwnerCannotBeDetected(t *testing.T) {
 }
 
 // One App per owner per role is the design, so a second registration is
-// refused rather than made (lib/auth.sh:528-536).
+// refused rather than made (lib/auth.sh:542-550).
 func TestLoginOnAnAlreadyConfiguredAppSaysWhyASecondIsNotOffered(t *testing.T) {
 	b := newBench(t, out("Organization 12345\n"))
 	b.meta(t, "CrossRev ShoreLogic", "crossrev-shorelogic")
@@ -269,7 +269,7 @@ func TestLoginPrintsTheRefresherPanelWithItsOwnJustification(t *testing.T) {
 }
 
 // A user-owned account posts to the personal settings page rather than the
-// organisation one (lib/auth.sh:578-582), and the panel says so.
+// organisation one (lib/auth.sh:592-596), and the panel says so.
 func TestLoginNamesTheOwnerTypeItResolved(t *testing.T) {
 	b := newBench(t, out("User 339\n"), bad())
 	b.browser(&opener{})
@@ -443,7 +443,7 @@ func wantMode(t *testing.T, path string, want os.FileMode) {
 }
 
 // A state value that is not the one CrossRev sent means the request did not
-// come from the page it opened (lib/auth.sh:733-736).
+// come from the page it opened (lib/auth.sh:747-750).
 func TestLoginRefusesAStateItDidNotSend(t *testing.T) {
 	b := newBench(t, out("Organization 12345\n"), bad())
 	b.browser(&opener{})
@@ -462,7 +462,7 @@ func TestLoginRefusesAStateItDidNotSend(t *testing.T) {
 
 // A redirect carrying a code and no state at all is refused, because the
 // listener path is the one path that can be required to send the state back
-// (lib/auth.sh:727-736).
+// (lib/auth.sh:741-750).
 //
 // The listener binds loopback only, so any request reaching it came from a
 // process on this machine — which is exactly what the state exists to tell
@@ -517,7 +517,7 @@ func TestLoginAcceptsAListenerRedirectCarryingTheStateItSent(t *testing.T) {
 // --- the paste fallback -----------------------------------------------------
 
 // With no listener the flow goes straight to the paste, which is the floor
-// rather than the plan (lib/auth.sh:658-673).
+// rather than the plan (lib/auth.sh:672-687).
 func TestLoginFallsBackToPastingWithNoListener(t *testing.T) {
 	b := newBench(t,
 		out("Organization 12345\n"),
@@ -549,7 +549,7 @@ func TestLoginFallsBackToPastingWithNoListener(t *testing.T) {
 	}
 }
 
-// A bare value with no code= in it is the code itself (lib/auth.sh:671).
+// A bare value with no code= in it is the code itself (lib/auth.sh:685).
 func TestLoginTakesABarePastedValueAsTheCode(t *testing.T) {
 	b := newBench(t,
 		out("Organization 12345\n"),
@@ -572,7 +572,7 @@ func TestLoginTakesABarePastedValueAsTheCode(t *testing.T) {
 
 // The paste is held to the state it carries. An absent one is the documented
 // fallback; one that came back wrong is a mismatch on either path
-// (lib/auth.sh:730-731, tests/test-auth.sh:472-479).
+// (lib/auth.sh:744-745, tests/test-auth.sh:472-479).
 func TestLoginRefusesAPastedURLCarryingTheWrongState(t *testing.T) {
 	b := newBench(t, out("Organization 12345\n"), bad())
 	b.browser(&opener{})
@@ -592,7 +592,7 @@ func TestLoginRefusesAPastedURLCarryingTheWrongState(t *testing.T) {
 
 // The paste expression stops the value at & alone, not at a space, which is
 // the one character that separates it from the listener's
-// (lib/auth.sh:646 against :668).
+// (lib/auth.sh:660 against :668).
 func TestLoginReadsAPastedValueUpToTheNextAmpersandOnly(t *testing.T) {
 	b := newBench(t,
 		out("Organization 12345\n"),
@@ -710,10 +710,10 @@ func TestLoginKeepsThePrivateKeyOutOfEveryPrintedLineAndEveryArgument(t *testing
 }
 
 // A temporary directory the page cannot be written into stops the flow with
-// the shell's own two sentences (lib/auth.sh:628-630), rather than an internal
+// the shell's own two sentences (lib/auth.sh:642-644), rather than an internal
 // error nobody can act on. Measured from the shell with NO_COLOR=1 and
 // TMPDIR=/nonexistent-abc/, which also proves the trailing slash is trimmed off
-// the directory the action line names (`${tmpdir%/}`, lib/auth.sh:626).
+// the directory the action line names (`${tmpdir%/}`, lib/auth.sh:640).
 func TestLoginRefusesWhenTheRegistrationPageCannotBeWritten(t *testing.T) {
 	b := newBench(t, out("Organization 12345\n"), bad())
 	b.browser(&opener{})
@@ -748,7 +748,7 @@ func TestLoginOpensTheManifestPageFromDisk(t *testing.T) {
 // auth login writes its key onto a path that may already exist, so it carries
 // the same defect as the rotation: the write kept the mode the file already
 // had, and the "Key ... (0600)" line below it read the mode back and reported
-// the wide one (lib/auth.sh:770-774).
+// the wide one (lib/auth.sh:787-791).
 func TestLoginNarrowsAKeyPathSomebodyHadWidened(t *testing.T) {
 	b := newBench(t,
 		out("Organization 12345\n"),

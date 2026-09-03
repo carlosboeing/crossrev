@@ -16,7 +16,7 @@ import (
 
 // Expectations is what the orchestrator handed the resolve leg, which is the
 // only thing the semantic half has to compare an answer against
-// (lib/validate.sh:27-30, lib/run.sh:2064-2065).
+// (lib/validate.sh:27-30, lib/run.sh:2070-2071).
 //
 // Findings is how many findings were numbered in the prompt, so a resolution may
 // name 1 through Findings and nothing else. Candidates is every issue number

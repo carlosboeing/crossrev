@@ -176,7 +176,7 @@ func (r *rig) wantOut(t *testing.T, want string) {
 
 // --- the two refusals cmd_cycle repeats after the parser ---------------------
 
-// TestDriverRefusesAMissingPullRequestNumber pins lib/run.sh:2910. Measured:
+// TestDriverRefusesAMissingPullRequestNumber pins lib/run.sh:2916. Measured:
 //
 //	$ crossrev cycle
 //	error  crossrev cycle needs a pull request number
@@ -201,7 +201,7 @@ func TestDriverRefusesAMissingPullRequestNumber(t *testing.T) {
 	r.wantOut(t, "")
 }
 
-// TestDriverRefusesAnUnknownTrigger pins lib/run.sh:2911-2916, which cmd_cycle
+// TestDriverRefusesAnUnknownTrigger pins lib/run.sh:2917-2922, which cmd_cycle
 // checks a second time because ctx_load reads the trigger first and treats
 // anything it does not recognise as human. Measured:
 //
@@ -238,7 +238,7 @@ func TestDriverRefusesAnUnknownTrigger(t *testing.T) {
 // --- the draft decision, applied once and upfront ---------------------------
 
 // TestDriverStopsOnADraftBeforeAnythingRuns pins the return-2 arm of ctx_load
-// (lib/run.sh:265-269) as cmd_cycle consumes it (lib/run.sh:2918-2925): two
+// (lib/run.sh:271-275) as cmd_cycle consumes it (lib/run.sh:2924-2931): two
 // lines, exit 0, and no pairing check and no leg, because the shell returns
 // before run_assert_cycle_pairing.
 //
@@ -288,7 +288,7 @@ func TestDriverStopsWhenTheContextLoadRefuses(t *testing.T) {
 // --- the pairing seam -------------------------------------------------------
 
 // TestDriverChecksThePairingBetweenTheLoadAndTheFirstLeg pins where
-// run_assert_cycle_pairing sits (lib/run.sh:2926): after the context load, so
+// run_assert_cycle_pairing sits (lib/run.sh:2932): after the context load, so
 // the config is available, and before the pass loop, so a harness that cannot
 // resolve is refused without a billed review. The override the request carried
 // is what it is asked about.
@@ -355,7 +355,7 @@ func TestDriverRunsWithoutAPairingCheck(t *testing.T) {
 // review, its resolve leg, then a second review that converges. The continuation
 // flag is what separates the two reviews — the shell forwards
 // `--continuation --no-tips` from the second pass onward and `--no-tips` on the
-// first (lib/run.sh:2944 and :2946) — and `--no-tips` goes on every leg whatever the
+// first (lib/run.sh:2950 and :2946) — and `--no-tips` goes on every leg whatever the
 // cycle was asked for, because the cycle prints the tip itself at most once.
 func TestDriverAlternatesTheLegsUntilAReviewConverges(t *testing.T) {
 	r := newRig(t, []loadStep{
@@ -397,7 +397,7 @@ func TestDriverAlternatesTheLegsUntilAReviewConverges(t *testing.T) {
 	}
 }
 
-// TestDriverRunsNoResolveAfterABlockedReview pins lib/run.sh:2956-2958. A
+// TestDriverRunsNoResolveAfterABlockedReview pins lib/run.sh:2962-2964. A
 // reviewer that could not complete leaves nothing to resolve, and the run ends
 // with no tip, because the loop did not reach a state worth nudging about.
 func TestDriverRunsNoResolveAfterABlockedReview(t *testing.T) {
@@ -416,7 +416,7 @@ func TestDriverRunsNoResolveAfterABlockedReview(t *testing.T) {
 }
 
 // TestDriverReadsAnAbsentVerdictAsBlocked pins `jq -r '.verdict // "blocked"'`
-// (lib/run.sh:2953): a review marker carrying no verdict is the halt, never a
+// (lib/run.sh:2959): a review marker carrying no verdict is the halt, never a
 // convergence.
 func TestDriverReadsAnAbsentVerdictAsBlocked(t *testing.T) {
 	r := newRig(t, []loadStep{
@@ -431,7 +431,7 @@ func TestDriverReadsAnAbsentVerdictAsBlocked(t *testing.T) {
 }
 
 // TestDriverRunsNoResolveAfterAConvergedReview pins the converged arm
-// (lib/run.sh:2960-2969): nothing left to resolve, and the tip fires.
+// (lib/run.sh:2966-2975): nothing left to resolve, and the tip fires.
 func TestDriverRunsNoResolveAfterAConvergedReview(t *testing.T) {
 	r := newRig(t, []loadStep{
 		{state: loaded(t)},
@@ -464,13 +464,13 @@ func TestDriverRunsNoResolveWhenAPassRaisesNothingActionable(t *testing.T) {
 }
 
 // TestDriverCallsAnEmptyPassAHaltWhileAnEscalationStands pins the exception
-// (lib/run.sh:2960-2967), which keeps the terminal line and the pass label the
+// (lib/run.sh:2966-2973), which keeps the terminal line and the pass label the
 // review leg wrote in agreement: an empty pass while a human still owes a
 // decision is a halt, not a convergence. The converged verdict is exempt,
 // because that is the settlement being verified.
 //
 // The tip still fires here. It sits after the inner if/else rather than inside
-// the converged arm (lib/run.sh:2968), so this halt nudges and the four other
+// the converged arm (lib/run.sh:2974), so this halt nudges and the four other
 // halts do not.
 func TestDriverCallsAnEmptyPassAHaltWhileAnEscalationStands(t *testing.T) {
 	r := newRig(t, []loadStep{
@@ -500,7 +500,7 @@ func TestDriverConvergesOnAConvergedVerdictDespiteAnEscalation(t *testing.T) {
 
 // --- what ends a pass after the resolve leg ---------------------------------
 
-// TestDriverHaltsOnABlockedResolveMarker pins lib/run.sh:2976-2978.
+// TestDriverHaltsOnABlockedResolveMarker pins lib/run.sh:2982-2984.
 func TestDriverHaltsOnABlockedResolveMarker(t *testing.T) {
 	r := newRig(t, []loadStep{
 		{state: loaded(t)},
@@ -517,7 +517,7 @@ func TestDriverHaltsOnABlockedResolveMarker(t *testing.T) {
 	r.wantOut(t, sayCycling+endLine("Halted after pass 1 — the resolver reported blocked."))
 }
 
-// TestDriverHaltsOnTheStopLabel pins lib/run.sh:2980-2982. The label is the one
+// TestDriverHaltsOnTheStopLabel pins lib/run.sh:2986-2988. The label is the one
 // a human applies, so the loop stops whatever the marker says.
 func TestDriverHaltsOnTheStopLabel(t *testing.T) {
 	third := loaded(t, marker(reviewIssues, 1), marker(resolvePushed, 1))
@@ -554,7 +554,7 @@ func TestDriverDoesNotReadAStopLabelOutOfANeighbour(t *testing.T) {
 }
 
 // TestDriverConvergesWhenAResolvePassSettledWithoutPushing pins
-// lib/run.sh:2993-2999. Every finding answered and no commit means the head
+// lib/run.sh:2999-3005. Every finding answered and no commit means the head
 // never moved, so the next review would decline it; reporting the cap there
 // would read a convergence out as a failure to converge. The tip fires.
 func TestDriverConvergesWhenAResolvePassSettledWithoutPushing(t *testing.T) {
@@ -571,7 +571,7 @@ func TestDriverConvergesWhenAResolvePassSettledWithoutPushing(t *testing.T) {
 }
 
 // TestDriverHaltsWhenAResolvePassLeftSomethingForAPerson pins
-// lib/run.sh:3001-3009, including the backticked command in the middle of the
+// lib/run.sh:3007-3015, including the backticked command in the middle of the
 // sentence. Blocked and escalated are caught by the two checks above; the halts
 // left here — a deferral nobody filed, a fix that reached no commit — apply no
 // crossrev/stop, and without this the driver would re-drive the resolver over
@@ -592,7 +592,7 @@ func TestDriverHaltsWhenAResolvePassLeftSomethingForAPerson(t *testing.T) {
 }
 
 // TestDriverIgnoresTheLabelOfAnUnfinishedResolvePass pins the guard on the
-// label read (lib/run.sh:2984-2991): a resolve marker that is not complete has
+// label read (lib/run.sh:2990-2997): a resolve marker that is not complete has
 // no pass label, so the loop goes round rather than reading a half-written
 // marker as an ending.
 func TestDriverIgnoresTheLabelOfAnUnfinishedResolvePass(t *testing.T) {
@@ -612,7 +612,7 @@ func TestDriverIgnoresTheLabelOfAnUnfinishedResolvePass(t *testing.T) {
 
 // --- the cap ----------------------------------------------------------------
 
-// TestDriverReportsTheCapBetweenIterations pins lib/run.sh:2937-2943: the pass
+// TestDriverReportsTheCapBetweenIterations pins lib/run.sh:2943-2949: the pass
 // number is re-read at the top of every iteration after the first, and a pass
 // already at the cap stops the run before another review starts.
 func TestDriverReportsTheCapBetweenIterations(t *testing.T) {
@@ -634,7 +634,7 @@ func TestDriverReportsTheCapBetweenIterations(t *testing.T) {
 }
 
 // TestDriverReportsTheCapAfterTheLastPass pins the line the loop falls out to
-// (lib/run.sh:3013-3015), which is a different sentence from the one above: the
+// (lib/run.sh:3019-3021), which is a different sentence from the one above: the
 // passes ran and none of them converged. The tip fires.
 func TestDriverReportsTheCapAfterTheLastPass(t *testing.T) {
 	one := func(markers ...string) State {
@@ -660,7 +660,7 @@ func TestDriverReportsTheCapAfterTheLastPass(t *testing.T) {
 				"Every finding and reply is on the pull request."))
 }
 
-// TestDriverHandsAPassAlreadyAtTheCapToTheBoundSeam pins lib/run.sh:2930-2934:
+// TestDriverHandsAPassAlreadyAtTheCapToTheBoundSeam pins lib/run.sh:2936-2940:
 // a cycle whose newest review pass already sits at or past the cap never enters
 // the loop. What happens then is _cycle_finish_at_bound's, which arrives with
 // bound.go; this pins that the driver calls it, with the pass and the cap it
@@ -699,7 +699,7 @@ func TestDriverHandsAPassAlreadyAtTheCapToTheBoundSeam(t *testing.T) {
 }
 
 // TestDriverReturnsOneWhenTheBoundSeamFails pins the `|| return 1` on the same
-// line (lib/run.sh:2932).
+// line (lib/run.sh:2938).
 func TestDriverReturnsOneWhenTheBoundSeamFails(t *testing.T) {
 	r := newRig(t, []loadStep{{state: loaded(t, marker(reviewIssues, 4))}})
 	r.driver.Bound = func(context.Context, *Driver, BoundInput) BoundResult {
@@ -715,12 +715,12 @@ func TestDriverReturnsOneWhenTheBoundSeamFails(t *testing.T) {
 
 // TestDriverForwardsTheTriggerUnchanged pins that every leg is told what the
 // cycle was told. The shell forwards the flag as it was typed, in `args`
-// (lib/run.sh:2900-2905), so an automatic cycle drives automatic legs.
+// (lib/run.sh:2906-2911), so an automatic cycle drives automatic legs.
 //
 // The reloads are the other half. ctx_load takes the trigger as its third
-// argument and defaults it to human (lib/run.sh:232); the shell passes it only
-// on the first call (lib/run.sh:2921) and calls every later one as
-// `ctx_load "$pr" "$repo"` (lib/run.sh:2938, :2950, :2974). So the fork and
+// argument and defaults it to human (lib/run.sh:233); the shell passes it only
+// on the first call (lib/run.sh:2927) and calls every later one as
+// `ctx_load "$pr" "$repo"` (lib/run.sh:2944, :2950, :2974). So the fork and
 // draft refusals apply once, upfront, and never again mid-loop.
 func TestDriverForwardsTheTriggerUnchanged(t *testing.T) {
 	r := newRig(t, []loadStep{
@@ -762,7 +762,7 @@ func TestDriverForwardsTheTriggerUnchanged(t *testing.T) {
 
 // TestDriverForwardsTheRequestsRepositoryNotTheLoadedOne pins that the legs get
 // the `--repo` the operator typed, or nothing when they typed nothing. The
-// shell appends to `args` only what it parsed (lib/run.sh:2900-2905), so a cycle
+// shell appends to `args` only what it parsed (lib/run.sh:2906-2911), so a cycle
 // started with no --repo forwards none and each leg resolves the slug itself.
 func TestDriverForwardsTheRequestsRepositoryNotTheLoadedOne(t *testing.T) {
 	r := newRig(t, []loadStep{
@@ -786,7 +786,7 @@ func TestDriverForwardsTheRequestsRepositoryNotTheLoadedOne(t *testing.T) {
 // --- a leg that fails -------------------------------------------------------
 
 // TestDriverReturnsOneWhenAReviewLegFails pins `leg_review … || return 1`
-// (lib/run.sh:2946): the leg has already said why, so the driver adds no line
+// (lib/run.sh:2952): the leg has already said why, so the driver adds no line
 // and runs nothing after it.
 func TestDriverReturnsOneWhenAReviewLegFails(t *testing.T) {
 	r := newRig(t, []loadStep{{state: loaded(t)}})
@@ -804,7 +804,7 @@ func TestDriverReturnsOneWhenAReviewLegFails(t *testing.T) {
 	r.wantOut(t, sayCycling)
 }
 
-// TestDriverReturnsOneWhenAResolveLegFails pins the same on lib/run.sh:2972.
+// TestDriverReturnsOneWhenAResolveLegFails pins the same on lib/run.sh:2978.
 func TestDriverReturnsOneWhenAResolveLegFails(t *testing.T) {
 	r := newRig(t, []loadStep{
 		{state: loaded(t)},
@@ -824,8 +824,8 @@ func TestDriverReturnsOneWhenAResolveLegFails(t *testing.T) {
 // --- the tip ----------------------------------------------------------------
 
 // TestDriverSuppressesTheTipWhenAskedTo pins `(( no_tips )) || run_upgrade_nudge`
-// (lib/run.sh:2968, :2998 and :3014). --no-tips is the flag the shell keeps out of
-// `args` (lib/run.sh:2904), so it suppresses the cycle's own tip and nothing else.
+// (lib/run.sh:2974, :2998 and :3014). --no-tips is the flag the shell keeps out of
+// `args` (lib/run.sh:2910), so it suppresses the cycle's own tip and nothing else.
 func TestDriverSuppressesTheTipWhenAskedTo(t *testing.T) {
 	r := newRig(t, []loadStep{
 		{state: loaded(t)},

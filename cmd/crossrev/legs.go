@@ -81,7 +81,7 @@ var harnessEnvironment = []string{
 // keep-transcripts decision the leg has already made.
 //
 // The flag outranks the config key, which is the shell's own order at
-// lib/run.sh:956: keeping everything is the debugging posture, and it is asked
+// lib/run.sh:962: keeping everything is the debugging posture, and it is asked
 // for per run. A directory that cannot be created answers a nil *Log, which is
 // a working Log that writes nothing — the port of the empty CROSSREV_RUN_DIR
 // the shell library falls back to.
@@ -98,7 +98,7 @@ func openLog(repo core.Slug, pr int, retention string, keep bool, leg string) *r
 	return log
 }
 
-// reviewLeg builds the review orchestrator (leg_review, lib/run.sh:913).
+// reviewLeg builds the review orchestrator (leg_review, lib/run.sh:919).
 //
 // Runner is the model-facing one, which refuses a Spec whose environment names
 // a forge credential. Env is the allowlist above rather than this process's
@@ -122,15 +122,17 @@ func reviewLeg(d *deps, client forge.Forge, cfg *config.Config) *review.Leg {
 // endpoint's `token_env` is simply there (lib/adapters/claude.sh:83). An
 // allowlist cannot name it in advance — the operator chooses it, and Ollama's
 // docs use ANTHROPIC_AUTH_TOKEN where Kimi's use ANTHROPIC_API_KEY, which is
-// why lib/config.sh:375 refuses to assume one. So the names come out of the
+// why lib/config.sh:411 refuses to assume one. So the names come out of the
 // config the leg is about to run under, and nothing wider is opened.
 //
 // A forge credential named there is dropped rather than carried. Nothing leaked
 // when it was carried — exec.NewOSRunner refuses any Spec whose environment
 // names one of the four — but the refusal it raised reads as a runner fault
-// where the fault is the config's. Whether such a config should be refused when
-// it is read, naming the file and the key, is a design decision left open;
-// dropping the name here is not that refusal and does not stand in for it.
+// where the fault is the config's. That config is now refused where it is read
+// (config.assertEndpoints, lib/config.sh:265), so a leg never reaches this
+// function holding one. The drop stays as the second of two: the refusal is
+// the one an operator sees, and this is what makes the leak impossible if a
+// path ever reaches here without passing the assert.
 func legEnvironment(cfg *config.Config) []string {
 	if cfg == nil {
 		return harnessEnvironment
@@ -155,7 +157,7 @@ func legEnvironment(cfg *config.Config) []string {
 	return names
 }
 
-// resolveLeg builds the resolve orchestrator (leg_resolve, lib/run.sh:1730).
+// resolveLeg builds the resolve orchestrator (leg_resolve, lib/run.sh:1736).
 func resolveLeg(d *deps, client forge.Forge, cfg *config.Config) *resolve.Leg {
 	return &resolve.Leg{
 		Forge:   client,
@@ -192,7 +194,7 @@ func reviewCommand(ctx context.Context, out *ui.IO, doc harness.Document, req cl
 	// holds, and which the leg packages may not import. So the composition root
 	// resolves it and hands it in. Local mode is left empty deliberately: the
 	// leg reads `gh api user` for itself, at the point in the call order
-	// ctx_load reads it (lib/run.sh:309).
+	// ctx_load reads it (lib/run.sh:315).
 	author := ""
 	if cfg.Get(".mode") == "automated" {
 		if author, err = trustedAuthor(ctx, client, "automated"); err != nil {
@@ -269,7 +271,7 @@ func resolveCommand(ctx context.Context, out *ui.IO, doc harness.Document, req c
 	return status, err
 }
 
-// acquireRunLock is run_lock_acquire (lib/run.sh:949 and :1768), taken after
+// acquireRunLock is run_lock_acquire (lib/run.sh:955 and :1768), taken after
 // the context is loaded and before the run log opens.
 //
 // Automated mode takes none: GitHub Actions gives one concurrency group per
@@ -314,7 +316,7 @@ func closeRun(out *ui.IO, log *runlog.Log, status int, err error, worktree strin
 	}
 }
 
-// keepTranscripts is lib/run.sh:957 and :1775, which is the flag OR the config
+// keepTranscripts is lib/run.sh:963 and :1775, which is the flag OR the config
 // key spelled `true`.
 //
 // runlog.KeepTranscripts is the OTHER half of the same decision: it reads
@@ -337,7 +339,7 @@ func isDir(path string) bool {
 // The leg loads it again for itself when Config is nil. It is loaded here as
 // well because two decisions are made before the leg is built and both are
 // configuration: the run log's retention window and whether transcripts are
-// kept (lib/run.sh:956-960).
+// kept (lib/run.sh:962-966).
 func legContext(ctx context.Context, d *deps, client forge.Forge, want core.Slug, pr int) (core.Slug, *config.Config, error) {
 	repo := want
 	if repo.Incomplete() {

@@ -16,7 +16,7 @@ import (
 	"github.com/carlosboeing/crossrev/internal/vcs"
 )
 
-// Trigger is who asked for the leg (lib/run.sh:937-939).
+// Trigger is who asked for the leg (lib/run.sh:943-945).
 type Trigger string
 
 const (
@@ -59,12 +59,12 @@ type Result struct {
 	Messages []ui.Line
 	// Nudge asks the caller to print the upgrade tip. run_upgrade_nudge is a
 	// terminal write and a leg holds no terminal, so the decision travels and
-	// the composition root does the printing (lib/run.sh:1319-1324).
+	// the composition root does the printing (lib/run.sh:1325-1330).
 	Nudge bool
 	Err   error
 }
 
-// Context is the one base/head load a review starts from (lib/run.sh:232-313).
+// Context is the one base/head load a review starts from (lib/run.sh:233-319).
 type Context struct {
 	Repo              core.Slug
 	PR                forge.PullRequest
@@ -98,7 +98,7 @@ type Leg struct {
 	Runner  exec.Runner
 	Env     []string
 	// LookPath reports whether a harness binary is on PATH. Nil searches PATH
-	// the way command -v does (lib/run.sh:524).
+	// the way command -v does (lib/run.sh:530).
 	LookPath func(string) (string, error)
 	// Validate checks the review payload. Nil means validate.Findings.
 	Validate func([]byte) error

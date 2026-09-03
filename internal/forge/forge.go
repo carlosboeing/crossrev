@@ -78,7 +78,7 @@ type Forge interface {
 
 	// AwaitingPullRequests is every open pull request carrying a label that
 	// starts `crossrev/awaiting-`, which is the list the watchdog sweeps
-	// (lib/run.sh:3691-3693). A failed read answers as none, because the
+	// (lib/run.sh:3707-3709). A failed read answers as none, because the
 	// shell's `|| stuck="[]"` cannot tell an empty repository from an
 	// unreachable API either.
 	AwaitingPullRequests(ctx context.Context, repo core.Slug) []AwaitingPullRequest

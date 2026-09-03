@@ -20,7 +20,7 @@ func TestFalseIsNotAbsent(t *testing.T) {
 	loaded := mustLoad(t, core.Revision{}, tree)
 
 	// cfg_get and cfg_get_json both run the value through jq's alternative
-	// operator, so both read `false` as empty (lib/config.sh:303-304). That is
+	// operator, so both read `false` as empty (lib/config.sh:339-340). That is
 	// exactly why the validator reads this one key another way, and why the
 	// merge itself has to keep the value.
 	if got := loaded.Get(".logs.keep_transcripts"); got != "" {
@@ -339,7 +339,7 @@ func TestAFloatWhereAWholeNumberIsRequiredIsRefused(t *testing.T) {
 
 // `version: 1.0` is a mismatch: the comparison is textual, because the key
 // exists so that a future shape can be rejected by an old binary
-// (lib/config.sh:298).
+// (lib/config.sh:334).
 func TestTheVersionComparisonIsTextual(t *testing.T) {
 	tree := files{"": {".github/crossrev.yml": "version: 1.0\n"}}
 	if got := refusalFrom(t, core.Revision{}, tree).Message; !strings.Contains(got, "declares version 1.0") {
@@ -348,7 +348,7 @@ func TestTheVersionComparisonIsTextual(t *testing.T) {
 }
 
 // Get renders one value the way `jq -r "<path> // empty"` does at
-// lib/config.sh:303: a string bare, an absent or null or false value empty, and
+// lib/config.sh:339: a string bare, an absent or null or false value empty, and
 // anything else as its JSON.
 func TestGetRendersTheWayJqDoes(t *testing.T) {
 	tree := files{"": {".github/crossrev.yml": "version: 1\n" +

@@ -108,7 +108,7 @@ func TestRoleKeySecret(t *testing.T) {
 // --- the file `auth login` writes ------------------------------------------
 
 // metaFixture is the JSON shape an existing install already has on disk, as
-// tests/test-auth.sh:97-107 writes it and lib/auth.sh:708-714 created it.
+// tests/test-auth.sh:97-107 writes it and lib/auth.sh:722-728 created it.
 const metaFixture = `{
   "owner": "ShoreLogic",
   "owner_type": "Organization",
@@ -155,7 +155,7 @@ func TestReadMetadata(t *testing.T) {
 }
 
 // Anything registered before roles existed has no role key, and it is the
-// loop's (lib/auth.sh:382, `.role // "loop"`).
+// loop's (lib/auth.sh:396, `.role // "loop"`).
 func TestReadMetadataDefaultsAnAbsentRoleToTheLoop(t *testing.T) {
 	path := writeMeta(t, t.TempDir(), `{"owner":"ShoreLogic","id":987}`)
 

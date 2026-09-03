@@ -15,7 +15,7 @@ import (
 	"github.com/carlosboeing/crossrev/internal/ui"
 )
 
-// PassLabel is _pass_label (lib/run.sh:592-598).
+// PassLabel is _pass_label (lib/run.sh:598-604).
 func PassLabel(pass, cap int) string {
 	if pass > cap {
 		return fmt.Sprintf("pass %d (past the cycle cap of %d)", pass, cap)
@@ -23,7 +23,7 @@ func PassLabel(pass, cap int) string {
 	return fmt.Sprintf("pass %d", pass)
 }
 
-// ClaimBody is the started-claim comment (lib/run.sh:1104-1107).
+// ClaimBody is the started-claim comment (lib/run.sh:1110-1113).
 func ClaimBody(pass, cap int, markerJSON string) string {
 	encoded, err := prstate.EncodeMarker(json.RawMessage(markerJSON))
 	if err != nil {
@@ -263,7 +263,7 @@ func (l *Leg) postDeclined(ctx context.Context, req Request, loaded Context, ad 
 	} else {
 		labelPass = 1
 	}
-	// Bash calls run_pass_labels ... halted here (lib/run.sh:1056), which adds
+	// Bash calls run_pass_labels ... halted here (lib/run.sh:1062), which adds
 	// the pass label and the halted label AND removes the three outcome labels
 	// that are mutually exclusive with it. Adding two labels without removing
 	// the others leaves awaiting-review or converged standing beside halted on

@@ -11,7 +11,7 @@ import (
 )
 
 // Prior is one finding carried in from an earlier pass, as the marker recorded
-// it (lib/run.sh:1141).
+// it (lib/run.sh:1147).
 //
 // The number the prompt shows is the row's position, and it is what
 // `prior[].finding_number` refers to. The id stays in its own column so it can

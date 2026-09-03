@@ -8,7 +8,7 @@ import (
 )
 
 // An endpoint named in the config and defined nowhere stops the leg
-// (cfg_endpoint, lib/config.sh:364-376, reached from
+// (cfg_endpoint, lib/config.sh:400-412, reached from
 // lib/adapters/claude.sh:78-92).
 //
 // The review leg's Invocation carried no endpoint at all, so `endpoint: ghost`
@@ -79,7 +79,7 @@ func TestAResolvedEndpointReachesTheChild(t *testing.T) {
 }
 
 // A pass that ends anywhere but awaiting-resolution asks for the upgrade tip
-// (lib/run.sh:1319-1324). The leg holds no terminal, so it answers the request
+// (lib/run.sh:1325-1330). The leg holds no terminal, so it answers the request
 // and the composition root decides whether to print.
 func TestAConvergedReviewAsksForTheUpgradeTip(t *testing.T) {
 	e := newEnv(t)

@@ -16,7 +16,7 @@ func TestContextLoadsThePullRequestOnce(t *testing.T) {
 		t.Fatalf("Run: %v", got.Err)
 	}
 	if e.forge.prCalls != 1 {
-		t.Fatalf("PullRequest called %d times, want 1 (lib/github.sh:36-45, lib/run.sh:242)", e.forge.prCalls)
+		t.Fatalf("PullRequest called %d times, want 1 (lib/github.sh:36-45, lib/run.sh:243)", e.forge.prCalls)
 	}
 }
 
@@ -84,8 +84,8 @@ func TestContextCarriesTheBaseAndHeadPair(t *testing.T) {
 }
 
 // The shell keys the trusted author on the MODE, not on who asked for the leg:
-// lib/run.sh:309 is state_trusted_author "$CTX_MODE", and CTX_MODE comes from
-// the configuration at lib/run.sh:299. lib/state.sh:26 then branches on
+// lib/run.sh:315 is state_trusted_author "$CTX_MODE", and CTX_MODE comes from
+// the configuration at lib/run.sh:305. lib/state.sh:26 then branches on
 // `automated` alone.
 func TestContextResolvesAppSlugInAutomatedMode(t *testing.T) {
 	e := newEnv(t)
@@ -118,7 +118,7 @@ func TestContextKeysTheTrustedAuthorOnTheModeNotTheTrigger(t *testing.T) {
 	leg := e.leg(t)
 	got := leg.Run(context.Background(), req)
 	if got.Err != nil {
-		t.Fatalf("Run: %v (lib/run.sh:309 keys on the mode)", got.Err)
+		t.Fatalf("Run: %v (lib/run.sh:315 keys on the mode)", got.Err)
 	}
 	if got.Context.Author != author {
 		t.Errorf("Author = %q, want the invoking user %q (lib/state.sh:44)", got.Context.Author, author)
@@ -149,7 +149,7 @@ func TestContextExcludesRepositoryBacklogFromTheDiff(t *testing.T) {
 		t.Error("prompt dropped the code diff")
 	}
 	if strings.Contains(prompt, "UNIQUE_BACKLOG_HUNK") {
-		t.Error("prompt carried the repository backlog (lib/run.sh:1130-1132)")
+		t.Error("prompt carried the repository backlog (lib/run.sh:1136-1138)")
 	}
 }
 

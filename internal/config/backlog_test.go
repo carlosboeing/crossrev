@@ -28,7 +28,7 @@ func resolveBacklog(t *testing.T, tree files, repoYAML string, base core.Revisio
 }
 
 // Nothing declared and nothing installed resolves to none. `auto` falls to none
-// rather than creating a location nobody asked for (lib/config.sh:465).
+// rather than creating a location nobody asked for (lib/config.sh:501).
 func TestAutoFallsToNone(t *testing.T) {
 	if got := resolveBacklog(t, files{"": {}}, "", core.Revision{}); got != "none" {
 		t.Errorf("resolved to %q, want %q", got, "none")
@@ -36,7 +36,7 @@ func TestAutoFallsToNone(t *testing.T) {
 }
 
 // An empty destination is `auto`, not `none`. cfg_resolve_backlog opens with
-// `want="${2:-auto}"` at lib/config.sh:378, and every caller passes
+// `want="${2:-auto}"` at lib/config.sh:414, and every caller passes
 // `cfg_get '.backlog.destination'`, which renders an absent, null or false key
 // as the empty string — so the `""` arm of the Bash `case` is unreachable and
 // the empty string means auto. Collapsing the two drops deferred work instead
@@ -55,7 +55,7 @@ func TestAnEmptyDestinationResolvesTheWayAutoDoes(t *testing.T) {
 	}
 
 	// The resolver called with the empty string directly, which is the shape
-	// lib/run.sh:304, lib/init.sh:115 and bin/crossrev:159 all call it in.
+	// lib/run.sh:310, lib/init.sh:115 and bin/crossrev:159 all call it in.
 	loaded := mustLoad(t, core.Revision{}, files{"": {"BACKLOG.md": ""}})
 	resolved, err := loaded.ResolveBacklog(context.Background(), core.Revision{}, "")
 	if err != nil {
@@ -72,7 +72,7 @@ func TestAnEmptyDestinationResolvesTheWayAutoDoes(t *testing.T) {
 	}
 }
 
-// Backlog discovery is read behind `[[ -e ]]` at lib/config.sh:443, so a
+// Backlog discovery is read behind `[[ -e ]]` at lib/config.sh:479, so a
 // directory at backlog/config.yml counts as the convention being installed.
 // Configuration is read behind `[[ -f ]]` and does not.
 func TestTheSniffCountsAPathThatIsNotAFile(t *testing.T) {
@@ -99,7 +99,7 @@ func TestASniffReadFailureNamesThePath(t *testing.T) {
 	}
 }
 
-// Tier 2, the sniff, in the order lib/config.sh:446-458 probes it.
+// Tier 2, the sniff, in the order lib/config.sh:482-494 probes it.
 func TestTheSniffKeepsItsOrder(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -127,7 +127,7 @@ func TestTheSniffKeepsItsOrder(t *testing.T) {
 	}
 }
 
-// A configured path wins outright (lib/config.sh:392-395).
+// A configured path wins outright (lib/config.sh:428-431).
 func TestAConfiguredPathWins(t *testing.T) {
 	tree := files{"": {"BACKLOG.md": ""}}
 	repo := "version: 1\nbacklog:\n  destination: repository\n  repository:\n    path: docs/deferred\n"
@@ -137,7 +137,7 @@ func TestAConfiguredPathWins(t *testing.T) {
 }
 
 // A repository key is explicit only when it appears in the repository config,
-// not when it arrives through the merged defaults (lib/config.sh:396). With
+// not when it arrives through the merged defaults (lib/config.sh:432). With
 // neither key stated the sniff decides both.
 func TestAnExplicitRepositoryDestinationSniffsBothLayouts(t *testing.T) {
 	tree := files{"": {"BACKLOG.md": ""}}
@@ -149,7 +149,7 @@ func TestAnExplicitRepositoryDestinationSniffsBothLayouts(t *testing.T) {
 
 // A stated layout constrains the candidates rather than reinterpreting a path
 // that belongs to another one, and tier 3 then fires because a repository
-// destination was explicitly asked for (lib/config.sh:459-464).
+// destination was explicitly asked for (lib/config.sh:495-500).
 func TestAStatedLayoutConstrainsTheSniff(t *testing.T) {
 	folder := files{"": {"BACKLOG.md": ""}}
 	repoFolder := "version: 1\nbacklog:\n  destination: repository\n  repository:\n    layout: folder\n"
@@ -177,7 +177,7 @@ func TestTheTwoLiteralDestinations(t *testing.T) {
 }
 
 // The sniff reads the base revision when there is one, like every other policy
-// read (lib/config.sh:440-444).
+// read (lib/config.sh:476-480).
 func TestTheSniffReadsTheBaseRevision(t *testing.T) {
 	base := revision(t, baseSHA)
 	tree := files{
@@ -191,7 +191,7 @@ func TestTheSniffReadsTheBaseRevision(t *testing.T) {
 
 // The two guards stay reachable for a caller passing a literal the resolver
 // does not know, even though a configured value is refused at load
-// (lib/config.sh:372-376).
+// (lib/config.sh:408-412).
 func TestTheResolverStillGuardsALiteralItDoesNotKnow(t *testing.T) {
 	loaded := mustLoad(t, core.Revision{}, files{"": {}})
 	if _, err := loaded.ResolveBacklog(context.Background(), core.Revision{}, "elsewhere"); err == nil {
@@ -218,7 +218,7 @@ func guardRefusal(t *testing.T, root, path string) *config.Refusal {
 	return refusal
 }
 
-// The cases lib/config.sh:480-505 already decides, which the divergence must
+// The cases lib/config.sh:516-541 already decides, which the divergence must
 // leave exactly as they are.
 func TestThePathGuardKeepsItsLexicalDecisions(t *testing.T) {
 	root := realTempDir(t)
@@ -235,7 +235,7 @@ func TestThePathGuardKeepsItsLexicalDecisions(t *testing.T) {
 	// Traversal that lands somewhere real above the checkout resolves, so it
 	// is refused by the arm that can name where it landed. Only a path that
 	// pops past `/` leaves the resolution empty and reaches the other arm
-	// (lib/config.sh:498-504).
+	// (lib/config.sh:534-540).
 	if got := guardRefusal(t, root, "../../etc").Message; got != "the backlog path '../../etc' resolves outside the repository" {
 		t.Errorf("traversal above the checkout: %q", got)
 	}
@@ -259,7 +259,7 @@ func TestThePathGuardKeepsItsLexicalDecisions(t *testing.T) {
 
 // AssertPathInsideRepo is exported and has no caller inside this package, so
 // its precondition on root is stated rather than assumed. The Bash is always
-// fed `git rev-parse --show-toplevel` (lib/config.sh:473).
+// fed `git rev-parse --show-toplevel` (lib/config.sh:509).
 func TestThePathGuardStatesItsPreconditionOnTheRoot(t *testing.T) {
 	root := t.TempDir()
 	if err := config.AssertPathInsideRepo(root+"/", "backlog/tasks"); err != nil {

@@ -17,7 +17,7 @@ import (
 )
 
 // Life is what can be shown about the process behind an unfinished claim
-// (lib/run.sh:3284-3294).
+// (lib/run.sh:3291-3301).
 //
 // The empty value is a real answer and the common one: an unreadable lock, a
 // run in another checkout, a pull request watched from a machine that never
@@ -43,12 +43,12 @@ const (
 //
 // It is an interface because the two answers come from different places and
 // neither belongs to the report: a local run is answered from the lock file in
-// the git dir, an automated one from the Actions API (lib/run.sh:3295-3353).
+// the git dir, an automated one from the Actions API (lib/run.sh:3302-3360).
 // The detail string carries the reason a `gone` is known, or the host an
 // `elsewhere` is on, and is empty for the other two.
 //
 // An implementation must memoise on the marker's `run_id`, which is what
-// lib/run.sh:3288-3290 does with a global rather than stdout: one report asks
+// lib/run.sh:3295-3297 does with a global rather than stdout: one report asks
 // about the same claim twice — once for its row and once for the NEXT line
 // under it — and for an automated leg an unmemoised answer is a second API
 // call per row.
@@ -59,7 +59,7 @@ type Liveness interface {
 // LegRow is one leg line, decided rather than laid out.
 //
 // The glyph reflects the OUTCOME and not whether the leg ran, which is the
-// distinction lib/run.sh:3195-3206 draws: green for a normal outcome, red for a
+// distinction lib/run.sh:3202-3213 draws: green for a normal outcome, red for a
 // bad one, a dim circle for a leg that never ran, and the half circle only
 // where the process behind an open claim answers.
 //
@@ -88,12 +88,12 @@ type NextLine struct {
 //
 // It carries the pull request's own facts as well, because `status` reads them
 // out of the single `gh pr view --json` call it already made
-// (lib/run.sh:3070-3084) and nothing should go back to the forge to render.
+// (lib/run.sh:3076-3091) and nothing should go back to the forge to render.
 type Report struct {
 	Repo core.Slug
 	PR   int
 
-	// State is the header word, and Colour is what lib/run.sh:3055-3060
+	// State is the header word, and Colour is what lib/run.sh:3061-3066
 	// colours it with. Note is the watchdog qualifier, or empty.
 	State  core.LoopState
 	Colour ui.State
@@ -106,7 +106,7 @@ type Report struct {
 	ChangedFiles int
 	Labels       []string
 	// Draft is the pull request's own `isDraft`, read whatever the trigger
-	// is (lib/run.sh:262). It is the one state the labels cannot show: every
+	// is (lib/run.sh:268). It is the one state the labels cannot show: every
 	// automatic invocation refuses a draft, so an awaiting label on one is a
 	// loop that stops with nothing wrong anywhere.
 	Draft bool
@@ -124,7 +124,7 @@ type Report struct {
 }
 
 // Status reads a pull request and decides what `crossrev status` has to say
-// about it (lib/run.sh:3034-3103).
+// about it (lib/run.sh:3040-3110).
 //
 // The state comes off the pull request, and only the liveness of an unfinished
 // leg comes off the process. A leg the usage limit killed after forty seconds
@@ -136,7 +136,7 @@ type Status struct {
 	Forge    forge.Forge
 	Liveness Liveness
 	// Now is the clock the age of an open claim is measured against. The
-	// shell reads `date +%s` at each row (lib/run.sh:3246).
+	// shell reads `date +%s` at each row (lib/run.sh:3253).
 	Now func() time.Time
 	// Show reads the configuration from the pull request's base revision,
 	// which is where policy is read from and never the head (ADR 0003).
@@ -154,7 +154,7 @@ type Status struct {
 // Load reads the pull request and derives the whole report.
 //
 // Argument handling belongs to the CLI: this takes a repository and a number
-// the way ctx_load does (lib/run.sh:3051). The trigger is human, so the fork
+// the way ctx_load does (lib/run.sh:3057). The trigger is human, so the fork
 // and draft refusals ctx_load applies to an automatic invocation are not
 // reachable here; the closed-pull-request refusal is.
 func (s *Status) Load(ctx context.Context, repo core.Slug, pr int) (Report, error) {
@@ -235,7 +235,7 @@ func (s *Status) Load(ctx context.Context, repo core.Slug, pr int) (Report, erro
 	}
 
 	// Every pass, refused ones included, which is what MaxPass counts
-	// (lib/run.sh:3088-3097).
+	// (lib/run.sh:3095-3104).
 	for pass := 1; pass <= report.MaxPass; pass++ {
 		report.Rows = append(report.Rows,
 			statusLegRow(ctx, in, pass, core.LegReview),
@@ -259,7 +259,7 @@ type statusInput struct {
 	liveness  Liveness
 }
 
-// statusColour is the header colour for a state word (lib/run.sh:3055-3060).
+// statusColour is the header colour for a state word (lib/run.sh:3061-3066).
 func statusColour(state core.LoopState) ui.State {
 	switch state {
 	case core.LoopConverged:
@@ -274,7 +274,7 @@ func statusColour(state core.LoopState) ui.State {
 }
 
 // statusState is the header word, read off the loop labels rather than computed
-// beside them (lib/run.sh:3112-3120).
+// beside them (lib/run.sh:3119-3127).
 //
 // One to one with the fixed labels, no exceptions, in the order a human would
 // read them: a stop request outranks everything, then a halt, then convergence,
@@ -299,7 +299,7 @@ func statusState(in statusInput) core.LoopState {
 
 // statusStateFromMarkers answers the header word for a pull request carrying no
 // state label at all, which is not the same question as which one
-// (lib/run.sh:3131-3178).
+// (lib/run.sh:3138-3185).
 //
 // Locally a label that will not apply is a warning rather than a fatal — one
 // process drives both legs, so the chain does not depend on it — which means a
@@ -359,7 +359,7 @@ func statusStateFromMarkers(in statusInput) core.LoopState {
 }
 
 // statusEscalated is how many findings one resolve leg handed to a human
-// (lib/run.sh:3182-3185). An absent marker counts as none, so callers can ask
+// (lib/run.sh:3189-3192). An absent marker counts as none, so callers can ask
 // before they know one exists.
 func statusEscalated(m prstate.Marker) int {
 	n := 0
@@ -372,7 +372,7 @@ func statusEscalated(m prstate.Marker) int {
 }
 
 // statusMarkersEscalated counts escalated findings across every resolve marker
-// on the pull request (lib/run.sh:3191-3193).
+// on the pull request (lib/run.sh:3198-3200).
 //
 // Which pass handed one to a human stops mattering when a newer pass runs: the
 // halt it caused is still standing, and only re-driving that pass — which
@@ -389,7 +389,7 @@ func statusMarkersEscalated(markers []prstate.Marker) int {
 }
 
 // statusActionable counts the findings the resolve leg may change code for
-// (lib/run.sh:350-360), which is policy.ShouldFix applied one finding at a
+// (lib/run.sh:356-366), which is policy.ShouldFix applied one finding at a
 // time.
 func statusActionable(findings json.RawMessage, minFix core.Severity) int {
 	n := 0
@@ -402,7 +402,7 @@ func statusActionable(findings json.RawMessage, minFix core.Severity) int {
 }
 
 // statusLegRow decides one leg line: which glyph, and which words
-// (lib/run.sh:3207-3267).
+// (lib/run.sh:3214-3274).
 func statusLegRow(ctx context.Context, in statusInput, pass int, leg core.Leg) LegRow {
 	row := LegRow{Pass: pass, Leg: leg}
 	m, ok := prstate.MarkerFor(in.markers, pass, leg)
@@ -461,7 +461,7 @@ func statusLegRow(ctx context.Context, in statusInput, pass int, leg core.Leg) L
 }
 
 // statusLegAbsent is what a leg with no marker at all should say
-// (lib/run.sh:3354-3373). "Has not run" reads as a step still outstanding,
+// (lib/run.sh:3361-3380). "Has not run" reads as a step still outstanding,
 // which is wrong for every case here but the first.
 func statusLegAbsent(in statusInput, pass int, leg core.Leg) string {
 	if leg != core.LegResolve {
@@ -495,7 +495,7 @@ func statusLegAbsent(in statusInput, pass int, leg core.Leg) string {
 }
 
 // statusLegComplete describes a finished leg by what it found or did
-// (lib/run.sh:3376-3415).
+// (lib/run.sh:3383-3422).
 func statusLegComplete(row LegRow, m prstate.Marker) LegRow {
 	if row.Leg == core.LegReview {
 		verdict := m.Verdict.Value()
@@ -544,7 +544,7 @@ func statusLegComplete(row LegRow, m prstate.Marker) LegRow {
 	return row
 }
 
-// statusNext is the NEXT section (lib/run.sh:3421-3535).
+// statusNext is the NEXT section (lib/run.sh:3428-3550).
 //
 // It always ends in something the reader can type: a command, or the condition
 // that has to change first and the command that follows it. Never an empty
@@ -559,7 +559,7 @@ func statusNext(ctx context.Context, in statusInput, state core.LoopState, pass 
 	// automatic invocation, and the review workflow's job condition skips
 	// before that even runs, so the label sits there and no event moves it.
 	// The command below is the only thing that will, and nothing else on this
-	// screen says so (lib/run.sh:3434-3437). A converged draft is finished, so
+	// screen says so (lib/run.sh:3449-3452). A converged draft is finished, so
 	// it gets the fact in the PULL REQUEST block and not this instruction.
 	if in.draft && strings.HasPrefix(string(state), "awaiting") {
 		next.line("this is a draft pull request, so no workflow starts a leg on it.")
@@ -683,7 +683,7 @@ func statusNext(ctx context.Context, in statusInput, state core.LoopState, pass 
 }
 
 // statusNextHalted is what NEXT says under each of the halt's shapes
-// (lib/run.sh:3554-3655).
+// (lib/run.sh:3569-3670).
 //
 // A halt has three shapes and they need different levers: a cap wants raising,
 // a blocked leg wants the underlying decision made, and an escalated finding
@@ -807,7 +807,7 @@ func (l *statusLines) cmd(format string, args ...any) {
 }
 
 // running is what NEXT says under a command whose leg is already running
-// (lib/run.sh:3544-3548).
+// (lib/run.sh:3559-3563).
 //
 // The row above says the leg is alive, so a section that reads as an invitation
 // to start it again would contradict the one thing this display exists to get
@@ -821,7 +821,7 @@ func (l *statusLines) running(pass int) {
 }
 
 // statusResolutionCounts is the one-line summary of a resolve marker's
-// resolutions (lib/run.sh:2585-2592), in the order the schema lists them.
+// resolutions (lib/run.sh:2591-2598), in the order the schema lists them.
 func statusResolutionCounts(resolutions json.RawMessage) string {
 	by := map[string]int{}
 	for _, r := range statusResolutionsOf(resolutions) {
@@ -840,7 +840,7 @@ func statusResolutionCounts(resolutions json.RawMessage) string {
 }
 
 // statusSeverityCounts is the review row's finding summary: the severities that
-// appear, highest first, with the count of each (lib/run.sh:3384-3389).
+// appear, highest first, with the count of each (lib/run.sh:3391-3396).
 func statusSeverityCounts(findings json.RawMessage) string {
 	by := map[string]int{}
 	for _, f := range statusFindings(findings) {
@@ -956,7 +956,7 @@ func statusAbbreviate(sha string) string {
 }
 
 // trustedAuthor is state_trusted_author (lib/state.sh:24-47), which cmd_status
-// reaches through ctx_load (lib/run.sh:3051 then lib/run.sh:309).
+// reaches through ctx_load (lib/run.sh:3057 then lib/run.sh:315).
 //
 // It is keyed on the MODE the configuration names, not on who is at the
 // keyboard: `automated` is the App's <slug>[bot] and nothing else, because a

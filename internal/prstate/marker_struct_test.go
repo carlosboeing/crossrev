@@ -21,7 +21,7 @@ func TestMarkerEncodesInTheWritersOrder(t *testing.T) {
 		want string
 	}{
 		{
-			// lib/run.sh:1095-1103, the fresh review claim.
+			// lib/run.sh:1101-1109, the fresh review claim.
 			name: "review-started",
 			in: prstate.Marker{
 				Version:       core.MarkerVersion,
@@ -47,7 +47,7 @@ func TestMarkerEncodesInTheWritersOrder(t *testing.T) {
 			want: `{"v":1,"leg":"review","pass":2,"state":"started","ts":1700000000,"done_ts":null,"run_id":"run-77","head_sha":"9f3c1abdeadbeef","harness":"codex","model":"gpt-5","effort":"high","endpoint":null,"model_reported":null,"tokens":null,"usage":null,"billing":null,"verdict":null,"blocked_reason":null,"findings":[]}`,
 		},
 		{
-			// lib/run.sh:1957-1965, the fresh resolve claim.
+			// lib/run.sh:1963-1971, the fresh resolve claim.
 			name: "resolve-started",
 			in: prstate.Marker{
 				Version:       core.MarkerVersion,
@@ -76,7 +76,7 @@ func TestMarkerEncodesInTheWritersOrder(t *testing.T) {
 			want: `{"v":1,"leg":"resolve","pass":2,"state":"started","ts":1700000000,"done_ts":null,"run_id":"run-77","head_sha":"9f3c1abdeadbeef","harness":"codex","model":"gpt-5","effort":"high","endpoint":null,"model_reported":null,"tokens":null,"usage":null,"billing":null,"blocked":false,"blocked_reason":null,"commit_sha":null,"commit_subject":null,"summary":"","resolutions":[]}`,
 		},
 		{
-			// lib/run.sh:1050-1056, the pass a cap refused to start.
+			// lib/run.sh:1056-1062, the pass a cap refused to start.
 			name: "declined",
 			in: prstate.Marker{
 				Version:       core.MarkerVersion,
@@ -295,7 +295,7 @@ func TestMarkerEncodesAnEmptyPayloadAsAbsent(t *testing.T) {
 
 // X3. `omitzero` on a plain string collapses present-and-empty into absent, so
 // a marker carrying an empty head_sha, run_id or reason re-encodes without the
-// key. lib/run.sh:1050 and :1095 write all three unconditionally.
+// key. lib/run.sh:1056 and :1095 write all three unconditionally.
 func TestMarkerKeepsAnEmptyStringField(t *testing.T) {
 	for _, payload := range []string{
 		`{"v":1,"leg":"review","pass":1,"run_id":"","head_sha":""}`,

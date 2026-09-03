@@ -264,7 +264,7 @@ func TestTwoCandidateIssuesAreOnSeparateLines(t *testing.T) {
 }
 
 // jq's `to_entries` walks an object in the order its keys were written, and
-// lib/run.sh:2482 builds it one finding at a time. A Go map would reorder the
+// lib/run.sh:2488 builds it one finding at a time. A Go map would reorder the
 // blocks on every run, so the decoder keeps the order and the encoder writes it
 // back.
 func TestCandidatesRoundTripInTheOrderTheyWereWritten(t *testing.T) {

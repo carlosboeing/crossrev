@@ -60,7 +60,7 @@ func (l *Leg) settings(req Request, loaded Context) (legSettings, ui.Line, error
 			s.harness = name
 			s.model = ""
 			s.endpoint = ""
-			// ui_warn, condition and consequence apart (lib/run.sh:542-543).
+			// ui_warn, condition and consequence apart (lib/run.sh:548-549).
 			warn := ui.Warn(
 				fmt.Sprintf("'%s' is not installed, so the reviewer runs on '%s' instead", asked, name),
 				fmt.Sprintf("Both legs now run on the same harness, so a bug it misses while reviewing it also misses while resolving. Install %s to get the second lineage back.", asked))
@@ -71,8 +71,8 @@ func (l *Leg) settings(req Request, loaded Context) (legSettings, ui.Line, error
 }
 
 // notInstalledRefusal is the last refusal in run_leg_settings
-// (lib/run.sh:538-540), reached once the configured harness has no binary and
-// the substitution loop at lib/run.sh:531-537 finds no other harness that
+// (lib/run.sh:544-546), reached once the configured harness has no binary and
+// the substitution loop at lib/run.sh:537-543 finds no other harness that
 // serves the leg.
 //
 // The hint names every harness that CAN take the leg, read off the descriptor
@@ -95,7 +95,7 @@ func notInstalledRefusal(doc harness.Document, asked string) *ui.FatalError {
 }
 
 // noAdapterRefusal is the refusal run_leg_settings prints when no adapter
-// function exists for the configured name (lib/run.sh:500-508).
+// function exists for the configured name (lib/run.sh:506-514).
 //
 // The hint names the harnesses CrossRev drives, read off the descriptor rather
 // than written into the sentence. A name the descriptor lists under not_driven
@@ -123,7 +123,7 @@ func noAdapterRefusal(doc harness.Document, name string) *ui.FatalError {
 }
 
 // servesLegRefusal is _run_assert_harness_serves_leg for the review leg
-// (lib/run.sh:553-558), reached from run_leg_settings at lib/run.sh:520.
+// (lib/run.sh:559-564), reached from run_leg_settings at lib/run.sh:526.
 //
 // The message is the product: it names the harness, the leg, the harnesses that
 // can take the leg, and the legs the refused harness actually serves. Measured
@@ -154,7 +154,7 @@ func servesLegRefusal(doc harness.Document, name string) *ui.FatalError {
 
 // capitaliseName is the Bash
 // `$(printf '%s' "${LEG_HARNESS:0:1}" | tr '[:lower:]' '[:upper:]')${LEG_HARNESS:1}`
-// at lib/run.sh:503: the first character upper-cased, the rest untouched.
+// at lib/run.sh:509: the first character upper-cased, the rest untouched.
 func capitaliseName(name string) string {
 	runes := []rune(name)
 	if len(runes) == 0 {
@@ -240,7 +240,7 @@ func (l *Leg) invoke(ctx context.Context, req Request, loaded Context, settings 
 	defer func() {
 		// The causal error stays in the message. Overwriting retErr outright
 		// lost why the harness never answered, which is the half a reader acts
-		// on; Bash keeps both (lib/run.sh:684, called from :881 and :893).
+		// on; Bash keeps both (lib/run.sh:690, called from :881 and :893).
 		if _, _, err := sandbox.Restore(workdir, moved); err != nil {
 			cause := "the attempt finished and its answer was not read"
 			if retErr != nil {
@@ -255,7 +255,7 @@ func (l *Leg) invoke(ctx context.Context, req Request, loaded Context, settings 
 	// itself (lib/adapters/claude.sh:78-92), and an unresolved name stops the
 	// leg: falling back to the vendor would run Claude while the config says
 	// Ollama, which is the silent substitution the divergence guard exists to
-	// catch arriving through a different door (lib/config.sh:358-363).
+	// catch arriving through a different door (lib/config.sh:394-399).
 	endpoint, err := l.endpoint(loaded, settings)
 	if err != nil {
 		return harness.Envelope{}, nil, msgs, err
@@ -296,7 +296,7 @@ func (l *Leg) invoke(ctx context.Context, req Request, loaded Context, settings 
 		res := l.runner().Run(ctx, spec)
 		if l.Log != nil {
 			// duration in whole seconds, which is what `$SECONDS` counts
-			// (lib/run.sh:825, :831).
+			// (lib/run.sh:831, :831).
 			l.Log.Event("invoke", fmt.Sprintf("harness=%s attempt=%d exit=%d duration=%ds",
 				settings.harness, attempt, res.ExitCode, int(l.now().Sub(started).Seconds())))
 		}
@@ -334,7 +334,7 @@ func (l *Leg) invoke(ctx context.Context, req Request, loaded Context, settings 
 		if code == 2 {
 			if semanticBudget > 0 {
 				semanticBudget--
-				// ui_warn, the pair kept apart (lib/run.sh:882-883).
+				// ui_warn, the pair kept apart (lib/run.sh:888-889).
 				msgs = append(msgs, ui.Warn(
 					fmt.Sprintf("%s returned an answer that contradicts what it was given — %s", settings.harness, problem),
 					"The shape is right, so this is the model drifting rather than a bug in CrossRev or the harness. Anything it edited has been put back, and it is being asked once more; a second one is fatal."))
@@ -347,7 +347,7 @@ func (l *Leg) invoke(ctx context.Context, req Request, loaded Context, settings 
 		}
 		shapeBudget--
 		if shapeBudget > 0 {
-			// ui_warn (lib/run.sh:894-895). Only a harness that does not
+			// ui_warn (lib/run.sh:900-901). Only a harness that does not
 			// constrain its own output ever reaches here, because a native one
 			// starts with a budget of 1.
 			msgs = append(msgs, ui.Warn(
@@ -356,7 +356,7 @@ func (l *Leg) invoke(ctx context.Context, req Request, loaded Context, settings 
 			continue
 		}
 		// Two endings, and the difference is whose bug it is
-		// (lib/run.sh:899-905). Printing the native-schema one for a harness
+		// (lib/run.sh:905-911). Printing the native-schema one for a harness
 		// that has no native schema sends the reader to the adapter over a
 		// model that simply did not follow the instruction.
 		return envelope, nil, msgs, &ui.FatalError{
@@ -366,7 +366,7 @@ func (l *Leg) invoke(ctx context.Context, req Request, loaded Context, settings 
 	}
 }
 
-// shapeExhaustedAction is lib/run.sh:901 and :904.
+// shapeExhaustedAction is lib/run.sh:907 and :904.
 func shapeExhaustedAction(schemaNative bool) string {
 	if schemaNative {
 		return "This harness validates output against the schema natively, so a mismatch is an adapter or harness bug rather than model drift. Nothing has been written to the pull request, and the rejected attempt's edits have been put back."
@@ -439,7 +439,7 @@ func promptThreads(threads []forge.ReviewThread) []prompt.Thread {
 }
 
 // describe is the harness half of the run header's Reviewer line
-// (lib/run.sh:1067). `${model:+, $model}` and `${effort:+, $effort effort}`
+// (lib/run.sh:1073). `${model:+, $model}` and `${effort:+, $effort effort}`
 // expand to nothing when unset, so an empty half is omitted rather than
 // printed as a trailing comma.
 func (s legSettings) describe() string {
@@ -476,10 +476,10 @@ func (l *Leg) mergeExport(ctx context.Context, adapter harness.Adapter, inv harn
 }
 
 // endpoint resolves the configured endpoint name against the config, the way
-// cfg_endpoint does for the Bash adapter (lib/config.sh:364-376).
+// cfg_endpoint does for the Bash adapter (lib/config.sh:400-412).
 //
 // An unset name is not an endpoint at all: cfg_endpoint returns 1 without a
-// message for it (lib/config.sh:366), which is the vendor's own API.
+// message for it (lib/config.sh:402), which is the vendor's own API.
 func (l *Leg) endpoint(loaded Context, settings legSettings) (harness.Endpoint, error) {
 	name := settings.endpoint
 	if name == "" || name == "null" || loaded.Config == nil {

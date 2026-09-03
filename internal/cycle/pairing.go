@@ -1,11 +1,11 @@
-// pairing.go — run_assert_cycle_pairing (lib/run.sh:575-587) and the refusal it
+// pairing.go — run_assert_cycle_pairing (lib/run.sh:581-593) and the refusal it
 // shares with the per-leg gate, _run_assert_harness_serves_leg
-// (lib/run.sh:553-558).
+// (lib/run.sh:559-564).
 //
 // # One harness on both legs is served, and not warned about
 //
 // Cycle forwards --harness into both legs, so an override puts one harness on
-// both sides of the loop. The comment at lib/run.sh:560-569 records why that is
+// both sides of the loop. The comment at lib/run.sh:566-575 records why that is
 // served rather than refused: run_leg_settings already puts both legs on one
 // harness when only one is installed, and the models-diverged check returns
 // early when one model was asked for, so the same pairing named through
@@ -16,7 +16,7 @@
 //
 // What the override IS checked for is what the configured names are checked
 // for: whether the harness serves the leg. The check runs after the config
-// loads and before the pass loop (lib/run.sh:2926), so a harness that cannot
+// loads and before the pass loop (lib/run.sh:2932), so a harness that cannot
 // resolve is refused without a billed review.
 package cycle
 
@@ -31,7 +31,7 @@ import (
 )
 
 // Pairing builds the driver's pairing check over one descriptor and one merged
-// configuration (lib/run.sh:575-587).
+// configuration (lib/run.sh:581-593).
 //
 // The returned check reads the configuration only when the override is empty,
 // which is the shell's `if [[ -n "$override" ]]` and not an optimisation.
@@ -39,12 +39,12 @@ func Pairing(doc harness.Document, cfg *config.Config) func(override string) err
 	return func(override string) error {
 		reviewer, resolver := override, override
 		if override == "" {
-			// lib/run.sh:582-583
+			// lib/run.sh:588-589
 			reviewer = cfg.Get(".reviewer.harness")
 			resolver = cfg.Get(".resolver.harness")
 		}
 		// The reviewer is checked first, so a pairing that fails both legs
-		// reports the review one (lib/run.sh:586-587).
+		// reports the review one (lib/run.sh:592-593).
 		if err := assertServesLeg(doc, reviewer, harness.LegReview); err != nil {
 			return err
 		}
@@ -52,7 +52,7 @@ func Pairing(doc harness.Document, cfg *config.Config) func(override string) err
 	}
 }
 
-// assertServesLeg is _run_assert_harness_serves_leg (lib/run.sh:553-558). The
+// assertServesLeg is _run_assert_harness_serves_leg (lib/run.sh:559-564). The
 // message is the product: it names the harness, the leg, the harnesses that can
 // take the leg, and the legs the refused harness actually serves.
 //
@@ -72,7 +72,7 @@ func Pairing(doc harness.Document, cfg *config.Config) func(override string) err
 // check reads the entry itself and is right either way.
 //
 // The laxness is load-bearing rather than accidental. An unknown name is
-// refused a few lines later by run_leg_settings' adapter test (lib/run.sh:500)
+// refused a few lines later by run_leg_settings' adapter test (lib/run.sh:506)
 // with a message that names the fault; refusing it here would print a sentence
 // with an empty product name and an empty leg list in it.
 //

@@ -120,7 +120,7 @@ func TestContext(t *testing.T) {
 			t.Fatalf("empty trigger: %v", got.Err)
 		}
 		if got.Outcome != OutcomeComplete {
-			t.Fatalf("Outcome = %q, want complete (lib/run.sh:1731 trigger=human)", got.Outcome)
+			t.Fatalf("Outcome = %q, want complete (lib/run.sh:1737 trigger=human)", got.Outcome)
 		}
 	})
 
@@ -291,8 +291,8 @@ func wantRefusal(t *testing.T, err error, message, hint string) {
 }
 
 // TestSettingsRefusesAHarnessThatCannotResolve pins
-// _run_assert_harness_serves_leg (lib/run.sh:553-558), reached from
-// run_leg_settings at lib/run.sh:520. The hint is built from the descriptor
+// _run_assert_harness_serves_leg (lib/run.sh:559-564), reached from
+// run_leg_settings at lib/run.sh:526. The hint is built from the descriptor
 // rather than written into the sentence: it names the harnesses that can take
 // the leg and reads the refused harness's product name and declared legs back
 // off its entry. Measured with grok rewritten to legs ["review"]:
@@ -342,7 +342,7 @@ func TestSettingsRefusesWhenMostOfTheDescriptorCannotResolve(t *testing.T) {
 }
 
 // TestSettingsSendsANotDrivenHarnessToEndpoints pins the branch at
-// lib/run.sh:502-504: a name the descriptor lists under not_driven is refused
+// lib/run.sh:508-510: a name the descriptor lists under not_driven is refused
 // with the reason it carries and the key that would work instead. The leg word
 // in "resolver.endpoint" is the config key, not the descriptor's review/resolve
 // vocabulary. Measured:
@@ -370,7 +370,7 @@ func TestSettingsSendsANotDrivenHarnessToEndpoints(t *testing.T) {
 }
 
 // TestSettingsNamesTheDrivenHarnessesForAnUnknownName pins the else arm at
-// lib/run.sh:505-506: a name the descriptor does not carry at all gets the same
+// lib/run.sh:511-512: a name the descriptor does not carry at all gets the same
 // sentence without the endpoints half, and the names come from the descriptor.
 // Measured:
 //
@@ -379,7 +379,7 @@ func TestSettingsSendsANotDrivenHarnessToEndpoints(t *testing.T) {
 //	       CrossRev drives claude, codex, agy, grok and opencode directly.
 //
 // This is also the case ServesLeg is deliberately lax about: the adapter test
-// at lib/run.sh:500 refuses the name before the serves-leg gate at :520 ever
+// at lib/run.sh:506 refuses the name before the serves-leg gate at :520 ever
 // reads it, so the refusal names the fault rather than printing a sentence
 // built from an empty product name.
 func TestSettingsNamesTheDrivenHarnessesForAnUnknownName(t *testing.T) {
@@ -394,7 +394,7 @@ func TestSettingsNamesTheDrivenHarnessesForAnUnknownName(t *testing.T) {
 }
 
 // TestSettingsRefusesWhenNothingThatCanResolveIsInstalled pins the last refusal
-// in run_leg_settings (lib/run.sh:538-540), reached once the configured harness
+// in run_leg_settings (lib/run.sh:544-546), reached once the configured harness
 // has no binary and the substitution loop at :531-537 finds no other harness
 // that serves the leg. The hint names the harnesses that could take the leg,
 // read off the descriptor. Measured on the shipped descriptor with a PATH that
@@ -436,7 +436,7 @@ func TestSettingsRefusesWhenNothingThatCanResolveIsInstalled(t *testing.T) {
 //
 // Two names here against five above is what pins _names_human's "a and b"
 // (lib/harnesses.sh:171-178), and claude is asked for because a harness that
-// cannot serve the leg is refused at lib/run.sh:520 before this line.
+// cannot serve the leg is refused at lib/run.sh:526 before this line.
 func TestSettingsNamesOnlyTheHarnessesThatCanResolve(t *testing.T) {
 	e := setup(t)
 	e.doc = legsRewritten(t, map[string][]string{
@@ -454,7 +454,7 @@ func TestSettingsNamesOnlyTheHarnessesThatCanResolve(t *testing.T) {
 
 // TestCapitaliseName pins the Bash
 // `$(printf '%s' "${h:0:1}" | tr '[:lower:]' '[:upper:]')${h:1}` at
-// lib/run.sh:503, including the two edges the not-driven refusal never reaches
+// lib/run.sh:509, including the two edges the not-driven refusal never reaches
 // on the shipped descriptor: an empty name, where `${h:0:1}` is empty and the
 // expansion is the empty string, and a one-character name, where `${h:1}` is
 // empty rather than out of range. The review leg carries the same function and

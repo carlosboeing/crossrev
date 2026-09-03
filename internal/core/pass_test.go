@@ -3,7 +3,7 @@ package core
 import "testing"
 
 // The marker vocabulary comes from the writers in lib/run.sh: `leg:"review"`
-// at lib/run.sh:1098 and `leg:"resolve"` at lib/run.sh:1960.
+// at lib/run.sh:1104 and `leg:"resolve"` at lib/run.sh:1966.
 func TestLegVocabularyIsReviewAndResolve(t *testing.T) {
 	if LegReview != "review" || LegResolve != "resolve" {
 		t.Fatalf("legs are %q and %q, want review and resolve", LegReview, LegResolve)
@@ -28,7 +28,7 @@ func TestParseLegAcceptsOnlyTheTwoWrittenValues(t *testing.T) {
 }
 
 // The configuration keys are `reviewer` and `resolver`; the marker vocabulary
-// is `review` and `resolve`. lib/run.sh:518 converts between them.
+// is `review` and `resolve`. lib/run.sh:524 converts between them.
 func TestLegRoleMapsOntoTheMarkerLeg(t *testing.T) {
 	if got, err := RoleReviewer.Leg(); err != nil || got != LegReview {
 		t.Fatalf("RoleReviewer.Leg() = %q, %v; want review", got, err)
@@ -124,7 +124,7 @@ func TestPassNumberValidRefusesWhatNewPassNumberRefuses(t *testing.T) {
 	}
 }
 
-// Every marker the shipped tool writes opens with `v:1` (lib/run.sh:1098).
+// Every marker the shipped tool writes opens with `v:1` (lib/run.sh:1104).
 func TestMarkerVersionIsOne(t *testing.T) {
 	if MarkerVersion != 1 {
 		t.Fatalf("MarkerVersion = %d, want 1", MarkerVersion)

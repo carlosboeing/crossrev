@@ -13,7 +13,7 @@ import (
 )
 
 // RotateRequest is `crossrev auth rotate`'s parsed options
-// (lib/auth.sh:826-835).
+// (lib/auth.sh:843-852).
 type RotateRequest struct {
 	// Owner is --owner. Empty means detect it.
 	Owner string
@@ -24,7 +24,7 @@ type RotateRequest struct {
 	KeyFile string
 }
 
-// The two numbers the download watch is built from (lib/auth.sh:881-884).
+// The two numbers the download watch is built from (lib/auth.sh:898-901).
 const (
 	rotateWaitSeconds  = 300
 	rotatePollInterval = 2 * time.Second
@@ -34,7 +34,7 @@ const (
 )
 
 // Rotate replaces an App's private key with a freshly generated one
-// (auth_rotate, lib/auth.sh:825).
+// (auth_rotate, lib/auth.sh:842).
 //
 // GitHub exposes no API for generating an App private key. It is a web-UI
 // action and there is no way around that, so this is a guided flow rather than
@@ -179,7 +179,7 @@ func (c *Commands) Rotate(ctx context.Context, req RotateRequest) error {
 		// Both writes go through the same helper. A write followed by a chmod
 		// left the backup at the source's mode for the width of two calls, and
 		// a write onto an existing dest kept whatever mode that file already
-		// had (lib/auth.sh:978-987).
+		// had (lib/auth.sh:1002-1011).
 		if err := write0600(backup, previous); err != nil {
 			return c.IO.Die(
 				"could not write the backup key to "+backup,
@@ -222,7 +222,7 @@ func (c *Commands) Rotate(ctx context.Context, req RotateRequest) error {
 }
 
 // freshDownload is `find "$downloads" -maxdepth 1 -name "$slug*.private-key.pem"
-// -newermt '-5 minutes' | head -1` (lib/auth.sh:882).
+// -newermt '-5 minutes' | head -1` (lib/auth.sh:899).
 //
 // The freshness window is re-read on every poll, because the shell re-runs find
 // on every poll and `-5 minutes` is relative to the moment it runs.
@@ -251,7 +251,7 @@ func (c *Commands) freshDownload(dir, slug string) string {
 }
 
 // VerifyApp asks GitHub to answer as this App, which is the proof a rotation
-// turns on (lib/auth.sh:904).
+// turns on (lib/auth.sh:921).
 //
 // The answer is discarded: `>/dev/null` at the shell. What is being tested is
 // that GitHub accepted a token signed with the key, and nothing about the

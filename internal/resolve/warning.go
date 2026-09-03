@@ -9,9 +9,9 @@ import (
 	"github.com/carlosboeing/crossrev/internal/ui"
 )
 
-// restoreFailure is _run_retry_reset's death (lib/run.sh:684-685). Bash puts
+// restoreFailure is _run_retry_reset's death (lib/run.sh:690-691). Bash puts
 // the causal problem in that message — the reason the answer was rejected, from
-// the call sites at lib/run.sh:881 and :893 — not the restore error. The
+// the call sites at lib/run.sh:887 and :893 — not the restore error. The
 // restore error is named after it rather than in its place, because losing why
 // the harness needs asking again is the diagnostic a reader most needs here.
 func restoreFailure(harness, problem, restoreErr string) Result {

@@ -74,7 +74,7 @@ func (r *Repository) RunWithEnv(ctx context.Context, extraEnv []string, args ...
 // order the child wrote them. Output.Stdout holds the whole of it.
 //
 // It is `$(git … 2>&1)`, which is how lib/github.sh:481 captures a commit,
-// lib/github.sh:510 a push and lib/run.sh:1891 a worktree creation. Use it only
+// lib/github.sh:510 a push and lib/run.sh:1897 a worktree creation. Use it only
 // where the output is a message for a person: a call whose stdout is read as
 // data must never have git's diagnostics mixed into it.
 func (r *Repository) RunCombined(ctx context.Context, args ...string) (Output, error) {
@@ -90,13 +90,13 @@ func (r *Repository) RunCombined(ctx context.Context, args ...string) (Output, e
 var ErrNotARepository = errors.New("not inside a git repository")
 
 // GitDir is `git rev-parse --git-dir`, which is this working tree's own
-// directory and not the clone's shared one. It is what lib/run.sh:635 reads,
+// directory and not the clone's shared one. It is what lib/run.sh:641 reads,
 // because the index it copies is this tree's.
 func (r *Repository) GitDir(ctx context.Context) (string, error) {
 	return r.revParse(ctx, "--git-dir")
 }
 
-// TopLevel is `git rev-parse --show-toplevel` (lib/run.sh:666).
+// TopLevel is `git rev-parse --show-toplevel` (lib/run.sh:672).
 func (r *Repository) TopLevel(ctx context.Context) (string, error) {
 	return r.revParse(ctx, "--show-toplevel")
 }
@@ -158,7 +158,7 @@ func (r *Repository) CommonDir(ctx context.Context) (string, error) {
 // Head is the revision HEAD names.
 //
 // The shell reads this as `git rev-parse HEAD 2>/dev/null || true` at
-// lib/run.sh:1902 and lib/run.sh:1879, so an unborn HEAD yields an empty string
+// lib/run.sh:1908 and lib/run.sh:1885, so an unborn HEAD yields an empty string
 // there and the zero Revision here.
 func (r *Repository) Head(ctx context.Context) (core.Revision, error) {
 	output, err := r.Run(ctx, "rev-parse", "HEAD")
@@ -176,7 +176,7 @@ func (r *Repository) Head(ctx context.Context) (core.Revision, error) {
 }
 
 // HasCommit reports whether the object database holds this revision as a
-// commit. It is `git cat-file -e "<sha>^{commit}"` (lib/run.sh:1867), whose
+// commit. It is `git cat-file -e "<sha>^{commit}"` (lib/run.sh:1873), whose
 // exit status is the whole answer.
 func (r *Repository) HasCommit(ctx context.Context, revision core.Revision) (bool, error) {
 	if revision.IsZero() {
@@ -192,7 +192,7 @@ func (r *Repository) HasCommit(ctx context.Context, revision core.Revision) (boo
 // ConfigGet is `git config --get <key>`, empty when the key is unset.
 //
 // Every caller in lib/ reads it as `$(git config … 2>/dev/null || true)`
-// (lib/run.sh:1845-1851), so a missing key and an empty value are one answer.
+// (lib/run.sh:1851-1857), so a missing key and an empty value are one answer.
 func (r *Repository) ConfigGet(ctx context.Context, key string) (string, error) {
 	output, err := r.Run(ctx, "config", "--get", key)
 	if err != nil {

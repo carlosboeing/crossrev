@@ -199,7 +199,7 @@ backlog:
 }
 
 // TestStatusState pins the header word for every fixture: the label-first rule
-// at lib/run.sh:3112-3130 and the marker fallback at lib/run.sh:3131-3181.
+// at lib/run.sh:3119-3137 and the marker fallback at lib/run.sh:3138-3188.
 func TestStatusState(t *testing.T) {
 	for _, c := range statusCases(t) {
 		t.Run(c.Name, func(t *testing.T) {
@@ -228,7 +228,7 @@ func TestStatusStateIsOneOfFive(t *testing.T) {
 
 // TestStatusPassCounts pins the two numbers the LOOP section reads: the current
 // review pass and the highest pass any marker mentions, refused passes included
-// (lib/run.sh:3065-3066).
+// (lib/run.sh:3071-3072).
 func TestStatusPassCounts(t *testing.T) {
 	for _, c := range statusCases(t) {
 		t.Run(c.Name, func(t *testing.T) {
@@ -244,8 +244,8 @@ func TestStatusPassCounts(t *testing.T) {
 }
 
 // TestStatusRows pins the glyph and the words on every leg row: the decision at
-// lib/run.sh:3207-3267, with the absent and completed shapes at
-// lib/run.sh:3354-3420.
+// lib/run.sh:3214-3274, with the absent and completed shapes at
+// lib/run.sh:3361-3427.
 func TestStatusRows(t *testing.T) {
 	for _, c := range statusCases(t) {
 		t.Run(c.Name, func(t *testing.T) {
@@ -294,7 +294,7 @@ func TestStatusRowsMatchTheirRenderedText(t *testing.T) {
 }
 
 // TestStatusNext pins the NEXT section: which lines are prose and which are a
-// command, and the exact text of each (lib/run.sh:3421-3665).
+// command, and the exact text of each (lib/run.sh:3428-3680).
 func TestStatusNext(t *testing.T) {
 	for _, c := range statusCases(t) {
 		t.Run(c.Name, func(t *testing.T) {
@@ -317,7 +317,7 @@ func TestStatusNext(t *testing.T) {
 
 // TestStatusNextAlwaysOffersSomethingTypable pins the property the section
 // exists for: never an empty section, never a bare dash, and never "nothing
-// automatic" as the last word (lib/run.sh:3417-3420). Every case either carries
+// automatic" as the last word (lib/run.sh:3424-3427). Every case either carries
 // a command or opens by saying there is nothing to run.
 func TestStatusNextAlwaysOffersSomethingTypable(t *testing.T) {
 	for _, c := range statusCases(t) {
@@ -340,7 +340,7 @@ func TestStatusNextAlwaysOffersSomethingTypable(t *testing.T) {
 }
 
 // TestStatusHeaderNote reads the watchdog qualifier straight off its label
-// (lib/run.sh:3062-3063).
+// (lib/run.sh:3068-3069).
 func TestStatusHeaderNote(t *testing.T) {
 	for _, c := range statusCases(t) {
 		t.Run(c.Name, func(t *testing.T) {
@@ -357,7 +357,7 @@ func TestStatusHeaderNote(t *testing.T) {
 	}
 }
 
-// TestStatusHeaderColour pins the four-way colour choice at lib/run.sh:3055-3060.
+// TestStatusHeaderColour pins the four-way colour choice at lib/run.sh:3061-3066.
 func TestStatusHeaderColour(t *testing.T) {
 	want := map[string]ui.State{
 		"converged":           ui.StateOK,
@@ -378,7 +378,7 @@ func TestStatusHeaderColour(t *testing.T) {
 
 // TestStatusPullRequestFacts pins the fields the PULL REQUEST and LOOP sections
 // print, which Load carries so step 2 does not read the forge again
-// (lib/run.sh:3070-3084).
+// (lib/run.sh:3076-3091).
 func TestStatusPullRequestFacts(t *testing.T) {
 	c := statusCases(t)[0]
 	got := statusLoad(t, c)
@@ -415,7 +415,7 @@ func TestStatusPullRequestFacts(t *testing.T) {
 }
 
 // TestStatusRefusesAClosedPullRequest pins the one refusal cmd_status inherits
-// from ctx_load: crossrev only runs on open pull requests (lib/run.sh:255-257).
+// from ctx_load: crossrev only runs on open pull requests (lib/run.sh:256-258).
 func TestStatusRefusesAClosedPullRequest(t *testing.T) {
 	c := statusCases(t)[0]
 	head, err := core.NewRevision(c.HeadSHA)
@@ -623,7 +623,7 @@ var _ cycle.Liveness = statusLife{}
 // TestStatusKeysTheTrustedAuthorOnTheMode pins that cmd_status reads the
 // author the same way every other leg does.
 //
-// lib/run.sh:3051 calls ctx_load, and ctx_load's lib/run.sh:309 is
+// lib/run.sh:3057 calls ctx_load, and ctx_load's lib/run.sh:315 is
 // state_trusted_author "$CTX_MODE". lib/state.sh:26 branches on `automated`,
 // where the author is the App's <slug>[bot] and nothing else; every other mode
 // is the invoking user. Keyed on ViewerLogin alone, `crossrev status` in an
@@ -672,7 +672,7 @@ func TestStatusKeysTheTrustedAuthorOnTheMode(t *testing.T) {
 // statusLoadDraft loads a report for a pull request whose `isDraft` and labels
 // are the subject, with no markers behind them.
 //
-// ctx_load records the draft flag whatever the trigger is (lib/run.sh:259), so
+// ctx_load records the draft flag whatever the trigger is (lib/run.sh:265), so
 // status sees it on a plain local read. The fixtures above carry no draft field
 // because every one of them was measured from a ready pull request; this builds
 // the forge directly rather than adding a column to all of them.
@@ -730,7 +730,7 @@ func statusNextText(report cycle.Report) string {
 	return b.String()
 }
 
-// TestStatusReportsADraft pins the fact status gained at lib/run.sh:3078: a
+// TestStatusReportsADraft pins the fact status gained at lib/run.sh:3085: a
 // draft carries the flag onto the report, and a ready pull request does not.
 func TestStatusReportsADraft(t *testing.T) {
 	if got := statusLoadDraft(t, []string{"crossrev/awaiting-review"}, true); !got.Draft {
@@ -742,7 +742,7 @@ func TestStatusReportsADraft(t *testing.T) {
 }
 
 // TestStatusRendersTheDraftLineUnderTheLabels pins where the line goes and what
-// it says (lib/run.sh:3078). It sits immediately under `labels`, and it is
+// it says (lib/run.sh:3085). It sits immediately under `labels`, and it is
 // omitted rather than printed as "no" on every other pull request.
 func TestStatusRendersTheDraftLineUnderTheLabels(t *testing.T) {
 	const want = "│  labels     crossrev/awaiting-review\n│  draft      yes — no workflow runs a leg on it\n"
@@ -761,7 +761,7 @@ func TestStatusRendersTheDraftLineUnderTheLabels(t *testing.T) {
 }
 
 // TestStatusNextExplainsADraftOnAnAwaitingState pins the two lines
-// lib/run.sh:3434-3437 puts above the state's own answer.
+// lib/run.sh:3449-3452 puts above the state's own answer.
 //
 // They go on either awaiting state, because both are a label no event will
 // move, and on neither terminal state: a converged draft is finished, and

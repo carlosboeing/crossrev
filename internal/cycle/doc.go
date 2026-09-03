@@ -1,6 +1,6 @@
 // Package cycle is the local-mode driver: one process runs a review leg and a
 // resolve leg in sequence until the pass bound or a terminal state
-// (lib/run.sh:2895-3016).
+// (lib/run.sh:2901-3022).
 //
 // Every decision the loop takes is read back off the pull request rather than
 // carried in memory, because that is where the state lives. The driver reloads

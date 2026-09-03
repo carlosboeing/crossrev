@@ -10,7 +10,7 @@ import (
 )
 
 // TestSelection covers the resolve-leg start-up table measured from
-// lib/run.sh:1788-1836 and lib/legs.sh:157-175.
+// lib/run.sh:1794-1842 and lib/legs.sh:157-175.
 //
 // Measured 2026-08-31 against this checkout:
 //

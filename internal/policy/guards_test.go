@@ -193,7 +193,7 @@ func TestAssertModelsDiverged(t *testing.T) {
 		{"the jq spelling of an absent model does not halt either",
 			policy.DifferenceDifferent, "claude-opus-5", "null", false},
 		// Both sides "null" is the real codex shape, not a contrived one:
-		// lib/run.sh:2142 defaults both reads with jq's `// "null"` and Codex
+		// lib/run.sh:2148 defaults both reads with jq's `// "null"` and Codex
 		// reports no model_reported at all. The mixed case above never reaches
 		// the absence check — the two models differ, so it returns one arm
 		// earlier — so only this pairing pins it.
@@ -266,7 +266,7 @@ func TestEndpointVariablesCannotBeShrunk(t *testing.T) {
 //
 // This is the opposite of the Bash default for an absent eighth argument
 // (`is_cross_repo="${8-false}"` at lib/legs.sh:451, which skips the
-// maintainer-edit check). Neither default ships: lib/run.sh:1904-1905 is the
+// maintainer-edit check). Neither default ships: lib/run.sh:1910-1911 is the
 // only caller and always passes all eight arguments, so the Bash default is as
 // unreachable in production as this zero value is. Requiring permission is the
 // safe reading of a field nobody filled in.

@@ -32,7 +32,7 @@ var ErrInterrupted = errors.New("interrupted after the last completed write")
 // The Bash argument loops read the value with `${2:-}` and then `shift 2`.
 // With one argument left, `shift` fails, `set -euo pipefail` ends the process,
 // and nothing is printed at all: an empty terminal and status 1
-// (bin/crossrev:12, lib/run.sh:917). Reproduced rather than improved on,
+// (bin/crossrev:12, lib/run.sh:923). Reproduced rather than improved on,
 // because a reader can see the difference. It is a defect of the shell, not a
 // design.
 //

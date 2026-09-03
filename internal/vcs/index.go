@@ -16,7 +16,7 @@ var ErrTreeCapture = errors.New("the working tree could not be captured")
 
 // CaptureTree records everything in the working tree as a git tree object,
 // through a temporary index of its own. It is _run_tree_capture at
-// lib/run.sh:634-640.
+// lib/run.sh:640-646.
 //
 // # Why a capture exists at all
 //
@@ -81,7 +81,7 @@ func (r *Repository) CaptureTree(ctx context.Context, indexPath string) (string,
 }
 
 // RestoreTree puts the working tree back to a captured state, or fails. It is
-// _run_tree_restore at lib/run.sh:654-663.
+// _run_tree_restore at lib/run.sh:660-669.
 //
 // # Read into the capture's own index
 //
@@ -206,7 +206,7 @@ func copyFile(source, destination string) error {
 //
 // stderr first, because that is where git puts a refusal, and stdout only when
 // stderr said nothing. These calls are not ported captures — the shell throws
-// their output away entirely (lib/run.sh:638, :667) — so there is no `2>&1` to
+// their output away entirely (lib/run.sh:644, :667) — so there is no `2>&1` to
 // match and no order to preserve.
 func diagnostic(output Output) string {
 	if message := strings.TrimSpace(output.Stderr); message != "" {

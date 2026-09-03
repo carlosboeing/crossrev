@@ -12,12 +12,12 @@ import (
 	"github.com/carlosboeing/crossrev/internal/ui"
 )
 
-// status is cmd_status (lib/run.sh:3034-3103): one read of the pull request,
+// status is cmd_status (lib/run.sh:3040-3110): one read of the pull request,
 // every decision derived from it, then the page.
 //
 // The liveness probe answers whether the run behind an unfinished claim is
 // still working. Its git-dir function is `git rev-parse --git-common-dir` put
-// through `pwd -P` (lib/run.sh:3315-3316), which is what the lock keys on so
+// through `pwd -P` (lib/run.sh:3322-3323), which is what the lock keys on so
 // that every working tree of a clone finds the same one.
 func status(ctx context.Context, out *ui.IO, doc harness.Document, req cli.StatusRequest) (int, error) {
 	d := open(out, doc)
@@ -56,16 +56,16 @@ func status(ctx context.Context, out *ui.IO, doc harness.Document, req cli.Statu
 	return cli.ExitOK, nil
 }
 
-// watchdog is cmd_watchdog (lib/run.sh:3666-3735).
+// watchdog is cmd_watchdog (lib/run.sh:3681-3763).
 //
 // The list of pull requests waiting on a leg is read here rather than inside
 // the sweep, because internal/cycle takes it as an argument: the sweep's whole
 // subject is what it decides about a pull request, and handing the list in is
 // what makes that answerable offline. The read is one forge call
-// (lib/run.sh:3691-3693).
+// (lib/run.sh:3707-3709).
 //
 // The author is resolved once, before the loop. Bash resolves it per pull
-// request with `state_trusted_author automated` (lib/run.sh:3709), and the
+// request with `state_trusted_author automated` (lib/run.sh:3737), and the
 // answer is the same every time: the watchdog only ever runs on a schedule, so
 // the mode is automated by construction and the trusted author is the App.
 func watchdog(ctx context.Context, out *ui.IO, doc harness.Document, req cli.WatchdogRequest) (int, error) {
@@ -119,8 +119,8 @@ func watchdog(ctx context.Context, out *ui.IO, doc harness.Document, req cli.Wat
 // the refusal rather than raising it.
 //
 // This is where bash's arithmetic reads the variable. The shell stores the flag
-// as written (lib/run.sh:3671) and only evaluates it at `(( age < timeout ))`
-// (lib/run.sh:3719), where a non-number ends the process with bash's own
+// as written (lib/run.sh:3686) and only evaluates it at `(( age < timeout ))`
+// (lib/run.sh:3747), where a non-number ends the process with bash's own
 // `abc: unbound variable`. Measured against bin/crossrev with `--timeout abc`:
 // exit 0 and the closing summary on a repository with nothing waiting, exit 1
 // on one with a pull request waiting. Converting at the flag refused both.

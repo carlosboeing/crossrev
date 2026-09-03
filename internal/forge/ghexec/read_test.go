@@ -473,9 +473,9 @@ func TestRepoSlugKeepsTheSpacesInWhatItQuotes(t *testing.T) {
 // A payload with no isCrossRepository reads as a fork, not as this repository's
 // own branch.
 //
-// lib/run.sh:284 records absent provenance as `unknown`, and every reader tests
+// lib/run.sh:290 records absent provenance as `unknown`, and every reader tests
 // for an explicit `false`: the automatic-trigger fork refusal at
-// lib/run.sh:249, the head-repository branch at lib/run.sh:285 and the
+// lib/run.sh:250, the head-repository branch at lib/run.sh:291 and the
 // maintainer-edit guard at lib/legs.sh:478. A Go bool defaulting to false
 // collapsed `unknown` onto the one value that means "safe to push", so an
 // unreadable payload inherited the permission an upstream branch gets.
@@ -491,9 +491,9 @@ func TestPullRequestTreatsAbsentProvenanceAsAFork(t *testing.T) {
 		t.Fatalf("PullRequest: %v", err)
 	}
 	if !pr.IsCrossRepository {
-		t.Error("an absent isCrossRepository read as this repository's own branch (lib/run.sh:284)")
+		t.Error("an absent isCrossRepository read as this repository's own branch (lib/run.sh:290)")
 	}
 	if pr.MaintainerCanModify {
-		t.Error("an absent maintainerCanModify read as permission granted (lib/run.sh:290)")
+		t.Error("an absent maintainerCanModify read as permission granted (lib/run.sh:296)")
 	}
 }

@@ -16,11 +16,11 @@ import (
 )
 
 // An App authenticates as itself with a short-lived RS256 JWT
-// (lib/auth.sh:151-172). This is what lets CrossRev confirm an installation
+// (lib/auth.sh:165-186). This is what lets CrossRev confirm an installation
 // actually landed rather than telling you to go and check. `gh` honours an
 // Authorization header we set, so this needs no HTTP client of its own.
 
-// The two offsets the shell chose (lib/auth.sh:165-167).
+// The two offsets the shell chose (lib/auth.sh:179-181).
 //
 // The backdating is not a rounding allowance: GitHub rejects a JWT whose iat is
 // in the future, and clock skew between here and GitHub is not ours to control.
@@ -30,11 +30,11 @@ const (
 )
 
 // jwtHeader is a literal in the shell rather than a jq expression, so these are
-// its bytes exactly (lib/auth.sh:163).
+// its bytes exactly (lib/auth.sh:177).
 const jwtHeader = `{"alg":"RS256","typ":"JWT"}`
 
 // JWT mints a token that proves this process holds the App's private key
-// (_auth_jwt, lib/auth.sh:160).
+// (_auth_jwt, lib/auth.sh:174).
 //
 // now is a parameter rather than a read of the clock, so the claims are a fact
 // the caller chose and a test can assert them rather than bound them.
@@ -47,7 +47,7 @@ const jwtHeader = `{"alg":"RS256","typ":"JWT"}`
 // `_auth_jwt` ends in a printf, so its exit status is the printf's. A missing
 // key, an unreadable one, or a non-numeric App id leaves an empty segment and
 // the function still returns 0 — measured, on all three. That makes the
-// `ui_die` at lib/auth.sh:901-903 unreachable, and an operator who pointed
+// `ui_die` at lib/auth.sh:918-920 unreachable, and an operator who pointed
 // --key at the wrong file is told GitHub rejected the token rather than that
 // nothing signed it. This refuses at the point the fault happened, which is the
 // message that shell line was written to print.
@@ -76,7 +76,7 @@ func JWT(pemPath string, appID int64, now time.Time) (string, error) {
 	return signingInput + "." + b64url(signature), nil
 }
 
-// b64url is `openssl base64 -A | tr '+/' '-_' | tr -d '='` (lib/auth.sh:158):
+// b64url is `openssl base64 -A | tr '+/' '-_' | tr -d '='` (lib/auth.sh:172):
 // standard base64 on one line, the two alphabet substitutions, and the padding
 // removed. Measured against the shell on three-, two- and one-byte inputs whose
 // standard forms are `+/+/`, `+/8=` and `+w==`; the url forms are `-_-_`, `-_8`
@@ -127,12 +127,12 @@ type Installation struct {
 }
 
 // Installations lists the accounts this App is installed on
-// (_auth_installations, lib/auth.sh:174).
+// (_auth_installations, lib/auth.sh:188).
 //
 // An App installed nowhere answers with an empty list and no error, and telling
 // that apart from a refused call is the point: it is what lets `auth status`
 // print "installed nowhere — it can reach no repository at all"
-// (lib/auth.sh:445) rather than staying quiet.
+// (lib/auth.sh:459) rather than staying quiet.
 //
 // The jq filter has no `// empty`, so a response missing a field interpolates
 // the literal `null` and the line survives. Measured against the stub, which

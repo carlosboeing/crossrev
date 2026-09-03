@@ -46,7 +46,7 @@ func (l *Leg) Run(ctx context.Context, req Request) (out Result) {
 	if skip != "" {
 		out.Outcome = OutcomeSkipped
 		out.Reason = skip
-		// Two ui_say lines (lib/run.sh:266-267). One message serves both legs,
+		// Two ui_say lines (lib/run.sh:272-273). One message serves both legs,
 		// so it names neither: a refused resolve leg was being told that
 		// nothing would "review" the pull request, which is the wrong
 		// instruction for the leg that was refused.
@@ -65,7 +65,7 @@ func (l *Leg) Run(ctx context.Context, req Request) (out Result) {
 	if hasStop(loaded.PR) {
 		out.Outcome = OutcomeSkipped
 		out.Reason = "crossrev/stop"
-		// Two ui_say lines (lib/run.sh:965-966).
+		// Two ui_say lines (lib/run.sh:971-972).
 		out.Messages = ui.SayLines(
 			fmt.Sprintf("crossrev/stop is on %s#%d, so this run stops without reviewing.", loaded.Repo, req.PR),
 			"Remove the label to let the loop continue.",
@@ -86,7 +86,7 @@ func (l *Leg) Run(ctx context.Context, req Request) (out Result) {
 	if ad.already {
 		out.Outcome = OutcomeSkipped
 		out.Reason = "already reviewed"
-		// Two ui_say lines (lib/run.sh:1005-1006).
+		// Two ui_say lines (lib/run.sh:1011-1012).
 		out.Messages = ui.SayLines(
 			fmt.Sprintf("%s#%d is already reviewed at %s — pass %d, and nothing has changed since.",
 				loaded.Repo, req.PR, loaded.PR.HeadRefOid.Short(), ad.pass),
@@ -97,7 +97,7 @@ func (l *Leg) Run(ctx context.Context, req Request) (out Result) {
 	if ad.decline != "" {
 		out.Outcome = OutcomeDeclined
 		out.Reason = ad.decline
-		// ui_say (lib/run.sh:1030).
+		// ui_say (lib/run.sh:1036).
 		out.Messages = []ui.Line{ui.Say(fmt.Sprintf("not reviewing %s#%d — %s", loaded.Repo, req.PR, ad.decline))}
 		if err := l.postDeclined(ctx, req, loaded, ad); err != nil {
 			out.Outcome = OutcomeError
@@ -106,7 +106,7 @@ func (l *Leg) Run(ctx context.Context, req Request) (out Result) {
 		return out
 	}
 	if ad.stale != "" {
-		// ui_warn, the pair kept apart (lib/run.sh:976-977).
+		// ui_warn, the pair kept apart (lib/run.sh:982-983).
 		out.Reason = "abandoning the unfinished pass-" + fmt.Sprint(ad.pass) + " review — " + ad.stale
 		out.Messages = append(out.Messages, ui.Warn(out.Reason,
 			"Resuming it would reconcile against findings that no longer describe this code. Starting the pass again instead."))
@@ -122,7 +122,7 @@ func (l *Leg) Run(ctx context.Context, req Request) (out Result) {
 	}
 
 	// The run header, two bare printfs after the settings are chosen and
-	// before the claim is posted (lib/run.sh:1066-1067):
+	// before the claim is posted (lib/run.sh:1072-1073):
 	//
 	//	printf '\n  Reviewing %s#%s — %s\n' …
 	//	printf '  Reviewer: %s%s%s\n' "$harness" "${model:+, $model}" "${effort:+, $effort effort}"
@@ -136,11 +136,11 @@ func (l *Leg) Run(ctx context.Context, req Request) (out Result) {
 		ui.Say("Reviewer: "+settings.describe()),
 	)
 
-	// lib/run.sh:1086, which the shell prints BELOW the header because the
+	// lib/run.sh:1092, which the shell prints BELOW the header because the
 	// redrive branch sits inside the claim block that follows it.
 	if ad.redrive {
 		msg := fmt.Sprintf("Pass %d's review ended blocked — driving pass %d again.", ad.pass, ad.pass)
-		// ui_say (lib/run.sh:1086).
+		// ui_say (lib/run.sh:1092).
 		out.Reason = msg
 		out.Messages = append(out.Messages, ui.Say(msg))
 	}
@@ -175,12 +175,12 @@ func (l *Leg) Run(ctx context.Context, req Request) (out Result) {
 		l.reportFatal(ctx, req, loaded, out.Marker, claimID, out.Err)
 	}()
 	if ad.recovering && !ad.redrive {
-		// ui_say (lib/run.sh:1092).
+		// ui_say (lib/run.sh:1098).
 		out.Messages = append(out.Messages, ui.Say(resumeMessage(ad.pass, marker.Findings)))
 	}
 
 	if hasRecordedFindings(marker) {
-		// ui_say (lib/run.sh:1118).
+		// ui_say (lib/run.sh:1124).
 		out.Messages = append(out.Messages, ui.Say("The previous attempt already recorded its findings, so the review is not run again."))
 	} else {
 		envelope, payload, invokeMsgs, err := l.invoke(ctx, req, loaded, settings, ad.pass)
@@ -203,7 +203,7 @@ func (l *Leg) Run(ctx context.Context, req Request) (out Result) {
 		if err == nil {
 			marker.Findings = findings
 		}
-		// ui_say, one per finding the anchor moved (lib/run.sh:1173).
+		// ui_say, one per finding the anchor moved (lib/run.sh:1179).
 		out.Messages = append(out.Messages, ui.SayLines(snaps...)...)
 		var doc struct {
 			Verdict       string  `json:"verdict"`
@@ -255,7 +255,7 @@ func (l *Leg) Run(ctx context.Context, req Request) (out Result) {
 		return out
 	}
 	// log_transcripts_clear, at the end of leg_review and nowhere earlier
-	// (lib/run.sh:1326). A failed leg keeps them: they are the reason the files
+	// (lib/run.sh:1332). A failed leg keeps them: they are the reason the files
 	// exist.
 	if l.Log != nil {
 		l.Log.ClearTranscripts("")

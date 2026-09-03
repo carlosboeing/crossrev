@@ -27,8 +27,8 @@ const (
 	// It goes to stderr, and both halves are required.
 	KindWarn
 	// KindBlank is a bare `printf '\n'`. Several leg sites print one directly
-	// rather than through a helper: above the run header (lib/run.sh:1066) and
-	// below the closing report (lib/run.sh:2434, :2439). ui_gap is a different
+	// rather than through a helper: above the run header (lib/run.sh:1072) and
+	// below the closing report (lib/run.sh:2440, :2438). ui_gap is a different
 	// line — it prints the dim gutter rule that spaces a section — so a blank
 	// cannot be spelled with it.
 	KindBlank

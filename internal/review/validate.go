@@ -45,7 +45,7 @@ func enrichFindings(payload, diffBytes []byte, workdir string) (json.RawMessage,
 	for _, raw := range doc.Findings {
 		// harness.Node rather than a map, because encoding/json sorts a map's
 		// keys and jq does not. Bash writes `$f + {id:…, anchor:…, …}`
-		// (lib/run.sh:1178-1180), and jq's + keeps the model's own key order
+		// (lib/run.sh:1184-1186), and jq's + keeps the model's own key order
 		// then appends the six in the order written. These bytes end up in the
 		// marker every pull request carries, so the order is not cosmetic.
 		var f harness.Node

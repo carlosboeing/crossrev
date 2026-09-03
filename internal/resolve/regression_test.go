@@ -186,7 +186,7 @@ func TestBillingUsesTheResolvedDescriptor(t *testing.T) {
 
 // TestRestoreFailureNamesTheRunsOwnFailure pins that a runner failure survives a
 // failed restore. Bash puts the reason the attempt is abandoned in that message
-// (lib/run.sh:684), so replacing it with a placeholder loses the half a reader
+// (lib/run.sh:690), so replacing it with a placeholder loses the half a reader
 // acts on.
 func TestRestoreFailureNamesTheRunsOwnFailure(t *testing.T) {
 	refused := "the model refused: no credit on this account"
@@ -282,7 +282,7 @@ func TestExitZeroHarnessFailureSurvivesAFailedRestore(t *testing.T) {
 // One message serves both legs, so it names neither. A declined resolve leg was
 // being told that an automatic invocation "does not review it" and to ask for a
 // review, which is the wrong instruction for the leg that was refused
-// (lib/run.sh:266-267).
+// (lib/run.sh:272-273).
 func TestAutomaticDraftRefusalNamesNeitherLeg(t *testing.T) {
 	e := setup(t)
 	e.forge.pr.IsDraft = true

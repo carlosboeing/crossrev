@@ -14,7 +14,7 @@ import (
 )
 
 // Finding is one finding the review leg raised, enriched with what the
-// orchestrator decided about it (lib/run.sh:2015-2036).
+// orchestrator decided about it (lib/run.sh:2021-2042).
 //
 // Number is the number the prompt shows it under, and the number the model
 // returns instead of the 16-character id: copying a hash accurately is clerical
@@ -64,7 +64,7 @@ type Issue struct {
 }
 
 // CandidateSet is the issues retrieved for one finding, keyed by that finding's
-// id the way lib/run.sh:2482 keys them.
+// id the way lib/run.sh:2488 keys them.
 type CandidateSet struct {
 	FindingID string
 	Issues    []Issue

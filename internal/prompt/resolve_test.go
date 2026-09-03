@@ -153,7 +153,7 @@ func TestResolveNamesAPriorResolution(t *testing.T) {
 
 // The candidate blocks are headed by the finding's number as well as its id, and
 // they keep the order the orchestrator built the object in rather than any
-// sorted order (lib/prompt.sh:269-273, lib/run.sh:2482).
+// sorted order (lib/prompt.sh:269-273, lib/run.sh:2488).
 func TestResolveKeepsTheCandidateOrder(t *testing.T) {
 	o := loadResolveOracle(t)
 	in := resolveFromOracle(o)

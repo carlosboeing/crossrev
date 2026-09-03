@@ -257,7 +257,7 @@ func TestInvokeSubstitutesAMissingConfiguredHarnessBeforeTheClaim(t *testing.T) 
 		}
 	}
 	if !found {
-		t.Errorf("messages = %v, want the substitute warning (lib/run.sh:542-543)", got.Messages)
+		t.Errorf("messages = %v, want the substitute warning (lib/run.sh:548-549)", got.Messages)
 	}
 	if len(e.runner.Specs()) == 0 {
 		t.Fatal("no harness spec")
@@ -408,8 +408,8 @@ func wantFatal(t *testing.T, err error, reason, action string) {
 }
 
 // TestSettingsRefusesAHarnessThatCannotReview pins
-// _run_assert_harness_serves_leg (lib/run.sh:553-558), reached from
-// run_leg_settings at lib/run.sh:520. The hint is built from the descriptor
+// _run_assert_harness_serves_leg (lib/run.sh:559-564), reached from
+// run_leg_settings at lib/run.sh:526. The hint is built from the descriptor
 // rather than written into the sentence: it names the harnesses that can take
 // the leg and reads the refused harness's product name and declared legs back
 // off its entry. Measured with grok rewritten to legs ["resolve"]:
@@ -458,7 +458,7 @@ func TestSettingsRefusesAReviewOnlyListThatOmitsReview(t *testing.T) {
 }
 
 // TestSettingsSendsANotDrivenHarnessToEndpoints pins the branch at
-// lib/run.sh:502-504: a name the descriptor lists under not_driven is refused
+// lib/run.sh:508-510: a name the descriptor lists under not_driven is refused
 // with the reason it carries and the key that would work instead. The leg word
 // in "reviewer.endpoint" is the config key, not the descriptor's review/resolve
 // vocabulary. Measured:
@@ -484,7 +484,7 @@ func TestSettingsSendsANotDrivenHarnessToEndpoints(t *testing.T) {
 }
 
 // TestSettingsNamesTheDrivenHarnessesForAnUnknownName pins the else arm at
-// lib/run.sh:505-506: a name the descriptor does not carry at all gets the same
+// lib/run.sh:511-512: a name the descriptor does not carry at all gets the same
 // sentence without the endpoints half, and the names come from the descriptor.
 // Measured:
 //
@@ -493,7 +493,7 @@ func TestSettingsSendsANotDrivenHarnessToEndpoints(t *testing.T) {
 //	       CrossRev drives claude, codex, agy, grok and opencode directly.
 //
 // This is also the case ServesLeg is deliberately lax about: the adapter test
-// at lib/run.sh:500 refuses the name before the serves-leg gate at :520 ever
+// at lib/run.sh:506 refuses the name before the serves-leg gate at :520 ever
 // reads it, so the refusal names the fault rather than printing a sentence
 // built from an empty product name.
 func TestSettingsNamesTheDrivenHarnessesForAnUnknownName(t *testing.T) {
@@ -509,7 +509,7 @@ func TestSettingsNamesTheDrivenHarnessesForAnUnknownName(t *testing.T) {
 }
 
 // TestSettingsRefusesWhenNothingThatCanReviewIsInstalled pins the last refusal
-// in run_leg_settings (lib/run.sh:538-540), reached once the configured harness
+// in run_leg_settings (lib/run.sh:544-546), reached once the configured harness
 // has no binary and the substitution loop at :531-537 finds no other harness
 // that serves the leg. The hint names the harnesses that could take the leg,
 // read off the descriptor. Measured on the shipped descriptor with a PATH that
@@ -549,7 +549,7 @@ func TestSettingsRefusesWhenNothingThatCanReviewIsInstalled(t *testing.T) {
 //
 // Two names here against five above is what pins _names_human's "a and b"
 // (lib/harnesses.sh:171-178), and claude is asked for because a harness that
-// cannot serve the leg is refused at lib/run.sh:520 before this line.
+// cannot serve the leg is refused at lib/run.sh:526 before this line.
 func TestSettingsNamesOnlyTheHarnessesThatCanReview(t *testing.T) {
 	e := newEnv(t)
 	e.doc = legsRewritten(t, map[string][]string{
@@ -589,7 +589,7 @@ func TestSettingsNamesOnlyTheHarnessesThatCanReview(t *testing.T) {
 // That check is lib/harnesses.sh:106-114 and its Go port is harness.Adapters
 // (internal/harness/adapter.go:119-127), which nothing outside a test calls —
 // so this refusal is the only thing standing between an adapter-less entry and
-// a nil adapter. The sentence it prints is the one measured at lib/run.sh:500-508;
+// a nil adapter. The sentence it prints is the one measured at lib/run.sh:506-514;
 // the descriptor that reaches it is one Bash would have rejected at load.
 func TestInvokeRefusesADescriptorEntryWithNoCompiledAdapter(t *testing.T) {
 	e := newEnv(t)

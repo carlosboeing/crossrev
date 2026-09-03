@@ -17,7 +17,7 @@ import (
 
 // TestReconcile pins that an already-settled finding is not answered twice,
 // that a redrive answers its own findings again, and that unthreaded replies
-// are seeded from issue comments (lib/run.sh:2291-2344).
+// are seeded from issue comments (lib/run.sh:2297-2350).
 func TestReconcile(t *testing.T) {
 	t.Run("an already-settled finding is not answered twice", func(t *testing.T) {
 		e := setup(t)

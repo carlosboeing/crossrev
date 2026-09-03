@@ -17,7 +17,7 @@ import (
 func (l *Leg) commitAndPush(ctx context.Context, s *session, workdir string, recs, findings []harness.Node, marker prstate.Marker, wrote bool, remote string) (sha string, messages []ui.Line, emptyRemote bool, err error) {
 	existing, _ := marker.CommitSHA.Get()
 	if existing != "" && existing != "null" {
-		// ui_say (lib/run.sh:2231).
+		// ui_say (lib/run.sh:2237).
 		return existing, []ui.Line{ui.Say("The previous attempt already pushed " + shortSHA(existing) + ", so the fix step is skipped.")}, false, nil
 	}
 
@@ -48,7 +48,7 @@ func (l *Leg) commitAndPush(ctx context.Context, s *session, workdir string, rec
 	}
 	if !staged {
 		if fixed > 0 {
-			// ui_warn, the pair kept apart (lib/run.sh:2249-2250).
+			// ui_warn, the pair kept apart (lib/run.sh:2255-2256).
 			messages = append(messages, ui.Warn(
 				fmt.Sprintf("the resolver reported %d fix(es) but changed no files", fixed),
 				"The replies below will claim a fix that is not in the diff, so their threads stay open and the pass halts for a person. Treat those resolutions as unverified and read the thread before merging."))
@@ -103,7 +103,7 @@ func (l *Leg) commitAndPush(ctx context.Context, s *session, workdir string, rec
 
 	sha, emptyRemote, err = l.pushHead(ctx, work, s, remote, runHooks)
 	if sha != "" {
-		// ui_ok (lib/run.sh:2264).
+		// ui_ok (lib/run.sh:2270).
 		messages = append(messages, ui.OK("pushed "+shortSHA(sha)+" to "+s.pr.HeadRefName))
 	}
 	return sha, messages, emptyRemote, err

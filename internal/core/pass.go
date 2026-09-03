@@ -5,15 +5,15 @@ import (
 	"fmt"
 )
 
-// MarkerVersion is the `v` every marker opens with (lib/run.sh:1052 and
-// lib/run.sh:1098).
+// MarkerVersion is the `v` every marker opens with (lib/run.sh:1058 and
+// lib/run.sh:1104).
 const MarkerVersion = 1
 
 // Leg is the marker's name for one half of the loop.
 type Leg string
 
 // The two legs, spelled as the marker writers spell them: `leg:"review"` at
-// lib/run.sh:1098 and `leg:"resolve"` at lib/run.sh:1960.
+// lib/run.sh:1104 and `leg:"resolve"` at lib/run.sh:1966.
 const (
 	LegReview  Leg = "review"
 	LegResolve Leg = "resolve"
@@ -42,12 +42,12 @@ func (l Leg) String() string { return string(l) }
 // LegRole is the configuration key for a leg's harness settings.
 //
 // The two vocabularies differ on purpose: the configuration names the actor
-// and the marker names the act. lib/run.sh:518 converts one to the other
+// and the marker names the act. lib/run.sh:524 converts one to the other
 // before the descriptor check reads it.
 type LegRole string
 
 // The two configurable roles, from `.reviewer` and `.resolver` in
-// `.github/crossrev.yml` (read at lib/run.sh:491).
+// `.github/crossrev.yml` (read at lib/run.sh:497).
 const (
 	RoleReviewer LegRole = "reviewer"
 	RoleResolver LegRole = "resolver"
@@ -88,7 +88,7 @@ type PassState string
 //   - started:  an open claim, which recovery resumes from (lib/state.sh:313)
 //   - complete: the leg settled (lib/state.sh:290)
 //   - declined: a cap refused to start the pass, so it never ran at all
-//     (lib/run.sh:1052, filtered back out at lib/state.sh:268)
+//     (lib/run.sh:1058, filtered back out at lib/state.sh:268)
 const (
 	PassStarted  PassState = "started"
 	PassComplete PassState = "complete"

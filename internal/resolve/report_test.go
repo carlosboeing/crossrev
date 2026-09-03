@@ -80,8 +80,8 @@ func TestTheResolveLegReportsWhatItDid(t *testing.T) {
 }
 
 // A deferral that files an issue reports the filing with ui_ok
-// (lib/run.sh:2375) and one that matched an existing issue with ui_say
-// (lib/run.sh:2376). The two are different helpers on purpose: a filed issue is
+// (lib/run.sh:2381) and one that matched an existing issue with ui_say
+// (lib/run.sh:2382). The two are different helpers on purpose: a filed issue is
 // a verified success, a match is a statement of fact.
 func TestTheResolveLegReportsWhatItFiledAndWhatItMatched(t *testing.T) {
 	e := setup(t)
@@ -98,7 +98,7 @@ func TestTheResolveLegReportsWhatItFiledAndWhatItMatched(t *testing.T) {
 	}
 }
 
-// The converged ending: nothing changed, so the loop is over (lib/run.sh:2440).
+// The converged ending: nothing changed, so the loop is over (lib/run.sh:2446).
 func TestTheResolveLegSaysWhenTheLoopIsDone(t *testing.T) {
 	e := setup(t)
 	e.addReview(t, defaultFindings(), "issues-remain")
@@ -122,7 +122,7 @@ func TestTheResolveLegSaysWhenTheLoopIsDone(t *testing.T) {
 	}
 }
 
-// An escalation applies crossrev/stop and says why (lib/run.sh:2427-2428).
+// An escalation applies crossrev/stop and says why (lib/run.sh:2433-2434).
 func TestTheResolveLegSaysWhenAHumanIsNeeded(t *testing.T) {
 	e := setup(t)
 	e.addReview(t, defaultFindings(), "issues-remain")
@@ -142,7 +142,7 @@ func TestTheResolveLegSaysWhenAHumanIsNeeded(t *testing.T) {
 }
 
 // A redrive says so, below the run header and above the claim edit
-// (lib/run.sh:1939).
+// (lib/run.sh:1945).
 func TestTheResolveLegSaysItIsDrivingThePassAgain(t *testing.T) {
 	e := setup(t)
 	e.git.staged = true
@@ -172,7 +172,7 @@ func TestTheResolveLegSaysItIsDrivingThePassAgain(t *testing.T) {
 }
 
 // The run log's worktree pair and the invoke duration, measured from
-// lib/run.sh:1894, :2451 and :831.
+// lib/run.sh:1900, :2451 and :831.
 func TestTheResolveLegBracketsTheWorktreeInTheRunLog(t *testing.T) {
 	e := setup(t)
 	e.git.staged = true
@@ -200,7 +200,7 @@ func TestTheResolveLegBracketsTheWorktreeInTheRunLog(t *testing.T) {
 }
 
 // A pass whose resolutions are already on the marker says so rather than
-// resolving in silence (lib/run.sh:1991).
+// resolving in silence (lib/run.sh:1997).
 func TestTheResolveLegSaysItIsNotRunningTheResolverAgain(t *testing.T) {
 	e := setup(t)
 	e.addReview(t, defaultFindings(), "issues-remain")
@@ -225,7 +225,7 @@ func TestTheResolveLegSaysItIsNotRunningTheResolverAgain(t *testing.T) {
 }
 
 // A pass that does not hand back to the reviewer asks for the upgrade tip
-// (lib/run.sh:2447: `next != awaiting-review`).
+// (lib/run.sh:2453: `next != awaiting-review`).
 func TestAConvergedResolvePassAsksForTheUpgradeTip(t *testing.T) {
 	e := setup(t)
 	e.addReview(t, defaultFindings(), "issues-remain")

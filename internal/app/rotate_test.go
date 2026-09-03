@@ -80,7 +80,7 @@ func TestRotatePrintsThePanelAndStopsWhenDeclined(t *testing.T) {
 }
 
 // --key skips the browser half entirely: there is nothing to confirm, because
-// the file it names is already on disk (lib/auth.sh:871).
+// the file it names is already on disk (lib/auth.sh:888).
 func TestRotateWithAKeyGivenAsksNothingAndOpensNothing(t *testing.T) {
 	b := newBench(t, out("crossrev-shorelogic\n"))
 	b.meta(t, "CrossRev ShoreLogic", "crossrev-shorelogic")
@@ -191,7 +191,7 @@ func TestRotateRefusesAFileItCannotSignWith(t *testing.T) {
 }
 
 // A key that belongs to another App signs perfectly well and is still refused,
-// because the proof is a call as this App (lib/auth.sh:904-906).
+// because the proof is a call as this App (lib/auth.sh:921-923).
 func TestRotateRefusesAKeyGitHubWillNotAcceptAndChangesNothing(t *testing.T) {
 	b := newBench(t, bad())
 	b.meta(t, "CrossRev ShoreLogic", "crossrev-shorelogic")
@@ -225,7 +225,7 @@ func TestRotateRefusesAKeyGitHubWillNotAcceptAndChangesNothing(t *testing.T) {
 // --- the legacy path -------------------------------------------------------
 
 // The unroled name would otherwise keep winning for the loop role and the
-// rotation would look successful while nothing had changed (lib/auth.sh:912-914).
+// rotation would look successful while nothing had changed (lib/auth.sh:929-931).
 func TestRotateRemovesTheLegacyUnroledKey(t *testing.T) {
 	b := newBench(t, out("crossrev-shorelogic\n"))
 	b.meta(t, "CrossRev ShoreLogic", "crossrev-shorelogic")
@@ -248,7 +248,7 @@ func TestRotateRemovesTheLegacyUnroledKey(t *testing.T) {
 	}
 	wantMode(t, roled, 0o600)
 	// The backup sits beside the ROLED destination, not beside the legacy name
-	// it replaced: `backup="$dest.previous"` (lib/auth.sh:908-909).
+	// it replaced: `backup="$dest.previous"` (lib/auth.sh:925-926).
 	if !strings.Contains(b.text(), "previous key kept at "+roled+".previous") {
 		t.Fatalf("printed:\n%s", b.text())
 	}
@@ -259,7 +259,7 @@ func TestRotateRemovesTheLegacyUnroledKey(t *testing.T) {
 
 // Told to update APP_PRIVATE_KEY after rotating the refresher's key, somebody
 // following that literally puts the refresher's key material behind the loop
-// App's identity (lib/auth.sh:922-927).
+// App's identity (lib/auth.sh:939-944).
 func TestRotateNamesTheRolesOwnSecretAndItsScope(t *testing.T) {
 	b := newBench(t, out("crossrev-refresh-shorelogic\n"))
 	body := `{"owner":"ShoreLogic","owner_type":"Organization","owner_id":12345,"id":988,` +
@@ -306,7 +306,7 @@ func TestRotateOnTheLoopRoleCarriesNoSecretsScopeNote(t *testing.T) {
 }
 
 // A user-owned App's key lives on the personal settings page
-// (lib/auth.sh:851-856).
+// (lib/auth.sh:868-873).
 func TestRotatePointsAUserOwnedAppAtItsOwnSettingsPage(t *testing.T) {
 	b := newBench(t)
 	body := `{"owner":"me","owner_type":"User","owner_id":1,"id":5,` +
@@ -343,7 +343,7 @@ func TestRotatePointsAUserOwnedAppAtItsOwnSettingsPage(t *testing.T) {
 // --- watching the downloads folder -----------------------------------------
 
 // The file lands with a name GitHub chooses, and typing it out is the step
-// people get wrong (lib/auth.sh:877-885).
+// people get wrong (lib/auth.sh:894-902).
 func TestRotatePicksUpTheKeyFromTheDownloadsFolder(t *testing.T) {
 	b := newBench(t, out("crossrev-shorelogic\n"))
 	b.meta(t, "CrossRev ShoreLogic", "crossrev-shorelogic")
@@ -400,7 +400,7 @@ func TestRotateIgnoresAPemForADifferentApp(t *testing.T) {
 }
 
 // A file older than five minutes is somebody's previous download, not this
-// one: `find -newermt '-5 minutes'` (lib/auth.sh:882).
+// one: `find -newermt '-5 minutes'` (lib/auth.sh:899).
 func TestRotateIgnoresAPemThatIsNotFresh(t *testing.T) {
 	b := newBench(t)
 	b.meta(t, "CrossRev ShoreLogic", "crossrev-shorelogic")
@@ -422,7 +422,7 @@ func TestRotateIgnoresAPemThatIsNotFresh(t *testing.T) {
 }
 
 // When nothing lands, the path is asked for rather than guessed at
-// (lib/auth.sh:890-892).
+// (lib/auth.sh:907-909).
 func TestRotateAsksForThePathWhenNothingIsDownloaded(t *testing.T) {
 	b := newBench(t, out("crossrev-shorelogic\n"))
 	b.meta(t, "CrossRev ShoreLogic", "crossrev-shorelogic")
@@ -442,7 +442,7 @@ func TestRotateAsksForThePathWhenNothingIsDownloaded(t *testing.T) {
 }
 
 // `${keyfile/#\~/$HOME}` is a textual replacement of a leading tilde, so a
-// typed ~/Downloads/x.pem resolves (lib/auth.sh:895).
+// typed ~/Downloads/x.pem resolves (lib/auth.sh:912).
 func TestRotateExpandsALeadingTilde(t *testing.T) {
 	b := newBench(t, out("crossrev-shorelogic\n"))
 	b.meta(t, "CrossRev ShoreLogic", "crossrev-shorelogic")
@@ -548,7 +548,7 @@ func TestRotateProvesTheKeyWithOneCallAsTheApp(t *testing.T) {
 }
 
 // A source that ends before the reader answers is a failed read, which is what
-// `ui_prompt || ui_die` catches (lib/auth.sh:890-891).
+// `ui_prompt || ui_die` catches (lib/auth.sh:907-908).
 func TestRotateRefusesWhenTheAnswerNeverCame(t *testing.T) {
 	b := newBench(t)
 	b.meta(t, "CrossRev ShoreLogic", "crossrev-shorelogic")
@@ -573,7 +573,7 @@ func TestRotateRefusesWhenTheAnswerNeverCame(t *testing.T) {
 // A key somebody had widened to 0644 stayed at 0644 through a rotation, and the
 // backup beside it kept the mode whatever file was already at that name had.
 // Both writes go through the rename now, so the mode comes from the file the
-// write created (lib/auth.sh:47-57, :978-987, tests/test-auth.sh).
+// write created (lib/auth.sh:61-71, :978-987, tests/test-auth.sh).
 func TestRotateNarrowsAWidenedKeyAndAWidenedBackup(t *testing.T) {
 	b := newBench(t, out("crossrev-shorelogic\n"))
 	b.meta(t, "CrossRev ShoreLogic", "crossrev-shorelogic")

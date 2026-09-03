@@ -10,7 +10,7 @@ import (
 	"github.com/carlosboeing/crossrev/internal/forge/ghexec"
 )
 
-// wantAwaitingJQ is the filter lib/run.sh:3692-3693 sends, written out here
+// wantAwaitingJQ is the filter lib/run.sh:3708-3709 sends, written out here
 // rather than read from the package so that changing it has to be done twice.
 // The newline and the eleven-space continuation indent are the shell's own
 // bytes: `gh` hands the whole string to jq, so the layout is part of what the
@@ -62,7 +62,7 @@ func TestAwaitingPullRequestsReadsTheThreeFields(t *testing.T) {
 
 // A read that fails answers as no pull requests, because the shell's
 // `|| stuck="[]"` cannot tell an unreachable API from an empty repository
-// (lib/run.sh:3693).
+// (lib/run.sh:3709).
 //
 // The last two rows are the ones that separate the exit code from the bytes.
 // `stuck` is assigned from a command substitution, so the shell's `||` fires on

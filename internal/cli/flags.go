@@ -16,7 +16,7 @@ import (
 // `watchdog` — is consumed by the parser and appears in none of them, which is
 // what "accepted and ignored" means.
 
-// CycleRequest is `crossrev cycle` (lib/run.sh:2895-2916).
+// CycleRequest is `crossrev cycle` (lib/run.sh:2901-2922).
 type CycleRequest struct {
 	PR              int
 	Repo            core.Slug
@@ -26,7 +26,7 @@ type CycleRequest struct {
 	KeepTranscripts bool
 }
 
-// ReviewRequest is `crossrev review` (lib/run.sh:913-941).
+// ReviewRequest is `crossrev review` (lib/run.sh:919-947).
 type ReviewRequest struct {
 	PR              int
 	Repo            core.Slug
@@ -37,7 +37,7 @@ type ReviewRequest struct {
 	KeepTranscripts bool
 }
 
-// ResolveRequest is `crossrev resolve` (lib/run.sh:1730-1756).
+// ResolveRequest is `crossrev resolve` (lib/run.sh:1736-1762).
 //
 // It takes no `--continuation`: the flag exists so a cycle can tell the review
 // leg it is not the first of the loop, and the resolve leg has no such state.
@@ -50,7 +50,7 @@ type ResolveRequest struct {
 	KeepTranscripts bool
 }
 
-// StatusRequest is `crossrev status` (lib/run.sh:3034-3049).
+// StatusRequest is `crossrev status` (lib/run.sh:3040-3055).
 type StatusRequest struct {
 	PR   int
 	Repo core.Slug
@@ -65,17 +65,17 @@ type InitRequest struct {
 	Yes     bool
 }
 
-// WatchdogRequest is `crossrev watchdog` (lib/run.sh:3666-3681).
+// WatchdogRequest is `crossrev watchdog` (lib/run.sh:3681-3696).
 type WatchdogRequest struct {
 	Repo core.Slug
 	// Timeout is `--timeout` as the shell's `timeout` variable holds it: the
 	// raw string, never empty, because the variable starts at 1800 and
 	// `${2:-1800}` puts the same digits back when the flag arrives empty
-	// (lib/run.sh:3667, :3671).
+	// (lib/run.sh:3682, :3671).
 	//
 	// It is a string and not a number because the shell does not convert it
 	// here. The value is only evaluated at `(( age < timeout ))`
-	// (lib/run.sh:3719), which a sweep reaches only once a pull request is
+	// (lib/run.sh:3747), which a sweep reaches only once a pull request is
 	// waiting, so `--timeout abc` is harmless on a repository with nothing
 	// waiting. Converting at the flag would refuse a command the shell runs.
 	// cmd/crossrev converts it where bash's arithmetic does.
@@ -91,33 +91,33 @@ type ConfigRequest struct{}
 type DoctorRequest struct{}
 
 // AuthStatusRequest is `crossrev auth status`, which has no argument loop and
-// so refuses nothing (lib/auth.sh:373).
+// so refuses nothing (lib/auth.sh:387).
 type AuthStatusRequest struct{}
 
-// AuthLoginRequest is `crossrev auth login` (lib/auth.sh:511-520).
+// AuthLoginRequest is `crossrev auth login` (lib/auth.sh:525-534).
 type AuthLoginRequest struct {
 	Owner string
 	Name  string
 	// Role is `--role`, and it is "loop" rather than empty when the flag is
 	// absent: the shell's parser starts from `local role="loop"`
-	// (lib/auth.sh:512).
+	// (lib/auth.sh:526).
 	Role string
 }
 
-// AuthInstallRequest is `crossrev auth install` (lib/auth.sh:792-800).
+// AuthInstallRequest is `crossrev auth install` (lib/auth.sh:809-817).
 type AuthInstallRequest struct {
 	Owner string
 	Role  string
 }
 
-// AuthRotateRequest is `crossrev auth rotate` (lib/auth.sh:879-889).
+// AuthRotateRequest is `crossrev auth rotate` (lib/auth.sh:896-906).
 type AuthRotateRequest struct {
 	Owner   string
 	Role    string
 	KeyFile string
 }
 
-// AuthRefreshRequest is `crossrev auth refresh` (lib/auth.sh:998-1009).
+// AuthRefreshRequest is `crossrev auth refresh` (lib/auth.sh:1022-1033).
 //
 // Repo is a string rather than a slug because the refresher writes a secret
 // through `gh` against whatever it is given, and `--org` is the other half of
@@ -156,7 +156,7 @@ const (
 //
 // Bash renders the installed names only when jq is present and `harness_names`
 // answers, and falls back to the shape of the flag otherwise
-// (lib/run.sh:926-931, :1742-1747, bin/crossrev:68-72). Here the caller decides
+// (lib/run.sh:932-937, :1742-1747, bin/crossrev:68-72). Here the caller decides
 // what it knows, and an empty list is that fallback.
 func harnessOption(harnesses []string) string {
 	if len(harnesses) == 0 {
@@ -226,7 +226,7 @@ func unknownOption(out *ui.IO, command, option, usage string) error {
 }
 
 // requireTrigger is the `case "$trigger" in human|automatic` guard the three
-// commands that read the flag apply after their loop (lib/run.sh:937-940,
+// commands that read the flag apply after their loop (lib/run.sh:943-946,
 // :1753-1756, :2913-2916).
 func requireTrigger(out *ui.IO, command, trigger string) error {
 	switch trigger {
@@ -276,8 +276,8 @@ func optionalSlug(out *ui.IO, raw string) (core.Slug, error) {
 	return slug, nil
 }
 
-// WatchdogDefaultTimeout is `timeout=1800` at lib/run.sh:3667, and the same
-// digits `${2:-1800}` puts back for an empty `--timeout` at lib/run.sh:3671.
+// WatchdogDefaultTimeout is `timeout=1800` at lib/run.sh:3682, and the same
+// digits `${2:-1800}` puts back for an empty `--timeout` at lib/run.sh:3686.
 //
 // It is the string the shell holds rather than a duration, because nothing
 // converts it until the sweep compares against it. cmd/crossrev does that

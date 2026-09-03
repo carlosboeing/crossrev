@@ -52,11 +52,11 @@ func stateHome() string {
 }
 
 // AddWorktree creates a detached worktree of revision at dir, making the parent
-// directory it needs. It is lib/run.sh:1889-1894.
+// directory it needs. It is lib/run.sh:1895-1900.
 //
 // The failure carries git's own output, because there is nothing better to say
 // about a refused `worktree add` than what git said about it
-// (lib/run.sh:1891-1893).
+// (lib/run.sh:1897-1899).
 func (r *Repository) AddWorktree(ctx context.Context, dir string, revision core.Revision) error {
 	if revision.IsZero() {
 		return &Refusal{
@@ -67,7 +67,7 @@ func (r *Repository) AddWorktree(ctx context.Context, dir string, revision core.
 	if err := os.MkdirAll(filepath.Dir(dir), 0o755); err != nil {
 		return err
 	}
-	// `2>&1`, as at lib/run.sh:1891: the hint is git's own words about why it
+	// `2>&1`, as at lib/run.sh:1897: the hint is git's own words about why it
 	// refused, and there is nothing better to say than what git said.
 	output, err := r.RunCombined(ctx, "worktree", "add", "--detach", dir, revision.SHA())
 	if err != nil {
@@ -83,7 +83,7 @@ func (r *Repository) AddWorktree(ctx context.Context, dir string, revision core.
 }
 
 // PruneWorktrees is `git worktree prune`, which forgets the administrative
-// records of worktrees whose directories are gone (lib/run.sh:1885). Its
+// records of worktrees whose directories are gone (lib/run.sh:1891). Its
 // failure is ignored there and here: a prune that did not run leaves stale
 // records and nothing else.
 func (r *Repository) PruneWorktrees(ctx context.Context) {
@@ -92,7 +92,7 @@ func (r *Repository) PruneWorktrees(ctx context.Context) {
 
 // WorktreeReusable reports whether an existing directory is this clone's own
 // worktree, sitting at the revision the leg is about to work on. It is the test
-// at lib/run.sh:1878-1886.
+// at lib/run.sh:1884-1892.
 //
 // Ownership is asked as well as revision, and lib/run.sh:64-70 says why: the
 // path is keyed on the repository slug and the pull request number alone, so
@@ -129,7 +129,7 @@ func (r *Repository) WorktreeReusable(ctx context.Context, dir string, revision 
 
 // RemoveWorktree takes the worktree away, and then the directory that held it.
 //
-// The order is the shell's (lib/run.sh:2450-2454). `git worktree remove
+// The order is the shell's (lib/run.sh:2456-2460). `git worktree remove
 // --force` first, so git forgets its administrative record; a plain delete
 // otherwise, because a directory git will not claim is still a directory in the
 // way. Then one level of parent, and one only: the `-p` form of rmdir walks up

@@ -106,7 +106,7 @@ func NewRepository(slug Slug, root, defaultBranch string, remotes []string) (Rep
 // name, and both would reach a filesystem path through PathKey.
 //
 // The shipped CLI refuses such a slug later and differently: ctx_load at
-// lib/run.sh:233-241 hands `--repo` straight to gh_pr_json, which dies with
+// lib/run.sh:234-242 hands `--repo` straight to gh_pr_json, which dies with
 // `could not read foo#42`. That is a divergence in refusal text, not in review
 // semantics, and closing it belongs with the port of the CLI's own argument
 // handling rather than here.

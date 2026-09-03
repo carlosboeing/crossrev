@@ -8,7 +8,7 @@ import (
 // A fork pull request whose payload names no head repository refuses, rather
 // than pushing to the repository the checkout happens to point at.
 //
-// lib/run.sh:285-291 sets CTX_HEAD_REPO to this repository ONLY on an explicit
+// lib/run.sh:291-297 sets CTX_HEAD_REPO to this repository ONLY on an explicit
 // `isCrossRepository: false`. Every other case reads it out of the payload and
 // leaves it empty when it is not there, which lib/legs.sh:468 then refuses.
 // Defaulting to the origin repository skipped that refusal, and the fork's

@@ -90,7 +90,7 @@ type Request struct {
 
 func (r Request) io() *ui.IO { return r.Out }
 
-// The two roles _auth_meta takes (lib/auth.sh:39-45). `loop` is the App the
+// The two roles _auth_meta takes (lib/auth.sh:39-59). `loop` is the App the
 // review and resolve jobs run as; `refresher` is the second App, carrying
 // secrets:write and nothing else, that exists only for a rotating credential on
 // an ephemeral runner.

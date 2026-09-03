@@ -88,7 +88,7 @@ func TestHaltOrder(t *testing.T) {
 	}
 }
 
-// TestZeroCapsAreNoCap pins the sentinel lib/config.sh:258 relies on: a cap of
+// TestZeroCapsAreNoCap pins the sentinel lib/config.sh:294 relies on: a cap of
 // zero bounds nothing. The generated table covers only the file cap.
 func TestZeroCapsAreNoCap(t *testing.T) {
 	base := policy.Termination{Verdict: core.VerdictIssuesRemain, Pass: core.PassNumber(9999), MaxPassesPerCycle: 0,

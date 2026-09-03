@@ -1,7 +1,7 @@
 // assets.go — the two JSON schemas, compiled in.
 //
 // Every shipped harness is given the schema for the leg it is running, and all
-// but one constrain their own output to it (lib/run.sh:1149-1150, 2070-2071). A checkout
+// but one constrain their own output to it (lib/run.sh:1155-1156, 2070-2071). A checkout
 // passes the file under `schemas/`; a binary has no checkout to pass, so it
 // carries the bytes.
 //

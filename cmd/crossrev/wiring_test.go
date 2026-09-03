@@ -201,10 +201,10 @@ func TestALegsReportIsSplitAcrossTheStreamsByKind(t *testing.T) {
 	}
 
 	// The whole block, byte for byte: the run header's blank line and two
-	// ui_say lines (lib/run.sh:1066-1067), three more ui_say, two ui_ok lines
+	// ui_say lines (lib/run.sh:1072-1073), three more ui_say, two ui_ok lines
 	// with the glyph, the verdict printf with its arrow and trailing blank
-	// (lib/run.sh:1317), then the resolve tip and its blank
-	// (lib/run.sh:1319-1322). The two-space indent and the `│  ✓ ` prefix are
+	// (lib/run.sh:1323), then the resolve tip and its blank
+	// (lib/run.sh:1325-1328). The two-space indent and the `│  ✓ ` prefix are
 	// the shell's, measured above.
 	want := "\n" +
 		"  Reviewing acme/widget#42 — pass 1\n" +
@@ -231,7 +231,7 @@ func TestALegsReportIsSplitAcrossTheStreamsByKind(t *testing.T) {
 // three-space consequence indent, and never to stdout.
 //
 // The reviewer answering `converged` alongside an actionable finding is the
-// cheapest real one to reach (lib/run.sh:1305, which is ui_warn).
+// cheapest real one to reach (lib/run.sh:1311, which is ui_warn).
 func TestALegsWarningGoesToStderr(t *testing.T) {
 	bin := binary(t)
 	fixture := newFixtureWith(t, convergedPayload)
@@ -477,7 +477,7 @@ func lastRunLog(t *testing.T, f fixture) string {
 	return string(body)
 }
 
-// The local run lock, run_lock_acquire at lib/run.sh:949 and :1768.
+// The local run lock, run_lock_acquire at lib/run.sh:955 and :1768.
 //
 // vcs.Repository.AcquireRunLock had no caller, so two terminals could drive the
 // same pull request at once and interleave their comments and replies.

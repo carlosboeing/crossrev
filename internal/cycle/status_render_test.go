@@ -154,7 +154,7 @@ func (f *statusPageForge) AwaitingPullRequests(context.Context, core.Slug) []for
 }
 
 // TestStatusRendersThePageTheShellPrints asserts the whole page byte for byte
-// against what `crossrev status` wrote (lib/run.sh:3055-3103): the five
+// against what `crossrev status` wrote (lib/run.sh:3061-3110): the five
 // sections, the PULL REQUEST and LOOP wording, the three-way passes line, the
 // backlog line, the gutter, the nine-column leg label and the outcome glyphs.
 func TestStatusRendersThePageTheShellPrints(t *testing.T) {
@@ -217,7 +217,7 @@ func statusFirstDifference(got, want string) string {
 }
 
 // TestStatusOmitsThePassesSectionWhenNothingRan pins the one section that is
-// dropped rather than printed empty (lib/run.sh:3087-3097). A heading with an
+// dropped rather than printed empty (lib/run.sh:3094-3104). A heading with an
 // empty body reads as a bug, and the passes line above already says none yet.
 func TestStatusOmitsThePassesSectionWhenNothingRan(t *testing.T) {
 	for _, p := range statusPages(t) {

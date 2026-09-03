@@ -62,7 +62,7 @@ backlog:
 }
 
 // TestPersist pins persist-before-resolve, both backlog destinations, and
-// that a failed write leaves the thread open (lib/run.sh:2144-2219, :2489-2530).
+// that a failed write leaves the thread open (lib/run.sh:2150-2225, :2489-2530).
 func TestPersist(t *testing.T) {
 	t.Run("a new github issue is filed before its thread is resolved", func(t *testing.T) {
 		e := setup(t)

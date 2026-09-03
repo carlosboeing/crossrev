@@ -40,7 +40,7 @@ func findingCount(raw json.RawMessage) int {
 
 // reportFatal records a leg that died on the pull request it had claimed
 // (_run_report_fatal at lib/run.sh:131-146, through
-// _run_report_invoke_failure at lib/run.sh:719-763).
+// _run_report_invoke_failure at lib/run.sh:725-769).
 //
 // The shell mounts this on the EXIT trap rather than on ui_die, because ui_die
 // is not the only way a leg dies: an unguarded failure under `set -e` and a
@@ -79,7 +79,7 @@ func (l *Leg) reportFatal(ctx context.Context, req Request, loaded Context, mark
 		MaxPass: cap,
 	})
 	// Best effort on every write below, which is what `|| true` is at
-	// lib/run.sh:744, :759 and :761: the harness error is the cause the
+	// lib/run.sh:750, :759 and :761: the harness error is the cause the
 	// operator needs, and a failure to record it must not replace it.
 	_ = l.editClaim(ctx, loaded.Repo, claimID, body, marker)
 	_, _ = l.applyPassLabels(ctx, req, loaded, marker.Pass, policy.PassHalted)

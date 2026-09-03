@@ -11,7 +11,7 @@ import (
 	"github.com/carlosboeing/crossrev/internal/ui"
 )
 
-// Trigger is who asked for the cycle (lib/run.sh:2896, :2903).
+// Trigger is who asked for the cycle (lib/run.sh:2902, :2903).
 type Trigger string
 
 const (
@@ -23,7 +23,7 @@ const (
 //
 // The parser is the command's; what it produces is this. NoTips is the one flag
 // that stays here rather than travelling on to a leg: the shell keeps
-// `--no-tips` out of `args` (lib/run.sh:2904) and appends its own to every leg
+// `--no-tips` out of `args` (lib/run.sh:2910) and appends its own to every leg
 // call, so the flag suppresses the cycle's single tip and nothing else.
 type Request struct {
 	PR              int
@@ -35,8 +35,8 @@ type Request struct {
 }
 
 // LegRequest is what one leg is invoked with: the arguments the shell collected
-// into `args` (lib/run.sh:2900-2905), plus the two flags it appends at the call
-// site (lib/run.sh:2944, :2946, :2972).
+// into `args` (lib/run.sh:2906-2911), plus the two flags it appends at the call
+// site (lib/run.sh:2950, :2946, :2972).
 //
 // Repo is the request's, not the loaded slug. The shell forwards only what it
 // parsed, so a cycle started without `--repo` forwards none and each leg
@@ -53,7 +53,7 @@ type LegRequest struct {
 
 // LegResult is how a leg stopped, as the driver reads it.
 //
-// The shell reads one bit: `leg_review … || return 1` (lib/run.sh:2944, :2946,
+// The shell reads one bit: `leg_review … || return 1` (lib/run.sh:2950, :2946,
 // :2972). A leg that fails has already said why, so nothing here carries a
 // message.
 type LegResult struct {
@@ -75,10 +75,10 @@ type ResolveLeg interface {
 	Run(ctx context.Context, req LegRequest) LegResult
 }
 
-// LoadRequest is one ctx_load call (lib/run.sh:232).
+// LoadRequest is one ctx_load call (lib/run.sh:233).
 //
 // The driver names the trigger on the first load only. Every later one is
-// `ctx_load "$pr" "$repo"` (lib/run.sh:2938, :2950, :2974), where the third
+// `ctx_load "$pr" "$repo"` (lib/run.sh:2944, :2950, :2974), where the third
 // argument defaults to human — so the fork and draft refusals, which are the
 // only trigger-gated ones, apply once and upfront rather than mid-loop.
 type LoadRequest struct {
@@ -91,7 +91,7 @@ type LoadRequest struct {
 //
 // Draft is a value rather than an error because ctx_load answers it with return
 // code 2 and the driver has a line of its own to print for it
-// (lib/run.sh:259-263, consumed at :2921-2925).
+// (lib/run.sh:265-269, consumed at :2921-2925).
 type State struct {
 	Repo              core.Slug
 	PR                int
@@ -109,7 +109,7 @@ type Loader interface {
 }
 
 // BoundInput is what _cycle_finish_at_bound is called with
-// (lib/run.sh:2932): the pass the pull request is on, the cap that stopped it,
+// (lib/run.sh:2938): the pass the pull request is on, the cap that stopped it,
 // and the leg arguments the driver would have forwarded.
 type BoundInput struct {
 	Pass  int
@@ -128,7 +128,7 @@ type BoundResult struct {
 }
 
 // Bound finishes a cycle whose newest review pass already sits at or past the
-// cap (lib/run.sh:2795-2889).
+// cap (lib/run.sh:2801-2895).
 //
 // It is a seam rather than a method so the port can arrive in its own file and
 // so a test can watch the driver hand over. A nil Bound is finishAtBound, which
@@ -136,7 +136,7 @@ type BoundResult struct {
 type Bound func(ctx context.Context, d *Driver, in BoundInput) BoundResult
 
 // Driver is cmd_cycle: the local-mode loop that runs the two legs in sequence
-// until the pass bound or a terminal state (lib/run.sh:2895-3016).
+// until the pass bound or a terminal state (lib/run.sh:2901-3022).
 //
 // State lives on the pull request rather than in memory, so every decision here
 // is taken off a context load the driver asks for again after each leg. That is
@@ -148,11 +148,11 @@ type Driver struct {
 	Loader  Loader
 	// Out is where ui_say and ui_end write.
 	Out io.Writer
-	// Nudge is run_upgrade_nudge (lib/run.sh:3777-3789). The environment read,
+	// Nudge is run_upgrade_nudge (lib/run.sh:3805-3817). The environment read,
 	// the config read and the workflow directory probe belong to the command
 	// that wires the driver; what belongs here is which endings call it.
 	Nudge func()
-	// Pairing is run_assert_cycle_pairing (lib/run.sh:575-587), asked about the
+	// Pairing is run_assert_cycle_pairing (lib/run.sh:581-593), asked about the
 	// harness override the request carried. Nil is no check.
 	Pairing func(override string) error
 	// Bound is _cycle_finish_at_bound.
@@ -180,7 +180,7 @@ func (d *Driver) nudge() {
 // Run drives the cycle.
 func (d *Driver) Run(ctx context.Context, req Request) Result {
 	if req.PR == 0 {
-		// lib/run.sh:2910
+		// lib/run.sh:2916
 		return Result{ExitCode: 1, Err: &ui.FatalError{
 			Reason: "crossrev cycle needs a pull request number",
 			Action: "Usage: crossrev cycle --pr 42",
@@ -188,7 +188,7 @@ func (d *Driver) Run(ctx context.Context, req Request) Result {
 	}
 	// Checked here as well as in the legs, because the context load below reads
 	// the trigger first and treats anything it does not recognise as human
-	// (lib/run.sh:2911-2916).
+	// (lib/run.sh:2917-2922).
 	switch req.Trigger {
 	case TriggerHuman, TriggerAutomatic:
 	default:
@@ -202,13 +202,13 @@ func (d *Driver) Run(ctx context.Context, req Request) Result {
 
 	// The draft rule is applied once, here, rather than left to the first leg:
 	// a cycle that declined mid-loop would report the reviewer as unable to
-	// finish (lib/run.sh:2918-2925).
+	// finish (lib/run.sh:2924-2931).
 	state, err := d.Loader.Load(ctx, LoadRequest{PR: req.PR, Repo: req.Repo, Trigger: req.Trigger})
 	if err != nil {
 		return Result{ExitCode: 1, Err: err}
 	}
 	if state.Draft {
-		// lib/run.sh:266-267. One message serves both legs, so it names
+		// lib/run.sh:272-273. One message serves both legs, so it names
 		// neither: a declined resolve leg told to "ask for a review" is
 		// given the wrong instruction. internal/review and internal/resolve
 		// print the same two lines for the same reason.
@@ -217,7 +217,7 @@ func (d *Driver) Run(ctx context.Context, req Request) Result {
 		return Result{ExitCode: 0}
 	}
 
-	// lib/run.sh:2926
+	// lib/run.sh:2932
 	if d.Pairing != nil {
 		if err := d.Pairing(req.HarnessOverride); err != nil {
 			return Result{ExitCode: 1, Err: err}
@@ -225,13 +225,13 @@ func (d *Driver) Run(ctx context.Context, req Request) Result {
 	}
 
 	max := state.MaxPassesPerCycle
-	// lib/run.sh:2928
+	// lib/run.sh:2934
 	out.Say(fmt.Sprintf("Cycling %s#%d, up to %d passes. Ctrl-C is safe — each leg finishes the write in flight.",
 		state.Repo, state.PR, max))
 
 	pass := prstate.CurrentReviewPass(state.Markers)
 	if pass >= max {
-		// lib/run.sh:2931-2934
+		// lib/run.sh:2937-2940
 		bound := d.Bound
 		if bound == nil {
 			bound = finishAtBound
@@ -247,10 +247,10 @@ func (d *Driver) Run(ctx context.Context, req Request) Result {
 		return Result{ExitCode: 0}
 	}
 
-	// lib/run.sh:2936
+	// lib/run.sh:2942
 	for i := 1; i <= max; i++ {
 		if i > 1 {
-			// lib/run.sh:2938-2943
+			// lib/run.sh:2944-2949
 			state, err = d.Loader.Load(ctx, d.reload(req))
 			if err != nil {
 				return Result{ExitCode: 1, Err: err}
@@ -261,7 +261,7 @@ func (d *Driver) Run(ctx context.Context, req Request) Result {
 				return Result{ExitCode: 0}
 			}
 		}
-		// lib/run.sh:2944, :2946. The continuation flag is what tells the review
+		// lib/run.sh:2950, :2946. The continuation flag is what tells the review
 		// leg the pass was generated rather than individually requested, and the
 		// pass bound is applied to a generated pass only.
 		if d.Review.Run(ctx, d.legRequest(req, i > 1)).Failed {
@@ -269,37 +269,37 @@ func (d *Driver) Run(ctx context.Context, req Request) Result {
 		}
 
 		// Re-read: the review leg wrote the state this decision reads
-		// (lib/run.sh:2949-2954).
+		// (lib/run.sh:2955-2960).
 		state, err = d.Loader.Load(ctx, d.reload(req))
 		if err != nil {
 			return Result{ExitCode: 1, Err: err}
 		}
 		pass = prstate.CurrentReviewPass(state.Markers)
-		// lib/run.sh:2952-2967, shared with the bound so a byte can only be
+		// lib/run.sh:2958-2973, shared with the bound so a byte can only be
 		// wrong in one place.
 		switch readReview(out, state, pass) {
 		case reviewHalted:
 			return Result{ExitCode: 0}
 		case reviewFinished:
 			// The tip sits after the inner if/else, not inside the converged
-			// arm (lib/run.sh:2968), so the escalation halt nudges too.
+			// arm (lib/run.sh:2974), so the escalation halt nudges too.
 			if !req.NoTips {
 				d.nudge()
 			}
 			return Result{ExitCode: 0}
 		}
 
-		// lib/run.sh:2972
+		// lib/run.sh:2978
 		if d.Resolve.Run(ctx, d.legRequest(req, false)).Failed {
 			return Result{ExitCode: 1}
 		}
 
-		// lib/run.sh:2974-2975
+		// lib/run.sh:2980-2981
 		state, err = d.Loader.Load(ctx, d.reload(req))
 		if err != nil {
 			return Result{ExitCode: 1, Err: err}
 		}
-		// lib/run.sh:2975-3010, shared with the bound. Without the halt arm the
+		// lib/run.sh:2981-3016, shared with the bound. Without the halt arm the
 		// driver would read a pass the resolve leg labelled halted, start
 		// another one anyway, and re-drive the resolver over work that is
 		// waiting on a person.
@@ -314,7 +314,7 @@ func (d *Driver) Run(ctx context.Context, req Request) Result {
 		}
 	}
 
-	// lib/run.sh:3013-3015
+	// lib/run.sh:3019-3021
 	out.End(fmt.Sprintf("Reached max_passes_per_cycle (%d) on %s#%d without converging. Every finding and reply is on the pull request.",
 		max, state.Repo, state.PR))
 	if !req.NoTips {
@@ -324,7 +324,7 @@ func (d *Driver) Run(ctx context.Context, req Request) Result {
 }
 
 // reload is every ctx_load after the first: the pull request and the repository
-// the operator named, and no trigger (lib/run.sh:2938, :2950, :2974).
+// the operator named, and no trigger (lib/run.sh:2944, :2950, :2974).
 func (d *Driver) reload(req Request) LoadRequest {
 	return LoadRequest{PR: req.PR, Repo: req.Repo, Trigger: TriggerHuman}
 }
@@ -344,7 +344,7 @@ func (d *Driver) legRequest(req Request, continuation bool) LegRequest {
 // hasStop reports whether the loop's stop label is on the pull request.
 //
 // The shell greps the space-joined label list for the name as a word
-// (lib/run.sh:2980), which also matches a label that merely ends in it, such as
+// (lib/run.sh:2986), which also matches a label that merely ends in it, such as
 // `team-crossrev/stop`. The name is matched whole here, which is the rule the
 // rest of the Go tree already reads this label by
 // (internal/review/context.go:169).

@@ -40,7 +40,7 @@ type RenderContext struct {
 
 const emDash = "—"
 
-// SeverityEmoji is run_severity_emoji (lib/run.sh:365-372).
+// SeverityEmoji is run_severity_emoji (lib/run.sh:371-378).
 func SeverityEmoji(severity string) string {
 	switch severity {
 	case "high":
@@ -54,7 +54,7 @@ func SeverityEmoji(severity string) string {
 	}
 }
 
-// CategoryEmoji is run_category_emoji (lib/run.sh:377-387).
+// CategoryEmoji is run_category_emoji (lib/run.sh:383-393).
 func CategoryEmoji(category string) string {
 	switch category {
 	case "correctness":
@@ -74,12 +74,12 @@ func CategoryEmoji(category string) string {
 	}
 }
 
-// FindingLabel is run_finding_label (lib/run.sh:410-416).
+// FindingLabel is run_finding_label (lib/run.sh:416-422).
 func FindingLabel(f Finding) string {
 	return fmt.Sprintf("%s [%s · %s]", SeverityEmoji(orQ(f.Severity)), ucFirst(orQ(f.Severity)), ucFirst(orQ(f.Category)))
 }
 
-// ActionableCount is run_actionable (lib/run.sh:350-360).
+// ActionableCount is run_actionable (lib/run.sh:356-366).
 func ActionableCount(findings []Finding, minFix string) int {
 	bar, err := core.ParseSeverity(minFix)
 	if err != nil {
@@ -98,7 +98,7 @@ func ActionableCount(findings []Finding, minFix string) int {
 	return n
 }
 
-// SameModel is _same_model (lib/run.sh:1449-1455).
+// SameModel is _same_model (lib/run.sh:1455-1461).
 func SameModel(want, got string) bool {
 	want = foldASCII(want)
 	got = foldASCII(got)
@@ -108,7 +108,7 @@ func SameModel(want, got string) bool {
 	return strings.Contains(got, want) || strings.Contains(want, got)
 }
 
-// Elapsed is _elapsed (lib/run.sh:1408-1415).
+// Elapsed is _elapsed (lib/run.sh:1414-1421).
 func Elapsed(from, to string) string {
 	if !digitsOnly(from) || !digitsOnly(to) {
 		return emDash
@@ -125,7 +125,7 @@ func Elapsed(from, to string) string {
 	return fmt.Sprintf("%dm %ds", secs/60, secs%60)
 }
 
-// Thousands is _thousands (lib/run.sh:1423-1430).
+// Thousands is _thousands (lib/run.sh:1429-1436).
 func Thousands(n string) string {
 	if !digitsOnly(n) {
 		return emDash
@@ -138,7 +138,7 @@ func Thousands(n string) string {
 	return n + out
 }
 
-// URLPath is _url_path (lib/run.sh:1603-1605).
+// URLPath is _url_path (lib/run.sh:1609-1611).
 func URLPath(path string) string {
 	parts := strings.Split(path, "/")
 	for i, p := range parts {
@@ -171,7 +171,7 @@ func isURIUnreserved(c byte) bool {
 	return false
 }
 
-// CommentBody is _review_comment_body (lib/run.sh:1367-1384).
+// CommentBody is _review_comment_body (lib/run.sh:1373-1390).
 func CommentBody(f Finding, pass int, harn, model, minFix string) string {
 	note := fmt.Sprintf("Below this repository's `min_fix_severity` (%s), so it is reported and left to a human.", minFix)
 	if f.PreExisting {
@@ -194,7 +194,7 @@ func CommentBody(f Finding, pass int, harn, model, minFix string) string {
 		marker)
 }
 
-// SummaryBody is _review_summary_body (lib/run.sh:1669-1724).
+// SummaryBody is _review_summary_body (lib/run.sh:1675-1730).
 func SummaryBody(findings []Finding, marker prstate.Marker, ctx RenderContext) string {
 	n := len(findings)
 	actionable := ActionableCount(findings, ctx.MinFix)

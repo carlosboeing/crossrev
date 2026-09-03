@@ -37,8 +37,8 @@ func TestProjectMapTrackerReadsTheField(t *testing.T) {
 		{"a two-hash heading closes it", "## Project Map\n\n## Other\n\n- **Tracker**: none\n", "", false},
 		// POSIX [[:space:]] holds the carriage return, so awk's
 		// /^##[[:space:]]/ closes the section on a bare `##` before a CRLF
-		// break (lib/config.sh:352), and the sed trims the CR off the value
-		// (lib/config.sh:362). Trimming space and tab alone leaves `none\r`,
+		// break (lib/config.sh:388), and the sed trims the CR off the value
+		// (lib/config.sh:398). Trimming space and tab alone leaves `none\r`,
 		// which stops matching `none`.
 		{"a carriage return is trimmed off the value", "## Project Map\r\n\r\n- **Tracker**: none\r\n", "none", true},
 		{"a carriage return closes the section", "## Project Map\n##\r\n- **Tracker**: none\n", "", false},
@@ -58,7 +58,7 @@ func TestProjectMapTrackerReadsTheField(t *testing.T) {
 	}
 }
 
-// The files are read in the order lib/config.sh:344 names them, and the first
+// The files are read in the order lib/config.sh:380 names them, and the first
 // one holding a Tracker wins.
 func TestProjectMapTrackerReadsTheThreeFilesInOrder(t *testing.T) {
 	tree := files{"": {
@@ -76,7 +76,7 @@ func TestProjectMapTrackerReadsTheThreeFilesInOrder(t *testing.T) {
 
 // A Tracker field that strips to nothing does not end the search either. The
 // Bash returns only when the stripped value is non-empty, and otherwise moves
-// to the next file (lib/config.sh:363-365).
+// to the next file (lib/config.sh:399-401).
 func TestATrackerThatStripsToNothingFallsThroughToTheNextFile(t *testing.T) {
 	tree := files{"": {
 		"AGENTS.md": "## Project Map\n\n- **Tracker**: (see the board)\n",
@@ -129,7 +129,7 @@ func TestAFileWithoutATrackerIsSkipped(t *testing.T) {
 }
 
 // Tier 1, the repository's own declaration, and what each value routes to
-// (lib/config.sh:408-429).
+// (lib/config.sh:444-465).
 func TestTheTrackerDecidesTheDestination(t *testing.T) {
 	tests := []struct {
 		tracker string
@@ -148,13 +148,13 @@ func TestTheTrackerDecidesTheDestination(t *testing.T) {
 		{"http://jira.example/browse/ENG", "none"},
 		// Linear, Jira and friends: somewhere real, nothing to write to yet.
 		{"Linear", "none"},
-		// lib/config.sh:413 is the glob `*github*issue*`, which is ordered.
+		// lib/config.sh:449 is the glob `*github*issue*`, which is ordered.
 		// A test for the two substrings in any order says GitHub Issues where
 		// the Bash says nothing to write to.
 		{"Issues on GitHub", "none"},
 		{"github issue tracker", "github_issues"},
-		// lib/config.sh:420 matches `*/*|*.md` on the lowercased value and
-		// then branches on the original at lib/config.sh:421, which is
+		// lib/config.sh:456 matches `*/*|*.md` on the lowercased value and
+		// then branches on the original at lib/config.sh:457, which is
 		// case-sensitive. `docs/TODO.MD` is a folder there.
 		{"docs/TODO.MD", "repository folder docs/TODO.MD"},
 		{"NOTES.MD", "repository folder NOTES.MD"},

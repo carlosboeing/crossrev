@@ -187,7 +187,7 @@ func TestCommonDirOutsideARepository(t *testing.T) {
 }
 
 // An unborn HEAD is the empty string in the shell (`|| true` at
-// lib/run.sh:1902), and the zero revision here.
+// lib/run.sh:1908), and the zero revision here.
 func TestHeadOnAnUnbornBranch(t *testing.T) {
 	git := testGit(t)
 	repo := initRepo(t, git, filepath.Join(realTempDir(t), "clone"))

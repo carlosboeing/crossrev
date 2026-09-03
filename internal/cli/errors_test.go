@@ -66,7 +66,7 @@ func TestExitCodesFromACommand(t *testing.T) {
 //
 // The shell's argument loops reach `shift 2` with one argument left. `shift`
 // fails, `set -euo pipefail` ends the process, and the reader gets an empty
-// terminal and status 1 (bin/crossrev:12, lib/run.sh:917). It is a defect of
+// terminal and status 1 (bin/crossrev:12, lib/run.sh:923). It is a defect of
 // the shell rather than a design, and it is reproduced because it is
 // observable.
 func TestExitCodesSilentStopSaysNothing(t *testing.T) {

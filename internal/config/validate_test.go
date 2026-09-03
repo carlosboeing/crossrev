@@ -189,7 +189,7 @@ func TestAnEndpointWithItsOwnTokenStillLoads(t *testing.T) {
 // A definition that is not a mapping holds no token_env to read. The jq asks
 // `(.value | type) == "object"` before it reads the key, so a string definition
 // passes this assertion and is refused later, by Endpoint, for the base_url it
-// does not have (lib/config.sh:321-323).
+// does not have (lib/config.sh:357-359).
 func TestANonMappingEndpointDefinitionPassesTheCredentialCheck(t *testing.T) {
 	document := "version: 1\nendpoints:\n  ollama: GH_TOKEN\n"
 	loaded := mustLoad(t, core.Revision{}, files{"": {".github/crossrev.yml": document}})
@@ -203,7 +203,7 @@ func TestANonMappingEndpointDefinitionPassesTheCredentialCheck(t *testing.T) {
 	}
 }
 
-// The endpoint check is last in the assert chain, where lib/config.sh:245 puts
+// The endpoint check is last in the assert chain, where lib/config.sh:281 puts
 // it, so a config wrong twice reports the same fault Bash reports.
 func TestTheEndpointCheckIsLastInTheAssertChain(t *testing.T) {
 	document := "version: 1\nbacklog:\n  destination: elsewhere\n" +

@@ -117,7 +117,7 @@ func TokenClaims(d Descriptor, credential []byte) (Claims, error) {
 // already expired: cred_seconds_left (lib/credentials.sh:77-84).
 //
 // `now` is a parameter rather than a call to time.Now because
-// lib/auth.sh:1006-1020 reads it twice around a refresh and compares the two,
+// lib/auth.sh:1030-1044 reads it twice around a refresh and compares the two,
 // and a test of that comparison cannot wait for the clock.
 func SecondsLeft(d Descriptor, credential []byte, now time.Time) (int64, error) {
 	claims, err := TokenClaims(d, credential)

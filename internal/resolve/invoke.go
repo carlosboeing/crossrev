@@ -83,7 +83,7 @@ func (l *Leg) prepareWorktree(ctx context.Context, s *session) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	// lib/run.sh:285-291. Only an explicit `isCrossRepository: false` means
+	// lib/run.sh:291-297. Only an explicit `isCrossRepository: false` means
 	// this repository's own branch and lets the head repository default to it.
 	// Every other case — a fork, or provenance the payload did not carry —
 	// reads the head repository out of the payload and leaves it EMPTY when it
@@ -151,7 +151,7 @@ func (l *Leg) invoke(ctx context.Context, s *session, marker prstate.Marker, wor
 			Pass:        s.pass,
 			Marker:      marker,
 			Resolutions: marker.Resolutions,
-			// ui_say (lib/run.sh:1991). Said before the commit and reply
+			// ui_say (lib/run.sh:1997). Said before the commit and reply
 			// steps, which is where the shell says it.
 			Messages: []ui.Line{ui.Say("The previous attempt already recorded its resolutions, so the resolver is not run again.")},
 		}
@@ -249,7 +249,7 @@ func (l *Leg) invoke(ctx context.Context, s *session, marker prstate.Marker, wor
 		transcript := ""
 		if l.Log != nil {
 			// The payload path per attempt, as the review leg does. Bash writes
-			// "$CROSSREV_TRANSCRIPT_BASE.payload" for both legs (lib/run.sh:819).
+			// "$CROSSREV_TRANSCRIPT_BASE.payload" for both legs (lib/run.sh:825).
 			// Without it the codex adapter refuses with ErrScratch, so a native
 			// resolve leg could not run under codex at all, and every other
 			// harness lost its per-attempt payload from the run log.
@@ -274,12 +274,12 @@ func (l *Leg) invoke(ctx context.Context, s *session, marker prstate.Marker, wor
 		if _, _, restoreErr := sandbox.Restore(workdir, paths); restoreErr != nil {
 			// The run's own failure is the cause, not a placeholder. Bash puts
 			// the reason the attempt is being abandoned in this slot
-			// (lib/run.sh:684, called from :881 and :893), so a runner that
+			// (lib/run.sh:690, called from :881 and :893), so a runner that
 			// died must say so here rather than be replaced by the restore.
 			//
 			// The envelope is built here rather than before the restore, so the
 			// order of the two on the success path stays the shell's: Bash
-			// restores at lib/run.sh:834 and only then reads `.ok` at :840. It
+			// restores at lib/run.sh:840 and only then reads `.ok` at :840. It
 			// is safe to build after a failed restore because no adapter reads a
 			// quarantined path — the one that touches disk at all, codex, reads
 			// inv.PayloadPath, which runlog puts in the run directory.
@@ -287,7 +287,7 @@ func (l *Leg) invoke(ctx context.Context, s *session, marker prstate.Marker, wor
 		}
 		if l.Log != nil {
 			// duration in whole seconds, which is what `$SECONDS` counts
-			// (lib/run.sh:825, :831).
+			// (lib/run.sh:831, :831).
 			l.Log.Event("invoke", fmt.Sprintf("harness=%s attempt=%d exit=%d duration=%ds",
 				s.settings.Harness, attempt, res.ExitCode, int(l.now().Sub(started).Seconds())))
 		}
@@ -338,7 +338,7 @@ func (l *Leg) invoke(ctx context.Context, s *session, marker prstate.Marker, wor
 					reset.Messages = append(msgs, reset.Messages...)
 					return *reset
 				}
-				// ui_warn, the pair kept apart (lib/run.sh:882-883).
+				// ui_warn, the pair kept apart (lib/run.sh:888-889).
 				msgs = append(msgs, ui.Warn(
 					fmt.Sprintf("%s returned an answer that contradicts what it was given — %s", s.settings.Harness, sem.Problem),
 					"The shape is right, so this is the model drifting rather than a bug in CrossRev or the harness. Anything it edited has been put back, and it is being asked once more; a second one is fatal."))
@@ -357,7 +357,7 @@ func (l *Leg) invoke(ctx context.Context, s *session, marker prstate.Marker, wor
 				reset.Messages = append(msgs, reset.Messages...)
 				return *reset
 			}
-			// ui_warn (lib/run.sh:894-895). Only a harness that does not
+			// ui_warn (lib/run.sh:900-901). Only a harness that does not
 			// constrain its own output reaches here: a native one starts with
 			// a budget of 1.
 			msgs = append(msgs, ui.Warn(
@@ -367,7 +367,7 @@ func (l *Leg) invoke(ctx context.Context, s *session, marker prstate.Marker, wor
 		}
 		msgs = append(msgs, l.invokeAbort(ctx, work, snapIndex, snapTree)...)
 		// Two endings, and the difference is whose bug it is
-		// (lib/run.sh:899-905).
+		// (lib/run.sh:905-911).
 		out := refuse(fmt.Sprintf("%s returned an object that does not match the schema — %s", s.settings.Harness, problem),
 			shapeExhaustedAction(entry.SchemaNative))
 		out.Messages = append(msgs, out.Messages...)
@@ -375,7 +375,7 @@ func (l *Leg) invoke(ctx context.Context, s *session, marker prstate.Marker, wor
 	}
 }
 
-// shapeExhaustedAction is lib/run.sh:901 and :904.
+// shapeExhaustedAction is lib/run.sh:907 and :904.
 func shapeExhaustedAction(schemaNative bool) string {
 	if schemaNative {
 		return "This harness validates output against the schema natively, so a mismatch is an adapter or harness bug rather than model drift. Nothing has been written to the pull request, and the rejected attempt's edits have been put back."
@@ -383,7 +383,7 @@ func shapeExhaustedAction(schemaNative bool) string {
 	return "That harness does not constrain its own output, so two mismatches in a row is the model failing the JSON instruction rather than an adapter bug. Name a model that follows a JSON instruction. Nothing has been written to the pull request, and the rejected attempt's edits have been put back."
 }
 
-// retryReset is _run_retry_reset (lib/run.sh:680-686): put the tree back, or
+// retryReset is _run_retry_reset (lib/run.sh:686-692): put the tree back, or
 // refuse to ask again at all.
 //
 // Asking again on top of a discarded attempt's edits is worse than losing the
@@ -400,7 +400,7 @@ func (l *Leg) retryReset(ctx context.Context, work Git, index, tree, harnessName
 	return &out
 }
 
-// invokeAbort is _run_invoke_abort (lib/run.sh:698-704): the way out when an
+// invokeAbort is _run_invoke_abort (lib/run.sh:704-710): the way out when an
 // answer is rejected and there is no attempt left to make.
 //
 // The exhausted path restores too. Without it the last rejected attempt's edits

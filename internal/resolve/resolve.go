@@ -48,7 +48,7 @@ func (l *Leg) Run(ctx context.Context, req Request) (out Result) {
 	}
 
 	// The run header, two bare printfs after the settings are chosen and
-	// before the claim (lib/run.sh:1913-1914):
+	// before the claim (lib/run.sh:1919-1920):
 	//
 	//	printf '\n  Resolving %s#%s — %s\n' …
 	//	printf '  Resolver: %s%s%s\n' "$harness" "${model:+, $model}" "${effort:+, $effort effort}"
@@ -79,7 +79,7 @@ func (l *Leg) Run(ctx context.Context, req Request) (out Result) {
 	// open, so every way out of the leg below records the failure on it until
 	// the complete edit lands. publish's own fail path reports as well, so the
 	// flag stops the pair reporting twice — CROSSREV_LEG_REPORTED at
-	// lib/run.sh:725.
+	// lib/run.sh:731.
 	//
 	// 130 is not a failure: the claim it leaves is deliberately resumable
 	// (lib/run.sh:141-143).

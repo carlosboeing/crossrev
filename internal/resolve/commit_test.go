@@ -18,7 +18,7 @@ import (
 
 // TestCommit pins restore-before-commit, git.hooks, one commit for the
 // current resolver change, and a kept worktree on refusal
-// (lib/run.sh:2222-2278, lib/github.sh:436-527).
+// (lib/run.sh:2228-2284, lib/github.sh:436-527).
 func TestCommit(t *testing.T) {
 	t.Run("quarantine is restored before the commit snapshot", func(t *testing.T) {
 		e := setup(t)

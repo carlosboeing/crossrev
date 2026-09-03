@@ -538,8 +538,8 @@ func (d Document) For(name string) (Descriptor, bool) {
 // default pair and the lookup's `found` is not read.
 //
 // The laxness is covered rather than accidental: an unknown name is refused by
-// run_leg_settings' adapter test (lib/run.sh:500) with a message that names the
-// fault, before this check runs at lib/run.sh:520.
+// run_leg_settings' adapter test (lib/run.sh:506) with a message that names the
+// fault, before this check runs at lib/run.sh:526.
 func (d Document) ServesLeg(name, leg string) bool {
 	entry, _ := d.For(name)
 	return slices.Contains(entry.Legs(), leg)

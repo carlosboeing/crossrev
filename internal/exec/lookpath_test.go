@@ -218,7 +218,7 @@ func TestLookPathReadsAnEmptyPathElementAsTheCurrentDirectory(t *testing.T) {
 //	$ bash -c 'command -v ./adir'        → nothing, exit 1
 //	$ bash -c 'command -v /abs/adir'     → nothing, exit 1
 //
-// The same fact is what lib/run.sh:524's `command -v` answers for a directory
+// The same fact is what lib/run.sh:530's `command -v` answers for a directory
 // named like a tool, and lookpath.go:36-40 records it for the search half.
 func TestLookPathRefusesADirectoryNamedWithASeparator(t *testing.T) {
 	root := t.TempDir()

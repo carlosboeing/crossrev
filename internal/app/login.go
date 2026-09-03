@@ -16,7 +16,7 @@ import (
 	"github.com/carlosboeing/crossrev/internal/ui"
 )
 
-// LoginRequest is `crossrev auth login`'s parsed options (lib/auth.sh:502-509).
+// LoginRequest is `crossrev auth login`'s parsed options (lib/auth.sh:516-523).
 type LoginRequest struct {
 	// Owner is --owner. Empty means detect it from the repository the working
 	// directory belongs to.
@@ -31,20 +31,20 @@ type LoginRequest struct {
 // ErrDeclined is what a refused confirmation returns.
 //
 // The Bash function prints "Nothing was created." and returns 1
-// (lib/auth.sh:608), which is not a failure to report: the reader was asked and
+// (lib/auth.sh:622), which is not a failure to report: the reader was asked and
 // said no. It carries no ui.FatalError, so nothing prints an error block over
 // the top of the sentence that already said what happened.
 var ErrDeclined = errors.New("the reader declined")
 
 // Login registers a GitHub App for an owner, and then installs it
-// (auth_login, lib/auth.sh:501).
+// (auth_login, lib/auth.sh:515).
 func (c *Commands) Login(ctx context.Context, req LoginRequest) error {
 	role := req.Role
 	if role == "" {
 		role = RoleLoop
 	}
 
-	// Rejects an unknown role before anything opens (lib/auth.sh:511). The
+	// Rejects an unknown role before anything opens (lib/auth.sh:525). The
 	// permissions are read again below; this call is for its refusal alone.
 	if _, err := RolePermissions(role); err != nil {
 		var refusal *ui.FatalError
@@ -54,7 +54,7 @@ func (c *Commands) Login(ctx context.Context, req LoginRequest) error {
 		return err
 	}
 
-	// `_ui_input_source >/dev/null || _ui_no_input` (lib/auth.sh:513): the
+	// `_ui_input_source >/dev/null || _ui_no_input` (lib/auth.sh:527): the
 	// check is outside ui_confirm, so --yes does not skip it. A flow that
 	// opened a browser and then found it could not ask anything would leave a
 	// half-registered App behind.
@@ -123,7 +123,7 @@ func (c *Commands) Login(ctx context.Context, req LoginRequest) error {
 	//
 	// The shell asks two questions here — is nc installed, and is a port free —
 	// and this asks one, because binding the socket answers both
-	// (lib/auth.sh:553-558).
+	// (lib/auth.sh:567-572).
 	port := FallbackPort
 	listener, listenErr := c.listen()
 	if listenErr == nil {
@@ -182,12 +182,12 @@ func (c *Commands) Login(ctx context.Context, req LoginRequest) error {
 	}
 	// The page carries the manifest and the state value, so it goes when the
 	// flow does — on every arm, including the refusals below. `trap RETURN` is
-	// what the shell uses (lib/auth.sh:613).
+	// what the shell uses (lib/auth.sh:627).
 	defer os.Remove(page)
 
 	// fromListener records which of the two paths produced the code, because
 	// only a redirect can be required to send the state back
-	// (lib/auth.sh:664-666).
+	// (lib/auth.sh:678-680).
 	var code, returnedState string
 	fromListener := false
 	if listenErr == nil {
@@ -203,7 +203,7 @@ func (c *Commands) Login(ctx context.Context, req LoginRequest) error {
 		if err == nil {
 			code, returnedState = redirected.Code, redirected.State
 			// `if [[ -n "$code" ]]; then from_listener=1; fi`
-			// (lib/auth.sh:683). A wait that ended on a decoy request leaves
+			// (lib/auth.sh:697). A wait that ended on a decoy request leaves
 			// an empty code, and that is the paste path rather than a redirect.
 			if code != "" {
 				fromListener = true
@@ -251,7 +251,7 @@ func (c *Commands) Login(ctx context.Context, req LoginRequest) error {
 			"Paste the full URL from the address bar, or just the value after code=")
 	}
 	// The two paths make different claims, so they are checked differently
-	// (lib/auth.sh:715-736).
+	// (lib/auth.sh:729-750).
 	//
 	// A request on the listener is a redirect. The listener binds loopback
 	// only, so any request to it came from a process on this machine, and
@@ -270,7 +270,7 @@ func (c *Commands) Login(ctx context.Context, req LoginRequest) error {
 		stateOK = false
 	}
 	if !stateOK {
-		// The lowercase `crossrev` is the shell's own byte (lib/auth.sh:735).
+		// The lowercase `crossrev` is the shell's own byte (lib/auth.sh:749).
 		return c.IO.Die(
 			"the state value GitHub returned does not match the one CrossRev sent",
 			"This request did not come from the page crossrev opened. Start again: crossrev auth login --owner "+owner)
@@ -292,7 +292,7 @@ func (c *Commands) Login(ctx context.Context, req LoginRequest) error {
 		return fmt.Errorf("could not create %s: %w", dir, err)
 	}
 	// chmod after mkdir -p, because mkdir applies the umask and an existing
-	// directory keeps whatever mode it already had (lib/auth.sh:701).
+	// directory keeps whatever mode it already had (lib/auth.sh:715).
 	if err := os.Chmod(dir, 0o700); err != nil {
 		return fmt.Errorf("could not set the mode of %s: %w", dir, err)
 	}
@@ -302,7 +302,7 @@ func (c *Commands) Login(ctx context.Context, req LoginRequest) error {
 	pemPath := dir + "/" + owner + "." + role + ".pem"
 	// Rename rather than create-then-chmod, so the key is never briefly
 	// readable and never inherits a wide mode from a file already at that path
-	// (lib/auth.sh:770-774).
+	// (lib/auth.sh:787-791).
 	if err := write0600(pemPath, []byte(registration.PEM)); err != nil {
 		return c.IO.Die(
 			"could not write the private key to "+pemPath,
@@ -321,7 +321,7 @@ func (c *Commands) Login(ctx context.Context, req LoginRequest) error {
 
 	// The shell compares the raw `stat` output here rather than the padded
 	// form `auth status` prints, so "600" is the string that matches
-	// (lib/auth.sh:719-727).
+	// (lib/auth.sh:733-741).
 	storedMode := strings.TrimPrefix(fileMode(pemPath), "0")
 
 	c.IO.Section("Registered")
@@ -344,7 +344,7 @@ func (c *Commands) Login(ctx context.Context, req LoginRequest) error {
 }
 
 // openPage hands the local page to a browser, warning rather than failing when
-// none can be started (lib/auth.sh:640-642 and :653-655).
+// none can be started (lib/auth.sh:654-656 and :653-655).
 func (c *Commands) openPage(path string) {
 	url := "file://" + path
 	if err := c.Browser.Open(context.Background(), url); err != nil {
@@ -356,7 +356,7 @@ func (c *Commands) openPage(path string) {
 
 // writeLoginPage puts the page somewhere a browser can open it, which is
 // `mktemp "$tmpdir/crossrev-manifest.XXXXXX"` renamed to end in `.html`
-// (lib/auth.sh:626-640). os.CreateTemp puts the suffix on for us, so there is
+// (lib/auth.sh:640-654). os.CreateTemp puts the suffix on for us, so there is
 // no rename here and no counterpart to the shell's guard on it.
 //
 // It is created 0600. The shell's mktemp does the same, and it matters: the
@@ -366,7 +366,7 @@ func (c *Commands) writeLoginPage(body string) (string, error) {
 	file, err := os.CreateTemp("", "crossrev-manifest-*.html")
 	if err != nil {
 		// The shell trims one trailing slash off $TMPDIR before naming it
-		// (`${tmpdir%/}`, lib/auth.sh:626), so the action line reads the same
+		// (`${tmpdir%/}`, lib/auth.sh:640), so the action line reads the same
 		// either way the reader set it.
 		dir := strings.TrimSuffix(os.TempDir(), "/")
 		return "", c.IO.Die(
@@ -382,7 +382,7 @@ func (c *Commands) writeLoginPage(body string) (string, error) {
 }
 
 // requireInput is `_ui_input_source >/dev/null || _ui_no_input`
-// (lib/auth.sh:513): it resolves the answer source without asking anything, so
+// (lib/auth.sh:527): it resolves the answer source without asking anything, so
 // a flow that cannot ask is stopped before it opens a browser.
 //
 // The two sentences are internal/ui/input.go:105-108's, repeated because
@@ -414,7 +414,7 @@ func (c *Commands) listen() (*Listener, error) {
 	return Listen()
 }
 
-// stateValue is `openssl rand -hex 16` (lib/auth.sh:548): sixteen random bytes
+// stateValue is `openssl rand -hex 16` (lib/auth.sh:562): sixteen random bytes
 // as thirty-two hex characters.
 //
 // It is what ties the redirect to the page CrossRev opened, so the bytes come
@@ -433,7 +433,7 @@ func (c *Commands) stateValue() (string, error) {
 }
 
 // pastedQueryValue is the sed the paste fallback runs:
-// `s/.*[?&]NAME=\([^&]*\).*/\1/p` (lib/auth.sh:668-669).
+// `s/.*[?&]NAME=\([^&]*\).*/\1/p` (lib/auth.sh:682-683).
 //
 // It is one character different from the listener's, and the difference is
 // deliberate on the shell's part: a pasted line has no ` HTTP/1.1` on the end
@@ -462,7 +462,7 @@ func pastedQueryValue(line, name string) string {
 // --- the manifest, and the page that posts it -------------------------------
 
 // LoginManifest is the App manifest GitHub creates the App from
-// (lib/auth.sh:562-575).
+// (lib/auth.sh:576-589).
 //
 // The keys are in jq's order because they are written in it, and the whole
 // thing is one line because `jq -cn` is compact — it goes into an HTML
@@ -484,7 +484,7 @@ func LoginManifest(name, redirect string, permissions []byte) []byte {
 }
 
 // LoginPage is the local page the browser is sent to (the heredoc at
-// lib/auth.sh:615-629), byte for byte, trailing newline included.
+// lib/auth.sh:629-643), byte for byte, trailing newline included.
 //
 // It exists because GitHub's App-manifest flow takes a POST and a browser
 // cannot be pointed at one. The form submits itself; the button is for when
@@ -512,7 +512,7 @@ func LoginPage(appName, postURL, manifest, state string) string {
 }
 
 // loginMetadata is the file `auth login` writes beside the key
-// (lib/auth.sh:708-714): jq's pretty format, keys in the order they are named.
+// (lib/auth.sh:722-728): jq's pretty format, keys in the order they are named.
 //
 // owner_id and id are numbers, because the shell passes both with `--argjson`.
 // An owner id that is not a number is refused here; jq would error and the
@@ -537,7 +537,7 @@ func loginMetadata(owner, ownerType, ownerID string, id int64, slug, name, role,
 // --- exchanging the code for the App ----------------------------------------
 
 // Registration is what GitHub answers when a manifest is converted
-// (lib/auth.sh:691-694).
+// (lib/auth.sh:705-708).
 type Registration struct {
 	// ID is the App's numeric id, zero for a response carrying none.
 	ID int64
@@ -551,7 +551,7 @@ type Registration struct {
 }
 
 // ConvertManifest exchanges a registration code for the App
-// (lib/auth.sh:685).
+// (lib/auth.sh:699).
 //
 // The code works once and expires an hour after the App is created, so a failed
 // exchange is not retried here — the caller says so and stops.
@@ -565,7 +565,7 @@ func (g *GH) ConvertManifest(ctx context.Context, code string) (Registration, er
 		Path: program,
 		Args: []string{"api", "--method", "POST", "app-manifests/" + code + "/conversions"},
 		Env:  g.env,
-		// `2>&1` at lib/auth.sh:685: the shell captures both streams into the
+		// `2>&1` at lib/auth.sh:699: the shell captures both streams into the
 		// value it parses, so a warning on stderr is part of what jq reads.
 		Streams: exec.StreamsCombined,
 	})

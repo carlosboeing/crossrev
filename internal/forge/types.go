@@ -23,7 +23,7 @@ type PullRequest struct {
 	ChangedFiles int
 	Labels       []Label
 	// IsCrossRepository is true for a fork AND for a payload that did not
-	// carry the field at all. lib/run.sh:284 records the second case as
+	// carry the field at all. lib/run.sh:290 records the second case as
 	// `unknown`, and every reader tests for an explicit `false`, so the two
 	// take the same branch everywhere. Only a payload saying `false` means
 	// this repository's own branch.
@@ -105,7 +105,7 @@ type IssueComment struct {
 // AwaitingPullRequest is one open pull request the watchdog was handed: its
 // number, every label on it, and the revision it points at.
 //
-// It is the three fields lib/run.sh:3692 selects and nothing else. The sweep
+// It is the three fields lib/run.sh:3708 selects and nothing else. The sweep
 // decides from marker and label state alone, so a wider read would carry
 // nothing it could use.
 type AwaitingPullRequest struct {
@@ -116,7 +116,7 @@ type AwaitingPullRequest struct {
 	// HeadSHA is `.head.sha`, printed abbreviated on the retry line.
 	HeadSHA string
 	// Draft is `draft`, which rides along in the same list response
-	// (lib/run.sh:3708). The watchdog reports a draft and skips it rather
+	// (lib/run.sh:3736). The watchdog reports a draft and skips it rather
 	// than retrying a leg no automatic invocation will run.
 	Draft bool
 }

@@ -101,7 +101,7 @@ func TestDeclinedPassRemovesMutuallyExclusiveLabels(t *testing.T) {
 // One message serves both legs, so it names neither. It told a declined resolve
 // leg that nothing would "review" the pull request and to ask for a review,
 // which is the wrong instruction for the leg that was refused
-// (lib/run.sh:266-267).
+// (lib/run.sh:272-273).
 func TestAutomaticDraftRefusalNamesNeitherLeg(t *testing.T) {
 	e := newEnv(t)
 	e.forge.pr.IsDraft = true

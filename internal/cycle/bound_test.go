@@ -18,7 +18,7 @@ func sayLine(text string) string { return "  " + text + "\n" }
 // TestBoundStartsNoFurtherPassAtTheCap pins that a cap of three runs no fourth
 // pass. The pull request sits on a complete review pass 3 with an actionable
 // finding and no resolve marker, so the pass is owed its resolve leg and
-// nothing else (lib/run.sh:2853-2854, :2887). Measured:
+// nothing else (lib/run.sh:2859-2860, :2887). Measured:
 //
 //	Pass 3 is unfinished, and max_passes_per_cycle (3) starts no further pass. Its resolve leg is still owed.
 //	LEG resolve --pr 42 --no-tips
@@ -42,7 +42,7 @@ func TestBoundStartsNoFurtherPassAtTheCap(t *testing.T) {
 }
 
 // TestBoundRunsNoResolveWhenTheReviewRaisedNothingActionable pins the arm at
-// lib/run.sh:2837-2846: a complete review pass at the bound that raised nothing
+// lib/run.sh:2843-2852: a complete review pass at the bound that raised nothing
 // at or above min_fix_severity is a convergence, and the resolve leg is never
 // billed for it.
 func TestBoundRunsNoResolveWhenTheReviewRaisedNothingActionable(t *testing.T) {
@@ -63,7 +63,7 @@ func TestBoundRunsNoResolveWhenTheReviewRaisedNothingActionable(t *testing.T) {
 const (
 	// An open claim: the review leg wrote its marker and has not come back.
 	reviewStarted = `{"v":1,"leg":"review","pass":%d,"state":"started"}`
-	// A decline over a pass that was mid-flight — the shape lib/run.sh:2812
+	// A decline over a pass that was mid-flight — the shape lib/run.sh:2818
 	// warns the continuation flag would write.
 	reviewDeclined = `{"v":1,"leg":"review","pass":%d,"state":"declined"}`
 	// The resolve leg claimed the pass and has not finished it.
@@ -72,7 +72,7 @@ const (
 
 // --- resuming the pass already under way -------------------------------------
 
-// TestBoundResumesAnOpenClaimWithoutTheContinuationFlag pins lib/run.sh:2817-2818.
+// TestBoundResumesAnOpenClaimWithoutTheContinuationFlag pins lib/run.sh:2823-2824.
 // `started` is an open claim, and the review leg resumes it at its existing pass
 // number. The bound must not be applied to that: the continuation flag would
 // refuse the resume, write a declined marker over a pass that is mid-flight, and
@@ -99,7 +99,7 @@ func TestBoundResumesAnOpenClaimWithoutTheContinuationFlag(t *testing.T) {
 	}
 }
 
-// TestBoundResumesAnythingElseWithTheContinuationFlag pins lib/run.sh:2819-2820.
+// TestBoundResumesAnythingElseWithTheContinuationFlag pins lib/run.sh:2825-2826.
 // A declined marker leaves the leg to compute a pass number of its own, and the
 // bound is the only thing stopping it starting one, so that case keeps the flag.
 //
@@ -142,7 +142,7 @@ func TestBoundResumesAPassWithNoMarkerAtAllWithTheContinuationFlag(t *testing.T)
 	r.wantOrder(t, "review+continuation", "load", "resolve", "load")
 }
 
-// TestBoundStopsWhenTheResumedReviewDidNotFinish pins lib/run.sh:2825-2828.
+// TestBoundStopsWhenTheResumedReviewDidNotFinish pins lib/run.sh:2831-2834.
 // Measured against the shell with a review leg that left its claim open:
 //
 //	└  Stopped on pass 3 of acme/widget#42 — the review leg did not finish, so no resolve leg follows it.
@@ -161,7 +161,7 @@ func TestBoundStopsWhenTheResumedReviewDidNotFinish(t *testing.T) {
 		endLine("Stopped on pass 3 of acme/widget#42 — the review leg did not finish, so no resolve leg follows it."))
 }
 
-// TestBoundRereadsThePassAfterTheResume pins lib/run.sh:2823: the pass is
+// TestBoundRereadsThePassAfterTheResume pins lib/run.sh:2829: the pass is
 // recomputed off the reload, so a review leg that resumed at a number of its own
 // is reported at that number rather than at the one the bound was called with.
 func TestBoundRereadsThePassAfterTheResume(t *testing.T) {
@@ -181,7 +181,7 @@ func TestBoundRereadsThePassAfterTheResume(t *testing.T) {
 
 // --- the two `|| return 1` sites ---------------------------------------------
 
-// TestBoundReturnsOneWhenTheReviewLegFails pins lib/run.sh:2818 and :2820.
+// TestBoundReturnsOneWhenTheReviewLegFails pins lib/run.sh:2824 and :2820.
 // Measured: the shell prints the resuming line, runs the leg, and returns 1
 // without loading again.
 func TestBoundReturnsOneWhenTheReviewLegFails(t *testing.T) {
@@ -199,7 +199,7 @@ func TestBoundReturnsOneWhenTheReviewLegFails(t *testing.T) {
 	r.wantOrder(t, "load", "review")
 }
 
-// TestBoundReturnsOneWhenTheResolveLegFails pins lib/run.sh:2854.
+// TestBoundReturnsOneWhenTheResolveLegFails pins lib/run.sh:2860.
 func TestBoundReturnsOneWhenTheResolveLegFails(t *testing.T) {
 	r := newRig(t, []loadStep{{state: loaded(t, marker(reviewIssues, 3))}})
 	r.driver.Resolve = &fakeLeg{rec: r.rec, leg: core.LegResolve, fail: true}
@@ -213,7 +213,7 @@ func TestBoundReturnsOneWhenTheResolveLegFails(t *testing.T) {
 }
 
 // TestBoundReturnsTheLoadRefusal pins that a refusal from the reload reaches the
-// caller. The shell calls ctx_load unchecked here (lib/run.sh:2822, :2860) and
+// caller. The shell calls ctx_load unchecked here (lib/run.sh:2828, :2860) and
 // every failure inside it is a ui_die that prints and exits the process, so the
 // message is the operator's either way; carrying it on BoundResult is how the
 // port keeps it.
@@ -235,7 +235,7 @@ func TestBoundReturnsTheLoadRefusal(t *testing.T) {
 }
 
 // TestBoundReturnsTheLoadRefusalAfterTheResolveLeg pins the second reload
-// (lib/run.sh:2858): a refusal there exits 1 with its message, the same as the
+// (lib/run.sh:2864): a refusal there exits 1 with its message, the same as the
 // first reload's, rather than reading as a clean stop.
 func TestBoundReturnsTheLoadRefusalAfterTheResolveLeg(t *testing.T) {
 	refusal := &ui.FatalError{Reason: "could not read acme/widget#42", Action: "Check the number."}
@@ -257,7 +257,7 @@ func TestBoundReturnsTheLoadRefusalAfterTheResolveLeg(t *testing.T) {
 
 // --- the verdict reading, shared with the loop -------------------------------
 
-// TestBoundHaltsOnABlockedReview pins lib/run.sh:2833-2836.
+// TestBoundHaltsOnABlockedReview pins lib/run.sh:2839-2842.
 func TestBoundHaltsOnABlockedReview(t *testing.T) {
 	r := newRig(t, []loadStep{{state: loaded(t, marker(reviewBlocked, 3))}})
 
@@ -269,7 +269,7 @@ func TestBoundHaltsOnABlockedReview(t *testing.T) {
 }
 
 // TestBoundReadsAnAbsentVerdictAsBlocked pins the `// "blocked"` default at
-// lib/run.sh:2831.
+// lib/run.sh:2837.
 func TestBoundReadsAnAbsentVerdictAsBlocked(t *testing.T) {
 	r := newRig(t, []loadStep{
 		{state: loaded(t, `{"v":1,"leg":"review","pass":3,"state":"complete","findings":[]}`)},
@@ -282,7 +282,7 @@ func TestBoundReadsAnAbsentVerdictAsBlocked(t *testing.T) {
 }
 
 // TestBoundConvergesOnAConvergedReview pins the converged arm of
-// lib/run.sh:2837-2845.
+// lib/run.sh:2843-2851.
 func TestBoundConvergesOnAConvergedReview(t *testing.T) {
 	r := newRig(t, []loadStep{{state: loaded(t, marker(reviewConverged, 3))}})
 
@@ -293,7 +293,7 @@ func TestBoundConvergesOnAConvergedReview(t *testing.T) {
 		endLine("Converged after pass 3 — nothing at or above min_fix_severity (medium) remains."))
 }
 
-// TestBoundHaltsOnAnEmptyPassWhileAnEscalationStands pins lib/run.sh:2841-2842:
+// TestBoundHaltsOnAnEmptyPassWhileAnEscalationStands pins lib/run.sh:2847-2848:
 // the review leg already wrote the label this message reports, so an empty pass
 // with an escalation standing is not read out as a convergence.
 func TestBoundHaltsOnAnEmptyPassWhileAnEscalationStands(t *testing.T) {
@@ -323,7 +323,7 @@ func TestBoundConvergesOnAConvergedVerdictDespiteAnEscalation(t *testing.T) {
 }
 
 // TestBoundNeverNudges pins the absence of run_upgrade_nudge from
-// lib/run.sh:2795-2889. The loop nudges after a convergence (lib/run.sh:2968);
+// lib/run.sh:2801-2895. The loop nudges after a convergence (lib/run.sh:2974);
 // this function does not, and the tip is not suppressed by --no-tips here
 // because it is never reached.
 func TestBoundNeverNudges(t *testing.T) {
@@ -352,7 +352,7 @@ func TestBoundNeverNudges(t *testing.T) {
 
 // --- the pass already resolved ------------------------------------------------
 
-// TestBoundReportsTheCapWhenThePassIsAlreadyResolved pins lib/run.sh:2848-2851.
+// TestBoundReportsTheCapWhenThePassIsAlreadyResolved pins lib/run.sh:2854-2857.
 // Both legs of the pass at the bound have finished, so nothing is owed and no
 // leg runs.
 func TestBoundReportsTheCapWhenThePassIsAlreadyResolved(t *testing.T) {
@@ -383,7 +383,7 @@ func TestBoundOwesTheResolveLegOfAnUnfinishedResolvePass(t *testing.T) {
 
 // --- the post-resolve reading, shared with the loop --------------------------
 
-// TestBoundHaltsOnABlockedResolveMarker pins lib/run.sh:2862-2865.
+// TestBoundHaltsOnABlockedResolveMarker pins lib/run.sh:2868-2871.
 func TestBoundHaltsOnABlockedResolveMarker(t *testing.T) {
 	r := newRig(t, []loadStep{
 		{state: loaded(t, marker(reviewIssues, 3))},
@@ -397,7 +397,7 @@ func TestBoundHaltsOnABlockedResolveMarker(t *testing.T) {
 		endLine("Halted after pass 3 — the resolver reported blocked."))
 }
 
-// TestBoundHaltsOnTheStopLabel pins lib/run.sh:2866-2869.
+// TestBoundHaltsOnTheStopLabel pins lib/run.sh:2872-2875.
 func TestBoundHaltsOnTheStopLabel(t *testing.T) {
 	stopped := loaded(t, marker(reviewIssues, 3), marker(resolvePushed, 3))
 	stopped.Labels = []string{"crossrev/stop"}
@@ -414,7 +414,7 @@ func TestBoundHaltsOnTheStopLabel(t *testing.T) {
 }
 
 // TestBoundConvergesWhenTheResolvePassSettledWithoutPushing pins
-// lib/run.sh:2879-2882. A pass that settled every finding without pushing is
+// lib/run.sh:2885-2888. A pass that settled every finding without pushing is
 // done: the next review would decline the unchanged head.
 func TestBoundConvergesWhenTheResolvePassSettledWithoutPushing(t *testing.T) {
 	r := newRig(t, []loadStep{
@@ -430,7 +430,7 @@ func TestBoundConvergesWhenTheResolvePassSettledWithoutPushing(t *testing.T) {
 }
 
 // TestBoundHaltsWhenTheResolvePassLeftSomethingForAPerson pins
-// lib/run.sh:2883-2886, backticks and all.
+// lib/run.sh:2889-2892, backticks and all.
 func TestBoundHaltsWhenTheResolvePassLeftSomethingForAPerson(t *testing.T) {
 	r := newRig(t, []loadStep{
 		{state: loaded(t, marker(reviewIssues, 3))},
@@ -445,7 +445,7 @@ func TestBoundHaltsWhenTheResolvePassLeftSomethingForAPerson(t *testing.T) {
 }
 
 // TestBoundIgnoresTheLabelOfAnUnfinishedResolvePass pins the
-// `state == complete` guard on the label read (lib/run.sh:2876): a resolve leg
+// `state == complete` guard on the label read (lib/run.sh:2882): a resolve leg
 // that came back without settling its marker gets the cap line, not a label.
 func TestBoundIgnoresTheLabelOfAnUnfinishedResolvePass(t *testing.T) {
 	r := newRig(t, []loadStep{
@@ -462,10 +462,10 @@ func TestBoundIgnoresTheLabelOfAnUnfinishedResolvePass(t *testing.T) {
 
 // --- what the reloads are told ------------------------------------------------
 
-// TestBoundReloadsWithTheLoadedRepository pins lib/run.sh:2822 and :2860, which
+// TestBoundReloadsWithTheLoadedRepository pins lib/run.sh:2828 and :2860, which
 // call ctx_load with "$CTX_PR" "$CTX_REPO" rather than with the pull request and
 // repository the operator typed. The loop's own reloads use the typed pair
-// (lib/run.sh:2938, :2950, :2974), so a cycle started without --repo forwards no
+// (lib/run.sh:2944, :2950, :2974), so a cycle started without --repo forwards no
 // repository there and the resolved slug here. Measured:
 //
 //	LOAD 42 acme/widget

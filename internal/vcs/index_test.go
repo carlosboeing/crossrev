@@ -13,7 +13,7 @@ import (
 
 // The resolve harness edits files before it returns its answer, and a rejected
 // answer is thrown away while its edits are not. So each attempt starts from
-// the state captured before the first one (lib/run.sh:612-631).
+// the state captured before the first one (lib/run.sh:618-637).
 func TestCaptureAndRestoreTree(t *testing.T) {
 	ctx := context.Background()
 	git := testGit(t)
@@ -60,7 +60,7 @@ func TestCaptureAndRestoreTree(t *testing.T) {
 // Reading into the capture's own index is what keeps someone's staging area out
 // of this. The capture holds everything that was there, staged and unstaged
 // alike, so resetting the real index to it would stage every unstaged change
-// the run happened to find (lib/run.sh:643-651).
+// the run happened to find (lib/run.sh:649-657).
 func TestRestoreTreeLeavesTheRealIndexAlone(t *testing.T) {
 	ctx := context.Background()
 	git := testGit(t)
@@ -92,7 +92,7 @@ func TestRestoreTreeLeavesTheRealIndexAlone(t *testing.T) {
 }
 
 // Ignored files are neither captured nor removed, which is right — they are not
-// committed either (lib/run.sh:661-662).
+// committed either (lib/run.sh:667-668).
 func TestRestoreTreeKeepsIgnoredFiles(t *testing.T) {
 	ctx := context.Background()
 	git := testGit(t)
@@ -118,7 +118,7 @@ func TestRestoreTreeKeepsIgnoredFiles(t *testing.T) {
 // A capture that was never taken, or a restore that will not apply, has to fail
 // rather than degrade quietly: asking again on top of a discarded attempt's
 // edits records the accepted answer against changes it never made
-// (lib/run.sh:665-666, :675-677).
+// (lib/run.sh:671-672, :675-677).
 func TestRestoreTreeRefusesWithoutACapture(t *testing.T) {
 	ctx := context.Background()
 	git := testGit(t)

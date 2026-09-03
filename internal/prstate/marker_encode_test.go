@@ -132,7 +132,7 @@ func TestEditMarkerKeepsUnknownKeysAndTheirOrder(t *testing.T) {
 	}
 }
 
-// jq's `del(.k)` is the other half of what the writers do, at lib/run.sh:1938
+// jq's `del(.k)` is the other half of what the writers do, at lib/run.sh:1944
 // and :1999.
 func TestEditMarkerDeletesAKey(t *testing.T) {
 	got, err := prstate.EditMarker(json.RawMessage(`{"a":1,"wrap_up":"old","z":9}`),
@@ -164,7 +164,7 @@ func TestEditMarkerRefusesAValueThatIsNotJSON(t *testing.T) {
 
 // X2. The struct view keeps only the keys it declares, so the bytes a marker
 // was read with have to survive alongside it. `wrap_up` is live legacy state:
-// lib/run.sh:1993-1999 still migrates it on resume.
+// lib/run.sh:1999-2005 still migrates it on resume.
 func TestMarkerKeepsTheBytesItWasReadWith(t *testing.T) {
 	stream := `{"id":4,"body":"<!-- crossrev: {\"v\":1,\"leg\":\"resolve\",\"pass\":2,\"state\":\"complete\",\"wrap_up\":\"old\"} -->"}`
 	markers := prstate.Markers([]byte(stream))

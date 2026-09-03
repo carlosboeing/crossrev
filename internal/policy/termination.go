@@ -24,7 +24,7 @@ const (
 // vocabulary rather than two: a pass number counts from one and names a
 // particular pass, and PassLabelName already spells it that way. A cap is a
 // bound on a count, and zero is its load-bearing sentinel for "no bound applies"
-// (lib/config.sh:258) — a value core.NewPassNumber refuses by construction, so
+// (lib/config.sh:294) — a value core.NewPassNumber refuses by construction, so
 // typing the caps as pass numbers would put a live sentinel inside the band the
 // type exists to exclude.
 type Termination struct {
@@ -62,7 +62,7 @@ func (d Decision) String() string { return string(d.Action) + " " + d.Reason }
 // person reads without changing whether the loop stopped, which is exactly the
 // class of divergence nothing else would catch.
 //
-// A cap of zero bounds nothing. lib/config.sh:258 uses that as its sentinel for
+// A cap of zero bounds nothing. lib/config.sh:294 uses that as its sentinel for
 // "no pass bound applies to this cycle", so it is load-bearing rather than a
 // guard against a missing value.
 func ShouldContinue(t Termination) Decision {

@@ -28,28 +28,28 @@ const (
 	// its resolutions) and the payload validated.
 	OutcomeInvoked Outcome = "invoked"
 	// OutcomeAlreadyResolved means the current pass's resolve marker is
-	// complete and not redrivable (lib/run.sh:1810-1813).
+	// complete and not redrivable (lib/run.sh:1816-1819).
 	OutcomeAlreadyResolved Outcome = "already_resolved"
 	// OutcomeNoFindings means the review raised nothing to resolve
-	// (lib/run.sh:1818-1836).
+	// (lib/run.sh:1824-1842).
 	OutcomeNoFindings Outcome = "no_findings"
 	// OutcomeHalted means an empty review pass still has a standing
-	// escalation (lib/run.sh:1828-1831).
+	// escalation (lib/run.sh:1834-1837).
 	OutcomeHalted Outcome = "halted"
 	// OutcomeStopped means crossrev/stop is on the pull request
-	// (lib/run.sh:1782-1786).
+	// (lib/run.sh:1788-1792).
 	OutcomeStopped Outcome = "stopped"
 	// OutcomeSkipped means an automatic invocation met a draft
-	// (lib/run.sh:259-262, ctx_load return 2).
+	// (lib/run.sh:265-268, ctx_load return 2).
 	OutcomeSkipped Outcome = "skipped"
 	// OutcomeComplete means replies, persistence, the commit and the push
-	// finished (lib/run.sh:2412-2458).
+	// finished (lib/run.sh:2418-2464).
 	OutcomeComplete Outcome = "complete"
 	// OutcomeRefused means the leg died the way ui_die does.
 	OutcomeRefused Outcome = "refused"
 )
 
-// Trigger is who asked for the leg (lib/run.sh:1731-1756).
+// Trigger is who asked for the leg (lib/run.sh:1737-1762).
 type Trigger string
 
 const (
@@ -81,7 +81,7 @@ type Result struct {
 	Messages    []ui.Line
 	// Nudge asks the caller to print the upgrade tip. run_upgrade_nudge is a
 	// terminal write and a leg holds no terminal, so the decision travels and
-	// the composition root does the printing (lib/run.sh:2447).
+	// the composition root does the printing (lib/run.sh:2453).
 	Nudge bool
 	Err   error
 }
@@ -109,10 +109,10 @@ type Leg struct {
 	// production leaves it nil.
 	Adapter harness.Adapter
 	// LookPath reports whether a harness binary is on PATH. Nil searches PATH
-	// the way command -v does (lib/run.sh:524).
+	// the way command -v does (lib/run.sh:530).
 	LookPath func(string) (string, error)
 
-	// reported is CROSSREV_LEG_REPORTED (lib/run.sh:725): the fatal record has
+	// reported is CROSSREV_LEG_REPORTED (lib/run.sh:731): the fatal record has
 	// been written for this leg, and a second attempt must not write it again.
 	reported bool
 }

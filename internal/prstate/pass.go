@@ -18,8 +18,8 @@ import (
 // embedded verbatim in a comment body. Go sorts a map's keys, so a marker built
 // from a map would rewrite every comment on every edit.
 //
-// The union covers all three writers: the review claim at lib/run.sh:1095, the
-// resolve claim at lib/run.sh:1957 and the declined marker at lib/run.sh:1050.
+// The union covers all three writers: the review claim at lib/run.sh:1101, the
+// resolve claim at lib/run.sh:1963 and the declined marker at lib/run.sh:1056.
 // A field one writer never sets is absent from its marker, not null.
 //
 // A union orders fields no single writer orders. Three pairs never co-occur —
@@ -88,7 +88,7 @@ type Marker struct {
 
 // The string fields above are Opt rather than plain strings for the reason Opt
 // exists: `omitzero` on a plain string drops a present empty value, and
-// lib/run.sh:1050 and :1095 write `run_id`, `head_sha` and `reason`
+// lib/run.sh:1056 and :1095 write `run_id`, `head_sha` and `reason`
 // unconditionally, so an empty one is present on the wire. The numeric and
 // enum fields keep the plain form, because no writer produces a zero version, a
 // zero pass, a zero timestamp or an empty leg or state: for those the zero
@@ -107,7 +107,7 @@ func (m Marker) CommentID() int64 { return m.commentID }
 //
 // The struct view is lossy on purpose — it is a fixed field list — so a caller
 // continuing state an older writer left behind reads it from here and edits it
-// with EditMarker. `wrap_up` is the live example: lib/run.sh:1993-1999 still
+// with EditMarker. `wrap_up` is the live example: lib/run.sh:1999-2005 still
 // migrates it on resume, and no field on Marker holds it.
 //
 // `comment_id` is not one of those keys, even though lib/state.sh:151 adds it
@@ -142,7 +142,7 @@ func (m Marker) MarshalJSON() ([]byte, error) {
 // mismatch, and the caller above drops it. jq does not: the field stays in the
 // object with whatever type it has, and every reader that guards with `// null`
 // carries on. The difference is not academic — `commit_subject` is
-// model-supplied at lib/run.sh:2109 — and it fails in the worst way, because
+// model-supplied at lib/run.sh:2115 — and it fails in the worst way, because
 // nothing errors: every marker on the pull request stops decoding at once, Pass
 // answers 1 forever, and the loop reviews a finished pull request again.
 //

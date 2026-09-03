@@ -68,7 +68,7 @@ type Checker struct {
 
 	// Config is the merged configuration the pairing report reads. `doctor`
 	// loads it from the working tree with no base revision, which is what
-	// cfg_load does for a command that is not a leg (lib/config.sh:183-242;
+	// cfg_load does for a command that is not a leg (lib/config.sh:183-278;
 	// the base-SHA contract is stated at :180-182).
 	// Its refusal belongs to the caller that loaded it.
 	Config *config.Config

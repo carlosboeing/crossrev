@@ -89,7 +89,7 @@ func TestTheOrchestratorRunnerInDepsCarriesAForgeCredential(t *testing.T) {
 }
 
 // The review leg starts the reviewing harness, which is the model-facing
-// process of ADR 0001 (leg_review, lib/run.sh:913; the strip is at
+// process of ADR 0001 (leg_review, lib/run.sh:919; the strip is at
 // lib/adapters/claude.sh:72).
 func TestTheReviewLegStartsItsHarnessThroughTheModelRunner(t *testing.T) {
 	d := open(newIO(false), harness.Document{})
@@ -98,7 +98,7 @@ func TestTheReviewLegStartsItsHarnessThroughTheModelRunner(t *testing.T) {
 	}
 }
 
-// The resolve leg is the same boundary (leg_resolve, lib/run.sh:1730).
+// The resolve leg is the same boundary (leg_resolve, lib/run.sh:1736).
 func TestTheResolveLegStartsItsHarnessThroughTheModelRunner(t *testing.T) {
 	d := open(newIO(false), harness.Document{})
 	if err := credentialDecision(t, resolveLeg(d, nil, nil).Runner); !errors.Is(err, exec.ErrForgeCredential) {
@@ -303,7 +303,7 @@ func TestTheGhSecretAllowlistIsTheGhAllowlist(t *testing.T) {
 // `git` and `gh` hold the forge credential and a harness may never see one.
 var runnerWiring = map[string]string{
 	// `gh` for `crossrev auth`, and the opener it hands a URL to. The opener
-	// is not model-facing (lib/auth.sh:142-146).
+	// is not model-facing (lib/auth.sh:156-160).
 	"authCommands: app.NewGH()":      "orchestrator",
 	"authCommands: app.NewBrowser()": "orchestrator",
 

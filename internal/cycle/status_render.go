@@ -8,22 +8,22 @@ import (
 	"github.com/carlosboeing/crossrev/internal/ui"
 )
 
-// statusFooter is the last line of the page (lib/run.sh:3102). It says where
+// statusFooter is the last line of the page (lib/run.sh:3109). It says where
 // the words came from, because the reader's next question after a header they
 // did not expect is whether the terminal and the pull request agree.
 const statusFooter = "State is read from the pull request itself, so this is the same view a workflow gets."
 
 // statusLegColumn is the width the leg name is padded to before the
-// description, `printf '%-9s'` at lib/run.sh:3209. Nine holds `resolve` with
+// description, `printf '%-9s'` at lib/run.sh:3216. Nine holds `resolve` with
 // two spaces after it, so every description on the page starts at one column.
 const statusLegColumn = 9
 
 // statusPassColumn is the width the pass number is padded to in the gutter,
-// `printf '%-2s '` at lib/run.sh:3094: two for the number and one space, which
+// `printf '%-2s '` at lib/run.sh:3101: two for the number and one space, which
 // leaves a two-digit pass its column without moving the glyph.
 const statusPassColumn = 2
 
-// Render prints a Report as `crossrev status` prints it (lib/run.sh:3053-3103).
+// Render prints a Report as `crossrev status` prints it (lib/run.sh:3059-3110).
 //
 // Every decision was made in Load. This lays them out, and the split is what
 // lets the page be asserted byte for byte against the shell without a pull
@@ -35,7 +35,7 @@ func Render(out *ui.IO, report Report) {
 	out.Gap()
 	out.Head("PULL REQUEST")
 	out.Line("title      " + report.Title)
-	// Omitted rather than printed empty (lib/run.sh:3071). A pull request read
+	// Omitted rather than printed empty (lib/run.sh:3077). A pull request read
 	// from an endpoint that does not answer `url` has no link to give, and a
 	// label with nothing after it reads as a failure to fetch one.
 	if report.URL != "" {
@@ -45,7 +45,7 @@ func Render(out *ui.IO, report Report) {
 		statusAbbreviate(report.HeadSHA), report.HeadBranch, report.ChangedFiles))
 	out.Line("labels     " + statusLabelList(report.Labels))
 	// Only when it is one: a line reading "draft no" on every other pull
-	// request would say nothing (lib/run.sh:3080).
+	// request would say nothing (lib/run.sh:3087).
 	if report.Draft {
 		out.Line("draft      yes — no workflow runs a leg on it")
 	}
@@ -55,12 +55,12 @@ func Render(out *ui.IO, report Report) {
 	out.Line(fmt.Sprintf("mode       %s, markers by %s", report.Mode, report.Author))
 	out.Line("passes     " + statusPassesLine(report))
 	// Backlog.String() is the one line cfg_resolve_backlog prints, which is
-	// what lib/run.sh:3085 interpolates: the destination, plus the layout and
+	// what lib/run.sh:3092 interpolates: the destination, plus the layout and
 	// path only where a repository backlog has them.
 	out.Line("deferred   " + report.Backlog.String())
 
 	// Omitted entirely rather than printed with nothing under it
-	// (lib/run.sh:3087-3097). A heading with an empty body reads as a bug, and
+	// (lib/run.sh:3094-3104). A heading with an empty body reads as a bug, and
 	// the passes line above already says none yet.
 	if report.MaxPass > 0 {
 		out.Gap()
@@ -82,8 +82,8 @@ func Render(out *ui.IO, report Report) {
 	out.End(statusFooter)
 }
 
-// statusLabelList is `${CTX_LABELS:-none}` at lib/run.sh:3073, over the
-// space-joined list ctx_load builds at lib/run.sh:277.
+// statusLabelList is `${CTX_LABELS:-none}` at lib/run.sh:3079, over the
+// space-joined list ctx_load builds at lib/run.sh:283.
 func statusLabelList(labels []string) string {
 	if len(labels) == 0 {
 		return "none"
@@ -91,7 +91,7 @@ func statusLabelList(labels []string) string {
 	return strings.Join(labels, " ")
 }
 
-// statusPassesLine is the three-way pass wording at lib/run.sh:3078-3084.
+// statusPassesLine is the three-way pass wording at lib/run.sh:3085-3091.
 //
 // Past the cap is its own arm rather than an overflowing "4 of 3", because a
 // pass beyond the cap is the state a halt is about and the reader has to see
@@ -108,7 +108,7 @@ func statusPassesLine(report Report) string {
 }
 
 // statusGutter is what sits left of the glyph: the pass number on the review
-// row and three spaces on the resolve row under it (lib/run.sh:3094-3095).
+// row and three spaces on the resolve row under it (lib/run.sh:3101-3102).
 //
 // The number is printed once per pass rather than on both rows, so the two legs
 // of one pass read as one block.
@@ -120,7 +120,7 @@ func statusGutter(row LegRow) string {
 }
 
 // statusLegLabel is the left column of a leg row, padded so the descriptions
-// line up (lib/run.sh:3209).
+// line up (lib/run.sh:3216).
 func statusLegLabel(leg core.Leg) string {
 	return fmt.Sprintf("%-*s", statusLegColumn, leg)
 }

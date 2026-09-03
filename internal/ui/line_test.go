@@ -42,8 +42,8 @@ func TestPrintRendersEachKindTheWayItsHelperDoes(t *testing.T) {
 		},
 		{
 			// The legs print several `printf '\n'` blank lines of their own —
-			// above the run header (lib/run.sh:1066) and below the closing
-			// report (lib/run.sh:2434). ui_gap is NOT this line: it prints the
+			// above the run header (lib/run.sh:1072) and below the closing
+			// report (lib/run.sh:2440). ui_gap is NOT this line: it prints the
 			// dim gutter rule, which is a section's spacing and not a blank.
 			name:       "a bare printf newline",
 			line:       ui.Blank(),

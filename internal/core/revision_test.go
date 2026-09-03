@@ -54,7 +54,7 @@ func TestRevisionShortIsTheSevenCharacterPrefix(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRevision: %v", err)
 	}
-	// lib/state.sh:330 and lib/run.sh:2271 both print "${sha:0:7}".
+	// lib/state.sh:330 and lib/run.sh:2277 both print "${sha:0:7}".
 	if got, want := r.Short(), "0123456"; got != want {
 		t.Fatalf("Short() = %q, want %q", got, want)
 	}
@@ -139,7 +139,7 @@ func TestRevisionPairIsIncompleteWhenEitherSideIsUnset(t *testing.T) {
 	}
 }
 
-// Every marker carries head_sha (lib/run.sh:1098), so a Revision has to be able
+// Every marker carries head_sha (lib/run.sh:1104), so a Revision has to be able
 // to appear in one. Unexported fields marshal to {} and decode to nothing at
 // all without a codec.
 func TestRevisionMarshalsAsItsSHA(t *testing.T) {

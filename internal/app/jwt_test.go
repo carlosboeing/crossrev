@@ -97,7 +97,7 @@ func decode(t *testing.T, segment string) []byte {
 // --- the token itself -------------------------------------------------------
 
 // The header is a literal in the shell, not a jq expression, so these are its
-// bytes exactly (lib/auth.sh:163).
+// bytes exactly (lib/auth.sh:177).
 func TestJWTHeaderIsTheLiteralTheShellPrints(t *testing.T) {
 	token, err := app.JWT(writePKCS1(t, key(t)), 12345, time.Unix(1700000000, 0))
 	if err != nil {
@@ -163,7 +163,7 @@ func TestJWTWritesTheAppIDAsANumber(t *testing.T) {
 
 // --- base64url, without padding ---------------------------------------------
 //
-// `_b64url` is `openssl base64 -A | tr '+/' '-_' | tr -d '='` (lib/auth.sh:158).
+// `_b64url` is `openssl base64 -A | tr '+/' '-_' | tr -d '='` (lib/auth.sh:172).
 // Measured on the three padding cases: `+/+/` for three bytes, `+/8=` for two,
 // `+w==` for one — and the url form drops the `=` and rewrites `+` and `/`.
 //
@@ -294,7 +294,7 @@ func TestJWTReadsBothPEMShapes(t *testing.T) {
 // A key that cannot sign refuses, and this is the one place the port answers
 // differently from the shell. `_auth_jwt` ends in a printf, so its exit status
 // is the printf's: openssl failing leaves an empty signature and the function
-// still returns 0. That makes the ui_die at lib/auth.sh:901-903 — the one
+// still returns 0. That makes the ui_die at lib/auth.sh:918-920 — the one
 // reading "could not sign a token with <path>" — unreachable, and the operator
 // gets the later "GitHub rejected a token" message about a token that was never
 // signed. The port refuses at the point the fault happened.
@@ -399,7 +399,7 @@ func TestInstallationsReadsAnAccountAndItsSelectionPerLine(t *testing.T) {
 
 // An App installed nowhere is a successful read of an empty list, not a
 // failure. It is the case `auth status` reports as "installed nowhere — it can
-// reach no repository at all" (lib/auth.sh:445), and telling it apart from a
+// reach no repository at all" (lib/auth.sh:459), and telling it apart from a
 // refused call is the whole reason that line can be printed.
 func TestInstallationsOnAnAppInstalledNowhere(t *testing.T) {
 	rec := &recorder{results: []exec.Result{out("")}}

@@ -8,7 +8,7 @@ import (
 	"github.com/carlosboeing/crossrev/internal/prstate"
 )
 
-// TestCountActionableMatchesTheShellBar pins run_actionable (lib/run.sh:350-361)
+// TestCountActionableMatchesTheShellBar pins run_actionable (lib/run.sh:356-367)
 // on the three shapes the driver actually meets: a pre-existing finding, one
 // below the bar, and one at it.
 //
@@ -53,7 +53,7 @@ func TestCountActionableMatchesTheShellBar(t *testing.T) {
 }
 
 // TestCountActionableReadsPreExistingAsJqDoes pins the truthiness rule behind
-// `select((.pre_existing // false) | not)` (lib/run.sh:358). jq calls everything
+// `select((.pre_existing // false) | not)` (lib/run.sh:364). jq calls everything
 // except false and null true, so a zero and an empty string both mark a finding
 // pre-existing. Measured:
 //
@@ -92,7 +92,7 @@ func TestCountActionableReadsPreExistingAsJqDoes(t *testing.T) {
 //	rc=5, stdout empty
 //
 // cmd_cycle assigns that empty string to `actionable` and then tests
-// `(( actionable == 0 ))` (lib/run.sh:2960), where bash reads an empty operand
+// `(( actionable == 0 ))` (lib/run.sh:2966), where bash reads an empty operand
 // as zero — so the driver behaves as though nothing were actionable. Counting
 // the finding as unranked gives the same answer for an array whose findings all
 // lack a severity, and a different one for an array that mixes a valid finding
@@ -109,7 +109,7 @@ func TestCountActionableTreatsAMissingSeverityAsUnranked(t *testing.T) {
 
 // TestCountActionableReadsAnAbsentFindingsPayload covers the marker whose
 // `findings` key is absent. cmd_cycle reads it as `jq -c '.findings // []'`
-// (lib/run.sh:2954), so absent is the empty array.
+// (lib/run.sh:2960), so absent is the empty array.
 func TestCountActionableReadsAnAbsentFindingsPayload(t *testing.T) {
 	if got := actionableCount(nil, core.SeverityMedium); got != 0 {
 		t.Errorf("actionableCount(nil) = %d, want 0", got)
@@ -120,7 +120,7 @@ func TestCountActionableReadsAnAbsentFindingsPayload(t *testing.T) {
 }
 
 // TestCountActionableReadsMalformedJSONAsZero pins the jq failure path of
-// run_actionable (lib/run.sh:357-360). Measured:
+// run_actionable (lib/run.sh:363-366). Measured:
 //
 //	$ run_actionable "{"   -> (no output), rc=5
 //
@@ -134,7 +134,7 @@ func TestCountActionableReadsMalformedJSONAsZero(t *testing.T) {
 }
 
 // TestCountEscalatedReadsAnUndecodableResolutionsAsZero pins the jq failure
-// path of _markers_escalated (lib/run.sh:3192) for a `resolutions` value that
+// path of _markers_escalated (lib/run.sh:3199) for a `resolutions` value that
 // is not iterable. Measured:
 //
 //	$ _markers_escalated '[{"leg":"resolve","resolutions":"escalated"}]' -> (no output), rc=5
@@ -153,7 +153,7 @@ func TestCountEscalatedReadsAnUndecodableResolutionsAsZero(t *testing.T) {
 }
 
 // TestCountEscalatedSkipsReviewMarkers pins _markers_escalated
-// (lib/run.sh:3191-3193): the filter is `select(.leg == "resolve")`, so an
+// (lib/run.sh:3198-3200): the filter is `select(.leg == "resolve")`, so an
 // escalation recorded on a review marker is not counted. Measured:
 //
 //	$ _markers_escalated '[{"leg":"review","resolutions":[{"resolution":"escalated"}]}]' -> 0
@@ -183,7 +183,7 @@ func TestCountEscalatedSumsAcrossResolveMarkers(t *testing.T) {
 }
 
 // TestCountEscalatedReadsAnAbsentResolutionsArray pins `(.resolutions // [])`
-// (lib/run.sh:3192). Measured: both `[{"leg":"resolve"}]` and
+// (lib/run.sh:3199). Measured: both `[{"leg":"resolve"}]` and
 // `[{"leg":"resolve","resolutions":null}]` answer 0.
 func TestCountEscalatedReadsAnAbsentResolutionsArray(t *testing.T) {
 	markers := parseMarkers(t, `[{"v":1,"leg":"resolve","pass":1,"state":"complete"},

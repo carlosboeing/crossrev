@@ -8,7 +8,7 @@ import (
 
 // The defect this helper exists to close: os.WriteFile applies its mode
 // argument on create only, exactly like the shell's umask, so a write onto a
-// path somebody had widened to 0644 left the key at 0644 (lib/auth.sh:47-57).
+// path somebody had widened to 0644 left the key at 0644 (lib/auth.sh:61-71).
 func TestWrite0600SetsTheModeOverAWidenedFile(t *testing.T) {
 	dest := filepath.Join(t.TempDir(), "ShoreLogic.loop.pem")
 	if err := os.WriteFile(dest, []byte("old"), 0o644); err != nil {
@@ -67,7 +67,7 @@ func TestWrite0600DoesNotInheritTheModeOfALeftoverTemporary(t *testing.T) {
 
 // A write it cannot make returns non-zero and removes its own temporary file,
 // so the call site can refuse by name rather than continuing over a key that is
-// not there (lib/auth.sh:56).
+// not there (lib/auth.sh:70).
 func TestWrite0600ReportsAWriteItCannotMakeAndLeavesNoTemporary(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "not-a-directory", "ShoreLogic.loop.pem")
 

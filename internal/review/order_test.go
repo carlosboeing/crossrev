@@ -11,7 +11,7 @@ import (
 
 // TestEnrichmentKeepsTheModelsKeyOrder pins the byte order of an enriched
 // finding. Bash builds one as `$f + {id:…, anchor:…, thread_id:null,
-// root_comment_id:null, resolution:null, tracked_as:null}` (lib/run.sh:1178-1180),
+// root_comment_id:null, resolution:null, tracked_as:null}` (lib/run.sh:1184-1186),
 // and jq's + keeps the left operand's keys in their own order, then appends the
 // new ones in the order written. Measured:
 //
@@ -50,7 +50,7 @@ func TestEnrichmentKeepsTheModelsKeyOrder(t *testing.T) {
 // TestReviewFootnoteKeepsTheTrailingSpace covers the branch the resolve leg's
 // tests already cover and the review leg's did not: a gap sentence present and
 // the cost footnote empty. Bash writes `${gaps:+$gaps }` before a footnote that
-// may be empty (lib/run.sh:1536), so the rendered text ends with one space
+// may be empty (lib/run.sh:1542), so the rendered text ends with one space
 // inside the <sub> tag. A mutation dropping the `+ " "` here survived the whole
 // suite before this test existed.
 func TestReviewFootnoteKeepsTheTrailingSpace(t *testing.T) {

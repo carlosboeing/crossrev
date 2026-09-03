@@ -15,13 +15,13 @@ import (
 
 // reportFatal records a leg that died on the pull request it had claimed
 // (_run_report_fatal at lib/run.sh:131-146, through
-// _run_report_invoke_failure at lib/run.sh:719-763).
+// _run_report_invoke_failure at lib/run.sh:725-769).
 //
 // Guarded on the claim still reading `started`: a pass that finished has
 // written `complete`, and rewriting it as blocked because something after it
 // failed would replace an accurate record with a wrong one (lib/run.sh:127-129).
 //
-// `reported` is CROSSREV_LEG_REPORTED (lib/run.sh:725), set before the writes
+// `reported` is CROSSREV_LEG_REPORTED (lib/run.sh:731), set before the writes
 // rather than after, so a second pass over the same leg cannot post the summary
 // twice when one of the writes below fails.
 func (l *Leg) reportFatal(ctx context.Context, s *session, marker prstate.Marker, reason string, workdir string, keep bool) {

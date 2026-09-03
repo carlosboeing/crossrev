@@ -146,7 +146,7 @@ func (c *Client) ReviewThreads(ctx context.Context, repo core.Slug, number int) 
 // malformed one by ParseFindingID at the call site.
 //
 // Traced rather than assumed harmless. All four consumers of a thread's finding
-// ids — lib/run.sh:1275, :1986, :2321 and :2322 — compare them against an id
+// ids — lib/run.sh:1281, :1986, :2321 and :2322 — compare them against an id
 // the review leg minted, and every minted id is sixteen lowercase hexadecimal
 // characters (internal/prstate/finding.go:34), so neither a null nor a
 // malformed id could ever have matched one. Dropping them loses no match and

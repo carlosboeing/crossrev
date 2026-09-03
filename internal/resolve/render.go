@@ -15,7 +15,7 @@ import (
 	"github.com/carlosboeing/crossrev/internal/prstate"
 )
 
-// ReplyBody is _resolve_reply_body at lib/run.sh:2564-2579.
+// ReplyBody is _resolve_reply_body at lib/run.sh:2570-2585.
 func ReplyBody(disposition json.RawMessage, tracked string, pass int, harnessName, model string) string {
 	var d struct {
 		FindingID  string `json:"finding_id"`
@@ -83,7 +83,7 @@ func stripResolutionLead(text string) string {
 	return head
 }
 
-// CommitSubjectOK is _commit_subject_ok at lib/run.sh:2635-2657.
+// CommitSubjectOK is _commit_subject_ok at lib/run.sh:2641-2663.
 func CommitSubjectOK(s, rawJSON string) bool {
 	if s == "" || s == "null" {
 		return false
@@ -168,7 +168,7 @@ func ucfirst(s string) string {
 	return string(unicode.ToUpper(r)) + s[size:]
 }
 
-// URLPath is _url_path at lib/run.sh:1603-1605: percent-encode each segment
+// URLPath is _url_path at lib/run.sh:1609-1611: percent-encode each segment
 // the way jq `@uri` does.
 func URLPath(path string) string {
 	parts := strings.Split(path, "/")
@@ -236,7 +236,7 @@ func findingByID(findings []harness.Node, id string) harness.Node {
 	return harness.Node{}
 }
 
-// CommitBody is _commit_body at lib/run.sh:2683-2718.
+// CommitBody is _commit_body at lib/run.sh:2689-2724.
 func CommitBody(resolutions, findings json.RawMessage, want, sha string, pass int, repo string, pr int) string {
 	var recs []harness.Node
 	_ = json.Unmarshal(resolutions, &recs)
@@ -495,7 +495,7 @@ func runDetails(m prstate.Marker, leg string) string {
 	return b.String()
 }
 
-// ResolveSummaryBody is _resolve_summary_body at lib/run.sh:2723-2775.
+// ResolveSummaryBody is _resolve_summary_body at lib/run.sh:2729-2781.
 func ResolveSummaryBody(resolutions, findings json.RawMessage, deferredLines string, marker prstate.Marker, repo string, pr, maxPasses int) string {
 	summary, _ := marker.Summary.Get()
 	pass := marker.Pass

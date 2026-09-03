@@ -14,8 +14,8 @@ import (
 // in, one parsed request or one refusal out.
 //
 // The rows are the shell's parse rule (bin/crossrev:111-190) and every argument
-// loop it dispatches to (lib/run.sh:913, :1730, :2895, :3034, :3666,
-// lib/init.sh:34, lib/auth.sh:511, :792, :879, :998).
+// loop it dispatches to (lib/run.sh:919, :1730, :2895, :3034, :3666,
+// lib/init.sh:34, lib/auth.sh:525, :792, :879, :998).
 //
 // Most rows were measured with `NO_COLOR=1 bash bin/crossrev …` before they
 // were written down, and testdata/help/refusals.json holds the bytes. Two
@@ -34,7 +34,7 @@ import (
 //
 // A third divergence was removed rather than recorded: `watchdog --timeout abc`
 // parses, because the shell does not read the value until it compares against
-// it (lib/run.sh:3671, :3719).
+// it (lib/run.sh:3686, :3719).
 func TestParseRuleMatrix(t *testing.T) {
 	file := loadMatrix(t)
 	for _, row := range file.Rows {

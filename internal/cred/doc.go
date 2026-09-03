@@ -3,7 +3,7 @@
 // refreshes the one credential that rotates.
 //
 // It is the port of lib/credentials.sh, the hosted-runner cases in
-// lib/preflight.sh:236-263, and the refresher path at lib/auth.sh:1004-1048.
+// lib/preflight.sh:236-263, and the refresher path at lib/auth.sh:1028-1072.
 //
 // # The rule the package exists to enforce
 //

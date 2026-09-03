@@ -25,7 +25,7 @@ type OSEnvironment struct{}
 // Getenv answers this process's environment.
 func (OSEnvironment) Getenv(name string) string { return os.Getenv(name) }
 
-// The two roles an App is registered under (lib/auth.sh:56-84).
+// The two roles an App is registered under (lib/auth.sh:70-98).
 //
 // One App per owner became one App per owner per role. The loop App is
 // referenced by the jobs that check out a pull request branch and run a model
@@ -38,7 +38,7 @@ const (
 )
 
 // configHome is `${XDG_CONFIG_HOME:-$HOME/.config}`, the base both files sit
-// under (lib/auth.sh:23, lib/auth.sh:329).
+// under (lib/auth.sh:23, lib/auth.sh:343).
 //
 // The pieces are concatenated rather than joined with filepath.Join, and that
 // is deliberate. `auth status` prints the key's path beside its mode, so the
@@ -58,7 +58,7 @@ func configHome(env Environment) string {
 func Dir(env Environment) string { return configHome(env) + "/crossrev/apps" }
 
 // TokensPath is the ledger of long-lived tokens and the dates they stop
-// working (_auth_tokens_file, lib/auth.sh:329).
+// working (_auth_tokens_file, lib/auth.sh:343).
 //
 // It sits beside the apps directory rather than inside it: the ledger is about
 // harness tokens in a repository's secrets, not about an App.
@@ -110,7 +110,7 @@ func isRegularFile(path string) bool {
 
 // write0600 writes body to dest so that the file is 0600 once the write
 // finishes, whatever mode the path held before (_auth_write_0600,
-// lib/auth.sh:47-57).
+// lib/auth.sh:61-71).
 //
 // os.WriteFile applies its mode argument on create only, exactly like the
 // shell's umask. A write onto an existing file truncates it and keeps the mode

@@ -13,7 +13,7 @@ import (
 // --- what each role is allowed to do ----------------------------------------
 //
 // The permission set goes into the App manifest GitHub registers from
-// (lib/auth.sh:566), so these bytes are what the App ends up holding. ADR 0006
+// (lib/auth.sh:580), so these bytes are what the App ends up holding. ADR 0006
 // is the decision they encode: three repository permissions for the loop, all
 // at write, and nothing else.
 
@@ -116,7 +116,7 @@ func TestTheSummaryNamesEveryPermissionTheRoleRequests(t *testing.T) {
 }
 
 // An unknown role refuses, and it refuses before anything opens: the shell
-// calls this for its exit status alone at lib/auth.sh:511, ahead of the browser
+// calls this for its exit status alone at lib/auth.sh:525, ahead of the browser
 // and the listener. The text is measured, not written from the source.
 func TestRolePermissionsRefusesAnUnknownRole(t *testing.T) {
 	for _, role := range []string{"bogus", "", "Loop", "secrets"} {

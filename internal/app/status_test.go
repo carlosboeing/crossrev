@@ -146,7 +146,7 @@ func TestStatusStartsNoProcessWhenNothingIsConfigured(t *testing.T) {
 }
 
 // A directory that does not exist is the same answer as one holding no
-// metadata: `[[ ! -d "$dir" ]] || ! compgen -G "$dir/*.json"` (lib/auth.sh:366).
+// metadata: `[[ ! -d "$dir" ]] || ! compgen -G "$dir/*.json"` (lib/auth.sh:380).
 func TestStatusTreatsAnAbsentDirectoryAsNothingConfigured(t *testing.T) {
 	b := newBench(t)
 	if err := os.RemoveAll(b.dir); err != nil {
@@ -253,7 +253,7 @@ func TestStatusOnAnAppInstalledNowherePrintsTheInstallURL(t *testing.T) {
 
 // owner_id was added after the first Apps were registered, so an older file has
 // none and the id is recovered rather than the message degraded
-// (lib/auth.sh:446-449).
+// (lib/auth.sh:460-463).
 func TestStatusRecoversAnAbsentOwnerIDFromGitHub(t *testing.T) {
 	b := newBench(t,
 		identity("CrossRev ShoreLogic", "crossrev-shorelogic"),
@@ -324,7 +324,7 @@ func TestStatusWarnsAboutAKeyWiderThan0600(t *testing.T) {
 		"│     could not check installations — the key may not match this App\n"+
 		"└  An App reaches only the repositories it is installed on.\n\n")
 
-	// Both calls were made, which is the ordering at lib/auth.sh:399 and :439:
+	// Both calls were made, which is the ordering at lib/auth.sh:413 and :439:
 	// the token is minted before the identity is read, so a refused identity
 	// still leaves a token for the installations check to try. Setting the
 	// token after the identity read instead would skip this second call and
@@ -335,7 +335,7 @@ func TestStatusWarnsAboutAKeyWiderThan0600(t *testing.T) {
 }
 
 // stat drops the leading zero and the shell pads it back, so a mode is four
-// digits whatever it is (lib/auth.sh:431).
+// digits whatever it is (lib/auth.sh:445).
 func TestStatusPrintsTheModeAsFourDigits(t *testing.T) {
 	for _, mode := range []os.FileMode{0o600, 0o644, 0o400, 0o000} {
 		b := newBench(t, bad(), bad())
@@ -421,7 +421,7 @@ func TestStatusLeavesTheCacheAloneWhenGitHubCannotBeReached(t *testing.T) {
 // --- several Apps ----------------------------------------------------------
 
 // The shell iterates `"$dir"/*.json`, which bash expands in sorted order, and
-// the role comes out of the file rather than out of its name (lib/auth.sh:380).
+// the role comes out of the file rather than out of its name (lib/auth.sh:394).
 func TestStatusReportsEveryAppInPathOrder(t *testing.T) {
 	b := newBench(t, bad(), bad())
 	write := func(name, owner, role string) {
@@ -448,7 +448,7 @@ func TestStatusReportsEveryAppInPathOrder(t *testing.T) {
 }
 
 // A file with no role key is the loop's: anything registered before roles
-// existed has none, and `.role // "loop"` is what reads it (lib/auth.sh:384).
+// existed has none, and `.role // "loop"` is what reads it (lib/auth.sh:398).
 func TestStatusReadsAnAbsentRoleAsTheLoops(t *testing.T) {
 	b := newBench(t)
 	body := `{"owner":"acme","owner_type":"User","owner_id":1,"id":7,"slug":"s","name":"n"}`
@@ -502,7 +502,7 @@ func TestStatusTokensReportsHealthyExpiringAndExpired(t *testing.T) {
 }
 
 // A secret the descriptor does not name gets the same warning without the
-// re-issue command, because there is none to name (lib/auth.sh:485-487).
+// re-issue command, because there is none to name (lib/auth.sh:499-501).
 func TestStatusTokensOmitsASeedCommandItDoesNotHave(t *testing.T) {
 	b := newBench(t)
 	b.ledger(t, `{"acme/widget":{"MYSTERY_TOKEN":{"created":"`+created(340)+`","valid_days":365}}}`)
@@ -532,7 +532,7 @@ func TestStatusTokensNamesTheSeedCommandForTheSecretItBelongsTo(t *testing.T) {
 }
 
 // An entry whose date cannot be read is skipped rather than reported as
-// anything: `auth_token_days_left … || continue` (lib/auth.sh:474).
+// anything: `auth_token_days_left … || continue` (lib/auth.sh:488).
 func TestStatusTokensSkipsAnEntryWithAnUnreadableDate(t *testing.T) {
 	b := newBench(t)
 	b.ledger(t, `{"acme/widget":{"BAD":{"created":"nope","valid_days":365}}}`)
@@ -555,7 +555,7 @@ func TestStatusTokensPrintsNothingWithoutALedger(t *testing.T) {
 	}
 }
 
-// A ledger jq cannot read is `|| return 0`, not a refusal (lib/auth.sh:467).
+// A ledger jq cannot read is `|| return 0`, not a refusal (lib/auth.sh:481).
 func TestStatusTokensPrintsNothingForALedgerItCannotRead(t *testing.T) {
 	for name, body := range map[string]string{
 		"not JSON":     "nope",

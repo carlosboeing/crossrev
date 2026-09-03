@@ -9,7 +9,7 @@ import (
 	"github.com/carlosboeing/crossrev/internal/exec"
 )
 
-// The invoke line carries how long the harness took (lib/run.sh:831):
+// The invoke line carries how long the harness took (lib/run.sh:837):
 //
 //	log_event invoke "harness=$harness attempt=$attempt exit=$adapter_rc duration=$(( SECONDS - invoke_start ))s"
 //
@@ -75,7 +75,7 @@ func TestTheTranscriptsHoldWhatTheHarnessPrintedAndAreRedacted(t *testing.T) {
 }
 
 // A successful leg deletes them; that is log_transcripts_clear at the end of
-// leg_review (lib/run.sh:1326).
+// leg_review (lib/run.sh:1332).
 func TestASuccessfulReviewLegClearsItsTranscripts(t *testing.T) {
 	e := newEnv(t)
 	writeAppGo(t, e.dir)

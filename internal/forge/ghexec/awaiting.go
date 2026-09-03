@@ -8,7 +8,7 @@ import (
 	"github.com/carlosboeing/crossrev/internal/forge"
 )
 
-// awaitingJQ is the filter the watchdog's read carries (lib/run.sh:3692-3693).
+// awaitingJQ is the filter the watchdog's read carries (lib/run.sh:3708-3709).
 //
 // The newline and the eleven-space continuation are the shell's own bytes.
 // They are kept because `gh` hands the string to jq unaltered and the offline
@@ -19,7 +19,7 @@ const awaitingJQ = "[.[] | select([.labels[].name] | any(startswith(\"crossrev/a
 	"           | {number, labels: [.labels[].name], head: .head.sha, draft}]"
 
 // AwaitingPullRequests is every open pull request carrying a
-// `crossrev/awaiting-` label (lib/run.sh:3691-3693).
+// `crossrev/awaiting-` label (lib/run.sh:3707-3709).
 //
 // A failed read answers as none. The shell writes `2>/dev/null)" || stuck="[]"`,
 // so it cannot tell an unreachable API from a repository with nothing waiting,

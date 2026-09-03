@@ -78,17 +78,17 @@ func (c *Commands) sleep(ctx context.Context, d time.Duration) error {
 // --- crossrev auth status ---------------------------------------------------
 
 // Status reports every App on this machine, and what is true of it right now
-// (auth_status, lib/auth.sh:363).
+// (auth_status, lib/auth.sh:377).
 //
 // It revalidates before it prints rather than after. The name and slug in the
 // metadata file were written once, at creation; renaming the App in its
 // settings moves both and nothing local notices. The command whose whole job is
 // answering "is my credential set up correctly" would otherwise answer
-// confidently out of a file that can be wrong (lib/auth.sh:392-397).
+// confidently out of a file that can be wrong (lib/auth.sh:406-411).
 func (c *Commands) Status(ctx context.Context) error {
 	dir := Dir(c.Env)
 
-	// `[[ ! -d "$dir" ]] || ! compgen -G "$dir/*.json"` (lib/auth.sh:366): a
+	// `[[ ! -d "$dir" ]] || ! compgen -G "$dir/*.json"` (lib/auth.sh:380): a
 	// directory that is not there and one holding no metadata are one answer.
 	metas, err := filepath.Glob(dir + "/*.json")
 	if err != nil {
@@ -114,7 +114,7 @@ func (c *Commands) Status(ctx context.Context) error {
 	return c.statusTokens()
 }
 
-// statusApp is one iteration of the loop at lib/auth.sh:380-457.
+// statusApp is one iteration of the loop at lib/auth.sh:394-471.
 func (c *Commands) statusApp(ctx context.Context, dir, path string) error {
 	// The shell reads each field with `jq -r`, which answers the literal `null`
 	// for an absent key. This refuses the file instead: a row reading
@@ -125,7 +125,7 @@ func (c *Commands) statusApp(ctx context.Context, dir, path string) error {
 		return err
 	}
 	// Owner and role come out of the file rather than out of its name
-	// (lib/auth.sh:381-382). ReadMetadata already reads an absent role as the
+	// (lib/auth.sh:395-396). ReadMetadata already reads an absent role as the
 	// loop's, which is `.role // "loop"`.
 	name, slug := meta.Name, meta.Slug
 	pem := PEMPath(dir, meta.Owner, meta.Role)
@@ -133,7 +133,7 @@ func (c *Commands) statusApp(ctx context.Context, dir, path string) error {
 	// The revalidation, and the order of the three calls is the shell's: the
 	// token is minted before the identity is read, so a token that exists but
 	// was refused still counts as one at the installations check below
-	// (lib/auth.sh:399-400 and :439).
+	// (lib/auth.sh:413-414 and :439).
 	var jwt string
 	var drift []Drift
 	if isRegularFile(pem) {
@@ -148,7 +148,7 @@ func (c *Commands) statusApp(ctx context.Context, dir, path string) error {
 				if len(drift) > 0 {
 					// Report the identity GitHub has, in this line and in the
 					// install URL below, which was being built from the stale
-					// slug too (lib/auth.sh:404-406).
+					// slug too (lib/auth.sh:418-420).
 					name, slug = identity.Name, identity.Slug
 				}
 			}
@@ -205,7 +205,7 @@ func (c *Commands) statusApp(ctx context.Context, dir, path string) error {
 	c.IO.No("   installed nowhere — it can reach no repository at all")
 	// owner_id was added after the first Apps were registered, so recover it
 	// rather than degrading the message for anything created earlier
-	// (lib/auth.sh:446-448). A failed recovery drops the line: an install URL
+	// (lib/auth.sh:460-462). A failed recovery drops the line: an install URL
 	// with an empty target lands on a page that cannot prefill anything.
 	ownerID := ownerIDText(meta.OwnerID)
 	if ownerID == "" {
@@ -235,7 +235,7 @@ func ownerIDText(id int64) string {
 // --- the other half of "is this still going to work tomorrow" --------------
 
 // statusTokens reports the long-lived tokens whose creation dates were recorded
-// (_auth_status_tokens, lib/auth.sh:463).
+// (_auth_status_tokens, lib/auth.sh:477).
 //
 // Every failure here is silent, which is the shell's `|| return 0` at :465 and
 // :467: this is a trailer on a command that has already reported something, and
@@ -294,7 +294,7 @@ func (c *Commands) statusTokens() error {
 }
 
 // seedCommand is what an operator runs to mint the token this secret carries,
-// found by the secret's name (lib/auth.sh:480-481).
+// found by the secret's name (lib/auth.sh:494-495).
 //
 // The first match wins. jq's `select(.credential.secret == $s)` prints every
 // match, and two would leave the shell with a two-line harness name that
@@ -327,7 +327,7 @@ func isDirectory(path string) bool {
 }
 
 // fileMode is the four-digit mode `auth status` prints beside the key
-// (lib/auth.sh:431).
+// (lib/auth.sh:445).
 //
 // `stat` drops the leading zero and the shell pads it back with `printf '%04d'`,
 // because "600" next to a sentence about 0600 reads as a mismatch. The
@@ -354,7 +354,7 @@ func fileMode(path string) string {
 
 // --- the install URL, and the one gh read only status makes ----------------
 
-// InstallURL is where to install an App (_auth_install_url, lib/auth.sh:131).
+// InstallURL is where to install an App (_auth_install_url, lib/auth.sh:145).
 //
 // /apps/<slug>/installations/new/permissions with target_id and target_type
 // lands directly on the install form with the account already chosen. It works
@@ -370,7 +370,7 @@ func InstallURL(slug, ownerType, ownerID string) string {
 }
 
 // AccountID is an account's numeric id, as text (`gh api "users/$owner" --jq
-// .id`, lib/auth.sh:448 and :760).
+// .id`, lib/auth.sh:462 and :760).
 //
 // It is the narrower half of AccountInfo, and it is separate because both call
 // sites already know the owner type and want the id alone. Its failure is not

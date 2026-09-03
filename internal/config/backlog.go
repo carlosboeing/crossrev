@@ -6,7 +6,7 @@ package config
 //
 // Inventing a folder in someone else's repository is the wrong default, so
 // CrossRev does not. Three tiers, first hit wins, and the last one only fires
-// when a repository backlog was explicitly asked for (lib/config.sh:328-334).
+// when a repository backlog was explicitly asked for (lib/config.sh:364-370).
 
 import (
 	"context"
@@ -34,7 +34,7 @@ const (
 type Layout string
 
 // The two layouts, plus the "any" the sniff uses when the repository config
-// stated none (lib/config.sh:447).
+// stated none (lib/config.sh:483).
 const (
 	LayoutFolder Layout = "folder"
 	LayoutFile   Layout = "file"
@@ -49,7 +49,7 @@ type Backlog struct {
 	Path   string
 }
 
-// String is the one line cfg_resolve_backlog prints at lib/config.sh:370:
+// String is the one line cfg_resolve_backlog prints at lib/config.sh:406:
 // "github_issues", "repository <layout> <path>", or "none".
 func (b Backlog) String() string {
 	if b.Destination == DestinationRepository {
@@ -60,7 +60,7 @@ func (b Backlog) String() string {
 
 // ResolveBacklog resolves `backlog.destination` to a concrete destination.
 //
-// It reproduces cfg_resolve_backlog at lib/config.sh:377-433. The two refusals
+// It reproduces cfg_resolve_backlog at lib/config.sh:413-469. The two refusals
 // below cannot be reached from a configured value, because assertBacklog
 // refuses both at load; they stay as a guard against a caller passing a literal
 // this does not know.
@@ -68,7 +68,7 @@ func (c *Config) ResolveBacklog(ctx context.Context, base core.Revision, want st
 	// An empty destination is `auto`, not `none`. Every caller reads the value
 	// through cfg_get, which renders an absent, null or false key as the empty
 	// string, and cfg_resolve_backlog substitutes `auto` for an empty second
-	// argument at lib/config.sh:378 — so the `""` arm of the Bash `case` is
+	// argument at lib/config.sh:414 — so the `""` arm of the Bash `case` is
 	// unreachable. Collapsing the two would drop deferred work instead of
 	// writing it, and assertBacklog already validates the same key as `auto`.
 	if want == "" {
@@ -104,7 +104,7 @@ func (c *Config) ResolveBacklog(ctx context.Context, base core.Revision, want st
 // trackerDestination reads a Project Map Tracker value as a destination, and
 // reports whether it decided one. Linear, Jira and friends decide nothing:
 // there is somewhere real to look, and nothing there to write to
-// (lib/config.sh:411-428).
+// (lib/config.sh:447-464).
 func trackerDestination(tracker string) (Backlog, bool) {
 	lowered := strings.ToLower(tracker)
 	switch {
@@ -118,13 +118,13 @@ func trackerDestination(tracker string) (Backlog, bool) {
 		// `https://linear.app/acme/team/ENG` into a directory of that name
 		// inside the checkout — relative, so the inside-the-repo guard waves
 		// it through. Same outcome as a bare `Linear`: somewhere real,
-		// nothing to write to (lib/config.sh:414-419).
+		// nothing to write to (lib/config.sh:450-455).
 		return Backlog{}, false
 	case strings.Contains(lowered, "/"), strings.HasSuffix(lowered, ".md"):
-		// One arm, because lib/config.sh:420 is one pattern, `*/*|*.md`,
+		// One arm, because lib/config.sh:456 is one pattern, `*/*|*.md`,
 		// matched against the lowercased value. The layout inside it is
 		// decided on the original: `[[ "$tracker" == *.md ]]` at
-		// lib/config.sh:421 is case-sensitive, so `docs/TODO.MD` is a folder
+		// lib/config.sh:457 is case-sensitive, so `docs/TODO.MD` is a folder
 		// there and splitting the arm in two would make it a file here.
 		if strings.HasSuffix(tracker, ".md") {
 			return Backlog{Destination: DestinationRepository, Layout: LayoutFile, Path: tracker}, true
@@ -136,7 +136,7 @@ func trackerDestination(tracker string) (Backlog, bool) {
 }
 
 // inOrder reports whether every needle appears in the haystack, each one after
-// the last. It is the Bash glob `*github*issue*` at lib/config.sh:413, which is
+// the last. It is the Bash glob `*github*issue*` at lib/config.sh:449, which is
 // ordered: `Issues on GitHub` does not match it, and a test for two substrings
 // in any order would say it does.
 func inOrder(haystack string, needles ...string) bool {
@@ -151,7 +151,7 @@ func inOrder(haystack string, needles ...string) bool {
 }
 
 // resolveRepositoryBacklog handles an explicitly configured repository backlog
-// (lib/config.sh:383-402).
+// (lib/config.sh:419-438).
 func (c *Config) resolveRepositoryBacklog(ctx context.Context, base core.Revision) (Backlog, error) {
 	layout := Layout(alternativeString(lookup(c.Merged, ".backlog.repository.layout"), string(LayoutFolder)))
 	path := c.Get(".backlog.repository.path")
@@ -165,7 +165,7 @@ func (c *Config) resolveRepositoryBacklog(ctx context.Context, base core.Revisio
 	}
 	// A repository key is explicit only when it appears in the repository
 	// config, not when it arrives through the merged defaults
-	// (lib/config.sh:396). A stated layout constrains the candidates rather
+	// (lib/config.sh:432). A stated layout constrains the candidates rather
 	// than reinterpreting a path that belongs to another one.
 	constrained := layoutAny
 	if c.Repo.Object("backlog").Object("repository").Has("layout") {
@@ -179,7 +179,7 @@ func (c *Config) resolveRepositoryBacklog(ctx context.Context, base core.Revisio
 // `explicit` is true when a repository destination was asked for, in which case
 // tier 3 applies; an automatic resolution falls to none rather than creating a
 // location nobody asked for (_cfg_sniff_repository_backlog,
-// lib/config.sh:446-466).
+// lib/config.sh:482-502).
 func (c *Config) sniffRepositoryBacklog(ctx context.Context, base core.Revision, explicit bool, layout Layout) (Backlog, error) {
 	if layout == layoutAny || layout == LayoutFolder {
 		for _, candidate := range []string{"backlog.config.yml", "backlog/config.yml", ".backlog/config.yml"} {
@@ -213,7 +213,7 @@ func (c *Config) sniffRepositoryBacklog(ctx context.Context, base core.Revision,
 }
 
 // pathExists asks whether a path exists, in the base revision when there is
-// one and on disk when there is not (_cfg_path_exists, lib/config.sh:440-444).
+// one and on disk when there is not (_cfg_path_exists, lib/config.sh:476-480).
 // The Bash test is `-e`, so a directory counts.
 func (c *Config) pathExists(ctx context.Context, base core.Revision, path string) (bool, error) {
 	_, status, err := c.show(ctx, base, path)
@@ -227,7 +227,7 @@ func (c *Config) pathExists(ctx context.Context, base core.Revision, path string
 //
 // The value ends in a file write, so it is bounded rather than trusted: a `../`
 // sequence, an absolute path or a symlink out of the checkout must fail loudly
-// instead of landing somewhere surprising (lib/config.sh:468-505).
+// instead of landing somewhere surprising (lib/config.sh:504-541).
 //
 // Resolving physically rather than lexically is one of the two deliberate
 // divergences approved for the native port, and it answers differently in two
@@ -248,7 +248,7 @@ func (c *Config) pathExists(ctx context.Context, base core.Revision, path string
 // a loop lands nowhere at all.
 //
 // root must be an absolute path, which is what `git rev-parse --show-toplevel`
-// prints and what every Bash caller passes (lib/config.sh:473). It is cleaned
+// prints and what every Bash caller passes (lib/config.sh:509). It is cleaned
 // here so that a trailing slash does not make the separator test below report
 // every path outside, and a relative root is refused under its own message
 // rather than misreported as an escape.
@@ -315,7 +315,7 @@ func outsideRefusal(path, resolved string) *Refusal {
 	}
 }
 
-// inside is the containment test at lib/config.sh:498-499: the root itself, or
+// inside is the containment test at lib/config.sh:534-535: the root itself, or
 // anything under it. The separator is load-bearing: without it `<root>-evil`
 // prefixes `<root>` and reads as inside the checkout.
 func inside(root, candidate string) bool {
@@ -329,7 +329,7 @@ func inside(root, candidate string) bool {
 	return strings.HasPrefix(candidate, prefix)
 }
 
-// lexicalResolve is the jq reduction at lib/config.sh:488-496. It returns the
+// lexicalResolve is the jq reduction at lib/config.sh:524-532. It returns the
 // empty string when the path climbs above the root, which is the escape the
 // caller refuses by name.
 func lexicalResolve(candidate string) string {

@@ -80,7 +80,7 @@ func (l *Leg) load(ctx context.Context, req Request) (*session, Result) {
 			"crossrev only runs on open pull requests. Reopen it, or pick another number.")
 	}
 	if req.Trigger == TriggerAutomatic && pr.IsDraft {
-		// Two ui_say lines (lib/run.sh:266-267). One message serves both legs,
+		// Two ui_say lines (lib/run.sh:272-273). One message serves both legs,
 		// so it names neither: a refused resolve leg was being told that
 		// nothing would "review" the pull request and to ask for a review,
 		// which is the wrong instruction for the leg that was refused.
@@ -263,7 +263,7 @@ func escalatedCount(markers []prstate.Marker) int {
 }
 
 func (l *Leg) settings(s *session) (*Refusal, ui.Line, error) {
-	// Derived from the leg, not configured. lib/run.sh:488-489:
+	// Derived from the leg, not configured. lib/run.sh:494-495:
 	// LEG_WRITE=no
 	// [[ "$leg" == "resolver" ]] && LEG_WRITE=yes
 	name := s.cfg.Get(".resolver.harness")
@@ -272,7 +272,7 @@ func (l *Leg) settings(s *session) (*Refusal, ui.Line, error) {
 	endpoint := s.cfg.Get(".resolver.endpoint")
 	if s.req.Harness != "" {
 		// Bash clears the model and the endpoint and keeps the effort
-		// (lib/run.sh:495): a model id for the harness that was asked for is
+		// (lib/run.sh:501): a model id for the harness that was asked for is
 		// wrong for a different one, but an effort level is not tied to a
 		// harness. Clearing effort here wrote "effort":null into the marker
 		// where Bash writes the configured value.
@@ -298,7 +298,7 @@ func (l *Leg) settings(s *session) (*Refusal, ui.Line, error) {
 	for _, alt := range doc.NamesForLeg("resolve") {
 		if l.binaryInstalled(alt) {
 			s.settings = legSettings{Harness: alt, Model: "", Effort: effort, Endpoint: ""}
-			// ui_warn, condition and consequence apart (lib/run.sh:542-543).
+			// ui_warn, condition and consequence apart (lib/run.sh:548-549).
 			warn := ui.Warn(
 				fmt.Sprintf("'%s' is not installed, so the resolver runs on '%s' instead", asked, alt),
 				fmt.Sprintf("Both legs now run on the same harness, so a bug it misses while reviewing it also misses while resolving. Install %s to get the second lineage back.", asked))
@@ -309,8 +309,8 @@ func (l *Leg) settings(s *session) (*Refusal, ui.Line, error) {
 }
 
 // notInstalledRefusal is the last refusal in run_leg_settings
-// (lib/run.sh:538-540), reached once the configured harness has no binary and
-// the substitution loop at lib/run.sh:531-537 finds no other harness that
+// (lib/run.sh:544-546), reached once the configured harness has no binary and
+// the substitution loop at lib/run.sh:537-543 finds no other harness that
 // serves the leg.
 //
 // The hint names every harness that CAN take the leg, read off the descriptor
@@ -333,7 +333,7 @@ func notInstalledRefusal(doc harness.Document, asked string) *Refusal {
 }
 
 // noAdapterRefusal is the refusal run_leg_settings prints when no adapter
-// function exists for the configured name (lib/run.sh:500-508).
+// function exists for the configured name (lib/run.sh:506-514).
 //
 // The hint names the harnesses CrossRev drives, read off the descriptor rather
 // than written into the sentence. A name the descriptor lists under not_driven
@@ -361,7 +361,7 @@ func noAdapterRefusal(doc harness.Document, name string) *Refusal {
 }
 
 // servesLegRefusal is _run_assert_harness_serves_leg for the resolve leg
-// (lib/run.sh:553-558), reached from run_leg_settings at lib/run.sh:520.
+// (lib/run.sh:559-564), reached from run_leg_settings at lib/run.sh:526.
 //
 // The message is the product: it names the harness, the leg, the harnesses that
 // can take the leg, and the legs the refused harness actually serves. Measured
@@ -392,7 +392,7 @@ func servesLegRefusal(doc harness.Document, name string) *Refusal {
 
 // capitaliseName is the Bash
 // `$(printf '%s' "${LEG_HARNESS:0:1}" | tr '[:lower:]' '[:upper:]')${LEG_HARNESS:1}`
-// at lib/run.sh:503: the first character upper-cased, the rest untouched.
+// at lib/run.sh:509: the first character upper-cased, the rest untouched.
 func capitaliseName(name string) string {
 	runes := []rune(name)
 	if len(runes) == 0 {
@@ -446,7 +446,7 @@ func (s *session) expect(candidates prompt.Candidates) *validate.Expectations {
 }
 
 // describe is the harness half of the run header's Resolver line
-// (lib/run.sh:1914). `${model:+, $model}` and `${effort:+, $effort effort}`
+// (lib/run.sh:1920). `${model:+, $model}` and `${effort:+, $effort effort}`
 // expand to nothing when unset, so an empty half is omitted rather than
 // printed as a trailing comma.
 func (s legSettings) describe() string {

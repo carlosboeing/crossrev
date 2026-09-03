@@ -101,7 +101,7 @@ func (b *bench) vendor(v *vendor) *vendor {
 // --- picking the harness ----------------------------------------------------
 
 // The shipped descriptor names exactly one refresher, so an unnamed harness
-// resolves without asking (lib/auth.sh:958-971).
+// resolves without asking (lib/auth.sh:975-995).
 func TestRefreshPicksTheOnlyHarnessConfiguredWithARefresher(t *testing.T) {
 	b := newBench(t, exec.Result{})
 	b.codexCredential(storedCredential(at.Unix()+3600, "refresh-1"))
@@ -116,7 +116,7 @@ func TestRefreshPicksTheOnlyHarnessConfiguredWithARefresher(t *testing.T) {
 }
 
 // Two refreshers is an ambiguity the operator has to settle, and the refusal
-// names both (lib/auth.sh:962-964).
+// names both (lib/auth.sh:1041-1043).
 func TestRefreshRefusesWhenTwoHarnessesCarryARefresher(t *testing.T) {
 	b := newBench(t)
 	b.cmds.Harnesses = harnessesWithRefreshers(t, "claude", "codex")
@@ -186,7 +186,7 @@ func harnessesWithRefreshers(t *testing.T, names ...string) harness.Document {
 }
 
 // A harness whose credential does not rotate has nothing to refresh, and an
-// unknown name answers the same way (lib/auth.sh:973-976).
+// unknown name answers the same way (lib/auth.sh:997-1000).
 func TestRefreshRefusesAHarnessThatNeedsNoRefresher(t *testing.T) {
 	for _, name := range []string{"claude", "agy", "nope"} {
 		t.Run(name, func(t *testing.T) {
@@ -210,7 +210,7 @@ func TestRefreshRefusesWhenTheSecretIsNotSet(t *testing.T) {
 }
 
 // --secret names a different variable, and it is both what is read and what is
-// written (lib/auth.sh:978-981).
+// written (lib/auth.sh:1002-1005).
 func TestRefreshReadsAndWritesTheSecretItWasGiven(t *testing.T) {
 	b := newBench(t, exec.Result{})
 	b.env["CROSSREV_ALT_AUTH"] = storedCredential(at.Unix()+3600, "refresh-1")
@@ -270,7 +270,7 @@ func TestRefreshWritesTheRepositorySecretAndSaysHowLongItIsGoodFor(t *testing.T)
 }
 
 // An organisation secret is written with --visibility all, because a secret no
-// workflow can read is not a credential (lib/auth.sh:1032).
+// workflow can read is not a credential (lib/auth.sh:1056).
 func TestRefreshWritesAnOrganisationSecretVisibleToEveryWorkflow(t *testing.T) {
 	b := newBench(t, exec.Result{})
 	b.codexCredential(storedCredential(at.Unix()+3600, "refresh-1"))
@@ -347,7 +347,7 @@ func TestRefreshRefusesWhenTheVendorAnsweredNothingUsable(t *testing.T) {
 }
 
 // An expiry that cannot be read is unverified, not "probably fine"
-// (lib/auth.sh:1015-1022).
+// (lib/auth.sh:1039-1046).
 func TestRefreshRefusesACredentialWhoseExpiryCannotBeRead(t *testing.T) {
 	b := newBench(t, exec.Result{})
 	b.codexCredential(storedCredential(at.Unix()+3600, "refresh-1"))
@@ -364,7 +364,7 @@ func TestRefreshRefusesACredentialWhoseExpiryCannotBeRead(t *testing.T) {
 
 // An expiry no later than the one it replaces means the refresh did not happen,
 // and writing it back would burn a refresh token for nothing
-// (lib/auth.sh:1024-1029).
+// (lib/auth.sh:1048-1053).
 func TestRefreshRefusesACredentialThatExpiresNoLater(t *testing.T) {
 	for name, expiry := range map[string]int64{
 		"the same expiry": at.Unix() + 3600,
@@ -389,7 +389,7 @@ func TestRefreshRefusesACredentialThatExpiresNoLater(t *testing.T) {
 
 // A stored credential whose own expiry cannot be read is not a reason to
 // refuse: `before` is simply unknown, and the comparison is skipped
-// (lib/auth.sh:1006 and :1026).
+// (lib/auth.sh:1030 and :1026).
 func TestRefreshCarriesOnWhenTheStoredExpiryCannotBeRead(t *testing.T) {
 	b := newBench(t, exec.Result{})
 	b.codexCredential(`{"tokens":{"access_token":"` +
@@ -490,7 +490,7 @@ func TestRefreshAsksTheIssuerWhereItsTokenEndpointIs(t *testing.T) {
 
 // The secret's name comes out of the descriptor, not out of the harness's
 // name. For codex the two happen to agree, so this asks a harness where they
-// do not (lib/auth.sh:979).
+// do not (lib/auth.sh:1003).
 func TestRefreshReadsTheSecretNameOutOfTheDescriptor(t *testing.T) {
 	b := newBench(t)
 	b.cmds.Harnesses = harnessesWithRefreshers(t, "claude")
@@ -502,7 +502,7 @@ func TestRefreshReadsTheSecretNameOutOfTheDescriptor(t *testing.T) {
 }
 
 // A descriptor entry naming no secret falls back to CROSSREV_<NAME>_AUTH, and
-// its refusal ends with the generic hint (lib/auth.sh:980 and :985).
+// its refusal ends with the generic hint (lib/auth.sh:1004 and :985).
 func TestRefreshFallsBackToTheHarnessesOwnVariableName(t *testing.T) {
 	b := newBench(t)
 	b.cmds.Harnesses = harnessesWithRefreshers(t, "agy")

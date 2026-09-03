@@ -40,8 +40,8 @@
 //
 // `--timeout` was a fourth and is not one any more. Converting it here refused
 // `crossrev watchdog --timeout abc` on a repository the shell sweeps to a clean
-// exit, because bash stores the flag as written (lib/run.sh:3671) and only
-// evaluates it at `(( age < timeout ))` (lib/run.sh:3719). WatchdogRequest
+// exit, because bash stores the flag as written (lib/run.sh:3686) and only
+// evaluates it at `(( age < timeout ))` (lib/run.sh:3747). WatchdogRequest
 // carries the raw string and cmd/crossrev converts it where the arithmetic is.
 //
 // # Where the version comes from

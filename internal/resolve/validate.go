@@ -9,7 +9,7 @@ import (
 )
 
 // mapNumbers replaces each resolution's finding_number with the finding id it
-// was numbered from (lib/run.sh:2089-2092).
+// was numbered from (lib/run.sh:2095-2098).
 func mapNumbers(payload json.RawMessage, findings []harness.Node) (json.RawMessage, error) {
 	doc, err := harness.DecodeOrdered(payload)
 	if err != nil {

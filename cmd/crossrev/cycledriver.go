@@ -21,7 +21,7 @@ import (
 	"github.com/carlosboeing/crossrev/internal/ui"
 )
 
-// cycleCommand is cmd_cycle (lib/run.sh:2895-3016).
+// cycleCommand is cmd_cycle (lib/run.sh:2901-3022).
 //
 // The driver reloads the context after every leg, because state lives on the
 // pull request rather than in memory. Everything it needs to do that arrives as
@@ -130,10 +130,10 @@ func (a resolveAdapter) Run(ctx context.Context, req cycle.LegRequest) cycle.Leg
 }
 
 // contextLoader is ctx_load, reduced to what the driver reads back after a leg
-// (lib/run.sh:232-300).
+// (lib/run.sh:233-306).
 //
 // It prints nothing. The shell's ctx_load prints two lines for a draft pull
-// request and returns 2 (lib/run.sh:259-262); here the draft is a field on
+// request and returns 2 (lib/run.sh:265-268); here the draft is a field on
 // State and the driver has its own line for it, so a loader that also printed
 // would print it twice.
 type contextLoader struct {
@@ -224,7 +224,7 @@ func atoi(s string) int {
 	return n
 }
 
-// upgradeNudge is run_upgrade_nudge (lib/run.sh:3777-3789).
+// upgradeNudge is run_upgrade_nudge (lib/run.sh:3805-3817).
 //
 // Three conditions, in the shell's order: the flag or the environment silences
 // it, the config key silences it, and a repository with no .github/workflows
@@ -234,7 +234,7 @@ func atoi(s string) int {
 //
 // The --no-tips flag is not read here. internal/cycle decides which endings
 // call Nudge at all, and the flag suppresses the cycle's single tip by not
-// calling it — which is the shell's own split at lib/run.sh:2904.
+// calling it — which is the shell's own split at lib/run.sh:2910.
 func upgradeNudge(out *ui.IO, cfg *config.Config) {
 	if os.Getenv("CROSSREV_NO_TIPS") == "1" {
 		return
@@ -251,7 +251,7 @@ func upgradeNudge(out *ui.IO, cfg *config.Config) {
 	fmt.Fprint(out.Out, upgradeTip)
 }
 
-// upgradeTip is the heredoc at lib/run.sh:3783-3788, byte for byte. It is a
+// upgradeTip is the heredoc at lib/run.sh:3811-3816, byte for byte. It is a
 // `cat <<'EOF'` rather than a ui_ helper, so it carries no gutter and ends with
 // a blank line.
 const upgradeTip = "  Tip: this repo already runs GitHub Actions. `crossrev init` would run this\n" +

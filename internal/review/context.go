@@ -52,7 +52,7 @@ func (l *Leg) loadContext(ctx context.Context, req Request) (Context, string, er
 		}
 	}
 	if req.Trigger == TriggerAutomatic && pr.IsDraft {
-		// lib/run.sh:259-262
+		// lib/run.sh:265-268
 		return loaded, "draft pull request", nil
 	}
 
@@ -99,7 +99,7 @@ func (l *Leg) loadContext(ctx context.Context, req Request) (Context, string, er
 // trustedAuthor is state_trusted_author (lib/state.sh:24-47), keyed on the
 // MODE and never on who asked for the leg.
 //
-// lib/run.sh:309 passes CTX_MODE, which lib/run.sh:299 reads from the
+// lib/run.sh:315 passes CTX_MODE, which lib/run.sh:305 reads from the
 // configuration at the base revision, and lib/state.sh:26 branches on
 // `automated` alone. Keyed on the trigger instead, `crossrev review --pr 42
 // --trigger automatic` against a `mode: local` repository refused with "cannot

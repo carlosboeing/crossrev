@@ -30,7 +30,7 @@ func (r *Refusal) Error() string { return r.Message }
 // treats an eighth argument nobody passed as "this repository's own branch" and
 // skips the maintainer-edit check, while an unset CrossRepo here requires the
 // contributor's permission. Neither default is reachable in a shipped run —
-// lib/run.sh:1904-1905 is the only caller and it always passes all eight
+// lib/run.sh:1910-1911 is the only caller and it always passes all eight
 // arguments — so this is a divergence between two unreachable branches rather
 // than a divergence in behaviour. Requiring permission is the safe reading of a
 // field nobody filled in, so Go keeps it.
@@ -203,7 +203,7 @@ func ConfiguredDifference(reviewer, resolver LegSettings) Difference {
 // never ran.
 //
 // The literal string "null" counts as absent because the caller reads the field
-// with jq's `// "null"` default (lib/run.sh:2142).
+// with jq's `// "null"` default (lib/run.sh:2148).
 func AssertModelsDiverged(configured Difference, reviewerModel, resolverModel string) error {
 	if configured != DifferenceDifferent {
 		return nil // one model was asked for

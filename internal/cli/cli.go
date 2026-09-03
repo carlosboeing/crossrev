@@ -17,7 +17,7 @@ import (
 //
 // harnesses is the list of installed harness names, which the review and
 // resolve usage lines carry. An empty list falls back to the shape of the flag,
-// the way the shell does when jq is missing (lib/run.sh:926-931).
+// the way the shell does when jq is missing (lib/run.sh:932-937).
 func Run(ctx context.Context, args []string, cmds Commands, out *ui.IO, harnesses []string) int {
 	inv, err := Parse(args, out, harnesses)
 	if err != nil {

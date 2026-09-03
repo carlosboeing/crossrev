@@ -23,7 +23,7 @@ import (
 //     (lib/config.sh:93-95), which succeeds on a tree and prints its listing.
 //     yq reads that listing as a plain multi-line string, so the file is found
 //     and then refused for its shape rather than skipped.
-//   - Backlog discovery is read behind `[[ -e ]]` (lib/config.sh:443), so
+//   - Backlog discovery is read behind `[[ -e ]]` (lib/config.sh:479), so
 //     anything at `backlog/config.yml` counts as the convention being
 //     installed.
 type FileStatus int

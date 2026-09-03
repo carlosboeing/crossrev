@@ -10,7 +10,7 @@ type sandboxRestoreFailure struct {
 	*ui.FatalError
 }
 
-// newSandboxRestoreFailure mirrors _run_retry_reset (lib/run.sh:684-685), where
+// newSandboxRestoreFailure mirrors _run_retry_reset (lib/run.sh:690-691), where
 // the interpolated value is the causal problem rather than the restore error.
 func newSandboxRestoreFailure(harness, problem, restoreErr string) *sandboxRestoreFailure {
 	return &sandboxRestoreFailure{&ui.FatalError{

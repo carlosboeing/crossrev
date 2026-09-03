@@ -156,7 +156,7 @@ func TestInstallNamesTheRoleItWasAskedFor(t *testing.T) {
 }
 
 // The owner is detected, not asked, because the repository's owner is the trust
-// boundary the private key sits on (lib/auth.sh:748).
+// boundary the private key sits on (lib/auth.sh:762).
 func TestInstallDetectsTheOwnerWhenNoneIsNamed(t *testing.T) {
 	b := newBench(t, out("ShoreLogic\n"), out("ShoreLogic selected\n"))
 	b.meta(t, "CrossRev ShoreLogic", "crossrev-shorelogic")
@@ -181,7 +181,7 @@ func TestInstallRefusesWhenTheOwnerCannotBeDetected(t *testing.T) {
 }
 
 // An older metadata file carries no owner_id, and the id is recovered rather
-// than the install URL degraded (lib/auth.sh:760).
+// than the install URL degraded (lib/auth.sh:470-473).
 func TestInstallRecoversAnAbsentOwnerIDFromGitHub(t *testing.T) {
 	b := newBench(t, out("12345\n"), out("ShoreLogic selected\n"))
 	body := `{"owner":"ShoreLogic","owner_type":"Organization","id":987,` +
@@ -205,7 +205,7 @@ func TestInstallRecoversAnAbsentOwnerIDFromGitHub(t *testing.T) {
 }
 
 // A browser that will not open is a warning naming the URL, never a refusal:
-// the install can still be done by hand (lib/auth.sh:786-788).
+// the install can still be done by hand (lib/auth.sh:803-805).
 func TestInstallWarnsRatherThanFailingWhenNoBrowserOpens(t *testing.T) {
 	b := newBench(t, out("ShoreLogic selected\n"))
 	b.meta(t, "CrossRev ShoreLogic", "crossrev-shorelogic")
@@ -229,7 +229,7 @@ func TestInstallWarnsRatherThanFailingWhenNoBrowserOpens(t *testing.T) {
 // --- the five-minute wait ---------------------------------------------------
 
 // The loop polls a hundred times, three seconds apart, and then warns without
-// undoing anything (lib/auth.sh:792-807).
+// undoing anything (lib/auth.sh:809-824).
 func TestInstallPollsForFiveMinutesAndThenWarns(t *testing.T) {
 	refusals := make([]exec.Result, 200)
 	for i := range refusals {
@@ -263,7 +263,7 @@ func TestInstallPollsForFiveMinutesAndThenWarns(t *testing.T) {
 }
 
 // An App installed nowhere answers with an empty list and no error, and that is
-// not "installed": the loop keeps waiting (lib/auth.sh:793-794).
+// not "installed": the loop keeps waiting (lib/auth.sh:810-811).
 func TestInstallKeepsWaitingWhileTheAppIsInstalledNowhere(t *testing.T) {
 	results := []exec.Result{out(""), out(""), out("ShoreLogic all\n")}
 	b := newBench(t, results...)
@@ -284,7 +284,7 @@ func TestInstallKeepsWaitingWhileTheAppIsInstalledNowhere(t *testing.T) {
 }
 
 // Two installations are two lines, which is what `while read -r acct sel`
-// produces (lib/auth.sh:796-798).
+// produces (lib/auth.sh:813-815).
 func TestInstallReportsEveryAccountTheAppLandedOn(t *testing.T) {
 	b := newBench(t, out("ShoreLogic selected\nbeta all\n"))
 	b.meta(t, "CrossRev ShoreLogic", "crossrev-shorelogic")

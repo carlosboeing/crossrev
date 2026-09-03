@@ -230,7 +230,7 @@ func TestFindingIDsSkipsANonObjectPayload(t *testing.T) {
 
 // F3. jq keeps a marker whose field carries the wrong JSON type; the typed view
 // must not throw the marker away for it. `commit_subject` is model-supplied at
-// lib/run.sh:2109, so a future writer changing any field's type would otherwise
+// lib/run.sh:2115, so a future writer changing any field's type would otherwise
 // stop every marker on the pull request from decoding, leave Pass at 1 forever,
 // and report nothing wrong.
 func TestMarkersKeepsAMarkerWithAWrongTypedField(t *testing.T) {

@@ -116,7 +116,7 @@ func TestWorktreeAddAndRemove(t *testing.T) {
 	}
 
 	// The worktree belongs to this clone and sits at the right revision, so a
-	// second leg reuses it rather than rebuilding it (lib/run.sh:1878-1886).
+	// second leg reuses it rather than rebuilding it (lib/run.sh:1884-1892).
 	reusable, err := repo.WorktreeReusable(ctx, dir, head)
 	if err != nil {
 		t.Fatalf("WorktreeReusable: %v", err)
@@ -143,7 +143,7 @@ func TestWorktreeAddAndRemove(t *testing.T) {
 	// One level up, and one only. The `-p` form of rmdir walks up removing
 	// every parent that becomes empty, which on a machine where the state
 	// directory holds nothing else deletes far more than CrossRev's own
-	// (lib/run.sh:2452-2454).
+	// (lib/run.sh:2458-2460).
 	if _, err := os.Stat(filepath.Join(root, "state", "crossrev", "worktrees")); err != nil {
 		t.Errorf("the grandparent directory was removed as well: %v", err)
 	}
@@ -179,7 +179,7 @@ func TestWorktreeReusableRefusesAnotherClone(t *testing.T) {
 
 // Removal falls back to deleting the directory when git will not, because a
 // worktree whose administrative record is gone is still a directory in the way
-// (lib/run.sh:2450).
+// (lib/run.sh:2456).
 func TestRemoveWorktreeFallsBackToDeleting(t *testing.T) {
 	ctx := context.Background()
 	git := testGit(t)

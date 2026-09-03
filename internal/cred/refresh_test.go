@@ -435,7 +435,7 @@ func TestARefreshRefusalNeverQuotesTheCredential(t *testing.T) {
 
 // Refresh writes nothing. It hands back bytes and the caller decides where they
 // go, which is what keeps "a leg restores, reads and discards" a property of
-// the type: lib/auth.sh:1020 re-reads the expiry out of them and refuses to
+// the type: lib/auth.sh:1044 re-reads the expiry out of them and refuses to
 // write back one it cannot read, and :1034-1042 is the only `gh secret set`.
 func TestRefreshReturnsBytesAndTouchesTheStoredCredential(t *testing.T) {
 	v := newVendor(t)
@@ -452,7 +452,7 @@ func TestRefreshReturnsBytesAndTouchesTheStoredCredential(t *testing.T) {
 	}
 }
 
-// The round trip lib/auth.sh:1006-1032 performs: read the expiry, refresh, read
+// The round trip lib/auth.sh:1030-1056 performs: read the expiry, refresh, read
 // the expiry back out of what came back, and refuse an expiry no later than the
 // one it replaces.
 func TestTheRefreshedCredentialCarriesAReadableLaterExpiry(t *testing.T) {

@@ -16,7 +16,7 @@ import (
 )
 
 // livenessMarker is one open claim carrying a run id, which is the only field
-// the probe reads (lib/run.sh:3286).
+// the probe reads (lib/run.sh:3293).
 func livenessMarker(t *testing.T, runID string) prstate.Marker {
 	t.Helper()
 	body, err := json.Marshal(map[string]any{
@@ -83,7 +83,7 @@ func livenessProbe(gitdir string, f forge.Forge) *cycle.LivenessProbe {
 }
 
 // TestLivenessLocal covers every arm of _status_liveness_local
-// (lib/run.sh:3311-3338): the lock has to exist, name the marker's pid, and
+// (lib/run.sh:3318-3345): the lock has to exist, name the marker's pid, and
 // name this host before `kill -0` is asked anything at all.
 func TestLivenessLocal(t *testing.T) {
 	const host = "buildbox"
@@ -183,7 +183,7 @@ func TestLivenessLocal(t *testing.T) {
 }
 
 // TestLivenessWithNowhereToKeepALock pins the `|| return 0` at
-// lib/run.sh:3316-3318: a directory that is not a repository has nowhere to
+// lib/run.sh:3323-3325: a directory that is not a repository has nowhere to
 // keep a lock, and that is not a claim that the leg died.
 //
 // Both arms put a lock the probe would answer `running` from where it would
@@ -251,7 +251,7 @@ func TestLivenessProbesTheRealProcessAndHost(t *testing.T) {
 }
 
 // TestLivenessHostnameFallsBackToLocal pins the `|| printf 'local'` half of
-// `hostname 2>/dev/null || printf 'local'` (lib/run.sh:3327).
+// `hostname 2>/dev/null || printf 'local'` (lib/run.sh:3334).
 //
 // The successful half is covered by TestLivenessProbesTheRealProcessAndHost,
 // which reads this machine's own name. That name is never "local" on a machine
@@ -315,7 +315,7 @@ func TestLivenessHostnameFallsBackToLocal(t *testing.T) {
 	}
 }
 
-// TestLivenessWorkflow is _status_liveness_workflow (lib/run.sh:3341-3352).
+// TestLivenessWorkflow is _status_liveness_workflow (lib/run.sh:3348-3359).
 // `completed` is the useful half: the run is over and the marker never reached
 // `complete`, so the leg died inside it however recently that was.
 func TestLivenessWorkflow(t *testing.T) {
@@ -353,7 +353,7 @@ func TestLivenessWorkflow(t *testing.T) {
 	}
 }
 
-// TestLivenessWithoutARunIDAsksNothing pins lib/run.sh:3290: a marker with no
+// TestLivenessWithoutARunIDAsksNothing pins lib/run.sh:3297: a marker with no
 // run id has nothing to probe, and neither the API nor the lock is read for it.
 //
 // The probe is asked about a real run id first, because an empty run id is the
@@ -377,7 +377,7 @@ func TestLivenessWithoutARunIDAsksNothing(t *testing.T) {
 	}
 }
 
-// TestLivenessMemoisesOnTheRunID pins the memo at lib/run.sh:3287-3288.
+// TestLivenessMemoisesOnTheRunID pins the memo at lib/run.sh:3294-3295.
 //
 // One report asks about the same claim twice — once for its row and once for
 // the NEXT line under it — and for an automated leg an unmemoised answer is a
@@ -409,7 +409,7 @@ func TestLivenessMemoisesOnTheRunID(t *testing.T) {
 }
 
 // TestLivenessRemembersOnlyTheLastRunID pins the shape of the memo rather than
-// only its effect: lib/run.sh:3283-3288 keeps one run id in a global, so a
+// only its effect: lib/run.sh:3290-3295 keeps one run id in a global, so a
 // third question about the first claim is asked again.
 //
 // A map would answer it from the cache and make one fewer API call than the

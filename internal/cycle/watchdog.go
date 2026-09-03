@@ -16,7 +16,7 @@ import (
 //
 // Bash builds this list itself, from one `gh api repos/<slug>/pulls?state=open`
 // filtered to the pull requests carrying a `crossrev/awaiting-` label
-// (lib/run.sh:3691-3693). forge.AwaitingPullRequests is that read, and the
+// (lib/run.sh:3707-3709). forge.AwaitingPullRequests is that read, and the
 // composition root performs it before calling Run, so the list arrives as an
 // argument rather than through a forge call made here. Nothing else about the
 // sweep changes: every decision below is made from these three fields and the
@@ -32,15 +32,15 @@ type Waiting struct {
 	// abbreviated on the retry line and read nowhere else.
 	HeadSHA string
 	// Draft is `draft` off the same list response, so reading it costs no
-	// extra call (lib/run.sh:3706, :3719). A draft is waiting on its author
+	// extra call (lib/run.sh:3723, :3719). A draft is waiting on its author
 	// rather than on a leg, so neither the retry nor the halt applies to it.
 	Draft bool
 }
 
-// Summary is the counters the closing line reports (lib/run.sh:3704, :3761).
+// Summary is the counters the closing line reports (lib/run.sh:3721, :3761).
 type Summary struct {
 	// Checked is every pull request the sweep looked at, including the ones
-	// it then skipped: lib/run.sh:3703 increments before lib/run.sh:3705
+	// it then skipped: lib/run.sh:3720 increments before lib/run.sh:3722
 	// honours crossrev/stop.
 	Checked int
 	// Retried is how many legs were re-fired.
@@ -49,7 +49,7 @@ type Summary struct {
 	Halted int
 	// Drafts is how many were reported as drafts and left alone. Counted
 	// apart from the other two because a draft is neither: nothing was
-	// re-fired and nothing was given up on (lib/run.sh:3704).
+	// re-fired and nothing was given up on (lib/run.sh:3721).
 	Drafts int
 }
 
@@ -59,7 +59,7 @@ type Summary struct {
 // converged pull request look identical from outside. So something has to go
 // looking, and it retries once before giving up — a dropped event is fixed by
 // re-firing it, and re-applying a label GitHub already holds fires nothing,
-// which is why the retry removes it first (lib/run.sh:3660-3665).
+// which is why the retry removes it first (lib/run.sh:3675-3680).
 //
 // It decides from marker and label state alone. No event payload reaches it,
 // and it reads no pull request body, diff or thread.
@@ -67,33 +67,33 @@ type Watchdog struct {
 	// Forge is every read and write it makes.
 	Forge forge.Forge
 	// Now is the clock every age is measured against. Bash reads it once,
-	// before the loop (lib/run.sh:3690), so one sweep uses one instant.
+	// before the loop (lib/run.sh:3705), so one sweep uses one instant.
 	Now func() time.Time
 	// Out is where the page goes.
 	Out *ui.IO
 	// Timeout is how long a leg may be waiting before it counts as stuck.
-	// Zero means the 1800 seconds lib/run.sh:3667 defaults the flag to.
+	// Zero means the 1800 seconds lib/run.sh:3682 defaults the flag to.
 	Timeout time.Duration
 	// TimeoutRefusal is a `--timeout` the caller could not convert, held
 	// rather than raised.
 	//
-	// Bash keeps the flag as a string (lib/run.sh:3671) and evaluates it only
-	// at `(( age < timeout ))` (lib/run.sh:3719), so a sweep that reaches no
+	// Bash keeps the flag as a string (lib/run.sh:3686) and evaluates it only
+	// at `(( age < timeout ))` (lib/run.sh:3747), so a sweep that reaches no
 	// pull request never dies on a nonsense value, and one that reaches a
 	// stopped or marker-less pull request does not either. Raising this where
 	// the arithmetic is, rather than at the flag, is what reproduces that.
 	TimeoutRefusal error
 	// Author is whose markers are loop state. Bash resolves it per pull
-	// request with `state_trusted_author automated` (lib/run.sh:3709); here
+	// request with `state_trusted_author automated` (lib/run.sh:3737); here
 	// the caller resolves it once and hands it in.
 	Author string
 }
 
-// watchdogDefaultTimeout is `timeout=1800` at lib/run.sh:3667.
+// watchdogDefaultTimeout is `timeout=1800` at lib/run.sh:3682.
 const watchdogDefaultTimeout = 30 * time.Minute
 
 // Run sweeps the pull requests it was handed and answers what it did
-// (lib/run.sh:3689-3735).
+// (lib/run.sh:3705-3763).
 //
 // The error is the sweep stopping early, which is what `ui_die` does to the
 // process: a label that did not land or a comment that did not post is fatal
@@ -129,9 +129,9 @@ func (w *Watchdog) Run(ctx context.Context, repo core.Slug, waiting []Waiting) (
 
 		leg := core.LegReview
 		// Bash asks whether the space-joined label list CONTAINS the
-		// awaiting-resolution name (lib/run.sh:3707), not whether one
+		// awaiting-resolution name (lib/run.sh:3724), not whether one
 		// label equals it, so the substring test is the parity one.
-		// The stop test two lines up is different on purpose: lib/run.sh:3705
+		// The stop test two lines up is different on purpose: lib/run.sh:3722
 		// is `grep -qw`, a whole-label match, which is what watchdogHasLabel,
 		// statusHasLabel (status.go) and hasStop (cycle.go) reproduce.
 		if strings.Contains(strings.Join(pr.Labels, " "), policy.LabelAwaitingResolution) {
@@ -142,7 +142,7 @@ func (w *Watchdog) Run(ctx context.Context, repo core.Slug, waiting []Waiting) (
 		// applies. Re-firing the label would meet the same refusal, and the
 		// sweep after that would report a leg that "is still not finishing" —
 		// a leg that never started. Saying the true reason once a sweep beats
-		// a retry that cannot work (lib/run.sh:3726-3735). It is decided
+		// a retry that cannot work (lib/run.sh:3754-3763). It is decided
 		// above the marker read, so a draft costs no forge call at all.
 		if pr.Draft {
 			w.Out.Opt(watchdogDraftLine(pr.PR, leg))
@@ -154,7 +154,7 @@ func (w *Watchdog) Run(ctx context.Context, repo core.Slug, waiting []Waiting) (
 		markers := statusMarkers(w.Forge.IssueComments(ctx, repo, pr.PR), w.Author)
 		if len(markers) == 0 {
 			// A label with nothing behind it: the event never arrived, so
-			// the leg never wrote a marker at all (lib/run.sh:3712-3716).
+			// the leg never wrote a marker at all (lib/run.sh:3740-3744).
 			w.Out.No(watchdogNeverStartedLine(pr.PR, leg))
 			if err := w.retry(ctx, repo, pr, leg, &summary); err != nil {
 				return summary, err
@@ -162,13 +162,13 @@ func (w *Watchdog) Run(ctx context.Context, repo core.Slug, waiting []Waiting) (
 			continue
 		}
 
-		// `last`, with no leg filter (lib/run.sh:3711): the age comes off
+		// `last`, with no leg filter (lib/run.sh:3739): the age comes off
 		// the newest marker on the pull request whichever leg wrote it.
 		// A marker with no `ts` reads as 0, which is `.ts // 0` at
-		// lib/run.sh:3718 and makes the leg past any timeout.
+		// lib/run.sh:3746 and makes the leg past any timeout.
 		age := time.Duration(now.Unix()-markers[len(markers)-1].TS) * time.Second
 		// The first read of the timeout, and so the first place a `--timeout`
-		// that is not a number can stop anything (lib/run.sh:3719).
+		// that is not a number can stop anything (lib/run.sh:3747).
 		if w.TimeoutRefusal != nil {
 			return summary, w.TimeoutRefusal
 		}
@@ -190,14 +190,14 @@ func (w *Watchdog) Run(ctx context.Context, repo core.Slug, waiting []Waiting) (
 }
 
 // retry re-fires the leg, or halts it because it has been re-fired once already
-// (lib/run.sh:3738-3767). It counts what it did into the summary.
+// (lib/run.sh:3766-3795). It counts what it did into the summary.
 func (w *Watchdog) retry(ctx context.Context, repo core.Slug, pr Waiting, leg core.Leg, summary *Summary) error {
 	label := policy.AwaitingLabel(leg)
 
 	if watchdogHasLabel(pr.Labels, policy.LabelWatchdogRetried) {
 		// One retry, then halt. A second failure is not a dropped event.
 		// The awaiting label comes off and does not go back on, which is
-		// what makes this terminal (lib/run.sh:3743-3746).
+		// what makes this terminal (lib/run.sh:3771-3774).
 		w.Forge.PullRequestLabelRemove(ctx, repo, pr.PR, label)
 		w.ensureLabel(ctx, repo, policy.LabelHalted)
 		if err := w.Forge.PullRequestLabelAdd(ctx, repo, pr.PR, policy.LabelHalted); err != nil {
@@ -212,7 +212,7 @@ func (w *Watchdog) retry(ctx context.Context, repo core.Slug, pr Waiting, leg co
 	}
 
 	// Re-applying a label GitHub already holds fires no event, so the retry
-	// has to remove it first (lib/run.sh:3757-3764).
+	// has to remove it first (lib/run.sh:3785-3792).
 	w.ensureLabel(ctx, repo, policy.LabelWatchdogRetried)
 	if err := w.Forge.PullRequestLabelAdd(ctx, repo, pr.PR, policy.LabelWatchdogRetried); err != nil {
 		return err
@@ -228,7 +228,7 @@ func (w *Watchdog) retry(ctx context.Context, repo core.Slug, pr Waiting, leg co
 
 // ensureLabel declares the label at the colour and description the one map
 // gives it. Bash sends the outcome to /dev/null and does not test it
-// (lib/run.sh:3744, :3759): a label the sweep failed to declare is still
+// (lib/run.sh:3772, :3759): a label the sweep failed to declare is still
 // applied on the next line, because GitHub's add-labels endpoint mints a
 // missing one with default metadata.
 func (w *Watchdog) ensureLabel(ctx context.Context, repo core.Slug, name string) {
@@ -239,7 +239,7 @@ func (w *Watchdog) ensureLabel(ctx context.Context, repo core.Slug, name string)
 	})
 }
 
-// watchdogHasLabel is the `grep -qw` test at lib/run.sh:3705 and :3742. Bash's
+// watchdogHasLabel is the `grep -qw` test at lib/run.sh:3722 and :3742. Bash's
 // -w also matches the name inside a longer one, because `-` and `/` are not
 // word characters; equality is what every other label reader in this tree uses,
 // and no repository mints a label the two would disagree on.

@@ -9,7 +9,7 @@ import (
 // Version is the only configuration shape this build understands. It is
 // CROSSREV_CONFIG_VERSION at lib/config.sh:21, compared as text rather than as
 // a number, so `version: 1.0` is a mismatch exactly as it is in Bash
-// (lib/config.sh:298).
+// (lib/config.sh:334).
 const Version = "1"
 
 // Number is a YAML number carried as the text a JSON encoder must emit.
@@ -80,7 +80,7 @@ func (o *Object) Keys() []string {
 
 // Has reports whether the key is present, which is not the same question as
 // whether its value is null. cfg_resolve_backlog asks exactly this of the
-// repository layer at lib/config.sh:396.
+// repository layer at lib/config.sh:432.
 func (o *Object) Has(key string) bool {
 	if o == nil {
 		return false

@@ -28,7 +28,7 @@ func TestObjectKeepsKeyOrder(t *testing.T) {
 }
 
 // Present-and-null is not the same question as absent, which is what
-// cfg_resolve_backlog asks of the repository layer at lib/config.sh:396.
+// cfg_resolve_backlog asks of the repository layer at lib/config.sh:432.
 func TestHasSeparatesPresentFromNull(t *testing.T) {
 	object := config.NewObject()
 	object.Set("stated", nil)

@@ -23,7 +23,7 @@ import (
 // Nothing under `want` is written by hand. Each fixture was recorded by running
 // the shipped cmd_watchdog with lib/*.sh sourced, a frozen clock, and the two
 // reads it makes answered with the payload GitHub would return — so the real
-// --jq filters in lib/run.sh:3692-3693 and lib/state.sh:62 ran. `page` is the
+// --jq filters in lib/run.sh:3708-3709 and lib/state.sh:62 ran. `page` is the
 // bytes it printed with stdout on a file, and `calls` is the four write
 // functions and the comment read it called, in order, named for the forge
 // operation each one is.
@@ -128,7 +128,7 @@ func watchdogRun(t *testing.T, c watchdogCase) (*watchdogForge, *bytes.Buffer, c
 }
 
 // TestWatchdogPrintsThePageTheShellPrints pins every printed byte of the sweep
-// against the shell's own output (lib/run.sh:3695-3734): the section heading,
+// against the shell's own output (lib/run.sh:3711-3762): the section heading,
 // the per-pull-request line and its glyph, the retry and halt lines indented
 // under it, the blank rule, the counted summary and the closing line with the
 // blank line ui_end leaves after it (lib/ui.sh:81).
@@ -148,9 +148,9 @@ func TestWatchdogPrintsThePageTheShellPrints(t *testing.T) {
 
 // TestWatchdogWritesWhatTheShellWrites pins the forge calls, in order. The order
 // is the mechanism: re-applying a label GitHub already holds fires no event, so
-// the retry removes it before adding it back (lib/run.sh:3759-3764), and the
+// the retry removes it before adding it back (lib/run.sh:3787-3792), and the
 // halt removes the awaiting label before it labels and comments
-// (lib/run.sh:3743-3752).
+// (lib/run.sh:3771-3780).
 func TestWatchdogWritesWhatTheShellWrites(t *testing.T) {
 	for _, c := range watchdogCases(t) {
 		t.Run(c.Name, func(t *testing.T) {
@@ -168,7 +168,7 @@ func TestWatchdogWritesWhatTheShellWrites(t *testing.T) {
 
 // TestWatchdogCounts pins the three counters the summary line reports. A pull
 // request carrying crossrev/stop is counted as checked and acted on in neither
-// direction, because lib/run.sh:3703 increments before lib/run.sh:3705 skips.
+// direction, because lib/run.sh:3720 increments before lib/run.sh:3722 skips.
 func TestWatchdogCounts(t *testing.T) {
 	for _, c := range watchdogCases(t) {
 		t.Run(c.Name, func(t *testing.T) {
@@ -191,7 +191,7 @@ func TestWatchdogCounts(t *testing.T) {
 
 // TestWatchdogRetriesOnceThenHalts is the whole mechanism in one sequence: the
 // first sweep re-fires the label and records that it did, and the second sweep
-// reads that record and halts instead of retrying again (lib/run.sh:3742).
+// reads that record and halts instead of retrying again (lib/run.sh:3770).
 //
 // The second attempt writes no awaiting label back, which is what makes the halt
 // terminal rather than another retry.
@@ -241,7 +241,7 @@ func TestWatchdogRetriesOnceThenHalts(t *testing.T) {
 }
 
 // TestWatchdogHaltComment pins the comment body byte for byte
-// (lib/run.sh:3747-3752). It names the leg, refuses to read as a verdict on the
+// (lib/run.sh:3775-3780). It names the leg, refuses to read as a verdict on the
 // code, and gives both the command to look and the labels to remove to restart.
 func TestWatchdogHaltComment(t *testing.T) {
 	const want = "**crossrev halted** — the resolve leg was already retried once and is still not finishing.\n" +
@@ -282,7 +282,7 @@ func TestWatchdogHaltComment(t *testing.T) {
 // author stops rather than running. With no author every marker filters out, so
 // a sweep that carried on would read every pull request as never started and
 // re-fire the whole repository. Bash cannot reach that state: it resolves the
-// author inside the loop at lib/run.sh:3709 and dies there (lib/state.sh:37-39).
+// author inside the loop at lib/run.sh:3737 and dies there (lib/state.sh:37-39).
 // Here the author is an input, so the refusal is the same words, earlier.
 func TestWatchdogWithoutATrustedAuthorRefuses(t *testing.T) {
 	const head = "d81a3f2abc0000000000000000000000000000ab"
@@ -414,7 +414,7 @@ func TestWatchdogWriteFailureStopsTheSweep(t *testing.T) {
 	}
 }
 
-// TestWatchdogDefaultTimeout pins the 1800 seconds lib/run.sh:3667 defaults the
+// TestWatchdogDefaultTimeout pins the 1800 seconds lib/run.sh:3682 defaults the
 // flag to. A zero Timeout must not read as "everything is past its timeout".
 func TestWatchdogDefaultTimeout(t *testing.T) {
 	const head = "d81a3f2abc0000000000000000000000000000ab"
@@ -440,8 +440,8 @@ func TestWatchdogDefaultTimeout(t *testing.T) {
 // TestWatchdogTimeoutRefusalWaitsForTheComparison pins where a `--timeout` that
 // is not a number stops the sweep.
 //
-// Bash keeps the flag as a string (lib/run.sh:3671) and reads it only at
-// `(( age < timeout ))` (lib/run.sh:3719), which three shapes never reach: no
+// Bash keeps the flag as a string (lib/run.sh:3686) and reads it only at
+// `(( age < timeout ))` (lib/run.sh:3747), which three shapes never reach: no
 // pull request waiting, one carrying crossrev/stop, and one with no marker
 // behind its label. Measured against bin/crossrev with `--timeout abc`: exit 0
 // for each of those, exit 1 for a pull request that is waiting with a marker.
@@ -677,7 +677,7 @@ func (f *watchdogForge) IssueCommentCreate(context.Context, core.Slug, int, stri
 var _ forge.Forge = (*watchdogForge)(nil)
 
 // TestWatchdogReportsADraftRatherThanRetryingIt pins the branch at
-// lib/run.sh:3727-3735.
+// lib/run.sh:3755-3763.
 //
 // A draft is waiting on its author, not on a leg: every automatic invocation
 // refuses it and the review workflow's job condition skips before that runs, so
@@ -755,7 +755,7 @@ func TestWatchdogReportsADraftRatherThanRetryingIt(t *testing.T) {
 
 // TestWatchdogCountsDraftsApartFromTheRest pins the third counter: a sweep over
 // one draft and one stuck pull request retries the second and reports the first,
-// and the closing line names all three numbers (lib/run.sh:3733).
+// and the closing line names all three numbers (lib/run.sh:3761).
 func TestWatchdogCountsDraftsApartFromTheRest(t *testing.T) {
 	const head = "d81a3f2abc0000000000000000000000000000ab"
 	f := &watchdogForge{comments: []forge.IssueComment{

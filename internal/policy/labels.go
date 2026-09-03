@@ -37,7 +37,7 @@ func PassLabelName(pass core.PassNumber) string {
 }
 
 // PassLabelState is the loop-state word a finished pass leaves behind, in the
-// spelling lib/legs.sh prints and lib/run.sh:441 matches against.
+// spelling lib/legs.sh prints and lib/run.sh:447 matches against.
 type PassLabelState string
 
 // The four words a pass label can carry. They are mutually exclusive: lib/run.sh
@@ -52,12 +52,12 @@ const (
 // String renders the bare word.
 func (p PassLabelState) String() string { return string(p) }
 
-// Label is the label the word names, as lib/run.sh:464 forms it.
+// Label is the label the word names, as lib/run.sh:470 forms it.
 //
 // The constants rather than `"crossrev/" + string(p)`: the four labels are
 // declared ten lines above, and a second spelling of them here is how a rename
 // lands in one place and not the other. An unknown word gets the concatenation,
-// which is what lib/run.sh:464 would also produce.
+// which is what lib/run.sh:470 would also produce.
 func (p PassLabelState) Label() string {
 	switch p {
 	case PassAwaitingReview:

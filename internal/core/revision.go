@@ -8,13 +8,13 @@ import (
 
 // shaLength is git's object name in hexadecimal. CrossRev never abbreviates a
 // revision it stores: every marker records the full `head_sha` it was written
-// against (lib/run.sh:1098), and a comparison against an abbreviation would
+// against (lib/run.sh:1104), and a comparison against an abbreviation would
 // match a different commit as readily as the right one.
 const shaLength = 40
 
 // shortLength is what the printed forms abbreviate to, as
 // `"${claim_sha:0:7}"` at lib/state.sh:330 and `"${commit_sha:0:7}"` at
-// lib/run.sh:2271.
+// lib/run.sh:2277.
 const shortLength = 7
 
 // ErrRevisionSHA is returned when a string is not a git object name.
@@ -74,7 +74,7 @@ func (r Revision) WithRef(ref string) Revision {
 }
 
 // MarshalJSON writes the object name, which is the form every marker's
-// `head_sha` holds (lib/run.sh:1098).
+// `head_sha` holds (lib/run.sh:1104).
 //
 // The zero revision is refused rather than written as "". A marker carrying an
 // empty head SHA is embedded verbatim in a public pull-request comment and

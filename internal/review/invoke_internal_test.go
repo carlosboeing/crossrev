@@ -4,7 +4,7 @@ import "testing"
 
 // TestCapitaliseName pins the Bash
 // `$(printf '%s' "${h:0:1}" | tr '[:lower:]' '[:upper:]')${h:1}` at
-// lib/run.sh:503, including the two edges the not-driven refusal never reaches
+// lib/run.sh:509, including the two edges the not-driven refusal never reaches
 // on the shipped descriptor: an empty name, where `${h:0:1}` is empty and the
 // expansion is the empty string, and a one-character name, where `${h:1}` is
 // empty rather than out of range.

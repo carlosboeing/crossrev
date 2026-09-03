@@ -125,7 +125,7 @@ func TestPromptOraclesCarryProvenance(t *testing.T) {
 
 // REVIEW.md is its own input rather than part of the metadata, and it is read
 // from the base revision so a branch cannot rewrite the loop that reviews it
-// (lib/prompt.sh:150-154, lib/run.sh:1134). The fixture was captured without
+// (lib/prompt.sh:150-154, lib/run.sh:1140). The fixture was captured without
 // one, so this is the case the fixture does not reach.
 func TestReviewQuotesREVIEWMarkdownWhenThereIsOne(t *testing.T) {
 	o := loadReviewOracle(t)

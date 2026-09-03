@@ -134,7 +134,7 @@ func actionLegs(t *testing.T, yaml string) []string {
 
 // TestFlagsHarnessHintNamesWhatIsInstalled pins the two shapes of the
 // `--harness` hint. Bash renders the list only when jq is present and
-// `harness_names` answers (lib/run.sh:926-931, :1742-1747); here the caller
+// `harness_names` answers (lib/run.sh:932-937, :1742-1747); here the caller
 // hands the names in, and an empty list is the fallback.
 func TestFlagsHarnessHintNamesWhatIsInstalled(t *testing.T) {
 	for _, tc := range []struct {

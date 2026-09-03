@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-// LookPath is `command -v` over PATH (lib/run.sh:524, lib/preflight.sh:56,
+// LookPath is `command -v` over PATH (lib/run.sh:530, lib/preflight.sh:56,
 // lib/harnesses.sh:90, lib/init.sh:771).
 //
 // It lives here because this is the package that starts a process, and because

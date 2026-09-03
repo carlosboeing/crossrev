@@ -30,7 +30,7 @@ func TestHarnessNamesAreTheFiveDescriptorsInDeclarationOrder(t *testing.T) {
 	}
 }
 
-// lib/run.sh:488 sets LEG_WRITE=no and lib/run.sh:489 raises it to yes for the
+// lib/run.sh:494 sets LEG_WRITE=no and lib/run.sh:495 raises it to yes for the
 // resolver alone. The comment above it says the derivation is deliberately not
 // configurable, so the only route to a write capability is the leg role.
 func TestWriteCapabilityIsDerivedFromTheLegAndNothingElse(t *testing.T) {
@@ -118,7 +118,7 @@ func TestUsageOptionalFieldsAreDistinguishableFromZero(t *testing.T) {
 	}
 }
 
-// run_invoke at lib/run.sh:774 hands the adapter a prompt, a schema and a
+// run_invoke at lib/run.sh:780 hands the adapter a prompt, a schema and a
 // workdir, and adapter_claude at lib/adapters/claude.sh:15-17 defaults only
 // model, effort, endpoint and write. So the first three are required and the
 // rest are not.
@@ -211,7 +211,7 @@ func TestParseWriteCapabilityAcceptsOnlyNoAndYes(t *testing.T) {
 			t.Fatalf("ParseWriteCapability(%q) = %q, %v", in, got, err)
 		}
 	}
-	// The empty string is not the Bash default: lib/run.sh:488 writes the word
+	// The empty string is not the Bash default: lib/run.sh:494 writes the word
 	// `no`, so an unset capability is a bug rather than a permission.
 	for _, in := range []string{"", "true", "Yes", "readonly"} {
 		if _, err := ParseWriteCapability(in); err == nil {
@@ -238,7 +238,7 @@ func TestUsageCachedSumsTheFourCacheBuckets(t *testing.T) {
 	}
 }
 
-// The adapters return the envelope shape lib/run.sh:840 reads. All nine keys
+// The adapters return the envelope shape lib/run.sh:846 reads. All nine keys
 // come from the adapter itself; nothing is attached afterwards.
 func TestEnvelopeDecodesTheAdapterFailureShape(t *testing.T) {
 	const raw = `{"ok":false,"payload":null,"error":"the adapter returned nothing at all"}`

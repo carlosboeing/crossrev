@@ -16,7 +16,7 @@ import (
 )
 
 // RoleDefaultName is the App name CrossRev proposes for an owner
-// (_auth_role_default_name, lib/auth.sh:97).
+// (_auth_role_default_name, lib/auth.sh:111).
 //
 // The name is display text and takes the product name (ADR 0010): it is what a
 // person reads in an organisation's installed Apps list, beside `Claude` and
@@ -43,7 +43,7 @@ func RoleDefaultName(role, owner string) string {
 }
 
 // RoleSummary is what a role is allowed to do, as `auth status` prints it
-// (_auth_role_summary, lib/auth.sh:64).
+// (_auth_role_summary, lib/auth.sh:78).
 func RoleSummary(role string) string {
 	switch role {
 	case RoleLoop:
@@ -55,7 +55,7 @@ func RoleSummary(role string) string {
 }
 
 // RoleKeySecret is which repository secret carries a role's private key
-// (_auth_role_key_secret, lib/auth.sh:77).
+// (_auth_role_key_secret, lib/auth.sh:91).
 //
 // Named per role rather than assumed, because the two are not interchangeable
 // and the consequence of confusing them is not a broken deploy — it is the
@@ -72,7 +72,7 @@ func RoleKeySecret(role string) string {
 }
 
 // Slug derives an App's slug from its name the way GitHub does: lowercase,
-// spaces to hyphens (_auth_slug, lib/auth.sh:105).
+// spaces to hyphens (_auth_slug, lib/auth.sh:119).
 //
 // The lowercasing is ASCII-only, and that is a decision rather than a
 // shortcut. `tr '[:upper:]' '[:lower:]'` answers differently in different
@@ -102,7 +102,7 @@ func Slug(name string) string {
 }
 
 // Metadata is the file `auth login` writes beside an App's private key
-// (lib/auth.sh:708-714), in the order jq wrote its keys.
+// (lib/auth.sh:722-728), in the order jq wrote its keys.
 //
 // It is a struct rather than a map so the field order is the file's order, and
 // so a caller reading .Slug is reading the field the trusted-author check falls
@@ -121,7 +121,7 @@ type Metadata struct {
 // ReadMetadata reads one App's cached identity.
 //
 // An absent role is the loop's: anything registered before roles existed has no
-// role key, and `auth status` reads it as `.role // "loop"` (lib/auth.sh:384).
+// role key, and `auth status` reads it as `.role // "loop"` (lib/auth.sh:398).
 func ReadMetadata(path string) (Metadata, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -151,7 +151,7 @@ type Drift struct {
 }
 
 // SyncMeta reconciles the cached identity at path against the authoritative
-// one, correcting it (_auth_sync_meta, lib/auth.sh:207).
+// one, correcting it (_auth_sync_meta, lib/auth.sh:221).
 //
 // It returns one entry per field that moved, and nothing at all when the two
 // agree — in which case the file is not touched.
@@ -441,7 +441,7 @@ func ghFailure(summary string, res exec.Result) error {
 }
 
 // DetectOwner is the owner of the repository the working directory belongs to
-// (_auth_detect_owner, lib/auth.sh:111).
+// (_auth_detect_owner, lib/auth.sh:125).
 //
 // The owner is detected, not asked, because the repository's owner is the trust
 // boundary the private key should sit on.
@@ -467,7 +467,7 @@ type Account struct {
 }
 
 // AccountInfo resolves an account by login (_auth_account_info,
-// lib/auth.sh:118).
+// lib/auth.sh:132).
 //
 // /users/ resolves all three kinds. The `\(…)` interpolation is jq's, so a
 // response missing either half prints nothing at all rather than half an
@@ -497,7 +497,7 @@ type Identity struct {
 }
 
 // AppIdentity reads the authoritative identity with the App's own JWT
-// (_auth_app_identity, lib/auth.sh:183).
+// (_auth_app_identity, lib/auth.sh:197).
 //
 // Authoritative, and reachable with the key already on disk. A reachable API
 // that answered with neither field is not evidence of anything, and an empty
@@ -529,7 +529,7 @@ func (g *GH) AppIdentity(ctx context.Context, jwt string) (Identity, error) {
 // against it, returning one entry per field that moved.
 //
 // It is the pair `auth status` performs before it prints a line
-// (lib/auth.sh:398-403). An unreachable API returns an error and leaves the
+// (lib/auth.sh:412-417). An unreachable API returns an error and leaves the
 // cache alone: it is not evidence the cached identity is wrong.
 func (g *GH) Sync(ctx context.Context, metaPath, jwt string) ([]Drift, error) {
 	identity, err := g.AppIdentity(ctx, jwt)
@@ -550,7 +550,7 @@ func (g *GH) Sync(ctx context.Context, metaPath, jwt string) ([]Drift, error) {
 // The ledger holds dates, never tokens.
 
 // stampLayout is the timestamp the ledger records and reads back, which is what
-// `date -u +%Y-%m-%dT%H:%M:%SZ` prints (lib/auth.sh:338).
+// `date -u +%Y-%m-%dT%H:%M:%SZ` prints (lib/auth.sh:352).
 //
 // Reading it back is BSD `date -j -f`, which takes this layout and no other,
 // with GNU `date -d` as the fallback. time.Parse is the strict reading: an
@@ -558,7 +558,7 @@ func (g *GH) Sync(ctx context.Context, metaPath, jwt string) ([]Drift, error) {
 const stampLayout = "2006-01-02T15:04:05Z"
 
 // TokenRecord writes down that a token was set, and how long it is good for
-// (auth_token_record, lib/auth.sh:332).
+// (auth_token_record, lib/auth.sh:346).
 //
 // now is injected rather than read, so what the ledger says is a fact a caller
 // chose and a test can assert.
@@ -603,7 +603,7 @@ func TokenRecord(env Environment, repo, name string, days int, now time.Time) er
 }
 
 // TokenDaysLeft is how many days a recorded token has before it expires
-// (auth_token_days_left, lib/auth.sh:344).
+// (auth_token_days_left, lib/auth.sh:358).
 //
 // It fails when nothing was recorded for that repository and secret, which is
 // what its caller treats as "no date to report" rather than as an error.
