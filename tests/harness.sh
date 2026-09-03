@@ -15,6 +15,37 @@
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CROSSREV="$HERE/../bin/crossrev"
 
+# One root for every temp file this suite creates — the harness's own, a
+# fixture's, or one a production code path under test makes — removed when the
+# suite's process exits. mktemp is redefined as a shell function below so every
+# later call, here and in whatever this file's caller sources or execs, lands
+# under this root without editing each call site.
+#
+# TMPDIR is not that mechanism: on macOS, /usr/bin/mktemp ignores an inherited
+# TMPDIR (measured: `env TMPDIR="$L" mktemp -d` still prints a path under the
+# system temp directory, not under $L), so only rewriting the command itself
+# reaches every call.
+HARNESS_TMP="$(command mktemp -d)"; export HARNESS_TMP
+_harness_cleanup() { rm -rf "$HARNESS_TMP"; }
+trap '_harness_cleanup' EXIT
+
+# An argument carrying an explicit template (a run of X's) goes through
+# unchanged; anything else — -d, -u, no argument at all — gets the template
+# appended so the result lands under $HARNESS_TMP. `export -f` so a bash child
+# of the suite, including the real crossrev binary under test, inherits it.
+mktemp() {
+  local a has_template=0
+  for a in "$@"; do
+    case "$a" in *XXX*) has_template=1 ;; esac
+  done
+  if (( has_template )); then
+    command mktemp "$@"
+  else
+    command mktemp "$@" "$HARNESS_TMP/tmp.XXXXXXXXXX"
+  fi
+}
+export -f mktemp
+
 pass=0; fail=0
 ok()    { printf '  ok    %s\n' "$1"; pass=$((pass+1)); }
 notok() { printf '  FAIL  %s\n    expected: %s\n    actual:   %s\n' "$1" "$2" "$3"; fail=$((fail+1)); }
