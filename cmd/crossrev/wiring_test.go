@@ -556,6 +556,54 @@ func TestTheDescriptorPathOverrideIsRead(t *testing.T) {
 	if !strings.Contains(got.stderr, "zzz") {
 		t.Errorf("the override descriptor was not read:\nstdout %q\nstderr %q", got.stdout, got.stderr)
 	}
+	// The refusal is a refusal: the process ends 1, and the message carries
+	// the remediation harness.Refusal names (harness/adapter.go:144-148), not
+	// only the reason.
+	if got.status != 1 {
+		t.Errorf("status = %d, want 1: a descriptor naming an unadapted harness refuses before any command runs",
+			got.status)
+	}
+	if want := "Add the adapter, or remove the entry."; !strings.Contains(got.stderr, want) {
+		t.Errorf("the refusal does not say what to do about it (%q):\nstderr %q", want, got.stderr)
+	}
+	// Nothing here can tell main.go's two arms apart, and no test can:
+	// harness.Adapters mints one Refusal (harness/adapter.go:144-148), its
+	// Error() is its Reason (harness/errors.go:80), and the fallback action at
+	// main.go:86 is the same string as that Refusal's Action, so both print the
+	// same two lines. A second Refusal carrying a different Action would make
+	// the errors.As branch observable and is what to add if one is ever minted.
+}
+
+// A descriptor that cannot be read or parsed is not fatal to help and version
+// (bin/crossrev:68-72).
+//
+// The shell renders its usage block from a harness list jq produced, and prints
+// the block with no list at all when jq is missing rather than refusing to
+// answer. main.descriptor keeps that arm: the parse error travels back as nil,
+// and the commands that need a working descriptor refuse for themselves.
+// Turning it into a refusal here means a machine with a broken descriptor
+// cannot even ask what version it has.
+func TestHelpAndVersionStillAnswerWithAnUnreadableDescriptor(t *testing.T) {
+	bin := binary(t)
+	dir := t.TempDir()
+
+	broken := filepath.Join(dir, "not-a-descriptor.json")
+	write(t, broken, "{ this is not JSON\n")
+	missing := filepath.Join(dir, "no-such-file.json")
+
+	for _, path := range []string{broken, missing} {
+		for _, command := range []string{"version", "help"} {
+			got := invoke(t, bin, []string{"CROSSREV_HARNESS_FILE=" + path}, command)
+			if got.status != 0 {
+				t.Errorf("crossrev %s with descriptor %s = status %d, want 0\nstderr: %q",
+					command, filepath.Base(path), got.status, got.stderr)
+			}
+			if got.stdout == "" {
+				t.Errorf("crossrev %s with descriptor %s printed nothing",
+					command, filepath.Base(path))
+			}
+		}
+	}
 }
 
 // state_trusted_author falls back to the App metadata file when
