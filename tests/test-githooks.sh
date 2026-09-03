@@ -24,7 +24,7 @@ HOOK="$ROOT/scripts/githooks/pre-commit"
 # One throwaway repository for the whole file. The hook reads the index, so a
 # real `git add` is the only honest way to drive it.
 work="$(mktemp -d)"
-trap 'rm -rf "$work"; _harness_cleanup' EXIT
+trap 'rm -rf "$work"; _tmproot_cleanup' EXIT
 git -C "$work" init -q
 git -C "$work" config user.email crossrev@example.test
 git -C "$work" config user.name "CrossRev Test"

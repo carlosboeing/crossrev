@@ -10,6 +10,8 @@
 
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=tmproot.sh
+source "$HERE/tmproot.sh"
 # shellcheck source=../lib/ui.sh
 source "$HERE/../lib/ui.sh"
 # shellcheck source=../lib/harnesses.sh
