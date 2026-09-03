@@ -239,6 +239,42 @@ cfg_load() {
   cfg_assert_git_hooks
   cfg_assert_logs
   cfg_assert_backlog
+  cfg_assert_endpoints
+}
+
+# The GitHub credential names `gh` reads, in its own order of precedence
+# (`gh help environment`). The adapters hold the same four in their strip lists,
+# and tests/test-permissions.sh asserts this list and those agree rather than
+# trusting each copy to have been updated together.
+CFG_FORGE_CREDENTIALS="GH_TOKEN GITHUB_TOKEN GH_ENTERPRISE_TOKEN GITHUB_ENTERPRISE_TOKEN"
+
+# Refuse an endpoint whose token_env names a GitHub credential.
+#
+# An endpoint's token_env is read with ${!name} and its value handed to the
+# harness process as that vendor's own token variable. So a token_env of
+# GH_TOKEN carries a GitHub credential across the boundary the adapters exist to
+# hold — and past their strip list, which removes GH_TOKEN while the same value
+# arrives as ANTHROPIC_AUTH_TOKEN (ADR 0001, SECURITY.md).
+#
+# Refused here rather than in cfg_endpoint, for the reason cfg_assert_backlog
+# gives: every caller reads that function through a command substitution, where
+# ui_die ends the subshell rather than the run. At load it is named once,
+# outside a substitution, so `init` and `doctor` say it before any leg does —
+# and an endpoint no leg selects today is still refused, because a config asking
+# for this is wrong whether or not it is reached.
+cfg_assert_endpoints() {
+  local name tok forge
+  while IFS=$'\t' read -r name tok; do
+    [[ -n "$tok" ]] || continue
+    for forge in $CFG_FORGE_CREDENTIALS; do
+      [[ "$tok" == "$forge" ]] || continue
+      ui_die "the endpoint '$name' names \$$tok as its token_env" \
+        "That is a GitHub credential, and CrossRev hands token_env's value to the model process, which must hold none. Point token_env at the endpoint's own token."
+    done
+  done < <(jq -r '
+    (.endpoints // {}) | to_entries[]
+    | "\(.key)\t\(if (.value | type) == "object" then (.value.token_env // "") else "" end)"' \
+    <<<"$CFG_MERGED")
 }
 
 # Refuse a backlog destination or layout CrossRev does not recognise.

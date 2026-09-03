@@ -273,4 +273,16 @@ for adapter in "$HERE"/../lib/adapters/*.sh; do
   done
 done
 
+# The config layer refuses the same four as an endpoint's token_env, because an
+# endpoint hands its value to the harness under a vendor variable name — past a
+# strip list that removes the GitHub name and never sees the value again.
+#
+# Two lists in two files, so they are asserted equal rather than each asserted
+# correct. A fifth name added to the adapters and not here would leave the
+# config layer accepting the one thing the adapters strip.
+is "the config layer names the same four credentials the adapters strip" \
+  "$(grep -m1 '^CFG_FORGE_CREDENTIALS=' "$HERE/../lib/config.sh" \
+     | sed 's/.*="//; s/"$//' | tr ' ' '\n' | sort | tr '\n' ' ')" \
+  "GH_ENTERPRISE_TOKEN GH_TOKEN GITHUB_ENTERPRISE_TOKEN GITHUB_TOKEN "
+
 finish

@@ -152,6 +152,8 @@ Falling back to the vendor's own API would mean running Claude while the config 
 
 Each endpoint needs both a `base_url` and a `token_env`. The variable name is required rather than assumed because it genuinely differs by service.
 
+A `token_env` naming `GH_TOKEN`, `GITHUB_TOKEN`, `GH_ENTERPRISE_TOKEN` or `GITHUB_ENTERPRISE_TOKEN` is refused when the config loads, whether or not any leg selects that endpoint. CrossRev hands `token_env`'s value to the model process, and that process must hold no GitHub credential. Point it at the endpoint's own token.
+
 ## A harness was refused for a leg
 
 `the harness '<name>' cannot serve the resolve leg`
