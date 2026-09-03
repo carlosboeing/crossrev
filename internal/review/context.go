@@ -67,7 +67,7 @@ func (l *Leg) loadContext(ctx context.Context, req Request) (Context, string, er
 	}
 	loaded.Config = cfg
 
-	author, err := l.trustedAuthor(ctx, req)
+	author, err := l.trustedAuthor(ctx, req, cfg.Get(".mode"))
 	if err != nil {
 		return loaded, "", err
 	}
@@ -96,11 +96,21 @@ func (l *Leg) loadContext(ctx context.Context, req Request) (Context, string, er
 	return loaded, "", nil
 }
 
-func (l *Leg) trustedAuthor(ctx context.Context, req Request) (string, error) {
+// trustedAuthor is state_trusted_author (lib/state.sh:24-47), keyed on the
+// MODE and never on who asked for the leg.
+//
+// lib/run.sh:309 passes CTX_MODE, which lib/run.sh:299 reads from the
+// configuration at the base revision, and lib/state.sh:26 branches on
+// `automated` alone. Keyed on the trigger instead, `crossrev review --pr 42
+// --trigger automatic` against a `mode: local` repository refused with "cannot
+// determine which App's markers to trust" where the shell trusts the invoking
+// user, and the reverse — an automated repository reviewed by hand — read the
+// operator's own markers rather than the App's.
+func (l *Leg) trustedAuthor(ctx context.Context, req Request, mode string) (string, error) {
 	if req.Author != "" {
 		return req.Author, nil
 	}
-	if req.Trigger == TriggerAutomatic {
+	if mode == "automated" {
 		// lib/state.sh:35-40. Measured: CROSSREV_APP_SLUG=crossrev → crossrev[bot].
 		slug := os.Getenv("CROSSREV_APP_SLUG")
 		if slug == "" {

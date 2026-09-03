@@ -28,7 +28,7 @@ type legSettings struct {
 	endpoint string
 }
 
-func (l *Leg) settings(req Request, loaded Context) (legSettings, string, error) {
+func (l *Leg) settings(req Request, loaded Context) (legSettings, ui.Line, error) {
 	cfg := loaded.Config
 	s := legSettings{
 		harness:  cfg.Get(".reviewer.harness"),
@@ -45,36 +45,122 @@ func (l *Leg) settings(req Request, loaded Context) (legSettings, string, error)
 		s.harness = string(core.HarnessCodex)
 	}
 	if !l.Harness.Known(s.harness) {
-		return s, "", &ui.FatalError{
-			Reason: fmt.Sprintf("there is no adapter for the harness '%s'", s.harness),
-			Action: "CrossRev drives the named harnesses directly.",
-		}
+		return s, ui.Line{}, noAdapterRefusal(l.Harness, s.harness)
 	}
 	if !l.Harness.ServesLeg(s.harness, string(core.LegReview)) {
-		return s, "", &ui.FatalError{
-			Reason: fmt.Sprintf("the harness '%s' cannot serve the review leg", s.harness),
-			Action: "Point reviewer.harness at a harness that serves review.",
-		}
+		return s, ui.Line{}, servesLegRefusal(l.Harness, s.harness)
 	}
 
 	asked := s.harness
 	if l.binaryInstalled(asked) {
-		return s, "", nil
+		return s, ui.Line{}, nil
 	}
 	for _, name := range l.Harness.NamesForLeg(string(core.LegReview)) {
 		if l.binaryInstalled(name) {
 			s.harness = name
 			s.model = ""
 			s.endpoint = ""
-			warn := fmt.Sprintf("'%s' is not installed, so the reviewer runs on '%s' instead"+"\n   "+
-				"Both legs now run on the same harness, so a bug it misses while reviewing it also misses while resolving. Install %s to get the second lineage back.", asked, name, asked)
+			// ui_warn, condition and consequence apart (lib/run.sh:542-543).
+			warn := ui.Warn(
+				fmt.Sprintf("'%s' is not installed, so the reviewer runs on '%s' instead", asked, name),
+				fmt.Sprintf("Both legs now run on the same harness, so a bug it misses while reviewing it also misses while resolving. Install %s to get the second lineage back.", asked))
 			return s, warn, nil
 		}
 	}
-	return s, "", &ui.FatalError{
-		Reason: fmt.Sprintf("the reviewer is configured to use '%s', which is not installed, and no other harness that can serve the review leg is either", asked),
-		Action: "Install one of the harnesses that serve the review leg.",
+	return s, ui.Line{}, notInstalledRefusal(l.Harness, asked)
+}
+
+// notInstalledRefusal is the last refusal in run_leg_settings
+// (lib/run.sh:538-540), reached once the configured harness has no binary and
+// the substitution loop at lib/run.sh:531-537 finds no other harness that
+// serves the leg.
+//
+// The hint names every harness that CAN take the leg, read off the descriptor
+// with harness_names_for_leg — which is why the refused harness appears in the
+// list it is told to install from. Measured on the shipped descriptor with a
+// PATH carrying jq and yq but no harness binary:
+//
+//	Install one of claude, codex, agy, grok and opencode. CrossRev needs at least one, and two different ones is what makes the cross-model check mean anything.
+//
+// and with codex, agy and grok rewritten to legs ["resolve"]:
+//
+//	Install one of claude and opencode. CrossRev needs at least one, and two different ones is what makes the cross-model check mean anything.
+func notInstalledRefusal(doc harness.Document, asked string) *ui.FatalError {
+	leg := string(core.LegReview)
+	return &ui.FatalError{
+		Reason: fmt.Sprintf("the reviewer is configured to use '%s', which is not installed, and no other harness that can serve the %s leg is either", asked, leg),
+		Action: fmt.Sprintf("Install one of %s. CrossRev needs at least one, and two different ones is what makes the cross-model check mean anything.",
+			harness.NamesHuman(doc.NamesForLeg(leg))),
 	}
+}
+
+// noAdapterRefusal is the refusal run_leg_settings prints when no adapter
+// function exists for the configured name (lib/run.sh:500-508).
+//
+// The hint names the harnesses CrossRev drives, read off the descriptor rather
+// than written into the sentence. A name the descriptor lists under not_driven
+// gets a second half carrying the reason it has no adapter and the key that
+// would work instead — and the leg word there is the CONFIG key (reviewer),
+// not the descriptor's review/resolve vocabulary. Measured:
+//
+//	reviewer kimi   -> CrossRev drives claude, codex, agy, grok and opencode directly. Kimi is reached through the claude adapter as a named endpoint, so there is no adapter_kimi behind the name: define it under endpoints: and set reviewer.endpoint, not reviewer.harness.
+//	reviewer nosuch -> CrossRev drives claude, codex, agy, grok and opencode directly.
+//
+// The resolve leg builds the same two sentences from the same descriptor reads.
+// Sharing one function would mean one tier-3 package importing another, which
+// internal/archtest refuses, so each leg carries its own copy against this
+// citation.
+func noAdapterRefusal(doc harness.Document, name string) *ui.FatalError {
+	action := fmt.Sprintf("CrossRev drives %s directly.", doc.NamesHuman())
+	if reason, notDriven := doc.NotDrivenReason(name); notDriven {
+		action += fmt.Sprintf(" %s is %s: define it under endpoints: and set reviewer.endpoint, not reviewer.harness.",
+			capitaliseName(name), reason)
+	}
+	return &ui.FatalError{
+		Reason: fmt.Sprintf("there is no adapter for the harness '%s'", name),
+		Action: action,
+	}
+}
+
+// servesLegRefusal is _run_assert_harness_serves_leg for the review leg
+// (lib/run.sh:553-558), reached from run_leg_settings at lib/run.sh:520.
+//
+// The message is the product: it names the harness, the leg, the harnesses that
+// can take the leg, and the legs the refused harness actually serves. Measured
+// with grok rewritten to legs ["resolve"]:
+//
+//	the harness 'grok' cannot serve the review leg
+//	CrossRev runs the review leg on claude, codex, agy and opencode. Grok is limited to the resolve leg.
+//
+// The leg list is `harness_get "$harness" '.legs // [] | join(", ")'`, whose
+// default is the EMPTY array rather than the review-resolve pair
+// harness_serves_leg defaults to. The difference cannot show: an entry that
+// declares no legs serves both and never reaches this line, and the validator
+// refuses a legs field that is not a non-empty array drawn from review and
+// resolve (lib/harnesses.sh:66-70). So a refused entry has declared exactly one
+// leg, and Descriptor.Legs is its declared list.
+func servesLegRefusal(doc harness.Document, name string) *ui.FatalError {
+	leg := string(core.LegReview)
+	entry, _ := doc.For(name)
+	return &ui.FatalError{
+		Reason: fmt.Sprintf("the harness '%s' cannot serve the %s leg", name, leg),
+		Action: fmt.Sprintf("CrossRev runs the %s leg on %s. %s is limited to the %s leg.",
+			leg,
+			harness.NamesHuman(doc.NamesForLeg(leg)),
+			entry.ProductName,
+			strings.Join(entry.Legs(), ", ")),
+	}
+}
+
+// capitaliseName is the Bash
+// `$(printf '%s' "${LEG_HARNESS:0:1}" | tr '[:lower:]' '[:upper:]')${LEG_HARNESS:1}`
+// at lib/run.sh:503: the first character upper-cased, the rest untouched.
+func capitaliseName(name string) string {
+	runes := []rune(name)
+	if len(runes) == 0 {
+		return ""
+	}
+	return strings.ToUpper(string(runes[0])) + string(runes[1:])
 }
 
 func (l *Leg) binaryInstalled(name string) bool {
@@ -85,63 +171,38 @@ func (l *Leg) binaryInstalled(name string) bool {
 	}
 	look := l.LookPath
 	if look == nil {
-		look = lookPath
+		look = exec.LookPath
 	}
 	_, err := look(binary)
 	return err == nil
 }
 
-func lookPath(name string) (string, error) {
-	if name == "" {
-		return "", os.ErrNotExist
-	}
-	if strings.ContainsRune(name, os.PathSeparator) {
-		if _, err := os.Stat(name); err != nil {
-			return "", err
-		}
-		return name, nil
-	}
-	for _, dir := range filepath.SplitList(os.Getenv("PATH")) {
-		if dir == "" {
-			continue
-		}
-		candidate := filepath.Join(dir, name)
-		if _, err := os.Stat(candidate); err == nil {
-			return candidate, nil
-		}
-	}
-	return "", os.ErrNotExist
-}
-
-func (l *Leg) invoke(ctx context.Context, req Request, loaded Context, settings legSettings, pass int) (envelope harness.Envelope, payload json.RawMessage, retErr error) {
+func (l *Leg) invoke(ctx context.Context, req Request, loaded Context, settings legSettings, pass int) (envelope harness.Envelope, payload json.RawMessage, msgs []ui.Line, retErr error) {
 	if err := harness.AssertEnvClean(l.Env); err != nil {
-		return harness.Envelope{}, nil, err
+		return harness.Envelope{}, nil, msgs, err
 	}
 
 	adapter, known := harness.For(l.Harness, settings.harness)
 	if !known {
-		return harness.Envelope{}, nil, &ui.FatalError{
-			Reason: fmt.Sprintf("there is no adapter for the harness '%s'", settings.harness),
-			Action: "CrossRev drives the named harnesses directly.",
-		}
+		return harness.Envelope{}, nil, msgs, noAdapterRefusal(l.Harness, settings.harness)
 	}
 
 	entry, _ := l.Harness.For(settings.harness)
 	staged, err := cred.Prepare(l.Harness.Credentials().For(settings.harness), settings.endpoint, cred.Options{Now: l.Now})
 	if err != nil {
-		return harness.Envelope{}, nil, err
+		return harness.Envelope{}, nil, msgs, err
 	}
 	defer func() { _ = cred.Discard(staged) }()
 
 	tmp, err := os.MkdirTemp("", "crossrev-review-")
 	if err != nil {
-		return harness.Envelope{}, nil, err
+		return harness.Envelope{}, nil, msgs, err
 	}
 	defer os.RemoveAll(tmp)
 
 	diffBytes, err := l.reviewDiff(ctx, loaded)
 	if err != nil {
-		return harness.Envelope{}, nil, err
+		return harness.Envelope{}, nil, msgs, err
 	}
 
 	promptBytes := prompt.Review{
@@ -156,11 +217,11 @@ func (l *Leg) invoke(ctx context.Context, req Request, loaded Context, settings 
 	promptPath := filepath.Join(tmp, "prompt")
 	schemaPath := filepath.Join(tmp, "schema.json")
 	if err := os.WriteFile(promptPath, promptBytes, 0o600); err != nil {
-		return harness.Envelope{}, nil, err
+		return harness.Envelope{}, nil, msgs, err
 	}
 	schemaBytes := validate.FindingsSchema()
 	if err := os.WriteFile(schemaPath, schemaBytes, 0o600); err != nil {
-		return harness.Envelope{}, nil, err
+		return harness.Envelope{}, nil, msgs, err
 	}
 
 	workdir := req.Workdir
@@ -169,12 +230,12 @@ func (l *Leg) invoke(ctx context.Context, req Request, loaded Context, settings 
 	}
 	desc, err := sandbox.LoadDescriptor(l.Harness.Raw())
 	if err != nil {
-		return harness.Envelope{}, nil, err
+		return harness.Envelope{}, nil, msgs, err
 	}
 	paths := desc.Paths()
 	moved, err := sandbox.Quarantine(workdir, paths)
 	if err != nil {
-		return harness.Envelope{}, nil, err
+		return harness.Envelope{}, nil, msgs, err
 	}
 	defer func() {
 		// The causal error stays in the message. Overwriting retErr outright
@@ -189,15 +250,27 @@ func (l *Leg) invoke(ctx context.Context, req Request, loaded Context, settings 
 		}
 	}()
 
+	// The endpoint is resolved here rather than in the adapter, because an
+	// adapter reads no configuration. The Bash adapter calls cfg_endpoint
+	// itself (lib/adapters/claude.sh:78-92), and an unresolved name stops the
+	// leg: falling back to the vendor would run Claude while the config says
+	// Ollama, which is the silent substitution the divergence guard exists to
+	// catch arriving through a different door (lib/config.sh:358-363).
+	endpoint, err := l.endpoint(loaded, settings)
+	if err != nil {
+		return harness.Envelope{}, nil, msgs, err
+	}
+
 	inv := harness.Invocation{
-		Prompt:  harness.File{Path: promptPath, Text: string(promptBytes)},
-		Schema:  harness.File{Path: schemaPath, Text: string(schemaBytes)},
-		Workdir: workdir,
-		Model:   settings.model,
-		Effort:  settings.effort,
-		Write:   false,
-		Env:     l.Env,
-		Scratch: tmp,
+		Prompt:   harness.File{Path: promptPath, Text: string(promptBytes)},
+		Schema:   harness.File{Path: schemaPath, Text: string(schemaBytes)},
+		Workdir:  workdir,
+		Model:    settings.model,
+		Effort:   settings.effort,
+		Endpoint: endpoint,
+		Write:    false,
+		Env:      l.Env,
+		Scratch:  tmp,
 	}
 
 	shapeBudget := 1
@@ -207,58 +280,98 @@ func (l *Leg) invoke(ctx context.Context, req Request, loaded Context, settings 
 	semanticBudget := 1
 
 	for attempt := 1; ; attempt++ {
+		transcript := ""
 		if l.Log != nil {
 			if base, ok := l.Log.TranscriptBase(attempt); ok {
+				transcript = base
 				inv.PayloadPath = base + ".payload"
 			}
 			l.Log.Event("invoke", fmt.Sprintf("harness=%s attempt=%d start", settings.harness, attempt))
 		}
 		spec, err := adapter.Spec(inv)
 		if err != nil {
-			return harness.Envelope{}, nil, err
+			return harness.Envelope{}, nil, msgs, err
 		}
+		started := l.now()
 		res := l.runner().Run(ctx, spec)
 		if l.Log != nil {
-			l.Log.Event("invoke", fmt.Sprintf("harness=%s attempt=%d exit=%d", settings.harness, attempt, res.ExitCode))
+			// duration in whole seconds, which is what `$SECONDS` counts
+			// (lib/run.sh:825, :831).
+			l.Log.Event("invoke", fmt.Sprintf("harness=%s attempt=%d exit=%d duration=%ds",
+				settings.harness, attempt, res.ExitCode, int(l.now().Sub(started).Seconds())))
 		}
 		if res.Err != nil && exec.IsNotFound(res.Err) {
-			return harness.Envelope{}, nil, adapter.NotInstalled()
+			return harness.Envelope{}, nil, msgs, adapter.NotInstalled()
 		}
 		envelope = adapter.Envelope(inv, res)
+		// The two streams are archived AFTER the envelope has been parsed out
+		// of them, then filtered in place. Filtering first would rewrite the
+		// model's own answer, so identical harness output would produce
+		// different findings depending on whether a run directory exists
+		// (lib/adapters/claude.sh:126-130, :148-154).
+		l.Log.WriteTranscript(transcript, res.Stdout, res.Stderr)
 		if !envelope.OK {
 			msg := "no error reported"
 			if envelope.Error != nil && *envelope.Error != "" {
 				msg = *envelope.Error
 			}
-			return envelope, nil, &ui.FatalError{
+			return envelope, nil, msgs, &ui.FatalError{
 				Reason: fmt.Sprintf("the %s harness failed: %s", settings.harness, msg),
 				Action: "If the error above mentions authentication, a token or a 401, the harness is installed and cannot log in.",
 			}
 		}
+		// The second child, for the one adapter whose telemetry is not in its
+		// own output (lib/adapters/opencode.sh:261-273). Telemetry, not the
+		// answer: an export that will not build or will not run leaves the
+		// fields unset and the leg stands.
+		l.mergeExport(ctx, adapter, inv, res, &envelope)
+
 		problem := l.checkPayload(envelope.Payload)
 		if problem == nil {
-			return envelope, envelope.Payload, nil
+			return envelope, envelope.Payload, msgs, nil
 		}
 		code := validateCode(problem)
 		if code == 2 {
 			if semanticBudget > 0 {
 				semanticBudget--
+				// ui_warn, the pair kept apart (lib/run.sh:882-883).
+				msgs = append(msgs, ui.Warn(
+					fmt.Sprintf("%s returned an answer that contradicts what it was given — %s", settings.harness, problem),
+					"The shape is right, so this is the model drifting rather than a bug in CrossRev or the harness. Anything it edited has been put back, and it is being asked once more; a second one is fatal."))
 				continue
 			}
-			return envelope, nil, &ui.FatalError{
+			return envelope, nil, msgs, &ui.FatalError{
 				Reason: fmt.Sprintf("%s twice returned an answer that contradicts what it was given — %s", settings.harness, problem),
-				Action: "The shape was right both times, so the schema cannot catch this and CrossRev will not guess which finding was meant.",
+				Action: "The shape was right both times, so the schema cannot catch this and CrossRev will not guess which finding was meant. Nothing has been written to the pull request, and the edits both rejected attempts made have been put back. Re-run the leg, or try the other harness.",
 			}
 		}
 		shapeBudget--
 		if shapeBudget > 0 {
+			// ui_warn (lib/run.sh:894-895). Only a harness that does not
+			// constrain its own output ever reaches here, because a native one
+			// starts with a budget of 1.
+			msgs = append(msgs, ui.Warn(
+				fmt.Sprintf("%s returned an object that does not match the schema — %s", settings.harness, problem),
+				"That harness does not constrain its own output, so this is the expected failure rather than a bug. Anything it edited has been put back, and it is being retried once; a second mismatch is fatal."))
 			continue
 		}
-		return envelope, nil, &ui.FatalError{
+		// Two endings, and the difference is whose bug it is
+		// (lib/run.sh:899-905). Printing the native-schema one for a harness
+		// that has no native schema sends the reader to the adapter over a
+		// model that simply did not follow the instruction.
+		return envelope, nil, msgs, &ui.FatalError{
 			Reason: fmt.Sprintf("%s returned an object that does not match the schema — %s", settings.harness, problem),
-			Action: "This harness validates output against the schema natively, so a mismatch is an adapter or harness bug rather than model drift.",
+			Action: shapeExhaustedAction(entry.SchemaNative),
 		}
 	}
+}
+
+// shapeExhaustedAction is lib/run.sh:901 and :904.
+func shapeExhaustedAction(schemaNative bool) string {
+	if schemaNative {
+		return "This harness validates output against the schema natively, so a mismatch is an adapter or harness bug rather than model drift. Nothing has been written to the pull request, and the rejected attempt's edits have been put back."
+	}
+	return "That harness does not constrain its own output, so two mismatches in a row is the model failing the JSON instruction rather than an adapter bug. Name a model that follows a JSON instruction. Nothing has been written to the pull request, and the rejected attempt's edits have been put back."
 }
 
 func (l *Leg) reviewDiff(ctx context.Context, loaded Context) ([]byte, error) {
@@ -323,4 +436,74 @@ func promptThreads(threads []forge.ReviewThread) []prompt.Thread {
 		})
 	}
 	return out
+}
+
+// describe is the harness half of the run header's Reviewer line
+// (lib/run.sh:1067). `${model:+, $model}` and `${effort:+, $effort effort}`
+// expand to nothing when unset, so an empty half is omitted rather than
+// printed as a trailing comma.
+func (s legSettings) describe() string {
+	out := s.harness
+	if s.model != "" {
+		out += ", " + s.model
+	}
+	if s.effort != "" {
+		out += ", " + s.effort + " effort"
+	}
+	return out
+}
+
+// mergeExport runs an adapter's export child and folds its answer in, for an
+// adapter that has one (lib/adapters/opencode.sh:261-273).
+func (l *Leg) mergeExport(ctx context.Context, adapter harness.Adapter, inv harness.Invocation, res exec.Result, envelope *harness.Envelope) {
+	exporter, ok := adapter.(harness.Exporter)
+	if !ok || !envelope.OK {
+		return
+	}
+	session := exporter.SessionID(res)
+	if session == "" {
+		return
+	}
+	spec, err := exporter.ExportSpec(inv, session)
+	if err != nil {
+		return
+	}
+	exported := l.runner().Run(ctx, spec)
+	if exported.Err != nil || exported.ExitCode != 0 {
+		return
+	}
+	exporter.MergeExport(envelope, exported.Stdout)
+}
+
+// endpoint resolves the configured endpoint name against the config, the way
+// cfg_endpoint does for the Bash adapter (lib/config.sh:364-376).
+//
+// An unset name is not an endpoint at all: cfg_endpoint returns 1 without a
+// message for it (lib/config.sh:366), which is the vendor's own API.
+func (l *Leg) endpoint(loaded Context, settings legSettings) (harness.Endpoint, error) {
+	name := settings.endpoint
+	if name == "" || name == "null" || loaded.Config == nil {
+		return harness.Endpoint{}, nil
+	}
+	resolved, err := loaded.Config.Endpoint(name)
+	if err != nil {
+		return harness.Endpoint{}, err
+	}
+	return harness.Endpoint{
+		Name:     resolved.Name,
+		URL:      resolved.BaseURL,
+		TokenVar: resolved.TokenEnv,
+		Token:    envValue(l.Env, resolved.TokenEnv),
+	}, nil
+}
+
+// envValue reads one name out of the allowlist the leg hands a child.
+func envValue(env []string, name string) string {
+	prefix := name + "="
+	for _, e := range env {
+		if strings.HasPrefix(e, prefix) {
+			return e[len(prefix):]
+		}
+	}
+	return ""
 }

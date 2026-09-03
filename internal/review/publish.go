@@ -13,8 +13,24 @@ import (
 	"github.com/carlosboeing/crossrev/internal/ui"
 )
 
-func (l *Leg) publish(ctx context.Context, req Request, loaded Context, settings legSettings, pass int, claimID int64, marker prstate.Marker) (prstate.Marker, []string, error) {
-	var msgs []string
+// publishState is what the caller has to know beyond the marker and the lines.
+//
+// settled is run_leg_settled (lib/run.sh:160-163): from the instant the
+// complete edit lands, nothing may rewrite the claim as blocked, because the
+// record on the pull request is accurate.
+//
+// nudge is the upgrade tip's half of the `if` at lib/run.sh:1319-1324. The leg
+// holds no terminal, so the decision travels and the composition root prints.
+type publishState struct {
+	settled bool
+	nudge   bool
+}
+
+// The state is whether the complete edit landed, which is run_leg_settled
+// (lib/run.sh:160-163): from that instant nothing may rewrite the claim as
+// blocked, because the record on the pull request is accurate.
+func (l *Leg) publish(ctx context.Context, req Request, loaded Context, settings legSettings, pass int, claimID int64, marker prstate.Marker) (prstate.Marker, []ui.Line, publishState, error) {
+	var msgs []ui.Line
 	findings := parseFindings(marker.Findings)
 	minFix := loaded.Config.Get(".policy.min_fix_severity")
 	if minFix == "" {
@@ -45,11 +61,12 @@ func (l *Leg) publish(ctx context.Context, req Request, loaded Context, settings
 	}
 	actionable := ActionableCount(findings, minFix)
 	if len(findings) > 0 {
-		msgs = append(msgs,
+		// Three ui_say lines (lib/run.sh:1228-1230).
+		msgs = append(msgs, ui.SayLines(
 			fmt.Sprintf("Found %d issue(s) — %d high, %d medium, %d low, of which %d pre-existing.", len(findings), high, medium, low, pre),
 			fmt.Sprintf("%d at or above min_fix_severity (%s); the rest are reported and left alone.", actionable, minFix),
 			"Posting them as inline comments on the lines they affect.",
-		)
+		)...)
 	}
 
 	posted, skipped := 0, 0
@@ -73,29 +90,32 @@ func (l *Leg) publish(ctx context.Context, req Request, loaded Context, settings
 			Body:   body,
 		})
 		if err != nil {
-			return marker, msgs, err
+			return marker, msgs, publishState{}, err
 		}
 		posted++
 		if placement == forge.PlacementFallback {
 			unanchored++
-			msgs = append(msgs, ui.Warning(
+			msgs = append(msgs, ui.Warn(
 				fmt.Sprintf("GitHub would not anchor a comment to %s:%d (%s) on %s#%d", f.Path, f.Line, side, loaded.Repo, req.PR),
 				"The finding is posted as a top-level comment naming that location instead, so it is not lost. A finding on a deleted line needs side LEFT.",
 			))
 		}
 	}
 	if posted > 0 {
-		msgs = append(msgs, fmt.Sprintf("posted %d finding comment(s)", posted))
+		// ui_ok, not ui_say: the comments are on the pull request (lib/run.sh:1255).
+		msgs = append(msgs, ui.OK(fmt.Sprintf("posted %d finding comment(s)", posted)))
 	}
 	if skipped > 0 {
-		msgs = append(msgs, fmt.Sprintf("%d finding(s) were already on the pull request from an earlier attempt, so they were not posted twice.", skipped))
+		msgs = append(msgs, ui.Say(fmt.Sprintf("%d finding(s) were already on the pull request from an earlier attempt, so they were not posted twice.", skipped)))
 	}
 	if unanchored > 0 {
 		noun := "findings"
 		if unanchored == 1 {
 			noun = "finding"
 		}
-		msgs = append(msgs, fmt.Sprintf("%d %s could not be anchored to a line and landed as top-level comments\n   Each one names the location it faults, so nothing is lost, but it sits at the top of the pull request rather than beside the code — and the resolve leg has no thread to reply into either.", unanchored, noun))
+		msgs = append(msgs, ui.Warn(
+			fmt.Sprintf("%d %s could not be anchored to a line and landed as top-level comments", unanchored, noun),
+			"Each one names the location it faults, so nothing is lost, but it sits at the top of the pull request rather than beside the code — and the resolve leg has no thread to reply into either."))
 	}
 
 	marker.Findings = attachThreads(marker.Findings, l.Forge.ReviewThreads(ctx, loaded.Repo, req.PR))
@@ -109,14 +129,19 @@ func (l *Leg) publish(ctx context.Context, req Request, loaded Context, settings
 		MaxPass: cap,
 	})
 	if err := l.editClaim(ctx, loaded.Repo, claimID, summary, marker); err != nil {
-		return marker, msgs, err
+		return marker, msgs, publishState{}, err
 	}
-	msgs = append(msgs, "posted a summary comment")
+	// ui_ok: the comment is on the pull request (lib/run.sh:1293).
+	msgs = append(msgs, ui.OK("posted a summary comment"))
 
 	marker.State = core.PassComplete
 	if err := l.editClaim(ctx, loaded.Repo, claimID, summary, marker); err != nil {
-		return marker, msgs, err
+		return marker, msgs, publishState{}, err
 	}
+	// run_leg_settled, immediately after the complete edit lands and not one
+	// line later (lib/run.sh:160-163). Everything below can still fail, and
+	// none of it may rewrite this record.
+	state := publishState{settled: true}
 
 	verdict := core.Verdict(marker.Verdict.Value())
 	escalated := escalatedCount(loaded.Markers)
@@ -126,26 +151,33 @@ func (l *Leg) publish(ctx context.Context, req Request, loaded Context, settings
 		if actionable == 1 {
 			noun = "finding"
 		}
-		msgs = append(msgs, fmt.Sprintf("the reviewer returned verdict '%s' alongside %d actionable %s\n   The actionable count outranks the verdict, so the pass is labelled '%s' to run the resolve leg.", verdict, actionable, noun, next))
+		msgs = append(msgs, ui.Warn(
+			fmt.Sprintf("the reviewer returned verdict '%s' alongside %d actionable %s", verdict, actionable, noun),
+			fmt.Sprintf("The actionable count outranks the verdict, so the pass is labelled '%s' to run the resolve leg.", next)))
 	}
 	warns, err := l.applyPassLabels(ctx, req, loaded, pass, next)
 	msgs = append(msgs, warns...)
 	if err != nil {
-		return marker, msgs, err
+		return marker, msgs, state, err
 	}
 
+	// Two bare printfs, each with a trailing blank line
+	// (lib/run.sh:1315-1317, :1319-1322).
 	if blocked, ok := marker.BlockedReason.Get(); ok && blocked != "" && verdict == core.VerdictBlocked {
-		msgs = append(msgs, "verdict: blocked — "+blocked)
+		msgs = append(msgs, ui.Say("→ verdict: blocked — "+blocked), ui.Blank())
 	} else {
-		msgs = append(msgs, "verdict: "+string(verdict))
+		msgs = append(msgs, ui.Say("→ verdict: "+string(verdict)), ui.Blank())
 	}
 	if next == policy.PassAwaitingResolution {
-		msgs = append(msgs,
-			"Nothing was changed in your working tree. To act on these:",
-			fmt.Sprintf("  crossrev resolve --pr %d", req.PR),
-		)
+		msgs = append(msgs, ui.Say("Nothing was changed in your working tree. To act on these:"),
+			ui.Say(fmt.Sprintf("  crossrev resolve --pr %d", req.PR)),
+			ui.Blank())
+	} else {
+		// The other arm of the same `if`, so a pass gets the handover or the
+		// tip and never both (lib/run.sh:1319-1324).
+		state.nudge = true
 	}
-	return marker, msgs, nil
+	return marker, msgs, state, nil
 }
 
 func (l *Leg) editClaim(ctx context.Context, repo core.Slug, claimID int64, body string, marker prstate.Marker) error {

@@ -72,8 +72,14 @@ type testEnv struct {
 	base     core.Revision
 	workdir  string
 	lookPath func(string) (string, error)
-	legEnv   []string
-	doc      harness.Document
+	// nilLookPath leaves Leg.LookPath nil so the case drives the production
+	// PATH search rather than the substitute below.
+	nilLookPath bool
+	legEnv      []string
+	doc         harness.Document
+	// runCtx is what Run is given. Nil means context.Background(); a case
+	// that needs a cancelled one sets it.
+	runCtx context.Context
 }
 
 func setup(t *testing.T) *testEnv {
@@ -160,7 +166,7 @@ func (e *testEnv) run(t *testing.T) Result {
 func (e *testEnv) runReq(t *testing.T, req Request) Result {
 	t.Helper()
 	look := e.lookPath
-	if look == nil {
+	if look == nil && !e.nilLookPath {
 		look = func(name string) (string, error) { return "/usr/bin/" + name, nil }
 	}
 	env := e.legEnv
@@ -186,7 +192,11 @@ func (e *testEnv) runReq(t *testing.T, req Request) Result {
 		Adapter:  adapter,
 		LookPath: look,
 	}
-	return leg.Run(context.Background(), req)
+	ctx := e.runCtx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return leg.Run(ctx, req)
 }
 
 func (e *testEnv) addReviewPass(t *testing.T, pass int, findings json.RawMessage, verdict string, state core.PassState) {
@@ -382,6 +392,9 @@ func (f *fakeForge) RepoIssueComments(context.Context, core.Slug, time.Time, int
 	return nil, nil
 }
 func (f *fakeForge) ViewerLogin(context.Context) (string, error) { return f.viewer, nil }
+func (f *fakeForge) AwaitingPullRequests(context.Context, core.Slug) []forge.AwaitingPullRequest {
+	return nil
+}
 func (f *fakeForge) WorkflowRunStatus(context.Context, core.Slug, string) forge.RunStatus {
 	return ""
 }
@@ -491,17 +504,18 @@ type gitMut struct {
 }
 
 type fakeGit struct {
-	env          *testEnv
-	dir          string
-	head         core.Revision
-	show         map[string][]byte
-	showCalls    []showCall
-	wrongHead    core.Revision
-	worktrees    *[]string
-	fetchCalls   []string
-	captureCalls *int
-	restoreCalls *int
-	runAt        []string
+	env            *testEnv
+	dir            string
+	head           core.Revision
+	show           map[string][]byte
+	showCalls      []showCall
+	wrongHead      core.Revision
+	worktrees      *[]string
+	fetchCalls     []string
+	captureCalls   *int
+	restoreCalls   *int
+	restoreTreeErr error
+	runAt          []string
 	*gitMut
 }
 
@@ -576,7 +590,7 @@ func (g *fakeGit) CaptureTree(context.Context, string) (string, error) {
 }
 func (g *fakeGit) RestoreTree(context.Context, string, string) error {
 	*g.restoreCalls++
-	return nil
+	return g.restoreTreeErr
 }
 func (g *fakeGit) LogSubjects(context.Context, core.Revision) ([]byte, error) {
 	return nil, nil

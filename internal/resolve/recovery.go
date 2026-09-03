@@ -3,13 +3,27 @@ package resolve
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strconv"
 
 	"github.com/carlosboeing/crossrev/internal/core"
+	"github.com/carlosboeing/crossrev/internal/harness"
 	"github.com/carlosboeing/crossrev/internal/policy"
 	"github.com/carlosboeing/crossrev/internal/prstate"
+	"github.com/carlosboeing/crossrev/internal/ui"
 )
 
+// reportFatal records a leg that died on the pull request it had claimed
+// (_run_report_fatal at lib/run.sh:131-146, through
+// _run_report_invoke_failure at lib/run.sh:719-763).
+//
+// Guarded on the claim still reading `started`: a pass that finished has
+// written `complete`, and rewriting it as blocked because something after it
+// failed would replace an accurate record with a wrong one (lib/run.sh:127-129).
+//
+// `reported` is CROSSREV_LEG_REPORTED (lib/run.sh:725), set before the writes
+// rather than after, so a second pass over the same leg cannot post the summary
+// twice when one of the writes below fails.
 func (l *Leg) reportFatal(ctx context.Context, s *session, marker prstate.Marker, reason string, workdir string, keep bool) {
 	if marker.State != core.PassStarted {
 		return
@@ -18,6 +32,7 @@ func (l *Leg) reportFatal(ctx context.Context, s *session, marker prstate.Marker
 	if id == 0 {
 		return
 	}
+	l.reported = true
 	now := l.now().Unix()
 	marker.State = core.PassComplete
 	marker.DoneTS = prstate.Some(now)
@@ -66,4 +81,22 @@ func passHeading(s *session) string {
 
 func optIntJSON(n int) json.RawMessage {
 	return json.RawMessage(strconv.Itoa(n))
+}
+
+// refusalReason is the first half of whatever refusal ended the leg, which is
+// what ui_die puts in CROSSREV_DIE_REASON.
+func refusalReason(err error) string {
+	var refusal *Refusal
+	if errors.As(err, &refusal) {
+		return refusal.Message
+	}
+	var harnessRefusal *harness.Refusal
+	if errors.As(err, &harnessRefusal) {
+		return harnessRefusal.Reason
+	}
+	var fatal *ui.FatalError
+	if errors.As(err, &fatal) {
+		return fatal.Reason
+	}
+	return err.Error()
 }

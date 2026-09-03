@@ -159,6 +159,10 @@ _b64url() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
 
 _auth_jwt() {
   local pem="$1" app_id="$2" now header payload signing_input sig
+  # jq --argjson reads the id as JSON. Anything that is not a whole number makes
+  # jq exit with a usage message and the claims come out empty, which used to
+  # travel on as a token nobody could tell from a good one.
+  [[ "$app_id" =~ ^[0-9]+$ ]] || return 1
   now="$(date +%s)"
   header='{"alg":"RS256","typ":"JWT"}'
   # Backdated 60s because GitHub rejects a JWT whose iat is in the future, and
@@ -166,7 +170,13 @@ _auth_jwt() {
   payload="$(jq -cn --argjson iat "$((now - 60))" --argjson exp "$((now + 540))" \
     --argjson iss "$app_id" '{iat:$iat, exp:$exp, iss:$iss}')"
   signing_input="$(printf '%s' "$header" | _b64url).$(printf '%s' "$payload" | _b64url)"
-  sig="$(printf '%s' "$signing_input" | openssl dgst -sha256 -sign "$pem" -binary | _b64url)"
+  # openssl is on the left of a pipe, so the pipeline reports _b64url's status and
+  # a key openssl refused to sign with came back as an empty signature segment on
+  # a token that looked whole. pipefail goes inside the substitution, which is a
+  # subshell and so cannot move the caller's options.
+  sig="$(set -o pipefail
+    printf '%s' "$signing_input" | openssl dgst -sha256 -sign "$pem" -binary | _b64url)" \
+    || return 1
   printf '%s.%s' "$signing_input" "$sig"
 }
 
@@ -607,8 +617,31 @@ auth_login() {
 
   ui_confirm "Open GitHub in your browser to create the App?" || { ui_say "Nothing was created."; return 1; }
 
-  local html; html="$(mktemp -t crossrev-manifest).html"
-  local reqfile; reqfile="$(mktemp -t crossrev-redirect)"
+  # An explicit template rather than -t, because the two mktemps read that flag
+  # differently: BSD takes a prefix and appends its own random part, GNU takes a
+  # template and refuses one with no trailing X's. `mktemp -t crossrev-manifest`
+  # therefore worked on macOS and failed on every Linux host with "too few X's in
+  # template", leaving both paths empty and dropping the flow into the paste
+  # prompt. A template argument means the same thing to both.
+  local tmpdir="${TMPDIR:-/tmp}"; tmpdir="${tmpdir%/}"
+
+  local html; html="$(mktemp "$tmpdir/crossrev-manifest.XXXXXX")" || ui_die \
+    "could not create a temporary file for the registration page" \
+    "Check that the temporary directory $tmpdir is writable."
+  # The browser needs the .html suffix, and mktemp cannot put one after the
+  # random part: GNU refuses a template whose X's are not at the end, and BSD
+  # leaves them unreplaced and creates the literal name, which is predictable.
+  # So the file mktemp made exclusively is renamed, rather than a second one
+  # being written beside it. The rename keeps mktemp's 0600 and leaves nothing
+  # behind under the old name.
+  mv "$html" "$html.html" || ui_die \
+    "could not name the temporary registration page" \
+    "Check that the temporary directory $tmpdir is writable."
+  html="$html.html"
+
+  local reqfile; reqfile="$(mktemp "$tmpdir/crossrev-redirect.XXXXXX")" || ui_die \
+    "could not create a temporary file for the redirect" \
+    "Check that the temporary directory $tmpdir is writable."
   # shellcheck disable=SC2064  # expand now, not at trap time
   trap "rm -f '$html' '$reqfile'" RETURN
 
@@ -628,7 +661,9 @@ auth_login() {
 </body>
 HTML
 
-  local code="" returned_state=""
+  # from_listener records which of the two paths produced the code, because only
+  # a redirect can be required to send the state back.
+  local code="" returned_state="" from_listener=0
 
   if (( use_listener )); then
     ui_section "Step 1 of 2: Create the GitHub App"
@@ -645,6 +680,7 @@ HTML
       local reqline; reqline="$(head -1 "$reqfile")"
       code="$(sed -n 's/.*[?&]code=\([^& ]*\).*/\1/p' <<<"$reqline")"
       returned_state="$(sed -n 's/.*[?&]state=\([^& ]*\).*/\1/p' <<<"$reqline")"
+      if [[ -n "$code" ]]; then from_listener=1; fi
     else
       ui_warn "nothing arrived on localhost:$port within five minutes" \
         "Falling back to pasting the code by hand. If the browser is showing a page that will not load, the address bar still has what is needed."
@@ -676,7 +712,25 @@ HTML
     "no code found" \
     "Paste the full URL from the address bar, or just the value after code="
 
-  if [[ -n "$returned_state" && "$returned_state" != "$state" ]]; then
+  # The two paths make different claims, so they are checked differently.
+  #
+  # A request on the listener is a redirect. The listener binds loopback only, so
+  # any request to it came from a process on this machine, and separating that
+  # from the page CrossRev opened is the whole job of the state. A request
+  # without one has not made the claim, so it is refused.
+  #
+  # The paste is a person reading their own address bar, and the prompt above
+  # documents the bare code as an answer. An absent state there is that
+  # documented fallback rather than a forgery.
+  #
+  # Either way, a state that came back wrong is refused.
+  local state_ok=1
+  if (( from_listener )); then
+    [[ "$returned_state" == "$state" ]] || state_ok=0
+  elif [[ -n "$returned_state" && "$returned_state" != "$state" ]]; then
+    state_ok=0
+  fi
+  if (( ! state_ok )); then
     ui_die "the state value GitHub returned does not match the one CrossRev sent" \
       "This request did not come from the page crossrev opened. Start again: crossrev auth login --owner $owner"
   fi

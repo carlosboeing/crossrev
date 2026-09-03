@@ -1,0 +1,87 @@
+# crossrev — repository policy. Written by `crossrev init`; yours to edit.
+#
+# This file is read from the BASE revision of every pull request, never from the
+# branch under review, so a pull request cannot rewrite the loop that reviews it.
+# A change here takes effect when it merges — the new policy is reviewed under the
+# old one, which is the correct order.
+#
+# Machine-local endpoints belong in ~/.config/crossrev/config.yml instead. A URL
+# like http://tower.local:11434 asserts something false on a GitHub runner.
+version: 1
+mode: automated # automated | local — who may write trusted state
+runner: github-hosted # github-hosted | self-hosted — where init renders the workflows to run
+# Bounds on what crossrev does unattended. The three continuation bounds end automatic reviewing and
+# never block a person: a review a human asked for runs regardless. min_fix_severity is different —
+# it bounds what an agent may change rather than whether the loop continues, so it holds on every
+# run. Daily bounds roll over 24 hours rather than resetting at midnight.
+policy:
+  min_fix_severity: medium # high | medium | low
+  max_passes_per_cycle: 3
+  max_files_changed_per_pr: 200
+  max_prs_per_day: 25
+# The resolve leg commits in a worktree of this repository, and a worktree shares its .git/hooks/, so
+# hooks installed there would fire on an automated commit. They never fire on a GitHub-hosted runner:
+# a fresh clone has no hooks, because hooks are not repository content. skip makes both sides behave
+# the same. Set run where a hook enforces something you rely on, and accept that a refused commit ends
+# the pass with the fix unpushed. See docs/adrs/0017-the-resolver-commits-without-host-git-hooks.md.
+git:
+  hooks: skip # skip | run — whether the resolver's commit and push run this repository's hooks
+# The per-run record under ~/.local/state/crossrev/runs/: a run log for every run, and the harness
+# transcripts when a leg fails. The pull request marker stays the durable record in automated mode;
+# these files are the local diagnosis, swept by age.
+logs:
+  retention_days: 14 # run logs and kept transcripts older than this are swept
+  keep_transcripts: false # true — keep the harness transcript even when a leg succeeds
+# Declared and working, but NOT the CI reviewer: Kimi's subscription credential
+# is a 15-minute OAuth access token with a rotating refresh token, not a static
+# key, so it cannot live in a repository secret. Point a leg at it locally, or in
+# CI once a static credential exists.
+endpoints:
+  kimi:
+    base_url: https://api.kimi.com/coding/
+    token_env: KIMI_API_KEY
+# The pairing, as `crossrev init` resolved it. init writes both blocks — harness,
+# model, effort, and endpoint — so the committed file says
+# what the loop runs and what init provisioned credentials for. A field resolving
+# to nothing is removed rather than left at this template's value.
+#
+# Cross-vendor is strongest: a bug one model family misses reviewing, it misses
+# resolving too. What works, and what each costs:
+#
+#   codex / claude   hosted, cross-vendor. Codex's token rotates, so it adds
+#                    CROSSREV_CODEX_AUTH, a second App with Secrets: write, and a cron
+#   claude / claude  one vendor, two models — fable reviewing, opus resolving. One
+#                    secret, no cron. Weaker, and doubles Claude usage
+#   opencode / claude  hosted or local, cross-vendor, either side. Its --model
+#                    takes provider/model, not a bare id
+#   agy / claude     cross-vendor, self-hosted only: agy's token lives about an hour
+#   kimi / claude    local only. kimi is an endpoint on the claude adapter, and its
+#                    credential is a 15-minute OAuth token
+#
+# Model ids must be fully qualified: `claude-fable-5`, never `fable-5`, which fails
+# as an entitlement error rather than a typo. `effort` reaches the harness verbatim.
+# Override a leg for one run with `--harness codex`, without touching this.
+reviewer:
+  harness: claude
+  model: kimi-k2
+  endpoint: kimi
+resolver:
+  harness: claude
+  model: claude-opus-5
+  effort: high
+# A real finding crossrev chose not to fix still has to go somewhere, or it disappears when the pull
+# request merges: an unresolved thread on a merged pull request appears in no GitHub view. Each
+# destination's own settings sit under its name.
+backlog:
+  destination: repository # github_issues | repository | none | auto — auto resolves at init
+  github_issues:
+    labels: [bug] # added to every issue crossrev opens — your taxonomy wins
+    tracking_label: crossrev-review # how crossrev recognises its own earlier issues, to avoid duplicates
+    create_missing_labels: true # false — use only labels that exist, and stop rather than invent one
+    comment_on_existing_issue: false # true — comment on the match instead of only linking from the pull request
+  repository:
+    layout: file # folder | file — folder writes one file per finding and survives concurrent merges; file appends to a list
+    path: .crossrev/backlog.md # repository-relative; writing outside the checkout is refused
+# Set to false to permanently silence the suggestion that a repository already
+# running Actions could run this loop automatically. `--no-tips` does it per run.
+enable_automation_hint: true

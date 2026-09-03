@@ -13,7 +13,100 @@
 # shellcheck disable=SC2034
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# The wrapper a native run is invoked through, and why one is needed.
+#
+# The stubs are configured through the environment: tests/stub/gh reads its
+# route table from CROSSREV_GH_ROUTES, the harness stubs read their payload from
+# CROSSREV_REVIEW_PAYLOAD. bin/crossrev hands every child the whole environment
+# it holds, so a stub it starts already carries all of them.
+#
+# The native binary hands each child an exact allowlist — Inherit, in
+# internal/exec, which is the ADR 0001 boundary — and a test-only name is not on
+# it and must not be. Widening a production allowlist for a fixture would make
+# the boundary a fiction. So the wrapper snapshots the names on the way in, and
+# tests/stub/_stub-env.sh reads them back on the way out.
+#
+# The snapshot goes beside the suite's own XDG_CONFIG_HOME, which is already on
+# every allowlist the binary builds, so the child can find it. It is written
+# before every invocation and removed after it, so a per-case export made after
+# stub_reset is carried and nothing outlives the run that wrote it.
+#
+# printf %q for the value, so a space, a quote or a newline survives and no line
+# is ever split. compgen -e rather than printenv, for the same reason: it lists
+# names, and a multi-line value cannot be mistaken for two of them.
+#
+# Two rules keep a credential out of it, because the developer running the suite
+# usually has one exported and the snapshot would otherwise hold the value in
+# plain text:
+#
+#   - Every name ending _AUTH is dropped. No stub reads one: `grep -rn AUTH
+#     tests/stub/` answers only comment headers, and the tripwire tests/stub/codex
+#     reads nothing at all. The suffix rather than the three names shipped today,
+#     so a harness added later is covered without anyone remembering this file.
+#   - The file is created under umask 077 rather than the process umask, which on
+#     a developer's machine is 022 and left it world-readable.
+#
+# tests/test-stub-env.sh holds both, and is the only thing that does.
+_stub_env_wrapper() {
+  local target="$1" dir
+  dir="$(mktemp -d)"
+  cat >"$dir/crossrev" <<WRAP
+#!/usr/bin/env bash
+set -uo pipefail
+_base="\${XDG_CONFIG_HOME:-\$HOME/.config}"
+mkdir -p "\$_base" 2>/dev/null
+_umask=\$(umask)
+umask 077
+: >"\$_base/crossrev-stub.env"
+umask "\$_umask"
+while IFS= read -r _name; do
+  printf 'export %s=%q\\n' "\$_name" "\${!_name}" >>"\$_base/crossrev-stub.env"
+done < <(compgen -e | grep '^CROSSREV_' | grep -v '_AUTH\$' || true)
+# Not exec: the snapshot exists to serve THIS invocation's children, and it is
+# removed the moment the binary exits. Left behind, it outlives the run and a
+# stub the suite then invokes directly — with a variable deliberately unset —
+# reads the value back out of it, because "already set wins" cannot see an unset
+# name.
+"$target" "\$@"
+_rc=\$?
+rm -f "\$_base/crossrev-stub.env"
+exit "\$_rc"
+WRAP
+  chmod +x "$dir/crossrev"
+  printf '%s' "$dir/crossrev"
+}
+
+# Which crossrev the CLI-driven cases invoke.
+#
+# CROSSREV_TEST_BIN names an executable to run instead of the shell entry point,
+# which is how scripts/test-native.sh points these suites at the Go binary. It
+# has to be an absolute path: every fixture cds into a throwaway checkout, so a
+# relative one would resolve against a different directory in every case.
+#
+# Absence selects bin/crossrev, so a plain `bash tests/run.sh` tests the shell
+# and nothing about the shipped tool depends on this variable. There is no
+# production flag that chooses between the two.
 CROSSREV="$HERE/../bin/crossrev"
+if [[ -n "${CROSSREV_TEST_BIN:-}" ]]; then
+  [[ "$CROSSREV_TEST_BIN" = /* ]] || {
+    printf 'CROSSREV_TEST_BIN must be an absolute path, and it is: %s\n' "$CROSSREV_TEST_BIN" >&2
+    exit 2
+  }
+  [[ -x "$CROSSREV_TEST_BIN" ]] || {
+    printf 'CROSSREV_TEST_BIN is not an executable: %s\n' "$CROSSREV_TEST_BIN" >&2
+    exit 2
+  }
+  CROSSREV="$(_stub_env_wrapper "$CROSSREV_TEST_BIN")"
+  # The wrapper stays live for the whole suite, so its directory goes when
+  # the suite exits, not per invocation. None of the CLI-driven suites sets
+  # its own EXIT trap (measured: `grep -n 'trap ' tests/test-*.sh` finds one
+  # only in test-diff.sh, test-githooks.sh and test-parity.sh, none of which
+  # runs against the binary). A suite that adds one replaces this and the
+  # directory leaks as it did before, which is no worse.
+  _stub_env_dir="${CROSSREV%/crossrev}"
+  trap 'rm -rf "$_stub_env_dir"' EXIT
+fi
 
 pass=0; fail=0
 ok()    { printf '  ok    %s\n' "$1"; pass=$((pass+1)); }

@@ -19,8 +19,8 @@ func newSandboxRestoreFailure(harness, problem, restoreErr string) *sandboxResto
 	}}
 }
 
-func (sandboxRestoreFailure) Warning() string {
-	return ui.Warning(
+func (sandboxRestoreFailure) Warning() ui.Line {
+	return ui.Warn(
 		"the rejected attempt's edits could not be put back",
 		"They are still in the checkout, and a later run would capture them as its own baseline. Check `git status` before re-running the leg.",
 	)

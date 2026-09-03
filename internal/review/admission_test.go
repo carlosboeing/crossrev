@@ -11,6 +11,8 @@ import (
 	"github.com/carlosboeing/crossrev/internal/forge"
 	"github.com/carlosboeing/crossrev/internal/policy"
 	"github.com/carlosboeing/crossrev/internal/review"
+
+	"github.com/carlosboeing/crossrev/internal/ui"
 )
 
 func TestAdmission(t *testing.T) {
@@ -363,7 +365,7 @@ func TestAdmissionStaleReviewWarningContainsFullText(t *testing.T) {
 	}
 	wantWarning := fmt.Sprintf("abandoning the unfinished pass-1 review — it started against %s and the pull request is now at %s\n   Resuming it would reconcile against findings that no longer describe this code. Starting the pass again instead.", oldSHA[:7], headSHA[:7])
 	found := false
-	for _, msg := range got.Messages {
+	for _, msg := range ui.Texts(got.Messages) {
 		if msg == wantWarning {
 			found = true
 			break

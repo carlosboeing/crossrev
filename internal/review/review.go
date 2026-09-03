@@ -15,8 +15,7 @@ import (
 
 // Run loads context, admits the pass, posts the claim, invokes the reviewer,
 // then publishes findings and completes the original claim.
-func (l *Leg) Run(ctx context.Context, req Request) Result {
-	var out Result
+func (l *Leg) Run(ctx context.Context, req Request) (out Result) {
 	if req.PR == 0 {
 		out.Outcome = OutcomeError
 		out.Err = &ui.FatalError{
@@ -47,10 +46,11 @@ func (l *Leg) Run(ctx context.Context, req Request) Result {
 	if skip != "" {
 		out.Outcome = OutcomeSkipped
 		out.Reason = skip
-		out.Messages = []string{
+		// Two ui_say lines (lib/run.sh:260-261).
+		out.Messages = ui.SayLines(
 			fmt.Sprintf("%s#%d is a draft pull request, so an automatic invocation does not review it.", loaded.Repo, req.PR),
 			"Mark it ready for review, or ask for a review explicitly.",
-		}
+		)
 		return out
 	}
 
@@ -62,10 +62,11 @@ func (l *Leg) Run(ctx context.Context, req Request) Result {
 	if hasStop(loaded.PR) {
 		out.Outcome = OutcomeSkipped
 		out.Reason = "crossrev/stop"
-		out.Messages = []string{
+		// Two ui_say lines (lib/run.sh:965-966).
+		out.Messages = ui.SayLines(
 			fmt.Sprintf("crossrev/stop is on %s#%d, so this run stops without reviewing.", loaded.Repo, req.PR),
 			"Remove the label to let the loop continue.",
-		}
+		)
 		return out
 	}
 
@@ -76,23 +77,25 @@ func (l *Leg) Run(ctx context.Context, req Request) Result {
 		return out
 	}
 	out.Pass = ad.pass
-	if ad.warning != "" {
+	if ad.warning.Text != "" {
 		out.Messages = append(out.Messages, ad.warning)
 	}
 	if ad.already {
 		out.Outcome = OutcomeSkipped
 		out.Reason = "already reviewed"
-		out.Messages = []string{
+		// Two ui_say lines (lib/run.sh:1005-1006).
+		out.Messages = ui.SayLines(
 			fmt.Sprintf("%s#%d is already reviewed at %s — pass %d, and nothing has changed since.",
 				loaded.Repo, req.PR, loaded.PR.HeadRefOid.Short(), ad.pass),
 			fmt.Sprintf("Push a revision, or run: crossrev resolve --pr %d", req.PR),
-		}
+		)
 		return out
 	}
 	if ad.decline != "" {
 		out.Outcome = OutcomeDeclined
 		out.Reason = ad.decline
-		out.Messages = []string{fmt.Sprintf("not reviewing %s#%d — %s", loaded.Repo, req.PR, ad.decline)}
+		// ui_say (lib/run.sh:1030).
+		out.Messages = []ui.Line{ui.Say(fmt.Sprintf("not reviewing %s#%d — %s", loaded.Repo, req.PR, ad.decline))}
 		if err := l.postDeclined(ctx, req, loaded, ad); err != nil {
 			out.Outcome = OutcomeError
 			out.Err = err
@@ -100,23 +103,43 @@ func (l *Leg) Run(ctx context.Context, req Request) Result {
 		return out
 	}
 	if ad.stale != "" {
+		// ui_warn, the pair kept apart (lib/run.sh:976-977).
 		out.Reason = "abandoning the unfinished pass-" + fmt.Sprint(ad.pass) + " review — " + ad.stale
-		out.Messages = append(out.Messages, out.Reason+"\n   Resuming it would reconcile against findings that no longer describe this code. Starting the pass again instead.")
+		out.Messages = append(out.Messages, ui.Warn(out.Reason,
+			"Resuming it would reconcile against findings that no longer describe this code. Starting the pass again instead."))
 	}
-	if ad.redrive {
-		msg := fmt.Sprintf("Pass %d's review ended blocked — driving pass %d again.", ad.pass, ad.pass)
-		out.Reason = msg
-		out.Messages = append(out.Messages, msg)
-	}
-
 	settings, warn, err := l.settings(req, loaded)
 	if err != nil {
 		out.Outcome = OutcomeError
 		out.Err = err
 		return out
 	}
-	if warn != "" {
+	if warn.Text != "" {
 		out.Messages = append(out.Messages, warn)
+	}
+
+	// The run header, two bare printfs after the settings are chosen and
+	// before the claim is posted (lib/run.sh:1066-1067):
+	//
+	//	printf '\n  Reviewing %s#%s — %s\n' …
+	//	printf '  Reviewer: %s%s%s\n' "$harness" "${model:+, $model}" "${effort:+, $effort effort}"
+	//
+	// The leading newline is its own line, and the two text lines carry the
+	// same two-space prefix ui_say prints, so they are Say lines.
+	cap := atoi(loaded.Config.Get(".policy.max_passes_per_cycle"))
+	out.Messages = append(out.Messages,
+		ui.Blank(),
+		ui.Say(fmt.Sprintf("Reviewing %s#%d — %s", loaded.Repo, req.PR, PassLabel(ad.pass, cap))),
+		ui.Say("Reviewer: "+settings.describe()),
+	)
+
+	// lib/run.sh:1086, which the shell prints BELOW the header because the
+	// redrive branch sits inside the claim block that follows it.
+	if ad.redrive {
+		msg := fmt.Sprintf("Pass %d's review ended blocked — driving pass %d again.", ad.pass, ad.pass)
+		// ui_say (lib/run.sh:1086).
+		out.Reason = msg
+		out.Messages = append(out.Messages, ui.Say(msg))
 	}
 
 	marker, claimID, err := l.postClaim(ctx, req, loaded, ad, settings)
@@ -127,14 +150,38 @@ func (l *Leg) Run(ctx context.Context, req Request) Result {
 	}
 	out.ClaimID = claimID
 	out.Marker = marker
+
+	// The EXIT trap, from here on. run_checkpoint snapshots the open leg at
+	// every settled point and run_leg_settled clears it, so the report fires on
+	// every way out of the leg between the claim landing and the complete edit
+	// (lib/run.sh:87-89, :167-179). `settled` is that snapshot.
+	//
+	// 130 is not a failure: run_checkpoint has already explained the interrupt
+	// and the claim it leaves is deliberately resumable, so naming it here would
+	// turn every Ctrl-C into a halted pull request (lib/run.sh:141-143). This
+	// package cannot see internal/cli's ErrInterrupted — a tier-3 peer — so the
+	// cancellation is read off the context, which is where it came from.
+	settled := false
+	defer func() {
+		if settled || out.Err == nil {
+			return
+		}
+		if ctx.Err() != nil || errors.Is(out.Err, context.Canceled) {
+			return
+		}
+		l.reportFatal(ctx, req, loaded, out.Marker, claimID, out.Err)
+	}()
 	if ad.recovering && !ad.redrive {
-		out.Messages = append(out.Messages, resumeMessage(ad.pass, marker.Findings))
+		// ui_say (lib/run.sh:1092).
+		out.Messages = append(out.Messages, ui.Say(resumeMessage(ad.pass, marker.Findings)))
 	}
 
 	if hasRecordedFindings(marker) {
-		out.Messages = append(out.Messages, "The previous attempt already recorded its findings, so the review is not run again.")
+		// ui_say (lib/run.sh:1118).
+		out.Messages = append(out.Messages, ui.Say("The previous attempt already recorded its findings, so the review is not run again."))
 	} else {
-		envelope, payload, err := l.invoke(ctx, req, loaded, settings, ad.pass)
+		envelope, payload, invokeMsgs, err := l.invoke(ctx, req, loaded, settings, ad.pass)
+		out.Messages = append(out.Messages, invokeMsgs...)
 		if err != nil {
 			var restoreErr *sandboxRestoreFailure
 			if errors.As(err, &restoreErr) {
@@ -153,7 +200,8 @@ func (l *Leg) Run(ctx context.Context, req Request) Result {
 		if err == nil {
 			marker.Findings = findings
 		}
-		out.Messages = append(out.Messages, snaps...)
+		// ui_say, one per finding the anchor moved (lib/run.sh:1173).
+		out.Messages = append(out.Messages, ui.SayLines(snaps...)...)
 		var doc struct {
 			Verdict       string  `json:"verdict"`
 			BlockedReason *string `json:"blocked_reason"`
@@ -178,7 +226,6 @@ func (l *Leg) Run(ctx context.Context, req Request) Result {
 		}
 		l.attachUsage(&marker, envelope, settings)
 		out.Marker = marker
-		cap := atoi(loaded.Config.Get(".policy.max_passes_per_cycle"))
 		raw, err := marker.MarshalJSON()
 		if err != nil {
 			out.Outcome = OutcomeError
@@ -194,13 +241,21 @@ func (l *Leg) Run(ctx context.Context, req Request) Result {
 		}
 	}
 
-	marker, pubMsgs, err := l.publish(ctx, req, loaded, settings, ad.pass, claimID, marker)
+	marker, pubMsgs, published, err := l.publish(ctx, req, loaded, settings, ad.pass, claimID, marker)
+	settled = published.settled
+	out.Nudge = published.nudge
 	out.Messages = append(out.Messages, pubMsgs...)
 	out.Marker = marker
 	if err != nil {
 		out.Outcome = OutcomeError
 		out.Err = err
 		return out
+	}
+	// log_transcripts_clear, at the end of leg_review and nowhere earlier
+	// (lib/run.sh:1326). A failed leg keeps them: they are the reason the files
+	// exist.
+	if l.Log != nil {
+		l.Log.ClearTranscripts("")
 	}
 	out.Outcome = OutcomeInvoked
 	return out

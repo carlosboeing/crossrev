@@ -6,6 +6,7 @@ import (
 	"go/parser"
 	"go/token"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -101,11 +102,17 @@ import (
 //
 // # What this does not cover, and why
 //
-// Test files and internal/testgen — see productionSource, which carries the
-// reasoning and the counter-argument. For unsafe that exclusion is load-bearing
-// rather than incidental: internal/ui/pty_linux_test.go and pty_darwin_test.go
-// both build a pseudo-terminal through unsafe.Pointer, and a test file compiles
-// into no released binary.
+// internal/testgen — see productionSource, which carries the reasoning.
+//
+// Test files are covered for the child-start rules and not for plugin and
+// unsafe. For unsafe that exclusion is load-bearing rather than incidental:
+// internal/ui/pty_linux_test.go and pty_darwin_test.go both build a
+// pseudo-terminal through unsafe.Pointer, and a test file compiles into no
+// released binary. For the child-start rules the exclusion was a hole: the
+// whole-environment rule in environment_test.go already scans tests, and it
+// caught cmd/crossrev/wiring_test.go's os.Environ, while an external test
+// package next to it could import os/exec and pass. processTestPermitted closes
+// that, by naming the files rather than the directories.
 type processRule struct {
 	// importPath, when set, forbids importing the package at all.
 	importPath string
@@ -123,6 +130,9 @@ type processRule struct {
 	// provesTheScan marks the import whose presence in permittedDir shows the
 	// scan reached the package it is supposed to be reading.
 	provesTheScan bool
+	// child marks a rule that forbids starting a child process. Those apply to
+	// test files as well; plugin and unsafe do not.
+	child bool
 }
 
 const processPermittedDir = "internal/exec"
@@ -133,19 +143,55 @@ const unsafePermittedDir = "internal/ui"
 const startsAChild = "only " + processPermittedDir + " may, and every other caller goes through its Runner"
 
 var processRules = []processRule{
-	{importPath: "os/exec", defaultName: "exec", permittedDir: processPermittedDir, consequence: startsAChild, provesTheScan: true},
-	{importPath: "os", defaultName: "os", symbol: "StartProcess", permittedDir: processPermittedDir, consequence: startsAChild},
-	{importPath: "syscall", defaultName: "syscall", symbol: "StartProcess", permittedDir: processPermittedDir, consequence: startsAChild},
-	{importPath: "syscall", defaultName: "syscall", symbol: "Exec", permittedDir: processPermittedDir, consequence: startsAChild},
-	{importPath: "syscall", defaultName: "syscall", symbol: "ForkExec", permittedDir: processPermittedDir, consequence: startsAChild},
-	{importPath: "syscall", defaultName: "syscall", symbol: "CreateProcess", permittedDir: processPermittedDir, consequence: startsAChild},
-	{importPath: "syscall", defaultName: "syscall", symbol: "CreateProcessAsUser", permittedDir: processPermittedDir, consequence: startsAChild},
+	{importPath: "os/exec", defaultName: "exec", permittedDir: processPermittedDir, consequence: startsAChild, provesTheScan: true, child: true},
+	{importPath: "os", defaultName: "os", symbol: "StartProcess", permittedDir: processPermittedDir, consequence: startsAChild, child: true},
+	{importPath: "syscall", defaultName: "syscall", symbol: "StartProcess", permittedDir: processPermittedDir, consequence: startsAChild, child: true},
+	{importPath: "syscall", defaultName: "syscall", symbol: "Exec", permittedDir: processPermittedDir, consequence: startsAChild, child: true},
+	{importPath: "syscall", defaultName: "syscall", symbol: "ForkExec", permittedDir: processPermittedDir, consequence: startsAChild, child: true},
+	{importPath: "syscall", defaultName: "syscall", symbol: "CreateProcess", permittedDir: processPermittedDir, consequence: startsAChild, child: true},
+	{importPath: "syscall", defaultName: "syscall", symbol: "CreateProcessAsUser", permittedDir: processPermittedDir, consequence: startsAChild, child: true},
 	{importPath: "plugin", defaultName: "plugin",
 		action:      "loads native code into this process through",
 		consequence: "no directory may, because a plugin's init functions run inside the process that holds every credential"},
 	{importPath: "unsafe", defaultName: "unsafe", permittedDir: unsafePermittedDir,
 		action:      "can forge a value the type system protects, through",
 		consequence: "only " + unsafePermittedDir + " may, for the ioctl that asks whether a file is a terminal"},
+}
+
+// processTestPermitted is every test file allowed to start a child process, by
+// path and not by directory.
+//
+// By path because a directory allowance would be no rule at all here: five test
+// files in internal/harness run the Bash oracle, so allowing that directory
+// would let a sixth do anything it liked, and the same for cmd/crossrev, where
+// wiring_test.go builds and runs the binary and nothing else there may.
+//
+// The list was measured rather than guessed: `grep -rl '"os/exec"' --include
+// '*_test.go'` over the module, minus the three files that only carry the
+// string inside a fixture. Three reasons cover all of it — the package under
+// test, the one test that runs the built binary, and the parity tests that run
+// the Bash oracle or a helper child of this test binary and compare.
+//
+// An entry nothing needs is a rule that has quietly stopped meaning anything,
+// so TestProcessStartBoundary fails on a name here that starts no child.
+var processTestPermitted = map[string]string{
+	"internal/exec/helper_unix_test.go": "the package under test; it re-runs this test binary as its own child helper",
+
+	"cmd/crossrev/wiring_test.go": "builds the binary with `go build` and runs it, which is the only end-to-end check of the composition root",
+
+	"internal/config/merge_test.go":              "runs this test binary as a helper child for the config merge oracle",
+	"internal/prompt/shell_test.go":              "runs bash and git to compare the prompt against the shell that wrote it",
+	"internal/review/helper_test.go":             "runs bash for the review leg's oracle",
+	"internal/forge/ghexec/stub_test.go":         "exec.LookPath, to skip when the stub's tools are not installed",
+	"internal/harness/alternatives_test.go":      "runs bash for the descriptor oracle",
+	"internal/harness/argv_test.go":              "runs bash for the argv oracle",
+	"internal/harness/descriptor_parity_test.go": "runs bash for the descriptor oracle",
+	"internal/harness/descriptor_test.go":        "exec.LookPath, to skip when jq is not installed",
+	"internal/harness/errors_test.go":            "runs bash for the adapter-error oracle",
+	"internal/harness/invocation_test.go":        "runs bash for the invocation oracle",
+	"internal/vcs/lock_test.go":                  "runs sh and sleep to hold a lock from another process",
+	"internal/vcs/push_streams_test.go":          "runs bash for the push oracle",
+	"internal/vcs/tail_shell_test.go":            "runs bash for the tail oracle",
 }
 
 // verb opens the violation sentence for one rule.
@@ -160,6 +206,7 @@ func TestProcessStartBoundary(t *testing.T) {
 	root := findRepoRoot(t)
 
 	permittedSeen := false
+	sawChild := map[string]bool{}
 	walkBoundarySources(t, root, func(relSlash string, src []byte) {
 		violations, permitted, err := auditProcessSource(relSlash, src)
 		if err != nil {
@@ -171,6 +218,9 @@ func TestProcessStartBoundary(t *testing.T) {
 		if permitted {
 			permittedSeen = true
 		}
+		if startsAChildSomewhere(t, relSlash, src) {
+			sawChild[relSlash] = true
+		}
 	})
 
 	// internal/exec is supposed to be the package that starts processes. If it
@@ -179,12 +229,181 @@ func TestProcessStartBoundary(t *testing.T) {
 		t.Errorf("expected a production file in %s to import os/exec; the scan is not looking where it thinks it is",
 			processPermittedDir)
 	}
+
+	// An allowance nothing needs is what lets the list only ever grow.
+	for _, unused := range unusedProcessAllowances(processTestPermitted, sawChild) {
+		t.Error(unused)
+	}
+}
+
+// unusedProcessAllowances is every allowance the scan found no child start for.
+//
+// The allowance map is a parameter rather than read from the file, so the rule
+// has a fixture. Read from the file it had none: every entry in
+// processTestPermitted does start a child today, so the loop never fired and
+// deleting it changed nothing the suite could see.
+func unusedProcessAllowances(permitted map[string]string, sawChild map[string]bool) []string {
+	var unused []string
+	for path, why := range permitted {
+		if !sawChild[path] {
+			unused = append(unused, fmt.Sprintf("processTestPermitted names %s (%q) and it starts no child there; drop the entry", path, why))
+		}
+	}
+	slices.Sort(unused)
+	return unused
+}
+
+// An allowance is load-bearing or it is gone. The list may only shrink on its
+// own, and a file that stops running the oracle has to take its entry with it.
+func TestUnusedProcessAllowancesAreReported(t *testing.T) {
+	permitted := map[string]string{
+		"internal/prompt/shell_test.go": "runs bash to compare against the shell",
+		"internal/vcs/lock_test.go":     "runs sh to hold a lock from another process",
+	}
+
+	tests := []struct {
+		name     string
+		sawChild map[string]bool
+		want     []string
+	}{
+		{
+			name:     "every allowance starts a child",
+			sawChild: map[string]bool{"internal/prompt/shell_test.go": true, "internal/vcs/lock_test.go": true},
+		},
+		{
+			name:     "one allowance starts nothing",
+			sawChild: map[string]bool{"internal/prompt/shell_test.go": true},
+			want:     []string{`processTestPermitted names internal/vcs/lock_test.go ("runs sh to hold a lock from another process") and it starts no child there; drop the entry`},
+		},
+		{
+			name:     "the scan found no child anywhere",
+			sawChild: map[string]bool{},
+			want: []string{
+				`processTestPermitted names internal/prompt/shell_test.go ("runs bash to compare against the shell") and it starts no child there; drop the entry`,
+				`processTestPermitted names internal/vcs/lock_test.go ("runs sh to hold a lock from another process") and it starts no child there; drop the entry`,
+			},
+		},
+		{
+			// A file the scan saw that no allowance names is the other rule's
+			// business, not this one's.
+			name:     "a child started somewhere no allowance names",
+			sawChild: map[string]bool{"internal/prompt/shell_test.go": true, "internal/vcs/lock_test.go": true, "internal/cycle/other_test.go": true},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := unusedProcessAllowances(permitted, tt.sawChild)
+			if !slices.Equal(got, tt.want) {
+				t.Fatalf("unused allowances = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// startsAChildSomewhere is what decides whether an allowance is load-bearing,
+// and it answered for the whole module with nothing checking its answer:
+// replacing its body with `return true` left every test green, because every
+// permitted file really does start a child and no other caller reads it.
+//
+// The rows are the child-start routes and the two rules that are not child
+// starts. plugin and unsafe are confined by the same walk and are deliberately
+// not children: an allowance for a test that imports unsafe would be a
+// different rule.
+func TestStartsAChildSomewhereAnswersOnlyForChildRoutes(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+		want   bool
+	}{
+		{
+			name:   "an os/exec import",
+			source: "package sample\nimport \"os/exec\"\nvar v = exec.Command\n",
+			want:   true,
+		},
+		{
+			name:   "a blank os/exec import",
+			source: "package sample\nimport _ \"os/exec\"\n",
+			want:   true,
+		},
+		{
+			name:   "os.StartProcess",
+			source: "package sample\nimport \"os\"\nvar v, _ = os.StartProcess(\"/bin/sh\", nil, &os.ProcAttr{})\n",
+			want:   true,
+		},
+		{
+			name:   "syscall.ForkExec",
+			source: "package sample\nimport \"syscall\"\nvar v = syscall.ForkExec\n",
+			want:   true,
+		},
+		{
+			// Confined by the same walk, and not a child start: a file holding
+			// only this needs no allowance.
+			name:   "an import of unsafe",
+			source: "package sample\nimport \"unsafe\"\nvar v unsafe.Pointer\n",
+			want:   false,
+		},
+		{
+			name:   "an import of plugin",
+			source: "package sample\nimport \"plugin\"\nvar v = plugin.Open\n",
+			want:   false,
+		},
+		{
+			// A sibling in the same package that acts on a process which
+			// already exists is not a start.
+			name:   "syscall.Wait4",
+			source: "package sample\nimport \"syscall\"\nvar v = syscall.Wait4\n",
+			want:   false,
+		},
+		{
+			// The import path as a string is not the import. Three test files
+			// in this module carry it inside a fixture and start nothing.
+			name:   "the import path inside a string",
+			source: "package sample\nvar fixture = `import \"os/exec\"`\n",
+			want:   false,
+		},
+		{
+			name:   "a file that starts nothing",
+			source: "package sample\nimport \"strings\"\nvar v = strings.TrimSpace\n",
+			want:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := startsAChildSomewhere(t, "internal/sample/sample_test.go", []byte(tt.source)); got != tt.want {
+				t.Fatalf("startsAChildSomewhere = %t, want %t", got, tt.want)
+			}
+		})
+	}
+}
+
+// startsAChildSomewhere answers whether a file holds any child-start reference
+// at all, which is what makes an allowance for it load-bearing.
+func startsAChildSomewhere(t *testing.T, relSlash string, src []byte) bool {
+	t.Helper()
+	node, err := parser.ParseFile(token.NewFileSet(), relSlash, src, 0)
+	if err != nil {
+		t.Fatalf("failed to parse %s: %v", relSlash, err)
+	}
+	for _, reference := range processReferences(node) {
+		if reference.child {
+			return true
+		}
+	}
+	return false
 }
 
 // auditProcessSource is the whole verdict for one file: the scope decision, the
 // parse, the routes and the permitted directory.
 func auditProcessSource(relSlash string, src []byte) (violations []string, permitted bool, err error) {
-	if !productionSource(relSlash) {
+	testFile := strings.HasSuffix(relSlash, "_test.go")
+	// internal/testgen is out whether the file is a test or not, for the reason
+	// productionSource gives: nothing imports the generator.
+	if strings.HasPrefix(relSlash, "internal/testgen/") {
+		return nil, false, nil
+	}
+	if !testFile && !productionSource(relSlash) {
 		return nil, false, nil
 	}
 
@@ -198,8 +417,20 @@ func auditProcessSource(relSlash string, src []byte) (violations []string, permi
 	// "vendored/internal/exec" ends with the permitted name and is not it, and
 	// "internal/execute" starts with it and is not it either.
 	dir := filepath.ToSlash(filepath.Dir(relSlash))
+	_, testAllowed := processTestPermitted[relSlash]
 
 	for _, reference := range processReferences(node) {
+		if testFile {
+			// plugin and unsafe keep the test exclusion; the child-start
+			// rules do not.
+			if !reference.child || testAllowed {
+				continue
+			}
+			violations = append(violations, fmt.Sprintf("%s:%d %s; %s",
+				relSlash, fset.Position(reference.pos).Line, reference.what,
+				"a test file may start a child only where processTestPermitted names it and says why"))
+			continue
+		}
 		if dir == reference.permittedDir {
 			permitted = permitted || reference.grantsPermission
 			continue
@@ -215,6 +446,9 @@ type processReference struct {
 	what         string
 	consequence  string
 	permittedDir string
+	// child marks a reference to a route that starts a child process, which is
+	// the half of these rules test files are in scope for.
+	child bool
 	// grantsPermission marks the import that proves the scan reached the
 	// permitted package, so the rule cannot pass vacuously.
 	grantsPermission bool
@@ -236,6 +470,7 @@ func processReferences(node *ast.File) []processReference {
 					consequence:      rule.consequence,
 					permittedDir:     rule.permittedDir,
 					grantsPermission: rule.provesTheScan,
+					child:            rule.child,
 				})
 			}
 			continue
@@ -257,6 +492,7 @@ func processReferences(node *ast.File) []processReference {
 						what:         rule.verb() + " " + qualified,
 						consequence:  rule.consequence,
 						permittedDir: rule.permittedDir,
+						child:        rule.child,
 					})
 					return false
 				}
@@ -267,6 +503,7 @@ func processReferences(node *ast.File) []processReference {
 						what:         rule.verb() + " " + qualified + " under a dot import",
 						consequence:  rule.consequence,
 						permittedDir: rule.permittedDir,
+						child:        rule.child,
 					})
 				}
 			}
@@ -425,9 +662,50 @@ func TestProcessAuditVerdict(t *testing.T) {
 			wantViolation: true,
 		},
 		{
-			name:   "a test file anywhere",
+			// Not "a test file anywhere" any more: this one is named in
+			// processTestPermitted, because it runs bash to compare against.
+			name:   "a test file the allowance names",
 			file:   "internal/prompt/shell_test.go",
 			source: "package prompt\nimport \"os/exec\"\nvar v = exec.Command\n",
+		},
+		{
+			// The hole this rule was extended to close. An external test
+			// package sits in the same directory as five files that may run
+			// the oracle, and a directory allowance would let it through.
+			name:          "an external test package in a directory whose other tests may",
+			file:          "internal/harness/scratch_test.go",
+			source:        "package harness_test\nimport \"os/exec\"\nvar x = exec.Command\n",
+			wantViolation: true,
+			mustMention:   "processTestPermitted names it",
+		},
+		{
+			// And the same beside the one test that builds and runs the
+			// binary. wiring_test.go may; nothing else in cmd/crossrev does.
+			name:          "an external test package beside the wiring test",
+			file:          "cmd/crossrev/scratch_test.go",
+			source:        "package main_test\nimport \"os/exec\"\nvar x = exec.Command\n",
+			wantViolation: true,
+			mustMention:   "processTestPermitted names it",
+		},
+		{
+			// os.StartProcess is the same rule, so a test file reaches it too.
+			name:          "a test file starting a child through os.StartProcess",
+			file:          "internal/cycle/scratch_test.go",
+			source:        "package cycle\nimport \"os\"\nvar v, _ = os.StartProcess(\"/bin/sh\", nil, &os.ProcAttr{})\n",
+			wantViolation: true,
+			mustMention:   "os.StartProcess",
+		},
+		{
+			// unsafe is not that rule: the pseudo-terminal tests need it, and
+			// a test file compiles into no released binary.
+			name:   "a test file importing unsafe",
+			file:   "internal/cycle/scratch_test.go",
+			source: "package cycle\nimport \"unsafe\"\nvar v unsafe.Pointer\n",
+		},
+		{
+			name:   "a test file for the parity generator",
+			file:   "internal/testgen/policy/main_test.go",
+			source: "package main\nimport \"os/exec\"\nvar v = exec.Command\n",
 		},
 		{
 			name:   "the parity generator",

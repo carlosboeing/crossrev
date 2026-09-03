@@ -1,0 +1,578 @@
+{
+  "harnesses": ["claude", "codex", "agy", "grok", "opencode"],
+  "rows": [
+    {
+      "name": "bare crossrev prints help",
+      "args": [],
+      "command": "help",
+      "request": {}
+    },
+    {
+      "name": "an empty first argument prints help",
+      "args": [""],
+      "command": "help",
+      "request": {}
+    },
+    {
+      "name": "help",
+      "args": ["help"],
+      "command": "help",
+      "request": {}
+    },
+    {
+      "name": "--help",
+      "args": ["--help"],
+      "command": "help",
+      "request": {}
+    },
+    {
+      "name": "-h",
+      "args": ["-h"],
+      "command": "help",
+      "request": {}
+    },
+    {
+      "name": "help ignores everything after it",
+      "args": ["help", "--pr", "42"],
+      "command": "help",
+      "request": {}
+    },
+    {
+      "name": "version",
+      "args": ["version"],
+      "command": "version",
+      "request": {}
+    },
+    {
+      "name": "--version",
+      "args": ["--version"],
+      "command": "version",
+      "request": {}
+    },
+    {
+      "name": "-v",
+      "args": ["-v"],
+      "command": "version",
+      "request": {}
+    },
+
+    {
+      "name": "a leading dash is the default cycle, and the options are the cycle's own",
+      "args": ["--pr", "42"],
+      "command": "cycle",
+      "request": {"PR": "42", "Repo": "", "Trigger": "human", "HarnessOverride": "", "NoTips": "false", "KeepTranscripts": "false"}
+    },
+    {
+      "name": "cycle named explicitly",
+      "args": ["cycle", "--pr", "42"],
+      "command": "cycle",
+      "request": {"PR": "42", "Repo": "", "Trigger": "human", "HarnessOverride": "", "NoTips": "false", "KeepTranscripts": "false"}
+    },
+    {
+      "name": "cycle with every flag it takes",
+      "args": ["cycle", "--pr", "42", "--repo", "owner/name", "--harness", "codex", "--trigger", "automatic", "--no-tips", "--keep-transcripts"],
+      "command": "cycle",
+      "request": {"PR": "42", "Repo": "owner/name", "Trigger": "automatic", "HarnessOverride": "codex", "NoTips": "true", "KeepTranscripts": "true"}
+    },
+    {
+      "name": "cycle by the dash rule with every flag it takes",
+      "args": ["--pr", "42", "--repo", "owner/name", "--harness", "codex", "--trigger", "automatic", "--no-tips", "--keep-transcripts"],
+      "command": "cycle",
+      "request": {"PR": "42", "Repo": "owner/name", "Trigger": "automatic", "HarnessOverride": "codex", "NoTips": "true", "KeepTranscripts": "true"}
+    },
+    {
+      "name": "the last --pr wins",
+      "args": ["cycle", "--pr", "1", "--pr", "42"],
+      "command": "cycle",
+      "request": {"PR": "42", "Repo": "", "Trigger": "human", "HarnessOverride": "", "NoTips": "false", "KeepTranscripts": "false"}
+    },
+
+    {
+      "name": "review with the number alone",
+      "args": ["review", "--pr", "42"],
+      "command": "review",
+      "request": {"PR": "42", "Repo": "", "Trigger": "human", "HarnessOverride": "", "Continuation": "false", "NoTips": "false", "KeepTranscripts": "false"}
+    },
+    {
+      "name": "review with every flag it takes",
+      "args": ["review", "--pr", "42", "--repo", "owner/name", "--harness", "codex", "--trigger", "automatic", "--continuation", "--no-tips", "--keep-transcripts"],
+      "command": "review",
+      "request": {"PR": "42", "Repo": "owner/name", "Trigger": "automatic", "HarnessOverride": "codex", "Continuation": "true", "NoTips": "true", "KeepTranscripts": "true"}
+    },
+    {
+      "name": "review accepts and ignores --pass",
+      "args": ["review", "--pr", "42", "--pass", "3"],
+      "command": "review",
+      "request": {"PR": "42", "Repo": "", "Trigger": "human", "HarnessOverride": "", "Continuation": "false", "NoTips": "false", "KeepTranscripts": "false"}
+    },
+
+    {
+      "name": "resolve with the number alone",
+      "args": ["resolve", "--pr", "7"],
+      "command": "resolve",
+      "request": {"PR": "7", "Repo": "", "Trigger": "human", "HarnessOverride": "", "NoTips": "false", "KeepTranscripts": "false"}
+    },
+    {
+      "name": "resolve with every flag it takes",
+      "args": ["resolve", "--pr", "7", "--repo", "owner/name", "--harness", "claude", "--trigger", "automatic", "--no-tips", "--keep-transcripts"],
+      "command": "resolve",
+      "request": {"PR": "7", "Repo": "owner/name", "Trigger": "automatic", "HarnessOverride": "claude", "NoTips": "true", "KeepTranscripts": "true"}
+    },
+    {
+      "name": "resolve accepts and ignores --pass",
+      "args": ["resolve", "--pr", "7", "--pass", "2"],
+      "command": "resolve",
+      "request": {"PR": "7", "Repo": "", "Trigger": "human", "HarnessOverride": "", "NoTips": "false", "KeepTranscripts": "false"}
+    },
+
+    {
+      "name": "status with the number alone",
+      "args": ["status", "--pr", "7"],
+      "command": "status",
+      "request": {"PR": "7", "Repo": ""}
+    },
+    {
+      "name": "status accepts and ignores the three flags the composite action forwards",
+      "args": ["status", "--pr", "7", "--repo", "owner/name", "--harness", "codex", "--trigger", "automatic", "--no-tips"],
+      "command": "status",
+      "request": {"PR": "7", "Repo": "owner/name"}
+    },
+
+    {
+      "name": "init with no flags",
+      "args": ["init"],
+      "command": "init",
+      "request": {"Owner": "", "Repo": "", "DryRun": "false", "Upgrade": "false", "Yes": "false"}
+    },
+    {
+      "name": "init with every flag it takes",
+      "args": ["init", "--owner", "owner", "--repo", "owner/name", "--dry-run", "--upgrade", "--yes"],
+      "command": "init",
+      "request": {"Owner": "owner", "Repo": "owner/name", "DryRun": "true", "Upgrade": "true", "Yes": "true"}
+    },
+    {
+      "name": "init -y is --yes",
+      "args": ["init", "-y"],
+      "command": "init",
+      "request": {"Owner": "", "Repo": "", "DryRun": "false", "Upgrade": "false", "Yes": "true"}
+    },
+
+    {
+      "name": "watchdog defaults the timeout to 1800 seconds",
+      "args": ["watchdog"],
+      "command": "watchdog",
+      "request": {"Repo": "", "Timeout": "1800"}
+    },
+    {
+      "name": "watchdog with the two flags it reads",
+      "args": ["watchdog", "--repo", "owner/name", "--timeout", "60"],
+      "command": "watchdog",
+      "request": {"Repo": "owner/name", "Timeout": "60"}
+    },
+    {
+      "name": "watchdog accepts and ignores the flags the composite action forwards",
+      "args": ["watchdog", "--pr", "3", "--harness", "codex", "--trigger", "automatic", "--no-tips"],
+      "command": "watchdog",
+      "request": {"Repo": "", "Timeout": "1800"}
+    },
+    {
+      "name": "an empty --timeout is the 1800-second default",
+      "args": ["watchdog", "--timeout", ""],
+      "command": "watchdog",
+      "request": {"Repo": "", "Timeout": "1800"}
+    },
+
+    {
+      "name": "config with no sub-command shows the merged config",
+      "args": ["config"],
+      "command": "config show",
+      "request": {}
+    },
+    {
+      "name": "config show",
+      "args": ["config", "show"],
+      "command": "config show",
+      "request": {}
+    },
+    {
+      "name": "config backlog",
+      "args": ["config", "backlog"],
+      "command": "config backlog",
+      "request": {}
+    },
+    {
+      "name": "config reads only its first argument",
+      "args": ["config", "show", "--anything"],
+      "command": "config show",
+      "request": {}
+    },
+
+    {
+      "name": "auth with no sub-command is auth status",
+      "args": ["auth"],
+      "command": "auth status",
+      "request": {}
+    },
+    {
+      "name": "auth status",
+      "args": ["auth", "status"],
+      "command": "auth status",
+      "request": {}
+    },
+    {
+      "name": "auth status takes no flags and refuses none",
+      "args": ["auth", "status", "--anything"],
+      "command": "auth status",
+      "request": {}
+    },
+    {
+      "name": "auth login defaults the role to loop",
+      "args": ["auth", "login"],
+      "command": "auth login",
+      "request": {"Owner": "", "Name": "", "Role": "loop"}
+    },
+    {
+      "name": "auth login with every flag it takes",
+      "args": ["auth", "login", "--owner", "owner", "--name", "CrossRev owner", "--role", "refresher"],
+      "command": "auth login",
+      "request": {"Owner": "owner", "Name": "CrossRev owner", "Role": "refresher"}
+    },
+    {
+      "name": "auth install defaults the role to loop",
+      "args": ["auth", "install"],
+      "command": "auth install",
+      "request": {"Owner": "", "Role": "loop"}
+    },
+    {
+      "name": "auth install with every flag it takes",
+      "args": ["auth", "install", "--owner", "owner", "--role", "refresher"],
+      "command": "auth install",
+      "request": {"Owner": "owner", "Role": "refresher"}
+    },
+    {
+      "name": "auth rotate defaults the role to loop",
+      "args": ["auth", "rotate"],
+      "command": "auth rotate",
+      "request": {"Owner": "", "Role": "loop", "KeyFile": ""}
+    },
+    {
+      "name": "auth rotate with every flag it takes",
+      "args": ["auth", "rotate", "--owner", "owner", "--role", "refresher", "--key", "downloaded.pem"],
+      "command": "auth rotate",
+      "request": {"Owner": "owner", "Role": "refresher", "KeyFile": "downloaded.pem"}
+    },
+    {
+      "name": "auth refresh with no flags",
+      "args": ["auth", "refresh"],
+      "command": "auth refresh",
+      "request": {"Harness": "", "Repo": "", "Org": "", "Secret": ""}
+    },
+    {
+      "name": "auth refresh with every flag it takes",
+      "args": ["auth", "refresh", "--harness", "claude", "--repo", "owner/name", "--org", "owner", "--secret", "CROSSREV_CLAUDE_AUTH"],
+      "command": "auth refresh",
+      "request": {"Harness": "claude", "Repo": "owner/name", "Org": "owner", "Secret": "CROSSREV_CLAUDE_AUTH"}
+    },
+
+    {
+      "name": "doctor",
+      "args": ["doctor"],
+      "command": "doctor",
+      "request": {}
+    },
+    {
+      "name": "doctor reads none of its arguments",
+      "args": ["doctor", "--anything", "at", "all"],
+      "command": "doctor",
+      "request": {}
+    },
+
+    {
+      "name": "a mistyped sub-command is named rather than run",
+      "args": ["reviw", "--pr", "3"],
+      "reason": "unknown command: reviw",
+      "action": "Run: crossrev help"
+    },
+    {
+      "name": "an unknown auth sub-command",
+      "args": ["auth", "bogus"],
+      "reason": "unknown auth command: bogus",
+      "action": "Try: crossrev auth status | login | install | rotate | refresh"
+    },
+    {
+      "name": "a flag where the auth sub-command belongs",
+      "args": ["auth", "--foo"],
+      "reason": "unknown auth command: --foo",
+      "action": "Try: crossrev auth status | login | install | rotate | refresh"
+    },
+    {
+      "name": "an unknown config sub-command",
+      "args": ["config", "bogus"],
+      "reason": "unknown config command: bogus",
+      "action": "Try: crossrev config show | backlog"
+    },
+    {
+      "name": "an unknown option for review names the harnesses",
+      "args": ["review", "--bogus"],
+      "reason": "unknown option for review: --bogus",
+      "action": "Usage: crossrev review --pr <number> [--harness <one of: claude|codex|agy|grok|opencode>] [--no-tips] [--keep-transcripts]"
+    },
+    {
+      "name": "an unknown option for resolve names the harnesses",
+      "args": ["resolve", "--bogus"],
+      "reason": "unknown option for resolve: --bogus",
+      "action": "Usage: crossrev resolve --pr <number> [--harness <one of: claude|codex|agy|grok|opencode>] [--trigger human|automatic] [--keep-transcripts]"
+    },
+    {
+      "name": "an unknown option for cycle",
+      "args": ["cycle", "--bogus"],
+      "reason": "unknown option for cycle: --bogus",
+      "action": "Usage: crossrev cycle --pr <number> [--trigger human|automatic] [--no-tips] [--keep-transcripts]"
+    },
+    {
+      "name": "an unknown leading option is the cycle's, not an unknown command",
+      "args": ["--bogus"],
+      "reason": "unknown option for cycle: --bogus",
+      "action": "Usage: crossrev cycle --pr <number> [--trigger human|automatic] [--no-tips] [--keep-transcripts]"
+    },
+    {
+      "name": "cycle does not take --continuation",
+      "args": ["cycle", "--pr", "3", "--continuation"],
+      "reason": "unknown option for cycle: --continuation",
+      "action": "Usage: crossrev cycle --pr <number> [--trigger human|automatic] [--no-tips] [--keep-transcripts]"
+    },
+    {
+      "name": "cycle does not take --pass",
+      "args": ["cycle", "--pr", "3", "--pass", "2"],
+      "reason": "unknown option for cycle: --pass",
+      "action": "Usage: crossrev cycle --pr <number> [--trigger human|automatic] [--no-tips] [--keep-transcripts]"
+    },
+    {
+      "name": "resolve does not take --continuation",
+      "args": ["resolve", "--pr", "3", "--continuation"],
+      "reason": "unknown option for resolve: --continuation",
+      "action": "Usage: crossrev resolve --pr <number> [--harness <one of: claude|codex|agy|grok|opencode>] [--trigger human|automatic] [--keep-transcripts]"
+    },
+    {
+      "name": "an unknown option for status",
+      "args": ["status", "--bogus"],
+      "reason": "unknown option for status: --bogus",
+      "action": "Usage: crossrev status --pr <number>"
+    },
+    {
+      "name": "an unknown option for watchdog",
+      "args": ["watchdog", "--bogus"],
+      "reason": "unknown option for watchdog: --bogus",
+      "action": "Usage: crossrev watchdog [--repo owner/name] [--timeout <seconds>]"
+    },
+    {
+      "name": "an unknown option for init",
+      "args": ["init", "--bogus"],
+      "reason": "unknown option for init: --bogus",
+      "action": "Usage: crossrev init [--owner <owner>] [--upgrade] [--dry-run] [--yes]"
+    },
+    {
+      "name": "an unknown option for auth login",
+      "args": ["auth", "login", "--bogus"],
+      "reason": "unknown option for auth login: --bogus",
+      "action": "Run: crossrev auth login [--owner <owner>] [--role loop|refresher] [--name <name>]"
+    },
+    {
+      "name": "an unknown option for auth install",
+      "args": ["auth", "install", "--bogus"],
+      "reason": "unknown option for auth install: --bogus",
+      "action": "Run: crossrev auth install [--owner <owner>] [--role loop|refresher]"
+    },
+    {
+      "name": "an unknown option for auth rotate",
+      "args": ["auth", "rotate", "--bogus"],
+      "reason": "unknown option for auth rotate: --bogus",
+      "action": "Run: crossrev auth rotate [--owner <owner>] [--role loop|refresher] [--key <downloaded.pem>]"
+    },
+    {
+      "name": "an unknown option for auth refresh",
+      "args": ["auth", "refresh", "--bogus"],
+      "reason": "unknown option for auth refresh: --bogus",
+      "action": "Run: crossrev auth refresh [--harness <name>] [--repo owner/name | --org owner] [--secret NAME]"
+    },
+
+    {
+      "name": "review without a pull request number",
+      "args": ["review"],
+      "reason": "crossrev review needs a pull request number",
+      "action": "Usage: crossrev review --pr 42"
+    },
+    {
+      "name": "an empty --pr is no --pr",
+      "args": ["review", "--pr", ""],
+      "reason": "crossrev review needs a pull request number",
+      "action": "Usage: crossrev review --pr 42"
+    },
+    {
+      "name": "resolve without a pull request number",
+      "args": ["resolve"],
+      "reason": "crossrev resolve needs a pull request number",
+      "action": "Usage: crossrev resolve --pr 42"
+    },
+    {
+      "name": "cycle without a pull request number",
+      "args": ["cycle"],
+      "reason": "crossrev cycle needs a pull request number",
+      "action": "Usage: crossrev cycle --pr 42"
+    },
+    {
+      "name": "status without a pull request number",
+      "args": ["status"],
+      "reason": "crossrev status needs a pull request number",
+      "action": "Usage: crossrev status --pr 42"
+    },
+
+    {
+      "name": "an unknown review trigger",
+      "args": ["review", "--pr", "3", "--trigger", "bogus"],
+      "reason": "unknown review trigger: bogus",
+      "action": "Use --trigger human or --trigger automatic."
+    },
+    {
+      "name": "an empty review trigger is not human",
+      "args": ["review", "--pr", "3", "--trigger", ""],
+      "reason": "unknown review trigger: ",
+      "action": "Use --trigger human or --trigger automatic."
+    },
+    {
+      "name": "an unknown resolve trigger",
+      "args": ["resolve", "--pr", "3", "--trigger", "bogus"],
+      "reason": "unknown resolve trigger: bogus",
+      "action": "Use --trigger human or --trigger automatic."
+    },
+    {
+      "name": "an unknown cycle trigger",
+      "args": ["cycle", "--pr", "3", "--trigger", "bogus"],
+      "reason": "unknown cycle trigger: bogus",
+      "action": "Use --trigger human or --trigger automatic."
+    },
+    {
+      "name": "an unknown cycle trigger reached by the dash rule",
+      "args": ["--trigger", "bogus", "--pr", "3"],
+      "reason": "unknown cycle trigger: bogus",
+      "action": "Use --trigger human or --trigger automatic."
+    },
+
+    {
+      "name": "review --pr with nothing after it stops without a word",
+      "args": ["review", "--pr"],
+      "silent": true
+    },
+    {
+      "name": "an ignored flag missing its value stops without a word too",
+      "args": ["review", "--pass"],
+      "silent": true
+    },
+    {
+      "name": "status --harness with nothing after it",
+      "args": ["status", "--harness"],
+      "silent": true
+    },
+    {
+      "name": "cycle --trigger with nothing after it",
+      "args": ["cycle", "--trigger"],
+      "silent": true
+    },
+    {
+      "name": "watchdog --timeout with nothing after it",
+      "args": ["watchdog", "--timeout"],
+      "silent": true
+    },
+    {
+      "name": "the dash rule reaches the cycle's own silent stop",
+      "args": ["--repo"],
+      "silent": true
+    },
+
+    {
+      "name": "init --owner with nothing after it says so",
+      "args": ["init", "--owner"],
+      "reason": "--owner needs a value",
+      "action": "Usage: crossrev init [--owner <owner>] [--upgrade] [--dry-run] [--yes]"
+    },
+    {
+      "name": "an empty init --repo is no value at all",
+      "args": ["init", "--repo", ""],
+      "reason": "--repo needs a value",
+      "action": "Usage: crossrev init [--owner <owner>] [--upgrade] [--dry-run] [--yes]"
+    },
+    {
+      "name": "auth login --owner with nothing after it",
+      "args": ["auth", "login", "--owner"],
+      "reason": "--owner needs a value",
+      "action": "Run: crossrev auth login [--owner <owner>] [--role loop|refresher] [--name <name>]"
+    },
+    {
+      "name": "an empty auth login --name",
+      "args": ["auth", "login", "--name", ""],
+      "reason": "--name needs a value",
+      "action": "Run: crossrev auth login [--owner <owner>] [--role loop|refresher] [--name <name>]"
+    },
+    {
+      "name": "an empty auth login --role",
+      "args": ["auth", "login", "--role", ""],
+      "reason": "--role needs a value",
+      "action": "Run: crossrev auth login [--owner <owner>] [--role loop|refresher] [--name <name>]"
+    },
+    {
+      "name": "auth install --role with nothing after it",
+      "args": ["auth", "install", "--role"],
+      "reason": "--role needs a value",
+      "action": "Run: crossrev auth install [--owner <owner>] [--role loop|refresher]"
+    },
+    {
+      "name": "auth rotate --key with nothing after it",
+      "args": ["auth", "rotate", "--key"],
+      "reason": "--key needs a value",
+      "action": "Run: crossrev auth rotate [--owner <owner>] [--role loop|refresher] [--key <downloaded.pem>]"
+    },
+    {
+      "name": "auth refresh --harness with nothing after it",
+      "args": ["auth", "refresh", "--harness"],
+      "reason": "--harness needs a value",
+      "action": "Run: crossrev auth refresh [--harness <name>] [--repo owner/name | --org owner] [--secret NAME]"
+    },
+    {
+      "name": "an empty auth refresh --org",
+      "args": ["auth", "refresh", "--org", ""],
+      "reason": "--org needs a value",
+      "action": "Run: crossrev auth refresh [--harness <name>] [--repo owner/name | --org owner] [--secret NAME]"
+    },
+    {
+      "name": "an empty auth refresh --secret",
+      "args": ["auth", "refresh", "--secret", ""],
+      "reason": "--secret needs a value",
+      "action": "Run: crossrev auth refresh [--harness <name>] [--repo owner/name | --org owner] [--secret NAME]"
+    },
+
+    {
+      "name": "a pull request number that is not a number",
+      "args": ["review", "--pr", "abc"],
+      "reason": "--pr must be a number, and it was: abc",
+      "action": "Pass the pull request number, for example: --pr 42"
+    },
+    {
+      "name": "a repository that is not owner/name",
+      "args": ["review", "--pr", "3", "--repo", "garbage"],
+      "reason": "--repo must be owner/name, and it was: garbage",
+      "action": "Pass the repository as owner/name, for example: --repo carlosboeing/crossrev"
+    },
+    {
+      "name": "an init repository that is not owner/name",
+      "args": ["init", "--repo", "garbage"],
+      "reason": "--repo must be owner/name, and it was: garbage",
+      "action": "Pass the repository as owner/name, for example: --repo carlosboeing/crossrev"
+    },
+    {
+      "name": "a watchdog timeout that is not a number is kept, not refused",
+      "args": ["watchdog", "--timeout", "abc"],
+      "command": "watchdog",
+      "request": {"Repo": "", "Timeout": "abc"}
+    }
+  ]
+}

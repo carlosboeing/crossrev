@@ -2,17 +2,17 @@ package resolve
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
-	"strings"
 
+	"github.com/carlosboeing/crossrev/internal/exec"
 	"github.com/carlosboeing/crossrev/internal/harness"
+	"github.com/carlosboeing/crossrev/internal/ui"
 )
 
 // Run selects the current review pass, claims once, invokes a write-capable
 // resolver, then replies, persists, commits and pushes.
-func (l *Leg) Run(ctx context.Context, req Request) Result {
+func (l *Leg) Run(ctx context.Context, req Request) (out Result) {
 	if req.PR == 0 {
 		return refuse("crossrev resolve needs a pull request number", "Usage: crossrev resolve --pr 42")
 	}
@@ -43,9 +43,20 @@ func (l *Leg) Run(ctx context.Context, req Request) Result {
 		return wrapErr(err)
 	} else if refusal != nil {
 		return Result{Outcome: OutcomeRefused, Err: refusal, Pass: s.pass}
-	} else if warn != "" {
+	} else if warn.Text != "" {
 		early.Messages = append(early.Messages, warn)
 	}
+
+	// The run header, two bare printfs after the settings are chosen and
+	// before the claim (lib/run.sh:1913-1914):
+	//
+	//	printf '\n  Resolving %s#%s — %s\n' …
+	//	printf '  Resolver: %s%s%s\n' "$harness" "${model:+, $model}" "${effort:+, $effort effort}"
+	early.Messages = append(early.Messages,
+		ui.Blank(),
+		ui.Say(fmt.Sprintf("Resolving %s#%d — %s", s.repo, req.PR, passLabel(s.pass, s.maxPasses))),
+		ui.Say("Resolver: "+s.settings.describe()),
+	)
 
 	workdir, err := l.prepareWorktree(ctx, s)
 	if err != nil {
@@ -54,15 +65,37 @@ func (l *Leg) Run(ctx context.Context, req Request) Result {
 		return r
 	}
 
-	marker, claimWarning, err := l.claim(ctx, s)
+	marker, claimMessage, err := l.claim(ctx, s)
 	if err != nil {
 		r := wrapErr(err)
 		r.Pass = s.pass
 		return r
 	}
-	if claimWarning != "" {
-		early.Messages = append(early.Messages, claimWarning)
+	if claimMessage.Text != "" {
+		early.Messages = append(early.Messages, claimMessage)
 	}
+
+	// The EXIT trap, from here on (lib/run.sh:87-89, :131-146). The claim is
+	// open, so every way out of the leg below records the failure on it until
+	// the complete edit lands. publish's own fail path reports as well, so the
+	// flag stops the pair reporting twice — CROSSREV_LEG_REPORTED at
+	// lib/run.sh:725.
+	//
+	// 130 is not a failure: the claim it leaves is deliberately resumable
+	// (lib/run.sh:141-143).
+	defer func() {
+		if l.reported || out.Err == nil {
+			return
+		}
+		if ctx.Err() != nil || errors.Is(out.Err, context.Canceled) {
+			return
+		}
+		reported := out.Marker
+		if reported.CommentID() == 0 {
+			reported = marker
+		}
+		l.reportFatal(ctx, s, reported, refusalReason(out.Err), workdir, true)
+	}()
 
 	got := l.invoke(ctx, s, marker, workdir)
 	got.Pass = s.pass
@@ -90,10 +123,7 @@ func (l *Leg) adapterFor(doc harness.Document, name string) (harness.Adapter, er
 	}
 	a, ok := harness.For(doc, name)
 	if !ok {
-		return nil, &Refusal{
-			Message: fmt.Sprintf("there is no adapter for the harness '%s'", name),
-			Hint:    "CrossRev drives claude, codex, agy, grok and opencode directly.",
-		}
+		return nil, noAdapterRefusal(doc, name)
 	}
 	return a, nil
 }
@@ -112,30 +142,8 @@ func (l *Leg) binaryInstalled(name string) bool {
 	}
 	look := l.LookPath
 	if look == nil {
-		look = lookPath
+		look = exec.LookPath
 	}
 	_, err = look(binary)
 	return err == nil
-}
-
-func lookPath(name string) (string, error) {
-	if name == "" {
-		return "", os.ErrNotExist
-	}
-	if strings.ContainsRune(name, os.PathSeparator) {
-		if _, err := os.Stat(name); err != nil {
-			return "", err
-		}
-		return name, nil
-	}
-	for _, dir := range filepath.SplitList(os.Getenv("PATH")) {
-		if dir == "" {
-			continue
-		}
-		candidate := filepath.Join(dir, name)
-		if _, err := os.Stat(candidate); err == nil {
-			return candidate, nil
-		}
-	}
-	return "", os.ErrNotExist
 }

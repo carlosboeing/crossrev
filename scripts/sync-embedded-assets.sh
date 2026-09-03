@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 #
-# Copy the canonical schemas, skills, harness descriptor and price extract into
-# the Go packages that embed them.
+# Copy the canonical schemas, skills, harness descriptor, price extract and
+# workflow templates into the Go packages that embed them.
 #
 # `go:embed` patterns are package-relative and cannot contain `..`, so a Go
 # package cannot embed a file from the repository root. The canonical files stay
 # where every other reader already finds them — `schemas/`, `skills/`,
-# `lib/harnesses.json` and `lib/prices.json` — and this script keeps a
-# byte-identical copy beside each package that embeds one. A source may appear
-# twice: the descriptor is embedded by two packages, and both copies are
+# `templates/`, `lib/harnesses.json` and `lib/prices.json` — and this script
+# keeps a byte-identical copy beside each package that embeds one. A source may
+# appear twice: the descriptor is embedded by two packages, and both copies are
 # compared against the canonical file rather than against each other.
 #
 # The copies are generated. Editing one by hand is the failure this exists to
@@ -47,6 +47,25 @@ ASSETS=(
   "lib/harnesses.json"            "internal/cred/assets/harnesses.json"
   "lib/harnesses.json"            "internal/harness/assets/harnesses.json"
   "lib/prices.json"               "internal/harness/assets/prices.json"
+
+  # The workflow and config templates `init` writes into a repository. A
+  # checkout renders them from "$ROOT/templates/" by path (lib/init.sh:570,
+  # lib/init.sh:874); a binary has no checkout, so internal/initcmd carries the
+  # bytes. Every file under templates/ is listed, because the `go:embed` there
+  # is a glob and a file left out would be embedded with nothing checking it.
+  "templates/crossrev.yml"              "internal/initcmd/assets/templates/crossrev.yml"
+  "templates/crossrev-review.yml"       "internal/initcmd/assets/templates/crossrev-review.yml"
+  "templates/crossrev-resolve.yml"      "internal/initcmd/assets/templates/crossrev-resolve.yml"
+  "templates/crossrev-watchdog.yml"     "internal/initcmd/assets/templates/crossrev-watchdog.yml"
+  "templates/crossrev-token-refresh.yml" "internal/initcmd/assets/templates/crossrev-token-refresh.yml"
+  "templates/operator-config.yml"       "internal/initcmd/assets/templates/operator-config.yml"
+
+  # The version `crossrev version` prints. bin/crossrev:64 reads it out of
+  # "$ROOT/VERSION", where ROOT is the checkout the shell was invoked from
+  # (bin/crossrev:26); a binary has no checkout, so internal/cli carries the
+  # bytes. Copied rather than rendered, so the trailing newline the file holds
+  # survives and internal/cli deletes whitespace the way `tr -d` does.
+  "VERSION"                             "internal/cli/assets/VERSION"
 )
 
 # The list above is what gets copied. It is not what decides the list is

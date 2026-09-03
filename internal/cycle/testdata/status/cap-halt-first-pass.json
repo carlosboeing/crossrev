@@ -1,0 +1,76 @@
+{
+  "name": "cap-halt-first-pass",
+  "shell": "tests/test-status.sh:502-512",
+  "now": 1787000000,
+  "head_sha": "2c4a46cb321db01826d116b5ef2add6b0284d68c",
+  "min_fix_severity": "medium",
+  "max_passes_per_cycle": 3,
+  "liveness": {
+    "life": "",
+    "detail": ""
+  },
+  "labels": [
+    "crossrev/halted",
+    "crossrev/pass-1"
+  ],
+  "markers": [
+    {
+      "v": 1,
+      "leg": "review",
+      "pass": 1,
+      "state": "declined",
+      "ts": 1787000000,
+      "done_ts": 1787000000,
+      "run_id": "x",
+      "head_sha": "2c4a46cb321db01826d116b5ef2add6b0284d68c",
+      "harness": null,
+      "model": null,
+      "effort": null,
+      "endpoint": null,
+      "model_reported": null,
+      "tokens": null,
+      "verdict": "declined",
+      "reason": "reached max_files_changed_per_pr (200)",
+      "findings": []
+    }
+  ],
+  "want": {
+    "state": "halted",
+    "pass": 0,
+    "max_pass": 1,
+    "rows": [
+      {
+        "pass": 1,
+        "leg": "review",
+        "step": "no",
+        "description": "never started — reached max_files_changed_per_pr (200)",
+        "rendered": "1  ✗ review   never started — reached max_files_changed_per_pr (200)"
+      },
+      {
+        "pass": 1,
+        "leg": "resolve",
+        "step": "opt",
+        "description": "not run",
+        "rendered": "   ○ resolve  not run"
+      }
+    ],
+    "next": [
+      {
+        "kind": "line",
+        "t": "pass 1 never began — reached max_files_changed_per_pr (200)."
+      },
+      {
+        "kind": "line",
+        "t": "No review has run on this pull request at all. Raise the cap in"
+      },
+      {
+        "kind": "line",
+        "t": ".github/crossrev.yml, then:"
+      },
+      {
+        "kind": "cmd",
+        "t": "crossrev review --pr 42"
+      }
+    ]
+  }
+}

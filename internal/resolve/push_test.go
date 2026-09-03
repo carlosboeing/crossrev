@@ -7,6 +7,8 @@ import (
 
 	"github.com/carlosboeing/crossrev/internal/core"
 	"github.com/carlosboeing/crossrev/internal/vcs"
+
+	"github.com/carlosboeing/crossrev/internal/ui"
 )
 
 // TestPush pins the push guard, a single push of the current change, and
@@ -46,7 +48,7 @@ func TestPush(t *testing.T) {
 		}
 		want := "could not read feature on origin, so the check for a concurrent push did not run\n   If someone pushed to that branch while this leg was working, this push may not include their commit. Confirm the branch looks right before merging."
 		found := false
-		for _, m := range got.Messages {
+		for _, m := range ui.Texts(got.Messages) {
 			if m == want {
 				found = true
 				break
@@ -98,7 +100,7 @@ func TestPush(t *testing.T) {
 			t.Fatalf("pushCalls = %d, want 1", e.git.pushCalls)
 		}
 		found := false
-		for _, m := range got.Messages {
+		for _, m := range ui.Texts(got.Messages) {
 			if strings.Contains(m, "rewritten") {
 				found = true
 			}

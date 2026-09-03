@@ -12,6 +12,8 @@ import (
 	"github.com/carlosboeing/crossrev/internal/forge"
 	"github.com/carlosboeing/crossrev/internal/policy"
 	"github.com/carlosboeing/crossrev/internal/prstate"
+
+	"github.com/carlosboeing/crossrev/internal/ui"
 )
 
 const twoFindings = `[{"path":"app.go","line":2,"side":"RIGHT","severity":"high","category":"correctness","pre_existing":false,"title":"Unchecked fetch response","why":"A failed request looks like a success","fix":"Check response.ok"},{"path":"app.go","line":2,"side":"RIGHT","severity":"low","category":"maintainability","pre_existing":false,"title":"Missing return type","why":"The inferred type is wider than intended","fix":"Annotate it"}]`
@@ -77,13 +79,13 @@ func TestPublishFallsBackToATopLevelComment(t *testing.T) {
 			t.Errorf("placement = %q, want fallback", p)
 		}
 	}
-	joined := strings.Join(got.Messages, "\n")
+	joined := ui.Joined(got.Messages)
 	wantWarning := "2 findings could not be anchored to a line and landed as top-level comments\n   Each one names the location it faults, so nothing is lost, but it sits at the top of the pull request rather than beside the code — and the resolve leg has no thread to reply into either."
 	if !strings.Contains(joined, wantWarning) {
 		t.Errorf("messages = %q, want unanchored warning %q", joined, wantWarning)
 	}
 	want := "GitHub would not anchor a comment to app.go:2 (RIGHT) on acme/widget#42\n   The finding is posted as a top-level comment naming that location instead, so it is not lost. A finding on a deleted line needs side LEFT."
-	if !containsString(got.Messages, want) {
+	if !containsString(ui.Texts(got.Messages), want) {
 		t.Errorf("messages = %q, want warning %q", got.Messages, want)
 	}
 }
@@ -99,7 +101,7 @@ func TestPublishWarnsWhenVerdictIsConvergedAlongsideActionableFindings(t *testin
 	}
 	wantWarning := "the reviewer returned verdict 'converged' alongside 1 actionable finding\n   The actionable count outranks the verdict, so the pass is labelled 'awaiting-resolution' to run the resolve leg."
 	found := false
-	for _, msg := range got.Messages {
+	for _, msg := range ui.Texts(got.Messages) {
 		if msg == wantWarning {
 			found = true
 			break
@@ -321,7 +323,7 @@ func TestPublishLabelWarningContainsFullText(t *testing.T) {
 	}
 	wantWarning := "could not apply the label 'crossrev/pass-1' to acme/widget#42\n   Locally that is cosmetic, because this process drives both legs itself. In automated mode it would stall the chain, which is what `crossrev init` creates the labels for."
 	found := false
-	for _, msg := range got.Messages {
+	for _, msg := range ui.Texts(got.Messages) {
 		if msg == wantWarning {
 			found = true
 			break

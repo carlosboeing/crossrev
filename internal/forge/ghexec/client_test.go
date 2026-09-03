@@ -240,6 +240,31 @@ func TestTheFilteredBodyIsWhatIsPublished(t *testing.T) {
 
 var _ forge.Forge = (*ghexec.Client)(nil)
 
+// declaredAllowlist is the environment `gh` is allowed to inherit, written out
+// here rather than read from the package, so a test cannot agree with a wrong
+// answer.
+//
+// There is no line of the shell to take it from: bin/crossrev hands `gh` the
+// whole environment it was started with, so this list is a narrowing the port
+// makes and the reasoning for every name is at ghEnvironment in client.go. That
+// makes an independent statement of it the only check there can be. The rule
+// comparing what the two `gh` constructors in this tree pass is in
+// internal/archtest, which is above both packages and holds a third copy for
+// the same reason.
+var declaredAllowlist = []string{
+	"PATH", "HOME",
+	"XDG_CONFIG_HOME", "GH_CONFIG_DIR", "GH_HOST",
+	"GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN",
+	"SSL_CERT_FILE", "SSL_CERT_DIR",
+	"HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY",
+	"http_proxy", "https_proxy", "no_proxy",
+}
+
+// declaredExcluded are the names that must not reach `gh`. GH_REPO would
+// retarget RepoSlug and every write after it; GH_FORCE_TTY would put ANSI
+// escapes in JSON these reads unmarshal. The other two are ordinary secrets.
+var declaredExcluded = []string{"GH_REPO", "GH_FORCE_TTY", "AWS_SECRET_ACCESS_KEY", "ANTHROPIC_API_KEY"}
+
 // The default environment is the allowlist, and nothing else read it.
 //
 // Every other test in this package overrides it with WithEnv, so the list
@@ -249,17 +274,8 @@ var _ forge.Forge = (*ghexec.Client)(nil)
 func TestTheDefaultEnvironmentIsTheAllowlist(t *testing.T) {
 	// Set the whole allowlist plus the two names it must not carry, so what
 	// reaches gh is decided by the allowlist and not by this process.
-	required := []string{
-		"PATH", "HOME",
-		"XDG_CONFIG_HOME", "GH_CONFIG_DIR", "GH_HOST",
-		"GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN",
-		"SSL_CERT_FILE", "SSL_CERT_DIR",
-		"HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY",
-		"http_proxy", "https_proxy", "no_proxy",
-	}
-	// GH_REPO would retarget RepoSlug and every write after it; GH_FORCE_TTY
-	// would put ANSI escapes in JSON these reads unmarshal.
-	excluded := []string{"GH_REPO", "GH_FORCE_TTY", "AWS_SECRET_ACCESS_KEY", "ANTHROPIC_API_KEY"}
+	required := declaredAllowlist
+	excluded := declaredExcluded
 
 	for _, name := range append(append([]string{}, required...), excluded...) {
 		t.Setenv(name, "value-of-"+name)
@@ -291,5 +307,99 @@ func TestTheDefaultEnvironmentIsTheAllowlist(t *testing.T) {
 	if len(got) != len(required) {
 		t.Errorf("gh received %d names and the allowlist declares %d; a name added to the allowlist is declared in this test too",
 			len(got), len(required))
+	}
+}
+
+// EnvironmentNames is the allowlist itself, for the one other caller that
+// builds `gh` invocations.
+//
+// internal/app runs `gh` too, and it held a second copy of these seventeen
+// names. Two lists of the same thing drift: a name added to one widens or
+// narrows only that side's environment, nothing errors, and no test on either
+// side reads the other. This accessor is what makes there be one list, and
+// internal/archtest is where the two constructors are compared.
+//
+// What the accessor answers is compared against declaredAllowlist above, not
+// against itself. Reading the expected value out of EnvironmentNames made this
+// test agree with every answer: a name dropped from the accessor was then never
+// set in this process either, so gh did not receive it and the comparison held.
+// Measured — deleting "no_proxy" from ghEnvironment passed this package and
+// failed only internal/archtest.
+func TestEnvironmentNamesIsTheDefaultTheConstructorReads(t *testing.T) {
+	declared := ghexec.EnvironmentNames()
+	if len(declared) == 0 {
+		t.Fatal("EnvironmentNames answered nothing; gh would inherit an empty environment")
+	}
+	if want := sorted(declaredAllowlist); !slices.Equal(sorted(declared), want) {
+		t.Errorf("EnvironmentNames answers %q and the allowlist this test declares is %q", sorted(declared), want)
+	}
+
+	// Set every name the allowlist declares, plus two that are not on it, so
+	// what reaches gh is decided by the allowlist and not by this process.
+	for _, name := range declaredAllowlist {
+		t.Setenv(name, "value-of-"+name)
+	}
+	t.Setenv("GH_REPO", "acme/other")
+	t.Setenv("CROSSREV_NOT_ON_THE_LIST", "present")
+
+	r := &recorder{}
+	// No WithEnv: this is the constructor's own answer.
+	c := ghexec.New(r, passthrough{})
+	if _, err := c.RepoSlug(context.Background()); err == nil {
+		t.Fatal("the recorder answered a slug it was never given")
+	}
+
+	var got []string
+	for _, entry := range r.only(t).Env {
+		name, _, _ := strings.Cut(entry, "=")
+		got = append(got, name)
+	}
+	slices.Sort(got)
+	want := sorted(declaredAllowlist)
+	if !slices.Equal(got, want) {
+		t.Errorf("gh received %q and the allowlist declares %q; the accessor is not the list the constructor reads", got, want)
+	}
+}
+
+// sorted is a sorted copy, so neither the package's slice nor this file's is
+// reordered by a comparison.
+func sorted(names []string) []string {
+	out := slices.Clone(names)
+	slices.Sort(out)
+	return out
+}
+
+// The accessor answers a fresh slice each time, for the reason
+// exec.ForgeCredentialNames does: an exported slice variable is writable from
+// any package in the binary, and a package that shortened this one would narrow
+// the environment `gh` receives everywhere at once — silently, because a `gh`
+// that cannot find its config or its trust store fails as a network or auth
+// error rather than as a missing name.
+func TestEnvironmentNamesCannotBeWrittenThrough(t *testing.T) {
+	got := ghexec.EnvironmentNames()
+	first := got[0]
+	got[0] = "OVERWRITTEN"
+	if second := ghexec.EnvironmentNames(); second[0] != first {
+		t.Errorf("EnvironmentNames()[0] = %q after a caller wrote to an earlier answer, want %q", second[0], first)
+	}
+}
+
+// A call gh answered with no id at all is not a refusal.
+//
+// gh_comment_create dies when `gh` fails and never when the id is unreadable:
+// it carries the empty string through (lib/github.sh:187-195). Refusing here
+// stopped the watchdog's halt, which discards the id — the shell posts that
+// comment with `>/dev/null` (lib/run.sh:3747). The two callers that need an id
+// refuse for themselves on id == 0.
+func TestCommentCreateAnswersNoIdRatherThanRefusing(t *testing.T) {
+	r := &recorder{results: []exec.Result{out("")}}
+	c := ghexec.New(r, masking{})
+
+	id, err := c.CommentCreate(context.Background(), testSlug(t), 42, "hello")
+	if err != nil {
+		t.Fatalf("CommentCreate refused an unreadable id: %v", err)
+	}
+	if id != 0 {
+		t.Errorf("id = %d, want 0", id)
 	}
 }

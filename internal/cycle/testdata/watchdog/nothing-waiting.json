@@ -1,0 +1,19 @@
+{
+  "name": "nothing-waiting",
+  "shell": "",
+  "repo": "acme/widget",
+  "author": "crossrev-acme[bot]",
+  "now": 1755400000,
+  "timeout_seconds": 1800,
+  "waiting": [],
+  "comments": [],
+  "want": {
+    "page": "\n◇  CrossRev watchdog on acme/widget\n│\n│  checked 0 pull request(s) waiting on a leg — retried 0, halted 0\n└  A pass that never fired and a pass that converged look identical from outside, which is why this runs on a schedule.\n\n",
+    "calls": [],
+    "summary": {
+      "checked": 0,
+      "retried": 0,
+      "halted": 0
+    }
+  }
+}

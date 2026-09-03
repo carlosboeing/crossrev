@@ -964,7 +964,13 @@ hasnt "run does not collide with the lock its own review leg took" \
 # succeeds and returns before anything asks whether an adapter exists. The stub
 # on PATH is what makes this the real case rather than the missing-binary one.
 fixture_repo; stub_reset
-routes_baseline "$(marker_comment 9001 "$converged_marker" | jq -cs . | payload)"
+# The marker must name a revision other than this fixture's head, so the leg
+# gets past "already reviewed" and reaches the harness check. converged_marker
+# was built from an earlier fixture's head, and git dates commits to the second:
+# on a fast runner the two fixtures share a head and the leg stops before the
+# check under test. Measured on both implementations with the dates pinned.
+new_revision_marker="$(jq -c '.head_sha = "0123456789abcdef0123456789abcdef01234567"' <<<"$converged_marker")"
+routes_baseline "$(marker_comment 9001 "$new_revision_marker" | jq -cs . | payload)"
 no_threads
 out="$("$CROSSREV" review --pr 42 --harness kimi 2>&1)" || true
 has  "a harness with no adapter is named as such"    "$out" "no adapter for the harness 'kimi'"

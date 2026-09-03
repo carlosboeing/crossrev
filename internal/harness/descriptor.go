@@ -523,14 +523,25 @@ func (d Document) For(name string) (Descriptor, bool) {
 	return entry, true
 }
 
-// ServesLeg is harness_serves_leg (lib/harnesses.sh:154-159). An unknown
-// harness serves nothing, which is jq's answer too: the selection is empty, so
-// the `//` default never applies and `index($l) != null` is not "true".
+// ServesLeg is harness_serves_leg (lib/harnesses.sh:154-159).
+//
+// A name the descriptor does not carry serves EVERY leg, because that is jq's
+// answer. The filter is
+//
+//	((.harnesses[] | select(.name == $n) | .legs) // ["review","resolve"])
+//	  | index($l) != null
+//
+// and the parenthesised selection produces NO values for an unknown name, so
+// `//` falls through to the default pair rather than to false. Measured on the
+// shipped descriptor, `harness_serves_leg nosuch review` and `… nosuch resolve`
+// both return 0. A zero Descriptor declares no legs, so Legs() answers the same
+// default pair and the lookup's `found` is not read.
+//
+// The laxness is covered rather than accidental: an unknown name is refused by
+// run_leg_settings' adapter test (lib/run.sh:500) with a message that names the
+// fault, before this check runs at lib/run.sh:520.
 func (d Document) ServesLeg(name, leg string) bool {
-	entry, found := d.For(name)
-	if !found {
-		return false
-	}
+	entry, _ := d.For(name)
 	return slices.Contains(entry.Legs(), leg)
 }
 

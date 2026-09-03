@@ -1,6 +1,10 @@
 package resolve
 
 import (
+	"encoding/json"
+	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -161,22 +165,6 @@ func TestContext(t *testing.T) {
 				wantErr:     "unknown resolve trigger",
 			},
 			{
-				name: "ServesLeg refuses a review-only harness",
-				setup: func(t *testing.T, e *testEnv, req *Request) {
-					raw := strings.Replace(string(harness.DescriptorJSON()),
-						`"name": "grok"`, `"name": "grok", "legs": ["review"]`, 1)
-					doc, err := harness.Load([]byte(raw))
-					if err != nil {
-						t.Fatalf("Load review-only grok: %v", err)
-					}
-					e.doc = doc
-					req.Harness = "grok"
-					e.addReview(t, defaultFindings(), "issues-remain")
-				},
-				wantOutcome: OutcomeRefused,
-				wantErr:     "cannot serve the resolve leg",
-			},
-			{
 				name: "AssertPushTarget refuses a worktree at the wrong revision",
 				setup: func(t *testing.T, e *testEnv, _ *Request) {
 					e.addReview(t, defaultFindings(), "issues-remain")
@@ -240,4 +228,295 @@ func containsPrefix(order []string, prefix string) bool {
 		}
 	}
 	return false
+}
+
+// --- the three refusals run_leg_settings prints before anything is billed ------
+
+// legsRewritten is the shipped lib/harnesses.json with the named harnesses'
+// `legs` rewritten, which is how every refusal below was measured:
+//
+//	$ jq '(.harnesses[] | select(.name=="grok") | .legs) |= ["review"]' \
+//	    lib/harnesses.json > /tmp/d.json
+//	$ NO_COLOR=1 CROSSREV_HARNESS_FILE=/tmp/d.json bash -c 'ROOT=$PWD;
+//	    source lib/ui.sh; source lib/harnesses.sh; source lib/run.sh;
+//	    _run_assert_harness_serves_leg grok resolve'
+//
+// Rewriting the shipped file rather than writing a small one keeps the names,
+// the product names and the descriptor order the operator's message is built
+// from, and every shipped entry serves both legs, so nothing here could be
+// measured against the file as it ships.
+func legsRewritten(t *testing.T, legs map[string][]string) harness.Document {
+	t.Helper()
+	var tree map[string]any
+	if err := json.Unmarshal(harness.DescriptorJSON(), &tree); err != nil {
+		t.Fatalf("decode the shipped descriptor: %v", err)
+	}
+	entries, ok := tree["harnesses"].([]any)
+	if !ok {
+		t.Fatal("the shipped descriptor has no harnesses array")
+	}
+	for _, entry := range entries {
+		object, ok := entry.(map[string]any)
+		if !ok {
+			t.Fatal("a harness entry is not an object")
+		}
+		name, _ := object["name"].(string)
+		if serves, found := legs[name]; found {
+			object["legs"] = serves
+		}
+	}
+	raw, err := json.Marshal(tree)
+	if err != nil {
+		t.Fatalf("re-encode the descriptor: %v", err)
+	}
+	doc, err := harness.Load(raw)
+	if err != nil {
+		t.Fatalf("harness.Load: %v", err)
+	}
+	return doc
+}
+
+func wantRefusal(t *testing.T, err error, message, hint string) {
+	t.Helper()
+	var refusal *Refusal
+	if !errors.As(err, &refusal) {
+		t.Fatalf("err = %v, want a *Refusal", err)
+	}
+	if refusal.Message != message {
+		t.Errorf("message\n got %q\nwant %q", refusal.Message, message)
+	}
+	if refusal.Hint != hint {
+		t.Errorf("hint\n got %q\nwant %q", refusal.Hint, hint)
+	}
+}
+
+// TestSettingsRefusesAHarnessThatCannotResolve pins
+// _run_assert_harness_serves_leg (lib/run.sh:553-558), reached from
+// run_leg_settings at lib/run.sh:520. The hint is built from the descriptor
+// rather than written into the sentence: it names the harnesses that can take
+// the leg and reads the refused harness's product name and declared legs back
+// off its entry. Measured with grok rewritten to legs ["review"]:
+//
+//	error  the harness 'grok' cannot serve the resolve leg
+//	       CrossRev runs the resolve leg on claude, codex, agy and opencode. Grok is limited to the review leg.
+func TestSettingsRefusesAHarnessThatCannotResolve(t *testing.T) {
+	e := setup(t)
+	e.doc = legsRewritten(t, map[string][]string{"grok": {"review"}})
+	e.addReview(t, defaultFindings(), "issues-remain")
+
+	got := e.runReq(t, Request{PR: 42, Repo: e.slug, Trigger: TriggerHuman, Harness: "grok"})
+
+	if got.Outcome != OutcomeRefused {
+		t.Errorf("Outcome = %q, want %q", got.Outcome, OutcomeRefused)
+	}
+	wantRefusal(t, got.Err,
+		"the harness 'grok' cannot serve the resolve leg",
+		"CrossRev runs the resolve leg on claude, codex, agy and opencode. Grok is limited to the review leg.")
+	if e.runner.specs != nil {
+		t.Errorf("harness started on a refusal: %d specs", len(e.runner.specs))
+	}
+}
+
+// TestSettingsRefusesWhenMostOfTheDescriptorCannotResolve pins that the list of
+// harnesses that can take the leg shrinks with the descriptor rather than being
+// a constant. Measured with claude, codex and agy rewritten to legs ["review"]:
+//
+//	error  the harness 'agy' cannot serve the resolve leg
+//	       CrossRev runs the resolve leg on grok and opencode. Antigravity is limited to the review leg.
+//
+// Two names here and four above is what pins _names_human's "a and b" against
+// its "a, b, c and d" (lib/harnesses.sh:171-178), and Antigravity against agy
+// is what pins the product name as a descriptor read.
+func TestSettingsRefusesWhenMostOfTheDescriptorCannotResolve(t *testing.T) {
+	e := setup(t)
+	e.doc = legsRewritten(t, map[string][]string{
+		"claude": {"review"}, "codex": {"review"}, "agy": {"review"},
+	})
+	e.addReview(t, defaultFindings(), "issues-remain")
+
+	got := e.runReq(t, Request{PR: 42, Repo: e.slug, Trigger: TriggerHuman, Harness: "agy"})
+
+	wantRefusal(t, got.Err,
+		"the harness 'agy' cannot serve the resolve leg",
+		"CrossRev runs the resolve leg on grok and opencode. Antigravity is limited to the review leg.")
+}
+
+// TestSettingsSendsANotDrivenHarnessToEndpoints pins the branch at
+// lib/run.sh:502-504: a name the descriptor lists under not_driven is refused
+// with the reason it carries and the key that would work instead. The leg word
+// in "resolver.endpoint" is the config key, not the descriptor's review/resolve
+// vocabulary. Measured:
+//
+//	$ bash -c 'ROOT=$PWD; source lib/ui.sh; source lib/harnesses.sh;
+//	    source lib/config.sh; source lib/run.sh; harness_source_adapters;
+//	    CFG_MERGED="{}"; run_leg_settings resolver kimi'
+//	error  there is no adapter for the harness 'kimi'
+//	       CrossRev drives claude, codex, agy, grok and opencode directly. Kimi is reached through the claude adapter as a named endpoint, so there is no adapter_kimi behind the name: define it under endpoints: and set resolver.endpoint, not resolver.harness.
+func TestSettingsSendsANotDrivenHarnessToEndpoints(t *testing.T) {
+	e := setup(t)
+	e.addReview(t, defaultFindings(), "issues-remain")
+
+	got := e.runReq(t, Request{PR: 42, Repo: e.slug, Trigger: TriggerHuman, Harness: "kimi"})
+
+	if got.Outcome != OutcomeRefused {
+		t.Errorf("Outcome = %q, want %q", got.Outcome, OutcomeRefused)
+	}
+	wantRefusal(t, got.Err,
+		"there is no adapter for the harness 'kimi'",
+		"CrossRev drives claude, codex, agy, grok and opencode directly. Kimi is reached through the claude adapter as a named endpoint, so there is no adapter_kimi behind the name: define it under endpoints: and set resolver.endpoint, not resolver.harness.")
+	if e.runner.specs != nil {
+		t.Errorf("harness started on a refusal: %d specs", len(e.runner.specs))
+	}
+}
+
+// TestSettingsNamesTheDrivenHarnessesForAnUnknownName pins the else arm at
+// lib/run.sh:505-506: a name the descriptor does not carry at all gets the same
+// sentence without the endpoints half, and the names come from the descriptor.
+// Measured:
+//
+//	$ ... run_leg_settings resolver nosuch
+//	error  there is no adapter for the harness 'nosuch'
+//	       CrossRev drives claude, codex, agy, grok and opencode directly.
+//
+// This is also the case ServesLeg is deliberately lax about: the adapter test
+// at lib/run.sh:500 refuses the name before the serves-leg gate at :520 ever
+// reads it, so the refusal names the fault rather than printing a sentence
+// built from an empty product name.
+func TestSettingsNamesTheDrivenHarnessesForAnUnknownName(t *testing.T) {
+	e := setup(t)
+	e.addReview(t, defaultFindings(), "issues-remain")
+
+	got := e.runReq(t, Request{PR: 42, Repo: e.slug, Trigger: TriggerHuman, Harness: "nosuch"})
+
+	wantRefusal(t, got.Err,
+		"there is no adapter for the harness 'nosuch'",
+		"CrossRev drives claude, codex, agy, grok and opencode directly.")
+}
+
+// TestSettingsRefusesWhenNothingThatCanResolveIsInstalled pins the last refusal
+// in run_leg_settings (lib/run.sh:538-540), reached once the configured harness
+// has no binary and the substitution loop at :531-537 finds no other harness
+// that serves the leg. The hint names the harnesses that could take the leg,
+// read off the descriptor. Measured on the shipped descriptor with a PATH that
+// carries jq and yq but no harness binary:
+//
+//	$ NO_COLOR=1 env PATH=/usr/bin:/bin:/usr/sbin:/sbin:/tmp/tools bash -c 'ROOT=$PWD;
+//	    source lib/ui.sh; source lib/harnesses.sh; source lib/config.sh;
+//	    source lib/run.sh; harness_source_adapters; CFG_MERGED="{}";
+//	    run_leg_settings resolver claude'
+//	error  the resolver is configured to use 'claude', which is not installed, and no other harness that can serve the resolve leg is either
+//	       Install one of claude, codex, agy, grok and opencode. CrossRev needs at least one, and two different ones is what makes the cross-model check mean anything.
+//
+// The refused harness is named in the list it is told to install from, because
+// the list is every harness that serves the leg rather than every alternative.
+func TestSettingsRefusesWhenNothingThatCanResolveIsInstalled(t *testing.T) {
+	e := setup(t)
+	e.lookPath = func(string) (string, error) { return "", os.ErrNotExist }
+	e.addReview(t, defaultFindings(), "issues-remain")
+
+	got := e.runReq(t, Request{PR: 42, Repo: e.slug, Trigger: TriggerHuman, Harness: "claude"})
+
+	if got.Outcome != OutcomeRefused {
+		t.Errorf("Outcome = %q, want %q", got.Outcome, OutcomeRefused)
+	}
+	wantRefusal(t, got.Err,
+		"the resolver is configured to use 'claude', which is not installed, and no other harness that can serve the resolve leg is either",
+		"Install one of claude, codex, agy, grok and opencode. CrossRev needs at least one, and two different ones is what makes the cross-model check mean anything.")
+	if e.runner.specs != nil {
+		t.Errorf("harness started on a refusal: %d specs", len(e.runner.specs))
+	}
+}
+
+// TestSettingsNamesOnlyTheHarnessesThatCanResolve pins that the install list is
+// harness_names_for_leg rather than every driven harness. Measured with codex,
+// agy and grok rewritten to legs ["review"] and the same binary-free PATH:
+//
+//	error  the resolver is configured to use 'claude', which is not installed, and no other harness that can serve the resolve leg is either
+//	       Install one of claude and opencode. CrossRev needs at least one, and two different ones is what makes the cross-model check mean anything.
+//
+// Two names here against five above is what pins _names_human's "a and b"
+// (lib/harnesses.sh:171-178), and claude is asked for because a harness that
+// cannot serve the leg is refused at lib/run.sh:520 before this line.
+func TestSettingsNamesOnlyTheHarnessesThatCanResolve(t *testing.T) {
+	e := setup(t)
+	e.doc = legsRewritten(t, map[string][]string{
+		"codex": {"review"}, "agy": {"review"}, "grok": {"review"},
+	})
+	e.lookPath = func(string) (string, error) { return "", os.ErrNotExist }
+	e.addReview(t, defaultFindings(), "issues-remain")
+
+	got := e.runReq(t, Request{PR: 42, Repo: e.slug, Trigger: TriggerHuman, Harness: "claude"})
+
+	wantRefusal(t, got.Err,
+		"the resolver is configured to use 'claude', which is not installed, and no other harness that can serve the resolve leg is either",
+		"Install one of claude and opencode. CrossRev needs at least one, and two different ones is what makes the cross-model check mean anything.")
+}
+
+// TestCapitaliseName pins the Bash
+// `$(printf '%s' "${h:0:1}" | tr '[:lower:]' '[:upper:]')${h:1}` at
+// lib/run.sh:503, including the two edges the not-driven refusal never reaches
+// on the shipped descriptor: an empty name, where `${h:0:1}` is empty and the
+// expansion is the empty string, and a one-character name, where `${h:1}` is
+// empty rather than out of range. The review leg carries the same function and
+// pins it the same way.
+func TestCapitaliseName(t *testing.T) {
+	for _, tt := range []struct{ in, want string }{
+		{"", ""},
+		{"k", "K"},
+		{"kimi", "Kimi"},
+		{"Kimi", "Kimi"},
+		{"opencode", "Opencode"},
+	} {
+		if got := capitaliseName(tt.in); got != tt.want {
+			t.Errorf("capitaliseName(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
+// The one case that leaves LookPath nil and drives the production search.
+//
+// Every other case here substitutes one, so without this the fallback is
+// untested. The private copy this package carried until now answered with a
+// directory named like the harness.
+func TestBinaryInstalledWithNoLookPathUsesTheSharedSearch(t *testing.T) {
+	root := t.TempDir()
+	asDirectory := filepath.Join(root, "d")
+	asProgram := filepath.Join(root, "x")
+	if err := os.MkdirAll(filepath.Join(asDirectory, "claude"), 0o755); err != nil {
+		t.Fatalf("make the directory named like the harness: %v", err)
+	}
+	if err := os.MkdirAll(asProgram, 0o755); err != nil {
+		t.Fatalf("make %s: %v", asProgram, err)
+	}
+	if err := os.WriteFile(filepath.Join(asProgram, "claude"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write the harness binary: %v", err)
+	}
+
+	const refusal = "the resolver is configured to use 'claude', which is not installed, and no other harness that can serve the resolve leg is either"
+
+	t.Run("a directory named like the harness is not the harness", func(t *testing.T) {
+		t.Setenv("PATH", asDirectory)
+		e := setup(t)
+		e.nilLookPath = true
+		e.addReview(t, defaultFindings(), "issues-remain")
+
+		got := e.runReq(t, Request{PR: 42, Repo: e.slug, Trigger: TriggerHuman, Harness: "claude"})
+
+		if got.Err == nil || !strings.Contains(got.Err.Error(), refusal) {
+			t.Fatalf("err = %v, want the not-installed refusal", got.Err)
+		}
+	})
+
+	t.Run("the executable is found behind it", func(t *testing.T) {
+		t.Setenv("PATH", asDirectory+string(os.PathListSeparator)+asProgram)
+		e := setup(t)
+		e.nilLookPath = true
+		e.addReview(t, defaultFindings(), "issues-remain")
+
+		got := e.runReq(t, Request{PR: 42, Repo: e.slug, Trigger: TriggerHuman, Harness: "claude"})
+
+		if got.Err != nil && strings.Contains(got.Err.Error(), refusal) {
+			t.Fatalf("the harness behind the directory was not found: %v", got.Err)
+		}
+	})
 }

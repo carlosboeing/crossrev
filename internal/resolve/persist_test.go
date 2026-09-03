@@ -12,6 +12,8 @@ import (
 	"github.com/carlosboeing/crossrev/internal/core"
 	"github.com/carlosboeing/crossrev/internal/forge"
 	"github.com/carlosboeing/crossrev/internal/harness"
+
+	"github.com/carlosboeing/crossrev/internal/ui"
 )
 
 func deferredPayload(persist json.RawMessage, dup any) json.RawMessage {
@@ -169,7 +171,7 @@ func TestPersist(t *testing.T) {
 			t.Fatalf("recorded a landing that did not happen: %s", got.Resolutions)
 		}
 		want := "could not file an issue on acme/widget for a deferred finding\n   The thread stays open and unresolved instead, so the finding is still visible on the pull request. Check that the backlog labels exist and the token has issues write."
-		if !strings.Contains(strings.Join(got.Messages, "\n"), want) {
+		if !strings.Contains(ui.Joined(got.Messages), want) {
 			t.Errorf("messages = %q, want warning %q", got.Messages, want)
 		}
 	})

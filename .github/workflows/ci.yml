@@ -1,6 +1,6 @@
 # The offline suite and the linter, on a runner.
 #
-# Both commands are the ones a contributor runs locally, unchanged. Nothing here
+# Every command here is one a contributor runs locally, unchanged. Nothing here
 # needs a network, a model, a GitHub App or a pull request — the suite stubs its
 # own `gh` and harnesses.
 #
@@ -25,11 +25,12 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version: '1.27.0'
           check-latest: false
@@ -54,6 +55,11 @@ jobs:
       - name: Lint
         run: bash scripts/lint.sh
 
+      - name: Go tests
+        env:
+          GOTOOLCHAIN: go1.27.0
+        run: go test ./...
+
       - name: Native tests
         run: bash scripts/test-native.sh
 
@@ -65,11 +71,12 @@ jobs:
   changelog:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       # fetch-depth: 0 is load-bearing. The default shallow clone shares no
       # history with the base branch, so `git diff base...HEAD` dies with
       # "no merge base" rather than returning a diff.
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
@@ -92,3 +99,41 @@ jobs:
         env:
           BASE_REF: ${{ github.base_ref }}
         run: bash scripts/check-changelog.sh "origin/$BASE_REF"
+
+  required:
+    name: required
+    if: always()
+    needs:
+      - test
+      - changelog
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify status of required CI jobs
+        run: |
+          set -euo pipefail
+          test_result="${{ needs.test.result }}"
+          changelog_result="${{ needs.changelog.result }}"
+          event_name="${{ github.event_name }}"
+
+          echo "test job result:      $test_result"
+          echo "changelog job result: $changelog_result (event: $event_name)"
+
+          if [ "$test_result" != "success" ]; then
+            echo "::error::mandatory job 'test' did not succeed (result: $test_result)"
+            exit 1
+          fi
+
+          if [ "$event_name" = "pull_request" ]; then
+            if [ "$changelog_result" != "success" ]; then
+              echo "::error::mandatory job 'changelog' did not succeed on pull request (result: $changelog_result)"
+              exit 1
+            fi
+          else
+            if [ "$changelog_result" != "success" ] && [ "$changelog_result" != "skipped" ]; then
+              echo "::error::job 'changelog' had unexpected status (result: $changelog_result)"
+              exit 1
+            fi
+          fi
+
+          echo "All required checks passed."

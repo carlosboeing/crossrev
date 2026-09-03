@@ -1,0 +1,51 @@
+{
+  "name": "two-pull-requests",
+  "shell": "",
+  "repo": "acme/widget",
+  "author": "crossrev-acme[bot]",
+  "now": 1755400000,
+  "timeout_seconds": 1800,
+  "waiting": [
+    {
+      "pr": 42,
+      "labels": [
+        "crossrev/awaiting-review"
+      ],
+      "head": "64b44004d6b4459cea637446e1d1b33b139039df"
+    },
+    {
+      "pr": 43,
+      "labels": [
+        "crossrev/awaiting-review"
+      ],
+      "head": "64b44004d6b4459cea637446e1d1b33b139039df"
+    }
+  ],
+  "comments": [
+    {
+      "id": 9001,
+      "author": "crossrev-acme[bot]",
+      "body": "Summary.\n\n<!-- crossrev: {\"v\":1,\"leg\":\"review\",\"pass\":1,\"state\":\"started\",\"ts\":1755396400,\"run_id\":\"1\",\"head_sha\":\"64b44004d6b4459cea637446e1d1b33b139039df\",\"harness\":\"claude\",\"model\":\"m\",\"model_reported\":\"m\",\"verdict\":null,\"findings\":[]} -->"
+    }
+  ],
+  "want": {
+    "page": "\n◇  CrossRev watchdog on acme/widget\n│  ✗ #42 — waiting on the review leg for 60 minutes, past the 30-minute timeout\n│     retried by re-firing crossrev/awaiting-review at 64b4400\n│  ✗ #43 — waiting on the review leg for 60 minutes, past the 30-minute timeout\n│     retried by re-firing crossrev/awaiting-review at 64b4400\n│\n│  checked 2 pull request(s) waiting on a leg — retried 2, halted 0\n└  A pass that never fired and a pass that converged look identical from outside, which is why this runs on a schedule.\n\n",
+    "calls": [
+      "issue-comments 42",
+      "label-ensure crossrev/watchdog-retried fbca04 crossrev: the watchdog retried this leg once",
+      "label-add 42 crossrev/watchdog-retried",
+      "label-remove 42 crossrev/awaiting-review",
+      "label-add 42 crossrev/awaiting-review",
+      "issue-comments 43",
+      "label-ensure crossrev/watchdog-retried fbca04 crossrev: the watchdog retried this leg once",
+      "label-add 43 crossrev/watchdog-retried",
+      "label-remove 43 crossrev/awaiting-review",
+      "label-add 43 crossrev/awaiting-review"
+    ],
+    "summary": {
+      "checked": 2,
+      "retried": 2,
+      "halted": 0
+    }
+  }
+}
