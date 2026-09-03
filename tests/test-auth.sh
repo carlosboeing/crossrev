@@ -369,6 +369,57 @@ missing_out="$( (auth_rotate --owner ShoreLogic --key "$STUB_DIR/absent.pem") 2>
 has "a key file that does not exist reports the path instead" \
   "$missing_out" "there is no file at $STUB_DIR/absent.pem"
 
+# --- a rotation ends at 0600 whatever mode the path already held ------------
+#
+# `umask` applies when a file is created. A redirect onto an existing file
+# truncates it and keeps its mode, so `(umask 077; cat >"$dest")` left a key
+# somebody had widened to 0644 at 0644 and printed `Rotated` over it. The backup
+# had the same shape one step earlier: `cp "$pem" "$backup" && chmod 600` is two
+# commands, and an existing backup sat at its old mode between them.
+#
+# GNU first, BSD second, for the reason auth_status records.
+mode_of() { printf '%04d' "$(stat -c '%a' "$1" 2>/dev/null || stat -f '%Lp' "$1" 2>/dev/null)"; }
+
+# The helper itself, so the property is pinned where it lives rather than only
+# through the one command that happens to call it today.
+wide="$STUB_DIR/wide.pem"; printf 'old\n' >"$wide"; chmod 644 "$wide"
+printf 'new\n' | _auth_write_0600 "$wide"
+is "_auth_write_0600 sets the mode rather than inheriting the path's" \
+  "$(mode_of "$wide")" "0600"
+is "and writes what it was given"               "$(cat "$wide")" "new"
+
+# A destination it cannot write fails rather than reporting success, and leaves
+# no half-written sibling for the next run to trip over.
+printf 'x\n' | _auth_write_0600 "$STUB_DIR/no-such-dir/k.pem" 2>/dev/null; write_rc=$?
+is "a write it cannot make returns non-zero"    "$write_rc" "1"
+is "and leaves no temporary file behind"        \
+  "$(find "$STUB_DIR" -name '*.tmp' | wc -l | tr -d ' ')" "0"
+
+XDG_CONFIG_HOME="$(mktemp -d)"; export XDG_CONFIG_HOME
+meta_fixture "CrossRev ShoreLogic" crossrev-shorelogic >/dev/null
+dest="$(_auth_dir)/ShoreLogic.loop.pem"
+(umask 077; openssl genrsa -out "$dest" 2048 2>/dev/null)
+new_key="$STUB_DIR/rotated.pem"
+openssl genrsa -out "$new_key" 2048 2>/dev/null
+
+# Both destinations exist already, and both are wider than a private key may be.
+chmod 644 "$dest"
+printf 'an older backup\n' >"$dest.previous"; chmod 666 "$dest.previous"
+replaced_key="$(cat "$dest")"
+: >"$CROSSREV_GH_ROUTES"
+
+rotate_out="$( (auth_rotate --owner ShoreLogic --key "$new_key") 2>&1 || true )"
+has "auth rotate installs a key it can prove"   "$rotate_out" "Rotated"
+is  "the rotated key ends at 0600, not the mode the path held" \
+  "$(mode_of "$dest")" "0600"
+is  "and so does the backup written beside it"  "$(mode_of "$dest.previous")" "0600"
+is  "the installed key is the one that was passed" \
+  "$(cat "$dest")" "$(cat "$new_key")"
+is  "and the backup holds the key that was replaced" \
+  "$(cat "$dest.previous")" "$replaced_key"
+is  "no temporary file is left in the App directory" \
+  "$(find "$(_auth_dir)" -name '*.tmp' | wc -l | tr -d ' ')" "0"
+
 # --- a login redirect must carry the state CrossRev generated ---------------
 #
 # auth_login posts a random state with the manifest and reads it back off the
