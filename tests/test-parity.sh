@@ -12,6 +12,8 @@
 
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=tmproot.sh
+source "$HERE/tmproot.sh"
 # shellcheck source=../lib/ui.sh
 source "$HERE/../lib/ui.sh"
 # shellcheck source=../lib/diff.sh
@@ -31,7 +33,7 @@ notok() { printf '  FAIL  %s\n    expected: %s\n    actual:   %s\n' "$1" "$2" "$
 is()    { [[ "$2" == "$3" ]] && ok "$1" || notok "$1" "$3" "$2"; }
 
 workdir="$(mktemp -d)"
-trap 'rm -rf "$workdir"' EXIT
+trap 'rm -rf "$workdir"; _tmproot_cleanup' EXIT
 
 # Every fixture names where it was captured, or a silent recapture has nothing
 # to be compared against later.

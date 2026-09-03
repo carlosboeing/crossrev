@@ -9,6 +9,8 @@
 
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=tmproot.sh
+source "$HERE/tmproot.sh"
 CROSSREV="$HERE/../bin/crossrev"
 
 pass=0 fail=0
