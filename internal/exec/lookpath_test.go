@@ -148,7 +148,15 @@ func TestLookPathDoesNotSearchAName(t *testing.T) {
 }
 
 // The empty name is not a search over PATH for "": every entry would answer
-// with the directory itself.
+// with the directory itself. Measured, GNU bash 3.2.57: `PATH="x1" command -v
+// ""` and `PATH="x1:" command -v ""` both exit 1.
+//
+// The early return is not the only reason this refuses, and no test can make it
+// be. shellJoin("", name) with an empty name answers a path ending in a
+// separator, os.Stat of that resolves to a directory or fails with ENOTDIR, and
+// neither is a regular file — so the fallback slot is never filled and the
+// search refuses on its own. Removing the guard is behaviour-preserving, which
+// is why this test passes with and without it.
 func TestLookPathRefusesTheEmptyName(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	if got, err := exec.LookPath(""); err == nil {
@@ -196,6 +204,154 @@ func TestLookPathReadsAnEmptyPathElementAsTheCurrentDirectory(t *testing.T) {
 			}
 			if got != row.want {
 				t.Errorf("LookPath(%q) with PATH=%q = %q, want %q", row.tool, row.path, got, row.want)
+			}
+		})
+	}
+}
+
+// A name carrying a separator must name a regular file. A directory carries an
+// execute bit and is not a program, so access(2) alone is not the test:
+// isProgram asks for a regular file first.
+//
+// Measured with an `adir/` planted as a mode-0755 directory, GNU bash 3.2.57:
+//
+//	$ bash -c 'command -v ./adir'        → nothing, exit 1
+//	$ bash -c 'command -v /abs/adir'     → nothing, exit 1
+//
+// The same fact is what lib/run.sh:524's `command -v` answers for a directory
+// named like a tool, and lookpath.go:36-40 records it for the search half.
+func TestLookPathRefusesADirectoryNamedWithASeparator(t *testing.T) {
+	root := t.TempDir()
+	directory := filepath.Join(root, "adir")
+	if err := os.MkdirAll(directory, 0o755); err != nil {
+		t.Fatalf("make %s: %v", directory, err)
+	}
+	// A PATH holding a program of the same base name must not rescue it.
+	rescue := filepath.Join(root, "rescue")
+	if err := os.MkdirAll(rescue, 0o755); err != nil {
+		t.Fatalf("make %s: %v", rescue, err)
+	}
+	if err := os.WriteFile(filepath.Join(rescue, "adir"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write %s/adir: %v", rescue, err)
+	}
+	t.Setenv("PATH", rescue)
+
+	if got, err := exec.LookPath(directory); err == nil {
+		t.Errorf("LookPath(%q) = %q, want a refusal: a directory is not a program", directory, got)
+	}
+	t.Chdir(root)
+	if got, err := exec.LookPath("./adir"); err == nil {
+		t.Errorf(`LookPath("./adir") = %q, want a refusal: a directory is not a program`, got)
+	}
+}
+
+// A name carrying a separator is answered with the bytes the caller passed, not
+// with a cleaned path. bash hands back what it was given, and a caller that
+// prints the answer or compares it against its own argument sees the difference.
+//
+// Measured, GNU bash 3.2.57, from a directory holding a mode-0755 `x` and
+// `x1/zzt`:
+//
+//	$ bash -c 'command -v ./x'              → ./x
+//	$ bash -c 'command -v ./x1/../x1/zzt'   → ./x1/../x1/zzt
+//
+// lookpath.go:57-58 records the refusal half of the same measurement.
+func TestLookPathAnswersANameWithASeparatorVerbatim(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "x1"), 0o755); err != nil {
+		t.Fatalf("make x1: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "x"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write x: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "x1", "zzt"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write x1/zzt: %v", err)
+	}
+	t.Chdir(root)
+	t.Setenv("PATH", "/nonexistent")
+
+	for _, name := range []string{"./x", "./x1/../x1/zzt"} {
+		got, err := exec.LookPath(name)
+		if err != nil {
+			t.Fatalf("LookPath(%q) = %v, want %q", name, err, name)
+		}
+		if got != name {
+			t.Errorf("LookPath(%q) = %q, want the bytes back unchanged", name, got)
+		}
+	}
+}
+
+// bash drops one trailing separator from a PATH element and glues the name on,
+// so the separators the element carries past the first survive into the answer.
+//
+// Measured, GNU bash 3.2.57, from a directory holding `x1/zzt` at mode 0755:
+//
+//	$ bash -c 'PATH="x1/"  command -v zzt'  → x1/zzt
+//	$ bash -c 'PATH="x1//" command -v zzt'  → x1//zzt
+//
+// lookpath.go:95-99 records the same measurement for shellJoin.
+func TestLookPathKeepsTheSeparatorsAPathElementCarries(t *testing.T) {
+	root := t.TempDir()
+	program := filepath.Join(root, "x1")
+	if err := os.MkdirAll(program, 0o755); err != nil {
+		t.Fatalf("make x1: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(program, "yq"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write x1/yq: %v", err)
+	}
+
+	separator := string(os.PathSeparator)
+	for _, row := range []struct{ name, path, want string }{
+		{"one trailing separator", program + separator, program + separator + "yq"},
+		{"two trailing separators", program + separator + separator, program + separator + separator + "yq"},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			t.Setenv("PATH", row.path)
+			got, err := exec.LookPath("yq")
+			if err != nil {
+				t.Fatalf("LookPath with PATH=%q = %v, want %q", row.path, err, row.want)
+			}
+			if got != row.want {
+				t.Errorf("LookPath with PATH=%q = %q, want %q", row.path, got, row.want)
+			}
+		})
+	}
+}
+
+// With an executable in more than one PATH entry, the first entry in PATH order
+// wins. The search is executable-preferred over the whole list and first-match
+// among the executables, which is one rule and not two.
+//
+// Measured, GNU bash 3.2.57, with `zzt` at mode 0755 in both x1 and x2:
+//
+//	$ bash -c 'PATH="x1:x2" command -v zzt'  → x1/zzt
+//	$ bash -c 'PATH="x2:x1" command -v zzt'  → x2/zzt
+func TestLookPathAnswersTheFirstExecutableInPathOrder(t *testing.T) {
+	root := t.TempDir()
+	first := filepath.Join(root, "x1")
+	second := filepath.Join(root, "x2")
+	for _, dir := range []string{first, second} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("make %s: %v", dir, err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "yq"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+			t.Fatalf("write %s/yq: %v", dir, err)
+		}
+	}
+
+	separator := string(os.PathListSeparator)
+	for _, row := range []struct{ name, path, want string }{
+		{"the first entry holds it", first + separator + second, filepath.Join(first, "yq")},
+		{"the order reversed", second + separator + first, filepath.Join(second, "yq")},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			t.Setenv("PATH", row.path)
+			got, err := exec.LookPath("yq")
+			if err != nil {
+				t.Fatalf("LookPath with PATH=%q = %v, want %q", row.path, err, row.want)
+			}
+			if got != row.want {
+				t.Errorf("LookPath with PATH=%q = %q, want %q", row.path, got, row.want)
 			}
 		})
 	}

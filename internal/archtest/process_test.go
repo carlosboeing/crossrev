@@ -6,6 +6,7 @@ import (
 	"go/parser"
 	"go/token"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -230,10 +231,150 @@ func TestProcessStartBoundary(t *testing.T) {
 	}
 
 	// An allowance nothing needs is what lets the list only ever grow.
-	for path, why := range processTestPermitted {
+	for _, unused := range unusedProcessAllowances(processTestPermitted, sawChild) {
+		t.Error(unused)
+	}
+}
+
+// unusedProcessAllowances is every allowance the scan found no child start for.
+//
+// The allowance map is a parameter rather than read from the file, so the rule
+// has a fixture. Read from the file it had none: every entry in
+// processTestPermitted does start a child today, so the loop never fired and
+// deleting it changed nothing the suite could see.
+func unusedProcessAllowances(permitted map[string]string, sawChild map[string]bool) []string {
+	var unused []string
+	for path, why := range permitted {
 		if !sawChild[path] {
-			t.Errorf("processTestPermitted names %s (%q) and it starts no child there; drop the entry", path, why)
+			unused = append(unused, fmt.Sprintf("processTestPermitted names %s (%q) and it starts no child there; drop the entry", path, why))
 		}
+	}
+	slices.Sort(unused)
+	return unused
+}
+
+// An allowance is load-bearing or it is gone. The list may only shrink on its
+// own, and a file that stops running the oracle has to take its entry with it.
+func TestUnusedProcessAllowancesAreReported(t *testing.T) {
+	permitted := map[string]string{
+		"internal/prompt/shell_test.go": "runs bash to compare against the shell",
+		"internal/vcs/lock_test.go":     "runs sh to hold a lock from another process",
+	}
+
+	tests := []struct {
+		name     string
+		sawChild map[string]bool
+		want     []string
+	}{
+		{
+			name:     "every allowance starts a child",
+			sawChild: map[string]bool{"internal/prompt/shell_test.go": true, "internal/vcs/lock_test.go": true},
+		},
+		{
+			name:     "one allowance starts nothing",
+			sawChild: map[string]bool{"internal/prompt/shell_test.go": true},
+			want:     []string{`processTestPermitted names internal/vcs/lock_test.go ("runs sh to hold a lock from another process") and it starts no child there; drop the entry`},
+		},
+		{
+			name:     "the scan found no child anywhere",
+			sawChild: map[string]bool{},
+			want: []string{
+				`processTestPermitted names internal/prompt/shell_test.go ("runs bash to compare against the shell") and it starts no child there; drop the entry`,
+				`processTestPermitted names internal/vcs/lock_test.go ("runs sh to hold a lock from another process") and it starts no child there; drop the entry`,
+			},
+		},
+		{
+			// A file the scan saw that no allowance names is the other rule's
+			// business, not this one's.
+			name:     "a child started somewhere no allowance names",
+			sawChild: map[string]bool{"internal/prompt/shell_test.go": true, "internal/vcs/lock_test.go": true, "internal/cycle/other_test.go": true},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := unusedProcessAllowances(permitted, tt.sawChild)
+			if !slices.Equal(got, tt.want) {
+				t.Fatalf("unused allowances = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// startsAChildSomewhere is what decides whether an allowance is load-bearing,
+// and it answered for the whole module with nothing checking its answer:
+// replacing its body with `return true` left every test green, because every
+// permitted file really does start a child and no other caller reads it.
+//
+// The rows are the child-start routes and the two rules that are not child
+// starts. plugin and unsafe are confined by the same walk and are deliberately
+// not children: an allowance for a test that imports unsafe would be a
+// different rule.
+func TestStartsAChildSomewhereAnswersOnlyForChildRoutes(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+		want   bool
+	}{
+		{
+			name:   "an os/exec import",
+			source: "package sample\nimport \"os/exec\"\nvar v = exec.Command\n",
+			want:   true,
+		},
+		{
+			name:   "a blank os/exec import",
+			source: "package sample\nimport _ \"os/exec\"\n",
+			want:   true,
+		},
+		{
+			name:   "os.StartProcess",
+			source: "package sample\nimport \"os\"\nvar v, _ = os.StartProcess(\"/bin/sh\", nil, &os.ProcAttr{})\n",
+			want:   true,
+		},
+		{
+			name:   "syscall.ForkExec",
+			source: "package sample\nimport \"syscall\"\nvar v = syscall.ForkExec\n",
+			want:   true,
+		},
+		{
+			// Confined by the same walk, and not a child start: a file holding
+			// only this needs no allowance.
+			name:   "an import of unsafe",
+			source: "package sample\nimport \"unsafe\"\nvar v unsafe.Pointer\n",
+			want:   false,
+		},
+		{
+			name:   "an import of plugin",
+			source: "package sample\nimport \"plugin\"\nvar v = plugin.Open\n",
+			want:   false,
+		},
+		{
+			// A sibling in the same package that acts on a process which
+			// already exists is not a start.
+			name:   "syscall.Wait4",
+			source: "package sample\nimport \"syscall\"\nvar v = syscall.Wait4\n",
+			want:   false,
+		},
+		{
+			// The import path as a string is not the import. Three test files
+			// in this module carry it inside a fixture and start nothing.
+			name:   "the import path inside a string",
+			source: "package sample\nvar fixture = `import \"os/exec\"`\n",
+			want:   false,
+		},
+		{
+			name:   "a file that starts nothing",
+			source: "package sample\nimport \"strings\"\nvar v = strings.TrimSpace\n",
+			want:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := startsAChildSomewhere(t, "internal/sample/sample_test.go", []byte(tt.source)); got != tt.want {
+				t.Fatalf("startsAChildSomewhere = %t, want %t", got, tt.want)
+			}
+		})
 	}
 }
 
