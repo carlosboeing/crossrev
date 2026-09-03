@@ -610,6 +610,39 @@ has "and NEXT starts with removing the label"   "$out" "gh pr edit 42 --remove-l
 has "then the leg that was owed when the brake went on" "$out" "crossrev resolve --pr 42"
 has "the resolve leg says why it did not run"   "$out" "○ resolve  not run — crossrev/stop is applied"
 
+# --- a draft, which no workflow will move -----------------------------------
+#
+# The state a label cannot show. Every automatic invocation refuses a draft, and
+# the review workflow's job condition skips before that runs, so an awaiting
+# label on a draft is a loop that stops with nothing wrong anywhere. status is
+# where an operator goes to find out why, and it said nothing (#122).
+as_draft() { route_first "pr view $FIX_PR --repo * --json *" \
+  "$(jq -cn --argjson n "$FIX_PR" --arg h "$FIX_HEAD" --arg b "$FIX_BASE" \
+     '{number:$n, title:"Add refresh", body:"", url:"https://github.com/x",
+       headRefName:"feature", headRefOid:$h, baseRefName:"main", baseRefOid:$b,
+       changedFiles:1, labels:[], isCrossRepository:false, maintainerCanModify:false,
+       isDraft:true, headRepositoryOwner:{login:"acme"}, headRepository:{name:"widget"},
+       state:"OPEN"}')"; }
+
+out="$(status_setup_with as_draft '[]')"
+has "a draft is named in the pull request block"   "$out" "draft      yes"
+has "and says what that costs"                     "$out" "no workflow runs a leg on it"
+has "NEXT explains why the label is not moving"    "$out" "no workflow starts a leg on it"
+has "and names both ways out"                      "$out" "Mark it ready for review, or run the leg yourself"
+has "the command itself is unchanged"              "$out" "crossrev review --pr 42"
+
+# Not on a state where the answer would be wrong: a converged loop is finished,
+# and telling its author to run a leg would be noise.
+out="$(status_setup_with as_draft "$(lbl crossrev/converged crossrev/pass-1)" \
+  "$(review_m 1 converged '[]')")"
+hasnt "a converged draft is not told to run a leg" "$out" "no workflow starts a leg on it"
+has   "and still reports the draft as a fact"      "$out" "draft      yes"
+
+# A pull request that is not a draft says none of this.
+out="$(status_with '[]')"
+hasnt "a ready pull request has no draft line"     "$out" "draft      yes"
+hasnt "and NEXT does not explain a skip that will not happen" "$out" "no workflow starts a leg on it"
+
 # --- the header word is one of exactly five ---------------------------------
 #
 # A sixth word would be a place for the terminal and the label to disagree, which

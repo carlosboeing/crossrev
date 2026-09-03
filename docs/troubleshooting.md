@@ -91,13 +91,26 @@ Run it by hand to see what it sees:
 crossrev watchdog --repo owner/name
 ```
 
+### A draft pull request is the one silence the watchdog cannot fix
+
+No leg runs automatically on a draft. The review workflow's job condition skips it, and the CLI refuses it on any automatic trigger. So an awaiting label on a draft never moves, and nothing is broken.
+
+The watchdog reports it rather than retrying, because re-firing the label meets the same refusal:
+
+```
+○ #7 — a draft pull request, so no automatic review leg runs on it
+   mark it ready for review, or run `crossrev review --pr 7` yourself
+```
+
+`crossrev status --pr 7` says the same thing under `NEXT`, and lists `draft yes` with the rest of the pull request. Marking it ready for review fires `ready_for_review`, which the review workflow listens for, and the loop resumes on its own.
+
 ## A pull request CrossRev won't touch
 
 | Refusal | Why |
 |---|---|
 | It comes from a **fork**, and the trigger was automatic | GitHub withholds secrets from fork pull requests, so the loop would run unauthenticated rather than not at all. Review it locally or by hand |
 | It isn't **open** | CrossRev only runs on open pull requests |
-| It's a **draft**, and the trigger was automatic | Mark it ready for review, or ask for a review explicitly. A person asking always gets one |
+| It's a **draft**, and the trigger was automatic | Both legs, so a draft is never resolved either. Mark it ready for review, or run the leg yourself. A person asking always gets one |
 | It's **already reviewed at this head SHA** | Push a revision, or run the resolve leg |
 
 ## The resolve leg won't push
@@ -138,6 +151,8 @@ An endpoint a leg names but nothing defines is a hard failure, never a fallback.
 Falling back to the vendor's own API would mean running Claude while the config says Ollama — the same silent substitution as above, arriving through a different door.
 
 Each endpoint needs both a `base_url` and a `token_env`. The variable name is required rather than assumed because it genuinely differs by service.
+
+A `token_env` naming `GH_TOKEN`, `GITHUB_TOKEN`, `GH_ENTERPRISE_TOKEN` or `GITHUB_ENTERPRISE_TOKEN` is refused when the config loads, whether or not any leg selects that endpoint. CrossRev hands `token_env`'s value to the model process, and that process must hold no GitHub credential. Point it at the endpoint's own token.
 
 ## A harness was refused for a leg
 

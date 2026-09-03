@@ -108,6 +108,9 @@ if [[ -n "${CROSSREV_TEST_BIN:-}" ]]; then
   trap 'rm -rf "$_stub_env_dir"' EXIT
 fi
 
+# shellcheck source=tmproot.sh
+source "$HERE/tmproot.sh"
+
 pass=0; fail=0
 ok()    { printf '  ok    %s\n' "$1"; pass=$((pass+1)); }
 notok() { printf '  FAIL  %s\n    expected: %s\n    actual:   %s\n' "$1" "$2" "$3"; fail=$((fail+1)); }

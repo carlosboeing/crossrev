@@ -69,4 +69,32 @@ done
 
 is "and nothing was written finding that out" "$(count 'method POST')" "0"
 
+# --- the inputs a workflow omits ---------------------------------------
+#
+# A forwarded flag is only half the contract. The other half is what the action
+# sends when a workflow passes nothing, because two of the three generated
+# workflows pass no `trigger:` at all and take this default instead.
+#
+# The draft rule is what rides on it. `ctx_load` refuses a draft pull request
+# only when the trigger is `automatic`, so a default of `human` — or no default,
+# which the forwarding step turns into no flag and the CLI turns into `human` —
+# puts the resolve leg back to pushing fixes to a draft the review leg refuses
+# to look at. That is what shipped at v0.2.0 and it was invisible: every other
+# assertion in this file passes either way.
+is "the trigger input defaults to automatic" \
+  "$(yq -r '.inputs.trigger.default' "$ACTION")" "automatic"
+
+for wf in resolve watchdog; do
+  is "templates/crossrev-$wf.yml passes no trigger, so it takes that default" \
+    "$(yq -r '[.jobs[].steps[].with.trigger] | map(select(. != null)) | length' \
+       "$HERE/../templates/crossrev-$wf.yml")" "0"
+done
+
+# The review workflow is the exception, and has to be: it also fires on
+# `issue_comment`, where a person typed `/crossrev review` and the caps and the
+# draft rule should not apply.
+has "templates/crossrev-review.yml chooses its own trigger per event" \
+  "$(yq -r '[.jobs[].steps[].with.trigger] | join("")' "$HERE/../templates/crossrev-review.yml")" \
+  "'automatic' || 'human'"
+
 finish

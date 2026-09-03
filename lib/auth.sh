@@ -44,6 +44,20 @@ _auth_meta() {
   printf '%s/%s.%s.json' "$dir" "$owner" "$role"
 }
 
+# Write stdin to a file that is 0600 when the write finishes, whatever mode the
+# path held before.
+#
+# `umask` applies on create only. A redirect onto an existing file truncates it
+# and keeps its mode, so `(umask 077; cat >"$dest")` leaves a 0644 key at 0644 —
+# the mode is inherited from whatever was there rather than set by the write. The
+# rename replaces the inode, so the mode comes from the file this created. It
+# also means nothing ever reads a half-written key. Same pattern the metadata
+# write already uses one function up.
+_auth_write_0600() {
+  local dest="$1"
+  (umask 077; cat >"$dest.tmp") && mv "$dest.tmp" "$dest" || { rm -f "$dest.tmp"; return 1; }
+}
+
 # What each role is for, and what it is allowed to do.
 #
 # The refresher gets `secrets`, which is GitHub's **repository** secret
@@ -754,10 +768,13 @@ HTML
   local dir; dir="$(_auth_dir)"
   mkdir -p "$dir"; chmod 700 "$dir"
 
-  # umask rather than create-then-chmod, so the key is never briefly readable.
+  # Rename rather than create-then-chmod, so the key is never briefly readable
+  # and never inherits a wide mode from a file already at that path.
   # New registrations always take the roled path, never the legacy one.
   local pem_path; pem_path="$(_auth_dir)/$owner.$role.pem"
-  (umask 077; printf '%s' "$pem" >"$pem_path")
+  printf '%s' "$pem" | _auth_write_0600 "$pem_path" || ui_die \
+    "could not write the private key to $pem_path" \
+    "Check the directory is writable. Nothing was stored."
 
   (umask 077; jq -n \
     --arg owner "$owner" --arg owner_type "$owner_type" --argjson owner_id "$owner_id" \
@@ -961,8 +978,15 @@ auth_rotate() {
 
   local dest backup; dest="$(_auth_dir)/$owner.$role.pem"
   backup="$dest.previous"
-  [[ -f "$pem" ]] && cp "$pem" "$backup" && chmod 600 "$backup"
-  (umask 077; cat "$keyfile" >"$dest")
+  # Both through the same helper. `cp` followed by `chmod` left the backup at the
+  # source's mode for the width of two commands, and a redirect onto an existing
+  # $dest kept whatever mode that file already had.
+  [[ -f "$pem" ]] && { _auth_write_0600 "$backup" <"$pem" || ui_die \
+    "could not write the backup key to $backup" \
+    "Check the directory is writable. The existing key is untouched."; }
+  _auth_write_0600 "$dest" <"$keyfile" || ui_die \
+    "could not write the new key to $dest" \
+    "Check the directory is writable. The previous key is at $backup."
   # The legacy unroled path would otherwise keep winning for the loop role and
   # the rotation would look successful while nothing had changed.
   [[ "$pem" != "$dest" && -f "$pem" ]] && rm -f "$pem"

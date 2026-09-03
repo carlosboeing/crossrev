@@ -11,6 +11,8 @@
 
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=tmproot.sh
+source "$HERE/tmproot.sh"
 # shellcheck source=../lib/diff.sh
 source "$HERE/../lib/diff.sh"
 
@@ -21,7 +23,7 @@ is()    { [[ "$2" == "$3" ]] && ok "$1" || notok "$1" "$3" "$2"; }
 has()   { [[ "$2" == *"$3"* ]] && ok "$1" || notok "$1" "contains '$3'" "$2"; }
 
 tmp="$(mktemp -d)"
-trap 'rm -rf "$tmp"' EXIT
+trap 'rm -rf "$tmp"; _tmproot_cleanup' EXIT
 
 # --- the fixture -----------------------------------------------------------
 #

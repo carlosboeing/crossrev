@@ -14,9 +14,9 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/harness.sh"
 CROSSREV_APP_SLUG=crossrev-acme; export CROSSREV_APP_SLUG
 
 waiting_prs() {
-  local labels="$1"
-  jq -cn --argjson l "$labels" --arg h "$FIX_HEAD" \
-    '[{number:42, labels:$l, head:{sha:$h}}]'
+  local labels="$1" draft="${2:-false}"
+  jq -cn --argjson l "$labels" --arg h "$FIX_HEAD" --argjson d "$draft" \
+    '[{number:42, labels:$l, head:{sha:$h}, draft:$d}]'
 }
 
 routes_watchdog() {
@@ -87,6 +87,43 @@ routes_watchdog "$(waiting_prs '[{"name":"crossrev/awaiting-resolution"},{"name"
 out="$("$CROSSREV" watchdog 2>&1)"
 is  "a pull request a human stopped is not retried" "$(count 'method DELETE')" "0"
 has "and the summary says nothing was acted on"     "$out" "retried 0, halted 0"
+
+# --- a draft is waiting on its author, not on a leg --------------------
+#
+# The review workflow's job condition skips a draft, and ctx_load refuses one on
+# any automatic invocation. So the label sits there and no event will move it.
+# Retrying re-fires the label into the same refusal, and the sweep after that
+# reports "already retried once and is still not finishing" about a leg that
+# never started. The watchdog says the true reason instead (#122).
+fixture_repo; stub_reset
+routes_watchdog "$(waiting_prs '[{"name":"crossrev/awaiting-review"}]' true)" \
+  "$(marker_comment 9001 "$stuck" "$FIX_APP" | jq -cs . | payload)"
+out="$("$CROSSREV" watchdog 2>&1)"; rc=$?
+
+is  "the watchdog exits clean over a draft"        "$rc" "0"
+has "a draft is named as the reason no leg runs"   "$out" "a draft pull request, so no automatic review leg runs on it"
+has "and the recovery is spelled out"              "$out" "mark it ready for review"
+is  "and nothing is retried"                       "$(count 'method DELETE')" "0"
+is  "and nothing is halted"                        "$(count 'labels\[\]=crossrev/halted')" "0"
+has "the summary counts it apart from the rest"    "$out" "retried 0, halted 0, 1 in draft"
+
+# The same for the resolve leg, which is the half that pushes: a draft reviewed
+# by hand leaves crossrev/awaiting-resolution behind, and no workflow clears it.
+fixture_repo; stub_reset
+routes_watchdog "$(waiting_prs '[{"name":"crossrev/awaiting-resolution"}]' true)" \
+  "$(marker_comment 9001 "$stuck" "$FIX_APP" | jq -cs . | payload)"
+out="$("$CROSSREV" watchdog 2>&1)"
+has "a draft awaiting resolution is named the same way" "$out" "no automatic resolve leg runs on it"
+is  "and it is not retried either"                      "$(count 'method DELETE')" "0"
+
+# An already-retried draft is still not halted: the halt comment would say the
+# leg is "still not finishing", and the leg has not started.
+fixture_repo; stub_reset
+routes_watchdog "$(waiting_prs '[{"name":"crossrev/awaiting-review"},{"name":"crossrev/watchdog-retried"}]' true)" \
+  "$(marker_comment 9001 "$stuck" "$FIX_APP" | jq -cs . | payload)"
+out="$("$CROSSREV" watchdog 2>&1)"
+is  "a draft retried by an older version is not then halted" "$(count 'labels\[\]=crossrev/halted')" "0"
+hasnt "and nothing claims the leg is still not finishing"    "$(calls)" "still not finishing"
 
 # --- a forged marker does not fool the watchdog -----------------------
 #

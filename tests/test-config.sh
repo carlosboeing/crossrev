@@ -9,6 +9,8 @@
 
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=tmproot.sh
+source "$HERE/tmproot.sh"
 
 # This suite does not source tests/harness.sh, so it makes the same choice
 # itself: CROSSREV_TEST_BIN names the binary the CLI-driven cases invoke, and
@@ -199,6 +201,64 @@ printf 'version: 1\nendpoints:\n  kimi:\n    base_url: http://mine.local/\n    t
 out="$($CROSSREV config show)"
 is "operator endpoint wins for the same name" "$(jq -r '.endpoints.kimi.base_url' <<<"$out")" "http://mine.local/"
 rm -f "$XDG_CONFIG_HOME/crossrev/config.yml"
+
+# --- an endpoint may not borrow a GitHub credential -------------------------
+#
+# token_env is read with ${!name} and its value handed to the harness process as
+# that vendor's own token variable. So `token_env: GH_TOKEN` carries a GitHub
+# credential across the boundary the adapters exist to hold, and past their
+# strip list — the strip removes GH_TOKEN, and the same value arrives as
+# ANTHROPIC_AUTH_TOKEN. Nothing refused it, at any layer (ADR 0001).
+#
+# All four names, because `gh` reads four: a list holding only the first leaves
+# the enterprise pair usable for the same trick.
+for credential in GH_TOKEN GITHUB_TOKEN GH_ENTERPRISE_TOKEN GITHUB_ENTERPRISE_TOKEN; do
+  d="$(new_repo)"; cd "$d" || exit 1; mkdir -p .github
+  printf 'version: 1\nendpoints:\n  mine:\n    base_url: https://api.example/\n    token_env: %s\n' \
+    "$credential" > .github/crossrev.yml
+  err="$($CROSSREV config show 2>&1 >/dev/null)"; rc=$?
+  is  "token_env: $credential exits non-zero"  "$rc" "1"
+  has "and the error names the endpoint"       "$err" "the endpoint 'mine'"
+  has "and the variable it named"              "$err" "\$$credential"
+  has "and says why it cannot be used"         "$err" "must hold none"
+done
+
+# Refused at load, so it does not wait for a leg that selects it. An endpoint
+# nothing points at is still a config asking CrossRev to do the one thing it
+# must not.
+d="$(new_repo)"; cd "$d" || exit 1; mkdir -p .github
+printf 'version: 1\nendpoints:\n  unused:\n    base_url: https://api.example/\n    token_env: GH_TOKEN\n' \
+  > .github/crossrev.yml
+err="$($CROSSREV config show 2>&1 >/dev/null)"; rc=$?
+is "an endpoint no leg selects is refused too" "$rc" "1"
+
+# The operator file is merged into the same map, so it is checked on the same
+# pass rather than trusted for being local.
+d="$(new_repo)"; cd "$d" || exit 1; mkdir -p .github "$XDG_CONFIG_HOME/crossrev"
+printf 'version: 1\n' > .github/crossrev.yml
+printf 'version: 1\nendpoints:\n  local:\n    base_url: http://mine.local/\n    token_env: GITHUB_TOKEN\n' \
+  > "$XDG_CONFIG_HOME/crossrev/config.yml"
+err="$($CROSSREV config show 2>&1 >/dev/null)"; rc=$?
+is  "an operator-file endpoint is refused the same way" "$rc" "1"
+has "and names that endpoint"                           "$err" "the endpoint 'local'"
+rm -f "$XDG_CONFIG_HOME/crossrev/config.yml"
+
+# A name that merely looks like one is a different variable, and refusing it
+# would break a real endpoint for no gain. Environment names are case-sensitive.
+d="$(new_repo)"; cd "$d" || exit 1; mkdir -p .github
+printf 'version: 1\nendpoints:\n  kimi:\n    base_url: https://api.example/\n    token_env: gh_token\n' \
+  > .github/crossrev.yml
+out="$($CROSSREV config show 2>/dev/null)"; rc=$?
+is "a lowercase gh_token is a different variable and is allowed" "$rc" "0"
+is "and it survives the load"  "$(jq -r '.endpoints.kimi.token_env' <<<"$out")" "gh_token"
+
+# And the ordinary case still loads.
+d="$(new_repo)"; cd "$d" || exit 1; mkdir -p .github
+printf 'version: 1\nendpoints:\n  kimi:\n    base_url: https://api.example/\n    token_env: KIMI_API_KEY\n' \
+  > .github/crossrev.yml
+out="$($CROSSREV config show 2>/dev/null)"; rc=$?
+is "an endpoint with its own token still loads" "$rc" "0"
+is "and keeps the name it was given" "$(jq -r '.endpoints.kimi.token_env' <<<"$out")" "KIMI_API_KEY"
 
 # --- backlog discovery -----------------------------------------------------
 d="$(new_repo)"; cd "$d" || exit 1
