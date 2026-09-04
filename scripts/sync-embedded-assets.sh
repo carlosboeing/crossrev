@@ -92,7 +92,13 @@ while IFS= read -r line; do
       embedded+=("${match#./}")
     done
   done
-done < <(find . -name '*.go' -not -path './.git/*' -print0 \
+# .worktrees/ is pruned for the same reason scripts/lint.sh:28-30 prunes it.
+# A checkout under it is a whole second copy of this repository, so every
+# //go:embed in it is found again with its canonical file one directory tree
+# away. The check then fails on main because a branch exists, and only from
+# the repository root -- a session working inside a worktree sees a clean run.
+done < <(find . -path './.worktrees' -prune -o \
+           -name '*.go' -not -path './.git/*' -print0 \
            | xargs -0 grep -n '^//go:embed ' 2>/dev/null \
            | sed 's/:[0-9][0-9]*:/:/')
 
