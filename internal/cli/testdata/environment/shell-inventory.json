@@ -1,0 +1,487 @@
+{
+  "note": "Every environment variable the shipped Bash reads, sets for a child, or strips from one. Derived from bin/crossrev, lib/*.sh and lib/adapters/*.sh, and from lib/harnesses.json for the names an adapter resolves at run time. Bash's own variables (BASH_SOURCE, SECONDS, IFS, the positional parameters) are out, and so is every shell global initialised at source time, because an inherited value cannot survive the assignment. Each `shell` entry was read back with sed before it was written down. A variable whose `spelled` is false is never written out in the shell: the shell reaches it through an indirect expansion of a descriptor field, or — for PATH — through `command -v`.",
+  "count": 40,
+  "classes": [
+    "operator input",
+    "runner signal",
+    "path override",
+    "credential to strip",
+    "endpoint to refuse",
+    "child-specific output"
+  ],
+  "dynamic": {
+    "endpoint token": "lib/adapters/claude.sh:82 reads `${!tok_env:-}`, where tok_env is the endpoint block's token_env key (lib/config.sh:375). The name is the operator's, so no table can hold it. templates/operator-config.yml:25 ships KIMI_API_KEY as the worked example.",
+    "harness secret fallback": "lib/auth.sh:1034 falls back to CROSSREV_<HARNESS>_AUTH when the descriptor names no secret. Measured against lib/harnesses.json: the only harness with `refresher: true` is codex, and codex declares CROSSREV_CODEX_AUTH, so the fallback is unreachable in the shipped descriptor. CROSSREV_CLAUDE_AUTH and CROSSREV_AGY_AUTH are therefore not listed."
+  },
+  "variables": [
+    {
+      "name": "ANTHROPIC_API_KEY",
+      "class": "credential to strip",
+      "descriptor": true,
+      "shell": [
+        "lib/usage.sh:331",
+        "lib/usage.sh:368"
+      ],
+      "why": "The billing signal: with it set and the harness keeping it, a run was charged to an API key rather than to a subscription. It survives the strip for claude alone, through the descriptor's env_keep.",
+      "spelled": true
+    },
+    {
+      "name": "ANTHROPIC_AUTH_TOKEN",
+      "class": "endpoint to refuse",
+      "descriptor": false,
+      "shell": [
+        "lib/legs.sh:497",
+        "lib/adapters/claude.sh:91",
+        "lib/config.sh:411"
+      ],
+      "why": "Set on the claude invocation when an endpoint is configured, and refused when CrossRev inherited one: it redirects the harness process-wide, so a leak silently moves both legs onto one model.",
+      "spelled": true
+    },
+    {
+      "name": "ANTHROPIC_BASE_URL",
+      "class": "endpoint to refuse",
+      "descriptor": false,
+      "shell": [
+        "lib/legs.sh:496",
+        "lib/adapters/claude.sh:91"
+      ],
+      "why": "The other half of the endpoint pair, refused for the same reason.",
+      "spelled": true
+    },
+    {
+      "name": "CLAUDE_CODE_OAUTH_TOKEN",
+      "class": "credential to strip",
+      "descriptor": true,
+      "shell": [
+        "lib/credentials.sh:127",
+        "lib/credentials.sh:143",
+        "lib/auth.sh:1041"
+      ],
+      "why": "Claude's subscription credential. The shell never writes the name: it comes from .credential.secret and is read through `${!secret}`.",
+      "spelled": false
+    },
+    {
+      "name": "CODEX_HOME",
+      "class": "path override",
+      "descriptor": true,
+      "shell": [
+        "lib/adapters/codex.sh:146"
+      ],
+      "why": "Where codex keeps its credential. Read directly for the rollout file, and exported by the staging path as .credential.staging.env.",
+      "spelled": true
+    },
+    {
+      "name": "CROSSREV_APP_SLUG",
+      "class": "operator input",
+      "descriptor": false,
+      "shell": [
+        "lib/state.sh:35",
+        "lib/state.sh:39"
+      ],
+      "why": "The App whose comments count as CrossRev's own. Unset, an automated run trusts an author that does not exist and reads no markers.",
+      "spelled": true
+    },
+    {
+      "name": "CROSSREV_ASSUME_YES",
+      "class": "operator input",
+      "descriptor": false,
+      "shell": [
+        "lib/ui.sh:145",
+        "lib/init.sh:59",
+        "lib/init.sh:524"
+      ],
+      "why": "`--yes` sets it, and only the value 1 answers every question. Nothing initialises it at source time, so an exported value reaches ui_confirm; measured with `CROSSREV_ASSUME_YES=1 ui_confirm ... </dev/null`, which answered yes where the bare call refused for want of a terminal.",
+      "spelled": true
+    },
+    {
+      "name": "CROSSREV_CODEX_AUTH",
+      "class": "credential to strip",
+      "descriptor": true,
+      "shell": [
+        "lib/credentials.sh:127",
+        "lib/credentials.sh:143",
+        "lib/auth.sh:1041"
+      ],
+      "why": "Codex's rotating credential, named by the descriptor and read through `${!secret}`. Stripped even from codex, because by then it has been written into CODEX_HOME.",
+      "spelled": false
+    },
+    {
+      "name": "CROSSREV_DIFF_EXCLUDE",
+      "class": "child-specific output",
+      "descriptor": false,
+      "shell": [
+        "lib/diff.sh:46",
+        "lib/diff.sh:53"
+      ],
+      "why": "One of three set on a single awk invocation and read back out of ENVIRON. Never exported.",
+      "spelled": true
+    },
+    {
+      "name": "CROSSREV_DIFF_PATH",
+      "class": "child-specific output",
+      "descriptor": false,
+      "shell": [
+        "lib/diff.sh:46",
+        "lib/diff.sh:49"
+      ],
+      "why": "As above.",
+      "spelled": true
+    },
+    {
+      "name": "CROSSREV_DIFF_SIDE",
+      "class": "child-specific output",
+      "descriptor": false,
+      "shell": [
+        "lib/diff.sh:46",
+        "lib/diff.sh:49"
+      ],
+      "why": "As above.",
+      "spelled": true
+    },
+    {
+      "name": "CROSSREV_GIT_EMAIL",
+      "class": "operator input",
+      "descriptor": false,
+      "shell": [
+        "lib/github.sh:447",
+        "lib/run.sh:2059"
+      ],
+      "why": "The author a pushed fix is committed as, and the address a prior commit is recognised by. Defaults to crossrev@users.noreply.github.com.",
+      "spelled": true
+    },
+    {
+      "name": "CROSSREV_GIT_NAME",
+      "class": "operator input",
+      "descriptor": false,
+      "shell": [
+        "lib/github.sh:446"
+      ],
+      "why": "The name a pushed fix is committed under. Defaults to crossrev.",
+      "spelled": true
+    },
+    {
+      "name": "CROSSREV_GROK_AUTH",
+      "class": "credential to strip",
+      "descriptor": true,
+      "shell": [
+        "lib/credentials.sh:127",
+        "lib/credentials.sh:143"
+      ],
+      "why": "Grok's rotating credential, named by the descriptor.",
+      "spelled": false
+    },
+    {
+      "name": "CROSSREV_HARNESS_FILE",
+      "class": "path override",
+      "descriptor": false,
+      "shell": [
+        "lib/harnesses.sh:21",
+        "lib/usage.sh:320"
+      ],
+      "why": "Points both descriptor readers at a file other than lib/harnesses.json. It is what every parity fixture on this branch uses to hand the shell a descriptor of its own.",
+      "spelled": true
+    },
+    {
+      "name": "CROSSREV_HARNESS_INSTALL",
+      "class": "child-specific output",
+      "descriptor": false,
+      "shell": [
+        "lib/init.sh:740",
+        "lib/init.sh:742"
+      ],
+      "why": "The install lines for a generated workflow, handed to one awk invocation through ENVIRON.",
+      "spelled": true
+    },
+    {
+      "name": "CROSSREV_LOG_RETENTION_DAYS",
+      "class": "operator input",
+      "descriptor": false,
+      "shell": [
+        "lib/log.sh:194"
+      ],
+      "why": "How many days a run directory survives the sweep, defaulting to 14. Nothing initialises it at source time; measured by intercepting find, which received -mtime +99 for an exported 99 and +14 for none.",
+      "spelled": true
+    },
+    {
+      "name": "CROSSREV_NO_TIPS",
+      "class": "operator input",
+      "descriptor": false,
+      "shell": [
+        "lib/run.sh:3806"
+      ],
+      "why": "Suppresses the automated-mode suggestion. Only the value 1 suppresses it.",
+      "spelled": true
+    },
+    {
+      "name": "CROSSREV_OPENCODE_AUTH",
+      "class": "credential to strip",
+      "descriptor": true,
+      "shell": [
+        "lib/credentials.sh:127",
+        "lib/credentials.sh:143"
+      ],
+      "why": "Opencode's credential, named by the descriptor.",
+      "spelled": false
+    },
+    {
+      "name": "CROSSREV_OWNER",
+      "class": "operator input",
+      "descriptor": false,
+      "shell": [
+        "lib/state.sh:36"
+      ],
+      "why": "Which owner's App metadata the trusted-author slug is read from when CROSSREV_APP_SLUG is unset.",
+      "spelled": true
+    },
+    {
+      "name": "CROSSREV_TRANSCRIPT_BASE",
+      "class": "path override",
+      "descriptor": false,
+      "shell": [
+        "lib/adapters/agy.sh:75",
+        "lib/adapters/claude.sh:103",
+        "lib/adapters/codex.sh:38",
+        "lib/adapters/grok.sh:60",
+        "lib/adapters/opencode.sh:165"
+      ],
+      "why": "The stem an attempt's captured streams are written under. The orchestrator sets it in its own process before calling an adapter (lib/run.sh:819); nothing initialises it at source time, so an exported value reaches the same read.",
+      "spelled": true
+    },
+    {
+      "name": "GH_ENTERPRISE_TOKEN",
+      "class": "credential to strip",
+      "descriptor": false,
+      "shell": [
+        "lib/adapters/claude.sh:72",
+        "lib/adapters/codex.sh:88",
+        "lib/adapters/agy.sh:90",
+        "lib/adapters/grok.sh:75",
+        "lib/adapters/opencode.sh:181"
+      ],
+      "why": "One of the four forge credentials stripped before a model-facing process. `gh help environment` lists it and GITHUB_ENTERPRISE_TOKEN in order of precedence, so both are named.",
+      "spelled": true
+    },
+    {
+      "name": "GH_TOKEN",
+      "class": "credential to strip",
+      "descriptor": false,
+      "shell": [
+        "lib/adapters/claude.sh:72",
+        "lib/adapters/codex.sh:88",
+        "lib/adapters/agy.sh:90",
+        "lib/adapters/grok.sh:75",
+        "lib/adapters/opencode.sh:181"
+      ],
+      "why": "The ADR 0001 boundary: no GitHub credential reaches the process that reads attacker-controlled text.",
+      "spelled": true
+    },
+    {
+      "name": "GITHUB_ACTIONS",
+      "class": "runner signal",
+      "descriptor": false,
+      "shell": [
+        "lib/preflight.sh:114"
+      ],
+      "why": "True on any runner, hosted or self-hosted. It decides only which unauthenticated-gh message is printed, and deliberately does not decide whether a secret is expected.",
+      "spelled": true
+    },
+    {
+      "name": "GITHUB_ENTERPRISE_TOKEN",
+      "class": "credential to strip",
+      "descriptor": false,
+      "shell": [
+        "lib/adapters/claude.sh:72",
+        "lib/adapters/codex.sh:88",
+        "lib/adapters/agy.sh:90",
+        "lib/adapters/grok.sh:75",
+        "lib/adapters/opencode.sh:181"
+      ],
+      "why": "The second Enterprise name, and the credential in use whenever the first is unset.",
+      "spelled": true
+    },
+    {
+      "name": "GITHUB_RUN_ID",
+      "class": "runner signal",
+      "descriptor": false,
+      "shell": [
+        "lib/log.sh:41",
+        "lib/run.sh:1005",
+        "lib/run.sh:1057",
+        "lib/run.sh:1102",
+        "lib/run.sh:1933",
+        "lib/run.sh:1964"
+      ],
+      "why": "Names the run in the marker and in the run directory. Falls back to local-$$ off a runner.",
+      "spelled": true
+    },
+    {
+      "name": "GITHUB_TOKEN",
+      "class": "credential to strip",
+      "descriptor": false,
+      "shell": [
+        "lib/adapters/claude.sh:72",
+        "lib/adapters/codex.sh:88",
+        "lib/adapters/agy.sh:90",
+        "lib/adapters/grok.sh:75",
+        "lib/adapters/opencode.sh:181"
+      ],
+      "why": "As GH_TOKEN.",
+      "spelled": true
+    },
+    {
+      "name": "GIT_INDEX_FILE",
+      "class": "child-specific output",
+      "descriptor": false,
+      "shell": [
+        "lib/run.sh:644",
+        "lib/run.sh:645",
+        "lib/run.sh:673",
+        "lib/run.sh:676"
+      ],
+      "why": "Points one git invocation at a scratch index so the working tree's own index is untouched. Set per command, never exported.",
+      "spelled": true
+    },
+    {
+      "name": "GROK_HOME",
+      "class": "path override",
+      "descriptor": true,
+      "shell": [
+        "lib/credentials.sh:152",
+        "lib/credentials.sh:160"
+      ],
+      "why": "Grok's staging lever, exported at a scratch directory for the leg and restored afterwards. The name is the descriptor's.",
+      "spelled": false
+    },
+    {
+      "name": "HOME",
+      "class": "path override",
+      "descriptor": false,
+      "shell": [
+        "lib/config.sh:23",
+        "lib/auth.sh:23",
+        "lib/auth.sh:353",
+        "lib/auth.sh:950",
+        "lib/log.sh:48",
+        "lib/log.sh:195",
+        "lib/preflight.sh:329",
+        "lib/run.sh:61",
+        "lib/adapters/codex.sh:146"
+      ],
+      "why": "The fallback under every XDG path, and the directory a rotated key is collected from.",
+      "spelled": true
+    },
+    {
+      "name": "LC_ALL",
+      "class": "child-specific output",
+      "descriptor": false,
+      "shell": [
+        "lib/diff.sh:47",
+        "lib/github.sh:412",
+        "lib/legs.sh:366",
+        "lib/log.sh:101",
+        "lib/state.sh:241",
+        "lib/state.sh:251"
+      ],
+      "why": "Pinned to C on each text tool so awk, grep, sed and tr count bytes and fold ASCII only. Set per command.",
+      "spelled": true
+    },
+    {
+      "name": "NO_COLOR",
+      "class": "operator input",
+      "descriptor": false,
+      "shell": [
+        "lib/ui.sh:19"
+      ],
+      "why": "Any value at all turns the palette off (https://no-color.org).",
+      "spelled": true
+    },
+    {
+      "name": "OPENCODE_CONFIG",
+      "class": "child-specific output",
+      "descriptor": false,
+      "shell": [
+        "lib/adapters/opencode.sh:184"
+      ],
+      "why": "The isolation config for one opencode invocation, merged over the operator's own and winning on the permission keys.",
+      "spelled": true
+    },
+    {
+      "name": "OPENCODE_CONFIG_DIR",
+      "class": "child-specific output",
+      "descriptor": false,
+      "shell": [
+        "lib/adapters/opencode.sh:184"
+      ],
+      "why": "An empty directory, which displaces the agents and commands that would otherwise load from beside the operator's global config.",
+      "spelled": true
+    },
+    {
+      "name": "PATH",
+      "class": "path override",
+      "descriptor": false,
+      "shell": [
+        "lib/preflight.sh:56",
+        "lib/harnesses.sh:90",
+        "lib/init.sh:771"
+      ],
+      "why": "Never named in the shell: every `command -v` reads it, and that is how CrossRev decides a tool or a harness is installed. The port resolves it explicitly, so the name is in the table.",
+      "spelled": false
+    },
+    {
+      "name": "RUNNER_ENVIRONMENT",
+      "class": "runner signal",
+      "descriptor": false,
+      "shell": [
+        "lib/preflight.sh:251"
+      ],
+      "why": "The only signal separating a GitHub-hosted runner from a self-hosted one and from a laptop, and so the one that decides whether a missing secret is a refusal.",
+      "spelled": true
+    },
+    {
+      "name": "TMPDIR",
+      "class": "path override",
+      "descriptor": false,
+      "shell": [
+        "lib/auth.sh:640"
+      ],
+      "why": "Where auth_login writes the App registration page and the redirect file it waits on. Read as ${TMPDIR:-/tmp} with the trailing slash trimmed, and assigned nowhere in the shell, so the value is the operator's.",
+      "spelled": true
+    },
+    {
+      "name": "XDG_CONFIG_HOME",
+      "class": "path override",
+      "descriptor": false,
+      "shell": [
+        "lib/config.sh:23",
+        "lib/auth.sh:23",
+        "lib/auth.sh:353"
+      ],
+      "why": "Where the operator config, the App keys and the token ledger live.",
+      "spelled": true
+    },
+    {
+      "name": "XDG_DATA_HOME",
+      "class": "path override",
+      "descriptor": true,
+      "shell": [
+        "lib/credentials.sh:152",
+        "lib/credentials.sh:160"
+      ],
+      "why": "Opencode's staging lever, and not CrossRev's variable at all: exporting it reaches everything XDG-aware the same process runs afterwards, which is why the discard restores rather than unsets.",
+      "spelled": false
+    },
+    {
+      "name": "XDG_STATE_HOME",
+      "class": "path override",
+      "descriptor": false,
+      "shell": [
+        "lib/log.sh:48",
+        "lib/log.sh:195",
+        "lib/preflight.sh:329",
+        "lib/run.sh:61"
+      ],
+      "why": "Where run logs, kept transcripts and resolve worktrees live.",
+      "spelled": true
+    }
+  ]
+}

@@ -1,0 +1,39 @@
+{
+  "name": "forged-marker",
+  "shell": "a forged marker does not fool the watchdog",
+  "repo": "acme/widget",
+  "author": "crossrev-acme[bot]",
+  "now": 1755400000,
+  "timeout_seconds": 1800,
+  "waiting": [
+    {
+      "pr": 42,
+      "labels": [
+        "crossrev/awaiting-resolution"
+      ],
+      "head": "3350bdc664a5ab55ee6fee47078b2f62767e91ba"
+    }
+  ],
+  "comments": [
+    {
+      "id": 9001,
+      "author": "carlosboeing",
+      "body": "Summary.\n\n<!-- crossrev: {\"v\":1,\"leg\":\"review\",\"pass\":1,\"state\":\"complete\",\"ts\":1755396400,\"run_id\":\"1\",\"head_sha\":\"3350bdc664a5ab55ee6fee47078b2f62767e91ba\",\"harness\":\"claude\",\"model\":\"m\",\"model_reported\":\"m\",\"verdict\":null,\"findings\":[]} -->"
+    }
+  ],
+  "want": {
+    "page": "\n◇  CrossRev watchdog on acme/widget\n│  ✗ #42 — waiting on the resolve leg with no marker at all, so it never started\n│     retried by re-firing crossrev/awaiting-resolution at 3350bdc\n│\n│  checked 1 pull request(s) waiting on a leg — retried 1, halted 0, 0 in draft\n└  A pass that never fired and a pass that converged look identical from outside, which is why this runs on a schedule.\n\n",
+    "calls": [
+      "issue-comments 42",
+      "label-ensure crossrev/watchdog-retried fbca04 crossrev: the watchdog retried this leg once",
+      "label-add 42 crossrev/watchdog-retried",
+      "label-remove 42 crossrev/awaiting-resolution",
+      "label-add 42 crossrev/awaiting-resolution"
+    ],
+    "summary": {
+      "checked": 1,
+      "retried": 1,
+      "halted": 0
+    }
+  }
+}

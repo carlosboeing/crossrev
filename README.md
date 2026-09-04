@@ -27,7 +27,7 @@ CrossRev reviews a selected PR on demand from the CLI or starts review cycles au
 
 ### Requirements
 
-CrossRev currently supports macOS and Linux. It requires `git`, authenticated `gh`, `jq`, `yq`, `openssl`, and at least one supported agent CLI; the `npx` and npm routes also require Node.js. The **default configuration** uses Codex for the reviewer agent and Claude for the resolver agent, but you can choose different [harnesses](#harness-support) and [models](#configuration).
+CrossRev currently supports macOS and Linux. It requires `git`, authenticated `gh`, and at least one supported agent CLI; the `npx` and npm routes also require Node.js. The **default configuration** uses Codex for the reviewer agent and Claude for the resolver agent, but you can choose different [harnesses](#harness-support) and [models](#configuration).
 
 ### Run without installing
 
@@ -37,11 +37,13 @@ Run one review pass directly from npm:
 npx crossrev-ai review --pr 42
 ```
 
+The npm package is the last Bash version, 0.5.0.
+
 The review command posts inline comments and a summary, but **never edits or pushes the branch**. CrossRev uses your existing `gh` authentication, so the comments appear under your GitHub account.
 
 ### Install CrossRev
 
-The bootstrap installer creates a checkout and installs the complete command set, including automated-mode setup:
+The bootstrap installer downloads the release binary and installs the complete command set, including automated-mode setup:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/carlosboeing/crossrev/main/bootstrap.sh | bash
@@ -53,7 +55,9 @@ Install the local CLI globally through npm:
 npm install -g crossrev-ai
 ```
 
-An npm installation supports local commands. `crossrev init` requires a checkout because it reads the Git commit used to pin generated workflows.
+npm is paused, not dropped. Publishing stops at the last Bash version until the platform packages exist. What is on the registry is 0.5.0, and what follows describes it.
+
+An npm installation supports local commands. `crossrev init` requires a checkout. It reads the Git commit used to pin generated workflows. For the current binary, use the bootstrap above or install from a checkout.
 
 From an existing checkout, run:
 
@@ -296,11 +300,12 @@ CrossRev reconstructs every pass from the pull request. Hidden markers record th
 
 Contributions are welcome. See [Contributing to CrossRev](CONTRIBUTING.md) for development setup, project constraints, test layers, and the pull-request process. Participation follows the [Code of Conduct](CODE_OF_CONDUCT.md).
 
-Run both offline checks before opening a pull request:
+Run the offline checks before opening a pull request:
 
 ```bash
 bash tests/run.sh
 bash scripts/lint.sh
+go test ./...
 ```
 
 Use the repository's [issue templates](.github/ISSUE_TEMPLATE/) for bug reports and feature requests.

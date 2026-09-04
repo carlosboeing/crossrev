@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Render generated harness documentation tables from lib/harnesses.json.
+# Render generated harness documentation tables from assets/harnesses.json.
 #
 # Usage:
 #   scripts/render-harness-docs.sh         # rewrite files in place
@@ -9,7 +9,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DESC="$REPO_ROOT/lib/harnesses.json"
+DESC="$REPO_ROOT/assets/harnesses.json"
 
 check_mode=0
 if [[ "${1:-}" == "--check" ]]; then
@@ -109,7 +109,7 @@ def notes_str:
 "| Adapter | Harness | Notes |",
 "|---|---|---|",
 ([.harnesses[]] | .[] |
-  "| `lib/adapters/\(.name).sh` | \(.product_name) |" + (if notes_str == "" then "" else " " + notes_str end) + " |"
+  "| `\(.name)` | \(.product_name) |" + (if notes_str == "" then "" else " " + notes_str end) + " |"
 )
 ' "$DESC"
 }

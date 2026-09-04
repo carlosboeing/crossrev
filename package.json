@@ -20,12 +20,13 @@
   },
   "license": "MIT",
   "author": "Carlos Boeing",
-  "bin": {
-    "crossrev": "bin/crossrev"
-  },
   "files": [
-    "bin/",
-    "lib/",
+    "action.yml",
+    "assets/",
+    "bootstrap.sh",
+    "cmd/",
+    "install.sh",
+    "internal/",
     "schemas/",
     "skills/",
     "templates/",

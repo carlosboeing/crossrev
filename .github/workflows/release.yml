@@ -1,12 +1,28 @@
 name: release
 
-# Publishes to npm when a version tag is pushed.
+# Builds the two native binaries, publishes them with plain checksums, and
+# creates the GitHub Release when a version tag is pushed.
 #
-# Authentication is trusted publishing, and nothing else. GitHub mints a
-# short-lived OIDC credential that npm verifies against a publisher configured
-# on the package. There is no npm token in this repository and none on
-# anybody's laptop, which is the point: a stored publish credential is the
-# thing worth not having. CopyDesk publishes the same way.
+# The first native release ships two targets and nothing else
+# (docs/adrs/0020-the-first-native-release-ships-a-reduced-scope.md):
+# darwin/arm64 built on the pinned macOS runner, linux/amd64 built in the
+# pinned Go container. Runner labels and image versions are recorded in
+# scripts/release-targets.json; the workflow repeats the labels beside their
+# consumer so a reader never has to open two files to know what ran where.
+#
+# npm is paused, not dropped. crossrev-ai is published and its versions are
+# permanent, and a native binary cannot ship through the current
+# single-package layout, so the publish job below skips until the platform
+# packages exist. The checksum file is unsigned for the same reason: there is
+# no installed base to defend yet, and signing lands beside this rather than
+# rewriting it.
+#
+# Authentication for the npm job, when it runs again, is trusted publishing,
+# and nothing else. GitHub mints a short-lived OIDC credential that npm
+# verifies against a publisher configured on the package. There is no npm
+# token in this repository and none on anybody's laptop, which is the point:
+# a stored publish credential is the thing worth not having. CopyDesk
+# publishes the same way.
 #
 # Configure the publisher once, against this file:
 #
@@ -49,6 +65,12 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: '1.27.0'
+          check-latest: false
+
       - name: Install and verify dependencies
         run: |
           set -euo pipefail
@@ -73,14 +95,17 @@ jobs:
           set -euo pipefail
           file_version="$(cat VERSION)"
           json_version="$(jq -r .version package.json)"
-          cli_version="$(bash bin/crossrev version)"
+          # The version the release ships is the binary's, so the agreement
+          # check builds it rather than running a script from the checkout.
+          bash scripts/build-native.sh dist/crossrev-release-check
+          cli_version="$(./dist/crossrev-release-check version)"
 
           echo "VERSION      $file_version"
           echo "package.json $json_version"
           echo "version      $cli_version"
 
           if [ "$file_version" != "$json_version" ] || [ "$file_version" != "$cli_version" ]; then
-            echo "::error::VERSION, package.json and bin/crossrev version disagree"
+            echo "::error::VERSION, package.json and the built binary disagree"
             exit 1
           fi
 
@@ -111,7 +136,7 @@ jobs:
 
             const required = [
               "LICENSE", "README.md", "VERSION", "package.json",
-              "bin/crossrev", "lib/run.sh", "lib/config.sh", "lib/github.sh",
+              "action.yml", "install.sh", "bootstrap.sh",
             ];
             const missing = required.filter(f => !files.includes(f));
             if (missing.length) {
@@ -135,18 +160,133 @@ jobs:
 
             const kb = pack.size / 1024;
             console.log(`tarball ${kb.toFixed(1)} kB across ${files.length} files`);
-            if (kb > 500) {
-              console.error("::error::tarball exceeds the 500 kB budget");
-              process.exit(1);
-            }
+            // No size budget: the tarball is the changelog gate's view of what
+            // ships rather than a published artifact, and npm is paused until
+            // the platform packages exist. The budget that used to sit here
+            // capped the published single-package tarball; the binaries the
+            // release actually publishes are tens of megabytes by nature.
           NODE
+
+  build-darwin-arm64:
+    name: Build darwin/arm64
+    needs: verify
+    # Pinned, never *-latest; scripts/release-targets.json records the image this resolves to.
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: '1.27.0'
+          check-latest: false
+
+      - name: Build
+        env:
+          GOTOOLCHAIN: go1.27.0
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          # CGO stays on: a CGO darwin/arm64 build leaves the linker's ad-hoc
+          # signature on the Mach-O binary, which the next step asserts
+          # (docs/adrs/0018-go-native-parity-contract.md). No explicit signing
+          # step: the target that needed one is deferred.
+          CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 go build -trimpath -o dist/crossrev-darwin-arm64 ./cmd/crossrev
+
+      - name: Assert the linker's ad-hoc signature
+        run: |
+          set -euo pipefail
+          codesign -dv dist/crossrev-darwin-arm64 2>&1 | tee /tmp/codesign.txt
+          grep -q 'Signature=adhoc' /tmp/codesign.txt
+
+      - name: Upload the binary
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: crossrev-darwin-arm64
+          path: dist/crossrev-darwin-arm64
+          if-no-files-found: error
+
+  build-linux-amd64:
+    name: Build linux/amd64
+    needs: verify
+    # Pinned, never *-latest; scripts/release-targets.json records the image this resolves to.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    # Committed as image@sha256, never a mutable tag; scripts/release-targets.json records the digest.
+    container:
+      image: golang:1.27.0-bookworm@sha256:ded31c68586d2e49e760acc2e65a884b23d032e9bbbed0ae0c55abd3fcaf4452
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Build
+        env:
+          GOTOOLCHAIN: go1.27.0
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          # Static: the binary installs onto machines whose libc is unknown,
+          # so it carries none.
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o dist/crossrev-linux-amd64 ./cmd/crossrev
+          ./dist/crossrev-linux-amd64 --version
+
+      - name: Upload the binary
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: crossrev-linux-amd64
+          path: dist/crossrev-linux-amd64
+          if-no-files-found: error
+
+  release:
+    name: Publish the binaries and create the GitHub Release
+    needs: [verify, build-darwin-arm64, build-linux-amd64]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    if: github.event_name == 'push' || inputs.dry_run == false
+    permissions:
+      contents: write   # to create the GitHub Release and upload its assets
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Download both binaries
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Write checksums.txt
+        run: |
+          set -euo pipefail
+          # Plain SHA-256, unsigned: checksum signing is deferred with the rest
+          # of supply-chain verification (docs/adrs/0020-the-first-native-release-ships-a-reduced-scope.md).
+          (cd dist && sha256sum crossrev-darwin-arm64 crossrev-linux-amd64 > checksums.txt)
+          cat dist/checksums.txt
+
+      - name: Create the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="${{ needs.verify.outputs.version }}"
+          # Lift this version's section out of the changelog for the release body.
+          awk -v v="$version" '
+            $0 ~ "^## \\[" v "\\]" { found = 1; next }
+            found && /^## \[/ { exit }
+            found { print }
+          ' CHANGELOG.md > body.md
+          if [ ! -s body.md ]; then
+            echo "See CHANGELOG.md." > body.md
+          fi
+          gh release create "v$version" --title "v$version" --notes-file body.md --verify-tag \
+            dist/crossrev-darwin-arm64 dist/crossrev-linux-amd64 dist/checksums.txt
 
   publish:
     name: Publish to npm
     needs: verify
+    # Paused until the npm platform packages exist (docs/adrs/0020-the-first-native-release-ships-a-reduced-scope.md).
+    if: false
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    if: github.event_name == 'push' || inputs.dry_run == false
     permissions:
       contents: write   # to create the GitHub Release
       id-token: write   # to mint the OIDC credential for trusted publishing
@@ -199,6 +339,8 @@ jobs:
           node-version: "24"
       # A publish nobody installed is a publish nobody verified. This runs the
       # published artifact from a clean directory rather than the checkout.
+      # Skipped while npm is paused: publish never runs, so there is nothing
+      # on the registry to verify.
       - name: npx the published version
         run: |
           set -euo pipefail

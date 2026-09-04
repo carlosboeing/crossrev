@@ -1,0 +1,34 @@
+
+  crossrev — cross-model PR review loop
+
+  Review a pull request with one model, resolve the findings with another.
+
+  USAGE
+    crossrev <command> [options]
+    crossrev --pr <n>         A cycle, which is what you want most of the time
+
+  COMMANDS
+    cycle --pr <n>           The whole loop in one process, up to max_passes_per_cycle
+    review --pr <n>          One review leg: post findings as inline comments
+    resolve --pr <n>         Verify each finding, fix or push back, reply, push
+    status --pr <n>          Read the loop's state off the pull request
+    init                     Set up automated mode: App, secrets, labels, workflows
+    watchdog                 Find pull requests stuck waiting on a leg, and retry once
+    config show|backlog      The merged config, and where deferred work goes
+    auth status              Which Apps are configured, and where installed
+    auth login               Register a GitHub App and install it
+    auth install             Install an already-registered App somewhere
+    auth rotate              Replace an App's private key, guided
+    auth refresh             Refresh a rotating harness credential (the refresher job)
+    doctor                   Check that everything crossrev needs is installed
+    version                  Print the installed version
+
+  OPTIONS on cycle, review and resolve
+    --harness <harness>   Override the harness the config names for that leg
+    --repo owner/name        Target another repository than this checkout
+    --no-tips                Suppress the automated-mode suggestion
+    --keep-transcripts       Keep the harness transcript even when the leg succeeds
+
+  Automated mode needs a GitHub App. Local runs do not — they use the gh
+  authentication you already have.
+

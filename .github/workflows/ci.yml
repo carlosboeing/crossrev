@@ -1,6 +1,6 @@
 # The offline suite and the linter, on a runner.
 #
-# Both commands are the ones a contributor runs locally, unchanged. Nothing here
+# Every command here is one a contributor runs locally, unchanged. Nothing here
 # needs a network, a model, a GitHub App or a pull request — the suite stubs its
 # own `gh` and harnesses.
 #
@@ -29,6 +29,12 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: '1.27.0'
+          check-latest: false
+
       - name: Install and verify dependencies
         run: |
           set -euo pipefail
@@ -39,18 +45,52 @@ jobs:
           command -v shellcheck >/dev/null || sudo apt-get install -y --no-install-recommends shellcheck
 
           # Assert rather than assume. A missing shellcheck reads as clean.
-          for t in bash git jq yq shellcheck openssl; do
+          for t in bash git jq yq shellcheck openssl go; do
             command -v "$t" >/dev/null || { echo "::error::$t is missing"; exit 1; }
           done
           printf '%s\n' "bash $BASH_VERSION" "$(jq --version)" "$(yq --version)" \
             "$(shellcheck --version | sed -n 's/^version: /shellcheck /p')" \
-            "$(openssl version)"
+            "$(openssl version)" "$(go version)"
 
       - name: Lint
         run: bash scripts/lint.sh
 
       - name: Tests
         run: bash tests/run.sh
+
+  # The binary, beside the black-box suite above. tests/run.sh builds it once
+  # and drives every remaining shell suite against it; the native job proves
+  # the same behaviour through Go tests and the coverage ledger.
+  native:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: '1.27.0'
+          check-latest: false
+
+      - name: Install and verify dependencies
+        run: |
+          set -euo pipefail
+          for t in bash git go; do
+            command -v "$t" >/dev/null || { echo "::error::$t is missing"; exit 1; }
+          done
+          printf '%s\n' "bash $BASH_VERSION" "$(go version)"
+
+      - name: Go tests
+        env:
+          GOTOOLCHAIN: go1.27.0
+        run: go test ./...
+
+      - name: Parity coverage
+        run: |
+          set -euo pipefail
+          bash scripts/check-parity-coverage.sh
+          bash scripts/check-parity-coverage.sh --native
 
   # A pull request only. The check compares against the base branch, and a push
   # has no base to compare against.
@@ -91,6 +131,7 @@ jobs:
     if: always()
     needs:
       - test
+      - native
       - changelog
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -99,14 +140,21 @@ jobs:
         run: |
           set -euo pipefail
           test_result="${{ needs.test.result }}"
+          native_result="${{ needs.native.result }}"
           changelog_result="${{ needs.changelog.result }}"
           event_name="${{ github.event_name }}"
 
           echo "test job result:      $test_result"
+          echo "native job result:    $native_result"
           echo "changelog job result: $changelog_result (event: $event_name)"
 
           if [ "$test_result" != "success" ]; then
             echo "::error::mandatory job 'test' did not succeed (result: $test_result)"
+            exit 1
+          fi
+
+          if [ "$native_result" != "success" ]; then
+            echo "::error::mandatory job 'native' did not succeed (result: $native_result)"
             exit 1
           fi
 

@@ -1,0 +1,34 @@
+{
+  "name": "stop-is-honoured",
+  "shell": "crossrev/stop is honoured here too",
+  "repo": "acme/widget",
+  "author": "crossrev-acme[bot]",
+  "now": 1755400000,
+  "timeout_seconds": 1800,
+  "waiting": [
+    {
+      "pr": 42,
+      "labels": [
+        "crossrev/awaiting-resolution",
+        "crossrev/stop"
+      ],
+      "head": "aab03d09bdffaa6b434504392bf906fc7ac30326"
+    }
+  ],
+  "comments": [
+    {
+      "id": 9001,
+      "author": "crossrev-acme[bot]",
+      "body": "Summary.\n\n<!-- crossrev: {\"v\":1,\"leg\":\"review\",\"pass\":1,\"state\":\"started\",\"ts\":1755396400,\"run_id\":\"1\",\"head_sha\":\"aab03d09bdffaa6b434504392bf906fc7ac30326\",\"harness\":\"claude\",\"model\":\"m\",\"model_reported\":\"m\",\"verdict\":null,\"findings\":[]} -->"
+    }
+  ],
+  "want": {
+    "page": "\n◇  CrossRev watchdog on acme/widget\n│\n│  checked 1 pull request(s) waiting on a leg — retried 0, halted 0, 0 in draft\n└  A pass that never fired and a pass that converged look identical from outside, which is why this runs on a schedule.\n\n",
+    "calls": [],
+    "summary": {
+      "checked": 1,
+      "retried": 0,
+      "halted": 0
+    }
+  }
+}

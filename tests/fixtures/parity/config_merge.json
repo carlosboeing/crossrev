@@ -1,0 +1,582 @@
+{
+  "captured": {
+    "platform": "Darwin 25.5.0 arm64",
+    "tr_implementation": "/usr/bin/tr (BSD tr)",
+    "awk_implementation": "/usr/bin/awk (one true awk (BWK))",
+    "locale": "en_AU.UTF-8",
+    "note": "state_finding_id and state_anchor pin LC_ALL=C internally, so ids and anchors are byte-oriented whatever locale this file was captured under."
+  },
+  "function": "cfg_load",
+  "cases": [
+    {
+      "name": "defaults",
+      "repo_yaml": null,
+      "operator_yaml": null,
+      "base_sha": null,
+      "merged": {
+        "version": 1,
+        "mode": "local",
+        "runner": "github-hosted",
+        "policy": {
+          "min_fix_severity": "medium",
+          "max_passes_per_cycle": 3,
+          "max_files_changed_per_pr": 200,
+          "max_prs_per_day": 25
+        },
+        "git": {
+          "hooks": "skip"
+        },
+        "logs": {
+          "retention_days": 14,
+          "keep_transcripts": false
+        },
+        "endpoints": {},
+        "backlog": {
+          "destination": "auto",
+          "github_issues": {
+            "labels": [],
+            "tracking_label": "crossrev-review",
+            "create_missing_labels": true,
+            "comment_on_existing_issue": false
+          },
+          "repository": {
+            "layout": "folder",
+            "path": null
+          }
+        },
+        "reviewer": {
+          "harness": "codex",
+          "model": null,
+          "effort": null,
+          "endpoint": null
+        },
+        "resolver": {
+          "harness": "claude",
+          "model": null,
+          "effort": null,
+          "endpoint": null
+        },
+        "enable_automation_hint": true
+      }
+    },
+    {
+      "name": "repo-over-defaults",
+      "repo_yaml": "version: 1\nmode: automated\nrunner: self-hosted\npolicy:\n  min_fix_severity: high\n  max_passes_per_cycle: 5\n  max_prs_per_day: 50\ngit:\n  hooks: run\nlogs:\n  retention_days: 30\n  keep_transcripts: true\nreviewer:\n  harness: claude\n  model: claude-3-7-sonnet\nresolver:\n  harness: codex\n  model: o3\nendpoints:\n  repo_ep:\n    base_url: https://repo.example.com/v1\n    token_env: REPO_KEY",
+      "operator_yaml": null,
+      "base_sha": null,
+      "merged": {
+        "version": 1,
+        "mode": "automated",
+        "runner": "self-hosted",
+        "policy": {
+          "min_fix_severity": "high",
+          "max_passes_per_cycle": 5,
+          "max_files_changed_per_pr": 200,
+          "max_prs_per_day": 50
+        },
+        "git": {
+          "hooks": "run"
+        },
+        "logs": {
+          "retention_days": 30,
+          "keep_transcripts": true
+        },
+        "endpoints": {
+          "repo_ep": {
+            "base_url": "https://repo.example.com/v1",
+            "token_env": "REPO_KEY"
+          }
+        },
+        "backlog": {
+          "destination": "auto",
+          "github_issues": {
+            "labels": [],
+            "tracking_label": "crossrev-review",
+            "create_missing_labels": true,
+            "comment_on_existing_issue": false
+          },
+          "repository": {
+            "layout": "folder",
+            "path": null
+          }
+        },
+        "reviewer": {
+          "harness": "claude",
+          "model": "claude-3-7-sonnet",
+          "effort": null,
+          "endpoint": null
+        },
+        "resolver": {
+          "harness": "codex",
+          "model": "o3",
+          "effort": null,
+          "endpoint": null
+        },
+        "enable_automation_hint": true
+      }
+    },
+    {
+      "name": "operator-endpoint-override",
+      "repo_yaml": "version: 1\nendpoints:\n  kimi:\n    base_url: https://public.example/\n    token_env: KIMI_API_KEY\n  repo_only:\n    base_url: https://repo.example/\n    token_env: REPO_KEY",
+      "operator_yaml": "version: 1\nendpoints:\n  kimi:\n    base_url: http://mine.local/\n    token_env: KIMI_API_KEY\n  operator_only:\n    base_url: http://operator.local/\n    token_env: OP_KEY",
+      "base_sha": null,
+      "merged": {
+        "version": 1,
+        "mode": "local",
+        "runner": "github-hosted",
+        "policy": {
+          "min_fix_severity": "medium",
+          "max_passes_per_cycle": 3,
+          "max_files_changed_per_pr": 200,
+          "max_prs_per_day": 25
+        },
+        "git": {
+          "hooks": "skip"
+        },
+        "logs": {
+          "retention_days": 14,
+          "keep_transcripts": false
+        },
+        "endpoints": {
+          "kimi": {
+            "base_url": "http://mine.local/",
+            "token_env": "KIMI_API_KEY"
+          },
+          "repo_only": {
+            "base_url": "https://repo.example/",
+            "token_env": "REPO_KEY"
+          },
+          "operator_only": {
+            "base_url": "http://operator.local/",
+            "token_env": "OP_KEY"
+          }
+        },
+        "backlog": {
+          "destination": "auto",
+          "github_issues": {
+            "labels": [],
+            "tracking_label": "crossrev-review",
+            "create_missing_labels": true,
+            "comment_on_existing_issue": false
+          },
+          "repository": {
+            "layout": "folder",
+            "path": null
+          }
+        },
+        "reviewer": {
+          "harness": "codex",
+          "model": null,
+          "effort": null,
+          "endpoint": null
+        },
+        "resolver": {
+          "harness": "claude",
+          "model": null,
+          "effort": null,
+          "endpoint": null
+        },
+        "enable_automation_hint": true
+      }
+    },
+    {
+      "name": "base-fallback-crossrev-yml",
+      "repo_yaml": "version: 1\npolicy:\n  max_passes_per_cycle: 7",
+      "operator_yaml": null,
+      "base_sha": "0913bf7b99dcecf746d0e6fcef5a9c1d64aaf3b0",
+      "merged": {
+        "version": 1,
+        "mode": "local",
+        "runner": "github-hosted",
+        "policy": {
+          "min_fix_severity": "medium",
+          "max_passes_per_cycle": 7,
+          "max_files_changed_per_pr": 200,
+          "max_prs_per_day": 25
+        },
+        "git": {
+          "hooks": "skip"
+        },
+        "logs": {
+          "retention_days": 14,
+          "keep_transcripts": false
+        },
+        "endpoints": {},
+        "backlog": {
+          "destination": "auto",
+          "github_issues": {
+            "labels": [],
+            "tracking_label": "crossrev-review",
+            "create_missing_labels": true,
+            "comment_on_existing_issue": false
+          },
+          "repository": {
+            "layout": "folder",
+            "path": null
+          }
+        },
+        "reviewer": {
+          "harness": "codex",
+          "model": null,
+          "effort": null,
+          "endpoint": null
+        },
+        "resolver": {
+          "harness": "claude",
+          "model": null,
+          "effort": null,
+          "endpoint": null
+        },
+        "enable_automation_hint": true
+      }
+    },
+    {
+      "name": "base-absent",
+      "repo_yaml": null,
+      "operator_yaml": null,
+      "base_sha": "2c4a46cb321db01826d116b5ef2add6b0284d68c",
+      "merged": {
+        "version": 1,
+        "mode": "local",
+        "runner": "github-hosted",
+        "policy": {
+          "min_fix_severity": "medium",
+          "max_passes_per_cycle": 3,
+          "max_files_changed_per_pr": 200,
+          "max_prs_per_day": 25
+        },
+        "git": {
+          "hooks": "skip"
+        },
+        "logs": {
+          "retention_days": 14,
+          "keep_transcripts": false
+        },
+        "endpoints": {},
+        "backlog": {
+          "destination": "auto",
+          "github_issues": {
+            "labels": [],
+            "tracking_label": "crossrev-review",
+            "create_missing_labels": true,
+            "comment_on_existing_issue": false
+          },
+          "repository": {
+            "layout": "folder",
+            "path": null
+          }
+        },
+        "reviewer": {
+          "harness": "codex",
+          "model": null,
+          "effort": null,
+          "endpoint": null
+        },
+        "resolver": {
+          "harness": "claude",
+          "model": null,
+          "effort": null,
+          "endpoint": null
+        },
+        "enable_automation_hint": true
+      }
+    },
+    {
+      "name": "base-empty",
+      "repo_yaml": "",
+      "operator_yaml": null,
+      "base_sha": "82fae556b53da84286825eba0a5e07138fca782a",
+      "merged": {
+        "version": 1,
+        "mode": "local",
+        "runner": "github-hosted",
+        "policy": {
+          "min_fix_severity": "medium",
+          "max_passes_per_cycle": 3,
+          "max_files_changed_per_pr": 200,
+          "max_prs_per_day": 25
+        },
+        "git": {
+          "hooks": "skip"
+        },
+        "logs": {
+          "retention_days": 14,
+          "keep_transcripts": false
+        },
+        "endpoints": {},
+        "backlog": {
+          "destination": "auto",
+          "github_issues": {
+            "labels": [],
+            "tracking_label": "crossrev-review",
+            "create_missing_labels": true,
+            "comment_on_existing_issue": false
+          },
+          "repository": {
+            "layout": "folder",
+            "path": null
+          }
+        },
+        "reviewer": {
+          "harness": "codex",
+          "model": null,
+          "effort": null,
+          "endpoint": null
+        },
+        "resolver": {
+          "harness": "claude",
+          "model": null,
+          "effort": null,
+          "endpoint": null
+        },
+        "enable_automation_hint": true
+      }
+    },
+    {
+      "name": "wt-empty-file",
+      "repo_yaml": "",
+      "operator_yaml": null,
+      "base_sha": null,
+      "merged": {
+        "version": 1,
+        "mode": "local",
+        "runner": "github-hosted",
+        "policy": {
+          "min_fix_severity": "medium",
+          "max_passes_per_cycle": 3,
+          "max_files_changed_per_pr": 200,
+          "max_prs_per_day": 25
+        },
+        "git": {
+          "hooks": "skip"
+        },
+        "logs": {
+          "retention_days": 14,
+          "keep_transcripts": false
+        },
+        "endpoints": {},
+        "backlog": {
+          "destination": "auto",
+          "github_issues": {
+            "labels": [],
+            "tracking_label": "crossrev-review",
+            "create_missing_labels": true,
+            "comment_on_existing_issue": false
+          },
+          "repository": {
+            "layout": "folder",
+            "path": null
+          }
+        },
+        "reviewer": {
+          "harness": "codex",
+          "model": null,
+          "effort": null,
+          "endpoint": null
+        },
+        "resolver": {
+          "harness": "claude",
+          "model": null,
+          "effort": null,
+          "endpoint": null
+        },
+        "enable_automation_hint": true
+      }
+    },
+    {
+      "name": "wt-comment-only",
+      "repo_yaml": "# nothing\n",
+      "operator_yaml": null,
+      "base_sha": null,
+      "merged": {
+        "version": 1,
+        "mode": "local",
+        "runner": "github-hosted",
+        "policy": {
+          "min_fix_severity": "medium",
+          "max_passes_per_cycle": 3,
+          "max_files_changed_per_pr": 200,
+          "max_prs_per_day": 25
+        },
+        "git": {
+          "hooks": "skip"
+        },
+        "logs": {
+          "retention_days": 14,
+          "keep_transcripts": false
+        },
+        "endpoints": {},
+        "backlog": {
+          "destination": "auto",
+          "github_issues": {
+            "labels": [],
+            "tracking_label": "crossrev-review",
+            "create_missing_labels": true,
+            "comment_on_existing_issue": false
+          },
+          "repository": {
+            "layout": "folder",
+            "path": null
+          }
+        },
+        "reviewer": {
+          "harness": "codex",
+          "model": null,
+          "effort": null,
+          "endpoint": null
+        },
+        "resolver": {
+          "harness": "claude",
+          "model": null,
+          "effort": null,
+          "endpoint": null
+        },
+        "enable_automation_hint": true
+      }
+    }
+  ],
+  "refusals": [
+    {
+      "name": "version-mismatch",
+      "family": "version",
+      "driver": "load",
+      "call": [],
+      "config": "version: 99\n",
+      "error": "\nerror  .github/crossrev.yml declares version 99, and this crossrev understands version 1\n       Upgrade crossrev, or set version: 1 in that file if it really is the current shape."
+    },
+    {
+      "name": "severity-invalid",
+      "family": "severity",
+      "driver": "load",
+      "call": [],
+      "config": "version: 1\npolicy:\n  min_fix_severity: medum\n",
+      "error": "\nerror  policy.min_fix_severity is 'medum', which is not one of high, medium or low\n       It names the lowest severity the resolve leg may change code for unattended. Set it to high, medium or low in the repository config, or remove it to take the default of medium."
+    },
+    {
+      "name": "pass-count-invalid",
+      "family": "pass_count",
+      "driver": "load",
+      "call": [],
+      "config": "version: 1\npolicy:\n  max_passes_per_cycle: 0\n",
+      "error": "\nerror  policy.max_passes_per_cycle is '0', which is not a whole number of passes above zero\n       It bounds how many passes the loop runs by itself before a person has to ask for another, so the smallest meaningful value is 1. Set it to 1 or more in the repository config, or remove it to take the default of 3. To stop CrossRev reviewing a repository at all, remove its workflows rather than setting the bound to zero."
+    },
+    {
+      "name": "git-hooks-invalid",
+      "family": "git_hooks",
+      "driver": "load",
+      "call": [],
+      "config": "version: 1\ngit:\n  hooks: skipp\n",
+      "error": "\nerror  git.hooks is 'skipp', which is not one of skip or run\n       It decides whether the resolver's commit and push run the repository's own git hooks. Set it to skip or run in the repository config, or remove it to take the default of skip."
+    },
+    {
+      "name": "log-retention-invalid",
+      "family": "log_retention",
+      "driver": "load",
+      "call": [],
+      "config": "version: 1\nlogs:\n  retention_days: 0\n",
+      "error": "\nerror  logs.retention_days is '0', which is not a whole number of days above zero\n       It bounds how long run logs and kept transcripts stay under the state directory before a sweep removes them. Set it to 1 or more in the repository config, or remove it to take the default of 14."
+    },
+    {
+      "name": "keep-transcripts-invalid",
+      "family": "log_transcripts",
+      "driver": "load",
+      "call": [],
+      "config": "version: 1\nlogs:\n  keep_transcripts: yes please\n",
+      "error": "\nerror  logs.keep_transcripts is 'yes please', which is not true or false\n       It decides whether harness transcripts survive a successful leg rather than only a failed one. Set it to true or false in the repository config, or remove it to take the default of false."
+    },
+    {
+      "name": "malformed-yaml",
+      "family": "parse",
+      "driver": "load",
+      "call": [],
+      "config": "version: 1\npolicy:\n  - this is not\n  a mapping: [unclosed\n",
+      "error": "\nerror  could not parse .github/crossrev.yml\n       It must be valid YAML. Check it with: yq '.' .github/crossrev.yml"
+    },
+    {
+      "name": "version-mismatch-at-base",
+      "family": "version",
+      "driver": "load_at_base",
+      "call": [],
+      "config": "version: 99\n",
+      "error": "\nerror  base revision .github/crossrev.yml declares version 99, and this crossrev understands version 1\n       Upgrade crossrev, or set version: 1 in that file if it really is the current shape."
+    },
+    {
+      "name": "malformed-yaml-at-base",
+      "family": "parse",
+      "driver": "load_at_base",
+      "call": [],
+      "config": "version: 1\npolicy:\n  - this is not\n  a mapping: [unclosed\n",
+      "error": "\nerror  could not parse .github/crossrev.yml at base revision <base_sha>\n       It must be valid YAML. Check it with: git show <base_sha>:.github/crossrev.yml | yq '.'"
+    },
+    {
+      "name": "non-mapping-sequence",
+      "family": "shape",
+      "driver": "load",
+      "call": [],
+      "config": "- a\n- b\n",
+      "error": "\nerror  .github/crossrev.yml is not a mapping\n       It must hold configuration keys at its top level, not a list or a single value. Check it with: yq '.' .github/crossrev.yml"
+    },
+    {
+      "name": "non-mapping-scalar",
+      "family": "shape",
+      "driver": "load",
+      "call": [],
+      "config": "42\n",
+      "error": "\nerror  .github/crossrev.yml is not a mapping\n       It must hold configuration keys at its top level, not a list or a single value. Check it with: yq '.' .github/crossrev.yml"
+    },
+    {
+      "name": "non-mapping-boolean",
+      "family": "shape",
+      "driver": "load",
+      "call": [],
+      "config": "true\n",
+      "error": "\nerror  .github/crossrev.yml is not a mapping\n       It must hold configuration keys at its top level, not a list or a single value. Check it with: yq '.' .github/crossrev.yml"
+    },
+    {
+      "name": "non-mapping-at-base",
+      "family": "shape",
+      "driver": "load_at_base",
+      "call": [],
+      "config": "- a\n- b\n",
+      "error": "\nerror  .github/crossrev.yml is not a mapping at base revision <base_sha>\n       It must hold configuration keys at its top level, not a list or a single value. Check it with: git show <base_sha>:.github/crossrev.yml | yq '.'"
+    },
+    {
+      "name": "endpoint-without-base-url",
+      "family": "endpoint",
+      "driver": "call",
+      "call": [
+        "cfg_endpoint",
+        "local"
+      ],
+      "config": "version: 1\nendpoints:\n  local:\n    token_env: LOCAL_TOKEN\n",
+      "error": "\nerror  the endpoint 'local' has no base_url\n       Add base_url: to its definition."
+    },
+    {
+      "name": "endpoint-without-token-env",
+      "family": "endpoint",
+      "driver": "call",
+      "call": [
+        "cfg_endpoint",
+        "local"
+      ],
+      "config": "version: 1\nendpoints:\n  local:\n    base_url: http://127.0.0.1:11434\n",
+      "error": "\nerror  the endpoint 'local' has no token_env\n       Add token_env: naming the environment variable that carries its token. Ollama's docs use ANTHROPIC_AUTH_TOKEN where Kimi's use ANTHROPIC_API_KEY, which is why the name is not assumed."
+    },
+    {
+      "name": "backlog-layout-invalid",
+      "family": "backlog",
+      "driver": "load",
+      "call": [],
+      "config": "version: 1\nbacklog:\n  destination: repository\n  repository:\n    layout: flat\n",
+      "error": "\nerror  backlog.repository.layout is 'flat', which is not folder or file\n       Set it to folder or file in the repository config."
+    },
+    {
+      "name": "backlog-destination-invalid",
+      "family": "backlog",
+      "driver": "load",
+      "call": [],
+      "config": "version: 1\nbacklog:\n  destination: elsewhere\n",
+      "error": "\nerror  backlog.destination is 'elsewhere', which CrossRev does not recognise\n       Set it to github_issues, repository, none or auto in the repository config."
+    }
+  ]
+}

@@ -54,21 +54,95 @@ inputs:
 runs:
   using: composite
   steps:
-    # A consumer's workflow cannot forget this, which is the only reason it
-    # lives here rather than in each template. Installation stays the runner's
-    # job — this fails naming the missing dependency rather than mid-leg with a
+    # The release ships a binary per runner, not a script the checkout runs, so
+    # the action fetches the one for this machine before running anything. The
+    # digest is checked against the checksums.txt from the same release before
+    # the binary runs.
+    #
+    # The download comes before the preflight because the preflight runs from
+    # the binary itself (the next step). The download needs only gh and a
+    # checksum tool, and says so plainly when one of those is missing.
+    - shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.app-token }}
+      run: |
+        set -euo pipefail
+        # Refused by name, before any download: the release builds Linux/X64
+        # and macOS/ARM64 and nothing else.
+        case "${RUNNER_OS:?}/${RUNNER_ARCH:?}" in
+          Linux/X64)   asset="crossrev-linux-amd64" ;;
+          macOS/ARM64) asset="crossrev-darwin-arm64" ;;
+          *) echo "::error::CrossRev ships no binary for $RUNNER_OS/$RUNNER_ARCH (this release builds Linux/X64 and macOS/ARM64)."; exit 1 ;;
+        esac
+
+        # The pin is the SHA this action was loaded at, and releases are cut by
+        # tag, so the SHA is resolved to the versioned tag pointing at it. A
+        # tag ref is used as named.
+        ref="${{ github.action_ref }}"
+        if [[ "$ref" =~ ^[0-9a-f]{40}$ ]]; then
+          tag="$(git ls-remote --tags https://github.com/carlosboeing/crossrev.git |
+            awk -v sha="$ref" '
+              /\^\{\}$/ { peeled[$2] = $1; next }
+              { direct[$2] = $1 }
+              END {
+                for (r in peeled) {
+                  t = r; sub(/\^\{\}$/, "", t); sub(/^refs\/tags\//, "", t)
+                  if (peeled[r] == sha && t ~ /^v[0-9]+\.[0-9]+\.[0-9]+$/) { print t; exit }
+                }
+                for (r in direct) {
+                  t = r; sub(/^refs\/tags\//, "", t)
+                  if (direct[r] == sha && t ~ /^v[0-9]+\.[0-9]+\.[0-9]+$/) { print t; exit }
+                }
+              }')"
+          [[ -n "$tag" ]] || {
+            echo "::error::no CrossRev release tag points at $ref, so there is no release to download."
+            exit 1
+          }
+        else
+          tag="$ref"
+        fi
+
+        # A checksum tool under either name. macOS ships shasum and no
+        # sha256sum; Linux ships sha256sum. Both check the same file format.
+        if command -v sha256sum >/dev/null 2>&1; then
+          sum="sha256sum"
+        else
+          sum="shasum -a 256"
+        fi
+
+        tmp="$RUNNER_TEMP/crossrev-dist"
+        mkdir -p "$tmp"
+        gh release download "$tag" --repo carlosboeing/crossrev \
+          --pattern "$asset" --pattern checksums.txt --dir "$tmp" --clobber
+        want="$(awk -v a="$asset" '$2 == a { print $1; found=1 } END { if (!found) exit 1 }' \
+          "$tmp/checksums.txt")" || {
+          echo "::error::checksums.txt from release $tag names no digest for $asset."
+          exit 1
+        }
+        got="$($sum "$tmp/$asset")"; got="${got%% *}"
+        [[ "$got" == "$want" ]] || {
+          echo "::error::the downloaded $asset does not match its digest, so it was not run."
+          exit 1
+        }
+
+        mkdir -p "$RUNNER_TEMP/crossrev-bin"
+        install -m 755 "$tmp/$asset" "$RUNNER_TEMP/crossrev-bin/crossrev"
+        echo "CROSSREV_BIN=$RUNNER_TEMP/crossrev-bin/crossrev" >> "$GITHUB_ENV"
+
+    # The dependency preflight, from the downloaded binary. A consumer's
+    # workflow cannot forget this, which is the only reason it lives here
+    # rather than in each template. Installation stays the runner's job — this
+    # fails naming the missing dependency rather than mid-leg with a
     # `command not found` three steps later.
     #
-    # GH_TOKEN is set because preflight verifies gh is authenticated, not just
+    # GH_TOKEN is set because doctor verifies gh is authenticated, not just
     # installed: an unauthenticated gh fails at the first API call instead.
     - shell: bash
       env:
         GH_TOKEN: ${{ inputs.app-token }}
       run: |
         set -euo pipefail
-        source "${{ github.action_path }}/lib/ui.sh"
-        source "${{ github.action_path }}/lib/preflight.sh"
-        preflight_check
+        "${CROSSREV_BIN:?}" doctor
 
     - shell: bash
       env:
@@ -86,4 +160,4 @@ runs:
         [[ -n "${{ inputs.harness }}" ]] && args+=(--harness "${{ inputs.harness }}")
         [[ -n "${{ inputs.trigger }}" ]] && args+=(--trigger "${{ inputs.trigger }}")
         [[ "${{ inputs.no-tips }}" == "true" ]] && args+=(--no-tips)
-        "${{ github.action_path }}/bin/crossrev" "${args[@]}"
+        "${CROSSREV_BIN:?}" "${args[@]}"

@@ -6,6 +6,10 @@
 # that genuinely need a model or GitHub are verified by hand and recorded in the
 # plan, because a test that needs a paid API call is a test nobody runs.
 #
+# The suites drive the native Go binary, built once up front and handed to every
+# suite through CROSSREV_TEST_BIN (see tests/harness.sh). There is no shell
+# implementation left to run them against.
+#
 # Suites run in parallel by default, because nothing is shared between them:
 # tests/harness.sh gives each suite its own XDG_CONFIG_HOME and XDG_STATE_HOME,
 # stub_reset gives each case its own gh route table and call log, and
@@ -17,8 +21,8 @@
 # ahead of it has finished, while the rest keep running behind it.
 #
 # The time goes on spawning processes rather than on computing: fixture_repo
-# alone starts about thirteen git processes, and tests/test-policy.sh calls it
-# 53 times. That is why more workers help and why the cap is modest.
+# alone starts about thirteen git processes. That is why more workers help and
+# why the cap is modest.
 #
 # Usage:
 #   bash tests/run.sh              # parallel, one job per core, capped at 8
@@ -26,9 +30,9 @@
 #   CROSSREV_TEST_JOBS=4 bash tests/run.sh
 #
 # Every suite runs with stdin closed. That is how CI runs them, and a suite that
-# asks a question is meant to die rather than hang — see _ui_input_source in
-# lib/ui.sh. A run at a terminal now matches the runner instead of diverging
-# from it.
+# asks a question is meant to die rather than hang — the binary reads
+# /dev/tty first, the way the shell it replaced did. A run at a terminal now
+# matches the runner instead of diverging from it.
 
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -60,6 +64,16 @@ if ! [[ "$jobs" =~ ^[0-9]+$ ]] || (( jobs < 1 )); then
   printf 'jobs must be a whole number above zero, got "%s"\n' "$jobs" >&2
   exit 2
 fi
+
+# One binary for the whole run, built before the first suite starts. Absolute,
+# because every fixture cds into a throwaway checkout.
+BIN="$HERE/../.tmp/crossrev-native"
+printf '\nbuilding %s\n' "$BIN"
+bash "$HERE/../scripts/build-native.sh" "$BIN" || {
+  printf '\nthe native binary did not build; nothing was run\n' >&2
+  exit 1
+}
+export CROSSREV_TEST_BIN="$BIN"
 
 suites=("$HERE"/test-*.sh)
 (( ${#suites[@]} > 0 )) || { printf 'no suites found under %s\n' "$HERE" >&2; exit 2; }

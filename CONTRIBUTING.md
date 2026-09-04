@@ -16,7 +16,7 @@ There is no build step and no package manager. The checkout is the installation.
 ```bash
 git clone https://github.com/carlosboeing/crossrev.git
 cd crossrev
-./install.sh          # symlinks bin/crossrev onto your PATH
+./install.sh          # builds the binary and copies it onto your PATH
 crossrev doctor       # names anything missing, and the fix
 ```
 
@@ -24,8 +24,14 @@ crossrev doctor       # names anything missing, and the fix
 immediately.
 
 Dependencies: `git`, `gh` (authenticated), `jq`, `yq`, `openssl`, plus
-`shellcheck` for the linter. On macOS, `yq` and `shellcheck` are the two usually
-missing — `brew install yq shellcheck`.
+`shellcheck` and Go 1.21 or newer for the linter. On macOS, `yq` and
+`shellcheck` are the two usually missing — `brew install yq shellcheck`.
+
+Go is new, and `scripts/lint.sh` fails without it rather than skipping its
+checks. Your installed Go does not have to be 1.27.0: `go.mod` pins that exact
+toolchain, and any Go from 1.21 downloads and switches to it on first use.
+[ADR 0018](docs/adrs/0018-go-native-parity-contract.md) records why the version
+is pinned rather than floated.
 
 ## Tests
 

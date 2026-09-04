@@ -1,0 +1,33 @@
+{
+  "name": "no-marker-at-all",
+  "shell": "a leg that never started at all",
+  "repo": "acme/widget",
+  "author": "crossrev-acme[bot]",
+  "now": 1755400000,
+  "timeout_seconds": 1800,
+  "waiting": [
+    {
+      "pr": 42,
+      "labels": [
+        "crossrev/awaiting-review"
+      ],
+      "head": "aab03d09bdffaa6b434504392bf906fc7ac30326"
+    }
+  ],
+  "comments": [],
+  "want": {
+    "page": "\n◇  CrossRev watchdog on acme/widget\n│  ✗ #42 — waiting on the review leg with no marker at all, so it never started\n│     retried by re-firing crossrev/awaiting-review at aab03d0\n│\n│  checked 1 pull request(s) waiting on a leg — retried 1, halted 0, 0 in draft\n└  A pass that never fired and a pass that converged look identical from outside, which is why this runs on a schedule.\n\n",
+    "calls": [
+      "issue-comments 42",
+      "label-ensure crossrev/watchdog-retried fbca04 crossrev: the watchdog retried this leg once",
+      "label-add 42 crossrev/watchdog-retried",
+      "label-remove 42 crossrev/awaiting-review",
+      "label-add 42 crossrev/awaiting-review"
+    ],
+    "summary": {
+      "checked": 1,
+      "retried": 1,
+      "halted": 0
+    }
+  }
+}

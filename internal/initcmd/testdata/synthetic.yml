@@ -1,0 +1,14 @@
+head __RUNS_ON__ __RUNS_ON__
+sha __SOURCE_SHA__ ref __SOURCE_REF__
+scope __REFRESH_SCOPE__ harness __REFRESH_HARNESS__ secret __REFRESH_SECRET__
+prefix __HARNESS_INSTALL__ suffix
+  # crossrev:only github-hosted
+  hosted only
+  # crossrev:end
+   # crossrev:only self-hosted
+  self only
+   # crossrev:end
+  # crossrev:only neither
+  neither
+  # crossrev:end
+tail

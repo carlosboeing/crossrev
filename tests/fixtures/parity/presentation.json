@@ -1,0 +1,598 @@
+{
+  "captured": {
+    "platform": "Darwin 25.5.0 arm64",
+    "tr_implementation": "/usr/bin/tr (BSD tr)",
+    "awk_implementation": "/usr/bin/awk (one true awk (BWK))",
+    "locale": "en_AU.UTF-8",
+    "note": "state_finding_id and state_anchor pin LC_ALL=C internally, so ids and anchors are byte-oriented whatever locale this file was captured under."
+  },
+  "function": "run_severity_emoji, run_category_emoji, run_finding_label, run_actionable, _same_model, _elapsed, _thousands, _pass_label, _commit_subject_ok, _url_path, _review_comment_body, _resolve_reply_body, _review_summary_body",
+  "min_fix_severity": "medium",
+  "max_passes_per_cycle": 3,
+  "repo": "o/r",
+  "pr": 42,
+  "severity": [
+    {
+      "name": "severity-high",
+      "value": "high",
+      "out": "🔴"
+    },
+    {
+      "name": "severity-medium",
+      "value": "medium",
+      "out": "🟠"
+    },
+    {
+      "name": "severity-low",
+      "value": "low",
+      "out": "🔵"
+    },
+    {
+      "name": "severity-other",
+      "value": "other",
+      "out": "⚪"
+    }
+  ],
+  "category": [
+    {
+      "name": "category-correctness",
+      "value": "correctness",
+      "out": "🐛"
+    },
+    {
+      "name": "category-security",
+      "value": "security",
+      "out": "🔒"
+    },
+    {
+      "name": "category-performance",
+      "value": "performance",
+      "out": "⚡"
+    },
+    {
+      "name": "category-maintainability",
+      "value": "maintainability",
+      "out": "🧹"
+    },
+    {
+      "name": "category-testing",
+      "value": "testing",
+      "out": "🧪"
+    },
+    {
+      "name": "category-docs",
+      "value": "docs",
+      "out": "📄"
+    },
+    {
+      "name": "category-other",
+      "value": "other",
+      "out": "❓"
+    }
+  ],
+  "same_model": [
+    {
+      "name": "alias-inside-canonical",
+      "want": "opus",
+      "got": "claude-opus-4-5-20251101",
+      "rc": 0
+    },
+    {
+      "name": "canonical-inside-alias",
+      "want": "claude-opus-4-5-20251101",
+      "got": "opus",
+      "rc": 0
+    },
+    {
+      "name": "date-pin-inside-family",
+      "want": "claude-opus-4-5",
+      "got": "claude-opus-4-5-20251101",
+      "rc": 0
+    },
+    {
+      "name": "different-family",
+      "want": "sonnet",
+      "got": "claude-opus-4-5-20251101",
+      "rc": 1
+    },
+    {
+      "name": "different-family-full",
+      "want": "claude-sonnet-4-5",
+      "got": "claude-opus-4-5-20251101",
+      "rc": 1
+    },
+    {
+      "name": "case-fold",
+      "want": "OPUS",
+      "got": "claude-opus-4-5-20251101",
+      "rc": 0
+    },
+    {
+      "name": "identical",
+      "want": "opus",
+      "got": "opus",
+      "rc": 0
+    },
+    {
+      "name": "empty-want",
+      "want": "",
+      "got": "opus",
+      "rc": 1
+    },
+    {
+      "name": "empty-got",
+      "want": "opus",
+      "got": "",
+      "rc": 1
+    }
+  ],
+  "elapsed": [
+    {
+      "name": "twelve-seconds",
+      "from": "100",
+      "to": "112",
+      "out": "12s"
+    },
+    {
+      "name": "exactly-one-minute",
+      "from": "100",
+      "to": "160",
+      "out": "1m 0s"
+    },
+    {
+      "name": "zero",
+      "from": "10",
+      "to": "10",
+      "out": "0s"
+    },
+    {
+      "name": "missing-from",
+      "from": "",
+      "to": "10",
+      "out": "—"
+    },
+    {
+      "name": "negative",
+      "from": "200",
+      "to": "100",
+      "out": "—"
+    }
+  ],
+  "thousands": [
+    {
+      "name": "five-digits",
+      "in": "41205",
+      "out": "41,205"
+    },
+    {
+      "name": "four-digits",
+      "in": "1000",
+      "out": "1,000"
+    },
+    {
+      "name": "three-digits",
+      "in": "12",
+      "out": "12"
+    },
+    {
+      "name": "non-digit",
+      "in": "abc",
+      "out": "—"
+    },
+    {
+      "name": "empty",
+      "in": "",
+      "out": "—"
+    }
+  ],
+  "pass_label": [
+    {
+      "name": "under-cap",
+      "pass": 1,
+      "cap": 3,
+      "out": "pass 1"
+    },
+    {
+      "name": "on-cap",
+      "pass": 3,
+      "cap": 3,
+      "out": "pass 3"
+    },
+    {
+      "name": "past-cap",
+      "pass": 4,
+      "cap": 3,
+      "out": "pass 4 (past the cycle cap of 3)"
+    }
+  ],
+  "commit_subject": [
+    {
+      "name": "plain",
+      "subject": "fix the thing",
+      "rc": 0
+    },
+    {
+      "name": "empty",
+      "subject": "",
+      "rc": 1
+    },
+    {
+      "name": "newline",
+      "subject": "line\nbreak",
+      "rc": 1
+    },
+    {
+      "name": "exactly-100",
+      "subject": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "rc": 0
+    },
+    {
+      "name": "101-chars",
+      "subject": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "rc": 1
+    },
+    {
+      "name": "marker-prefix",
+      "subject": "<!-- crossrev: x",
+      "rc": 1
+    },
+    {
+      "name": "literal-null",
+      "subject": "null",
+      "rc": 1
+    }
+  ],
+  "url_path": [
+    {
+      "name": "plain",
+      "path": "src/app.ts",
+      "out": "src/app.ts\n"
+    },
+    {
+      "name": "space",
+      "path": "src/a file.ts",
+      "out": "src/a%20file.ts\n"
+    },
+    {
+      "name": "closing-paren",
+      "path": "src/a)b.ts",
+      "out": "src/a%29b.ts\n"
+    },
+    {
+      "name": "pipe",
+      "path": "src/a|b.ts",
+      "out": "src/a%7Cb.ts\n"
+    },
+    {
+      "name": "slash-kept",
+      "path": "src/nested/x.ts",
+      "out": "src/nested/x.ts\n"
+    }
+  ],
+  "finding_label": [
+    {
+      "name": "high-security",
+      "finding": {
+        "severity": "high",
+        "category": "security"
+      },
+      "out": "🔴 [High · Security]"
+    },
+    {
+      "name": "unknown-both",
+      "finding": {
+        "severity": "?",
+        "category": "?"
+      },
+      "out": "⚪ [? · ?]"
+    },
+    {
+      "name": "missing-keys",
+      "finding": {},
+      "out": "⚪ [? · ?]"
+    }
+  ],
+  "actionable": [
+    {
+      "name": "mixed",
+      "findings": [
+        {
+          "severity": "high",
+          "pre_existing": false
+        },
+        {
+          "severity": "low",
+          "pre_existing": false
+        },
+        {
+          "severity": "high",
+          "pre_existing": true
+        }
+      ],
+      "out": "1\n"
+    },
+    {
+      "name": "empty",
+      "findings": [],
+      "out": "0\n"
+    },
+    {
+      "name": "all-below",
+      "findings": [
+        {
+          "severity": "low",
+          "pre_existing": false
+        }
+      ],
+      "out": "0\n"
+    }
+  ],
+  "comments": [
+    {
+      "name": "pre-existing",
+      "finding": {
+        "id": "aaaaaaaaaaaaaaaa",
+        "path": "app.ts",
+        "line": 2,
+        "side": "RIGHT",
+        "severity": "high",
+        "category": "security",
+        "pre_existing": true,
+        "title": "Token compared with ==",
+        "why": "A timing side channel",
+        "fix": "Use timingSafeEqual"
+      },
+      "pass": 1,
+      "harness": "claude",
+      "model": "opus",
+      "body_b64": "IyMjIyDwn5S0IFtIaWdoIMK3IFNlY3VyaXR5XSBUb2tlbiBjb21wYXJlZCB3aXRoID09CgpBIHRpbWluZyBzaWRlIGNoYW5uZWwKCioqRml4OioqIFVzZSB0aW1pbmdTYWZlRXF1YWwKCjxzdWI+QSByZWFsIGJ1ZywgYnV0IHRoaXMgcHVsbCByZXF1ZXN0IGRpZCBub3QgaW50cm9kdWNlIGl0LCBzbyBpdCBpcyByZXBvcnRlZCBoZXJlIGFuZCBuZXZlciBmaXhlZCBoZXJlLiDCtyBjcm9zc3JldiBwYXNzIDEsIHJldmlld2VkIGJ5IGNsYXVkZSAob3B1cykuIEEgc2Vjb25kIGFnZW50IG5vdyB2ZXJpZmllcyB0aGlzIHBvaW50IGFuZCBlaXRoZXIgZml4ZXMgaXQsIGRlZmVycyBpdCwgb3IgZXhwbGFpbnMgd2h5IGl0IGlzIHdyb25nLjwvc3ViPgoKPCEtLSBjcm9zc3JldjpmIHsiaWQiOiJhYWFhYWFhYWFhYWFhYWFhIiwicGFzcyI6MSwibGVnIjoicmV2aWV3In0gLS0+"
+    },
+    {
+      "name": "above-threshold-no-model",
+      "finding": {
+        "id": "aaaaaaaaaaaaaaaa",
+        "path": "app.ts",
+        "line": 2,
+        "side": "RIGHT",
+        "severity": "high",
+        "category": "security",
+        "pre_existing": false,
+        "title": "Token compared with ==",
+        "why": "A timing side channel",
+        "fix": "Use timingSafeEqual"
+      },
+      "pass": 1,
+      "harness": "claude",
+      "model": "",
+      "body_b64": "IyMjIyDwn5S0IFtIaWdoIMK3IFNlY3VyaXR5XSBUb2tlbiBjb21wYXJlZCB3aXRoID09CgpBIHRpbWluZyBzaWRlIGNoYW5uZWwKCioqRml4OioqIFVzZSB0aW1pbmdTYWZlRXF1YWwKCjxzdWI+QXQgb3IgYWJvdmUgdGhpcyByZXBvc2l0b3J5J3MgYG1pbl9maXhfc2V2ZXJpdHlgIChtZWRpdW0pLCBzbyB0aGUgcmVzb2x2ZSBsZWcgbWF5IGNoYW5nZSBjb2RlIGZvciBpdC4gwrcgY3Jvc3NyZXYgcGFzcyAxLCByZXZpZXdlZCBieSBjbGF1ZGUuIEEgc2Vjb25kIGFnZW50IG5vdyB2ZXJpZmllcyB0aGlzIHBvaW50IGFuZCBlaXRoZXIgZml4ZXMgaXQsIGRlZmVycyBpdCwgb3IgZXhwbGFpbnMgd2h5IGl0IGlzIHdyb25nLjwvc3ViPgoKPCEtLSBjcm9zc3JldjpmIHsiaWQiOiJhYWFhYWFhYWFhYWFhYWFhIiwicGFzcyI6MSwibGVnIjoicmV2aWV3In0gLS0+"
+    },
+    {
+      "name": "below-threshold",
+      "finding": {
+        "id": "aaaaaaaaaaaaaaaa",
+        "path": "app.ts",
+        "line": 1,
+        "side": "RIGHT",
+        "severity": "low",
+        "category": "maintainability",
+        "pre_existing": false,
+        "title": "Third copy",
+        "why": "Drift",
+        "fix": "Extract one"
+      },
+      "pass": 1,
+      "harness": "claude",
+      "model": "opus",
+      "body_b64": "IyMjIyDwn5S1IFtMb3cgwrcgTWFpbnRhaW5hYmlsaXR5XSBUaGlyZCBjb3B5CgpEcmlmdAoKKipGaXg6KiogRXh0cmFjdCBvbmUKCjxzdWI+QmVsb3cgdGhpcyByZXBvc2l0b3J5J3MgYG1pbl9maXhfc2V2ZXJpdHlgIChtZWRpdW0pLCBzbyBpdCBpcyByZXBvcnRlZCBhbmQgbGVmdCB0byBhIGh1bWFuLiDCtyBjcm9zc3JldiBwYXNzIDEsIHJldmlld2VkIGJ5IGNsYXVkZSAob3B1cykuIEEgc2Vjb25kIGFnZW50IG5vdyB2ZXJpZmllcyB0aGlzIHBvaW50IGFuZCBlaXRoZXIgZml4ZXMgaXQsIGRlZmVycyBpdCwgb3IgZXhwbGFpbnMgd2h5IGl0IGlzIHdyb25nLjwvc3ViPgoKPCEtLSBjcm9zc3JldjpmIHsiaWQiOiJhYWFhYWFhYWFhYWFhYWFhIiwicGFzcyI6MSwibGVnIjoicmV2aWV3In0gLS0+"
+    },
+    {
+      "name": "title-starts-with-paren",
+      "finding": {
+        "id": "aaaaaaaaaaaaaaaa",
+        "path": "app.ts",
+        "line": 1,
+        "side": "RIGHT",
+        "severity": "high",
+        "category": "security",
+        "pre_existing": false,
+        "title": "(leading paren) title",
+        "why": "w",
+        "fix": "f"
+      },
+      "pass": 1,
+      "harness": "claude",
+      "model": "opus",
+      "body_b64": "IyMjIyDwn5S0IFtIaWdoIMK3IFNlY3VyaXR5XSAobGVhZGluZyBwYXJlbikgdGl0bGUKCncKCioqRml4OioqIGYKCjxzdWI+QXQgb3IgYWJvdmUgdGhpcyByZXBvc2l0b3J5J3MgYG1pbl9maXhfc2V2ZXJpdHlgIChtZWRpdW0pLCBzbyB0aGUgcmVzb2x2ZSBsZWcgbWF5IGNoYW5nZSBjb2RlIGZvciBpdC4gwrcgY3Jvc3NyZXYgcGFzcyAxLCByZXZpZXdlZCBieSBjbGF1ZGUgKG9wdXMpLiBBIHNlY29uZCBhZ2VudCBub3cgdmVyaWZpZXMgdGhpcyBwb2ludCBhbmQgZWl0aGVyIGZpeGVzIGl0LCBkZWZlcnMgaXQsIG9yIGV4cGxhaW5zIHdoeSBpdCBpcyB3cm9uZy48L3N1Yj4KCjwhLS0gY3Jvc3NyZXY6ZiB7ImlkIjoiYWFhYWFhYWFhYWFhYWFhYSIsInBhc3MiOjEsImxlZyI6InJldmlldyJ9IC0tPg=="
+    }
+  ],
+  "replies": [
+    {
+      "name": "fixed",
+      "disposition": {
+        "finding_id": "aaaaaaaaaaaaaaaa",
+        "resolution": "fixed",
+        "reply": "Replaced with a constant-time compare."
+      },
+      "tracked": "",
+      "pass": 1,
+      "harness": "claude",
+      "model": "sonnet",
+      "body_b64": "KipGaXhlZC4qKiBSZXBsYWNlZCB3aXRoIGEgY29uc3RhbnQtdGltZSBjb21wYXJlLgoKPHN1Yj5jcm9zc3JldiBwYXNzIDEsIHZlcmlmaWVkIGJ5IGNsYXVkZSAoc29ubmV0KS4gRXZlcnkgZmluZGluZyBpcyB2ZXJpZmllZCB3aGF0ZXZlciBpdHMgc2V2ZXJpdHkg4oCUIHNldmVyaXR5IGdvdmVybnMgd2hhdCBoYXBwZW5zIGFmdGVyd2FyZHMsIG5vdCB3aGV0aGVyIHRoZSBjaGVjayBoYXBwZW5zLjwvc3ViPgoKPCEtLSBjcm9zc3JldjpmIHsiaWQiOiJhYWFhYWFhYWFhYWFhYWFhIiwicGFzcyI6MSwibGVnIjoicmVzb2x2ZSJ9IC0tPg=="
+    },
+    {
+      "name": "skipped",
+      "disposition": {
+        "finding_id": "aaaaaaaaaaaaaaaa",
+        "resolution": "skipped",
+        "reply": "Out of scope."
+      },
+      "tracked": "",
+      "pass": 1,
+      "harness": "claude",
+      "model": "",
+      "body_b64": "KipTa2lwcGVkLioqIE91dCBvZiBzY29wZS4KCjxzdWI+Y3Jvc3NyZXYgcGFzcyAxLCB2ZXJpZmllZCBieSBjbGF1ZGUuIEV2ZXJ5IGZpbmRpbmcgaXMgdmVyaWZpZWQgd2hhdGV2ZXIgaXRzIHNldmVyaXR5IOKAlCBzZXZlcml0eSBnb3Zlcm5zIHdoYXQgaGFwcGVucyBhZnRlcndhcmRzLCBub3Qgd2hldGhlciB0aGUgY2hlY2sgaGFwcGVucy48L3N1Yj4KCjwhLS0gY3Jvc3NyZXY6ZiB7ImlkIjoiYWFhYWFhYWFhYWFhYWFhYSIsInBhc3MiOjEsImxlZyI6InJlc29sdmUifSAtLT4="
+    },
+    {
+      "name": "deferred",
+      "disposition": {
+        "finding_id": "aaaaaaaaaaaaaaaa",
+        "resolution": "deferred",
+        "reply": "Needs a follow-up."
+      },
+      "tracked": "",
+      "pass": 1,
+      "harness": "claude",
+      "model": "",
+      "body_b64": "KipEZWZlcnJlZC4qKiBOZWVkcyBhIGZvbGxvdy11cC4KCjxzdWI+Y3Jvc3NyZXYgcGFzcyAxLCB2ZXJpZmllZCBieSBjbGF1ZGUuIEV2ZXJ5IGZpbmRpbmcgaXMgdmVyaWZpZWQgd2hhdGV2ZXIgaXRzIHNldmVyaXR5IOKAlCBzZXZlcml0eSBnb3Zlcm5zIHdoYXQgaGFwcGVucyBhZnRlcndhcmRzLCBub3Qgd2hldGhlciB0aGUgY2hlY2sgaGFwcGVucy48L3N1Yj4KCjwhLS0gY3Jvc3NyZXY6ZiB7ImlkIjoiYWFhYWFhYWFhYWFhYWFhYSIsInBhc3MiOjEsImxlZyI6InJlc29sdmUifSAtLT4="
+    },
+    {
+      "name": "disputed-tracked",
+      "disposition": {
+        "finding_id": "aaaaaaaaaaaaaaaa",
+        "resolution": "disputed",
+        "reply": "Not a bug."
+      },
+      "tracked": "owner/repo#99",
+      "pass": 2,
+      "harness": "agy",
+      "model": "",
+      "body_b64": "KipOb3QgY2hhbmdpbmcgdGhpcy4qKiBOb3QgYSBidWcuCgpUcmFja2VkIG91dHNpZGUgdGhpcyBwdWxsIHJlcXVlc3QgYXMgb3duZXIvcmVwbyM5OSwgc28gaXQgc3Vydml2ZXMgdGhlIG1lcmdlLgoKPHN1Yj5jcm9zc3JldiBwYXNzIDIsIHZlcmlmaWVkIGJ5IGFneS4gRXZlcnkgZmluZGluZyBpcyB2ZXJpZmllZCB3aGF0ZXZlciBpdHMgc2V2ZXJpdHkg4oCUIHNldmVyaXR5IGdvdmVybnMgd2hhdCBoYXBwZW5zIGFmdGVyd2FyZHMsIG5vdCB3aGV0aGVyIHRoZSBjaGVjayBoYXBwZW5zLjwvc3ViPgoKPCEtLSBjcm9zc3JldjpmIHsiaWQiOiJhYWFhYWFhYWFhYWFhYWFhIiwicGFzcyI6MiwibGVnIjoicmVzb2x2ZSJ9IC0tPg=="
+    },
+    {
+      "name": "escalated",
+      "disposition": {
+        "finding_id": "aaaaaaaaaaaaaaaa",
+        "resolution": "escalated",
+        "reply": "Policy call."
+      },
+      "tracked": "",
+      "pass": 1,
+      "harness": "claude",
+      "model": "",
+      "body_b64": "KipUaGlzIG5lZWRzIGEgaHVtYW4gZGVjaXNpb24uKiogUG9saWN5IGNhbGwuCgo8c3ViPmNyb3NzcmV2IHBhc3MgMSwgdmVyaWZpZWQgYnkgY2xhdWRlLiBFdmVyeSBmaW5kaW5nIGlzIHZlcmlmaWVkIHdoYXRldmVyIGl0cyBzZXZlcml0eSDigJQgc2V2ZXJpdHkgZ292ZXJucyB3aGF0IGhhcHBlbnMgYWZ0ZXJ3YXJkcywgbm90IHdoZXRoZXIgdGhlIGNoZWNrIGhhcHBlbnMuPC9zdWI+Cgo8IS0tIGNyb3NzcmV2OmYgeyJpZCI6ImFhYWFhYWFhYWFhYWFhYWEiLCJwYXNzIjoxLCJsZWciOiJyZXNvbHZlIn0gLS0+"
+    },
+    {
+      "name": "unknown-word",
+      "disposition": {
+        "finding_id": "aaaaaaaaaaaaaaaa",
+        "resolution": "other",
+        "reply": "Something else."
+      },
+      "tracked": "",
+      "pass": 1,
+      "harness": "claude",
+      "model": "",
+      "body_b64": "KipvdGhlci4qKiBTb21ldGhpbmcgZWxzZS4KCjxzdWI+Y3Jvc3NyZXYgcGFzcyAxLCB2ZXJpZmllZCBieSBjbGF1ZGUuIEV2ZXJ5IGZpbmRpbmcgaXMgdmVyaWZpZWQgd2hhdGV2ZXIgaXRzIHNldmVyaXR5IOKAlCBzZXZlcml0eSBnb3Zlcm5zIHdoYXQgaGFwcGVucyBhZnRlcndhcmRzLCBub3Qgd2hldGhlciB0aGUgY2hlY2sgaGFwcGVucy48L3N1Yj4KCjwhLS0gY3Jvc3NyZXY6ZiB7ImlkIjoiYWFhYWFhYWFhYWFhYWFhYSIsInBhc3MiOjEsImxlZyI6InJlc29sdmUifSAtLT4="
+    },
+    {
+      "name": "model-already-led-fixed",
+      "disposition": {
+        "finding_id": "aaaaaaaaaaaaaaaa",
+        "resolution": "skipped",
+        "reply": "**Fixed.** already had the lead"
+      },
+      "tracked": "",
+      "pass": 1,
+      "harness": "claude",
+      "model": "",
+      "body_b64": "KipTa2lwcGVkLioqIGFscmVhZHkgaGFkIHRoZSBsZWFkCgo8c3ViPmNyb3NzcmV2IHBhc3MgMSwgdmVyaWZpZWQgYnkgY2xhdWRlLiBFdmVyeSBmaW5kaW5nIGlzIHZlcmlmaWVkIHdoYXRldmVyIGl0cyBzZXZlcml0eSDigJQgc2V2ZXJpdHkgZ292ZXJucyB3aGF0IGhhcHBlbnMgYWZ0ZXJ3YXJkcywgbm90IHdoZXRoZXIgdGhlIGNoZWNrIGhhcHBlbnMuPC9zdWI+Cgo8IS0tIGNyb3NzcmV2OmYgeyJpZCI6ImFhYWFhYWFhYWFhYWFhYWEiLCJwYXNzIjoxLCJsZWciOiJyZXNvbHZlIn0gLS0+"
+    }
+  ],
+  "summaries": [
+    {
+      "name": "converged-alias",
+      "findings": [],
+      "marker": {
+        "verdict": "converged",
+        "blocked_reason": "",
+        "pass": 2,
+        "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "unanchored": 0,
+        "harness": "claude",
+        "model": "opus",
+        "model_reported": "claude-opus-4-5-20251101",
+        "effort": "high",
+        "ts": 100,
+        "done_ts": 160,
+        "tokens": 41205
+      },
+      "body_b64": "IyMgY3Jvc3NyZXYgcmV2aWV3IOKAlCBwYXNzIDIKCj4gWyFUSVBdCj4gKipDb252ZXJnZWQuKiogTm90aGluZyBhdCBvciBhYm92ZSBgbWluX2ZpeF9zZXZlcml0eWAgKG1lZGl1bSkgcmVtYWlucywgc28gdGhlIGxvb3Agc3RvcHMgaGVyZS4gRmluZGluZ3MgYmVsb3cgdGhlIHRocmVzaG9sZCwgYW5kIHByZS1leGlzdGluZyBvbmVzLCBhcmUgcmVwb3J0ZWQgYnV0IGNhbm5vdCBrZWVwIHRoZSBsb29wIGFsaXZlIOKAlCBhIGxvb3AgdGhhdCBjYW5ub3QgY29udmVyZ2UgYmVjYXVzZSBvZiBhIG5hbWluZyBxdWliYmxlIGlzIG9uZSBub2JvZHkgbGVhdmVzIHN3aXRjaGVkIG9uLgoKVmVyZGljdDogKipjb252ZXJnZWQqKi4KCk5vIGZpbmRpbmdzLiBMb3ctc2V2ZXJpdHkgYW5kIHByZS1leGlzdGluZyBpc3N1ZXMgd291bGQgYmUgbGlzdGVkIGhlcmUgdG9vLCBzbyB0aGlzIGlzIGFuIGVtcHR5IHJldmlldyByYXRoZXIgdGhhbiBhIGZpbHRlcmVkIG9uZS4KCioqUnVuIGRldGFpbHMqKgoKfCBMZWcgfCBBZ2VudCB8IER1cmF0aW9uIHwgVG9rZW5zIHwgQ2FjaGVkIHwgRXN0LiBjb3N0IHwKfC0tLXwtLS18LS0tfC0tLXwtLS18LS0tfAp8IHJldmlldyB8IGBjbGF1ZGVgIMK3IGBjbGF1ZGUtb3B1cy00LTUtMjAyNTExMDFgIMK3IGhpZ2ggZWZmb3J0IHwgMW0gMHMgfCA0MSwyMDUgfCDigJQgfCDigJQgfAoK"
+    },
+    {
+      "name": "issues-substitution",
+      "findings": [],
+      "marker": {
+        "verdict": "issues-remain",
+        "blocked_reason": "",
+        "pass": 1,
+        "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "unanchored": 0,
+        "harness": "claude",
+        "model": "sonnet",
+        "model_reported": "claude-opus-4-5-20251101",
+        "effort": "high",
+        "ts": 100,
+        "done_ts": 112,
+        "tokens": 12
+      },
+      "body_b64": "IyMgY3Jvc3NyZXYgcmV2aWV3IOKAlCBwYXNzIDEKCj4gWyFDQVVUSU9OXQo+ICoqMCBmaW5kaW5ncyBuZWVkIHJlc29sdmluZy4qKiBBIHNlY29uZCBhZ2VudCBub3cgdmVyaWZpZXMgZXZlcnkgZmluZGluZyBiZWxvdyBhZ2FpbnN0IHRoZSBjb2RlYmFzZSBhbmQgZWl0aGVyIGZpeGVzIGl0LCBza2lwcyBpdCwgZGVmZXJzIGl0LCBvciBleHBsYWlucyB3aHkgaXQgaXMgd3JvbmcuIEl0IG1heSBjaGFuZ2UgY29kZSBmb3IgdGhlIDAgYXQgb3IgYWJvdmUgYG1pbl9maXhfc2V2ZXJpdHlgIChtZWRpdW0pOyB0aGUgcmVzdCBhcmUgdmVyaWZpZWQgYW5kIHJlcG9ydGVkLCBuZXZlciBzaWxlbnRseSBkcm9wcGVkLgoKVmVyZGljdDogKippc3N1ZXMtcmVtYWluKiouCgpObyBmaW5kaW5ncy4gTG93LXNldmVyaXR5IGFuZCBwcmUtZXhpc3RpbmcgaXNzdWVzIHdvdWxkIGJlIGxpc3RlZCBoZXJlIHRvbywgc28gdGhpcyBpcyBhbiBlbXB0eSByZXZpZXcgcmF0aGVyIHRoYW4gYSBmaWx0ZXJlZCBvbmUuCgoqKlJ1biBkZXRhaWxzKioKCnwgTGVnIHwgQWdlbnQgfCBEdXJhdGlvbiB8IFRva2VucyB8IENhY2hlZCB8IEVzdC4gY29zdCB8CnwtLS18LS0tfC0tLXwtLS18LS0tfC0tLXwKfCByZXZpZXcgfCBgY2xhdWRlYCDCtyBgY2xhdWRlLW9wdXMtNC01LTIwMjUxMTAxYCDigJQgKipyZXF1ZXN0ZWQgYHNvbm5ldGAsIGEgZGlmZmVyZW50IG1vZGVsIGFuc3dlcmVkKiogwrcgaGlnaCBlZmZvcnQgfCAxMnMgfCAxMiB8IOKAlCB8IOKAlCB8Cgo="
+    },
+    {
+      "name": "blocked",
+      "findings": [],
+      "marker": {
+        "verdict": "blocked",
+        "blocked_reason": "the diff would not fetch",
+        "pass": 1,
+        "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "unanchored": 0,
+        "harness": "claude",
+        "model": "opus",
+        "model_reported": "opus",
+        "effort": "high",
+        "ts": 1,
+        "done_ts": 2,
+        "tokens": 1
+      },
+      "body_b64": "IyMgY3Jvc3NyZXYgcmV2aWV3IOKAlCBwYXNzIDEKCj4gWyFXQVJOSU5HXQo+ICoqVGhlIHJldmlldyBjb3VsZCBub3QgYmUgY29tcGxldGVkOioqIHRoZSBkaWZmIHdvdWxkIG5vdCBmZXRjaCBUaGUgbG9vcCBoYWx0cyBoZXJlIGFuZCBhIGh1bWFuIGlzIG5lZWRlZC4gTm90aGluZyBpbiB0aGlzIGNvbW1lbnQgaXMgYSBqdWRnZW1lbnQgYWJvdXQgdGhlIGNvZGUuCgpWZXJkaWN0OiAqKmJsb2NrZWQqKi4KCk5vIGZpbmRpbmdzLiBMb3ctc2V2ZXJpdHkgYW5kIHByZS1leGlzdGluZyBpc3N1ZXMgd291bGQgYmUgbGlzdGVkIGhlcmUgdG9vLCBzbyB0aGlzIGlzIGFuIGVtcHR5IHJldmlldyByYXRoZXIgdGhhbiBhIGZpbHRlcmVkIG9uZS4KCioqUnVuIGRldGFpbHMqKgoKfCBMZWcgfCBBZ2VudCB8IER1cmF0aW9uIHwgVG9rZW5zIHwgQ2FjaGVkIHwgRXN0LiBjb3N0IHwKfC0tLXwtLS18LS0tfC0tLXwtLS18LS0tfAp8IHJldmlldyB8IGBjbGF1ZGVgIMK3IGBvcHVzYCDCtyBoaWdoIGVmZm9ydCB8IDFzIHwgMSB8IOKAlCB8IOKAlCB8Cgo="
+    },
+    {
+      "name": "one-unanchored",
+      "findings": [],
+      "marker": {
+        "verdict": "issues-remain",
+        "blocked_reason": "",
+        "pass": 1,
+        "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "unanchored": 1,
+        "harness": "claude",
+        "model": "opus",
+        "model_reported": "opus",
+        "effort": "high",
+        "ts": 1,
+        "done_ts": 2,
+        "tokens": 1
+      },
+      "body_b64": "IyMgY3Jvc3NyZXYgcmV2aWV3IOKAlCBwYXNzIDEKCj4gWyFDQVVUSU9OXQo+ICoqMCBmaW5kaW5ncyBuZWVkIHJlc29sdmluZy4qKiBBIHNlY29uZCBhZ2VudCBub3cgdmVyaWZpZXMgZXZlcnkgZmluZGluZyBiZWxvdyBhZ2FpbnN0IHRoZSBjb2RlYmFzZSBhbmQgZWl0aGVyIGZpeGVzIGl0LCBza2lwcyBpdCwgZGVmZXJzIGl0LCBvciBleHBsYWlucyB3aHkgaXQgaXMgd3JvbmcuIEl0IG1heSBjaGFuZ2UgY29kZSBmb3IgdGhlIDAgYXQgb3IgYWJvdmUgYG1pbl9maXhfc2V2ZXJpdHlgIChtZWRpdW0pOyB0aGUgcmVzdCBhcmUgdmVyaWZpZWQgYW5kIHJlcG9ydGVkLCBuZXZlciBzaWxlbnRseSBkcm9wcGVkLgoKVmVyZGljdDogKippc3N1ZXMtcmVtYWluKiouCgpObyBmaW5kaW5ncy4gTG93LXNldmVyaXR5IGFuZCBwcmUtZXhpc3RpbmcgaXNzdWVzIHdvdWxkIGJlIGxpc3RlZCBoZXJlIHRvbywgc28gdGhpcyBpcyBhbiBlbXB0eSByZXZpZXcgcmF0aGVyIHRoYW4gYSBmaWx0ZXJlZCBvbmUuCgpPbmUgZmluZGluZyBjb3VsZCBub3QgYmUgYW5jaG9yZWQgdG8gYSBsaW5lIG9mIHRoZSBkaWZmLCBzbyBpdCBpcyBhIHRvcC1sZXZlbCBjb21tZW50IG9uIHRoaXMgcHVsbCByZXF1ZXN0IG5hbWluZyBpdHMgbG9jYXRpb24gaW5zdGVhZC4gSXRzIHJlcGx5IHdpbGwgbGFuZCB0aGVyZSB0b28sIGJlY2F1c2UgdGhlcmUgaXMgbm8gcmV2aWV3IHRocmVhZCB0byBwdXQgb25lIGluLgoKKipSdW4gZGV0YWlscyoqCgp8IExlZyB8IEFnZW50IHwgRHVyYXRpb24gfCBUb2tlbnMgfCBDYWNoZWQgfCBFc3QuIGNvc3QgfAp8LS0tfC0tLXwtLS18LS0tfC0tLXwtLS18CnwgcmV2aWV3IHwgYGNsYXVkZWAgwrcgYG9wdXNgIMK3IGhpZ2ggZWZmb3J0IHwgMXMgfCAxIHwg4oCUIHwg4oCUIHwKCg=="
+    },
+    {
+      "name": "two-unanchored",
+      "findings": [],
+      "marker": {
+        "verdict": "issues-remain",
+        "blocked_reason": "",
+        "pass": 1,
+        "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "unanchored": 2,
+        "harness": "claude",
+        "model": "opus",
+        "model_reported": "opus",
+        "effort": "high",
+        "ts": 1,
+        "done_ts": 2,
+        "tokens": 1
+      },
+      "body_b64": "IyMgY3Jvc3NyZXYgcmV2aWV3IOKAlCBwYXNzIDEKCj4gWyFDQVVUSU9OXQo+ICoqMCBmaW5kaW5ncyBuZWVkIHJlc29sdmluZy4qKiBBIHNlY29uZCBhZ2VudCBub3cgdmVyaWZpZXMgZXZlcnkgZmluZGluZyBiZWxvdyBhZ2FpbnN0IHRoZSBjb2RlYmFzZSBhbmQgZWl0aGVyIGZpeGVzIGl0LCBza2lwcyBpdCwgZGVmZXJzIGl0LCBvciBleHBsYWlucyB3aHkgaXQgaXMgd3JvbmcuIEl0IG1heSBjaGFuZ2UgY29kZSBmb3IgdGhlIDAgYXQgb3IgYWJvdmUgYG1pbl9maXhfc2V2ZXJpdHlgIChtZWRpdW0pOyB0aGUgcmVzdCBhcmUgdmVyaWZpZWQgYW5kIHJlcG9ydGVkLCBuZXZlciBzaWxlbnRseSBkcm9wcGVkLgoKVmVyZGljdDogKippc3N1ZXMtcmVtYWluKiouCgpObyBmaW5kaW5ncy4gTG93LXNldmVyaXR5IGFuZCBwcmUtZXhpc3RpbmcgaXNzdWVzIHdvdWxkIGJlIGxpc3RlZCBoZXJlIHRvbywgc28gdGhpcyBpcyBhbiBlbXB0eSByZXZpZXcgcmF0aGVyIHRoYW4gYSBmaWx0ZXJlZCBvbmUuCgoyIGZpbmRpbmdzIGNvdWxkIG5vdCBiZSBhbmNob3JlZCB0byBhIGxpbmUgb2YgdGhlIGRpZmYsIHNvIHRoZXkgYXJlIHRvcC1sZXZlbCBjb21tZW50cyBvbiB0aGlzIHB1bGwgcmVxdWVzdCBuYW1pbmcgdGhlaXIgbG9jYXRpb25zIGluc3RlYWQuIFRoZWlyIHJlcGxpZXMgd2lsbCBsYW5kIHRoZXJlIHRvbywgYmVjYXVzZSB0aGVyZSBhcmUgbm8gcmV2aWV3IHRocmVhZHMgdG8gcHV0IHRoZW0gaW4uCgoqKlJ1biBkZXRhaWxzKioKCnwgTGVnIHwgQWdlbnQgfCBEdXJhdGlvbiB8IFRva2VucyB8IENhY2hlZCB8IEVzdC4gY29zdCB8CnwtLS18LS0tfC0tLXwtLS18LS0tfC0tLXwKfCByZXZpZXcgfCBgY2xhdWRlYCDCtyBgb3B1c2AgwrcgaGlnaCBlZmZvcnQgfCAxcyB8IDEgfCDigJQgfCDigJQgfAoK"
+    }
+  ]
+}

@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
-# tests/test-bootstrap.sh — the entry script nothing tested until the extraction.
+# tests/test-bootstrap.sh — the binary download, its digest check, and the install.
 #
-# find_checkout has three branches and two of them fail by returning a real
-# directory that is not a checkout, so the failure surfaces at the exec guard
-# blaming the wrong thing. That is why these are assertions rather than edits.
+# bootstrap.sh fetches a release asset rather than cloning a checkout, so a full
+# run needs the network and no suite does one. What runs offline: the platform
+# mapping and the digest check as extracted functions, plus static assertions
+# about the install — atomic, explicit-destination, safe replacement — and the
+# sentence that says what the digest proves.
 
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -15,98 +17,97 @@ pass=0; fail=0
 ok()    { printf '  ok    %s\n' "$1"; pass=$((pass+1)); }
 notok() { printf '  FAIL  %s\n    expected: %s\n    actual:   %s\n' "$1" "$2" "$3"; fail=$((fail+1)); }
 is()    { [[ "$2" == "$3" ]] && ok "$1" || notok "$1" "$3" "$2"; }
+has()   { [[ "$2" == *"$3"* ]] && ok "$1" \
+            || notok "$1" "bootstrap.sh contains '$3'" "no such string in bootstrap.sh"; }
+hasnt() { [[ "$2" != *"$3"* ]] && ok "$1" \
+            || notok "$1" "bootstrap.sh does not contain '$3'" \
+                     "found at line(s) $(grep -nF -- "$3" "$ROOT/bootstrap.sh" | cut -d: -f1 | tr '\n' ' ')"; }
 
-# A directory shaped like a CrossRev checkout, without being one.
-#
-# The path is resolved with `cd -P` deliberately. On macOS `mktemp -d` hands back
-# a path under /var, which is a symlink to /private/var — and find_checkout's
-# symlink branch normalises with `cd -P` before returning. Comparing a physical
-# path against a logical fixture would fail for a reason that has nothing to do
-# with the code under test.
-fake_checkout() {
-  local d; d="$(cd -P "$(mktemp -d)" && pwd)"
-  mkdir -p "$d/bin"
-  printf '#!/usr/bin/env bash\n' >"$d/install.sh"; chmod +x "$d/install.sh"
-  printf '#!/usr/bin/env bash\n' >"$d/bin/crossrev"; chmod +x "$d/bin/crossrev"
-  printf '%s' "$d"
-}
+src="$(cat "$ROOT/bootstrap.sh")"
 
-# An empty directory, normalised the same way, for the cases that assert a miss.
-empty_dir() { (cd -P "$(mktemp -d)" && pwd); }
-
-# The two functions, lifted out of bootstrap.sh.
+# The two pure functions, lifted out of bootstrap.sh.
 #
-# Sourcing the script whole would run the installer, so they are extracted
-# instead. BOTH of them: find_checkout calls _is_checkout, and an extraction that
-# took only the first would fail on "command not found" in every case — a
-# green-looking red for the wrong reason.
-#
-# _is_checkout is matched as a single line, not as a /^}/ range. It is a
-# one-liner with no closing brace of its own, so a range would run past it to
-# find_checkout's closing brace and overlap the second range entirely — and sed
-# emits a line once per matching command, so every overlapping line comes out
-# twice and the eval gets syntactically broken bash.
+# Sourcing the script whole would start a download, so they are extracted
+# instead, each as a /^name() {/,/^}/ range. _sum and die arrive as stubs: the
+# script selects its checksum tool by probing the machine, which a range cannot
+# carry, and the real die exits, which is what the refusal cases assert.
 extract_functions() {
-  sed -n '/^_is_checkout() {/p; /^find_checkout() {/,/^}/p' "$ROOT/bootstrap.sh"
+  sed -n '/^platform_asset() {/,/^}/p; /^verified_digest() {/,/^}/p' "$ROOT/bootstrap.sh"
+}
+_sum() { shasum -a 256 "$1" 2>/dev/null || sha256sum "$1"; }
+die() { printf 'DIED %s' "$1"; exit 3; }
+
+platform() {
+  ( eval "$(extract_functions)" 2>/dev/null
+    declare -F platform_asset >/dev/null || { printf '__extraction_failed__'; exit 0; }
+    platform_asset "$1" "$2" || printf '__refused__'; )
 }
 
-# find_checkout, run with the environment it reads.
+# 1. The two targets the release builds.
+is "macOS on Apple Silicon downloads the darwin asset" \
+  "$(platform Darwin arm64)" "crossrev-darwin-arm64"
+is "Linux on 64-bit Intel downloads the linux asset" \
+  "$(platform Linux x86_64)" "crossrev-linux-amd64"
+
+# 2. Anything else is refused by name, before any download.
+is "Windows is refused" "$(platform MINGW64_NT x86_64)" "__refused__"
+is "Linux on ARM is refused" "$(platform Linux aarch64)" "__refused__"
+is "macOS on Intel is refused" "$(platform Darwin x86_64)" "__refused__"
+
+# A digest check, run with fixture files.
 #
-# PATH is pinned rather than extended. find_checkout asks `command -v crossrev`,
-# so an inherited PATH lets a real installed CrossRev answer — and that answer
-# resolves back to a real checkout, which is a plausible-looking wrong result.
-# The suite would pass on a machine with nothing installed and fail on the
-# operator's own, which is the worst way for a test to be wrong. /usr/bin and
-# /bin stay because find_checkout shells out to dirname and readlink.
-#
-# DEST and DEST_EXPLICIT are read by find_checkout, which arrives through the
-# eval — shellcheck cannot see that far and reports both as unused.
-# shellcheck disable=SC2034
-run_find() {
-  local pwd_dir="$1" dest="$2" explicit="$3" binpath="${4:-}"
-  (
-    cd "$pwd_dir" || exit 1
-    DEST="$dest"; DEST_EXPLICIT="$explicit"
-    PATH="${binpath:+$binpath:}/usr/bin:/bin"
-    eval "$(extract_functions)" 2>/dev/null
-    # A failed extraction returns nothing from every case, including the ones
-    # asserting a miss — which reads as six wrong answers rather than one broken
-    # harness. Say so instead.
-    declare -F _is_checkout >/dev/null && declare -F find_checkout >/dev/null \
-      || { printf '__extraction_failed__'; exit 0; }
-    find_checkout || printf '__none__'
-  )
+# Each case runs in a subshell: verified_digest dies on a mismatch, and a die
+# in the suite's own shell would end the suite rather than fail one assertion.
+check() {
+  local d; d="$(mktemp -d)"
+  printf 'payload\n' >"$d/asset"
+  ( eval "$(extract_functions)" 2>/dev/null
+    if [[ "$1" == "mismatch" ]]; then
+      printf 'deadbeef  crossrev-linux-amd64\n' >"$d/checksums.txt"
+    else
+      printf 'deadbeef  some-other-file\n' >"$d/checksums.txt"
+    fi
+    verified_digest "$d/asset" "$d/checksums.txt" "crossrev-linux-amd64" || printf '__refused__'; )
 }
 
-# 1. Run from inside a checkout.
-c="$(fake_checkout)"
-is "run from inside a checkout returns that checkout" "$(run_find "$c" /nonexistent 0)" "$c"
+# The honest version: a matching digest must print the digest from
+# checksums.txt and exit 0.
+d="$(mktemp -d)"
+printf 'payload\n' >"$d/asset"
+_sum "$d/asset" | awk '{ print $1"  crossrev-linux-amd64" }' >"$d/sums"
+out="$( (eval "$(extract_functions)" 2>/dev/null; verified_digest "$d/asset" "$d/sums" "crossrev-linux-amd64"); echo "exit=$?")"
+is "a matching digest prints the expected digest and exits 0" "${out//$'\n'/}" "$(awk '{ print $1 }' "$d/sums")exit=0"
 
-# 2. An explicit --dir is the only place looked at.
-c2="$(fake_checkout)"; other="$(fake_checkout)"
-is "an explicit --dir that holds a checkout is used" "$(run_find "$other" "$c2" 1)" "$c2"
-is "an explicit --dir that does not is a miss, not a search" \
-  "$(run_find "$other" "$(empty_dir)" 1)" "__none__"
+# 4. Anything else dies rather than installing.
+is "a mismatched digest dies" "$(check mismatch)" "DIED the downloaded crossrev-linux-amd64 does not match its digest, so it was not installed"
+is "a checksums.txt with no line for the asset dies" "$(check missing)" "DIED checksums.txt names no digest for crossrev-linux-amd64"
 
-# 3. Where the script would have put it.
-c3="$(fake_checkout)"
-is "the default destination is checked last" "$(run_find "$(empty_dir)" "$c3" 0)" "$c3"
+# 5. The install: atomic, explicit, safe.
+has "the download lands in a private directory inside the destination" "$src" 'mktemp -d "$DEST/.crossrev-tmp.'
+has "and is renamed over the destination" "$src" 'mv -f "$TMP/$ASSET" "$target"'
+has "an explicit --dir is honoured" "$src" '--dir)  DEST='
+has "an identical binary is kept without asking" "$src" 'cmp -s "$TMP/$ASSET" "$target"'
+has "anything else asks before it is replaced" "$src" 'ask "Replace $target?"'
 
-# 4. The installed-symlink walk — the site that is off by two in the old world.
-c4="$(fake_checkout)"; bindir="$(empty_dir)"
-ln -s "$c4/bin/crossrev" "$bindir/crossrev"
-is "an installed symlink resolves back to its checkout" \
-  "$(run_find "$(empty_dir)" /nonexistent 0 "$bindir")" "$c4"
+# 6. What the check proves, in the script's own words — and what it must never
+# claim. A substituted release substitutes checksums.txt with the binary, so
+# the digest proves the transfer arrived intact and nothing about the publisher.
+has "the check is stated as transfer integrity" "$src" "covers the transfer, not the publisher"
+has "and disclaims authorship" "$src" "says nothing about who put it there"
+hasnt "no signature language" "$src" "sign"
+hasnt "no attestation language" "$src" "attest"
+hasnt "no authenticity language" "$src" "authentic"
 
-# 5. A directory with install.sh but no bin/crossrev is not a checkout.
-half="$(empty_dir)"; printf '#!/usr/bin/env bash\n' >"$half/install.sh"
-is "install.sh alone is not enough to call it a checkout" \
-  "$(run_find "$(empty_dir)" "$half" 0)" "__none__"
-
-# 6. The hand-off target the exec guard checks.
-grep -q 'exec "\$SRC/install.sh"' "$ROOT/bootstrap.sh" \
-  && ok "the hand-off execs the root install.sh" \
-  || notok "the hand-off execs the root install.sh" 'exec "$SRC/install.sh"' "$(grep -n 'exec ' "$ROOT/bootstrap.sh")"
+# 7. What is gone: no clone, no checkout, no library.
+hasnt "nothing clones anymore" "$src" "git clone"
+# A sourcing command, not the header comment explaining there is none.
+if grep -qE '^[[:space:]]*source ' "$ROOT/bootstrap.sh"; then
+  notok "nothing sources anything (it is self-contained)" "no source command" \
+    "found at line(s) $(grep -nE '^[[:space:]]*source ' "$ROOT/bootstrap.sh" | cut -d: -f1 | tr '\n' ' ')"
+else
+  ok "nothing sources anything (it is self-contained)"
+fi
+hasnt "nothing execs the old installer" "$src" "install.sh"
 
 printf '\n  %d passed, %d failed\n' "$pass" "$fail"
 (( fail == 0 ))

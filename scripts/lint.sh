@@ -6,8 +6,8 @@
 # itself — unquoted expansions, the empty-array-expands-to-one-empty-word trap,
 # assignments in a single `local` that read each other and silently do not.
 #
-# -x follows `source` directives, which is the only way it can see the lib files
-# from bin/crossrev.
+# -x follows `source` directives, which is the only way it can see across the
+# suite scaffolding the tests share.
 
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -35,10 +35,10 @@ printf '\nshellcheck -S warning\n'
 if command -v shellcheck >/dev/null 2>&1; then
   # bootstrap.sh is here for the reason it cannot be anywhere else: it is fetched
   # and piped into bash straight from the internet, and it is deliberately
-  # self-contained — it cannot source lib/ui.sh, because the reason it is running
-  # is that lib/ is not on the machine yet. Nothing else would catch a mistake in
+  # self-contained — it sources nothing, because the reason it is running
+  # is that nothing is installed yet. Nothing else would catch a mistake in
   # it.
-  if shellcheck -S warning -x bin/crossrev lib/*.sh lib/adapters/*.sh \
+  if shellcheck -S warning -x \
        tests/*.sh tests/stub/* bootstrap.sh install.sh scripts/*.sh \
        scripts/githooks/pre-commit; then
     printf '  ok    clean\n'
@@ -67,19 +67,21 @@ else
   fail=1
 fi
 
-# The permitted homes for a harness name are exactly three: lib/harnesses.json,
-# lib/adapters/<name>.sh, and tests/ — test fixtures name harnesses deliberately,
-# and tests/stub/codex is a tripwire that must keep naming one. Three files are
-# outside the scanned set on purpose: templates/crossrev.yml and
-# templates/operator-config.yml are example configuration whose job is to name a
-# harness, and scripts/refresh-prices.sh holds LiteLLM price keys whose model
-# ids contain harness names without driving any of them. A stale example there
-# is a documentation bug rather than an allowlist. Any other exemption is a
-# design change, not a lint tweak.
+# The permitted homes for a harness name are exactly two: assets/harnesses.json
+# and tests/ — test fixtures name harnesses deliberately, and tests/stub/codex
+# is a tripwire that must keep naming one. The adapters that used to form the
+# third home are Go code now, which this check cannot read; internal/archtest
+# and the descriptor tests own that side. Three files are outside the scanned
+# set on purpose: templates/crossrev.yml and templates/operator-config.yml are
+# example configuration whose job is to name a harness, and
+# scripts/refresh-prices.sh holds LiteLLM price keys whose model ids contain
+# harness names without driving any of them. A stale example there is a
+# documentation bug rather than an allowlist. Any other exemption is a design
+# change, not a lint tweak.
 printf '\nharness names\n'
-names="$(jq -r '.harnesses[].name, .not_driven[].name' lib/harnesses.json 2>/dev/null | paste -sd'|' -)"
+names="$(jq -r '.harnesses[].name, .not_driven[].name' assets/harnesses.json 2>/dev/null | paste -sd'|' -)"
 if [[ -z "$names" ]]; then
-  printf '  FAIL  lib/harnesses.json could not be read, so the harness-name check did not run\n'
+  printf '  FAIL  assets/harnesses.json could not be read, so the harness-name check did not run\n'
   fail=1
 else
   scan_scripts=()
@@ -88,12 +90,11 @@ else
     scan_scripts+=("$f")
   done
   hits="$(grep -nEH "\\b($names)\\b" \
-      bin/crossrev lib/*.sh \
       ${scan_scripts[@]+"${scan_scripts[@]}"} \
       templates/crossrev-review.yml templates/crossrev-resolve.yml templates/crossrev-token-refresh.yml \
       2>/dev/null | grep -vE ':[0-9]+:[[:space:]]*#' || true)"
   if [[ -z "$hits" ]]; then
-    printf '  ok    no harness name outside its adapter, the descriptor and tests/\n'
+    printf '  ok    no harness name outside the descriptor and tests/\n'
   else
     printf '  FAIL  a harness name appears outside its permitted homes\n'
     printf '%s\n' "$hits" | sed 's/^/        /'
@@ -103,10 +104,58 @@ fi
 
 printf '\nrendered docs\n'
 if bash scripts/render-harness-docs.sh --check >/dev/null 2>&1; then
-  printf '  ok    generated harness tables in README.md and docs/ match lib/harnesses.json\n'
+  printf '  ok    generated harness tables in README.md and docs/ match assets/harnesses.json\n'
 else
-  printf '  FAIL  generated harness tables differ from lib/harnesses.json\n'
+  printf '  FAIL  generated harness tables differ from assets/harnesses.json\n'
   printf '        Run: bash scripts/render-harness-docs.sh\n'
+  fail=1
+fi
+
+# The Go packages embed the schemas, the skills, the harness descriptor, the
+# price extract and the workflow templates, and `go:embed` cannot reach a file
+# above its own package. The copies under internal/*/assets/ are generated, so
+# a hand edit to one changes what a binary sends a harness or writes into a
+# repository while the file a contributor edits stays as it was.
+printf '\nembedded assets\n'
+if bash scripts/sync-embedded-assets.sh --check >/dev/null 2>&1; then
+  printf '  ok    the embedded schemas, skills, descriptor, prices and templates match their canonical files\n'
+else
+  printf '  FAIL  an embedded copy differs from its canonical file\n'
+  bash scripts/sync-embedded-assets.sh --check 2>&1 | sed 's/^/        /'
+  printf '        Run: bash scripts/sync-embedded-assets.sh\n'
+  fail=1
+fi
+
+printf '\ngo\n'
+if command -v go >/dev/null 2>&1; then
+  if GOTOOLCHAIN=go1.27.0 go mod verify >/dev/null 2>&1; then
+    printf '  ok    go mod verified\n'
+  else
+    printf '  FAIL  go mod verify failed\n'
+    GOTOOLCHAIN=go1.27.0 go mod verify 2>&1 | sed 's/^/        /'
+    fail=1
+  fi
+  if GOTOOLCHAIN=go1.27.0 go vet ./... >/dev/null 2>&1; then
+    printf '  ok    go vet clean\n'
+  else
+    printf '  FAIL  go vet found problems\n'
+    GOTOOLCHAIN=go1.27.0 go vet ./... 2>&1 | sed 's/^/        /'
+    fail=1
+  fi
+  # The generated Go parity vectors come from the policy tables in
+  # tests/fixtures/policy/. Nothing else compares them, so an edit to a table
+  # that nobody regenerated would leave the vectors disagreeing with the source
+  # they were cut from, with every other check green.
+  if GOTOOLCHAIN=go1.27.0 go run ./internal/testgen/policy -check >/dev/null 2>&1; then
+    printf '  ok    generated parity vectors match the policy tables\n'
+  else
+    printf '  FAIL  generated parity vectors differ from the policy tables\n'
+    GOTOOLCHAIN=go1.27.0 go run ./internal/testgen/policy -check 2>&1 | sed 's/^/        /'
+    printf '        Run: go run ./internal/testgen/policy\n'
+    fail=1
+  fi
+else
+  printf '  FAIL  go is not installed\n'
   fail=1
 fi
 

@@ -1,0 +1,35 @@
+{
+  "name": "boundary-inside-by-one-second",
+  "shell": "",
+  "repo": "acme/widget",
+  "author": "crossrev-acme[bot]",
+  "now": 1755400000,
+  "timeout_seconds": 600,
+  "waiting": [
+    {
+      "pr": 42,
+      "labels": [
+        "crossrev/awaiting-review"
+      ],
+      "head": "82491fd01f76a7c867457160482cf33c2a4b1cee"
+    }
+  ],
+  "comments": [
+    {
+      "id": 9001,
+      "author": "crossrev-acme[bot]",
+      "body": "Summary.\n\n<!-- crossrev: {\"v\":1,\"leg\":\"review\",\"pass\":1,\"state\":\"started\",\"ts\":1755399401,\"run_id\":\"1\",\"head_sha\":\"82491fd01f76a7c867457160482cf33c2a4b1cee\",\"harness\":\"claude\",\"model\":\"m\",\"model_reported\":\"m\",\"verdict\":null,\"findings\":[]} -->"
+    }
+  ],
+  "want": {
+    "page": "\n◇  CrossRev watchdog on acme/widget\n│  ○ #42 — waiting on the review leg, 9 minute(s) in, inside the 10-minute timeout\n│\n│  checked 1 pull request(s) waiting on a leg — retried 0, halted 0, 0 in draft\n└  A pass that never fired and a pass that converged look identical from outside, which is why this runs on a schedule.\n\n",
+    "calls": [
+      "issue-comments 42"
+    ],
+    "summary": {
+      "checked": 1,
+      "retried": 0,
+      "halted": 0
+    }
+  }
+}
