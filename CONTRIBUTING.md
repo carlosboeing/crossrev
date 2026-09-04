@@ -16,7 +16,7 @@ There is no build step and no package manager. The checkout is the installation.
 ```bash
 git clone https://github.com/carlosboeing/crossrev.git
 cd crossrev
-./install.sh          # symlinks bin/crossrev onto your PATH
+./install.sh          # builds the binary and copies it onto your PATH
 crossrev doctor       # names anything missing, and the fix
 ```
 

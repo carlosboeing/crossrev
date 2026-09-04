@@ -688,64 +688,10 @@ func TestEnvironmentContract(t *testing.T) {
 		}
 	})
 
-	t.Run("a name the shell reads with a default and never assigns is in the contract", func(t *testing.T) {
-		// The rule that catches a variable arriving on the Bash side. The Go
-		// walk above cannot: a name the port has not reached yet is read by no
-		// Go source, and the inventory is hand-written, so nothing else reads
-		// the shell back. TMPDIR arrived at lib/auth.sh:640 with the login
-		// fix and no rule failed.
-		inherited := inheritedShellReads(t, root)
-		if len(inherited) < len(table)/4 {
-			t.Fatalf("the shell scan found %d inherited reads, which is too few to be looking at this tool", len(inherited))
-		}
-		for _, read := range inherited {
-			if _, held := byName[read.name]; !held {
-				t.Errorf("%s reads %s with a default and the shell assigns it nowhere, and the contract does not carry it",
-					read.where, read.name)
-			}
-		}
-	})
-
-	t.Run("every measured shell site names its variable", func(t *testing.T) {
-		// The half a hand-written table gets wrong. A citation is a claim about
-		// a line in the shipped Bash, and this reads the line back.
-		inventory := loadShellInventory(t)
-		for _, measured := range inventory.Variables {
-			if !measured.Spelled {
-				continue
-			}
-			for _, site := range measured.Shell {
-				file, line, ok := strings.Cut(site, ":")
-				if !ok {
-					t.Errorf("%s: %q is not file:line", measured.Name, site)
-					continue
-				}
-				number, err := strconv.Atoi(line)
-				if err != nil || number < 1 {
-					t.Errorf("%s: %q has no line number", measured.Name, site)
-					continue
-				}
-				raw, err := os.ReadFile(filepath.Join(root, file))
-				if err != nil {
-					t.Errorf("%s: %v", measured.Name, err)
-					continue
-				}
-				lines := strings.Split(string(raw), "\n")
-				if number > len(lines) {
-					t.Errorf("%s: %s has only %d lines", measured.Name, file, len(lines))
-					continue
-				}
-				if !strings.Contains(lines[number-1], measured.Name) {
-					t.Errorf("%s: %s does not name it, it reads %q", measured.Name, site, lines[number-1])
-				}
-			}
-		}
-	})
-
 	t.Run("the descriptor-named variables are the descriptor's", func(t *testing.T) {
 		// The other half a hand-written table gets wrong. A name marked as the
-		// descriptor's has to be in lib/harnesses.json, and every name in
-		// lib/harnesses.json has to be marked.
+		// descriptor's has to be in assets/harnesses.json, and every name in
+		// assets/harnesses.json has to be marked.
 		document, err := harness.Descriptors()
 		if err != nil {
 			t.Fatalf("read the descriptor: %v", err)
@@ -772,15 +718,15 @@ func TestEnvironmentContract(t *testing.T) {
 
 		for _, v := range table {
 			if v.Descriptor && !fromDescriptor[v.Name] {
-				t.Errorf("%s is marked as the descriptor's and lib/harnesses.json does not declare it", v.Name)
+				t.Errorf("%s is marked as the descriptor's and assets/harnesses.json does not declare it", v.Name)
 			}
 			if !v.Descriptor && fromDescriptor[v.Name] {
-				t.Errorf("lib/harnesses.json declares %s and the contract does not mark it as the descriptor's", v.Name)
+				t.Errorf("assets/harnesses.json declares %s and the contract does not mark it as the descriptor's", v.Name)
 			}
 		}
 		for name := range fromDescriptor {
 			if _, held := byName[name]; !held {
-				t.Errorf("lib/harnesses.json declares %s and the contract does not carry it", name)
+				t.Errorf("assets/harnesses.json declares %s and the contract does not carry it", name)
 			}
 		}
 	})

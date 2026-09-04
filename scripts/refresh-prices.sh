@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
-# Regenerate lib/prices.json from LiteLLM's model_prices_and_context_window.json.
+# Regenerate assets/prices.json from LiteLLM's model_prices_and_context_window.json.
 #
-# A maintainer tool, never on a runtime path: lib/usage.sh only reads the
+# A maintainer tool, never on a runtime path: the binary only reads the
 # committed extract, so rendering a review comment needs no network and a
 # historical pass re-prices against exactly the revision its marker names.
 #
@@ -14,7 +14,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DEST="$ROOT/lib/prices.json"
+DEST="$ROOT/assets/prices.json"
 UPSTREAM_URL="https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json"
 COMMITS_URL="https://api.github.com/repos/BerriAI/litellm/commits?path=model_prices_and_context_window.json&per_page=1"
 

@@ -24,8 +24,8 @@ func TestEmbeddedAssetsAreTheCanonicalFiles(t *testing.T) {
 		canonical string
 		embedded  []byte
 	}{
-		{name: "the harness descriptor", canonical: "lib/harnesses.json", embedded: harness.DescriptorJSON()},
-		{name: "the price extract", canonical: "lib/prices.json", embedded: harness.PricesJSON()},
+		{name: "the harness descriptor", canonical: "assets/harnesses.json", embedded: harness.DescriptorJSON()},
+		{name: "the price extract", canonical: "assets/prices.json", embedded: harness.PricesJSON()},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			want, err := os.ReadFile(filepath.Join(repoRoot, tt.canonical))

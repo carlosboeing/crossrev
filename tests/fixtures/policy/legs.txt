@@ -1,0 +1,78 @@
+# Loop-policy tables: legs_should_continue, legs_resolve_redrivable, legs_review_redrivable.
+# Extracted verbatim from tests/test-legs.sh at the native cutover, when the
+# shell suite that owned them was deleted. internal/testgen/policy reads these
+# sections and generates the data-only Go fixtures; scripts/lint.sh re-checks
+# that the generated files match. Edit a table here, then regenerate.
+# [policy-table: legs_should_continue]
+decides continue "issues remain below every cap"        issues-remain 1 3 false false 0 12 10 200
+decides converged "converged stops the loop"            converged     1 3 false false 0 12 10 200
+decides halt     "crossrev/stop outranks a healthy verdict" converged  1 3 true  false 0 12 10 200
+decides halt     "the resolver reporting blocked halts"  issues-remain 1 3 false true  0 12 10 200
+
+# The boundary is the thing worth testing: pass 3 of max 3 is the last pass, not
+# the one after which a fourth begins.
+decides continue "one below the pass cap continues"     issues-remain 2 3 false false 0 12 10 200
+decides halt     "exactly at the pass cap halts"        issues-remain 3 3 false false 0 12 10 200
+decides halt     "beyond the pass cap halts"            issues-remain 4 3 false false 0 12 10 200
+
+decides continue "one below the daily cap continues"    issues-remain 1 3 false false 11 12 10 200
+decides halt     "exactly at the daily cap halts"       issues-remain 1 3 false false 12 12 10 200
+is "the daily halt names the other pull requests already reviewed" \
+  "$(legs_should_continue issues-remain 1 3 false false 12 12 10 200)" \
+  "halt reached max_prs_per_day (12) — 12 other pull requests were already reviewed in the last 24 hours"
+
+decides continue "exactly at the file cap still runs"   issues-remain 1 3 false false 0 12 200 200
+decides halt     "above the file cap halts"             issues-remain 1 3 false false 0 12 201 200
+decides continue "a file cap of zero is no cap"         issues-remain 1 3 false false 0 12 9999 0
+# [policy-table-end: legs_should_continue]
+# [policy-table: legs_resolve_redrivable]
+redrivable yes "a blocked pass re-drives once what stopped it is fixed" \
+  '{"leg":"resolve","pass":1,"state":"complete","blocked":true,"resolutions":[]}'
+redrivable yes "an escalated pass re-drives once a human has settled it" \
+  '{"leg":"resolve","pass":1,"state":"complete","blocked":false,"resolutions":[{"resolution":"fixed"},{"resolution":"escalated"}]}'
+redrivable no  "a settled pass stays refused" \
+  '{"leg":"resolve","pass":1,"state":"complete","blocked":false,"commit_sha":"d81a3f2abc","resolutions":[{"resolution":"fixed"},{"resolution":"skipped"}]}'
+# The leg writes no resolve marker for a pass that raised nothing, so a marker
+# that reached `complete` answered at least one finding. One that records none
+# of those answers settled nothing anybody can read, so it re-drives.
+redrivable yes "a pass that recorded no resolutions re-drives" \
+  '{"leg":"resolve","pass":1,"state":"complete","blocked":false,"resolutions":[]}'
+redrivable no  "an all-disputed pass stays refused" \
+  '{"leg":"resolve","pass":1,"state":"complete","blocked":false,"resolutions":[{"resolution":"disputed"}]}'
+# A deferral whose record never landed left its thread open on purpose, so the
+# pass is not settled: once the filing is fixed, driving it again is the remedy.
+redrivable yes "an unpersisted deferral re-drives once the filing is fixed" \
+  '{"leg":"resolve","pass":1,"state":"complete","blocked":false,"resolutions":[{"resolution":"deferred","crossrev_tracked":""}]}'
+# A fix the resolver claimed and never committed decided nothing either: the
+# thread is open, the code is unchanged, and re-running the leg is the remedy
+# once whatever stopped the write is dealt with.
+redrivable yes "a fix that reached no commit re-drives" \
+  '{"leg":"resolve","pass":1,"state":"complete","blocked":false,"commit_sha":null,"resolutions":[{"resolution":"fixed"},{"resolution":"disputed"}]}'
+redrivable yes "a legacy pass with no resolutions recorded re-drives" \
+  '{"leg":"resolve","pass":1,"state":"complete","blocked":false,"commit_sha":null}'
+# The same legacy marker with a commit is an ordinary finished pass: the head
+# moved, the reviewer has something to see, and re-deciding it settles nothing.
+redrivable no  "a legacy pass that pushed stays refused" \
+  '{"leg":"resolve","pass":1,"state":"complete","blocked":false,"commit_sha":"d81a3f2abc"}'
+# [policy-table-end: legs_resolve_redrivable]
+
+# Completing a harness failure writes verdict blocked, which is what used to
+# make the next review answer "already reviewed" on the same head.
+review_redrivable() {
+  local want="$1" desc="$2"
+  local got; if legs_review_redrivable "$3"; then got=yes; else got=no; fi
+  [[ "$got" == "$want" ]] && ok "$desc" || notok "$desc" "$want" "$got"
+}
+
+# [policy-table: legs_review_redrivable]
+review_redrivable yes "a blocked review re-drives once the harness can run" \
+  '{"leg":"review","pass":1,"state":"complete","verdict":"blocked","findings":[]}'
+review_redrivable no  "a review that found issues stays refused" \
+  '{"leg":"review","pass":1,"state":"complete","verdict":"issues-remain","findings":[{"severity":"high"}]}'
+review_redrivable no  "a converged review stays refused" \
+  '{"leg":"review","pass":1,"state":"complete","verdict":"converged","findings":[]}'
+review_redrivable no  "an unfinished review is recovery, not this re-drive" \
+  '{"leg":"review","pass":1,"state":"started","verdict":null,"findings":[]}'
+review_redrivable no  "an empty marker is not redrivable" \
+  ""
+# [policy-table-end: legs_review_redrivable]

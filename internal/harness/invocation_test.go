@@ -3,7 +3,6 @@ package harness_test
 import (
 	"encoding/json"
 	"errors"
-	osexec "os/exec"
 	"strings"
 	"testing"
 
@@ -143,45 +142,41 @@ func TestAssertEnvCleanNamesEveryLeakedVariable(t *testing.T) {
 }
 
 // Layer one's other half, cross-checked against legs_configured_difference.
-func TestConfiguredDifferenceMatchesTheShell(t *testing.T) {
-	for _, tool := range []string{"bash"} {
-		if _, err := osexec.LookPath(tool); err != nil {
-			t.Skipf("%s is not on PATH, so the shell side cannot be run", tool)
-		}
-	}
-
-	// Nothing is spliced into this script: the six settings arrive as arguments.
-	const script = `
-set -uo pipefail
-ROOT="$1"; shift
-export ROOT
-# shellcheck source=/dev/null
-source "$ROOT/lib/ui.sh"
-# shellcheck source=/dev/null
-source "$ROOT/lib/legs.sh"
-legs_configured_difference "$@"
-`
-
-	cases := []struct{ reviewer, resolver harness.LegSettings }{
-		{harness.LegSettings{"claude", "vendor", "m"}, harness.LegSettings{"claude", "vendor", "m"}},
-		{harness.LegSettings{"claude", "vendor", "m"}, harness.LegSettings{"codex", "vendor", "m"}},
-		{harness.LegSettings{"claude", "vendor", "m"}, harness.LegSettings{"claude", "an-endpoint", "m"}},
-		{harness.LegSettings{"claude", "vendor", "m"}, harness.LegSettings{"claude", "vendor", "n"}},
-		{harness.LegSettings{}, harness.LegSettings{}},
+func TestConfiguredDifferenceFreezesTheShellAnswers(t *testing.T) {
+	// legs_configured_difference lived in lib/legs.sh. The five answers below
+	// are what it printed, measured at the native cutover; the shell is
+	// removed, so they are frozen here.
+	cases := []struct {
+		name     string
+		reviewer harness.LegSettings
+		resolver harness.LegSettings
+		want     string
+	}{
+		{name: "identical legs",
+			reviewer: harness.LegSettings{Harness: "claude", Endpoint: "vendor", Model: "m"},
+			resolver: harness.LegSettings{Harness: "claude", Endpoint: "vendor", Model: "m"},
+			want:     "same"},
+		{name: "another harness",
+			reviewer: harness.LegSettings{Harness: "claude", Endpoint: "vendor", Model: "m"},
+			resolver: harness.LegSettings{Harness: "codex", Endpoint: "vendor", Model: "m"},
+			want:     "different"},
+		{name: "another endpoint",
+			reviewer: harness.LegSettings{Harness: "claude", Endpoint: "vendor", Model: "m"},
+			resolver: harness.LegSettings{Harness: "claude", Endpoint: "an-endpoint", Model: "m"},
+			want:     "different"},
+		{name: "another model",
+			reviewer: harness.LegSettings{Harness: "claude", Endpoint: "vendor", Model: "m"},
+			resolver: harness.LegSettings{Harness: "claude", Endpoint: "vendor", Model: "n"},
+			want:     "different"},
+		{name: "two empty settings",
+			reviewer: harness.LegSettings{},
+			resolver: harness.LegSettings{},
+			want:     "same"},
 	}
 	for _, tt := range cases {
-		name := tt.reviewer.Harness + "/" + tt.reviewer.Endpoint + "/" + tt.reviewer.Model +
-			" against " + tt.resolver.Harness + "/" + tt.resolver.Endpoint + "/" + tt.resolver.Model
-		t.Run(name, func(t *testing.T) {
-			cmd := osexec.Command("bash", "-c", script, "bash", repoRoot,
-				tt.reviewer.Harness, tt.reviewer.Endpoint, tt.reviewer.Model,
-				tt.resolver.Harness, tt.resolver.Endpoint, tt.resolver.Model)
-			out, err := cmd.Output()
-			if err != nil {
-				t.Fatalf("running legs_configured_difference: %v", err)
-			}
-			if got := harness.ConfiguredDifference(tt.reviewer, tt.resolver); got != string(out) {
-				t.Errorf("Go = %q, Bash = %q", got, string(out))
+		t.Run(tt.name, func(t *testing.T) {
+			if got := harness.ConfiguredDifference(tt.reviewer, tt.resolver); got != tt.want {
+				t.Errorf("Go  = %q\nwant = %q", got, tt.want)
 			}
 		})
 	}
@@ -228,49 +223,29 @@ func TestAssertModelsDivergedOnlyHaltsOnAProvenConvergence(t *testing.T) {
 	}
 }
 
-// _same_model, run rather than described.
-//
-// The function is extracted from lib/run.sh by name rather than sourcing the
-// whole file, which defines several hundred functions and runs top-level guards.
-// An extraction that failed would exit 2 rather than pass vacuously.
-func TestSameModelMatchesTheShell(t *testing.T) {
-	if _, err := osexec.LookPath("bash"); err != nil {
-		t.Skip("bash is not on PATH, so the shell side cannot be run")
-	}
-
-	// Nothing is spliced into this script: the two names arrive as arguments.
-	const script = `
-set -uo pipefail
-ROOT="$1"
-eval "$(sed -n '/^_same_model() {$/,/^}$/p' "$ROOT/lib/run.sh")"
-declare -F _same_model >/dev/null || { printf 'the function could not be extracted\n' >&2; exit 2; }
-if _same_model "$2" "$3"; then printf 'same'; else printf 'differ'; fi
-`
-
-	cases := [][2]string{
-		{"claude-opus-5", "claude-opus-5"},
-		{"claude-opus-5", "claude-opus-5-20260101"},
-		{"opus", "claude-opus-4-5-20251101"},
-		{"claude-opus-5", "claude-sonnet-5"},
-		{"", "claude-opus-5"},
-		{"claude-opus-5", ""},
-		{"", ""},
-		{"CLAUDE-OPUS-5", "claude-opus-5"},
-		{"claude-opus-5", "CLAUDE-OPUS-5-20260101"},
+// _same_model lived in lib/run.sh. The table below is what it answered,
+// measured at the native cutover; the shell is removed, so the answers are
+// frozen here. TestSameModelHoldsInBothDirections pins the containment rule
+// itself; this pins the edges, including the empty and case-folded ones.
+func TestSameModelFreezesTheShellAnswers(t *testing.T) {
+	cases := []struct {
+		a, b string
+		want bool
+	}{
+		{"claude-opus-5", "claude-opus-5", true},
+		{"claude-opus-5", "claude-opus-5-20260101", true},
+		{"opus", "claude-opus-4-5-20251101", true},
+		{"claude-opus-5", "claude-sonnet-5", false},
+		{"", "claude-opus-5", false},
+		{"claude-opus-5", "", false},
+		{"", "", false},
+		{"CLAUDE-OPUS-5", "claude-opus-5", true},
+		{"claude-opus-5", "CLAUDE-OPUS-5-20260101", true},
 	}
 	for _, tt := range cases {
-		t.Run(tt[0]+" against "+tt[1], func(t *testing.T) {
-			cmd := osexec.Command("bash", "-c", script, "bash", repoRoot, tt[0], tt[1])
-			out, err := cmd.Output()
-			if err != nil {
-				t.Fatalf("running _same_model: %v", err)
-			}
-			got := "differ"
-			if harness.SameModel(tt[0], tt[1]) {
-				got = "same"
-			}
-			if got != string(out) {
-				t.Errorf("Go = %q, Bash = %q", got, string(out))
+		t.Run(tt.a+" against "+tt.b, func(t *testing.T) {
+			if got := harness.SameModel(tt.a, tt.b); got != tt.want {
+				t.Errorf("Go  = %v\nwant = %v", got, tt.want)
 			}
 		})
 	}

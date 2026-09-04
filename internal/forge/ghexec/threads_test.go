@@ -2,29 +2,27 @@ package ghexec_test
 
 import (
 	"context"
-	"os"
 	"strings"
 	"testing"
 )
 
-// The GraphQL documents are transcribed from lib/github.sh, so they are
-// compared against it rather than against a copy of themselves.
-func TestGraphQLDocumentsMatchTheShell(t *testing.T) {
-	src, err := os.ReadFile("../../../lib/github.sh")
-	if err != nil {
-		t.Fatalf("reading lib/github.sh: %v", err)
-	}
-	shell := string(src)
-
+// The GraphQL documents, frozen at the native cutover.
+//
+// They were transcribed from lib/github.sh, and this test compared them
+// against it rather than against a copy of themselves. The shell is removed,
+// so the transcribed documents are frozen here: what actually gets sent, read
+// back off the argv the client builds.
+func TestGraphQLDocumentsAreFrozen(t *testing.T) {
 	for _, c := range []struct {
 		name string
 		got  string
+		want string
 	}{
-		{"reviewThreads", threadsQueryFromCode(t)},
-		{"resolveReviewThread", resolveMutationFromCode(t)},
+		{"reviewThreads", threadsQueryFromCode(t), "\n    query($owner:String!,$name:String!,$number:Int!) {\n      repository(owner:$owner,name:$name) {\n        pullRequest(number:$number) {\n          reviewThreads(first:100) {\n            nodes {\n              id isResolved isOutdated path line\n              comments(first:30) { nodes { databaseId body author { login } } }\n            }\n          }\n        }\n      }\n    }"},
+		{"resolveReviewThread", resolveMutationFromCode(t), "\n    mutation($threadId:ID!) {\n      resolveReviewThread(input:{threadId:$threadId}) { thread { isResolved } }\n    }"},
 	} {
-		if !strings.Contains(shell, c.got) {
-			t.Errorf("the %s document is not in lib/github.sh verbatim:\n%s", c.name, c.got)
+		if c.got != c.want {
+			t.Errorf("the %s document moved:\n got: %q\nwant: %q", c.name, c.got, c.want)
 		}
 	}
 }

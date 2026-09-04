@@ -1,26 +1,25 @@
 # Every original tests/test-*.sh suite, the behaviour it owned, and what now proves it.
 # Columns: suite, class, behaviour, destinations (space-separated).
 # A go-test row is proved by Go package tests. A black-box row is proved by running
-# the shell suite itself against one built binary (scripts/test-native.sh); those
-# suites must neither source lib/*.sh nor execute bin/crossrev, which
-# scripts/check-parity-coverage.sh --native enforces. Mixed suites that do both
-# are recorded under their Go proof; their CLI halves keep running in
-# test-native.sh as regression, but the proof the gate checks is the Go one.
+# the shell suite itself against one built binary, which is what tests/run.sh
+# builds and runs; those suites must neither source lib/*.sh nor execute
+# bin/crossrev, which scripts/check-parity-coverage.sh --native enforces.
+# Rows for deleted suites stay as the record of where their behaviour went.
 test-action.sh	black-box	action.yml forwards only flags the named leg accepts	tests/test-action.sh
 test-adapters.sh	black-box	agy adapter behaviour through a real review leg	tests/test-adapters.sh
 test-auth.sh	go-test	App registration names and implied slugs	internal/app/metadata_test.go internal/app/login_test.go
 test-bootstrap.sh	black-box	binary download, digest check and atomic install	tests/test-bootstrap.sh
-test-commit-convention.sh	go-test	resolve prompt commit-convention over varied histories	internal/prompt/commit_test.go internal/prompt/shell_test.go
+test-commit-convention.sh	go-test	resolve prompt commit-convention over varied histories	internal/prompt/commit_test.go internal/prompt/convention_test.go
 test-config.sh	go-test	config layers, endpoint fallback and backlog discovery	internal/config/load_test.go internal/config/merge_test.go internal/config/validate_test.go internal/config/endpoint_test.go internal/config/backlog_test.go
 test-credentials.sh	go-test	restored credentials read, refuse rules, never write back	internal/cred/refresh_test.go internal/cred/freshness_test.go internal/cred/staging_test.go
 test-diff.sh	go-test	diff gutter numbering and anchor snap for off-hunk findings	internal/diff/parser_test.go internal/diff/anchor_test.go internal/diff/numbered_test.go
 test-githooks.sh	black-box	pre-commit hook must-commit versus must-refuse sets	tests/test-githooks.sh
-test-harnesses.sh	go-test	harness descriptor load, query and validation failures	internal/harness/descriptor_test.go internal/harness/descriptor_parity_test.go internal/core/harness_test.go
+test-harnesses.sh	go-test	harness descriptor load, query and validation failures	internal/harness/descriptor_test.go internal/core/harness_test.go
 test-init.sh	go-test	init plan gate, label inventory, dry-run and upgrade	internal/initcmd/config_test.go internal/initcmd/execute_test.go internal/initcmd/plan_test.go internal/initcmd/render_test.go
 test-install.sh	black-box	build-from-checkout install and the skills hand-off	tests/test-install.sh
 test-legs.sh	go-test	loop termination and push guards	internal/cycle/cycle_test.go internal/cycle/bound_test.go internal/policy/guards_test.go internal/policy/termination_test.go
 test-log.sh	go-test	run log, transcripts, redaction and retention sweep	internal/runlog/log_test.go internal/runlog/redact_test.go internal/runlog/retention_test.go internal/runlog/transcript_test.go
-test-parity.sh	go-test	frozen Bash baseline vectors, read from the Go side	internal/config/parity_test.go internal/cred/parity_test.go internal/policy/parity_generated_test.go internal/prstate/parity_generated_test.go internal/runlog/parity_test.go internal/harness/descriptor_parity_test.go
+test-parity.sh	go-test	frozen Bash baseline vectors, read from the Go side	internal/config/parity_test.go internal/cred/parity_test.go internal/policy/parity_generated_test.go internal/prstate/parity_generated_test.go internal/runlog/parity_test.go
 test-permissions.sh	go-test	write permission scoped per leg	internal/app/permissions_test.go internal/sandbox/paths_test.go internal/sandbox/quarantine_test.go
 test-persist.sh	black-box	resolve leg resolutions, deferral, dedupe and commit	tests/test-persist.sh
 test-policy.sh	go-test	policy from the base revision, marker trust and caps	internal/policy/guards_test.go internal/policy/labels_test.go internal/policy/termination_test.go internal/config/load_test.go

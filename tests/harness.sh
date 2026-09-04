@@ -18,8 +18,8 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 #
 # The stubs are configured through the environment: tests/stub/gh reads its
 # route table from CROSSREV_GH_ROUTES, the harness stubs read their payload from
-# CROSSREV_REVIEW_PAYLOAD. bin/crossrev hands every child the whole environment
-# it holds, so a stub it starts already carries all of them.
+# CROSSREV_REVIEW_PAYLOAD. The shell entrypoint handed every child the whole
+# environment it held, so a stub it started already carried all of them.
 #
 # The native binary hands each child an exact allowlist — Inherit, in
 # internal/exec, which is the ADR 0001 boundary — and a test-only name is not on
@@ -79,34 +79,34 @@ WRAP
 
 # Which crossrev the CLI-driven cases invoke.
 #
-# CROSSREV_TEST_BIN names an executable to run instead of the shell entry point,
-# which is how scripts/test-native.sh points these suites at the Go binary. It
-# has to be an absolute path: every fixture cds into a throwaway checkout, so a
+# CROSSREV_TEST_BIN names the built binary to run. tests/run.sh builds it once
+# and exports the path; a suite run any other way refuses rather than falling
+# back, because there is no shell implementation left to fall back to. It has
+# to be an absolute path: every fixture cds into a throwaway checkout, so a
 # relative one would resolve against a different directory in every case.
 #
-# Absence selects bin/crossrev, so a plain `bash tests/run.sh` tests the shell
-# and nothing about the shipped tool depends on this variable. There is no
-# production flag that chooses between the two.
-CROSSREV="$HERE/../bin/crossrev"
-if [[ -n "${CROSSREV_TEST_BIN:-}" ]]; then
-  [[ "$CROSSREV_TEST_BIN" = /* ]] || {
-    printf 'CROSSREV_TEST_BIN must be an absolute path, and it is: %s\n' "$CROSSREV_TEST_BIN" >&2
-    exit 2
-  }
-  [[ -x "$CROSSREV_TEST_BIN" ]] || {
-    printf 'CROSSREV_TEST_BIN is not an executable: %s\n' "$CROSSREV_TEST_BIN" >&2
-    exit 2
-  }
-  CROSSREV="$(_stub_env_wrapper "$CROSSREV_TEST_BIN")"
-  # The wrapper stays live for the whole suite, so its directory goes when
-  # the suite exits, not per invocation. None of the CLI-driven suites sets
-  # its own EXIT trap (measured: `grep -n 'trap ' tests/test-*.sh` finds one
-  # only in test-diff.sh, test-githooks.sh and test-parity.sh, none of which
-  # runs against the binary). A suite that adds one replaces this and the
-  # directory leaks as it did before, which is no worse.
-  _stub_env_dir="${CROSSREV%/crossrev}"
-  trap 'rm -rf "$_stub_env_dir"' EXIT
+# There is no production flag that chooses an implementation. The binary is the
+# tool; this variable exists so one built binary serves the whole run.
+if [[ -z "${CROSSREV_TEST_BIN:-}" ]]; then
+  printf 'CROSSREV_TEST_BIN is not set; run the suite through bash tests/run.sh\n' >&2
+  exit 2
 fi
+[[ "$CROSSREV_TEST_BIN" = /* ]] || {
+  printf 'CROSSREV_TEST_BIN must be an absolute path, and it is: %s\n' "$CROSSREV_TEST_BIN" >&2
+  exit 2
+}
+[[ -x "$CROSSREV_TEST_BIN" ]] || {
+  printf 'CROSSREV_TEST_BIN is not an executable: %s\n' "$CROSSREV_TEST_BIN" >&2
+  exit 2
+}
+CROSSREV="$(_stub_env_wrapper "$CROSSREV_TEST_BIN")"
+# The wrapper stays live for the whole suite, so its directory goes when
+# the suite exits, not per invocation. None of the CLI-driven suites sets
+# its own EXIT trap (measured: `grep -n 'trap ' tests/test-*.sh` finds one
+# only in test-githooks.sh). A suite that adds one replaces this and the
+# directory leaks as it did before, which is no worse.
+_stub_env_dir="${CROSSREV%/crossrev}"
+trap 'rm -rf "$_stub_env_dir"' EXIT
 
 # shellcheck source=tmproot.sh
 source "$HERE/tmproot.sh"

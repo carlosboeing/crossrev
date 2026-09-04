@@ -148,16 +148,3 @@ func chmodExecutable(t *testing.T, path string) {
 		t.Fatalf("chmod %s: %v", path, err)
 	}
 }
-
-// shellOracleEnv is the environment the shell oracle runs under: the same
-// pinned dates and isolated configuration testGit gives the Go side, so the two
-// are compared over one repository under one set of rules.
-func shellOracleEnv() []string {
-	env := append([]string{
-		"HOME=" + os.TempDir(),
-		"GIT_CONFIG_GLOBAL=" + os.DevNull,
-		"GIT_CONFIG_SYSTEM=" + os.DevNull,
-		"GIT_TERMINAL_PROMPT=0",
-	}, pinnedDates...)
-	return append(env, exec.Inherit([]string{"PATH", "LANG", "LC_ALL"})...)
-}

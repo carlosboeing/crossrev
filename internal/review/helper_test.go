@@ -1,12 +1,9 @@
 package review_test
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
-	osexec "os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -519,31 +516,6 @@ func writeHead(e *env, path, content string) {
 		e.vcs.files[headSHA] = map[string][]byte{}
 	}
 	e.vcs.files[headSHA][path] = []byte(content)
-}
-
-func repoRootPath(t *testing.T) string {
-	t.Helper()
-	root, err := filepath.Abs(repoRoot)
-	if err != nil {
-		t.Fatalf("repo root: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(root, "lib", "run.sh")); err != nil {
-		t.Fatalf("lib/run.sh missing under %s: %v", root, err)
-	}
-	return root
-}
-
-func bashOutput(t *testing.T, script string, args ...string) string {
-	t.Helper()
-	cmdArgs := append([]string{"-c", script, "bash"}, args...)
-	cmd := osexec.Command("bash", cmdArgs...)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
-	if err != nil {
-		t.Fatalf("bash: %v\nstderr: %s", err, stderr.String())
-	}
-	return string(out)
 }
 
 // env is what the leg hands a child.

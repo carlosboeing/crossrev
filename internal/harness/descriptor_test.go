@@ -3,7 +3,6 @@ package harness_test
 import (
 	"encoding/json"
 	"errors"
-	"os/exec"
 	"reflect"
 	"slices"
 	"strings"
@@ -258,15 +257,18 @@ func TestNamesHumanReadsAsASentence(t *testing.T) {
 
 // --- the validator, against the shell that wrote it --------------------------
 
-// mutation is one of the rejection cases tests/test-harnesses.sh:105-175 builds,
-// applied to the shipped descriptor.
+// mutation is one rejection case: the shipped descriptor with one edit applied.
+//
+// snippet is the fault's stable fragment, so a Go message that merely differed
+// in wording from the shell's would still be caught by the full-string
+// comparison below AND by this. sentence is the whole Go answer, frozen at the
+// native cutover from the implementation the shell cross-check had proven
+// equal; it pins the wording the shell check used to pin.
 type mutation struct {
-	name  string
-	apply func(map[string]any)
-	// snippet is what the Bash test asserts the message contains, so a Go
-	// message that merely differed in wording would still be caught by the
-	// full-string comparison against bash below AND by this.
-	snippet string
+	name     string
+	apply    func(map[string]any)
+	snippet  string
+	sentence string
 }
 
 func mutations() []mutation {
@@ -278,51 +280,67 @@ func mutations() []mutation {
 	}
 	return []mutation{
 		{name: "wrong version", snippet: "reads version 1",
-			apply: func(d map[string]any) { d["version"] = float64(2) }},
+			sentence: "the descriptor's version is 2, and this build reads version 1",
+			apply:    func(d map[string]any) { d["version"] = float64(2) }},
 		{name: "harnesses as an object", snippet: "must be arrays",
-			apply: func(d map[string]any) { d["harnesses"] = map[string]any{} }},
+			sentence: "harnesses and not_driven must be arrays of objects carrying a name",
+			apply:    func(d map[string]any) { d["harnesses"] = map[string]any{} }},
 		{name: "empty harness array", snippet: "names no harnesses",
-			apply: func(d map[string]any) { d["harnesses"] = []any{} }},
+			sentence: "the descriptor names no harnesses",
+			apply:    func(d map[string]any) { d["harnesses"] = []any{} }},
 		{name: "duplicate harness name", snippet: "appears more than once",
+			sentence: "harness name claude appears more than once",
 			apply: func(d map[string]any) {
 				list := d["harnesses"].([]any)
 				d["harnesses"] = append(list, list[0])
 			}},
 		{name: "bad harness name pattern", snippet: "is not [a-z][a-z0-9-]*",
-			apply: func(d map[string]any) { harnessAt(d, 0)["name"] = "Claude_Code" }},
+			sentence: `harness name "Claude_Code" is not [a-z][a-z0-9-]*`,
+			apply:    func(d map[string]any) { harnessAt(d, 0)["name"] = "Claude_Code" }},
 		{name: "not_driven collides with a driven harness", snippet: "is also a driven harness",
+			sentence: "a not_driven name is duplicated, or is also a driven harness",
 			apply: func(d map[string]any) {
 				d["not_driven"] = append(d["not_driven"].([]any),
 					map[string]any{"name": "claude", "reason": "dup"})
 			}},
 		{name: "invalid environment variable name", snippet: "is not [A-Z_][A-Z0-9_]*",
-			apply: func(d map[string]any) { credentialAt(d, 0)["secret"] = "bad-secret-name" }},
+			sentence: "environment variable name bad-secret-name is not [A-Z_][A-Z0-9_]*",
+			apply:    func(d map[string]any) { credentialAt(d, 0)["secret"] = "bad-secret-name" }},
 		{name: "out-of-range archetype", snippet: "out-of-range",
-			apply: func(d map[string]any) { credentialAt(d, 0)["archetype"] = "Z" }},
+			sentence: "harness claude carries an out-of-range archetype, provenance, schema_style, install kind or staging kind",
+			apply:    func(d map[string]any) { credentialAt(d, 0)["archetype"] = "Z" }},
 		{name: "out-of-range credential billing", snippet: "not subscription, api or unknown",
-			apply: func(d map[string]any) { credentialAt(d, 0)["billing"] = "free" }},
+			sentence: "harness claude carries a credential billing that is not subscription, api or unknown",
+			apply:    func(d map[string]any) { credentialAt(d, 0)["billing"] = "free" }},
 		{name: "quarantine path with a parent segment", snippet: "contains a .. segment",
+			sentence: `quarantine or destination path "../etc/passwd" is absolute, empty, or contains a .. segment`,
 			apply: func(d map[string]any) {
 				entry := harnessAt(d, 0)
 				entry["quarantine"] = append(entry["quarantine"].([]any), "../etc/passwd")
 			}},
 		{name: "installer command omitting its pinned version", snippet: "pinned version its command does not carry",
+			sentence: "harness claude has an installer with no url, no command, or a pinned version its command does not carry",
 			apply: func(d map[string]any) {
 				harnessAt(d, 0)["install"].(map[string]any)["pinned_version"] = "9.9.9"
 			}},
 		{name: "a quarantine entry that is not a string", snippet: "is absolute, empty, or contains a .. segment",
+			sentence: "quarantine or destination path 123 is absolute, empty, or contains a .. segment",
 			apply: func(d map[string]any) {
 				entry := harnessAt(d, 0)
 				entry["quarantine"] = append(entry["quarantine"].([]any), float64(123))
 			}},
 		{name: "a harness name that is not a string", snippet: "is not [a-z][a-z0-9-]*",
-			apply: func(d map[string]any) { harnessAt(d, 0)["name"] = float64(5) }},
+			sentence: "harness name 5 is not [a-z][a-z0-9-]*",
+			apply:    func(d map[string]any) { harnessAt(d, 0)["name"] = float64(5) }},
 		{name: "a legs element outside review and resolve", snippet: "drawn from review and resolve",
-			apply: func(d map[string]any) { harnessAt(d, 0)["legs"] = []any{"review", "deploy"} }},
+			sentence: "harness claude carries a legs field that is not a non-empty array drawn from review and resolve",
+			apply:    func(d map[string]any) { harnessAt(d, 0)["legs"] = []any{"review", "deploy"} }},
 		{name: "an empty legs array", snippet: "drawn from review and resolve",
-			apply: func(d map[string]any) { harnessAt(d, 0)["legs"] = []any{} }},
+			sentence: "harness claude carries a legs field that is not a non-empty array drawn from review and resolve",
+			apply:    func(d map[string]any) { harnessAt(d, 0)["legs"] = []any{} }},
 		{name: "legs as a bare string", snippet: "non-empty array drawn from review and resolve",
-			apply: func(d map[string]any) { harnessAt(d, 0)["legs"] = "review" }},
+			sentence: "harness claude carries a legs field that is not a non-empty array drawn from review and resolve",
+			apply:    func(d map[string]any) { harnessAt(d, 0)["legs"] = "review" }},
 	}
 }
 
@@ -366,32 +384,23 @@ func TestValidatorRejectsEveryCaseTheShellRejects(t *testing.T) {
 	}
 }
 
-// The Go validator answers the same sentence the Bash one does, word for word.
+// The validator answers every mutation with its frozen sentence.
 //
-// It runs the shell rather than reading a frozen vector, because
-// harness_validate's messages interpolate the descriptor's own values and a
-// frozen copy would go stale the moment lib/harnesses.json changed. The
-// tests/fixtures/parity oracle covers what does not move; this covers what does.
-func TestValidatorMessagesMatchTheShell(t *testing.T) {
-	for _, tool := range []string{"bash", "jq"} {
-		if _, err := exec.LookPath(tool); err != nil {
-			t.Skipf("%s is not on PATH, so the shell side cannot be run", tool)
-		}
-	}
-
-	if got := shellValidate(t, harness.DescriptorJSON()); got != "" {
-		t.Fatalf("the shell rejects the shipped descriptor: %q; the cross-check is not comparing what it thinks it is", got)
+// The sentences were measured against the shell validator at the native
+// cutover, when this test compared the two word for word. The shell is
+// removed, so the measured answers are frozen here; TestValidatorRejectsEvery
+// CaseTheShellRejects keeps the wording-agnostic net beside it, so a message
+// that names the fault differently is still caught there.
+func TestValidatorMessagesAreFrozen(t *testing.T) {
+	if got := harness.Validate(harness.DescriptorJSON()); got != "" {
+		t.Fatalf("the shipped descriptor is rejected: %q; the frozen sentences are not comparing what they think they are", got)
 	}
 
 	for _, tt := range mutations() {
 		t.Run(tt.name, func(t *testing.T) {
 			descriptor := mutate(t, tt.apply)
-			want := shellValidate(t, descriptor)
-			if want == "" {
-				t.Fatalf("the shell accepted the mutation, so there is nothing to compare")
-			}
-			if got := harness.Validate(descriptor); got != want {
-				t.Errorf("Go  = %q\nBash = %q", got, want)
+			if got := harness.Validate(descriptor); got != tt.sentence {
+				t.Errorf("Go  = %q\nwant = %q", got, tt.sentence)
 			}
 		})
 	}
@@ -455,27 +464,21 @@ func TestLoadRefusalCarriesConsequence(t *testing.T) {
 	if err == nil {
 		t.Fatal("Load accepted bad descriptor")
 	}
-	want := "the harness descriptor is invalid: the descriptor's version is 2, and this build reads version 1\n   It drives sourced paths, install commands, environment names and quarantine paths, so CrossRev stops rather than acting on it. Fix lib/harnesses.json."
+	want := "the harness descriptor is invalid: the descriptor's version is 2, and this build reads version 1\n   It drives sourced paths, install commands, environment names and quarantine paths, so CrossRev stops rather than acting on it. Fix assets/harnesses.json."
 	if !strings.Contains(err.Error(), want) {
 		t.Errorf("err = %q, want %q", err.Error(), want)
 	}
 }
 
-// The order of the twelve checks is the Bash function's `elif` chain, and a
+// The order of the twelve checks is the validator's own chain, and a
 // descriptor carrying two faults reports the earlier one.
 //
 // Validate's own comment says "the tests freeze which that is". Every mutation
 // above carries exactly ONE fault, so no ordering was ever exercised and
 // swapping two checks survived. These documents carry two, and the pair is
 // chosen so that each fault would produce a different sentence on its own —
-// the shell is the oracle for which one wins.
+// the earlier and later snippets are the frozen oracle for which one wins.
 func TestTheEarlierOfTwoFaultsIsTheOneReported(t *testing.T) {
-	for _, tool := range []string{"bash", "jq"} {
-		if _, err := exec.LookPath(tool); err != nil {
-			t.Skipf("%s is not on PATH, so the shell side cannot be run", tool)
-		}
-	}
-
 	harnessAt := func(document map[string]any, at int) map[string]any {
 		return document["harnesses"].([]any)[at].(map[string]any)
 	}
@@ -570,17 +573,12 @@ func TestTheEarlierOfTwoFaultsIsTheOneReported(t *testing.T) {
 			if tt.earlier == tt.later {
 				t.Fatal("the two faults share a sentence, so this proves no ordering")
 			}
-			want := shellValidate(t, descriptor)
-			if !strings.Contains(want, tt.earlier) {
-				t.Fatalf("the shell answers %q, which does not carry the earlier fault %q", want, tt.earlier)
-			}
-			if strings.Contains(want, tt.later) {
-				t.Fatalf("the shell answers %q, which carries the later fault; the pair is not ordered", want)
-			}
-
 			got := harness.Validate(descriptor)
-			if got != want {
-				t.Errorf("Go  = %q\nBash = %q\nthe checks run in a different order", got, want)
+			if !strings.Contains(got, tt.earlier) {
+				t.Errorf("Go answers %q, which does not carry the earlier fault %q", got, tt.earlier)
+			}
+			if strings.Contains(got, tt.later) {
+				t.Errorf("Go answers %q, which carries the later fault; the pair is not ordered", got)
 			}
 		})
 	}

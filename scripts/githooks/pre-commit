@@ -40,9 +40,8 @@ set -uo pipefail
 # **`pricing` stays denied, with a closed exemption for the vendor-rate sense.**
 # CrossRev prices nothing. It reads a vendored table of vendor token rates to
 # tell an operator what a leg cost them on their own subscription, and the word
-# is load-bearing in `lib/usage.sh`, `scripts/refresh-prices.sh`,
-# `docs/architecture.md` and their native port. A bare match refused every commit
-# touching token cost — four in a row, correctly bypassed each time — and a gate
+# is load-bearing in `scripts/refresh-prices.sh`, `docs/architecture.md` and
+# `internal/harness`. A bare match refused every commit touching token cost — four in a row, correctly bypassed each time — and a gate
 # people learn to pass stops catching what it was written for.
 #
 # The first attempt at this narrowed the term to commercial collocations. That

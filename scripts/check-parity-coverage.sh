@@ -7,14 +7,12 @@
 #   scripts/check-parity-coverage.sh           # the ledger is complete
 #   scripts/check-parity-coverage.sh --native  # plus: every black-box
 #     destination is pure (no lib/*.sh sourcing, no bin/crossrev execution)
-#     and actually runs in scripts/test-native.sh
 #
 # A row has four tab-separated fields: suite, class, behaviour, destinations.
 # Class is go-test (proved by Go package tests) or black-box (proved by running
-# the shell suite itself against one built binary). Mixed suites that do both
-# are recorded under their Go proof; their CLI halves keep running in
-# test-native.sh as regression, which is why the --native list check allows a
-# SUITES entry that maps to a go-test row but never the reverse.
+# the shell suite itself against one built binary, which is what tests/run.sh
+# builds and runs). A black-box destination proves the binary, so it must not
+# reach the removed shell implementation.
 
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -33,9 +31,8 @@ TSV="tests/parity-coverage.tsv"
 fail=0
 refuse() { printf 'parity coverage: %s\n' "$1" >&2; fail=1; }
 
-# suite -> "class<TAB>destinations", so a duplicate is a second write to a set key.
+# suite -> destinations, so a duplicate is a second write to a set key.
 seen=""
-row_of() { awk -F'\t' -v s="$1" '$1 == s { print $2"\t"$4; found=1 } END { if (!found) exit 1 }' "$TSV"; }
 
 line=0
 while IFS= read -r raw || [[ -n "$raw" ]]; do
@@ -74,12 +71,10 @@ for path in tests/test-*.sh; do
 done
 
 if (( NATIVE )); then
-  # The suites test-native.sh runs, read off its SUITES list rather than
-  # repeated here: two lists of the same set drift, and this check failing is
-  # how that drift surfaces.
-  suites="$(sed -n '/^SUITES=(/,/^)/p' scripts/test-native.sh | grep -oE 'test-[a-z-]+\.sh' || true)"
-  [[ -n "$suites" ]] || refuse "could not read the SUITES list out of scripts/test-native.sh"
-
+  # Every suite on disk runs in tests/run.sh, which builds one binary and
+  # points every suite at it — so a mapped black-box suite runs against the
+  # binary by construction, and what remains to check is that its destination
+  # proves the binary rather than the removed shell.
   while IFS= read -r raw || [[ -n "$raw" ]]; do
     [[ "$raw" =~ ^#.*$ || -z "$raw" ]] && continue
     suite="$(cut -f1 <<<"$raw")"
@@ -88,12 +83,12 @@ if (( NATIVE )); then
     [[ "$class" == "black-box" ]] || continue
     for dest in $dests; do
       # A native destination proves the binary, so it must not reach the shell
-      # implementation: no sourcing lib/*.sh, no executing the checked-in
+      # implementation: no sourcing lib/*.sh, no executing the removed
       # entrypoint. Full-line comments are stripped first; a literal inside a
       # trailing comment would need a reader, and none of these files has one
       # next to either pattern. Shared harness tests/harness.sh is not a
-      # destination and is not checked: its bin/crossrev fallback only runs
-      # when CROSSREV_TEST_BIN is unset, which test-native.sh never allows.
+      # destination and is not checked: its CROSSREV_TEST_BIN contract is what
+      # tests/run.sh establishes, and no other runner sets it.
       code="$(grep -vE '^[[:space:]]*#' "$dest")"
       if grep -qE '(^|[;&|[:space:]\(])(source|\.)[[:space:]]+[^;&|]*lib/' <<<"$code"; then
         refuse "$dest sources lib/*.sh, so it cannot prove the binary"
@@ -101,23 +96,13 @@ if (( NATIVE )); then
       if grep -qE '\.\./bin/crossrev|\$ROOT/bin/crossrev|\$HERE/\.\./bin/crossrev|(^|[;&|[:space:]\(\)])bin/crossrev' <<<"$code"; then
         refuse "$dest executes bin/crossrev, so it cannot prove the binary"
       fi
-      # Every mapped black-box suite runs against the one built binary.
-      grep -qxF "$suite" <<<"$suites" \
-        || refuse "$suite is mapped black-box but runs nowhere in scripts/test-native.sh"
     done
   done <"$TSV"
-
-  # And nothing runs there unmapped: an unlisted suite would prove behaviour
-  # the ledger attributes nowhere.
-  while IFS= read -r name; do
-    [[ -z "$name" ]] && continue
-    row_of "$name" >/dev/null || refuse "$name runs in scripts/test-native.sh but is mapped nowhere"
-  done <<<"$suites"
 fi
 
 (( fail == 0 )) || exit 1
 if (( NATIVE )); then
-  printf 'parity coverage holds, and every black-box suite is pure and runs against the binary\n'
+  printf 'parity coverage holds, and every black-box destination proves the binary\n'
 else
   printf 'parity coverage holds: every suite is mapped once to a destination that exists\n'
 fi

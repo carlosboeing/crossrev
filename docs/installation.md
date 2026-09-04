@@ -40,7 +40,7 @@ npm install -g crossrev-ai     # or put it on your PATH the npm way
 
 **The package is `crossrev-ai`; the command it installs is `crossrev`.** npm refuses the plain name as too similar to `cross-env`, a check with no appeal, so the suffix is a constraint rather than a choice ([ADR 0011](adrs/0011-npm-as-a-second-install-route.md)). `npm install crossrev` will not find anything. Every other route — Homebrew, releases, the clone — uses the plain name, and what you type after installing is `crossrev` in all of them.
 
-The package is the same bash the clone runs — `bin/`, `lib/`, `schemas/`, `skills/`, `templates/` and the `VERSION` file, with no build step and no dependencies. It needs Node only to install; nothing about the tool runs on it. macOS and Linux only, declared in the manifest, so Windows fails at install rather than at first run.
+The package is the last Bash version — `bin/`, `lib/`, `schemas/`, `skills/`, `templates/` and the `VERSION` file, with no build step and no dependencies. It needs Node only to install; nothing about the tool runs on it. macOS and Linux only, declared in the manifest, so Windows fails at install rather than at first run.
 
 **`crossrev init` does not work from an npm install, and this is the one real difference.** `init` generates workflows that pin the composite action to a 40-character SHA, and it reads that SHA from CrossRev's own git checkout ([ADR 0009](adrs/0009-delivery-via-sha-pinned-composite-action.md)). An npm package has no `.git`, so `init` stops with an error naming the cause rather than writing a workflow pinned to nothing.
 
@@ -103,9 +103,7 @@ crossrev doctor
 | Tool | Why |
 |---|---|
 | `git`, `gh` | Reading and writing the pull request. `gh` must be authenticated |
-| `jq` | The findings and resolve payloads are JSON |
-| `yq` | Both config layers are YAML, and `jq` cannot read YAML |
-| `openssl` | Decoding a restored subscription credential to check its remaining lifetime |
+| `jq`, `yq`, `openssl` | Kept by the `doctor` report. The binary parses JSON and YAML natively and signs nothing |
 | One of `claude`, `codex`, `agy` | Something has to do the reviewing |
 
 `yq` is the one usually missing on macOS — `brew install yq`. It is preinstalled on both GitHub runner families.

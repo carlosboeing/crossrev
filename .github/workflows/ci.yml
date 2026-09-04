@@ -58,10 +58,9 @@ jobs:
       - name: Tests
         run: bash tests/run.sh
 
-  # The native binary, beside the Bash suite above. Both run until the cutover:
-  # the Bash suite guards the shipped tool while the port proves itself, and
-  # the native job proves the binary the release ships against the same
-  # behaviour through Go tests, the black-box suites and the coverage ledger.
+  # The binary, beside the black-box suite above. tests/run.sh builds it once
+  # and drives every remaining shell suite against it; the native job proves
+  # the same behaviour through Go tests and the coverage ledger.
   native:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -86,9 +85,6 @@ jobs:
         env:
           GOTOOLCHAIN: go1.27.0
         run: go test ./...
-
-      - name: Native tests
-        run: bash scripts/test-native.sh
 
       - name: Parity coverage
         run: |

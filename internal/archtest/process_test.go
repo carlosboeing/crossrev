@@ -180,18 +180,11 @@ var processTestPermitted = map[string]string{
 	"cmd/crossrev/wiring_test.go": "builds the binary with `go build` and runs it, which is the only end-to-end check of the composition root",
 
 	"internal/config/merge_test.go":              "runs this test binary as a helper child for the config merge oracle",
-	"internal/prompt/shell_test.go":              "runs bash and git to compare the prompt against the shell that wrote it",
-	"internal/review/helper_test.go":             "runs bash for the review leg's oracle",
+	"internal/prompt/convention_test.go":         "runs git to build real histories for the frozen convention vectors",
 	"internal/forge/ghexec/stub_test.go":         "exec.LookPath, to skip when the stub's tools are not installed",
-	"internal/harness/alternatives_test.go":      "runs bash for the descriptor oracle",
+	"internal/harness/alternatives_test.go":      "runs bash for the jq session-id filter",
 	"internal/harness/argv_test.go":              "runs bash for the argv oracle",
-	"internal/harness/descriptor_parity_test.go": "runs bash for the descriptor oracle",
-	"internal/harness/descriptor_test.go":        "exec.LookPath, to skip when jq is not installed",
-	"internal/harness/errors_test.go":            "runs bash for the adapter-error oracle",
-	"internal/harness/invocation_test.go":        "runs bash for the invocation oracle",
 	"internal/vcs/lock_test.go":                  "runs sh and sleep to hold a lock from another process",
-	"internal/vcs/push_streams_test.go":          "runs bash for the push oracle",
-	"internal/vcs/tail_shell_test.go":            "runs bash for the tail oracle",
 }
 
 // verb opens the violation sentence for one rule.
@@ -257,8 +250,8 @@ func unusedProcessAllowances(permitted map[string]string, sawChild map[string]bo
 // own, and a file that stops running the oracle has to take its entry with it.
 func TestUnusedProcessAllowancesAreReported(t *testing.T) {
 	permitted := map[string]string{
-		"internal/prompt/shell_test.go": "runs bash to compare against the shell",
-		"internal/vcs/lock_test.go":     "runs sh to hold a lock from another process",
+		"internal/prompt/convention_test.go": "runs git to build real histories",
+		"internal/vcs/lock_test.go":          "runs sh to hold a lock from another process",
 	}
 
 	tests := []struct {
@@ -268,18 +261,18 @@ func TestUnusedProcessAllowancesAreReported(t *testing.T) {
 	}{
 		{
 			name:     "every allowance starts a child",
-			sawChild: map[string]bool{"internal/prompt/shell_test.go": true, "internal/vcs/lock_test.go": true},
+			sawChild: map[string]bool{"internal/prompt/convention_test.go": true, "internal/vcs/lock_test.go": true},
 		},
 		{
 			name:     "one allowance starts nothing",
-			sawChild: map[string]bool{"internal/prompt/shell_test.go": true},
+			sawChild: map[string]bool{"internal/prompt/convention_test.go": true},
 			want:     []string{`processTestPermitted names internal/vcs/lock_test.go ("runs sh to hold a lock from another process") and it starts no child there; drop the entry`},
 		},
 		{
 			name:     "the scan found no child anywhere",
 			sawChild: map[string]bool{},
 			want: []string{
-				`processTestPermitted names internal/prompt/shell_test.go ("runs bash to compare against the shell") and it starts no child there; drop the entry`,
+				`processTestPermitted names internal/prompt/convention_test.go ("runs git to build real histories") and it starts no child there; drop the entry`,
 				`processTestPermitted names internal/vcs/lock_test.go ("runs sh to hold a lock from another process") and it starts no child there; drop the entry`,
 			},
 		},
@@ -287,7 +280,7 @@ func TestUnusedProcessAllowancesAreReported(t *testing.T) {
 			// A file the scan saw that no allowance names is the other rule's
 			// business, not this one's.
 			name:     "a child started somewhere no allowance names",
-			sawChild: map[string]bool{"internal/prompt/shell_test.go": true, "internal/vcs/lock_test.go": true, "internal/cycle/other_test.go": true},
+			sawChild: map[string]bool{"internal/prompt/convention_test.go": true, "internal/vcs/lock_test.go": true, "internal/cycle/other_test.go": true},
 		},
 	}
 
@@ -663,9 +656,9 @@ func TestProcessAuditVerdict(t *testing.T) {
 		},
 		{
 			// Not "a test file anywhere" any more: this one is named in
-			// processTestPermitted, because it runs bash to compare against.
+			// processTestPermitted, because it runs git for its vectors.
 			name:   "a test file the allowance names",
-			file:   "internal/prompt/shell_test.go",
+			file:   "internal/prompt/convention_test.go",
 			source: "package prompt\nimport \"os/exec\"\nvar v = exec.Command\n",
 		},
 		{

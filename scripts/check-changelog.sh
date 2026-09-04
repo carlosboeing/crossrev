@@ -58,6 +58,12 @@ fi
 # The intersection: changed files that a user would actually receive.
 shipped_changed="$(comm -12 <(sort <<<"$shipped") <(sort <<<"$changed"))"
 
+# Go test files travel inside shipped directories (cmd/, internal/) but do not
+# ship: the binary carries no test code, and goldens under testdata/ steer the
+# tests rather than the tool. Without this a test-only change would demand an
+# entry, which ends the rule that tests and CI changes are exempt.
+shipped_changed="$(grep -vE '_test\.go$|/testdata/' <<<"$shipped_changed" || true)"
+
 printf '\nchangelog\n'
 
 if [[ -z "$shipped_changed" ]]; then

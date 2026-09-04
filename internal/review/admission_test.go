@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -306,7 +305,7 @@ func TestAdmission(t *testing.T) {
 	}
 }
 
-func TestAdmissionPassLabelMatchesPresentationAndShell(t *testing.T) {
+func TestAdmissionPassLabelMatchesPresentation(t *testing.T) {
 	raw, err := os.ReadFile("../../tests/fixtures/parity/presentation.json")
 	if err != nil {
 		t.Fatal(err)
@@ -325,33 +324,12 @@ func TestAdmissionPassLabelMatchesPresentationAndShell(t *testing.T) {
 	if len(fixture.PassLabel) == 0 {
 		t.Fatal("presentation.json records no pass_label vectors")
 	}
-	root := repoRootPath(t)
 	for _, vector := range fixture.PassLabel {
 		got := review.PassLabel(vector.Pass, vector.Cap)
 		if got != vector.Out {
 			t.Errorf("%s: Go = %q, fixture = %q", vector.Name, got, vector.Out)
 		}
-		shell := shellPassLabel(t, root, vector.Pass, vector.Cap)
-		if got != shell {
-			t.Errorf("%s: Go = %q, Bash = %q", vector.Name, got, shell)
-		}
 	}
-}
-
-func shellPassLabel(t *testing.T, root string, pass, cap int) string {
-	t.Helper()
-	const script = `
-set -uo pipefail
-ROOT="$1"
-export ROOT
-# shellcheck source=/dev/null
-source "$ROOT/lib/ui.sh"
-# shellcheck source=/dev/null
-source "$ROOT/lib/run.sh"
-_pass_label "$2" "$3"
-`
-	out := bashOutput(t, script, root, strconv.Itoa(pass), strconv.Itoa(cap))
-	return strings.TrimRight(out, "\n")
 }
 
 func TestAdmissionStaleReviewWarningContainsFullText(t *testing.T) {

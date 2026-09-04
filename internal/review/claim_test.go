@@ -2,7 +2,6 @@ package review_test
 
 import (
 	"errors"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -98,39 +97,21 @@ func TestClaimHappensBeforeTheHarness(t *testing.T) {
 	}
 }
 
-func TestClaimBodyMatchesTheShell(t *testing.T) {
-	root := repoRootPath(t)
+// The claim body, frozen at the native cutover.
+//
+// The review leg's opening comment was compared byte for byte against the
+// shell's. The shell is removed, so the bytes the two implementations agreed
+// on are frozen here.
+func TestClaimBodyIsFrozen(t *testing.T) {
 	got := review.ClaimBody(1, 3, startedMarkerJSON())
-	shell := shellClaimBody(t, root, 1, 3, startedMarkerJSON())
-	if got != shell {
-		t.Errorf("Go claim body does not match Bash\nGo:\n%s\nBash:\n%s", got, shell)
+	want := "**crossrev — reviewing, pass 1**\n\nReading the diff and any earlier review threads. This comment becomes the pass summary when the review finishes.\n\n<!-- crossrev: {\"v\":1,\"leg\":\"review\",\"pass\":1,\"state\":\"started\",\"ts\":1700000000,\"done_ts\":null,\"run_id\":\"local-test\",\"head_sha\":\"2c4a46cb321db01826d116b5ef2add6b0284d68c\",\"harness\":\"claude\",\"model\":null,\"effort\":null,\"endpoint\":null,\"model_reported\":null,\"tokens\":null,\"usage\":null,\"billing\":null,\"verdict\":null,\"blocked_reason\":null,\"findings\":[]} -->"
+	if got != want {
+		t.Errorf("Go claim body does not match the frozen body\nGo:\n%s\nwant:\n%s", got, want)
 	}
 }
 
 func startedMarkerJSON() string {
 	return `{"v":1,"leg":"review","pass":1,"state":"started","ts":1700000000,"done_ts":null,"run_id":"local-test","head_sha":"2c4a46cb321db01826d116b5ef2add6b0284d68c","harness":"claude","model":null,"effort":null,"endpoint":null,"model_reported":null,"tokens":null,"usage":null,"billing":null,"verdict":null,"blocked_reason":null,"findings":[]}`
-}
-
-func shellClaimBody(t *testing.T, root string, pass, cap int, marker string) string {
-	t.Helper()
-	const script = `
-set -uo pipefail
-ROOT="$1"
-export ROOT
-# shellcheck source=/dev/null
-source "$ROOT/lib/ui.sh"
-# shellcheck source=/dev/null
-source "$ROOT/lib/state.sh"
-# shellcheck source=/dev/null
-source "$ROOT/lib/run.sh"
-pass="$2"
-cap="$3"
-marker="$4"
-printf '%s' "**crossrev — reviewing, $(_pass_label "$pass" "$cap")**
-
-Reading the diff and any earlier review threads. This comment becomes the pass summary when the review finishes.$(state_marker_encode "$marker")"
-`
-	return bashOutput(t, script, root, strconv.Itoa(pass), strconv.Itoa(cap), marker)
 }
 
 func TestClaimWriteCapabilityIsFalse(t *testing.T) {

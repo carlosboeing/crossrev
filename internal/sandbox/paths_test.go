@@ -12,7 +12,7 @@ import (
 
 const (
 	pathsFixture     = "tests/fixtures/parity/paths.json"
-	descriptorSource = "lib/harnesses.json"
+	descriptorSource = "assets/harnesses.json"
 )
 
 type pathsVectors struct {
@@ -76,7 +76,7 @@ func TestQuarantineDirParity(t *testing.T) {
 
 // The list is every quarantine entry of every harness plus the shared ones,
 // sorted and deduplicated. It is read from the descriptor the tool ships rather
-// than written out here, so a harness added to lib/harnesses.json changes both
+// than written out here, so a harness added to assets/harnesses.json changes both
 // sides at once.
 func TestQuarantinedPathsParity(t *testing.T) {
 	want := loadVectors(t).QuarantinedPaths

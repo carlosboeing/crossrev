@@ -9,13 +9,13 @@ import (
 	"github.com/carlosboeing/crossrev/internal/config"
 )
 
-// The Bash defaults read the pairing out of lib/harnesses.json at runtime
-// (lib/config.sh:101-102). Go states it in source, so this test reads the same
-// file and fails if the two ever drift.
+// The shell defaults read the pairing out of the harness descriptor at runtime.
+// Go states it in source, so this test reads the same file and fails if the
+// two ever drift.
 func TestTheDefaultPairingMatchesTheHarnessTable(t *testing.T) {
-	raw, err := os.ReadFile(filepath.Join(repoRoot(t), "lib/harnesses.json"))
+	raw, err := os.ReadFile(filepath.Join(repoRoot(t), "assets/harnesses.json"))
 	if err != nil {
-		t.Fatalf("read lib/harnesses.json: %v", err)
+		t.Fatalf("read assets/harnesses.json: %v", err)
 	}
 	var table struct {
 		DefaultPairing struct {

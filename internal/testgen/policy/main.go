@@ -540,12 +540,12 @@ func writeGenerated(filename string, source []byte, checkOnly bool) error {
 }
 
 func main() {
-	checkOnly := flag.Bool("check", false, "compare the generated fixtures against the Bash tables without writing them")
+	checkOnly := flag.Bool("check", false, "compare the generated fixtures against the policy tables without writing them")
 	flag.Parse()
 
 	root := findRepoRoot()
-	stateFile := filepath.Join(root, "tests", "test-state.sh")
-	legsFile := filepath.Join(root, "tests", "test-legs.sh")
+	stateFile := filepath.Join(root, "tests", "fixtures", "policy", "state.txt")
+	legsFile := filepath.Join(root, "tests", "fixtures", "policy", "legs.txt")
 	policyOutFile := filepath.Join(root, "internal", "policy", "parity_generated_test.go")
 	prstateOutFile := filepath.Join(root, "internal", "prstate", "parity_generated_test.go")
 

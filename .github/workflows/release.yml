@@ -65,6 +65,12 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: '1.27.0'
+          check-latest: false
+
       - name: Install and verify dependencies
         run: |
           set -euo pipefail
@@ -89,14 +95,17 @@ jobs:
           set -euo pipefail
           file_version="$(cat VERSION)"
           json_version="$(jq -r .version package.json)"
-          cli_version="$(bash bin/crossrev version)"
+          # The version the release ships is the binary's, so the agreement
+          # check builds it rather than running a script from the checkout.
+          bash scripts/build-native.sh dist/crossrev-release-check
+          cli_version="$(./dist/crossrev-release-check version)"
 
           echo "VERSION      $file_version"
           echo "package.json $json_version"
           echo "version      $cli_version"
 
           if [ "$file_version" != "$json_version" ] || [ "$file_version" != "$cli_version" ]; then
-            echo "::error::VERSION, package.json and bin/crossrev version disagree"
+            echo "::error::VERSION, package.json and the built binary disagree"
             exit 1
           fi
 
@@ -127,7 +136,7 @@ jobs:
 
             const required = [
               "LICENSE", "README.md", "VERSION", "package.json",
-              "bin/crossrev", "lib/run.sh", "lib/config.sh", "lib/github.sh",
+              "action.yml", "install.sh", "bootstrap.sh",
             ];
             const missing = required.filter(f => !files.includes(f));
             if (missing.length) {
@@ -151,10 +160,11 @@ jobs:
 
             const kb = pack.size / 1024;
             console.log(`tarball ${kb.toFixed(1)} kB across ${files.length} files`);
-            if (kb > 500) {
-              console.error("::error::tarball exceeds the 500 kB budget");
-              process.exit(1);
-            }
+            // No size budget: the tarball is the changelog gate's view of what
+            // ships rather than a published artifact, and npm is paused until
+            // the platform packages exist. The budget that used to sit here
+            // capped the published single-package tarball; the binaries the
+            // release actually publishes are tens of megabytes by nature.
           NODE
 
   build-darwin-arm64:

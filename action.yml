@@ -54,26 +54,14 @@ inputs:
 runs:
   using: composite
   steps:
-    # A consumer's workflow cannot forget this, which is the only reason it
-    # lives here rather than in each template. Installation stays the runner's
-    # job — this fails naming the missing dependency rather than mid-leg with a
-    # `command not found` three steps later.
-    #
-    # GH_TOKEN is set because preflight verifies gh is authenticated, not just
-    # installed: an unauthenticated gh fails at the first API call instead.
-    - shell: bash
-      env:
-        GH_TOKEN: ${{ inputs.app-token }}
-      run: |
-        set -euo pipefail
-        source "${{ github.action_path }}/lib/ui.sh"
-        source "${{ github.action_path }}/lib/preflight.sh"
-        preflight_check
-
     # The release ships a binary per runner, not a script the checkout runs, so
     # the action fetches the one for this machine before running anything. The
     # digest is checked against the checksums.txt from the same release before
     # the binary runs.
+    #
+    # The download comes before the preflight because the preflight runs from
+    # the binary itself (the next step). The download needs only gh and a
+    # checksum tool, and says so plainly when one of those is missing.
     - shell: bash
       env:
         GH_TOKEN: ${{ inputs.app-token }}
@@ -140,6 +128,21 @@ runs:
         mkdir -p "$RUNNER_TEMP/crossrev-bin"
         install -m 755 "$tmp/$asset" "$RUNNER_TEMP/crossrev-bin/crossrev"
         echo "CROSSREV_BIN=$RUNNER_TEMP/crossrev-bin/crossrev" >> "$GITHUB_ENV"
+
+    # The dependency preflight, from the downloaded binary. A consumer's
+    # workflow cannot forget this, which is the only reason it lives here
+    # rather than in each template. Installation stays the runner's job — this
+    # fails naming the missing dependency rather than mid-leg with a
+    # `command not found` three steps later.
+    #
+    # GH_TOKEN is set because doctor verifies gh is authenticated, not just
+    # installed: an unauthenticated gh fails at the first API call instead.
+    - shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.app-token }}
+      run: |
+        set -euo pipefail
+        "${CROSSREV_BIN:?}" doctor
 
     - shell: bash
       env:
