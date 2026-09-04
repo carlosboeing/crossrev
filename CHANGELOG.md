@@ -4,6 +4,8 @@ All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepa
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-09-04
+
 ### Added
 
 - **The Bash implementation is removed, and every route runs the Go binary.** `bin/crossrev`, `lib/*.sh`, `lib/adapters/*.sh` and `tests/capture-parity.sh` are deleted. The canonical `lib/harnesses.json` and `lib/prices.json` move to `assets/`. Checkout development is `go run ./cmd/crossrev`. `tests/run.sh` builds the binary once and runs the nine remaining shell suites against it. The twenty-one shell suites the ledger maps to Go tests are deleted with it. The policy tables they carried move to `tests/fixtures/policy/`, and the generator reads them there. The Go tests that ran the shell as a live oracle now compare against the answers it had proven, frozen in place. The composite action downloads the binary first and runs `crossrev doctor` from it. `install.sh` builds and copies with no library behind it. `package.json` keeps its name and version with no entrypoint until the platform packages exist. **Nothing the tool does changes.** The CLI surface, the schemas, the markers, the labels and every printed byte are the ones the port measured.
