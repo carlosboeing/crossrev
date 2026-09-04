@@ -18,6 +18,18 @@ if [[ ! -f "$HERE/lib/ui.sh" ]]; then
   exit 1
 fi
 
+if [[ ! -f "$HERE/scripts/build-native.sh" ]]; then
+  echo "error  install.sh builds the binary with scripts/build-native.sh, which is missing." >&2
+  echo "       Either that is not a CrossRev source tree, or the ref you cloned predates it." >&2
+  exit 1
+fi
+
+command -v go >/dev/null 2>&1 || {
+  echo "error  install.sh builds CrossRev from source, and go is not installed." >&2
+  echo "       Install Go 1.21 or newer (go.mod fetches the pinned toolchain itself), then run this again." >&2
+  exit 1
+}
+
 # shellcheck source=lib/ui.sh
 source "$HERE/lib/ui.sh"
 # shellcheck source=lib/preflight.sh
@@ -52,13 +64,23 @@ ui_line "version $(tr -d '[:space:]' <"$HERE/VERSION")"
 preflight_check harness || true
 
 target="$BIN_DIR/crossrev"
+
+# Build first, into a private directory, so a failed build leaves the
+# installed copy alone rather than replacing it with half a binary.
+build_tmp="$(mktemp -d)"
+trap 'rm -rf "$build_tmp"' EXIT
+bash "$HERE/scripts/build-native.sh" "$build_tmp/crossrev" || {
+  echo "error  the build failed, and nothing was installed." >&2
+  exit 1
+}
+
 replaced=""
 if [[ -e "$target" || -L "$target" ]]; then
-  existing="$(readlink "$target" 2>/dev/null || echo "$target")"
-  if [[ "$existing" == "$HERE/bin/crossrev" ]]; then
-    :  # already pointing at this checkout, nothing to ask
+  if [[ -f "$target" ]] && ! [[ -L "$target" ]] && cmp -s "$build_tmp/crossrev" "$target"; then
+    :  # already this binary, nothing to ask
   else
-    ui_warn "$target already exists and points somewhere else" \
+    existing="$(readlink "$target" 2>/dev/null || echo "$target")"
+    ui_warn "$target already exists and is not this build" \
       "Continuing will replace it. It currently points at: $existing"
     ui_confirm "Replace it?" || { ui_say "Left it alone. Nothing was installed."; exit 1; }
     replaced="$existing"
@@ -66,9 +88,18 @@ if [[ -e "$target" || -L "$target" ]]; then
 fi
 
 mkdir -p "$BIN_DIR"
-# Symlink rather than copy, so editing the checkout takes effect immediately and
-# there is one source of truth. Same conclusion the skills CLI reached.
-ln -sf "$HERE/bin/crossrev" "$target"
+# Copy rather than symlink, so the installed tool keeps working after the
+# checkout moves on: the binary carries everything it needs. Rebuild and
+# re-run this script to pick up a newer checkout.
+#
+# Remove first rather than copying over: every install the old script made is
+# a symlink, and cp follows one, writing the binary through the link onto the
+# checkout's own entrypoint instead of replacing the link.
+rm -f "$target"
+cp -f "$build_tmp/crossrev" "$target"
+chmod +x "$target"
+trap - EXIT
+rm -rf "$build_tmp"
 
 ui_section "Installed"
 # Rule 5: verify rather than assert. A symlink that resolves to nothing runs as
@@ -77,12 +108,12 @@ if [[ -x "$target" ]]; then
   ui_ok "$target"
   # Say what moved, not just what landed. The prompt above is easy to accept and
   # easier to skip with --yes, and the failure it leads to is silent: `crossrev`
-  # keeps working while running a different checkout than the one you think, so
-  # the next `git pull` in the old one changes nothing and there is no error to
-  # explain why.
+  # keeps working while running a different build than the one you think, so
+  # the next `git pull` in the old checkout changes nothing and there is no
+  # error to explain why.
   if [[ -n "$replaced" ]]; then
-    ui_line "   replaced a link to $replaced"
-    ui_line "   \`crossrev\` now runs from $HERE"
+    ui_line "   replaced $replaced"
+    ui_line "   \`crossrev\` now runs the build from $HERE"
   fi
 else
   ui_no "$target — created, but does not resolve to an executable"

@@ -15,8 +15,6 @@ import (
 	"github.com/carlosboeing/crossrev/internal/vcs"
 )
 
-var instructionFiles = []string{"AGENTS.md", "CLAUDE.md", "GEMINI.md"}
-
 func (l *Leg) loadContext(ctx context.Context, req Request) (Context, string, error) {
 	var loaded Context
 	repo := req.Repo
@@ -82,12 +80,6 @@ func (l *Leg) loadContext(ctx context.Context, req Request) (Context, string, er
 
 	loaded.ReviewMD = l.fileAtBase(ctx, pr.BaseRefOid, "REVIEW.md")
 	loaded.GitMessage = firstLines(l.fileAtBase(ctx, pr.BaseRefOid, ".gitmessage"), 20)
-	loaded.Instructions = map[string][]byte{}
-	for _, path := range instructionFiles {
-		if body := l.fileAtBase(ctx, pr.BaseRefOid, path); len(body) > 0 {
-			loaded.Instructions[path] = body
-		}
-	}
 	if tracker, found, err := config.ProjectMapTracker(ctx, pr.BaseRefOid, l.show()); err != nil {
 		return loaded, "", err
 	} else if found {

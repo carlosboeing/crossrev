@@ -20,20 +20,22 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT" || exit 1
 
-# The CLI-driven suites, written out rather than globbed.
+# The suites, written out rather than globbed: every black-box destination
+# tests/parity-coverage.tsv maps, plus the mixed CLI-driven suites whose shell
+# halves keep running here as regression.
 #
 # A glob would sweep in every direct-source suite, which have no counterpart in
-# the binary. The list is what this grep answers, run from the repository root:
-#
-#   grep -lE '\$\{?CROSSREV([^_A-Za-z0-9]|$)' tests/test-*.sh
-#
-# The check below fails the run when that grep finds a CLI-driven suite the
-# list above does not name.
+# the binary. The consistency between this list and the TSV is not trusted:
+# scripts/check-parity-coverage.sh --native refuses a mapped black-box suite
+# missing here and a suite here mapped nowhere.
 SUITES=(
   test-action.sh
   test-adapters.sh
+  test-bootstrap.sh
   test-config.sh
+  test-githooks.sh
   test-init.sh
+  test-install.sh
   test-legs.sh
   test-log.sh
   test-permissions.sh
@@ -43,6 +45,7 @@ SUITES=(
   test-recovery.sh
   test-runner.sh
   test-status.sh
+  test-stub-env.sh
   test-watchdog.sh
   test-worktree.sh
 )

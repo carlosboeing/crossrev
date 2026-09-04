@@ -173,6 +173,48 @@ func TestInvoke(t *testing.T) {
 		}
 	})
 
+	t.Run("a harness write to a quarantined path warns when the checkout is restored", func(t *testing.T) {
+		e := setup(t)
+		e.addReview(t, defaultFindings(), "issues-remain")
+		e.runner.onRun = func(spec exec.Spec) {
+			// A blind write: CLAUDE.md was quarantined before the harness
+			// started, so anything created at its path is discarded.
+			if err := os.WriteFile(filepath.Join(spec.Dir, "CLAUDE.md"), []byte("blind\n"), 0o644); err != nil {
+				t.Errorf("plant the blind write: %v", err)
+			}
+		}
+		got := e.run(t)
+		if got.Err != nil {
+			t.Fatalf("Run: %v", got.Err)
+		}
+		want := "the harness wrote to quarantined path(s): CLAUDE.md\n   Those writes were discarded when the checkout was restored, so any finding reported as fixed by editing them is not fixed and is in no commit. Check those findings by hand."
+		if !strings.Contains(ui.Joined(got.Messages), want) {
+			t.Errorf("messages = %q, want warning %q", got.Messages, want)
+		}
+	})
+
+	t.Run("a quarantined write still warns when the invocation never starts", func(t *testing.T) {
+		e := setup(t)
+		e.addReview(t, defaultFindings(), "issues-remain")
+		e.adapter.beforeSpec = func(inv harness.Invocation) {
+			if err := os.WriteFile(filepath.Join(inv.Workdir, "CLAUDE.md"), []byte("blind\n"), 0o644); err != nil {
+				t.Errorf("plant the blind write: %v", err)
+			}
+		}
+		e.adapter.specErr = errors.New("adapter setup failed")
+		got := e.run(t)
+		if got.Err == nil {
+			t.Fatal("Run succeeded after the adapter spec failed")
+		}
+		if !strings.Contains(got.Err.Error(), "adapter setup failed") {
+			t.Errorf("error = %q, want the spec failure", got.Err)
+		}
+		want := "the harness wrote to quarantined path(s): CLAUDE.md\n   Those writes were discarded when the checkout was restored, so any finding reported as fixed by editing them is not fixed and is in no commit. Check those findings by hand."
+		if !strings.Contains(ui.Joined(got.Messages), want) {
+			t.Errorf("messages = %q, want warning %q", got.Messages, want)
+		}
+	})
+
 	t.Run("missing configured resolver is substituted before the claim", func(t *testing.T) {
 		e := setup(t)
 		e.addReview(t, defaultFindings(), "issues-remain")

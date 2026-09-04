@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/carlosboeing/crossrev/internal/app"
+	"github.com/carlosboeing/crossrev/internal/buildinfo"
 	"github.com/carlosboeing/crossrev/internal/cli"
 	"github.com/carlosboeing/crossrev/internal/core"
 	"github.com/carlosboeing/crossrev/internal/exec"
@@ -235,20 +236,19 @@ func (p initPairing) NeedsRefresher(runner, name, endpoint string) bool {
 // initSource is initcmd.Source: which commit of CrossRev the generated
 // workflows pin (lib/init.sh:141-147).
 //
-// The shell runs `git -C "$ROOT" rev-parse HEAD` and `git -C "$ROOT" describe
-// --tags` against its OWN checkout rather than the repository being set up, and
-// ROOT is the directory `bin/crossrev` was invoked from with its symlinks
-// resolved (bin/crossrev:16-27). This does the same, over os.Executable: the
-// binary sits at <root>/<something>/crossrev, so <dir>/.. is the checkout, and
-// os.Executable answers the real path rather than the symlink install.sh made.
+// The SHA is the VCS revision `go build` stamped into this binary
+// (internal/buildinfo.Pin), not `git rev-parse HEAD` of a checkout beside it.
+// A released binary ships with no checkout beside it, so the checkout cannot
+// be the source of the pin; and a pin read from a dirty tree would name code
+// nobody can fetch. An unstamped build — `go run`, `go test`,
+// `-buildvcs=false` — and a build from a modified tree are both refused, and
+// initcmd.Resolve turns either refusal into the same "could not work out
+// which commit to pin" stop it already gives a checkout it cannot read.
 //
-// internal/buildinfo.Pin() is not used, and that is the difference between this
-// phase and the next one. Pin reads the VCS revision `go build` stamped and
-// refuses a build made from a modified tree, which is the right answer for a
-// released binary and the wrong one here: the shell does not care whether its
-// tree is dirty, and refusing would make `init` unusable from every build that
-// is not from a clean tag. The release phase that ships a binary with no
-// checkout beside it is where Pin belongs.
+// The ref is still `git describe --tags` against the checkout this binary was
+// built in, best-effort: it rides in the comment beside the pin, and a binary
+// with no checkout beside it answers `untagged` the way the shell does when
+// describe fails (lib/init.sh:142-143).
 //
 // The two answers fail differently, which is why the interface has two methods.
 // A SHA that cannot be read stops the run — a workflow pinned to nothing would
@@ -256,17 +256,9 @@ func (p initPairing) NeedsRefresher(runner, name, endpoint string) bool {
 // is the word `untagged`, which the plan prints as a comment beside the pin.
 type initSource struct{ repo *vcs.Repository }
 
+// SHA is the build stamp, refused when absent or modified.
 func (s initSource) SHA(ctx context.Context) (string, error) {
-	if s.repo == nil {
-		return "", nil
-	}
-	head, err := s.repo.Head(ctx)
-	if err != nil {
-		// `|| INIT_SOURCE_SHA=""` at lib/init.sh:141. The empty answer is what
-		// initcmd refuses on, with the shell's own words.
-		return "", nil
-	}
-	return head.SHA(), nil
+	return buildinfo.Pin()
 }
 
 func (s initSource) Ref(ctx context.Context) (string, error) {

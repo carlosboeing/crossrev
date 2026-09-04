@@ -264,14 +264,19 @@ func (l *Leg) invoke(ctx context.Context, s *session, marker prstate.Marker, wor
 		}
 		spec, err := adapter.Spec(inv)
 		if err != nil {
-			if _, _, restoreErr := sandbox.Restore(workdir, paths); restoreErr != nil {
+			if _, warn, restoreErr := sandbox.Restore(workdir, paths); restoreErr != nil {
 				return restoreFailure(s.settings.Harness, err.Error(), restoreErr.Error())
+			} else if warn != nil {
+				// ui_warn: sandbox.Restore answers both halves (lib/sandbox.sh).
+				msgs = append(msgs, ui.Warn(warn.Message, warn.Hint))
 			}
-			return wrapErr(err)
+			out := wrapErr(err)
+			out.Messages = append(msgs, out.Messages...)
+			return out
 		}
 		started := l.now()
 		res := l.runner().Run(ctx, spec)
-		if _, _, restoreErr := sandbox.Restore(workdir, paths); restoreErr != nil {
+		if _, warn, restoreErr := sandbox.Restore(workdir, paths); restoreErr != nil {
 			// The run's own failure is the cause, not a placeholder. Bash puts
 			// the reason the attempt is being abandoned in this slot
 			// (lib/run.sh:690, called from :881 and :893), so a runner that
@@ -284,6 +289,9 @@ func (l *Leg) invoke(ctx context.Context, s *session, marker prstate.Marker, wor
 			// quarantined path — the one that touches disk at all, codex, reads
 			// inv.PayloadPath, which runlog puts in the run directory.
 			return restoreFailure(s.settings.Harness, runFailureCause(adapter.Envelope(inv, res), res), restoreErr.Error())
+		} else if warn != nil {
+			// ui_warn: sandbox.Restore answers both halves (lib/sandbox.sh).
+			msgs = append(msgs, ui.Warn(warn.Message, warn.Hint))
 		}
 		if l.Log != nil {
 			// duration in whole seconds, which is what `$SECONDS` counts

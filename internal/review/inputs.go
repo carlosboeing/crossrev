@@ -75,7 +75,6 @@ type Context struct {
 	ReviewMD          []byte
 	GitMessage        []byte
 	ProjectMapTracker string
-	Instructions      map[string][]byte
 	Backlog           config.Backlog
 }
 
