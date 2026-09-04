@@ -41,7 +41,7 @@ The review command posts inline comments and a summary, but **never edits or pus
 
 ### Install CrossRev
 
-The bootstrap installer creates a checkout and installs the complete command set, including automated-mode setup:
+The bootstrap installer downloads the release binary and installs the complete command set, including automated-mode setup:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/carlosboeing/crossrev/main/bootstrap.sh | bash

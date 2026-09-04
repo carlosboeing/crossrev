@@ -3,46 +3,42 @@
 # bootstrap.sh — one command, from nothing to a working `crossrev`.
 #
 # This is the only file meant to be fetched and run directly. Everything else
-# assumes a checkout already exists; this is what produces one.
+# assumes a binary already exists; this is what fetches one.
 #
 # **It is deliberately self-contained.** It cannot source lib/ui.sh, because the
-# whole reason it is running is that lib/ui.sh is not on the machine yet. So it
-# carries its own thirty lines of prompting and says less than the rest of the
-# tool does. Anything it would have to explain twice belongs in install.sh, which
-# runs immediately after it and has the real one.
+# whole reason it is running is that nothing is installed yet. So it carries
+# its own thirty lines of prompting and says less than the rest of the tool
+# does.
 #
 # **It is fetched, not cloned.** The repository is public, so raw.githubusercontent
 # serves this file anonymously — no token, no gh, no credential of any kind:
 #
 #   curl -fsSL https://raw.githubusercontent.com/carlosboeing/crossrev/main/bootstrap.sh | bash
 #
-# Everything below assumes nothing but bash, git and coreutils.
+# Everything below assumes nothing but bash, curl and coreutils.
 #
-# **Every step it takes is optional.** Someone who already has a checkout, or who
-# cloned it by hand, should not be made to clone again — so it looks for an
-# existing one first and uses it. It is safe to re-run.
+# **Every step it takes is optional.** Someone who already has a working binary
+# should not be made to download again — so it compares against an existing one
+# first and keeps it when the bytes match. It is safe to re-run.
 
 set -euo pipefail
 
 REPO="${CROSSREV_REPO:-carlosboeing/crossrev}"
-DEST="${CROSSREV_SRC_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/crossrev}"
-# Empty means the repository's default branch. A tag or SHA here is how you get
-# a reproducible install — "what did I install?" has an answer only if the ref
-# was not a moving branch.
+DEST="${CROSSREV_BIN_DIR:-$HOME/.local/bin}"
+# Empty means the latest release. A tag here is how you get a reproducible
+# install — "what did I install?" has an answer only if the ref was not moving.
 REF="${CROSSREV_REF:-}"
 ASSUME_YES=0
 DEST_EXPLICIT=0
-INSTALL_ARGS=()
 
 while (( $# )); do
   case "$1" in
     --dir)  DEST="${2:?--dir needs a path}"; DEST_EXPLICIT=1; shift 2 ;;
     --repo) REPO="${2:?--repo needs owner/name}"; shift 2 ;;
-    --ref)  REF="${2:?--ref needs a branch, tag or SHA}"; shift 2 ;;
-    --yes|-y) ASSUME_YES=1; INSTALL_ARGS+=(--yes); shift ;;
-    --skills|--no-skills) INSTALL_ARGS+=("$1"); shift ;;
+    --ref)  REF="${2:?--ref needs a release tag}"; shift 2 ;;
+    --yes|-y) ASSUME_YES=1; shift ;;
     --help|-h)
-      echo "usage: bootstrap.sh [--dir <path>] [--repo owner/name] [--ref <tag|branch|sha>] [--yes] [--skills|--no-skills]"
+      echo "usage: bootstrap.sh [--dir <path>] [--repo owner/name] [--ref <tag>] [--yes]"
       exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 1 ;;
   esac
@@ -68,7 +64,7 @@ die()  { printf '\n%serror%s  %s\n       %s\n\n' "$_y" "$_r" "$1" "$2" >&2; exit
 
 ask() {
   (( ASSUME_YES )) && return 0
-  [[ -r /dev/tty ]] || die "there is no terminal to ask at, and this would create $DEST" \
+  [[ -r /dev/tty ]] || die "there is no terminal to ask at, and this would install $DEST/crossrev" \
     "Re-run with --yes to accept, or --dir to choose somewhere else."
   local reply
   printf '%s◆  %s%s  [Y/n] ' "$_b" "$1" "$_r"
@@ -76,101 +72,145 @@ ask() {
   [[ -z "$reply" || "$reply" =~ ^[Yy] ]]
 }
 
-# --- is there already a checkout? -------------------------------------------
+# --- which binary ------------------------------------------------------------
 #
-# Three places worth looking, cheapest first. Cloning over the top of a checkout
-# someone already has is the rudest thing this script could do.
+# The release builds two targets and nothing else, so anything else is refused
+# by name before any download starts rather than mid-install with a 404.
+# A pure function of its two arguments so the suite can drive it offline.
 
-# Both files, not just install.sh. A directory carrying an install.sh and no
-# bin/crossrev is some other project, and treating it as a checkout produces the
-# silent failure this predicate exists to prevent: a real directory, returned
-# confidently, that cannot run the tool.
-_is_checkout() { [[ -f "$1/install.sh" && -f "$1/bin/crossrev" ]]; }
-
-find_checkout() {
-  local p
-
-  # An explicit --dir is an instruction about where to install from, so it is the
-  # only place looked at. Searching anyway and quietly using a checkout somewhere
-  # else would be answering a different question than the one asked.
-  if (( DEST_EXPLICIT )); then
-    _is_checkout "$DEST" && { printf '%s' "$DEST"; return 0; }
-    return 1
-  fi
-
-  # 1. Run from inside one. The tool is the repository root now, so $PWD is
-  # already the answer — the old two-level walk out of tools/crossrev is gone.
-  _is_checkout "$PWD" && { printf '%s' "$PWD"; return 0; }
-
-  # 2. Already installed — follow the symlink back to its source. One level up
-  # from bin/, not three: the checkout root holds bin/ directly.
-  if p="$(command -v crossrev 2>/dev/null)"; then
-    while [[ -L "$p" ]]; do
-      local d; d="$(cd -P "$(dirname "$p")" && pwd)"
-      p="$(readlink "$p")"; [[ "$p" != /* ]] && p="$d/$p"
-    done
-    p="$(cd -P "$(dirname "$p")/.." && pwd 2>/dev/null)" || p=""
-    [[ -n "$p" ]] && _is_checkout "$p" && { printf '%s' "$p"; return 0; }
-  fi
-
-  # 3. Where this script would have put it.
-  _is_checkout "$DEST" && { printf '%s' "$DEST"; return 0; }
-
-  return 1
+platform_asset() {
+  case "$1/$2" in
+    Darwin/arm64)  printf '%s' "crossrev-darwin-arm64" ;;
+    Linux/x86_64)  printf '%s' "crossrev-linux-amd64" ;;
+    *) return 1 ;;
+  esac
 }
+
+ASSET="$(platform_asset "$(uname -s)" "$(uname -m)")" || die \
+  "there is no CrossRev binary for $(uname -s)/$(uname -m)" \
+  "This release ships macOS on Apple Silicon and Linux on 64-bit Intel/AMD only."
+
+command -v curl >/dev/null 2>&1 || die \
+  "curl is not installed, and this script downloads the binary with it" \
+  "Install curl and run this again. On macOS: xcode-select --install"
+
+# A checksum tool under either name. macOS ships shasum and no sha256sum;
+# Linux ships sha256sum. Both check the same file format.
+if command -v sha256sum >/dev/null 2>&1; then
+  _sum() { sha256sum "$1"; }
+elif command -v shasum >/dev/null 2>&1; then
+  _sum() { shasum -a 256 "$1"; }
+else
+  die "neither sha256sum nor shasum is installed, and the download is verified before it runs" \
+    "Install coreutils or perl and run this again."
+fi
+
+# --- which release ------------------------------------------------------------
+
+if [[ -n "$REF" ]]; then
+  TAG="$REF"
+else
+  TAG="$(curl -fsSIL -o /dev/null -w '%{url_effective}' \
+    "https://github.com/$REPO/releases/latest" 2>/dev/null)" || die \
+    "could not work out the latest release of $REPO" \
+    "Check the network, then re-run with an explicit tag: --ref v0.5.0"
+  TAG="${TAG##*/}"
+fi
+[[ -n "$TAG" ]] || die \
+  "could not work out the latest release of $REPO" \
+  "Check the network, then re-run with an explicit tag: --ref v0.5.0"
 
 printf '\n  %scrossrev%s\n' "$_b" "$_r"
 
-# --- get a checkout ----------------------------------------------------------
+step "Download"
+say "  release   $REPO $TAG"
+say "  asset     $ASSET"
+say "  into      $DEST/crossrev"
+printf '\n'
 
-if SRC="$(find_checkout)"; then
-  step "Source"
-  ok "using the checkout already at $SRC"
-  say "Nothing was cloned. Re-run with --dir to install from somewhere else."
-else
-  command -v git >/dev/null 2>&1 || die \
-    "git is not installed, and crossrev runs from a checkout" \
-    "Install git and run this again. On macOS: xcode-select --install"
-
-  step "Clone"
-  say "crossrev runs from a checkout rather than a copied binary, so this needs"
-  say "somewhere to live. It stays there — deleting it uninstalls the tool."
-  say ""
-  say "  repository  $REPO"
-  say "  ref         ${REF:-the default branch}"
-  say "  into        $DEST"
-  printf '\n'
-  ask "Clone it there?" || die "nothing was cloned" \
-    "Choose a different location with --dir <path>, or clone it yourself and re-run this from inside it."
-
-  mkdir -p "$(dirname "$DEST")"
-  # gh where it is available, because it already holds the credential for a
-  # private repository and knows the right URL form. Plain git otherwise, which
-  # is all a public repository needs — the same fallback that will make this work
-  # for someone who has never installed gh.
-  clone_args=(--quiet)
-  [[ -n "$REF" ]] && clone_args+=(--branch "$REF")
-  if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
-    gh repo clone "$REPO" "$DEST" -- "${clone_args[@]}" || die \
-      "could not clone $REPO${REF:+ at $REF} with gh" \
-      "Check you have access to it, and that the ref exists: gh repo view $REPO"
-  else
-    git clone "${clone_args[@]}" "https://github.com/$REPO.git" "$DEST" || die \
-      "could not clone $REPO${REF:+ at $REF}" \
-      "It is private, or the ref does not exist. Authenticate with gh and try again: gh auth login"
-  fi
-  SRC="$DEST"
-  ok "cloned into $SRC"
+# An explicit --dir is an instruction about where to install, so nothing else
+# is consulted. Otherwise the one existing binary worth keeping is the one
+# already on PATH: downloading over the top of an identical file is the
+# rudest thing this script could do, and replacing a different one without
+# asking is the second rudest.
+if (( ! DEST_EXPLICIT )) && p="$(command -v crossrev 2>/dev/null)"; then
+  say "A copy is already on PATH at $p; the download is checked against it first."
 fi
 
-# --- hand over to the installer ---------------------------------------------
+# verified_digest answers the digest checksums.txt names for the asset, after
+# proving the downloaded file matches it. Anything else dies before the binary
+# lands on PATH. A pure function of files the caller names so the suite can
+# drive it offline; _sum is whatever checksum tool this machine has.
+
+verified_digest() {
+  local want got
+  want="$(awk -v a="$3" '$2 == a { print $1; found=1 } END { if (!found) exit 1 }' \
+    "$2")" || die \
+    "checksums.txt names no digest for $3" \
+    "Without that line the binary cannot be checked before it runs. Check the release."
+  got="$(_sum "$1")"; got="${got%% *}"
+  [[ "$got" == "$want" ]] || die \
+    "the downloaded $3 does not match its digest, so it was not installed" \
+    "Delete nothing: re-run this script for a fresh download, and report it if a second download disagrees too."
+  printf '%s' "$want"
+}
+
+# --- download and verify -------------------------------------------------------
 #
-# install.sh owns the requirements check, the PATH entry and the skills offer,
-# and it is the same script someone with a checkout runs by hand. Duplicating any
-# of that here would be a second copy to keep in step.
+# Into a private directory inside the destination, so the rename that installs
+# the binary stays on one filesystem and is atomic: an interrupted run leaves
+# the old binary or nothing, never half a file. The digest is checked there,
+# before anything lands on PATH.
 
-[[ -x "$SRC/install.sh" ]] || die \
-  "the checkout at $SRC has no install.sh" \
-  "Either that is not a CrossRev source tree, or the ref you cloned predates it — try --ref with a tag that has it. Point --dir somewhere else, or delete $SRC and re-run."
+mkdir -p "$DEST"
+TMP="$(mktemp -d "$DEST/.crossrev-tmp.XXXXXX")"
+chmod 700 "$TMP"
+trap 'rm -rf "$TMP"' EXIT
 
-exec "$SRC/install.sh" ${INSTALL_ARGS+"${INSTALL_ARGS[@]}"}
+BASE="https://github.com/$REPO/releases/download/$TAG"
+curl -fsSL -o "$TMP/$ASSET" "$BASE/$ASSET" || die \
+  "could not download $ASSET from $REPO release $TAG" \
+  "Check the tag exists and carries that asset: $BASE/$ASSET"
+curl -fsSL -o "$TMP/checksums.txt" "$BASE/checksums.txt" || die \
+  "could not download checksums.txt from $REPO release $TAG" \
+  "Without it the binary cannot be checked before it runs. Check the release carries one."
+ok "downloaded $ASSET and its checksums"
+
+verified_digest "$TMP/$ASSET" "$TMP/checksums.txt" "$ASSET" >/dev/null
+ok "the digest matches"
+say "That check covers the transfer, not the publisher: checksums.txt comes"
+say "from the same release as the binary, so it proves the file arrived"
+say "intact and says nothing about who put it there."
+
+chmod +x "$TMP/$ASSET"
+
+# --- install --------------------------------------------------------------------
+
+target="$DEST/crossrev"
+if [[ -e "$target" || -L "$target" ]]; then
+  if [[ -f "$target" ]] && cmp -s "$TMP/$ASSET" "$target"; then
+    ok "$target is already this binary. Nothing was changed."
+    exit 0
+  fi
+  ask "Replace $target?" || die "nothing was installed" \
+    "Left the existing file alone. Re-run with --dir <path> to install beside it."
+fi
+
+mv -f "$TMP/$ASSET" "$target"
+trap - EXIT
+rm -rf "$TMP"
+
+if [[ -x "$target" ]]; then
+  ok "$target"
+else
+  die "$target was installed but does not run as an executable" \
+    "Check the filesystem allows execution there, then re-run this script."
+fi
+
+if ! command -v crossrev >/dev/null 2>&1; then
+  say "$DEST is not on your PATH, so typing \`crossrev\` will not find it."
+  say "Add this to your shell profile:"
+  say "  export PATH=\"$DEST:\$PATH\""
+fi
+
+say "Then check everything:   crossrev doctor"

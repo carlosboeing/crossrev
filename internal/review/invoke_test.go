@@ -126,6 +126,28 @@ func TestInvokeWarnsWhenSandboxRestoreFails(t *testing.T) {
 	}
 }
 
+func TestInvokeWarnsWhenTheHarnessWritesToAQuarantinedPath(t *testing.T) {
+	e := newEnv(t)
+	if err := os.WriteFile(e.dir+"/CLAUDE.md", []byte("quarantine me\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	e.runner.onSpec = func(spec exec.Spec) {
+		// A blind write: CLAUDE.md was quarantined before the harness
+		// started, so anything created at its path is discarded.
+		if err := os.WriteFile(filepath.Join(spec.Dir, "CLAUDE.md"), []byte("blind\n"), 0o644); err != nil {
+			t.Errorf("plant the blind write: %v", err)
+		}
+	}
+	got := runLeg(t, e, e.request(t))
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
+	want := "the harness wrote to quarantined path(s): CLAUDE.md\n   Those writes were discarded when the checkout was restored, so any finding reported as fixed by editing them is not fixed and is in no commit. Check those findings by hand."
+	if !strings.Contains(ui.Joined(got.Messages), want) {
+		t.Errorf("messages = %q, want warning %q", got.Messages, want)
+	}
+}
+
 func TestInvokeSchemaNativeShapeErrorDoesNotRetry(t *testing.T) {
 	e := newEnv(t)
 	leg := e.leg(t)

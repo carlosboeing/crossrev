@@ -1,0 +1,27 @@
+{
+  "comment": "The two build targets the first native release ships (ADR 0020). Runner labels are pinned versioned labels, never *-latest. Image versions and the container digest were read from the official sources below on the resolved date; the workflow consumes the labels and the digest, this file records why they are what they are.",
+  "resolved": "2026-09-04",
+  "targets": {
+    "darwin/arm64": {
+      "runs_on": "macos-15",
+      "arch": "arm64",
+      "image_version": "20260824.0482.1",
+      "os_version": "macOS 15.7.9 (24G830)",
+      "note": "macos-15 is the conservative pinned label while macos-latest migrates to macOS 26 (completed July 2026). macOS runners are arm64 by default; no Intel variant is built."
+    },
+    "linux/amd64": {
+      "runs_on": "ubuntu-24.04",
+      "arch": "x64",
+      "image_version": "20260823.283.1",
+      "os_version": "Ubuntu 24.04.4 LTS",
+      "container": "golang:1.27.0-bookworm@sha256:ded31c68586d2e49e760acc2e65a884b23d032e9bbbed0ae0c55abd3fcaf4452",
+      "container_note": "Pinned by digest (the multi-arch index; Docker selects the amd64 image on the x64 runner), never a mutable tag. The bookworm variant carries git, which actions/checkout needs inside the container."
+    }
+  },
+  "sources": [
+    "https://docs.github.com/en/actions/reference/runners/github-hosted-runners",
+    "https://github.com/actions/runner-images/blob/main/images/macos/macos-15-Readme.md",
+    "https://github.com/actions/runner-images/blob/main/images/ubuntu/Ubuntu2404-Readme.md",
+    "https://hub.docker.com/v2/repositories/library/golang/tags/1.27.0-bookworm"
+  ]
+}

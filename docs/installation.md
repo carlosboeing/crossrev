@@ -8,25 +8,30 @@ curl -fsSL https://raw.githubusercontent.com/carlosboeing/crossrev/main/bootstra
 
 No token, no `gh`, no credential of any kind. The repository is public, so raw.githubusercontent serves the script anonymously.
 
-`bootstrap.sh` clones CrossRev somewhere durable, then hands off to `install.sh`, which puts `crossrev` on your PATH. It asks before creating anything, and it is safe to re-run.
+`bootstrap.sh` downloads the release binary for your platform, checks its digest against the release's `checksums.txt`, and installs it onto your PATH. It asks before replacing anything, and it is safe to re-run.
 
 ### What bootstrap decides, and how to override it
 
 | Flag | Default | What it does |
 |---|---|---|
-| `--dir <path>` | `~/.local/share/crossrev` | Where the clone lives. Respects `XDG_DATA_HOME` |
-| `--ref <tag\|branch\|sha>` | the default branch | Pin a known revision. Worth doing if you want "what did I install?" to have an answer |
+| `--dir <path>` | `~/.local/bin` | Where the `crossrev` binary lands |
+| `--ref <tag>` | the latest release | Pin a known release. Worth doing if you want "what did I install?" to have an answer |
 | `--repo owner/name` | `carlosboeing/crossrev` | A fork |
 | `--yes` | ask | Accept every prompt. Required when there is no terminal to ask at |
-| `--skills` / `--no-skills` | ask | Decide the skills offer up front. Forwarded to `install.sh` |
 
-`CROSSREV_REF` and `CROSSREV_REPO` set the last two through the environment instead.
+`CROSSREV_BIN_DIR`, `CROSSREV_REF` and `CROSSREV_REPO` set the destination, tag and fork through the environment instead.
 
-**Bootstrap looks for an existing checkout before cloning anything.** It checks three places, cheapest first: the directory you are standing in, the checkout that an already-installed `crossrev` symlink resolves back to, and the destination it would clone into. Any of them that holds both `install.sh` and `bin/crossrev` is used as-is. Cloning over the top of a checkout you already have would be the rudest thing the script could do.
+**Only two platforms have a binary.** macOS on Apple Silicon and Linux on 64-bit Intel/AMD. Anything else is refused by name before any download starts.
 
-Pass `--dir` and it looks nowhere else. An explicit destination is an instruction, and searching anyway would answer a different question than the one you asked.
+**An existing install with identical bytes is kept without asking.** Anything else asks before it is replaced. The install is atomic: the download lands in a private directory, the digest is checked there, and a rename puts it on PATH. An interrupted run leaves the old binary or nothing, never half a file.
 
-## From npm, to try it without cloning
+**The digest proves the transfer, not the publisher.** `checksums.txt` comes from the same release as the binary, so a matching digest means the file arrived intact and says nothing about who put it there.
+
+Pass `--dir` and it installs there and nowhere else. An explicit destination is an instruction, and installing anywhere else would answer a different question than the one you asked.
+
+## From npm, to try the last Bash version
+
+**npm is paused, not dropped.** Publishing stops at the last Bash version until the platform packages exist ([ADR 0020](adrs/0020-the-first-native-release-ships-a-reduced-scope.md)). What is on the registry still runs, and what follows describes it.
 
 ```bash
 npx crossrev-ai --pr 42        # nothing installed, nothing left behind
@@ -39,9 +44,9 @@ The package is the same bash the clone runs — `bin/`, `lib/`, `schemas/`, `ski
 
 **`crossrev init` does not work from an npm install, and this is the one real difference.** `init` generates workflows that pin the composite action to a 40-character SHA, and it reads that SHA from CrossRev's own git checkout ([ADR 0009](adrs/0009-delivery-via-sha-pinned-composite-action.md)). An npm package has no `.git`, so `init` stops with an error naming the cause rather than writing a workflow pinned to nothing.
 
-So: **npm is the local path, a clone is either path.** If you're setting up automated mode, use the bootstrap above. Full reasoning in [ADR 0011](adrs/0011-npm-as-a-second-install-route.md).
+So: **npm is the local path, a release binary is either path.** If you're setting up automated mode, use the bootstrap above. Full reasoning in [ADR 0011](adrs/0011-npm-as-a-second-install-route.md).
 
-Updating is `npm update -g crossrev-ai`, which is the one thing npm does better than the clone — see [the checkout is the installation](#the-checkout-is-the-installation) for why the clone has no update command yet.
+Updating a release install is the bootstrap again, which keeps an identical binary without asking. Updating npm is `npm update -g crossrev-ai`, which is the one thing npm does better than a binary.
 
 ## Installing from a checkout you already have
 
@@ -53,21 +58,21 @@ Skip the bootstrap:
 
 | Flag | What it does |
 |---|---|
-| `--bin-dir <dir>` | Where to put the symlink. Defaults to `~/.local/bin`, or `CROSSREV_BIN_DIR` |
-| `--yes` | Don't ask before replacing an existing link |
+| `--bin-dir <dir>` | Where to put the binary. Defaults to `~/.local/bin`, or `CROSSREV_BIN_DIR` |
+| `--yes` | Don't ask before replacing an existing binary |
 | `--skills` / `--no-skills` | Decide the skills offer without being asked |
 
-`install.sh` owns exactly one thing permanently: the symlink on your PATH. It reports what it replaced, because a link silently repointed at a different checkout keeps working while `git pull` in the old one changes nothing, and there is no error to explain why.
+`install.sh` builds the binary from the checkout with `scripts/build-native.sh` and copies it onto your PATH. It reports what it replaced, because a binary silently overwritten by a different build keeps working while running code you did not expect, and there is no error to explain why.
 
 If the bin directory isn't on your PATH, it tells you the line to add to your shell profile rather than editing it for you.
 
-## The checkout is the installation
+## The binary is the installation
 
-`install.sh` symlinks; it never copies. At runtime `crossrev` resolves the symlink and reads its libraries, skills and templates from the checkout. Three consequences worth knowing:
+The binary carries everything it needs: skills, templates and schemas are embedded at build time, so there is no checkout to keep beside it. Three consequences worth knowing:
 
-- **`git pull` in the checkout is the update.** There is no `crossrev update` command, and no reinstall step. A [roadmap item](ROADMAP.md) tracks giving this a proper command.
-- **Deleting or moving the checkout is the uninstall.** Remove the clone and the symlink on your PATH, and nothing is left except `~/.config/crossrev/` if you set up automated mode.
-- **Editing the checkout takes effect immediately.** Handy when you're working on CrossRev itself, occasionally surprising otherwise.
+- **Rebuild and re-run `install.sh` to update.** There is no `crossrev update` command. A [roadmap item](ROADMAP.md) tracks giving this a proper command.
+- **Deleting the binary is the uninstall.** Remove it from your PATH, and nothing is left except `~/.config/crossrev/` if you set up automated mode.
+- **Editing the checkout changes nothing until you reinstall.** Handy when you're working on CrossRev itself: the installed tool keeps running the build it was copied from, no matter what the checkout does next.
 
 ## The two skills
 
@@ -79,7 +84,7 @@ npx skills@latest add carlosboeing/crossrev
 
 No `--skill` filters: `skills/` holds exactly those two, so naming them selects everything and can only go stale.
 
-**The loop does not need them.** CrossRev reads both skills out of its checkout and reproduces their text into every prompt, so installing them is for invoking them by hand in an ordinary session. That's why it stays an offer — and it's the only step that wants Node, when everything else runs on git, bash and coreutils.
+**The loop does not need them.** CrossRev embeds both skills at build time and reproduces their text into every prompt, so installing them is for invoking them by hand in an ordinary session. That's why it stays an offer — and it's the only step that wants Node, when everything else runs on git, bash and coreutils.
 
 With no `npx` installed, or no terminal to ask at, the offer is skipped and the command printed. Neither is a failure, and the loop is unaffected.
 
