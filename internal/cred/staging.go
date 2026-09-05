@@ -15,6 +15,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -284,6 +285,47 @@ func stagingFailure(d Descriptor, dir string, o Options, err error) error {
 		Reason: fmt.Sprintf("the restored %s credential could not be written to its scratch home", d.Harness),
 		Action: "CrossRev stages it in a directory it throws away when the leg finishes. Check that the temporary directory is writable.",
 	}
+}
+
+// Apply returns env with the staging variable pointed at the scratch home.
+//
+// This exists because os.Setenv is not enough, and the gap it covers is silent.
+// A leg's child environment is an allowlist read ONCE, at the composition root,
+// before the leg runs and therefore before anything is staged
+// (cmd/crossrev/legs.go:113 and :168 call exec.Inherit). Prepare's export lands
+// after that read, so the slice the child receives still holds whatever
+// CODEX_HOME the parent had — nothing, on a fresh runner.
+//
+// The harness then reads its own default home, finds no login there, and calls
+// the vendor unauthenticated. What comes back is a 401 naming no cause, which
+// reads as a bad credential rather than a credential that never arrived. The
+// Bash this replaced could not reach the fault: its child inherited the live
+// environment at exec time, so the export was simply there
+// (lib/adapters/codex.sh:26-95).
+//
+// The pair is applied to a copy. env is the leg's, shared across attempts, and
+// a retry must not accumulate a second entry for the same name.
+//
+// A nil or zero *Staged answers env unchanged, which is every path that staged
+// nothing: a laptop, a self-hosted runner, and a harness whose descriptor names
+// no staging variable.
+func (s *Staged) Apply(env []string) []string {
+	if s == nil || s.Env == "" || s.Dir == "" {
+		return env
+	}
+
+	// The name is replaced rather than appended to. Go's exec takes the LAST
+	// entry for a repeated name on Linux and on macOS, so appending would work
+	// by accident on both and by accident is not a property to ship.
+	prefix := s.Env + "="
+	applied := make([]string, 0, len(env)+1)
+	for _, entry := range env {
+		if strings.HasPrefix(entry, prefix) {
+			continue
+		}
+		applied = append(applied, entry)
+	}
+	return append(applied, prefix+s.Dir)
 }
 
 // Discard removes the scratch home and puts the environment back: cred_discard

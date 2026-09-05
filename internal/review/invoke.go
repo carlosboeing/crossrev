@@ -272,8 +272,10 @@ func (l *Leg) invoke(ctx context.Context, req Request, loaded Context, settings 
 		Effort:   settings.effort,
 		Endpoint: endpoint,
 		Write:    false,
-		Env:      l.Env,
-		Scratch:  tmp,
+		// staged, not l.Env: the allowlist was read before Prepare staged
+		// anything, so the staging variable reaches the child only from here.
+		Env:     staged.Apply(l.Env),
+		Scratch: tmp,
 	}
 
 	shapeBudget := 1
