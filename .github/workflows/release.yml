@@ -227,6 +227,11 @@ jobs:
           GOTOOLCHAIN: go1.27.0
         run: |
           set -euo pipefail
+          # go build's VCS stamping shells out to git, and the container's git
+          # sees the checkout owned by a different user than the one running
+          # this step, so it refuses with "detected dubious ownership" before
+          # `git config` names the checkout trusted here too.
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           mkdir -p dist
           # Static: the binary installs onto machines whose libc is unknown,
           # so it carries none.
