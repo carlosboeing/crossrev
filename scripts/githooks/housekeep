@@ -90,6 +90,25 @@ INNER
   return $rc
 }
 
+# --- check B: changelog pairing ---------------------------------------------
+
+_check_changelog() { # _check_changelog <base> <head>
+  # Off unless this repository opted in. The design measured 97% of quotacap
+  # pushes blocked by this rule, and a hook that fires that often gets
+  # bypassed by reflex, which is worse than no hook.
+  [ -f "$(dirname "$0")/drift-guard.on" ] || return 0
+  git log --format='%s' "$1..$2" | grep -qE '^(feat|fix|perf)(\(|:)' || return 0
+  # Repository infrastructure ships nothing to a user. A changelog line for a CI
+  # fix is noise, and a refusal during a broken release teaches --no-verify.
+  # Measured over 80 crossrev commits: 4 of the 44 feat/fix/perf commits touch
+  # only these paths, and none of the other 40 is wrongly skipped.
+  git diff --name-only "$1" "$2" \
+    | grep -qvE '^(\.github/|scripts/|tests/|docs/|[^/]+\.md$)' || return 0
+  git diff --name-only "$1" "$2" | grep -qiE '(^|/)CHANGELOG\.md$' && return 0
+  printf '  CHANGELOG.md:1  a feat, fix or perf commit is in this push with no changelog entry\n' >&2
+  return 1
+}
+
 # --- entry point ------------------------------------------------------------
 
 cmd_check_push() { # cmd_check_push <base> <head>
@@ -101,6 +120,7 @@ cmd_check_push() { # cmd_check_push <base> <head>
 $(_lifecycle_files "$base" "$head")
 INNER
   _check_recently_shipped "$base" "$head" || rc=1
+  _check_changelog "$base" "$head" || rc=1
   if [ "$rc" -ne 0 ]; then
     printf '\nhousekeep: refusing the push.\n' >&2
     printf '  Fix the findings above, or push with --no-verify to override.\n\n' >&2
