@@ -220,6 +220,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Build
+        # A containerized step defaults to `sh`, not bash, and this image's `sh`
+        # is dash, which refuses `set -o pipefail`.
+        shell: bash
         env:
           GOTOOLCHAIN: go1.27.0
         run: |
