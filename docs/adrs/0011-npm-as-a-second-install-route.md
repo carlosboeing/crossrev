@@ -3,6 +3,9 @@ date: 2026-08-13
 title: "npm is a second install route for the local path only"
 type: adr
 status: approved
+authors:
+  - "Carlos Boeing"
+  - "claude-opus-5 (claude-code)"
 scope: [delivery, distribution, npm]
 ---
 

@@ -3,6 +3,8 @@ date: 2026-08-10
 title: "Repository-provided harness configuration is quarantined before any invocation"
 type: adr
 status: approved
+authors:
+  - "Carlos Boeing"
 scope: [security, sandbox, adapters]
 ---
 

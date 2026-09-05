@@ -3,6 +3,8 @@ date: 2026-08-10
 title: "The loop App holds Contents, Issues and Pull requests at write, and nothing else"
 type: adr
 status: approved
+authors:
+  - "Carlos Boeing"
 scope: [security, github-apps, permissions]
 ---
 

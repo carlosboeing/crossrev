@@ -3,6 +3,8 @@ date: 2026-08-11
 title: "Skill text is reproduced into each prompt rather than discovered"
 type: adr
 status: approved
+authors:
+  - "Carlos Boeing"
 scope: [protocol, prompts, sandbox]
 ---
 

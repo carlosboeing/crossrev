@@ -3,6 +3,9 @@ date: 2026-08-10
 title: "Cross-model review loop with schema-constrained legs"
 type: adr
 status: approved
+authors:
+  - "Carlos Boeing"
+  - "claude-opus-5 (claude-code)"
 scope: [architecture, models, protocol]
 ---
 
