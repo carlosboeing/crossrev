@@ -1,0 +1,118 @@
+#!/usr/bin/env bash
+#
+# housekeep — refuse stale project records, report what a merge left behind.
+#
+#   housekeep check --push <base> <head>   local only, exits 1 on findings
+#   housekeep check                        everything, calls gh, always exits 0
+#   housekeep fix                          removes worktrees and branches
+#
+# `check --push` never touches the network. A gate that needs the network
+# becomes slow, fails offline, and gets skipped.
+#
+# Install: see the README beside this file.
+
+set -uo pipefail
+
+LIFECYCLE_RE='(^|/)(0-brainstorms|1-discovery|2-design|3-plans|4-reviews|adrs)/'
+VALID_STATUS='draft|approved|in-progress|shipped|resolved|superseded'
+LIFECYCLE_TYPE='brainstorm|research|discovery|design|plan|review|audit|retro|adr'
+
+# --- helpers ----------------------------------------------------------------
+
+_frontmatter() { # _frontmatter <file> -> the block between the first two ---
+  awk 'NR==1 && $0!="---" {exit 1} NR==1 {next} $0=="---" {exit} {print}' "$1"
+}
+
+_field() { # _field <file> <name> -> the value, or empty
+  local val
+  val="$(_frontmatter "$1" | sed -n "s/^$2:[[:space:]]*//p" | head -1 | tr -d '"')"
+  if [ -z "$val" ]; then
+    val="$(_frontmatter "$1" | awk -v f="$2:" '$0 ~ "^"f {found=1; next} found && /^[[:space:]]*-/ {print; exit} found && !/^[[:space:]]/ {exit}')"
+  fi
+  printf '%s' "$val"
+}
+
+_lifecycle_files() { # _lifecycle_files <base> <head>
+  git diff --name-only --diff-filter=ACMR "$1" "$2" -- '*.md' \
+    | grep -E "$LIFECYCLE_RE" || true
+}
+
+# --- check A: frontmatter ---------------------------------------------------
+
+_check_frontmatter() { # _check_frontmatter <file> -> 0 ok, 1 finding
+  local f="$1" doctype status rc=0
+  [ -f "$f" ] || return 0
+  if ! _frontmatter "$f" >/dev/null 2>&1; then
+    printf '  %s:1  no frontmatter block at byte 0\n' "$f" >&2
+    return 1
+  fi
+  for want in title type authors; do
+    if [ -z "$(_field "$f" "$want")" ]; then
+      printf '  %s:1  missing %s\n' "$f" "$want" >&2
+      rc=1
+    fi
+  done
+  doctype="$(_field "$f" type)"
+  if printf '%s' "$doctype" | grep -qE "^($LIFECYCLE_TYPE)$"; then
+    [ -n "$(_field "$f" date)" ] || { printf '  %s:1  lifecycle doc missing date\n' "$f" >&2; rc=1; }
+    status="$(_field "$f" status)"
+    if [ -z "$status" ]; then
+      printf '  %s:1  lifecycle doc missing status\n' "$f" >&2; rc=1
+    elif ! printf '%s' "$status" | grep -qE "^($VALID_STATUS)$"; then
+      printf '  %s:1  status %s is not one of: %s\n' "$f" "$status" "$VALID_STATUS" >&2; rc=1
+    fi
+  fi
+  return $rc
+}
+
+# --- check C: a shipped roadmap line matches its document -------------------
+
+_check_recently_shipped() { # _check_recently_shipped <base> <head>
+  local roadmap rc=0 line target added
+  roadmap="$(git diff --name-only "$1" "$2" | grep -E '(^|/)ROADMAP\.md$' | head -1)"
+  [ -n "$roadmap" ] || return 0
+  added="$(git diff --unified=0 "$1" "$2" -- "$roadmap" \
+             | grep -E '^\+' | grep -v '^+++' | sed 's/^+//')"
+  printf '%s' "$added" | grep -iq 'recently shipped' || return 0
+  while IFS= read -r line; do
+    for target in $(printf '%s' "$line" | grep -oE '\]\([^)]+\.md\)' | tr -d ']()'); do
+      [ -f "$target" ] || continue
+      printf '%s' "$target" | grep -qE "$LIFECYCLE_RE" || continue
+      if [ "$(_field "$target" status)" != "shipped" ]; then
+        printf '  %s:1  linked from a Recently shipped line but status is %s\n' \
+          "$target" "$(_field "$target" status)" >&2
+        rc=1
+      fi
+    done
+  done <<INNER
+$added
+INNER
+  return $rc
+}
+
+# --- entry point ------------------------------------------------------------
+
+cmd_check_push() { # cmd_check_push <base> <head>
+  local base="$1" head="$2" rc=0 f
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    _check_frontmatter "$f" || rc=1
+  done <<INNER
+$(_lifecycle_files "$base" "$head")
+INNER
+  _check_recently_shipped "$base" "$head" || rc=1
+  if [ "$rc" -ne 0 ]; then
+    printf '\nhousekeep: refusing the push.\n' >&2
+    printf '  Fix the findings above, or push with --no-verify to override.\n\n' >&2
+  fi
+  return $rc
+}
+
+case "${1:-}" in
+  check)
+    shift
+    if [ "${1:-}" = "--push" ]; then shift; cmd_check_push "${1:?base}" "${2:?head}"; exit $?; fi
+    printf 'housekeep: the full check is Task 6\n' >&2; exit 0 ;;
+  fix) printf 'housekeep: fix is Task 7\n' >&2; exit 0 ;;
+  *) printf 'usage: housekeep check [--push <base> <head>] | housekeep fix\n' >&2; exit 2 ;;
+esac
