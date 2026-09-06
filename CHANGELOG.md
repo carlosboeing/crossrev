@@ -4,6 +4,8 @@ All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepa
 
 ## [Unreleased]
 
+## [0.6.1] — 2026-09-06
+
 ### Fixed
 
 - **A staged harness credential reaches the harness again.** A leg's child environment is an allowlist read once, at the composition root, before the leg runs. `cred.Prepare` stages the restored credential into a scratch home and exports the variable that names it — `CODEX_HOME`, `GROK_HOME`, or `XDG_DATA_HOME` for opencode — but that export lands after the read, so the child was handed a list that never named the scratch home. The harness then read its own default store, found no login on a fresh runner, and called the vendor unauthenticated. What came back was a 401 naming no cause, which reads as a bad credential rather than a credential that never arrived. `cred.Staged.Apply` now puts the pair in front of the child on both legs. **This broke automated mode on a hosted runner for codex, grok and opencode.** Claude was unaffected: `CLAUDE_CODE_OAUTH_TOKEN` is a plain secret already present when the allowlist is read. Measured on the testbed under 0.6.0: seven 401s from the Responses endpoint, and the same credential authenticated the moment the variable was present before the leg was built. The Bash this replaced could not reach the fault, because its child inherited the live environment at exec time.
