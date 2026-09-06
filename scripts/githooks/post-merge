@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+#
+# post-merge — print what the merge left behind. It refuses nothing and it
+# deletes nothing, so it may call the network.
+#
+# git runs it after `git pull` completes a merge, which is what you run after
+# a squash merge on GitHub.
+#
+# Tested 2026-09-04 on git 2.50.1: it fires on a fast-forward pull, and does
+# not fire on a pull with nothing to fetch. The second case is correct. A pull
+# that merged nothing left nothing behind.
+
+set -uo pipefail
+HERE="$(cd "$(dirname "$0")" && pwd)"
+"$HERE/housekeep" check || true
+exit 0
