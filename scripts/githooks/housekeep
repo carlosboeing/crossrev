@@ -13,7 +13,10 @@
 
 set -uo pipefail
 
-LIFECYCLE_RE='(^|/)(0-brainstorms|1-discovery|2-design|3-plans|4-reviews|adrs)/'
+# A lifecycle document is one file directly inside a lifecycle directory.
+# Anything nested deeper is a bundle or an assets folder, which the conventions
+# exempt: discovery bundle contents, assets/, imports/, notes/.
+LIFECYCLE_RE='(^|/)(0-brainstorms|1-discovery|2-design|3-plans|4-reviews|adrs)/[^/]+\.md$'
 VALID_STATUS='draft|approved|in-progress|shipped|resolved|superseded'
 LIFECYCLE_TYPE='brainstorm|research|discovery|design|plan|review|audit|retro|adr'
 
@@ -32,6 +35,12 @@ _field() { # _field <file> <name> -> the value, or empty
   printf '%s' "$val"
 }
 
+_blob() { # _blob <commit-ish> <repo-relative-path> -> prints a temp file path
+  local out
+  out="$(mktemp)" || return 1
+  if git show "$1:$2" > "$out" 2>/dev/null; then printf '%s' "$out"; else rm -f "$out"; return 1; fi
+}
+
 _lifecycle_files() { # _lifecycle_files <base> <head>
   git diff --name-only --diff-filter=ACMR "$1" "$2" -- '*.md' \
     | grep -E "$LIFECYCLE_RE" || true
@@ -39,27 +48,27 @@ _lifecycle_files() { # _lifecycle_files <base> <head>
 
 # --- check A: frontmatter ---------------------------------------------------
 
-_check_frontmatter() { # _check_frontmatter <file> -> 0 ok, 1 finding
-  local f="$1" doctype status rc=0
+_check_frontmatter() { # _check_frontmatter <blob-path> <label> -> 0 ok, 1 finding
+  local f="$1" label="${2:-$1}" doctype status rc=0
   [ -f "$f" ] || return 0
   if ! _frontmatter "$f" >/dev/null 2>&1; then
-    printf '  %s:1  no frontmatter block at byte 0\n' "$f" >&2
+    printf '  %s:1  no frontmatter block at byte 0\n' "$label" >&2
     return 1
   fi
   for want in title type authors; do
     if [ -z "$(_field "$f" "$want")" ]; then
-      printf '  %s:1  missing %s\n' "$f" "$want" >&2
+      printf '  %s:1  missing %s\n' "$label" "$want" >&2
       rc=1
     fi
   done
   doctype="$(_field "$f" type)"
   if printf '%s' "$doctype" | grep -qE "^($LIFECYCLE_TYPE)$"; then
-    [ -n "$(_field "$f" date)" ] || { printf '  %s:1  lifecycle doc missing date\n' "$f" >&2; rc=1; }
+    [ -n "$(_field "$f" date)" ] || { printf '  %s:1  lifecycle doc missing date\n' "$label" >&2; rc=1; }
     status="$(_field "$f" status)"
     if [ -z "$status" ]; then
-      printf '  %s:1  lifecycle doc missing status\n' "$f" >&2; rc=1
+      printf '  %s:1  lifecycle doc missing status\n' "$label" >&2; rc=1
     elif ! printf '%s' "$status" | grep -qE "^($VALID_STATUS)$"; then
-      printf '  %s:1  status %s is not one of: %s\n' "$f" "$status" "$VALID_STATUS" >&2; rc=1
+      printf '  %s:1  status %s is not one of: %s\n' "$label" "$status" "$VALID_STATUS" >&2; rc=1
     fi
   fi
   return $rc
@@ -68,19 +77,35 @@ _check_frontmatter() { # _check_frontmatter <file> -> 0 ok, 1 finding
 # --- check C: a shipped roadmap line matches its document -------------------
 
 _check_recently_shipped() { # _check_recently_shipped <base> <head>
-  local roadmap rc=0 line target added
+  local roadmap rc=0 line target added dir root abs rel blob status doctype
   roadmap="$(git diff --name-only "$1" "$2" | grep -E '(^|/)ROADMAP\.md$' | head -1)"
   [ -n "$roadmap" ] || return 0
+  # A roadmap writes its links relative to its own directory, not to the
+  # repository root. Resolving them from the root made this check a no-op.
+  dir="$(dirname "$roadmap")"
+  root="$(git rev-parse --show-toplevel)"
   added="$(git diff --unified=0 "$1" "$2" -- "$roadmap" \
              | grep -E '^\+' | grep -v '^+++' | sed 's/^+//')"
   printf '%s' "$added" | grep -iq 'recently shipped' || return 0
   while IFS= read -r line; do
     for target in $(printf '%s' "$line" | grep -oE '\]\([^)]+\.md\)' | tr -d ']()'); do
-      [ -f "$target" ] || continue
-      printf '%s' "$target" | grep -qE "$LIFECYCLE_RE" || continue
-      if [ "$(_field "$target" status)" != "shipped" ]; then
+      abs="$(cd "$root/$dir" 2>/dev/null && cd "$(dirname "$target")" 2>/dev/null \
+             && printf '%s/%s' "$(pwd -P)" "$(basename "$target")")"
+      [ -n "$abs" ] || continue
+      rel="${abs#$root/}"
+      printf '%s' "$rel" | grep -qE "$LIFECYCLE_RE" || continue
+      blob="$(_blob "$2" "$rel")" || continue
+      status="$(_field "$blob" status)"
+      # Two document types never reach `shipped`, and that is correct.
+      # An ADR is accepted, so `approved` is its terminal state. A brainstorm
+      # concludes in a design, so `resolved` is its terminal state.
+      doctype="$(_field "$blob" type)"
+      [ "$doctype" = "adr" ] && [ "$status" = "approved" ] && status=shipped
+      [ "$doctype" = "brainstorm" ] && [ "$status" = "resolved" ] && status=shipped
+      rm -f "$blob"
+      if [ "$status" != "shipped" ]; then
         printf '  %s:1  linked from a Recently shipped line but status is %s\n' \
-          "$target" "$(_field "$target" status)" >&2
+          "$rel" "${status:-absent}" >&2
         rc=1
       fi
     done
@@ -103,19 +128,150 @@ _check_changelog() { # _check_changelog <base> <head>
   # Measured over 80 crossrev commits: 4 of the 44 feat/fix/perf commits touch
   # only these paths, and none of the other 40 is wrongly skipped.
   git diff --name-only "$1" "$2" \
-    | grep -qvE '^(\.github/|scripts/|tests/|docs/|[^/]+\.md$)' || return 0
+    | grep -qvE '^(\.github/|scripts/|tests/|docs/)|(^|/)testdata/|^[^/]+\.md$' || return 0
   git diff --name-only "$1" "$2" | grep -qiE '(^|/)CHANGELOG\.md$' && return 0
   printf '  CHANGELOG.md:1  a feat, fix or perf commit is in this push with no changelog entry\n' >&2
   return 1
 }
 
+
+# --- the on-demand check: what did a merge leave behind? ---------------------
+
+GH="${HOUSEKEEP_GH:-gh}"   # a test replaces this with a stub
+
+_merged_prs() { # _merged_prs -> one pull request number per line
+  # post-merge is handed no pull request number, and one pull can bring
+  # several squash merges. Every squash merge here ends its subject with
+  # (#N), as in: feat(scope): thing (#37). A direct push yields nothing,
+  # which is right.
+  git log --format='%s' ORIG_HEAD..HEAD 2>/dev/null \
+    | sed -n 's/.*(#\([0-9][0-9]*\))$/\1/p'
+}
+
+_roadmap() { # _roadmap -> this repository's roadmap path, or nothing
+  # This repository only. A nested working-memory repository is separate, and
+  # the script is vendored there too, so it finds its own roadmap when it runs
+  # from inside it. Never reach across the boundary.
+  for c in docs/ROADMAP.md ROADMAP.md; do
+    [ -f "$c" ] && { printf '%s' "$c"; return 0; }
+  done
+  return 1
+}
+
+_next_section() { # _next_section <roadmap> -> the lines under ## Next
+  awk '/^##[[:space:]]+Next/{f=1;next} /^##[[:space:]]/{f=0} f' "$1"
+}
+
+_worktree_for() { # _worktree_for <branch> -> the worktree path using it
+  git worktree list --porcelain \
+    | awk -v b="refs/heads/$1" '/^worktree /{w=$2} /^branch /{if($2==b) print w}'
+}
+
+cmd_check() { # cmd_check -> always exits 0; it reports, it never refuses
+  local prs n state head road next_lines hits found=0 wt target status
+  prs="$(_merged_prs)"
+  road="$(_roadmap || true)"
+  [ -n "$road" ] && next_lines="$(_next_section "$road")"
+
+  for n in $prs; do
+    local json
+    json="$("$GH" pr view "$n" --json state,headRefName,closingIssuesReferences 2>/dev/null)" || continue
+    state="$(printf '%s' "$json" | sed -n 's/.*"state":"\([A-Z]*\)".*/\1/p')"
+    [ "$state" = "MERGED" ] || continue
+    head="$(printf '%s' "$json" | sed -n 's/.*"headRefName":"\([^"]*\)".*/\1/p')"
+
+    # finding 1: the branch, and any worktree holding it
+    if [ -n "$head" ] && git show-ref --verify --quiet "refs/heads/$head"; then
+      printf '  pull request %s merged, branch %s still here\n' "$n" "$head"
+      wt="$(_worktree_for "$head")"
+      [ -n "$wt" ] && printf '    worktree %s holds it, so remove that first\n' "$wt"
+      found=1
+    fi
+
+    # findings 2 and 3: a roadmap Next line naming an issue the merge closed
+    for i in $(printf '%s' "$json" | grep -o '"number":[0-9]*' | cut -d: -f2); do
+      hits="$(printf '%s\n' "$next_lines" | grep -n "#$i\b" || true)"
+      [ -n "$hits" ] || continue
+      printf '  %s  a Next line names issue %s, which pull request %s closed\n' "$road" "$i" "$n"
+      found=1
+      for target in $(printf '%s\n' "$hits" | grep -oE '\]\([^)]+\.md\)' | tr -d ']()'); do
+        local abs rel blob
+        abs="$(cd "$(dirname "$road")" 2>/dev/null && cd "$(dirname "$target")" 2>/dev/null \
+               && printf '%s/%s' "$(pwd -P)" "$(basename "$target")")"
+        [ -n "$abs" ] || continue
+        rel="${abs#$(git rev-parse --show-toplevel)/}"
+        printf '%s' "$rel" | grep -qE "$LIFECYCLE_RE" || continue
+        blob="$(_blob HEAD "$rel")" || continue
+        status="$(_field "$blob" status)"; rm -f "$blob"
+        [ "$status" = "shipped" ] || printf '    %s:1  linked there but status is %s\n' "$rel" "${status:-absent}"
+      done
+    done
+  done
+
+  # finding 4: remote branches that are gone
+  local pruned
+  pruned="$(git remote prune --dry-run origin 2>/dev/null | sed -n 's/^ \* \[would prune\] /    /p')"
+  if [ -n "$pruned" ]; then
+    printf '  stale remote refs:\n%s\n' "$pruned"
+    found=1
+  fi
+
+  [ "$found" -eq 1 ] && printf '\n  housekeep fix\n\n'
+  return 0
+}
+
+
+# --- fix: the only code path that deletes -----------------------------------
+
+cmd_fix() { # cmd_fix -> removes a merged branch and its worktree, locally only
+  # Order is not negotiable: confirm MERGED through gh, remove the worktree,
+  # then delete the branch, then prune. A branch held by a worktree cannot be
+  # deleted. `git branch -d` refuses after a squash merge, because git cannot
+  # see the squash as a merge, so -D is used and the gh confirmation comes
+  # first. Nothing here deletes a remote branch, ever.
+  local prs n json state head wt did=0
+  prs="$(_merged_prs)"
+  for n in $prs; do
+    json="$("$GH" pr view "$n" --json state,headRefName 2>/dev/null)" || {
+      printf '  pull request %s: gh gave no answer, so nothing was deleted\n' "$n" >&2; continue; }
+    state="$(printf '%s' "$json" | sed -n 's/.*"state":"\([A-Z]*\)".*/\1/p')"
+    if [ "$state" != "MERGED" ]; then
+      printf '  pull request %s is %s, not MERGED, so its branch stays\n' "$n" "${state:-unknown}" >&2
+      continue
+    fi
+    head="$(printf '%s' "$json" | sed -n 's/.*"headRefName":"\([^"]*\)".*/\1/p')"
+    [ -n "$head" ] || continue
+    git show-ref --verify --quiet "refs/heads/$head" || continue
+
+    wt="$(_worktree_for "$head")"
+    if [ -n "$wt" ]; then
+      if git worktree remove "$wt" 2>/dev/null; then
+        printf '  removed worktree %s\n' "$wt"; did=1
+      else
+        printf '  worktree %s has changes, so branch %s stays\n' "$wt" "$head" >&2
+        continue
+      fi
+    fi
+    if git branch -D "$head" >/dev/null 2>&1; then
+      printf '  deleted branch %s\n' "$head"; did=1
+    fi
+  done
+  if git remote prune origin 2>/dev/null | grep -q .; then
+    printf '  pruned stale remote refs\n'; did=1
+  fi
+  [ "$did" -eq 0 ] && printf '  nothing to do\n'
+  return 0
+}
+
 # --- entry point ------------------------------------------------------------
 
 cmd_check_push() { # cmd_check_push <base> <head>
-  local base="$1" head="$2" rc=0 f
+  local base="$1" head="$2" rc=0 f blob
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    _check_frontmatter "$f" || rc=1
+    blob="$(_blob "$head" "$f")" || continue
+    _check_frontmatter "$blob" "$f" || rc=1
+    rm -f "$blob"
   done <<INNER
 $(_lifecycle_files "$base" "$head")
 INNER
@@ -132,7 +288,7 @@ case "${1:-}" in
   check)
     shift
     if [ "${1:-}" = "--push" ]; then shift; cmd_check_push "${1:?base}" "${2:?head}"; exit $?; fi
-    printf 'housekeep: the full check is Task 6\n' >&2; exit 0 ;;
-  fix) printf 'housekeep: fix is Task 7\n' >&2; exit 0 ;;
+    cmd_check; exit 0 ;;
+  fix) cmd_fix; exit 0 ;;
   *) printf 'usage: housekeep check [--push <base> <head>] | housekeep fix\n' >&2; exit 2 ;;
 esac
