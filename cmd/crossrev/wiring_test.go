@@ -84,8 +84,8 @@ func errorAs(err error, target **exec.ExitError) bool {
 // stdout, stderr and the status — the way tests/harness.sh drives the shell.
 //
 // These are the commands that answer without a repository, a network or a
-// harness. The ones that need all three are the CLI-driven shell suites' job:
-// scripts/test-native.sh points them at this same binary.
+// harness. The ones that need all three are the remaining shell suites' job:
+// tests/run.sh builds the binary once and points them at it.
 func TestTheBinaryAnswersOneCommandPerPackage(t *testing.T) {
 	bin := binary(t)
 
