@@ -3,6 +3,9 @@ date: 2026-08-22
 title: "The resolver commits without the host repository's git hooks"
 type: adr
 status: approved
+authors:
+  - "Carlos Boeing"
+  - "claude-opus-5 (claude-code)"
 scope: [resolve, git, configuration]
 ---
 

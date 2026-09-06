@@ -3,6 +3,9 @@ date: 2026-08-21
 title: "Seed-and-self-refresh for reusable credentials"
 type: adr
 status: approved
+authors:
+  - "Carlos Boeing"
+  - "claude-opus-5 (claude-code)"
 scope: [credentials, ci, github-apps]
 supersedes: 0004-subscription-credentials-in-ci.md
 ---

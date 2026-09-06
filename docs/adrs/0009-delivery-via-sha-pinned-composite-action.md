@@ -3,6 +3,8 @@ date: 2026-08-13
 title: "Delivery is a composite action pinned by full-length SHA"
 type: adr
 status: approved
+authors:
+  - "Carlos Boeing"
 scope: [delivery, github-actions, supply-chain]
 ---
 

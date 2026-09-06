@@ -3,6 +3,9 @@ date: 2026-08-13
 title: "Name: CrossRev, renamed from revloop"
 type: adr
 status: approved
+authors:
+  - "Carlos Boeing"
+  - "claude-opus-5 (claude-code)"
 scope: [naming, writing-style]
 ---
 

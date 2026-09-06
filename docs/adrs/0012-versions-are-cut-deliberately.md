@@ -3,6 +3,9 @@ date: 2026-08-14
 title: "Versions are cut deliberately, and the commit type decides the bump"
 type: adr
 status: approved
+authors:
+  - "Carlos Boeing"
+  - "claude-opus-5 (claude-code)"
 scope: [release, versioning, ci]
 ---
 
