@@ -86,7 +86,17 @@ _check_recently_shipped() { # _check_recently_shipped <base> <head>
   root="$(git rev-parse --show-toplevel)"
   added="$(git diff --unified=0 "$1" "$2" -- "$roadmap" \
              | grep -E '^\+' | grep -v '^+++' | sed 's/^+//')"
-  printf '%s' "$added" | grep -iq 'recently shipped' || return 0
+  [ -n "$added" ] || return 0
+  # Only lines that end up under `## Recently shipped` are judged. Reading the
+  # whole added block was wrong: it judged a Next actions line too, and refused
+  # a roadmap that correctly listed a design still in progress.
+  local blob section
+  blob="$(_blob "$2" "$roadmap")" || return 0
+  section="$(awk '/^##[[:space:]]+Recently shipped/{f=1;next} /^##[[:space:]]/{f=0} f' "$blob")"
+  rm -f "$blob"
+  [ -n "$section" ] || return 0
+  added="$(printf '%s\n' "$added" | grep -Fxf <(printf '%s\n' "$section") || true)"
+  [ -n "$added" ] || return 0
   while IFS= read -r line; do
     for target in $(printf '%s' "$line" | grep -oE '\]\([^)]+\.md\)' | tr -d ']()'); do
       abs="$(cd "$root/$dir" 2>/dev/null && cd "$(dirname "$target")" 2>/dev/null \
