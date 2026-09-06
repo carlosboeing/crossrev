@@ -3,6 +3,8 @@ date: 2026-08-11
 title: "Six labels are the loop's contract, and crossrev/stop outranks a healthy verdict"
 type: adr
 status: approved
+authors:
+  - "Carlos Boeing"
 scope: [labels, presentation, termination]
 ---
 

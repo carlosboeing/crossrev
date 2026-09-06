@@ -3,6 +3,8 @@ date: 2026-08-10
 title: "The pull request is the state"
 type: adr
 status: approved
+authors:
+  - "Carlos Boeing"
 scope: [architecture, state, idempotency]
 ---
 

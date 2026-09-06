@@ -3,6 +3,9 @@ date: 2026-08-11
 title: "Subscription credentials in CI: lifetimes drive runner pairing"
 type: adr
 status: approved
+authors:
+  - "Carlos Boeing"
+  - "claude-opus-5 (claude-code)"
 scope: [credentials, ci, github-apps]
 superseded_by: 0015-seed-and-self-refresh-for-reusable-credentials.md
 ---

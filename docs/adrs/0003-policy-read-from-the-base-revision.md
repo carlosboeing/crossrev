@@ -3,6 +3,8 @@ date: 2026-08-10
 title: "Repository policy is read from the base revision"
 type: adr
 status: approved
+authors:
+  - "Carlos Boeing"
 scope: [security, configuration]
 ---
 
