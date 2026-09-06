@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -843,5 +844,70 @@ func TestADiscardThatFailsTwiceReportsBothFailures(t *testing.T) {
 	}
 	if !strings.Contains(message, "restoring CODEX_HOME") {
 		t.Errorf("the error does not name the restore failure: %q", message)
+	}
+}
+
+// Apply is what puts the staging variable in front of the child, because the
+// leg's environment was read before Prepare ran (cmd/crossrev/legs.go:113).
+func TestApplyPutsTheStagingVariableInTheChildEnvironment(t *testing.T) {
+	env := newEnv(map[string]string{"CROSSREV_CODEX_AUTH": string(credential(t, 86400))})
+	staged, err := cred.Prepare(codex(t), "", options(t, env))
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	t.Cleanup(func() { _ = cred.Discard(staged) })
+
+	applied := staged.Apply([]string{"PATH=/usr/bin", "HOME=/tmp"})
+	want := "CODEX_HOME=" + staged.Dir
+	if !slices.Contains(applied, want) {
+		t.Errorf("Apply gave %v, which does not name %q", applied, want)
+	}
+	if !slices.Contains(applied, "PATH=/usr/bin") {
+		t.Error("Apply dropped an entry it was given")
+	}
+}
+
+// A stale entry is replaced rather than joined. Go's exec takes the last of a
+// repeated name, so appending would work by accident on the platforms measured
+// and say nothing about the one that follows.
+func TestApplyReplacesAStaleStagingVariable(t *testing.T) {
+	env := newEnv(map[string]string{"CROSSREV_CODEX_AUTH": string(credential(t, 86400))})
+	staged, err := cred.Prepare(codex(t), "", options(t, env))
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	t.Cleanup(func() { _ = cred.Discard(staged) })
+
+	applied := staged.Apply([]string{"CODEX_HOME=/somewhere/stale", "PATH=/usr/bin"})
+	count := 0
+	for _, entry := range applied {
+		if strings.HasPrefix(entry, "CODEX_HOME=") {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("CODEX_HOME appears %d times in %v, want once", count, applied)
+	}
+	if slices.Contains(applied, "CODEX_HOME=/somewhere/stale") {
+		t.Error("Apply kept the stale home")
+	}
+}
+
+// Nothing staged, nothing changed: a laptop, a self-hosted runner, and a
+// harness whose descriptor names no staging variable all reach this.
+func TestApplyLeavesTheEnvironmentAloneWhenNothingWasStaged(t *testing.T) {
+	given := []string{"PATH=/usr/bin", "HOME=/tmp"}
+
+	for name, staged := range map[string]*cred.Staged{
+		"nil":     nil,
+		"zero":    {},
+		"no dir":  {Env: "CODEX_HOME"},
+		"no name": {Dir: "/tmp/scratch"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := staged.Apply(given); !slices.Equal(got, given) {
+				t.Errorf("Apply gave %v, want %v unchanged", got, given)
+			}
+		})
 	}
 }

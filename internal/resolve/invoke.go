@@ -217,8 +217,10 @@ func (l *Leg) invoke(ctx context.Context, s *session, marker prstate.Marker, wor
 		Effort:   s.settings.Effort,
 		Endpoint: ep,
 		Write:    core.WriteCapabilityFor(core.RoleResolver) == core.WriteYes,
-		Env:      l.Env,
-		Scratch:  filepath.Join(tmp, "scratch"),
+		// staged, not l.Env: the allowlist was read before Prepare staged
+		// anything, so the staging variable reaches the child only from here.
+		Env:     staged.Apply(l.Env),
+		Scratch: filepath.Join(tmp, "scratch"),
 	}
 	if err := os.MkdirAll(inv.Scratch, 0o700); err != nil {
 		return wrapErr(err)
