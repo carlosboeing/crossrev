@@ -23,7 +23,6 @@ type batchOutcome struct {
 	findings     []Finding
 	verdict      string
 	envelope     *harness.Envelope
-	payload      json.RawMessage
 	payloads     []json.RawMessage
 	examined     []string
 	limits       []string
@@ -56,7 +55,7 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 	}
 	plan := intel.Batches(scope, acceptedIDs, render)
 	if plan.HaltReason != "" || len(plan.Carried) > 0 {
-		return l.haltPass(ctx, req, loaded, pass, claimID, out, &batchBound{plan: plan, scope: scope})
+		return l.haltPass(ctx, req, loaded, pass, claimID, out, &batchBound{plan: plan, scope: scope, accepted: acceptedIDs})
 	}
 	marker := markerForPass(loaded.Markers, pass)
 	claim := out.Marker
@@ -86,8 +85,9 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 	if err != nil {
 		return err
 	}
+	marker.CoverageManifestID = prstate.Some(initial.CommentID())
 	if initialStop.Limit != "" {
-		return l.haltPass(ctx, req, loaded, pass, claimID, out, &batchBound{plan: planForStop(plan, initialStop), scope: scope, accepted: acceptedIDs})
+		return l.haltPass(ctx, req, loaded, pass, claimID, out, &batchBound{plan: planForStop(plan, initialStop, scope, acceptedIDs), scope: scope, accepted: acceptedIDs})
 	}
 	_ = initial
 	for _, batch := range plan.Batches {
@@ -104,12 +104,12 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 		}
 		for id, disp := range dispositions {
 			outcome.dispositions[id] = disp
+			acceptedIDs[id] = true
 		}
 		outcome.verdict = verdictFromPayload(payload)
 		outcome.payloads = append(outcome.payloads, payload)
 		if outcome.envelope == nil {
 			outcome.envelope = &envelope
-			outcome.payload = payload
 		}
 		outcome.examined = append(outcome.examined, examined)
 		outcome.limits = append(outcome.limits, limits...)
@@ -120,12 +120,12 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 		manifest, stop, err := l.publishBatchGeneration(ctx, req, loaded, scope, advisory, gen+outcome.batches+1, outcome.dispositions, outcome.examined, outcome.limits)
 		if err != nil {
 			if stop, ok := batchStop(err); ok {
-				return l.haltPass(ctx, req, loaded, pass, claimID, out, &batchBound{plan: planForStop(plan, stop), scope: scope, accepted: acceptedIDs})
+				return l.haltPass(ctx, req, loaded, pass, claimID, out, &batchBound{plan: planForStop(plan, stop, scope, acceptedIDs), scope: scope, accepted: acceptedIDs})
 			}
 			return err
 		}
 		if stop.Limit != "" {
-			return l.haltPass(ctx, req, loaded, pass, claimID, out, &batchBound{plan: planForStop(plan, stop), scope: scope, accepted: acceptedIDs})
+			return l.haltPass(ctx, req, loaded, pass, claimID, out, &batchBound{plan: planForStop(plan, stop, scope, acceptedIDs), scope: scope, accepted: acceptedIDs})
 		}
 		marker.CoverageManifestID = prstate.Some(manifest.CommentID())
 	}
@@ -363,9 +363,18 @@ func stopForBound(bound *batchBound) prstate.CoverageStop {
 }
 
 // planForStop carries a ledger-bound halt back into a batch plan shape: the
-// bound names what the shard limit stopped, and the scope names what stays
-// outstanding.
-func planForStop(plan intel.BatchPlan, stop prstate.CoverageStop) intel.BatchPlan {
+// ledger's own limit becomes the halt word, and the unaccepted units become
+// the unbatched remainder, so stopForBound counts and names the same halt
+// the ledger reported.
+func planForStop(plan intel.BatchPlan, stop prstate.CoverageStop, scope intel.Scope, accepted map[core.UnitID]bool) intel.BatchPlan {
+	plan.HaltReason = stop.Limit
+	plan.HaltPath = ""
+	plan.Unbatched = plan.Unbatched[:0]
+	for _, unit := range scope.Required {
+		if !accepted[unit.ID] {
+			plan.Unbatched = append(plan.Unbatched, unit)
+		}
+	}
 	plan.CarryReason = stop.Limit
 	return plan
 }
@@ -405,16 +414,36 @@ func (l *Leg) finishCoveredPass(ctx context.Context, req Request, loaded Context
 	_ = pass
 	_ = claimID
 	_ = scope
+	verdict := outcome.verdict
+	if verdict == "" {
+		verdict = verdictForResumed(outcome.dispositions)
+	}
 	out.Marker = marker
-	out.Covered = coveredPass{findings: outcome.findings, verdict: outcome.verdict, envelope: outcome.envelope, payload: mergePayloads(outcome.payloads), examined: outcome.examined, limits: outcome.limits}
+	out.Covered = coveredPass{findings: outcome.findings, verdict: verdict, envelope: outcome.envelope, payload: mergePayloads(outcome.payloads, verdict), examined: outcome.examined, limits: outcome.limits}
 	return nil
+}
+
+// verdictForResumed reports the verdict for a pass that accepted no batch in
+// this run: issues-remain when any carried disposition names a finding,
+// converged otherwise. A fully resumed pass re-confirms prior coverage
+// rather than re-judging it.
+func verdictForResumed(dispositions map[core.UnitID]recordDisposition) string {
+	for _, disp := range dispositions {
+		if disp.Disposition == "finding" {
+			return "issues-remain"
+		}
+	}
+	return "converged"
 }
 
 // mergePayloads folds every accepted batch payload into one findings
 // document for the enrich-and-publish path: the union of findings with the
 // last batch's verdict, examined scope and known limits. Generations already
-// carry the per-batch coverage; the marker and summary need the union.
-func mergePayloads(payloads []json.RawMessage) json.RawMessage {
+// carry the per-batch coverage; the marker and summary need the union. With
+// no payload this run accepted nothing new, so the document is empty rather
+// than a judgement: the caller sets the verdict from the carried
+// dispositions instead.
+func mergePayloads(payloads []json.RawMessage, fallbackVerdict string) json.RawMessage {
 	var findings []json.RawMessage
 	verdict := ""
 	examined := ""
@@ -437,6 +466,9 @@ func mergePayloads(payloads []json.RawMessage) json.RawMessage {
 			examined = doc.ExaminedScope
 		}
 		limits = append(limits, doc.KnownLimits...)
+	}
+	if verdict == "" {
+		verdict = fallbackVerdict
 	}
 	if verdict == "" {
 		verdict = "issues-remain"

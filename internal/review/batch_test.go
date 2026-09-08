@@ -104,9 +104,9 @@ func TestReviewBoundedHaltKeepsTheLastCompleteGeneration(t *testing.T) {
 	}
 }
 
-// TestReviewHaltAppliesTheHaltedLabel pins that a covered pass applies no
-// halted label: the halted label belongs to bounded halts alone.
-func TestReviewHaltAppliesTheHaltedLabel(t *testing.T) {
+// TestReviewCoveredPassAppliesNoHaltedLabel pins that a covered pass applies
+// no halted label: the halted label belongs to bounded halts alone.
+func TestReviewCoveredPassAppliesNoHaltedLabel(t *testing.T) {
 	e := newEnv(t)
 	writeRequiredHead(e, "a.go", "package a\n")
 	e.runner.script = []exec.Result{
@@ -153,18 +153,16 @@ func TestReviewPublishesFindingsFromEveryBatch(t *testing.T) {
 	if len(findings) != 2 {
 		t.Fatalf("marker findings = %d, want 2 (one per batch)", len(findings))
 	}
-	_ = prstate.CoverageRecordUnit
 	gens := ledgerGenerations(t, e)
 	last := gens[len(gens)-1]
 	covered := 0
 	for _, record := range last.Records {
-		if record.Type == string(prstate.CoverageRecordUnit) && record.Disposition.Present() {
+		if record.Type == prstate.CoverageRecordUnit && record.Disposition.Present() {
 			covered++
 		}
 	}
-	_ = covered
-	if len(last.Records) != 41 {
-		t.Fatalf("generation records = %d, want 41", len(last.Records))
+	if covered != 41 {
+		t.Fatalf("covered units = %d, want 41 (every required file with a disposition)", covered)
 	}
 }
 
