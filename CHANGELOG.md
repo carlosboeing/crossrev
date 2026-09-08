@@ -14,6 +14,8 @@ All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepa
 
 - **The review leg refuses incomplete or contradictory coverage.** `validate.Review` takes the answer and the numbered batch the prompt printed. Each unit number appears once. Finding numbers name returned findings. Evidence names a supplied path and revision. Spans sit inside the supplied text. `not_affected` names evidence and a reason. `could_not_review` names the failed fallbacks in its reason. Empty output fails as shape. Bad shape exits 1. Bad coverage exits 2. The exit-2 error names the missing, duplicate and unknown numbers for the retry. `validate.Findings` stays for callers with no batch.
 
+- **Coverage generations are stored as manifests and shards with full digests.** `internal/prstate` adds the `crossrev:c` codec: an append-only manifest and shard type, outstanding records, full SHA-256 body and integrity digests, measured fields, the scope report and the reserved verification envelope. New generations write `not_implemented` with five nulls; unknown or mistyped members are refused. No reader in this increment publishes or selects generations yet.
+
 ## [0.6.1] — 2026-09-06
 
 ### Fixed
