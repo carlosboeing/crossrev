@@ -16,6 +16,8 @@ All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepa
 
 - **Coverage generations are stored as manifests and shards with full digests.** `internal/prstate` adds the `crossrev:c` codec: an append-only manifest and shard type, outstanding records, full SHA-256 body and integrity digests, measured fields, the scope report and the reserved verification envelope. New generations write `not_implemented` with five nulls; unknown or mistyped members are refused. No reader in this increment publishes or selects generations yet.
 
+- **Pass markers move to v2 and record halted work as incomplete.** Markers this release writes open with `v:2` and carry the coverage manifest id, the stop counts, and the repair confirmation pair in writer order; readers refuse anything newer. Markers at `v:1` stay readable for findings, pass numbering and prior resolutions, but add no coverage. A pass that runs and halts before settling records `incomplete` with one of three halt words and re-drives at the same revision; recorded limits use two words. No verification marker field ships.
+
 ## [0.6.1] — 2026-09-06
 
 ### Fixed

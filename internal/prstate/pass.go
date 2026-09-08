@@ -78,6 +78,21 @@ type Marker struct {
 	EffortReported Opt[string]     `json:"effort_reported,omitzero"`
 	Unanchored     Opt[int]        `json:"unanchored,omitzero"`
 	Unthreaded     Opt[int]        `json:"unthreaded,omitzero"`
+	// The v2 tail, in writer order: the coverage manifest this pass
+	// published or stopped against, the stop diagnostics a halted pass
+	// records, and the confirmation pair the orchestrator writes only after
+	// accepted review at the repair head. An initial clean review carries
+	// both confirmation SHAs null. There is no verification SHA or check
+	// list here: verification is not implemented.
+	//
+	// A v1 marker never carries these keys, so they stay absent on the wire
+	// for one. Absent is the whole of the v1 answer: a historical marker
+	// still decodes for findings, pass numbering and prior resolutions, but
+	// its coverage reference is always absent and cannot satisfy convergence.
+	CoverageManifestID  Opt[int64]        `json:"coverage_manifest_id,omitzero"`
+	CoverageStop        Opt[CoverageStop] `json:"coverage_stop,omitzero"`
+	ConfirmationBaseSHA Opt[string]       `json:"confirmation_base_sha,omitzero"`
+	ConfirmationHeadSHA Opt[string]       `json:"confirmation_head_sha,omitzero"`
 
 	// commentID is which comment the marker was read off, and raw is the
 	// bytes it was read as. Both are unexported so no encoder can reach
@@ -266,12 +281,36 @@ func (m Marker) DecodeFindings(v any) error {
 }
 
 // ParseMarker reads one decoded marker payload into the typed view.
+//
+// A marker carrying a version above the one this release writes is refused,
+// because its fields may mean something this reader does not know. A v1
+// marker still decodes: its coverage tail is absent, so it contributes no
+// coverage, but its findings, pass number and prior resolutions stay
+// readable. Downgrading a pull request that already carries v2 state is
+// unsupported: writers always write the current version.
 func ParseMarker(raw json.RawMessage) (Marker, error) {
 	var m Marker
 	if err := json.Unmarshal(raw, &m); err != nil {
 		return Marker{}, fmt.Errorf("reading a marker: %w", err)
 	}
+	if m.Version == 0 {
+		return m, nil
+	}
+	if _, err := core.ParseMarkerVersion(m.Version); err != nil {
+		return Marker{}, fmt.Errorf("reading a marker: %w", err)
+	}
 	return m, nil
+}
+
+// CoverageContribution reports whether this marker carries a coverage
+// reference a reader may count: a current-version marker naming its
+// manifest. A v1 marker is reviewer context, not coverage.
+func (m Marker) CoverageContribution() bool {
+	if m.Version != core.MarkerVersion {
+		return false
+	}
+	_, ok := m.CoverageManifestID.Get()
+	return ok
 }
 
 // commentIDKey is the key state_markers adds to every marker object it prints,

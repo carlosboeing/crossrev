@@ -23,9 +23,29 @@ type ResolveMarker struct {
 }
 
 // ReviewMarker is the part of a completed review marker ReviewRedrivable reads.
+//
+// The state it carries is `complete` for a settled pass, or `incomplete`
+// for a pass that ran and halted before settling: an incomplete pass may be
+// re-driven at the same revision, where a settled one needs a new revision.
 type ReviewMarker struct {
 	State   core.PassState
 	Verdict core.Verdict
+}
+
+// ReviewIncomplete reports whether this marker records a pass that ran but
+// remains unsettled: halted with outstanding work, resumable at the same
+// revision. It is the opposite of the parity-era endings, which are settled
+// for this revision once complete.
+func ReviewIncomplete(m *ReviewMarker) bool {
+	return m != nil && m.State == core.PassIncomplete
+}
+
+// ReviewSettled reports whether this marker records a pass whose work is
+// decided for this revision: complete, whatever the verdict. An incomplete
+// pass ran but settled nothing, so it reads as unsettled here and resumes
+// rather than advancing.
+func ReviewSettled(m *ReviewMarker) bool {
+	return m != nil && m.State == core.PassComplete
 }
 
 // ResolveUnpushedFix reports a fix the resolver claimed and never committed
@@ -89,17 +109,38 @@ func ResolveRedrivable(m ResolveMarker) bool {
 // (lib/legs.sh:187-192). A nil marker is the absent one, which lib/legs.sh:189
 // spells as an empty string.
 //
-// Only `verdict: "blocked"` on a `complete` pass admits a re-drive: a review
-// that recorded findings, or that converged, is settled for this revision, and
-// an unfinished one is recovery rather than this re-drive.
+// A `complete` pass with `verdict: "blocked"` admits a re-drive: a review
+// that recorded findings, or that converged, is settled for this revision,
+// and an unfinished one is recovery rather than this re-drive. An
+// `incomplete` pass also admits one: it ran and halted before settling, so
+// the re-drive resumes the same revision rather than starting a clean new
+// pass over it.
 func ReviewRedrivable(m *ReviewMarker) bool {
 	if m == nil {
 		return false
+	}
+	if m.State == core.PassIncomplete {
+		return true
 	}
 	if m.State != core.PassComplete {
 		return false
 	}
 	return m.Verdict == core.VerdictBlocked
+}
+
+// RedriveRevision says where an admitted re-drive resumes.
+//
+// An incomplete pass resumes the revision it halted at: the same head keeps
+// the outstanding work, a moved head starts the next pass over the new
+// revision instead. A settled pass always advances: its work is decided for
+// the recorded revision, even when the head has not visibly moved. The first
+// answer says whether the pass keeps its number, the second whether the
+// revision advanced past it.
+func RedriveRevision(m *ReviewMarker, markerHeadSHA, currentHeadSHA string) (keep, advance bool) {
+	if ReviewIncomplete(m) && currentHeadSHA == markerHeadSHA {
+		return true, false
+	}
+	return false, true
 }
 
 // UnfiledDeferrals counts deferrals whose backlog record never landed
