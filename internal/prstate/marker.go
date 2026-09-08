@@ -19,8 +19,9 @@ import (
 // CrossRev has ever touched carries these bytes, and a case change would find
 // none of them: nothing errors, the pass simply reads as never having run.
 const (
-	MarkerPrefix        = "<!-- crossrev:"
-	FindingMarkerPrefix = "<!-- crossrev:f"
+	MarkerPrefix         = "<!-- crossrev:"
+	FindingMarkerPrefix  = "<!-- crossrev:f"
+	CoverageMarkerPrefix = "<!-- crossrev:c"
 )
 
 // The delimiters the extraction actually splits on. The pass marker's opening

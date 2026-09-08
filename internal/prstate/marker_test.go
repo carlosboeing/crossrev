@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/carlosboeing/crossrev/internal/core"
 	"github.com/carlosboeing/crossrev/internal/prstate"
 )
 
@@ -109,6 +110,40 @@ func TestMarkerPrefixesAreLiteralAndLowercase(t *testing.T) {
 	}
 	if prstate.FindingMarkerPrefix != "<!-- crossrev:f" {
 		t.Errorf("finding marker prefix is %q", prstate.FindingMarkerPrefix)
+	}
+	if prstate.CoverageMarkerPrefix != "<!-- crossrev:c" {
+		t.Errorf("coverage marker prefix is %q", prstate.CoverageMarkerPrefix)
+	}
+}
+
+// The coverage opening delimiter is the 16 characters up to and including the
+// trailing space of `<!-- crossrev:c {...} -->`, and it matches neither
+// existing reader.
+func TestCoverageMarkerOpenIsSixteenCharacters(t *testing.T) {
+	open := prstate.CoverageMarkerPrefix + " "
+	if len(open) != 16 {
+		t.Errorf("coverage marker open is %d characters, want 16", len(open))
+	}
+	if open != "<!-- crossrev:c " {
+		t.Errorf("coverage marker open is %q", open)
+	}
+}
+
+// A coverage marker must not decode as a state marker (lib/state.sh:74-75
+// keeps the two readers apart by the trailing space; the coverage prefix
+// keeps a third one apart the same way).
+func TestDecodeMarkerIgnoresACoverageMarker(t *testing.T) {
+	body := "text\n\n<!-- crossrev:c {\"v\":1,\"kind\":\"manifest\"} -->"
+	if got, ok := prstate.DecodeMarker(body); ok {
+		t.Errorf("a coverage marker decoded as a state marker: %q", string(got))
+	}
+}
+
+// A coverage marker carries no finding id.
+func TestFindingIDsIgnoresACoverageMarker(t *testing.T) {
+	body := "text\n\n<!-- crossrev:c {\"v\":1,\"kind\":\"shard\"} -->"
+	if got := prstate.FindingIDs([]string{body}, core.LegReview, 0); len(got) != 0 {
+		t.Errorf("a coverage marker produced finding ids %v", got)
 	}
 }
 
