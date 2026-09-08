@@ -19,6 +19,9 @@ The orchestrator supplies everything in the prompt. **You do not fetch anything.
 
 | Supplied | What it is |
 |---|---|
+| The batch | The required files under review this call, each numbered, with its change kind, readable content or explicit access limit, and its numbered diff |
+| Advisory files | Untouched files offered as uncertain context, with the search or convention rule that found each — for judgement, never as required work |
+| Excluded paths | Paths removed from the required set, each with its reason — present so nothing reads as silently omitted |
 | The diff | The changes under review, every hunk line prefixed with its old and new line number |
 | Pass number | Which pass this is |
 | Prior findings | From pass 2 onward: earlier findings, their ids, and how the resolve leg settled each |
@@ -78,6 +81,29 @@ Do not inflate. A `low` marked `high` costs a commit, a review cycle, and some o
 
 Do not report a finding for code you did not read. Do not report one you cannot anchor.
 
+## Every numbered file gets a disposition
+
+The batch numbers every required file: 1 for the first, 2 for the second, and so on. Name each one by that number in `coverage` — `"unit_number": 2` for the second file — rather than by its 16-character id, which is printed beside it for quoting in prose.
+
+Return one entry per numbered file: no more, no fewer, no duplicates. A file left out has no disposition recorded, which is a silent loss rather than a visible one.
+
+| Disposition | When |
+|---|---|
+| `no_issue` | Examined and clean |
+| `finding` | Examined and defective — name the finding's 1-based positions in `finding_numbers`, at least one |
+| `not_affected` | Examined and needing no change, with evidence saying why. It does not exempt a changed file from inspection: the file was still read and judged |
+| `could_not_review` | Strong evidence named an affected unit, and access or tooling failures stopped judgement after fallbacks — with the failed fallbacks in `reason` |
+
+Unsupported reading, difficult code, a large batch, ordinary uncertainty, missing tests and one failed attempt do not qualify for `could_not_review`.
+
+Each coverage entry names `evidence`: at least one item with a supplied path and its content revision, `start_line` and `end_line` for the lines the judgement rests on — null for file-level evidence — a `source` of `git`, `search`, `convention` or `reviewer`, and a `note` saying what it shows. Each coverage entry names `reason`: one line for the disposition, expected for `not_affected` and `could_not_review` where the disposition is a judgement rather than an observation.
+
+Advisory files never take a disposition and never satisfy one: a real defect found there is still published as a finding, but the required file it was found from keeps its own disposition. Excluded paths never take one either: they sit outside the required set, visibly, with their reason.
+
+## The scope report
+
+`examined_scope` states what was examined, in one or more sentences. `known_limits` names what limited the review — unreadable files, capped searches, content supplied as an access limit rather than text — and is empty when nothing did. Both are required even when the review found nothing: an empty `findings` array with no examined scope cannot tell examined code from omitted code.
+
 ## From pass 2 onward
 
 Before looking for anything new, classify every prior finding you were given, into `prior`. Name each by the number in the first column of the table you were given — `"finding_number": 2` for the second row — rather than by its 16-character id, which is printed beside it for quoting in prose.
@@ -108,3 +134,5 @@ Then two rules that make convergence possible:
 Return JSON matching the supplied schema, and nothing else. No prose before it, no fenced block around it, no commentary after. The harness constrains your output to the schema; your job is to fill it honestly.
 
 An empty `findings` array with verdict `converged` is a good and common result. Reporting something because reporting nothing feels lazy is the single most expensive habit in this loop — every fabricated finding costs a verification pass, a reply, and a little credibility.
+
+A `coverage` entry for every numbered file, `examined_scope`, and `known_limits` travel with the findings in the same object.
