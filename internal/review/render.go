@@ -25,6 +25,8 @@ type Finding struct {
 	Why           string  `json:"why"`
 	Fix           string  `json:"fix"`
 	Anchor        string  `json:"anchor"`
+	AnchorKind    string  `json:"anchor_kind"`
+	AnchorReason  string  `json:"anchor_reason"`
 	ThreadID      *string `json:"thread_id"`
 	RootCommentID *int64  `json:"root_comment_id"`
 }

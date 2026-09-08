@@ -50,8 +50,14 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 		acceptedIDs[unitID] = true
 	}
 	advisory := intel.AdvisoryFiles(ctx, scope, scopeSearcher{vcs: l.VCS})
+	pair := repairConfirmation(loaded.Markers, scope.Head)
+	confirmation, err := l.confirmationDelta(ctx, pair)
+	if err != nil {
+		pair = confirmationPair{}
+		confirmation = nil
+	}
 	render := func(files []intel.FileUnit) int {
-		return len(l.renderBatchPrompt(ctx, req, loaded, settings, pass, files, scope))
+		return len(l.renderBatchPrompt(ctx, req, loaded, settings, pass, files, scope, confirmation))
 	}
 	plan := intel.Batches(scope, acceptedIDs, render)
 	if plan.HaltReason != "" || len(plan.Carried) > 0 {
@@ -93,7 +99,7 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 	for _, batch := range plan.Batches {
 		expected, units := batchExpectations(batch.Files, scope.Base, scope.Head)
 		advisoryRefs, excludedRefs := advisoryPromptRefs(scope, advisory)
-		payload, envelope, batchMsgs, err := l.invokeBatch(ctx, req, loaded, settings, pass, units, advisoryRefs, excludedRefs, expected)
+		payload, envelope, batchMsgs, err := l.invokeBatch(ctx, req, loaded, settings, pass, units, advisoryRefs, excludedRefs, confirmation, expected)
 		out.Messages = append(out.Messages, batchMsgs...)
 		if err != nil {
 			return err
@@ -129,7 +135,7 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 		}
 		marker.CoverageManifestID = prstate.Some(manifest.CommentID())
 	}
-	return l.finishCoveredPass(ctx, req, loaded, settings, pass, claimID, marker, scope, outcome, out)
+	return l.finishCoveredPass(ctx, req, loaded, settings, pass, claimID, marker, scope, outcome, pair, out)
 }
 
 // batchBound carries a bounded halt out of the batch loop: the 400-file pass
@@ -406,7 +412,7 @@ func haltUILines(outstanding []string, stop prstate.CoverageStop) []ui.Line {
 // finishCoveredPass folds a fully covered pass into the result: the marker
 // carries the current coverage manifest id and the batch findings, and the
 // caller continues to the existing enrich-and-publish path with them.
-func (l *Leg) finishCoveredPass(ctx context.Context, req Request, loaded Context, settings legSettings, pass int, claimID int64, marker prstate.Marker, scope intel.Scope, outcome batchOutcome, out *Result) error {
+func (l *Leg) finishCoveredPass(ctx context.Context, req Request, loaded Context, settings legSettings, pass int, claimID int64, marker prstate.Marker, scope intel.Scope, outcome batchOutcome, pair confirmationPair, out *Result) error {
 	_ = ctx
 	_ = req
 	_ = loaded
@@ -417,6 +423,13 @@ func (l *Leg) finishCoveredPass(ctx context.Context, req Request, loaded Context
 	verdict := outcome.verdict
 	if verdict == "" {
 		verdict = verdictForResumed(outcome.dispositions)
+	}
+	if pair.set {
+		marker.ConfirmationBaseSHA = prstate.Some(pair.base.SHA())
+		marker.ConfirmationHeadSHA = prstate.Some(pair.head.SHA())
+	} else {
+		marker.ConfirmationBaseSHA = prstate.Null[string]()
+		marker.ConfirmationHeadSHA = prstate.Null[string]()
 	}
 	out.Marker = marker
 	out.Covered = coveredPass{findings: outcome.findings, verdict: verdict, envelope: outcome.envelope, payload: mergePayloads(outcome.payloads, verdict), examined: outcome.examined, limits: outcome.limits}

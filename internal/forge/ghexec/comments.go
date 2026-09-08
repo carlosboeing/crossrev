@@ -114,6 +114,36 @@ func (c *Client) ReviewCommentCreate(ctx context.Context, comment forge.ReviewCo
 	return forge.PlacementFallback, nil
 }
 
+// ReviewFileComment posts a file-level review comment: the finding names
+// a changed path with no valid hunk line, so the comment carries
+// subject_type file and no line or side. A refusal falls back to a
+// top-level comment naming the path, the same shape the inline path uses.
+func (c *Client) ReviewFileComment(ctx context.Context, comment forge.ReviewComment) (forge.Placement, error) {
+	filtered, lost, err := c.publish(comment.Body)
+	if err != nil {
+		return "", err
+	}
+	if lost {
+		c.warn(unfilteredSummary, unfilteredWarning)
+	}
+
+	res := c.run(ctx, "api", "--method", "POST",
+		"repos/"+comment.Repo.String()+"/pulls/"+strconv.Itoa(comment.Number)+"/comments",
+		"-f", "body="+filtered,
+		"-f", "commit_id="+comment.Commit.SHA(),
+		"-f", "path="+comment.Path,
+		"-f", "subject_type=file")
+	if answered(res) {
+		return forge.PlacementInline, nil
+	}
+
+	located := fmt.Sprintf("**%s**\n\n%s", comment.Path, filtered)
+	if _, err := c.CommentCreate(ctx, comment.Repo, comment.Number, located); err != nil {
+		return "", err
+	}
+	return forge.PlacementFallback, nil
+}
+
 // ReviewReply replies inside an existing review thread, addressed by the
 // thread's first comment. Replying at top level instead is what makes a pull
 // request unreadable (lib/github.sh:229-238).

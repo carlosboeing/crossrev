@@ -589,6 +589,10 @@ func (f *statusForge) ReviewCommentCreate(context.Context, forge.ReviewComment) 
 	panic("status writes nothing")
 }
 
+func (f *statusForge) ReviewFileComment(context.Context, forge.ReviewComment) (forge.Placement, error) {
+	panic("status writes nothing")
+}
+
 func (f *statusForge) ReviewReply(context.Context, core.Slug, int, int64, string) error {
 	panic("status writes nothing")
 }
