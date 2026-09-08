@@ -24,7 +24,7 @@ func read(t *testing.T, path string) []byte {
 func rendering(t *testing.T, configuration, runner string, template []byte) string {
 	t.Helper()
 	if runner == "self-hosted" {
-		configuration = strings.Replace(configuration, "version: 1\n", "version: 1\nrunner: self-hosted\n", 1)
+		configuration = strings.Replace(configuration, "version: 2\n", "version: 2\nrunner: self-hosted\n", 1)
 	}
 	req := request(t, configuration)
 	req.Source = fakeSource{sha: "0123456789abcdef0123456789abcdef01234567", ref: "v9.9.9"}
@@ -41,13 +41,13 @@ func rendering(t *testing.T, configuration, runner string, template []byte) stri
 // renderer and the templates together, so a deliberate template edit is a
 // deliberate fixture regeneration.
 func TestRenderWorkflowMatchesTheShell(t *testing.T) {
-	hosted := `version: 1
+	hosted := `version: 2
 reviewer:
   harness: codex
 resolver:
   harness: claude
 `
-	selfHosted := `version: 1
+	selfHosted := `version: 2
 reviewer:
   harness: claude
 resolver:
@@ -93,7 +93,7 @@ func templateFor(t *testing.T, workflow string) []byte {
 }
 
 func TestRenderSubstitutesEveryPlaceholderEverywhereOnALine(t *testing.T) {
-	configuration := `version: 1
+	configuration := `version: 2
 reviewer:
   harness: codex
 resolver:
@@ -113,7 +113,7 @@ resolver:
 }
 
 func TestRenderKeepsOnlyTheBlockFencedForThisRunner(t *testing.T) {
-	configuration := `version: 1
+	configuration := `version: 2
 reviewer:
   harness: claude
 resolver:
@@ -141,7 +141,7 @@ func TestRenderNamesTheRefreshScopeRepositoryEvenForAnOrganisation(t *testing.T)
 	// An organisation-level rotating credential would be refreshed by every
 	// repository reading it, and concurrency groups do not span
 	// repositories, so "one writer" would quietly become several.
-	configuration := `version: 1
+	configuration := `version: 2
 reviewer:
   harness: codex
 resolver:
@@ -173,22 +173,22 @@ endpoints:
 	}{
 		{
 			name:          "two harnesses install in leg order",
-			configuration: "version: 1\nreviewer:\n  harness: codex\nresolver:\n  harness: claude\n",
+			configuration: "version: 2\nreviewer:\n  harness: codex\nresolver:\n  harness: claude\n",
 			want:          []string{codex, claude},
 		},
 		{
 			name:          "one harness on both legs installs once",
-			configuration: "version: 1\nreviewer:\n  harness: claude\nresolver:\n  harness: claude\n",
+			configuration: "version: 2\nreviewer:\n  harness: claude\nresolver:\n  harness: claude\n",
 			want:          []string{claude},
 		},
 		{
 			name:          "a leg on a named endpoint installs the endpoint host",
-			configuration: "version: 1\nreviewer:\n  harness: codex\nresolver:\n  harness: claude\n  endpoint: kimi\n" + endpoints,
+			configuration: "version: 2\nreviewer:\n  harness: codex\nresolver:\n  harness: claude\n  endpoint: kimi\n" + endpoints,
 			want:          []string{codex, claude},
 		},
 		{
 			name:          "two legs on one endpoint install the host once",
-			configuration: "version: 1\nreviewer:\n  harness: claude\n  endpoint: kimi\nresolver:\n  harness: claude\n  endpoint: kimi\n" + endpoints,
+			configuration: "version: 2\nreviewer:\n  harness: claude\n  endpoint: kimi\nresolver:\n  harness: claude\n  endpoint: kimi\n" + endpoints,
 			want:          []string{claude},
 		},
 	} {
@@ -218,7 +218,7 @@ func TestRenderWritesNothing(t *testing.T) {
 	root := t.TempDir()
 	before := tree(t, root)
 
-	configuration := `version: 1
+	configuration := `version: 2
 reviewer:
   harness: codex
 resolver:
@@ -249,7 +249,7 @@ func TestRenderLeavesTheEmbeddedTemplateAlone(t *testing.T) {
 	template := initcmd.ReviewWorkflowTemplate()
 	original := string(template)
 
-	configuration := `version: 1
+	configuration := `version: 2
 reviewer:
   harness: codex
 resolver:
@@ -270,7 +270,7 @@ resolver:
 // The whole document is compared, because the blank line the wrong answer
 // leaves is invisible to an assertion that only looks at the install lines.
 func TestRenderLeavesNoBlankLineWhenNothingInstalls(t *testing.T) {
-	configuration := "version: 1\nreviewer:\n  harness: bogus\nresolver:\n  harness: bogus\n"
+	configuration := "version: 2\nreviewer:\n  harness: bogus\nresolver:\n  harness: bogus\n"
 	got := rendering(t, configuration, "github-hosted", read(t, "synthetic.yml"))
 	want := "head ubuntu-latest ubuntu-latest\n" +
 		"sha 0123456789abcdef0123456789abcdef01234567 ref v9.9.9\n" +
@@ -292,7 +292,7 @@ func TestRenderLeavesNoBlankLineWhenNothingInstalls(t *testing.T) {
 // An empty template stays empty: awk reads no records from it and prints
 // nothing, so there is no newline to add.
 func TestRenderEndsADocumentTheTemplateLeftUnterminated(t *testing.T) {
-	configuration := "version: 1\nreviewer:\n  harness: codex\nresolver:\n  harness: claude\n"
+	configuration := "version: 2\nreviewer:\n  harness: codex\nresolver:\n  harness: claude\n"
 	for _, row := range []struct{ name, template, want string }{
 		{"no final newline", "head __RUNS_ON__\ntail", "head ubuntu-latest\ntail\n"},
 		{"a final newline already", "head __RUNS_ON__\ntail\n", "head ubuntu-latest\ntail\n"},

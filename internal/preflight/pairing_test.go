@@ -227,7 +227,7 @@ func TestReportPairings(t *testing.T) {
 		{
 			name:   "the default pairing on a hosted runner",
 			runner: "github-hosted",
-			yaml:   "version: \"1\"\nreviewer:\n  harness: codex\nresolver:\n  harness: claude\n",
+			yaml:   "version: \"2\"\nreviewer:\n  harness: codex\nresolver:\n  harness: claude\n",
 			wantOK: true,
 			want: "\n◇  Pairings on runner: github-hosted\n" +
 				"│  ✓ reviewer — codex by subscription, kept warm by the refresher workflow\n" +
@@ -236,7 +236,7 @@ func TestReportPairings(t *testing.T) {
 		{
 			name:   "a named endpoint is a static token and skips the credential question",
 			runner: "github-hosted",
-			yaml:   "version: \"1\"\nreviewer:\n  harness: grok\n  endpoint: x\nresolver:\n  harness: claude\n",
+			yaml:   "version: \"2\"\nreviewer:\n  harness: grok\n  endpoint: x\nresolver:\n  harness: claude\n",
 			wantOK: true,
 			want: "\n◇  Pairings on runner: github-hosted\n" +
 				"│  ✓ reviewer — grok via the 'x' endpoint, a static token in a secret\n" +
@@ -245,7 +245,7 @@ func TestReportPairings(t *testing.T) {
 		{
 			name:   "a refused leg stops the report where it failed",
 			runner: "github-hosted",
-			yaml:   "version: \"1\"\nreviewer:\n  harness: agy\nresolver:\n  harness: claude\n",
+			yaml:   "version: \"2\"\nreviewer:\n  harness: agy\nresolver:\n  harness: claude\n",
 			wantOK: false,
 			want: "\n◇  Pairings on runner: github-hosted\n" +
 				"│  ✗ reviewer — agy by subscription cannot run on a github-hosted runner\n" +
@@ -255,7 +255,7 @@ func TestReportPairings(t *testing.T) {
 		{
 			name:   "self-hosted holds the login already",
 			runner: "self-hosted",
-			yaml:   "version: \"1\"\nreviewer:\n  harness: agy\nresolver:\n  harness: claude\n",
+			yaml:   "version: \"2\"\nreviewer:\n  harness: agy\nresolver:\n  harness: claude\n",
 			wantOK: true,
 			want: "\n◇  Pairings on runner: self-hosted\n" +
 				"│  ✓ reviewer — agy by subscription\n" +
@@ -264,7 +264,7 @@ func TestReportPairings(t *testing.T) {
 		{
 			name:   "a harness with no adapter is named as such",
 			runner: "github-hosted",
-			yaml:   "version: \"1\"\nreviewer:\n  harness: bogus\nresolver:\n  harness: claude\n",
+			yaml:   "version: \"2\"\nreviewer:\n  harness: bogus\nresolver:\n  harness: claude\n",
 			wantOK: false,
 			want: "\n◇  Pairings on runner: github-hosted\n" +
 				"│  ✗ reviewer — bogus by subscription cannot run on a github-hosted runner\n" +

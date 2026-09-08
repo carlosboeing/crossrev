@@ -174,7 +174,7 @@ func statusLoad(t *testing.T, c statusCase) cycle.Report {
 // statusShow answers the configuration read from the base revision, in the
 // shape tests/harness.sh writes into every fixture checkout.
 func statusShow(c statusCase) config.ShowFile {
-	yaml := fmt.Sprintf(`version: 1
+	yaml := fmt.Sprintf(`version: 2
 mode: local
 policy:
   min_fix_severity: %s
@@ -657,7 +657,7 @@ func TestStatusKeysTheTrustedAuthorOnTheMode(t *testing.T) {
 			if path != ".github/crossrev.yml" {
 				return nil, config.NotFound, nil
 			}
-			return []byte("version: 1\nmode: automated\n"), config.IsFile, nil
+			return []byte("version: 2\nmode: automated\n"), config.IsFile, nil
 		},
 	}
 	report, err := s.Load(context.Background(), slug, statusPR)

@@ -20,7 +20,7 @@ func TestContext(t *testing.T) {
 		e := setup(t)
 		e.addReview(t, defaultFindings(), "issues-remain")
 		e.git.show = map[string][]byte{
-			e.base.SHA() + ":.github/crossrev.yml": []byte("version: 1\nresolver:\n  harness: claude\n"),
+			e.base.SHA() + ":.github/crossrev.yml": []byte("version: 2\nresolver:\n  harness: claude\n"),
 		}
 		got := e.run(t)
 		if got.Err != nil {
@@ -72,7 +72,7 @@ func TestContext(t *testing.T) {
 		e := setup(t)
 		e.addReview(t, defaultFindings(), "issues-remain")
 		e.git.show = map[string][]byte{
-			e.base.SHA() + ":.github/crossrev.yml": []byte("version: 1\nbacklog:\n  destination: github_issues\n"),
+			e.base.SHA() + ":.github/crossrev.yml": []byte("version: 2\nbacklog:\n  destination: github_issues\n"),
 		}
 		e.forge.candidates = []forge.IssueCandidate{{
 			Number: 19,

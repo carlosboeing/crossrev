@@ -155,6 +155,51 @@ func decodeJSON(t *testing.T, raw []byte) any {
 	return value
 }
 
+// versionBump rewrites the frozen version-1 bytes to the current declaration
+// before replay.
+//
+// The fixture is the Bash baseline: the shell understood version 1, so every
+// input and merged expectation it records says 1. This build understands
+// version 2, and the merge carries the declaration through untouched — the
+// same bytes that went in come back out in the merge. Rewriting only the
+// declaration keeps the replay comparing everything else: layer order, key
+// order, defaults, endpoint merge, fallback, and every refusal text that does
+// not name a version.
+func versionBumpYAML(t *testing.T, raw json.RawMessage) (string, bool) {
+	t.Helper()
+	value, present := optionalString(t, raw)
+	if !present {
+		return "", false
+	}
+	return strings.ReplaceAll(value, "version: 1", "version: "+config.Version), true
+}
+
+// versionBumpMerged rewrites the frozen merged expectation's declared version
+// to the current one, leaving every other key and value compared exactly.
+func versionBumpMerged(t *testing.T, raw json.RawMessage) any {
+	t.Helper()
+	decoded := decodeJSON(t, raw)
+	merged, ok := decoded.(map[string]any)
+	if !ok {
+		t.Fatalf("decode fixture merged %q: want an object", string(raw))
+	}
+	merged["version"] = decodeJSON(t, []byte(config.Version))
+	return merged
+}
+
+// versionBumpRefusal rewrites the frozen refusal text's version-sensitive
+// words to the current declaration, leaving every other refusal compared
+// exactly. Only the two version-mismatch vectors name a version; the rest
+// pass through untouched.
+func versionBumpRefusal(vector refusalVector) (configText, errorText string) {
+	configText = strings.ReplaceAll(vector.Config, "version: 1", "version: "+config.Version)
+	errorText = strings.ReplaceAll(vector.Error,
+		"understands version 1", "understands version "+config.Version)
+	errorText = strings.ReplaceAll(errorText,
+		"set version: 1 in that file", "set version: "+config.Version+" in that file")
+	return configText, errorText
+}
+
 func TestConfigMergeParity(t *testing.T) {
 	fixture := loadParity(t)
 	if len(fixture.Cases) == 0 {
@@ -164,8 +209,8 @@ func TestConfigMergeParity(t *testing.T) {
 
 	for _, testCase := range fixture.Cases {
 		t.Run(testCase.Name, func(t *testing.T) {
-			repoYAML, repoPresent := optionalString(t, testCase.RepoYAML)
-			operatorYAML, operatorPresent := optionalString(t, testCase.OperatorYAML)
+			repoYAML, repoPresent := versionBumpYAML(t, testCase.RepoYAML)
+			operatorYAML, operatorPresent := versionBumpYAML(t, testCase.OperatorYAML)
 			_, atBase := optionalString(t, testCase.BaseSHA)
 
 			tree := files{"": {}}
@@ -199,7 +244,7 @@ func TestConfigMergeParity(t *testing.T) {
 			if err != nil {
 				t.Fatalf("MergedJSON: %v", err)
 			}
-			if want, got := decodeJSON(t, testCase.Merged), decodeJSON(t, actual); !reflect.DeepEqual(want, got) {
+			if want, got := versionBumpMerged(t, testCase.Merged), decodeJSON(t, actual); !reflect.DeepEqual(want, got) {
 				t.Errorf("merged config differs\n want: %s\n  got: %s", testCase.Merged, actual)
 			}
 		})
@@ -216,6 +261,7 @@ func TestConfigRefusalParity(t *testing.T) {
 		t.Run(vector.Name, func(t *testing.T) {
 			tree := files{"": {}}
 			base := core.Revision{}
+			vectorConfig, vectorError := versionBumpRefusal(vector)
 
 			switch vector.Driver {
 			case "load_at_base":
@@ -224,9 +270,9 @@ func TestConfigRefusalParity(t *testing.T) {
 					t.Fatalf("build the base revision: %v", err)
 				}
 				base = revision
-				tree[baseSHA] = map[string]string{".github/crossrev.yml": vector.Config}
+				tree[baseSHA] = map[string]string{".github/crossrev.yml": vectorConfig}
 			default:
-				tree[""][".github/crossrev.yml"] = vector.Config
+				tree[""][".github/crossrev.yml"] = vectorConfig
 			}
 
 			loaded, err := config.Load(context.Background(), base, tree.show())
@@ -253,8 +299,8 @@ func TestConfigRefusalParity(t *testing.T) {
 			if vector.Driver == "load_at_base" {
 				actual = fortyHex.ReplaceAllString(actual, "<base_sha>")
 			}
-			if actual != vector.Error {
-				t.Errorf("refusal text differs\n want: %q\n  got: %q", vector.Error, actual)
+			if actual != vectorError {
+				t.Errorf("refusal text differs\n want: %q\n  got: %q", vectorError, actual)
 			}
 		})
 	}
@@ -266,6 +312,103 @@ func asRefusal(err error, target **config.Refusal) bool {
 		*target = refusal
 	}
 	return ok
+}
+
+// TestVersionOneIsRefusedAfterTheCoverageBreak pins the deliberate break: a
+// repository that still declares the superseded version 1 is refused with the
+// current version named as the recovery, in the working tree and at the base
+// revision, for both the repository layer and the operator layer.
+func TestVersionOneIsRefusedAfterTheCoverageBreak(t *testing.T) {
+	operatorPath := config.OperatorPath()
+	base := mustRevision(t)
+
+	for _, test := range []struct {
+		name string
+		tree files
+		base core.Revision
+	}{
+		{"the working tree", files{"": {".github/crossrev.yml": "version: 1\n"}}, core.Revision{}},
+		{"the fallback file", files{"": {".crossrev.yml": "version: 1\n"}}, core.Revision{}},
+		{"the operator file", files{"": {operatorPath: "version: 1\n"}}, core.Revision{}},
+		{"the base revision", files{"": {}, baseSHA: {".github/crossrev.yml": "version: 1\n"}}, base},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			refusal := refusalFrom(t, test.base, test.tree)
+			if want := "declares version 1, and this crossrev understands version " + config.Version; !strings.Contains(refusal.Message, want) {
+				t.Errorf("message = %q, want it to name the refused version and the current one (%q)", refusal.Message, want)
+			}
+			if want := "set version: " + config.Version + " in that file"; !strings.Contains(refusal.Hint, want) {
+				t.Errorf("hint = %q, want it to name the recovery (%q)", refusal.Hint, want)
+			}
+		})
+	}
+}
+
+func mustRevision(t *testing.T) core.Revision {
+	t.Helper()
+	revision, err := core.NewRevision(baseSHA)
+	if err != nil {
+		t.Fatalf("build the base revision: %v", err)
+	}
+	return revision
+}
+
+// TestGeneratedConfigurationUsesVersionTwo pins that the defaults and the
+// generated templates declare the current version, so a fresh `init` writes a
+// file this build accepts.
+func TestGeneratedConfigurationUsesVersionTwo(t *testing.T) {
+	loaded := mustLoad(t, core.Revision{}, files{})
+	if got := loaded.Get(".version"); got != config.Version {
+		t.Errorf("the defaults declare version %q, want %q", got, config.Version)
+	}
+	merged, err := loaded.MergedJSON()
+	if err != nil {
+		t.Fatalf("MergedJSON: %v", err)
+	}
+	if want := `"version":` + config.Version; !strings.Contains(string(merged), want) {
+		t.Errorf("the merged defaults are %s, want them to carry %s", merged, want)
+	}
+}
+
+// TestConfigParityExceptForTheDeclaredVersionBreak pins that the only
+// intentional difference from the frozen Bash baseline is the declared
+// version: the replay above transforms version-sensitive inputs and expected
+// version fields before comparing, and every other merge and refusal
+// behaviour stays compared byte for byte.
+func TestConfigParityExceptForTheDeclaredVersionBreak(t *testing.T) {
+	fixture := loadParity(t)
+	mergeChanged := 0
+	for _, testCase := range fixture.Cases {
+		merged, ok := decodeJSON(t, testCase.Merged).(map[string]any)
+		if !ok {
+			t.Fatalf("case %q: the fixture merged value is not an object", testCase.Name)
+		}
+		version, _ := merged["version"].(json.Number)
+		if version.String() != "1" {
+			t.Errorf("case %q: the frozen merged version is %v, want the recorded 1", testCase.Name, version)
+			continue
+		}
+		mergeChanged++
+	}
+	if mergeChanged == 0 {
+		t.Error("no frozen merge case records version 1, so the replay transform is guarding nothing")
+	}
+
+	refusalChanged := 0
+	for _, vector := range fixture.Refusals {
+		_, bumped := versionBumpRefusal(vector)
+		if bumped != vector.Error {
+			refusalChanged++
+		}
+	}
+	// Only the two version-mismatch vectors name a version in their text.
+	if refusalChanged != 2 {
+		t.Errorf("%d frozen refusal texts name a version, want exactly the two version-mismatch vectors", refusalChanged)
+	}
+
+	if config.Version == "1" {
+		t.Errorf("config.Version is still %q, so the break this test pins has not happened", config.Version)
+	}
 }
 
 func callRefusal(t *testing.T, loaded *config.Config, call []string) error {

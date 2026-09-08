@@ -135,7 +135,7 @@ func TestClaimWriteCapabilityIsFalse(t *testing.T) {
 
 func TestClaimWarnsWhenTheDailyReviewBackstopCannotReadComments(t *testing.T) {
 	e := newEnv(t)
-	e.cfg = mustConfig(t, "version: 1\npolicy:\n  max_prs_per_day: 3\n")
+	e.cfg = mustConfig(t, "version: 2\npolicy:\n  max_prs_per_day: 3\n")
 	e.forge.repoCommentsErr = errors.New("comments unavailable")
 	req := e.request(t)
 	req.Trigger = review.TriggerAutomatic

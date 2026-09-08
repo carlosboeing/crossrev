@@ -16,6 +16,8 @@ All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepa
 
 - **Coverage generations are stored as manifests and shards with full digests.** `internal/prstate` adds the `crossrev:c` codec: an append-only manifest and shard type, outstanding records, full SHA-256 body and integrity digests, measured fields, the scope report and the reserved verification envelope. New generations write `not_implemented` with five nulls; unknown or mistyped members are refused. No reader in this increment publishes or selects generations yet.
 
+- **The repository configuration moves from version 1 to version 2.** `config.Version` is now `"2"`; the defaults, the shipped templates and fresh `init` output declare `version: 2`. A file that still declares `version: 1` is refused with the current version named as the fix. The parity replay rewrites only the frozen version-1 bytes before comparing, so every other recorded merge and refusal still matches. No new setting ships with the move.
+
 ## [0.6.1] — 2026-09-06
 
 ### Fixed

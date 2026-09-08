@@ -65,7 +65,7 @@ func TestHarnessOverrideKeepsConfiguredEffort(t *testing.T) {
 	e := setup(t)
 	e.addReview(t, defaultFindings(), "issues-remain")
 	e.git.show = map[string][]byte{
-		e.base.SHA() + ":.github/crossrev.yml": []byte("version: 1\nresolver:\n  harness: codex\n  model: o3-mini\n  effort: high\n  endpoint: https://example.invalid\n"),
+		e.base.SHA() + ":.github/crossrev.yml": []byte("version: 2\nresolver:\n  harness: codex\n  model: o3-mini\n  effort: high\n  endpoint: https://example.invalid\n"),
 	}
 	got := e.runReq(t, Request{
 		PR:      42,
@@ -107,7 +107,7 @@ func TestResolveSubstituteHarnessWarningKeepsSecondSentence(t *testing.T) {
 	e := setup(t)
 	e.addReview(t, defaultFindings(), "issues-remain")
 	e.git.show = map[string][]byte{
-		e.base.SHA() + ":.github/crossrev.yml": []byte("version: 1\nresolver:\n  harness: codex\n"),
+		e.base.SHA() + ":.github/crossrev.yml": []byte("version: 2\nresolver:\n  harness: codex\n"),
 	}
 	e.lookPath = func(name string) (string, error) {
 		if name == "claude" {
