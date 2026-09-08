@@ -18,6 +18,8 @@ All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepa
 
 - **Coverage generations publish and select through strict comment reads.** `internal/prstate` adds the ledger store contract with append-only publication and read-back checks: shards first with position and digest checks on each new comment, a base/head recheck, then the manifest last. `internal/forge/ghexec` reads every comment page and reports API, page and decode failures instead of answering an empty list. Selection keeps only the trusted author's comments, takes the highest complete generation at the exact base, head and engine, breaks equal-generation ties by lower manifest comment id, and refuses missing, altered, reordered, corrupt or unreadable state. Past 32 shards the pass keeps the last complete generation and records stop totals with the limit name.
 
+- **Pass markers move to v2 and record halted work as incomplete.** Markers this release writes open with `v:2` and carry the coverage manifest id, the stop counts, and the repair confirmation pair in writer order; readers refuse anything newer. Markers at `v:1` stay readable for findings, pass numbering and prior resolutions, but add no coverage. A pass that runs and halts before settling records `incomplete` with one of three halt words and re-drives at the same revision; recorded limits use two words. No verification marker field ships.
+
 ## [0.6.1] — 2026-09-06
 
 ### Fixed

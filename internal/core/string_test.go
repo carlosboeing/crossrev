@@ -66,3 +66,25 @@ func TestRevisionStringIsTheFullObjectName(t *testing.T) {
 		t.Fatalf("String() = %q, want %q", got, shaA)
 	}
 }
+
+// The new pass-state, halt-reason and limit-reason spellings render as the
+// marker holds them.
+func TestNewMarkerVocabularyRendersItsSpelling(t *testing.T) {
+	cases := []struct {
+		name string
+		got  string
+		want string
+	}{
+		{"PassState", PassIncomplete.String(), "incomplete"},
+		{"HaltReason", HaltCoverageIncomplete.String(), "coverage_incomplete"},
+		{"LimitReason", LimitReviewBudgetReached.String(), "review_budget_reached"},
+	}
+	for _, c := range cases {
+		if c.got != c.want {
+			t.Errorf("%s String() = %q, want %q", c.name, c.got, c.want)
+		}
+	}
+	if got := PassIncomplete.String(); got != "incomplete" {
+		t.Fatalf("PassIncomplete.String() = %q", got)
+	}
+}
