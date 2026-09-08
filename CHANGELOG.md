@@ -12,6 +12,8 @@ All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepa
 
 - **The reviewer prompt numbers every file it must account for.** Each batch file renders numbered with readable content or an explicit access limit, with advisory and excluded paths shown beside it. The findings schema adds `coverage`, `examined_scope` and `known_limits`: one entry per numbered file with its disposition, finding links, evidence and reason, plus a scope report that stays even when nothing was found.
 
+- **The review leg refuses incomplete or contradictory coverage.** `validate.Review` takes the answer and the numbered batch the prompt printed. Each unit number appears once. Finding numbers name returned findings. Evidence names a supplied path and revision. Spans sit inside the supplied text. `not_affected` names evidence and a reason. `could_not_review` names the failed fallbacks in its reason. Empty output fails as shape. Bad shape exits 1. Bad coverage exits 2. The exit-2 error names the missing, duplicate and unknown numbers for the retry. `validate.Findings` stays for callers with no batch.
+
 ## [0.6.1] — 2026-09-06
 
 ### Fixed

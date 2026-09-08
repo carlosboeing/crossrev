@@ -18,6 +18,7 @@ import (
 	"github.com/carlosboeing/crossrev/internal/prstate"
 	"github.com/carlosboeing/crossrev/internal/review"
 	"github.com/carlosboeing/crossrev/internal/runlog"
+	"github.com/carlosboeing/crossrev/internal/validate"
 	"github.com/carlosboeing/crossrev/internal/vcs"
 )
 
@@ -394,9 +395,12 @@ type env struct {
 	// keepTranscripts is the --keep-transcripts posture, which the run log
 	// carries rather than the leg.
 	keepTranscripts bool
-	// validate replaces validate.Findings, so a case can drive the retry
-	// budgets without building a payload that fails for the right reason.
-	validate func([]byte) error
+	// validate replaces the leg's validator seam, so a case can drive the
+	// retry budgets without building a payload that fails for the right
+	// reason. It takes the same ReviewExpectations the production seam
+	// takes; cases that do not care about the batch ignore the second
+	// argument.
+	validate func([]byte, validate.ReviewExpectations) error
 	// legEnv is what the leg hands a child. Nil is the default pair below.
 	legEnv []string
 }

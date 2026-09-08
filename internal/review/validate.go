@@ -16,7 +16,10 @@ import (
 
 func (l *Leg) checkPayload(payload []byte) error {
 	if l != nil && l.Validate != nil {
-		return l.Validate(payload)
+		return l.Validate(payload, l.Expect)
+	}
+	if l != nil && len(l.Expect.Units) > 0 {
+		return validate.Review(payload, l.Expect)
 	}
 	return validate.Findings(payload)
 }

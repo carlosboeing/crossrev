@@ -13,6 +13,7 @@ import (
 	"github.com/carlosboeing/crossrev/internal/prstate"
 	"github.com/carlosboeing/crossrev/internal/runlog"
 	"github.com/carlosboeing/crossrev/internal/ui"
+	"github.com/carlosboeing/crossrev/internal/validate"
 	"github.com/carlosboeing/crossrev/internal/vcs"
 )
 
@@ -99,8 +100,18 @@ type Leg struct {
 	// LookPath reports whether a harness binary is on PATH. Nil searches PATH
 	// the way command -v does (lib/run.sh:530).
 	LookPath func(string) (string, error)
-	// Validate checks the review payload. Nil means validate.Findings.
-	Validate func([]byte) error
+	// Validate checks the review payload. Nil means Review against the
+	// leg's own batch expectations: exact unit-number coverage, valid
+	// finding references, valid evidence revisions and spans, evidence
+	// for not_affected, and failed-fallback reasons for could_not_review.
+	// Tests that drive the retry budgets without a batch set a substitute
+	// directly.
+	Validate func(payload []byte, expected validate.ReviewExpectations) error
+	// Expect holds the numbered batch units this leg's payload must cover:
+	// the positions 1 to len(Units) by prompt order, with the base and head
+	// the batch was built between. The batch loop fills it (C1 wires that
+	// loop); empty means the frozen prompt with no batch input.
+	Expect validate.ReviewExpectations
 }
 
 func (l *Leg) now() time.Time {
