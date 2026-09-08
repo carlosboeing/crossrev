@@ -4,6 +4,10 @@ All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepa
 
 ## [Unreleased]
 
+### Added
+
+- **Review Intelligence starts with a frozen file-unit oracle.** One NUL-safe diff records every added, modified, deleted, renamed and type-changed path in `internal/vcs`; `internal/intel` reads base/head evidence for each path, with full body digests and visible exclusions. Each unit has a stable UnitID under engine `file-v1`; a residual collision is refused. Nothing reads this yet: no reviewer prompt, marker or label changes in this increment.
+
 ## [0.6.1] — 2026-09-06
 
 ### Fixed
