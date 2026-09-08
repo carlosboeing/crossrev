@@ -115,5 +115,47 @@
   ],
   "doc": "Frozen oracle for file-unit discovery (Task A1). Hand-authored before the implementation: each case lists the required path, change kind, content revision, UnitID and body digest the production code must return. UnitID is the first 16 lowercase hex characters of SHA-256 over the u1 file identity preimage. Body digest is full SHA-256 hex over the evidence bytes, or over the empty string when no bytes are available. Do not regenerate from production code.",
   "engine": "file-v1",
-  "engine_id": "e2b455e748711e52"
+  "engine_id": "e2b455e748711e52",
+  "advisory": {
+    "doc": "Frozen vectors for advisory discovery (Task A2). Hand-authored before the implementation: term_vectors list the ASCII identifier set the production code must extract from each body, and conventions list the adjacent-test candidates it must derive from each path. Terms use [A-Za-z_][A-Za-z0-9_]* with terms shorter than four bytes dropped, deduplicated and sorted. Do not regenerate from production code.",
+    "max_search_hits": 200,
+    "term_vectors": [
+      {
+        "body": "package store\n\nfunc SaveOrder(id string) {}\n",
+        "terms": ["SaveOrder", "func", "package", "store", "string"]
+      },
+      {
+        "body": "ab := Foo(2fast, _x1)\n",
+        "terms": ["fast"]
+      },
+      {
+        "body": "caf\u00e9 au_lait return\n",
+        "terms": ["au_lait", "return"]
+      },
+      {
+        "body": "zebra apple zebra mango\n",
+        "terms": ["apple", "mango", "zebra"]
+      }
+    ],
+    "conventions": [
+      {
+        "path": "src/store.go",
+        "candidates": ["src/store.spec.go", "src/store.test.go", "src/store_test.go", "src/test_store.go", "test/src/store.go", "tests/src/store.go"]
+      },
+      {
+        "path": "src/app.js",
+        "candidates": ["src/app.spec.js", "src/app.test.js", "src/app_test.js", "src/test_app.js", "test/src/app.js", "tests/src/app.js"]
+      },
+      {
+        "path": "Makefile",
+        "candidates": ["Makefile_test", "test/Makefile", "test_Makefile", "tests/Makefile"]
+      }
+    ]
+  },
+  "batching": {
+    "doc": "Frozen bounds for deterministic batching (Task A2). Batches hold at most 40 files; a pass admits at most 400 required files; the fully rendered prompt, including headers and prior context, holds at most 184320 bytes (180 KiB).",
+    "max_files_per_batch": 40,
+    "max_units_per_pass": 400,
+    "max_prompt_bytes": 184320
+  }
 }

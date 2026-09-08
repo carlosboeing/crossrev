@@ -8,6 +8,8 @@ All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepa
 
 - **Review Intelligence starts with a frozen file-unit oracle.** One NUL-safe diff records every added, modified, deleted, renamed and type-changed path in `internal/vcs`; `internal/intel` reads base/head evidence for each path, with full body digests and visible exclusions. Each unit has a stable UnitID under engine `file-v1`; a residual collision is refused. Nothing reads this yet: no reviewer prompt, marker or label changes in this increment.
 
+- **Advisory discovery and deterministic batching bound the review input.** Fixed-string search at the head revision returns at most 200 hits per changed identifier and records a capped term as `too_common`; adjacent-test conventions name uncertain context beside it. Both stay advisory and never change the required set. Batches pack outstanding files in path order, at most 40 files, measuring the fully rendered prompt against 180 KB, with at most 400 files per pass. A file that fits nowhere stays outstanding with `input_exceeds_budget`; files past the pass budget carry `review_budget_reached`.
+
 ## [0.6.1] — 2026-09-06
 
 ### Fixed
