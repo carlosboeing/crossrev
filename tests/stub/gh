@@ -42,6 +42,44 @@ emit() {
   fi
 }
 
+# Stateful coverage read-back for the Review Intelligence ledger. The ledger
+# publishes a shard, reads it back by comment id, rechecks the revision,
+# then publishes the manifest last — so the stub must answer what was
+# written, not a static fixture. Created coverage bodies are spooled under
+# CROSSREV_GH_STATE (one file per comment id); the single-comment GET and
+# the paginated list GET replay them. Non-coverage comments are untouched:
+# unmatched writes below still answer {}.
+if [[ -n "${CROSSREV_GH_STATE:-}" ]]; then
+  mkdir -p "$CROSSREV_GH_STATE"
+  # A coverage create: POST .../issues/42/comments with a crossrev:c marker
+  # in the body. Spool the body and answer the next comment id.
+  if [[ "$joined" == "api --method POST repos/"*"/issues/"*"/comments"* ]]; then
+    body=""
+    for a in "$@"; do
+      [[ "$a" == body=* ]] && body="${a#body=}"
+    done
+    if [[ "$body" == *"crossrev:c"* ]]; then
+      next="$CROSSREV_GH_STATE/next-id"
+      [[ -f "$next" ]] || printf '9001' >"$next"
+      id="$(cat "$next")"
+      printf '%s' "$(( id + 1 ))" >"$next"
+      printf '%s' "$body" >"$CROSSREV_GH_STATE/comment-$id"
+      printf '{"id":%s}\n' "$id" | emit
+      exit 0
+    fi
+  fi
+  # Single-comment read-back: api repos/<slug>/issues/comments/<id>.
+  if [[ "$joined" == "api repos/"*"/issues/comments/"* ]]; then
+    id="${joined##*/}"
+    id="${id%% *}"
+    if [[ -f "$CROSSREV_GH_STATE/comment-$id" ]]; then
+      jq -cn --argjson id "$id" --arg body "$(cat "$CROSSREV_GH_STATE/comment-$id")" \
+        '{id:$id, body:$body, user:{login:"tester"}, created_at:"2026-09-09T00:00:00Z"}' | emit
+      exit 0
+    fi
+  fi
+fi
+
 if [[ -f "${CROSSREV_GH_ROUTES:-/nonexistent}" ]]; then
   while IFS=$'\t' read -r pat resp; do
     [[ -n "${pat:-}" ]] || continue
