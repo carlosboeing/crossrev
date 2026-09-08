@@ -314,7 +314,7 @@ func (l *Leg) finishCoveredRun(ctx context.Context, req Request, loaded Context,
 	}
 	workdir := req.Workdir
 	diffBytes, _ := l.reviewDiff(ctx, loaded)
-	enriched, snaps, err := enrichFindings(covered.payload, diffBytes, workdir)
+	enriched, snaps, err := enrichFindingsInScope(covered.payload, diffBytes, workdir, requiredPaths(loaded))
 	if err == nil {
 		marker.Findings = enriched
 	}
@@ -333,6 +333,21 @@ func (l *Leg) finishCoveredRun(ctx context.Context, req Request, loaded Context,
 	}
 	out.Outcome = OutcomeInvoked
 	return *out
+}
+
+// requiredPaths reads the current required paths off the loaded scope for
+// anchor decisions: a finding on one of these paths with no valid hunk line
+// is file-level; anywhere else is outside the diff. Nil scope means the
+// frozen path, where the diff alone decides.
+func requiredPaths(loaded Context) map[string]bool {
+	if loaded.Scope == nil {
+		return nil
+	}
+	out := make(map[string]bool, len(loaded.Scope.Required))
+	for _, unit := range loaded.Scope.Required {
+		out[unit.Path] = true
+	}
+	return out
 }
 
 func (l *Leg) attachUsage(marker *prstate.Marker, envelope harness.Envelope, settings legSettings) {

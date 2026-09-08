@@ -436,6 +436,10 @@ func (f *fakeForge) CommentEdit(_ context.Context, repo core.Slug, commentID int
 func (f *fakeForge) ReviewCommentCreate(context.Context, forge.ReviewComment) (forge.Placement, error) {
 	return forge.PlacementInline, nil
 }
+func (f *fakeForge) ReviewFileComment(context.Context, forge.ReviewComment) (forge.Placement, error) {
+	return forge.PlacementInline, nil
+}
+
 func (f *fakeForge) ReviewReply(_ context.Context, repo core.Slug, number int, rootCommentID int64, body string) error {
 	f.note("ReviewReply")
 	f.replies = append(f.replies, reviewReply{Repo: repo, PR: number, RootCommentID: rootCommentID, Body: body})

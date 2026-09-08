@@ -91,6 +91,12 @@ type Review struct {
 	// Excluded holds paths removed from the required denominator with their
 	// reason. Nil means none is rendered.
 	Excluded []ExclusionRef
+
+	// Confirmation holds the B-to-C repair delta: what the resolver changed
+	// between the reviewed head and the repaired head. Nil means an initial
+	// clean review with nothing to confirm. A set delta renders ahead of
+	// the full scope as required confirmation input.
+	Confirmation []byte
 }
 
 // BatchUnit is one numbered required file: its change, its evidence revision,
@@ -241,6 +247,12 @@ func (r Review) Render() []byte {
 	b.Write(diff.Parse(r.Diff, core.RevisionPair{}).Numbered())
 	b.WriteString("\n````\n\n")
 
+	// The confirmation delta renders ahead of the full scope: after a
+	// repair, the reviewer confirms what the resolver changed before
+	// re-judging the whole. Empty on an initial clean review, so the frozen
+	// parity-era prompt keeps its bytes exactly.
+	b.WriteString(renderConfirmation(r.Confirmation))
+
 	// The batch block sits between the full diff and the output instruction:
 	// the diff stays the anchorable whole, and the numbered files are the
 	// readable work this call must account for. Empty batch input renders
@@ -257,6 +269,26 @@ func (r Review) Render() []byte {
 	}
 
 	return []byte(b.String())
+}
+
+// renderConfirmation is the required repair-delta input: the B-to-C diff
+// the resolver produced, rendered ahead of the current full scope. It takes
+// no disposition and satisfies no coverage entry: it says what changed since
+// the reviewed head, so the reviewer confirms the repair before re-judging
+// the whole. Empty renders nothing.
+func renderConfirmation(delta []byte) string {
+	if len(delta) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("## The repair delta to confirm\n\n")
+	b.WriteString("The resolver changed code since the reviewed head. Confirm this delta " +
+		"first: it is required input, and the dispositions below still account for " +
+		"every current required file.\n\n")
+	b.WriteString("````diff\n")
+	b.Write(delta)
+	b.WriteString("\n````\n\n")
+	return b.String()
 }
 
 // renderBatch is the Review Intelligence batch input: numbered required files

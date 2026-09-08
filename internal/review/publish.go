@@ -80,15 +80,7 @@ func (l *Leg) publish(ctx context.Context, req Request, loaded Context, settings
 			side = s
 		}
 		body := CommentBody(f, pass, settings.harness, settings.model, minFix)
-		placement, err := l.Forge.ReviewCommentCreate(ctx, forge.ReviewComment{
-			Repo:   loaded.Repo,
-			Number: req.PR,
-			Commit: loaded.PR.HeadRefOid,
-			Path:   f.Path,
-			Line:   f.Line,
-			Side:   side,
-			Body:   body,
-		})
+		placement, err := l.postFinding(ctx, loaded, req, f, side, body)
 		if err != nil {
 			return marker, msgs, publishState{}, err
 		}
@@ -178,6 +170,48 @@ func (l *Leg) publish(ctx context.Context, req Request, loaded Context, settings
 		state.nudge = true
 	}
 	return marker, msgs, state, nil
+}
+
+
+// postFinding posts one finding where its anchor kind says: a hunk line goes
+// inline, a required file with no valid hunk line lands a file-level review
+// comment, and an outside-diff path posts top-level with its finding id. The
+// finding id travels in every shape, so resolution identity never needs a
+// thread.
+func (l *Leg) postFinding(ctx context.Context, loaded Context, req Request, f Finding, side core.Side, body string) (forge.Placement, error) {
+	switch AnchorKind(f.AnchorKind) {
+	case AnchorFile:
+		return l.Forge.ReviewFileComment(ctx, forge.ReviewComment{
+			Repo:   loaded.Repo,
+			Number: req.PR,
+			Commit: loaded.PR.HeadRefOid,
+			Path:   f.Path,
+			Line:   f.Line,
+			Side:   side,
+			Body:   body,
+		})
+	case AnchorOutsideDiff:
+		if _, err := l.Forge.CommentCreate(ctx, loaded.Repo, req.PR, outsideDiffBody(f, body)); err != nil {
+			return "", err
+		}
+		return forge.PlacementFallback, nil
+	default:
+		return l.Forge.ReviewCommentCreate(ctx, forge.ReviewComment{
+			Repo:   loaded.Repo,
+			Number: req.PR,
+			Commit: loaded.PR.HeadRefOid,
+			Path:   f.Path,
+			Line:   f.Line,
+			Side:   side,
+			Body:   body,
+		})
+	}
+}
+
+// outsideDiffBody renders an outside-diff finding as a top-level comment
+// that keeps its finding id: the resolve leg matches the id, not a thread.
+func outsideDiffBody(f Finding, body string) string {
+	return fmt.Sprintf("**%s** — outside the changed files (`%s`).\n\n%s", f.ID, f.Path, body)
 }
 
 func (l *Leg) editClaim(ctx context.Context, repo core.Slug, claimID int64, body string, marker prstate.Marker) error {

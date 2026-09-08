@@ -142,10 +142,34 @@ type fakeVCS struct {
 	// invisible to ChangedFiles, so frozen-path tests keep zero required
 	// units and stay on the single-prompt path.
 	required map[string]bool
+	// repair, when set, answers RangeDiff with the B-to-C delta.
+	repair *fakeRepair
 }
 
 func (f *fakeVCS) ExactSearch(_ context.Context, revision core.Revision, term string, limit int) ([]vcs.SearchHit, bool, error) {
 	return nil, false, nil
+}
+
+// repairDelta, when set, is the B-to-C delta RangeDiff answers: the bytes a
+// repair changed between the reviewed head and the current head.
+func (f *fakeVCS) RangeDiff(_ context.Context, base, head core.Revision) ([]byte, error) {
+	if f.repair == nil {
+		return nil, nil
+	}
+	return f.repair.at(base.SHA(), head.SHA())
+}
+
+type fakeRepair struct {
+	base  string
+	head  string
+	bytes []byte
+}
+
+func (r *fakeRepair) at(base, head string) ([]byte, error) {
+	if r == nil || base != r.base || head != r.head {
+		return nil, nil
+	}
+	return r.bytes, nil
 }
 
 func (f *fakeVCS) ChangedFiles(_ context.Context, base, head core.Revision) ([]core.FileChange, error) {
@@ -287,6 +311,7 @@ type fakeForge struct {
 	nextID          int64
 	ops             []string
 	reviewPosted    []forge.ReviewComment
+	filePosted      []forge.ReviewComment
 	reviewComments  []forge.IssueComment
 	placements      []forge.Placement
 	forceFallback   bool
@@ -433,6 +458,12 @@ func (f *fakeForge) ReviewCommentCreate(_ context.Context, comment forge.ReviewC
 		FindingIDs:    ids,
 	})
 	f.placements = append(f.placements, forge.PlacementInline)
+	return forge.PlacementInline, nil
+}
+
+func (f *fakeForge) ReviewFileComment(_ context.Context, comment forge.ReviewComment) (forge.Placement, error) {
+	f.filePosted = append(f.filePosted, comment)
+	f.ops = append(f.ops, "review-file-comment")
 	return forge.PlacementInline, nil
 }
 

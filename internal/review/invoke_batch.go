@@ -29,22 +29,23 @@ func ledgerStoreFor(l *Leg) prstate.LedgerStore {
 // context and file content together — for the byte budget the packing
 // measures. It renders through the same Review value the invoke path sends,
 // so the measured bytes are the sent bytes.
-func (l *Leg) renderBatchPrompt(ctx context.Context, req Request, loaded Context, settings legSettings, pass int, files []intel.FileUnit, scope intel.Scope) []byte {
+func (l *Leg) renderBatchPrompt(ctx context.Context, req Request, loaded Context, settings legSettings, pass int, files []intel.FileUnit, scope intel.Scope, confirmation []byte) []byte {
 	expected, units := batchExpectations(files, scope.Base, scope.Head)
 	_ = expected
 	advisory := intel.AdvisoryFiles(ctx, scope, scopeSearcher{vcs: l.VCS})
 	advisoryRefs, excludedRefs := advisoryPromptRefs(scope, advisory)
 	diffBytes, _ := l.reviewDiff(ctx, loaded)
 	return prompt.Review{
-		Skill:    prompt.ReviewSkill(),
-		Diff:     diffBytes,
-		Meta:     reviewMeta(loaded, req, pass),
-		Prior:    priorFindings(loaded),
-		Threads:  promptThreads(l.Forge.ReviewThreads(ctx, loaded.Repo, req.PR)),
-		ReviewMD: loaded.ReviewMD,
-		Batch:    units,
-		Advisory: advisoryRefs,
-		Excluded: excludedRefs,
+		Skill:        prompt.ReviewSkill(),
+		Diff:         diffBytes,
+		Meta:         reviewMeta(loaded, req, pass),
+		Prior:        priorFindings(loaded),
+		Threads:      promptThreads(l.Forge.ReviewThreads(ctx, loaded.Repo, req.PR)),
+		ReviewMD:     loaded.ReviewMD,
+		Batch:        units,
+		Advisory:     advisoryRefs,
+		Excluded:     excludedRefs,
+		Confirmation: confirmation,
 	}.Render()
 }
 
@@ -52,21 +53,22 @@ func (l *Leg) renderBatchPrompt(ctx context.Context, req Request, loaded Context
 // answer against the batch's own expectations. A semantic failure gets one
 // retry whose prompt names the exact missing, duplicate and unknown unit
 // numbers; a second failure is fatal and publishes nothing.
-func (l *Leg) invokeBatch(ctx context.Context, req Request, loaded Context, settings legSettings, pass int, units []prompt.BatchUnit, advisory []prompt.AdvisoryRef, excluded []prompt.ExclusionRef, expected validate.ReviewExpectations) (json.RawMessage, harness.Envelope, []ui.Line, error) {
+func (l *Leg) invokeBatch(ctx context.Context, req Request, loaded Context, settings legSettings, pass int, units []prompt.BatchUnit, advisory []prompt.AdvisoryRef, excluded []prompt.ExclusionRef, confirmation []byte, expected validate.ReviewExpectations) (json.RawMessage, harness.Envelope, []ui.Line, error) {
 	diffBytes, err := l.reviewDiff(ctx, loaded)
 	if err != nil {
 		return nil, harness.Envelope{}, nil, err
 	}
 	promptBytes := prompt.Review{
-		Skill:    prompt.ReviewSkill(),
-		Diff:     diffBytes,
-		Meta:     reviewMeta(loaded, req, pass),
-		Prior:    priorFindings(loaded),
-		Threads:  promptThreads(l.Forge.ReviewThreads(ctx, loaded.Repo, req.PR)),
-		ReviewMD: loaded.ReviewMD,
-		Batch:    units,
-		Advisory: advisory,
-		Excluded: excluded,
+		Skill:        prompt.ReviewSkill(),
+		Diff:         diffBytes,
+		Meta:         reviewMeta(loaded, req, pass),
+		Prior:        priorFindings(loaded),
+		Threads:      promptThreads(l.Forge.ReviewThreads(ctx, loaded.Repo, req.PR)),
+		ReviewMD:     loaded.ReviewMD,
+		Batch:        units,
+		Advisory:     advisory,
+		Excluded:     excluded,
+		Confirmation: confirmation,
 	}.Render()
 	return l.invokePrompt(ctx, req, loaded, settings, expected, promptBytes)
 }
