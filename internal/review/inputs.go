@@ -10,6 +10,7 @@ import (
 	"github.com/carlosboeing/crossrev/internal/exec"
 	"github.com/carlosboeing/crossrev/internal/forge"
 	"github.com/carlosboeing/crossrev/internal/harness"
+	"github.com/carlosboeing/crossrev/internal/intel"
 	"github.com/carlosboeing/crossrev/internal/prstate"
 	"github.com/carlosboeing/crossrev/internal/runlog"
 	"github.com/carlosboeing/crossrev/internal/ui"
@@ -44,6 +45,7 @@ const (
 	OutcomeInvoked  Outcome = "invoked"
 	OutcomeSkipped  Outcome = "skipped"
 	OutcomeDeclined Outcome = "declined"
+	OutcomeHalted   Outcome = "halted"
 	OutcomeError    Outcome = "error"
 )
 
@@ -63,6 +65,10 @@ type Result struct {
 	// the composition root does the printing (lib/run.sh:1325-1330).
 	Nudge bool
 	Err   error
+	// Covered carries a fully covered batch pass's findings and scope
+	// claims to the enrich-and-publish path. Nil on the frozen path and on
+	// a bounded halt.
+	Covered any
 }
 
 // Context is the one base/head load a review starts from (lib/run.sh:233-319).
@@ -77,11 +83,17 @@ type Context struct {
 	GitMessage        []byte
 	ProjectMapTracker string
 	Backlog           config.Backlog
+	// Scope is the deterministic required file set for the current base and
+	// head under the file engine, built before the first model call. Nil in
+	// runs that carry the frozen prompt with no batch input.
+	Scope *intel.Scope
 }
 
 // VCS is the base-revision file reader. Production wires *vcs.Repository.
 type VCS interface {
 	Show(ctx context.Context, revision core.Revision, path string) ([]byte, vcs.FileStatus, error)
+	ChangedFiles(ctx context.Context, base, head core.Revision) ([]core.FileChange, error)
+	ExactSearch(ctx context.Context, revision core.Revision, term string, limit int) ([]vcs.SearchHit, bool, error)
 }
 
 // Leg is the review orchestrator. Dependencies are injected.

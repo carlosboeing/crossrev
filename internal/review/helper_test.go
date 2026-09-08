@@ -3,6 +3,7 @@ package review_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -136,6 +137,38 @@ func (e *eventLog) all() []string {
 
 type fakeVCS struct {
 	files map[string]map[string][]byte
+	// required marks head paths the coverage loop must account for. Paths
+	// written by writeHead/writeBase (config fixtures, hijack cases) stay
+	// invisible to ChangedFiles, so frozen-path tests keep zero required
+	// units and stay on the single-prompt path.
+	required map[string]bool
+}
+
+func (f *fakeVCS) ExactSearch(_ context.Context, revision core.Revision, term string, limit int) ([]vcs.SearchHit, bool, error) {
+	return nil, false, nil
+}
+
+func (f *fakeVCS) ChangedFiles(_ context.Context, base, head core.Revision) ([]core.FileChange, error) {
+	var changes []core.FileChange
+	for path := range f.files[head.SHA()] {
+		if !f.required[path] {
+			continue
+		}
+		kind := core.ChangeAdded
+		if _, ok := f.files[base.SHA()][path]; ok {
+			kind = core.ChangeModified
+		}
+		changes = append(changes, core.FileChange{Path: path, Kind: kind})
+	}
+	for path := range f.files[base.SHA()] {
+		if !f.required[path] {
+			continue
+		}
+		if _, ok := f.files[head.SHA()][path]; !ok {
+			changes = append(changes, core.FileChange{OldPath: path, Path: path, Kind: core.ChangeDeleted})
+		}
+	}
+	return changes, nil
 }
 
 func (f *fakeVCS) Show(_ context.Context, revision core.Revision, path string) ([]byte, vcs.FileStatus, error) {
@@ -191,7 +224,48 @@ func (r *fakeRunner) Specs() []exec.Spec {
 	return out
 }
 
+type fakeLedger struct {
+	mu       int64
+	comments map[int64]prstate.CoverageComment
+	order    []int64
+	failList error
+}
+
+func newFakeLedger() *fakeLedger {
+	return &fakeLedger{comments: map[int64]prstate.CoverageComment{}}
+}
+
+func (f *fakeLedger) CoverageComments(_ context.Context, _ core.Slug, _ int) ([]prstate.CoverageComment, error) {
+	if f.failList != nil {
+		return nil, f.failList
+	}
+	var out []prstate.CoverageComment
+	for _, id := range f.order {
+		out = append(out, f.comments[id])
+	}
+	return out, nil
+}
+
+func (f *fakeLedger) CoverageComment(_ context.Context, _ core.Slug, commentID int64) (prstate.CoverageComment, error) {
+	c, ok := f.comments[commentID]
+	if !ok {
+		return prstate.CoverageComment{}, errors.New("no such comment")
+	}
+	return c, nil
+}
+
+func (f *fakeLedger) CreateCoverageComment(_ context.Context, _ core.Slug, _ int, body string) (int64, error) {
+	f.mu++
+	id := 7000 + f.mu
+	f.comments[id] = prstate.CoverageComment{ID: id, Author: author, Body: body}
+	f.order = append(f.order, id)
+	return id, nil
+}
+
+var _ prstate.LedgerStore = (*fakeLedger)(nil)
+
 type fakeForge struct {
+	ledger          *fakeLedger
 	log             *eventLog
 	pr              forge.PullRequest
 	prErr           error
@@ -217,6 +291,20 @@ type fakeForge struct {
 	placements      []forge.Placement
 	forceFallback   bool
 }
+
+func (f *fakeForge) CoverageComments(ctx context.Context, repo core.Slug, number int) ([]prstate.CoverageComment, error) {
+	return f.ledger.CoverageComments(ctx, repo, number)
+}
+
+func (f *fakeForge) CoverageComment(ctx context.Context, repo core.Slug, commentID int64) (prstate.CoverageComment, error) {
+	return f.ledger.CoverageComment(ctx, repo, commentID)
+}
+
+func (f *fakeForge) CreateCoverageComment(ctx context.Context, repo core.Slug, number int, body string) (int64, error) {
+	return f.ledger.CreateCoverageComment(ctx, repo, number, body)
+}
+
+var _ prstate.LedgerStore = (*fakeForge)(nil)
 
 func (f *fakeForge) RepoSlug(context.Context) (core.Slug, error) {
 	return core.ParseSlug("acme/widget")
@@ -418,7 +506,8 @@ func newEnv(t *testing.T) *env {
 	return &env{
 		log: events,
 		forge: &fakeForge{
-			log: events,
+			ledger: newFakeLedger(),
+			log:    events,
 			pr: forge.PullRequest{
 				Number:       42,
 				Title:        "t",
@@ -506,6 +595,18 @@ func runLeg(t *testing.T, e *env, req review.Request) review.Result {
 	}
 	leg := e.leg(t)
 	return leg.Run(context.Background(), req)
+}
+
+// writeRequiredHead writes one required head file the coverage loop must
+// account for. Frozen-path tests that stub no head files keep zero required
+// units and stay on the single-prompt path; batch tests write head files
+// and drive the coverage loop.
+func writeRequiredHead(e *env, path, content string) {
+	writeHead(e, path, content)
+	if e.vcs.required == nil {
+		e.vcs.required = map[string]bool{}
+	}
+	e.vcs.required[path] = true
 }
 
 func writeBase(e *env, path, content string) {

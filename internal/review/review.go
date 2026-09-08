@@ -174,6 +174,28 @@ func (l *Leg) Run(ctx context.Context, req Request) (out Result) {
 		}
 		l.reportFatal(ctx, req, loaded, out.Marker, claimID, out.Err)
 	}()
+
+	// The coverage loop, after the claim exists and before any finding is
+	// published. Scope is built from the authoritative git history at the
+	// current base and head; the initial generation records every uncovered
+	// unit as outstanding, so a crash before the first accepted batch leaves
+	// the started claim and the same scope to rebuild from. A leg without a
+	// git reader or ledger store keeps the frozen single-prompt path below.
+	if scope, scopeErr := l.buildScope(ctx, loaded.PR.BaseRefOid, loaded.PR.HeadRefOid, scopeExclusions(loaded.Backlog.Path)); scopeErr == nil && ledgerStoreFor(l) != nil && len(scope.Required) > 0 {
+		loaded.Scope = &scope
+		if covErr := l.runCoverage(ctx, req, loaded, settings, ad.pass, claimID, scope, &out); covErr != nil {
+			out.Outcome = OutcomeError
+			out.Err = covErr
+			return out
+		}
+		if out.Outcome == OutcomeHalted {
+			return out
+		}
+		if covered, ok := out.Covered.(coveredPass); ok {
+			out.Covered = nil
+			return l.finishCoveredRun(ctx, req, loaded, settings, ad, cap, claimID, out.Marker, covered, &out)
+		}
+	}
 	if ad.recovering && !ad.redrive {
 		// ui_say (lib/run.sh:1098).
 		out.Messages = append(out.Messages, ui.Say(resumeMessage(ad.pass, marker.Findings)))
@@ -262,6 +284,55 @@ func (l *Leg) Run(ctx context.Context, req Request) (out Result) {
 	}
 	out.Outcome = OutcomeInvoked
 	return out
+}
+
+// finishCoveredRun folds a fully covered batch pass into the frozen
+// enrich-and-publish path: the batch findings are enriched, anchored and
+// published exactly as a single-prompt pass's findings are. C2 owns the
+// repair-delta confirmation pair the marker will carry; C3 owns the
+// convergence predicate the publish path will consult.
+func (l *Leg) finishCoveredRun(ctx context.Context, req Request, loaded Context, settings legSettings, ad admission, cap int, claimID int64, marker prstate.Marker, covered coveredPass, out *Result) (result Result) {
+	out.Marker = marker
+	if covered.envelope != nil {
+		out.Envelope = covered.envelope
+	}
+	out.Payload = covered.payload
+	marker.Verdict = prstate.Some(covered.verdict)
+	marker.BlockedReason = prstate.Null[string]()
+	if covered.envelope != nil {
+		if covered.envelope.ModelReported != nil && *covered.envelope.ModelReported != "" {
+			marker.ModelReported = prstate.Some(*covered.envelope.ModelReported)
+		} else {
+			marker.ModelReported = prstate.Null[string]()
+		}
+		if covered.envelope.EffortReported != nil && *covered.envelope.EffortReported != "" {
+			marker.EffortReported = prstate.Some(*covered.envelope.EffortReported)
+		} else {
+			marker.EffortReported = prstate.Null[string]()
+		}
+		l.attachUsage(&marker, *covered.envelope, settings)
+	}
+	workdir := req.Workdir
+	diffBytes, _ := l.reviewDiff(ctx, loaded)
+	enriched, snaps, err := enrichFindings(covered.payload, diffBytes, workdir)
+	if err == nil {
+		marker.Findings = enriched
+	}
+	out.Messages = append(out.Messages, ui.SayLines(snaps...)...)
+	_ = claimID
+	_ = cap
+	out.Marker = marker
+	published, pubMsgs, state, err := l.publish(ctx, req, loaded, settings, ad.pass, claimID, marker)
+	_ = state
+	out.Messages = append(out.Messages, pubMsgs...)
+	out.Marker = published
+	if err != nil {
+		out.Outcome = OutcomeError
+		out.Err = err
+		return *out
+	}
+	out.Outcome = OutcomeInvoked
+	return *out
 }
 
 func (l *Leg) attachUsage(marker *prstate.Marker, envelope harness.Envelope, settings legSettings) {
