@@ -13,18 +13,7 @@ import (
 	"github.com/carlosboeing/crossrev/internal/prstate"
 	"github.com/carlosboeing/crossrev/internal/ui"
 	"github.com/carlosboeing/crossrev/internal/validate"
-	"github.com/carlosboeing/crossrev/internal/vcs"
 )
-
-// vcsRepo returns the git checkout behind the leg's file reads, or nil in
-// tests that stub the reads. Production wires *vcs.Repository.
-func vcsRepo(l *Leg) *vcs.Repository {
-	if l == nil {
-		return nil
-	}
-	repo, _ := l.VCS.(*vcs.Repository)
-	return repo
-}
 
 // ledgerStoreFor returns the coverage ledger over the leg's forge client, or
 // nil when the client does not implement the store contract.
@@ -117,17 +106,6 @@ func (l *Leg) invokeWithStaged(ctx context.Context, req Request, loaded Context,
 	defer os.RemoveAll(tmp)
 	envelope, payload, msgs, err := l.runPrompt(ctx, req, loaded, settings, adapter, entry, staged, tmp, promptBytes, nil)
 	return payload, envelope, msgs, err
-}
-
-// checkBatchPayload validates one batch answer against its own expectations
-// through the leg's seam: the injected substitute in tests, the semantic
-// check in production. Empty output is a shape error; every rejected answer
-// adds no disposition.
-func (l *Leg) checkBatchPayload(payload []byte, expected validate.ReviewExpectations) error {
-	if l != nil && l.Validate != nil {
-		return l.Validate(payload, expected)
-	}
-	return validate.Review(payload, expected)
 }
 
 // currentGeneration selects the current complete coverage generation for

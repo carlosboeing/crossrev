@@ -24,6 +24,7 @@ type batchOutcome struct {
 	verdict      string
 	envelope     *harness.Envelope
 	payload      json.RawMessage
+	payloads     []json.RawMessage
 	examined     []string
 	limits       []string
 	batches      int
@@ -44,14 +45,16 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 	}
 	gen := current.Gen
 	accepted := acceptedFromGeneration(current, scope.Base, scope.Head, scope.Engine)
-	for unitID := range accepted {
-		outcome.dispositions[unitID] = recordDisposition{}
+	acceptedIDs := make(map[core.UnitID]bool, len(accepted))
+	for unitID, disp := range accepted {
+		outcome.dispositions[unitID] = disp
+		acceptedIDs[unitID] = true
 	}
 	advisory := intel.AdvisoryFiles(ctx, scope, scopeSearcher{vcs: l.VCS})
 	render := func(files []intel.FileUnit) int {
 		return len(l.renderBatchPrompt(ctx, req, loaded, settings, pass, files, scope))
 	}
-	plan := intel.Batches(scope, accepted, render)
+	plan := intel.Batches(scope, acceptedIDs, render)
 	if plan.HaltReason != "" || len(plan.Carried) > 0 {
 		return l.haltPass(ctx, req, loaded, pass, claimID, out, &batchBound{plan: plan, scope: scope})
 	}
@@ -79,9 +82,14 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 	marker.Leg = core.LegReview
 	marker.Pass = pass
 	marker.Version = core.MarkerVersion
-	if _, err := l.publishInitialGeneration(ctx, req, loaded, scope, advisory, gen+1); err != nil {
+	initial, initialStop, err := l.publishInitialGeneration(ctx, req, loaded, scope, advisory, gen+1, outcome.dispositions)
+	if err != nil {
 		return err
 	}
+	if initialStop.Limit != "" {
+		return l.haltPass(ctx, req, loaded, pass, claimID, out, &batchBound{plan: planForStop(plan, initialStop), scope: scope, accepted: acceptedIDs})
+	}
+	_ = initial
 	for _, batch := range plan.Batches {
 		expected, units := batchExpectations(batch.Files, scope.Base, scope.Head)
 		advisoryRefs, excludedRefs := advisoryPromptRefs(scope, advisory)
@@ -98,6 +106,7 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 			outcome.dispositions[id] = disp
 		}
 		outcome.verdict = verdictFromPayload(payload)
+		outcome.payloads = append(outcome.payloads, payload)
 		if outcome.envelope == nil {
 			outcome.envelope = &envelope
 			outcome.payload = payload
@@ -108,12 +117,15 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 			outcome.findings = append(outcome.findings, finding)
 		}
 		outcome.batches++
-		manifest, _, err := l.publishBatchGeneration(ctx, req, loaded, scope, advisory, gen+outcome.batches+1, outcome.dispositions, outcome.examined, outcome.limits)
+		manifest, stop, err := l.publishBatchGeneration(ctx, req, loaded, scope, advisory, gen+outcome.batches+1, outcome.dispositions, outcome.examined, outcome.limits)
 		if err != nil {
 			if stop, ok := batchStop(err); ok {
-				return l.haltPass(ctx, req, loaded, pass, claimID, out, &batchBound{plan: planForStop(plan, stop), scope: scope})
+				return l.haltPass(ctx, req, loaded, pass, claimID, out, &batchBound{plan: planForStop(plan, stop), scope: scope, accepted: acceptedIDs})
 			}
 			return err
+		}
+		if stop.Limit != "" {
+			return l.haltPass(ctx, req, loaded, pass, claimID, out, &batchBound{plan: planForStop(plan, stop), scope: scope, accepted: acceptedIDs})
 		}
 		marker.CoverageManifestID = prstate.Some(manifest.CommentID())
 	}
@@ -123,8 +135,9 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 // batchBound carries a bounded halt out of the batch loop: the 400-file pass
 // bound, the 32-shard ledger bound, or the single-file input bound.
 type batchBound struct {
-	plan  intel.BatchPlan
-	scope intel.Scope
+	plan     intel.BatchPlan
+	scope    intel.Scope
+	accepted map[core.UnitID]bool
 }
 
 func (e *batchBound) Error() string {
@@ -178,9 +191,8 @@ func (l *Leg) publishBatchGeneration(ctx context.Context, req Request, loaded Co
 // the claim exists: every uncovered unit outstanding, so a crash before the
 // first accepted batch leaves the started claim and the same scope to
 // rebuild from.
-func (l *Leg) publishInitialGeneration(ctx context.Context, req Request, loaded Context, scope intel.Scope, advisory intel.AdvisorySummary, gen int) (prstate.Manifest, error) {
-	manifest, _, err := l.publishBatchGeneration(ctx, req, loaded, scope, advisory, gen, map[core.UnitID]recordDisposition{}, nil, nil)
-	return manifest, err
+func (l *Leg) publishInitialGeneration(ctx context.Context, req Request, loaded Context, scope intel.Scope, advisory intel.AdvisorySummary, gen int, carried map[core.UnitID]recordDisposition) (prstate.Manifest, prstate.CoverageStop, error) {
+	return l.publishBatchGeneration(ctx, req, loaded, scope, advisory, gen, carried, nil, nil)
 }
 
 // dispositionsFromPayload reads the accepted dispositions out of one accepted
@@ -282,9 +294,32 @@ func markerForPass(markers []prstate.Marker, pass int) prstate.Marker {
 func (l *Leg) haltPass(ctx context.Context, req Request, loaded Context, pass int, claimID int64, out *Result, bound *batchBound) error {
 	stop := stopForBound(bound)
 	marker := markerForPass(loaded.Markers, pass)
+	claim := out.Marker
+	if claim.Harness.Present() {
+		marker.Harness = claim.Harness
+	}
+	if claim.Model.Present() {
+		marker.Model = claim.Model
+	}
+	if claim.Effort.Present() {
+		marker.Effort = claim.Effort
+	}
+	if claim.Endpoint.Present() {
+		marker.Endpoint = claim.Endpoint
+	}
+	if claim.RunID.Present() {
+		marker.RunID = claim.RunID
+	}
+	if claim.HeadSHA.Present() {
+		marker.HeadSHA = claim.HeadSHA
+	}
+	marker.TS = claim.TS
+	marker.Leg = core.LegReview
+	marker.Pass = pass
+	marker.Version = core.MarkerVersion
 	marker.State = core.PassIncomplete
 	marker.CoverageStop = prstate.Some(stop)
-	outstanding := outstandingPaths(bound.scope, map[core.UnitID]bool{})
+	outstanding := outstandingPaths(bound.scope, bound.accepted)
 	body := haltBody(outstanding, stop, stop.Limit)
 	if err := l.editClaim(ctx, loaded.Repo, claimID, body, marker); err != nil {
 		return err
@@ -298,19 +333,33 @@ func (l *Leg) haltPass(ctx context.Context, req Request, loaded Context, pass in
 }
 
 // stopForBound renders the stop counts one bounded halt records: required,
-// covered and outstanding totals with the limit name.
+// covered and outstanding totals with the limit name. Already-accepted units
+// count as covered, never as outstanding.
 func stopForBound(bound *batchBound) prstate.CoverageStop {
-	outstanding := bound.plan.Carried
+	remaining := bound.plan.Carried
 	limit := intel.CarryReviewBudgetReached
 	if bound.plan.HaltReason != "" {
-		outstanding = bound.plan.Unbatched
+		remaining = bound.plan.Unbatched
 		limit = bound.plan.HaltReason
 	}
-	covered := len(bound.scope.Required) - len(outstanding)
+	remainingSet := make(map[string]bool, len(remaining))
+	for _, unit := range remaining {
+		remainingSet[unit.Path] = true
+	}
+	outstanding := 0
+	for _, unit := range bound.scope.Required {
+		if bound.accepted[unit.ID] {
+			continue
+		}
+		if remainingSet[unit.Path] {
+			outstanding++
+		}
+	}
+	covered := len(bound.scope.Required) - outstanding
 	if covered < 0 {
 		covered = 0
 	}
-	return prstate.CoverageStop{RequiredCount: len(bound.scope.Required), CoveredCount: covered, OutstandingCount: len(outstanding), Limit: limit}
+	return prstate.CoverageStop{RequiredCount: len(bound.scope.Required), CoveredCount: covered, OutstandingCount: outstanding, Limit: limit}
 }
 
 // planForStop carries a ledger-bound halt back into a batch plan shape: the
@@ -357,8 +406,52 @@ func (l *Leg) finishCoveredPass(ctx context.Context, req Request, loaded Context
 	_ = claimID
 	_ = scope
 	out.Marker = marker
-	out.Covered = coveredPass{findings: outcome.findings, verdict: outcome.verdict, envelope: outcome.envelope, payload: outcome.payload, examined: outcome.examined, limits: outcome.limits}
+	out.Covered = coveredPass{findings: outcome.findings, verdict: outcome.verdict, envelope: outcome.envelope, payload: mergePayloads(outcome.payloads), examined: outcome.examined, limits: outcome.limits}
 	return nil
+}
+
+// mergePayloads folds every accepted batch payload into one findings
+// document for the enrich-and-publish path: the union of findings with the
+// last batch's verdict, examined scope and known limits. Generations already
+// carry the per-batch coverage; the marker and summary need the union.
+func mergePayloads(payloads []json.RawMessage) json.RawMessage {
+	var findings []json.RawMessage
+	verdict := ""
+	examined := ""
+	var limits []string
+	for _, payload := range payloads {
+		var doc struct {
+			Verdict       string            `json:"verdict"`
+			Findings      []json.RawMessage `json:"findings"`
+			ExaminedScope string            `json:"examined_scope"`
+			KnownLimits   []string          `json:"known_limits"`
+		}
+		if err := json.Unmarshal(payload, &doc); err != nil {
+			continue
+		}
+		findings = append(findings, doc.Findings...)
+		if doc.Verdict != "" {
+			verdict = doc.Verdict
+		}
+		if doc.ExaminedScope != "" {
+			examined = doc.ExaminedScope
+		}
+		limits = append(limits, doc.KnownLimits...)
+	}
+	if verdict == "" {
+		verdict = "issues-remain"
+	}
+	merged, err := json.Marshal(struct {
+		Verdict       string            `json:"verdict"`
+		BlockedReason *string           `json:"blocked_reason"`
+		Findings      []json.RawMessage `json:"findings"`
+		ExaminedScope string            `json:"examined_scope"`
+		KnownLimits   []string          `json:"known_limits"`
+	}{Verdict: verdict, BlockedReason: nil, Findings: findings, ExaminedScope: examined, KnownLimits: limits})
+	if err != nil {
+		return payloads[0]
+	}
+	return merged
 }
 
 // verdictFromPayload reads the reviewer's verdict out of one accepted batch

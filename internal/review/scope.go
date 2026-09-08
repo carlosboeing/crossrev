@@ -99,11 +99,13 @@ func scopeExclusions(backlogPath string) []intel.Exclusion {
 }
 
 // acceptedFromGeneration reads the dispositions the current generation
-// accepted at this exact base, head and engine. Any other revision or engine
-// contributes nothing: a repair changes the head and retires every earlier
-// disposition.
-func acceptedFromGeneration(gen prstate.Generation, base, head core.Revision, engine string) map[core.UnitID]bool {
-	accepted := map[core.UnitID]bool{}
+// accepted at this exact base, head and engine, with the finding ids,
+// evidence and reasons they carry: resuming a pass republishes the full
+// judgement, never an empty disposition (which the strict decoder refuses).
+// Any other revision or engine contributes nothing: a repair changes the
+// head and retires every earlier disposition.
+func acceptedFromGeneration(gen prstate.Generation, base, head core.Revision, engine string) map[core.UnitID]recordDisposition {
+	accepted := map[core.UnitID]recordDisposition{}
 	if gen.Revision.Base.SHA() != base.SHA() || gen.Revision.Head.SHA() != head.SHA() || gen.Engine != engine {
 		return accepted
 	}
@@ -111,10 +113,16 @@ func acceptedFromGeneration(gen prstate.Generation, base, head core.Revision, en
 		if record.Type != prstate.CoverageRecordUnit {
 			continue
 		}
-		if !record.Disposition.Present() || record.Disposition.IsNull() {
+		disp, ok := record.Disposition.Get()
+		if !ok || disp == "" {
 			continue
 		}
-		accepted[core.UnitID(record.UnitID)] = true
+		var ids []string
+		ids = append(ids, record.FindingIDs...)
+		var evidence []prstate.Evidence
+		evidence = append(evidence, record.Evidence...)
+		reason, _ := record.Reason.Get()
+		accepted[core.UnitID(record.UnitID)] = recordDisposition{Disposition: disp, FindingIDs: ids, Evidence: evidence, Reason: reason}
 	}
 	return accepted
 }

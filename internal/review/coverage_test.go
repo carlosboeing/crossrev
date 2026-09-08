@@ -37,6 +37,22 @@ func batchPath(i int) string {
 	return "a.go"
 }
 
+// batchAnswerFor answers n numbered units over the given paths in order, all
+// no_issue. Paths beyond the two-file helper are fileNN.go in order.
+func batchAnswerFor(t *testing.T, paths []string) string {
+	t.Helper()
+	var b strings.Builder
+	b.WriteString(`{"verdict":"issues-remain","blocked_reason":null,"findings":[],"coverage":[`)
+	for i, path := range paths {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		b.WriteString(`{"unit_number":` + itoa2(i+1) + `,"disposition":"no_issue","finding_numbers":[],"evidence":[{"path":"` + path + `","revision":"` + headSHA + `","start_line":null,"end_line":null,"source":"git","note":null}],"reason":null}`)
+	}
+	b.WriteString(`],"examined_scope":"read the batch","known_limits":[]}`)
+	return b.String()
+}
+
 func itoa2(n int) string {
 	if n == 0 {
 		return "0"

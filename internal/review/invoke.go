@@ -317,7 +317,7 @@ func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settin
 				settings.harness, attempt, res.ExitCode, int(l.now().Sub(started).Seconds())))
 		}
 		if res.Err != nil && exec.IsNotFound(res.Err) {
-			return harness.Envelope{}, nil, msgs, adapter.NotInstalled()
+			return harness.Envelope{}, nil, outMsgs, adapter.NotInstalled()
 		}
 		envelope := adapter.Envelope(inv, res)
 		// The two streams are archived AFTER the envelope has been parsed out

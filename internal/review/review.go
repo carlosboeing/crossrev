@@ -154,6 +154,27 @@ func (l *Leg) Run(ctx context.Context, req Request) (out Result) {
 	out.ClaimID = claimID
 	out.Marker = marker
 
+	// The EXIT trap, from here on. run_checkpoint snapshots the open leg at
+	// every settled point and run_leg_settled clears it, so the report fires on
+	// every way out of the leg between the claim landing and the complete edit
+	// (lib/run.sh:87-89, :167-179). `settled` is that snapshot.
+	//
+	// 130 is not a failure: run_checkpoint has already explained the interrupt
+	// and the claim it leaves is deliberately resumable, so naming it here would
+	// turn every Ctrl-C into a halted pull request (lib/run.sh:141-143). This
+	// package cannot see internal/cli's ErrInterrupted — a tier-3 peer — so the
+	// cancellation is read off the context, which is where it came from.
+	settled := false
+	defer func() {
+		if settled || out.Err == nil {
+			return
+		}
+		if ctx.Err() != nil || errors.Is(out.Err, context.Canceled) {
+			return
+		}
+		l.reportFatal(ctx, req, loaded, out.Marker, claimID, out.Err)
+	}()
+
 	// The coverage loop, after the claim exists and before any finding is
 	// published. Scope is built from the authoritative git history at the
 	// current base and head; the initial generation records every uncovered
@@ -175,35 +196,11 @@ func (l *Leg) Run(ctx context.Context, req Request) (out Result) {
 			return l.finishCoveredRun(ctx, req, loaded, settings, ad, cap, claimID, out.Marker, covered, &out)
 		}
 	}
-	// The EXIT trap, from here on. run_checkpoint snapshots the open leg at
-	// every settled point and run_leg_settled clears it, so the report fires on
-	// every way out of the leg between the claim landing and the complete edit
-	// (lib/run.sh:87-89, :167-179). `settled` is that snapshot.
-	//
-	// 130 is not a failure: run_checkpoint has already explained the interrupt
-	// and the claim it leaves is deliberately resumable, so naming it here would
-	// turn every Ctrl-C into a halted pull request (lib/run.sh:141-143). This
-	// package cannot see internal/cli's ErrInterrupted — a tier-3 peer — so the
-	// cancellation is read off the context, which is where it came from.
-	settled := false
-	defer func() {
-		if settled || out.Err == nil {
-			return
-		}
-		if ctx.Err() != nil || errors.Is(out.Err, context.Canceled) {
-			return
-		}
-		l.reportFatal(ctx, req, loaded, out.Marker, claimID, out.Err)
-	}()
 	if ad.recovering && !ad.redrive {
 		// ui_say (lib/run.sh:1098).
 		out.Messages = append(out.Messages, ui.Say(resumeMessage(ad.pass, marker.Findings)))
 	}
 
-	if covered, ok := out.Covered.(coveredPass); ok {
-		out.Covered = nil
-		return l.finishCoveredRun(ctx, req, loaded, settings, ad, cap, claimID, marker, covered, &out)
-	}
 	if hasRecordedFindings(marker) {
 		// ui_say (lib/run.sh:1124).
 		out.Messages = append(out.Messages, ui.Say("The previous attempt already recorded its findings, so the review is not run again."))
