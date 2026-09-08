@@ -173,7 +173,7 @@ func TestNewPanicsOnANilRunner(t *testing.T) {
 // A Client with no filter refuses every write rather than publishing text
 // nothing inspected.
 //
-// Every write that publishes a body, not one of them: the five that can report
+// Every write that publishes a body, not one of them: the six that can report
 // the refusal do, and IssueCommentCreate — which returns nothing and so cannot
 // — is the one where only the absence of a call says so. Its guard is the
 // difference between posting nothing and posting an empty body.
@@ -195,6 +195,10 @@ func TestWritesRefuseWithoutAFilter(t *testing.T) {
 		},
 		"IssueCreate": func(t *testing.T, c *ghexec.Client) error {
 			_, err := c.IssueCreate(context.Background(), testSlug(t), "title", "hello", nil)
+			return err
+		},
+		"CreateCoverageComment": func(t *testing.T, c *ghexec.Client) error {
+			_, err := c.CreateCoverageComment(context.Background(), testSlug(t), 42, "hello")
 			return err
 		},
 	}

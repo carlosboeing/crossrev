@@ -16,6 +16,8 @@ All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepa
 
 - **Coverage generations are stored as manifests and shards with full digests.** `internal/prstate` adds the `crossrev:c` codec: an append-only manifest and shard type, outstanding records, full SHA-256 body and integrity digests, measured fields, the scope report and the reserved verification envelope. New generations write `not_implemented` with five nulls; unknown or mistyped members are refused. No reader in this increment publishes or selects generations yet.
 
+- **Coverage generations publish and select through strict comment reads.** `internal/prstate` adds the ledger store contract with append-only publication and read-back checks: shards first with position and digest checks on each new comment, a base/head recheck, then the manifest last. `internal/forge/ghexec` reads every comment page and reports API, page and decode failures instead of answering an empty list. Selection keeps only the trusted author's comments, takes the highest complete generation at the exact base, head and engine, breaks equal-generation ties by lower manifest comment id, and refuses missing, altered, reordered, corrupt or unreadable state. Past 32 shards the pass keeps the last complete generation and records stop totals with the limit name.
+
 ## [0.6.1] — 2026-09-06
 
 ### Fixed

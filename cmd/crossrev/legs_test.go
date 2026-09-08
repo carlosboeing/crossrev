@@ -7,6 +7,7 @@ import (
 
 	"github.com/carlosboeing/crossrev/internal/config"
 	"github.com/carlosboeing/crossrev/internal/exec"
+	"github.com/carlosboeing/crossrev/internal/harness"
 )
 
 // A repository config cannot put a forge credential on the leg's allowlist by
@@ -46,5 +47,24 @@ func TestLegEnvironmentDropsAForgeCredentialAnEndpointNames(t *testing.T) {
 	}
 	if !slices.Contains(names, "KIMI_API_KEY") {
 		t.Error("legEnvironment dropped the operator's own token_env")
+	}
+}
+
+// The ledger store is the same orchestrator-facing client the legs already
+// hold, converted rather than constructed. A second `gh` constructor here
+// would be the bypass the runner-wiring rule exists to catch, so this pins
+// the conversion: the store answers non-nil for the forge client, and nil
+// for anything that is not one.
+func TestLedgerStoreIsTheSameOrchestratorClient(t *testing.T) {
+	d := open(newIO(false), harness.Document{})
+	client := d.forgeClient()
+	if client == nil {
+		t.Fatal("forgeClient answered nil")
+	}
+	if store := ledgerStore(client); store == nil {
+		t.Fatal("the forge client does not implement the ledger store")
+	}
+	if store := ledgerStore(nil); store != nil {
+		t.Errorf("a nil client converted to %v, want nil", store)
 	}
 }
