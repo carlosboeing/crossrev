@@ -115,14 +115,14 @@ func TestRecoveryPostsNoneWhenEveryInlineHasLanded(t *testing.T) {
 
 func TestRecoveryPolicyStillComesFromTheBaseRevision(t *testing.T) {
 	e := newEnv(t)
-	writeBase(e, ".github/crossrev.yml", "version: 1\npolicy:\n  min_fix_severity: high\n")
-	writeHead(e, ".github/crossrev.yml", "version: 1\npolicy:\n  min_fix_severity: low\n")
+	writeBase(e, ".github/crossrev.yml", "version: 2\npolicy:\n  min_fix_severity: high\n")
+	writeHead(e, ".github/crossrev.yml", "version: 2\npolicy:\n  min_fix_severity: low\n")
 	id1 := mustFindingID(t, "aaaaaaaaaaaaaaaa")
 	id2 := mustFindingID(t, "bbbbbbbbbbbbbbbb")
 	claim := startedClaimWithFindings(t, id1, id2)
 	e.forge.comments = []forge.IssueComment{commentWithMarker(t, 9001, claim)}
 	e.forge.nextID = 10001
-	e.cfg = mustConfig(t, "version: 1\npolicy:\n  min_fix_severity: high\n")
+	e.cfg = mustConfig(t, "version: 2\npolicy:\n  min_fix_severity: high\n")
 	got := runLeg(t, e, e.request(t))
 	if got.Err != nil {
 		t.Fatalf("Run: %v", got.Err)

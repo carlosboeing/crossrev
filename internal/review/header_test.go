@@ -21,7 +21,7 @@ import (
 // pass it was, or which harness was about to answer.
 func TestTheRunHeaderNamesThePullRequestPassAndReviewer(t *testing.T) {
 	e := newEnv(t)
-	e.cfg = mustConfig(t, "version: 1\nreviewer:\n  harness: claude\n  model: reviewer-model\n  effort: high\n")
+	e.cfg = mustConfig(t, "version: 2\nreviewer:\n  harness: claude\n  model: reviewer-model\n  effort: high\n")
 	writeAppGo(t, e.dir)
 	e.runner.script = []exec.Result{{ExitCode: 0, Stdout: claudeStdout(issuesPayload(twoFindings))}}
 
@@ -50,7 +50,7 @@ func TestTheRunHeaderNamesThePullRequestPassAndReviewer(t *testing.T) {
 // expands to nothing when the model is unset, and so does the effort.
 func TestTheRunHeaderOmitsAnUnsetModelAndEffort(t *testing.T) {
 	e := newEnv(t)
-	e.cfg = mustConfig(t, "version: 1\nreviewer:\n  harness: claude\n")
+	e.cfg = mustConfig(t, "version: 2\nreviewer:\n  harness: claude\n")
 	writeAppGo(t, e.dir)
 	e.runner.script = []exec.Result{{ExitCode: 0, Stdout: claudeStdout(issuesPayload(twoFindings))}}
 
@@ -70,7 +70,7 @@ func TestTheRunHeaderOmitsAnUnsetModelAndEffort(t *testing.T) {
 // is _pass_label at lib/run.sh:598-605.
 func TestTheRunHeaderNamesTheCycleCapItPassed(t *testing.T) {
 	e := newEnv(t)
-	e.cfg = mustConfig(t, "version: 1\npolicy:\n  max_passes_per_cycle: 3\n")
+	e.cfg = mustConfig(t, "version: 2\npolicy:\n  max_passes_per_cycle: 3\n")
 	writeAppGo(t, e.dir)
 	raw := fmt.Sprintf(`{"v":1,"leg":"review","pass":3,"state":"complete","ts":1699950000,"run_id":"x","head_sha":%q,"verdict":"issues-remain","findings":[]}`, oldSHA)
 	e.forge.comments = []forge.IssueComment{commentWithMarker(t, 9001, parseMarker(t, raw))}

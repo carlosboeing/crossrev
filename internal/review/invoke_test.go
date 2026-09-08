@@ -257,7 +257,7 @@ func TestInvokeSubstitutesAMissingConfiguredHarnessBeforeTheClaim(t *testing.T) 
 		}
 		return "", os.ErrNotExist
 	}
-	e.cfg = mustConfig(t, "version: 1\nreviewer:\n  harness: codex\n")
+	e.cfg = mustConfig(t, "version: 2\nreviewer:\n  harness: codex\n")
 	req := e.request(t)
 	req.HarnessOverride = ""
 	leg := e.leg(t)

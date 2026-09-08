@@ -106,7 +106,7 @@ func TestAnInterruptedReviewLegLeavesTheClaimResumable(t *testing.T) {
 func TestASettledReviewLegIsNotRewrittenWhenALaterStepFails(t *testing.T) {
 	e := newEnv(t)
 	writeAppGo(t, e.dir)
-	e.cfg = mustConfig(t, "version: 1\nmode: automated\n")
+	e.cfg = mustConfig(t, "version: 2\nmode: automated\n")
 	t.Setenv("CROSSREV_APP_SLUG", "crossrev")
 	e.runner.script = []exec.Result{{ExitCode: 0, Stdout: claudeStdout(issuesPayload(twoFindings))}}
 	e.forge.labelAddErr = errors.New("no")

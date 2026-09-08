@@ -21,7 +21,7 @@ REVIEW_PAYLOAD='{"verdict":"issues-remain","blocked_reason":null,"prior":null,"f
 
 config_agy_reviews() {
   cat <<'EOF'
-version: 1
+version: 2
 mode: local
 policy:
   min_fix_severity: medium
@@ -122,7 +122,7 @@ is  "a leg writes no secret, ever"                "$(count 'secret set')" "0"
 # --- a review leg on the fourth harness -------------------------------------
 config_grok_reviews() {
   cat <<'EOF'
-version: 1
+version: 2
 mode: local
 policy:
   min_fix_severity: medium
@@ -142,7 +142,7 @@ EOF
 
 config_grok_resolves() {
   cat <<'EOF'
-version: 1
+version: 2
 mode: local
 policy:
   min_fix_severity: medium
@@ -276,7 +276,7 @@ has "naming Grok in the diagnosis"                "$out" "Grok"
 # out of the box, so a leg that ran without the deny config would be the bug.
 config_opencode_reviews() {
   cat <<'EOF'
-version: 1
+version: 2
 mode: local
 policy:
   min_fix_severity: medium
@@ -532,7 +532,7 @@ has "and the marker records no answering model"   "$(calls)" '"model_reported":n
 
 config_claude_reviews() {
   cat <<'EOF'
-version: 1
+version: 2
 mode: local
 policy:
   min_fix_severity: medium
@@ -581,7 +581,7 @@ has "keeping the harness's own cost figure"       "$(calls)" '"cost_source":"har
 # number CrossRev would display was charged by nobody.
 config_claude_endpoint_reviews() {
   cat <<'EOF'
-version: 1
+version: 2
 mode: local
 policy:
   min_fix_severity: medium
@@ -625,7 +625,7 @@ has "and the harness cost did not survive"        "$(calls)" '"cost_usd":null'
 # stay denied.
 config_opencode_resolves() {
   cat <<'EOF'
-version: 1
+version: 2
 mode: local
 policy:
   min_fix_severity: medium

@@ -148,7 +148,7 @@ fixture_default_config() {
 fixture_config() {
   local mode="$1" min_fix_severity="$2"
   cat <<EOF
-version: 1
+version: 2
 mode: $mode
 policy:
   min_fix_severity: $min_fix_severity

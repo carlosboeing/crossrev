@@ -7,7 +7,7 @@
 #
 # Machine-local endpoints belong in ~/.config/crossrev/config.yml instead. A URL
 # like http://tower.local:11434 asserts something false on a GitHub runner.
-version: 1
+version: 2
 
 mode: automated             # automated | local — who may write trusted state
 runner: github-hosted       # github-hosted | self-hosted — where init renders the workflows to run

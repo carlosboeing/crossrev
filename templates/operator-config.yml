@@ -11,7 +11,7 @@
 #
 # Tokens are never in here. `token_env` names an environment variable; its value
 # comes from your shell locally and from a repository secret in CI.
-version: 1
+version: 2
 
 endpoints:
   # Claude Code talks to anything exposing an Anthropic-compatible /v1/messages

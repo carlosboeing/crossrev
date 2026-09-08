@@ -17,7 +17,7 @@ ID_DEFER="bbbb000000000002"
 
 config_with_issue_sink() {
   cat <<'EOF'
-version: 1
+version: 2
 mode: local
 policy:
   min_fix_severity: medium
@@ -82,7 +82,7 @@ resolve_payload() {
 
 config_with_file_sink() {
   cat <<'EOF'
-version: 1
+version: 2
 mode: local
 policy:
   min_fix_severity: medium

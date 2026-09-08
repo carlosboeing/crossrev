@@ -179,7 +179,7 @@ func TestWriteFilesLeavesThePolicyAloneOnUpgrade(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(root, ".github"), 0o777); err != nil {
 		t.Fatalf("make .github: %v", err)
 	}
-	handEdited := "version: 1\npolicy:\n  max_passes_per_cycle: 7\n"
+	handEdited := "version: 2\npolicy:\n  max_passes_per_cycle: 7\n"
 	if err := os.WriteFile(filepath.Join(root, ".github", "crossrev.yml"), []byte(handEdited), 0o666); err != nil {
 		t.Fatalf("write the policy: %v", err)
 	}
@@ -532,10 +532,10 @@ func TestDirReadsAndWritesUnderItsRoot(t *testing.T) {
 	if !dir.Exists(".github/workflows") {
 		t.Error("a directory that was created reads as absent")
 	}
-	if err := dir.WriteFile(".github/crossrev.yml", []byte("version: 1\n")); err != nil {
+	if err := dir.WriteFile(".github/crossrev.yml", []byte("version: 2\n")); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
-	if got := readUnder(t, root, ".github/crossrev.yml"); got != "version: 1\n" {
+	if got := readUnder(t, root, ".github/crossrev.yml"); got != "version: 2\n" {
 		t.Errorf("the file holds %q", got)
 	}
 }
