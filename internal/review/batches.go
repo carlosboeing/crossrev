@@ -51,7 +51,11 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 	}
 	advisory := intel.AdvisoryFiles(ctx, scope, scopeSearcher{vcs: l.VCS})
 	pair := repairConfirmation(loaded.Markers, scope.Head)
-	confirmation := l.confirmationDelta(ctx, pair)
+	confirmation, err := l.confirmationDelta(ctx, pair)
+	if err != nil {
+		pair = confirmationPair{}
+		confirmation = nil
+	}
 	render := func(files []intel.FileUnit) int {
 		return len(l.renderBatchPrompt(ctx, req, loaded, settings, pass, files, scope, confirmation))
 	}

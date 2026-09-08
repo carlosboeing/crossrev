@@ -172,7 +172,6 @@ func (l *Leg) publish(ctx context.Context, req Request, loaded Context, settings
 	return marker, msgs, state, nil
 }
 
-
 // postFinding posts one finding where its anchor kind says: a hunk line goes
 // inline, a required file with no valid hunk line lands a file-level review
 // comment, and an outside-diff path posts top-level with its finding id. The

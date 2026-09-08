@@ -62,14 +62,12 @@ func repairConfirmation(markers []prstate.Marker, currentHead core.Revision) con
 
 // confirmationDelta reads the B-to-C repair bytes for the prompt: the
 // resolver-only delta ahead of the current full scope. Empty when no repair
-// is under confirmation, so an initial clean review renders no delta.
-func (l *Leg) confirmationDelta(ctx context.Context, pair confirmationPair) []byte {
+// is under confirmation, so an initial clean review renders no delta. A
+// retrieval failure is reported, so the caller can unset the pair rather
+// than claim a confirmation the reviewer never saw.
+func (l *Leg) confirmationDelta(ctx context.Context, pair confirmationPair) ([]byte, error) {
 	if !pair.set || l.VCS == nil {
-		return nil
+		return nil, nil
 	}
-	delta, err := l.VCS.RangeDiff(ctx, pair.base, pair.head)
-	if err != nil {
-		return nil
-	}
-	return delta
+	return l.VCS.RangeDiff(ctx, pair.base, pair.head)
 }
