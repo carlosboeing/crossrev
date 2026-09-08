@@ -106,7 +106,7 @@ func TestASemanticRetryWarnsOnceAndAsksAgain(t *testing.T) {
 	e := newEnv(t)
 	writeAppGo(t, e.dir)
 	calls := 0
-	e.validate = func([]byte) error {
+	e.validate = func([]byte, validate.ReviewExpectations) error {
 		calls++
 		if calls == 1 {
 			return semanticProblem("finding 3 was answered twice")

@@ -3,17 +3,20 @@ package validate_test
 import (
 	"testing"
 
+	"github.com/carlosboeing/crossrev/internal/core"
 	"github.com/carlosboeing/crossrev/internal/validate"
 )
 
-// The cases here are the ones the two tables in findings_test.go and
-// resolve_test.go do not reach. Each was found by mutating the code and
-// watching every existing test still pass, so each one names the mutation it
-// refuses in its comment.
+// The cases here are the ones the three tables in findings_test.go,
+// resolve_test.go and review_contract_test.go do not reach. Each was found by
+// mutating the code and watching every existing test still pass, so each one
+// names the mutation it refuses in its comment.
 //
 // Every `want` is the byte string lib/validate.sh prints for the same payload,
 // measured by running validate_findings or validate_resolve on it rather than
-// derived from the Go.
+// derived from the Go. Review-contract cases carry no shell wording: the
+// semantic half is new with this release, so each want is the message the
+// retry prompt quotes.
 
 // finding wraps one findings element in a payload the rest of the check
 // accepts, so a case says only what it is testing.
@@ -309,5 +312,219 @@ func TestResolveCallsAFractionalFindingNumberMalformed(t *testing.T) {
 	err := validate.Resolve([]byte(payload), &validate.Expectations{Findings: 1})
 	if code(err) != 1 {
 		t.Fatalf("got code %d %q, want a shape failure", code(err), message(err))
+	}
+}
+
+// reviewExpectation is the two-file batch the review-contract edge cases run
+// against: a.go carries ten readable lines at the head, b.go four.
+func reviewExpectation(t *testing.T) validate.ReviewExpectations {
+	t.Helper()
+	base, err := core.NewRevision("1111111111111111111111111111111111111111")
+	if err != nil {
+		t.Fatalf("base: %v", err)
+	}
+	head, err := core.NewRevision("2222222222222222222222222222222222222222")
+	if err != nil {
+		t.Fatalf("head: %v", err)
+	}
+	return validate.ReviewExpectations{
+		Base: base,
+		Head: head,
+		Units: []validate.UnitExpectation{
+			{Path: "a.go", Revision: head, Lines: 10, Readable: true},
+			{Path: "b.go", Revision: head, Lines: 4, Readable: true},
+		},
+	}
+}
+
+// reviewShell wraps one coverage array in the verdict, findings and scope
+// report the reviewer contract requires.
+func reviewShell(coverage string) string {
+	return `{"verdict":"converged","findings":[],"coverage":` + coverage +
+		`,"examined_scope":"read the two batch files","known_limits":[]}`
+}
+
+// reviewUnit joins one coverage entry over a single git evidence item.
+func reviewUnit(number int, path, revision, disposition, findings, reason string, start, end int) string {
+	return `{"unit_number":` + reviewItoa(number) +
+		`,"disposition":` + disposition +
+		`,"finding_numbers":` + findings +
+		`,"evidence":[{"path":` + reviewQuoteString(path) +
+		`,"revision":` + reviewQuoteString(revision) +
+		`,"start_line":` + reviewSpan(start) +
+		`,"end_line":` + reviewSpan(end) +
+		`,"source":"git","note":null}],"reason":` + reason + `}`
+}
+
+// reviewSpan renders one nullable line endpoint.
+func reviewSpan(n int) string {
+	if n < 0 {
+		return "null"
+	}
+	return reviewItoa(n)
+}
+
+// A whole number past 2^63 is still whole, and the contradiction it earns is
+// semantic. The earlier `n != float64(int64(n))` saturated and called it
+// non-whole — a shape failure where the contradiction belongs, and the two
+// carry different retry budgets.
+func TestReviewCallsAHugeWholeUnitNumberSemanticRatherThanMalformed(t *testing.T) {
+	expect := reviewExpectation(t)
+	head := "2222222222222222222222222222222222222222"
+	for _, literal := range []string{"1E+19", "9223372036854775808"} {
+		payload := reviewShell(`[{"unit_number":` + literal +
+			`,"disposition":"no_issue","finding_numbers":[],"evidence":[],"reason":null},` +
+			reviewUnit(2, "b.go", head, `"no_issue"`, `[]`, `null`, 1, 4) + `]`)
+		err := validate.Review([]byte(payload), expect)
+		if code(err) != 2 {
+			t.Errorf("%s: got code %d %q, want a semantic contradiction", literal, code(err), message(err))
+		}
+	}
+}
+
+// 1.5 is the case the whole-number check exists for, and it stays a shape
+// failure.
+func TestReviewCallsAFractionalUnitNumberMalformed(t *testing.T) {
+	expect := reviewExpectation(t)
+	head := "2222222222222222222222222222222222222222"
+	payload := reviewShell(`[` +
+		reviewUnit(1, "a.go", head, `"no_issue"`, `[]`, `null`, 1, 10) + `,` +
+		`{"unit_number":1.5,"disposition":"no_issue","finding_numbers":[],"evidence":[],"reason":null}]`)
+	if err := validate.Review([]byte(payload), expect); code(err) != 1 {
+		t.Fatalf("got code %d %q, want a shape failure", code(err), message(err))
+	}
+}
+
+// The set-equality check answers missing before unknown: a payload that both
+// omits a unit and invents one names the omission first, so the retry prompt
+// quotes what to add before what to drop.
+func TestReviewReportsTheMissingUnitBeforeTheUnknownOne(t *testing.T) {
+	expect := reviewExpectation(t)
+	head := "2222222222222222222222222222222222222222"
+	payload := reviewShell(`[` +
+		reviewUnit(1, "a.go", head, `"no_issue"`, `[]`, `null`, 1, 10) + `,` +
+		reviewUnit(9, "b.go", head, `"no_issue"`, `[]`, `null`, 1, 4) + `]`)
+	err := validate.Review([]byte(payload), expect)
+	want := "coverage is missing unit number(s) 2; names unknown unit number(s) 9 — " +
+		"2 unit(s) were supplied, numbered 1 to 2"
+	if code(err) != 2 || message(err) != want {
+		t.Fatalf("got code %d %q, want 2 %q", code(err), message(err), want)
+	}
+}
+
+// A no_issue entry naming a finding number contradicts its own disposition:
+// the finding half names a returned finding, and the disposition half says
+// there is none. The finding-reference check runs before the evidence check,
+// so a payload that also cites an unprovided path gets the reference message.
+func TestReviewReportsABadFindingReferenceBeforeBadEvidence(t *testing.T) {
+	expect := reviewExpectation(t)
+	head := "2222222222222222222222222222222222222222"
+	payload := reviewShell(`[` +
+		`{"unit_number":1,"disposition":"no_issue","finding_numbers":[1],` +
+		`"evidence":[{"path":"elsewhere.go","revision":` + reviewQuoteString(head) +
+		`,"start_line":1,"end_line":10,"source":"git","note":null}],"reason":null},` +
+		reviewUnit(2, "b.go", head, `"no_issue"`, `[]`, `null`, 1, 4) + `]`)
+	err := validate.Review([]byte(payload), expect)
+	want := "coverage for unit 1 names finding number 1, but 0 finding(s) were returned, numbered 1 to 0"
+	if code(err) != 2 || message(err) != want {
+		t.Fatalf("got code %d %q, want 2 %q", code(err), message(err), want)
+	}
+}
+
+// A half-open span — one endpoint null and the other set — is a semantic
+// contradiction: a judgement rests on lines or on the file, not half of each.
+// Dropping the half-open clause left every existing case passing, because no
+// case set exactly one endpoint.
+func TestReviewRefusesAHalfOpenSpan(t *testing.T) {
+	expect := reviewExpectation(t)
+	head := "2222222222222222222222222222222222222222"
+	payload := reviewShell(`[` +
+		`{"unit_number":1,"disposition":"no_issue","finding_numbers":[],` +
+		`"evidence":[{"path":"a.go","revision":` + reviewQuoteString(head) +
+		`,"start_line":null,"end_line":10,"source":"git","note":null}],"reason":null},` +
+		reviewUnit(2, "b.go", head, `"no_issue"`, `[]`, `null`, 1, 4) + `]`)
+	err := validate.Review([]byte(payload), expect)
+	want := "coverage for unit 1 cites a half-open span, and a judgement rests on lines or on the file, " +
+		"not half of each"
+	if code(err) != 2 || message(err) != want {
+		t.Fatalf("got code %d %q, want 2 %q", code(err), message(err), want)
+	}
+}
+
+// A span over content supplied as an access limit contradicts the batch: the
+// unit carries no readable lines, so only file-level null spans pass.
+// Removing the readability clause accepted line evidence for a unit the
+// batch showed no bytes for.
+func TestReviewRefusesASpanOverAnAccessLimit(t *testing.T) {
+	base, err := core.NewRevision("1111111111111111111111111111111111111111")
+	if err != nil {
+		t.Fatalf("base: %v", err)
+	}
+	head, err := core.NewRevision("2222222222222222222222222222222222222222")
+	if err != nil {
+		t.Fatalf("head: %v", err)
+	}
+	expect := validate.ReviewExpectations{
+		Base: base,
+		Head: head,
+		Units: []validate.UnitExpectation{
+			{Path: "logo.bin", Revision: head, Readable: false},
+		},
+	}
+	payload := reviewShell(`[` + reviewUnit(1, "logo.bin", head.SHA(), `"no_issue"`, `[]`, `null`, 1, 10) + `]`)
+	err = validate.Review([]byte(payload), expect)
+	want := "coverage for unit 1 cites lines 1-10 for content supplied as an access limit, " +
+		"and a limit carries file-level evidence only"
+	if code(err) != 2 || message(err) != want {
+		t.Fatalf("got code %d %q, want 2 %q", code(err), message(err), want)
+	}
+}
+
+// File-level null spans pass over an access limit: there are no readable
+// lines to contradict, and the unit still needs its disposition recorded.
+func TestReviewAcceptsFileLevelEvidenceOverAnAccessLimit(t *testing.T) {
+	base, err := core.NewRevision("1111111111111111111111111111111111111111")
+	if err != nil {
+		t.Fatalf("base: %v", err)
+	}
+	head, err := core.NewRevision("2222222222222222222222222222222222222222")
+	if err != nil {
+		t.Fatalf("head: %v", err)
+	}
+	expect := validate.ReviewExpectations{
+		Base: base,
+		Head: head,
+		Units: []validate.UnitExpectation{
+			{Path: "logo.bin", Revision: head, Readable: false},
+		},
+	}
+	payload := reviewShell(`[` + reviewUnit(1, "logo.bin", head.SHA(), `"no_issue"`, `[]`, `null`, -1, -1) + `]`)
+	if err := validate.Review([]byte(payload), expect); err != nil {
+		t.Fatalf("file-level evidence over an access limit should pass, got %q", err)
+	}
+}
+
+// One finding named by two units contradicts the one-finding-one-unit rule:
+// the second unit's disposition answers for a finding already answered for.
+// The cross-unit duplicate is checked after the per-unit rules, so a payload
+// that also omits evidence gets the evidence message first.
+func TestReviewRefusesAFindingNamedByTwoUnits(t *testing.T) {
+	finding := `{"path":"a.go","line":2,"side":"RIGHT","severity":"high","category":"correctness",` +
+		`"pre_existing":false,"title":"t","why":"w","fix":"f"}`
+	expect := reviewExpectation(t)
+	head := "2222222222222222222222222222222222222222"
+	payload := `{"verdict":"issues-remain","findings":[` + finding + `],` +
+		`"coverage":[` +
+		`{"unit_number":1,"disposition":"finding","finding_numbers":[1],` +
+		`"evidence":[{"path":"a.go","revision":` + reviewQuoteString(head) +
+		`,"start_line":1,"end_line":10,"source":"git","note":null}],"reason":null},` +
+		`{"unit_number":2,"disposition":"finding","finding_numbers":[1],` +
+		`"evidence":[{"path":"b.go","revision":` + reviewQuoteString(head) +
+		`,"start_line":1,"end_line":4,"source":"git","note":null}],"reason":null}],` +
+		`"examined_scope":"read the two batch files","known_limits":[]}`
+	err := validate.Review([]byte(payload), expect)
+	want := "finding number 1 is named by more than one unit, and one finding answers for one unit"
+	if code(err) != 2 || message(err) != want {
+		t.Fatalf("got code %d %q, want 2 %q", code(err), message(err), want)
 	}
 }

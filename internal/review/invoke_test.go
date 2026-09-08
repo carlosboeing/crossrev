@@ -75,7 +75,7 @@ func TestInvokeSemanticRetryRunsTheHarnessOnceMore(t *testing.T) {
 	e := newEnv(t)
 	leg := e.leg(t)
 	attempts := 0
-	leg.Validate = func(payload []byte) error {
+	leg.Validate = func(payload []byte, _ validate.ReviewExpectations) error {
 		attempts++
 		if attempts == 1 {
 			return &validate.SemanticError{Problem: "finding 9 was not in the numbered list"}
@@ -151,7 +151,7 @@ func TestInvokeWarnsWhenTheHarnessWritesToAQuarantinedPath(t *testing.T) {
 func TestInvokeSchemaNativeShapeErrorDoesNotRetry(t *testing.T) {
 	e := newEnv(t)
 	leg := e.leg(t)
-	leg.Validate = func([]byte) error {
+	leg.Validate = func([]byte, validate.ReviewExpectations) error {
 		return &validate.ShapeError{Problem: "no verdict key"}
 	}
 	got := leg.Run(context.Background(), e.request(t))
@@ -177,7 +177,7 @@ func TestInvokeRecordsClaimThenHarness(t *testing.T) {
 func TestInvokeSemanticRetryIsExactlyOne(t *testing.T) {
 	e := newEnv(t)
 	leg := e.leg(t)
-	leg.Validate = func([]byte) error {
+	leg.Validate = func([]byte, validate.ReviewExpectations) error {
 		return &validate.SemanticError{Problem: "finding 9 was not in the numbered list"}
 	}
 	got := leg.Run(context.Background(), e.request(t))
@@ -237,7 +237,7 @@ func TestInvokeOpencodeShapeErrorRetriesOnce(t *testing.T) {
 	leg := e.leg(t)
 	req := e.request(t)
 	req.HarnessOverride = "opencode"
-	leg.Validate = func([]byte) error {
+	leg.Validate = func([]byte, validate.ReviewExpectations) error {
 		return &validate.ShapeError{Problem: "no verdict key"}
 	}
 	got := leg.Run(context.Background(), req)
