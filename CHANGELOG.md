@@ -10,6 +10,8 @@ All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepa
 
 - **Advisory discovery and deterministic batching bound the review input.** Fixed-string search at the head revision returns at most 200 hits per changed identifier and records a capped term as `too_common`; adjacent-test conventions name uncertain context beside it. Both stay advisory and never change the required set. Batches pack outstanding files in path order, at most 40 files, measuring the fully rendered prompt against 180 KB, with at most 400 files per pass. A file that fits nowhere stays outstanding with `input_exceeds_budget`; files past the pass budget carry `review_budget_reached`.
 
+- **The reviewer prompt numbers every file it must account for.** Each batch file renders numbered with readable content or an explicit access limit, with advisory and excluded paths shown beside it. The findings schema adds `coverage`, `examined_scope` and `known_limits`: one entry per numbered file with its disposition, finding links, evidence and reason, plus a scope report that stays even when nothing was found.
+
 ## [0.6.1] — 2026-09-06
 
 ### Fixed
