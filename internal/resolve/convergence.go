@@ -2,7 +2,7 @@ package resolve
 
 import (
 	"context"
-	"strings"
+	"errors"
 
 	"github.com/carlosboeing/crossrev/internal/core"
 	"github.com/carlosboeing/crossrev/internal/policy"
@@ -42,7 +42,6 @@ func (l *Leg) resolveConvergence(ctx context.Context, s *session) (policy.Conver
 		return conv, true
 	}
 	conv.LedgerCurrent = true
-	required := map[string]bool{}
 	for _, record := range gen.Records {
 		switch record.Type {
 		case prstate.CoverageRecordOutstanding:
@@ -60,10 +59,6 @@ func (l *Leg) resolveConvergence(ctx context.Context, s *session) (policy.Conver
 		}
 	}
 	conv.Required = len(gen.Paths)
-	for _, path := range gen.Paths {
-		required[path] = true
-	}
-	_ = required
 	conv.ScopeReported = gen.ScopeReport.ExaminedScope != ""
 	conv.ConfirmationRequired, conv.ConfirmationComplete = resolveConfirmation(s, head)
 	return conv, true
@@ -72,7 +67,7 @@ func (l *Leg) resolveConvergence(ctx context.Context, s *session) (policy.Conver
 // isAbsence reports the one SelectGeneration failure that is not a refusal:
 // no complete generation exists at this revision pair.
 func isAbsence(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "no complete generation at")
+	return errors.Is(err, prstate.ErrNoCompleteGeneration)
 }
 
 // resolveConfirmation reads the repair-delta obligation off the review

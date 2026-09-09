@@ -281,7 +281,7 @@ func SelectGeneration(comments []CoverageComment, trustedAuthor string, revision
 	if lastErr != nil {
 		return Generation{}, lastErr
 	}
-	return Generation{}, coverageErrorf("no complete generation at %s...%s under %q", revision.Base.SHA(), revision.Head.SHA(), engine)
+	return Generation{}, fmt.Errorf("%w: %w at %s...%s under %q", ErrCoverage, ErrNoCompleteGeneration, revision.Base.SHA(), revision.Head.SHA(), engine)
 }
 
 // assembleGeneration binds one manifest to its shards by id, position and

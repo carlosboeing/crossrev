@@ -114,6 +114,32 @@ func (l *Leg) publish(ctx context.Context, req Request, loaded Context, settings
 	marker.DoneTS = prstate.Some(l.now().Unix())
 	marker.Unanchored = prstate.Some(unanchored)
 
+	verdict := core.Verdict(marker.Verdict.Value())
+	escalated := escalatedCount(loaded.Markers)
+	if conv, ok := l.buildConvergence(ctx, loaded, marker, actionable); ok && !policy.Converged(conv) {
+		// The coverage obligation is unmet: a green verdict cannot stand,
+		// and a quiet one cannot pass as finished. With actionable findings
+		// the resolve leg is still owed, so the verdict stays issues-remain;
+		// with nothing actionable the review could not complete, so it
+		// records blocked with the specific debt named.
+		if actionable > 0 {
+			if verdict == core.VerdictConverged {
+				msgs = append(msgs, ui.Warn(
+					"the reviewer returned verdict 'converged' with the coverage obligation unmet",
+					"The verdict is recorded as issues-remain instead: a green verdict needs every required file covered, no outstanding or unexamined record, a reported scope and any confirmed repair. Nothing here judges the code."))
+			}
+			verdict = core.VerdictIssuesRemain
+			marker.Verdict = prstate.Some(string(verdict))
+		} else {
+			verdict = core.VerdictBlocked
+			marker.Verdict = prstate.Some(string(verdict))
+			marker.BlockedReason = prstate.Some(coverageDebt(conv))
+			msgs = append(msgs, ui.Warn(
+				"the review leaves its coverage obligation unmet with nothing actionable",
+				"The pass records blocked instead of finished: "+coverageDebt(conv)+". Nothing here judges the code."))
+		}
+	}
+
 	summary := SummaryBody(parseFindings(marker.Findings), marker, RenderContext{
 		Repo:    loaded.Repo.String(),
 		PR:      req.PR,
@@ -135,17 +161,8 @@ func (l *Leg) publish(ctx context.Context, req Request, loaded Context, settings
 	// none of it may rewrite this record.
 	state := publishState{settled: true}
 
-	verdict := core.Verdict(marker.Verdict.Value())
-	escalated := escalatedCount(loaded.Markers)
 	next := policy.PassLabel(verdict, actionable, escalated)
 	if conv, ok := l.buildConvergence(ctx, loaded, marker, actionable); ok {
-		if verdict == core.VerdictConverged && !policy.Converged(conv) {
-			msgs = append(msgs, ui.Warn(
-				"the reviewer returned verdict 'converged' with the coverage obligation unmet",
-				"The verdict is recorded as issues-remain instead: a green verdict needs every required file covered, no outstanding or unexamined record, a reported scope and any confirmed repair. Nothing here judges the code."))
-			verdict = core.VerdictIssuesRemain
-			marker.Verdict = prstate.Some(string(verdict))
-		}
 		next = policy.PassLabelWithCoverage(verdict, actionable, escalated, conv)
 	}
 	if verdict == core.VerdictConverged && next != policy.PassConverged {
@@ -180,6 +197,28 @@ func (l *Leg) publish(ctx context.Context, req Request, loaded Context, settings
 		state.nudge = true
 	}
 	return marker, msgs, state, nil
+}
+
+
+// coverageDebt names the specific unmet coverage obligation for a blocked
+// pass: the counts, the missing scope report, or the unconfirmed repair.
+func coverageDebt(conv policy.Convergence) string {
+	switch {
+	case !conv.LedgerCurrent:
+		return "no current coverage generation at this revision"
+	case conv.Outstanding > 0:
+		return fmt.Sprintf("%d required file(s) left outstanding", conv.Outstanding)
+	case conv.CouldNotReview > 0:
+		return fmt.Sprintf("%d required file(s) could not be examined", conv.CouldNotReview)
+	case conv.Covered != conv.Required:
+		return fmt.Sprintf("%d of %d required files covered", conv.Covered, conv.Required)
+	case !conv.ScopeReported:
+		return "the reviewer reported no examined scope"
+	case conv.ConfirmationRequired && !conv.ConfirmationComplete:
+		return "the repair delta has no accepted confirmation"
+	default:
+		return "the coverage obligation is unmet"
+	}
 }
 
 // postFinding posts one finding where its anchor kind says: a hunk line goes

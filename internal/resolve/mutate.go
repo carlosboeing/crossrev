@@ -362,6 +362,19 @@ func (l *Leg) finishEmpty(ctx context.Context, s *session, got Result) Result {
 	if got.Outcome == OutcomeHalted {
 		next = policy.PassHalted
 	}
+	if next == policy.PassConverged {
+		// The no-findings path reports converged only with the coverage
+		// obligation met. With no coverage generation at this head no
+		// coverage pass ran here, so the frozen-path ending keeps its
+		// legacy label; corrupt or incomplete coverage fails closed to
+		// halted, because the resolve leg cannot cover files itself and
+		// a human must re-drive the review.
+		if conv, ok := l.resolveConvergence(ctx, s); ok {
+			if !policy.Converged(conv) {
+				next = policy.PassHalted
+			}
+		}
+	}
 	_ = l.applyPassLabels(ctx, s, s.pass, next)
 	return got
 }

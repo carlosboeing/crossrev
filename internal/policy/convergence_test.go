@@ -3,6 +3,8 @@ package policy_test
 import (
 	"testing"
 
+	"github.com/carlosboeing/crossrev/internal/core"
+
 	"github.com/carlosboeing/crossrev/internal/policy"
 )
 
@@ -47,5 +49,23 @@ func TestConvergedRequiresEveryCoverageGuard(t *testing.T) {
 		if policy.Converged(input) {
 			t.Errorf("%s still converges", name)
 		}
+	}
+}
+
+// TestPassLabelWithCoverageMapping pins the non-green mapping: open work
+// holds awaiting-resolution, a quiet but unmet obligation halts.
+func TestPassLabelWithCoverageMapping(t *testing.T) {
+	open := convergedInput()
+	open.Outstanding = 1
+	if got := policy.PassLabelWithCoverage(core.VerdictIssuesRemain, 1, 0, open); got != policy.PassAwaitingResolution {
+		t.Errorf("open work maps to %q, want awaiting-resolution", got)
+	}
+	quiet := convergedInput()
+	quiet.ScopeReported = false
+	if got := policy.PassLabelWithCoverage(core.VerdictConverged, 0, 0, quiet); got != policy.PassHalted {
+		t.Errorf("quiet unmet obligation maps to %q, want halted", got)
+	}
+	if got := policy.PassLabelWithCoverage(core.VerdictConverged, 0, 0, convergedInput()); got != policy.PassConverged {
+		t.Errorf("met obligation maps to %q, want converged", got)
 	}
 }

@@ -408,7 +408,12 @@ func statusStateFromMarkers(in statusInput) core.LoopState {
 		return core.LoopHalted
 	case policy.PassConverged:
 		// A no-commit settle reports green only with the review marker's
-		// coverage half met at the current head.
+		// coverage half met at the current head. A blocked review marker
+		// means the coverage obligation failed, so no settle built on it
+		// can be green either.
+		if review.Verdict.Value() == string(core.VerdictBlocked) {
+			return core.LoopAwaitingReview
+		}
 		if statusReviewConverges(in, review) {
 			return core.LoopConverged
 		}

@@ -220,8 +220,8 @@ var _ = context.Background
 
 // TestReviewWriterDowngradesUncoveredConvergedVerdict pins route 1: an
 // accepted converged answer with one file unexaminable (could_not_review)
-// cannot complete green — the writer records issues-remain, applies no
-// converged label, and never falls back to the model verdict.
+// cannot complete green — the writer records blocked with the debt named,
+// applies no converged label, and never falls back to the model verdict.
 func TestReviewWriterDowngradesUncoveredConvergedVerdict(t *testing.T) {
 	e := newEnv(t)
 	writeRequiredHead(e, "a.go", "package a\n")
@@ -248,7 +248,22 @@ func TestReviewWriterDowngradesUncoveredConvergedVerdict(t *testing.T) {
 			t.Fatalf("converged label applied with one file unexamined: %v", e.forge.labelsAdded)
 		}
 	}
-	if verdict := got.Marker.Verdict.Value(); verdict != "issues-remain" {
-		t.Errorf("marker verdict = %q, want issues-remain (downgraded from converged)", verdict)
+	if verdict := got.Marker.Verdict.Value(); verdict != "blocked" {
+		t.Errorf("marker verdict = %q, want blocked (downgraded from converged)", verdict)
+	}
+	if reason, _ := got.Marker.BlockedReason.Get(); !strings.Contains(reason, "could not be examined") {
+		t.Errorf("blocked reason = %q, want the coverage debt named", reason)
+	}
+	// The downgrade must reach the stored bytes, not just the in-memory
+	// marker: downstream readers reload the claim comment.
+	if len(e.forge.edits) == 0 {
+		t.Fatal("no claim edits stored")
+	}
+	stored := e.forge.edits[len(e.forge.edits)-1]
+	if !strings.Contains(stored, `"verdict":"blocked"`) {
+		t.Errorf("stored claim lacks the downgraded verdict")
+	}
+	if strings.Contains(stored, `"verdict":"converged"`) {
+		t.Errorf("stored claim still carries the converged verdict")
 	}
 }

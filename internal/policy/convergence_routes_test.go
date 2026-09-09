@@ -31,7 +31,9 @@ func TestEveryConvergedRouteUsesThePredicate(t *testing.T) {
 		t.Fatal("the predicate converges with one outstanding file")
 	}
 
-	// Route 1, the review writer's gate.
+	// Route 1, the review writer's gate: publish consults Converged before
+	// completing a converged verdict (the full writer path is pinned by
+	// TestReviewWriterDowngradesUncoveredConvergedVerdict in internal/review).
 	if policy.Converged(input) {
 		t.Error("the review writer would complete a converged verdict with one outstanding file")
 	}

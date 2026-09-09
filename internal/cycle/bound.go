@@ -220,7 +220,8 @@ func readResolve(out *ui.IO, state State, pass int) resolveReading {
 	// than spinning declines until the cap and reporting a convergence as a
 	// failure to converge.
 	if label == policy.PassConverged {
-		if review, ok := prstate.MarkerFor(state.Markers, pass, core.LegReview); !ok || !prstate.MarkerConverges(review) {
+		review, ok := prstate.MarkerFor(state.Markers, pass, core.LegReview)
+		if !ok || !prstate.MarkerConverges(review) || review.Verdict.Value() == string(core.VerdictBlocked) {
 			return resolveContinues
 		}
 		out.End(fmt.Sprintf("Converged after pass %d — nothing at or above min_fix_severity (%s) remains.",

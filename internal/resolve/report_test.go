@@ -327,3 +327,22 @@ func seedOutstandingGeneration(t *testing.T, e *testEnv) {
 		{ID: 9202, Author: "tester", Body: manifestBody},
 	}}
 }
+
+// TestEmptyFindingsWithOutstandingCoverageHalts pins the finishEmpty gate:
+// a resolve run with no findings but one outstanding file in the current
+// generation must not report converged — the review debt needs a human.
+func TestEmptyFindingsWithOutstandingCoverageHalts(t *testing.T) {
+	e := setup(t)
+	e.addReview(t, json.RawMessage(`[]`), "issues-remain")
+	seedOutstandingGeneration(t, e)
+
+	got := e.run(t)
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
+	for _, label := range e.forge.addedLabels {
+		if label == policy.LabelConverged {
+			t.Fatalf("converged label applied with one outstanding file: %v", e.forge.addedLabels)
+		}
+	}
+}
