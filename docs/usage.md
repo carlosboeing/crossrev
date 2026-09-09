@@ -50,37 +50,37 @@ The resolve leg adds threaded replies, resolves the threads it settled, commits 
 
 ### Which files a review reads
 
-Each review pass reads every changed file. CrossRev lists every added, modified, deleted, renamed and type-changed path between the base and the head. A rename counts as new work. It keeps no prior result.
+Each review pass reads every changed file: every added, modified, deleted, renamed and type-changed path between the base branch and the pull request branch. A rename counts as new work and is read again from scratch. Nothing carries over from an earlier revision: when the branch moves, the next pass reads every current file again.
 
-Deleted files read from the base. Other files read from the head. Files with no readable text stay in the required set with a named access limit.
+A **required file** is a changed file the review must account for. Deleted files read from the base. Other files read from the head. Files with no readable text stay required, with a named access limit saying why they could not be read.
 
-Existing backlog paths stay out of the required set. Each one shows in the manifest with its reason.
+Backlog paths stay out: files CrossRev itself writes (the deferred-findings list) are not review work. Each one is still named with its reason, so nothing reads as silently skipped.
 
-Exact search and adjacent-test names are hints only. They add no required file and close none. Search stops at 200 hits per term and marks the term `too_common`.
+Exact search hits and adjacent-test names are hints only. They add no required file and close none. Search stops at 200 hits per term and marks the term `too_common`.
 
-The reviewer covers each required file with one disposition. Required means covered plus outstanding, with no overlap. A changed base, head or engine retires every prior result. A re-drive at the same base, head and engine resumes the open paths.
+The reviewer gives each required file one disposition: `no_issue`, `finding`, `not_affected`, or `could_not_review`. A file with a disposition is **covered**; a file still waiting for one is **outstanding**. Every required file ends the pass in exactly one of those two states.
 
 One pass reads at most 400 required files. Batches hold at most 40 files in path order.
 
 Batches measure the full rendered prompt against 180 KB (184,320 bytes).
 
-A file that fits in no batch stays open with `input_exceeds_budget`.
+A file that fits in no batch stays outstanding with `input_exceeds_budget`.
 
 Files past the pass budget carry `review_budget_reached`.
 
-A halted pass records state `incomplete` with its halt word and stop counts. The claim names the open paths for the next run.
+A halted pass records state `incomplete` with its halt word and stop counts. The claim names the outstanding files for the next run.
 
-The next review after a repair reads the repair delta first, then the full scope.
+The next review after a repair reads what the repair changed first, then the full scope.
 
-The pass writes the repair pair only after it reads every current file. A first clean review writes both pair fields null.
+The pass records which repair it confirmed only after it reads every current file. A first clean review records none.
 
-The reviewer reports a scope note and a list of known limits.
+The reviewer reports a scope note saying what was read, and a list of known limits saying what constrained it.
 
-One convergence rule reads that note with the counts and the repair pair.
+One convergence rule reads that note with the counts and the confirmed repair.
 
 The review writer and both label rules read that rule. The local cycle and both status paths read it too.
 
-A false result never falls back to the reviewer verdict.
+A failed check never falls back to the reviewer verdict.
 
 ### The commits CrossRev makes
 
@@ -158,7 +158,7 @@ The label row on a pull request reads at a glance, because no two of the six col
 |---|---|---|
 | `crossrev/awaiting-review` | blue | A review is owed |
 | `crossrev/awaiting-resolution` | purple | The review landed, the resolve leg is owed |
-| `crossrev/converged` | green | The reviewer leaves no required file open |
+| `crossrev/converged` | green | The loop finished on its own |
 | `crossrev/halted` | orange | Stopped short, a human is needed |
 | `crossrev/stop` | red | A human applied it, and the loop stops |
 | `crossrev/pass-N` | grey | Which pass it is on |
@@ -189,7 +189,7 @@ In automated mode the runner is discarded after the job, so the generated workfl
 |---|---|
 | awaiting review | A review leg is owed |
 | awaiting resolution | The review landed; the resolve leg is owed |
-| converged | Nothing at or above `min_fix_severity` remains, and the reviewer leaves no required file open |
+| converged | Nothing at or above `min_fix_severity` remains, and every changed file was read |
 | halted | It stopped short — a cap, a blocked leg, an escalated finding, or a deferral whose record never landed. A human is needed |
 | stopped | Somebody applied `crossrev/stop` |
 
@@ -197,7 +197,7 @@ A resolve pass that ended blocked or escalated is complete but not settled, so i
 
 A resolve pass can also finish the loop itself. A pass that settled every finding without pushing a commit — each disputed, skipped, or deferred and tracked — converges on the spot: the head never moved, so a re-review would find nothing new and decline. A pass that pushed hands back to the reviewer, because there is something new to see.
 
-Converged does not mean "no findings". It means no finding this pull request introduced, at or above the threshold, remains, and the reviewer leaves no required file open. Findings below the threshold and pre-existing ones are reported and cannot keep the loop alive — a loop that cannot converge because of a naming quibble is one nobody leaves switched on.
+Converged does not mean "no findings". It means no finding this pull request introduced, at or above the threshold, remains, and every changed file was read. Findings below the threshold and pre-existing ones are reported and cannot keep the loop alive — a loop that cannot converge because of a naming quibble is one nobody leaves switched on.
 
 Converged also does not mean checks ran. The coverage record names verification status not_implemented. No check runs in this release.
 

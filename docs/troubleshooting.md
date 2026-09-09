@@ -64,15 +64,15 @@ If that process is still running, wait for it or stop it. If it isn't, CrossRev 
 | The resolve leg returned `blocked` | Same, on the other leg |
 | A finding was `escalated` | It needs a human decision, so `crossrev/stop` went on and the thread stayed open |
 | **A leg stopped with an error** | The harness failed to answer, a commit was refused, a push was rejected. The claim comment and its marker carry the reason. Fix what it names, then run the same command again |
-| The pass left required files open | The claim names them with its halt word and stop counts. Run the same command again at the same base, head and engine to resume |
+| The pass left files without a disposition | The claim names them with its halt word and stop counts. Run the same command again on the same revision to resume |
 
 ## Coverage halts
 
-Three halt words name a pass that could not read every required file. The marker records state `incomplete` with the word and the stop counts. Required, covered and outstanding counts show what ran and what stays open.
+Three halt words name a pass that could not read every changed file. The marker records state `incomplete` with the word and the stop counts. The counts show what ran and what still waits for a disposition.
 
-`coverage_incomplete` means an accepted batch left files open. `ledger_exhausted` means packing crossed 32 shards, so the pass keeps the last full generation. `input_exceeds_budget` means one file fits in no rendered prompt. Files past the 400-file pass budget carry `review_budget_reached`.
+`coverage_incomplete` means an accepted batch left files waiting. `ledger_exhausted` means packing crossed 32 shards, so the pass keeps the last full generation. `input_exceeds_budget` means one file fits in no rendered prompt. Files past the 400-file pass budget carry `review_budget_reached`.
 
-Run the same command again at the same base, head and engine. It resumes the open paths. A changed base, head or engine retires every prior result and starts over.
+Run the same command again on the same revision. It resumes the waiting files. A new push retires every prior result and starts over.
 
 No check runs in this release. The coverage record names verification status not_implemented. A halt never means checks failed.
 

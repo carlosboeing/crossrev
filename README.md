@@ -147,9 +147,9 @@ flowchart TD
 
 A **cycle** contains one or more **passes**. In each pass, the reviewer agent reads the current revision. The resolver agent follows when findings meet the configured severity threshold. The loop ends when it converges, reaches a limit, or needs a person.
 
-Each review pass reads every changed file. CrossRev lists every added, modified, deleted, renamed and type-changed path between the base and the head. A rename counts as new work. It keeps no prior result.
+Each review pass reads every changed file: every added, modified, deleted, renamed and type-changed path between the base branch and the pull request branch. A rename counts as new work and is read again from scratch.
 
-`crossrev/converged` means review work is complete. No check runs in this release. The coverage record names verification status not_implemented and five nulls. [Using CrossRev](docs/usage.md) names what is required, covered, outstanding, advisory and excluded.
+`crossrev/converged` means review work is complete. No check runs in this release. The coverage record names verification status not_implemented and five nulls. [Using CrossRev](docs/usage.md) names which files count, which were read, which still wait, and which were hints or exclusions.
 
 The review limit is `policy.max_passes_per_cycle`, which defaults to 3. [Using CrossRev](docs/usage.md) documents all six termination conditions and their precedence.
 
