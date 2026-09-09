@@ -83,8 +83,8 @@ func acceptanceInput(oracle convergenceAcceptanceFile) policy.Convergence {
 // report or confirmation guard exists there.
 func TestConvergenceAcceptanceOracle(t *testing.T) {
 	oracle := loadConvergenceAcceptance(t)
-	if len(oracle.Weakened) != 9 {
-		t.Fatalf("oracle holds %d weakened cases, want 9", len(oracle.Weakened))
+	if len(oracle.Weakened) != 10 {
+		t.Fatalf("oracle holds %d weakened cases, want 10", len(oracle.Weakened))
 	}
 	if got := policy.Converged(acceptanceInput(oracle)); got != oracle.AllClear.Converged {
 		t.Fatalf("all-clear converges = %v, want %v", got, oracle.AllClear.Converged)
@@ -114,9 +114,13 @@ func TestConvergenceAcceptanceOracle(t *testing.T) {
 				for field, value := range w.Fields {
 					switch field {
 					case "required":
-						input.Required = value
+						input.Required = int(value)
 					case "covered":
-						input.Covered = value
+						input.Covered = int(value)
+					case "confirmation_required":
+						input.ConfirmationRequired = value != 0
+					case "confirmation_complete":
+						input.ConfirmationComplete = value != 0
 					default:
 						t.Fatalf("oracle case %q names unknown field %q", w.Name, field)
 					}

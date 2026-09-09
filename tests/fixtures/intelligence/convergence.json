@@ -13,15 +13,70 @@
     "converged": true
   },
   "weakened": [
-    {"name": "unresolved fixable", "field": "unresolved_fixable", "value": 1, "converged": false},
-    {"name": "stale ledger", "field": "ledger_current", "value": false, "converged": false},
-    {"name": "under-covered", "field": "covered", "value": 2, "converged": false},
-    {"name": "outstanding record", "field": "outstanding", "value": 1, "converged": false},
-    {"name": "could_not_review", "field": "could_not_review", "value": 1, "converged": false},
-    {"name": "missing scope report", "field": "scope_reported", "value": false, "converged": false},
-    {"name": "unconfirmed repair", "field": "confirmation_required", "value": true, "converged": false},
-    {"name": "over-covered", "field": "covered", "value": 4, "converged": false},
-    {"name": "empty required set", "fields": {"required": 0, "covered": 0}, "converged": false}
+    {
+      "name": "unresolved fixable",
+      "field": "unresolved_fixable",
+      "value": 1,
+      "converged": false
+    },
+    {
+      "name": "stale ledger",
+      "field": "ledger_current",
+      "value": false,
+      "converged": false
+    },
+    {
+      "name": "under-covered",
+      "field": "covered",
+      "value": 2,
+      "converged": false
+    },
+    {
+      "name": "outstanding record",
+      "field": "outstanding",
+      "value": 1,
+      "converged": false
+    },
+    {
+      "name": "could_not_review",
+      "field": "could_not_review",
+      "value": 1,
+      "converged": false
+    },
+    {
+      "name": "missing scope report",
+      "field": "scope_reported",
+      "value": false,
+      "converged": false
+    },
+    {
+      "name": "unconfirmed repair",
+      "field": "confirmation_required",
+      "value": true,
+      "converged": false
+    },
+    {
+      "name": "over-covered",
+      "field": "covered",
+      "value": 4,
+      "converged": false
+    },
+    {
+      "name": "empty required set",
+      "fields": {
+        "required": 0,
+        "covered": 0
+      },
+      "converged": false
+    },
+    {
+      "name": "confirmed repair",
+      "fields": {
+        "confirmation_required": 1,
+        "confirmation_complete": 1
+      },
+      "converged": true
+    }
   ],
   "routes": {
     "doc": "Every convergence route refuses one outstanding file: the review writer downgrades, both label rules hold green, and both status paths refuse stale or incomplete green state.",

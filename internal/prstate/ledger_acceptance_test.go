@@ -125,6 +125,13 @@ func acceptancePair(t *testing.T) core.RevisionPair {
 // expected records: every value is copied out of the fixture, never derived
 // from production discovery.
 func acceptanceCandidate(t *testing.T, g ledgerAcceptanceGeneration, pair core.RevisionPair) prstate.Generation {
+	return acceptanceCandidateWithEngine(t, g, pair, loadLedgerAcceptance(t).Engine)
+}
+
+// acceptanceCandidateWithEngine builds the candidate with the literal frozen
+// engine, so an engine drift fails at select time rather than hiding behind
+// the code's own constant.
+func acceptanceCandidateWithEngine(t *testing.T, g ledgerAcceptanceGeneration, pair core.RevisionPair, engine string) prstate.Generation {
 	t.Helper()
 	var records []prstate.Record
 	for _, r := range g.Records {
@@ -180,7 +187,7 @@ func acceptanceCandidate(t *testing.T, g ledgerAcceptanceGeneration, pair core.R
 	return prstate.Generation{
 		Gen:      g.Gen,
 		Revision: pair,
-		Engine:   core.FileEngineVersion,
+		Engine:   engine,
 		Paths:    append([]string(nil), g.Paths...),
 		Records:  records,
 		Advisory: prstate.Advisory{Count: g.Advisory.Count, Rules: append([]string(nil), g.Advisory.Rules...), Limits: limits},
@@ -339,6 +346,28 @@ func TestLedgerAcceptanceOracle(t *testing.T) {
 				got := selected.Records[i]
 				if got.Type != r.Type || got.UnitID != r.UnitID || got.PathIndex != r.PathIndex || got.Kind != r.Kind || got.Change != r.Change || got.BodyDigest != r.BodyDigest {
 					t.Errorf("record %d = %+v, want literal %+v", i, got, r)
+				}
+				if optStr(got.Disposition) != strOrNull(r.Disposition) {
+					t.Errorf("record %d disposition = %q, want %q", i, optStr(got.Disposition), strOrNull(r.Disposition))
+				}
+				if strings.Join(got.FindingIDs, ",") != strings.Join(r.FindingIDs, ",") {
+					t.Errorf("record %d finding ids = %v, want %v", i, got.FindingIDs, r.FindingIDs)
+				}
+				if len(got.Evidence) != len(r.Evidence) {
+					t.Errorf("record %d evidence = %d items, want %d", i, len(got.Evidence), len(r.Evidence))
+				} else {
+					for j, ev := range r.Evidence {
+						gotEv := got.Evidence[j]
+						if gotEv.Path != ev.Path || optStr(gotEv.Revision) != ev.Revision ||
+							optInt(gotEv.StartLine) != intOrNull(ev.StartLine) ||
+							optInt(gotEv.EndLine) != intOrNull(ev.EndLine) ||
+							gotEv.Source != ev.Source || optStr(gotEv.Note) != strOrNull(ev.Note) {
+							t.Errorf("record %d evidence %d = %+v, want %+v", i, j, gotEv, ev)
+						}
+					}
+				}
+				if optStr(got.Reason) != strOrNull(r.Reason) {
+					t.Errorf("record %d reason = %q, want %q", i, optStr(got.Reason), strOrNull(r.Reason))
 				}
 			}
 
@@ -576,6 +605,17 @@ func TestLedgerAcceptancePersistenceRefusesCorruptState(t *testing.T) {
 		} else if !prstate.IsCoverageError(err) {
 			t.Errorf("error = %v, want the coverage refusal", err)
 		}
+		movedBase, err := core.NewRevision("4444444444444444444444444444444444444444")
+		if err != nil {
+			t.Fatalf("moved revision: %v", err)
+		}
+		otherBase := pair
+		otherBase.Base = movedBase
+		if _, err := prstate.SelectGeneration(comments, "tester", otherBase, core.FileEngineVersion); err == nil {
+			t.Error("a manifest at another base selected")
+		} else if !prstate.IsCoverageError(err) {
+			t.Errorf("error = %v, want the coverage refusal", err)
+		}
 		if _, err := prstate.SelectGeneration(comments, "tester", pair, "deadbeefdeadbeef"); err == nil {
 			t.Error("a manifest under another engine selected")
 		} else if !prstate.IsCoverageError(err) {
@@ -584,11 +624,12 @@ func TestLedgerAcceptancePersistenceRefusesCorruptState(t *testing.T) {
 	})
 }
 
-// TestLedgerAcceptanceMutationProvesTheGateIsLive flips one expected byte
-// and asserts failure: a unit record with its disposition removed must not
-// encode, so a production change that drops an obligation cannot pass
+// TestLedgerAcceptanceMutationProvesTheGateIsLive removes one obligation
+// and asserts failure: a unit record with its disposition nulled must not
+// publish, so a production change that drops an obligation cannot pass
 // silently. The strict decoder refuses a unit with a null disposition, and
-// the publisher fails closed on it rather than publishing partial coverage.
+// the publisher fails closed on the read-back rather than publishing
+// partial coverage.
 func TestLedgerAcceptanceMutationProvesTheGateIsLive(t *testing.T) {
 	oracle := loadLedgerAcceptance(t)
 	g := oracle.Generations[1]
@@ -597,40 +638,42 @@ func TestLedgerAcceptanceMutationProvesTheGateIsLive(t *testing.T) {
 	if candidate.Records[0].Disposition.Value() != "finding" {
 		t.Fatalf("oracle record 0 disposition is %q, want finding", candidate.Records[0].Disposition.Value())
 	}
-	// Remove the one obligation the finding disposition carries: its
-	// finding number. A writer that drops the link between a finding
-	// judgement and its finding must not publish.
-	candidate.Records[0].FindingIDs = nil
+	// Remove the disposition itself: a unit with a null disposition is
+	// refused on read-back, so publication fails closed.
+	candidate.Records[0].Disposition = prstate.Null[string]()
 	store := newAcceptanceStore(t)
-	if _, _, err := prstate.PublishGeneration(context.Background(), store, acceptanceSlug(t), 42, candidate, func() error { return nil }); err != nil {
-		t.Fatalf("PublishGeneration with the mutated record: %v", err)
+	if _, _, err := prstate.PublishGeneration(context.Background(), store, acceptanceSlug(t), 42, candidate, func() error { return nil }); err == nil {
+		t.Fatal("PublishGeneration published a unit with a null disposition; the suite did not turn red")
 	}
-	comments, err := store.CoverageComments(context.Background(), acceptanceSlug(t), 42)
-	if err != nil {
-		t.Fatalf("CoverageComments: %v", err)
+}
+
+
+func optStr(o prstate.Opt[string]) string {
+	if v, ok := o.Get(); ok {
+		return v
 	}
-	selected, err := prstate.SelectGeneration(comments, "tester", pair, core.FileEngineVersion)
-	if err != nil {
-		t.Fatalf("SelectGeneration: %v", err)
+	return "<null>"
+}
+
+func optInt(o prstate.Opt[int]) int {
+	if v, ok := o.Get(); ok {
+		return v
 	}
-	if len(selected.Records[0].FindingIDs) != 0 {
-		t.Fatal("the mutated record still carries its finding number; the suite did not turn red")
+	return -1
+}
+
+func strOrNull(s *string) string {
+	if s == nil {
+		return "<null>"
 	}
-	// The red proof: the oracle's literal still names the finding, so the
-	// mutated generation differs from the expected one in exactly the
-	// obligation removed.
-	if len(g.Records[0].FindingIDs) == 0 || g.Records[0].FindingIDs[0] != "a1b2c3d4e5f60718" {
-		t.Fatalf("oracle record 0 finding ids = %v, want the literal finding", g.Records[0].FindingIDs)
+	return *s
+}
+
+func intOrNull(i *int) int {
+	if i == nil {
+		return -1
 	}
-	if len(selected.Records) != len(g.Records) {
-		t.Fatalf("selected %d records, want %d", len(selected.Records), len(g.Records))
-	}
-	// The red proof is the comparison against the literal: the selected
-	// generation carries no finding number where the oracle names one, so
-	// the oracle test comparing full generations turns red on this input.
-	if len(selected.Records[0].FindingIDs) == len(g.Records[0].FindingIDs) {
-		t.Fatal("the mutated record round-trips as the oracle's record; the red proof is void")
-	}
+	return *i
 }
 
 func withAcceptanceShardPos(t *testing.T, body string, shardID int64, pos int) string {

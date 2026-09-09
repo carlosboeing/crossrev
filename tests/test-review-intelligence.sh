@@ -67,25 +67,48 @@ routes_review_empty() {
 # The comment list the ledger wrote, replayed as a static route with the
 # trusted author, so a second binary invocation reads the same generations.
 replay_ledger() {
-  local comments
-  comments="$(python3 - "$GH_STATE" "$FIX_USER" <<'PY'
-import json, sys, glob
-d, author = sys.argv[1], sys.argv[2]
-files = sorted(glob.glob(d + "/comment-*"), key=lambda p: int(p.rsplit("-", 1)[1]))
-out = []
-for f in files:
-    cid = int(f.rsplit("-", 1)[1])
-    out.append({"id": cid, "body": open(f).read(),
-                "user": {"login": author},
-                "created_at": "2026-09-09T00:00:00Z"})
-print(json.dumps(out))
-PY
-)"
+  replay_ledger_as "$FIX_USER"
+}
+
+# The spooled coverage comments replayed as one static comment list, so a
+# second binary invocation reads the same generations. Bodies travel through
+# --rawfile, so no byte is re-serialized and digests still verify.
+replay_ledger_as() {
+  local author="$1" comments="[]" f cid
+  while IFS= read -r f; do
+    [[ -n "$f" ]] || continue
+    cid="${f##*-}"
+    comments="$(jq -c --argjson id "$cid" --arg a "$author" --rawfile body "$f" \
+      '. + [{id:$id, body:$body, user:{login:$a}, created_at:"2026-09-09T00:00:00Z"}]' <<<"$comments")"
+  done < <(ls "$GH_STATE"/comment-* 2>/dev/null | sort -t- -k2 -n)
   route_first "api --paginate repos/*/issues/$FIX_PR/comments*" "$comments"
+  # Pin the list: the stateful stub merges spooled coverage over the static
+  # baseline, but a replayed list is the pinned ledger under test.
+  : >"$GH_STATE/frozen"
 }
 
 # Labels currently applied, one per line, from the stub call log.
 applied_labels() { grep -o "labels\[\]=crossrev/[a-z-]*" "$GH_LOG" | sort -u; }
+
+# Labels applied after line $1 of the call log: the per-run slice, so an
+# earlier run's converged label cannot satisfy a later run's refusal.
+labels_since() { tail -n +"$(( $1 + 1 ))" "$GH_LOG" | grep -o "labels\[\]=crossrev/[a-z-]*" | sort -u; }
+
+# Re-point the pr-view route at the current FIX_HEAD and FIX_BASE after a
+# repair commit: routes match in file order, so the stale baseline entry
+# must be shadowed with route_first rather than appended behind it.
+repoint_pr_view() {
+  route_first "pr view $FIX_PR --repo * --json *" "$(jq -cn \
+    --argjson n "$FIX_PR" --arg h "$FIX_HEAD" --arg b "$FIX_BASE" \
+    '{number:$n, title:"Add refresh", body:"Adds a refresh helper.", url:"https://github.com/x",
+      headRefName:"feature", headRefOid:$h, baseRefName:"main", baseRefOid:$b,
+      changedFiles:1, labels:[], isCrossRepository:false, maintainerCanModify:false, isDraft:false,
+      headRepositoryOwner:{login:"acme"}, headRepository:{name:"widget"}, state:"OPEN"}')"
+}
+
+# First-occurrence byte flip in a spooled comment (portable sed -i via temp
+# file: BSD sed needs an argument to -i, so write aside and move back).
+flip_first() { tmp="$(mktemp)"; sed "s/$1/$2/" "$3" >"$tmp" && mv "$tmp" "$3"; }
 
 # --- semantic validation ---------------------------------------------------
 
@@ -141,26 +164,26 @@ has "malformed output is refused as a schema mismatch" "$out" "does not match th
 
 # --- complete no-finding review --------------------------------------------
 
-# A complete no-finding review at the fixture head still halts incomplete on
-# its first run: coverage is published by this run, and the convergence
-# report needs a current generation at the revision. The re-drive at the
-# unchanged head converges.
+# A complete no-finding review at the fixture head converges on its first
+# run: the run publishes its generations and the writer gate reads the
+# current bytes back, the way production sees comments the run just
+# created. The stub merges spooled coverage over the static comment list
+# for exactly this reason.
 fixture_repo; stub_reset
 routes_review_empty
 clean1="$(unit1 no_issue '[]' "$(evidence_file)")"
 CROSSREV_REVIEW_PAYLOAD="$(review_payload_for converged "[$clean1]" | payload)"
 export CROSSREV_REVIEW_PAYLOAD
 out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
-has "the first clean run publishes rather than converging" "$out" "no current coverage generation"
-has "the first clean run records blocked, not converged" "$out" "verdict: blocked"
-has "the first clean run halts the loop" "$(applied_labels)" "labels[]=crossrev/halted"
+is "a complete clean review runs" "$rc" "0"
+has "a complete clean review converges on its first run" "$out" "verdict: converged"
+has "a complete clean review applies the converged label" "$(applied_labels)" "labels[]=crossrev/converged"
 
 # --- inaccessible, binary and deleted files --------------------------------
 
 # An unreadable file stays required: could_not_review with the failed
 # fallbacks in reason is accepted, published, and blocks green.
 fixture_repo; stub_reset
-chmod 000 vendor 2>/dev/null || true
 routes_review_empty
 # The default fixture has no vendor file; use a binary-shaped claim instead:
 # evidence with a null span is file-level, which is the only span an access
@@ -193,10 +216,11 @@ CROSSREV_REVIEW_PAYLOAD="$(review_payload_for converged "[$del_cov]" | payload)"
 export CROSSREV_REVIEW_PAYLOAD
 out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
 is "a deleted-file review runs" "$rc" "0"
-hasnt "a deleted-file review never converges without a current generation" "$out" "verdict: converged"
+has "a deleted-file review converges with its base evidence covered" "$out" "verdict: converged"
 
 # Renames: rename app.ts so the required set carries a rename with the old
-# path as base evidence. A complete no_issue answer is accepted.
+# path as base evidence. A complete no_issue answer over both units is
+# accepted and converges, with the deletion read at the base.
 fixture_repo; stub_reset
 git checkout -q feature
 git mv app.ts renamed.ts
@@ -214,7 +238,7 @@ CROSSREV_REVIEW_PAYLOAD="$(review_payload_for converged "$ren_cov" | payload)"
 export CROSSREV_REVIEW_PAYLOAD
 out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
 is "a rename review runs" "$rc" "0"
-has "a rename review publishes before converging" "$out" "no current coverage generation"
+has "a rename review converges with both units covered" "$out" "verdict: converged"
 
 # --- base/head/engine invalidation ------------------------------------------
 
@@ -234,8 +258,20 @@ newhead="$(git rev-parse feature)"
 [[ "$newhead" != "$FIX_HEAD" ]] && ok "a repair moves the head" "moved" "moved" \
   || notok "a repair moves the head" "a new head" "$newhead"
 # Old generations name the old head, so the new head starts uncovered.
+# Re-drive at the repair head: the retired dispositions mean the new head
+# is reviewed from zero accepted units, and the ledger gains a generation
+# at the new revision rather than converging on stale ones.
 has "the old generation names the old revision" "$(cat "$GH_STATE"/comment-*)" "$FIX_HEAD"
 hasnt "and names no generation at the repair head yet" "$(cat "$GH_STATE"/comment-*)" "$newhead"
+FIX_HEAD="$newhead"
+routes_review_empty
+repoint_pr_view
+repair_cov="$(unit1 no_issue '[]' "$(evidence_file)")"
+CROSSREV_REVIEW_PAYLOAD="$(review_payload_for converged "[$repair_cov]" | payload)"
+export CROSSREV_REVIEW_PAYLOAD
+out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
+is "a repair re-drive runs" "$rc" "0"
+has "a repair re-drive publishes at the new head" "$(cat "$GH_STATE"/comment-*)" "$newhead"
 
 # --- advisory hits and too_common --------------------------------------------
 
@@ -271,6 +307,8 @@ CROSSREV_REVIEW_PAYLOAD="$(review_payload_for converged "$adv_cov" | payload)"
 export CROSSREV_REVIEW_PAYLOAD
 out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
 is "an advisory-shaped review runs" "$rc" "0"
+has "an advisory-shaped review converges on both required files" "$(applied_labels)" "labels[]=crossrev/converged"
+has "advisory context adds no required unit" "$(cat "$GH_STATE"/comment-*)" '"required_count":2' 
 
 # --- input, review and ledger bounds ------------------------------------------
 
@@ -278,7 +316,7 @@ is "an advisory-shaped review runs" "$rc" "0"
 # input_exceeds_budget and outstanding paths, applying halted.
 fixture_repo; stub_reset
 git checkout -q feature
-python3 -c "open('huge.go','w').write('package huge\n' + '// filler line to exceed the prompt budget\n' * 8000)"
+{ printf 'package huge\n'; yes '// filler line to exceed the prompt budget' | head -n 8000; } >huge.go
 git add -A && git commit -qm huge && git push -q origin feature
 FIX_HEAD="$(git rev-parse feature)"
 routes_review_empty
@@ -311,10 +349,12 @@ has "a restart applies the converged label" "$(applied_labels)" "labels[]=crossr
 
 # --- a no-commit resolve settle --------------------------------------------------
 
-# A no-commit resolve settle with current complete coverage converges; with
-# one outstanding file it stays awaiting-review rather than celebrating.
-# The settle path is unit-pinned in internal/resolve/report_test.go; here
-# the binary proves the label the pull request carries.
+# A no-commit resolve settle with no coverage history keeps its legacy
+# converged label: with no generation at this head no coverage pass ran
+# here, so the frozen-path settle is unchanged. The outstanding-settle
+# refusal is unit-pinned in internal/resolve/report_test.go
+# (TestSettleWithOutstandingCoverageStaysAwaitingReview); here the binary
+# proves the legacy label the pull request carries.
 ID_D1="a1b2c3d4"
 review_marker_v2() {
   jq -cn --arg sha "$FIX_HEAD" --arg a "$ID_D1" '
@@ -358,12 +398,22 @@ export CROSSREV_REVIEW_PAYLOAD
 "$CROSSREV" review --pr 42 >/dev/null 2>&1
 # The stub wrote shards then the manifest; drop the manifest comments and
 # the ledger must read as absent rather than partial.
-python3 - "$GH_STATE" <<'PY'
-import glob, os
-for f in glob.glob(os.path.join(os.environ.get("GH_STATE_DIR", ""), "comment-*")):
-    pass
-PY
 has "a full publish leaves a manifest behind" "$(cat "$GH_STATE"/comment-*)" '"kind":"manifest"'
+# Crash before the manifest: drop every manifest comment from the spool, so
+# only shards remain. The ledger must read as absent rather than partial,
+# and the re-drive must not converge.
+grep -l '"kind":"manifest"' "$GH_STATE"/comment-* 2>/dev/null | xargs rm -f
+replay_ledger
+out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
+is "a crash re-drive runs" "$rc" "0"
+has "a crash re-drive republishes the missing manifest" "$(cat "$GH_STATE"/comment-*)" '"kind":"manifest"'
+# The re-drive read the pinned shards-only list, so it blocked; a third run
+# over the republished ledger converges, proving shards-only selected as
+# absent rather than partial.
+replay_ledger
+out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
+is "a republished ledger converges" "$rc" "0"
+has "a republished ledger converges" "$out" "verdict: converged"
 
 # Missing shard: delete one shard comment from the spool and re-drive at
 # the unchanged head. Selection must refuse rather than converge.
@@ -375,7 +425,7 @@ export CROSSREV_REVIEW_PAYLOAD
 rm -f "$GH_STATE"/comment-9001
 replay_ledger
 out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
-hasnt "a missing shard never converges" "$out" "labels[]=crossrev/converged"
+hasnt "a missing shard never converges" "$(applied_labels)" "labels[]=crossrev/converged"
 
 # Altered shard: rewrite one shard body under the manifest's digest and
 # re-drive. The generation must refuse.
@@ -385,15 +435,10 @@ CROSSREV_REVIEW_PAYLOAD="$(review_payload_for converged "[$clean1]" | payload)"
 export CROSSREV_REVIEW_PAYLOAD
 "$CROSSREV" review --pr 42 >/dev/null 2>&1
 shard="$(ls "$GH_STATE"/comment-* | head -n 1)"
-python3 - "$shard" <<'PY'
-import sys
-p = sys.argv[1]
-body = open(p).read()
-open(p, "w").write(body.replace('"pos":0', '"pos":1', 1))
-PY
+flip_first '"pos":0' '"pos":1' "$shard"
 replay_ledger
 out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
-hasnt "an altered shard never converges" "$out" "labels[]=crossrev/converged"
+hasnt "an altered shard never converges" "$(applied_labels)" "labels[]=crossrev/converged"
 
 # Reordered shard: flip a shard reference position in the manifest payload
 # without re-digesting, and re-drive. The positions disagree, so the
@@ -404,17 +449,10 @@ CROSSREV_REVIEW_PAYLOAD="$(review_payload_for converged "[$clean1]" | payload)"
 export CROSSREV_REVIEW_PAYLOAD
 "$CROSSREV" review --pr 42 >/dev/null 2>&1
 manifest="$(ls "$GH_STATE"/comment-* | head -n 2 | tail -n 1)"
-python3 - "$manifest" <<'PY'
-import sys
-p = sys.argv[1]
-body = open(p).read()
-old = '"pos":0,"id":'
-assert old in body, "no shard reference at position 0"
-open(p, "w").write(body.replace(old, '"pos":7,"id":', 1))
-PY
+flip_first '"pos":0,"id":' '"pos":7,"id":' "$manifest"
 replay_ledger
 out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
-hasnt "a reordered shard never converges" "$out" "labels[]=crossrev/converged"
+hasnt "a reordered shard never converges" "$(applied_labels)" "labels[]=crossrev/converged"
 
 # Strict comment-read failure: the comment list route fails, and the leg
 # must refuse rather than answer an empty ledger.
@@ -453,20 +491,7 @@ routes_review_empty
 CROSSREV_REVIEW_PAYLOAD="$(review_payload_for converged "[$clean1]" | payload)"
 export CROSSREV_REVIEW_PAYLOAD
 "$CROSSREV" review --pr 42 >/dev/null 2>&1
-other_author="$(python3 - "$GH_STATE" <<'PY'
-import glob, json, sys
-d = sys.argv[1]
-files = sorted(glob.glob(d + "/comment-*"), key=lambda p: int(p.rsplit("-", 1)[1]))
-out = []
-for f in files:
-    cid = int(f.rsplit("-", 1)[1])
-    out.append({"id": cid, "body": open(f).read(),
-                "user": {"login": "someone-else"},
-                "created_at": "2026-09-09T00:00:00Z"})
-print(json.dumps(out))
-PY
-)"
-route_first "api --paginate repos/*/issues/$FIX_PR/comments*" "$other_author"
+replay_ledger_as "someone-else"
 fresh1="$(unit1 no_issue '[]' "$(evidence_file)")"
 CROSSREV_REVIEW_PAYLOAD="$(review_payload_for converged "[$fresh1]" | payload)"
 export CROSSREV_REVIEW_PAYLOAD
@@ -505,6 +530,18 @@ git add -A && git commit -qm late && git push -q origin feature
 moved="$(git rev-parse feature)"
 [[ "$moved" != "$FIX_HEAD" ]] && ok "head movement retires the candidate" "moved" "moved" \
   || notok "head movement retires the candidate" "a new head" "$moved"
+# Re-drive at the moved head: retired dispositions mean the new head is
+# reviewed from zero accepted units, and the ledger gains a generation
+# there instead of converging on the old one.
+FIX_HEAD="$moved"
+routes_review_empty
+repoint_pr_view
+late_cov="$(unit1 no_issue '[]' "$(evidence_file)")"
+CROSSREV_REVIEW_PAYLOAD="$(review_payload_for converged "[$late_cov]" | payload)"
+export CROSSREV_REVIEW_PAYLOAD
+out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
+is "a moved-head re-drive runs" "$rc" "0"
+has "a moved-head re-drive publishes at the new head" "$(cat "$GH_STATE"/comment-*)" "$moved"
 
 # --- mutation red proof ----------------------------------------------------------
 
@@ -524,15 +561,11 @@ replay_ledger
 # the only current generation refuses and the re-drive cannot converge on
 # stale bytes.
 first_shard="$(ls "$GH_STATE"/comment-* | head -n 1)"
-python3 - "$first_shard" <<'PY'
-import sys
-p = sys.argv[1]
-body = open(p).read()
-open(p, "w").write(body.replace('"kind":"shard"', '"kind":"shardX"', 1))
-PY
+flip_first '"kind":"shard"' '"kind":"shardX"' "$first_shard"
 replay_ledger
+mark="$(wc -l <"$GH_LOG" | tr -d ' ')"
 out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
-hasnt "a corrupted ledger never converges on stale bytes" "$out" "labels[]=crossrev/converged"
+hasnt "a corrupted ledger never converges on stale bytes" "$(labels_since "$mark")" "labels[]=crossrev/converged"
 
 # Bypassing a convergence route turns the suite red (route 1, the review
 # writer gate): a converged verdict with one file unexaminable must record
@@ -554,16 +587,16 @@ hasnt "the writer gate applies no converged label past the debt" "$(applied_labe
 
 # --- red proof ---------------------------------------------------------------
 #
-# The named red case for the slice: a converged verdict with no coverage
-# generation at all must halt rather than converge. The pre-slice binary
-# has no ledger, so it reports converged on the first clean run below;
-# this binary records blocked with no current generation and halts. That
-# first-clean-run halt is asserted at the top of this suite ("the first
-# clean run publishes rather than converging"), and the Go oracles pin the
-# same gate per package: TestReviewIntelligenceAcceptanceOracle replays
-# the frozen discovery vectors, TestLedgerAcceptanceOracle the ledger
-# vectors, and TestConvergenceAcceptanceOracle the predicate vectors,
-# each with a mutation case proving the gate turns red when one
-# obligation is removed.
+# The CLI always publishes coverage, so no CLI path reaches "converged with
+# no generation": the red proof is the writer gate above (an unexaminable
+# file records blocked with the debt named), the corrupted ledger below
+# (the only generation refuses, so the re-drive blocks), and the Go
+# oracles, which pin the same gate per package:
+# TestReviewIntelligenceAcceptanceOracle replays the frozen discovery
+# vectors, TestLedgerAcceptanceOracle the ledger vectors, and
+# TestConvergenceAcceptanceOracle the predicate vectors, each with a
+# mutation case proving the gate turns red when one obligation is removed.
+# The pre-slice binary converges with no coverage marker anywhere; this
+# binary cannot produce that shape, which is the point of the slice.
 
 finish
