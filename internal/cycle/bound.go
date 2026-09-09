@@ -155,6 +155,13 @@ func readReview(out *ui.IO, state State, pass int) reviewReading {
 	if verdict != core.VerdictConverged && actionable != 0 {
 		return reviewContinues
 	}
+	if verdict == core.VerdictConverged && !prstate.MarkerConverges(marker) {
+		// The marker's own half is unmet (halted, stopped, or a coverage
+		// promise never recorded): the pass is owed work, not green. Head
+		// freshness is the loop's own revision detection, which starts a
+		// new pass on a new revision rather than reporting the old one.
+		return reviewContinues
+	}
 	// The review leg already wrote the label this message reports; the two have
 	// to agree, so an empty pass while an escalation stands is not read out as
 	// a convergence.
@@ -213,6 +220,9 @@ func readResolve(out *ui.IO, state State, pass int) resolveReading {
 	// than spinning declines until the cap and reporting a convergence as a
 	// failure to converge.
 	if label == policy.PassConverged {
+		if review, ok := prstate.MarkerFor(state.Markers, pass, core.LegReview); !ok || !prstate.MarkerConverges(review) {
+			return resolveContinues
+		}
 		out.End(fmt.Sprintf("Converged after pass %d — nothing at or above min_fix_severity (%s) remains.",
 			pass, state.MinFixSeverity))
 		return resolveConverged

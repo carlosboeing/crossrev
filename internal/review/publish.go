@@ -138,6 +138,16 @@ func (l *Leg) publish(ctx context.Context, req Request, loaded Context, settings
 	verdict := core.Verdict(marker.Verdict.Value())
 	escalated := escalatedCount(loaded.Markers)
 	next := policy.PassLabel(verdict, actionable, escalated)
+	if conv, ok := l.buildConvergence(ctx, loaded, marker, actionable); ok {
+		if verdict == core.VerdictConverged && !policy.Converged(conv) {
+			msgs = append(msgs, ui.Warn(
+				"the reviewer returned verdict 'converged' with the coverage obligation unmet",
+				"The verdict is recorded as issues-remain instead: a green verdict needs every required file covered, no outstanding or unexamined record, a reported scope and any confirmed repair. Nothing here judges the code."))
+			verdict = core.VerdictIssuesRemain
+			marker.Verdict = prstate.Some(string(verdict))
+		}
+		next = policy.PassLabelWithCoverage(verdict, actionable, escalated, conv)
+	}
 	if verdict == core.VerdictConverged && next != policy.PassConverged {
 		noun := "findings"
 		if actionable == 1 {

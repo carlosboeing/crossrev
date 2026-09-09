@@ -1,6 +1,6 @@
 {
-  "name": "precedence-converged-outranks-awaiting",
-  "shell": "lib/run.sh:3113-3118",
+  "name": "stale-converged-label",
+  "shell": "internal/cycle/status_test.go:TestStatusStaleConvergedLabelRefuses",
   "now": 1787000000,
   "head_sha": "2c4a46cb321db01826d116b5ef2add6b0284d68c",
   "min_fix_severity": "medium",
@@ -10,13 +10,11 @@
     "detail": ""
   },
   "labels": [
-    "crossrev/converged",
-    "crossrev/awaiting-resolution",
-    "crossrev/awaiting-review"
+    "crossrev/converged"
   ],
   "markers": [
     {
-      "v": 1,
+      "v": 2,
       "leg": "review",
       "pass": 1,
       "state": "complete",
@@ -30,16 +28,12 @@
       "endpoint": null,
       "model_reported": "m",
       "tokens": 1000,
-      "verdict": "issues-remain",
-      "findings": [
-        {
-          "severity": "medium"
-        }
-      ]
+      "verdict": "converged",
+      "findings": []
     }
   ],
   "want": {
-    "state": "awaiting resolution",
+    "state": "awaiting review",
     "pass": 1,
     "max_pass": 1,
     "rows": [
@@ -47,21 +41,21 @@
         "pass": 1,
         "leg": "review",
         "step": "ok",
-        "description": "1 medium",
-        "rendered": "1  ✓ review   1 medium"
+        "description": "no findings — converged",
+        "rendered": "1  ✓ review   no findings — converged"
       },
       {
         "pass": 1,
         "leg": "resolve",
         "step": "opt",
-        "description": "not run yet",
-        "rendered": "   ○ resolve  not run yet"
+        "description": "not needed, the review converged",
+        "rendered": "   ○ resolve  not needed, the review converged"
       }
     ],
     "next": [
       {
         "kind": "cmd",
-        "t": "crossrev resolve --pr 42"
+        "t": "crossrev review --pr 42"
       }
     ]
   }

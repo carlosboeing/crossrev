@@ -100,6 +100,24 @@ func AwaitingLabel(leg core.Leg) string {
 // arm is exempt: a reviewer that says converged after the human settled the
 // thread is the settlement being verified, which is the one way out of the halt
 // that does not need a person again.
+// PassLabelWithCoverage is PassLabel gated on the convergence predicate:
+// converged needs the base label AND the current coverage obligation met.
+// A stale label, an outstanding record, an unexamined file, a missing scope
+// report or an unconfirmed repair holds the pass at awaiting-resolution
+// rather than reporting a convergence the coverage does not support.
+func PassLabelWithCoverage(verdict core.Verdict, actionable, escalated int, converged Convergence) PassLabelState {
+	if PassLabel(verdict, actionable, escalated) != PassConverged {
+		return PassLabel(verdict, actionable, escalated)
+	}
+	if !Converged(converged) {
+		if actionable > 0 || converged.Outstanding > 0 || converged.CouldNotReview > 0 {
+			return PassAwaitingResolution
+		}
+		return PassHalted
+	}
+	return PassConverged
+}
+
 func PassLabel(verdict core.Verdict, actionable, escalated int) PassLabelState {
 	if verdict == core.VerdictBlocked {
 		return PassHalted
@@ -132,6 +150,20 @@ func PassLabel(verdict core.Verdict, actionable, escalated int) PassLabelState {
 // otherEscalated counts escalations standing in other passes' markers. This
 // pass's own are read off the marker, and the caller may hold a newer record of
 // this pass than the marker list does.
+// ResolvePassLabelWithCoverage is ResolvePassLabel gated on the convergence
+// predicate: a no-commit settle reports converged only when the current
+// coverage obligation is met. Anything else keeps the label the base rule
+// wrote: a push still hands back to the reviewer, a halt still halts.
+func ResolvePassLabelWithCoverage(m ResolveMarker, otherEscalated int, converged Convergence) PassLabelState {
+	if ResolvePassLabel(m, otherEscalated) != PassConverged {
+		return ResolvePassLabel(m, otherEscalated)
+	}
+	if !Converged(converged) {
+		return PassAwaitingReview
+	}
+	return PassConverged
+}
+
 func ResolvePassLabel(m ResolveMarker, otherEscalated int) PassLabelState {
 	switch {
 	case m.Blocked,

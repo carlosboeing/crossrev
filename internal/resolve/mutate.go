@@ -174,6 +174,17 @@ func (l *Leg) publish(ctx context.Context, s *session, got Result, workdir strin
 
 	other := otherEscalated(s.markers, s.pass)
 	next := policy.ResolvePassLabel(asPolicyResolve(marker), other)
+	if next == policy.PassConverged {
+		// A no-commit settle reports converged only when the current
+		// coverage obligation is met at this head. The base rule already
+		// established nothing fixable is open; the predicate adds the
+		// ledger, counts, scope and confirmation guards. With no coverage
+		// generation at this head no coverage pass ran here, so the
+		// frozen-path settle keeps its legacy label.
+		if conv, ok := l.resolveConvergence(ctx, s); ok {
+			next = policy.ResolvePassLabelWithCoverage(asPolicyResolve(marker), other, conv)
+		}
+	}
 	if err := l.applyPassLabels(ctx, s, s.pass, next); err != nil {
 		// ui_warn: applyPassLabels answers the pair already joined by addLabel.
 		got.Messages = append(got.Messages, ui.Say(err.Error()))

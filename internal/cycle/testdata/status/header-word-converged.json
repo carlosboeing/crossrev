@@ -37,7 +37,7 @@
     }
   ],
   "want": {
-    "state": "converged",
+    "state": "awaiting resolution",
     "pass": 1,
     "max_pass": 1,
     "rows": [
@@ -58,12 +58,8 @@
     ],
     "next": [
       {
-        "kind": "line",
-        "t": "nothing to run — the loop converged on pass 1: nothing at or"
-      },
-      {
-        "kind": "line",
-        "t": "above min_fix_severity (medium) remains."
+        "kind": "cmd",
+        "t": "crossrev resolve --pr 42"
       }
     ]
   }

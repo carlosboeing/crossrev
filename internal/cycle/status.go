@@ -259,6 +259,48 @@ type statusInput struct {
 	liveness  Liveness
 }
 
+// statusReviewConverges reports whether one complete converged review marker
+// underwrites a green report at the current head: the marker's own half
+// (complete, no stop, coverage promise kept), the head it was written at,
+// and any repair confirmation pair it carries.
+func statusReviewConverges(in statusInput, review prstate.Marker) bool {
+	if !prstate.MarkerConverges(review) {
+		return false
+	}
+	if !prstate.MarkerHeadCurrent(review, in.headSHA) {
+		return false
+	}
+	return prstate.ConfirmationSettled(review, in.headSHA)
+}
+
+// statusMarkersConverge reports whether the markers underwrite the converged
+// label: the current review pass converges by the marker rule and any
+// completed resolve settle at the same pass agrees by its own label rule at
+// the current head.
+func statusMarkersConverge(in statusInput) bool {
+	pass := prstate.CurrentReviewPass(in.markers)
+	if pass == 0 {
+		return false
+	}
+	review, ok := prstate.MarkerFor(in.markers, pass, core.LegReview)
+	if !ok || core.Verdict(review.Verdict.Value()) != core.VerdictConverged {
+		return false
+	}
+	if !statusReviewConverges(in, review) {
+		return false
+	}
+	resolve, hasResolve := prstate.MarkerFor(in.markers, pass, core.LegResolve)
+	if hasResolve && resolve.State == core.PassComplete {
+		if policy.ResolvePassLabel(statusResolveMarker(resolve), statusMarkersEscalated(in.markers)) != policy.PassConverged {
+			return false
+		}
+		if !prstate.MarkerHeadCurrent(resolve, in.headSHA) {
+			return false
+		}
+	}
+	return true
+}
+
 // statusColour is the header colour for a state word (lib/run.sh:3061-3066).
 func statusColour(state core.LoopState) ui.State {
 	switch state {
@@ -288,7 +330,14 @@ func statusState(in statusInput) core.LoopState {
 	case statusHasLabel(in.labels, policy.LabelHalted):
 		return core.LoopHalted
 	case statusHasLabel(in.labels, policy.LabelConverged):
-		return core.LoopConverged
+		// A converged label is honoured only when the markers underwrite
+		// it at the current head: a stale label from an earlier revision,
+		// a halted pass, or coverage never recorded must never report
+		// green. Otherwise the markers' own answer stands.
+		if statusMarkersConverge(in) {
+			return core.LoopConverged
+		}
+		return statusStateFromMarkers(in)
 	case statusHasLabel(in.labels, policy.LabelAwaitingResolution):
 		return core.LoopAwaitingResolution
 	case statusHasLabel(in.labels, policy.LabelAwaitingReview):
@@ -326,7 +375,13 @@ func statusStateFromMarkers(in statusInput) core.LoopState {
 	}
 	switch core.Verdict(review.Verdict.Value()) {
 	case core.VerdictConverged:
-		return core.LoopConverged
+		// A converged verdict reports green only with the marker's own
+		// half met at the current head; otherwise the pass is owed work,
+		// not a celebration.
+		if statusReviewConverges(in, review) {
+			return core.LoopConverged
+		}
+		return core.LoopAwaitingReview
 	case core.VerdictBlocked:
 		return core.LoopHalted
 	}
@@ -352,7 +407,12 @@ func statusStateFromMarkers(in statusInput) core.LoopState {
 	case policy.PassHalted:
 		return core.LoopHalted
 	case policy.PassConverged:
-		return core.LoopConverged
+		// A no-commit settle reports green only with the review marker's
+		// coverage half met at the current head.
+		if statusReviewConverges(in, review) {
+			return core.LoopConverged
+		}
+		return core.LoopAwaitingReview
 	default:
 		return core.LoopAwaitingReview
 	}
