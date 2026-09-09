@@ -35,3 +35,4 @@ test-stub-env.sh	black-box	stub-environment wrapper properties	tests/test-stub-e
 test-usage.sh	go-test	usage accounting and vendored prices	internal/harness/usage_test.go internal/harness/pricing_test.go
 test-watchdog.sh	black-box	watchdog retry then halt on dropped label events	tests/test-watchdog.sh
 test-worktree.sh	go-test	resolve-leg worktree isolation and doctor	internal/vcs/worktree_test.go internal/preflight/worktrees_test.go
+test-review-intelligence.sh	black-box	review intelligence acceptance oracle through the binary	tests/test-review-intelligence.sh

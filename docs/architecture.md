@@ -77,6 +77,11 @@ A marker carries the protocol version, the leg, the pass number, its state, time
 |---|---|---|
 | `<!-- crossrev:` | The pass summary comment | The whole pass: verdict, findings, resolutions, cost |
 | `<!-- crossrev:f` | Each inline comment and each reply | One finding id, its pass, and the leg that wrote it |
+| `<!-- crossrev:c` | Coverage comments | One batch of dispositions, or the manifest naming them |
+
+New markers open with `v:2`. They name the coverage record, the stop counts and the confirmed repair.
+
+Markers at `v:1` still read for findings and pass numbers, but they carry no coverage. Readers refuse `v:3` and later.
 
 Three properties follow, and each one is why a marker exists rather than a ledger:
 
@@ -134,6 +139,44 @@ It terminates on the first of:
 6. The pull request is larger than the file cap.
 
 The last three are continuation bounds: they end *automatic* reviewing and never block a person. `min_fix_severity` is different in kind — it bounds what an agent may change, so it holds on every run.
+
+## File coverage
+
+Each review pass reads every changed file: every added, modified, deleted, renamed and type-changed path between the base branch and the pull request branch. A rename counts as new work and is read again from scratch.
+
+A **required file** is a changed file the review must account for. The reviewer gives each one a disposition, and the pass converges only when every required file has one. When the branch moves, every prior result is retired and the next pass starts over. A re-run at the same revision resumes the files still waiting for a disposition.
+
+The review reads in batches because one prompt cannot hold a large pull request. One pass reads at most 400 required files. Batches hold at most 40 files in path order.
+
+Batches measure the full rendered prompt against 180 KB (184,320 bytes).
+
+A file that fits in no batch waits with `input_exceeds_budget`.
+
+Files past the pass budget carry `review_budget_reached`.
+
+The next review after a repair reads what the repair changed first, then the full scope.
+
+The pass records which repair it confirmed only after it reads every current file. A first clean review records none.
+
+The reviewer reports a scope note saying what was read, and a list of known limits saying what constrained it.
+
+One convergence rule reads that note with the counts and the confirmed repair. The review writer, both label rules, the local cycle and both status paths all read that rule. A failed check never falls back to the reviewer verdict.
+
+The coverage record names verification status not_implemented and five nulls. No check runs in this release. `crossrev/converged` means review work is complete.
+
+The file list lives in `internal/intel`, the stored record in `internal/prstate`, the batch loop in `internal/review`, and the convergence rule in `internal/policy`.
+
+### The coverage ledger
+
+Coverage is stored on the pull request itself, in the same hidden comments as the markers: small shards first, then one manifest naming them.
+
+A read failure is reported, never answered as empty. Only the trusted author counts.
+
+Readers refuse missing, altered or reordered shards.
+
+Past 32 shards the pass keeps the last full generation. It records stop counts with the `ledger_exhausted` limit.
+
+Repository files declare `version: 2`. A file that still declares `version: 1` is refused. Run `crossrev init --upgrade` to re-render workflows. It leaves the policy file alone, so change the version line by hand.
 
 ## The credential seam
 

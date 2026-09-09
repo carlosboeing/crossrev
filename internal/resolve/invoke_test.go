@@ -219,7 +219,7 @@ func TestInvoke(t *testing.T) {
 		e := setup(t)
 		e.addReview(t, defaultFindings(), "issues-remain")
 		e.git.show = map[string][]byte{
-			e.base.SHA() + ":.github/crossrev.yml": []byte("version: 1\nresolver:\n  harness: codex\n  model: x\n"),
+			e.base.SHA() + ":.github/crossrev.yml": []byte("version: 2\nresolver:\n  harness: codex\n  model: x\n"),
 		}
 		e.lookPath = func(name string) (string, error) {
 			if name == "claude" {

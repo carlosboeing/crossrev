@@ -3,6 +3,7 @@ package review_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -18,6 +19,7 @@ import (
 	"github.com/carlosboeing/crossrev/internal/prstate"
 	"github.com/carlosboeing/crossrev/internal/review"
 	"github.com/carlosboeing/crossrev/internal/runlog"
+	"github.com/carlosboeing/crossrev/internal/validate"
 	"github.com/carlosboeing/crossrev/internal/vcs"
 )
 
@@ -135,6 +137,62 @@ func (e *eventLog) all() []string {
 
 type fakeVCS struct {
 	files map[string]map[string][]byte
+	// required marks head paths the coverage loop must account for. Paths
+	// written by writeHead/writeBase (config fixtures, hijack cases) stay
+	// invisible to ChangedFiles, so frozen-path tests keep zero required
+	// units and stay on the single-prompt path.
+	required map[string]bool
+	// repair, when set, answers RangeDiff with the B-to-C delta.
+	repair *fakeRepair
+}
+
+func (f *fakeVCS) ExactSearch(_ context.Context, revision core.Revision, term string, limit int) ([]vcs.SearchHit, bool, error) {
+	return nil, false, nil
+}
+
+// repairDelta, when set, is the B-to-C delta RangeDiff answers: the bytes a
+// repair changed between the reviewed head and the current head.
+func (f *fakeVCS) RangeDiff(_ context.Context, base, head core.Revision) ([]byte, error) {
+	if f.repair == nil {
+		return nil, nil
+	}
+	return f.repair.at(base.SHA(), head.SHA())
+}
+
+type fakeRepair struct {
+	base  string
+	head  string
+	bytes []byte
+}
+
+func (r *fakeRepair) at(base, head string) ([]byte, error) {
+	if r == nil || base != r.base || head != r.head {
+		return nil, nil
+	}
+	return r.bytes, nil
+}
+
+func (f *fakeVCS) ChangedFiles(_ context.Context, base, head core.Revision) ([]core.FileChange, error) {
+	var changes []core.FileChange
+	for path := range f.files[head.SHA()] {
+		if !f.required[path] {
+			continue
+		}
+		kind := core.ChangeAdded
+		if _, ok := f.files[base.SHA()][path]; ok {
+			kind = core.ChangeModified
+		}
+		changes = append(changes, core.FileChange{Path: path, Kind: kind})
+	}
+	for path := range f.files[base.SHA()] {
+		if !f.required[path] {
+			continue
+		}
+		if _, ok := f.files[head.SHA()][path]; !ok {
+			changes = append(changes, core.FileChange{OldPath: path, Path: path, Kind: core.ChangeDeleted})
+		}
+	}
+	return changes, nil
 }
 
 func (f *fakeVCS) Show(_ context.Context, revision core.Revision, path string) ([]byte, vcs.FileStatus, error) {
@@ -190,7 +248,48 @@ func (r *fakeRunner) Specs() []exec.Spec {
 	return out
 }
 
+type fakeLedger struct {
+	mu       int64
+	comments map[int64]prstate.CoverageComment
+	order    []int64
+	failList error
+}
+
+func newFakeLedger() *fakeLedger {
+	return &fakeLedger{comments: map[int64]prstate.CoverageComment{}}
+}
+
+func (f *fakeLedger) CoverageComments(_ context.Context, _ core.Slug, _ int) ([]prstate.CoverageComment, error) {
+	if f.failList != nil {
+		return nil, f.failList
+	}
+	var out []prstate.CoverageComment
+	for _, id := range f.order {
+		out = append(out, f.comments[id])
+	}
+	return out, nil
+}
+
+func (f *fakeLedger) CoverageComment(_ context.Context, _ core.Slug, commentID int64) (prstate.CoverageComment, error) {
+	c, ok := f.comments[commentID]
+	if !ok {
+		return prstate.CoverageComment{}, errors.New("no such comment")
+	}
+	return c, nil
+}
+
+func (f *fakeLedger) CreateCoverageComment(_ context.Context, _ core.Slug, _ int, body string) (int64, error) {
+	f.mu++
+	id := 7000 + f.mu
+	f.comments[id] = prstate.CoverageComment{ID: id, Author: author, Body: body}
+	f.order = append(f.order, id)
+	return id, nil
+}
+
+var _ prstate.LedgerStore = (*fakeLedger)(nil)
+
 type fakeForge struct {
+	ledger          *fakeLedger
 	log             *eventLog
 	pr              forge.PullRequest
 	prErr           error
@@ -212,10 +311,25 @@ type fakeForge struct {
 	nextID          int64
 	ops             []string
 	reviewPosted    []forge.ReviewComment
+	filePosted      []forge.ReviewComment
 	reviewComments  []forge.IssueComment
 	placements      []forge.Placement
 	forceFallback   bool
 }
+
+func (f *fakeForge) CoverageComments(ctx context.Context, repo core.Slug, number int) ([]prstate.CoverageComment, error) {
+	return f.ledger.CoverageComments(ctx, repo, number)
+}
+
+func (f *fakeForge) CoverageComment(ctx context.Context, repo core.Slug, commentID int64) (prstate.CoverageComment, error) {
+	return f.ledger.CoverageComment(ctx, repo, commentID)
+}
+
+func (f *fakeForge) CreateCoverageComment(ctx context.Context, repo core.Slug, number int, body string) (int64, error) {
+	return f.ledger.CreateCoverageComment(ctx, repo, number, body)
+}
+
+var _ prstate.LedgerStore = (*fakeForge)(nil)
 
 func (f *fakeForge) RepoSlug(context.Context) (core.Slug, error) {
 	return core.ParseSlug("acme/widget")
@@ -347,6 +461,12 @@ func (f *fakeForge) ReviewCommentCreate(_ context.Context, comment forge.ReviewC
 	return forge.PlacementInline, nil
 }
 
+func (f *fakeForge) ReviewFileComment(_ context.Context, comment forge.ReviewComment) (forge.Placement, error) {
+	f.filePosted = append(f.filePosted, comment)
+	f.ops = append(f.ops, "review-file-comment")
+	return forge.PlacementInline, nil
+}
+
 func (f *fakeForge) ReviewReply(context.Context, core.Slug, int, int64, string) error { return nil }
 
 func (f *fakeForge) ThreadResolve(context.Context, string) error { return nil }
@@ -394,9 +514,12 @@ type env struct {
 	// keepTranscripts is the --keep-transcripts posture, which the run log
 	// carries rather than the leg.
 	keepTranscripts bool
-	// validate replaces validate.Findings, so a case can drive the retry
-	// budgets without building a payload that fails for the right reason.
-	validate func([]byte) error
+	// validate replaces the leg's validator seam, so a case can drive the
+	// retry budgets without building a payload that fails for the right
+	// reason. It takes the same ReviewExpectations the production seam
+	// takes; cases that do not care about the batch ignore the second
+	// argument.
+	validate func([]byte, validate.ReviewExpectations) error
 	// legEnv is what the leg hands a child. Nil is the default pair below.
 	legEnv []string
 }
@@ -414,7 +537,8 @@ func newEnv(t *testing.T) *env {
 	return &env{
 		log: events,
 		forge: &fakeForge{
-			log: events,
+			ledger: newFakeLedger(),
+			log:    events,
 			pr: forge.PullRequest{
 				Number:       42,
 				Title:        "t",
@@ -502,6 +626,18 @@ func runLeg(t *testing.T, e *env, req review.Request) review.Result {
 	}
 	leg := e.leg(t)
 	return leg.Run(context.Background(), req)
+}
+
+// writeRequiredHead writes one required head file the coverage loop must
+// account for. Frozen-path tests that stub no head files keep zero required
+// units and stay on the single-prompt path; batch tests write head files
+// and drive the coverage loop.
+func writeRequiredHead(e *env, path, content string) {
+	writeHead(e, path, content)
+	if e.vcs.required == nil {
+		e.vcs.required = map[string]bool{}
+	}
+	e.vcs.required[path] = true
 }
 
 func writeBase(e *env, path, content string) {

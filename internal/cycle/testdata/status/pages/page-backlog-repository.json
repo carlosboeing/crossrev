@@ -2,7 +2,7 @@
   "name": "page-backlog-repository",
   "shell": "lib/run.sh:3085",
   "now": 1788303166,
-  "config_yaml": "version: 1\nmode: local\npolicy:\n  min_fix_severity: medium\n  max_passes_per_cycle: 3\n  max_files_changed_per_pr: 200\n  max_prs_per_day: 25\nreviewer:\n  harness: claude\n  model: reviewer-model\nresolver:\n  harness: claude\n  model: resolver-model\nbacklog:\n  destination: repository",
+  "config_yaml": "version: 2\nmode: local\npolicy:\n  min_fix_severity: medium\n  max_passes_per_cycle: 3\n  max_files_changed_per_pr: 200\n  max_prs_per_day: 25\nreviewer:\n  harness: claude\n  model: reviewer-model\nresolver:\n  harness: claude\n  model: resolver-model\nbacklog:\n  destination: repository",
   "author": "tester",
   "head_sha": "f46915caf68567a9b4bb7d4a9d172827d6cf30f7",
   "base_sha": "ca9ed21a16f3fb610d9efd6919e1c6a9972347d3",

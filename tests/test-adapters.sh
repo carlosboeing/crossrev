@@ -17,11 +17,14 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/harness.sh"
 REVIEW_PAYLOAD='{"verdict":"issues-remain","blocked_reason":null,"prior":null,"findings":[
   {"path":"app.ts","line":2,"side":"RIGHT","severity":"high","category":"correctness","pre_existing":false,
    "title":"Unchecked fetch response","why":"A failed request looks like a success","fix":"Check response.ok"}
-]}'
+],"coverage":[{"unit_number":1,"disposition":"finding","finding_numbers":[1],
+  "evidence":[{"path":"app.ts","revision":"REPLACE_HEAD_SHA","start_line":1,"end_line":2,"source":"git","note":null}],
+  "reason":null}],
+"examined_scope":"read app.ts at the head","known_limits":[]}'
 
 config_agy_reviews() {
   cat <<'EOF'
-version: 1
+version: 2
 mode: local
 policy:
   min_fix_severity: medium
@@ -44,7 +47,7 @@ fixture_repo "$(config_agy_reviews)"; stub_reset
 routes_baseline "$(printf '[]' | payload)"
 route 'api --method POST repos/*/issues/42/comments*' '{"id":9001}'
 route '*reviewThreads*' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}'
-CROSSREV_REVIEW_PAYLOAD="$(printf '%s' "$REVIEW_PAYLOAD" | payload)"; export CROSSREV_REVIEW_PAYLOAD
+CROSSREV_REVIEW_PAYLOAD="$(printf '%s' "$REVIEW_PAYLOAD" | sed "s/REPLACE_HEAD_SHA/$FIX_HEAD/g" | payload)"; export CROSSREV_REVIEW_PAYLOAD
 out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
 # Captured before the direct-stub probes below append to the same log.
 agy_review_argv="$(cat "$ARGV_LOG")"
@@ -122,7 +125,7 @@ is  "a leg writes no secret, ever"                "$(count 'secret set')" "0"
 # --- a review leg on the fourth harness -------------------------------------
 config_grok_reviews() {
   cat <<'EOF'
-version: 1
+version: 2
 mode: local
 policy:
   min_fix_severity: medium
@@ -142,7 +145,7 @@ EOF
 
 config_grok_resolves() {
   cat <<'EOF'
-version: 1
+version: 2
 mode: local
 policy:
   min_fix_severity: medium
@@ -164,7 +167,7 @@ fixture_repo "$(config_grok_reviews)"; stub_reset
 routes_baseline "$(printf '[]' | payload)"
 route 'api --method POST repos/*/issues/42/comments*' '{"id":9001}'
 route '*reviewThreads*' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}'
-CROSSREV_REVIEW_PAYLOAD="$(printf '%s' "$REVIEW_PAYLOAD" | payload)"; export CROSSREV_REVIEW_PAYLOAD
+CROSSREV_REVIEW_PAYLOAD="$(printf '%s' "$REVIEW_PAYLOAD" | sed "s/REPLACE_HEAD_SHA/$FIX_HEAD/g" | payload)"; export CROSSREV_REVIEW_PAYLOAD
 out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
 # Capture before the probes below invoke the stub and append to the same log.
 grok_review_argv="$(cat "$ARGV_LOG")"
@@ -258,7 +261,7 @@ fixture_repo "$(config_grok_reviews)"; stub_reset
 routes_baseline "$(printf '[]' | payload)"
 route 'api --method POST repos/*/issues/42/comments*' '{"id":9001}'
 route '*reviewThreads*' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}'
-CROSSREV_REVIEW_PAYLOAD="$(printf '%s' "$REVIEW_PAYLOAD" | payload)"; export CROSSREV_REVIEW_PAYLOAD
+CROSSREV_REVIEW_PAYLOAD="$(printf '%s' "$REVIEW_PAYLOAD" | sed "s/REPLACE_HEAD_SHA/$FIX_HEAD/g" | payload)"; export CROSSREV_REVIEW_PAYLOAD
 CROSSREV_GROK_UNAUTH=1; export CROSSREV_GROK_UNAUTH
 out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
 unset CROSSREV_GROK_UNAUTH
@@ -276,7 +279,7 @@ has "naming Grok in the diagnosis"                "$out" "Grok"
 # out of the box, so a leg that ran without the deny config would be the bug.
 config_opencode_reviews() {
   cat <<'EOF'
-version: 1
+version: 2
 mode: local
 policy:
   min_fix_severity: medium
@@ -304,7 +307,7 @@ fixture_repo "$(config_opencode_reviews)"; stub_reset
 routes_baseline "$(printf '[]' | payload)"
 route 'api --method POST repos/*/issues/42/comments*' '{"id":9001}'
 route '*reviewThreads*' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}'
-CROSSREV_REVIEW_PAYLOAD="$(printf '%s' "$REVIEW_PAYLOAD" | payload)"; export CROSSREV_REVIEW_PAYLOAD
+CROSSREV_REVIEW_PAYLOAD="$(printf '%s' "$REVIEW_PAYLOAD" | sed "s/REPLACE_HEAD_SHA/$FIX_HEAD/g" | payload)"; export CROSSREV_REVIEW_PAYLOAD
 # The stub hands back every isolation config it accepted, so the assertions
 # below read what a leg was actually granted rather than what the adapter
 # meant to write.
@@ -413,7 +416,7 @@ fixture_repo "$(config_opencode_reviews)"; stub_reset
 routes_baseline "$(printf '[]' | payload)"
 route 'api --method POST repos/*/issues/42/comments*' '{"id":9001}'
 route '*reviewThreads*' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}'
-CROSSREV_REVIEW_PAYLOAD="$(printf '%s' "$REVIEW_PAYLOAD" | payload)"; export CROSSREV_REVIEW_PAYLOAD
+CROSSREV_REVIEW_PAYLOAD="$(printf '%s' "$REVIEW_PAYLOAD" | sed "s/REPLACE_HEAD_SHA/$FIX_HEAD/g" | payload)"; export CROSSREV_REVIEW_PAYLOAD
 CROSSREV_OPENCODE_MODE=fenced; export CROSSREV_OPENCODE_MODE
 out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
 unset CROSSREV_OPENCODE_MODE
@@ -425,7 +428,7 @@ fixture_repo "$(config_opencode_reviews)"; stub_reset
 routes_baseline "$(printf '[]' | payload)"
 route 'api --method POST repos/*/issues/42/comments*' '{"id":9001}'
 route '*reviewThreads*' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}'
-CROSSREV_REVIEW_PAYLOAD="$(printf '%s' "$REVIEW_PAYLOAD" | payload)"; export CROSSREV_REVIEW_PAYLOAD
+CROSSREV_REVIEW_PAYLOAD="$(printf '%s' "$REVIEW_PAYLOAD" | sed "s/REPLACE_HEAD_SHA/$FIX_HEAD/g" | payload)"; export CROSSREV_REVIEW_PAYLOAD
 CROSSREV_OPENCODE_MODE=prose; export CROSSREV_OPENCODE_MODE
 out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
 unset CROSSREV_OPENCODE_MODE
@@ -439,7 +442,7 @@ fixture_repo "$(config_opencode_reviews)"; stub_reset
 routes_baseline "$(printf '[]' | payload)"
 route 'api --method POST repos/*/issues/42/comments*' '{"id":9001}'
 route '*reviewThreads*' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}'
-CROSSREV_REVIEW_PAYLOAD="$(printf '%s' "$REVIEW_PAYLOAD" | payload)"; export CROSSREV_REVIEW_PAYLOAD
+CROSSREV_REVIEW_PAYLOAD="$(printf '%s' "$REVIEW_PAYLOAD" | sed "s/REPLACE_HEAD_SHA/$FIX_HEAD/g" | payload)"; export CROSSREV_REVIEW_PAYLOAD
 CROSSREV_OPENCODE_MODE='split'; export CROSSREV_OPENCODE_MODE
 out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
 unset CROSSREV_OPENCODE_MODE
@@ -453,7 +456,7 @@ fixture_repo "$(config_opencode_reviews)"; stub_reset
 routes_baseline "$(printf '[]' | payload)"
 route 'api --method POST repos/*/issues/42/comments*' '{"id":9001}'
 route '*reviewThreads*' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}'
-CROSSREV_REVIEW_PAYLOAD="$(printf '%s' "$REVIEW_PAYLOAD" | payload)"; export CROSSREV_REVIEW_PAYLOAD
+CROSSREV_REVIEW_PAYLOAD="$(printf '%s' "$REVIEW_PAYLOAD" | sed "s/REPLACE_HEAD_SHA/$FIX_HEAD/g" | payload)"; export CROSSREV_REVIEW_PAYLOAD
 CROSSREV_OPENCODE_MODE=empty; export CROSSREV_OPENCODE_MODE
 out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
 unset CROSSREV_OPENCODE_MODE
@@ -468,7 +471,7 @@ fixture_repo "$(config_opencode_reviews)"; stub_reset
 routes_baseline "$(printf '[]' | payload)"
 route 'api --method POST repos/*/issues/42/comments*' '{"id":9001}'
 route '*reviewThreads*' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}'
-CROSSREV_REVIEW_PAYLOAD="$(printf '%s' "$REVIEW_PAYLOAD" | payload)"; export CROSSREV_REVIEW_PAYLOAD
+CROSSREV_REVIEW_PAYLOAD="$(printf '%s' "$REVIEW_PAYLOAD" | sed "s/REPLACE_HEAD_SHA/$FIX_HEAD/g" | payload)"; export CROSSREV_REVIEW_PAYLOAD
 CROSSREV_OPENCODE_MODE=error; export CROSSREV_OPENCODE_MODE
 out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
 unset CROSSREV_OPENCODE_MODE
@@ -482,7 +485,7 @@ fixture_repo "$(config_opencode_reviews)"; stub_reset
 routes_baseline "$(printf '[]' | payload)"
 route 'api --method POST repos/*/issues/42/comments*' '{"id":9001}'
 route '*reviewThreads*' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}'
-CROSSREV_REVIEW_PAYLOAD="$(printf '%s' "$REVIEW_PAYLOAD" | payload)"; export CROSSREV_REVIEW_PAYLOAD
+CROSSREV_REVIEW_PAYLOAD="$(printf '%s' "$REVIEW_PAYLOAD" | sed "s/REPLACE_HEAD_SHA/$FIX_HEAD/g" | payload)"; export CROSSREV_REVIEW_PAYLOAD
 CROSSREV_OPENCODE_MODE=error-other; export CROSSREV_OPENCODE_MODE
 out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
 unset CROSSREV_OPENCODE_MODE
@@ -497,7 +500,7 @@ fixture_repo "$(config_opencode_reviews)"; stub_reset
 routes_baseline "$(printf '[]' | payload)"
 route 'api --method POST repos/*/issues/42/comments*' '{"id":9001}'
 route '*reviewThreads*' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}'
-CROSSREV_REVIEW_PAYLOAD="$(printf '%s' "$REVIEW_PAYLOAD" | payload)"; export CROSSREV_REVIEW_PAYLOAD
+CROSSREV_REVIEW_PAYLOAD="$(printf '%s' "$REVIEW_PAYLOAD" | sed "s/REPLACE_HEAD_SHA/$FIX_HEAD/g" | payload)"; export CROSSREV_REVIEW_PAYLOAD
 CROSSREV_OPENCODE_MODE=nojson; export CROSSREV_OPENCODE_MODE
 out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
 unset CROSSREV_OPENCODE_MODE
@@ -514,7 +517,7 @@ fixture_repo "$(config_opencode_reviews)"; stub_reset
 routes_baseline "$(printf '[]' | payload)"
 route 'api --method POST repos/*/issues/42/comments*' '{"id":9001}'
 route '*reviewThreads*' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}'
-CROSSREV_REVIEW_PAYLOAD="$(printf '%s' "$REVIEW_PAYLOAD" | payload)"; export CROSSREV_REVIEW_PAYLOAD
+CROSSREV_REVIEW_PAYLOAD="$(printf '%s' "$REVIEW_PAYLOAD" | sed "s/REPLACE_HEAD_SHA/$FIX_HEAD/g" | payload)"; export CROSSREV_REVIEW_PAYLOAD
 CROSSREV_OPENCODE_NO_EXPORT=1; export CROSSREV_OPENCODE_NO_EXPORT
 out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
 unset CROSSREV_OPENCODE_NO_EXPORT
@@ -532,7 +535,7 @@ has "and the marker records no answering model"   "$(calls)" '"model_reported":n
 
 config_claude_reviews() {
   cat <<'EOF'
-version: 1
+version: 2
 mode: local
 policy:
   min_fix_severity: medium
@@ -555,7 +558,7 @@ run_claude_review() {
   routes_baseline "$(printf '[]' | payload)"
   route 'api --method POST repos/*/issues/42/comments*' '{"id":9001}'
   route '*reviewThreads*' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}'
-  CROSSREV_REVIEW_PAYLOAD="$(printf '%s' "$REVIEW_PAYLOAD" | payload)"; export CROSSREV_REVIEW_PAYLOAD
+  CROSSREV_REVIEW_PAYLOAD="$(printf '%s' "$REVIEW_PAYLOAD" | sed "s/REPLACE_HEAD_SHA/$FIX_HEAD/g" | payload)"; export CROSSREV_REVIEW_PAYLOAD
 }
 
 # Both names present is the precedence case: the oauth token is set too and
@@ -581,7 +584,7 @@ has "keeping the harness's own cost figure"       "$(calls)" '"cost_source":"har
 # number CrossRev would display was charged by nobody.
 config_claude_endpoint_reviews() {
   cat <<'EOF'
-version: 1
+version: 2
 mode: local
 policy:
   min_fix_severity: medium
@@ -607,7 +610,7 @@ fixture_repo "$(config_claude_endpoint_reviews)"; stub_reset
 routes_baseline "$(printf '[]' | payload)"
 route 'api --method POST repos/*/issues/42/comments*' '{"id":9001}'
 route '*reviewThreads*' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}'
-CROSSREV_REVIEW_PAYLOAD="$(printf '%s' "$REVIEW_PAYLOAD" | payload)"; export CROSSREV_REVIEW_PAYLOAD
+CROSSREV_REVIEW_PAYLOAD="$(printf '%s' "$REVIEW_PAYLOAD" | sed "s/REPLACE_HEAD_SHA/$FIX_HEAD/g" | payload)"; export CROSSREV_REVIEW_PAYLOAD
 export KIMI_API_KEY=stub-endpoint-token
 out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
 unset KIMI_API_KEY CROSSREV_REVIEW_PAYLOAD
@@ -625,7 +628,7 @@ has "and the harness cost did not survive"        "$(calls)" '"cost_usd":null'
 # stay denied.
 config_opencode_resolves() {
   cat <<'EOF'
-version: 1
+version: 2
 mode: local
 policy:
   min_fix_severity: medium

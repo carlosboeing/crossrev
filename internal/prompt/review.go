@@ -1,4 +1,13 @@
-// review.go — the review leg's prompt (lib/prompt.sh:132-198).
+// review.go — the review leg's prompt (lib/prompt.sh:132-198), plus the
+// Review Intelligence batch input (plan Task A3).
+//
+// The frozen sections stay byte-identical: the skill through the untrusted
+// notice, the pull-request block, prior findings, open threads, the full
+// base-to-head diff, and the output instruction. The batch block below is the
+// one intentional addition — numbered required files with readable content or
+// explicit access limits, advisory summaries and exclusions — and
+// TestReviewIntelligenceSupersedesOnlyTheFrozenPromptSections pins that the
+// frozen prompt is a subsequence of what Render writes.
 
 package prompt
 
@@ -47,6 +56,12 @@ type Prior struct {
 // Every field is bytes or values the orchestrator already holds. Nothing here
 // reads a file, runs a command or reaches the network: the agent fetches
 // nothing, and neither does the assembly.
+//
+// Batch is the Review Intelligence input for this call: numbered required
+// files with readable content or explicit access limits, advisory summaries
+// and exclusions. It is empty for the frozen parity-era prompt, which carries
+// the full diff alone. A3 renders the batch; C1 wires the batch loop that
+// fills it.
 type Review struct {
 	// Skill is skills/pr-review/SKILL.md — ReviewSkill for a compiled binary,
 	// or the file a checkout reads.
@@ -64,15 +79,84 @@ type Review struct {
 	// revision so a branch cannot rewrite the loop that reviews it. Empty means
 	// there is none, and the section is dropped rather than printed empty.
 	ReviewMD []byte
+
+	// Batch holds the numbered required files this call must account for.
+	// Nil means the frozen prompt: no batch block is rendered.
+	Batch []BatchUnit
+
+	// Advisory holds untouched context files with the rule that found each.
+	// Nil means none is rendered.
+	Advisory []AdvisoryRef
+
+	// Excluded holds paths removed from the required denominator with their
+	// reason. Nil means none is rendered.
+	Excluded []ExclusionRef
+
+	// Confirmation holds the B-to-C repair delta: what the resolver changed
+	// between the reviewed head and the repaired head. Nil means an initial
+	// clean review with nothing to confirm. A set delta renders ahead of
+	// the full scope as required confirmation input.
+	Confirmation []byte
+}
+
+// BatchUnit is one numbered required file: its change, its evidence revision,
+// and either readable bytes or an explicit access limit — never both, never
+// neither. The number is the unit's 1-based position in the batch, and it is
+// what `coverage[].unit_number` refers back to.
+type BatchUnit struct {
+	// Path is the current path, OldPath the previous path for a rename or a
+	// deletion.
+	Path    string
+	OldPath string
+	// Change is how the path changed between the two revisions.
+	Change core.ChangeKind
+	// ContentRevision is where the evidence bytes were read: the base for a
+	// deletion, the head for every other kind.
+	ContentRevision core.Revision
+	// Body is the readable evidence bytes. Nil when the unit is unavailable
+	// or binary.
+	Body []byte
+	// Available reports whether readable bytes were read.
+	Available bool
+	// Binary reports a NUL byte in the evidence, git's own binary signal.
+	Binary bool
+	// Reason names the access limit when the unit has no readable bytes:
+	// unreadable, binary or otherwise unavailable content stays a required
+	// obligation with this visible limit.
+	Reason string
+	// NumberedDiff is the gutter-numbered diff for this file's own lines, or
+	// nil when none applies.
+	NumberedDiff []byte
+}
+
+// AdvisoryRef is one untouched path offered as uncertain context, with the
+// rule that found it: search for a fixed-string hit, convention for an
+// adjacent-test naming match.
+type AdvisoryRef struct {
+	Path string
+	Rule string
+	Term string
+}
+
+// ExclusionRef is one path removed from the required denominator, with the
+// reason it was removed.
+type ExclusionRef struct {
+	Path   string
+	Reason string
 }
 
 // Render is the prompt, byte for byte as lib/prompt.sh's prompt_review writes
-// it.
+// it, plus the Review Intelligence batch block when the batch input is set.
 //
 // The order is the shell's and is not free to change: the skill first because it
 // is the whole rubric, REVIEW.md under it because it ranks above the skill's
 // defaults, the untrusted-input rule under that because it ranks above both, and
-// everything the pull request supplied after it.
+// everything the pull request supplied after it. The batch block sits between
+// the full diff and the output instruction: the diff stays the anchorable
+// whole, and the numbered files are the readable work this call accounts for.
+// With no batch input Render writes the frozen bytes exactly, which
+// TestReviewMatchesTheFrozenPrompt pins and
+// TestReviewIntelligenceSupersedesOnlyTheFrozenPromptSections relies on.
 func (r Review) Render() []byte {
 	var b strings.Builder
 
@@ -163,9 +247,122 @@ func (r Review) Render() []byte {
 	b.Write(diff.Parse(r.Diff, core.RevisionPair{}).Numbered())
 	b.WriteString("\n````\n\n")
 
+	// The confirmation delta renders ahead of the full scope: after a
+	// repair, the reviewer confirms what the resolver changed before
+	// re-judging the whole. Empty on an initial clean review, so the frozen
+	// parity-era prompt keeps its bytes exactly.
+	b.WriteString(renderConfirmation(r.Confirmation))
+
+	// The batch block sits between the full diff and the output instruction:
+	// the diff stays the anchorable whole, and the numbered files are the
+	// readable work this call must account for. Empty batch input renders
+	// nothing, so the frozen parity-era prompt keeps its bytes exactly.
+	b.WriteString(renderBatch(r.Batch, r.Advisory, r.Excluded))
+
 	b.WriteString("## Output\n\n")
 	b.WriteString("Return JSON matching the schema you were given, and nothing else. An empty " +
 		"`findings` array with verdict `converged` is a good and common result.\n")
+	if len(r.Batch) > 0 || len(r.Advisory) > 0 || len(r.Excluded) > 0 {
+		b.WriteString("Name every numbered file above in `coverage`, one entry per number — " +
+			"no more, no fewer, no duplicates — and state `examined_scope` and `known_limits` " +
+			"even when the review found nothing.\n")
+	}
 
 	return []byte(b.String())
+}
+
+// renderConfirmation is the required repair-delta input: the B-to-C diff
+// the resolver produced, rendered ahead of the current full scope. It takes
+// no disposition and satisfies no coverage entry: it says what changed since
+// the reviewed head, so the reviewer confirms the repair before re-judging
+// the whole. Empty renders nothing.
+func renderConfirmation(delta []byte) string {
+	if len(delta) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("## The repair delta to confirm\n\n")
+	b.WriteString("The resolver changed code since the reviewed head. Confirm this delta " +
+		"first: it is required input, and the dispositions below still account for " +
+		"every current required file.\n\n")
+	b.WriteString("````diff\n")
+	b.Write(delta)
+	b.WriteString("\n````\n\n")
+	return b.String()
+}
+
+// renderBatch is the Review Intelligence batch input: numbered required files
+// with readable content or an explicit access limit, advisory summaries and
+// exclusions. It renders nothing when the batch is empty, so the frozen
+// parity-era prompt — built with no batch — keeps its bytes exactly.
+func renderBatch(units []BatchUnit, advisory []AdvisoryRef, excluded []ExclusionRef) string {
+	if len(units) == 0 && len(advisory) == 0 && len(excluded) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("## The files under review\n\n")
+	if len(units) > 0 {
+		b.WriteString("Account for every numbered file below in `coverage`, one entry per " +
+			"number. A file disposition means you examined the supplied content and change, " +
+			"not merely its pathname. `not_affected` does not exempt a changed file: it says " +
+			"the file was read and needs no change, with evidence saying why.\n\n")
+		for i, u := range units {
+			renderBatchUnit(&b, i+1, u)
+		}
+	}
+	if len(advisory) > 0 {
+		b.WriteString("### Advisory context\n\n")
+		b.WriteString("Untouched files offered as uncertain context. They take no disposition " +
+			"and satisfy none: a real defect found here is still published as a finding, but " +
+			"the required file it was found from keeps its own disposition.\n\n")
+		for _, a := range advisory {
+			if a.Term != "" {
+				fmt.Fprintf(&b, "- `%s` (search `%s`)\n", a.Path, a.Term)
+			} else {
+				fmt.Fprintf(&b, "- `%s` (convention)\n", a.Path)
+			}
+		}
+		b.WriteString("\n")
+	}
+	if len(excluded) > 0 {
+		b.WriteString("### Excluded paths\n\n")
+		b.WriteString("Removed from the required set, visibly, with the reason for each. " +
+			"They take no disposition and are not omitted in silence.\n\n")
+		for _, e := range excluded {
+			fmt.Fprintf(&b, "- `%s` — %s\n", e.Path, e.Reason)
+		}
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+// renderBatchUnit is one numbered required file: its change, its evidence
+// revision, and either readable bytes or an explicit access limit.
+func renderBatchUnit(b *strings.Builder, number int, u BatchUnit) {
+	fmt.Fprintf(b, "### %d. `%s` — %s at `%s`\n\n", number, u.Path, u.Change, u.ContentRevision)
+	if u.OldPath != "" && u.OldPath != u.Path {
+		fmt.Fprintf(b, "Previously `%s`.\n\n", u.OldPath)
+	}
+	switch {
+	case !u.Available:
+		fmt.Fprintf(b, "No readable content: %s. This file stays required: record "+
+			"`could_not_review` with the failed fallbacks in `reason`.\n\n", u.Reason)
+	case u.Binary:
+		fmt.Fprintf(b, "Binary content is not shown. This file stays required: judge it on "+
+			"provenance, integrity, and build or reproducibility evidence, and record the "+
+			"limit in `known_limits`.\n\n")
+	default:
+		fmt.Fprintf(b, "````\n%s\n````\n\n", quoteBytes(u.Body))
+	}
+	if len(u.NumberedDiff) > 0 {
+		fmt.Fprintf(b, "Its numbered diff:\n\n````diff\n%s\n````\n\n",
+			quoteBytes(u.NumberedDiff))
+	}
+}
+
+// quoteBytes is the prompt's own trailing-newline rule: the fenced block
+// closes on the line after the content, so one trailing newline terminates the
+// last content line rather than opening an empty one.
+func quoteBytes(body []byte) string {
+	return strings.TrimSuffix(string(body), "\n")
 }

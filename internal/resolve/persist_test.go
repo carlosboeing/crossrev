@@ -37,7 +37,7 @@ func persistDoc() json.RawMessage {
 }
 
 func githubIssuesConfig() []byte {
-	return []byte(`version: 1
+	return []byte(`version: 2
 resolver:
   harness: claude
 backlog:
@@ -50,7 +50,7 @@ backlog:
 }
 
 func repositoryBacklogConfig(layout, path string) []byte {
-	return []byte(`version: 1
+	return []byte(`version: 2
 resolver:
   harness: claude
 backlog:
@@ -238,7 +238,7 @@ func TestPersist(t *testing.T) {
 		e := setup(t)
 		e.addReview(t, defaultFindings(), "issues-remain")
 		e.git.show = map[string][]byte{
-			e.base.SHA() + ":.github/crossrev.yml": []byte("version: 1\nresolver:\n  harness: claude\nbacklog:\n  destination: none\n"),
+			e.base.SHA() + ":.github/crossrev.yml": []byte("version: 2\nresolver:\n  harness: claude\nbacklog:\n  destination: none\n"),
 		}
 		e.adapter.payloads = []json.RawMessage{deferredPayload(persistDoc(), nil)}
 		got := e.run(t)

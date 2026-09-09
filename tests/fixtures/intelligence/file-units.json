@@ -1,0 +1,161 @@
+{
+  "cases": [
+    {
+      "available": true,
+      "binary": false,
+      "body": "package added\n",
+      "body_digest": "52383700d77b07e44615cafc4885f39dd83b6f7bd34d588b2f8b33bf3fdfa046",
+      "change": "added",
+      "error": "",
+      "name": "added file",
+      "old_path": "",
+      "path": "src/added.go",
+      "reason": "",
+      "revision": "head",
+      "unit_id": "e7d250f4226ea120"
+    },
+    {
+      "available": true,
+      "binary": false,
+      "body": "package modified\n\nfunc B() {}\n",
+      "body_digest": "45a31c8caa1a7045fd347ee6b746c791782c069b44008f59d97b66fe4df7544d",
+      "change": "modified",
+      "error": "",
+      "name": "modified file",
+      "old_path": "",
+      "path": "src/modified.go",
+      "reason": "",
+      "revision": "head",
+      "unit_id": "a28d2fb65a6b7287"
+    },
+    {
+      "available": true,
+      "binary": false,
+      "body": "package deleted\n",
+      "body_digest": "2b45f5714462722815d33194bfe830441b633bb475140d67f56fed5427d1629a",
+      "change": "deleted",
+      "error": "",
+      "name": "deleted file",
+      "old_path": "src/deleted.go",
+      "path": "src/deleted.go",
+      "reason": "",
+      "revision": "base",
+      "unit_id": "583cc64acdc6a61e"
+    },
+    {
+      "available": true,
+      "binary": false,
+      "body": "package renamed\n",
+      "body_digest": "3759453c408449dfd67195555edb7a41829105134963e7a670f1cf4b28ececae",
+      "change": "renamed",
+      "error": "",
+      "name": "renamed file",
+      "old_path": "src/old.go",
+      "path": "src/renamed.go",
+      "reason": "",
+      "revision": "head",
+      "unit_id": "f6c703a8a56333c0"
+    },
+    {
+      "available": true,
+      "binary": false,
+      "body": "link-target\n",
+      "body_digest": "18aa2d3565f35cd137ce47a9edabcf527ff882eb7dee495ec5dbddb872e62326",
+      "change": "type_changed",
+      "error": "",
+      "name": "type-changed file",
+      "old_path": "",
+      "path": "src/modechange",
+      "reason": "",
+      "revision": "head",
+      "unit_id": "17f67884391cc2ca"
+    },
+    {
+      "available": true,
+      "binary": true,
+      "body": "GIF89a\u0000\u0001binary-bytes",
+      "body_digest": "873900a4c3079a73a1bb4c8608493b759404c91c2e1ade73bf3cbcee6cf4c9e3",
+      "change": "added",
+      "error": "",
+      "name": "binary file",
+      "old_path": "",
+      "path": "assets/logo.bin",
+      "reason": "",
+      "revision": "head",
+      "unit_id": "c853e1fb8e77ad26"
+    },
+    {
+      "available": true,
+      "binary": false,
+      "body": "",
+      "body_digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "change": "added",
+      "error": "",
+      "name": "empty file",
+      "old_path": "",
+      "path": "src/empty.go",
+      "reason": "",
+      "revision": "head",
+      "unit_id": "4c3b0b21ac81c3e4"
+    },
+    {
+      "available": false,
+      "binary": false,
+      "body": "",
+      "body_digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "change": "modified",
+      "error": "permission denied",
+      "name": "inaccessible file",
+      "old_path": "",
+      "path": "vendor/secret.bin",
+      "reason": "permission denied",
+      "revision": "head",
+      "unit_id": "2a87fec6d23309aa"
+    }
+  ],
+  "doc": "Frozen oracle for file-unit discovery (Task A1). Hand-authored before the implementation: each case lists the required path, change kind, content revision, UnitID and body digest the production code must return. UnitID is the first 16 lowercase hex characters of SHA-256 over the u1 file identity preimage. Body digest is full SHA-256 hex over the evidence bytes, or over the empty string when no bytes are available. Do not regenerate from production code.",
+  "engine": "file-v1",
+  "engine_id": "e2b455e748711e52",
+  "advisory": {
+    "doc": "Frozen vectors for advisory discovery (Task A2). Hand-authored before the implementation: term_vectors list the ASCII identifier set the production code must extract from each body, and conventions list the adjacent-test candidates it must derive from each path. Terms use [A-Za-z_][A-Za-z0-9_]* with terms shorter than four bytes dropped, deduplicated and sorted. Do not regenerate from production code.",
+    "max_search_hits": 200,
+    "term_vectors": [
+      {
+        "body": "package store\n\nfunc SaveOrder(id string) {}\n",
+        "terms": ["SaveOrder", "func", "package", "store", "string"]
+      },
+      {
+        "body": "ab := Foo(2fast, _x1)\n",
+        "terms": ["fast"]
+      },
+      {
+        "body": "caf\u00e9 au_lait return\n",
+        "terms": ["au_lait", "return"]
+      },
+      {
+        "body": "zebra apple zebra mango\n",
+        "terms": ["apple", "mango", "zebra"]
+      }
+    ],
+    "conventions": [
+      {
+        "path": "src/store.go",
+        "candidates": ["src/store.spec.go", "src/store.test.go", "src/store_test.go", "src/test_store.go", "test/src/store.go", "tests/src/store.go"]
+      },
+      {
+        "path": "src/app.js",
+        "candidates": ["src/app.spec.js", "src/app.test.js", "src/app_test.js", "src/test_app.js", "test/src/app.js", "tests/src/app.js"]
+      },
+      {
+        "path": "Makefile",
+        "candidates": ["Makefile_test", "test/Makefile", "test_Makefile", "tests/Makefile"]
+      }
+    ]
+  },
+  "batching": {
+    "doc": "Frozen bounds for deterministic batching (Task A2). Batches hold at most 40 files; a pass admits at most 400 required files; the fully rendered prompt, including headers and prior context, holds at most 184320 bytes (180 KiB).",
+    "max_files_per_batch": 40,
+    "max_units_per_pass": 400,
+    "max_prompt_bytes": 184320
+  }
+}

@@ -1,0 +1,62 @@
+{
+  "name": "stale-converged-label",
+  "shell": "tests/test-status.sh:at_head_review (converged label needs markers at head)",
+  "now": 1787000000,
+  "head_sha": "2c4a46cb321db01826d116b5ef2add6b0284d68c",
+  "min_fix_severity": "medium",
+  "max_passes_per_cycle": 3,
+  "liveness": {
+    "life": "",
+    "detail": ""
+  },
+  "labels": [
+    "crossrev/converged"
+  ],
+  "markers": [
+    {
+      "v": 2,
+      "leg": "review",
+      "pass": 1,
+      "state": "complete",
+      "ts": 1786999940,
+      "done_ts": 1786999970,
+      "run_id": "x",
+      "head_sha": "2c4a46cb321db01826d116b5ef2add6b0284d68c",
+      "harness": "claude",
+      "model": "m",
+      "effort": "high",
+      "endpoint": null,
+      "model_reported": "m",
+      "tokens": 1000,
+      "verdict": "converged",
+      "findings": []
+    }
+  ],
+  "want": {
+    "state": "awaiting review",
+    "pass": 1,
+    "max_pass": 1,
+    "rows": [
+      {
+        "pass": 1,
+        "leg": "review",
+        "step": "ok",
+        "description": "no findings — converged",
+        "rendered": "1  ✓ review   no findings — converged"
+      },
+      {
+        "pass": 1,
+        "leg": "resolve",
+        "step": "opt",
+        "description": "not needed, the review converged",
+        "rendered": "   ○ resolve  not needed, the review converged"
+      }
+    ],
+    "next": [
+      {
+        "kind": "cmd",
+        "t": "crossrev review --pr 42"
+      }
+    ]
+  }
+}

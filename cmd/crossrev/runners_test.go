@@ -307,7 +307,11 @@ var runnerWiring = map[string]string{
 	"authCommands: app.NewGH()":      "orchestrator",
 	"authCommands: app.NewBrowser()": "orchestrator",
 
-	// The forge provider: every read and write is `gh`.
+	// The forge provider: every read and write is `gh`. The coverage
+	// ledger store is the same client converted, not a second one, so it
+	// names no runner of its own and this table needs no ledger row: a
+	// second `gh` constructor here would be the bypass this rule exists
+	// to catch.
 	"forgeClient: ghexec.New()": "orchestrator",
 
 	// `crossrev init`. The first three are `gh` — the account read, the

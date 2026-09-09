@@ -48,6 +48,40 @@ The review leg writes:
 
 The resolve leg adds threaded replies, resolves the threads it settled, commits any fixes, files deferred defects to the configured backlog, and posts its own summary comment.
 
+### Which files a review reads
+
+Each review pass reads every changed file: every added, modified, deleted, renamed and type-changed path between the base branch and the pull request branch. A rename counts as new work and is read again from scratch. Nothing carries over from an earlier revision: when the branch moves, the next pass reads every current file again.
+
+A **required file** is a changed file the review must account for. Deleted files read from the base. Other files read from the head. Files with no readable text stay required, with a named access limit saying why they could not be read.
+
+Backlog paths stay out: files CrossRev itself writes (the deferred-findings list) are not review work. Each one is still named with its reason, so nothing reads as silently skipped.
+
+Exact search hits and adjacent-test names are hints only. They add no required file and close none. Search stops at 200 hits per term and marks the term `too_common`.
+
+The reviewer gives each required file one disposition: `no_issue`, `finding`, `not_affected`, or `could_not_review`. A file with a disposition is **covered**; a file still waiting for one is **outstanding**. Every required file ends the pass in exactly one of those two states.
+
+One pass reads at most 400 required files. Batches hold at most 40 files in path order.
+
+Batches measure the full rendered prompt against 180 KB (184,320 bytes).
+
+A file that fits in no batch stays outstanding with `input_exceeds_budget`.
+
+Files past the pass budget carry `review_budget_reached`.
+
+A halted pass records state `incomplete` with its halt word and stop counts. The claim names the outstanding files for the next run.
+
+The next review after a repair reads what the repair changed first, then the full scope.
+
+The pass records which repair it confirmed only after it reads every current file. A first clean review records none.
+
+The reviewer reports a scope note saying what was read, and a list of known limits saying what constrained it.
+
+One convergence rule reads that note with the counts and the confirmed repair.
+
+The review writer and both label rules read that rule. The local cycle and both status paths read it too.
+
+A failed check never falls back to the reviewer verdict.
+
 ### The commits CrossRev makes
 
 A pass that changes code makes one commit and pushes it to the pull request's own branch.
@@ -155,7 +189,7 @@ In automated mode the runner is discarded after the job, so the generated workfl
 |---|---|
 | awaiting review | A review leg is owed |
 | awaiting resolution | The review landed; the resolve leg is owed |
-| converged | Nothing at or above `min_fix_severity` remains. The loop finished on its own |
+| converged | Nothing at or above `min_fix_severity` remains, and every changed file was read |
 | halted | It stopped short — a cap, a blocked leg, an escalated finding, or a deferral whose record never landed. A human is needed |
 | stopped | Somebody applied `crossrev/stop` |
 
@@ -163,7 +197,9 @@ A resolve pass that ended blocked or escalated is complete but not settled, so i
 
 A resolve pass can also finish the loop itself. A pass that settled every finding without pushing a commit — each disputed, skipped, or deferred and tracked — converges on the spot: the head never moved, so a re-review would find nothing new and decline. A pass that pushed hands back to the reviewer, because there is something new to see.
 
-Converged does not mean "no findings". It means no finding this pull request introduced, at or above the threshold, remains. Findings below the threshold and pre-existing ones are reported and cannot keep the loop alive — a loop that cannot converge because of a naming quibble is one nobody leaves switched on.
+Converged does not mean "no findings". It means no finding this pull request introduced, at or above the threshold, remains, and every changed file was read. Findings below the threshold and pre-existing ones are reported and cannot keep the loop alive — a loop that cannot converge because of a naming quibble is one nobody leaves switched on.
+
+Converged also does not mean checks ran. The coverage record names verification status not_implemented. No check runs in this release.
 
 One exception keeps the green honest: a pass that raises nothing new while an escalated finding is still open does not converge. The reviewer does not re-raise a settled finding, so the pass is empty precisely because the loop is waiting on a person — and `halted` stays on the pull request until that person settles the thread and a later pass verifies the settlement.
 

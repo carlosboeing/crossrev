@@ -667,6 +667,9 @@ func (f *watchdogForge) CommentEdit(context.Context, core.Slug, int64, string) e
 func (f *watchdogForge) ReviewCommentCreate(context.Context, forge.ReviewComment) (forge.Placement, error) {
 	return "", nil
 }
+func (f *watchdogForge) ReviewFileComment(context.Context, forge.ReviewComment) (forge.Placement, error) {
+	return "", nil
+}
 func (f *watchdogForge) ReviewReply(context.Context, core.Slug, int, int64, string) error { return nil }
 func (f *watchdogForge) ThreadResolve(context.Context, string) error                      { return nil }
 func (f *watchdogForge) IssueCreate(context.Context, core.Slug, string, string, []string) (int, error) {

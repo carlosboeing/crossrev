@@ -2,7 +2,7 @@
   "name": "page-converged-loop",
   "shell": "tests/test-status.sh:127-160",
   "now": 1788303161,
-  "config_yaml": "version: 1\nmode: local\npolicy:\n  min_fix_severity: medium\n  max_passes_per_cycle: 3\n  max_files_changed_per_pr: 200\n  max_prs_per_day: 25\nreviewer:\n  harness: claude\n  model: reviewer-model\nresolver:\n  harness: claude\n  model: resolver-model\nbacklog:\n  destination: none",
+  "config_yaml": "version: 2\nmode: local\npolicy:\n  min_fix_severity: medium\n  max_passes_per_cycle: 3\n  max_files_changed_per_pr: 200\n  max_prs_per_day: 25\nreviewer:\n  harness: claude\n  model: reviewer-model\nresolver:\n  harness: claude\n  model: resolver-model\nbacklog:\n  destination: none",
   "author": "tester",
   "head_sha": "73b86e87b8c8ecf18e6a535e014b24eed745c20e",
   "base_sha": "7086f8c9a4b9222a4b5d60c7c191d15cbc1d8959",

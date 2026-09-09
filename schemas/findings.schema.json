@@ -6,7 +6,10 @@
     "verdict",
     "findings",
     "prior",
-    "blocked_reason"
+    "blocked_reason",
+    "coverage",
+    "examined_scope",
+    "known_limits"
   ],
   "additionalProperties": false,
   "properties": {
@@ -143,6 +146,122 @@
         "null"
       ],
       "description": "Why the review could not be completed, or null. Only meaningful with verdict blocked."
+    },
+    "coverage": {
+      "type": "array",
+      "description": "One entry per numbered required file in the prompt, in the batch input order — no more, no fewer, no duplicates. The orchestrator checks the numbers: a unit left out has no disposition recorded, which is a silent loss rather than a visible one.",
+      "items": {
+        "type": "object",
+        "required": [
+          "unit_number",
+          "disposition",
+          "finding_numbers",
+          "evidence",
+          "reason"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "unit_number": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The number shown beside the required file in the prompt — 1 for the first, 2 for the second, and so on. A small integer rather than the file's id, because copying a 16-character hash accurately is clerical work models are poor at and a mistyped one is accepted silently."
+          },
+          "disposition": {
+            "type": "string",
+            "enum": [
+              "no_issue",
+              "finding",
+              "not_affected",
+              "could_not_review"
+            ],
+            "description": "no_issue: examined and clean. finding: examined and defective, named in finding_numbers. not_affected: examined and needing no change, with evidence saying why — it does not exempt a changed file from inspection. could_not_review: strong evidence named an affected unit and access or tooling failures prevented judgement after fallbacks, with the failed fallbacks in reason."
+          },
+          "finding_numbers": {
+            "type": "array",
+            "description": "The 1-based positions of this unit's findings in the findings array, in order. Empty unless disposition is finding, which names at least one.",
+            "items": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          "evidence": {
+            "type": "array",
+            "description": "What the judgement rests on: at least one entry naming a supplied path and revision, with nullable line spans and a note. Line endpoints are null for file-level evidence.",
+            "items": {
+              "type": "object",
+              "required": [
+                "path",
+                "revision",
+                "start_line",
+                "end_line",
+                "source",
+                "note"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "description": "Repository-relative path, exactly as it appears in the batch input."
+                },
+                "revision": {
+                  "type": "string",
+                  "description": "Where the evidence was read: the content revision shown beside the file."
+                },
+                "start_line": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "description": "First line the judgement rests on, or null for file-level evidence."
+                },
+                "end_line": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "description": "Last line the judgement rests on, or null for file-level evidence."
+                },
+                "source": {
+                  "type": "string",
+                  "enum": [
+                    "git",
+                    "search",
+                    "convention",
+                    "reviewer"
+                  ],
+                  "description": "Where the evidence came from: git for the supplied file content and diff, search for an exact-search hit, convention for an adjacent-test naming match, reviewer for the reviewer's own reading of the checkout."
+                },
+                "note": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "One line saying what this evidence shows, or null."
+                }
+              }
+            }
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "One line of reasoning for this unit's disposition, or null for a clean no_issue. Expected for not_affected and could_not_review, where the disposition is a judgement rather than an observation."
+          }
+        }
+      }
+    },
+    "examined_scope": {
+      "type": "string",
+      "description": "What was examined, in one or more sentences. Present even when the review found nothing: an empty findings array with no examined scope cannot tell examined code from omitted code.",
+      "minLength": 1
+    },
+    "known_limits": {
+      "type": "array",
+      "description": "What limited the review — unreadable files, capped searches, content supplied as an access limit rather than text. Present even when empty.",
+      "items": {
+        "type": "string"
+      }
     }
   }
 }

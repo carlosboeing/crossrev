@@ -16,7 +16,7 @@ import (
 
 // baseline is the configuration the rest of these tests vary: automated mode on
 // a hosted runner, one harness on both legs, and no deferred work.
-const baseline = `version: 1
+const baseline = `version: 2
 mode: automated
 policy:
   max_passes_per_cycle: 3
@@ -204,7 +204,7 @@ func TestResolveAsksAboutTheOwnerTheFlagNamed(t *testing.T) {
 }
 
 func TestResolveRefusesARunnerItDoesNotRecognise(t *testing.T) {
-	req := request(t, strings.Replace(baseline, "version: 1\n", "version: 1\nrunner: github_hosted\n", 1))
+	req := request(t, strings.Replace(baseline, "version: 2\n", "version: 2\nrunner: github_hosted\n", 1))
 
 	_, err := initcmd.Resolve(context.Background(), req)
 	var fatal *ui.FatalError
@@ -220,7 +220,7 @@ func TestResolveRefusesARunnerItDoesNotRecognise(t *testing.T) {
 }
 
 func TestResolveAcceptsSelfHosted(t *testing.T) {
-	req := request(t, strings.Replace(baseline, "version: 1\n", "version: 1\nrunner: self-hosted\n", 1))
+	req := request(t, strings.Replace(baseline, "version: 2\n", "version: 2\nrunner: self-hosted\n", 1))
 	plan, err := initcmd.Resolve(context.Background(), req)
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
@@ -231,7 +231,7 @@ func TestResolveAcceptsSelfHosted(t *testing.T) {
 }
 
 func TestResolveRefusesALegWhoseHarnessCannotUseItsEndpoint(t *testing.T) {
-	configuration := `version: 1
+	configuration := `version: 2
 reviewer:
   harness: codex
   endpoint: kimi
@@ -259,7 +259,7 @@ endpoints:
 }
 
 func TestResolveCarriesAnUnresolvableEndpointUp(t *testing.T) {
-	configuration := `version: 1
+	configuration := `version: 2
 reviewer:
   harness: claude
   endpoint: nowhere
@@ -320,7 +320,7 @@ func TestResolveAsksThePairingInTheDescriptorsVocabulary(t *testing.T) {
 func TestResolveNeverAsksThePairingAboutALegOnAnEndpoint(t *testing.T) {
 	// An endpoint means a static token in a secret, which never rotates and
 	// so never cares what kind of runner it is on.
-	configuration := `version: 1
+	configuration := `version: 2
 reviewer:
   harness: claude
   endpoint: kimi
@@ -397,7 +397,7 @@ func TestResolveBacklogOriginSaysWhereTheAnswerCameFrom(t *testing.T) {
 }
 
 func TestResolveBacklogLabelsAreTheTrackingLabelAndTheExtras(t *testing.T) {
-	configuration := `version: 1
+	configuration := `version: 2
 reviewer:
   harness: claude
 resolver:
@@ -421,7 +421,7 @@ backlog:
 func TestResolveBacklogLabelsSqueezeTheGapAnEmptyListLeaves(t *testing.T) {
 	// `printf '%s %s' … | tr -s ' ' | sed 's/ *$//'` at lib/init.sh:130. An
 	// empty extras list leaves a trailing space, which the trim removes.
-	configuration := `version: 1
+	configuration := `version: 2
 reviewer:
   harness: claude
 resolver:
@@ -446,7 +446,7 @@ func TestResolveKeepsTheLeadingGapAnEmptyTrackingLabelLeaves(t *testing.T) {
 	// `tr -s` squeezes a repeated space; one leading space is not repeated,
 	// and `sed 's/ *$//'` only trims the end. So the value is " bug", which
 	// is not empty — and the plan prints a filed-issues block for it.
-	configuration := `version: 1
+	configuration := `version: 2
 reviewer:
   harness: claude
 resolver:
@@ -555,49 +555,49 @@ endpoints:
 	}{
 		{
 			name:          "a hosted runner needs a credential for each subscription harness",
-			configuration: "version: 1\nreviewer:\n  harness: codex\nresolver:\n  harness: claude\n",
+			configuration: "version: 2\nreviewer:\n  harness: codex\nresolver:\n  harness: claude\n",
 			pairing:       fakePairing{secrets: map[string]string{"codex": "CROSSREV_CODEX_AUTH", "claude": "CLAUDE_CODE_OAUTH_TOKEN"}},
 			want:          []string{"APP_ID", "APP_PRIVATE_KEY", "CROSSREV_CODEX_AUTH", "CLAUDE_CODE_OAUTH_TOKEN"},
 		},
 		{
 			name:          "one harness on both legs is named once",
-			configuration: "version: 1\nreviewer:\n  harness: claude\nresolver:\n  harness: claude\n",
+			configuration: "version: 2\nreviewer:\n  harness: claude\nresolver:\n  harness: claude\n",
 			pairing:       fakePairing{secrets: map[string]string{"claude": "CLAUDE_CODE_OAUTH_TOKEN"}},
 			want:          []string{"APP_ID", "APP_PRIVATE_KEY", "CLAUDE_CODE_OAUTH_TOKEN"},
 		},
 		{
 			name:          "a self-hosted runner needs none of them",
-			configuration: "version: 1\nrunner: self-hosted\nreviewer:\n  harness: codex\nresolver:\n  harness: claude\n",
+			configuration: "version: 2\nrunner: self-hosted\nreviewer:\n  harness: codex\nresolver:\n  harness: claude\n",
 			pairing:       fakePairing{secrets: map[string]string{"codex": "CROSSREV_CODEX_AUTH", "claude": "CLAUDE_CODE_OAUTH_TOKEN"}},
 			want:          []string{"APP_ID", "APP_PRIVATE_KEY"},
 		},
 		{
 			name:          "a harness with no secret contributes none",
-			configuration: "version: 1\nreviewer:\n  harness: claude\nresolver:\n  harness: claude\n",
+			configuration: "version: 2\nreviewer:\n  harness: claude\nresolver:\n  harness: claude\n",
 			pairing:       fakePairing{},
 			want:          []string{"APP_ID", "APP_PRIVATE_KEY"},
 		},
 		{
 			name:          "an endpoint names its own token variable",
-			configuration: "version: 1\nreviewer:\n  harness: claude\n  endpoint: kimi\nresolver:\n  harness: claude\n" + endpoints,
+			configuration: "version: 2\nreviewer:\n  harness: claude\n  endpoint: kimi\nresolver:\n  harness: claude\n" + endpoints,
 			pairing:       fakePairing{secrets: map[string]string{"claude": "CLAUDE_CODE_OAUTH_TOKEN"}},
 			want:          []string{"APP_ID", "APP_PRIVATE_KEY", "KIMI_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"},
 		},
 		{
 			name:          "an endpoint on a self-hosted runner still needs its token",
-			configuration: "version: 1\nrunner: self-hosted\nreviewer:\n  harness: claude\n  endpoint: kimi\nresolver:\n  harness: claude\n" + endpoints,
+			configuration: "version: 2\nrunner: self-hosted\nreviewer:\n  harness: claude\n  endpoint: kimi\nresolver:\n  harness: claude\n" + endpoints,
 			pairing:       fakePairing{secrets: map[string]string{"claude": "CLAUDE_CODE_OAUTH_TOKEN"}},
 			want:          []string{"APP_ID", "APP_PRIVATE_KEY", "KIMI_API_KEY"},
 		},
 		{
 			name:          "two legs on one endpoint name its token once",
-			configuration: "version: 1\nreviewer:\n  harness: claude\n  endpoint: kimi\nresolver:\n  harness: claude\n  endpoint: kimi\n" + endpoints,
+			configuration: "version: 2\nreviewer:\n  harness: claude\n  endpoint: kimi\nresolver:\n  harness: claude\n  endpoint: kimi\n" + endpoints,
 			pairing:       fakePairing{secrets: map[string]string{"claude": "CLAUDE_CODE_OAUTH_TOKEN"}},
 			want:          []string{"APP_ID", "APP_PRIVATE_KEY", "KIMI_API_KEY"},
 		},
 		{
 			name:          "a refresher adds its own App",
-			configuration: "version: 1\nreviewer:\n  harness: codex\nresolver:\n  harness: claude\n",
+			configuration: "version: 2\nreviewer:\n  harness: codex\nresolver:\n  harness: claude\n",
 			pairing: fakePairing{
 				secrets:   map[string]string{"codex": "CROSSREV_CODEX_AUTH", "claude": "CLAUDE_CODE_OAUTH_TOKEN"},
 				refresher: map[string]bool{"codex": true},

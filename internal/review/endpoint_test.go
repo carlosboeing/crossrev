@@ -18,7 +18,7 @@ import (
 func TestAnUnresolvedEndpointHaltsTheReviewLeg(t *testing.T) {
 	e := newEnv(t)
 	writeAppGo(t, e.dir)
-	e.cfg = mustConfig(t, "version: 1\nreviewer:\n  harness: claude\n  endpoint: ghost\n")
+	e.cfg = mustConfig(t, "version: 2\nreviewer:\n  harness: claude\n  endpoint: ghost\n")
 	e.runner.script = []exec.Result{{ExitCode: 0, Stdout: claudeStdout(issuesPayload(twoFindings))}}
 
 	req := e.request(t)
@@ -38,7 +38,7 @@ func TestAnUnresolvedEndpointHaltsTheReviewLeg(t *testing.T) {
 func TestAnEndpointWithNoTokenHaltsTheReviewLeg(t *testing.T) {
 	e := newEnv(t)
 	writeAppGo(t, e.dir)
-	e.cfg = mustConfig(t, "version: 1\nreviewer:\n  harness: claude\n  endpoint: ollama\nendpoints:\n  ollama:\n    base_url: http://localhost:11434\n    token_env: OLLAMA_TOKEN\n")
+	e.cfg = mustConfig(t, "version: 2\nreviewer:\n  harness: claude\n  endpoint: ollama\nendpoints:\n  ollama:\n    base_url: http://localhost:11434\n    token_env: OLLAMA_TOKEN\n")
 	e.runner.script = []exec.Result{{ExitCode: 0, Stdout: claudeStdout(issuesPayload(twoFindings))}}
 
 	req := e.request(t)
@@ -58,7 +58,7 @@ func TestAnEndpointWithNoTokenHaltsTheReviewLeg(t *testing.T) {
 func TestAResolvedEndpointReachesTheChild(t *testing.T) {
 	e := newEnv(t)
 	writeAppGo(t, e.dir)
-	e.cfg = mustConfig(t, "version: 1\nreviewer:\n  harness: claude\n  endpoint: ollama\nendpoints:\n  ollama:\n    base_url: http://localhost:11434\n    token_env: OLLAMA_TOKEN\n")
+	e.cfg = mustConfig(t, "version: 2\nreviewer:\n  harness: claude\n  endpoint: ollama\nendpoints:\n  ollama:\n    base_url: http://localhost:11434\n    token_env: OLLAMA_TOKEN\n")
 	e.legEnv = []string{"PATH=/usr/bin", "HOME=/tmp", "OLLAMA_TOKEN=t"}
 	e.runner.script = []exec.Result{{ExitCode: 0, Stdout: claudeStdout(issuesPayload(twoFindings))}}
 

@@ -7,7 +7,12 @@
 #
 # Machine-local endpoints belong in ~/.config/crossrev/config.yml instead. A URL
 # like http://tower.local:11434 asserts something false on a GitHub runner.
-version: 1
+#
+# version: 2 declares the file shape this crossrev reads. A file that still
+# declares version: 1 is refused with this version named as the fix; change
+# the line by hand, since `crossrev init --upgrade` re-renders workflows and
+# leaves this file alone.
+version: 2
 mode: automated # automated | local — who may write trusted state
 runner: github-hosted # github-hosted | self-hosted — where init renders the workflows to run
 # Bounds on what crossrev does unattended. The three continuation bounds end automatic reviewing and
