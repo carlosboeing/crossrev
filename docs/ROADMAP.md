@@ -18,6 +18,8 @@ Forward view of CrossRev: what's in flight, what's next, what's deliberately def
 
 - **Review Intelligence ships file coverage.** It lists every changed file and reads each one in bounded batches. The acceptance oracle passes; the paired comparison stays pending. A bounded paired comparison will judge defect handling; it is not run here.
 
+- **The native cutover is complete.** `bin/crossrev` and `lib/` are removed. Every route uses the Go binary. The action downloads it, `bootstrap.sh` installs it, and `install.sh` builds it. Checkout development is `go run ./cmd/crossrev`.
+
 - **The first native release stays small.** [ADR 0020](adrs/0020-the-first-native-release-ships-a-reduced-scope.md) bounds it: two targets, plain checksums, no linked grammars, npm paused. Two gates prove the cutover: the suite against the binary, and one testbed run. **It ships as a 0.x release.** The version is cut deliberately, and `v1.0.0` stays a separate decision.
 
 - **The Bash implementation is removed.** A defect is fixed in Go. The frozen oracle under `tests/fixtures/parity/` stays read-only.

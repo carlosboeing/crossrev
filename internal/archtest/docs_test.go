@@ -30,24 +30,13 @@ func TestPublicDocsDescribeCoverageNotVerification(t *testing.T) {
 		}
 		joined += "\n" + string(raw)
 	}
-	lowered := strings.ToLower(joined)
-
-	for _, banned := range []string{
-		"verified convergence",
-		"verify convergence",
-		"verification passed",
-		"checks passed",
-		"all checks pass",
-		"no_checks_discovered",
-	} {
-		if strings.Contains(lowered, banned) {
-			t.Errorf("public docs claim %q, which states a verification this release never runs", banned)
-		}
+	for _, banned := range auditDocsVerdict(joined) {
+		t.Errorf("public docs claim %q, which states a verification this release never runs", banned)
 	}
-	if !strings.Contains(joined, "not_implemented") {
-		t.Error("public docs never name verification.status not_implemented, so nothing says checks are out of scope")
+	for _, missing := range auditDocsMissing(joined) {
+		t.Errorf("public docs lack %q, so nothing says checks are out of scope", missing)
 	}
-	// The six reserved envelope states are decoder vocabulary for another
+	// The reserved envelope states are decoder vocabulary for another
 	// writer's bytes, not states this release documents as its own outcomes.
 	for _, state := range []string{
 		"verification.status: passed",
