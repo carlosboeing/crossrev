@@ -1,0 +1,34 @@
+{
+  "doc": "Acceptance convergence vectors for the Review Intelligence coverage slice (Task D1). Hand-authored predicate inputs and expected outcomes: never generated from the production convergence function. Each weakened case differs from the all-clear input in exactly one obligation, and the suite asserts each mutation refuses.",
+  "all_clear": {
+    "unresolved_fixable": 0,
+    "ledger_current": true,
+    "required": 3,
+    "covered": 3,
+    "outstanding": 0,
+    "could_not_review": 0,
+    "scope_reported": true,
+    "confirmation_required": false,
+    "confirmation_complete": false,
+    "converged": true
+  },
+  "weakened": [
+    {"name": "unresolved fixable", "field": "unresolved_fixable", "value": 1, "converged": false},
+    {"name": "stale ledger", "field": "ledger_current", "value": false, "converged": false},
+    {"name": "under-covered", "field": "covered", "value": 2, "converged": false},
+    {"name": "outstanding record", "field": "outstanding", "value": 1, "converged": false},
+    {"name": "could_not_review", "field": "could_not_review", "value": 1, "converged": false},
+    {"name": "missing scope report", "field": "scope_reported", "value": false, "converged": false},
+    {"name": "unconfirmed repair", "field": "confirmation_required", "value": true, "converged": false},
+    {"name": "over-covered", "field": "covered", "value": 4, "converged": false},
+    {"name": "empty required set", "fields": {"required": 0, "covered": 0}, "converged": false}
+  ],
+  "routes": {
+    "doc": "Every convergence route refuses one outstanding file: the review writer downgrades, both label rules hold green, and both status paths refuse stale or incomplete green state.",
+    "review_writer": "a converged verdict with one file unexaminable records blocked with the debt named, applies no converged label",
+    "review_label": "PassLabelWithCoverage holds PassConverged only when the predicate is true",
+    "resolve_label": "ResolvePassLabelWithCoverage reports a no-commit settle converged only when the predicate is true",
+    "status_labelled": "a converged label is honoured only when the markers underwrite it at the current head",
+    "status_unlabelled": "a converged verdict reports green only with the marker half met at the current head"
+  }
+}
