@@ -364,18 +364,24 @@ has "and says why there is nothing to run" "$out" "nothing new to see"
 
 # With no labels at all, the marker copy of the same decision has to agree:
 # halted and converged come from the markers, and this pass converged.
-out="$(status_with '[]' \
-  "$(review_m 1 issues-remain "$ONE_MED")" \
-  "$(resolve_m 1 "$DISPUTED")")"
+settled_at_head() {
+  route_first "api --paginate repos/*/issues/$FIX_PR/comments*" "$(jq -cn \
+    --argjson a "$(marker_comment 9001 "$(review_m 1 issues-remain "$ONE_MED")")" \
+    --argjson b "$(marker_comment 9002 "$(resolve_m 1 "$DISPUTED")")" '[$a,$b]')"
+}
+out="$(status_setup_with settled_at_head '[]')"
 has "with no labels the markers give the same answer" "$out" "acme/widget#42 — converged"
 hasnt "not a hand-back to a reviewer that declines"   "$out" "— awaiting review"
 hasnt "nor a resolve leg that was already owed and ran" "$out" "— awaiting resolution"
 
 # A tracked deferral settles the pass the same way: the finding was real, but
 # the work lives in an issue off this pull request, so nothing is owed here.
-out="$(status_with '[]' \
-  "$(review_m 1 issues-remain "$ONE_MED")" \
-  "$(resolve_m 1 "$DEFERRED_TRACKED")")"
+settled_tracked_at_head() {
+  route_first "api --paginate repos/*/issues/$FIX_PR/comments*" "$(jq -cn \
+    --argjson a "$(marker_comment 9001 "$(review_m 1 issues-remain "$ONE_MED")")" \
+    --argjson b "$(marker_comment 9002 "$(resolve_m 1 "$DEFERRED_TRACKED")")" '[$a,$b]')"
+}
+out="$(status_setup_with settled_tracked_at_head '[]')"
 has "a pass whose only finding was deferred and tracked converges" \
   "$out" "acme/widget#42 — converged"
 
@@ -452,7 +458,7 @@ hasnt "and is not waved through as settled"                     "$out" "nothing 
 # no trigger left and `status` is the only thing that can ask for the pass.
 out="$(status_setup_with moved_after_settle_comments "$(lbl crossrev/converged crossrev/pass-1)")"
 has "a revision after a converged settle is owed a review"  "$out" "crossrev review --pr 42"
-has "and NEXT says why the terminal state stopped applying" "$out" "the branch has moved since"
+has "and NEXT says why the pass is owed again" "$out" "Pass 1 is closed and the branch moved"
 hasnt "rather than reporting nothing to run over it"        "$out" "nothing to run"
 
 # And the marker copy of the same decision, for a pull request with no labels to
@@ -633,8 +639,12 @@ has "the command itself is unchanged"              "$out" "crossrev review --pr 
 
 # Not on a state where the answer would be wrong: a converged loop is finished,
 # and telling its author to run a leg would be noise.
-out="$(status_setup_with as_draft "$(lbl crossrev/converged crossrev/pass-1)" \
-  "$(review_m 1 converged '[]')")"
+converged_at_head_draft() {
+  as_draft
+  route_first "api --paginate repos/*/issues/$FIX_PR/comments*" "$(jq -cn \
+    --argjson a "$(marker_comment 9001 "$(review_m 1 converged '[]')")" '[$a]')"
+}
+out="$(status_setup_with converged_at_head_draft "$(lbl crossrev/converged crossrev/pass-1)")"
 hasnt "a converged draft is not told to run a leg" "$out" "no workflow starts a leg on it"
 has   "and still reports the draft as a fact"      "$out" "draft      yes"
 
@@ -647,16 +657,24 @@ hasnt "and NEXT does not explain a skip that will not happen" "$out" "no workflo
 #
 # A sixth word would be a place for the terminal and the label to disagree, which
 # is the thing reading the header off the label was meant to stop.
+at_head_review() {
+  route_first "api --paginate repos/*/issues/$FIX_PR/comments*" "$(jq -cn \
+    --argjson a "$(marker_comment 9001 "$(review_m 1 converged '[]')")" '[$a]')"
+}
 for pair in \
   "crossrev/awaiting-review:awaiting review" \
   "crossrev/awaiting-resolution:awaiting resolution" \
-  "crossrev/converged:converged" \
   "crossrev/halted:halted" \
   "crossrev/stop:stopped"; do
   label="${pair%%:*}"; word="${pair#*:}"
   out="$(status_with "$(lbl "$label")" "$(review_m 1 issues-remain "$ONE_MED")")"
   has "$label reads as '$word'" "$out" "acme/widget#42 — $word"
 done
+# A converged label is honoured only with markers that underwrite it at the
+# current head: a stale label from an earlier revision must never report
+# green, so this case builds its marker after the fixture sets the head.
+out="$(status_setup_with at_head_review "$(lbl crossrev/converged)")"
+has "crossrev/converged reads as 'converged'" "$out" "acme/widget#42 — converged"
 
 # `interrupted` was dropped entirely: an interrupted review still leaves a review
 # owed, and NEXT still prints the same command, so it was a sixth word that

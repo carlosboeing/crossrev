@@ -63,7 +63,7 @@
     }
   ],
   "want": {
-    "state": "converged",
+    "state": "awaiting review",
     "pass": 1,
     "max_pass": 1,
     "rows": [
@@ -84,16 +84,16 @@
     ],
     "next": [
       {
-        "kind": "line",
-        "t": "the loop converged on pass 1, and the branch has moved since."
-      },
-      {
-        "kind": "line",
-        "t": "Nothing reviews a new revision on its own, so pass 2 is owed:"
-      },
-      {
         "kind": "cmd",
         "t": "crossrev review --pr 42"
+      },
+      {
+        "kind": "line",
+        "t": "Pass 1 is closed and the branch moved, so pass 2 reviews"
+      },
+      {
+        "kind": "line",
+        "t": "the new revision."
       }
     ]
   }

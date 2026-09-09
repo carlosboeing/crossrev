@@ -486,6 +486,7 @@ func TestStatusReadsOnlyTheTrustedAuthorsMarkers(t *testing.T) {
 		Now:      func() time.Time { return time.Unix(c.Now, 0) },
 		Show:     statusShow(c),
 	}
+
 	report, err := s.Load(context.Background(), slug, statusPR)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
@@ -680,9 +681,31 @@ func TestStatusKeysTheTrustedAuthorOnTheMode(t *testing.T) {
 // status sees it on a plain local read. The fixtures above carry no draft field
 // because every one of them was measured from a ready pull request; this builds
 // the forge directly rather than adding a column to all of them.
+func statusCaseNamed(t *testing.T, name string) statusCase {
+	t.Helper()
+	for _, c := range statusCases(t) {
+		if c.Name == name {
+			return c
+		}
+	}
+	t.Fatalf("no status fixture named %s", name)
+	return statusCase{}
+}
+
 func statusLoadDraft(t *testing.T, labels []string, draft bool) cycle.Report {
 	t.Helper()
+	return statusLoadDraftOn(t, "", labels, draft)
+}
+
+// statusLoadDraftOn loads the draft matrix on one named fixture's markers.
+// A converged label underwrites green only with markers that converge, so
+// the terminal-state subcase runs on the converged loop's own markers.
+func statusLoadDraftOn(t *testing.T, fixture string, labels []string, draft bool) cycle.Report {
+	t.Helper()
 	c := statusCases(t)[0]
+	if fixture != "" {
+		c = statusCaseNamed(t, fixture)
+	}
 	head, err := core.NewRevision(c.HeadSHA)
 	if err != nil {
 		t.Fatalf("head revision: %v", err)
@@ -699,6 +722,18 @@ func statusLoadDraft(t *testing.T, labels []string, draft bool) cycle.Report {
 	for _, name := range labels {
 		forgeLabels = append(forgeLabels, forge.Label{Name: name})
 	}
+	comments := make([]forge.IssueComment, 0, len(c.Markers))
+	for i, raw := range c.Markers {
+		body, err := prstate.EncodeMarker(raw)
+		if err != nil {
+			t.Fatalf("encoding marker %d: %v", i, err)
+		}
+		comments = append(comments, forge.IssueComment{
+			ID:          int64(9001 + i),
+			AuthorLogin: statusAuthor,
+			Body:        "Summary." + body,
+		})
+	}
 	s := &cycle.Status{
 		Forge: &statusForge{pr: forge.PullRequest{
 			Number:       statusPR,
@@ -712,7 +747,9 @@ func statusLoadDraft(t *testing.T, labels []string, draft bool) cycle.Report {
 			Labels:       forgeLabels,
 			IsDraft:      draft,
 			State:        "OPEN",
-		}},
+		},
+			comments: comments,
+		},
 		Liveness: statusLife{},
 		Now:      func() time.Time { return time.Unix(c.Now, 0) },
 		Show:     statusShow(c),
@@ -781,6 +818,7 @@ func TestStatusNextExplainsADraftOnAnAwaitingState(t *testing.T) {
 		draft   bool
 		want    bool
 		wantCmd string
+		fixture string
 	}{
 		{
 			name:    "awaiting review",
@@ -797,9 +835,10 @@ func TestStatusNextExplainsADraftOnAnAwaitingState(t *testing.T) {
 			wantCmd: "crossrev resolve --pr 42",
 		},
 		{
-			name:   "converged",
-			labels: []string{"crossrev/converged"},
-			draft:  true,
+			name:    "converged",
+			labels:  []string{"crossrev/converged"},
+			draft:   true,
+			fixture: "converged-loop",
 		},
 		{
 			name:   "a ready pull request awaiting review",
@@ -808,6 +847,9 @@ func TestStatusNextExplainsADraftOnAnAwaitingState(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			report := statusLoadDraft(t, tc.labels, tc.draft)
+			if tc.fixture != "" {
+				report = statusLoadDraftOn(t, tc.fixture, tc.labels, tc.draft)
+			}
 			next := statusNextText(report)
 			if got := strings.Contains(next, why) && strings.Contains(next, how); got != tc.want {
 				t.Errorf("NEXT = %q, want the draft explanation: %v", next, tc.want)

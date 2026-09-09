@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/carlosboeing/crossrev/internal/core"
+	"github.com/carlosboeing/crossrev/internal/policy"
 	"github.com/carlosboeing/crossrev/internal/prstate"
 	"github.com/carlosboeing/crossrev/internal/ui"
 )
@@ -255,5 +256,93 @@ func TestAResolvePassHandingBackDoesNotAskForTheTip(t *testing.T) {
 	}
 	if got.Nudge {
 		t.Fatal("a pass handing back to the reviewer asked for the tip too")
+	}
+}
+
+// TestSettleWithOutstandingCoverageStaysAwaitingReview pins route 3: a
+// no-commit settle with one outstanding file in the current generation must
+// not report converged — the loop owes the reviewer another look, not a
+// celebration.
+func TestSettleWithOutstandingCoverageStaysAwaitingReview(t *testing.T) {
+	e := setup(t)
+	e.addReview(t, defaultFindings(), "issues-remain")
+	e.adapter.payloads = []json.RawMessage{json.RawMessage(
+		`{"blocked":false,"blocked_reason":null,"summary":"All but one.","commit_subject":null,` +
+			`"resolutions":[{"finding_number":1,"resolution":"skipped","reply":"no",` +
+			`"persist":null,"duplicate_of":null}]}`)}
+	seedOutstandingGeneration(t, e)
+
+	got := e.run(t)
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
+	for _, label := range e.forge.addedLabels {
+		if label == policy.LabelConverged {
+			t.Fatalf("converged label applied with one outstanding file: %v", e.forge.addedLabels)
+		}
+	}
+}
+
+// seedOutstandingGeneration publishes one generation at the fixture head
+// with one covered and one outstanding record, authored by the trusted
+// viewer, so the settle gate has current but incomplete coverage to refuse.
+func seedOutstandingGeneration(t *testing.T, e *testEnv) {
+	t.Helper()
+	coveredID := string(core.FileUnitID("a.go"))
+	outstandingID := string(core.FileUnitID("b.go"))
+	digest := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	shard := prstate.BuildShard(0, []prstate.Record{
+		{
+			Type:        prstate.CoverageRecordUnit,
+			UnitID:      coveredID,
+			PathIndex:   0,
+			Kind:        "file",
+			Change:      "modified",
+			BodyDigest:  digest,
+			Disposition: prstate.Some("no_issue"),
+		},
+		prstate.OutstandingRecord(outstandingID, 1, "added", digest, "awaiting review"),
+	})
+	shardBody, err := prstate.EncodeCoverageShard(shard)
+	if err != nil {
+		t.Fatalf("encode shard: %v", err)
+	}
+	shard, ok := prstate.DecodeCoverageShard(shardBody)
+	if !ok {
+		t.Fatal("the seeded shard does not decode")
+	}
+	shardDigest := shard.Digest
+	manifest := prstate.BuildManifest(1, testBaseSHA, testHeadSHA, core.FileEngineVersion,
+		[]string{"a.go", "b.go"},
+		[]prstate.ShardRef{{Pos: 0, ID: 9201, Digest: shardDigest, N: 2}},
+		1, 2,
+		prstate.Advisory{}, nil,
+		prstate.ScopeReport{ExaminedScope: "read the batch", KnownLimits: []string{}})
+	manifestBody, err := prstate.EncodeCoverageManifest(manifest)
+	if err != nil {
+		t.Fatalf("encode manifest: %v", err)
+	}
+	e.forge.coverageLedger = &resolveLedger{comments: []prstate.CoverageComment{
+		{ID: 9201, Author: "tester", Body: shardBody},
+		{ID: 9202, Author: "tester", Body: manifestBody},
+	}}
+}
+
+// TestEmptyFindingsWithOutstandingCoverageHalts pins the finishEmpty gate:
+// a resolve run with no findings but one outstanding file in the current
+// generation must not report converged — the review debt needs a human.
+func TestEmptyFindingsWithOutstandingCoverageHalts(t *testing.T) {
+	e := setup(t)
+	e.addReview(t, json.RawMessage(`[]`), "issues-remain")
+	seedOutstandingGeneration(t, e)
+
+	got := e.run(t)
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
+	for _, label := range e.forge.addedLabels {
+		if label == policy.LabelConverged {
+			t.Fatalf("converged label applied with one outstanding file: %v", e.forge.addedLabels)
+		}
 	}
 }

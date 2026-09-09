@@ -86,6 +86,12 @@ func VerificationStatuses() []string {
 // ErrCoverage is returned for coverage bytes no strict reader accepts.
 var ErrCoverage = errors.New("a coverage payload is not a v1 manifest or shard")
 
+// ErrNoCompleteGeneration reports that no complete generation exists at a
+// revision pair: absence, not refusal. Callers that predate the coverage
+// obligation keep their legacy answer on absence; corrupt state still fails
+// closed through ErrCoverage.
+var ErrNoCompleteGeneration = errors.New("no complete generation at this revision")
+
 // IsCoverageError reports whether err is the coverage codec's refusal.
 func IsCoverageError(err error) bool { return errors.Is(err, ErrCoverage) }
 
