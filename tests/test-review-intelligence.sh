@@ -308,7 +308,7 @@ export CROSSREV_REVIEW_PAYLOAD
 out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
 is "an advisory-shaped review runs" "$rc" "0"
 has "an advisory-shaped review converges on both required files" "$(applied_labels)" "labels[]=crossrev/converged"
-has "advisory context adds no required unit" "$(cat "$GH_STATE"/comment-*)" '"required_count":2' 
+has "advisory context adds no required unit" "$(cat "$GH_STATE"/comment-*)" '"required_count":2'
 
 # --- input, review and ledger bounds ------------------------------------------
 

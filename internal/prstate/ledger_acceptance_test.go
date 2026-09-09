@@ -647,7 +647,6 @@ func TestLedgerAcceptanceMutationProvesTheGateIsLive(t *testing.T) {
 	}
 }
 
-
 func optStr(o prstate.Opt[string]) string {
 	if v, ok := o.Get(); ok {
 		return v
