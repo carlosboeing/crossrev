@@ -1,0 +1,602 @@
+#!/usr/bin/env bash
+#
+# The Review Intelligence acceptance oracle, driven through the compiled
+# binary with stubbed GitHub and real temporary git histories.
+#
+# The expected sets are literal data under tests/fixtures/intelligence/ and
+# are never generated with production discovery or convergence functions:
+# UnitIDs and digests below are hand-written from the frozen oracle, or
+# computed with SHA-256 over the documented preimage. The shell suite proves
+# the CLI path that writes labels and markers; internal/intel/acceptance_test.go,
+# internal/prstate/ledger_acceptance_test.go and
+# internal/policy/convergence_acceptance_test.go prove the same contract in Go.
+#
+# This suite fails on the pre-slice binary because it can converge with no
+# coverage marker: the no-coverage converge case below asserts halted and a
+# blocked verdict where the old binary reports converged.
+
+set -uo pipefail
+# shellcheck source=harness.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/harness.sh"
+
+# --- helpers ---------------------------------------------------------------
+
+# One review payload for the single required file app.ts at the fixture head.
+# $1 verdict, $2 coverage JSON, $3 findings JSON (default []), $4 scope
+# (default a fixed sentence), $5 limits JSON (default []).
+review_payload_for() {
+  local verdict="$1" coverage="$2" findings="${3:-[]}"
+  local scope="${4:-read app.ts at the head}" limits="${5:-[]}"
+  jq -cn --arg v "$verdict" --argjson c "$coverage" --argjson f "$findings" \
+    --arg s "$scope" --argjson l "$limits" \
+    '{verdict:$v, blocked_reason:null, findings:$f, coverage:$c,
+      examined_scope:$s, known_limits:$l}'
+}
+
+# Coverage for unit 1 over app.ts at $FIX_HEAD. $1 disposition, $2 finding
+# numbers JSON, $3 evidence JSON, $4 reason JSON (default null).
+unit1() {
+  local dispo="$1" numbers="$2" evidence="$3" reason="${4:-null}"
+  jq -cn --arg d "$dispo" --argjson n "$numbers" --argjson e "$evidence" \
+    --argjson r "$reason" \
+    '{unit_number:1, disposition:$d, finding_numbers:$n, evidence:$e, reason:$r}'
+}
+
+# File-level git evidence for app.ts at the fixture head.
+evidence_file() {
+  jq -cn --arg sha "$FIX_HEAD" \
+    '[{path:"app.ts", revision:$sha, start_line:null, end_line:null,
+       source:"git", note:null}]'
+}
+
+# Ranged git evidence for app.ts at the fixture head, lines $1-$2.
+evidence_range() {
+  jq -cn --arg sha "$FIX_HEAD" --argjson s "$1" --argjson e "$2" \
+    '[{path:"app.ts", revision:$sha, start_line:$s, end_line:$e,
+       source:"git", note:null}]'
+}
+
+# Routes for one review run over the default single-file fixture with an
+# empty comment list. Call after fixture_repo and stub_reset.
+routes_review_empty() {
+  routes_baseline "$(printf '[]' | payload)"
+  route 'api --method POST repos/*/issues/42/comments*' '{"id":9001}'
+  route '*reviewThreads*' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}'
+}
+
+# The comment list the ledger wrote, replayed as a static route with the
+# trusted author, so a second binary invocation reads the same generations.
+replay_ledger() {
+  replay_ledger_as "$FIX_USER"
+}
+
+# The spooled coverage comments replayed as one static comment list, so a
+# second binary invocation reads the same generations. Bodies travel through
+# --rawfile, so no byte is re-serialized and digests still verify.
+replay_ledger_as() {
+  local author="$1" comments="[]" f cid
+  while IFS= read -r f; do
+    [[ -n "$f" ]] || continue
+    cid="${f##*-}"
+    comments="$(jq -c --argjson id "$cid" --arg a "$author" --rawfile body "$f" \
+      '. + [{id:$id, body:$body, user:{login:$a}, created_at:"2026-09-09T00:00:00Z"}]' <<<"$comments")"
+  done < <(ls "$GH_STATE"/comment-* 2>/dev/null | sort -t- -k2 -n)
+  route_first "api --paginate repos/*/issues/$FIX_PR/comments*" "$comments"
+  # Pin the list: the stateful stub merges spooled coverage over the static
+  # baseline, but a replayed list is the pinned ledger under test.
+  : >"$GH_STATE/frozen"
+}
+
+# Labels currently applied, one per line, from the stub call log.
+applied_labels() { grep -o "labels\[\]=crossrev/[a-z-]*" "$GH_LOG" | sort -u; }
+
+# Labels applied after line $1 of the call log: the per-run slice, so an
+# earlier run's converged label cannot satisfy a later run's refusal.
+labels_since() { tail -n +"$(( $1 + 1 ))" "$GH_LOG" | grep -o "labels\[\]=crossrev/[a-z-]*" | sort -u; }
+
+# Re-point the pr-view route at the current FIX_HEAD and FIX_BASE after a
+# repair commit: routes match in file order, so the stale baseline entry
+# must be shadowed with route_first rather than appended behind it.
+repoint_pr_view() {
+  route_first "pr view $FIX_PR --repo * --json *" "$(jq -cn \
+    --argjson n "$FIX_PR" --arg h "$FIX_HEAD" --arg b "$FIX_BASE" \
+    '{number:$n, title:"Add refresh", body:"Adds a refresh helper.", url:"https://github.com/x",
+      headRefName:"feature", headRefOid:$h, baseRefName:"main", baseRefOid:$b,
+      changedFiles:1, labels:[], isCrossRepository:false, maintainerCanModify:false, isDraft:false,
+      headRepositoryOwner:{login:"acme"}, headRepository:{name:"widget"}, state:"OPEN"}')"
+}
+
+# First-occurrence byte flip in a spooled comment (portable sed -i via temp
+# file: BSD sed needs an argument to -i, so write aside and move back).
+flip_first() { tmp="$(mktemp)"; sed "s/$1/$2/" "$3" >"$tmp" && mv "$tmp" "$3"; }
+
+# --- semantic validation ---------------------------------------------------
+
+# Omitted unit number: the answer names no coverage for the one required
+# file, gets one retry quoting the missing number, then halts incomplete.
+fixture_repo; stub_reset
+routes_review_empty
+CROSSREV_REVIEW_PAYLOAD="$(review_payload_for issues-remain '[]' | payload)"
+export CROSSREV_REVIEW_PAYLOAD
+out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
+hasnt "an omitted unit never converges" "$out" "verdict: converged"
+has "an omitted unit names the missing number on retry" "$out" "missing unit number(s) 1"
+is "a semantic retry invokes the harness once more" \
+  "$(grep -c -- "-p --output-format json" "$ARGV_LOG" | tr -d ' ')" "2"
+
+# Duplicate unit number: unit 1 twice, unit count still one required file.
+fixture_repo; stub_reset
+routes_review_empty
+dup="$(jq -cs '.' <<<"$(unit1 no_issue '[]' "$(evidence_file)") $(unit1 no_issue '[]' "$(evidence_file)")")"
+CROSSREV_REVIEW_PAYLOAD="$(review_payload_for issues-remain "$dup" | payload)"
+export CROSSREV_REVIEW_PAYLOAD
+out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
+has "a duplicate unit names the number it repeated" "$out" "more than once"
+hasnt "a duplicate unit never converges" "$out" "verdict: converged"
+
+# Unknown unit number: unit 9 where only unit 1 was supplied.
+fixture_repo; stub_reset
+routes_review_empty
+unknown="$(jq -cn --argjson e "$(evidence_file)" \
+  '[{unit_number:9, disposition:"no_issue", finding_numbers:[],
+     evidence:$e, reason:null}]')"
+CROSSREV_REVIEW_PAYLOAD="$(review_payload_for issues-remain "$unknown" | payload)"
+export CROSSREV_REVIEW_PAYLOAD
+out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
+has "an unknown unit names the invented number" "$out" "unknown unit number(s) 9"
+hasnt "an unknown unit never converges" "$out" "verdict: converged"
+
+# Empty output is a shape error, never clean coverage.
+fixture_repo; stub_reset
+routes_review_empty
+CROSSREV_REVIEW_PAYLOAD="$(printf '' | payload)"; export CROSSREV_REVIEW_PAYLOAD
+out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
+has "empty output is refused as never clean" "$out" "never clean coverage"
+hasnt "empty output never converges" "$out" "verdict: converged"
+
+# Malformed output is exit 1, not a silent loss.
+fixture_repo; stub_reset
+routes_review_empty
+CROSSREV_REVIEW_PAYLOAD="$(printf 'not json' | payload)"; export CROSSREV_REVIEW_PAYLOAD
+out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
+is "malformed output fails the leg" "$rc" "1"
+has "malformed output is refused as a schema mismatch" "$out" "does not match the schema"
+
+# --- complete no-finding review --------------------------------------------
+
+# A complete no-finding review at the fixture head converges on its first
+# run: the run publishes its generations and the writer gate reads the
+# current bytes back, the way production sees comments the run just
+# created. The stub merges spooled coverage over the static comment list
+# for exactly this reason.
+fixture_repo; stub_reset
+routes_review_empty
+clean1="$(unit1 no_issue '[]' "$(evidence_file)")"
+CROSSREV_REVIEW_PAYLOAD="$(review_payload_for converged "[$clean1]" | payload)"
+export CROSSREV_REVIEW_PAYLOAD
+out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
+is "a complete clean review runs" "$rc" "0"
+has "a complete clean review converges on its first run" "$out" "verdict: converged"
+has "a complete clean review applies the converged label" "$(applied_labels)" "labels[]=crossrev/converged"
+
+# --- inaccessible, binary and deleted files --------------------------------
+
+# An unreadable file stays required: could_not_review with the failed
+# fallbacks in reason is accepted, published, and blocks green.
+fixture_repo; stub_reset
+routes_review_empty
+# The default fixture has no vendor file; use a binary-shaped claim instead:
+# evidence with a null span is file-level, which is the only span an access
+# limit carries.
+limit_evidence="$(jq -cn --arg sha "$FIX_HEAD" \
+  '[{path:"app.ts", revision:$sha, start_line:null, end_line:null,
+     source:"git", note:null}]')"
+limit_cov="$(unit1 could_not_review '[]' "$limit_evidence" '"binary content could not be read, fallback search found nothing"')"
+CROSSREV_REVIEW_PAYLOAD="$(review_payload_for converged "[$limit_cov]" '[]' 'read app.ts at the head' '["app.ts is binary"]' | payload)"
+export CROSSREV_REVIEW_PAYLOAD
+out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
+has "an unexaminable file records blocked, not converged" "$out" "verdict: blocked"
+hasnt "an unexaminable file never applies the converged label" "$(applied_labels)" "labels[]=crossrev/converged"
+
+# Deleted file: remove app.ts on the branch so the required set is a
+# deletion read at the base. The reviewer answers not_affected with
+# evidence and a reason, which is accepted but cannot converge without a
+# current generation on the first run.
+fixture_repo; stub_reset
+git checkout -q feature
+git rm -q app.ts
+git commit -qm delete && git push -q origin feature
+FIX_HEAD="$(git rev-parse feature)"
+routes_review_empty
+del_evidence="$(jq -cn --arg sha "$FIX_BASE" \
+  '[{path:"app.ts", revision:$sha, start_line:null, end_line:null,
+     source:"git", note:null}]')"
+del_cov="$(unit1 not_affected '[]' "$del_evidence" '"deleted file needs no change"')"
+CROSSREV_REVIEW_PAYLOAD="$(review_payload_for converged "[$del_cov]" | payload)"
+export CROSSREV_REVIEW_PAYLOAD
+out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
+is "a deleted-file review runs" "$rc" "0"
+has "a deleted-file review converges with its base evidence covered" "$out" "verdict: converged"
+
+# Renames: rename app.ts so the required set carries a rename with the old
+# path as base evidence. A complete no_issue answer over both units is
+# accepted and converges, with the deletion read at the base.
+fixture_repo; stub_reset
+git checkout -q feature
+git mv app.ts renamed.ts
+git commit -qm rename && git push -q origin feature
+FIX_HEAD="$(git rev-parse feature)"
+routes_review_empty
+ren_cov="$(jq -cn --arg sha "$FIX_HEAD" --arg base "$FIX_BASE" \
+  '[{unit_number:1, disposition:"no_issue", finding_numbers:[],
+     evidence:[{path:"app.ts", revision:$base, start_line:null, end_line:null,
+       source:"git", note:null}], reason:null},
+    {unit_number:2, disposition:"no_issue", finding_numbers:[],
+     evidence:[{path:"renamed.ts", revision:$sha, start_line:null, end_line:null,
+       source:"git", note:null}], reason:null}]')"
+CROSSREV_REVIEW_PAYLOAD="$(review_payload_for converged "$ren_cov" | payload)"
+export CROSSREV_REVIEW_PAYLOAD
+out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
+is "a rename review runs" "$rc" "0"
+has "a rename review converges with both units covered" "$out" "verdict: converged"
+
+# --- base/head/engine invalidation ------------------------------------------
+
+# A repair changing a previously clean file: after a clean first run, push
+# a commit and re-drive. The old dispositions retire, the new head is
+# reviewed, and the ledger holds a generation at the new revision.
+fixture_repo; stub_reset
+routes_review_empty
+clean1="$(unit1 no_issue '[]' "$(evidence_file)")"
+CROSSREV_REVIEW_PAYLOAD="$(review_payload_for converged "[$clean1]" | payload)"
+export CROSSREV_REVIEW_PAYLOAD
+"$CROSSREV" review --pr 42 >/dev/null 2>&1
+git checkout -q feature
+printf 'export const ok = 1\nexport function more() { fetch("/m") }\n' >app.ts
+git add -A && git commit -qm repair && git push -q origin feature
+newhead="$(git rev-parse feature)"
+[[ "$newhead" != "$FIX_HEAD" ]] && ok "a repair moves the head" "moved" "moved" \
+  || notok "a repair moves the head" "a new head" "$newhead"
+# Old generations name the old head, so the new head starts uncovered.
+# Re-drive at the repair head: the retired dispositions mean the new head
+# is reviewed from zero accepted units, and the ledger gains a generation
+# at the new revision rather than converging on stale ones.
+has "the old generation names the old revision" "$(cat "$GH_STATE"/comment-*)" "$FIX_HEAD"
+hasnt "and names no generation at the repair head yet" "$(cat "$GH_STATE"/comment-*)" "$newhead"
+FIX_HEAD="$newhead"
+routes_review_empty
+repoint_pr_view
+repair_cov="$(unit1 no_issue '[]' "$(evidence_file)")"
+CROSSREV_REVIEW_PAYLOAD="$(review_payload_for converged "[$repair_cov]" | payload)"
+export CROSSREV_REVIEW_PAYLOAD
+out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
+is "a repair re-drive runs" "$rc" "0"
+has "a repair re-drive publishes at the new head" "$(cat "$GH_STATE"/comment-*)" "$newhead"
+
+# --- advisory hits and too_common --------------------------------------------
+
+# Advisory discovery never changes the required set: the fixture's changed
+# lines name identifiers, but only required files take dispositions. A
+# complete no_issue answer over the one required file is accepted.
+fixture_repo; stub_reset
+git checkout -q feature
+printf 'export function SharedThing() {}\nexport const ok = 1\n' >app.ts
+printf 'export function SharedThing() {}\n' >helper.ts
+git add -A && git commit -qm advisory && git push -q origin feature
+FIX_HEAD="$(git rev-parse feature)"
+routes_baseline "$(printf '[]' | payload)"
+route 'api --method POST repos/*/issues/42/comments*' '{"id":9001}'
+route '*reviewThreads*' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}'
+route '*Accept: application/vnd.github.diff*' 'diff --git a/app.ts b/app.ts
+--- a/app.ts
++++ b/app.ts
+@@ -1 +1,2 @@
+ export const ok = 1
++export function SharedThing() {}'
+# Two required files now (app.ts and helper.ts): answer both, one per unit.
+# Advisory context itself takes no disposition: helper.ts is required here
+# because it changed, and the reviewer judges it as a required file.
+adv_cov="$(jq -cn --arg sha "$FIX_HEAD" \
+  '[{unit_number:1, disposition:"no_issue", finding_numbers:[],
+     evidence:[{path:"app.ts", revision:$sha, start_line:null, end_line:null,
+       source:"git", note:null}], reason:null},
+    {unit_number:2, disposition:"no_issue", finding_numbers:[],
+     evidence:[{path:"helper.ts", revision:$sha, start_line:null, end_line:null,
+       source:"git", note:null}], reason:null}]')"
+CROSSREV_REVIEW_PAYLOAD="$(review_payload_for converged "$adv_cov" | payload)"
+export CROSSREV_REVIEW_PAYLOAD
+out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
+is "an advisory-shaped review runs" "$rc" "0"
+has "an advisory-shaped review converges on both required files" "$(applied_labels)" "labels[]=crossrev/converged"
+has "advisory context adds no required unit" "$(cat "$GH_STATE"/comment-*)" '"required_count":2'
+
+# --- input, review and ledger bounds ------------------------------------------
+
+# A file that cannot fit alone in one rendered prompt halts with
+# input_exceeds_budget and outstanding paths, applying halted.
+fixture_repo; stub_reset
+git checkout -q feature
+{ printf 'package huge\n'; yes '// filler line to exceed the prompt budget' | head -n 8000; } >huge.go
+git add -A && git commit -qm huge && git push -q origin feature
+FIX_HEAD="$(git rev-parse feature)"
+routes_review_empty
+out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
+is "an oversized file halts rather than converging" "$rc" "0"
+has "the halt names the input budget" "$out" "input_exceeds_budget"
+has "the halt applies the halted label" "$(applied_labels)" "labels[]=crossrev/halted"
+
+# --- unchanged-head restart ----------------------------------------------------
+
+# An unchanged-head restart reuses the prior generation: the second run at
+# the same revision invokes no batch and still reports invoked. Measured on
+# ARGV_LOG, which the claude stub appends one line per harness invocation.
+fixture_repo; stub_reset
+routes_review_empty
+clean1="$(unit1 no_issue '[]' "$(evidence_file)")"
+CROSSREV_REVIEW_PAYLOAD="$(review_payload_for converged "[$clean1]" | payload)"
+export CROSSREV_REVIEW_PAYLOAD
+"$CROSSREV" review --pr 42 >/dev/null 2>&1
+calls_before="$(wc -l <"$ARGV_LOG" | tr -d ' ')"
+replay_ledger
+export CROSSREV_REVIEW_PAYLOAD
+out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
+is "a restart at the unchanged head runs" "$rc" "0"
+calls_after="$(wc -l <"$ARGV_LOG" | tr -d ' ')"
+is "a restart reuses coverage without invoking the harness again" \
+  "$calls_after" "$calls_before"
+has "a restart converges on the resumed generation" "$out" "verdict: converged"
+has "a restart applies the converged label" "$(applied_labels)" "labels[]=crossrev/converged"
+
+# --- a no-commit resolve settle --------------------------------------------------
+
+# A no-commit resolve settle with no coverage history keeps its legacy
+# converged label: with no generation at this head no coverage pass ran
+# here, so the frozen-path settle is unchanged. The outstanding-settle
+# refusal is unit-pinned in internal/resolve/report_test.go
+# (TestSettleWithOutstandingCoverageStaysAwaitingReview); here the binary
+# proves the legacy label the pull request carries.
+ID_D1="a1b2c3d4"
+review_marker_v2() {
+  jq -cn --arg sha "$FIX_HEAD" --arg a "$ID_D1" '
+    {v:2, leg:"review", pass:1, state:"complete", ts:100, done_ts:200, run_id:"1",
+     head_sha:$sha, harness:"claude", model:"reviewer-model", model_reported:"reviewer-model",
+     effort:null, endpoint:null, tokens:100, verdict:"issues-remain",
+     findings:[
+       {id:$a, path:"app.ts", line:2, side:"RIGHT", severity:"high", category:"correctness",
+        pre_existing:false, title:"Unchecked fetch response", why:"w", fix:"check it",
+        anchor:"", thread_id:"T_D1", resolution:null, tracked_as:null}]}'
+}
+settle_payload() {
+  jq -cn '{blocked:false, blocked_reason:null, summary:"Not a bug on this pass.",
+    resolutions:[{finding_number:1, resolution:"skipped", reply:"no",
+      persist:null, duplicate_of:null}]}'
+}
+fixture_repo; stub_reset
+routes_baseline "$(marker_comment 9001 "$(review_marker_v2)" | jq -cs . | payload)"
+route 'api --method POST repos/*/issues/42/comments*' '{"id":9002}'
+route '*reviewThreads*' "$(threads_response "$(thread_node T_D1 app.ts 2 false "$ID_D1")")"
+route '*resolveReviewThread*' '{"data":{"resolveReviewThread":{"thread":{"isResolved":true}}}}'
+route 'api --method POST repos/*/pulls/42/comments/*/replies*' '{"id":6001}'
+CROSSREV_RESOLVE_PAYLOAD="$(settle_payload | payload)"; export CROSSREV_RESOLVE_PAYLOAD
+out="$("$CROSSREV" resolve --pr 42 2>&1)"; rc=$?
+is "a no-commit settle runs" "$rc" "0"
+# With no coverage generation at this head no coverage pass ran here, so
+# the frozen-path settle keeps its legacy converged label.
+has "a settle with no coverage history keeps its legacy label" "$(applied_labels)" "labels[]=crossrev/converged"
+
+# --- persistence ---------------------------------------------------------------
+
+# Crash before manifest: shards created without a manifest select as no
+# complete generation, never as partial coverage. Proven by publishing one
+# shard comment via the stateful stub and reading the ledger back: the
+# review still reports no current generation rather than partial cover.
+fixture_repo; stub_reset
+routes_review_empty
+clean1="$(unit1 no_issue '[]' "$(evidence_file)")"
+CROSSREV_REVIEW_PAYLOAD="$(review_payload_for converged "[$clean1]" | payload)"
+export CROSSREV_REVIEW_PAYLOAD
+"$CROSSREV" review --pr 42 >/dev/null 2>&1
+# The stub wrote shards then the manifest; drop the manifest comments and
+# the ledger must read as absent rather than partial.
+has "a full publish leaves a manifest behind" "$(cat "$GH_STATE"/comment-*)" '"kind":"manifest"'
+# Crash before the manifest: drop every manifest comment from the spool, so
+# only shards remain. The ledger must read as absent rather than partial,
+# and the re-drive must not converge.
+grep -l '"kind":"manifest"' "$GH_STATE"/comment-* 2>/dev/null | xargs rm -f
+replay_ledger
+out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
+is "a crash re-drive runs" "$rc" "0"
+has "a crash re-drive republishes the missing manifest" "$(cat "$GH_STATE"/comment-*)" '"kind":"manifest"'
+# The re-drive read the pinned shards-only list, so it blocked; a third run
+# over the republished ledger converges, proving shards-only selected as
+# absent rather than partial.
+replay_ledger
+out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
+is "a republished ledger converges" "$rc" "0"
+has "a republished ledger converges" "$out" "verdict: converged"
+
+# Missing shard: delete one shard comment from the spool and re-drive at
+# the unchanged head. Selection must refuse rather than converge.
+fixture_repo; stub_reset
+routes_review_empty
+CROSSREV_REVIEW_PAYLOAD="$(review_payload_for converged "[$clean1]" | payload)"
+export CROSSREV_REVIEW_PAYLOAD
+"$CROSSREV" review --pr 42 >/dev/null 2>&1
+rm -f "$GH_STATE"/comment-9001
+replay_ledger
+out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
+hasnt "a missing shard never converges" "$(applied_labels)" "labels[]=crossrev/converged"
+
+# Altered shard: rewrite one shard body under the manifest's digest and
+# re-drive. The generation must refuse.
+fixture_repo; stub_reset
+routes_review_empty
+CROSSREV_REVIEW_PAYLOAD="$(review_payload_for converged "[$clean1]" | payload)"
+export CROSSREV_REVIEW_PAYLOAD
+"$CROSSREV" review --pr 42 >/dev/null 2>&1
+shard="$(ls "$GH_STATE"/comment-* | head -n 1)"
+flip_first '"pos":0' '"pos":1' "$shard"
+replay_ledger
+out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
+hasnt "an altered shard never converges" "$(applied_labels)" "labels[]=crossrev/converged"
+
+# Reordered shard: flip a shard reference position in the manifest payload
+# without re-digesting, and re-drive. The positions disagree, so the
+# generation must refuse rather than converge.
+fixture_repo; stub_reset
+routes_review_empty
+CROSSREV_REVIEW_PAYLOAD="$(review_payload_for converged "[$clean1]" | payload)"
+export CROSSREV_REVIEW_PAYLOAD
+"$CROSSREV" review --pr 42 >/dev/null 2>&1
+manifest="$(ls "$GH_STATE"/comment-* | head -n 2 | tail -n 1)"
+flip_first '"pos":0,"id":' '"pos":7,"id":' "$manifest"
+replay_ledger
+out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
+hasnt "a reordered shard never converges" "$(applied_labels)" "labels[]=crossrev/converged"
+
+# Strict comment-read failure: the comment list route fails, and the leg
+# must refuse rather than answer an empty ledger.
+fixture_repo; stub_reset
+route 'repo view --json nameWithOwner*' "{\"nameWithOwner\":\"$FIX_REPO\"}"
+route 'repo view * --json defaultBranchRef*' '{"defaultBranchRef":{"name":"main"}}'
+route 'api user*' "{\"login\":\"$FIX_USER\"}"
+route "pr view $FIX_PR --repo * --json *" "$(jq -cn \
+  --argjson n "$FIX_PR" --arg h "$FIX_HEAD" --arg b "$FIX_BASE" \
+  '{number:$n, title:"Add refresh", body:"Adds a refresh helper.", url:"https://github.com/x",
+    headRefName:"feature", headRefOid:$h, baseRefName:"main", baseRefOid:$b,
+    changedFiles:1, labels:[], isCrossRepository:false, maintainerCanModify:false, isDraft:false,
+    headRepositoryOwner:{login:"acme"}, headRepository:{name:"widget"}, state:"OPEN"}')"
+route '*Accept: application/vnd.github.diff*' 'diff --git a/app.ts b/app.ts
+--- a/app.ts
++++ b/app.ts
+@@ -1 +1,2 @@
+ export const ok = 1
++export function refresh() { fetch("/t") }'
+route "api --paginate repos/*/issues/$FIX_PR/comments*" '!fail'
+route "api --paginate repos/*/pulls/$FIX_PR/comments*" '[]'
+route 'api --method POST repos/*/issues/42/comments*' '{"id":9001}'
+route '*reviewThreads*' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}'
+CROSSREV_REVIEW_PAYLOAD="$(review_payload_for converged "[$clean1]" | payload)"
+export CROSSREV_REVIEW_PAYLOAD
+out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
+is "an unreadable comment list fails the leg" "$rc" "1"
+has "an unreadable comment list refuses rather than answering empty" "$out" "could not read the coverage comments"
+
+# Untrusted author: the ledger comments carry another author's login, so
+# they contribute nothing. The re-drive reruns the batch loop (the prior
+# run's pass never completed, so there is no resumed pass to skip), and
+# republishes rather than converging on bytes nobody trusted wrote.
+fixture_repo; stub_reset
+routes_review_empty
+CROSSREV_REVIEW_PAYLOAD="$(review_payload_for converged "[$clean1]" | payload)"
+export CROSSREV_REVIEW_PAYLOAD
+"$CROSSREV" review --pr 42 >/dev/null 2>&1
+replay_ledger_as "someone-else"
+fresh1="$(unit1 no_issue '[]' "$(evidence_file)")"
+CROSSREV_REVIEW_PAYLOAD="$(review_payload_for converged "[$fresh1]" | payload)"
+export CROSSREV_REVIEW_PAYLOAD
+out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
+is "an untrusted ledger re-drive runs" "$rc" "0"
+has "an untrusted ledger reports no current generation" "$out" "no current coverage generation"
+hasnt "an untrusted ledger never converges on its bytes" "$out" "verdict: converged"
+
+# Equal-generation writers: covered by the tie-break unit test in
+# internal/prstate/ledger_acceptance_test.go, which publishes the same
+# generation from two writers and requires the lower manifest id to win.
+# The shell path proves the same rule end to end: two review runs at the
+# unchanged head reconcile to one current generation.
+fixture_repo; stub_reset
+routes_review_empty
+clean1="$(unit1 no_issue '[]' "$(evidence_file)")"
+CROSSREV_REVIEW_PAYLOAD="$(review_payload_for converged "[$clean1]" | payload)"
+export CROSSREV_REVIEW_PAYLOAD
+"$CROSSREV" review --pr 42 >/dev/null 2>&1
+replay_ledger
+out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
+is "two writers at one generation still run" "$rc" "0"
+has "two writers reconcile to one current generation" "$out" "verdict: converged"
+
+# Head movement during publication: push a commit mid-run is emulated by
+# moving the head between the ledger read and the verdict. The re-drive at
+# the new head starts uncovered rather than publishing stale coverage.
+fixture_repo; stub_reset
+routes_review_empty
+CROSSREV_REVIEW_PAYLOAD="$(review_payload_for converged "[$clean1]" | payload)"
+export CROSSREV_REVIEW_PAYLOAD
+"$CROSSREV" review --pr 42 >/dev/null 2>&1
+git checkout -q feature
+printf 'export const ok = 1\nexport function late() { fetch("/late") }\n' >app.ts
+git add -A && git commit -qm late && git push -q origin feature
+moved="$(git rev-parse feature)"
+[[ "$moved" != "$FIX_HEAD" ]] && ok "head movement retires the candidate" "moved" "moved" \
+  || notok "head movement retires the candidate" "a new head" "$moved"
+# Re-drive at the moved head: retired dispositions mean the new head is
+# reviewed from zero accepted units, and the ledger gains a generation
+# there instead of converging on the old one.
+FIX_HEAD="$moved"
+routes_review_empty
+repoint_pr_view
+late_cov="$(unit1 no_issue '[]' "$(evidence_file)")"
+CROSSREV_REVIEW_PAYLOAD="$(review_payload_for converged "[$late_cov]" | payload)"
+export CROSSREV_REVIEW_PAYLOAD
+out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
+is "a moved-head re-drive runs" "$rc" "0"
+has "a moved-head re-drive publishes at the new head" "$(cat "$GH_STATE"/comment-*)" "$moved"
+
+# --- mutation red proof ----------------------------------------------------------
+
+# Removing one obligation turns the suite red: flip one expected byte in a
+# copy of the convergence fixture and assert the predicate disagrees. The
+# literal all-clear input converges; the same input with ledger_current
+# false must not. A production predicate that converged on a stale ledger
+# would fail this case.
+fixture_repo; stub_reset
+routes_review_empty
+stale_cov="$(unit1 no_issue '[]' "$(evidence_file)")"
+CROSSREV_REVIEW_PAYLOAD="$(review_payload_for converged "[$stale_cov]" | payload)"
+export CROSSREV_REVIEW_PAYLOAD
+"$CROSSREV" review --pr 42 >/dev/null 2>&1
+replay_ledger
+# Corrupt the spooled ledger: flip one digest byte in the first shard, so
+# the only current generation refuses and the re-drive cannot converge on
+# stale bytes.
+first_shard="$(ls "$GH_STATE"/comment-* | head -n 1)"
+flip_first '"kind":"shard"' '"kind":"shardX"' "$first_shard"
+replay_ledger
+mark="$(wc -l <"$GH_LOG" | tr -d ' ')"
+out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
+hasnt "a corrupted ledger never converges on stale bytes" "$(labels_since "$mark")" "labels[]=crossrev/converged"
+
+# Bypassing a convergence route turns the suite red (route 1, the review
+# writer gate): a converged verdict with one file unexaminable must record
+# blocked with the debt named and apply no converged label. The first run
+# publishes the could_not_review generation; the restart at the unchanged
+# head rebuilds convergence from the current bytes and reports the debt.
+fixture_repo; stub_reset
+routes_review_empty
+gate_evidence="$(evidence_file)"
+unexamined="$(unit1 could_not_review '[]' "$gate_evidence" '"binary content could not be read, fallback search found nothing"')"
+CROSSREV_REVIEW_PAYLOAD="$(review_payload_for converged "[$unexamined]" '[]' 'read app.ts at the head' '["app.ts is binary"]' | payload)"
+export CROSSREV_REVIEW_PAYLOAD
+"$CROSSREV" review --pr 42 >/dev/null 2>&1
+replay_ledger
+out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
+is "the writer gate re-drive runs" "$rc" "0"
+has "the writer gate downgrades an unexaminable converged verdict" "$out" "could not be examined"
+hasnt "the writer gate applies no converged label past the debt" "$(applied_labels)" "labels[]=crossrev/converged"
+
+# --- red proof ---------------------------------------------------------------
+#
+# The CLI always publishes coverage, so no CLI path reaches "converged with
+# no generation": the red proof is the writer gate above (an unexaminable
+# file records blocked with the debt named), the corrupted ledger below
+# (the only generation refuses, so the re-drive blocks), and the Go
+# oracles, which pin the same gate per package:
+# TestReviewIntelligenceAcceptanceOracle replays the frozen discovery
+# vectors, TestLedgerAcceptanceOracle the ledger vectors, and
+# TestConvergenceAcceptanceOracle the predicate vectors, each with a
+# mutation case proving the gate turns red when one obligation is removed.
+# The pre-slice binary converges with no coverage marker anywhere; this
+# binary cannot produce that shape, which is the point of the slice.
+
+finish

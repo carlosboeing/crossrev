@@ -51,6 +51,10 @@ emit() {
 # unmatched writes below still answer {}.
 if [[ -n "${CROSSREV_GH_STATE:-}" ]]; then
   mkdir -p "$CROSSREV_GH_STATE"
+  # The login coverage comments are attributed to. The stub cannot know it
+  # from the create call (GitHub sets it server-side), so the suite exports
+  # it beside the state directory and the snapshot file carries it in.
+  gh_author="${CROSSREV_GH_AUTHOR:-tester}"
   # A coverage create: POST .../issues/42/comments with a crossrev:c marker
   # in the body. Spool the body and answer the next comment id.
   if [[ "$joined" == "api --method POST repos/"*"/issues/"*"/comments"* ]]; then
@@ -73,8 +77,43 @@ if [[ -n "${CROSSREV_GH_STATE:-}" ]]; then
     id="${joined##*/}"
     id="${id%% *}"
     if [[ -f "$CROSSREV_GH_STATE/comment-$id" ]]; then
-      jq -cn --argjson id "$id" --arg body "$(cat "$CROSSREV_GH_STATE/comment-$id")" \
-        '{id:$id, body:$body, user:{login:"tester"}, created_at:"2026-09-09T00:00:00Z"}' | emit
+      jq -cn --argjson id "$id" --arg body "$(cat "$CROSSREV_GH_STATE/comment-$id")" --arg a "$gh_author" \
+        '{id:$id, body:$body, user:{login:$a}, created_at:"2026-09-09T00:00:00Z"}' | emit
+      exit 0
+    fi
+  fi
+  # Paginated comment list: merge the spooled coverage comments over the
+  # static baseline, the way the API answers comments the run just created.
+  # Without this the ledger could never see the generation the same run
+  # published, and every first run would block where production converges.
+  # A test that pins the list (replay_ledger) writes the frozen guard, and
+  # the static route answers alone.
+  if [[ "$joined" == "api --paginate repos/"*"/issues/"*"/comments"* && ! -f "$CROSSREV_GH_STATE/frozen" ]]; then
+    spool="[]"
+    for f in "$CROSSREV_GH_STATE"/comment-*; do
+      [[ -e "$f" ]] || continue
+      cid="${f##*-}"
+      case "$cid" in *[!0-9]*) continue;; esac
+      spool="$(jq -c --argjson id "$cid" --arg a "$gh_author" --rawfile body "$f" \
+        '. + [{id:$id, body:$body, user:{login:$a}, created_at:"2026-09-09T00:00:00Z"}]' <<<"$spool")"
+    done
+    if [[ "$spool" != "[]" ]]; then
+      static="[]"
+      if [[ -f "${CROSSREV_GH_ROUTES:-/nonexistent}" ]]; then
+        while IFS=$'\t' read -r pat resp; do
+          [[ -n "${pat:-}" ]] || continue
+          # shellcheck disable=SC2053  # the pattern is a glob on purpose
+          if [[ "$joined" == $pat ]]; then
+            if [[ "${resp:-}" == @* ]]; then
+              static="$(cat "${resp#@}")"
+            else
+              static="${resp:-[]}"
+            fi
+            break
+          fi
+        done <"$CROSSREV_GH_ROUTES"
+      fi
+      jq -cs '.[0] + .[1]' <(printf '%s' "$static") <(printf '%s' "$spool") | emit
       exit 0
     fi
   fi

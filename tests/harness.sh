@@ -226,6 +226,7 @@ stub_reset() {
   : >"$GH_LOG"; : >"$GH_ROUTES"; : >"$ARGV_LOG"; : >"$BROWSER_LOG"
   mkdir -p "$GH_STATE"
   export CROSSREV_GH_LOG="$GH_LOG" CROSSREV_GH_ROUTES="$GH_ROUTES" CROSSREV_PROMPT_LOG="$PROMPT_LOG"
+  export CROSSREV_GH_AUTHOR="$FIX_USER"
   export CROSSREV_GH_STATE="$GH_STATE"
   export CROSSREV_BROWSER_LOG="$BROWSER_LOG"
   # Appended to, not overwritten: `crossrev run` invokes the harness twice, and

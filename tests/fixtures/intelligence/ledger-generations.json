@@ -1,0 +1,156 @@
+{
+  "doc": "Acceptance ledger vectors for the Review Intelligence coverage slice (Task D1). Hand-authored expected generations and persistence outcomes: never generated from production discovery or convergence code. Unit identities are the first 16 hex characters of SHA-256 over the u1 file preimage; body digests are full SHA-256 hex over the evidence bytes. Base and head SHAs are literal placeholders the tests rebind to the fixture revision pair at runtime.",
+  "engine": "file-v1",
+  "engine_id": "e2b455e748711e52",
+  "generations": [
+    {
+      "name": "two files, one judged and one outstanding",
+      "gen": 7,
+      "base_sha": "1111111111111111111111111111111111111111",
+      "head_sha": "2222222222222222222222222222222222222222",
+      "paths": ["a.go", "b.go"],
+      "records": [
+        {
+          "type": "unit",
+          "unit_id": "7cace3282fbd6583",
+          "path_index": 0,
+          "kind": "file",
+          "change": "modified",
+          "body_digest": "7b39baa38a2ec2b8d111bbbd8e448e80226477ab40105d9d2123d4dc18067438",
+          "disposition": "no_issue",
+          "finding_ids": [],
+          "evidence": [
+            {
+              "path": "a.go",
+              "revision": "2222222222222222222222222222222222222222",
+              "start_line": 1,
+              "end_line": 1,
+              "source": "git",
+              "note": null
+            }
+          ],
+          "reason": null
+        },
+        {
+          "type": "outstanding",
+          "unit_id": "3f5d31d7f7029517",
+          "path_index": 1,
+          "kind": "file",
+          "change": "added",
+          "body_digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "disposition": null,
+          "finding_ids": null,
+          "evidence": [],
+          "reason": "binary content is not shown"
+        }
+      ],
+      "advisory": {
+        "count": 1,
+        "rules": ["convention", "search"],
+        "limits": [
+          {"rule": "search:SharedThing", "observed": 200, "limit": 200, "reason": "too_common"}
+        ]
+      },
+      "excluded": [
+        {"path": "vendor/lib.go", "reason": "vendored code"}
+      ],
+      "scope_report": {
+        "examined_scope": "Read a.go and b.go at the head.",
+        "known_limits": ["b.go is binary."]
+      },
+      "verification": {
+        "status": "not_implemented",
+        "revision": null,
+        "checks": null,
+        "sources_inspected": null,
+        "rejected": null,
+        "recovery": null
+      },
+      "required_count": 2,
+      "outstanding_count": 1,
+      "expected_manifest_version": 1,
+      "expected_manifest_kind": "manifest",
+      "expected_granularity": "file"
+    },
+    {
+      "name": "two files, both judged with one finding",
+      "gen": 9,
+      "base_sha": "1111111111111111111111111111111111111111",
+      "head_sha": "2222222222222222222222222222222222222222",
+      "paths": ["a.go", "b.go"],
+      "records": [
+        {
+          "type": "unit",
+          "unit_id": "7cace3282fbd6583",
+          "path_index": 0,
+          "kind": "file",
+          "change": "modified",
+          "body_digest": "7b39baa38a2ec2b8d111bbbd8e448e80226477ab40105d9d2123d4dc18067438",
+          "disposition": "finding",
+          "finding_ids": ["a1b2c3d4e5f60718"],
+          "evidence": [
+            {
+              "path": "a.go",
+              "revision": "2222222222222222222222222222222222222222",
+              "start_line": 1,
+              "end_line": 1,
+              "source": "git",
+              "note": null
+            }
+          ],
+          "reason": null
+        },
+        {
+          "type": "unit",
+          "unit_id": "3f5d31d7f7029517",
+          "path_index": 1,
+          "kind": "file",
+          "change": "added",
+          "body_digest": "983aab874348ab0e62d9fa51e0719b12f570234284c1f21c740bb6d3ca7cf11d",
+          "disposition": "no_issue",
+          "finding_ids": [],
+          "evidence": [
+            {
+              "path": "b.go",
+              "revision": "2222222222222222222222222222222222222222",
+              "start_line": null,
+              "end_line": null,
+              "source": "git",
+              "note": null
+            }
+          ],
+          "reason": null
+        }
+      ],
+      "advisory": {"count": 0, "rules": ["convention", "search"], "limits": []},
+      "excluded": [],
+      "scope_report": {
+        "examined_scope": "Read a.go and b.go at the head.",
+        "known_limits": []
+      },
+      "verification": {
+        "status": "not_implemented",
+        "revision": null,
+        "checks": null,
+        "sources_inspected": null,
+        "rejected": null,
+        "recovery": null
+      },
+      "required_count": 2,
+      "outstanding_count": 0,
+      "expected_manifest_version": 1,
+      "expected_manifest_kind": "manifest",
+      "expected_granularity": "file"
+    }
+  ],
+  "persistence": {
+    "crash_before_manifest": "shards created without a manifest select as no complete generation, never as partial coverage",
+    "missing_shard": "a manifest naming a shard comment that is gone is an error, not an empty ledger",
+    "altered_shard": "a shard whose body no longer matches its digest refuses the generation",
+    "reordered_shard": "a manifest whose shard positions disagree refuses the generation",
+    "strict_comment_read_failure": "an unreadable comment list is an error, never an empty ledger",
+    "untrusted_author": "comments by any other author contribute nothing",
+    "equal_generation_tie": "two manifests at one generation reconcile by lower manifest comment id",
+    "head_movement_during_publication": "a head that moved during publication retires the candidate with no manifest created"
+  }
+}
