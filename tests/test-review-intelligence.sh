@@ -33,13 +33,13 @@ review_payload_for() {
       examined_scope:$s, known_limits:$l}'
 }
 
-# Coverage for unit 1 over app.ts at $FIX_HEAD. $1 disposition, $2 finding
+# Coverage for unit 1 over app.ts at $FIX_HEAD. $1 verdict, $2 finding
 # numbers JSON, $3 evidence JSON, $4 reason JSON (default null).
 unit1() {
-  local dispo="$1" numbers="$2" evidence="$3" reason="${4:-null}"
-  jq -cn --arg d "$dispo" --argjson n "$numbers" --argjson e "$evidence" \
+  local verdict="$1" numbers="$2" evidence="$3" reason="${4:-null}"
+  jq -cn --arg d "$verdict" --argjson n "$numbers" --argjson e "$evidence" \
     --argjson r "$reason" \
-    '{unit_number:1, disposition:$d, finding_numbers:$n, evidence:$e, reason:$r}'
+    '{unit_number:1, verdict:$d, finding_numbers:$n, evidence:$e, reason:$r}'
 }
 
 # File-level git evidence for app.ts at the fixture head.
@@ -138,7 +138,7 @@ hasnt "a duplicate unit never converges" "$out" "verdict: converged"
 fixture_repo; stub_reset
 routes_review_empty
 unknown="$(jq -cn --argjson e "$(evidence_file)" \
-  '[{unit_number:9, disposition:"no_issue", finding_numbers:[],
+  '[{unit_number:9, verdict:"no_issue", finding_numbers:[],
      evidence:$e, reason:null}]')"
 CROSSREV_REVIEW_PAYLOAD="$(review_payload_for issues-remain "$unknown" | payload)"
 export CROSSREV_REVIEW_PAYLOAD
@@ -228,10 +228,10 @@ git commit -qm rename && git push -q origin feature
 FIX_HEAD="$(git rev-parse feature)"
 routes_review_empty
 ren_cov="$(jq -cn --arg sha "$FIX_HEAD" --arg base "$FIX_BASE" \
-  '[{unit_number:1, disposition:"no_issue", finding_numbers:[],
+  '[{unit_number:1, verdict:"no_issue", finding_numbers:[],
      evidence:[{path:"app.ts", revision:$base, start_line:null, end_line:null,
        source:"git", note:null}], reason:null},
-    {unit_number:2, disposition:"no_issue", finding_numbers:[],
+    {unit_number:2, verdict:"no_issue", finding_numbers:[],
      evidence:[{path:"renamed.ts", revision:$sha, start_line:null, end_line:null,
        source:"git", note:null}], reason:null}]')"
 CROSSREV_REVIEW_PAYLOAD="$(review_payload_for converged "$ren_cov" | payload)"
@@ -243,7 +243,7 @@ has "a rename review converges with both units covered" "$out" "verdict: converg
 # --- base/head/engine invalidation ------------------------------------------
 
 # A repair changing a previously clean file: after a clean first run, push
-# a commit and re-drive. The old dispositions retire, the new head is
+# a commit and re-drive. The old verdicts retire, the new head is
 # reviewed, and the ledger holds a generation at the new revision.
 fixture_repo; stub_reset
 routes_review_empty
@@ -258,7 +258,7 @@ newhead="$(git rev-parse feature)"
 [[ "$newhead" != "$FIX_HEAD" ]] && ok "a repair moves the head" "moved" "moved" \
   || notok "a repair moves the head" "a new head" "$newhead"
 # Old generations name the old head, so the new head starts uncovered.
-# Re-drive at the repair head: the retired dispositions mean the new head
+# Re-drive at the repair head: the retired verdicts mean the new head
 # is reviewed from zero accepted units, and the ledger gains a generation
 # at the new revision rather than converging on stale ones.
 has "the old generation names the old revision" "$(cat "$GH_STATE"/comment-*)" "$FIX_HEAD"
@@ -276,7 +276,7 @@ has "a repair re-drive publishes at the new head" "$(cat "$GH_STATE"/comment-*)"
 # --- advisory hits and too_common --------------------------------------------
 
 # Advisory discovery never changes the required set: the fixture's changed
-# lines name identifiers, but only required files take dispositions. A
+# lines name identifiers, but only required files take verdicts. A
 # complete no_issue answer over the one required file is accepted.
 fixture_repo; stub_reset
 git checkout -q feature
@@ -294,13 +294,13 @@ route '*Accept: application/vnd.github.diff*' 'diff --git a/app.ts b/app.ts
  export const ok = 1
 +export function SharedThing() {}'
 # Two required files now (app.ts and helper.ts): answer both, one per unit.
-# Advisory context itself takes no disposition: helper.ts is required here
+# Advisory context itself takes no verdict: helper.ts is required here
 # because it changed, and the reviewer judges it as a required file.
 adv_cov="$(jq -cn --arg sha "$FIX_HEAD" \
-  '[{unit_number:1, disposition:"no_issue", finding_numbers:[],
+  '[{unit_number:1, verdict:"no_issue", finding_numbers:[],
      evidence:[{path:"app.ts", revision:$sha, start_line:null, end_line:null,
        source:"git", note:null}], reason:null},
-    {unit_number:2, disposition:"no_issue", finding_numbers:[],
+    {unit_number:2, verdict:"no_issue", finding_numbers:[],
      evidence:[{path:"helper.ts", revision:$sha, start_line:null, end_line:null,
        source:"git", note:null}], reason:null}]')"
 CROSSREV_REVIEW_PAYLOAD="$(review_payload_for converged "$adv_cov" | payload)"
@@ -530,7 +530,7 @@ git add -A && git commit -qm late && git push -q origin feature
 moved="$(git rev-parse feature)"
 [[ "$moved" != "$FIX_HEAD" ]] && ok "head movement retires the candidate" "moved" "moved" \
   || notok "head movement retires the candidate" "a new head" "$moved"
-# Re-drive at the moved head: retired dispositions mean the new head is
+# Re-drive at the moved head: retired verdicts mean the new head is
 # reviewed from zero accepted units, and the ledger gains a generation
 # there instead of converging on the old one.
 FIX_HEAD="$moved"

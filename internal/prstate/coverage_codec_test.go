@@ -66,7 +66,7 @@ func sampleRecords(t *testing.T) []prstate.Record {
 			Kind:        prstate.CoverageGranularityFile,
 			Change:      "modified",
 			BodyDigest:  coverageBodyDigest("package a\n"),
-			Disposition: prstate.Some("no_issue"),
+			Verdict:     prstate.Some("no_issue"),
 			FindingIDs:  []string{},
 			Evidence: []prstate.Evidence{{
 				Path:      "a.go",
@@ -157,10 +157,10 @@ func TestCoverageCodecMatchesTheV1Schema(t *testing.T) {
 		t.Fatalf("shard holds %d records", len(s.Records))
 	}
 	judged, outstanding := s.Records[0], s.Records[1]
-	if judged.Type != "unit" || judged.Disposition.Value() != "no_issue" {
+	if judged.Type != "unit" || judged.Verdict.Value() != "no_issue" {
 		t.Errorf("judged record is %+v", judged)
 	}
-	if outstanding.Type != "outstanding" || !outstanding.Disposition.IsNull() || outstanding.FindingIDs != nil {
+	if outstanding.Type != "outstanding" || !outstanding.Verdict.IsNull() || outstanding.FindingIDs != nil {
 		t.Errorf("outstanding record is %+v", outstanding)
 	}
 

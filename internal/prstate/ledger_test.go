@@ -228,14 +228,14 @@ func TestSelectGenerationBreaksEqualGenerationTiesByLowerCommentID(t *testing.T)
 	second := newScriptStore(t)
 
 	// Two writers publish the same generation number with different
-	// dispositions: the first finds nothing, the second records a finding.
+	// verdicts: the first finds nothing, the second records a finding.
 	quiet := candidateFor(t, 9)
 	_, _, err := prstate.PublishGeneration(t.Context(), first, mustTestSlug(t), 42, quiet, func() error { return nil })
 	if err != nil {
 		t.Fatalf("first PublishGeneration: %v", err)
 	}
 	loud := candidateFor(t, 9)
-	loud.Records[0].Disposition = prstate.Some("finding")
+	loud.Records[0].Verdict = prstate.Some("finding")
 	loud.Records[0].FindingIDs = []string{"a1b2c3d4e5f60718"}
 	_, _, err = prstate.PublishGeneration(t.Context(), second, mustTestSlug(t), 42, loud, func() error { return nil })
 	if err != nil {
@@ -293,7 +293,7 @@ func TestSelectGenerationBreaksEqualGenerationTiesByLowerCommentID(t *testing.T)
 	if len(got.Records) != 2 {
 		t.Fatalf("selected %d records, want 2", len(got.Records))
 	}
-	if got.Records[0].Disposition.Value() != "no_issue" {
+	if got.Records[0].Verdict.Value() != "no_issue" {
 		t.Errorf("the losing manifest's finding survived the tie-break: %+v", got.Records[0])
 	}
 
@@ -307,7 +307,7 @@ func TestSelectGenerationBreaksEqualGenerationTiesByLowerCommentID(t *testing.T)
 	if err != nil {
 		t.Fatalf("SelectGeneration reversed: %v", err)
 	}
-	if again.Records[0].Disposition.Value() != "no_issue" {
+	if again.Records[0].Verdict.Value() != "no_issue" {
 		t.Errorf("reversed order reconciled differently: %+v", again.Records[0])
 	}
 }
@@ -333,7 +333,7 @@ func TestSelectGenerationFiltersByTrustedAuthor(t *testing.T) {
 }
 
 // TestSelectGenerationRetiresStaleRevisions proves a base, head or engine
-// change retires every earlier disposition: a manifest at another revision
+// change retires every earlier verdict: a manifest at another revision
 // pair or engine is skipped, not merged.
 func TestSelectGenerationRetiresStaleRevisions(t *testing.T) {
 	store := newScriptStore(t)

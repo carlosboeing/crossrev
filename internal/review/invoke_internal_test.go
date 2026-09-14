@@ -46,7 +46,7 @@ func TestCheckPayloadWithExpectationsRefusesAnOmittedUnit(t *testing.T) {
 		},
 	}}
 	payload := `{"verdict":"converged","findings":[],` +
-		`"coverage":[{"unit_number":1,"disposition":"no_issue","finding_numbers":[],` +
+		`"coverage":[{"unit_number":1,"verdict":"no_issue","finding_numbers":[],` +
 		`"evidence":[{"path":"a.go","revision":"2222222222222222222222222222222222222222",` +
 		`"start_line":1,"end_line":10,"source":"git","note":null}],"reason":null}],` +
 		`"examined_scope":"read the first file","known_limits":[]}`

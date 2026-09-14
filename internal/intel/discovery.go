@@ -89,7 +89,7 @@ type Scope struct {
 //
 // A read failure for one path degrades that unit to unavailable; it never
 // fails the whole set. Two changes resolving to one UnitID fail the pass
-// with both paths named, because a single disposition must never stand for
+// with both paths named, because a single verdict must never stand for
 // two units.
 func RequiredFiles(ctx context.Context, changes []core.FileChange, read FileReader, base, head core.Revision, excluded []Exclusion) (Scope, error) {
 	scope := Scope{Base: base, Head: head, Engine: core.FileEngineVersion, EngineID: core.FileEngineID()}

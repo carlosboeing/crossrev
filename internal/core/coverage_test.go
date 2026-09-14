@@ -49,17 +49,17 @@ func TestParseChangeKindRoundTrips(t *testing.T) {
 	}
 }
 
-func TestParseDispositionRoundTrips(t *testing.T) {
-	for _, d := range []Disposition{DispositionNoIssue, DispositionFinding, DispositionNotAffected, DispositionCouldNotReview} {
-		parsed, err := ParseDisposition(string(d))
+func TestParseFileVerdictRoundTrips(t *testing.T) {
+	for _, d := range []FileVerdict{FileVerdictNoIssue, FileVerdictFinding, FileVerdictNotAffected, FileVerdictCouldNotReview} {
+		parsed, err := ParseFileVerdict(string(d))
 		if err != nil {
-			t.Errorf("ParseDisposition(%q): %v", d, err)
+			t.Errorf("ParseFileVerdict(%q): %v", d, err)
 		} else if parsed != d {
-			t.Errorf("ParseDisposition(%q) = %q", d, parsed)
+			t.Errorf("ParseFileVerdict(%q) = %q", d, parsed)
 		}
 	}
-	if _, err := ParseDisposition("pending"); err == nil {
-		t.Error("ParseDisposition(pending) succeeded, want an error")
+	if _, err := ParseFileVerdict("pending"); err == nil {
+		t.Error("ParseFileVerdict(pending) succeeded, want an error")
 	}
 }
 

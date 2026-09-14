@@ -58,7 +58,7 @@ Backlog paths stay out: files CrossRev itself writes (the deferred-findings list
 
 Exact search hits and adjacent-test names are hints only. They add no required file and close none. Search stops at 200 hits per term and marks the term `too_common`.
 
-The reviewer gives each required file one disposition: `no_issue`, `finding`, `not_affected`, or `could_not_review`. A file with a disposition is **covered**; a file still waiting for one is **outstanding**. Every required file ends the pass in exactly one of those two states.
+The reviewer gives each required file one file verdict: `no_issue`, `finding`, `not_affected`, or `could_not_review`. A file with a verdict is **covered**; a file still waiting for one is **outstanding**. Every required file ends the pass in exactly one of those two states.
 
 One pass reads at most 400 required files. Batches hold at most 40 files in path order.
 

@@ -43,7 +43,7 @@ func (l *Leg) buildConvergence(ctx context.Context, loaded Context, marker prsta
 		case prstate.CoverageRecordOutstanding:
 			conv.Outstanding++
 		case prstate.CoverageRecordUnit:
-			disp, ok := record.Disposition.Get()
+			disp, ok := record.Verdict.Get()
 			if !ok || disp == "" {
 				conv.Outstanding++
 				continue

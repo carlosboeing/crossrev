@@ -63,8 +63,8 @@ type BatchPlan struct {
 }
 
 // Batches packs the scope's outstanding required files — those with no accepted
-// disposition — into deterministic path-ordered batches under the three
-// budgets. Accepted dispositions come from the current coverage generation, so
+// verdict — into deterministic path-ordered batches under the three
+// budgets. Accepted verdicts come from the current coverage generation, so
 // a resumed pass packs only what remains. Packing measures only through
 // render: a batch is admitted when render says its complete prompt fits, and a
 // file that does not fit alone halts with input_exceeds_budget rather than

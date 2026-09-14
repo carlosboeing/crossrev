@@ -126,7 +126,7 @@ func TestReviewCoverageSemanticContract(t *testing.T) {
 		{
 			name: "finding with no finding number is a semantic contradiction",
 			payload: reviewPayload(`[]`, reviewCoverage(
-				`{"unit_number":1,"disposition":"finding","finding_numbers":[],"evidence":[`+reviewGitEvidence("a.go", head.SHA(), 1, 10)+`],"reason":null}`,
+				`{"unit_number":1,"verdict":"finding","finding_numbers":[],"evidence":[`+reviewGitEvidence("a.go", head.SHA(), 1, 10)+`],"reason":null}`,
 				reviewUnitNoIssue(2, "b.go", head.SHA(), 1, 4),
 			)),
 			want: "coverage for unit 1 says finding but names no finding number",
@@ -171,7 +171,7 @@ func TestReviewCoverageSemanticContract(t *testing.T) {
 		{
 			name: "not_affected without evidence and a reason is a semantic contradiction",
 			payload: reviewPayload(`[]`, reviewCoverage(
-				`{"unit_number":1,"disposition":"not_affected","finding_numbers":[],"evidence":[],"reason":null}`,
+				`{"unit_number":1,"verdict":"not_affected","finding_numbers":[],"evidence":[],"reason":null}`,
 				reviewUnitNoIssue(2, "b.go", head.SHA(), 1, 4),
 			)),
 			want: "coverage for unit 1 says not_affected without evidence and a reason, and a changed file is not cleared by assertion",
@@ -180,14 +180,14 @@ func TestReviewCoverageSemanticContract(t *testing.T) {
 		{
 			name: "not_affected with evidence and a reason passes",
 			payload: reviewPayload(`[]`, reviewCoverage(
-				`{"unit_number":1,"disposition":"not_affected","finding_numbers":[],"evidence":[`+reviewGitEvidence("a.go", head.SHA(), 1, 10)+`],"reason":"generated file, matches its source"}`,
+				`{"unit_number":1,"verdict":"not_affected","finding_numbers":[],"evidence":[`+reviewGitEvidence("a.go", head.SHA(), 1, 10)+`],"reason":"generated file, matches its source"}`,
 				reviewUnitNoIssue(2, "b.go", head.SHA(), 1, 4),
 			)),
 		},
 		{
 			name: "could_not_review without a reason is a semantic contradiction",
 			payload: reviewPayload(`[]`, reviewCoverage(
-				`{"unit_number":1,"disposition":"could_not_review","finding_numbers":[],"evidence":[],"reason":null}`,
+				`{"unit_number":1,"verdict":"could_not_review","finding_numbers":[],"evidence":[],"reason":null}`,
 				reviewUnitNoIssue(2, "b.go", head.SHA(), 1, 4),
 			)),
 			want: "coverage for unit 1 says could_not_review without the failed fallbacks in reason",
@@ -196,7 +196,7 @@ func TestReviewCoverageSemanticContract(t *testing.T) {
 		{
 			name: "could_not_review with the failed fallbacks in reason passes",
 			payload: reviewPayload(`[]`, reviewCoverage(
-				`{"unit_number":1,"disposition":"could_not_review","finding_numbers":[],"evidence":[],"reason":"submodule fetch failed, then LFS fetch failed"}`,
+				`{"unit_number":1,"verdict":"could_not_review","finding_numbers":[],"evidence":[],"reason":"submodule fetch failed, then LFS fetch failed"}`,
 				reviewUnitNoIssue(2, "b.go", head.SHA(), 1, 4),
 			)),
 		},
@@ -302,18 +302,18 @@ func reviewGitEvidence(path, revision string, start, end int) string {
 		`,"source":"git","note":null}`
 }
 
-// reviewUnitNoIssue is a clean disposition over one evidence item.
+// reviewUnitNoIssue is a clean verdict over one evidence item.
 func reviewUnitNoIssue(number int, path, revision string, start, end int) string {
 	return `{"unit_number":` + reviewItoa(number) +
-		`,"disposition":"no_issue","finding_numbers":[]` +
+		`,"verdict":"no_issue","finding_numbers":[]` +
 		`,"evidence":[` + reviewGitEvidence(path, revision, start, end) + `]` +
 		`,"reason":null}`
 }
 
-// reviewUnitFinding is a finding disposition naming one finding number.
+// reviewUnitFinding is a finding verdict naming one finding number.
 func reviewUnitFinding(number int, path, revision string, start, end, finding int) string {
 	return `{"unit_number":` + reviewItoa(number) +
-		`,"disposition":"finding","finding_numbers":[` + reviewItoa(finding) + `]` +
+		`,"verdict":"finding","finding_numbers":[` + reviewItoa(finding) + `]` +
 		`,"evidence":[` + reviewGitEvidence(path, revision, start, end) + `]` +
 		`,"reason":null}`
 }

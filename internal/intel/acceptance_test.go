@@ -105,7 +105,7 @@ func TestReviewIntelligenceAcceptanceOracle(t *testing.T) {
 	}
 
 	// The engine identity is frozen beside the cases: a later change to
-	// enumeration, evidence or disposition semantics must change the
+	// enumeration, evidence or verdict semantics must change the
 	// literal and invalidate prior generations.
 	if core.FileEngineVersion != oracle.Engine {
 		t.Errorf("engine = %q, want frozen %q", core.FileEngineVersion, oracle.Engine)

@@ -178,7 +178,7 @@ func reviewShape(payload []byte) error {
 		badCoverage++
 	}
 	if badCoverage > 0 {
-		return shapef("%d coverage %s have a missing or out-of-range unit_number, disposition, "+
+		return shapef("%d coverage %s have a missing or out-of-range unit_number, verdict, "+
 			"finding_numbers, evidence or reason — first: %s",
 			badCoverage, coveragePlural(badCoverage), jqCompact(firstCoverage))
 	}
@@ -193,7 +193,7 @@ func coveragePlural(n int) string {
 }
 
 // coverageEntryIsBad reports whether one coverage entry fails the member
-// shape: a whole unit number at or above 1, a disposition inside the four, a
+// shape: a whole unit number at or above 1, a verdict inside the four, a
 // finding_numbers array of whole numbers at or above 1, an evidence array of
 // well-shaped items, and a reason that is a string or null.
 func coverageEntryIsBad(entry json.RawMessage) bool {
@@ -207,7 +207,7 @@ func coverageEntryIsBad(entry json.RawMessage) bool {
 	if !isWholeAtLeast(c["unit_number"], 1) {
 		return true
 	}
-	if !jqIn(c["disposition"], "no_issue", "finding", "not_affected", "could_not_review") {
+	if !jqIn(c["verdict"], "no_issue", "finding", "not_affected", "could_not_review") {
 		return true
 	}
 	if jqType(c["finding_numbers"]) != "array" {
@@ -353,25 +353,25 @@ func reviewSemantic(payload []byte, expected ReviewExpectations) error {
 					item.number, f, reviewFindingsRangeWords(len(doc.Findings)))
 			}
 		}
-		if item.dispo == string(core.DispositionFinding) {
+		if item.verdict == string(core.FileVerdictFinding) {
 			if len(item.findings) == 0 {
 				return semanticf("coverage for unit %d says finding but names no finding number",
 					item.number)
 			}
 		} else if len(item.findings) > 0 {
 			return semanticf("coverage for unit %d says %s but names finding number(s) %s",
-				item.number, item.dispo, reviewIntsWords(item.findings))
+				item.number, item.verdict, reviewIntsWords(item.findings))
 		}
 	}
 
 	for _, item := range ordered {
-		switch item.dispo {
-		case string(core.DispositionNotAffected):
+		switch item.verdict {
+		case string(core.FileVerdictNotAffected):
 			if len(item.evidence) == 0 || !item.hasReason {
 				return semanticf("coverage for unit %d says not_affected without evidence and a reason, and a changed file is not cleared by assertion",
 					item.number)
 			}
-		case string(core.DispositionCouldNotReview):
+		case string(core.FileVerdictCouldNotReview):
 			if !item.hasReason {
 				return semanticf("coverage for unit %d says could_not_review without the failed fallbacks in reason",
 					item.number)
@@ -381,7 +381,7 @@ func reviewSemantic(payload []byte, expected ReviewExpectations) error {
 
 	for _, item := range ordered {
 		unit := expected.Units[item.number-1]
-		if len(item.evidence) == 0 && item.dispo != string(core.DispositionCouldNotReview) {
+		if len(item.evidence) == 0 && item.verdict != string(core.FileVerdictCouldNotReview) {
 			return semanticf("coverage for unit %d names no evidence, and a judgement with nothing behind it is not a judgement",
 				item.number)
 		}
@@ -413,7 +413,7 @@ func reviewSemantic(payload []byte, expected ReviewExpectations) error {
 type reviewCoverageEntry struct {
 	number    int
 	literal   string
-	dispo     string
+	verdict     string
 	findings  []int
 	evidence  []reviewEvidenceRef
 	reason    string
@@ -438,7 +438,7 @@ type reviewEvidenceRef struct {
 func decodeReviewCoverageEntry(entry json.RawMessage) (reviewCoverageEntry, bool) {
 	var c struct {
 		UnitNumber     json.RawMessage   `json:"unit_number"`
-		Disposition    string            `json:"disposition"`
+		Verdict        string            `json:"verdict"`
 		FindingNumbers []json.RawMessage `json:"finding_numbers"`
 		Evidence       []json.RawMessage `json:"evidence"`
 		Reason         json.RawMessage   `json:"reason"`
@@ -453,7 +453,7 @@ func decodeReviewCoverageEntry(entry json.RawMessage) (reviewCoverageEntry, bool
 	}
 	item.number = int(n)
 	item.literal = strings.TrimSpace(string(c.UnitNumber))
-	item.dispo = c.Disposition
+	item.verdict = c.Verdict
 	for _, raw := range c.FindingNumbers {
 		f, ok := jqFloat(raw)
 		if !ok {

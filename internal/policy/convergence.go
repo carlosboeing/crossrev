@@ -16,10 +16,10 @@ type Convergence struct {
 	LedgerCurrent bool
 	// Required counts every required file at the current revision pair.
 	Required int
-	// Covered counts required files with an accepted disposition in the
+	// Covered counts required files with an accepted verdict in the
 	// current generation.
 	Covered int
-	// Outstanding counts required files with no accepted disposition.
+	// Outstanding counts required files with no accepted verdict.
 	Outstanding int
 	// CouldNotReview counts records the reviewer could not examine.
 	CouldNotReview int

@@ -299,7 +299,7 @@ func seedOutstandingGeneration(t *testing.T, e *testEnv) {
 			Kind:        "file",
 			Change:      "modified",
 			BodyDigest:  digest,
-			Disposition: prstate.Some("no_issue"),
+			Verdict:     prstate.Some("no_issue"),
 		},
 		prstate.OutstandingRecord(outstandingID, 1, "added", digest, "awaiting review"),
 	})

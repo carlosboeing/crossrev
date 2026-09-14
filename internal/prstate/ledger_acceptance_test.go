@@ -30,7 +30,7 @@ type ledgerAcceptanceGeneration struct {
 		Kind        string   `json:"kind"`
 		Change      string   `json:"change"`
 		BodyDigest  string   `json:"body_digest"`
-		Disposition *string  `json:"disposition"`
+		Verdict     *string  `json:"verdict"`
 		FindingIDs  []string `json:"finding_ids"`
 		Evidence    []struct {
 			Path      string  `json:"path"`
@@ -143,8 +143,8 @@ func acceptanceCandidateWithEngine(t *testing.T, g ledgerAcceptanceGeneration, p
 			Change:     r.Change,
 			BodyDigest: r.BodyDigest,
 		}
-		if r.Disposition != nil {
-			record.Disposition = prstate.Some(*r.Disposition)
+		if r.Verdict != nil {
+			record.Verdict = prstate.Some(*r.Verdict)
 		}
 		if r.FindingIDs != nil {
 			record.FindingIDs = append([]string(nil), r.FindingIDs...)
@@ -347,8 +347,8 @@ func TestLedgerAcceptanceOracle(t *testing.T) {
 				if got.Type != r.Type || got.UnitID != r.UnitID || got.PathIndex != r.PathIndex || got.Kind != r.Kind || got.Change != r.Change || got.BodyDigest != r.BodyDigest {
 					t.Errorf("record %d = %+v, want literal %+v", i, got, r)
 				}
-				if optStr(got.Disposition) != strOrNull(r.Disposition) {
-					t.Errorf("record %d disposition = %q, want %q", i, optStr(got.Disposition), strOrNull(r.Disposition))
+				if optStr(got.Verdict) != strOrNull(r.Verdict) {
+					t.Errorf("record %d verdict = %q, want %q", i, optStr(got.Verdict), strOrNull(r.Verdict))
 				}
 				if strings.Join(got.FindingIDs, ",") != strings.Join(r.FindingIDs, ",") {
 					t.Errorf("record %d finding ids = %v, want %v", i, got.FindingIDs, r.FindingIDs)
@@ -529,7 +529,7 @@ func TestLedgerAcceptancePersistenceRefusesCorruptState(t *testing.T) {
 			t.Fatalf("first PublishGeneration: %v", err)
 		}
 		loud := acceptanceCandidate(t, g, pair)
-		loud.Records[0].Disposition = prstate.Some("finding")
+		loud.Records[0].Verdict = prstate.Some("finding")
 		loud.Records[0].FindingIDs = []string{"a1b2c3d4e5f60718"}
 		if _, _, err := prstate.PublishGeneration(context.Background(), second, acceptanceSlug(t), 42, loud, func() error { return nil }); err != nil {
 			t.Fatalf("second PublishGeneration: %v", err)
@@ -568,7 +568,7 @@ func TestLedgerAcceptancePersistenceRefusesCorruptState(t *testing.T) {
 		if got.Gen != g.Gen {
 			t.Fatalf("selected gen = %d, want %d", got.Gen, g.Gen)
 		}
-		if got.Records[0].Disposition.Value() != "no_issue" {
+		if got.Records[0].Verdict.Value() != "no_issue" {
 			t.Errorf("the losing manifest's finding survived the tie-break: %+v", got.Records[0])
 		}
 	})
@@ -589,7 +589,7 @@ func TestLedgerAcceptancePersistenceRefusesCorruptState(t *testing.T) {
 		}
 	})
 
-	// Base, head or engine movement retires every earlier disposition: a
+	// Base, head or engine movement retires every earlier verdict: a
 	// manifest at another revision pair or engine is skipped, not merged.
 	t.Run("base/head/engine invalidation", func(t *testing.T) {
 		store, _ := publish(t)
@@ -625,9 +625,9 @@ func TestLedgerAcceptancePersistenceRefusesCorruptState(t *testing.T) {
 }
 
 // TestLedgerAcceptanceMutationProvesTheGateIsLive removes one obligation
-// and asserts failure: a unit record with its disposition nulled must not
+// and asserts failure: a unit record with its verdict nulled must not
 // publish, so a production change that drops an obligation cannot pass
-// silently. The strict decoder refuses a unit with a null disposition, and
+// silently. The strict decoder refuses a unit with a null verdict, and
 // the publisher fails closed on the read-back rather than publishing
 // partial coverage.
 func TestLedgerAcceptanceMutationProvesTheGateIsLive(t *testing.T) {
@@ -635,15 +635,15 @@ func TestLedgerAcceptanceMutationProvesTheGateIsLive(t *testing.T) {
 	g := oracle.Generations[1]
 	pair := acceptancePair(t)
 	candidate := acceptanceCandidate(t, g, pair)
-	if candidate.Records[0].Disposition.Value() != "finding" {
-		t.Fatalf("oracle record 0 disposition is %q, want finding", candidate.Records[0].Disposition.Value())
+	if candidate.Records[0].Verdict.Value() != "finding" {
+		t.Fatalf("oracle record 0 verdict is %q, want finding", candidate.Records[0].Verdict.Value())
 	}
-	// Remove the disposition itself: a unit with a null disposition is
+	// Remove the verdict itself: a unit with a null verdict is
 	// refused on read-back, so publication fails closed.
-	candidate.Records[0].Disposition = prstate.Null[string]()
+	candidate.Records[0].Verdict = prstate.Null[string]()
 	store := newAcceptanceStore(t)
 	if _, _, err := prstate.PublishGeneration(context.Background(), store, acceptanceSlug(t), 42, candidate, func() error { return nil }); err == nil {
-		t.Fatal("PublishGeneration published a unit with a null disposition; the suite did not turn red")
+		t.Fatal("PublishGeneration published a unit with a null verdict; the suite did not turn red")
 	}
 }
 

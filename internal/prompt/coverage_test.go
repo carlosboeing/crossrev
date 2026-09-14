@@ -21,7 +21,7 @@ import (
 // TestReviewSchemaRequiresCoverageAndScopeReport requires the canonical
 // findings schema to carry the reviewer coverage contract: coverage[],
 // examined_scope and known_limits as required top-level fields, with the
-// unit_number/disposition/finding_numbers/evidence/reason member shape and
+// unit_number/verdict/finding_numbers/evidence/reason member shape and
 // the git|search|convention|reviewer evidence source set.
 //
 // It fails before the change because a schema-valid answer can omit coverage
@@ -77,24 +77,24 @@ func TestReviewSchemaRequiresCoverageAndScopeReport(t *testing.T) {
 	} else if coverage.Type != "array" {
 		t.Errorf("coverage type = %q, want array", coverage.Type)
 	}
-	for _, want := range []string{"unit_number", "disposition", "finding_numbers", "evidence", "reason"} {
+	for _, want := range []string{"unit_number", "verdict", "finding_numbers", "evidence", "reason"} {
 		if !containsString(coverage.Items.Required, want) {
 			t.Errorf("coverage items require %q, want it listed", want)
 		}
 	}
-	dispositionRaw, ok := coverage.Items.Properties["disposition"]
+	verdictRaw, ok := coverage.Items.Properties["verdict"]
 	if !ok {
-		t.Fatalf("coverage items have no disposition")
+		t.Fatalf("coverage items have no verdict")
 	}
-	var disposition struct {
+	var verdict struct {
 		Enum []string `json:"enum"`
 	}
-	if err := json.Unmarshal(dispositionRaw, &disposition); err != nil {
-		t.Fatalf("disposition is not an enum schema: %v", err)
+	if err := json.Unmarshal(verdictRaw, &verdict); err != nil {
+		t.Fatalf("verdict is not an enum schema: %v", err)
 	}
 	for _, want := range []string{"no_issue", "finding", "not_affected", "could_not_review"} {
-		if !containsString(disposition.Enum, want) {
-			t.Errorf("disposition enum = %q, want it to contain %q", disposition.Enum, want)
+		if !containsString(verdict.Enum, want) {
+			t.Errorf("verdict enum = %q, want it to contain %q", verdict.Enum, want)
 		}
 	}
 	evidenceRaw, ok := coverage.Items.Properties["evidence"]
@@ -288,14 +288,14 @@ func TestReviewPromptNumbersEveryBatchUnitWithReadableEvidence(t *testing.T) {
 		}
 	}
 	if strings.Contains(got, "could_not_review` with the failed fallbacks") == false {
-		t.Error("the unreadable unit does not say what disposition it needs")
+		t.Error("the unreadable unit does not say what verdict it needs")
 	}
 	// Advisory and exclusion blocks are visible with their rules and reasons.
 	for _, want := range []string{
 		"### Advisory context", "`src/helper.go` (search `SaveOrder`)",
 		"`src/app_test.go` (convention)", "### Excluded paths",
 		"`docs/backlog/item.md` — backlog destination",
-		"They take no disposition and are not omitted in silence.",
+		"They take no verdict and are not omitted in silence.",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("advisory/exclusion block does not show %q", want)

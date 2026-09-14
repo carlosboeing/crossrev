@@ -273,7 +273,7 @@ func (r Review) Render() []byte {
 
 // renderConfirmation is the required repair-delta input: the B-to-C diff
 // the resolver produced, rendered ahead of the current full scope. It takes
-// no disposition and satisfies no coverage entry: it says what changed since
+// no verdict and satisfies no coverage entry: it says what changed since
 // the reviewed head, so the reviewer confirms the repair before re-judging
 // the whole. Empty renders nothing.
 func renderConfirmation(delta []byte) string {
@@ -283,7 +283,7 @@ func renderConfirmation(delta []byte) string {
 	var b strings.Builder
 	b.WriteString("## The repair delta to confirm\n\n")
 	b.WriteString("The resolver changed code since the reviewed head. Confirm this delta " +
-		"first: it is required input, and the dispositions below still account for " +
+		"first: it is required input, and the verdicts below still account for " +
 		"every current required file.\n\n")
 	b.WriteString("````diff\n")
 	b.Write(delta)
@@ -303,7 +303,7 @@ func renderBatch(units []BatchUnit, advisory []AdvisoryRef, excluded []Exclusion
 	b.WriteString("## The files under review\n\n")
 	if len(units) > 0 {
 		b.WriteString("Account for every numbered file below in `coverage`, one entry per " +
-			"number. A file disposition means you examined the supplied content and change, " +
+			"number. A file verdict means you examined the supplied content and change, " +
 			"not merely its pathname. `not_affected` does not exempt a changed file: it says " +
 			"the file was read and needs no change, with evidence saying why.\n\n")
 		for i, u := range units {
@@ -312,9 +312,9 @@ func renderBatch(units []BatchUnit, advisory []AdvisoryRef, excluded []Exclusion
 	}
 	if len(advisory) > 0 {
 		b.WriteString("### Advisory context\n\n")
-		b.WriteString("Untouched files offered as uncertain context. They take no disposition " +
+		b.WriteString("Untouched files offered as uncertain context. They take no verdict " +
 			"and satisfy none: a real defect found here is still published as a finding, but " +
-			"the required file it was found from keeps its own disposition.\n\n")
+			"the required file it was found from keeps its own verdict.\n\n")
 		for _, a := range advisory {
 			if a.Term != "" {
 				fmt.Fprintf(&b, "- `%s` (search `%s`)\n", a.Path, a.Term)
@@ -327,7 +327,7 @@ func renderBatch(units []BatchUnit, advisory []AdvisoryRef, excluded []Exclusion
 	if len(excluded) > 0 {
 		b.WriteString("### Excluded paths\n\n")
 		b.WriteString("Removed from the required set, visibly, with the reason for each. " +
-			"They take no disposition and are not omitted in silence.\n\n")
+			"They take no verdict and are not omitted in silence.\n\n")
 		for _, e := range excluded {
 			fmt.Fprintf(&b, "- `%s` — %s\n", e.Path, e.Reason)
 		}
