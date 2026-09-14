@@ -149,12 +149,12 @@
     },
     "coverage": {
       "type": "array",
-      "description": "One entry per numbered required file in the prompt, in the batch input order — no more, no fewer, no duplicates. The orchestrator checks the numbers: a unit left out has no disposition recorded, which is a silent loss rather than a visible one.",
+      "description": "One entry per numbered required file in the prompt, in the batch input order — no more, no fewer, no duplicates. The orchestrator checks the numbers: a unit left out has no verdict recorded, which is a silent loss rather than a visible one.",
       "items": {
         "type": "object",
         "required": [
           "unit_number",
-          "disposition",
+          "verdict",
           "finding_numbers",
           "evidence",
           "reason"
@@ -166,7 +166,7 @@
             "minimum": 1,
             "description": "The number shown beside the required file in the prompt — 1 for the first, 2 for the second, and so on. A small integer rather than the file's id, because copying a 16-character hash accurately is clerical work models are poor at and a mistyped one is accepted silently."
           },
-          "disposition": {
+          "verdict": {
             "type": "string",
             "enum": [
               "no_issue",
@@ -178,7 +178,7 @@
           },
           "finding_numbers": {
             "type": "array",
-            "description": "The 1-based positions of this unit's findings in the findings array, in order. Empty unless disposition is finding, which names at least one.",
+            "description": "The 1-based positions of this unit's findings in the findings array, in order. Empty unless verdict is finding, which names at least one.",
             "items": {
               "type": "integer",
               "minimum": 1
@@ -246,7 +246,7 @@
               "string",
               "null"
             ],
-            "description": "One line of reasoning for this unit's disposition, or null for a clean no_issue. Expected for not_affected and could_not_review, where the disposition is a judgement rather than an observation."
+            "description": "One line of reasoning for this unit's verdict, or null for a clean no_issue. Expected for not_affected and could_not_review, where the verdict is a judgement rather than an observation."
           }
         }
       }

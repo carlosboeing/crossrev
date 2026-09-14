@@ -98,14 +98,14 @@ func scopeExclusions(backlogPath string) []intel.Exclusion {
 	return []intel.Exclusion{{Path: backlogPath, Reason: "backlog destination"}}
 }
 
-// acceptedFromGeneration reads the dispositions the current generation
+// acceptedFromGeneration reads the verdicts the current generation
 // accepted at this exact base, head and engine, with the finding ids,
 // evidence and reasons they carry: resuming a pass republishes the full
-// judgement, never an empty disposition (which the strict decoder refuses).
+// judgement, never an empty verdict (which the strict decoder refuses).
 // Any other revision or engine contributes nothing: a repair changes the
-// head and retires every earlier disposition.
-func acceptedFromGeneration(gen prstate.Generation, base, head core.Revision, engine string) map[core.UnitID]recordDisposition {
-	accepted := map[core.UnitID]recordDisposition{}
+// head and retires every earlier verdict.
+func acceptedFromGeneration(gen prstate.Generation, base, head core.Revision, engine string) map[core.UnitID]recordVerdict {
+	accepted := map[core.UnitID]recordVerdict{}
 	if gen.Revision.Base.SHA() != base.SHA() || gen.Revision.Head.SHA() != head.SHA() || gen.Engine != engine {
 		return accepted
 	}
@@ -113,7 +113,7 @@ func acceptedFromGeneration(gen prstate.Generation, base, head core.Revision, en
 		if record.Type != prstate.CoverageRecordUnit {
 			continue
 		}
-		disp, ok := record.Disposition.Get()
+		disp, ok := record.Verdict.Get()
 		if !ok || disp == "" {
 			continue
 		}
@@ -122,7 +122,7 @@ func acceptedFromGeneration(gen prstate.Generation, base, head core.Revision, en
 		var evidence []prstate.Evidence
 		evidence = append(evidence, record.Evidence...)
 		reason, _ := record.Reason.Get()
-		accepted[core.UnitID(record.UnitID)] = recordDisposition{Disposition: disp, FindingIDs: ids, Evidence: evidence, Reason: reason}
+		accepted[core.UnitID(record.UnitID)] = recordVerdict{Verdict: disp, FindingIDs: ids, Evidence: evidence, Reason: reason}
 	}
 	return accepted
 }
@@ -149,12 +149,12 @@ func scopeReportOf(examined string, limits []string) prstate.ScopeReport {
 }
 
 // generationRecords renders one complete generation's records from the scope
-// and the dispositions accepted so far: covered units carry their
-// disposition, the rest stay outstanding with their access reason.
-func generationRecords(scope intel.Scope, dispositions map[core.UnitID]recordDisposition, pathIndex map[string]int) []prstate.Record {
+// and the verdicts accepted so far: covered units carry their
+// verdict, the rest stay outstanding with their access reason.
+func generationRecords(scope intel.Scope, verdicts map[core.UnitID]recordVerdict, pathIndex map[string]int) []prstate.Record {
 	records := make([]prstate.Record, 0, len(scope.Required))
 	for _, unit := range scope.Required {
-		if disp, ok := dispositions[unit.ID]; ok {
+		if disp, ok := verdicts[unit.ID]; ok {
 			records = append(records, unitRecord(unit, pathIndex[unit.Path], disp))
 		} else {
 			records = append(records, prstate.OutstandingRecord(string(unit.ID), pathIndex[unit.Path], string(unit.Change), unit.BodyDigest, outstandingReason(unit)))
@@ -163,16 +163,16 @@ func generationRecords(scope intel.Scope, dispositions map[core.UnitID]recordDis
 	return records
 }
 
-// recordDisposition is one accepted unit: its disposition, finding ids and
+// recordVerdict is one accepted unit: its verdict, finding ids and
 // evidence, as the reviewer reported them.
-type recordDisposition struct {
-	Disposition string
+type recordVerdict struct {
+	Verdict string
 	FindingIDs  []string
 	Evidence    []prstate.Evidence
 	Reason      string
 }
 
-func unitRecord(unit intel.FileUnit, pathIdx int, disp recordDisposition) prstate.Record {
+func unitRecord(unit intel.FileUnit, pathIdx int, disp recordVerdict) prstate.Record {
 	record := prstate.Record{
 		Type:       prstate.CoverageRecordUnit,
 		UnitID:     string(unit.ID),
@@ -181,7 +181,7 @@ func unitRecord(unit intel.FileUnit, pathIdx int, disp recordDisposition) prstat
 		Change:     string(unit.Change),
 		BodyDigest: unit.BodyDigest,
 	}
-	record.Disposition = prstate.Some(disp.Disposition)
+	record.Verdict = prstate.Some(disp.Verdict)
 	if len(disp.FindingIDs) > 0 {
 		record.FindingIDs = append([]string(nil), disp.FindingIDs...)
 	}
@@ -253,7 +253,7 @@ func haltBody(paths []string, stop prstate.CoverageStop, halt string) string {
 		for _, path := range paths {
 			fmt.Fprintf(&b, "- `%s`\n", path)
 		}
-		b.WriteString("\nA re-drive at the same base, head and engine resumes these paths. Any changed value starts from zero accepted dispositions.\n")
+		b.WriteString("\nA re-drive at the same base, head and engine resumes these paths. Any changed value starts from zero accepted verdicts.\n")
 	}
 	return b.String()
 }

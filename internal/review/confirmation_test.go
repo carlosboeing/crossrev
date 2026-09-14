@@ -49,10 +49,10 @@ func TestConfirmationReceivesRepairDeltaBeforeFullScope(t *testing.T) {
 	}
 }
 
-// TestRepairInvalidatesEveryPriorDisposition pins invalidation: a repair
-// that moves the head retires every earlier disposition, so the next review
+// TestRepairInvalidatesEveryPriorFileVerdict pins invalidation: a repair
+// that moves the head retires every earlier verdict, so the next review
 // accounts for every current required file from zero accepted units.
-func TestRepairInvalidatesEveryPriorDisposition(t *testing.T) {
+func TestRepairInvalidatesEveryPriorFileVerdict(t *testing.T) {
 	e := newEnv(t)
 	writeRequiredHead(e, "a.go", "package a\n")
 	e.runner.script = []exec.Result{
@@ -67,7 +67,7 @@ func TestRepairInvalidatesEveryPriorDisposition(t *testing.T) {
 	writeRequiredHead(e, "b.go", "package b\n")
 	reused := acceptedAtHead(t, e)
 	if reused != 0 {
-		t.Fatalf("reused dispositions at the moved head = %d, want 0", reused)
+		t.Fatalf("reused verdicts at the moved head = %d, want 0", reused)
 	}
 }
 
@@ -149,7 +149,7 @@ func acceptedAtHead(t *testing.T, e *env) int {
 	}
 	accepted := 0
 	for _, record := range gen.Records {
-		if record.Type == prstate.CoverageRecordUnit && record.Disposition.Present() {
+		if record.Type == prstate.CoverageRecordUnit && record.Verdict.Present() {
 			accepted++
 		}
 	}
@@ -189,7 +189,7 @@ func seedResolveMarker(t *testing.T, e *env, reviewedHead, commit string) {
 func outsideDiffAnswer(t *testing.T) string {
 	t.Helper()
 	return `{"verdict":"issues-remain","blocked_reason":null,"findings":[{"number":1,"path":"a_test.go","line":1,"side":"RIGHT","severity":"high","category":"correctness","pre_existing":false,"title":"Untested helper","why":"The helper has no test","fix":"Add one"}],` +
-		`"coverage":[{"unit_number":1,"disposition":"finding","finding_numbers":[1],` +
+		`"coverage":[{"unit_number":1,"verdict":"finding","finding_numbers":[1],` +
 		`"evidence":[{"path":"a.go","revision":"` + headSHA + `","start_line":null,"end_line":null,"source":"git","note":null}],"reason":null}],` +
 		`"examined_scope":"read the batch","known_limits":[]}`
 }

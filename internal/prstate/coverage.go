@@ -48,7 +48,7 @@ const (
 	CoverageKindShard    = "shard"
 )
 
-// Coverage record types. Outstanding is a record type, not a disposition:
+// Coverage record types. Outstanding is a record type, not a verdict:
 // there is no pending judgement.
 const (
 	CoverageRecordUnit        = "unit"
@@ -153,8 +153,8 @@ type Evidence struct {
 }
 
 // Record is one required file inside a shard: either a judged unit carrying
-// its disposition, finding ids, evidence and reason, or an outstanding record
-// carrying no disposition or finding ids. The kind is fixed to file; the
+// its verdict, finding ids, evidence and reason, or an outstanding record
+// carrying no verdict or finding ids. The kind is fixed to file; the
 // change is one of the five enumerations.
 type Record struct {
 	Type        string      `json:"type"`
@@ -163,7 +163,7 @@ type Record struct {
 	Kind        string      `json:"kind"`
 	Change      string      `json:"change"`
 	BodyDigest  string      `json:"body_digest"`
-	Disposition Opt[string] `json:"disposition,omitzero"`
+	Verdict     Opt[string] `json:"verdict,omitzero"`
 	FindingIDs  []string    `json:"finding_ids,omitzero"`
 	Evidence    []Evidence  `json:"evidence,omitzero"`
 	Reason      Opt[string] `json:"reason,omitzero"`
@@ -514,7 +514,7 @@ func recordOf(r Record) json.RawMessage {
 		{key: "kind", value: appendJSONString(nil, r.Kind)},
 		{key: "change", value: appendJSONString(nil, r.Change)},
 		{key: "body_digest", value: appendJSONString(nil, r.BodyDigest)},
-		{key: "disposition", value: optStringOf(r.Disposition)},
+		{key: "verdict", value: optStringOf(r.Verdict)},
 	}
 	if r.FindingIDs == nil {
 		obj = append(obj, member{key: "finding_ids", value: json.RawMessage("null")})
@@ -1158,7 +1158,7 @@ func decodeRecords(raw json.RawMessage) ([]Record, bool) {
 }
 
 // decodeRecord strictly decodes one coverage record. Outstanding records
-// carry a null disposition and a null finding_ids; judged units carry both.
+// carry a null verdict and a null finding_ids; judged units carry both.
 // Both carry the fixed file kind, one of the five changes, a 16-hex unit id
 // and a 64-hex body digest.
 func decodeRecord(raw json.RawMessage) (Record, bool) {
@@ -1167,7 +1167,7 @@ func decodeRecord(raw json.RawMessage) (Record, bool) {
 		return Record{}, false
 	}
 	if !exactKeys(obj, []string{"type", "unit_id", "path_index", "kind", "change",
-		"body_digest", "disposition", "finding_ids", "evidence", "reason"}) {
+		"body_digest", "verdict", "finding_ids", "evidence", "reason"}) {
 		return Record{}, false
 	}
 	var recordType string
@@ -1195,12 +1195,12 @@ func decodeRecord(raw json.RawMessage) (Record, bool) {
 	if err := json.Unmarshal(mustGet(obj, "body_digest"), &bodyDigest); err != nil || !isHex64(bodyDigest) {
 		return Record{}, false
 	}
-	disposition := decodeOptString(mustGet(obj, "disposition"))
-	if !disposition.Present() {
+	verdict := decodeOptString(mustGet(obj, "verdict"))
+	if !verdict.Present() {
 		return Record{}, false
 	}
-	if disposition.Present() && !disposition.IsNull() {
-		if !validDisposition(disposition.Value()) {
+	if verdict.Present() && !verdict.IsNull() {
+		if !validVerdict(verdict.Value()) {
 			return Record{}, false
 		}
 	}
@@ -1216,10 +1216,10 @@ func decodeRecord(raw json.RawMessage) (Record, bool) {
 		findingIDs = ids
 	}
 	if recordType == CoverageRecordOutstanding {
-		if !disposition.IsNull() || findingIDs != nil {
+		if !verdict.IsNull() || findingIDs != nil {
 			return Record{}, false
 		}
-	} else if disposition.IsNull() {
+	} else if verdict.IsNull() {
 		return Record{}, false
 	}
 	evidence, ok := decodeEvidences(mustGet(obj, "evidence"))
@@ -1237,7 +1237,7 @@ func decodeRecord(raw json.RawMessage) (Record, bool) {
 		Kind:        kind,
 		Change:      change,
 		BodyDigest:  bodyDigest,
-		Disposition: disposition,
+		Verdict:     verdict,
 		FindingIDs:  findingIDs,
 		Evidence:    evidence,
 		Reason:      reason,
@@ -1335,7 +1335,7 @@ func validChange(s string) bool {
 	return false
 }
 
-func validDisposition(s string) bool {
+func validVerdict(s string) bool {
 	switch s {
 	case "no_issue", "finding", "not_affected", "could_not_review":
 		return true
@@ -1417,7 +1417,7 @@ func BuildShard(pos int, records []Record) Shard {
 	}
 }
 
-// OutstandingRecord builds one outstanding record: no disposition, null
+// OutstandingRecord builds one outstanding record: no verdict, null
 // finding ids, and the reason the work remains.
 func OutstandingRecord(unitID string, pathIndex int, change, bodyDigest, reason string) Record {
 	return Record{

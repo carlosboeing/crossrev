@@ -17,7 +17,7 @@
           "kind": "file",
           "change": "modified",
           "body_digest": "7b39baa38a2ec2b8d111bbbd8e448e80226477ab40105d9d2123d4dc18067438",
-          "disposition": "no_issue",
+          "verdict": "no_issue",
           "finding_ids": [],
           "evidence": [
             {
@@ -38,7 +38,7 @@
           "kind": "file",
           "change": "added",
           "body_digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-          "disposition": null,
+          "verdict": null,
           "finding_ids": null,
           "evidence": [],
           "reason": "binary content is not shown"
@@ -86,7 +86,7 @@
           "kind": "file",
           "change": "modified",
           "body_digest": "7b39baa38a2ec2b8d111bbbd8e448e80226477ab40105d9d2123d4dc18067438",
-          "disposition": "finding",
+          "verdict": "finding",
           "finding_ids": ["a1b2c3d4e5f60718"],
           "evidence": [
             {
@@ -107,7 +107,7 @@
           "kind": "file",
           "change": "added",
           "body_digest": "983aab874348ab0e62d9fa51e0719b12f570234284c1f21c740bb6d3ca7cf11d",
-          "disposition": "no_issue",
+          "verdict": "no_issue",
           "finding_ids": [],
           "evidence": [
             {

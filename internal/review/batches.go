@@ -16,10 +16,10 @@ import (
 	"github.com/carlosboeing/crossrev/internal/validate"
 )
 
-// batchOutcome is what one batch run settled: the dispositions it accepted,
+// batchOutcome is what one batch run settled: the verdicts it accepted,
 // the findings they name, and the scope claims the manifest carries.
 type batchOutcome struct {
-	dispositions map[core.UnitID]recordDisposition
+	verdicts map[core.UnitID]recordVerdict
 	findings     []Finding
 	verdict      string
 	envelope     *harness.Envelope
@@ -37,7 +37,7 @@ type batchOutcome struct {
 // a nil error with an empty outcome means the caller continues on the
 // frozen path (no git reader or ledger store in this run).
 func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, settings legSettings, pass int, claimID int64, scope intel.Scope, out *Result) error {
-	outcome := batchOutcome{dispositions: map[core.UnitID]recordDisposition{}}
+	outcome := batchOutcome{verdicts: map[core.UnitID]recordVerdict{}}
 	current, err := l.currentGeneration(ctx, loaded, scope.Base, scope.Head, scope.Engine)
 	if err != nil {
 		return err
@@ -46,7 +46,7 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 	accepted := acceptedFromGeneration(current, scope.Base, scope.Head, scope.Engine)
 	acceptedIDs := make(map[core.UnitID]bool, len(accepted))
 	for unitID, disp := range accepted {
-		outcome.dispositions[unitID] = disp
+		outcome.verdicts[unitID] = disp
 		acceptedIDs[unitID] = true
 	}
 	advisory := intel.AdvisoryFiles(ctx, scope, scopeSearcher{vcs: l.VCS})
@@ -87,7 +87,7 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 	marker.Leg = core.LegReview
 	marker.Pass = pass
 	marker.Version = core.MarkerVersion
-	initial, initialStop, err := l.publishInitialGeneration(ctx, req, loaded, scope, advisory, gen+1, outcome.dispositions)
+	initial, initialStop, err := l.publishInitialGeneration(ctx, req, loaded, scope, advisory, gen+1, outcome.verdicts)
 	if err != nil {
 		return err
 	}
@@ -104,12 +104,12 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 		if err != nil {
 			return err
 		}
-		dispositions, examined, limits, err := dispositionsFromPayload(payload, batch.Files)
+		verdicts, examined, limits, err := verdictsFromPayload(payload, batch.Files)
 		if err != nil {
 			return err
 		}
-		for id, disp := range dispositions {
-			outcome.dispositions[id] = disp
+		for id, disp := range verdicts {
+			outcome.verdicts[id] = disp
 			acceptedIDs[id] = true
 		}
 		outcome.verdict = verdictFromPayload(payload)
@@ -123,7 +123,7 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 			outcome.findings = append(outcome.findings, finding)
 		}
 		outcome.batches++
-		manifest, stop, err := l.publishBatchGeneration(ctx, req, loaded, scope, advisory, gen+outcome.batches+1, outcome.dispositions, outcome.examined, outcome.limits)
+		manifest, stop, err := l.publishBatchGeneration(ctx, req, loaded, scope, advisory, gen+outcome.batches+1, outcome.verdicts, outcome.examined, outcome.limits)
 		if err != nil {
 			if stop, ok := batchStop(err); ok {
 				return l.haltPass(ctx, req, loaded, pass, claimID, out, &batchBound{plan: planForStop(plan, stop, scope, acceptedIDs), scope: scope, accepted: acceptedIDs})
@@ -155,8 +155,8 @@ func (e *batchBound) Error() string {
 
 // publishBatchGeneration publishes one complete generation after an accepted
 // batch. The generation accounts for every required file: covered units
-// carry their accepted disposition, the rest stay outstanding.
-func (l *Leg) publishBatchGeneration(ctx context.Context, req Request, loaded Context, scope intel.Scope, advisory intel.AdvisorySummary, gen int, dispositions map[core.UnitID]recordDisposition, examined []string, limits []string) (prstate.Manifest, prstate.CoverageStop, error) {
+// carry their accepted verdict, the rest stay outstanding.
+func (l *Leg) publishBatchGeneration(ctx context.Context, req Request, loaded Context, scope intel.Scope, advisory intel.AdvisorySummary, gen int, verdicts map[core.UnitID]recordVerdict, examined []string, limits []string) (prstate.Manifest, prstate.CoverageStop, error) {
 	store := ledgerStoreFor(l)
 	paths := make([]string, 0, len(scope.Required))
 	pathIndex := make(map[string]int, len(scope.Required))
@@ -176,7 +176,7 @@ func (l *Leg) publishBatchGeneration(ctx context.Context, req Request, loaded Co
 		Revision:    core.RevisionPair{Base: scope.Base, Head: scope.Head},
 		Engine:      scope.Engine,
 		Paths:       paths,
-		Records:     generationRecords(scope, dispositions, pathIndex),
+		Records:     generationRecords(scope, verdicts, pathIndex),
 		Advisory:    prstate.Advisory{Count: advisory.Count, Rules: advisory.Rules, Limits: advisoryLimits(advisory)},
 		Excluded:    excludedRecords(scope),
 		ScopeReport: scopeReportOf(examinedScope, limits),
@@ -197,17 +197,17 @@ func (l *Leg) publishBatchGeneration(ctx context.Context, req Request, loaded Co
 // the claim exists: every uncovered unit outstanding, so a crash before the
 // first accepted batch leaves the started claim and the same scope to
 // rebuild from.
-func (l *Leg) publishInitialGeneration(ctx context.Context, req Request, loaded Context, scope intel.Scope, advisory intel.AdvisorySummary, gen int, carried map[core.UnitID]recordDisposition) (prstate.Manifest, prstate.CoverageStop, error) {
+func (l *Leg) publishInitialGeneration(ctx context.Context, req Request, loaded Context, scope intel.Scope, advisory intel.AdvisorySummary, gen int, carried map[core.UnitID]recordVerdict) (prstate.Manifest, prstate.CoverageStop, error) {
 	return l.publishBatchGeneration(ctx, req, loaded, scope, advisory, gen, carried, nil, nil)
 }
 
-// dispositionsFromPayload reads the accepted dispositions out of one accepted
+// verdictsFromPayload reads the accepted verdicts out of one accepted
 // batch payload: one entry per numbered unit, in prompt order.
-func dispositionsFromPayload(payload json.RawMessage, files []intel.FileUnit) (map[core.UnitID]recordDisposition, string, []string, error) {
+func verdictsFromPayload(payload json.RawMessage, files []intel.FileUnit) (map[core.UnitID]recordVerdict, string, []string, error) {
 	var doc struct {
 		Coverage []struct {
 			UnitNumber     int                `json:"unit_number"`
-			Disposition    string             `json:"disposition"`
+			Verdict        string             `json:"verdict"`
 			FindingNumbers []int              `json:"finding_numbers"`
 			Evidence       []prstate.Evidence `json:"evidence"`
 			Reason         *string            `json:"reason"`
@@ -224,7 +224,7 @@ func dispositionsFromPayload(payload json.RawMessage, files []intel.FileUnit) (m
 	}
 	byNumber := make(map[int]string, len(doc.Findings))
 	_ = byNumber
-	out := make(map[core.UnitID]recordDisposition, len(files))
+	out := make(map[core.UnitID]recordVerdict, len(files))
 	for _, entry := range doc.Coverage {
 		if entry.UnitNumber < 1 || entry.UnitNumber > len(files) {
 			continue
@@ -238,7 +238,7 @@ func dispositionsFromPayload(payload json.RawMessage, files []intel.FileUnit) (m
 		if entry.Reason != nil {
 			reason = *entry.Reason
 		}
-		out[unit.ID] = recordDisposition{Disposition: entry.Disposition, FindingIDs: ids, Evidence: entry.Evidence, Reason: reason}
+		out[unit.ID] = recordVerdict{Verdict: entry.Verdict, FindingIDs: ids, Evidence: entry.Evidence, Reason: reason}
 	}
 	return out, doc.ExaminedScope, doc.KnownLimits, nil
 }
@@ -422,7 +422,7 @@ func (l *Leg) finishCoveredPass(ctx context.Context, req Request, loaded Context
 	_ = scope
 	verdict := outcome.verdict
 	if verdict == "" {
-		verdict = verdictForResumed(outcome.dispositions)
+		verdict = verdictForResumed(outcome.verdicts)
 	}
 	if pair.set {
 		marker.ConfirmationBaseSHA = prstate.Some(pair.base.SHA())
@@ -437,12 +437,12 @@ func (l *Leg) finishCoveredPass(ctx context.Context, req Request, loaded Context
 }
 
 // verdictForResumed reports the verdict for a pass that accepted no batch in
-// this run: issues-remain when any carried disposition names a finding,
+// this run: issues-remain when any carried verdict names a finding,
 // converged otherwise. A fully resumed pass re-confirms prior coverage
 // rather than re-judging it.
-func verdictForResumed(dispositions map[core.UnitID]recordDisposition) string {
-	for _, disp := range dispositions {
-		if disp.Disposition == "finding" {
+func verdictForResumed(verdicts map[core.UnitID]recordVerdict) string {
+	for _, disp := range verdicts {
+		if disp.Verdict == "finding" {
 			return "issues-remain"
 		}
 	}
@@ -455,7 +455,7 @@ func verdictForResumed(dispositions map[core.UnitID]recordDisposition) string {
 // carry the per-batch coverage; the marker and summary need the union. With
 // no payload this run accepted nothing new, so the document is empty rather
 // than a judgement: the caller sets the verdict from the carried
-// dispositions instead.
+// verdicts instead.
 func mergePayloads(payloads []json.RawMessage, fallbackVerdict string) json.RawMessage {
 	var findings []json.RawMessage
 	verdict := ""

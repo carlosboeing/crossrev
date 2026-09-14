@@ -81,13 +81,13 @@ Do not inflate. A `low` marked `high` costs a commit, a review cycle, and some o
 
 Do not report a finding for code you did not read. Do not report one you cannot anchor.
 
-## Every numbered file gets a disposition
+## Every numbered file gets a verdict
 
 The batch numbers every required file: 1 for the first, 2 for the second, and so on. Name each one by that number in `coverage` — `"unit_number": 2` for the second file — rather than by its 16-character id, which is printed beside it for quoting in prose.
 
-Return one entry per numbered file: no more, no fewer, no duplicates. A file left out has no disposition recorded, which is a silent loss rather than a visible one.
+Return one entry per numbered file: no more, no fewer, no duplicates. A file left out has no verdict recorded, which is a silent loss rather than a visible one.
 
-| Disposition | When |
+| Verdict | When |
 |---|---|
 | `no_issue` | Examined and clean |
 | `finding` | Examined and defective — name the finding's 1-based positions in `finding_numbers`, at least one |
@@ -96,9 +96,9 @@ Return one entry per numbered file: no more, no fewer, no duplicates. A file lef
 
 Unsupported reading, difficult code, a large batch, ordinary uncertainty, missing tests and one failed attempt do not qualify for `could_not_review`.
 
-Each coverage entry names `evidence`: at least one item with a supplied path and its content revision, `start_line` and `end_line` for the lines the judgement rests on — null for file-level evidence — a `source` of `git`, `search`, `convention` or `reviewer`, and a `note` saying what it shows. Each coverage entry names `reason`: one line for the disposition, expected for `not_affected` and `could_not_review` where the disposition is a judgement rather than an observation.
+Each coverage entry names `evidence`: at least one item with a supplied path and its content revision, `start_line` and `end_line` for the lines the judgement rests on — null for file-level evidence — a `source` of `git`, `search`, `convention` or `reviewer`, and a `note` saying what it shows. Each coverage entry names `reason`: one line for the verdict, expected for `not_affected` and `could_not_review` where the verdict is a judgement rather than an observation.
 
-Advisory files never take a disposition and never satisfy one: a real defect found there is still published as a finding, but the required file it was found from keeps its own disposition. Excluded paths never take one either: they sit outside the required set, visibly, with their reason.
+Advisory files never take a verdict and never satisfy one: a real defect found there is still published as a finding, but the required file it was found from keeps its own verdict. Excluded paths never take one either: they sit outside the required set, visibly, with their reason.
 
 ## The scope report
 

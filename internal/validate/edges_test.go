@@ -345,9 +345,9 @@ func reviewShell(coverage string) string {
 }
 
 // reviewUnit joins one coverage entry over a single git evidence item.
-func reviewUnit(number int, path, revision, disposition, findings, reason string, start, end int) string {
+func reviewUnit(number int, path, revision, verdict, findings, reason string, start, end int) string {
 	return `{"unit_number":` + reviewItoa(number) +
-		`,"disposition":` + disposition +
+		`,"verdict":` + verdict +
 		`,"finding_numbers":` + findings +
 		`,"evidence":[{"path":` + reviewQuoteString(path) +
 		`,"revision":` + reviewQuoteString(revision) +
@@ -373,7 +373,7 @@ func TestReviewCallsAHugeWholeUnitNumberSemanticRatherThanMalformed(t *testing.T
 	head := "2222222222222222222222222222222222222222"
 	for _, literal := range []string{"1E+19", "9223372036854775808"} {
 		payload := reviewShell(`[{"unit_number":` + literal +
-			`,"disposition":"no_issue","finding_numbers":[],"evidence":[],"reason":null},` +
+			`,"verdict":"no_issue","finding_numbers":[],"evidence":[],"reason":null},` +
 			reviewUnit(2, "b.go", head, `"no_issue"`, `[]`, `null`, 1, 4) + `]`)
 		err := validate.Review([]byte(payload), expect)
 		if code(err) != 2 {
@@ -389,7 +389,7 @@ func TestReviewCallsAFractionalUnitNumberMalformed(t *testing.T) {
 	head := "2222222222222222222222222222222222222222"
 	payload := reviewShell(`[` +
 		reviewUnit(1, "a.go", head, `"no_issue"`, `[]`, `null`, 1, 10) + `,` +
-		`{"unit_number":1.5,"disposition":"no_issue","finding_numbers":[],"evidence":[],"reason":null}]`)
+		`{"unit_number":1.5,"verdict":"no_issue","finding_numbers":[],"evidence":[],"reason":null}]`)
 	if err := validate.Review([]byte(payload), expect); code(err) != 1 {
 		t.Fatalf("got code %d %q, want a shape failure", code(err), message(err))
 	}
@@ -412,15 +412,15 @@ func TestReviewReportsTheMissingUnitBeforeTheUnknownOne(t *testing.T) {
 	}
 }
 
-// A no_issue entry naming a finding number contradicts its own disposition:
-// the finding half names a returned finding, and the disposition half says
+// A no_issue entry naming a finding number contradicts its own verdict:
+// the finding half names a returned finding, and the verdict half says
 // there is none. The finding-reference check runs before the evidence check,
 // so a payload that also cites an unprovided path gets the reference message.
 func TestReviewReportsABadFindingReferenceBeforeBadEvidence(t *testing.T) {
 	expect := reviewExpectation(t)
 	head := "2222222222222222222222222222222222222222"
 	payload := reviewShell(`[` +
-		`{"unit_number":1,"disposition":"no_issue","finding_numbers":[1],` +
+		`{"unit_number":1,"verdict":"no_issue","finding_numbers":[1],` +
 		`"evidence":[{"path":"elsewhere.go","revision":` + reviewQuoteString(head) +
 		`,"start_line":1,"end_line":10,"source":"git","note":null}],"reason":null},` +
 		reviewUnit(2, "b.go", head, `"no_issue"`, `[]`, `null`, 1, 4) + `]`)
@@ -439,7 +439,7 @@ func TestReviewRefusesAHalfOpenSpan(t *testing.T) {
 	expect := reviewExpectation(t)
 	head := "2222222222222222222222222222222222222222"
 	payload := reviewShell(`[` +
-		`{"unit_number":1,"disposition":"no_issue","finding_numbers":[],` +
+		`{"unit_number":1,"verdict":"no_issue","finding_numbers":[],` +
 		`"evidence":[{"path":"a.go","revision":` + reviewQuoteString(head) +
 		`,"start_line":null,"end_line":10,"source":"git","note":null}],"reason":null},` +
 		reviewUnit(2, "b.go", head, `"no_issue"`, `[]`, `null`, 1, 4) + `]`)
@@ -481,7 +481,7 @@ func TestReviewRefusesASpanOverAnAccessLimit(t *testing.T) {
 }
 
 // File-level null spans pass over an access limit: there are no readable
-// lines to contradict, and the unit still needs its disposition recorded.
+// lines to contradict, and the unit still needs its verdict recorded.
 func TestReviewAcceptsFileLevelEvidenceOverAnAccessLimit(t *testing.T) {
 	base, err := core.NewRevision("1111111111111111111111111111111111111111")
 	if err != nil {
@@ -505,7 +505,7 @@ func TestReviewAcceptsFileLevelEvidenceOverAnAccessLimit(t *testing.T) {
 }
 
 // One finding named by two units contradicts the one-finding-one-unit rule:
-// the second unit's disposition answers for a finding already answered for.
+// the second unit's verdict answers for a finding already answered for.
 // The cross-unit duplicate is checked after the per-unit rules, so a payload
 // that also omits evidence gets the evidence message first.
 func TestReviewRefusesAFindingNamedByTwoUnits(t *testing.T) {
@@ -515,10 +515,10 @@ func TestReviewRefusesAFindingNamedByTwoUnits(t *testing.T) {
 	head := "2222222222222222222222222222222222222222"
 	payload := `{"verdict":"issues-remain","findings":[` + finding + `],` +
 		`"coverage":[` +
-		`{"unit_number":1,"disposition":"finding","finding_numbers":[1],` +
+		`{"unit_number":1,"verdict":"finding","finding_numbers":[1],` +
 		`"evidence":[{"path":"a.go","revision":` + reviewQuoteString(head) +
 		`,"start_line":1,"end_line":10,"source":"git","note":null}],"reason":null},` +
-		`{"unit_number":2,"disposition":"finding","finding_numbers":[1],` +
+		`{"unit_number":2,"verdict":"finding","finding_numbers":[1],` +
 		`"evidence":[{"path":"b.go","revision":` + reviewQuoteString(head) +
 		`,"start_line":1,"end_line":4,"source":"git","note":null}],"reason":null}],` +
 		`"examined_scope":"read the two batch files","known_limits":[]}`

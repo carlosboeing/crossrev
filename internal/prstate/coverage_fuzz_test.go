@@ -20,7 +20,7 @@ func FuzzCoverageDigestRoundTrip(f *testing.F) {
 	f.Add("b.go", "added", "", "search", "")
 	f.Add("", "deleted", "could_not_review", "reviewer", "binary content is not shown")
 
-	f.Fuzz(func(t *testing.T, path, change, disposition, source, reason string) {
+	f.Fuzz(func(t *testing.T, path, change, verdict, source, reason string) {
 		if strings.Contains(path, "\x00") {
 			t.Skip("a NUL path cannot round-trip through a comment body")
 		}
@@ -34,11 +34,11 @@ func FuzzCoverageDigestRoundTrip(f *testing.F) {
 			source = "git"
 		}
 		var record prstate.Record
-		if disposition == "" {
+		if verdict == "" {
 			record = prstate.OutstandingRecord(unitID, 0, change, bodyDigest, reasonOr(reason, "outstanding for the next pass"))
 		} else {
-			if !validFuzzDisposition(disposition) {
-				disposition = "no_issue"
+			if !validFuzzVerdict(verdict) {
+				verdict = "no_issue"
 			}
 			record = prstate.Record{
 				Type:        prstate.CoverageRecordUnit,
@@ -47,7 +47,7 @@ func FuzzCoverageDigestRoundTrip(f *testing.F) {
 				Kind:        prstate.CoverageGranularityFile,
 				Change:      change,
 				BodyDigest:  bodyDigest,
-				Disposition: prstate.Some(disposition),
+				Verdict:     prstate.Some(verdict),
 				FindingIDs:  []string{},
 				Evidence: []prstate.Evidence{{
 					Path:     pathOr(path, "a.go"),
@@ -57,7 +57,7 @@ func FuzzCoverageDigestRoundTrip(f *testing.F) {
 				}},
 				Reason: prstate.Null[string](),
 			}
-			if disposition == "not_affected" {
+			if verdict == "not_affected" {
 				record.Reason = prstate.Some(reasonOr(reason, "read and needs no change"))
 			}
 		}
@@ -105,7 +105,7 @@ func validFuzzChange(s string) bool {
 	return false
 }
 
-func validFuzzDisposition(s string) bool {
+func validFuzzVerdict(s string) bool {
 	switch s {
 	case "no_issue", "finding", "not_affected", "could_not_review":
 		return true

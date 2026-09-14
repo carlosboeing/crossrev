@@ -114,7 +114,7 @@ func (l *Leg) invokeWithStaged(ctx context.Context, req Request, loaded Context,
 // this base, head and engine from the trusted author's comments. An
 // unreadable comment list is an error, never an empty ledger. No complete
 // generation is not an error: the first pass starts from zero accepted
-// dispositions and publishes the initial outstanding generation.
+// verdicts and publishes the initial outstanding generation.
 func (l *Leg) currentGeneration(ctx context.Context, loaded Context, base, head core.Revision, engine string) (prstate.Generation, error) {
 	store := ledgerStoreFor(l)
 	if store == nil {

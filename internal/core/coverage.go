@@ -8,7 +8,7 @@ import (
 )
 
 // FileEngineVersion is the first file-coverage engine. Its manifest identity
-// is FileEngineID. A later change to enumeration, evidence or disposition
+// is FileEngineID. A later change to enumeration, evidence or verdict
 // semantics must change this literal and invalidate prior generations.
 const FileEngineVersion = "file-v1"
 
@@ -77,32 +77,32 @@ func ParseChangeKind(s string) (ChangeKind, error) {
 // String renders the change kind as the manifest holds it.
 func (k ChangeKind) String() string { return string(k) }
 
-// Disposition is a reviewer's judgement on one required unit.
-type Disposition string
+// FileVerdict is a reviewer's judgement on one required unit.
+type FileVerdict string
 
-// The four dispositions a reviewer may report. Outstanding is a record type,
-// not a disposition: there is no pending judgement.
+// The four verdicts a reviewer may report. Outstanding is a record type,
+// not a verdict: there is no pending judgement.
 const (
-	DispositionNoIssue        Disposition = "no_issue"
-	DispositionFinding        Disposition = "finding"
-	DispositionNotAffected    Disposition = "not_affected"
-	DispositionCouldNotReview Disposition = "could_not_review"
+	FileVerdictNoIssue        FileVerdict = "no_issue"
+	FileVerdictFinding        FileVerdict = "finding"
+	FileVerdictNotAffected    FileVerdict = "not_affected"
+	FileVerdictCouldNotReview FileVerdict = "could_not_review"
 )
 
-// ErrDisposition is returned for a disposition no reviewer reports.
-var ErrDisposition = errors.New("a disposition is no_issue, finding, not_affected or could_not_review")
+// ErrFileVerdict is returned for a verdict no reviewer reports.
+var ErrFileVerdict = errors.New("a verdict is no_issue, finding, not_affected or could_not_review")
 
-// ParseDisposition accepts only the four reported values.
-func ParseDisposition(s string) (Disposition, error) {
-	switch Disposition(s) {
-	case DispositionNoIssue, DispositionFinding, DispositionNotAffected, DispositionCouldNotReview:
-		return Disposition(s), nil
+// ParseFileVerdict accepts only the four reported values.
+func ParseFileVerdict(s string) (FileVerdict, error) {
+	switch FileVerdict(s) {
+	case FileVerdictNoIssue, FileVerdictFinding, FileVerdictNotAffected, FileVerdictCouldNotReview:
+		return FileVerdict(s), nil
 	}
-	return "", fmt.Errorf("%w: %q", ErrDisposition, s)
+	return "", fmt.Errorf("%w: %q", ErrFileVerdict, s)
 }
 
-// String renders the disposition as the manifest holds it.
-func (d Disposition) String() string { return string(d) }
+// String renders the verdict as the manifest holds it.
+func (d FileVerdict) String() string { return string(d) }
 
 // FileChange is one path from a complete git enumeration: the current path,
 // the previous path where one exists, and how the two differ.

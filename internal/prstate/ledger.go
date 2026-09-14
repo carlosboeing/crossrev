@@ -217,7 +217,7 @@ func manifestRaw(body string) []byte {
 // Only comments by the trusted author are read; anything else is another
 // writer's bytes and contributes nothing. Manifests must carry the exact
 // base, head and engine asked for — any revision or engine change retires
-// every earlier disposition. The highest generation wins; two manifests at
+// every earlier verdict. The highest generation wins; two manifests at
 // the same generation reconcile by lower manifest comment id. Missing,
 // altered or reordered shards, an unreadable comment list and an unknown
 // future schema are errors, not an empty ledger.

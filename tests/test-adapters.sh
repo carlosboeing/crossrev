@@ -17,7 +17,7 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/harness.sh"
 REVIEW_PAYLOAD='{"verdict":"issues-remain","blocked_reason":null,"prior":null,"findings":[
   {"path":"app.ts","line":2,"side":"RIGHT","severity":"high","category":"correctness","pre_existing":false,
    "title":"Unchecked fetch response","why":"A failed request looks like a success","fix":"Check response.ok"}
-],"coverage":[{"unit_number":1,"disposition":"finding","finding_numbers":[1],
+],"coverage":[{"unit_number":1,"verdict":"finding","finding_numbers":[1],
   "evidence":[{"path":"app.ts","revision":"REPLACE_HEAD_SHA","start_line":1,"end_line":2,"source":"git","note":null}],
   "reason":null}],
 "examined_scope":"read app.ts at the head","known_limits":[]}'

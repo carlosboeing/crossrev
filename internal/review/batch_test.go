@@ -24,9 +24,9 @@ func findingAnswer(t *testing.T, firstPath string, rest []string, title string) 
 			b.WriteByte(',')
 		}
 		if i == 0 {
-			b.WriteString(`{"unit_number":` + itoa2(i+1) + `,"disposition":"finding","finding_numbers":[1],"evidence":[{"path":"` + path + `","revision":"` + headSHA + `","start_line":1,"end_line":1,"source":"git","note":null}],"reason":null}`)
+			b.WriteString(`{"unit_number":` + itoa2(i+1) + `,"verdict":"finding","finding_numbers":[1],"evidence":[{"path":"` + path + `","revision":"` + headSHA + `","start_line":1,"end_line":1,"source":"git","note":null}],"reason":null}`)
 		} else {
-			b.WriteString(`{"unit_number":` + itoa2(i+1) + `,"disposition":"no_issue","finding_numbers":[],"evidence":[{"path":"` + path + `","revision":"` + headSHA + `","start_line":null,"end_line":null,"source":"git","note":null}],"reason":null}`)
+			b.WriteString(`{"unit_number":` + itoa2(i+1) + `,"verdict":"no_issue","finding_numbers":[],"evidence":[{"path":"` + path + `","revision":"` + headSHA + `","start_line":null,"end_line":null,"source":"git","note":null}],"reason":null}`)
 		}
 	}
 	b.WriteString(`],"examined_scope":"read the batch","known_limits":[]}`)
@@ -157,18 +157,18 @@ func TestReviewPublishesFindingsFromEveryBatch(t *testing.T) {
 	last := gens[len(gens)-1]
 	covered := 0
 	for _, record := range last.Records {
-		if record.Type == prstate.CoverageRecordUnit && record.Disposition.Present() {
+		if record.Type == prstate.CoverageRecordUnit && record.Verdict.Present() {
 			covered++
 		}
 	}
 	if covered != 41 {
-		t.Fatalf("covered units = %d, want 41 (every required file with a disposition)", covered)
+		t.Fatalf("covered units = %d, want 41 (every required file with a verdict)", covered)
 	}
 }
 
 // TestReviewResumeSkipsCoveredBatches pins resumption across runs: after a
 // first run covers the one required file, a second run at the same revision
-// reuses the accepted disposition, invokes no batch, and still reports
+// reuses the accepted verdict, invokes no batch, and still reports
 // invoked.
 func TestReviewResumeSkipsCoveredBatches(t *testing.T) {
 	e := newEnv(t)

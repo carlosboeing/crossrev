@@ -24,7 +24,7 @@ func batchAnswer(t *testing.T, n int) string {
 		if i > 1 {
 			b.WriteByte(',')
 		}
-		b.WriteString(`{"unit_number":` + itoa2(i) + `,"disposition":"no_issue","finding_numbers":[],"evidence":[{"path":"` + batchPath(i) + `","revision":"` + headSHA + `","start_line":null,"end_line":null,"source":"git","note":null}],"reason":null}`)
+		b.WriteString(`{"unit_number":` + itoa2(i) + `,"verdict":"no_issue","finding_numbers":[],"evidence":[{"path":"` + batchPath(i) + `","revision":"` + headSHA + `","start_line":null,"end_line":null,"source":"git","note":null}],"reason":null}`)
 	}
 	b.WriteString(`],"examined_scope":"read the batch","known_limits":[]}`)
 	return b.String()
@@ -49,7 +49,7 @@ func batchAnswerFor(t *testing.T, paths []string) string {
 		if i > 0 {
 			b.WriteByte(',')
 		}
-		b.WriteString(`{"unit_number":` + itoa2(i+1) + `,"disposition":"no_issue","finding_numbers":[],"evidence":[{"path":"` + path + `","revision":"` + headSHA + `","start_line":null,"end_line":null,"source":"git","note":null}],"reason":null}`)
+		b.WriteString(`{"unit_number":` + itoa2(i+1) + `,"verdict":"no_issue","finding_numbers":[],"evidence":[{"path":"` + path + `","revision":"` + headSHA + `","start_line":null,"end_line":null,"source":"git","note":null}],"reason":null}`)
 	}
 	b.WriteString(`],"examined_scope":"read the batch","known_limits":[]}`)
 	return b.String()
@@ -151,7 +151,7 @@ func TestReviewRetriesSemanticOmissionOnce(t *testing.T) {
 	e := newEnv(t)
 	writeRequiredHead(e, "a.go", "package a\n")
 	writeRequiredHead(e, "b.go", "package b\n")
-	omitSecond := `{"verdict":"issues-remain","blocked_reason":null,"findings":[],"coverage":[{"unit_number":1,"disposition":"no_issue","finding_numbers":[],"evidence":[],"reason":null}],"examined_scope":"read half the batch","known_limits":[]}`
+	omitSecond := `{"verdict":"issues-remain","blocked_reason":null,"findings":[],"coverage":[{"unit_number":1,"verdict":"no_issue","finding_numbers":[],"evidence":[],"reason":null}],"examined_scope":"read half the batch","known_limits":[]}`
 	e.runner.script = []exec.Result{
 		{ExitCode: 0, Stdout: claudeStdout(omitSecond)},
 		{ExitCode: 0, Stdout: claudeStdout(batchAnswer(t, 2))},
@@ -180,7 +180,7 @@ func TestReviewRetriesSemanticOmissionOnce(t *testing.T) {
 
 // TestReviewRestartUsesOnlySameRevisionCoverage pins resumption: a restart at
 // the same base, head and engine reuses the prior generation's accepted
-// dispositions, while a moved head starts from zero accepted units.
+// verdicts, while a moved head starts from zero accepted units.
 func TestReviewRestartUsesOnlySameRevisionCoverage(t *testing.T) {
 	e := newEnv(t)
 	writeRequiredHead(e, "a.go", "package a\n")
@@ -199,7 +199,7 @@ func TestReviewRestartUsesOnlySameRevisionCoverage(t *testing.T) {
 	}
 }
 
-// acceptedReuse counts the prior generation's dispositions the leg would
+// acceptedReuse counts the prior generation's verdicts the leg would
 // reuse at the given revision pair under the current engine.
 func acceptedReuse(t *testing.T, e *env, base, head core.Revision) int {
 	t.Helper()
@@ -209,7 +209,7 @@ func acceptedReuse(t *testing.T, e *env, base, head core.Revision) int {
 	}
 	accepted := 0
 	for _, record := range gen.Records {
-		if record.Type == "unit" && record.Disposition.Present() {
+		if record.Type == "unit" && record.Verdict.Present() {
 			accepted++
 		}
 	}
@@ -227,9 +227,9 @@ func TestReviewWriterDowngradesUncoveredConvergedVerdict(t *testing.T) {
 	writeRequiredHead(e, "a.go", "package a\n")
 	writeRequiredHead(e, "b.go", "package b\n")
 	unexaminable := `{"verdict":"converged","blocked_reason":null,"findings":[],"coverage":[` +
-		`{"unit_number":1,"disposition":"no_issue","finding_numbers":[],` +
+		`{"unit_number":1,"verdict":"no_issue","finding_numbers":[],` +
 		`"evidence":[{"path":"a.go","revision":"` + headSHA + `","start_line":null,"end_line":null,"source":"git","note":null}],"reason":null},` +
-		`{"unit_number":2,"disposition":"could_not_review","finding_numbers":[],` +
+		`{"unit_number":2,"verdict":"could_not_review","finding_numbers":[],` +
 		`"evidence":[{"path":"b.go","revision":"` + headSHA + `","start_line":null,"end_line":null,"source":"git","note":null}],` +
 		`"reason":"binary content could not be read, fallback search found nothing"}],` +
 		`"examined_scope":"read the batch","known_limits":["b.go is binary"]}`
