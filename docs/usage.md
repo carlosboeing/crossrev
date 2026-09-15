@@ -60,6 +60,8 @@ Exact search hits and adjacent-test names are hints only. They add no required f
 
 The reviewer gives each required file one file verdict: `no_issue`, `finding`, `not_affected`, or `could_not_review`. A file with a verdict is **covered**; a file still waiting for one is **outstanding**. Every required file ends the pass in exactly one of those two states.
 
+Covered means a verdict was recorded for the file. A `could_not_review` verdict still prevents convergence.
+
 One pass reads at most 400 required files. Batches hold at most 40 files in path order.
 
 Batches measure the full rendered prompt against 180 KB (184,320 bytes).
@@ -189,7 +191,7 @@ In automated mode the runner is discarded after the job, so the generated workfl
 |---|---|
 | awaiting review | A review leg is owed |
 | awaiting resolution | The review landed; the resolve leg is owed |
-| converged | Nothing at or above `min_fix_severity` remains, and every changed file was read |
+| converged | Nothing at or above `min_fix_severity` remains, every required file has an accepted verdict, none is marked `could_not_review`, and any repair has been confirmed |
 | halted | It stopped short — a cap, a blocked leg, an escalated finding, or a deferral whose record never landed. A human is needed |
 | stopped | Somebody applied `crossrev/stop` |
 
@@ -197,7 +199,7 @@ A resolve pass that ended blocked or escalated is complete but not settled, so i
 
 A resolve pass can also finish the loop itself. A pass that settled every finding without pushing a commit — each disputed, skipped, or deferred and tracked — converges on the spot: the head never moved, so a re-review would find nothing new and decline. A pass that pushed hands back to the reviewer, because there is something new to see.
 
-Converged does not mean "no findings". It means no finding this pull request introduced, at or above the threshold, remains, and every changed file was read. Findings below the threshold and pre-existing ones are reported and cannot keep the loop alive — a loop that cannot converge because of a naming quibble is one nobody leaves switched on.
+Converged does not mean "no findings". It means no finding this pull request introduced, at or above the threshold, remains, every required file has an accepted verdict, none is marked `could_not_review`, and any repair has been confirmed. Findings below the threshold and pre-existing ones are reported and cannot keep the loop alive — a loop that cannot converge because of a naming quibble is one nobody leaves switched on.
 
 Converged also does not mean checks ran. The coverage record names verification status not_implemented. No check runs in this release.
 
