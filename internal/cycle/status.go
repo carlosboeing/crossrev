@@ -197,11 +197,16 @@ func (s *Status) Load(ctx context.Context, repo core.Slug, pr int) (Report, erro
 	}
 
 	maxPasses, _ := strconv.Atoi(cfg.Get(".policy.max_passes_per_cycle"))
+	comments := s.Forge.IssueComments(ctx, repo, pr)
 	in := statusInput{
 		repo:      repo,
 		pr:        pr,
 		labels:    statusLabelNames(pull.Labels),
-		markers:   statusMarkers(s.Forge.IssueComments(ctx, repo, pr), author),
+		markers:   statusMarkers(comments, author),
+		coverage:  statusCoverageComments(comments),
+		author:    author,
+		base:      pull.BaseRefOid,
+		head:      pull.HeadRefOid,
 		headSHA:   pull.HeadRefOid.SHA(),
 		draft:     pull.IsDraft,
 		minFix:    core.Severity(cfg.Get(".policy.min_fix_severity")),
@@ -251,6 +256,10 @@ type statusInput struct {
 	pr        int
 	labels    []string
 	markers   []prstate.Marker
+	coverage  []prstate.CoverageComment
+	author    string
+	base      core.Revision
+	head      core.Revision
 	headSHA   string
 	draft     bool
 	minFix    core.Severity
@@ -262,7 +271,8 @@ type statusInput struct {
 // statusReviewConverges reports whether one complete converged review marker
 // underwrites a green report at the current head: the marker's own half
 // (complete, no stop, coverage promise kept), the head it was written at,
-// and any repair confirmation pair it carries.
+// any repair confirmation pair it carries, and the coverage ledger the
+// promise references.
 func statusReviewConverges(in statusInput, review prstate.Marker) bool {
 	if !prstate.MarkerConverges(review) {
 		return false
@@ -270,7 +280,51 @@ func statusReviewConverges(in statusInput, review prstate.Marker) bool {
 	if !prstate.MarkerHeadCurrent(review, in.headSHA) {
 		return false
 	}
-	return prstate.ConfirmationSettled(review, in.headSHA)
+	if !prstate.ConfirmationSettled(review, in.headSHA) {
+		return false
+	}
+	return statusCoverageConverges(in, review)
+}
+
+// statusCoverageConverges reports whether the coverage ledger underwrites
+// the converged marker's promise: the current complete generation at the
+// exact base, head and engine, selected from the trusted author's comments,
+// must satisfy the one convergence predicate. The manifest id on the marker
+// is a reference, not evidence — a ledger that no longer holds a current
+// complete generation (removed, written for another revision, or carrying
+// records the predicate refuses) cannot report green on the marker alone. A
+// v1 marker predates the coverage obligation and is grandfathered.
+func statusCoverageConverges(in statusInput, review prstate.Marker) bool {
+	if _, ok := review.CoverageManifestID.Get(); !ok {
+		return true
+	}
+	generation, err := prstate.SelectGeneration(in.coverage, in.author,
+		core.RevisionPair{Base: in.base, Head: in.head}, core.FileEngineVersion)
+	if err != nil {
+		return false
+	}
+	conv := policy.Convergence{
+		LedgerCurrent: true,
+		Required:      len(generation.Records),
+		ScopeReported: generation.ScopeReport.ExaminedScope != "",
+	}
+	for _, record := range generation.Records {
+		switch record.Type {
+		case prstate.CoverageRecordOutstanding:
+			conv.Outstanding++
+		case prstate.CoverageRecordUnit:
+			verdict, ok := record.Verdict.Get()
+			if !ok || verdict == "" {
+				conv.Outstanding++
+				continue
+			}
+			conv.Covered++
+			if verdict == string(core.FileVerdictCouldNotReview) {
+				conv.CouldNotReview++
+			}
+		}
+	}
+	return policy.Converged(conv)
 }
 
 // statusMarkersConverge reports whether the markers underwrite the converged
@@ -988,6 +1042,18 @@ func statusMarkers(comments []forge.IssueComment, author string) []prstate.Marke
 		lines = append(lines, string(raw))
 	}
 	return prstate.Markers([]byte(strings.Join(lines, "\n")))
+}
+
+// statusCoverageComments renders the conversation comments as the ledger
+// surface SelectGeneration reads. Coverage comments are conversation
+// comments, so the one list Load already fetched serves both, and the
+// selection — not this copy — decides which author is trusted.
+func statusCoverageComments(comments []forge.IssueComment) []prstate.CoverageComment {
+	out := make([]prstate.CoverageComment, 0, len(comments))
+	for _, c := range comments {
+		out = append(out, prstate.CoverageComment{ID: c.ID, Author: c.AuthorLogin, Body: c.Body})
+	}
+	return out
 }
 
 func statusLabelNames(labels []forge.Label) []string {

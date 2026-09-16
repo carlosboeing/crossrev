@@ -77,7 +77,7 @@ A marker carries the protocol version, the leg, the pass number, its state, time
 |---|---|---|
 | `<!-- crossrev:` | The pass summary comment | The whole pass: verdict, findings, resolutions, cost |
 | `<!-- crossrev:f` | Each inline comment and each reply | One finding id, its pass, and the leg that wrote it |
-| `<!-- crossrev:c` | Coverage comments | One batch of verdicts, or the manifest naming them |
+| `<!-- crossrev:c` | Coverage comments | A shard containing file coverage records, or a manifest identifying all shards in a complete coverage snapshot |
 
 New markers open with `v:2`. They name the coverage record, the stop counts and the confirmed repair.
 
@@ -144,7 +144,7 @@ The last three are continuation bounds: they end *automatic* reviewing and never
 
 Each review pass reads every changed file: every added, modified, deleted, renamed and type-changed path between the base branch and the pull request branch. A rename counts as new work and is read again from scratch.
 
-A **required file** is a changed file the review must account for. The reviewer gives each one a verdict, and the pass converges only when every required file has one. When the branch moves, every prior result is retired and the next pass starts over. A re-run at the same revision resumes the files still waiting for a verdict.
+A **required file** is a changed file the review must account for. The reviewer gives each one a verdict, and the pass converges only when every required file has one. When the branch moves, every prior result is retired and the next pass starts over. A re-run reuses recorded verdicts only when the base commit, the pull request commit and the review-engine version are unchanged; then it resumes the files still waiting for a verdict.
 
 The review reads in batches because one prompt cannot hold a large pull request. One pass reads at most 400 required files. Batches hold at most 40 files in path order.
 
@@ -169,6 +169,8 @@ The file list lives in `internal/intel`, the stored record in `internal/prstate`
 ### The coverage ledger
 
 Coverage is stored on the pull request itself, in the same hidden comments as the markers: small shards first, then one manifest naming them.
+
+One generation holds a record for every required file, outstanding ones included, and that complete snapshot is split into shards by serialized size. A shard is a storage chunk, not a review batch: its boundaries need not match the files supplied in one reviewer invocation.
 
 A read failure is reported, never answered as empty. Only the trusted author counts.
 
