@@ -40,4 +40,17 @@ cd "$ROOT"
 mkdir -p "$(dirname "$OUT")"
 
 export GOTOOLCHAIN="go1.27.0"
-go build -trimpath -o "$OUT" ./cmd/crossrev
+
+# Set by scripts/install-local.sh, never by CI. An empty value is a release
+# build, which is what every other caller is.
+LDFLAGS=""
+if [[ "${CROSSREV_DEV_BUILD:-}" == "1" ]]; then
+  LDFLAGS="-X github.com/carlosboeing/crossrev/internal/buildinfo.LocalBuild=1"
+fi
+# Replaces the whole version string. Nothing sets it yet; it exists so the
+# convention has no hole in it.
+if [[ -n "${CROSSREV_VERSION_OVERRIDE:-}" ]]; then
+  LDFLAGS="${LDFLAGS:+$LDFLAGS }-X github.com/carlosboeing/crossrev/internal/buildinfo.VersionOverride=${CROSSREV_VERSION_OVERRIDE}"
+fi
+
+go build -trimpath ${LDFLAGS:+-ldflags "$LDFLAGS"} -o "$OUT" ./cmd/crossrev

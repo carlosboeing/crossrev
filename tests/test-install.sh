@@ -53,8 +53,28 @@ out="$(CROSSREV_BIN_DIR="$bin" bash "$ROOT/scripts/install-local.sh" --yes --no-
   || notok "and the copy is executable" "executable" "$(ls -la "$bin/crossrev")"
 is_version="$("$bin/crossrev" version 2>/dev/null)"
 want_version="$(tr -d '[:space:]' <"$ROOT/VERSION")"
-[[ "$is_version" == "$want_version" ]] && ok "and the copy reports this checkout's version" \
-  || notok "and the copy reports this checkout's version" "$want_version" "$is_version"
+# The installer marks its build, so the copy reports base-commit-dirty from
+# the stamp Go recorded — read back off the binary rather than recomputed, so
+# no assumption about what counts as dirty sits between the two.
+stamp="$(go version -m "$bin/crossrev" 2>/dev/null)" || true
+stamp_rev="$(grep 'vcs.revision=' <<<"$stamp" | cut -d= -f2 | cut -c1-7)" || true
+stamp_mod="$(grep 'vcs.modified=' <<<"$stamp" | cut -d= -f2)" || true
+if [[ -n "$stamp_rev" ]]; then
+  want_version="$want_version-$stamp_rev"
+  [[ "$stamp_mod" == "true" ]] && want_version="$want_version-dirty"
+fi
+[[ "$is_version" == "$want_version" ]] && ok "and the copy reports this checkout's marked version" \
+  || notok "and the copy reports this checkout's marked version" "$want_version" "$is_version"
+# And the stamp names this checkout's HEAD — Go's answer, checked against
+# git's, so a recomputation here would prove nothing.
+head_sha="$(git -C "$ROOT" rev-parse HEAD 2>/dev/null | cut -c1-7)" || true
+if [[ -z "$stamp_rev" || -z "$head_sha" ]]; then
+  ok "and the marked commit is this checkout's HEAD (unstamped build, nothing to check)"
+elif [[ "$stamp_rev" == "$head_sha" ]]; then
+  ok "and the marked commit is this checkout's HEAD"
+else
+  notok "and the marked commit is this checkout's HEAD" "$head_sha" "$stamp_rev"
+fi
 case "$out" in
   *"$(cd "$ROOT" && pwd)"*) ok "the source it reports is this checkout" ;;
   *) notok "the source it reports is this checkout" "$(cd "$ROOT" && pwd)" "$out" ;;

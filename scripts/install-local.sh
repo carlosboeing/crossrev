@@ -93,6 +93,11 @@ target="$BIN_DIR/crossrev"
 
 # Build first, into a private directory, so a failed build leaves the
 # installed copy alone rather than replacing it with half a binary.
+#
+# The mark is what makes the version honest: a clean local build and a release
+# build of the same commit are identical to Go, so the installer says at build
+# time that this one is local, and `crossrev version` carries the commit.
+export CROSSREV_DEV_BUILD=1
 build_tmp="$(mktemp -d)"
 trap 'rm -rf "$build_tmp"' EXIT
 bash "$HERE/scripts/build-binary.sh" host "$build_tmp/crossrev" || {
