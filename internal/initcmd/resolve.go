@@ -13,6 +13,11 @@ import (
 	"github.com/carlosboeing/crossrev/internal/harness"
 )
 
+// untagged is the ref beside a pin no release tag points at: the default
+// Resolve sets when the source names none, and the value Print warns about.
+// Tests pin the literal; production shares this.
+const untagged = "untagged"
+
 // Plan is everything `init` settles before it prints, asks or writes anything
 // (lib/init.sh:19-28 and _init_resolve, lib/init.sh:70-162).
 //
@@ -36,7 +41,8 @@ type Plan struct {
 	Runner string
 
 	// SourceSHA is the commit of CrossRev the workflows pin, and SourceRef
-	// is the described tag that rides in the comment beside it.
+	// is the release tag pointing at it that rides in the comment beside
+	// it, or `untagged`.
 	SourceSHA string
 	SourceRef string
 
@@ -204,7 +210,7 @@ func Resolve(ctx context.Context, req Request) (Plan, error) {
 	if sha, err := req.Source.SHA(ctx); err == nil {
 		plan.SourceSHA = sha
 	}
-	plan.SourceRef = "untagged"
+	plan.SourceRef = untagged
 	if ref, err := req.Source.Ref(ctx); err == nil {
 		plan.SourceRef = ref
 	}

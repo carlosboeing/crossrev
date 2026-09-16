@@ -401,6 +401,36 @@ func TestPrintWarnsOnlyWhenTheDefaultBranchIsUnprotected(t *testing.T) {
 	}
 }
 
+// A pin no release tag points at generates workflows the action refuses on
+// their first run, in a consumer's repository, with an error about a missing
+// release rather than about the binary that wrote them. Saying so here costs
+// one line and puts the warning next to its cause.
+func TestPlanWarnsWhenThePinCarriesNoReleaseTag(t *testing.T) {
+	req := request(t, baseline)
+	req.Source = fakeSource{sha: strings.Repeat("a", 40), ref: "untagged"}
+	out, printed := capture()
+	req.Out = out
+
+	resolved(t, req).Print(context.Background(), req)
+
+	if !strings.Contains(printed.String(), "no release points at it") {
+		t.Errorf("an untagged pin was reported without a warning:\n%s", printed.String())
+	}
+}
+
+func TestPlanDoesNotWarnWhenThePinIsATaggedRelease(t *testing.T) {
+	req := request(t, baseline)
+	req.Source = fakeSource{sha: strings.Repeat("a", 40), ref: "v0.6.2"}
+	out, printed := capture()
+	req.Out = out
+
+	resolved(t, req).Print(context.Background(), req)
+
+	if strings.Contains(printed.String(), "no release points at it") {
+		t.Errorf("a tagged pin was warned about:\n%s", printed.String())
+	}
+}
+
 func TestPrintWritesNothing(t *testing.T) {
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, ".github/workflows"), 0o755); err != nil {

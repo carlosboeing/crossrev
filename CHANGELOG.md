@@ -7,6 +7,7 @@ All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepa
 ### Added
 
 - **A locally built binary reports its commit.** `crossrev version` prints `X.Y.Z-<short-sha>`, with `-dirty` when the tree had uncommitted changes, for anything `scripts/install-local.sh` builds. Release builds still print plain SemVer, so the release agreement gate is untouched. `CROSSREV_VERSION_OVERRIDE` replaces the whole string when set.
+- **`crossrev init` warns when the pin carries no release tag.** The workflows it writes would fail on their first run with an error about a missing release; the plan now says so beside the pin, naming the consequence. It still proceeds — testing unreleased workflow changes against a real repository is deliberate, and the testbed exists for it.
 
 ### Changed
 
