@@ -4,6 +4,10 @@ All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepa
 
 ## [Unreleased]
 
+### Fixed
+
+- **Pinned actions run their own release again.** The composite action resolved its binary through `github.action_ref`, which arrives empty, so the empty ref fell through to the tag branch and every consumer silently downloaded the latest release whatever the pin said — v0.6.2 pins ran the v0.7.0 binary the hour it published. The action now reads the release from the `VERSION` beside itself, refuses an unversioned checkout, and logs the resolved tag.
+
 ## [0.7.0] — 2026-09-17
 
 ### Added
