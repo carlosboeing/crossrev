@@ -62,6 +62,14 @@ done
 fixture_repo; stub_reset
 
 for leg in $LEGS; do
+  # auth-refresh is deliberately outside this loop. The action does not send
+  # it the forwarded flags — it builds `auth refresh --harness --repo` itself
+  # — so "does this leg accept every forwarded flag" is not a question about
+  # it. And it cannot merely be left in: `crossrev auth-refresh` is not a
+  # command, so the binary answers `unknown command`, the assertion below
+  # looks for `unknown option`, and the row passes having checked nothing.
+  # The real coverage for this leg is the auth refresh invocation further down.
+  [[ "$leg" == "auth-refresh" ]] && continue
   out="$("$CROSSREV" "$leg" "${args[@]}" 2>&1)"
   hasnt "the $leg leg takes every flag the action forwards" \
     "$out" "unknown option for $leg"
@@ -126,4 +134,27 @@ has "templates/crossrev-review.yml chooses its own trigger per event" \
   "$(yq -r '[.jobs[].steps[].with.trigger] | join("")' "$HERE/../templates/crossrev-review.yml")" \
   "'automatic' || 'human'"
 
+# auth-refresh does not take the forwarded flags, so it gets its own branch in
+# the run step rather than the generic assembly. Without the branch the generic
+# path appends --trigger and --no-tips, which `auth refresh`'s argument loop
+# refuses outright (internal/cli/parse.go:478-500) — the leg would die at its
+# first argument, on a credential with a ten-day clock on it.
+refresh_branch="$(yq -r '.runs.steps[-1].run' "$ACTION")"
+has "the run step branches on auth-refresh"      "$refresh_branch" "auth-refresh"
+has "and builds the auth refresh command itself" "$refresh_branch" "auth refresh"
+has "naming the harness"                         "$refresh_branch" "--harness"
+has "and the repository explicitly"              "$refresh_branch" "--repo"
+branch="${refresh_branch#*inputs.leg*auth-refresh}"
+hasnt "without forwarding the trigger flag"      "${branch%%fi*}" "--trigger"
+
+# `crossrev auth-refresh` is not a command (internal/cli/parse.go:117), so the
+# leg loop above cannot say anything useful about this value: the binary dies
+# with `unknown command`, the loop's assertion looks for `unknown option`, and
+# a vacuous pass is what you get. The real command is exercised here instead.
+fixture_repo; stub_reset
+out="$("$CROSSREV" auth refresh --harness codex --repo acme/widget 2>&1)"
+hasnt "auth refresh takes the two flags the action sends it" \
+  "$out" "unknown option for auth refresh"
+
 finish
+

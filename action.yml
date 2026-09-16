@@ -168,9 +168,25 @@ runs:
                "after one pass with no error anywhere."
           exit 1
         }
+
+        # auth-refresh is a leg of the action and not a leg of the loop, so it
+        # skips the generic assembly entirely. The generic path always appends
+        # --trigger and --no-tips, because both inputs have defaults, and
+        # `auth refresh` refuses an unknown option rather than ignoring it.
+        #
+        # --repo is explicit because this job has no checkout: an empty --repo
+        # falls back to `gh repo view`, which needs a remote that is not there.
+        if [[ "${{ inputs.leg }}" == "auth-refresh" ]]; then
+          args=(auth refresh --repo "${{ github.repository }}")
+          [[ -n "${{ inputs.harness }}" ]] && args+=(--harness "${{ inputs.harness }}")
+          "${CROSSREV_BIN:?}" "${args[@]}"
+          exit 0
+        fi
+
         args=("${{ inputs.leg }}")
         [[ -n "${{ inputs.pr }}" ]] && args+=(--pr "${{ inputs.pr }}")
         [[ -n "${{ inputs.harness }}" ]] && args+=(--harness "${{ inputs.harness }}")
         [[ -n "${{ inputs.trigger }}" ]] && args+=(--trigger "${{ inputs.trigger }}")
         [[ "${{ inputs.no-tips }}" == "true" ]] && args+=(--no-tips)
         "${CROSSREV_BIN:?}" "${args[@]}"
+

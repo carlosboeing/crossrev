@@ -10,6 +10,8 @@ All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepa
 
 - **The composite action asks each leg for only the preflight it needs.** The watchdog and `status` legs install and invoke no harness CLI, so the hard-coded harness preflight failed them before any work. The preflight step now maps the leg to `--level core` for `status`, `watchdog` and `auth-refresh`, and `--level harness` for model-running legs. Unrecognised legs fall back to `harness` so an omission fails closed.
 
+- **The composite action gains an `auth-refresh` leg.** Token refresh was the last consumer of the source-checkout delivery mode, which v0.6.0 removed; giving the action an `auth-refresh` leg puts release-binary acquisition in exactly one place. The leg forwards no pull-request or loop flags and builds `crossrev auth refresh --harness <harness> --repo <owner/name>` directly.
+
 ## [0.6.1] — 2026-09-06
 
 ### Fixed
