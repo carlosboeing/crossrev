@@ -321,6 +321,12 @@ func TestReviewRunsAdmittedBatchesBeforeBudgetHalt(t *testing.T) {
 	if !converged {
 		t.Errorf("labels added = %v, want crossrev/converged after the re-drive covers the remainder", e.forge.labelsAdded)
 	}
+	if _, ok := again.Marker.CoverageStop.Get(); ok {
+		t.Error("the settled marker still carries the halt's coverage_stop")
+	}
+	if !prstate.MarkerConverges(again.Marker) {
+		t.Error("the settled marker does not converge after the re-drive covers the remainder")
+	}
 }
 
 // TestReviewRunsSchedulableBatchesBeforeInputHalt pins the same ordering when

@@ -451,6 +451,11 @@ func (l *Leg) finishCoveredPass(ctx context.Context, req Request, loaded Context
 		marker.ConfirmationBaseSHA = prstate.Null[string]()
 		marker.ConfirmationHeadSHA = prstate.Null[string]()
 	}
+	// A settled pass carries no stop. The marker under construction may be
+	// a resumed halt, and a complete marker that still carries one cannot
+	// underwrite green — MarkerConverges refuses it — while the ledger
+	// predicate has already applied the converged label.
+	marker.CoverageStop = prstate.Null[prstate.CoverageStop]()
 	out.Marker = marker
 	out.Covered = coveredPass{findings: outcome.findings, verdict: verdict, envelope: outcome.envelope, payload: mergePayloads(outcome.payloads, verdict), examined: outcome.examined, limits: outcome.limits}
 	return nil
