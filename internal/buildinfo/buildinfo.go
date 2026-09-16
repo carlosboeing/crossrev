@@ -24,6 +24,20 @@ type Info struct {
 	Time string
 }
 
+// LocalBuild is set by -ldflags when scripts/install-local.sh builds the
+// binary, and is empty for every other build including the released ones.
+//
+// It exists because a clean local build and a release build of the same commit
+// are identical to Go: same vcs.revision, same vcs.modified. Nothing at runtime
+// can tell them apart, so the local installer says so at build time. QuotaCap
+// marks its own output the same way, through QUOTACAP_DEV_BUILD.
+var LocalBuild string
+
+// VersionOverride is set by -ldflags from CROSSREV_VERSION_OVERRIDE, and
+// replaces the whole version string. It mirrors QUOTACAP_VERSION_OVERRIDE:
+// nothing sets it yet, and it exists so the convention has no hole in it.
+var VersionOverride string
+
 // Stamped reports whether the build carries a VCS revision.
 func (i Info) Stamped() bool { return i.Revision != "" }
 

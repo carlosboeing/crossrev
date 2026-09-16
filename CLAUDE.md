@@ -21,7 +21,7 @@ That is a named set of runs on one repository with one pairing, not a general gu
 - **Architecture**: `docs/architecture.md` (current state, including the file-by-file layout under `## The layout`)
 - **Working memory**: `.workbench/` — a **separate private repository**, nested here as an independent clone. See the gate below.
 - **Other**:
-  - No package manager, no lockfile. The binary is the installation: `install.sh` builds it from the checkout with `scripts/build-native.sh` and copies it onto PATH, and `bootstrap.sh` downloads a release asset the same way. The skills, templates and schemas are embedded at build time.
+  - No package manager, no lockfile. The binary is the installation: `scripts/install-local.sh` builds it from the checkout with `scripts/build-binary.sh` and copies it onto PATH, and `install.sh` downloads a release asset the same way. The skills, templates and schemas are embedded at build time. The install and build names match QuotaCap's by house convention — `install.sh` downloads, `scripts/install-local.sh` builds, one `scripts/build-binary.sh` per target, `<PROJECT>_DEV_BUILD` marking — so keep the two repositories in step rather than renaming one alone.
   - Dependencies are `git`, `gh` and `openssl`, plus `shellcheck` and Go 1.21 or newer for the linter. `go.mod` pins the exact `go1.27.0` toolchain, which any Go from 1.21 downloads and switches to on first use, so the installed version does not have to match. Go arrived with the native parity port and is authorised by [ADR 0018](docs/adrs/0018-go-native-parity-contract.md). Adding any other language runtime needs an ADR first.
   - Delivery to consuming repositories is a composite action pinned by full 40-character SHA ([ADR 0009](docs/adrs/0009-delivery-via-sha-pinned-composite-action.md)). `crossrev init` generates the pinned form; the floating `@v0` exists only in the README's copy-paste example.
   - CI runs `scripts/lint.sh`, `go test ./...` and `tests/run.sh` on push and pull request, plus `scripts/check-changelog.sh` on pull requests only. A release is a tag, and the tag triggers `.github/workflows/release.yml`, which verifies the version, publishes the two binaries and creates the GitHub Release.
@@ -88,7 +88,7 @@ Any generic agent skill — `brainstorming`, `writing-plans`, or an equivalent �
 ```
 docs/
 ├── README.md               — docs index
-├── installation.md         — bootstrap, install.sh, doctor, the skills offer
+├── installation.md         — install.sh, install-local.sh, doctor, the skills offer
 ├── usage.md                — the loop, what it writes, the labels, the resolutions
 ├── configuration.md        — .github/crossrev.yml, endpoints, environment variables
 ├── credentials.md          — which secrets automated mode needs, and why

@@ -538,6 +538,25 @@ func TestResolveCallsAnUndescribableCheckoutUntagged(t *testing.T) {
 	if plan.SourceRef != "untagged" {
 		t.Errorf("ref = %q, want untagged", plan.SourceRef)
 	}
+	if plan.SourceUnreachable {
+		t.Error("SourceUnreachable = true for a lookup that answered: only a failure to ask sets it")
+	}
+}
+
+func TestResolveMarksAnUnreachableRemoteRatherThanClaimingNoTag(t *testing.T) {
+	req := request(t, baseline)
+	req.Source = fakeSource{sha: strings.Repeat("b", 40), refErr: initcmd.ErrSourceUnreachable}
+
+	plan, err := initcmd.Resolve(context.Background(), req)
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if plan.SourceRef != "untagged" {
+		t.Errorf("ref = %q, want untagged", plan.SourceRef)
+	}
+	if !plan.SourceUnreachable {
+		t.Error("SourceUnreachable = false, want true: the remote was never asked")
+	}
 }
 
 func TestRequiredSecrets(t *testing.T) {

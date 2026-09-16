@@ -3,14 +3,14 @@
 ## The one-command install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/carlosboeing/crossrev/main/bootstrap.sh | bash
+curl -fsSL https://raw.githubusercontent.com/carlosboeing/crossrev/main/install.sh | bash
 ```
 
 No token, no `gh`, no credential of any kind. The repository is public, so raw.githubusercontent serves the script anonymously.
 
-`bootstrap.sh` downloads the release binary for your platform, checks its digest against the release's `checksums.txt`, and installs it onto your PATH. It asks before replacing anything, and it is safe to re-run.
+`install.sh` downloads the release binary for your platform, checks its digest against the release's `checksums.txt`, and installs it onto your PATH. It asks before replacing anything, and it is safe to re-run.
 
-### What bootstrap decides, and how to override it
+### What the installer decides, and how to override it
 
 | Flag | Default | What it does |
 |---|---|---|
@@ -44,16 +44,16 @@ The package is the last Bash version — `bin/`, `lib/`, `schemas/`, `skills/`, 
 
 **`crossrev init` does not work from an npm install, and this is the one real difference.** `init` generates workflows that pin the composite action to a 40-character SHA, and it reads that SHA from CrossRev's own git checkout ([ADR 0009](adrs/0009-delivery-via-sha-pinned-composite-action.md)). An npm package has no `.git`, so `init` stops with an error naming the cause rather than writing a workflow pinned to nothing.
 
-So: **npm is the local path, a release binary is either path.** If you're setting up automated mode, use the bootstrap above. Full reasoning in [ADR 0011](adrs/0011-npm-as-a-second-install-route.md).
+So: **npm is the local path, a release binary is either path.** If you're setting up automated mode, use the one-command install above. Full reasoning in [ADR 0011](adrs/0011-npm-as-a-second-install-route.md).
 
-Updating a release install is the bootstrap again, which keeps an identical binary without asking. Updating npm is `npm update -g crossrev-ai`, which is the one thing npm does better than a binary.
+Updating a release install is the one-command install again, which keeps an identical binary without asking. Updating npm is `npm update -g crossrev-ai`, which is the one thing npm does better than a binary.
 
 ## Installing from a checkout you already have
 
-Skip the bootstrap:
+Skip the download:
 
 ```bash
-./install.sh
+./scripts/install-local.sh
 ```
 
 | Flag | What it does |
@@ -62,7 +62,7 @@ Skip the bootstrap:
 | `--yes` | Don't ask before replacing an existing binary |
 | `--skills` / `--no-skills` | Decide the skills offer without being asked |
 
-`install.sh` builds the binary from the checkout with `scripts/build-native.sh` and copies it onto your PATH. It reports what it replaced, because a binary silently overwritten by a different build keeps working while running code you did not expect, and there is no error to explain why.
+`scripts/install-local.sh` builds the binary from the checkout with `scripts/build-binary.sh` and copies it onto your PATH. It reports what it replaced, because a binary silently overwritten by a different build keeps working while running code you did not expect, and there is no error to explain why.
 
 If the bin directory isn't on your PATH, it tells you the line to add to your shell profile rather than editing it for you.
 
@@ -70,13 +70,13 @@ If the bin directory isn't on your PATH, it tells you the line to add to your sh
 
 The binary carries everything it needs: skills, templates and schemas are embedded at build time, so there is no checkout to keep beside it. Three consequences worth knowing:
 
-- **Rebuild and re-run `install.sh` to update.** There is no `crossrev update` command. A [roadmap item](ROADMAP.md) tracks giving this a proper command.
+- **Rebuild and re-run `scripts/install-local.sh` to update.** There is no `crossrev update` command. A [roadmap item](ROADMAP.md) tracks giving this a proper command.
 - **Deleting the binary is the uninstall.** Remove it from your PATH, and nothing is left except `~/.config/crossrev/` if you set up automated mode.
 - **Editing the checkout changes nothing until you reinstall.** Handy when you're working on CrossRev itself: the installed tool keeps running the build it was copied from, no matter what the checkout does next.
 
 ## The two skills
 
-`install.sh` **offers** to install `pr-review` and `pr-resolve` for your harnesses, and hands over to the [`skills` CLI](https://github.com/obra/skills) if you accept. By hand it is:
+`scripts/install-local.sh` **offers** to install `pr-review` and `pr-resolve` for your harnesses, and hands over to the [`skills` CLI](https://github.com/obra/skills) if you accept. By hand it is:
 
 ```bash
 npx skills@latest add carlosboeing/crossrev

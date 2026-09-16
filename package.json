@@ -23,7 +23,6 @@
   "files": [
     "action.yml",
     "assets/",
-    "bootstrap.sh",
     "cmd/",
     "install.sh",
     "internal/",

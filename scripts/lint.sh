@@ -33,13 +33,13 @@ done < <(find . -path './.worktrees' -prune -o \
 
 printf '\nshellcheck -S warning\n'
 if command -v shellcheck >/dev/null 2>&1; then
-  # bootstrap.sh is here for the reason it cannot be anywhere else: it is fetched
+  # install.sh is here for the reason it cannot be anywhere else: it is fetched
   # and piped into bash straight from the internet, and it is deliberately
   # self-contained — it sources nothing, because the reason it is running
   # is that nothing is installed yet. Nothing else would catch a mistake in
   # it.
   if shellcheck -S warning -x \
-       tests/*.sh tests/stub/* bootstrap.sh install.sh scripts/*.sh \
+       tests/*.sh tests/stub/* install.sh scripts/*.sh \
        scripts/githooks/pre-commit; then
     printf '  ok    clean\n'
   else

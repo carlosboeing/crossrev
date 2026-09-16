@@ -2,6 +2,7 @@ package initcmd
 
 import (
 	"context"
+	"errors"
 
 	"github.com/carlosboeing/crossrev/internal/config"
 	"github.com/carlosboeing/crossrev/internal/core"
@@ -145,17 +146,28 @@ type Pairing interface {
 // (lib/init.sh:141-147).
 //
 // Two methods, because the two answers fail differently: a SHA that cannot be
-// read stops the run, and a ref that cannot be read is the word `untagged`.
-// Folding them into one call would put that difference inside the
+// read stops the run, and a ref that cannot be read leaves `Untagged` in
+// place. Folding them into one call would put that difference inside the
 // implementation, where the shell keeps it in `init`.
 type Source interface {
-	// SHA is `git -C "$ROOT" rev-parse HEAD` against the CrossRev checkout,
-	// not the repository being set up.
+	// SHA is the VCS revision stamped into the binary, not `git rev-parse
+	// HEAD` of any checkout beside it. An unstamped or modified build is an
+	// error, and Resolve refuses the run on it.
 	SHA(ctx context.Context) (string, error)
 
-	// Ref is `git -C "$ROOT" describe --tags` against the same checkout.
+	// Ref is the release tag pointing at the SHA, read from the remote. It
+	// answers `Untagged` with a nil error when no release tag points at the
+	// pin, and `Untagged` with ErrSourceUnreachable when the remote could
+	// not be asked. Any other error keeps the default silently, the way a
+	// checkout with no tags did.
 	Ref(ctx context.Context) (string, error)
 }
+
+// ErrSourceUnreachable reports that the remote could not be asked which tag
+// points at the pin. Resolve records it on the plan rather than refusing:
+// the pin is still written, and Print says the lookup failed instead of
+// claiming no release points at it.
+var ErrSourceUnreachable = errors.New("could not reach the CrossRev remote to check the pin's tag")
 
 // FileSystem is the working tree of the repository being set up.
 //

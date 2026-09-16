@@ -4,6 +4,19 @@ All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepa
 
 ## [Unreleased]
 
+### Added
+
+- **A locally built binary reports its commit.** `crossrev version` prints `X.Y.Z-<short-sha>`, with `-dirty` when the tree had uncommitted changes, for anything `scripts/install-local.sh` builds. Release builds still print plain SemVer, so the release agreement gate is untouched. `CROSSREV_VERSION_OVERRIDE` replaces the whole string when set.
+- **`crossrev init` warns when the pin carries no release tag.** The workflows it writes would fail on their first run with an error about a missing release; the plan now says so beside the pin, naming the consequence. It still proceeds — testing unreleased workflow changes against a real repository is deliberate, and the testbed exists for it. It warns only when the lookup answered: when the remote cannot be reached at all, the plan says the question went unanswered instead of stating a cause it never established.
+
+### Changed
+
+- **The install scripts swap names and the build centralises on one script.** `bootstrap.sh` becomes `install.sh` — it downloads the release binary, which is what that filename means everywhere else — and the checkout builder moves to `scripts/install-local.sh`. `scripts/build-native.sh` becomes `scripts/build-binary.sh`, takes a target (`darwin-arm64`, `linux-amd64`, `host`), and the release workflow's two inline builds now call it, so the version-agreement gate verifies a binary produced the same way as the ones it publishes. The documented one-command install URL changes accordingly.
+
+### Fixed
+
+- **`crossrev init` derives the pin's tag comment from the pinned commit.** The tag used to come from `git describe` in whatever checkout sat near the binary, so one binary wrote two different comments from two locations — and the one that looked informative named the wrong commit. The lookup is now the one the composite action already performs, so both answer the same way. A commit no release tag points at writes `untagged`, which is then true; when the remote cannot be asked at all, the comment stays `untagged` but the plan says the lookup failed rather than claiming no release exists. The lookup runs under a twenty-second timeout with every prompt disabled — terminal, askpass and SSH — so a stalled connection or an SSH rewrite fails into that fallback instead of blocking init.
+
 ## [0.6.2] — 2026-09-16
 
 ### Fixed
