@@ -144,6 +144,8 @@ type fakeVCS struct {
 	required map[string]bool
 	// repair, when set, answers RangeDiff with the B-to-C delta.
 	repair *fakeRepair
+	// changedErr, when set, is the git failure ChangedFiles returns.
+	changedErr error
 }
 
 func (f *fakeVCS) ExactSearch(_ context.Context, revision core.Revision, term string, limit int) ([]vcs.SearchHit, bool, error) {
@@ -173,6 +175,9 @@ func (r *fakeRepair) at(base, head string) ([]byte, error) {
 }
 
 func (f *fakeVCS) ChangedFiles(_ context.Context, base, head core.Revision) ([]core.FileChange, error) {
+	if f.changedErr != nil {
+		return nil, f.changedErr
+	}
 	var changes []core.FileChange
 	for path := range f.files[head.SHA()] {
 		if !f.required[path] {
@@ -294,6 +299,10 @@ type fakeForge struct {
 	pr              forge.PullRequest
 	prErr           error
 	prCalls         int
+	// onPullRequest, when set, runs after each PullRequest call with the
+	// running call count, so a case can move the pull request's head or base
+	// mid-run the way a push during the review would.
+	onPullRequest   func(calls int)
 	comments        []forge.IssueComment
 	createErr       error
 	created         []string
@@ -339,6 +348,9 @@ func (f *fakeForge) DefaultBranch(context.Context, core.Slug) string { return "m
 
 func (f *fakeForge) PullRequest(context.Context, core.Slug, int) (forge.PullRequest, error) {
 	f.prCalls++
+	if f.onPullRequest != nil {
+		f.onPullRequest(f.prCalls)
+	}
 	if f.prErr != nil {
 		return forge.PullRequest{}, f.prErr
 	}
@@ -424,6 +436,13 @@ func (f *fakeForge) CommentCreate(_ context.Context, _ core.Slug, _ int, body st
 func (f *fakeForge) CommentEdit(_ context.Context, _ core.Slug, commentID int64, body string) error {
 	f.editIDs = append(f.editIDs, commentID)
 	f.edits = append(f.edits, body)
+	// An edit rewrites the comment, the way GitHub does: a later read — a
+	// resumed leg loading its markers — sees the new body, not the old one.
+	for i, c := range f.comments {
+		if c.ID == commentID {
+			f.comments[i].Body = body
+		}
+	}
 	f.ops = append(f.ops, "comment-edit")
 	return nil
 }

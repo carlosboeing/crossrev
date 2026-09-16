@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/carlosboeing/crossrev/internal/config"
 	"github.com/carlosboeing/crossrev/internal/core"
 	"github.com/carlosboeing/crossrev/internal/harness"
 	"github.com/carlosboeing/crossrev/internal/intel"
@@ -60,10 +61,15 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 		return len(l.renderBatchPrompt(ctx, req, loaded, settings, pass, files, scope, confirmation))
 	}
 	plan := intel.Batches(scope, acceptedIDs, render)
-	if plan.HaltReason != "" || len(plan.Carried) > 0 {
-		return l.haltPass(ctx, req, loaded, pass, claimID, out, &batchBound{plan: plan, scope: scope, accepted: acceptedIDs})
-	}
 	marker := markerForPass(loaded.Markers, pass)
+	// Findings a previous attempt recorded on the claim — after its accepted
+	// batches, or in the blocked record the failure left — come back into the
+	// outcome here, so a resumed pass republishes every accepted finding
+	// rather than converging over the verdicts alone.
+	if restored := marker.Findings; findingCount(restored) > 0 {
+		outcome.payloads = append(outcome.payloads, findingsOnlyPayload(restored))
+		outcome.findings = append(outcome.findings, parseFindings(restored)...)
+	}
 	claim := out.Marker
 	if claim.Harness.Present() {
 		marker.Harness = claim.Harness
@@ -93,7 +99,7 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 	}
 	marker.CoverageManifestID = prstate.Some(initial.CommentID())
 	if initialStop.Limit != "" {
-		return l.haltPass(ctx, req, loaded, pass, claimID, out, &batchBound{plan: planForStop(plan, initialStop, scope, acceptedIDs), scope: scope, accepted: acceptedIDs})
+		return l.haltPass(ctx, req, loaded, pass, claimID, out, &batchBound{plan: planForStop(plan, initialStop), scope: scope, accepted: acceptedIDs})
 	}
 	_ = initial
 	for _, batch := range plan.Batches {
@@ -126,14 +132,31 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 		manifest, stop, err := l.publishBatchGeneration(ctx, req, loaded, scope, advisory, gen+outcome.batches+1, outcome.verdicts, outcome.examined, outcome.limits)
 		if err != nil {
 			if stop, ok := batchStop(err); ok {
-				return l.haltPass(ctx, req, loaded, pass, claimID, out, &batchBound{plan: planForStop(plan, stop, scope, acceptedIDs), scope: scope, accepted: acceptedIDs})
+				return l.haltPass(ctx, req, loaded, pass, claimID, out, &batchBound{plan: planForStop(plan, stop), scope: scope, accepted: acceptedIDs})
 			}
 			return err
 		}
 		if stop.Limit != "" {
-			return l.haltPass(ctx, req, loaded, pass, claimID, out, &batchBound{plan: planForStop(plan, stop, scope, acceptedIDs), scope: scope, accepted: acceptedIDs})
+			return l.haltPass(ctx, req, loaded, pass, claimID, out, &batchBound{plan: planForStop(plan, stop), scope: scope, accepted: acceptedIDs})
 		}
 		marker.CoverageManifestID = prstate.Some(manifest.CommentID())
+		if raw := unionRawFindings(outcome.payloads); raw != nil {
+			// The accepted batch's findings go onto the claim the way the
+			// frozen path records its own before publishing: a failure in a
+			// later batch leaves them on the pull request, where the re-drive
+			// reads them back. The record stays a started claim — the pass
+			// has not settled.
+			marker.Findings = raw
+			out.Marker.Findings = raw
+			recorded := marker
+			recorded.State = core.PassStarted
+			if err := l.editClaim(ctx, loaded.Repo, claimID, recordedFindingsBody(pass, loaded.Config), recorded); err != nil {
+				return err
+			}
+		}
+	}
+	if plan.HaltReason != "" || len(plan.Carried) > 0 {
+		return l.haltPass(ctx, req, loaded, pass, claimID, out, &batchBound{plan: plan, scope: scope, accepted: acceptedIDs})
 	}
 	return l.finishCoveredPass(ctx, req, loaded, settings, pass, claimID, marker, scope, outcome, pair, out)
 }
@@ -182,8 +205,16 @@ func (l *Leg) publishBatchGeneration(ctx context.Context, req Request, loaded Co
 		ScopeReport: scopeReportOf(examinedScope, limits),
 	}
 	stillCurrent := func() error {
-		if loaded.PR.HeadRefOid.SHA() != scope.Head.SHA() {
-			return fmt.Errorf("the head moved during publication")
+		// The pair is re-read from the forge rather than compared against the
+		// snapshot the leg loaded: loaded.PR and scope come from the same
+		// read, so comparing them cannot see a push that landed during the
+		// model invocation.
+		current, err := l.Forge.PullRequest(ctx, loaded.Repo, req.PR)
+		if err != nil {
+			return err
+		}
+		if current.BaseRefOid.SHA() != scope.Base.SHA() || current.HeadRefOid.SHA() != scope.Head.SHA() {
+			return fmt.Errorf("the base or head moved during publication")
 		}
 		return nil
 	}
@@ -325,6 +356,11 @@ func (l *Leg) haltPass(ctx context.Context, req Request, loaded Context, pass in
 	marker.Version = core.MarkerVersion
 	marker.State = core.PassIncomplete
 	marker.CoverageStop = prstate.Some(stop)
+	if findingCount(claim.Findings) > 0 {
+		// Findings the accepted batches recorded stay on the halted claim,
+		// so the re-drive restores them beside the outstanding paths.
+		marker.Findings = claim.Findings
+	}
 	outstanding := outstandingPaths(bound.scope, bound.accepted)
 	body := haltBody(outstanding, stop, stop.Limit)
 	if err := l.editClaim(ctx, loaded.Repo, claimID, body, marker); err != nil {
@@ -339,48 +375,29 @@ func (l *Leg) haltPass(ctx context.Context, req Request, loaded Context, pass in
 }
 
 // stopForBound renders the stop counts one bounded halt records: required,
-// covered and outstanding totals with the limit name. Already-accepted units
-// count as covered, never as outstanding.
+// covered and outstanding totals with the limit name. Covered derives only
+// from accepted verdicts — an admitted batch that never ran is outstanding,
+// never covered.
 func stopForBound(bound *batchBound) prstate.CoverageStop {
-	remaining := bound.plan.Carried
 	limit := intel.CarryReviewBudgetReached
 	if bound.plan.HaltReason != "" {
-		remaining = bound.plan.Unbatched
 		limit = bound.plan.HaltReason
-	}
-	remainingSet := make(map[string]bool, len(remaining))
-	for _, unit := range remaining {
-		remainingSet[unit.Path] = true
 	}
 	outstanding := 0
 	for _, unit := range bound.scope.Required {
-		if bound.accepted[unit.ID] {
-			continue
-		}
-		if remainingSet[unit.Path] {
+		if !bound.accepted[unit.ID] {
 			outstanding++
 		}
 	}
-	covered := len(bound.scope.Required) - outstanding
-	if covered < 0 {
-		covered = 0
-	}
-	return prstate.CoverageStop{RequiredCount: len(bound.scope.Required), CoveredCount: covered, OutstandingCount: outstanding, Limit: limit}
+	return prstate.CoverageStop{RequiredCount: len(bound.scope.Required), CoveredCount: len(bound.scope.Required) - outstanding, OutstandingCount: outstanding, Limit: limit}
 }
 
 // planForStop carries a ledger-bound halt back into a batch plan shape: the
-// ledger's own limit becomes the halt word, and the unaccepted units become
-// the unbatched remainder, so stopForBound counts and names the same halt
-// the ledger reported.
-func planForStop(plan intel.BatchPlan, stop prstate.CoverageStop, scope intel.Scope, accepted map[core.UnitID]bool) intel.BatchPlan {
+// ledger's own limit becomes the halt word, so stopForBound names the same
+// halt the ledger reported.
+func planForStop(plan intel.BatchPlan, stop prstate.CoverageStop) intel.BatchPlan {
 	plan.HaltReason = stop.Limit
 	plan.HaltPath = ""
-	plan.Unbatched = plan.Unbatched[:0]
-	for _, unit := range scope.Required {
-		if !accepted[unit.ID] {
-			plan.Unbatched = append(plan.Unbatched, unit)
-		}
-	}
 	plan.CarryReason = stop.Limit
 	return plan
 }
@@ -447,6 +464,52 @@ func verdictForResumed(verdicts map[core.UnitID]recordVerdict) string {
 		}
 	}
 	return "converged"
+}
+
+// unionRawFindings folds the raw finding objects out of every accepted batch
+// payload into one JSON array, preserving each payload's own bytes: the claim
+// carries them verbatim, so a resumed pass restores exactly what the reviewer
+// said, and enrichment derives the same stable finding ids from them.
+func unionRawFindings(payloads []json.RawMessage) json.RawMessage {
+	var findings []json.RawMessage
+	for _, payload := range payloads {
+		var doc struct {
+			Findings []json.RawMessage `json:"findings"`
+		}
+		if err := json.Unmarshal(payload, &doc); err != nil {
+			continue
+		}
+		findings = append(findings, doc.Findings...)
+	}
+	if len(findings) == 0 {
+		return nil
+	}
+	raw, err := json.Marshal(findings)
+	if err != nil {
+		return nil
+	}
+	return raw
+}
+
+// findingsOnlyPayload wraps restored findings in the payload shape
+// mergePayloads folds: no verdict and no scope claims, which this run's
+// accepted batches and the carried verdicts supply.
+func findingsOnlyPayload(findings json.RawMessage) json.RawMessage {
+	raw, err := json.Marshal(struct {
+		Findings json.RawMessage `json:"findings"`
+	}{Findings: findings})
+	if err != nil {
+		return nil
+	}
+	return raw
+}
+
+// recordedFindingsBody is the claim body while a batched pass holds accepted
+// findings mid-run: the same findings-recorded record the frozen path writes,
+// with the pass still running underneath it.
+func recordedFindingsBody(pass int, cfg *config.Config) string {
+	return fmt.Sprintf("**crossrev — reviewing, %s**\n\nFindings recorded; the remaining batches are still running.",
+		PassLabel(pass, atoi(cfg.Get(".policy.max_passes_per_cycle"))))
 }
 
 // mergePayloads folds every accepted batch payload into one findings

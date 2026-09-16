@@ -2,6 +2,7 @@ package review_test
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -265,5 +266,103 @@ func TestReviewWriterDowngradesUncoveredConvergedVerdict(t *testing.T) {
 	}
 	if strings.Contains(stored, `"verdict":"converged"`) {
 		t.Errorf("stored claim still carries the converged verdict")
+	}
+}
+
+// TestReviewFailsClosedWhenFileEnumerationFails pins the enumeration failure
+// mode: a git error listing the changed files stops the leg rather than
+// falling through to the frozen single-prompt path, which carries no
+// coverage obligation and would converge with no ledger.
+func TestReviewFailsClosedWhenFileEnumerationFails(t *testing.T) {
+	e := newEnv(t)
+	writeRequiredHead(e, "a.go", "package a\n")
+	e.vcs.changedErr = errors.New("git ls-tree exploded")
+	got := runLeg(t, e, e.request(t))
+	if got.Err == nil {
+		t.Fatal("Run: want the enumeration failure returned, not bypassed")
+	}
+	if got.Outcome != review.OutcomeError {
+		t.Errorf("Outcome = %q, want error", got.Outcome)
+	}
+	if !strings.Contains(got.Err.Error(), "git ls-tree exploded") {
+		t.Errorf("Err = %v, want the enumeration failure named", got.Err)
+	}
+	if e.runner.calls != 0 {
+		t.Errorf("harness calls = %d, want 0 (no review without a required set)", e.runner.calls)
+	}
+	for _, label := range e.forge.labelsAdded {
+		if label == policy.LabelConverged {
+			t.Fatalf("converged label applied with no coverage ledger: %v", e.forge.labelsAdded)
+		}
+	}
+}
+
+// TestReviewRefusesStaleGenerationWhenHeadMoves pins the publication
+// freshness check: a push landing during the model invocation retires the
+// accepted batch's candidate, so the generation is never committed and no
+// convergence is published for the old head.
+func TestReviewRefusesStaleGenerationWhenHeadMoves(t *testing.T) {
+	e := newEnv(t)
+	writeRequiredHead(e, "a.go", "package a\n")
+	moved := mustRev(t, "5555555555555555555555555555555555555555")
+	e.runner.onSpec = func(exec.Spec) { e.forge.pr.HeadRefOid = moved }
+	e.runner.script = []exec.Result{
+		{ExitCode: 0, Stdout: claudeStdout(batchAnswer(t, 1))},
+	}
+	got := runLeg(t, e, e.request(t))
+	if got.Err == nil {
+		t.Fatal("Run: want the stale candidate refused after the head moved")
+	}
+	if !strings.Contains(got.Err.Error(), "moved") {
+		t.Errorf("Err = %v, want the moved revision named", got.Err)
+	}
+	for _, label := range e.forge.labelsAdded {
+		if label == policy.LabelConverged {
+			t.Fatalf("converged label applied for the old head: %v", e.forge.labelsAdded)
+		}
+	}
+	gens := ledgerGenerations(t, e)
+	if len(gens) != 1 {
+		t.Fatalf("complete generations = %d, want 1 (the initial outstanding generation only; the stale candidate was refused)", len(gens))
+	}
+}
+
+// TestReviewRefusesConvergenceWhenHeadMovesAfterCoverage pins the freshness
+// re-check at the label move: a push landing after the last generation
+// committed still refuses convergence, because the label — not the ledger —
+// is what drives the loop.
+func TestReviewRefusesConvergenceWhenHeadMovesAfterCoverage(t *testing.T) {
+	e := newEnv(t)
+	writeRequiredHead(e, "a.go", "package a\n")
+	moved := mustRev(t, "5555555555555555555555555555555555555555")
+	e.forge.onPullRequest = func(int) {
+		manifests := 0
+		for _, id := range e.forge.ledger.order {
+			if _, ok := prstate.DecodeCoverageManifest(e.forge.ledger.comments[id].Body); ok {
+				manifests++
+			}
+		}
+		if manifests >= 2 {
+			e.forge.pr.HeadRefOid = moved
+		}
+	}
+	e.runner.script = []exec.Result{
+		{ExitCode: 0, Stdout: claudeStdout(batchAnswer(t, 1))},
+	}
+	got := runLeg(t, e, e.request(t))
+	if got.Err == nil {
+		t.Fatal("Run: want convergence refused after the head moved past the covered revision")
+	}
+	if !strings.Contains(got.Err.Error(), "moved") {
+		t.Errorf("Err = %v, want the moved revision named", got.Err)
+	}
+	for _, label := range e.forge.labelsAdded {
+		if label == policy.LabelConverged {
+			t.Fatalf("converged label applied for the old head: %v", e.forge.labelsAdded)
+		}
+	}
+	gens := ledgerGenerations(t, e)
+	if len(gens) != 2 {
+		t.Fatalf("complete generations = %d, want 2 (coverage committed before the push landed)", len(gens))
 	}
 }
