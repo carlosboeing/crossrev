@@ -161,6 +161,22 @@ func (l *Leg) publish(ctx context.Context, req Request, loaded Context, settings
 	// none of it may rewrite this record.
 	state := publishState{settled: true}
 
+	// The coverage obligation was judged against the scope's base and head,
+	// and a push landing during the review retires both. Re-read the pair
+	// from the forge before the loop-state label moves — the same freshness
+	// check PublishGeneration runs before committing the manifest — and
+	// refuse a stale convergence: the label, not the ledger, is what drives
+	// the loop.
+	if loaded.Scope != nil {
+		current, err := l.Forge.PullRequest(ctx, loaded.Repo, req.PR)
+		if err != nil {
+			return marker, msgs, state, err
+		}
+		if current.BaseRefOid.SHA() != loaded.Scope.Base.SHA() || current.HeadRefOid.SHA() != loaded.Scope.Head.SHA() {
+			return marker, msgs, state, fmt.Errorf("the base or head moved during the review; not applying a loop label for the old revision %s", loaded.Scope.Head.Short())
+		}
+	}
+
 	next := policy.PassLabel(verdict, actionable, escalated)
 	if conv, ok := l.buildConvergence(ctx, loaded, marker, actionable); ok {
 		next = policy.PassLabelWithCoverage(verdict, actionable, escalated, conv)

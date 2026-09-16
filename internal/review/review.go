@@ -181,7 +181,16 @@ func (l *Leg) Run(ctx context.Context, req Request) (out Result) {
 	// unit as outstanding, so a crash before the first accepted batch leaves
 	// the started claim and the same scope to rebuild from. A leg without a
 	// git reader or ledger store keeps the frozen single-prompt path below.
-	if scope, scopeErr := l.buildScope(ctx, loaded.PR.BaseRefOid, loaded.PR.HeadRefOid, scopeExclusions(loaded.Backlog.Path)); scopeErr == nil && ledgerStoreFor(l) != nil && len(scope.Required) > 0 {
+	// A git failure enumerating the changed files fails closed instead: the
+	// frozen path carries no coverage obligation, so falling through to it
+	// would review and converge with no required set at all.
+	scope, scopeErr := l.buildScope(ctx, loaded.PR.BaseRefOid, loaded.PR.HeadRefOid, scopeExclusions(loaded.Backlog.Path))
+	if scopeErr != nil && !errors.Is(scopeErr, errNoScopeReader{}) {
+		out.Outcome = OutcomeError
+		out.Err = scopeErr
+		return out
+	}
+	if scopeErr == nil && ledgerStoreFor(l) != nil && len(scope.Required) > 0 {
 		loaded.Scope = &scope
 		if covErr := l.runCoverage(ctx, req, loaded, settings, ad.pass, claimID, scope, &out); covErr != nil {
 			out.Outcome = OutcomeError
