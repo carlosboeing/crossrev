@@ -17,7 +17,7 @@ author: carlosboeing
 
 inputs:
   leg:
-    description: Which leg to run — review, resolve, cycle, status or watchdog.
+    description: Which leg to run — review, resolve, cycle, status, watchdog or auth-refresh.
     required: true
   pr:
     description: The pull request number. Not needed for watchdog.
@@ -135,6 +135,15 @@ runs:
     # fails naming the missing dependency rather than mid-leg with a
     # `command not found` three steps later.
     #
+    # The level is per leg, and the map lives here for the same reason the
+    # preflight does. A leg that invokes a model needs a harness CLI on PATH;
+    # a leg that only reads and writes the forge does not, and the watchdog
+    # template installs none. Asking every leg for a harness is what made
+    # every watchdog run on v0.6.x fail before doing any work (ADR 0021).
+    #
+    # The catch-all is `harness` on purpose: a leg added to the input without
+    # being added here fails its preflight by asking for more, not less.
+    #
     # GH_TOKEN is set because doctor verifies gh is authenticated, not just
     # installed: an unauthenticated gh fails at the first API call instead.
     - shell: bash
@@ -142,7 +151,11 @@ runs:
         GH_TOKEN: ${{ inputs.app-token }}
       run: |
         set -euo pipefail
-        "${CROSSREV_BIN:?}" doctor
+        case "${{ inputs.leg }}" in
+          status|watchdog|auth-refresh) level=core ;;
+          *)                            level=harness ;;
+        esac
+        "${CROSSREV_BIN:?}" doctor --level "$level"
 
     - shell: bash
       env:

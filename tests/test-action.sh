@@ -69,6 +69,35 @@ done
 
 is "and nothing was written finding that out" "$(count 'method POST')" "0"
 
+# The per-leg preflight level. Regression one — every watchdog run on v0.6.x
+# failing `no harness CLI found` before doing any work — shipped because
+# nothing here asserted which level a leg asks for. The levels are read out of
+# action.yml's own case statement, so a leg added to the map without being
+# added here is visible as a missing assertion rather than as a silent pass.
+level_for() {
+  yq -r '.runs.steps[] | select(.run | test("doctor --level")) | .run' "$ACTION" |
+    awk -v leg="$1" '
+      /^[[:space:]]*[*a-z|-]+\)/ {
+        pattern = $1; sub(/\)$/, "", pattern)
+        n = split(pattern, alts, "|")
+        match_here = 0
+        for (i = 1; i <= n; i++) if (alts[i] == leg || alts[i] == "*") match_here = 1
+      }
+      match_here && /level=/ { sub(/.*level=/, ""); sub(/[";[:space:]].*$/, ""); print; exit }
+    '
+}
+
+for leg in review resolve cycle; do
+  is "the $leg leg asks for the harness preflight" "$(level_for "$leg")" "harness"
+done
+for leg in status watchdog auth-refresh; do
+  is "the $leg leg asks for the core preflight" "$(level_for "$leg")" "core"
+done
+
+# An unknown leg asks for more, not less. A leg added to the input without
+# being added to the map must fail its preflight rather than skip a check.
+is "an unrecognised leg falls back to harness" "$(level_for "not-a-leg")" "harness"
+
 # --- the inputs a workflow omits ---------------------------------------
 #
 # A forwarded flag is only half the contract. The other half is what the action

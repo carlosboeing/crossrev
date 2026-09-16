@@ -8,6 +8,8 @@ All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepa
 
 - **`crossrev doctor` accepts `--level core|harness`.** The watchdog leg installs no harness CLI and invokes no model, so `doctor`'s hard-coded harness requirement failed it before any work. Both levels already existed in `internal/preflight` with no way for a caller or the composite action to select the lower one. Unset continues to default to `harness`.
 
+- **The composite action asks each leg for only the preflight it needs.** The watchdog and `status` legs install and invoke no harness CLI, so the hard-coded harness preflight failed them before any work. The preflight step now maps the leg to `--level core` for `status`, `watchdog` and `auth-refresh`, and `--level harness` for model-running legs. Unrecognised legs fall back to `harness` so an omission fails closed.
+
 ## [0.6.1] — 2026-09-06
 
 ### Fixed
