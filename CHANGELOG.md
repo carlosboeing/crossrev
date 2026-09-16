@@ -14,6 +14,8 @@ All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepa
 
 - **The token-refresh workflow refreshes through the action instead of checking out source.** The v0.6.0 cutover removed `bin/` and `lib/`, so checking out the repository left the workflow with no `crossrev` binary to run. The workflow template now uses the SHA-pinned composite action with `leg: auth-refresh`, ensuring binary verification and download happen in one place.
 
+- **Correction to 0.6.0.** That release said "Nothing the tool does changes." Two things did, both in the cron workflows, and neither was caught before a consuming repository ran them: the composite action's preflight asked every leg for a harness CLI the watchdog template does not install, and the token-refresh workflow still ran `crossrev` from a `bin/` directory the same release deleted. Both are fixed here, and [ADR 0021](docs/adrs/0021-cron-legs-run-through-the-composite-action.md) adds the proof standard that would have caught them.
+
 ## [0.6.1] — 2026-09-06
 
 ### Fixed
