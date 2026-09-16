@@ -1,251 +1,216 @@
 #!/usr/bin/env bash
 #
-# install.sh — put crossrev on your PATH.
+# install.sh — one command, from nothing to a working `crossrev`.
 #
-# PATH is all this owns, permanently. Skills are installed by the `skills` CLI,
-# which already knows 76 agents, offers project or global scope, symlinks rather
-# than copies, and prints an itemised summary before acting. Reimplementing a
-# fraction of that in bash would be strictly worse and would drift from a tool
-# someone else maintains.
+# This is the only file meant to be fetched and run directly. Everything else
+# assumes a binary already exists; this is what fetches one.
 #
-# This script is deliberately self-contained: it sources nothing, because the
-# thing it installs is a compiled binary rather than a tree of shell libraries.
-# Everything below assumes nothing but bash, git, go and coreutils.
+# **It is deliberately self-contained.** It cannot source lib/ui.sh, because the
+# whole reason it is running is that nothing is installed yet. So it carries
+# its own thirty lines of prompting and says less than the rest of the tool
+# does.
+#
+# **It is fetched, not cloned.** The repository is public, so raw.githubusercontent
+# serves this file anonymously — no token, no gh, no credential of any kind:
+#
+#   curl -fsSL https://raw.githubusercontent.com/carlosboeing/crossrev/main/install.sh | bash
+#
+# Everything below assumes nothing but bash, curl and coreutils.
+#
+# **Every step it takes is optional.** Someone who already has a working binary
+# should not be made to download again — so it compares against an existing one
+# first and keeps it when the bytes match. It is safe to re-run.
 
 set -euo pipefail
 
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-if [[ ! -f "$HERE/scripts/build-native.sh" ]]; then
-  echo "error  install.sh builds the binary with scripts/build-native.sh, which is missing." >&2
-  echo "       Either that is not a CrossRev source tree, or the ref you cloned predates it." >&2
-  exit 1
-fi
-
-command -v go >/dev/null 2>&1 || {
-  echo "error  install.sh builds CrossRev from source, and go is not installed." >&2
-  echo "       Install Go 1.21 or newer (go.mod fetches the pinned toolchain itself), then run this again." >&2
-  exit 1
-}
-
-# --- the minimum prompting this file needs ----------------------------------
-#
-# /dev/tty first, so prompting still works with the tool on the right-hand side
-# of a pipe. Falling back to stdin covers the rest, and having neither is worth
-# a real message rather than bash's "Device not configured".
-
-_bold="$(tput bold 2>/dev/null || true)"
-_sgr0="$(tput sgr0 2>/dev/null || true)"
-
-_input_source() {
-  if ( : </dev/tty ) 2>/dev/null; then printf '/dev/tty'
-  elif [[ -t 0 ]]; then printf '/dev/stdin'
-  else return 1
-  fi
-}
-
-_no_input() {
-  echo "error  install.sh needs to ask you something, but no terminal is attached." >&2
-  echo "       Re-run with --yes to accept every prompt in advance." >&2
-  exit 1
-}
-
-# Ask before replacing an outward-facing file. Defaults to no, so a stray
-# newline cannot approve something. Honours --yes via CROSSREV_ASSUME_YES.
-_confirm() { # prompt
-  if [[ "${CROSSREV_ASSUME_YES:-0}" == "1" ]]; then
-    printf '%s◆  %s%s  yes (--yes)\n' "$_bold" "$1" "$_sgr0"
-    return 0
-  fi
-  local reply src
-  src="$(_input_source)" || _no_input
-  printf '%s◆  %s%s  [y/N] ' "$_bold" "$1" "$_sgr0"
-  read -r reply <"$src" || return 1
-  [[ "$reply" =~ ^[Yy]([Ee][Ss])?$ ]]
-}
-
-BIN_DIR="${CROSSREV_BIN_DIR:-$HOME/.local/bin}"
-# empty = ask, 1 = install them, 0 = do not
-WANT_SKILLS=""
+REPO="${CROSSREV_REPO:-carlosboeing/crossrev}"
+DEST="${CROSSREV_BIN_DIR:-$HOME/.local/bin}"
+# Empty means the latest release. A tag here is how you get a reproducible
+# install — "what did I install?" has an answer only if the ref was not moving.
+REF="${CROSSREV_REF:-}"
+ASSUME_YES=0
+DEST_EXPLICIT=0
 
 while (( $# )); do
   case "$1" in
-    # _confirm reads this, so exporting it is the whole of --yes.
-    --yes|-y) export CROSSREV_ASSUME_YES=1; shift ;;
-    --bin-dir) BIN_DIR="${2:?--bin-dir needs a path}"; shift 2 ;;
-    --skills)    WANT_SKILLS=1; shift ;;
-    --no-skills) WANT_SKILLS=0; shift ;;
+    --dir)  DEST="${2:?--dir needs a path}"; DEST_EXPLICIT=1; shift 2 ;;
+    --repo) REPO="${2:?--repo needs owner/name}"; shift 2 ;;
+    --ref)  REF="${2:?--ref needs a release tag}"; shift 2 ;;
+    --yes|-y) ASSUME_YES=1; shift ;;
     --help|-h)
-      echo "usage: install.sh [--yes] [--bin-dir <dir>] [--skills | --no-skills]"; exit 0 ;;
+      echo "usage: install.sh [--dir <path>] [--repo owner/name] [--ref <tag>] [--yes]"
+      exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 1 ;;
   esac
 done
 
-printf '\n  %scrossrev%s\n' "$_bold" "$_sgr0"
+# --- the minimum UI this file needs -----------------------------------------
+#
+# Reading from /dev/tty rather than stdin is not defensive here, it is required:
+# fetched and piped into bash, this script IS stdin, so `read` would consume the
+# rest of itself. With no terminal at all there is nobody to ask, and the answer
+# is to proceed only when --yes said so in advance.
 
-printf '\n◇  Source\n'
-printf '│  %s\n' "$HERE"
-printf '│  version %s\n' "$(tr -d '[:space:]' <"$HERE/VERSION")"
-
-target="$BIN_DIR/crossrev"
-
-# Build first, into a private directory, so a failed build leaves the
-# installed copy alone rather than replacing it with half a binary.
-build_tmp="$(mktemp -d)"
-trap 'rm -rf "$build_tmp"' EXIT
-bash "$HERE/scripts/build-native.sh" "$build_tmp/crossrev" || {
-  echo "error  the build failed, and nothing was installed." >&2
-  exit 1
-}
-
-# Report requirements but do not refuse to install on a missing harness — you
-# might be installing on a machine before setting the harnesses up. `doctor`
-# and the legs themselves are where a missing dependency becomes fatal.
-"$build_tmp/crossrev" doctor || true
-
-replaced=""
-if [[ -e "$target" || -L "$target" ]]; then
-  if [[ -f "$target" ]] && ! [[ -L "$target" ]] && cmp -s "$build_tmp/crossrev" "$target"; then
-    :  # already this binary, nothing to ask
-  else
-    existing="$(readlink "$target" 2>/dev/null || echo "$target")"
-    printf '\n⚠  %s already exists and is not this build\n' "$target" >&2
-    printf '   Continuing will replace it. It currently points at: %s\n\n' "$existing" >&2
-    _confirm "Replace it?" || { printf '  Left it alone. Nothing was installed.\n'; exit 1; }
-    replaced="$existing"
-  fi
+if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then
+  _b=$'\033[1m'; _d=$'\033[2m'; _r=$'\033[0m'; _g=$'\033[32m'; _y=$'\033[33m'
+else
+  _b=''; _d=''; _r=''; _g=''; _y=''
 fi
 
-mkdir -p "$BIN_DIR"
-# Copy rather than symlink, so the installed tool keeps working after the
-# checkout moves on: the binary carries everything it needs. Rebuild and
-# re-run this script to pick up a newer checkout.
-#
-# Remove first rather than copying over: every install the old script made is
-# a symlink, and cp follows one, writing the binary through the link onto the
-# checkout's own entrypoint instead of replacing the link.
-rm -f "$target"
-cp -f "$build_tmp/crossrev" "$target"
-chmod +x "$target"
-trap - EXIT
-rm -rf "$build_tmp"
+say()  { printf '  %s\n' "$1"; }
+ok()   { printf '  %s✓%s %s\n' "$_g" "$_r" "$1"; }
+step() { printf '\n%s◇  %s%s\n' "$_b" "$1" "$_r"; }
+die()  { printf '\n%serror%s  %s\n       %s\n\n' "$_y" "$_r" "$1" "$2" >&2; exit 1; }
 
-printf '\n◇  Installed\n'
-# Rule 5: verify rather than assert. A symlink that resolves to nothing runs as
-# "command not found" later, a long way from here.
-if [[ -x "$target" ]]; then
-  printf '│  ✓ %s\n' "$target"
-  # Say what moved, not just what landed. The prompt above is easy to accept and
-  # easier to skip with --yes, and the failure it leads to is silent: `crossrev`
-  # keeps working while running a different build than the one you think, so
-  # the next `git pull` in the old checkout changes nothing and there is no
-  # error to explain why.
-  if [[ -n "$replaced" ]]; then
-    printf '│     replaced %s\n' "$replaced"
-    printf '│     `crossrev` now runs the build from %s\n' "$HERE"
-  fi
+ask() {
+  (( ASSUME_YES )) && return 0
+  [[ -r /dev/tty ]] || die "there is no terminal to ask at, and this would install $DEST/crossrev" \
+    "Re-run with --yes to accept, or --dir to choose somewhere else."
+  local reply
+  printf '%s◆  %s%s  [Y/n] ' "$_b" "$1" "$_r"
+  read -r reply </dev/tty || return 1
+  [[ -z "$reply" || "$reply" =~ ^[Yy] ]]
+}
+
+# --- which binary ------------------------------------------------------------
+#
+# The release builds two targets and nothing else, so anything else is refused
+# by name before any download starts rather than mid-install with a 404.
+# A pure function of its two arguments so the suite can drive it offline.
+
+platform_asset() {
+  case "$1/$2" in
+    Darwin/arm64)  printf '%s' "crossrev-darwin-arm64" ;;
+    Linux/x86_64)  printf '%s' "crossrev-linux-amd64" ;;
+    *) return 1 ;;
+  esac
+}
+
+ASSET="$(platform_asset "$(uname -s)" "$(uname -m)")" || die \
+  "there is no CrossRev binary for $(uname -s)/$(uname -m)" \
+  "This release ships macOS on Apple Silicon and Linux on 64-bit Intel/AMD only."
+
+command -v curl >/dev/null 2>&1 || die \
+  "curl is not installed, and this script downloads the binary with it" \
+  "Install curl and run this again. On macOS: xcode-select --install"
+
+# A checksum tool under either name. macOS ships shasum and no sha256sum;
+# Linux ships sha256sum. Both check the same file format.
+if command -v sha256sum >/dev/null 2>&1; then
+  _sum() { sha256sum "$1"; }
+elif command -v shasum >/dev/null 2>&1; then
+  _sum() { shasum -a 256 "$1"; }
 else
-  printf '│  ✗ %s — created, but does not resolve to an executable\n' "$target"
-  exit 1
+  die "neither sha256sum nor shasum is installed, and the download is verified before it runs" \
+    "Install coreutils or perl and run this again."
+fi
+
+# --- which release ------------------------------------------------------------
+
+if [[ -n "$REF" ]]; then
+  TAG="$REF"
+else
+  TAG="$(curl -fsSIL -o /dev/null -w '%{url_effective}' \
+    "https://github.com/$REPO/releases/latest" 2>/dev/null)" || die \
+    "could not work out the latest release of $REPO" \
+    "Check the network, then re-run with an explicit tag: --ref v0.5.0"
+  TAG="${TAG##*/}"
+fi
+[[ -n "$TAG" ]] || die \
+  "could not work out the latest release of $REPO" \
+  "Check the network, then re-run with an explicit tag: --ref v0.5.0"
+
+printf '\n  %scrossrev%s\n' "$_b" "$_r"
+
+step "Download"
+say "  release   $REPO $TAG"
+say "  asset     $ASSET"
+say "  into      $DEST/crossrev"
+printf '\n'
+
+# An explicit --dir is an instruction about where to install, so nothing else
+# is consulted. Otherwise the one existing binary worth keeping is the one
+# already on PATH: downloading over the top of an identical file is the
+# rudest thing this script could do, and replacing a different one without
+# asking is the second rudest.
+if (( ! DEST_EXPLICIT )) && p="$(command -v crossrev 2>/dev/null)"; then
+  say "A copy is already on PATH at $p; the download is checked against it first."
+fi
+
+# verified_digest answers the digest checksums.txt names for the asset, after
+# proving the downloaded file matches it. Anything else dies before the binary
+# lands on PATH. A pure function of files the caller names so the suite can
+# drive it offline; _sum is whatever checksum tool this machine has.
+
+verified_digest() {
+  local want got
+  want="$(awk -v a="$3" '$2 == a { print $1; found=1 } END { if (!found) exit 1 }' \
+    "$2")" || die \
+    "checksums.txt names no digest for $3" \
+    "Without that line the binary cannot be checked before it runs. Check the release."
+  got="$(_sum "$1")"; got="${got%% *}"
+  [[ "$got" == "$want" ]] || die \
+    "the downloaded $3 does not match its digest, so it was not installed" \
+    "Delete nothing: re-run this script for a fresh download, and report it if a second download disagrees too."
+  printf '%s' "$want"
+}
+
+# --- download and verify -------------------------------------------------------
+#
+# Into a private directory inside the destination, so the rename that installs
+# the binary stays on one filesystem and is atomic: an interrupted run leaves
+# the old binary or nothing, never half a file. The digest is checked there,
+# before anything lands on PATH.
+
+mkdir -p "$DEST"
+TMP="$(mktemp -d "$DEST/.crossrev-tmp.XXXXXX")"
+chmod 700 "$TMP"
+trap 'rm -rf "$TMP"' EXIT
+
+BASE="https://github.com/$REPO/releases/download/$TAG"
+curl -fsSL -o "$TMP/$ASSET" "$BASE/$ASSET" || die \
+  "could not download $ASSET from $REPO release $TAG" \
+  "Check the tag exists and carries that asset: $BASE/$ASSET"
+curl -fsSL -o "$TMP/checksums.txt" "$BASE/checksums.txt" || die \
+  "could not download checksums.txt from $REPO release $TAG" \
+  "Without it the binary cannot be checked before it runs. Check the release carries one."
+ok "downloaded $ASSET and its checksums"
+
+verified_digest "$TMP/$ASSET" "$TMP/checksums.txt" "$ASSET" >/dev/null
+ok "the digest matches"
+say "That check covers the transfer, not the publisher: checksums.txt comes"
+say "from the same release as the binary, so it proves the file arrived"
+say "intact and says nothing about who put it there."
+
+chmod +x "$TMP/$ASSET"
+
+# --- install --------------------------------------------------------------------
+
+target="$DEST/crossrev"
+if [[ -e "$target" || -L "$target" ]]; then
+  if [[ -f "$target" ]] && cmp -s "$TMP/$ASSET" "$target"; then
+    ok "$target is already this binary. Nothing was changed."
+    exit 0
+  fi
+  ask "Replace $target?" || die "nothing was installed" \
+    "Left the existing file alone. Re-run with --dir <path> to install beside it."
+fi
+
+mv -f "$TMP/$ASSET" "$target"
+trap - EXIT
+rm -rf "$TMP"
+
+if [[ -x "$target" ]]; then
+  ok "$target"
+else
+  die "$target was installed but does not run as an executable" \
+    "Check the filesystem allows execution there, then re-run this script."
 fi
 
 if ! command -v crossrev >/dev/null 2>&1; then
-  printf '│\n'
-  printf '│  %s is not on your PATH, so typing `crossrev` will not find it.\n' "$BIN_DIR"
-  printf '│  Add this to your shell profile:\n'
-  printf '│    export PATH="%s:$PATH"\n' "$BIN_DIR"
+  say "$DEST is not on your PATH, so typing \`crossrev\` will not find it."
+  say "Add this to your shell profile:"
+  say "  export PATH=\"$DEST:\$PATH\""
 fi
 
-# ---------------------------------------------------------------------------
-# The two skills — offered, not printed, and not forced
-# ---------------------------------------------------------------------------
-#
-# Printing a command for someone to copy is the thing this project argues
-# against everywhere else, so this offers to run it. It stays an offer rather
-# than becoming part of the install for two reasons that are not politeness.
-#
-# The loop does not need them. The binary carries both skills compiled in and
-# reproduces their text into each prompt, so installing them is for using
-# them by hand in an ordinary session. Installing something unneeded by default
-# is worse than asking.
-#
-# And this is the only step that wants Node. Everything above runs with git,
-# go, bash and coreutils; making the whole install depend on npx for an optional
-# extra would be a poor trade.
-#
-# The source is this directory. Root skills/ holds exactly pr-review and
-# pr-resolve, so naming them with --skill would select everything the CLI would
-# have found anyway — a filter that can only go stale.
-#
-# Hand off, rather than drive.
-#
-# The skills CLI runs its own flow for a human: it detects which harnesses are
-# installed, asks about project versus global scope, and asks whether to symlink
-# or copy. That flow is better than anything decided here, and it is the flow
-# someone gets running the command by hand — so an installer that suppressed it
-# with --yes would be quietly making three choices on their behalf and calling it
-# convenience.
-#
-# It also detects when an *agent* is driving it and goes non-interactive by
-# itself, which is why the scripted branch is a real branch rather than
-# defensiveness: in that mode nobody is asked, and its default scope is project —
-# meaning the clone this script runs from. Present in the repository you were
-# only installing from, absent everywhere you work, silent about the difference.
-# So the scripted path names the scope and the interactive one does not.
-#
-# $1 is "interactive" or "scripted".
-_install_skills() {
-  if [[ "$1" == "interactive" ]]; then
-    npx skills@latest add "$HERE"
-  else
-    npx skills@latest add "$HERE" --global --yes
-  fi
-}
-
-printf '│\n'
-if [[ "$WANT_SKILLS" == "0" ]]; then
-  printf '│  Skipped the skills (--no-skills). The loop does not need them:\n'
-  printf '│  the binary carries both skills compiled in.\n'
-elif ! command -v npx >/dev/null 2>&1; then
-  printf '│  npx is not installed, so the two skills were not offered. Nothing is\n'
-  printf '│  missing — the binary carries both skills compiled in.\n'
-  printf '│  Install Node if you want them available by hand, then run:\n'
-  printf '│    npx skills@latest add %s --global\n' "$HERE"
-elif [[ "$WANT_SKILLS" != "1" ]] && ! _input_source >/dev/null 2>&1; then
-  # No terminal to ask at — a script, a CI step, a container with no controlling
-  # terminal. Skip and say so. Dying here would fail an install that has already
-  # succeeded, over an optional extra nobody was asked about.
-  printf '│  No terminal attached, so the two optional skills were not offered.\n'
-  printf '│  The loop is unaffected. Add them with --skills, or:\n'
-  printf '│    npx skills@latest add %s --global\n' "$HERE"
-else
-  printf '│  pr-review and pr-resolve can also be installed for your harnesses, so\n'
-  printf '│  you can invoke them by hand outside the loop. The loop itself does not\n'
-  printf '│  need them — the binary carries both skills compiled in.\n'
-  printf '│\n'
-  printf '│  The skills CLI takes it from here: it detects which harnesses you have\n'
-  printf '│  and asks where to put them and whether to symlink. Its questions, not\n'
-  printf "│  crossrev's.\n"
-  printf '\n'
-  if [[ "$WANT_SKILLS" == "1" ]] || _confirm "Hand over to the skills CLI now?"; then
-    # Interactive unless install.sh was itself told not to ask. --yes here means
-    # "do not ask ME whether to install them", not "answer the skills CLI's
-    # questions for someone" — those are different permissions and only the
-    # scripted path has the second.
-    mode=interactive
-    [[ "${CROSSREV_ASSUME_YES:-0}" == "1" ]] && mode=scripted
-    if _install_skills "$mode"; then
-      printf '│  ✓ the skills CLI finished\n'
-    else
-      printf '│  ⚠ the skills CLI did not finish\n'
-      printf '│    Nothing else is affected — the loop reads both skills out of the binary regardless. Retry with: npx skills@latest add %s\n' "$HERE"
-    fi
-  else
-    printf '  Left them out. Add them later with --skills, or:\n'
-    printf '    npx skills@latest add %s\n' "$HERE"
-    # The remote shorthand needs no checkout at all, which is the one thing the
-    # line above cannot do. It is a hint for elsewhere, not what this run used.
-    printf '    npx skills@latest add carlosboeing/crossrev   # from anywhere\n'
-  fi
-fi
-printf '└  Then check everything:   crossrev doctor\n\n'
+say "Then check everything:   crossrev doctor"

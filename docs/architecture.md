@@ -276,7 +276,7 @@ Two inputs are worth understanding:
 
 The action's first step downloads the release binary for the runner platform and checks its digest against the release's `checksums.txt`. The second runs `crossrev doctor` from that binary, so a consumer's workflow cannot forget the preflight. Installation stays the runner's job.
 
-The **credential refresher** is the one workflow that still checks CrossRev out rather than calling the action, because `crossrev auth refresh` isn't expressible through the `leg` input. It's a plain public checkout — no token, no key, no secret — and it never checks out the pull request branch, never runs a model and never reads a diff.
+Every generated workflow calls the composite action, including the **credential refresher**. It passes `leg: auth-refresh` and the harness credential as step `env`, and checks nothing out at all — it never sees the pull request branch, never runs a model and never reads a diff. The action's preflight asks each leg for the level it needs: a model-running leg for a harness CLI, a forge-only leg for the core five.
 
 ## The layout
 
@@ -324,7 +324,7 @@ skills/          pr-review/, pr-resolve/
 templates/       workflows, starter config, example operator config
 scripts/         lint.sh, check-changelog.sh, check-parity-coverage.sh,
                   next-version.sh, refresh-prices.sh, render-harness-docs.sh,
-                  build-native.sh, sync-embedded-assets.sh,
+                  build-binary.sh, sync-embedded-assets.sh,
                   verify-native-toolchain.sh, release-targets.json
 tests/           the stubbed-gh suite. tests/run.sh builds the binary once and runs all of it
 ```

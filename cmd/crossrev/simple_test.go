@@ -15,7 +15,7 @@ import (
 )
 
 // doctorRun is one `crossrev doctor`, with the report captured.
-func doctorRun(t *testing.T) (int, string) {
+func doctorRun(t *testing.T, req cli.DoctorRequest) (int, string) {
 	t.Helper()
 	doc, err := harness.Descriptors()
 	if err != nil {
@@ -23,7 +23,7 @@ func doctorRun(t *testing.T) (int, string) {
 	}
 	var out, errOut bytes.Buffer
 	io := &ui.IO{Out: &out, Err: &errOut, Palette: ui.Plain()}
-	status, err := doctor(context.Background(), io, doc)
+	status, err := doctor(context.Background(), io, doc, req)
 	if err != nil {
 		t.Fatalf("doctor: %v", err)
 	}
@@ -47,13 +47,41 @@ func harnessStub() stub {
 func TestDoctorRequiresAHarnessAndNotJustTheCoreTools(t *testing.T) {
 	sandboxPATH(t, coreToolStubs()) // the five, and no harness
 
-	status, report := doctorRun(t)
+	status, report := doctorRun(t, cli.DoctorRequest{})
 
 	if !strings.Contains(report, "no harness CLI found") {
 		t.Errorf("doctor did not probe for a harness at all (bin/crossrev:165 asks for `harness`):\n%s", report)
 	}
 	if status != cli.ExitFailure {
 		t.Errorf("doctor answered status %d with no harness installed, want %d:\n%s",
+			status, cli.ExitFailure, report)
+	}
+}
+
+// The watchdog leg installs no harness CLI and invokes no model, so the
+// action asks doctor for the lower level. Regression one shipped because
+// there was no way to ask.
+func TestDoctorAtCoreLevelPassesWithNoHarnessInstalled(t *testing.T) {
+	sandboxPATH(t, coreToolStubs()) // the five, and no harness
+
+	status, report := doctorRun(t, cli.DoctorRequest{Level: "core"})
+	if status != cli.ExitOK {
+		t.Errorf("doctor --level core answered status %d with no harness installed, want %d:\n%s",
+			status, cli.ExitOK, report)
+	}
+	if strings.Contains(report, "no harness CLI found") {
+		t.Errorf("doctor --level core probed for a harness anyway:\n%s", report)
+	}
+}
+
+// The default is unchanged, which is what keeps interactive use and every
+// model-running leg asking for the harness.
+func TestDoctorDefaultsToHarnessLevel(t *testing.T) {
+	sandboxPATH(t, coreToolStubs()) // the five, and no harness
+
+	status, report := doctorRun(t, cli.DoctorRequest{})
+	if status != cli.ExitFailure {
+		t.Errorf("an unset level answered status %d, want %d — the default must stay harness:\n%s",
 			status, cli.ExitFailure, report)
 	}
 }
@@ -70,7 +98,7 @@ func TestDoctorFailsOnAStrandedQuarantineAndSaysSo(t *testing.T) {
 	work := sandboxPATH(t, append(coreToolStubs(), harnessStub()))
 
 	// Everything installed: the verdict at bin/crossrev:176, word for word.
-	status, report := doctorRun(t)
+	status, report := doctorRun(t, cli.DoctorRequest{})
 	if status != cli.ExitOK {
 		t.Fatalf("doctor answered status %d on a complete machine, want %d:\n%s",
 			status, cli.ExitOK, report)
@@ -84,7 +112,7 @@ func TestDoctorFailsOnAStrandedQuarantineAndSaysSo(t *testing.T) {
 		t.Fatalf("mkdir: %v", err)
 	}
 
-	status, report = doctorRun(t)
+	status, report = doctorRun(t, cli.DoctorRequest{})
 	if !strings.Contains(report, "stranded quarantine found at "+sandbox.QuarantineDir) {
 		t.Fatalf("doctor did not find the quarantine:\n%s", report)
 	}

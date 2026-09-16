@@ -48,6 +48,14 @@ func (p Plan) Print(ctx context.Context, req Request) {
 	out.Line("GitHub App        " + appLine)
 	out.Line("source pin        " + truncate(p.SourceSHA, 40))
 	out.Line("                  (" + p.SourceRef + " — the SHA is the pin, the tag is a comment)")
+	if p.SourceRef == Untagged {
+		if p.SourceUnreachable {
+			out.Line("                  could not reach github.com to check which release this pin is")
+		} else {
+			out.Line("                  no release points at it, so the action will refuse to")
+			out.Line("                  download a binary for these workflows")
+		}
+	}
 
 	out.Line("")
 	out.Line("runner            " + p.Runner)

@@ -49,6 +49,10 @@ const helpBlock = `
     --no-tips                Suppress the automated-mode suggestion
     --keep-transcripts       Keep the harness transcript even when the leg succeeds
 
+  OPTIONS on doctor
+    --level core|harness     Which preflight to run. core is git, gh, jq, yq and
+                             openssl; harness adds a model CLI. Defaults to harness
+
   Automated mode needs a GitHub App. Local runs do not — they use the gh
   authentication you already have.
 
@@ -82,7 +86,19 @@ func Help(out *ui.IO, harnesses []string) (int, error) {
 // absolute path. That message cannot be reproduced without inventing the path,
 // so the same stop is said in the voice the rest of the tool prints in.
 func Version(out *ui.IO, raw string) (int, error) {
-	text := strings.Map(func(r rune) rune {
+	text := deleteWhitespace(raw)
+	if text == "" {
+		return ExitFailure, out.Die("this build carries no version",
+			"Reinstall CrossRev from a checkout that has its VERSION file.")
+	}
+	printRaw(out, text+"\n")
+	return ExitOK, nil
+}
+
+// deleteWhitespace removes every whitespace byte, the way `tr -d '[:space:]'`
+// does at bin/crossrev:64 — deleted throughout, not trimmed from the ends.
+func deleteWhitespace(s string) string {
+	return strings.Map(func(r rune) rune {
 		// The six bytes POSIX [:space:] names, and no more. unicode.IsSpace
 		// would also delete a non-breaking space and the Unicode separators,
 		// which `tr` in a checkout does not.
@@ -90,13 +106,7 @@ func Version(out *ui.IO, raw string) (int, error) {
 			return -1
 		}
 		return r
-	}, raw)
-	if text == "" {
-		return ExitFailure, out.Die("this build carries no version",
-			"Reinstall CrossRev from a checkout that has its VERSION file.")
-	}
-	printRaw(out, text+"\n")
-	return ExitOK, nil
+	}, s)
 }
 
 // printRaw writes bytes to stdout with nothing added.

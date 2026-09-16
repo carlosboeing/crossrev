@@ -13,8 +13,8 @@
 # Transient quarantine directory
 .crossrev-quarantine/
 
-# Native build output. scripts/build-native.sh takes the path as an argument and
-# tests/run.sh passes .tmp/crossrev-native; a 12 MB binary is not a
+# Native build output. scripts/build-binary.sh takes a target and a path, and
+# tests/run.sh passes host and .tmp/crossrev-native; a 12 MB binary is not a
 # tracked file. /crossrev is where a bare `go build ./cmd/...` drops one, which
 # is how one reached a commit once.
 .tmp/

@@ -8,7 +8,7 @@ Operator-facing brief for AI coding assistants working on this repo; `README.md`
 
 Named 2026-08-13, renamed from the working title `revloop` ([ADR 0010](docs/adrs/0010-name-crossrev.md)). Key decisions live in `docs/adrs/0001`–`0010`.
 
-**Pre-1.0, and honest about how far the proof reaches.** Every command is covered by an offline suite and the local path has run against real pull requests. **Automated mode's workflows are installed in one repository, [`carlosboeing/crossrev-testbed`](https://github.com/carlosboeing/crossrev-testbed), and the loop has chained leg to leg there on GitHub's runners** — at v0.2.0 on 2026-08-17, at v0.5.0 on 2026-08-24, and on the native binary at v0.6.1 on 2026-09-06, where a pull request carrying planted defects ran five legs to `crossrev/converged` unattended.
+**Pre-1.0, and honest about how far the proof reaches.** Every command is covered by an offline suite and the local path has run against real pull requests. **Automated mode's workflows are installed in one repository, [`carlosboeing/crossrev-testbed`](https://github.com/carlosboeing/crossrev-testbed), and the loop has chained leg to leg there on GitHub's runners** — at v0.2.0 on 2026-08-17, at v0.5.0 on 2026-08-24, and on the native binary at v0.6.1 on 2026-09-06, where a pull request carrying planted defects ran five legs to `crossrev/converged` unattended. **The two cron workflows were outside every one of those runs**, which is how v0.6.0 shipped both of them broken; they were watched run green at v0.6.2 on 2026-09-16, by `workflow_dispatch` rather than by the schedule.
 
 That is a named set of runs on one repository with one pairing, not a general guarantee. Nothing has run on a self-hosted runner, under any pairing other than codex reviewing and claude resolving, or at any volume. The draft defect ([#122](https://github.com/carlosboeing/crossrev/issues/122)) is fixed and covered offline, and has not been watched run on a draft in CI. `0.x` records that gap — describe the runs that happened, not automated mode as working.
 
@@ -21,7 +21,7 @@ That is a named set of runs on one repository with one pairing, not a general gu
 - **Architecture**: `docs/architecture.md` (current state, including the file-by-file layout under `## The layout`)
 - **Working memory**: `.workbench/` — a **separate private repository**, nested here as an independent clone. See the gate below.
 - **Other**:
-  - No package manager, no lockfile. The binary is the installation: `install.sh` builds it from the checkout with `scripts/build-native.sh` and copies it onto PATH, and `bootstrap.sh` downloads a release asset the same way. The skills, templates and schemas are embedded at build time.
+  - No package manager, no lockfile. The binary is the installation: `scripts/install-local.sh` builds it from the checkout with `scripts/build-binary.sh` and copies it onto PATH, and `install.sh` downloads a release asset the same way. The skills, templates and schemas are embedded at build time. The install and build names match QuotaCap's by house convention — `install.sh` downloads, `scripts/install-local.sh` builds, one `scripts/build-binary.sh` per target, `<PROJECT>_DEV_BUILD` marking — so keep the two repositories in step rather than renaming one alone.
   - Dependencies are `git`, `gh` and `openssl`, plus `shellcheck` and Go 1.21 or newer for the linter. `go.mod` pins the exact `go1.27.0` toolchain, which any Go from 1.21 downloads and switches to on first use, so the installed version does not have to match. Go arrived with the native parity port and is authorised by [ADR 0018](docs/adrs/0018-go-native-parity-contract.md). Adding any other language runtime needs an ADR first.
   - Delivery to consuming repositories is a composite action pinned by full 40-character SHA ([ADR 0009](docs/adrs/0009-delivery-via-sha-pinned-composite-action.md)). `crossrev init` generates the pinned form; the floating `@v0` exists only in the README's copy-paste example.
   - CI runs `scripts/lint.sh`, `go test ./...` and `tests/run.sh` on push and pull request, plus `scripts/check-changelog.sh` on pull requests only. A release is a tag, and the tag triggers `.github/workflows/release.yml`, which verifies the version, publishes the two binaries and creates the GitHub Release.
@@ -88,7 +88,7 @@ Any generic agent skill — `brainstorming`, `writing-plans`, or an equivalent �
 ```
 docs/
 ├── README.md               — docs index
-├── installation.md         — bootstrap, install.sh, doctor, the skills offer
+├── installation.md         — install.sh, install-local.sh, doctor, the skills offer
 ├── usage.md                — the loop, what it writes, the labels, the resolutions
 ├── configuration.md        — .github/crossrev.yml, endpoints, environment variables
 ├── credentials.md          — which secrets automated mode needs, and why
@@ -164,6 +164,7 @@ Versions are **cut deliberately, not per merge**. Changes accumulate under `## [
 - **Never choose major on your own.** `v1.0.0` is gated on proving automated mode end to end. Raise it rather than deciding it.
 - **A published version is permanent.** npm's unpublish is conditional and cannot be undone, and a `name@version` pair is never reusable. Treat a tag push as irreversible, because it is.
 - **Every tag gets a GitHub Release.** The tag publishes the two binaries with an unsigned `checksums.txt`; the Release is where a person finds out what changed. A tag alone renders nothing, and nobody can subscribe to one — GitHub's watch-for-releases needs a Release object.
+- **A release touching `action.yml` or `templates/` requires live verification.** Per [ADR 0021](docs/adrs/0021-cron-legs-run-through-the-composite-action.md), a release whose diff touches `action.yml`, `templates/`, or CI entry paths cannot be cut on the suite alone; all four generated workflows must run green on `carlosboeing/crossrev-testbed` (the event legs on a PR, and both crons via `workflow_dispatch`).
 
 ### Release notes
 

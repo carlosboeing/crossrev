@@ -69,7 +69,7 @@ fi
 # because every fixture cds into a throwaway checkout.
 BIN="$HERE/../.tmp/crossrev-native"
 printf '\nbuilding %s\n' "$BIN"
-bash "$HERE/../scripts/build-native.sh" "$BIN" || {
+bash "$HERE/../scripts/build-binary.sh" host "$BIN" || {
   printf '\nthe native binary did not build; nothing was run\n' >&2
   exit 1
 }

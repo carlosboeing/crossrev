@@ -16,12 +16,12 @@ There is no build step and no package manager. The checkout is the installation.
 ```bash
 git clone https://github.com/carlosboeing/crossrev.git
 cd crossrev
-./install.sh          # builds the binary and copies it onto your PATH
-crossrev doctor       # names anything missing, and the fix
+./scripts/install-local.sh   # builds the binary and copies it onto your PATH
+crossrev doctor              # names anything missing, and the fix
 ```
 
-`install.sh` symlinks rather than copies, so editing the checkout takes effect
-immediately.
+`scripts/install-local.sh` copies rather than symlinks, so rebuild and re-run
+it after pulling to pick up a newer checkout.
 
 Dependencies: `git`, `gh` (authenticated), `jq`, `yq`, `openssl`, plus
 `shellcheck` and Go 1.21 or newer for the linter. On macOS, `yq` and

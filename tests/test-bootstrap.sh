@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 # tests/test-bootstrap.sh — the binary download, its digest check, and the install.
 #
-# bootstrap.sh fetches a release asset rather than cloning a checkout, so a full
+# The suite keeps its Bash-era name because tests/parity-coverage.tsv keys on
+# it and scripts/check-parity-coverage.sh requires the destination to exist;
+# the script it exercises is install.sh, renamed from bootstrap.sh.
+#
+# install.sh fetches a release asset rather than cloning a checkout, so a full
 # run needs the network and no suite does one. What runs offline: the platform
 # mapping and the digest check as extracted functions, plus static assertions
 # about the install — atomic, explicit-destination, safe replacement — and the
@@ -18,21 +22,21 @@ ok()    { printf '  ok    %s\n' "$1"; pass=$((pass+1)); }
 notok() { printf '  FAIL  %s\n    expected: %s\n    actual:   %s\n' "$1" "$2" "$3"; fail=$((fail+1)); }
 is()    { [[ "$2" == "$3" ]] && ok "$1" || notok "$1" "$3" "$2"; }
 has()   { [[ "$2" == *"$3"* ]] && ok "$1" \
-            || notok "$1" "bootstrap.sh contains '$3'" "no such string in bootstrap.sh"; }
+            || notok "$1" "install.sh contains '$3'" "no such string in install.sh"; }
 hasnt() { [[ "$2" != *"$3"* ]] && ok "$1" \
-            || notok "$1" "bootstrap.sh does not contain '$3'" \
-                     "found at line(s) $(grep -nF -- "$3" "$ROOT/bootstrap.sh" | cut -d: -f1 | tr '\n' ' ')"; }
+            || notok "$1" "install.sh does not contain '$3'" \
+                     "found at line(s) $(grep -nF -- "$3" "$ROOT/install.sh" | cut -d: -f1 | tr '\n' ' ')"; }
 
-src="$(cat "$ROOT/bootstrap.sh")"
+src="$(cat "$ROOT/install.sh")"
 
-# The two pure functions, lifted out of bootstrap.sh.
+# The two pure functions, lifted out of install.sh.
 #
 # Sourcing the script whole would start a download, so they are extracted
 # instead, each as a /^name() {/,/^}/ range. _sum and die arrive as stubs: the
 # script selects its checksum tool by probing the machine, which a range cannot
 # carry, and the real die exits, which is what the refusal cases assert.
 extract_functions() {
-  sed -n '/^platform_asset() {/,/^}/p; /^verified_digest() {/,/^}/p' "$ROOT/bootstrap.sh"
+  sed -n '/^platform_asset() {/,/^}/p; /^verified_digest() {/,/^}/p' "$ROOT/install.sh"
 }
 _sum() { shasum -a 256 "$1" 2>/dev/null || sha256sum "$1"; }
 die() { printf 'DIED %s' "$1"; exit 3; }
@@ -101,13 +105,13 @@ hasnt "no authenticity language" "$src" "authentic"
 # 7. What is gone: no clone, no checkout, no library.
 hasnt "nothing clones anymore" "$src" "git clone"
 # A sourcing command, not the header comment explaining there is none.
-if grep -qE '^[[:space:]]*source ' "$ROOT/bootstrap.sh"; then
+if grep -qE '^[[:space:]]*source ' "$ROOT/install.sh"; then
   notok "nothing sources anything (it is self-contained)" "no source command" \
-    "found at line(s) $(grep -nE '^[[:space:]]*source ' "$ROOT/bootstrap.sh" | cut -d: -f1 | tr '\n' ' ')"
+    "found at line(s) $(grep -nE '^[[:space:]]*source ' "$ROOT/install.sh" | cut -d: -f1 | tr '\n' ' ')"
 else
   ok "nothing sources anything (it is self-contained)"
 fi
-hasnt "nothing execs the old installer" "$src" "install.sh"
+hasnt "nothing execs the local installer" "$src" "install-local.sh"
 
 printf '\n  %d passed, %d failed\n' "$pass" "$fail"
 (( fail == 0 ))

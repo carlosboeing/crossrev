@@ -97,7 +97,7 @@ jobs:
           json_version="$(jq -r .version package.json)"
           # The version the release ships is the binary's, so the agreement
           # check builds it rather than running a script from the checkout.
-          bash scripts/build-native.sh dist/crossrev-release-check
+          bash scripts/build-binary.sh host dist/crossrev-release-check
           cli_version="$(./dist/crossrev-release-check version)"
 
           echo "VERSION      $file_version"
@@ -136,7 +136,7 @@ jobs:
 
             const required = [
               "LICENSE", "README.md", "VERSION", "package.json",
-              "action.yml", "install.sh", "bootstrap.sh",
+              "action.yml", "install.sh",
             ];
             const missing = required.filter(f => !files.includes(f));
             if (missing.length) {
@@ -188,11 +188,9 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          # CGO stays on: a CGO darwin/arm64 build leaves the linker's ad-hoc
-          # signature on the Mach-O binary, which the next step asserts
-          # (docs/adrs/0018-go-native-parity-contract.md). No explicit signing
-          # step: the target that needed one is deferred.
-          CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 go build -trimpath -o dist/crossrev-darwin-arm64 ./cmd/crossrev
+          # The per-target flags live in scripts/build-binary.sh; the CGO-on
+          # rationale for this target moved there with them.
+          bash scripts/build-binary.sh darwin-arm64 dist/crossrev-darwin-arm64
 
       - name: Assert the linker's ad-hoc signature
         run: |
@@ -233,9 +231,8 @@ jobs:
           # `git config` names the checkout trusted here too.
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           mkdir -p dist
-          # Static: the binary installs onto machines whose libc is unknown,
-          # so it carries none.
-          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o dist/crossrev-linux-amd64 ./cmd/crossrev
+          # The per-target flags live in scripts/build-binary.sh.
+          bash scripts/build-binary.sh linux-amd64 dist/crossrev-linux-amd64
           ./dist/crossrev-linux-amd64 --version
 
       - name: Upload the binary

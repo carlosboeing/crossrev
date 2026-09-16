@@ -49,6 +49,8 @@ The counter-argument is recorded rather than dismissed. Changing release archite
 | npm | Paused. No new version published until platform packages exist |
 | Cutover proof | The complete suite against the Go binary, and one automated-mode run on the testbed |
 
+**Amendment, 2026-09-16.** The two install scripts have since swapped names — `install.sh` downloads the release binary and `scripts/install-local.sh` builds from the checkout — matching the names QuotaCap already used for the same two jobs. The Install routes row above and the signing-key sentence below keep the names as decided.
+
 ### What moves to a later release
 
 Reproducible double-builds with digest comparison. ECDSA P-256 checksum signing with the key embedded in `bootstrap.sh`. Release-attestation verification in the composite action. The `linux/arm64` and `darwin/amd64` targets. The four npm platform packages. The ten grammars.

@@ -195,7 +195,7 @@ If the harness wrote to one of those paths while it was quarantined, that write 
 
 ## The skills offer was skipped
 
-Not a failure. `install.sh` skips it and prints the command when there's no `npx` installed, or no terminal to ask at — a script, a CI step, a container with no controlling terminal. Dying there would fail an install that already succeeded, over an optional extra.
+Not a failure. `scripts/install-local.sh` skips it and prints the command when there's no `npx` installed, or no terminal to ask at — a script, a CI step, a container with no controlling terminal. Dying there would fail an install that already succeeded, over an optional extra.
 
 **The loop is unaffected either way.** CrossRev reproduces both skills into every prompt from its own checkout; installing them is only for invoking them by hand.
 
