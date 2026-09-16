@@ -4,6 +4,10 @@ All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepa
 
 ## [Unreleased]
 
+### Changed
+
+- **The install scripts swap names and the build centralises on one script.** `bootstrap.sh` becomes `install.sh` — it downloads the release binary, which is what that filename means everywhere else — and the checkout builder moves to `scripts/install-local.sh`. `scripts/build-native.sh` becomes `scripts/build-binary.sh`, takes a target (`darwin-arm64`, `linux-amd64`, `host`), and the release workflow's two inline builds now call it, so the version-agreement gate verifies a binary produced the same way as the ones it publishes. The documented one-command install URL changes accordingly.
+
 ## [0.6.2] — 2026-09-16
 
 ### Fixed

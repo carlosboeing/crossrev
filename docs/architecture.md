@@ -279,7 +279,7 @@ skills/          pr-review/, pr-resolve/
 templates/       workflows, starter config, example operator config
 scripts/         lint.sh, check-changelog.sh, check-parity-coverage.sh,
                   next-version.sh, refresh-prices.sh, render-harness-docs.sh,
-                  build-native.sh, sync-embedded-assets.sh,
+                  build-binary.sh, sync-embedded-assets.sh,
                   verify-native-toolchain.sh, release-targets.json
 tests/           the stubbed-gh suite. tests/run.sh builds the binary once and runs all of it
 ```

@@ -215,8 +215,8 @@ Claude Code talks to anything exposing an Anthropic-compatible `/v1/messages` en
 | `CROSSREV_ASSUME_YES` | you | Answers the install and upgrade prompts, same as `--yes` |
 | `CROSSREV_NO_TIPS` | you | Drops the closing suggestion from a command's output |
 | `CROSSREV_GIT_NAME`, `CROSSREV_GIT_EMAIL` | you | Overrides the identity the resolve leg commits under |
-| `CROSSREV_BIN_DIR` | you | Where `install.sh` puts the PATH symlink |
-| `CROSSREV_REPO`, `CROSSREV_REF` | you | What `bootstrap.sh` clones, and at which revision |
+| `CROSSREV_BIN_DIR` | you | Where `scripts/install-local.sh` puts the binary |
+| `CROSSREV_REPO`, `CROSSREV_REF` | you | What `install.sh` downloads, and at which revision |
 
 `XDG_CONFIG_HOME` and `XDG_DATA_HOME` are respected for the config directory and the default clone location.
 

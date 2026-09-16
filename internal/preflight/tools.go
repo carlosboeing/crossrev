@@ -271,7 +271,7 @@ func (c *Checker) toolVersion(ctx context.Context, tool string) (string, int) {
 // (preflight_check, lib/preflight.sh:79-168).
 //
 // It answers false when anything required is missing, so the caller decides
-// whether that is fatal: install.sh reports, a leg dies.
+// whether that is fatal: scripts/install-local.sh reports, a leg dies.
 func (c *Checker) Check(ctx context.Context, need string) bool {
 	missing := 0
 

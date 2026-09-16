@@ -43,10 +43,10 @@ The review command posts inline comments and a summary, but **never edits or pus
 
 ### Install CrossRev
 
-The bootstrap installer downloads the release binary and installs the complete command set, including automated-mode setup:
+The installer downloads the release binary and installs the complete command set, including automated-mode setup:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/carlosboeing/crossrev/main/bootstrap.sh | bash
+curl -fsSL https://raw.githubusercontent.com/carlosboeing/crossrev/main/install.sh | bash
 ```
 
 Install the local CLI globally through npm:
@@ -57,12 +57,12 @@ npm install -g crossrev-ai
 
 npm is paused, not dropped. Publishing stops at the last Bash version until the platform packages exist. What is on the registry is 0.5.0, and what follows describes it.
 
-An npm installation supports local commands. `crossrev init` requires a checkout. It reads the Git commit used to pin generated workflows. For the current binary, use the bootstrap above or install from a checkout.
+An npm installation supports local commands. `crossrev init` requires a checkout. It reads the Git commit used to pin generated workflows. For the current binary, use the installer above or install from a checkout.
 
 From an existing checkout, run:
 
 ```bash
-./install.sh
+./scripts/install-local.sh
 ```
 
 See [Installing CrossRev](docs/installation.md) for pinned revisions, custom installation directories, updates, and removal.
