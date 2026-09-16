@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -56,7 +57,7 @@ func initCommand(ctx context.Context, doc harness.Document, req cli.InitRequest)
 		GitHub:  initGitHub{forge: client, gh: ghApp, secrets: &secretLister{runner: d.orchestrator, env: exec.Inherit(ghSecretEnvironment)}},
 		Apps:    initApps{env: env},
 		Pairing: initPairing{doc: doc},
-		Source:  initSource{repo: d.git.At(crossrevCheckout())},
+		Source:  initSource{repo: d.git.At("")},
 		Files:   initFiles{},
 		Out:     out,
 	}
@@ -245,10 +246,10 @@ func (p initPairing) NeedsRefresher(runner, name, endpoint string) bool {
 // initcmd.Resolve turns either refusal into the same "could not work out
 // which commit to pin" stop it already gives a checkout it cannot read.
 //
-// The ref is still `git describe --tags` against the checkout this binary was
-// built in, best-effort: it rides in the comment beside the pin, and a binary
-// with no checkout beside it answers `untagged` the way the shell does when
-// describe fails (lib/init.sh:142-143).
+// The ref is the release tag pointing at the pin, read from the remote with
+// `git ls-remote --tags`. It rides in the comment beside the pin, and a
+// commit no release tag points at — or no network to ask with — answers
+// `untagged`, which is then true.
 //
 // The two answers fail differently, which is why the interface has two methods.
 // A SHA that cannot be read stops the run — a workflow pinned to nothing would
@@ -261,44 +262,78 @@ func (s initSource) SHA(ctx context.Context) (string, error) {
 	return buildinfo.Pin()
 }
 
+// Ref is the release tag pointing at the pinned commit, or `untagged`.
+//
+// It is derived from the pin rather than found beside the binary. The two used
+// to come from different places — the SHA from the build stamp, the ref from
+// `git describe` in whatever checkout sat two directories above the
+// executable — so the comment could name a commit that was not the pinned one,
+// and did. Running the same binary from two locations produced two different
+// comments for the same pin.
+//
+// This is the lookup action.yml:80-103 already performs at runtime to turn its
+// pin into a release to download, so the action and init now answer the
+// question the same way. No network, or a commit no release tag points at,
+// answers `untagged`, which is then true.
+//
+// The lookup needs no local repository, so the runner carries no directory:
+// `At("")` runs the child in the process's own working directory, and
+// ls-remote against a URL asks nothing of it.
 func (s initSource) Ref(ctx context.Context) (string, error) {
-	if s.repo == nil {
+	sha, err := buildinfo.Pin()
+	if err != nil || sha == "" {
 		return untaggedRef, nil
 	}
-	out, err := s.repo.Run(ctx, "describe", "--tags")
-	if err != nil || !out.OK() {
-		// `|| INIT_SOURCE_REF="untagged"` at lib/init.sh:142-143.
+	out, runErr := s.repo.Run(ctx, "ls-remote", "--tags", crossrevRemote)
+	if runErr != nil || !out.OK() {
 		return untaggedRef, nil
 	}
-	described := strings.TrimSpace(out.Text())
-	if described == "" {
-		return untaggedRef, nil
-	}
-	return described, nil
+	return tagForSHA(out.Text(), sha), nil
 }
 
-// untaggedRef is what `git describe --tags` answering nothing leaves behind
-// (lib/init.sh:143).
+// untaggedRef is the comment beside a pin no release tag points at.
 const untaggedRef = "untagged"
 
-// crossrevCheckout is $ROOT: the CrossRev checkout this binary was built in,
-// found the way bin/crossrev finds it.
+// crossrevRemote is the repository the pin's tag is read from: the same
+// literal action.yml resolves its own pin against.
+const crossrevRemote = "https://github.com/carlosboeing/crossrev.git"
+
+// releaseTag is what counts as a pin comment. action.yml matches
+// ^v[0-9]+\.[0-9]+\.[0-9]+$ and so does this.
+var releaseTag = regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+$`)
+
+// tagForSHA is the release tag pointing at sha in `git ls-remote --tags`
+// output, or `untagged`.
 //
-// os.Executable resolves the symlink install.sh puts on PATH, which is the
-// whole of what `_resolve` at bin/crossrev:16-24 does by hand because BSD
-// readlink has no -f. A binary that is not inside a checkout answers a
-// directory with no git repository in it, and initSource then answers the empty
-// SHA that initcmd refuses on.
-func crossrevCheckout() string {
-	path, err := os.Executable()
-	if err != nil {
-		return ""
+// Two passes, like action.yml's awk: every peeled line before any direct one,
+// so an annotated tag wins over a lightweight tag on the same commit. The
+// peeled form (`refs/tags/v0.6.2^{}`) is the commit an annotated tag points
+// at; the direct form names the tag object for an annotated tag and the commit
+// for a lightweight one. Either answer names the pinned commit, which is what
+// the old `git describe` beside the binary could not promise.
+func tagForSHA(out, sha string) string {
+	for _, wantPeeled := range []bool{true, false} {
+		for _, line := range strings.Split(out, "\n") {
+			fields := strings.SplitN(line, "\t", 2)
+			if len(fields) != 2 || fields[0] != sha {
+				continue
+			}
+			ref := fields[1]
+			if strings.HasSuffix(ref, "^{}") != wantPeeled {
+				continue
+			}
+			name, ok := strings.CutPrefix(ref, "refs/tags/")
+			if !ok {
+				continue
+			}
+			name = strings.TrimSuffix(name, "^{}")
+			if !releaseTag.MatchString(name) {
+				continue
+			}
+			return name
+		}
 	}
-	resolved, err := filepath.EvalSymlinks(path)
-	if err != nil {
-		resolved = path
-	}
-	return filepath.Dir(filepath.Dir(resolved))
+	return untaggedRef
 }
 
 // initFiles is the working tree of the repository being set up, on both sides
