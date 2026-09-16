@@ -110,6 +110,30 @@ func TestAFailedReviewLegKeepsItsTranscripts(t *testing.T) {
 	}
 }
 
+// A covered pass leaves through the same publish tail as the frozen path:
+// the upgrade tip travels on the result when no handover replaces it, and
+// a clean pass clears its transcripts.
+func TestACoveredPassKeepsThePublishTail(t *testing.T) {
+	e := newEnv(t)
+	writeRequiredHead(e, "a.go", "package a\n")
+	e.runner.script = []exec.Result{{ExitCode: 0, Stdout: claudeStdout(batchAnswerFor(t, []string{"a.go"}))}}
+
+	got := runLeg(t, e, e.request(t))
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
+	if !got.Nudge {
+		t.Error("a covered pass with no handover left Nudge false")
+	}
+	left, err := filepath.Glob(filepath.Join(runDir(t, e), "review.attempt-*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(left) != 0 {
+		t.Fatalf("transcripts left behind after a clean covered pass: %v", left)
+	}
+}
+
 func runDir(t *testing.T, e *env) string {
 	t.Helper()
 	return filepath.Join(e.dir, "run")

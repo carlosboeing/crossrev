@@ -202,7 +202,9 @@ func (l *Leg) Run(ctx context.Context, req Request) (out Result) {
 		}
 		if covered, ok := out.Covered.(coveredPass); ok {
 			out.Covered = nil
-			return l.finishCoveredRun(ctx, req, loaded, settings, ad, cap, claimID, out.Marker, covered, &out)
+			result, state := l.finishCoveredRun(ctx, req, loaded, settings, ad, cap, claimID, out.Marker, covered, &out)
+			settled = state.settled
+			return result
 		}
 	}
 	if ad.recovering && !ad.redrive {
@@ -297,10 +299,10 @@ func (l *Leg) Run(ctx context.Context, req Request) (out Result) {
 
 // finishCoveredRun folds a fully covered batch pass into the frozen
 // enrich-and-publish path: the batch findings are enriched, anchored and
-// published exactly as a single-prompt pass's findings are. C2 owns the
-// repair-delta confirmation pair the marker will carry; C3 owns the
-// convergence predicate the publish path will consult.
-func (l *Leg) finishCoveredRun(ctx context.Context, req Request, loaded Context, settings legSettings, ad admission, cap int, claimID int64, marker prstate.Marker, covered coveredPass, out *Result) (result Result) {
+// published exactly as a single-prompt pass's findings are. The
+// confirmation pair is already on the marker, where the publish path's
+// convergence check reads it.
+func (l *Leg) finishCoveredRun(ctx context.Context, req Request, loaded Context, settings legSettings, ad admission, cap int, claimID int64, marker prstate.Marker, covered coveredPass, out *Result) (result Result, state publishState) {
 	out.Marker = marker
 	if covered.envelope != nil {
 		out.Envelope = covered.envelope
@@ -328,20 +330,24 @@ func (l *Leg) finishCoveredRun(ctx context.Context, req Request, loaded Context,
 		marker.Findings = enriched
 	}
 	out.Messages = append(out.Messages, ui.SayLines(snaps...)...)
-	_ = claimID
-	_ = cap
 	out.Marker = marker
 	published, pubMsgs, state, err := l.publish(ctx, req, loaded, settings, ad.pass, claimID, marker)
-	_ = state
 	out.Messages = append(out.Messages, pubMsgs...)
 	out.Marker = published
+	out.Nudge = state.nudge
 	if err != nil {
 		out.Outcome = OutcomeError
 		out.Err = err
-		return *out
+		return *out, state
+	}
+	// log_transcripts_clear, at the end of leg_review and nowhere earlier
+	// (lib/run.sh:1332). A failed leg keeps them: they are the reason the
+	// files exist.
+	if l.Log != nil {
+		l.Log.ClearTranscripts("")
 	}
 	out.Outcome = OutcomeInvoked
-	return *out
+	return *out, state
 }
 
 // requiredPaths reads the current required paths off the loaded scope for
