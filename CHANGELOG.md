@@ -4,6 +4,8 @@ All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepa
 
 ## [Unreleased]
 
+## [0.6.2] — 2026-09-16
+
 ### Fixed
 
 - **`crossrev doctor` accepts `--level core|harness`.** The watchdog leg installs no harness CLI and invokes no model, so `doctor`'s hard-coded harness requirement failed it before any work. Both levels already existed in `internal/preflight` with no way for a caller or the composite action to select the lower one. Unset continues to default to `harness`.
