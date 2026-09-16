@@ -3,6 +3,7 @@ package review
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 
 	"github.com/carlosboeing/crossrev/internal/core"
@@ -143,7 +144,10 @@ func (l *Leg) invokeWithStaged(ctx context.Context, req Request, loaded Context,
 // this base, head and engine from the trusted author's comments. An
 // unreadable comment list is an error, never an empty ledger. No complete
 // generation is not an error: the first pass starts from zero accepted
-// verdicts and publishes the initial outstanding generation.
+// verdicts and publishes the initial outstanding generation. Any other
+// selection failure — corrupt, missing, reordered or future-schema bytes —
+// fails the pass: re-reviewing from zero over coverage that cannot be read
+// would hide the integrity failure behind wasted work.
 func (l *Leg) currentGeneration(ctx context.Context, loaded Context, base, head core.Revision, engine string) (prstate.Generation, error) {
 	store := ledgerStoreFor(l)
 	if store == nil {
@@ -155,7 +159,10 @@ func (l *Leg) currentGeneration(ctx context.Context, loaded Context, base, head 
 	}
 	gen, err := prstate.SelectGeneration(comments, loaded.Author, core.RevisionPair{Base: base, Head: head}, engine)
 	if err != nil {
-		return prstate.Generation{}, nil
+		if errors.Is(err, prstate.ErrNoCompleteGeneration) {
+			return prstate.Generation{}, nil
+		}
+		return prstate.Generation{}, err
 	}
 	return gen, nil
 }

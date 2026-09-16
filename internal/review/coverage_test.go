@@ -145,6 +145,25 @@ func TestReviewPublishesOneCompleteGenerationPerAcceptedBatch(t *testing.T) {
 	}
 }
 
+// Corrupt coverage bytes fail the pass closed: the leg reports the error
+// rather than re-reviewing from zero over a ledger it cannot read, and no
+// model call goes out.
+func TestReviewFailsClosedOnCorruptCoverage(t *testing.T) {
+	e := newEnv(t)
+	writeRequiredHead(e, "a.go", "package a\n")
+	e.forge.ledger.comments[8001] = prstate.CoverageComment{ID: 8001, Author: author, Body: "note\n\n<!-- crossrev:c {oops} -->"}
+	e.forge.ledger.order = append(e.forge.ledger.order, 8001)
+	e.runner.script = []exec.Result{{ExitCode: 0, Stdout: claudeStdout(batchAnswerFor(t, []string{"a.go"}))}}
+
+	got := runLeg(t, e, e.request(t))
+	if got.Err == nil {
+		t.Fatal("corrupt coverage did not fail the pass")
+	}
+	if e.runner.calls != 0 {
+		t.Errorf("harness calls = %d, want 0 (fail closed before the first model call)", e.runner.calls)
+	}
+}
+
 // TestReviewRetriesSemanticOmissionOnce pins the one semantic retry with the
 // missing unit named: the first answer omits unit 2 of 2, the leg asks once
 // more quoting the missing number, and the accepted retry publishes.
