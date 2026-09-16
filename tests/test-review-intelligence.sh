@@ -313,17 +313,23 @@ has "advisory context adds no required unit" "$(cat "$GH_STATE"/comment-*)" '"re
 # --- input, review and ledger bounds ------------------------------------------
 
 # A file that cannot fit alone in one rendered prompt halts with
-# input_exceeds_budget and outstanding paths, applying halted.
+# input_exceeds_budget only after the schedulable batches have run: the
+# accepted batch (app.ts) persists first, so a re-drive resumes with just
+# the oversized file outstanding rather than repeating work.
 fixture_repo; stub_reset
 git checkout -q feature
 { printf 'package huge\n'; yes '// filler line to exceed the prompt budget' | head -n 8000; } >huge.go
 git add -A && git commit -qm huge && git push -q origin feature
 FIX_HEAD="$(git rev-parse feature)"
 routes_review_empty
+CROSSREV_REVIEW_PAYLOAD="$(review_payload_for converged "[$(unit1 no_issue '[]' "$(evidence_file)")]" | payload)"
+export CROSSREV_REVIEW_PAYLOAD
 out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
 is "an oversized file halts rather than converging" "$rc" "0"
 has "the halt names the input budget" "$out" "input_exceeds_budget"
 has "the halt applies the halted label" "$(applied_labels)" "labels[]=crossrev/halted"
+has "the schedulable batch persisted before the halt" "$(cat "$GH_STATE"/comment-*)" '"gen":2'
+has "the accepted batch left only the oversized file outstanding" "$(cat "$GH_STATE"/comment-*)" '"outstanding_count":1'
 
 # --- unchanged-head restart ----------------------------------------------------
 
