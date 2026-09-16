@@ -4,6 +4,10 @@ All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepa
 
 ## [Unreleased]
 
+### Fixed
+
+- **Coverage ledger comments render one identifying line.** Every published shard and manifest comment was marker bytes alone, so a pull request collected a row of identical blank boxes showing GitHub's "No description provided." Each comment now opens with its generation, shard position and record count; readers scan for the marker delimiters, so leading prose changes nothing on the wire.
+
 ## [0.7.1] — 2026-09-17
 
 ### Fixed

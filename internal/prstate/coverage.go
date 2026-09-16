@@ -290,7 +290,9 @@ type CoverageStop struct {
 // EncodeCoverageManifest serialises a manifest for embedding in a comment
 // body. The manifest digest is recomputed from bytes with the digest member
 // removed, so a caller-supplied digest can neither survive nor mismatch: the
-// bytes on the wire always carry the digest of the bytes on the wire.
+// bytes on the wire always carry the digest of the bytes on the wire. The
+// returned body carries no human text; publishers add the rendered line with
+// coverageCommentBody.
 func EncodeCoverageManifest(m Manifest) (string, error) {
 	m.Digest = ""
 	raw := json.RawMessage(manifestFields(m).marshal())
@@ -309,7 +311,8 @@ func EncodeCoverageManifest(m Manifest) (string, error) {
 
 // EncodeCoverageShard serialises a shard for embedding in a comment body.
 // The shard digest is recomputed from bytes with the digest member removed,
-// for the same reason the manifest's is.
+// for the same reason the manifest's is. The returned body carries no human
+// text; publishers add the rendered line with coverageCommentBody.
 func EncodeCoverageShard(s Shard) (string, error) {
 	s.Digest = ""
 	raw := json.RawMessage(shardFields(s).marshal())
@@ -324,6 +327,17 @@ func EncodeCoverageShard(s Shard) (string, error) {
 		return "", coverageErrorf("encoding a coverage shard: %v", err)
 	}
 	return "\n\n" + coverageMarkerOpen + string(normalised) + markerClose, nil
+}
+
+// coverageCommentBody prefixes an encoded coverage payload with the one
+// human line the comment renders. Without it every ledger comment shows
+// GitHub's "No description provided.", and a pull request collects a row of
+// identical blank boxes — one per shard plus the manifest. Readers scan for
+// the marker delimiters and skip every other line, so leading prose changes
+// nothing on the wire; the line stays far inside the envelope reserve
+// packRecords holds back for it.
+func coverageCommentBody(human, encoded string) string {
+	return human + encoded
 }
 
 // DecodeCoverageManifest pulls a manifest out of one comment body, checks its

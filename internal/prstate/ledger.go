@@ -49,6 +49,8 @@ func PublishGeneration(ctx context.Context, store LedgerStore, repo core.Slug, n
 		if err != nil {
 			return Manifest{}, CoverageStop{}, err
 		}
+		body = coverageCommentBody(fmt.Sprintf("Coverage ledger, generation %d, shard %d of %d (%d records). Machine-readable record; safe to ignore.",
+			candidate.Gen, pos+1, len(packed), len(records)), body)
 		id, err := store.CreateCoverageComment(ctx, repo, number, body)
 		if err != nil {
 			return Manifest{}, CoverageStop{}, err
@@ -92,6 +94,8 @@ func PublishGeneration(ctx context.Context, store LedgerStore, repo core.Slug, n
 	if err != nil {
 		return Manifest{}, CoverageStop{}, err
 	}
+	body = coverageCommentBody(fmt.Sprintf("Coverage ledger, generation %d, manifest (%d shards). Machine-readable record; safe to ignore.",
+		candidate.Gen, len(shards)), body)
 	id, err := store.CreateCoverageComment(ctx, repo, number, body)
 	if err != nil {
 		return Manifest{}, CoverageStop{}, err
