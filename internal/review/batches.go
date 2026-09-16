@@ -237,6 +237,12 @@ func (l *Leg) publishInitialGeneration(ctx context.Context, req Request, loaded 
 
 // verdictsFromPayload reads the accepted verdicts out of one accepted
 // batch payload: one entry per numbered unit, in prompt order.
+//
+// finding_ids on the record are the batch-local 1-based finding positions
+// the reviewer reported, not stable finding ids: the reviewer numbers
+// findings per batch, and the stable id is minted later, at enrich time,
+// from path, title and anchor. Nothing joins these positions to posted
+// comments; they record which payload entries the verdict named.
 func verdictsFromPayload(payload json.RawMessage, files []intel.FileUnit) (map[core.UnitID]recordVerdict, string, []string, error) {
 	var doc struct {
 		Coverage []struct {
@@ -248,16 +254,10 @@ func verdictsFromPayload(payload json.RawMessage, files []intel.FileUnit) (map[c
 		} `json:"coverage"`
 		ExaminedScope string   `json:"examined_scope"`
 		KnownLimits   []string `json:"known_limits"`
-		Findings      []struct {
-			Number int    `json:"number"`
-			ID     string `json:"id"`
-		} `json:"findings"`
 	}
 	if err := json.Unmarshal(payload, &doc); err != nil {
 		return nil, "", nil, err
 	}
-	byNumber := make(map[int]string, len(doc.Findings))
-	_ = byNumber
 	out := make(map[core.UnitID]recordVerdict, len(files))
 	for _, entry := range doc.Coverage {
 		if entry.UnitNumber < 1 || entry.UnitNumber > len(files) {

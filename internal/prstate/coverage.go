@@ -164,6 +164,8 @@ type Record struct {
 	Change      string      `json:"change"`
 	BodyDigest  string      `json:"body_digest"`
 	Verdict     Opt[string] `json:"verdict,omitzero"`
+	// FindingIDs are the batch-local 1-based finding positions the
+	// reviewer reported, not the minted stable ids posted comments carry.
 	FindingIDs  []string    `json:"finding_ids,omitzero"`
 	Evidence    []Evidence  `json:"evidence,omitzero"`
 	Reason      Opt[string] `json:"reason,omitzero"`
