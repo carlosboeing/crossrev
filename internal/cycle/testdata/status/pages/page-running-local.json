@@ -2,7 +2,7 @@
   "name": "page-running-local",
   "shell": "tests/test-status.sh:234-242",
   "now": 1788303167,
-  "config_yaml": "version: 1\nmode: local\npolicy:\n  min_fix_severity: medium\n  max_passes_per_cycle: 3\n  max_files_changed_per_pr: 200\n  max_prs_per_day: 25\nreviewer:\n  harness: claude\n  model: reviewer-model\nresolver:\n  harness: claude\n  model: resolver-model\nbacklog:\n  destination: none",
+  "config_yaml": "version: 2\nmode: local\npolicy:\n  min_fix_severity: medium\n  max_passes_per_cycle: 3\n  max_files_changed_per_pr: 200\n  max_prs_per_day: 25\nreviewer:\n  harness: claude\n  model: reviewer-model\nresolver:\n  harness: claude\n  model: resolver-model\nbacklog:\n  destination: none",
   "author": "tester",
   "head_sha": "8bb8b43343094bc44cb4e43ce4eda8cca6eb4ea3",
   "base_sha": "22c80ac24e88d76b4b0f844ba2e61810e22232ab",

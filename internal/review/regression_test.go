@@ -24,7 +24,7 @@ func TestReviewSubstituteHarnessWarningKeepsSecondSentence(t *testing.T) {
 		}
 		return "", os.ErrNotExist
 	}
-	e.cfg = mustConfig(t, "version: 1\nreviewer:\n  harness: codex\n")
+	e.cfg = mustConfig(t, "version: 2\nreviewer:\n  harness: codex\n")
 	req := e.request(t)
 	req.HarnessOverride = ""
 	leg := e.leg(t)
@@ -51,7 +51,7 @@ func TestReviewSubstituteHarnessWarningKeepsSecondSentence(t *testing.T) {
 func TestDeclinedPassRemovesMutuallyExclusiveLabels(t *testing.T) {
 	e := newEnv(t)
 	// Configure policy to decline on file count
-	e.cfg = mustConfig(t, "version: 1\npolicy:\n  max_files_changed_per_pr: 1\n")
+	e.cfg = mustConfig(t, "version: 2\npolicy:\n  max_files_changed_per_pr: 1\n")
 	e.forge.pr.ChangedFiles = 5
 	req := e.request(t)
 	req.Trigger = review.TriggerAutomatic

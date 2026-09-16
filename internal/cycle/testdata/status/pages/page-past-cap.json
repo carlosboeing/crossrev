@@ -2,7 +2,7 @@
   "name": "page-past-cap",
   "shell": "lib/run.sh:3081",
   "now": 1788303164,
-  "config_yaml": "version: 1\nmode: local\npolicy:\n  min_fix_severity: medium\n  max_passes_per_cycle: 3\n  max_files_changed_per_pr: 200\n  max_prs_per_day: 25\nreviewer:\n  harness: claude\n  model: reviewer-model\nresolver:\n  harness: claude\n  model: resolver-model\nbacklog:\n  destination: none",
+  "config_yaml": "version: 2\nmode: local\npolicy:\n  min_fix_severity: medium\n  max_passes_per_cycle: 3\n  max_files_changed_per_pr: 200\n  max_prs_per_day: 25\nreviewer:\n  harness: claude\n  model: reviewer-model\nresolver:\n  harness: claude\n  model: resolver-model\nbacklog:\n  destination: none",
   "author": "tester",
   "head_sha": "c4eb2b796136d32c093bbc557a3ebb4131eccfe2",
   "base_sha": "137452411381af4621b1f79f5ae7e7ed95da26bb",

@@ -23,8 +23,8 @@ func TestContextLoadsThePullRequestOnce(t *testing.T) {
 func TestContextReadsPolicyAndReviewMDFromTheBaseRevision(t *testing.T) {
 	e := newEnv(t)
 	e.cfg = nil
-	writeBase(e, ".github/crossrev.yml", "version: 1\npolicy:\n  max_passes_per_cycle: 5\n  min_fix_severity: high\nreviewer:\n  harness: claude\n")
-	writeHead(e, ".github/crossrev.yml", "version: 1\npolicy:\n  max_passes_per_cycle: 99\nreviewer:\n  harness: claude\n  model: hijacked-model\n")
+	writeBase(e, ".github/crossrev.yml", "version: 2\npolicy:\n  max_passes_per_cycle: 5\n  min_fix_severity: high\nreviewer:\n  harness: claude\n")
+	writeHead(e, ".github/crossrev.yml", "version: 2\npolicy:\n  max_passes_per_cycle: 99\nreviewer:\n  harness: claude\n  model: hijacked-model\n")
 	writeBase(e, "REVIEW.md", "Flag every use of console.log.\n")
 	writeHead(e, "REVIEW.md", "branch-supplied REVIEW.md, never read from the head.\n")
 	writeBase(e, ".gitmessage", "type(scope): subject\n")
@@ -89,7 +89,7 @@ func TestContextCarriesTheBaseAndHeadPair(t *testing.T) {
 // `automated` alone.
 func TestContextResolvesAppSlugInAutomatedMode(t *testing.T) {
 	e := newEnv(t)
-	e.cfg = mustConfig(t, "version: 1\nmode: automated\n")
+	e.cfg = mustConfig(t, "version: 2\nmode: automated\n")
 	t.Setenv("CROSSREV_APP_SLUG", "crossrev")
 	req := e.request(t)
 	req.Author = ""
@@ -110,7 +110,7 @@ func TestContextResolvesAppSlugInAutomatedMode(t *testing.T) {
 // determine which App's markers to trust" after two gh calls.
 func TestContextKeysTheTrustedAuthorOnTheModeNotTheTrigger(t *testing.T) {
 	e := newEnv(t)
-	e.cfg = mustConfig(t, "version: 1\nmode: local\n")
+	e.cfg = mustConfig(t, "version: 2\nmode: local\n")
 	t.Setenv("CROSSREV_APP_SLUG", "")
 	req := e.request(t)
 	req.Author = ""
@@ -127,7 +127,7 @@ func TestContextKeysTheTrustedAuthorOnTheModeNotTheTrigger(t *testing.T) {
 
 func TestContextExcludesRepositoryBacklogFromTheDiff(t *testing.T) {
 	e := newEnv(t)
-	e.cfg = mustConfig(t, "version: 1\nbacklog:\n  destination: repository\n  repository:\n    layout: file\n    path: BACKLOG.md\n")
+	e.cfg = mustConfig(t, "version: 2\nbacklog:\n  destination: repository\n  repository:\n    layout: file\n    path: BACKLOG.md\n")
 	e.forge.diff = []byte("diff --git a/app.go b/app.go\n--- a/app.go\n+++ b/app.go\n@@ -1,1 +1,2 @@\n context\n+added\ndiff --git a/BACKLOG.md b/BACKLOG.md\n--- a/BACKLOG.md\n+++ b/BACKLOG.md\n@@ -1,1 +1,2 @@\n old-backlog\n+UNIQUE_BACKLOG_HUNK\n")
 	var prompt string
 	e.runner.onSpec = func(spec exec.Spec) {

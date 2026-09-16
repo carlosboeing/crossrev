@@ -248,3 +248,58 @@ func TestResolveRedrivableUnknownResolution(t *testing.T) {
 		t.Error("an unrecognised resolution re-drove the pass")
 	}
 }
+
+// Acceptance 3: an incomplete review pass re-drives at the same revision.
+func TestIncompletePassRedrivesAtTheSameRevision(t *testing.T) {
+	incomplete := &policy.ReviewMarker{State: core.PassIncomplete}
+	if !policy.ReviewRedrivable(incomplete) {
+		t.Fatal("an incomplete review pass does not re-drive")
+	}
+	// Incomplete resumes at the same revision rather than starting a new pass.
+	keep, advance := policy.RedriveRevision(incomplete, "aaa111", "aaa111")
+	if !keep || advance {
+		t.Errorf("same-revision incomplete redrive = keep %v advance %v, want keep true advance false", keep, advance)
+	}
+	keep, advance = policy.RedriveRevision(incomplete, "aaa111", "bbb222")
+	if keep || !advance {
+		t.Errorf("moved-revision redrive = keep %v advance %v, want keep false advance true", keep, advance)
+	}
+	// Pass counting treats incomplete as work that ran but remains unsettled.
+	if policy.ReviewSettled(incomplete) {
+		t.Error("an incomplete pass reads as settled")
+	}
+	settled := &policy.ReviewMarker{State: core.PassComplete, Verdict: core.VerdictIssuesRemain}
+	if !policy.ReviewSettled(settled) {
+		t.Error("a completed issues-remain pass does not read as settled")
+	}
+}
+
+// A blocked complete pass still re-drives; settled passes stay refused.
+func TestIncompleteRedriveKeepsTheParityEraEndings(t *testing.T) {
+	blocked := &policy.ReviewMarker{State: core.PassComplete, Verdict: core.VerdictBlocked}
+	if !policy.ReviewRedrivable(blocked) {
+		t.Error("a blocked complete pass does not re-drive")
+	}
+	for _, m := range []*policy.ReviewMarker{
+		nil,
+		{State: core.PassStarted, Verdict: core.VerdictBlocked},
+		{State: core.PassComplete, Verdict: core.VerdictIssuesRemain},
+		{State: core.PassComplete, Verdict: core.VerdictConverged},
+		{State: core.PassDeclined, Verdict: core.VerdictBlocked},
+	} {
+		if policy.ReviewRedrivable(m) {
+			t.Errorf("ReviewRedrivable(%+v) = true, want false", m)
+		}
+	}
+	// Incomplete verdicts are unsettled ends, not completion verdicts.
+	incomplete := &policy.ReviewMarker{State: core.PassIncomplete}
+	if policy.ReviewSettled(incomplete) {
+		t.Error("an incomplete pass reads as settled")
+	}
+	if policy.ReviewIncomplete(nil) {
+		t.Error("an absent marker reads as incomplete")
+	}
+	if policy.ReviewIncomplete(blocked) {
+		t.Error("a blocked complete pass reads as incomplete")
+	}
+}

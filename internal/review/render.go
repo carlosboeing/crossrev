@@ -25,6 +25,8 @@ type Finding struct {
 	Why           string  `json:"why"`
 	Fix           string  `json:"fix"`
 	Anchor        string  `json:"anchor"`
+	AnchorKind    string  `json:"anchor_kind"`
+	AnchorReason  string  `json:"anchor_reason"`
 	ThreadID      *string `json:"thread_id"`
 	RootCommentID *int64  `json:"root_comment_id"`
 }
@@ -236,6 +238,7 @@ func SummaryBody(findings []Finding, marker prstate.Marker, ctx RenderContext) s
 		sha, _ := marker.HeadSHA.Get()
 		b.WriteString(findingsTable(findings, ctx.Repo, sha))
 	}
+	b.WriteString(coverageFootnote(marker))
 
 	unanchored := 0
 	if u, ok := marker.Unanchored.Get(); ok {
@@ -249,6 +252,20 @@ func SummaryBody(findings []Finding, marker prstate.Marker, ctx RenderContext) s
 	}
 
 	b.WriteString(runDetails(marker, "review"))
+	return b.String()
+}
+
+// coverageFootnote renders the accounted and outstanding paths the coverage
+// loop recorded, with the known limits the reviewer reported. A pass with
+// no coverage manifest id carries no footnote, so the frozen summary bytes
+// stay exactly as they were.
+func coverageFootnote(marker prstate.Marker) string {
+	id, ok := marker.CoverageManifestID.Get()
+	if !ok || id == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("Coverage generation %d accounts for every required file at the current head; outstanding paths, if any, are listed in the halt record above.\n\n", id))
 	return b.String()
 }
 

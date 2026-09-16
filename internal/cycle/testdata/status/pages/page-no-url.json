@@ -2,7 +2,7 @@
   "name": "page-no-url",
   "shell": "lib/run.sh:3071",
   "now": 1788303165,
-  "config_yaml": "version: 1\nmode: local\npolicy:\n  min_fix_severity: medium\n  max_passes_per_cycle: 3\n  max_files_changed_per_pr: 200\n  max_prs_per_day: 25\nreviewer:\n  harness: claude\n  model: reviewer-model\nresolver:\n  harness: claude\n  model: resolver-model\nbacklog:\n  destination: none",
+  "config_yaml": "version: 2\nmode: local\npolicy:\n  min_fix_severity: medium\n  max_passes_per_cycle: 3\n  max_files_changed_per_pr: 200\n  max_prs_per_day: 25\nreviewer:\n  harness: claude\n  model: reviewer-model\nresolver:\n  harness: claude\n  model: resolver-model\nbacklog:\n  destination: none",
   "author": "tester",
   "head_sha": "6abe5b2d66341b88c315098c65c81590d859cc1a",
   "base_sha": "7905a31a036b69310172b3ae9ce9070a93e2d94d",

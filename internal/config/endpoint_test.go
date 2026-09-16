@@ -11,7 +11,7 @@ import (
 )
 
 func TestEndpointResolvesToItsPair(t *testing.T) {
-	tree := files{"": {".github/crossrev.yml": "version: 1\nendpoints:\n  ollama:\n    base_url: http://127.0.0.1:11434\n    token_env: ANTHROPIC_AUTH_TOKEN\n"}}
+	tree := files{"": {".github/crossrev.yml": "version: 2\nendpoints:\n  ollama:\n    base_url: http://127.0.0.1:11434\n    token_env: ANTHROPIC_AUTH_TOKEN\n"}}
 	endpoint, err := mustLoad(t, core.Revision{}, tree).Endpoint("ollama")
 	if err != nil {
 		t.Fatalf("Endpoint: %v", err)
@@ -26,7 +26,7 @@ func TestEndpointResolvesToItsPair(t *testing.T) {
 // — the same silent substitution the divergence guard exists to catch, arriving
 // through a different door (lib/config.sh:344-348).
 func TestAnUndefinedEndpointIsRefusedRatherThanFallenBackFrom(t *testing.T) {
-	tree := files{"": {".github/crossrev.yml": "version: 1\n"}}
+	tree := files{"": {".github/crossrev.yml": "version: 2\n"}}
 	_, err := mustLoad(t, core.Revision{}, tree).Endpoint("ollama")
 	refusal, ok := err.(*config.Refusal)
 	if !ok {
@@ -73,7 +73,7 @@ func mustEndpointError(t *testing.T, loaded *config.Config, name string) error {
 // `.endpoints[$n] // empty` is non-empty for a string, and the base_url read
 // off that string comes back empty (lib/config.sh:353-359).
 func TestAScalarEndpointHasNoBaseURL(t *testing.T) {
-	tree := files{"": {".github/crossrev.yml": "version: 1\nendpoints:\n  ollama: \"http://x\"\n"}}
+	tree := files{"": {".github/crossrev.yml": "version: 2\nendpoints:\n  ollama: \"http://x\"\n"}}
 	_, err := mustLoad(t, core.Revision{}, tree).Endpoint("ollama")
 	refusal, ok := err.(*config.Refusal)
 	if !ok {
@@ -88,8 +88,8 @@ func TestAScalarEndpointHasNoBaseURL(t *testing.T) {
 // it reads as no definition at all.
 func TestANullEndpointIsDefinedNowhere(t *testing.T) {
 	for _, document := range []string{
-		"version: 1\nendpoints:\n  ollama: null\n",
-		"version: 1\nendpoints:\n  ollama: false\n",
+		"version: 2\nendpoints:\n  ollama: null\n",
+		"version: 2\nendpoints:\n  ollama: false\n",
 	} {
 		tree := files{"": {".github/crossrev.yml": document}}
 		_, err := mustLoad(t, core.Revision{}, tree).Endpoint("ollama")
@@ -106,7 +106,7 @@ func TestANullEndpointIsDefinedNowhere(t *testing.T) {
 // An endpoint defined as an empty mapping is present to jq, so it reaches the
 // missing-base_url refusal rather than the defined-nowhere one.
 func TestAnEmptyEndpointHasNoBaseURL(t *testing.T) {
-	tree := files{"": {".github/crossrev.yml": "version: 1\nendpoints:\n  ollama: {}\n"}}
+	tree := files{"": {".github/crossrev.yml": "version: 2\nendpoints:\n  ollama: {}\n"}}
 	_, err := mustLoad(t, core.Revision{}, tree).Endpoint("ollama")
 	if err == nil || err.Error() != "the endpoint 'ollama' has no base_url" {
 		t.Errorf("error = %v, want the missing base_url refusal", err)
@@ -117,7 +117,7 @@ func TestAnEmptyEndpointHasNoBaseURL(t *testing.T) {
 // whole point of the second layer, for a URL meaningless on a runner.
 func TestAnOperatorOnlyEndpointResolves(t *testing.T) {
 	operatorPath := config.OperatorPath()
-	tree := files{"": {operatorPath: "version: 1\nendpoints:\n  mine:\n    base_url: http://home.local/\n    token_env: HOME_TOKEN\n"}}
+	tree := files{"": {operatorPath: "version: 2\nendpoints:\n  mine:\n    base_url: http://home.local/\n    token_env: HOME_TOKEN\n"}}
 	endpoint, err := mustLoad(t, core.Revision{}, tree).Endpoint("mine")
 	if err != nil {
 		t.Fatalf("Endpoint: %v", err)

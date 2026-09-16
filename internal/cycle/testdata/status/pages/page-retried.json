@@ -2,7 +2,7 @@
   "name": "page-retried",
   "shell": "tests/test-status.sh:211-224",
   "now": 1788303163,
-  "config_yaml": "version: 1\nmode: local\npolicy:\n  min_fix_severity: medium\n  max_passes_per_cycle: 3\n  max_files_changed_per_pr: 200\n  max_prs_per_day: 25\nreviewer:\n  harness: claude\n  model: reviewer-model\nresolver:\n  harness: claude\n  model: resolver-model\nbacklog:\n  destination: none",
+  "config_yaml": "version: 2\nmode: local\npolicy:\n  min_fix_severity: medium\n  max_passes_per_cycle: 3\n  max_files_changed_per_pr: 200\n  max_prs_per_day: 25\nreviewer:\n  harness: claude\n  model: reviewer-model\nresolver:\n  harness: claude\n  model: resolver-model\nbacklog:\n  destination: none",
   "author": "tester",
   "head_sha": "c49e28b3422412c6e2baf538277b29ff32091f7e",
   "base_sha": "20eaedb03d14c0f858542687652918eeac16c5da",

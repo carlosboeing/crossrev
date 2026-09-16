@@ -9,11 +9,12 @@ import (
 	"github.com/carlosboeing/crossrev/internal/prstate"
 )
 
-// The three marker writers in lib/run.sh build their object with one jq
-// expression each, and `jq -c` keeps insertion order. The byte strings below
-// were produced by sourcing lib/state.sh and running those exact expressions
-// through state_marker_encode, so this test fails on any field the Go struct
-// declares out of order.
+// The three marker writers build their object with one expression each, and
+// the encoded form keeps insertion order. The byte strings below were
+// produced from the writers' field order, so this test fails on any field
+// the Go struct declares out of order. They carry the current version: the
+// frozen v1 bytes live in the parity oracle and in marker_test.go's written
+// markers, which stay the superseded v1 contract.
 func TestMarkerEncodesInTheWritersOrder(t *testing.T) {
 	cases := []struct {
 		name string
@@ -44,7 +45,7 @@ func TestMarkerEncodesInTheWritersOrder(t *testing.T) {
 				BlockedReason: prstate.Null[string](),
 				Findings:      json.RawMessage("[]"),
 			},
-			want: `{"v":1,"leg":"review","pass":2,"state":"started","ts":1700000000,"done_ts":null,"run_id":"run-77","head_sha":"9f3c1abdeadbeef","harness":"codex","model":"gpt-5","effort":"high","endpoint":null,"model_reported":null,"tokens":null,"usage":null,"billing":null,"verdict":null,"blocked_reason":null,"findings":[]}`,
+			want: `{"v":2,"leg":"review","pass":2,"state":"started","ts":1700000000,"done_ts":null,"run_id":"run-77","head_sha":"9f3c1abdeadbeef","harness":"codex","model":"gpt-5","effort":"high","endpoint":null,"model_reported":null,"tokens":null,"usage":null,"billing":null,"verdict":null,"blocked_reason":null,"findings":[]}`,
 		},
 		{
 			// lib/run.sh:1963-1971, the fresh resolve claim.
@@ -73,7 +74,7 @@ func TestMarkerEncodesInTheWritersOrder(t *testing.T) {
 				Summary:       prstate.Some(""),
 				Resolutions:   json.RawMessage("[]"),
 			},
-			want: `{"v":1,"leg":"resolve","pass":2,"state":"started","ts":1700000000,"done_ts":null,"run_id":"run-77","head_sha":"9f3c1abdeadbeef","harness":"codex","model":"gpt-5","effort":"high","endpoint":null,"model_reported":null,"tokens":null,"usage":null,"billing":null,"blocked":false,"blocked_reason":null,"commit_sha":null,"commit_subject":null,"summary":"","resolutions":[]}`,
+			want: `{"v":2,"leg":"resolve","pass":2,"state":"started","ts":1700000000,"done_ts":null,"run_id":"run-77","head_sha":"9f3c1abdeadbeef","harness":"codex","model":"gpt-5","effort":"high","endpoint":null,"model_reported":null,"tokens":null,"usage":null,"billing":null,"blocked":false,"blocked_reason":null,"commit_sha":null,"commit_subject":null,"summary":"","resolutions":[]}`,
 		},
 		{
 			// lib/run.sh:1056-1062, the pass a cap refused to start.
@@ -99,7 +100,7 @@ func TestMarkerEncodesInTheWritersOrder(t *testing.T) {
 				Reason:        prstate.Some("reached max_passes_per_cycle (3)"),
 				Findings:      json.RawMessage("[]"),
 			},
-			want: `{"v":1,"leg":"review","pass":3,"state":"declined","ts":1700000000,"done_ts":1700000000,"run_id":"run-77","head_sha":"9f3c1abdeadbeef","harness":null,"model":null,"effort":null,"endpoint":null,"model_reported":null,"tokens":null,"usage":null,"billing":null,"verdict":"declined","reason":"reached max_passes_per_cycle (3)","findings":[]}`,
+			want: `{"v":2,"leg":"review","pass":3,"state":"declined","ts":1700000000,"done_ts":1700000000,"run_id":"run-77","head_sha":"9f3c1abdeadbeef","harness":null,"model":null,"effort":null,"endpoint":null,"model_reported":null,"tokens":null,"usage":null,"billing":null,"verdict":"declined","reason":"reached max_passes_per_cycle (3)","findings":[]}`,
 		},
 	}
 
@@ -312,5 +313,122 @@ func TestMarkerKeepsAnEmptyStringField(t *testing.T) {
 		if string(raw) != payload {
 			t.Errorf("an empty value was dropped\n got %s\nwant %s", raw, payload)
 		}
+	}
+}
+
+// Acceptance 1: a v2 marker carries the coverage and confirmation references.
+func TestV2MarkerCarriesCoverageAndConfirmationReferences(t *testing.T) {
+	if core.MarkerVersion != 2 {
+		t.Fatalf("MarkerVersion = %d, want 2", core.MarkerVersion)
+	}
+	m := prstate.Marker{
+		Version:             core.MarkerVersion,
+		Leg:                 core.LegReview,
+		Pass:                1,
+		State:               core.PassIncomplete,
+		TS:                  1700000000,
+		CoverageManifestID:  prstate.Some(int64(4242)),
+		CoverageStop:        prstate.Some(prstate.CoverageStop{RequiredCount: 3, CoveredCount: 1, OutstandingCount: 2, MeasuredBytes: 900, ShardCount: 1, Limit: "review_budget_reached"}),
+		ConfirmationBaseSHA: prstate.Null[string](),
+		ConfirmationHeadSHA: prstate.Null[string](),
+	}
+	raw, err := m.MarshalJSON()
+	if err != nil {
+		t.Fatalf("marshalling: %v", err)
+	}
+	for _, want := range []string{`"v":2`, `"coverage_manifest_id":4242`, `"coverage_stop":{"required_count":3`, `"confirmation_base_sha":null`, `"confirmation_head_sha":null`} {
+		if !strings.Contains(string(raw), want) {
+			t.Errorf("marshalled %s misses %s", raw, want)
+		}
+	}
+}
+
+// Acceptance 2: a v1 marker decodes but contributes no coverage reference.
+func TestV1MarkerContributesNoCoverage(t *testing.T) {
+	m, err := prstate.ParseMarker(json.RawMessage(`{"v":1,"leg":"review","pass":1,"state":"complete"}`))
+	if err != nil {
+		t.Fatalf("parsing a v1 marker: %v", err)
+	}
+	if m.CoverageManifestID.Present() {
+		t.Errorf("a v1 marker carries coverage_manifest_id %+v", m.CoverageManifestID)
+	}
+	if m.CoverageContribution() {
+		t.Error("a v1 marker contributes coverage")
+	}
+	v2 := prstate.Marker{Version: 2, CoverageManifestID: prstate.Some(int64(9))}
+	if !v2.CoverageContribution() {
+		t.Error("a v2 marker with a manifest id contributes no coverage")
+	}
+	// Future versions are refused by the typed reader.
+	if _, err := prstate.ParseMarker(json.RawMessage(`{"v":3,"leg":"review","pass":1}`)); err == nil {
+		t.Error("a v3 marker parsed without an error")
+	}
+}
+
+// A v2 marker round-trips its tail in writer order, without verification fields.
+func TestV2MarkerTailRoundTripsInWriterOrder(t *testing.T) {
+	in := `{"v":2,"leg":"review","pass":1,"state":"incomplete","ts":1700000000,"coverage_manifest_id":4242,"coverage_stop":{"required_count":3,"covered_count":1,"outstanding_count":2,"measured_bytes":900,"shard_count":1,"limit":"review_budget_reached"},"confirmation_base_sha":null,"confirmation_head_sha":null}`
+	m, err := prstate.ParseMarker(json.RawMessage(in))
+	if err != nil {
+		t.Fatalf("parsing: %v", err)
+	}
+	if !m.CoverageContribution() {
+		t.Fatal("a v2 marker naming its manifest contributes no coverage")
+	}
+	if got, ok := m.CoverageManifestID.Get(); !ok || got != 4242 {
+		t.Errorf("coverage_manifest_id = %d, %v", got, ok)
+	}
+	stop, ok := m.CoverageStop.Get()
+	if !ok || stop.RequiredCount != 3 || stop.Limit != "review_budget_reached" {
+		t.Errorf("coverage_stop = %+v, %v", stop, ok)
+	}
+	raw, err := m.MarshalJSON()
+	if err != nil {
+		t.Fatalf("marshalling: %v", err)
+	}
+	if string(raw) != in {
+		t.Errorf("round trip changed the bytes\n got %s\nwant %s", raw, in)
+	}
+	encoded, err := m.Encode()
+	if err != nil {
+		t.Fatalf("encoding: %v", err)
+	}
+	if encoded != "\n\n"+prstate.MarkerPrefix+" "+in+" -->" {
+		t.Errorf("encoded %q", encoded)
+	}
+}
+
+// The tail keys sit after the last parity-era key in writer order.
+func TestV2TailKeysSitAfterTheParityEraKeys(t *testing.T) {
+	m := prstate.Marker{
+		Version: 2, Leg: core.LegReview, Pass: 1, State: core.PassComplete,
+		TS:                1,
+		Findings:          json.RawMessage("[]"),
+		Unthreaded:        prstate.Some(3),
+		CoverageManifestID: prstate.Some(int64(7)),
+	}
+	raw, err := m.MarshalJSON()
+	if err != nil {
+		t.Fatalf("marshalling: %v", err)
+	}
+	ut := strings.Index(string(raw), `"unthreaded":3`)
+	cv := strings.Index(string(raw), `"coverage_manifest_id":7`)
+	if ut < 0 || cv < 0 || ut > cv {
+		t.Errorf("tail key order wrong in %s", raw)
+	}
+	if strings.Contains(string(raw), "verification") {
+		t.Errorf("a v2 marker carries verification fields: %s", raw)
+	}
+}
+
+// A future version decodes as bytes but never as a typed marker.
+func TestFutureMarkerVersionIsRefusedByTheTypedReader(t *testing.T) {
+	body := `text` + "\n\n" + prstate.MarkerPrefix + ` {"v":9,"leg":"review","pass":1} -->`
+	raw, ok := prstate.DecodeMarker(body)
+	if !ok {
+		t.Fatal("the byte reader dropped a future marker")
+	}
+	if _, err := prstate.ParseMarker(raw); err == nil {
+		t.Error("the typed reader accepted a v9 marker")
 	}
 }

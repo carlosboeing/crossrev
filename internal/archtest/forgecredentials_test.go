@@ -26,6 +26,15 @@ import (
 // Order is compared too, not only membership. Both lists are `gh help
 // environment`'s order of precedence, and a reordering is a sign one of them
 // was rewritten from memory rather than from that document.
+//
+// The ledger's new `gh` calls run through the same orchestrator-facing
+// client, which is what makes this file B2's credential gate: the client
+// test proves every new method starts `gh` with the client's environment,
+// and this test proves that environment still carries exactly the four
+// names `gh` authenticates with. A ledger read that widened the model
+// environment instead would arrive there holding a credential, and the
+// model-facing runner would refuse it — or worse, a ledger write that
+// bypassed the client would carry no boundary at all.
 func TestTheConfigLayerRefusesTheCredentialsAHarnessIsStrippedOf(t *testing.T) {
 	stripped := exec.ForgeCredentialNames()
 	refused := config.ForgeCredentialNames()

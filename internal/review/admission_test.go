@@ -63,7 +63,7 @@ func TestAdmission(t *testing.T) {
 			name: "automatic daily cap declines",
 			setup: func(t *testing.T, e *env, req *review.Request) {
 				req.Trigger = review.TriggerAutomatic
-				e.cfg = mustConfig(t, "version: 1\npolicy:\n  max_prs_per_day: 1\n")
+				e.cfg = mustConfig(t, "version: 2\npolicy:\n  max_prs_per_day: 1\n")
 				other := parseMarker(t, fmt.Sprintf(`{"v":1,"leg":"review","pass":1,"state":"complete","ts":1699950000,"run_id":"x","head_sha":%q,"verdict":"converged","findings":[]}`, headSHA))
 				encoded, err := other.Encode()
 				if err != nil {

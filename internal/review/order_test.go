@@ -40,7 +40,7 @@ func TestEnrichmentKeepsTheModelsKeyOrder(t *testing.T) {
 	want := []string{
 		"path", "line", "side", "severity", "category", "pre_existing",
 		"title", "why", "fix",
-		"id", "anchor", "thread_id", "root_comment_id", "resolution", "tracked_as",
+		"id", "anchor", "anchor_kind", "anchor_reason", "thread_id", "root_comment_id", "resolution", "tracked_as",
 	}
 	if keys := got[0].Keys(); strings.Join(keys, ",") != strings.Join(want, ",") {
 		t.Errorf("key order\n got %v\nwant %v", keys, want)

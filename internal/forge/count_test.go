@@ -353,3 +353,40 @@ func TestPRsReviewedTodaySkipsAMarkerWhoseTimestampIsAString(t *testing.T) {
 		t.Errorf("count = %d, want 0; the shell counts it and rounding down is the safe direction", got)
 	}
 }
+
+// An incomplete review ran, so it consumes a daily unit like a complete one.
+// Only a declined pass — refused before it started — counts as never run.
+func TestPRsReviewedTodayCountsAnIncompleteReview(t *testing.T) {
+	after := countCutoff.Unix() + 60
+	f := &fakeForge{pages: [][]forge.IssueComment{{
+		markerComment(t, countAuthor, 7, "review", "incomplete", after),
+	}}}
+
+	got, err := forge.PRsReviewedToday(context.Background(), f, request(t, 0, nil))
+	if err != nil {
+		t.Fatalf("PRsReviewedToday: %v", err)
+	}
+	if got != 1 {
+		t.Errorf("count = %d, want 1: an incomplete review ran", got)
+	}
+}
+
+// The current pull request's own incomplete marker answers zero without a
+// repository-wide read, the same as a complete one.
+func TestPRsReviewedTodayTreatsAnOwnIncompleteMarkerAsCurrent(t *testing.T) {
+	f := &fakeForge{pages: [][]forge.IssueComment{{
+		markerComment(t, countAuthor, 7, "review", "complete", countCutoff.Unix()+60),
+	}}}
+
+	got, err := forge.PRsReviewedToday(context.Background(), f,
+		request(t, 0, markers(t, "review", "incomplete", countCutoff.Unix()+1)))
+	if err != nil {
+		t.Fatalf("PRsReviewedToday: %v", err)
+	}
+	if got != 0 {
+		t.Errorf("count = %d, want 0", got)
+	}
+	if len(f.asked) != 0 {
+		t.Errorf("pages read = %v, want none", f.asked)
+	}
+}

@@ -44,7 +44,7 @@ func TestCommit(t *testing.T) {
 		e.addReview(t, defaultFindings(), "issues-remain")
 		e.git.staged = true
 		e.git.show = map[string][]byte{
-			e.base.SHA() + ":.github/crossrev.yml": []byte("version: 1\nresolver:\n  harness: claude\ngit:\n  hooks: skip\n"),
+			e.base.SHA() + ":.github/crossrev.yml": []byte("version: 2\nresolver:\n  harness: claude\ngit:\n  hooks: skip\n"),
 		}
 		got := e.run(t)
 		if got.Err != nil {
@@ -63,7 +63,7 @@ func TestCommit(t *testing.T) {
 		e.addReview(t, defaultFindings(), "issues-remain")
 		e.git.staged = true
 		e.git.show = map[string][]byte{
-			e.base.SHA() + ":.github/crossrev.yml": []byte("version: 1\nresolver:\n  harness: claude\ngit:\n  hooks: run\n"),
+			e.base.SHA() + ":.github/crossrev.yml": []byte("version: 2\nresolver:\n  harness: claude\ngit:\n  hooks: run\n"),
 		}
 		got := e.run(t)
 		if got.Err != nil {

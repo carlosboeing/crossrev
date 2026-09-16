@@ -11,9 +11,11 @@ import (
 // Findings checks one review payload and returns nil, or a ShapeError naming the
 // first problem in the words the shell prints.
 //
-// Only shape is checked, because the review leg has nothing to contradict: the
-// orchestrator hands it a diff and prior findings, not a numbering the answer has
-// to cover. validate_resolve is the one with a semantic half.
+// Only shape is checked, because this is the compatibility entry point for
+// callers with no input batch to contradict: the review leg hands those
+// callers a diff and prior findings, not a numbering the answer has to
+// cover. Callers that do hold the batch call Review, which runs this shape
+// first and then the semantic half.
 //
 // Three of the shell's answers look wrong and are reproduced anyway, because
 // this is a parity port and each one is jq behaving as jq does.

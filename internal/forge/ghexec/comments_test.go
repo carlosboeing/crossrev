@@ -195,6 +195,45 @@ func TestReviewCommentCreateReportsARefusedFallback(t *testing.T) {
 	}
 }
 
+// A file-level comment carries subject_type=file and no line or side: the
+// finding names a changed path with no valid hunk line, so GitHub anchors
+// to the file rather than a line.
+func TestReviewFileCommentSendsSubjectTypeFile(t *testing.T) {
+	c, r := client(t)
+
+	got, err := c.ReviewFileComment(context.Background(), reviewComment(t, "Finding."))
+	if err != nil {
+		t.Fatalf("ReviewFileComment: %v", err)
+	}
+	if got != forge.PlacementInline {
+		t.Errorf("placement = %q, want inline", got)
+	}
+	r.wantArgs(t, 0, "api", "--method", "POST", "repos/acme/widget/pulls/42/comments",
+		"-f", "body=Finding.",
+		"-f", "commit_id=1111111111111111111111111111111111111111",
+		"-f", "path=app.ts",
+		"-f", "subject_type=file")
+}
+
+// A refused file anchor falls back to a top-level comment naming the path,
+// the same shape the inline path uses for a refused line.
+func TestReviewFileCommentFallsBackToATopLevelComment(t *testing.T) {
+	c, r := client(t, bad(), out("9001\n"))
+
+	got, err := c.ReviewFileComment(context.Background(), reviewComment(t, "Finding."))
+	if err != nil {
+		t.Fatalf("ReviewFileComment: %v", err)
+	}
+	if got != forge.PlacementFallback {
+		t.Errorf("placement = %q, want fallback", got)
+	}
+	if len(r.specs) != 2 {
+		t.Fatalf("gh was invoked %v, want the file attempt and the fallback", r.argvs())
+	}
+	r.wantArgs(t, 1, "api", "--method", "POST", "repos/acme/widget/issues/42/comments",
+		"-f", "body=**app.ts**\n\nFinding.", "--jq", ".id")
+}
+
 func TestReviewReplyArgv(t *testing.T) {
 	c, r := client(t)
 	if err := c.ReviewReply(context.Background(), testSlug(t), 42, 5000, "Fixed."); err != nil {

@@ -16,7 +16,7 @@ import (
 // treats false as empty, so a lenient read of `keep_transcripts: false` reports
 // the key unset and refuses every config.
 func TestFalseIsNotAbsent(t *testing.T) {
-	tree := files{"": {".github/crossrev.yml": "version: 1\nlogs:\n  keep_transcripts: false\n"}}
+	tree := files{"": {".github/crossrev.yml": "version: 2\nlogs:\n  keep_transcripts: false\n"}}
 	loaded := mustLoad(t, core.Revision{}, tree)
 
 	// cfg_get and cfg_get_json both run the value through jq's alternative
@@ -38,7 +38,7 @@ func TestFalseIsNotAbsent(t *testing.T) {
 	}
 	// The state that must not collapse: a stated false loads, and an absent
 	// key takes the same default, but neither is refused as unset.
-	absent := mustLoad(t, core.Revision{}, files{"": {".github/crossrev.yml": "version: 1\n"}})
+	absent := mustLoad(t, core.Revision{}, files{"": {".github/crossrev.yml": "version: 2\n"}})
 	if got := string(mustJSON(t, absent)); !strings.Contains(got, `"keep_transcripts":false`) {
 		t.Errorf("an absent keep_transcripts did not take its default: %s", got)
 	}
@@ -48,7 +48,7 @@ func TestFalseIsNotAbsent(t *testing.T) {
 // is the documented "no cap" value, and a read that collapsed it into absent
 // would restore the default of 200.
 func TestZeroIsNotAbsent(t *testing.T) {
-	tree := files{"": {".github/crossrev.yml": "version: 1\npolicy:\n  max_files_changed_per_pr: 0\n"}}
+	tree := files{"": {".github/crossrev.yml": "version: 2\npolicy:\n  max_files_changed_per_pr: 0\n"}}
 	loaded := mustLoad(t, core.Revision{}, tree)
 
 	if got := loaded.Get(".policy.max_files_changed_per_pr"); got != "0" {
@@ -63,7 +63,7 @@ func TestZeroIsNotAbsent(t *testing.T) {
 // jq's `*` keeps it, and no broad unknown-field refusal exists in Bash to add
 // here.
 func TestUnknownKeysSurviveTheMerge(t *testing.T) {
-	tree := files{"": {".github/crossrev.yml": "version: 1\nnot_a_key_crossrev_knows: 42\npolicy:\n  invented: true\n"}}
+	tree := files{"": {".github/crossrev.yml": "version: 2\nnot_a_key_crossrev_knows: 42\npolicy:\n  invented: true\n"}}
 	loaded := mustLoad(t, core.Revision{}, tree)
 
 	if got := loaded.Get(".not_a_key_crossrev_knows"); got != "42" {
@@ -83,8 +83,8 @@ func TestUnknownKeysSurviveTheMerge(t *testing.T) {
 func TestTheOperatorFileAffectsNamedEndpointsOnly(t *testing.T) {
 	operatorPath := config.OperatorPath()
 	tree := files{"": {
-		".github/crossrev.yml": "version: 1\npolicy:\n  max_passes_per_cycle: 5\n",
-		operatorPath: "version: 1\npolicy:\n  max_passes_per_cycle: 9\nmode: automated\n" +
+		".github/crossrev.yml": "version: 2\npolicy:\n  max_passes_per_cycle: 5\n",
+		operatorPath: "version: 2\npolicy:\n  max_passes_per_cycle: 9\nmode: automated\n" +
 			"endpoints:\n  mine:\n    base_url: http://local/\n    token_env: TOKEN\n",
 	}}
 	loaded := mustLoad(t, core.Revision{}, tree)
@@ -105,8 +105,8 @@ func TestTheOperatorFileAffectsNamedEndpointsOnly(t *testing.T) {
 func TestTheEndpointMergeIsRecursive(t *testing.T) {
 	operatorPath := config.OperatorPath()
 	tree := files{"": {
-		".github/crossrev.yml": "version: 1\nendpoints:\n  kimi:\n    base_url: https://public.example/\n    token_env: KIMI_API_KEY\n",
-		operatorPath:           "version: 1\nendpoints:\n  kimi:\n    base_url: http://mine.local/\n",
+		".github/crossrev.yml": "version: 2\nendpoints:\n  kimi:\n    base_url: https://public.example/\n    token_env: KIMI_API_KEY\n",
+		operatorPath:           "version: 2\nendpoints:\n  kimi:\n    base_url: http://mine.local/\n",
 	}}
 	endpoint, err := mustLoad(t, core.Revision{}, tree).Endpoint("kimi")
 	if err != nil {
@@ -130,10 +130,10 @@ func TestNumbersArriveAsTheTextJqReads(t *testing.T) {
 		path     string
 		want     string
 	}{
-		{"hexadecimal", "version: 1\npolicy:\n  max_prs_per_day: 0x10\n", ".policy.max_prs_per_day", "16"},
-		{"leading zeros", "version: 1\npolicy:\n  max_prs_per_day: 007\n", ".policy.max_prs_per_day", "7"},
-		{"underscores", "version: 1\npolicy:\n  max_prs_per_day: 1_000\n", ".policy.max_prs_per_day", "1000"},
-		{"a float keeps its text", "version: 1\npolicy:\n  max_prs_per_day: 5.0\n", ".policy.max_prs_per_day", "5.0"},
+		{"hexadecimal", "version: 2\npolicy:\n  max_prs_per_day: 0x10\n", ".policy.max_prs_per_day", "16"},
+		{"leading zeros", "version: 2\npolicy:\n  max_prs_per_day: 007\n", ".policy.max_prs_per_day", "7"},
+		{"underscores", "version: 2\npolicy:\n  max_prs_per_day: 1_000\n", ".policy.max_prs_per_day", "1000"},
+		{"a float keeps its text", "version: 2\npolicy:\n  max_prs_per_day: 5.0\n", ".policy.max_prs_per_day", "5.0"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -228,7 +228,7 @@ func TestNumbersAreResolvedTheWayYqResolvesThem(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.literal, func(t *testing.T) {
-			document := "version: 1\npolicy:\n  max_prs_per_day: " + test.literal + "\n"
+			document := "version: 2\npolicy:\n  max_prs_per_day: " + test.literal + "\n"
 			loaded := mustLoad(t, core.Revision{}, files{"": {".github/crossrev.yml": document}})
 			if got := loaded.Get(".policy.max_prs_per_day"); got != test.want {
 				t.Errorf("max_prs_per_day = %q, want %q", got, test.want)
@@ -252,7 +252,7 @@ func TestALiteralYqCannotReadRefusesTheFile(t *testing.T) {
 		"a not-a-number":          ".nan",
 	} {
 		t.Run(name, func(t *testing.T) {
-			document := "version: 1\npolicy:\n  max_prs_per_day: " + literal + "\n"
+			document := "version: 2\npolicy:\n  max_prs_per_day: " + literal + "\n"
 			tree := files{"": {".github/crossrev.yml": document}}
 			if got := refusalFrom(t, core.Revision{}, tree).Message; got != "could not parse .github/crossrev.yml" {
 				t.Errorf("message = %q, want the file refused as unparsable", got)
@@ -265,8 +265,8 @@ func TestALiteralYqCannotReadRefusesTheFile(t *testing.T) {
 // resolves to rather than accepted as three digits (lib/config.sh:225, 262).
 func TestALeadingZeroFloatIsRefusedAsTheShellRefusesIt(t *testing.T) {
 	for _, test := range []struct{ document, wants string }{
-		{"version: 1\nlogs:\n  retention_days: 08\n", "logs.retention_days is '8.0'"},
-		{"version: 1\npolicy:\n  max_passes_per_cycle: 08\n", "policy.max_passes_per_cycle is '8.0'"},
+		{"version: 2\nlogs:\n  retention_days: 08\n", "logs.retention_days is '8.0'"},
+		{"version: 2\npolicy:\n  max_passes_per_cycle: 08\n", "policy.max_passes_per_cycle is '8.0'"},
 	} {
 		tree := files{"": {".github/crossrev.yml": test.document}}
 		if got := refusalFrom(t, core.Revision{}, tree).Message; !strings.Contains(got, test.wants) {
@@ -274,7 +274,7 @@ func TestALeadingZeroFloatIsRefusedAsTheShellRefusesIt(t *testing.T) {
 		}
 	}
 	// And a leading-zero integer is decimal, so the bound is the one written.
-	tree := files{"": {".github/crossrev.yml": "version: 1\npolicy:\n  max_passes_per_cycle: 0777\n"}}
+	tree := files{"": {".github/crossrev.yml": "version: 2\npolicy:\n  max_passes_per_cycle: 0777\n"}}
 	if got := mustLoad(t, core.Revision{}, tree).Get(".policy.max_passes_per_cycle"); got != "777" {
 		t.Errorf("max_passes_per_cycle = %q, want %q", got, "777")
 	}
@@ -285,10 +285,10 @@ func TestALeadingZeroFloatIsRefusedAsTheShellRefusesIt(t *testing.T) {
 // leniently loaded a config with every named endpoint dropped.
 func TestANonMappingEndpointsKeyIsRefused(t *testing.T) {
 	for _, test := range []struct{ name, document, wants string }{
-		{"a string", "version: 1\nendpoints: nope\n", "endpoints is a string, which is not a mapping"},
-		{"a list", "version: 1\nendpoints:\n  - a\n", "endpoints is a list, which is not a mapping"},
-		{"a number", "version: 1\nendpoints: 5\n", "endpoints is a number, which is not a mapping"},
-		{"true", "version: 1\nendpoints: true\n", "endpoints is true or false, which is not a mapping"},
+		{"a string", "version: 2\nendpoints: nope\n", "endpoints is a string, which is not a mapping"},
+		{"a list", "version: 2\nendpoints:\n  - a\n", "endpoints is a list, which is not a mapping"},
+		{"a number", "version: 2\nendpoints: 5\n", "endpoints is a number, which is not a mapping"},
+		{"true", "version: 2\nendpoints: true\n", "endpoints is true or false, which is not a mapping"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			tree := files{"": {".github/crossrev.yml": test.document}}
@@ -299,7 +299,7 @@ func TestANonMappingEndpointsKeyIsRefused(t *testing.T) {
 	}
 	// `null` and `false` are jq's `// {}`, so both contribute nothing and the
 	// run carries on. Measured on both sides.
-	for _, document := range []string{"version: 1\nendpoints: null\n", "version: 1\nendpoints: false\n"} {
+	for _, document := range []string{"version: 2\nendpoints: null\n", "version: 2\nendpoints: false\n"} {
 		loaded := mustLoad(t, core.Revision{}, files{"": {".github/crossrev.yml": document}})
 		if got := string(mustJSON(t, loaded)); !strings.Contains(got, `"endpoints":{}`) {
 			t.Errorf("endpoints = %s, want an empty object", got)
@@ -311,7 +311,7 @@ func TestANonMappingEndpointsKeyIsRefused(t *testing.T) {
 // from, so a loaded config can never write back into the defaults a later load
 // will read. Clone's own comment states the guarantee and nothing else pins it.
 func TestTheMergeNeverAliasesTheDefaults(t *testing.T) {
-	tree := files{"": {".github/crossrev.yml": "version: 1\n"}}
+	tree := files{"": {".github/crossrev.yml": "version: 2\n"}}
 	loaded := mustLoad(t, core.Revision{}, tree)
 	loaded.Merged.Object("policy").Set("min_fix_severity", "changed")
 	loaded.Merged.Object("backlog").Object("github_issues").Set("tracking_label", "changed")
@@ -331,19 +331,19 @@ func TestTheMergeNeverAliasesTheDefaults(t *testing.T) {
 // A float where a whole number is required is refused, and the refusal quotes
 // the text rather than a rounded value.
 func TestAFloatWhereAWholeNumberIsRequiredIsRefused(t *testing.T) {
-	tree := files{"": {".github/crossrev.yml": "version: 1\nlogs:\n  retention_days: 5.0\n"}}
+	tree := files{"": {".github/crossrev.yml": "version: 2\nlogs:\n  retention_days: 5.0\n"}}
 	if got := refusalFrom(t, core.Revision{}, tree).Message; !strings.Contains(got, "'5.0'") {
 		t.Errorf("message = %q, want it to quote 5.0", got)
 	}
 }
 
-// `version: 1.0` is a mismatch: the comparison is textual, because the key
+// `version: 2.0` is a mismatch: the comparison is textual, because the key
 // exists so that a future shape can be rejected by an old binary
 // (lib/config.sh:334).
 func TestTheVersionComparisonIsTextual(t *testing.T) {
-	tree := files{"": {".github/crossrev.yml": "version: 1.0\n"}}
-	if got := refusalFrom(t, core.Revision{}, tree).Message; !strings.Contains(got, "declares version 1.0") {
-		t.Errorf("message = %q, want it to quote 1.0", got)
+	tree := files{"": {".github/crossrev.yml": "version: 2.0\n"}}
+	if got := refusalFrom(t, core.Revision{}, tree).Message; !strings.Contains(got, "declares version 2.0") {
+		t.Errorf("message = %q, want it to quote 2.0", got)
 	}
 }
 
@@ -351,7 +351,7 @@ func TestTheVersionComparisonIsTextual(t *testing.T) {
 // lib/config.sh:339: a string bare, an absent or null or false value empty, and
 // anything else as its JSON.
 func TestGetRendersTheWayJqDoes(t *testing.T) {
-	tree := files{"": {".github/crossrev.yml": "version: 1\n" +
+	tree := files{"": {".github/crossrev.yml": "version: 2\n" +
 		"backlog:\n  github_issues:\n    labels: [a, b]\n" +
 		"reviewer:\n  model: null\n"}}
 	loaded := mustLoad(t, core.Revision{}, tree)
@@ -386,13 +386,13 @@ func TestGetRendersTheWayJqDoes(t *testing.T) {
 // The merge keeps the defaults' key order and appends what the repository adds,
 // which is what jq's `*` does and what `crossrev config show` prints.
 func TestTheMergeKeepsKeyOrder(t *testing.T) {
-	tree := files{"": {".github/crossrev.yml": "version: 1\nzzz_added_last: 1\nmode: automated\n"}}
+	tree := files{"": {".github/crossrev.yml": "version: 2\nzzz_added_last: 1\nmode: automated\n"}}
 	merged, err := mustLoad(t, core.Revision{}, tree).MergedJSON()
 	if err != nil {
 		t.Fatalf("MergedJSON: %v", err)
 	}
 	text := string(merged)
-	if !strings.HasPrefix(text, `{"version":1,"mode":"automated","runner":`) {
+	if !strings.HasPrefix(text, `{"version":2,"mode":"automated","runner":`) {
 		t.Errorf("the merge reordered the defaults: %s", text[:min(80, len(text))])
 	}
 	if !strings.HasSuffix(text, `,"zzz_added_last":1}`) {
@@ -418,13 +418,13 @@ func mustJSON(t *testing.T, loaded *config.Config) []byte {
 // more under a refusal naming a key nobody had written.
 func TestANestedNonMappingIsRefusedByName(t *testing.T) {
 	for _, test := range []struct{ name, document, wants string }{
-		{"policy a string", "version: 1\npolicy: \"x\"\n", "policy is a string, which is not a mapping"},
-		{"policy a list", "version: 1\npolicy:\n  - a\n", "policy is a list, which is not a mapping"},
-		{"git a number", "version: 1\ngit: 5\n", "git is a number, which is not a mapping"},
-		{"logs a list", "version: 1\nlogs:\n  - 1\n", "logs is a list, which is not a mapping"},
-		{"backlog a string", "version: 1\nbacklog: hello\n", "backlog is a string, which is not a mapping"},
-		{"backlog.repository a string", "version: 1\nbacklog:\n  repository: hello\n", "backlog.repository is a string, which is not a mapping"},
-		{"a boolean", "version: 1\ngit: true\n", "git is true or false, which is not a mapping"},
+		{"policy a string", "version: 2\npolicy: \"x\"\n", "policy is a string, which is not a mapping"},
+		{"policy a list", "version: 2\npolicy:\n  - a\n", "policy is a list, which is not a mapping"},
+		{"git a number", "version: 2\ngit: 5\n", "git is a number, which is not a mapping"},
+		{"logs a list", "version: 2\nlogs:\n  - 1\n", "logs is a list, which is not a mapping"},
+		{"backlog a string", "version: 2\nbacklog: hello\n", "backlog is a string, which is not a mapping"},
+		{"backlog.repository a string", "version: 2\nbacklog:\n  repository: hello\n", "backlog.repository is a string, which is not a mapping"},
+		{"a boolean", "version: 2\ngit: true\n", "git is true or false, which is not a mapping"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			tree := files{"": {".github/crossrev.yml": test.document}}
@@ -442,9 +442,9 @@ func TestANestedNonMappingIsRefusedByName(t *testing.T) {
 // Measured on both sides.
 func TestANestedNullReachesTheValueAssertion(t *testing.T) {
 	for _, test := range []struct{ name, document, wants string }{
-		{"policy", "version: 1\npolicy: null\n", "policy.min_fix_severity is 'unset', which is not one of high, medium or low"},
-		{"git", "version: 1\ngit:\n", "git.hooks is 'unset', which is not one of skip or run"},
-		{"logs", "version: 1\nlogs: null\n", "logs.retention_days is 'unset', which is not a whole number of days above zero"},
+		{"policy", "version: 2\npolicy: null\n", "policy.min_fix_severity is 'unset', which is not one of high, medium or low"},
+		{"git", "version: 2\ngit:\n", "git.hooks is 'unset', which is not one of skip or run"},
+		{"logs", "version: 2\nlogs: null\n", "logs.retention_days is 'unset', which is not a whole number of days above zero"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			tree := files{"": {".github/crossrev.yml": test.document}}
@@ -455,8 +455,8 @@ func TestANestedNullReachesTheValueAssertion(t *testing.T) {
 	}
 	// The two backlog keys each read through a fallback, so a null there loads.
 	for _, document := range []string{
-		"version: 1\nbacklog: null\n",
-		"version: 1\nbacklog:\n  repository: null\n",
+		"version: 2\nbacklog: null\n",
+		"version: 2\nbacklog:\n  repository: null\n",
 	} {
 		if got := mustLoad(t, core.Revision{}, files{"": {".github/crossrev.yml": document}}).Get(".mode"); got != "local" {
 			t.Errorf("%q did not load: mode = %q", document, got)
@@ -467,7 +467,7 @@ func TestANestedNullReachesTheValueAssertion(t *testing.T) {
 // Which fault is named is the one the run meets first, because the Bash reaches
 // each assertion only when the one above it passed.
 func TestTheFirstFaultInTheReadingOrderIsTheOneNamed(t *testing.T) {
-	tree := files{"": {".github/crossrev.yml": "version: 1\ngit: 5\npolicy:\n  min_fix_severity: medum\n"}}
+	tree := files{"": {".github/crossrev.yml": "version: 2\ngit: 5\npolicy:\n  min_fix_severity: medum\n"}}
 	want := "policy.min_fix_severity is 'medum', which is not one of high, medium or low"
 	if got := refusalFrom(t, core.Revision{}, tree).Message; got != want {
 		t.Errorf("message = %q, want the severity named before the container", got)
@@ -481,32 +481,32 @@ func TestTheFirstFaultInTheReadingOrderIsTheOneNamed(t *testing.T) {
 func TestAMergeKeyIsResolvedTheWayYqResolvesIt(t *testing.T) {
 	for _, test := range []struct{ name, document, path, want string }{
 		{
-			"one source", "version: 1\ndefaults: &d\n  hooks: run\ngit:\n  <<: *d\n",
+			"one source", "version: 2\ndefaults: &d\n  hooks: run\ngit:\n  <<: *d\n",
 			".git.hooks", "run",
 		},
 		{
 			"a key written after the merge wins",
-			"version: 1\na: &a\n  hooks: run\ngit:\n  <<: *a\n  hooks: skip\n",
+			"version: 2\na: &a\n  hooks: run\ngit:\n  <<: *a\n  hooks: skip\n",
 			".git.hooks", "skip",
 		},
 		{
 			"a key written before it does not",
-			"version: 1\na: &a\n  hooks: run\ngit:\n  hooks: skip\n  <<: *a\n",
+			"version: 2\na: &a\n  hooks: run\ngit:\n  hooks: skip\n  <<: *a\n",
 			".git.hooks", "run",
 		},
 		{
 			"a chain resolves through its own merge",
-			"version: 1\nb: &b\n  hooks: run\na: &a\n  <<: *b\ngit:\n  <<: *a\n",
+			"version: 2\nb: &b\n  hooks: run\na: &a\n  <<: *b\ngit:\n  <<: *a\n",
 			".git.hooks", "run",
 		},
 		{
 			"the earliest of a sequence of sources wins",
-			"version: 1\na: &a\n  hooks: run\nb: &b\n  hooks: skip\ngit:\n  <<: [*a, *b]\n",
+			"version: 2\na: &a\n  hooks: run\nb: &b\n  hooks: skip\ngit:\n  <<: [*a, *b]\n",
 			".git.hooks", "run",
 		},
 		{
 			"a source yq will not follow merges nothing",
-			"version: 1\ngit:\n  hooks: run\n  <<:\n    hooks: skip\n",
+			"version: 2\ngit:\n  hooks: run\n  <<:\n    hooks: skip\n",
 			".git.hooks", "run",
 		},
 	} {
@@ -526,7 +526,7 @@ func TestAMergeKeyIsResolvedTheWayYqResolvesIt(t *testing.T) {
 // earliest entry does not set come from the ones after it, in that order.
 // Measured against yq, which answers `{"k":"a","pc":3,"pb":2,"pa":1}`.
 func TestASequenceOfMergeSourcesKeepsYqsOrder(t *testing.T) {
-	document := "version: 1\n" +
+	document := "version: 2\n" +
 		"a: &a {k: a, pa: 1}\nb: &b {k: b, pb: 2}\nc: &c {k: c, pc: 3}\n" +
 		"d:\n  <<: [*a, *b, *c]\n"
 	loaded := mustLoad(t, core.Revision{}, files{"": {".github/crossrev.yml": document}})
@@ -539,8 +539,8 @@ func TestASequenceOfMergeSourcesKeepsYqsOrder(t *testing.T) {
 // Bash refuses the whole file for it.
 func TestAMergeKeyNamingANonMappingRefusesTheFile(t *testing.T) {
 	for name, document := range map[string]string{
-		"an alias to a list":   "version: 1\na: &a [1, 2]\ngit:\n  <<: *a\n",
-		"an alias to a scalar": "version: 1\na: &a 5\ngit:\n  <<: *a\n",
+		"an alias to a list":   "version: 2\na: &a [1, 2]\ngit:\n  <<: *a\n",
+		"an alias to a scalar": "version: 2\na: &a 5\ngit:\n  <<: *a\n",
 	} {
 		t.Run(name, func(t *testing.T) {
 			tree := files{"": {".github/crossrev.yml": document}}
@@ -556,16 +556,16 @@ func TestAMergeKeyNamingANonMappingRefusesTheFile(t *testing.T) {
 // the empty string.
 func TestAMappingKeyIsTheTextYqWrites(t *testing.T) {
 	for _, test := range []struct{ name, document, wants string }{
-		{"a tilde", "version: 1\nq:\n  ~: v\n", `"q":{"~":"v"}`},
-		{"the word null", "version: 1\nq:\n  null: v\n", `"q":{"null":"v"}`},
-		{"a list key", "version: 1\nq:\n  ? [a, b]\n  : v\n", `"q":{"":"v"}`},
-		{"a mapping key", "version: 1\nq:\n  ? {a: b}\n  : v\n", `"q":{"":"v"}`},
-		{"an integer", "version: 1\nq:\n  5: v\n", `"q":{"5":"v"}`},
-		{"a boolean", "version: 1\nq:\n  true: v\n", `"q":{"true":"v"}`},
-		{"an unresolved base", "version: 1\nq:\n  0x10: v\n", `"q":{"0x10":"v"}`},
-		{"an exponent", "version: 1\nq:\n  1e3: v\n", `"q":{"1e3":"v"}`},
-		{"a negative zero", "version: 1\nq:\n  -0: v\n", `"q":{"-0":"v"}`},
-		{"an alias key", "version: 1\na: &x 1\nq:\n  *x : v\n", `"q":{"1":"v"}`},
+		{"a tilde", "version: 2\nq:\n  ~: v\n", `"q":{"~":"v"}`},
+		{"the word null", "version: 2\nq:\n  null: v\n", `"q":{"null":"v"}`},
+		{"a list key", "version: 2\nq:\n  ? [a, b]\n  : v\n", `"q":{"":"v"}`},
+		{"a mapping key", "version: 2\nq:\n  ? {a: b}\n  : v\n", `"q":{"":"v"}`},
+		{"an integer", "version: 2\nq:\n  5: v\n", `"q":{"5":"v"}`},
+		{"a boolean", "version: 2\nq:\n  true: v\n", `"q":{"true":"v"}`},
+		{"an unresolved base", "version: 2\nq:\n  0x10: v\n", `"q":{"0x10":"v"}`},
+		{"an exponent", "version: 2\nq:\n  1e3: v\n", `"q":{"1e3":"v"}`},
+		{"a negative zero", "version: 2\nq:\n  -0: v\n", `"q":{"-0":"v"}`},
+		{"an alias key", "version: 2\na: &x 1\nq:\n  *x : v\n", `"q":{"1":"v"}`},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			loaded := mustLoad(t, core.Revision{}, files{"": {".github/crossrev.yml": test.document}})
@@ -591,7 +591,7 @@ func TestAWhitespaceOnlyDocumentStatesNoPolicy(t *testing.T) {
 		"spaces":                     "   \n",
 		"a carriage return":          "\r\n",
 		"a tab before a comment":     "\t# nothing\n",
-		"a tab above real content":   "\t\nversion: 1\n",
+		"a tab above real content":   "\t\nversion: 2\n",
 		"a blank above a comment":    "\t\n# nothing\n",
 		"a comment after a tab line": "\t# one\n# two\n",
 	} {
@@ -607,9 +607,9 @@ func TestAWhitespaceOnlyDocumentStatesNoPolicy(t *testing.T) {
 // A tab that reaches the parser is an error on both sides.
 func TestATabInContentStillRefusesTheFile(t *testing.T) {
 	for name, document := range map[string]string{
-		"a tab indenting a value":       "version: 1\ngit:\n\thooks: run\n",
-		"a tab line below content":      "version: 1\n\t\n",
-		"a tab under a leading comment": "# c\n\tversion: 1\n",
+		"a tab indenting a value":       "version: 2\ngit:\n\thooks: run\n",
+		"a tab line below content":      "version: 2\n\t\n",
+		"a tab under a leading comment": "# c\n\tversion: 2\n",
 	} {
 		t.Run(name, func(t *testing.T) {
 			tree := files{"": {".github/crossrev.yml": document}}
@@ -639,7 +639,7 @@ func TestAMultiDocumentFileIsNotAMapping(t *testing.T) {
 		})
 	}
 	// One document with a leading marker is still one document.
-	loaded := mustLoad(t, core.Revision{}, files{"": {".github/crossrev.yml": "---\nversion: 1\nmode: automated\n"}})
+	loaded := mustLoad(t, core.Revision{}, files{"": {".github/crossrev.yml": "---\nversion: 2\nmode: automated\n"}})
 	if got := loaded.Get(".mode"); got != "automated" {
 		t.Errorf("mode = %q, want the single document read", got)
 	}
@@ -694,7 +694,7 @@ func TestLeadingDocumentMarkersAreDroppedTheWayYqDropsThem(t *testing.T) {
 
 // A refusal quotes what `jq -r` writes, and `jq -r` pretty-prints a composite.
 func TestARefusalQuotesACompositeTheWayJqPrintsIt(t *testing.T) {
-	tree := files{"": {".github/crossrev.yml": "version: 1\npolicy:\n  min_fix_severity: [a, b]\n"}}
+	tree := files{"": {".github/crossrev.yml": "version: 2\npolicy:\n  min_fix_severity: [a, b]\n"}}
 	want := "policy.min_fix_severity is '[\n  \"a\",\n  \"b\"\n]', which is not one of high, medium or low"
 	if got := refusalFrom(t, core.Revision{}, tree).Message; got != want {
 		t.Errorf("message = %q, want %q", got, want)
@@ -784,7 +784,7 @@ func runRecursiveAnchorChild(t *testing.T, name string) {
 // has to close over the path through the document and not over the document, or
 // every shared anchor — the whole point of writing one — would be refused.
 func TestARepeatedAnchorIsNotACycle(t *testing.T) {
-	document := "version: 1\nd: &d\n  hooks: run\nq:\n  one: *d\n  two: *d\ngit:\n  <<: *d\n"
+	document := "version: 2\nd: &d\n  hooks: run\nq:\n  one: *d\n  two: *d\ngit:\n  <<: *d\n"
 	loaded := mustLoad(t, core.Revision{}, files{"": {".github/crossrev.yml": document}})
 	if got := string(loaded.GetJSON(".q")); got != `{"one":{"hooks":"run"},"two":{"hooks":"run"}}` {
 		t.Errorf("the repeated anchor = %s", got)
@@ -803,14 +803,14 @@ func TestARepeatedAnchorIsNotACycle(t *testing.T) {
 // lib/config.sh:231, because `//` would report the legitimate default of false
 // as unset. Measured: the Bash names this value `[1,{"a":"b"}]`.
 func TestTheTranscriptSwitchIsQuotedCompact(t *testing.T) {
-	tree := files{"": {".github/crossrev.yml": "version: 1\nlogs:\n  keep_transcripts: [1, {a: b}]\n"}}
+	tree := files{"": {".github/crossrev.yml": "version: 2\nlogs:\n  keep_transcripts: [1, {a: b}]\n"}}
 	want := `logs.keep_transcripts is '[1,{"a":"b"}]', which is not true or false`
 	if got := refusalFrom(t, core.Revision{}, tree).Message; got != want {
 		t.Errorf("message = %q, want %q", got, want)
 	}
 	// The other five keys keep the pretty-printed form, so the two renderings
 	// cannot be collapsed into one.
-	pretty := files{"": {".github/crossrev.yml": "version: 1\ngit:\n  hooks: [1, {a: b}]\n"}}
+	pretty := files{"": {".github/crossrev.yml": "version: 2\ngit:\n  hooks: [1, {a: b}]\n"}}
 	wantPretty := "git.hooks is '[\n  1,\n  {\n    \"a\": \"b\"\n  }\n]', which is not one of skip or run"
 	if got := refusalFrom(t, core.Revision{}, pretty).Message; got != wantPretty {
 		t.Errorf("message = %q, want %q", got, wantPretty)
@@ -828,7 +828,7 @@ func TestTheTranscriptSwitchIsQuotedCompact(t *testing.T) {
 func TestAFloatWithMisplacedUnderscoresRefusesTheFile(t *testing.T) {
 	for _, literal := range []string{"1e_3", "1_e3", "1.5_", "1.0_", "1e3_", "1.5__", "1_0e3_"} {
 		t.Run(literal, func(t *testing.T) {
-			tree := files{"": {".github/crossrev.yml": "version: 1\nx: " + literal + "\n"}}
+			tree := files{"": {".github/crossrev.yml": "version: 2\nx: " + literal + "\n"}}
 			if got := refusalFrom(t, core.Revision{}, tree).Message; got != "could not parse .github/crossrev.yml" {
 				t.Errorf("message = %q, want the file refused as unparsable", got)
 			}
@@ -836,7 +836,7 @@ func TestAFloatWithMisplacedUnderscoresRefusesTheFile(t *testing.T) {
 	}
 	// The refusal a misplaced underscore used to produce, on the key that made
 	// it visible: yq will not read this file, so nothing reaches the assertion.
-	tree := files{"": {".github/crossrev.yml": "version: 1\nlogs:\n  retention_days: 1.0_\n"}}
+	tree := files{"": {".github/crossrev.yml": "version: 2\nlogs:\n  retention_days: 1.0_\n"}}
 	if got := refusalFrom(t, core.Revision{}, tree).Message; got != "could not parse .github/crossrev.yml" {
 		t.Errorf("message = %q, want the parse refusal rather than the value refusal", got)
 	}
@@ -848,7 +848,7 @@ func TestAFloatWithMisplacedUnderscoresRefusesTheFile(t *testing.T) {
 		{"1.0_0", "1.0"},
 	} {
 		t.Run(test.literal, func(t *testing.T) {
-			tree := files{"": {".github/crossrev.yml": "version: 1\nx: " + test.literal + "\n"}}
+			tree := files{"": {".github/crossrev.yml": "version: 2\nx: " + test.literal + "\n"}}
 			loaded := mustLoad(t, core.Revision{}, tree)
 			if got := string(loaded.GetJSON(".x")); got != test.want {
 				t.Errorf("x = %s, want %s", got, test.want)
@@ -918,7 +918,7 @@ func TestARepeatedKeyBesideAMergeKeyTakesItsLastPosition(t *testing.T) {
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			tree := files{"": {".github/crossrev.yml": "version: 1\n" + test.document}}
+			tree := files{"": {".github/crossrev.yml": "version: 2\n" + test.document}}
 			loaded := mustLoad(t, core.Revision{}, tree)
 			if got := string(loaded.GetJSON(test.path)); got != test.want {
 				t.Errorf("%s = %s, want %s", test.path, got, test.want)

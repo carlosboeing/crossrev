@@ -51,7 +51,7 @@ func TestWriteConfigMatchesTheShell(t *testing.T) {
 		{
 			name:     "github-issues.yml",
 			resolved: "github_issues",
-			body: `version: 1
+			body: `version: 2
 reviewer:
   harness: claude
   model: reviewer-model
@@ -62,7 +62,7 @@ resolver:
 		{
 			name:     "repository-folder.yml",
 			resolved: "repository folder backlog/findings",
-			body: `version: 1
+			body: `version: 2
 reviewer:
   harness: codex
   effort: high
@@ -74,7 +74,7 @@ resolver:
 		{
 			name:     "none-destination.yml",
 			resolved: "none",
-			body: `version: 1
+			body: `version: 2
 reviewer:
   harness: opencode
   model: anthropic/claude-fable-5
@@ -84,7 +84,7 @@ resolver:
 		{
 			name:     "endpoint-leg.yml",
 			resolved: "repository file .crossrev/backlog.md",
-			body: `version: 1
+			body: `version: 2
 reviewer:
   harness: claude
   endpoint: kimi
@@ -104,7 +104,7 @@ endpoints:
 			// it falls through to none (lib/init.sh:877-883).
 			name:     "unresolvable.yml",
 			resolved: "repository",
-			body: `version: 1
+			body: `version: 2
 reviewer:
   harness: claude
 resolver:
@@ -126,7 +126,7 @@ resolver:
 // file naming a different one leaves the repository provisioned for a leg that
 // never runs (lib/init.sh:897-927, tests/test-init.sh:298-325).
 func TestWriteConfigStatesThePairingItProvisionedFor(t *testing.T) {
-	plan := initcmd.Plan{BacklogResolved: "github_issues", Config: configFrom(t, `version: 1
+	plan := initcmd.Plan{BacklogResolved: "github_issues", Config: configFrom(t, `version: 2
 reviewer:
   harness: codex
 resolver:
@@ -234,7 +234,7 @@ func TestWriteConfigQuotesAValueTheWayYqDoes(t *testing.T) {
 		{"!!str x", `'!!str x'`},
 	} {
 		t.Run(row.value, func(t *testing.T) {
-			plan := initcmd.Plan{BacklogResolved: "none", Config: configFrom(t, "version: 1\nreviewer:\n  harness: claude\n  model: \""+yamlEscape(row.value)+"\"\n")}
+			plan := initcmd.Plan{BacklogResolved: "none", Config: configFrom(t, "version: 2\nreviewer:\n  harness: claude\n  model: \""+yamlEscape(row.value)+"\"\n")}
 			written := plan.WriteConfig(initcmd.PolicyTemplate())
 			want := "\n  model: " + row.want + "\n"
 			if !strings.Contains(string(written), want) {
@@ -255,13 +255,13 @@ func yamlEscape(value string) string {
 // template carries every block init writes into, so this is the arm no fixture
 // reaches. yq creates the missing mappings on the way down.
 func TestWriteConfigCreatesAMappingThePathNeedsAndDoesNotHave(t *testing.T) {
-	template := []byte("version: 1\nreviewer:\n  harness: claude\n")
-	plan := initcmd.Plan{BacklogResolved: "repository folder notes/x", Config: configFrom(t, `version: 1
+	template := []byte("version: 2\nreviewer:\n  harness: claude\n")
+	plan := initcmd.Plan{BacklogResolved: "repository folder notes/x", Config: configFrom(t, `version: 2
 reviewer:
   harness: claude
 resolver:
   harness: codex`)}
-	want := "version: 1\n" +
+	want := "version: 2\n" +
 		"reviewer:\n" +
 		"  harness: claude\n" +
 		"backlog:\n" +
@@ -331,7 +331,7 @@ func TestWriteConfigKeepsABacklogPathWhoseSpacesAreInIt(t *testing.T) {
 		},
 	} {
 		t.Run(row.name, func(t *testing.T) {
-			plan := initcmd.Plan{BacklogResolved: row.resolved, Config: configFrom(t, `version: 1
+			plan := initcmd.Plan{BacklogResolved: row.resolved, Config: configFrom(t, `version: 2
 reviewer:
   harness: claude
 resolver:
@@ -364,7 +364,7 @@ resolver:
 //	      del(.reviewer.model) | del(.reviewer.effort) | del(.reviewer.endpoint) |
 //	      .resolver.harness = "claude" | del(.resolver.model) |
 //	      del(.resolver.effort) | del(.resolver.endpoint)' min.yml
-//	version: 1
+//	version: 2
 //	backlog:
 //	  destination: none
 //	reviewer:
@@ -372,19 +372,19 @@ resolver:
 //	resolver:
 //	  harness: claude
 func TestWriteConfigWritesTheLegsInTheShellsOrder(t *testing.T) {
-	plan := initcmd.Plan{BacklogResolved: "none", Config: configFrom(t, `version: 1
+	plan := initcmd.Plan{BacklogResolved: "none", Config: configFrom(t, `version: 2
 reviewer:
   harness: codex
 resolver:
   harness: claude`)}
-	want := "version: 1\n" +
+	want := "version: 2\n" +
 		"backlog:\n" +
 		"  destination: none\n" +
 		"reviewer:\n" +
 		"  harness: codex\n" +
 		"resolver:\n" +
 		"  harness: claude\n"
-	if got := string(plan.WriteConfig([]byte("version: 1\n"))); got != want {
+	if got := string(plan.WriteConfig([]byte("version: 2\n"))); got != want {
 		t.Errorf("got\n%q\nwant\n%q", got, want)
 	}
 }
@@ -393,7 +393,7 @@ resolver:
 // binary's own copy, and a caller that wrote through them would change what
 // every later run renders.
 func TestWriteConfigLeavesTheEmbeddedTemplateAlone(t *testing.T) {
-	plan := initcmd.Plan{BacklogResolved: "github_issues", Config: configFrom(t, "version: 1\nreviewer:\n  harness: codex\n")}
+	plan := initcmd.Plan{BacklogResolved: "github_issues", Config: configFrom(t, "version: 2\nreviewer:\n  harness: codex\n")}
 	template := initcmd.PolicyTemplate()
 	before := string(template)
 	plan.WriteConfig(template)

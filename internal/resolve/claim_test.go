@@ -189,7 +189,7 @@ func TestNewClaimParityKeys(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshalling: %v", err)
 	}
-	const want = `{"v":1,"leg":"resolve","pass":1,"state":"started","ts":1700000000,"done_ts":null,"run_id":"run-1","head_sha":"abcdef0","harness":"claude","model":null,"effort":null,"endpoint":null,"model_reported":null,"tokens":null,"usage":null,"billing":null,"blocked":false,"blocked_reason":null,"commit_sha":null,"commit_subject":null,"summary":"","resolutions":[]}`
+	const want = `{"v":2,"leg":"resolve","pass":1,"state":"started","ts":1700000000,"done_ts":null,"run_id":"run-1","head_sha":"abcdef0","harness":"claude","model":null,"effort":null,"endpoint":null,"model_reported":null,"tokens":null,"usage":null,"billing":null,"blocked":false,"blocked_reason":null,"commit_sha":null,"commit_subject":null,"summary":"","resolutions":[]}`
 	if string(raw) != want {
 		t.Errorf("marshalled\n got %s\nwant %s", string(raw), want)
 	}
@@ -226,7 +226,7 @@ func TestResetRedriveParityKeys(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshalling: %v", err)
 	}
-	const want = `{"v":1,"leg":"resolve","pass":1,"state":"started","ts":1700000100,"done_ts":null,"run_id":"run-2","head_sha":"abcdef0","harness":"claude","model":null,"effort":null,"endpoint":null,"model_reported":null,"tokens":null,"usage":null,"billing":null,"blocked":false,"blocked_reason":null,"commit_sha":null,"commit_subject":null,"summary":"","resolutions":[]}`
+	const want = `{"v":2,"leg":"resolve","pass":1,"state":"started","ts":1700000100,"done_ts":null,"run_id":"run-2","head_sha":"abcdef0","harness":"claude","model":null,"effort":null,"endpoint":null,"model_reported":null,"tokens":null,"usage":null,"billing":null,"blocked":false,"blocked_reason":null,"commit_sha":null,"commit_subject":null,"summary":"","resolutions":[]}`
 	if string(raw) != want {
 		t.Errorf("marshalled\n got %s\nwant %s", string(raw), want)
 	}

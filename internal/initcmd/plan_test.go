@@ -32,7 +32,7 @@ func resolved(t *testing.T, req initcmd.Request) initcmd.Plan {
 }
 
 func TestPrintPlanForAUserOwnedRepository(t *testing.T) {
-	configuration := `version: 1
+	configuration := `version: 2
 mode: automated
 policy:
   max_passes_per_cycle: 3
@@ -116,7 +116,7 @@ backlog:
 }
 
 func TestPrintPlanForAnOrganisationWithARefresher(t *testing.T) {
-	configuration := `version: 1
+	configuration := `version: 2
 mode: automated
 policy:
   max_passes_per_cycle: 2
@@ -228,7 +228,7 @@ func TestPrintSaysOverwritesNoneRatherThanLeavingTheRowBlank(t *testing.T) {
 }
 
 func TestPrintLabelInventoryStatesTheChangeItWouldMake(t *testing.T) {
-	configuration := `version: 1
+	configuration := `version: 2
 policy:
   max_passes_per_cycle: 1
 reviewer:
@@ -327,7 +327,7 @@ func TestPrintSecretNote(t *testing.T) {
 			// The whole pairing, so every note in the table is
 			// reached through the plan rather than through a helper
 			// that was handed the secret name directly.
-			configuration := `version: 1
+			configuration := `version: 2
 reviewer:
   harness: codex
 resolver:

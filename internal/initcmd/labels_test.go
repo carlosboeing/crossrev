@@ -49,7 +49,7 @@ func (f *fakeLabels) LabelEnsure(_ context.Context, repo core.Slug, label forge.
 
 // issueSinkConfig is tests/test-init.sh's config_with_issue_sink, byte for
 // byte, so the label counts here are the ones that suite measures.
-const issueSinkConfig = `version: 1
+const issueSinkConfig = `version: 2
 mode: automated
 policy:
   min_fix_severity: medium

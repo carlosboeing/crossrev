@@ -7,7 +7,11 @@ Two files, at two layers. Policy is repository-specific and belongs in the repos
 | `.github/crossrev.yml` | Repository policy: mode, runner, caps, the pairing, the backlog | Yes |
 | `~/.config/crossrev/config.yml` | Endpoints that only exist on your machine | Never |
 
-`.crossrev.yml` at the repository root works too, and is checked second. Both files are YAML and both carry `version: 1`. A `version` key present and not `1` is a refusal rather than a warning — the whole point of the key is that a future shape can be rejected by an old binary.
+`.crossrev.yml` at the repository root works too, and is checked second. Both files are YAML and both carry `version: 2`. A `version` key present and not `2` is a refusal rather than a warning — the whole point of the key is that a future shape can be rejected by an old binary.
+
+Repository files declare `version: 2`.
+
+A file that still declares `version: 1` is refused. It names the current version as the fix.
 
 `crossrev config show` prints the merged result.
 
@@ -20,10 +24,12 @@ Two files, at two layers. Policy is repository-specific and belongs in the repos
 ### mode and runner
 
 ```yaml
-version: 1
+version: 2
 mode: automated             # automated | local — who may write trusted state
 runner: github-hosted       # github-hosted | self-hosted
 ```
+
+Run `crossrev init --upgrade` to re-render workflows. It leaves the policy file alone, so change the version line by hand.
 
 `mode` decides whose markers CrossRev trusts. In `automated` mode it reads markers from the GitHub App and nothing else, because a forged marker there makes an *agent* act — push a commit, skip a finding, believe a leg finished. In `local` mode the trusted author is you, the invoking user, and a forged marker can only mislead you about work you asked for.
 
@@ -178,7 +184,7 @@ Set to `false` to permanently silence the suggestion that a repository already r
 `~/.config/crossrev/config.yml` never leaves your machine and is never committed. It holds what's true *here* and false everywhere else.
 
 ```yaml
-version: 1
+version: 2
 
 endpoints:
   kimi:

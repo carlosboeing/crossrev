@@ -26,7 +26,7 @@ func doctorChecker(t *testing.T, r *recorder, look func(string) (string, error),
 	return c, &buf
 }
 
-const defaultPairing = "version: \"1\"\nrunner: github-hosted\nreviewer:\n  harness: codex\nresolver:\n  harness: claude\n"
+const defaultPairing = "version: \"2\"\nrunner: github-hosted\nreviewer:\n  harness: codex\nresolver:\n  harness: claude\n"
 
 // The whole assembled report of `crossrev doctor` on a machine where everything
 // is installed and configured (bin/crossrev:162-179).
@@ -112,7 +112,7 @@ func TestDoctorFailsOnAnUnservablePairing(t *testing.T) {
 	r.answer("gh api user --jq .login", "carlosboeing\n", 0)
 	r.answer("agy --version", "1.1.23\n", 0)
 	c, buf := doctorChecker(t, r, onPath("git", "gh", "jq", "yq", "openssl", "agy"),
-		"version: \"1\"\nrunner: github-hosted\nreviewer:\n  harness: agy\nresolver:\n  harness: claude\n")
+		"version: \"2\"\nrunner: github-hosted\nreviewer:\n  harness: agy\nresolver:\n  harness: claude\n")
 	t.Setenv("XDG_STATE_HOME", state)
 	if err := os.MkdirAll(filepath.Join(state, "crossrev", "worktrees", "acme-widget", "pr-9"), 0o755); err != nil {
 		t.Fatal(err)
@@ -166,7 +166,7 @@ func TestDoctorReportsPairingsAgainstTheConfiguredRunner(t *testing.T) {
 	r.answer("gh api user --jq .login", "carlosboeing\n", 0)
 	r.answer("agy --version", "1.1.23\n", 0)
 	c, buf := doctorChecker(t, r, onPath("git", "gh", "jq", "yq", "openssl", "agy"),
-		"version: \"1\"\nrunner: self-hosted\nreviewer:\n  harness: agy\nresolver:\n  harness: claude\n")
+		"version: \"2\"\nrunner: self-hosted\nreviewer:\n  harness: agy\nresolver:\n  harness: claude\n")
 
 	if code := c.Doctor(context.Background()); code != 0 {
 		t.Errorf("Doctor = %d, want 0", code)

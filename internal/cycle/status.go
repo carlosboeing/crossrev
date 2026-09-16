@@ -197,11 +197,16 @@ func (s *Status) Load(ctx context.Context, repo core.Slug, pr int) (Report, erro
 	}
 
 	maxPasses, _ := strconv.Atoi(cfg.Get(".policy.max_passes_per_cycle"))
+	comments := s.Forge.IssueComments(ctx, repo, pr)
 	in := statusInput{
 		repo:      repo,
 		pr:        pr,
 		labels:    statusLabelNames(pull.Labels),
-		markers:   statusMarkers(s.Forge.IssueComments(ctx, repo, pr), author),
+		markers:   statusMarkers(comments, author),
+		coverage:  statusCoverageComments(comments),
+		author:    author,
+		base:      pull.BaseRefOid,
+		head:      pull.HeadRefOid,
 		headSHA:   pull.HeadRefOid.SHA(),
 		draft:     pull.IsDraft,
 		minFix:    core.Severity(cfg.Get(".policy.min_fix_severity")),
@@ -251,12 +256,103 @@ type statusInput struct {
 	pr        int
 	labels    []string
 	markers   []prstate.Marker
+	coverage  []prstate.CoverageComment
+	author    string
+	base      core.Revision
+	head      core.Revision
 	headSHA   string
 	draft     bool
 	minFix    core.Severity
 	maxPasses int
 	now       time.Time
 	liveness  Liveness
+}
+
+// statusReviewConverges reports whether one complete converged review marker
+// underwrites a green report at the current head: the marker's own half
+// (complete, no stop, coverage promise kept), the head it was written at,
+// any repair confirmation pair it carries, and the coverage ledger the
+// promise references.
+func statusReviewConverges(in statusInput, review prstate.Marker) bool {
+	if !prstate.MarkerConverges(review) {
+		return false
+	}
+	if !prstate.MarkerHeadCurrent(review, in.headSHA) {
+		return false
+	}
+	if !prstate.ConfirmationSettled(review, in.headSHA) {
+		return false
+	}
+	return statusCoverageConverges(in, review)
+}
+
+// statusCoverageConverges reports whether the coverage ledger underwrites
+// the converged marker's promise: the current complete generation at the
+// exact base, head and engine, selected from the trusted author's comments,
+// must satisfy the one convergence predicate. The manifest id on the marker
+// is a reference, not evidence — a ledger that no longer holds a current
+// complete generation (removed, written for another revision, or carrying
+// records the predicate refuses) cannot report green on the marker alone. A
+// v1 marker predates the coverage obligation and is grandfathered.
+func statusCoverageConverges(in statusInput, review prstate.Marker) bool {
+	if _, ok := review.CoverageManifestID.Get(); !ok {
+		return true
+	}
+	generation, err := prstate.SelectGeneration(in.coverage, in.author,
+		core.RevisionPair{Base: in.base, Head: in.head}, core.FileEngineVersion)
+	if err != nil {
+		return false
+	}
+	conv := policy.Convergence{
+		LedgerCurrent: true,
+		Required:      len(generation.Records),
+		ScopeReported: generation.ScopeReport.ExaminedScope != "",
+	}
+	for _, record := range generation.Records {
+		switch record.Type {
+		case prstate.CoverageRecordOutstanding:
+			conv.Outstanding++
+		case prstate.CoverageRecordUnit:
+			verdict, ok := record.Verdict.Get()
+			if !ok || verdict == "" {
+				conv.Outstanding++
+				continue
+			}
+			conv.Covered++
+			if verdict == string(core.FileVerdictCouldNotReview) {
+				conv.CouldNotReview++
+			}
+		}
+	}
+	return policy.Converged(conv)
+}
+
+// statusMarkersConverge reports whether the markers underwrite the converged
+// label: the current review pass converges by the marker rule and any
+// completed resolve settle at the same pass agrees by its own label rule at
+// the current head.
+func statusMarkersConverge(in statusInput) bool {
+	pass := prstate.CurrentReviewPass(in.markers)
+	if pass == 0 {
+		return false
+	}
+	review, ok := prstate.MarkerFor(in.markers, pass, core.LegReview)
+	if !ok || core.Verdict(review.Verdict.Value()) != core.VerdictConverged {
+		return false
+	}
+	if !statusReviewConverges(in, review) {
+		return false
+	}
+	resolve, hasResolve := prstate.MarkerFor(in.markers, pass, core.LegResolve)
+	if hasResolve && resolve.State == core.PassComplete {
+		if policy.ResolvePassLabel(statusResolveMarker(resolve), statusMarkersEscalated(in.markers)) != policy.PassConverged {
+			return false
+		}
+		if !prstate.MarkerHeadCurrent(resolve, in.headSHA) {
+			return false
+		}
+	}
+	return true
 }
 
 // statusColour is the header colour for a state word (lib/run.sh:3061-3066).
@@ -288,7 +384,14 @@ func statusState(in statusInput) core.LoopState {
 	case statusHasLabel(in.labels, policy.LabelHalted):
 		return core.LoopHalted
 	case statusHasLabel(in.labels, policy.LabelConverged):
-		return core.LoopConverged
+		// A converged label is honoured only when the markers underwrite
+		// it at the current head: a stale label from an earlier revision,
+		// a halted pass, or coverage never recorded must never report
+		// green. Otherwise the markers' own answer stands.
+		if statusMarkersConverge(in) {
+			return core.LoopConverged
+		}
+		return statusStateFromMarkers(in)
 	case statusHasLabel(in.labels, policy.LabelAwaitingResolution):
 		return core.LoopAwaitingResolution
 	case statusHasLabel(in.labels, policy.LabelAwaitingReview):
@@ -326,7 +429,13 @@ func statusStateFromMarkers(in statusInput) core.LoopState {
 	}
 	switch core.Verdict(review.Verdict.Value()) {
 	case core.VerdictConverged:
-		return core.LoopConverged
+		// A converged verdict reports green only with the marker's own
+		// half met at the current head; otherwise the pass is owed work,
+		// not a celebration.
+		if statusReviewConverges(in, review) {
+			return core.LoopConverged
+		}
+		return core.LoopAwaitingReview
 	case core.VerdictBlocked:
 		return core.LoopHalted
 	}
@@ -352,7 +461,17 @@ func statusStateFromMarkers(in statusInput) core.LoopState {
 	case policy.PassHalted:
 		return core.LoopHalted
 	case policy.PassConverged:
-		return core.LoopConverged
+		// A no-commit settle reports green only with the review marker's
+		// coverage half met at the current head. A blocked review marker
+		// means the coverage obligation failed, so no settle built on it
+		// can be green either.
+		if review.Verdict.Value() == string(core.VerdictBlocked) {
+			return core.LoopAwaitingReview
+		}
+		if statusReviewConverges(in, review) {
+			return core.LoopConverged
+		}
+		return core.LoopAwaitingReview
 	default:
 		return core.LoopAwaitingReview
 	}
@@ -923,6 +1042,18 @@ func statusMarkers(comments []forge.IssueComment, author string) []prstate.Marke
 		lines = append(lines, string(raw))
 	}
 	return prstate.Markers([]byte(strings.Join(lines, "\n")))
+}
+
+// statusCoverageComments renders the conversation comments as the ledger
+// surface SelectGeneration reads. Coverage comments are conversation
+// comments, so the one list Load already fetched serves both, and the
+// selection — not this copy — decides which author is trusted.
+func statusCoverageComments(comments []forge.IssueComment) []prstate.CoverageComment {
+	out := make([]prstate.CoverageComment, 0, len(comments))
+	for _, c := range comments {
+		out = append(out, prstate.CoverageComment{ID: c.ID, Author: c.AuthorLogin, Body: c.Body})
+	}
+	return out
 }
 
 func statusLabelNames(labels []forge.Label) []string {

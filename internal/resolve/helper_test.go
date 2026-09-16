@@ -3,6 +3,7 @@ package resolve
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -301,6 +302,7 @@ type fakeForge struct {
 	slug           core.Slug
 	pr             forge.PullRequest
 	viewer         string
+	coverageLedger *resolveLedger
 	comments       []forge.IssueComment
 	reviewComments []forge.IssueComment
 	threads        []forge.ReviewThread
@@ -391,6 +393,11 @@ func (f *fakeForge) ReviewComments(context.Context, core.Slug, int) []forge.Issu
 func (f *fakeForge) RepoIssueComments(context.Context, core.Slug, time.Time, int) ([]forge.IssueComment, error) {
 	return nil, nil
 }
+
+type resolveLedger struct {
+	comments []prstate.CoverageComment
+}
+
 func (f *fakeForge) ViewerLogin(context.Context) (string, error) { return f.viewer, nil }
 func (f *fakeForge) AwaitingPullRequests(context.Context, core.Slug) []forge.AwaitingPullRequest {
 	return nil
@@ -436,6 +443,40 @@ func (f *fakeForge) CommentEdit(_ context.Context, repo core.Slug, commentID int
 func (f *fakeForge) ReviewCommentCreate(context.Context, forge.ReviewComment) (forge.Placement, error) {
 	return forge.PlacementInline, nil
 }
+func (f *fakeForge) ReviewFileComment(context.Context, forge.ReviewComment) (forge.Placement, error) {
+	return forge.PlacementInline, nil
+}
+
+// coverageLedger, when set, serves the coverage ledger reads: the resolve
+// settle gate selects the current generation from it.
+func (f *fakeForge) CoverageComments(context.Context, core.Slug, int) ([]prstate.CoverageComment, error) {
+	// No ledger in the fixture means no coverage comment exists yet, the
+	// way a pre-coverage pull request reads: an empty list, not a failure.
+	// A list that cannot be read is a failure and stays one.
+	if f.coverageLedger == nil {
+		return nil, nil
+	}
+	return f.coverageLedger.comments, nil
+}
+
+func (f *fakeForge) CoverageComment(_ context.Context, _ core.Slug, commentID int64) (prstate.CoverageComment, error) {
+	if f.coverageLedger == nil {
+		return prstate.CoverageComment{}, errors.New("no coverage ledger in this fixture")
+	}
+	for _, c := range f.coverageLedger.comments {
+		if c.ID == commentID {
+			return c, nil
+		}
+	}
+	return prstate.CoverageComment{}, errors.New("no such coverage comment")
+}
+
+func (f *fakeForge) CreateCoverageComment(_ context.Context, _ core.Slug, _ int, _ string) (int64, error) {
+	return 0, errors.New("the resolve fixture never publishes coverage")
+}
+
+var _ prstate.LedgerStore = (*fakeForge)(nil)
+
 func (f *fakeForge) ReviewReply(_ context.Context, repo core.Slug, number int, rootCommentID int64, body string) error {
 	f.note("ReviewReply")
 	f.replies = append(f.replies, reviewReply{Repo: repo, PR: number, RootCommentID: rootCommentID, Body: body})

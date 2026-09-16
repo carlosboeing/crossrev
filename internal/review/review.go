@@ -174,6 +174,39 @@ func (l *Leg) Run(ctx context.Context, req Request) (out Result) {
 		}
 		l.reportFatal(ctx, req, loaded, out.Marker, claimID, out.Err)
 	}()
+
+	// The coverage loop, after the claim exists and before any finding is
+	// published. Scope is built from the authoritative git history at the
+	// current base and head; the initial generation records every uncovered
+	// unit as outstanding, so a crash before the first accepted batch leaves
+	// the started claim and the same scope to rebuild from. A leg without a
+	// git reader or ledger store keeps the frozen single-prompt path below.
+	// A git failure enumerating the changed files fails closed instead: the
+	// frozen path carries no coverage obligation, so falling through to it
+	// would review and converge with no required set at all.
+	scope, scopeErr := l.buildScope(ctx, loaded.PR.BaseRefOid, loaded.PR.HeadRefOid, scopeExclusions(loaded.Backlog.Path))
+	if scopeErr != nil && !errors.Is(scopeErr, errNoScopeReader{}) {
+		out.Outcome = OutcomeError
+		out.Err = scopeErr
+		return out
+	}
+	if scopeErr == nil && ledgerStoreFor(l) != nil && len(scope.Required) > 0 {
+		loaded.Scope = &scope
+		if covErr := l.runCoverage(ctx, req, loaded, settings, ad.pass, claimID, scope, &out); covErr != nil {
+			out.Outcome = OutcomeError
+			out.Err = covErr
+			return out
+		}
+		if out.Outcome == OutcomeHalted {
+			return out
+		}
+		if covered, ok := out.Covered.(coveredPass); ok {
+			out.Covered = nil
+			result, state := l.finishCoveredRun(ctx, req, loaded, settings, ad, cap, claimID, out.Marker, covered, &out)
+			settled = state.settled
+			return result
+		}
+	}
 	if ad.recovering && !ad.redrive {
 		// ui_say (lib/run.sh:1098).
 		out.Messages = append(out.Messages, ui.Say(resumeMessage(ad.pass, marker.Findings)))
@@ -261,6 +294,74 @@ func (l *Leg) Run(ctx context.Context, req Request) (out Result) {
 		l.Log.ClearTranscripts("")
 	}
 	out.Outcome = OutcomeInvoked
+	return out
+}
+
+// finishCoveredRun folds a fully covered batch pass into the frozen
+// enrich-and-publish path: the batch findings are enriched, anchored and
+// published exactly as a single-prompt pass's findings are. The
+// confirmation pair is already on the marker, where the publish path's
+// convergence check reads it.
+func (l *Leg) finishCoveredRun(ctx context.Context, req Request, loaded Context, settings legSettings, ad admission, cap int, claimID int64, marker prstate.Marker, covered coveredPass, out *Result) (result Result, state publishState) {
+	out.Marker = marker
+	if covered.envelope != nil {
+		out.Envelope = covered.envelope
+	}
+	out.Payload = covered.payload
+	marker.Verdict = prstate.Some(covered.verdict)
+	marker.BlockedReason = prstate.Null[string]()
+	if covered.envelope != nil {
+		if covered.envelope.ModelReported != nil && *covered.envelope.ModelReported != "" {
+			marker.ModelReported = prstate.Some(*covered.envelope.ModelReported)
+		} else {
+			marker.ModelReported = prstate.Null[string]()
+		}
+		if covered.envelope.EffortReported != nil && *covered.envelope.EffortReported != "" {
+			marker.EffortReported = prstate.Some(*covered.envelope.EffortReported)
+		} else {
+			marker.EffortReported = prstate.Null[string]()
+		}
+		l.attachUsage(&marker, *covered.envelope, settings)
+	}
+	workdir := req.Workdir
+	diffBytes, _ := l.reviewDiff(ctx, loaded)
+	enriched, snaps, err := enrichFindingsInScope(covered.payload, diffBytes, workdir, requiredPaths(loaded))
+	if err == nil {
+		marker.Findings = enriched
+	}
+	out.Messages = append(out.Messages, ui.SayLines(snaps...)...)
+	out.Marker = marker
+	published, pubMsgs, state, err := l.publish(ctx, req, loaded, settings, ad.pass, claimID, marker)
+	out.Messages = append(out.Messages, pubMsgs...)
+	out.Marker = published
+	out.Nudge = state.nudge
+	if err != nil {
+		out.Outcome = OutcomeError
+		out.Err = err
+		return *out, state
+	}
+	// log_transcripts_clear, at the end of leg_review and nowhere earlier
+	// (lib/run.sh:1332). A failed leg keeps them: they are the reason the
+	// files exist.
+	if l.Log != nil {
+		l.Log.ClearTranscripts("")
+	}
+	out.Outcome = OutcomeInvoked
+	return *out, state
+}
+
+// requiredPaths reads the current required paths off the loaded scope for
+// anchor decisions: a finding on one of these paths with no valid hunk line
+// is file-level; anywhere else is outside the diff. Nil scope means the
+// frozen path, where the diff alone decides.
+func requiredPaths(loaded Context) map[string]bool {
+	if loaded.Scope == nil {
+		return nil
+	}
+	out := make(map[string]bool, len(loaded.Scope.Required))
+	for _, unit := range loaded.Scope.Required {
+		out[unit.Path] = true
+	}
 	return out
 }
 

@@ -124,7 +124,7 @@ func (a answers) Open() (io.ReadCloser, error) {
 // hostedPairing is tests/test-runner.sh's config_for, with the backlog off so
 // the secrets section is what a test is looking at.
 func hostedPairing(reviewer, resolver string) string {
-	return `version: 1
+	return `version: 2
 mode: automated
 policy:
   min_fix_severity: medium

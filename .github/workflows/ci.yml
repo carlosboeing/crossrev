@@ -10,9 +10,12 @@
 # green lint that never linted anything. The check below fails instead.
 name: CI
 
+# An unfiltered push runs CI on every pushed branch at the pushed commit,
+# while pull_request keeps testing the merge revision. A branch push with an
+# open pull request therefore starts two runs by design; their github.ref
+# values differ, so the concurrency group below does not combine them.
 on:
   push:
-    branches: [main]
   pull_request:
 
 permissions:

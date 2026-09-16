@@ -106,7 +106,7 @@ func TestAnInterruptedReviewLegLeavesTheClaimResumable(t *testing.T) {
 func TestASettledReviewLegIsNotRewrittenWhenALaterStepFails(t *testing.T) {
 	e := newEnv(t)
 	writeAppGo(t, e.dir)
-	e.cfg = mustConfig(t, "version: 1\nmode: automated\n")
+	e.cfg = mustConfig(t, "version: 2\nmode: automated\n")
 	t.Setenv("CROSSREV_APP_SLUG", "crossrev")
 	e.runner.script = []exec.Result{{ExitCode: 0, Stdout: claudeStdout(issuesPayload(twoFindings))}}
 	e.forge.labelAddErr = errors.New("no")
@@ -125,6 +125,37 @@ func TestASettledReviewLegIsNotRewrittenWhenALaterStepFails(t *testing.T) {
 	}
 	if strings.Contains(string(raw), `"verdict":"blocked"`) {
 		t.Errorf("a settled leg was rewritten as blocked by a later failure:\n%s", raw)
+	}
+	if !strings.Contains(string(raw), `"state":"complete"`) {
+		t.Errorf("the settled marker is not complete:\n%s", raw)
+	}
+}
+
+// A covered pass settles through the same publish tail as the frozen path:
+// once the complete edit lands, a later failure — here the loop label —
+// fails the leg without rewriting the accurate record as blocked.
+func TestASettledCoveredPassIsNotRewrittenWhenLabelsFail(t *testing.T) {
+	e := newEnv(t)
+	writeRequiredHead(e, "a.go", "package a\n")
+	e.cfg = mustConfig(t, "version: 2\nmode: automated\n")
+	t.Setenv("CROSSREV_APP_SLUG", "crossrev")
+	e.runner.script = []exec.Result{{ExitCode: 0, Stdout: claudeStdout(batchAnswerFor(t, []string{"a.go"}))}}
+	e.forge.labelAddErr = errors.New("no")
+
+	got := runLeg(t, e, e.request(t))
+	if got.Err == nil {
+		t.Fatal("a label that could not be applied did not fail a covered leg")
+	}
+	if len(e.forge.edits) == 0 {
+		t.Fatal("the claim was never edited")
+	}
+	last := e.forge.edits[len(e.forge.edits)-1]
+	raw, ok := prstate.DecodeMarker(last)
+	if !ok {
+		t.Fatalf("no marker in the last body:\n%s", last)
+	}
+	if strings.Contains(string(raw), `"verdict":"blocked"`) {
+		t.Errorf("a settled covered pass was rewritten as blocked by a later failure:\n%s", raw)
 	}
 	if !strings.Contains(string(raw), `"state":"complete"`) {
 		t.Errorf("the settled marker is not complete:\n%s", raw)

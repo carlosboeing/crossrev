@@ -43,8 +43,8 @@ func TestAutoFallsToNone(t *testing.T) {
 // of writing it.
 func TestAnEmptyDestinationResolvesTheWayAutoDoes(t *testing.T) {
 	for name, document := range map[string]string{
-		"a null destination":  "version: 1\nbacklog:\n  destination: null\n",
-		"a false destination": "version: 1\nbacklog:\n  destination: false\n",
+		"a null destination":  "version: 2\nbacklog:\n  destination: null\n",
+		"a false destination": "version: 2\nbacklog:\n  destination: false\n",
 	} {
 		t.Run(name, func(t *testing.T) {
 			tree := files{"": {"BACKLOG.md": ""}}
@@ -67,7 +67,7 @@ func TestAnEmptyDestinationResolvesTheWayAutoDoes(t *testing.T) {
 
 	// The arm that must not move with it: an explicit none is still none.
 	tree := files{"": {"BACKLOG.md": ""}}
-	if got := resolveBacklog(t, tree, "version: 1\nbacklog:\n  destination: none\n", core.Revision{}); got != "none" {
+	if got := resolveBacklog(t, tree, "version: 2\nbacklog:\n  destination: none\n", core.Revision{}); got != "none" {
 		t.Errorf("an explicit none resolved to %q", got)
 	}
 }
@@ -87,7 +87,7 @@ func TestTheSniffCountsAPathThatIsNotAFile(t *testing.T) {
 // revision — but a native implementation reads the filesystem and can.
 func TestASniffReadFailureNamesThePath(t *testing.T) {
 	tree := files{"": {
-		".github/crossrev.yml": "version: 1\n",
+		".github/crossrev.yml": "version: 2\n",
 		"backlog.config.yml":   readFails,
 	}}
 	_, err := mustLoad(t, core.Revision{}, tree).ResolveBacklog(context.Background(), core.Revision{}, "auto")
@@ -130,7 +130,7 @@ func TestTheSniffKeepsItsOrder(t *testing.T) {
 // A configured path wins outright (lib/config.sh:428-431).
 func TestAConfiguredPathWins(t *testing.T) {
 	tree := files{"": {"BACKLOG.md": ""}}
-	repo := "version: 1\nbacklog:\n  destination: repository\n  repository:\n    path: docs/deferred\n"
+	repo := "version: 2\nbacklog:\n  destination: repository\n  repository:\n    path: docs/deferred\n"
 	if got := resolveBacklog(t, tree, repo, core.Revision{}); got != "repository folder docs/deferred" {
 		t.Errorf("resolved to %q", got)
 	}
@@ -141,7 +141,7 @@ func TestAConfiguredPathWins(t *testing.T) {
 // neither key stated the sniff decides both.
 func TestAnExplicitRepositoryDestinationSniffsBothLayouts(t *testing.T) {
 	tree := files{"": {"BACKLOG.md": ""}}
-	repo := "version: 1\nbacklog:\n  destination: repository\n"
+	repo := "version: 2\nbacklog:\n  destination: repository\n"
 	if got := resolveBacklog(t, tree, repo, core.Revision{}); got != "repository file BACKLOG.md" {
 		t.Errorf("resolved to %q, want the sniffed file convention", got)
 	}
@@ -152,13 +152,13 @@ func TestAnExplicitRepositoryDestinationSniffsBothLayouts(t *testing.T) {
 // destination was explicitly asked for (lib/config.sh:495-500).
 func TestAStatedLayoutConstrainsTheSniff(t *testing.T) {
 	folder := files{"": {"BACKLOG.md": ""}}
-	repoFolder := "version: 1\nbacklog:\n  destination: repository\n  repository:\n    layout: folder\n"
+	repoFolder := "version: 2\nbacklog:\n  destination: repository\n  repository:\n    layout: folder\n"
 	if got := resolveBacklog(t, folder, repoFolder, core.Revision{}); got != "repository folder .crossrev/backlog" {
 		t.Errorf("an explicit folder layout resolved to %q", got)
 	}
 
 	file := files{"": {"backlog/config.yml": ""}}
-	repoFile := "version: 1\nbacklog:\n  destination: repository\n  repository:\n    layout: file\n"
+	repoFile := "version: 2\nbacklog:\n  destination: repository\n  repository:\n    layout: file\n"
 	if got := resolveBacklog(t, file, repoFile, core.Revision{}); got != "repository file .crossrev/backlog.md" {
 		t.Errorf("an explicit file layout resolved to %q", got)
 	}
@@ -167,11 +167,11 @@ func TestAStatedLayoutConstrainsTheSniff(t *testing.T) {
 // github_issues and none are answered without probing anything.
 func TestTheTwoLiteralDestinations(t *testing.T) {
 	tree := files{"": {"BACKLOG.md": ""}}
-	if got := resolveBacklog(t, tree, "version: 1\nbacklog:\n  destination: github_issues\n", core.Revision{}); got != "github_issues" {
+	if got := resolveBacklog(t, tree, "version: 2\nbacklog:\n  destination: github_issues\n", core.Revision{}); got != "github_issues" {
 		t.Errorf("resolved to %q", got)
 	}
 	tree = files{"": {"BACKLOG.md": ""}}
-	if got := resolveBacklog(t, tree, "version: 1\nbacklog:\n  destination: none\n", core.Revision{}); got != "none" {
+	if got := resolveBacklog(t, tree, "version: 2\nbacklog:\n  destination: none\n", core.Revision{}); got != "none" {
 		t.Errorf("resolved to %q", got)
 	}
 }

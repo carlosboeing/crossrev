@@ -87,7 +87,7 @@ func TestBaseRevisionEmptyConfigIsSilent(t *testing.T) {
 // reverted to a default with exit 0 and nothing printed.
 func TestBaseRevisionMalformedConfigRefusesByNameAndRevision(t *testing.T) {
 	base := revision(t, baseSHA)
-	broken := "version: 1\npolicy:\n  - this is not\n  a mapping: [unclosed\n"
+	broken := "version: 2\npolicy:\n  - this is not\n  a mapping: [unclosed\n"
 	refusal := refusalFrom(t, base, files{"": {}, baseSHA: {".github/crossrev.yml": broken}})
 
 	if want := "could not parse .github/crossrev.yml at base revision " + baseSHA; refusal.Message != want {
@@ -106,7 +106,7 @@ func TestBaseRevisionMalformedConfigRefusesByNameAndRevision(t *testing.T) {
 // A working-tree config that will not parse is refused with the working-tree
 // hint instead (lib/config.sh:43-46).
 func TestWorkingTreeMalformedConfigRefusesWithTheWorkingTreeHint(t *testing.T) {
-	broken := "version: 1\npolicy:\n  - this is not\n  a mapping: [unclosed\n"
+	broken := "version: 2\npolicy:\n  - this is not\n  a mapping: [unclosed\n"
 	refusal := refusalFrom(t, core.Revision{}, files{"": {".github/crossrev.yml": broken}})
 
 	if want := "could not parse .github/crossrev.yml"; refusal.Message != want {
@@ -120,8 +120,8 @@ func TestWorkingTreeMalformedConfigRefusesWithTheWorkingTreeHint(t *testing.T) {
 // `.github/crossrev.yml` beats `.crossrev.yml` (lib/config.sh:147-160).
 func TestGithubConfigBeatsDotCrossrev(t *testing.T) {
 	tree := files{"": {
-		".github/crossrev.yml": "version: 1\npolicy:\n  max_passes_per_cycle: 5\n",
-		".crossrev.yml":        "version: 1\npolicy:\n  max_passes_per_cycle: 9\n",
+		".github/crossrev.yml": "version: 2\npolicy:\n  max_passes_per_cycle: 5\n",
+		".crossrev.yml":        "version: 2\npolicy:\n  max_passes_per_cycle: 9\n",
 	}}
 	if got := mustLoad(t, core.Revision{}, tree).Get(".policy.max_passes_per_cycle"); got != "5" {
 		t.Errorf("max_passes_per_cycle = %q, want %q", got, "5")
@@ -129,8 +129,8 @@ func TestGithubConfigBeatsDotCrossrev(t *testing.T) {
 
 	base := revision(t, baseSHA)
 	atBase := files{"": {}, baseSHA: {
-		".github/crossrev.yml": "version: 1\npolicy:\n  max_passes_per_cycle: 5\n",
-		".crossrev.yml":        "version: 1\npolicy:\n  max_passes_per_cycle: 9\n",
+		".github/crossrev.yml": "version: 2\npolicy:\n  max_passes_per_cycle: 5\n",
+		".crossrev.yml":        "version: 2\npolicy:\n  max_passes_per_cycle: 9\n",
 	}}
 	if got := mustLoad(t, base, atBase).Get(".policy.max_passes_per_cycle"); got != "5" {
 		t.Errorf("at the base revision max_passes_per_cycle = %q, want %q", got, "5")
@@ -141,10 +141,10 @@ func TestGithubConfigBeatsDotCrossrev(t *testing.T) {
 // other file. Falling through would run the repository under a policy it did
 // not state.
 func TestBrokenGithubConfigIsNamedRatherThanSkipped(t *testing.T) {
-	broken := "version: 1\npolicy:\n  - this is not\n  a mapping: [unclosed\n"
+	broken := "version: 2\npolicy:\n  - this is not\n  a mapping: [unclosed\n"
 	tree := files{"": {
 		".github/crossrev.yml": broken,
-		".crossrev.yml":        "version: 1\npolicy:\n  max_passes_per_cycle: 9\n",
+		".crossrev.yml":        "version: 2\npolicy:\n  max_passes_per_cycle: 9\n",
 	}}
 	if got := refusalFrom(t, core.Revision{}, tree).Message; got != "could not parse .github/crossrev.yml" {
 		t.Errorf("message = %q, want the .github file named", got)
@@ -162,7 +162,7 @@ func TestOperatorConfigIsRefusedByItsOwnPath(t *testing.T) {
 	if got := config.OperatorPath(); got != operatorPath {
 		t.Fatalf("OperatorPath() = %q, want %q", got, operatorPath)
 	}
-	broken := "version: 1\npolicy:\n  - this is not\n  a mapping: [unclosed\n"
+	broken := "version: 2\npolicy:\n  - this is not\n  a mapping: [unclosed\n"
 	base := revision(t, baseSHA)
 	refusal := refusalFrom(t, base, files{"": {operatorPath: broken}, baseSHA: {}})
 
@@ -176,7 +176,7 @@ func TestOperatorConfigIsRefusedByItsOwnPath(t *testing.T) {
 func TestOperatorVersionMismatchIsRefusedByPath(t *testing.T) {
 	operatorPath := config.OperatorPath()
 	refusal := refusalFrom(t, core.Revision{}, files{"": {operatorPath: "version: 99\n"}})
-	if want := operatorPath + " declares version 99, and this crossrev understands version 1"; refusal.Message != want {
+	if want := operatorPath + " declares version 99, and this crossrev understands version 2"; refusal.Message != want {
 		t.Errorf("message = %q, want %q", refusal.Message, want)
 	}
 }
@@ -198,8 +198,8 @@ func TestOperatorPathFollowsXDGConfigHome(t *testing.T) {
 func TestPolicyIsReadFromTheBaseRevisionNotTheWorkingTree(t *testing.T) {
 	base := revision(t, baseSHA)
 	tree := files{
-		"":      {".github/crossrev.yml": "version: 1\npolicy:\n  max_passes_per_cycle: 99\n"},
-		baseSHA: {".github/crossrev.yml": "version: 1\npolicy:\n  max_passes_per_cycle: 7\n"},
+		"":      {".github/crossrev.yml": "version: 2\npolicy:\n  max_passes_per_cycle: 99\n"},
+		baseSHA: {".github/crossrev.yml": "version: 2\npolicy:\n  max_passes_per_cycle: 7\n"},
 	}
 	if got := mustLoad(t, base, tree).Get(".policy.max_passes_per_cycle"); got != "7" {
 		t.Errorf("max_passes_per_cycle = %q, want the base revision's %q", got, "7")
@@ -211,7 +211,7 @@ func TestOnlyTheNamedRevisionIsRead(t *testing.T) {
 	base := revision(t, baseSHA)
 	tree := files{
 		"":       {},
-		otherSHA: {".github/crossrev.yml": "version: 1\npolicy:\n  max_passes_per_cycle: 7\n"},
+		otherSHA: {".github/crossrev.yml": "version: 2\npolicy:\n  max_passes_per_cycle: 7\n"},
 		baseSHA:  {},
 	}
 	if got := mustLoad(t, base, tree).Get(".policy.max_passes_per_cycle"); got != "3" {
@@ -291,7 +291,7 @@ func TestANonMappingIsRefusedByTheNameOfTheFileThatHeldIt(t *testing.T) {
 func TestADirectoryAtTheFirstConfigPathFallsThroughToTheSecond(t *testing.T) {
 	tree := files{"": {
 		".github/crossrev.yml": isDirectory,
-		".crossrev.yml":        "version: 1\npolicy:\n  max_passes_per_cycle: 9\n",
+		".crossrev.yml":        "version: 2\npolicy:\n  max_passes_per_cycle: 9\n",
 	}}
 	if got := mustLoad(t, core.Revision{}, tree).Get(".policy.max_passes_per_cycle"); got != "9" {
 		t.Errorf("max_passes_per_cycle = %q, want the second file's %q", got, "9")
@@ -368,8 +368,8 @@ func TestANullDocumentStatesNoPolicy(t *testing.T) {
 func TestBothLayersAreKeptSeparately(t *testing.T) {
 	operatorPath := config.OperatorPath()
 	tree := files{"": {
-		".github/crossrev.yml": "version: 1\nmode: automated\n",
-		operatorPath:           "version: 1\nendpoints:\n  mine:\n    base_url: http://local/\n    token_env: TOKEN\n",
+		".github/crossrev.yml": "version: 2\nmode: automated\n",
+		operatorPath:           "version: 2\nendpoints:\n  mine:\n    base_url: http://local/\n    token_env: TOKEN\n",
 	}}
 	loaded := mustLoad(t, core.Revision{}, tree)
 
@@ -394,7 +394,7 @@ func TestATreeAtTheConfigPathIsRefusedAtTheBaseRevision(t *testing.T) {
 	base := revision(t, baseSHA)
 	tree := files{"": {}, baseSHA: {
 		".github/crossrev.yml": isDirectory,
-		".crossrev.yml":        "version: 1\nmode: automated\n",
+		".crossrev.yml":        "version: 2\nmode: automated\n",
 	}}
 	refusal := refusalFrom(t, base, tree)
 	want := ".github/crossrev.yml is not a mapping at base revision " + baseSHA
@@ -405,7 +405,7 @@ func TestATreeAtTheConfigPathIsRefusedAtTheBaseRevision(t *testing.T) {
 	// `[[ -f ]]`.
 	working := files{"": {
 		".github/crossrev.yml": isDirectory,
-		".crossrev.yml":        "version: 1\nmode: automated\n",
+		".crossrev.yml":        "version: 2\nmode: automated\n",
 	}}
 	if got := mustLoad(t, core.Revision{}, working).Get(".mode"); got != "automated" {
 		t.Errorf("mode = %q, want the fallback file read", got)

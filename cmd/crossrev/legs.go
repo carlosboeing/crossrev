@@ -15,6 +15,7 @@ import (
 	"github.com/carlosboeing/crossrev/internal/exec"
 	"github.com/carlosboeing/crossrev/internal/forge"
 	"github.com/carlosboeing/crossrev/internal/harness"
+	"github.com/carlosboeing/crossrev/internal/prstate"
 	"github.com/carlosboeing/crossrev/internal/resolve"
 	"github.com/carlosboeing/crossrev/internal/review"
 	"github.com/carlosboeing/crossrev/internal/runlog"
@@ -96,6 +97,21 @@ func openLog(repo core.Slug, pr int, retention string, keep bool, leg string) *r
 		Leg:             leg,
 	})
 	return log
+}
+
+// ledgerStore is the coverage ledger over the same orchestrator-facing
+// GitHub client every other read and write uses. The client already
+// implements prstate.LedgerStore, so this is a conversion and not a second
+// client: the ledger's `gh` calls inherit the allowlist and the runner the
+// boundary pins, and the store never reaches a model-facing process. The
+// review leg converts the same way per call (ledgerStoreFor); this stays
+// the tested composition-root conversion.
+func ledgerStore(client forge.Forge) prstate.LedgerStore {
+	store, ok := client.(prstate.LedgerStore)
+	if !ok {
+		return nil
+	}
+	return store
 }
 
 // reviewLeg builds the review orchestrator (leg_review, lib/run.sh:919).

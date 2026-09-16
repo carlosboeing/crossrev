@@ -17,20 +17,20 @@ func TestEveryRefusedValueFamilyNamesItsValue(t *testing.T) {
 		document string
 		wants    string
 	}{
-		{"a misspelt severity", "version: 1\npolicy:\n  min_fix_severity: medum\n", "policy.min_fix_severity is 'medum'"},
-		{"an unset severity", "version: 1\npolicy:\n  min_fix_severity: null\n", "policy.min_fix_severity is 'unset'"},
-		{"a zero pass bound", "version: 1\npolicy:\n  max_passes_per_cycle: 0\n", "policy.max_passes_per_cycle is '0'"},
-		{"an unset pass bound", "version: 1\npolicy:\n  max_passes_per_cycle: null\n", "policy.max_passes_per_cycle is 'unset'"},
-		{"a negative pass bound", "version: 1\npolicy:\n  max_passes_per_cycle: -1\n", "policy.max_passes_per_cycle is '-1'"},
-		{"a spelt-out pass bound", "version: 1\npolicy:\n  max_passes_per_cycle: three\n", "policy.max_passes_per_cycle is 'three'"},
-		{"a misspelt hooks switch", "version: 1\ngit:\n  hooks: skipp\n", "git.hooks is 'skipp'"},
-		{"a zero retention", "version: 1\nlogs:\n  retention_days: 0\n", "logs.retention_days is '0'"},
-		{"an unset retention", "version: 1\nlogs:\n  retention_days: null\n", "logs.retention_days is 'unset'"},
-		{"a spelt-out retention", "version: 1\nlogs:\n  retention_days: fortnight\n", "logs.retention_days is 'fortnight'"},
-		{"a non-boolean transcript switch", "version: 1\nlogs:\n  keep_transcripts: maybe\n", "logs.keep_transcripts is 'maybe'"},
-		{"a numeric transcript switch", "version: 1\nlogs:\n  keep_transcripts: 1\n", "logs.keep_transcripts is '1'"},
-		{"an unknown backlog destination", "version: 1\nbacklog:\n  destination: elsewhere\n", "backlog.destination is 'elsewhere'"},
-		{"an unknown backlog layout", "version: 1\nbacklog:\n  repository:\n    layout: flat\n", "backlog.repository.layout is 'flat'"},
+		{"a misspelt severity", "version: 2\npolicy:\n  min_fix_severity: medum\n", "policy.min_fix_severity is 'medum'"},
+		{"an unset severity", "version: 2\npolicy:\n  min_fix_severity: null\n", "policy.min_fix_severity is 'unset'"},
+		{"a zero pass bound", "version: 2\npolicy:\n  max_passes_per_cycle: 0\n", "policy.max_passes_per_cycle is '0'"},
+		{"an unset pass bound", "version: 2\npolicy:\n  max_passes_per_cycle: null\n", "policy.max_passes_per_cycle is 'unset'"},
+		{"a negative pass bound", "version: 2\npolicy:\n  max_passes_per_cycle: -1\n", "policy.max_passes_per_cycle is '-1'"},
+		{"a spelt-out pass bound", "version: 2\npolicy:\n  max_passes_per_cycle: three\n", "policy.max_passes_per_cycle is 'three'"},
+		{"a misspelt hooks switch", "version: 2\ngit:\n  hooks: skipp\n", "git.hooks is 'skipp'"},
+		{"a zero retention", "version: 2\nlogs:\n  retention_days: 0\n", "logs.retention_days is '0'"},
+		{"an unset retention", "version: 2\nlogs:\n  retention_days: null\n", "logs.retention_days is 'unset'"},
+		{"a spelt-out retention", "version: 2\nlogs:\n  retention_days: fortnight\n", "logs.retention_days is 'fortnight'"},
+		{"a non-boolean transcript switch", "version: 2\nlogs:\n  keep_transcripts: maybe\n", "logs.keep_transcripts is 'maybe'"},
+		{"a numeric transcript switch", "version: 2\nlogs:\n  keep_transcripts: 1\n", "logs.keep_transcripts is '1'"},
+		{"an unknown backlog destination", "version: 2\nbacklog:\n  destination: elsewhere\n", "backlog.destination is 'elsewhere'"},
+		{"an unknown backlog layout", "version: 2\nbacklog:\n  repository:\n    layout: flat\n", "backlog.repository.layout is 'flat'"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -55,26 +55,26 @@ func TestTheVersionIsCheckedBeforeTheValueFamilies(t *testing.T) {
 // The value families are refused in the order lib/config.sh:186-190 asserts
 // them, so a config with two bad values reports the same one Bash reports.
 func TestTheValueFamiliesKeepTheirOrder(t *testing.T) {
-	document := "version: 1\npolicy:\n  min_fix_severity: medum\n  max_passes_per_cycle: 0\n" +
+	document := "version: 2\npolicy:\n  min_fix_severity: medum\n  max_passes_per_cycle: 0\n" +
 		"git:\n  hooks: skipp\nlogs:\n  retention_days: 0\nbacklog:\n  destination: elsewhere\n"
 	tree := files{"": {".github/crossrev.yml": document}}
 	if got := refusalFrom(t, core.Revision{}, tree).Message; !strings.Contains(got, "policy.min_fix_severity") {
 		t.Errorf("message = %q, want min_fix_severity refused first", got)
 	}
 
-	document = "version: 1\npolicy:\n  max_passes_per_cycle: 0\ngit:\n  hooks: skipp\n"
+	document = "version: 2\npolicy:\n  max_passes_per_cycle: 0\ngit:\n  hooks: skipp\n"
 	tree = files{"": {".github/crossrev.yml": document}}
 	if got := refusalFrom(t, core.Revision{}, tree).Message; !strings.Contains(got, "policy.max_passes_per_cycle") {
 		t.Errorf("message = %q, want max_passes_per_cycle refused before git.hooks", got)
 	}
 
-	document = "version: 1\ngit:\n  hooks: skipp\nlogs:\n  retention_days: 0\n"
+	document = "version: 2\ngit:\n  hooks: skipp\nlogs:\n  retention_days: 0\n"
 	tree = files{"": {".github/crossrev.yml": document}}
 	if got := refusalFrom(t, core.Revision{}, tree).Message; !strings.Contains(got, "git.hooks") {
 		t.Errorf("message = %q, want git.hooks refused before logs", got)
 	}
 
-	document = "version: 1\nlogs:\n  retention_days: 0\nbacklog:\n  destination: elsewhere\n"
+	document = "version: 2\nlogs:\n  retention_days: 0\nbacklog:\n  destination: elsewhere\n"
 	tree = files{"": {".github/crossrev.yml": document}}
 	if got := refusalFrom(t, core.Revision{}, tree).Message; !strings.Contains(got, "logs.retention_days") {
 		t.Errorf("message = %q, want logs refused before backlog", got)
@@ -85,18 +85,18 @@ func TestTheValueFamiliesKeepTheirOrder(t *testing.T) {
 // than the key.
 func TestTheAcceptedValuesLoad(t *testing.T) {
 	documents := []string{
-		"version: 1\npolicy:\n  min_fix_severity: high\n",
-		"version: 1\npolicy:\n  min_fix_severity: medium\n",
-		"version: 1\npolicy:\n  min_fix_severity: low\n",
-		"version: 1\npolicy:\n  max_passes_per_cycle: 1\n",
-		"version: 1\ngit:\n  hooks: skip\n",
-		"version: 1\ngit:\n  hooks: run\n",
-		"version: 1\nlogs:\n  retention_days: 1\n  keep_transcripts: true\n",
-		"version: 1\nlogs:\n  retention_days: 30\n  keep_transcripts: false\n",
-		"version: 1\nbacklog:\n  destination: github_issues\n",
-		"version: 1\nbacklog:\n  destination: repository\n  repository:\n    layout: file\n",
-		"version: 1\nbacklog:\n  destination: none\n",
-		"version: 1\nbacklog:\n  destination: auto\n",
+		"version: 2\npolicy:\n  min_fix_severity: high\n",
+		"version: 2\npolicy:\n  min_fix_severity: medium\n",
+		"version: 2\npolicy:\n  min_fix_severity: low\n",
+		"version: 2\npolicy:\n  max_passes_per_cycle: 1\n",
+		"version: 2\ngit:\n  hooks: skip\n",
+		"version: 2\ngit:\n  hooks: run\n",
+		"version: 2\nlogs:\n  retention_days: 1\n  keep_transcripts: true\n",
+		"version: 2\nlogs:\n  retention_days: 30\n  keep_transcripts: false\n",
+		"version: 2\nbacklog:\n  destination: github_issues\n",
+		"version: 2\nbacklog:\n  destination: repository\n  repository:\n    layout: file\n",
+		"version: 2\nbacklog:\n  destination: none\n",
+		"version: 2\nbacklog:\n  destination: auto\n",
 		// No version key at all: absent is not a mismatch.
 		"policy:\n  min_fix_severity: low\n",
 	}
@@ -118,7 +118,7 @@ func TestTheAcceptedValuesLoad(t *testing.T) {
 func TestAnEndpointMayNotNameAForgeCredentialAsItsTokenEnv(t *testing.T) {
 	for _, credential := range config.ForgeCredentialNames() {
 		t.Run(credential, func(t *testing.T) {
-			document := "version: 1\nendpoints:\n  mine:\n    base_url: https://api.example/\n    token_env: " + credential + "\n"
+			document := "version: 2\nendpoints:\n  mine:\n    base_url: https://api.example/\n    token_env: " + credential + "\n"
 			refusal := refusalFrom(t, core.Revision{}, files{"": {".github/crossrev.yml": document}})
 
 			want := "the endpoint 'mine' names $" + credential + " as its token_env"
@@ -139,7 +139,7 @@ func TestAnEndpointMayNotNameAForgeCredentialAsItsTokenEnv(t *testing.T) {
 // must not — and Load is the moment `config show`, `doctor` and every leg pass
 // through, so all three say it before anything runs.
 func TestAnEndpointNoLegSelectsIsRefusedToo(t *testing.T) {
-	document := "version: 1\nendpoints:\n  unused:\n    base_url: https://api.example/\n    token_env: GH_TOKEN\n"
+	document := "version: 2\nendpoints:\n  unused:\n    base_url: https://api.example/\n    token_env: GH_TOKEN\n"
 	if got := refusalFrom(t, core.Revision{}, files{"": {".github/crossrev.yml": document}}).Message; !strings.Contains(got, "the endpoint 'unused'") {
 		t.Errorf("message = %q, want the unselected endpoint refused by name", got)
 	}
@@ -148,9 +148,9 @@ func TestAnEndpointNoLegSelectsIsRefusedToo(t *testing.T) {
 // The operator file merges into the same mapping, so it is checked on the same
 // pass rather than trusted for being local.
 func TestAnOperatorFileEndpointIsRefusedTheSameWay(t *testing.T) {
-	operator := "version: 1\nendpoints:\n  local:\n    base_url: http://mine.local/\n    token_env: GITHUB_TOKEN\n"
+	operator := "version: 2\nendpoints:\n  local:\n    base_url: http://mine.local/\n    token_env: GITHUB_TOKEN\n"
 	tree := files{"": {
-		".github/crossrev.yml": "version: 1\n",
+		".github/crossrev.yml": "version: 2\n",
 		config.OperatorPath():  operator,
 	}}
 	if got := refusalFrom(t, core.Revision{}, tree).Message; got != "the endpoint 'local' names $GITHUB_TOKEN as its token_env" {
@@ -161,7 +161,7 @@ func TestAnOperatorFileEndpointIsRefusedTheSameWay(t *testing.T) {
 // A name that merely looks like one is a different variable, and refusing it
 // would break a real endpoint for no gain. Environment names are case-sensitive.
 func TestALowercaseForgeCredentialNameIsADifferentVariable(t *testing.T) {
-	document := "version: 1\nendpoints:\n  kimi:\n    base_url: https://api.example/\n    token_env: gh_token\n"
+	document := "version: 2\nendpoints:\n  kimi:\n    base_url: https://api.example/\n    token_env: gh_token\n"
 	loaded := mustLoad(t, core.Revision{}, files{"": {".github/crossrev.yml": document}})
 	endpoint, err := loaded.Endpoint("kimi")
 	if err != nil {
@@ -175,7 +175,7 @@ func TestALowercaseForgeCredentialNameIsADifferentVariable(t *testing.T) {
 // And the ordinary case still loads, or the check above would pass against a
 // port that had stopped reading token_env at all.
 func TestAnEndpointWithItsOwnTokenStillLoads(t *testing.T) {
-	document := "version: 1\nendpoints:\n  kimi:\n    base_url: https://api.example/\n    token_env: KIMI_API_KEY\n"
+	document := "version: 2\nendpoints:\n  kimi:\n    base_url: https://api.example/\n    token_env: KIMI_API_KEY\n"
 	loaded := mustLoad(t, core.Revision{}, files{"": {".github/crossrev.yml": document}})
 	endpoint, err := loaded.Endpoint("kimi")
 	if err != nil {
@@ -191,7 +191,7 @@ func TestAnEndpointWithItsOwnTokenStillLoads(t *testing.T) {
 // passes this assertion and is refused later, by Endpoint, for the base_url it
 // does not have (lib/config.sh:357-359).
 func TestANonMappingEndpointDefinitionPassesTheCredentialCheck(t *testing.T) {
-	document := "version: 1\nendpoints:\n  ollama: GH_TOKEN\n"
+	document := "version: 2\nendpoints:\n  ollama: GH_TOKEN\n"
 	loaded := mustLoad(t, core.Revision{}, files{"": {".github/crossrev.yml": document}})
 	_, err := loaded.Endpoint("ollama")
 	refusal, ok := err.(*config.Refusal)
@@ -206,7 +206,7 @@ func TestANonMappingEndpointDefinitionPassesTheCredentialCheck(t *testing.T) {
 // The endpoint check is last in the assert chain, where lib/config.sh:281 puts
 // it, so a config wrong twice reports the same fault Bash reports.
 func TestTheEndpointCheckIsLastInTheAssertChain(t *testing.T) {
-	document := "version: 1\nbacklog:\n  destination: elsewhere\n" +
+	document := "version: 2\nbacklog:\n  destination: elsewhere\n" +
 		"endpoints:\n  mine:\n    base_url: https://api.example/\n    token_env: GH_TOKEN\n"
 	if got := refusalFrom(t, core.Revision{}, files{"": {".github/crossrev.yml": document}}).Message; !strings.Contains(got, "backlog.destination") {
 		t.Errorf("message = %q, want the backlog refused first", got)

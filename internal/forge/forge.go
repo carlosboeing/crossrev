@@ -117,6 +117,12 @@ type Forge interface {
 	// (lib/github.sh:204-227). The Placement says which happened.
 	ReviewCommentCreate(ctx context.Context, comment ReviewComment) (Placement, error)
 
+	// ReviewFileComment posts a file-level review comment (subject_type
+	// file): a changed path with no valid hunk line. It anchors to the
+	// file rather than a line, so the finding keeps its thread without
+	// inventing a line number.
+	ReviewFileComment(ctx context.Context, comment ReviewComment) (Placement, error)
+
 	// ReviewReply replies inside an existing thread, addressed by the
 	// thread's first comment (lib/github.sh:229-238). Replying at top level
 	// instead is what makes a pull request unreadable, so the caller counts

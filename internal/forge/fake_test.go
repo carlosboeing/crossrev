@@ -67,6 +67,10 @@ func (f *fakeForge) CommentEdit(context.Context, core.Slug, int64, string) error
 func (f *fakeForge) ReviewCommentCreate(context.Context, forge.ReviewComment) (forge.Placement, error) {
 	return forge.PlacementInline, nil
 }
+func (f *fakeForge) ReviewFileComment(context.Context, forge.ReviewComment) (forge.Placement, error) {
+	return forge.PlacementInline, nil
+}
+
 func (f *fakeForge) ReviewReply(context.Context, core.Slug, int, int64, string) error { return nil }
 func (f *fakeForge) ThreadResolve(context.Context, string) error                      { return nil }
 func (f *fakeForge) LabelEnsure(context.Context, core.Slug, forge.Label) (forge.LabelState, error) {

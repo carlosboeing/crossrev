@@ -323,7 +323,7 @@ func newFixtureWith(t *testing.T, payload string) fixture {
 	}}
 }
 
-const fixtureConfig = `version: 1
+const fixtureConfig = `version: 2
 mode: local
 policy:
   min_fix_severity: medium

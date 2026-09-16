@@ -136,6 +136,10 @@ func PRsReviewedToday(ctx context.Context, f Forge, req DailyCount) (int, error)
 
 // countsAsReview is the one test both halves apply: a review leg, not
 // declined, stamped inside the window.
+//
+// An incomplete review ran, so it counts: it consumed a daily unit exactly
+// like a complete one. Only a declined pass — refused before it started —
+// counts as never having run.
 func countsAsReview(leg core.Leg, state core.PassState, ts int64, cutoff time.Time) bool {
 	return leg == core.LegReview && !state.Declined() && ts > cutoff.Unix()
 }
