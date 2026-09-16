@@ -1,6 +1,10 @@
 package main
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/carlosboeing/crossrev/internal/initcmd"
+)
 
 // The peeled form (`refs/tags/v0.6.2^{}`) is the commit an annotated tag
 // points at; the direct form is a lightweight tag. action.yml reads both and
@@ -19,8 +23,8 @@ func TestTagForSHAReadsBothTagForms(t *testing.T) {
 
 func TestTagForSHAAnswersUntaggedForACommitNoTagPointsAt(t *testing.T) {
 	out := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\trefs/tags/v0.6.1\n"
-	if got := tagForSHA(out, "3cbdb5489de49c1503b82e8a6ce48567a5e9e8f4"); got != untaggedRef {
-		t.Errorf("tagForSHA = %q, want %q", got, untaggedRef)
+	if got := tagForSHA(out, "3cbdb5489de49c1503b82e8a6ce48567a5e9e8f4"); got != initcmd.Untagged {
+		t.Errorf("tagForSHA = %q, want %q", got, initcmd.Untagged)
 	}
 }
 
@@ -29,7 +33,7 @@ func TestTagForSHAAnswersUntaggedForACommitNoTagPointsAt(t *testing.T) {
 func TestTagForSHAIgnoresRefsThatAreNotReleaseTags(t *testing.T) {
 	const sha = "3cbdb5489de49c1503b82e8a6ce48567a5e9e8f4"
 	out := sha + "\trefs/tags/nightly\n" + sha + "\trefs/heads/main\n"
-	if got := tagForSHA(out, sha); got != untaggedRef {
-		t.Errorf("tagForSHA = %q, want %q", got, untaggedRef)
+	if got := tagForSHA(out, sha); got != initcmd.Untagged {
+		t.Errorf("tagForSHA = %q, want %q", got, initcmd.Untagged)
 	}
 }

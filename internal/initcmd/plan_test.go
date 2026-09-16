@@ -407,7 +407,7 @@ func TestPrintWarnsOnlyWhenTheDefaultBranchIsUnprotected(t *testing.T) {
 // one line and puts the warning next to its cause.
 func TestPlanWarnsWhenThePinCarriesNoReleaseTag(t *testing.T) {
 	req := request(t, baseline)
-	req.Source = fakeSource{sha: strings.Repeat("a", 40), ref: "untagged"}
+	req.Source = fakeSource{sha: strings.Repeat("a", 40), ref: initcmd.Untagged}
 	out, printed := capture()
 	req.Out = out
 
@@ -415,6 +415,27 @@ func TestPlanWarnsWhenThePinCarriesNoReleaseTag(t *testing.T) {
 
 	if !strings.Contains(printed.String(), "no release points at it") {
 		t.Errorf("an untagged pin was reported without a warning:\n%s", printed.String())
+	}
+}
+
+// When the remote could not be asked, the plan says the question went
+// unanswered. Claiming no release points at the pin would state a cause the
+// lookup never established — behind a proxy that blocks github.com, that
+// tells the operator the opposite of the truth about a correct pin.
+func TestPlanSaysWhenTheRemoteCouldNotBeAsked(t *testing.T) {
+	req := request(t, baseline)
+	req.Source = fakeSource{sha: strings.Repeat("a", 40), refErr: initcmd.ErrSourceUnreachable}
+	out, printed := capture()
+	req.Out = out
+
+	resolved(t, req).Print(context.Background(), req)
+
+	report := printed.String()
+	if !strings.Contains(report, "could not reach github.com") {
+		t.Errorf("an unasked remote was reported without saying so:\n%s", report)
+	}
+	if strings.Contains(report, "no release points at it") {
+		t.Errorf("an unasked remote was reported as having no release:\n%s", report)
 	}
 }
 

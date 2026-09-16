@@ -29,7 +29,7 @@ func rendering(t *testing.T, configuration, runner string, template []byte) stri
 	req := request(t, configuration)
 	req.Source = fakeSource{sha: "0123456789abcdef0123456789abcdef01234567", ref: "v9.9.9"}
 	if runner == "self-hosted" {
-		req.Source = fakeSource{sha: "0123456789abcdef0123456789abcdef01234567", ref: "untagged"}
+		req.Source = fakeSource{sha: "0123456789abcdef0123456789abcdef01234567", ref: initcmd.Untagged}
 	}
 	return string(resolved(t, req).RenderWorkflow(req, template))
 }

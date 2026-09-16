@@ -247,9 +247,10 @@ func (p initPairing) NeedsRefresher(runner, name, endpoint string) bool {
 // which commit to pin" stop it already gives a checkout it cannot read.
 //
 // The ref is the release tag pointing at the pin, read from the remote with
-// `git ls-remote --tags`. It rides in the comment beside the pin, and a
-// commit no release tag points at — or no network to ask with — answers
-// `untagged`, which is then true.
+// `git ls-remote --tags`. It rides in the comment beside the pin. A commit no
+// release tag points at answers `untagged`, which is then true; a remote that
+// cannot be asked answers `untagged` with ErrSourceUnreachable, so the plan
+// says the lookup failed rather than claiming no release exists.
 //
 // The two answers fail differently, which is why the interface has two methods.
 // A SHA that cannot be read stops the run — a workflow pinned to nothing would
@@ -273,26 +274,37 @@ func (s initSource) SHA(ctx context.Context) (string, error) {
 //
 // This is the lookup action.yml:80-103 already performs at runtime to turn its
 // pin into a release to download, so the action and init now answer the
-// question the same way. No network, or a commit no release tag points at,
-// answers `untagged`, which is then true.
+// question the same way. A commit no release tag points at answers
+// `untagged`, which is then true; a lookup that fails answers `untagged` with
+// ErrSourceUnreachable, so the plan says the question went unanswered rather
+// than claiming no release points at the pin.
 //
 // The lookup needs no local repository, so the runner carries no directory:
 // `At("")` runs the child in the process's own working directory, and
-// ls-remote against a URL asks nothing of it.
+// ls-remote against a URL asks nothing of it. It runs under a short timeout
+// with terminal prompting off: the answer is already non-fatal, so a stall or
+// a question is always the wrong trade for it.
 func (s initSource) Ref(ctx context.Context) (string, error) {
 	sha, err := buildinfo.Pin()
 	if err != nil || sha == "" {
-		return untaggedRef, nil
+		return initcmd.Untagged, nil
 	}
-	out, runErr := s.repo.Run(ctx, "ls-remote", "--tags", crossrevRemote)
+	ctx, cancel := context.WithTimeout(ctx, refLookupTimeout)
+	defer cancel()
+	// GIT_TERMINAL_PROMPT=0 for this call alone: an `insteadOf` rewrite to
+	// SSH must fail into the fallback rather than prompt on /dev/tty for a
+	// value init is willing to give up on anyway.
+	out, runErr := s.repo.RunWithEnv(ctx, []string{"GIT_TERMINAL_PROMPT=0"}, "ls-remote", "--tags", crossrevRemote)
 	if runErr != nil || !out.OK() {
-		return untaggedRef, nil
+		return initcmd.Untagged, initcmd.ErrSourceUnreachable
 	}
 	return tagForSHA(out.Text(), sha), nil
 }
 
-// untaggedRef is the comment beside a pin no release tag points at.
-const untaggedRef = "untagged"
+// refLookupTimeout bounds the tag lookup. Twenty seconds is generous for a
+// response of a few dozen refs and short against a blackholed connection,
+// which would otherwise stall init silently for the full TCP timeout.
+const refLookupTimeout = 20 * time.Second
 
 // crossrevRemote is the repository the pin's tag is read from: the same
 // literal action.yml resolves its own pin against.
@@ -333,7 +345,7 @@ func tagForSHA(out, sha string) string {
 			return name
 		}
 	}
-	return untaggedRef
+	return initcmd.Untagged
 }
 
 // initFiles is the working tree of the repository being set up, on both sides

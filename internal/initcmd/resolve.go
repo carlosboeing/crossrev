@@ -3,6 +3,7 @@ package initcmd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -13,10 +14,11 @@ import (
 	"github.com/carlosboeing/crossrev/internal/harness"
 )
 
-// untagged is the ref beside a pin no release tag points at: the default
+// Untagged is the ref beside a pin no release tag points at: the default
 // Resolve sets when the source names none, and the value Print warns about.
-// Tests pin the literal; production shares this.
-const untagged = "untagged"
+// Exported so the composition root returns the same word the plan is checked
+// against; the render goldens and resolve_test pin the literal value.
+const Untagged = "untagged"
 
 // Plan is everything `init` settles before it prints, asks or writes anything
 // (lib/init.sh:19-28 and _init_resolve, lib/init.sh:70-162).
@@ -45,6 +47,11 @@ type Plan struct {
 	// it, or `untagged`.
 	SourceSHA string
 	SourceRef string
+
+	// SourceUnreachable is true when the remote could not be asked which tag
+	// points at the pin, so SourceRef's `untagged` means "unknown" rather
+	// than "no release points at it". Print says which.
+	SourceUnreachable bool
 
 	// PassLabels is `crossrev/pass-N` for each pass the policy allows, and
 	// FixedLabels is the five the loop always needs (lib/init.sh:103-109).
@@ -210,9 +217,11 @@ func Resolve(ctx context.Context, req Request) (Plan, error) {
 	if sha, err := req.Source.SHA(ctx); err == nil {
 		plan.SourceSHA = sha
 	}
-	plan.SourceRef = untagged
+	plan.SourceRef = Untagged
 	if ref, err := req.Source.Ref(ctx); err == nil {
 		plan.SourceRef = ref
+	} else if errors.Is(err, ErrSourceUnreachable) {
+		plan.SourceUnreachable = true
 	}
 	if plan.SourceSHA == "" {
 		return Plan{}, req.io().Die(
