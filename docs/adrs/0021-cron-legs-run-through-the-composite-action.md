@@ -6,7 +6,7 @@ status: approved
 scope: [action, preflight, auth-refresh, templates, proof-standard]
 authors:
   - "Carlos Boeing"
-  - "Gemini (Antigravity)"
+  - "Claude Opus 4.6 (Antigravity)"
 related:
   - docs/adrs/0009-delivery-via-sha-pinned-composite-action.md
   - docs/adrs/0018-go-native-parity-contract.md
