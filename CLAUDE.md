@@ -164,6 +164,7 @@ Versions are **cut deliberately, not per merge**. Changes accumulate under `## [
 - **Never choose major on your own.** `v1.0.0` is gated on proving automated mode end to end. Raise it rather than deciding it.
 - **A published version is permanent.** npm's unpublish is conditional and cannot be undone, and a `name@version` pair is never reusable. Treat a tag push as irreversible, because it is.
 - **Every tag gets a GitHub Release.** The tag publishes the two binaries with an unsigned `checksums.txt`; the Release is where a person finds out what changed. A tag alone renders nothing, and nobody can subscribe to one — GitHub's watch-for-releases needs a Release object.
+- **A release touching `action.yml` or `templates/` requires live verification.** Per [ADR 0021](docs/adrs/0021-cron-legs-run-through-the-composite-action.md), a release whose diff touches `action.yml`, `templates/`, or CI entry paths cannot be cut on the suite alone; all four generated workflows must run green on `carlosboeing/crossrev-testbed` (the event legs on a PR, and both crons via `workflow_dispatch`).
 
 ### Release notes
 

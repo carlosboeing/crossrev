@@ -52,29 +52,27 @@ jobs:
           private-key: ${{ secrets.CROSSREV_REFRESH_APP_PRIVATE_KEY }}
           skip-token-revoke: true
 
-      # Only CrossRev's own source is checked out. The repository under review
-      # never appears in this job, which is what keeps it free of anything a
-      # pull request author can influence.
+      # No checkout at all. This job once checked CrossRev's own source out and
+      # ran it from source, because `auth refresh` was not
+      # expressible through the action's `leg` input. It is now, and the
+      # composite action is the single home for acquiring the release binary —
+      # it downloads the build for the runner and verifies its digest against
+      # the release's checksums.txt before anything runs (ADR 0021, amending
+      # ADR 0009).
       #
-      # This one keeps a checkout rather than collapsing to `uses:` like the
-      # legs did. `auth refresh` is not expressible through the action's `leg`
-      # input, whose values are review|resolve|cycle|status|watchdog, and
-      # extending that interface belongs to the automated-mode proof rather than
-      # here. The checkout is public now, so it needs no token, no deploy key
-      # and no secret — the threat posture is unchanged.
-      - uses: actions/checkout@v5
-        with:
-          repository: carlosboeing/crossrev
-          ref: __SOURCE_SHA__   # __SOURCE_REF__
-          path: .crossrev-src
-
-      - run: echo "$GITHUB_WORKSPACE/.crossrev-src/bin" >>"$GITHUB_PATH"
-
+      # The three properties that make `Secrets: write` safe here are unchanged,
+      # and dropping the checkout strengthens the first: the job never checks
+      # out the pull request branch, never runs a model, and never reads a diff
+      # or a comment. No source tree is present at all now. There is nothing in
+      # it to inject into.
       - name: refresh
+        uses: carlosboeing/crossrev@__SOURCE_SHA__   # __SOURCE_REF__
+        with:
+          leg: auth-refresh
+          harness: __REFRESH_HARNESS__
+          app-token: ${{ steps.app.outputs.token }}
         env:
-          GH_TOKEN: ${{ steps.app.outputs.token }}
           __REFRESH_SECRET__: ${{ secrets.__REFRESH_SECRET__ }}
-        run: crossrev auth refresh --harness __REFRESH_HARNESS__ __REFRESH_SCOPE__
 
       - if: always()
         env:

@@ -278,13 +278,19 @@
       "name": "doctor",
       "args": ["doctor"],
       "command": "doctor",
-      "request": {}
+      "request": {"Level": ""}
     },
     {
-      "name": "doctor reads none of its arguments",
-      "args": ["doctor", "--anything", "at", "all"],
+      "name": "doctor --level core",
+      "args": ["doctor", "--level", "core"],
       "command": "doctor",
-      "request": {}
+      "request": {"Level": "core"}
+    },
+    {
+      "name": "doctor --level harness",
+      "args": ["doctor", "--level", "harness"],
+      "command": "doctor",
+      "request": {"Level": "harness"}
     },
 
     {

@@ -5,7 +5,7 @@
 # builds and runs; those suites must neither source lib/*.sh nor execute
 # bin/crossrev, which scripts/check-parity-coverage.sh --native enforces.
 # Rows for deleted suites stay as the record of where their behaviour went.
-test-action.sh	black-box	action.yml forwards only flags the named leg accepts	tests/test-action.sh
+test-action.sh	black-box	action.yml forwards only flags the named leg accepts, and asks each leg for the preflight it needs	tests/test-action.sh
 test-adapters.sh	black-box	agy adapter behaviour through a real review leg	tests/test-adapters.sh
 test-auth.sh	go-test	App registration names and implied slugs	internal/app/metadata_test.go internal/app/login_test.go
 test-bootstrap.sh	black-box	binary download, digest check and atomic install	tests/test-bootstrap.sh
@@ -23,7 +23,7 @@ test-parity.sh	go-test	frozen Bash baseline vectors, read from the Go side	inter
 test-permissions.sh	go-test	write permission scoped per leg	internal/app/permissions_test.go internal/sandbox/paths_test.go internal/sandbox/quarantine_test.go
 test-persist.sh	black-box	resolve leg resolutions, deferral, dedupe and commit	tests/test-persist.sh
 test-policy.sh	go-test	policy from the base revision, marker trust and caps	internal/policy/guards_test.go internal/policy/labels_test.go internal/policy/termination_test.go internal/config/load_test.go
-test-preflight.sh	go-test	dependency and credential preflight	internal/preflight/tools_test.go internal/preflight/pairing_test.go internal/preflight/quarantine_test.go
+test-preflight.sh	go-test	dependency and credential preflight	internal/preflight/tools_test.go internal/preflight/pairing_test.go internal/preflight/quarantine_test.go cmd/crossrev/simple_test.go
 test-presentation.sh	go-test	human display wording and layout	internal/review/render_test.go internal/resolve/render_test.go
 test-recovery.sh	go-test	retry, crash, stale-claim and lock reconciliation	internal/resolve/recovery_test.go internal/review/recovery_test.go internal/vcs/lock_test.go
 test-runner.sh	go-test	runner-to-pairing mapping and generated workflow shapes	internal/preflight/pairing_test.go internal/initcmd/render_test.go internal/app/refresh_test.go

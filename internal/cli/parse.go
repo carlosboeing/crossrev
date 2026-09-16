@@ -98,8 +98,7 @@ func Parse(args []string, out *ui.IO, harnesses []string) (Invocation, error) {
 	case "config":
 		return parseConfig(rest, out)
 	case "doctor":
-		// The shell reads none of doctor's arguments (bin/crossrev:163).
-		return Invocation{Command: CommandDoctor, Request: DoctorRequest{}}, nil
+		return parseDoctor(rest, out)
 	case string(CommandCycle):
 		return parseCycle(rest, out)
 	case string(CommandReview):
@@ -161,6 +160,38 @@ func parseConfig(args []string, out *ui.IO) (Invocation, error) {
 	}
 	return Invocation{}, out.Die("unknown config command: "+sub,
 		"Try: crossrev config show | backlog")
+}
+
+// parseDoctor is the one argument loop the shell did not have
+// (bin/crossrev:163 read none). --level picks between the two levels
+// internal/preflight implements; an unrecognised value is refused rather
+// than falling back, because a silent fallback to core is exactly the
+// regression ADR 0021 exists to close.
+func parseDoctor(args []string, out *ui.IO) (Invocation, error) {
+	var req DoctorRequest
+	s := &scanner{args: args}
+	for s.more() {
+		var err error
+		switch flag := s.flag(); flag {
+		case "--level":
+			req.Level, err = s.required(out, "--level", usageDoctor)
+			if err == nil {
+				switch req.Level {
+				case DoctorLevelCore, DoctorLevelHarness:
+				default:
+					err = out.Die(
+						"unknown preflight level: "+req.Level,
+						usageDoctor)
+				}
+			}
+		default:
+			err = unknownOption(out, "doctor", flag, usageDoctor)
+		}
+		if err != nil {
+			return Invocation{}, err
+		}
+	}
+	return Invocation{Command: CommandDoctor, Request: req}, nil
 }
 
 // parseCycle is cmd_cycle's argument loop (lib/run.sh:2902-2922).

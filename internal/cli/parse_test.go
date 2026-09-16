@@ -157,3 +157,42 @@ func TestParseRuleHelpAndVersionNeedNothingInstalled(t *testing.T) {
 		})
 	}
 }
+
+func TestParseDoctorReadsLevel(t *testing.T) {
+	for _, row := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"doctor"}, ""},
+		{[]string{"doctor", "--level", "core"}, "core"},
+		{[]string{"doctor", "--level", "harness"}, "harness"},
+	} {
+		io, _, _ := captureIO()
+		inv, err := Parse(row.args, io, nil)
+		if err != nil {
+			t.Fatalf("parse %v: %v", row.args, err)
+		}
+		req, ok := inv.Request.(DoctorRequest)
+		if !ok {
+			t.Fatalf("parse %v produced %T, want DoctorRequest", row.args, inv.Request)
+		}
+		if req.Level != row.want {
+			t.Errorf("parse %v gave level %q, want %q", row.args, req.Level, row.want)
+		}
+	}
+}
+
+func TestParseDoctorRefusesAnUnknownLevel(t *testing.T) {
+	io, _, _ := captureIO()
+	if _, err := Parse([]string{"doctor", "--level", "everything"}, io, nil); err == nil {
+		t.Error("doctor --level everything was accepted; an unrecognised level must be refused, " +
+			"because silently falling back to core is the regression this flag exists to prevent")
+	}
+}
+
+func TestParseDoctorRefusesAnUnknownOption(t *testing.T) {
+	io, _, _ := captureIO()
+	if _, err := Parse([]string{"doctor", "--verbose"}, io, nil); err == nil {
+		t.Error("doctor accepted --verbose; the arm now has an argument loop and must refuse the rest")
+	}
+}
