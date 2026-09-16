@@ -277,3 +277,36 @@ func TestReviewBatchDiffDropsFilesOutsideTheBatch(t *testing.T) {
 	}
 }
 
+// TestReviewDiscoversSharedContextOncePerPass pins the cached snapshot: the
+// packer measures one candidate per admitted file, and each measurement used
+// to repeat advisory discovery, the diff read and the thread fetch — four
+// files carrying two distinct search terms meant ten ExactSearch calls before
+// the first model invocation. The shared context is discovered once per pass
+// and candidates render from it.
+func TestReviewDiscoversSharedContextOncePerPass(t *testing.T) {
+	e := newEnv(t)
+	for i := 0; i < 4; i++ {
+		writeRequiredHead(e, fmt.Sprintf("f%d.go", i), "alphaBeta gammaDelta\n")
+	}
+	acceptAll(e)
+	got := runLeg(t, e, e.request(t))
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
+	if got.Outcome != review.OutcomeInvoked {
+		t.Fatalf("Outcome = %q, want invoked", got.Outcome)
+	}
+	if e.vcs.searchCalls != 2 {
+		t.Errorf("ExactSearch calls = %d, want 2 (one per distinct term, once for the pass)", e.vcs.searchCalls)
+	}
+	// Two thread fetches stand: the snapshot every candidate and batch
+	// renders from, and the attach the publish path records findings with.
+	if e.forge.threadCalls != 2 {
+		t.Errorf("ReviewThreads calls = %d, want 2 (the pass snapshot and the publish-path attach)", e.forge.threadCalls)
+	}
+	// Two diff reads stand: the snapshot every candidate and batch renders
+	// from, and the enrich read the publish path anchors findings against.
+	if e.forge.diffCalls != 2 {
+		t.Errorf("PullRequestDiff calls = %d, want 2 (the pass snapshot and the publish-path enrich)", e.forge.diffCalls)
+	}
+}

@@ -56,8 +56,9 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 		pair = confirmationPair{}
 		confirmation = nil
 	}
+	shared := l.discoverBatchContext(ctx, req, loaded, pass, scope, advisory, confirmation)
 	render := func(files []intel.FileUnit) int {
-		return len(l.renderBatchPrompt(ctx, req, loaded, settings, pass, files, scope, confirmation))
+		return len(shared.render(files, scope.Base, scope.Head))
 	}
 	plan := intel.Batches(scope, acceptedIDs, render)
 	if plan.HaltReason != "" || len(plan.Carried) > 0 {
@@ -97,9 +98,11 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 	}
 	_ = initial
 	for _, batch := range plan.Batches {
-		expected, units := batchExpectations(batch.Files, scope.Base, scope.Head)
-		advisoryRefs, excludedRefs := advisoryPromptRefs(scope, advisory)
-		payload, envelope, batchMsgs, err := l.invokeBatch(ctx, req, loaded, settings, pass, units, advisoryRefs, excludedRefs, confirmation, expected)
+		expected, _ := batchExpectations(batch.Files, scope.Base, scope.Head)
+		if shared.diffErr != nil {
+			return shared.diffErr
+		}
+		payload, envelope, batchMsgs, err := l.invokePrompt(ctx, req, loaded, settings, expected, shared.render(batch.Files, scope.Base, scope.Head))
 		out.Messages = append(out.Messages, batchMsgs...)
 		if err != nil {
 			return err
