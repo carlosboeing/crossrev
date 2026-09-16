@@ -282,19 +282,37 @@ func (s initSource) SHA(ctx context.Context) (string, error) {
 // The lookup needs no local repository, so the runner carries no directory:
 // `At("")` runs the child in the process's own working directory, and
 // ls-remote against a URL asks nothing of it. It runs under a short timeout
-// with terminal prompting off: the answer is already non-fatal, so a stall or
+// with every prompt disabled: the answer is already non-fatal, so a stall or
 // a question is always the wrong trade for it.
 func (s initSource) Ref(ctx context.Context) (string, error) {
 	sha, err := buildinfo.Pin()
 	if err != nil || sha == "" {
 		return initcmd.Untagged, nil
 	}
+	return s.refForSHA(ctx, sha)
+}
+
+// refForSHA is Ref's remote half: the tag comment for a pin it already holds.
+//
+// It is split out so a test can drive the child invocation without a build
+// stamp — a test binary carries no VCS revision, so Ref itself returns before
+// reaching git.
+func (s initSource) refForSHA(ctx context.Context, sha string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, refLookupTimeout)
 	defer cancel()
-	// GIT_TERMINAL_PROMPT=0 for this call alone: an `insteadOf` rewrite to
-	// SSH must fail into the fallback rather than prompt on /dev/tty for a
-	// value init is willing to give up on anyway.
-	out, runErr := s.repo.RunWithEnv(ctx, []string{"GIT_TERMINAL_PROMPT=0"}, "ls-remote", "--tags", crossrevRemote)
+	// Three entries, because one was not enough. GIT_TERMINAL_PROMPT=0 stops
+	// git's own terminal prompt, but git consults an inherited GIT_ASKPASS
+	// before that setting, and an `insteadOf` rewrite to SSH leaves OpenSSH
+	// free to ask for a passphrase or a host-key confirmation. `false` as
+	// the askpass helper fails the credential request instead of asking,
+	// and BatchMode makes ssh fail instead of asking. Either failure lands
+	// in the unreachable fallback below, which is the point: the answer is
+	// already non-fatal, so a question is always the wrong trade for it.
+	out, runErr := s.repo.RunWithEnv(ctx, []string{
+		"GIT_TERMINAL_PROMPT=0",
+		"GIT_SSH_COMMAND=ssh -o BatchMode=yes",
+		"GIT_ASKPASS=false",
+	}, "ls-remote", "--tags", crossrevRemote)
 	if runErr != nil || !out.OK() {
 		return initcmd.Untagged, initcmd.ErrSourceUnreachable
 	}

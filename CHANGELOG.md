@@ -15,7 +15,7 @@ All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepa
 
 ### Fixed
 
-- **`crossrev init` derives the pin's tag comment from the pinned commit.** The tag used to come from `git describe` in whatever checkout sat near the binary, so one binary wrote two different comments from two locations — and the one that looked informative named the wrong commit. The lookup is now the one the composite action already performs, so both answer the same way. A commit no release tag points at writes `untagged`, which is then true; when the remote cannot be asked at all, the comment stays `untagged` but the plan says the lookup failed rather than claiming no release exists. The lookup runs under a twenty-second timeout with terminal prompting off, so a stalled connection or an SSH rewrite fails into that fallback instead of blocking init.
+- **`crossrev init` derives the pin's tag comment from the pinned commit.** The tag used to come from `git describe` in whatever checkout sat near the binary, so one binary wrote two different comments from two locations — and the one that looked informative named the wrong commit. The lookup is now the one the composite action already performs, so both answer the same way. A commit no release tag points at writes `untagged`, which is then true; when the remote cannot be asked at all, the comment stays `untagged` but the plan says the lookup failed rather than claiming no release exists. The lookup runs under a twenty-second timeout with every prompt disabled — terminal, askpass and SSH — so a stalled connection or an SSH rewrite fails into that fallback instead of blocking init.
 
 ## [0.6.2] — 2026-09-16
 
