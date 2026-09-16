@@ -9,8 +9,10 @@ import (
 
 	"github.com/carlosboeing/crossrev/internal/core"
 	"github.com/carlosboeing/crossrev/internal/exec"
+	"github.com/carlosboeing/crossrev/internal/intel"
 	"github.com/carlosboeing/crossrev/internal/prstate"
 	"github.com/carlosboeing/crossrev/internal/review"
+	"github.com/carlosboeing/crossrev/internal/validate"
 )
 
 // findingAnswer answers n numbered units with one finding on the first unit:
@@ -364,5 +366,118 @@ func TestReviewRunsSchedulableBatchesBeforeInputHalt(t *testing.T) {
 	}
 	if covered != 1 {
 		t.Errorf("covered units in the current generation = %d, want 1 (a.go accepted, z_huge.go outstanding)", covered)
+	}
+}
+
+// acceptAll batches the validation seam for cases that measure packing and
+// prompt shape rather than the answer check: any payload passes.
+func acceptAll(e *env) {
+	e.validate = func([]byte, validate.ReviewExpectations) error { return nil }
+}
+
+// TestReviewSplitsAnOversizedDiffAcrossBatches reproduces the measurement
+// behind per-batch diff slicing: a rendered diff past the 180 KiB prompt
+// budget, spread across 41 individually small files, used to halt every
+// candidate — even a one-file batch carried the whole diff — so the pass made
+// zero model calls and stopped on input_exceeds_budget. With each batch
+// carrying only its own files' hunks, splitting shrinks the input and the
+// pass covers the scope.
+func TestReviewSplitsAnOversizedDiffAcrossBatches(t *testing.T) {
+	e := newEnv(t)
+	var raw strings.Builder
+	filler := strings.Repeat("+// a rendered line of change to price the batch\n", 100)
+	for i := 1; i <= 41; i++ {
+		path := fmt.Sprintf("file%02d.go", i)
+		writeRequiredHead(e, path, "package x\n")
+		fmt.Fprintf(&raw, "diff --git a/%s b/%s\n--- a/%s\n+++ b/%s\n@@ -1,1 +1,101 @@\n context\n%s", path, path, path, path, filler)
+	}
+	e.forge.diff = []byte(raw.String())
+	if len(e.forge.diff) <= intel.MaxPromptBytes {
+		t.Fatalf("fixture diff is %d bytes, want it past the %d budget so the whole diff cannot fit one prompt", len(e.forge.diff), intel.MaxPromptBytes)
+	}
+	acceptAll(e)
+	prompts := capturePrompt(e)
+	got := runLeg(t, e, e.request(t))
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
+	if got.Outcome != review.OutcomeInvoked {
+		t.Fatalf("Outcome = %q, want invoked (splitting must shrink the input, not halt)", got.Outcome)
+	}
+	if e.runner.calls < 2 {
+		t.Fatalf("harness calls = %d, want at least 2 (the budget splits the 41 files into batches)", e.runner.calls)
+	}
+	for i, prompt := range *prompts {
+		if len(prompt) > intel.MaxPromptBytes {
+			t.Errorf("prompt %d is %d bytes, over the %d budget the packer measured against", i+1, len(prompt), intel.MaxPromptBytes)
+		}
+	}
+}
+
+// TestReviewBatchDiffDropsFilesOutsideTheBatch pins the positive selection:
+// one small required file beside a generated file the scope never required.
+// The batch prompt slices the diff to its own files, so a section the batch
+// does not hold cannot price the pass out, no matter its size.
+func TestReviewBatchDiffDropsFilesOutsideTheBatch(t *testing.T) {
+	e := newEnv(t)
+	writeRequiredHead(e, "small.go", "package small\n")
+	e.forge.diff = []byte("diff --git a/small.go b/small.go\n--- a/small.go\n+++ b/small.go\n@@ -1,1 +1,2 @@\n context\n+added\n" +
+		"diff --git a/gen/big.go b/gen/big.go\n--- a/gen/big.go\n+++ b/gen/big.go\n@@ -1,1 +1,8001 @@\n context\n" +
+		strings.Repeat("+generated line priced out of every batch\n", 8000))
+	acceptAll(e)
+	prompts := capturePrompt(e)
+	got := runLeg(t, e, e.request(t))
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
+	if got.Outcome != review.OutcomeInvoked {
+		t.Fatalf("Outcome = %q, want invoked (the batch's own diff fits)", got.Outcome)
+	}
+	if len(*prompts) != 1 {
+		t.Fatalf("prompts = %d, want 1 (one file, one batch)", len(*prompts))
+	}
+	prompt := (*prompts)[0]
+	if !strings.Contains(prompt, "b/small.go") {
+		t.Error("prompt dropped the batch's own diff section")
+	}
+	if strings.Contains(prompt, "gen/big.go") {
+		t.Error("prompt carried a diff section the batch does not hold")
+	}
+	if len(prompt) > intel.MaxPromptBytes {
+		t.Errorf("prompt is %d bytes, over the %d budget", len(prompt), intel.MaxPromptBytes)
+	}
+}
+
+// TestReviewDiscoversSharedContextOncePerPass pins the cached snapshot: the
+// packer measures one candidate per admitted file, and each measurement used
+// to repeat advisory discovery, the diff read and the thread fetch — four
+// files carrying two distinct search terms meant ten ExactSearch calls before
+// the first model invocation. The shared context is discovered once per pass
+// and candidates render from it.
+func TestReviewDiscoversSharedContextOncePerPass(t *testing.T) {
+	e := newEnv(t)
+	for i := 0; i < 4; i++ {
+		writeRequiredHead(e, fmt.Sprintf("f%d.go", i), "alphaBeta gammaDelta\n")
+	}
+	acceptAll(e)
+	got := runLeg(t, e, e.request(t))
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
+	if got.Outcome != review.OutcomeInvoked {
+		t.Fatalf("Outcome = %q, want invoked", got.Outcome)
+	}
+	if e.vcs.searchCalls != 2 {
+		t.Errorf("ExactSearch calls = %d, want 2 (one per distinct term, once for the pass)", e.vcs.searchCalls)
+	}
+	// Two thread fetches stand: the snapshot every candidate and batch
+	// renders from, and the attach the publish path records findings with.
+	if e.forge.threadCalls != 2 {
+		t.Errorf("ReviewThreads calls = %d, want 2 (the pass snapshot and the publish-path attach)", e.forge.threadCalls)
+	}
+	// Two diff reads stand: the snapshot every candidate and batch renders
+	// from, and the enrich read the publish path anchors findings against.
+	if e.forge.diffCalls != 2 {
+		t.Errorf("PullRequestDiff calls = %d, want 2 (the pass snapshot and the publish-path enrich)", e.forge.diffCalls)
 	}
 }

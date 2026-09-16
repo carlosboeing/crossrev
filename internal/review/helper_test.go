@@ -146,9 +146,13 @@ type fakeVCS struct {
 	repair *fakeRepair
 	// changedErr, when set, is the git failure ChangedFiles returns.
 	changedErr error
+	// searchCalls counts ExactSearch invocations, so a test can pin how often
+	// advisory discovery runs.
+	searchCalls int
 }
 
 func (f *fakeVCS) ExactSearch(_ context.Context, revision core.Revision, term string, limit int) ([]vcs.SearchHit, bool, error) {
+	f.searchCalls++
 	return nil, false, nil
 }
 
@@ -314,7 +318,13 @@ type fakeForge struct {
 	labelsRemoved   []string
 	labelAddErr     error
 	threads         []forge.ReviewThread
+	// threadCalls counts ReviewThreads invocations, so a test can pin how
+	// often the open conversation is fetched.
+	threadCalls     int
 	diff            []byte
+	// diffCalls counts PullRequestDiff invocations, so a test can pin how
+	// often the diff is read.
+	diffCalls       int
 	repoComments    []forge.IssueComment
 	repoCommentsErr error
 	nextID          int64
@@ -358,6 +368,7 @@ func (f *fakeForge) PullRequest(context.Context, core.Slug, int) (forge.PullRequ
 }
 
 func (f *fakeForge) PullRequestDiff(context.Context, core.Slug, core.Revision, core.Revision) ([]byte, error) {
+	f.diffCalls++
 	if f.diff != nil {
 		return f.diff, nil
 	}
@@ -373,6 +384,7 @@ func (f *fakeForge) PullRequestLabels(context.Context, core.Slug, int) []string 
 }
 
 func (f *fakeForge) ReviewThreads(context.Context, core.Slug, int) []forge.ReviewThread {
+	f.threadCalls++
 	return f.threads
 }
 

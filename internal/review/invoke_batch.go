@@ -7,6 +7,7 @@ import (
 
 	"github.com/carlosboeing/crossrev/internal/core"
 	"github.com/carlosboeing/crossrev/internal/cred"
+	"github.com/carlosboeing/crossrev/internal/diff"
 	"github.com/carlosboeing/crossrev/internal/harness"
 	"github.com/carlosboeing/crossrev/internal/intel"
 	"github.com/carlosboeing/crossrev/internal/prompt"
@@ -25,52 +26,80 @@ func ledgerStoreFor(l *Leg) prstate.LedgerStore {
 	return store
 }
 
-// renderBatchPrompt renders one batch's complete prompt — headers, prior
-// context and file content together — for the byte budget the packing
-// measures. It renders through the same Review value the invoke path sends,
-// so the measured bytes are the sent bytes.
-func (l *Leg) renderBatchPrompt(ctx context.Context, req Request, loaded Context, settings legSettings, pass int, files []intel.FileUnit, scope intel.Scope, confirmation []byte) []byte {
-	expected, units := batchExpectations(files, scope.Base, scope.Head)
-	_ = expected
-	advisory := intel.AdvisoryFiles(ctx, scope, scopeSearcher{vcs: l.VCS})
+// batchContext is one pass's shared prompt context, discovered once before
+// packing measures the first candidate: the diff parsed for per-batch
+// slicing, the open threads, the advisory and exclusion refs, and the repair
+// delta. Packing measures one candidate per admitted file, and each
+// discovery leg is a git process or a forge request, so candidates render
+// from this snapshot rather than repeating the discovery — forty files
+// carrying two search terms otherwise meant 82 searches before the first
+// model call.
+type batchContext struct {
+	diff         *diff.Diff
+	diffErr      error
+	meta         prompt.Meta
+	prior        []prompt.Prior
+	threads      []prompt.Thread
+	reviewMD     []byte
+	advisory     []prompt.AdvisoryRef
+	excluded     []prompt.ExclusionRef
+	confirmation []byte
+}
+
+// discoverBatchContext reads the pass's shared context exactly once. The
+// advisory summary comes from the caller — the coverage ledger persists its
+// counts and cap reasons, so the prompt refs and the ledger records are the
+// one discovery rather than two that could disagree.
+func (l *Leg) discoverBatchContext(ctx context.Context, req Request, loaded Context, pass int, scope intel.Scope, advisory intel.AdvisorySummary, confirmation []byte) batchContext {
+	diffBytes, err := l.reviewDiff(ctx, loaded)
 	advisoryRefs, excludedRefs := advisoryPromptRefs(scope, advisory)
-	diffBytes, _ := l.reviewDiff(ctx, loaded)
+	return batchContext{
+		diff:         diff.Parse(diffBytes, core.RevisionPair{}),
+		diffErr:      err,
+		meta:         reviewMeta(loaded, req, pass),
+		prior:        priorFindings(loaded),
+		threads:      promptThreads(l.Forge.ReviewThreads(ctx, loaded.Repo, req.PR)),
+		reviewMD:     loaded.ReviewMD,
+		advisory:     advisoryRefs,
+		excluded:     excludedRefs,
+		confirmation: confirmation,
+	}
+}
+
+// render builds one candidate batch's complete prompt from the snapshot —
+// headers, prior context and file content together, with the diff sliced to
+// the batch's own files. It is pure over the snapshot: no git, no forge, and
+// deterministic, so the packer can measure it for every candidate and the
+// invoke path sends exactly the measured bytes.
+func (c batchContext) render(files []intel.FileUnit, base, head core.Revision) []byte {
+	_, units := batchExpectations(files, base, head)
 	return prompt.Review{
 		Skill:        prompt.ReviewSkill(),
-		Diff:         diffBytes,
-		Meta:         reviewMeta(loaded, req, pass),
-		Prior:        priorFindings(loaded),
-		Threads:      promptThreads(l.Forge.ReviewThreads(ctx, loaded.Repo, req.PR)),
-		ReviewMD:     loaded.ReviewMD,
+		Diff:         c.diff.Only(batchPaths(files)),
+		Meta:         c.meta,
+		Prior:        c.prior,
+		Threads:      c.threads,
+		ReviewMD:     c.reviewMD,
 		Batch:        units,
-		Advisory:     advisoryRefs,
-		Excluded:     excludedRefs,
-		Confirmation: confirmation,
+		Advisory:     c.advisory,
+		Excluded:     c.excluded,
+		Confirmation: c.confirmation,
 	}.Render()
 }
 
-// invokeBatch invokes the reviewer for one numbered batch and validates the
-// answer against the batch's own expectations. A semantic failure gets one
-// retry whose prompt names the exact missing, duplicate and unknown unit
-// numbers; a second failure is fatal and publishes nothing.
-func (l *Leg) invokeBatch(ctx context.Context, req Request, loaded Context, settings legSettings, pass int, units []prompt.BatchUnit, advisory []prompt.AdvisoryRef, excluded []prompt.ExclusionRef, confirmation []byte, expected validate.ReviewExpectations) (json.RawMessage, harness.Envelope, []ui.Line, error) {
-	diffBytes, err := l.reviewDiff(ctx, loaded)
-	if err != nil {
-		return nil, harness.Envelope{}, nil, err
+// batchPaths names the sections one batch keeps from the full diff: each
+// unit's current path, plus its previous path for a rename or a deletion.
+// The repair delta is not part of this input — Confirmation carries it
+// whole, ahead of the sliced scope.
+func batchPaths(files []intel.FileUnit) []string {
+	paths := make([]string, 0, len(files))
+	for _, unit := range files {
+		paths = append(paths, unit.Path)
+		if unit.OldPath != "" && unit.OldPath != unit.Path {
+			paths = append(paths, unit.OldPath)
+		}
 	}
-	promptBytes := prompt.Review{
-		Skill:        prompt.ReviewSkill(),
-		Diff:         diffBytes,
-		Meta:         reviewMeta(loaded, req, pass),
-		Prior:        priorFindings(loaded),
-		Threads:      promptThreads(l.Forge.ReviewThreads(ctx, loaded.Repo, req.PR)),
-		ReviewMD:     loaded.ReviewMD,
-		Batch:        units,
-		Advisory:     advisory,
-		Excluded:     excluded,
-		Confirmation: confirmation,
-	}.Render()
-	return l.invokePrompt(ctx, req, loaded, settings, expected, promptBytes)
+	return paths
 }
 
 // invokePrompt runs one rendered prompt through the harness with the
@@ -140,6 +169,3 @@ type errNoLedgerStore struct{}
 func (e errNoLedgerStore) Error() string {
 	return "no ledger store on this leg"
 }
-
-var _ = intel.MaxFilesPerBatch
-var _ core.UnitID

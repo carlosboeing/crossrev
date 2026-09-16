@@ -67,8 +67,10 @@ type Review struct {
 	// or the file a checkout reads.
 	Skill []byte
 
-	// Diff is the raw unified diff. It reaches the prompt numbered, so the
-	// number a finding must carry is on the line the model is looking at.
+	// Diff is the raw unified diff the prompt shows under "The diff under
+	// review", numbered so the number a finding must carry is on the line the
+	// model is looking at. The frozen prompt carries the full base-to-head
+	// diff; a batched call carries the slice for its own files.
 	Diff []byte
 
 	Meta    Meta
@@ -253,10 +255,11 @@ func (r Review) Render() []byte {
 	// parity-era prompt keeps its bytes exactly.
 	b.WriteString(renderConfirmation(r.Confirmation))
 
-	// The batch block sits between the full diff and the output instruction:
-	// the diff stays the anchorable whole, and the numbered files are the
-	// readable work this call must account for. Empty batch input renders
-	// nothing, so the frozen parity-era prompt keeps its bytes exactly.
+	// The batch block sits between the diff and the output instruction: a
+	// batched call carries its own files' hunks in the diff section, and the
+	// numbered files are the readable work this call accounts for. Empty
+	// batch input renders nothing, so the frozen parity-era prompt keeps its
+	// bytes exactly.
 	b.WriteString(renderBatch(r.Batch, r.Advisory, r.Excluded))
 
 	b.WriteString("## Output\n\n")

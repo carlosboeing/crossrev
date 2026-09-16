@@ -8,7 +8,9 @@ import (
 	"github.com/carlosboeing/crossrev/internal/core"
 	"github.com/carlosboeing/crossrev/internal/exec"
 	"github.com/carlosboeing/crossrev/internal/forge"
+	"github.com/carlosboeing/crossrev/internal/intel"
 	"github.com/carlosboeing/crossrev/internal/prstate"
+	"github.com/carlosboeing/crossrev/internal/review"
 )
 
 // TestConfirmationReceivesRepairDeltaBeforeFullScope pins the repair
@@ -125,6 +127,52 @@ func TestOutsideDiffFindingKeepsResolutionIdentityWithoutAThread(t *testing.T) {
 	}
 	if len(e.forge.threads) != 0 {
 		t.Fatalf("threads = %d, want 0: the outside-diff finding posts with no thread", len(e.forge.threads))
+	}
+}
+
+// TestConfirmationKeepsTheRepairDeltaWhenTheDiffIsSliced pins that slicing
+// the A-to-C scope to a batch's own files never touches the B-to-C repair
+// delta: the delta is required confirmation input, rendered ahead of the
+// numbered files even when the full diff had to be sliced to fit the budget.
+func TestConfirmationKeepsTheRepairDeltaWhenTheDiffIsSliced(t *testing.T) {
+	e := newEnv(t)
+	writeRequiredHead(e, "repair.go", "package repair\n\nfunc Fixed() int { return 1 }\n")
+	e.forge.diff = []byte("diff --git a/repair.go b/repair.go\n--- a/repair.go\n+++ b/repair.go\n@@ -1,3 +1,3 @@\n-func Broken() int { return 0 }\n+func Fixed() int { return 1 }\n" +
+		"diff --git a/gen/big.go b/gen/big.go\n--- a/gen/big.go\n+++ b/gen/big.go\n@@ -1,1 +1,8001 @@\n context\n" +
+		strings.Repeat("+generated line priced out of every batch\n", 8000))
+	reviewedB := mustRev(t, baseSHA)
+	e.vcs.repair = &fakeRepair{base: reviewedB.SHA(), head: headSHA, bytes: []byte("diff --git a/repair.go b/repair.go\n--- a/repair.go\n+++ b/repair.go\n@@ -1,3 +1,3 @@\n-func Broken() int { return 0 }\n+func Fixed() int { return 1 } // UNIQUE_REPAIR_DELTA\n")}
+	seedResolveMarker(t, e, reviewedB.SHA(), headSHA)
+	prompts := capturePrompt(e)
+	e.runner.script = []exec.Result{
+		{ExitCode: 0, Stdout: claudeStdout(batchAnswerFor(t, []string{"repair.go"}))},
+	}
+	got := runLeg(t, e, e.request(t))
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
+	if got.Outcome != review.OutcomeInvoked {
+		t.Fatalf("Outcome = %q, want invoked (the sliced scope fits; the pass must not halt)", got.Outcome)
+	}
+	if len(*prompts) != 1 {
+		t.Fatalf("prompts = %d, want 1", len(*prompts))
+	}
+	prompt := (*prompts)[0]
+	repairAt := strings.Index(prompt, "## The repair delta to confirm")
+	if repairAt < 0 || !strings.Contains(prompt, "UNIQUE_REPAIR_DELTA") {
+		t.Fatal("prompt dropped the repair delta when the diff was sliced")
+	}
+	if scopeAt := strings.Index(prompt, "The files under review"); scopeAt >= 0 && repairAt > scopeAt {
+		t.Fatal("repair delta follows the numbered files; want it first")
+	}
+	if !strings.Contains(prompt, "b/repair.go") {
+		t.Error("prompt dropped the batch's own A-to-C diff section")
+	}
+	if strings.Contains(prompt, "gen/big.go") {
+		t.Error("prompt carried a diff section the batch does not hold")
+	}
+	if len(prompt) > intel.MaxPromptBytes {
+		t.Errorf("prompt is %d bytes, over the %d budget", len(prompt), intel.MaxPromptBytes)
 	}
 }
 
