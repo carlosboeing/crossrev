@@ -57,7 +57,7 @@ npm install -g crossrev-ai
 
 npm is paused, not dropped. Publishing stops at the last Bash version until the platform packages exist. What is on the registry is 0.5.0, and what follows describes it.
 
-An npm installation supports local commands. `crossrev init` requires a checkout. It reads the Git commit used to pin generated workflows. For the current binary, use the installer above or install from a checkout.
+An npm installation supports local commands. In 0.5.0, `crossrev init` requires a checkout: it reads the Git commit used to pin generated workflows from the directory around it. The current binary carries that commit in its build stamp instead — for that, use the installer above or install from a checkout.
 
 From an existing checkout, run:
 
