@@ -10,7 +10,8 @@
 # moves a tag, and the failure mode is a repository whose review behaviour
 # changes with nothing in its own history to show for it. `crossrev init`
 # generates the pinned form; the floating @v0 in the README is a human choosing
-# convenience knowingly.
+# convenience knowingly. The binary a pinned action runs comes from the VERSION
+# beside it, so the pin governs the behaviour and not just the workflow text.
 name: CrossRev
 description: Review a pull request with one model and resolve the findings with another.
 author: carlosboeing
@@ -75,32 +76,25 @@ runs:
           *) echo "::error::CrossRev ships no binary for $RUNNER_OS/$RUNNER_ARCH (this release builds Linux/X64 and macOS/ARM64)."; exit 1 ;;
         esac
 
-        # The pin is the SHA this action was loaded at, and releases are cut by
-        # tag, so the SHA is resolved to the versioned tag pointing at it. A
-        # tag ref is used as named.
-        ref="${{ github.action_ref }}"
-        if [[ "$ref" =~ ^[0-9a-f]{40}$ ]]; then
-          tag="$(git ls-remote --tags https://github.com/carlosboeing/crossrev.git |
-            awk -v sha="$ref" '
-              /\^\{\}$/ { peeled[$2] = $1; next }
-              { direct[$2] = $1 }
-              END {
-                for (r in peeled) {
-                  t = r; sub(/\^\{\}$/, "", t); sub(/^refs\/tags\//, "", t)
-                  if (peeled[r] == sha && t ~ /^v[0-9]+\.[0-9]+\.[0-9]+$/) { print t; exit }
-                }
-                for (r in direct) {
-                  t = r; sub(/^refs\/tags\//, "", t)
-                  if (direct[r] == sha && t ~ /^v[0-9]+\.[0-9]+\.[0-9]+$/) { print t; exit }
-                }
-              }')"
-          [[ -n "$tag" ]] || {
-            echo "::error::no CrossRev release tag points at $ref, so there is no release to download."
-            exit 1
-          }
-        else
-          tag="$ref"
-        fi
+        # The binary follows the action's own VERSION, read out of the checkout
+        # GitHub loads this action at: the pinned SHA carries the VERSION its
+        # release shipped, so a repository's behaviour changes only when its
+        # pin does. Resolving through the pin itself is what the previous
+        # revision did, and it never worked: github.action_ref arrives empty
+        # here, the empty ref fell through to the tag branch, and every
+        # consumer silently downloaded the latest release whatever the pin
+        # said. An unreadable or unversioned checkout is refused rather than
+        # guessed at.
+        [[ -n "${GITHUB_ACTION_PATH:-}" && -f "$GITHUB_ACTION_PATH/VERSION" ]] || {
+          echo "::error::no VERSION beside the loaded action, so there is no release to download."
+          exit 1
+        }
+        tag="v$(tr -d '[:space:]' < "$GITHUB_ACTION_PATH/VERSION")"
+        [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+          echo "::error::the loaded action names '$tag', which is not a release."
+          exit 1
+        }
+        echo "CrossRev $tag, resolved from the loaded action's own VERSION."
 
         # A checksum tool under either name. macOS ships shasum and no
         # sha256sum; Linux ships sha256sum. Both check the same file format.

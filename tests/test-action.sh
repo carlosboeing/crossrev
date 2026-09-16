@@ -156,5 +156,25 @@ out="$("$CROSSREV" auth refresh --harness codex --repo acme/widget 2>&1)"
 hasnt "auth refresh takes the two flags the action sends it" \
   "$out" "unknown option for auth refresh"
 
+# --- the release the action downloads ----------------------------------
+#
+# The binary follows the action's own VERSION. Regression: resolving through
+# the pin never worked — github.action_ref arrives empty, the empty ref fell
+# through to the tag branch, and every consumer silently downloaded the
+# latest release whatever the pin said. The v0.7.0 proof caught it red: legs
+# pinned at the v0.6.2 commit ran the v0.7.0 binary the hour it published.
+# The download step is read out of action.yml, so a resolution rewritten
+# without these properties fails here rather than in a consumer's
+# repository.
+download_step="$(yq -r '.runs.steps[] | select(.run | test("gh release download")) | .run' "$ACTION")"
+has "the download step reads the action's own VERSION" \
+  "$download_step" "GITHUB_ACTION_PATH/VERSION"
+has "and refuses an unversioned checkout" \
+  "$download_step" "no VERSION beside the loaded action"
+has "and refuses a version that names no release" \
+  "$download_step" "which is not a release"
+hasnt "without resolving through the pin context" \
+  "$download_step" '${{ github.action_ref }}'
+
 finish
 
