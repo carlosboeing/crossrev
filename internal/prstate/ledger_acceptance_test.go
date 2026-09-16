@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -250,6 +251,45 @@ func (s *acceptanceStore) CreateCoverageComment(_ context.Context, _ core.Slug, 
 	s.comments[id] = prstate.CoverageComment{ID: id, Author: "tester", Body: body}
 	s.order = append(s.order, id)
 	return id, nil
+}
+
+// TestLedgerPublishedBodiesCarryAProseLine pins that every comment the ledger
+// publishes renders one identifying human line: without it a pull request
+// collects a row of identical blank boxes showing GitHub's "No description
+// provided." — one per shard plus the manifest. The line names the
+// generation, the shard position and the record count.
+func TestLedgerPublishedBodiesCarryAProseLine(t *testing.T) {
+	oracle := loadLedgerAcceptance(t)
+	g := oracle.Generations[0]
+	store := newAcceptanceStore(t)
+	candidate := acceptanceCandidate(t, g, acceptancePair(t))
+	if _, _, err := prstate.PublishGeneration(context.Background(), store, acceptanceSlug(t), 42, candidate, func() error { return nil }); err != nil {
+		t.Fatalf("PublishGeneration: %v", err)
+	}
+	if len(store.order) != 2 {
+		t.Fatalf("published %d comments, want 2 (one shard, one manifest)", len(store.order))
+	}
+	shardBody := store.comments[store.order[0]].Body
+	wantShard := fmt.Sprintf("Coverage ledger, generation %d, shard 1 of 1 (%d records).", g.Gen, len(g.Records))
+	if !strings.HasPrefix(shardBody, wantShard) {
+		t.Errorf("shard body renders %q, want prefix %q", firstLine(shardBody), wantShard)
+	}
+	if _, ok := prstate.DecodeCoverageShard(shardBody); !ok {
+		t.Error("the published shard body does not decode beneath its prose line")
+	}
+	manifestBody := store.comments[store.order[1]].Body
+	wantManifest := fmt.Sprintf("Coverage ledger, generation %d, manifest (1 shards).", g.Gen)
+	if !strings.HasPrefix(manifestBody, wantManifest) {
+		t.Errorf("manifest body renders %q, want prefix %q", firstLine(manifestBody), wantManifest)
+	}
+	if _, ok := prstate.DecodeCoverageManifest(manifestBody); !ok {
+		t.Error("the published manifest body does not decode beneath its prose line")
+	}
+}
+
+func firstLine(body string) string {
+	line, _, _ := strings.Cut(body, "\n")
+	return line
 }
 
 // TestLedgerAcceptanceOracle publishes every hand-authored generation and
