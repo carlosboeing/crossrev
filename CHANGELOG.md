@@ -12,6 +12,8 @@ All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepa
 
 - **The composite action gains an `auth-refresh` leg.** Token refresh was the last consumer of the source-checkout delivery mode, which v0.6.0 removed; giving the action an `auth-refresh` leg puts release-binary acquisition in exactly one place. The leg forwards no pull-request or loop flags and builds `crossrev auth refresh --harness <harness> --repo <owner/name>` directly.
 
+- **The token-refresh workflow refreshes through the action instead of checking out source.** The v0.6.0 cutover removed `bin/` and `lib/`, so checking out the repository left the workflow with no `crossrev` binary to run. The workflow template now uses the SHA-pinned composite action with `leg: auth-refresh`, ensuring binary verification and download happen in one place.
+
 ## [0.6.1] — 2026-09-06
 
 ### Fixed

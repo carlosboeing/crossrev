@@ -307,3 +307,30 @@ func TestRenderEndsADocumentTheTemplateLeftUnterminated(t *testing.T) {
 		})
 	}
 }
+
+// The golden below this is a byte check, and a byte check is what let the
+// stale `.crossrev-src/bin` line survive the v0.6.0 cutover green: the
+// workflow it locked had not pointed at a real binary since bin/ was deleted.
+// This asserts the property instead, so a future cutover cannot satisfy it
+// with whatever bytes happen to be in testdata.
+func TestRenderedTokenRefreshCallsTheActionAndChecksOutNoSource(t *testing.T) {
+	configuration := `version: 1
+reviewer:
+  harness: codex
+resolver:
+  harness: claude
+`
+	got := rendering(t, configuration, "github-hosted", initcmd.TokenRefreshWorkflowTemplate())
+
+	if strings.Contains(got, ".crossrev-src") {
+		t.Errorf("the rendered token-refresh workflow still checks CrossRev out; "+
+			"v0.6.0 deleted bin/ and lib/, so there is no crossrev on that path:\n%s", got)
+	}
+	if !strings.Contains(got, "uses: carlosboeing/crossrev@") {
+		t.Errorf("the rendered token-refresh workflow does not call the action:\n%s", got)
+	}
+	if !strings.Contains(got, "leg: auth-refresh") {
+		t.Errorf("the rendered token-refresh workflow names no leg:\n%s", got)
+	}
+}
+
