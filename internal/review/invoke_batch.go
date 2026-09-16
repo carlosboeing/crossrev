@@ -7,6 +7,7 @@ import (
 
 	"github.com/carlosboeing/crossrev/internal/core"
 	"github.com/carlosboeing/crossrev/internal/cred"
+	"github.com/carlosboeing/crossrev/internal/diff"
 	"github.com/carlosboeing/crossrev/internal/harness"
 	"github.com/carlosboeing/crossrev/internal/intel"
 	"github.com/carlosboeing/crossrev/internal/prompt"
@@ -28,7 +29,10 @@ func ledgerStoreFor(l *Leg) prstate.LedgerStore {
 // renderBatchPrompt renders one batch's complete prompt — headers, prior
 // context and file content together — for the byte budget the packing
 // measures. It renders through the same Review value the invoke path sends,
-// so the measured bytes are the sent bytes.
+// so the measured bytes are the sent bytes. The diff is sliced to the batch's
+// own files: carrying the whole pull-request diff in every candidate meant a
+// diff past the budget on its own priced even a one-file batch out, and
+// splitting could never shrink the input.
 func (l *Leg) renderBatchPrompt(ctx context.Context, req Request, loaded Context, settings legSettings, pass int, files []intel.FileUnit, scope intel.Scope, confirmation []byte) []byte {
 	expected, units := batchExpectations(files, scope.Base, scope.Head)
 	_ = expected
@@ -37,7 +41,7 @@ func (l *Leg) renderBatchPrompt(ctx context.Context, req Request, loaded Context
 	diffBytes, _ := l.reviewDiff(ctx, loaded)
 	return prompt.Review{
 		Skill:        prompt.ReviewSkill(),
-		Diff:         diffBytes,
+		Diff:         batchDiff(diffBytes, units),
 		Meta:         reviewMeta(loaded, req, pass),
 		Prior:        priorFindings(loaded),
 		Threads:      promptThreads(l.Forge.ReviewThreads(ctx, loaded.Repo, req.PR)),
@@ -47,6 +51,21 @@ func (l *Leg) renderBatchPrompt(ctx context.Context, req Request, loaded Context
 		Excluded:     excludedRefs,
 		Confirmation: confirmation,
 	}.Render()
+}
+
+// batchDiff slices the full diff to one batch's own files: each unit's
+// current path, plus its previous path for a rename or a deletion. The repair
+// delta is not part of this input — Confirmation carries it whole, ahead of
+// the sliced scope.
+func batchDiff(diffBytes []byte, units []prompt.BatchUnit) []byte {
+	paths := make([]string, 0, len(units))
+	for _, u := range units {
+		paths = append(paths, u.Path)
+		if u.OldPath != "" && u.OldPath != u.Path {
+			paths = append(paths, u.OldPath)
+		}
+	}
+	return diff.Parse(diffBytes, core.RevisionPair{}).Only(paths)
 }
 
 // invokeBatch invokes the reviewer for one numbered batch and validates the
@@ -60,7 +79,7 @@ func (l *Leg) invokeBatch(ctx context.Context, req Request, loaded Context, sett
 	}
 	promptBytes := prompt.Review{
 		Skill:        prompt.ReviewSkill(),
-		Diff:         diffBytes,
+		Diff:         batchDiff(diffBytes, units),
 		Meta:         reviewMeta(loaded, req, pass),
 		Prior:        priorFindings(loaded),
 		Threads:      promptThreads(l.Forge.ReviewThreads(ctx, loaded.Repo, req.PR)),
