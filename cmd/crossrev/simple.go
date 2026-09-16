@@ -27,14 +27,19 @@ import (
 // orchestrator asking GitHub who it is and they carry the forge credential;
 // preflight's own nil default is the model-facing runner, which would refuse
 // them and report the operator unauthenticated.
-func doctor(ctx context.Context, out *ui.IO, doc harness.Document) (int, error) {
+func doctor(ctx context.Context, out *ui.IO, doc harness.Document, req cli.DoctorRequest) (int, error) {
 	d := open(out, doc)
 	checker := &preflight.Checker{
 		IO:      out,
 		Runner:  d.orchestrator,
 		Harness: doc,
 	}
-	ok := checker.Check(ctx, preflight.NeedHarness)
+	// Empty is the default, and the default is what the shell did.
+	level := preflight.NeedHarness
+	if req.Level != "" {
+		level = req.Level
+	}
+	ok := checker.Check(ctx, level)
 	if !checker.CheckQuarantine() {
 		ok = false
 	}

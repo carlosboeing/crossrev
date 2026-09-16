@@ -29,8 +29,8 @@ func compose(out *ui.IO, doc harness.Document) (cli.Commands, []string) {
 			return cli.Version(out, cli.InstalledVersion())
 		},
 
-		Doctor: func(ctx context.Context, _ cli.DoctorRequest) (int, error) {
-			return doctor(ctx, out, doc)
+		Doctor: func(ctx context.Context, req cli.DoctorRequest) (int, error) {
+			return doctor(ctx, out, doc, req)
 		},
 		ConfigShow: func(ctx context.Context, _ cli.ConfigRequest) (int, error) {
 			return configShow(ctx, out, doc)

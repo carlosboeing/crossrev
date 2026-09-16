@@ -86,9 +86,16 @@ type WatchdogRequest struct {
 // shell reads its first argument and nothing else (bin/crossrev:157-161).
 type ConfigRequest struct{}
 
-// DoctorRequest is `crossrev doctor`, which reads none of its arguments
-// (bin/crossrev:163-180).
-type DoctorRequest struct{}
+// DoctorRequest is `crossrev doctor`. The shell read none of its arguments
+// (bin/crossrev:163-180); --level is the one option Go adds, because the
+// composite action needs to ask for the lower of the two preflight levels
+// that internal/preflight has always implemented (ADR 0021).
+type DoctorRequest struct {
+	// Level is "core", "harness", or "" for the default. The parser does
+	// not substitute the default, so a request built by any other caller
+	// keeps the harness behaviour the shell had.
+	Level string
+}
 
 // AuthStatusRequest is `crossrev auth status`, which has no argument loop and
 // so refuses nothing (lib/auth.sh:387).
@@ -149,6 +156,16 @@ const (
 	usageAuthInstall = "Run: crossrev auth install [--owner <owner>] [--role loop|refresher]"
 	usageAuthRotate  = "Run: crossrev auth rotate [--owner <owner>] [--role loop|refresher] [--key <downloaded.pem>]"
 	usageAuthRefresh = "Run: crossrev auth refresh [--harness <name>] [--repo owner/name | --org owner] [--secret NAME]"
+	usageDoctor      = "Usage: crossrev doctor [--level core|harness]"
+)
+
+// The two preflight levels, as doctor's --level accepts them. The values match
+// preflight.NeedCore and preflight.NeedHarness byte for byte; cmd/crossrev
+// hands the string straight to Check, so a divergence here silently selects
+// the core set (preflight treats anything that is not "harness" as core).
+const (
+	DoctorLevelCore    = "core"
+	DoctorLevelHarness = "harness"
 )
 
 // harnessOption is the `--harness` fragment the review and resolve usage lines
