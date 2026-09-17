@@ -206,8 +206,8 @@ func (l *Leg) Run(ctx context.Context, req Request) (out Result) {
 	// The pull request that changes no files is settled here without a model
 	// at all: there is nothing to send, and the two sources agree on why.
 	// When they disagree the leg still runs, because GitHub's count can lag a
-	// force-push or a revert and the diff may yet be readable — but the gate
-	// above means the disagreement cannot report a result either.
+	// force-push or a revert and the diff may yet be readable. Such a pass
+	// can still report findings; what the binding above denies it is green.
 	if scopeErr == nil && len(scope.Required) == 0 && loaded.PR.ChangedFiles == 0 {
 		result, state := l.finishNoChangesRun(ctx, req, loaded, ad, cap, claimID, out.Marker, &out)
 		settled = state.settled
