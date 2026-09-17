@@ -241,12 +241,16 @@ func TestALegsWarningGoesToStderr(t *testing.T) {
 	if got.status != 0 {
 		t.Fatalf("status = %d\nstdout: %q\nstderr: %q", got.status, got.stdout, got.stderr)
 	}
-	want := "\n⚠  the reviewer returned verdict 'converged' alongside 1 actionable finding\n" +
-		"   The actionable count outranks the verdict, so the pass is labelled 'awaiting-resolution' to run the resolve leg.\n\n"
+	// Whichever downgrade warning fires — the case is about the stream it
+	// lands on, not which one it is. The coverage gate reaches a converged
+	// verdict first, because Converged refuses any pass holding an
+	// unresolved fixable finding (internal/policy/convergence.go:43).
+	want := "\n⚠  the reviewer returned verdict 'converged' with the coverage obligation unmet\n" +
+		"   The verdict is recorded as issues-remain instead: a green verdict needs every required file covered, no outstanding or unexamined record, a reported scope and any confirmed repair. Nothing here judges the code.\n\n"
 	if !strings.Contains(got.stderr, want) {
 		t.Errorf("stderr =\n%q\nwant it to contain\n%q", got.stderr, want)
 	}
-	if strings.Contains(got.stdout, "outranks the verdict") {
+	if strings.Contains(got.stdout, "coverage obligation unmet") {
 		t.Errorf("the warning also landed on stdout: %q", got.stdout)
 	}
 }

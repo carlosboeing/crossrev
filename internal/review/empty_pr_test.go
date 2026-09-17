@@ -103,3 +103,34 @@ func TestEmptyPullRequestSummaryNamesTheState(t *testing.T) {
 		t.Errorf("summary contains the empty-review sentence, which states a review that never ran\n--- summary ---\n%s", summary)
 	}
 }
+
+// TestEmptyGitScopeNeverConvergesWhenTheAPIDisagrees pins the half of the
+// defect that the first cut of this fix left open. Git enumerates no required
+// file while GitHub still reports a changed count — a lagging read after a
+// force-push or a revert produces exactly that — so the pass is not settled as
+// "nothing to review". It still runs, because the diff comes from the forge
+// and may hold real content. What it may never do is report green: Run binds
+// the coverage obligation on every successful enumeration, and
+// policy.Converged refuses a required count of zero.
+//
+// Without that binding the pass reached the frozen single-prompt path with
+// loaded.Scope nil, both publication gates were skipped, and the stock
+// converged harness reply produced `[crossrev/pass-1 crossrev/converged]` on a
+// pull request nothing had read.
+func TestEmptyGitScopeNeverConvergesWhenTheAPIDisagrees(t *testing.T) {
+	e := newEnv(t)
+	e.forge.pr.ChangedFiles = 1 // GitHub disagrees with git's empty enumeration
+
+	leg := e.leg(t)
+	got := leg.Run(context.Background(), e.request(t))
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
+
+	for _, added := range e.forge.labelsAdded {
+		if added == policy.LabelConverged {
+			t.Fatalf("labelsAdded = %v, want no %q: the required set was empty, so no file was covered",
+				e.forge.labelsAdded, policy.LabelConverged)
+		}
+	}
+}

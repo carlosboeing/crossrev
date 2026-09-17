@@ -167,7 +167,12 @@ func (l *Leg) publish(ctx context.Context, req Request, loaded Context, settings
 	// check PublishGeneration runs before committing the manifest — and
 	// refuse a stale convergence: the label, not the ledger, is what drives
 	// the loop.
-	if loaded.Scope != nil {
+	// A scope that required nothing published no generation, so there is no
+	// convergence to go stale and nothing to re-read for. Binding the scope
+	// on every successful enumeration is what arms the coverage gates above;
+	// it must not also buy a second pull request read on a pass that has no
+	// coverage to protect (forge.PullRequest is one read on purpose).
+	if loaded.Scope != nil && len(loaded.Scope.Required) > 0 {
 		current, err := l.Forge.PullRequest(ctx, loaded.Repo, req.PR)
 		if err != nil {
 			return marker, msgs, state, err
