@@ -2,6 +2,12 @@
 
 All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **A pull request that changes no files is settled without a reviewer, and can never report green.** A branch whose head matches its base — reverted, or overtaken by a merge, rebase or cherry-pick that brought the same work into the base — enumerates no required file. The review leg read that as "no coverage engine available" and fell through to the frozen single-prompt path, where `loaded.Scope` stays nil and both coverage gates in publication are keyed on it being set. Every v0.7.0 convergence rule was therefore skipped, and the model's answer alone decided the label: a model replying `converged` to an empty prompt put `crossrev/converged` on a pull request nothing had reviewed. `policy.Converged` has always refused a required count of zero, and the frozen oracle pins it; nothing asked. The leg now recognises the state when git and GitHub agree the pull request changes no files, records the pass blocked with a reason CrossRev writes rather than a model, applies `crossrev/halted`, and invokes no harness — the observed run spent 20,327 tokens discovering there was nothing to read. The summary comment says so in plain words, naming the comparison rather than a commit, because a revert, a merge and a rebase all reach this state and telling them apart would be a guess. Observed halting on `carlosboeing/crossrev-testbed#24` at v0.7.2, which is the same defect landing on its safe side by chance.
+
 ## [0.7.2] — 2026-09-17
 
 ### Fixed

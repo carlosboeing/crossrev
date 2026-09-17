@@ -190,6 +190,26 @@ func (l *Leg) Run(ctx context.Context, req Request) (out Result) {
 		out.Err = scopeErr
 		return out
 	}
+	// A pull request that changes no files, settled here rather than sent to
+	// a model. Two independent sources have to agree before the leg says so:
+	// git enumerated no required file, and GitHub reports the pull request
+	// changes none. Either one alone is ordinary — a leg with no scope reader
+	// enumerates nothing, and GitHub's count is a different read that can lag
+	// — so the pair is what makes the state safe to act on.
+	//
+	// Falling through instead reaches the frozen single-prompt path below,
+	// where loaded.Scope stays nil. Both coverage gates in publish are keyed
+	// on that being set (publish.go:119, :181), so they are skipped, and the
+	// model's answer alone decides the label. A model answering 'converged'
+	// on an empty prompt then puts crossrev/converged on a pull request
+	// nothing reviewed. Observed halting instead on
+	// carlosboeing/crossrev-testbed#24 at v0.7.2, which is the same defect
+	// landing on its safe side by luck.
+	if scopeErr == nil && len(scope.Required) == 0 && loaded.PR.ChangedFiles == 0 {
+		result, state := l.finishEmptyRun(ctx, req, loaded, ad, cap, claimID, out.Marker, &out)
+		settled = state.settled
+		return result
+	}
 	if scopeErr == nil && ledgerStoreFor(l) != nil && len(scope.Required) > 0 {
 		loaded.Scope = &scope
 		if covErr := l.runCoverage(ctx, req, loaded, settings, ad.pass, claimID, scope, &out); covErr != nil {
