@@ -2,6 +2,12 @@
 
 All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **A pass that enumerates no reviewable file can never report green, and a pull request that changes no files is settled without a reviewer.** A branch whose head matches its base — reverted, or overtaken by a merge, rebase or cherry-pick that brought the same work into the base — enumerates no required file. The review leg read that as "no coverage engine available" and fell through to the frozen single-prompt path, where `loaded.Scope` stays nil and both coverage gates in publication are keyed on it being set. Every convergence rule added in 0.7.0 was therefore skipped, and the model's answer alone decided the label: a model replying `converged` to a prompt with nothing in it put `crossrev/converged` on a pull request nothing had read. `policy.Converged` has always refused a required count of zero, and the frozen oracle pins it; nothing asked. A successful enumeration now binds the pass to its coverage obligation whatever it counted, so a green verdict on an empty set is downgraded rather than believed. Where git and GitHub agree the pull request changes no files, the leg settles the pass itself — blocked, with a reason CrossRev writes rather than a model, `crossrev/halted` applied, and no harness invoked; the observed run spent 20,327 tokens discovering there was nothing to read. Where they disagree, which a lagging API count after a force-push or a revert produces, the pass still runs, because the diff comes from the forge rather than from git and may hold real content — it can report findings, and it cannot report green. The summary names the comparison rather than a commit, because a revert, a merge and a rebase all reach this state and telling them apart would be a guess. It also no longer says a push restarts the loop: the generated review workflow subscribes to `opened`, `ready_for_review` and `labeled`, never to `synchronize`, so the next pass is started by a `/crossrev review` comment or the `crossrev/awaiting-review` label. Observed halting on `carlosboeing/crossrev-testbed#24` at v0.7.2, which is the same defect landing on its safe side by chance.
+
 ## [0.7.2] — 2026-09-17
 
 ### Fixed

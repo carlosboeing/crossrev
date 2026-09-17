@@ -38,6 +38,16 @@ type RenderContext struct {
 	PR      int
 	MinFix  string
 	MaxPass int
+	// NoChanges renders the pull request whose head matches its base, which
+	// git and GitHub agree changes nothing. It is a state of the pull
+	// request rather than a verdict on its code, so it replaces the whole
+	// body: the findings table, the empty-review sentence and the
+	// run-details table all describe a review that did not happen.
+	NoChanges bool
+	// BaseRef and HeadRef name the two branches being compared, for the
+	// NoChanges body only.
+	BaseRef string
+	HeadRef string
 }
 
 const emDash = "—"
@@ -213,6 +223,11 @@ func SummaryBody(findings []Finding, marker prstate.Marker, ctx RenderContext) s
 	var b strings.Builder
 	fmt.Fprintf(&b, "## crossrev review — %s\n\n", PassLabel(pass, ctx.MaxPass))
 
+	if ctx.NoChanges {
+		b.WriteString(noChangesBody(ctx))
+		return b.String()
+	}
+
 	noun := "findings"
 	if n == 1 {
 		noun = "finding"
@@ -266,6 +281,39 @@ func coverageFootnote(marker prstate.Marker) string {
 	}
 	var b strings.Builder
 	b.WriteString(fmt.Sprintf("Coverage generation %d accounts for every required file at the current head; outstanding paths, if any, are listed in the halt record above.\n\n", id))
+	return b.String()
+}
+
+// noChangesBody renders the pull request whose head matches its base.
+//
+// It names no commit. A branch reaches this state by a revert, by a merge or
+// rebase that brought the same work in from the base, or by a cherry-pick
+// upstream, and telling those apart needs history analysis whose answer
+// would still be a guess. The comparison is a fact CrossRev reads directly
+// and holds however the branch got here.
+//
+// It does not tell the reader a push restarts the loop. The generated review
+// workflow subscribes to opened, ready_for_review and labeled, plus issue
+// comments, and never to synchronize (templates/crossrev-review.yml:7-11),
+// so a new commit alone fires nothing. This path also clears the awaiting
+// labels, which is what the watchdog looks for.
+func noChangesBody(ctx RenderContext) string {
+	base, head := ctx.BaseRef, ctx.HeadRef
+	if base == "" {
+		base = "the base branch"
+	}
+	if head == "" {
+		head = "this branch"
+	}
+
+	var b strings.Builder
+	b.WriteString(alert("NOTE", "**Nothing to review.** This pull request's head is identical to its base, so it changes no files. CrossRev stops rather than calling a reviewer with nothing to read."))
+	fmt.Fprintf(&b, "| | |\n|---|---|\n| Comparing | `%s` → `%s` |\n| Files changed | **0** |\n\n", base, head)
+	fmt.Fprintf(&b, "**Why this happens.** Either the branch's changes were undone, or the same work already reached `%s` another way — a merge, a rebase, or a cherry-pick that brought it in. Either way there is no difference left to review.\n\n", base)
+	b.WriteString("**What to do**\n\n")
+	b.WriteString("- **Close this pull request** if the change is no longer wanted.\n")
+	fmt.Fprintf(&b, "- **Add a commit** if it isn't finished, then comment `/crossrev review` to start the next pass. A push on its own does not restart the loop — the review workflow listens for that comment and for the `crossrev/awaiting-review` label, not for new commits. Locally, run `crossrev review --pr %d`.\n\n", ctx.PR)
+	b.WriteString("No reviewer was called, so this pass cost nothing.\n\n")
 	return b.String()
 }
 

@@ -5,8 +5,9 @@
 # here takes effect when it merges.
 #
 # Only what differs from the built-in defaults is set. Everything else — local
-# mode, the pass and file bounds, git.hooks — comes from lib/config.sh.
-version: 1
+# mode, the pass and file bounds, git.hooks — comes from the binary's own
+# defaults in internal/config.
+version: 2
 
 policy:
   # Lower than the shipped default of medium, and deliberately so. CrossRev is a

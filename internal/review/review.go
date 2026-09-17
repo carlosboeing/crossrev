@@ -190,8 +190,30 @@ func (l *Leg) Run(ctx context.Context, req Request) (out Result) {
 		out.Err = scopeErr
 		return out
 	}
-	if scopeErr == nil && ledgerStoreFor(l) != nil && len(scope.Required) > 0 {
+	// A successful enumeration binds the pass to its coverage obligation,
+	// whatever it counted. loaded.Scope being set is what arms both gates in
+	// publication (publish.go:119, :181), and policy.Converged refuses a
+	// required count of zero (internal/policy/convergence.go:50) — so from
+	// here on a green verdict on an empty set is downgraded rather than
+	// believed, and no model answer can put crossrev/converged on a pull
+	// request nothing read. Only errNoScopeReader, which no production leg
+	// reaches because cmd/crossrev/legs.go:124 always supplies a reader,
+	// leaves the obligation unbound.
+	if scopeErr == nil {
 		loaded.Scope = &scope
+	}
+
+	// The pull request that changes no files is settled here without a model
+	// at all: there is nothing to send, and the two sources agree on why.
+	// When they disagree the leg still runs, because GitHub's count can lag a
+	// force-push or a revert and the diff may yet be readable. Such a pass
+	// can still report findings; what the binding above denies it is green.
+	if scopeErr == nil && len(scope.Required) == 0 && loaded.PR.ChangedFiles == 0 {
+		result, state := l.finishNoChangesRun(ctx, req, loaded, ad, cap, claimID, out.Marker, &out)
+		settled = state.settled
+		return result
+	}
+	if scopeErr == nil && ledgerStoreFor(l) != nil && len(scope.Required) > 0 {
 		if covErr := l.runCoverage(ctx, req, loaded, settings, ad.pass, claimID, scope, &out); covErr != nil {
 			out.Outcome = OutcomeError
 			out.Err = covErr

@@ -99,7 +99,13 @@ func TestPublishWarnsWhenVerdictIsConvergedAlongsideActionableFindings(t *testin
 	if got.Err != nil {
 		t.Fatalf("Run: %v", got.Err)
 	}
-	wantWarning := "the reviewer returned verdict 'converged' alongside 1 actionable finding\n   The actionable count outranks the verdict, so the pass is labelled 'awaiting-resolution' to run the resolve leg."
+	// The coverage gate reaches a converged verdict first. A successful
+	// enumeration binds the pass to its obligation, and Converged refuses
+	// any pass holding an unresolved fixable finding
+	// (internal/policy/convergence.go:43), so the downgrade is recorded
+	// with the coverage reason rather than the actionable count. Both
+	// record issues-remain; this is the one production now prints.
+	wantWarning := "the reviewer returned verdict 'converged' with the coverage obligation unmet\n   The verdict is recorded as issues-remain instead: a green verdict needs every required file covered, no outstanding or unexamined record, a reported scope and any confirmed repair. Nothing here judges the code."
 	found := false
 	for _, msg := range ui.Texts(got.Messages) {
 		if msg == wantWarning {

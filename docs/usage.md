@@ -192,7 +192,7 @@ In automated mode the runner is discarded after the job, so the generated workfl
 | awaiting review | A review leg is owed |
 | awaiting resolution | The review landed; the resolve leg is owed |
 | converged | Nothing at or above `min_fix_severity` remains, every required file has an accepted verdict, none is marked `could_not_review`, and any repair has been confirmed |
-| halted | It stopped short — a cap, a blocked leg, an escalated finding, or a deferral whose record never landed. A human is needed |
+| halted | It stopped short — a cap, a blocked leg, an escalated finding, a deferral whose record never landed, or a pull request that changes no files. A human is needed |
 | stopped | Somebody applied `crossrev/stop` |
 
 A resolve pass that ended blocked or escalated is complete but not settled, so it can be driven again. Once whatever stopped it is fixed, `crossrev resolve --pr N` runs the resolver over the same findings instead of refusing. The same goes for a pass that left a deferral unpersisted, and for one whose claimed fix reached no commit. A pass that settled every finding stays finished. `status` names whichever command applies.
@@ -202,6 +202,8 @@ A resolve pass can also finish the loop itself. A pass that settled every findin
 Converged does not mean "no findings". It means no finding this pull request introduced, at or above the threshold, remains, every required file has an accepted verdict, none is marked `could_not_review`, and any repair has been confirmed. Findings below the threshold and pre-existing ones are reported and cannot keep the loop alive — a loop that cannot converge because of a naming quibble is one nobody leaves switched on.
 
 Converged also does not mean checks ran. The coverage record names verification status not_implemented. No check runs in this release.
+
+A pull request that changes no files never converges either. Its head is identical to its base — the branch was reverted, or the same work reached the base by a merge, a rebase or a cherry-pick — so there is no diff to read and no required file to account for. CrossRev settles that pass itself, without calling a reviewer: it posts a summary naming the state and applies `crossrev/halted`. Close the pull request, or add a commit and then comment `/crossrev review` to start the next pass. A push on its own restarts nothing — the generated review workflow subscribes to `opened`, `ready_for_review` and `labeled`, never to `synchronize` — and this path clears the awaiting labels the watchdog looks for. Locally, run `crossrev review --pr N`.
 
 One exception keeps the green honest: a pass that raises nothing new while an escalated finding is still open does not converge. The reviewer does not re-raise a settled finding, so the pass is empty precisely because the loop is waiting on a person — and `halted` stays on the pull request until that person settles the thread and a later pass verifies the settlement.
 

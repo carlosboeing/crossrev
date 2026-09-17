@@ -71,8 +71,12 @@ func TestTheVerdictWarningKeepsItsTwoHalvesApart(t *testing.T) {
 		t.Fatalf("Run: %v", got.Err)
 	}
 
-	const wantCondition = "the reviewer returned verdict 'converged' alongside 1 actionable finding"
-	const wantConsequence = "The actionable count outranks the verdict, so the pass is labelled 'awaiting-resolution' to run the resolve leg."
+	// The two halves of whichever downgrade warning fires. The coverage gate
+	// reaches a converged verdict before the actionable-count one does, so
+	// this is the pair production prints; the split into condition and
+	// consequence is what the case is about, not which warning it is.
+	const wantCondition = "the reviewer returned verdict 'converged' with the coverage obligation unmet"
+	const wantConsequence = "The verdict is recorded as issues-remain instead: a green verdict needs every required file covered, no outstanding or unexamined record, a reported scope and any confirmed repair. Nothing here judges the code."
 
 	var warning ui.Line
 	for _, line := range got.Messages {
