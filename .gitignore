@@ -23,3 +23,8 @@
 # package.json exists for npm distribution only. There is no dependency tree
 # to lock, and the repo has no package manager step.
 package-lock.json
+
+# Playwright MCP writes a page snapshot per navigation into the working
+# directory. They are session artifacts of a browsing run, never input to a
+# build, and they accumulate one file per page visit.
+.playwright-mcp/
