@@ -5,6 +5,7 @@ import (
 	"slices"
 
 	"github.com/carlosboeing/crossrev/internal/core"
+	"github.com/carlosboeing/crossrev/internal/prstate"
 )
 
 // named is the value a refusal quotes, with the word the Bash `${v:-unset}`
@@ -190,6 +191,110 @@ func unknownLayout(layout string) *Refusal {
 		Message: fmt.Sprintf("backlog.repository.layout is '%s', which is not folder or file", layout),
 		Hint:    "Set it to folder or file in the repository config.",
 	}
+}
+
+// assertCoverage refuses a ledger storage configuration CrossRev does not
+// recognise.
+//
+// Read leniently, `store: comments` would fall through to whichever branch is
+// not `auto`, so a repository that meant to pin the ref store would silently
+// take the fallback — and `ref_namespace: refs/heads` would write branches,
+// which the blast-radius contract promises CrossRev never creates. The
+// namespace rule itself lives in prstate beside the ref name it guards, so the
+// two cannot drift; this is the load-time half of that check.
+func (c *Config) assertCoverage() error {
+	if err := requireMappingAt(c.Merged, ".coverage"); err != nil {
+		return err
+	}
+	switch store := c.Get(".coverage.store"); store {
+	case "", "auto", "refs", "marker":
+	default:
+		return &Refusal{
+			Message: fmt.Sprintf("coverage.store is '%s', which is not one of auto, refs or marker", store),
+			Hint:    "It decides where the coverage ledger is written. Set it to auto, refs or marker in the repository config, or remove it to take the default of auto.",
+		}
+	}
+	switch overflow := c.Get(".coverage.on_overflow"); overflow {
+	case "", "degrade", "halt":
+	default:
+		return &Refusal{
+			Message: fmt.Sprintf("coverage.on_overflow is '%s', which is not one of degrade or halt", overflow),
+			Hint:    "It decides whether a generation that does not fit the marker store is published in a compact form or stops the leg. Set it to degrade or halt in the repository config, or remove it to take the default of degrade.",
+		}
+	}
+	if namespace := c.Get(".coverage.ref_namespace"); namespace != "" {
+		if err := prstate.ValidNamespace(namespace); err != nil {
+			return &Refusal{
+				Message: fmt.Sprintf("coverage.ref_namespace is '%s', which CrossRev must not write to (%s)", namespace, err),
+				Hint:    "It must be under refs/ and outside refs/heads, refs/tags, refs/pull and refs/remotes, with no empty component and none of the characters git forbids in a ref. Set it in the repository config, or remove it to take the default of refs/crossrev.",
+			}
+		}
+	}
+	return nil
+}
+
+// assertReviewers refuses a reviewers list that is not one usable slot.
+//
+// A list of two or more is refused as not yet supported rather than parsed:
+// nothing in this release executes a panel, and a configuration that parses
+// while nothing runs it is worse than one that refuses. The slot ids are
+// checked here for the reason the namespace is checked in assertCoverage —
+// they address refs, and the rule lives in prstate beside the name it guards.
+func (c *Config) assertReviewers() error {
+	value := lookup(c.Merged, ".reviewers")
+	if value == nil {
+		return nil
+	}
+	list, ok := value.([]any)
+	if !ok {
+		return &Refusal{
+			Message: "reviewers is " + shapeOf(value) + ", which is not a list",
+			Hint:    "It holds one reviewer slot per entry, each with an id and a harness. Correct it where it is set, or remove it to keep the reviewer: shorthand.",
+		}
+	}
+	if len(list) == 0 {
+		return &Refusal{
+			Message: "reviewers is empty, and the review leg needs one reviewer to run",
+			Hint:    "Name one entry, or remove reviewers: to keep the reviewer: shorthand.",
+		}
+	}
+	for _, item := range list {
+		slot, ok := item.(*Object)
+		if !ok {
+			return &Refusal{
+				Message: "a reviewers entry is " + shapeOf(item) + ", which is not a mapping",
+				Hint:    "Each entry names one reviewer slot with an id and a harness. Correct it where it is set.",
+			}
+		}
+		id := alternative(slot.Value("id"))
+		if id == "" {
+			continue
+		}
+		if err := prstate.ValidSlot(id); err != nil {
+			return &Refusal{
+				Message: fmt.Sprintf("a reviewers id is '%s', which cannot address a ledger ref (%s)", id, err),
+				Hint:    "A slot id is one path component starting with a letter or digit, up to 64 characters of letters, digits, dots, underscores and dashes. Correct it where it is set, or omit it to take reviewer1.",
+			}
+		}
+	}
+	if len(list) > 1 {
+		return &Refusal{
+			Message: fmt.Sprintf("the config names %d reviewers, and CrossRev runs one reviewer in this release", len(list)),
+			Hint:    "CrossRev runs one reviewer in this release. Name one entry, or use the `reviewer:` shorthand.",
+		}
+	}
+	return nil
+}
+
+// assertReviewer refuses a singular reviewer that holds something keys cannot
+// be read out of.
+//
+// Without it `reviewer: claude` loads and runs codex: the harness lookup
+// answers nothing for a string, and the empty answer falls back to the
+// default. That is the same wrong-harness fault the canonical resolver closes
+// for the plural shape, arriving through the singular one.
+func (c *Config) assertReviewer() error {
+	return requireMappingAt(c.Merged, ".reviewer")
 }
 
 // forgeCredentialNames are the GitHub credential names `gh` reads, in its own
