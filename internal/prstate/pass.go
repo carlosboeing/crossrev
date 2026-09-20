@@ -93,6 +93,11 @@ type Marker struct {
 	CoverageStop        Opt[CoverageStop] `json:"coverage_stop,omitzero"`
 	ConfirmationBaseSHA Opt[string]       `json:"confirmation_base_sha,omitzero"`
 	ConfirmationHeadSHA Opt[string]       `json:"confirmation_head_sha,omitzero"`
+	// CoveragePayload is the generation the marker store carries inline, and
+	// CoveragePrevPayload its predecessor, retained only while it fits. Both
+	// absent for the ref store.
+	CoveragePayload     json.RawMessage   `json:"coverage_payload,omitzero"`
+	CoveragePrevPayload json.RawMessage   `json:"coverage_prev_payload,omitzero"`
 
 	// commentID is which comment the marker was read off, and raw is the
 	// bytes it was read as. Both are unexported so no encoder can reach
@@ -142,7 +147,7 @@ func (m Marker) Raw() json.RawMessage { return bytes.Clone(m.raw) }
 // input". Every reader here already reads a zero-length payload as absent —
 // DecodeFindings and DecodeResolutions both — so the writer agrees with them.
 func (m Marker) MarshalJSON() ([]byte, error) {
-	for _, payload := range []*json.RawMessage{&m.Tokens, &m.Usage, &m.Findings, &m.Resolutions} {
+	for _, payload := range []*json.RawMessage{&m.Tokens, &m.Usage, &m.Findings, &m.Resolutions, &m.CoveragePayload, &m.CoveragePrevPayload} {
 		if len(*payload) == 0 {
 			*payload = nil
 		}
@@ -250,6 +255,8 @@ func (m Marker) clone() Marker {
 	m.Usage = bytes.Clone(m.Usage)
 	m.Findings = bytes.Clone(m.Findings)
 	m.Resolutions = bytes.Clone(m.Resolutions)
+	m.CoveragePayload = bytes.Clone(m.CoveragePayload)
+	m.CoveragePrevPayload = bytes.Clone(m.CoveragePrevPayload)
 	return m
 }
 

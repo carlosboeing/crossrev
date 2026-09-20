@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/carlosboeing/crossrev/internal/core"
@@ -178,7 +179,7 @@ func FixtureGeneration(t interface{ Fatal(...any); Helper() }, form string) prst
 	if err != nil {
 		t.Fatal(err)
 	}
-	return prstate.Generation{
+	full := prstate.Generation{
 		Gen:      1,
 		Revision: core.RevisionPair{Base: base, Head: head},
 		Engine:   core.FileEngineVersion,
@@ -189,12 +190,46 @@ func FixtureGeneration(t interface{ Fatal(...any); Helper() }, form string) prst
 			Effort:   "medium",
 			Endpoint: "https://api.openai.com/v1",
 		},
-		Form:  form,
+		Form:  prstate.GenerationFull,
 		Paths: []string{"file1.go", "file2.go"},
 		Records: []prstate.Record{
-			{PathIndex: 0, Type: prstate.CoverageRecordUnit, Verdict: prstate.Some("no_issue")},
+			{
+				Type:       prstate.CoverageRecordUnit,
+				UnitID:     "0123456789abcdef",
+				PathIndex:  0,
+				Kind:       prstate.CoverageGranularityFile,
+				Change:     "modified",
+				BodyDigest: strings.Repeat("a", 64),
+				Verdict:    prstate.Some("no_issue"),
+				FindingIDs: []string{},
+				Evidence:   []prstate.Evidence{},
+				Reason:     prstate.Null[string](),
+				Supplied:   prstate.Some(prstate.SuppliedInput{Digest: strings.Repeat("c", 64), Form: "full_text", Truncated: false}),
+				Reaction:   prstate.UnimplementedReaction(),
+			},
+			{
+				Type:       prstate.CoverageRecordUnit,
+				UnitID:     "fedcba9876543210",
+				PathIndex:  1,
+				Kind:       prstate.CoverageGranularityFile,
+				Change:     "added",
+				BodyDigest: strings.Repeat("b", 64),
+				Verdict:    prstate.Some("no_issue"),
+				FindingIDs: []string{},
+				Evidence:   []prstate.Evidence{},
+				Reason:     prstate.Null[string](),
+				Supplied:   prstate.Some(prstate.SuppliedInput{Digest: strings.Repeat("d", 64), Form: "full_text", Truncated: false}),
+				Reaction:   prstate.UnimplementedReaction(),
+			},
 		},
+		Advisory:    prstate.Advisory{Rules: []string{}, Limits: []prstate.AdvisoryLimit{}},
+		Excluded:    []prstate.CoverageExclusion{},
+		ScopeReport: prstate.ScopeReport{ExaminedScope: "scope", KnownLimits: []string{}},
 	}
+	if form == prstate.GenerationCompact {
+		return prstate.CompactGeneration(full)
+	}
+	return full
 }
 
 // FixtureSlotRef creates a valid SlotRef for testing.

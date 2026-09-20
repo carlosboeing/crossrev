@@ -4,15 +4,15 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"github.com/carlosboeing/crossrev/internal/harness"
-	"github.com/carlosboeing/crossrev/internal/prstate"
 	"os"
 	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/carlosboeing/crossrev/internal/core"
 	"github.com/carlosboeing/crossrev/internal/exec"
-
+	"github.com/carlosboeing/crossrev/internal/harness"
+	"github.com/carlosboeing/crossrev/internal/prstate"
 	"github.com/carlosboeing/crossrev/internal/ui"
 )
 
@@ -304,5 +304,39 @@ func TestAutomaticDraftRefusalNamesNeitherLeg(t *testing.T) {
 	}
 	if texts := ui.Texts(got.Messages); !reflect.DeepEqual(texts, want) {
 		t.Fatalf("messages = %q, want %q", texts, want)
+	}
+}
+
+// The resolve leg rewrites the review marker directly (mutate.go:146),
+// bypassing editClaim. It is bounded too.
+func TestTheResolveLegsReviewMarkerRewriteIsBounded(t *testing.T) {
+	e := setup(t)
+	// A review marker with a payload that fitted when posted,
+	// but when the resolve leg updates findings and appends the review summary,
+	// the whole comment exceeds CommentCap.
+	bigPayload := json.RawMessage(`{"dummy":"` + strings.Repeat("x", 63*1024+100) + `"}`)
+	m := prstate.Marker{
+		Version:         core.MarkerVersion,
+		Leg:             core.LegReview,
+		Pass:            1,
+		State:           core.PassComplete,
+		TS:              e.now.Unix() - 60,
+		RunID:           prstate.Some("review-run"),
+		HeadSHA:         prstate.Some(e.head.SHA()),
+		Harness:         prstate.Some("codex"),
+		Verdict:         prstate.Some("issues-remain"),
+		Findings:        defaultFindings(),
+		CoveragePayload: bigPayload,
+	}
+	e.postMarker(t, 9001, m)
+
+	got := e.run(t)
+	if got.Err == nil {
+		t.Fatal("expected resolve leg to fail when review marker rewrite exceeds CommentCap")
+	}
+	for _, edit := range e.forge.edits {
+		if len(edit.Body) > prstate.CommentCap {
+			t.Fatalf("a marker comment of %d bytes was written; the cap is %d", len(edit.Body), prstate.CommentCap)
+		}
 	}
 }

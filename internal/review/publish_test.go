@@ -339,3 +339,40 @@ func TestPublishLabelWarningContainsFullText(t *testing.T) {
 		t.Errorf("messages = %q, want warning %q", got.Messages, wantWarning)
 	}
 }
+
+// The case publication alone cannot catch: the payload fitted at the
+// checkpoint, and the summary written after it does not.
+func TestAPayloadThatFitsAtPublicationAndOverflowsAtTheSummaryEdit(t *testing.T) {
+	e := newEnv(t)
+	writeAppGo(t, e.dir)
+	// A coverage payload that fitted at the checkpoint (<= 65536),
+	// and fitted at the findings-recorded edit, but when the summary prose is
+	// appended at editClaim, the whole comment exceeds CommentCap.
+	bigPayload := json.RawMessage(`{"dummy":"` + strings.Repeat("x", 63*1024+100) + `"}`)
+	claimMarker := prstate.Marker{
+		Version:         core.MarkerVersion,
+		Leg:             core.LegReview,
+		Pass:            1,
+		State:           core.PassStarted,
+		TS:              frozenNow.Unix(),
+		RunID:           prstate.Some(runID),
+		HeadSHA:         prstate.Some(headSHA),
+		Harness:         prstate.Some("claude"),
+		CoveragePayload: bigPayload,
+	}
+	claimID := int64(9001)
+	e.forge.comments = []forge.IssueComment{
+		commentWithMarker(t, claimID, claimMarker),
+	}
+	e.runner.script = []exec.Result{{ExitCode: 0, Stdout: claudeStdout(convergedPayload())}}
+	got := runLeg(t, e, e.request(t))
+	if got.Err == nil {
+		t.Fatal("expected summary edit exceeding CommentCap to fail")
+	}
+	for _, body := range e.forge.edits {
+		if len(body) > prstate.CommentCap {
+			t.Fatalf("a marker comment of %d bytes was written; the cap is %d", len(body), prstate.CommentCap)
+		}
+	}
+}
+

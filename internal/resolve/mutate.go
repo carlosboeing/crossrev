@@ -143,6 +143,9 @@ func (l *Leg) publish(ctx context.Context, s *session, got Result, workdir strin
 	if err != nil {
 		return fail(err)
 	}
+	if err := prstate.FitMarkerComment(reviewBody + encodedReview); err != nil {
+		return fail(err)
+	}
 	if err := l.Forge.CommentEdit(ctx, s.repo, s.review.CommentID(), reviewBody+encodedReview); err != nil {
 		return fail(err)
 	}

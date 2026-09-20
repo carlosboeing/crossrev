@@ -292,6 +292,9 @@ func (l *Leg) editClaim(ctx context.Context, repo core.Slug, claimID int64, body
 	if err != nil {
 		return err
 	}
+	if err := prstate.FitMarkerComment(body + encoded); err != nil {
+		return err
+	}
 	if err := l.Forge.CommentEdit(ctx, repo, claimID, body+encoded); err != nil {
 		return &ui.FatalError{
 			Reason: fmt.Sprintf("could not update comment %d on %s", claimID, repo),
