@@ -194,6 +194,17 @@ func (c *Client) run(ctx context.Context, args ...string) exec.Result {
 	})
 }
 
+// runInput is run with a request body on stdin. `gh api --input -` reads it,
+// which is how a payload larger than an argument list reaches the API.
+func (c *Client) runInput(ctx context.Context, body []byte, args ...string) exec.Result {
+	return c.runner.Run(ctx, exec.Spec{
+		Path:  program,
+		Args:  args,
+		Env:   c.env,
+		Stdin: body,
+	})
+}
+
 // publishNotice is what stands in for a body the filter could not process. It
 // is the text log_redact_publish prints in the same case (lib/log.sh:155).
 const publishNotice = "CrossRev could not filter this text for credential shapes, so it withheld it rather than publishing it."

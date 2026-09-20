@@ -42,6 +42,40 @@ emit() {
   fi
 }
 
+hash_stdin() {
+  if command -v shasum >/dev/null 2>&1; then
+    shasum | awk '{print $1}'
+  else
+    sha1sum | awk '{print $1}'
+  fi
+}
+
+match_routes() {
+  if [[ -f "${CROSSREV_GH_ROUTES:-/nonexistent}" ]]; then
+    while IFS=$'\t' read -r pat resp; do
+      [[ -n "${pat:-}" ]] || continue
+      # shellcheck disable=SC2053  # the pattern is a glob on purpose
+      if [[ "$joined" == $pat ]]; then
+        # Checked before the pipeline, not inside it: `exit 1` on the left of a pipe
+        # runs in a subshell, so the stub would exit 0 and every "this call fails"
+        # fixture would silently succeed.
+        [[ "${resp:-}" == "!fail" ]] && exit 1
+        if [[ "${resp:-}" == @* ]]; then
+          cat "${resp#@}"
+        else
+          printf '%s\n' "${resp:-}"
+        fi | emit
+        exit 0
+      fi
+    done <"$CROSSREV_GH_ROUTES"
+  fi
+}
+
+stdin_payload=""
+if [[ "$joined" == *"--input -"* ]]; then
+  stdin_payload="$(cat)"
+fi
+
 # Stateful coverage read-back for the Review Intelligence ledger. The ledger
 # publishes a shard, reads it back by comment id, rechecks the revision,
 # then publishes the manifest last — so the stub must answer what was
@@ -117,26 +151,159 @@ if [[ -n "${CROSSREV_GH_STATE:-}" ]]; then
       exit 0
     fi
   fi
-fi
 
-if [[ -f "${CROSSREV_GH_ROUTES:-/nonexistent}" ]]; then
-  while IFS=$'\t' read -r pat resp; do
-    [[ -n "${pat:-}" ]] || continue
-    # shellcheck disable=SC2053  # the pattern is a glob on purpose
-    if [[ "$joined" == $pat ]]; then
-      # Checked before the pipeline, not inside it: `exit 1` on the left of a pipe
-      # runs in a subshell, so the stub would exit 0 and every "this call fails"
-      # fixture would silently succeed.
-      [[ "${resp:-}" == "!fail" ]] && exit 1
-      if [[ "${resp:-}" == @* ]]; then
-        cat "${resp#@}"
-      else
-        printf '%s\n' "${resp:-}"
-      fi | emit
+  # Git object API
+  if [[ "$joined" == *"git/"* ]]; then
+    match_routes
+
+    # 1. POST /git/blobs
+    if [[ "$joined" == "api --method POST repos/"*"/git/blobs"* ]]; then
+      content=""
+      if [[ -n "$stdin_payload" ]]; then
+        content="$(jq -r '.content // ""' <<<"$stdin_payload")"
+      fi
+      sha="$(printf '%s' "$content" | hash_stdin)"
+      printf '%s' "$content" >"$CROSSREV_GH_STATE/blob-$sha"
+      printf '{"sha":"%s"}\n' "$sha" | emit
       exit 0
     fi
-  done <"$CROSSREV_GH_ROUTES"
+
+    # 2. GET /git/blobs/<sha>
+    if [[ "$joined" == "api repos/"*"/git/blobs/"* && "$joined" != *"--method"* ]]; then
+      sha="${joined##*git/blobs/}"
+      sha="${sha%% *}"
+      if [[ "$sha" == "corrupt00000000000000000000000000000000" || "$sha" == "corrupt-blob" ]]; then
+        printf '{"sha":"%s","content":"{corrupt-json","encoding":"utf-8"}\n' "$sha" | emit
+        exit 0
+      fi
+      if [[ -f "$CROSSREV_GH_STATE/blob-$sha" ]]; then
+        content="$(cat "$CROSSREV_GH_STATE/blob-$sha")"
+        jq -cn --arg sha "$sha" --arg content "$content" '{sha:$sha, content:$content, encoding:"utf-8"}' | emit
+        exit 0
+      fi
+      printf '{"message":"Not Found"}\n' >&2
+      exit 1
+    fi
+
+    # 3. POST /git/trees
+    if [[ "$joined" == "api --method POST repos/"*"/git/trees"* ]]; then
+      sha="$(printf '%s' "$stdin_payload" | hash_stdin)"
+      printf '%s' "$stdin_payload" >"$CROSSREV_GH_STATE/tree-$sha"
+      printf '{"sha":"%s"}\n' "$sha" | emit
+      exit 0
+    fi
+
+    # 4. GET /git/trees/<sha>
+    if [[ "$joined" == "api repos/"*"/git/trees/"* && "$joined" != *"--method"* ]]; then
+      sha="${joined##*git/trees/}"
+      sha="${sha%% *}"
+      if [[ "$sha" == "corrupt00000000000000000000000000000000" || "$sha" == "corrupt-tree" ]]; then
+        printf '{"sha":"%s","tree":[{"path":"manifest.json","type":"blob","sha":"corrupt-blob"},{"path":"records.json","type":"blob","sha":"corrupt-blob"}]}\n' "$sha" | emit
+        exit 0
+      fi
+      if [[ -f "$CROSSREV_GH_STATE/tree-$sha" ]]; then
+        tree_json="$(jq -c '.tree // []' "$CROSSREV_GH_STATE/tree-$sha")"
+        jq -cn --arg sha "$sha" --argjson tree "$tree_json" '{sha:$sha, tree:$tree}' | emit
+        exit 0
+      fi
+      printf '{"message":"Not Found"}\n' >&2
+      exit 1
+    fi
+
+    # 5. POST /git/commits
+    if [[ "$joined" == "api --method POST repos/"*"/git/commits"* ]]; then
+      sha="$(printf '%s' "$stdin_payload" | hash_stdin)"
+      printf '%s' "$stdin_payload" >"$CROSSREV_GH_STATE/commit-$sha"
+      printf '{"sha":"%s"}\n' "$sha" | emit
+      exit 0
+    fi
+
+    # 6. GET /git/commits/<sha>
+    if [[ "$joined" == "api repos/"*"/git/commits/"* && "$joined" != *"--method"* ]]; then
+      sha="${joined##*git/commits/}"
+      sha="${sha%% *}"
+      if [[ "$sha" == "corrupt00000000000000000000000000000000" ]]; then
+        printf '{"sha":"corrupt00000000000000000000000000000000","tree":{"sha":"corrupt-tree"},"message":"corrupt"}\n' | emit
+        exit 0
+      fi
+      if [[ -f "$CROSSREV_GH_STATE/commit-$sha" ]]; then
+        tree="$(jq -r '.tree // ""' "$CROSSREV_GH_STATE/commit-$sha")"
+        msg="$(jq -r '.message // ""' "$CROSSREV_GH_STATE/commit-$sha")"
+        jq -cn --arg sha "$sha" --arg tree "$tree" --arg msg "$msg" '{sha:$sha, tree:{sha:$tree}, message:$msg}' | emit
+        exit 0
+      fi
+      printf '{"message":"Not Found"}\n' >&2
+      exit 1
+    fi
+
+    # 7. POST /git/refs
+    if [[ "$joined" == "api --method POST repos/"*"/git/refs"* ]]; then
+      ref=""
+      sha=""
+      if [[ -n "$stdin_payload" ]]; then
+        ref="$(jq -r '.ref // empty' <<<"$stdin_payload")"
+        sha="$(jq -r '.sha // empty' <<<"$stdin_payload")"
+      fi
+      if [[ -z "$ref" || -z "$sha" ]]; then
+        for a in "$@"; do
+          [[ "$a" == ref=* ]] && ref="${a#ref=}"
+          [[ "$a" == sha=* ]] && sha="${a#sha=}"
+        done
+      fi
+      ref_enc="$(printf '%s' "$ref" | tr '/' '_')"
+      ref_no_prefix="${ref#refs/}"
+      ref_enc2="$(printf '%s' "$ref_no_prefix" | tr '/' '_')"
+      if [[ -f "$CROSSREV_GH_STATE/ref-$ref_enc" ]]; then
+        printf '{"message":"Reference already exists"}\n' >&2
+        exit 1
+      fi
+      jq -cn --arg ref "$ref" --arg sha "$sha" '{ref:$ref, object:{sha:$sha, type:"commit"}}' >"$CROSSREV_GH_STATE/ref-$ref_enc"
+      cp "$CROSSREV_GH_STATE/ref-$ref_enc" "$CROSSREV_GH_STATE/ref-$ref_enc2"
+      cat "$CROSSREV_GH_STATE/ref-$ref_enc" | emit
+      exit 0
+    fi
+
+    # 8. PATCH /git/refs/<ref>
+    if [[ "$joined" == "api --method PATCH repos/"*"/git/refs/"* ]]; then
+      ref_path="${joined##*git/refs/}"
+      ref_path="${ref_path%% *}"
+      ref="refs/${ref_path#refs/}"
+      sha=""
+      if [[ -n "$stdin_payload" ]]; then
+        sha="$(jq -r '.sha // empty' <<<"$stdin_payload")"
+      fi
+      if [[ -z "$sha" ]]; then
+        for a in "$@"; do
+          [[ "$a" == sha=* ]] && sha="${a#sha=}"
+        done
+      fi
+      ref_enc="$(printf '%s' "$ref" | tr '/' '_')"
+      ref_no_prefix="${ref#refs/}"
+      ref_enc2="$(printf '%s' "$ref_no_prefix" | tr '/' '_')"
+      jq -cn --arg ref "$ref" --arg sha "$sha" '{ref:$ref, object:{sha:$sha, type:"commit"}}' >"$CROSSREV_GH_STATE/ref-$ref_enc"
+      cp "$CROSSREV_GH_STATE/ref-$ref_enc" "$CROSSREV_GH_STATE/ref-$ref_enc2"
+      cat "$CROSSREV_GH_STATE/ref-$ref_enc" | emit
+      exit 0
+    fi
+
+    # 9. GET /git/ref/<ref>
+    if [[ ( "$joined" == "api repos/"*"/git/ref/"* || "$joined" == "api repos/"*"/git/refs/"* ) && "$joined" != *"--method"* ]]; then
+      ref_path="${joined##*git/ref/}"
+      [[ "$joined" == *"git/refs/"* ]] && ref_path="${joined##*git/refs/}"
+      ref_path="${ref_path%% *}"
+      ref="refs/${ref_path#refs/}"
+      ref_enc="$(printf '%s' "$ref" | tr '/' '_')"
+      if [[ -f "$CROSSREV_GH_STATE/ref-$ref_enc" ]]; then
+        cat "$CROSSREV_GH_STATE/ref-$ref_enc" | emit
+        exit 0
+      fi
+      printf '{"message":"Not Found"}\n' >&2
+      exit 1
+    fi
+  fi
 fi
+
+match_routes
 
 # Unmatched writes succeed and return nothing useful, which is the honest default:
 # a test that cares asserts on the log.
