@@ -475,7 +475,7 @@ func (f *fakeForge) CreateCoverageComment(_ context.Context, _ core.Slug, _ int,
 	return 0, errors.New("the resolve fixture never publishes coverage")
 }
 
-var _ prstate.LedgerStore = (*fakeForge)(nil)
+var _ prstate.CommentStore = (*fakeForge)(nil)
 
 func (f *fakeForge) ReviewReply(_ context.Context, repo core.Slug, number int, rootCommentID int64, body string) error {
 	f.note("ReviewReply")

@@ -295,7 +295,7 @@ func (f *fakeLedger) CreateCoverageComment(_ context.Context, _ core.Slug, _ int
 	return id, nil
 }
 
-var _ prstate.LedgerStore = (*fakeLedger)(nil)
+var _ prstate.CommentStore = (*fakeLedger)(nil)
 
 type fakeForge struct {
 	ledger          *fakeLedger
@@ -348,7 +348,7 @@ func (f *fakeForge) CreateCoverageComment(ctx context.Context, repo core.Slug, n
 	return f.ledger.CreateCoverageComment(ctx, repo, number, body)
 }
 
-var _ prstate.LedgerStore = (*fakeForge)(nil)
+var _ prstate.CommentStore = (*fakeForge)(nil)
 
 func (f *fakeForge) RepoSlug(context.Context) (core.Slug, error) {
 	return core.ParseSlug("acme/widget")

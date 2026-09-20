@@ -101,13 +101,13 @@ func openLog(repo core.Slug, pr int, retention string, keep bool, leg string) *r
 
 // ledgerStore is the coverage ledger over the same orchestrator-facing
 // GitHub client every other read and write uses. The client already
-// implements prstate.LedgerStore, so this is a conversion and not a second
+// implements prstate.CommentStore, so this is a conversion and not a second
 // client: the ledger's `gh` calls inherit the allowlist and the runner the
 // boundary pins, and the store never reaches a model-facing process. The
 // review leg converts the same way per call (ledgerStoreFor); this stays
 // the tested composition-root conversion.
-func ledgerStore(client forge.Forge) prstate.LedgerStore {
-	store, ok := client.(prstate.LedgerStore)
+func ledgerStore(client forge.Forge) prstate.CommentStore {
+	store, ok := client.(prstate.CommentStore)
 	if !ok {
 		return nil
 	}

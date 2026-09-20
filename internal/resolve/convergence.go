@@ -24,7 +24,7 @@ import (
 // keeps its legacy label. Corrupt state is never absence: it fails closed.
 func (l *Leg) resolveConvergence(ctx context.Context, s *session) (policy.Convergence, bool) {
 	var conv policy.Convergence
-	store, ok := l.Forge.(prstate.LedgerStore)
+	store, ok := l.Forge.(prstate.CommentStore)
 	if !ok || store == nil {
 		return conv, false
 	}
@@ -65,7 +65,9 @@ func (l *Leg) resolveConvergence(ctx context.Context, s *session) (policy.Conver
 }
 
 // isAbsence reports the one SelectGeneration failure that is not a refusal:
-// no complete generation exists at this revision pair.
+// no complete generation exists at this revision pair. It answers whether
+// coverage was ever claimed under the comment store; Task 8 moves this question
+// to marker.CoverageHandle().
 func isAbsence(err error) bool {
 	return errors.Is(err, prstate.ErrNoCompleteGeneration)
 }

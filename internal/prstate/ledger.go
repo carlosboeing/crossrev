@@ -24,7 +24,7 @@ import (
 // Crossing MaxCoverageShards stops with ledger stop diagnostics while the
 // last complete generation stands. The stop carries the measured totals and
 // the limit name; it never counts as a complete generation.
-func PublishGeneration(ctx context.Context, store LedgerStore, repo core.Slug, number int, candidate Generation, stillCurrent func() error) (Manifest, CoverageStop, error) {
+func PublishGeneration(ctx context.Context, store CommentStore, repo core.Slug, number int, candidate Generation, stillCurrent func() error) (Manifest, CoverageStop, error) {
 	if candidate.Revision.Incomplete() {
 		return Manifest{}, CoverageStop{}, coverageErrorf("publishing a generation with no revision pair")
 	}

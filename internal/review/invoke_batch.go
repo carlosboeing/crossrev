@@ -19,11 +19,11 @@ import (
 
 // ledgerStoreFor returns the coverage ledger over the leg's forge client, or
 // nil when the client does not implement the store contract.
-func ledgerStoreFor(l *Leg) prstate.LedgerStore {
+func ledgerStoreFor(l *Leg) prstate.CommentStore {
 	if l == nil || l.Forge == nil {
 		return nil
 	}
-	store, _ := l.Forge.(prstate.LedgerStore)
+	store, _ := l.Forge.(prstate.CommentStore)
 	return store
 }
 

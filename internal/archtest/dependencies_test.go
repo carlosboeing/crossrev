@@ -180,8 +180,8 @@ func TestProductionTierDAG(t *testing.T) {
 			relPath = strings.TrimPrefix(pkgPath, modulePrefix)
 		}
 
-		// Exclude archtest and testgen from production DAG validation
-		if strings.HasPrefix(relPath, "internal/archtest") || strings.HasPrefix(relPath, "internal/testgen") {
+		// Exclude archtest, testgen and storetest from production DAG validation
+		if strings.HasPrefix(relPath, "internal/archtest") || strings.HasPrefix(relPath, "internal/testgen") || strings.HasPrefix(relPath, "internal/prstate/storetest") {
 			continue
 		}
 

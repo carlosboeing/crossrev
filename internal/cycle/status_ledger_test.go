@@ -45,7 +45,7 @@ func (l *statusLedger) CreateCoverageComment(_ context.Context, _ core.Slug, _ i
 	return id, nil
 }
 
-var _ prstate.LedgerStore = (*statusLedger)(nil)
+var _ prstate.CommentStore = (*statusLedger)(nil)
 
 // statusPublishGeneration publishes one complete generation the way the
 // review leg does, and answers the conversation comments carrying it and the

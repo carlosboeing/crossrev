@@ -137,4 +137,4 @@ func decodeLedgerComment(b []byte) (prstate.CoverageComment, error) {
 	}, nil
 }
 
-var _ prstate.LedgerStore = (*Client)(nil)
+var _ prstate.CommentStore = (*Client)(nil)
