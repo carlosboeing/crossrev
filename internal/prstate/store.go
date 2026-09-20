@@ -9,7 +9,8 @@ import (
 	"github.com/carlosboeing/crossrev/internal/core"
 )
 
-// Ledger limits.
+// Ledger limits (v1 comment ledger, retained for fixture compatibility; Task 10
+// retires the v1 comment store callers while live storage uses LedgerStore and v2 schema).
 //
 // A generation holds at most MaxCoverageShards shards. The design's §10.6
 // fires its halt bound there; this release keeps the last complete generation
