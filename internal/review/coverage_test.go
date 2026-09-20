@@ -13,6 +13,7 @@ import (
 	"github.com/carlosboeing/crossrev/internal/core"
 	"github.com/carlosboeing/crossrev/internal/exec"
 	"github.com/carlosboeing/crossrev/internal/prstate"
+	"github.com/carlosboeing/crossrev/internal/prstate/storetest"
 	"github.com/carlosboeing/crossrev/internal/review"
 )
 
@@ -70,51 +71,16 @@ func itoa2(n int) string {
 	return string(digits)
 }
 
-// ledgerGenerations returns the complete generations the leg published,
-// selected one generation at a time from the oldest manifest on.
-func ledgerManifestIDs(t *testing.T, e *env) []int64 {
-	t.Helper()
-	var ids []int64
-	for _, c := range e.forge.comments {
-		if c.AuthorLogin != author {
-			continue
-		}
-		if manifest, ok := prstate.DecodeCoverageManifest(c.Body); ok {
-			ids = append(ids, c.ID)
-			_ = manifest
-		}
-	}
-	return ids
-}
-
-func ledgerComments(t *testing.T, e *env) []prstate.CoverageComment {
-	t.Helper()
-	var comments []prstate.CoverageComment
-	for _, c := range e.forge.ledger.order {
-		stored := e.forge.ledger.comments[c]
-		comments = append(comments, prstate.CoverageComment{ID: stored.ID, Author: stored.Author, Body: stored.Body})
-	}
-	return comments
-}
-
-// ledgerGenerations returns every complete generation the leg published:
-// one SelectGeneration per manifest, each over the ledger prefix through
-// that manifest, so earlier generations are visible beside the current one.
+// ledgerGenerations returns every complete generation the leg published, in
+// publication order: the initial outstanding generation plus one per
+// accepted batch.
 func ledgerGenerations(t *testing.T, e *env) []prstate.Generation {
 	t.Helper()
-	comments := ledgerComments(t, e)
-	var out []prstate.Generation
-	for i, c := range comments {
-		if _, ok := prstate.DecodeCoverageManifest(c.Body); !ok {
-			continue
-		}
-		gen, err := prstate.SelectGeneration(comments[:i+1], author, core.RevisionPair{Base: mustRev(t, baseSHA), Head: mustRev(t, headSHA)}, core.FileEngineVersion)
-		if err != nil {
-			continue
-		}
-		out = append(out, gen)
+	store, ok := e.forge.store.(*storetest.FakeStore)
+	if !ok {
+		t.Fatalf("fixture store is %T, want *storetest.FakeStore", e.forge.store)
 	}
-	return out
+	return store.Published()
 }
 
 // TestReviewPublishesOneCompleteGenerationPerAcceptedBatch pins the C1 batch
@@ -153,8 +119,10 @@ func TestReviewPublishesOneCompleteGenerationPerAcceptedBatch(t *testing.T) {
 func TestReviewFailsClosedOnCorruptCoverage(t *testing.T) {
 	e := newEnv(t)
 	writeRequiredHead(e, "a.go", "package a\n")
-	e.forge.ledger.comments[8001] = prstate.CoverageComment{ID: 8001, Author: author, Body: "note\n\n<!-- crossrev:c {oops} -->"}
-	e.forge.ledger.order = append(e.forge.ledger.order, 8001)
+	// An open claim carrying a claim that is not a valid handle: a
+	// generation number with no ref behind it. Corrupt state, never "no
+	// coverage".
+	seedStartedClaim(t, e, prstate.Marker{CoverageGen: prstate.Some(7)})
 	e.runner.script = []exec.Result{{ExitCode: 0, Stdout: claudeStdout(batchAnswerFor(t, []string{"a.go"}))}}
 
 	got := runLeg(t, e, e.request(t))
@@ -225,14 +193,15 @@ func TestReviewRestartUsesOnlySameRevisionCoverage(t *testing.T) {
 // reuse at the given revision pair under the current engine.
 func acceptedReuse(t *testing.T, e *env, base, head core.Revision) int {
 	t.Helper()
-	gen, err := prstate.SelectGeneration(ledgerComments(t, e), author, core.RevisionPair{Base: base, Head: head}, core.FileEngineVersion)
-	if err != nil {
-		return 0
-	}
 	accepted := 0
-	for _, record := range gen.Records {
-		if record.Type == "unit" && record.Verdict.Present() {
-			accepted++
+	for _, gen := range ledgerGenerations(t, e) {
+		if gen.Revision.Base.SHA() != base.SHA() || gen.Revision.Head.SHA() != head.SHA() || gen.Engine != core.FileEngineVersion {
+			continue
+		}
+		for _, record := range gen.Records {
+			if record.Type == "unit" && record.Verdict.Present() {
+				accepted++
+			}
 		}
 	}
 	return accepted
@@ -482,8 +451,11 @@ func TestReviewRefusesStaleGenerationWhenHeadMoves(t *testing.T) {
 		}
 	}
 	gens := ledgerGenerations(t, e)
-	if len(gens) != 1 {
-		t.Fatalf("complete generations = %d, want 1 (the initial outstanding generation only; the stale candidate was refused)", len(gens))
+	if len(gens) != 2 {
+		t.Fatalf("published generations = %d, want 2 (the initial plus the stale candidate, whose handle was retired before the commit point)", len(gens))
+	}
+	if gen, _ := got.Marker.CoverageGen.Get(); gen != 1 {
+		t.Fatalf("the marker names generation %d, want 1 (the initial checkpoint; the stale candidate's handle was retired before the commit point)", gen)
 	}
 }
 
@@ -496,13 +468,7 @@ func TestReviewRefusesConvergenceWhenHeadMovesAfterCoverage(t *testing.T) {
 	writeRequiredHead(e, "a.go", "package a\n")
 	moved := mustRev(t, "5555555555555555555555555555555555555555")
 	e.forge.onPullRequest = func(int) {
-		manifests := 0
-		for _, id := range e.forge.ledger.order {
-			if _, ok := prstate.DecodeCoverageManifest(e.forge.ledger.comments[id].Body); ok {
-				manifests++
-			}
-		}
-		if manifests >= 2 {
+		if len(ledgerGenerations(t, e)) >= 2 {
 			e.forge.pr.HeadRefOid = moved
 		}
 	}

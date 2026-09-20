@@ -518,7 +518,12 @@ type statusForge struct {
 	pr       forge.PullRequest
 	prErr    error
 	comments []forge.IssueComment
+	// ledger serves the ref-store ledger reads once the status gate moves
+	// onto it. Nil means this fixture has no ledger store.
+	ledger prstate.LedgerStore
 }
+
+func (f *statusForge) RefLedger(string) prstate.LedgerStore { return f.ledger }
 
 func (f *statusForge) RepoSlug(context.Context) (core.Slug, error) {
 	return core.ParseSlug(statusRepo)

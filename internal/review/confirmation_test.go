@@ -190,15 +190,17 @@ func capturePrompt(e *env) *[]string {
 
 func acceptedAtHead(t *testing.T, e *env) int {
 	t.Helper()
-	comments := ledgerComments(t, e)
-	gen, err := prstate.SelectGeneration(comments, author, core.RevisionPair{Base: mustRev(t, baseSHA), Head: mustRev(t, "4444444444444444444444444444444444444444")}, core.FileEngineVersion)
-	if err != nil {
-		return 0
-	}
+	head := mustRev(t, "4444444444444444444444444444444444444444")
+	base := mustRev(t, baseSHA)
 	accepted := 0
-	for _, record := range gen.Records {
-		if record.Type == prstate.CoverageRecordUnit && record.Verdict.Present() {
-			accepted++
+	for _, gen := range ledgerGenerations(t, e) {
+		if gen.Revision.Base.SHA() != base.SHA() || gen.Revision.Head.SHA() != head.SHA() || gen.Engine != core.FileEngineVersion {
+			continue
+		}
+		for _, record := range gen.Records {
+			if record.Type == prstate.CoverageRecordUnit && record.Verdict.Present() {
+				accepted++
+			}
 		}
 	}
 	return accepted

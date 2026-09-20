@@ -116,7 +116,7 @@ func (l *Leg) publish(ctx context.Context, req Request, loaded Context, settings
 
 	verdict := core.Verdict(marker.Verdict.Value())
 	escalated := escalatedCount(loaded.Markers)
-	if conv, ok := l.buildConvergence(ctx, loaded, marker, actionable); ok && !policy.Converged(conv) {
+	if conv, ok := l.buildConvergence(ctx, loaded, marker, actionable, producerOf(settings)); ok && !policy.Converged(conv) {
 		// The coverage obligation is unmet: a green verdict cannot stand,
 		// and a quiet one cannot pass as finished. With actionable findings
 		// the resolve leg is still owed, so the verdict stays issues-remain;
@@ -183,7 +183,7 @@ func (l *Leg) publish(ctx context.Context, req Request, loaded Context, settings
 	}
 
 	next := policy.PassLabel(verdict, actionable, escalated)
-	if conv, ok := l.buildConvergence(ctx, loaded, marker, actionable); ok {
+	if conv, ok := l.buildConvergence(ctx, loaded, marker, actionable, producerOf(settings)); ok {
 		next = policy.PassLabelWithCoverage(verdict, actionable, escalated, conv)
 	}
 	if verdict == core.VerdictConverged && next != policy.PassConverged {
@@ -219,7 +219,6 @@ func (l *Leg) publish(ctx context.Context, req Request, loaded Context, settings
 	}
 	return marker, msgs, state, nil
 }
-
 
 // coverageDebt names the specific unmet coverage obligation for a blocked
 // pass: the counts, the missing scope report, or the unconfirmed repair.

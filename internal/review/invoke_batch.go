@@ -3,7 +3,6 @@ package review
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"os"
 
 	"github.com/carlosboeing/crossrev/internal/core"
@@ -16,16 +15,6 @@ import (
 	"github.com/carlosboeing/crossrev/internal/ui"
 	"github.com/carlosboeing/crossrev/internal/validate"
 )
-
-// ledgerStoreFor returns the coverage ledger over the leg's forge client, or
-// nil when the client does not implement the store contract.
-func ledgerStoreFor(l *Leg) prstate.CommentStore {
-	if l == nil || l.Forge == nil {
-		return nil
-	}
-	store, _ := l.Forge.(prstate.CommentStore)
-	return store
-}
 
 // batchContext is one pass's shared prompt context, discovered once before
 // packing measures the first candidate: the diff parsed for per-batch
@@ -162,39 +151,34 @@ func (l *Leg) invokeWithStaged(ctx context.Context, req Request, loaded Context,
 	return payload, envelope, msgs, err
 }
 
-// currentGeneration selects the current complete coverage generation for
-// this base, head and engine from the trusted author's comments. An
-// unreadable comment list is an error, never an empty ledger. No complete
-// generation is not an error: the first pass starts from zero accepted
-// verdicts and publishes the initial outstanding generation. Any other
-// selection failure — corrupt, missing, reordered or future-schema bytes —
-// fails the pass: re-reviewing from zero over coverage that cannot be read
-// would hide the integrity failure behind wasted work.
-func (l *Leg) currentGeneration(ctx context.Context, loaded Context, base, head core.Revision, engine string) (prstate.Generation, error) {
-	store := ledgerStoreFor(l)
-	if store == nil {
-		return prstate.Generation{}, errNoLedgerStore{}
-	}
-	comments, err := store.CoverageComments(ctx, loaded.Repo, loaded.PR.Number)
+// currentGeneration reads the pass's resumption point off the marker as it
+// stands: the handle the marker names, the generation behind it, retired
+// unless its revision pair, engine and producer are all still in force.
+//
+// No claim means no coverage pass ran — or a legacy manifest id whose
+// comment is never read again, which is the lost-ledger row. Both resume
+// from zero; the legacy case costs at most one re-review of the current
+// head. A lost ledger resumes from zero too. Anything else that goes wrong
+// — a corrupt claim, a corrupt generation, an unreadable store — fails the
+// pass: re-reviewing from zero over coverage that cannot be read would hide
+// the integrity failure behind wasted work.
+func (l *Leg) currentGeneration(ctx context.Context, loaded Context, store prstate.LedgerStore, marker prstate.Marker, scope intel.Scope, producer prstate.Producer) (prstate.Generation, error) {
+	h, claimed, err := marker.CoverageHandle()
 	if err != nil {
 		return prstate.Generation{}, err
 	}
-	gen, err := prstate.SelectGeneration(comments, loaded.Author, core.RevisionPair{Base: base, Head: head}, engine)
+	if !claimed {
+		return prstate.Generation{}, nil
+	}
+	gen, err := store.ReadGeneration(ctx, slotRefFor(loaded), h)
 	if err != nil {
-		if errors.Is(err, prstate.ErrNoCompleteGeneration) {
+		if lost, _ := coverageOutcome(err); lost {
 			return prstate.Generation{}, nil
 		}
 		return prstate.Generation{}, err
 	}
+	if !prstate.GenerationCurrent(gen, core.RevisionPair{Base: scope.Base, Head: scope.Head}, scope.Engine, producer) {
+		return prstate.Generation{}, nil
+	}
 	return gen, nil
-}
-
-// errNoLedgerStore reports a leg whose forge client does not implement the
-// coverage ledger. Production always wires the orchestrator-facing client,
-// which implements it; callers without one take the frozen single-prompt
-// path instead of failing the pass.
-type errNoLedgerStore struct{}
-
-func (e errNoLedgerStore) Error() string {
-	return "no ledger store on this leg"
 }

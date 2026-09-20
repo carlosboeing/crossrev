@@ -3,6 +3,7 @@ package review
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -23,25 +24,28 @@ import (
 type batchOutcome struct {
 	verdicts map[core.UnitID]recordVerdict
 	supplied map[core.UnitID]prstate.SuppliedInput
-	findings     []Finding
-	verdict      string
-	envelope     *harness.Envelope
-	payloads     []json.RawMessage
-	examined     []string
-	limits       []string
-	batches      int
-	retries      int
+	findings []Finding
+	verdict  string
+	envelope *harness.Envelope
+	payloads []json.RawMessage
+	examined []string
+	limits   []string
+	batches  int
+	retries  int
 }
 
 // runCoverage runs the batch loop for one pass and folds its outcome into
 // the result: findings enriched and published through the existing path,
-// the marker carrying the current coverage manifest id. A bounded halt sets
-// the outcome to the halted record and returns true through the result;
-// a nil error with an empty outcome means the caller continues on the
-// frozen path (no git reader or ledger store in this run).
-func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, settings legSettings, pass int, claimID int64, scope intel.Scope, out *Result) error {
+// the marker carrying the handle of each generation the pass publishes.
+// A bounded halt sets the outcome to the halted record; a nil error with
+// an empty outcome means the caller continues on the frozen path (no git
+// reader in this run — the ledger store always answers, falling back to
+// the marker when refs are refused).
+func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, settings legSettings, pass int, claimID int64, scope intel.Scope, store prstate.LedgerStore, selection ledgerSelection, out *Result) error {
 	outcome := batchOutcome{verdicts: map[core.UnitID]recordVerdict{}, supplied: map[core.UnitID]prstate.SuppliedInput{}}
-	current, err := l.currentGeneration(ctx, loaded, scope.Base, scope.Head, scope.Engine)
+	producer := producerOf(settings)
+	marker := markerForPass(loaded.Markers, pass)
+	current, err := l.currentGeneration(ctx, loaded, store, marker, scope, producer)
 	if err != nil {
 		return err
 	}
@@ -74,7 +78,6 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 		return len(promptBytes)
 	}
 	plan := intel.Batches(scope, acceptedIDs, render)
-	marker := markerForPass(loaded.Markers, pass)
 	// Findings a previous attempt recorded on the claim — after its accepted
 	// batches, or in the blocked record the failure left — come back into the
 	// outcome here, so a resumed pass republishes every accepted finding
@@ -106,15 +109,20 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 	marker.Leg = core.LegReview
 	marker.Pass = pass
 	marker.Version = core.MarkerVersion
-	initial, initialStop, err := l.publishInitialGeneration(ctx, req, loaded, scope, advisory, gen+1, outcome.verdicts, outcome.supplied)
+	initial, initialStop, err := l.publishInitialGeneration(ctx, req, loaded, store, marker, scope, advisory, gen+1, producer, outcome.verdicts, outcome.supplied)
 	if err != nil {
 		return err
 	}
-	marker.CoverageManifestID = prstate.Some(initial.CommentID())
+	marker.RecordCoverage(initial)
+	// The reported marker tracks the commit point: a failure in a later
+	// batch reports this checkpoint rather than the bare claim, so the
+	// re-drive resumes from the accepted batches instead of repeating
+	// them.
+	out.Marker = marker
+	selection = reportLedgerFallback(store, selection, out)
 	if initialStop.Limit != "" {
-		return l.haltPass(ctx, req, loaded, pass, claimID, out, &batchBound{plan: planForStop(plan, initialStop), scope: scope, accepted: acceptedIDs})
+		return l.haltPass(ctx, req, loaded, pass, claimID, out, marker, &batchBound{plan: planForStop(plan, initialStop), scope: scope, accepted: acceptedIDs})
 	}
-	_ = initial
 	for _, batch := range plan.Batches {
 		expected, _ := batchExpectations(batch.Files, scope.Base, scope.Head)
 		if shared.diffErr != nil {
@@ -150,17 +158,19 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 			outcome.findings = append(outcome.findings, finding)
 		}
 		outcome.batches++
-		manifest, stop, err := l.publishBatchGeneration(ctx, req, loaded, scope, advisory, gen+outcome.batches+1, outcome.verdicts, outcome.supplied, outcome.examined, outcome.limits)
+		handle, stop, err := l.publishBatchGeneration(ctx, req, loaded, store, marker, scope, advisory, gen+outcome.batches+1, producer, outcome.verdicts, outcome.supplied, outcome.examined, outcome.limits)
 		if err != nil {
 			if stop, ok := batchStop(err); ok {
-				return l.haltPass(ctx, req, loaded, pass, claimID, out, &batchBound{plan: planForStop(plan, stop), scope: scope, accepted: acceptedIDs})
+				return l.haltPass(ctx, req, loaded, pass, claimID, out, marker, &batchBound{plan: planForStop(plan, stop), scope: scope, accepted: acceptedIDs})
 			}
 			return err
 		}
 		if stop.Limit != "" {
-			return l.haltPass(ctx, req, loaded, pass, claimID, out, &batchBound{plan: planForStop(plan, stop), scope: scope, accepted: acceptedIDs})
+			return l.haltPass(ctx, req, loaded, pass, claimID, out, marker, &batchBound{plan: planForStop(plan, stop), scope: scope, accepted: acceptedIDs})
 		}
-		marker.CoverageManifestID = prstate.Some(manifest.CommentID())
+		marker.RecordCoverage(handle)
+		out.Marker = marker
+		selection = reportLedgerFallback(store, selection, out)
 		if raw := unionRawFindings(outcome.payloads); raw != nil {
 			// The accepted batch's findings go onto the claim the way the
 			// frozen path records its own before publishing: a failure in a
@@ -177,9 +187,28 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 		}
 	}
 	if plan.HaltReason != "" || len(plan.Carried) > 0 {
-		return l.haltPass(ctx, req, loaded, pass, claimID, out, &batchBound{plan: plan, scope: scope, accepted: acceptedIDs})
+		return l.haltPass(ctx, req, loaded, pass, claimID, out, marker, &batchBound{plan: plan, scope: scope, accepted: acceptedIDs})
 	}
 	return l.finishCoveredPass(ctx, req, loaded, settings, pass, claimID, marker, scope, outcome, pair, out)
+}
+
+// reportLedgerFallback names a mid-pass store fallback the operator did not
+// ask for: under `auto` a refused ref write moves the rest of the pass to
+// the marker store, and the pass says so once rather than landing coverage
+// somewhere unexpected in silence. It answers the selection in force, so
+// the caller reports the move exactly once however many batches follow.
+func reportLedgerFallback(store prstate.LedgerStore, selection ledgerSelection, out *Result) ledgerSelection {
+	auto, ok := store.(*autoLedger)
+	if !ok {
+		return selection
+	}
+	if current := auto.Selection(); current != selection {
+		out.Messages = append(out.Messages, ui.Warn(
+			fmt.Sprintf("the coverage ref write was refused (%s), so this pass stores its ledger in the pass marker instead", current.Reason),
+			"The coverage is the same either way; only where it is kept changed."))
+		return current
+	}
+	return selection
 }
 
 // batchBound carries a bounded halt out of the batch loop: the 400-file pass
@@ -207,8 +236,12 @@ var ObservePublishedCandidate func(prstate.Generation)
 // publishBatchGeneration publishes one complete generation after an accepted
 // batch. The generation accounts for every required file: covered units
 // carry their accepted verdict, the rest stay outstanding.
-func (l *Leg) publishBatchGeneration(ctx context.Context, req Request, loaded Context, scope intel.Scope, advisory intel.AdvisorySummary, gen int, verdicts map[core.UnitID]recordVerdict, supplied map[core.UnitID]prstate.SuppliedInput, examined []string, limits []string) (prstate.Manifest, prstate.CoverageStop, error) {
-	store := ledgerStoreFor(l)
+//
+// The parent comes from parentFor as the marker currently stands, and the
+// caller records the returned handle on that same marker immediately: the
+// marker edit that follows is the commit point, because the marker is the
+// only thing a reader trusts.
+func (l *Leg) publishBatchGeneration(ctx context.Context, req Request, loaded Context, store prstate.LedgerStore, marker prstate.Marker, scope intel.Scope, advisory intel.AdvisorySummary, gen int, producer prstate.Producer, verdicts map[core.UnitID]recordVerdict, supplied map[core.UnitID]prstate.SuppliedInput, examined []string, limits []string) (prstate.Handle, prstate.CoverageStop, error) {
 	paths := make([]string, 0, len(scope.Required))
 	pathIndex := make(map[string]int, len(scope.Required))
 	for _, unit := range scope.Required {
@@ -226,6 +259,9 @@ func (l *Leg) publishBatchGeneration(ctx context.Context, req Request, loaded Co
 		Gen:         gen,
 		Revision:    core.RevisionPair{Base: scope.Base, Head: scope.Head},
 		Engine:      scope.Engine,
+		Slot:        loaded.Config.Reviewers()[0].ID,
+		Producer:    producer,
+		Form:        prstate.GenerationFull,
 		Paths:       paths,
 		Records:     generationRecords(scope, verdicts, pathIndex, supplied),
 		Advisory:    prstate.Advisory{Count: advisory.Count, Rules: advisory.Rules, Limits: advisoryLimits(advisory)},
@@ -246,21 +282,37 @@ func (l *Leg) publishBatchGeneration(ctx context.Context, req Request, loaded Co
 		}
 		return nil
 	}
-	if store == nil {
-		return prstate.Manifest{}, prstate.CoverageStop{}, fmt.Errorf("no ledger store")
+	parent, err := l.parentFor(ctx, store, slotRefFor(loaded), marker)
+	if err != nil {
+		return prstate.Handle{}, prstate.CoverageStop{}, err
 	}
 	if ObservePublishedCandidate != nil {
 		ObservePublishedCandidate(candidate)
 	}
-	return prstate.PublishGeneration(ctx, store, loaded.Repo, req.PR, candidate, stillCurrent)
+	handle, err := store.PublishGeneration(ctx, slotRefFor(loaded), parent, candidate)
+	if err != nil {
+		var exhausted *prstate.LedgerExhausted
+		if errors.As(err, &exhausted) {
+			return prstate.Handle{}, exhausted.Stop, nil
+		}
+		return prstate.Handle{}, prstate.CoverageStop{}, err
+	}
+	// The freshness recheck stays exactly where it is: the objects are
+	// written, the handle is not yet recorded, and a head that moved
+	// during publication still retires the candidate before the marker
+	// edit commits it.
+	if err := stillCurrent(); err != nil {
+		return prstate.Handle{}, prstate.CoverageStop{}, err
+	}
+	return handle, prstate.CoverageStop{}, nil
 }
 
 // publishInitialGeneration publishes the opening complete generation after
 // the claim exists: every uncovered unit outstanding, so a crash before the
 // first accepted batch leaves the started claim and the same scope to
 // rebuild from.
-func (l *Leg) publishInitialGeneration(ctx context.Context, req Request, loaded Context, scope intel.Scope, advisory intel.AdvisorySummary, gen int, carried map[core.UnitID]recordVerdict, supplied map[core.UnitID]prstate.SuppliedInput) (prstate.Manifest, prstate.CoverageStop, error) {
-	return l.publishBatchGeneration(ctx, req, loaded, scope, advisory, gen, carried, supplied, nil, nil)
+func (l *Leg) publishInitialGeneration(ctx context.Context, req Request, loaded Context, store prstate.LedgerStore, marker prstate.Marker, scope intel.Scope, advisory intel.AdvisorySummary, gen int, producer prstate.Producer, carried map[core.UnitID]recordVerdict, supplied map[core.UnitID]prstate.SuppliedInput) (prstate.Handle, prstate.CoverageStop, error) {
+	return l.publishBatchGeneration(ctx, req, loaded, store, marker, scope, advisory, gen, producer, carried, supplied, nil, nil)
 }
 
 // verdictsFromPayload reads the accepted verdicts out of one accepted
@@ -359,9 +411,11 @@ func markerForPass(markers []prstate.Marker, pass int) prstate.Marker {
 // haltPass records a bounded incomplete outcome on the claim without
 // deleting the last complete generation: state incomplete, the halt word,
 // the stop counts, the halted label and the outstanding paths.
-func (l *Leg) haltPass(ctx context.Context, req Request, loaded Context, pass int, claimID int64, out *Result, bound *batchBound) error {
+func (l *Leg) haltPass(ctx context.Context, req Request, loaded Context, pass int, claimID int64, out *Result, marker prstate.Marker, bound *batchBound) error {
 	stop := stopForBound(bound)
-	marker := markerForPass(loaded.Markers, pass)
+	// The halted claim carries the marker as it stands — including the
+	// handle of the last generation published — so a re-drive resumes
+	// from the accepted batches instead of repeating them.
 	claim := out.Marker
 	if claim.Harness.Present() {
 		marker.Harness = claim.Harness

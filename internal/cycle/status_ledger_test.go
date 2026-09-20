@@ -2,8 +2,6 @@ package cycle_test
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"testing"
 	"time"
 
@@ -11,46 +9,31 @@ import (
 	"github.com/carlosboeing/crossrev/internal/cycle"
 	"github.com/carlosboeing/crossrev/internal/forge"
 	"github.com/carlosboeing/crossrev/internal/prstate"
+	"github.com/carlosboeing/crossrev/internal/prstate/storetest"
 )
 
 // statusLedgerHead is the head the ledger cases run at, the same revision the
 // measured fixtures use.
 const statusLedgerHead = "2c4a46cb321db01826d116b5ef2add6b0284d68c"
 
-// statusLedger is the in-memory ledger store a case publishes a generation
-// into. Comment ids run from 8001 up so they never collide with the marker
-// comments the case adds beside them.
-type statusLedger struct {
-	next     int64
-	comments []prstate.CoverageComment
+// statusProducer is the producer the ledger cases run as: the reviewer the
+// status fixture configuration resolves.
+func statusProducer() prstate.Producer {
+	return prstate.Producer{Harness: "claude", Model: "reviewer-model"}
 }
 
-func (l *statusLedger) CoverageComments(context.Context, core.Slug, int) ([]prstate.CoverageComment, error) {
-	return l.comments, nil
-}
-
-func (l *statusLedger) CoverageComment(_ context.Context, _ core.Slug, id int64) (prstate.CoverageComment, error) {
-	for _, c := range l.comments {
-		if c.ID == id {
-			return c, nil
-		}
+func statusSlotRef(t *testing.T) prstate.SlotRef {
+	t.Helper()
+	slug, err := core.ParseSlug(statusRepo)
+	if err != nil {
+		t.Fatalf("slug: %v", err)
 	}
-	return prstate.CoverageComment{}, fmt.Errorf("no such comment %d", id)
+	return prstate.SlotRef{Repo: slug, Number: statusPR, Slot: prstate.DefaultSlot}
 }
-
-func (l *statusLedger) CreateCoverageComment(_ context.Context, _ core.Slug, _ int, body string) (int64, error) {
-	l.next++
-	id := 8000 + l.next
-	l.comments = append(l.comments, prstate.CoverageComment{ID: id, Author: statusAuthor, Body: body})
-	return id, nil
-}
-
-var _ prstate.CommentStore = (*statusLedger)(nil)
 
 // statusPublishGeneration publishes one complete generation the way the
-// review leg does, and answers the conversation comments carrying it and the
-// manifest's comment id.
-func statusPublishGeneration(t *testing.T, base, head string, paths []string, records []prstate.Record) ([]prstate.CoverageComment, int64) {
+// review leg does, and answers the handle the pass marker records.
+func statusPublishGeneration(t *testing.T, store *storetest.FakeStore, base, head string, paths []string, records []prstate.Record) prstate.Handle {
 	t.Helper()
 	baseRev, err := core.NewRevision(base)
 	if err != nil {
@@ -60,27 +43,22 @@ func statusPublishGeneration(t *testing.T, base, head string, paths []string, re
 	if err != nil {
 		t.Fatalf("head revision: %v", err)
 	}
-	slug, err := core.ParseSlug(statusRepo)
-	if err != nil {
-		t.Fatalf("slug: %v", err)
-	}
-	store := &statusLedger{}
-	candidate := prstate.Generation{
+	gen := prstate.Generation{
 		Gen:         1,
 		Revision:    core.RevisionPair{Base: baseRev, Head: headRev},
 		Engine:      core.FileEngineVersion,
+		Slot:        prstate.DefaultSlot,
+		Producer:    statusProducer(),
+		Form:        prstate.GenerationFull,
 		Paths:       paths,
 		Records:     records,
 		ScopeReport: prstate.ScopeReport{ExaminedScope: "every changed file at the head revision"},
 	}
-	manifest, stop, err := prstate.PublishGeneration(context.Background(), store, slug, statusPR, candidate, func() error { return nil })
+	handle, err := store.PublishGeneration(context.Background(), statusSlotRef(t), prstate.Handle{}, gen)
 	if err != nil {
 		t.Fatalf("PublishGeneration: %v", err)
 	}
-	if stop.Limit != "" {
-		t.Fatalf("PublishGeneration stopped: %+v", stop)
-	}
-	return store.comments, manifest.CommentID()
+	return handle
 }
 
 // statusUnitRecord is one judged file record for the ledger cases.
@@ -97,22 +75,25 @@ func statusUnitRecord(path string, pathIndex int, verdict string) prstate.Record
 }
 
 // statusConvergedMarkerComment is the v2 complete converged review marker the
-// review leg leaves when its pass converges, naming the manifest it published.
-func statusConvergedMarkerComment(t *testing.T, head string, manifestID int64) forge.IssueComment {
+// review leg leaves when its pass converges, carrying the given coverage
+// fields.
+func statusConvergedMarkerComment(t *testing.T, head string, mutate func(*prstate.Marker)) forge.IssueComment {
 	t.Helper()
 	marker := prstate.Marker{
-		Version:            core.MarkerVersion,
-		Leg:                core.LegReview,
-		Pass:               1,
-		State:              core.PassComplete,
-		TS:                 1786999940,
-		DoneTS:             prstate.Some(int64(1786999970)),
-		RunID:              prstate.Some("x"),
-		HeadSHA:            prstate.Some(head),
-		Harness:            prstate.Some("claude"),
-		Verdict:            prstate.Some(string(core.VerdictConverged)),
-		Findings:           json.RawMessage("[]"),
-		CoverageManifestID: prstate.Some(manifestID),
+		Version:  core.MarkerVersion,
+		Leg:      core.LegReview,
+		Pass:     1,
+		State:    core.PassComplete,
+		TS:       1786999940,
+		DoneTS:   prstate.Some(int64(1786999970)),
+		RunID:    prstate.Some("x"),
+		HeadSHA:  prstate.Some(head),
+		Harness:  prstate.Some("claude"),
+		Verdict:  prstate.Some(string(core.VerdictConverged)),
+		Findings: []byte("[]"),
+	}
+	if mutate != nil {
+		mutate(&marker)
 	}
 	body, err := marker.Encode()
 	if err != nil {
@@ -121,19 +102,18 @@ func statusConvergedMarkerComment(t *testing.T, head string, manifestID int64) f
 	return forge.IssueComment{ID: 9001, AuthorLogin: statusAuthor, Body: "Summary." + body}
 }
 
-// statusLedgerComments renders ledger comments as conversation comments, the
-// shape IssueComments answers with.
-func statusLedgerComments(ledger []prstate.CoverageComment) []forge.IssueComment {
-	out := make([]forge.IssueComment, 0, len(ledger))
-	for _, c := range ledger {
-		out = append(out, forge.IssueComment{ID: c.ID, AuthorLogin: c.Author, Body: "coverage" + c.Body})
+// statusNameHandle mutates a marker to name the published generation,
+// the way a review pass leaves its checkpoint behind.
+func statusNameHandle(handle prstate.Handle) func(*prstate.Marker) {
+	return func(m *prstate.Marker) {
+		m.RecordCoverage(handle)
 	}
-	return out
 }
 
 // statusLoadLedger loads a report for a converged-labelled pull request
-// carrying the given conversation comments at the fixture base and head.
-func statusLoadLedger(t *testing.T, comments []forge.IssueComment) cycle.Report {
+// carrying the given conversation comments at the fixture base and head,
+// with the given ledger store behind the forge client.
+func statusLoadLedger(t *testing.T, comments []forge.IssueComment, ledger prstate.LedgerStore) cycle.Report {
 	t.Helper()
 	head, err := core.NewRevision(statusLedgerHead)
 	if err != nil {
@@ -158,6 +138,7 @@ func statusLoadLedger(t *testing.T, comments []forge.IssueComment) cycle.Report 
 				HeadRefName: "feature",
 			},
 			comments: comments,
+			ledger:   ledger,
 		},
 		Liveness: statusLife{},
 		Now:      func() time.Time { return time.Unix(1787000000, 0) },
@@ -172,95 +153,91 @@ func statusLoadLedger(t *testing.T, comments []forge.IssueComment) cycle.Report 
 
 // TestStatusConvergenceReadsTheLedger pins that a converged report is
 // underwritten by the coverage the marker references, not by the marker
-// alone: the manifest id on a v2 marker is a reference, and a ledger that no
-// longer holds a current complete generation — removed, written for another
-// revision, or holding records the convergence predicate refuses — cannot
+// alone: the handle on a v2 marker is a reference, and a ledger that no
+// longer holds the named generation — lost, written for another revision,
+// retired, or holding records the convergence predicate refuses — cannot
 // satisfy the coverage obligation the marker promises.
 func TestStatusConvergenceReadsTheLedger(t *testing.T) {
 	paths := []string{"app.go"}
 	covered := []prstate.Record{statusUnitRecord("app.go", 0, string(core.FileVerdictNoIssue))}
 
-	ledger, manifestID := statusPublishGeneration(t, statusBase, statusLedgerHead, paths, covered)
+	t.Run("a current complete generation underwrites the converged report", func(t *testing.T) {
+		store := storetest.NewFakeStore()
+		handle := statusPublishGeneration(t, store, statusBase, statusLedgerHead, paths, covered)
+		comments := []forge.IssueComment{
+			statusConvergedMarkerComment(t, statusLedgerHead, statusNameHandle(handle)),
+		}
+		if got := statusLoadLedger(t, comments, store).State; got != core.LoopConverged {
+			t.Errorf("state = %q, want %q", got, core.LoopConverged)
+		}
+	})
 
-	cases := []struct {
-		name    string
-		ledger  []prstate.CoverageComment
-		want    core.LoopState
-	}{
-		{
-			name:   "a current complete generation underwrites the converged report",
-			ledger: ledger,
-			want:   core.LoopConverged,
-		},
-		{
-			name:   "a removed ledger leaves only the marker's promise",
-			ledger: nil,
-			want:   core.LoopAwaitingReview,
-		},
-		{
-			name: "a manifest without its shard is not a complete generation",
-			ledger: func() []prstate.CoverageComment {
-				var manifests []prstate.CoverageComment
-				for _, c := range ledger {
-					if _, ok := prstate.DecodeCoverageManifest(c.Body); ok {
-						manifests = append(manifests, c)
-					}
-				}
-				return manifests
-			}(),
-			want: core.LoopAwaitingReview,
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			comments := append(statusLedgerComments(tc.ledger),
-				statusConvergedMarkerComment(t, statusLedgerHead, manifestID))
-			report := statusLoadLedger(t, comments)
-			if report.State != tc.want {
-				t.Errorf("state = %q, want %q", report.State, tc.want)
-			}
-		})
-	}
+	t.Run("a removed ledger leaves only the marker's promise", func(t *testing.T) {
+		comments := []forge.IssueComment{
+			statusConvergedMarkerComment(t, statusLedgerHead, cutoverNameLostCommit),
+		}
+		if got := statusLoadLedger(t, comments, storetest.NewFakeStore()).State; got != core.LoopAwaitingReview {
+			t.Errorf("state = %q, want %q", got, core.LoopAwaitingReview)
+		}
+	})
+
+	t.Run("an unverifiable generation is not a complete generation", func(t *testing.T) {
+		store := storetest.NewFakeStore()
+		handle := statusPublishGeneration(t, store, statusBase, statusLedgerHead, paths, covered)
+		store.SetCorrupt(handle.Commit)
+		comments := []forge.IssueComment{
+			statusConvergedMarkerComment(t, statusLedgerHead, statusNameHandle(handle)),
+		}
+		if got := statusLoadLedger(t, comments, store).State; got != core.LoopAwaitingReview {
+			t.Errorf("state = %q, want %q", got, core.LoopAwaitingReview)
+		}
+	})
 
 	t.Run("a generation at another base answers for another pull request", func(t *testing.T) {
-		other, otherManifest := statusPublishGeneration(t,
+		store := storetest.NewFakeStore()
+		handle := statusPublishGeneration(t, store,
 			"1111111111111111111111111111111111111111", statusLedgerHead, paths, covered)
-		comments := append(statusLedgerComments(other),
-			statusConvergedMarkerComment(t, statusLedgerHead, otherManifest))
-		if got := statusLoadLedger(t, comments).State; got != core.LoopAwaitingReview {
+		comments := []forge.IssueComment{
+			statusConvergedMarkerComment(t, statusLedgerHead, statusNameHandle(handle)),
+		}
+		if got := statusLoadLedger(t, comments, store).State; got != core.LoopAwaitingReview {
 			t.Errorf("state = %q, want %q", got, core.LoopAwaitingReview)
 		}
 	})
 
 	t.Run("a could_not_review verdict cannot underwrite convergence", func(t *testing.T) {
-		unexamined, id := statusPublishGeneration(t, statusBase, statusLedgerHead, paths,
+		store := storetest.NewFakeStore()
+		handle := statusPublishGeneration(t, store, statusBase, statusLedgerHead, paths,
 			[]prstate.Record{statusUnitRecord("app.go", 0, string(core.FileVerdictCouldNotReview))})
-		comments := append(statusLedgerComments(unexamined),
-			statusConvergedMarkerComment(t, statusLedgerHead, id))
-		if got := statusLoadLedger(t, comments).State; got != core.LoopAwaitingReview {
+		comments := []forge.IssueComment{
+			statusConvergedMarkerComment(t, statusLedgerHead, statusNameHandle(handle)),
+		}
+		if got := statusLoadLedger(t, comments, store).State; got != core.LoopAwaitingReview {
 			t.Errorf("state = %q, want %q", got, core.LoopAwaitingReview)
 		}
 	})
 
 	t.Run("an outstanding record cannot underwrite convergence", func(t *testing.T) {
-		waiting, id := statusPublishGeneration(t, statusBase, statusLedgerHead, paths,
+		store := storetest.NewFakeStore()
+		handle := statusPublishGeneration(t, store, statusBase, statusLedgerHead, paths,
 			[]prstate.Record{prstate.OutstandingRecord(string(core.FileUnitID("app.go")), 0,
 				string(core.ChangeModified), core.BodyDigestHex([]byte("body of app.go")), "awaiting review")})
-		comments := append(statusLedgerComments(waiting),
-			statusConvergedMarkerComment(t, statusLedgerHead, id))
-		if got := statusLoadLedger(t, comments).State; got != core.LoopAwaitingReview {
+		comments := []forge.IssueComment{
+			statusConvergedMarkerComment(t, statusLedgerHead, statusNameHandle(handle)),
+		}
+		if got := statusLoadLedger(t, comments, store).State; got != core.LoopAwaitingReview {
 			t.Errorf("state = %q, want %q", got, core.LoopAwaitingReview)
 		}
 	})
 
 	t.Run("a v1 marker predates the coverage obligation", func(t *testing.T) {
-		raw := json.RawMessage(`{"v":1,"leg":"review","pass":1,"state":"complete","ts":1786999940,"done_ts":1786999970,"run_id":"x","head_sha":"` + statusLedgerHead + `","harness":"claude","verdict":"converged","findings":[]}`)
+		raw := []byte(`{"v":1,"leg":"review","pass":1,"state":"complete","ts":1786999940,"done_ts":1786999970,"run_id":"x","head_sha":"` + statusLedgerHead + `","harness":"claude","verdict":"converged","findings":[]}`)
 		body, err := prstate.EncodeMarker(raw)
 		if err != nil {
 			t.Fatalf("EncodeMarker: %v", err)
 		}
 		comments := []forge.IssueComment{{ID: 9001, AuthorLogin: statusAuthor, Body: "Summary." + body}}
-		if got := statusLoadLedger(t, comments).State; got != core.LoopConverged {
+		if got := statusLoadLedger(t, comments, storetest.NewFakeStore()).State; got != core.LoopConverged {
 			t.Errorf("state = %q, want %q", got, core.LoopConverged)
 		}
 	})
