@@ -18,9 +18,11 @@ import (
 )
 
 // batchOutcome is what one batch run settled: the verdicts it accepted,
-// the findings they name, and the scope claims the manifest carries.
+// the findings they name, the scope claims the manifest carries, and the
+// per-file supplied measurements the accepted batches rendered.
 type batchOutcome struct {
 	verdicts map[core.UnitID]recordVerdict
+	supplied map[core.UnitID]prstate.SuppliedInput
 	findings     []Finding
 	verdict      string
 	envelope     *harness.Envelope
@@ -38,7 +40,7 @@ type batchOutcome struct {
 // a nil error with an empty outcome means the caller continues on the
 // frozen path (no git reader or ledger store in this run).
 func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, settings legSettings, pass int, claimID int64, scope intel.Scope, out *Result) error {
-	outcome := batchOutcome{verdicts: map[core.UnitID]recordVerdict{}}
+	outcome := batchOutcome{verdicts: map[core.UnitID]recordVerdict{}, supplied: map[core.UnitID]prstate.SuppliedInput{}}
 	current, err := l.currentGeneration(ctx, loaded, scope.Base, scope.Head, scope.Engine)
 	if err != nil {
 		return err
@@ -50,6 +52,15 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 		outcome.verdicts[unitID] = disp
 		acceptedIDs[unitID] = true
 	}
+	// A resumed verdict keeps the measurement taken when it was judged: the
+	// revision pair is unchanged, so the bytes handed over then are the bytes
+	// that would be handed over now. A generation that predates the field
+	// carries nothing, and its resumed records honestly read null.
+	for _, record := range current.Records {
+		if s, ok := record.Supplied.Get(); ok {
+			outcome.supplied[core.UnitID(record.UnitID)] = s
+		}
+	}
 	advisory := intel.AdvisoryFiles(ctx, scope, scopeSearcher{vcs: l.VCS})
 	pair := repairConfirmation(loaded.Markers, scope.Head)
 	confirmation, err := l.confirmationDelta(ctx, pair)
@@ -59,7 +70,8 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 	}
 	shared := l.discoverBatchContext(ctx, req, loaded, pass, scope, advisory, confirmation)
 	render := func(files []intel.FileUnit) int {
-		return len(shared.render(files, scope.Base, scope.Head))
+		promptBytes, _ := shared.render(files, scope.Base, scope.Head)
+		return len(promptBytes)
 	}
 	plan := intel.Batches(scope, acceptedIDs, render)
 	marker := markerForPass(loaded.Markers, pass)
@@ -94,7 +106,7 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 	marker.Leg = core.LegReview
 	marker.Pass = pass
 	marker.Version = core.MarkerVersion
-	initial, initialStop, err := l.publishInitialGeneration(ctx, req, loaded, scope, advisory, gen+1, outcome.verdicts)
+	initial, initialStop, err := l.publishInitialGeneration(ctx, req, loaded, scope, advisory, gen+1, outcome.verdicts, outcome.supplied)
 	if err != nil {
 		return err
 	}
@@ -108,7 +120,8 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 		if shared.diffErr != nil {
 			return shared.diffErr
 		}
-		payload, envelope, batchMsgs, err := l.invokePrompt(ctx, req, loaded, settings, expected, shared.render(batch.Files, scope.Base, scope.Head))
+		promptBytes, supplied := shared.render(batch.Files, scope.Base, scope.Head)
+		payload, envelope, batchMsgs, err := l.invokePrompt(ctx, req, loaded, settings, expected, promptBytes)
 		out.Messages = append(out.Messages, batchMsgs...)
 		if err != nil {
 			return err
@@ -121,6 +134,11 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 			outcome.verdicts[id] = disp
 			acceptedIDs[id] = true
 		}
+		// Only an accepted batch's measurement persists: a refused answer
+		// judged nothing, so its bytes describe no record.
+		for id, s := range supplied {
+			outcome.supplied[id] = s
+		}
 		outcome.verdict = verdictFromPayload(payload)
 		outcome.payloads = append(outcome.payloads, payload)
 		if outcome.envelope == nil {
@@ -132,7 +150,7 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 			outcome.findings = append(outcome.findings, finding)
 		}
 		outcome.batches++
-		manifest, stop, err := l.publishBatchGeneration(ctx, req, loaded, scope, advisory, gen+outcome.batches+1, outcome.verdicts, outcome.examined, outcome.limits)
+		manifest, stop, err := l.publishBatchGeneration(ctx, req, loaded, scope, advisory, gen+outcome.batches+1, outcome.verdicts, outcome.supplied, outcome.examined, outcome.limits)
 		if err != nil {
 			if stop, ok := batchStop(err); ok {
 				return l.haltPass(ctx, req, loaded, pass, claimID, out, &batchBound{plan: planForStop(plan, stop), scope: scope, accepted: acceptedIDs})
@@ -179,10 +197,17 @@ func (e *batchBound) Error() string {
 	return fmt.Sprintf("halted: %s carries %d files", intel.CarryReviewBudgetReached, len(e.plan.Carried))
 }
 
+// ObservePublishedCandidate receives each coverage generation candidate the
+// leg hands to publication, before the store encodes it. Production leaves
+// it nil; tests set it to observe the in-memory candidate, whose supplied
+// measurements the v1 comment codec cannot carry until the ref-store
+// cutover encodes the field.
+var ObservePublishedCandidate func(prstate.Generation)
+
 // publishBatchGeneration publishes one complete generation after an accepted
 // batch. The generation accounts for every required file: covered units
 // carry their accepted verdict, the rest stay outstanding.
-func (l *Leg) publishBatchGeneration(ctx context.Context, req Request, loaded Context, scope intel.Scope, advisory intel.AdvisorySummary, gen int, verdicts map[core.UnitID]recordVerdict, examined []string, limits []string) (prstate.Manifest, prstate.CoverageStop, error) {
+func (l *Leg) publishBatchGeneration(ctx context.Context, req Request, loaded Context, scope intel.Scope, advisory intel.AdvisorySummary, gen int, verdicts map[core.UnitID]recordVerdict, supplied map[core.UnitID]prstate.SuppliedInput, examined []string, limits []string) (prstate.Manifest, prstate.CoverageStop, error) {
 	store := ledgerStoreFor(l)
 	paths := make([]string, 0, len(scope.Required))
 	pathIndex := make(map[string]int, len(scope.Required))
@@ -202,7 +227,7 @@ func (l *Leg) publishBatchGeneration(ctx context.Context, req Request, loaded Co
 		Revision:    core.RevisionPair{Base: scope.Base, Head: scope.Head},
 		Engine:      scope.Engine,
 		Paths:       paths,
-		Records:     generationRecords(scope, verdicts, pathIndex),
+		Records:     generationRecords(scope, verdicts, pathIndex, supplied),
 		Advisory:    prstate.Advisory{Count: advisory.Count, Rules: advisory.Rules, Limits: advisoryLimits(advisory)},
 		Excluded:    excludedRecords(scope),
 		ScopeReport: scopeReportOf(examinedScope, limits),
@@ -224,6 +249,9 @@ func (l *Leg) publishBatchGeneration(ctx context.Context, req Request, loaded Co
 	if store == nil {
 		return prstate.Manifest{}, prstate.CoverageStop{}, fmt.Errorf("no ledger store")
 	}
+	if ObservePublishedCandidate != nil {
+		ObservePublishedCandidate(candidate)
+	}
 	return prstate.PublishGeneration(ctx, store, loaded.Repo, req.PR, candidate, stillCurrent)
 }
 
@@ -231,8 +259,8 @@ func (l *Leg) publishBatchGeneration(ctx context.Context, req Request, loaded Co
 // the claim exists: every uncovered unit outstanding, so a crash before the
 // first accepted batch leaves the started claim and the same scope to
 // rebuild from.
-func (l *Leg) publishInitialGeneration(ctx context.Context, req Request, loaded Context, scope intel.Scope, advisory intel.AdvisorySummary, gen int, carried map[core.UnitID]recordVerdict) (prstate.Manifest, prstate.CoverageStop, error) {
-	return l.publishBatchGeneration(ctx, req, loaded, scope, advisory, gen, carried, nil, nil)
+func (l *Leg) publishInitialGeneration(ctx context.Context, req Request, loaded Context, scope intel.Scope, advisory intel.AdvisorySummary, gen int, carried map[core.UnitID]recordVerdict, supplied map[core.UnitID]prstate.SuppliedInput) (prstate.Manifest, prstate.CoverageStop, error) {
+	return l.publishBatchGeneration(ctx, req, loaded, scope, advisory, gen, carried, supplied, nil, nil)
 }
 
 // verdictsFromPayload reads the accepted verdicts out of one accepted

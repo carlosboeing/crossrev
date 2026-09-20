@@ -2,6 +2,8 @@ package review_test
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"strings"
 	"testing"
@@ -313,6 +315,145 @@ func TestReviewFailsClosedWhenFileEnumerationFails(t *testing.T) {
 		if label == policy.LabelConverged {
 			t.Fatalf("converged label applied with no coverage ledger: %v", e.forge.labelsAdded)
 		}
+	}
+}
+
+// capturePublished records each coverage generation candidate the leg hands
+// to publication, in order. The candidates are the in-memory values, before
+// the store encodes them: the v1 comment codec carries no supplied key, so
+// a test reading back through SelectGeneration always sees a null Supplied.
+// Set before runLeg; the observer resets when the test ends.
+func capturePublished(t *testing.T) *[]prstate.Generation {
+	t.Helper()
+	published := &[]prstate.Generation{}
+	review.ObservePublishedCandidate = func(candidate prstate.Generation) {
+		*published = append(*published, candidate)
+	}
+	t.Cleanup(func() { review.ObservePublishedCandidate = nil })
+	return published
+}
+
+// suppliedRecordFor returns the published record for one required path: the
+// record whose path index names it. It fails the test when the generation
+// carries no such record, so a lookup miss cannot read as a missing field.
+func suppliedRecordFor(t *testing.T, gen prstate.Generation, path string) prstate.Record {
+	t.Helper()
+	for _, record := range gen.Records {
+		if record.PathIndex >= 0 && record.PathIndex < len(gen.Paths) && gen.Paths[record.PathIndex] == path {
+			return record
+		}
+	}
+	t.Fatalf("no record for %q in generation %d (%d records)", path, gen.Gen, len(gen.Records))
+	return prstate.Record{}
+}
+
+// bodyHandedTo extracts one numbered file's fenced content out of the prompt
+// the stub harness was actually given: the bytes under the unit's section
+// header, between the opening fence and the closing one. It reads the
+// harness input, not the fixture and not the scope, so a digest derived from
+// it agrees with the record only when the record describes what the model
+// received. The prompt fence trims one trailing newline, so the fixture body
+// carries none and the extraction is byte-exact.
+func bodyHandedTo(t *testing.T, prompt, path string) []byte {
+	t.Helper()
+	header := "### 1. `" + path + "`"
+	at := strings.Index(prompt, header)
+	if at < 0 {
+		t.Fatalf("prompt carries no numbered section for %q", path)
+	}
+	const fence = "````\n"
+	open := strings.Index(prompt[at:], fence)
+	if open < 0 {
+		t.Fatalf("prompt section for %q carries no fenced content", path)
+	}
+	rest := prompt[at+open+len(fence):]
+	close := strings.Index(rest, "\n````")
+	if close < 0 {
+		t.Fatalf("prompt section for %q has an unterminated fence", path)
+	}
+	return []byte(rest[:close])
+}
+
+// TestSuppliedDigestMatchesTheBytesHandedToTheHarness pins the point of the
+// supplied field: the digest must match the bytes the harness got, not the
+// bytes on disk and not the rendered prompt. The expected value is parsed
+// out of the prompt the stub harness was actually given — hashing the
+// fixture again on both sides would prove nothing — and the actual value is
+// the candidate the leg handed to publication, which the v1 codec drops on
+// the wire and store read-back can never observe.
+func TestSuppliedDigestMatchesTheBytesHandedToTheHarness(t *testing.T) {
+	e := newEnv(t)
+	// No trailing newline: the prompt fence trims one, so this keeps the
+	// extraction byte-exact (see bodyHandedTo).
+	body := "package a\n\nconst HandedOver = true"
+	writeRequiredHead(e, "a.go", body)
+	prompts := capturePrompt(e)
+	published := capturePublished(t)
+	e.runner.script = []exec.Result{
+		{ExitCode: 0, Stdout: claudeStdout(batchAnswer(t, 1))},
+	}
+	got := runLeg(t, e, e.request(t))
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
+	if len(*prompts) != 1 {
+		t.Fatalf("prompts = %d, want 1 (one file, one batch)", len(*prompts))
+	}
+	handed := bodyHandedTo(t, (*prompts)[0], "a.go")
+	if string(handed) != body {
+		t.Fatalf("extracted %q from the prompt, want the %q the scope read", handed, body)
+	}
+	if len(*published) == 0 {
+		t.Fatal("no complete generation published")
+	}
+	record := suppliedRecordFor(t, (*published)[len(*published)-1], "a.go")
+	supplied, ok := record.Supplied.Get()
+	if !ok {
+		t.Fatal("a judged record carries no supplied input")
+	}
+	sum := sha256.Sum256(handed)
+	if want := hex.EncodeToString(sum[:]); supplied.Digest != want {
+		t.Fatalf("supplied digest %s, want %s — the digest does not describe what the model received", supplied.Digest, want)
+	}
+	if supplied.Form != prstate.SuppliedFormFullText {
+		t.Fatalf("form %q for a file supplied in full", supplied.Form)
+	}
+}
+
+// TestAnUnavailableFileRecordsDiffOnly pins that binary, unreadable or
+// quarantined content stays required with a named access limit and no body:
+// the record must say diff_only rather than claim a full-text supply.
+func TestAnUnavailableFileRecordsDiffOnly(t *testing.T) {
+	e := newEnv(t)
+	writeRequiredHead(e, "blob.bin", "GIF89a\x00\x01binary-bytes")
+	prompts := capturePrompt(e)
+	published := capturePublished(t)
+	e.runner.script = []exec.Result{
+		{ExitCode: 0, Stdout: claudeStdout(batchAnswerFor(t, []string{"blob.bin"}))},
+	}
+	got := runLeg(t, e, e.request(t))
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
+	if len(*prompts) != 1 {
+		t.Fatalf("prompts = %d, want 1 (one file, one batch)", len(*prompts))
+	}
+	if strings.Contains((*prompts)[0], "binary-bytes") {
+		t.Fatal("prompt carried the binary body the batch block withholds")
+	}
+	if len(*published) == 0 {
+		t.Fatal("no complete generation published")
+	}
+	record := suppliedRecordFor(t, (*published)[len(*published)-1], "blob.bin")
+	supplied, ok := record.Supplied.Get()
+	if !ok {
+		t.Fatal("a judged binary record carries no supplied input")
+	}
+	if supplied.Form != prstate.SuppliedFormDiffOnly {
+		t.Fatalf("form %q for a file that reached the model through the diff slice alone", supplied.Form)
+	}
+	if want := core.BodyDigestHex(nil); supplied.Digest != want {
+		t.Fatalf("diff_only digest %s, want %s (no body bytes were handed over)", supplied.Digest, want)
 	}
 }
 

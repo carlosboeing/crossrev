@@ -69,11 +69,19 @@ func (l *Leg) discoverBatchContext(ctx context.Context, req Request, loaded Cont
 
 // render builds one candidate batch's complete prompt from the snapshot —
 // headers, prior context and file content together, with the diff sliced to
-// the batch's own files. It is pure over the snapshot: no git, no forge, and
-// deterministic, so the packer can measure it for every candidate and the
-// invoke path sends exactly the measured bytes.
-func (c batchContext) render(files []intel.FileUnit, base, head core.Revision) []byte {
+// the batch's own files — and measures what the reviewer is actually given
+// for each unit, from the exact batch units the prompt renders. It is pure
+// over the snapshot: no git, no forge, and deterministic, so the packer can
+// measure it for every candidate and the invoke path sends exactly the
+// measured bytes. The measurement happens once, here, and travels with the
+// batch to publication; it is never recomputed there from a second read,
+// which could disagree with what was sent.
+func (c batchContext) render(files []intel.FileUnit, base, head core.Revision) ([]byte, map[core.UnitID]prstate.SuppliedInput) {
 	_, units := batchExpectations(files, base, head)
+	supplied := make(map[core.UnitID]prstate.SuppliedInput, len(files))
+	for i, unit := range units {
+		supplied[files[i].ID] = suppliedFor(unit)
+	}
 	return prompt.Review{
 		Skill:        prompt.ReviewSkill(),
 		Diff:         c.diff.Only(batchPaths(files)),
@@ -85,7 +93,21 @@ func (c batchContext) render(files []intel.FileUnit, base, head core.Revision) [
 		Advisory:     c.advisory,
 		Excluded:     c.excluded,
 		Confirmation: c.confirmation,
-	}.Render()
+	}.Render(), supplied
+}
+
+// suppliedFor measures what the reviewer is actually given for one unit: a
+// digest over the unit's body bytes as handed to prompt rendering. A unit
+// with readable bytes supplied in full reads full_text; an unavailable or
+// binary unit reaches the model through the diff slice alone and reads
+// diff_only, with the digest over the empty input because no body bytes were
+// handed over. Truncated stays false: a file that cannot fit a prompt alone
+// halts with input_exceeds_budget rather than being cut.
+func suppliedFor(unit prompt.BatchUnit) prstate.SuppliedInput {
+	if unit.Available && !unit.Binary {
+		return prstate.SuppliedInput{Digest: core.BodyDigestHex(unit.Body), Form: prstate.SuppliedFormFullText}
+	}
+	return prstate.SuppliedInput{Digest: core.BodyDigestHex(nil), Form: prstate.SuppliedFormDiffOnly}
 }
 
 // batchPaths names the sections one batch keeps from the full diff: each

@@ -149,13 +149,19 @@ func scopeReportOf(examined string, limits []string) prstate.ScopeReport {
 }
 
 // generationRecords renders one complete generation's records from the scope
-// and the verdicts accepted so far: covered units carry their
-// verdict, the rest stay outstanding with their access reason.
-func generationRecords(scope intel.Scope, verdicts map[core.UnitID]recordVerdict, pathIndex map[string]int) []prstate.Record {
+// and the verdicts accepted so far: covered units carry their verdict and
+// the measurement of what the reviewer was given for them, the rest stay
+// outstanding with their access reason and a null supplied input — nothing
+// was handed to a reviewer for a file nobody reviewed.
+func generationRecords(scope intel.Scope, verdicts map[core.UnitID]recordVerdict, pathIndex map[string]int, supplied map[core.UnitID]prstate.SuppliedInput) []prstate.Record {
 	records := make([]prstate.Record, 0, len(scope.Required))
 	for _, unit := range scope.Required {
 		if disp, ok := verdicts[unit.ID]; ok {
-			records = append(records, unitRecord(unit, pathIndex[unit.Path], disp))
+			record := unitRecord(unit, pathIndex[unit.Path], disp)
+			if s, ok := supplied[unit.ID]; ok {
+				record.Supplied = prstate.Some(s)
+			}
+			records = append(records, record)
 		} else {
 			records = append(records, prstate.OutstandingRecord(string(unit.ID), pathIndex[unit.Path], string(unit.Change), unit.BodyDigest, outstandingReason(unit)))
 		}
