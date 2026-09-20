@@ -1,6 +1,7 @@
 package prstate_test
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/carlosboeing/crossrev/internal/core"
@@ -197,5 +198,96 @@ func TestDecodeFindings(t *testing.T) {
 	}
 	if len(untouched) != 1 {
 		t.Errorf("a marker with no findings overwrote the destination: %+v", untouched)
+	}
+}
+
+func TestCoverageHandleTellsNoClaimFromCorruptClaim(t *testing.T) {
+	if _, claimed, err := v2MarkerWith(t, "").CoverageHandle(); claimed || err != nil {
+		t.Fatal("an empty marker is no claim, not an error")
+	}
+	// a gen with neither a commit nor a payload; a commit and a payload both
+	_, claimed, err := v2MarkerWith(t, `"coverage_gen":3`).CoverageHandle()
+	if !claimed || err == nil {
+		t.Fatal("a malformed claim must be claimed-and-corrupt, never unclaimed")
+	}
+	const sha = "9f3c1abdeadbeef9f3c1abdeadbeef9f3c1abd"
+	_, claimed, err = v2MarkerWith(t, `"coverage_gen":3,"coverage_ref":"marker","coverage_commit":"`+sha+`","coverage_payload":{"manifest":{},"records":[]}`).CoverageHandle()
+	if !claimed || err == nil {
+		t.Fatal("a claim carrying both a commit and a payload must be claimed-and-corrupt, never unclaimed")
+	}
+}
+
+// A handle written by RecordCoverage reads back as the same handle, and the
+// previous generation survives one rotation as the predecessor.
+func TestRecordCoverageRoundTripsThroughCoverageHandle(t *testing.T) {
+	const sha = "9f3c1abdeadbeef9f3c1abdeadbeef9f3c1abd"
+	var m prstate.Marker
+	m.RecordCoverage(prstate.Handle{Gen: 3, Commit: sha, Location: "refs/crossrev/pr/42/reviewer1/coverage"})
+	h, claimed, err := m.CoverageHandle()
+	if !claimed || err != nil {
+		t.Fatalf("a recorded ref handle reads back claimed=%v err=%v", claimed, err)
+	}
+	if h.Gen != 3 || h.Commit != sha || h.Location != "refs/crossrev/pr/42/reviewer1/coverage" {
+		t.Fatalf("a recorded ref handle reads back as %+v", h)
+	}
+	if len(m.CoveragePayload) != 0 || len(m.CoveragePrevPayload) != 0 {
+		t.Fatal("a ref handle left an inline payload on the marker")
+	}
+
+	m.RecordCoverage(prstate.Handle{Gen: 1, Location: prstate.HandleMarker, Payload: prstate.Some(json.RawMessage(`{"manifest":{},"records":[]}`))})
+	m.RecordCoverage(prstate.Handle{Gen: 2, Location: prstate.HandleMarker, Payload: prstate.Some(json.RawMessage(`{"manifest":{"gen":2},"records":[]}`))})
+	if string(m.CoveragePayload) != `{"manifest":{"gen":2},"records":[]}` {
+		t.Fatalf("the current payload is %s", m.CoveragePayload)
+	}
+	if string(m.CoveragePrevPayload) != `{"manifest":{},"records":[]}` {
+		t.Fatalf("the predecessor payload is %s", m.CoveragePrevPayload)
+	}
+	h, claimed, err = m.CoverageHandle()
+	if !claimed || err != nil {
+		t.Fatalf("a recorded marker handle reads back claimed=%v err=%v", claimed, err)
+	}
+	if h.Gen != 2 || h.Location != prstate.HandleMarker || string(m.CoveragePayload) == "" {
+		t.Fatalf("a recorded marker handle reads back as %+v", h)
+	}
+
+	// The chain moving to refs leaves no inline payload behind: the
+	// predecessor lives in the parent commit now, not in the comment.
+	m.RecordCoverage(prstate.Handle{Gen: 3, Commit: sha, Location: "refs/crossrev/pr/42/reviewer1/coverage"})
+	if len(m.CoveragePayload) != 0 || len(m.CoveragePrevPayload) != 0 {
+		t.Fatal("a ref handle kept the marker store's inline payloads")
+	}
+}
+
+func TestUnknownMarkerKeysStillRoundTrip(t *testing.T) {
+	const sha = "9f3c1abdeadbeef9f3c1abdeadbeef9f3c1abd"
+	// Raw() is the documented route for continuing state an older writer left
+	// (pass.go); the new keys must not disturb it.
+	m := v2MarkerWith(t, `"coverage_gen":3,"coverage_ref":"refs/crossrev/pr/42/reviewer1/coverage","coverage_commit":"`+sha+`","wrap_up":{"migrated":false}`)
+	if _, claimed, err := m.CoverageHandle(); !claimed || err != nil {
+		t.Fatalf("the struct view lost the new keys: claimed=%v err=%v", claimed, err)
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(m.Raw(), &raw); err != nil {
+		t.Fatalf("reading the raw marker: %v", err)
+	}
+	if string(raw["wrap_up"]) != `{"migrated":false}` {
+		t.Fatalf("Raw dropped the unknown key: %s", m.Raw())
+	}
+	edited, err := prstate.EditMarker(m.Raw(), prstate.MarkerEdit{Key: "state", Value: json.RawMessage(`"complete"`)})
+	if err != nil {
+		t.Fatalf("editing the raw marker: %v", err)
+	}
+	reread, err := prstate.ParseMarker(edited)
+	if err != nil {
+		t.Fatalf("parsing the edited marker: %v", err)
+	}
+	if _, claimed, err := reread.CoverageHandle(); !claimed || err != nil {
+		t.Fatalf("the edit round-trip lost the new keys: claimed=%v err=%v", claimed, err)
+	}
+	if err := json.Unmarshal(reread.Raw(), &raw); err != nil {
+		t.Fatalf("reading the edited raw marker: %v", err)
+	}
+	if string(raw["wrap_up"]) != `{"migrated":false}` {
+		t.Fatalf("the edit round-trip dropped the unknown key: %s", edited)
 	}
 }
