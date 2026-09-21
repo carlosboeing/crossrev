@@ -70,7 +70,9 @@ If that process is still running, wait for it or stop it. If it isn't, CrossRev 
 
 Three halt words name a pass that could not read every changed file. The marker records state `incomplete` with the word and the stop counts. The counts show what ran and what still waits for a verdict.
 
-`coverage_incomplete` means an accepted batch left files waiting. `ledger_exhausted` means packing crossed 32 shards, so the pass keeps the last full generation. `input_exceeds_budget` means one file fits in no rendered prompt. Files past the 400-file pass budget carry `review_budget_reached`.
+`coverage_incomplete` means an accepted batch left files waiting. `ledger_exhausted` means a marker-carried generation outgrew the 64 KiB comment cap after the retention ladder ran, so the pass keeps the last generation that fit. `input_exceeds_budget` means one file fits in no rendered prompt. Files past the 400-file pass budget carry `review_budget_reached`.
+
+The ladder sheds the predecessor generation first, then compacts the current one to counts under `on_overflow: degrade`; under `halt` it skips compaction. Either way the stop counts name what ran and what still waits. The ref store has no comment cap, so this halt only fires on the marker path — `crossrev doctor` says which store is in force.
 
 Run the same command again. It resumes the waiting files, reusing recorded verdicts while the base commit, the pull request commit and the review-engine version are unchanged. A new push retires every prior result and starts over.
 

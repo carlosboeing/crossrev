@@ -269,6 +269,44 @@ func TestReviewNumberingFollowsThePromptNotDiscoveryOrder(t *testing.T) {
 	}
 }
 
+// An evidence note carrying a fenced block is refused at the same boundary
+// that refuses a bad shape, so the skill's writing rule is enforced rather
+// than requested. Coverage refs sit outside normal history, so a quoted line
+// nobody expected to persist would survive a force-push intended to remove
+// it; a note without source text passes unchanged.
+func TestAnEvidenceNoteCarryingACodeFenceIsRefused(t *testing.T) {
+	head := mustReviewRevision(t, "2222222222222222222222222222222222222222")
+	base := mustReviewRevision(t, "1111111111111111111111111111111111111111")
+	expect := validate.ReviewExpectations{
+		Base: base,
+		Head: head,
+		Units: []validate.UnitExpectation{
+			{Path: "a.go", Revision: head, Lines: 10, Readable: true},
+		},
+	}
+	evidence := func(note string) string {
+		return `{"path":"a.go","revision":` + reviewQuoteString(head.SHA()) +
+			`,"start_line":1,"end_line":10,"source":"git","note":` + note + `}`
+	}
+	unit := func(note string) string {
+		return `{"unit_number":1,"verdict":"no_issue","finding_numbers":[],` +
+			`"evidence":[` + evidence(note) + `],"reason":null}`
+	}
+
+	fenced := reviewPayload(`[]`, reviewCoverage(unit(
+		`"the check at lines 3-5:\n`+"```go\\nif ok {\\n}\\n```\"")))
+	if err := validate.Review([]byte(fenced), expect); err == nil {
+		t.Fatalf("wanted a fenced evidence note refused, got nil")
+	} else if got := reviewTestCode(err); got != 1 {
+		t.Fatalf("wanted a shape refusal (exit 1), got exit %d: %q", got, err)
+	}
+
+	plain := reviewPayload(`[]`, reviewCoverage(unit(`"the nil check at lines 3-5 covers the empty case"`)))
+	if err := validate.Review([]byte(plain), expect); err != nil {
+		t.Fatalf("wanted a note without source text accepted, got %q", err)
+	}
+}
+
 func mustReviewRevision(t *testing.T, sha string) core.Revision {
 	t.Helper()
 	rev, err := core.NewRevision(sha)

@@ -139,6 +139,30 @@ Cross-vendor is the strongest arrangement, because a bug one model family misses
 | `agy` / `claude` | Self-hosted only | Antigravity's token lives 56 minutes, and CrossRev cannot seed into a hosted runner yet |
 | `kimi` / `claude` | Local only | Kimi is an endpoint on the Claude adapter, and its credential is a 15-minute OAuth token |
 
+### coverage and reviewers
+
+```yaml
+coverage:
+  store: auto                  # auto | refs | marker
+  ref_namespace: refs/crossrev
+  on_overflow: degrade         # degrade | halt
+
+reviewers:
+  - id: main
+    harness: claude
+    model: claude-fable-5
+    effort: medium
+```
+
+These keys live here alone: `crossrev init` never writes them, so the starter config carries the defaults and these are set by hand. [What CrossRev writes](what-crossrev-writes.md) explains what they govern; [ADR 0022](adrs/0022-the-coverage-ledger-lives-in-git-refs.md) records why.
+
+| Field | What it does |
+|---|---|
+| `coverage.store` | Where coverage generations go. `auto` tries git refs first and falls back to the marker comment when a ref write is refused; `refs` requires refs and fails loudly; `marker` never touches refs at all. Default `auto`. |
+| `coverage.ref_namespace` | The namespace ledger refs live under, one ref per pull request per reviewer. Default `refs/crossrev`. Anything not under `refs/`, anything under `refs/heads`, `refs/tags`, `refs/pull` or `refs/remotes`, and any unsafe component is refused. |
+| `coverage.on_overflow` | What a marker-carried generation does when the comment would pass 64 KiB. `degrade` sheds the predecessor, then compacts the current generation to counts, then halts; `halt` skips compaction. Default `degrade`. |
+| `reviewers` | The reviewer slots, each with an `id`, `harness`, `model`, `effort` and `endpoint`. The list wins over the `reviewer:` shorthand whenever it names a slot. Ids are explicit and stable — never derived from list position — because each slot owns its ledger ref. **One reviewer runs in this release**; a second entry is refused. |
+
 ### backlog
 
 ```yaml

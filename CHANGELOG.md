@@ -2,6 +2,12 @@
 
 All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **CrossRev describes what it writes to a repository, and `doctor` reports the coverage ledger.** [What CrossRev writes](docs/what-crossrev-writes.md) carries the blast-radius contract as a contract — never outside its configured namespace, never under `refs/heads/` or `refs/tags/`, never deleting, never force-pushing a branch, never touching another slot's refs — each promise naming the code that keeps it, with the snippets for excluding the namespace from CI ref-fetching and mirrors, the mirror-push caveat, and the measured cost: 26 of the testbed's 30 advertised refs are already `refs/pull/*`, so one ledger ref per pull request roughly doubles a cost every repository carries. [ADR 0022](docs/adrs/0022-the-coverage-ledger-lives-in-git-refs.md) records the decision. `crossrev doctor` gains a coverage section naming the store in force and why, the namespace, the overflow behaviour, the resolved reviewer, and what the token can do — with the probe's limit stated plainly: it proves the permission, not the namespace. Evidence notes carry locations and reasoning, never source text, enforced by the shape validator refusing a note with a fenced block.
+
 ## [0.7.3] — 2026-09-17
 
 ### Fixed

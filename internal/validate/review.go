@@ -243,10 +243,10 @@ func coverageEntryIsBad(entry json.RawMessage) bool {
 }
 
 // coverageEvidenceIsBad reports whether one evidence item fails the member
-// shape: a non-empty path and revision, a source inside the four, and whole
-// or null line spans. Whether the path and revision were supplied, and
-// whether the span sits inside readable content, is the semantic half's
-// question.
+// shape: a non-empty path and revision, a source inside the four, whole or
+// null line spans, and a note carrying no fenced block. Whether the path and
+// revision were supplied, and whether the span sits inside readable content,
+// is the semantic half's question.
 func coverageEvidenceIsBad(item json.RawMessage) bool {
 	if jqType(item) != "object" {
 		return true
@@ -271,6 +271,14 @@ func coverageEvidenceIsBad(item json.RawMessage) bool {
 		if !isWholeAtLeast(end, 1) {
 			return true
 		}
+	}
+	// Notes carry locations and reasoning, never source text. Coverage refs
+	// sit outside normal history, so a quoted line nobody expected to persist
+	// would survive a force-push intended to remove it. The fence is what is
+	// refused rather than the quotation, because a fence is detectable and a
+	// paraphrase is not.
+	if note, ok := jqString(e["note"]); ok && strings.Contains(note, "```") {
+		return true
 	}
 	return false
 }

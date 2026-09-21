@@ -56,7 +56,7 @@ The App holds three repository permissions, at write, and nothing else — no Se
 
 | Permission | Purpose |
 |---|---|
-| `contents: write` | Push fixes |
+| `contents: write` | Push fixes, publish coverage refs |
 | `pull_requests: write` | Comment, reply and resolve threads |
 | `issues: write` | Apply pull request labels, and file issues for deferred findings |
 

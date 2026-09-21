@@ -96,7 +96,7 @@ Return one entry per numbered file: no more, no fewer, no duplicates. A file lef
 
 Unsupported reading, difficult code, a large batch, ordinary uncertainty, missing tests and one failed attempt do not qualify for `could_not_review`.
 
-Each coverage entry names `evidence`: at least one item with a supplied path and its content revision, `start_line` and `end_line` for the lines the judgement rests on — null for file-level evidence — a `source` of `git`, `search`, `convention` or `reviewer`, and a `note` saying what it shows. Each coverage entry names `reason`: one line for the verdict, expected for `not_affected` and `could_not_review` where the verdict is a judgement rather than an observation.
+Each coverage entry names `evidence`: at least one item with a supplied path and its content revision, `start_line` and `end_line` for the lines the judgement rests on — null for file-level evidence — a `source` of `git`, `search`, `convention` or `reviewer`, and a `note` saying what it shows. **Notes carry locations and reasoning, never source text**: name the lines and say what they show, but do not quote them. Coverage records persist outside normal history, so a quoted line would survive a force-push meant to remove it — and a note carrying a fenced block is refused. Each coverage entry names `reason`: one line for the verdict, expected for `not_affected` and `could_not_review` where the verdict is a judgement rather than an observation.
 
 Advisory files never take a verdict and never satisfy one: a real defect found there is still published as a finding, but the required file it was found from keeps its own verdict. Excluded paths never take one either: they sit outside the required set, visibly, with their reason.
 

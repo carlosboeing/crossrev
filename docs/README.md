@@ -6,6 +6,7 @@ Start with [installation](installation.md), then [usage](usage.md). Everything e
 |---|---|
 | [installation.md](installation.md) | Getting CrossRev onto your machine, updating it, removing it |
 | [usage.md](usage.md) | Running the loop locally, what it writes to a pull request, which model runs each leg |
+| [what-crossrev-writes.md](what-crossrev-writes.md) | What CrossRev writes to a repository, as a contract: the ledger ref, the marker fallback, and how to exclude it |
 | [configuration.md](configuration.md) | `.github/crossrev.yml` field by field, machine-local endpoints, environment variables |
 | [credentials.md](credentials.md) | Which secrets automated mode needs, what each one holds, and why Codex needs a second App |
 | [troubleshooting.md](troubleshooting.md) | The failure modes, each with the name it reports itself under |

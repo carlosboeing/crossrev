@@ -35,6 +35,7 @@ func TestDoctorOnAWorkingMachine(t *testing.T) {
 	r.answer("gh api user --jq .login", "carlosboeing\n", 0)
 	r.answer("claude --version", "2.1.258 (Claude Code)\n", 0)
 	r.answer("codex --version", "codex-cli 0.152.1\n", 0)
+	r.answer("gh repo view --json viewerPermission --jq .viewerPermission", "WRITE\n", 0)
 	c, buf := doctorChecker(t, r, onPath("git", "gh", "jq", "yq", "openssl", "claude", "codex"), defaultPairing)
 
 	if code := c.Doctor(context.Background()); code != 0 {
@@ -54,6 +55,13 @@ func TestDoctorOnAWorkingMachine(t *testing.T) {
 		"\n◇  Pairings on runner: github-hosted\n" +
 		"│  ✓ reviewer — codex by subscription, kept warm by the refresher workflow\n" +
 		"│  ✓ resolver — claude by subscription\n" +
+		"\n◇  Coverage ledger\n" +
+		"│  store auto (the default): tries git refs first, and falls back to the marker comment when a ref write is refused\n" +
+		"│  namespace refs/crossrev — one ref per pull request per reviewer, refs/crossrev/pr/<number>/<slot>/coverage\n" +
+		"│  on_overflow degrade (the default): a marker comment past 64 KiB sheds its predecessor, then compacts the current generation to counts, then halts\n" +
+		"│  ✓ token can push to this repository (contents: write)\n" +
+		"│     This proves the permission, not the namespace: an organisation ruleset restricts ref creation, and only an attempted ref write discovers one.\n" +
+		"│  reviewer reviewer1 on codex\n" +
 		"└  Everything CrossRev needs is installed.\n\n"
 	if got := buf.String(); got != want {
 		t.Errorf("report =\n%q\nwant\n%q", got, want)
