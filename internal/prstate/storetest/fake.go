@@ -23,6 +23,9 @@ type FakeStore struct {
 	unreadable     bool
 	unreadableErr  error
 	isMarker       bool
+	// publishRefusedErr, when set, fails publishes while reads keep
+	// working: a permission denial rather than an outage.
+	publishRefusedErr error
 }
 
 // NewFakeStore returns an in-memory FakeStore producing ref handles by default.
@@ -64,6 +67,15 @@ func (f *FakeStore) SetUnreadable(err error) {
 	defer f.mu.Unlock()
 	f.unreadable = true
 	f.unreadableErr = err
+}
+
+// SetPublishRefused configures the store to fail publishes with err while
+// reads keep working: the shape of a permission denial, where the token
+// may read the ledger but not write it.
+func (f *FakeStore) SetPublishRefused(err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.publishRefusedErr = err
 }
 
 // Published returns the history of published generations.
@@ -139,6 +151,9 @@ func (f *FakeStore) PublishGeneration(ctx context.Context, ref prstate.SlotRef, 
 			return prstate.Handle{}, f.unreadableErr
 		}
 		return prstate.Handle{}, fmt.Errorf("transient store publish failure on %s#%d", ref.Repo, ref.Number)
+	}
+	if f.publishRefusedErr != nil {
+		return prstate.Handle{}, f.publishRefusedErr
 	}
 
 	genNum := candidate.Gen

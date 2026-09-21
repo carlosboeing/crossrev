@@ -166,7 +166,9 @@ func (s *refStore) PublishGeneration(ctx context.Context, ref prstate.SlotRef, p
 		return prstate.Handle{}, fmt.Errorf("parsing commit response: %w", err)
 	}
 
-	// 6. POST or PATCH /git/refs. Force is inert on a custom namespace.
+	// 6. POST or PATCH /git/refs. Force is required: a concurrent move or
+	// a re-rooted chain makes the update a non-fast-forward, on any
+	// namespace.
 	postRes := s.client.run(ctx, "api", "--method", "POST",
 		fmt.Sprintf("repos/%s/git/refs", ref.Repo.String()),
 		"-f", "ref="+refName,

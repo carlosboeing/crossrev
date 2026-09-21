@@ -440,3 +440,48 @@ func TestAutoFailsLoudOnTransientFailure(t *testing.T) {
 		t.Fatalf("selection after a transient failure = %+v, want the ref selection still in force", got)
 	}
 }
+
+// TestAutoReadsBothHalvesAfterAMidPassFallback pins the split history: the
+// ref half accepts the first publication, a later one is refused and lands
+// in the marker, and both generations still read — the ref handle through
+// the ref store, the marker handle through the marker store.
+func TestAutoReadsBothHalvesAfterAMidPassFallback(t *testing.T) {
+	ctx := context.Background()
+	scope := cutoverScope(t)
+	loaded := cutoverLoaded(t, scope)
+	refs := storetest.NewFakeStore()
+	marker := storetest.NewFakeMarkerStore()
+	auto := &autoLedger{refs: refs, marker: marker,
+		selection: ledgerSelection{Store: ledgerStoreRefs, Reason: ledgerReasonConfigured}}
+
+	firstGen := cutoverGeneration(t, prstate.GenerationFull, scope)
+	first, err := auto.PublishGeneration(ctx, slotRefFor(loaded), prstate.Handle{}, firstGen)
+	if err != nil {
+		t.Fatalf("first publish: %v", err)
+	}
+	refs.SetPublishRefused(&prstate.RefWriteRefused{Op: "creating manifest blob", Err: errors.New("creating manifest blob: gh exited 1")})
+	secondGen := cutoverGeneration(t, prstate.GenerationFull, scope)
+	secondGen.Gen = 2
+	second, err := auto.PublishGeneration(ctx, slotRefFor(loaded), first, secondGen)
+	if err != nil {
+		t.Fatalf("a refused mid-pass write halted instead of falling back: %v", err)
+	}
+	if second.Location != prstate.HandleMarker {
+		t.Fatalf("second handle location = %q, want the marker half", second.Location)
+	}
+
+	readFirst, err := auto.ReadGeneration(ctx, slotRefFor(loaded), first)
+	if err != nil {
+		t.Fatalf("the ref half stopped reading after the fallback: %v", err)
+	}
+	if readFirst.Gen != 1 {
+		t.Fatalf("ref-half generation gen = %d, want 1", readFirst.Gen)
+	}
+	readSecond, err := auto.ReadGeneration(ctx, slotRefFor(loaded), second)
+	if err != nil {
+		t.Fatalf("the marker half does not read: %v", err)
+	}
+	if readSecond.Gen != 2 {
+		t.Fatalf("marker-half generation gen = %d, want 2", readSecond.Gen)
+	}
+}

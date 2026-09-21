@@ -38,6 +38,14 @@ func statusSlotRef(t *testing.T) prstate.SlotRef {
 // review leg does, and answers the handle the pass marker records.
 func statusPublishGeneration(t *testing.T, store *storetest.FakeStore, base, head string, paths []string, records []prstate.Record) prstate.Handle {
 	t.Helper()
+	return statusPublishGenerationAs(t, store, base, head, paths, records, statusProducer())
+}
+
+// statusPublishGenerationAs publishes under the given producer: a pass
+// that ran under an override or a substitution records what it ran with,
+// not the configuration text.
+func statusPublishGenerationAs(t *testing.T, store *storetest.FakeStore, base, head string, paths []string, records []prstate.Record, producer prstate.Producer) prstate.Handle {
+	t.Helper()
 	baseRev, err := core.NewRevision(base)
 	if err != nil {
 		t.Fatalf("base revision: %v", err)
@@ -51,7 +59,7 @@ func statusPublishGeneration(t *testing.T, store *storetest.FakeStore, base, hea
 		Revision:    core.RevisionPair{Base: baseRev, Head: headRev},
 		Engine:      core.FileEngineVersion,
 		Slot:        prstate.DefaultSlot,
-		Producer:    statusProducer(),
+		Producer:    producer,
 		Form:        prstate.GenerationFull,
 		Paths:       paths,
 		Records:     records,
@@ -92,6 +100,7 @@ func statusConvergedMarkerComment(t *testing.T, head string, mutate func(*prstat
 		RunID:    prstate.Some("x"),
 		HeadSHA:  prstate.Some(head),
 		Harness:  prstate.Some("claude"),
+		Model:    prstate.Some("reviewer-model"),
 		Verdict:  prstate.Some(string(core.VerdictConverged)),
 		Findings: []byte("[]"),
 	}
@@ -169,6 +178,25 @@ func TestStatusConvergenceReadsTheLedger(t *testing.T) {
 		handle := statusPublishGeneration(t, store, statusBase, statusLedgerHead, paths, covered)
 		comments := []forge.IssueComment{
 			statusConvergedMarkerComment(t, statusLedgerHead, statusNameHandle(handle)),
+		}
+		if got := statusLoadLedger(t, comments, store).State; got != core.LoopConverged {
+			t.Errorf("state = %q, want %q", got, core.LoopConverged)
+		}
+	})
+
+	t.Run("a pass under an override is judged by what it ran with", func(t *testing.T) {
+		// The configuration names claude; the pass ran under a harness
+		// override, which wipes the model and endpoint. Status must agree
+		// with the review that converged, not retire its coverage.
+		store := storetest.NewFakeStore()
+		handle := statusPublishGenerationAs(t, store, statusBase, statusLedgerHead, paths, covered,
+			prstate.Producer{Harness: "opencode"})
+		comments := []forge.IssueComment{
+			statusConvergedMarkerComment(t, statusLedgerHead, func(m *prstate.Marker) {
+				m.Harness = prstate.Some("opencode")
+				m.Model = prstate.Null[string]()
+				m.RecordCoverage(handle)
+			}),
 		}
 		if got := statusLoadLedger(t, comments, store).State; got != core.LoopConverged {
 			t.Errorf("state = %q, want %q", got, core.LoopConverged)

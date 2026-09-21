@@ -25,8 +25,7 @@ const (
 const CoverageKindRecords = "records"
 
 // SuppliedInput is what the reviewer was actually given for one file:
-// measured at prompt-assembly time, never reported by the model. Task 7
-// produces it.
+// measured at prompt-assembly time, never reported by the model.
 type SuppliedInput struct {
 	Digest    string `json:"digest"` // sha256 over the exact bytes handed over
 	Form      string `json:"form"`   // full_text | diff_only

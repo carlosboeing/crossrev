@@ -343,7 +343,10 @@ func statusCoverageConverges(ctx context.Context, in statusInput, review prstate
 	if err != nil {
 		return false
 	}
-	if !prstate.GenerationCurrent(generation, core.RevisionPair{Base: in.base, Head: in.head}, core.FileEngineVersion, in.coverage.producer) {
+	// The pass is judged by what it ran with, read off its marker — not by
+	// the configuration text, which an override or a substitution parts
+	// from and a later edit can move under a settled pass.
+	if !prstate.GenerationCurrent(generation, core.RevisionPair{Base: in.base, Head: in.head}, core.FileEngineVersion, prstate.ProducerFor(review, in.coverage.producer)) {
 		return false
 	}
 	conv := policy.Convergence{
@@ -371,10 +374,11 @@ func statusCoverageConverges(ctx context.Context, in statusInput, review prstate
 }
 
 // coverageSource is what the status coverage read goes through: the client
-// the report already holds, the slot it addresses, and the producer in
-// force now. Reads route by handle location — a marker handle reads
-// through the marker store and a ref handle through the ref store — so a
-// store the marker never named is never consulted.
+// the report already holds, the slot it addresses, and the configured
+// producer a marker without one falls back to. Reads route by handle
+// location — a marker handle reads through the marker store and a ref
+// handle through the ref store — so a store the marker never named is
+// never consulted.
 type coverageSource struct {
 	refs     prstate.LedgerStore
 	marker   prstate.LedgerStore

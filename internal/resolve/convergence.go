@@ -55,7 +55,11 @@ func (l *Leg) resolveConvergence(ctx context.Context, s *session) (policy.Conver
 	}
 	reviewer := s.cfg.Reviewers()[0]
 	ref := prstate.SlotRef{Repo: s.repo, Number: s.req.PR, Slot: reviewer.ID}
-	producer := prstate.Producer{Harness: reviewer.Harness, Model: reviewer.Model, Effort: reviewer.Effort, Endpoint: reviewer.Endpoint}
+	configured := prstate.Producer{Harness: reviewer.Harness, Model: reviewer.Model, Effort: reviewer.Effort, Endpoint: reviewer.Endpoint}
+	// The pass is judged by what it ran with, read off its marker — the
+	// configuration text parts from it under an override or a
+	// substitution, and a settle must agree with the review that ran.
+	producer := prstate.ProducerFor(s.review, configured)
 	gen, err := store.ReadGeneration(ctx, ref, h)
 	if err != nil {
 		return conv, true

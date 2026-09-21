@@ -158,3 +158,51 @@ func TestEveryReaderFailsClosedOnCorruptionAndOnAnUnreadableStore(t *testing.T) 
 		}
 	})
 }
+
+// TestResolveSettlesAPassThatRanUnderAnOverride pins the settle half of
+// the producer contract: the review converged under a harness override
+// the configuration does not name, and the settle judges the pass by what
+// it ran with rather than retiring its coverage.
+func TestResolveSettlesAPassThatRanUnderAnOverride(t *testing.T) {
+	e := setup(t)
+	store := storetest.NewFakeStore()
+	e.forge.ledger = store
+	overridden := prstate.Producer{Harness: "opencode"}
+	gen := prstate.Generation{
+		Gen:      1,
+		Revision: core.RevisionPair{Base: e.forge.pr.BaseRefOid, Head: e.forge.pr.HeadRefOid},
+		Engine:   core.FileEngineVersion,
+		Slot:     prstate.DefaultSlot,
+		Producer: overridden,
+		Form:     prstate.GenerationFull,
+		Paths:    []string{"a.go"},
+		Records: []prstate.Record{{
+			Type:       prstate.CoverageRecordUnit,
+			UnitID:     string(core.FileUnitID("a.go")),
+			PathIndex:  0,
+			Kind:       prstate.CoverageGranularityFile,
+			Change:     string(core.ChangeModified),
+			BodyDigest: core.BodyDigestHex([]byte("body of a.go")),
+			Verdict:    prstate.Some("no_issue"),
+		}},
+		ScopeReport: prstate.ScopeReport{ExaminedScope: "read the batch"},
+	}
+	handle, err := store.PublishGeneration(context.Background(),
+		prstate.SlotRef{Repo: e.slug, Number: 42, Slot: prstate.DefaultSlot}, prstate.Handle{}, gen)
+	if err != nil {
+		t.Fatalf("PublishGeneration: %v", err)
+	}
+	review := cutoverReviewMarker(t, e, func(m *prstate.Marker) {
+		m.Harness = prstate.Some("opencode")
+		m.Model = prstate.Null[string]()
+		m.RecordCoverage(handle)
+	})
+
+	conv, obliged := cutoverLeg(e).resolveConvergence(context.Background(), cutoverSession(t, e, review))
+	if !obliged {
+		t.Fatal("a current complete generation took the frozen path")
+	}
+	if !policy.Converged(conv) {
+		t.Fatal("the settle retired coverage the review converged under an override")
+	}
+}

@@ -9,8 +9,8 @@ import (
 	"github.com/carlosboeing/crossrev/internal/core"
 )
 
-// Ledger limits (v1 comment ledger, retained for fixture compatibility; Task 10
-// retires the v1 comment store callers while live storage uses LedgerStore and v2 schema).
+// Ledger limits (v1 comment ledger, retained for fixture compatibility; live
+// storage uses LedgerStore and the v2 schema).
 //
 // A generation holds at most MaxCoverageShards shards. The design's §10.6
 // fires its halt bound there; this release keeps the last complete generation
@@ -174,6 +174,19 @@ func (e *RefWriteRefused) Error() string {
 		return fmt.Sprintf("ref write refused by a ruleset: %v", e.Err)
 	}
 	return fmt.Sprintf("ref write refused: %v", e.Err)
+}
+
+// ProducerFor answers the producer a pass ran with, read off its marker:
+// the claim records the resolved settings, not the configuration text, so
+// a pass that ran under an override or a substitution is judged by what
+// actually judged it. A marker that names no producer predates the claim
+// fields and falls back to the configured reviewer.
+func ProducerFor(m Marker, fallback Producer) Producer {
+	harness, ok := m.Harness.Get()
+	if !ok {
+		return fallback
+	}
+	return Producer{Harness: harness, Model: m.Model.Value(), Effort: m.Effort.Value(), Endpoint: m.Endpoint.Value()}
 }
 
 // GenerationCurrent reports whether a generation may still be reused: the

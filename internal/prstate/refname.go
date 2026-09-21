@@ -10,8 +10,8 @@ import (
 var slotRegex = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
 
 // ValidNamespace refuses anything that could put CrossRev outside its own
-// corner of the ref space. Task 12 promises CrossRev never creates a branch
-// or a tag; this is where that promise is kept rather than documented.
+// corner of the ref space. CrossRev never creates a branch or a tag; this
+// is where that promise is kept rather than documented.
 //
 // Refused: anything not under refs/; refs/heads, refs/tags, refs/pull and
 // refs/remotes and their children; a component that is empty, starts with a

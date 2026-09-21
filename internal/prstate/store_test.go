@@ -59,6 +59,55 @@ func passthroughFilter(s string) (string, error) {
 	return s, nil
 }
 
+// TestProducerFor pins where a pass's producer is read from: the marker
+// the pass left, which records the resolved settings — including an
+// override's wiped model and endpoint — rather than the configuration
+// text. A marker that names no producer predates the claim fields and
+// falls back to the configured reviewer.
+func TestProducerFor(t *testing.T) {
+	fallback := prstate.Producer{Harness: "claude", Model: "reviewer-model", Effort: "high", Endpoint: "vendor"}
+
+	t.Run("a pass marker names what it ran with", func(t *testing.T) {
+		marker := prstate.Marker{
+			Harness:  prstate.Some("opencode"),
+			Model:    prstate.Null[string](),
+			Effort:   prstate.Some("medium"),
+			Endpoint: prstate.Null[string](),
+		}
+		want := prstate.Producer{Harness: "opencode", Effort: "medium"}
+		if got := prstate.ProducerFor(marker, fallback); got != want {
+			t.Fatalf("ProducerFor = %+v, want %+v", got, want)
+		}
+	})
+
+	t.Run("the wire format round-trips the producer", func(t *testing.T) {
+		marker := prstate.Marker{
+			Harness:  prstate.Some("opencode"),
+			Model:    prstate.Null[string](),
+			Effort:   prstate.Some("medium"),
+			Endpoint: prstate.Null[string](),
+		}
+		raw, err := json.Marshal(marker)
+		if err != nil {
+			t.Fatalf("Marshal: %v", err)
+		}
+		var decoded prstate.Marker
+		if err := json.Unmarshal(raw, &decoded); err != nil {
+			t.Fatalf("Unmarshal: %v", err)
+		}
+		want := prstate.Producer{Harness: "opencode", Effort: "medium"}
+		if got := prstate.ProducerFor(decoded, fallback); got != want {
+			t.Fatalf("ProducerFor after a round trip = %+v, want %+v", got, want)
+		}
+	})
+
+	t.Run("a marker without a producer falls back to the configured reviewer", func(t *testing.T) {
+		if got := prstate.ProducerFor(prstate.Marker{}, fallback); got != fallback {
+			t.Fatalf("ProducerFor = %+v, want the fallback %+v", got, fallback)
+		}
+	})
+}
+
 func fixtureGeneration(t *testing.T, form string) prstate.Generation {
 	return storetest.FixtureGeneration(t, form)
 }
