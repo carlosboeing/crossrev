@@ -6,6 +6,7 @@ status: approved
 scope: [coverage, storage, git-refs, doctor]
 authors:
   - "Carlos Boeing"
+  - "muse-spark (muse)"
 related:
   - docs/adrs/0002-the-pull-request-is-the-state.md
   - docs/adrs/0006-three-app-permissions-and-nothing-else.md

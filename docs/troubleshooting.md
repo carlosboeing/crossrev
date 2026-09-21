@@ -64,13 +64,13 @@ If that process is still running, wait for it or stop it. If it isn't, CrossRev 
 | The resolve leg returned `blocked` | Same, on the other leg |
 | A finding was `escalated` | It needs a human decision, so `crossrev/stop` went on and the thread stayed open |
 | **A leg stopped with an error** | The harness failed to answer, a commit was refused, a push was rejected. The claim comment and its marker carry the reason. Fix what it names, then run the same command again |
-| The pass left files without a verdict | The claim names them with its halt word and stop counts. Run the same command again to resume — recorded verdicts are reused while the base commit, the pull request commit and the review-engine version are unchanged |
+| The pass left files without a verdict | The claim names them with its halt word and stop counts. Run the same command again to resume — recorded verdicts are reused while the base commit, the pull request commit, the review-engine version and the review producer (harness, model, effort and endpoint) are unchanged |
 
 ## Coverage halts
 
 Three halt words name a pass that could not read every changed file. The marker records state `incomplete` with the word and the stop counts. The counts show what ran and what still waits for a verdict.
 
-`coverage_incomplete` means an accepted batch left files waiting. `ledger_exhausted` means a marker-carried generation outgrew the 64 KiB comment cap after the retention ladder ran, so the pass keeps the last generation that fit. `input_exceeds_budget` means one file fits in no rendered prompt. Files past the 400-file pass budget carry `review_budget_reached`.
+`coverage_incomplete` means an accepted batch left files waiting. `ledger_exhausted` means a marker-carried generation outgrew the 64 KiB comment cap after the retention ladder ran, so the pass keeps the last generation that fit — a cap the ref store does not share, its generations persisting as git objects. `input_exceeds_budget` means one file fits in no rendered prompt. Files past the 400-file pass budget carry `review_budget_reached`.
 
 The ladder sheds the predecessor generation first, then compacts the current one to counts under `on_overflow: degrade`; under `halt` it skips compaction. Either way the stop counts name what ran and what still waits. The ref store has no comment cap, so this halt only fires on the marker path — `crossrev doctor` says which store is in force.
 
