@@ -2,6 +2,8 @@ package review_test
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"strings"
 	"testing"
@@ -11,6 +13,7 @@ import (
 	"github.com/carlosboeing/crossrev/internal/core"
 	"github.com/carlosboeing/crossrev/internal/exec"
 	"github.com/carlosboeing/crossrev/internal/prstate"
+	"github.com/carlosboeing/crossrev/internal/prstate/storetest"
 	"github.com/carlosboeing/crossrev/internal/review"
 )
 
@@ -68,51 +71,16 @@ func itoa2(n int) string {
 	return string(digits)
 }
 
-// ledgerGenerations returns the complete generations the leg published,
-// selected one generation at a time from the oldest manifest on.
-func ledgerManifestIDs(t *testing.T, e *env) []int64 {
-	t.Helper()
-	var ids []int64
-	for _, c := range e.forge.comments {
-		if c.AuthorLogin != author {
-			continue
-		}
-		if manifest, ok := prstate.DecodeCoverageManifest(c.Body); ok {
-			ids = append(ids, c.ID)
-			_ = manifest
-		}
-	}
-	return ids
-}
-
-func ledgerComments(t *testing.T, e *env) []prstate.CoverageComment {
-	t.Helper()
-	var comments []prstate.CoverageComment
-	for _, c := range e.forge.ledger.order {
-		stored := e.forge.ledger.comments[c]
-		comments = append(comments, prstate.CoverageComment{ID: stored.ID, Author: stored.Author, Body: stored.Body})
-	}
-	return comments
-}
-
-// ledgerGenerations returns every complete generation the leg published:
-// one SelectGeneration per manifest, each over the ledger prefix through
-// that manifest, so earlier generations are visible beside the current one.
+// ledgerGenerations returns every complete generation the leg published, in
+// publication order: the initial outstanding generation plus one per
+// accepted batch.
 func ledgerGenerations(t *testing.T, e *env) []prstate.Generation {
 	t.Helper()
-	comments := ledgerComments(t, e)
-	var out []prstate.Generation
-	for i, c := range comments {
-		if _, ok := prstate.DecodeCoverageManifest(c.Body); !ok {
-			continue
-		}
-		gen, err := prstate.SelectGeneration(comments[:i+1], author, core.RevisionPair{Base: mustRev(t, baseSHA), Head: mustRev(t, headSHA)}, core.FileEngineVersion)
-		if err != nil {
-			continue
-		}
-		out = append(out, gen)
+	store, ok := e.forge.store.(*storetest.FakeStore)
+	if !ok {
+		t.Fatalf("fixture store is %T, want *storetest.FakeStore", e.forge.store)
 	}
-	return out
+	return store.Published()
 }
 
 // TestReviewPublishesOneCompleteGenerationPerAcceptedBatch pins the C1 batch
@@ -151,8 +119,10 @@ func TestReviewPublishesOneCompleteGenerationPerAcceptedBatch(t *testing.T) {
 func TestReviewFailsClosedOnCorruptCoverage(t *testing.T) {
 	e := newEnv(t)
 	writeRequiredHead(e, "a.go", "package a\n")
-	e.forge.ledger.comments[8001] = prstate.CoverageComment{ID: 8001, Author: author, Body: "note\n\n<!-- crossrev:c {oops} -->"}
-	e.forge.ledger.order = append(e.forge.ledger.order, 8001)
+	// An open claim carrying a claim that is not a valid handle: a
+	// generation number with no ref behind it. Corrupt state, never "no
+	// coverage".
+	seedStartedClaim(t, e, prstate.Marker{CoverageGen: prstate.Some(7)})
 	e.runner.script = []exec.Result{{ExitCode: 0, Stdout: claudeStdout(batchAnswerFor(t, []string{"a.go"}))}}
 
 	got := runLeg(t, e, e.request(t))
@@ -219,18 +189,82 @@ func TestReviewRestartUsesOnlySameRevisionCoverage(t *testing.T) {
 	}
 }
 
+// TestNewPassContinuesTheLedgerChain pins the cross-pass ancestry: after a
+// completed pass and a new head, admission starts pass 2, whose first
+// publication parents onto pass 1's tip and continues its generation
+// numbers instead of rooting an unrelated chain at generation 1.
+func TestNewPassContinuesTheLedgerChain(t *testing.T) {
+	e := newEnv(t)
+	writeRequiredHead(e, "a.go", "package a\n")
+	e.runner.script = []exec.Result{
+		{ExitCode: 0, Stdout: claudeStdout(batchAnswer(t, 1))},
+	}
+	first := runLeg(t, e, e.request(t))
+	if first.Err != nil {
+		t.Fatalf("first Run: %v", first.Err)
+	}
+	if first.Marker.Pass != 1 {
+		t.Fatalf("first pass = %d, want 1", first.Marker.Pass)
+	}
+	tipCommit, _ := first.Marker.CoverageCommit.Get()
+	tipGen := first.Marker.CoverageGen.Value()
+	if tipCommit == "" || tipGen == 0 {
+		t.Fatalf("pass 1 left no checkpoint (gen %d commit %q); the ancestry has nothing to continue", tipGen, tipCommit)
+	}
+
+	movedSHA := "4444444444444444444444444444444444444444"
+	e.forge.pr.HeadRefOid = mustRev(t, movedSHA)
+	if e.vcs.files[movedSHA] == nil {
+		e.vcs.files[movedSHA] = map[string][]byte{}
+	}
+	e.vcs.files[movedSHA]["a.go"] = []byte("package a\n")
+	// Evidence must cite the base or the head under review.
+	secondAnswer := strings.Replace(batchAnswer(t, 1), headSHA, movedSHA, -1)
+	e.runner.script = append(e.runner.script, exec.Result{ExitCode: 0, Stdout: claudeStdout(secondAnswer)})
+
+	store, ok := e.forge.store.(*storetest.FakeStore)
+	if !ok {
+		t.Fatalf("fixture store is %T, want *storetest.FakeStore", e.forge.store)
+	}
+	publishedBefore := len(store.Published())
+	callsBefore := e.runner.calls
+
+	second := runLeg(t, e, e.request(t))
+	if second.Err != nil {
+		t.Fatalf("second Run: %v", second.Err)
+	}
+	if second.Marker.Pass != 2 {
+		t.Fatalf("second pass = %d, want 2 (the moved head admits a new pass)", second.Marker.Pass)
+	}
+	if e.runner.calls == callsBefore {
+		t.Fatal("pass 2 ran no model call; it resumed verdicts instead of re-judging the new head")
+	}
+	gens := store.Published()[publishedBefore:]
+	parents := store.Parents()[publishedBefore:]
+	if len(gens) == 0 {
+		t.Fatal("pass 2 published nothing")
+	}
+	if parents[0].Commit != tipCommit {
+		t.Fatalf("pass 2's first publication parents on %q, want pass 1's tip %q", parents[0].Commit, tipCommit)
+	}
+	if gens[0].Gen != tipGen+1 {
+		t.Fatalf("pass 2's first publication is gen %d, want %d (numbering continues across passes)", gens[0].Gen, tipGen+1)
+	}
+}
+
 // acceptedReuse counts the prior generation's verdicts the leg would
 // reuse at the given revision pair under the current engine.
 func acceptedReuse(t *testing.T, e *env, base, head core.Revision) int {
 	t.Helper()
-	gen, err := prstate.SelectGeneration(ledgerComments(t, e), author, core.RevisionPair{Base: base, Head: head}, core.FileEngineVersion)
-	if err != nil {
-		return 0
-	}
 	accepted := 0
-	for _, record := range gen.Records {
-		if record.Type == "unit" && record.Verdict.Present() {
-			accepted++
+	for _, gen := range ledgerGenerations(t, e) {
+		if gen.Revision.Base.SHA() != base.SHA() || gen.Revision.Head.SHA() != head.SHA() || gen.Engine != core.FileEngineVersion {
+			continue
+		}
+		for _, record := range gen.Records {
+			if record.Type == "unit" && record.Verdict.Present() {
+				accepted++
+			}
 		}
 	}
 	return accepted
@@ -316,6 +350,145 @@ func TestReviewFailsClosedWhenFileEnumerationFails(t *testing.T) {
 	}
 }
 
+// capturePublished records each coverage generation candidate the leg hands
+// to publication, in order. The candidates are the in-memory values, before
+// any store encodes them, so a test reading them here sees what the leg
+// supplied rather than what publication persisted. Set before runLeg; the
+// observer resets when the test ends.
+func capturePublished(t *testing.T) *[]prstate.Generation {
+	t.Helper()
+	published := &[]prstate.Generation{}
+	review.ObservePublishedCandidate = func(candidate prstate.Generation) {
+		*published = append(*published, candidate)
+	}
+	t.Cleanup(func() { review.ObservePublishedCandidate = nil })
+	return published
+}
+
+// suppliedRecordFor returns the published record for one required path: the
+// record whose path index names it. It fails the test when the generation
+// carries no such record, so a lookup miss cannot read as a missing field.
+func suppliedRecordFor(t *testing.T, gen prstate.Generation, path string) prstate.Record {
+	t.Helper()
+	for _, record := range gen.Records {
+		if record.PathIndex >= 0 && record.PathIndex < len(gen.Paths) && gen.Paths[record.PathIndex] == path {
+			return record
+		}
+	}
+	t.Fatalf("no record for %q in generation %d (%d records)", path, gen.Gen, len(gen.Records))
+	return prstate.Record{}
+}
+
+// bodyHandedTo extracts one numbered file's fenced content out of the prompt
+// the stub harness was actually given: the bytes under the unit's section
+// header, between the opening fence and the closing one. It reads the
+// harness input, not the fixture and not the scope, so a digest derived from
+// it agrees with the record only when the record describes what the model
+// received. The prompt fence trims one trailing newline, so the fixture body
+// carries none and the extraction is byte-exact.
+func bodyHandedTo(t *testing.T, prompt, path string) []byte {
+	t.Helper()
+	header := "### 1. `" + path + "`"
+	at := strings.Index(prompt, header)
+	if at < 0 {
+		t.Fatalf("prompt carries no numbered section for %q", path)
+	}
+	const fence = "````\n"
+	open := strings.Index(prompt[at:], fence)
+	if open < 0 {
+		t.Fatalf("prompt section for %q carries no fenced content", path)
+	}
+	rest := prompt[at+open+len(fence):]
+	close := strings.Index(rest, "\n````")
+	if close < 0 {
+		t.Fatalf("prompt section for %q has an unterminated fence", path)
+	}
+	return []byte(rest[:close])
+}
+
+// TestSuppliedDigestMatchesTheBytesHandedToTheHarness pins the point of the
+// supplied field: the digest must match the bytes the harness got, not the
+// bytes on disk and not the rendered prompt. The expected value is parsed
+// out of the prompt the stub harness was actually given — hashing the
+// fixture again on both sides would prove nothing — and the actual value is
+// the candidate the leg handed to publication, which the v1 codec drops on
+// the wire and store read-back can never observe.
+func TestSuppliedDigestMatchesTheBytesHandedToTheHarness(t *testing.T) {
+	e := newEnv(t)
+	// No trailing newline: the prompt fence trims one, so this keeps the
+	// extraction byte-exact (see bodyHandedTo).
+	body := "package a\n\nconst HandedOver = true"
+	writeRequiredHead(e, "a.go", body)
+	prompts := capturePrompt(e)
+	published := capturePublished(t)
+	e.runner.script = []exec.Result{
+		{ExitCode: 0, Stdout: claudeStdout(batchAnswer(t, 1))},
+	}
+	got := runLeg(t, e, e.request(t))
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
+	if len(*prompts) != 1 {
+		t.Fatalf("prompts = %d, want 1 (one file, one batch)", len(*prompts))
+	}
+	handed := bodyHandedTo(t, (*prompts)[0], "a.go")
+	if string(handed) != body {
+		t.Fatalf("extracted %q from the prompt, want the %q the scope read", handed, body)
+	}
+	if len(*published) == 0 {
+		t.Fatal("no complete generation published")
+	}
+	record := suppliedRecordFor(t, (*published)[len(*published)-1], "a.go")
+	supplied, ok := record.Supplied.Get()
+	if !ok {
+		t.Fatal("a judged record carries no supplied input")
+	}
+	sum := sha256.Sum256(handed)
+	if want := hex.EncodeToString(sum[:]); supplied.Digest != want {
+		t.Fatalf("supplied digest %s, want %s — the digest does not describe what the model received", supplied.Digest, want)
+	}
+	if supplied.Form != prstate.SuppliedFormFullText {
+		t.Fatalf("form %q for a file supplied in full", supplied.Form)
+	}
+}
+
+// TestAnUnavailableFileRecordsDiffOnly pins that binary, unreadable or
+// quarantined content stays required with a named access limit and no body:
+// the record must say diff_only rather than claim a full-text supply.
+func TestAnUnavailableFileRecordsDiffOnly(t *testing.T) {
+	e := newEnv(t)
+	writeRequiredHead(e, "blob.bin", "GIF89a\x00\x01binary-bytes")
+	prompts := capturePrompt(e)
+	published := capturePublished(t)
+	e.runner.script = []exec.Result{
+		{ExitCode: 0, Stdout: claudeStdout(batchAnswerFor(t, []string{"blob.bin"}))},
+	}
+	got := runLeg(t, e, e.request(t))
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
+	if len(*prompts) != 1 {
+		t.Fatalf("prompts = %d, want 1 (one file, one batch)", len(*prompts))
+	}
+	if strings.Contains((*prompts)[0], "binary-bytes") {
+		t.Fatal("prompt carried the binary body the batch block withholds")
+	}
+	if len(*published) == 0 {
+		t.Fatal("no complete generation published")
+	}
+	record := suppliedRecordFor(t, (*published)[len(*published)-1], "blob.bin")
+	supplied, ok := record.Supplied.Get()
+	if !ok {
+		t.Fatal("a judged binary record carries no supplied input")
+	}
+	if supplied.Form != prstate.SuppliedFormDiffOnly {
+		t.Fatalf("form %q for a file that reached the model through the diff slice alone", supplied.Form)
+	}
+	if want := core.BodyDigestHex(nil); supplied.Digest != want {
+		t.Fatalf("diff_only digest %s, want %s (no body bytes were handed over)", supplied.Digest, want)
+	}
+}
+
 // TestReviewRefusesStaleGenerationWhenHeadMoves pins the publication
 // freshness check: a push landing during the model invocation retires the
 // accepted batch's candidate, so the generation is never committed and no
@@ -341,8 +514,11 @@ func TestReviewRefusesStaleGenerationWhenHeadMoves(t *testing.T) {
 		}
 	}
 	gens := ledgerGenerations(t, e)
-	if len(gens) != 1 {
-		t.Fatalf("complete generations = %d, want 1 (the initial outstanding generation only; the stale candidate was refused)", len(gens))
+	if len(gens) != 2 {
+		t.Fatalf("published generations = %d, want 2 (the initial plus the stale candidate, whose handle was retired before the commit point)", len(gens))
+	}
+	if gen, _ := got.Marker.CoverageGen.Get(); gen != 1 {
+		t.Fatalf("the marker names generation %d, want 1 (the initial checkpoint; the stale candidate's handle was retired before the commit point)", gen)
 	}
 }
 
@@ -355,13 +531,7 @@ func TestReviewRefusesConvergenceWhenHeadMovesAfterCoverage(t *testing.T) {
 	writeRequiredHead(e, "a.go", "package a\n")
 	moved := mustRev(t, "5555555555555555555555555555555555555555")
 	e.forge.onPullRequest = func(int) {
-		manifests := 0
-		for _, id := range e.forge.ledger.order {
-			if _, ok := prstate.DecodeCoverageManifest(e.forge.ledger.comments[id].Body); ok {
-				manifests++
-			}
-		}
-		if manifests >= 2 {
+		if len(ledgerGenerations(t, e)) >= 2 {
 			e.forge.pr.HeadRefOid = moved
 		}
 	}

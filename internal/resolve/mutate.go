@@ -143,6 +143,9 @@ func (l *Leg) publish(ctx context.Context, s *session, got Result, workdir strin
 	if err != nil {
 		return fail(err)
 	}
+	if err := prstate.FitMarkerComment(reviewBody + encodedReview); err != nil {
+		return fail(err)
+	}
 	if err := l.Forge.CommentEdit(ctx, s.repo, s.review.CommentID(), reviewBody+encodedReview); err != nil {
 		return fail(err)
 	}
@@ -179,8 +182,9 @@ func (l *Leg) publish(ctx context.Context, s *session, got Result, workdir strin
 		// coverage obligation is met at this head. The base rule already
 		// established nothing fixable is open; the predicate adds the
 		// ledger, counts, scope and confirmation guards. With no coverage
-		// generation at this head no coverage pass ran here, so the
-		// frozen-path settle keeps its legacy label.
+		// claim on the marker no coverage pass ran here, so the
+		// frozen-path settle keeps its legacy label; a claim the store
+		// no longer backs re-reviews instead of keeping converged.
 		if conv, ok := l.resolveConvergence(ctx, s); ok {
 			next = policy.ResolvePassLabelWithCoverage(asPolicyResolve(marker), other, conv)
 		}
@@ -364,11 +368,12 @@ func (l *Leg) finishEmpty(ctx context.Context, s *session, got Result) Result {
 	}
 	if next == policy.PassConverged {
 		// The no-findings path reports converged only with the coverage
-		// obligation met. With no coverage generation at this head no
+		// obligation met. With no coverage claim on the marker no
 		// coverage pass ran here, so the frozen-path ending keeps its
-		// legacy label; corrupt or incomplete coverage fails closed to
-		// halted, because the resolve leg cannot cover files itself and
-		// a human must re-drive the review.
+		// legacy label; a claim the store no longer backs, and corrupt
+		// or incomplete coverage, fail closed to halted, because the
+		// resolve leg cannot cover files itself and a human must
+		// re-drive the review.
 		if conv, ok := l.resolveConvergence(ctx, s); ok {
 			if !policy.Converged(conv) {
 				next = policy.PassHalted

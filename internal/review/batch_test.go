@@ -375,6 +375,81 @@ func TestReviewRunsSchedulableBatchesBeforeInputHalt(t *testing.T) {
 	}
 }
 
+// TestAnOutstandingRecordCarriesNoSuppliedInput pins that a file nobody
+// reviewed carries no supplied input: the halt leaves z_huge.go outstanding
+// in the current generation, and nothing was handed to a reviewer for it —
+// a different fact from handing over empty bytes. The judged sibling proves
+// the null is real: a.go carries its measurement in the same candidate, so
+// the outstanding null means nothing was handed over, not that the
+// observation dropped the field.
+func TestAnOutstandingRecordCarriesNoSuppliedInput(t *testing.T) {
+	e := newEnv(t)
+	writeRequiredHead(e, "a.go", "package a\n")
+	writeRequiredHead(e, "z_huge.go", "package huge\n"+strings.Repeat("// filler line to exceed the prompt budget\n", 8000))
+	e.runner.script = []exec.Result{
+		{ExitCode: 0, Stdout: claudeStdout(batchAnswerFor(t, []string{"a.go"}))},
+	}
+	published := capturePublished(t)
+	got := runLeg(t, e, e.request(t))
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
+	if got.Outcome != review.OutcomeHalted {
+		t.Fatalf("Outcome = %q, want halted (z_huge.go never reviewed)", got.Outcome)
+	}
+	if len(*published) == 0 {
+		t.Fatal("no complete generation published")
+	}
+	last := (*published)[len(*published)-1]
+	sibling := suppliedRecordFor(t, last, "a.go")
+	if _, ok := sibling.Supplied.Get(); !ok {
+		t.Fatal("the judged sibling carries no supplied input, so the outstanding null proves nothing")
+	}
+	record := suppliedRecordFor(t, last, "z_huge.go")
+	if _, ok := record.Verdict.Get(); ok {
+		t.Fatal("z_huge.go carries a verdict in a halted pass")
+	}
+	if _, ok := record.Supplied.Get(); ok {
+		t.Fatal("a file nobody reviewed claims bytes were supplied for it")
+	}
+}
+
+// TestTruncatedIsFalseBecauseNothingTruncates is a guard, not a tautology: a
+// file that cannot fit a prompt alone halts with input_exceeds_budget rather
+// than being cut, so every supplied record must read truncated false. If a
+// truncation path is ever added, this test fails and forces the field to be
+// set honestly. It reads the candidates the leg handed to publication: the
+// v1 codec drops the field on the wire, so store read-back would check
+// nothing.
+func TestTruncatedIsFalseBecauseNothingTruncates(t *testing.T) {
+	e := newEnv(t)
+	writeRequiredHead(e, "a.go", "package a\n")
+	e.runner.script = []exec.Result{
+		{ExitCode: 0, Stdout: claudeStdout(batchAnswer(t, 1))},
+	}
+	published := capturePublished(t)
+	got := runLeg(t, e, e.request(t))
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
+	var judged int
+	for _, gen := range *published {
+		for _, record := range gen.Records {
+			supplied, ok := record.Supplied.Get()
+			if !ok {
+				continue
+			}
+			judged++
+			if supplied.Truncated {
+				t.Errorf("generation %d record %s claims truncation, and nothing truncates", gen.Gen, record.UnitID)
+			}
+		}
+	}
+	if judged == 0 {
+		t.Fatal("no judged record carries supplied input, so the guard checked nothing")
+	}
+}
+
 // acceptAll batches the validation seam for cases that measure packing and
 // prompt shape rather than the answer check: any payload passes.
 func acceptAll(e *env) {

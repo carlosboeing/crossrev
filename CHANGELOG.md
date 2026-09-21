@@ -2,6 +2,22 @@
 
 All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Ledger ref updates no longer fail against the GitHub API.** PATCH /git/refs takes a boolean force, and the `-f force=true` form field sent the string, so every update 422d. Each pass publishes at least twice to its slot ref — the initial generation, then each accepted batch — so the second publication always fell back to the marker while the ref held the initial generation. The update now sends a JSON body, and the offline `gh` stub holds GitHub's boolean rule.
+
+- **The review and resolve skills forbid backslash escapes outside code spans.** A resolver once double-escaped its summary newlines, so a resolve summary posted literal `\n` sequences; the same flake could emit `\t`, `\r` or `\"`. Both skills now say plain characters; [#267](https://github.com/carlosboeing/crossrev/issues/267) tracks enforcing it deterministically.
+
+- **A new review pass continues the ledger chain, reads never rewind it, marker digests cover the redacted bytes, and denied writes fall back.** A pass admitted after a completed one rooted an unrelated chain at generation 1, orphaning every earlier pass from the slot ref's ancestry; it now seeds from the slot's latest checkpoint for ancestry and numbering while verdicts still retire at a new revision. A generation read force-updated an existing ref to the handle being read, so reading an older generation rewound a concurrently advanced ledger; restores are create-only now. The marker store digested the pre-redaction bytes while the comment writer redacted the payload afterwards, so a credential-shaped string persisted a generation that never verified; both stores filter before encoding. Under `auto`, a denied blob, tree or commit write halted the pass instead of falling back, because only the ref-update error was classified as a refusal; permission and policy denials across the whole sequence report the typed refusal now, while transient failures still fail loudly.
+
+- **Status and settle judge a pass by the producer it ran with.** The review leg records the resolved settings on its generations, but status and the resolve settle compared against the configuration text — so a pass that ran under a `--harness` override or a binary substitution converged and then failed the coverage obligation everywhere else. Both readers now take the producer off the pass marker, falling back to the configured reviewer for markers that predate the claim fields.
+
+### Changed
+
+- **CrossRev describes what it writes to a repository, and `doctor` reports the coverage ledger.** [What CrossRev writes](docs/what-crossrev-writes.md) carries the blast-radius contract as a contract — never outside its configured namespace, never under `refs/heads/` or `refs/tags/`, never deleting, never force-pushing a branch, never touching another slot's refs — each promise naming the code that keeps it, with the snippets for excluding the namespace from CI ref-fetching and mirrors, the mirror-push caveat, and the measured cost: 26 of the testbed's 30 advertised refs are already `refs/pull/*`, so one ledger ref per pull request roughly doubles a cost every repository carries. [ADR 0022](docs/adrs/0022-the-coverage-ledger-lives-in-git-refs.md) records the decision. `crossrev doctor` gains a coverage section naming the store in force and why, the namespace, the overflow behaviour, the resolved reviewer, and what the token can do — with the probe's limit stated plainly: it proves the permission, not the namespace. Evidence notes carry locations and reasoning, never source text, enforced by the shape validator refusing a note with a fenced block.
+
 ## [0.7.3] — 2026-09-17
 
 ### Fixed

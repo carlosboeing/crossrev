@@ -81,7 +81,7 @@ func (l *Leg) reportFatal(ctx context.Context, req Request, loaded Context, mark
 	// Best effort on every write below, which is what `|| true` is at
 	// lib/run.sh:750, :759 and :761: the harness error is the cause the
 	// operator needs, and a failure to record it must not replace it.
-	_ = l.editClaim(ctx, loaded.Repo, claimID, body, marker)
+	_, _ = l.editClaim(ctx, loaded.Repo, claimID, body, marker, coverageOverflow(loaded))
 	_, _ = l.applyPassLabels(ctx, req, loaded, marker.Pass, policy.PassHalted)
 }
 

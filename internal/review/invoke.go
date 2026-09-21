@@ -29,20 +29,22 @@ type legSettings struct {
 }
 
 func (l *Leg) settings(req Request, loaded Context) (legSettings, ui.Line, error) {
-	cfg := loaded.Config
+	// The canonical reviewer, never the singular key: reading that key
+	// directly would accept a plural configuration and then run the singular
+	// default sitting underneath it. The resolver also carries the codex
+	// default an empty harness used to fall back to here, so a resolved slot
+	// always names a harness.
+	reviewer := loaded.Config.Reviewers()[0]
 	s := legSettings{
-		harness:  cfg.Get(".reviewer.harness"),
-		model:    cfg.Get(".reviewer.model"),
-		effort:   cfg.Get(".reviewer.effort"),
-		endpoint: cfg.Get(".reviewer.endpoint"),
+		harness:  reviewer.Harness,
+		model:    reviewer.Model,
+		effort:   reviewer.Effort,
+		endpoint: reviewer.Endpoint,
 	}
 	if req.HarnessOverride != "" {
 		s.harness = req.HarnessOverride
 		s.model = ""
 		s.endpoint = ""
-	}
-	if s.harness == "" {
-		s.harness = string(core.HarnessCodex)
 	}
 	if !l.Harness.Known(s.harness) {
 		return s, ui.Line{}, noAdapterRefusal(l.Harness, s.harness)

@@ -281,7 +281,7 @@ The loop enforces the configured severity threshold and pass limit. CrossRev che
 
 CrossRev **supports self-hosted runners**, but public repositories require [stricter isolation](docs/adrs/0016-public-repositories-may-use-isolated-one-job-runners.md) because PRs can carry prompt injections that expose credentials or modify shared state. GitHub warns that self-hosted runners can be persistently compromised and should generally not be used for public repositories in its [secure-use guidance](https://docs.github.com/en/actions/reference/security/secure-use#hardening-for-self-hosted-runners). For public repositories, use a **GitHub-hosted runner** or a fresh, [ephemeral self-hosted runner](https://docs.github.com/en/actions/reference/runners/self-hosted-runners#ephemeral-runners-for-autoscaling) that handles one job and is destroyed afterward. A container alone is not sufficient if it can reach host credentials or shared state.
 
-CrossRev reconstructs every pass from the pull request. Hidden markers record the revision, findings, resolutions, and execution details. A retry reads those markers and continues without duplicating completed writes.
+CrossRev reconstructs every pass from the pull request and the repository's ledger ref. Hidden markers record the revision, findings, resolutions, and execution details. A retry reads those markers and continues without duplicating completed writes. [What CrossRev writes](docs/what-crossrev-writes.md) lists every write, as a contract.
 
 **The model process never receives a GitHub credential.** The orchestrator makes every GitHub API call and controls every git commit and push.
 
@@ -291,6 +291,7 @@ CrossRev reconstructs every pass from the pull request. Hidden markers record th
 |---|---|
 | [Installation](docs/installation.md) | Install, update, and remove CrossRev |
 | [Usage](docs/usage.md) | Run the loop, inspect its output, and understand each terminal state |
+| [What CrossRev writes](docs/what-crossrev-writes.md) | See everything CrossRev writes to a repository, as a contract |
 | [Configuration](docs/configuration.md) | Configure repository policy, local endpoints, and environment variables |
 | [Credentials](docs/credentials.md) | Understand the secrets required for automated mode |
 | [Troubleshooting](docs/troubleshooting.md) | Diagnose each reported failure and resume a stopped loop |

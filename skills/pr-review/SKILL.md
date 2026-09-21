@@ -96,7 +96,7 @@ Return one entry per numbered file: no more, no fewer, no duplicates. A file lef
 
 Unsupported reading, difficult code, a large batch, ordinary uncertainty, missing tests and one failed attempt do not qualify for `could_not_review`.
 
-Each coverage entry names `evidence`: at least one item with a supplied path and its content revision, `start_line` and `end_line` for the lines the judgement rests on — null for file-level evidence — a `source` of `git`, `search`, `convention` or `reviewer`, and a `note` saying what it shows. Each coverage entry names `reason`: one line for the verdict, expected for `not_affected` and `could_not_review` where the verdict is a judgement rather than an observation.
+Each coverage entry names `evidence`: at least one item with a supplied path and its content revision, `start_line` and `end_line` for the lines the judgement rests on — null for file-level evidence — a `source` of `git`, `search`, `convention` or `reviewer`, and a `note` saying what it shows. **Notes carry locations and reasoning, never source text**: name the lines and say what they show, but do not quote them. Coverage records persist outside normal history, so a quoted line would survive a force-push meant to remove it — and a note carrying a fenced block is refused. Each coverage entry names `reason`: one line for the verdict, expected for `not_affected` and `could_not_review` where the verdict is a judgement rather than an observation.
 
 Advisory files never take a verdict and never satisfy one: a real defect found there is still published as a finding, but the required file it was found from keeps its own verdict. Excluded paths never take one either: they sit outside the required set, visibly, with their reason.
 
@@ -131,7 +131,7 @@ Then two rules that make convergence possible:
 
 ## Output
 
-Return JSON matching the supplied schema, and nothing else. No prose before it, no fenced block around it, no commentary after. The harness constrains your output to the schema; your job is to fill it honestly.
+Return JSON matching the supplied schema, and nothing else. No prose before it, no fenced block around it, no commentary after. The harness constrains your output to the schema; your job is to fill it honestly. **No backslash escapes outside code spans.** Write newlines, tabs, and quotes as the characters themselves — never `\n`, `\t`, `\r`, or `\"`. The text posts verbatim, so an escape shows instead of acting.
 
 An empty `findings` array with verdict `converged` is a good and common result. Reporting something because reporting nothing feels lazy is the single most expensive habit in this loop — every fabricated finding costs a verification pass, a reply, and a little credibility.
 

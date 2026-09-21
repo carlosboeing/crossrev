@@ -3,7 +3,6 @@ package review_test
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -17,6 +16,7 @@ import (
 	"github.com/carlosboeing/crossrev/internal/forge"
 	"github.com/carlosboeing/crossrev/internal/harness"
 	"github.com/carlosboeing/crossrev/internal/prstate"
+	"github.com/carlosboeing/crossrev/internal/prstate/storetest"
 	"github.com/carlosboeing/crossrev/internal/review"
 	"github.com/carlosboeing/crossrev/internal/runlog"
 	"github.com/carlosboeing/crossrev/internal/validate"
@@ -257,71 +257,33 @@ func (r *fakeRunner) Specs() []exec.Spec {
 	return out
 }
 
-type fakeLedger struct {
-	mu       int64
-	comments map[int64]prstate.CoverageComment
-	order    []int64
-	failList error
-}
-
-func newFakeLedger() *fakeLedger {
-	return &fakeLedger{comments: map[int64]prstate.CoverageComment{}}
-}
-
-func (f *fakeLedger) CoverageComments(_ context.Context, _ core.Slug, _ int) ([]prstate.CoverageComment, error) {
-	if f.failList != nil {
-		return nil, f.failList
-	}
-	var out []prstate.CoverageComment
-	for _, id := range f.order {
-		out = append(out, f.comments[id])
-	}
-	return out, nil
-}
-
-func (f *fakeLedger) CoverageComment(_ context.Context, _ core.Slug, commentID int64) (prstate.CoverageComment, error) {
-	c, ok := f.comments[commentID]
-	if !ok {
-		return prstate.CoverageComment{}, errors.New("no such comment")
-	}
-	return c, nil
-}
-
-func (f *fakeLedger) CreateCoverageComment(_ context.Context, _ core.Slug, _ int, body string) (int64, error) {
-	f.mu++
-	id := 7000 + f.mu
-	f.comments[id] = prstate.CoverageComment{ID: id, Author: author, Body: body}
-	f.order = append(f.order, id)
-	return id, nil
-}
-
-var _ prstate.LedgerStore = (*fakeLedger)(nil)
-
 type fakeForge struct {
-	ledger          *fakeLedger
-	log             *eventLog
-	pr              forge.PullRequest
-	prErr           error
-	prCalls         int
+	// store serves the ledger reads and writes. Nil means this fixture
+	// has no ledger store, so an `auto` leg falls back to the marker.
+	store   prstate.LedgerStore
+	log     *eventLog
+	pr      forge.PullRequest
+	prErr   error
+	prCalls int
 	// onPullRequest, when set, runs after each PullRequest call with the
 	// running call count, so a case can move the pull request's head or base
 	// mid-run the way a push during the review would.
-	onPullRequest   func(calls int)
-	comments        []forge.IssueComment
-	createErr       error
-	created         []string
-	createdIDs      []int64
-	zeroCreateID    bool
-	edits           []string
-	editIDs         []int64
-	labelsAdded     []string
-	labelsRemoved   []string
-	labelAddErr     error
-	threads         []forge.ReviewThread
+	onPullRequest func(calls int)
+	comments      []forge.IssueComment
+	createErr     error
+	created       []string
+	createdIDs    []int64
+	zeroCreateID  bool
+	edits         []string
+	editIDs       []int64
+	labelsAdded   []string
+	labelsRemoved []string
+	labelAddErr   error
+	threads       []forge.ReviewThread
 	// threadCalls counts ReviewThreads invocations, so a test can pin how
 	// often the open conversation is fetched.
-	threadCalls     int
-	diff            []byte
+	threadCalls int
+	diff        []byte
 	// diffCalls counts PullRequestDiff invocations, so a test can pin how
 	// often the diff is read.
 	diffCalls       int
@@ -336,19 +298,9 @@ type fakeForge struct {
 	forceFallback   bool
 }
 
-func (f *fakeForge) CoverageComments(ctx context.Context, repo core.Slug, number int) ([]prstate.CoverageComment, error) {
-	return f.ledger.CoverageComments(ctx, repo, number)
-}
-
-func (f *fakeForge) CoverageComment(ctx context.Context, repo core.Slug, commentID int64) (prstate.CoverageComment, error) {
-	return f.ledger.CoverageComment(ctx, repo, commentID)
-}
-
-func (f *fakeForge) CreateCoverageComment(ctx context.Context, repo core.Slug, number int, body string) (int64, error) {
-	return f.ledger.CreateCoverageComment(ctx, repo, number, body)
-}
-
-var _ prstate.LedgerStore = (*fakeForge)(nil)
+// RefLedger answers the ledger store this fixture carries, the way the
+// production client answers its ref store under the configured namespace.
+func (f *fakeForge) RefLedger(string) prstate.LedgerStore { return f.store }
 
 func (f *fakeForge) RepoSlug(context.Context) (core.Slug, error) {
 	return core.ParseSlug("acme/widget")
@@ -568,8 +520,8 @@ func newEnv(t *testing.T) *env {
 	return &env{
 		log: events,
 		forge: &fakeForge{
-			ledger: newFakeLedger(),
-			log:    events,
+			store: storetest.NewFakeStore(),
+			log:   events,
 			pr: forge.PullRequest{
 				Number:       42,
 				Title:        "t",

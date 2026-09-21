@@ -116,7 +116,8 @@ func (l *Leg) publish(ctx context.Context, req Request, loaded Context, settings
 
 	verdict := core.Verdict(marker.Verdict.Value())
 	escalated := escalatedCount(loaded.Markers)
-	if conv, ok := l.buildConvergence(ctx, loaded, marker, actionable); ok && !policy.Converged(conv) {
+	conv, obliged := l.buildConvergence(ctx, loaded, marker, actionable, producerOf(settings))
+	if obliged && !policy.Converged(conv) {
 		// The coverage obligation is unmet: a green verdict cannot stand,
 		// and a quiet one cannot pass as finished. With actionable findings
 		// the resolve leg is still owed, so the verdict stays issues-remain;
@@ -140,22 +141,35 @@ func (l *Leg) publish(ctx context.Context, req Request, loaded Context, settings
 		}
 	}
 
-	summary := SummaryBody(parseFindings(marker.Findings), marker, RenderContext{
+	renderCtx := RenderContext{
 		Repo:    loaded.Repo.String(),
 		PR:      req.PR,
 		MinFix:  minFix,
 		MaxPass: cap,
-	})
-	if err := l.editClaim(ctx, loaded.Repo, claimID, summary, marker); err != nil {
+	}
+	if obliged {
+		// The footnote's counts are the pass's own convergence, counted
+		// above, so the sentence reads the same on either store. Reused
+		// rather than rebuilt: only the verdict moved since, which
+		// convergence never reads. The frozen path supplies none and the
+		// footnote stays silent.
+		renderCtx.Coverage = &CoverageCounts{Covered: conv.Covered, Required: conv.Required}
+	}
+	summary := SummaryBody(parseFindings(marker.Findings), marker, renderCtx)
+	written, err := l.editClaim(ctx, loaded.Repo, claimID, summary, marker, coverageOverflow(loaded))
+	if err != nil {
 		return marker, msgs, publishState{}, err
 	}
+	marker = written
 	// ui_ok: the comment is on the pull request (lib/run.sh:1299).
 	msgs = append(msgs, ui.OK("posted a summary comment"))
 
 	marker.State = core.PassComplete
-	if err := l.editClaim(ctx, loaded.Repo, claimID, summary, marker); err != nil {
+	written, err = l.editClaim(ctx, loaded.Repo, claimID, summary, marker, coverageOverflow(loaded))
+	if err != nil {
 		return marker, msgs, publishState{}, err
 	}
+	marker = written
 	// run_leg_settled, immediately after the complete edit lands and not one
 	// line later (lib/run.sh:160-163). Everything below can still fail, and
 	// none of it may rewrite this record.
@@ -183,7 +197,7 @@ func (l *Leg) publish(ctx context.Context, req Request, loaded Context, settings
 	}
 
 	next := policy.PassLabel(verdict, actionable, escalated)
-	if conv, ok := l.buildConvergence(ctx, loaded, marker, actionable); ok {
+	if conv, ok := l.buildConvergence(ctx, loaded, marker, actionable, producerOf(settings)); ok {
 		next = policy.PassLabelWithCoverage(verdict, actionable, escalated, conv)
 	}
 	if verdict == core.VerdictConverged && next != policy.PassConverged {
@@ -219,7 +233,6 @@ func (l *Leg) publish(ctx context.Context, req Request, loaded Context, settings
 	}
 	return marker, msgs, state, nil
 }
-
 
 // coverageDebt names the specific unmet coverage obligation for a blocked
 // pass: the counts, the missing scope report, or the unconfirmed repair.
@@ -283,22 +296,53 @@ func outsideDiffBody(f Finding, body string) string {
 	return fmt.Sprintf("**%s** — outside the changed files (`%s`).\n\n%s", f.ID, f.Path, body)
 }
 
-func (l *Leg) editClaim(ctx context.Context, repo core.Slug, claimID int64, body string, marker prstate.Marker) error {
-	raw, err := marker.MarshalJSON()
-	if err != nil {
-		return err
+// coverageOverflow answers the retention policy in force for marker writes:
+// degrade unless the operator configured halt. A missing config degrades,
+// the way an absent value reads as the default everywhere else.
+func coverageOverflow(loaded Context) string {
+	if loaded.Config == nil {
+		return prstate.OverflowDegrade
 	}
-	encoded, err := prstate.EncodeMarker(raw)
-	if err != nil {
-		return err
+	return loaded.Config.Coverage().OnOverflow
+}
+
+// editClaim writes body with the marker attached, applying the retention
+// ladder when the rendered comment does not fit: the predecessor goes
+// first, then the current generation compacts under degrade, and only a
+// comment that cannot hold even one compact generation refuses with
+// LedgerExhausted. It answers the marker as written, so the caller records
+// what shedding gave up; on any failure it answers the marker as it was,
+// because nothing was written and the last write still stands.
+func (l *Leg) editClaim(ctx context.Context, repo core.Slug, claimID int64, body string, marker prstate.Marker, onOverflow string) (prstate.Marker, error) {
+	original := marker
+	render := func(m prstate.Marker) (string, error) {
+		encoded, err := m.Encode()
+		if err != nil {
+			return "", err
+		}
+		return body + encoded, nil
 	}
-	if err := l.Forge.CommentEdit(ctx, repo, claimID, body+encoded); err != nil {
-		return &ui.FatalError{
+	shed, err := prstate.ShedToFit(&marker, render, onOverflow)
+	if err != nil {
+		return original, err
+	}
+	if shed.Degraded {
+		marker.CoverageDegraded = prstate.Some(true)
+	}
+	final, err := render(marker)
+	if err != nil {
+		return original, err
+	}
+	if err := prstate.FitMarkerComment(final); err != nil {
+		return original, err
+	}
+	if err := l.Forge.CommentEdit(ctx, repo, claimID, final); err != nil {
+		return original, &ui.FatalError{
 			Reason: fmt.Sprintf("could not update comment %d on %s", claimID, repo),
 			Action: "The pass marker lives in that comment, so leaving it stale would misreport what happened. Retry, or check the token's permissions.",
 		}
 	}
-	return nil
+	return marker, nil
 }
 
 func attachThreads(raw json.RawMessage, threads []forge.ReviewThread) json.RawMessage {

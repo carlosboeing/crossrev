@@ -48,6 +48,19 @@ type RenderContext struct {
 	// NoChanges body only.
 	BaseRef string
 	HeadRef string
+	// Coverage carries the pass's own convergence counts for the
+	// coverage footnote. Nil means no convergence was computed — the
+	// frozen path — so the summary carries no footnote.
+	Coverage *CoverageCounts
+}
+
+// CoverageCounts is how many of the required files the pass reviewed, as
+// its own convergence counted them. The footnote reads the counts here
+// rather than out of the marker, so the sentence is the same whichever
+// store published the generation.
+type CoverageCounts struct {
+	Covered  int
+	Required int
 }
 
 const emDash = "—"
@@ -253,7 +266,7 @@ func SummaryBody(findings []Finding, marker prstate.Marker, ctx RenderContext) s
 		sha, _ := marker.HeadSHA.Get()
 		b.WriteString(findingsTable(findings, ctx.Repo, sha))
 	}
-	b.WriteString(coverageFootnote(marker))
+	b.WriteString(coverageFootnote(marker, ctx.Coverage))
 
 	unanchored := 0
 	if u, ok := marker.Unanchored.Get(); ok {
@@ -270,18 +283,37 @@ func SummaryBody(findings []Finding, marker prstate.Marker, ctx RenderContext) s
 	return b.String()
 }
 
-// coverageFootnote renders the accounted and outstanding paths the coverage
-// loop recorded, with the known limits the reviewer reported. A pass with
-// no coverage manifest id carries no footnote, so the frozen summary bytes
-// stay exactly as they were.
-func coverageFootnote(marker prstate.Marker) string {
-	id, ok := marker.CoverageManifestID.Get()
-	if !ok || id == 0 {
+// coverageFootnote renders one human sentence for the coverage the pass
+// published: how many of the changed files it reviewed, and at which head.
+// The counts come from the caller — the pass's own convergence — so the
+// sentence reads the same on either store: a ref-store claim names a
+// generation render cannot count without a store client, but the caller
+// already counted it. The marker still gates the sentence: only a claimed,
+// well-formed handle gets one. Anything without something to count — no
+// convergence, no claim, a corrupt claim, no head — carries no footnote,
+// so the frozen summary bytes stay exactly as they were and a summary a
+// reviewer reads never carries a machine-facing generation line.
+func coverageFootnote(marker prstate.Marker, cov *CoverageCounts) string {
+	if cov == nil {
 		return ""
 	}
-	var b strings.Builder
-	b.WriteString(fmt.Sprintf("Coverage generation %d accounts for every required file at the current head; outstanding paths, if any, are listed in the halt record above.\n\n", id))
-	return b.String()
+	if _, claimed, err := marker.CoverageHandle(); err != nil || !claimed {
+		return ""
+	}
+	sha, _ := marker.HeadSHA.Get()
+	if sha == "" {
+		return ""
+	}
+	return fmt.Sprintf("Reviewed %d of %d changed files at `%s`.\n\n", cov.Covered, cov.Required, shortSHA(sha))
+}
+
+// shortSHA abbreviates a commit SHA the way printed messages do: the first
+// seven characters, or the whole string when it is shorter.
+func shortSHA(sha string) string {
+	if len(sha) <= 7 {
+		return sha
+	}
+	return sha[:7]
 }
 
 // noChangesBody renders the pull request whose head matches its base.

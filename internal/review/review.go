@@ -180,7 +180,8 @@ func (l *Leg) Run(ctx context.Context, req Request) (out Result) {
 	// current base and head; the initial generation records every uncovered
 	// unit as outstanding, so a crash before the first accepted batch leaves
 	// the started claim and the same scope to rebuild from. A leg without a
-	// git reader or ledger store keeps the frozen single-prompt path below.
+	// git reader keeps the frozen single-prompt path below; the ledger store
+	// always answers, falling back to the marker when refs are refused.
 	// A git failure enumerating the changed files fails closed instead: the
 	// frozen path carries no coverage obligation, so falling through to it
 	// would review and converge with no required set at all.
@@ -213,8 +214,14 @@ func (l *Leg) Run(ctx context.Context, req Request) (out Result) {
 		settled = state.settled
 		return result
 	}
-	if scopeErr == nil && ledgerStoreFor(l) != nil && len(scope.Required) > 0 {
-		if covErr := l.runCoverage(ctx, req, loaded, settings, ad.pass, claimID, scope, &out); covErr != nil {
+	if scopeErr == nil && len(scope.Required) > 0 {
+		store, selection, ledgerErr := l.ledgerFor(loaded)
+		if ledgerErr != nil {
+			out.Outcome = OutcomeError
+			out.Err = ledgerErr
+			return out
+		}
+		if covErr := l.runCoverage(ctx, req, loaded, settings, ad.pass, claimID, scope, store, selection, &out); covErr != nil {
 			out.Outcome = OutcomeError
 			out.Err = covErr
 			return out

@@ -3,7 +3,6 @@ package review
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"os"
 
 	"github.com/carlosboeing/crossrev/internal/core"
@@ -16,16 +15,6 @@ import (
 	"github.com/carlosboeing/crossrev/internal/ui"
 	"github.com/carlosboeing/crossrev/internal/validate"
 )
-
-// ledgerStoreFor returns the coverage ledger over the leg's forge client, or
-// nil when the client does not implement the store contract.
-func ledgerStoreFor(l *Leg) prstate.LedgerStore {
-	if l == nil || l.Forge == nil {
-		return nil
-	}
-	store, _ := l.Forge.(prstate.LedgerStore)
-	return store
-}
 
 // batchContext is one pass's shared prompt context, discovered once before
 // packing measures the first candidate: the diff parsed for per-batch
@@ -69,11 +58,19 @@ func (l *Leg) discoverBatchContext(ctx context.Context, req Request, loaded Cont
 
 // render builds one candidate batch's complete prompt from the snapshot —
 // headers, prior context and file content together, with the diff sliced to
-// the batch's own files. It is pure over the snapshot: no git, no forge, and
-// deterministic, so the packer can measure it for every candidate and the
-// invoke path sends exactly the measured bytes.
-func (c batchContext) render(files []intel.FileUnit, base, head core.Revision) []byte {
+// the batch's own files — and measures what the reviewer is actually given
+// for each unit, from the exact batch units the prompt renders. It is pure
+// over the snapshot: no git, no forge, and deterministic, so the packer can
+// measure it for every candidate and the invoke path sends exactly the
+// measured bytes. The measurement happens once, here, and travels with the
+// batch to publication; it is never recomputed there from a second read,
+// which could disagree with what was sent.
+func (c batchContext) render(files []intel.FileUnit, base, head core.Revision) ([]byte, map[core.UnitID]prstate.SuppliedInput) {
 	_, units := batchExpectations(files, base, head)
+	supplied := make(map[core.UnitID]prstate.SuppliedInput, len(files))
+	for i, unit := range units {
+		supplied[files[i].ID] = suppliedFor(unit)
+	}
 	return prompt.Review{
 		Skill:        prompt.ReviewSkill(),
 		Diff:         c.diff.Only(batchPaths(files)),
@@ -85,7 +82,21 @@ func (c batchContext) render(files []intel.FileUnit, base, head core.Revision) [
 		Advisory:     c.advisory,
 		Excluded:     c.excluded,
 		Confirmation: c.confirmation,
-	}.Render()
+	}.Render(), supplied
+}
+
+// suppliedFor measures what the reviewer is actually given for one unit: a
+// digest over the unit's body bytes as handed to prompt rendering. A unit
+// with readable bytes supplied in full reads full_text; an unavailable or
+// binary unit reaches the model through the diff slice alone and reads
+// diff_only, with the digest over the empty input because no body bytes were
+// handed over. Truncated stays false: a file that cannot fit a prompt alone
+// halts with input_exceeds_budget rather than being cut.
+func suppliedFor(unit prompt.BatchUnit) prstate.SuppliedInput {
+	if unit.Available && !unit.Binary {
+		return prstate.SuppliedInput{Digest: core.BodyDigestHex(unit.Body), Form: prstate.SuppliedFormFullText}
+	}
+	return prstate.SuppliedInput{Digest: core.BodyDigestHex(nil), Form: prstate.SuppliedFormDiffOnly}
 }
 
 // batchPaths names the sections one batch keeps from the full diff: each
@@ -140,39 +151,34 @@ func (l *Leg) invokeWithStaged(ctx context.Context, req Request, loaded Context,
 	return payload, envelope, msgs, err
 }
 
-// currentGeneration selects the current complete coverage generation for
-// this base, head and engine from the trusted author's comments. An
-// unreadable comment list is an error, never an empty ledger. No complete
-// generation is not an error: the first pass starts from zero accepted
-// verdicts and publishes the initial outstanding generation. Any other
-// selection failure — corrupt, missing, reordered or future-schema bytes —
-// fails the pass: re-reviewing from zero over coverage that cannot be read
-// would hide the integrity failure behind wasted work.
-func (l *Leg) currentGeneration(ctx context.Context, loaded Context, base, head core.Revision, engine string) (prstate.Generation, error) {
-	store := ledgerStoreFor(l)
-	if store == nil {
-		return prstate.Generation{}, errNoLedgerStore{}
-	}
-	comments, err := store.CoverageComments(ctx, loaded.Repo, loaded.PR.Number)
+// currentGeneration reads the pass's resumption point off the marker as it
+// stands: the handle the marker names, the generation behind it, retired
+// unless its revision pair, engine and producer are all still in force.
+//
+// No claim means no coverage pass ran — or a legacy manifest id whose
+// comment is never read again, which is the lost-ledger row. Both resume
+// from zero; the legacy case costs at most one re-review of the current
+// head. A lost ledger resumes from zero too. Anything else that goes wrong
+// — a corrupt claim, a corrupt generation, an unreadable store — fails the
+// pass: re-reviewing from zero over coverage that cannot be read would hide
+// the integrity failure behind wasted work.
+func (l *Leg) currentGeneration(ctx context.Context, loaded Context, store prstate.LedgerStore, marker prstate.Marker, scope intel.Scope, producer prstate.Producer) (prstate.Generation, error) {
+	h, claimed, err := marker.CoverageHandle()
 	if err != nil {
 		return prstate.Generation{}, err
 	}
-	gen, err := prstate.SelectGeneration(comments, loaded.Author, core.RevisionPair{Base: base, Head: head}, engine)
+	if !claimed {
+		return prstate.Generation{}, nil
+	}
+	gen, err := store.ReadGeneration(ctx, slotRefFor(loaded), h)
 	if err != nil {
-		if errors.Is(err, prstate.ErrNoCompleteGeneration) {
+		if lost, _ := coverageOutcome(err); lost {
 			return prstate.Generation{}, nil
 		}
 		return prstate.Generation{}, err
 	}
+	if !prstate.GenerationCurrent(gen, core.RevisionPair{Base: scope.Base, Head: scope.Head}, scope.Engine, producer) {
+		return prstate.Generation{}, nil
+	}
 	return gen, nil
-}
-
-// errNoLedgerStore reports a leg whose forge client does not implement the
-// coverage ledger. Production always wires the orchestrator-facing client,
-// which implements it; callers without one take the frozen single-prompt
-// path instead of failing the pass.
-type errNoLedgerStore struct{}
-
-func (e errNoLedgerStore) Error() string {
-	return "no ledger store on this leg"
 }

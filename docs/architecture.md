@@ -77,7 +77,7 @@ A marker carries the protocol version, the leg, the pass number, its state, time
 |---|---|---|
 | `<!-- crossrev:` | The pass summary comment | The whole pass: verdict, findings, resolutions, cost |
 | `<!-- crossrev:f` | Each inline comment and each reply | One finding id, its pass, and the leg that wrote it |
-| `<!-- crossrev:c` | Coverage comments | A shard containing file coverage records, or a manifest identifying all shards in a complete coverage snapshot |
+| `<!-- crossrev:c` | No longer written | The retired comment ledger: shards plus a manifest per generation. Comment-era generations are never read again; live coverage publishes to the ledger ref below |
 
 New markers open with `v:2`. They name the coverage record, the stop counts and the confirmed repair.
 
@@ -144,7 +144,7 @@ The last three are continuation bounds: they end *automatic* reviewing and never
 
 Each review pass reads every changed file: every added, modified, deleted, renamed and type-changed path between the base branch and the pull request branch. A rename counts as new work and is read again from scratch.
 
-A **required file** is a changed file the review must account for. The reviewer gives each one a verdict, and the pass converges only when every required file has one. When the branch moves, every prior result is retired and the next pass starts over. A re-run reuses recorded verdicts only when the base commit, the pull request commit and the review-engine version are unchanged; then it resumes the files still waiting for a verdict.
+A **required file** is a changed file the review must account for. The reviewer gives each one a verdict, and the pass converges only when every required file has one. When the branch moves, every prior result is retired and the next pass starts over. A re-run reuses recorded verdicts only when the base commit, the pull request commit, the review-engine version and the review producer (harness, model, effort and endpoint) are unchanged; then it resumes the files still waiting for a verdict.
 
 The review reads in batches because one prompt cannot hold a large pull request. One pass reads at most 400 required files. Batches hold at most 40 files in path order.
 
@@ -168,15 +168,17 @@ The file list lives in `internal/intel`, the stored record in `internal/prstate`
 
 ### The coverage ledger
 
-Coverage is stored on the pull request itself, in the same hidden comments as the markers: small shards first, then one manifest naming them.
+Coverage is stored in the repository itself, as a commit addressed by one ref per pull request per reviewer slot: `refs/crossrev/pr/42/reviewer1/coverage`. Each generation is a commit carrying `manifest.json` and `records.json`, parented on the previous generation.
 
-One generation holds a record for every required file, outstanding ones included, and that complete snapshot is split into shards by serialized size. A shard is a storage chunk, not a review batch: its boundaries need not match the files supplied in one reviewer invocation.
+One generation holds a record for every required file, outstanding ones included. The pass marker on the pull request records the handle naming the generation — its number, its commit SHA, and where it lives — and that handle is what a reader trusts: it resolves the commit, not the ref.
 
-A read failure is reported, never answered as empty. Only the trusted author counts.
+The scope report stays a reviewer claim — the examined scope and known limits the reviewer reported, labelled as claims rather than deterministic discovery — and each covered record now also carries a measurement of what the reviewer was given for it: a digest over the exact bytes, the form they arrived in, and whether they were truncated.
 
-Readers refuse missing, altered or reordered shards.
+A read failure is reported, never answered as empty. Only the trusted author counts. A ref that went missing while its commit survives is re-created on read; objects that are gone lose the ledger, and the next pass re-reviews; objects that do not verify fail the pass closed.
 
-Past 32 shards the pass keeps the last full generation. It records stop counts with the `ledger_exhausted` limit.
+Under `coverage.store: auto` a refused ref write falls back to the marker comment, which must fit in 64 KiB — a cap the ref store does not share, its generations persisting as git objects. The retention ladder sheds the predecessor generation first, then compacts the current generation to counts under `on_overflow: degrade`, then halts with the `ledger_exhausted` limit and stop counts. `crossrev doctor` reports which store is in force and why.
+
+[What CrossRev writes](what-crossrev-writes.md) carries the blast-radius contract; [ADR 0022](adrs/0022-the-coverage-ledger-lives-in-git-refs.md) records the decision.
 
 Repository files declare `version: 2`. A file that still declares `version: 1` is refused. Run `crossrev init --upgrade` to re-render workflows. It leaves the policy file alone, so change the version line by hand.
 
@@ -292,7 +294,7 @@ internal/        Go packages, in tiers
   core/            Tier 0: domain primitives and FindingID
   buildinfo/       Tier 1: version and build metadata
   policy/          Tier 1: pure policy functions and termination rules
-  prstate/         Tier 1: marker parsing and finding identity
+  prstate/         Tier 1: marker parsing, finding identity, coverage ledger stores
   diff/            Tier 1: gutter mapping and hunk snapping
   validate/        Tier 1: payload validation
   intel/           Tier 1: Review Intelligence contracts
@@ -317,7 +319,7 @@ internal/        Go packages, in tiers
   cycle/           Tier 3: multi-pass cycle driver
   app/             Tier 3: application lifecycle
   initcmd/         Tier 3: init command
-  preflight/       Tier 3: dependency checks
+  preflight/       Tier 3: dependency checks and the coverage report
   cli/             Tier 3: CLI command router
 schemas/         findings.schema.json, resolve.schema.json
 skills/          pr-review/, pr-resolve/

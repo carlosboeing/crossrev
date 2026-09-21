@@ -1,6 +1,7 @@
 package resolve
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"github.com/carlosboeing/crossrev/internal/core"
 	"github.com/carlosboeing/crossrev/internal/policy"
 	"github.com/carlosboeing/crossrev/internal/prstate"
+	"github.com/carlosboeing/crossrev/internal/prstate/storetest"
 	"github.com/carlosboeing/crossrev/internal/ui"
 )
 
@@ -284,48 +286,73 @@ func TestSettleWithOutstandingCoverageStaysAwaitingReview(t *testing.T) {
 }
 
 // seedOutstandingGeneration publishes one generation at the fixture head
-// with one covered and one outstanding record, authored by the trusted
-// viewer, so the settle gate has current but incomplete coverage to refuse.
+// with one covered and one outstanding record, and names it from the
+// posted review marker, so the settle gate has current but incomplete
+// coverage to refuse.
 func seedOutstandingGeneration(t *testing.T, e *testEnv) {
 	t.Helper()
 	coveredID := string(core.FileUnitID("a.go"))
 	outstandingID := string(core.FileUnitID("b.go"))
 	digest := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-	shard := prstate.BuildShard(0, []prstate.Record{
-		{
-			Type:        prstate.CoverageRecordUnit,
-			UnitID:      coveredID,
-			PathIndex:   0,
-			Kind:        "file",
-			Change:      "modified",
-			BodyDigest:  digest,
-			Verdict:     prstate.Some("no_issue"),
+	gen := prstate.Generation{
+		Gen:      1,
+		Revision: core.RevisionPair{Base: e.base, Head: e.head},
+		Engine:   core.FileEngineVersion,
+		Slot:     prstate.DefaultSlot,
+		Producer: prstate.Producer{Harness: "codex"},
+		Form:     prstate.GenerationFull,
+		Paths:    []string{"a.go", "b.go"},
+		Records: []prstate.Record{
+			{
+				Type:       prstate.CoverageRecordUnit,
+				UnitID:     coveredID,
+				PathIndex:  0,
+				Kind:       "file",
+				Change:     "modified",
+				BodyDigest: digest,
+				Verdict:    prstate.Some("no_issue"),
+			},
+			prstate.OutstandingRecord(outstandingID, 1, "added", digest, "awaiting review"),
 		},
-		prstate.OutstandingRecord(outstandingID, 1, "added", digest, "awaiting review"),
-	})
-	shardBody, err := prstate.EncodeCoverageShard(shard)
+		ScopeReport: prstate.ScopeReport{ExaminedScope: "read the batch", KnownLimits: []string{}},
+	}
+	store := storetest.NewFakeStore()
+	e.forge.ledger = store
+	ref := prstate.SlotRef{Repo: e.slug, Number: 42, Slot: prstate.DefaultSlot}
+	handle, err := store.PublishGeneration(context.Background(), ref, prstate.Handle{}, gen)
 	if err != nil {
-		t.Fatalf("encode shard: %v", err)
+		t.Fatalf("PublishGeneration: %v", err)
 	}
-	shard, ok := prstate.DecodeCoverageShard(shardBody)
-	if !ok {
-		t.Fatal("the seeded shard does not decode")
+	setReviewCoverage(t, e, handle)
+}
+
+// setReviewCoverage rewrites the posted pass-1 review marker comment to
+// name the published generation, the way a review pass leaves its
+// checkpoint behind.
+func setReviewCoverage(t *testing.T, e *testEnv, handle prstate.Handle) {
+	t.Helper()
+	for i, c := range e.forge.comments {
+		raw, err := json.Marshal(prstate.Comment{ID: c.ID, Body: c.Body, CreatedAt: c.CreatedAt})
+		if err != nil {
+			t.Fatalf("marshal comment: %v", err)
+		}
+		markers := prstate.Markers(raw)
+		if len(markers) != 1 {
+			continue
+		}
+		m := markers[0]
+		if m.Leg != core.LegReview || m.Pass != 1 {
+			continue
+		}
+		m.RecordCoverage(handle)
+		encoded, err := m.Encode()
+		if err != nil {
+			t.Fatalf("encode marker: %v", err)
+		}
+		e.forge.comments[i].Body = "pass comment" + encoded
+		return
 	}
-	shardDigest := shard.Digest
-	manifest := prstate.BuildManifest(1, testBaseSHA, testHeadSHA, core.FileEngineVersion,
-		[]string{"a.go", "b.go"},
-		[]prstate.ShardRef{{Pos: 0, ID: 9201, Digest: shardDigest, N: 2}},
-		1, 2,
-		prstate.Advisory{}, nil,
-		prstate.ScopeReport{ExaminedScope: "read the batch", KnownLimits: []string{}})
-	manifestBody, err := prstate.EncodeCoverageManifest(manifest)
-	if err != nil {
-		t.Fatalf("encode manifest: %v", err)
-	}
-	e.forge.coverageLedger = &resolveLedger{comments: []prstate.CoverageComment{
-		{ID: 9201, Author: "tester", Body: shardBody},
-		{ID: 9202, Author: "tester", Body: manifestBody},
-	}}
+	t.Fatal("no posted pass-1 review marker to name the generation from")
 }
 
 // TestEmptyFindingsWithOutstandingCoverageHalts pins the finishEmpty gate:

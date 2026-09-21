@@ -5,11 +5,11 @@ import "context"
 // Doctor is the whole `crossrev doctor` report and its exit code
 // (bin/crossrev:163-180).
 //
-// Four probes in this order, because the reader works down the page: what is
+// Five probes in this order, because the reader works down the page: what is
 // installed, what a killed run left in the checkout, what the configured runner
-// can serve, and which worktrees are still sitting in the state directory. The
-// first three can fail the command; the fourth never does, which is why the
-// Bash call carries no `|| doctor_ok=1`.
+// can serve, what the coverage ledger would do, and which worktrees are still
+// sitting in the state directory. The first four can fail the command; the
+// fifth never does, which is why the Bash call carries no `|| doctor_ok=1`.
 //
 // Two things the caller does first, matching what bin/crossrev does around this
 // branch. It does not source the harness adapters — doctor's whole job is to
@@ -37,6 +37,14 @@ func (c *Checker) Doctor(ctx context.Context) int {
 	// that machine has already been told yq is missing.
 	if c.installed("yq") && c.Config != nil {
 		if !c.ReportPairings(c.Config.Get(".runner")) {
+			ok = false
+		}
+	}
+
+	// The coverage probe needs no yq guard: Go reads the config itself, and
+	// there is no Bash predecessor whose report has to match.
+	if c.Config != nil {
+		if !c.ReportCoverage(ctx) {
 			ok = false
 		}
 	}

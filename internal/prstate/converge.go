@@ -7,8 +7,8 @@ import (
 // MarkerConverges reports whether one complete review marker may underwrite
 // a convergence report: the state is complete, no stop is recorded, and the
 // coverage promise is kept. A v1 marker predates the coverage obligation and
-// is grandfathered; a v2 marker without a coverage manifest id promises
-// coverage it never recorded, so it cannot underwrite green.
+// is grandfathered; a v2 marker with no coverage recorded promises coverage
+// it never published, so it cannot underwrite green.
 //
 // Head freshness and the confirmation pair are checked by callers that hold
 // the current head; this answers the marker's own half.
@@ -20,7 +20,7 @@ func MarkerConverges(m Marker) bool {
 		return false
 	}
 	if m.Version >= 2 {
-		if _, ok := m.CoverageManifestID.Get(); !ok {
+		if !m.coveragePresent() {
 			return false
 		}
 	}

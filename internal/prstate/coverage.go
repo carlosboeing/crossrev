@@ -86,11 +86,7 @@ func VerificationStatuses() []string {
 // ErrCoverage is returned for coverage bytes no strict reader accepts.
 var ErrCoverage = errors.New("a coverage payload is not a v1 manifest or shard")
 
-// ErrNoCompleteGeneration reports that no complete generation exists at a
-// revision pair: absence, not refusal. Callers that predate the coverage
-// obligation keep their legacy answer on absence; corrupt state still fails
-// closed through ErrCoverage.
-var ErrNoCompleteGeneration = errors.New("no complete generation at this revision")
+// ErrNoCompleteGeneration is declared in store.go.
 
 // IsCoverageError reports whether err is the coverage codec's refusal.
 func IsCoverageError(err error) bool { return errors.Is(err, ErrCoverage) }
@@ -169,6 +165,11 @@ type Record struct {
 	FindingIDs  []string    `json:"finding_ids,omitzero"`
 	Evidence    []Evidence  `json:"evidence,omitzero"`
 	Reason      Opt[string] `json:"reason,omitzero"`
+	// Supplied is null for an outstanding record: nothing was handed to a
+	// reviewer for a file nobody reviewed, which is a different fact from
+	// handing over empty bytes.
+	Supplied    Opt[SuppliedInput] `json:"supplied,omitzero"`
+	Reaction    Reaction           `json:"reaction"`
 }
 
 // AdvisoryLimit is one visible cap: a search term whose holders exceeded the
@@ -214,11 +215,12 @@ type ShardRef struct {
 	N      int    `json:"n"`
 }
 
-// Manifest is one complete coverage generation: the revision pair and engine
-// it was made at, the path table, the shard references, the required and
-// outstanding counts, the advisory and excluded summaries, the reviewer scope
-// report, the reserved verification envelope, and the full SHA-256 integrity
-// digest over its own bytes with the digest field removed.
+// Manifest is one complete coverage generation in v1 schema (retained for
+// fixture compatibility; live storage uses the v2 schema in schema2.go): the
+// revision pair and engine it was made at, the path table, the shard references,
+// the required and outstanding counts, the advisory and excluded summaries,
+// the reviewer scope report, the reserved verification envelope, and the full
+// SHA-256 integrity digest over its own bytes with the digest field removed.
 type Manifest struct {
 	Version          int                 `json:"v"`
 	Kind             string              `json:"kind"`
@@ -252,10 +254,11 @@ func (m Manifest) CommentID() int64 { return m.commentID }
 // are a copy, so editing them cannot reach the manifest.
 func (m Manifest) Raw() json.RawMessage { return bytes.Clone(m.raw) }
 
-// Shard is one shard comment: its position, its records, and the full
-// SHA-256 integrity digest over its own bytes with the digest field removed.
-// A shard carries no generation number: membership is established by the
-// manifest that names it.
+// Shard is one v1 shard comment (retained for fixture compatibility; live
+// storage uses the v2 schema in schema2.go): its position, its records, and
+// the full SHA-256 integrity digest over its own bytes with the digest field
+// removed. A shard carries no generation number: membership is established by
+// the manifest that names it.
 type Shard struct {
 	Version int      `json:"v"`
 	Kind    string   `json:"kind"`
@@ -283,16 +286,20 @@ type CoverageStop struct {
 	CoveredCount     int    `json:"covered_count"`
 	OutstandingCount int    `json:"outstanding_count"`
 	MeasuredBytes    int    `json:"measured_bytes"`
-	ShardCount       int    `json:"shard_count"`
-	Limit            string `json:"limit"`
+	// ShardCount is always zero. Shards were the v1 comment ledger's
+	// publication unit; the field stays so markers written before the
+	// ref store still decode.
+	ShardCount int    `json:"shard_count"`
+	Limit      string `json:"limit"`
 }
 
-// EncodeCoverageManifest serialises a manifest for embedding in a comment
-// body. The manifest digest is recomputed from bytes with the digest member
+// EncodeCoverageManifest serialises a v1 manifest for embedding in a comment
+// body (retained for fixture compatibility; live storage uses EncodeGenerationV2).
+// The manifest digest is recomputed from bytes with the digest member
 // removed, so a caller-supplied digest can neither survive nor mismatch: the
 // bytes on the wire always carry the digest of the bytes on the wire. The
-// returned body carries no human text; publishers add the rendered line with
-// coverageCommentBody.
+// returned body carries no human text; the retired v1 comment publisher
+// prefixed the rendered line.
 func EncodeCoverageManifest(m Manifest) (string, error) {
 	m.Digest = ""
 	raw := json.RawMessage(manifestFields(m).marshal())
@@ -309,10 +316,11 @@ func EncodeCoverageManifest(m Manifest) (string, error) {
 	return "\n\n" + coverageMarkerOpen + string(normalised) + markerClose, nil
 }
 
-// EncodeCoverageShard serialises a shard for embedding in a comment body.
+// EncodeCoverageShard serialises a v1 shard for embedding in a comment body
+// (retained for fixture compatibility; live storage uses EncodeGenerationV2).
 // The shard digest is recomputed from bytes with the digest member removed,
 // for the same reason the manifest's is. The returned body carries no human
-// text; publishers add the rendered line with coverageCommentBody.
+// text; the retired v1 comment publisher prefixed the rendered line.
 func EncodeCoverageShard(s Shard) (string, error) {
 	s.Digest = ""
 	raw := json.RawMessage(shardFields(s).marshal())
@@ -329,18 +337,8 @@ func EncodeCoverageShard(s Shard) (string, error) {
 	return "\n\n" + coverageMarkerOpen + string(normalised) + markerClose, nil
 }
 
-// coverageCommentBody prefixes an encoded coverage payload with the one
-// human line the comment renders. Without it every ledger comment shows
-// GitHub's "No description provided.", and a pull request collects a row of
-// identical blank boxes — one per shard plus the manifest. Readers scan for
-// the marker delimiters and skip every other line, so leading prose changes
-// nothing on the wire; the line stays far inside the envelope reserve
-// packRecords holds back for it.
-func coverageCommentBody(human, encoded string) string {
-	return human + encoded
-}
-
-// DecodeCoverageManifest pulls a manifest out of one comment body, checks its
+// DecodeCoverageManifest pulls a v1 manifest out of one comment body (retained
+// for fixture compatibility; live storage uses DecodeGenerationV2), checks its
 // shape strictly, and verifies its integrity digest before returning it. A
 // body carrying no coverage marker, a payload of any other kind, or a digest
 // mismatch decodes to nothing.
@@ -358,7 +356,8 @@ func DecodeCoverageManifest(body string) (Manifest, bool) {
 	return m, true
 }
 
-// DecodeCoverageShard pulls a shard out of one comment body, checks its shape
+// DecodeCoverageShard pulls a v1 shard out of one comment body (retained for
+// fixture compatibility; live storage uses DecodeGenerationV2), checks its shape
 // strictly, and verifies its integrity digest before returning it.
 func DecodeCoverageShard(body string) (Shard, bool) {
 	payload := extractCoveragePayload(body)

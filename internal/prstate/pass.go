@@ -78,21 +78,47 @@ type Marker struct {
 	EffortReported Opt[string]     `json:"effort_reported,omitzero"`
 	Unanchored     Opt[int]        `json:"unanchored,omitzero"`
 	Unthreaded     Opt[int]        `json:"unthreaded,omitzero"`
-	// The v2 tail, in writer order: the coverage manifest this pass
-	// published or stopped against, the stop diagnostics a halted pass
-	// records, and the confirmation pair the orchestrator writes only after
-	// accepted review at the repair head. An initial clean review carries
-	// both confirmation SHAs null. There is no verification SHA or check
-	// list here: verification is not implemented.
+	// The v2 tail, in writer order: the coverage this pass published or
+	// stopped against, the stop diagnostics a halted pass records, and the
+	// confirmation pair the orchestrator writes only after accepted review
+	// at the repair head. An initial clean review carries both confirmation
+	// SHAs null. There is no verification SHA or check list here:
+	// verification is not implemented.
 	//
 	// A v1 marker never carries these keys, so they stay absent on the wire
 	// for one. Absent is the whole of the v1 answer: a historical marker
 	// still decodes for findings, pass numbering and prior resolutions, but
 	// its coverage reference is always absent and cannot satisfy convergence.
+	//
+	// CoverageManifestID is the comment id the release before this one
+	// published its generation to. Nothing writes it anymore and nothing
+	// reads the comment it names; it stays readable so a marker in flight
+	// keeps converging on its own field.
 	CoverageManifestID  Opt[int64]        `json:"coverage_manifest_id,omitzero"`
 	CoverageStop        Opt[CoverageStop] `json:"coverage_stop,omitzero"`
 	ConfirmationBaseSHA Opt[string]       `json:"confirmation_base_sha,omitzero"`
 	ConfirmationHeadSHA Opt[string]       `json:"confirmation_head_sha,omitzero"`
+	// CoveragePayload is the generation the marker store carries inline, and
+	// CoveragePrevPayload its predecessor, retained only while it fits. Both
+	// absent for the ref store.
+	CoveragePayload     json.RawMessage   `json:"coverage_payload,omitzero"`
+	CoveragePrevPayload json.RawMessage   `json:"coverage_prev_payload,omitzero"`
+	// CoverageGen is the generation number the pass published. This is the
+	// number a reader means by "generation", and the number the summary prints.
+	CoverageGen Opt[int] `json:"coverage_gen,omitzero"`
+	// CoverageRef is where that generation lives: a ref name, or "marker".
+	// It is a locator for humans and for `git log`, never an authority.
+	CoverageRef Opt[string] `json:"coverage_ref,omitzero"`
+	// CoverageCommit is the commit SHA the ref store published, and the only
+	// thing a reader resolves. Content-addressed, so it authenticates the
+	// whole parent chain. Absent for the marker store, which carries its
+	// payload inline.
+	CoverageCommit Opt[string] `json:"coverage_commit,omitzero"`
+	// CoverageDegraded marks a generation published in the compact form,
+	// because the payload did not fit and on_overflow said degrade. Records
+	// carry a verdict code and nothing else. A later pass can still resume
+	// from it; what is missing is evidence, reasons and finding ids.
+	CoverageDegraded Opt[bool] `json:"coverage_degraded,omitzero"`
 
 	// commentID is which comment the marker was read off, and raw is the
 	// bytes it was read as. Both are unexported so no encoder can reach
@@ -142,7 +168,7 @@ func (m Marker) Raw() json.RawMessage { return bytes.Clone(m.raw) }
 // input". Every reader here already reads a zero-length payload as absent —
 // DecodeFindings and DecodeResolutions both — so the writer agrees with them.
 func (m Marker) MarshalJSON() ([]byte, error) {
-	for _, payload := range []*json.RawMessage{&m.Tokens, &m.Usage, &m.Findings, &m.Resolutions} {
+	for _, payload := range []*json.RawMessage{&m.Tokens, &m.Usage, &m.Findings, &m.Resolutions, &m.CoveragePayload, &m.CoveragePrevPayload} {
 		if len(*payload) == 0 {
 			*payload = nil
 		}
@@ -250,6 +276,8 @@ func (m Marker) clone() Marker {
 	m.Usage = bytes.Clone(m.Usage)
 	m.Findings = bytes.Clone(m.Findings)
 	m.Resolutions = bytes.Clone(m.Resolutions)
+	m.CoveragePayload = bytes.Clone(m.CoveragePayload)
+	m.CoveragePrevPayload = bytes.Clone(m.CoveragePrevPayload)
 	return m
 }
 
@@ -303,14 +331,85 @@ func ParseMarker(raw json.RawMessage) (Marker, error) {
 }
 
 // CoverageContribution reports whether this marker carries a coverage
-// reference a reader may count: a current-version marker naming its
-// manifest. A v1 marker is reviewer context, not coverage.
+// reference a reader may count: a current-version marker naming the
+// coverage it published, on the new fields or, for a marker written before
+// them, the legacy manifest comment id. A v1 marker is reviewer context,
+// not coverage.
 func (m Marker) CoverageContribution() bool {
 	if m.Version != core.MarkerVersion {
 		return false
 	}
+	return m.coveragePresent()
+}
+
+// coveragePresent reports coverage presence: the generation number this
+// release writes, or the manifest comment id the release before it wrote.
+// Convergence and contribution both read this rather than either field, so
+// a third coverage claim cannot be added to one and missed in the other.
+func (m Marker) coveragePresent() bool {
+	if _, ok := m.CoverageGen.Get(); ok {
+		return true
+	}
 	_, ok := m.CoverageManifestID.Get()
 	return ok
+}
+
+// CoverageHandle is the handle this marker names. It is the only place a
+// handle is reconstructed from a marker, so a fifth field cannot be read in
+// three readers and missed in the fourth.
+//
+// Three answers, not two. No claim is the normal first-pass state and the
+// only source of "no coverage pass ran". A claim whose fields do not form a
+// valid handle is corrupt state and refuses; it must never be read as no
+// coverage, because that is the reading that keeps a converged label.
+//
+// The legacy manifest comment id is not a claim: nothing reads the comment
+// it names anymore, so a marker carrying only it re-reviews rather than
+// refusing.
+func (m Marker) CoverageHandle() (h Handle, claimed bool, err error) {
+	if !m.CoverageGen.Present() && !m.CoverageRef.Present() && !m.CoverageCommit.Present() && !m.CoverageDegraded.Present() && len(m.CoveragePayload) == 0 {
+		return Handle{}, false, nil
+	}
+	h = Handle{
+		Gen:      m.CoverageGen.Value(),
+		Location: m.CoverageRef.Value(),
+		Commit:   m.CoverageCommit.Value(),
+		Degraded: m.CoverageDegraded.Value(),
+	}
+	if len(m.CoveragePayload) > 0 {
+		h.Payload = Some(json.RawMessage(bytes.Clone(m.CoveragePayload)))
+	}
+	if verr := h.Valid(); verr != nil {
+		return h, true, fmt.Errorf("the coverage claim on this marker does not form a handle: %w", verr)
+	}
+	return h, true, nil
+}
+
+// RecordCoverage writes a published handle onto the marker, rotating the
+// payloads so the current generation and, while it fits, its predecessor are
+// retained.
+//
+// The marker edit that follows is the commit point: the store's publish
+// wrote objects no reader trusts until this marker names them.
+func (m *Marker) RecordCoverage(h Handle) {
+	m.CoverageGen = Some(h.Gen)
+	m.CoverageRef = Some(h.Location)
+	if h.Commit != "" {
+		m.CoverageCommit = Some(h.Commit)
+	} else {
+		m.CoverageCommit = Opt[string]{}
+	}
+	m.CoverageDegraded = Some(h.Degraded)
+	payload, ok := h.Payload.Get()
+	if !ok || len(payload) == 0 {
+		// No inline payload: the predecessor lives in the parent commit
+		// now, not in the comment, so both payload keys stay absent.
+		m.CoveragePayload = nil
+		m.CoveragePrevPayload = nil
+		return
+	}
+	m.CoveragePrevPayload = m.CoveragePayload
+	m.CoveragePayload = bytes.Clone(payload)
 }
 
 // commentIDKey is the key state_markers adds to every marker object it prints,

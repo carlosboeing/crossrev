@@ -39,8 +39,12 @@ func Pairing(doc harness.Document, cfg *config.Config) func(override string) err
 	return func(override string) error {
 		reviewer, resolver := override, override
 		if override == "" {
-			// lib/run.sh:588-589
-			reviewer = cfg.Get(".reviewer.harness")
+			// lib/run.sh:588-589. The reviewer comes from the canonical list:
+			// reading the singular key would pair on the default sitting
+			// underneath a plural configuration instead of the harness it
+			// names. The resolver stays singular; it is a role, not a slot
+			// in a panel.
+			reviewer = cfg.Reviewers()[0].Harness
 			resolver = cfg.Get(".resolver.harness")
 		}
 		// The reviewer is checked first, so a pairing that fails both legs

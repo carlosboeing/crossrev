@@ -59,6 +59,20 @@ func Render(out *ui.IO, report Report) {
 	// path only where a repository backlog has them.
 	out.Line("deferred   " + report.Backlog.String())
 
+	// Omitted entirely when the current review pass claims no generation,
+	// the way PASSES is when no pass has run. The degraded line prints
+	// only when it is one, the way the draft line does: a line reading
+	// "degraded no" on every whole generation would say nothing.
+	if report.CoverageStore != "" {
+		out.Gap()
+		out.Head("COVERAGE")
+		out.Line(fmt.Sprintf("generation   %d", report.CoverageGen))
+		out.Line("store        " + report.CoverageStore)
+		if report.CoverageDegraded {
+			out.Line("degraded     yes — compact form, verdict codes only")
+		}
+	}
+
 	// Omitted entirely rather than printed with nothing under it
 	// (lib/run.sh:3094-3104). A heading with an empty body reads as a bug, and
 	// the passes line above already says none yet.

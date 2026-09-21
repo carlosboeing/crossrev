@@ -42,7 +42,9 @@ func (l *Leg) reportFatal(ctx context.Context, s *session, marker prstate.Marker
 	body := ResolveSummaryBody(marker.Resolutions, json.RawMessage("[]"), "", marker, s.repo.String(), s.req.PR, s.maxPasses)
 	encoded, err := marker.Encode()
 	if err == nil {
-		_ = l.Forge.CommentEdit(ctx, s.repo, id, body+encoded)
+		if err := prstate.FitMarkerComment(body + encoded); err == nil {
+			_ = l.Forge.CommentEdit(ctx, s.repo, id, body+encoded)
+		}
 	}
 
 	l.Forge.PullRequestLabelRemove(ctx, s.repo, s.req.PR, policy.LabelAwaitingReview)
