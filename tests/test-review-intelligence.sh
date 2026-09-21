@@ -70,11 +70,11 @@ routes_review_empty() {
 # marker needs replaying, and it is rebuilt from the ref run 1 left
 # behind rather than re-serialized from a spool.
 #
-# $1 state (default started: the crash shape — run 1 published and died
-# before the complete edit, so run 2 recovers the pass), $2 author
-# (default the trusted user).
+# Always the started state (the crash shape — run 1 published and died
+# before the complete edit, so run 2 recovers the pass) under the
+# trusted user; call replay_claim_as directly for other states or authors.
 replay_claim() {
-  replay_claim_as "${1:-started}" "${2:-$FIX_USER}"
+  replay_claim_as started "$FIX_USER"
 }
 
 replay_claim_as() {
