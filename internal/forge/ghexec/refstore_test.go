@@ -431,6 +431,43 @@ func TestRefStoreRefusedWriteReportsRefusal(t *testing.T) {
 	}
 }
 
+// Live-verified on the testbed 2026-09-21: GitHub rejects PATCH /git/refs
+// with `-f force=true` because force is a boolean, not a string. Every
+// pass publishes at least twice to its ref (the initial generation, then
+// each accepted batch), so the second publication always fell back to the
+// marker. The stub holds GitHub's rule; the second publish must succeed.
+func TestRefStoreSecondPublishUpdatesTheRef(t *testing.T) {
+	ctx := context.Background()
+	ref := storetest.FixtureSlotRef(t)
+	store, gh := newStubbedRefStore(t)
+
+	first, err := store.PublishGeneration(ctx, ref, prstate.Handle{}, fixtureGeneration(t, prstate.GenerationFull))
+	if err != nil {
+		t.Fatalf("first publish: %v", err)
+	}
+	secondGen := fixtureGeneration(t, prstate.GenerationFull)
+	secondGen.Gen = 2
+	second, err := store.PublishGeneration(ctx, ref, first, secondGen)
+	if err != nil {
+		t.Fatalf("second publish: %v", err)
+	}
+	if second.Commit == "" || second.Commit == first.Commit {
+		t.Fatalf("second publish did not move the ref: %+v", second)
+	}
+	sawPatch := false
+	for _, call := range gh.calls() {
+		if strings.Contains(call, "--method PATCH") && strings.Contains(call, "/git/refs/") {
+			sawPatch = true
+			if !strings.Contains(call, "--input") || strings.Contains(call, "force=") {
+				t.Errorf("PATCH used form fields, want a JSON body: %q", call)
+			}
+		}
+	}
+	if !sawPatch {
+		t.Error("no PATCH call was made; the test never exercised the update path")
+	}
+}
+
 // Step 8: Contract test across both backends.
 func TestRefStoreMeetsTheContract(t *testing.T) {
 	storetest.Contract(t, "refs", func(t *testing.T) prstate.LedgerStore {

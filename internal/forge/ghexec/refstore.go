@@ -175,10 +175,18 @@ func (s *refStore) PublishGeneration(ctx context.Context, ref prstate.SlotRef, p
 	)
 	if !answered(postRes) {
 		trimmed := strings.TrimPrefix(refName, "refs/")
-		patchRes := s.client.run(ctx, "api", "--method", "PATCH",
+		// A JSON body, not -f fields: force is a boolean and `-f
+		// force=true` sends the string "true", which GitHub 422s.
+		patchPayload, err := json.Marshal(map[string]any{
+			"sha":   commitResp.SHA,
+			"force": true,
+		})
+		if err != nil {
+			return prstate.Handle{}, err
+		}
+		patchRes := s.client.runInput(ctx, patchPayload, "api", "--method", "PATCH",
 			fmt.Sprintf("repos/%s/git/refs/%s", ref.Repo.String(), trimmed),
-			"-f", "sha="+commitResp.SHA,
-			"-f", "force=true",
+			"--input", "-",
 		)
 		if !answered(patchRes) {
 			return prstate.Handle{}, fmt.Errorf("ref write refused for %s: %w", refName, failure("updating ref", patchRes))
@@ -301,11 +309,16 @@ func (s *refStore) ReadGeneration(ctx context.Context, ref prstate.SlotRef, hand
 		)
 		if !answered(postRes) {
 			trimmed := strings.TrimPrefix(refName, "refs/")
-			_ = s.client.run(ctx, "api", "--method", "PATCH",
-				fmt.Sprintf("repos/%s/git/refs/%s", ref.Repo.String(), trimmed),
-				"-f", "sha="+handle.Commit,
-				"-f", "force=true",
-			)
+			// As above: a JSON body carries the boolean force.
+			if patchPayload, err := json.Marshal(map[string]any{
+				"sha":   handle.Commit,
+				"force": true,
+			}); err == nil {
+				_ = s.client.runInput(ctx, patchPayload, "api", "--method", "PATCH",
+					fmt.Sprintf("repos/%s/git/refs/%s", ref.Repo.String(), trimmed),
+					"--input", "-",
+				)
+			}
 		}
 	}
 

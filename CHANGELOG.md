@@ -4,6 +4,10 @@ All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepa
 
 ## [Unreleased]
 
+### Fixed
+
+- **Ledger ref updates no longer fail against the GitHub API.** PATCH /git/refs takes a boolean force, and the `-f force=true` form field sent the string, so every update 422d. Each pass publishes at least twice to its slot ref — the initial generation, then each accepted batch — so the second publication always fell back to the marker while the ref held the initial generation. The update now sends a JSON body, and the offline `gh` stub holds GitHub's boolean rule.
+
 ### Changed
 
 - **CrossRev describes what it writes to a repository, and `doctor` reports the coverage ledger.** [What CrossRev writes](docs/what-crossrev-writes.md) carries the blast-radius contract as a contract — never outside its configured namespace, never under `refs/heads/` or `refs/tags/`, never deleting, never force-pushing a branch, never touching another slot's refs — each promise naming the code that keeps it, with the snippets for excluding the namespace from CI ref-fetching and mirrors, the mirror-push caveat, and the measured cost: 26 of the testbed's 30 advertised refs are already `refs/pull/*`, so one ledger ref per pull request roughly doubles a cost every repository carries. [ADR 0022](docs/adrs/0022-the-coverage-ledger-lives-in-git-refs.md) records the decision. `crossrev doctor` gains a coverage section naming the store in force and why, the namespace, the overflow behaviour, the resolved reviewer, and what the token can do — with the probe's limit stated plainly: it proves the permission, not the namespace. Evidence notes carry locations and reasoning, never source text, enforced by the shape validator refusing a note with a fenced block.

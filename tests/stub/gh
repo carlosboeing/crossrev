@@ -265,6 +265,20 @@ if [[ -n "${CROSSREV_GH_STATE:-}" ]]; then
 
     # 8. PATCH /git/refs/<ref>
     if [[ "$joined" == "api --method PATCH repos/"*"/git/refs/"* ]]; then
+      # GitHub-fidelity, live-verified 2026-09-21: `force` is a boolean.
+      # `-f force=true` sends the string "true" and GitHub 422s, which is
+      # how every ref update silently became a marker fallback on the
+      # testbed. The client sends a JSON body with boolean force instead.
+      for a in "$@"; do
+        if [[ "$a" == force=* ]]; then
+          printf '{"message":"Invalid request. For properties/force, \\"true\\" is not a boolean."}\n' >&2
+          exit 1
+        fi
+      done
+      if ! jq -e '.force == true' <<<"${stdin_payload:-null}" >/dev/null 2>&1; then
+        printf '{"message":"Validation Failed: force must be boolean true"}\n' >&2
+        exit 1
+      fi
       ref_path="${joined##*git/refs/}"
       ref_path="${ref_path%% *}"
       ref="refs/${ref_path#refs/}"
