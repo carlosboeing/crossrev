@@ -44,7 +44,7 @@ func (s *refStore) PublishGeneration(ctx context.Context, ref prstate.SlotRef, p
 		return prstate.Handle{}, errNoFilter
 	}
 
-	// 1. Filter before digesting. Abort immediately on filter failure!
+	// 1. Filter before digesting; a filter failure aborts the write.
 	candCopy := candidate
 	if err := prstate.FilterGeneration(s.client.filter.Filter, &candCopy); err != nil {
 		return prstate.Handle{}, fmt.Errorf("filtering generation: %w", err)
@@ -168,7 +168,7 @@ func (s *refStore) PublishGeneration(ctx context.Context, ref prstate.SlotRef, p
 
 	// 6. POST or PATCH /git/refs. Force is required: a concurrent move or
 	// a re-rooted chain makes the update a non-fast-forward, on any
-	// namespace.
+	// namespace — and it still only moves this slot's ledger ref.
 	postRes := s.client.run(ctx, "api", "--method", "POST",
 		fmt.Sprintf("repos/%s/git/refs", ref.Repo.String()),
 		"-f", "ref="+refName,

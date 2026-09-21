@@ -454,10 +454,16 @@ func TestAutoReadsBothHalvesAfterAMidPassFallback(t *testing.T) {
 	auto := &autoLedger{refs: refs, marker: marker,
 		selection: ledgerSelection{Store: ledgerStoreRefs, Reason: ledgerReasonConfigured}}
 
+	out := &Result{}
+	selection := ledgerSelection{Store: ledgerStoreRefs, Reason: ledgerReasonConfigured}
 	firstGen := cutoverGeneration(t, prstate.GenerationFull, scope)
 	first, err := auto.PublishGeneration(ctx, slotRefFor(loaded), prstate.Handle{}, firstGen)
 	if err != nil {
 		t.Fatalf("first publish: %v", err)
+	}
+	selection = reportLedgerFallback(auto, selection, out)
+	if len(out.Messages) != 0 {
+		t.Fatalf("an unmoved selection warned %d times, want silence", len(out.Messages))
 	}
 	refs.SetPublishRefused(&prstate.RefWriteRefused{Op: "creating manifest blob", Err: errors.New("creating manifest blob: gh exited 1")})
 	secondGen := cutoverGeneration(t, prstate.GenerationFull, scope)
@@ -468,6 +474,22 @@ func TestAutoReadsBothHalvesAfterAMidPassFallback(t *testing.T) {
 	}
 	if second.Location != prstate.HandleMarker {
 		t.Fatalf("second handle location = %q, want the marker half", second.Location)
+	}
+	selection = reportLedgerFallback(auto, selection, out)
+	if got := auto.Selection(); got.Store != ledgerStoreMarker || got.Reason != ledgerReasonRefWriteRefused {
+		t.Fatalf("selection after fallback = %+v, want marker/ref_write_refused", got)
+	}
+	if len(out.Messages) != 1 {
+		t.Fatalf("the fallback warned %d times, want once", len(out.Messages))
+	}
+	thirdGen := cutoverGeneration(t, prstate.GenerationFull, scope)
+	thirdGen.Gen = 3
+	if _, err := auto.PublishGeneration(ctx, slotRefFor(loaded), second, thirdGen); err != nil {
+		t.Fatalf("third publish: %v", err)
+	}
+	selection = reportLedgerFallback(auto, selection, out)
+	if len(out.Messages) != 1 {
+		t.Fatalf("a settled fallback warned %d times, want the one warning kept", len(out.Messages))
 	}
 
 	readFirst, err := auto.ReadGeneration(ctx, slotRefFor(loaded), first)

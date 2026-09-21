@@ -173,8 +173,8 @@ func (s *markerStore) PublishGeneration(ctx context.Context, ref SlotRef, parent
 	}
 	// Filter before digesting, the way the ref store does: the comment
 	// writer filters the whole comment again on the way out, and the
-	// digests must already describe the redacted bytes. Abort immediately
-	// on filter failure!
+	// digests must already describe the redacted bytes. A filter failure
+	// aborts the write.
 	if err := FilterGeneration(s.filter, &candidate); err != nil {
 		return Handle{}, fmt.Errorf("filtering generation: %w", err)
 	}
