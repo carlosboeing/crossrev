@@ -247,17 +247,35 @@ func batchExpectations(units []intel.FileUnit, base, head core.Revision) (expect
 	return expected, promptUnits
 }
 
+// haltPathListBudget caps the outstanding-path section of a halt report in
+// bytes. The halt must fit the comment cap even when the outstanding set
+// does not, so the list truncates and the counts stay exact: a re-drive
+// rebuilds the full list from the generation's outstanding records, not
+// from this prose.
+const haltPathListBudget = 8 * 1024
+
 // haltBody renders the bounded halt the claim carries when the pass cannot
-// cover every required file: the halt word, the stop counts and the
-// outstanding paths, so a fresh process can reconstruct the same list.
+// cover every required file: the halt word, the exact stop counts and the
+// outstanding paths up to a fixed budget, with an overflow count past it.
 func haltBody(paths []string, stop prstate.CoverageStop, halt string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "**crossrev halted before covering every changed file** — %s.\n\n", halt)
 	fmt.Fprintf(&b, "Required %d, covered %d, outstanding %d. The last complete generation stands; nothing partial was published as complete.\n\n", stop.RequiredCount, stop.CoveredCount, stop.OutstandingCount)
 	if len(paths) > 0 {
 		b.WriteString("Outstanding paths:\n\n")
+		budget := haltPathListBudget
+		listed := 0
 		for _, path := range paths {
-			fmt.Fprintf(&b, "- `%s`\n", path)
+			line := "- `" + path + "`\n"
+			if len(line) > budget {
+				break
+			}
+			b.WriteString(line)
+			budget -= len(line)
+			listed++
+		}
+		if rest := len(paths) - listed; rest > 0 {
+			fmt.Fprintf(&b, "- …and %d more outstanding paths\n", rest)
 		}
 		b.WriteString("\nA re-drive at the same base, head and engine resumes these paths. Any changed value starts from zero accepted verdicts.\n")
 	}

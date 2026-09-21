@@ -76,11 +76,16 @@ func verdictCode(r Record) (byte, error) {
 	}
 }
 
-func recordFromVerdictCode(code byte, pathIndex int) (Record, error) {
+func recordFromVerdictCode(code byte, pathIndex int, path string) (Record, error) {
+	// The unit id is re-derived, not stored: FileUnitID is a pure function
+	// of the path, so the compact wire form carries no identity and a
+	// decoded compact record still resumes exactly where a full one would.
+	unitID := string(core.FileUnitID(path))
 	switch code {
 	case '0':
 		return Record{
 			Type:      CoverageRecordOutstanding,
+			UnitID:    unitID,
 			PathIndex: pathIndex,
 			Kind:      CoverageGranularityFile,
 			Verdict:   Null[string](),
@@ -88,6 +93,7 @@ func recordFromVerdictCode(code byte, pathIndex int) (Record, error) {
 	case '1':
 		return Record{
 			Type:      CoverageRecordUnit,
+			UnitID:    unitID,
 			PathIndex: pathIndex,
 			Kind:      CoverageGranularityFile,
 			Verdict:   Some("no_issue"),
@@ -95,6 +101,7 @@ func recordFromVerdictCode(code byte, pathIndex int) (Record, error) {
 	case '2':
 		return Record{
 			Type:      CoverageRecordUnit,
+			UnitID:    unitID,
 			PathIndex: pathIndex,
 			Kind:      CoverageGranularityFile,
 			Verdict:   Some("finding"),
@@ -102,6 +109,7 @@ func recordFromVerdictCode(code byte, pathIndex int) (Record, error) {
 	case '3':
 		return Record{
 			Type:      CoverageRecordUnit,
+			UnitID:    unitID,
 			PathIndex: pathIndex,
 			Kind:      CoverageGranularityFile,
 			Verdict:   Some("not_affected"),
@@ -109,6 +117,7 @@ func recordFromVerdictCode(code byte, pathIndex int) (Record, error) {
 	case '4':
 		return Record{
 			Type:      CoverageRecordUnit,
+			UnitID:    unitID,
 			PathIndex: pathIndex,
 			Kind:      CoverageGranularityFile,
 			Verdict:   Some("could_not_review"),
@@ -131,6 +140,7 @@ func CompactGeneration(g Generation) Generation {
 		if !ok {
 			compactRecords[i] = Record{
 				Type:      CoverageRecordOutstanding,
+				UnitID:    string(core.FileUnitID(g.Paths[i])),
 				PathIndex: i,
 				Kind:      CoverageGranularityFile,
 				Verdict:   Null[string](),
@@ -141,7 +151,7 @@ func CompactGeneration(g Generation) Generation {
 		if err != nil {
 			code = '0'
 		}
-		rec, _ := recordFromVerdictCode(code, i)
+		rec, _ := recordFromVerdictCode(code, i, g.Paths[i])
 		compactRecords[i] = rec
 	}
 	var paths []string
@@ -569,7 +579,7 @@ func DecodeGenerationV2(manifestBytes, recordsBytes []byte) (Generation, error) 
 
 		records = make([]Record, len(verdicts))
 		for i := 0; i < len(verdicts); i++ {
-			rec, err := recordFromVerdictCode(verdicts[i], i)
+			rec, err := recordFromVerdictCode(verdicts[i], i, paths[i])
 			if err != nil {
 				return Generation{}, err
 			}

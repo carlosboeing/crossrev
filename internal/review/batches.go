@@ -121,7 +121,7 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 	out.Marker = marker
 	selection = reportLedgerFallback(store, selection, out)
 	if initialStop.Limit != "" {
-		return l.haltPass(ctx, req, loaded, pass, claimID, out, marker, &batchBound{plan: planForStop(plan, initialStop), scope: scope, accepted: acceptedIDs})
+		return l.haltPass(ctx, req, loaded, pass, claimID, out, marker, &batchBound{plan: planForStop(plan, initialStop), scope: scope, accepted: acceptedIDs, stop: initialStop})
 	}
 	for _, batch := range plan.Batches {
 		expected, _ := batchExpectations(batch.Files, scope.Base, scope.Head)
@@ -161,12 +161,12 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 		handle, stop, err := l.publishBatchGeneration(ctx, req, loaded, store, marker, scope, advisory, gen+outcome.batches+1, producer, outcome.verdicts, outcome.supplied, outcome.examined, outcome.limits)
 		if err != nil {
 			if stop, ok := batchStop(err); ok {
-				return l.haltPass(ctx, req, loaded, pass, claimID, out, marker, &batchBound{plan: planForStop(plan, stop), scope: scope, accepted: acceptedIDs})
+				return l.haltPass(ctx, req, loaded, pass, claimID, out, marker, &batchBound{plan: planForStop(plan, stop), scope: scope, accepted: acceptedIDs, stop: stop})
 			}
 			return err
 		}
 		if stop.Limit != "" {
-			return l.haltPass(ctx, req, loaded, pass, claimID, out, marker, &batchBound{plan: planForStop(plan, stop), scope: scope, accepted: acceptedIDs})
+			return l.haltPass(ctx, req, loaded, pass, claimID, out, marker, &batchBound{plan: planForStop(plan, stop), scope: scope, accepted: acceptedIDs, stop: stop})
 		}
 		marker.RecordCoverage(handle)
 		out.Marker = marker
@@ -181,7 +181,7 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 			out.Marker.Findings = raw
 			recorded := marker
 			recorded.State = core.PassStarted
-			if err := l.editClaim(ctx, loaded.Repo, claimID, recordedFindingsBody(pass, loaded.Config), recorded); err != nil {
+			if _, err := l.editClaim(ctx, loaded.Repo, claimID, recordedFindingsBody(pass, loaded.Config), recorded, coverageOverflow(loaded)); err != nil {
 				return err
 			}
 		}
@@ -212,11 +212,15 @@ func reportLedgerFallback(store prstate.LedgerStore, selection ledgerSelection, 
 }
 
 // batchBound carries a bounded halt out of the batch loop: the 400-file pass
-// bound, the 32-shard ledger bound, or the single-file input bound.
+// bound, the ledger's exhaustion bound, or the single-file input bound.
+// stop is the ledger's own stop when the ledger reported the halt, so the
+// recorded halt carries what it measured rather than a recomputation of it;
+// zero for a halt the batch plan reached on its own.
 type batchBound struct {
 	plan     intel.BatchPlan
 	scope    intel.Scope
 	accepted map[core.UnitID]bool
+	stop     prstate.CoverageStop
 }
 
 func (e *batchBound) Error() string {
@@ -448,9 +452,11 @@ func (l *Leg) haltPass(ctx context.Context, req Request, loaded Context, pass in
 	}
 	outstanding := outstandingPaths(bound.scope, bound.accepted)
 	body := haltBody(outstanding, stop, stop.Limit)
-	if err := l.editClaim(ctx, loaded.Repo, claimID, body, marker); err != nil {
+	written, err := l.editClaim(ctx, loaded.Repo, claimID, body, marker, coverageOverflow(loaded))
+	if err != nil {
 		return err
 	}
+	marker = written
 	_, _ = l.applyPassLabels(ctx, req, loaded, pass, policy.PassHalted)
 	out.Outcome = OutcomeHalted
 	out.Reason = stop.Limit
@@ -462,7 +468,8 @@ func (l *Leg) haltPass(ctx context.Context, req Request, loaded Context, pass in
 // stopForBound renders the stop counts one bounded halt records: required,
 // covered and outstanding totals with the limit name. Covered derives only
 // from accepted verdicts — an admitted batch that never ran is outstanding,
-// never covered.
+// never covered. A halt the ledger reported keeps the bytes it measured, so
+// the operator can see why it stopped; a plan-bound halt measured nothing.
 func stopForBound(bound *batchBound) prstate.CoverageStop {
 	limit := intel.CarryReviewBudgetReached
 	if bound.plan.HaltReason != "" {
@@ -474,7 +481,7 @@ func stopForBound(bound *batchBound) prstate.CoverageStop {
 			outstanding++
 		}
 	}
-	return prstate.CoverageStop{RequiredCount: len(bound.scope.Required), CoveredCount: len(bound.scope.Required) - outstanding, OutstandingCount: outstanding, Limit: limit}
+	return prstate.CoverageStop{RequiredCount: len(bound.scope.Required), CoveredCount: len(bound.scope.Required) - outstanding, OutstandingCount: outstanding, MeasuredBytes: bound.stop.MeasuredBytes, Limit: limit}
 }
 
 // planForStop carries a ledger-bound halt back into a batch plan shape: the

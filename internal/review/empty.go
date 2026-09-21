@@ -58,13 +58,14 @@ func (l *Leg) finishNoChangesRun(ctx context.Context, req Request, loaded Contex
 	out.Messages = append(out.Messages, ui.Say(fmt.Sprintf(
 		"%s#%d changes no files — stopping without calling a reviewer", loaded.Repo, req.PR)))
 
-	if err := l.editClaim(ctx, loaded.Repo, claimID, summary, marker); err != nil {
+	written, err := l.editClaim(ctx, loaded.Repo, claimID, summary, marker, coverageOverflow(loaded))
+	if err != nil {
 		out.Outcome = OutcomeError
 		out.Err = err
 		out.Marker = marker
 		return *out, publishState{}
 	}
-	out.Marker = marker
+	out.Marker = written
 	// The record is durable from here, so nothing below may rewrite it.
 	state := publishState{settled: true}
 	// ui_ok (lib/run.sh:1299).
