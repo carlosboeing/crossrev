@@ -116,7 +116,8 @@ func (l *Leg) publish(ctx context.Context, req Request, loaded Context, settings
 
 	verdict := core.Verdict(marker.Verdict.Value())
 	escalated := escalatedCount(loaded.Markers)
-	if conv, ok := l.buildConvergence(ctx, loaded, marker, actionable, producerOf(settings)); ok && !policy.Converged(conv) {
+	conv, obliged := l.buildConvergence(ctx, loaded, marker, actionable, producerOf(settings))
+	if obliged && !policy.Converged(conv) {
 		// The coverage obligation is unmet: a green verdict cannot stand,
 		// and a quiet one cannot pass as finished. With actionable findings
 		// the resolve leg is still owed, so the verdict stays issues-remain;
@@ -140,12 +141,21 @@ func (l *Leg) publish(ctx context.Context, req Request, loaded Context, settings
 		}
 	}
 
-	summary := SummaryBody(parseFindings(marker.Findings), marker, RenderContext{
+	renderCtx := RenderContext{
 		Repo:    loaded.Repo.String(),
 		PR:      req.PR,
 		MinFix:  minFix,
 		MaxPass: cap,
-	})
+	}
+	if obliged {
+		// The footnote's counts are the pass's own convergence, counted
+		// above, so the sentence reads the same on either store. Reused
+		// rather than rebuilt: only the verdict moved since, which
+		// convergence never reads. The frozen path supplies none and the
+		// footnote stays silent.
+		renderCtx.Coverage = &CoverageCounts{Covered: conv.Covered, Required: conv.Required}
+	}
+	summary := SummaryBody(parseFindings(marker.Findings), marker, renderCtx)
 	written, err := l.editClaim(ctx, loaded.Repo, claimID, summary, marker, coverageOverflow(loaded))
 	if err != nil {
 		return marker, msgs, publishState{}, err

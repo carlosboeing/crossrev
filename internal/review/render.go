@@ -48,6 +48,19 @@ type RenderContext struct {
 	// NoChanges body only.
 	BaseRef string
 	HeadRef string
+	// Coverage carries the pass's own convergence counts for the
+	// coverage footnote. Nil means no convergence was computed — the
+	// frozen path — so the summary carries no footnote.
+	Coverage *CoverageCounts
+}
+
+// CoverageCounts is how many of the required files the pass reviewed, as
+// its own convergence counted them. The footnote reads the counts here
+// rather than out of the marker, so the sentence is the same whichever
+// store published the generation.
+type CoverageCounts struct {
+	Covered  int
+	Required int
 }
 
 const emDash = "—"
@@ -253,7 +266,7 @@ func SummaryBody(findings []Finding, marker prstate.Marker, ctx RenderContext) s
 		sha, _ := marker.HeadSHA.Get()
 		b.WriteString(findingsTable(findings, ctx.Repo, sha))
 	}
-	b.WriteString(coverageFootnote(marker))
+	b.WriteString(coverageFootnote(marker, ctx.Coverage))
 
 	unanchored := 0
 	if u, ok := marker.Unanchored.Get(); ok {
@@ -272,49 +285,26 @@ func SummaryBody(findings []Finding, marker prstate.Marker, ctx RenderContext) s
 
 // coverageFootnote renders one human sentence for the coverage the pass
 // published: how many of the changed files it reviewed, and at which head.
-// The counts come out of the inline payload, which only the marker store
-// carries; a ref-store claim names a generation render cannot count without
-// a store client, and a sentence it cannot fill it does not print. Anything
-// else undecodable — no claim, a corrupt claim, a payload that does not
-// decode, no head — likewise carries no footnote, so a summary a reviewer
-// reads never carries a machine-facing generation line.
-func coverageFootnote(marker prstate.Marker) string {
-	h, claimed, err := marker.CoverageHandle()
-	if err != nil || !claimed {
+// The counts come from the caller — the pass's own convergence — so the
+// sentence reads the same on either store: a ref-store claim names a
+// generation render cannot count without a store client, but the caller
+// already counted it. The marker still gates the sentence: only a claimed,
+// well-formed handle gets one. Anything without something to count — no
+// convergence, no claim, a corrupt claim, no head — carries no footnote,
+// so the frozen summary bytes stay exactly as they were and a summary a
+// reviewer reads never carries a machine-facing generation line.
+func coverageFootnote(marker prstate.Marker, cov *CoverageCounts) string {
+	if cov == nil {
 		return ""
 	}
-	payload, ok := h.Payload.Get()
-	if !ok || len(payload) == 0 {
-		return ""
-	}
-	var env struct {
-		Manifest json.RawMessage `json:"manifest"`
-		Records  json.RawMessage `json:"records"`
-	}
-	if err := json.Unmarshal(payload, &env); err != nil {
-		return ""
-	}
-	if len(env.Manifest) == 0 || len(env.Records) == 0 {
-		return ""
-	}
-	gen, err := prstate.DecodeGenerationV2(env.Manifest, env.Records)
-	if err != nil {
+	if _, claimed, err := marker.CoverageHandle(); err != nil || !claimed {
 		return ""
 	}
 	sha, _ := marker.HeadSHA.Get()
 	if sha == "" {
 		return ""
 	}
-	covered := 0
-	for _, record := range gen.Records {
-		if record.Type != prstate.CoverageRecordUnit {
-			continue
-		}
-		if verdict, ok := record.Verdict.Get(); ok && verdict != "" {
-			covered++
-		}
-	}
-	return fmt.Sprintf("Reviewed %d of %d changed files at `%s`.\n\n", covered, len(gen.Records), shortSHA(sha))
+	return fmt.Sprintf("Reviewed %d of %d changed files at `%s`.\n\n", cov.Covered, cov.Required, shortSHA(sha))
 }
 
 // shortSHA abbreviates a commit SHA the way printed messages do: the first
