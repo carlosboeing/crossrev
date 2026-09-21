@@ -189,6 +189,69 @@ func TestReviewRestartUsesOnlySameRevisionCoverage(t *testing.T) {
 	}
 }
 
+// TestNewPassContinuesTheLedgerChain pins the cross-pass ancestry: after a
+// completed pass and a new head, admission starts pass 2, whose first
+// publication parents onto pass 1's tip and continues its generation
+// numbers instead of rooting an unrelated chain at generation 1.
+func TestNewPassContinuesTheLedgerChain(t *testing.T) {
+	e := newEnv(t)
+	writeRequiredHead(e, "a.go", "package a\n")
+	e.runner.script = []exec.Result{
+		{ExitCode: 0, Stdout: claudeStdout(batchAnswer(t, 1))},
+	}
+	first := runLeg(t, e, e.request(t))
+	if first.Err != nil {
+		t.Fatalf("first Run: %v", first.Err)
+	}
+	if first.Marker.Pass != 1 {
+		t.Fatalf("first pass = %d, want 1", first.Marker.Pass)
+	}
+	tipCommit, _ := first.Marker.CoverageCommit.Get()
+	tipGen := first.Marker.CoverageGen.Value()
+	if tipCommit == "" || tipGen == 0 {
+		t.Fatalf("pass 1 left no checkpoint (gen %d commit %q); the ancestry has nothing to continue", tipGen, tipCommit)
+	}
+
+	movedSHA := "4444444444444444444444444444444444444444"
+	e.forge.pr.HeadRefOid = mustRev(t, movedSHA)
+	if e.vcs.files[movedSHA] == nil {
+		e.vcs.files[movedSHA] = map[string][]byte{}
+	}
+	e.vcs.files[movedSHA]["a.go"] = []byte("package a\n")
+	// Evidence must cite the base or the head under review.
+	secondAnswer := strings.Replace(batchAnswer(t, 1), headSHA, movedSHA, -1)
+	e.runner.script = append(e.runner.script, exec.Result{ExitCode: 0, Stdout: claudeStdout(secondAnswer)})
+
+	store, ok := e.forge.store.(*storetest.FakeStore)
+	if !ok {
+		t.Fatalf("fixture store is %T, want *storetest.FakeStore", e.forge.store)
+	}
+	publishedBefore := len(store.Published())
+	callsBefore := e.runner.calls
+
+	second := runLeg(t, e, e.request(t))
+	if second.Err != nil {
+		t.Fatalf("second Run: %v", second.Err)
+	}
+	if second.Marker.Pass != 2 {
+		t.Fatalf("second pass = %d, want 2 (the moved head admits a new pass)", second.Marker.Pass)
+	}
+	if e.runner.calls == callsBefore {
+		t.Fatal("pass 2 ran no model call; it resumed verdicts instead of re-judging the new head")
+	}
+	gens := store.Published()[publishedBefore:]
+	parents := store.Parents()[publishedBefore:]
+	if len(gens) == 0 {
+		t.Fatal("pass 2 published nothing")
+	}
+	if parents[0].Commit != tipCommit {
+		t.Fatalf("pass 2's first publication parents on %q, want pass 1's tip %q", parents[0].Commit, tipCommit)
+	}
+	if gens[0].Gen != tipGen+1 {
+		t.Fatalf("pass 2's first publication is gen %d, want %d (numbering continues across passes)", gens[0].Gen, tipGen+1)
+	}
+}
+
 // acceptedReuse counts the prior generation's verdicts the leg would
 // reuse at the given revision pair under the current engine.
 func acceptedReuse(t *testing.T, e *env, base, head core.Revision) int {

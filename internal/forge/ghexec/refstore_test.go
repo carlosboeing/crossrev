@@ -134,6 +134,24 @@ func (g *stubGh) hasRef(t *testing.T, refName string) bool {
 	return err == nil
 }
 
+func (g *stubGh) refTarget(t *testing.T, refName string) string {
+	t.Helper()
+	refEnc := strings.ReplaceAll(refName, "/", "_")
+	raw, err := os.ReadFile(filepath.Join(g.stateDir, "ref-"+refEnc))
+	if err != nil {
+		t.Fatalf("reading ref %s: %v", refName, err)
+	}
+	var obj struct {
+		Object struct {
+			SHA string `json:"sha"`
+		} `json:"object"`
+	}
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		t.Fatalf("unmarshaling ref %s: %v", refName, err)
+	}
+	return obj.Object.SHA
+}
+
 func (g *stubGh) setRoute(t *testing.T, routes string) {
 	t.Helper()
 	if err := os.WriteFile(g.routesPath, []byte(routes), 0o600); err != nil {
@@ -364,6 +382,35 @@ func TestRefStoreDeletedRefIsNotALostLedger(t *testing.T) {
 	}
 }
 
+// A read restores a missing ref and never moves an existing one: publish A
+// then child B, read A back, and the ref still names B. A status or resolve
+// reader holding an older marker must not rewind a concurrently advanced
+// ledger and strand the newer generations.
+func TestRefStoreReadLeavesAnExistingRefAtTheNewerCommit(t *testing.T) {
+	ctx := context.Background()
+	ref := storetest.FixtureSlotRef(t)
+	store, gh := newStubbedRefStore(t)
+
+	first, err := store.PublishGeneration(ctx, ref, prstate.Handle{}, fixtureGeneration(t, prstate.GenerationFull))
+	if err != nil {
+		t.Fatalf("first publish: %v", err)
+	}
+	secondGen := fixtureGeneration(t, prstate.GenerationFull)
+	secondGen.Gen = 2
+	second, err := store.PublishGeneration(ctx, ref, first, secondGen)
+	if err != nil {
+		t.Fatalf("second publish: %v", err)
+	}
+
+	if _, err := store.ReadGeneration(ctx, ref, first); err != nil {
+		t.Fatalf("reading the older generation: %v", err)
+	}
+	refName := mustRefName(t, "refs/crossrev", ref)
+	if target := gh.refTarget(t, refName); target != second.Commit {
+		t.Fatalf("reading the older generation moved the ref to %s, want it left at the newer %s", target, second.Commit)
+	}
+}
+
 func TestRefStoreMissingObjectsAreALostLedger(t *testing.T) {
 	ctx := context.Background()
 	ref := storetest.FixtureSlotRef(t)
@@ -420,14 +467,92 @@ func TestRefStoreRefusedWriteReportsRefusal(t *testing.T) {
 	ctx := context.Background()
 	ref := storetest.FixtureSlotRef(t)
 	store, gh := newStubbedRefStore(t)
-	gh.setRoute(t, "api --method POST repos/*/git/refs*\t!fail\napi --method PATCH repos/*/git/refs/*\t!fail\n")
+	gh.setRoute(t, "api --method POST repos/*/git/refs*\t!deny\napi --method PATCH repos/*/git/refs/*\t!deny\n")
 
 	_, err := store.PublishGeneration(ctx, ref, prstate.Handle{}, fixtureGeneration(t, prstate.GenerationFull))
 	if err == nil {
 		t.Fatal("a refused write succeeded")
 	}
+	var refused *prstate.RefWriteRefused
+	if !errors.As(err, &refused) {
+		t.Fatalf("error %q is not the typed refusal `auto` falls back on", err)
+	}
 	if !strings.Contains(err.Error(), "ref write refused") {
 		t.Fatalf("error %q does not report refusal", err)
+	}
+	if want := "updating ref " + mustRefName(t, "refs/crossrev", ref); refused.Op != want {
+		t.Fatalf("refused op = %q, want %q", refused.Op, want)
+	}
+	if refused.Ruleset {
+		t.Fatal("a scope denial was classified as a ruleset denial")
+	}
+}
+
+// A token that can comment but may not write contents is rejected by the
+// first blob POST, before the code reaches /git/refs: that denial is the
+// same typed refusal, so `auto` falls back instead of halting.
+func TestRefStoreDeniedBlobWriteReportsRefusal(t *testing.T) {
+	ctx := context.Background()
+	ref := storetest.FixtureSlotRef(t)
+	store, gh := newStubbedRefStore(t)
+	gh.setRoute(t, "api --method POST repos/*/git/blobs*\t!deny\n")
+
+	_, err := store.PublishGeneration(ctx, ref, prstate.Handle{}, fixtureGeneration(t, prstate.GenerationFull))
+	if err == nil {
+		t.Fatal("a denied blob write succeeded")
+	}
+	var refused *prstate.RefWriteRefused
+	if !errors.As(err, &refused) {
+		t.Fatalf("error %q is not the typed refusal `auto` falls back on", err)
+	}
+	if refused.Op != "creating manifest blob" {
+		t.Fatalf("refused op = %q, want the first write that was denied", refused.Op)
+	}
+}
+
+// A silent failure carries no denial: it stays an ordinary error, so
+// `auto` fails loudly instead of landing a generation in the marker over
+// a network blip.
+func TestRefStoreTransientWriteFailureIsNotARefusal(t *testing.T) {
+	ctx := context.Background()
+	ref := storetest.FixtureSlotRef(t)
+	store, gh := newStubbedRefStore(t)
+	gh.setRoute(t, "api --method POST repos/*/git/refs*\t!fail\napi --method PATCH repos/*/git/refs/*\t!fail\n")
+
+	_, err := store.PublishGeneration(ctx, ref, prstate.Handle{}, fixtureGeneration(t, prstate.GenerationFull))
+	if err == nil {
+		t.Fatal("a failed write succeeded")
+	}
+	var refused *prstate.RefWriteRefused
+	if errors.As(err, &refused) {
+		t.Fatalf("a transient failure was classified as a refusal: %v", err)
+	}
+	if strings.Contains(err.Error(), "ref write refused") {
+		t.Fatalf("a transient failure reports refusal: %q", err)
+	}
+}
+
+// A ruleset denial names itself, so the fallback records the policy
+// reason rather than a bare refused write.
+func TestRefStoreRulesetDenialNamesTheRuleset(t *testing.T) {
+	ctx := context.Background()
+	ref := storetest.FixtureSlotRef(t)
+	store, gh := newStubbedRefStore(t)
+	gh.setRoute(t, "api --method POST repos/*/git/refs*\t!fail\napi --method PATCH repos/*/git/refs/*\t!deny-ruleset\n")
+
+	_, err := store.PublishGeneration(ctx, ref, prstate.Handle{}, fixtureGeneration(t, prstate.GenerationFull))
+	if err == nil {
+		t.Fatal("a ruleset-denied write succeeded")
+	}
+	var refused *prstate.RefWriteRefused
+	if !errors.As(err, &refused) {
+		t.Fatalf("error %q is not the typed refusal", err)
+	}
+	if !refused.Ruleset {
+		t.Fatal("a ruleset denial was not classified as one")
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "ruleset") {
+		t.Fatalf("error %q does not name the ruleset", err)
 	}
 }
 

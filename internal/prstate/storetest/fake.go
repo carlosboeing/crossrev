@@ -16,6 +16,7 @@ type FakeStore struct {
 	mu             sync.Mutex
 	generations    map[string]prstate.Generation
 	published      []prstate.Generation
+	parents        []prstate.Handle
 	handles        []prstate.Handle
 	goneCommits    map[string]bool
 	corruptCommits map[string]bool
@@ -71,6 +72,16 @@ func (f *FakeStore) Published() []prstate.Generation {
 	defer f.mu.Unlock()
 	out := make([]prstate.Generation, len(f.published))
 	copy(out, f.published)
+	return out
+}
+
+// Parents returns the parent handle each publication named, in publication
+// order, so a test can pin the ancestry a pass builds.
+func (f *FakeStore) Parents() []prstate.Handle {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]prstate.Handle, len(f.parents))
+	copy(out, f.parents)
 	return out
 }
 
@@ -136,6 +147,7 @@ func (f *FakeStore) PublishGeneration(ctx context.Context, ref prstate.SlotRef, 
 		candidate.Gen = genNum
 	}
 	f.published = append(f.published, candidate)
+	f.parents = append(f.parents, parent)
 
 	if f.isMarker {
 		data, err := json.Marshal(candidate)

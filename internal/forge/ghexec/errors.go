@@ -3,8 +3,10 @@ package ghexec
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/carlosboeing/crossrev/internal/exec"
+	"github.com/carlosboeing/crossrev/internal/prstate"
 )
 
 // errNoFilter is what a write refuses with when the Client was built without a
@@ -40,4 +42,43 @@ func failure(summary string, res exec.Result) error {
 		return fmt.Errorf("%s: %w", summary, res.Err)
 	}
 	return fmt.Errorf("%s: gh exited %d", summary, res.ExitCode)
+}
+
+// permissionRefused reports whether a failed gh invocation names a
+// permission or policy denial rather than a transient failure: an HTTP
+// 403 (authenticated, but the token may not perform the write) or a
+// ruleset verdict. A 401 or 404 fails fast instead — the marker half
+// could not succeed where authentication or repository access itself
+// failed — and so does a rate limit, which is transient however it is
+// numbered. A transport failure (a Go error rather than an answered exit
+// code) is never a refusal.
+//
+// It reads the captured streams for classification only. What gh printed
+// never enters the returned error, the way failure withholds it.
+func permissionRefused(res exec.Result) (refused, ruleset bool) {
+	if answered(res) || res.Err != nil {
+		return false, false
+	}
+	combined := string(res.Stdout) + "\n" + string(res.Stderr)
+	lower := strings.ToLower(combined)
+	if strings.Contains(lower, "rate limit") {
+		return false, false
+	}
+	if strings.Contains(lower, "ruleset") {
+		return true, true
+	}
+	return strings.Contains(combined, "403"), false
+}
+
+// publishFailure classifies a failed ledger-write invocation: a permission
+// or policy denial becomes the typed refusal `auto` falls back on, and
+// anything else stays the ordinary error that fails loudly. The ledger is
+// the one caller that needs the distinction failure deliberately lacks —
+// falling back on a network blip would land a generation in the marker
+// for no reason the operator can see.
+func publishFailure(op string, res exec.Result) error {
+	if refused, ruleset := permissionRefused(res); refused {
+		return &prstate.RefWriteRefused{Op: op, Ruleset: ruleset, Err: failure(op, res)}
+	}
+	return failure(op, res)
 }

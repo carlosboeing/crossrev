@@ -47,12 +47,16 @@ func TestFakeStoreContract(t *testing.T) {
 
 func TestMarkerStoreMeetsTheContract(t *testing.T) {
 	storetest.Contract(t, "marker", func(t *testing.T) prstate.LedgerStore {
-		return prstate.NewMarkerStore(identityRender, prstate.OverflowDegrade)
+		return prstate.NewMarkerStore(identityRender, prstate.OverflowDegrade, passthroughFilter)
 	})
 }
 
 func identityRender(p json.RawMessage) (string, error) {
 	return string(p), nil
+}
+
+func passthroughFilter(s string) (string, error) {
+	return s, nil
 }
 
 func fixtureGeneration(t *testing.T, form string) prstate.Generation {

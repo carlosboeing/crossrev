@@ -154,6 +154,28 @@ func (e *LedgerExhausted) Error() string {
 		e.Stop.Limit, e.Stop.MeasuredBytes, e.Stop.RequiredCount, e.Stop.CoveredCount, e.Stop.OutstandingCount)
 }
 
+// RefWriteRefused reports that the forge refused a ledger write for
+// permission or policy reasons: the token may not create the objects or
+// move the ref. Under `auto` it falls back to the marker store; anything
+// else — a transient or network failure — is an ordinary error and fails
+// loudly instead. Op names what was refused, in failure's vocabulary, and
+// Err carries the underlying failure with the streams withheld.
+type RefWriteRefused struct {
+	Op      string
+	Ruleset bool
+	Err     error
+}
+
+func (e *RefWriteRefused) Error() string {
+	if e == nil {
+		return "ref write refused"
+	}
+	if e.Ruleset {
+		return fmt.Sprintf("ref write refused by a ruleset: %v", e.Err)
+	}
+	return fmt.Sprintf("ref write refused: %v", e.Err)
+}
+
 // GenerationCurrent reports whether a generation may still be reused: the
 // revision pair, the engine and the producer must all match what is in force
 // now. One predicate, so a fourth reason to retire cannot be added to three

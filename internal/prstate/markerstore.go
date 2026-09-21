@@ -3,6 +3,7 @@ package prstate
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 )
 
@@ -129,15 +130,26 @@ func decodeGenerationPayload(raw json.RawMessage) (Generation, error) {
 type markerStore struct {
 	render     func(payload json.RawMessage) (string, error)
 	onOverflow string
+	filter     func(string) (string, error)
 }
+
+// ErrNoPublishFilter is what the marker store refuses a publication with
+// when it was built without the publication filter: the comment writer
+// would redact the payload after its digests were computed, so the
+// persisted generation would never verify. Reads need no filter.
+var ErrNoPublishFilter = errors.New("no publish filter is installed, so nothing was published")
 
 // NewMarkerStore returns the fallback store, which carries its payload inside
 // the pass marker comment. render composes the whole comment the leg will
 // send, so the bound measures the bytes that will actually be written.
-func NewMarkerStore(render func(payload json.RawMessage) (string, error), onOverflow string) LedgerStore {
+// filter is the same publication filter the comment writer applies, and the
+// store runs it before encoding: the digests must describe the persisted
+// bytes, not the pre-redaction ones. A nil filter serves reads only.
+func NewMarkerStore(render func(payload json.RawMessage) (string, error), onOverflow string, filter func(string) (string, error)) LedgerStore {
 	return &markerStore{
 		render:     render,
 		onOverflow: onOverflow,
+		filter:     filter,
 	}
 }
 
@@ -155,6 +167,16 @@ func (s *markerStore) ReadGeneration(ctx context.Context, ref SlotRef, handle Ha
 func (s *markerStore) PublishGeneration(ctx context.Context, ref SlotRef, parent Handle, candidate Generation) (Handle, error) {
 	if err := ctx.Err(); err != nil {
 		return Handle{}, err
+	}
+	if s.filter == nil {
+		return Handle{}, ErrNoPublishFilter
+	}
+	// Filter before digesting, the way the ref store does: the comment
+	// writer filters the whole comment again on the way out, and the
+	// digests must already describe the redacted bytes. Abort immediately
+	// on filter failure!
+	if err := FilterGeneration(s.filter, &candidate); err != nil {
+		return Handle{}, fmt.Errorf("filtering generation: %w", err)
 	}
 	render := s.render
 	if render == nil {

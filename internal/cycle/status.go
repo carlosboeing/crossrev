@@ -391,7 +391,8 @@ type refLedgerSource interface {
 func statusCoverageSourceFor(client forge.Forge, cfg *config.Config, repo core.Slug, pr int) coverageSource {
 	reviewer := cfg.Reviewers()[0]
 	out := coverageSource{
-		marker: prstate.NewMarkerStore(nil, cfg.Coverage().OnOverflow),
+		// Read-only: status never publishes, so no filter.
+		marker: prstate.NewMarkerStore(nil, cfg.Coverage().OnOverflow, nil),
 		slot:   prstate.SlotRef{Repo: repo, Number: pr, Slot: reviewer.ID},
 		producer: prstate.Producer{
 			Harness:  reviewer.Harness,

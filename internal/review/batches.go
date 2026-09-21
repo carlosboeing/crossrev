@@ -44,12 +44,23 @@ type batchOutcome struct {
 func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, settings legSettings, pass int, claimID int64, scope intel.Scope, store prstate.LedgerStore, selection ledgerSelection, out *Result) error {
 	outcome := batchOutcome{verdicts: map[core.UnitID]recordVerdict{}, supplied: map[core.UnitID]prstate.SuppliedInput{}}
 	producer := producerOf(settings)
-	marker := markerForPass(loaded.Markers, pass)
+	marker, err := markerForPass(loaded.Markers, pass)
+	if err != nil {
+		return err
+	}
 	current, err := l.currentGeneration(ctx, loaded, store, marker, scope, producer)
 	if err != nil {
 		return err
 	}
 	gen := current.Gen
+	if gen == 0 {
+		// The claim parsed cleanly when currentGeneration read this same
+		// marker above, so only whether one is claimed is still open: a
+		// retired checkpoint keeps its number, and numbering never restarts.
+		if h, claimed, _ := marker.CoverageHandle(); claimed {
+			gen = h.Gen
+		}
+	}
 	accepted := acceptedFromGeneration(current, scope.Base, scope.Head, scope.Engine)
 	acceptedIDs := make(map[core.UnitID]bool, len(accepted))
 	for unitID, disp := range accepted {
@@ -408,13 +419,66 @@ func excludedRecords(scope intel.Scope) []prstate.CoverageExclusion {
 	return out
 }
 
-// markerForPass returns the pass marker under construction, or a blank one
-// the batch loop fills in.
-func markerForPass(markers []prstate.Marker, pass int) prstate.Marker {
-	if done, ok := prstate.MarkerFor(markers, pass, core.LegReview); ok {
-		return done
+// markerForPass returns the pass marker under construction: the pass's own
+// marker when one exists, otherwise a blank one. A marker that claims no
+// coverage is seeded from the slot's latest checkpoint, so a new pass
+// parents onto the previous tip and continues its generation numbers
+// instead of rooting an unrelated chain the ref update would orphan. The
+// seed is ancestry only — currentGeneration still retires the verdicts at
+// a new revision.
+func markerForPass(markers []prstate.Marker, pass int) (prstate.Marker, error) {
+	marker, ok := prstate.MarkerFor(markers, pass, core.LegReview)
+	if !ok {
+		marker = prstate.Marker{Pass: pass}
 	}
-	return prstate.Marker{Pass: pass}
+	if _, claimed, err := marker.CoverageHandle(); err != nil {
+		return prstate.Marker{}, err
+	} else if claimed {
+		return marker, nil
+	}
+	ancestor, ok, err := latestCoverageCheckpoint(markers, pass)
+	if err != nil {
+		return prstate.Marker{}, err
+	}
+	if ok {
+		marker.RecordCoverage(ancestor)
+	}
+	return marker, nil
+}
+
+// latestCoverageCheckpoint answers the coverage handle of the newest
+// earlier review pass that left one: the checkpoint a new pass continues.
+// Earlier passes only — the future never parents the present. Only the
+// selected checkpoint is validated; an older marker's claim is that
+// pass's own business, and a pass must not fail for state it never uses.
+// The selected one refuses when it does not parse: silently re-rooting
+// would orphan the chain it names.
+func latestCoverageCheckpoint(markers []prstate.Marker, pass int) (prstate.Handle, bool, error) {
+	found := false
+	var (
+		checkpoint prstate.Marker
+		bestPass   int
+	)
+	for _, m := range markers {
+		if m.Leg != core.LegReview || m.Pass >= pass {
+			continue
+		}
+		_, claimed, err := m.CoverageHandle()
+		if err == nil && !claimed {
+			continue
+		}
+		if !found || m.Pass > bestPass {
+			checkpoint, bestPass, found = m, m.Pass, true
+		}
+	}
+	if !found {
+		return prstate.Handle{}, false, nil
+	}
+	h, _, err := checkpoint.CoverageHandle()
+	if err != nil {
+		return prstate.Handle{}, false, err
+	}
+	return h, true, nil
 }
 
 // haltPass records a bounded incomplete outcome on the claim without

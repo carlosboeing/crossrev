@@ -42,7 +42,11 @@ type refLedgerSource interface {
 // for the guarantee and a silent downgrade would break it.
 func (l *Leg) ledgerFor(loaded Context) (prstate.LedgerStore, ledgerSelection, error) {
 	cov := loaded.Config.Coverage()
-	marker := prstate.NewMarkerStore(nil, cov.OnOverflow)
+	// The run log's Publish is the same filter the comment writer applies
+	// on the way out, so the marker store digests the bytes that persist.
+	// Nil-safe: a leg with no log still redacts, and only loses the event
+	// line about it.
+	marker := prstate.NewMarkerStore(nil, cov.OnOverflow, l.Log.Publish)
 	switch cov.Store {
 	case ledgerStoreMarker:
 		// Never touch refs at all, whatever the token permits.
@@ -120,13 +124,14 @@ func (a *autoLedger) PublishGeneration(ctx context.Context, ref prstate.SlotRef,
 	return a.marker.PublishGeneration(ctx, ref, parent, candidate)
 }
 
-// isRefWriteRefused reports whether the error names a refused ref write —
-// the vocabulary the ref store reports refusals in, so `auto` can fall
+// isRefWriteRefused reports whether the error is the typed refusal the ref
+// store reports permission and policy denials with, so `auto` can fall
 // back on them and fail loudly on everything else. A transient failure is
 // not a refusal: falling back on a network blip would land a generation
 // in the marker for no reason the operator can see.
 func isRefWriteRefused(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "ref write refused")
+	var refused *prstate.RefWriteRefused
+	return errors.As(err, &refused)
 }
 
 // refusalReason names why the ref write was refused. A ruleset denial is

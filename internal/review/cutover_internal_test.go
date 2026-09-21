@@ -277,3 +277,166 @@ func TestSubstitutedRefCannotMoveTheConvergenceAnswer(t *testing.T) {
 		t.Fatalf("covered = %d, want 2: the answer was computed from the substituted bytes, not the marker's commit", conv.Covered)
 	}
 }
+
+// cutoverCheckpoint is a completed review marker for the given pass naming
+// the given commit: the shape a settled pass leaves its successor.
+func cutoverCheckpoint(pass int, commit string) prstate.Marker {
+	marker := cutoverMarkerNaming(commit)
+	marker.Pass = pass
+	marker.State = core.PassComplete
+	return marker
+}
+
+// TestMarkerForPassSeedsANewPassFromTheLatestCheckpoint pins the new-pass
+// ancestry: a pass with no marker of its own starts from the slot's latest
+// coverage checkpoint, so its first publication parents onto the previous
+// tip instead of rooting an unrelated chain. The seed is coverage only —
+// no findings carry across passes.
+func TestMarkerForPassSeedsANewPassFromTheLatestCheckpoint(t *testing.T) {
+	commit1 := "1111111111111111111111111111111111111111"
+	commit2 := "2222222222222222222222222222222222222222"
+	corrupt := prstate.Marker{Version: core.MarkerVersion, Leg: core.LegReview, Pass: 1, State: core.PassComplete, CoverageGen: prstate.Some(7)}
+	declined := prstate.Marker{Version: core.MarkerVersion, Leg: core.LegReview, Pass: 2, State: core.PassDeclined}
+	ownBlank := prstate.Marker{Version: core.MarkerVersion, Leg: core.LegReview, Pass: 2, State: core.PassStarted}
+	ownCorrupt := prstate.Marker{Version: core.MarkerVersion, Leg: core.LegReview, Pass: 2, State: core.PassStarted, CoverageGen: prstate.Some(7)}
+
+	cases := []struct {
+		name     string
+		markers  []prstate.Marker
+		pass     int
+		wantGen  int
+		wantRef  string
+		wantErr  bool
+		wantPass int
+	}{
+		{name: "first pass with no markers starts blank", markers: nil, pass: 1, wantGen: 0, wantPass: 1},
+		{name: "own marker with a claim is kept", markers: []prstate.Marker{cutoverCheckpoint(2, commit1)}, pass: 2, wantGen: 7, wantRef: commit1, wantPass: 2},
+		{name: "new pass seeds from the previous checkpoint", markers: []prstate.Marker{cutoverCheckpoint(1, commit1)}, pass: 2, wantGen: 7, wantRef: commit1, wantPass: 2},
+		{name: "newest checkpoint wins", markers: []prstate.Marker{cutoverCheckpoint(1, commit1), cutoverCheckpoint(2, commit2)}, pass: 3, wantGen: 7, wantRef: commit2, wantPass: 3},
+		{name: "claimless markers are skipped", markers: []prstate.Marker{cutoverCheckpoint(1, commit1), declined}, pass: 3, wantGen: 7, wantRef: commit1, wantPass: 3},
+		{name: "own claimless marker is seeded", markers: []prstate.Marker{cutoverCheckpoint(1, commit1), ownBlank}, pass: 2, wantGen: 7, wantRef: commit1, wantPass: 2},
+		{name: "corrupt checkpoint refuses", markers: []prstate.Marker{corrupt}, pass: 2, wantErr: true},
+		{name: "own corrupt claim refuses", markers: []prstate.Marker{cutoverCheckpoint(1, commit1), ownCorrupt}, pass: 2, wantErr: true},
+		{name: "older corruption is not the new pass's business", markers: []prstate.Marker{corrupt, cutoverCheckpoint(2, commit2)}, pass: 3, wantGen: 7, wantRef: commit2, wantPass: 3},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			marker, err := markerForPass(tc.markers, tc.pass)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatal("corrupt coverage did not refuse the pass")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("markerForPass: %v", err)
+			}
+			if marker.Pass != tc.wantPass {
+				t.Fatalf("marker pass = %d, want %d", marker.Pass, tc.wantPass)
+			}
+			h, claimed, err := marker.CoverageHandle()
+			if err != nil {
+				t.Fatalf("seeded claim does not parse: %v", err)
+			}
+			if tc.wantGen == 0 {
+				if claimed {
+					t.Fatalf("blank pass claims coverage %+v; nothing seeded it", h)
+				}
+				return
+			}
+			if !claimed {
+				t.Fatal("the pass started with no coverage claim; it would root a new chain")
+			}
+			if h.Gen != tc.wantGen || h.Commit != tc.wantRef {
+				t.Fatalf("seeded handle = gen %d commit %s, want gen %d commit %s", h.Gen, h.Commit, tc.wantGen, tc.wantRef)
+			}
+			if len(marker.Findings) != 0 {
+				t.Fatal("the seed carried findings across passes; ancestry is coverage only")
+			}
+		})
+	}
+}
+
+// TestAutoFallsBackOnRefusal pins the auto path: a permission denial on
+// the ref half — including one from the first blob write, before the code
+// reaches /git/refs — moves the pass to the marker store instead of
+// halting, and records why. A ruleset denial records the policy reason
+// rather than the bare one.
+func TestAutoFallsBackOnRefusal(t *testing.T) {
+	cases := []struct {
+		name   string
+		denied *prstate.RefWriteRefused
+		reason string
+	}{
+		{
+			name:   "scope denial falls back",
+			denied: &prstate.RefWriteRefused{Op: "creating manifest blob", Err: errors.New("creating manifest blob: gh exited 1")},
+			reason: ledgerReasonRefWriteRefused,
+		},
+		{
+			name:   "ruleset denial records the policy reason",
+			denied: &prstate.RefWriteRefused{Op: "updating ref", Ruleset: true, Err: errors.New("updating ref: gh exited 1")},
+			reason: ledgerReasonRuleset,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			scope := cutoverScope(t)
+			loaded := cutoverLoaded(t, scope)
+			refs := storetest.NewFakeStore()
+			refs.SetUnreadable(tc.denied)
+			leg := &Leg{Forge: &cutoverForge{store: refs}}
+
+			store, selection, err := leg.ledgerFor(loaded)
+			if err != nil {
+				t.Fatalf("ledgerFor: %v", err)
+			}
+			if selection.Store != ledgerStoreRefs {
+				t.Fatalf("initial selection = %q, want refs (auto attempts the ref write first)", selection.Store)
+			}
+			auto, ok := store.(*autoLedger)
+			if !ok {
+				t.Fatalf("store is %T, want the auto wrapper", store)
+			}
+			handle, err := store.PublishGeneration(ctx, slotRefFor(loaded), prstate.Handle{}, cutoverGeneration(t, prstate.GenerationFull, scope))
+			if err != nil {
+				t.Fatalf("a denied ref write halted the pass instead of falling back: %v", err)
+			}
+			if handle.Location != prstate.HandleMarker {
+				t.Fatalf("fallback handle location = %q, want the marker store", handle.Location)
+			}
+			if _, ok := handle.Payload.Get(); !ok {
+				t.Fatal("the fallback handle carries no payload")
+			}
+			if got := auto.Selection(); got.Store != ledgerStoreMarker || got.Reason != tc.reason {
+				t.Fatalf("selection after fallback = %+v, want marker/%s", got, tc.reason)
+			}
+		})
+	}
+}
+
+// TestAutoFailsLoudOnTransientFailure pins the other half of the
+// contract: an ordinary error is not a refusal, so the pass fails with
+// the ref selection still in force rather than landing a generation in
+// the marker over a network blip.
+func TestAutoFailsLoudOnTransientFailure(t *testing.T) {
+	ctx := context.Background()
+	scope := cutoverScope(t)
+	loaded := cutoverLoaded(t, scope)
+	refs := storetest.NewFakeStore()
+	refs.SetUnreadable(errors.New("updating ref: gh exited 1"))
+	leg := &Leg{Forge: &cutoverForge{store: refs}}
+
+	store, _, err := leg.ledgerFor(loaded)
+	if err != nil {
+		t.Fatalf("ledgerFor: %v", err)
+	}
+	auto := store.(*autoLedger)
+	if _, err := store.PublishGeneration(ctx, slotRefFor(loaded), prstate.Handle{}, cutoverGeneration(t, prstate.GenerationFull, scope)); err == nil {
+		t.Fatal("a transient ref failure fell back instead of failing loudly")
+	}
+	if got := auto.Selection(); got.Store != ledgerStoreRefs {
+		t.Fatalf("selection after a transient failure = %+v, want the ref selection still in force", got)
+	}
+}

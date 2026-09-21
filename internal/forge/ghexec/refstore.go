@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/carlosboeing/crossrev/internal/exec"
-	"github.com/carlosboeing/crossrev/internal/forge"
 	"github.com/carlosboeing/crossrev/internal/prstate"
 )
 
@@ -47,7 +46,7 @@ func (s *refStore) PublishGeneration(ctx context.Context, ref prstate.SlotRef, p
 
 	// 1. Filter before digesting. Abort immediately on filter failure!
 	candCopy := candidate
-	if err := filterGeneration(s.client.filter, &candCopy); err != nil {
+	if err := prstate.FilterGeneration(s.client.filter.Filter, &candCopy); err != nil {
 		return prstate.Handle{}, fmt.Errorf("filtering generation: %w", err)
 	}
 
@@ -78,7 +77,7 @@ func (s *refStore) PublishGeneration(ctx context.Context, ref prstate.SlotRef, p
 	res := s.client.runInput(ctx, manifestBlobReq, "api", "--method", "POST",
 		fmt.Sprintf("repos/%s/git/blobs", ref.Repo.String()), "--input", "-")
 	if !answered(res) {
-		return prstate.Handle{}, failure("creating manifest blob", res)
+		return prstate.Handle{}, publishFailure("creating manifest blob", res)
 	}
 	var manifestBlobResp struct {
 		SHA string `json:"sha"`
@@ -97,7 +96,7 @@ func (s *refStore) PublishGeneration(ctx context.Context, ref prstate.SlotRef, p
 	res = s.client.runInput(ctx, recordsBlobReq, "api", "--method", "POST",
 		fmt.Sprintf("repos/%s/git/blobs", ref.Repo.String()), "--input", "-")
 	if !answered(res) {
-		return prstate.Handle{}, failure("creating records blob", res)
+		return prstate.Handle{}, publishFailure("creating records blob", res)
 	}
 	var recordsBlobResp struct {
 		SHA string `json:"sha"`
@@ -129,7 +128,7 @@ func (s *refStore) PublishGeneration(ctx context.Context, ref prstate.SlotRef, p
 	res = s.client.runInput(ctx, treePayload, "api", "--method", "POST",
 		fmt.Sprintf("repos/%s/git/trees", ref.Repo.String()), "--input", "-")
 	if !answered(res) {
-		return prstate.Handle{}, failure("creating tree", res)
+		return prstate.Handle{}, publishFailure("creating tree", res)
 	}
 	var treeResp struct {
 		SHA string `json:"sha"`
@@ -158,7 +157,7 @@ func (s *refStore) PublishGeneration(ctx context.Context, ref prstate.SlotRef, p
 	res = s.client.runInput(ctx, commitPayload, "api", "--method", "POST",
 		fmt.Sprintf("repos/%s/git/commits", ref.Repo.String()), "--input", "-")
 	if !answered(res) {
-		return prstate.Handle{}, failure("creating commit", res)
+		return prstate.Handle{}, publishFailure("creating commit", res)
 	}
 	var commitResp struct {
 		SHA string `json:"sha"`
@@ -189,7 +188,7 @@ func (s *refStore) PublishGeneration(ctx context.Context, ref prstate.SlotRef, p
 			"--input", "-",
 		)
 		if !answered(patchRes) {
-			return prstate.Handle{}, fmt.Errorf("ref write refused for %s: %w", refName, failure("updating ref", patchRes))
+			return prstate.Handle{}, publishFailure("updating ref "+refName, patchRes)
 		}
 	}
 
@@ -300,26 +299,18 @@ func (s *refStore) ReadGeneration(ctx context.Context, ref prstate.SlotRef, hand
 		return prstate.Generation{}, fmt.Errorf("%w: %v", prstate.ErrLedgerCorrupt, err)
 	}
 
-	// DeletedRef is NOT a lost ledger: restore reachability by re-creating or pointing the ref to this commit.
+	// A deleted ref is not a lost ledger: re-create it at the generation
+	// just read, so the chain stays reachable. Create-only — when the ref
+	// already exists (the ordinary read, or another writer racing this
+	// one) there is nothing to restore, and a read must never move a ref
+	// a newer publication owns. Best-effort: a denied or failed restore
+	// does not fail a generation that already read.
 	if refName, err := prstate.RefName(s.namespace, ref); err == nil {
-		postRes := s.client.run(ctx, "api", "--method", "POST",
+		_ = s.client.run(ctx, "api", "--method", "POST",
 			fmt.Sprintf("repos/%s/git/refs", ref.Repo.String()),
 			"-f", "ref="+refName,
 			"-f", "sha="+handle.Commit,
 		)
-		if !answered(postRes) {
-			trimmed := strings.TrimPrefix(refName, "refs/")
-			// As above: a JSON body carries the boolean force.
-			if patchPayload, err := json.Marshal(map[string]any{
-				"sha":   handle.Commit,
-				"force": true,
-			}); err == nil {
-				_ = s.client.runInput(ctx, patchPayload, "api", "--method", "PATCH",
-					fmt.Sprintf("repos/%s/git/refs/%s", ref.Repo.String(), trimmed),
-					"--input", "-",
-				)
-			}
-		}
 	}
 
 	return gen, nil
@@ -346,84 +337,4 @@ func isNotFound(res exec.Result) bool {
 	}
 	combined := string(res.Stderr) + string(res.Stdout)
 	return strings.Contains(combined, "404") || strings.Contains(combined, "Not Found")
-}
-
-func filterGeneration(f forge.Publisher, g *prstate.Generation) error {
-	filterOpt := func(o prstate.Opt[string]) (prstate.Opt[string], error) {
-		if !o.Present() {
-			return o, nil
-		}
-		s, _ := o.Get()
-		filtered, err := f.Filter(s)
-		if err != nil {
-			return o, err
-		}
-		return prstate.Some(filtered), nil
-	}
-
-	filterStr := func(s string) (string, error) {
-		return f.Filter(s)
-	}
-
-	var err error
-	g.ScopeReport.ExaminedScope, err = filterStr(g.ScopeReport.ExaminedScope)
-	if err != nil {
-		return err
-	}
-
-	for i := range g.ScopeReport.KnownLimits {
-		g.ScopeReport.KnownLimits[i], err = filterStr(g.ScopeReport.KnownLimits[i])
-		if err != nil {
-			return err
-		}
-	}
-
-	for i := range g.Records {
-		r := &g.Records[i]
-		r.Reason, err = filterOpt(r.Reason)
-		if err != nil {
-			return err
-		}
-		for j := range r.Evidence {
-			ev := &r.Evidence[j]
-			ev.Source, err = filterStr(ev.Source)
-			if err != nil {
-				return err
-			}
-			ev.Note, err = filterOpt(ev.Note)
-			if err != nil {
-				return err
-			}
-		}
-		for j := range r.FindingIDs {
-			r.FindingIDs[j], err = filterStr(r.FindingIDs[j])
-			if err != nil {
-				return err
-			}
-		}
-	}
-
-	for i := range g.Advisory.Rules {
-		g.Advisory.Rules[i], err = filterStr(g.Advisory.Rules[i])
-		if err != nil {
-			return err
-		}
-	}
-	for i := range g.Advisory.Limits {
-		lim := &g.Advisory.Limits[i]
-		lim.Reason, err = filterStr(lim.Reason)
-		if err != nil {
-			return err
-		}
-	}
-
-	for i := range g.Excluded {
-		ex := &g.Excluded[i]
-		ex.Reason, err = filterStr(ex.Reason)
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
 }

@@ -60,6 +60,18 @@ match_routes() {
         # runs in a subshell, so the stub would exit 0 and every "this call fails"
         # fixture would silently succeed.
         [[ "${resp:-}" == "!fail" ]] && exit 1
+        # Permission and policy denials, in gh's voice: a 403 for a token
+        # without the scope, a 422 naming the ruleset that rejected the
+        # write. The client classifies on these the way it classifies on
+        # the real ones, and silent !fail stays the transient shape.
+        if [[ "${resp:-}" == "!deny" ]]; then
+          printf 'gh: Resource not accessible by integration (HTTP 403)\n' >&2
+          exit 1
+        fi
+        if [[ "${resp:-}" == "!deny-ruleset" ]]; then
+          printf 'gh: Validation Failed: the ref update was rejected by a ruleset (HTTP 422)\n' >&2
+          exit 1
+        fi
         if [[ "${resp:-}" == @* ]]; then
           cat "${resp#@}"
         else

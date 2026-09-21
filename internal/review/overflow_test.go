@@ -369,7 +369,7 @@ func TestInitialExhaustionKeepsThePriorCoverageClaim(t *testing.T) {
 	if halted.Marker.CoverageCommit.Present() {
 		t.Fatal("the halted marker gained a commit SHA the marker store never writes")
 	}
-	behind, err := prstate.NewMarkerStore(nil, prstate.OverflowDegrade).ReadGeneration(context.Background(), prstate.SlotRef{}, kept)
+	behind, err := prstate.NewMarkerStore(nil, prstate.OverflowDegrade, nil).ReadGeneration(context.Background(), prstate.SlotRef{}, kept)
 	if err != nil {
 		t.Fatalf("the generation the halted marker names does not read back: %v", err)
 	}

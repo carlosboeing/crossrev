@@ -93,7 +93,8 @@ func (l *Leg) resolveConvergence(ctx context.Context, s *session) (policy.Conver
 // fails the settle closed.
 func resolveStoreFor(client forge.Forge, cfg *config.Config, h prstate.Handle) (prstate.LedgerStore, bool) {
 	if h.Location == prstate.HandleMarker {
-		return prstate.NewMarkerStore(nil, cfg.Coverage().OnOverflow), true
+		// Read-only: the settle never publishes, so no filter.
+		return prstate.NewMarkerStore(nil, cfg.Coverage().OnOverflow, nil), true
 	}
 	src, ok := client.(refLedgerSource)
 	if !ok || src == nil {
