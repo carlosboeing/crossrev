@@ -438,3 +438,90 @@ func TestRefStoreMeetsTheContract(t *testing.T) {
 		return store
 	})
 }
+
+// Moved from the retired comment-ledger suite (its filter-failure refusal
+// test): a generation the filter could not process stops the write, and gh
+// is never invoked — marker-carrying content refuses the same as unmarked
+// content.
+func TestRefStoreRefusesTheBlobWriteWhenTheFilterFails(t *testing.T) {
+	ctx := context.Background()
+	ref := storetest.FixtureSlotRef(t)
+	gen := fixtureGeneration(t, prstate.GenerationFull)
+	gen.Records[0].Reason = prstate.Some("Shard.\n\n<!-- crossrev:c {\"v\":1,\"kind\":\"shard\"} -->")
+
+	rec := &recorder{}
+	store := newClient(rec, failingFilter{}).RefLedger("refs/crossrev")
+	if _, err := store.PublishGeneration(ctx, ref, prstate.Handle{}, gen); err == nil {
+		t.Error("a generation was published unfiltered")
+	}
+	if len(rec.specs) != 0 {
+		t.Errorf("gh was invoked %d times, want not at all", len(rec.specs))
+	}
+}
+
+// Moved from the retired comment-ledger suite (its publishes-the-notice
+// test), with the behaviour inverted on purpose: the comment path published
+// a notice when unmarked content failed filtering, but the blob path has no
+// notice — the write refuses, nothing is stored, and the error names
+// filtering as the cause rather than masking it.
+func TestRefStoreRefusesUnmarkedContentWhenTheFilterFails(t *testing.T) {
+	ctx := context.Background()
+	ref := storetest.FixtureSlotRef(t)
+
+	_, records, err := prstate.EncodeGenerationV2(fixtureGeneration(t, prstate.GenerationFull))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(records, []byte(prstate.MarkerPrefix)) {
+		t.Fatal("the fixture carries a marker prefix, so this test would pass for the wrong reason")
+	}
+
+	rec := &recorder{}
+	store := newClient(rec, failingFilter{}).RefLedger("refs/crossrev")
+	if _, err := store.PublishGeneration(ctx, ref, prstate.Handle{}, fixtureGeneration(t, prstate.GenerationFull)); err == nil {
+		t.Fatal("unmarked content was published despite the filter failing")
+	} else if !strings.Contains(err.Error(), "filtering generation") {
+		t.Fatalf("error %q does not name filtering as the cause", err)
+	}
+	if len(rec.specs) != 0 {
+		t.Fatalf("gh was called %d times; nothing may be written", len(rec.specs))
+	}
+}
+
+// Moved from the retired comment-ledger suite (its filtered-body test): the
+// filtered bytes are what reach storage, not the bytes the caller handed
+// over — in both blobs, since the scope report travels in the manifest.
+func TestRefStoreStoresTheFilteredBytes(t *testing.T) {
+	ctx := context.Background()
+	ref := storetest.FixtureSlotRef(t)
+	store, gh := newStubbedRefStoreWithFilter(t, masking{})
+
+	gen := fixtureGeneration(t, prstate.GenerationFull)
+	gen.Records[0].Reason = prstate.Some("sk-ant-secret")
+	gen.ScopeReport.ExaminedScope = "sk-ant-secret"
+
+	handle, err := store.PublishGeneration(ctx, ref, prstate.Handle{}, gen)
+	if err != nil {
+		t.Fatalf("PublishGeneration: %v", err)
+	}
+	for _, name := range []string{"manifest.json", "records.json"} {
+		stored := gh.readBlob(t, name, handle.Commit)
+		if bytes.Contains(stored, []byte("sk-ant-secret")) {
+			t.Errorf("%s holds the unfiltered secret", name)
+		}
+		if !bytes.Contains(stored, []byte("masked")) {
+			t.Errorf("%s holds %q, want the filtered bytes", name, stored)
+		}
+	}
+
+	read, err := store.ReadGeneration(ctx, ref, handle)
+	if err != nil {
+		t.Fatalf("ReadGeneration: %v", err)
+	}
+	if reason, ok := read.Records[0].Reason.Get(); !ok || reason != "masked" {
+		t.Errorf("read record reason = %q, want %q", reason, "masked")
+	}
+	if read.ScopeReport.ExaminedScope != "masked" {
+		t.Errorf("read examined scope = %q, want %q", read.ScopeReport.ExaminedScope, "masked")
+	}
+}

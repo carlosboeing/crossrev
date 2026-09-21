@@ -111,12 +111,12 @@ func encodeSampleManifest(t *testing.T, ref prstate.ShardRef) string {
 }
 
 // TestCoverageBodiesDecodeBeneathAProseLine pins that the human line every
-// published ledger comment carries changes nothing on the wire: readers scan
+// published ledger comment carried changes nothing on the wire: readers scan
 // for the marker delimiters and skip every other line, digests cover the
 // payload alone, and old readers meet the same shape.
 func TestCoverageBodiesDecodeBeneathAProseLine(t *testing.T) {
 	shardBody, ref := encodeSampleShard(t, 7001)
-	shardBody = "Coverage ledger, generation 7, shard 1 of 1 (2 records). Machine-readable record; safe to ignore." + shardBody
+	shardBody = "Coverage ledger, generation 7, shard 1 of 1 (2 records)." + shardBody
 	decoded, ok := prstate.DecodeCoverageShard(shardBody)
 	if !ok {
 		t.Fatal("a shard beneath a prose line does not decode")
@@ -125,7 +125,7 @@ func TestCoverageBodiesDecodeBeneathAProseLine(t *testing.T) {
 		t.Error("a shard beneath a prose line verifies a different digest")
 	}
 	manifestBody := encodeSampleManifest(t, ref)
-	manifestBody = "Coverage ledger, generation 7, manifest (1 shards). Machine-readable record; safe to ignore." + manifestBody
+	manifestBody = "Coverage ledger, generation 7, manifest (1 shards)." + manifestBody
 	if _, ok := prstate.DecodeCoverageManifest(manifestBody); !ok {
 		t.Fatal("a manifest beneath a prose line does not decode")
 	}

@@ -286,8 +286,11 @@ type CoverageStop struct {
 	CoveredCount     int    `json:"covered_count"`
 	OutstandingCount int    `json:"outstanding_count"`
 	MeasuredBytes    int    `json:"measured_bytes"`
-	ShardCount       int    `json:"shard_count"`
-	Limit            string `json:"limit"`
+	// ShardCount is always zero. Shards were the v1 comment ledger's
+	// publication unit; the field stays so markers written before the
+	// ref store still decode.
+	ShardCount int    `json:"shard_count"`
+	Limit      string `json:"limit"`
 }
 
 // EncodeCoverageManifest serialises a v1 manifest for embedding in a comment
@@ -295,8 +298,8 @@ type CoverageStop struct {
 // The manifest digest is recomputed from bytes with the digest member
 // removed, so a caller-supplied digest can neither survive nor mismatch: the
 // bytes on the wire always carry the digest of the bytes on the wire. The
-// returned body carries no human text; publishers add the rendered line with
-// coverageCommentBody.
+// returned body carries no human text; the retired v1 comment publisher
+// prefixed the rendered line.
 func EncodeCoverageManifest(m Manifest) (string, error) {
 	m.Digest = ""
 	raw := json.RawMessage(manifestFields(m).marshal())
@@ -317,7 +320,7 @@ func EncodeCoverageManifest(m Manifest) (string, error) {
 // (retained for fixture compatibility; live storage uses EncodeGenerationV2).
 // The shard digest is recomputed from bytes with the digest member removed,
 // for the same reason the manifest's is. The returned body carries no human
-// text; publishers add the rendered line with coverageCommentBody.
+// text; the retired v1 comment publisher prefixed the rendered line.
 func EncodeCoverageShard(s Shard) (string, error) {
 	s.Digest = ""
 	raw := json.RawMessage(shardFields(s).marshal())
@@ -332,18 +335,6 @@ func EncodeCoverageShard(s Shard) (string, error) {
 		return "", coverageErrorf("encoding a coverage shard: %v", err)
 	}
 	return "\n\n" + coverageMarkerOpen + string(normalised) + markerClose, nil
-}
-
-// coverageCommentBody prefixes an encoded coverage payload with the one
-// human line the comment renders (v1 comment ledger; Task 10 retires the
-// comment store). Without it every ledger comment shows
-// GitHub's "No description provided.", and a pull request collects a row of
-// identical blank boxes — one per shard plus the manifest. Readers scan for
-// the marker delimiters and skip every other line, so leading prose changes
-// nothing on the wire; the line stays far inside the envelope reserve
-// packRecords holds back for it.
-func coverageCommentBody(human, encoded string) string {
-	return human + encoded
 }
 
 // DecodeCoverageManifest pulls a v1 manifest out of one comment body (retained

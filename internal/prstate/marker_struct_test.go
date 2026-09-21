@@ -328,7 +328,7 @@ func TestV2MarkerCarriesCoverageAndConfirmationReferences(t *testing.T) {
 		State:               core.PassIncomplete,
 		TS:                  1700000000,
 		CoverageManifestID:  prstate.Some(int64(4242)),
-		CoverageStop:        prstate.Some(prstate.CoverageStop{RequiredCount: 3, CoveredCount: 1, OutstandingCount: 2, MeasuredBytes: 900, ShardCount: 1, Limit: "review_budget_reached"}),
+		CoverageStop:        prstate.Some(prstate.CoverageStop{RequiredCount: 3, CoveredCount: 1, OutstandingCount: 2, MeasuredBytes: 900, Limit: "review_budget_reached"}),
 		ConfirmationBaseSHA: prstate.Null[string](),
 		ConfirmationHeadSHA: prstate.Null[string](),
 	}
