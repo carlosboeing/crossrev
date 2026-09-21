@@ -8,7 +8,7 @@ All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepa
 
 - **Ledger ref updates no longer fail against the GitHub API.** PATCH /git/refs takes a boolean force, and the `-f force=true` form field sent the string, so every update 422d. Each pass publishes at least twice to its slot ref — the initial generation, then each accepted batch — so the second publication always fell back to the marker while the ref held the initial generation. The update now sends a JSON body, and the offline `gh` stub holds GitHub's boolean rule.
 
-- **The review and resolve skills ask for real newlines.** A resolver once double-escaped its summary newlines, so a resolve summary posted literal `\n` sequences. Both skills now say newlines; [#267](https://github.com/carlosboeing/crossrev/issues/267) tracks enforcing it deterministically.
+- **The review and resolve skills forbid backslash escapes outside code spans.** A resolver once double-escaped its summary newlines, so a resolve summary posted literal `\n` sequences; the same flake could emit `\t`, `\r` or `\"`. Both skills now say plain characters; [#267](https://github.com/carlosboeing/crossrev/issues/267) tracks enforcing it deterministically.
 
 ### Changed
 
