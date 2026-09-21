@@ -270,18 +270,60 @@ func SummaryBody(findings []Finding, marker prstate.Marker, ctx RenderContext) s
 	return b.String()
 }
 
-// coverageFootnote renders the accounted and outstanding paths the coverage
-// loop recorded, with the known limits the reviewer reported. A pass with
-// no coverage manifest id carries no footnote, so the frozen summary bytes
-// stay exactly as they were.
+// coverageFootnote renders one human sentence for the coverage the pass
+// published: how many of the changed files it reviewed, and at which head.
+// The counts come out of the inline payload, which only the marker store
+// carries; a ref-store claim names a generation render cannot count without
+// a store client, and a sentence it cannot fill it does not print. Anything
+// else undecodable — no claim, a corrupt claim, a payload that does not
+// decode, no head — likewise carries no footnote, so a summary a reviewer
+// reads never carries a machine-facing generation line.
 func coverageFootnote(marker prstate.Marker) string {
-	id, ok := marker.CoverageManifestID.Get()
-	if !ok || id == 0 {
+	h, claimed, err := marker.CoverageHandle()
+	if err != nil || !claimed {
 		return ""
 	}
-	var b strings.Builder
-	b.WriteString(fmt.Sprintf("Coverage generation %d accounts for every required file at the current head; outstanding paths, if any, are listed in the halt record above.\n\n", id))
-	return b.String()
+	payload, ok := h.Payload.Get()
+	if !ok || len(payload) == 0 {
+		return ""
+	}
+	var env struct {
+		Manifest json.RawMessage `json:"manifest"`
+		Records  json.RawMessage `json:"records"`
+	}
+	if err := json.Unmarshal(payload, &env); err != nil {
+		return ""
+	}
+	if len(env.Manifest) == 0 || len(env.Records) == 0 {
+		return ""
+	}
+	gen, err := prstate.DecodeGenerationV2(env.Manifest, env.Records)
+	if err != nil {
+		return ""
+	}
+	sha, _ := marker.HeadSHA.Get()
+	if sha == "" {
+		return ""
+	}
+	covered := 0
+	for _, record := range gen.Records {
+		if record.Type != prstate.CoverageRecordUnit {
+			continue
+		}
+		if verdict, ok := record.Verdict.Get(); ok && verdict != "" {
+			covered++
+		}
+	}
+	return fmt.Sprintf("Reviewed %d of %d changed files at `%s`.\n\n", covered, len(gen.Records), shortSHA(sha))
+}
+
+// shortSHA abbreviates a commit SHA the way printed messages do: the first
+// seven characters, or the whole string when it is shorter.
+func shortSHA(sha string) string {
+	if len(sha) <= 7 {
+		return sha
+	}
+	return sha[:7]
 }
 
 // noChangesBody renders the pull request whose head matches its base.

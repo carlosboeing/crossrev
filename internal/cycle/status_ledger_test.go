@@ -1,7 +1,9 @@
 package cycle_test
 
 import (
+	"bytes"
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -10,6 +12,7 @@ import (
 	"github.com/carlosboeing/crossrev/internal/forge"
 	"github.com/carlosboeing/crossrev/internal/prstate"
 	"github.com/carlosboeing/crossrev/internal/prstate/storetest"
+	"github.com/carlosboeing/crossrev/internal/ui"
 )
 
 // statusLedgerHead is the head the ledger cases run at, the same revision the
@@ -239,6 +242,71 @@ func TestStatusConvergenceReadsTheLedger(t *testing.T) {
 		comments := []forge.IssueComment{{ID: 9001, AuthorLogin: statusAuthor, Body: "Summary." + body}}
 		if got := statusLoadLedger(t, comments, storetest.NewFakeStore()).State; got != core.LoopConverged {
 			t.Errorf("state = %q, want %q", got, core.LoopConverged)
+		}
+	})
+}
+
+// TestStatusReportsTheGenerationTheStoreAndTheDegradedFlag pins the other
+// half of taking the machine-facing detail out of the summary: the
+// generation number, the store it lives in and the degraded flag belong in
+// `crossrev status` output, carried from the current review pass marker.
+func TestStatusReportsTheGenerationTheStoreAndTheDegradedFlag(t *testing.T) {
+	t.Run("a ref generation names its number, its ref and the degraded flag", func(t *testing.T) {
+		refName, err := prstate.RefName("refs/crossrev", statusSlotRef(t))
+		if err != nil {
+			t.Fatalf("RefName: %v", err)
+		}
+		handle := prstate.Handle{
+			Gen:      7,
+			Commit:   strings.Repeat("d", 40),
+			Location: refName,
+			Degraded: true,
+		}
+		comments := []forge.IssueComment{
+			statusConvergedMarkerComment(t, statusLedgerHead, statusNameHandle(handle)),
+		}
+		report := statusLoadLedger(t, comments, storetest.NewFakeStore())
+		if report.CoverageGen != 7 || report.CoverageStore != refName || !report.CoverageDegraded {
+			t.Fatalf("coverage = (%d, %q, %v), want (7, %q, true)",
+				report.CoverageGen, report.CoverageStore, report.CoverageDegraded, refName)
+		}
+		var buf bytes.Buffer
+		cycle.Render(&ui.IO{Out: &buf}, report)
+		page := buf.String()
+		for _, want := range []string{
+			"generation   7",
+			"store        " + refName,
+			"degraded     yes",
+		} {
+			if !strings.Contains(page, want) {
+				t.Errorf("page lacks %q:\n%s", want, page)
+			}
+		}
+	})
+
+	t.Run("a whole marker generation omits the degraded line", func(t *testing.T) {
+		store := storetest.NewFakeMarkerStore()
+		handle := statusPublishGeneration(t, store, statusBase, statusLedgerHead,
+			[]string{"app.go"},
+			[]prstate.Record{statusUnitRecord("app.go", 0, string(core.FileVerdictNoIssue))})
+		comments := []forge.IssueComment{
+			statusConvergedMarkerComment(t, statusLedgerHead, statusNameHandle(handle)),
+		}
+		report := statusLoadLedger(t, comments, store)
+		if report.CoverageGen != 1 || report.CoverageStore != prstate.HandleMarker || report.CoverageDegraded {
+			t.Fatalf("coverage = (%d, %q, %v), want (1, %q, false)",
+				report.CoverageGen, report.CoverageStore, report.CoverageDegraded, prstate.HandleMarker)
+		}
+		var buf bytes.Buffer
+		cycle.Render(&ui.IO{Out: &buf}, report)
+		page := buf.String()
+		for _, want := range []string{"generation   1", "store        marker"} {
+			if !strings.Contains(page, want) {
+				t.Errorf("page lacks %q:\n%s", want, page)
+			}
+		}
+		if strings.Contains(page, "degraded") {
+			t.Errorf("a whole generation prints a degraded line:\n%s", page)
 		}
 	})
 }

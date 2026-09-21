@@ -119,6 +119,16 @@ type Report struct {
 	MinFixSeverity    core.Severity
 	Backlog           config.Backlog
 
+	// CoverageGen, CoverageStore and CoverageDegraded are the
+	// machine-facing half of the coverage the current review pass claims:
+	// the generation number, where it lives (a ref name, or "marker"), and
+	// whether it is the compact form. The summary a reviewer reads carries
+	// none of this, so the status page does. An empty store means no
+	// claim, and the section is omitted rather than printed empty.
+	CoverageGen      int
+	CoverageStore    string
+	CoverageDegraded bool
+
 	Rows []LegRow
 	Next []NextLine
 }
@@ -237,6 +247,19 @@ func (s *Status) Load(ctx context.Context, repo core.Slug, pr int) (Report, erro
 	report.Colour = statusColour(report.State)
 	if statusHasLabel(in.labels, policy.LabelWatchdogRetried) {
 		report.Note = "(retried once)"
+	}
+
+	if pass := prstate.CurrentReviewPass(in.markers); pass > 0 {
+		if review, ok := prstate.MarkerFor(in.markers, pass, core.LegReview); ok {
+			// The machine-facing detail the summary no longer carries.
+			// Display only: a corrupt claim fails closed here the way
+			// the state computation does, by showing nothing.
+			if h, claimed, err := review.CoverageHandle(); err == nil && claimed {
+				report.CoverageGen = h.Gen
+				report.CoverageStore = h.Location
+				report.CoverageDegraded = h.Degraded
+			}
+		}
 	}
 
 	// Every pass, refused ones included, which is what MaxPass counts
