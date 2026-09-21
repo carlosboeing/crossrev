@@ -1,6 +1,7 @@
 package review_test
 
 import (
+	"context"
 	"fmt"
 	"regexp"
 	"sort"
@@ -292,4 +293,95 @@ func TestTheSameFixtureUnderTheRefStoreNeverDegrades(t *testing.T) {
 		}
 	}
 	t.Fatalf("900 files did not converge in four passes; %d accounted for", len(seen))
+}
+
+// An initial-exhaustion halt keeps the prior coverage claim: the halted
+// marker still names the last complete generation, so the halt's own "the
+// last complete generation stands" is true and a re-drive resumes from it
+// instead of failing closed on a corrupt claim. The seed is a pass that
+// halted at the 400-file budget with a complete generation on its marker;
+// the scope then grows past what one compact generation can fit, so the
+// re-drive's initial publication exhausts before any batch runs.
+func TestInitialExhaustionKeepsThePriorCoverageClaim(t *testing.T) {
+	e := newEnv(t)
+	e.cfg = mustConfig(t, "coverage:\n  store: marker\n  on_overflow: degrade\n")
+	paths := requiredFilesWithRealisticPaths(t, e, 410)
+
+	scriptOverflowAnswers(t, e, paths[:400])
+	first := runLeg(t, e, e.request(t))
+	if first.Err != nil {
+		t.Fatalf("seed Run: %v", first.Err)
+	}
+	if first.Outcome != review.OutcomeHalted {
+		t.Fatalf("seed Outcome = %q, want halted (410 files carry 10 past the 400-file pass budget)", first.Outcome)
+	}
+	prior, claimed, err := first.Marker.CoverageHandle()
+	if err != nil {
+		t.Fatalf("seed marker's coverage claim does not validate: %v", err)
+	}
+	if !claimed {
+		t.Fatal("seed marker carries no coverage claim, so the halt below proves nothing")
+	}
+	if prior.Gen <= 0 {
+		t.Fatalf("seed marker names gen %d, want a published generation", prior.Gen)
+	}
+
+	// Grow the scope past what one compact generation can fit. The new
+	// paths are distinct from the seed's, and the head does not move, so
+	// the next run re-drives the halted pass rather than starting a new one.
+	requiredFilesExceeding(t, e, prstate.CommentCap)
+
+	halted := runLeg(t, e, e.request(t))
+	if halted.Err != nil {
+		t.Fatalf("a re-drive past one compact generation errored instead of halting: %v", halted.Err)
+	}
+	if halted.Outcome != review.OutcomeHalted {
+		t.Fatalf("Outcome = %q, want halted", halted.Outcome)
+	}
+	if halted.Reason != prstate.CoverageStopLimit {
+		t.Fatalf("Reason = %q, want %q", halted.Reason, prstate.CoverageStopLimit)
+	}
+	stop, ok := halted.Marker.CoverageStop.Get()
+	if !ok {
+		t.Fatal("halted marker carries no coverage_stop")
+	}
+	if stop.Limit != prstate.CoverageStopLimit {
+		t.Fatalf("stop limit %q", stop.Limit)
+	}
+	if stop.MeasuredBytes <= prstate.CommentCap {
+		t.Fatalf("the halt reports %d measured bytes against a %d cap; the operator cannot see why it stopped",
+			stop.MeasuredBytes, prstate.CommentCap)
+	}
+
+	kept, claimed, err := halted.Marker.CoverageHandle()
+	if err != nil {
+		t.Fatalf("the halted marker's coverage claim is corrupt, so the last complete generation does not stand: %v", err)
+	}
+	if !claimed {
+		t.Fatal("the halted marker lost its coverage claim; the last complete generation does not stand")
+	}
+	if kept.Gen != prior.Gen {
+		t.Fatalf("the halted marker names gen %d, want the prior gen %d", kept.Gen, prior.Gen)
+	}
+	if kept.Location != prstate.HandleMarker {
+		t.Fatalf("the halted marker names location %q, want %q", kept.Location, prstate.HandleMarker)
+	}
+	if halted.Marker.CoverageCommit.Present() {
+		t.Fatal("the halted marker gained a commit SHA the marker store never writes")
+	}
+	behind, err := prstate.NewMarkerStore(nil, prstate.OverflowDegrade).ReadGeneration(context.Background(), prstate.SlotRef{}, kept)
+	if err != nil {
+		t.Fatalf("the generation the halted marker names does not read back: %v", err)
+	}
+	if behind.Gen != prior.Gen {
+		t.Fatalf("the generation behind the halted marker is gen %d, want the prior gen %d", behind.Gen, prior.Gen)
+	}
+
+	again := runLeg(t, e, e.request(t))
+	if again.Err != nil {
+		t.Fatalf("the re-drive after the halt failed closed instead of resuming: %v", again.Err)
+	}
+	if again.Outcome != review.OutcomeHalted {
+		t.Fatalf("re-drive Outcome = %q, want halted", again.Outcome)
+	}
 }

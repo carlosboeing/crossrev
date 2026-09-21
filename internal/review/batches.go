@@ -113,6 +113,14 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 	if err != nil {
 		return err
 	}
+	if initialStop.Limit != "" {
+		// Nothing was published, so there is no handle to record: the
+		// halted marker keeps the prior coverage claim, and the halt's
+		// own "the last complete generation stands" names the generation
+		// the marker still carries. The mid-pass halt returns the same
+		// way, before recording.
+		return l.haltPass(ctx, req, loaded, pass, claimID, out, marker, &batchBound{plan: planForStop(plan, initialStop), scope: scope, accepted: acceptedIDs, stop: initialStop})
+	}
 	marker.RecordCoverage(initial)
 	// The reported marker tracks the commit point: a failure in a later
 	// batch reports this checkpoint rather than the bare claim, so the
@@ -120,9 +128,6 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 	// them.
 	out.Marker = marker
 	selection = reportLedgerFallback(store, selection, out)
-	if initialStop.Limit != "" {
-		return l.haltPass(ctx, req, loaded, pass, claimID, out, marker, &batchBound{plan: planForStop(plan, initialStop), scope: scope, accepted: acceptedIDs, stop: initialStop})
-	}
 	for _, batch := range plan.Batches {
 		expected, _ := batchExpectations(batch.Files, scope.Base, scope.Head)
 		if shared.diffErr != nil {
