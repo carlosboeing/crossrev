@@ -289,9 +289,9 @@ func TestReviewFailsClosedWhenFileEnumerationFails(t *testing.T) {
 
 // capturePublished records each coverage generation candidate the leg hands
 // to publication, in order. The candidates are the in-memory values, before
-// the store encodes them: the v1 comment codec carries no supplied key, so
-// a test reading back through SelectGeneration always sees a null Supplied.
-// Set before runLeg; the observer resets when the test ends.
+// any store encodes them, so a test reading them here sees what the leg
+// supplied rather than what publication persisted. Set before runLeg; the
+// observer resets when the test ends.
 func capturePublished(t *testing.T) *[]prstate.Generation {
 	t.Helper()
 	published := &[]prstate.Generation{}
