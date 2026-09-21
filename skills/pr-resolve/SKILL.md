@@ -115,7 +115,7 @@ A **closed** candidate counts. Closing an issue is a decision, and re-filing som
 
 ## The summary comment
 
-One comment summarising what happened, in Markdown, written for a collaborator who has never heard of CrossRev: what was fixed, what was skipped and why, what was deferred and where it went, what was disputed and on what grounds. It goes in the `summary` field.
+One comment summarising what happened, in Markdown, written for a collaborator who has never heard of CrossRev: what was fixed, what was skipped and why, what was deferred and where it went, what was disputed and on what grounds. It goes in the `summary` field. **Use real newlines.** Never write literal `\n` sequences — the field holds Markdown, and a backslash-n posts verbatim instead of breaking the line.
 
 The orchestrator wraps it: the alert at the top, the resolution table, the run details, the machine-readable marker and the `## Deferred work filed` list. **Do not write any of them yourself** — and you could not write the last one anyway, because the filing has not happened yet and you do not know the issue numbers.
 

@@ -131,7 +131,7 @@ Then two rules that make convergence possible:
 
 ## Output
 
-Return JSON matching the supplied schema, and nothing else. No prose before it, no fenced block around it, no commentary after. The harness constrains your output to the schema; your job is to fill it honestly.
+Return JSON matching the supplied schema, and nothing else. No prose before it, no fenced block around it, no commentary after. The harness constrains your output to the schema; your job is to fill it honestly. **Use real newlines.** Never write literal `\n` sequences inside a text field — the text posts verbatim, and a backslash-n shows instead of breaking the line.
 
 An empty `findings` array with verdict `converged` is a good and common result. Reporting something because reporting nothing feels lazy is the single most expensive habit in this loop — every fabricated finding costs a verification pass, a reply, and a little credibility.
 
