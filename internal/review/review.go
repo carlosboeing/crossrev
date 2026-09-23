@@ -207,6 +207,16 @@ func (l *Leg) Run(ctx context.Context, req Request) (out Result) {
 		loaded.Scope = &scope
 	}
 
+	// Repository policy or the backlog rule can exclude every changed path.
+	// That pass settles blocked and halted with no model, rather than falling
+	// through to invoke, which would send the whole diff. Git's enumeration
+	// decides it, not GitHub's count: the count can lag a push, and a zero
+	// there would otherwise report excluded changes as no change at all.
+	if scopeErr == nil && len(scope.Required) == 0 && len(scope.Excluded) > 0 {
+		result, state := l.finishNothingToReviewRun(ctx, req, loaded, ad.pass, claimID, out.Marker, nothingExcludedReason(scope.Excluded), scope, &out)
+		settled = state.settled
+		return result
+	}
 	// The pull request that changes no files is settled here without a model
 	// at all: there is nothing to send, and the two sources agree on why.
 	// When they disagree the leg still runs, because GitHub's count can lag a
@@ -214,14 +224,6 @@ func (l *Leg) Run(ctx context.Context, req Request) (out Result) {
 	// can still report findings; what the binding above denies it is green.
 	if scopeErr == nil && len(scope.Required) == 0 && loaded.PR.ChangedFiles == 0 {
 		result, state := l.finishNoChangesRun(ctx, req, loaded, ad, cap, claimID, out.Marker, &out)
-		settled = state.settled
-		return result
-	}
-	// Repository policy or the backlog rule can exclude every changed path.
-	// That pass settles the same way — blocked, halted, no model — rather
-	// than falling through to invoke, which would send the whole diff.
-	if scopeErr == nil && len(scope.Required) == 0 && len(scope.Excluded) > 0 && loaded.PR.ChangedFiles > 0 {
-		result, state := l.finishNothingToReviewRun(ctx, req, loaded, ad.pass, claimID, out.Marker, nothingExcludedReason(scope.Excluded), scope, &out)
 		settled = state.settled
 		return result
 	}

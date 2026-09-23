@@ -167,8 +167,8 @@ func minifiedMatches(body []byte) bool {
 	if len(body) == 0 || bytes.IndexByte(body, 0) >= 0 {
 		return false
 	}
-	lines := bytes.Count(body, []byte("\n")) + 1
-	return len(body) > minifiedAverageLineBytes*lines
+	newlines := bytes.Count(body, []byte("\n"))
+	return len(body)-newlines > minifiedAverageLineBytes*(newlines+1)
 }
 
 // HeaderExcerpt quotes the first header-window line carrying a generated

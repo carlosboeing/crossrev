@@ -185,6 +185,30 @@ func TestNothingToReviewWhenEveryFileIsExcluded(t *testing.T) {
 	}
 }
 
+// GitHub's changed-file count can lag a push. When it reads zero while git
+// enumerates changed files that the repository excluded, the pass must say
+// so, not claim the head is identical to the base.
+func TestNothingToReviewWhenTheAPICountLagsAnExcludedChange(t *testing.T) {
+	e := newEnv(t)
+	writeRequiredHead(e, "dist/bundle.js", "var bundle = 1\n")
+	e.vcs.attrs = map[string]vcs.AttributeDecision{"dist/bundle.js": vcs.AttributeSet}
+	e.forge.pr.ChangedFiles = 0
+	e.runner.onSpec = func(exec.Spec) { t.Error("the harness ran for a pass with nothing to review") }
+
+	got := runLeg(t, e, e.request(t))
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
+	const reason = "Every changed file is marked `linguist-generated` in `.gitattributes` at the base, so there was nothing to review. A PR that changes generated output without its source is worth a look."
+	final := decodeEditMarker(t, e.forge.edits[len(e.forge.edits)-1])
+	if r, _ := final.BlockedReason.Get(); r != reason {
+		t.Errorf("blocked reason = %q, want the repository-exclusion reason", r)
+	}
+	if !containsString(e.forge.labelsAdded, policy.LabelHalted) {
+		t.Errorf("labelsAdded = %v, want %q", e.forge.labelsAdded, policy.LabelHalted)
+	}
+}
+
 // A pull request whose every changed file is recognised as generated and is
 // too large for one prompt settles the same way, with the skip reason.
 func TestNothingToReviewWhenEveryFileIsSkipped(t *testing.T) {

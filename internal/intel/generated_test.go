@@ -213,6 +213,7 @@ func TestGeneratedSignalMinifiedBoundaries(t *testing.T) {
 		{"no newline 110", "src/x.js", line110, ""},
 		{"no newline 111", "src/x.js", line111, intel.SignalMinified},
 		{"two lines averaging 110", "src/x.js", line110 + "\n" + strings.Repeat("b", 109), ""},
+		{"two lines of exactly 110", "src/x.js", line110 + "\n" + line110, ""},
 		{"two lines averaging 111", "src/x.js", line111 + "\n" + strings.Repeat("b", 110), intel.SignalMinified},
 		{"trailing newline dilutes", "src/x.js", line111 + "\n", ""},
 		{"ts extension", "src/webAssets.ts", line111, intel.SignalMinified},
