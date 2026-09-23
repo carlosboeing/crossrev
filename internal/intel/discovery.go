@@ -62,6 +62,9 @@ type FileUnit struct {
 	Available bool
 	// Binary reports a NUL byte in the evidence, git's own binary signal.
 	Binary bool
+	// Generated holds the built-in generated-file signal that matched the
+	// evidence, or empty when no rule matched or no bytes were available.
+	Generated string
 	// Reason names the access limit when the unit is unavailable.
 	Reason string
 }
@@ -128,6 +131,7 @@ func RequiredFiles(ctx context.Context, changes []core.FileChange, read FileRead
 		unit.Body = body.Data
 		unit.Binary = bytes.IndexByte(body.Data, 0) >= 0
 		unit.BodyDigest = core.BodyDigestHex(body.Data)
+		unit.Generated = GeneratedSignal(unit.Path, body.Data)
 		scope.Required = append(scope.Required, unit)
 	}
 	sort.Slice(scope.Required, func(i, j int) bool { return scope.Required[i].Path < scope.Required[j].Path })
