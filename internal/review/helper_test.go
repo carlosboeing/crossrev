@@ -146,9 +146,29 @@ type fakeVCS struct {
 	repair *fakeRepair
 	// changedErr, when set, is the git failure ChangedFiles returns.
 	changedErr error
+	// attrs, when non-nil, is the base-tree linguist-generated answer per
+	// current path. attrErr fails the attribute read; attrWarn rides with a
+	// successful one, the old-git posture.
+	attrs    map[string]vcs.AttributeDecision
+	attrWarn *vcs.Warning
+	attrErr  error
+	// reads counts Show calls per path, so a test can prove an excluded
+	// path's body was never read.
+	reads map[string]int
 	// searchCalls counts ExactSearch invocations, so a test can pin how often
 	// advisory discovery runs.
 	searchCalls int
+}
+
+func (f *fakeVCS) GeneratedAttributes(_ context.Context, _ core.Revision, paths []string) (map[string]vcs.AttributeDecision, *vcs.Warning, error) {
+	if f.attrErr != nil {
+		return nil, nil, f.attrErr
+	}
+	answers := make(map[string]vcs.AttributeDecision, len(paths))
+	for _, path := range paths {
+		answers[path] = f.attrs[path]
+	}
+	return answers, f.attrWarn, nil
 }
 
 func (f *fakeVCS) ExactSearch(_ context.Context, revision core.Revision, term string, limit int) ([]vcs.SearchHit, bool, error) {
@@ -205,6 +225,10 @@ func (f *fakeVCS) ChangedFiles(_ context.Context, base, head core.Revision) ([]c
 }
 
 func (f *fakeVCS) Show(_ context.Context, revision core.Revision, path string) ([]byte, vcs.FileStatus, error) {
+	if f.reads == nil {
+		f.reads = map[string]int{}
+	}
+	f.reads[path]++
 	tree, ok := f.files[revision.SHA()]
 	if !ok {
 		return nil, vcs.NotFound, nil

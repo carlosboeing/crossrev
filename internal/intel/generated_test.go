@@ -263,7 +263,7 @@ func TestRequiredFilesRecordsGeneratedSignals(t *testing.T) {
 			"src/plain.ts":     {Path: "src/plain.ts", Body: "export const x = 1\n", Available: true},
 		},
 	}}
-	scope, err := intel.RequiredFiles(context.Background(), changes, reader, base, head, nil)
+	scope, err := intel.RequiredFiles(context.Background(), changes, reader, base, head, nil, nil)
 	if err != nil {
 		t.Fatalf("RequiredFiles: %v", err)
 	}
@@ -287,7 +287,7 @@ func TestRequiredFilesRecordsGeneratedSignals(t *testing.T) {
 func TestRequiredFilesLeavesUnreadableBodyUnsigned(t *testing.T) {
 	base, head := stubRevisions(t)
 	changes := []core.FileChange{{Path: "src/locked.go", Kind: core.ChangeModified}}
-	scope, err := intel.RequiredFiles(context.Background(), changes, failingReader{}, base, head, nil)
+	scope, err := intel.RequiredFiles(context.Background(), changes, failingReader{}, base, head, nil, nil)
 	if err != nil {
 		t.Fatalf("RequiredFiles: %v", err)
 	}
@@ -300,5 +300,177 @@ func TestRequiredFilesLeavesUnreadableBodyUnsigned(t *testing.T) {
 	}
 	if unit.Generated != "" {
 		t.Errorf("unreadable unit Generated = %q, want empty", unit.Generated)
+	}
+}
+
+func TestClassifyGenerated(t *testing.T) {
+	cases := []struct {
+		name   string
+		attr   intel.AttributeDecision
+		signal string
+		source string
+		rule   string
+		effect intel.ClassEffect
+	}{
+		{"set excludes outright", intel.AttributeSet, "", intel.SourceGitattributes, "linguist-generated", intel.EffectExcluded},
+		{"set ignores a built-in signal", intel.AttributeSet, intel.SignalHeader, intel.SourceGitattributes, "linguist-generated", intel.EffectExcluded},
+		{"negated suppresses a built-in signal", intel.AttributeNegated, intel.SignalHeader, intel.SourceGitattributes, "linguist-generated", intel.EffectPlain},
+		{"negated plain stays plain", intel.AttributeNegated, "", intel.SourceGitattributes, "linguist-generated", intel.EffectPlain},
+		{"unspecified lets a signal speak", intel.AttributeUnspecified, intel.SignalLockfile, intel.SourceBuiltin, intel.SignalLockfile, intel.EffectGenerated},
+		{"unspecified without a signal is plain", intel.AttributeUnspecified, "", "", "", intel.EffectPlain},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := intel.ClassifyGenerated(c.attr, c.signal)
+			if got.Source != c.source || got.Rule != c.rule || got.Effect != c.effect {
+				t.Errorf("ClassifyGenerated(%v, %q) = {%q %q %v}, want {%q %q %v}",
+					c.attr, c.signal, got.Source, got.Rule, got.Effect, c.source, c.rule, c.effect)
+			}
+		})
+	}
+}
+
+// recordingReader fails the test when the excluded path's body is asked for:
+// repository policy excludes before any evidence is read.
+type recordingReader struct {
+	t       *testing.T
+	bodies  map[string]string
+	refused map[string]bool
+}
+
+func (r recordingReader) Read(_ context.Context, _ core.Revision, path string) (intel.FileBody, error) {
+	if r.refused[path] {
+		r.t.Errorf("body of policy-excluded %s was read", path)
+		return intel.FileBody{Unavailable: true, Reason: "refused"}, nil
+	}
+	body, ok := r.bodies[path]
+	if !ok {
+		return intel.FileBody{Unavailable: true, Reason: "no such path"}, nil
+	}
+	return intel.FileBody{Data: []byte(body)}, nil
+}
+
+func TestRequiredFilesExcludesAttributeSetPathsBeforeReading(t *testing.T) {
+	base, head := stubRevisions(t)
+	changes := []core.FileChange{
+		{Path: "dist/bundle.js", Kind: core.ChangeModified},
+		{Path: "src/keep.go", Kind: core.ChangeModified},
+	}
+	reader := recordingReader{
+		t:       t,
+		bodies:  map[string]string{"src/keep.go": "package keep\n"},
+		refused: map[string]bool{"dist/bundle.js": true},
+	}
+	attrs := map[string]intel.AttributeDecision{"dist/bundle.js": intel.AttributeSet}
+	scope, err := intel.RequiredFiles(context.Background(), changes, reader, base, head, nil, attrs)
+	if err != nil {
+		t.Fatalf("RequiredFiles: %v", err)
+	}
+	if len(scope.Required) != 1 || scope.Required[0].Path != "src/keep.go" {
+		t.Fatalf("required = %v, want only src/keep.go", scope.Required)
+	}
+	if len(scope.Excluded) != 1 {
+		t.Fatalf("excluded = %v, want the marked path", scope.Excluded)
+	}
+	exclusion := scope.Excluded[0]
+	if exclusion.Path != "dist/bundle.js" {
+		t.Errorf("excluded path = %q, want dist/bundle.js", exclusion.Path)
+	}
+	if exclusion.Reason != "generated: linguist-generated in .gitattributes" {
+		t.Errorf("exclusion reason = %q", exclusion.Reason)
+	}
+}
+
+// An oversized header-marked file under -linguist-generated carries no
+// generated signal: the attribute suppresses every built-in rule, so the
+// file is reviewed when it fits and halts when it does not.
+func TestRequiredFilesNegatedSuppressesTheBuiltInSignal(t *testing.T) {
+	base, head := stubRevisions(t)
+	changes := []core.FileChange{{Path: "src/webAssets.ts", Kind: core.ChangeModified}}
+	reader := stubReader{bodies: map[string]map[string]oracleCase{
+		stubBaseSHA: {},
+		stubHeadSHA: {
+			"src/webAssets.ts": {Path: "src/webAssets.ts", Body: "// generated by scripts/build-embed.mjs — do not edit\n", Available: true},
+		},
+	}}
+	attrs := map[string]intel.AttributeDecision{"src/webAssets.ts": intel.AttributeNegated}
+	scope, err := intel.RequiredFiles(context.Background(), changes, reader, base, head, nil, attrs)
+	if err != nil {
+		t.Fatalf("RequiredFiles: %v", err)
+	}
+	if len(scope.Required) != 1 {
+		t.Fatalf("required holds %d units, want 1", len(scope.Required))
+	}
+	unit := scope.Required[0]
+	if !unit.Available {
+		t.Fatal("the negated unit was not read")
+	}
+	if unit.Generated != "" {
+		t.Errorf("Generated = %q, want empty under -linguist-generated", unit.Generated)
+	}
+	if len(scope.Excluded) != 0 {
+		t.Errorf("excluded = %v, want none", scope.Excluded)
+	}
+}
+
+// The attribute answer keys on the current path only: a rename out of a
+// marked directory is a new review obligation, and a mark on the old path
+// does not follow the file.
+func TestRequiredFilesAttributesKeyOnTheCurrentPath(t *testing.T) {
+	base, head := stubRevisions(t)
+	changes := []core.FileChange{
+		{OldPath: "dist/old.go", Path: "src/new.go", Kind: core.ChangeRenamed},
+	}
+	reader := stubReader{bodies: map[string]map[string]oracleCase{
+		stubBaseSHA: {},
+		stubHeadSHA: {"src/new.go": {Path: "src/new.go", Body: "package src\n", Available: true}},
+	}}
+
+	t.Run("a mark on the old path does not follow", func(t *testing.T) {
+		attrs := map[string]intel.AttributeDecision{"dist/old.go": intel.AttributeSet}
+		scope, err := intel.RequiredFiles(context.Background(), changes, reader, base, head, nil, attrs)
+		if err != nil {
+			t.Fatalf("RequiredFiles: %v", err)
+		}
+		if len(scope.Required) != 1 || len(scope.Excluded) != 0 {
+			t.Fatalf("required = %v excluded = %v, want the renamed file required", scope.Required, scope.Excluded)
+		}
+	})
+
+	t.Run("a mark on the current path excludes", func(t *testing.T) {
+		attrs := map[string]intel.AttributeDecision{"src/new.go": intel.AttributeSet}
+		scope, err := intel.RequiredFiles(context.Background(), changes, reader, base, head, nil, attrs)
+		if err != nil {
+			t.Fatalf("RequiredFiles: %v", err)
+		}
+		if len(scope.Required) != 0 || len(scope.Excluded) != 1 {
+			t.Fatalf("required = %v excluded = %v, want the renamed file excluded", scope.Required, scope.Excluded)
+		}
+	})
+}
+
+// The backlog rule keeps its old-or-new-path match beside the attribute
+// read: a rename out of the backlog stays excluded.
+func TestRequiredFilesBacklogMatchSurvivesAttributes(t *testing.T) {
+	base, head := stubRevisions(t)
+	changes := []core.FileChange{
+		{OldPath: "docs/backlog/item.md", Path: "docs/elsewhere/item.md", Kind: core.ChangeRenamed},
+		{Path: "src/keep.go", Kind: core.ChangeModified},
+	}
+	reader := stubReader{bodies: map[string]map[string]oracleCase{
+		stubBaseSHA: {},
+		stubHeadSHA: {"src/keep.go": {Path: "src/keep.go", Body: "package keep\n", Available: true}},
+	}}
+	excluded := []intel.Exclusion{{Path: "docs/backlog", Reason: "backlog destination"}}
+	attrs := map[string]intel.AttributeDecision{"docs/elsewhere/item.md": intel.AttributeUnspecified}
+	scope, err := intel.RequiredFiles(context.Background(), changes, reader, base, head, excluded, attrs)
+	if err != nil {
+		t.Fatalf("RequiredFiles: %v", err)
+	}
+	if len(scope.Required) != 1 || scope.Required[0].Path != "src/keep.go" {
+		t.Fatalf("required = %v, want only src/keep.go", scope.Required)
+	}
+	if len(scope.Excluded) != 1 || scope.Excluded[0].Reason != "backlog destination" {
+		t.Fatalf("excluded = %v, want the backlog path with its reason", scope.Excluded)
 	}
 }

@@ -185,11 +185,14 @@ func (l *Leg) Run(ctx context.Context, req Request) (out Result) {
 	// A git failure enumerating the changed files fails closed instead: the
 	// frozen path carries no coverage obligation, so falling through to it
 	// would review and converge with no required set at all.
-	scope, scopeErr := l.buildScope(ctx, loaded.PR.BaseRefOid, loaded.PR.HeadRefOid, scopeExclusions(loaded.Backlog.Path))
+	scope, scopeWarning, scopeErr := l.buildScope(ctx, loaded.PR.BaseRefOid, loaded.PR.HeadRefOid, scopeExclusions(loaded.Backlog.Path))
 	if scopeErr != nil && !errors.Is(scopeErr, errNoScopeReader{}) {
 		out.Outcome = OutcomeError
 		out.Err = scopeErr
 		return out
+	}
+	if scopeWarning != nil {
+		out.Messages = append(out.Messages, ui.Warn(scopeWarning.Message, scopeWarning.Hint))
 	}
 	// A successful enumeration binds the pass to its coverage obligation,
 	// whatever it counted. loaded.Scope being set is what arms both gates in

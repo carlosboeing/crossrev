@@ -155,7 +155,7 @@ func TestReviewIntelligenceAcceptanceOracle(t *testing.T) {
 		}
 		reader.bodies[sha] = m
 	}
-	scope, err := intel.RequiredFiles(context.Background(), changes, reader, base, head, nil)
+	scope, err := intel.RequiredFiles(context.Background(), changes, reader, base, head, nil, nil)
 	if err != nil {
 		t.Fatalf("RequiredFiles: %v", err)
 	}

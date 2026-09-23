@@ -75,6 +75,10 @@ type Call struct {
 	// asks for exec.StreamsCombined, and gets Output.Stdout holding what a
 	// `2>&1` capture would have held.
 	Streams exec.Streams
+
+	// Stdin is the input handed to the child. Nil means the child reads EOF at
+	// once. check-attr --stdin reads its path list here, NUL-delimited.
+	Stdin []byte
 }
 
 // Output is what one git invocation produced.
@@ -146,6 +150,7 @@ func (g *Git) Run(ctx context.Context, call Call) (Output, error) {
 		Dir:     call.Dir,
 		Env:     env,
 		Streams: call.Streams,
+		Stdin:   call.Stdin,
 	})
 
 	output := Output{
