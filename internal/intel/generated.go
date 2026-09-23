@@ -71,9 +71,23 @@ const (
 )
 
 // minifiedAverageLineBytes is Linguist's average-line-length threshold for
-// generated minified files. Here it applies to every extension, because a
-// bundle embedded in another file type has the same shape.
+// generated minified files. Here it applies to every extension except
+// proseExtensions, because a bundle embedded in another file type has the
+// same shape.
 const minifiedAverageLineBytes = 110
+
+// proseExtensions are exempt from the minified rule. Prose kept as one line
+// per paragraph averages well over 110 bytes a line without being generated,
+// and a match would skip a handwritten document instead of halting on it.
+// Compared case-insensitively.
+var proseExtensions = map[string]bool{
+	".md":       true,
+	".markdown": true,
+	".mdx":      true,
+	".rst":      true,
+	".adoc":     true,
+	".txt":      true,
+}
 
 // excerptMaxBytes caps the header excerpt quoted in a PR warning. A marker
 // can sit on a minified line of any length, and GitHub refuses a comment
@@ -100,7 +114,7 @@ func GeneratedSignal(path string, body []byte) string {
 	if headerMatches(body) {
 		return SignalHeader
 	}
-	if minifiedMatches(body) {
+	if !proseExtensions[strings.ToLower(pathpkg.Ext(base))] && minifiedMatches(body) {
 		return SignalMinified
 	}
 	return ""

@@ -596,6 +596,43 @@ func TestResolvePromptNegatedAttributeWithGeneratedHeaderStays(t *testing.T) {
 	}
 }
 
+// The resolve prompt applies built-in signals at every size, so a small
+// Markdown file written one line per paragraph would lose its diff if long
+// lines counted as minified. It stays.
+func TestResolvePromptKeepsUnwrappedMarkdown(t *testing.T) {
+	e := setup(t)
+	e.addReview(t, defaultFindings(), "issues-remain")
+	e.adapter.payloads = []json.RawMessage{oneFindingPayload()}
+
+	e.forge.diff = []byte(strings.Join([]string{
+		"diff --git a/docs/README.md b/docs/README.md",
+		"--- a/docs/README.md",
+		"+++ b/docs/README.md",
+		"@@ -1 +1 @@",
+		"-old",
+		"+new",
+		"diff --git a/app.ts b/app.ts",
+		"--- a/app.ts",
+		"+++ b/app.ts",
+		"@@ -1 +1 @@",
+		"-old",
+		"+new",
+	}, "\n") + "\n")
+	paragraph := strings.Repeat("An unwrapped paragraph written by a person. ", 10)
+	e.git.show = map[string][]byte{
+		"docs/README.md": []byte(paragraph + "\n\n" + paragraph + "\n"),
+	}
+
+	got := e.run(t)
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
+	prompt := e.adapter.invs[0].Prompt.Text
+	if !strings.Contains(prompt, "diff --git a/docs/README.md b/docs/README.md") {
+		t.Errorf("unwrapped Markdown was filtered out of the resolve diff:\n%s", prompt)
+	}
+}
+
 func hasFlagPair(args []string, flag, value string) bool {
 	for i := 0; i < len(args)-1; i++ {
 		if args[i] == flag && args[i+1] == value {

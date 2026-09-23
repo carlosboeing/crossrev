@@ -35,7 +35,7 @@ CrossRev uses pure built-in detectors in fixed precedence:
 1. `lockfile`: Exact match on known lockfile basenames.
 2. `bundle-name`: Suffixes `.min.js`, `.min.css`, `.js.map`, and `.css.map`.
 3. `header`: Header window scan (first 10 lines or 1,024 bytes) for Go code generation comments, `@generated`, or `generated` with `do not edit` or `do not modify`.
-4. `minified`: Average line length strictly greater than 110 bytes across non-binary files.
+4. `minified`: Average line length strictly greater than 110 bytes, in a non-binary file that is not prose or markup.
 
 A built-in match only acts when a file cannot fit the prompt budget alone. Fitting files continue to be packed and reviewed. Oversized generated files are skipped rather than halting the pass.
 
@@ -63,9 +63,13 @@ All `crossrev-*` attributes are reserved and ignored.
 
 Git versions below 2.40 (which lack `--source` support) emit a single warning and fall through to built-in rules.
 
-### 5. Minified detection applies to all extensions
+### 5. Minified detection applies to every extension except prose
 
-The 110-byte average line length threshold applies to all non-binary file extensions. A file with NUL bytes is treated as binary and does not match the minified rule.
+The 110-byte average line length threshold applies to every non-binary file except those ending in `.md`, `.markdown`, `.mdx`, `.rst`, `.adoc` or `.txt`, compared case-insensitively. A file with NUL bytes is treated as binary and does not match the minified rule.
+
+Linguist applies this threshold to `.js` and `.css` only. CrossRev widens it because a bundle embedded in a `.ts` file, and generated data such as OpenAPI dumps, i18n bundles and test snapshots, have the same long-line shape. Limiting it to script and style files would make those files halt again.
+
+Prose is the exception because it has that shape without being generated. A document written with one line per paragraph averages several hundred bytes a line. Matching it would skip a handwritten file behind a warning that calls it generated, where the pass should halt, and would drop its diff from the resolve prompt at any size. The header rule still applies to prose, so a generated document that carries a marker is still recognised.
 
 ### 6. Empty required sets halt without invoking a model
 

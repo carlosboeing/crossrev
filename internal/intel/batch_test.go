@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/carlosboeing/crossrev/internal/core"
@@ -304,6 +305,27 @@ func TestBatchesHaltAtAnOversizedPlainFile(t *testing.T) {
 	}
 	if len(plan.Unbatched) != 3 {
 		t.Errorf("unbatched = %d files, want all three", len(plan.Unbatched))
+	}
+}
+
+// A handwritten Markdown file too large for one prompt halts rather than
+// skipping: its long unwrapped lines are not a generated signal, so nothing
+// the author wrote is dropped from review behind a "generated" warning.
+func TestBatchesHaltAtOversizedUnwrappedMarkdown(t *testing.T) {
+	scope := batchScope(t, 3, []byte("package f\n"))
+	paragraph := strings.Repeat("An unwrapped paragraph written by a person. ", 10) + "\n"
+	body := []byte(strings.Repeat(paragraph, intel.MaxPromptBytes/len(paragraph)+1))
+	scope.Required[0].Path = "CHANGELOG.md"
+	scope.Required[0].Body = body
+	scope.Required[0].BodyDigest = core.BodyDigestHex(body)
+	scope.Required[0].Generated = intel.GeneratedSignal("CHANGELOG.md", body)
+
+	plan := intel.Batches(scope, nil, sizeRender(0))
+	if plan.HaltReason != "input_exceeds_budget" || plan.HaltPath != "CHANGELOG.md" {
+		t.Fatalf("halt = %q at %q, want input_exceeds_budget at CHANGELOG.md", plan.HaltReason, plan.HaltPath)
+	}
+	if len(plan.Skipped) != 0 {
+		t.Errorf("skipped = %v, want none", plan.Skipped)
 	}
 }
 
