@@ -251,8 +251,8 @@ func TestGeneratedAttributesSpeaksNulDelimitedTriples(t *testing.T) {
 	stub := &attrStubRunner{
 		versionText: "git version 2.50.1\n",
 		versionCode: 0,
-		attrStdout: "my dir/a.go\x00linguist-generated\x00set\x00b.go\x00linguist-generated\x00false\x00",
-		attrCode:   0,
+		attrStdout:  "my dir/a.go\x00linguist-generated\x00set\x00b.go\x00linguist-generated\x00false\x00",
+		attrCode:    0,
 	}
 	repo := stubGit(t, stub)
 	base := mustRevision(t, "1111111111111111111111111111111111111111")
@@ -273,10 +273,10 @@ func TestGeneratedAttributesSpeaksNulDelimitedTriples(t *testing.T) {
 
 func TestParseGitVersion(t *testing.T) {
 	for _, tt := range []struct {
-		text        string
-		token       string
+		text         string
+		token        string
 		major, minor int
-		ok          bool
+		ok           bool
 	}{
 		{"git version 2.50.1", "2.50.1", 2, 50, true},
 		{"git version 2.39.3 (Apple Git-154)", "2.39.3", 2, 39, true},

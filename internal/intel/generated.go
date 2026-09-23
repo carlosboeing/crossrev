@@ -5,6 +5,7 @@ import (
 	pathpkg "path"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 )
 
 // Generated-file signals, returned by GeneratedSignal in this fixed
@@ -73,6 +74,12 @@ const (
 // generated minified files. Here it applies to every extension, because a
 // bundle embedded in another file type has the same shape.
 const minifiedAverageLineBytes = 110
+
+// excerptMaxBytes caps the header excerpt quoted in a PR warning. A marker
+// can sit on a minified line of any length, and GitHub refuses a comment
+// body over 65,536 characters, so the excerpt is capped before the warning
+// line is built rather than by the skip list's own bound afterwards.
+const excerptMaxBytes = 120
 
 // GeneratedSignal reports which built-in rule recognises a file as
 // generated, reading only the path and the evidence bytes: the head, or the
@@ -148,4 +155,41 @@ func minifiedMatches(body []byte) bool {
 	}
 	lines := bytes.Count(body, []byte("\n")) + 1
 	return len(body) > minifiedAverageLineBytes*lines
+}
+
+// HeaderExcerpt quotes the first header-window line carrying a generated
+// marker, rendered for a comment: backticks and control bytes removed, cut
+// to excerptMaxBytes on a rune boundary with an ellipsis. It is derived from
+// the same bounded window the detector read and is never stored in the
+// ledger. An empty answer means no marker line is in the window.
+func HeaderExcerpt(body []byte) string {
+	for _, line := range strings.Split(string(headerWindow(body)), "\n") {
+		if goGeneratedHeader.MatchString(line) ||
+			strings.Contains(line, "@generated") ||
+			strings.Contains(strings.ToLower(line), "generated") {
+			return sanitizeExcerpt(line)
+		}
+	}
+	return ""
+}
+
+// sanitizeExcerpt renders one marker line for a comment: backticks and
+// control bytes out, then the byte cap with an ellipsis.
+func sanitizeExcerpt(line string) string {
+	var b strings.Builder
+	for _, r := range line {
+		if r == '`' || r < 0x20 || r == 0x7f {
+			continue
+		}
+		b.WriteRune(r)
+	}
+	s := b.String()
+	if len(s) <= excerptMaxBytes {
+		return s
+	}
+	cut := excerptMaxBytes - len("…")
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + "…"
 }

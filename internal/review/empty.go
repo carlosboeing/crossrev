@@ -79,7 +79,7 @@ func countFiles(n int) string {
 // converged: policy.Converged refuses a required count of zero
 // (internal/policy/convergence.go:50), and a green label on a pull request
 // nothing read is the failure the coverage engine exists to prevent.
-func (l *Leg) finishNothingToReviewRun(ctx context.Context, req Request, loaded Context, pass int, claimID int64, marker prstate.Marker, reason string, out *Result) (Result, publishState) {
+func (l *Leg) finishNothingToReviewRun(ctx context.Context, req Request, loaded Context, pass int, claimID int64, marker prstate.Marker, reason string, scope intel.Scope, out *Result) (Result, publishState) {
 	marker.Verdict = prstate.Some(string(core.VerdictBlocked))
 	marker.BlockedReason = prstate.Some(reason)
 	marker.DoneTS = prstate.Some(l.now().Unix())
@@ -91,10 +91,12 @@ func (l *Leg) finishNothingToReviewRun(ctx context.Context, req Request, loaded 
 		minFix = string(core.SeverityMedium)
 	}
 	summary := SummaryBody(nil, marker, RenderContext{
-		Repo:    loaded.Repo.String(),
-		PR:      req.PR,
-		MinFix:  minFix,
-		MaxPass: atoi(loaded.Config.Get(".policy.max_passes_per_cycle")),
+		Repo:     loaded.Repo.String(),
+		PR:       req.PR,
+		MinFix:   minFix,
+		MaxPass:  atoi(loaded.Config.Get(".policy.max_passes_per_cycle")),
+		Skipped:  skipRenderDetails(scope.Skipped),
+		Excluded: policyExclusionPaths(scope),
 	})
 
 	// ui_say: the state, before the comment lands, so a failure below still

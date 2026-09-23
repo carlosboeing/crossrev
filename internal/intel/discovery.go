@@ -157,6 +157,11 @@ type Scope struct {
 	Required []FileUnit
 	// Excluded holds every removed path and its reason, sorted by path.
 	Excluded []Exclusion
+	// Skipped holds the generated units packing skipped, in path order, with
+	// their bodies still available for rendering the warning. Each appears in
+	// Excluded with its reason. Empty until packing runs: discovery never
+	// fills it.
+	Skipped []FileUnit
 }
 
 // RequiredFiles builds the required file set from one complete enumeration.

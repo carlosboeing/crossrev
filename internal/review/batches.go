@@ -96,6 +96,15 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 	// hold. The prompts packing measured were rendered above from the
 	// pre-skip scope, so no measured prompt names a skip.
 	scope = moveSkips(scope, plan.Skipped)
+	if loaded.Scope != nil {
+		// The bound scope is the post-skip one: convergence, the footnote
+		// and the summary read what the pass actually required.
+		*loaded.Scope = scope
+	}
+	// ui_warn per skip, as the skip happens, so a local run shows each one.
+	for _, unit := range scope.Skipped {
+		out.Messages = append(out.Messages, skipWarnLine(unit))
+	}
 	// Findings a previous attempt recorded on the claim — after its accepted
 	// batches, or in the blocked record the failure left — come back into the
 	// outcome here, so a resumed pass republishes every accepted finding
@@ -132,7 +141,7 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 	// model or a converged label, and publishes no generation for a review
 	// that never ran.
 	if len(scope.Required) == 0 {
-		result, _ := l.finishNothingToReviewRun(ctx, req, loaded, pass, claimID, marker, nothingSkippedReason(len(scope.Excluded)-len(plan.Skipped), len(plan.Skipped)), out)
+		result, _ := l.finishNothingToReviewRun(ctx, req, loaded, pass, claimID, marker, nothingSkippedReason(len(scope.Excluded)-len(plan.Skipped), len(plan.Skipped)), scope, out)
 		return result.Err
 	}
 	initial, initialStop, err := l.publishInitialGeneration(ctx, req, loaded, store, marker, scope, advisory, gen+1, producer, outcome.verdicts, outcome.supplied)
@@ -243,6 +252,7 @@ func moveSkips(scope intel.Scope, skipped []intel.FileUnit) intel.Scope {
 		}
 	}
 	scope.Required = kept
+	scope.Skipped = append(scope.Skipped, skipped...)
 	sort.Slice(scope.Excluded, func(i, j int) bool { return scope.Excluded[i].Path < scope.Excluded[j].Path })
 	return scope
 }

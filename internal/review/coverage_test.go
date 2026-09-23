@@ -16,6 +16,7 @@ import (
 	"github.com/carlosboeing/crossrev/internal/prstate"
 	"github.com/carlosboeing/crossrev/internal/prstate/storetest"
 	"github.com/carlosboeing/crossrev/internal/review"
+	"github.com/carlosboeing/crossrev/internal/ui"
 )
 
 // batchAnswer returns a coverage-complete answer for n numbered units: every
@@ -685,6 +686,16 @@ func TestReviewRedriveSkipsTheSameFile(t *testing.T) {
 	}
 	if second.Outcome != review.OutcomeHalted {
 		t.Fatalf("second Outcome = %q, want halted again", second.Outcome)
+	}
+	// The resumed pass shows the same skip warning as the fresh one.
+	warns := 0
+	for _, line := range second.Messages {
+		if line.Kind == ui.KindWarn && strings.Contains(line.Text, "gen/big.ts") && strings.Contains(line.Text, "generated (header)") {
+			warns++
+		}
+	}
+	if warns != 1 {
+		t.Errorf("skip warnings on the resumed pass = %d, want 1", warns)
 	}
 	if e.runner.calls != calls {
 		t.Errorf("the re-drive made %d new harness calls, want none: a.go stayed accepted and the skip re-happened in packing", e.runner.calls-calls)
