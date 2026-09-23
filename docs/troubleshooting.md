@@ -70,7 +70,13 @@ If that process is still running, wait for it or stop it. If it isn't, CrossRev 
 
 Three halt words name a pass that could not read every changed file. The marker records state `incomplete` with the word and the stop counts. The counts show what ran and what still waits for a verdict.
 
-`coverage_incomplete` means an accepted batch left files waiting. `ledger_exhausted` means a marker-carried generation outgrew the 64 KiB comment cap after the retention ladder ran, so the pass keeps the last generation that fit — a cap the ref store does not share, its generations persisting as git objects. `input_exceeds_budget` means one file fits in no rendered prompt. Files past the 400-file pass budget carry `review_budget_reached`.
+`coverage_incomplete` means an accepted batch left files waiting. `ledger_exhausted` means a marker-carried generation outgrew the 64 KiB comment cap after the retention ladder ran, so the pass keeps the last generation that fit — a cap the ref store does not share, its generations persisting as git objects. `input_exceeds_budget` means one plain file fits in no rendered prompt (files with a generated signal are skipped with a visible warning rather than halting). Files past the 400-file pass budget carry `review_budget_reached`.
+
+When `input_exceeds_budget` halts a pass, inspect the file named in the claim:
+- If the file is generated, mark it `path linguist-generated` in `.gitattributes` on the base branch to exclude it from review.
+- If the file is marked `path -linguist-generated`, CrossRev is required to review it; if it cannot fit in 180 KB, it halts.
+
+If a pull request has nothing left to review because all changed files are excluded by `.gitattributes` or skipped as oversized generated files, the pass halts with `blocked` and `crossrev/halted` without calling a model harness.
 
 The ladder sheds the predecessor generation first, then compacts the current one to counts under `on_overflow: degrade`; under `halt` it skips compaction. Either way the stop counts name what ran and what still waits. The ref store has no comment cap, so this halt only fires on the marker path — `crossrev doctor` says which store is in force.
 

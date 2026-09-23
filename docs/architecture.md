@@ -325,11 +325,13 @@ schemas/         findings.schema.json, resolve.schema.json
 skills/          pr-review/, pr-resolve/
 templates/       workflows, starter config, example operator config
 scripts/         lint.sh, check-changelog.sh, check-parity-coverage.sh,
-                  next-version.sh, refresh-prices.sh, render-harness-docs.sh,
-                  build-binary.sh, sync-embedded-assets.sh,
+                  next-version.sh, refresh-prices.sh, refresh-generated-rules.sh,
+                  render-harness-docs.sh, build-binary.sh, sync-embedded-assets.sh,
                   verify-native-toolchain.sh, release-targets.json
 tests/           the stubbed-gh suite. tests/run.sh builds the binary once and runs all of it
 ```
+
+Maintainer scripts keep vendored data current without putting network fetches on runtime paths: `scripts/refresh-prices.sh` extracts token rates from LiteLLM into `assets/prices.json`, and `scripts/refresh-generated-rules.sh` inspects upstream Linguist's `generated.rb` and reports additions for `internal/intel/generated.go`. Both tools leave production runs offline and deterministic.
 
 ## The test suite
 

@@ -80,6 +80,24 @@ The value is refused rather than misread if it is neither `skip` nor `run`. A ty
 
 Full reasoning in [ADR 0017](adrs/0017-the-resolver-commits-without-host-git-hooks.md).
 
+### .gitattributes (generated file policy)
+
+Path-level exclusion and review policy uses standard `.gitattributes`, read from the base revision of the pull request:
+
+```gitattributes
+# Exclude from review without a warning:
+dist/**          linguist-generated
+*.generated.ts   linguist-generated
+
+# Force CrossRev to review (or halt if oversized):
+critical-gen.ts  -linguist-generated
+```
+
+- `linguist-generated` excludes the path from review before prompt packing and drops it from the resolve diff.
+- `-linguist-generated` overrides built-in recognition (lockfiles, bundle suffixes, minified text, headers). CrossRev must review the file if it fits, or halt with `input_exceeds_budget` if oversized.
+- All attributes with prefix `crossrev-*` are reserved and ignored.
+- Git 2.40 or newer is required for base-tree attribute resolution (`git check-attr --source`). Older Git versions warn once and fall through to built-in rules. See [ADR 0023](adrs/0023-generated-files-are-recognised-without-configuration.md).
+
 ### logs
 
 ```yaml
