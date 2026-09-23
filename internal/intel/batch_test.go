@@ -391,8 +391,8 @@ func TestSkipReason(t *testing.T) {
 	}
 }
 
-// Admission caps before packing: a generated file past the 400-file pass
-// budget is carried, never skipped, because packing never measured it.
+// A generated file past 400 reviewable files is carried. A skip inside the
+// bound frees its slot for the next file.
 func TestBatchesCarryRatherThanSkipPastThePassBudget(t *testing.T) {
 	scope := batchScope(t, 401, []byte("package f\n"))
 	scope = generatedUnit(scope, 400, intel.SignalHeader, true)
@@ -407,15 +407,40 @@ func TestBatchesCarryRatherThanSkipPastThePassBudget(t *testing.T) {
 		t.Errorf("carry reason = %q", plan.CarryReason)
 	}
 
-	// Inside the admission bound the same file skips, and the overflow still
-	// carries.
+	// Inside the admission bound the skip frees a slot for the last file.
 	scope = batchScope(t, 401, []byte("package f\n"))
 	scope = generatedUnit(scope, 5, intel.SignalHeader, true)
 	plan = intel.Batches(scope, nil, sizeRender(64))
 	if len(plan.Skipped) != 1 || plan.Skipped[0].Path != "src/f0005.go" {
 		t.Errorf("skipped = %v, want src/f0005.go", plan.Skipped)
 	}
-	if len(plan.Carried) != 1 || plan.Carried[0].Path != "src/f0400.go" {
-		t.Errorf("carried = %v, want src/f0400.go", plan.Carried)
+	if len(plan.Carried) != 0 {
+		t.Errorf("carried = %v, want none", plan.Carried)
+	}
+	packed := 0
+	for _, batch := range plan.Batches {
+		packed += len(batch.Files)
+	}
+	if packed != 400 {
+		t.Errorf("packed = %d, want all 400 reviewable files", packed)
+	}
+}
+
+// Skipped files cannot consume the 400 review slots. Otherwise a re-drive
+// skips the same 400 files and carries the first reviewable file forever.
+func TestBatchesReachReviewableFileAfterFourHundredSkips(t *testing.T) {
+	scope := batchScope(t, 401, []byte("package f\n"))
+	for i := 0; i < 400; i++ {
+		scope = generatedUnit(scope, i, intel.SignalHeader, true)
+	}
+	plan := intel.Batches(scope, nil, sizeRender(64))
+	if len(plan.Skipped) != 400 {
+		t.Errorf("skipped = %d, want 400", len(plan.Skipped))
+	}
+	if len(plan.Carried) != 0 || plan.HaltReason != "" {
+		t.Errorf("carry = %d, halt = %q, want neither", len(plan.Carried), plan.HaltReason)
+	}
+	if len(plan.Batches) != 1 || len(plan.Batches[0].Files) != 1 || plan.Batches[0].Files[0].Path != "src/f0400.go" {
+		t.Errorf("batches = %v, want only src/f0400.go", plan.Batches)
 	}
 }

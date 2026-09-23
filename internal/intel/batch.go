@@ -8,7 +8,8 @@ import (
 )
 
 // Packing budgets for one review pass. A pass admits at most MaxUnitsPerPass
-// required files; batches hold at most MaxFilesPerBatch files each; and every
+// reviewable required files; skipped generated files do not consume a slot.
+// Batches hold at most MaxFilesPerBatch files each; and every
 // batch's fully rendered prompt holds at most MaxPromptBytes bytes. The byte
 // budget is 180 KiB, matching the frozen batching fixture.
 const (
@@ -47,7 +48,7 @@ type BatchPlan struct {
 	// Batches holds the scheduled batches in review order. Every batch fits
 	// both the file-count and the rendered-byte budgets.
 	Batches []Batch
-	// Carried holds outstanding files past the 400-file pass budget, in path
+	// Carried holds outstanding files past the 400-reviewable-file pass budget, in path
 	// order, for a later pass. Empty means the pass admitted everything.
 	Carried []FileUnit
 	// CarryReason is review_budget_reached when Carried is non-empty, and
@@ -95,14 +96,8 @@ func Batches(scope Scope, accepted map[core.UnitID]bool, render RenderBatch) Bat
 	}
 	sort.Slice(outstanding, func(i, j int) bool { return outstanding[i].Path < outstanding[j].Path })
 
-	admitted := outstanding
-	if len(outstanding) > MaxUnitsPerPass {
-		admitted = outstanding[:MaxUnitsPerPass]
-		plan.Carried = append(plan.Carried, outstanding[MaxUnitsPerPass:]...)
-		plan.CarryReason = CarryReviewBudgetReached
-	}
-
 	var current []FileUnit
+	admittedCount := 0
 	flush := func() {
 		if len(current) > 0 {
 			plan.Batches = append(plan.Batches, Batch{Files: current})
@@ -111,8 +106,8 @@ func Batches(scope Scope, accepted map[core.UnitID]bool, render RenderBatch) Bat
 	}
 	halt := func(index int) BatchPlan {
 		plan.HaltReason = HaltInputExceedsBudget
-		plan.HaltPath = admitted[index].Path
-		plan.Unbatched = append(plan.Unbatched, admitted[index:]...)
+		plan.HaltPath = outstanding[index].Path
+		plan.Unbatched = append(plan.Unbatched, outstanding[index:]...)
 		return plan
 	}
 	// skipOrHalt answers whether packing continues: a unit that cannot fit
@@ -124,7 +119,12 @@ func Batches(scope Scope, accepted map[core.UnitID]bool, render RenderBatch) Bat
 		}
 		return halt(i), false
 	}
-	for i, unit := range admitted {
+	for i, unit := range outstanding {
+		if admittedCount == MaxUnitsPerPass {
+			plan.Carried = append(plan.Carried, outstanding[i:]...)
+			plan.CarryReason = CarryReviewBudgetReached
+			break
+		}
 		if len(current) >= MaxFilesPerBatch {
 			flush()
 		}
@@ -133,6 +133,7 @@ func Batches(scope Scope, accepted map[core.UnitID]bool, render RenderBatch) Bat
 		candidate[len(current)] = unit
 		if render(candidate) <= MaxPromptBytes {
 			current = candidate
+			admittedCount++
 			continue
 		}
 		if len(current) == 0 {
@@ -148,6 +149,7 @@ func Batches(scope Scope, accepted map[core.UnitID]bool, render RenderBatch) Bat
 			}
 		} else {
 			current = single
+			admittedCount++
 		}
 	}
 	flush()

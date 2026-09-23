@@ -146,7 +146,7 @@ Each review pass reads every changed file: every added, modified, deleted, renam
 
 A **required file** is a changed file the review must account for. The reviewer gives each one a verdict, and the pass converges only when every required file has one. When the branch moves, every prior result is retired and the next pass starts over. A re-run reuses recorded verdicts only when the base commit, the pull request commit, the review-engine version and the review producer (harness, model, effort and endpoint) are unchanged; then it resumes the files still waiting for a verdict.
 
-The review reads in batches because one prompt cannot hold a large pull request. One pass reads at most 400 required files. Batches hold at most 40 files in path order.
+The review reads in batches because one prompt cannot hold a large pull request. One pass reads at most 400 required files; oversized generated files skipped before review do not use those slots. Batches hold at most 40 files in path order.
 
 Batches measure the full rendered prompt against 180 KB (184,320 bytes).
 
