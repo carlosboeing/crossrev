@@ -95,6 +95,7 @@ docs/
 ├── troubleshooting.md      — the failure modes, by the name each reports itself under
 ├── architecture.md         — current-state architecture
 ├── ROADMAP.md              — what's in flight / next / shipped
+├── changelog-0.x.md       — CHANGELOG entries for 0.1.0 to 0.5.0
 └── adrs/                   — single-decision records (NNNN-title.md)
 ```
 

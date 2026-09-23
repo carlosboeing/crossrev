@@ -7,7 +7,7 @@ authors:
   - "GPT-5 (Codex)"
   - "Claude Opus 5 (Claude Code)"
   - "Muse Spark (Muse Code)"
-last_reviewed: 2026-09-21
+last_reviewed: 2026-09-23
 ---
 
 # Roadmap
@@ -26,6 +26,7 @@ Forward view of CrossRev: what's in flight, what's next, what's deliberately def
 
 ## Next actions
 
+- **Review a file that does not fit one prompt by its diff.** Every changed file is sent whole, followed by its numbered diff (`internal/prompt/review.go:358`), so a handwritten file larger than the 180 KiB prompt budget halts the pass with `input_exceeds_budget` however small its change. `CHANGELOG.md` reached that size at 184,647 bytes, and entries for 0.5.0 and earlier were moved to [`changelog-0.x.md`](changelog-0.x.md) to keep it reviewable. The fix is to send such a file as its hunks with bounded surrounding lines and record it as `diff_only`, a form the coverage ledger already defines (`internal/prstate/schema2.go:21`). The summary would name each file reviewed that way. A generated file would then be skipped only when its diff alone cannot fit.
 - **The resolver merges the base branch** ([#113](https://github.com/carlosboeing/crossrev/issues/113)). Agents open pull requests in parallel, and the moment one merges the rest are conflicted. CrossRev cannot see that: `gh pr view --json` at `internal/forge/ghexec/read.go:17` asks for neither `mergeable` nor `mergeStateStatus`. So `crossrev/converged` can be applied to a branch that will not merge, which is a label stating something false. Neither leg is broken by the conflict — the reviewer reads a three-dot compare from the merge base, and the resolver works in a detached worktree at the head SHA — which is exactly why the loop finishes and says so. The shape it takes: merging becomes the resolve leg's first duty, because the resolver is the pull request's author and merging is an authorship job. A four-rung ladder escalates from plain `git merge`, to a `merge=union` driver for append-only files like `CHANGELOG.md`, to the model, to a person. Mergeability becomes an input to `legs_should_continue`. The watchdog re-labels conflicted pull requests, since a base branch moving fires none of the pull-request events either leg waits on. The first shipment is detection and the convergence criterion alone, which gives no model any new authority.
 - **`crossrev update`.** Today the update is rebuilding and re-running `scripts/install-local.sh`, and the uninstall is deleting the binary, which [installation.md](installation.md) states plainly because pretending otherwise is the failure mode. A real command would handle the pull, report what changed, and tell you when a config version has moved. An npm install already updates with `npm update -g crossrev-ai`, which narrows this to the clone rather than answering it — and leaves the config-version half unanswered either way.
 - **`crossrev stop` and `crossrev resume`.** `crossrev/stop` is the loop's only human-facing kill switch. It is read in five places and written in one — the resolve leg applying it to itself after an escalation. So CrossRev can pull its own brake and you cannot, unless you reach for the GitHub label picker or a raw API call. The moment you need it is a leg mid-flight pushing commits, which is the moment you are least able to look up the syntax.
