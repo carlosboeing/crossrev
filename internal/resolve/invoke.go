@@ -18,6 +18,7 @@ import (
 	"github.com/carlosboeing/crossrev/internal/exec"
 	"github.com/carlosboeing/crossrev/internal/forge"
 	"github.com/carlosboeing/crossrev/internal/harness"
+	"github.com/carlosboeing/crossrev/internal/intel"
 	"github.com/carlosboeing/crossrev/internal/policy"
 	"github.com/carlosboeing/crossrev/internal/prompt"
 	"github.com/carlosboeing/crossrev/internal/prstate"
@@ -165,9 +166,13 @@ func (l *Leg) invoke(ctx context.Context, s *session, marker prstate.Marker, wor
 	if err != nil {
 		return wrapErr(err)
 	}
-	promptBytes, err := l.renderPrompt(ctx, s, threads, candidates, workdir)
+	promptBytes, promptWarn, err := l.renderPrompt(ctx, s, threads, candidates, workdir)
 	if err != nil {
 		return wrapErr(err)
+	}
+	var promptMsgs []ui.Line
+	if promptWarn != nil {
+		promptMsgs = append(promptMsgs, ui.Warn(promptWarn.Message, promptWarn.Hint))
 	}
 
 	tmp, err := os.MkdirTemp("", "crossrev-resolve-*")
@@ -245,7 +250,7 @@ func (l *Leg) invoke(ctx context.Context, s *session, marker prstate.Marker, wor
 
 	// What the retry loop said, carried out with whatever it answers. Bash
 	// prints these as it goes; a leg here answers its lines (internal/ui).
-	var msgs []ui.Line
+	msgs := append([]ui.Line(nil), promptMsgs...)
 
 	for attempt := 1; ; attempt++ {
 		transcript := ""
@@ -427,24 +432,75 @@ func (l *Leg) invokeAbort(ctx context.Context, work Git, index, tree string) []u
 		"They are still in the checkout, and a later run would capture them as its own baseline. Check `git status` before re-running the leg.")}
 }
 
-func (l *Leg) renderPrompt(ctx context.Context, s *session, threads []forge.ReviewThread, candidates prompt.Candidates, workdir string) ([]byte, error) {
+func (l *Leg) renderPrompt(ctx context.Context, s *session, threads []forge.ReviewThread, candidates prompt.Candidates, workdir string) ([]byte, *vcs.Warning, error) {
 	findings, err := toPromptFindings(s.findings)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	sbx, err := sandbox.LoadDescriptor(harness.DescriptorJSON())
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	rawDiff, err := l.Forge.PullRequestDiff(ctx, s.repo, s.pr.BaseRefOid, s.pr.HeadRefOid)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
+	parsedDiff := diff.Parse(rawDiff, core.RevisionPair{})
+	diffFiles := parsedDiff.Files()
+
+	queryPaths := make([]string, 0, len(diffFiles))
+	for _, f := range diffFiles {
+		queryPaths = append(queryPaths, f.Path)
+	}
+	attrs, warn, err := l.Git.GeneratedAttributes(ctx, s.pr.BaseRefOid, queryPaths)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	openFindingPaths := make(map[string]bool)
+	for _, f := range s.findings {
+		if p := f.Member("path").StringVal(); p != "" {
+			openFindingPaths[p] = true
+		}
+	}
+
 	exclude := []string{}
 	if s.backlog.Destination == config.DestinationRepository {
 		exclude = []string{s.backlog.Path, ".crossrev"}
 	}
-	diffBytes := diff.Parse(rawDiff, core.RevisionPair{}).Excluded(exclude)
+
+	for _, f := range diffFiles {
+		if openFindingPaths[f.Path] || (f.OldPath != "" && openFindingPaths[f.OldPath]) {
+			continue
+		}
+
+		body, err := l.readEvidence(ctx, workdir, s.pr.BaseRefOid, s.pr.HeadRefOid, f)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		signal := intel.GeneratedSignal(f.Path, body)
+		attr := attrs[f.Path]
+		var intelAttr intel.AttributeDecision
+		switch attr {
+		case vcs.AttributeSet:
+			intelAttr = intel.AttributeSet
+		case vcs.AttributeNegated:
+			intelAttr = intel.AttributeNegated
+		default:
+			intelAttr = intel.AttributeUnspecified
+		}
+
+		class := intel.ClassifyGenerated(intelAttr, signal)
+		if class.Effect == intel.EffectExcluded || class.Effect == intel.EffectGenerated {
+			exclude = append(exclude, f.Path)
+			if f.OldPath != "" && f.OldPath != f.Path {
+				exclude = append(exclude, f.OldPath)
+			}
+		}
+	}
+
+	diffBytes := parsedDiff.Excluded(exclude)
 
 	logBytes, _ := l.Git.LogSubjects(ctx, s.pr.BaseRefOid)
 	template, _, _ := l.Git.Show(ctx, s.pr.BaseRefOid, ".gitmessage")
@@ -468,8 +524,33 @@ func (l *Leg) renderPrompt(ctx context.Context, s *session, threads []forge.Revi
 			Template:     template,
 		},
 	}
-	_ = workdir
-	return r.Render(), nil
+	return r.Render(), warn, nil
+}
+
+func (l *Leg) readEvidence(ctx context.Context, workdir string, base, head core.Revision, f diff.DiffFile) ([]byte, error) {
+	if f.Deleted {
+		body, status, err := l.Git.Show(ctx, base, f.Path)
+		if err != nil {
+			return nil, err
+		}
+		if status != vcs.IsFile {
+			return nil, nil
+		}
+		return body, nil
+	}
+	if workdir != "" {
+		if data, err := os.ReadFile(filepath.Join(workdir, f.Path)); err == nil {
+			return data, nil
+		}
+	}
+	body, status, err := l.Git.Show(ctx, head, f.Path)
+	if err != nil {
+		return nil, err
+	}
+	if status != vcs.IsFile {
+		return nil, nil
+	}
+	return body, nil
 }
 
 func promptMeta(s *session) prompt.Meta {

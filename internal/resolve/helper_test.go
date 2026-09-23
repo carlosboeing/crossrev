@@ -317,6 +317,8 @@ type fakeForge struct {
 	removedLabels  []string
 	byFinding      map[string]int
 	resolved       []string
+	diff           []byte
+	diffErr        error
 	createErr      error
 	replyErr       error
 	threadErr      error
@@ -370,6 +372,12 @@ func (f *fakeForge) PullRequest(context.Context, core.Slug, int) (forge.PullRequ
 }
 func (f *fakeForge) PullRequestDiff(context.Context, core.Slug, core.Revision, core.Revision) ([]byte, error) {
 	f.note("PullRequestDiff")
+	if f.diffErr != nil {
+		return nil, f.diffErr
+	}
+	if f.diff != nil {
+		return f.diff, nil
+	}
 	return []byte("diff --git a/app.ts b/app.ts\n--- a/app.ts\n+++ b/app.ts\n@@ -1 +1 @@\n-old\n+new\n"), nil
 }
 func (f *fakeForge) PullRequestLabels(context.Context, core.Slug, int) []string {
@@ -516,18 +524,22 @@ type gitMut struct {
 }
 
 type fakeGit struct {
-	env            *testEnv
-	dir            string
-	head           core.Revision
-	show           map[string][]byte
-	showCalls      []showCall
-	wrongHead      core.Revision
-	worktrees      *[]string
-	fetchCalls     []string
-	captureCalls   *int
-	restoreCalls   *int
-	restoreTreeErr error
-	runAt          []string
+	env                 *testEnv
+	dir                 string
+	head                core.Revision
+	show                map[string][]byte
+	showCalls           []showCall
+	wrongHead           core.Revision
+	worktrees           *[]string
+	fetchCalls          []string
+	captureCalls        *int
+	restoreCalls        *int
+	restoreTreeErr      error
+	runAt               []string
+	generatedAttrs      map[string]vcs.AttributeDecision
+	generatedAttrsWarn  *vcs.Warning
+	generatedAttrsErr   error
+	generatedAttrsCalls []core.Revision
 	*gitMut
 }
 
@@ -537,6 +549,21 @@ func (g *fakeGit) WithDir(dir string) Git {
 	clone.dir = dir
 	g.runAt = append(g.runAt, dir)
 	return &clone
+}
+func (g *fakeGit) GeneratedAttributes(_ context.Context, base core.Revision, paths []string) (map[string]vcs.AttributeDecision, *vcs.Warning, error) {
+	g.generatedAttrsCalls = append(g.generatedAttrsCalls, base)
+	if g.generatedAttrsErr != nil {
+		return nil, nil, g.generatedAttrsErr
+	}
+	answers := make(map[string]vcs.AttributeDecision, len(paths))
+	for _, p := range paths {
+		if d, ok := g.generatedAttrs[p]; ok {
+			answers[p] = d
+		} else {
+			answers[p] = vcs.AttributeUnspecified
+		}
+	}
+	return answers, g.generatedAttrsWarn, nil
 }
 func (g *fakeGit) Show(_ context.Context, revision core.Revision, path string) ([]byte, vcs.FileStatus, error) {
 	g.showCalls = append(g.showCalls, showCall{Revision: revision, Path: path})

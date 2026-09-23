@@ -156,6 +156,33 @@ func Parse(raw []byte, revisions core.RevisionPair) *Diff {
 // Revisions is the base and head the diff was produced from.
 func (d *Diff) Revisions() core.RevisionPair { return d.revisions }
 
+// DiffFile is one file affected by a diff section.
+type DiffFile struct {
+	// Path is the current path: pathB for an addition, modification or rename;
+	// pathA for a deletion.
+	Path string
+	// OldPath is the previous path: pathA for a rename or deletion. Empty for an addition.
+	OldPath string
+	// Deleted reports whether the new path was /dev/null.
+	Deleted bool
+}
+
+// Files returns the files touched by the diff sections, in appearance order.
+func (d *Diff) Files() []DiffFile {
+	var files []DiffFile
+	for _, s := range d.sections {
+		if s.pathA == "" && s.pathB == "" {
+			continue
+		}
+		if s.pathB == "" {
+			files = append(files, DiffFile{Path: s.pathA, OldPath: s.pathA, Deleted: true})
+		} else {
+			files = append(files, DiffFile{Path: s.pathB, OldPath: s.pathA, Deleted: false})
+		}
+	}
+	return files
+}
+
 func (d *Diff) keepHeader(sec int, raw string) {
 	d.lines = append(d.lines, line{header: true, section: sec, raw: raw})
 }
