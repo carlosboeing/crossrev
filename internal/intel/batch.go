@@ -1,6 +1,7 @@
 package intel
 
 import (
+	"fmt"
 	"sort"
 
 	"github.com/carlosboeing/crossrev/internal/core"
@@ -37,10 +38,11 @@ type Batch struct {
 }
 
 // BatchPlan is the whole pass input: the batches to review in order, the
-// files carried past the pass budget, and any halt on a file that cannot fit
-// alone. The next prompt task renders Batches directly — each FileUnit carries
-// its change kind, content revision, readable body or access reason — so no
-// compatibility layer sits between this shape and its consumer.
+// files carried past the pass budget, the generated files skipped, and any
+// halt on a file that cannot fit alone. The next prompt task renders Batches
+// directly — each FileUnit carries its change kind, content revision,
+// readable body or access reason — so no compatibility layer sits between
+// this shape and its consumer.
 type BatchPlan struct {
 	// Batches holds the scheduled batches in review order. Every batch fits
 	// both the file-count and the rendered-byte budgets.
@@ -51,6 +53,10 @@ type BatchPlan struct {
 	// CarryReason is review_budget_reached when Carried is non-empty, and
 	// empty otherwise.
 	CarryReason string
+	// Skipped holds the admitted generated files that cannot fit alone in a
+	// rendered prompt, in path order. Packing continues past a skip; the
+	// caller records each in the scope's exclusions with SkipReason.
+	Skipped []FileUnit
 	// HaltReason is input_exceeds_budget when one file cannot fit alone in a
 	// rendered prompt, and empty otherwise. Batches scheduled before the halt
 	// stand; nothing from the halting file on is scheduled.
@@ -62,13 +68,22 @@ type BatchPlan struct {
 	Unbatched []FileUnit
 }
 
+// SkipReason records why a generated file was skipped: the signal that
+// matched, the file's byte size and the prompt budget it could not fit. The
+// reason text is the exclusion record the generation and the warning carry.
+func SkipReason(unit FileUnit) string {
+	return fmt.Sprintf("generated (%s), %d bytes, over the %d-byte prompt budget", unit.Generated, len(unit.Body), MaxPromptBytes)
+}
+
 // Batches packs the scope's outstanding required files — those with no accepted
 // verdict — into deterministic path-ordered batches under the three
 // budgets. Accepted verdicts come from the current coverage generation, so
 // a resumed pass packs only what remains. Packing measures only through
-// render: a batch is admitted when render says its complete prompt fits, and a
-// file that does not fit alone halts with input_exceeds_budget rather than
-// splitting or deferring silently.
+// render: a batch is admitted when render says its complete prompt fits. A
+// file that does not fit alone is skipped when a built-in rule recognised it
+// as generated, and packing continues; any other file that does not fit
+// alone halts with input_exceeds_budget rather than splitting or deferring
+// silently.
 func Batches(scope Scope, accepted map[core.UnitID]bool, render RenderBatch) BatchPlan {
 	var plan BatchPlan
 	outstanding := make([]FileUnit, 0, len(scope.Required))
@@ -100,6 +115,15 @@ func Batches(scope Scope, accepted map[core.UnitID]bool, render RenderBatch) Bat
 		plan.Unbatched = append(plan.Unbatched, admitted[index:]...)
 		return plan
 	}
+	// skipOrHalt answers whether packing continues: a unit that cannot fit
+	// alone skips when it carries a generated signal and halts otherwise.
+	skipOrHalt := func(i int, unit FileUnit) (BatchPlan, bool) {
+		if unit.Generated != "" {
+			plan.Skipped = append(plan.Skipped, unit)
+			return plan, true
+		}
+		return halt(i), false
+	}
 	for i, unit := range admitted {
 		if len(current) >= MaxFilesPerBatch {
 			flush()
@@ -112,11 +136,16 @@ func Batches(scope Scope, accepted map[core.UnitID]bool, render RenderBatch) Bat
 			continue
 		}
 		if len(current) == 0 {
-			return halt(i)
+			if next, ok := skipOrHalt(i, unit); !ok {
+				return next
+			}
+			continue
 		}
 		flush()
 		if single := []FileUnit{unit}; render(single) > MaxPromptBytes {
-			return halt(i)
+			if next, ok := skipOrHalt(i, unit); !ok {
+				return next
+			}
 		} else {
 			current = single
 		}

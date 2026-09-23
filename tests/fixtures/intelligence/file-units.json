@@ -114,8 +114,8 @@
     }
   ],
   "doc": "Frozen oracle for file-unit discovery (Task A1). Hand-authored before the implementation: each case lists the required path, change kind, content revision, UnitID and body digest the production code must return. UnitID is the first 16 lowercase hex characters of SHA-256 over the u1 file identity preimage. Body digest is full SHA-256 hex over the evidence bytes, or over the empty string when no bytes are available. Do not regenerate from production code.",
-  "engine": "file-v1",
-  "engine_id": "e2b455e748711e52",
+  "engine": "file-v2",
+  "engine_id": "9224cacfc387067f",
   "advisory": {
     "doc": "Frozen vectors for advisory discovery (Task A2). Hand-authored before the implementation: term_vectors list the ASCII identifier set the production code must extract from each body, and conventions list the adjacent-test candidates it must derive from each path. Terms use [A-Za-z_][A-Za-z0-9_]* with terms shorter than four bytes dropped, deduplicated and sorted. Do not regenerate from production code.",
     "max_search_hits": 200,

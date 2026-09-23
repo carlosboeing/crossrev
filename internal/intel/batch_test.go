@@ -250,3 +250,150 @@ func TestBatchingMatchesTheFrozenFixture(t *testing.T) {
 		t.Errorf("MaxPromptBytes = %d, want frozen %d", intel.MaxPromptBytes, fixture.Batching.MaxPromptBytes)
 	}
 }
+
+// generatedUnit marks the i-th required file with a built-in signal and,
+// when big is set, a body no rendered prompt can hold alone.
+func generatedUnit(scope intel.Scope, i int, signal string, big bool) intel.Scope {
+	scope.Required[i].Generated = signal
+	if big {
+		body := make([]byte, intel.MaxPromptBytes+1)
+		for j := range body {
+			body[j] = 'a'
+		}
+		scope.Required[i].Body = body
+		scope.Required[i].BodyDigest = core.BodyDigestHex(body)
+	}
+	return scope
+}
+
+// A generated file that cannot fit alone is skipped and packing continues:
+// the files after it are still reviewed.
+func TestBatchesSkipOversizedGeneratedFiles(t *testing.T) {
+	scope := batchScope(t, 3, []byte("package f\n"))
+	scope = generatedUnit(scope, 0, intel.SignalHeader, true)
+	plan := intel.Batches(scope, nil, sizeRender(0))
+
+	if plan.HaltReason != "" {
+		t.Errorf("halt = %q at %q, want none: a generated file skips", plan.HaltReason, plan.HaltPath)
+	}
+	if len(plan.Skipped) != 1 || plan.Skipped[0].Path != "src/f0000.go" {
+		t.Fatalf("skipped = %v, want src/f0000.go", plan.Skipped)
+	}
+	if got := batchSizes(plan); len(got) != 1 || got[0] != 2 {
+		t.Errorf("batches = %v, want one batch holding the two small files", got)
+	}
+	if len(plan.Unbatched) != 0 {
+		t.Errorf("unbatched = %d files, want none", len(plan.Unbatched))
+	}
+}
+
+// The same size with no signal halts exactly as before: only a recognised
+// generated file turns the halt into a skip.
+func TestBatchesHaltAtAnOversizedPlainFile(t *testing.T) {
+	scope := batchScope(t, 3, []byte("package f\n"))
+	scope = generatedUnit(scope, 0, "", true)
+	plan := intel.Batches(scope, nil, sizeRender(0))
+	if plan.HaltReason != "input_exceeds_budget" {
+		t.Fatalf("halt reason = %q, want input_exceeds_budget", plan.HaltReason)
+	}
+	if plan.HaltPath != "src/f0000.go" {
+		t.Errorf("halt path = %q, want src/f0000.go", plan.HaltPath)
+	}
+	if len(plan.Skipped) != 0 {
+		t.Errorf("skipped = %v, want none", plan.Skipped)
+	}
+	if len(plan.Unbatched) != 3 {
+		t.Errorf("unbatched = %d files, want all three", len(plan.Unbatched))
+	}
+}
+
+// A generated file that fits is packed like any other: the signal only
+// matters at the budget.
+func TestBatchesPackGeneratedFilesThatFit(t *testing.T) {
+	scope := batchScope(t, 2, []byte("package f\n"))
+	scope = generatedUnit(scope, 0, intel.SignalHeader, false)
+	scope = generatedUnit(scope, 1, intel.SignalLockfile, false)
+	plan := intel.Batches(scope, nil, sizeRender(64))
+	if len(plan.Skipped) != 0 {
+		t.Errorf("skipped = %v, want none", plan.Skipped)
+	}
+	if got := batchSizes(plan); len(got) != 1 || got[0] != 2 {
+		t.Errorf("batches = %v, want one batch of 2", got)
+	}
+}
+
+// An oversized lockfile skips like any other oversized generated file.
+func TestBatchesSkipOversizedLockfiles(t *testing.T) {
+	scope := batchScope(t, 2, []byte("package f\n"))
+	scope.Required[1].Path = "web/package-lock.json"
+	scope.Required[1].ID = core.FileUnitID("web/package-lock.json")
+	scope = generatedUnit(scope, 1, intel.SignalLockfile, true)
+	plan := intel.Batches(scope, nil, sizeRender(0))
+	if len(plan.Skipped) != 1 || plan.Skipped[0].Path != "web/package-lock.json" {
+		t.Fatalf("skipped = %v, want the lockfile", plan.Skipped)
+	}
+	if got := batchSizes(plan); len(got) != 1 || got[0] != 1 {
+		t.Errorf("batches = %v, want one batch of the small file", got)
+	}
+}
+
+// A plain halt later in path order keeps the earlier skip and the batches
+// already packed.
+func TestBatchesPlainHaltRetainsEarlierSkips(t *testing.T) {
+	scope := batchScope(t, 5, []byte("package f\n"))
+	scope = generatedUnit(scope, 1, intel.SignalMinified, true) // skipped
+	scope = generatedUnit(scope, 3, "", true)                   // plain: halts
+	plan := intel.Batches(scope, nil, sizeRender(0))
+	if len(plan.Skipped) != 1 || plan.Skipped[0].Path != "src/f0001.go" {
+		t.Errorf("skipped = %v, want src/f0001.go", plan.Skipped)
+	}
+	if plan.HaltReason != "input_exceeds_budget" || plan.HaltPath != "src/f0003.go" {
+		t.Errorf("halt = %q at %q, want input_exceeds_budget at src/f0003.go", plan.HaltReason, plan.HaltPath)
+	}
+	// Trying f0001 against the open batch flushed f0000 first, so the two
+	// small files land in one batch each.
+	if got := batchSizes(plan); len(got) != 2 || got[0] != 1 || got[1] != 1 {
+		t.Errorf("batches = %v, want [f0000] then [f0002]", got)
+	}
+	if len(plan.Unbatched) != 2 || plan.Unbatched[0].Path != "src/f0003.go" {
+		t.Errorf("unbatched = %v, want f0003 and f0004", plan.Unbatched)
+	}
+}
+
+// The skip reason names the signal, the byte size and the budget.
+func TestSkipReason(t *testing.T) {
+	unit := intel.FileUnit{Path: "src/webAssets.ts", Generated: intel.SignalHeader, Body: make([]byte, 350797)}
+	want := "generated (header), 350797 bytes, over the 184320-byte prompt budget"
+	if got := intel.SkipReason(unit); got != want {
+		t.Errorf("SkipReason = %q, want %q", got, want)
+	}
+}
+
+// Admission caps before packing: a generated file past the 400-file pass
+// budget is carried, never skipped, because packing never measured it.
+func TestBatchesCarryRatherThanSkipPastThePassBudget(t *testing.T) {
+	scope := batchScope(t, 401, []byte("package f\n"))
+	scope = generatedUnit(scope, 400, intel.SignalHeader, true)
+	plan := intel.Batches(scope, nil, sizeRender(64))
+	if len(plan.Skipped) != 0 {
+		t.Errorf("skipped = %v, want none: the 401st file was never admitted", plan.Skipped)
+	}
+	if len(plan.Carried) != 1 || plan.Carried[0].Path != "src/f0400.go" {
+		t.Errorf("carried = %v, want src/f0400.go", plan.Carried)
+	}
+	if plan.CarryReason != intel.CarryReviewBudgetReached {
+		t.Errorf("carry reason = %q", plan.CarryReason)
+	}
+
+	// Inside the admission bound the same file skips, and the overflow still
+	// carries.
+	scope = batchScope(t, 401, []byte("package f\n"))
+	scope = generatedUnit(scope, 5, intel.SignalHeader, true)
+	plan = intel.Batches(scope, nil, sizeRender(64))
+	if len(plan.Skipped) != 1 || plan.Skipped[0].Path != "src/f0005.go" {
+		t.Errorf("skipped = %v, want src/f0005.go", plan.Skipped)
+	}
+	if len(plan.Carried) != 1 || plan.Carried[0].Path != "src/f0400.go" {
+		t.Errorf("carried = %v, want src/f0400.go", plan.Carried)
+	}
+}
