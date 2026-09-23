@@ -13,5 +13,6 @@ Start with [installation](installation.md), then [usage](usage.md). Everything e
 | [architecture.md](architecture.md) | How the loop is built: the two legs, the orchestrator, the adapters, the marker and label contract |
 | [adrs/](adrs/) | Decision records — what was decided, what was considered, what it costs |
 | [ROADMAP.md](ROADMAP.md) | What's next, and what's deliberately deferred |
+| [changelog-0.x.md](changelog-0.x.md) | Release notes for 0.1.0 to 0.5.0, moved out of `CHANGELOG.md` |
 
 **CrossRev is a work in progress.** Every command is built and covered by an offline test suite, and the local path has been run against real pull requests. Automated mode's workflows are installed in one repository and the loop has chained leg to leg there on GitHub's runners, most recently on the native binary at v0.6.1 on 2026-09-06, where a pull request carrying planted defects ran five legs to a converged label unattended — one repository, one harness pairing, hosted runners only. That is why the version is `0.x`: the proof covers the runs it covers and nothing wider. [ROADMAP.md](ROADMAP.md) names what is observed and what is not, and the docs repeat it wherever it matters rather than only here.
