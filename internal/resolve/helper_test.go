@@ -540,6 +540,8 @@ type fakeGit struct {
 	generatedAttrsWarn  *vcs.Warning
 	generatedAttrsErr   error
 	generatedAttrsCalls []core.Revision
+	// onAddWorktree, when set, lays files into the fresh worktree.
+	onAddWorktree func(dir string) error
 	*gitMut
 }
 
@@ -598,6 +600,11 @@ func (g *fakeGit) AddWorktree(_ context.Context, dir string, _ core.Revision) er
 	}
 	if err := os.WriteFile(filepath.Join(dir, "CLAUDE.md"), []byte("injected\n"), 0o644); err != nil {
 		return err
+	}
+	if g.onAddWorktree != nil {
+		if err := g.onAddWorktree(dir); err != nil {
+			return err
+		}
 	}
 	*g.worktrees = append(*g.worktrees, dir)
 	return nil

@@ -360,14 +360,25 @@ func coverageFootnote(marker prstate.Marker, ctx RenderContext) string {
 
 // exclusionLine lists the paths repository policy or the backlog rule
 // removed, in one line under the footnote. The repository chose those
-// exclusions, so they are information, not a warning.
+// exclusions, so they are information, not a warning. The list has the halt
+// report's byte bound, ending with a count past it, because a repository can
+// mark thousands of changed paths generated.
 func exclusionLine(excluded []string) string {
 	if len(excluded) == 0 {
 		return ""
 	}
-	quoted := make([]string, len(excluded))
-	for i, path := range excluded {
-		quoted[i] = "`" + path + "`"
+	budget := haltPathListBudget
+	quoted := make([]string, 0, len(excluded))
+	for _, path := range excluded {
+		item := "`" + path + "`"
+		if len(item)+len(", ") > budget {
+			break
+		}
+		quoted = append(quoted, item)
+		budget -= len(item) + len(", ")
+	}
+	if rest := len(excluded) - len(quoted); rest > 0 {
+		quoted = append(quoted, fmt.Sprintf("…and %d more", rest))
 	}
 	return fmt.Sprintf("Excluded by repository policy: %s — not reviewed.\n\n", strings.Join(quoted, ", "))
 }

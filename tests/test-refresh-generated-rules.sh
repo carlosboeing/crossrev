@@ -60,7 +60,10 @@ EOF
 hash_before="$(shasum -a 256 "$GO_FILE" 2>/dev/null || sha256sum "$GO_FILE" 2>/dev/null || cksum "$GO_FILE")"
 
 # 3. Run script with stubbed file and commit
-out="$(CROSSREV_LINGUIST_URL="file://$stub_rb" CROSSREV_LINGUIST_COMMIT="$stub_sha" bash "$SCRIPT" 2>&1)" || true
+status=0
+out="$(CROSSREV_LINGUIST_URL="file://$stub_rb" CROSSREV_LINGUIST_COMMIT="$stub_sha" bash "$SCRIPT" 2>&1)" || status=$?
+
+[[ "$status" -eq 0 ]] && ok "the script exits 0" || notok "the script exits 0" "exit 0" "exit $status: $out"
 
 # Assert upstream commit shown
 has "output shows the upstream commit" "$out" "$stub_sha"

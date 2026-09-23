@@ -506,3 +506,30 @@ func TestTheFootnoteIsUnchangedWithoutExclusions(t *testing.T) {
 		t.Errorf("an exclusion line printed with no exclusions:\n%s", got)
 	}
 }
+
+// The exclusion line is bounded like the skip list: a repository that marks
+// thousands of changed paths generated still gets a summary under GitHub's
+// 65,536-character comment cap.
+func TestTheExclusionLineBoundsItsList(t *testing.T) {
+	var excluded []string
+	for i := 0; i < 3000; i++ {
+		excluded = append(excluded, fmt.Sprintf("dist/some/rather/long/path/number-%04d/bundle.js", i))
+	}
+	got := review.SummaryBody(nil, skipMarker("converged"), review.RenderContext{
+		Repo: "acme/widget", PR: 42, MinFix: "medium", MaxPass: 3,
+		Coverage: &review.CoverageCounts{Covered: 1, Required: 1, Excluded: len(excluded)},
+		Excluded: excluded,
+	})
+	if len(got) > 65536 {
+		t.Errorf("summary is %d bytes, over the comment cap", len(got))
+	}
+	if !strings.Contains(got, "Excluded by repository policy: `dist/some/rather/long/path/number-0000/bundle.js`") {
+		t.Errorf("the exclusion line lost its first path:\n%.500s", got)
+	}
+	if strings.Contains(got, "number-2999") {
+		t.Error("the list ran past its bound to the last path")
+	}
+	if !strings.Contains(got, "more — not reviewed.") {
+		t.Errorf("no remaining-count past the bound:\n%.500s", got)
+	}
+}

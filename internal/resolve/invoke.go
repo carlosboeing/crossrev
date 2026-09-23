@@ -474,7 +474,7 @@ func (l *Leg) renderPrompt(ctx context.Context, s *session, threads []forge.Revi
 			continue
 		}
 
-		body, err := l.readEvidence(ctx, workdir, s.pr.BaseRefOid, s.pr.HeadRefOid, f)
+		body, err := l.readEvidence(ctx, s.pr.BaseRefOid, s.pr.HeadRefOid, f)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -527,23 +527,16 @@ func (l *Leg) renderPrompt(ctx context.Context, s *session, threads []forge.Revi
 	return r.Render(), warn, nil
 }
 
-func (l *Leg) readEvidence(ctx context.Context, workdir string, base, head core.Revision, f diff.DiffFile) ([]byte, error) {
+// readEvidence reads the committed blob a classification judges: the base for
+// a deletion, the head otherwise. Never the working tree: the checkout is the
+// pull request's own, so a path there can be a symlink to /dev/zero or to a
+// file outside the repository, and a blob read has neither problem.
+func (l *Leg) readEvidence(ctx context.Context, base, head core.Revision, f diff.DiffFile) ([]byte, error) {
+	revision := head
 	if f.Deleted {
-		body, status, err := l.Git.Show(ctx, base, f.Path)
-		if err != nil {
-			return nil, err
-		}
-		if status != vcs.IsFile {
-			return nil, nil
-		}
-		return body, nil
+		revision = base
 	}
-	if workdir != "" {
-		if data, err := os.ReadFile(filepath.Join(workdir, f.Path)); err == nil {
-			return data, nil
-		}
-	}
-	body, status, err := l.Git.Show(ctx, head, f.Path)
+	body, status, err := l.Git.Show(ctx, revision, f.Path)
 	if err != nil {
 		return nil, err
 	}
