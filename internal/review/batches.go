@@ -127,6 +127,14 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 	marker.Leg = core.LegReview
 	marker.Pass = pass
 	marker.Version = core.MarkerVersion
+	// Packing can empty the required set: every remaining path was
+	// recognised as generated and oversized. That pass settles without a
+	// model or a converged label, and publishes no generation for a review
+	// that never ran.
+	if len(scope.Required) == 0 {
+		result, _ := l.finishNothingToReviewRun(ctx, req, loaded, pass, claimID, marker, nothingSkippedReason(len(scope.Excluded)-len(plan.Skipped), len(plan.Skipped)), out)
+		return result.Err
+	}
 	initial, initialStop, err := l.publishInitialGeneration(ctx, req, loaded, store, marker, scope, advisory, gen+1, producer, outcome.verdicts, outcome.supplied)
 	if err != nil {
 		return err

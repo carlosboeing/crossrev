@@ -217,6 +217,14 @@ func (l *Leg) Run(ctx context.Context, req Request) (out Result) {
 		settled = state.settled
 		return result
 	}
+	// Repository policy or the backlog rule can exclude every changed path.
+	// That pass settles the same way — blocked, halted, no model — rather
+	// than falling through to invoke, which would send the whole diff.
+	if scopeErr == nil && len(scope.Required) == 0 && len(scope.Excluded) > 0 && loaded.PR.ChangedFiles > 0 {
+		result, state := l.finishNothingToReviewRun(ctx, req, loaded, ad.pass, claimID, out.Marker, nothingExcludedReason(scope.Excluded), &out)
+		settled = state.settled
+		return result
+	}
 	if scopeErr == nil && len(scope.Required) > 0 {
 		store, selection, ledgerErr := l.ledgerFor(loaded)
 		if ledgerErr != nil {

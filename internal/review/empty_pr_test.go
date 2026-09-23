@@ -5,7 +5,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/carlosboeing/crossrev/internal/core"
+	"github.com/carlosboeing/crossrev/internal/exec"
 	"github.com/carlosboeing/crossrev/internal/policy"
+	"github.com/carlosboeing/crossrev/internal/review"
+	"github.com/carlosboeing/crossrev/internal/vcs"
 )
 
 // A pull request whose head matches its base changes no files, so there is
@@ -132,5 +136,102 @@ func TestEmptyGitScopeNeverConvergesWhenTheAPIDisagrees(t *testing.T) {
 			t.Fatalf("labelsAdded = %v, want no %q: the required set was empty, so no file was covered",
 				e.forge.labelsAdded, policy.LabelConverged)
 		}
+	}
+}
+
+// A pull request whose every changed path is marked linguist-generated at
+// the base leaves nothing to review. The pass settles without a model:
+// verdict blocked, the halted label, and a reason CrossRev writes — never
+// converged on a pull request nothing read.
+func TestNothingToReviewWhenEveryFileIsExcluded(t *testing.T) {
+	e := newEnv(t)
+	writeRequiredHead(e, "dist/bundle.js", "var bundle = 1\n")
+	writeRequiredHead(e, "gen/output.go", "package gen\n")
+	e.vcs.attrs = map[string]vcs.AttributeDecision{
+		"dist/bundle.js": vcs.AttributeSet,
+		"gen/output.go":  vcs.AttributeSet,
+	}
+	e.runner.onSpec = func(exec.Spec) { t.Error("the harness ran for a pass with nothing to review") }
+
+	got := runLeg(t, e, e.request(t))
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
+	if got.Outcome != review.OutcomeHalted {
+		t.Errorf("Outcome = %q, want halted", got.Outcome)
+	}
+	if e.runner.calls != 0 {
+		t.Errorf("runner.calls = %d, want 0", e.runner.calls)
+	}
+	for _, added := range e.forge.labelsAdded {
+		if added == policy.LabelConverged {
+			t.Fatalf("labelsAdded = %v, want no %q on a pass that read nothing", e.forge.labelsAdded, policy.LabelConverged)
+		}
+	}
+	if !containsString(e.forge.labelsAdded, policy.LabelHalted) {
+		t.Errorf("labelsAdded = %v, want %q", e.forge.labelsAdded, policy.LabelHalted)
+	}
+	const reason = "Every changed file is marked `linguist-generated` in `.gitattributes` at the base, so there was nothing to review. A PR that changes generated output without its source is worth a look."
+	final := decodeEditMarker(t, e.forge.edits[len(e.forge.edits)-1])
+	if v := final.Verdict.Value(); v != string(core.VerdictBlocked) {
+		t.Errorf("verdict = %q, want blocked", v)
+	}
+	if r, _ := final.BlockedReason.Get(); r != reason {
+		t.Errorf("blocked reason = %q, want the repository-exclusion reason", r)
+	}
+	summary := e.forge.edits[len(e.forge.edits)-1]
+	if !strings.Contains(summary, reason) {
+		t.Errorf("summary does not carry the reason\n--- summary ---\n%s", summary)
+	}
+}
+
+// A pull request whose every changed file is recognised as generated and is
+// too large for one prompt settles the same way, with the skip reason.
+func TestNothingToReviewWhenEveryFileIsSkipped(t *testing.T) {
+	e := newEnv(t)
+	writeRequiredHead(e, "gen/big.ts", oversizedHeaderBody())
+	writeRequiredHead(e, "src/webAssets.ts", oversizedHeaderBody())
+	e.runner.onSpec = func(exec.Spec) { t.Error("the harness ran for a pass with nothing to review") }
+
+	got := runLeg(t, e, e.request(t))
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
+	if got.Outcome != review.OutcomeHalted {
+		t.Errorf("Outcome = %q, want halted", got.Outcome)
+	}
+	if e.runner.calls != 0 {
+		t.Errorf("runner.calls = %d, want 0", e.runner.calls)
+	}
+	if !containsString(e.forge.labelsAdded, policy.LabelHalted) {
+		t.Errorf("labelsAdded = %v, want %q", e.forge.labelsAdded, policy.LabelHalted)
+	}
+	const reason = "Every changed file was recognised as generated and is too large for one review prompt, so nothing was reviewed."
+	final := decodeEditMarker(t, e.forge.edits[len(e.forge.edits)-1])
+	if r, _ := final.BlockedReason.Get(); r != reason {
+		t.Errorf("blocked reason = %q, want the all-skipped reason", r)
+	}
+}
+
+// When repository policy excludes some files and packing skips the rest, the
+// reason names both counts.
+func TestNothingToReviewNamesBothCounts(t *testing.T) {
+	e := newEnv(t)
+	writeRequiredHead(e, "dist/bundle.js", "var bundle = 1\n")
+	writeRequiredHead(e, "src/webAssets.ts", oversizedHeaderBody())
+	e.vcs.attrs = map[string]vcs.AttributeDecision{"dist/bundle.js": vcs.AttributeSet}
+	e.runner.onSpec = func(exec.Spec) { t.Error("the harness ran for a pass with nothing to review") }
+
+	got := runLeg(t, e, e.request(t))
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
+	if got.Outcome != review.OutcomeHalted {
+		t.Errorf("Outcome = %q, want halted", got.Outcome)
+	}
+	const reason = "Nothing was reviewed: 1 changed file excluded by repository policy, 1 changed file recognised as generated and too large for one review prompt."
+	final := decodeEditMarker(t, e.forge.edits[len(e.forge.edits)-1])
+	if r, _ := final.BlockedReason.Get(); r != reason {
+		t.Errorf("blocked reason = %q, want the combined counts", r)
 	}
 }
