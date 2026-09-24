@@ -46,6 +46,55 @@ func TestClaudeGrantsTheWriteOnlyToAWritingLeg(t *testing.T) {
 	}
 }
 
+// The reading leg runs with an explicit read-only tool list and loads no
+// operator MCP servers. The writing leg takes neither flag: it needs its edit
+// tools, and it keeps the argv it has always had.
+func TestClaudePinsAReadingLegToReadOnlyTools(t *testing.T) {
+	adapter := claudeAdapter(t)
+
+	reading, err := adapter.Spec(invocation(t, "claude", false))
+	if err != nil {
+		t.Fatalf("building the reading spec: %v", err)
+	}
+	if !hasFlagPair(reading.Args, "--tools", "Read,Grep,Glob") {
+		t.Errorf("a reading leg is pinned to the read-only tool list; got %v", reading.Args)
+	}
+	if !slices.Contains(reading.Args, "--strict-mcp-config") {
+		t.Errorf("a reading leg loads no operator MCP servers; got %v", reading.Args)
+	}
+
+	writing, err := adapter.Spec(invocation(t, "claude", true))
+	if err != nil {
+		t.Fatalf("building the writing spec: %v", err)
+	}
+	if slices.Contains(writing.Args, "--tools") {
+		t.Errorf("a writing leg keeps its edit tools; got %v", writing.Args)
+	}
+	if slices.Contains(writing.Args, "--strict-mcp-config") {
+		t.Errorf("a writing leg takes no MCP exclusion; got %v", writing.Args)
+	}
+}
+
+// The named-endpoint path builds through the same adapter, so a reading leg on
+// it carries the same tool list.
+func TestClaudeNamedEndpointKeepsAReadingLegReadOnly(t *testing.T) {
+	inv := invocation(t, "claude", false)
+	inv.Endpoint = harness.Endpoint{
+		Name: "an-endpoint", URL: "https://example.invalid", TokenVar: "AN_ENDPOINT_TOKEN", Token: "sekret",
+	}
+
+	spec, err := claudeAdapter(t).Spec(inv)
+	if err != nil {
+		t.Fatalf("building the spec: %v", err)
+	}
+	if !hasFlagPair(spec.Args, "--tools", "Read,Grep,Glob") {
+		t.Errorf("an endpoint reading leg is pinned to the read-only tool list; got %v", spec.Args)
+	}
+	if !slices.Contains(spec.Args, "--strict-mcp-config") {
+		t.Errorf("an endpoint reading leg loads no operator MCP servers; got %v", spec.Args)
+	}
+}
+
 func TestClaudeArgumentShape(t *testing.T) {
 	adapter := claudeAdapter(t)
 	inv := invocation(t, "claude", false)

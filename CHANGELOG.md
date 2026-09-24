@@ -2,6 +2,12 @@
 
 All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **The Claude Code review leg runs with an explicit read-only tool list and loads no operator MCP servers.** The reading leg passed no mode and no tool flags at all, so the session ran with whatever the operator's own settings carried. It now passes `--tools Read,Grep,Glob` and `--strict-mcp-config`: the three read tools the review needs, and no MCP servers at all (`--tools` covers built-in tools only, so the two flags travel together). The named-endpoint path builds through the same adapter and gets the same list. The resolve leg is unchanged — it needs its edit tools and keeps its argv.
+
 ## [0.8.0] — 2026-09-21
 
 ### Fixed
