@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -346,4 +347,52 @@ func hasFlagPair(args []string, flag, value string) bool {
 		}
 	}
 	return false
+}
+
+// The version gate refuses an opencode past its supported major before the
+// leg's run child starts (issue #272): the probe is the only child the runner
+// ever sees.
+func TestOpencodeVersionGateRefusesBeforeTheRun(t *testing.T) {
+	e := setup(t)
+	e.addReview(t, defaultFindings(), "issues-remain")
+	e.adapter = nil // the real adapters build the specs
+	e.runner.stdout = []byte("opencode v2.0.15\n")
+
+	got := e.runReq(t, Request{PR: 42, Repo: e.slug, Trigger: TriggerHuman, Harness: "opencode"})
+	if got.Err == nil {
+		t.Fatal("the leg accepted an opencode 2.x install")
+	}
+	if !strings.Contains(got.Err.Error(), "opencode 1.x") {
+		t.Errorf("err = %q, want the supported range named", got.Err)
+	}
+	if !strings.Contains(got.Err.Error(), "#272") {
+		t.Errorf("err = %q, want issue #272 named", got.Err)
+	}
+	if len(e.runner.specs) != 1 {
+		t.Fatalf("the runner started %d children, want only the version probe: %v", len(e.runner.specs), e.runner.specs)
+	}
+	if !slices.Equal(e.runner.specs[0].Args, []string{"--version"}) {
+		t.Errorf("the only child was the version probe; got %v", e.runner.specs[0].Args)
+	}
+}
+
+// A supported install passes the gate and reaches the run. The canned stdout is
+// not a valid run stream, so the leg fails afterwards on the envelope — this
+// asserts the gate let it through, not the run's outcome.
+func TestOpencodeVersionGateRunsASupportedInstall(t *testing.T) {
+	e := setup(t)
+	e.addReview(t, defaultFindings(), "issues-remain")
+	e.adapter = nil
+	e.runner.stdout = []byte("opencode v1.18.21 (test stub)\n")
+
+	e.runReq(t, Request{PR: 42, Repo: e.slug, Trigger: TriggerHuman, Harness: "opencode"})
+	if len(e.runner.specs) != 2 {
+		t.Fatalf("the runner started %d children, want the probe and the run: %v", len(e.runner.specs), e.runner.specs)
+	}
+	if !slices.Equal(e.runner.specs[0].Args, []string{"--version"}) {
+		t.Errorf("the first child is the version probe; got %v", e.runner.specs[0].Args)
+	}
+	if got := e.runner.specs[1].Args[0]; got != "run" {
+		t.Errorf("the second child is the run; got %v", e.runner.specs[1].Args)
+	}
 }

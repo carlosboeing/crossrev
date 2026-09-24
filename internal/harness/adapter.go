@@ -29,6 +29,7 @@ package harness
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"strconv"
@@ -72,6 +73,42 @@ type Adapter interface {
 	// adapter refuses at `command -v` before running anything — so the caller
 	// translates one with NotInstalled first.
 	Envelope(Invocation, exec.Result) Envelope
+}
+
+// VersionPinned is the adapter that knows which CLI versions it drives and
+// refuses an install outside them before the leg starts.
+//
+// The leg runs the probe, the way it runs every child: an adapter builds Specs
+// and starts nothing (see Spec above). `--version` starts no model and costs no
+// call, so the check runs on every leg rather than behind a cache.
+type VersionPinned interface {
+	// VersionProbe is the child that reports the installed CLI's version.
+	VersionProbe(Invocation) exec.Spec
+	// VersionRefusal reads the probe's answer: the refusal for an install this
+	// adapter does not drive — including a probe that reported no version at
+	// all — or nil for a confirmed supported one.
+	VersionRefusal(probe []byte) *Refusal
+}
+
+// CheckVersion runs the version probe of an adapter that has one and answers
+// its refusal, or nil when the leg may start. An adapter that pins no version
+// is left alone.
+func CheckVersion(ctx context.Context, runner exec.Runner, adapter Adapter, inv Invocation) *Refusal {
+	pinned, ok := adapter.(VersionPinned)
+	if !ok {
+		return nil
+	}
+	res := runner.Run(ctx, pinned.VersionProbe(inv))
+	if res.Err != nil && exec.IsNotFound(res.Err) {
+		return adapter.NotInstalled()
+	}
+	if res.Err != nil || res.ExitCode != 0 {
+		// Fail closed: a probe that did not answer leaves the version
+		// unconfirmed, and unconfirmed is not supported. The adapter's own
+		// "did not report" refusal is the answer, and the leg does not start.
+		return pinned.VersionRefusal(nil)
+	}
+	return pinned.VersionRefusal(res.Stdout)
 }
 
 // Exporter is the adapter that answers its telemetry from a SECOND child.

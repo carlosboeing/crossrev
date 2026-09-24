@@ -8,6 +8,8 @@ All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepa
 
 - **The Claude Code review leg runs with an explicit read-only tool list and loads no operator MCP servers.** The reading leg passed no mode and no tool flags at all, so the session ran with whatever the operator's own settings carried. It now passes `--tools Read,Grep,Glob` and `--strict-mcp-config`: the three read tools the review needs, and no MCP servers at all (`--tools` covers built-in tools only, so the two flags travel together). The named-endpoint path builds through the same adapter and gets the same list. The resolve leg is unchanged — it needs its edit tools and keeps its argv.
 
+- **An opencode install past 1.x is refused before a leg starts.** opencode 2.x does not accept the flags the adapter passes and does not read the isolation config it writes ([#272](https://github.com/carlosboeing/crossrev/issues/272)), so a run on it would start without the constraints the config exists to hold. Both legs probe `opencode --version` first and refuse 2.x and later — and any install whose probe does not answer with a version — naming the supported range and the install to use, rather than starting a leg that cannot run as intended.
+
 ## [0.8.0] — 2026-09-21
 
 ### Fixed
