@@ -266,7 +266,8 @@ func TestCheckTreatsAnEmptyLoginAsNoAnswer(t *testing.T) {
 }
 
 // The harness set is descriptor-driven, and a harness is optional
-// (lib/preflight.sh:138-165).
+// (lib/preflight.sh:138-165). Each reported version is compared against the
+// span on record for that harness.
 func TestCheckHarnessReportsEveryDescribedHarness(t *testing.T) {
 	t.Setenv("GITHUB_ACTIONS", "")
 	r := coreVersions(newRecorder())
@@ -287,13 +288,42 @@ func TestCheckHarnessReportsEveryDescribedHarness(t *testing.T) {
 		"│  ✓ jq 1.8.1\n" +
 		"│  ✓ yq v4.53.3\n" +
 		"│  ✓ openssl 3.6.3\n" +
-		"│  ✓ claude 2.1.258\n" +
-		"│  ✓ codex 0.152.1\n" +
+		"│  ✓ claude 2.1.258 — known good (2.1.237-2.1.281)\n" +
+		"│  ✓ codex 0.152.1 — unverified, outside the recorded range (0.148.0)\n" +
 		"│  ○ agy — installed, but it did not report a version\n" +
 		"│  ○ grok — not found, optional\n" +
 		"│  ○ opencode — not found, optional\n"
 	if got := buf.String(); got != want {
 		t.Errorf("report =\n%q\nwant\n%q", got, want)
+	}
+}
+
+// A version is reported against the span on record, never against an invented
+// range: outside the span is unverified, a harness with no recorded span says
+// so, and the one recorded boundary — opencode 2.x and later (issue #272) —
+// names itself rather than reading as merely unverified. None of it is a
+// failure: the report is information, and the refusal lives in the leg.
+func TestCheckHarnessComparesVersionsAgainstRecordedEvidence(t *testing.T) {
+	t.Setenv("GITHUB_ACTIONS", "")
+	r := coreVersions(newRecorder())
+	r.answer("gh api user --jq .login", "carlosboeing\n", 0)
+	r.answer("claude --version", "2.1.300 (Claude Code)\n", 0)
+	r.answer("agy --version", "0.1.5\n", 0)
+	r.answer("opencode --version", "opencode v2.0.15\n", 0)
+	c, buf := checker(t, r, onPath("git", "gh", "jq", "yq", "openssl", "claude", "agy", "opencode"))
+
+	if !c.Check(context.Background(), preflight.NeedHarness) {
+		t.Errorf("Check = false, want true")
+	}
+	report := buf.String()
+	for _, want := range []string{
+		"│  ✓ claude 2.1.300 — unverified, outside the recorded range (2.1.237-2.1.281)\n",
+		"│  ✓ agy 0.1.5 — unverified, no recorded version range\n",
+		"│  ✓ opencode v2.0.15 — unsupported: CrossRev drives opencode 1.x, see issue #272\n",
+	} {
+		if !strings.Contains(report, want) {
+			t.Errorf("report =\n%s\nwant a line %q", report, want)
+		}
 	}
 }
 

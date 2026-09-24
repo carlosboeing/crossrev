@@ -10,6 +10,10 @@ All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepa
 
 - **An opencode install past 1.x is refused before a leg starts.** opencode 2.x does not accept the flags the adapter passes and does not read the isolation config it writes ([#272](https://github.com/carlosboeing/crossrev/issues/272)), so a run on it would start without the constraints the config exists to hold. Both legs probe `opencode --version` first and refuse 2.x and later — and any install whose probe does not answer with a version — naming the supported range and the install to use, rather than starting a leg that cannot run as intended.
 
+### Added
+
+- **`crossrev doctor` reports each installed harness's version against the versions on record.** The record is the descriptor's install pins and recorded runs — Claude Code 2.1.237-2.1.281, Codex 0.148.0, Grok 1.0.5, opencode 1.18.21 — and nothing wider. A version outside it reports as unverified rather than judged, agy has no recorded range and says so, and opencode 2.x names its boundary and issue #272. The report is information and fails nothing; the refusal that stops work is the leg's own.
+
 ## [0.8.0] — 2026-09-21
 
 ### Fixed

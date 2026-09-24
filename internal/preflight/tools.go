@@ -2,9 +2,11 @@ package preflight
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 
 	"github.com/carlosboeing/crossrev/internal/config"
@@ -220,6 +222,94 @@ func (c *Checker) darwin() bool {
 // token out gives one readable format.
 var versionToken = regexp.MustCompile(`v?[0-9]+\.[0-9]+[0-9A-Za-z.+-]*`)
 
+// versionSpan is the span of one harness CLI's version CrossRev has on record,
+// and where a recorded boundary sits below it.
+type versionSpan struct {
+	// lo and hi are the inclusive bounds of the record.
+	lo, hi [3]int
+	// label is the span the way this report prints it.
+	label string
+	// maxMajor is the highest major the adapters drive when that boundary is
+	// recorded in its own right — today only opencode's 1.x, with 2.x refused
+	// by the leg (issue #272). Zero is "the span says it all".
+	maxMajor int
+}
+
+// recordedVersions is what is on record about each harness CLI's version: the
+// exact span CrossRev has run, from the descriptor's install pin
+// (internal/harness/assets/harnesses.json) and from recorded runs. A report
+// never widens it. A version outside the span reads as unverified, and a
+// harness with no entry — agy, whose install pins nothing — reads as having no
+// recorded range at all.
+//
+// A span of one is one: codex, grok and opencode are pinned exactly and
+// nothing wider was recorded. Claude Code's pin is 2.1.237 and recorded runs
+// reach 2.1.281.
+var recordedVersions = map[string]versionSpan{
+	"claude":   {lo: [3]int{2, 1, 237}, hi: [3]int{2, 1, 281}, label: "2.1.237-2.1.281"},
+	"codex":    {lo: [3]int{0, 148, 0}, hi: [3]int{0, 148, 0}, label: "0.148.0"},
+	"grok":     {lo: [3]int{1, 0, 5}, hi: [3]int{1, 0, 5}, label: "1.0.5"},
+	"opencode": {lo: [3]int{1, 18, 21}, hi: [3]int{1, 18, 21}, label: "1.18.21", maxMajor: 1},
+}
+
+// versionVerdict is what the report adds to one reported version: the
+// comparison against the record, and nothing stronger. Every line is
+// information — an unverified version fails nothing, because the refusal that
+// stops work lives in the leg and says so.
+func versionVerdict(name, token string) string {
+	span, recorded := recordedVersions[name]
+	numbers := versionNumbers(token)
+	if recorded && span.maxMajor > 0 && numbers[0] > span.maxMajor {
+		// The one recorded boundary below a span: the adapter refuses this
+		// major outright (issue #272), which is stronger than unverified.
+		return fmt.Sprintf(" — unsupported: CrossRev drives %s %d.x, see issue #272", name, span.maxMajor)
+	}
+	if !recorded {
+		return " — unverified, no recorded version range"
+	}
+	if span.contains(numbers) {
+		return " — known good (" + span.label + ")"
+	}
+	return " — unverified, outside the recorded range (" + span.label + ")"
+}
+
+// contains is the inclusive recorded span.
+func (s versionSpan) contains(version [3]int) bool {
+	return compareVersions(s.lo, version) <= 0 && compareVersions(version, s.hi) <= 0
+}
+
+// compareVersions orders two version triples component by component.
+func compareVersions(a, b [3]int) int {
+	for at := range a {
+		if a[at] != b[at] {
+			if a[at] < b[at] {
+				return -1
+			}
+			return 1
+		}
+	}
+	return 0
+}
+
+// versionNumbers reads up to three numeric components of a version token.
+// "v2.1.281" and "2.1.281-beta" both read as 2.1.281: the digits before any
+// suffix, with a missing component counting as zero.
+func versionNumbers(token string) [3]int {
+	var numbers [3]int
+	for at, part := range strings.SplitN(strings.TrimPrefix(token, "v"), ".", 3) {
+		digits := part
+		for index, r := range part {
+			if r < '0' || r > '9' {
+				digits = part[:index]
+				break
+			}
+		}
+		number, _ := strconv.Atoi(digits)
+		numbers[at] = number
+	}
+	return numbers
+}
+
 // The three outcomes of a version probe (lib/preflight.sh:44-47). They are
 // separate because the fixes differ and the caller has to say which.
 const (
@@ -368,7 +458,8 @@ func (c *Checker) ghOK(ctx context.Context, path, jq string) bool {
 }
 
 // checkHarness reports every harness the descriptor drives and answers whether
-// at least one is installed (lib/preflight.sh:138-165).
+// at least one is installed (lib/preflight.sh:138-165). Each installed harness
+// gets its version compared against the span on record.
 func (c *Checker) checkHarness(ctx context.Context) bool {
 	// jq is what reads the descriptor in the shell, so without it the probe is
 	// skipped rather than reporting every harness as missing. Go reads the
@@ -389,7 +480,7 @@ func (c *Checker) checkHarness(ctx context.Context) bool {
 		version, rc := c.toolVersion(ctx, binary)
 		switch rc {
 		case versionOK:
-			c.io().OK(version)
+			c.io().OK(version + versionVerdict(name, strings.TrimPrefix(version, binary+" ")))
 			found = true
 		case versionSilent:
 			// Deliberately not counted as a harness. A CLI that will not say
