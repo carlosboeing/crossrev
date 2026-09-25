@@ -218,7 +218,7 @@ var environment = []Variable{
 	{
 		Name:    "GITHUB_ACTIONS",
 		Class:   ClassRunnerSignal,
-		Readers: []string{"internal/preflight", "internal/vcs"},
+		Readers: []string{"internal/preflight", "cmd/crossrev"},
 	},
 	{
 		Name:    "GITHUB_ENTERPRISE_TOKEN",

@@ -11,6 +11,7 @@ import (
 	"github.com/carlosboeing/crossrev/internal/harness"
 	"github.com/carlosboeing/crossrev/internal/prstate"
 	"github.com/carlosboeing/crossrev/internal/ui"
+	"github.com/carlosboeing/crossrev/internal/vcs"
 )
 
 // Run loads context, admits the pass, posts the claim, invokes the reviewer,
@@ -133,7 +134,7 @@ func (l *Leg) Run(ctx context.Context, req Request) (out Result) {
 			return out
 		}
 		if l.Log != nil && len(removed) > 0 {
-			l.Log.Event("credentials", removedCredentialLine(removed))
+			l.Log.Event("credentials", vcs.RemovedCredentialLine(removed))
 		}
 	}
 

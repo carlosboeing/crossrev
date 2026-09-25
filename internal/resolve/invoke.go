@@ -36,7 +36,7 @@ func (l *Leg) prepareWorktree(ctx context.Context, s *session) (string, error) {
 		return "", err
 	}
 	if l.Log != nil && len(removed) > 0 {
-		l.Log.Event("credentials", removedCredentialLine(removed))
+		l.Log.Event("credentials", vcs.RemovedCredentialLine(removed))
 	}
 	wt, err := vcs.WorktreeDir(s.repo, s.req.PR)
 	if err != nil {

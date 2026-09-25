@@ -156,7 +156,7 @@ runs:
         GH_TOKEN: ${{ inputs.app-token }}
       run: |
         set -euo pipefail
-        [[ -n "${{ inputs.app-token }}" ]] || {
+        [[ -n "${GH_TOKEN:-}" ]] || {
           echo "::error::app-token is empty. crossrev will not run with GITHUB_TOKEN:" \
                "writes made with it do not trigger workflows, so the loop would stop" \
                "after one pass with no error anywhere."

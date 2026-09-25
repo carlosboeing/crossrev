@@ -42,15 +42,3 @@ func TestTheResolveLegRemovesPersistedCheckoutCredentials(t *testing.T) {
 		}
 	})
 }
-
-func TestRemovedCredentialLineNamesTheCountAndTheFiles(t *testing.T) {
-	got := removedCredentialLine([]vcs.RemovedCredential{
-		{Key: "http.https://github.com/.extraheader", File: ".git/config"},
-		{Key: "http.https://ghe.example.com/.extraheader", File: ".git/config"},
-		{Key: "http.https://github.com/.extraheader", File: "/tmp/runner/creds"},
-	})
-	want := "removed 3 persisted checkout credential entries from .git/config, /tmp/runner/creds"
-	if got != want {
-		t.Errorf("line = %q, want %q", got, want)
-	}
-}
