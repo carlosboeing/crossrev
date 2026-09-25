@@ -47,10 +47,11 @@ func TestClaudeGrantsTheWriteOnlyToAWritingLeg(t *testing.T) {
 }
 
 // The reading leg runs with an explicit read-only tool list and loads no
-// operator MCP servers. Agent and Skill are removed outright: they are named
-// separately from the `--tools` list in the CLI reference's own rules, so the
-// removal is spelled rather than inferred. The writing leg takes none of these
-// flags: it needs its edit tools, and it keeps the argv it has always had.
+// operator MCP servers. Agent and Skill are removed outright rather than left
+// to inference: the CLI reference's --disallowedTools rule removes a bare tool
+// name from context, and no read of a diff needs either tool. The writing leg
+// takes none of these flags: it needs its edit tools, and it keeps the argv it
+// has always had.
 func TestClaudePinsAReadingLegToReadOnlyTools(t *testing.T) {
 	adapter := claudeAdapter(t)
 
