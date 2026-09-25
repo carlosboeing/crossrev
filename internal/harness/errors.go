@@ -29,6 +29,10 @@ var (
 	// (lib/adapters/claude.sh:19-21).
 	ErrNotInstalled = errors.New("the harness CLI is not installed")
 
+	// ErrVersionUnsupported is returned for an install outside the CLI
+	// versions this adapter drives.
+	ErrVersionUnsupported = errors.New("the harness CLI version is outside the supported range")
+
 	// ErrEndpointUnsupported is a named endpoint given to an adapter that
 	// cannot reach one. Named endpoints are Anthropic-compatible and reached
 	// through one adapter (lib/adapters/codex.sh:26-29).

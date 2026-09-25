@@ -1,7 +1,9 @@
 package harness_test
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -470,4 +472,131 @@ func TestOpencodeWritesNothingIntoTheCheckout(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(inv.Scratch, "config.json")); err != nil {
 		t.Errorf("the isolation config is not in the scratch directory: %v", err)
 	}
+}
+
+// An install past the supported major version is refused by version, before the
+// leg starts. opencode 2.x does not accept the flags this adapter passes and
+// does not read the isolation config it writes (issue #272), so a run on it
+// would start without the constraints the config exists to hold. A probe that
+// names no version is refused the same way: "could not confirm" is not
+// "supported", and the gate fails closed.
+func TestOpencodeRefusesAnInstallPastTheSupportedMajor(t *testing.T) {
+	adapter := opencodeAdapter(t)
+	pinned, ok := any(adapter).(harness.VersionPinned)
+	if !ok {
+		t.Fatal("the opencode adapter does not implement harness.VersionPinned")
+	}
+
+	inv := invocation(t, "opencode", false)
+	probe := pinned.VersionProbe(inv)
+	if !slices.Equal(probe.Args, []string{"--version"}) {
+		t.Errorf("the version probe is `opencode --version`; got %v", probe.Args)
+	}
+	if probe.Dir != inv.Scratch {
+		t.Errorf("the probe's working directory = %q, want the scratch directory %q — it runs before the quarantine, so it must not start in the checkout", probe.Dir, inv.Scratch)
+	}
+
+	for _, tt := range []struct {
+		name string
+		out  string
+	}{
+		{name: "2.x", out: "opencode v2.0.15\n"},
+		{name: "2.0.0", out: "opencode v2.0.0\n"},
+		{name: "3.x", out: "opencode v3.1.4\n"},
+		{name: "0.x", out: "opencode v0.9.9\n"},
+		{name: "no version token at all", out: "no version token here\n"},
+		{name: "no output at all", out: ""},
+	} {
+		t.Run("refuses "+tt.name, func(t *testing.T) {
+			refusal := pinned.VersionRefusal([]byte(tt.out))
+			if refusal == nil {
+				t.Fatal("the install was accepted")
+			}
+			if !errorIs(refusal, harness.ErrVersionUnsupported) {
+				t.Errorf("err = %v, want ErrVersionUnsupported", refusal)
+			}
+			if !strings.Contains(refusal.Reason, "opencode 1.x") {
+				t.Errorf("Reason does not name the supported range: %q", refusal.Reason)
+			}
+			if !strings.Contains(refusal.Action, "issues/272") {
+				t.Errorf("Action does not point at issue #272: %q", refusal.Action)
+			}
+			if !strings.Contains(refusal.Action, "opencode-ai@1.18.21") {
+				t.Errorf("Action does not name the supported install: %q", refusal.Action)
+			}
+		})
+	}
+
+	for _, out := range []string{
+		"1.18.21 (test stub)\n",
+		"opencode v1.18.21\n",
+		"opencode v1.0.0\n",
+	} {
+		t.Run(fmt.Sprintf("accepts %q", strings.TrimSpace(out)), func(t *testing.T) {
+			if refusal := pinned.VersionRefusal([]byte(out)); refusal != nil {
+				t.Errorf("refusal = %v, want nil", refusal)
+			}
+		})
+	}
+}
+
+// fixedRunner answers one canned result to every child it is handed.
+type fixedRunner struct{ res exec.Result }
+
+func (r fixedRunner) Run(context.Context, exec.Spec) exec.Result { return r.res }
+
+// A probe that does not answer refuses rather than admitting the leg: the gate
+// fails closed, because an unconfirmed version is not a supported one. A
+// missing binary stays the not-installed refusal it has always been.
+func TestCheckVersionRefusesAProbeThatDoesNotAnswer(t *testing.T) {
+	adapter, known := harness.For(descriptors(t), "opencode")
+	if !known {
+		t.Fatal("the descriptor carries no opencode adapter")
+	}
+	inv := invocation(t, "opencode", false)
+
+	for _, tt := range []struct {
+		name string
+		res  exec.Result
+	}{
+		{name: "a probe that failed to run", res: exec.Result{Err: exec.ErrPipesAbandoned}},
+		{name: "a probe that exited non-zero", res: exec.Result{ExitCode: 1}},
+		{name: "a probe that printed nothing", res: exec.Result{}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			refusal := harness.CheckVersion(context.Background(), fixedRunner{tt.res}, adapter, inv)
+			if refusal == nil {
+				t.Fatal("the leg was allowed to start on an unconfirmed version")
+			}
+			if !errorIs(refusal, harness.ErrVersionUnsupported) {
+				t.Errorf("err = %v, want ErrVersionUnsupported", refusal)
+			}
+			if !strings.Contains(refusal.Reason, "opencode 1.x") {
+				t.Errorf("Reason does not name the supported range: %q", refusal.Reason)
+			}
+		})
+	}
+
+	t.Run("a supported version lets the leg start", func(t *testing.T) {
+		res := exec.Result{Stdout: []byte("opencode v1.18.21 (test stub)\n")}
+		if refusal := harness.CheckVersion(context.Background(), fixedRunner{res}, adapter, inv); refusal != nil {
+			t.Errorf("refusal = %v, want nil", refusal)
+		}
+	})
+
+	t.Run("a missing binary stays the not-installed refusal", func(t *testing.T) {
+		// The real start failure, from the real runner: a missing binary
+		// starts nothing and answers the one error shape IsNotFound must keep
+		// matching, rather than a fabricated one.
+		missing := exec.NewOSRunner().Run(context.Background(), exec.Spec{
+			Path: "crossrev-no-such-binary-for-tests", Args: []string{"--version"},
+		})
+		refusal := harness.CheckVersion(context.Background(), fixedRunner{missing}, adapter, inv)
+		if refusal == nil {
+			t.Fatal("a missing binary was allowed to start the leg")
+		}
+		if !errorIs(refusal, harness.ErrNotInstalled) {
+			t.Errorf("err = %v, want ErrNotInstalled", refusal)
+		}
+	})
 }

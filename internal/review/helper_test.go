@@ -223,6 +223,12 @@ type fakeRunner struct {
 	script []exec.Result
 	calls  int
 	onSpec func(exec.Spec)
+	// probes records `--version` children, and version is what they answer.
+	// A probe is not a session child: it neither advances the script nor
+	// counts in calls, the same way tests/stub/opencode answers --version
+	// before it logs anything.
+	probes  []exec.Spec
+	version string
 }
 
 func (r *fakeRunner) Run(_ context.Context, spec exec.Spec) exec.Result {
@@ -230,6 +236,15 @@ func (r *fakeRunner) Run(_ context.Context, spec exec.Spec) exec.Result {
 		r.log.add("harness")
 	}
 	r.mu.Lock()
+	if len(spec.Args) == 1 && spec.Args[0] == "--version" {
+		r.probes = append(r.probes, spec)
+		version := r.version
+		if version == "" {
+			version = "1.18.21 (test stub)"
+		}
+		r.mu.Unlock()
+		return exec.Result{ExitCode: 0, Stdout: []byte(version + "\n")}
+	}
 	r.specs = append(r.specs, spec)
 	r.calls++
 	call := r.calls

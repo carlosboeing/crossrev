@@ -2,6 +2,18 @@
 
 All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **The Claude Code review leg runs with an explicit read-only tool list and loads no operator MCP servers.** The reading leg passed no mode and no tool flags at all, so the session ran with whatever the operator's own settings carried. It now passes `--tools Read,Grep,Glob`, `--disallowedTools Agent,Skill` and `--strict-mcp-config`: the three read tools the review needs, with the Agent and Skill tools removed and no MCP servers at all (`--tools` covers built-in tools only and leaves MCP tools alone, so the flags travel together). The named-endpoint path builds through the same adapter and gets the same list. The resolve leg is unchanged — it needs its edit tools and keeps its argv.
+
+- **An opencode install outside 1.x is refused before a leg starts.** opencode 2.x does not accept the flags the adapter passes and does not read the isolation config it writes ([#272](https://github.com/carlosboeing/crossrev/issues/272)), so a run on it would start without the constraints the config exists to hold. Both legs probe `opencode --version` first — outside the checkout, before the resolve leg's quarantine — and refuse any install that is not 1.x, and one whose probe reports no version, naming the supported range and the install to use rather than starting a leg that cannot run as intended.
+
+### Added
+
+- **`crossrev doctor` reports each installed harness's version against the versions on record.** The record is the descriptor's install pins — Claude Code 2.1.237-2.1.281 with recorded runs above the pin, Codex 0.148.0, Grok 1.0.5, opencode 1.18.21 — and nothing wider, so a pin bump moves the record with it. A version outside it reports as unverified rather than judged, and agy has no recorded range and says so. An install an adapter refuses — opencode 2.x today ([#272](https://github.com/carlosboeing/crossrev/issues/272)) — is reported in the adapter's own words and not counted as a harness, because no leg will start it.
+
 ## [0.8.0] — 2026-09-21
 
 ### Fixed

@@ -226,6 +226,12 @@ func (l *Leg) invoke(ctx context.Context, s *session, marker prstate.Marker, wor
 		return wrapErr(err)
 	}
 
+	// The version gate, before anything starts: an adapter that pins its CLI
+	// version refuses an install it does not drive rather than run a leg on it.
+	if refusal := harness.CheckVersion(ctx, l.runner(), adapter, inv); refusal != nil {
+		return wrapErr(refusal)
+	}
+
 	entry, _ := doc.For(s.settings.Harness)
 	shapeBudget := 1
 	if !entry.SchemaNative {
