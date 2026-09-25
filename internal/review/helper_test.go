@@ -149,6 +149,12 @@ type fakeVCS struct {
 	// searchCalls counts ExactSearch invocations, so a test can pin how often
 	// advisory discovery runs.
 	searchCalls int
+	// removePersistedCalls counts RemovePersistedCredentials invocations, and
+	// removePersistedErr is the failure it returns.
+	removePersistedCalls int
+	removePersistedErr   error
+	// removed is what RemovePersistedCredentials answers.
+	removed []vcs.RemovedCredential
 }
 
 func (f *fakeVCS) ExactSearch(_ context.Context, revision core.Revision, term string, limit int) ([]vcs.SearchHit, bool, error) {
@@ -214,6 +220,14 @@ func (f *fakeVCS) Show(_ context.Context, revision core.Revision, path string) (
 		return nil, vcs.NotFound, nil
 	}
 	return content, vcs.IsFile, nil
+}
+
+func (f *fakeVCS) RemovePersistedCredentials(context.Context) ([]vcs.RemovedCredential, error) {
+	f.removePersistedCalls++
+	if f.removePersistedErr != nil {
+		return nil, f.removePersistedErr
+	}
+	return f.removed, nil
 }
 
 type fakeRunner struct {

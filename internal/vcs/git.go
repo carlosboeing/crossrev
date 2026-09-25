@@ -42,6 +42,13 @@ type Git struct {
 
 	// Runner starts the child.
 	Runner exec.Runner
+
+	// ActionsRunner says this process runs on a GitHub Actions runner, and
+	// every git child authenticates to the forge host per invocation for it.
+	// The composition root decides once; the zero value is a local run, and
+	// tests set the field directly rather than inheriting the machine they
+	// run on.
+	ActionsRunner bool
 }
 
 // New returns a Git that starts children through runner with env.
@@ -114,15 +121,20 @@ func (o Output) Lines() []string {
 // default. NewOSRunner refuses a child whose environment names GH_TOKEN,
 // GITHUB_TOKEN, GH_ENTERPRISE_TOKEN or GITHUB_ENTERPRISE_TOKEN — and git
 // legitimately holds one. lib/github.sh pushes with a plain `git push`
-// (lib/github.sh:449 and :516) over whatever credential helper the
-// environment configures, which on a GitHub-hosted runner is the ambient
-// token. A model-facing runner here would refuse that push with a security
-// message about a leak that is not happening.
+// (lib/github.sh:449 and :516). A model-facing runner here would refuse that
+// push with a security message about a leak that is not happening.
 //
 // git is also not the process the boundary exists for. That process is the
 // harness, described at lib/adapters/codex.sh:79-82 as "the process that reads
 // attacker-controlled text"; git reads a repository the orchestrator already
 // decided to run in.
+//
+// On a GitHub Actions runner the invocation also carries the forge-host
+// credential pair: the checkout persists no token under the generated
+// workflows, and the legs remove a persisted one before they run, so git
+// authenticates per invocation through `gh` instead of reading the checkout's
+// config. Locally the invocation is untouched, and the operator's own
+// credential helper answers as it always has.
 //
 // A non-zero exit is data, not an error: `git cat-file -e` answers a question
 // with its status and lib/run.sh:1873 reads it as one. The error return covers
@@ -140,9 +152,14 @@ func (g *Git) Run(ctx context.Context, call Call) (Output, error) {
 		env = append(env, call.ExtraEnv...)
 	}
 
+	args := call.Args
+	if g.ActionsRunner {
+		args = withRunnerCredentials(args)
+	}
+
 	result := g.Runner.Run(ctx, exec.Spec{
 		Path:    path,
-		Args:    call.Args,
+		Args:    args,
 		Dir:     call.Dir,
 		Env:     env,
 		Streams: call.Streams,

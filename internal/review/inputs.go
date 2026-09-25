@@ -95,6 +95,7 @@ type VCS interface {
 	ChangedFiles(ctx context.Context, base, head core.Revision) ([]core.FileChange, error)
 	ExactSearch(ctx context.Context, revision core.Revision, term string, limit int) ([]vcs.SearchHit, bool, error)
 	RangeDiff(ctx context.Context, base, head core.Revision) ([]byte, error)
+	RemovePersistedCredentials(ctx context.Context) ([]vcs.RemovedCredential, error)
 }
 
 // Leg is the review orchestrator. Dependencies are injected.

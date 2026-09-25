@@ -145,6 +145,7 @@ type Git interface {
 	HasStagedChanges(ctx context.Context) (bool, error)
 	Commit(ctx context.Context, options vcs.CommitOptions) error
 	Push(ctx context.Context, remote, branch string, runHooks bool) error
+	RemovePersistedCredentials(ctx context.Context) ([]vcs.RemovedCredential, error)
 	PushURL(ctx context.Context, remote string) (string, error)
 	RemoteHead(ctx context.Context, url, branch string) (string, error)
 	RemoveWorktree(ctx context.Context, dir string) error
@@ -218,6 +219,9 @@ func (g repoGit) Commit(ctx context.Context, options vcs.CommitOptions) error {
 }
 func (g repoGit) Push(ctx context.Context, remote, branch string, runHooks bool) error {
 	return g.repo.Push(ctx, remote, branch, runHooks)
+}
+func (g repoGit) RemovePersistedCredentials(ctx context.Context) ([]vcs.RemovedCredential, error) {
+	return g.repo.RemovePersistedCredentials(ctx)
 }
 func (g repoGit) PushURL(ctx context.Context, remote string) (string, error) {
 	return g.repo.PushURL(ctx, remote)
