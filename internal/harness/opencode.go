@@ -194,38 +194,46 @@ func (a *Opencode) Spec(inv Invocation) (exec.Spec, error) {
 
 // VersionProbe is `opencode --version`, which reports "opencode vX.Y.Z" and
 // costs no model call.
+//
+// Its working directory is the scratch directory rather than the checkout:
+// --version needs no checkout, and the resolve leg runs this probe before the
+// quarantine has moved repository-provided harness configuration, so starting
+// it outside the worktree is what keeps the probe from reading any.
 func (a *Opencode) VersionProbe(inv Invocation) exec.Spec {
-	return a.spec(inv, []string{"--version"})
+	probe := a.spec(inv, []string{"--version"})
+	probe.Dir = inv.Scratch
+	return probe
 }
 
-// VersionRefusal refuses an install past the major version this adapter
+// VersionRefusal refuses an install outside the major version this adapter
 // drives, before the leg starts — and one it cannot read a version from.
 //
-// The boundary is measured rather than defensive: opencode 2.x does not accept
-// the flags this adapter passes and does not read the isolation config it
-// writes, so a run on it would start with no constraints at all
-// (https://github.com/carlosboeing/crossrev/issues/272). Refusing by version
-// is what keeps the leg from ever starting there.
+// The rule is exactly 1.x, which is what every refusal here names. The upper
+// boundary is measured rather than defensive: opencode 2.x does not accept the
+// flags this adapter passes and does not read the isolation config it writes,
+// so a run on it would start with no constraints at all
+// (https://github.com/carlosboeing/crossrev/issues/272). Below 1.x nothing is
+// recorded, so it is refused on the same terms rather than run blind.
 //
-// A probe that names no version at all is refused on the same terms: the gate
-// fails closed, because an install CrossRev cannot confirm is not one it
-// drives. The rule is stated as a version rule, so the refusal names the range
-// in both shapes rather than guessing which major the unreadable banner hid.
+// A probe that names no version at all is refused too: the gate fails closed,
+// because an install CrossRev cannot confirm is not one it drives. The refusal
+// names the range in every shape rather than guessing what an unreadable
+// banner hid.
 func (a *Opencode) VersionRefusal(probe []byte) *Refusal {
 	token := opencodeVersionToken.FindString(string(probe))
 	if token == "" {
 		return &Refusal{
 			Reason: "the opencode CLI did not report a version, and CrossRev supports opencode 1.x (issue #272)",
-			Action: "CrossRev cannot confirm this install is one it drives, so the leg is refused rather than started (https://github.com/carlosboeing/crossrev/issues/272). Install the supported CLI with: npm install -g opencode-ai@1.18.21, or point this leg at another harness with --harness.",
+			Action: "CrossRev cannot confirm this install is one it drives, so the leg is refused rather than started (https://github.com/carlosboeing/crossrev/issues/272). Install the supported CLI with: " + a.descriptor.Install.Command + ", or point this leg at another harness with --harness.",
 			Kind:   ErrVersionUnsupported,
 		}
 	}
-	if majorVersion(token) < 2 {
+	if majorVersion(token) == 1 {
 		return nil
 	}
 	return &Refusal{
 		Reason: "the opencode CLI reports version " + token + ", and CrossRev supports opencode 1.x (issue #272)",
-		Action: "opencode 2.x does not accept the flags this adapter passes and does not read the isolation config it writes: https://github.com/carlosboeing/crossrev/issues/272. Install the supported CLI with: npm install -g opencode-ai@1.18.21, or point this leg at another harness with --harness.",
+		Action: "opencode 2.x does not accept the flags this adapter passes and does not read the isolation config it writes (https://github.com/carlosboeing/crossrev/issues/272), and nothing below 1.x is recorded. Install the supported CLI with: " + a.descriptor.Install.Command + ", or point this leg at another harness with --harness.",
 		Kind:   ErrVersionUnsupported,
 	}
 }

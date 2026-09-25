@@ -487,9 +487,13 @@ func TestOpencodeRefusesAnInstallPastTheSupportedMajor(t *testing.T) {
 		t.Fatal("the opencode adapter does not implement harness.VersionPinned")
 	}
 
-	probe := pinned.VersionProbe(invocation(t, "opencode", false))
+	inv := invocation(t, "opencode", false)
+	probe := pinned.VersionProbe(inv)
 	if !slices.Equal(probe.Args, []string{"--version"}) {
 		t.Errorf("the version probe is `opencode --version`; got %v", probe.Args)
+	}
+	if probe.Dir != inv.Scratch {
+		t.Errorf("the probe's working directory = %q, want the scratch directory %q — it runs before the quarantine, so it must not start in the checkout", probe.Dir, inv.Scratch)
 	}
 
 	for _, tt := range []struct {
@@ -499,6 +503,7 @@ func TestOpencodeRefusesAnInstallPastTheSupportedMajor(t *testing.T) {
 		{name: "2.x", out: "opencode v2.0.15\n"},
 		{name: "2.0.0", out: "opencode v2.0.0\n"},
 		{name: "3.x", out: "opencode v3.1.4\n"},
+		{name: "0.x", out: "opencode v0.9.9\n"},
 		{name: "no version token at all", out: "no version token here\n"},
 		{name: "no output at all", out: ""},
 	} {
@@ -526,7 +531,6 @@ func TestOpencodeRefusesAnInstallPastTheSupportedMajor(t *testing.T) {
 		"1.18.21 (test stub)\n",
 		"opencode v1.18.21\n",
 		"opencode v1.0.0\n",
-		"opencode v0.9.9\n",
 	} {
 		t.Run(fmt.Sprintf("accepts %q", strings.TrimSpace(out)), func(t *testing.T) {
 			if refusal := pinned.VersionRefusal([]byte(out)); refusal != nil {

@@ -2,7 +2,6 @@ package preflight
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"regexp"
 	"runtime"
@@ -222,52 +221,65 @@ func (c *Checker) darwin() bool {
 // token out gives one readable format.
 var versionToken = regexp.MustCompile(`v?[0-9]+\.[0-9]+[0-9A-Za-z.+-]*`)
 
-// versionSpan is the span of one harness CLI's version CrossRev has on record,
-// and where a recorded boundary sits below it.
+// versionRefusal asks the adapter itself about the reported version: the one
+// boundary an adapter enforces is stated once, in the adapter, rather than
+// copied into this report. Nil is "the adapter drives this install".
+func (c *Checker) versionRefusal(name, token string) *harness.Refusal {
+	adapter, ok := harness.For(c.Harness, name)
+	if !ok {
+		return nil
+	}
+	pinned, ok := adapter.(harness.VersionPinned)
+	if !ok {
+		return nil
+	}
+	return pinned.VersionRefusal([]byte(token))
+}
+
+// versionSpan is the span of one harness CLI's version CrossRev has on record.
 type versionSpan struct {
 	// lo and hi are the inclusive bounds of the record.
 	lo, hi [3]int
 	// label is the span the way this report prints it.
 	label string
-	// maxMajor is the highest major the adapters drive when that boundary is
-	// recorded in its own right — today only opencode's 1.x, with 2.x refused
-	// by the leg (issue #272). Zero is "the span says it all".
-	maxMajor int
 }
 
-// recordedVersions is what is on record about each harness CLI's version: the
-// exact span CrossRev has run, from the descriptor's install pin
-// (internal/harness/assets/harnesses.json) and from recorded runs. A report
-// never widens it. A version outside the span reads as unverified, and a
-// harness with no entry — agy, whose install pins nothing — reads as having no
-// recorded range at all.
-//
-// A span of one is one: codex, grok and opencode are pinned exactly and
-// nothing wider was recorded. Claude Code's pin is 2.1.237 and recorded runs
-// reach 2.1.281.
-var recordedVersions = map[string]versionSpan{
-	"claude":   {lo: [3]int{2, 1, 237}, hi: [3]int{2, 1, 281}, label: "2.1.237-2.1.281"},
-	"codex":    {lo: [3]int{0, 148, 0}, hi: [3]int{0, 148, 0}, label: "0.148.0"},
-	"grok":     {lo: [3]int{1, 0, 5}, hi: [3]int{1, 0, 5}, label: "1.0.5"},
-	"opencode": {lo: [3]int{1, 18, 21}, hi: [3]int{1, 18, 21}, label: "1.18.21", maxMajor: 1},
+// recordedRuns is the recorded-run evidence above a descriptor pin. The lower
+// bound of every span is the descriptor's own install pin
+// (internal/harness/assets/harnesses.json), read where the report is built, so
+// a pin bump moves the span with it and nothing here has to follow. This map
+// holds only what recorded runs proved past the pin, and only Claude Code has
+// any: its pin is 2.1.237 and recorded runs reach 2.1.281.
+var recordedRuns = map[string]string{
+	"claude": "2.1.281",
+}
+
+// versionSpanFor is the recorded span for one harness: its install pin up to
+// whatever recorded runs proved above it. No pin is no record — agy pins
+// nothing — and a pin past every recorded run narrows back to the pin itself.
+func versionSpanFor(name, pin string) (versionSpan, bool) {
+	if pin == "" {
+		return versionSpan{}, false
+	}
+	lo := versionNumbers(pin)
+	hi, label := lo, pin
+	if upper, ok := recordedRuns[name]; ok && compareVersions(versionNumbers(upper), hi) > 0 {
+		hi = versionNumbers(upper)
+		label = pin + "-" + upper
+	}
+	return versionSpan{lo: lo, hi: hi, label: label}, true
 }
 
 // versionVerdict is what the report adds to one reported version: the
 // comparison against the record, and nothing stronger. Every line is
 // information — an unverified version fails nothing, because the refusal that
 // stops work lives in the leg and says so.
-func versionVerdict(name, token string) string {
-	span, recorded := recordedVersions[name]
-	numbers := versionNumbers(token)
-	if recorded && span.maxMajor > 0 && numbers[0] > span.maxMajor {
-		// The one recorded boundary below a span: the adapter refuses this
-		// major outright (issue #272), which is stronger than unverified.
-		return fmt.Sprintf(" — unsupported: CrossRev drives %s %d.x, see issue #272", name, span.maxMajor)
-	}
+func versionVerdict(name, token, pin string) string {
+	span, recorded := versionSpanFor(name, pin)
 	if !recorded {
 		return " — unverified, no recorded version range"
 	}
-	if span.contains(numbers) {
+	if span.contains(versionNumbers(token)) {
 		return " — known good (" + span.label + ")"
 	}
 	return " — unverified, outside the recorded range (" + span.label + ")"
@@ -473,14 +485,24 @@ func (c *Checker) checkHarness(ctx context.Context) bool {
 
 	found := false
 	for _, name := range c.Harness.Names() {
+		entry, _ := c.Harness.For(name)
 		binary := name
-		if entry, ok := c.Harness.For(name); ok && entry.Binary != "" {
+		if entry.Binary != "" {
 			binary = entry.Binary
 		}
 		version, rc := c.toolVersion(ctx, binary)
 		switch rc {
 		case versionOK:
-			c.io().OK(version + versionVerdict(name, strings.TrimPrefix(version, binary+" ")))
+			token := strings.TrimPrefix(version, binary+" ")
+			if refusal := c.versionRefusal(name, token); refusal != nil {
+				// The adapter refuses this install, so the report carries its
+				// words and does not count it as a harness — the same line
+				// versionSilent below draws, and an install no leg will start
+				// is the stronger case. found stays unset.
+				c.io().Opt(refusal.Reason)
+				break
+			}
+			c.io().OK(version + versionVerdict(name, token, entry.Install.PinnedVersion))
 			found = true
 		case versionSilent:
 			// Deliberately not counted as a harness. A CLI that will not say

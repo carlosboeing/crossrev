@@ -47,8 +47,10 @@ func TestClaudeGrantsTheWriteOnlyToAWritingLeg(t *testing.T) {
 }
 
 // The reading leg runs with an explicit read-only tool list and loads no
-// operator MCP servers. The writing leg takes neither flag: it needs its edit
-// tools, and it keeps the argv it has always had.
+// operator MCP servers. Agent and Skill are removed outright: they are named
+// separately from the `--tools` list in the CLI reference's own rules, so the
+// removal is spelled rather than inferred. The writing leg takes none of these
+// flags: it needs its edit tools, and it keeps the argv it has always had.
 func TestClaudePinsAReadingLegToReadOnlyTools(t *testing.T) {
 	adapter := claudeAdapter(t)
 
@@ -58,6 +60,9 @@ func TestClaudePinsAReadingLegToReadOnlyTools(t *testing.T) {
 	}
 	if !hasFlagPair(reading.Args, "--tools", "Read,Grep,Glob") {
 		t.Errorf("a reading leg is pinned to the read-only tool list; got %v", reading.Args)
+	}
+	if !hasFlagPair(reading.Args, "--disallowedTools", "Agent,Skill") {
+		t.Errorf("a reading leg removes Agent and Skill; got %v", reading.Args)
 	}
 	if !slices.Contains(reading.Args, "--strict-mcp-config") {
 		t.Errorf("a reading leg loads no operator MCP servers; got %v", reading.Args)
@@ -69,6 +74,9 @@ func TestClaudePinsAReadingLegToReadOnlyTools(t *testing.T) {
 	}
 	if slices.Contains(writing.Args, "--tools") {
 		t.Errorf("a writing leg keeps its edit tools; got %v", writing.Args)
+	}
+	if slices.Contains(writing.Args, "--disallowedTools") {
+		t.Errorf("a writing leg takes no tool removal; got %v", writing.Args)
 	}
 	if slices.Contains(writing.Args, "--strict-mcp-config") {
 		t.Errorf("a writing leg takes no MCP exclusion; got %v", writing.Args)

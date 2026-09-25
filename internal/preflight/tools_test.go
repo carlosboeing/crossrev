@@ -300,9 +300,9 @@ func TestCheckHarnessReportsEveryDescribedHarness(t *testing.T) {
 
 // A version is reported against the span on record, never against an invented
 // range: outside the span is unverified, a harness with no recorded span says
-// so, and the one recorded boundary — opencode 2.x and later (issue #272) —
-// names itself rather than reading as merely unverified. None of it is a
-// failure: the report is information, and the refusal lives in the leg.
+// so, and an install the adapter itself refuses is reported in the adapter's
+// own words and never counted as a harness. None of it fails on the version
+// alone; the refusal that stops work is the leg's own.
 func TestCheckHarnessComparesVersionsAgainstRecordedEvidence(t *testing.T) {
 	t.Setenv("GITHUB_ACTIONS", "")
 	r := coreVersions(newRecorder())
@@ -319,11 +319,35 @@ func TestCheckHarnessComparesVersionsAgainstRecordedEvidence(t *testing.T) {
 	for _, want := range []string{
 		"│  ✓ claude 2.1.300 — unverified, outside the recorded range (2.1.237-2.1.281)\n",
 		"│  ✓ agy 0.1.5 — unverified, no recorded version range\n",
-		"│  ✓ opencode v2.0.15 — unsupported: CrossRev drives opencode 1.x, see issue #272\n",
+		"│  ○ the opencode CLI reports version v2.0.15, and CrossRev supports opencode 1.x (issue #272)\n",
 	} {
 		if !strings.Contains(report, want) {
 			t.Errorf("report =\n%s\nwant a line %q", report, want)
 		}
+	}
+	if strings.Contains(report, "✓ opencode") {
+		t.Errorf("a refused install is not counted as a found harness:\n%s", report)
+	}
+}
+
+// An install the adapter refuses is not "a harness CLI found": a machine
+// holding only one cannot run a leg, so the report says so rather than passing.
+func TestCheckHarnessCountsARefusedInstallAsNone(t *testing.T) {
+	t.Setenv("GITHUB_ACTIONS", "")
+	r := coreVersions(newRecorder())
+	r.answer("gh api user --jq .login", "carlosboeing\n", 0)
+	r.answer("opencode --version", "opencode v2.0.15\n", 0)
+	c, buf := checker(t, r, onPath("git", "gh", "jq", "yq", "openssl", "opencode"))
+
+	if c.Check(context.Background(), preflight.NeedHarness) {
+		t.Errorf("Check = true, want false")
+	}
+	report := buf.String()
+	if !strings.Contains(report, "│  ○ the opencode CLI reports version v2.0.15, and CrossRev supports opencode 1.x (issue #272)\n") {
+		t.Errorf("report =\n%s\nwant the adapter's refusal line", report)
+	}
+	if !strings.Contains(report, "no harness CLI found") {
+		t.Errorf("report =\n%s\nwant the no-harness verdict", report)
 	}
 }
 

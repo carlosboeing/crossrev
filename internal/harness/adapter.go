@@ -79,8 +79,7 @@ type Adapter interface {
 // refuses an install outside them before the leg starts.
 //
 // The leg runs the probe, the way it runs every child: an adapter builds Specs
-// and starts nothing (see Spec above). `--version` starts no model and costs no
-// call, so the check runs on every leg rather than behind a cache.
+// and starts nothing (see Spec above).
 type VersionPinned interface {
 	// VersionProbe is the child that reports the installed CLI's version.
 	VersionProbe(Invocation) exec.Spec
@@ -92,7 +91,9 @@ type VersionPinned interface {
 
 // CheckVersion runs the version probe of an adapter that has one and answers
 // its refusal, or nil when the leg may start. An adapter that pins no version
-// is left alone.
+// is left alone. The review leg prompts per batch, so this runs per prompt
+// rather than once per leg: `--version` starts no model and costs no call, and
+// a cache would be state a crash loses.
 func CheckVersion(ctx context.Context, runner exec.Runner, adapter Adapter, inv Invocation) *Refusal {
 	pinned, ok := adapter.(VersionPinned)
 	if !ok {

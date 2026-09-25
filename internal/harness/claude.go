@@ -58,12 +58,15 @@ func (a *Claude) Spec(inv Invocation) (exec.Spec, error) {
 	// leg runs the same tool set whatever the operator's own settings carry.
 	// --tools restricts the built-in tools only and leaves MCP tools alone, so
 	// --strict-mcp-config travels with it; with no --mcp-config to keep, the
-	// session loads no MCP servers at all. The named-endpoint path builds
-	// through here, so it gets the same list.
+	// session loads no MCP servers at all. Agent and Skill are removed
+	// outright rather than assumed covered: they start subagents and run
+	// operator skills, which no read-only review needs, and a bare name in
+	// --disallowedTools removes the tool from context. The named-endpoint path
+	// builds through here, so it gets the same list.
 	if inv.Write {
 		args = append(args, "--permission-mode", "acceptEdits")
 	} else {
-		args = append(args, "--tools", "Read,Grep,Glob", "--strict-mcp-config")
+		args = append(args, "--tools", "Read,Grep,Glob", "--disallowedTools", "Agent,Skill", "--strict-mcp-config")
 	}
 
 	// Claude Code takes the schema INLINE as a JSON string. Codex takes a file
