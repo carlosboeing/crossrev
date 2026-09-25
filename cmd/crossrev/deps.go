@@ -56,9 +56,8 @@ type deps struct {
 // invocations carry the forge-host helper (internal/vcs's package comment),
 // and locally a push over https uses the operator's own helper. The names
 // are the ones git itself documents and the ones the offline suite sets: a
-// fixture points HOME and the
-// XDG variables at a temporary directory, and a git that inherited neither
-// would read the developer's own configuration.
+// fixture points HOME and the XDG variables at a temporary directory, and a
+// git that inherited neither would read the developer's own configuration.
 var gitEnvironment = []string{
 	"PATH",
 	"HOME",

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -33,12 +34,10 @@ var runnerCredentialArgs = []string{
 }
 
 // withRunnerCredentials returns args with the runner credential pair ahead of
-// them. The prebuilt slice is copied out, never appended into: appending
-// would write the caller's args into shared backing storage.
+// them. The prebuilt slice is cloned, never appended into: appending would
+// write the caller's args into shared backing storage.
 func withRunnerCredentials(args []string) []string {
-	prefixed := make([]string, 0, len(runnerCredentialArgs)+len(args))
-	prefixed = append(prefixed, runnerCredentialArgs...)
-	return append(prefixed, args...)
+	return append(slices.Clone(runnerCredentialArgs), args...)
 }
 
 // extraHeaderPattern matches the config keys a checkout persists a token
