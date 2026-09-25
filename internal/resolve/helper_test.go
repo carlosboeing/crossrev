@@ -516,18 +516,21 @@ type gitMut struct {
 }
 
 type fakeGit struct {
-	env            *testEnv
-	dir            string
-	head           core.Revision
-	show           map[string][]byte
-	showCalls      []showCall
-	wrongHead      core.Revision
-	worktrees      *[]string
-	fetchCalls     []string
-	captureCalls   *int
-	restoreCalls   *int
-	restoreTreeErr error
-	runAt          []string
+	env                  *testEnv
+	dir                  string
+	head                 core.Revision
+	show                 map[string][]byte
+	showCalls            []showCall
+	wrongHead            core.Revision
+	worktrees            *[]string
+	fetchCalls           []string
+	captureCalls         *int
+	restoreCalls         *int
+	restoreTreeErr       error
+	runAt                []string
+	removePersistedCalls int
+	removePersistedErr   error
+	removed              []vcs.RemovedCredential
 	*gitMut
 }
 
@@ -640,6 +643,13 @@ func (g *fakeGit) Push(_ context.Context, remote, branch string, runHooks bool) 
 }
 func (g *fakeGit) PushURL(context.Context, string) (string, error) {
 	return "https://github.com/" + g.env.slug.String() + ".git", nil
+}
+func (g *fakeGit) RemovePersistedCredentials(context.Context) ([]vcs.RemovedCredential, error) {
+	g.removePersistedCalls++
+	if g.removePersistedErr != nil {
+		return nil, g.removePersistedErr
+	}
+	return g.removed, nil
 }
 func (g *fakeGit) RemoteHead(context.Context, string, string) (string, error) {
 	if g.remoteHeadErr != nil {

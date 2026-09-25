@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/carlosboeing/crossrev/internal/core"
@@ -145,6 +146,7 @@ type Git interface {
 	HasStagedChanges(ctx context.Context) (bool, error)
 	Commit(ctx context.Context, options vcs.CommitOptions) error
 	Push(ctx context.Context, remote, branch string, runHooks bool) error
+	RemovePersistedCredentials(ctx context.Context) ([]vcs.RemovedCredential, error)
 	PushURL(ctx context.Context, remote string) (string, error)
 	RemoteHead(ctx context.Context, url, branch string) (string, error)
 	RemoveWorktree(ctx context.Context, dir string) error
@@ -219,6 +221,9 @@ func (g repoGit) Commit(ctx context.Context, options vcs.CommitOptions) error {
 func (g repoGit) Push(ctx context.Context, remote, branch string, runHooks bool) error {
 	return g.repo.Push(ctx, remote, branch, runHooks)
 }
+func (g repoGit) RemovePersistedCredentials(ctx context.Context) ([]vcs.RemovedCredential, error) {
+	return g.repo.RemovePersistedCredentials(ctx)
+}
 func (g repoGit) PushURL(ctx context.Context, remote string) (string, error) {
 	return g.repo.PushURL(ctx, remote)
 }
@@ -236,6 +241,20 @@ func (g repoGit) RemoveWorktree(ctx context.Context, dir string) error {
 
 func refuse(msg, hint string) Result {
 	return Result{Outcome: OutcomeRefused, Err: &Refusal{Message: msg, Hint: hint}}
+}
+
+// removedCredentialLine describes what the scrub removed for the run log: the
+// count and the files, never the values.
+func removedCredentialLine(removed []vcs.RemovedCredential) string {
+	var files []string
+	seen := make(map[string]bool)
+	for _, r := range removed {
+		if !seen[r.File] {
+			seen[r.File] = true
+			files = append(files, r.File)
+		}
+	}
+	return fmt.Sprintf("removed %d persisted checkout credential entries from %s", len(removed), strings.Join(files, ", "))
 }
 
 func (l *Leg) now() time.Time {

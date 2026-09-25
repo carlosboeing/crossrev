@@ -3,6 +3,8 @@ package review
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/carlosboeing/crossrev/internal/config"
@@ -95,6 +97,7 @@ type VCS interface {
 	ChangedFiles(ctx context.Context, base, head core.Revision) ([]core.FileChange, error)
 	ExactSearch(ctx context.Context, revision core.Revision, term string, limit int) ([]vcs.SearchHit, bool, error)
 	RangeDiff(ctx context.Context, base, head core.Revision) ([]byte, error)
+	RemovePersistedCredentials(ctx context.Context) ([]vcs.RemovedCredential, error)
 }
 
 // Leg is the review orchestrator. Dependencies are injected.
@@ -132,6 +135,20 @@ func (l *Leg) now() time.Time {
 		return l.Now()
 	}
 	return time.Now()
+}
+
+// removedCredentialLine describes what the scrub removed for the run log: the
+// count and the files, never the values.
+func removedCredentialLine(removed []vcs.RemovedCredential) string {
+	var files []string
+	seen := make(map[string]bool)
+	for _, r := range removed {
+		if !seen[r.File] {
+			seen[r.File] = true
+			files = append(files, r.File)
+		}
+	}
+	return fmt.Sprintf("removed %d persisted checkout credential entries from %s", len(removed), strings.Join(files, ", "))
 }
 
 func (l *Leg) runner() exec.Runner {

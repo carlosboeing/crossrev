@@ -121,6 +121,22 @@ func (l *Leg) Run(ctx context.Context, req Request) (out Result) {
 		out.Messages = append(out.Messages, warn)
 	}
 
+	// The token the checkout persisted, if any, is removed before the
+	// harness starts. Generated workflows persist none, but a checkout from
+	// an older workflow still carries it. A leg without a git reader has no
+	// checkout to clean.
+	if l.VCS != nil {
+		removed, err := l.VCS.RemovePersistedCredentials(ctx)
+		if err != nil {
+			out.Outcome = OutcomeError
+			out.Err = err
+			return out
+		}
+		if l.Log != nil && len(removed) > 0 {
+			l.Log.Event("credentials", removedCredentialLine(removed))
+		}
+	}
+
 	// The run header, two bare printfs after the settings are chosen and
 	// before the claim is posted (lib/run.sh:1072-1073):
 	//

@@ -124,6 +124,13 @@ func (o Output) Lines() []string {
 // attacker-controlled text"; git reads a repository the orchestrator already
 // decided to run in.
 //
+// On a GitHub Actions runner the invocation also carries the credential
+// helper: the checkout persists no token under the generated workflows, and
+// the legs remove a persisted one before they run, so git authenticates per
+// invocation through `gh` instead of reading the checkout's config. Locally
+// the environment is untouched, and the operator's own credential helper
+// answers as it always has.
+//
 // A non-zero exit is data, not an error: `git cat-file -e` answers a question
 // with its status and lib/run.sh:1873 reads it as one. The error return covers
 // only the cases exec.Result.Err covers, where no status was produced at all.
@@ -138,6 +145,9 @@ func (g *Git) Run(ctx context.Context, call Call) (Output, error) {
 		env = make([]string, 0, len(g.Env)+len(call.ExtraEnv))
 		env = append(env, g.Env...)
 		env = append(env, call.ExtraEnv...)
+	}
+	if onActionsRunner() {
+		env = withCredentialHelper(env)
 	}
 
 	result := g.Runner.Run(ctx, exec.Spec{
