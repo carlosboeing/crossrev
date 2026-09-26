@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/carlosboeing/crossrev/internal/config"
@@ -89,6 +90,21 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 		return len(promptBytes)
 	}
 	plan := intel.Batches(scope, acceptedIDs, render)
+	// Packing's skips join the exclusion record before the first
+	// publication: the generation records each skipped path with its
+	// reason, and the required set no longer waits on a file no prompt can
+	// hold. The prompts packing measured were rendered above from the
+	// pre-skip scope, so no measured prompt names a skip.
+	scope = moveSkips(scope, plan.Skipped)
+	if loaded.Scope != nil {
+		// The bound scope is the post-skip one: convergence, the footnote
+		// and the summary read what the pass actually required.
+		*loaded.Scope = scope
+	}
+	// ui_warn per skip, as the skip happens, so a local run shows each one.
+	for _, unit := range scope.Skipped {
+		out.Messages = append(out.Messages, skipWarnLine(unit))
+	}
 	// Findings a previous attempt recorded on the claim — after its accepted
 	// batches, or in the blocked record the failure left — come back into the
 	// outcome here, so a resumed pass republishes every accepted finding
@@ -120,6 +136,14 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 	marker.Leg = core.LegReview
 	marker.Pass = pass
 	marker.Version = core.MarkerVersion
+	// Packing can empty the required set: every remaining path was
+	// recognised as generated and oversized. That pass settles without a
+	// model or a converged label, and publishes no generation for a review
+	// that never ran.
+	if len(scope.Required) == 0 {
+		result, _ := l.finishNothingToReviewRun(ctx, req, loaded, pass, claimID, marker, nothingSkippedReason(len(scope.Excluded)-len(plan.Skipped), len(plan.Skipped)), scope, out)
+		return result.Err
+	}
 	initial, initialStop, err := l.publishInitialGeneration(ctx, req, loaded, store, marker, scope, advisory, gen+1, producer, outcome.verdicts, outcome.supplied)
 	if err != nil {
 		return err
@@ -206,6 +230,31 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 		return l.haltPass(ctx, req, loaded, pass, claimID, out, marker, &batchBound{plan: plan, scope: scope, accepted: acceptedIDs})
 	}
 	return l.finishCoveredPass(ctx, req, loaded, settings, pass, claimID, marker, scope, outcome, pair, out)
+}
+
+// moveSkips transfers packing's skipped units from the required set into the
+// exclusion record, in path order, with the reason each skip carries. The
+// ledger schema does not change: a skip is a prstate.CoverageExclusion like
+// any other.
+func moveSkips(scope intel.Scope, skipped []intel.FileUnit) intel.Scope {
+	if len(skipped) == 0 {
+		return scope
+	}
+	dropped := make(map[core.UnitID]bool, len(skipped))
+	for _, unit := range skipped {
+		dropped[unit.ID] = true
+		scope.Excluded = append(scope.Excluded, intel.Exclusion{Path: unit.Path, Reason: intel.SkipReason(unit)})
+	}
+	kept := make([]intel.FileUnit, 0, len(scope.Required)-len(skipped))
+	for _, unit := range scope.Required {
+		if !dropped[unit.ID] {
+			kept = append(kept, unit)
+		}
+	}
+	scope.Required = kept
+	scope.Skipped = append(scope.Skipped, skipped...)
+	sort.Slice(scope.Excluded, func(i, j int) bool { return scope.Excluded[i].Path < scope.Excluded[j].Path })
+	return scope
 }
 
 // reportLedgerFallback names a mid-pass store fallback the operator did not

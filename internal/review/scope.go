@@ -71,15 +71,33 @@ func (s scopeSearcher) Exists(ctx context.Context, revision core.Revision, path 
 // enumeration cannot list — a git failure — stops the leg, because an
 // unlisted path is a silent loss. A path whose bytes cannot be read stays
 // required with a visible access limit.
-func (l *Leg) buildScope(ctx context.Context, base, head core.Revision, excluded []intel.Exclusion) (intel.Scope, error) {
+//
+// The base tree's linguist-generated answers join the enumeration here. A
+// git too old for check-attr --source degrades to one warning and the
+// built-in rules; any other attribute failure stops the leg the way a failed
+// ChangedFiles does, because reading it as unspecified would review paths
+// the repository marked generated.
+func (l *Leg) buildScope(ctx context.Context, base, head core.Revision, excluded []intel.Exclusion) (intel.Scope, *vcs.Warning, error) {
 	if l.VCS == nil {
-		return intel.Scope{}, errNoScopeReader{}
+		return intel.Scope{}, nil, errNoScopeReader{}
 	}
 	changes, err := l.VCS.ChangedFiles(ctx, base, head)
 	if err != nil {
-		return intel.Scope{}, err
+		return intel.Scope{}, nil, err
 	}
-	return intel.RequiredFiles(ctx, changes, scopeReader{leg: l}, base, head, excluded)
+	paths := make([]string, 0, len(changes))
+	for _, change := range changes {
+		paths = append(paths, change.Path)
+	}
+	attrs, warning, err := l.VCS.GeneratedAttributes(ctx, base, paths)
+	if err != nil {
+		return intel.Scope{}, nil, err
+	}
+	scope, err := intel.RequiredFiles(ctx, changes, scopeReader{leg: l}, base, head, excluded, intelAttributeDecisions(attrs))
+	if err != nil {
+		return intel.Scope{}, nil, err
+	}
+	return scope, warning, nil
 }
 
 type errNoScopeReader struct{}

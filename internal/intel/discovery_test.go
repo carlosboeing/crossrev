@@ -126,7 +126,7 @@ func TestRequiredFilesMatchesTheFrozenOracle(t *testing.T) {
 		}
 	}
 
-	scope, err := intel.RequiredFiles(context.Background(), changes, stubReader{bodies: bySHA}, base, head, nil)
+	scope, err := intel.RequiredFiles(context.Background(), changes, stubReader{bodies: bySHA}, base, head, nil, nil)
 	if err != nil {
 		t.Fatalf("RequiredFiles: %v", err)
 	}
@@ -204,7 +204,7 @@ func TestRequiredFilesRecordsVisibleExclusions(t *testing.T) {
 		},
 	}}
 	excluded := []intel.Exclusion{{Path: "docs/backlog", Reason: "backlog destination"}}
-	scope, err := intel.RequiredFiles(context.Background(), changes, reader, base, head, excluded)
+	scope, err := intel.RequiredFiles(context.Background(), changes, reader, base, head, excluded, nil)
 	if err != nil {
 		t.Fatalf("RequiredFiles: %v", err)
 	}
@@ -228,7 +228,7 @@ func TestRequiredFilesRejectsResidualUnitIDCollisions(t *testing.T) {
 		{Path: "src/dup.go", Kind: core.ChangeModified},
 	}
 	reader := stubReader{bodies: map[string]map[string]oracleCase{stubBaseSHA: {}, stubHeadSHA: {}}}
-	if _, err := intel.RequiredFiles(context.Background(), changes, reader, base, head, nil); err == nil {
+	if _, err := intel.RequiredFiles(context.Background(), changes, reader, base, head, nil, nil); err == nil {
 		t.Fatal("RequiredFiles accepted two changes with one UnitID, want an error")
 	}
 }
@@ -242,7 +242,7 @@ func (failingReader) Read(_ context.Context, _ core.Revision, _ string) (intel.F
 func TestRequiredFilesKeepsUnreadableContentAsAnObligation(t *testing.T) {
 	base, head := stubRevisions(t)
 	changes := []core.FileChange{{Path: "src/locked.go", Kind: core.ChangeModified}}
-	scope, err := intel.RequiredFiles(context.Background(), changes, failingReader{}, base, head, nil)
+	scope, err := intel.RequiredFiles(context.Background(), changes, failingReader{}, base, head, nil, nil)
 	if err != nil {
 		t.Fatalf("RequiredFiles: %v", err)
 	}

@@ -95,7 +95,29 @@ type VCS interface {
 	ChangedFiles(ctx context.Context, base, head core.Revision) ([]core.FileChange, error)
 	ExactSearch(ctx context.Context, revision core.Revision, term string, limit int) ([]vcs.SearchHit, bool, error)
 	RangeDiff(ctx context.Context, base, head core.Revision) ([]byte, error)
+	GeneratedAttributes(ctx context.Context, base core.Revision, paths []string) (map[string]vcs.AttributeDecision, *vcs.Warning, error)
 	RemovePersistedCredentials(ctx context.Context) ([]vcs.RemovedCredential, error)
+}
+
+// intelAttributeDecisions maps the VCS attribute answer onto discovery's
+// vocabulary. intel imports nothing effectful and vcs imports nothing about
+// review scope, so the conversion lives with the leg.
+func intelAttributeDecisions(attrs map[string]vcs.AttributeDecision) map[string]intel.AttributeDecision {
+	if len(attrs) == 0 {
+		return nil
+	}
+	out := make(map[string]intel.AttributeDecision, len(attrs))
+	for path, decision := range attrs {
+		switch decision {
+		case vcs.AttributeSet:
+			out[path] = intel.AttributeSet
+		case vcs.AttributeNegated:
+			out[path] = intel.AttributeNegated
+		default:
+			out[path] = intel.AttributeUnspecified
+		}
+	}
+	return out
 }
 
 // Leg is the review orchestrator. Dependencies are injected.

@@ -39,6 +39,81 @@ type Exclusion struct {
 	Reason string
 }
 
+// AttributeDecision is the base-tree .gitattributes answer for one changed
+// path's linguist-generated attribute. The VCS layer reads it; discovery
+// applies it.
+type AttributeDecision int
+
+const (
+	// AttributeUnspecified means .gitattributes says nothing about the path,
+	// so the built-in generated-file rules decide.
+	AttributeUnspecified AttributeDecision = iota
+	// AttributeSet means the base tree marks the path linguist-generated:
+	// repository policy excludes it outright.
+	AttributeSet
+	// AttributeNegated means the base tree explicitly unmarks the path
+	// (-linguist-generated or linguist-generated=false): every built-in
+	// rule is suppressed.
+	AttributeNegated
+)
+
+// Classification source names: what spoke for a path.
+const (
+	SourceGitattributes = "gitattributes"
+	SourceBuiltin       = "built-in"
+)
+
+// ClassEffect is what a classification does to a path.
+type ClassEffect int
+
+const (
+	// EffectPlain reviews the file when it fits and halts the pass when it
+	// does not, exactly as an unrecognised file behaves.
+	EffectPlain ClassEffect = iota
+	// EffectExcluded removes the path from the required set before its body
+	// is read.
+	EffectExcluded
+	// EffectGenerated keeps the path required; packing skips it with a
+	// visible warning when it cannot fit one rendered prompt.
+	EffectGenerated
+)
+
+// Classification is the generated-file decision for one changed path: which
+// source spoke, the rule it named, and the effect on the pass. Detectors,
+// the base-tree attribute read and any later policy source join here, so one
+// function holds the precedence.
+type Classification struct {
+	// Source names what decided: "gitattributes" or "built-in". Empty for an
+	// ordinary file.
+	Source string
+	// Rule names the deciding rule: "linguist-generated" or a signal name.
+	// Empty for an ordinary file.
+	Rule string
+	// Effect is what happens to the path.
+	Effect ClassEffect
+}
+
+// GeneratedAttributeReason is the exclusion reason recorded for a path the
+// base tree marks linguist-generated.
+const GeneratedAttributeReason = "generated: linguist-generated in .gitattributes"
+
+// ClassifyGenerated joins the base-tree attribute answer with the built-in
+// evidence signal. A set attribute excludes, whatever the evidence says; a
+// negated attribute suppresses every built-in signal; an unspecified
+// attribute lets the signal speak.
+func ClassifyGenerated(attr AttributeDecision, signal string) Classification {
+	switch attr {
+	case AttributeSet:
+		return Classification{Source: SourceGitattributes, Rule: "linguist-generated", Effect: EffectExcluded}
+	case AttributeNegated:
+		return Classification{Source: SourceGitattributes, Rule: "linguist-generated", Effect: EffectPlain}
+	}
+	if signal != "" {
+		return Classification{Source: SourceBuiltin, Rule: signal, Effect: EffectGenerated}
+	}
+	return Classification{Effect: EffectPlain}
+}
+
 // FileUnit is one required file: its identity, its change, and the evidence
 // the reviewer must account for.
 type FileUnit struct {
@@ -62,6 +137,9 @@ type FileUnit struct {
 	Available bool
 	// Binary reports a NUL byte in the evidence, git's own binary signal.
 	Binary bool
+	// Generated holds the built-in generated-file signal that matched the
+	// evidence, or empty when no rule matched or no bytes were available.
+	Generated string
 	// Reason names the access limit when the unit is unavailable.
 	Reason string
 }
@@ -79,6 +157,11 @@ type Scope struct {
 	Required []FileUnit
 	// Excluded holds every removed path and its reason, sorted by path.
 	Excluded []Exclusion
+	// Skipped holds the generated units packing skipped, in path order, with
+	// their bodies still available for rendering the warning. Each appears in
+	// Excluded with its reason. Empty until packing runs: discovery never
+	// fills it.
+	Skipped []FileUnit
 }
 
 // RequiredFiles builds the required file set from one complete enumeration.
@@ -87,16 +170,25 @@ type Scope struct {
 // unavailable files as obligations with a visible limit, and records
 // exclusions by path and reason outside the required denominator.
 //
+// attrs is the base-tree linguist-generated answer per current path. A set
+// answer excludes the path outright, before its body is read, and the
+// current path alone decides: a file renamed out of a marked directory is a
+// new review obligation. A negated answer suppresses the built-in signal.
+//
 // A read failure for one path degrades that unit to unavailable; it never
 // fails the whole set. Two changes resolving to one UnitID fail the pass
 // with both paths named, because a single verdict must never stand for
 // two units.
-func RequiredFiles(ctx context.Context, changes []core.FileChange, read FileReader, base, head core.Revision, excluded []Exclusion) (Scope, error) {
+func RequiredFiles(ctx context.Context, changes []core.FileChange, read FileReader, base, head core.Revision, excluded []Exclusion, attrs map[string]AttributeDecision) (Scope, error) {
 	scope := Scope{Base: base, Head: head, Engine: core.FileEngineVersion, EngineID: core.FileEngineID()}
 	seen := make(map[core.UnitID]string, len(changes))
 	for _, change := range changes {
 		if matchExclusion(change, excluded) {
 			scope.Excluded = append(scope.Excluded, exclusionFor(change, excluded))
+			continue
+		}
+		if ClassifyGenerated(attrs[change.Path], "").Effect == EffectExcluded {
+			scope.Excluded = append(scope.Excluded, Exclusion{Path: change.Path, Reason: GeneratedAttributeReason})
 			continue
 		}
 		unit := FileUnit{
@@ -128,6 +220,13 @@ func RequiredFiles(ctx context.Context, changes []core.FileChange, read FileRead
 		unit.Body = body.Data
 		unit.Binary = bytes.IndexByte(body.Data, 0) >= 0
 		unit.BodyDigest = core.BodyDigestHex(body.Data)
+		signal := ""
+		if attrs[change.Path] == AttributeUnspecified {
+			signal = GeneratedSignal(unit.Path, body.Data)
+		}
+		if classification := ClassifyGenerated(attrs[change.Path], signal); classification.Effect == EffectGenerated {
+			unit.Generated = classification.Rule
+		}
 		scope.Required = append(scope.Required, unit)
 	}
 	sort.Slice(scope.Required, func(i, j int) bool { return scope.Required[i].Path < scope.Required[j].Path })

@@ -146,11 +146,11 @@ Each review pass reads every changed file: every added, modified, deleted, renam
 
 A **required file** is a changed file the review must account for. The reviewer gives each one a verdict, and the pass converges only when every required file has one. When the branch moves, every prior result is retired and the next pass starts over. A re-run reuses recorded verdicts only when the base commit, the pull request commit, the review-engine version and the review producer (harness, model, effort and endpoint) are unchanged; then it resumes the files still waiting for a verdict.
 
-The review reads in batches because one prompt cannot hold a large pull request. One pass reads at most 400 required files. Batches hold at most 40 files in path order.
+The review reads in batches because one prompt cannot hold a large pull request. One pass reads at most 400 required files; oversized generated files skipped before review do not use those slots. Batches hold at most 40 files in path order.
 
 Batches measure the full rendered prompt against 180 KB (184,320 bytes).
 
-A file that fits in no batch waits with `input_exceeds_budget`.
+A plain file that fits in no batch waits with `input_exceeds_budget` and halts the pass. An oversized generated file is skipped instead, with a warning in the comment summary and the terminal.
 
 Files past the pass budget carry `review_budget_reached`.
 
@@ -325,11 +325,13 @@ schemas/         findings.schema.json, resolve.schema.json
 skills/          pr-review/, pr-resolve/
 templates/       workflows, starter config, example operator config
 scripts/         lint.sh, check-changelog.sh, check-parity-coverage.sh,
-                  next-version.sh, refresh-prices.sh, render-harness-docs.sh,
-                  build-binary.sh, sync-embedded-assets.sh,
+                  next-version.sh, refresh-prices.sh, refresh-generated-rules.sh,
+                  render-harness-docs.sh, build-binary.sh, sync-embedded-assets.sh,
                   verify-native-toolchain.sh, release-targets.json
 tests/           the stubbed-gh suite. tests/run.sh builds the binary once and runs all of it
 ```
+
+Maintainer scripts keep vendored data current without putting network fetches on runtime paths: `scripts/refresh-prices.sh` extracts token rates from LiteLLM into `assets/prices.json`, and `scripts/refresh-generated-rules.sh` inspects upstream Linguist's `generated.rb` and reports additions for `internal/intel/generated.go`. Both tools leave production runs offline and deterministic.
 
 ## The test suite
 

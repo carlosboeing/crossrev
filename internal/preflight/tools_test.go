@@ -582,3 +582,41 @@ func TestRequireYqWithNoLookPathUsesTheSharedSearch(t *testing.T) {
 		})
 	}
 }
+
+// check-attr --source arrived in git 2.40. Below it the legs fall back to
+// the built-in generated-file rules with a warning, so doctor reports the
+// gap as advisory rather than fatal.
+func TestCheckReportsGitBelow240(t *testing.T) {
+	t.Setenv("GITHUB_ACTIONS", "")
+	r := coreVersions(newRecorder())
+	r.answer("git --version", "git version 2.39.2\n", 0)
+	r.answer("gh api user --jq .login", "carlosboeing\n", 0)
+	c, buf := checker(t, r, onPath(corePath...))
+
+	if !c.Check(context.Background(), preflight.NeedCore) {
+		t.Errorf("Check = false, want true: an old git is degraded, not missing")
+	}
+	report := buf.String()
+	if !strings.Contains(report, "│  ✓ git 2.39.2\n") {
+		t.Errorf("report did not name git's version:\n%s", report)
+	}
+	if !strings.Contains(report, "│  ○ git 2.39.2 — below 2.40") {
+		t.Errorf("report did not warn about the 2.40 requirement:\n%s", report)
+	}
+}
+
+// At or past 2.40 the report is the plain version line and nothing more.
+func TestCheckReportsGit240Silently(t *testing.T) {
+	t.Setenv("GITHUB_ACTIONS", "")
+	r := coreVersions(newRecorder())
+	r.answer("git --version", "git version 2.40.0\n", 0)
+	r.answer("gh api user --jq .login", "carlosboeing\n", 0)
+	c, buf := checker(t, r, onPath(corePath...))
+
+	if !c.Check(context.Background(), preflight.NeedCore) {
+		t.Errorf("Check = false, want true")
+	}
+	if strings.Contains(buf.String(), "2.40,") || strings.Contains(buf.String(), "○ git") {
+		t.Errorf("report warned about a git that meets the requirement:\n%s", buf)
+	}
+}

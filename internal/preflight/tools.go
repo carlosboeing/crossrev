@@ -12,6 +12,7 @@ import (
 	"github.com/carlosboeing/crossrev/internal/exec"
 	"github.com/carlosboeing/crossrev/internal/harness"
 	"github.com/carlosboeing/crossrev/internal/ui"
+	"github.com/carlosboeing/crossrev/internal/vcs"
 )
 
 // The requirement sets preflight_check takes (lib/preflight.sh:69-71).
@@ -388,6 +389,9 @@ func (c *Checker) Check(ctx context.Context, need string) bool {
 			}
 		case rc == versionOK:
 			c.io().OK(version)
+			if tool == "git" {
+				c.reportGitAttributes(version)
+			}
 		case rc == versionSilent:
 			// Present but not answering. Installing it again is the one thing
 			// that will not help, so the message says so rather than reaching
@@ -405,6 +409,20 @@ func (c *Checker) Check(ctx context.Context, need string) bool {
 	}
 
 	return missing == 0
+}
+
+// reportGitAttributes says when the installed git cannot read .gitattributes
+// from a tree-ish: check-attr --source arrived in 2.40. Below it the legs
+// warn once and run on the built-in generated-file rules, so the report is
+// advisory rather than fatal.
+func (c *Checker) reportGitAttributes(version string) {
+	parsed, ok := vcs.ParseGitVersion(version)
+	if !ok {
+		return
+	}
+	if !parsed.AtLeast(2, 40) {
+		c.io().Opt(version + " — below 2.40, so .gitattributes linguist-generated is not read at the base; the built-in generated-file rules still apply")
+	}
 }
 
 // reportGh proves gh usable rather than merely installed (lib/preflight.sh:91-123).

@@ -7,13 +7,18 @@ import (
 	"fmt"
 )
 
-// FileEngineVersion is the first file-coverage engine. Its manifest identity
+// FileEngineVersion is the file-coverage engine. Its manifest identity
 // is FileEngineID. A later change to enumeration, evidence or verdict
 // semantics must change this literal and invalidate prior generations.
-const FileEngineVersion = "file-v1"
+//
+// file-v2 recognises generated files: a base-tree linguist-generated mark
+// excludes a path, and an oversized file with a built-in generated signal
+// moves from required to skipped, so the required set a file-v1 generation
+// recorded no longer means the same thing.
+const FileEngineVersion = "file-v2"
 
 // FileEngineID is the first 16 lowercase hex characters of SHA-256 over
-// "crossrev-review-intelligence\nfile-v1\n". It binds a coverage generation
+// "crossrev-review-intelligence\nfile-v2\n". It binds a coverage generation
 // to the engine semantics that produced it.
 func FileEngineID() string {
 	sum := sha256.Sum256([]byte("crossrev-review-intelligence\n" + FileEngineVersion + "\n"))

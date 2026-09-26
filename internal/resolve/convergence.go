@@ -38,7 +38,6 @@ type refLedgerSource interface {
 // internal/review/ledger.go.
 func (l *Leg) resolveConvergence(ctx context.Context, s *session) (policy.Convergence, bool) {
 	var conv policy.Convergence
-	base, head := s.pr.BaseRefOid, s.pr.HeadRefOid
 	h, claimed, err := s.review.CoverageHandle()
 	if err != nil {
 		return conv, true
@@ -49,22 +48,8 @@ func (l *Leg) resolveConvergence(ctx context.Context, s *session) (policy.Conver
 		}
 		return conv, false
 	}
-	store, ok := resolveStoreFor(l.Forge, s.cfg, h)
+	gen, ok := l.generationIfCurrent(ctx, s, h)
 	if !ok {
-		return conv, true
-	}
-	reviewer := s.cfg.Reviewers()[0]
-	ref := prstate.SlotRef{Repo: s.repo, Number: s.req.PR, Slot: reviewer.ID}
-	configured := prstate.Producer{Harness: reviewer.Harness, Model: reviewer.Model, Effort: reviewer.Effort, Endpoint: reviewer.Endpoint}
-	// The pass is judged by what it ran with, read off its marker — the
-	// configuration text parts from it under an override or a
-	// substitution, and a settle must agree with the review that ran.
-	producer := prstate.ProducerFor(s.review, configured)
-	gen, err := store.ReadGeneration(ctx, ref, h)
-	if err != nil {
-		return conv, true
-	}
-	if !prstate.GenerationCurrent(gen, core.RevisionPair{Base: base, Head: head}, core.FileEngineVersion, producer) {
 		return conv, true
 	}
 	conv.LedgerCurrent = true
@@ -86,8 +71,35 @@ func (l *Leg) resolveConvergence(ctx context.Context, s *session) (policy.Conver
 	}
 	conv.Required = len(gen.Paths)
 	conv.ScopeReported = gen.ScopeReport.ExaminedScope != ""
-	conv.ConfirmationRequired, conv.ConfirmationComplete = resolveConfirmation(s, head)
+	conv.ConfirmationRequired, conv.ConfirmationComplete = resolveConfirmation(s, s.pr.HeadRefOid)
 	return conv, true
+}
+
+// generationIfCurrent reads the generation h names and returns it only when
+// the read succeeds and GenerationCurrent holds. A missing store, a failed
+// read and a retired generation are the same false. resolveConvergence
+// treats that false as coverage it cannot use, and the review-comment
+// rewrite keeps today's comment on the same false.
+func (l *Leg) generationIfCurrent(ctx context.Context, s *session, h prstate.Handle) (prstate.Generation, bool) {
+	store, ok := resolveStoreFor(l.Forge, s.cfg, h)
+	if !ok {
+		return prstate.Generation{}, false
+	}
+	reviewer := s.cfg.Reviewers()[0]
+	ref := prstate.SlotRef{Repo: s.repo, Number: s.req.PR, Slot: reviewer.ID}
+	configured := prstate.Producer{Harness: reviewer.Harness, Model: reviewer.Model, Effort: reviewer.Effort, Endpoint: reviewer.Endpoint}
+	// The pass is judged by what it ran with, read off its marker — the
+	// configuration text parts from it under an override or a
+	// substitution, and a settle must agree with the review that ran.
+	producer := prstate.ProducerFor(s.review, configured)
+	gen, err := store.ReadGeneration(ctx, ref, h)
+	if err != nil {
+		return prstate.Generation{}, false
+	}
+	if !prstate.GenerationCurrent(gen, core.RevisionPair{Base: s.pr.BaseRefOid, Head: s.pr.HeadRefOid}, core.FileEngineVersion, producer) {
+		return prstate.Generation{}, false
+	}
+	return gen, true
 }
 
 // resolveStoreFor answers the store the named handle reads through: the

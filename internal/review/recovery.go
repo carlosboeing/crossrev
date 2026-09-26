@@ -72,12 +72,19 @@ func (l *Leg) reportFatal(ctx context.Context, req Request, loaded Context, mark
 		cap = atoi(loaded.Config.Get(".policy.max_passes_per_cycle"))
 		minFix = loaded.Config.Get(".policy.min_fix_severity")
 	}
-	body := SummaryBody(parseFindings(marker.Findings), marker, RenderContext{
+	renderCtx := RenderContext{
 		Repo:    loaded.Repo.String(),
 		PR:      req.PR,
 		MinFix:  minFix,
 		MaxPass: cap,
-	})
+	}
+	// A fatal can land after packing skipped generated files; the record of
+	// what was not reviewed belongs on the summary however the pass ended.
+	if loaded.Scope != nil {
+		renderCtx.Skipped = skipRenderDetails(loaded.Scope.Skipped)
+		renderCtx.Excluded = policyExclusionPaths(*loaded.Scope)
+	}
+	body := SummaryBody(parseFindings(marker.Findings), marker, renderCtx)
 	// Best effort on every write below, which is what `|| true` is at
 	// lib/run.sh:750, :759 and :761: the harness error is the cause the
 	// operator needs, and a failure to record it must not replace it.

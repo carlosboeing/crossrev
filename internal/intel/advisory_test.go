@@ -51,7 +51,7 @@ func advisoryScope(t *testing.T, bodies map[string]map[string]oracleCase) (intel
 		{Path: "vendor/lib.go", Kind: core.ChangeModified},
 	}
 	excluded := []intel.Exclusion{{Path: "vendor", Reason: "vendored code"}}
-	scope, err := intel.RequiredFiles(context.Background(), changes, stubReader{bodies: bodies}, base, head, excluded)
+	scope, err := intel.RequiredFiles(context.Background(), changes, stubReader{bodies: bodies}, base, head, excluded, nil)
 	if err != nil {
 		t.Fatalf("RequiredFiles: %v", err)
 	}

@@ -152,8 +152,12 @@ func (l *Leg) publish(ctx context.Context, req Request, loaded Context, settings
 		// above, so the sentence reads the same on either store. Reused
 		// rather than rebuilt: only the verdict moved since, which
 		// convergence never reads. The frozen path supplies none and the
-		// footnote stays silent.
-		renderCtx.Coverage = &CoverageCounts{Covered: conv.Covered, Required: conv.Required}
+		// footnote stays silent. The denominator counts every changed file,
+		// exclusions included, and the skips and policy exclusions render
+		// beside it.
+		renderCtx.Coverage = &CoverageCounts{Covered: conv.Covered, Required: conv.Required, Excluded: len(loaded.Scope.Excluded)}
+		renderCtx.Skipped = skipRenderDetails(loaded.Scope.Skipped)
+		renderCtx.Excluded = policyExclusionPaths(*loaded.Scope)
 	}
 	summary := SummaryBody(parseFindings(marker.Findings), marker, renderCtx)
 	written, err := l.editClaim(ctx, loaded.Repo, claimID, summary, marker, coverageOverflow(loaded))
