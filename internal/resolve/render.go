@@ -11,6 +11,7 @@ import (
 
 	"github.com/carlosboeing/crossrev/internal/core"
 	"github.com/carlosboeing/crossrev/internal/harness"
+	"github.com/carlosboeing/crossrev/internal/intel"
 	"github.com/carlosboeing/crossrev/internal/policy"
 	"github.com/carlosboeing/crossrev/internal/prstate"
 )
@@ -606,7 +607,7 @@ func actionableCount(findings []harness.Node, minFix core.Severity) int {
 	return n
 }
 
-func reviewSummaryBody(findings json.RawMessage, marker prstate.Marker, repo core.Slug, minFix core.Severity, maxPasses int) string {
+func reviewSummaryBody(findings json.RawMessage, marker prstate.Marker, repo core.Slug, minFix core.Severity, maxPasses int, cov commentCoverage) string {
 	var fs []harness.Node
 	_ = json.Unmarshal(findings, &fs)
 	n := len(fs)
@@ -623,6 +624,9 @@ func reviewSummaryBody(findings json.RawMessage, marker prstate.Marker, repo cor
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "## crossrev review — %s\n\n", passLabel(pass, maxPasses))
+	if cov.on && len(cov.skips) > 0 {
+		b.WriteString(intel.SkipWarning(cov.skips))
+	}
 	noun := "findings"
 	if n == 1 {
 		noun = "finding"
@@ -644,6 +648,10 @@ func reviewSummaryBody(findings json.RawMessage, marker prstate.Marker, repo cor
 	} else {
 		sha, _ := marker.HeadSHA.Get()
 		b.WriteString(findingsTable(findings, sha, repo))
+	}
+	if cov.on {
+		b.WriteString(intel.CoverageFootnote(cov.counts, cov.sha))
+		b.WriteString(intel.ExclusionLine(cov.excluded))
 	}
 	unanchored := marker.Unanchored.Value()
 	if unanchored == 1 {

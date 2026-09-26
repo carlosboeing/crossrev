@@ -391,6 +391,27 @@ func TestSkipReason(t *testing.T) {
 	}
 }
 
+// ParseSkipReason reads back every signal SkipReason writes, and refuses a
+// policy exclusion, which shares the generation's exclusion list.
+func TestSkipReasonRoundTrip(t *testing.T) {
+	for _, signal := range []string{intel.SignalLockfile, intel.SignalBundleName, intel.SignalHeader, intel.SignalMinified} {
+		unit := intel.FileUnit{Generated: signal, Body: make([]byte, 350797)}
+		reason := intel.SkipReason(unit)
+		gotSignal, gotSize, gotBudget, ok := intel.ParseSkipReason(reason)
+		if !ok || gotSignal != signal || gotSize != 350797 || gotBudget != intel.MaxPromptBytes {
+			t.Errorf("ParseSkipReason(%q) = %q, %d, %d, %v", reason, gotSignal, gotSize, gotBudget, ok)
+		}
+		if again := intel.SkipReasonText(gotSignal, gotSize); again != reason {
+			t.Errorf("SkipReasonText = %q, want %q", again, reason)
+		}
+	}
+	for _, reason := range []string{intel.GeneratedAttributeReason, "backlog destination", ""} {
+		if _, _, _, ok := intel.ParseSkipReason(reason); ok {
+			t.Errorf("ParseSkipReason(%q) parsed a non-skip", reason)
+		}
+	}
+}
+
 // A generated file past 400 reviewable files is carried. A skip inside the
 // bound frees its slot for the next file.
 func TestBatchesCarryRatherThanSkipPastThePassBudget(t *testing.T) {

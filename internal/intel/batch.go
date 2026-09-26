@@ -3,6 +3,8 @@ package intel
 import (
 	"fmt"
 	"sort"
+	"strconv"
+	"strings"
 
 	"github.com/carlosboeing/crossrev/internal/core"
 )
@@ -73,7 +75,47 @@ type BatchPlan struct {
 // matched, the file's byte size and the prompt budget it could not fit. The
 // reason text is the exclusion record the generation and the warning carry.
 func SkipReason(unit FileUnit) string {
-	return fmt.Sprintf("generated (%s), %d bytes, over the %d-byte prompt budget", unit.Generated, len(unit.Body), MaxPromptBytes)
+	return SkipReasonText(unit.Generated, len(unit.Body))
+}
+
+// SkipReasonText is SkipReason for a signal and a byte size. The warning
+// renders from this text, so a caller that already measured the body does
+// not allocate it again. ParseSkipReason reads the same text back.
+func SkipReasonText(signal string, size int) string {
+	return fmt.Sprintf("generated (%s), %d bytes, over the %d-byte prompt budget", signal, size, MaxPromptBytes)
+}
+
+// ParseSkipReason reads a reason SkipReasonText wrote. ok is false for a
+// policy exclusion or any other text, so a generation's exclusion list can
+// be split into skips and repository policy without a second field.
+func ParseSkipReason(reason string) (signal string, size, budget int, ok bool) {
+	const prefix = "generated ("
+	const afterSignal = "), "
+	const afterSize = " bytes, over the "
+	const budgetTail = "-byte prompt budget"
+	rest, found := strings.CutPrefix(reason, prefix)
+	if !found {
+		return "", 0, 0, false
+	}
+	signal, rest, found = strings.Cut(rest, afterSignal)
+	if !found || signal == "" {
+		return "", 0, 0, false
+	}
+	sizeText, rest, found := strings.Cut(rest, afterSize)
+	if !found || !strings.HasSuffix(rest, budgetTail) {
+		return "", 0, 0, false
+	}
+	budgetText := strings.TrimSuffix(rest, budgetTail)
+	var err error
+	size, err = strconv.Atoi(sizeText)
+	if err != nil || size < 0 {
+		return "", 0, 0, false
+	}
+	budget, err = strconv.Atoi(budgetText)
+	if err != nil || budget < 0 {
+		return "", 0, 0, false
+	}
+	return signal, size, budget, true
 }
 
 // Batches packs the scope's outstanding required files — those with no accepted

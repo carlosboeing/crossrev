@@ -553,7 +553,13 @@ func (l *Leg) readEvidence(ctx context.Context, base, head core.Revision, f diff
 	if f.Deleted {
 		revision = base
 	}
-	body, status, err := l.Git.Show(ctx, revision, f.Path)
+	return l.blobAt(ctx, revision, f.Path)
+}
+
+// blobAt reads one committed blob through Git.Show. A path that is not a
+// file answers no bytes and no error. The working tree is never opened.
+func (l *Leg) blobAt(ctx context.Context, revision core.Revision, path string) ([]byte, error) {
+	body, status, err := l.Git.Show(ctx, revision, path)
 	if err != nil {
 		return nil, err
 	}

@@ -347,15 +347,12 @@ func coverageFootnote(marker prstate.Marker, ctx RenderContext) string {
 	if sha == "" {
 		return ""
 	}
-	total := cov.Required + cov.Excluded
-	out := fmt.Sprintf("Reviewed %d of %d changed files at `%s`.", cov.Covered, total, shortSHA(sha))
-	switch skipped := len(ctx.Skipped); {
-	case skipped == 1:
-		out += " 1 was not reviewed; see the warning above."
-	case skipped > 1:
-		out += fmt.Sprintf(" %d were not reviewed; see the warning above.", skipped)
-	}
-	return out + "\n\n"
+	return intel.CoverageFootnote(intel.CoverageCounts{
+		Covered:  cov.Covered,
+		Required: cov.Required,
+		Excluded: cov.Excluded,
+		Skipped:  len(ctx.Skipped),
+	}, sha)
 }
 
 // exclusionLine lists the paths repository policy or the backlog rule
@@ -364,23 +361,7 @@ func coverageFootnote(marker prstate.Marker, ctx RenderContext) string {
 // report's byte bound, ending with a count past it, because a repository can
 // mark thousands of changed paths generated.
 func exclusionLine(excluded []string) string {
-	if len(excluded) == 0 {
-		return ""
-	}
-	budget := haltPathListBudget
-	quoted := make([]string, 0, len(excluded))
-	for _, path := range excluded {
-		item := "`" + path + "`"
-		if len(item)+len(", ") > budget {
-			break
-		}
-		quoted = append(quoted, item)
-		budget -= len(item) + len(", ")
-	}
-	if rest := len(excluded) - len(quoted); rest > 0 {
-		quoted = append(quoted, fmt.Sprintf("…and %d more", rest))
-	}
-	return fmt.Sprintf("Excluded by repository policy: %s — not reviewed.\n\n", strings.Join(quoted, ", "))
+	return intel.ExclusionLine(excluded)
 }
 
 // skipWarning renders the block that opens a summary whose pass skipped
@@ -388,45 +369,23 @@ func exclusionLine(excluded []string) string {
 // and the budget, and ends with the guidance for its rule. The list has the
 // halt report's byte bound, ending with a count past it.
 func skipWarning(skipped []SkippedFile) string {
-	var b strings.Builder
-	if len(skipped) == 1 {
-		b.WriteString("> **Warning: 1 changed file was not reviewed.** CrossRev recognised it as generated and it is too large for one review prompt.\n>\n")
-	} else {
-		fmt.Fprintf(&b, "> **Warning: %d changed files were not reviewed.** CrossRev recognised them as generated and they are too large for one review prompt.\n>\n", len(skipped))
+	if len(skipped) == 0 {
+		return ""
 	}
-	budget := haltPathListBudget
-	listed := 0
-	for _, s := range skipped {
-		line := "> - " + skipLine(s) + "\n"
-		if len(line) > budget {
-			break
+	notices := make([]intel.SkipNotice, len(skipped))
+	for i, s := range skipped {
+		notices[i] = intel.SkipNotice{
+			Path:    s.Path,
+			Reason:  intel.SkipReasonText(s.Signal, s.Bytes),
+			Excerpt: s.Excerpt,
 		}
-		b.WriteString(line)
-		budget -= len(line)
-		listed++
 	}
-	if rest := len(skipped) - listed; rest > 0 {
-		fmt.Fprintf(&b, "> - …and %d more skipped files\n", rest)
-	}
-	b.WriteString(">\n")
-	b.WriteString("> To have CrossRev review a file like this, mark it `-linguist-generated` in `.gitattributes`. It is then reviewed if it fits, or the pass halts. To exclude it without this warning, mark it `linguist-generated`.\n\n")
-	return b.String()
-}
-
-// skipLine renders one skipped file for the warning block: path, rule, size,
-// budget, and the guidance for its rule.
-func skipLine(s SkippedFile) string {
-	rule := s.Signal
-	if s.Signal == "header" && s.Excerpt != "" {
-		rule = "header: `" + s.Excerpt + "`"
-	}
-	return fmt.Sprintf("`%s` — generated (%s), %s bytes, over the %s-byte budget. %s",
-		s.Path, rule, Thousands(strconv.Itoa(s.Bytes)), Thousands(strconv.Itoa(intel.MaxPromptBytes)), skipGuidance(s.Signal))
+	return intel.SkipWarning(notices)
 }
 
 // skipRenderDetails turns packing's skipped units into the render shape. The
-// header excerpt derives from the same bounded window the detector read; it
-// is computed here and never stored in the ledger.
+// header excerpt derives from the same bounded window the detector read.
+// The ledger stores the reason, not the quote.
 func skipRenderDetails(skipped []intel.FileUnit) []SkippedFile {
 	if len(skipped) == 0 {
 		return nil
@@ -459,22 +418,12 @@ func policyExclusionPaths(scope intel.Scope) []string {
 	return out
 }
 
-// skipGuidance is the per-rule closing advice of a skip line: a lockfile
-// alone holds the resolved URLs and integrity hashes, so its guidance names
-// them rather than a generating file.
-func skipGuidance(signal string) string {
-	if signal == "lockfile" {
-		return "It was not read, and its manifest is not a substitute: check its resolved URLs and hashes by hand or with a lockfile linter."
-	}
-	return "Check it yourself, or review the file that generates it."
-}
-
 // skipWarnLine is the terminal warning for one skipped file, carrying the
 // same path, rule and size as the comment's warning block.
 func skipWarnLine(unit intel.FileUnit) ui.Line {
 	return ui.Warn(
 		fmt.Sprintf("%s was recognised as generated (%s), %s bytes, and fits no review prompt — it was not reviewed", unit.Path, unit.Generated, Thousands(strconv.Itoa(len(unit.Body)))),
-		skipGuidance(unit.Generated))
+		intel.SkipGuidance(unit.Generated))
 }
 
 // shortSHA abbreviates a commit SHA the way printed messages do: the first

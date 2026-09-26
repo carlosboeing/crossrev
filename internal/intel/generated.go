@@ -175,7 +175,9 @@ func minifiedMatches(body []byte) bool {
 // marker, rendered for a comment: backticks and control bytes removed, cut
 // to excerptMaxBytes on a rune boundary with an ellipsis. It is derived from
 // the same bounded window the detector read and is never stored in the
-// ledger. An empty answer means no marker line is in the window.
+// ledger. The resolve leg calls it again on the committed head blob when it
+// rewrites the review comment. An empty answer means no marker line is in
+// the window.
 func HeaderExcerpt(body []byte) string {
 	for _, line := range strings.Split(string(headerWindow(body)), "\n") {
 		if goGeneratedHeader.MatchString(line) ||
