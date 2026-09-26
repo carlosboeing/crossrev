@@ -35,7 +35,7 @@ CrossRev uses pure built-in detectors in fixed precedence:
 1. `lockfile`: Exact match on known lockfile basenames.
 2. `bundle-name`: Suffixes `.min.js`, `.min.css`, `.js.map`, and `.css.map`.
 3. `header`: Header window scan (first 10 lines or 1,024 bytes) for Go code generation comments, `@generated`, or `generated` with `do not edit` or `do not modify`.
-4. `minified`: Average line length strictly greater than 110 bytes, in a non-binary file that is not prose or markup.
+4. `minified`: Average line length strictly greater than 110 bytes, in a non-binary file whose extension is not one of the prose extensions section 5 lists.
 
 A built-in match only acts when a file cannot fit the prompt budget alone. Fitting files continue to be packed and reviewed. Oversized generated files are skipped rather than halting the pass.
 

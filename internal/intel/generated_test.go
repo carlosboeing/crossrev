@@ -230,8 +230,8 @@ func TestGeneratedSignalMinifiedBoundaries(t *testing.T) {
 }
 
 // Prose kept as one line per paragraph averages well over 110 bytes a line
-// without being generated, so the minified rule skips prose and markup
-// extensions. The header rule still applies to them.
+// without being generated, so the minified rule skips prose extensions.
+// The header rule still applies to them.
 func TestGeneratedSignalMinifiedSkipsProse(t *testing.T) {
 	paragraph := strings.Repeat("An unwrapped paragraph written by a person. ", 10)
 	prose := paragraph + "\n\n" + paragraph + "\n"
