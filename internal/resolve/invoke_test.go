@@ -597,6 +597,56 @@ func TestResolvePromptNegatedAttributeWithGeneratedHeaderStays(t *testing.T) {
 	}
 }
 
+// A path the base marks linguist-generated is dropped even when its bytes
+// look handwritten. A path an open finding names stays, attribute and all,
+// because the resolver may have to edit it.
+func TestResolvePromptAttributeSetDropsPlainFilesUnlessAFindingNamesThem(t *testing.T) {
+	e := setup(t)
+	findings := json.RawMessage(`[
+		{"id":"` + testFinding + `","path":"dist/widget.js","line":2,"side":"RIGHT","severity":"high","category":"correctness","pre_existing":false,"title":"nil deref","why":"crash","fix":"check"}
+	]`)
+	e.addReview(t, findings, "issues-remain")
+	e.adapter.payloads = []json.RawMessage{oneFindingPayload()}
+	e.forge.diff = []byte(strings.Join([]string{
+		"diff --git a/dist/app.js b/dist/app.js",
+		"--- a/dist/app.js",
+		"+++ b/dist/app.js",
+		"@@ -1 +1 @@",
+		"-old",
+		"+new",
+		"diff --git a/dist/widget.js b/dist/widget.js",
+		"--- a/dist/widget.js",
+		"+++ b/dist/widget.js",
+		"@@ -1 +1 @@",
+		"-old",
+		"+new",
+	}, "\n") + "\n")
+	ordinary := []byte("function app() {\n  return 1;\n}\n")
+	e.git.show = map[string][]byte{
+		"dist/app.js":    ordinary,
+		"dist/widget.js": ordinary,
+	}
+	e.git.generatedAttrs = map[string]vcs.AttributeDecision{
+		"dist/app.js":    vcs.AttributeSet,
+		"dist/widget.js": vcs.AttributeSet,
+	}
+
+	got := e.run(t)
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
+	if len(e.adapter.invs) == 0 {
+		t.Fatal("adapter not invoked")
+	}
+	prompt := e.adapter.invs[0].Prompt.Text
+	if strings.Contains(prompt, "diff --git a/dist/app.js b/dist/app.js") {
+		t.Errorf("plain attribute-set path stayed in the prompt:\n%s", prompt)
+	}
+	if !strings.Contains(prompt, "diff --git a/dist/widget.js b/dist/widget.js") {
+		t.Errorf("attribute-set path named by an open finding was dropped:\n%s", prompt)
+	}
+}
+
 // The resolve prompt applies built-in signals at every size, so a small
 // Markdown file written one line per paragraph would lose its diff if long
 // lines counted as minified. It stays.
