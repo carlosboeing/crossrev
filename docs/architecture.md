@@ -150,7 +150,7 @@ The review reads in batches because one prompt cannot hold a large pull request.
 
 Batches measure the full rendered prompt against 180 KB (184,320 bytes).
 
-A file that fits in no batch waits with `input_exceeds_budget`.
+A plain file that fits in no batch waits with `input_exceeds_budget` and halts the pass. An oversized generated file is skipped instead, with a warning in the comment summary and the terminal.
 
 Files past the pass budget carry `review_budget_reached`.
 
