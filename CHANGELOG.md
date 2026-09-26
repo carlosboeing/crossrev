@@ -8,6 +8,10 @@ All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepa
 
 - **Generated files are recognised without configuration.** CrossRev detects lockfiles, bundle names, minified files (`.md`, `.markdown`, `.mdx`, `.rst`, `.adoc` and `.txt` excepted), and generated headers using pure built-in rules seeded from Linguist's `generated.rb`, with base-revision `.gitattributes` (`linguist-generated`) as the repository authority. Fitting generated files are reviewed; oversized generated files are skipped with visible warnings in the pull request comment and terminal. The resolve leg keeps that warning, the policy exclusion line and the coverage footnote when it rewrites the review comment, quoting a header marker from the committed blob. Skips do not consume the 400 review slots, so later files can be reviewed and passes can converge. Generated and excluded files are filtered from the resolve leg diff at any size unless anchored by an open finding. A pull request with nothing left to review halts with `blocked` and `crossrev/halted` without invoking a model. The coverage engine advances to `file-v2`. See [ADR 0023](docs/adrs/0023-generated-files-are-recognised-without-configuration.md).
 
+### Fixed
+
+- **A multi-call review pass reports the summed usage across every call.** The pass marker carried only the first batch's usage envelope, so every further call's tokens went unreported. The marker now sums the usage buckets across every accepted call into the existing `tokens` and `usage` fields, keeping the first call's model, and warns once naming both models when a later call answers under another one. A resumed pass sums only the calls accepted in this run.
+
 ## [0.9.0] — 2026-09-26
 
 ### Fixed

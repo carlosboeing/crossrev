@@ -28,11 +28,62 @@ type batchOutcome struct {
 	findings []Finding
 	verdict  string
 	envelope *harness.Envelope
-	payloads []json.RawMessage
-	examined []string
-	limits   []string
-	batches  int
-	retries  int
+	// usage sums the buckets across every envelope this run accepted, so
+	// the marker reports what the pass spent rather than what its first
+	// batch spent. Resumed verdicts carry no fresh call and add nothing.
+	usage *harness.Usage
+	// model is the first answering model this run's calls reported, and
+	// modelWarned records that the mismatch warning has fired. The marker
+	// keeps the first envelope's model; the warning names the change once.
+	model       string
+	modelWarned bool
+	payloads    []json.RawMessage
+	examined    []string
+	limits      []string
+	batches     int
+	retries     int
+}
+
+// addEnvelope folds one accepted call's envelope into the outcome: the
+// first envelope's identity stands, its usage buckets join the running
+// sum, and a call answering under another model warns once naming both.
+// A retry's envelope counts once, when its call is accepted — a refused
+// answer judged nothing, so its bytes describe no record.
+func (o *batchOutcome) addEnvelope(envelope harness.Envelope) []ui.Line {
+	if o.envelope == nil {
+		o.envelope = &envelope
+	}
+	if envelope.Usage != nil {
+		if o.usage == nil {
+			sum := *envelope.Usage
+			o.usage = &sum
+		} else {
+			o.usage.InputFresh += envelope.Usage.InputFresh
+			o.usage.CacheRead += envelope.Usage.CacheRead
+			o.usage.CacheWrite5m += envelope.Usage.CacheWrite5m
+			o.usage.CacheWrite1h += envelope.Usage.CacheWrite1h
+			o.usage.CacheWriteUnsplit += envelope.Usage.CacheWriteUnsplit
+			o.usage.Output += envelope.Usage.Output
+		}
+	}
+	reported := ""
+	if envelope.ModelReported != nil {
+		reported = *envelope.ModelReported
+	}
+	if reported == "" {
+		return nil
+	}
+	if o.model == "" {
+		o.model = reported
+		return nil
+	}
+	if o.modelWarned || o.model == reported {
+		return nil
+	}
+	o.modelWarned = true
+	return []ui.Line{ui.Warn(
+		fmt.Sprintf("calls in this pass answered under different models — %s, then %s", o.model, reported),
+		"The marker keeps the first model and sums usage across every call. If the harness substituted a model mid-pass, two reviewers judged this pass.")}
 }
 
 // runCoverage runs the batch loop for one pass and folds its outcome into
@@ -189,9 +240,7 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 		}
 		outcome.verdict = verdictFromPayload(payload)
 		outcome.payloads = append(outcome.payloads, payload)
-		if outcome.envelope == nil {
-			outcome.envelope = &envelope
-		}
+		out.Messages = append(out.Messages, outcome.addEnvelope(envelope)...)
 		outcome.examined = append(outcome.examined, examined)
 		outcome.limits = append(outcome.limits, limits...)
 		for _, finding := range findingsFromPayload(payload) {
@@ -664,8 +713,22 @@ func (l *Leg) finishCoveredPass(ctx context.Context, req Request, loaded Context
 	// predicate has already applied the converged label.
 	marker.CoverageStop = prstate.Null[prstate.CoverageStop]()
 	out.Marker = marker
-	out.Covered = coveredPass{findings: outcome.findings, verdict: verdict, envelope: outcome.envelope, payload: mergePayloads(outcome.payloads, verdict), examined: outcome.examined, limits: outcome.limits}
+	out.Covered = coveredPass{findings: outcome.findings, verdict: verdict, envelope: summedEnvelope(outcome), payload: mergePayloads(outcome.payloads, verdict), examined: outcome.examined, limits: outcome.limits}
 	return nil
+}
+
+// summedEnvelope answers the envelope the pass reports: the first call's
+// identity carrying the summed usage and its total. A pass whose calls
+// reported no usage keeps the first envelope untouched.
+func summedEnvelope(outcome batchOutcome) *harness.Envelope {
+	if outcome.envelope == nil || outcome.usage == nil {
+		return outcome.envelope
+	}
+	summed := *outcome.envelope
+	total := outcome.usage.WithTotal()
+	summed.Usage = &total
+	summed.Tokens = total.Total
+	return &summed
 }
 
 // verdictForResumed reports the verdict for a pass that accepted no batch in
