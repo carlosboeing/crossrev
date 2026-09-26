@@ -52,12 +52,12 @@ type deps struct {
 
 // gitEnvironment is what a git child inherits.
 //
-// git is the one tool here that may hold a forge credential, because a push
-// over https uses whatever credential helper the environment configures
-// (internal/vcs's package comment). The names are the ones git itself
-// documents and the ones the offline suite sets: a fixture points HOME and the
-// XDG variables at a temporary directory, and a git that inherited neither
-// would read the developer's own configuration.
+// git is the one tool here that may hold a forge credential: on a runner its
+// invocations carry the forge-host helper (internal/vcs's package comment),
+// and locally a push over https uses the operator's own helper. The names
+// are the ones git itself documents and the ones the offline suite sets: a
+// fixture points HOME and the XDG variables at a temporary directory, and a
+// git that inherited neither would read the developer's own configuration.
 var gitEnvironment = []string{
 	"PATH",
 	"HOME",
@@ -91,6 +91,10 @@ var gitEnvironment = []string{
 func open(out *ui.IO, doc harness.Document) *deps {
 	orchestrator := exec.NewOrchestratorRunner()
 	git := vcs.New(orchestrator, exec.Inherit(gitEnvironment))
+	// Decided once, here, rather than read inside the git primitive on every
+	// call: whether this process runs on a GitHub Actions runner, hosted or
+	// self-hosted, which is what tells git to authenticate per invocation.
+	git.ActionsRunner = os.Getenv("GITHUB_ACTIONS") != ""
 	return &deps{
 		out:          out,
 		orchestrator: orchestrator,

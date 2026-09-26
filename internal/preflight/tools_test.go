@@ -266,7 +266,8 @@ func TestCheckTreatsAnEmptyLoginAsNoAnswer(t *testing.T) {
 }
 
 // The harness set is descriptor-driven, and a harness is optional
-// (lib/preflight.sh:138-165).
+// (lib/preflight.sh:138-165). Each reported version is compared against the
+// span on record for that harness.
 func TestCheckHarnessReportsEveryDescribedHarness(t *testing.T) {
 	t.Setenv("GITHUB_ACTIONS", "")
 	r := coreVersions(newRecorder())
@@ -287,13 +288,66 @@ func TestCheckHarnessReportsEveryDescribedHarness(t *testing.T) {
 		"│  ✓ jq 1.8.1\n" +
 		"│  ✓ yq v4.53.3\n" +
 		"│  ✓ openssl 3.6.3\n" +
-		"│  ✓ claude 2.1.258\n" +
-		"│  ✓ codex 0.152.1\n" +
+		"│  ✓ claude 2.1.258 — known good (2.1.237-2.1.281)\n" +
+		"│  ✓ codex 0.152.1 — unverified, outside the recorded range (0.148.0)\n" +
 		"│  ○ agy — installed, but it did not report a version\n" +
 		"│  ○ grok — not found, optional\n" +
 		"│  ○ opencode — not found, optional\n"
 	if got := buf.String(); got != want {
 		t.Errorf("report =\n%q\nwant\n%q", got, want)
+	}
+}
+
+// A version is reported against the span on record, never against an invented
+// range: outside the span is unverified, a harness with no recorded span says
+// so, and an install the adapter itself refuses is reported in the adapter's
+// own words and never counted as a harness. None of it fails on the version
+// alone; the refusal that stops work is the leg's own.
+func TestCheckHarnessComparesVersionsAgainstRecordedEvidence(t *testing.T) {
+	t.Setenv("GITHUB_ACTIONS", "")
+	r := coreVersions(newRecorder())
+	r.answer("gh api user --jq .login", "carlosboeing\n", 0)
+	r.answer("claude --version", "2.1.300 (Claude Code)\n", 0)
+	r.answer("agy --version", "0.1.5\n", 0)
+	r.answer("opencode --version", "opencode v2.0.15\n", 0)
+	c, buf := checker(t, r, onPath("git", "gh", "jq", "yq", "openssl", "claude", "agy", "opencode"))
+
+	if !c.Check(context.Background(), preflight.NeedHarness) {
+		t.Errorf("Check = false, want true")
+	}
+	report := buf.String()
+	for _, want := range []string{
+		"│  ✓ claude 2.1.300 — unverified, outside the recorded range (2.1.237-2.1.281)\n",
+		"│  ✓ agy 0.1.5 — unverified, no recorded version range\n",
+		"│  ○ the opencode CLI reports version v2.0.15, and CrossRev supports opencode 1.x (issue #272)\n",
+	} {
+		if !strings.Contains(report, want) {
+			t.Errorf("report =\n%s\nwant a line %q", report, want)
+		}
+	}
+	if strings.Contains(report, "✓ opencode") {
+		t.Errorf("a refused install is not counted as a found harness:\n%s", report)
+	}
+}
+
+// An install the adapter refuses is not "a harness CLI found": a machine
+// holding only one cannot run a leg, so the report says so rather than passing.
+func TestCheckHarnessCountsARefusedInstallAsNone(t *testing.T) {
+	t.Setenv("GITHUB_ACTIONS", "")
+	r := coreVersions(newRecorder())
+	r.answer("gh api user --jq .login", "carlosboeing\n", 0)
+	r.answer("opencode --version", "opencode v2.0.15\n", 0)
+	c, buf := checker(t, r, onPath("git", "gh", "jq", "yq", "openssl", "opencode"))
+
+	if c.Check(context.Background(), preflight.NeedHarness) {
+		t.Errorf("Check = true, want false")
+	}
+	report := buf.String()
+	if !strings.Contains(report, "│  ○ the opencode CLI reports version v2.0.15, and CrossRev supports opencode 1.x (issue #272)\n") {
+		t.Errorf("report =\n%s\nwant the adapter's refusal line", report)
+	}
+	if !strings.Contains(report, "no harness CLI found") {
+		t.Errorf("report =\n%s\nwant the no-harness verdict", report)
 	}
 }
 

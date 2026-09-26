@@ -183,6 +183,12 @@ No shipped harness currently restricts its legs, so this refusal only appears fo
 
 `--harness` on `cycle` lands on both legs, which is how an operator with a single harness installed runs the loop. It is refused only when that harness cannot serve one of them.
 
+`the opencode CLI reports version 2.x, and CrossRev supports opencode 1.x (issue #272)`
+
+`the opencode CLI did not report a version, and CrossRev supports opencode 1.x (issue #272)`
+
+opencode 2.x does not accept the flags the adapter passes and does not read the isolation config it writes, so a leg on it would run without the constraints that config exists to hold ([#272](https://github.com/carlosboeing/crossrev/issues/272)). Both legs probe `opencode --version` and refuse any install outside 1.x before starting. The second message is the same refusal on the same terms for a probe that reports no version — CrossRev fails closed rather than starting a leg on an install it cannot confirm. Install the supported CLI — `npm install -g opencode-ai@1.18.21`, the version the descriptor pins — or point the leg at another harness with `--harness`.
+
 ## A credential problem in CI
 
 | Symptom | Cause |

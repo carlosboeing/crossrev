@@ -28,6 +28,17 @@ import (
 )
 
 func (l *Leg) prepareWorktree(ctx context.Context, s *session) (string, error) {
+	// The token the checkout persisted, if any, is removed before anything
+	// else runs — before the fetches below, which authenticate per
+	// invocation, and before the harness starts. Generated workflows
+	// persist none, but a checkout from an older workflow still carries it.
+	removed, err := l.Git.RemovePersistedCredentials(ctx)
+	if err != nil {
+		return "", err
+	}
+	if l.Log != nil && len(removed) > 0 {
+		l.Log.Event("credentials", vcs.RemovedCredentialLine(removed))
+	}
 	wt, err := vcs.WorktreeDir(s.repo, s.req.PR)
 	if err != nil {
 		return "", err
@@ -229,6 +240,12 @@ func (l *Leg) invoke(ctx context.Context, s *session, marker prstate.Marker, wor
 	}
 	if err := os.MkdirAll(inv.Scratch, 0o700); err != nil {
 		return wrapErr(err)
+	}
+
+	// The version gate, before anything starts: an adapter that pins its CLI
+	// version refuses an install it does not drive rather than run a leg on it.
+	if refusal := harness.CheckVersion(ctx, l.runner(), adapter, inv); refusal != nil {
+		return wrapErr(refusal)
 	}
 
 	entry, _ := doc.For(s.settings.Harness)

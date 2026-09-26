@@ -47,8 +47,8 @@ func TestDoctorOnAWorkingMachine(t *testing.T) {
 		"│  ✓ jq 1.8.1\n" +
 		"│  ✓ yq v4.53.3\n" +
 		"│  ✓ openssl 3.6.3\n" +
-		"│  ✓ claude 2.1.258\n" +
-		"│  ✓ codex 0.152.1\n" +
+		"│  ✓ claude 2.1.258 — known good (2.1.237-2.1.281)\n" +
+		"│  ✓ codex 0.152.1 — unverified, outside the recorded range (0.148.0)\n" +
 		"│  ○ agy — not found, optional\n" +
 		"│  ○ grok — not found, optional\n" +
 		"│  ○ opencode — not found, optional\n" +

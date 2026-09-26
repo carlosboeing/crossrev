@@ -26,7 +26,7 @@
 // A real git child is started through exec.NewOrchestratorRunner. git is not the
 // process the credential boundary exists for — that process is the harness,
 // which reads attacker-controlled text — and git is the one tool here that may
-// legitimately hold a forge credential, because a push over https uses whatever
-// credential helper the environment configures. Git.New carries the full
-// reasoning.
+// legitimately hold a forge credential. On a runner its invocations carry the
+// forge-host helper; locally a push over https uses the operator's own helper.
+// Git.New carries the full reasoning.
 package vcs

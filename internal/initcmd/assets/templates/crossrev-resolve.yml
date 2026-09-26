@@ -37,6 +37,11 @@ jobs:
           ref: ${{ github.event.pull_request.head.ref }}
           fetch-depth: 0
           token: ${{ steps.app.outputs.token }}
+          # The token checks the code out and is then forgotten: keeping it
+          # would persist it in the checkout's git config for the rest of the
+          # job. CrossRev authenticates its own git calls per invocation, so
+          # later steps in this job have no persisted credential to reuse.
+          persist-credentials: false
 
       # crossrev:only github-hosted
       # The whole step sits inside the sentinel rather than just its body: a

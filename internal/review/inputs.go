@@ -96,6 +96,7 @@ type VCS interface {
 	ExactSearch(ctx context.Context, revision core.Revision, term string, limit int) ([]vcs.SearchHit, bool, error)
 	RangeDiff(ctx context.Context, base, head core.Revision) ([]byte, error)
 	GeneratedAttributes(ctx context.Context, base core.Revision, paths []string) (map[string]vcs.AttributeDecision, *vcs.Warning, error)
+	RemovePersistedCredentials(ctx context.Context) ([]vcs.RemovedCredential, error)
 }
 
 // intelAttributeDecisions maps the VCS attribute answer onto discovery's

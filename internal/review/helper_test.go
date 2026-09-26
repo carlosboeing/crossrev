@@ -158,6 +158,12 @@ type fakeVCS struct {
 	// searchCalls counts ExactSearch invocations, so a test can pin how often
 	// advisory discovery runs.
 	searchCalls int
+	// removePersistedCalls counts RemovePersistedCredentials invocations, and
+	// removePersistedErr is the failure it returns.
+	removePersistedCalls int
+	removePersistedErr   error
+	// removed is what RemovePersistedCredentials answers.
+	removed []vcs.RemovedCredential
 }
 
 func (f *fakeVCS) GeneratedAttributes(_ context.Context, _ core.Revision, paths []string) (map[string]vcs.AttributeDecision, *vcs.Warning, error) {
@@ -240,6 +246,14 @@ func (f *fakeVCS) Show(_ context.Context, revision core.Revision, path string) (
 	return content, vcs.IsFile, nil
 }
 
+func (f *fakeVCS) RemovePersistedCredentials(context.Context) ([]vcs.RemovedCredential, error) {
+	f.removePersistedCalls++
+	if f.removePersistedErr != nil {
+		return nil, f.removePersistedErr
+	}
+	return f.removed, nil
+}
+
 type fakeRunner struct {
 	log    *eventLog
 	mu     sync.Mutex
@@ -247,6 +261,12 @@ type fakeRunner struct {
 	script []exec.Result
 	calls  int
 	onSpec func(exec.Spec)
+	// probes records `--version` children, and version is what they answer.
+	// A probe is not a session child: it neither advances the script nor
+	// counts in calls, the same way tests/stub/opencode answers --version
+	// before it logs anything.
+	probes  []exec.Spec
+	version string
 }
 
 func (r *fakeRunner) Run(_ context.Context, spec exec.Spec) exec.Result {
@@ -254,6 +274,15 @@ func (r *fakeRunner) Run(_ context.Context, spec exec.Spec) exec.Result {
 		r.log.add("harness")
 	}
 	r.mu.Lock()
+	if len(spec.Args) == 1 && spec.Args[0] == "--version" {
+		r.probes = append(r.probes, spec)
+		version := r.version
+		if version == "" {
+			version = "1.18.21 (test stub)"
+		}
+		r.mu.Unlock()
+		return exec.Result{ExitCode: 0, Stdout: []byte(version + "\n")}
+	}
 	r.specs = append(r.specs, spec)
 	r.calls++
 	call := r.calls

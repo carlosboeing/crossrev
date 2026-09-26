@@ -43,9 +43,13 @@ func TestEveryAdapterBuildsTheWholeArgv(t *testing.T) {
 		want  []string
 	}{
 		{
+			// The reading leg carries its tool list, its MCP exclusion and its
+			// Agent and Skill removal beside the Bash lines; the writing leg
+			// takes none of them, because it needs its edit tools.
 			harness: "claude", write: false,
-			where: "lib/adapters/claude.sh:23,49,54,55,111",
+			where: "lib/adapters/claude.sh:23,49,54,55,111, plus the reading leg's read-only tool list",
 			want: []string{"-p", "--output-format", "json",
+				"--tools", "Read,Grep,Glob", "--disallowedTools", "Agent,Skill", "--strict-mcp-config",
 				"--json-schema", "<schema-text>", "--model", "<model>", "--effort", "high", "<prompt>"},
 		},
 		{

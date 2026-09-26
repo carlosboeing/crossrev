@@ -96,7 +96,7 @@ One detail about the `skills` CLI, because it fails by reporting nothing rather 
 crossrev doctor
 ```
 
-`doctor` checks the dependencies, verifies `gh` is authenticated rather than merely installed, and reports which harnesses it can see. It also says which reviewer/resolver pairings your configured runner can actually serve — the half of "is this set up correctly" that otherwise stays invisible until a CI run fails to authenticate.
+`doctor` checks the dependencies, verifies `gh` is authenticated rather than merely installed, and reports which harnesses it can see — each installed one's version compared against the versions on record for it, where a version outside the record reads as unverified rather than judged. It also says which reviewer/resolver pairings your configured runner can actually serve — the half of "is this set up correctly" that otherwise stays invisible until a CI run fails to authenticate.
 
 ### What it needs
 
