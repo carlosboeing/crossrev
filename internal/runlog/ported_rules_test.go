@@ -44,6 +44,7 @@ func TestPortedCredentialRules(t *testing.T) {
 		{"age-secret-key", fragments("AGE-SECRET-KEY-1", strings.Repeat("Q", 58)), fragments("AGE-SECRET-KEY-1", strings.Repeat("Q", 57))},
 		{"alibaba-access-key-id", fragments("LTAI", varied(alphaWord, 20)), fragments("LTAI", "abc")},
 		{"artifactory-api-key", fragments("AKCp", varied(alphaWord, 69)), fragments("AkCp", strings.Repeat("a0", 34), "a")},
+		{"artifactory-reference-token", fragments("cmVmd", varied(alphaWord, 59)), fragments("cmVMd", strings.Repeat("a0", 29), "a")},
 		{"authress-service-client-access-key", fragments("sc_", varied(alphaWord, 8), ".", "ab12", ".acc_", varied(alphaWord, 12), ".", varied(alphaNumLower, 30)), fragments("sc_", "abc", ".acc_", "short")},
 		{"aws-amazon-bedrock-api-key-long-lived", fragments("ABSK", varied(alphaBase64, 112)), fragments("ABSK", "QmVkcm9ja0FQSUtleS1EXAMPLE")},
 		{"clojars-api-token", fragments("CLOJARS_", varied(alphaNumLower, 60)), fragments("CLOJARS_", "abc")},
@@ -110,8 +111,8 @@ func TestPortedCredentialRules(t *testing.T) {
 		{"stripe-access-token", fragments("sk_live_", varied(alphaWord, 24)), fragments("task_test_", strings.Repeat("a0", 15))},
 		{"vault-batch-token", fragments("hvb.", varied(alphaWord, 138)), fragments("hvb.", "abc")},
 	}
-	if len(cases) != 70 {
-		t.Fatalf("test cases = %d, want 70", len(cases))
+	if len(cases) != 71 {
+		t.Fatalf("test cases = %d, want 71", len(cases))
 	}
 	var noLog *runlog.Log
 	for _, c := range cases {
@@ -174,6 +175,7 @@ func TestPortedLowEntropyLookalikesStayPlain(t *testing.T) {
 		{"adobe-client-secret", fragments("p8e-", strings.Repeat("a", 32))},
 		{"alibaba-access-key-id", fragments("LTAI", strings.Repeat("a", 20))},
 		{"artifactory-api-key", fragments("AKCp", strings.Repeat("X", 69))},
+		{"artifactory-reference-token", fragments("cmVmd", strings.Repeat("X", 59))},
 		{"authress-service-client-access-key", fragments("sc_", strings.Repeat("a", 30), ".", "ab12", ".acc_", strings.Repeat("b", 32), ".", strings.Repeat("c", 120))},
 		{"aws-amazon-bedrock-api-key-long-lived", fragments("ABSK", strings.Repeat("A", 109))},
 		{"clojars-api-token", fragments("CLOJARS_", strings.Repeat("a", 60))},
@@ -237,8 +239,8 @@ func TestPortedLowEntropyLookalikesStayPlain(t *testing.T) {
 		{"stripe-access-token", fragments("sk_live_", strings.Repeat("a", 24))},
 		{"vault-batch-token", fragments("hvb.", strings.Repeat("a", 138))},
 	}
-	if len(cases) != 66 {
-		t.Fatalf("lookalike cases = %d, want 66", len(cases))
+	if len(cases) != 67 {
+		t.Fatalf("lookalike cases = %d, want 67", len(cases))
 	}
 	var noLog *runlog.Log
 	for _, c := range cases {

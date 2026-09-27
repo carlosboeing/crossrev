@@ -89,6 +89,7 @@ var portedCredentialPatterns = []portedCredentialPattern{
 	{"shopify-custom-access-token", regexp.MustCompile(`shpca_[a-fA-F0-9]{32}`), 12, 2},
 	{"shopify-private-app-access-token", regexp.MustCompile(`shppa_[a-fA-F0-9]{32}`), 12, 2},
 	{"shopify-shared-secret", regexp.MustCompile(`shpss_[a-fA-F0-9]{32}`), 12, 2},
+	{"artifactory-reference-token", regexp.MustCompile(`\bcmVmd[A-Za-z0-9]{59}\b`), 11, 4.5},
 	{"gitlab-deploy-token", regexp.MustCompile(`gldt-[0-9a-zA-Z_\-]{20}`), 11, 3},
 	{"gitlab-feed-token", regexp.MustCompile(`glft-[0-9a-zA-Z_\-]{20}`), 11, 3},
 	{"gitlab-runner-authentication-token", regexp.MustCompile(`glrt-[0-9a-zA-Z_\-]{20}(?:[^0-9a-zA-Z_-]|$)`), 11, 3},
