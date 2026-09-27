@@ -75,12 +75,21 @@ has "claim create returns an allocated id" "$claim_id" "90"
 claim_body="$(gh api repos/acme/widget/issues/comments/"$claim_id" --jq .body)"
 has "single comment read replays claim body" "$claim_body" 'claim <!-- crossrev:'
 
+claim_login="$(gh api repos/acme/widget/issues/comments/"$claim_id" --jq .user.login)"
+is "single comment read attributes the claim to the seeded user" "$claim_login" "eval-reviewer"
+
 issue_comments_list="$(gh api --paginate repos/acme/widget/issues/42/comments --jq '.[].body')"
 has "issue comments list includes seeded comment" "$issue_comments_list" "Initial discussion on the PR"
 has "issue comments list includes new claim comment" "$issue_comments_list" 'claim <!-- crossrev:'
 
 multiline_body="$(gh api --paginate repos/acme/widget/issues/42/comments --jq '.[] | select(.id == 1002) | .body')"
 is "seeded multiline body replays the newline" "$multiline_body" "$(printf 'Seeded line one\nSeeded line two')"
+
+listed_claim_login="$(gh api --paginate repos/acme/widget/issues/42/comments --jq '.[] | select(.body | contains("claim <!-- crossrev:")) | .user.login')"
+is "listed claim login equals the seeded user" "$listed_claim_login" "eval-reviewer"
+
+seeded_login="$(gh api --paginate repos/acme/widget/issues/42/comments --jq '.[] | select(.id == 1001) | .user.login')"
+is "listed seeded comment keeps its seed login" "$seeded_login" "author"
 
 gh api --method PATCH repos/acme/widget/issues/comments/"$claim_id" -f body='claim updated <!-- crossrev: {"pass":1,"leg":"review"} -->' >/dev/null
 updated_body="$(gh api repos/acme/widget/issues/comments/"$claim_id" --jq .body)"
@@ -104,6 +113,9 @@ has "reply post returns comment id" "$reply_id" "90"
 pr_comments_list="$(gh api --paginate repos/acme/widget/pulls/42/comments --jq '.[].body')"
 has "PR review comments list contains finding 1" "$pr_comments_list" "finding 1"
 has "PR review comments list contains reply" "$pr_comments_list" "reply explaining fix"
+
+finding_login="$(gh api --paginate repos/acme/widget/pulls/42/comments --jq '.[] | select(.id == '"$finding_id"') | .user.login')"
+is "listed finding login equals the seeded user" "$finding_login" "eval-reviewer"
 
 threads_query='query($owner:String!,$name:String!,$number:Int!) {
   repository(owner:$owner,name:$name) {

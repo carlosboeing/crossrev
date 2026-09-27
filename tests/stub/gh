@@ -124,6 +124,23 @@ if [[ -n "${CROSSREV_GH_STATE:-}" ]]; then
   # from the create call (GitHub sets it server-side), so the suite exports
   # it beside the state directory and the snapshot file carries it in.
   gh_author="${CROSSREV_GH_AUTHOR:-tester}"
+  # The login comments created in the run are attributed to. GitHub
+  # attributes a create to the calling token, which this stand-in reads
+  # back through `api user` — so a create carries the seeded user login
+  # when one is seeded, and the exported author otherwise. Without this
+  # every marker read that keeps only that login drops what the run
+  # just stored.
+  create_author="$gh_author"
+  if [[ -f "$CROSSREV_GH_STATE/user.json" ]]; then
+    _u="$(jq -r '.login // empty' "$CROSSREV_GH_STATE/user.json" 2>/dev/null || true)"
+    [[ -n "$_u" ]] && create_author="$_u"
+  elif [[ -f "$CROSSREV_GH_STATE/user" ]]; then
+    _u="$(cat "$CROSSREV_GH_STATE/user")"
+    if [[ "$_u" =~ ^\{.*\}$ ]]; then
+      _u="$(jq -r '.login // empty' <<<"$_u" 2>/dev/null || true)"
+    fi
+    [[ -n "$_u" ]] && create_author="$_u"
+  fi
 
   # Seed issue comments if present
   seed_comments="$CROSSREV_GH_STATE/issue-comments.json"
@@ -140,6 +157,8 @@ if [[ -n "${CROSSREV_GH_STATE:-}" ]]; then
       sc_id="$(jq -r '.id // empty' <<<"$sc_obj")"
       [[ -n "$sc_id" ]] || continue
       printf '%s' "$(jq -r '.body // ""' <<<"$sc_obj")" >"$CROSSREV_GH_STATE/comment-$sc_id"
+      sc_login="$(jq -r '.user.login // empty' <<<"$sc_obj")"
+      printf '%s' "${sc_login:-$create_author}" >"$CROSSREV_GH_STATE/comment-$sc_id.author"
       if (( sc_id >= cur_id )); then
         cur_id=$(( sc_id + 1 ))
       fi
@@ -173,6 +192,7 @@ if [[ -n "${CROSSREV_GH_STATE:-}" ]]; then
       id="$(cat "$next")"
       printf '%s' "$(( id + 1 ))" >"$next"
       printf '%s' "$body" >"$CROSSREV_GH_STATE/comment-$id"
+      printf '%s' "$create_author" >"$CROSSREV_GH_STATE/comment-$id.author"
       printf '{"id":%s}\n' "$id" | emit
       exit 0
     fi
@@ -182,7 +202,9 @@ if [[ -n "${CROSSREV_GH_STATE:-}" ]]; then
     id="${joined##*/}"
     id="${id%% *}"
     if [[ -f "$CROSSREV_GH_STATE/comment-$id" ]]; then
-      jq -cn --argjson id "$id" --arg body "$(cat "$CROSSREV_GH_STATE/comment-$id")" --arg a "$gh_author" \
+      ca="$gh_author"
+      [[ -f "$CROSSREV_GH_STATE/comment-$id.author" ]] && ca="$(cat "$CROSSREV_GH_STATE/comment-$id.author")"
+      jq -cn --argjson id "$id" --arg body "$(cat "$CROSSREV_GH_STATE/comment-$id")" --arg a "$ca" \
         '{id:$id, body:$body, user:{login:$a}, created_at:"2026-09-09T00:00:00Z"}' | emit
       exit 0
     fi
@@ -202,7 +224,9 @@ if [[ -n "${CROSSREV_GH_STATE:-}" ]]; then
       [[ -e "$f" ]] || continue
       cid="${f##*-}"
       case "$cid" in *[!0-9]*) continue;; esac
-      spool="$(jq -c --argjson id "$cid" --arg a "$gh_author" --rawfile body "$f" \
+      ca="$gh_author"
+      [[ -f "$CROSSREV_GH_STATE/comment-$cid.author" ]] && ca="$(cat "$CROSSREV_GH_STATE/comment-$cid.author")"
+      spool="$(jq -c --argjson id "$cid" --arg a "$ca" --rawfile body "$f" \
         '. + [{id:$id, body:$body, user:{login:$a}, created_at:"2026-09-09T00:00:00Z", issue_url:"https://api.github.com/repos/acme/widget/issues/42"}]' <<<"$spool")"
     done
     if [[ "$spool" != "[]" ]]; then
@@ -244,6 +268,7 @@ if [[ -n "${CROSSREV_GH_STATE:-}" ]]; then
     id="$(cat "$next")"
     printf '%s' "$(( id + 1 ))" >"$next"
     printf '%s' "$body" >"$CROSSREV_GH_STATE/comment-$id"
+    printf '%s' "$create_author" >"$CROSSREV_GH_STATE/comment-$id.author"
     printf '{"id":%s}\n' "$id" | emit
     exit 0
   fi
@@ -256,7 +281,9 @@ if [[ -n "${CROSSREV_GH_STATE:-}" ]]; then
     body="$(extract_field body "$@")"
     if [[ -f "$CROSSREV_GH_STATE/comment-$id" ]]; then
       printf '%s' "$body" >"$CROSSREV_GH_STATE/comment-$id"
-      jq -cn --argjson id "$id" --arg body "$body" --arg a "$gh_author" \
+      ca="$gh_author"
+      [[ -f "$CROSSREV_GH_STATE/comment-$id.author" ]] && ca="$(cat "$CROSSREV_GH_STATE/comment-$id.author")"
+      jq -cn --argjson id "$id" --arg body "$body" --arg a "$ca" \
         '{id:$id, body:$body, user:{login:$a}, created_at:"2026-09-09T00:00:00Z"}' | emit
       exit 0
     fi
@@ -272,7 +299,9 @@ if [[ -n "${CROSSREV_GH_STATE:-}" ]]; then
       [[ -e "$f" ]] || continue
       cid="${f##*-}"
       case "$cid" in *[!0-9]*) continue;; esac
-      spool="$(jq -c --argjson id "$cid" --arg a "$gh_author" --rawfile body "$f" \
+      ca="$gh_author"
+      [[ -f "$CROSSREV_GH_STATE/comment-$cid.author" ]] && ca="$(cat "$CROSSREV_GH_STATE/comment-$cid.author")"
+      spool="$(jq -c --argjson id "$cid" --arg a "$ca" --rawfile body "$f" \
         '. + [{id:$id, body:$body, user:{login:$a}, created_at:"2026-09-09T00:00:00Z", issue_url:"https://api.github.com/repos/acme/widget/issues/42"}]' <<<"$spool")"
     done
     printf '%s\n' "$spool" | emit
@@ -633,7 +662,7 @@ if [[ -n "${CROSSREV_GH_STATE:-}" ]]; then
   if [[ "$joined" == "api --paginate repos/"*"/pulls/"*"/comments"* ]]; then
     match_routes
     if [[ -f "$CROSSREV_GH_STATE/threads.json" ]]; then
-      jq -c '[.[] | .path as $p | .line as $l | .comments.nodes[] | {id:.databaseId, databaseId:.databaseId, body:.body, path:$p, line:$l, user:{login:(.author.login // "'"$gh_author"'")}, created_at:"2026-09-09T00:00:00Z"}]' "$CROSSREV_GH_STATE/threads.json" | emit
+      jq -c '[.[] | .path as $p | .line as $l | .comments.nodes[] | {id:.databaseId, databaseId:.databaseId, body:.body, path:$p, line:$l, user:{login:(.author.login // "'"$create_author"'")}, created_at:"2026-09-09T00:00:00Z"}]' "$CROSSREV_GH_STATE/threads.json" | emit
       exit 0
     fi
     printf '[]\n' | emit
@@ -650,14 +679,14 @@ if [[ -n "${CROSSREV_GH_STATE:-}" ]]; then
     [[ -f "$next" ]] || printf '9001' >"$next"
     reply_id="$(cat "$next")"
     printf '%s' "$(( reply_id + 1 ))" >"$next"
-    reply_node="$(jq -cn --argjson id "$reply_id" --arg b "$rbody" --arg a "$gh_author" \
+    reply_node="$(jq -cn --argjson id "$reply_id" --arg b "$rbody" --arg a "$create_author" \
       '{databaseId:$id, body:$b, author:{login:$a}}')"
     [[ -f "$CROSSREV_GH_STATE/threads.json" ]] || printf '[]' >"$CROSSREV_GH_STATE/threads.json"
     updated="$(jq -c --argjson root "$root_id" --argjson r "$reply_node" \
       'map(if (.comments.nodes | any(.databaseId == $root)) then .comments.nodes += [$r] else . end)' \
       "$CROSSREV_GH_STATE/threads.json")"
     printf '%s' "$updated" >"$CROSSREV_GH_STATE/threads.json"
-    jq -cn --argjson id "$reply_id" --arg b "$rbody" --arg a "$gh_author" \
+    jq -cn --argjson id "$reply_id" --arg b "$rbody" --arg a "$create_author" \
       '{id:$id, databaseId:$id, body:$b, user:{login:$a}, created_at:"2026-09-09T00:00:00Z"}' | emit
     exit 0
   fi
@@ -678,7 +707,7 @@ if [[ -n "${CROSSREV_GH_STATE:-}" ]]; then
       line_json="$cline"
     fi
 
-    new_comment="$(jq -cn --argjson id "$cid" --arg b "$cbody" --arg a "$gh_author" \
+    new_comment="$(jq -cn --argjson id "$cid" --arg b "$cbody" --arg a "$create_author" \
       '{databaseId:$id, body:$b, author:{login:$a}}')"
     new_thread="$(jq -cn --arg id "RT_$cid" --arg p "$cpath" --argjson l "$line_json" --argjson c "$new_comment" \
       '{id:$id, isResolved:false, isOutdated:false, path:$p, line:$l, comments:{nodes:[$c]}}')"
@@ -687,7 +716,7 @@ if [[ -n "${CROSSREV_GH_STATE:-}" ]]; then
     updated="$(jq -c --argjson t "$new_thread" '. + [$t]' "$CROSSREV_GH_STATE/threads.json")"
     printf '%s' "$updated" >"$CROSSREV_GH_STATE/threads.json"
 
-    jq -cn --argjson id "$cid" --arg b "$cbody" --arg p "$cpath" --argjson l "$line_json" --arg a "$gh_author" \
+    jq -cn --argjson id "$cid" --arg b "$cbody" --arg p "$cpath" --argjson l "$line_json" --arg a "$create_author" \
       '{id:$id, databaseId:$id, body:$b, path:$p, line:$l, user:{login:$a}, created_at:"2026-09-09T00:00:00Z"}' | emit
     exit 0
   fi
