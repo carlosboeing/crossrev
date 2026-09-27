@@ -119,7 +119,7 @@ replay_blocked_claim() {
 # generation number its message carries, printed as "sha gen".
 claim_handle() {
   local ref_file sha gen
-  ref_file="$(ls "$GH_STATE"/ref-refs_crossrev_pr_"${FIX_PR}"_* 2>/dev/null | head -n 1)"
+  ref_file="$(ls "$GH_STATE"/ref-acme_widget_refs_crossrev_pr_"${FIX_PR}"_* 2>/dev/null | head -n 1)"
   sha="$(jq -r .object.sha "$ref_file")"
   gen="$(jq -r '.message' "$GH_STATE/commit-$sha" | sed -n 's/.*gen \([0-9][0-9]*\).*/\1/p')"
   printf '%s %s' "$sha" "${gen:-1}"
