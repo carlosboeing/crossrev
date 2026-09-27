@@ -141,17 +141,114 @@ if [[ -n "${CROSSREV_GH_STATE:-}" ]]; then
     fi
     [[ -n "$_u" ]] && create_author="$_u"
   fi
+  # The seeded pull request's number, owner and repo. Threads and labels
+  # seeded without an explicit home default to these, the way the
+  # pulls/<number>/comments list already defaults a missing pull_number.
+  seed_pr_number="42"
+  seed_repo_owner="acme"
+  seed_repo_name="widget"
+  if [[ -f "$CROSSREV_GH_STATE/pr.json" ]]; then
+    _sn="$(jq -r '.number // empty' "$CROSSREV_GH_STATE/pr.json" 2>/dev/null || true)"
+    [[ "$_sn" =~ ^[0-9]+$ ]] && seed_pr_number="$_sn"
+    _so="$(jq -r '.headRepositoryOwner.login // empty' "$CROSSREV_GH_STATE/pr.json" 2>/dev/null || true)"
+    [[ -n "$_so" ]] && seed_repo_owner="$_so"
+    _sr="$(jq -r '.headRepository.name // empty' "$CROSSREV_GH_STATE/pr.json" 2>/dev/null || true)"
+    [[ -n "$_sr" ]] && seed_repo_name="$_sr"
+  fi
+  seed_repo_slug="$seed_repo_owner/$seed_repo_name"
+  # The state file holding one repository's label definitions, seeded
+  # from labels.json on first touch so each repo starts from the same
+  # catalogue but recolours and creates stay on their own repo. Only
+  # writes initialise it: a read on empty state must not pin [] before
+  # the seeds arrive.
+  repo_labels_file() {
+    local _f="$CROSSREV_GH_STATE/labels-$req_repo_key.json"
+    if [[ ! -f "$_f" ]]; then
+      if [[ -f "$CROSSREV_GH_STATE/labels.json" ]]; then
+        cp "$CROSSREV_GH_STATE/labels.json" "$_f"
+      else
+        printf '[]' >"$_f"
+      fi
+    fi
+    printf '%s' "$_f"
+  }
+  # The same definitions for reading: the per-repo file when one was
+  # written, else the seed, else empty. Never creates anything.
+  repo_labels_current() {
+    local _f="$CROSSREV_GH_STATE/labels-$req_repo_key.json"
+    if [[ -f "$_f" ]]; then
+      cat "$_f"
+    elif [[ -f "$CROSSREV_GH_STATE/labels.json" ]]; then
+      cat "$CROSSREV_GH_STATE/labels.json"
+    else
+      printf '[]'
+    fi
+  }
+  # One issue's labels for reading, without persisting. Falls back to
+  # the matching seed so an untouched issue replays what was seeded.
+  pr_labels_current() {
+    local _num="$1"
+    local _f="$CROSSREV_GH_STATE/pr-labels-$req_repo_key-$_num.json"
+    if [[ -f "$_f" ]]; then
+      cat "$_f"
+    elif [[ -f "$CROSSREV_GH_STATE/pr-$_num.json" ]]; then
+      jq -c '.labels // []' "$CROSSREV_GH_STATE/pr-$_num.json" 2>/dev/null || printf '[]'
+    elif [[ "$_num" == "$seed_pr_number" && -f "$CROSSREV_GH_STATE/pr.json" ]]; then
+      jq -c '.labels // []' "$CROSSREV_GH_STATE/pr.json" 2>/dev/null || printf '[]'
+    else
+      printf '[]'
+    fi
+  }
+  # The state file holding one issue's labels, seeded from the matching
+  # pr-<n>.json (or pr.json when the number is the seeded pull's own) on
+  # first touch so other issues start empty rather than inheriting them.
+  pr_labels_file() {
+    local _num="$1"
+    local _f="$CROSSREV_GH_STATE/pr-labels-$req_repo_key-$_num.json"
+    if [[ ! -f "$_f" ]]; then
+      local _seed="[]"
+      if [[ -f "$CROSSREV_GH_STATE/pr-$_num.json" ]]; then
+        _seed="$(jq -c '.labels // []' "$CROSSREV_GH_STATE/pr-$_num.json" 2>/dev/null || printf '[]')"
+      elif [[ "$_num" == "$seed_pr_number" && -f "$CROSSREV_GH_STATE/pr.json" ]]; then
+        _seed="$(jq -c '.labels // []' "$CROSSREV_GH_STATE/pr.json" 2>/dev/null || printf '[]')"
+      fi
+      printf '%s' "$_seed" >"$_f"
+    fi
+    printf '%s' "$_f"
+  }
+  # The state file prefix for one repository's git refs. Refs are
+  # per-repo server-side; without the key a ref created on one repo
+  # would answer reads on another.
+  ref_file_prefix() {
+    printf '%s' "$CROSSREV_GH_STATE/ref-$req_repo_key"
+  }
   # The issue_url for this request, parsed from its path. A create stores
   # it beside the comment so both list endpoints replay which pull
   # request the comment belongs to; a fixed URL would count every
   # comment as pull request 42.
+  #
+  # The owner and repo for this request, from the same paths. Every
+  # per-PR and per-repo state file is keyed on them (and the number),
+  # so a second pull request's data never appears in the first one's
+  # reads. Defaults match the seed fixtures, which name acme/widget.
   req_issue_url=""
+  req_owner=""
+  req_repo=""
   for _a in "$@"; do
-    if [[ "$_a" =~ ^repos/([^/]+)/([^/]+)/issues/([0-9]+) ]]; then
+    if [[ "$_a" =~ repos/([^/]+)/([^/]+)/issues/([0-9]+) ]]; then
       req_issue_url="https://api.github.com/repos/${BASH_REMATCH[1]}/${BASH_REMATCH[2]}/issues/${BASH_REMATCH[3]}"
-      break
+      [[ -z "$req_owner" ]] && req_owner="${BASH_REMATCH[1]}"
+      [[ -z "$req_repo" ]] && req_repo="${BASH_REMATCH[2]}"
+    elif [[ "$_a" =~ repos/([^/[:space:]]+)/([^/[:space:]]+) ]]; then
+      [[ -z "$req_owner" ]] && req_owner="${BASH_REMATCH[1]}"
+      [[ -z "$req_repo" ]] && req_repo="${BASH_REMATCH[2]}"
     fi
   done
+  req_owner="${req_owner:-acme}"
+  req_repo="${req_repo:-widget}"
+  req_repo_slug="$req_owner/$req_repo"
+  # A filename-safe owner_repo key for the per-repo state files.
+  req_repo_key="$(printf '%s_%s' "$req_owner" "$req_repo" | tr -c 'A-Za-z0-9._-' '_')"
 
   # Seed issue comments if present
   seed_comments="$CROSSREV_GH_STATE/issue-comments.json"
@@ -223,10 +320,20 @@ if [[ -n "${CROSSREV_GH_STATE:-}" ]]; then
     fi
   fi
   # Single-comment read-back: api repos/<slug>/issues/comments/<id>.
+  # The id is unique, but the path still names a repo: a comment stored
+  # on one repo 404s when read through another's, the way the API does.
   if [[ "$joined" == "api repos/"*"/issues/comments/"* ]]; then
     id="${joined##*/}"
     id="${id%% *}"
     if [[ -f "$CROSSREV_GH_STATE/comment-$id" ]]; then
+      if [[ -f "$CROSSREV_GH_STATE/comment-$id.issue" ]]; then
+        stored_issue="$(cat "$CROSSREV_GH_STATE/comment-$id.issue")"
+        if [[ "$stored_issue" != *"repos/$req_owner/$req_repo/issues/"* ]]; then
+          match_routes
+          printf '{"message":"Not Found"}\n' >&2
+          exit 1
+        fi
+      fi
       ca="$gh_author"
       [[ -f "$CROSSREV_GH_STATE/comment-$id.author" ]] && ca="$(cat "$CROSSREV_GH_STATE/comment-$id.author")"
       jq -cn --argjson id "$id" --arg body "$(cat "$CROSSREV_GH_STATE/comment-$id")" --arg a "$ca" \
@@ -348,8 +455,11 @@ if [[ -n "${CROSSREV_GH_STATE:-}" ]]; then
       [[ -f "$CROSSREV_GH_STATE/comment-$cid.author" ]] && ca="$(cat "$CROSSREV_GH_STATE/comment-$cid.author")"
       # The repository-wide path names no issue, so only the stored URL
       # is truthful here; the default keeps seeds without one unchanged.
+      # It does name a repo, so only that repo's comments are listed: a
+      # second repo's comment must not appear in the first one's reads.
       iu="https://api.github.com/repos/acme/widget/issues/42"
       [[ -f "$CROSSREV_GH_STATE/comment-$cid.issue" ]] && iu="$(cat "$CROSSREV_GH_STATE/comment-$cid.issue")"
+      [[ "$iu" != *"repos/$req_owner/$req_repo/issues/"* ]] && continue
       spool="$(jq -c --argjson id "$cid" --arg a "$ca" --arg iu "$iu" --rawfile body "$f" \
         '. + [{id:$id, body:$body, user:{login:$a}, created_at:"2026-09-09T00:00:00Z", issue_url:$iu}]' <<<"$spool")"
     # The if, not a case: bash 3.2 misparses case with continue here.
@@ -472,13 +582,14 @@ if [[ -n "${CROSSREV_GH_STATE:-}" ]]; then
       ref_enc="$(printf '%s' "$ref" | tr '/' '_')"
       ref_no_prefix="${ref#refs/}"
       ref_enc2="$(printf '%s' "$ref_no_prefix" | tr '/' '_')"
-      if [[ -f "$CROSSREV_GH_STATE/ref-$ref_enc" ]]; then
+      ref_base="$(ref_file_prefix)"
+      if [[ -f "${ref_base}_$ref_enc" ]]; then
         printf '{"message":"Reference already exists"}\n' >&2
         exit 1
       fi
-      jq -cn --arg ref "$ref" --arg sha "$sha" '{ref:$ref, object:{sha:$sha, type:"commit"}}' >"$CROSSREV_GH_STATE/ref-$ref_enc"
-      cp "$CROSSREV_GH_STATE/ref-$ref_enc" "$CROSSREV_GH_STATE/ref-$ref_enc2"
-      cat "$CROSSREV_GH_STATE/ref-$ref_enc" | emit
+      jq -cn --arg ref "$ref" --arg sha "$sha" '{ref:$ref, object:{sha:$sha, type:"commit"}}' >"${ref_base}_$ref_enc"
+      cp "${ref_base}_$ref_enc" "${ref_base}_$ref_enc2"
+      cat "${ref_base}_$ref_enc" | emit
       exit 0
     fi
 
@@ -513,9 +624,10 @@ if [[ -n "${CROSSREV_GH_STATE:-}" ]]; then
       ref_enc="$(printf '%s' "$ref" | tr '/' '_')"
       ref_no_prefix="${ref#refs/}"
       ref_enc2="$(printf '%s' "$ref_no_prefix" | tr '/' '_')"
-      jq -cn --arg ref "$ref" --arg sha "$sha" '{ref:$ref, object:{sha:$sha, type:"commit"}}' >"$CROSSREV_GH_STATE/ref-$ref_enc"
-      cp "$CROSSREV_GH_STATE/ref-$ref_enc" "$CROSSREV_GH_STATE/ref-$ref_enc2"
-      cat "$CROSSREV_GH_STATE/ref-$ref_enc" | emit
+      ref_base="$(ref_file_prefix)"
+      jq -cn --arg ref "$ref" --arg sha "$sha" '{ref:$ref, object:{sha:$sha, type:"commit"}}' >"${ref_base}_$ref_enc"
+      cp "${ref_base}_$ref_enc" "${ref_base}_$ref_enc2"
+      cat "${ref_base}_$ref_enc" | emit
       exit 0
     fi
 
@@ -526,8 +638,9 @@ if [[ -n "${CROSSREV_GH_STATE:-}" ]]; then
       ref_path="${ref_path%% *}"
       ref="refs/${ref_path#refs/}"
       ref_enc="$(printf '%s' "$ref" | tr '/' '_')"
-      if [[ -f "$CROSSREV_GH_STATE/ref-$ref_enc" ]]; then
-        cat "$CROSSREV_GH_STATE/ref-$ref_enc" | emit
+      ref_base="$(ref_file_prefix)"
+      if [[ -f "${ref_base}_$ref_enc" ]]; then
+        cat "${ref_base}_$ref_enc" | emit
         exit 0
       fi
       printf '{"message":"Not Found"}\n' >&2
@@ -556,8 +669,28 @@ if [[ -n "${CROSSREV_GH_STATE:-}" ]]; then
   fi
 
   # Pull request metadata: pr view <number> ...
+  # The seed answers its own number on its own repo only: any other
+  # number or repo gets the generic shape, so a second pull request's
+  # title and labels never appear in the first one's reads.
   if [[ "$joined" == "pr view"* ]]; then
     match_routes
+    view_num=""
+    for a in "$@"; do
+      [[ "$a" =~ ^[0-9]+$ ]] && { view_num="$a"; break; }
+    done
+    view_repo=""
+    _pv=""
+    for a in "$@"; do
+      if [[ "$_pv" == "--repo" || "$_pv" == "-R" ]]; then view_repo="$a"; fi
+      [[ "$a" == --repo=* ]] && view_repo="${a#--repo=}"
+      _pv="$a"
+    done
+    if [[ "$view_repo" == */* ]]; then
+      req_owner="${view_repo%%/*}"
+      req_repo="${view_repo##*/}"
+      req_repo_slug="$view_repo"
+      req_repo_key="$(printf '%s_%s' "$req_owner" "$req_repo" | tr -c 'A-Za-z0-9._-' '_')"
+    fi
     pr_file=""
     for a in "$@"; do
       if [[ "$a" =~ ^[0-9]+$ ]] && [[ -f "$CROSSREV_GH_STATE/pr-$a.json" ]]; then
@@ -566,17 +699,13 @@ if [[ -n "${CROSSREV_GH_STATE:-}" ]]; then
       fi
     done
     if [[ -z "$pr_file" && -f "$CROSSREV_GH_STATE/pr.json" ]]; then
-      pr_file="$CROSSREV_GH_STATE/pr.json"
+      if [[ -z "$view_num" || "$view_num" == "$seed_pr_number" ]] && \
+         [[ -z "$view_repo" || "$view_repo" == "$seed_repo_slug" ]]; then
+        pr_file="$CROSSREV_GH_STATE/pr.json"
+      fi
     fi
 
-    if [[ -f "$CROSSREV_GH_STATE/pr-labels.json" ]]; then
-      current_pr_labels="$(cat "$CROSSREV_GH_STATE/pr-labels.json")"
-    elif [[ -n "$pr_file" ]]; then
-      current_pr_labels="$(jq -c '.labels // []' "$pr_file")"
-      printf '%s' "$current_pr_labels" >"$CROSSREV_GH_STATE/pr-labels.json"
-    else
-      current_pr_labels="[]"
-    fi
+    current_pr_labels="$(pr_labels_current "${view_num:-$seed_pr_number}")"
 
     if [[ -n "$pr_file" ]]; then
       jq --argjson l "$current_pr_labels" '.labels = $l' "$pr_file" | emit
@@ -598,17 +727,16 @@ if [[ -n "${CROSSREV_GH_STATE:-}" ]]; then
   fi
 
   # Check / get repo label colour: GET repos/<slug>/labels/<name>
+  # Definitions live per repo: a label created on one repo 404s on another.
   if [[ "$joined" == "api repos/"*"/labels/"* && "$joined" != *"--method"* && "$joined" != *"issues/"* ]]; then
     match_routes
     lbl_name="${joined##*labels/}"
     lbl_name="${lbl_name%% *}"
     lbl_name="$(printf '%b' "${lbl_name//%/\\x}")"
-    if [[ -f "$CROSSREV_GH_STATE/labels.json" ]]; then
-      lbl="$(jq -c --arg n "$lbl_name" '.[] | select(.name == $n)' "$CROSSREV_GH_STATE/labels.json" 2>/dev/null || true)"
-      if [[ -n "$lbl" ]]; then
-        printf '%s\n' "$lbl" | emit
-        exit 0
-      fi
+    lbl="$(repo_labels_current | jq -c --arg n "$lbl_name" '.[] | select(.name == $n)' 2>/dev/null || true)"
+    if [[ -n "$lbl" ]]; then
+      printf '%s\n' "$lbl" | emit
+      exit 0
     fi
     printf '{"message":"Not Found"}\n' >&2
     exit 1
@@ -621,10 +749,10 @@ if [[ -n "${CROSSREV_GH_STATE:-}" ]]; then
     color="$(extract_field color "$@")"
     desc="$(extract_field description "$@")"
     color="${color:-ededed}"
-    [[ -f "$CROSSREV_GH_STATE/labels.json" ]] || printf '[]' >"$CROSSREV_GH_STATE/labels.json"
+    repo_defs="$(repo_labels_file)"
     updated="$(jq -c --arg n "$name" --arg c "$color" --arg d "${desc:-}" \
-      '[.[] | select(.name != $n)] + [{name:$n, color:$c, description:$d}]' "$CROSSREV_GH_STATE/labels.json")"
-    printf '%s' "$updated" >"$CROSSREV_GH_STATE/labels.json"
+      '[.[] | select(.name != $n)] + [{name:$n, color:$c, description:$d}]' "$repo_defs")"
+    printf '%s' "$updated" >"$repo_defs"
     jq -cn --arg n "$name" --arg c "$color" --arg d "${desc:-}" \
       '{name:$n, color:$c, description:$d}' | emit
     exit 0
@@ -637,11 +765,11 @@ if [[ -n "${CROSSREV_GH_STATE:-}" ]]; then
     lbl_name="${lbl_name%% *}"
     lbl_name="$(printf '%b' "${lbl_name//%/\\x}")"
     color="$(extract_field color "$@")"
-    [[ -f "$CROSSREV_GH_STATE/labels.json" ]] || printf '[]' >"$CROSSREV_GH_STATE/labels.json"
+    repo_defs="$(repo_labels_file)"
     updated="$(jq -c --arg n "$lbl_name" --arg c "$color" \
-      'map(if .name == $n then .color = $c else . end)' "$CROSSREV_GH_STATE/labels.json")"
-    printf '%s' "$updated" >"$CROSSREV_GH_STATE/labels.json"
-    lbl="$(jq -c --arg n "$lbl_name" '.[] | select(.name == $n)' "$CROSSREV_GH_STATE/labels.json")"
+      'map(if .name == $n then .color = $c else . end)' "$repo_defs")"
+    printf '%s' "$updated" >"$repo_defs"
+    lbl="$(jq -c --arg n "$lbl_name" '.[] | select(.name == $n)' "$repo_defs")"
     printf '%s\n' "${lbl:-{\}}" | emit
     exit 0
   fi
@@ -649,34 +777,38 @@ if [[ -n "${CROSSREV_GH_STATE:-}" ]]; then
   # List repo labels: GET repos/<slug>/labels
   if [[ ("$joined" == "api repos/"*"/labels" || "$joined" == "api repos/"*"/labels "*) && "$joined" != *"--method"* && "$joined" != *"issues/"* ]]; then
     match_routes
-    [[ -f "$CROSSREV_GH_STATE/labels.json" ]] || printf '[]' >"$CROSSREV_GH_STATE/labels.json"
-    cat "$CROSSREV_GH_STATE/labels.json" | emit
+    repo_labels_current | emit
     exit 0
   fi
 
   # Read PR labels: GET repos/<slug>/issues/<number>/labels
+  # Labels live per owner, repo and issue number: labels added on one
+  # pull request never appear on another's list.
   if [[ "$joined" == "api repos/"*"/issues/"*"/labels"* && "$joined" != *"--method"* ]]; then
     match_routes
-    if [[ -f "$CROSSREV_GH_STATE/pr-labels.json" ]]; then
-      cat "$CROSSREV_GH_STATE/pr-labels.json"
-    elif [[ -f "$CROSSREV_GH_STATE/pr.json" ]]; then
-      jq -c '.labels // []' "$CROSSREV_GH_STATE/pr.json"
-    else
-      printf '[]'
-    fi | emit
+    list_num=""
+    for _a in "$@"; do
+      if [[ "$_a" =~ repos/[^/]+/[^/]+/issues/([0-9]+) ]]; then
+        list_num="${BASH_REMATCH[1]}"
+        break
+      fi
+    done
+    pr_labels_current "${list_num:-$seed_pr_number}" | emit
     exit 0
   fi
 
   # Add PR labels: POST repos/<slug>/issues/<number>/labels
   if [[ "$joined" == "api --method POST repos/"*"/issues/"*"/labels"* ]]; then
     match_routes
-    if [[ -f "$CROSSREV_GH_STATE/pr-labels.json" ]]; then
-      cur="$(cat "$CROSSREV_GH_STATE/pr-labels.json")"
-    elif [[ -f "$CROSSREV_GH_STATE/pr.json" ]]; then
-      cur="$(jq -c '.labels // []' "$CROSSREV_GH_STATE/pr.json")"
-    else
-      cur="[]"
-    fi
+    add_num=""
+    for _a in "$@"; do
+      if [[ "$_a" =~ repos/[^/]+/[^/]+/issues/([0-9]+) ]]; then
+        add_num="${BASH_REMATCH[1]}"
+        break
+      fi
+    done
+    add_state="$(pr_labels_file "${add_num:-$seed_pr_number}")"
+    cur="$(cat "$add_state")"
     new_labels=()
     prev=""
     for a in "$@"; do
@@ -687,18 +819,17 @@ if [[ -n "${CROSSREV_GH_STATE:-}" ]]; then
       fi
       prev="$a"
     done
+    repo_defs_add="$(repo_labels_current)"
     for nl in "${new_labels[@]}"; do
       [[ -n "$nl" ]] || continue
       col="ededed"
-      if [[ -f "$CROSSREV_GH_STATE/labels.json" ]]; then
-        found_col="$(jq -r --arg n "$nl" '.[] | select(.name == $n) | .color' "$CROSSREV_GH_STATE/labels.json" 2>/dev/null || true)"
-        [[ -n "$found_col" && "$found_col" != "null" ]] && col="$found_col"
-      fi
+      found_col="$(printf '%s' "$repo_defs_add" | jq -r --arg n "$nl" '.[] | select(.name == $n) | .color' 2>/dev/null || true)"
+      [[ -n "$found_col" && "$found_col" != "null" ]] && col="$found_col"
       cur="$(jq -c --arg n "$nl" --arg c "$col" \
         'if any(.name == $n) then . else . + [{name:$n, color:$c, description:""}] end' <<<"$cur")"
     done
-    printf '%s' "$cur" >"$CROSSREV_GH_STATE/pr-labels.json"
-    cat "$CROSSREV_GH_STATE/pr-labels.json" | emit
+    printf '%s' "$cur" >"$add_state"
+    cat "$add_state" | emit
     exit 0
   fi
 
@@ -708,15 +839,17 @@ if [[ -n "${CROSSREV_GH_STATE:-}" ]]; then
     lbl_name="${joined##*labels/}"
     lbl_name="${lbl_name%% *}"
     lbl_name="$(printf '%b' "${lbl_name//%/\\x}")"
-    if [[ -f "$CROSSREV_GH_STATE/pr-labels.json" ]]; then
-      cur="$(cat "$CROSSREV_GH_STATE/pr-labels.json")"
-    elif [[ -f "$CROSSREV_GH_STATE/pr.json" ]]; then
-      cur="$(jq -c '.labels // []' "$CROSSREV_GH_STATE/pr.json")"
-    else
-      cur="[]"
-    fi
+    del_num=""
+    for _a in "$@"; do
+      if [[ "$_a" =~ repos/[^/]+/[^/]+/issues/([0-9]+) ]]; then
+        del_num="${BASH_REMATCH[1]}"
+        break
+      fi
+    done
+    del_state="$(pr_labels_file "${del_num:-$seed_pr_number}")"
+    cur="$(cat "$del_state")"
     cur="$(jq -c --arg n "$lbl_name" '[.[] | select(.name != $n)]' <<<"$cur")"
-    printf '%s' "$cur" >"$CROSSREV_GH_STATE/pr-labels.json"
+    printf '%s' "$cur" >"$del_state"
     printf '[]\n' | emit
     exit 0
   fi
@@ -741,7 +874,8 @@ if [[ -n "${CROSSREV_GH_STATE:-}" ]]; then
 
     if [[ -f "$CROSSREV_GH_STATE/threads.json" ]]; then
       jq -c --argjson pnum "$req_pull_num" --argjson dp "$default_pull" \
-        '[.[] | select((.pull_number // $dp) == $pnum) | .path as $p | .line as $l | .comments.nodes[] | {id:.databaseId, databaseId:.databaseId, body:.body, path:$p, line:$l, user:{login:(.author.login // "'"$create_author"'")}, created_at:"2026-09-09T00:00:00Z"}]' "$CROSSREV_GH_STATE/threads.json" | emit
+        --arg rs "$req_repo_slug" --arg dr "$seed_repo_slug" \
+        '[.[] | select(((.pull_number // $dp) == $pnum) and ((.repo // $dr) == $rs)) | .path as $p | .line as $l | .comments.nodes[] | {id:.databaseId, databaseId:.databaseId, body:.body, path:$p, line:$l, user:{login:(.author.login // "'"$create_author"'")}, created_at:"2026-09-09T00:00:00Z"}]' "$CROSSREV_GH_STATE/threads.json" | emit
       exit 0
     fi
     printf '[]\n' | emit
@@ -796,8 +930,8 @@ if [[ -n "${CROSSREV_GH_STATE:-}" ]]; then
 
     new_comment="$(jq -cn --argjson id "$cid" --arg b "$cbody" --arg a "$create_author" \
       '{databaseId:$id, body:$b, author:{login:$a}}')"
-    new_thread="$(jq -cn --arg id "RT_$cid" --argjson pull "$req_pull_num" --arg p "$cpath" --argjson l "$line_json" --argjson c "$new_comment" \
-      '{id:$id, pull_number:$pull, isResolved:false, isOutdated:false, path:$p, line:$l, comments:{nodes:[$c]}}')"
+    new_thread="$(jq -cn --arg id "RT_$cid" --argjson pull "$req_pull_num" --arg rs "$req_repo_slug" --arg p "$cpath" --argjson l "$line_json" --argjson c "$new_comment" \
+      '{id:$id, pull_number:$pull, repo:$rs, isResolved:false, isOutdated:false, path:$p, line:$l, comments:{nodes:[$c]}}')"
 
     [[ -f "$CROSSREV_GH_STATE/threads.json" ]] || printf '[]' >"$CROSSREV_GH_STATE/threads.json"
     updated="$(jq -c --argjson t "$new_thread" '. + [$t]' "$CROSSREV_GH_STATE/threads.json")"
@@ -813,9 +947,20 @@ if [[ -n "${CROSSREV_GH_STATE:-}" ]]; then
     match_routes
     if [[ "$joined" == *"reviewThreads"* ]]; then
       [[ -f "$CROSSREV_GH_STATE/threads.json" ]] || printf '[]' >"$CROSSREV_GH_STATE/threads.json"
-      threads="$(cat "$CROSSREV_GH_STATE/threads.json")"
+      # The query names its pull request (-F number=<pull>); only that
+      # pull's threads answer, defaulting a seeded thread to the seeded
+      # pull the way pulls/<number>/comments already does.
+      q_number="$(extract_field number "$@")"
+      [[ "$q_number" =~ ^[0-9]+$ ]] || q_number="$seed_pr_number"
+      q_owner="$(extract_field owner "$@")"
+      q_name="$(extract_field name "$@")"
+      q_repo="${q_owner:-$seed_repo_owner}/${q_name:-$seed_repo_name}"
+      threads="$(jq -c --argjson pnum "$q_number" --arg qr "$q_repo" \
+        --argjson dp "$seed_pr_number" --arg dr "$seed_repo_slug" \
+        '[.[] | select(((.pull_number // $dp) == $pnum) and ((.repo // $dr) == $qr))]' \
+        "$CROSSREV_GH_STATE/threads.json")"
       jq -cn --argjson t "$threads" \
-        '{data:{repository:{pullRequest:{reviewThreads:{nodes:($t | map(del(.pull_number)))}}}}}' | emit
+        '{data:{repository:{pullRequest:{reviewThreads:{nodes:($t | map(del(.pull_number, .repo)))}}}}}' | emit
       exit 0
     fi
     if [[ "$joined" == *"resolveReviewThread"* || "$joined" == *"threadId="* ]]; then
