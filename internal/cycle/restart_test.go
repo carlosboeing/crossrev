@@ -217,6 +217,29 @@ func TestRestartRefusesAStoppedPullRequest(t *testing.T) {
 	}
 }
 
+// TestRestartRefusesAStoppedPullRequestWithoutAHalt: a pull request carrying
+// only crossrev/stop is not halted, and the refusal must not describe it as
+// one — the brake is what is named, and the manual removal is the remedy.
+func TestRestartRefusesAStoppedPullRequestWithoutAHalt(t *testing.T) {
+	f, _, err := restartRun(t, []string{"crossrev/stop"}, nil)
+	var fatal *ui.FatalError
+	if !errors.As(err, &fatal) {
+		t.Fatalf("Run = %v, want a ui.FatalError", err)
+	}
+	if !strings.Contains(fatal.Reason, "crossrev/stop") {
+		t.Errorf("reason = %q, want it to name the stop label", fatal.Reason)
+	}
+	if strings.Contains(fatal.Reason, "halted") {
+		t.Errorf("reason = %q, want no claim of a halt the pull request does not carry", fatal.Reason)
+	}
+	if !strings.Contains(fatal.Action, "gh pr edit 42 --remove-label crossrev/stop") {
+		t.Errorf("action = %q, want the manual removal", fatal.Action)
+	}
+	if len(f.calls) != 0 {
+		t.Errorf("a stopped pull request was written to: %v", f.calls)
+	}
+}
+
 // TestRestartRefusesAPullRequestThatIsNotHalted pins the refusal saying what
 // applies instead: an awaiting label means the loop is waiting on a leg, and
 // the remedy is running that leg, not restarting anything.

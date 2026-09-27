@@ -74,8 +74,12 @@ func (r *Restart) Run(ctx context.Context, repo core.Slug, pr int) error {
 
 	labels := statusLabelNames(pull.Labels)
 	if statusHasLabel(labels, policy.LabelStop) {
+		reason := fmt.Sprintf("%s#%d carries crossrev/stop", repo, pr)
+		if statusHasLabel(labels, policy.LabelHalted) {
+			reason = fmt.Sprintf("%s#%d is halted, but it also carries crossrev/stop", repo, pr)
+		}
 		return &ui.FatalError{
-			Reason: fmt.Sprintf("%s#%d is halted, but it also carries crossrev/stop", repo, pr),
+			Reason: reason,
 			Action: fmt.Sprintf("crossrev/stop is the human brake, and no command clears it. Remove it by hand once the loop should run again: gh pr edit %d --remove-label crossrev/stop", pr),
 		}
 	}
