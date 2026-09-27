@@ -51,7 +51,7 @@ func TestOpenCreatesThePrivateRunDirectory(t *testing.T) {
 	l := openLog(t, runlog.Options{Repo: "acme/widget", PR: "7"})
 
 	assertMode(t, l.Dir(), 0o700)
-	if got, want := readLog(t, l), "2026-08-29T01:02:03Z run start repo=acme/widget pr=7\n"; got != want {
+	if got, want := readLog(t, l), "2026-08-29T01:02:03Z run start repo=acme/widget pr=7 revision=-\n"; got != want {
 		t.Errorf("run log = %q, want %q", got, want)
 	}
 	assertMode(t, filepath.Join(l.Dir(), "run.log"), 0o600)
@@ -89,6 +89,9 @@ func TestOpenWithNoDirectory(t *testing.T) {
 	// Every method tolerates it, because the callers are the paths whose own
 	// failure is what is being recorded.
 	l.Event("run", "start")
+	l.Phase("enumerate", 0)
+	l.PhaseTerms(0, 0)
+	l.Call(1, 0, 0, 0, 0, 0, "", 0)
 	l.SetLeg("review")
 	l.ClearTranscripts("")
 	l.RedactFile(blocked)
@@ -97,6 +100,9 @@ func TestOpenWithNoDirectory(t *testing.T) {
 	}
 	if _, ok := l.TranscriptBase(1); ok {
 		t.Error("TranscriptBase reported a stem with no run directory")
+	}
+	if _, ok := l.TranscriptBaseForCall(1, 1); ok {
+		t.Error("TranscriptBaseForCall reported a stem with no run directory")
 	}
 	if l.TranscriptsKept() {
 		t.Error("TranscriptsKept is true with no run directory")
@@ -164,7 +170,7 @@ func TestEventStampsUTCWhateverTheClockSays(t *testing.T) {
 		Now:  func() time.Time { return local },
 	})
 
-	if got, want := readLog(t, l), "2026-08-29T01:02:03Z run start repo=acme/widget pr=7\n"; got != want {
+	if got, want := readLog(t, l), "2026-08-29T01:02:03Z run start repo=acme/widget pr=7 revision=-\n"; got != want {
 		t.Errorf("run log = %q, want %q", got, want)
 	}
 }

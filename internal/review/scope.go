@@ -85,7 +85,9 @@ func (l *Leg) buildScope(ctx context.Context, base, head core.Revision, excluded
 	if l.VCS == nil {
 		return intel.Scope{}, nil, errNoScopeReader{}
 	}
+	start := l.now()
 	changes, err := l.VCS.ChangedFiles(ctx, base, head)
+	l.Log.Phase("enumerate", l.now().Sub(start).Milliseconds())
 	if err != nil {
 		return intel.Scope{}, nil, err
 	}
@@ -93,11 +95,13 @@ func (l *Leg) buildScope(ctx context.Context, base, head core.Revision, excluded
 	for _, change := range changes {
 		paths = append(paths, change.Path)
 	}
+	start = l.now()
 	attrs, warning, err := l.VCS.GeneratedAttributes(ctx, base, paths)
 	if err != nil {
 		return intel.Scope{}, nil, err
 	}
 	scope, err := intel.RequiredFiles(ctx, changes, scopeReader{leg: l}, base, head, excluded, intelAttributeDecisions(attrs))
+	l.Log.Phase("reads", l.now().Sub(start).Milliseconds())
 	if err != nil {
 		return intel.Scope{}, nil, err
 	}

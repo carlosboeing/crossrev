@@ -93,9 +93,13 @@ func (e *Refusal) Unwrap() error { return e.Err }
 // (lib/legs.sh:518).
 const harnessErrorCap = 400
 
-// diagnosisPattern is the `grep -iE` of lib/legs.sh:520.
+// diagnosisPattern is the `grep -iE` of lib/legs.sh:520, widened by one
+// stem: a sandbox denial such as `socket deny resolution failed: ...`
+// carries the cause a later `Error: see the warning above` line points at,
+// and `denied` alone does not match it (`deny` is not a substring of
+// `denied`, so both stems are listed).
 var diagnosisPattern = regexp.MustCompile(
-	`(?i)error|fatal|denied|unauthor|forbidden|invalid|expired|timed out|refused|not found`)
+	`(?i)error|fatal|denied|deny|unauthor|forbidden|invalid|expired|timed out|refused|not found`)
 
 // HarnessError is legs_harness_error (lib/legs.sh:517-534): the part of a
 // harness's stderr worth showing, capped.

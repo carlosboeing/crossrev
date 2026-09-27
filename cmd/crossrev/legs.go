@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/carlosboeing/crossrev/internal/buildinfo"
 	"github.com/carlosboeing/crossrev/internal/cli"
 	"github.com/carlosboeing/crossrev/internal/config"
 	"github.com/carlosboeing/crossrev/internal/core"
@@ -92,6 +93,7 @@ func openLog(repo core.Slug, pr int, retention string, keep bool, leg string) *r
 		RetentionDays:   runlog.RetentionDays(retention),
 		Repo:            repo.String(),
 		PR:              strconv.Itoa(pr),
+		Revision:        buildinfo.Read().Revision,
 		KeepTranscripts: keep,
 		Leg:             leg,
 	})
