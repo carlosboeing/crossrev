@@ -264,6 +264,31 @@
       }
     },
     {
+      "name": "restart without a pull request number",
+      "args": [
+        "restart"
+      ],
+      "shell": null,
+      "native": {
+        "exit": 1,
+        "stderr": "\nerror  crossrev restart needs a pull request number\n       Usage: crossrev restart --pr 42\n\n"
+      },
+      "note": "restart is a new command with no shell counterpart, the Bash implementation having been removed. There is nothing to measure; these bytes are what ui.Die prints with the Plain palette."
+    },
+    {
+      "name": "an unknown option for restart",
+      "args": [
+        "restart",
+        "--bogus"
+      ],
+      "shell": null,
+      "native": {
+        "exit": 1,
+        "stderr": "\nerror  unknown option for restart: --bogus\n       Usage: crossrev restart --pr <number>\n\n"
+      },
+      "note": "restart is a new command with no shell counterpart, the Bash implementation having been removed. There is nothing to measure; these bytes are what ui.Die prints with the Plain palette."
+    },
+    {
       "name": "an unknown review trigger",
       "args": [
         "review",

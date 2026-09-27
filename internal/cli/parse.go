@@ -17,6 +17,7 @@ const (
 	CommandReview        Command = "review"
 	CommandResolve       Command = "resolve"
 	CommandStatus        Command = "status"
+	CommandRestart       Command = "restart"
 	CommandInit          Command = "init"
 	CommandWatchdog      Command = "watchdog"
 	CommandConfigShow    Command = "config show"
@@ -35,7 +36,7 @@ const (
 func AllCommands() []Command {
 	return []Command{
 		CommandCycle, CommandReview, CommandResolve, CommandStatus,
-		CommandInit, CommandWatchdog, CommandConfigShow, CommandConfigBacklog,
+		CommandRestart, CommandInit, CommandWatchdog, CommandConfigShow, CommandConfigBacklog,
 		CommandAuthStatus, CommandAuthLogin, CommandAuthInstall,
 		CommandAuthRotate, CommandAuthRefresh, CommandDoctor,
 		CommandVersion, CommandHelp,
@@ -107,6 +108,8 @@ func Parse(args []string, out *ui.IO, harnesses []string) (Invocation, error) {
 		return parseResolve(rest, out, harnesses)
 	case string(CommandStatus):
 		return parseStatus(rest, out)
+	case string(CommandRestart):
+		return parseRestart(rest, out)
 	case string(CommandInit):
 		return parseInit(rest, out)
 	case string(CommandWatchdog):
@@ -364,6 +367,38 @@ func parseStatus(args []string, out *ui.IO) (Invocation, error) {
 		return Invocation{}, err
 	}
 	return Invocation{Command: CommandStatus, Request: req}, nil
+}
+
+// parseRestart is restart's argument loop. The command is new with the Go
+// binary — bin/crossrev had no restart case, so there is no shell loop to
+// mirror — and its shape is parseStatus's: the two flags it reads, and
+// nothing accepted and thrown away.
+func parseRestart(args []string, out *ui.IO) (Invocation, error) {
+	var req RestartRequest
+	var pr, repo string
+	s := &scanner{args: args}
+	for s.more() {
+		var err error
+		switch flag := s.flag(); flag {
+		case "--pr":
+			pr, err = s.value()
+		case "--repo":
+			repo, err = s.value()
+		default:
+			err = unknownOption(out, "restart", flag, usageRestart)
+		}
+		if err != nil {
+			return Invocation{}, err
+		}
+	}
+	var err error
+	if req.PR, err = requirePR(out, "restart", pr); err != nil {
+		return Invocation{}, err
+	}
+	if req.Repo, err = optionalSlug(out, repo); err != nil {
+		return Invocation{}, err
+	}
+	return Invocation{Command: CommandRestart, Request: req}, nil
 }
 
 // parseWatchdog is cmd_watchdog's argument loop (lib/run.sh:3682-3696).
