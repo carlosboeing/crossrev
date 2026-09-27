@@ -56,6 +56,13 @@ type StatusRequest struct {
 	Repo core.Slug
 }
 
+// RestartRequest is `crossrev restart`. New with the Go binary — the shell
+// had no counterpart, so there is no argument loop it transcribes.
+type RestartRequest struct {
+	PR   int
+	Repo core.Slug
+}
+
 // InitRequest is `crossrev init` (lib/init.sh:34-46).
 type InitRequest struct {
 	Owner   string
@@ -149,6 +156,7 @@ type VersionRequest struct{}
 const (
 	usageCycle    = "Usage: crossrev cycle --pr <number> [--trigger human|automatic] [--no-tips] [--keep-transcripts]"
 	usageStatus   = "Usage: crossrev status --pr <number>"
+	usageRestart  = "Usage: crossrev restart --pr <number>"
 	usageWatchdog = "Usage: crossrev watchdog [--repo owner/name] [--timeout <seconds>]"
 	usageInit     = "Usage: crossrev init [--owner <owner>] [--upgrade] [--dry-run] [--yes]"
 

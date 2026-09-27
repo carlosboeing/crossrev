@@ -2,6 +2,7 @@ package exec
 
 import (
 	"context"
+	"errors"
 	"io"
 	"os"
 	"time"
@@ -96,4 +97,34 @@ type Streamer interface {
 }
 
 // Signaled reports that a signal ended the child rather than a return from main.
+//
+// Only a recorded signal counts. A plain exit status in the 128+N range, such
+// as ssh's 255, is an ordinary exit, not a signal death. Exit-code inference
+// for interrupts lives in Interrupted's explicit list instead.
 func (r Result) Signaled() bool { return r.Signal != nil }
+
+// Interrupted reports that an interrupt signal, termination signal or context
+// cancellation ended the child rather than a return from main.
+//
+// SIGINT (130) is Ctrl-C, SIGTERM (143) is termination requested by the host,
+// and SIGKILL (137) is the group kill that cancellation applies when the
+// context ends. None of these is a harness failure or a model error.
+func (r Result) Interrupted() bool {
+	if errors.Is(r.Err, context.Canceled) {
+		return true
+	}
+	if r.Signal == os.Interrupt || r.Signal == os.Kill {
+		return true
+	}
+	if number, ok := signalNumber(r.Signal); ok {
+		switch 128 + number {
+		case 130, 131, 137, 143:
+			return true
+		}
+	}
+	switch r.ExitCode {
+	case 130, 131, 137, 143:
+		return true
+	}
+	return false
+}

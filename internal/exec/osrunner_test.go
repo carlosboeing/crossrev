@@ -348,6 +348,9 @@ func TestRunReportsCancellation(t *testing.T) {
 		if !result.Signaled() {
 			t.Errorf("a cancelled child was not reported as signalled: exit=%d", result.ExitCode)
 		}
+		if !result.Interrupted() {
+			t.Errorf("a cancelled child was not reported as interrupted: exit=%d", result.ExitCode)
+		}
 		if result.ExitCode <= 128 {
 			t.Errorf("ExitCode = %d, want 128 plus the killing signal", result.ExitCode)
 		}
