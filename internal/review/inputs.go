@@ -93,7 +93,8 @@ type Context struct {
 type VCS interface {
 	Show(ctx context.Context, revision core.Revision, path string) ([]byte, vcs.FileStatus, error)
 	ChangedFiles(ctx context.Context, base, head core.Revision) ([]core.FileChange, error)
-	ExactSearch(ctx context.Context, revision core.Revision, term string, limit int) ([]vcs.SearchHit, bool, error)
+	ChangedLines(ctx context.Context, base, head core.Revision) ([]byte, error)
+	SearchAll(ctx context.Context, revision core.Revision, terms []string, limit int) ([]vcs.TermResult, error)
 	RangeDiff(ctx context.Context, base, head core.Revision) ([]byte, error)
 	GeneratedAttributes(ctx context.Context, base core.Revision, paths []string) (map[string]vcs.AttributeDecision, *vcs.Warning, error)
 	RemovePersistedCredentials(ctx context.Context) ([]vcs.RemovedCredential, error)

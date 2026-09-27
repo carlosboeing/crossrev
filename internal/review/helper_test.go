@@ -155,9 +155,21 @@ type fakeVCS struct {
 	// reads counts Show calls per path, so a test can prove an excluded
 	// path's body was never read.
 	reads map[string]int
-	// searchCalls counts ExactSearch invocations, so a test can pin how often
-	// advisory discovery runs.
-	searchCalls int
+	// searchResults scripts the blob-pass answers per term, searchTooCommon
+	// caps per term, and searchErr fails the whole pass. gotTerms records
+	// the last call's terms, and searchCalls counts SearchAll invocations,
+	// so a test can pin that advisory discovery runs once per pass.
+	searchResults   map[string][]vcs.SearchHit
+	searchTooCommon map[string]bool
+	searchErr       error
+	gotTerms        []string
+	searchCalls     int
+	// changedLines answers ChangedLines with the stub -U0 diff the
+	// advisory term walk reads; changedLinesErr fails it, and
+	// changedLinesCalls counts invocations.
+	changedLines      []byte
+	changedLinesErr   error
+	changedLinesCalls int
 	// removePersistedCalls counts RemovePersistedCredentials invocations, and
 	// removePersistedErr is the failure it returns.
 	removePersistedCalls int
@@ -177,9 +189,25 @@ func (f *fakeVCS) GeneratedAttributes(_ context.Context, _ core.Revision, paths 
 	return answers, f.attrWarn, nil
 }
 
-func (f *fakeVCS) ExactSearch(_ context.Context, revision core.Revision, term string, limit int) ([]vcs.SearchHit, bool, error) {
+func (f *fakeVCS) SearchAll(_ context.Context, _ core.Revision, terms []string, _ int) ([]vcs.TermResult, error) {
 	f.searchCalls++
-	return nil, false, nil
+	f.gotTerms = append([]string(nil), terms...)
+	if f.searchErr != nil {
+		return nil, f.searchErr
+	}
+	var out []vcs.TermResult
+	for _, term := range terms {
+		out = append(out, vcs.TermResult{Term: term, Hits: f.searchResults[term], TooCommon: f.searchTooCommon[term]})
+	}
+	return out, nil
+}
+
+func (f *fakeVCS) ChangedLines(_ context.Context, _, _ core.Revision) ([]byte, error) {
+	f.changedLinesCalls++
+	if f.changedLinesErr != nil {
+		return nil, f.changedLinesErr
+	}
+	return f.changedLines, nil
 }
 
 // repairDelta, when set, is the B-to-C delta RangeDiff answers: the bytes a

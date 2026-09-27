@@ -401,3 +401,51 @@ func TestReviewIntelligenceSupersedesOnlyTheFrozenPromptSections(t *testing.T) {
 		}
 	}
 }
+
+// TestReviewPromptRendersAdvisoryPointerLines requires search pointers to
+// carry their holder line: path and line together, with the term that found
+// them. A convention neighbour keeps the bare path it always had.
+func TestReviewPromptRendersAdvisoryPointerLines(t *testing.T) {
+	o := loadReviewOracle(t)
+	head := "2222222222222222222222222222222222222222"
+	units := []prompt.BatchUnit{
+		{Path: "src/added.go", Change: core.ChangeAdded, ContentRevision: revisionOf(t, head),
+			Body: []byte("package added\n"), Available: true},
+	}
+	advisory := []prompt.AdvisoryRef{
+		{Path: "src/helper.go", Rule: "search", Term: "SaveOrder", Line: 12},
+		{Path: "src/app_test.go", Rule: "convention"},
+	}
+	got := string(batchReview(o, units, advisory, nil).Render())
+	for _, want := range []string{
+		"`src/helper.go:12` (search `SaveOrder`)",
+		"`src/app_test.go` (convention)",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("advisory block does not show %q", want)
+		}
+	}
+}
+
+// TestReviewPromptCountsPointersPastTheCap requires the remainder line past
+// the per-call pointer cap, and its absence on a quiet call.
+func TestReviewPromptCountsPointersPastTheCap(t *testing.T) {
+	o := loadReviewOracle(t)
+	head := "2222222222222222222222222222222222222222"
+	units := []prompt.BatchUnit{
+		{Path: "src/added.go", Change: core.ChangeAdded, ContentRevision: revisionOf(t, head),
+			Body: []byte("package added\n"), Available: true},
+	}
+	advisory := []prompt.AdvisoryRef{
+		{Path: "src/helper.go", Rule: "search", Term: "SaveOrder", Line: 12},
+	}
+	capped := batchReview(o, units, advisory, nil)
+	capped.AdvisoryOmitted = 12
+	if got := string(capped.Render()); !strings.Contains(got, "- …and 12 more pointers") {
+		t.Errorf("capped advisory block does not count its remainder:\n%s", got)
+	}
+	quiet := string(batchReview(o, units, advisory, nil).Render())
+	if strings.Contains(quiet, "more pointers") {
+		t.Errorf("a quiet call counts pointers it did not omit:\n%s", quiet)
+	}
+}

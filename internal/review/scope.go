@@ -40,19 +40,23 @@ type scopeSearcher struct {
 	vcs VCS
 }
 
-func (s scopeSearcher) ExactSearch(ctx context.Context, revision core.Revision, term string, limit int) ([]string, bool, error) {
+func (s scopeSearcher) SearchAll(ctx context.Context, revision core.Revision, terms []string, limit int) ([]intel.TermResult, error) {
 	if s.vcs == nil {
-		return nil, false, nil
+		return nil, nil
 	}
-	hits, tooCommon, err := s.vcs.ExactSearch(ctx, revision, term, limit)
+	results, err := s.vcs.SearchAll(ctx, revision, terms, limit)
 	if err != nil {
-		return nil, false, nil
+		return nil, nil
 	}
-	paths := make([]string, 0, len(hits))
-	for _, hit := range hits {
-		paths = append(paths, hit.Path)
+	out := make([]intel.TermResult, 0, len(results))
+	for _, res := range results {
+		hits := make([]intel.SearchHit, 0, len(res.Hits))
+		for _, hit := range res.Hits {
+			hits = append(hits, intel.SearchHit{Path: hit.Path, Lines: append([]int(nil), hit.Lines...), OmittedLines: hit.OmittedLines})
+		}
+		out = append(out, intel.TermResult{Term: res.Term, Hits: hits, TooCommon: res.TooCommon})
 	}
-	return paths, tooCommon, nil
+	return out, nil
 }
 
 func (s scopeSearcher) Exists(ctx context.Context, revision core.Revision, path string) (bool, error) {
