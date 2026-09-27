@@ -141,6 +141,17 @@ if [[ -n "${CROSSREV_GH_STATE:-}" ]]; then
     fi
     [[ -n "$_u" ]] && create_author="$_u"
   fi
+  # The issue_url for this request, parsed from its path. A create stores
+  # it beside the comment so both list endpoints replay which pull
+  # request the comment belongs to; a fixed URL would count every
+  # comment as pull request 42.
+  req_issue_url=""
+  for _a in "$@"; do
+    if [[ "$_a" =~ ^repos/([^/]+)/([^/]+)/issues/([0-9]+) ]]; then
+      req_issue_url="https://api.github.com/repos/${BASH_REMATCH[1]}/${BASH_REMATCH[2]}/issues/${BASH_REMATCH[3]}"
+      break
+    fi
+  done
 
   # Seed issue comments if present
   seed_comments="$CROSSREV_GH_STATE/issue-comments.json"
@@ -159,6 +170,8 @@ if [[ -n "${CROSSREV_GH_STATE:-}" ]]; then
       printf '%s' "$(jq -r '.body // ""' <<<"$sc_obj")" >"$CROSSREV_GH_STATE/comment-$sc_id"
       sc_login="$(jq -r '.user.login // empty' <<<"$sc_obj")"
       printf '%s' "${sc_login:-$create_author}" >"$CROSSREV_GH_STATE/comment-$sc_id.author"
+      sc_issue="$(jq -r '.issue_url // empty' <<<"$sc_obj")"
+      [[ -n "$sc_issue" ]] && printf '%s' "$sc_issue" >"$CROSSREV_GH_STATE/comment-$sc_id.issue"
       if (( sc_id >= cur_id )); then
         cur_id=$(( sc_id + 1 ))
       fi
@@ -193,6 +206,7 @@ if [[ -n "${CROSSREV_GH_STATE:-}" ]]; then
       printf '%s' "$(( id + 1 ))" >"$next"
       printf '%s' "$body" >"$CROSSREV_GH_STATE/comment-$id"
       printf '%s' "$create_author" >"$CROSSREV_GH_STATE/comment-$id.author"
+      [[ -n "$req_issue_url" ]] && printf '%s' "$req_issue_url" >"$CROSSREV_GH_STATE/comment-$id.issue"
       printf '{"id":%s}\n' "$id" | emit
       exit 0
     fi
@@ -226,8 +240,11 @@ if [[ -n "${CROSSREV_GH_STATE:-}" ]]; then
       case "$cid" in *[!0-9]*) continue;; esac
       ca="$gh_author"
       [[ -f "$CROSSREV_GH_STATE/comment-$cid.author" ]] && ca="$(cat "$CROSSREV_GH_STATE/comment-$cid.author")"
-      spool="$(jq -c --argjson id "$cid" --arg a "$ca" --rawfile body "$f" \
-        '. + [{id:$id, body:$body, user:{login:$a}, created_at:"2026-09-09T00:00:00Z", issue_url:"https://api.github.com/repos/acme/widget/issues/42"}]' <<<"$spool")"
+      iu="$req_issue_url"
+      [[ -f "$CROSSREV_GH_STATE/comment-$cid.issue" ]] && iu="$(cat "$CROSSREV_GH_STATE/comment-$cid.issue")"
+      iu="${iu:-https://api.github.com/repos/acme/widget/issues/42}"
+      spool="$(jq -c --argjson id "$cid" --arg a "$ca" --arg iu "$iu" --rawfile body "$f" \
+        '. + [{id:$id, body:$body, user:{login:$a}, created_at:"2026-09-09T00:00:00Z", issue_url:$iu}]' <<<"$spool")"
     done
     if [[ "$spool" != "[]" ]]; then
       static="[]"
@@ -269,6 +286,7 @@ if [[ -n "${CROSSREV_GH_STATE:-}" ]]; then
     printf '%s' "$(( id + 1 ))" >"$next"
     printf '%s' "$body" >"$CROSSREV_GH_STATE/comment-$id"
     printf '%s' "$create_author" >"$CROSSREV_GH_STATE/comment-$id.author"
+    [[ -n "$req_issue_url" ]] && printf '%s' "$req_issue_url" >"$CROSSREV_GH_STATE/comment-$id.issue"
     printf '{"id":%s}\n' "$id" | emit
     exit 0
   fi
@@ -301,8 +319,12 @@ if [[ -n "${CROSSREV_GH_STATE:-}" ]]; then
       case "$cid" in *[!0-9]*) continue;; esac
       ca="$gh_author"
       [[ -f "$CROSSREV_GH_STATE/comment-$cid.author" ]] && ca="$(cat "$CROSSREV_GH_STATE/comment-$cid.author")"
-      spool="$(jq -c --argjson id "$cid" --arg a "$ca" --rawfile body "$f" \
-        '. + [{id:$id, body:$body, user:{login:$a}, created_at:"2026-09-09T00:00:00Z", issue_url:"https://api.github.com/repos/acme/widget/issues/42"}]' <<<"$spool")"
+      # The repository-wide path names no issue, so only the stored URL
+      # is truthful here; the default keeps seeds without one unchanged.
+      iu="https://api.github.com/repos/acme/widget/issues/42"
+      [[ -f "$CROSSREV_GH_STATE/comment-$cid.issue" ]] && iu="$(cat "$CROSSREV_GH_STATE/comment-$cid.issue")"
+      spool="$(jq -c --argjson id "$cid" --arg a "$ca" --arg iu "$iu" --rawfile body "$f" \
+        '. + [{id:$id, body:$body, user:{login:$a}, created_at:"2026-09-09T00:00:00Z", issue_url:$iu}]' <<<"$spool")"
     done
     printf '%s\n' "$spool" | emit
     exit 0

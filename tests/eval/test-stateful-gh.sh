@@ -91,6 +91,16 @@ is "listed claim login equals the seeded user" "$listed_claim_login" "eval-revie
 seeded_login="$(gh api --paginate repos/acme/widget/issues/42/comments --jq '.[] | select(.id == 1001) | .user.login')"
 is "listed seeded comment keeps its seed login" "$seeded_login" "author"
 
+other_id="$(gh api --method POST repos/other/repo/issues/7/comments -f body='unrelated note' --jq .id)"
+other_url="$(gh api --paginate repos/other/repo/issues/7/comments --jq '.[] | select(.id == '"$other_id"') | .issue_url')"
+is "created comment replays its own issue_url" "$other_url" "https://api.github.com/repos/other/repo/issues/7"
+
+claim_url="$(gh api --paginate repos/acme/widget/issues/42/comments --jq '.[] | select(.id == '"$claim_id"') | .issue_url')"
+is "claim keeps its own issue_url" "$claim_url" "https://api.github.com/repos/acme/widget/issues/42"
+
+wide_url="$(gh api --method GET repos/acme/widget/issues/comments --jq '.[] | select(.id == '"$other_id"') | .issue_url')"
+is "repository-wide list replays the stored issue_url" "$wide_url" "https://api.github.com/repos/other/repo/issues/7"
+
 gh api --method PATCH repos/acme/widget/issues/comments/"$claim_id" -f body='claim updated <!-- crossrev: {"pass":1,"leg":"review"} -->' >/dev/null
 updated_body="$(gh api repos/acme/widget/issues/comments/"$claim_id" --jq .body)"
 has "single comment read replays updated claim body" "$updated_body" "claim updated"
