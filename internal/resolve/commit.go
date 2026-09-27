@@ -14,11 +14,11 @@ import (
 	"github.com/carlosboeing/crossrev/internal/vcs"
 )
 
-func (l *Leg) commitAndPush(ctx context.Context, s *session, workdir string, recs, findings []harness.Node, marker prstate.Marker, wrote bool, remote string) (sha string, messages []ui.Line, emptyRemote bool, err error) {
+func (l *Leg) commitAndPush(ctx context.Context, s *session, workdir string, recs, findings []harness.Node, marker prstate.Marker, wrote bool, remote string) (sha string, messages []ui.Line, emptyRemote bool, committed bool, err error) {
 	existing, _ := marker.CommitSHA.Get()
 	if existing != "" && existing != "null" {
 		// ui_say (lib/run.sh:2237).
-		return existing, []ui.Line{ui.Say("The previous attempt already pushed " + shortSHA(existing) + ", so the fix step is skipped.")}, false, nil
+		return existing, []ui.Line{ui.Say("The previous attempt already pushed " + shortSHA(existing) + ", so the fix step is skipped.")}, false, false, nil
 	}
 
 	fixed := 0
@@ -28,12 +28,12 @@ func (l *Leg) commitAndPush(ctx context.Context, s *session, workdir string, rec
 		}
 	}
 	if fixed == 0 && !wrote {
-		return "", nil, false, nil
+		return "", nil, false, false, nil
 	}
 
 	if sbx, loadErr := sandbox.LoadDescriptor(harness.DescriptorJSON()); loadErr == nil {
 		if _, warn, restoreErr := sandbox.Restore(workdir, sbx.Paths()); restoreErr != nil {
-			return "", nil, false, restoreErr
+			return "", nil, false, false, restoreErr
 		} else if warn != nil {
 			// ui_warn: sandbox.Restore answers both halves (lib/sandbox.sh).
 			messages = append(messages, ui.Warn(warn.Message, warn.Hint))
@@ -44,7 +44,7 @@ func (l *Leg) commitAndPush(ctx context.Context, s *session, workdir string, rec
 	work.StageAll(ctx)
 	staged, stageErr := work.HasStagedChanges(ctx)
 	if stageErr != nil {
-		return "", messages, false, stageErr
+		return "", messages, false, false, stageErr
 	}
 	if !staged {
 		if fixed > 0 {
@@ -53,12 +53,12 @@ func (l *Leg) commitAndPush(ctx context.Context, s *session, workdir string, rec
 				fmt.Sprintf("the resolver reported %d fix(es) but changed no files", fixed),
 				"The replies below will claim a fix that is not in the diff, so their threads stay open and the pass halts for a person. Treat those resolutions as unverified and read the thread before merging."))
 		}
-		return "", messages, false, nil
+		return "", messages, false, false, nil
 	}
 
 	target, targetErr := l.Git.ResolvePushRepo(ctx, remote)
 	if targetErr != nil {
-		return "", messages, false, targetErr
+		return "", messages, false, false, targetErr
 	}
 	for _, w := range target.Warnings {
 		messages = append(messages, ui.Warn(w.Message, w.Hint))
@@ -70,7 +70,7 @@ func (l *Leg) commitAndPush(ctx context.Context, s *session, workdir string, rec
 		}
 	}
 	if target.Repo != headRepo {
-		return "", messages, false, &Refusal{
+		return "", messages, false, false, &Refusal{
 			Message: fmt.Sprintf("remote '%s' pushes to '%s', but the head repository of this pull request is '%s'",
 				remote, target.Slug(), headRepo),
 			Hint: fmt.Sprintf("CrossRev pushes only to the head repository of the pull request under review. The resolver's changes are still in the working tree and nothing was pushed. Check `git config --get-all remote.%s.pushurl`.", remote),
@@ -95,18 +95,21 @@ func (l *Leg) commitAndPush(ctx context.Context, s *session, workdir string, rec
 		if l.Log != nil {
 			l.Log.Event("commit", "failed: "+err.Error())
 		}
-		return "", messages, false, err
+		return "", messages, false, false, err
 	}
 	if l.Log != nil {
 		l.Log.Event("commit", "exit=0")
 	}
 
+	// From here the fix is committed locally: whatever pushHead answers, the
+	// caller reports committed, so a failed push leaves the claim open for a
+	// retry instead of completing it as blocked.
 	sha, emptyRemote, err = l.pushHead(ctx, work, s, remote, runHooks)
 	if sha != "" {
 		// ui_ok (lib/run.sh:2270).
 		messages = append(messages, ui.OK("pushed "+shortSHA(sha)+" to "+s.pr.HeadRefName))
 	}
-	return sha, messages, emptyRemote, err
+	return sha, messages, emptyRemote, true, err
 }
 
 // shortSHA is `${commit_sha:0:7}`.

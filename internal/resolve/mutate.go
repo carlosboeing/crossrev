@@ -14,6 +14,9 @@ import (
 
 func (l *Leg) publish(ctx context.Context, s *session, got Result, workdir string) Result {
 	marker := got.Marker
+	// The claim as opened: a failed push returns it untouched, still started
+	// with no resolutions, so the retry resumes it with a fresh invoke.
+	claim := marker
 	commentID := marker.CommentID()
 	keep := true
 	settled := false
@@ -40,14 +43,11 @@ func (l *Leg) publish(ctx context.Context, s *session, got Result, workdir strin
 	}
 
 	if resolutionCount(marker) == 0 {
+		// In memory only: the claim comment carries the resolutions once the
+		// push lands. Recording them before the push meant a failed push left
+		// a started marker holding resolutions, so the retry resumed recorded
+		// work instead of re-invoking the resolver.
 		marker = l.attachPayload(marker, got)
-		body, err := l.encodeClaim(marker, passHeading(s), "Resolutions recorded; committing and replying now.")
-		if err != nil {
-			return fail(err)
-		}
-		if err := l.Forge.CommentEdit(ctx, s.repo, commentID, body); err != nil {
-			return fail(err)
-		}
 	} else {
 		if summary, ok := marker.Summary.Get(); !ok || summary == "" {
 			if wrap := wrapUpFromRaw(marker); wrap != "" {
@@ -75,7 +75,7 @@ func (l *Leg) publish(ctx context.Context, s *session, got Result, workdir strin
 	marker.Resolutions = marshalResolutions(recs)
 	got.Resolutions = marker.Resolutions
 
-	commitSHA, msgs, emptyRemote, err := l.commitAndPush(ctx, s, workdir, recs, findings, marker, wrote, remote)
+	commitSHA, msgs, emptyRemote, committed, err := l.commitAndPush(ctx, s, workdir, recs, findings, marker, wrote, remote)
 	got.Messages = append(got.Messages, msgs...)
 	if emptyRemote {
 		// ui_warn, the pair kept apart (lib/run.sh:2391-2392).
@@ -84,22 +84,47 @@ func (l *Leg) publish(ctx context.Context, s *session, got Result, workdir strin
 			"If someone pushed to that branch while this leg was working, this push may not include their commit. Confirm the branch looks right before merging."))
 	}
 	if err != nil {
+		if committed {
+			// The fix is committed locally but the push did not land. The
+			// claim stays open at started with no resolutions: one re-run —
+			// the watchdog's retry included — is a fresh invoke that
+			// recommits and pushes. No fatal record: completing the claim as
+			// blocked would refuse that retry instead of resuming it, and
+			// the deferred filings from this attempt stay matched, not
+			// duplicated, through the already-filed matching in
+			// persistDeferred. Marking reported stops Run's exit trap from
+			// completing the deliberately open claim.
+			l.reported = true
+			r := wrapErr(err)
+			r.Pass = s.pass
+			r.Marker = claim
+			r.Resolutions = got.Resolutions
+			r.Messages = got.Messages
+			return r
+		}
 		return fail(err)
 	}
+	// The resolutions reach the claim comment only now that the push landed
+	// (or the push step ran with nothing to send): the edit that used to run
+	// before the commit moved here, with wording that matches the new order.
+	lead := "Resolutions recorded; replying to each thread now."
 	if commitSHA != "" {
 		marker.CommitSHA = prstate.Some(commitSHA)
 		short := commitSHA
 		if len(short) > 7 {
 			short = short[:7]
 		}
-		body, encErr := l.encodeClaim(marker, passHeading(s), "Pushed `"+short+"`; replying to each thread now.")
-		if encErr != nil {
-			return fail(encErr)
-		}
-		if err := l.Forge.CommentEdit(ctx, s.repo, commentID, body); err != nil {
-			return fail(err)
-		}
+		lead = "Pushed `" + short + "`; resolutions recorded, replying to each thread now."
 	}
+	body, encErr := l.encodeClaim(marker, passHeading(s), lead)
+	if encErr != nil {
+		return fail(encErr)
+	}
+	if err := l.Forge.CommentEdit(ctx, s.repo, commentID, body); err != nil {
+		return fail(err)
+	}
+	got.Marker = marker
+	got.Resolutions = marker.Resolutions
 
 	already := l.postedFindingIDs(ctx, s)
 	if s.redriving {
