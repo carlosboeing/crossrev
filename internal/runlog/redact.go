@@ -1,6 +1,8 @@
 package runlog
 
 import (
+	"bytes"
+	"encoding/base64"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -22,14 +24,103 @@ const WithheldText = "CrossRev could not filter this text for credential shapes,
 // redacted line still names the kind of token it held.
 const mask = "…[redacted]"
 
+// pemBegin opens a PEM private-key block and captures its label. The
+// terminator is found by search rather than by pattern: Go's regexp has no
+// backreference, so one pattern cannot require the END label to match the
+// BEGIN label, and a mismatched terminator must leave the text alone.
+var pemBegin = regexp.MustCompile(`-----BEGIN ([A-Z0-9 ]*PRIVATE KEY)-----`)
+
+// redactPEM masks every PEM private-key block whose terminator carries the
+// BEGIN label, keeping the BEGIN line so a redacted line still names what
+// it held. A BEGIN line with no matching terminator passes through, and the
+// search continues after it.
+func redactPEM(in []byte) []byte {
+	var out []byte
+	rest := in
+	for {
+		loc := pemBegin.FindSubmatchIndex(rest)
+		if loc == nil {
+			return append(out, rest...)
+		}
+		after := rest[loc[1]:]
+		if bytes.HasPrefix(after, []byte(mask)) {
+			// Already masked: the terminator is gone, so a search
+			// for it could only reach a later block's.
+			out = append(out, rest[:loc[1]+len(mask)]...)
+			rest = rest[loc[1]+len(mask):]
+			continue
+		}
+		end := []byte("-----END " + string(rest[loc[2]:loc[3]]) + "-----")
+		i := bytes.Index(after, end)
+		if i < 0 {
+			out = append(out, rest[:loc[1]]...)
+			rest = after
+			continue
+		}
+		out = append(out, rest[:loc[1]]...)
+		out = append(out, mask...)
+		rest = after[i+len(end):]
+	}
+}
+
+// basicAuthPattern finds a candidate basic-auth header value, in any letter
+// case. The value is validated by isBasicCredential rather than by pattern:
+// any word of base64-alphabet characters would match, including ordinary
+// prose after a Basic scheme.
+var basicAuthPattern = regexp.MustCompile(`(?i)(authorization: basic )([A-Za-z0-9+/=]+)`)
+
+// isBasicCredential reports whether a candidate header value is a complete
+// base64 Basic value decoding to a username and password pair — the form
+// git's http.extraheader writes. Anything shorter than 8 characters passes
+// through: the mask keeps 6, which would carry the whole value.
+func isBasicCredential(value []byte) bool {
+	if len(value) < 8 {
+		return false
+	}
+	decoded, err := base64.StdEncoding.DecodeString(string(value))
+	if err != nil {
+		return false
+	}
+	i := bytes.IndexByte(decoded, ':')
+	return i > 0 && i < len(decoded)-1
+}
+
+// redactBasicAuth masks every basic-auth header whose value is a credential,
+// keeping the header and the first six value characters so a redacted line
+// still names what it held. A value that is not base64 for a username and
+// password pair passes through.
+func redactBasicAuth(in []byte) []byte {
+	return basicAuthPattern.ReplaceAllFunc(in, func(match []byte) []byte {
+		loc := basicAuthPattern.FindSubmatchIndex(match)
+		value := match[loc[4]:loc[5]]
+		if !isBasicCredential(value) {
+			return match
+		}
+		out := make([]byte, 0, loc[4]+6+len(mask))
+		out = append(out, match[:loc[4]]...)
+		out = append(out, value[:6]...)
+		out = append(out, mask...)
+		return out
+	})
+}
+
 // credentialPatterns are the credential shapes CrossRev handles, masked
 // wherever they appear (log_redact, lib/log.sh:96-107). Kept deliberately
 // broader than the tokens a run is expected to hold: a harness echoing its
 // environment on a failure path is the case this exists for.
 //
-// Order is load-bearing and matches the order of the -e flags. The generic
-// sk- rule runs last, over text the first rule has already masked, and a masked
-// string no longer matches it — which is where the idempotence comes from.
+// Order is load-bearing. The private-key block runs first, in redactPEM
+// before this list: its body is base64 that can itself match the token
+// rules, so the block is consumed whole before any of them see it. The
+// checkout header runs next, in redactBasicAuth, for the same reason — its
+// base64 hides the token's own prefix. The existing specific token rules
+// follow, then the pinned gitleaks rules in ported_rules.go, and the generic
+// sk- rule runs last over text the earlier rules have already masked.
+//
+// A masked string matches nothing twice, which is where the idempotence
+// comes from: the mask breaks every charset, the block rule consumes the
+// terminator its match needs, and the header mask keeps only six value
+// characters, below the length a credential needs.
 //
 // Byte-oriented, like the LC_ALL=C the Bash filter pins. Every class here is
 // ASCII, and Go's regexp decodes a byte that is not valid UTF-8 as one
@@ -44,8 +135,15 @@ var credentialPatterns = []struct {
 	{regexp.MustCompile(`(github_pat_[A-Za-z0-9_]{6})[A-Za-z0-9_]+`), "${1}" + mask},
 	{regexp.MustCompile(`(gh[pousr]_[A-Za-z0-9]{6})[A-Za-z0-9]+`), "${1}" + mask},
 	{regexp.MustCompile(`(xai-[A-Za-z0-9_-]{6})[A-Za-z0-9_-]+`), "${1}" + mask},
-	{regexp.MustCompile(`(sk-[A-Za-z0-9_-]{6})[A-Za-z0-9_-]{12,}`), "${1}" + mask},
+	{regexp.MustCompile(`\b(AKIA[0-9A-Z]{6})[0-9A-Z]{10}\b`), "${1}" + mask},
+	{regexp.MustCompile(`\b(ASIA[0-9A-Z]{6})[0-9A-Z]{10}\b`), "${1}" + mask},
+	{regexp.MustCompile(`(AIza[A-Za-z0-9_-]{6})[A-Za-z0-9_-]{29,}`), "${1}" + mask},
+	{regexp.MustCompile(`(ya29\.[A-Za-z0-9._-]{6})[A-Za-z0-9._-]{14,}`), "${1}" + mask},
+	{regexp.MustCompile(`(xox[baprse]-[A-Za-z0-9_-]{6})[A-Za-z0-9_-]+`), "${1}" + mask},
+	{regexp.MustCompile(`(xapp-[A-Za-z0-9_-]{6})[A-Za-z0-9_-]+`), "${1}" + mask},
 }
+
+var genericSKPattern = regexp.MustCompile(`(sk-[A-Za-z0-9_-]{6})[A-Za-z0-9_-]{12,}`)
 
 // filter is the signature of the credential filter, and it reports an error
 // because the thing being ported can fail: the Bash filter is an external sed,
@@ -56,10 +154,13 @@ var credentialPatterns = []struct {
 type filter func([]byte) ([]byte, error)
 
 func filterBytes(in []byte) ([]byte, error) {
-	out := in
+	out := redactPEM(in)
+	out = redactBasicAuth(out)
 	for _, pattern := range credentialPatterns {
 		out = pattern.re.ReplaceAll(out, []byte(pattern.with))
 	}
+	out = redactPorted(out)
+	out = genericSKPattern.ReplaceAll(out, []byte("${1}"+mask))
 	return out, nil
 }
 

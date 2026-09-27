@@ -124,10 +124,10 @@ func TestEventCollapsesNewlines(t *testing.T) {
 // its detail from names and exit codes (lib/log.sh:74-77).
 func TestEventRedactsWhatItWrites(t *testing.T) {
 	l := openLog(t, runlog.Options{Repo: "acme/widget", PR: "7"})
-	l.Event("harness", "claude said ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
+	l.Event("harness", fragments("claude said ghp_", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"))
 
 	got := readLog(t, l)
-	if strings.Contains(got, "ghp_AAAAAAAAAAAA") {
+	if strings.Contains(got, fragments("ghp_", "AAAAAAAAAAAA")) {
 		t.Errorf("the run log carries the credential:\n%s", got)
 	}
 	if !strings.Contains(got, "ghp_AAAAAA…[redacted]") {

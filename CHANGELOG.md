@@ -12,6 +12,8 @@ All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepa
 
 - **A multi-call review pass reports the summed usage across every call.** The pass marker carried only the first batch's usage envelope, so every further call's tokens went unreported. The marker now sums the usage buckets across every model call the pass made — accepted batches and refused attempts alike — into the existing `tokens` and `usage` fields, keeping the first accepted call's model, and warns once naming both models when a later accepted call answers under another one. A resumed pass sums only the calls made in this run.
 
+- **Run-log redaction covers cloud keys, private-key blocks, checkout Basic auth and more vendor tokens.** The filter now masks AWS access IDs, Google API keys and OAuth tokens, Slack tokens, PEM private-key blocks and the checkout's `AUTHORIZATION: basic` header. It also ports 71 distinctive credential formats from gitleaks v8.30.1, pinned to commit `83d9cd684c87d95d656c1458ef04895a7f1cbd8e`, each with its upstream entropy threshold where gitleaks sets one, without adding a dependency. The other 150 gitleaks rules have generic or context-bound shapes, need allowlists to avoid false positives, lack a prefix inside the credential, or overlap the existing compatibility rules. The filter keeps the credential prefix readable, consumes blocks and headers before token matching, and masks and notes a value only once on repeated publication. Redaction remains a second layer because a model can re-encode a secret.
+
 ## [0.9.0] — 2026-09-26
 
 ### Fixed
