@@ -181,9 +181,7 @@ func TestConfirmationKeepsTheRepairDeltaWhenTheDiffIsSliced(t *testing.T) {
 func capturePrompt(e *env) *[]string {
 	prompts := &[]string{}
 	e.runner.onSpec = func(spec exec.Spec) {
-		if len(spec.Args) > 0 {
-			*prompts = append(*prompts, spec.Args[len(spec.Args)-1])
-		}
+		*prompts = append(*prompts, specPrompt(spec))
 	}
 	return prompts
 }

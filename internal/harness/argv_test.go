@@ -45,35 +45,36 @@ func TestEveryAdapterBuildsTheWholeArgv(t *testing.T) {
 		{
 			// The reading leg carries its tool list, its MCP exclusion and its
 			// Agent and Skill removal beside the Bash lines; the writing leg
-			// takes none of them, because it needs its edit tools.
+			// takes none of them, because it needs its edit tools. Both legs
+			// hand the prompt on stdin rather than as the last argument.
 			harness: "claude", write: false,
-			where: "lib/adapters/claude.sh:23,49,54,55,111, plus the reading leg's read-only tool list",
+			where: "lib/adapters/claude.sh:23,49,54,55,111, plus the reading leg's read-only tool list, minus the argv prompt",
 			want: []string{"-p", "--output-format", "json",
 				"--tools", "Read,Grep,Glob", "--disallowedTools", "Agent,Skill", "--strict-mcp-config",
-				"--json-schema", "<schema-text>", "--model", "<model>", "--effort", "high", "<prompt>"},
+				"--json-schema", "<schema-text>", "--model", "<model>", "--effort", "high"},
 		},
 		{
 			harness: "claude", write: true,
-			where: "lib/adapters/claude.sh:23,43,49,54,55,111",
+			where: "lib/adapters/claude.sh:23,43,49,54,55,111, minus the argv prompt",
 			want: []string{"-p", "--output-format", "json",
 				"--permission-mode", "acceptEdits",
-				"--json-schema", "<schema-text>", "--model", "<model>", "--effort", "high", "<prompt>"},
+				"--json-schema", "<schema-text>", "--model", "<model>", "--effort", "high"},
 		},
 		{
 			harness: "codex", write: false,
-			where: "lib/adapters/codex.sh:50,56,70,74,75,77,95",
+			where: "lib/adapters/codex.sh:50,56,70,74,75,77,95, with the argv prompt replaced by the stdin marker",
 			want: []string{"exec", "--skip-git-repo-check", "--json", "-o", "<payload>",
 				"--ignore-user-config", "--sandbox", "read-only",
 				"--output-schema", "<schema-path>", "-m", "<model>",
-				"-c", "model_reasoning_effort=high", "<prompt>"},
+				"-c", "model_reasoning_effort=high", "-"},
 		},
 		{
 			harness: "codex", write: true,
-			where: "lib/adapters/codex.sh:50,56,68,74,75,77,95",
+			where: "lib/adapters/codex.sh:50,56,68,74,75,77,95, with the argv prompt replaced by the stdin marker",
 			want: []string{"exec", "--skip-git-repo-check", "--json", "-o", "<payload>",
 				"--ignore-user-config", "--sandbox", "workspace-write",
 				"--output-schema", "<schema-path>", "-m", "<model>",
-				"-c", "model_reasoning_effort=high", "<prompt>"},
+				"-c", "model_reasoning_effort=high", "-"},
 		},
 		{
 			harness: "agy", write: false,

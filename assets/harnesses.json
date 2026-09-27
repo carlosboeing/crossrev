@@ -30,6 +30,7 @@
       },
       "schema_style": "inline",
       "schema_native": true,
+      "prompt_transport": "stdin",
       "sandbox_args": [],
       "quarantine": [".claude", "CLAUDE.md", ".clauderc"],
       "credential": {
@@ -63,6 +64,7 @@
       },
       "schema_style": "path",
       "schema_native": true,
+      "prompt_transport": "stdin",
       "sandbox_args": ["--ignore-user-config"],
       "quarantine": [".codex"],
       "credential": {
@@ -96,6 +98,7 @@
       },
       "schema_style": "path",
       "schema_native": true,
+      "prompt_transport": "argv",
       "sandbox_args": [],
       "quarantine": [".gemini"],
       "credential": {
@@ -129,6 +132,7 @@
       },
       "schema_style": "inline",
       "schema_native": true,
+      "prompt_transport": "file",
       "sandbox_args": [],
       "quarantine": [".grok"],
       "credential": {
@@ -162,6 +166,7 @@
       },
       "schema_style": "prompt",
       "schema_native": false,
+      "prompt_transport": "argv",
       "legs": ["review", "resolve"],
       "sandbox_args": [],
       "quarantine": [".opencode", "opencode.json", "opencode.jsonc"],

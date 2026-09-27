@@ -77,8 +77,11 @@ func TestCodexArgumentShape(t *testing.T) {
 	if !hasFlagPair(spec.Args, "-c", "model_reasoning_effort="+inv.Effort) {
 		t.Error("the effort is not passed as a config override")
 	}
-	if last := spec.Args[len(spec.Args)-1]; last != inv.Prompt.Text {
-		t.Errorf("the last argument is not the prompt: %q", last)
+	if last := spec.Args[len(spec.Args)-1]; last != "-" {
+		t.Errorf("the last argument is %q, want the stdin marker -", last)
+	}
+	if got := string(spec.Stdin); got != inv.Prompt.Argument() {
+		t.Errorf("stdin carries %d bytes, want the %d-byte prompt", len(got), len(inv.Prompt.Argument()))
 	}
 }
 
