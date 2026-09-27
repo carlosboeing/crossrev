@@ -199,10 +199,15 @@ func FileChangedTerms(diff []byte, changes []core.FileChange) map[string][]strin
 // path, where +++ names /dev/null and --- names the file; every other kind
 // keys by the +++ path. Headers, hunk markers, binary announcements and
 // gitlink Subproject lines are not code and contribute nothing.
+//
+// Content only counts inside a hunk: a changed line starting with -- or ++
+// arrives as a --- or +++ record, which the header walk would otherwise read
+// as a file header and drop with the identifiers it carries.
 func changedSections(diff []byte) map[string][]byte {
 	sections := make(map[string][]byte)
 	var current string
 	var haveCurrent bool
+	var inHunk bool
 	flush := func(path string, content []byte) {
 		if path == "" {
 			return
@@ -213,6 +218,13 @@ func changedSections(diff []byte) map[string][]byte {
 		switch {
 		case strings.HasPrefix(rec, "diff --git "):
 			current, haveCurrent = "", false
+			inHunk = false
+		case strings.HasPrefix(rec, "@@"):
+			inHunk = true
+		case inHunk && len(rec) > 0 && (rec[0] == '+' || rec[0] == '-'):
+			if haveCurrent && !isSubprojectLine(rec[1:]) {
+				flush(current, append([]byte(rec[1:]), '\n'))
+			}
 		case strings.HasPrefix(rec, "--- "):
 			if path := changedHeaderPath(rec[4:], "a/"); path != "" {
 				current, haveCurrent = path, true
@@ -222,14 +234,6 @@ func changedSections(diff []byte) map[string][]byte {
 				current, haveCurrent = path, true
 			} else {
 				// +++ /dev/null is a deletion: the --- path above stands.
-			}
-		case strings.HasPrefix(rec, "+") && !strings.HasPrefix(rec, "+++"):
-			if haveCurrent && !isSubprojectLine(rec[1:]) {
-				flush(current, append([]byte(rec[1:]), '\n'))
-			}
-		case strings.HasPrefix(rec, "-") && !strings.HasPrefix(rec, "---"):
-			if haveCurrent && !isSubprojectLine(rec[1:]) {
-				flush(current, append([]byte(rec[1:]), '\n'))
 			}
 		}
 	}

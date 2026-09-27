@@ -410,6 +410,30 @@ func TestAdvisoryChangedTermsWalkMinusUZeroLines(t *testing.T) {
 	}
 }
 
+// TestAdvisoryChangedTermsKeepRepeatedPrefixContentLines requires content
+// lines starting with -- or ++ to contribute identifiers: git emits them as
+// --- and +++ records, which are content inside a hunk, not file headers.
+func TestAdvisoryChangedTermsKeepRepeatedPrefixContentLines(t *testing.T) {
+	changes := []core.FileChange{
+		{Path: "notes.txt", Kind: core.ChangeModified},
+	}
+	diff := []byte("diff --git a/notes.txt b/notes.txt\n" +
+		"--- a/notes.txt\n" +
+		"+++ b/notes.txt\n" +
+		"@@ -1,2 +1,2 @@\n" +
+		"--- OldMarker stays\n" +
+		"-plain gone\n" +
+		"+++ NewMarker arrives\n" +
+		"+plain added\n")
+	perFile := intel.FileChangedTerms(diff, changes)
+	got := perFile["notes.txt"]
+	for _, want := range []string{"OldMarker", "NewMarker"} {
+		if idx := sort.SearchStrings(got, want); idx >= len(got) || got[idx] != want {
+			t.Errorf("FileChangedTerms[notes.txt] = %q, want %q among the terms", got, want)
+		}
+	}
+}
+
 // TestAdvisoryChangedTermsIgnoreBinaryAndSubprojectSections requires two -U0
 // shapes to contribute their paths alone: a binary pair with no content
 // lines, and a gitlink whose Subproject lines are not code.
