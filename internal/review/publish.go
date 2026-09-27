@@ -116,7 +116,10 @@ func (l *Leg) publish(ctx context.Context, req Request, loaded Context, settings
 
 	verdict := core.Verdict(marker.Verdict.Value())
 	escalated := escalatedCount(loaded.Markers)
-	conv, obliged := l.buildConvergence(ctx, loaded, marker, actionable, producerOf(settings, marker.ModelReported.Value()))
+	// Both convergence reads below judge the same settled marker, so they
+	// share one producer built from the model the pass stored.
+	producer := producerOf(settings, marker.ModelReported.Value())
+	conv, obliged := l.buildConvergence(ctx, loaded, marker, actionable, producer)
 	if obliged && !policy.Converged(conv) {
 		// The coverage obligation is unmet: a green verdict cannot stand,
 		// and a quiet one cannot pass as finished. With actionable findings
@@ -201,7 +204,7 @@ func (l *Leg) publish(ctx context.Context, req Request, loaded Context, settings
 	}
 
 	next := policy.PassLabel(verdict, actionable, escalated)
-	if conv, ok := l.buildConvergence(ctx, loaded, marker, actionable, producerOf(settings, marker.ModelReported.Value())); ok {
+	if conv, ok := l.buildConvergence(ctx, loaded, marker, actionable, producer); ok {
 		next = policy.PassLabelWithCoverage(verdict, actionable, escalated, conv)
 	}
 	if verdict == core.VerdictConverged && next != policy.PassConverged {

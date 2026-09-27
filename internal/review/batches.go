@@ -187,8 +187,11 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 	if claim.Model.Present() {
 		marker.Model = claim.Model
 	}
-	if claim.ModelReported.Present() {
-		marker.ModelReported = claim.ModelReported
+	// A null claim model carries no answer: only a reported value moves
+	// onto the pass marker, so a re-drive never wipes the model its
+	// reused generation was published under.
+	if reported, ok := claim.ModelReported.Get(); ok {
+		marker.ModelReported = prstate.Some(reported)
 	}
 	if claim.Effort.Present() {
 		marker.Effort = claim.Effort
@@ -652,8 +655,10 @@ func (l *Leg) haltPass(ctx context.Context, req Request, loaded Context, pass in
 	if claim.Model.Present() {
 		marker.Model = claim.Model
 	}
-	if claim.ModelReported.Present() {
-		marker.ModelReported = claim.ModelReported
+	// As in runCoverage: a null claim model carries no answer, so the
+	// halted marker keeps the model its generations were published under.
+	if reported, ok := claim.ModelReported.Get(); ok {
+		marker.ModelReported = prstate.Some(reported)
 	}
 	if claim.Effort.Present() {
 		marker.Effort = claim.Effort
