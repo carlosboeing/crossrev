@@ -1,9 +1,12 @@
 package vcs_test
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"runtime"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/carlosboeing/crossrev/internal/core"
@@ -269,6 +272,69 @@ func TestSearchAllFindsAPathWithASpace(t *testing.T) {
 	res := searchResultsByTerm(t, results)["SpacedHelper"]
 	if len(res.Hits) != 1 || res.Hits[0].Path != "dir/space name.go" {
 		t.Errorf("SearchAll spaced path = %v, want [dir/space name.go]", res.Hits)
+	}
+}
+
+// TestSearchAllStreamsBlobsWithinOneBlobOfMemory requires the blob pass to
+// parse and match as the cat-file stream arrives: thirty 1 MB blobs must
+// cost well under their total in allocation. Buffering the whole stream
+// plus a per-blob copy costs several times it, so the bound fails there
+// and passes here with an order of magnitude to spare either way.
+func TestSearchAllStreamsBlobsWithinOneBlobOfMemory(t *testing.T) {
+	git := testGit(t)
+	dir := realTempDir(t)
+	repo := initRepo(t, git, dir)
+
+	const blobs = 30
+	const blobBytes = 1 << 20
+	const term = "StreamedRareMarker"
+	filler := bytes.Repeat([]byte("x"), blobBytes-len(term))
+	for i := 0; i < blobs; i++ {
+		body := append(append([]byte(nil), filler...), term...)
+		if i > 0 {
+			// A distinct last byte per blob: identical blobs would
+			// stream once, and the pass must face all thirty megabytes.
+			body[len(body)-1] = byte(i)
+		}
+		write(t, dir, fmt.Sprintf("big/blob%02d.bin", i), string(body))
+	}
+	head := searchHead(t, repo)
+
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	results, err := repo.SearchAll(context.Background(), head, []string{term}, 200)
+	runtime.ReadMemStats(&after)
+	if err != nil {
+		t.Fatalf("SearchAll: %v", err)
+	}
+	res := searchResultsByTerm(t, results)[term]
+	if len(res.Hits) != 1 || res.Hits[0].Path != "big/blob00.bin" {
+		t.Fatalf("SearchAll large-blob holders = %v, want big/blob00.bin alone", res.Hits)
+	}
+	if len(res.Hits[0].Lines) != 1 || res.Hits[0].Lines[0] != 1 {
+		t.Errorf("SearchAll large-blob lines = %v, want [1] (one unbroken line)", res.Hits[0].Lines)
+	}
+	allocated := after.TotalAlloc - before.TotalAlloc
+	if budget := uint64(blobs*blobBytes) * 3 / 2; allocated > budget {
+		t.Errorf("SearchAll allocated %d bytes over %d bytes of blobs, want under %d (stream, do not buffer)", allocated, blobs*blobBytes, budget)
+	}
+}
+
+// TestSearchAllNeedsAStreamingRunner requires an honest error when the git
+// runner cannot stream: a silent buffered fallback would reintroduce the
+// peak the streaming pass exists to avoid.
+func TestSearchAllNeedsAStreamingRunner(t *testing.T) {
+	repo := vcs.New(&recorder{}, nil).At(t.TempDir())
+	head, err := core.NewRevision(strings.Repeat("a", 40))
+	if err != nil {
+		t.Fatalf("head revision: %v", err)
+	}
+	_, err = repo.SearchAll(context.Background(), head, []string{"term"}, 1)
+	if err == nil {
+		t.Fatal("SearchAll over a non-streaming runner succeeded, want an error")
+	}
+	if !strings.Contains(err.Error(), "stream") {
+		t.Errorf("SearchAll error = %q, want it to name streaming", err.Error())
 	}
 }
 

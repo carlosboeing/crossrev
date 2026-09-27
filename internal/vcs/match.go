@@ -77,30 +77,41 @@ func newMatcher(terms []string) *matcher {
 	return m
 }
 
-// scan walks data once, calling emit for every term ending at each byte
-// offset: the term's index and the offset of its last byte. Matches overlap
-// — every pattern ending at an offset reports, not just the longest.
-func (m *matcher) scan(data []byte, emit func(term int, end int)) {
-	state := 0
-	for i := 0; i < len(data); i++ {
-		c := data[i]
-		if state == 0 {
-			state = m.root[c]
+// matcherStream walks chunks in order, keeping automaton state across feed
+// boundaries so a term split over two reads still matches.
+type matcherStream struct {
+	m     *matcher
+	state int
+}
+
+// stream starts one chunked walk over the matcher's terms.
+func (m *matcher) stream() *matcherStream {
+	return &matcherStream{m: m}
+}
+
+// feed walks chunk, calling emit for every term ending at each absolute byte
+// offset: the term's index and base+i for chunk index i. Matches overlap —
+// every pattern ending at an offset reports, not just the longest.
+func (s *matcherStream) feed(chunk []byte, base int, emit func(term int, end int)) {
+	for i := 0; i < len(chunk); i++ {
+		c := chunk[i]
+		if s.state == 0 {
+			s.state = s.m.root[c]
 		} else {
 			for {
-				if next, ok := m.nodes[state].next[c]; ok {
-					state = next
+				if next, ok := s.m.nodes[s.state].next[c]; ok {
+					s.state = next
 					break
 				}
-				state = m.nodes[state].fail
-				if state == 0 {
-					state = m.root[c]
+				s.state = s.m.nodes[s.state].fail
+				if s.state == 0 {
+					s.state = s.m.root[c]
 					break
 				}
 			}
 		}
-		for _, term := range m.nodes[state].out {
-			emit(term, i)
+		for _, term := range s.m.nodes[s.state].out {
+			emit(term, base+i)
 		}
 	}
 }
