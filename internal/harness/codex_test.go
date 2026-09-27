@@ -256,3 +256,91 @@ func TestCodexRefusesWithNoPayloadPath(t *testing.T) {
 		t.Fatal("the adapter accepted an invocation with nowhere to write the payload")
 	}
 }
+
+// A failing run answers an envelope rather than dying, taking its message from
+// turn.failed on stdout before falling back to stderr.
+func TestCodexFailureEnvelope(t *testing.T) {
+	adapter := codexAdapter(t)
+	inv := invocation(t, "codex", false)
+
+	tests := []struct {
+		name string
+		res  exec.Result
+		want string
+	}{
+		{
+			name: "turn.failed carries the diagnosis",
+			res: exec.Result{
+				ExitCode: 1,
+				Stdout:   []byte(`{"type":"turn.failed","error":{"message":"the model refused to answer"}}`),
+			},
+			want: "the model refused to answer",
+		},
+		{
+			name: "turn.failed with string error",
+			res: exec.Result{
+				ExitCode: 1,
+				Stdout:   []byte(`{"type":"turn.failed","error":"something went wrong"}`),
+			},
+			want: "something went wrong",
+		},
+		{
+			name: "turn.failed with message field",
+			res: exec.Result{
+				ExitCode: 1,
+				Stdout:   []byte(`{"type":"turn.failed","message":"quota exceeded"}`),
+			},
+			want: "quota exceeded",
+		},
+		{
+			name: "the last failure of multiple turns wins",
+			res: exec.Result{
+				ExitCode: 1,
+				Stdout: []byte(strings.Join([]string{
+					`{"type":"turn.started"}`,
+					`{"type":"turn.completed","usage":{"input_tokens":100,"output_tokens":7}}`,
+					`{"type":"turn.started"}`,
+					`{"type":"turn.failed","error":{"message":"model stream ended unexpectedly"}}`,
+				}, "\n")),
+			},
+			want: "model stream ended unexpectedly",
+		},
+		{
+			name: "an empty stdout falls through to stderr",
+			res: exec.Result{
+				ExitCode: 1,
+				Stderr:   []byte("banner\nError: unauthorized\n"),
+			},
+			want: "Error: unauthorized",
+		},
+		{
+			name: "stdout diagnosis beats stderr noise",
+			res: exec.Result{
+				ExitCode: 1,
+				Stdout:   []byte(`{"type":"turn.failed","error":{"message":"rate limit exceeded"}}`),
+				Stderr:   []byte("banner\ninfo: workdir /tmp\n"),
+			},
+			want: "rate limit exceeded",
+		},
+		{
+			name: "neither stream said anything",
+			res:  exec.Result{ExitCode: 3},
+			want: "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			envelope := adapter.Envelope(inv, tt.res)
+			if envelope.OK {
+				t.Fatal("the envelope reports success")
+			}
+			if got := deref(envelope.Error); got != tt.want {
+				t.Errorf("error = %q, want %q", got, tt.want)
+			}
+			if envelope.Payload != nil || envelope.Endpoint != nil || envelope.Usage != nil || envelope.Tokens != nil {
+				t.Error("a failure envelope carries no payload, endpoint or telemetry")
+			}
+		})
+	}
+}
+
