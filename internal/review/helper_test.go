@@ -310,6 +310,18 @@ func (r *fakeRunner) Specs() []exec.Spec {
 	return out
 }
 
+// specPrompt is the prompt a child process was handed: stdin where the
+// adapter's transport is stdin, otherwise the last argument.
+func specPrompt(spec exec.Spec) string {
+	if spec.Stdin != nil {
+		return string(spec.Stdin)
+	}
+	if len(spec.Args) > 0 {
+		return spec.Args[len(spec.Args)-1]
+	}
+	return ""
+}
+
 type fakeForge struct {
 	// store serves the ledger reads and writes. Nil means this fixture
 	// has no ledger store, so an `auto` leg falls back to the marker.

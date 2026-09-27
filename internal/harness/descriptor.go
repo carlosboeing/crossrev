@@ -184,6 +184,10 @@ type Descriptor struct {
 	// schema. False for opencode alone, and it is what arms the extra
 	// shape-retry (lib/adapters/opencode.sh:8-15).
 	SchemaNative bool `json:"schema_native"`
+	// PromptTransport is stdin, file or argv: how this harness is handed the
+	// prompt. Codex and Claude Code read it from stdin, grok takes a file
+	// path, and agy and opencode take it on argv.
+	PromptTransport string `json:"prompt_transport"`
 	// SandboxArgs are the hardening arguments the adapter must pass.
 	SandboxArgs []string `json:"sandbox_args"`
 	// Quarantine are the paths this harness auto-loads configuration from.
@@ -350,7 +354,7 @@ func Validate(raw []byte) string {
 	}
 	for _, entry := range harnessList {
 		if !inRange(entry) {
-			return fmt.Sprintf("harness %s carries an out-of-range archetype, provenance, schema_style, install kind or staging kind", entryName(entry))
+			return fmt.Sprintf("harness %s carries an out-of-range archetype, provenance, schema_style, prompt_transport, install kind or staging kind", entryName(entry))
 		}
 	}
 	for _, entry := range harnessList {
@@ -729,6 +733,7 @@ func inRange(entry any) bool {
 	return slices.Contains([]string{"A", "B", "C"}, stringAt(entry, "credential", "archetype")) &&
 		slices.Contains([]string{"measured", "inferred", "vendor-documented"}, stringAt(entry, "credential", "provenance")) &&
 		slices.Contains([]string{"inline", "path", "prompt"}, stringAt(entry, "schema_style")) &&
+		slices.Contains([]string{"stdin", "file", "argv"}, stringAt(entry, "prompt_transport")) &&
 		slices.Contains([]string{"script", "npm"}, stringAt(entry, "install", "kind")) &&
 		slices.Contains([]string{"none", "file", "home", "env"}, stringAt(entry, "credential", "staging", "kind"))
 }

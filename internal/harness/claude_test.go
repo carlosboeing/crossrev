@@ -115,9 +115,13 @@ func TestClaudeArgumentShape(t *testing.T) {
 	if got := spec.Args[:3]; !slices.Equal(got, []string{"-p", "--output-format", "json"}) {
 		t.Errorf("the invocation does not open with -p --output-format json: %v", got)
 	}
-	// The prompt is the last argument, which is where the CLI takes it.
-	if last := spec.Args[len(spec.Args)-1]; last != inv.Prompt.Text {
-		t.Errorf("the last argument is not the prompt: %q", last)
+	// No positional prompt: -p reads it from stdin, and the argument vector
+	// carries nothing of it.
+	if slices.Contains(spec.Args, inv.Prompt.Text) {
+		t.Errorf("the prompt is still on argv: %v", spec.Args)
+	}
+	if got := string(spec.Stdin); got != inv.Prompt.Argument() {
+		t.Errorf("stdin carries %d bytes, want the %d-byte prompt", len(got), len(inv.Prompt.Argument()))
 	}
 	if !hasFlagPair(spec.Args, "--model", inv.Model) {
 		t.Error("the configured model is not passed through")
@@ -195,7 +199,9 @@ func TestClaudeRefusesAnEndpointWithNoToken(t *testing.T) {
 	}
 }
 
-// The whole invocation, against the fake CLI the offline suite uses.
+// The whole invocation, against the fake CLI the offline suite uses. The
+// prompt travels on stdin: -p takes no positional prompt, and the stub reads
+// stdin first.
 func TestClaudeAgainstTheStub(t *testing.T) {
 	adapter := claudeAdapter(t)
 	inv := invocation(t, "claude", false)
@@ -203,6 +209,12 @@ func TestClaudeAgainstTheStub(t *testing.T) {
 	spec, err := adapter.Spec(inv)
 	if err != nil {
 		t.Fatalf("building the spec: %v", err)
+	}
+	if got := string(spec.Stdin); got != inv.Prompt.Argument() {
+		t.Errorf("stdin does not carry the prompt: %d bytes", len(got))
+	}
+	if slices.Contains(spec.Args, inv.Prompt.Text) {
+		t.Errorf("the prompt is still a positional argument: %v", spec.Args)
 	}
 	res := runAgainstStub(t, spec, payloadFile(t, "CROSSREV_REVIEW_PAYLOAD", cannedPayload))
 	if res.Err != nil {

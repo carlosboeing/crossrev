@@ -22,6 +22,8 @@ All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepa
 
 - **`crossrev status` recounts open human decisions from review-thread state.** The halted NEXT step counted escalations off the resolve markers, so an escalated thread a human settled by hand was still reported as needing a human decision. It now reads the pull request's review threads and counts only escalations whose thread is still open: a resolution naming no finding, or one whose thread is unknown because the thread read failed, still counts. The leg rows are unchanged — they report what the legs did, not what is still open.
 
+- **Codex and Claude Code legs hand the prompt on stdin instead of argv.** A leg's prompt is hundreds of kilobytes, and argv is the wrong vehicle for it: `codex exec` now runs with `-` and reads the prompt from stdin, and `claude -p` runs with no positional prompt and reads it the same way. The descriptor records the new `prompt_transport` per harness — stdin for codex and claude, file for grok, argv for agy and opencode — and the validator refuses any other value. The bytes the model reads are unchanged: stdin carries the prompt with its trailing newlines removed, exactly as argv did. A stdin holding the prompt reaches EOF after it, so the open-stdin block the adapters used to close with `</dev/null` cannot recur.
+
 ## [0.9.0] — 2026-09-26
 
 ### Fixed
