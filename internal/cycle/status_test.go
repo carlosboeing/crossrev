@@ -521,6 +521,9 @@ type statusForge struct {
 	// ledger serves the ref-store ledger reads once the status gate moves
 	// onto it. Nil means this fixture has no ledger store.
 	ledger prstate.LedgerStore
+	// threads serves the review-thread read the NEXT escalation count
+	// recounts open human decisions from. Nil means no thread state.
+	threads []forge.ReviewThread
 }
 
 func (f *statusForge) RefLedger(string) prstate.LedgerStore { return f.ledger }
@@ -556,7 +559,7 @@ func (f *statusForge) PullRequestLabels(context.Context, core.Slug, int) []strin
 }
 
 func (f *statusForge) ReviewThreads(context.Context, core.Slug, int) []forge.ReviewThread {
-	panic("status does not read review threads")
+	return f.threads
 }
 
 func (f *statusForge) ReviewComments(context.Context, core.Slug, int) []forge.IssueComment {
