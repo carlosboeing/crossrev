@@ -21,7 +21,7 @@ import (
 // restartRun drives the real command against one fixture pull request: the
 // labels and the markers go on the way the loop leaves them, and the forge
 // answers from there.
-func restartRun(t *testing.T, labels []string, markers []map[string]any) (*restartForge, *bytes.Buffer, error) {
+func restartRun(t *testing.T, labels []string, markers []map[string]any, configure ...func(*restartForge)) (*restartForge, *bytes.Buffer, error) {
 	t.Helper()
 	forgeLabels := make([]forge.Label, 0, len(labels))
 	for _, name := range labels {
@@ -56,6 +56,9 @@ func restartRun(t *testing.T, labels []string, markers []map[string]any) (*resta
 			State:      "OPEN",
 		},
 		comments: comments,
+	}
+	for _, apply := range configure {
+		apply(f)
 	}
 	slug, err := core.ParseSlug(restartRepo)
 	if err != nil {
@@ -97,8 +100,8 @@ func TestRestartReviewHaltedRestartsTheReviewLeg(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 	want := []string{
-		"label-remove 42 crossrev/halted",
 		"label-add 42 crossrev/awaiting-review",
+		"label-remove 42 crossrev/halted",
 	}
 	if got := strings.Join(f.calls, "\n"); got != strings.Join(want, "\n") {
 		t.Errorf("transcript\n--- got ---\n%s\n--- want ---\n%s", got, strings.Join(want, "\n"))
@@ -117,8 +120,8 @@ func TestRestartResolveHaltedRestartsTheResolveLeg(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 	want := []string{
-		"label-remove 42 crossrev/halted",
 		"label-add 42 crossrev/awaiting-resolution",
+		"label-remove 42 crossrev/halted",
 	}
 	if got := strings.Join(f.calls, "\n"); got != strings.Join(want, "\n") {
 		t.Errorf("transcript\n--- got ---\n%s\n--- want ---\n%s", got, strings.Join(want, "\n"))
@@ -127,7 +130,7 @@ func TestRestartResolveHaltedRestartsTheResolveLeg(t *testing.T) {
 
 // TestRestartClearsTheWatchdogsBookkeeping pins the watchdog halt in one
 // transcript: the open resolve claim is the record of which leg was retried,
-// and both labels the watchdog left come off before the awaiting label goes
+// and both labels the watchdog left come off after the awaiting label goes
 // back on, in that order.
 func TestRestartClearsTheWatchdogsBookkeeping(t *testing.T) {
 	f, out, err := restartRun(t,
@@ -140,15 +143,57 @@ func TestRestartClearsTheWatchdogsBookkeeping(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 	want := []string{
+		"label-add 42 crossrev/awaiting-resolution",
 		"label-remove 42 crossrev/halted",
 		"label-remove 42 crossrev/watchdog-retried",
-		"label-add 42 crossrev/awaiting-resolution",
 	}
 	if got := strings.Join(f.calls, "\n"); got != strings.Join(want, "\n") {
 		t.Errorf("transcript\n--- got ---\n%s\n--- want ---\n%s", got, strings.Join(want, "\n"))
 	}
 	if !strings.Contains(out.String(), "crossrev/awaiting-resolution") {
 		t.Errorf("output = %q, want it to name the label that went on", out.String())
+	}
+}
+
+// TestRestartReappliesAnAwaitingLabelAlreadyOn: the workflows listen for the
+// labeled event, which an add against a label already on the pull request
+// does not fire, so the restart takes it off and puts it back.
+func TestRestartReappliesAnAwaitingLabelAlreadyOn(t *testing.T) {
+	f, _, err := restartRun(t,
+		[]string{"crossrev/halted", "crossrev/awaiting-review"},
+		[]map[string]any{
+			restartMarker(t, core.LegReview, 1, core.PassComplete, map[string]any{"verdict": "blocked"}),
+		})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	want := []string{
+		"label-remove 42 crossrev/awaiting-review",
+		"label-add 42 crossrev/awaiting-review",
+		"label-remove 42 crossrev/halted",
+	}
+	if got := strings.Join(f.calls, "\n"); got != strings.Join(want, "\n") {
+		t.Errorf("transcript\n--- got ---\n%s\n--- want ---\n%s", got, strings.Join(want, "\n"))
+	}
+}
+
+// TestRestartFailedAddLeavesTheHaltInPlace: the add is the restart, so when
+// it fails the halt labels stay on and a second restart still sees a halted
+// pull request rather than refusing it as one that never halted.
+func TestRestartFailedAddLeavesTheHaltInPlace(t *testing.T) {
+	addErr := errors.New("label write refused")
+	f, _, err := restartRun(t,
+		[]string{"crossrev/halted"},
+		[]map[string]any{
+			restartMarker(t, core.LegReview, 1, core.PassComplete, map[string]any{"verdict": "blocked"}),
+		},
+		func(f *restartForge) { f.addErr = addErr })
+	if !errors.Is(err, addErr) {
+		t.Fatalf("Run = %v, want the label add's error", err)
+	}
+	want := []string{"label-add 42 crossrev/awaiting-review"}
+	if got := strings.Join(f.calls, "\n"); got != strings.Join(want, "\n") {
+		t.Errorf("transcript\n--- got ---\n%s\n--- want ---\n%s", got, strings.Join(want, "\n"))
 	}
 }
 
@@ -217,6 +262,7 @@ type restartForge struct {
 	pr       forge.PullRequest
 	comments []forge.IssueComment
 	calls    []string
+	addErr   error
 }
 
 func (f *restartForge) record(format string, args ...any) {
@@ -239,7 +285,7 @@ func (f *restartForge) ViewerLogin(context.Context) (string, error) { return res
 
 func (f *restartForge) PullRequestLabelAdd(_ context.Context, _ core.Slug, pr int, label string) error {
 	f.record("label-add %d %s", pr, label)
-	return nil
+	return f.addErr
 }
 
 func (f *restartForge) PullRequestLabelRemove(_ context.Context, _ core.Slug, pr int, label string) {

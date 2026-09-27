@@ -94,18 +94,24 @@ func (r *Restart) Run(ctx context.Context, repo core.Slug, pr int) error {
 	markers := statusMarkers(r.Forge.IssueComments(ctx, repo, pr), author)
 	leg := restartLeg(markers)
 
+	// The add is the restart: the generated workflows listen for the awaiting
+	// label going on, so it goes on first and a failed add is fatal with the
+	// halt still in place — removing the halt first would leave a failed add
+	// refusing the next restart as not halted. When the label is already on,
+	// it comes off and back on, because an add against a present label fires
+	// no labeled event.
+	awaiting := policy.AwaitingLabel(leg)
+	if statusHasLabel(labels, awaiting) {
+		r.Forge.PullRequestLabelRemove(ctx, repo, pr, awaiting)
+	}
+	if err := r.Forge.PullRequestLabelAdd(ctx, repo, pr, awaiting); err != nil {
+		return err
+	}
 	r.Forge.PullRequestLabelRemove(ctx, repo, pr, policy.LabelHalted)
 	removed := []string{policy.LabelHalted}
 	if statusHasLabel(labels, policy.LabelWatchdogRetried) {
 		r.Forge.PullRequestLabelRemove(ctx, repo, pr, policy.LabelWatchdogRetried)
 		removed = append(removed, policy.LabelWatchdogRetried)
-	}
-	// The add is the restart: the generated workflows listen for the awaiting
-	// label going on. A remove without it clears the halt and restarts
-	// nothing, so a failed add is fatal rather than half a remedy.
-	awaiting := policy.AwaitingLabel(leg)
-	if err := r.Forge.PullRequestLabelAdd(ctx, repo, pr, awaiting); err != nil {
-		return err
 	}
 
 	r.Out.Say(fmt.Sprintf("%s#%d restarted: removed %s, applied %s",
