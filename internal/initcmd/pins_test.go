@@ -40,6 +40,7 @@ func TestTemplatesPinActionsBySHA(t *testing.T) {
 		}
 		for _, line := range strings.Split(string(body), "\n") {
 			trimmed := strings.TrimSpace(line)
+			trimmed = strings.TrimPrefix(trimmed, "- ")
 			if !strings.HasPrefix(trimmed, "uses:") {
 				continue
 			}
