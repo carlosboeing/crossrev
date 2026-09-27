@@ -28,6 +28,22 @@ func (r *Repository) ChangedFiles(ctx context.Context, base, head core.Revision)
 	return parseNameStatus(output.Stdout)
 }
 
+// ChangedLines returns the -U0 unified diff between base and head in one
+// `git diff -U0 <base>...<head>` call: added and removed lines with no
+// context, the bytes the advisory term walk reads. The range is three-dot,
+// the same comparison ChangedFiles enumerates, so the sections line up with
+// the enumeration path for path.
+func (r *Repository) ChangedLines(ctx context.Context, base, head core.Revision) ([]byte, error) {
+	output, err := r.Run(ctx, "diff", "-U0", base.SHA()+"..."+head.SHA())
+	if err != nil {
+		return nil, err
+	}
+	if !output.OK() {
+		return nil, fmt.Errorf("git diff -U0 exited %d: %s", output.ExitCode, output.Stderr)
+	}
+	return []byte(output.Stdout), nil
+}
+
 // parseNameStatus reads NUL-delimited --name-status output without splitting
 // valid path bytes on whitespace. A trailing NUL leaves an empty final field
 // which carries no record.

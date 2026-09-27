@@ -16,6 +16,8 @@ All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepa
 
 - **`crossrev doctor` no longer requires jq, yq or openssl.** The three stayed past the Go port only to keep the report shaped like the Bash one — [ADR 0018](docs/adrs/0018-go-native-parity-contract.md) kept them "until a later behavior decision changes that observable surface", and this is that decision. The requirement set is `git` and `gh` (authenticated), the binary's own dependencies: it parses JSON and YAML natively and signs nothing. The pairing report no longer waits for `yq`, which printed no Pairings section at all on a machine without it and hid the half of the report that says which pairings the configured runner can serve, and the harness probe no longer skips without `jq`, so such a machine still learns which harnesses it has. `crossrev config` and `crossrev init` still require `yq`.
 
+- **Advisory context is searched from the changed lines in one blob pass, and each model call sees only its own files' pointers.** Discovery used to extract search terms from whole file bodies and run one `git grep` per term, so untouched identifiers paged noise into every prompt and a large pull request paid thousands of git processes. Terms now come from the added and removed `-U0` lines plus each changed path, one `git ls-tree` plus one `git cat-file --batch` stream answers every term with holder paths and line numbers, and each call renders pointers from its own files' terms — rarest first, fifty lines at most with the rest counted. Terms past 200 holders stay `too_common`, the ledger fields are unchanged, and the repeated whole-pass path list is gone.
+
 ## [0.9.0] — 2026-09-26
 
 ### Fixed

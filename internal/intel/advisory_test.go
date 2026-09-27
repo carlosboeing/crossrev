@@ -14,21 +14,38 @@ import (
 	"github.com/carlosboeing/crossrev/internal/intel"
 )
 
-// fakeSearcher is the advisory Searcher with scripted answers: hits and caps
-// per term, existence per path, and optional errors for either call.
+// fakeSearcher is the advisory Searcher with scripted answers: one blob-pass
+// result per term, existence per path, and an optional whole-call search
+// error. It records the terms and limit each SearchAll call carried, so a
+// test can pin that discovery searched the changed lines rather than the
+// whole bodies.
 type fakeSearcher struct {
-	hits      map[string][]string
-	tooCommon map[string]bool
-	searchErr map[string]error
+	results   map[string]intel.TermResult
+	searchErr error
 	exists    map[string]bool
 	existErr  map[string]error
+	calls     int
+	gotTerms  []string
+	gotLimit  int
 }
 
-func (f *fakeSearcher) ExactSearch(_ context.Context, _ core.Revision, term string, _ int) ([]string, bool, error) {
-	if err, ok := f.searchErr[term]; ok {
-		return nil, false, err
+func (f *fakeSearcher) SearchAll(_ context.Context, _ core.Revision, terms []string, limit int) ([]intel.TermResult, error) {
+	f.calls++
+	f.gotTerms = append([]string(nil), terms...)
+	f.gotLimit = limit
+	if f.searchErr != nil {
+		return nil, f.searchErr
 	}
-	return f.hits[term], f.tooCommon[term], nil
+	var out []intel.TermResult
+	for _, term := range terms {
+		if res, ok := f.results[term]; ok {
+			res.Term = term
+			out = append(out, res)
+		} else {
+			out = append(out, intel.TermResult{Term: term})
+		}
+	}
+	return out, nil
 }
 
 func (f *fakeSearcher) Exists(_ context.Context, _ core.Revision, path string) (bool, error) {
@@ -68,6 +85,24 @@ func advisoryBodies() map[string]map[string]oracleCase {
 	}
 }
 
+// advisoryDiff is the -U0 change behind advisoryScope: src/app.go swaps one
+// identifier line, src/other.go gains its package line. The searched terms
+// are these lines' identifiers plus the two required paths — never the whole
+// bodies above.
+func advisoryDiff() []byte {
+	return []byte("diff --git a/src/app.go b/src/app.go\n" +
+		"--- a/src/app.go\n" +
+		"+++ b/src/app.go\n" +
+		"@@ -2 +2 @@\n" +
+		"-func OldThing() {}\n" +
+		"+func SharedThing() {}\n" +
+		"diff --git a/src/other.go b/src/other.go\n" +
+		"--- a/src/other.go\n" +
+		"+++ b/src/other.go\n" +
+		"@@ -0,0 +1 @@\n" +
+		"+package other\n")
+}
+
 // TestAdvisoryDiscoveryNeverChangesTheRequiredSet runs discovery over a scope
 // whose search hits name a required path, an excluded path and two untouched
 // paths, and requires the required set to come back identical while only the
@@ -79,12 +114,17 @@ func TestAdvisoryDiscoveryNeverChangesTheRequiredSet(t *testing.T) {
 	beforeExcluded := append([]intel.Exclusion(nil), scope.Excluded...)
 
 	search := &fakeSearcher{
-		hits: map[string][]string{
-			"SharedThing": {"docs/notes.md", "src/app.go", "unrelated.md", "vendor/lib.go"},
+		results: map[string]intel.TermResult{
+			"SharedThing": {Hits: []intel.SearchHit{
+				{Path: "docs/notes.md", Lines: []int{2}},
+				{Path: "src/app.go", Lines: []int{1}},
+				{Path: "unrelated.md", Lines: []int{9}},
+				{Path: "vendor/lib.go", Lines: []int{1}},
+			}},
 		},
 		exists: map[string]bool{"src/app_test.go": true},
 	}
-	summary := intel.AdvisoryFiles(context.Background(), scope, search)
+	summary := intel.AdvisoryFiles(context.Background(), scope, advisoryDiff(), search)
 
 	if !reflect.DeepEqual(scope.Required, beforeRequired) {
 		t.Errorf("AdvisoryFiles changed the required set: was %v, now %v", pathsOf(beforeRequired), pathsOf(scope.Required))
@@ -112,6 +152,9 @@ func TestAdvisoryDiscoveryNeverChangesTheRequiredSet(t *testing.T) {
 	if summary.Count != len(summary.Files) {
 		t.Errorf("advisory count = %d, want the %d files listed", summary.Count, len(summary.Files))
 	}
+	if search.calls != 1 {
+		t.Errorf("SearchAll calls = %d, want 1 (one blob pass answers every term)", search.calls)
+	}
 }
 
 func pathsOf(units []intel.FileUnit) []string {
@@ -136,17 +179,19 @@ func advisoryPaths(summary intel.AdvisorySummary) []string {
 func TestAdvisoryTooCommonContributesNoUnits(t *testing.T) {
 	scope, _, _ := advisoryScope(t, advisoryBodies())
 	search := &fakeSearcher{
-		hits: map[string][]string{
-			"SharedThing": {"docs/capped.md"},
-			"other":       {"docs/plain.md"},
+		results: map[string]intel.TermResult{
+			"SharedThing": {
+				Hits:      []intel.SearchHit{{Path: "docs/capped.md", Lines: []int{1}}},
+				TooCommon: true,
+			},
+			"other": {Hits: []intel.SearchHit{{Path: "docs/plain.md", Lines: []int{4}}}},
 		},
-		tooCommon: map[string]bool{"SharedThing": true},
 	}
-	summary := intel.AdvisoryFiles(context.Background(), scope, search)
+	summary := intel.AdvisoryFiles(context.Background(), scope, advisoryDiff(), search)
 
 	for _, f := range summary.Files {
-		if f.Path == "docs/capped.md" {
-			t.Errorf("capped term contributed advisory file %q, want none", f.Path)
+		if f.Path == "docs/capped.md" || f.Term == "SharedThing" {
+			t.Errorf("capped term contributed advisory file %+v, want none", f)
 		}
 	}
 	if len(summary.Limits) != 1 {
@@ -159,6 +204,9 @@ func TestAdvisoryTooCommonContributesNoUnits(t *testing.T) {
 	if limit.Limit != 200 {
 		t.Errorf("limit = %d, want 200", limit.Limit)
 	}
+	if limit.Rule != "search:SharedThing" {
+		t.Errorf("limit rule = %q, want search:SharedThing", limit.Rule)
+	}
 	found := false
 	for _, f := range summary.Files {
 		if f.Path == "docs/plain.md" {
@@ -170,26 +218,272 @@ func TestAdvisoryTooCommonContributesNoUnits(t *testing.T) {
 	}
 }
 
-// TestAdvisorySearchErrorDegradesOneTerm scripts a failing term beside a good
-// one and requires the good term to survive without failing discovery.
-func TestAdvisorySearchErrorDegradesOneTerm(t *testing.T) {
+// TestAdvisorySearchErrorDropsSearchKeepsConvention scripts a failing blob
+// pass and requires discovery to survive it: no search file and no search
+// limit, while the convention rule beside it still contributes.
+func TestAdvisorySearchErrorDropsSearchKeepsConvention(t *testing.T) {
 	scope, _, _ := advisoryScope(t, advisoryBodies())
 	search := &fakeSearcher{
-		hits:      map[string][]string{"other": {"docs/plain.md"}},
-		searchErr: map[string]error{"SharedThing": errors.New("index offline")},
+		searchErr: errors.New("index offline"),
+		exists:    map[string]bool{"src/app_test.go": true},
 	}
-	summary := intel.AdvisoryFiles(context.Background(), scope, search)
+	summary := intel.AdvisoryFiles(context.Background(), scope, advisoryDiff(), search)
+	for _, f := range summary.Files {
+		if f.Rule == intel.AdvisoryRuleSearch {
+			t.Errorf("failing search contributed advisory file %+v, want none", f)
+		}
+	}
 	found := false
 	for _, f := range summary.Files {
-		if f.Path == "docs/plain.md" {
+		if f.Path == "src/app_test.go" {
 			found = true
 		}
 	}
 	if !found {
-		t.Errorf("failing term dropped the good term: files = %v", advisoryPaths(summary))
+		t.Errorf("failing search dropped the convention rule: files = %v", advisoryPaths(summary))
 	}
 	if len(summary.Limits) != 0 {
 		t.Errorf("a search error recorded limits %v, want none", summary.Limits)
+	}
+}
+
+// TestAdvisorySearchesChangedLinesNotWholeBodies is the fixture where the old
+// whole-body terms would page noise: the required body holds a noisy
+// identifier the changed lines never touch. Discovery must search the
+// changed line's identifier plus the changed paths, and never the body-only
+// token — so its holders stay unpaged whatever they hold.
+func TestAdvisorySearchesChangedLinesNotWholeBodies(t *testing.T) {
+	bodies := map[string]map[string]oracleCase{
+		stubBaseSHA: {},
+		stubHeadSHA: {
+			"src/app.go":   {Path: "src/app.go", Body: "package app\n\nconst NoisyWholeBodyToken = 1\nfunc RareChangedToken() {}\n", Available: true},
+			"src/other.go": {Path: "src/other.go", Body: "package other\n", Available: true},
+		},
+	}
+	scope, _, _ := advisoryScope(t, bodies)
+	diff := []byte("diff --git a/src/app.go b/src/app.go\n" +
+		"--- a/src/app.go\n" +
+		"+++ b/src/app.go\n" +
+		"@@ -3 +3 @@\n" +
+		"-func OldThing() {}\n" +
+		"+func RareChangedToken() {}\n")
+	search := &fakeSearcher{
+		results: map[string]intel.TermResult{
+			"RareChangedToken": {Hits: []intel.SearchHit{{Path: "docs/rare.md", Lines: []int{5}}}},
+		},
+	}
+	summary := intel.AdvisoryFiles(context.Background(), scope, diff, search)
+
+	wantTerms := []string{"OldThing", "RareChangedToken", "func", "src/app.go", "src/other.go"}
+	sort.Strings(wantTerms)
+	if !reflect.DeepEqual(search.gotTerms, wantTerms) {
+		t.Errorf("searched terms = %q, want the changed lines' identifiers plus the changed paths %q", search.gotTerms, wantTerms)
+	}
+	for _, term := range search.gotTerms {
+		if term == "NoisyWholeBodyToken" {
+			t.Errorf("searched terms include the body-only token %q, which the changed lines never touch", term)
+		}
+	}
+	for _, f := range summary.Files {
+		if f.Term == "NoisyWholeBodyToken" {
+			t.Errorf("body-only token contributed advisory file %+v, want none", f)
+		}
+	}
+	found := false
+	for _, f := range summary.Files {
+		if f.Path == "docs/rare.md" && f.Line == 5 {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("changed-line term contributed nothing: files = %+v", summary.Files)
+	}
+}
+
+// TestAdvisorySearchHitsCarryLineNumbers requires one advisory file per
+// holder line: a hit on lines 3 and 7 renders two pointers, not one.
+func TestAdvisorySearchHitsCarryLineNumbers(t *testing.T) {
+	scope, _, _ := advisoryScope(t, advisoryBodies())
+	diff := []byte("diff --git a/src/app.go b/src/app.go\n" +
+		"--- a/src/app.go\n" +
+		"+++ b/src/app.go\n" +
+		"@@ -0,0 +1 @@\n" +
+		"+// LoneMarkerAlpha\n")
+	search := &fakeSearcher{
+		results: map[string]intel.TermResult{
+			"LoneMarkerAlpha": {Hits: []intel.SearchHit{{Path: "docs/lines.md", Lines: []int{3, 7}}}},
+		},
+	}
+	summary := intel.AdvisoryFiles(context.Background(), scope, diff, search)
+
+	var lines []int
+	for _, f := range summary.Files {
+		if f.Path == "docs/lines.md" {
+			if f.Term != "LoneMarkerAlpha" {
+				t.Errorf("holder term = %q, want LoneMarkerAlpha", f.Term)
+			}
+			lines = append(lines, f.Line)
+		}
+	}
+	if !reflect.DeepEqual(lines, []int{3, 7}) {
+		t.Errorf("holder lines = %v, want [3 7] (one pointer per holder line)", lines)
+	}
+}
+
+// TestAdvisoryChangedTermsWalkMinusUZeroLines checks the term walk over -U0
+// shapes: added and removed lines contribute identifiers, headers and context
+// never do, and every changed path joins verbatim.
+func TestAdvisoryChangedTermsWalkMinusUZeroLines(t *testing.T) {
+	changes := []core.FileChange{
+		{Path: "src/app.go", Kind: core.ChangeModified},
+		{Path: "src/new.go", Kind: core.ChangeAdded},
+		{Path: "src/gone.go", OldPath: "src/gone.go", Kind: core.ChangeDeleted},
+		{Path: "src/renamed.go", OldPath: "src/oldname.go", Kind: core.ChangeRenamed},
+		{Path: "sp ace.go", Kind: core.ChangeModified},
+	}
+	diff := []byte("diff --git a/src/app.go b/src/app.go\n" +
+		"index 1111111..2222222 100644\n" +
+		"--- a/src/app.go\n" +
+		"+++ b/src/app.go\n" +
+		"@@ -1 +1 @@\n" +
+		"-func OldThing() {}\n" +
+		"+func SharedThing() {}\n" +
+		"diff --git a/src/new.go b/src/new.go\n" +
+		"new file mode 100644\n" +
+		"--- /dev/null\n" +
+		"+++ b/src/new.go\n" +
+		"@@ -0,0 +1 @@\n" +
+		"+package fresh\n" +
+		"diff --git a/src/gone.go b/src/gone.go\n" +
+		"deleted file mode 100644\n" +
+		"--- a/src/gone.go\n" +
+		"+++ /dev/null\n" +
+		"@@ -1 +0,0 @@\n" +
+		"-package doomed\n" +
+		"diff --git a/src/oldname.go b/src/renamed.go\n" +
+		"similarity index 90%\n" +
+		"rename from src/oldname.go\n" +
+		"rename to src/renamed.go\n" +
+		"--- a/src/oldname.go\n" +
+		"+++ b/src/renamed.go\n" +
+		"@@ -1 +1 @@\n" +
+		"-package stale\n" +
+		"+package moved\n" +
+		"diff --git \"a/sp ace.go\" \"b/sp ace.go\"\n" +
+		"--- \"a/sp ace.go\"\n" +
+		"+++ \"b/sp ace.go\"\n" +
+		"@@ -1 +1 @@\n" +
+		"-package cramped\n" +
+		"+package roomy\n")
+
+	perFile := intel.FileChangedTerms(diff, changes)
+	wantPerFile := map[string][]string{
+		"src/app.go":   {"OldThing", "SharedThing", "func", "src/app.go"},
+		"src/new.go":   {"fresh", "package", "src/new.go"},
+		"src/gone.go":  {"doomed", "package", "src/gone.go"},
+		"src/renamed.go": {"moved", "package", "src/oldname.go", "src/renamed.go", "stale"},
+		"sp ace.go":    {"cramped", "package", "roomy", "sp ace.go"},
+	}
+	for path, want := range wantPerFile {
+		sort.Strings(want)
+		if got := perFile[path]; !reflect.DeepEqual(got, want) {
+			t.Errorf("FileChangedTerms[%q] = %q, want %q", path, got, want)
+		}
+	}
+	if len(perFile) != len(wantPerFile) {
+		t.Errorf("FileChangedTerms holds %d paths, want %d", len(perFile), len(wantPerFile))
+	}
+
+	global := intel.ChangedTerms(diff, changes)
+	for _, term := range []string{"SharedThing", "fresh", "doomed", "moved", "roomy", "src/oldname.go", "sp ace.go"} {
+		if !sort.StringsAreSorted(global) {
+			t.Fatal("ChangedTerms is not sorted")
+		}
+		if idx := sort.SearchStrings(global, term); idx >= len(global) || global[idx] != term {
+			t.Errorf("ChangedTerms = %q, want %q among the terms", global, term)
+		}
+	}
+	for _, header := range []string{"diff", "index", "rename", "similarity", "No", "newline"} {
+		if idx := sort.SearchStrings(global, header); idx < len(global) && global[idx] == header {
+			t.Errorf("ChangedTerms = %q, want no header word %q", global, header)
+		}
+	}
+}
+
+// TestAdvisoryChangedTermsIgnoreBinaryAndSubprojectSections requires two -U0
+// shapes to contribute their paths alone: a binary pair with no content
+// lines, and a gitlink whose Subproject lines are not code.
+func TestAdvisoryChangedTermsIgnoreBinaryAndSubprojectSections(t *testing.T) {
+	changes := []core.FileChange{
+		{Path: "assets/logo.png", Kind: core.ChangeModified},
+		{Path: "vendor/dep", Kind: core.ChangeModified},
+	}
+	diff := []byte("diff --git a/assets/logo.png b/assets/logo.png\n" +
+		"index 1111111..2222222 100644\n" +
+		"Binary files a/assets/logo.png and b/assets/logo.png differ\n" +
+		"diff --git a/vendor/dep b/vendor/dep\n" +
+		"--- a/vendor/dep\n" +
+		"+++ b/vendor/dep\n" +
+		"@@ -1 +1 @@\n" +
+		"-Subproject commit 1111111111111111111111111111111111111111\n" +
+		"+Subproject commit 2222222222222222222222222222222222222222\n")
+	perFile := intel.FileChangedTerms(diff, changes)
+	if got := perFile["assets/logo.png"]; !reflect.DeepEqual(got, []string{"assets/logo.png"}) {
+		t.Errorf("binary terms = %q, want the path alone", got)
+	}
+	if got := perFile["vendor/dep"]; !reflect.DeepEqual(got, []string{"vendor/dep"}) {
+		t.Errorf("gitlink terms = %q, want the path alone", got)
+	}
+}
+
+// TestAdvisoryPointersRankFewestHoldersCapFiftyAtTheCall requires the
+// per-call rendering: pointers from the call's own changed terms, rarest
+// term first, fifty lines at most with the rest counted — and convention
+// files only when they neighbour the call's own paths.
+func TestAdvisoryPointersRankFewestHoldersCapFiftyAtTheCall(t *testing.T) {
+	files := []intel.AdvisoryFile{{Path: "r.md", Rule: intel.AdvisoryRuleSearch, Term: "rareTerm", Line: 1}}
+	for i := 0; i < 60; i++ {
+		files = append(files, intel.AdvisoryFile{
+			Path: string(rune('a'+i/26)) + string(rune('a'+i%26)) + ".md",
+			Rule: intel.AdvisoryRuleSearch, Term: "busyTerm", Line: 1,
+		})
+	}
+	files = append(files,
+		intel.AdvisoryFile{Path: "src/app_test.go", Rule: intel.AdvisoryRuleConvention},
+		intel.AdvisoryFile{Path: "zzz/lone_test.go", Rule: intel.AdvisoryRuleConvention},
+	)
+	summary := intel.AdvisorySummary{Files: files, Count: len(files), Rules: []string{"convention", "search"}}
+
+	pointers, omitted := intel.BatchPointers(summary, []string{"rareTerm", "busyTerm"}, []string{"src/app.go"})
+	if len(pointers) != 50 {
+		t.Fatalf("pointers = %d lines, want the 50-line cap", len(pointers))
+	}
+	if omitted != 12 {
+		t.Errorf("omitted = %d, want 12 (11 busy holders plus the neighbouring convention file)", omitted)
+	}
+	if pointers[0].Term != "rareTerm" {
+		t.Errorf("first pointer term = %q, want rareTerm (fewest holders first)", pointers[0].Term)
+	}
+	for _, p := range pointers {
+		if p.Path == "zzz/lone_test.go" {
+			t.Errorf("pointers neighbour %q, which is adjacent to no batch path", p.Path)
+		}
+		if p.Path == "src/app_test.go" {
+			t.Errorf("pointers hold the convention file %q inside the 50-line search cap", p.Path)
+		}
+	}
+
+	// A quiet call renders every pointer with nothing omitted, convention
+	// neighbours included.
+	quiet, omitted := intel.BatchPointers(summary, []string{"rareTerm"}, []string{"src/app.go"})
+	if omitted != 0 {
+		t.Errorf("quiet omitted = %d, want 0", omitted)
+	}
+	if len(quiet) != 2 {
+		t.Fatalf("quiet pointers = %d, want the rare pointer plus its convention neighbour", len(quiet))
+	}
+	if quiet[0].Term != "rareTerm" || quiet[1].Path != "src/app_test.go" {
+		t.Errorf("quiet pointers = %+v, want search first and convention after", quiet)
 	}
 }
 

@@ -531,10 +531,9 @@ func TestReviewBatchDiffDropsFilesOutsideTheBatch(t *testing.T) {
 
 // TestReviewDiscoversSharedContextOncePerPass pins the cached snapshot: the
 // packer measures one candidate per admitted file, and each measurement used
-// to repeat advisory discovery, the diff read and the thread fetch — four
-// files carrying two distinct search terms meant ten ExactSearch calls before
-// the first model invocation. The shared context is discovered once per pass
-// and candidates render from it.
+// to repeat advisory discovery, the diff read and the thread fetch. The
+// shared context is discovered once per pass and candidates render from it:
+// one changed-line read and one blob pass however many candidates pack.
 func TestReviewDiscoversSharedContextOncePerPass(t *testing.T) {
 	e := newEnv(t)
 	for i := 0; i < 4; i++ {
@@ -548,8 +547,11 @@ func TestReviewDiscoversSharedContextOncePerPass(t *testing.T) {
 	if got.Outcome != review.OutcomeInvoked {
 		t.Fatalf("Outcome = %q, want invoked", got.Outcome)
 	}
-	if e.vcs.searchCalls != 2 {
-		t.Errorf("ExactSearch calls = %d, want 2 (one per distinct term, once for the pass)", e.vcs.searchCalls)
+	if e.vcs.searchCalls != 1 {
+		t.Errorf("SearchAll calls = %d, want 1 (one blob pass answers every term, once for the pass)", e.vcs.searchCalls)
+	}
+	if e.vcs.changedLinesCalls != 1 {
+		t.Errorf("ChangedLines calls = %d, want 1 (the term walk reads the -U0 diff once for the pass)", e.vcs.changedLinesCalls)
 	}
 	// Two thread fetches stand: the snapshot every candidate and batch
 	// renders from, and the attach the publish path records findings with.
