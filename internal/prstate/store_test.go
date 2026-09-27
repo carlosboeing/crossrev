@@ -106,6 +106,18 @@ func TestProducerFor(t *testing.T) {
 			t.Fatalf("ProducerFor = %+v, want the fallback %+v", got, fallback)
 		}
 	})
+
+	t.Run("a marker with no configured model answers the reported model", func(t *testing.T) {
+		marker := prstate.Marker{
+			Harness:       prstate.Some("claude"),
+			Model:         prstate.Null[string](),
+			ModelReported: prstate.Some("claude-3-5-sonnet"),
+		}
+		want := prstate.Producer{Harness: "claude", Model: "claude-3-5-sonnet"}
+		if got := prstate.ProducerFor(marker, fallback); got != want {
+			t.Fatalf("ProducerFor = %+v, want %+v", got, want)
+		}
+	})
 }
 
 func fixtureGeneration(t *testing.T, form string) prstate.Generation {

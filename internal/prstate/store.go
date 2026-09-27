@@ -186,7 +186,11 @@ func ProducerFor(m Marker, fallback Producer) Producer {
 	if !ok {
 		return fallback
 	}
-	return Producer{Harness: harness, Model: m.Model.Value(), Effort: m.Effort.Value(), Endpoint: m.Endpoint.Value()}
+	model := m.Model.Value()
+	if model == "" {
+		model = m.ModelReported.Value()
+	}
+	return Producer{Harness: harness, Model: model, Effort: m.Effort.Value(), Endpoint: m.Endpoint.Value()}
 }
 
 // GenerationCurrent reports whether a generation may still be reused: the

@@ -370,10 +370,13 @@ func (l *Leg) finishCoveredRun(ctx context.Context, req Request, loaded Context,
 	marker.Verdict = prstate.Some(covered.verdict)
 	marker.BlockedReason = prstate.Null[string]()
 	if covered.envelope != nil {
+		// The batch loop already stored the first answering model on the
+		// marker, under which its generations published. When the first
+		// envelope names none and a later call did, keep that stored
+		// model: clearing it retires the pass's own coverage at the
+		// convergence check below.
 		if covered.envelope.ModelReported != nil && *covered.envelope.ModelReported != "" {
 			marker.ModelReported = prstate.Some(*covered.envelope.ModelReported)
-		} else {
-			marker.ModelReported = prstate.Null[string]()
 		}
 		if covered.envelope.EffortReported != nil && *covered.envelope.EffortReported != "" {
 			marker.EffortReported = prstate.Some(*covered.envelope.EffortReported)

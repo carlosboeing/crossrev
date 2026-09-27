@@ -720,3 +720,189 @@ func TestReviewRedriveSkipsTheSameFile(t *testing.T) {
 		t.Error("no re-drive generation records the skip")
 	}
 }
+
+// TestReviewRecordsAnsweringModelWhenHarnessNamesNone pins C5 item 9: when
+// the reviewer configuration names no model, the published coverage
+// generation records the answering model reported by the harness on its
+// producer rather than an empty model.
+func TestReviewRecordsAnsweringModelWhenHarnessNamesNone(t *testing.T) {
+	t.Run("reported model is recorded when configured model is empty", func(t *testing.T) {
+		e := newEnv(t)
+		writeRequiredHead(e, "a.go", "package a\n")
+		e.runner.script = []exec.Result{
+			{ExitCode: 0, Stdout: claudeStdoutWithUsage(t, batchAnswer(t, 1), "claude-3-5-sonnet", 100, 10, 20, 30)},
+		}
+		got := runLeg(t, e, e.request(t))
+		if got.Err != nil {
+			t.Fatalf("Run: %v", got.Err)
+		}
+		gens := ledgerGenerations(t, e)
+		if len(gens) < 2 {
+			t.Fatalf("generations = %d, want at least 2", len(gens))
+		}
+		last := gens[len(gens)-1]
+		if last.Producer.Model != "claude-3-5-sonnet" {
+			t.Fatalf("last.Producer.Model = %q, want %q", last.Producer.Model, "claude-3-5-sonnet")
+		}
+	})
+
+	t.Run("configured model is preserved over reported model", func(t *testing.T) {
+		e := newEnv(t)
+		e.cfg = mustConfig(t, "reviewers:\n  - harness: claude\n    model: configured-model\n")
+		writeRequiredHead(e, "a.go", "package a\n")
+		e.runner.script = []exec.Result{
+			{ExitCode: 0, Stdout: claudeStdoutWithUsage(t, batchAnswer(t, 1), "reported-model", 100, 10, 20, 30)},
+		}
+		req := e.request(t)
+		req.HarnessOverride = ""
+		leg := e.leg(t)
+		got := leg.Run(context.Background(), req)
+		if got.Err != nil {
+			t.Fatalf("Run: %v", got.Err)
+		}
+		gens := ledgerGenerations(t, e)
+		if len(gens) < 2 {
+			t.Fatalf("generations = %d, want at least 2", len(gens))
+		}
+		last := gens[len(gens)-1]
+		if last.Producer.Model != "configured-model" {
+			t.Fatalf("last.Producer.Model = %q, want %q", last.Producer.Model, "configured-model")
+		}
+	})
+
+	t.Run("first answering model is recorded when calls report different models", func(t *testing.T) {
+		e := newEnv(t)
+		paths := writeNumberedFiles(e, 81)
+		models := []string{"claude-first", "claude-second"}
+		for i := 0; i < 2; i++ {
+			lo, hi := i*40, (i+1)*40
+			if hi > len(paths) {
+				hi = len(paths)
+			}
+			e.runner.script = append(e.runner.script, exec.Result{ExitCode: 0, Stdout: claudeStdoutWithUsage(t,
+				batchAnswerFor(t, paths[lo:hi]), models[i], 100, 10, 20, 30)})
+		}
+		e.runner.script = append(e.runner.script, exec.Result{ExitCode: 0, Stdout: claudeStdoutWithUsage(t,
+			batchAnswerFor(t, paths[80:]), "claude-third", 100, 10, 20, 30)})
+
+		got := runLeg(t, e, e.request(t))
+		if got.Err != nil {
+			t.Fatalf("Run: %v", got.Err)
+		}
+		gens := ledgerGenerations(t, e)
+		if len(gens) < 2 {
+			t.Fatalf("generations = %d, want at least 2", len(gens))
+		}
+		last := gens[len(gens)-1]
+		if last.Producer.Model != "claude-first" {
+			t.Fatalf("last.Producer.Model = %q, want %q", last.Producer.Model, "claude-first")
+		}
+	})
+}
+
+// TestReviewKeepsStoredModelWhenFirstEnvelopeNamesNone pins the publish
+// half of C5 item 9: the first batch's envelope names no model and a later
+// call does, so the generations publish under the later model while the
+// summed envelope — the first call's identity — stays silent. The settled
+// marker must keep the stored model rather than clearing it, or the
+// convergence check retires its own coverage and blocks an honest pass.
+func TestReviewKeepsStoredModelWhenFirstEnvelopeNamesNone(t *testing.T) {
+	e := newEnv(t)
+	paths := writeNumberedFiles(e, 81)
+	e.runner.script = []exec.Result{
+		{ExitCode: 0, Stdout: claudeStdout(batchAnswerFor(t, paths[0:40]))},
+		{ExitCode: 0, Stdout: claudeStdoutWithUsage(t, batchAnswerFor(t, paths[40:80]), "claude-late", 100, 10, 20, 30)},
+		{ExitCode: 0, Stdout: claudeStdoutWithUsage(t, batchAnswerFor(t, paths[80:]), "claude-late", 100, 10, 20, 30)},
+	}
+	got := runLeg(t, e, e.request(t))
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
+	if e.runner.calls != 3 {
+		t.Fatalf("harness calls = %d, want 3 (one per batch)", e.runner.calls)
+	}
+	if model, ok := got.Marker.ModelReported.Get(); !ok || model != "claude-late" {
+		t.Errorf("marker ModelReported = %q, present=%v, want %q (the later call's model, kept past the silent first envelope)", model, ok, "claude-late")
+	}
+	gens := ledgerGenerations(t, e)
+	if len(gens) < 2 {
+		t.Fatalf("generations = %d, want at least 2", len(gens))
+	}
+	if last := gens[len(gens)-1]; last.Producer.Model != "claude-late" {
+		t.Errorf("last.Producer.Model = %q, want %q", last.Producer.Model, "claude-late")
+	}
+	if verdict := got.Marker.Verdict.Value(); verdict != "issues-remain" {
+		t.Errorf("marker verdict = %q, want issues-remain (the coverage is current; the silent first envelope must not fail it)", verdict)
+	}
+}
+
+// TestReviewRedriveKeepsAnsweringModelWhenClaimCarriesNone pins the
+// re-drive half of C5 item 9: a blocked pass settled under a reported model
+// is driven again, and the re-driven claim carries an explicit null model.
+// The pass marker must keep the model its reused generation was published
+// under, so every required file stays accepted and no model call goes out.
+func TestReviewRedriveKeepsAnsweringModelWhenClaimCarriesNone(t *testing.T) {
+	e := newEnv(t)
+	writeRequiredHead(e, "a.go", "package a\n")
+	writeRequiredHead(e, "b.go", "package b\n")
+	oneUnjudgeable := `{"verdict":"issues-remain","blocked_reason":null,"findings":[],"coverage":[` +
+		`{"unit_number":1,"verdict":"no_issue","finding_numbers":[],` +
+		`"evidence":[{"path":"a.go","revision":"` + headSHA + `","start_line":null,"end_line":null,"source":"git","note":null}],"reason":null},` +
+		`{"unit_number":2,"verdict":"could_not_review","finding_numbers":[],` +
+		`"evidence":[{"path":"b.go","revision":"` + headSHA + `","start_line":null,"end_line":null,"source":"git","note":null}],` +
+		`"reason":"binary content could not be read, fallback search found nothing"}],` +
+		`"examined_scope":"read the batch","known_limits":["b.go is binary"]}`
+	e.runner.script = []exec.Result{
+		{ExitCode: 0, Stdout: claudeStdoutWithUsage(t, oneUnjudgeable, "claude-redrive", 100, 10, 20, 30)},
+	}
+	first := runLeg(t, e, e.request(t))
+	if first.Err != nil {
+		t.Fatalf("first Run: %v", first.Err)
+	}
+	if verdict := first.Marker.Verdict.Value(); verdict != "blocked" {
+		t.Fatalf("first marker verdict = %q, want blocked (b.go unexaminable settles the pass for the re-drive)", verdict)
+	}
+	if model, ok := first.Marker.ModelReported.Get(); !ok || model != "claude-redrive" {
+		t.Fatalf("first marker ModelReported = %q, present=%v, want %q", model, ok, "claude-redrive")
+	}
+	published := len(ledgerGenerations(t, e))
+	calls := e.runner.calls
+
+	second := runLeg(t, e, e.request(t))
+	if second.Err != nil {
+		t.Fatalf("second Run: %v", second.Err)
+	}
+	if e.runner.calls != calls {
+		t.Errorf("the re-drive made %d new harness calls, want none (every required file stayed accepted)", e.runner.calls-calls)
+	}
+	if model, ok := second.Marker.ModelReported.Get(); !ok || model != "claude-redrive" {
+		t.Errorf("re-drive marker ModelReported = %q, present=%v, want %q (the re-driven claim carries none; the pass marker keeps it)", model, ok, "claude-redrive")
+	}
+	if verdict := second.Marker.Verdict.Value(); verdict != "blocked" {
+		t.Errorf("re-drive marker verdict = %q, want blocked (the unexaminable file still owes coverage)", verdict)
+	}
+	rest := ledgerGenerations(t, e)[published:]
+	if len(rest) == 0 {
+		t.Fatal("the re-drive published nothing")
+	}
+	for _, gen := range rest {
+		if gen.Producer.Model != "claude-redrive" {
+			t.Errorf("re-drive generation %d producer model = %q, want %q", gen.Gen, gen.Producer.Model, "claude-redrive")
+		}
+	}
+
+	// A third drive must still reuse the coverage: the wiped model retired
+	// the re-drive's own generation, so without the fix every further
+	// drive re-reviews from zero instead of resuming.
+	calls = e.runner.calls
+	third := runLeg(t, e, e.request(t))
+	if third.Err != nil {
+		t.Fatalf("third Run: %v", third.Err)
+	}
+	if e.runner.calls != calls {
+		t.Errorf("the third drive made %d new harness calls, want none (the re-drive's coverage stays current)", e.runner.calls-calls)
+	}
+	if model, ok := third.Marker.ModelReported.Get(); !ok || model != "claude-redrive" {
+		t.Errorf("third marker ModelReported = %q, present=%v, want %q", model, ok, "claude-redrive")
+	}
+}
