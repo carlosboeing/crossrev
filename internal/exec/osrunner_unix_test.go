@@ -40,6 +40,9 @@ func TestRunMapsASignalToOneHundredAndTwentyEightPlusIt(t *testing.T) {
 			if !result.Signaled() {
 				t.Error("Signaled reported false for a signalled child")
 			}
+			if !result.Interrupted() {
+				t.Error("Interrupted reported false for an interrupted child")
+			}
 			// Nothing cancelled this run, so the exit status is the whole story.
 			if result.Err != nil {
 				t.Errorf("Err = %v, want nil for a child that died on its own signal", result.Err)
