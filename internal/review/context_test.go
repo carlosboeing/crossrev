@@ -34,9 +34,7 @@ func TestContextReadsPolicyAndReviewMDFromTheBaseRevision(t *testing.T) {
 
 	var prompt string
 	e.runner.onSpec = func(spec exec.Spec) {
-		if len(spec.Args) > 0 {
-			prompt = spec.Args[len(spec.Args)-1]
-		}
+		prompt = specPrompt(spec)
 	}
 	req := e.request(t)
 	got := runLeg(t, e, req)
@@ -131,9 +129,7 @@ func TestContextExcludesRepositoryBacklogFromTheDiff(t *testing.T) {
 	e.forge.diff = []byte("diff --git a/app.go b/app.go\n--- a/app.go\n+++ b/app.go\n@@ -1,1 +1,2 @@\n context\n+added\ndiff --git a/BACKLOG.md b/BACKLOG.md\n--- a/BACKLOG.md\n+++ b/BACKLOG.md\n@@ -1,1 +1,2 @@\n old-backlog\n+UNIQUE_BACKLOG_HUNK\n")
 	var prompt string
 	e.runner.onSpec = func(spec exec.Spec) {
-		if len(spec.Args) > 0 {
-			prompt = spec.Args[len(spec.Args)-1]
-		}
+		prompt = specPrompt(spec)
 	}
 	got := runLeg(t, e, e.request(t))
 	if got.Err != nil {

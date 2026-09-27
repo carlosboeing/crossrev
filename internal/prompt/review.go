@@ -86,9 +86,13 @@ type Review struct {
 	// Nil means the frozen prompt: no batch block is rendered.
 	Batch []BatchUnit
 
-	// Advisory holds untouched context files with the rule that found each.
-	// Nil means none is rendered.
+	// Advisory holds this call's untouched context pointers with the rule
+	// that found each. Nil means none is rendered.
 	Advisory []AdvisoryRef
+
+	// AdvisoryOmitted counts the call's pointers past the per-call cap.
+	// Zero renders no remainder line.
+	AdvisoryOmitted int
 
 	// Excluded holds paths removed from the required denominator with their
 	// reason. Nil means none is rendered.
@@ -131,13 +135,15 @@ type BatchUnit struct {
 	NumberedDiff []byte
 }
 
-// AdvisoryRef is one untouched path offered as uncertain context, with the
-// rule that found it: search for a fixed-string hit, convention for an
-// adjacent-test naming match.
+// AdvisoryRef is one untouched pointer offered as uncertain context, with
+// the rule that found it: search for a fixed-string hit, convention for an
+// adjacent-test naming match. A search pointer names its term and its
+// 1-based holder line; a convention neighbour names neither.
 type AdvisoryRef struct {
 	Path string
 	Rule string
 	Term string
+	Line int
 }
 
 // ExclusionRef is one path removed from the required denominator, with the
@@ -260,7 +266,7 @@ func (r Review) Render() []byte {
 	// numbered files are the readable work this call accounts for. Empty
 	// batch input renders nothing, so the frozen parity-era prompt keeps its
 	// bytes exactly.
-	b.WriteString(renderBatch(r.Batch, r.Advisory, r.Excluded))
+	b.WriteString(renderBatch(r.Batch, r.Advisory, r.AdvisoryOmitted, r.Excluded))
 
 	b.WriteString("## Output\n\n")
 	b.WriteString("Return JSON matching the schema you were given, and nothing else. An empty " +
@@ -298,8 +304,8 @@ func renderConfirmation(delta []byte) string {
 // with readable content or an explicit access limit, advisory summaries and
 // exclusions. It renders nothing when the batch is empty, so the frozen
 // parity-era prompt — built with no batch — keeps its bytes exactly.
-func renderBatch(units []BatchUnit, advisory []AdvisoryRef, excluded []ExclusionRef) string {
-	if len(units) == 0 && len(advisory) == 0 && len(excluded) == 0 {
+func renderBatch(units []BatchUnit, advisory []AdvisoryRef, omitted int, excluded []ExclusionRef) string {
+	if len(units) == 0 && len(advisory) == 0 && omitted == 0 && len(excluded) == 0 {
 		return ""
 	}
 	var b strings.Builder
@@ -313,17 +319,24 @@ func renderBatch(units []BatchUnit, advisory []AdvisoryRef, excluded []Exclusion
 			renderBatchUnit(&b, i+1, u)
 		}
 	}
-	if len(advisory) > 0 {
+	if len(advisory) > 0 || omitted > 0 {
 		b.WriteString("### Advisory context\n\n")
 		b.WriteString("Untouched files offered as uncertain context. They take no verdict " +
 			"and satisfy none: a real defect found here is still published as a finding, but " +
 			"the required file it was found from keeps its own verdict.\n\n")
 		for _, a := range advisory {
 			if a.Term != "" {
-				fmt.Fprintf(&b, "- `%s` (search `%s`)\n", a.Path, a.Term)
+				if a.Line > 0 {
+					fmt.Fprintf(&b, "- `%s:%d` (search `%s`)\n", a.Path, a.Line, a.Term)
+				} else {
+					fmt.Fprintf(&b, "- `%s` (search `%s`)\n", a.Path, a.Term)
+				}
 			} else {
 				fmt.Fprintf(&b, "- `%s` (convention)\n", a.Path)
 			}
+		}
+		if omitted > 0 {
+			fmt.Fprintf(&b, "- …and %d more pointers\n", omitted)
 		}
 		b.WriteString("\n")
 	}

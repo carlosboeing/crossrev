@@ -9,7 +9,7 @@
 // tidiness. Adapters build a Spec and start nothing themselves. Production
 // process start is confined to internal/exec by the process-start AST walk,
 // which does not cover syscall.Syscall. Every property exec.Spec carries —
-// the exact environment, the closed stdin — is decided in one place rather
+// the exact environment, the child's stdin — is decided in one place rather
 // than five.
 //
 // # Every adapter starts a model-facing process
@@ -234,6 +234,10 @@ func (b base) endpointRefusal(endpoint Endpoint, host, extra string) *Refusal {
 // `codex exec` blocks indefinitely on "Reading additional input from stdin..."
 // (lib/adapters/codex.sh:92-94), and opencode was measured silent for five
 // minutes with zero bytes on either stream (lib/adapters/opencode.sh:47-50).
+//
+// An adapter whose descriptor transport is stdin sets Spec.Stdin to the prompt
+// itself (promptStdin). That stdin reaches EOF after the last byte, so the
+// open-stdin block above cannot recur for it either.
 func (b base) spec(inv Invocation, args []string, additions ...string) exec.Spec {
 	return exec.Spec{
 		Path: b.descriptor.Binary,
@@ -242,6 +246,12 @@ func (b base) spec(inv Invocation, args []string, additions ...string) exec.Spec
 		Env:  childEnv(b.doc, b.descriptor.Name, inv.Env, additions...),
 	}
 }
+
+// promptStdin is the prompt as a stdin transport hands it over: File.Argument,
+// not File.Text. The adapters used to pass `"$(cat "$prompt_file")"` on argv,
+// and command substitution removes every trailing newline, so Argument is the
+// bytes the model has always read. The transport changes; they do not.
+func promptStdin(inv Invocation) []byte { return []byte(inv.Prompt.Argument()) }
 
 // stripFor is cred.StripFor over the credential view of the same descriptor.
 //
