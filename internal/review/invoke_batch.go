@@ -18,11 +18,12 @@ import (
 
 // batchContext is one pass's shared prompt context, discovered once before
 // packing measures the first candidate: the diff parsed for per-batch
-// slicing, the open threads, the advisory and exclusion refs, and the repair
-// delta. Packing measures one candidate per admitted file, and each
-// discovery leg is a git process or a forge request, so candidates render
-// from this snapshot rather than repeating the discovery — forty files
-// carrying two search terms otherwise meant 82 searches before the first
+// slicing, the open threads, the whole-pass advisory summary with the
+// per-file changed terms each call selects its own pointers from, the
+// exclusion refs, and the repair delta. Packing measures one candidate per
+// admitted file, and each discovery leg is a git process or a forge request,
+// so candidates render from this snapshot rather than repeating the
+// discovery — forty files otherwise meant forty blob passes before the first
 // model call.
 type batchContext struct {
 	diff         *diff.Diff
@@ -31,18 +32,18 @@ type batchContext struct {
 	prior        []prompt.Prior
 	threads      []prompt.Thread
 	reviewMD     []byte
-	advisory     []prompt.AdvisoryRef
+	advisory     intel.AdvisorySummary
+	fileTerms    map[string][]string
 	excluded     []prompt.ExclusionRef
 	confirmation []byte
 }
 
 // discoverBatchContext reads the pass's shared context exactly once. The
 // advisory summary comes from the caller — the coverage ledger persists its
-// counts and cap reasons, so the prompt refs and the ledger records are the
-// one discovery rather than two that could disagree.
-func (l *Leg) discoverBatchContext(ctx context.Context, req Request, loaded Context, pass int, scope intel.Scope, advisory intel.AdvisorySummary, confirmation []byte) batchContext {
+// counts and cap reasons, so the prompt pointers and the ledger records are
+// the one discovery rather than two that could disagree.
+func (l *Leg) discoverBatchContext(ctx context.Context, req Request, loaded Context, pass int, scope intel.Scope, advisory intel.AdvisorySummary, fileTerms map[string][]string, confirmation []byte) batchContext {
 	diffBytes, err := l.reviewDiff(ctx, loaded)
-	advisoryRefs, excludedRefs := advisoryPromptRefs(scope, advisory)
 	return batchContext{
 		diff:         diff.Parse(diffBytes, core.RevisionPair{}),
 		diffErr:      err,
@@ -50,8 +51,9 @@ func (l *Leg) discoverBatchContext(ctx context.Context, req Request, loaded Cont
 		prior:        priorFindings(loaded),
 		threads:      promptThreads(l.Forge.ReviewThreads(ctx, loaded.Repo, req.PR)),
 		reviewMD:     loaded.ReviewMD,
-		advisory:     advisoryRefs,
-		excluded:     excludedRefs,
+		advisory:     advisory,
+		fileTerms:    fileTerms,
+		excluded:     excludedPromptRefs(scope),
 		confirmation: confirmation,
 	}
 }
@@ -71,17 +73,19 @@ func (c batchContext) render(files []intel.FileUnit, base, head core.Revision) (
 	for i, unit := range units {
 		supplied[files[i].ID] = suppliedFor(unit)
 	}
+	advisory, omitted := batchPointerRefs(c.advisory, c.fileTerms, files)
 	return prompt.Review{
-		Skill:        prompt.ReviewSkill(),
-		Diff:         c.diff.Only(batchPaths(files)),
-		Meta:         c.meta,
-		Prior:        c.prior,
-		Threads:      c.threads,
-		ReviewMD:     c.reviewMD,
-		Batch:        units,
-		Advisory:     c.advisory,
-		Excluded:     c.excluded,
-		Confirmation: c.confirmation,
+		Skill:           prompt.ReviewSkill(),
+		Diff:            c.diff.Only(batchPaths(files)),
+		Meta:            c.meta,
+		Prior:           c.prior,
+		Threads:         c.threads,
+		ReviewMD:        c.reviewMD,
+		Batch:           units,
+		Advisory:        advisory,
+		AdvisoryOmitted: omitted,
+		Excluded:        c.excluded,
+		Confirmation:    c.confirmation,
 	}.Render(), supplied
 }
 

@@ -3,6 +3,7 @@ package exec
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
 	"time"
 )
@@ -69,6 +70,31 @@ type Result struct {
 
 // OK reports that the child started, finished on its own and exited zero.
 func (r Result) OK() bool { return r.Err == nil && r.ExitCode == 0 }
+
+// Streamer starts a child whose stdout the caller reads as it arrives,
+// rather than captured and handed back whole.
+//
+// It is a separate interface from Runner so the buffered default needs no
+// new method on every fake: a caller that needs arrival-order parsing
+// asserts the runner it was given. A failed assertion is a wiring bug to
+// report, never a reason to fall back to a buffered run that reintroduces
+// the peak the caller was avoiding.
+type Streamer interface {
+	// RunStream starts spec, hands its stdout to consume while the child
+	// runs, and returns once the child is reaped. Stderr is still
+	// captured, into Result.Stderr; Result.Stdout carries nothing and
+	// Result.StdoutBytes counts what the child wrote, read or discarded.
+	//
+	// A consume that returns nil need not have read to EOF: the rest is
+	// discarded so a child blocked on a full pipe can still finish. A
+	// consume that returns an error ends the child first, and the error
+	// becomes Result.Err — unless the context ended the child, in which
+	// case the context's error wins the way it does for Run.
+	//
+	// Spec.Streams must stay StreamsSeparate: merging the streams would
+	// hand consume bytes that are not stdout's.
+	RunStream(ctx context.Context, spec Spec, consume func(io.Reader) error) Result
+}
 
 // Signaled reports that a signal ended the child rather than a return from main.
 //

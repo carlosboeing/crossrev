@@ -2,6 +2,8 @@ package vcs
 
 import (
 	"context"
+	"errors"
+	"io"
 	"strings"
 
 	"github.com/carlosboeing/crossrev/internal/exec"
@@ -144,6 +146,32 @@ func (o Output) Lines() []string {
 // with its status and lib/run.sh:1873 reads it as one. The error return covers
 // only the cases exec.Result.Err covers, where no status was produced at all.
 func (g *Git) Run(ctx context.Context, call Call) (Output, error) {
+	result := g.Runner.Run(ctx, g.spec(call))
+	return outputOf(result), result.Err
+}
+
+// RunStream starts one git invocation whose stdout consume reads as it
+// arrives, and waits for it.
+//
+// Stdout is the caller's to bound: nothing is retained, so a stream larger
+// than memory stays a stream. Stderr is still captured, into Output.Stderr.
+// The runner must be an exec.Streamer; anything else answers an error,
+// because a silent buffered fallback would reintroduce the peak the caller
+// was avoiding.
+func (g *Git) RunStream(ctx context.Context, call Call, consume func(io.Reader) error) (Output, error) {
+	streamer, ok := g.Runner.(exec.Streamer)
+	if !ok {
+		return Output{}, errors.New("vcs: the git runner cannot stream a child's output")
+	}
+	result := streamer.RunStream(ctx, g.spec(call), consume)
+	return outputOf(result), result.Err
+}
+
+// spec builds the child description Run and RunStream both start: the
+// program, the Actions-runner credential pair, the exact environment, and
+// the call's own streams and input. One builder, so the two paths cannot
+// drift apart on what a git child receives.
+func (g *Git) spec(call Call) exec.Spec {
 	path := g.Path
 	if path == "" {
 		path = "git"
@@ -161,21 +189,22 @@ func (g *Git) Run(ctx context.Context, call Call) (Output, error) {
 		args = withRunnerCredentials(args)
 	}
 
-	result := g.Runner.Run(ctx, exec.Spec{
+	return exec.Spec{
 		Path:    path,
 		Args:    args,
 		Dir:     call.Dir,
 		Env:     env,
 		Streams: call.Streams,
 		Stdin:   call.Stdin,
-	})
+	}
+}
 
-	output := Output{
+func outputOf(result exec.Result) Output {
+	return Output{
 		Stdout:   string(result.Stdout),
 		Stderr:   string(result.Stderr),
 		ExitCode: result.ExitCode,
 	}
-	return output, result.Err
 }
 
 // At returns the repository rooted at dir. An empty dir is the calling
