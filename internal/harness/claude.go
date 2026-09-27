@@ -89,7 +89,9 @@ func (a *Claude) Spec(inv Invocation) (exec.Spec, error) {
 	if wanted(inv.Effort) {
 		args = append(args, "--effort", inv.Effort)
 	}
-	args = append(args, inv.Prompt.Argument())
+	// No positional prompt: `-p` reads it from stdin ("Print response and
+	// exit (useful for pipes)"). A leg's prompt is hundreds of kilobytes,
+	// and argv is the wrong vehicle for it.
 
 	var additions []string
 	if inv.Endpoint.Named() {
@@ -111,7 +113,9 @@ func (a *Claude) Spec(inv Invocation) (exec.Spec, error) {
 		}
 	}
 
-	return a.spec(inv, args, additions...), nil
+	spec := a.spec(inv, args, additions...)
+	spec.Stdin = promptStdin(inv)
+	return spec, nil
 }
 
 func (a *Claude) schemaTextMissing() *Refusal {
