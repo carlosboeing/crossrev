@@ -138,6 +138,9 @@ has "PR review comments list contains reply" "$pr_comments_list" "reply explaini
 finding_login="$(gh api --paginate repos/acme/widget/pulls/42/comments --jq '.[] | select(.id == '"$finding_id"') | .user.login')"
 is "listed finding login equals the seeded user" "$finding_login" "eval-reviewer"
 
+pr7_comments_list="$(gh api --paginate repos/acme/widget/pulls/7/comments --jq '.[].body' 2>/dev/null || true)"
+hasnt "comment posted on pulls/42 is absent from pulls/7" "$pr7_comments_list" "finding 1"
+
 threads_query='query($owner:String!,$name:String!,$number:Int!) {
   repository(owner:$owner,name:$name) {
     pullRequest(number:$number) {

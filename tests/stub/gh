@@ -717,8 +717,24 @@ if [[ -n "${CROSSREV_GH_STATE:-}" ]]; then
   # List PR review comments: GET repos/<slug>/pulls/<number>/comments
   if [[ "$joined" == "api --paginate repos/"*"/pulls/"*"/comments"* ]]; then
     match_routes
+    req_pull_num=""
+    for _a in "$@"; do
+      if [[ "$_a" =~ repos/[^/]+/[^/]+/pulls/([0-9]+) ]]; then
+        req_pull_num="${BASH_REMATCH[1]}"
+        break
+      fi
+    done
+    [[ -z "$req_pull_num" ]] && req_pull_num="42"
+
+    default_pull="42"
+    if [[ -f "$CROSSREV_GH_STATE/pr.json" ]]; then
+      _dp="$(jq -r '.number // empty' "$CROSSREV_GH_STATE/pr.json" 2>/dev/null || true)"
+      [[ -n "$_dp" ]] && default_pull="$_dp"
+    fi
+
     if [[ -f "$CROSSREV_GH_STATE/threads.json" ]]; then
-      jq -c '[.[] | .path as $p | .line as $l | .comments.nodes[] | {id:.databaseId, databaseId:.databaseId, body:.body, path:$p, line:$l, user:{login:(.author.login // "'"$create_author"'")}, created_at:"2026-09-09T00:00:00Z"}]' "$CROSSREV_GH_STATE/threads.json" | emit
+      jq -c --argjson pnum "$req_pull_num" --argjson dp "$default_pull" \
+        '[.[] | select((.pull_number // $dp) == $pnum) | .path as $p | .line as $l | .comments.nodes[] | {id:.databaseId, databaseId:.databaseId, body:.body, path:$p, line:$l, user:{login:(.author.login // "'"$create_author"'")}, created_at:"2026-09-09T00:00:00Z"}]' "$CROSSREV_GH_STATE/threads.json" | emit
       exit 0
     fi
     printf '[]\n' | emit
@@ -753,6 +769,14 @@ if [[ -n "${CROSSREV_GH_STATE:-}" ]]; then
     cbody="$(extract_field body "$@")"
     cpath="$(extract_field path "$@")"
     cline="$(extract_field line "$@")"
+    req_pull_num=""
+    for _a in "$@"; do
+      if [[ "$_a" =~ repos/[^/]+/[^/]+/pulls/([0-9]+) ]]; then
+        req_pull_num="${BASH_REMATCH[1]}"
+        break
+      fi
+    done
+    [[ -z "$req_pull_num" ]] && req_pull_num="42"
     next="$CROSSREV_GH_STATE/next-id"
     [[ -f "$next" ]] || printf '9001' >"$next"
     cid="$(cat "$next")"
@@ -765,8 +789,8 @@ if [[ -n "${CROSSREV_GH_STATE:-}" ]]; then
 
     new_comment="$(jq -cn --argjson id "$cid" --arg b "$cbody" --arg a "$create_author" \
       '{databaseId:$id, body:$b, author:{login:$a}}')"
-    new_thread="$(jq -cn --arg id "RT_$cid" --arg p "$cpath" --argjson l "$line_json" --argjson c "$new_comment" \
-      '{id:$id, isResolved:false, isOutdated:false, path:$p, line:$l, comments:{nodes:[$c]}}')"
+    new_thread="$(jq -cn --arg id "RT_$cid" --argjson pull "$req_pull_num" --arg p "$cpath" --argjson l "$line_json" --argjson c "$new_comment" \
+      '{id:$id, pull_number:$pull, isResolved:false, isOutdated:false, path:$p, line:$l, comments:{nodes:[$c]}}')"
 
     [[ -f "$CROSSREV_GH_STATE/threads.json" ]] || printf '[]' >"$CROSSREV_GH_STATE/threads.json"
     updated="$(jq -c --argjson t "$new_thread" '. + [$t]' "$CROSSREV_GH_STATE/threads.json")"
@@ -784,7 +808,7 @@ if [[ -n "${CROSSREV_GH_STATE:-}" ]]; then
       [[ -f "$CROSSREV_GH_STATE/threads.json" ]] || printf '[]' >"$CROSSREV_GH_STATE/threads.json"
       threads="$(cat "$CROSSREV_GH_STATE/threads.json")"
       jq -cn --argjson t "$threads" \
-        '{data:{repository:{pullRequest:{reviewThreads:{nodes:$t}}}}}' | emit
+        '{data:{repository:{pullRequest:{reviewThreads:{nodes:($t | map(del(.pull_number)))}}}}}' | emit
       exit 0
     fi
     if [[ "$joined" == *"resolveReviewThread"* || "$joined" == *"threadId="* ]]; then
