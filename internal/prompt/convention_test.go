@@ -62,6 +62,10 @@ func buildRepo(t *testing.T, commits []commit, template string) (string, string)
 	git("init", "-q", "-b", "main")
 	git("config", "user.name", "Test")
 	git("config", "user.email", devEmail)
+	git("config", "gc.auto", "0")
+	git("config", "gc.autoDetach", "false")
+	git("config", "maintenance.auto", "false")
+	git("config", "maintenance.autoDetach", "false")
 
 	if template != "" {
 		if err := os.WriteFile(filepath.Join(dir, ".gitmessage"), []byte(template), 0o644); err != nil {
@@ -331,5 +335,42 @@ func TestSubjectsDropTrailingEmptySubjects(t *testing.T) {
 	}
 	if strings.Contains(got, "    feat: six\n    \n") {
 		t.Fatal("an empty subject was quoted after the last real one")
+	}
+}
+
+// buildRepo must disable automatic gc and maintenance so commits do not spawn
+// detached background processes that continue writing to the temporary
+// directory while Go's test runner removes it.
+func TestBuildRepoDisablesBackgroundMaintenance(t *testing.T) {
+	requireGit(t)
+	trace := filepath.Join(t.TempDir(), "git-trace.log")
+	t.Setenv("GIT_TRACE2", trace)
+
+	dir, _ := buildRepo(t, manySubjects(2, devEmail), "")
+	getConfig := func(key string) string {
+		t.Helper()
+		cmd := exec.Command("git", "config", "--get", key)
+		cmd.Dir = dir
+		out, _ := cmd.CombinedOutput()
+		return strings.TrimSpace(string(out))
+	}
+	if got := getConfig("gc.auto"); got != "0" {
+		t.Errorf("gc.auto = %q; want 0", got)
+	}
+	if got := getConfig("gc.autoDetach"); got != "false" {
+		t.Errorf("gc.autoDetach = %q; want false", got)
+	}
+	if got := getConfig("maintenance.auto"); got != "false" {
+		t.Errorf("maintenance.auto = %q; want false", got)
+	}
+	if got := getConfig("maintenance.autoDetach"); got != "false" {
+		t.Errorf("maintenance.autoDetach = %q; want false", got)
+	}
+
+	content, err := os.ReadFile(trace)
+	if err == nil && len(content) > 0 {
+		if strings.Contains(string(content), "--detach") {
+			t.Errorf("git spawned a detached background process:\n%s", content)
+		}
 	}
 }
