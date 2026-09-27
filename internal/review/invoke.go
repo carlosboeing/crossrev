@@ -216,15 +216,21 @@ func (l *Leg) invoke(ctx context.Context, req Request, loaded Context, settings 
 		ReviewMD: loaded.ReviewMD,
 	}.Render()
 
-	return l.runPrompt(ctx, req, loaded, settings, adapter, entry, staged, tmp, promptBytes, msgs)
+	start := l.now()
+	envelope, payload, outMsgs, err := l.runPrompt(ctx, req, loaded, settings, adapter, entry, staged, tmp, promptBytes, msgs, 1)
+	if err == nil {
+		l.logAcceptedCall(1, promptBytes, len(diffBytes), envelope, l.now().Sub(start).Milliseconds())
+	}
+	return envelope, payload, outMsgs, err
 }
 
 // runPrompt runs one rendered prompt through the harness child with the
 // leg's validation seam: one semantic retry naming the rejected numbers,
 // then a fatal refusal that publishes nothing. The deferred sandbox restore
 // assigns through the named retErr return, so a restore failure after a
-// successful answer still fails the leg the way the frozen path does.
-func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settings legSettings, adapter harness.Adapter, entry harness.Descriptor, staged *cred.Staged, tmp string, promptBytes []byte, msgs []ui.Line) (envelope harness.Envelope, payload json.RawMessage, outMsgs []ui.Line, retErr error) {
+// successful answer still fails the leg the way the frozen path does. call
+// is the call's number in the pass, naming its transcripts.
+func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settings legSettings, adapter harness.Adapter, entry harness.Descriptor, staged *cred.Staged, tmp string, promptBytes []byte, msgs []ui.Line, call int) (envelope harness.Envelope, payload json.RawMessage, outMsgs []ui.Line, retErr error) {
 	outMsgs = msgs
 
 	promptPath := filepath.Join(tmp, "prompt")
@@ -310,7 +316,7 @@ func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settin
 	for attempt := 1; ; attempt++ {
 		transcript := ""
 		if l.Log != nil {
-			if base, ok := l.Log.TranscriptBase(attempt); ok {
+			if base, ok := l.Log.TranscriptBaseForCall(call, attempt); ok {
 				transcript = base
 				inv.PayloadPath = base + ".payload"
 			}
