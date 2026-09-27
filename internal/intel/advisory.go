@@ -36,9 +36,12 @@ const (
 
 // SearchHit is one holder of a search term: the repository-relative path and
 // the 1-based line numbers holding the term, ascending with no repeats.
+// OmittedLines counts the further distinct matching lines the blob pass
+// counted past its per-holder cap without keeping.
 type SearchHit struct {
-	Path  string
-	Lines []int
+	Path         string
+	Lines        []int
+	OmittedLines int
 }
 
 // TermResult is one term's blob-pass answer: its holders by path, or the
@@ -83,14 +86,17 @@ type AdvisoryLimit struct {
 
 // AdvisorySummary is the whole advisory answer for one scope: the untouched
 // context pointers, the caps hit along the way, their count, and the rules
-// that ran. Per-call rendering selects from Files; the coverage ledger
-// persists Count, Rules and Limits, so no compatibility layer sits between
-// this shape and either consumer.
+// that ran. Per-call rendering selects from Files and adds OmittedLines;
+// the coverage ledger persists Count, Rules and Limits, so no compatibility
+// layer sits between this shape and either consumer. OmittedLines holds, per
+// term, the holder lines the blob pass counted past its per-holder cap —
+// pointers no call can show, counted in the call's remainder instead.
 type AdvisorySummary struct {
-	Files  []AdvisoryFile
-	Limits []AdvisoryLimit
-	Count  int
-	Rules  []string
+	Files        []AdvisoryFile
+	Limits       []AdvisoryLimit
+	Count        int
+	Rules        []string
+	OmittedLines map[string]int
 }
 
 // SearchTerms extracts the language-neutral ASCII identifier set from data:
@@ -399,6 +405,12 @@ func AdvisoryFiles(ctx context.Context, scope Scope, diff []byte, search Searche
 				for _, line := range hit.Lines {
 					summary.Files = append(summary.Files, AdvisoryFile{Path: hit.Path, Rule: AdvisoryRuleSearch, Term: term, Line: line})
 				}
+				if hit.OmittedLines > 0 {
+					if summary.OmittedLines == nil {
+						summary.OmittedLines = make(map[string]int)
+					}
+					summary.OmittedLines[term] += hit.OmittedLines
+				}
 			}
 		}
 	}
@@ -446,11 +458,16 @@ func AdvisoryFiles(ctx context.Context, scope Scope, diff []byte, search Searche
 // and line; the convention twin is redundant for this call, not omitted.
 // Search pointers rank by fewest holders, then term, path and line;
 // convention neighbours follow by path. At most MaxPointersPerCall render;
-// omitted counts the rest.
+// omitted counts the rest plus the call's terms' counted holder lines,
+// which the blob pass never materialized.
 func BatchPointers(summary AdvisorySummary, batchTerms []string, batchPaths []string) (pointers []AdvisoryFile, omitted int) {
 	terms := make(map[string]bool, len(batchTerms))
 	for _, term := range batchTerms {
 		terms[term] = true
+	}
+	lineOmitted := 0
+	for term := range terms {
+		lineOmitted += summary.OmittedLines[term]
 	}
 	neighbours := make(map[string]bool)
 	for _, path := range batchPaths {
@@ -506,7 +523,7 @@ func BatchPointers(summary AdvisorySummary, batchTerms []string, batchPaths []st
 	sort.Slice(convention, func(i, j int) bool { return convention[i].Path < convention[j].Path })
 	selected := append(search, convention...)
 	if len(selected) <= MaxPointersPerCall {
-		return selected, 0
+		return selected, lineOmitted
 	}
-	return selected[:MaxPointersPerCall], len(selected) - MaxPointersPerCall
+	return selected[:MaxPointersPerCall], len(selected)-MaxPointersPerCall+lineOmitted
 }

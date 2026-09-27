@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"reflect"
 	"runtime"
 	"sort"
 	"strings"
@@ -335,6 +336,40 @@ func TestSearchAllNeedsAStreamingRunner(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "stream") {
 		t.Errorf("SearchAll error = %q, want it to name streaming", err.Error())
+	}
+}
+
+// TestSearchAllCapsLinesPerHolder requires the public blob pass to retain a
+// bounded line list per holder and count the rest: one file holding the term
+// on thirty lines answers ten lines with twenty counted, never thirty
+// materialized pointers.
+func TestSearchAllCapsLinesPerHolder(t *testing.T) {
+	git := testGit(t)
+	dir := realTempDir(t)
+	repo := initRepo(t, git, dir)
+
+	var body strings.Builder
+	for i := 0; i < 30; i++ {
+		fmt.Fprintf(&body, "line %d holds NoisyMarker\n", i)
+	}
+	write(t, dir, "noisy.go", body.String())
+	head := searchHead(t, repo)
+
+	results, err := repo.SearchAll(context.Background(), head, []string{"NoisyMarker"}, 200)
+	if err != nil {
+		t.Fatalf("SearchAll: %v", err)
+	}
+	res := searchResultsByTerm(t, results)["NoisyMarker"]
+	if len(res.Hits) != 1 || res.Hits[0].Path != "noisy.go" {
+		t.Fatalf("SearchAll noisy holder = %v, want noisy.go alone", res.Hits)
+	}
+	hit := res.Hits[0]
+	wantLines := []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
+	if !reflect.DeepEqual(hit.Lines, wantLines) {
+		t.Errorf("noisy holder lines = %v, want the first ten", hit.Lines)
+	}
+	if hit.OmittedLines != 20 {
+		t.Errorf("noisy holder omitted lines = %d, want 20", hit.OmittedLines)
 	}
 }
 

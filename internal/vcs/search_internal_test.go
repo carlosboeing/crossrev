@@ -184,6 +184,39 @@ func TestBlobScannerCarriesMatchesAcrossWindows(t *testing.T) {
 	}
 }
 
+// TestBlobScannerCapsLinesPerHolderCountsTheRest requires one noisy blob to
+// retain only the first MaxLinesPerHolder lines per term and to count the
+// rest without materializing them: a holder repeating a term on every one
+// of its lines costs bounded retention. Same-line repeats still dedupe
+// rather than inflating either side.
+func TestBlobScannerCapsLinesPerHolderCountsTheRest(t *testing.T) {
+	sha := strings.Repeat("a", 40)
+	entries := []treeBlob{{sha: sha, path: "noisy.go"}}
+	var body strings.Builder
+	for i := 0; i < 25; i++ {
+		body.WriteString("MARKER holds this line\n")
+	}
+	body.WriteString("MARKER twice MARKER on one line\n")
+	raw := body.String()
+	var stream bytes.Buffer
+	stream.WriteString(sha + " blob " + strconv.Itoa(len(raw)) + "\n" + raw + "\n")
+	s := newBlobScanner([]string{"MARKER"}, entries, 200)
+	if err := s.consume(&stream); err != nil {
+		t.Fatalf("consume: %v", err)
+	}
+	if len(s.found) != 1 || len(s.found[0]) != 1 {
+		t.Fatalf("found = %+v, want the one noisy holder", s.found)
+	}
+	hit := s.found[0][0]
+	wantLines := []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
+	if !reflect.DeepEqual(hit.Lines, wantLines) {
+		t.Errorf("holder lines = %v, want the first %d", hit.Lines, MaxLinesPerHolder)
+	}
+	if hit.OmittedLines != 16 {
+		t.Errorf("omitted lines = %d, want 16 (lines 11-25 plus the double-hit line once)", hit.OmittedLines)
+	}
+}
+
 // TestMatcherStreamFeedsAcrossBoundaries requires automaton state to carry
 // across feeds: "swo" and "rd" arrive apart and still match sword, word and
 // ord at absolute offsets.

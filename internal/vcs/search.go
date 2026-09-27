@@ -19,12 +19,22 @@ import (
 // number twice rather than sharing one.
 const ExactSearchLimit = 200
 
+// MaxLinesPerHolder bounds the line numbers one holder retains per term. A
+// holder repeating a term on every one of its lines would otherwise
+// accumulate a pointer per line — millions for a large generated file —
+// long before the per-call prompt cap could cut it. Further distinct
+// matching lines count into OmittedLines without materializing.
+const MaxLinesPerHolder = 10
+
 // SearchHit is one holder of a fixed-string term at the searched revision:
 // the repository-relative path and the 1-based line numbers holding the
-// term, ascending with no repeats.
+// term, ascending with no repeats. At most MaxLinesPerHolder lines retain;
+// OmittedLines counts the further distinct matching lines the pass
+// counted but did not keep.
 type SearchHit struct {
-	Path  string
-	Lines []int
+	Path         string
+	Lines        []int
+	OmittedLines int
 }
 
 // TermResult is one term's blob-pass answer: its holders by path, or the
@@ -281,7 +291,9 @@ func (s *blobScanner) scanStreamed(sha string, in io.Reader, size int) error {
 // record files one match of term in the blob sha names, on 1-based line,
 // fanning identical blobs out to every path naming them. Per term, holders
 // past limit+1 stop recording — the caller only needs to know the cap
-// broke, and truncates the extra holder itself.
+// broke, and truncates the extra holder itself. Per holder, lines past
+// MaxLinesPerHolder count into OmittedLines without materializing, so one
+// noisy file cannot grow retention with its own size.
 func (s *blobScanner) record(term int, sha string, line int) {
 	if s.capped[term] {
 		return
@@ -310,6 +322,10 @@ func (s *blobScanner) record(term int, sha string, line int) {
 			s.last[term] = make(map[string]int)
 		}
 		s.last[term][path] = line
+		if len(s.found[term][slot].Lines) >= MaxLinesPerHolder {
+			s.found[term][slot].OmittedLines++
+			continue
+		}
 		s.found[term][slot].Lines = append(s.found[term][slot].Lines, line)
 	}
 }

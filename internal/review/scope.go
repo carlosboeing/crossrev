@@ -52,7 +52,7 @@ func (s scopeSearcher) SearchAll(ctx context.Context, revision core.Revision, te
 	for _, res := range results {
 		hits := make([]intel.SearchHit, 0, len(res.Hits))
 		for _, hit := range res.Hits {
-			hits = append(hits, intel.SearchHit{Path: hit.Path, Lines: append([]int(nil), hit.Lines...)})
+			hits = append(hits, intel.SearchHit{Path: hit.Path, Lines: append([]int(nil), hit.Lines...), OmittedLines: hit.OmittedLines})
 		}
 		out = append(out, intel.TermResult{Term: res.Term, Hits: hits, TooCommon: res.TooCommon})
 	}

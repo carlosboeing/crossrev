@@ -66,6 +66,39 @@ func TestReviewBatchPointersArePerCall(t *testing.T) {
 	}
 }
 
+// TestReviewBatchPromptCountsCappedHolderLines requires a holder whose
+// blob-pass lines were capped to render its retained pointers with the
+// counted rest on the prompt's remainder line.
+func TestReviewBatchPromptCountsCappedHolderLines(t *testing.T) {
+	e := newEnv(t)
+	writeRequiredHead(e, "file01.go", "package x\n")
+	e.vcs.searchResults = map[string][]vcs.SearchHit{
+		"UniqueTerm01": {{Path: "docs/noisy.md", Lines: []int{1, 2}, OmittedLines: 98}},
+	}
+	e.vcs.changedLines = []byte("diff --git a/file01.go b/file01.go\n--- a/file01.go\n+++ b/file01.go\n@@ -0,0 +1 @@\n+// UniqueTerm01 marker\n")
+	acceptAll(e)
+	prompts := capturePrompt(e)
+	got := runLeg(t, e, e.request(t))
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
+	if got.Outcome != review.OutcomeInvoked {
+		t.Fatalf("Outcome = %q, want invoked", got.Outcome)
+	}
+	if len(*prompts) != 1 {
+		t.Fatalf("prompts = %d, want 1 (one file packs into one batch)", len(*prompts))
+	}
+	prompt := (*prompts)[0]
+	for _, want := range []string{"docs/noisy.md:1", "docs/noisy.md:2"} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("prompt lacks retained pointer %q", want)
+		}
+	}
+	if !strings.Contains(prompt, "…and 98 more pointers") {
+		t.Error("prompt lacks the remainder line counting the 98 capped holder lines")
+	}
+}
+
 // TestReviewBatchPromptOmitsWholePassAdvisoryList requires the old repeated
 // path list to be absent: no batch prompt carries all 41 holders the way the
 // whole-pass list repeated in every call.

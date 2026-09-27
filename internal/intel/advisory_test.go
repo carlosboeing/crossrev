@@ -376,6 +376,63 @@ func TestAdvisorySearchHitsCarryLineNumbers(t *testing.T) {
 	}
 }
 
+// TestAdvisoryLineOverflowCountsTowardTheCallRemainder scripts a hit whose
+// holder lines were capped during the blob pass and requires the counted rest
+// to reach the call's remainder: two retained pointers render, 98 count as
+// omitted. A required or excluded holder's counted lines stay dropped with
+// its pointers, a capped term's with its files, and a call past the 50-line
+// cap adds both remainders together.
+func TestAdvisoryLineOverflowCountsTowardTheCallRemainder(t *testing.T) {
+	scope, _, _ := advisoryScope(t, advisoryBodies())
+	search := &fakeSearcher{
+		results: map[string]intel.TermResult{
+			"SharedThing": {Hits: []intel.SearchHit{
+				{Path: "docs/noisy.md", Lines: []int{1, 2}, OmittedLines: 98},
+				{Path: "src/app.go", Lines: []int{1}, OmittedLines: 40},
+				{Path: "vendor/lib.go", Lines: []int{1}, OmittedLines: 50},
+			}},
+			"other": {
+				Hits:      []intel.SearchHit{{Path: "docs/capped.md", Lines: []int{1}, OmittedLines: 60}},
+				TooCommon: true,
+			},
+		},
+	}
+	summary := intel.AdvisoryFiles(context.Background(), scope, advisoryDiff(), search)
+
+	if got := summary.OmittedLines["SharedThing"]; got != 98 {
+		t.Errorf("summary omitted lines for SharedThing = %d, want 98 (required and excluded holders dropped)", got)
+	}
+	if got := summary.OmittedLines["other"]; got != 0 {
+		t.Errorf("summary omitted lines for capped term other = %d, want none", got)
+	}
+	for _, f := range summary.Files {
+		if f.Term == "SharedThing" && f.Path != "docs/noisy.md" {
+			t.Errorf("required or excluded holder contributed advisory file %+v, want none", f)
+		}
+	}
+
+	pointers, omitted := intel.BatchPointers(summary, []string{"SharedThing"}, nil)
+	if len(pointers) != 2 {
+		t.Fatalf("pointers = %d, want the 2 retained holder lines", len(pointers))
+	}
+	if omitted != 98 {
+		t.Errorf("omitted = %d, want the 98 counted holder lines", omitted)
+	}
+
+	var files []intel.AdvisoryFile
+	for i := 0; i < 60; i++ {
+		files = append(files, intel.AdvisoryFile{
+			Path: string(rune('a'+i/26)) + string(rune('a'+i%26)) + ".md",
+			Rule: intel.AdvisoryRuleSearch, Term: "busyTerm", Line: 1,
+		})
+	}
+	capped := intel.AdvisorySummary{Files: files, Count: len(files), OmittedLines: map[string]int{"busyTerm": 5}}
+	_, over := intel.BatchPointers(capped, []string{"busyTerm"}, nil)
+	if over != 15 {
+		t.Errorf("over-cap omitted = %d, want 15 (10 past the 50-line cap plus 5 counted holder lines)", over)
+	}
+}
+
 // TestAdvisoryChangedTermsWalkMinusUZeroLines checks the term walk over -U0
 // shapes: added and removed lines contribute identifiers, headers and context
 // never do, and every changed path joins verbatim.
