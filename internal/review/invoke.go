@@ -302,6 +302,10 @@ func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settin
 		shapeBudget = 2
 	}
 	semanticBudget := 1
+	// refused sums the usage buckets of the attempts this prompt turned
+	// away. A refused answer judged nothing, but its call was spent, and
+	// the marker reports what the pass spent.
+	var refused *harness.Usage
 
 	for attempt := 1; ; attempt++ {
 		transcript := ""
@@ -352,12 +356,14 @@ func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settin
 
 		problem := l.checkPayload(envelope.Payload)
 		if problem == nil {
+			foldRefusedAttempts(&envelope, refused)
 			return envelope, envelope.Payload, outMsgs, nil
 		}
 		code := validateCode(problem)
 		if code == 2 {
 			if semanticBudget > 0 {
 				semanticBudget--
+				refused = foldAttempt(refused, envelope.Usage)
 				// ui_warn, the pair kept apart (lib/run.sh:888-889).
 				outMsgs = append(outMsgs, ui.Warn(
 					fmt.Sprintf("%s returned an answer that contradicts what it was given — %s", settings.harness, problem),
@@ -371,6 +377,7 @@ func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settin
 		}
 		shapeBudget--
 		if shapeBudget > 0 {
+			refused = foldAttempt(refused, envelope.Usage)
 			// ui_warn (lib/run.sh:900-901). Only a harness that does not
 			// constrain its own output ever reaches here, because a native one
 			// starts with a budget of 1.
@@ -388,6 +395,41 @@ func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settin
 			Action: shapeExhaustedAction(entry.SchemaNative),
 		}
 	}
+}
+
+// foldAttempt joins one refused attempt's usage buckets into the running
+// sum, answering the sum to keep. A nil record contributes nothing.
+func foldAttempt(sum, attempt *harness.Usage) *harness.Usage {
+	if attempt == nil {
+		return sum
+	}
+	if sum == nil {
+		fresh := *attempt
+		return &fresh
+	}
+	addUsageBuckets(sum, attempt)
+	return sum
+}
+
+// foldRefusedAttempts carries the refused attempts' buckets into the
+// accepted envelope, so one prompt's envelope reports every call it
+// cost. Identity stays on the accepted attempt: model, effort and the
+// non-bucket usage fields are untouched.
+func foldRefusedAttempts(envelope *harness.Envelope, refused *harness.Usage) {
+	if refused == nil {
+		return
+	}
+	if envelope.Usage == nil {
+		total := refused.WithTotal()
+		envelope.Usage = &total
+		envelope.Tokens = total.Total
+		return
+	}
+	sum := *envelope.Usage
+	addUsageBuckets(&sum, refused)
+	total := sum.WithTotal()
+	envelope.Usage = &total
+	envelope.Tokens = total.Total
 }
 
 // shapeExhaustedAction is lib/run.sh:907 and :904.
