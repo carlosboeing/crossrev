@@ -209,3 +209,95 @@ func TestPinnedWorktreeReusedWhenCurrent(t *testing.T) {
 		t.Errorf("harness dir = %s, want the reusable worktree %s", specs[0].Dir, wt)
 	}
 }
+
+// TestPinnedWorktreeDirtyAtHeadPreserved proves a worktree at the head with
+// uncommitted changes is not reused: a failed leg keeps its worktree for
+// debugging, and running the next pass on top of those leftovers would hand
+// the reviewer files the pull request never carried — then delete them on a
+// clean finish. The dirty tree is preserved and the pass works in a fresh
+// one.
+func TestPinnedWorktreeDirtyAtHeadPreserved(t *testing.T) {
+	e := newEnv(t)
+	state := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", state)
+	wt, err := vcs.WorktreeDir(mustSlug(t), 42)
+	if err != nil {
+		t.Fatalf("WorktreeDir: %v", err)
+	}
+	if err := os.MkdirAll(wt, 0o755); err != nil {
+		t.Fatalf("lay the dirty worktree: %v", err)
+	}
+	sentinel := filepath.Join(wt, "leftover.txt")
+	if err := os.WriteFile(sentinel, []byte("a failed attempt left this\n"), 0o644); err != nil {
+		t.Fatalf("plant the leftover: %v", err)
+	}
+	e.vcs.reusable = map[string]bool{wt: true}
+	e.vcs.clean = map[string]bool{wt: false}
+	if e.vcs.heads == nil {
+		e.vcs.heads = map[string]string{}
+	}
+	e.vcs.heads[wt] = headSHA
+	leg := e.leg(t)
+	got := leg.Run(context.Background(), pinnedReq(t, e))
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
+	specs := e.runner.Specs()
+	if len(specs) != 1 {
+		t.Fatalf("harness calls = %d, want 1", len(specs))
+	}
+	if specs[0].Dir == wt {
+		t.Fatalf("the harness ran in the dirty worktree %s, want a fresh one", wt)
+	}
+	if _, err := os.Stat(sentinel); err != nil {
+		t.Errorf("the dirty worktree was not preserved: %v", err)
+	}
+	if e.vcs.addCalls != 1 {
+		t.Errorf("fresh worktree adds = %d, want 1", e.vcs.addCalls)
+	}
+	if _, err := os.Stat(specs[0].Dir); !os.IsNotExist(err) {
+		t.Errorf("a clean finish left the fresh worktree at %s", specs[0].Dir)
+	}
+}
+
+// TestPinnedWorktreeForeignOccupantPreserved proves a path occupied by a
+// worktree this clone does not own — another checkout's, or a failed leg's
+// at an older head — is never deleted to make room. The occupant is
+// preserved with its uncommitted edits, and the pass works in a fresh
+// directory beside it.
+func TestPinnedWorktreeForeignOccupantPreserved(t *testing.T) {
+	e := newEnv(t)
+	state := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", state)
+	wt, err := vcs.WorktreeDir(mustSlug(t), 42)
+	if err != nil {
+		t.Fatalf("WorktreeDir: %v", err)
+	}
+	if err := os.MkdirAll(wt, 0o755); err != nil {
+		t.Fatalf("lay the occupant: %v", err)
+	}
+	sentinel := filepath.Join(wt, "uncommitted.txt")
+	if err := os.WriteFile(sentinel, []byte("another checkout's edits\n"), 0o644); err != nil {
+		t.Fatalf("plant the occupant's edits: %v", err)
+	}
+	e.vcs.reusable = map[string]bool{wt: false}
+	if e.vcs.heads == nil {
+		e.vcs.heads = map[string]string{}
+	}
+	e.vcs.heads[wt] = oldSHA
+	leg := e.leg(t)
+	got := leg.Run(context.Background(), pinnedReq(t, e))
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
+	specs := e.runner.Specs()
+	if len(specs) != 1 {
+		t.Fatalf("harness calls = %d, want 1", len(specs))
+	}
+	if specs[0].Dir == wt {
+		t.Fatalf("the harness ran in the foreign worktree %s, want a fresh one", wt)
+	}
+	if _, err := os.Stat(sentinel); err != nil {
+		t.Errorf("the foreign occupant was deleted: %v", err)
+	}
+}

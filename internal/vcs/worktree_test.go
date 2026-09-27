@@ -149,6 +149,42 @@ func TestWorktreeAddAndRemove(t *testing.T) {
 	}
 }
 
+// A fresh worktree is clean, and any uncommitted change — a tracked edit, a
+// staged entry, an untracked file — makes it unclean. Reuse requires clean,
+// so a failed leg's leftovers never read as the pull request's own files.
+func TestWorktreeClean(t *testing.T) {
+	ctx := context.Background()
+	git := testGit(t)
+	root := realTempDir(t)
+	repo := initRepo(t, git, filepath.Join(root, "clone"))
+	head := commitFile(t, repo, "app.ts", "export const ok = 1\n", "init")
+
+	dir := filepath.Join(root, "state", "crossrev", "worktrees", "o-r", "pr-42")
+	if err := repo.AddWorktree(ctx, dir, head); err != nil {
+		t.Fatalf("AddWorktree: %v", err)
+	}
+	if clean, err := repo.WorktreeClean(ctx, dir); err != nil {
+		t.Fatalf("WorktreeClean: %v", err)
+	} else if !clean {
+		t.Error("a fresh worktree was not clean")
+	}
+
+	write(t, dir, "app.ts", "export const ok = 2\n")
+	if clean, err := repo.WorktreeClean(ctx, dir); err != nil {
+		t.Fatalf("WorktreeClean: %v", err)
+	} else if clean {
+		t.Error("a worktree with a tracked edit was clean")
+	}
+	mustGit(t, git.At(dir), "checkout", "--", "app.ts")
+
+	write(t, dir, "untracked.ts", "export const extra = 1\n")
+	if clean, err := repo.WorktreeClean(ctx, dir); err != nil {
+		t.Fatalf("WorktreeClean: %v", err)
+	} else if clean {
+		t.Error("a worktree with an untracked file was clean")
+	}
+}
+
 // A directory that is not a worktree of this clone must not be reused: the path
 // is keyed on the slug and the pull request alone, so two checkouts of one
 // repository collide on it, and the head revision cannot tell them apart —

@@ -43,7 +43,7 @@ func newWorktreeHeadMismatch(dir string, have, want core.Revision) *WorktreeHead
 //
 // An explicit req.Workdir stays as the override it is: its HEAD is proved
 // against the pull request head and a mismatch is refused before any model
-// call. An empty one creates a clean detached worktree at the head by the
+// call. An empty one selects a clean detached worktree at the head by the
 // resolve pattern — the ordered head fetch, then reuse or create — and
 // reports it created, so the caller removes it at leg end. The one
 // worktree serves every call the pass makes, so quarantine and finding
@@ -63,23 +63,13 @@ func (l *Leg) prepareWorktree(ctx context.Context, req Request, loaded Context) 
 	if err := l.ensureHeadPresent(ctx, req, loaded); err != nil {
 		return "", false, err
 	}
-	wt, err := vcs.WorktreeDir(loaded.Repo, req.PR)
+	base, err := vcs.WorktreeDir(loaded.Repo, req.PR)
 	if err != nil {
 		return "", false, err
 	}
-	reusable, err := l.VCS.WorktreeReusable(ctx, wt, head)
+	wt, err := l.selectWorktree(ctx, base, head)
 	if err != nil {
 		return "", false, err
-	}
-	if !reusable {
-		_ = os.RemoveAll(wt)
-		l.VCS.PruneWorktrees(ctx)
-		if err := l.VCS.AddWorktree(ctx, wt, head); err != nil {
-			return "", false, err
-		}
-		if l.Log != nil {
-			l.Log.Event("worktree", "created "+wt)
-		}
 	}
 	// The worktree was just created at the head or proved reusable at it;
 	// either way the checked-out HEAD is proved before the first call.
@@ -89,6 +79,68 @@ func (l *Leg) prepareWorktree(ctx context.Context, req Request, loaded Context) 
 		return "", false, newWorktreeHeadMismatch(wt, have, head)
 	}
 	return wt, true, nil
+}
+
+// maxWorktreeCandidates bounds the probe for a free worktree path: the
+// canonical directory, then suffixed ones beside it.
+const maxWorktreeCandidates = 100
+
+// selectWorktree answers the directory the pass works in.
+//
+// The canonical path is reused only when it is this clone's own worktree at
+// the head holding no uncommitted changes. A failed leg keeps its worktree
+// for debugging, so a tree at the head can still carry that attempt's files;
+// reusing it would hand the reviewer files the pull request never carried,
+// and a clean finish would then delete them. An occupant that is not
+// reusable at all — another checkout's worktree, or a failed leg's at an
+// older head — is preserved the same way: the path is keyed on the
+// repository and the pull request alone, so deleting it could take out
+// uncommitted edits this run never proved it owns. Either way the pass works
+// in a fresh suffixed directory beside the occupant, never in it and never
+// by removing it.
+func (l *Leg) selectWorktree(ctx context.Context, base string, head core.Revision) (string, error) {
+	for n := 1; n <= maxWorktreeCandidates; n++ {
+		candidate := base
+		if n > 1 {
+			candidate = fmt.Sprintf("%s-%d", base, n)
+		}
+		info, err := os.Stat(candidate)
+		if err != nil {
+			if !os.IsNotExist(err) {
+				return "", err
+			}
+			l.VCS.PruneWorktrees(ctx)
+			if err := l.VCS.AddWorktree(ctx, candidate, head); err != nil {
+				return "", err
+			}
+			if l.Log != nil {
+				l.Log.Event("worktree", "created "+candidate)
+			}
+			return candidate, nil
+		}
+		if info.IsDir() {
+			reusable, err := l.VCS.WorktreeReusable(ctx, candidate, head)
+			if err != nil {
+				return "", err
+			}
+			if reusable {
+				clean, err := l.VCS.WorktreeClean(ctx, candidate)
+				if err != nil {
+					return "", err
+				}
+				if clean {
+					return candidate, nil
+				}
+			}
+		}
+		if l.Log != nil {
+			l.Log.Event("worktree", "preserved "+candidate)
+		}
+	}
+	return "", &ui.FatalError{
+		Reason: fmt.Sprintf("could not find a free worktree path under %s", base),
+		Action: "The preserved worktrees beside it were left by failed legs for debugging. Remove the ones no longer needed and re-run the leg.",
+	}
 }
 
 // ensureHeadPresent fetches a missing head through the resolve pattern's

@@ -200,6 +200,10 @@ type fakeVCS struct {
 	// reusable, when set, is the answer WorktreeReusable gives for the next
 	// pinned worktree. Unset means every pinned worktree is fresh.
 	reusable map[string]bool
+	// clean, when set, is the answer WorktreeClean gives per directory.
+	// Unset means every worktree is clean; a set map answers false for
+	// directories with no entry, so unknown cleanliness never earns reuse.
+	clean map[string]bool
 	// worktrees records the directories AddWorktree created, addCalls counts
 	// them, and onAddWorktree lays files into the fresh worktree.
 	worktrees     []string
@@ -371,6 +375,13 @@ func (f *fakeVCS) WorktreeReusable(_ context.Context, dir string, _ core.Revisio
 		return false, nil
 	}
 	return f.reusable[dir], nil
+}
+
+func (f *fakeVCS) WorktreeClean(_ context.Context, dir string) (bool, error) {
+	if f.clean == nil {
+		return true, nil
+	}
+	return f.clean[dir], nil
 }
 
 func (f *fakeVCS) AddWorktree(_ context.Context, dir string, revision core.Revision) error {

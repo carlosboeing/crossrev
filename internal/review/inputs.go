@@ -111,6 +111,7 @@ type VCS interface {
 	ConfigGet(ctx context.Context, key string) (string, error)
 	Fetch(ctx context.Context, remote, refspec string) error
 	WorktreeReusable(ctx context.Context, dir string, revision core.Revision) (bool, error)
+	WorktreeClean(ctx context.Context, dir string) (bool, error)
 	AddWorktree(ctx context.Context, dir string, revision core.Revision) error
 	RemoveWorktree(ctx context.Context, dir string) error
 	PruneWorktrees(ctx context.Context)

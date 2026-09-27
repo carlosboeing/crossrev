@@ -127,6 +127,26 @@ func (r *Repository) WorktreeReusable(ctx context.Context, dir string, revision 
 	return owner == mine, nil
 }
 
+// WorktreeClean reports whether the worktree at dir holds no uncommitted
+// changes: `git status --porcelain` with empty output. Tracked edits, staged
+// entries and untracked files all count as unclean, because any of them would
+// be read as the pull request's own files by a leg that reuses the tree.
+//
+// A refused status is an error rather than unclean. The caller reads this
+// only for a directory WorktreeReusable already proved is this clone's own
+// worktree, so git failing to answer means something unexpected broke, not
+// that the tree is dirty.
+func (r *Repository) WorktreeClean(ctx context.Context, dir string) (bool, error) {
+	output, err := r.git.At(dir).Run(ctx, "status", "--porcelain")
+	if err != nil {
+		return false, err
+	}
+	if !output.OK() {
+		return false, fmt.Errorf("git status --porcelain in %s: %s", dir, output.Stderr)
+	}
+	return output.Text() == "", nil
+}
+
 // RemoveWorktree takes the worktree away, and then the directory that held it.
 //
 // The order is the shell's (lib/run.sh:2456-2460). `git worktree remove
