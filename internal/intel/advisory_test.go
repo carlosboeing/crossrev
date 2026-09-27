@@ -300,6 +300,52 @@ func TestAdvisorySearchesChangedLinesNotWholeBodies(t *testing.T) {
 	}
 }
 
+// TestAdvisoryConventionSurvivesAnotherTermsSearchHit requires the
+// convention entry to survive a search hit on the same path: batch A owns
+// the hitting term while batch B owns the adjacent source file, so batch B
+// must still render its own adjacent test. A batch owning both renders the
+// search pointer once, never both entries for one path.
+func TestAdvisoryConventionSurvivesAnotherTermsSearchHit(t *testing.T) {
+	scope, _, _ := advisoryScope(t, advisoryBodies())
+	diff := advisoryDiff()
+	search := &fakeSearcher{
+		results: map[string]intel.TermResult{
+			"SharedThing": {Hits: []intel.SearchHit{{Path: "src/other_test.go", Lines: []int{5}}}},
+		},
+		exists: map[string]bool{"src/other_test.go": true},
+	}
+	summary := intel.AdvisoryFiles(context.Background(), scope, diff, search)
+
+	perFile := intel.FileChangedTerms(diff, []core.FileChange{
+		{Path: "src/app.go", Kind: core.ChangeModified},
+		{Path: "src/other.go", Kind: core.ChangeModified},
+	})
+	pointers, _ := intel.BatchPointers(summary, perFile["src/other.go"], []string{"src/other.go"})
+	found := false
+	for _, p := range pointers {
+		if p.Path == "src/other_test.go" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("batch pointers for src/other.go = %+v, want the src/other_test.go convention neighbour", pointers)
+	}
+
+	own, _ := intel.BatchPointers(summary, perFile["src/app.go"], []string{"src/app.go"})
+	held := 0
+	for _, p := range own {
+		if p.Path == "src/other_test.go" {
+			held++
+			if p.Rule != intel.AdvisoryRuleSearch {
+				t.Errorf("shared pointer rule = %q, want the search entry to win", p.Rule)
+			}
+		}
+	}
+	if held != 1 {
+		t.Errorf("batch pointers for src/app.go hold src/other_test.go %d times, want once", held)
+	}
+}
+
 // TestAdvisorySearchHitsCarryLineNumbers requires one advisory file per
 // holder line: a hit on lines 3 and 7 renders two pointers, not one.
 func TestAdvisorySearchHitsCarryLineNumbers(t *testing.T) {

@@ -356,9 +356,12 @@ func splitExt(base string) (stem, ext string) {
 // reads for the adjacent-test candidates. Required and excluded paths never
 // turn advisory, a capped term contributes no file but records its
 // too_common limit, and a failed search drops the search rule rather than
-// failing discovery — advisory context must never block a review pass. The
-// scope argument is read, never written. Results sort by path, limits by
-// rule.
+// failing discovery — advisory context must never block a review pass. A
+// path both rules find carries both entries: per-call rendering selects
+// from the call's own terms and paths, so suppressing the convention entry
+// here would hide the adjacent test from every call but the hitting term's
+// own. The scope argument is read, never written. Results sort by path,
+// limits by rule.
 func AdvisoryFiles(ctx context.Context, scope Scope, diff []byte, search Searcher) AdvisorySummary {
 	required := make(map[string]bool, len(scope.Required))
 	changes := make([]core.FileChange, 0, len(scope.Required))
@@ -371,7 +374,6 @@ func AdvisoryFiles(ctx context.Context, scope Scope, diff []byte, search Searche
 		excluded[e.Path] = true
 	}
 	summary := AdvisorySummary{Rules: []string{AdvisoryRuleConvention, AdvisoryRuleSearch}}
-	seen := make(map[string]bool)
 
 	terms := ChangedTerms(diff, changes)
 	if results, err := search.SearchAll(ctx, scope.Head, terms, MaxSearchHits); err == nil {
@@ -395,7 +397,6 @@ func AdvisoryFiles(ctx context.Context, scope Scope, diff []byte, search Searche
 					continue
 				}
 				for _, line := range hit.Lines {
-					seen[hit.Path] = true
 					summary.Files = append(summary.Files, AdvisoryFile{Path: hit.Path, Rule: AdvisoryRuleSearch, Term: term, Line: line})
 				}
 			}
@@ -405,7 +406,7 @@ func AdvisoryFiles(ctx context.Context, scope Scope, diff []byte, search Searche
 	candidates := make(map[string]bool)
 	for _, unit := range scope.Required {
 		for _, candidate := range AdjacentTestCandidates(unit.Path) {
-			if required[candidate] || excluded[candidate] || seen[candidate] || candidates[candidate] {
+			if required[candidate] || excluded[candidate] || candidates[candidate] {
 				continue
 			}
 			candidates[candidate] = true
@@ -421,7 +422,6 @@ func AdvisoryFiles(ctx context.Context, scope Scope, diff []byte, search Searche
 		if err != nil || !ok {
 			continue
 		}
-		seen[candidate] = true
 		summary.Files = append(summary.Files, AdvisoryFile{Path: candidate, Rule: AdvisoryRuleConvention})
 	}
 
@@ -441,10 +441,12 @@ func AdvisoryFiles(ctx context.Context, scope Scope, diff []byte, search Searche
 
 // BatchPointers selects one call's advisory pointers from the whole-pass
 // summary: the search pointers whose term is one of the call's own changed
-// terms, and the convention files neighbouring the call's own paths. Search
-// pointers rank by fewest holders, then term, path and line; convention
-// neighbours follow by path. At most MaxPointersPerCall render; omitted
-// counts the rest.
+// terms, and the convention files neighbouring the call's own paths. A path
+// both rules found renders once, as the search entry that names its term
+// and line; the convention twin is redundant for this call, not omitted.
+// Search pointers rank by fewest holders, then term, path and line;
+// convention neighbours follow by path. At most MaxPointersPerCall render;
+// omitted counts the rest.
 func BatchPointers(summary AdvisorySummary, batchTerms []string, batchPaths []string) (pointers []AdvisoryFile, omitted int) {
 	terms := make(map[string]bool, len(batchTerms))
 	for _, term := range batchTerms {
@@ -475,6 +477,19 @@ func BatchPointers(summary AdvisorySummary, batchTerms []string, batchPaths []st
 			}
 			convention = append(convention, file)
 		}
+	}
+	if len(search) > 0 && len(convention) > 0 {
+		held := make(map[string]bool, len(search))
+		for _, file := range search {
+			held[file.Path] = true
+		}
+		kept := make([]AdvisoryFile, 0, len(convention))
+		for _, file := range convention {
+			if !held[file.Path] {
+				kept = append(kept, file)
+			}
+		}
+		convention = kept
 	}
 	sort.Slice(search, func(i, j int) bool {
 		if len(holders[search[i].Term]) != len(holders[search[j].Term]) {
