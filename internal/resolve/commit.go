@@ -171,6 +171,13 @@ func (l *Leg) pushHead(ctx context.Context, work Git, s *session, remote string,
 			}
 		}
 	}
+	// The local HEAD is the SHA the push sends: read it before pushing and
+	// return it after a successful push, so a read failure refuses before
+	// anything lands instead of passing a landed push off as failed.
+	head, err := work.Head(ctx)
+	if err != nil {
+		return "", empty, err
+	}
 	if l.Log != nil {
 		l.Log.Event("push", "start branch="+s.pr.HeadRefName+" remote="+remote)
 	}
@@ -182,10 +189,6 @@ func (l *Leg) pushHead(ctx context.Context, work Git, s *session, remote string,
 	}
 	if l.Log != nil {
 		l.Log.Event("push", "exit=0")
-	}
-	head, err := work.Head(ctx)
-	if err != nil {
-		return "", empty, err
 	}
 	return head.SHA(), empty, nil
 }

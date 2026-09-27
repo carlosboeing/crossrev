@@ -226,6 +226,29 @@ func TestPush(t *testing.T) {
 		}
 	})
 
+	// The local HEAD is the SHA the push sends, so it is read before pushing:
+	// a read failure refuses before the push is attempted, and can never
+	// pass a landed push off as failed.
+	t.Run("a failed head read refuses before the push", func(t *testing.T) {
+		e := setup(t)
+		e.addReview(t, defaultFindings(), "issues-remain")
+		e.git.staged = true
+		e.git.headErrAfterCommit = errors.New("cannot read HEAD: boom")
+		got := e.run(t)
+		if got.Outcome != OutcomeRefused {
+			t.Fatalf("Outcome = %q, want refused", got.Outcome)
+		}
+		if got.Err == nil || !strings.Contains(got.Err.Error(), "cannot read HEAD") {
+			t.Fatalf("Err = %v, want the head read failure", got.Err)
+		}
+		if e.git.commitCalls != 1 {
+			t.Fatalf("commitCalls = %d, want the local commit the read was meant to report", e.git.commitCalls)
+		}
+		if e.git.pushCalls != 0 {
+			t.Fatal("pushed without a known local SHA")
+		}
+	})
+
 	t.Run("a refused push keeps the worktree and the reason", func(t *testing.T) {
 		e := setup(t)
 		e.addReview(t, defaultFindings(), "issues-remain")

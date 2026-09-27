@@ -84,6 +84,16 @@ func (l *Leg) publish(ctx context.Context, s *session, got Result, workdir strin
 			"If someone pushed to that branch while this leg was working, this push may not include their commit. Confirm the branch looks right before merging."))
 	}
 	if err != nil {
+		if !committed {
+			// The commit never landed and nothing was pushed, so the
+			// blocked record must not carry resolutions for work that
+			// reached no remote: report the claim as opened — still
+			// started with none — so a later pass reads no prior
+			// resolutions from it.
+			marker = claim
+			got.Marker = claim
+			got.Resolutions = claim.Resolutions
+		}
 		if committed {
 			// The fix is committed locally but the push did not land. The
 			// claim stays open at started with no resolutions: one re-run —
