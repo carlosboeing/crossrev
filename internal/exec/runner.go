@@ -2,6 +2,7 @@ package exec
 
 import (
 	"context"
+	"errors"
 	"os"
 	"time"
 )
@@ -70,4 +71,39 @@ type Result struct {
 func (r Result) OK() bool { return r.Err == nil && r.ExitCode == 0 }
 
 // Signaled reports that a signal ended the child rather than a return from main.
-func (r Result) Signaled() bool { return r.Signal != nil }
+//
+// A child killed by signal N carries 128+N in ExitCode. A Result populated from
+// an exit code alone — a scripted runner in a test, or a recorder — reports
+// Signaled true when ExitCode is in that range even when Signal is nil.
+func (r Result) Signaled() bool {
+	if r.Signal != nil {
+		return true
+	}
+	return r.ExitCode > 128 && r.ExitCode < 256
+}
+
+// Interrupted reports that an interrupt signal, termination signal or context
+// cancellation ended the child rather than a return from main.
+//
+// SIGINT (130) is Ctrl-C, SIGTERM (143) is termination requested by the host,
+// and SIGKILL (137) is the group kill cancellation applies when the context
+// ends. None of these is a harness failure or a model error.
+func (r Result) Interrupted() bool {
+	if errors.Is(r.Err, context.Canceled) {
+		return true
+	}
+	if r.Signal == os.Interrupt || r.Signal == os.Kill {
+		return true
+	}
+	if number, ok := signalNumber(r.Signal); ok {
+		switch 128 + number {
+		case 130, 131, 137, 143:
+			return true
+		}
+	}
+	switch r.ExitCode {
+	case 130, 131, 137, 143:
+		return true
+	}
+	return false
+}
