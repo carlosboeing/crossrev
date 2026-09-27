@@ -113,10 +113,14 @@ func (a *Codex) Envelope(inv Invocation, res exec.Result) Envelope {
 	// same case would be error handling that cannot change an outcome.
 	payload, _ := os.ReadFile(inv.PayloadPath) //nolint:gosec // the orchestrator named this path
 	if res.ExitCode != 0 || len(payload) == 0 {
-		// No "exited N with no output" fallback here, unlike the other four:
-		// the Bash builds this message from stderr alone, so an empty stderr
-		// answers the empty string (lib/adapters/codex.sh:100).
-		return failed(a.Name(), runlog.Redact(HarnessError(res.Stderr)))
+		// Read turn.failed from stdout first; fall back to the stderr diagnosis
+		// when none is reported. An empty stderr still answers the empty
+		// string, matching the Bash (lib/adapters/codex.sh:100).
+		message := ParseCodexError(res.Stdout)
+		if message == "" {
+			message = HarnessError(res.Stderr)
+		}
+		return failed(a.Name(), runlog.Redact(message))
 	}
 
 	compact, parsed := parseJSON(string(payload))

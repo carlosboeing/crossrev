@@ -251,6 +251,46 @@ func ParseCodexEvents(events []byte) *Usage {
 	return &total
 }
 
+// ParseCodexError reads the diagnosis `codex exec --json` writes on turn.failed.
+//
+// The error is carried inside the event — `.error.message // .error // .message // empty`
+// — and the last turn that carries one wins, matching ParseCodexEvents.
+func ParseCodexError(events []byte) string {
+	nodes, err := decodeStream(events)
+	if err != nil {
+		nodes = nil
+		for _, line := range splitLines(string(events)) {
+			trimmed := strings.TrimSpace(line)
+			if trimmed == "" {
+				continue
+			}
+			if n, err := DecodeOrdered([]byte(trimmed)); err == nil {
+				nodes = append(nodes, n)
+			}
+		}
+	}
+	var last string
+	for _, event := range nodes {
+		kind, _ := event.member("type").asString()
+		if kind != "turn.failed" && kind != "error" {
+			continue
+		}
+		if msg, ok := event.member("error").member("message").asString(); ok && msg != "" {
+			last = msg
+			continue
+		}
+		if msg, ok := event.member("error").asString(); ok && msg != "" {
+			last = msg
+			continue
+		}
+		if msg, ok := event.member("message").asString(); ok && msg != "" {
+			last = msg
+			continue
+		}
+	}
+	return last
+}
+
 // ParseGrok is usage_parse_grok (lib/usage.sh:149-175).
 //
 // Grok's own total_tokens reconciles with the parts, but reading it would trust
