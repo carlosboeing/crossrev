@@ -136,14 +136,22 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 			outcome.supplied[core.UnitID(record.UnitID)] = s
 		}
 	}
-	advisory := intel.AdvisoryFiles(ctx, scope, scopeSearcher{vcs: l.VCS})
+	// The -U0 lines feed the advisory term walk. A failed read degrades to
+	// path-only terms rather than failing the pass: advisory context must
+	// never block a review, and coverage never depended on these bytes.
+	changed, err := l.VCS.ChangedLines(ctx, scope.Base, scope.Head)
+	if err != nil {
+		changed = nil
+	}
+	advisory := intel.AdvisoryFiles(ctx, scope, changed, scopeSearcher{vcs: l.VCS})
+	fileTerms := intel.FileChangedTerms(changed, scopeChanges(scope))
 	pair := repairConfirmation(loaded.Markers, scope.Head)
 	confirmation, err := l.confirmationDelta(ctx, pair)
 	if err != nil {
 		pair = confirmationPair{}
 		confirmation = nil
 	}
-	shared := l.discoverBatchContext(ctx, req, loaded, pass, scope, advisory, confirmation)
+	shared := l.discoverBatchContext(ctx, req, loaded, pass, scope, advisory, fileTerms, confirmation)
 	render := func(files []intel.FileUnit) int {
 		promptBytes, _ := shared.render(files, scope.Base, scope.Head)
 		return len(promptBytes)
@@ -495,18 +503,53 @@ func findingsFromPayload(payload json.RawMessage) []Finding {
 	return doc.Findings
 }
 
-// advisoryPromptRefs renders the advisory and exclusion summaries one batch
-// prompt carries beside its numbered files.
-func advisoryPromptRefs(scope intel.Scope, advisory intel.AdvisorySummary) ([]prompt.AdvisoryRef, []prompt.ExclusionRef) {
-	var advisoryRefs []prompt.AdvisoryRef
-	for _, file := range advisory.Files {
-		advisoryRefs = append(advisoryRefs, prompt.AdvisoryRef{Path: file.Path, Rule: file.Rule, Term: file.Term})
+// scopeChanges names the enumeration the advisory term walk reads: the
+// required units' current and previous paths, the same paths the scope
+// sorts by.
+func scopeChanges(scope intel.Scope) []core.FileChange {
+	changes := make([]core.FileChange, 0, len(scope.Required))
+	for _, unit := range scope.Required {
+		changes = append(changes, core.FileChange{OldPath: unit.OldPath, Path: unit.Path, Kind: unit.Change})
 	}
+	return changes
+}
+
+// batchPointerRefs selects one batch's advisory pointers from the whole-pass
+// summary: the call's own changed terms and paths, ranked and capped, with
+// the omitted remainder counted for the prompt's own line.
+func batchPointerRefs(advisory intel.AdvisorySummary, fileTerms map[string][]string, files []intel.FileUnit) ([]prompt.AdvisoryRef, int) {
+	seen := make(map[string]bool)
+	var terms []string
+	var paths []string
+	for _, unit := range files {
+		paths = append(paths, unit.Path)
+		for _, term := range fileTerms[unit.Path] {
+			if !seen[term] {
+				seen[term] = true
+				terms = append(terms, term)
+			}
+		}
+		if !seen[unit.Path] {
+			seen[unit.Path] = true
+			terms = append(terms, unit.Path)
+		}
+	}
+	pointers, omitted := intel.BatchPointers(advisory, terms, paths)
+	refs := make([]prompt.AdvisoryRef, 0, len(pointers))
+	for _, pointer := range pointers {
+		refs = append(refs, prompt.AdvisoryRef{Path: pointer.Path, Rule: pointer.Rule, Term: pointer.Term, Line: pointer.Line})
+	}
+	return refs, omitted
+}
+
+// excludedPromptRefs renders the exclusion summary every batch prompt
+// carries beside its numbered files.
+func excludedPromptRefs(scope intel.Scope) []prompt.ExclusionRef {
 	var excludedRefs []prompt.ExclusionRef
 	for _, e := range scope.Excluded {
 		excludedRefs = append(excludedRefs, prompt.ExclusionRef{Path: e.Path, Reason: e.Reason})
 	}
-	return advisoryRefs, excludedRefs
+	return excludedRefs
 }
 
 func advisoryLimits(advisory intel.AdvisorySummary) []prstate.AdvisoryLimit {
