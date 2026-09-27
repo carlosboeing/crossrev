@@ -102,6 +102,16 @@ is "claim keeps its own issue_url" "$claim_url" "https://api.github.com/repos/ac
 wide_url="$(gh api --method GET repos/acme/widget/issues/comments --jq '.[] | select(.id == '"$other_id"') | .issue_url')"
 is "repository-wide list replays the stored issue_url" "$wide_url" "https://api.github.com/repos/other/repo/issues/7"
 
+issue42_ids="$(gh api --paginate repos/acme/widget/issues/42/comments --jq '.[].id')"
+hasnt "issue 7 comment is absent from issue 42 list" "$issue42_ids" "$other_id"
+
+issue7_ids="$(gh api --paginate repos/other/repo/issues/7/comments --jq '.[].id')"
+hasnt "seed 1001 is absent from issue 7 list" "$issue7_ids" "1001"
+
+seed_url="$(gh api --paginate repos/acme/widget/issues/42/comments --jq '.[] | select(.id == 1001) | .issue_url')"
+seed_wide_url="$(gh api --method GET repos/acme/widget/issues/comments --jq '.[] | select(.id == 1001) | .issue_url')"
+is "seed 1001 issue_url stays the same on both lists" "$seed_url" "$seed_wide_url"
+
 gh api --method PATCH repos/acme/widget/issues/comments/"$claim_id" -f body='claim updated <!-- crossrev: {"pass":1,"leg":"review"} -->' >/dev/null
 updated_body="$(gh api repos/acme/widget/issues/comments/"$claim_id" --jq .body)"
 has "single comment read replays updated claim body" "$updated_body" "claim updated"

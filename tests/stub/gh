@@ -171,7 +171,17 @@ if [[ -n "${CROSSREV_GH_STATE:-}" ]]; then
       sc_login="$(jq -r '.user.login // empty' <<<"$sc_obj")"
       printf '%s' "${sc_login:-$create_author}" >"$CROSSREV_GH_STATE/comment-$sc_id.author"
       sc_issue="$(jq -r '.issue_url // empty' <<<"$sc_obj")"
-      [[ -n "$sc_issue" ]] && printf '%s' "$sc_issue" >"$CROSSREV_GH_STATE/comment-$sc_id.issue"
+      if [[ -z "$sc_issue" ]]; then
+        if [[ -f "$CROSSREV_GH_STATE/pr.json" ]]; then
+          powner="$(jq -r '.headRepositoryOwner.login // "acme"' "$CROSSREV_GH_STATE/pr.json" 2>/dev/null || echo acme)"
+          prepo="$(jq -r '.headRepository.name // "widget"' "$CROSSREV_GH_STATE/pr.json" 2>/dev/null || echo widget)"
+          pnum="$(jq -r '.number // 42' "$CROSSREV_GH_STATE/pr.json" 2>/dev/null || echo 42)"
+          sc_issue="https://api.github.com/repos/$powner/$prepo/issues/$pnum"
+        else
+          sc_issue="https://api.github.com/repos/acme/widget/issues/42"
+        fi
+      fi
+      printf '%s' "$sc_issue" >"$CROSSREV_GH_STATE/comment-$sc_id.issue"
       if (( sc_id >= cur_id )); then
         cur_id=$(( sc_id + 1 ))
       fi
@@ -206,7 +216,8 @@ if [[ -n "${CROSSREV_GH_STATE:-}" ]]; then
       printf '%s' "$(( id + 1 ))" >"$next"
       printf '%s' "$body" >"$CROSSREV_GH_STATE/comment-$id"
       printf '%s' "$create_author" >"$CROSSREV_GH_STATE/comment-$id.author"
-      [[ -n "$req_issue_url" ]] && printf '%s' "$req_issue_url" >"$CROSSREV_GH_STATE/comment-$id.issue"
+      iu="${req_issue_url:-https://api.github.com/repos/acme/widget/issues/42}"
+      printf '%s' "$iu" >"$CROSSREV_GH_STATE/comment-$id.issue"
       printf '{"id":%s}\n' "$id" | emit
       exit 0
     fi
@@ -242,9 +253,13 @@ if [[ -n "${CROSSREV_GH_STATE:-}" ]]; then
       [[ -e "$f" ]] || continue
       ca="$gh_author"
       [[ -f "$CROSSREV_GH_STATE/comment-$cid.author" ]] && ca="$(cat "$CROSSREV_GH_STATE/comment-$cid.author")"
-      iu="$req_issue_url"
-      [[ -f "$CROSSREV_GH_STATE/comment-$cid.issue" ]] && iu="$(cat "$CROSSREV_GH_STATE/comment-$cid.issue")"
-      iu="${iu:-https://api.github.com/repos/acme/widget/issues/42}"
+      iu="https://api.github.com/repos/acme/widget/issues/42"
+      if [[ -f "$CROSSREV_GH_STATE/comment-$cid.issue" ]]; then
+        iu="$(cat "$CROSSREV_GH_STATE/comment-$cid.issue")"
+      else
+        printf '%s' "$iu" >"$CROSSREV_GH_STATE/comment-$cid.issue"
+      fi
+      [[ -n "$req_issue_url" && "$iu" != "$req_issue_url" ]] && continue
       spool="$(jq -c --argjson id "$cid" --arg a "$ca" --arg iu "$iu" --rawfile body "$f" \
         '. + [{id:$id, body:$body, user:{login:$a}, created_at:"2026-09-09T00:00:00Z", issue_url:$iu}]' <<<"$spool")"
     # The if, not a case: bash 3.2 misparses case with continue here.
@@ -295,7 +310,8 @@ if [[ -n "${CROSSREV_GH_STATE:-}" ]]; then
     printf '%s' "$(( id + 1 ))" >"$next"
     printf '%s' "$body" >"$CROSSREV_GH_STATE/comment-$id"
     printf '%s' "$create_author" >"$CROSSREV_GH_STATE/comment-$id.author"
-    [[ -n "$req_issue_url" ]] && printf '%s' "$req_issue_url" >"$CROSSREV_GH_STATE/comment-$id.issue"
+    iu="${req_issue_url:-https://api.github.com/repos/acme/widget/issues/42}"
+    printf '%s' "$iu" >"$CROSSREV_GH_STATE/comment-$id.issue"
     printf '{"id":%s}\n' "$id" | emit
     exit 0
   fi
