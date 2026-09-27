@@ -97,9 +97,27 @@ func (g *stubGh) publishForeignGeneration(t *testing.T, ref prstate.SlotRef, lab
 	}
 }
 
+// The state file the gh stub keeps for refName, mirroring its per-repo
+// key (ref-<owner>_<repo>_<ref with slashes as underscores>). Every
+// refstore test runs against the fixture slot's repo, so the helpers
+// address the same files the stub reads and writes.
+func (g *stubGh) refFile(t *testing.T, refName string) string {
+	t.Helper()
+	slugKey := strings.ReplaceAll(storetest.FixtureSlotRef(t).Repo.String(), "/", "_")
+	safe := strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9',
+			r == '_', r == '.', r == '-':
+			return r
+		default:
+			return '_'
+		}
+	}, slugKey)
+	return filepath.Join(g.stateDir, "ref-"+safe+"_"+strings.ReplaceAll(refName, "/", "_"))
+}
+
 func (g *stubGh) moveRef(t *testing.T, refName string, commit string) {
 	t.Helper()
-	refEnc := strings.ReplaceAll(refName, "/", "_")
 	data, err := json.Marshal(map[string]any{
 		"ref": refName,
 		"object": map[string]string{
@@ -110,34 +128,31 @@ func (g *stubGh) moveRef(t *testing.T, refName string, commit string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(g.stateDir, "ref-"+refEnc), data, 0o600); err != nil {
+	if err := os.WriteFile(g.refFile(t, refName), data, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	trimmed := strings.TrimPrefix(refName, "refs/")
-	if err := os.WriteFile(filepath.Join(g.stateDir, "ref-"+strings.ReplaceAll(trimmed, "/", "_")), data, 0o600); err != nil {
+	if err := os.WriteFile(g.refFile(t, trimmed), data, 0o600); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func (g *stubGh) deleteRef(t *testing.T, refName string) {
 	t.Helper()
-	refEnc := strings.ReplaceAll(refName, "/", "_")
-	_ = os.Remove(filepath.Join(g.stateDir, "ref-"+refEnc))
+	_ = os.Remove(g.refFile(t, refName))
 	trimmed := strings.TrimPrefix(refName, "refs/")
-	_ = os.Remove(filepath.Join(g.stateDir, "ref-"+strings.ReplaceAll(trimmed, "/", "_")))
+	_ = os.Remove(g.refFile(t, trimmed))
 }
 
 func (g *stubGh) hasRef(t *testing.T, refName string) bool {
 	t.Helper()
-	refEnc := strings.ReplaceAll(refName, "/", "_")
-	_, err := os.Stat(filepath.Join(g.stateDir, "ref-"+refEnc))
+	_, err := os.Stat(g.refFile(t, refName))
 	return err == nil
 }
 
 func (g *stubGh) refTarget(t *testing.T, refName string) string {
 	t.Helper()
-	refEnc := strings.ReplaceAll(refName, "/", "_")
-	raw, err := os.ReadFile(filepath.Join(g.stateDir, "ref-"+refEnc))
+	raw, err := os.ReadFile(g.refFile(t, refName))
 	if err != nil {
 		t.Fatalf("reading ref %s: %v", refName, err)
 	}

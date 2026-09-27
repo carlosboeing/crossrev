@@ -1,0 +1,20 @@
+[
+  {
+    "id": "PRRT_seed1",
+    "isResolved": false,
+    "isOutdated": false,
+    "path": "app.ts",
+    "line": 10,
+    "comments": {
+      "nodes": [
+        {
+          "databaseId": 2001,
+          "body": "Existing review thread comment",
+          "author": {
+            "login": "prior-reviewer"
+          }
+        }
+      ]
+    }
+  }
+]
