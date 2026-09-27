@@ -60,6 +60,15 @@ var harnessErrorCases = []struct {
 	},
 	{name: "carriage returns", stderr: "banner\r\nError: with a carriage return\r\n",
 		want: "Error: with a carriage return\r"},
+	{
+		// A sandbox denial carries no diagnosis keyword of its own, so a
+		// later error line pointing at it used to replace the cause with a
+		// pointer to text already discarded. The denial now matches, and
+		// the last-two window keeps both.
+		name:   "a sandbox denial before the error that points at it",
+		stderr: "socket deny resolution failed: example.com\nError: see the warning above\n",
+		want:   "socket deny resolution failed: example.com\nError: see the warning above",
+	},
 }
 
 // The tail rules, frozen at the native cutover.
