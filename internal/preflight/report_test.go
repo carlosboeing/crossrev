@@ -36,7 +36,7 @@ func TestDoctorOnAWorkingMachine(t *testing.T) {
 	r.answer("claude --version", "2.1.258 (Claude Code)\n", 0)
 	r.answer("codex --version", "codex-cli 0.152.1\n", 0)
 	r.answer("gh repo view --json viewerPermission --jq .viewerPermission", "WRITE\n", 0)
-	c, buf := doctorChecker(t, r, onPath("git", "gh", "jq", "yq", "openssl", "claude", "codex"), defaultPairing)
+	c, buf := doctorChecker(t, r, onPath("git", "gh", "claude", "codex"), defaultPairing)
 
 	if code := c.Doctor(context.Background()); code != 0 {
 		t.Errorf("Doctor = %d, want 0", code)
@@ -44,9 +44,6 @@ func TestDoctorOnAWorkingMachine(t *testing.T) {
 	want := "\n◇  Requirements\n" +
 		"│  ✓ git 2.50.1\n" +
 		"│  ✓ gh 2.97.0 — authenticated as carlosboeing\n" +
-		"│  ✓ jq 1.8.1\n" +
-		"│  ✓ yq v4.53.3\n" +
-		"│  ✓ openssl 3.6.3\n" +
 		"│  ✓ claude 2.1.258 — known good (2.1.237-2.1.281)\n" +
 		"│  ✓ codex 0.152.1 — unverified, outside the recorded range (0.148.0)\n" +
 		"│  ○ agy — not found, optional\n" +
@@ -68,13 +65,38 @@ func TestDoctorOnAWorkingMachine(t *testing.T) {
 	}
 }
 
-// A missing tool changes the closing line and the exit code, and nothing else
-// about the report (bin/crossrev:175-179).
+// jq, yq and openssl are not doctor's to require: the binary reads YAML and
+// JSON itself and signs nothing, so a PATH holding none of the three passes
+// and still prints the pairing report.
+func TestDoctorPassesWithoutJqYqAndOpenssl(t *testing.T) {
+	r := coreVersions(newRecorder())
+	r.answer("gh api user --jq .login", "carlosboeing\n", 0)
+	r.answer("claude --version", "2.1.258 (Claude Code)\n", 0)
+	r.answer("gh repo view --json viewerPermission --jq .viewerPermission", "WRITE\n", 0)
+	c, buf := doctorChecker(t, r, onPath("git", "gh", "claude"), defaultPairing)
+
+	if code := c.Doctor(context.Background()); code != 0 {
+		t.Errorf("Doctor = %d, want 0", code)
+	}
+	report := buf.String()
+	if !strings.Contains(report, "\n◇  Pairings on runner: github-hosted\n") {
+		t.Errorf("the pairing report was skipped without yq:\n%s", report)
+	}
+	for _, tool := range []string{"jq", "yq", "openssl"} {
+		if strings.Contains(report, tool) {
+			t.Errorf("the report still names %s, which doctor no longer requires:\n%s", tool, report)
+		}
+	}
+}
+
+// A missing tool changes the closing line and the exit code, and the pairing
+// report still prints, because the config loads without the missing tool
+// (bin/crossrev:175-179).
 func TestDoctorFailsOnAMissingTool(t *testing.T) {
 	r := coreVersions(newRecorder())
 	r.answer("gh api user --jq .login", "carlosboeing\n", 0)
 	r.answer("claude --version", "2.1.258\n", 0)
-	c, buf := doctorChecker(t, r, onPath("git", "gh", "jq", "openssl", "claude"), defaultPairing)
+	c, buf := doctorChecker(t, r, onPath("gh", "claude"), defaultPairing)
 
 	if code := c.Doctor(context.Background()); code != 1 {
 		t.Errorf("Doctor = %d, want 1", code)
@@ -83,10 +105,11 @@ func TestDoctorFailsOnAMissingTool(t *testing.T) {
 	if !strings.HasSuffix(report, "└  Fix what is marked ✗ above, then run this again.\n\n") {
 		t.Errorf("report did not close with the fix line:\n%s", report)
 	}
-	// yq is what reads the config in the shell, so without it the pairing
-	// report is skipped rather than printed from a config nothing could read.
-	if strings.Contains(report, "Pairings on runner") {
-		t.Errorf("pairings were reported without yq:\n%s", report)
+	if !strings.Contains(report, "│  ✗ git — not found. Install with: xcode-select --install\n") {
+		t.Errorf("report did not name the missing tool:\n%s", report)
+	}
+	if !strings.Contains(report, "Pairings on runner") {
+		t.Errorf("pairings were skipped for a tool the config does not read:\n%s", report)
 	}
 }
 
@@ -96,7 +119,7 @@ func TestDoctorFailsOnAStrandedQuarantine(t *testing.T) {
 	r := coreVersions(newRecorder())
 	r.answer("gh api user --jq .login", "carlosboeing\n", 0)
 	r.answer("claude --version", "2.1.258\n", 0)
-	c, buf := doctorChecker(t, r, onPath("git", "gh", "jq", "yq", "openssl", "claude"), defaultPairing)
+	c, buf := doctorChecker(t, r, onPath("git", "gh", "claude"), defaultPairing)
 	if err := os.Mkdir(filepath.Join(c.Dir, ".crossrev-quarantine"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +142,7 @@ func TestDoctorFailsOnAnUnservablePairing(t *testing.T) {
 	r := coreVersions(newRecorder())
 	r.answer("gh api user --jq .login", "carlosboeing\n", 0)
 	r.answer("agy --version", "1.1.23\n", 0)
-	c, buf := doctorChecker(t, r, onPath("git", "gh", "jq", "yq", "openssl", "agy"),
+	c, buf := doctorChecker(t, r, onPath("git", "gh", "agy"),
 		"version: \"2\"\nrunner: github-hosted\nreviewer:\n  harness: agy\nresolver:\n  harness: claude\n")
 	t.Setenv("XDG_STATE_HOME", state)
 	if err := os.MkdirAll(filepath.Join(state, "crossrev", "worktrees", "acme-widget", "pr-9"), 0o755); err != nil {
@@ -148,7 +171,7 @@ func TestDoctorReportsWorktreesWithoutFailing(t *testing.T) {
 	r := coreVersions(newRecorder())
 	r.answer("gh api user --jq .login", "carlosboeing\n", 0)
 	r.answer("claude --version", "2.1.258\n", 0)
-	c, buf := doctorChecker(t, r, onPath("git", "gh", "jq", "yq", "openssl", "claude"), defaultPairing)
+	c, buf := doctorChecker(t, r, onPath("git", "gh", "claude"), defaultPairing)
 	t.Setenv("XDG_STATE_HOME", state)
 	if err := os.MkdirAll(filepath.Join(state, "crossrev", "worktrees", "acme-widget", "pr-9"), 0o755); err != nil {
 		t.Fatal(err)
@@ -173,7 +196,7 @@ func TestDoctorReportsPairingsAgainstTheConfiguredRunner(t *testing.T) {
 	r := coreVersions(newRecorder())
 	r.answer("gh api user --jq .login", "carlosboeing\n", 0)
 	r.answer("agy --version", "1.1.23\n", 0)
-	c, buf := doctorChecker(t, r, onPath("git", "gh", "jq", "yq", "openssl", "agy"),
+	c, buf := doctorChecker(t, r, onPath("git", "gh", "agy"),
 		"version: \"2\"\nrunner: self-hosted\nreviewer:\n  harness: agy\nresolver:\n  harness: claude\n")
 
 	if code := c.Doctor(context.Background()); code != 0 {

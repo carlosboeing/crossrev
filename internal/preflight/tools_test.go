@@ -14,8 +14,8 @@ import (
 	"github.com/carlosboeing/crossrev/internal/ui"
 )
 
-// The five core tools, in the order lib/preflight.sh:86 probes them.
-var corePath = []string{"git", "gh", "jq", "yq", "openssl"}
+// The two core tools, in the order lib/preflight.sh:86 probes them.
+var corePath = []string{"git", "gh"}
 
 // The hint names a fix for the platform the operator is actually on
 // (lib/preflight.sh:8-34). Measured from the shell with
@@ -25,9 +25,7 @@ func TestInstallHintOnDarwin(t *testing.T) {
 	for tool, want := range map[string]string{
 		"git":      "xcode-select --install",
 		"gh":       "brew install gh",
-		"jq":       "brew install jq",
 		"yq":       "brew install yq",
-		"openssl":  "already present on macOS; otherwise brew install openssl",
 		"claude":   "https://claude.com/claude-code",
 		"codex":    "https://chatgpt.com/codex",
 		"agy":      "https://antigravity.google",
@@ -48,13 +46,11 @@ func TestInstallHintOnDarwin(t *testing.T) {
 func TestInstallHintElsewhere(t *testing.T) {
 	c := &preflight.Checker{Harness: document(t), OS: "Linux"}
 	for tool, want := range map[string]string{
-		"git":     "your package manager, e.g. apt install git",
-		"gh":      "https://github.com/cli/cli#installation",
-		"jq":      "https://jqlang.github.io/jq/download/",
-		"yq":      "https://github.com/mikefarah/yq#install",
-		"openssl": "your package manager, e.g. apt install openssl",
-		"claude":  "https://claude.com/claude-code",
-		"nope":    "install nope",
+		"git":    "your package manager, e.g. apt install git",
+		"gh":     "https://github.com/cli/cli#installation",
+		"yq":     "https://github.com/mikefarah/yq#install",
+		"claude": "https://claude.com/claude-code",
+		"nope":   "install nope",
 	} {
 		if got := c.InstallHint(tool); got != want {
 			t.Errorf("InstallHint(%q) = %q, want %q", tool, got, want)
@@ -89,33 +85,9 @@ func TestCheckCoreReportsEveryTool(t *testing.T) {
 	}
 	want := "\n◇  Requirements\n" +
 		"│  ✓ git 2.50.1\n" +
-		"│  ✓ gh 2.97.0 — authenticated as carlosboeing\n" +
-		"│  ✓ jq 1.8.1\n" +
-		"│  ✓ yq v4.53.3\n" +
-		"│  ✓ openssl 3.6.3\n"
+		"│  ✓ gh 2.97.0 — authenticated as carlosboeing\n"
 	if got := buf.String(); got != want {
 		t.Errorf("report =\n%q\nwant\n%q", got, want)
-	}
-}
-
-// openssl is asked with its own subcommand, because the build on GitHub's
-// hosted runners rejects --version outright (lib/preflight.sh:59).
-func TestCheckProbesOpensslWithItsOwnSubcommand(t *testing.T) {
-	r := coreVersions(newRecorder())
-	r.answer("gh api user --jq .login", "carlosboeing\n", 0)
-	c, buf := checker(t, r, onPath(corePath...))
-	c.Check(context.Background(), preflight.NeedCore)
-
-	for _, argv := range r.argvs() {
-		if argv == "openssl --version" {
-			t.Errorf("openssl was probed with --version: %v", r.argvs())
-		}
-	}
-	if _, found := r.specFor("openssl version"); !found {
-		t.Errorf("openssl version was never run: %v", r.argvs())
-	}
-	if !strings.Contains(buf.String(), "✓ openssl 3.6.3") {
-		t.Errorf("report did not name openssl's version:\n%s", buf)
 	}
 }
 
@@ -125,17 +97,17 @@ func TestCheckProbesOpensslWithItsOwnSubcommand(t *testing.T) {
 func TestCheckSeparatesSilentFromMissing(t *testing.T) {
 	r := coreVersions(newRecorder())
 	r.answer("gh api user --jq .login", "carlosboeing\n", 0)
-	r.answer("yq --version", "yq: error while loading shared libraries\n", 1)
+	r.answer("git --version", "git: error while loading shared libraries\n", 1)
 	c, buf := checker(t, r, onPath(corePath...))
 
 	if c.Check(context.Background(), preflight.NeedCore) {
 		t.Errorf("Check = true, want false")
 	}
 	report := buf.String()
-	if !strings.Contains(report, "│  ✗ yq — installed, but it did not report a version. Check that it runs.\n") {
+	if !strings.Contains(report, "│  ✗ git — installed, but it did not report a version. Check that it runs.\n") {
 		t.Errorf("report did not say the tool is installed:\n%s", report)
 	}
-	if strings.Contains(report, "yq — not found") {
+	if strings.Contains(report, "git — not found") {
 		t.Errorf("report sent the reader to install what is already there:\n%s", report)
 	}
 }
@@ -145,16 +117,16 @@ func TestCheckSeparatesSilentFromMissing(t *testing.T) {
 func TestCheckReportsAMissingToolWithItsInstallHint(t *testing.T) {
 	r := coreVersions(newRecorder())
 	r.answer("gh api user --jq .login", "carlosboeing\n", 0)
-	c, buf := checker(t, r, onPath("git", "gh", "jq", "openssl"))
+	c, buf := checker(t, r, onPath("git"))
 
 	if c.Check(context.Background(), preflight.NeedCore) {
 		t.Errorf("Check = true, want false")
 	}
-	if !strings.Contains(buf.String(), "│  ✗ yq — not found. Install with: brew install yq\n") {
+	if !strings.Contains(buf.String(), "│  ✗ gh — not found. Install with: brew install gh\n") {
 		t.Errorf("report did not name the fix:\n%s", buf)
 	}
 	for _, argv := range r.argvs() {
-		if strings.HasPrefix(argv, "yq ") {
+		if strings.HasPrefix(argv, "gh ") {
 			t.Errorf("a tool that is not on PATH was still run: %v", r.argvs())
 		}
 	}
@@ -277,7 +249,7 @@ func TestCheckHarnessReportsEveryDescribedHarness(t *testing.T) {
 	// agy runs and will not say what it is, which is deliberately not a
 	// harness (lib/preflight.sh:151-155).
 	r.answer("agy --version", "agy: broken\n", 0)
-	c, buf := checker(t, r, onPath("git", "gh", "jq", "yq", "openssl", "claude", "codex", "agy"))
+	c, buf := checker(t, r, onPath("git", "gh", "claude", "codex", "agy"))
 
 	if !c.Check(context.Background(), preflight.NeedHarness) {
 		t.Errorf("Check = false, want true")
@@ -285,9 +257,6 @@ func TestCheckHarnessReportsEveryDescribedHarness(t *testing.T) {
 	want := "\n◇  Requirements\n" +
 		"│  ✓ git 2.50.1\n" +
 		"│  ✓ gh 2.97.0 — authenticated as carlosboeing\n" +
-		"│  ✓ jq 1.8.1\n" +
-		"│  ✓ yq v4.53.3\n" +
-		"│  ✓ openssl 3.6.3\n" +
 		"│  ✓ claude 2.1.258 — known good (2.1.237-2.1.281)\n" +
 		"│  ✓ codex 0.152.1 — unverified, outside the recorded range (0.148.0)\n" +
 		"│  ○ agy — installed, but it did not report a version\n" +
@@ -310,7 +279,7 @@ func TestCheckHarnessComparesVersionsAgainstRecordedEvidence(t *testing.T) {
 	r.answer("claude --version", "2.1.300 (Claude Code)\n", 0)
 	r.answer("agy --version", "0.1.5\n", 0)
 	r.answer("opencode --version", "opencode v2.0.15\n", 0)
-	c, buf := checker(t, r, onPath("git", "gh", "jq", "yq", "openssl", "claude", "agy", "opencode"))
+	c, buf := checker(t, r, onPath("git", "gh", "claude", "agy", "opencode"))
 
 	if !c.Check(context.Background(), preflight.NeedHarness) {
 		t.Errorf("Check = false, want true")
@@ -337,7 +306,7 @@ func TestCheckHarnessCountsARefusedInstallAsNone(t *testing.T) {
 	r := coreVersions(newRecorder())
 	r.answer("gh api user --jq .login", "carlosboeing\n", 0)
 	r.answer("opencode --version", "opencode v2.0.15\n", 0)
-	c, buf := checker(t, r, onPath("git", "gh", "jq", "yq", "openssl", "opencode"))
+	c, buf := checker(t, r, onPath("git", "gh", "opencode"))
 
 	if c.Check(context.Background(), preflight.NeedHarness) {
 		t.Errorf("Check = true, want false")
@@ -368,25 +337,26 @@ func TestCheckHarnessFailsWhenNoneIsInstalled(t *testing.T) {
 	}
 }
 
-// jq is what reads the descriptor in the shell, so without it the harness probe
-// says it was skipped rather than reporting every harness as missing
-// (lib/preflight.sh:140-141).
-func TestCheckHarnessSkipsTheProbeWithoutJq(t *testing.T) {
+// The harness probe runs without jq, because Go reads the descriptor itself:
+// a machine without jq still learns which harnesses it has, rather than a
+// skip that names a tool doctor no longer requires
+// (lib/preflight.sh:140-141 skipped it, because jq read the descriptor there).
+func TestCheckHarnessProbesWithoutJq(t *testing.T) {
 	t.Setenv("GITHUB_ACTIONS", "")
 	r := coreVersions(newRecorder())
 	r.answer("gh api user --jq .login", "carlosboeing\n", 0)
-	c, buf := checker(t, r, onPath("git", "gh", "yq", "openssl", "claude"))
+	r.answer("claude --version", "2.1.258\n", 0)
+	c, buf := checker(t, r, onPath("git", "gh", "claude"))
 
-	// jq itself is missing, so the check fails on that and not on the harness.
-	if c.Check(context.Background(), preflight.NeedHarness) {
-		t.Errorf("Check = true, want false")
+	if !c.Check(context.Background(), preflight.NeedHarness) {
+		t.Errorf("Check = false, want true")
 	}
 	report := buf.String()
-	if !strings.Contains(report, "│  ○ harness check skipped — install jq to probe installed harnesses\n") {
-		t.Errorf("report =\n%s", report)
+	if !strings.Contains(report, "│  ✓ claude 2.1.258 — known good (2.1.237-2.1.281)\n") {
+		t.Errorf("the harness probe was skipped without jq:\n%s", report)
 	}
-	if strings.Contains(report, "no harness CLI found") {
-		t.Errorf("a skipped probe still reported a verdict:\n%s", report)
+	if strings.Contains(report, "skipped") {
+		t.Errorf("a probe that runs reported a skip:\n%s", report)
 	}
 }
 
@@ -404,13 +374,13 @@ func TestCheckWithholdsAForgeCredentialFromAVersionProbe(t *testing.T) {
 		IO:       io,
 		Runner:   r,
 		Env:      []string{"PATH=/stub", "GH_TOKEN=ghp_secret", "GITHUB_TOKEN=ghs_secret"},
-		LookPath: onPath("git", "gh", "jq", "yq", "openssl", "claude"),
+		LookPath: onPath("git", "gh", "claude"),
 		Harness:  document(t),
 		OS:       "Darwin",
 	}
 	c.Check(context.Background(), preflight.NeedHarness)
 
-	for _, key := range []string{"git --version", "openssl version", "claude --version"} {
+	for _, key := range []string{"git --version", "claude --version"} {
 		spec, found := r.specFor(key)
 		if !found {
 			t.Fatalf("%s was never run: %v", key, r.argvs())

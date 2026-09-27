@@ -16,7 +16,7 @@ It reads the loop's state off the pull request, renders every pass with both leg
 crossrev doctor
 ```
 
-`doctor` names the gap and the fix rather than just reporting a gap. `yq` is the usual one on macOS — `brew install yq`. It's preinstalled on both GitHub runner families.
+`doctor` names the gap and the fix rather than just reporting a gap. The requirement set is `git` and `gh` — the binary parses JSON and YAML natively and signs nothing, so `jq`, `yq` and `openssl` are not asked for.
 
 `doctor` also verifies that `gh` is **authenticated**, not merely installed, because an unauthenticated `gh` fails at the first API call instead of at the check. And it reports which reviewer/resolver pairings your configured runner can serve — otherwise that stays invisible until a CI run fails to authenticate.
 

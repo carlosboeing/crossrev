@@ -20,7 +20,7 @@ func coverageChecker(t *testing.T, permission, yaml string) (*preflight.Checker,
 	if permission != "" {
 		r.answer("gh repo view --json viewerPermission --jq .viewerPermission", permission+"\n", 0)
 	}
-	c, buf := doctorChecker(t, r, onPath("git", "gh", "jq", "yq", "openssl", "claude", "codex"), yaml)
+	c, buf := doctorChecker(t, r, onPath("git", "gh", "claude", "codex"), yaml)
 	return c, buf
 }
 
@@ -147,7 +147,7 @@ func TestDoctorNamesGHESAsUnproven(t *testing.T) {
 	r.answer("claude --version", "2.1.258\n", 0)
 	r.answer("codex --version", "codex-cli 0.152.1\n", 0)
 	r.answer("gh repo view --json viewerPermission --jq .viewerPermission", "WRITE\n", 0)
-	c, buf := doctorChecker(t, r, onPath("git", "gh", "jq", "yq", "openssl", "claude", "codex"), defaultPairing)
+	c, buf := doctorChecker(t, r, onPath("git", "gh", "claude", "codex"), defaultPairing)
 	c.Env = []string{"GH_HOST=ghe.example.com"}
 
 	if code := c.Doctor(context.Background()); code != 0 {

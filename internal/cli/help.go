@@ -50,8 +50,8 @@ const helpBlock = `
     --keep-transcripts       Keep the harness transcript even when the leg succeeds
 
   OPTIONS on doctor
-    --level core|harness     Which preflight to run. core is git, gh, jq, yq and
-                             openssl; harness adds a model CLI. Defaults to harness
+    --level core|harness     Which preflight to run. core is git and gh;
+                             harness adds a model CLI. Defaults to harness
 
   Automated mode needs a GitHub App. Local runs do not — they use the gh
   authentication you already have.
