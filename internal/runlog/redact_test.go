@@ -79,7 +79,7 @@ func TestRedactMasksCloudKeys(t *testing.T) {
 			"key ASIAIOSFODNN7EXAMPLE here",
 			"key ASIAIOSFOD…[redacted] here"},
 		{"google api key",
-			"key AIzaABCDEF0123456789abcdef0123456789 here",
+			"key AIzaABCDEF0123456789abcdef0123456789XYZ here",
 			"key AIzaABCDEF…[redacted] here"},
 		{"google oauth token",
 			"token ya29.a0AfH6SMBxYz0123456789_abcdefghij here",
@@ -90,6 +90,9 @@ func TestRedactMasksCloudKeys(t *testing.T) {
 		{"slack user token",
 			"token xoxp-abcdefEXAMPLEabcdefEXAMPLE here",
 			"token xoxp-abcdef…[redacted] here"},
+		{"slack refresh token",
+			"token xoxe-1-1234567890-abcdefgh here",
+			"token xoxe-1-1234…[redacted] here"},
 		{"slack app token",
 			"token xapp-1-A0123456789-1234567890123-abcdef here",
 			"token xapp-1-A012…[redacted] here"},
@@ -136,18 +139,31 @@ func TestRedactMasksPrivateKeyBlocks(t *testing.T) {
 	}
 }
 
-// TestRedactMasksTheCheckoutHeader covers the AUTHORIZATION: basic form the
-// checkout persists: its base64 hides the token's own prefix from the token
-// rules, so the header is a shape of its own.
+// TestRedactMasksTheCheckoutHeader covers the authorization header the
+// checkout persists, in any letter case: its base64 hides the token's own
+// prefix from the token rules, so the header is a shape of its own.
 func TestRedactMasksTheCheckoutHeader(t *testing.T) {
-	const in = "http.https://github.com/.extraheader AUTHORIZATION: basic eC1hY2Nlc3MtdG9rZW46Z2hzXzEyMzQ1Njc4OTBhYmNkZWY="
-	const want = "http.https://github.com/.extraheader AUTHORIZATION: basic eC1hY2…[redacted]"
-	got := runlog.Redact(in)
-	if got != want {
-		t.Errorf("Redact(%q) = %q, want %q", in, got, want)
+	cases := []struct{ name, in, want string }{
+		{"upper",
+			"http.https://github.com/.extraheader AUTHORIZATION: basic eC1hY2Nlc3MtdG9rZW46Z2hzXzEyMzQ1Njc4OTBhYmNkZWY=",
+			"http.https://github.com/.extraheader AUTHORIZATION: basic eC1hY2…[redacted]"},
+		{"lower header, capital scheme",
+			"http.https://github.com/.extraheader authorization: Basic dGVzdDpzZWNyZXQ=",
+			"http.https://github.com/.extraheader authorization: Basic dGVzdD…[redacted]"},
+		{"capital header, upper scheme",
+			"Authorization: BASIC Z2l0aHViOmdocF8xMjM0NTY3ODkwYWJjZGVm",
+			"Authorization: BASIC Z2l0aH…[redacted]"},
 	}
-	if again := runlog.Redact(got); again != got {
-		t.Errorf("a second pass changed the body:\n got %q\nwant %q", again, got)
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := runlog.Redact(c.in)
+			if got != c.want {
+				t.Errorf("Redact(%q) = %q, want %q", c.in, got, c.want)
+			}
+			if again := runlog.Redact(got); again != got {
+				t.Errorf("a second pass changed the body:\n got %q\nwant %q", again, got)
+			}
+		})
 	}
 }
 
@@ -168,19 +184,24 @@ func TestRedactMasksTheCheckoutHeaderBeforeItsContents(t *testing.T) {
 }
 
 // TestRedactLeavesLookalikesAlone is the negative case per shape: a short
-// prefix, a wrong family, a block that is not a private key, and a header
-// that is not basic auth all pass through, with no notice published.
+// prefix, a wrong family, a block that is not a private key, a block whose
+// terminator names another key, and a header that is not basic auth all pass
+// through, with no notice published.
 func TestRedactLeavesLookalikesAlone(t *testing.T) {
 	cases := []struct{ name, in string }{
 		{"aws id too short", "key AKIA12 here"},
+		{"aws short identifier", "key AKIA1234567 here"},
 		{"aws id lowercase", "key akiaiosfodnn7example here"},
 		{"google key too short", "key AIza12 here"},
+		{"google key short identifier", "key AIzaConfigValue here"},
 		{"google oauth too short", "token ya29.abc here"},
 		{"slack token too short", "token xoxb-abc here"},
+		{"slack refresh token too short", "token xoxe-abc here"},
 		{"slack unknown family", "token xoxz-1234567890abcdef here"},
 		{"slack app token too short", "token xapp-abc here"},
 		{"certificate block", "-----BEGIN CERTIFICATE-----\nMIIBOgIBAAJBAKq7Z2Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3\n-----END CERTIFICATE-----\n"},
 		{"key block without terminator", "-----BEGIN RSA PRIVATE KEY-----\nMIIBOgIBAAJBAKq7Z2Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3\n"},
+		{"key block with mismatched labels", "-----BEGIN RSA PRIVATE KEY-----\nMIIBOgIBAAJBAKq7Z2Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3\n-----END EC PRIVATE KEY-----\n"},
 		{"bearer header", "extraheader = AUTHORIZATION: bearer eC1hY2Nlc3MtdG9rZW4="},
 		{"basic header too short", "AUTHORIZATION: basic abc"},
 	}
@@ -206,18 +227,20 @@ func TestRedactLeavesLookalikesAlone(t *testing.T) {
 // changes nothing.
 func TestRedactPublishNotesNewShapesOnce(t *testing.T) {
 	const body = "keys AKIAIOSFODNN7EXAMPLE ASIAIOSFODNN7EXAMPLE " +
-		"AIzaABCDEF0123456789abcdef0123456789 " +
+		"AIzaABCDEF0123456789abcdef0123456789XYZ " +
 		"ya29.a0AfH6SMBxYz0123456789_abcdefghij " +
 		"xoxb-abcdefEXAMPLEabcdefEXAMPLE " +
+		"xoxe-1-1234567890-abcdefgh " +
 		"xapp-1-A0123456789-1234567890123-abcdef\n" +
 		"-----BEGIN RSA PRIVATE KEY-----\nMIIBOgIBAAJBAKq7Z2Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3\n-----END RSA PRIVATE KEY-----\n" +
 		"AUTHORIZATION: basic eC1hY2Nlc3MtdG9rZW46Z2hzXzEyMzQ1Njc4OTBhYmNkZWY="
 	secrets := []string{
 		"AKIAIOSFODNN7EXAMPLE",
 		"ASIAIOSFODNN7EXAMPLE",
-		"AIzaABCDEF0123456789abcdef0123456789",
+		"AIzaABCDEF0123456789abcdef0123456789XYZ",
 		"ya29.a0AfH6SMBxYz0123456789_abcdefghij",
 		"xoxb-abcdefEXAMPLEabcdefEXAMPLE",
+		"xoxe-1-1234567890-abcdefgh",
 		"xapp-1-A0123456789-1234567890123-abcdef",
 		"MIIBOgIBAAJBAKq7Z2Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3",
 		"eC1hY2Nlc3MtdG9rZW46Z2hzXzEyMzQ1Njc4OTBhYmNkZWY=",

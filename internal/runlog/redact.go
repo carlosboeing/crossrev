@@ -1,6 +1,7 @@
 package runlog
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -22,17 +23,56 @@ const WithheldText = "CrossRev could not filter this text for credential shapes,
 // redacted line still names the kind of token it held.
 const mask = "…[redacted]"
 
+// pemBegin opens a PEM private-key block and captures its label. The
+// terminator is found by search rather than by pattern: Go's regexp has no
+// backreference, so one pattern cannot require the END label to match the
+// BEGIN label, and a mismatched terminator must leave the text alone.
+var pemBegin = regexp.MustCompile(`-----BEGIN ([A-Z0-9 ]*PRIVATE KEY)-----`)
+
+// redactPEM masks every PEM private-key block whose terminator carries the
+// BEGIN label, keeping the BEGIN line so a redacted line still names what
+// it held. A BEGIN line with no matching terminator passes through, and the
+// search continues after it.
+func redactPEM(in []byte) []byte {
+	var out []byte
+	rest := in
+	for {
+		loc := pemBegin.FindSubmatchIndex(rest)
+		if loc == nil {
+			return append(out, rest...)
+		}
+		after := rest[loc[1]:]
+		if bytes.HasPrefix(after, []byte(mask)) {
+			// Already masked: the terminator is gone, so a search
+			// for it could only reach a later block's.
+			out = append(out, rest[:loc[1]+len(mask)]...)
+			rest = rest[loc[1]+len(mask):]
+			continue
+		}
+		end := []byte("-----END " + string(rest[loc[2]:loc[3]]) + "-----")
+		i := bytes.Index(after, end)
+		if i < 0 {
+			out = append(out, rest[:loc[1]]...)
+			rest = after
+			continue
+		}
+		out = append(out, rest[:loc[1]]...)
+		out = append(out, mask...)
+		rest = after[i+len(end):]
+	}
+}
+
 // credentialPatterns are the credential shapes CrossRev handles, masked
 // wherever they appear (log_redact, lib/log.sh:96-107). Kept deliberately
 // broader than the tokens a run is expected to hold: a harness echoing its
 // environment on a failure path is the case this exists for.
 //
-// Order is load-bearing. The private-key block runs first: its body is
-// base64 that can itself match the token rules, so the block is consumed
-// whole before any of them see it. The checkout header runs next for the
-// same reason — its base64 hides the token's own prefix. The specific
-// token rules follow, and the generic sk- rule runs last, over text the
-// earlier rules have already masked.
+// Order is load-bearing. The private-key block runs first, in redactPEM
+// before this list: its body is base64 that can itself match the token
+// rules, so the block is consumed whole before any of them see it. The
+// checkout header runs next for the same reason — its base64 hides the
+// token's own prefix. The specific token rules follow, and the generic sk-
+// rule runs last, over text the earlier rules have already masked.
 //
 // A masked string matches nothing twice, which is where the idempotence
 // comes from: the mask breaks every charset, and the block rule consumes
@@ -47,17 +87,16 @@ var credentialPatterns = []struct {
 	re   *regexp.Regexp
 	with string
 }{
-	{regexp.MustCompile(`(?s)(-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----).*?-----END [A-Z0-9 ]*PRIVATE KEY-----`), "${1}" + mask},
-	{regexp.MustCompile(`(AUTHORIZATION: basic [A-Za-z0-9+/=]{6})[A-Za-z0-9+/=]+`), "${1}" + mask},
+	{regexp.MustCompile(`(?i)(authorization: basic [A-Za-z0-9+/=]{6})[A-Za-z0-9+/=]+`), "${1}" + mask},
 	{regexp.MustCompile(`(sk-ant-[A-Za-z0-9_-]{6})[A-Za-z0-9_-]+`), "${1}" + mask},
 	{regexp.MustCompile(`(github_pat_[A-Za-z0-9_]{6})[A-Za-z0-9_]+`), "${1}" + mask},
 	{regexp.MustCompile(`(gh[pousr]_[A-Za-z0-9]{6})[A-Za-z0-9]+`), "${1}" + mask},
 	{regexp.MustCompile(`(xai-[A-Za-z0-9_-]{6})[A-Za-z0-9_-]+`), "${1}" + mask},
-	{regexp.MustCompile(`(AKIA[0-9A-Z]{6})[0-9A-Z]+`), "${1}" + mask},
-	{regexp.MustCompile(`(ASIA[0-9A-Z]{6})[0-9A-Z]+`), "${1}" + mask},
-	{regexp.MustCompile(`(AIza[A-Za-z0-9_-]{6})[A-Za-z0-9_-]+`), "${1}" + mask},
+	{regexp.MustCompile(`\b(AKIA[0-9A-Z]{6})[0-9A-Z]{10}\b`), "${1}" + mask},
+	{regexp.MustCompile(`\b(ASIA[0-9A-Z]{6})[0-9A-Z]{10}\b`), "${1}" + mask},
+	{regexp.MustCompile(`(AIza[A-Za-z0-9_-]{6})[A-Za-z0-9_-]{29,}`), "${1}" + mask},
 	{regexp.MustCompile(`(ya29\.[A-Za-z0-9._-]{6})[A-Za-z0-9._-]+`), "${1}" + mask},
-	{regexp.MustCompile(`(xox[baprs]-[A-Za-z0-9_-]{6})[A-Za-z0-9_-]+`), "${1}" + mask},
+	{regexp.MustCompile(`(xox[baprse]-[A-Za-z0-9_-]{6})[A-Za-z0-9_-]+`), "${1}" + mask},
 	{regexp.MustCompile(`(xapp-[A-Za-z0-9_-]{6})[A-Za-z0-9_-]+`), "${1}" + mask},
 	{regexp.MustCompile(`(sk-[A-Za-z0-9_-]{6})[A-Za-z0-9_-]{12,}`), "${1}" + mask},
 }
@@ -71,7 +110,7 @@ var credentialPatterns = []struct {
 type filter func([]byte) ([]byte, error)
 
 func filterBytes(in []byte) ([]byte, error) {
-	out := in
+	out := redactPEM(in)
 	for _, pattern := range credentialPatterns {
 		out = pattern.re.ReplaceAll(out, []byte(pattern.with))
 	}
