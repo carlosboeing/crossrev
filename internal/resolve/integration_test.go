@@ -225,19 +225,21 @@ func TestIntegrationResolvePassConsumesTheReviewMarker(t *testing.T) {
 		t.Errorf("claim body = %q", e.forge.created[0].Body)
 	}
 	claimID := int64(9101)
-	if len(e.forge.edits) != 5 {
-		t.Fatalf("claim edits = %d, want 5 (recorded, pushed, review update, summary, complete)", len(e.forge.edits))
+	if len(e.forge.edits) != 4 {
+		t.Fatalf("claim edits = %d, want 4 (recorded after the push, review update, summary, complete)", len(e.forge.edits))
 	}
-	for _, id := range []int{0, 1, 3, 4} {
+	for _, id := range []int{0, 2, 3} {
 		if e.forge.edits[id].CommentID != claimID {
 			t.Errorf("edit %d targets comment %d, want the resolve claim %d", id, e.forge.edits[id].CommentID, claimID)
 		}
 	}
-	if !strings.Contains(e.forge.edits[0].Body, "Resolutions recorded; committing and replying now.") {
-		t.Errorf("first claim edit = %q", e.forge.edits[0].Body)
+	// The resolutions reach the claim only after the push lands, so the
+	// recorded and pushed edits are one post-push edit now.
+	if !strings.Contains(e.forge.edits[0].Body, "resolutions recorded") {
+		t.Errorf("first claim edit = %q, want it to record the resolutions", e.forge.edits[0].Body)
 	}
-	if !strings.Contains(e.forge.edits[1].Body, "replying to each thread now") {
-		t.Errorf("second claim edit = %q", e.forge.edits[1].Body)
+	if !strings.Contains(e.forge.edits[0].Body, "Pushed `") || !strings.Contains(e.forge.edits[0].Body, "replying to each thread now") {
+		t.Errorf("first claim edit = %q, want it after the push", e.forge.edits[0].Body)
 	}
 
 	// Replies land on the threads the marker's findings name, with the
@@ -286,7 +288,7 @@ func TestIntegrationResolvePassConsumesTheReviewMarker(t *testing.T) {
 
 	// The review pass's comment is updated in place — the same comment id the
 	// review leg created — with its findings now carrying their resolutions.
-	reviewEdit := e.forge.edits[2]
+	reviewEdit := e.forge.edits[1]
 	if reviewEdit.CommentID != 9001 {
 		t.Fatalf("review update targets comment %d, want the review claim 9001", reviewEdit.CommentID)
 	}
@@ -306,7 +308,7 @@ func TestIntegrationResolvePassConsumesTheReviewMarker(t *testing.T) {
 	}
 
 	// The final marker on the resolve claim is the pass of record.
-	final := decodeMarkerFromBody(t, e.forge.edits[4].Body)
+	final := decodeMarkerFromBody(t, e.forge.edits[3].Body)
 	if final.Leg != core.LegResolve || final.Pass != pass {
 		t.Errorf("final marker leg/pass = %s/%d, want resolve/%d", final.Leg, final.Pass, pass)
 	}
