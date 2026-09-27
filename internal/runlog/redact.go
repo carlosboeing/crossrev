@@ -138,7 +138,7 @@ var credentialPatterns = []struct {
 	{regexp.MustCompile(`\b(AKIA[0-9A-Z]{6})[0-9A-Z]{10}\b`), "${1}" + mask},
 	{regexp.MustCompile(`\b(ASIA[0-9A-Z]{6})[0-9A-Z]{10}\b`), "${1}" + mask},
 	{regexp.MustCompile(`(AIza[A-Za-z0-9_-]{6})[A-Za-z0-9_-]{29,}`), "${1}" + mask},
-	{regexp.MustCompile(`(ya29\.[A-Za-z0-9._-]{6})[A-Za-z0-9._-]+`), "${1}" + mask},
+	{regexp.MustCompile(`(ya29\.[A-Za-z0-9._-]{6})[A-Za-z0-9._-]{14,}`), "${1}" + mask},
 	{regexp.MustCompile(`(xox[baprse]-[A-Za-z0-9_-]{6})[A-Za-z0-9_-]+`), "${1}" + mask},
 	{regexp.MustCompile(`(xapp-[A-Za-z0-9_-]{6})[A-Za-z0-9_-]+`), "${1}" + mask},
 	{regexp.MustCompile(`(sk-[A-Za-z0-9_-]{6})[A-Za-z0-9_-]{12,}`), "${1}" + mask},
