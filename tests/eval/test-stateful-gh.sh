@@ -8,7 +8,8 @@
 #   3. Finding posts (pull-request review comment create, reply in thread, list, GraphQL query)
 #   4. Label moves (label ensure with colour, PR label add and remove, pr view sync)
 #   5. Thread resolve (GraphQL resolveReviewThread mutation, verified via threads query)
-#   6. Route matching precedence (CROSSREV_GH_ROUTES matches before state)
+#   6. Hyphenated state directory (numeric id order whatever the path holds)
+#   7. Route matching precedence (CROSSREV_GH_ROUTES matches before state)
 
 set -uo pipefail
 
@@ -188,7 +189,21 @@ updated_threads="$(gh api graphql -F owner=acme -F name=widget -F number=42 -f q
 resolved_state="$(jq -r '.data.repository.pullRequest.reviewThreads.nodes[] | select(.id == "'"$new_thread_id"'") | .isResolved' <<<"$updated_threads")"
 is "review threads query replays resolved state as true" "$resolved_state" "true"
 
-# 6. Route matching precedence
+# 6. Hyphenated state directory ordering
+hyphen_dir="$STATE_DIR/case-dir"
+mkdir -p "$hyphen_dir"
+cat >"$hyphen_dir/issue-comments.json" <<'EOF'
+[
+  {"id": 100, "body": "three-digit seed", "user": {"login": "author"}},
+  {"id": 9, "body": "one-digit seed", "user": {"login": "author"}}
+]
+EOF
+export CROSSREV_GH_STATE="$hyphen_dir"
+hyphen_order="$(gh api --paginate repos/acme/widget/issues/42/comments --jq '.[].id')"
+is "hyphenated state dir lists comments in numeric id order" "$hyphen_order" "$(printf '9\n100')"
+export CROSSREV_GH_STATE="$STATE_DIR"
+
+# 7. Route matching precedence
 routes_file="$STATE_DIR/routes"
 printf 'api user*\t{"login":"routed-user"}\n' >"$routes_file"
 export CROSSREV_GH_ROUTES="$routes_file"

@@ -234,10 +234,12 @@ if [[ -n "${CROSSREV_GH_STATE:-}" ]]; then
   # the static route answers alone.
   if [[ "$joined" == "api --paginate repos/"*"/issues/"*"/comments"* && ! -f "$CROSSREV_GH_STATE/frozen" ]]; then
     spool="[]"
-    for f in $(ls -1 "$CROSSREV_GH_STATE"/comment-* 2>/dev/null | sort -t- -k2 -n); do
+    # Ordered by the numeric id in the comment-<id> basename only:
+    # sorting the full path on hyphens miscounts when the state
+    # directory itself holds one, and marker parsing reads list order
+    # as chronology.
+    while IFS=$'\t' read -r cid f; do
       [[ -e "$f" ]] || continue
-      cid="${f##*-}"
-      case "$cid" in *[!0-9]*) continue;; esac
       ca="$gh_author"
       [[ -f "$CROSSREV_GH_STATE/comment-$cid.author" ]] && ca="$(cat "$CROSSREV_GH_STATE/comment-$cid.author")"
       iu="$req_issue_url"
@@ -245,7 +247,14 @@ if [[ -n "${CROSSREV_GH_STATE:-}" ]]; then
       iu="${iu:-https://api.github.com/repos/acme/widget/issues/42}"
       spool="$(jq -c --argjson id "$cid" --arg a "$ca" --arg iu "$iu" --rawfile body "$f" \
         '. + [{id:$id, body:$body, user:{login:$a}, created_at:"2026-09-09T00:00:00Z", issue_url:$iu}]' <<<"$spool")"
-    done
+    # The if, not a case: bash 3.2 misparses case with continue here.
+    done < <(for _cf in "$CROSSREV_GH_STATE"/comment-[0-9]*; do
+      [[ -e "$_cf" ]] || continue
+      _cb="${_cf##*/}"
+      _cid="${_cb#comment-}"
+      if [[ "$_cid" == *[!0-9]* || -z "$_cid" ]]; then continue; fi
+      printf '%s\t%s\n' "$_cid" "$_cf"
+    done | sort -t$'\t' -k1,1n)
     if [[ "$spool" != "[]" ]]; then
       static="[]"
       if [[ -f "${CROSSREV_GH_ROUTES:-/nonexistent}" ]]; then
@@ -313,10 +322,12 @@ if [[ -n "${CROSSREV_GH_STATE:-}" ]]; then
   if [[ "$joined" == "api --method GET repos/"*"/issues/comments"* ]]; then
     match_routes
     spool="[]"
-    for f in $(ls -1 "$CROSSREV_GH_STATE"/comment-* 2>/dev/null | sort -t- -k2 -n); do
+    # Ordered by the numeric id in the comment-<id> basename only:
+    # sorting the full path on hyphens miscounts when the state
+    # directory itself holds one, and marker parsing reads list order
+    # as chronology.
+    while IFS=$'\t' read -r cid f; do
       [[ -e "$f" ]] || continue
-      cid="${f##*-}"
-      case "$cid" in *[!0-9]*) continue;; esac
       ca="$gh_author"
       [[ -f "$CROSSREV_GH_STATE/comment-$cid.author" ]] && ca="$(cat "$CROSSREV_GH_STATE/comment-$cid.author")"
       # The repository-wide path names no issue, so only the stored URL
@@ -325,7 +336,14 @@ if [[ -n "${CROSSREV_GH_STATE:-}" ]]; then
       [[ -f "$CROSSREV_GH_STATE/comment-$cid.issue" ]] && iu="$(cat "$CROSSREV_GH_STATE/comment-$cid.issue")"
       spool="$(jq -c --argjson id "$cid" --arg a "$ca" --arg iu "$iu" --rawfile body "$f" \
         '. + [{id:$id, body:$body, user:{login:$a}, created_at:"2026-09-09T00:00:00Z", issue_url:$iu}]' <<<"$spool")"
-    done
+    # The if, not a case: bash 3.2 misparses case with continue here.
+    done < <(for _cf in "$CROSSREV_GH_STATE"/comment-[0-9]*; do
+      [[ -e "$_cf" ]] || continue
+      _cb="${_cf##*/}"
+      _cid="${_cb#comment-}"
+      if [[ "$_cid" == *[!0-9]* || -z "$_cid" ]]; then continue; fi
+      printf '%s\t%s\n' "$_cid" "$_cf"
+    done | sort -t$'\t' -k1,1n)
     printf '%s\n' "$spool" | emit
     exit 0
   fi
