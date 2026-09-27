@@ -8,6 +8,12 @@
 #   3. Finding posts (pull-request review comment create, reply in thread, list, GraphQL query)
 #   4. Label moves (label ensure with colour, PR label add and remove, pr view sync)
 #   5. Thread resolve (GraphQL resolveReviewThread mutation, verified via threads query)
+#   8. Review thread isolation (a number=7 query excludes pull 42 threads)
+#   9. PR label isolation (list, add, remove and pr view per owner, repo, number)
+#   10. Repo label isolation (single read, list, create, recolour per repo)
+#   11. Issue comment isolation (single read, edit, repo-wide list per repo)
+#   12. PR metadata isolation (pr view answers its own number and repo only)
+#   13. Git objects (refs per repo; blobs, trees and commits content-addressed)
 #   6. Hyphenated state directory (numeric id order whatever the path holds)
 #   7. Route matching precedence (CROSSREV_GH_ROUTES matches before state)
 
@@ -99,7 +105,7 @@ is "created comment replays its own issue_url" "$other_url" "https://api.github.
 claim_url="$(gh api --paginate repos/acme/widget/issues/42/comments --jq '.[] | select(.id == '"$claim_id"') | .issue_url')"
 is "claim keeps its own issue_url" "$claim_url" "https://api.github.com/repos/acme/widget/issues/42"
 
-wide_url="$(gh api --method GET repos/acme/widget/issues/comments --jq '.[] | select(.id == '"$other_id"') | .issue_url')"
+wide_url="$(gh api --method GET repos/other/repo/issues/comments --jq '.[] | select(.id == '"$other_id"') | .issue_url')"
 is "repository-wide list replays the stored issue_url" "$wide_url" "https://api.github.com/repos/other/repo/issues/7"
 
 issue42_ids="$(gh api --paginate repos/acme/widget/issues/42/comments --jq '.[].id')"
@@ -116,7 +122,7 @@ page1_ids="$(gh api --method GET repos/acme/widget/issues/comments -F per_page=2
 is "repo-wide comments page 1 respects per_page" "$page1_ids" "$(printf '1001\n1002')"
 
 page2_ids="$(gh api --method GET repos/acme/widget/issues/comments -F per_page=2 -F page=2 --jq '.[].id')"
-is "repo-wide comments page 2 returns next slice" "$page2_ids" "$(printf '%s\n%s' "$claim_id" "$other_id")"
+is "repo-wide comments page 2 returns next slice" "$page2_ids" "$claim_id"
 
 page3_ids="$(gh api --method GET repos/acme/widget/issues/comments -F per_page=2 -F page=3 --jq '.[].id')"
 is "repo-wide comments past end returns empty array" "$page3_ids" ""
@@ -213,6 +219,88 @@ is "resolveReviewThread mutation returns isResolved true" "$(jq -r .data.resolve
 updated_threads="$(gh api graphql -F owner=acme -F name=widget -F number=42 -f query="$threads_query")"
 resolved_state="$(jq -r '.data.repository.pullRequest.reviewThreads.nodes[] | select(.id == "'"$new_thread_id"'") | .isResolved' <<<"$updated_threads")"
 is "review threads query replays resolved state as true" "$resolved_state" "true"
+
+# 8. Second-PR isolation for review threads
+threads7="$(gh api graphql -F owner=acme -F name=widget -F number=7 -f query="$threads_query")"
+hasnt "threads query for pull 7 excludes the pull 42 finding" "$threads7" "finding 1"
+hasnt "threads query for pull 7 excludes the seeded pull 42 thread" "$threads7" "Existing review thread comment"
+hasnt "threads query for pull 7 excludes the pull 42 reply" "$threads7" "reply explaining fix"
+has "threads query for pull 42 still lists the finding" "$threads_json" "finding 1"
+
+# 9. Second-PR isolation for PR labels
+gh api --method POST repos/other/repo/issues/7/labels -f labels[]=crossrev/other-pr >/dev/null
+labels42_after="$(gh api repos/acme/widget/issues/42/labels --jq '.[].name')"
+hasnt "issue 42 labels exclude the other issue's label" "$labels42_after" "crossrev/other-pr"
+labels7="$(gh api repos/other/repo/issues/7/labels --jq '.[].name')"
+has "issue 7 labels keep their own label" "$labels7" "crossrev/other-pr"
+hasnt "issue 7 labels exclude issue 42's awaiting-review" "$labels7" "crossrev/awaiting-review"
+hasnt "issue 7 labels exclude the seeded enhancement" "$labels7" "enhancement"
+gh api --method POST repos/acme/widget/issues/42/labels -f labels[]=crossrev/scratch >/dev/null
+gh api --method DELETE repos/acme/widget/issues/42/labels/crossrev%2Fscratch >/dev/null
+labels7_kept="$(gh api repos/other/repo/issues/7/labels --jq '.[].name')"
+has "removing a label on 42 keeps issue 7's labels" "$labels7_kept" "crossrev/other-pr"
+prview7_labels="$(gh pr view 7 --repo acme/widget --json labels --jq '.labels[].name' 2>/dev/null || true)"
+hasnt "pr view 7 excludes issue 42's labels" "$prview7_labels" "crossrev/awaiting-review"
+prview42_labels="$(gh pr view 42 --repo acme/widget --json labels --jq '.labels[].name')"
+has "pr view 42 keeps its own labels" "$prview42_labels" "crossrev/awaiting-review"
+
+# 10. Second-repo isolation for repo labels
+other_single_rc=0
+gh api repos/other/repo/labels/crossrev%2Fawaiting-review >/dev/null 2>&1 || other_single_rc=$?
+is "single label read on another repo exits 1" "$other_single_rc" "1"
+other_repo_labels="$(gh api repos/other/repo/labels --jq '.[].name' 2>/dev/null || true)"
+hasnt "other repo label list excludes this repo's created label" "$other_repo_labels" "crossrev/awaiting-review"
+gh api --method POST repos/other/repo/labels -f name=other-only -f color=ffffff >/dev/null
+acme_repo_labels="$(gh api repos/acme/widget/labels --jq '.[].name')"
+hasnt "this repo label list excludes the other repo's label" "$acme_repo_labels" "other-only"
+gh api --method PATCH repos/other/repo/labels/bug -f color=000000 >/dev/null
+bug_color="$(gh api repos/acme/widget/labels/bug --jq .color)"
+is "recolour on another repo keeps this repo's colour" "$bug_color" "d73a4a"
+
+# 11. Second-PR isolation for issue comments
+other_read_rc=0
+gh api repos/other/repo/issues/comments/"$claim_id" >/dev/null 2>&1 || other_read_rc=$?
+is "single comment read on another repo exits 1" "$other_read_rc" "1"
+gh api --method PATCH repos/other/repo/issues/comments/"$other_id" -f body='unrelated note edited' >/dev/null
+issue42_bodies="$(gh api --paginate repos/acme/widget/issues/42/comments --jq '.[].body')"
+hasnt "edited other-issue body is absent from issue 42 list" "$issue42_bodies" "unrelated note edited"
+issue7_bodies="$(gh api --paginate repos/other/repo/issues/7/comments --jq '.[].body')"
+has "edited body replays on its own issue" "$issue7_bodies" "unrelated note edited"
+wide_acme="$(gh api --method GET repos/acme/widget/issues/comments --jq '.[].id')"
+hasnt "repo-wide list for acme/widget excludes the other repo comment" "$wide_acme" "$other_id"
+wide_other="$(gh api --method GET repos/other/repo/issues/comments --jq '.[].id')"
+has "repo-wide list for other/repo includes its own comment" "$wide_other" "$other_id"
+hasnt "repo-wide list for other/repo excludes acme/widget seeds" "$wide_other" "1001"
+
+# 12. Second-PR isolation for PR metadata
+pr7_title="$(gh pr view 7 --repo acme/widget --json number,title --jq .title)"
+is "pr view 7 does not replay the seeded title" "$pr7_title" "Pull Request"
+pr42_other_repo="$(gh pr view 42 --repo other/repo --json number,title --jq .title)"
+is "pr view 42 on another repo does not replay the seed" "$pr42_other_repo" "Pull Request"
+pr42_same_repo="$(gh pr view 42 --repo acme/widget --json number,title --jq .title)"
+is "pr view 42 on its repo still replays the seed" "$pr42_same_repo" "Add refresh helper"
+
+# 13. Git objects: refs are per-repo, objects are content-addressed
+printf '{"ref":"refs/heads/feature-x","sha":"1111111111111111111111111111111111111111"}' \
+  | gh api --method POST repos/acme/widget/git/refs --input - >/dev/null
+other_ref_rc=0
+gh api repos/other/repo/git/refs/heads/feature-x >/dev/null 2>&1 || other_ref_rc=$?
+is "ref read on another repo exits 1" "$other_ref_rc" "1"
+own_ref_sha="$(gh api repos/acme/widget/git/refs/heads/feature-x --jq .object.sha)"
+is "ref read on its repo replays the sha" "$own_ref_sha" "1111111111111111111111111111111111111111"
+printf '{"ref":"refs/heads/feature-x","sha":"2222222222222222222222222222222222222222","force":true}' \
+  | gh api --method PATCH repos/other/repo/git/refs/heads/feature-x --input - >/dev/null
+own_ref_kept="$(gh api repos/acme/widget/git/refs/heads/feature-x --jq .object.sha)"
+is "patching the ref on another repo keeps this repo's sha" "$own_ref_kept" "1111111111111111111111111111111111111111"
+blob_sha="$(printf '{"content":"hello-blob"}' | gh api --method POST repos/acme/widget/git/blobs --input - --jq .sha)"
+blob_cross="$(gh api repos/other/repo/git/blobs/"$blob_sha" --jq .content)"
+is "blob content is addressable from another repo path by design" "$blob_cross" "hello-blob"
+tree_sha="$(printf '{"base_tree":"x","tree":[]}' | gh api --method POST repos/acme/widget/git/trees --input - --jq .sha)"
+tree_cross="$(gh api repos/other/repo/git/trees/"$tree_sha" --jq '.tree | length')"
+is "tree object is addressable from another repo path by design" "$tree_cross" "0"
+commit_sha="$(printf '{"message":"gen 1","tree":"abc"}' | gh api --method POST repos/acme/widget/git/commits --input - --jq .sha)"
+commit_cross="$(gh api repos/other/repo/git/commits/"$commit_sha" --jq .message)"
+is "commit object is addressable from another repo path by design" "$commit_cross" "gen 1"
 
 # 6. Hyphenated state directory ordering
 hyphen_dir="$STATE_DIR/case-dir"
