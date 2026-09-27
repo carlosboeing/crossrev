@@ -170,10 +170,16 @@ func TestRedactMasksTheCheckoutHeader(t *testing.T) {
 // TestRedactMasksTheCheckoutHeaderBeforeItsContents pins the order: the
 // header's base64 can itself hold a token-shaped substring, so the header
 // rule runs before the token rules and the whole value is masked rather
-// than the fragment.
+// than the fragment. The value is a fabricated shape, not a credential: it
+// decodes to a username and password pair, and the fragment it carries
+// matches the AWS rule on its own, which is what makes the order load-bearing.
 func TestRedactMasksTheCheckoutHeaderBeforeItsContents(t *testing.T) {
-	const in = "AUTHORIZATION: basic eC1hAKIAIOSFODNN7EXAMPLEY2Nlcg=="
-	const want = "AUTHORIZATION: basic eC1hAK…[redacted]"
+	const value = "AKIAIOSFODNN7EXAMPLE+1NvbWVVc2VyOnNvbWVwYXNz"
+	const in = "AUTHORIZATION: basic " + value
+	const want = "AUTHORIZATION: basic AKIAIO…[redacted]"
+	if alone := runlog.Redact(value); strings.Contains(alone, "AKIAIOSFODNN7EXAMPLE") {
+		t.Fatalf("the fragment no longer matches the AWS rule alone: %q", alone)
+	}
 	got := runlog.Redact(in)
 	if got != want {
 		t.Errorf("Redact(%q) = %q, want %q", in, got, want)
@@ -181,12 +187,16 @@ func TestRedactMasksTheCheckoutHeaderBeforeItsContents(t *testing.T) {
 	if strings.Contains(got, "AKIAIOSFODNN7EXAMPLE") {
 		t.Errorf("the header's contents survived inside the masked body: %q", got)
 	}
+	if again := runlog.Redact(got); again != got {
+		t.Errorf("a second pass changed the body:\n got %q\nwant %q", again, got)
+	}
 }
 
 // TestRedactLeavesLookalikesAlone is the negative case per shape: a short
 // prefix, a wrong family, a block that is not a private key, a block whose
-// terminator names another key, and a header that is not basic auth all pass
-// through, with no notice published.
+// terminator names another key, a header that is not basic auth, and a basic
+// header whose value is prose rather than a username and password pair all
+// pass through, with no notice published.
 func TestRedactLeavesLookalikesAlone(t *testing.T) {
 	cases := []struct{ name, in string }{
 		{"aws id too short", "key AKIA12 here"},
@@ -204,6 +214,8 @@ func TestRedactLeavesLookalikesAlone(t *testing.T) {
 		{"key block with mismatched labels", "-----BEGIN RSA PRIVATE KEY-----\nMIIBOgIBAAJBAKq7Z2Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3\n-----END EC PRIVATE KEY-----\n"},
 		{"bearer header", "extraheader = AUTHORIZATION: bearer eC1hY2Nlc3MtdG9rZW4="},
 		{"basic header too short", "AUTHORIZATION: basic abc"},
+		{"basic header is prose", "Authorization: Basic authentication"},
+		{"basic header without user and password", "Authorization: Basic aGVsbG8gd29ybGQ="},
 	}
 	var noLog *runlog.Log
 	for _, c := range cases {
