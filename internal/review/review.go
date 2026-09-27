@@ -138,6 +138,39 @@ func (l *Leg) Run(ctx context.Context, req Request) (out Result) {
 		}
 	}
 
+	// The pinned worktree, before the claim: an empty Workdir creates a
+	// clean detached worktree at the pull request head, reused across every
+	// call the pass makes, and an explicit one stays as the override it is
+	// with its HEAD proved against the head. A refusal here leaves no
+	// claim, the way the resolve leg refuses before claiming.
+	if l.VCS != nil {
+		wt, created, err := l.prepareWorktree(ctx, req, loaded)
+		if err != nil {
+			out.Outcome = OutcomeError
+			out.Err = err
+			return out
+		}
+		req.Workdir = wt
+		if created {
+			// The leg-end removal hook: a clean finish removes the
+			// worktree, a failed leg keeps it for debugging. lib/run.sh:96-99
+			// keeps the resolve worktree the same way, and the command
+			// reports the kept directory.
+			defer func() {
+				if out.Err != nil {
+					if l.Log != nil {
+						l.Log.Event("worktree", "kept "+wt)
+					}
+					return
+				}
+				_ = l.VCS.RemoveWorktree(ctx, wt)
+				if l.Log != nil {
+					l.Log.Event("worktree", "removed "+wt)
+				}
+			}()
+		}
+	}
+
 	// The run header, two bare printfs after the settings are chosen and
 	// before the claim is posted (lib/run.sh:1072-1073):
 	//

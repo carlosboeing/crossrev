@@ -175,6 +175,31 @@ func (r *Repository) Head(ctx context.Context) (core.Revision, error) {
 	return core.NewRevision(text)
 }
 
+// HeadAt is Head in another directory: the revision the worktree at dir
+// has checked out. The review leg reads it to prove its pinned worktree,
+// and an explicit workdir override, sit at the pull request head.
+func (r *Repository) HeadAt(ctx context.Context, dir string) (core.Revision, error) {
+	return r.git.At(dir).Head(ctx)
+}
+
+// Fetch runs `git fetch <remote> [<refspec>]`, the ordered fallbacks both
+// legs use to reach a head the clone does not hold yet. A refused fetch is
+// an error; callers that probe several refspecs in turn ignore it.
+func (r *Repository) Fetch(ctx context.Context, remote, refspec string) error {
+	args := []string{"fetch", remote}
+	if refspec != "" {
+		args = append(args, refspec)
+	}
+	output, err := r.Run(ctx, args...)
+	if err != nil {
+		return err
+	}
+	if !output.OK() {
+		return fmt.Errorf("git fetch: %s", output.Stderr)
+	}
+	return nil
+}
+
 // HasCommit reports whether the object database holds this revision as a
 // commit. It is `git cat-file -e "<sha>^{commit}"` (lib/run.sh:1873), whose
 // exit status is the whole answer.

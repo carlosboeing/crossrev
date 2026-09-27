@@ -206,6 +206,8 @@ func reviewCommand(ctx context.Context, out *ui.IO, doc harness.Document, req cl
 
 	leg := reviewLeg(d, client, cfg)
 	leg.Config = cfg
+	// No Workdir: an empty one pins a clean detached worktree at the pull
+	// request head, so the harness never runs in the operator checkout.
 	result := leg.Run(ctx, review.Request{
 		PR:              req.PR,
 		Repo:            repo,
@@ -213,14 +215,17 @@ func reviewCommand(ctx context.Context, out *ui.IO, doc harness.Document, req cl
 		Continuation:    req.Continuation,
 		HarnessOverride: req.HarnessOverride,
 		Author:          author,
-		Workdir:         d.repo.Dir(),
 		RunID:           runlog.RunID(),
 	})
 	status, err := reportLeg(out, result.Messages, result.Err)
 	if result.Nudge && !req.NoTips {
 		upgradeNudge(out, cfg)
 	}
-	closeRun(out, d.log, status, result.Err, "")
+	// The worktree the review leg works in is named from the same two facts
+	// the leg derives it from, because a failed leg keeps its worktree for
+	// debugging and this process holds no other handle on it.
+	worktree, _ := vcs.WorktreeDir(repo, req.PR)
+	closeRun(out, d.log, status, result.Err, worktree)
 	return status, err
 }
 
