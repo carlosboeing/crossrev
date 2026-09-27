@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/carlosboeing/crossrev/tests/eval/manifest.schema.json",
+  "title": "CrossRev offline full-loop eval case manifest",
+  "description": "One frozen repository, one pull request, and the arms to run against it. The manifest never names a private repository, record, or path: repo is a stand-in slug (owner/name), frozen_repo is a local bare repository built for the eval, and every SHA is content in that repository. tests/eval/run-loop.sh enforces this file with jq (there is no other validator); the shape below is kept in step with that enforcement by tests/eval/self-test.sh.",
+  "type": "object",
+  "required": ["version", "repo", "pr", "frozen_repo", "reviewer", "resolver", "trusted_user", "cases"],
+  "properties": {
+    "version": {"type": "integer", "const": 1},
+    "repo": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$",
+      "description": "Stand-in slug the legs see (for example acme/widget). A slug, never a path or URL."
+    },
+    "pr": {"type": "integer", "minimum": 1},
+    "frozen_repo": {
+      "type": "string", "minLength": 1,
+      "description": "Local bare repository the runner copies fresh per case and arm. A throwaway fixture path, never a private checkout."
+    },
+    "reviewer": {
+      "type": "object",
+      "required": ["harness", "model"],
+      "properties": {
+        "harness": {"type": "string", "enum": ["claude", "agy", "grok", "kimi", "opencode"]},
+        "model": {"type": "string", "minLength": 1}
+      },
+      "description": "Explicit model pin committed into every synthetic base revision. Never codex: tests/stub/codex is a tripwire that exits loudly instead of running."
+    },
+    "resolver": {
+      "type": "object",
+      "required": ["harness", "model"],
+      "properties": {
+        "harness": {"type": "string", "enum": ["claude", "agy", "grok", "kimi", "opencode"]},
+        "model": {"type": "string", "minLength": 1}
+      }
+    },
+    "trusted_user": {
+      "type": "string", "minLength": 1,
+      "description": "Login the stand-in reports for gh api user and attributes stand-in writes to."
+    },
+    "cases": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "base", "head", "base_branch", "head_branch", "mode", "arms"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$"},
+          "base": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+          "head": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+          "base_branch": {"type": "string", "minLength": 1},
+          "head_branch": {"type": "string", "minLength": 1},
+          "mode": {"type": "string", "enum": ["full", "planted"]},
+          "arms": {
+            "type": "array", "minItems": 1,
+            "items": {
+              "type": "object",
+              "required": ["id"],
+              "properties": {
+                "id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$"},
+                "reviewer_harness": {"type": "string", "enum": ["claude", "agy", "grok", "kimi", "opencode"]},
+                "resolver_harness": {"type": "string", "enum": ["claude", "agy", "grok", "kimi", "opencode"]},
+                "review_payloads": {
+                  "type": "array", "minItems": 1,
+                  "description": "Stubbed reviewer answers, one per pass; the last repeats. __EVAL_HEAD__ and __EVAL_BASE__ are substituted with the head under review and the synthetic base revision before each review leg. Full mode only."
+                },
+                "resolve_payload": {
+                  "type": "object",
+                  "description": "Stubbed resolver answer ({blocked, commit_subject, summary, resolutions})."
+                },
+                "resolve_edit": {
+                  "type": ["string", "null"],
+                  "description": "Shell snippet the resolver stub runs in the checkout to model the code change. Null means the resolver changes nothing."
+                },
+                "real_findings": {
+                  "type": "array",
+                  "description": "Findings transcribed from a real review run. Planted mode only; concatenated with planted_findings into the one review marker."
+                },
+                "planted_findings": {
+                  "type": "array",
+                  "description": "Synthetic findings. Planted mode only. Each carries id (16 hex characters), path, line, side, severity, category, pre_existing, title, why, fix."
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
