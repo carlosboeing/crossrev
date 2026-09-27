@@ -66,9 +66,11 @@ func TestRedactFileLeavesEverythingElseAlone(t *testing.T) {
 }
 
 func TestRedactPortedNPMToken(t *testing.T) {
-	// npm.go generates npm_ followed by 36 alphanumeric characters.
-	credential := "npm_" + strings.Repeat("a0", 18)
-	if got := runlog.Redact(credential); got != "npm_a0a0a0…[redacted]" {
+	// npm.go generates npm_ followed by 36 alphanumeric characters. The body
+	// varies so the token clears the ported upstream entropy threshold; the
+	// repeated-character lookalike is covered in ported_rules_test.go.
+	credential := fragments("npm_", varied(alphaWord, 36))
+	if got := runlog.Redact(credential); got != "npm_aB1cD2…[redacted]" {
 		t.Errorf("Redact(npm token) = %q", got)
 	}
 	nearMiss := "npm_" + strings.Repeat("a0", 17)
