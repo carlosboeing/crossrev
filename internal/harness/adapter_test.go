@@ -154,6 +154,7 @@ func TestEveryAdapterStripsTheForgeCredentialsAndForeignVendorCredentials(t *tes
 			if err != nil {
 				t.Fatalf("building the spec: %v", err)
 			}
+			entry, _ := doc.For(name)
 
 			held := map[string]bool{}
 			for _, entry := range spec.Env {
@@ -177,13 +178,18 @@ func TestEveryAdapterStripsTheForgeCredentialsAndForeignVendorCredentials(t *tes
 			if !held["PATH"] || !held["HOME"] {
 				t.Error("the child lost a variable nothing asked to strip")
 			}
-			if spec.Stdin != nil {
+			if entry.PromptTransport == "stdin" {
+				// The prompt travels on this stdin, which reaches EOF after
+				// it — the open-stdin block the CLIs exhibit cannot recur.
+				if string(spec.Stdin) != inv.Prompt.Argument() {
+					t.Error("a stdin transport carries the prompt on stdin")
+				}
+			} else if spec.Stdin != nil {
 				t.Error("stdin has to be at EOF; the CLIs block on an open one")
 			}
 			if spec.Dir != inv.Workdir {
 				t.Errorf("Dir = %q, want the checkout", spec.Dir)
 			}
-			entry, _ := doc.For(name)
 			if spec.Path != entry.Binary {
 				t.Errorf("Path = %q, want the descriptor's binary %q", spec.Path, entry.Binary)
 			}

@@ -95,9 +95,15 @@ func (a *Codex) Spec(inv Invocation) (exec.Spec, error) {
 	if wanted(inv.Effort) {
 		args = append(args, "-c", "model_reasoning_effort="+inv.Effort)
 	}
-	args = append(args, inv.Prompt.Argument())
+	// `codex exec` reads the prompt from stdin when the positional prompt is
+	// `-` rather than text: "If not provided as an argument (or if `-` is
+	// used), instructions are read from stdin" (`codex exec --help`). A leg's
+	// prompt is hundreds of kilobytes, and argv is the wrong vehicle for it.
+	args = append(args, "-")
 
-	return a.spec(inv, args), nil
+	spec := a.spec(inv, args)
+	spec.Stdin = promptStdin(inv)
+	return spec, nil
 }
 
 // Envelope reads what the child produced (lib/adapters/codex.sh:99-166).
