@@ -27,9 +27,16 @@ const mask = "…[redacted]"
 // broader than the tokens a run is expected to hold: a harness echoing its
 // environment on a failure path is the case this exists for.
 //
-// Order is load-bearing and matches the order of the -e flags. The generic
-// sk- rule runs last, over text the first rule has already masked, and a masked
-// string no longer matches it — which is where the idempotence comes from.
+// Order is load-bearing. The private-key block runs first: its body is
+// base64 that can itself match the token rules, so the block is consumed
+// whole before any of them see it. The checkout header runs next for the
+// same reason — its base64 hides the token's own prefix. The specific
+// token rules follow, and the generic sk- rule runs last, over text the
+// earlier rules have already masked.
+//
+// A masked string matches nothing twice, which is where the idempotence
+// comes from: the mask breaks every charset, and the block rule consumes
+// the terminator its match needs.
 //
 // Byte-oriented, like the LC_ALL=C the Bash filter pins. Every class here is
 // ASCII, and Go's regexp decodes a byte that is not valid UTF-8 as one
@@ -40,10 +47,18 @@ var credentialPatterns = []struct {
 	re   *regexp.Regexp
 	with string
 }{
+	{regexp.MustCompile(`(?s)(-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----).*?-----END [A-Z0-9 ]*PRIVATE KEY-----`), "${1}" + mask},
+	{regexp.MustCompile(`(AUTHORIZATION: basic [A-Za-z0-9+/=]{6})[A-Za-z0-9+/=]+`), "${1}" + mask},
 	{regexp.MustCompile(`(sk-ant-[A-Za-z0-9_-]{6})[A-Za-z0-9_-]+`), "${1}" + mask},
 	{regexp.MustCompile(`(github_pat_[A-Za-z0-9_]{6})[A-Za-z0-9_]+`), "${1}" + mask},
 	{regexp.MustCompile(`(gh[pousr]_[A-Za-z0-9]{6})[A-Za-z0-9]+`), "${1}" + mask},
 	{regexp.MustCompile(`(xai-[A-Za-z0-9_-]{6})[A-Za-z0-9_-]+`), "${1}" + mask},
+	{regexp.MustCompile(`(AKIA[0-9A-Z]{6})[0-9A-Z]+`), "${1}" + mask},
+	{regexp.MustCompile(`(ASIA[0-9A-Z]{6})[0-9A-Z]+`), "${1}" + mask},
+	{regexp.MustCompile(`(AIza[A-Za-z0-9_-]{6})[A-Za-z0-9_-]+`), "${1}" + mask},
+	{regexp.MustCompile(`(ya29\.[A-Za-z0-9._-]{6})[A-Za-z0-9._-]+`), "${1}" + mask},
+	{regexp.MustCompile(`(xox[baprs]-[A-Za-z0-9_-]{6})[A-Za-z0-9_-]+`), "${1}" + mask},
+	{regexp.MustCompile(`(xapp-[A-Za-z0-9_-]{6})[A-Za-z0-9_-]+`), "${1}" + mask},
 	{regexp.MustCompile(`(sk-[A-Za-z0-9_-]{6})[A-Za-z0-9_-]{12,}`), "${1}" + mask},
 }
 
