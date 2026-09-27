@@ -189,8 +189,8 @@ func TestEveryCommandIsWiredAndReachesItsOwnHandler(t *testing.T) {
 	}
 
 	// A command answers here rather than reaching a network: the sandbox is a
-	// directory that is not a checkout, with the five core tools stubbed so
-	// the two config commands get past preflight_require_yq.
+	// directory that is not a checkout, with the core tools stubbed so the two
+	// config commands get past requireYq.
 	sandboxPATH(t, coreToolStubs())
 
 	answers := map[string]string{}
@@ -490,8 +490,9 @@ type stub struct {
 	body string
 }
 
-// coreToolStubs are the five preflight probes (lib/preflight.sh:86), each
-// answering a version, with gh also answering the first identity probe.
+// coreToolStubs are the two probes preflight makes (lib/preflight.sh:86), each
+// answering a version, with gh also answering the first identity probe, plus
+// yq for requireYq, which the two config commands still run.
 func coreToolStubs() []stub {
 	stubs := []stub{{
 		name: "gh",
@@ -501,7 +502,7 @@ func coreToolStubs() []stub {
 			"  'repo view'*) echo '{}' ;;\n" +
 			"  *) exit 1 ;;\nesac\n",
 	}}
-	for _, tool := range []string{"git", "jq", "yq", "openssl"} {
+	for _, tool := range []string{"git", "yq"} {
 		stubs = append(stubs, stub{name: tool, body: "#!/bin/sh\necho '" + tool + " 1.2.3'\n"})
 	}
 	return stubs

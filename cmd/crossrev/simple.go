@@ -8,7 +8,6 @@ import (
 
 	"github.com/carlosboeing/crossrev/internal/cli"
 	"github.com/carlosboeing/crossrev/internal/core"
-	"github.com/carlosboeing/crossrev/internal/exec"
 	"github.com/carlosboeing/crossrev/internal/harness"
 	"github.com/carlosboeing/crossrev/internal/preflight"
 	"github.com/carlosboeing/crossrev/internal/ui"
@@ -17,11 +16,10 @@ import (
 // doctor is the `doctor` arm of bin/crossrev:163-180.
 //
 // Four probes and one closing line, and the closing line's wording is the
-// verdict: everything installed, or fix what is marked. The pairing report runs
-// only when yq is on PATH, which is the shell's `command -v yq` at
-// bin/crossrev:170 — not because this binary needs yq, but because the report
-// is what an operator and the composite action both read, and a machine
-// without yq has a different answer to give first.
+// verdict: everything installed, or fix what is marked. The pairing report
+// runs whenever the configuration loads, which is what `cfg_load ""` inside
+// the same branch does: a configuration that refuses ends the command with
+// that refusal.
 //
 // The Runner is the orchestrator's. The three gh identity probes are the
 // orchestrator asking GitHub who it is and they carry the forge credential;
@@ -43,15 +41,13 @@ func doctor(ctx context.Context, out *ui.IO, doc harness.Document, req cli.Docto
 	if !checker.CheckQuarantine() {
 		ok = false
 	}
-	if _, err := exec.LookPath("yq"); err == nil {
-		cfg, err := d.loadConfig(ctx, core.Revision{})
-		if err != nil {
-			return cli.ExitFailure, reportFatal(out, err)
-		}
-		checker.Config = cfg
-		if !checker.ReportPairings(cfg.Get(".runner")) {
-			ok = false
-		}
+	cfg, err := d.loadConfig(ctx, core.Revision{})
+	if err != nil {
+		return cli.ExitFailure, reportFatal(out, err)
+	}
+	checker.Config = cfg
+	if !checker.ReportPairings(cfg.Get(".runner")) {
+		ok = false
 	}
 	checker.ReportWorktrees()
 	if ok {
@@ -111,9 +107,8 @@ func configBacklog(ctx context.Context, out *ui.IO, doc harness.Document) (int, 
 // requireYq is preflight_require_yq, which `config` and `init` run before they
 // load anything (bin/crossrev:155, lib/init.sh:49).
 //
-// It stays a requirement even though this binary reads YAML itself, for the
-// reason preflight's package comment gives: the report is what an operator and
-// the composite action both read, and a machine set up for CrossRev has yq.
+// Only those two commands ask: doctor stopped requiring yq with jq and
+// openssl, and every other command loads the configuration without asking.
 func requireYq(ctx context.Context, out *ui.IO, doc harness.Document) error {
 	_ = ctx
 	checker := &preflight.Checker{IO: out, Harness: doc}

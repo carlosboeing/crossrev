@@ -25,7 +25,7 @@ Restate the reasoning here rather than pointing at where it was written down.
 
 - [ ] Conventional Commit subject (`type(scope): description`, imperative, <= 72 chars)
 - [ ] Nothing in the body names a private repository, a workbench path, or a path on a personal machine
-- [ ] No new runtime, package manager or dependency beyond bash, `gh`, `jq`, `yq`, `openssl`
+- [ ] No new runtime, package manager or dependency beyond bash, `gh`, `jq`, `yq`
 - [ ] No GitHub credential reaches the agent process
 - [ ] Policy still read from the pull request's base revision, never its head
 - [ ] Markers and the `crossrev/*` label namespace still lowercase

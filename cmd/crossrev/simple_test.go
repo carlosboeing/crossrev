@@ -36,16 +36,16 @@ func harnessStub() stub {
 	return stub{name: "claude", body: "#!/bin/sh\necho 'claude 1.2.3'\n"}
 }
 
-// doctor asks for a harness, not just the core five (bin/crossrev:165:
+// doctor asks for a harness, not just the core two (bin/crossrev:165:
 // `preflight_check harness || doctor_ok=1`).
 //
-// The requirement string is the whole of the difference. NeedCore probes git,
-// gh, jq, yq and openssl; NeedHarness probes those and then every harness the
-// descriptor drives, and refuses when none of them is installed. A machine with
-// the five tools and no model CLI is set up for nothing, and asking for the
-// core set alone tells it everything is fine.
+// The requirement string is the whole of the difference. NeedCore probes git
+// and gh; NeedHarness probes those and then every harness the descriptor
+// drives, and refuses when none of them is installed. A machine with the two
+// tools and no model CLI is set up for nothing, and asking for the core set
+// alone tells it everything is fine.
 func TestDoctorRequiresAHarnessAndNotJustTheCoreTools(t *testing.T) {
-	sandboxPATH(t, coreToolStubs()) // the five, and no harness
+	sandboxPATH(t, coreToolStubs()) // the core tools, and no harness
 
 	status, report := doctorRun(t, cli.DoctorRequest{})
 
@@ -62,7 +62,7 @@ func TestDoctorRequiresAHarnessAndNotJustTheCoreTools(t *testing.T) {
 // action asks doctor for the lower level. Regression one shipped because
 // there was no way to ask.
 func TestDoctorAtCoreLevelPassesWithNoHarnessInstalled(t *testing.T) {
-	sandboxPATH(t, coreToolStubs()) // the five, and no harness
+	sandboxPATH(t, coreToolStubs()) // the core tools, and no harness
 
 	status, report := doctorRun(t, cli.DoctorRequest{Level: "core"})
 	if status != cli.ExitOK {
@@ -77,12 +77,42 @@ func TestDoctorAtCoreLevelPassesWithNoHarnessInstalled(t *testing.T) {
 // The default is unchanged, which is what keeps interactive use and every
 // model-running leg asking for the harness.
 func TestDoctorDefaultsToHarnessLevel(t *testing.T) {
-	sandboxPATH(t, coreToolStubs()) // the five, and no harness
+	sandboxPATH(t, coreToolStubs()) // the core tools, and no harness
 
 	status, report := doctorRun(t, cli.DoctorRequest{})
 	if status != cli.ExitFailure {
 		t.Errorf("an unset level answered status %d, want %d — the default must stay harness:\n%s",
 			status, cli.ExitFailure, report)
+	}
+}
+
+// jq, yq and openssl left doctor's required set, so a PATH holding only git,
+// gh and a harness passes and still prints the pairing report.
+func TestDoctorPassesWithoutJqYqAndOpenssl(t *testing.T) {
+	sandboxPATH(t, []stub{
+		{name: "git", body: "#!/bin/sh\necho 'git version 2.50.1'\n"},
+		{
+			name: "gh",
+			body: "#!/bin/sh\ncase \"$*\" in\n" +
+				"  '--version') echo 'gh version 2.40.0' ;;\n" +
+				"  'api user --jq .login') echo tester ;;\n" +
+				"  *) exit 1 ;;\nesac\n",
+		},
+		harnessStub(),
+	})
+
+	status, report := doctorRun(t, cli.DoctorRequest{})
+	if status != cli.ExitOK {
+		t.Errorf("doctor answered status %d without jq, yq or openssl, want %d:\n%s",
+			status, cli.ExitOK, report)
+	}
+	if !strings.Contains(report, "Pairings on runner") {
+		t.Errorf("doctor skipped the pairing report without yq:\n%s", report)
+	}
+	for _, tool := range []string{"jq", "yq", "openssl"} {
+		if strings.Contains(report, tool+" ") {
+			t.Errorf("doctor still asks for %s, which it no longer requires:\n%s", tool, report)
+		}
 	}
 }
 

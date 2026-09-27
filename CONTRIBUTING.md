@@ -23,9 +23,10 @@ crossrev doctor              # names anything missing, and the fix
 `scripts/install-local.sh` copies rather than symlinks, so rebuild and re-run
 it after pulling to pick up a newer checkout.
 
-Dependencies: `git`, `gh` (authenticated), `jq`, `yq`, `openssl`, plus
-`shellcheck` and Go 1.21 or newer for the linter. On macOS, `yq` and
-`shellcheck` are the two usually missing — `brew install yq shellcheck`.
+Dependencies: `git`, `gh` (authenticated), `jq`, `yq`, plus
+`shellcheck` and Go 1.21 or newer for the linter and the offline suite. On
+macOS, `yq` and `shellcheck` are the two usually missing — `brew install yq
+shellcheck`.
 
 Go is new, and `scripts/lint.sh` fails without it rather than skipping its
 checks. Your installed Go does not have to be 1.27.0: `go.mod` pins that exact
@@ -61,7 +62,7 @@ Do not "fix" it.
 
 ## Constraints that matter
 
-- **bash, `gh`, `jq`, `yq`, `openssl`, and nothing else.** No runtime, no
+- **bash, `gh`, `jq`, `yq`, and nothing else.** No runtime, no
   lockfile, no dependency tree. That is what makes the tool installable with a
   clone and runnable on a runner with no setup step. A change that adds a
   language runtime needs an ADR first.

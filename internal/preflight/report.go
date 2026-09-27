@@ -17,7 +17,7 @@ import "context"
 // loads the configuration, the way `cfg_load ""` runs inside this branch: a
 // configuration that refuses ends the command with that refusal, so a Checker
 // reaching here with a nil Config had none to load. That skips the pairing
-// report, which is also what a machine without yq gets.
+// report and the coverage probe.
 func (c *Checker) Doctor(ctx context.Context) int {
 	ok := true
 
@@ -30,20 +30,13 @@ func (c *Checker) Doctor(ctx context.Context) int {
 
 	// Which pairings the configured runner can serve is the other half of "is
 	// this set up correctly", and it is invisible until a CI run fails to
-	// authenticate. Reported here rather than discovered there.
-	//
-	// The yq guard is kept although Go reads YAML itself. It is observable: on
-	// a machine without yq the Bash report carries no Pairings section, and
-	// that machine has already been told yq is missing.
-	if c.installed("yq") && c.Config != nil {
+	// authenticate. Reported here rather than discovered there. Both config
+	// probes run under the one condition: a Checker reaching here with a nil
+	// Config had none to load.
+	if c.Config != nil {
 		if !c.ReportPairings(c.Config.Get(".runner")) {
 			ok = false
 		}
-	}
-
-	// The coverage probe needs no yq guard: Go reads the config itself, and
-	// there is no Bash predecessor whose report has to match.
-	if c.Config != nil {
 		if !c.ReportCoverage(ctx) {
 			ok = false
 		}

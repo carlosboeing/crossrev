@@ -1,7 +1,7 @@
 # Dependabot configuration.
 #
 # One ecosystem only. CrossRev has no package manager and no lockfile — it runs on
-# bash, gh, jq, yq and openssl, none of which Dependabot tracks. What it can
+# bash, gh, jq and yq, none of which Dependabot tracks. What it can
 # track is the actions the CI workflow and the composite action reference, which
 # is the one place a pinned third-party version lives in this repository.
 #

@@ -23,10 +23,10 @@ type reply struct {
 // recorder is a Runner that answers from a table keyed by the argv it is given,
 // and remembers every Spec it saw.
 //
-// Keyed by argv rather than by call order on purpose: preflight probes the five
-// tools in a fixed order and then asks gh up to three questions, and a table
-// keyed by order would have to be rewritten whenever a case changes which of
-// the three answer.
+// Keyed by argv rather than by call order on purpose: preflight probes the two
+// core tools in a fixed order and then asks gh up to three questions, and a
+// table keyed by order would have to be rewritten whenever a case changes which
+// of the three answer.
 type recorder struct {
 	mu      sync.Mutex
 	answers map[string]reply
@@ -116,9 +116,6 @@ func capture() (*ui.IO, *bytes.Buffer) {
 func coreVersions(r *recorder) *recorder {
 	r.answer("git --version", "git version 2.50.1 (Apple Git-155)\n", 0)
 	r.answer("gh --version", "gh version 2.97.0 (2026-01-01)\n", 0)
-	r.answer("jq --version", "jq-1.8.1\n", 0)
-	r.answer("yq --version", "yq (mikefarah/yq) version v4.53.3\n", 0)
-	r.answer("openssl version", "OpenSSL 3.6.3 30 Sep 2026\n", 0)
 	return r
 }
 

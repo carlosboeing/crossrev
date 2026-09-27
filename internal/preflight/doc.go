@@ -9,11 +9,10 @@
 //
 // # Four probes, in the order doctor prints them
 //
-//   - Checker.Check: git, gh, jq, yq and openssl, plus every harness the
-//     descriptor drives. Three of the five are not this binary's own
-//     dependencies any more — Go reads YAML and JSON itself and signs nothing
-//     with openssl — and they stay because the report is what an operator and
-//     the composite action both read.
+//   - Checker.Check: git and gh (authenticated), plus every harness the
+//     descriptor drives. jq, yq and openssl stayed past the port only to keep
+//     the report shaped like the Bash one; that parity is retired, and only
+//     this binary's own dependencies are probed.
 //   - Checker.CheckQuarantine: the instruction files a killed run left behind
 //     in .crossrev-quarantine, which look deleted in git status until somebody
 //     finds them.

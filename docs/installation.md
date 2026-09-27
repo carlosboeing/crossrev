@@ -103,10 +103,9 @@ crossrev doctor
 | Tool | Why |
 |---|---|
 | `git`, `gh` | Reading and writing the pull request. `gh` must be authenticated |
-| `jq`, `yq`, `openssl` | Kept by the `doctor` report. The binary parses JSON and YAML natively and signs nothing |
 | One of `claude`, `codex`, `agy` | Something has to do the reviewing |
 
-`yq` is the one usually missing on macOS — `brew install yq`. It is preinstalled on both GitHub runner families.
+The requirement set used to include `jq`, `yq` and `openssl`. The binary parses JSON and YAML natively and signs nothing, so they left it; a PATH holding none of the three passes and still prints the pairing report. `crossrev config` and `crossrev init` still ask for `yq`.
 
 ## Local endpoints
 
