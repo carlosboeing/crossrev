@@ -103,11 +103,11 @@ func (o *batchOutcome) addEnvelope(envelope harness.Envelope) []ui.Line {
 // the marker when refs are refused).
 func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, settings legSettings, pass int, claimID int64, scope intel.Scope, store prstate.LedgerStore, selection ledgerSelection, out *Result) error {
 	outcome := batchOutcome{verdicts: map[core.UnitID]recordVerdict{}, supplied: map[core.UnitID]prstate.SuppliedInput{}}
-	producer := producerOf(settings)
 	marker, err := markerForPass(loaded.Markers, pass)
 	if err != nil {
 		return err
 	}
+	producer := producerOf(settings, marker.ModelReported.Value())
 	current, err := l.currentGeneration(ctx, loaded, store, marker, scope, producer)
 	if err != nil {
 		return err
@@ -187,6 +187,12 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 	if claim.Model.Present() {
 		marker.Model = claim.Model
 	}
+	// A null claim model carries no answer: only a reported value moves
+	// onto the pass marker, so a re-drive never wipes the model its
+	// reused generation was published under.
+	if reported, ok := claim.ModelReported.Get(); ok {
+		marker.ModelReported = prstate.Some(reported)
+	}
 	if claim.Effort.Present() {
 		marker.Effort = claim.Effort
 	}
@@ -263,6 +269,7 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 			outcome.findings = append(outcome.findings, finding)
 		}
 		outcome.batches++
+		producer = producerOf(settings, outcome.model)
 		handle, stop, err := l.publishBatchGeneration(ctx, req, loaded, store, marker, scope, advisory, gen+outcome.batches+1, producer, outcome.verdicts, outcome.supplied, outcome.examined, outcome.limits)
 		if err != nil {
 			if stop, ok := batchStop(err); ok {
@@ -274,6 +281,9 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 			return l.haltPass(ctx, req, loaded, pass, claimID, out, marker, &batchBound{plan: planForStop(plan, stop), scope: scope, accepted: acceptedIDs, stop: stop})
 		}
 		marker.RecordCoverage(handle)
+		if outcome.model != "" {
+			marker.ModelReported = prstate.Some(outcome.model)
+		}
 		out.Marker = marker
 		selection = reportLedgerFallback(store, selection, out)
 		if raw := unionRawFindings(outcome.payloads); raw != nil {
@@ -644,6 +654,11 @@ func (l *Leg) haltPass(ctx context.Context, req Request, loaded Context, pass in
 	}
 	if claim.Model.Present() {
 		marker.Model = claim.Model
+	}
+	// As in runCoverage: a null claim model carries no answer, so the
+	// halted marker keeps the model its generations were published under.
+	if reported, ok := claim.ModelReported.Get(); ok {
+		marker.ModelReported = prstate.Some(reported)
 	}
 	if claim.Effort.Present() {
 		marker.Effort = claim.Effort

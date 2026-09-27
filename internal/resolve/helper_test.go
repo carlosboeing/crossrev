@@ -504,23 +504,28 @@ type showCall struct {
 }
 
 type gitMut struct {
-	staged          bool
-	commitCalls     int
-	pushCalls       int
-	commitOpts      vcs.CommitOptions
-	pushHooks       bool
-	pushRemote      string
-	pushBranch      string
-	commitErr       error
-	pushErr         error
-	commitSHA       string
-	remoteHead      string
-	remoteHeadErr   error
-	pushTarget      vcs.PushTarget
-	pushMismatch    core.Slug
-	beforeCommit    func(dir string)
-	removedWorktree bool
-	worktreeDir     string
+	staged      bool
+	commitCalls int
+	pushCalls   int
+	commitOpts  vcs.CommitOptions
+	pushHooks   bool
+	pushRemote  string
+	pushBranch  string
+	commitErr   error
+	pushErr     error
+	// headErrAfterCommit fails Head only once a local commit has landed,
+	// isolating the read that reports the new commit from the earlier
+	// reads that pin the worktree to the pull request's head.
+	headErrAfterCommit error
+	committed          bool
+	commitSHA          string
+	remoteHead         string
+	remoteHeadErr      error
+	pushTarget         vcs.PushTarget
+	pushMismatch       core.Slug
+	beforeCommit       func(dir string)
+	removedWorktree    bool
+	worktreeDir        string
 }
 
 type fakeGit struct {
@@ -585,6 +590,9 @@ func (g *fakeGit) Show(_ context.Context, revision core.Revision, path string) (
 }
 func (g *fakeGit) HasCommit(context.Context, core.Revision) (bool, error) { return true, nil }
 func (g *fakeGit) Head(context.Context) (core.Revision, error) {
+	if g.committed && g.headErrAfterCommit != nil {
+		return core.Revision{}, g.headErrAfterCommit
+	}
 	if !g.wrongHead.IsZero() {
 		return g.wrongHead, nil
 	}
@@ -663,6 +671,7 @@ func (g *fakeGit) Commit(_ context.Context, options vcs.CommitOptions) error {
 	if rev, err := core.NewRevision(g.commitSHA); err == nil {
 		g.head = rev
 	}
+	g.committed = true
 	return nil
 }
 func (g *fakeGit) Push(_ context.Context, remote, branch string, runHooks bool) error {

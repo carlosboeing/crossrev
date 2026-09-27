@@ -57,6 +57,11 @@ func TestRecovery(t *testing.T) {
 		if !blocked {
 			t.Error("claim was not marked blocked")
 		}
+		// The commit never landed and nothing was pushed, so the blocked
+		// record must not carry resolutions for work that reached no remote.
+		if n := resolutionCount(lastResolve); n != 0 {
+			t.Errorf("blocked claim carries %d resolutions, want none: the commit never landed", n)
+		}
 		for _, edit := range e.forge.edits {
 			if edit.CommentID == 9001 {
 				raw, ok := prstate.DecodeMarker(edit.Body)

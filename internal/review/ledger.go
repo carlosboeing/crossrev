@@ -203,9 +203,15 @@ func coverageOutcome(err error) (lost, failClosed bool) {
 
 // producerOf reads the producer off the leg's resolved settings — what the
 // leg actually ran with, not what the configuration text says, for the
-// reason ConfiguredDifference reads what each leg ran.
-func producerOf(s legSettings) prstate.Producer {
-	return prstate.Producer{Harness: s.harness, Model: s.model, Effort: s.effort, Endpoint: s.endpoint}
+// reason ConfiguredDifference reads what each leg ran. When the settings
+// name no model, the producer records the answering model reported by the
+// harness.
+func producerOf(s legSettings, reported string) prstate.Producer {
+	model := s.model
+	if model == "" {
+		model = reported
+	}
+	return prstate.Producer{Harness: s.harness, Model: model, Effort: s.effort, Endpoint: s.endpoint}
 }
 
 // slotRefFor addresses this pull request's ledger slot: the reviewer's
