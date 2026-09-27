@@ -31,6 +31,32 @@ type Finding struct {
 	AnchorReason  string  `json:"anchor_reason"`
 	ThreadID      *string `json:"thread_id"`
 	RootCommentID *int64  `json:"root_comment_id"`
+	// Posted records whether the finding reached the pull request as a
+	// comment. Nil and null read as posted, so markers written before the
+	// field existed keep their meaning; only an explicit false holds a
+	// finding back. Omitted on the wire when unset, so a posted finding
+	// encodes exactly as it always has.
+	Posted *bool `json:"posted,omitempty"`
+}
+
+// IsPosted reports whether the finding reached the pull request. Absent
+// reads as posted: only an explicit false holds one back.
+func (f Finding) IsPosted() bool {
+	return f.Posted == nil || *f.Posted
+}
+
+// holdBelowThreshold reports whether a finding is recorded but not posted.
+// Pass 1 posts everything; on later passes a finding whose severity ranks
+// below min_fix_severity is held. This is a severity comparison, not
+// ShouldFix: a pre-existing finding never fixes but still posts at or above
+// the threshold, so only severity below the threshold is held. A held
+// finding raised again at a higher severity ranks at or above the bar and
+// posts then.
+func holdBelowThreshold(f Finding, minFix string, pass int) bool {
+	if pass <= 1 {
+		return false
+	}
+	return policy.SeverityRank(core.Severity(f.Severity)) < policy.SeverityRank(core.Severity(minFix))
 }
 
 // RenderContext is the repository-level values the summary comment reads
@@ -302,6 +328,13 @@ func SummaryBody(findings []Finding, marker prstate.Marker, ctx RenderContext) s
 	} else {
 		sha, _ := marker.HeadSHA.Get()
 		b.WriteString(findingsTable(findings, ctx.Repo, sha))
+		if held := countHeld(findings); held > 0 {
+			noun := "findings"
+			if held == 1 {
+				noun = "finding"
+			}
+			fmt.Fprintf(&b, "%d %s below %s recorded and not posted.\n\n", held, noun, ctx.MinFix)
+		}
 	}
 	b.WriteString(coverageFootnote(marker, ctx))
 	b.WriteString(exclusionLine(ctx.Excluded))
@@ -673,6 +706,18 @@ func tokenString(raw json.RawMessage) string {
 		return ""
 	}
 	return strings.Trim(string(raw), `"`)
+}
+
+// countHeld counts the findings the pass recorded without posting: the
+// below-threshold findings later passes hold back.
+func countHeld(findings []Finding) int {
+	n := 0
+	for _, f := range findings {
+		if !f.IsPosted() {
+			n++
+		}
+	}
+	return n
 }
 
 func parseFindings(raw json.RawMessage) []Finding {

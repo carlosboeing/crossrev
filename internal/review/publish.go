@@ -69,10 +69,21 @@ func (l *Leg) publish(ctx context.Context, req Request, loaded Context, settings
 		)...)
 	}
 
+	// Passes after the first hold below-threshold findings: they are
+	// recorded on the marker with posted:false, skipped by the posting loop
+	// below, and counted in the summary. The stamp lands before anything
+	// posts, so the marker, the summary and the next pass's priors all read
+	// the same record; convergence still counts every finding, held or not.
+	marker.Findings = stampNotPosted(marker.Findings, heldIDs(findings, minFix, pass))
+	findings = parseFindings(marker.Findings)
+
 	posted, skipped := 0, 0
 	for _, f := range findings {
 		if already[f.ID] {
 			skipped++
+			continue
+		}
+		if !f.IsPosted() {
 			continue
 		}
 		side := core.SideRight
@@ -350,6 +361,49 @@ func (l *Leg) editClaim(ctx context.Context, repo core.Slug, claimID int64, body
 		}
 	}
 	return marker, nil
+}
+
+// heldIDs names the findings the pass holds back: below min_fix_severity on
+// a pass after the first. Findings without an id are never held, so a
+// payload the enricher never minted cannot suppress its siblings.
+func heldIDs(findings []Finding, minFix string, pass int) map[string]bool {
+	out := map[string]bool{}
+	for _, f := range findings {
+		if f.ID == "" {
+			continue
+		}
+		if holdBelowThreshold(f, minFix, pass) {
+			out[f.ID] = true
+		}
+	}
+	return out
+}
+
+// stampNotPosted records the held findings with posted:false, keeping every
+// other byte of the marker as the enricher wrote it: the edit goes through
+// the order-preserving node rather than a struct round-trip, so a posted
+// finding encodes exactly as it always has and an older reader still reads
+// the record.
+func stampNotPosted(raw json.RawMessage, held map[string]bool) json.RawMessage {
+	if len(held) == 0 || len(raw) == 0 || string(raw) == "null" {
+		return raw
+	}
+	var findings []harness.Node
+	if err := json.Unmarshal(raw, &findings); err != nil {
+		return raw
+	}
+	for i := range findings {
+		id, _ := findings[i].Member("id").AsString()
+		if id == "" || !held[id] {
+			continue
+		}
+		findings[i].Set("posted", harness.FromBool(false))
+	}
+	out, err := json.Marshal(findings)
+	if err != nil {
+		return raw
+	}
+	return out
 }
 
 func attachThreads(raw json.RawMessage, threads []forge.ReviewThread) json.RawMessage {

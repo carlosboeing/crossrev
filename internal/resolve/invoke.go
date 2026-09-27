@@ -658,6 +658,22 @@ func backfillRoots(findings []harness.Node, threads []forge.ReviewThread) []harn
 }
 
 func enrichFindings(findings []harness.Node, markers []prstate.Marker, minFix core.Severity) []harness.Node {
+	// Findings the review leg recorded without posting never reach the
+	// resolver: with no comment on the pull request there is no thread to
+	// reply into and no top-level comment to name, so they are dropped
+	// before numbering. Absent reads as posted, keeping markers written
+	// before the field existed resolvable; only an explicit false filters.
+	kept := findings[:0]
+	for _, f := range findings {
+		// Member, not Lookup: the environment contract scan reads a
+		// .Lookup("name") call shape as a process-environment read, and a
+		// finding key is not one.
+		if posted := f.Member("posted"); !posted.IsNull() && !posted.Truthy() {
+			continue
+		}
+		kept = append(kept, f)
+	}
+	findings = kept
 	priors := priorResolutions(markers)
 	for i := range findings {
 		n := i + 1

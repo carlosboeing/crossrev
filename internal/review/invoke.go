@@ -485,6 +485,16 @@ func priorFindings(loaded Context) []prompt.Prior {
 		if err := m.DecodeFindings(&findings); err != nil {
 			continue
 		}
+		// A finding the pass recorded without posting never reached the
+		// pull request, so the resolve leg never saw it and no resolution
+		// exists for it. It still reaches the next review, marked
+		// not_posted, so the reviewer can tell a held finding from a
+		// settled one — and re-raise it if the code now warrants more.
+		for i := range findings {
+			if findings[i].Posted.IsFalse() {
+				findings[i].Resolution = prompt.Str("not_posted")
+			}
+		}
 		priors = append(priors, findings...)
 	}
 	return priors

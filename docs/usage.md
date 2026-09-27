@@ -147,6 +147,8 @@ Category is a closed set — `correctness`, `security`, `performance`, `maintain
 
 A finding also carries `pre_existing`, true when the defect would still be there if the pull request were reverted. Pre-existing defects are reported at any severity but never fixed, and they cannot keep the loop alive. A pull request that also fixes old bugs is one nobody can review.
 
+The first pass posts every finding as a comment. On later passes, findings below `min_fix_severity` are held: recorded on the pass marker, listed in the summary table, and counted there ("N findings below \<severity\> recorded and not posted"), but never posted. A pre-existing finding at or above the threshold still posts. Held findings never reach the resolve leg — with no comment there is no thread to reply into — and return in the next review's prior findings with resolution `not_posted`. A held finding raised again at a higher severity posts then.
+
 ### The five resolutions
 
 Every finding gets a reply, whatever the resolve leg decides. Nothing is silently dropped.
