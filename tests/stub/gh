@@ -132,13 +132,18 @@ if [[ -n "${CROSSREV_GH_STATE:-}" ]]; then
     next="$CROSSREV_GH_STATE/next-id"
     [[ -f "$next" ]] || printf '9001' >"$next"
     cur_id="$(cat "$next")"
-    while IFS=$'\t' read -r sc_id sc_body; do
+    # One compact object per line: @tsv renders a newline inside a body as
+    # the two characters backslash-n, so a multiline seed would not replay
+    # what the runner wrote. The command substitution strips jq's trailing
+    # newline, keeping single-line seeds byte-identical to before.
+    while IFS= read -r sc_obj; do
+      sc_id="$(jq -r '.id // empty' <<<"$sc_obj")"
       [[ -n "$sc_id" ]] || continue
-      printf '%s' "$sc_body" >"$CROSSREV_GH_STATE/comment-$sc_id"
+      printf '%s' "$(jq -r '.body // ""' <<<"$sc_obj")" >"$CROSSREV_GH_STATE/comment-$sc_id"
       if (( sc_id >= cur_id )); then
         cur_id=$(( sc_id + 1 ))
       fi
-    done < <(jq -r '.[] | [.id, .body] | @tsv' "$seed_comments" 2>/dev/null || true)
+    done < <(jq -c '.[]' "$seed_comments" 2>/dev/null || true)
     printf '%s' "$cur_id" >"$next"
     : >"$CROSSREV_GH_STATE/.seeded-issue-comments"
   fi

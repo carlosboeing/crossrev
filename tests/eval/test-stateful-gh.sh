@@ -79,6 +79,9 @@ issue_comments_list="$(gh api --paginate repos/acme/widget/issues/42/comments --
 has "issue comments list includes seeded comment" "$issue_comments_list" "Initial discussion on the PR"
 has "issue comments list includes new claim comment" "$issue_comments_list" 'claim <!-- crossrev:'
 
+multiline_body="$(gh api --paginate repos/acme/widget/issues/42/comments --jq '.[] | select(.id == 1002) | .body')"
+is "seeded multiline body replays the newline" "$multiline_body" "$(printf 'Seeded line one\nSeeded line two')"
+
 gh api --method PATCH repos/acme/widget/issues/comments/"$claim_id" -f body='claim updated <!-- crossrev: {"pass":1,"leg":"review"} -->' >/dev/null
 updated_body="$(gh api repos/acme/widget/issues/comments/"$claim_id" --jq .body)"
 has "single comment read replays updated claim body" "$updated_body" "claim updated"
