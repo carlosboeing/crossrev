@@ -30,6 +30,8 @@ All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepa
 
 - **Codex legs report the stdout diagnosis when a turn fails.** The adapter extracted failure messages from stderr alone, missing the `turn.failed` event Codex writes to stdout when an execution fails. The adapter now parses `turn.failed` and `error` events from stdout before falling back to the stderr diagnosis, keeping the diagnosis lines from stderr when stdout reports no error.
 
+- **Generated workflows pin third-party actions by SHA.** The review, resolve, watchdog and token-refresh templates reached `actions/checkout`, `actions/upload-artifact` and `actions/create-github-app-token` by floating tag, so a moved tag could change what a consuming repository runs with nothing in its own history to show for it. Every third-party `uses:` now names the full 40-character SHA with the tag riding in a trailing comment — checkout and upload-artifact at v7.0.1 (up from v5 and v4), `create-github-app-token` at v2 — the same form the project's own workflows use. `scripts/refresh-action-pins.sh` resolves each tag to its SHA through the GitHub API to move a pin forward, and a template test refuses any `uses:` in any other form.
+
 ## [0.9.0] — 2026-09-26
 
 ### Fixed
