@@ -43,7 +43,9 @@ type batchContext struct {
 // counts and cap reasons, so the prompt pointers and the ledger records are
 // the one discovery rather than two that could disagree.
 func (l *Leg) discoverBatchContext(ctx context.Context, req Request, loaded Context, pass int, scope intel.Scope, advisory intel.AdvisorySummary, fileTerms map[string][]string, confirmation []byte) batchContext {
+	start := l.now()
 	diffBytes, err := l.reviewDiff(ctx, loaded)
+	l.Log.Phase("diff", l.now().Sub(start).Milliseconds())
 	return batchContext{
 		diff:         diff.Parse(diffBytes, core.RevisionPair{}),
 		diffErr:      err,
@@ -120,8 +122,9 @@ func batchPaths(files []intel.FileUnit) []string {
 
 // invokePrompt runs one rendered prompt through the harness with the
 // batch-scoped validation seam: one semantic retry naming the rejected
-// numbers, then a fatal refusal that publishes nothing.
-func (l *Leg) invokePrompt(ctx context.Context, req Request, loaded Context, settings legSettings, expected validate.ReviewExpectations, promptBytes []byte) (json.RawMessage, harness.Envelope, []ui.Line, error) {
+// numbers, then a fatal refusal that publishes nothing. call is the call's
+// number in the pass, naming its transcripts and its run-log line.
+func (l *Leg) invokePrompt(ctx context.Context, req Request, loaded Context, settings legSettings, expected validate.ReviewExpectations, promptBytes []byte, call int) (json.RawMessage, harness.Envelope, []ui.Line, error) {
 	if err := harness.AssertEnvClean(l.Env); err != nil {
 		return nil, harness.Envelope{}, nil, err
 	}
@@ -138,20 +141,69 @@ func (l *Leg) invokePrompt(ctx context.Context, req Request, loaded Context, set
 	saved := l.Expect
 	l.Expect = expected
 	defer func() { l.Expect = saved }()
-	return l.invokeWithStaged(ctx, req, loaded, settings, adapter, entry, staged, expected, promptBytes)
+	return l.invokeWithStaged(ctx, req, loaded, settings, adapter, entry, staged, expected, promptBytes, call)
+}
+
+// logAcceptedCall writes one accepted call's run-log line: the rendered
+// prompt's byte length, the evidence bytes handed over with it, the usage
+// buckets the accepted envelope folded in (refused attempts included), the
+// answering model, and the call's wall time. A refused answer judged
+// nothing and gets no line.
+func (l *Leg) logAcceptedCall(call int, promptBytes []byte, suppliedBytes int, envelope harness.Envelope, ms int64) {
+	if l.Log == nil {
+		return
+	}
+	var fresh, cached, output int64
+	if envelope.Usage != nil {
+		fresh = envelope.Usage.InputFresh
+		cached = envelope.Usage.Cached()
+		output = envelope.Usage.Output
+	}
+	model := ""
+	if envelope.ModelReported != nil {
+		model = *envelope.ModelReported
+	}
+	l.Log.Call(call, len(promptBytes), suppliedBytes, fresh, cached, output, model, ms)
+}
+
+// suppliedBytes measures what the reviewer was actually given for one batch:
+// the evidence body bytes handed to prompt rendering. Units reaching the
+// model through the diff slice alone contribute nothing, the way their
+// supplied record reads diff_only.
+func suppliedBytes(files []intel.FileUnit) int {
+	total := 0
+	for _, unit := range files {
+		if unit.Available && !unit.Binary {
+			total += len(unit.Body)
+		}
+	}
+	return total
+}
+
+// changedTermCount is the whole-pass search set's size: every file's terms
+// deduplicated. The advisory blob pass searches this set, so the terms phase
+// carries the count the search ran with.
+func changedTermCount(fileTerms map[string][]string) int {
+	seen := make(map[string]bool)
+	for _, terms := range fileTerms {
+		for _, term := range terms {
+			seen[term] = true
+		}
+	}
+	return len(seen)
 }
 
 // invokeWithStaged runs one batch prompt through the already-staged
 // credential: one sandbox quarantine per prompt (not per attempt), the
 // validation seam scoped to this batch, and the staged credential discarded
 // by the caller.
-func (l *Leg) invokeWithStaged(ctx context.Context, req Request, loaded Context, settings legSettings, adapter harness.Adapter, entry harness.Descriptor, staged *cred.Staged, expected validate.ReviewExpectations, promptBytes []byte) (json.RawMessage, harness.Envelope, []ui.Line, error) {
+func (l *Leg) invokeWithStaged(ctx context.Context, req Request, loaded Context, settings legSettings, adapter harness.Adapter, entry harness.Descriptor, staged *cred.Staged, expected validate.ReviewExpectations, promptBytes []byte, call int) (json.RawMessage, harness.Envelope, []ui.Line, error) {
 	tmp, err := os.MkdirTemp("", "crossrev-review-")
 	if err != nil {
 		return nil, harness.Envelope{}, nil, err
 	}
 	defer os.RemoveAll(tmp)
-	envelope, payload, msgs, err := l.runPrompt(ctx, req, loaded, settings, adapter, entry, staged, tmp, promptBytes, nil)
+	envelope, payload, msgs, err := l.runPrompt(ctx, req, loaded, settings, adapter, entry, staged, tmp, promptBytes, nil, call)
 	return payload, envelope, msgs, err
 }
 

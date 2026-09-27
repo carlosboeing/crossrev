@@ -3,6 +3,7 @@ package runlog
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -49,6 +50,13 @@ type Options struct {
 	// Repo and PR name the run in its opening event.
 	Repo string
 	PR   string
+
+	// Revision is the build revision the run started from, from
+	// buildinfo.Info.Revision. Empty reads as a dash on the `run start`
+	// line: a build with no VCS stamp (go run, go test, an exported
+	// tarball) still writes the field, with the same missing-identity
+	// mark the call lines use for a harness that names no model.
+	Revision string
 
 	// KeepTranscripts asks for the transcripts of a successful invocation to
 	// survive. The flag and the config key both reach here through
@@ -137,7 +145,11 @@ func Open(opts Options) (*Log, error) {
 	if opts.SweepBase != "" {
 		Sweep(opts.SweepBase, opts.retentionWindow(), now())
 	}
-	l.Event("run", "start repo="+opts.Repo+" pr="+opts.PR)
+	revision := opts.Revision
+	if revision == "" {
+		revision = "-"
+	}
+	l.Event("run", "start repo="+opts.Repo+" pr="+opts.PR+" revision="+revision)
 	return l, nil
 }
 
@@ -229,3 +241,46 @@ func (l *Log) Event(phase, detail string) {
 }
 
 var eventDetail = strings.NewReplacer("\n", " ", "\r", " ")
+
+// Phase records one review-preparation step's wall time: enumerate, reads,
+// diff, search or pack. A nil Log writes nothing, like every other method.
+func (l *Log) Phase(name string, ms int64) {
+	if l == nil {
+		return
+	}
+	l.Event("phase", name+" ms="+strconv.FormatInt(ms, 10))
+}
+
+// PhaseTerms records the advisory term walk: the whole-pass search set's
+// size alongside its wall time.
+func (l *Log) PhaseTerms(terms int, ms int64) {
+	if l == nil {
+		return
+	}
+	l.Event("phase", "terms terms="+strconv.Itoa(terms)+" ms="+strconv.FormatInt(ms, 10))
+}
+
+// Call records one accepted model call: the rendered prompt's byte length,
+// the evidence bytes handed over with it, the usage buckets the accepted
+// envelope folded in, the answering model (or a dash where the harness
+// names none), and the call's wall time including its refused attempts.
+//
+// reads and commands stay zero: later slices fill them from the tool-call
+// record, and until then the fields read honestly rather than missing.
+func (l *Log) Call(call, promptBytes, suppliedBytes int, fresh, cached, output int64, model string, ms int64) {
+	if l == nil {
+		return
+	}
+	if model == "" {
+		model = "-"
+	}
+	l.Event("call", strconv.Itoa(call)+
+		" prompt_bytes="+strconv.Itoa(promptBytes)+
+		" supplied_bytes="+strconv.Itoa(suppliedBytes)+
+		" fresh="+strconv.FormatInt(fresh, 10)+
+		" cached="+strconv.FormatInt(cached, 10)+
+		" output="+strconv.FormatInt(output, 10)+
+		" reads=0 commands=0"+
+		" model="+model+
+		" ms="+strconv.FormatInt(ms, 10))
+}
