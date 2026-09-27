@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/carlosboeing/crossrev/internal/harness"
@@ -310,3 +311,76 @@ func deref[T any](value *T) T {
 	}
 	return *value
 }
+
+func TestParseCodexError(t *testing.T) {
+	tests := []struct {
+		name   string
+		events string
+		want   string
+	}{
+		{
+			name:   "empty",
+			events: "",
+			want:   "",
+		},
+		{
+			name:   "turn.failed with object error message",
+			events: `{"type":"turn.failed","error":{"message":"the model refused to answer"}}`,
+			want:   "the model refused to answer",
+		},
+		{
+			name:   "turn.failed with string error",
+			events: `{"type":"turn.failed","error":"something went wrong"}`,
+			want:   "something went wrong",
+		},
+		{
+			name:   "turn.failed with top-level message",
+			events: `{"type":"turn.failed","message":"quota exceeded"}`,
+			want:   "quota exceeded",
+		},
+		{
+			name:   "error event type",
+			events: `{"type":"error","error":{"message":"stream disconnected"}}`,
+			want:   "stream disconnected",
+		},
+		{
+			name: "last failure wins across multiple turns",
+			events: strings.Join([]string{
+				`{"type":"turn.started"}`,
+				`{"type":"turn.failed","error":{"message":"first failure"}}`,
+				`{"type":"turn.started"}`,
+				`{"type":"turn.failed","error":{"message":"final failure"}}`,
+			}, "\n"),
+			want: "final failure",
+		},
+		{
+			name: "successful turns before turn.failed",
+			events: strings.Join([]string{
+				`{"type":"thread.started","thread_id":"0199cf3a"}`,
+				`{"type":"turn.started"}`,
+				`{"type":"turn.completed","usage":{"input_tokens":57444,"output_tokens":329}}`,
+				`{"type":"turn.started"}`,
+				`{"type":"turn.failed","error":{"message":"context length exceeded"}}`,
+			}, "\n"),
+			want: "context length exceeded",
+		},
+		{
+			name:   "no failure event in stream",
+			events: `{"type":"thread.started"}` + "\n" + `{"type":"turn.completed","usage":{"input_tokens":10}}`,
+			want:   "",
+		},
+		{
+			name:   "corrupt trailing data still recovers earlier failure",
+			events: `{"type":"turn.failed","error":{"message":"truncated stream"}}` + "\n" + `corrupt-not-json`,
+			want:   "truncated stream",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := harness.ParseCodexError([]byte(tt.events)); got != tt.want {
+				t.Errorf("ParseCodexError() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+

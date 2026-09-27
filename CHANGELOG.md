@@ -25,6 +25,8 @@ All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepa
 
 - **Codex and Claude Code legs hand the prompt on stdin instead of argv.** A leg's prompt is hundreds of kilobytes, and argv is the wrong vehicle for it: `codex exec` now runs with `-` and reads the prompt from stdin, and `claude -p` runs with no positional prompt and reads it the same way. The descriptor records the new `prompt_transport` per harness — stdin for codex and claude, file for grok, argv for agy and opencode — and the validator refuses any other value. The bytes the model reads are unchanged: stdin carries the prompt with its trailing newlines removed, exactly as argv did. A stdin holding the prompt reaches EOF after it, so the open-stdin block the adapters used to close with `</dev/null` cannot recur.
 
+- **Codex legs report the stdout diagnosis when a turn fails.** The adapter extracted failure messages from stderr alone, missing the `turn.failed` event Codex writes to stdout when an execution fails. The adapter now parses `turn.failed` and `error` events from stdout before falling back to the stderr diagnosis, keeping the diagnosis lines from stderr when stdout reports no error.
+
 ## [0.9.0] — 2026-09-26
 
 ### Fixed
