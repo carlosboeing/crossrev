@@ -1180,18 +1180,25 @@ func statusAbbreviate(sha string) string {
 // Every other mode is the invoking user, whose worst case is being misled
 // about work they asked for.
 func (s *Status) trustedAuthor(ctx context.Context, mode string, repo core.Slug, pr int) (string, error) {
+	return statusTrustedAuthor(ctx, s.Forge, s.AppSlug, mode, repo, pr)
+}
+
+// statusTrustedAuthor is the body of trustedAuthor, as a function so the
+// other reader of the same decision — Restart, which has no report to fill —
+// answers with the same rule rather than a copy of it.
+func statusTrustedAuthor(ctx context.Context, client forge.Forge, appSlug, mode string, repo core.Slug, pr int) (string, error) {
 	if mode == "automated" {
 		// lib/state.sh:35-38, with both halves of the slug resolved by the
 		// caller: the variable and the App metadata file.
-		if s.AppSlug == "" {
+		if appSlug == "" {
 			return "", &ui.FatalError{
 				Reason: "cannot determine which App's markers to trust",
 				Action: "Automated mode reads markers only from the App that writes them. In a workflow, set CROSSREV_APP_SLUG from the token step's app-slug output. Locally, run: crossrev auth status",
 			}
 		}
-		return s.AppSlug + "[bot]", nil
+		return appSlug + "[bot]", nil
 	}
-	author, err := s.Forge.ViewerLogin(ctx)
+	author, err := client.ViewerLogin(ctx)
 	if err != nil || author == "" {
 		return "", &ui.FatalError{
 			Reason: fmt.Sprintf("could not resolve whose markers to trust on %s#%d", repo, pr),

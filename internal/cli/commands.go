@@ -23,6 +23,7 @@ type Commands struct {
 	Review   func(context.Context, ReviewRequest) (int, error)
 	Resolve  func(context.Context, ResolveRequest) (int, error)
 	Status   func(context.Context, StatusRequest) (int, error)
+	Restart  func(context.Context, RestartRequest) (int, error)
 	Init     func(context.Context, InitRequest) (int, error)
 	Watchdog func(context.Context, WatchdogRequest) (int, error)
 
@@ -61,6 +62,8 @@ func Dispatch(ctx context.Context, inv Invocation, cmds Commands, out *ui.IO) (i
 		return call(ctx, inv, cmds.Resolve, out)
 	case CommandStatus:
 		return call(ctx, inv, cmds.Status, out)
+	case CommandRestart:
+		return call(ctx, inv, cmds.Restart, out)
 	case CommandInit:
 		return call(ctx, inv, cmds.Init, out)
 	case CommandWatchdog:

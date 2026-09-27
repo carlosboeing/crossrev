@@ -32,6 +32,7 @@ const helpBlock = `
     review --pr <n>          One review leg: post findings as inline comments
     resolve --pr <n>         Verify each finding, fix or push back, reply, push
     status --pr <n>          Read the loop's state off the pull request
+    restart --pr <n>         Restart a halted leg: clear the halt, re-apply its awaiting label
     init                     Set up automated mode: App, secrets, labels, workflows
     watchdog                 Find pull requests stuck waiting on a leg, and retry once
     config show|backlog      The merged config, and where deferred work goes

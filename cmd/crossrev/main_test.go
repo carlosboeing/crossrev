@@ -124,10 +124,10 @@ func TestPolicyIsReadAtTheRevisionRatherThanFromTheWorkingTree(t *testing.T) {
 // a swap compiles. A field stubbed to `return 0, nil` prints nothing and
 // answers the wrong status.
 //
-// Cycle, Review, Resolve and Status share the refusal a command with no
-// repository makes. Each takes its own request type, so no one of them can be
-// wired to another's handler and still build; the marker is there to prove the
-// closure reaches a real handler rather than a stub.
+// Cycle, Review, Resolve, Status and Restart share the refusal a command with
+// no repository makes. Each takes its own request type, so no one of them can
+// be wired to another's handler and still build; the marker is there to prove
+// the closure reaches a real handler rather than a stub.
 func commandTable(t *testing.T) []struct {
 	field      string
 	wantStatus int
@@ -143,6 +143,7 @@ func commandTable(t *testing.T) []struct {
 		{"Review", cli.ExitFailure, "Run crossrev from a checkout with a GitHub remote"},
 		{"Resolve", cli.ExitFailure, "Run crossrev from a checkout with a GitHub remote"},
 		{"Status", cli.ExitFailure, "Run crossrev from a checkout with a GitHub remote"},
+		{"Restart", cli.ExitFailure, "Run crossrev from a checkout with a GitHub remote"},
 		{"Init", cli.ExitFailure, `a repository slug must be owner/name`},
 		{"Watchdog", cli.ExitFailure, "could not work out which repository to watch"},
 		{"ConfigShow", cli.ExitOK, `"min_fix_severity": "medium"`},

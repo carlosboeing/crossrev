@@ -42,6 +42,9 @@ func compose(out *ui.IO, doc harness.Document) (cli.Commands, []string) {
 		Status: func(ctx context.Context, req cli.StatusRequest) (int, error) {
 			return status(ctx, out, doc, req)
 		},
+		Restart: func(ctx context.Context, req cli.RestartRequest) (int, error) {
+			return restart(ctx, out, doc, req)
+		},
 		Watchdog: func(ctx context.Context, req cli.WatchdogRequest) (int, error) {
 			return watchdog(ctx, out, doc, req)
 		},

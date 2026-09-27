@@ -204,6 +204,8 @@ In automated mode the runner is discarded after the job, so the generated workfl
 
 A resolve pass that ended blocked or escalated is complete but not settled, so it can be driven again. Once whatever stopped it is fixed, `crossrev resolve --pr N` runs the resolver over the same findings instead of refusing. The same goes for a pass that left a deferral unpersisted, and for one whose claimed fix reached no commit. A pass that settled every finding stays finished. `status` names whichever command applies.
 
+`crossrev restart --pr N` is the one-command form of that remedy for a halted pull request: it clears `crossrev/halted`, and `crossrev/watchdog-retried` when present, and re-applies the halted leg's awaiting label. It refuses a pull request carrying `crossrev/stop` — red is the human brake, and no command clears it — and one that is not halted, saying what applies instead.
+
 A resolve pass can also finish the loop itself. A pass that settled every finding without pushing a commit — each disputed, skipped, or deferred and tracked — converges on the spot: the head never moved, so a re-review would find nothing new and decline. A pass that pushed hands back to the reviewer, because there is something new to see.
 
 Converged does not mean "no findings". It means no finding this pull request introduced, at or above the threshold, remains, every required file has an accepted verdict, none is marked `could_not_review`, and any repair has been confirmed. Findings below the threshold and pre-existing ones are reported and cannot keep the loop alive — a loop that cannot converge because of a naming quibble is one nobody leaves switched on.
@@ -263,7 +265,7 @@ Event-driven mode's failure mode is silence: a dropped label event and a converg
 crossrev watchdog --repo owner/name --timeout 1800
 ```
 
-It finds open pull requests carrying a `crossrev/awaiting-*` label, and for each one past the timeout it **retries once** by removing and re-applying the label — re-applying a label GitHub already holds fires no event, which is why the removal matters. A second failure is not a dropped event, so it applies `crossrev/halted`, comments saying how far the leg got, and stops.
+It finds open pull requests carrying a `crossrev/awaiting-*` label, and for each one past the timeout it **retries once** by removing and re-applying the label — re-applying a label GitHub already holds fires no event, which is why the removal matters. A second failure is not a dropped event, so it applies `crossrev/halted`, comments saying how far the leg got, and stops. `crossrev restart --pr N` restarts it once you have looked.
 
 ## Where deferred work goes
 
