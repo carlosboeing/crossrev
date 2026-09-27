@@ -20,20 +20,18 @@ import (
 // Anything that is not NeedHarness is the core set, which is what the Bash
 // `if [[ "$need" == "harness" ]]` does with an argument it does not recognise.
 const (
-	// NeedCore is git, gh (authenticated), jq, yq and openssl.
+	// NeedCore is git and gh (authenticated).
 	NeedCore = "core"
 	// NeedHarness is the core set plus at least one harness CLI.
 	NeedHarness = "harness"
 )
 
-// coreTools are the five probed in this order (lib/preflight.sh:86).
-//
-// Go reads no YAML through yq, no JSON through jq and signs nothing with
-// openssl, so three of the five are not this binary's own dependencies. They
-// stay because the report is observable: `crossrev doctor` names all five, the
-// composite action reads the same report, and dropping one is a change to what
-// an operator sees rather than an internal tidy-up.
-var coreTools = []string{"git", "gh", "jq", "yq", "openssl"}
+// coreTools are the two probed in this order, and both are this binary's own
+// dependencies (lib/preflight.sh:86 probed five, in this order's head). jq,
+// yq and openssl stayed past the port only to keep the report shaped like the
+// Bash one; that parity is retired, and retiring it is the change an operator
+// sees rather than an internal tidy-up nobody asked for.
+var coreTools = []string{"git", "gh"}
 
 // Checker holds what every probe needs: somewhere to report, a way to start a
 // child, an environment for it, a PATH lookup and the harness descriptor.
@@ -170,34 +168,26 @@ func (c *Checker) installed(name string) bool {
 // actually on (_install_hint, lib/preflight.sh:8-34).
 //
 // A harness takes its hint from the descriptor. A name the descriptor does not
-// drive has none, and falls to the generic sentence — which is what jq's `//
-// empty` leaves behind for a name it cannot select.
+// drive has none, and falls to the generic sentence. yq keeps its hint for
+// RequireYq: `config` and `init` still require yq, and doctor no longer does.
 func (c *Checker) InstallHint(tool string) string {
 	if c.darwin() {
 		switch tool {
 		case "gh":
 			return "brew install gh"
-		case "jq":
-			return "brew install jq"
 		case "yq":
 			return "brew install yq"
 		case "git":
 			return "xcode-select --install"
-		case "openssl":
-			return "already present on macOS; otherwise brew install openssl"
 		}
 	} else {
 		switch tool {
 		case "gh":
 			return "https://github.com/cli/cli#installation"
-		case "jq":
-			return "https://jqlang.github.io/jq/download/"
 		case "yq":
 			return "https://github.com/mikefarah/yq#install"
 		case "git":
 			return "your package manager, e.g. apt install git"
-		case "openssl":
-			return "your package manager, e.g. apt install openssl"
 		}
 	}
 	if entry, found := c.Harness.For(tool); found && entry.Install.Hint != "" {
@@ -342,18 +332,11 @@ func (c *Checker) toolVersion(ctx context.Context, tool string) (string, int) {
 		return "", versionMissing
 	}
 
-	// openssl's own subcommand is `openssl version`; --version came later and
-	// the build on GitHub's hosted runners rejects it (lib/preflight.sh:53-54).
-	args := []string{"--version"}
-	if tool == "openssl" {
-		args = []string{"version"}
-	}
-
 	// stderr is folded into the capture so a tool that complains still gets
 	// read (lib/preflight.sh:59-60).
 	result := c.runner().Run(ctx, exec.Spec{
 		Path:    tool,
-		Args:    args,
+		Args:    []string{"--version"},
 		Env:     c.modelFacingEnv(),
 		Streams: exec.StreamsCombined,
 	})
@@ -491,16 +474,6 @@ func (c *Checker) ghOK(ctx context.Context, path, jq string) bool {
 // at least one is installed (lib/preflight.sh:138-165). Each installed harness
 // gets its version compared against the span on record.
 func (c *Checker) checkHarness(ctx context.Context) bool {
-	// jq is what reads the descriptor in the shell, so without it the probe is
-	// skipped rather than reporting every harness as missing. Go reads the
-	// descriptor itself and could answer anyway; skipping keeps the report the
-	// same on the machine that has no jq, and that machine has already been
-	// told jq is missing two lines above.
-	if !c.installed("jq") {
-		c.io().Opt("harness check skipped — install jq to probe installed harnesses")
-		return true
-	}
-
 	found := false
 	for _, name := range c.Harness.Names() {
 		entry, _ := c.Harness.For(name)
@@ -540,14 +513,14 @@ func (c *Checker) checkHarness(ctx context.Context) bool {
 }
 
 // RequireYq refuses to carry on without yq (preflight_require_yq,
-// lib/preflight.sh:296-300).
-//
-// yq reads YAML and jq reads JSON. Both config layers are YAML, so yq is not
-// optional and the check says why rather than just naming the binary.
+// lib/preflight.sh:296-300). `config` and `init` are its callers: doctor
+// stopped requiring jq, yq and openssl, and nothing else asks.
 //
 // The refusal is returned rather than exiting, which is what ui.IO.Die does for
 // every ported ui_die. The lowercase `crossrev's` in the reason is the shell's
-// own string, copied as it stands.
+// own string, copied as it stands, and it says the config files are YAML
+// because that is why the two commands refuse rather than just naming the
+// binary.
 func (c *Checker) RequireYq() error {
 	if c.installed("yq") {
 		return nil
