@@ -323,5 +323,33 @@ export CROSSREV_GH_ROUTES="$routes_file"
 routed_login="$(gh api user --jq .login)"
 is "explicit route table entry overrides state" "$routed_login" "routed-user"
 
+# 14. Failure paths report failure instead of success
+printf 'api --paginate repos/acme/widget/issues/42/comments*\t!fail\n' >"$routes_file"
+fail_list_rc=0
+gh api --paginate repos/acme/widget/issues/42/comments >/dev/null 2>&1 || fail_list_rc=$?
+is "spooled list honours a matching !fail route" "$fail_list_rc" "1"
+
+printf 'api --paginate repos/acme/widget/issues/42/comments*\t!deny\n' >"$routes_file"
+deny_list_rc=0
+deny_list_err="$(gh api --paginate repos/acme/widget/issues/42/comments 2>&1 >/dev/null)" || deny_list_rc=$?
+is "spooled list honours a matching !deny route" "$deny_list_rc" "1"
+has "spooled list !deny reports the 403" "$deny_list_err" "HTTP 403"
+unset CROSSREV_GH_ROUTES
+
+next_before_reply="$(cat "$STATE_DIR/next-id")"
+missing_reply_rc=0
+gh api --method POST repos/acme/widget/pulls/42/comments/999999/replies -f body='reply to nothing' >/dev/null 2>&1 || missing_reply_rc=$?
+is "reply to a missing root exits 1" "$missing_reply_rc" "1"
+is "missing-root reply allocates no id" "$(cat "$STATE_DIR/next-id")" "$next_before_reply"
+
+known_resolve_rc=0
+gh api graphql -f threadId="$new_thread_id" -f query="$resolve_query" >/dev/null 2>&1 || known_resolve_rc=$?
+is "resolveReviewThread on a known id exits 0" "$known_resolve_rc" "0"
+threads_before_unknown="$(cat "$STATE_DIR/threads.json")"
+missing_resolve_rc=0
+gh api graphql -f threadId=RT_missing -f query="$resolve_query" >/dev/null 2>&1 || missing_resolve_rc=$?
+is "resolveReviewThread on an unknown id exits 1" "$missing_resolve_rc" "1"
+is "unknown resolve leaves threads.json unchanged" "$(cat "$STATE_DIR/threads.json")" "$threads_before_unknown"
+
 printf '\n  %d passed, %d failed\n\n' "$pass" "$fail"
 (( fail == 0 ))

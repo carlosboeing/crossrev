@@ -384,6 +384,18 @@ if [[ -n "${CROSSREV_GH_STATE:-}" ]]; then
           [[ -n "${pat:-}" ]] || continue
           # shellcheck disable=SC2053  # the pattern is a glob on purpose
           if [[ "$joined" == $pat ]]; then
+            # The same sentinels match_routes honours: without them a
+            # matching !fail entry is merged as JSON and the call
+            # succeeds after a jq error instead of failing.
+            [[ "${resp:-}" == "!fail" ]] && exit 1
+            if [[ "${resp:-}" == "!deny" ]]; then
+              printf 'gh: Resource not accessible by integration (HTTP 403)\n' >&2
+              exit 1
+            fi
+            if [[ "${resp:-}" == "!deny-ruleset" ]]; then
+              printf 'gh: Validation Failed: the ref update was rejected by a ruleset (HTTP 422)\n' >&2
+              exit 1
+            fi
             if [[ "${resp:-}" == @* ]]; then
               static="$(cat "${resp#@}")"
             else
@@ -888,6 +900,14 @@ if [[ -n "${CROSSREV_GH_STATE:-}" ]]; then
     rbody="$(extract_field body "$@")"
     root_id="${joined##*comments/}"
     root_id="${root_id%%/*}"
+    [[ -f "$CROSSREV_GH_STATE/threads.json" ]] || printf '[]' >"$CROSSREV_GH_STATE/threads.json"
+    # A reply to a root that is not in state must fail before an id is
+    # allocated: otherwise the call succeeds, consumes an id, and the
+    # evaluation records a reply that was never stored.
+    if ! jq -e --arg root "$root_id" '[.[] | .comments.nodes[]? | select((.databaseId | tostring) == $root)] | length > 0' "$CROSSREV_GH_STATE/threads.json" >/dev/null 2>&1; then
+      printf '{"message":"Not Found"}\n' >&2
+      exit 1
+    fi
     next="$CROSSREV_GH_STATE/next-id"
     [[ -f "$next" ]] || printf '9001' >"$next"
     reply_id="$(cat "$next")"
@@ -965,11 +985,16 @@ if [[ -n "${CROSSREV_GH_STATE:-}" ]]; then
     fi
     if [[ "$joined" == *"resolveReviewThread"* || "$joined" == *"threadId="* ]]; then
       tid="$(extract_field threadId "$@")"
-      if [[ -f "$CROSSREV_GH_STATE/threads.json" && -n "$tid" ]]; then
-        updated="$(jq -c --arg id "$tid" \
-          'map(if .id == $id then .isResolved = true else . end)' "$CROSSREV_GH_STATE/threads.json")"
-        printf '%s' "$updated" >"$CROSSREV_GH_STATE/threads.json"
+      [[ -f "$CROSSREV_GH_STATE/threads.json" ]] || printf '[]' >"$CROSSREV_GH_STATE/threads.json"
+      # An unknown thread id must fail: answering isResolved:true while
+      # leaving state unchanged records a resolution that never happened.
+      if [[ -z "$tid" ]] || ! jq -e --arg id "$tid" 'map(select(.id == $id)) | length > 0' "$CROSSREV_GH_STATE/threads.json" >/dev/null 2>&1; then
+        printf '{"errors":[{"message":"Could not resolve to a node with the given id"}]}\n' >&2
+        exit 1
       fi
+      updated="$(jq -c --arg id "$tid" \
+        'map(if .id == $id then .isResolved = true else . end)' "$CROSSREV_GH_STATE/threads.json")"
+      printf '%s' "$updated" >"$CROSSREV_GH_STATE/threads.json"
       printf '{"data":{"resolveReviewThread":{"thread":{"isResolved":true}}}}\n' | emit
       exit 0
     fi
