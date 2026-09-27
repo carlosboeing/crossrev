@@ -8,13 +8,18 @@ import (
 
 	"github.com/carlosboeing/crossrev/internal/exec"
 	"github.com/carlosboeing/crossrev/internal/harness"
+	"github.com/carlosboeing/crossrev/internal/validate"
 )
 
 // A 200 KiB prompt stays off the argument vector where the descriptor says
-// stdin, on both legs: no codex or claude argument may exceed 4 KiB, and the
-// prompt travels as the child's stdin instead. A stdin holding the prompt
-// reaches EOF after it, so the open-stdin block the adapters used to close
-// with </dev/null cannot recur.
+// stdin, on both legs: the prompt travels as the child's stdin instead, and
+// no codex or claude argument may exceed 4 KiB — except claude's
+// --json-schema value. Claude Code takes the schema inline as a JSON string
+// (a path fails with a parse error, claude.go), and stdin already holds the
+// prompt, so the real leg schemas travel there at 11,720 and 5,734 bytes by
+// design. The test exercises those real schemas and pins that one value to
+// them. A stdin holding the prompt reaches EOF after it, so the open-stdin
+// block the adapters used to close with </dev/null cannot recur.
 func TestStdinTransportKeepsLongPromptsOffArgv(t *testing.T) {
 	doc := descriptors(t)
 
@@ -29,13 +34,17 @@ func TestStdinTransportKeepsLongPromptsOffArgv(t *testing.T) {
 				if !known {
 					t.Fatalf("the descriptor names no %s adapter", name)
 				}
-				inv := longPromptInvocation(t, name, write)
+				inv := legSchema(t, longPromptInvocation(t, name, write), write)
 
 				spec, err := adapter.Spec(inv)
 				if err != nil {
 					t.Fatalf("building the spec: %v", err)
 				}
-				for _, arg := range spec.Args {
+				for i, arg := range spec.Args {
+					if name == "claude" && i > 0 && spec.Args[i-1] == "--json-schema" {
+						// The one exemption: see the test comment.
+						continue
+					}
 					if len(arg) > maxArgBytes {
 						t.Errorf("an argument carries %d bytes, over the %d-byte ceiling", len(arg), maxArgBytes)
 					}
@@ -56,6 +65,9 @@ func TestStdinTransportKeepsLongPromptsOffArgv(t *testing.T) {
 					}
 					if slices.Contains(spec.Args, inv.Prompt.Text) {
 						t.Error("the prompt is still a positional argument; -p takes it from stdin")
+					}
+					if !hasFlagPair(spec.Args, "--json-schema", inv.Schema.Argument()) {
+						t.Error("the --json-schema value is not the real leg schema")
 					}
 				}
 			})
@@ -219,6 +231,23 @@ const (
 	// maxArgBytes is the longest argument a stdin transport may build.
 	maxArgBytes = 4 * 1024
 )
+
+// legSchema replaces the fixture's small schema with the real schema the
+// leg hands its harness: the findings schema on a review leg, the resolve
+// schema on a resolve leg. Both exceed the 4 KiB ceiling, so a passing test
+// proves the ceiling against what production actually passes.
+func legSchema(t *testing.T, inv harness.Invocation, write bool) harness.Invocation {
+	t.Helper()
+	schema := validate.FindingsSchema()
+	if write {
+		schema = validate.ResolveSchema()
+	}
+	if err := os.WriteFile(inv.Schema.Path, schema, 0o600); err != nil {
+		t.Fatalf("writing the leg schema: %v", err)
+	}
+	inv.Schema.Text = string(schema)
+	return inv
+}
 
 // longPromptInvocation is invocation with a 200 KiB prompt, written to the
 // prompt file as well so the fixture stays coherent.
