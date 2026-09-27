@@ -186,7 +186,7 @@ Every run also writes locally, under `~/.local/state/crossrev/runs/<repo-slug>/p
 
 `run.log` is one line per event — timestamp, phase, subprocess, exit code, duration — so a stall inside a step is attributable to that step, and a dead run says where it stopped. A failed leg also keeps the harness transcript there (`<leg>.attempt-N.stdout` and `.stderr`), so what the model actually did can be read afterwards instead of being deleted by the code that noticed the failure. Successful legs delete their transcripts; `--keep-transcripts` keeps them, for the failure that is a wrong answer rather than an error.
 
-Two bounds hold. Nothing grows without limit: run directories older than `logs.retention_days` (default 14) are swept, logs and transcripts alike. And no credential reaches either file: the harness process holds no GitHub token, and captured output is redacted before it lands.
+Run directories older than `logs.retention_days` (default 14) are swept, logs and transcripts alike. The harness process holds no GitHub token, and captured output passes the credential-shape filter before it lands in either file. An unrecognized or re-encoded secret can still pass through.
 
 In automated mode the runner is discarded after the job, so the generated workflows upload the directory as a run artifact (`crossrev-run-<run-id>`, retained 14 days). The pull request marker stays the durable record there — the artifact is the diagnosis.
 

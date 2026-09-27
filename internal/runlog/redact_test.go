@@ -14,7 +14,7 @@ import (
 // a line and it falls back to a plain comment (lib/log.sh:138-141).
 func TestPublishIsIdempotent(t *testing.T) {
 	var noLog *runlog.Log
-	once, err := noLog.Publish("the token is ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
+	once, err := noLog.Publish(fragments("the token is ghp_", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"))
 	if err != nil {
 		t.Fatalf("first pass: %v", err)
 	}
@@ -34,7 +34,7 @@ func TestPublishIsIdempotent(t *testing.T) {
 func TestRedactFileRewritesInPlace(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "review.attempt-1.stdout")
-	if err := os.WriteFile(path, []byte("start\nghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\nend\n"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(fragments("start\nghp_", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\nend\n")), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -65,6 +65,18 @@ func TestRedactFileLeavesEverythingElseAlone(t *testing.T) {
 	}
 }
 
+func TestRedactPortedNPMToken(t *testing.T) {
+	// npm.go generates npm_ followed by 36 alphanumeric characters.
+	credential := "npm_" + strings.Repeat("a0", 18)
+	if got := runlog.Redact(credential); got != "npm_a0a0a0…[redacted]" {
+		t.Errorf("Redact(npm token) = %q", got)
+	}
+	nearMiss := "npm_" + strings.Repeat("a0", 17)
+	if got := runlog.Redact(nearMiss); got != nearMiss {
+		t.Errorf("Redact(short npm token) = %q", got)
+	}
+}
+
 // TestRedactMasksCloudKeys covers the vendor prefixes beyond the oracle's
 // frozen five: AWS access key ids, Google API keys and OAuth tokens, and
 // Slack tokens. The values below are fabricated strings in the shapes the
@@ -73,31 +85,31 @@ func TestRedactFileLeavesEverythingElseAlone(t *testing.T) {
 func TestRedactMasksCloudKeys(t *testing.T) {
 	cases := []struct{ name, in, want string }{
 		{"aws access key id",
-			"key AKIAIOSFODNN7EXAMPLE here",
+			fragments("key AKIA", "IOSFODNN7EXAMPLE here"),
 			"key AKIAIOSFOD…[redacted] here"},
 		{"aws temporary key id",
-			"key ASIAIOSFODNN7EXAMPLE here",
+			fragments("key ASIA", "IOSFODNN7EXAMPLE here"),
 			"key ASIAIOSFOD…[redacted] here"},
 		{"google api key",
-			"key AIzaABCDEF0123456789abcdef0123456789XYZ here",
+			fragments("key AIza", "ABCDEF0123456789abcdef0123456789XYZ here"),
 			"key AIzaABCDEF…[redacted] here"},
 		{"google oauth token",
-			"token ya29.a0AfH6SMBxYz0123456789_abcdefghij here",
+			fragments("token ya29.", "a0AfH6SMBxYz0123456789_abcdefghij here"),
 			"token ya29.a0AfH6…[redacted] here"},
 		{"google oauth token at full length",
-			"token ya29.a0AfH6SMBxYz0123456789_abcdefghij-QWERTYUIOPASDFGHJKLZXCVBNM1234567890_abcdefghij0123456789 here",
+			fragments("token ya29.", "a0AfH6SMBxYz0123456789_abcdefghij-QWERTYUIOPASDFGHJKLZXCVBNM1234567890_abcdefghij0123456789 here"),
 			"token ya29.a0AfH6…[redacted] here"},
 		{"slack bot token",
-			"token xoxb-abcdefEXAMPLEabcdefEXAMPLE here",
+			fragments("token xoxb-", "abcdefEXAMPLEabcdefEXAMPLE here"),
 			"token xoxb-abcdef…[redacted] here"},
 		{"slack user token",
-			"token xoxp-abcdefEXAMPLEabcdefEXAMPLE here",
+			fragments("token xoxp-", "abcdefEXAMPLEabcdefEXAMPLE here"),
 			"token xoxp-abcdef…[redacted] here"},
 		{"slack refresh token",
-			"token xoxe-1-1234567890-abcdefgh here",
+			fragments("token xoxe-", "1-1234567890-abcdefgh here"),
 			"token xoxe-1-1234…[redacted] here"},
 		{"slack app token",
-			"token xapp-1-A0123456789-1234567890123-abcdef here",
+			fragments("token xapp-", "1-A0123456789-1234567890123-abcdef here"),
 			"token xapp-1-A012…[redacted] here"},
 	}
 	for _, c := range cases {
@@ -120,13 +132,13 @@ func TestRedactMasksCloudKeys(t *testing.T) {
 func TestRedactMasksPrivateKeyBlocks(t *testing.T) {
 	cases := []struct{ name, in, want string }{
 		{"rsa",
-			"deploy key:\n-----BEGIN RSA PRIVATE KEY-----\nMIIBOgIBAAJBAKq7Z2Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3\n-----END RSA PRIVATE KEY-----\nend\n",
+			fragments("deploy key:\n-----BEGIN", " RSA PRIVATE KEY-----\nMIIBOgIBAAJBAKq7Z2Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3\n-----END RSA PRIVATE KEY-----\nend\n"),
 			"deploy key:\n-----BEGIN RSA PRIVATE KEY-----…[redacted]\nend\n"},
 		{"openssh",
-			"-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW\n-----END OPENSSH PRIVATE KEY-----\n",
+			fragments("-----BEGIN", " OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW\n-----END OPENSSH PRIVATE KEY-----\n"),
 			"-----BEGIN OPENSSH PRIVATE KEY-----…[redacted]\n"},
 		{"pkcs8",
-			"-----BEGIN PRIVATE KEY-----\nMIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgmbihuqpXfnzQ9PJKjRw0\n-----END PRIVATE KEY-----\n",
+			fragments("-----BEGIN", " PRIVATE KEY-----\nMIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgmbihuqpXfnzQ9PJKjRw0\n-----END PRIVATE KEY-----\n"),
 			"-----BEGIN PRIVATE KEY-----…[redacted]\n"},
 	}
 	for _, c := range cases {
@@ -148,13 +160,13 @@ func TestRedactMasksPrivateKeyBlocks(t *testing.T) {
 func TestRedactMasksTheCheckoutHeader(t *testing.T) {
 	cases := []struct{ name, in, want string }{
 		{"upper",
-			"http.https://github.com/.extraheader AUTHORIZATION: basic eC1hY2Nlc3MtdG9rZW46Z2hzXzEyMzQ1Njc4OTBhYmNkZWY=",
+			fragments("http.https://github.com/.extraheader AUTHORIZATION: basic eC1hY2", "Nlc3MtdG9rZW46Z2hzXzEyMzQ1Njc4OTBhYmNkZWY="),
 			"http.https://github.com/.extraheader AUTHORIZATION: basic eC1hY2…[redacted]"},
 		{"lower header, capital scheme",
-			"http.https://github.com/.extraheader authorization: Basic dGVzdDpzZWNyZXQ=",
+			fragments("http.https://github.com/.extraheader authorization: Basic dGVzdD", "pzZWNyZXQ="),
 			"http.https://github.com/.extraheader authorization: Basic dGVzdD…[redacted]"},
 		{"capital header, upper scheme",
-			"Authorization: BASIC Z2l0aHViOmdocF8xMjM0NTY3ODkwYWJjZGVm",
+			fragments("Authorization: BASIC Z2l0aH", "ViOmdocF8xMjM0NTY3ODkwYWJjZGVm"),
 			"Authorization: BASIC Z2l0aH…[redacted]"},
 	}
 	for _, c := range cases {
@@ -177,17 +189,17 @@ func TestRedactMasksTheCheckoutHeader(t *testing.T) {
 // decodes to a username and password pair, and the fragment it carries
 // matches the AWS rule on its own, which is what makes the order load-bearing.
 func TestRedactMasksTheCheckoutHeaderBeforeItsContents(t *testing.T) {
-	const value = "AKIAIOSFODNN7EXAMPLE+1NvbWVVc2VyOnNvbWVwYXNz"
-	const in = "AUTHORIZATION: basic " + value
+	value := fragments("AKIA", "IOSFODNN7EXAMPLE+1NvbWVVc2VyOnNvbWVwYXNz")
+	in := "AUTHORIZATION: basic " + value
 	const want = "AUTHORIZATION: basic AKIAIO…[redacted]"
-	if alone := runlog.Redact(value); strings.Contains(alone, "AKIAIOSFODNN7EXAMPLE") {
+	if alone := runlog.Redact(value); strings.Contains(alone, fragments("AKIA", "IOSFODNN7EXAMPLE")) {
 		t.Fatalf("the fragment no longer matches the AWS rule alone: %q", alone)
 	}
 	got := runlog.Redact(in)
 	if got != want {
 		t.Errorf("Redact(%q) = %q, want %q", in, got, want)
 	}
-	if strings.Contains(got, "AKIAIOSFODNN7EXAMPLE") {
+	if strings.Contains(got, fragments("AKIA", "IOSFODNN7EXAMPLE")) {
 		t.Errorf("the header's contents survived inside the masked body: %q", got)
 	}
 	if again := runlog.Redact(got); again != got {
@@ -206,20 +218,20 @@ func TestRedactLeavesLookalikesAlone(t *testing.T) {
 		{"aws short identifier", "key AKIA1234567 here"},
 		{"aws id lowercase", "key akiaiosfodnn7example here"},
 		{"google key too short", "key AIza12 here"},
-		{"google key short identifier", "key AIzaConfigValue here"},
+		{"google key short identifier", fragments("key AIza", "ConfigValue here")},
 		{"google oauth too short", "token ya29.abc here"},
-		{"google oauth code selector", "token ya29.accessToken here"},
+		{"google oauth code selector", fragments("token ya29.", "accessToken here")},
 		{"slack token too short", "token xoxb-abc here"},
 		{"slack refresh token too short", "token xoxe-abc here"},
 		{"slack unknown family", "token xoxz-1234567890abcdef here"},
 		{"slack app token too short", "token xapp-abc here"},
-		{"certificate block", "-----BEGIN CERTIFICATE-----\nMIIBOgIBAAJBAKq7Z2Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3\n-----END CERTIFICATE-----\n"},
-		{"key block without terminator", "-----BEGIN RSA PRIVATE KEY-----\nMIIBOgIBAAJBAKq7Z2Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3\n"},
-		{"key block with mismatched labels", "-----BEGIN RSA PRIVATE KEY-----\nMIIBOgIBAAJBAKq7Z2Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3\n-----END EC PRIVATE KEY-----\n"},
-		{"bearer header", "extraheader = AUTHORIZATION: bearer eC1hY2Nlc3MtdG9rZW4="},
+		{"certificate block", fragments("-----BEGIN", " CERTIFICATE-----\nMIIBOgIBAAJBAKq7Z2Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3\n-----END CERTIFICATE-----\n")},
+		{"key block without terminator", fragments("-----BEGIN", " RSA PRIVATE KEY-----\nMIIBOgIBAAJBAKq7Z2Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3\n")},
+		{"key block with mismatched labels", fragments("-----BEGIN", " RSA PRIVATE KEY-----\nMIIBOgIBAAJBAKq7Z2Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3\n-----END EC PRIVATE KEY-----\n")},
+		{"bearer header", fragments("extraheader = AUTHORIZATION: bearer eC1hY2", "Nlc3MtdG9rZW4=")},
 		{"basic header too short", "AUTHORIZATION: basic abc"},
-		{"basic header is prose", "Authorization: Basic authentication"},
-		{"basic header without user and password", "Authorization: Basic aGVsbG8gd29ybGQ="},
+		{"basic header is prose", fragments("Authorization: Basic authen", "tication")},
+		{"basic header without user and password", fragments("Authorization: Basic aGVsbG", "8gd29ybGQ=")},
 	}
 	var noLog *runlog.Log
 	for _, c := range cases {
@@ -242,24 +254,24 @@ func TestRedactLeavesLookalikesAlone(t *testing.T) {
 // through Publish twice: masked once, noted once, and the second pass
 // changes nothing.
 func TestRedactPublishNotesNewShapesOnce(t *testing.T) {
-	const body = "keys AKIAIOSFODNN7EXAMPLE ASIAIOSFODNN7EXAMPLE " +
-		"AIzaABCDEF0123456789abcdef0123456789XYZ " +
-		"ya29.a0AfH6SMBxYz0123456789_abcdefghij " +
-		"xoxb-abcdefEXAMPLEabcdefEXAMPLE " +
-		"xoxe-1-1234567890-abcdefgh " +
-		"xapp-1-A0123456789-1234567890123-abcdef\n" +
-		"-----BEGIN RSA PRIVATE KEY-----\nMIIBOgIBAAJBAKq7Z2Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3\n-----END RSA PRIVATE KEY-----\n" +
-		"AUTHORIZATION: basic eC1hY2Nlc3MtdG9rZW46Z2hzXzEyMzQ1Njc4OTBhYmNkZWY="
+	body := fragments("keys AKIA", "IOSFODNN7EXAMPLE ASIA", "IOSFODNN7EXAMPLE ") +
+		fragments("AIza", "ABCDEF0123456789abcdef0123456789XYZ ") +
+		fragments("ya29.", "a0AfH6SMBxYz0123456789_abcdefghij ") +
+		fragments("xoxb-", "abcdefEXAMPLEabcdefEXAMPLE ") +
+		fragments("xoxe-", "1-1234567890-abcdefgh ") +
+		fragments("xapp-", "1-A0123456789-1234567890123-abcdef\n") +
+		fragments("-----BEGIN", " RSA PRIVATE KEY-----\nMIIBOgIBAAJBAKq7Z2Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3\n-----END RSA PRIVATE KEY-----\n") +
+		fragments("AUTHORIZATION: basic eC1hY2", "Nlc3MtdG9rZW46Z2hzXzEyMzQ1Njc4OTBhYmNkZWY=")
 	secrets := []string{
-		"AKIAIOSFODNN7EXAMPLE",
-		"ASIAIOSFODNN7EXAMPLE",
-		"AIzaABCDEF0123456789abcdef0123456789XYZ",
-		"ya29.a0AfH6SMBxYz0123456789_abcdefghij",
-		"xoxb-abcdefEXAMPLEabcdefEXAMPLE",
-		"xoxe-1-1234567890-abcdefgh",
-		"xapp-1-A0123456789-1234567890123-abcdef",
+		fragments("AKIA", "IOSFODNN7EXAMPLE"),
+		fragments("ASIA", "IOSFODNN7EXAMPLE"),
+		fragments("AIza", "ABCDEF0123456789abcdef0123456789XYZ"),
+		fragments("ya29.", "a0AfH6SMBxYz0123456789_abcdefghij"),
+		fragments("xoxb-", "abcdefEXAMPLEabcdefEXAMPLE"),
+		fragments("xoxe-", "1-1234567890-abcdefgh"),
+		fragments("xapp-", "1-A0123456789-1234567890123-abcdef"),
 		"MIIBOgIBAAJBAKq7Z2Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3Jv3",
-		"eC1hY2Nlc3MtdG9rZW46Z2hzXzEyMzQ1Njc4OTBhYmNkZWY=",
+		fragments("eC1hY2", "Nlc3MtdG9rZW46Z2hzXzEyMzQ1Njc4OTBhYmNkZWY="),
 	}
 	var noLog *runlog.Log
 	once, err := noLog.Publish(body)

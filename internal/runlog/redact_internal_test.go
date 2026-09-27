@@ -13,6 +13,8 @@ import (
 
 var errFilterDied = errors.New("the filter died")
 
+func fragments(parts ...string) string { return strings.Join(parts, "") }
+
 func failingLog(t *testing.T, dir string) *Log {
 	t.Helper()
 	l, err := Open(Options{Dir: dir, Repo: "acme/widget", PR: "7"})
@@ -30,7 +32,7 @@ func TestPublishFailsClosed(t *testing.T) {
 	dir := t.TempDir()
 	l := failingLog(t, dir)
 
-	got, err := l.Publish("the token is ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
+	got, err := l.Publish(fragments("the token is ghp_", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"))
 	if !errors.Is(err, errFilterDied) {
 		t.Fatalf("Publish err = %v, want the filter's own error", err)
 	}
@@ -56,7 +58,7 @@ func TestRedactFileFailsClosed(t *testing.T) {
 	dir := t.TempDir()
 	l := failingLog(t, dir)
 	path := filepath.Join(dir, "review.attempt-1.stdout")
-	if err := os.WriteFile(path, []byte("ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(fragments("ghp_", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n")), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -122,7 +124,7 @@ func (s *stubTemp) Remove() error {
 // because the file this runs on is the transcript, the one most likely to be
 // holding a credential.
 func TestRedactFileDiscardsWhenTheRewriteFails(t *testing.T) {
-	const credential = "ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+	credential := fragments("ghp_", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
 	for _, step := range []string{"write", "close", "rename"} {
 		t.Run(step, func(t *testing.T) {
 			dir := t.TempDir()
@@ -179,7 +181,7 @@ func TestRedactFileDiscardsWhenTheRewriteFails(t *testing.T) {
 // opened the filter has already succeeded, so what is lost is a transcript and
 // what would be kept is a credential.
 func TestRedactFileDiscardsWhenNoTemporaryOpens(t *testing.T) {
-	const credential = "ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+	credential := fragments("ghp_", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
 	dir := t.TempDir()
 	l, err := Open(Options{Dir: dir, Repo: "acme/widget", PR: "7"})
 	if err != nil {

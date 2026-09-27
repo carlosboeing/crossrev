@@ -113,9 +113,9 @@ func redactBasicAuth(in []byte) []byte {
 // before this list: its body is base64 that can itself match the token
 // rules, so the block is consumed whole before any of them see it. The
 // checkout header runs next, in redactBasicAuth, for the same reason — its
-// base64 hides the token's own prefix. The specific token rules follow, and
-// the generic sk- rule runs last, over text the earlier rules have already
-// masked.
+// base64 hides the token's own prefix. The existing specific token rules
+// follow, then the pinned gitleaks rules in ported_rules.go, and the generic
+// sk- rule runs last over text the earlier rules have already masked.
 //
 // A masked string matches nothing twice, which is where the idempotence
 // comes from: the mask breaks every charset, the block rule consumes the
@@ -141,8 +141,9 @@ var credentialPatterns = []struct {
 	{regexp.MustCompile(`(ya29\.[A-Za-z0-9._-]{6})[A-Za-z0-9._-]{14,}`), "${1}" + mask},
 	{regexp.MustCompile(`(xox[baprse]-[A-Za-z0-9_-]{6})[A-Za-z0-9_-]+`), "${1}" + mask},
 	{regexp.MustCompile(`(xapp-[A-Za-z0-9_-]{6})[A-Za-z0-9_-]+`), "${1}" + mask},
-	{regexp.MustCompile(`(sk-[A-Za-z0-9_-]{6})[A-Za-z0-9_-]{12,}`), "${1}" + mask},
 }
+
+var genericSKPattern = regexp.MustCompile(`(sk-[A-Za-z0-9_-]{6})[A-Za-z0-9_-]{12,}`)
 
 // filter is the signature of the credential filter, and it reports an error
 // because the thing being ported can fail: the Bash filter is an external sed,
@@ -158,6 +159,8 @@ func filterBytes(in []byte) ([]byte, error) {
 	for _, pattern := range credentialPatterns {
 		out = pattern.re.ReplaceAll(out, []byte(pattern.with))
 	}
+	out = redactPorted(out)
+	out = genericSKPattern.ReplaceAll(out, []byte("${1}"+mask))
 	return out, nil
 }
 
