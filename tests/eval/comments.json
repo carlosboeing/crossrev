@@ -1,0 +1,10 @@
+[
+  {
+    "id": 1001,
+    "body": "Initial discussion on the PR",
+    "user": {
+      "login": "author"
+    },
+    "created_at": "2026-09-28T00:00:00Z"
+  }
+]

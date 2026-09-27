@@ -1,0 +1,28 @@
+{
+  "number": 42,
+  "title": "Add refresh helper",
+  "body": "Adds a refresh helper for the dashboard.",
+  "url": "https://github.com/acme/widget/pull/42",
+  "headRefName": "feature",
+  "headRefOid": "1111111111111111111111111111111111111111",
+  "baseRefName": "main",
+  "baseRefOid": "0000000000000000000000000000000000000000",
+  "changedFiles": 1,
+  "labels": [
+    {
+      "name": "enhancement",
+      "color": "a2eeef",
+      "description": "New feature or request"
+    }
+  ],
+  "isCrossRepository": false,
+  "isDraft": false,
+  "headRepositoryOwner": {
+    "login": "acme"
+  },
+  "headRepository": {
+    "name": "widget"
+  },
+  "maintainerCanModify": true,
+  "state": "OPEN"
+}

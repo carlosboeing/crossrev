@@ -50,6 +50,29 @@ hash_stdin() {
   fi
 }
 
+extract_field() {
+  local prefix="$1"; shift
+  local val=""
+  local prev=""
+  for a in "$@"; do
+    if [[ "$prev" == "-f" || "$prev" == "-F" || "$prev" == "--field" || "$prev" == "--raw-field" || "$prev" == "-q" || "$prev" == "--jq" ]] && [[ "$a" == "$prefix="* ]]; then
+      val="${a#"$prefix="}"
+    elif [[ "$a" == "$prefix="* ]]; then
+      val="${a#"$prefix="}"
+    elif [[ "$a" == "-f$prefix="* ]]; then
+      val="${a#"-f$prefix="}"
+    elif [[ "$a" == "-F$prefix="* ]]; then
+      val="${a#"-F$prefix="}"
+    elif [[ "$a" == "--field=$prefix="* ]]; then
+      val="${a#"--field=$prefix="}"
+    elif [[ "$a" == "--raw-field=$prefix="* ]]; then
+      val="${a#"--raw-field=$prefix="}"
+    fi
+    prev="$a"
+  done
+  printf '%s' "$val"
+}
+
 match_routes() {
   if [[ -f "${CROSSREV_GH_ROUTES:-/nonexistent}" ]]; then
     while IFS=$'\t' read -r pat resp; do
@@ -101,6 +124,37 @@ if [[ -n "${CROSSREV_GH_STATE:-}" ]]; then
   # from the create call (GitHub sets it server-side), so the suite exports
   # it beside the state directory and the snapshot file carries it in.
   gh_author="${CROSSREV_GH_AUTHOR:-tester}"
+
+  # Seed issue comments if present
+  seed_comments="$CROSSREV_GH_STATE/issue-comments.json"
+  [[ -f "$seed_comments" ]] || seed_comments="$CROSSREV_GH_STATE/comments.json"
+  if [[ -f "$seed_comments" && ! -f "$CROSSREV_GH_STATE/.seeded-issue-comments" ]]; then
+    next="$CROSSREV_GH_STATE/next-id"
+    [[ -f "$next" ]] || printf '9001' >"$next"
+    cur_id="$(cat "$next")"
+    while IFS=$'\t' read -r sc_id sc_body; do
+      [[ -n "$sc_id" ]] || continue
+      printf '%s' "$sc_body" >"$CROSSREV_GH_STATE/comment-$sc_id"
+      if (( sc_id >= cur_id )); then
+        cur_id=$(( sc_id + 1 ))
+      fi
+    done < <(jq -r '.[] | [.id, .body] | @tsv' "$seed_comments" 2>/dev/null || true)
+    printf '%s' "$cur_id" >"$next"
+    : >"$CROSSREV_GH_STATE/.seeded-issue-comments"
+  fi
+
+  # Initialize next-id past any seeded review thread comment databaseId
+  if [[ -f "$CROSSREV_GH_STATE/threads.json" && ! -f "$CROSSREV_GH_STATE/.seeded-threads" ]]; then
+    next="$CROSSREV_GH_STATE/next-id"
+    [[ -f "$next" ]] || printf '9001' >"$next"
+    cur_id="$(cat "$next")"
+    max_tid="$(jq -r '[.[].comments.nodes[].databaseId // 0] | max // 0' "$CROSSREV_GH_STATE/threads.json" 2>/dev/null || echo 0)"
+    if (( max_tid >= cur_id )); then
+      printf '%s' "$(( max_tid + 1 ))" >"$next"
+    fi
+    : >"$CROSSREV_GH_STATE/.seeded-threads"
+  fi
+
   # A coverage create: POST .../issues/42/comments with a crossrev:c marker
   # in the body. Spool the body and answer the next comment id.
   if [[ "$joined" == "api --method POST repos/"*"/issues/"*"/comments"* ]]; then
@@ -127,6 +181,9 @@ if [[ -n "${CROSSREV_GH_STATE:-}" ]]; then
         '{id:$id, body:$body, user:{login:$a}, created_at:"2026-09-09T00:00:00Z"}' | emit
       exit 0
     fi
+    match_routes
+    printf '{"message":"Not Found"}\n' >&2
+    exit 1
   fi
   # Paginated comment list: merge the spooled coverage comments over the
   # static baseline, the way the API answers comments the run just created.
@@ -136,12 +193,12 @@ if [[ -n "${CROSSREV_GH_STATE:-}" ]]; then
   # the static route answers alone.
   if [[ "$joined" == "api --paginate repos/"*"/issues/"*"/comments"* && ! -f "$CROSSREV_GH_STATE/frozen" ]]; then
     spool="[]"
-    for f in "$CROSSREV_GH_STATE"/comment-*; do
+    for f in $(ls -1 "$CROSSREV_GH_STATE"/comment-* 2>/dev/null | sort -t- -k2 -n); do
       [[ -e "$f" ]] || continue
       cid="${f##*-}"
       case "$cid" in *[!0-9]*) continue;; esac
       spool="$(jq -c --argjson id "$cid" --arg a "$gh_author" --rawfile body "$f" \
-        '. + [{id:$id, body:$body, user:{login:$a}, created_at:"2026-09-09T00:00:00Z"}]' <<<"$spool")"
+        '. + [{id:$id, body:$body, user:{login:$a}, created_at:"2026-09-09T00:00:00Z", issue_url:"https://api.github.com/repos/acme/widget/issues/42"}]' <<<"$spool")"
     done
     if [[ "$spool" != "[]" ]]; then
       static="[]"
@@ -159,9 +216,62 @@ if [[ -n "${CROSSREV_GH_STATE:-}" ]]; then
           fi
         done <"$CROSSREV_GH_ROUTES"
       fi
-      jq -cs '.[0] + .[1]' <(printf '%s' "$static") <(printf '%s' "$spool") | emit
+      jq -cs '.[0] as $static | .[1] as $spool | ($static | map(.id)) as $sids | $static + ($spool | map(select(.id as $id | $sids | index($id) | not)))' <(printf '%s' "$static") <(printf '%s' "$spool") | emit
       exit 0
     fi
+  fi
+  if [[ "$joined" == "api --paginate repos/"*"/issues/"*"/comments"* ]]; then
+    match_routes
+    printf '[]\n' | emit
+    exit 0
+  fi
+
+  # General issue comment create: POST repos/<slug>/issues/<number>/comments
+  if [[ "$joined" == "api --method POST repos/"*"/issues/"*"/comments"* ]]; then
+    match_routes
+    body=""
+    for a in "$@"; do
+      [[ "$a" == body=* ]] && body="${a#body=}"
+    done
+    [[ -z "$body" ]] && body="$(extract_field body "$@")"
+    next="$CROSSREV_GH_STATE/next-id"
+    [[ -f "$next" ]] || printf '9001' >"$next"
+    id="$(cat "$next")"
+    printf '%s' "$(( id + 1 ))" >"$next"
+    printf '%s' "$body" >"$CROSSREV_GH_STATE/comment-$id"
+    printf '{"id":%s}\n' "$id" | emit
+    exit 0
+  fi
+
+  # Issue comment edit: PATCH repos/<slug>/issues/comments/<id>
+  if [[ "$joined" == "api --method PATCH repos/"*"/issues/comments/"* ]]; then
+    match_routes
+    id="${joined##*issues/comments/}"
+    id="${id%% *}"
+    body="$(extract_field body "$@")"
+    if [[ -f "$CROSSREV_GH_STATE/comment-$id" ]]; then
+      printf '%s' "$body" >"$CROSSREV_GH_STATE/comment-$id"
+      jq -cn --argjson id "$id" --arg body "$body" --arg a "$gh_author" \
+        '{id:$id, body:$body, user:{login:$a}, created_at:"2026-09-09T00:00:00Z"}' | emit
+      exit 0
+    fi
+    printf '{}\n' | emit
+    exit 0
+  fi
+
+  # Repository-wide issue comments: GET repos/<slug>/issues/comments
+  if [[ "$joined" == "api --method GET repos/"*"/issues/comments"* ]]; then
+    match_routes
+    spool="[]"
+    for f in $(ls -1 "$CROSSREV_GH_STATE"/comment-* 2>/dev/null | sort -t- -k2 -n); do
+      [[ -e "$f" ]] || continue
+      cid="${f##*-}"
+      case "$cid" in *[!0-9]*) continue;; esac
+      spool="$(jq -c --argjson id "$cid" --arg a "$gh_author" --rawfile body "$f" \
+        '. + [{id:$id, body:$body, user:{login:$a}, created_at:"2026-09-09T00:00:00Z", issue_url:"https://api.github.com/repos/acme/widget/issues/42"}]' <<<"$spool")"
+    done
+    printf '%s\n' "$spool" | emit
+    exit 0
   fi
 
   # Git object API
@@ -325,6 +435,277 @@ if [[ -n "${CROSSREV_GH_STATE:-}" ]]; then
       fi
       printf '{"message":"Not Found"}\n' >&2
       exit 1
+    fi
+  fi
+
+  # api user --jq .login
+  if [[ "$joined" == "api user"* ]]; then
+    match_routes
+    if [[ -f "$CROSSREV_GH_STATE/user.json" ]]; then
+      cat "$CROSSREV_GH_STATE/user.json" | emit
+      exit 0
+    fi
+    if [[ -f "$CROSSREV_GH_STATE/user" ]]; then
+      u="$(cat "$CROSSREV_GH_STATE/user")"
+      if [[ "$u" =~ ^\{.*\}$ ]]; then
+        printf '%s\n' "$u" | emit
+      else
+        jq -cn --arg login "$u" '{login: $login}' | emit
+      fi
+      exit 0
+    fi
+    jq -cn --arg login "$gh_author" '{login: $login}' | emit
+    exit 0
+  fi
+
+  # Pull request metadata: pr view <number> ...
+  if [[ "$joined" == "pr view"* ]]; then
+    match_routes
+    pr_file=""
+    for a in "$@"; do
+      if [[ "$a" =~ ^[0-9]+$ ]] && [[ -f "$CROSSREV_GH_STATE/pr-$a.json" ]]; then
+        pr_file="$CROSSREV_GH_STATE/pr-$a.json"
+        break
+      fi
+    done
+    if [[ -z "$pr_file" && -f "$CROSSREV_GH_STATE/pr.json" ]]; then
+      pr_file="$CROSSREV_GH_STATE/pr.json"
+    fi
+
+    if [[ -f "$CROSSREV_GH_STATE/pr-labels.json" ]]; then
+      current_pr_labels="$(cat "$CROSSREV_GH_STATE/pr-labels.json")"
+    elif [[ -n "$pr_file" ]]; then
+      current_pr_labels="$(jq -c '.labels // []' "$pr_file")"
+      printf '%s' "$current_pr_labels" >"$CROSSREV_GH_STATE/pr-labels.json"
+    else
+      current_pr_labels="[]"
+    fi
+
+    if [[ -n "$pr_file" ]]; then
+      jq --argjson l "$current_pr_labels" '.labels = $l' "$pr_file" | emit
+      exit 0
+    fi
+
+    pr_num="42"
+    for a in "$@"; do
+      [[ "$a" =~ ^[0-9]+$ ]] && { pr_num="$a"; break; }
+    done
+    jq -cn --argjson n "$pr_num" --argjson l "$current_pr_labels" \
+      '{number:$n, title:"Pull Request", body:"", url:"https://github.com/acme/widget/pull/\($n)",
+        headRefName:"feature", headRefOid:"0000000000000000000000000000000000000000",
+        baseRefName:"main", baseRefOid:"0000000000000000000000000000000000000000",
+        changedFiles:0, labels:$l, isCrossRepository:false, isDraft:false,
+        headRepositoryOwner:{login:"acme"}, headRepository:{name:"widget"},
+        maintainerCanModify:true, state:"OPEN"}' | emit
+    exit 0
+  fi
+
+  # Check / get repo label colour: GET repos/<slug>/labels/<name>
+  if [[ "$joined" == "api repos/"*"/labels/"* && "$joined" != *"--method"* && "$joined" != *"issues/"* ]]; then
+    match_routes
+    lbl_name="${joined##*labels/}"
+    lbl_name="${lbl_name%% *}"
+    lbl_name="$(printf '%b' "${lbl_name//%/\\x}")"
+    if [[ -f "$CROSSREV_GH_STATE/labels.json" ]]; then
+      lbl="$(jq -c --arg n "$lbl_name" '.[] | select(.name == $n)' "$CROSSREV_GH_STATE/labels.json" 2>/dev/null || true)"
+      if [[ -n "$lbl" ]]; then
+        printf '%s\n' "$lbl" | emit
+        exit 0
+      fi
+    fi
+    printf '{"message":"Not Found"}\n' >&2
+    exit 1
+  fi
+
+  # Create repo label: POST repos/<slug>/labels
+  if [[ ("$joined" == "api --method POST repos/"*"/labels" || "$joined" == "api --method POST repos/"*"/labels "*) && "$joined" != *"issues/"* ]]; then
+    match_routes
+    name="$(extract_field name "$@")"
+    color="$(extract_field color "$@")"
+    desc="$(extract_field description "$@")"
+    color="${color:-ededed}"
+    [[ -f "$CROSSREV_GH_STATE/labels.json" ]] || printf '[]' >"$CROSSREV_GH_STATE/labels.json"
+    updated="$(jq -c --arg n "$name" --arg c "$color" --arg d "${desc:-}" \
+      '[.[] | select(.name != $n)] + [{name:$n, color:$c, description:$d}]' "$CROSSREV_GH_STATE/labels.json")"
+    printf '%s' "$updated" >"$CROSSREV_GH_STATE/labels.json"
+    jq -cn --arg n "$name" --arg c "$color" --arg d "${desc:-}" \
+      '{name:$n, color:$c, description:$d}' | emit
+    exit 0
+  fi
+
+  # Recolour repo label: PATCH repos/<slug>/labels/<name>
+  if [[ "$joined" == "api --method PATCH repos/"*"/labels/"* && "$joined" != *"issues/"* ]]; then
+    match_routes
+    lbl_name="${joined##*labels/}"
+    lbl_name="${lbl_name%% *}"
+    lbl_name="$(printf '%b' "${lbl_name//%/\\x}")"
+    color="$(extract_field color "$@")"
+    [[ -f "$CROSSREV_GH_STATE/labels.json" ]] || printf '[]' >"$CROSSREV_GH_STATE/labels.json"
+    updated="$(jq -c --arg n "$lbl_name" --arg c "$color" \
+      'map(if .name == $n then .color = $c else . end)' "$CROSSREV_GH_STATE/labels.json")"
+    printf '%s' "$updated" >"$CROSSREV_GH_STATE/labels.json"
+    lbl="$(jq -c --arg n "$lbl_name" '.[] | select(.name == $n)' "$CROSSREV_GH_STATE/labels.json")"
+    printf '%s\n' "${lbl:-{\}}" | emit
+    exit 0
+  fi
+
+  # List repo labels: GET repos/<slug>/labels
+  if [[ ("$joined" == "api repos/"*"/labels" || "$joined" == "api repos/"*"/labels "*) && "$joined" != *"--method"* && "$joined" != *"issues/"* ]]; then
+    match_routes
+    [[ -f "$CROSSREV_GH_STATE/labels.json" ]] || printf '[]' >"$CROSSREV_GH_STATE/labels.json"
+    cat "$CROSSREV_GH_STATE/labels.json" | emit
+    exit 0
+  fi
+
+  # Read PR labels: GET repos/<slug>/issues/<number>/labels
+  if [[ "$joined" == "api repos/"*"/issues/"*"/labels"* && "$joined" != *"--method"* ]]; then
+    match_routes
+    if [[ -f "$CROSSREV_GH_STATE/pr-labels.json" ]]; then
+      cat "$CROSSREV_GH_STATE/pr-labels.json"
+    elif [[ -f "$CROSSREV_GH_STATE/pr.json" ]]; then
+      jq -c '.labels // []' "$CROSSREV_GH_STATE/pr.json"
+    else
+      printf '[]'
+    fi | emit
+    exit 0
+  fi
+
+  # Add PR labels: POST repos/<slug>/issues/<number>/labels
+  if [[ "$joined" == "api --method POST repos/"*"/issues/"*"/labels"* ]]; then
+    match_routes
+    if [[ -f "$CROSSREV_GH_STATE/pr-labels.json" ]]; then
+      cur="$(cat "$CROSSREV_GH_STATE/pr-labels.json")"
+    elif [[ -f "$CROSSREV_GH_STATE/pr.json" ]]; then
+      cur="$(jq -c '.labels // []' "$CROSSREV_GH_STATE/pr.json")"
+    else
+      cur="[]"
+    fi
+    new_labels=()
+    prev=""
+    for a in "$@"; do
+      if [[ "$prev" == "-f" || "$prev" == "-F" ]] && [[ "$a" == labels\[\]=* ]]; then
+        new_labels+=("${a#labels\[\]=}")
+      elif [[ "$a" == labels\[\]=* ]]; then
+        new_labels+=("${a#labels\[\]=}")
+      fi
+      prev="$a"
+    done
+    for nl in "${new_labels[@]}"; do
+      [[ -n "$nl" ]] || continue
+      col="ededed"
+      if [[ -f "$CROSSREV_GH_STATE/labels.json" ]]; then
+        found_col="$(jq -r --arg n "$nl" '.[] | select(.name == $n) | .color' "$CROSSREV_GH_STATE/labels.json" 2>/dev/null || true)"
+        [[ -n "$found_col" && "$found_col" != "null" ]] && col="$found_col"
+      fi
+      cur="$(jq -c --arg n "$nl" --arg c "$col" \
+        'if any(.name == $n) then . else . + [{name:$n, color:$c, description:""}] end' <<<"$cur")"
+    done
+    printf '%s' "$cur" >"$CROSSREV_GH_STATE/pr-labels.json"
+    cat "$CROSSREV_GH_STATE/pr-labels.json" | emit
+    exit 0
+  fi
+
+  # Remove PR labels: DELETE repos/<slug>/issues/<number>/labels/<name>
+  if [[ "$joined" == "api --method DELETE repos/"*"/issues/"*"/labels/"* ]]; then
+    match_routes
+    lbl_name="${joined##*labels/}"
+    lbl_name="${lbl_name%% *}"
+    lbl_name="$(printf '%b' "${lbl_name//%/\\x}")"
+    if [[ -f "$CROSSREV_GH_STATE/pr-labels.json" ]]; then
+      cur="$(cat "$CROSSREV_GH_STATE/pr-labels.json")"
+    elif [[ -f "$CROSSREV_GH_STATE/pr.json" ]]; then
+      cur="$(jq -c '.labels // []' "$CROSSREV_GH_STATE/pr.json")"
+    else
+      cur="[]"
+    fi
+    cur="$(jq -c --arg n "$lbl_name" '[.[] | select(.name != $n)]' <<<"$cur")"
+    printf '%s' "$cur" >"$CROSSREV_GH_STATE/pr-labels.json"
+    printf '[]\n' | emit
+    exit 0
+  fi
+
+  # List PR review comments: GET repos/<slug>/pulls/<number>/comments
+  if [[ "$joined" == "api --paginate repos/"*"/pulls/"*"/comments"* ]]; then
+    match_routes
+    if [[ -f "$CROSSREV_GH_STATE/threads.json" ]]; then
+      jq -c '[.[] | .path as $p | .line as $l | .comments.nodes[] | {id:.databaseId, databaseId:.databaseId, body:.body, path:$p, line:$l, user:{login:(.author.login // "'"$gh_author"'")}, created_at:"2026-09-09T00:00:00Z"}]' "$CROSSREV_GH_STATE/threads.json" | emit
+      exit 0
+    fi
+    printf '[]\n' | emit
+    exit 0
+  fi
+
+  # Reply in review thread: POST repos/<slug>/pulls/<number>/comments/<id>/replies
+  if [[ "$joined" == "api --method POST repos/"*"/pulls/"*"/comments/"*"/replies"* ]]; then
+    match_routes
+    rbody="$(extract_field body "$@")"
+    root_id="${joined##*comments/}"
+    root_id="${root_id%%/*}"
+    next="$CROSSREV_GH_STATE/next-id"
+    [[ -f "$next" ]] || printf '9001' >"$next"
+    reply_id="$(cat "$next")"
+    printf '%s' "$(( reply_id + 1 ))" >"$next"
+    reply_node="$(jq -cn --argjson id "$reply_id" --arg b "$rbody" --arg a "$gh_author" \
+      '{databaseId:$id, body:$b, author:{login:$a}}')"
+    [[ -f "$CROSSREV_GH_STATE/threads.json" ]] || printf '[]' >"$CROSSREV_GH_STATE/threads.json"
+    updated="$(jq -c --argjson root "$root_id" --argjson r "$reply_node" \
+      'map(if (.comments.nodes | any(.databaseId == $root)) then .comments.nodes += [$r] else . end)' \
+      "$CROSSREV_GH_STATE/threads.json")"
+    printf '%s' "$updated" >"$CROSSREV_GH_STATE/threads.json"
+    jq -cn --argjson id "$reply_id" --arg b "$rbody" --arg a "$gh_author" \
+      '{id:$id, databaseId:$id, body:$b, user:{login:$a}, created_at:"2026-09-09T00:00:00Z"}' | emit
+    exit 0
+  fi
+
+  # Create PR review comment: POST repos/<slug>/pulls/<number>/comments
+  if [[ "$joined" == "api --method POST repos/"*"/pulls/"*"/comments"* ]]; then
+    match_routes
+    cbody="$(extract_field body "$@")"
+    cpath="$(extract_field path "$@")"
+    cline="$(extract_field line "$@")"
+    next="$CROSSREV_GH_STATE/next-id"
+    [[ -f "$next" ]] || printf '9001' >"$next"
+    cid="$(cat "$next")"
+    printf '%s' "$(( cid + 1 ))" >"$next"
+
+    line_json="null"
+    if [[ -n "$cline" && "$cline" =~ ^[0-9]+$ ]]; then
+      line_json="$cline"
+    fi
+
+    new_comment="$(jq -cn --argjson id "$cid" --arg b "$cbody" --arg a "$gh_author" \
+      '{databaseId:$id, body:$b, author:{login:$a}}')"
+    new_thread="$(jq -cn --arg id "RT_$cid" --arg p "$cpath" --argjson l "$line_json" --argjson c "$new_comment" \
+      '{id:$id, isResolved:false, isOutdated:false, path:$p, line:$l, comments:{nodes:[$c]}}')"
+
+    [[ -f "$CROSSREV_GH_STATE/threads.json" ]] || printf '[]' >"$CROSSREV_GH_STATE/threads.json"
+    updated="$(jq -c --argjson t "$new_thread" '. + [$t]' "$CROSSREV_GH_STATE/threads.json")"
+    printf '%s' "$updated" >"$CROSSREV_GH_STATE/threads.json"
+
+    jq -cn --argjson id "$cid" --arg b "$cbody" --arg p "$cpath" --argjson l "$line_json" --arg a "$gh_author" \
+      '{id:$id, databaseId:$id, body:$b, path:$p, line:$l, user:{login:$a}, created_at:"2026-09-09T00:00:00Z"}' | emit
+    exit 0
+  fi
+
+  # GraphQL reviewThreads query and resolveReviewThread mutation
+  if [[ "$joined" == "api graphql"* ]]; then
+    match_routes
+    if [[ "$joined" == *"reviewThreads"* ]]; then
+      [[ -f "$CROSSREV_GH_STATE/threads.json" ]] || printf '[]' >"$CROSSREV_GH_STATE/threads.json"
+      threads="$(cat "$CROSSREV_GH_STATE/threads.json")"
+      jq -cn --argjson t "$threads" \
+        '{data:{repository:{pullRequest:{reviewThreads:{nodes:$t}}}}}' | emit
+      exit 0
+    fi
+    if [[ "$joined" == *"resolveReviewThread"* || "$joined" == *"threadId="* ]]; then
+      tid="$(extract_field threadId "$@")"
+      if [[ -f "$CROSSREV_GH_STATE/threads.json" && -n "$tid" ]]; then
+        updated="$(jq -c --arg id "$tid" \
+          'map(if .id == $id then .isResolved = true else . end)' "$CROSSREV_GH_STATE/threads.json")"
+        printf '%s' "$updated" >"$CROSSREV_GH_STATE/threads.json"
+      fi
+      printf '{"data":{"resolveReviewThread":{"thread":{"isResolved":true}}}}\n' | emit
+      exit 0
     fi
   fi
 fi
