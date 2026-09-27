@@ -16,11 +16,9 @@ func fragments(parts ...string) string { return strings.Join(parts, "") }
 
 func TestPortedCredentialRules(t *testing.T) {
 	cases := []struct{ id, positive, negative string }{
-		{"1password-service-account-token", fragments("ops_eyJ", strings.Repeat("a0", 125)), fragments("ops_eyJ", "zaWduSW5B..[Redacted]")},
 		{"adobe-client-secret", fragments("p8e-", strings.Repeat("a0", 16)), fragments("p8e-", "abc")},
 		{"age-secret-key", fragments("AGE-SECRET-KEY-1", strings.Repeat("Q", 58)), fragments("AGE-SECRET-KEY-1", strings.Repeat("Q", 57))},
 		{"alibaba-access-key-id", fragments("LTAI", strings.Repeat("a1", 10)), fragments("LTAI", "abc")},
-		{"artifactory-api-key", fragments("AKCp", strings.Repeat("a0", 34), "a"), fragments("AkCp", strings.Repeat("a0", 34), "a")},
 		{"authress-service-client-access-key", fragments("sc_", strings.Repeat("a1", 5), ".", "ab12", ".acc_", strings.Repeat("a1", 8), ".", strings.Repeat("a1", 15)), fragments("sc_", "abc", ".acc_", "short")},
 		{"aws-amazon-bedrock-api-key-long-lived", fragments("ABSK", strings.Repeat("Aa01", 28)), fragments("ABSK", "QmVkcm9ja0FQSUtleS1EXAMPLE")},
 		{"clojars-api-token", fragments("CLOJARS_", strings.Repeat("a0", 30)), fragments("CLOJARS_", "abc")},
@@ -36,7 +34,6 @@ func TestPortedCredentialRules(t *testing.T) {
 		{"facebook-page-access-token", fragments("EAAM", strings.Repeat("a0", 50)), fragments("eaaaC0b75a9329fded2ffa9a02b47e0117831b82")},
 		{"flutterwave-encryption-key", fragments("FLWSECK_TEST-", strings.Repeat("a0", 6)), fragments("FLWSECK_TEST-", "abc")},
 		{"flutterwave-secret-key", fragments("FLWSECK_TEST-", strings.Repeat("a0", 16), "-X"), fragments("FLWSECK_TEST-", "abc", "-X")},
-		{"flyio-access-token", fragments("fo1_", strings.Repeat("a0", 21), "a"), fragments("fo1_", strings.Repeat("a0", 21))},
 		{"frameio-api-token", fragments("fio-u-", strings.Repeat("a0", 32)), fragments("fio-u-", "abc")},
 		{"gitlab-cicd-job-token", fragments("glcbt-", "a1b2c", "_", strings.Repeat("a0", 10)), fragments("glcbt-", "abc")},
 		{"gitlab-deploy-token", fragments("gldt-", strings.Repeat("a0", 10)), fragments("gldt-", "abc")},
@@ -46,26 +43,20 @@ func TestPortedCredentialRules(t *testing.T) {
 		{"gitlab-kubernetes-agent-token", fragments("glagent-", strings.Repeat("a0", 25)), fragments("glagent-", "abc")},
 		{"gitlab-oauth-app-secret", fragments("gloas-", strings.Repeat("a0", 32)), fragments("gloas-", "abc")},
 		{"gitlab-ptt", fragments("glptt-", strings.Repeat("a0", 20)), fragments("glptt-", strings.Repeat("x", 40))},
-		{"gitlab-rrt", fragments("GR1348941", strings.Repeat("a0", 10)), fragments("GR1348941", strings.Repeat("a0", 9), "a")},
 		{"gitlab-runner-authentication-token", fragments("glrt-", strings.Repeat("a0", 10)), fragments("glrt-", "abc")},
 		{"gitlab-runner-authentication-token-routable", fragments("glrt-t1_", strings.Repeat("a0", 13), "a", ".", "ab", "1234567"), fragments("glrt-tx_", strings.Repeat("x", 27), ".xxxxxxxxx")},
 		{"gitlab-scim-token", fragments("glsoat-", strings.Repeat("a0", 10)), fragments("glsoat-", "abc")},
-		{"grafana-service-account-token", fragments("glsa_", strings.Repeat("a0", 16), "_", strings.Repeat("a0", 4)), fragments("glsa_", strings.Repeat("a0", 15), "a", "_", strings.Repeat("a0", 4))},
 		{"heroku-api-key-v2", fragments("HRKU-AA", strings.Repeat("a0", 29)), fragments("HRKU-AA", "abc")},
 		{"huggingface-organization-api-token", fragments("api_org_", strings.Repeat("aB", 17)), "const api_org_controller = require('api')"},
-		{"infracost-api-token", fragments("ico-", strings.Repeat("a0", 16)), fragments("http://assets.r7.com/assets/media_box_tv_tres_colunas/video_box.", "ico-7a388b69018576d24b59331fd60aab0c.png")},
 		{"intra42-client-secret", fragments("s-s4t2ud-", strings.Repeat("ab01", 16)), fragments("s-s4t2ud-", "abc")},
 		{"linear-api-key", fragments("lin_api_", strings.Repeat("a0", 20)), fragments("lin_api_", "abc")},
 		{"notion-api-token", fragments("ntn_", "12345678901", strings.Repeat("a0", 16), "abc"), fragments("ntn_", "12345678901")},
 		{"npm-access-token", fragments("npm_", strings.Repeat("a0", 18)), fragments("npm_", strings.Repeat("a0", 17))},
 		{"octopus-deploy-api-key", fragments("API-", strings.Repeat("A0", 13)), fragments("msgstr \"GSSAPI-VIRHEKAPSELOINTIMERKKIJONO.\"")},
-		{"openshift-user-token", fragments("sha256~", strings.Repeat("a0", 21), "a"), fragments("sha256~", strings.Repeat("a0", 21))},
-		{"perplexity-api-key", fragments("pplx-", strings.Repeat("a0", 24)), fragments("pplx-", strings.Repeat("a0", 23), "a")},
 		{"planetscale-api-token", fragments("pscale_tkn_", strings.Repeat("a0", 16)), fragments("pscale_tkn_", "abc")},
 		{"planetscale-oauth-token", fragments("pscale_oauth_", strings.Repeat("a0", 16)), fragments("pscale_oauth_", "abc")},
 		{"planetscale-password", fragments("pscale_pw_", strings.Repeat("a0", 16)), fragments("pscale_pw_", "abc")},
 		{"postman-api-token", fragments("PMAK-", strings.Repeat("a0", 12), "-", strings.Repeat("a0", 17)), fragments("PMAK-", "abc")},
-		{"prefect-api-token", fragments("pnu_", strings.Repeat("a0", 18)), fragments("pnu_", strings.Repeat("a0", 17), "a")},
 		{"pulumi-api-token", fragments("pul-", strings.Repeat("a0", 20)), "<img src=\"./assets/vipul-f0eb1acf0da84c06a50c5b2c59932001997786b176dec02bd16\">"},
 		{"pypi-upload-token", fragments("pypi-AgEIcHlwaS5vcmc", strings.Repeat("a0", 32)), fragments("pypi-AgEIcHlwaS5vcmc", "abc")},
 		{"readme-api-token", fragments("rdme_", strings.Repeat("a0", 35)), fragments("rdme_", strings.Repeat("X", 70))},
@@ -87,8 +78,8 @@ func TestPortedCredentialRules(t *testing.T) {
 		{"stripe-access-token", fragments("sk_live_", strings.Repeat("a0", 15)), fragments("task_test_", strings.Repeat("a0", 15))},
 		{"vault-batch-token", fragments("hvb.", strings.Repeat("a0", 69)), fragments("hvb.", "abc")},
 	}
-	if len(cases) != 70 {
-		t.Fatalf("test cases = %d, want 70", len(cases))
+	if len(cases) != 61 {
+		t.Fatalf("test cases = %d, want 61", len(cases))
 	}
 	var noLog *runlog.Log
 	for _, c := range cases {
@@ -141,15 +132,42 @@ func TestRedactLeavesOrdinaryTextAlone(t *testing.T) {
 func TestEntropyDependentLookalikesStayPlain(t *testing.T) {
 	// These strings are false positives in the pinned generators. Their regexes
 	// alone match, so importing those rules without entropy would mask prose.
-	cases := []string{
-		fragments("hf_", strings.Repeat("x", 34)),
-		fragments("glpat-", "XXXXXXXXXXX-XXXXXXXX"),
-		fragments("glc_", strings.Repeat("x", 68)),
+	// Each entry below names the excluded rule whose generator lists it.
+	cases := []struct{ id, value string }{
+		{"huggingface-token", fragments("hf_", strings.Repeat("x", 34))},
+		{"gitlab-pat", fragments("glpat-", "XXXXXXXXXXX-XXXXXXXX")},
+		{"grafana-cloud-api-token", fragments("glc_", strings.Repeat("x", 68))},
+		{"prefect-api-token", fragments("PREFECT_API_KEY = \"pnu_", strings.Repeat("X", 36), "\"")},
+		{"flyio-access-token", fragments("api_key = \"fo1_", strings.Repeat("x", 43), "\"")},
+		{"artifactory-api-key", fragments("lowEntropy := AKCp", strings.Repeat("X", 69))},
+		{"infracost-api-token", fragments("ico-", strings.Repeat("X", 32))},
+		{"perplexity-api-key", fragments("PERPLEXITY_API_KEY=pplx-", strings.Repeat("x", 48))},
+		{"grafana-service-account-token", fragments("glsa_", strings.Repeat("X", 32), "_", strings.Repeat("A", 8))},
+		{"openshift-user-token", fragments("--set kraken.kubeconfig.token.token=\"sha256~", strings.Repeat("X", 10), "_PUT_YOUR_TOKEN_HERE_", strings.Repeat("X", 12), "\" \\")},
+		{"gitlab-rrt", fragments("GR1348941", strings.Repeat("X", 20))},
+		{"1password-service-account-token", fragments("ops_eyJ", strings.Repeat("x", 330))},
 	}
-	for _, value := range cases {
-		if got := runlog.Redact(value); got != value {
-			t.Errorf("Redact(%q) = %q, want unchanged", value, got)
+	var noLog *runlog.Log
+	for _, c := range cases {
+		if got := runlog.Redact(c.value); got != c.value {
+			t.Errorf("%s: Redact = %q, want unchanged", c.id, got)
 		}
+		if got, err := noLog.Publish(c.value); err != nil || got != c.value {
+			t.Errorf("%s: Publish = %q, %v, want unchanged", c.id, got, err)
+		}
+	}
+}
+
+func TestFacebookClosingParenthesisStaysPlain(t *testing.T) {
+	// The pinned rule ends with a delimiter group that admits no closing
+	// parenthesis, so a candidate followed by ")" is not a token.
+	value := fragments("EAAM", strings.Repeat("a0", 50), ")")
+	if got := runlog.Redact(value); got != value {
+		t.Errorf("Redact = %q, want unchanged", got)
+	}
+	var noLog *runlog.Log
+	if got, err := noLog.Publish(value); err != nil || got != value {
+		t.Errorf("Publish = %q, %v, want unchanged", got, err)
 	}
 }
 
