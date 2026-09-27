@@ -9,6 +9,7 @@ import (
 	"github.com/carlosboeing/crossrev/internal/exec"
 	"github.com/carlosboeing/crossrev/internal/review"
 	"github.com/carlosboeing/crossrev/internal/ui"
+	"github.com/carlosboeing/crossrev/internal/validate"
 )
 
 // claudeStdoutWithUsage answers payload with one modelUsage entry carrying
@@ -177,5 +178,52 @@ func TestReviewUsageWarnsOnceWhenTheModelChanges(t *testing.T) {
 	}
 	if string(got.Marker.Tokens) != "480" {
 		t.Errorf("marker tokens = %s, want 480 (all three envelopes summed)", got.Marker.Tokens)
+	}
+}
+
+// TestReviewRetryReportsBothAttemptsUsage pins that a refused attempt's
+// tokens are spent and reported: one batch whose first answer is rejected
+// and retried carries both attempts' buckets into the marker, while model
+// identity stays on the accepted attempt alone.
+func TestReviewRetryReportsBothAttemptsUsage(t *testing.T) {
+	e := newEnv(t)
+	writeRequiredHead(e, "a.go", "package a\n")
+	calls := 0
+	e.validate = func([]byte, validate.ReviewExpectations) error {
+		calls++
+		if calls == 1 {
+			return semanticProblem("finding 1 was answered twice")
+		}
+		return nil
+	}
+	answer := batchAnswerFor(t, []string{"a.go"})
+	e.runner.script = []exec.Result{
+		{ExitCode: 0, Stdout: claudeStdoutWithUsage(t, answer, "claude-decoy", 1000, 100, 200, 300)},
+		{ExitCode: 0, Stdout: claudeStdoutWithUsage(t, answer, "claude-test", 100, 10, 20, 30)},
+	}
+	got := runLeg(t, e, e.request(t))
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
+	if e.runner.calls != 2 {
+		t.Fatalf("the harness was invoked %d time(s), want 2 (the refused attempt plus its retry)", e.runner.calls)
+	}
+	if string(got.Marker.Tokens) != "1760" {
+		t.Errorf("marker tokens = %s, want 1760 (both attempts)", got.Marker.Tokens)
+	}
+	want := map[string]int64{"input_fresh": 1100, "cache_read": 110, "cache_write_5m": 0, "cache_write_1h": 0, "cache_write_unsplit": 220, "output": 330, "total": 1760}
+	buckets := usageBuckets(t, got.Marker.Usage)
+	for key, wantValue := range want {
+		if buckets[key] != wantValue {
+			t.Errorf("usage[%s] = %d, want %d", key, buckets[key], wantValue)
+		}
+	}
+	if model, _ := got.Marker.ModelReported.Get(); model != "claude-test" {
+		t.Errorf("model_reported = %q, want claude-test (the accepted attempt)", model)
+	}
+	for _, line := range got.Messages {
+		if line.Kind == ui.KindWarn && (strings.Contains(line.Text, "claude-decoy") || strings.Contains(line.Action, "claude-decoy")) {
+			t.Errorf("the refused attempt's model leaked into a warning: %q", line.Text)
+		}
 	}
 }

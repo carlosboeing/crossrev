@@ -44,11 +44,24 @@ type batchOutcome struct {
 	retries     int
 }
 
+// addUsageBuckets folds src's six buckets into dst. Non-bucket fields and
+// the total stay the caller's business: dst keeps its own record with the
+// summed buckets.
+func addUsageBuckets(dst, src *harness.Usage) {
+	dst.InputFresh += src.InputFresh
+	dst.CacheRead += src.CacheRead
+	dst.CacheWrite5m += src.CacheWrite5m
+	dst.CacheWrite1h += src.CacheWrite1h
+	dst.CacheWriteUnsplit += src.CacheWriteUnsplit
+	dst.Output += src.Output
+}
+
 // addEnvelope folds one accepted call's envelope into the outcome: the
 // first envelope's identity stands, its usage buckets join the running
 // sum, and a call answering under another model warns once naming both.
-// A retry's envelope counts once, when its call is accepted — a refused
-// answer judged nothing, so its bytes describe no record.
+// A retry's envelope counts once, when its call is accepted; the refused
+// attempts behind it already joined that envelope's usage where the
+// prompt ran. Identity and the warning stay on accepted calls.
 func (o *batchOutcome) addEnvelope(envelope harness.Envelope) []ui.Line {
 	if o.envelope == nil {
 		o.envelope = &envelope
@@ -58,12 +71,7 @@ func (o *batchOutcome) addEnvelope(envelope harness.Envelope) []ui.Line {
 			sum := *envelope.Usage
 			o.usage = &sum
 		} else {
-			o.usage.InputFresh += envelope.Usage.InputFresh
-			o.usage.CacheRead += envelope.Usage.CacheRead
-			o.usage.CacheWrite5m += envelope.Usage.CacheWrite5m
-			o.usage.CacheWrite1h += envelope.Usage.CacheWrite1h
-			o.usage.CacheWriteUnsplit += envelope.Usage.CacheWriteUnsplit
-			o.usage.Output += envelope.Usage.Output
+			addUsageBuckets(o.usage, envelope.Usage)
 		}
 	}
 	reported := ""

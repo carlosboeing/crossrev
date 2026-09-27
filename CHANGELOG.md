@@ -10,7 +10,7 @@ All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepa
 
 ### Fixed
 
-- **A multi-call review pass reports the summed usage across every call.** The pass marker carried only the first batch's usage envelope, so every further call's tokens went unreported. The marker now sums the usage buckets across every accepted call into the existing `tokens` and `usage` fields, keeping the first call's model, and warns once naming both models when a later call answers under another one. A resumed pass sums only the calls accepted in this run.
+- **A multi-call review pass reports the summed usage across every call.** The pass marker carried only the first batch's usage envelope, so every further call's tokens went unreported. The marker now sums the usage buckets across every model call the pass made — accepted batches and refused attempts alike — into the existing `tokens` and `usage` fields, keeping the first accepted call's model, and warns once naming both models when a later accepted call answers under another one. A resumed pass sums only the calls made in this run.
 
 ## [0.9.0] — 2026-09-26
 
