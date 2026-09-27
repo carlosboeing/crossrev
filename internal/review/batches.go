@@ -139,12 +139,16 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 	// The -U0 lines feed the advisory term walk. A failed read degrades to
 	// path-only terms rather than failing the pass: advisory context must
 	// never block a review, and coverage never depended on these bytes.
+	termsStart := l.now()
 	changed, err := l.VCS.ChangedLines(ctx, scope.Base, scope.Head)
 	if err != nil {
 		changed = nil
 	}
-	advisory := intel.AdvisoryFiles(ctx, scope, changed, scopeSearcher{vcs: l.VCS})
 	fileTerms := intel.FileChangedTerms(changed, scopeChanges(scope))
+	l.Log.PhaseTerms(changedTermCount(fileTerms), l.now().Sub(termsStart).Milliseconds())
+	searchStart := l.now()
+	advisory := intel.AdvisoryFiles(ctx, scope, changed, scopeSearcher{vcs: l.VCS})
+	l.Log.Phase("search", l.now().Sub(searchStart).Milliseconds())
 	pair := repairConfirmation(loaded.Markers, scope.Head)
 	confirmation, err := l.confirmationDelta(ctx, pair)
 	if err != nil {
@@ -156,7 +160,9 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 		promptBytes, _ := shared.render(files, scope.Base, scope.Head)
 		return len(promptBytes)
 	}
+	packStart := l.now()
 	plan := intel.Batches(scope, acceptedIDs, render)
+	l.Log.Phase("pack", l.now().Sub(packStart).Milliseconds())
 	// Packing's skips join the exclusion record before the first
 	// publication: the generation records each skipped path with its
 	// reason, and the required set no longer waits on a file no prompt can
@@ -230,17 +236,21 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 	// them.
 	out.Marker = marker
 	selection = reportLedgerFallback(store, selection, out)
-	for _, batch := range plan.Batches {
+	for i, batch := range plan.Batches {
+		call := i + 1
 		expected, _ := batchExpectations(batch.Files, scope.Base, scope.Head)
 		if shared.diffErr != nil {
 			return shared.diffErr
 		}
 		promptBytes, supplied := shared.render(batch.Files, scope.Base, scope.Head)
-		payload, envelope, batchMsgs, err := l.invokePrompt(ctx, req, loaded, settings, expected, promptBytes)
+		start := l.now()
+		payload, envelope, batchMsgs, err := l.invokePrompt(ctx, req, loaded, settings, expected, promptBytes, call)
+		ms := l.now().Sub(start).Milliseconds()
 		out.Messages = append(out.Messages, batchMsgs...)
 		if err != nil {
 			return err
 		}
+		l.logAcceptedCall(call, promptBytes, suppliedBytes(batch.Files), envelope, ms)
 		verdicts, examined, limits, err := verdictsFromPayload(payload, batch.Files)
 		if err != nil {
 			return err

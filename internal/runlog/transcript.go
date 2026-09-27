@@ -49,12 +49,37 @@ func (l *Log) TranscriptBase(attempt int) (string, bool) {
 		return "", false
 	}
 	base := l.dir + "/" + leg + ".attempt-" + strconv.Itoa(attempt)
+	l.preCreate(base)
+	return base, true
+}
+
+// TranscriptBaseForCall is the stem for one model call's transcripts: the
+// leg, the call's number in the pass, and the attempt within that call.
+//
+// The review leg runs one call per batch plus its retries, and every call
+// sharing one attempt-only stem would overwrite the evidence the earlier
+// call left. The resolve leg runs no calls and keeps TranscriptBase.
+func (l *Log) TranscriptBaseForCall(call, attempt int) (string, bool) {
+	if l == nil || l.dir == "" {
+		return "", false
+	}
+	leg := l.Leg()
+	if leg == "" {
+		return "", false
+	}
+	base := l.dir + "/" + leg + ".call-" + strconv.Itoa(call) + ".attempt-" + strconv.Itoa(attempt)
+	l.preCreate(base)
+	return base, true
+}
+
+// preCreate holds the three streams at 0600 before an adapter's redirect
+// opens them. See TranscriptBase for why a failure still yields a stem.
+func (l *Log) preCreate(base string) {
 	for _, stream := range transcriptStreams {
 		if err := CreatePrivate(base + stream); err != nil {
 			l.Event("transcript", "could not pre-create "+base+stream+"; the adapter's redirect will use the process umask")
 		}
 	}
-	return base, true
 }
 
 // ClearTranscripts deletes one attempt's transcripts, or every attempt's for
@@ -71,16 +96,23 @@ func (l *Log) ClearTranscripts(base string) {
 	if l == nil || l.dir == "" || l.TranscriptsKept() {
 		return
 	}
-	pattern := base + ".*"
+	patterns := []string{base + ".*"}
 	if base == "" {
-		pattern = l.dir + "/" + l.Leg() + ".attempt-*.*"
+		// Both stems: the attempt-only form the resolve leg keeps, and
+		// the per-call form the review leg writes.
+		patterns = []string{
+			l.dir + "/" + l.Leg() + ".attempt-*.*",
+			l.dir + "/" + l.Leg() + ".call-*.*",
+		}
 	}
-	matches, err := filepath.Glob(pattern)
-	if err != nil {
-		return
-	}
-	for _, match := range matches {
-		_ = os.Remove(match)
+	for _, pattern := range patterns {
+		matches, err := filepath.Glob(pattern)
+		if err != nil {
+			continue
+		}
+		for _, match := range matches {
+			_ = os.Remove(match)
+		}
 	}
 }
 

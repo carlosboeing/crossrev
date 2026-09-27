@@ -56,7 +56,7 @@ func TestTheTranscriptsHoldWhatTheHarnessPrintedAndAreRedacted(t *testing.T) {
 	}
 
 	dir := runDir(t, e)
-	stdout := mustReadFile(t, filepath.Join(dir, "review.attempt-1.stdout"))
+	stdout := mustReadFile(t, filepath.Join(dir, "review.call-1.attempt-1.stdout"))
 	if !strings.Contains(stdout, "Unchecked fetch response") {
 		t.Errorf("the transcript does not hold what the harness printed:\n%s", stdout)
 	}
@@ -66,10 +66,10 @@ func TestTheTranscriptsHoldWhatTheHarnessPrintedAndAreRedacted(t *testing.T) {
 	if !strings.Contains(stdout, "sk-ant-api03-…[redacted]") {
 		t.Errorf("the token body is not masked:\n%s", stdout)
 	}
-	if stderr := mustReadFile(t, filepath.Join(dir, "review.attempt-1.stderr")); !strings.Contains(stderr, "harness chatter") {
+	if stderr := mustReadFile(t, filepath.Join(dir, "review.call-1.attempt-1.stderr")); !strings.Contains(stderr, "harness chatter") {
 		t.Errorf("the stderr transcript is empty: %q", stderr)
 	}
-	if mode := fileMode(t, filepath.Join(dir, "review.attempt-1.stdout")); mode != 0o600 {
+	if mode := fileMode(t, filepath.Join(dir, "review.call-1.attempt-1.stdout")); mode != 0o600 {
 		t.Errorf("transcript mode = %o, want 600", mode)
 	}
 }
@@ -85,12 +85,14 @@ func TestASuccessfulReviewLegClearsItsTranscripts(t *testing.T) {
 		t.Fatalf("Run: %v", got.Err)
 	}
 
-	left, err := filepath.Glob(filepath.Join(runDir(t, e), "review.attempt-*"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(left) != 0 {
-		t.Fatalf("transcripts left behind after a clean pass: %v", left)
+	for _, pattern := range []string{"review.call-*", "review.attempt-*"} {
+		left, err := filepath.Glob(filepath.Join(runDir(t, e), pattern))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(left) != 0 {
+			t.Fatalf("transcripts left behind after a clean pass (%s): %v", pattern, left)
+		}
 	}
 }
 
@@ -104,7 +106,7 @@ func TestAFailedReviewLegKeepsItsTranscripts(t *testing.T) {
 		t.Fatal("a harness that exits 1 did not fail the leg")
 	}
 
-	stderr := mustReadFile(t, filepath.Join(runDir(t, e), "review.attempt-1.stderr"))
+	stderr := mustReadFile(t, filepath.Join(runDir(t, e), "review.call-1.attempt-1.stderr"))
 	if !strings.Contains(stderr, "no canned payload") {
 		t.Fatalf("the failed attempt's transcript does not hold the harness error: %q", stderr)
 	}
@@ -125,12 +127,14 @@ func TestACoveredPassKeepsThePublishTail(t *testing.T) {
 	if !got.Nudge {
 		t.Error("a covered pass with no handover left Nudge false")
 	}
-	left, err := filepath.Glob(filepath.Join(runDir(t, e), "review.attempt-*"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(left) != 0 {
-		t.Fatalf("transcripts left behind after a clean covered pass: %v", left)
+	for _, pattern := range []string{"review.call-*", "review.attempt-*"} {
+		left, err := filepath.Glob(filepath.Join(runDir(t, e), pattern))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(left) != 0 {
+			t.Fatalf("transcripts left behind after a clean covered pass (%s): %v", pattern, left)
+		}
 	}
 }
 
