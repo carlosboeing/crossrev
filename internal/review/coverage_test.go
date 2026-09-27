@@ -720,3 +720,82 @@ func TestReviewRedriveSkipsTheSameFile(t *testing.T) {
 		t.Error("no re-drive generation records the skip")
 	}
 }
+
+// TestReviewRecordsAnsweringModelWhenHarnessNamesNone pins C5 item 9: when
+// the reviewer configuration names no model, the published coverage
+// generation records the answering model reported by the harness on its
+// producer rather than an empty model.
+func TestReviewRecordsAnsweringModelWhenHarnessNamesNone(t *testing.T) {
+	t.Run("reported model is recorded when configured model is empty", func(t *testing.T) {
+		e := newEnv(t)
+		writeRequiredHead(e, "a.go", "package a\n")
+		e.runner.script = []exec.Result{
+			{ExitCode: 0, Stdout: claudeStdoutWithUsage(t, batchAnswer(t, 1), "claude-3-5-sonnet", 100, 10, 20, 30)},
+		}
+		got := runLeg(t, e, e.request(t))
+		if got.Err != nil {
+			t.Fatalf("Run: %v", got.Err)
+		}
+		gens := ledgerGenerations(t, e)
+		if len(gens) < 2 {
+			t.Fatalf("generations = %d, want at least 2", len(gens))
+		}
+		last := gens[len(gens)-1]
+		if last.Producer.Model != "claude-3-5-sonnet" {
+			t.Fatalf("last.Producer.Model = %q, want %q", last.Producer.Model, "claude-3-5-sonnet")
+		}
+	})
+
+	t.Run("configured model is preserved over reported model", func(t *testing.T) {
+		e := newEnv(t)
+		e.cfg = mustConfig(t, "reviewers:\n  - harness: claude\n    model: configured-model\n")
+		writeRequiredHead(e, "a.go", "package a\n")
+		e.runner.script = []exec.Result{
+			{ExitCode: 0, Stdout: claudeStdoutWithUsage(t, batchAnswer(t, 1), "reported-model", 100, 10, 20, 30)},
+		}
+		req := e.request(t)
+		req.HarnessOverride = ""
+		leg := e.leg(t)
+		got := leg.Run(context.Background(), req)
+		if got.Err != nil {
+			t.Fatalf("Run: %v", got.Err)
+		}
+		gens := ledgerGenerations(t, e)
+		if len(gens) < 2 {
+			t.Fatalf("generations = %d, want at least 2", len(gens))
+		}
+		last := gens[len(gens)-1]
+		if last.Producer.Model != "configured-model" {
+			t.Fatalf("last.Producer.Model = %q, want %q", last.Producer.Model, "configured-model")
+		}
+	})
+
+	t.Run("first answering model is recorded when calls report different models", func(t *testing.T) {
+		e := newEnv(t)
+		paths := writeNumberedFiles(e, 81)
+		models := []string{"claude-first", "claude-second"}
+		for i := 0; i < 2; i++ {
+			lo, hi := i*40, (i+1)*40
+			if hi > len(paths) {
+				hi = len(paths)
+			}
+			e.runner.script = append(e.runner.script, exec.Result{ExitCode: 0, Stdout: claudeStdoutWithUsage(t,
+				batchAnswerFor(t, paths[lo:hi]), models[i], 100, 10, 20, 30)})
+		}
+		e.runner.script = append(e.runner.script, exec.Result{ExitCode: 0, Stdout: claudeStdoutWithUsage(t,
+			batchAnswerFor(t, paths[80:]), "claude-third", 100, 10, 20, 30)})
+
+		got := runLeg(t, e, e.request(t))
+		if got.Err != nil {
+			t.Fatalf("Run: %v", got.Err)
+		}
+		gens := ledgerGenerations(t, e)
+		if len(gens) < 2 {
+			t.Fatalf("generations = %d, want at least 2", len(gens))
+		}
+		last := gens[len(gens)-1]
+		if last.Producer.Model != "claude-first" {
+			t.Fatalf("last.Producer.Model = %q, want %q", last.Producer.Model, "claude-first")
+		}
+	})
+}

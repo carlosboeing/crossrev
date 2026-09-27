@@ -116,7 +116,7 @@ func (l *Leg) publish(ctx context.Context, req Request, loaded Context, settings
 
 	verdict := core.Verdict(marker.Verdict.Value())
 	escalated := escalatedCount(loaded.Markers)
-	conv, obliged := l.buildConvergence(ctx, loaded, marker, actionable, producerOf(settings))
+	conv, obliged := l.buildConvergence(ctx, loaded, marker, actionable, producerOf(settings, marker.ModelReported.Value()))
 	if obliged && !policy.Converged(conv) {
 		// The coverage obligation is unmet: a green verdict cannot stand,
 		// and a quiet one cannot pass as finished. With actionable findings
@@ -201,7 +201,7 @@ func (l *Leg) publish(ctx context.Context, req Request, loaded Context, settings
 	}
 
 	next := policy.PassLabel(verdict, actionable, escalated)
-	if conv, ok := l.buildConvergence(ctx, loaded, marker, actionable, producerOf(settings)); ok {
+	if conv, ok := l.buildConvergence(ctx, loaded, marker, actionable, producerOf(settings, marker.ModelReported.Value())); ok {
 		next = policy.PassLabelWithCoverage(verdict, actionable, escalated, conv)
 	}
 	if verdict == core.VerdictConverged && next != policy.PassConverged {
