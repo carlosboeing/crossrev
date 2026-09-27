@@ -360,6 +360,13 @@ if [[ -n "${CROSSREV_GH_STATE:-}" ]]; then
       if [[ "$_cid" == *[!0-9]* || -z "$_cid" ]]; then continue; fi
       printf '%s\t%s\n' "$_cid" "$_cf"
     done | sort -t$'\t' -k1,1n)
+    req_page="$(extract_field page "$@")"
+    req_per_page="$(extract_field per_page "$@")"
+    [[ "$req_page" =~ ^[1-9][0-9]*$ ]] || req_page=1
+    [[ "$req_per_page" =~ ^[1-9][0-9]*$ ]] || req_per_page=30
+
+    offset=$(( (req_page - 1) * req_per_page ))
+    spool="$(jq -c --argjson off "$offset" --argjson lim "$req_per_page" '.[$off : ($off + $lim)]' <<<"$spool")"
     printf '%s\n' "$spool" | emit
     exit 0
   fi

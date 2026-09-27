@@ -112,6 +112,18 @@ seed_url="$(gh api --paginate repos/acme/widget/issues/42/comments --jq '.[] | s
 seed_wide_url="$(gh api --method GET repos/acme/widget/issues/comments --jq '.[] | select(.id == 1001) | .issue_url')"
 is "seed 1001 issue_url stays the same on both lists" "$seed_url" "$seed_wide_url"
 
+page1_ids="$(gh api --method GET repos/acme/widget/issues/comments -F per_page=2 -F page=1 --jq '.[].id')"
+is "repo-wide comments page 1 respects per_page" "$page1_ids" "$(printf '1001\n1002')"
+
+page2_ids="$(gh api --method GET repos/acme/widget/issues/comments -F per_page=2 -F page=2 --jq '.[].id')"
+is "repo-wide comments page 2 returns next slice" "$page2_ids" "$(printf '%s\n%s' "$claim_id" "$other_id")"
+
+page3_ids="$(gh api --method GET repos/acme/widget/issues/comments -F per_page=2 -F page=3 --jq '.[].id')"
+is "repo-wide comments past end returns empty array" "$page3_ids" ""
+
+default_page2="$(gh api --method GET repos/acme/widget/issues/comments -F page=2 --jq '.[].id')"
+is "repo-wide comments page 2 with default per_page is empty" "$default_page2" ""
+
 gh api --method PATCH repos/acme/widget/issues/comments/"$claim_id" -f body='claim updated <!-- crossrev: {"pass":1,"leg":"review"} -->' >/dev/null
 updated_body="$(gh api repos/acme/widget/issues/comments/"$claim_id" --jq .body)"
 has "single comment read replays updated claim body" "$updated_body" "claim updated"
