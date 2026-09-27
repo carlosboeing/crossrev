@@ -88,7 +88,7 @@ The last row is why a marker never reads `started` after the process is gone. A 
 
 **The full record is on disk.** The error also names a directory under `~/.local/state/crossrev/runs/`: `run.log` says what the run did and where it stopped, and a failed leg's transcript — the harness's whole stdout and stderr — is kept beside it. The 400 bytes in the comment are the excerpt, not the record. In automated mode the same directory leaves the runner as the `crossrev-run-<run-id>` artifact.
 
-Remove `crossrev/halted` once you've looked, then run the command `status` suggests.
+Remove `crossrev/halted` once you've looked, then run the command `status` suggests. `crossrev restart --pr N` does both in one command: it clears the halt and re-applies the halted leg's awaiting label.
 
 **A declined pass leaves a marker too**, flagged `declined`, so `status` can render the refusal instead of inferring it from a label plus the prose of a comment. It doesn't count as a pass: raising the cap and re-running won't answer "already reviewed".
 
@@ -102,7 +102,7 @@ Event-driven mode's failure mode is silence: a dropped label event and a converg
 
 That's what the watchdog is for. It runs on a schedule, finds open pull requests carrying a `crossrev/awaiting-*` label past its timeout, and **retries once** by removing and re-applying the label. Re-applying a label GitHub already holds fires no event, which is why the removal is the mechanism.
 
-A second failure is not a dropped event, so it applies `crossrev/halted`, comments saying how far the leg got, and stops. To restart it, remove `crossrev/halted` and `crossrev/watchdog-retried`, then apply the awaiting label again.
+A second failure is not a dropped event, so it applies `crossrev/halted`, comments saying how far the leg got, and stops. To restart it, `crossrev restart --pr N` removes `crossrev/halted` and `crossrev/watchdog-retried` and applies the awaiting label again.
 
 Run it by hand to see what it sees:
 

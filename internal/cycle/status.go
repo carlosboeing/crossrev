@@ -213,6 +213,7 @@ func (s *Status) Load(ctx context.Context, repo core.Slug, pr int) (Report, erro
 		pr:        pr,
 		labels:    statusLabelNames(pull.Labels),
 		markers:   statusMarkers(comments, author),
+		threads:   s.Forge.ReviewThreads(ctx, repo, pr),
 		coverage:  statusCoverageSourceFor(s.Forge, cfg, repo, pr),
 		author:    author,
 		base:      pull.BaseRefOid,
@@ -279,6 +280,7 @@ type statusInput struct {
 	pr        int
 	labels    []string
 	markers   []prstate.Marker
+	threads   []forge.ReviewThread
 	coverage  coverageSource
 	author    string
 	base      core.Revision
@@ -600,6 +602,48 @@ func statusMarkersEscalated(markers []prstate.Marker) int {
 			continue
 		}
 		n += statusEscalated(m)
+	}
+	return n
+}
+
+// statusOpenEscalated recounts the escalations still waiting on a human from
+// thread state rather than from the markers alone.
+//
+// A resolution naming a finding whose thread is resolved is settled by hand;
+// one naming no finding, or one whose thread is still open or unknown —
+// including a failed thread read, which answers as no threads — still needs
+// a human decision.
+func statusOpenEscalated(markers []prstate.Marker, threads []forge.ReviewThread) int {
+	resolved := map[string]bool{}
+	for _, th := range threads {
+		if !th.IsResolved {
+			continue
+		}
+		for _, id := range th.FindingIDs {
+			resolved[string(id)] = true
+		}
+	}
+	n := 0
+	for _, m := range markers {
+		if m.Leg != core.LegResolve {
+			continue
+		}
+		var records []struct {
+			Resolution string `json:"resolution"`
+			FindingID  string `json:"finding_id"`
+		}
+		if err := m.DecodeResolutions(&records); err != nil {
+			continue
+		}
+		for _, r := range records {
+			if r.Resolution != string(core.ResolutionEscalated) {
+				continue
+			}
+			if r.FindingID != "" && resolved[r.FindingID] {
+				continue
+			}
+			n++
+		}
 	}
 	return n
 }
@@ -940,8 +984,11 @@ func statusNextHalted(in statusInput, pass int) []NextLine {
 	// An escalated finding is the one halt nobody can automate past: two
 	// agents disagreed twice, or the point needs a judgement that is not
 	// theirs. The thread is left open on purpose, so the lever is reading it,
-	// not re-running the leg that already declined to decide.
-	if escalated := statusMarkersEscalated(in.markers); escalated > 0 {
+	// not re-running the leg that already declined to decide. The count is
+	// read off thread state rather than off the markers alone, because a
+	// human who settles a thread by hand leaves the marker saying
+	// `escalated` behind it.
+	if escalated := statusOpenEscalated(in.markers, in.threads); escalated > 0 {
 		noun := "findings"
 		if escalated == 1 {
 			noun = "finding"
@@ -1180,18 +1227,25 @@ func statusAbbreviate(sha string) string {
 // Every other mode is the invoking user, whose worst case is being misled
 // about work they asked for.
 func (s *Status) trustedAuthor(ctx context.Context, mode string, repo core.Slug, pr int) (string, error) {
+	return statusTrustedAuthor(ctx, s.Forge, s.AppSlug, mode, repo, pr)
+}
+
+// statusTrustedAuthor is the body of trustedAuthor, as a function so the
+// other reader of the same decision — Restart, which has no report to fill —
+// answers with the same rule rather than a copy of it.
+func statusTrustedAuthor(ctx context.Context, client forge.Forge, appSlug, mode string, repo core.Slug, pr int) (string, error) {
 	if mode == "automated" {
 		// lib/state.sh:35-38, with both halves of the slug resolved by the
 		// caller: the variable and the App metadata file.
-		if s.AppSlug == "" {
+		if appSlug == "" {
 			return "", &ui.FatalError{
 				Reason: "cannot determine which App's markers to trust",
 				Action: "Automated mode reads markers only from the App that writes them. In a workflow, set CROSSREV_APP_SLUG from the token step's app-slug output. Locally, run: crossrev auth status",
 			}
 		}
-		return s.AppSlug + "[bot]", nil
+		return appSlug + "[bot]", nil
 	}
-	author, err := s.Forge.ViewerLogin(ctx)
+	author, err := client.ViewerLogin(ctx)
 	if err != nil || author == "" {
 		return "", &ui.FatalError{
 			Reason: fmt.Sprintf("could not resolve whose markers to trust on %s#%d", repo, pr),

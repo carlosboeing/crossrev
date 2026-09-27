@@ -139,6 +139,19 @@
     },
 
     {
+      "name": "restart with the number alone",
+      "args": ["restart", "--pr", "42"],
+      "command": "restart",
+      "request": {"PR": "42", "Repo": ""}
+    },
+    {
+      "name": "restart with both flags it takes",
+      "args": ["restart", "--pr", "7", "--repo", "owner/name"],
+      "command": "restart",
+      "request": {"PR": "7", "Repo": "owner/name"}
+    },
+
+    {
       "name": "init with no flags",
       "args": ["init"],
       "command": "init",
@@ -366,6 +379,12 @@
       "action": "Usage: crossrev status --pr <number>"
     },
     {
+      "name": "an unknown option for restart",
+      "args": ["restart", "--bogus"],
+      "reason": "unknown option for restart: --bogus",
+      "action": "Usage: crossrev restart --pr <number>"
+    },
+    {
       "name": "an unknown option for watchdog",
       "args": ["watchdog", "--bogus"],
       "reason": "unknown option for watchdog: --bogus",
@@ -431,6 +450,12 @@
       "args": ["status"],
       "reason": "crossrev status needs a pull request number",
       "action": "Usage: crossrev status --pr 42"
+    },
+    {
+      "name": "restart without a pull request number",
+      "args": ["restart"],
+      "reason": "crossrev restart needs a pull request number",
+      "action": "Usage: crossrev restart --pr 42"
     },
 
     {

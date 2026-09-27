@@ -56,6 +56,26 @@ func status(ctx context.Context, out *ui.IO, doc harness.Document, req cli.Statu
 	return cli.ExitOK, nil
 }
 
+// restart is the composition half of `crossrev restart --pr N`: the decision
+// and the label writes live in internal/cycle, so this opens the dependencies
+// and hands them over, the way status does. Restart resolves its own slug and
+// reads its own pull request, so nothing is gathered here first.
+func restart(ctx context.Context, out *ui.IO, doc harness.Document, req cli.RestartRequest) (int, error) {
+	d := open(out, doc)
+	client := d.forgeClient()
+
+	r := &cycle.Restart{
+		Forge:   client,
+		Show:    d.show(),
+		Out:     out,
+		AppSlug: appSlug(osEnv{}),
+	}
+	if err := r.Run(ctx, req.Repo, req.PR); err != nil {
+		return cli.ExitFailure, reportFatal(out, err)
+	}
+	return cli.ExitOK, nil
+}
+
 // watchdog is cmd_watchdog (lib/run.sh:3681-3763).
 //
 // The list of pull requests waiting on a leg is read here rather than inside
