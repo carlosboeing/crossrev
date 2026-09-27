@@ -20,6 +20,8 @@ All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepa
 
 - **`crossrev doctor` no longer requires jq, yq or openssl.** The three stayed past the Go port only to keep the report shaped like the Bash one — [ADR 0018](docs/adrs/0018-go-native-parity-contract.md) kept them "until a later behavior decision changes that observable surface", and this is that decision. The requirement set is `git` and `gh` (authenticated), the binary's own dependencies: it parses JSON and YAML natively and signs nothing. The pairing report no longer waits for `yq`, which printed no Pairings section at all on a machine without it and hid the half of the report that says which pairings the configured runner can serve, and the harness probe no longer skips without `jq`, so such a machine still learns which harnesses it has. `crossrev config` and `crossrev init` still require `yq`.
 
+- **`crossrev status` recounts open human decisions from review-thread state.** The halted NEXT step counted escalations off the resolve markers, so an escalated thread a human settled by hand was still reported as needing a human decision. It now reads the pull request's review threads and counts only escalations whose thread is still open: a resolution naming no finding, or one whose thread is unknown because the thread read failed, still counts. The leg rows are unchanged — they report what the legs did, not what is still open.
+
 ## [0.9.0] — 2026-09-26
 
 ### Fixed
