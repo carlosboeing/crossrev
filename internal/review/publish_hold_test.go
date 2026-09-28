@@ -190,6 +190,70 @@ func TestPublishReRaisedFindingPostsAtHigherSeverity(t *testing.T) {
 	}
 }
 
+// thirdHeadSHA moves the pull request a second time, admitting pass 3 the
+// way secondHeadSHA admits pass 2.
+const thirdHeadSHA = "4444444444444444444444444444444444444444"
+
+// A low finding posted on pass 1, held on pass 2 and raised to medium on
+// pass 3 posts again: the pass-1 comment records the low severity, so the
+// already-posted set must not swallow the upgrade.
+func TestPublishUpgradedHeldFindingPostsDespiteEarlierPost(t *testing.T) {
+	e := newEnv(t)
+	writeAppGo(t, e.dir)
+	lowOnly := `{"verdict":"issues-remain","blocked_reason":null,"findings":[` +
+		`{"path":"app.go","line":2,"side":"RIGHT","severity":"low","category":"maintainability","pre_existing":false,"title":"Missing return type","why":"w","fix":"f"}]}`
+	e.runner.script = []exec.Result{{ExitCode: 0, Stdout: claudeStdout(lowOnly)}}
+	first := runLeg(t, e, e.request(t))
+	if first.Err != nil {
+		t.Fatalf("pass 1 Run: %v", first.Err)
+	}
+	if len(e.forge.reviewPosted) != 1 {
+		t.Fatalf("pass-1 posts = %d, want 1 (pass 1 posts everything)", len(e.forge.reviewPosted))
+	}
+
+	e.forge.pr.HeadRefOid = mustRev(t, secondHeadSHA)
+	e.runner.script = []exec.Result{{ExitCode: 0, Stdout: claudeStdout(lowOnly)}}
+	second := runLeg(t, e, e.request(t))
+	if second.Err != nil {
+		t.Fatalf("pass 2 Run: %v", second.Err)
+	}
+	if len(e.forge.reviewPosted) != 1 {
+		t.Fatalf("pass-2 posts = %d, want 0 more (the low finding is held)", len(e.forge.reviewPosted)-1)
+	}
+	heldID := ""
+	for _, f := range markerFindings(t, second.Marker.Findings) {
+		if f.Title == "Missing return type" {
+			heldID = f.ID
+			if f.Posted == nil || *f.Posted {
+				t.Fatalf("pass 2 did not hold the low finding: %+v", f)
+			}
+		}
+	}
+	if heldID == "" {
+		t.Fatal("pass 2 recorded no finding id")
+	}
+
+	e.forge.pr.HeadRefOid = mustRev(t, thirdHeadSHA)
+	raised := `{"verdict":"issues-remain","blocked_reason":null,"findings":[` +
+		`{"path":"app.go","line":2,"side":"RIGHT","severity":"medium","category":"maintainability","pre_existing":false,"title":"Missing return type","why":"w","fix":"f"}]}`
+	e.runner.script = []exec.Result{{ExitCode: 0, Stdout: claudeStdout(raised)}}
+	third := runLeg(t, e, e.request(t))
+	if third.Err != nil {
+		t.Fatalf("pass 3 Run: %v", third.Err)
+	}
+	if len(e.forge.reviewPosted) != 2 {
+		t.Fatalf("pass-3 posts = %d, want 1 more (the re-raised medium finding)", len(e.forge.reviewPosted)-1)
+	}
+	stored := markerFindings(t, third.Marker.Findings)
+	raisedFinding := findingByTitle(stored, "Missing return type")
+	if raisedFinding.ID != heldID {
+		t.Errorf("re-raised id = %q, want the held id %q", raisedFinding.ID, heldID)
+	}
+	if raisedFinding.Posted != nil {
+		t.Errorf("re-raised posted = %v, want absent (posted)", *raisedFinding.Posted)
+	}
+}
+
 // A held finding reaches the next review's prior table with resolution
 // not_posted, while a posted finding from the same pass reads none.
 func TestPriorNotPostedResolutionReachesTheNextPrompt(t *testing.T) {

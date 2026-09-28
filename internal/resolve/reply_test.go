@@ -74,3 +74,61 @@ func TestOutsideDiffReplyKeepsResolutionWithoutAThread(t *testing.T) {
 	var _ core.FindingID
 	var _ forge.ReviewThread
 }
+
+// A mixed pass carries a held finding beside a posted one through
+// resolution: the resolver answers only the posted finding, and the marker
+// rewrite keeps the held one — posted:false, no resolution — so its
+// not_posted prior and its summary count survive the resolve leg.
+func TestReplyAndResolveKeepsHeldFindingsInMarkerRewrite(t *testing.T) {
+	findings, err := harness.DecodeStream([]byte(`{"id":"aaaaaaaaaaaaaaaa","path":"a.go","line":1,` +
+		`"severity":"low","title":"held nit","posted":false,"resolution":null}` + "\n" +
+		`{"id":"bbbbbbbbbbbbbbbb","path":"a.go","line":2,` +
+		`"severity":"high","title":"real bug","resolution":null}`))
+	if err != nil {
+		t.Fatalf("decode findings: %v", err)
+	}
+	recs, err := harness.DecodeStream([]byte(`{"finding_id":"bbbbbbbbbbbbbbbb","reply":"fixed","resolution":"fixed","crossrev_tracked":""}`))
+	if err != nil {
+		t.Fatalf("decode recs: %v", err)
+	}
+
+	e := setup(t)
+	s := &session{
+		pass:     2,
+		repo:     e.slug,
+		req:      Request{PR: 42},
+		settings: legSettings{Harness: "claude", Model: "claude-3-7-sonnet"},
+	}
+	leg := &Leg{Forge: e.forge}
+	_, _, _, findingsOut, _ := leg.replyAndResolve(context.Background(), s, recs, findings, nil, "abc1234", map[string]bool{}, 0)
+	var out []map[string]json.RawMessage
+	if err := json.Unmarshal(findingsOut, &out); err != nil {
+		t.Fatalf("findingsOut decode: %v", err)
+	}
+	if len(out) != 2 {
+		t.Fatalf("findingsOut = %d findings, want 2 (the held one survives)", len(out))
+	}
+	byID := map[string]map[string]json.RawMessage{}
+	for _, f := range out {
+		var id string
+		_ = json.Unmarshal(f["id"], &id)
+		byID[id] = f
+	}
+	held, ok := byID["aaaaaaaaaaaaaaaa"]
+	if !ok {
+		t.Fatal("the held finding is missing from the marker rewrite")
+	}
+	var posted bool
+	_ = json.Unmarshal(held["posted"], &posted)
+	if posted {
+		t.Errorf("held posted = true, want false recorded through resolution")
+	}
+	if raw, present := held["resolution"]; !present || string(raw) == `"fixed"` {
+		t.Errorf("held resolution = %s, want no resolution recorded", string(raw))
+	}
+	var resolutionOut string
+	_ = json.Unmarshal(byID["bbbbbbbbbbbbbbbb"]["resolution"], &resolutionOut)
+	if resolutionOut != "fixed" {
+		t.Errorf("posted resolution = %q, want fixed", resolutionOut)
+	}
+}

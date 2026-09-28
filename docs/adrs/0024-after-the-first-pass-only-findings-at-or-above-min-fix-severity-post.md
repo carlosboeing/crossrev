@@ -34,11 +34,11 @@ The hold is a severity comparison, not `ShouldFix`. A pre-existing finding never
 
 ### 3. Held findings never reach the resolver
 
-The resolve leg drops `posted: false` findings where it enriches its input, before numbering. With no comment on the pull request there is no thread to reply into and no top-level comment to name, so no reply or resolution can reference one. Findings without the key still arrive.
+The resolve leg drops `posted: false` findings where it enriches its input, before numbering. With no comment on the pull request there is no thread to reply into and no top-level comment to name, so no reply or resolution can reference one. Findings without the key still arrive. The full record stays on the session for the marker and summary rewrite, so a mixed pass keeps its held findings with their `not_posted` priors.
 
 ### 4. Held findings return as `not_posted` priors
 
-A held finding still reaches the next review's prior table, with resolution `not_posted`, so the reviewer can tell a held finding from a settled one. A finding raised again at a higher severity ranks at or above the bar and posts then, under its stable id.
+A held finding still reaches the next review's prior table, with resolution `not_posted`, so the reviewer can tell a held finding from a settled one. A finding raised again at a higher severity ranks at or above the bar and posts then, under its stable id — even when an earlier pass posted it at the lower severity, since that comment records the lower severity and must not suppress the upgrade. Findings never held back stay duplicate-suppressed, and two findings under one id in a single pass post once.
 
 ### 5. Convergence is untouched
 

@@ -77,9 +77,21 @@ func (l *Leg) publish(ctx context.Context, req Request, loaded Context, settings
 	marker.Findings = stampNotPosted(marker.Findings, heldIDs(findings, minFix, pass))
 	findings = parseFindings(marker.Findings)
 
+	heldEarlier := heldEarlierIDs(loaded.Markers)
+	postedThisPass := map[string]bool{}
 	posted, skipped := 0, 0
 	for _, f := range findings {
-		if already[f.ID] {
+		// Within-pass retries post once: a second finding under an id
+		// this pass already posted is the same point twice.
+		if f.ID != "" && postedThisPass[f.ID] {
+			skipped++
+			continue
+		}
+		// An upgraded held finding posts again. It was recorded without
+		// posting on an earlier pass and now ranks at or above the bar,
+		// so the earlier comment's lower severity must not suppress it;
+		// anything never held back stays duplicate-suppressed.
+		if already[f.ID] && !(heldEarlier[f.ID] && f.IsPosted()) {
 			skipped++
 			continue
 		}
@@ -96,6 +108,9 @@ func (l *Leg) publish(ctx context.Context, req Request, loaded Context, settings
 			return marker, msgs, publishState{}, err
 		}
 		posted++
+		if f.ID != "" {
+			postedThisPass[f.ID] = true
+		}
 		if placement == forge.PlacementFallback {
 			unanchored++
 			msgs = append(msgs, ui.Warn(
@@ -374,6 +389,31 @@ func heldIDs(findings []Finding, minFix string, pass int) map[string]bool {
 		}
 		if holdBelowThreshold(f, minFix, pass) {
 			out[f.ID] = true
+		}
+	}
+	return out
+}
+
+// heldEarlierIDs names the findings an earlier pass recorded without
+// posting: explicit posted:false on a review marker. Finding ids carry no
+// severity, so a finding posted low on pass 1, held on pass 2 and raised to
+// medium on pass 3 keeps its id — and the pass-1 comment would suppress the
+// upgrade as already posted. These ids are the exception: raised back at or
+// above the bar, they post again.
+func heldEarlierIDs(markers []prstate.Marker) map[string]bool {
+	out := map[string]bool{}
+	for _, m := range markers {
+		if m.Leg != core.LegReview {
+			continue
+		}
+		var findings []Finding
+		if err := m.DecodeFindings(&findings); err != nil {
+			continue
+		}
+		for _, f := range findings {
+			if f.ID != "" && !f.IsPosted() {
+				out[f.ID] = true
+			}
 		}
 	}
 	return out

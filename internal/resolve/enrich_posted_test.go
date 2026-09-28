@@ -64,3 +64,27 @@ func TestEnrichWithEveryFindingNotPostedAnswersEmpty(t *testing.T) {
 		t.Errorf("enriched findings = %d, want 0", len(got))
 	}
 }
+
+// The filter answers a copy: the caller's slice still holds the full review
+// record, which the marker and summary rewrite needs after the resolver runs.
+// Filtering in place would compact the shared backing array and drop the
+// held findings from that rewrite.
+func TestEnrichFindingsLeavesInputUnchanged(t *testing.T) {
+	in := postedNodes(t, `[{`+
+		`"id":"aaaaaaaaaaaaaaaa","path":"a.go","line":1,"severity":"low","pre_existing":false,"title":"held nit","posted":false},`+
+		`{`+
+		`"id":"bbbbbbbbbbbbbbbb","path":"a.go","line":2,"severity":"high","pre_existing":false,"title":"real bug"}]`)
+	got := enrichFindings(in, nil, core.SeverityMedium)
+	if len(got) != 1 {
+		t.Fatalf("enriched findings = %d, want 1", len(got))
+	}
+	if len(in) != 2 {
+		t.Fatalf("input findings = %d, want 2 (the full record)", len(in))
+	}
+	if id := in[0].Member("id").StringVal(); id != "aaaaaaaaaaaaaaaa" {
+		t.Errorf("input[0] id = %q, want the held finding (backing array clobbered)", id)
+	}
+	if id := in[1].Member("id").StringVal(); id != "bbbbbbbbbbbbbbbb" {
+		t.Errorf("input[1] id = %q, want the posted finding", id)
+	}
+}
