@@ -2,7 +2,10 @@ package resolve
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -107,6 +110,90 @@ func TestAnUncancelledSignalDeathReadsAsAnInterrupt(t *testing.T) {
 			t.Fatalf("an interrupt marked the claim blocked: %s", ed.Body)
 		}
 	}
+}
+
+// A resolver killed after editing files puts the pre-invoke tree back before
+// answering the interrupt. The claim stays resumable, and prepareWorktree
+// reuses the worktree on HEAD and ownership alone with no cleanliness check
+// (internal/vcs/worktree.go), so without the restore the retry's commitAndPush
+// would stage the killed attempt's edits beside the accepted answer's.
+func TestAnInterruptedResolveLegRestoresTheTreeBeforeAnswering(t *testing.T) {
+	e := setup(t)
+	e.addReview(t, defaultFindings(), "issues-remain")
+	e.adapter.envErr = "killed"
+	e.adapter.payloads = []json.RawMessage{oneFindingPayload(), oneFindingPayload()}
+	// The killed child edited the tree before it died.
+	var ranDir string
+	e.runner.onRun = func(spec exec.Spec) {
+		ranDir = spec.Dir
+		if e.runner.result != nil {
+			_ = os.WriteFile(filepath.Join(spec.Dir, "stray.txt"), []byte("uncommitted\n"), 0o644)
+		}
+	}
+	e.runner.result = &exec.Result{ExitCode: 137, Stderr: []byte("killed\n")}
+
+	got := e.run(t)
+	if got.Err == nil {
+		t.Fatal("a killed harness did not fail the leg")
+	}
+	if !errors.Is(got.Err, context.Canceled) {
+		t.Fatalf("err = %v, want it to wrap context.Canceled", got.Err)
+	}
+	if ranDir == "" {
+		t.Fatal("the harness never ran, so the kill edited nothing")
+	}
+	if _, err := os.Stat(filepath.Join(ranDir, "stray.txt")); err != nil {
+		t.Fatalf("the killed harness left no edit behind: %v", err)
+	}
+	if *e.git.restoreCalls != 1 {
+		t.Fatalf("restoreCalls = %d, want 1 — the interrupt answered without putting the pre-invoke tree back", *e.git.restoreCalls)
+	}
+	for _, ed := range e.forge.edits {
+		if strings.Contains(ed.Body, `"blocked":true`) {
+			t.Fatalf("an interrupt marked the claim blocked: %s", ed.Body)
+		}
+	}
+
+	// The retry drives the same open claim to completion.
+	e.runner.result = nil
+	e.runner.onRun = nil
+	e.adapter.envErr = ""
+	e.git.staged = true
+	retry := e.run(t)
+	if retry.Err != nil {
+		t.Fatalf("retry after an interrupt: %v", retry.Err)
+	}
+}
+
+// A restore that will not apply turns the interrupt into a failure. Leaving
+// the claim resumable on a dirty tree would let the retry commit the killed
+// attempt's edits, so the leg records the failure instead.
+func TestAnInterruptedResolveLegWithAFailedRestoreIsAFailure(t *testing.T) {
+	e := setup(t)
+	e.addReview(t, defaultFindings(), "issues-remain")
+	e.adapter.envErr = "killed"
+	e.runner.result = &exec.Result{ExitCode: 137, Stderr: []byte("killed\n")}
+	e.git.restoreTreeErr = errors.New("the index is locked")
+
+	got := e.run(t)
+	if got.Err == nil {
+		t.Fatal("a killed harness with a failed restore did not fail the leg")
+	}
+	if errors.Is(got.Err, context.Canceled) {
+		t.Fatalf("err = %v, want no cancellation identity — the claim must not stay resumable on a dirty tree", got.Err)
+	}
+	msg := got.Err.Error()
+	for _, want := range []string{"interrupted", "could not be put back"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("err = %q, want it to name %q", msg, want)
+		}
+	}
+	for _, ed := range e.forge.edits {
+		if strings.Contains(ed.Body, `"blocked":true`) {
+			return
+		}
+	}
+	t.Fatal("a failed restore left the claim without blocked:true")
 }
 
 // A settled pass is not rewritten by a later failure (lib/run.sh:127-129).

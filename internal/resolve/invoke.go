@@ -340,6 +340,18 @@ func (l *Leg) invoke(ctx context.Context, s *session, marker prstate.Marker, wor
 			// context.Canceled so errors.Is still sees it through the
 			// join. Bare context.Canceled would reach the terminal as a
 			// plain error with the doctor hint.
+			//
+			// The killed child may have edited the tree before it died, and
+			// the claim stays resumable while prepareWorktree reuses the
+			// worktree on HEAD and ownership alone with no cleanliness
+			// check, so the pre-invoke tree goes back before answering the
+			// interrupt. A restore that will not apply is a failure, not an
+			// interrupt: retrying on top of the killed attempt's edits would
+			// commit changes no accepted answer describes.
+			if reset := l.retryReset(ctx, work, snapIndex, snapTree, s.settings.Harness, fmt.Sprintf("the %s harness was interrupted", s.settings.Harness)); reset != nil {
+				reset.Messages = append(msgs, reset.Messages...)
+				return *reset
+			}
 			return Result{Outcome: OutcomeRefused, Err: errors.Join(&Refusal{
 				Message: fmt.Sprintf("the %s harness was interrupted", s.settings.Harness),
 				Hint:    "The harness did not answer. Re-run the leg.",
