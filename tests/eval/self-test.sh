@@ -276,6 +276,9 @@ for arm in arm-a arm-b; do
   has "$arm wrote the repaired refresh helper to app.ts" "$arm_file" "if (!r.ok)"
   has "$arm kept the untouched export beside it" "$arm_file" "export const ok = 1"
   has "$arm tagged its own repair" "$arm_file" "$tag"
+  checkout_file="$(cat "$R/refresh-helper/$arm/work/checkout/app.ts" 2>/dev/null || true)"
+  has "$arm fast-forwarded its checkout to the repaired file" "$checkout_file" "if (!r.ok)"
+  has "$arm checkout carries its own repair tag" "$checkout_file" "$tag"
 done
 hasnt "arm-a dropped its stale pass label" "$(cat "$A/labels.json")" "crossrev/pass-1"
 hasnt "arm-b dropped its stale pass label" "$(cat "$B/labels.json")" "crossrev/pass-1"
