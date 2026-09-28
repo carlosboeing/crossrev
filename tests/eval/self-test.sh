@@ -140,7 +140,7 @@ resolve_payload() {
 }
 
 resolve_edit_for() {
-  printf 'printf "%s\\n" "export const ok = 1" "export async function refresh() { const r = await fetch(\\"/t\\"); if (!r.ok) throw new Error(\\"bad\\") } // %s" > app.ts' "$1"
+  printf 'printf "%%s\\n" "export const ok = 1" "export async function refresh() { const r = await fetch(\\"/t\\"); if (!r.ok) throw new Error(\\"bad\\") } // %s" > app.ts' "$1"
 }
 
 MANIFEST="$T/manifest.json"
