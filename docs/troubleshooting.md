@@ -198,6 +198,7 @@ opencode 2.x does not accept the flags the adapter passes and does not read the 
 | An opencode leg says it rejected its credential | The staged `auth.json` no longer authenticates. Re-seed: `opencode auth login` locally, then `gh secret set CROSSREV_OPENCODE_AUTH < ~/.local/share/opencode/auth.json`. Beware that opencode falls through to a different provider when its configured one cannot authenticate, so the provider named in the failure may not be yours |
 | `crossrev init` refuses your pairing | The runner cannot serve it. It names the credential lifetime and both fixes |
 | The loop stops after one leg | Something is using the default `GITHUB_TOKEN` for a write that advances the loop. GitHub deliberately doesn't trigger another workflow from those writes; the App token is what chains them |
+| The failure notice names the App-token step | The workflow could not mint the GitHub App token it runs every write through. Check that `APP_ID` and `APP_PRIVATE_KEY` are set on the repository and that the App is still installed on it |
 
 See [credentials.md](credentials.md) for the full model.
 

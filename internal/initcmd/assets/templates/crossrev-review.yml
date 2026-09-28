@@ -70,7 +70,7 @@ jobs:
       # well as pushes. With the harness CLI called directly there is no managed
       # token to fall back on.
       - id: app
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
         with:
           app-id: ${{ secrets.APP_ID }}
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
@@ -102,7 +102,7 @@ jobs:
           fi
 
       - if: steps.pr.outputs.skip != 'true'
-        uses: actions/checkout@v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: refs/pull/${{ steps.pr.outputs.number }}/head
           fetch-depth: 0
@@ -152,7 +152,7 @@ jobs:
       # went wrong. No GitHub credential reaches these files: the harness never
       # holds one, and the transcripts are redacted before they are kept.
       - if: always() && steps.pr.outputs.skip != 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: crossrev-run-${{ github.run_id }}
           path: ~/.local/state/crossrev/runs/
@@ -165,3 +165,77 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
         run: gh api --method DELETE installation/token || true
+
+  notice:
+    # A workflow token's permissions are set per job, so a comment posted
+    # from the leg job would need that job to hold pull-requests write —
+    # beside the App token it mints and the checkout the loop pushes from.
+    # This job runs instead, only when the leg failed, carrying only what
+    # commenting needs. `actions: read` lets it ask the run API which steps
+    # failed; the two write scopes let it answer on the pull request.
+    needs: [review]
+    if: failure()
+    runs-on: __RUNS_ON__
+    permissions:
+      actions: read
+      issues: write
+      pull-requests: write
+    steps:
+      # The workflow's own token, never the App token: the step that mints
+      # the App token may be the step that failed, and a notice needing it
+      # would go silent exactly when it is most needed.
+      - shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          if [[ -z "$NUMBER" ]]; then
+            echo "no pull request number in this event; nothing to notify."
+            exit 0
+          fi
+          run_url="https://github.com/$REPO/actions/runs/$RUN_ID"
+
+          # The steps that failed, read off this run. `gh` parses its own
+          # response, so the runner needs no other tool. When the read
+          # itself fails, the notice still posts — naming the run rather
+          # than the steps.
+          failed="$(gh api "repos/$REPO/actions/runs/$RUN_ID/jobs?per_page=100" \
+            --jq '[.jobs[] | select(.conclusion == "failure") | .steps[]? | select(.conclusion == "failure") | .name] | unique | .[]')" || failed=""
+
+          steps_block=""
+          # A backtick in a step name would close the code span the comment
+          # wraps it in, so it reads as an apostrophe instead.
+          apos="'"
+          if [[ -n "$failed" ]]; then
+            while IFS= read -r step; do
+              [[ -n "$step" ]] || continue
+              step="${step//\`/$apos}"
+              case "$step" in
+                *pp-token*|*"pp token"*|*"pp Token"*)
+                  fix="the workflow could not mint its GitHub App token. Check that the APP_ID and APP_PRIVATE_KEY secrets are set on the repository and that the App is still installed on it." ;;
+                *checkout*|*Checkout*)
+                  fix="the checkout failed before CrossRev started. Re-run the job; if it persists, check the branch still exists." ;;
+                *curl*)
+                  fix="installing the harness failed before CrossRev started. Re-run the job; if it persists, check the install source answers." ;;
+                *review*)
+                  fix="the CrossRev review leg itself failed. Read the claim comment CrossRev posted on this pull request and the run log in the crossrev-run-$RUN_ID artifact." ;;
+                *)
+                  fix="check the run log at $run_url." ;;
+              esac
+              steps_block+="- \`$step\`: $fix"$'\n'
+            done <<< "$failed"
+          fi
+
+          steps_block="${steps_block%$'\n'}"
+
+          body="CrossRev: the review leg failed on this pull request."
+          if [[ -n "$steps_block" ]]; then
+            body+=$'\n\nThe failed steps, from [run '"$RUN_ID"']('"${run_url}"$'):\n\n'"${steps_block}"
+          else
+            body+=$'\n\nThe run API named no failed step; the run itself is at '"${run_url}"'.'
+          fi
+          body+=$'\n\nTo retry, remove and re-apply the `crossrev/awaiting-review` label, or comment `/crossrev review` on the pull request.'
+
+          gh pr comment "$NUMBER" --repo "$REPO" --body "$body"
