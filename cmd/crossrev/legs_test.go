@@ -1,12 +1,18 @@
 package main
 
 import (
+	"bytes"
+	"context"
+	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/carlosboeing/crossrev/internal/config"
 	"github.com/carlosboeing/crossrev/internal/exec"
+	"github.com/carlosboeing/crossrev/internal/resolve"
+	"github.com/carlosboeing/crossrev/internal/ui"
 )
 
 // A repository config cannot put a forge credential on the leg's allowlist by
@@ -46,5 +52,38 @@ func TestLegEnvironmentDropsAForgeCredentialAnEndpointNames(t *testing.T) {
 	}
 	if !slices.Contains(names, "KIMI_API_KEY") {
 		t.Error("legEnvironment dropped the operator's own token_env")
+	}
+}
+
+// An interrupted leg reports an interrupt on the terminal, not the
+// harness-failure message and not the generic refusal. Both legs answer the
+// cancellation joined with their own refusal type — the review leg a
+// *ui.FatalError, the resolve leg a *resolve.Refusal — so refusalText keeps
+// finding the typed refusal while errors.Is still sees context.Canceled. A
+// bare context.Canceled would fall to the plain-error branch and print
+// "error  context canceled" with the doctor hint, which is the regression
+// this pins: reportLeg is the single exit every leg command returns through.
+func TestAnInterruptedLegReportsAnInterrupt(t *testing.T) {
+	for _, err := range []error{
+		errors.Join(&ui.FatalError{
+			Reason: "the harness was interrupted",
+			Action: "Re-run the leg.",
+		}, context.Canceled),
+		errors.Join(&resolve.Refusal{
+			Message: "the harness was interrupted",
+			Hint:    "Re-run the leg.",
+		}, context.Canceled),
+	} {
+		var stdout, stderr bytes.Buffer
+		out := &ui.IO{Out: &stdout, Err: &stderr, Palette: ui.Plain()}
+		_, _ = reportLeg(out, nil, err)
+		if !strings.Contains(stderr.String(), "was interrupted") {
+			t.Errorf("stderr = %q, want it to name the interrupt (%T)", stderr.String(), err)
+		}
+		for _, bad := range []string{"harness failed", "authentication", "doctor", "context canceled"} {
+			if strings.Contains(stderr.String(), bad) {
+				t.Errorf("stderr = %q, want no %q on an interrupt (%T)", stderr.String(), bad, err)
+			}
+		}
 	}
 }
