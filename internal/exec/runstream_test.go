@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -100,6 +101,28 @@ func TestRunStreamDiscardsWhatConsumeLeavesUnread(t *testing.T) {
 	}
 	if result.StdoutBytes != 1000000 {
 		t.Errorf("StdoutBytes = %d, want the 1000000 written (read or discarded)", result.StdoutBytes)
+	}
+}
+
+// Whatever consume leaves unread must still be counted whole: the drain
+// beside the wait owns the only close, so no reap can truncate it. Closing
+// the read end while the drain has yet to read turns buffered bytes into
+// os.ErrClosed with no error reported, so this loops the small-payload case
+// where that race fires.
+func TestRunStreamCountsWhatConsumeLeavesUnread(t *testing.T) {
+	const total = 8192
+	for i := 0; i < 25; i++ {
+		var head [10]byte
+		result := runStream(t, helperSpec("spew", strconv.Itoa(total), "0"), func(rd io.Reader) error {
+			_, err := io.ReadFull(rd, head[:])
+			return err
+		})
+		if result.Err != nil {
+			t.Fatalf("iteration %d: Err = %v, want nil", i, result.Err)
+		}
+		if result.StdoutBytes != total {
+			t.Fatalf("iteration %d: StdoutBytes = %d, want the %d written (read or discarded)", i, result.StdoutBytes, total)
+		}
 	}
 }
 
