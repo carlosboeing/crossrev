@@ -73,7 +73,13 @@ func (a *Grok) Spec(inv Invocation) (exec.Spec, error) {
 		args = append(args, "--sandbox", "read-only", "--deny", "Edit", "--deny", "Write")
 	}
 
-	if inv.Schema.Present() {
+	// --json-schema travels on the review leg only. With the flag and a
+	// prompt carrying the full diff, the model answers in one structured
+	// turn and never calls an edit tool, so a resolve leg's claimed fixes
+	// land nowhere. Without it the resolve leg edits first and its answer
+	// is read out of the text instead (see grokPayload); the shape check
+	// downstream still validates that text against the same schema.
+	if inv.Schema.Present() && !inv.Write {
 		if inv.Schema.Text == "" {
 			return exec.Spec{}, &Refusal{
 				Reason: "the grok adapter was given a schema path with no schema text",
@@ -152,7 +158,9 @@ func (a *Grok) Envelope(inv Invocation, res exec.Result) Envelope {
 	usage := ParseGrok(stdout)
 	payload := grokPayload(stdout, answer)
 	if inv.Write && payload == nil && streamText != "" {
-		if parsed, ok := parseJSON(streamText); ok {
+		// The resolve leg runs without --json-schema, so the streamed
+		// answer is prose around the payload rather than the payload.
+		if parsed, ok := ExtractJSON(streamText); ok {
 			payload = parsed
 		}
 	}
@@ -240,7 +248,9 @@ func grokStreamError(stdout []byte) string {
 // a successful turn was reported as "the payload is not a JSON object".
 // structured_output is the snake_case sibling agy uses; it stays as a fallback in
 // case a later grok release matches that spelling. .text remains last for a run
-// with no schema.
+// with no schema — and the resolve leg is always such a run now, so its text
+// goes through the fenced-or-spanned ladder rather than a bare parse: without
+// the flag nothing constrains the answer to JSON alone.
 func grokPayload(stdout []byte, answer node) json.RawMessage {
 	for _, key := range []string{"structuredOutput", "structured_output"} {
 		if value, ok := alternativeValue(rawMember(stdout, key)); ok {
@@ -259,7 +269,7 @@ func grokPayload(stdout []byte, answer node) json.RawMessage {
 		}
 		return nil
 	case kindString:
-		payload, parsed := parseJSON(text.text)
+		payload, parsed := ExtractJSON(text.text)
 		if !parsed {
 			return nil
 		}

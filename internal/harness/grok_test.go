@@ -2,6 +2,7 @@ package harness_test
 
 import (
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -234,6 +235,81 @@ func TestGrokPayloadLadder(t *testing.T) {
 				t.Errorf("payload = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+// A resolve leg leaves --json-schema off so the model edits before it
+// answers: under the flag a prompt carrying the full diff ends in one
+// structured turn with zero tool calls, and the claimed fixes land nowhere.
+func TestGrokResolveSpecOmitsJsonSchema(t *testing.T) {
+	adapter := grokAdapter(t)
+	inv := invocation(t, "grok", true)
+	spec, err := adapter.Spec(inv)
+	if err != nil {
+		t.Fatalf("building resolve spec: %v", err)
+	}
+	for _, arg := range spec.Args {
+		if arg == "--json-schema" {
+			t.Errorf("resolve spec must not pass --json-schema: got %v", spec.Args)
+		}
+	}
+}
+
+// The review leg keeps the flag: it reads without writing, so the structured
+// turn is its whole job.
+func TestGrokReviewSpecKeepsJsonSchema(t *testing.T) {
+	adapter := grokAdapter(t)
+	inv := invocation(t, "grok", false)
+	spec, err := adapter.Spec(inv)
+	if err != nil {
+		t.Fatalf("building review spec: %v", err)
+	}
+	if !hasFlagPair(spec.Args, "--json-schema", inv.Schema.Text) {
+		t.Errorf("review spec must still constrain the answer: got %v", spec.Args)
+	}
+}
+
+// Without the flag nothing constrains the answer to bare JSON, so the write
+// leg's payload is read out of prose: a fenced block or a bare object
+// surrounded by words. Prose with no object in it stays no payload.
+func TestGrokWriteLegParsesPayloadFromProse(t *testing.T) {
+	adapter := grokAdapter(t)
+	inv := invocation(t, "grok", true)
+	body := `{"blocked":false,"blocked_reason":null,"summary":"s","commit_subject":null,"resolutions":[]}`
+
+	tests := []struct {
+		name string
+		text string
+		want string
+	}{
+		{name: "a fenced block", text: "Here is what I did:\n```json\n" + body + "\n```\nDone.", want: body},
+		{name: "a bare object in prose", text: "Fixed it. " + body + " Let me know.", want: body},
+		{name: "prose with no object", text: "I could not do it", want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stdout := `{"text":` + strconv.Quote(tt.text) + `}`
+			envelope := adapter.Envelope(inv, exec.Result{Stdout: []byte(stdout)})
+			if got := string(envelope.Payload); got != tt.want {
+				t.Errorf("payload = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// The resolve leg streams, so its answer arrives as text deltas beside the
+// terminal end event. A fenced payload there is the same prose-tolerant read.
+func TestGrokWriteLegParsesStreamedFencedPayload(t *testing.T) {
+	adapter := grokAdapter(t)
+	inv := invocation(t, "grok", true)
+	body := `{"blocked":false,"blocked_reason":null,"summary":"s","commit_subject":null,"resolutions":[]}`
+	stdout := "{\"type\":\"text\",\"data\":\"Here is what I did:\\n```json\\n\"}\n" +
+		"{\"type\":\"text\",\"data\":" + strconv.Quote(body) + "}\n" +
+		"{\"type\":\"text\",\"data\":\"\\n```\\n\"}\n" +
+		`{"type":"end","usage":{"input_tokens":3,"output_tokens":4}}`
+	envelope := adapter.Envelope(inv, exec.Result{Stdout: []byte(stdout)})
+	if got := string(envelope.Payload); got != body {
+		t.Errorf("payload = %q, want %q", got, body)
 	}
 }
 

@@ -207,6 +207,7 @@ has "and the marker records grok's usage total"     "$(calls)" '"tokens":7'
 is  "a grok review leg writes no secret, ever"    "$(count 'secret set')" "0"
 
 has  "the grok review leg is pinned read-only"    "$grok_review_argv" "--sandbox read-only"
+has  "and constrains the answer with the schema"  "$grok_review_argv" "--json-schema"
 has  "and denies Edit"                            "$grok_review_argv" "--deny Edit"
 has  "and denies Write"                           "$grok_review_argv" "--deny Write"
 has  "and runs dontAsk, not a promptable default" "$grok_review_argv" "--permission-mode dontAsk"
@@ -255,6 +256,7 @@ has  "and may Write"                              "$grok_resolve_argv" "--allow 
 has  "and still runs dontAsk"                     "$grok_resolve_argv" "--permission-mode dontAsk"
 hasnt "a grok resolve leg is not pinned read-only" "$grok_resolve_argv" "--sandbox read-only"
 hasnt "nor given a blanket bypass"                "$grok_resolve_argv" "bypassPermissions"
+hasnt "a grok resolve leg leaves the schema flag off, so it edits before it answers" "$grok_resolve_argv" "--json-schema"
 
 # --- grok authentication rejection is a credential failure ------------------
 fixture_repo "$(config_grok_reviews)"; stub_reset
