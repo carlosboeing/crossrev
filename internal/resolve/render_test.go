@@ -247,3 +247,37 @@ func TestMixedPassRendersHonestCountsAfterRewrite(t *testing.T) {
 		t.Errorf("pure-pass footer changed wording:\n%.800s", pure)
 	}
 }
+
+// The pass-3 end of a posted-held-upgraded sequence renders the posted
+// occurrence: under a duplicate id the resolutions table and the commit
+// body read the medium upgrade on its current thread, not the held low
+// entry beside it, which carries neither severity nor thread.
+func TestResolveTablesPreferPostedOccurrence(t *testing.T) {
+	const fid = "2222222222222222"
+	findings := json.RawMessage(`[
+{"id":"` + fid + `","path":"a.go","line":1,"severity":"low","category":"correctness","title":"same nit","posted":false,"resolution":null},
+{"id":"` + fid + `","path":"a.go","line":1,"severity":"medium","category":"correctness","title":"same nit","root_comment_id":77,"resolution":null}
+]`)
+	resolutions := json.RawMessage(`[{"finding_id":"` + fid + `","resolution":"fixed"}]`)
+	marker := prstate.Marker{
+		Pass:    3,
+		Summary: prstate.Some("Fixed it."),
+		HeadSHA: prstate.Some(testHeadSHA),
+		Harness: prstate.Some("claude"),
+		Blocked: prstate.Some(false),
+	}
+	got := ResolveSummaryBody(resolutions, findings, "", marker, "acme/widget", 42, 3)
+	if !strings.Contains(got, "Medium") {
+		t.Errorf("resolutions table does not show the posted upgrade's severity:\n%.800s", got)
+	}
+	if strings.Contains(got, "Low") {
+		t.Errorf("resolutions table shows the held entry's severity:\n%.800s", got)
+	}
+	if !strings.Contains(got, "https://github.com/acme/widget/pull/42/files#r77") {
+		t.Errorf("resolutions table does not link the current thread:\n%.800s", got)
+	}
+	body := CommitBody(resolutions, findings, "fixed", testHeadSHA, 3, "acme/widget", 42)
+	if !strings.Contains(body, "https://github.com/acme/widget/pull/42/files#r77") {
+		t.Errorf("commit body does not link the current thread:\n%s", body)
+	}
+}

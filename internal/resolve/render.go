@@ -236,11 +236,28 @@ func findingLocation(f harness.Node, sha string, repo core.Slug, pr int) string 
 	return locationLink(path, line, blobURL(repo, sha, path, line))
 }
 
+// findingByID answers the posted occurrence under a duplicate id: a
+// finding id's current thread is its latest posted comment, so the
+// resolutions table, the commit body and the deferred-filing location
+// read the upgrade on its thread rather than the held entry beside it,
+// which carries no thread. Markers written before posted:false existed
+// read as posted, so they still match; with no posted occurrence the
+// first match keeps the record.
 func findingByID(findings []harness.Node, id string) harness.Node {
-	for _, f := range findings {
-		if f.Member("id").StringVal() == id {
+	first := -1
+	for i, f := range findings {
+		if f.Member("id").StringVal() != id {
+			continue
+		}
+		if first == -1 {
+			first = i
+		}
+		if posted := f.Member("posted"); posted.IsNull() || posted.Truthy() {
 			return f
 		}
+	}
+	if first != -1 {
+		return findings[first]
 	}
 	return harness.Node{}
 }
