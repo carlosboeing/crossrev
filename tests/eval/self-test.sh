@@ -369,9 +369,11 @@ is "a full arm with no review_payloads is refused" "$(( nopay_rc != 0 ? 1 : 0 ))
 has "and the refusal names the field" "$(cat "$T/runner-no-payloads-out.txt")" "review_payloads"
 
 printf 'not json' >"$T/stamp-probe.json"
-XDG_STATE_HOME="$T/xdg-state" bash "$RUNNER" --manifest "$T/stamp-probe.json" --bin "$BIN" \
+# Color-forced end to end, the way a user shell with color forcing runs
+# it: the stamp name must read clean even then.
+CLICOLOR=1 CLICOLOR_FORCE=1 XDG_STATE_HOME="$T/xdg-state" bash "$RUNNER" --manifest "$T/stamp-probe.json" --bin "$BIN" \
   >"$T/stamp-probe-out.txt" 2>&1 || true
-stamp_dir="$(ls "$T/xdg-state/crossrev-eval" 2>/dev/null || true)"
+stamp_dir="$(CLICOLOR=1 CLICOLOR_FORCE=1 ls "$T/xdg-state/crossrev-eval" 2>/dev/null || true)"
 is "the default results stamp carries the day" \
   "$([[ $stamp_dir =~ ^[0-9]{8}-[0-9]{6}$ ]] && echo yes || echo no)" "yes"
 
