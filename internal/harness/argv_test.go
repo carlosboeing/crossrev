@@ -102,11 +102,11 @@ func TestEveryAdapterBuildsTheWholeArgv(t *testing.T) {
 		},
 		{
 			harness: "grok", write: true,
-			where: "lib/adapters/grok.sh:36,44,49,50,51,52,79, plus streaming-json and the --tools allowlist for a resolve leg that edits without running commands",
+			where: "lib/adapters/grok.sh:36,44,49,50,51,52,79, plus streaming-json and the --tools allowlist for a resolve leg that edits without running commands, minus --json-schema so the model edits before it answers",
 			want: []string{"--output-format", "streaming-json", "--permission-mode", "dontAsk",
 				"--sandbox", "workspace", "--allow", "Edit", "--allow", "Write",
 				"--tools", "Read,Grep,Glob,Edit,Write",
-				"--json-schema", "<schema-text>", "--model", "<model>",
+				"--model", "<model>",
 				"--reasoning-effort", "high", "--prompt-file", "<prompt-path>"},
 		},
 		{

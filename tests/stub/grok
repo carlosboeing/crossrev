@@ -17,6 +17,8 @@
 # bypass is never a CrossRev grant. A resolve leg edits without running
 # commands: `--tools` holds the read and edit tools with no shell entry, and
 # `--output-format streaming-json` leaves the tool record the tripwire reads.
+# A resolve leg also leaves `--json-schema` off, so the model edits before it
+# answers instead of ending in one structured turn with no tool calls.
 # Wrong flags exit 96.
 
 set -uo pipefail
@@ -135,6 +137,10 @@ if [[ "$prompt" == *"You are the review leg"* ]]; then
 elif [[ "$prompt" == *"You are the resolve leg"* ]]; then
   if [[ "$sandbox" != "workspace" || "$allow_edit" -ne 1 || "$allow_write" -ne 1 ]]; then
     printf 'test stub: a resolve leg needs --sandbox workspace --allow Edit --allow Write\n' >&2
+    exit 96
+  fi
+  if [[ -n "$schema" ]]; then
+    printf 'test stub: a resolve leg must not pass --json-schema, so the model edits before it answers\n' >&2
     exit 96
   fi
   if [[ "$format" != "streaming-json" ]]; then
