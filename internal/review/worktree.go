@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/carlosboeing/crossrev/internal/core"
 	"github.com/carlosboeing/crossrev/internal/ui"
@@ -43,11 +44,11 @@ func newWorktreeHeadMismatch(dir string, have, want core.Revision) *WorktreeHead
 //
 // An explicit req.Workdir stays as the override it is: its HEAD is proved
 // against the pull request head and a mismatch is refused before any model
-// call. An empty one selects a clean detached worktree at the head by the
-// resolve pattern — the ordered head fetch, then reuse or create — and
-// reports it created, so the caller removes it at leg end. The one
-// worktree serves every call the pass makes, so quarantine and finding
-// anchors resolve under it and never under the operator checkout.
+// call. An empty one creates a fresh detached worktree at the head by the
+// resolve pattern — the ordered head fetch, then a fresh uniquely named
+// worktree — and reports it created, so the caller removes it at leg end.
+// The one worktree serves every call the pass makes, so quarantine and
+// finding anchors resolve under it and never under the operator checkout.
 func (l *Leg) prepareWorktree(ctx context.Context, req Request, loaded Context) (workdir string, created bool, err error) {
 	head := loaded.PR.HeadRefOid
 	if req.Workdir != "" {
@@ -71,8 +72,9 @@ func (l *Leg) prepareWorktree(ctx context.Context, req Request, loaded Context) 
 	if err != nil {
 		return "", false, err
 	}
-	// The worktree was just created at the head or proved reusable at it;
-	// either way the checked-out HEAD is proved before the first call.
+	// The worktree was just created at the head and proved registered to
+	// this clone; the checked-out HEAD is proved once more before the
+	// first call, so a swap in between still fails closed here.
 	if have, err := l.VCS.HeadAt(ctx, wt); err != nil {
 		return "", false, err
 	} else if !have.Equal(head) {
@@ -85,62 +87,160 @@ func (l *Leg) prepareWorktree(ctx context.Context, req Request, loaded Context) 
 // canonical directory, then suffixed ones beside it.
 const maxWorktreeCandidates = 100
 
-// selectWorktree answers the directory the pass works in.
+// selectWorktree creates the fresh directory the pass works in.
 //
-// The canonical path is reused only when it is this clone's own worktree at
-// the head holding no uncommitted changes. A failed leg keeps its worktree
-// for debugging, so a tree at the head can still carry that attempt's files;
-// reusing it would hand the reviewer files the pull request never carried,
-// and a clean finish would then delete them. An occupant that is not
-// reusable at all — another checkout's worktree, or a failed leg's at an
-// older head — is preserved the same way: the path is keyed on the
-// repository and the pull request alone, so deleting it could take out
-// uncommitted edits this run never proved it owns. Either way the pass works
-// in a fresh suffixed directory beside the occupant, never in it and never
-// by removing it.
+// The leg never reuses a prior tree: every existing occupant — a clean tree
+// at the head, a dirty one, an ignored leftover, a symlink, a file, a nested
+// repository, another clone's worktree — is preserved, and the pass works in
+// the first absent suffixed directory beside it. Reuse is what let dirty,
+// ignored, symlinked, nested and foreign occupants reach the harness, and
+// what a path swap between the check and its use could divert; a fresh `git
+// worktree add` checks out only the head's tracked files, so ignored and
+// untracked leftovers, submodule contents and nested repositories cannot
+// arrive with it. The path is keyed on the repository and the pull request
+// alone, so removing an occupant could take out uncommitted edits this run
+// never proved it owns: the pass works beside it, never in it and never by
+// removing it.
 func (l *Leg) selectWorktree(ctx context.Context, base string, head core.Revision) (string, error) {
+	if err := refuseSymlinkedParents(base); err != nil {
+		return "", err
+	}
 	for n := 1; n <= maxWorktreeCandidates; n++ {
 		candidate := base
 		if n > 1 {
 			candidate = fmt.Sprintf("%s-%d", base, n)
 		}
-		info, err := os.Stat(candidate)
-		if err != nil {
-			if !os.IsNotExist(err) {
-				return "", err
-			}
-			l.VCS.PruneWorktrees(ctx)
-			if err := l.VCS.AddWorktree(ctx, candidate, head); err != nil {
-				return "", err
-			}
+		// Lstat, not Stat: a symlink at the candidate is an occupant to
+		// work beside, not a directory to follow into. Following it
+		// handed the harness the checkout the link targets.
+		if _, err := os.Lstat(candidate); err == nil {
 			if l.Log != nil {
-				l.Log.Event("worktree", "created "+candidate)
+				l.Log.Event("worktree", "preserved "+candidate)
 			}
-			return candidate, nil
+			continue
+		} else if !os.IsNotExist(err) {
+			return "", err
 		}
-		if info.IsDir() {
-			reusable, err := l.VCS.WorktreeReusable(ctx, candidate, head)
-			if err != nil {
-				return "", err
+		l.VCS.PruneWorktrees(ctx)
+		if err := l.VCS.AddWorktree(ctx, candidate, head); err != nil {
+			// Another run may have won the race for this path between
+			// the absence check and the add — git refuses an existing
+			// path — in which case the next suffixed directory is
+			// tried. Anything else also arrives here when the path is
+			// still absent, and is reported rather than retried.
+			if _, statErr := os.Lstat(candidate); statErr == nil {
+				continue
 			}
-			if reusable {
-				clean, err := l.VCS.WorktreeClean(ctx, candidate)
-				if err != nil {
-					return "", err
-				}
-				if clean {
-					return candidate, nil
-				}
-			}
+			return "", err
+		}
+		if err := l.proveFreshWorktree(ctx, candidate, head); err != nil {
+			return "", err
 		}
 		if l.Log != nil {
-			l.Log.Event("worktree", "preserved "+candidate)
+			l.Log.Event("worktree", "created "+candidate)
 		}
+		return candidate, nil
 	}
 	return "", &ui.FatalError{
 		Reason: fmt.Sprintf("could not find a free worktree path under %s", base),
 		Action: "The preserved worktrees beside it were left by failed legs for debugging. Remove the ones no longer needed and re-run the leg.",
 	}
+}
+
+// proveFreshWorktree proves the directory AddWorktree just created is still
+// the worktree this run made: a real directory rather than a swap, checked
+// out at the head, and registered to this clone rather than another one. A
+// path replaced between the check and its use fails closed here, before any
+// model call, and the directory is left for inspection rather than removed.
+func (l *Leg) proveFreshWorktree(ctx context.Context, dir string, head core.Revision) error {
+	fi, err := os.Lstat(dir)
+	if err != nil {
+		return err
+	}
+	if !fi.IsDir() || fi.Mode()&os.ModeSymlink != 0 {
+		return &ui.FatalError{
+			Reason: fmt.Sprintf("the worktree path %s is not a directory this run created", dir),
+			Action: "Something replaced the fresh review worktree between its creation and its first use. Remove the unexpected entry and re-run the leg.",
+		}
+	}
+	have, err := l.VCS.HeadAt(ctx, dir)
+	if err != nil {
+		return err
+	}
+	if !have.Equal(head) {
+		return newWorktreeHeadMismatch(dir, have, head)
+	}
+	reusable, err := l.VCS.WorktreeReusable(ctx, dir, head)
+	if err != nil {
+		return err
+	}
+	if !reusable {
+		return &ui.FatalError{
+			Reason: fmt.Sprintf("the worktree at %s is not registered to this checkout", dir),
+			Action: "Something replaced the fresh review worktree between its creation and its first use. Remove the unexpected entry and re-run the leg.",
+		}
+	}
+	return nil
+}
+
+// refuseSymlinkedParents refuses a worktree base reached through a symlink:
+// creating under one would check the head out inside whatever the link
+// targets rather than the state directory. Every component of the shared
+// parent chain below the state home is listed without following it, so a
+// symlink anywhere on the path fails closed before anything is created. The
+// state home itself is the operator's configured location and is trusted as
+// found; absent components are fine, they are the leg's own to create.
+func refuseSymlinkedParents(base string) error {
+	const anchor = "/crossrev/worktrees/"
+	i := strings.Index(base, anchor)
+	if i < 0 {
+		return &ui.FatalError{
+			Reason: fmt.Sprintf("the review worktree path %s is not under a worktree directory", base),
+			Action: "Re-run the leg: the worktree path is built internally, so an unexpected layout means something replaced it.",
+		}
+	}
+	root := strings.TrimSuffix(base[:i], "/")
+	// The whole chain below the state home, anchor included: the shared
+	// parent of every candidate runs through it.
+	rel := strings.Trim(base[i:], "/")
+	parts := strings.Split(rel, "/")
+	prefix := root
+	if prefix == "" {
+		prefix = "/"
+	}
+	// Every prefix short of the final component: the final component is
+	// the candidate itself, whose symlinks the selection loop works
+	// beside rather than refusing.
+	for _, part := range parts[:len(parts)-1] {
+		if part == "" || part == "." {
+			continue
+		}
+		if prefix == "/" {
+			prefix = "/" + part
+		} else {
+			prefix = prefix + "/" + part
+		}
+		fi, err := os.Lstat(prefix)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return err
+		}
+		if fi.Mode()&os.ModeSymlink != 0 {
+			return &ui.FatalError{
+				Reason: fmt.Sprintf("the worktree parent %s is a symlink", prefix),
+				Action: "A fresh review worktree cannot be created under a symlink without checking the head out inside its target. Remove the link and re-run the leg.",
+			}
+		}
+		if !fi.IsDir() {
+			return &ui.FatalError{
+				Reason: fmt.Sprintf("the worktree parent %s is not a directory", prefix),
+				Action: "A fresh review worktree cannot be created under it. Remove the unexpected entry and re-run the leg.",
+			}
+		}
+	}
+	return nil
 }
 
 // ensureHeadPresent fetches a missing head through the resolve pattern's

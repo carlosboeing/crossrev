@@ -231,10 +231,14 @@ func TestWorktreeExplicitWorkdirAtWrongCommitRefused(t *testing.T) {
 	}
 }
 
-// TestPinnedWorktreeReusedWhenCurrent proves a worktree already sitting at
-// the head is reused: no second `worktree add`, and every call the pass
-// makes runs in it.
-func TestPinnedWorktreeReusedWhenCurrent(t *testing.T) {
+// TestPinnedWorktreeNeverReusesPriorTree proves the sweep rule: a worktree
+// already sitting at the head, clean and owned by this clone, is still not
+// reused. Reuse is what let dirty, ignored, symlinked, nested and foreign
+// occupants reach the harness, and what a path swap between the check and
+// its use could divert; every pass works in a tree this run created, so an
+// occupant is always preserved and the harness only ever sees a fresh
+// checkout.
+func TestPinnedWorktreeNeverReusesPriorTree(t *testing.T) {
 	e := newEnv(t)
 	state := t.TempDir()
 	t.Setenv("XDG_STATE_HOME", state)
@@ -243,9 +247,14 @@ func TestPinnedWorktreeReusedWhenCurrent(t *testing.T) {
 		t.Fatalf("WorktreeDir: %v", err)
 	}
 	if err := os.MkdirAll(wt, 0o755); err != nil {
-		t.Fatalf("lay the reusable worktree: %v", err)
+		t.Fatalf("lay the prior worktree: %v", err)
+	}
+	sentinel := filepath.Join(wt, "prior.txt")
+	if err := os.WriteFile(sentinel, []byte("the previous pass left this\n"), 0o644); err != nil {
+		t.Fatalf("plant the leftover: %v", err)
 	}
 	e.vcs.reusable = map[string]bool{wt: true}
+	e.vcs.clean = map[string]bool{wt: true}
 	if e.vcs.heads == nil {
 		e.vcs.heads = map[string]string{}
 	}
@@ -255,15 +264,137 @@ func TestPinnedWorktreeReusedWhenCurrent(t *testing.T) {
 	if got.Err != nil {
 		t.Fatalf("Run: %v", got.Err)
 	}
-	if e.vcs.addCalls != 0 {
-		t.Errorf("recreated a worktree already at the head: %d adds", e.vcs.addCalls)
+	if e.vcs.addCalls != 1 {
+		t.Errorf("fresh worktree adds = %d, want 1: a clean prior tree must not be reused", e.vcs.addCalls)
 	}
 	specs := e.runner.Specs()
 	if len(specs) != 1 {
 		t.Fatalf("harness calls = %d, want 1", len(specs))
 	}
-	if specs[0].Dir != wt {
-		t.Errorf("harness dir = %s, want the reusable worktree %s", specs[0].Dir, wt)
+	if specs[0].Dir == wt {
+		t.Fatalf("the harness ran in the prior worktree %s, want a fresh one", wt)
+	}
+	if _, err := os.Stat(sentinel); err != nil {
+		t.Errorf("the prior worktree was not preserved: %v", err)
+	}
+	if _, err := os.Stat(specs[0].Dir); !os.IsNotExist(err) {
+		t.Errorf("a clean finish left the fresh worktree at %s", specs[0].Dir)
+	}
+}
+
+// TestPinnedWorktreeSymlinkOccupantSkipped proves a symlink at the canonical
+// path is never followed: it may point at a clean checkout at the head,
+// which the old stat-and-reuse probe accepted, handing the harness the
+// operator checkout. The link is preserved and the pass works beside it.
+func TestPinnedWorktreeSymlinkOccupantSkipped(t *testing.T) {
+	e := newEnv(t)
+	state := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", state)
+	wt, err := vcs.ReviewWorktreeDir(mustSlug(t), 42)
+	if err != nil {
+		t.Fatalf("WorktreeDir: %v", err)
+	}
+	target := t.TempDir()
+	marker := filepath.Join(target, "checkout.txt")
+	if err := os.WriteFile(marker, []byte("the operator checkout\n"), 0o644); err != nil {
+		t.Fatalf("plant the target file: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(wt), 0o755); err != nil {
+		t.Fatalf("lay the parent: %v", err)
+	}
+	if err := os.Symlink(target, wt); err != nil {
+		t.Fatalf("lay the symlink: %v", err)
+	}
+	e.vcs.reusable = map[string]bool{wt: true}
+	e.vcs.clean = map[string]bool{wt: true}
+	if e.vcs.heads == nil {
+		e.vcs.heads = map[string]string{}
+	}
+	e.vcs.heads[wt] = headSHA
+	leg := e.leg(t)
+	got := leg.Run(context.Background(), pinnedReq(t, e))
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
+	specs := e.runner.Specs()
+	if len(specs) != 1 {
+		t.Fatalf("harness calls = %d, want 1", len(specs))
+	}
+	if specs[0].Dir == wt {
+		t.Fatalf("the harness ran through the symlink %s", wt)
+	}
+	if specs[0].Dir == target {
+		t.Fatalf("the harness ran in the symlink target %s", target)
+	}
+	if fi, err := os.Lstat(wt); err != nil {
+		t.Errorf("the symlink was not preserved: %v", err)
+	} else if fi.Mode()&os.ModeSymlink == 0 {
+		t.Errorf("the path %s is no longer a symlink", wt)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Errorf("the symlink target was touched: %v", err)
+	}
+}
+
+// TestPinnedWorktreeAddFailureRetriesNextPath proves a creation race is
+// ridden out rather than reported: when the first free path fails to create
+// — another run won the race between the absence check and the add — the
+// leg tries the next suffixed directory beside it.
+func TestPinnedWorktreeAddFailureRetriesNextPath(t *testing.T) {
+	e := newEnv(t)
+	state := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", state)
+	wt, err := vcs.ReviewWorktreeDir(mustSlug(t), 42)
+	if err != nil {
+		t.Fatalf("WorktreeDir: %v", err)
+	}
+	if err := os.MkdirAll(wt, 0o755); err != nil {
+		t.Fatalf("lay the occupant: %v", err)
+	}
+	second := wt + "-2"
+	e.vcs.addErrs = map[string]error{second: errors.New("already exists")}
+	leg := e.leg(t)
+	got := leg.Run(context.Background(), pinnedReq(t, e))
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
+	specs := e.runner.Specs()
+	if len(specs) != 1 {
+		t.Fatalf("harness calls = %d, want 1", len(specs))
+	}
+	if want := wt + "-3"; specs[0].Dir != want {
+		t.Errorf("harness dir = %s, want %s past the lost race", specs[0].Dir, want)
+	}
+	if e.vcs.addCalls != 2 {
+		t.Errorf("worktree adds = %d, want 2: the failed creation plus the retry", e.vcs.addCalls)
+	}
+}
+
+// TestPinnedWorktreeUnregisteredTreeRefused proves the post-create ownership
+// proof: when the fresh directory is not registered to this clone — a swap
+// between creation and use, or a worktree of another clone at the predicted
+// path — the leg stops before any model call instead of running there.
+func TestPinnedWorktreeUnregisteredTreeRefused(t *testing.T) {
+	e := newEnv(t)
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	wt, err := vcs.ReviewWorktreeDir(mustSlug(t), 42)
+	if err != nil {
+		t.Fatalf("WorktreeDir: %v", err)
+	}
+	e.vcs.reusable = map[string]bool{wt: false}
+	leg := e.leg(t)
+	got := leg.Run(context.Background(), pinnedReq(t, e))
+	if got.Err == nil {
+		t.Fatal("wanted a refusal for a tree registered to another clone")
+	}
+	if !strings.Contains(got.Err.Error(), "registered") {
+		t.Errorf("err = %v, want a refusal naming the failed registration", got.Err)
+	}
+	if len(e.runner.Specs()) != 0 {
+		t.Fatalf("harness started in an unowned tree: %d specs", len(e.runner.Specs()))
+	}
+	if len(e.forge.created) != 0 {
+		t.Errorf("the refusal posted a claim first: %v", e.forge.created)
 	}
 }
 

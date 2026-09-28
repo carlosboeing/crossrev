@@ -197,9 +197,17 @@ type fakeVCS struct {
 	// config answers ConfigGet per key; the push-remote keys default to
 	// origin, the way a checkout with no branch configuration reads.
 	config map[string]string
-	// reusable, when set, is the answer WorktreeReusable gives for the next
-	// pinned worktree. Unset means every pinned worktree is fresh.
+	// reusable, when set, holds explicit WorktreeReusable answers per
+	// directory. A directory the fake created through AddWorktree answers
+	// true unless an explicit entry says otherwise, so the leg's
+	// post-create ownership proof passes for trees it just made; every
+	// other directory without an entry answers false.
 	reusable map[string]bool
+	// addErrs, when set, fails AddWorktree for the named directory,
+	// simulating a creation race the leg must ride out by trying the next
+	// path. The winner's tree now occupies the path, the way a real race
+	// leaves it.
+	addErrs map[string]error
 	// clean, when set, is the answer WorktreeClean gives per directory.
 	// Unset means every worktree is clean; a set map answers false for
 	// directories with no entry, so unknown cleanliness never earns reuse.
@@ -371,10 +379,17 @@ func (f *fakeVCS) Fetch(_ context.Context, remote, refspec string) error {
 }
 
 func (f *fakeVCS) WorktreeReusable(_ context.Context, dir string, _ core.Revision) (bool, error) {
-	if f.reusable == nil {
-		return false, nil
+	if f.reusable != nil {
+		if answer, ok := f.reusable[dir]; ok {
+			return answer, nil
+		}
 	}
-	return f.reusable[dir], nil
+	for _, created := range f.worktrees {
+		if created == dir {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (f *fakeVCS) WorktreeClean(_ context.Context, dir string) (bool, error) {
@@ -386,6 +401,10 @@ func (f *fakeVCS) WorktreeClean(_ context.Context, dir string) (bool, error) {
 
 func (f *fakeVCS) AddWorktree(_ context.Context, dir string, revision core.Revision) error {
 	f.addCalls++
+	if err, ok := f.addErrs[dir]; ok && err != nil {
+		_ = os.MkdirAll(dir, 0o755)
+		return err
+	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}

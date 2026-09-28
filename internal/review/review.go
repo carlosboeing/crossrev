@@ -139,10 +139,11 @@ func (l *Leg) Run(ctx context.Context, req Request) (out Result) {
 	}
 
 	// The pinned worktree, before the claim: an empty Workdir creates a
-	// clean detached worktree at the pull request head, reused across every
-	// call the pass makes, and an explicit one stays as the override it is
-	// with its HEAD proved against the head. A refusal here leaves no
-	// claim, the way the resolve leg refuses before claiming.
+	// fresh detached worktree at the pull request head, used across every
+	// call the pass makes and never a reused prior tree, and an explicit
+	// one stays as the override it is with its HEAD proved against the
+	// head. A refusal here leaves no claim, the way the resolve leg refuses
+	// before claiming.
 	if l.VCS != nil {
 		wt, created, err := l.prepareWorktree(ctx, req, loaded)
 		if err != nil {
