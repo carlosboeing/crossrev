@@ -18,8 +18,11 @@
 //     CLI copy is RATE_LIMITED_USER_MESSAGE_OAUTH and
 //     RATE_LIMITED_USER_MESSAGE_API_KEY in error.rs of xai-org/grok-build,
 //     cited by independent CLI contract notes
-//   - opencode: no authored quota sentence; provider errors pass through, so
-//     the generic 429 and rate-limit signals apply
+//   - opencode: provider errors pass through, so the generic 429 and
+//     rate-limit signals apply; its GoUsageLimitError text is built in
+//     packages/opencode/src/session/retry.ts ("<limit> usage limit
+//     reached. It will reset in <reset>."), where a retry-after under 60
+//     seconds prints the words "less than a minute"
 //   - kimi: not a driven harness (see not_driven in assets/harnesses.json);
 //     it is reached through the claude adapter, so the Claude Code sentences
 //     apply
@@ -157,6 +160,10 @@ var resetShapes = []*regexp.Regexp{
 	regexp.MustCompile(`^(\d{1,2}\s?(?:[APap][Mm]))(?:[^a-zA-Z]|$)`),
 	// Duration: "Resets in 167h39m40s", "resets in 2h 15m", "try again in 20s".
 	regexp.MustCompile(`(?i)^(\d+\s*(?:hours?|hrs?|h|minutes?|mins?|m|seconds?|secs?|s|days?|d|weeks?|w)(?:\s*\d+\s*(?:hours?|hrs?|h|minutes?|mins?|m|seconds?|secs?|s|days?|d|weeks?|w))*)(?:[^a-zA-Z]|$)`),
+	// OpenCode word reset: "It will reset in less than a minute"
+	// (packages/opencode/src/session/retry.ts prints the words when the
+	// retry-after header is under 60 seconds).
+	regexp.MustCompile(`(?i)^(less than a minute)(?:[^a-zA-Z]|$)`),
 }
 
 func extractResetTime(reason string) string {

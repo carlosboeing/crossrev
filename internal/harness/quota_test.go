@@ -419,6 +419,15 @@ func TestDocumentedHarnessSentences(t *testing.T) {
 		{name: "opencode free-tier rate limit", harness: "opencode", reason: "Rate limit exceeded. Please try again later.", wantReset: "1h", wantQuot: true},
 		// GoUsageLimitError text; "5 hour" names the window, not a reset.
 		{name: "opencode plan window usage limit", harness: "opencode", reason: "OpenCode Go 5 hour usage limit reached.", wantReset: "1h", wantQuot: true},
+		// GoUsageLimitError text built in packages/opencode/src/session/retry.ts
+		// of sst/opencode: "<limit> usage limit reached. It will reset in
+		// <reset>." Below 60 seconds of retry-after <reset> is the words
+		// "less than a minute", kept verbatim instead of the harness
+		// default.
+		{name: "opencode usage limit resets in less than a minute", harness: "opencode", reason: "Pro usage limit reached. It will reset in less than a minute. To continue using this model now, enable usage from your available balance", wantReset: "less than a minute", wantQuot: true},
+		// Same builder with a numeric retry-after: the minute count is the
+		// printed reset.
+		{name: "opencode usage limit resets in minutes", harness: "opencode", reason: "Pro usage limit reached. It will reset in 5 minutes. To continue using this model now, enable usage from your available balance", wantReset: "5 minutes", wantQuot: true},
 		// Kimi is not a driven harness (not_driven in assets/harnesses.json):
 		// it is reached through the claude adapter, so the Claude Code
 		// sentences apply to it.
