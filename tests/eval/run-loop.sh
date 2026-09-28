@@ -152,6 +152,10 @@ for (( ci=0; ci<ncases; ci++ )); do
   for (( ai=0; ai<narms; ai++ )); do
     [[ -n "$(jq -r --argjson i "$ci" --argjson j "$ai" '.cases[$i].arms[$j].id // empty' "$MANIFEST")" ]] \
       || eval_fail ".cases[$ci].arms[$ai] needs .id"
+    if [[ "$(jq -r --argjson i "$ci" '.cases[$i].mode' "$MANIFEST")" == "full" ]]; then
+      [[ "$(jq -r --argjson i "$ci" --argjson j "$ai" '.cases[$i].arms[$j].review_payloads | length // 0' "$MANIFEST")" != "0" ]] \
+        || eval_fail ".cases[$ci].arms[$ai] needs .review_payloads in full mode"
+    fi
   done
 done
 
@@ -402,6 +406,11 @@ eval_record_pass() {
 # EVAL_STALLED (possibly "true").
 eval_full_loop() {
   local arm_dir="$1" arm_json="$2"
+  # Cleared before the payload check, so a refused arm cannot inherit the
+  # previous arm's legs and terminal label in its result.
+  LEGS=()
+  EVAL_TERMINAL="none"
+  EVAL_STALLED="false"
   local npayloads pass payload_idx
   npayloads="$(jq -r '.review_payloads | length' <<<"$arm_json")"
   [[ "$npayloads" != "0" ]] || { printf 'run-loop: arm needs review_payloads in full mode\n' >&2; return 1; }
@@ -421,9 +430,6 @@ eval_full_loop() {
     unset CROSSREV_RESOLVE_EDIT
   fi
 
-  LEGS=()
-  EVAL_TERMINAL="none"
-  EVAL_STALLED="false"
   local labels terminal
   pass=1
   while (( pass <= 6 )); do
@@ -806,7 +812,7 @@ WRAP
       if [[ "$mode" == "planted" ]]; then
         eval_planted_arm "$arm_dir" "$arm_json" || failures=$((failures+1))
       else
-        eval_full_loop "$arm_dir" "$arm_json"
+        eval_full_loop "$arm_dir" "$arm_json" || failures=$((failures+1))
       fi
       eval_collect_offline "$arm_dir"
       eval_write_result "$arm_dir" "$case_id" "$arm_id" "$mode" "$base" "$ARM_BASE_PRIME"
