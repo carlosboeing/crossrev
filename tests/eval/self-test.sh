@@ -203,9 +203,24 @@ jq -n \
 is "the manifest is valid JSON" "$(jq -e '.version == 1 and (.cases | length) == 2' "$MANIFEST" >/dev/null 2>&1 && echo yes || echo no)" "yes"
 
 # --- run the loop ----------------------------------------------------------
+
+# A git-remote-https shim that records any network transport attempt and
+# refuses it: the offline loop must never leave the local copies. It sits
+# on PATH only for the main runner invocation below.
+SHIMBIN="$T/shimbin"
+REMOTE_LOG="$T/remote-https.log"
+mkdir -p "$SHIMBIN"
+: >"$REMOTE_LOG"
+cat >"$SHIMBIN/git-remote-https" <<EOF
+#!/usr/bin/env bash
+printf '%s %s\n' "\$PWD" "\$*" >>"$REMOTE_LOG"
+exit 1
+EOF
+chmod +x "$SHIMBIN/git-remote-https"
+
 printf '\nrunning the offline loop\n'
 R="$T/results"
-bash "$RUNNER" --manifest "$MANIFEST" --results-dir "$R" --bin "$BIN" \
+PATH="$SHIMBIN:$PATH" bash "$RUNNER" --manifest "$MANIFEST" --results-dir "$R" --bin "$BIN" \
   >"$T/runner-out.txt" 2>&1
 runner_rc=$?
 if (( runner_rc != 0 )); then
@@ -250,6 +265,32 @@ is "arm-a labels converge" \
 is "arm-b labels converge" \
   "$(jq -r '.labels | map(select(. == "crossrev/converged")) | length' "$B/labels.json")" "1"
 
+# --- the repair reached the file, and labels stay live ----------------------
+for arm in arm-a arm-b; do
+  tag="blue"; [[ "$arm" == "arm-b" ]] && tag="green"
+  arm_file="$(git --git-dir="$R/refresh-helper/$arm/work/origin.git" show refs/heads/feature:app.ts 2>/dev/null || true)"
+  has "$arm wrote the repaired refresh helper to app.ts" "$arm_file" "if (!r.ok)"
+  has "$arm kept the untouched export beside it" "$arm_file" "export const ok = 1"
+  has "$arm tagged its own repair" "$arm_file" "$tag"
+done
+hasnt "arm-a dropped its stale pass label" "$(cat "$A/labels.json")" "crossrev/pass-1"
+hasnt "arm-b dropped its stale pass label" "$(cat "$B/labels.json")" "crossrev/pass-1"
+# pr view must agree with the live label list: the stand-in overlays the
+# live labels onto the seeded pull request object.
+pr_view_labels() {
+  (
+    export CROSSREV_GH_STATE="$1/state" CROSSREV_GH_ROUTES="$1/routes"
+    export CROSSREV_GH_LOG=/dev/null CROSSREV_GH_AUTHOR=eval-reviewer
+    "$ROOT/tests/stub/gh" pr view 42 --repo acme/widget \
+      --jq '.labels | map(.name) | join(",")'
+  )
+}
+is "pr view agrees with the live labels for arm-a" \
+  "$(pr_view_labels "$A")" "$(jq -r '.labels | join(",")' "$A/labels.json")"
+is "pr view agrees with the live labels for arm-b" \
+  "$(pr_view_labels "$B")" "$(jq -r '.labels | join(",")' "$B/labels.json")"
+hasnt "no fetch reached the network" "$(cat "$REMOTE_LOG")" "github.com"
+
 # --- the synthetic base revision ----------------------------------------------
 is "the results record the base to base-prime mapping" \
   "$(jq -r '.["refresh-helper"].base' "$R/base-map.json" 2>/dev/null)" "$BASE_SHA"
@@ -272,6 +313,8 @@ has "and the planted finding" "$(cat "$P/markers.json")" "Untyped legacy export"
 has "the planted fix reached the branch" \
   "$(git --git-dir="$P/work/origin.git" log --format=%s refs/heads/feature)" \
   "fix(api): answer the planted and real findings (amber)"
+planted_file="$(git --git-dir="$P/work/origin.git" show refs/heads/feature:app.ts 2>/dev/null || true)"
+has "the planted repair reached app.ts" "$planted_file" "if (!r.ok)"
 is "the planted run resolved every thread it posted" \
   "$(jq -r '[.[] | select(.isResolved != true)] | length' "$P/state/threads.json" 2>/dev/null)" "0"
 
@@ -309,6 +352,29 @@ bash "$RUNNER" --manifest "$PRIV_MANIFEST" --results-dir "$T/results-priv" --bin
 priv_rc=$?
 is "a manifest naming a private record is refused" "$(( priv_rc != 0 ? 1 : 0 ))" "1"
 has "and the refusal says why" "$(cat "$T/runner-priv-out.txt")" "private"
+
+NOPAY_MANIFEST="$T/manifest-no-payloads.json"
+jq '.cases[0].arms[1] |= del(.review_payloads)' "$MANIFEST" >"$NOPAY_MANIFEST"
+bash "$RUNNER" --manifest "$NOPAY_MANIFEST" --results-dir "$T/results-no-payloads" --bin "$BIN" \
+  >"$T/runner-no-payloads-out.txt" 2>&1
+nopay_rc=$?
+is "a full arm with no review_payloads is refused" "$(( nopay_rc != 0 ? 1 : 0 ))" "1"
+has "and the refusal names the field" "$(cat "$T/runner-no-payloads-out.txt")" "review_payloads"
+
+printf 'not json' >"$T/stamp-probe.json"
+XDG_STATE_HOME="$T/xdg-state" bash "$RUNNER" --manifest "$T/stamp-probe.json" --bin "$BIN" \
+  >"$T/stamp-probe-out.txt" 2>&1 || true
+stamp_dir="$(ls "$T/xdg-state/crossrev-eval" 2>/dev/null || true)"
+is "the default results stamp carries the day" \
+  "$([[ $stamp_dir =~ ^[0-9]{8}-[0-9]{6}$ ]] && echo yes || echo no)" "yes"
+
+SPACE_R="$T/results with space"
+bash "$RUNNER" --manifest "$MANIFEST" --results-dir "$SPACE_R" --bin "$BIN" \
+  >"$T/runner-space-out.txt" 2>&1
+space_rc=$?
+is "the runner exits clean with a space in the results path" "$space_rc" "0"
+is "the base map is written with a space in the results path" \
+  "$(jq -e '.["refresh-helper"] | has("base_prime")' "$SPACE_R/base-map.json" >/dev/null 2>&1 && echo yes || echo no)" "yes"
 
 printf '\n  %d passed, %d failed\n\n' "$pass" "$fail"
 (( fail == 0 ))
