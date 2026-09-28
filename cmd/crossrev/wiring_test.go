@@ -662,6 +662,38 @@ func newFixtureAutomated(t *testing.T) fixture {
 	return f
 }
 
+// A leg refused after its log opens still closes the log.
+//
+// Both legs used to return before closeRun when trustedAuthor refused — an
+// automated run with no App slug ends run.log at `run start` with no exit
+// line, where the shell's EXIT trap wrote one on every path (lib/run.sh:92).
+func TestARefusedLegStillClosesItsLog(t *testing.T) {
+	bin := binary(t)
+
+	for _, leg := range []string{"review", "resolve"} {
+		t.Run(leg, func(t *testing.T) {
+			// Automated mode with no slug and no metadata file, so
+			// trustedAuthor refuses after openLog has written `run start`.
+			fixture := newFixtureAutomated(t)
+			got := invoke(t, bin, fixture.env, leg, "--pr", "42", "--repo", "acme/widget")
+
+			if got.status != 1 {
+				t.Fatalf("status = %d, want 1\nstdout: %q\nstderr: %q", got.status, got.stdout, got.stderr)
+			}
+			const reason = "cannot determine which App's markers to trust"
+			if !strings.Contains(got.stderr, reason) {
+				t.Fatalf("the leg was not refused for its author:\n%q", got.stderr)
+			}
+			log := lastRunLog(t, fixture)
+			lines := strings.Split(strings.TrimRight(log, "\n"), "\n")
+			last := lines[len(lines)-1]
+			if want := "exit code=1 reason=" + reason; !strings.Contains(last, want) {
+				t.Errorf("the run log's last line is %q, want it to carry %q:\n%s", last, want, log)
+			}
+		})
+	}
+}
+
 // The same fallback reaching the review leg: without it, an automated run
 // started from a machine refuses after two gh calls where the shell reads the
 // slug off disk.
