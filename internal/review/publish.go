@@ -489,6 +489,12 @@ func stampNotPosted(raw json.RawMessage, held []bool) json.RawMessage {
 	return out
 }
 
+// A finding id's current thread is its latest posted comment: held
+// entries carry no thread and no resolution, an upgrade posts a new
+// comment that becomes the current thread, a re-held id may upgrade
+// again, and each resolution lands on the posted occurrence and its
+// current thread. Publish, the marker rewrite, the resolver's input and
+// every summary follow this rule.
 func attachThreads(raw json.RawMessage, threads []forge.ReviewThread) json.RawMessage {
 	if len(raw) == 0 || string(raw) == "null" {
 		return raw
@@ -502,18 +508,34 @@ func attachThreads(raw json.RawMessage, threads []forge.ReviewThread) json.RawMe
 		return raw
 	}
 	for i := range findings {
+		// Held entries carry no thread: with no comment on the pull
+		// request there is nothing to reply into, so an older thread
+		// under the same id must not attach here.
+		if posted := findings[i].Member("posted"); !posted.IsNull() && !posted.Truthy() {
+			continue
+		}
 		id, _ := findings[i].Member("id").AsString()
-		for _, th := range threads {
+		// An upgraded re-post shares its id with the spent thread, so
+		// the latest posted comment wins: comment ids grow with
+		// creation, and the current pass just posted the newest one.
+		best := -1
+		for j, th := range threads {
 			if !threadHas(th, id) {
 				continue
 			}
-			if th.ID != "" {
-				findings[i].Set("thread_id", harness.FromString(th.ID))
+			if best == -1 || th.RootCommentID > threads[best].RootCommentID {
+				best = j
 			}
-			if th.RootCommentID != 0 {
-				findings[i].Set("root_comment_id", harness.FromInt(th.RootCommentID))
-			}
-			break
+		}
+		if best == -1 {
+			continue
+		}
+		th := threads[best]
+		if th.ID != "" {
+			findings[i].Set("thread_id", harness.FromString(th.ID))
+		}
+		if th.RootCommentID != 0 {
+			findings[i].Set("root_comment_id", harness.FromInt(th.RootCommentID))
 		}
 	}
 	out, err := json.Marshal(findings)

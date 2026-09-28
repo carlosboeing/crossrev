@@ -75,6 +75,95 @@ func TestOutsideDiffReplyKeepsResolutionWithoutAThread(t *testing.T) {
 	var _ forge.ReviewThread
 }
 
+// A reposted finding shares its id with an older thread: the reply and
+// the resolution belong to the current thread — the latest posted
+// comment — so the actionable thread closes instead of the spent one.
+func TestReplyAndResolveUsesCurrentThreadForRepostedFinding(t *testing.T) {
+	findings, err := harness.DecodeStream([]byte(`{"id":"cccccccccccccccc","path":"a.go","line":1,` +
+		`"severity":"medium","title":"raised nit","resolution":null}`))
+	if err != nil {
+		t.Fatalf("decode findings: %v", err)
+	}
+	recs, err := harness.DecodeStream([]byte(`{"finding_id":"cccccccccccccccc","reply":"fixed","resolution":"fixed","crossrev_tracked":""}`))
+	if err != nil {
+		t.Fatalf("decode recs: %v", err)
+	}
+	e := setup(t)
+	oldID := mustFindingID(t, "cccccccccccccccc")
+	e.forge.threads = []forge.ReviewThread{
+		{ID: "thread-old", Path: "a.go", Line: 1, RootCommentID: 55, FindingIDs: []core.FindingID{oldID}},
+		{ID: "thread-new", Path: "a.go", Line: 1, RootCommentID: 77, FindingIDs: []core.FindingID{oldID}},
+	}
+	s := &session{
+		pass:     3,
+		repo:     e.slug,
+		req:      Request{PR: 42},
+		settings: legSettings{Harness: "claude", Model: "claude-3-7-sonnet"},
+	}
+	leg := &Leg{Forge: e.forge}
+	_, _, _, _, _ = leg.replyAndResolve(context.Background(), s, recs, findings, e.forge.threads, "abc1234", map[string]bool{}, 0)
+	if len(e.forge.replies) != 1 {
+		t.Fatalf("thread replies = %d, want 1", len(e.forge.replies))
+	}
+	if e.forge.replies[0].RootCommentID != 77 {
+		t.Errorf("reply root = %d, want 77 (the current thread, not the pass-1 thread)", e.forge.replies[0].RootCommentID)
+	}
+	if len(e.forge.resolved) != 1 || e.forge.resolved[0] != "thread-new" {
+		t.Errorf("resolved = %v, want [thread-new] (the current thread)", e.forge.resolved)
+	}
+}
+
+// A mixed-severity duplicate records the resolution on the posted
+// occurrence: the held entry keeps posted:false and no resolution, so a
+// later pass can still upgrade it, while the posted entry settles.
+func TestReplyAndResolveRecordsResolutionOnPostedOccurrence(t *testing.T) {
+	findings, err := harness.DecodeStream([]byte(`{"id":"dddddddddddddddd","path":"a.go","line":1,` +
+		`"severity":"low","title":"same point","posted":false,"resolution":null}` + "\n" +
+		`{"id":"dddddddddddddddd","path":"a.go","line":1,` +
+		`"severity":"medium","title":"same point","resolution":null}`))
+	if err != nil {
+		t.Fatalf("decode findings: %v", err)
+	}
+	recs, err := harness.DecodeStream([]byte(`{"finding_id":"dddddddddddddddd","reply":"fixed","resolution":"fixed","crossrev_tracked":""}`))
+	if err != nil {
+		t.Fatalf("decode recs: %v", err)
+	}
+	e := setup(t)
+	s := &session{
+		pass:     2,
+		repo:     e.slug,
+		req:      Request{PR: 42},
+		settings: legSettings{Harness: "claude", Model: "claude-3-7-sonnet"},
+	}
+	leg := &Leg{Forge: e.forge}
+	_, _, _, findingsOut, _ := leg.replyAndResolve(context.Background(), s, recs, findings, nil, "abc1234", map[string]bool{}, 0)
+	var out []map[string]json.RawMessage
+	if err := json.Unmarshal(findingsOut, &out); err != nil {
+		t.Fatalf("findingsOut decode: %v", err)
+	}
+	if len(out) != 2 {
+		t.Fatalf("findingsOut = %d findings, want 2", len(out))
+	}
+	var heldRes, postedRes string
+	for _, f := range out {
+		var posted *bool
+		_ = json.Unmarshal(f["posted"], &posted)
+		var res string
+		_ = json.Unmarshal(f["resolution"], &res)
+		if posted != nil && !*posted {
+			heldRes = res
+		} else {
+			postedRes = res
+		}
+	}
+	if heldRes == "fixed" {
+		t.Errorf("held occurrence resolution = %q, want none (held entries carry no resolution)", heldRes)
+	}
+	if postedRes != "fixed" {
+		t.Errorf("posted occurrence resolution = %q, want fixed", postedRes)
+	}
+}
+
 // A mixed pass carries a held finding beside a posted one through
 // resolution: the resolver answers only the posted finding, and the marker
 // rewrite keeps the held one — posted:false, no resolution — so its

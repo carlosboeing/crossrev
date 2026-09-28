@@ -16,8 +16,12 @@ import (
 	"github.com/carlosboeing/crossrev/internal/prstate"
 )
 
-// ReplyBody is _resolve_reply_body at lib/run.sh:2570-2585.
-func ReplyBody(disposition json.RawMessage, tracked string, pass int, harnessName, model string) string {
+// ReplyBody is _resolve_reply_body at lib/run.sh:2570-2585. Held counts
+// the findings the pass recorded without posting: on a mixed pass the
+// footer scopes verification to posted findings, since held ones never
+// reached the resolver. A pass with nothing held reads exactly as it
+// always has, which is what the frozen reply vectors pin.
+func ReplyBody(disposition json.RawMessage, tracked string, pass int, harnessName, model string, held int) string {
 	var d struct {
 		FindingID  string `json:"finding_id"`
 		Resolution string `json:"resolution"`
@@ -44,7 +48,11 @@ func ReplyBody(disposition json.RawMessage, tracked string, pass int, harnessNam
 		b.WriteString(model)
 		b.WriteByte(')')
 	}
-	b.WriteString(". Every finding is verified whatever its severity — severity governs what happens afterwards, not whether the check happens.</sub>")
+	if held > 0 {
+		b.WriteString(". Every posted finding is verified whatever its severity — severity governs what happens afterwards, not whether the check happens.</sub>")
+	} else {
+		b.WriteString(". Every finding is verified whatever its severity — severity governs what happens afterwards, not whether the check happens.</sub>")
+	}
 	id, err := prstate.ParseFindingID(d.FindingID)
 	if err == nil {
 		b.WriteString(prstate.EncodeFindingMarker(id, pass, core.LegResolve))
@@ -531,7 +539,7 @@ func ResolveSummaryBody(resolutions, findings json.RawMessage, deferredLines str
 	} else if escalated > 0 {
 		b.WriteString(alert("WARNING", fmt.Sprintf("**%d %s need a human decision.** `crossrev/stop` is applied, so the loop halts until somebody removes it. %s", escalated, noun, counts)))
 	} else {
-		b.WriteString(alert("NOTE", fmt.Sprintf("**%s** Every finding was verified whatever its severity — severity governs what happens afterwards, not whether the check happens.", counts)))
+		b.WriteString(alert("NOTE", fmt.Sprintf("**%s** Every posted finding was verified whatever its severity — severity governs what happens afterwards, not whether the check happens.", counts)))
 	}
 
 	if commit != "" && commit != "null" {
@@ -554,6 +562,20 @@ func ResolveSummaryBody(resolutions, findings json.RawMessage, deferredLines str
 	fmt.Fprintf(&b, "%s\n\n", summary)
 	sha, _ := marker.HeadSHA.Get()
 	b.WriteString(resolutionsTable(resolutions, findings, sha, slug, pr))
+
+	// The held findings stayed on the review marker through the rewrite,
+	// so the resolve summary keeps their count the way the review summary
+	// does: they were recorded, never posted, and never reached the
+	// resolver.
+	if held := countUnposted(findings); held > 0 {
+		noun := "findings"
+		verb := "they never"
+		if held == 1 {
+			noun = "finding"
+			verb = "it never"
+		}
+		fmt.Fprintf(&b, "%d held %s recorded and not posted; %s reached the resolver.\n\n", held, noun, verb)
+	}
 
 	if deferredLines != "" {
 		b.WriteString("## Deferred work filed\n")
@@ -655,7 +677,20 @@ func reviewSummaryBody(findings json.RawMessage, marker prstate.Marker, repo cor
 		}
 		b.WriteString(alert("WARNING", fmt.Sprintf("**The review could not be completed:** %s The loop halts here and a human is needed. Nothing in this comment is a judgement about the code.", blockedReason)))
 	default:
-		b.WriteString(alert("CAUTION", fmt.Sprintf("**%d %s need resolving.** A second agent now verifies every finding below against the codebase and either fixes it, skips it, defers it, or explains why it is wrong. It may change code for the %d at or above `min_fix_severity` (%s); the rest are verified and reported, never silently dropped.", n, noun, actionable, minFix)))
+		// As in the review leg's own summary: held findings never reach
+		// the resolver, so on a mixed pass the resolving claims scope to
+		// posted findings. A pass with nothing held reads exactly as it
+		// always has.
+		if held := countUnposted(findings); held > 0 {
+			posted := n - held
+			need := fmt.Sprintf("**%d posted findings need resolving.**", posted)
+			if posted == 1 {
+				need = "**1 posted finding needs resolving.**"
+			}
+			b.WriteString(alert("CAUTION", fmt.Sprintf("%s A second agent now verifies every posted finding below against the codebase and either fixes it, skips it, defers it, or explains why it is wrong. It may change code for the %d at or above `min_fix_severity` (%s); the rest are verified and reported, never silently dropped.", need, actionable, minFix)))
+		} else {
+			b.WriteString(alert("CAUTION", fmt.Sprintf("**%d %s need resolving.** A second agent now verifies every finding below against the codebase and either fixes it, skips it, defers it, or explains why it is wrong. It may change code for the %d at or above `min_fix_severity` (%s); the rest are verified and reported, never silently dropped.", n, noun, actionable, minFix)))
+		}
 	}
 	fmt.Fprintf(&b, "Verdict: **%s**.\n\n", verdict)
 	if n == 0 {

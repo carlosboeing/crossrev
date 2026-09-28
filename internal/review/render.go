@@ -318,7 +318,20 @@ func SummaryBody(findings []Finding, marker prstate.Marker, ctx RenderContext) s
 		}
 		b.WriteString(alert("WARNING", fmt.Sprintf("**The review could not be completed:** %s The loop halts here and a human is needed. Nothing in this comment is a judgement about the code.", reason)))
 	default:
-		b.WriteString(alert("CAUTION", fmt.Sprintf("**%d %s need resolving.** A second agent now verifies every finding below against the codebase and either fixes it, skips it, defers it, or explains why it is wrong. It may change code for the %d at or above `min_fix_severity` (%s); the rest are verified and reported, never silently dropped.", n, noun, actionable, ctx.MinFix)))
+		// Held findings never reach the resolver, so on a mixed pass the
+		// resolving claims scope to posted findings; the held count below
+		// the table still names the rest. A pass with nothing held reads
+		// exactly as it always has.
+		if held := countHeld(findings); held > 0 {
+			posted := n - held
+			need := fmt.Sprintf("**%d posted findings need resolving.**", posted)
+			if posted == 1 {
+				need = "**1 posted finding needs resolving.**"
+			}
+			b.WriteString(alert("CAUTION", fmt.Sprintf("%s A second agent now verifies every posted finding below against the codebase and either fixes it, skips it, defers it, or explains why it is wrong. It may change code for the %d at or above `min_fix_severity` (%s); the rest are verified and reported, never silently dropped.", need, actionable, ctx.MinFix)))
+		} else {
+			b.WriteString(alert("CAUTION", fmt.Sprintf("**%d %s need resolving.** A second agent now verifies every finding below against the codebase and either fixes it, skips it, defers it, or explains why it is wrong. It may change code for the %d at or above `min_fix_severity` (%s); the rest are verified and reported, never silently dropped.", n, noun, actionable, ctx.MinFix)))
+		}
 	}
 
 	fmt.Fprintf(&b, "Verdict: **%s**.\n\n", verdict)

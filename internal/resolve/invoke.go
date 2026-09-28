@@ -645,13 +645,23 @@ func backfillRoots(findings []harness.Node, threads []forge.ReviewThread) []harn
 		if root := findings[i].Member("root_comment_id"); root.Present() && !root.IsNull() {
 			continue
 		}
+		// Held entries carry no thread (see the finding-lifecycle rule
+		// with attachThreads in internal/review/publish.go), so only
+		// posted findings backfill a root — the current thread's.
+		if posted := findings[i].Member("posted"); !posted.IsNull() && !posted.Truthy() {
+			continue
+		}
 		id := findings[i].Member("id").StringVal()
+		var best int64
 		for _, th := range threads {
 			for _, fid := range th.FindingIDs {
-				if string(fid) == id && th.RootCommentID != 0 {
-					findings[i].Set("root_comment_id", harness.FromInt(th.RootCommentID))
+				if string(fid) == id && th.RootCommentID != 0 && th.RootCommentID > best {
+					best = th.RootCommentID
 				}
 			}
+		}
+		if best != 0 {
+			findings[i].Set("root_comment_id", harness.FromInt(best))
 		}
 	}
 	return findings

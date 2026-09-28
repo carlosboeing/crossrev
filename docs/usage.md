@@ -151,7 +151,7 @@ The first pass posts every finding as a comment. On later passes, findings below
 
 ### The five resolutions
 
-Every posted finding gets a reply, whatever the resolve leg decides. Nothing is silently dropped. A held finding gets no reply — with no comment on the pull request there is no thread to reply into — and stays on the review marker and summary, where the resolve leg keeps its held count when it rewrites the review comment, until a later pass posts it.
+Every posted finding gets a reply, whatever the resolve leg decides. Nothing is silently dropped. A held finding gets no reply — with no comment on the pull request there is no thread to reply into — and stays on the review marker and summary, where the resolve leg keeps its held count when it rewrites the review comment, until a later pass posts it. One lifecycle governs a finding id across passes: its current thread is its latest posted comment, so an upgrade that posts again moves the thread the resolver replies into and resolves, while a held entry carries no thread and no resolution. Summaries say what was posted and verified, with the held count beside each claim.
 
 | Resolution | What it means |
 |---|---|

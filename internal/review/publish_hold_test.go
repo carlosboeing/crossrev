@@ -15,6 +15,19 @@ import (
 // next run admits pass 2 through IsNewRevision rather than recovery.
 const secondHeadSHA = "3333333333333333333333333333333333333333"
 
+// moveHead moves the pull request to a new head with the checkout
+// following the push: since the worktree pinning, an explicit workdir
+// whose HEAD is not the head under review is refused before any model
+// call.
+func moveHead(t *testing.T, e *env, sha string) {
+	t.Helper()
+	e.forge.pr.HeadRefOid = mustRev(t, sha)
+	if e.vcs.heads == nil {
+		e.vcs.heads = map[string]string{}
+	}
+	e.vcs.heads[e.dir] = sha
+}
+
 // seedCompletePassOne plants a finished pass-1 review marker at the old head,
 // so the run under test admits pass 2 as a new revision.
 func seedCompletePassOne(t *testing.T, e *env, findings string) {
@@ -166,7 +179,7 @@ func TestPublishReRaisedFindingPostsAtHigherSeverity(t *testing.T) {
 		t.Fatal("pass 2 recorded no finding id")
 	}
 
-	e.forge.pr.HeadRefOid = mustRev(t, secondHeadSHA)
+	moveHead(t, e, secondHeadSHA)
 	raised := `{"verdict":"issues-remain","blocked_reason":null,"findings":[` +
 		`{"path":"app.go","line":2,"side":"RIGHT","severity":"medium","category":"maintainability","pre_existing":false,"title":"Missing return type","why":"w","fix":"f"}]}`
 	e.runner.script = []exec.Result{{ExitCode: 0, Stdout: claudeStdout(raised)}}
@@ -211,7 +224,7 @@ func TestPublishUpgradedHeldFindingPostsDespiteEarlierPost(t *testing.T) {
 		t.Fatalf("pass-1 posts = %d, want 1 (pass 1 posts everything)", len(e.forge.reviewPosted))
 	}
 
-	e.forge.pr.HeadRefOid = mustRev(t, secondHeadSHA)
+	moveHead(t, e, secondHeadSHA)
 	e.runner.script = []exec.Result{{ExitCode: 0, Stdout: claudeStdout(lowOnly)}}
 	second := runLeg(t, e, e.request(t))
 	if second.Err != nil {
@@ -233,7 +246,7 @@ func TestPublishUpgradedHeldFindingPostsDespiteEarlierPost(t *testing.T) {
 		t.Fatal("pass 2 recorded no finding id")
 	}
 
-	e.forge.pr.HeadRefOid = mustRev(t, thirdHeadSHA)
+	moveHead(t, e, thirdHeadSHA)
 	raised := `{"verdict":"issues-remain","blocked_reason":null,"findings":[` +
 		`{"path":"app.go","line":2,"side":"RIGHT","severity":"medium","category":"maintainability","pre_existing":false,"title":"Missing return type","why":"w","fix":"f"}]}`
 	e.runner.script = []exec.Result{{ExitCode: 0, Stdout: claudeStdout(raised)}}
@@ -256,7 +269,7 @@ func TestPublishUpgradedHeldFindingPostsDespiteEarlierPost(t *testing.T) {
 	// The upgrade posted on pass 3, so reporting it again at the same
 	// severity on pass 4 is a duplicate like any other: suppression
 	// resumes instead of posting a second comment for the same point.
-	e.forge.pr.HeadRefOid = mustRev(t, fourthHeadSHA)
+	moveHead(t, e, fourthHeadSHA)
 	e.runner.script = []exec.Result{{ExitCode: 0, Stdout: claudeStdout(raised)}}
 	fourth := runLeg(t, e, e.request(t))
 	if fourth.Err != nil {
@@ -323,6 +336,79 @@ func TestPublishMixedSeverityDuplicateHoldsOnlyTheLowEntry(t *testing.T) {
 
 // A held finding reaches the next review's prior table with resolution
 // not_posted, while a posted finding from the same pass reads none.
+// The full hold lifecycle across three passes: pass 1 posts the low
+// finding, pass 2 holds it without binding any thread, and pass 3
+// upgrades it to medium and posts again. The reposted finding binds to
+// its current-pass comment — the new thread — not the pass-1 thread it
+// shares an id with, so the resolver answers the actionable thread.
+func TestPublishUpgradeBindsCurrentThread(t *testing.T) {
+	e := newEnv(t)
+	writeAppGo(t, e.dir)
+	lowOnly := `{"verdict":"issues-remain","blocked_reason":null,"findings":[` +
+		`{"path":"app.go","line":2,"side":"RIGHT","severity":"low","category":"maintainability","pre_existing":false,"title":"Missing return type","why":"w","fix":"f"}]}`
+	e.runner.script = []exec.Result{{ExitCode: 0, Stdout: claudeStdout(lowOnly)}}
+	first := runLeg(t, e, e.request(t))
+	if first.Err != nil {
+		t.Fatalf("pass 1 Run: %v", first.Err)
+	}
+	if len(e.forge.reviewPosted) != 1 {
+		t.Fatalf("pass-1 posts = %d, want 1 (pass 1 posts everything)", len(e.forge.reviewPosted))
+	}
+	if len(e.forge.threads) != 1 {
+		t.Fatalf("pass-1 threads = %d, want 1", len(e.forge.threads))
+	}
+	oldRoot := e.forge.threads[0].RootCommentID
+
+	moveHead(t, e, secondHeadSHA)
+	e.runner.script = []exec.Result{{ExitCode: 0, Stdout: claudeStdout(lowOnly)}}
+	second := runLeg(t, e, e.request(t))
+	if second.Err != nil {
+		t.Fatalf("pass 2 Run: %v", second.Err)
+	}
+	if len(e.forge.reviewPosted) != 1 {
+		t.Fatalf("pass-2 posts = %d, want 0 more (the low finding is held)", len(e.forge.reviewPosted)-1)
+	}
+	held := markerFindings(t, second.Marker.Findings)
+	if len(held) != 1 {
+		t.Fatalf("pass-2 findings = %d, want 1", len(held))
+	}
+	if held[0].Posted == nil || *held[0].Posted {
+		t.Fatalf("pass 2 did not hold the low finding: %+v", held[0])
+	}
+	if held[0].ThreadID != nil || held[0].RootCommentID != nil {
+		t.Errorf("held finding carries thread %v/%v, want none (held entries carry no thread)", held[0].ThreadID, held[0].RootCommentID)
+	}
+
+	moveHead(t, e, thirdHeadSHA)
+	raised := `{"verdict":"issues-remain","blocked_reason":null,"findings":[` +
+		`{"path":"app.go","line":2,"side":"RIGHT","severity":"medium","category":"maintainability","pre_existing":false,"title":"Missing return type","why":"w","fix":"f"}]}`
+	e.runner.script = []exec.Result{{ExitCode: 0, Stdout: claudeStdout(raised)}}
+	third := runLeg(t, e, e.request(t))
+	if third.Err != nil {
+		t.Fatalf("pass 3 Run: %v", third.Err)
+	}
+	if len(e.forge.reviewPosted) != 2 {
+		t.Fatalf("pass-3 posts = %d, want 1 more (the re-raised medium finding)", len(e.forge.reviewPosted)-1)
+	}
+	if len(e.forge.threads) != 2 {
+		t.Fatalf("pass-3 threads = %d, want 2 (the upgrade opens a new thread)", len(e.forge.threads))
+	}
+	newRoot := e.forge.threads[1].RootCommentID
+	if newRoot == oldRoot {
+		t.Fatalf("threads share root %d, so this is not the two-thread case", oldRoot)
+	}
+	upgraded := markerFindings(t, third.Marker.Findings)
+	if len(upgraded) != 1 {
+		t.Fatalf("pass-3 findings = %d, want 1", len(upgraded))
+	}
+	if upgraded[0].Posted != nil {
+		t.Errorf("upgraded posted = %v, want absent (posted)", *upgraded[0].Posted)
+	}
+	if upgraded[0].RootCommentID == nil || *upgraded[0].RootCommentID != newRoot {
+		t.Errorf("upgraded binds root %v, want the current-pass comment %d (not the pass-1 thread %d)", upgraded[0].RootCommentID, newRoot, oldRoot)
+	}
+}
+
 func TestPriorNotPostedResolutionReachesTheNextPrompt(t *testing.T) {
 	e := newEnv(t)
 	writeAppGo(t, e.dir)
