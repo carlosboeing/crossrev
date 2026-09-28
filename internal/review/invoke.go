@@ -1,6 +1,7 @@
 package review
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -314,6 +315,11 @@ func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settin
 		shapeBudget = 2
 	}
 	semanticBudget := 1
+	// transientBudget is the one more attempt a server-side or transport
+	// failure earns: the harness failed before answering rather than
+	// answering badly. Authentication, quota and refusal errors never draw
+	// from it.
+	transientBudget := 1
 	// refused sums the usage buckets of the attempts this prompt turned
 	// away. A refused answer judged nothing, but its call was spent, and
 	// the marker reports what the pass spent.
@@ -369,6 +375,17 @@ func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settin
 			if envelope.Error != nil && *envelope.Error != "" {
 				msg = *envelope.Error
 			}
+			if transientBudget > 0 && harness.IsTransientHarnessError(msg) {
+				transientBudget--
+				refused = foldAttempt(refused, envelope.Usage)
+				// ui_warn, the pair kept apart. A failure before any answer
+				// is a server-side or transport failure worth asking once
+				// more about, never model drift.
+				outMsgs = append(outMsgs, ui.Warn(
+					fmt.Sprintf("%s hit a transient harness failure — %s", settings.harness, msg),
+					"The harness failed before answering rather than answering badly, so this looks like a server-side or transport failure. It is being asked once more; a second failure is fatal."))
+				continue
+			}
 			return envelope, nil, outMsgs, &ui.FatalError{
 				Reason: fmt.Sprintf("the %s harness failed: %s", settings.harness, msg),
 				Action: "If the error above mentions authentication, a token or a 401, the harness is installed and cannot log in.",
@@ -379,6 +396,23 @@ func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settin
 		// answer: an export that will not build or will not run leaves the
 		// fields unset and the leg stands.
 		l.mergeExport(ctx, adapter, inv, res, &envelope)
+
+		// A SUCCESS that answered nothing is a harness failure, not clean
+		// coverage: empty output never means the code was examined. A
+		// harness that constrains its own output failing to produce any is
+		// worth asking once more about before the shape check below refuses
+		// it, which is where the second empty answer still lands — the
+		// refusal keeps its existing words. A harness without a native
+		// schema already retries a shape miss below, so spending the
+		// transient budget there too would ask a third time.
+		if len(bytes.TrimSpace(envelope.Payload)) == 0 && entry.SchemaNative && transientBudget > 0 {
+			transientBudget--
+			refused = foldAttempt(refused, envelope.Usage)
+			outMsgs = append(outMsgs, ui.Warn(
+				fmt.Sprintf("%s answered successfully with an empty payload — empty output is never clean coverage", settings.harness),
+				"The harness constrains its own output and still answered nothing, so this looks like a harness failure rather than model drift. It is being asked once more; a second empty answer is fatal."))
+			continue
+		}
 
 		problem := l.checkPayload(envelope.Payload)
 		if problem == nil {

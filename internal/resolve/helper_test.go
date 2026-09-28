@@ -756,6 +756,9 @@ type stubAdapter struct {
 	beforeSpec func(harness.Invocation)
 	specErr    error
 	envErr     string
+	// envelopes, when set, answer one envelope per call in order, so a case
+	// can drive a failed first attempt followed by a successful retry.
+	envelopes []harness.Envelope
 }
 
 func (a *stubAdapter) Name() string { return "claude" }
@@ -780,6 +783,9 @@ func (a *stubAdapter) Spec(inv harness.Invocation) (exec.Spec, error) {
 func (a *stubAdapter) Envelope(_ harness.Invocation, _ exec.Result) harness.Envelope {
 	i := a.calls
 	a.calls++
+	if i < len(a.envelopes) {
+		return a.envelopes[i]
+	}
 	if a.envErr != "" {
 		return harness.Envelope{Harness: "claude", Error: &a.envErr}
 	}
