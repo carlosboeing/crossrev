@@ -718,12 +718,18 @@ type recordingRunner struct {
 	specs  []exec.Spec
 	onRun  func(exec.Spec)
 	stdout []byte
+	// result, when set, is what Run answers instead of the canned zero exit.
+	// A case driving a signal death sets it to the kill's exit status.
+	result *exec.Result
 }
 
 func (r *recordingRunner) Run(_ context.Context, spec exec.Spec) exec.Result {
 	r.specs = append(r.specs, spec)
 	if r.onRun != nil {
 		r.onRun(spec)
+	}
+	if r.result != nil {
+		return *r.result
 	}
 	out := r.stdout
 	if len(out) == 0 {

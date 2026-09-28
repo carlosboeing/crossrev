@@ -100,6 +100,31 @@ func TestAnInterruptedReviewLegLeavesTheClaimResumable(t *testing.T) {
 	}
 }
 
+// A child killed by a signal with the context still live — exit 137, no
+// cancellation — is an interrupt, not a harness failure. Signal deaths map to
+// 128+N (internal/exec/runner.go:29-33), and only the failure path that reads
+// Result.Interrupted turns them back into the cancellation the exit mapping
+// and the fatal-report skip already understand.
+func TestAnUncancelledSignalDeathReadsAsAnInterrupt(t *testing.T) {
+	e := newEnv(t)
+	writeAppGo(t, e.dir)
+	e.runner.script = []exec.Result{{ExitCode: 137, Stderr: []byte("killed\n")}}
+
+	got := runLeg(t, e, e.request(t))
+	if got.Err == nil {
+		t.Fatal("a killed harness did not fail the leg")
+	}
+	if !errors.Is(got.Err, context.Canceled) {
+		t.Fatalf("err = %v, want it to wrap context.Canceled", got.Err)
+	}
+	if msg := got.Err.Error(); strings.Contains(msg, "harness failed") || strings.Contains(msg, "authentication") {
+		t.Fatalf("an interrupt reads as a harness failure: %q", msg)
+	}
+	if len(e.forge.edits) != 0 {
+		t.Fatalf("an interrupt rewrote the claim: %v", e.forge.edits)
+	}
+}
+
 // A leg that finished writes `complete`, and something failing afterwards must
 // not replace an accurate record with a wrong one. That is what
 // run_leg_settled clears the snapshot for (lib/run.sh:127-129, :160-163).

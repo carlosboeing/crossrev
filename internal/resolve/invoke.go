@@ -332,6 +332,13 @@ func (l *Leg) invoke(ctx context.Context, s *session, marker prstate.Marker, wor
 		// Archived after the parse and filtered in place, the order
 		// lib/adapters/claude.sh:126-130 and :148-154 keep.
 		l.Log.WriteTranscript(transcript, res.Stdout, res.Stderr)
+		if res.Interrupted() {
+			// As the review leg: a signal death is the cancellation the
+			// exit mapping and the fatal-report skip already read, not a
+			// harness failure with an authentication hint. Returned bare so
+			// errors.Is still sees context.Canceled through it.
+			return Result{Outcome: OutcomeRefused, Err: context.Canceled, Messages: msgs}
+		}
 		// The second child, for the one adapter whose telemetry is not in its
 		// own output (lib/adapters/opencode.sh:261-273).
 		l.mergeExport(ctx, adapter, inv, res, &env)

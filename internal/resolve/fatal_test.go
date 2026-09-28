@@ -2,11 +2,13 @@ package resolve
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/carlosboeing/crossrev/internal/core"
+	"github.com/carlosboeing/crossrev/internal/exec"
 	"github.com/carlosboeing/crossrev/internal/forge"
 	"github.com/carlosboeing/crossrev/internal/policy"
 	"github.com/carlosboeing/crossrev/internal/prstate"
@@ -57,6 +59,34 @@ func TestAnInterruptedResolveLegLeavesTheClaimResumable(t *testing.T) {
 	got := e.run(t)
 	if got.Err == nil {
 		t.Fatal("a cancelled run did not fail the leg")
+	}
+	for _, ed := range e.forge.edits {
+		if strings.Contains(ed.Body, `"blocked":true`) {
+			t.Fatalf("an interrupt marked the claim blocked: %s", ed.Body)
+		}
+	}
+}
+
+// A child killed by a signal with the context still live — exit 137, no
+// cancellation — is an interrupt, not a harness failure. Signal deaths map to
+// 128+N (internal/exec/runner.go:29-33), and only the failure path that reads
+// Result.Interrupted turns them back into the cancellation the exit mapping
+// and the fatal-report skip already understand.
+func TestAnUncancelledSignalDeathReadsAsAnInterrupt(t *testing.T) {
+	e := setup(t)
+	e.addReview(t, defaultFindings(), "issues-remain")
+	e.adapter.envErr = "killed"
+	e.runner.result = &exec.Result{ExitCode: 137, Stderr: []byte("killed\n")}
+
+	got := e.run(t)
+	if got.Err == nil {
+		t.Fatal("a killed harness did not fail the leg")
+	}
+	if !errors.Is(got.Err, context.Canceled) {
+		t.Fatalf("err = %v, want it to wrap context.Canceled", got.Err)
+	}
+	if msg := got.Err.Error(); strings.Contains(msg, "harness failed") || strings.Contains(msg, "authentication") {
+		t.Fatalf("an interrupt reads as a harness failure: %q", msg)
 	}
 	for _, ed := range e.forge.edits {
 		if strings.Contains(ed.Body, `"blocked":true`) {
