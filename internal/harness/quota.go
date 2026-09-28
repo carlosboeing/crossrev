@@ -15,7 +15,9 @@
 //     "RESOURCE_EXHAUSTED (code 429): Individual quota reached. … Resets in
 //     <duration>" shape is corroborated across independent observed reports
 //   - Grok: https://docs.x.ai/developers/rate-limits documents the 429; the
-//     CLI copy is corroborated across repositories citing xai-org/grok-build
+//     CLI copy is RATE_LIMITED_USER_MESSAGE_OAUTH and
+//     RATE_LIMITED_USER_MESSAGE_API_KEY in error.rs of xai-org/grok-build,
+//     cited by independent CLI contract notes
 //   - opencode: no authored quota sentence; provider errors pass through, so
 //     the generic 429 and rate-limit signals apply
 //   - kimi: not a driven harness (see not_driven in assets/harnesses.json);
@@ -33,12 +35,13 @@ import (
 // session window, so the operator cannot wait them out. Each fires against at
 // least one inclusion below; exclusions win over inclusions.
 var quotaExclusions = []string{
-	// Claude Code spend caps need a billing change or an admin, not a wait:
-	// "You've hit your monthly spend limit", "spend limit reached".
-	"spend limit",
-	// The same cap on usage-billing organisations, which says "usage limit"
-	// in place of "spend limit".
-	"individual usage limit",
+	// Codex "Quota exceeded. Check your plan and billing details."
+	// (QuotaExceeded in error.rs): retry_delay returns None, so it is a
+	// billing stop, not a usage window.
+	"check your plan and billing details",
+	// Claude Code Fable consent prompt closed unanswered: answer the prompt
+	// or switch model, don't wait out a window.
+	"went unanswered",
 	// A full local disk (EDQUOT/ENOSPC), not a subscription window.
 	"disk quota",
 	// "Context limit reached": the request is too large; compact, don't wait.
@@ -48,6 +51,24 @@ var quotaExclusions = []string{
 	// "Server is temporarily limiting requests (not your usage limit)": the
 	// page's own disambiguator says it is not a plan quota.
 	"not your usage limit",
+}
+
+// usageWarningPattern is the "you've used most of your window" notice
+// ("You've used 85% of your session limit · resets 3:45pm"): it prints a
+// reset time but the leg is still running, so it is never a halt.
+var usageWarningPattern = regexp.MustCompile(`(?i)\bused \d+% of your\b`)
+
+// spendOrBudget reports whether reason is a spend cap, shared budget, or
+// usage-billing cap sentence. Those are billing stops unless the message
+// also names the plan window's reset ("· your session limit resets 3:45pm",
+// "spend limit reached (daily; resets 2026-08-09 00:00 UTC)"), in which
+// case the error reference says access returns then without anyone raising
+// the limit, so waiting fixes it.
+func spendOrBudget(lower string) bool {
+	return strings.Contains(lower, "spend limit") ||
+		strings.Contains(lower, "spend cap") ||
+		strings.Contains(lower, "shared budget") ||
+		strings.Contains(lower, "individual usage limit")
 }
 
 // hitLimitPattern is the "You've hit your <name> limit" sentence family:
@@ -64,10 +85,16 @@ var status429Pattern = regexp.MustCompile(`(?:^|[^0-9])429(?:[^0-9]|$)`)
 // failure.
 func IsQuotaError(reason string) bool {
 	lower := strings.ToLower(reason)
+	if usageWarningPattern.MatchString(reason) {
+		return false
+	}
 	for _, ex := range quotaExclusions {
 		if strings.Contains(lower, ex) {
 			return false
 		}
+	}
+	if spendOrBudget(lower) {
+		return extractResetTime(reason) != ""
 	}
 	if hitLimitPattern.MatchString(reason) {
 		return true
@@ -118,6 +145,8 @@ var skipAfterKeyword = regexp.MustCompile(`^[\s:·\-–—]*(?:(?:at|in)\b[\s:·
 // newline, a "·" separator, or a "(Zone/Name)" paren is kept rather than
 // discarded.
 var resetShapes = []*regexp.Regexp{
+	// Gateway dated reset: "resets 2026-08-09 00:00 UTC".
+	regexp.MustCompile(`^(\d{4}-\d{2}-\d{2} \d{1,2}:\d{2}(?::\d{2})?\s?(?:UTC|GMT)?)(?:[^a-zA-Z]|$)`),
 	// Codex full datetime: "try again at Sep 28th, 2026 2:14 AM".
 	regexp.MustCompile(`^([A-Za-z]{3,9} \d{1,2}(?:st|nd|rd|th)?, \d{4} \d{1,2}:\d{2}\s?(?:[APap][Mm])?)(?:[^a-zA-Z]|$)`),
 	// Weekday and clock: "resets Mon 12:00am".
