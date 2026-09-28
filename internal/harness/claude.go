@@ -34,7 +34,10 @@ func (a *Claude) Spec(inv Invocation) (exec.Spec, error) {
 	args := []string{"-p", "--output-format", "json"}
 	if inv.Write {
 		// A resolve leg streams its tool record so the tripwire can read it.
+		// stream-json under -p requires --verbose at flag parsing; without
+		// it the leg never edits.
 		args[2] = "stream-json"
+		args = append(args, "--verbose")
 	}
 
 	// A resolve leg has to change files, and headless Claude Code denies a

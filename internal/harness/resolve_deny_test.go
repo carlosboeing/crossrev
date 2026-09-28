@@ -42,6 +42,9 @@ func TestClaudeResolveSpecDeniesCommands(t *testing.T) {
 	if !hasFlagPair(spec.Args, "--output-format", "stream-json") {
 		t.Errorf("a resolve leg streams its tool record; got %v", spec.Args)
 	}
+	if !slices.Contains(spec.Args, "--verbose") {
+		t.Errorf("a resolve leg passes --verbose, which stream-json requires under -p; got %v", spec.Args)
+	}
 }
 
 func TestGrokResolveSpecDeniesCommands(t *testing.T) {

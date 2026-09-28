@@ -56,7 +56,7 @@ func TestEveryAdapterBuildsTheWholeArgv(t *testing.T) {
 		{
 			harness: "claude", write: true,
 			where: "lib/adapters/claude.sh:23,43,49,54,55,111, minus the argv prompt, plus stream-json and the Bash denial for a resolve leg that edits without running commands",
-			want: []string{"-p", "--output-format", "stream-json",
+			want: []string{"-p", "--output-format", "stream-json", "--verbose",
 				"--permission-mode", "acceptEdits", "--disallowedTools", "Bash",
 				"--json-schema", "<schema-text>", "--model", "<model>", "--effort", "high"},
 		},
