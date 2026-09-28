@@ -90,7 +90,7 @@ if [[ -n "$ASSIGNMENTS" ]]; then
 fi
 
 if [[ -z "$RESULTS_DIR" ]]; then
-  stamp="$(date +%Y%mdb-%H%M%S 2>/dev/null || date +%s)"
+  stamp="$(date +%Y%m%d-%H%M%S 2>/dev/null || date +%s)"
   RESULTS_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/crossrev-eval/$stamp"
 fi
 mkdir -p "$RESULTS_DIR" || { printf 'run-loop: cannot create %s\n' "$RESULTS_DIR" >&2; exit 2; }
