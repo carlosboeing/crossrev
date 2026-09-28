@@ -204,19 +204,21 @@ is "the manifest is valid JSON" "$(jq -e '.version == 1 and (.cases | length) ==
 
 # --- run the loop ----------------------------------------------------------
 
-# A git-remote-https shim that records any network transport attempt and
-# refuses it: the offline loop must never leave the local copies. It sits
-# on PATH only for the main runner invocation below.
+# A git wrapper that records every fetch invocation: the offline loop
+# must fetch the repaired head from the arm's local bare copy, never from
+# the github.com remote address. It sits on PATH only for the main runner
+# invocation below and execs the real git for everything.
 SHIMBIN="$T/shimbin"
-REMOTE_LOG="$T/remote-https.log"
+FETCH_LOG="$T/fetch.log"
+REAL_GIT="$(command -v git)"
 mkdir -p "$SHIMBIN"
-: >"$REMOTE_LOG"
-cat >"$SHIMBIN/git-remote-https" <<EOF
+: >"$FETCH_LOG"
+cat >"$SHIMBIN/git" <<EOF
 #!/usr/bin/env bash
-printf '%s %s\n' "\$PWD" "\$*" >>"$REMOTE_LOG"
-exit 1
+if [[ "\${1:-}" == "fetch" ]]; then printf '%s %s\n' "\$PWD" "\$*" >>"$FETCH_LOG"; fi
+exec "$REAL_GIT" "\$@"
 EOF
-chmod +x "$SHIMBIN/git-remote-https"
+chmod +x "$SHIMBIN/git"
 
 printf '\nrunning the offline loop\n'
 R="$T/results"
@@ -281,7 +283,7 @@ pr_view_labels() {
   (
     export CROSSREV_GH_STATE="$1/state" CROSSREV_GH_ROUTES="$1/routes"
     export CROSSREV_GH_LOG=/dev/null CROSSREV_GH_AUTHOR=eval-reviewer
-    "$ROOT/tests/stub/gh" pr view 42 --repo acme/widget \
+    "$ROOT/tests/stub/gh" pr view 42 --repo acme/widget --json number,labels,headRefOid \
       --jq '.labels | map(.name) | join(",")'
   )
 }
@@ -289,7 +291,7 @@ is "pr view agrees with the live labels for arm-a" \
   "$(pr_view_labels "$A")" "$(jq -r '.labels | join(",")' "$A/labels.json")"
 is "pr view agrees with the live labels for arm-b" \
   "$(pr_view_labels "$B")" "$(jq -r '.labels | join(",")' "$B/labels.json")"
-hasnt "no fetch reached the network" "$(cat "$REMOTE_LOG")" "github.com"
+hasnt "repoint fetches the local copy, never the network remote" "$(cat "$FETCH_LOG")" " origin"
 
 # --- the synthetic base revision ----------------------------------------------
 is "the results record the base to base-prime mapping" \
