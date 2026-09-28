@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
 	osexec "os/exec"
 	"time"
 )
@@ -22,11 +23,11 @@ var _ Streamer = (*OSRunner)(nil)
 // count.
 //
 // consume runs in the calling goroutine while the child writes. Once it
-// returns, whatever it left unread is discarded in the background: a child
-// blocked on a full pipe can still finish, and Wait still only returns
-// once it has exited. A consume error kills the group first, so the child
-// cannot outlive the caller that gave up on it; an orphan holding the pipe
-// past the drain grace ends the wait the way it does for Run.
+// returns, whatever it left unread is discarded beside the wait so a child
+// blocked on a full pipe can still finish, and an orphan holding the pipe
+// past the drain grace ends the wait the way it does for Run. A consume
+// error kills the group first, so the child cannot outlive the caller that
+// gave up on it.
 func (r *OSRunner) RunStream(ctx context.Context, spec Spec, consume func(io.Reader) error) Result {
 	started := time.Now()
 
@@ -83,10 +84,15 @@ func (r *OSRunner) RunStream(ctx context.Context, spec Spec, consume func(io.Rea
 	}
 	cmd.Stdin = bytes.NewReader(spec.Stdin)
 
-	// The pipe must exist before Start. Its read end is closed after Wait:
-	// closing it earlier would fail consume's reads, and leaving it open
-	// would leave the drain below behind when an orphan holds the stream.
-	stdout, err := cmd.StdoutPipe()
+	// The runner owns this pipe rather than asking os/exec for one
+	// (Cmd.StdoutPipe): a pipe os/exec creates is closed by Wait when the
+	// child exits, so unread buffered bytes raced that closure and could
+	// return os.ErrClosed with trailing output lost. An owned pipe is
+	// closed only below, once the drain beside Wait is done or the grace
+	// has released it, so the reap cannot truncate the byte count — and
+	// closing the read end is what releases the drain when an orphan
+	// still holds the write end.
+	stdoutR, stdoutW, err := os.Pipe()
 	if err != nil {
 		return Result{
 			ExitCode: -1,
@@ -96,6 +102,7 @@ func (r *OSRunner) RunStream(ctx context.Context, spec Spec, consume func(io.Rea
 		}
 	}
 	stderr := &capture{limit: spec.MaxOutputBytes}
+	cmd.Stdout = stdoutW
 	cmd.Stderr = stderr
 
 	setProcessGroup(cmd)
@@ -103,6 +110,8 @@ func (r *OSRunner) RunStream(ctx context.Context, spec Spec, consume func(io.Rea
 	cmd.WaitDelay = pipeDrainGrace
 
 	if err := cmd.Start(); err != nil {
+		_ = stdoutR.Close()
+		_ = stdoutW.Close()
 		return Result{
 			ExitCode: -1,
 			Stdout:   []byte{},
@@ -110,25 +119,61 @@ func (r *OSRunner) RunStream(ctx context.Context, spec Spec, consume func(io.Rea
 			Err:      &StartError{Path: spec.Path, Dir: spec.Dir, Err: err},
 		}
 	}
+	// The child has its own descriptor now. The parent's write end must
+	// close or the drain below never sees EOF.
+	_ = stdoutW.Close()
 
-	counted := &countReader{r: stdout}
+	counted := &countReader{r: stdoutR}
 	consumeErr := consume(counted)
 	if consumeErr != nil {
 		// The caller stopped reading: the child may be blocked writing
 		// to a pipe nobody drains, so end the group before waiting.
 		_ = killProcessGroup(cmd)
 	}
+	// Drain whatever the caller left unread beside the wait, not ahead of
+	// it. Cmd.WaitDelay starts only once Wait observes the child exit, so
+	// draining to EOF first would hang on an orphan past the grace and
+	// leave ErrPipesAbandoned unreachable. The drain is joined, never
+	// left behind.
 	draining := make(chan struct{})
 	go func() {
 		defer close(draining)
 		_, _ = io.Copy(io.Discard, counted)
 	}()
 	waitErr := cmd.Wait()
-	// Wait closed the pipe once the child exited; closing it again only
-	// stops the drain when an orphan still holds the stream. Either way
-	// the drain is joined, never left behind.
-	_ = stdout.Close()
-	<-draining
+	// The drain owns the read end until it is done: closing it first turns
+	// a Read that has not taken the poller lock into os.ErrClosed, and
+	// io.Copy drops whatever was still buffered with no error reported.
+	// So the read end closes only below — once the drain reaches EOF on
+	// its own, or to release a drain still stuck after the grace.
+	if !errors.Is(waitErr, osexec.ErrWaitDelay) {
+		select {
+		case <-draining:
+		case <-time.After(pipeDrainGrace):
+			// An orphan holds the write end past the grace. Release the
+			// drain and report the capture cut short, the way Run does
+			// when WaitDelay fires. WaitDelay never watches this pipe —
+			// an *os.File stdout is connected directly, not copied — so
+			// a stdout-only orphan reaches this arm with a nil Wait.
+			_ = stdoutR.Close()
+			<-draining
+			// Only when Wait reported nothing of its own. A signalled
+			// wait (a cancellation or deadline kill) and a non-zero
+			// exit already carry the outcome; the abandoned pipe must
+			// not overwrite them, so cancellationError below still
+			// sees the signal and the exit code still stands.
+			if waitErr == nil {
+				waitErr = osexec.ErrWaitDelay
+			}
+		}
+	} else {
+		// WaitDelay already spent the grace on os/exec's own copiers. The
+		// drain beside it may still be stuck on a held write end, so
+		// release and join it rather than spending the grace twice.
+		_ = stdoutR.Close()
+		<-draining
+	}
+	_ = stdoutR.Close()
 
 	result := Result{Duration: time.Since(started)}
 	result.Stdout = []byte{}
