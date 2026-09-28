@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/carlosboeing/crossrev/internal/core"
 	"github.com/carlosboeing/crossrev/internal/prstate"
 )
 
@@ -143,6 +144,30 @@ func TestRender(t *testing.T) {
 			t.Errorf("summary footnote missing trailing space:\n got: %q\nwant containing: %q", got, wantFootnote)
 		}
 	})
+}
+
+// A mixed pass keeps its held count when the resolve leg rewrites the
+// review summary: the findings table still lists every finding, and the
+// count below names the held ones, matching the review leg's own summary.
+func TestReviewSummaryRewriteKeepsHeldCount(t *testing.T) {
+	findings := json.RawMessage(`[{` +
+		`"id":"aaaaaaaaaaaaaaaa","path":"a.go","line":1,"severity":"low","category":"maintainability","pre_existing":false,"title":"held nit","posted":false},` +
+		`{` +
+		`"id":"bbbbbbbbbbbbbbbb","path":"a.go","line":2,"severity":"high","category":"correctness","pre_existing":false,"title":"real bug"}]`)
+	marker := prstate.Marker{
+		Pass:    2,
+		HeadSHA: prstate.Some(testHeadSHA),
+		Harness: prstate.Some("claude"),
+		Model:   prstate.Some("claude-3-7-sonnet"),
+		Blocked: prstate.Some(false),
+	}
+	got := reviewSummaryBody(findings, marker, mustSlug(t), core.SeverityMedium, 3, commentCoverage{})
+	if !strings.Contains(got, "1 finding below medium recorded and not posted.") {
+		t.Errorf("rewrite lost the held count:\n%s", got)
+	}
+	if !strings.Contains(got, "held nit") {
+		t.Errorf("rewrite lost the held finding's table row:\n%s", got)
+	}
 }
 
 func repoRoot(t *testing.T) string {

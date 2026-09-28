@@ -252,6 +252,73 @@ func TestPublishUpgradedHeldFindingPostsDespiteEarlierPost(t *testing.T) {
 	if raisedFinding.Posted != nil {
 		t.Errorf("re-raised posted = %v, want absent (posted)", *raisedFinding.Posted)
 	}
+
+	// The upgrade posted on pass 3, so reporting it again at the same
+	// severity on pass 4 is a duplicate like any other: suppression
+	// resumes instead of posting a second comment for the same point.
+	e.forge.pr.HeadRefOid = mustRev(t, fourthHeadSHA)
+	e.runner.script = []exec.Result{{ExitCode: 0, Stdout: claudeStdout(raised)}}
+	fourth := runLeg(t, e, e.request(t))
+	if fourth.Err != nil {
+		t.Fatalf("pass 4 Run: %v", fourth.Err)
+	}
+	if len(e.forge.reviewPosted) != 2 {
+		t.Fatalf("pass-4 posts = %d, want 0 more (the upgrade already posted on pass 3)", len(e.forge.reviewPosted)-2)
+	}
+}
+
+// fourthHeadSHA moves the pull request a third time, admitting pass 4 the
+// way secondHeadSHA admits pass 2.
+const fourthHeadSHA = "5555555555555555555555555555555555555555"
+
+// Two entries under one finding id at mixed severities hold only the
+// below-threshold entry: the id carries path, title and anchor but no
+// severity, so stamping by id would hold the actionable entry too and the
+// resolve leg would never see it.
+func TestPublishMixedSeverityDuplicateHoldsOnlyTheLowEntry(t *testing.T) {
+	e := newEnv(t)
+	writeAppGo(t, e.dir)
+	seedCompletePassOne(t, e, `[]`)
+	payload := `{"verdict":"issues-remain","blocked_reason":null,"findings":[` +
+		`{"path":"app.go","line":2,"side":"RIGHT","severity":"low","category":"maintainability","pre_existing":false,"title":"Same point","why":"w","fix":"f"},` +
+		`{"path":"app.go","line":2,"side":"RIGHT","severity":"medium","category":"maintainability","pre_existing":false,"title":"Same point","why":"w","fix":"f"}]}`
+	e.runner.script = []exec.Result{{ExitCode: 0, Stdout: claudeStdout(payload)}}
+	got := runLeg(t, e, e.request(t))
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
+	if len(e.forge.reviewPosted) != 1 {
+		t.Fatalf("inline posts = %d, want 1 (the medium entry only)", len(e.forge.reviewPosted))
+	}
+	body := e.forge.reviewPosted[0].Body
+	if !strings.Contains(body, "[Medium ·") {
+		t.Errorf("posted body does not carry the medium entry: %q", body)
+	}
+	if strings.Contains(body, "[Low ·") {
+		t.Errorf("posted body carries the held low entry: %q", body)
+	}
+	stored := markerFindings(t, got.Marker.Findings)
+	if len(stored) != 2 {
+		t.Fatalf("marker findings = %d, want 2 (both entries recorded)", len(stored))
+	}
+	if stored[0].ID != stored[1].ID {
+		t.Fatalf("entries share no id (%q vs %q), so this is not the duplicate case", stored[0].ID, stored[1].ID)
+	}
+	for _, f := range stored {
+		switch f.Severity {
+		case "low":
+			if f.Posted == nil || *f.Posted {
+				t.Errorf("low entry posted = %v, want explicit false", f.Posted)
+			}
+		case "medium":
+			if f.Posted != nil {
+				t.Errorf("medium entry posted = %v, want absent (posted)", *f.Posted)
+			}
+		}
+	}
+	if summary := lastSummary(e); !strings.Contains(summary, "1 finding below medium recorded and not posted") {
+		t.Errorf("summary = %q, want the held-findings count", summary)
+	}
 }
 
 // A held finding reaches the next review's prior table with resolution

@@ -74,7 +74,7 @@ func (l *Leg) publish(ctx context.Context, req Request, loaded Context, settings
 	// below, and counted in the summary. The stamp lands before anything
 	// posts, so the marker, the summary and the next pass's priors all read
 	// the same record; convergence still counts every finding, held or not.
-	marker.Findings = stampNotPosted(marker.Findings, heldIDs(findings, minFix, pass))
+	marker.Findings = stampNotPosted(marker.Findings, heldEntries(findings, minFix, pass))
 	findings = parseFindings(marker.Findings)
 
 	heldEarlier := heldEarlierIDs(loaded.Markers)
@@ -378,30 +378,39 @@ func (l *Leg) editClaim(ctx context.Context, repo core.Slug, claimID int64, body
 	return marker, nil
 }
 
-// heldIDs names the findings the pass holds back: below min_fix_severity on
-// a pass after the first. Findings without an id are never held, so a
-// payload the enricher never minted cannot suppress its siblings.
-func heldIDs(findings []Finding, minFix string, pass int) map[string]bool {
-	out := map[string]bool{}
-	for _, f := range findings {
+// heldEntries marks, per finding entry, whether the pass holds it back:
+// below min_fix_severity on a pass after the first. The decision is per
+// entry, not per id: ids carry path, title and anchor but no severity, so
+// two entries under one id at mixed severities hold only the
+// below-threshold one and the actionable entry still posts. Findings
+// without an id are never held, so a payload the enricher never minted
+// cannot suppress its siblings.
+func heldEntries(findings []Finding, minFix string, pass int) []bool {
+	held := make([]bool, len(findings))
+	for i, f := range findings {
 		if f.ID == "" {
 			continue
 		}
-		if holdBelowThreshold(f, minFix, pass) {
-			out[f.ID] = true
-		}
+		held[i] = holdBelowThreshold(f, minFix, pass)
 	}
-	return out
+	return held
 }
 
-// heldEarlierIDs names the findings an earlier pass recorded without
-// posting: explicit posted:false on a review marker. Finding ids carry no
+// heldEarlierIDs names the findings whose latest review-marker occurrence
+// was recorded without posting: explicit posted:false. Finding ids carry no
 // severity, so a finding posted low on pass 1, held on pass 2 and raised to
 // medium on pass 3 keeps its id — and the pass-1 comment would suppress the
 // upgrade as already posted. These ids are the exception: raised back at or
-// above the bar, they post again.
+// above the bar, they post again. Only the latest occurrence counts, so
+// once the upgrade posts, reporting it again is a duplicate like any other
+// and suppression resumes. Within one marker a posted occurrence wins over
+// a held one under the same id: the point reached the pull request on that
+// pass, whatever else the pass recorded beside it.
 func heldEarlierIDs(markers []prstate.Marker) map[string]bool {
-	out := map[string]bool{}
+	// Markers read oldest first, so the last write per id is its latest
+	// occurrence. Within one marker a posted occurrence wins over a held
+	// one under the same id.
+	held := map[string]bool{}
 	for _, m := range markers {
 		if m.Leg != core.LegReview {
 			continue
@@ -410,10 +419,31 @@ func heldEarlierIDs(markers []prstate.Marker) map[string]bool {
 		if err := m.DecodeFindings(&findings); err != nil {
 			continue
 		}
+		postedHere := map[string]bool{}
+		heldHere := map[string]bool{}
 		for _, f := range findings {
-			if f.ID != "" && !f.IsPosted() {
-				out[f.ID] = true
+			if f.ID == "" {
+				continue
 			}
+			if f.IsPosted() {
+				postedHere[f.ID] = true
+			} else {
+				heldHere[f.ID] = true
+			}
+		}
+		for id := range postedHere {
+			held[id] = false
+		}
+		for id := range heldHere {
+			if !postedHere[id] {
+				held[id] = true
+			}
+		}
+	}
+	out := map[string]bool{}
+	for id, h := range held {
+		if h {
+			out[id] = true
 		}
 	}
 	return out
@@ -423,21 +453,34 @@ func heldEarlierIDs(markers []prstate.Marker) map[string]bool {
 // other byte of the marker as the enricher wrote it: the edit goes through
 // the order-preserving node rather than a struct round-trip, so a posted
 // finding encodes exactly as it always has and an older reader still reads
-// the record.
-func stampNotPosted(raw json.RawMessage, held map[string]bool) json.RawMessage {
-	if len(held) == 0 || len(raw) == 0 || string(raw) == "null" {
+// the record. The decisions are index-aligned with the parsed findings the
+// caller decided on; a length mismatch means the record moved underfoot,
+// so it stays untouched rather than stamping the wrong entry.
+func stampNotPosted(raw json.RawMessage, held []bool) json.RawMessage {
+	if len(raw) == 0 || string(raw) == "null" {
 		return raw
 	}
 	var findings []harness.Node
 	if err := json.Unmarshal(raw, &findings); err != nil {
 		return raw
 	}
-	for i := range findings {
-		id, _ := findings[i].Member("id").AsString()
-		if id == "" || !held[id] {
-			continue
+	if len(held) != len(findings) {
+		return raw
+	}
+	any := false
+	for _, h := range held {
+		if h {
+			any = true
+			break
 		}
-		findings[i].Set("posted", harness.FromBool(false))
+	}
+	if !any {
+		return raw
+	}
+	for i := range findings {
+		if held[i] {
+			findings[i].Set("posted", harness.FromBool(false))
+		}
 	}
 	out, err := json.Marshal(findings)
 	if err != nil {

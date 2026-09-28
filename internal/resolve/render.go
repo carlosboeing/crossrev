@@ -595,6 +595,21 @@ func findingsTable(findings json.RawMessage, sha string, repo core.Slug) string 
 	return b.String()
 }
 
+// countUnposted counts the findings the review leg recorded without
+// posting: explicit posted:false. Absent reads as posted, matching the
+// enrich filter, so markers written before the field existed count none.
+func countUnposted(findings json.RawMessage) int {
+	var fs []harness.Node
+	_ = json.Unmarshal(findings, &fs)
+	n := 0
+	for _, f := range fs {
+		if posted := f.Member("posted"); !posted.IsNull() && !posted.Truthy() {
+			n++
+		}
+	}
+	return n
+}
+
 func actionableCount(findings []harness.Node, minFix core.Severity) int {
 	n := 0
 	for _, f := range findings {
@@ -648,6 +663,17 @@ func reviewSummaryBody(findings json.RawMessage, marker prstate.Marker, repo cor
 	} else {
 		sha, _ := marker.HeadSHA.Get()
 		b.WriteString(findingsTable(findings, sha, repo))
+		// The review leg counts the findings it recorded without posting
+		// beside its table, and the rewrite keeps that count: the held
+		// findings stay on the rewritten marker, so the sentence stays
+		// true after resolution.
+		if held := countUnposted(findings); held > 0 {
+			noun := "findings"
+			if held == 1 {
+				noun = "finding"
+			}
+			fmt.Fprintf(&b, "%d %s below %s recorded and not posted.\n\n", held, noun, minFix)
+		}
 	}
 	if cov.on {
 		b.WriteString(intel.CoverageFootnote(cov.counts, cov.sha))

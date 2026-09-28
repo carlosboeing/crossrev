@@ -151,7 +151,7 @@ The first pass posts every finding as a comment. On later passes, findings below
 
 ### The five resolutions
 
-Every finding gets a reply, whatever the resolve leg decides. Nothing is silently dropped.
+Every posted finding gets a reply, whatever the resolve leg decides. Nothing is silently dropped. A held finding gets no reply — with no comment on the pull request there is no thread to reply into — and stays on the review marker and summary, where the resolve leg keeps its held count when it rewrites the review comment, until a later pass posts it.
 
 | Resolution | What it means |
 |---|---|

@@ -38,7 +38,9 @@ The resolve leg drops `posted: false` findings where it enriches its input, befo
 
 ### 4. Held findings return as `not_posted` priors
 
-A held finding still reaches the next review's prior table, with resolution `not_posted`, so the reviewer can tell a held finding from a settled one. A finding raised again at a higher severity ranks at or above the bar and posts then, under its stable id — even when an earlier pass posted it at the lower severity, since that comment records the lower severity and must not suppress the upgrade. Findings never held back stay duplicate-suppressed, and two findings under one id in a single pass post once.
+A held finding still reaches the next review's prior table, with resolution `not_posted`, so the reviewer can tell a held finding from a settled one. A finding raised again at a higher severity ranks at or above the bar and posts then, under its stable id — even when an earlier pass posted it at the lower severity, since that comment records the lower severity and must not suppress the upgrade. The upgrade posts once: only an id whose latest marker occurrence was held escapes suppression, so reporting it again after it posts is a duplicate like any other. Findings never held back stay duplicate-suppressed, and two findings under one id in a single pass post once.
+
+The hold is decided per finding entry, not per id: two entries under one id at mixed severities hold only the below-threshold one, so the actionable entry still posts and still reaches the resolver. The resolve leg's rewrite of the review summary renders the same held count beside the table, so the count survives resolution.
 
 ### 5. Convergence is untouched
 
