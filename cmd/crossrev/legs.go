@@ -206,6 +206,8 @@ func reviewCommand(ctx context.Context, out *ui.IO, doc harness.Document, req cl
 
 	leg := reviewLeg(d, client, cfg)
 	leg.Config = cfg
+	// No Workdir: an empty one pins a clean detached worktree at the pull
+	// request head, so the harness never runs in the operator checkout.
 	result := leg.Run(ctx, review.Request{
 		PR:              req.PR,
 		Repo:            repo,
@@ -213,14 +215,18 @@ func reviewCommand(ctx context.Context, out *ui.IO, doc harness.Document, req cl
 		Continuation:    req.Continuation,
 		HarnessOverride: req.HarnessOverride,
 		Author:          author,
-		Workdir:         d.repo.Dir(),
 		RunID:           runlog.RunID(),
 	})
 	status, err := reportLeg(out, result.Messages, result.Err)
 	if result.Nudge && !req.NoTips {
 		upgradeNudge(out, cfg)
 	}
-	closeRun(out, d.log, status, result.Err, "")
+	// The worktree a failed leg kept for debugging is the directory the
+	// leg actually selected, which this process holds no other handle on:
+	// after a preserved occupant the files are in a suffixed directory
+	// beside the canonical path, and re-deriving that path here would name
+	// the preserved tree this run worked beside instead of its own.
+	closeRun(out, d.log, status, result.Err, result.KeptWorktree)
 	return status, err
 }
 
