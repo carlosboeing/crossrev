@@ -87,6 +87,32 @@ func TestWorktreeDirRefusesTheZeroSlug(t *testing.T) {
 	}
 }
 
+// The review leg's worktree is a sibling of the resolve leg's under the same
+// repository directory: sharing that path let each leg reuse or delete the
+// other's tree. The zero slug is refused for the same reason as above.
+func TestReviewWorktreeDir(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", "/state")
+	t.Setenv("HOME", "/home/dev")
+	got, err := vcs.ReviewWorktreeDir(slug(t, "carlosboeing", "crossrev"), 42)
+	if err != nil {
+		t.Fatalf("ReviewWorktreeDir: %v", err)
+	}
+	want := "/state/crossrev/worktrees/carlosboeing-crossrev/review-pr-42"
+	if got != want {
+		t.Errorf("dir = %q, want %q", got, want)
+	}
+	resolve, err := vcs.WorktreeDir(slug(t, "carlosboeing", "crossrev"), 42)
+	if err != nil {
+		t.Fatalf("WorktreeDir: %v", err)
+	}
+	if got == resolve {
+		t.Errorf("the review worktree %q is the resolve worktree", got)
+	}
+	if got, err := vcs.ReviewWorktreeDir(core.Slug{}, 1); err == nil {
+		t.Errorf("ReviewWorktreeDir(zero) = %q, want a refusal", got)
+	}
+}
+
 // commitFile writes a file, stages it and commits, returning the new revision.
 func commitFile(t *testing.T, repo *vcs.Repository, name, content, message string) core.Revision {
 	t.Helper()

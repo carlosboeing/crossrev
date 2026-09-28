@@ -181,7 +181,7 @@ func TestPinnedWorktreeReusedWhenCurrent(t *testing.T) {
 	e := newEnv(t)
 	state := t.TempDir()
 	t.Setenv("XDG_STATE_HOME", state)
-	wt, err := vcs.WorktreeDir(mustSlug(t), 42)
+	wt, err := vcs.ReviewWorktreeDir(mustSlug(t), 42)
 	if err != nil {
 		t.Fatalf("WorktreeDir: %v", err)
 	}
@@ -220,7 +220,7 @@ func TestPinnedWorktreeDirtyAtHeadPreserved(t *testing.T) {
 	e := newEnv(t)
 	state := t.TempDir()
 	t.Setenv("XDG_STATE_HOME", state)
-	wt, err := vcs.WorktreeDir(mustSlug(t), 42)
+	wt, err := vcs.ReviewWorktreeDir(mustSlug(t), 42)
 	if err != nil {
 		t.Fatalf("WorktreeDir: %v", err)
 	}
@@ -260,6 +260,51 @@ func TestPinnedWorktreeDirtyAtHeadPreserved(t *testing.T) {
 	}
 }
 
+// TestPinnedWorktreeIgnoresResolveWorktree proves the review leg never
+// works in the resolve leg's directory: a resolve worktree sitting at the
+// head, clean and reusable, is still not reused. The resolve leg reuses
+// that path on HEAD and ownership alone with no cleanliness check, so
+// sharing it lets a failed review's leftovers reach `git add -A`, lets a
+// moved head delete the tree a failed review kept, and lets a clean review
+// finish delete a resolve leftover sitting at the head.
+func TestPinnedWorktreeIgnoresResolveWorktree(t *testing.T) {
+	e := newEnv(t)
+	state := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", state)
+	resolveWT, err := vcs.WorktreeDir(mustSlug(t), 42)
+	if err != nil {
+		t.Fatalf("WorktreeDir: %v", err)
+	}
+	if err := os.MkdirAll(resolveWT, 0o755); err != nil {
+		t.Fatalf("lay the resolve worktree: %v", err)
+	}
+	sentinel := filepath.Join(resolveWT, "resolve.txt")
+	if err := os.WriteFile(sentinel, []byte("the resolve leg's own\n"), 0o644); err != nil {
+		t.Fatalf("plant the resolve file: %v", err)
+	}
+	e.vcs.reusable = map[string]bool{resolveWT: true}
+	e.vcs.clean = map[string]bool{resolveWT: true}
+	if e.vcs.heads == nil {
+		e.vcs.heads = map[string]string{}
+	}
+	e.vcs.heads[resolveWT] = headSHA
+	leg := e.leg(t)
+	got := leg.Run(context.Background(), pinnedReq(t, e))
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
+	specs := e.runner.Specs()
+	if len(specs) != 1 {
+		t.Fatalf("harness calls = %d, want 1", len(specs))
+	}
+	if specs[0].Dir == resolveWT {
+		t.Fatalf("the harness ran in the resolve worktree %s, want the review leg's own directory", resolveWT)
+	}
+	if _, err := os.Stat(sentinel); err != nil {
+		t.Errorf("the resolve worktree was touched: %v", err)
+	}
+}
+
 // TestPinnedWorktreeForeignOccupantPreserved proves a path occupied by a
 // worktree this clone does not own — another checkout's, or a failed leg's
 // at an older head — is never deleted to make room. The occupant is
@@ -269,7 +314,7 @@ func TestPinnedWorktreeForeignOccupantPreserved(t *testing.T) {
 	e := newEnv(t)
 	state := t.TempDir()
 	t.Setenv("XDG_STATE_HOME", state)
-	wt, err := vcs.WorktreeDir(mustSlug(t), 42)
+	wt, err := vcs.ReviewWorktreeDir(mustSlug(t), 42)
 	if err != nil {
 		t.Fatalf("WorktreeDir: %v", err)
 	}

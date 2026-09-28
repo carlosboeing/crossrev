@@ -63,7 +63,7 @@ func (l *Leg) prepareWorktree(ctx context.Context, req Request, loaded Context) 
 	if err := l.ensureHeadPresent(ctx, req, loaded); err != nil {
 		return "", false, err
 	}
-	base, err := vcs.WorktreeDir(loaded.Repo, req.PR)
+	base, err := vcs.ReviewWorktreeDir(loaded.Repo, req.PR)
 	if err != nil {
 		return "", false, err
 	}

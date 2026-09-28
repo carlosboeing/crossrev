@@ -38,6 +38,28 @@ func WorktreeDir(slug core.Slug, pr int) (string, error) {
 	return state + "/crossrev/worktrees/" + slug.PathKey() + "/pr-" + strconv.Itoa(pr), nil
 }
 
+// ReviewWorktreeDir is where the review leg's dedicated worktree lives: a
+// sibling of WorktreeDir under the same repository directory, so the two
+// legs never reuse or delete each other's tree. The resolve leg reuses its
+// path on HEAD and ownership alone with no cleanliness check, and removes
+// it outright once the head has moved — sharing that path let a failed
+// review's leftovers reach `git add -A`, let a moved head delete the tree
+// a failed review kept, and let a clean review finish delete a resolve
+// leftover sitting at the head.
+//
+// The construction mirrors WorktreeDir's — concatenation, not joining, and
+// the zero slug refused — for the reasons its comment gives.
+func ReviewWorktreeDir(slug core.Slug, pr int) (string, error) {
+	if slug.Incomplete() {
+		return "", fmt.Errorf("%w: the slug is %q", ErrWorktreePath, slug)
+	}
+	state := stateHome()
+	if state == "" {
+		return "", fmt.Errorf("%w: neither XDG_STATE_HOME nor HOME is set", ErrWorktreePath)
+	}
+	return state + "/crossrev/worktrees/" + slug.PathKey() + "/review-pr-" + strconv.Itoa(pr), nil
+}
+
 // stateHome is `${XDG_STATE_HOME:-$HOME/.local/state}`. The `:-` form falls
 // back on an empty value as well as an unset one.
 func stateHome() string {
