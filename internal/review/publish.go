@@ -69,10 +69,33 @@ func (l *Leg) publish(ctx context.Context, req Request, loaded Context, settings
 		)...)
 	}
 
+	// Passes after the first hold below-threshold findings: they are
+	// recorded on the marker with posted:false, skipped by the posting loop
+	// below, and counted in the summary. The stamp lands before anything
+	// posts, so the marker, the summary and the next pass's priors all read
+	// the same record; convergence still counts every finding, held or not.
+	marker.Findings = stampNotPosted(marker.Findings, heldEntries(findings, minFix, pass))
+	findings = parseFindings(marker.Findings)
+
+	heldEarlier := heldEarlierIDs(loaded.Markers)
+	postedThisPass := map[string]bool{}
 	posted, skipped := 0, 0
 	for _, f := range findings {
-		if already[f.ID] {
+		// Within-pass retries post once: a second finding under an id
+		// this pass already posted is the same point twice.
+		if f.ID != "" && postedThisPass[f.ID] {
 			skipped++
+			continue
+		}
+		// An upgraded held finding posts again. It was recorded without
+		// posting on an earlier pass and now ranks at or above the bar,
+		// so the earlier comment's lower severity must not suppress it;
+		// anything never held back stays duplicate-suppressed.
+		if already[f.ID] && !(heldEarlier[f.ID] && f.IsPosted()) {
+			skipped++
+			continue
+		}
+		if !f.IsPosted() {
 			continue
 		}
 		side := core.SideRight
@@ -85,6 +108,9 @@ func (l *Leg) publish(ctx context.Context, req Request, loaded Context, settings
 			return marker, msgs, publishState{}, err
 		}
 		posted++
+		if f.ID != "" {
+			postedThisPass[f.ID] = true
+		}
 		if placement == forge.PlacementFallback {
 			unanchored++
 			msgs = append(msgs, ui.Warn(
@@ -352,6 +378,123 @@ func (l *Leg) editClaim(ctx context.Context, repo core.Slug, claimID int64, body
 	return marker, nil
 }
 
+// heldEntries marks, per finding entry, whether the pass holds it back:
+// below min_fix_severity on a pass after the first. The decision is per
+// entry, not per id: ids carry path, title and anchor but no severity, so
+// two entries under one id at mixed severities hold only the
+// below-threshold one and the actionable entry still posts. Findings
+// without an id are never held, so a payload the enricher never minted
+// cannot suppress its siblings.
+func heldEntries(findings []Finding, minFix string, pass int) []bool {
+	held := make([]bool, len(findings))
+	for i, f := range findings {
+		if f.ID == "" {
+			continue
+		}
+		held[i] = holdBelowThreshold(f, minFix, pass)
+	}
+	return held
+}
+
+// heldEarlierIDs names the findings whose latest review-marker occurrence
+// was recorded without posting: explicit posted:false. Finding ids carry no
+// severity, so a finding posted low on pass 1, held on pass 2 and raised to
+// medium on pass 3 keeps its id — and the pass-1 comment would suppress the
+// upgrade as already posted. These ids are the exception: raised back at or
+// above the bar, they post again. Only the latest occurrence counts, so
+// once the upgrade posts, reporting it again is a duplicate like any other
+// and suppression resumes. Within one marker a posted occurrence wins over
+// a held one under the same id: the point reached the pull request on that
+// pass, whatever else the pass recorded beside it.
+func heldEarlierIDs(markers []prstate.Marker) map[string]bool {
+	// Markers read oldest first, so the last write per id is its latest
+	// occurrence. Within one marker a posted occurrence wins over a held
+	// one under the same id.
+	held := map[string]bool{}
+	for _, m := range markers {
+		if m.Leg != core.LegReview {
+			continue
+		}
+		var findings []Finding
+		if err := m.DecodeFindings(&findings); err != nil {
+			continue
+		}
+		postedHere := map[string]bool{}
+		heldHere := map[string]bool{}
+		for _, f := range findings {
+			if f.ID == "" {
+				continue
+			}
+			if f.IsPosted() {
+				postedHere[f.ID] = true
+			} else {
+				heldHere[f.ID] = true
+			}
+		}
+		for id := range postedHere {
+			held[id] = false
+		}
+		for id := range heldHere {
+			if !postedHere[id] {
+				held[id] = true
+			}
+		}
+	}
+	out := map[string]bool{}
+	for id, h := range held {
+		if h {
+			out[id] = true
+		}
+	}
+	return out
+}
+
+// stampNotPosted records the held findings with posted:false, keeping every
+// other byte of the marker as the enricher wrote it: the edit goes through
+// the order-preserving node rather than a struct round-trip, so a posted
+// finding encodes exactly as it always has and an older reader still reads
+// the record. The decisions are index-aligned with the parsed findings the
+// caller decided on; a length mismatch means the record moved underfoot,
+// so it stays untouched rather than stamping the wrong entry.
+func stampNotPosted(raw json.RawMessage, held []bool) json.RawMessage {
+	if len(raw) == 0 || string(raw) == "null" {
+		return raw
+	}
+	var findings []harness.Node
+	if err := json.Unmarshal(raw, &findings); err != nil {
+		return raw
+	}
+	if len(held) != len(findings) {
+		return raw
+	}
+	any := false
+	for _, h := range held {
+		if h {
+			any = true
+			break
+		}
+	}
+	if !any {
+		return raw
+	}
+	for i := range findings {
+		if held[i] {
+			findings[i].Set("posted", harness.FromBool(false))
+		}
+	}
+	out, err := json.Marshal(findings)
+	if err != nil {
+		return raw
+	}
+	return out
+}
+
+// A finding id's current thread is its latest posted comment: held
+// entries carry no thread and no resolution, an upgrade posts a new
+// comment that becomes the current thread, a re-held id may upgrade
+// again, and each resolution lands on the posted occurrence and its
+// current thread. Publish, the marker rewrite, the resolver's input and
+// every summary follow this rule.
 func attachThreads(raw json.RawMessage, threads []forge.ReviewThread) json.RawMessage {
 	if len(raw) == 0 || string(raw) == "null" {
 		return raw
@@ -365,18 +508,34 @@ func attachThreads(raw json.RawMessage, threads []forge.ReviewThread) json.RawMe
 		return raw
 	}
 	for i := range findings {
+		// Held entries carry no thread: with no comment on the pull
+		// request there is nothing to reply into, so an older thread
+		// under the same id must not attach here.
+		if posted := findings[i].Member("posted"); !posted.IsNull() && !posted.Truthy() {
+			continue
+		}
 		id, _ := findings[i].Member("id").AsString()
-		for _, th := range threads {
+		// An upgraded re-post shares its id with the spent thread, so
+		// the latest posted comment wins: comment ids grow with
+		// creation, and the current pass just posted the newest one.
+		best := -1
+		for j, th := range threads {
 			if !threadHas(th, id) {
 				continue
 			}
-			if th.ID != "" {
-				findings[i].Set("thread_id", harness.FromString(th.ID))
+			if best == -1 || th.RootCommentID > threads[best].RootCommentID {
+				best = j
 			}
-			if th.RootCommentID != 0 {
-				findings[i].Set("root_comment_id", harness.FromInt(th.RootCommentID))
-			}
-			break
+		}
+		if best == -1 {
+			continue
+		}
+		th := threads[best]
+		if th.ID != "" {
+			findings[i].Set("thread_id", harness.FromString(th.ID))
+		}
+		if th.RootCommentID != 0 {
+			findings[i].Set("root_comment_id", harness.FromInt(th.RootCommentID))
 		}
 	}
 	out, err := json.Marshal(findings)
