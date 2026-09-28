@@ -119,6 +119,11 @@ type Marker struct {
 	// carry a verdict code and nothing else. A later pass can still resume
 	// from it; what is missing is evidence, reasons and finding ids.
 	CoverageDegraded Opt[bool] `json:"coverage_degraded,omitzero"`
+	// Redriven marks a pass that ran again on its comment after a previous
+	// attempt could not be completed. The review claim sets it; both
+	// review-summary renderers read it, so the notice survives the resolve
+	// leg rewriting the review comment from the marker.
+	Redriven Opt[bool] `json:"redriven,omitzero"`
 
 	// commentID is which comment the marker was read off, and raw is the
 	// bytes it was read as. Both are unexported so no encoder can reach

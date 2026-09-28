@@ -292,6 +292,13 @@ func SummaryBody(findings []Finding, marker prstate.Marker, ctx RenderContext) s
 	var b strings.Builder
 	fmt.Fprintf(&b, "## crossrev review — %s\n\n", PassLabel(pass, ctx.MaxPass))
 
+	// The redrive notice sits above everything the verdict chooses,
+	// including the no-changes body: it is the pass's provenance, and a
+	// redriven pass shows it however the pass ended.
+	if marker.Redriven.Value() {
+		b.WriteString("This pass ran again on this comment: the previous attempt could not be completed.\n\n")
+	}
+
 	if ctx.NoChanges {
 		b.WriteString(noChangesBody(ctx))
 		return b.String()

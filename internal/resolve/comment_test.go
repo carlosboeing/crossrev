@@ -96,3 +96,42 @@ func TestResolveKeepsTheSkipWarningWhenItRewritesTheReviewComment(t *testing.T) 
 		t.Errorf("Show was not called for %s at the head", skipPath)
 	}
 }
+
+// The resolve leg rewrites the review comment from the marker rather than
+// from the comment text, so a redrive notice the review summary carried
+// has to survive that rewrite — or nothing the reader sees says the pass
+// ran again once the resolve leg has run.
+func TestResolveKeepsTheRedriveNoticeWhenItRewritesTheReviewComment(t *testing.T) {
+	e := setup(t)
+	e.postMarker(t, 9001, prstate.Marker{
+		Version:  core.MarkerVersion,
+		Leg:      core.LegReview,
+		Pass:     1,
+		State:    core.PassComplete,
+		TS:       e.now.Unix() - 60,
+		RunID:    prstate.Some("review-run"),
+		HeadSHA:  prstate.Some(e.head.SHA()),
+		Harness:  prstate.Some("codex"),
+		Verdict:  prstate.Some("issues-remain"),
+		Findings: defaultFindings(),
+		Redriven: prstate.Some(true),
+	})
+	e.adapter.payloads = []json.RawMessage{oneFindingPayload()}
+
+	got := e.run(t)
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
+	var body string
+	for _, edit := range e.forge.edits {
+		if edit.CommentID == 9001 {
+			body = edit.Body
+		}
+	}
+	if body == "" {
+		t.Fatal("the review comment was not edited")
+	}
+	if want := "This pass ran again on this comment: the previous attempt could not be completed."; !strings.Contains(body, want) {
+		t.Errorf("rewritten review comment lost the redrive notice:\n%s", body)
+	}
+}

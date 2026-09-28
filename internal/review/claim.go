@@ -151,6 +151,10 @@ func redriveClaim(done prstate.Marker, head, runID string, ts int64) prstate.Mar
 	done.Tokens = json.RawMessage("null")
 	done.Usage = json.RawMessage("null")
 	done.Billing = prstate.Null[string]()
+	// The marker carries the redrive into the summary: the redrive claim
+	// edit is rewritten twice before the pass finishes, so only a field
+	// the renderers read keeps the notice on the comment a reader sees.
+	done.Redriven = prstate.Some(true)
 	return done
 }
 
@@ -172,6 +176,13 @@ func (l *Leg) postClaim(ctx context.Context, req Request, loaded Context, ad adm
 				PassLabel(ad.pass, cap), mustEncode(raw))
 			if err := l.Forge.CommentEdit(ctx, loaded.Repo, id, body); err != nil {
 				return prstate.Marker{}, 0, err
+			}
+			// A fresh claim posts a new comment, which is its own record. A
+			// redrive rewrites the pass comment in place, which GitHub shows
+			// no new comment for — so the redrive reports what it posted, or
+			// the write the retry-safety marker depends on is untraceable.
+			if l.Log != nil {
+				l.Log.Event("claim", fmt.Sprintf("redrive pass=%d comment=%d", ad.pass, id))
 			}
 		}
 		return marker, id, nil

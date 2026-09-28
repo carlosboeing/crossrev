@@ -230,6 +230,31 @@ func TestRenderSummaryBody(t *testing.T) {
 	}
 }
 
+// A redriven pass names the redrive in its summary, directly under the
+// heading, so a pull request reader sees the pass ran again. A pass that
+// ran once carries no such sentence.
+func TestTheSummaryNamesARedrive(t *testing.T) {
+	ctx := review.RenderContext{Repo: "acme/widget", PR: 42, MinFix: "medium", MaxPass: 3}
+	notice := "This pass ran again on this comment: the previous attempt could not be completed."
+	redriven := prstate.Marker{
+		Pass:     1,
+		Verdict:  prstate.Some("converged"),
+		Findings: json.RawMessage("[]"),
+		Redriven: prstate.Some(true),
+	}
+	if got := review.SummaryBody(nil, redriven, ctx); !strings.Contains(got, notice) {
+		t.Errorf("redriven summary names no redrive:\n%s", got)
+	}
+	fresh := prstate.Marker{
+		Pass:     1,
+		Verdict:  prstate.Some("converged"),
+		Findings: json.RawMessage("[]"),
+	}
+	if got := review.SummaryBody(nil, fresh, ctx); strings.Contains(got, notice) {
+		t.Errorf("fresh summary names a redrive it never ran:\n%s", got)
+	}
+}
+
 func decodeB64(t *testing.T, s string) string {
 	t.Helper()
 	raw, err := base64.StdEncoding.DecodeString(s)
