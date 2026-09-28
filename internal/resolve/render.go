@@ -661,7 +661,7 @@ func actionableCount(findings []harness.Node, minFix core.Severity) int {
 	return n
 }
 
-func reviewSummaryBody(findings json.RawMessage, marker prstate.Marker, repo core.Slug, minFix core.Severity, maxPasses int, cov commentCoverage) string {
+func reviewSummaryBody(findings json.RawMessage, marker prstate.Marker, repo core.Slug, pr int, minFix core.Severity, maxPasses int, cov commentCoverage) string {
 	var fs []harness.Node
 	_ = json.Unmarshal(findings, &fs)
 	n := len(fs)
@@ -698,7 +698,16 @@ func reviewSummaryBody(findings json.RawMessage, marker prstate.Marker, repo cor
 		if blockedReason == "" {
 			blockedReason = "No reason was given."
 		}
-		b.WriteString(alert("WARNING", fmt.Sprintf("**The review could not be completed:** %s The loop halts here and a human is needed. Nothing in this comment is a judgement about the code.", blockedReason)))
+		harn, _ := marker.Harness.Get()
+		if resetTime, ok := harness.QuotaReset(harn, blockedReason); ok {
+			cmd := "crossrev review"
+			if pr > 0 {
+				cmd = fmt.Sprintf("crossrev review --pr %d", pr)
+			}
+			b.WriteString(alert("WARNING", fmt.Sprintf("**The review could not be completed:** %s The loop halts here — resumes after %s, then run `%s`. Nothing in this comment is a judgement about the code.", blockedReason, resetTime, cmd)))
+		} else {
+			b.WriteString(alert("WARNING", fmt.Sprintf("**The review could not be completed:** %s The loop halts here and a human is needed. Nothing in this comment is a judgement about the code.", blockedReason)))
+		}
 	default:
 		// As in the review leg's own summary: held findings never reach
 		// the resolver, so on a mixed pass the resolving claims scope to

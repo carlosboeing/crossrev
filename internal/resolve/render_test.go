@@ -146,6 +146,41 @@ func TestRender(t *testing.T) {
 	})
 }
 
+// A quota stop names its resume time and next command instead of saying
+// "a human is needed".
+func TestReviewSummaryBodyQuotaStopNamesResumeTime(t *testing.T) {
+	marker := prstate.Marker{
+		Verdict:       prstate.Some(string(core.VerdictBlocked)),
+		BlockedReason: prstate.Some("the codex harness failed: 429 rate limit exceeded"),
+		Harness:       prstate.Some("codex"),
+	}
+	findings := json.RawMessage(`[]`)
+	repo := mustSlug(t)
+	got := reviewSummaryBody(findings, marker, repo, 42, core.SeverityMedium, 3, commentCoverage{})
+	wantAlert := "The loop halts here — resumes after 5h, then run `crossrev review --pr 42`. Nothing in this comment is a judgement about the code."
+	if !strings.Contains(got, wantAlert) {
+		t.Errorf("summary body missing quota resume line:\n got: %s\nwant containing: %s", got, wantAlert)
+	}
+	if strings.Contains(got, "a human is needed") {
+		t.Errorf("a quota stop should not claim a human is needed:\n%s", got)
+	}
+
+	// Explicit reset in reason
+	marker.BlockedReason = prstate.Some("the codex harness failed: 429 rate limit exceeded (resets 2h 15m)")
+	gotExplicit := reviewSummaryBody(findings, marker, repo, 42, core.SeverityMedium, 3, commentCoverage{})
+	wantExplicit := "The loop halts here — resumes after 2h 15m, then run `crossrev review --pr 42`. Nothing in this comment is a judgement about the code."
+	if !strings.Contains(gotExplicit, wantExplicit) {
+		t.Errorf("summary body missing explicit reset line:\n got: %s\nwant containing: %s", gotExplicit, wantExplicit)
+	}
+
+	// Non-quota failure still says a human is needed
+	marker.BlockedReason = prstate.Some("the harness CLI is not installed")
+	gotNonQuota := reviewSummaryBody(findings, marker, repo, 42, core.SeverityMedium, 3, commentCoverage{})
+	if !strings.Contains(gotNonQuota, "The loop halts here and a human is needed.") {
+		t.Errorf("non-quota stop missing human is needed alert:\n%s", gotNonQuota)
+	}
+}
+
 // A mixed pass keeps its held count when the resolve leg rewrites the
 // review summary: the findings table still lists every finding, and the
 // count below names the held ones, matching the review leg's own summary.
@@ -161,7 +196,7 @@ func TestReviewSummaryRewriteKeepsHeldCount(t *testing.T) {
 		Model:   prstate.Some("claude-3-7-sonnet"),
 		Blocked: prstate.Some(false),
 	}
-	got := reviewSummaryBody(findings, marker, mustSlug(t), core.SeverityMedium, 3, commentCoverage{})
+	got := reviewSummaryBody(findings, marker, mustSlug(t), 42, core.SeverityMedium, 3, commentCoverage{})
 	if !strings.Contains(got, "1 finding below medium recorded and not posted.") {
 		t.Errorf("rewrite lost the held count:\n%s", got)
 	}
@@ -205,7 +240,7 @@ func TestMixedPassRendersHonestCountsAfterRewrite(t *testing.T) {
 		Model:   prstate.Some("claude-3-7-sonnet"),
 		Blocked: prstate.Some(false),
 	}
-	rewrite := reviewSummaryBody(findings, marker, mustSlug(t), core.SeverityMedium, 3, commentCoverage{})
+	rewrite := reviewSummaryBody(findings, marker, mustSlug(t), 42, core.SeverityMedium, 3, commentCoverage{})
 	if !strings.Contains(rewrite, "1 posted finding needs resolving.") {
 		t.Errorf("rewrite alert does not scope to posted findings:\n%.800s", rewrite)
 	}

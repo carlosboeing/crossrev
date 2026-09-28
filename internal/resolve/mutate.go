@@ -174,7 +174,7 @@ func (l *Leg) publish(ctx context.Context, s *session, got Result, workdir strin
 		))
 	}
 
-	reviewBody := reviewSummaryBody(findingsRaw, s.review, s.repo, s.minFix, s.maxPasses, l.reviewCommentCoverage(ctx, s))
+	reviewBody := reviewSummaryBody(findingsRaw, s.review, s.repo, s.req.PR, s.minFix, s.maxPasses, l.reviewCommentCoverage(ctx, s))
 	updated := s.review
 	updated.Findings = findingsRaw
 	encodedReview, err := updated.Encode()

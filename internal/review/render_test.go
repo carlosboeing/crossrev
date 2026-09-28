@@ -559,6 +559,45 @@ func TestTheExclusionLineBoundsItsList(t *testing.T) {
 	}
 }
 
+// A quota stop names its resume time and next command instead of saying
+// "a human is needed".
+func TestSummaryBodyQuotaStopNamesResumeTime(t *testing.T) {
+	marker := prstate.Marker{
+		Verdict:       prstate.Some("blocked"),
+		BlockedReason: prstate.Some("the claude harness failed: quota exhausted"),
+		Harness:       prstate.Some("claude"),
+	}
+	ctx := review.RenderContext{
+		Repo:    "acme/widget",
+		PR:      42,
+		MinFix:  "medium",
+		MaxPass: 3,
+	}
+	got := review.SummaryBody(nil, marker, ctx)
+	wantAlert := "The loop halts here — resumes after 5h, then run `crossrev review --pr 42`. Nothing in this comment is a judgement about the code."
+	if !strings.Contains(got, wantAlert) {
+		t.Errorf("summary body missing quota resume line:\n got: %s\nwant containing: %s", got, wantAlert)
+	}
+	if strings.Contains(got, "a human is needed") {
+		t.Errorf("a quota stop should not claim a human is needed:\n%s", got)
+	}
+
+	// Explicit reset in reason
+	marker.BlockedReason = prstate.Some("the claude harness failed: quota exhausted (resets 5pm)")
+	gotExplicit := review.SummaryBody(nil, marker, ctx)
+	wantExplicit := "The loop halts here — resumes after 5pm, then run `crossrev review --pr 42`. Nothing in this comment is a judgement about the code."
+	if !strings.Contains(gotExplicit, wantExplicit) {
+		t.Errorf("summary body missing explicit reset line:\n got: %s\nwant containing: %s", gotExplicit, wantExplicit)
+	}
+
+	// Non-quota failure still says a human is needed
+	marker.BlockedReason = prstate.Some("the harness CLI is not installed")
+	gotNonQuota := review.SummaryBody(nil, marker, ctx)
+	if !strings.Contains(gotNonQuota, "The loop halts here and a human is needed.") {
+		t.Errorf("non-quota stop missing human is needed alert:\n%s", gotNonQuota)
+	}
+}
+
 // A mixed pass scopes the resolving claims to posted findings: the alert
 // counts only what the resolver will see, while the held count below the
 // table still names what stayed on the marker.

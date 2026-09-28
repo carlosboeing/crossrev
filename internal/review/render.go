@@ -323,7 +323,16 @@ func SummaryBody(findings []Finding, marker prstate.Marker, ctx RenderContext) s
 		if reason == "" {
 			reason = "No reason was given."
 		}
-		b.WriteString(alert("WARNING", fmt.Sprintf("**The review could not be completed:** %s The loop halts here and a human is needed. Nothing in this comment is a judgement about the code.", reason)))
+		harn, _ := marker.Harness.Get()
+		if resetTime, ok := harness.QuotaReset(harn, reason); ok {
+			cmd := "crossrev review"
+			if ctx.PR > 0 {
+				cmd = fmt.Sprintf("crossrev review --pr %d", ctx.PR)
+			}
+			b.WriteString(alert("WARNING", fmt.Sprintf("**The review could not be completed:** %s The loop halts here — resumes after %s, then run `%s`. Nothing in this comment is a judgement about the code.", reason, resetTime, cmd)))
+		} else {
+			b.WriteString(alert("WARNING", fmt.Sprintf("**The review could not be completed:** %s The loop halts here and a human is needed. Nothing in this comment is a judgement about the code.", reason)))
+		}
 	default:
 		// Held findings never reach the resolver, so on a mixed pass the
 		// resolving claims scope to posted findings; the held count below
