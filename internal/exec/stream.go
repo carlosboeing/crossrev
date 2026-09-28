@@ -88,9 +88,10 @@ func (r *OSRunner) RunStream(ctx context.Context, spec Spec, consume func(io.Rea
 	// (Cmd.StdoutPipe): a pipe os/exec creates is closed by Wait when the
 	// child exits, so unread buffered bytes raced that closure and could
 	// return os.ErrClosed with trailing output lost. An owned pipe is
-	// closed only below, after Wait, so the drain beside it cannot lose
-	// bytes to the reap — and closing the read end there is what releases
-	// the drain when an orphan still holds the write end.
+	// closed only below, once the drain beside Wait is done or the grace
+	// has released it, so the reap cannot truncate the byte count — and
+	// closing the read end is what releases the drain when an orphan
+	// still holds the write end.
 	stdoutR, stdoutW, err := os.Pipe()
 	if err != nil {
 		return Result{
@@ -132,17 +133,40 @@ func (r *OSRunner) RunStream(ctx context.Context, spec Spec, consume func(io.Rea
 	// Drain whatever the caller left unread beside the wait, not ahead of
 	// it. Cmd.WaitDelay starts only once Wait observes the child exit, so
 	// draining to EOF first would hang on an orphan past the grace and
-	// leave ErrPipesAbandoned unreachable. Closing the read end after
-	// Wait releases the drain even then; the drain is joined, never left
-	// behind.
+	// leave ErrPipesAbandoned unreachable. The drain is joined, never
+	// left behind.
 	draining := make(chan struct{})
 	go func() {
 		defer close(draining)
 		_, _ = io.Copy(io.Discard, counted)
 	}()
 	waitErr := cmd.Wait()
+	// The drain owns the read end until it is done: closing it first turns
+	// a Read that has not taken the poller lock into os.ErrClosed, and
+	// io.Copy drops whatever was still buffered with no error reported.
+	// So the read end closes only below — once the drain reaches EOF on
+	// its own, or to release a drain still stuck after the grace.
+	if !errors.Is(waitErr, osexec.ErrWaitDelay) {
+		select {
+		case <-draining:
+		case <-time.After(pipeDrainGrace):
+			// An orphan holds the write end past the grace. Release the
+			// drain and report the capture cut short, the way Run does
+			// when WaitDelay fires. WaitDelay never watches this pipe —
+			// an *os.File stdout is connected directly, not copied — so
+			// a stdout-only orphan reaches this arm with a nil Wait.
+			_ = stdoutR.Close()
+			<-draining
+			waitErr = osexec.ErrWaitDelay
+		}
+	} else {
+		// WaitDelay already spent the grace on os/exec's own copiers. The
+		// drain beside it may still be stuck on a held write end, so
+		// release and join it rather than spending the grace twice.
+		_ = stdoutR.Close()
+		<-draining
+	}
 	_ = stdoutR.Close()
-	<-draining
 
 	result := Result{Duration: time.Since(started)}
 	result.Stdout = []byte{}

@@ -120,6 +120,65 @@ func TestRunStreamReportsPipesTheChildLeftHeldOpen(t *testing.T) {
 	}
 }
 
+// A grandchild holding only stdout is invisible to Cmd.WaitDelay: os/exec
+// connects an *os.File stdout directly instead of copying it, so no copier
+// exists for the grace to bound and Wait returns nil at once. Only the drain
+// beside Wait can report this orphan, by still being stuck when the grace
+// elapses. The both-streams orphan above cannot cover it: there the
+// grandchild also holds stderr, and the stderr copy is what trips
+// ErrWaitDelay.
+//
+// This test is in the package rather than beside it so it can shrink
+// pipeDrainGrace. At its production value the case would cost ten seconds a run.
+func TestRunStreamReportsAStdoutOnlyOrphan(t *testing.T) {
+	restore := pipeDrainGrace
+	pipeDrainGrace = 300 * time.Millisecond
+	t.Cleanup(func() { pipeDrainGrace = restore })
+
+	const holdFor = 30 * time.Second
+
+	spec := Spec{
+		Path: os.Args[0],
+		Args: []string{"-test.run=TestHelperProcess", "--", "orphan-stdout", strconv.Itoa(int(holdFor.Milliseconds()))},
+		Env:  []string{"CROSSREV_EXEC_HELPER=1"},
+	}
+
+	// One read only: the orphan's pid arrives at once, and reading to EOF
+	// here would wait on the grandchild the test is about.
+	var pidText []byte
+	started := time.Now()
+	result := NewOSRunner().RunStream(context.Background(), spec, func(rd io.Reader) error {
+		buf := make([]byte, 32)
+		n, _ := rd.Read(buf)
+		pidText = append(pidText, buf[:n]...)
+		return nil
+	})
+	elapsed := time.Since(started)
+
+	// Whatever the kill reached, the grandchild must not outlive the test.
+	t.Cleanup(func() {
+		if pid, err := strconv.Atoi(string(pidText)); err == nil {
+			_ = syscall.Kill(pid, syscall.SIGKILL)
+		}
+	})
+
+	if !errors.Is(result.Err, ErrPipesAbandoned) {
+		t.Fatalf("Err = %v, want ErrPipesAbandoned (stdout bytes %d, stderr %q)", result.Err, result.StdoutBytes, result.Stderr)
+	}
+	if result.OK() {
+		t.Error("OK reported true for a capture that was cut short; a truncated payload would read as a success")
+	}
+	if result.ExitCode != 0 {
+		t.Errorf("ExitCode = %d, want the 0 the child itself exited with", result.ExitCode)
+	}
+
+	// Bounded, and bounded well below what the grandchild holds for. Without
+	// the grace bounding the stuck drain this holds the full thirty seconds.
+	if elapsed > 10*time.Second {
+		t.Errorf("RunStream took %s to give up on the held stdout, want roughly %s", elapsed, pipeDrainGrace)
+	}
+}
+
 // The predicate behind Result.Err, tested directly because the condition it
 // decides has a microsecond-wide window in a live run.
 func TestCancellationErrorAsksAboutTheSignal(t *testing.T) {

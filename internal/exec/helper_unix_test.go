@@ -82,6 +82,21 @@ func helperSpawn(msArg string) {
 // one thing Cmd.WaitDelay exists to bound. The pid goes to stdout so the test
 // can clean up whatever the kill did not reach.
 func helperOrphan(msArg string) {
+	orphanGrandchild(msArg, false)
+}
+
+// helperOrphanStdout starts a grandchild that inherits only the captured
+// stdout, prints its pid, and exits at once.
+//
+// This is the half of the orphan case the both-streams helper cannot cover:
+// the grandchild holds no stderr, so os/exec's own stderr copier reaches EOF
+// and Cmd.WaitDelay has nothing to bound. Only the drain beside Wait can
+// notice this orphan.
+func helperOrphanStdout(msArg string) {
+	orphanGrandchild(msArg, true)
+}
+
+func orphanGrandchild(msArg string, stdoutOnly bool) {
 	if _, err := strconv.Atoi(msArg); err != nil {
 		fmt.Fprintln(os.Stderr, "helper: bad duration", msArg)
 		os.Exit(2)
@@ -96,6 +111,9 @@ func helperOrphan(msArg string) {
 	grandchild.Stdin = null
 	grandchild.Stdout = os.Stdout
 	grandchild.Stderr = os.Stderr
+	if stdoutOnly {
+		grandchild.Stderr = null
+	}
 	// Its own group, so the runner's cancellation kill does not reach it. This
 	// case is about a child that exited cleanly and left its pipes held, not
 	// about a cancellation.
