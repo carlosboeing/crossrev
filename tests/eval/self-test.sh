@@ -215,7 +215,9 @@ mkdir -p "$SHIMBIN"
 : >"$FETCH_LOG"
 cat >"$SHIMBIN/git" <<EOF
 #!/usr/bin/env bash
-if [[ "\${1:-}" == "fetch" ]]; then printf '%s %s\n' "\$PWD" "\$*" >>"$FETCH_LOG"; fi
+_want=0
+for _a in "\$@"; do [[ "\$_a" == "fetch" ]] && _want=1; done
+(( _want )) && printf '%s %s\n' "\$PWD" "\$*" >>"$FETCH_LOG"
 exec "$REAL_GIT" "\$@"
 EOF
 chmod +x "$SHIMBIN/git"
