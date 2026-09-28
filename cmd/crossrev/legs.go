@@ -173,7 +173,7 @@ func resolveLeg(d *deps, client forge.Forge, cfg *config.Config) *resolve.Leg {
 }
 
 // reviewCommand is `crossrev review` once the flags are parsed.
-func reviewCommand(ctx context.Context, out *ui.IO, doc harness.Document, req cli.ReviewRequest) (int, error) {
+func reviewCommand(ctx context.Context, out *ui.IO, doc harness.Document, req cli.ReviewRequest) (status int, err error) {
 	d := open(out, doc)
 	client := d.forgeClient()
 
@@ -190,6 +190,13 @@ func reviewCommand(ctx context.Context, out *ui.IO, doc harness.Document, req cl
 	d.log = openLog(repo, req.PR, cfg.Get(".logs.retention_days"),
 		keepTranscripts(req.KeepTranscripts, cfg), "review")
 	client = d.forgeClient()
+
+	// The run log closes on every path past this point, the way the shell's
+	// EXIT trap closed it. A refusal between here and the leg — the App slug
+	// trustedAuthor cannot resolve — used to return before closeRun and left
+	// run.log ending at `run start` with no exit line.
+	var kept string
+	defer func() { closeRun(out, d.log, status, err, kept) }()
 
 	// Automated mode's author is the App and nothing else, and its slug can
 	// come from the App metadata file (lib/state.sh:35-36) — which internal/app
@@ -217,7 +224,7 @@ func reviewCommand(ctx context.Context, out *ui.IO, doc harness.Document, req cl
 		Author:          author,
 		RunID:           runlog.RunID(),
 	})
-	status, err := reportLeg(out, result.Messages, result.Err)
+	status, err = reportLeg(out, result.Messages, result.Err)
 	if result.Nudge && !req.NoTips {
 		upgradeNudge(out, cfg)
 	}
@@ -226,12 +233,12 @@ func reviewCommand(ctx context.Context, out *ui.IO, doc harness.Document, req cl
 	// after a preserved occupant the files are in a suffixed directory
 	// beside the canonical path, and re-deriving that path here would name
 	// the preserved tree this run worked beside instead of its own.
-	closeRun(out, d.log, status, result.Err, result.KeptWorktree)
+	kept = result.KeptWorktree
 	return status, err
 }
 
 // resolveCommand is `crossrev resolve` once the flags are parsed.
-func resolveCommand(ctx context.Context, out *ui.IO, doc harness.Document, req cli.ResolveRequest) (int, error) {
+func resolveCommand(ctx context.Context, out *ui.IO, doc harness.Document, req cli.ResolveRequest) (status int, err error) {
 	d := open(out, doc)
 	client := d.forgeClient()
 
@@ -248,6 +255,13 @@ func resolveCommand(ctx context.Context, out *ui.IO, doc harness.Document, req c
 	d.log = openLog(repo, req.PR, cfg.Get(".logs.retention_days"),
 		keepTranscripts(req.KeepTranscripts, cfg), "resolve")
 	client = d.forgeClient()
+
+	// The run log closes on every path past this point, the way the shell's
+	// EXIT trap closed it. A refusal between here and the leg — the App slug
+	// trustedAuthor cannot resolve — used to return before closeRun and left
+	// run.log ending at `run start` with no exit line.
+	var worktree string
+	defer func() { closeRun(out, d.log, status, err, worktree) }()
 
 	author, err := trustedAuthor(ctx, client, cfg.Get(".mode"))
 	if err != nil {
@@ -267,15 +281,14 @@ func resolveCommand(ctx context.Context, out *ui.IO, doc harness.Document, req c
 	if result.Message != "" {
 		messages = append(messages, ui.Say(result.Message))
 	}
-	status, err := reportLeg(out, messages, result.Err)
+	status, err = reportLeg(out, messages, result.Err)
 	if result.Nudge && !req.NoTips {
 		upgradeNudge(out, cfg)
 	}
 	// The worktree the resolve leg works in is named from the same two facts
 	// the leg derives it from, because run_cleanup reads CROSSREV_WORKTREE and
 	// this process holds no such variable (lib/run.sh:96-99).
-	worktree, _ := vcs.WorktreeDir(repo, req.PR)
-	closeRun(out, d.log, status, result.Err, worktree)
+	worktree, _ = vcs.WorktreeDir(repo, req.PR)
 	return status, err
 }
 
@@ -302,7 +315,7 @@ func acquireRunLock(ctx context.Context, out *ui.IO, d *deps, pr int, mode strin
 // its record in.
 //
 // The shell runs this from an EXIT trap, so it fires on every path out of a
-// leg. Here it is called at the one return each leg command has, which is the
+// leg. Here each leg command defers it right after the log opens, which is the
 // same set of paths: internal/* answers a refusal as a value rather than
 // exiting, so nothing below leaves by any other route.
 //
