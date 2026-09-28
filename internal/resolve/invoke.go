@@ -370,6 +370,18 @@ func (l *Leg) invoke(ctx context.Context, s *session, marker prstate.Marker, wor
 			out.Messages = append(msgs, out.Messages...)
 			return out
 		}
+		// The resolve-leg tripwire: a command event in the harness's own
+		// tool record fails the leg before any push, naming the harness
+		// and the command. The deny flags should have stopped it; this
+		// catches what they missed.
+		if command, tripped := harness.ResolveCommand(s.settings.Harness, res.Stdout); tripped {
+			msgs = append(msgs, l.invokeAbort(ctx, work, snapIndex, snapTree)...)
+			out := refuse(
+				fmt.Sprintf("the %s harness ran a command on a resolve leg that edits without running commands: %s", s.settings.Harness, command),
+				"The resolve leg denies commands, so anything the command changed has been put back and nothing has been written to the pull request. Re-run the leg; if it trips again, the harness is running commands its flags should deny.")
+			out.Messages = append(msgs, out.Messages...)
+			return out
+		}
 		err = validate.Resolve(env.Payload, s.expect(candidates))
 		if err == nil {
 			mapped, mapErr := mapNumbers(env.Payload, s.resolvable)

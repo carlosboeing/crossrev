@@ -152,6 +152,14 @@ The error names what git said, so read that line first. Two causes are common.
 
 Either way the fix is not lost. It stays in the worktree, which CrossRev keeps and names on its way out, and the pass halts with the reason recorded on the pull request rather than only in your terminal.
 
+## A resolve leg ran a command
+
+Resolve legs edit files and never run commands. Each harness denies commands on its resolve leg: Codex runs `--sandbox workspace-write` with `--disable shell_tool --disable unified_exec`; Claude Code runs `--permission-mode acceptEdits` with `--disallowedTools Bash`; Grok runs `--tools Read,Grep,Glob,Edit,Write` with no shell entry; Antigravity runs `--mode accept-edits` with no bypass flag.
+
+On Codex, Claude Code and Grok the denial is watched afterwards. Their resolve legs stream the tool record — Codex `--json`, Claude Code `--output-format stream-json`, Grok `--output-format streaming-json` — and the leg fails before anything is pushed when a command event appears, naming the harness and the command. Anything the command changed is put back.
+
+Antigravity is the exception. Its `--output-format json` carries no tool events, so there is nothing to watch: commands denied, no tripwire. A command it ran anyway would not be caught here. That gap is known and stated here rather than implied away.
+
 ## Both legs ran the same model
 
 CrossRev refuses to continue when it detects this, because it's the failure the whole cross-model design exists to prevent and it otherwise completes normally with no error anywhere.

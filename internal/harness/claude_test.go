@@ -50,8 +50,8 @@ func TestClaudeGrantsTheWriteOnlyToAWritingLeg(t *testing.T) {
 // operator MCP servers. Agent and Skill are removed outright rather than left
 // to inference: the CLI reference's --disallowedTools rule removes a bare tool
 // name from context, and no read of a diff needs either tool. The writing leg
-// takes none of these flags: it needs its edit tools, and it keeps the argv it
-// has always had.
+// keeps its edit tools but denies Bash: a resolve leg edits without running
+// commands.
 func TestClaudePinsAReadingLegToReadOnlyTools(t *testing.T) {
 	adapter := claudeAdapter(t)
 
@@ -76,8 +76,8 @@ func TestClaudePinsAReadingLegToReadOnlyTools(t *testing.T) {
 	if slices.Contains(writing.Args, "--tools") {
 		t.Errorf("a writing leg keeps its edit tools; got %v", writing.Args)
 	}
-	if slices.Contains(writing.Args, "--disallowedTools") {
-		t.Errorf("a writing leg takes no tool removal; got %v", writing.Args)
+	if !hasFlagPair(writing.Args, "--disallowedTools", "Bash") {
+		t.Errorf("a writing leg denies Bash; got %v", writing.Args)
 	}
 	if slices.Contains(writing.Args, "--strict-mcp-config") {
 		t.Errorf("a writing leg takes no MCP exclusion; got %v", writing.Args)

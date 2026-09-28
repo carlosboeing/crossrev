@@ -74,11 +74,19 @@ func (a *Codex) Spec(inv Invocation) (exec.Spec, error) {
 	// are on the wrong side of the line between editing files and running
 	// arbitrary commands.
 	//
+	// A resolve leg edits without running commands: workspace-write keeps file
+	// writes while --disable removes the shell. shell_tool is the tool itself
+	// and unified_exec is the runner behind it; denying one without the other
+	// leaves the other to run the command. --disable is repeatable
+	// (`codex exec --help`), and --sandbox workspace-write is the same grant
+	// the leg has always had.
+	//
 	// A reading leg is pinned read-only rather than left to the default, because
 	// codex reads a user config that can set one. Saying it costs nothing and
 	// means a machine-level setting cannot quietly hand the review leg a
 	// writable tree.
 	if inv.Write {
+		args = append(args, "--disable", "shell_tool", "--disable", "unified_exec")
 		args = append(args, "--sandbox", "workspace-write")
 	} else {
 		args = append(args, "--sandbox", "read-only")

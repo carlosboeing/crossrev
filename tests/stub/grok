@@ -6,11 +6,18 @@
 # `--json-schema`: the constrained object on `structuredOutput`, a concatenated
 # draft string on `text` (which `fromjson` rejects), usage on `usage`, and
 # `modelUsage` keyed by model id. That shape is what lib/adapters/grok.sh parses.
+# A resolve leg runs `--output-format streaming-json` so its tool record is
+# readable; the stub still answers the json shape, which the adapter reads
+# through its streaming fallback, because the stub's job is to assert the
+# flags rather than to re-emit the stream.
 #
 # It also asserts the flags the adapter is supposed to pass. `--prompt-file`
 # takes a path; `-p` / `--print` / `--single` consume the next argv as the
 # prompt, so using them is the same class of bug as agy's `--print`. A blanket
-# bypass is never a CrossRev grant. Wrong flags exit 96.
+# bypass is never a CrossRev grant. A resolve leg edits without running
+# commands: `--tools` holds the read and edit tools with no shell entry, and
+# `--output-format streaming-json` leaves the tool record the tripwire reads.
+# Wrong flags exit 96.
 
 set -uo pipefail
 
@@ -43,6 +50,8 @@ allow_edit=0
 allow_write=0
 deny_edit=0
 deny_write=0
+format=""
+tools=""
 requested=""
 
 while (( $# )); do
@@ -87,7 +96,11 @@ while (( $# )); do
       ;;
     --model)
       requested="${2:-}"; shift 2 ;;
-    --output-format|--reasoning-effort|--effort|--tools|--disallowed-tools|--rules|--system-prompt-override|--system-prompt)
+    --output-format)
+      format="${2:-}"; shift 2 ;;
+    --tools)
+      tools="${2:-}"; shift 2 ;;
+    --reasoning-effort|--effort|--disallowed-tools|--rules|--system-prompt-override|--system-prompt)
       shift 2 ;;
     *)
       shift ;;
@@ -115,11 +128,29 @@ if [[ "$prompt" == *"You are the review leg"* ]]; then
     printf 'test stub: a review leg must not pass --allow Edit or --allow Write\n' >&2
     exit 96
   fi
+  if [[ "$format" != "json" ]]; then
+    printf 'test stub: a review leg needs --output-format json, not %s\n' "${format:-unset}" >&2
+    exit 96
+  fi
 elif [[ "$prompt" == *"You are the resolve leg"* ]]; then
   if [[ "$sandbox" != "workspace" || "$allow_edit" -ne 1 || "$allow_write" -ne 1 ]]; then
     printf 'test stub: a resolve leg needs --sandbox workspace --allow Edit --allow Write\n' >&2
     exit 96
   fi
+  if [[ "$format" != "streaming-json" ]]; then
+    printf 'test stub: a resolve leg needs --output-format streaming-json, not %s\n' "${format:-unset}" >&2
+    exit 96
+  fi
+  if [[ "$tools" != *"Edit"* || "$tools" != *"Write"* ]]; then
+    printf 'test stub: a resolve leg needs a --tools allowlist holding Edit and Write, not %s\n' "${tools:-unset}" >&2
+    exit 96
+  fi
+  for banned in Bash bash shell run_terminal_command; do
+    if [[ "$tools" == *"$banned"* ]]; then
+      printf 'test stub: the --tools allowlist must leave the shell out, got %s\n' "$tools" >&2
+      exit 96
+    fi
+  done
 fi
 
 payload_file="${CROSSREV_HARNESS_PAYLOAD:-}"

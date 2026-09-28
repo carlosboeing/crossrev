@@ -55,9 +55,9 @@ func TestEveryAdapterBuildsTheWholeArgv(t *testing.T) {
 		},
 		{
 			harness: "claude", write: true,
-			where: "lib/adapters/claude.sh:23,43,49,54,55,111, minus the argv prompt",
-			want: []string{"-p", "--output-format", "json",
-				"--permission-mode", "acceptEdits",
+			where: "lib/adapters/claude.sh:23,43,49,54,55,111, minus the argv prompt, plus stream-json and the Bash denial for a resolve leg that edits without running commands",
+			want: []string{"-p", "--output-format", "stream-json",
+				"--permission-mode", "acceptEdits", "--disallowedTools", "Bash",
 				"--json-schema", "<schema-text>", "--model", "<model>", "--effort", "high"},
 		},
 		{
@@ -70,9 +70,10 @@ func TestEveryAdapterBuildsTheWholeArgv(t *testing.T) {
 		},
 		{
 			harness: "codex", write: true,
-			where: "lib/adapters/codex.sh:50,56,68,74,75,77,95, with the argv prompt replaced by the stdin marker",
+			where: "lib/adapters/codex.sh:50,56,68,74,75,77,95, with the argv prompt replaced by the stdin marker, plus the shell denial for a resolve leg that edits without running commands",
 			want: []string{"exec", "--skip-git-repo-check", "--json", "-o", "<payload>",
-				"--ignore-user-config", "--sandbox", "workspace-write",
+				"--ignore-user-config", "--disable", "shell_tool", "--disable", "unified_exec",
+				"--sandbox", "workspace-write",
 				"--output-schema", "<schema-path>", "-m", "<model>",
 				"-c", "model_reasoning_effort=high", "-"},
 		},
@@ -101,9 +102,10 @@ func TestEveryAdapterBuildsTheWholeArgv(t *testing.T) {
 		},
 		{
 			harness: "grok", write: true,
-			where: "lib/adapters/grok.sh:36,44,49,50,51,52,79",
-			want: []string{"--output-format", "json", "--permission-mode", "dontAsk",
+			where: "lib/adapters/grok.sh:36,44,49,50,51,52,79, plus streaming-json and the --tools allowlist for a resolve leg that edits without running commands",
+			want: []string{"--output-format", "streaming-json", "--permission-mode", "dontAsk",
 				"--sandbox", "workspace", "--allow", "Edit", "--allow", "Write",
+				"--tools", "Read,Grep,Glob,Edit,Write",
 				"--json-schema", "<schema-text>", "--model", "<model>",
 				"--reasoning-effort", "high", "--prompt-file", "<prompt-path>"},
 		},

@@ -45,15 +45,30 @@ func (a *Grok) Spec(inv Invocation) (exec.Spec, error) {
 	// --prompt-file last: it takes a path, so remaining flags are not
 	// swallowed, but putting the prompt after the rest matches the other
 	// adapters' shape.
-	args := []string{"--output-format", "json", "--permission-mode", "dontAsk"}
+	outputFormat := "json"
+	if inv.Write {
+		// A resolve leg streams its tool record so the tripwire can read it.
+		outputFormat = "streaming-json"
+	}
+	args := []string{"--output-format", outputFormat, "--permission-mode", "dontAsk"}
 
 	// dontAsk on both legs: the headless default can prompt and hang. The
 	// resolve leg needs an explicit write grant on top; the review leg is denied
 	// at both the permission-rule and sandbox layers. bypassPermissions,
 	// --always-approve, --yolo and --dangerously-skip-permissions are a blanket
 	// bypass and are never passed.
+	//
+	// A resolve leg edits without running commands: the --tools allowlist
+	// holds the read and edit tools while leaving the shell out. A --deny
+	// rule did not remove the shell in the measured run, so the allowlist is
+	// what denies it. --sandbox workspace and --allow Edit/Write stay as the
+	// filesystem and permission grants; --tools is the built-in tool list
+	// (`grok --help`). The names are the Claude-style tool names the
+	// orchestration mappings record (Read, Grep, Glob, Edit, Write), with no
+	// Bash entry.
 	if inv.Write {
-		args = append(args, "--sandbox", "workspace", "--allow", "Edit", "--allow", "Write")
+		args = append(args, "--sandbox", "workspace", "--allow", "Edit", "--allow", "Write",
+			"--tools", "Read,Grep,Glob,Edit,Write")
 	} else {
 		args = append(args, "--sandbox", "read-only", "--deny", "Edit", "--deny", "Write")
 	}
@@ -91,11 +106,25 @@ func (a *Grok) Spec(inv Invocation) (exec.Spec, error) {
 var grokCredentialRejection = regexp.MustCompile(`(?i)not signed in|XAI_API_KEY`)
 
 // Envelope reads what the child produced (lib/adapters/grok.sh:83-149).
-func (a *Grok) Envelope(_ Invocation, res exec.Result) Envelope {
-	answer, _ := decodeOrdered(res.Stdout)
+func (a *Grok) Envelope(inv Invocation, res exec.Result) Envelope {
+	// A resolve leg streams NDJSON; the terminal end event carries the usage
+	// envelope while the text deltas accumulate to the constrained answer.
+	// The review leg keeps the single json object.
+	stdout := res.Stdout
+	var streamText string
+	if inv.Write {
+		if end := grokStreamEnd(res.Stdout); end != nil {
+			stdout = end
+		}
+		streamText = grokStreamText(res.Stdout)
+	}
+	answer, _ := decodeOrdered(stdout)
 
 	if res.ExitCode != 0 {
 		message := firstAlternative(answer, "error", "text")
+		if message == "" && inv.Write {
+			message = grokStreamError(res.Stdout)
+		}
 		if message == "" {
 			message = HarnessError(res.Stderr)
 		}
@@ -120,14 +149,87 @@ func (a *Grok) Envelope(_ Invocation, res exec.Result) Envelope {
 	// models list the parser built out of modelUsage — its entries carry call
 	// counts rather than token totals, so there is no share to rank and first is
 	// the only report.
-	usage := ParseGrok(res.Stdout)
-	envelope := succeeded(a.Name(), vendorEndpoint, grokPayload(res.Stdout, answer), usage)
+	usage := ParseGrok(stdout)
+	payload := grokPayload(stdout, answer)
+	if inv.Write && payload == nil && streamText != "" {
+		if parsed, ok := parseJSON(streamText); ok {
+			payload = parsed
+		}
+	}
+	envelope := succeeded(a.Name(), vendorEndpoint, payload, usage)
 	if usage != nil {
 		if model := ModelReportedFromModels(usage.Models); model != "" {
 			envelope.ModelReported = &model
 		}
 	}
 	return envelope
+}
+
+// grokStreamEnd is the terminal end event of a streaming-json run: the last
+// line whose top-level type is "end". Each line decodes alone so one malformed
+// line skips rather than taking the whole stream down.
+func grokStreamEnd(stdout []byte) []byte {
+	var last []byte
+	for _, line := range strings.Split(string(stdout), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		event, err := decodeOrdered([]byte(trimmed))
+		if err != nil {
+			continue
+		}
+		if kind, _ := event.member("type").asString(); kind != "end" {
+			continue
+		}
+		last = []byte(trimmed)
+	}
+	return last
+}
+
+// grokStreamText concatenates every text event's data, the accumulated answer
+// a streaming-json run carries in place of the json object's text field.
+func grokStreamText(stdout []byte) string {
+	var answer strings.Builder
+	for _, line := range strings.Split(string(stdout), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		event, err := decodeOrdered([]byte(trimmed))
+		if err != nil {
+			continue
+		}
+		if kind, _ := event.member("type").asString(); kind != "text" {
+			continue
+		}
+		if data, ok := event.member("data").asString(); ok {
+			answer.WriteString(data)
+		}
+	}
+	return answer.String()
+}
+
+// grokStreamError is the first error event's message on a failed
+// streaming-json run.
+func grokStreamError(stdout []byte) string {
+	for _, line := range strings.Split(string(stdout), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		event, err := decodeOrdered([]byte(trimmed))
+		if err != nil {
+			continue
+		}
+		if kind, _ := event.member("type").asString(); kind != "error" {
+			continue
+		}
+		if message, ok := event.member("message").asString(); ok && message != "" {
+			return message
+		}
+	}
+	return ""
 }
 
 // grokPayload is the ladder at lib/adapters/grok.sh:118-124.
