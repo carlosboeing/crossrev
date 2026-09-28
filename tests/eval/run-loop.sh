@@ -830,9 +830,19 @@ done
 # One base to base-prime entry per case: the fixed timestamp keeps every
 # arm's synthetic commit on the same SHA, so the first arm speaks for all.
 if [[ -s "$RESULT_LIST" ]]; then
-  jq -s 'map(select(.base_prime != null))
-    | map({key:.case, value:{base:.base, base_prime:.base_prime}})
-    | from_entries' $(cat "$RESULT_LIST") >"$RESULTS_DIR/base-map.json"
+  # Into an array, never through word splitting: a results path with a
+  # space or a glob character must still reach jq as one argument.
+  result_paths=()
+  while IFS= read -r result_path; do
+    [[ -n "$result_path" ]] && result_paths+=("$result_path")
+  done <"$RESULT_LIST"
+  if (( ${#result_paths[@]} > 0 )); then
+    jq -s 'map(select(.base_prime != null))
+      | map({key:.case, value:{base:.base, base_prime:.base_prime}})
+      | from_entries' "${result_paths[@]}" >"$RESULTS_DIR/base-map.json"
+  else
+    printf '{}\n' >"$RESULTS_DIR/base-map.json"
+  fi
   bash "$EVAL_HERE/adjudicate.sh" --results-dir "$RESULTS_DIR"
 else
   printf '{}\n' >"$RESULTS_DIR/base-map.json"
