@@ -82,7 +82,7 @@ func helperSpawn(msArg string) {
 // one thing Cmd.WaitDelay exists to bound. The pid goes to stdout so the test
 // can clean up whatever the kill did not reach.
 func helperOrphan(msArg string) {
-	orphanGrandchild(msArg, false)
+	orphanGrandchild(msArg, "both", 0, 0)
 }
 
 // helperOrphanStdout starts a grandchild that inherits only the captured
@@ -93,10 +93,46 @@ func helperOrphan(msArg string) {
 // and Cmd.WaitDelay has nothing to bound. Only the drain beside Wait can
 // notice this orphan.
 func helperOrphanStdout(msArg string) {
-	orphanGrandchild(msArg, true)
+	orphanGrandchild(msArg, "stdout", 0, 0)
 }
 
-func orphanGrandchild(msArg string, stdoutOnly bool) {
+// helperOrphanStderr starts a grandchild that inherits only the captured
+// stderr, prints its pid, and exits at once.
+//
+// This is the mirror of the stdout-only case: the grandchild holds no
+// stdout, so the streamed drain reaches EOF on its own and only os/exec's
+// own stderr copier trips the grace.
+func helperOrphanStderr(msArg string) {
+	orphanGrandchild(msArg, "stderr", 0, 0)
+}
+
+// helperOrphanExit starts a grandchild holding the which streams ("both",
+// "stdout" or "stderr"), prints its pid, and exits with the given code
+// instead of zero, so a test can ask what a non-zero exit reports when an
+// orphan holds the pipes.
+func helperOrphanExit(msArg, which, codeArg string) {
+	code, err := strconv.Atoi(codeArg)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "helper: bad exit code", codeArg)
+		os.Exit(2)
+	}
+	orphanGrandchild(msArg, which, code, 0)
+}
+
+// helperOrphanSleep starts a grandchild holding the which streams, prints
+// its pid, and sleeps instead of exiting, so a cancellation or deadline
+// test has a live child to kill while the grandchild holds the pipes past
+// the kill.
+func helperOrphanSleep(msArg, which, sleepArg string) {
+	sleepMs, err := strconv.Atoi(sleepArg)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "helper: bad duration", sleepArg)
+		os.Exit(2)
+	}
+	orphanGrandchild(msArg, which, 0, sleepMs)
+}
+
+func orphanGrandchild(msArg string, which string, code int, sleepMs int) {
 	if _, err := strconv.Atoi(msArg); err != nil {
 		fmt.Fprintln(os.Stderr, "helper: bad duration", msArg)
 		os.Exit(2)
@@ -109,10 +145,17 @@ func orphanGrandchild(msArg string, stdoutOnly bool) {
 	grandchild := osexec.Command(os.Args[0], "-test.run=TestHelperProcess", "--", "hold", msArg)
 	grandchild.Env = []string{helperMarker + "=" + helperOn}
 	grandchild.Stdin = null
-	grandchild.Stdout = os.Stdout
-	grandchild.Stderr = os.Stderr
-	if stdoutOnly {
-		grandchild.Stderr = null
+	grandchild.Stdout, grandchild.Stderr = null, null
+	switch which {
+	case "both":
+		grandchild.Stdout, grandchild.Stderr = os.Stdout, os.Stderr
+	case "stdout":
+		grandchild.Stdout = os.Stdout
+	case "stderr":
+		grandchild.Stderr = os.Stderr
+	default:
+		fmt.Fprintln(os.Stderr, "helper: bad streams", which)
+		os.Exit(2)
 	}
 	// Its own group, so the runner's cancellation kill does not reach it. This
 	// case is about a child that exited cleanly and left its pipes held, not
@@ -123,5 +166,8 @@ func orphanGrandchild(msArg string, stdoutOnly bool) {
 		os.Exit(2)
 	}
 	fmt.Fprint(os.Stdout, grandchild.Process.Pid)
-	os.Exit(0)
+	if sleepMs > 0 {
+		time.Sleep(time.Duration(sleepMs) * time.Millisecond)
+	}
+	os.Exit(code)
 }

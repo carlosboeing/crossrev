@@ -159,6 +159,15 @@ func TestHelperProcess(t *testing.T) {
 	case "orphan-stdout":
 		helperOrphanStdout(rest[0])
 
+	case "orphan-stderr":
+		helperOrphanStderr(rest[0])
+
+	case "orphan-exit":
+		helperOrphanExit(rest[0], rest[1], rest[2])
+
+	case "orphan-sleep":
+		helperOrphanSleep(rest[0], rest[1], rest[2])
+
 	case "hold":
 		// A grandchild that holds whatever descriptors it inherited and says
 		// nothing, so the parent's captured streams stay open with no output to

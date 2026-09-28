@@ -157,7 +157,14 @@ func (r *OSRunner) RunStream(ctx context.Context, spec Spec, consume func(io.Rea
 			// a stdout-only orphan reaches this arm with a nil Wait.
 			_ = stdoutR.Close()
 			<-draining
-			waitErr = osexec.ErrWaitDelay
+			// Only when Wait reported nothing of its own. A signalled
+			// wait (a cancellation or deadline kill) and a non-zero
+			// exit already carry the outcome; the abandoned pipe must
+			// not overwrite them, so cancellationError below still
+			// sees the signal and the exit code still stands.
+			if waitErr == nil {
+				waitErr = osexec.ErrWaitDelay
+			}
 		}
 	} else {
 		// WaitDelay already spent the grace on os/exec's own copiers. The
