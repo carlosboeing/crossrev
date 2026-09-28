@@ -2,6 +2,7 @@ package harness_test
 
 import (
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/carlosboeing/crossrev/internal/exec"
@@ -39,6 +40,67 @@ func TestAgyGrantsTheWriteOnlyToAWritingLeg(t *testing.T) {
 	if slices.Contains(reading.Args, "--ignore-user-config") {
 		t.Error("--ignore-user-config is codex's flag, not this one's")
 	}
+}
+
+// A review leg states outright that it has no shell command tool, because a
+// command attempt in headless mode is auto-denied and the denial ends the run
+// with an empty answer: measured on agy 1.2.12, a 152 KB review-style prompt
+// answered `status: SUCCESS` with an empty `response`, `denied_actions`
+// naming `command`, and the stderr line about headless mode being unable to
+// prompt. `--sandbox` was tried and does not change that outcome; telling the
+// model the tool is absent stops the attempt, and the same prompt then answers
+// with no denied action and an empty stderr. The directive wraps the prompt
+// rather than replacing it, so the leg's own markers stay readable, and the
+// resolve leg is untouched: its Task 12 settlement (commands denied, no
+// tripwire) is asserted in resolve_deny_test.go and below.
+func TestAgyReviewLegSaysItHasNoCommandTool(t *testing.T) {
+	adapter := agyAdapter(t)
+	inv := invocation(t, "agy", false)
+
+	spec, err := adapter.Spec(inv)
+	if err != nil {
+		t.Fatalf("building the spec: %v", err)
+	}
+	at := slices.Index(spec.Args, "--print")
+	if at < 0 {
+		t.Fatalf("the invocation carries no --print: %v", spec.Args)
+	}
+	got := spec.Args[at+1]
+	if !strings.Contains(got, inv.Prompt.Argument()) {
+		t.Error("the directive replaced the prompt instead of wrapping it")
+	}
+	if !strings.Contains(got, "no shell command tool") {
+		t.Errorf("the review prompt states no shell command tool; got %q", agyTail(got, 200))
+	}
+	if !strings.Contains(got, "answer anyway") {
+		t.Errorf("the review prompt tells the model to answer anyway; got %q", agyTail(got, 200))
+	}
+}
+
+// The resolve leg's prompt passes through byte for byte: the Task 12
+// settlement stays exactly as it was.
+func TestAgyResolveLegPromptPassesThrough(t *testing.T) {
+	adapter := agyAdapter(t)
+	inv := invocation(t, "agy", true)
+
+	spec, err := adapter.Spec(inv)
+	if err != nil {
+		t.Fatalf("building the spec: %v", err)
+	}
+	at := slices.Index(spec.Args, "--print")
+	if at < 0 {
+		t.Fatalf("the invocation carries no --print: %v", spec.Args)
+	}
+	if got, want := spec.Args[at+1], inv.Prompt.Argument(); got != want {
+		t.Errorf("--print differs from the prompt:\n  got : %q\n  want: %q", agyTail(got, 120), agyTail(want, 120))
+	}
+}
+
+func agyTail(text string, n int) string {
+	if len(text) <= n {
+		return text
+	}
+	return "…" + text[len(text)-n:]
 }
 
 // `--print` takes the prompt as its VALUE, so every other flag has to come

@@ -107,7 +107,9 @@ func TestStdinTransportCarriesThePromptAsTheShellSpelledIt(t *testing.T) {
 
 // The other three transports keep their shape under the same 200 KiB prompt:
 // grok names the prompt file, agy and opencode still pass the prompt on argv,
-// and none of them holds stdin open with anything on it.
+// and none of them holds stdin open with anything on it. agy's review leg
+// wraps the prompt in its no-commands directive, so only its resolve leg
+// carries the prompt verbatim.
 func TestFileAndArgvTransportsKeepTheirShape(t *testing.T) {
 	doc := descriptors(t)
 
@@ -140,8 +142,25 @@ func TestFileAndArgvTransportsKeepTheirShape(t *testing.T) {
 						t.Error("the prompt text reached argv; it travels by file")
 					}
 				case "agy":
-					if !hasFlagPair(spec.Args, "--print", inv.Prompt.Argument()) {
-						t.Error("the prompt is not the --print value")
+					at := slices.Index(spec.Args, "--print")
+					if at < 0 {
+						t.Fatalf("the invocation carries no --print: %v", spec.Args)
+					}
+					got := spec.Args[at+1]
+					if write {
+						if got != inv.Prompt.Argument() {
+							t.Error("the resolve prompt is not the --print value")
+						}
+						break
+					}
+					if !strings.HasPrefix(got, "You have no shell command tool") {
+						t.Error("the review prompt does not open with the no-commands directive")
+					}
+					if !strings.Contains(got, inv.Prompt.Argument()) {
+						t.Error("the review prompt lost the prompt inside its directive")
+					}
+					if !strings.HasSuffix(got, "answer anyway.") {
+						t.Error("the review prompt does not close with the no-commands directive")
 					}
 				case "opencode":
 					last := spec.Args[len(spec.Args)-1]
