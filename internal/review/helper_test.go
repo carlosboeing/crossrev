@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -176,6 +177,53 @@ type fakeVCS struct {
 	removePersistedErr   error
 	// removed is what RemovePersistedCredentials answers.
 	removed []vcs.RemovedCredential
+	// heads answers HeadAt per directory. A directory with no entry reads
+	// the pull request head, so the explicit-workdir default every existing
+	// case passes keeps proving the head it always proved.
+	heads map[string]string
+	// headErr, when set, is the failure HeadAt returns.
+	headErr error
+	// hasCommit, when non-nil, answers HasCommit per SHA. Nil holds every
+	// commit, so cases that never move the head fetch nothing.
+	hasCommit map[string]bool
+	// hasCommitErr, when set, is the failure HasCommit returns.
+	hasCommitErr error
+	// fetchCalls records Fetch invocations as "remote refspec", and onFetch
+	// runs after each one, so a case can land the head on the fallback it
+	// is proving.
+	fetchCalls []string
+	fetchErr   error
+	onFetch    func(remote, refspec string)
+	// config answers ConfigGet per key; the push-remote keys default to
+	// origin, the way a checkout with no branch configuration reads.
+	config map[string]string
+	// reusable, when set, holds explicit WorktreeReusable answers per
+	// directory. A directory the fake created through AddWorktree answers
+	// true unless an explicit entry says otherwise, so the leg's
+	// post-create ownership proof passes for trees it just made; every
+	// other directory without an entry answers false.
+	reusable map[string]bool
+	// addErrs, when set, fails AddWorktree for the named directory,
+	// simulating a creation race the leg must ride out by trying the next
+	// path. The winner's tree now occupies the path, the way a real race
+	// leaves it.
+	addErrs map[string]error
+	// clean, when set, is the answer WorktreeClean gives per directory.
+	// Unset means every worktree is clean; a set map answers false for
+	// directories with no entry, so unknown cleanliness never earns reuse.
+	clean map[string]bool
+	// worktrees records the directories AddWorktree created, addCalls counts
+	// them, and onAddWorktree lays files into the fresh worktree.
+	worktrees     []string
+	addCalls      int
+	onAddWorktree func(dir string) error
+	// removedWorktrees records the directories RemoveWorktree took away,
+	// and pruneCalls counts PruneWorktrees invocations.
+	removedWorktrees []string
+	pruneCalls       int
+	// removeErr, when set, is the failure RemoveWorktree returns, leaving
+	// the directory in place the way a failed removal does.
+	removeErr error
 }
 
 func (f *fakeVCS) GeneratedAttributes(_ context.Context, _ core.Revision, paths []string) (map[string]vcs.AttributeDecision, *vcs.Warning, error) {
@@ -281,6 +329,110 @@ func (f *fakeVCS) RemovePersistedCredentials(context.Context) ([]vcs.RemovedCred
 	}
 	return f.removed, nil
 }
+
+func (f *fakeVCS) headFor(dir string) core.Revision {
+	if sha, ok := f.heads[dir]; ok {
+		rev, err := core.NewRevision(sha)
+		if err != nil {
+			panic(err)
+		}
+		return rev
+	}
+	rev, err := core.NewRevision(headSHA)
+	if err != nil {
+		panic(err)
+	}
+	return rev
+}
+
+func (f *fakeVCS) HeadAt(_ context.Context, dir string) (core.Revision, error) {
+	if f.headErr != nil {
+		return core.Revision{}, f.headErr
+	}
+	return f.headFor(dir), nil
+}
+
+func (f *fakeVCS) HasCommit(_ context.Context, revision core.Revision) (bool, error) {
+	if f.hasCommitErr != nil {
+		return false, f.hasCommitErr
+	}
+	if f.hasCommit == nil {
+		return true, nil
+	}
+	return f.hasCommit[revision.SHA()], nil
+}
+
+func (f *fakeVCS) ConfigGet(_ context.Context, key string) (string, error) {
+	if val, ok := f.config[key]; ok {
+		return val, nil
+	}
+	switch key {
+	case "branch.feature.pushRemote", "branch.feature.remote", "remote.pushDefault":
+		return "origin", nil
+	}
+	return "", nil
+}
+
+func (f *fakeVCS) Fetch(_ context.Context, remote, refspec string) error {
+	f.fetchCalls = append(f.fetchCalls, remote+" "+refspec)
+	if f.onFetch != nil {
+		f.onFetch(remote, refspec)
+	}
+	return f.fetchErr
+}
+
+func (f *fakeVCS) WorktreeReusable(_ context.Context, dir string, _ core.Revision) (bool, error) {
+	if f.reusable != nil {
+		if answer, ok := f.reusable[dir]; ok {
+			return answer, nil
+		}
+	}
+	for _, created := range f.worktrees {
+		if created == dir {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (f *fakeVCS) WorktreeClean(_ context.Context, dir string) (bool, error) {
+	if f.clean == nil {
+		return true, nil
+	}
+	return f.clean[dir], nil
+}
+
+func (f *fakeVCS) AddWorktree(_ context.Context, dir string, revision core.Revision) error {
+	f.addCalls++
+	if err, ok := f.addErrs[dir]; ok && err != nil {
+		_ = os.MkdirAll(dir, 0o755)
+		return err
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	if f.heads == nil {
+		f.heads = map[string]string{}
+	}
+	f.heads[dir] = revision.SHA()
+	if f.onAddWorktree != nil {
+		if err := f.onAddWorktree(dir); err != nil {
+			return err
+		}
+	}
+	f.worktrees = append(f.worktrees, dir)
+	return nil
+}
+
+func (f *fakeVCS) RemoveWorktree(_ context.Context, dir string) error {
+	f.removedWorktrees = append(f.removedWorktrees, dir)
+	if f.removeErr != nil {
+		return f.removeErr
+	}
+	return os.RemoveAll(dir)
+}
+
+func (f *fakeVCS) PruneWorktrees(context.Context) { f.pruneCalls++ }
 
 type fakeRunner struct {
 	log    *eventLog

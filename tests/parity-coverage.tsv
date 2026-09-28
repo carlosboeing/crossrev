@@ -9,6 +9,7 @@ test-action.sh	black-box	action.yml forwards only flags the named leg accepts, a
 test-adapters.sh	black-box	agy adapter behaviour through a real review leg	tests/test-adapters.sh
 test-auth.sh	go-test	App registration names and implied slugs	internal/app/metadata_test.go internal/app/login_test.go
 test-bootstrap.sh	black-box	binary download, digest check and atomic install	tests/test-bootstrap.sh
+test-check-changelog.sh	black-box	changelog gate reads both npm pack --json shapes and fails loudly on neither	tests/test-check-changelog.sh
 test-commit-convention.sh	go-test	resolve prompt commit-convention over varied histories	internal/prompt/commit_test.go internal/prompt/convention_test.go
 test-config.sh	go-test	config layers, endpoint fallback and backlog discovery	internal/config/load_test.go internal/config/merge_test.go internal/config/validate_test.go internal/config/endpoint_test.go internal/config/backlog_test.go
 test-credentials.sh	go-test	restored credentials read, refuse rules, never write back	internal/cred/refresh_test.go internal/cred/freshness_test.go internal/cred/staging_test.go

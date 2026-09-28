@@ -243,6 +243,11 @@ func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settin
 		return harness.Envelope{}, nil, outMsgs, err
 	}
 
+	// The harness runs in the pinned worktree Run prepared, which an
+	// explicit req.Workdir overrides. Only a leg without a git reader
+	// reaches the fallback: its frozen path has no worktree to pin, so the
+	// harness runs where the operator stands. Quarantine below moves files
+	// in this directory, never in the operator checkout.
 	workdir := req.Workdir
 	if workdir == "" {
 		workdir, _ = os.Getwd()
