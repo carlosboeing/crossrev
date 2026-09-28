@@ -374,6 +374,16 @@ eval_repoint() {
   # is already local (this checkout pushed it); the fetch only refreshes
   # the tracking state the way a repointed pull request would read.
   git -C "$ARM_CHECKOUT" fetch -q "$arm_dir/work/origin.git" "$ARM_HEAD_BRANCH" 2>/dev/null || true
+  # The resolve leg commits in its own worktree and pushes the bare copy,
+  # so this checkout's head branch is one commit behind the repair: its
+  # file is still the unrepaired one while the diff below and pr.json
+  # already name the repair head. The next review leg reads this
+  # directory, so fast-forward it to the fetched commit first. The SHA
+  # form needs no FETCH_HEAD, which a failed fetch would leave stale.
+  git -C "$ARM_CHECKOUT" merge -q --ff-only "$new_head" 2>/dev/null || {
+    printf 'run-loop: cannot fast-forward %s to %s\n' "$ARM_CHECKOUT" "$new_head" >&2
+    return 1
+  }
   git -C "$ARM_CHECKOUT" diff "$ARM_BASE" "$new_head" >"$arm_dir/diff.txt"
   jq --arg h "$new_head" '.headRefOid = $h' "$ARM_STATE/pr.json" >"$ARM_STATE/pr.json.tmp" \
     && mv "$ARM_STATE/pr.json.tmp" "$ARM_STATE/pr.json"
