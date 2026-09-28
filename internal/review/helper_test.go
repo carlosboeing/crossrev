@@ -221,6 +221,9 @@ type fakeVCS struct {
 	// and pruneCalls counts PruneWorktrees invocations.
 	removedWorktrees []string
 	pruneCalls       int
+	// removeErr, when set, is the failure RemoveWorktree returns, leaving
+	// the directory in place the way a failed removal does.
+	removeErr error
 }
 
 func (f *fakeVCS) GeneratedAttributes(_ context.Context, _ core.Revision, paths []string) (map[string]vcs.AttributeDecision, *vcs.Warning, error) {
@@ -423,6 +426,9 @@ func (f *fakeVCS) AddWorktree(_ context.Context, dir string, revision core.Revis
 
 func (f *fakeVCS) RemoveWorktree(_ context.Context, dir string) error {
 	f.removedWorktrees = append(f.removedWorktrees, dir)
+	if f.removeErr != nil {
+		return f.removeErr
+	}
 	return os.RemoveAll(dir)
 }
 

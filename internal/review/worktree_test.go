@@ -93,6 +93,37 @@ func TestFailedLegKeepsPinnedWorktree(t *testing.T) {
 	}
 }
 
+// TestFailedWorktreeRemovalKeepsTheWorktree proves a clean finish whose
+// cleanup fails does not report green: the removal error reaches the
+// caller with the directory retained in KeptWorktree for debugging.
+func TestFailedWorktreeRemovalKeepsTheWorktree(t *testing.T) {
+	e := newEnv(t)
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	var dirs []string
+	e.runner.onSpec = func(spec exec.Spec) { dirs = append(dirs, spec.Dir) }
+	e.vcs.removeErr = errors.New("device or resource busy")
+	leg := e.leg(t)
+	got := leg.Run(context.Background(), pinnedReq(t, e))
+	if got.Err == nil {
+		t.Fatal("wanted the removal failure, got a clean finish")
+	}
+	if len(dirs) != 1 {
+		t.Fatalf("harness calls = %d, want 1", len(dirs))
+	}
+	if got.Outcome != review.OutcomeError {
+		t.Errorf("outcome = %q, want %q", got.Outcome, review.OutcomeError)
+	}
+	if got.KeptWorktree != dirs[0] {
+		t.Errorf("kept worktree = %q, want the unremoved %q", got.KeptWorktree, dirs[0])
+	}
+	if _, err := os.Stat(dirs[0]); err != nil {
+		t.Errorf("the unremoved worktree is gone at %s: %v", dirs[0], err)
+	}
+	if len(e.vcs.removedWorktrees) != 1 || e.vcs.removedWorktrees[0] != dirs[0] {
+		t.Errorf("removal attempts = %v, want one at %s", e.vcs.removedWorktrees, dirs[0])
+	}
+}
+
 // TestFailedLegReportsTheSelectedWorktree proves the kept path is the
 // directory selectWorktree actually selected: with the canonical review
 // path preserved as a dirty occupant, the failed leg works in the suffixed

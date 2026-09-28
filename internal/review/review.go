@@ -165,7 +165,14 @@ func (l *Leg) Run(ctx context.Context, req Request) (out Result) {
 					}
 					return
 				}
-				_ = l.VCS.RemoveWorktree(ctx, wt)
+				if err := l.VCS.RemoveWorktree(ctx, wt); err != nil {
+					out.Outcome = OutcomeError
+					out.Err = err
+					if l.Log != nil {
+						l.Log.Event("worktree", "kept "+wt)
+					}
+					return
+				}
 				out.KeptWorktree = ""
 				if l.Log != nil {
 					l.Log.Event("worktree", "removed "+wt)
