@@ -88,6 +88,20 @@ func TestAnUncancelledSignalDeathReadsAsAnInterrupt(t *testing.T) {
 	if msg := got.Err.Error(); strings.Contains(msg, "harness failed") || strings.Contains(msg, "authentication") {
 		t.Fatalf("an interrupt reads as a harness failure: %q", msg)
 	}
+	// The terminal must read an interrupt, not the generic refusal. A bare
+	// context.Canceled reaches refusalText as a plain error and prints
+	// "error  context canceled" with the doctor hint, so the error has to
+	// carry the interrupt refusal the terminal prints.
+	var refusal *Refusal
+	if !errors.As(got.Err, &refusal) {
+		t.Fatalf("err = %T (%v), want it to carry the interrupt refusal", got.Err, got.Err)
+	}
+	if !strings.Contains(refusal.Message, "interrupt") {
+		t.Fatalf("message = %q, want it to name the interrupt", refusal.Message)
+	}
+	if strings.Contains(refusal.Hint, "doctor") || strings.Contains(refusal.Hint, "authentication") {
+		t.Fatalf("hint = %q, want no doctor hint and no authentication hint on an interrupt", refusal.Hint)
+	}
 	for _, ed := range e.forge.edits {
 		if strings.Contains(ed.Body, `"blocked":true`) {
 			t.Fatalf("an interrupt marked the claim blocked: %s", ed.Body)

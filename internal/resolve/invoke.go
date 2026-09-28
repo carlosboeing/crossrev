@@ -335,9 +335,15 @@ func (l *Leg) invoke(ctx context.Context, s *session, marker prstate.Marker, wor
 		if res.Interrupted() {
 			// As the review leg: a signal death is the cancellation the
 			// exit mapping and the fatal-report skip already read, not a
-			// harness failure with an authentication hint. Returned bare so
-			// errors.Is still sees context.Canceled through it.
-			return Result{Outcome: OutcomeRefused, Err: context.Canceled, Messages: msgs}
+			// harness failure with an authentication hint. The refusal
+			// carries the interrupt the terminal prints, joined with
+			// context.Canceled so errors.Is still sees it through the
+			// join. Bare context.Canceled would reach the terminal as a
+			// plain error with the doctor hint.
+			return Result{Outcome: OutcomeRefused, Err: errors.Join(&Refusal{
+				Message: fmt.Sprintf("the %s harness was interrupted", s.settings.Harness),
+				Hint:    "The harness did not answer. Re-run the leg.",
+			}, context.Canceled), Messages: msgs}
 		}
 		// The second child, for the one adapter whose telemetry is not in its
 		// own output (lib/adapters/opencode.sh:261-273).

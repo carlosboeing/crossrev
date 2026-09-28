@@ -11,6 +11,7 @@ import (
 	"github.com/carlosboeing/crossrev/internal/forge"
 	"github.com/carlosboeing/crossrev/internal/policy"
 	"github.com/carlosboeing/crossrev/internal/prstate"
+	"github.com/carlosboeing/crossrev/internal/ui"
 )
 
 // A leg that dies after posting its claim records the failure on the pull
@@ -119,6 +120,20 @@ func TestAnUncancelledSignalDeathReadsAsAnInterrupt(t *testing.T) {
 	}
 	if msg := got.Err.Error(); strings.Contains(msg, "harness failed") || strings.Contains(msg, "authentication") {
 		t.Fatalf("an interrupt reads as a harness failure: %q", msg)
+	}
+	// The terminal must read an interrupt, not the generic refusal. A bare
+	// context.Canceled reaches refusalText as a plain error and prints
+	// "error  context canceled" with the doctor hint, so the error has to
+	// carry the interrupt refusal the terminal prints.
+	var fatal *ui.FatalError
+	if !errors.As(got.Err, &fatal) {
+		t.Fatalf("err = %T (%v), want it to carry the interrupt refusal", got.Err, got.Err)
+	}
+	if !strings.Contains(fatal.Reason, "interrupt") {
+		t.Fatalf("reason = %q, want it to name the interrupt", fatal.Reason)
+	}
+	if strings.Contains(fatal.Action, "doctor") {
+		t.Fatalf("action = %q, want no doctor hint on an interrupt", fatal.Action)
 	}
 	if len(e.forge.edits) != 0 {
 		t.Fatalf("an interrupt rewrote the claim: %v", e.forge.edits)
