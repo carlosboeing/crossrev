@@ -146,6 +146,59 @@ func TestATransientResolveFailureTwiceFailsWithTheSecondMessage(t *testing.T) {
 	}
 }
 
+// A transport failure followed by an empty answer is one empty payload, not
+// two: the retry the transport failure spent says nothing about what the
+// second attempt answered.
+func TestATransportFailureThenAnEmptyAnswerRefusesAsOneEmptyPayload(t *testing.T) {
+	e := setup(t)
+	e.git.staged = true
+	e.addReview(t, defaultFindings(), "issues-remain")
+	e.adapter.envelopes = []harness.Envelope{
+		failedResolveEnvelope("UNAVAILABLE (code 503): Deadline expired"),
+		okResolveEnvelope("", 7, 3),
+	}
+
+	got := e.run(t)
+	if got.Err == nil {
+		t.Fatal("an empty answer after a transient failure did not fail the leg")
+	}
+	if strings.Contains(got.Err.Error(), "twice") {
+		t.Errorf("err = %q, want a refusal for one empty payload", got.Err)
+	}
+	if !strings.Contains(got.Err.Error(), "empty payload") {
+		t.Errorf("err = %q, want the empty-payload refusal", got.Err)
+	}
+	if warned := warningContaining(got.Messages, "transient"); warned.Text == "" {
+		t.Errorf("the transport warning is gone: %q", ui.Texts(got.Messages))
+	}
+	if e.adapter.calls != 2 {
+		t.Errorf("the harness was asked %d time(s), want 2", e.adapter.calls)
+	}
+}
+
+// Two empty answers keep the twice-empty refusal: both attempts answered,
+// and both answers were empty.
+func TestTwoEmptyResolveAnswersRefuseAsTwiceEmpty(t *testing.T) {
+	e := setup(t)
+	e.git.staged = true
+	e.addReview(t, defaultFindings(), "issues-remain")
+	e.adapter.envelopes = []harness.Envelope{
+		okResolveEnvelope("", 10, 5),
+		okResolveEnvelope("", 7, 3),
+	}
+
+	got := e.run(t)
+	if got.Err == nil {
+		t.Fatal("two empty answers did not fail the leg")
+	}
+	if !strings.Contains(got.Err.Error(), "twice answered successfully with an empty payload") {
+		t.Errorf("err = %q, want the twice-empty refusal", got.Err)
+	}
+	if e.adapter.calls != 2 {
+		t.Errorf("the harness was asked %d time(s), want 2", e.adapter.calls)
+	}
+}
+
 // Authentication failures are not transient: no second call is spent on one.
 func TestAnAuthenticationResolveFailureIsNotRetried(t *testing.T) {
 	e := setup(t)

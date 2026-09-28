@@ -260,6 +260,11 @@ func (l *Leg) invoke(ctx context.Context, s *session, marker prstate.Marker, wor
 	// answering badly. Authentication, quota and refusal errors never draw
 	// from it.
 	transientBudget := 1
+	// transientSpentOnEmpty records what the budget was spent on. The
+	// budget is shared between transport failures and empty payloads, so
+	// an exhausted budget in the empty branch below means a transport
+	// failure followed by one empty answer unless this is set.
+	var transientSpentOnEmpty bool
 	// transientRefused sums the usage buckets of the attempts turned away
 	// as transient, so the accepted envelope reports every call it cost.
 	var transientRefused *harness.Usage
@@ -415,6 +420,7 @@ func (l *Leg) invoke(ctx context.Context, s *session, marker prstate.Marker, wor
 		if len(bytes.TrimSpace(env.Payload)) == 0 {
 			if transientBudget > 0 {
 				transientBudget--
+				transientSpentOnEmpty = true
 				transientRefused = foldTransientAttempt(transientRefused, env.Usage)
 				if reset := l.retryReset(ctx, work, snapIndex, snapTree, s.settings.Harness, "the answer was empty"); reset != nil {
 					reset.Messages = append(msgs, reset.Messages...)
@@ -426,6 +432,15 @@ func (l *Leg) invoke(ctx context.Context, s *session, marker prstate.Marker, wor
 				continue
 			}
 			msgs = append(msgs, l.invokeAbort(ctx, work, snapIndex, snapTree)...)
+			if !transientSpentOnEmpty {
+				// The budget went to a transport failure, so this is one
+				// empty answer after a retried failure — not two empty
+				// answers. The transport warning stands above this refusal.
+				out := refuse(fmt.Sprintf("%s answered successfully with an empty payload after a transient harness failure — empty output is never a clean resolve", s.settings.Harness),
+					"The first attempt failed before answering and earned the one retry, so this empty answer has no attempt left: there is nothing to record and nothing the retry could have quoted back. This is a harness failure rather than model drift. Nothing has been written to the pull request, and the rejected attempts' edits have been put back. Re-run the leg.")
+				out.Messages = append(msgs, out.Messages...)
+				return out
+			}
 			out := refuse(fmt.Sprintf("%s twice answered successfully with an empty payload — empty output is never a clean resolve", s.settings.Harness),
 				"Both answers were empty, so there is nothing to record and nothing the retry could have quoted back: this is a harness failure rather than model drift. Nothing has been written to the pull request, and the rejected attempts' edits have been put back. Re-run the leg.")
 			out.Messages = append(msgs, out.Messages...)
