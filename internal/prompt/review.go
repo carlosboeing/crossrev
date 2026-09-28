@@ -49,6 +49,13 @@ type Prior struct {
 	Title      Value `json:"title"`
 	Resolution Value `json:"resolution"`
 	TrackedAs  Value `json:"tracked_as"`
+	// Posted records whether the finding reached the pull request as a
+	// comment. Passes after the first hold below-threshold findings back
+	// with an explicit false; an absent key reads as posted, the way older
+	// markers carry it. The review leg maps an explicit false to a
+	// not_posted resolution in the prior table; the prompt itself prints
+	// only the resolution column.
+	Posted Value `json:"posted"`
 }
 
 // Review is everything the review leg's prompt is assembled from.
