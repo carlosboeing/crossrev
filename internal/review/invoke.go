@@ -3,6 +3,7 @@ package review
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -349,6 +350,20 @@ func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settin
 		// different findings depending on whether a run directory exists
 		// (lib/adapters/claude.sh:126-130, :148-154).
 		l.Log.WriteTranscript(transcript, res.Stdout, res.Stderr)
+		if res.Interrupted() {
+			// A signal death is an interrupt, not a harness failure: the
+			// child was killed rather than answering badly. The refusal
+			// carries the interrupt the terminal prints, joined with
+			// context.Canceled — the identity the exit mapping and the
+			// fatal-report skip already read — so the leg exits 130 and
+			// leaves the claim resumable instead of printing the
+			// harness-failure message. Bare context.Canceled would reach
+			// the terminal as a plain error with the doctor hint.
+			return envelope, nil, outMsgs, errors.Join(&ui.FatalError{
+				Reason: fmt.Sprintf("the %s harness was interrupted", settings.harness),
+				Action: "The harness did not answer. Re-run the leg.",
+			}, context.Canceled)
+		}
 		if !envelope.OK {
 			msg := "no error reported"
 			if envelope.Error != nil && *envelope.Error != "" {

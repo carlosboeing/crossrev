@@ -332,6 +332,31 @@ func (l *Leg) invoke(ctx context.Context, s *session, marker prstate.Marker, wor
 		// Archived after the parse and filtered in place, the order
 		// lib/adapters/claude.sh:126-130 and :148-154 keep.
 		l.Log.WriteTranscript(transcript, res.Stdout, res.Stderr)
+		if res.Interrupted() {
+			// As the review leg: a signal death is the cancellation the
+			// exit mapping and the fatal-report skip already read, not a
+			// harness failure with an authentication hint. The refusal
+			// carries the interrupt the terminal prints, joined with
+			// context.Canceled so errors.Is still sees it through the
+			// join. Bare context.Canceled would reach the terminal as a
+			// plain error with the doctor hint.
+			//
+			// The killed child may have edited the tree before it died, and
+			// the claim stays resumable while prepareWorktree reuses the
+			// worktree on HEAD and ownership alone with no cleanliness
+			// check, so the pre-invoke tree goes back before answering the
+			// interrupt. A restore that will not apply is a failure, not an
+			// interrupt: retrying on top of the killed attempt's edits would
+			// commit changes no accepted answer describes.
+			if reset := l.retryReset(ctx, work, snapIndex, snapTree, s.settings.Harness, fmt.Sprintf("the %s harness was interrupted", s.settings.Harness)); reset != nil {
+				reset.Messages = append(msgs, reset.Messages...)
+				return *reset
+			}
+			return Result{Outcome: OutcomeRefused, Err: errors.Join(&Refusal{
+				Message: fmt.Sprintf("the %s harness was interrupted", s.settings.Harness),
+				Hint:    "The harness did not answer. Re-run the leg.",
+			}, context.Canceled), Messages: msgs}
+		}
 		// The second child, for the one adapter whose telemetry is not in its
 		// own output (lib/adapters/opencode.sh:261-273).
 		l.mergeExport(ctx, adapter, inv, res, &env)
