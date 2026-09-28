@@ -252,28 +252,37 @@ eval_terminal_label() {
   return 1
 }
 
-# The stand-in's route table: repository and author reads, the pull request
-# metadata with the synthetic base, and the original diff. Comment, thread
-# and label reads are deliberately unrouted so the stand-in's live state
-# answers them — that is what makes legs observe each other.
+# The stand-in's route table: repository and author reads and the original
+# diff. Comment, thread and label reads are deliberately unrouted so the
+# stand-in's live state answers them — that is what makes legs observe each
+# other. The pull request metadata with the synthetic base lives in the
+# stand-in's pr.json instead of a pr view route: a frozen route body would
+# pin labels to empty, while pr.json gets the live labels overlaid on
+# every read.
 eval_write_routes() {
-  local head="$1" base_prime="$2" diff_file="$3"
+  local diff_file="$1"
+  {
+    printf '%s\t%s\n' 'repo view --json nameWithOwner*' "{\"nameWithOwner\":\"$REPO\"}"
+    printf '%s\t%s\n' 'repo view * --json defaultBranchRef*' '{"defaultBranchRef":{"name":"main"}}'
+    printf '%s\t%s\n' 'api user*' "{\"login\":\"$TRUSTED\"}"
+    printf '%s\t@%s\n' '*Accept: application/vnd.github.diff*' "$diff_file"
+  } >"$ARM_ROUTES"
+}
+
+# The seeded pull request object: the synthetic base, the head under
+# review, and the manifest slug. Labels stay empty here; the stand-in
+# overlays the live label list on every read.
+eval_write_pr_json() {
+  local head="$1" base_prime="$2"
   local owner="${REPO%%/*}" name="${REPO##*/}"
-  local pr_json
-  pr_json="$(jq -cn --argjson n "$PR" --arg h "$head" --arg b "$base_prime" \
+  jq -cn --argjson n "$PR" --arg h "$head" --arg b "$base_prime" \
     --arg o "$owner" --arg r "$name" \
     --arg hb "${ARM_HEAD_BRANCH:-feature}" --arg bb "${ARM_BASE_BRANCH:-main}" \
     '{number:$n, title:"Eval case", body:"Offline eval fixture.", url:"https://github.com/x",
       headRefName:$hb, headRefOid:$h, baseRefName:$bb, baseRefOid:$b,
       changedFiles:1, labels:[], isCrossRepository:false, maintainerCanModify:false, isDraft:false,
-      headRepositoryOwner:{login:$o}, headRepository:{name:$r}, state:"OPEN"}')"
-  {
-    printf '%s\t%s\n' 'repo view --json nameWithOwner*' "{\"nameWithOwner\":\"$REPO\"}"
-    printf '%s\t%s\n' 'repo view * --json defaultBranchRef*' '{"defaultBranchRef":{"name":"main"}}'
-    printf '%s\t%s\n' 'api user*' "{\"login\":\"$TRUSTED\"}"
-    printf '%s\t%s\n' "pr view $PR --repo * --json *" "$pr_json"
-    printf '%s\t@%s\n' '*Accept: application/vnd.github.diff*' "$diff_file"
-  } >"$ARM_ROUTES"
+      headRepositoryOwner:{login:$o}, headRepository:{name:$r}, state:"OPEN"}' \
+    >"$ARM_STATE/pr.json"
 }
 
 # --- offline arm setup -----------------------------------------------------------
@@ -341,12 +350,14 @@ eval_offline_setup() {
   ARM_HEAD_BRANCH="$head_branch"
   ARM_BASE_BRANCH="$base_branch"
   : >"$ARM_GH_LOG"
-  eval_write_routes "$head" "$base_prime" "$arm_dir/diff.txt"
+  eval_write_routes "$arm_dir/diff.txt"
+  eval_write_pr_json "$head" "$base_prime"
 }
 
 # After a resolve push moved the head: fetch it into the checkout and
-# re-point the stand-in at the repair head with the current diff, the way
-# a repointed pull request would read. Records the new head for the caller.
+# re-point the stand-in at the repair head with the current diff and the
+# new head revision in pr.json, the way a repointed pull request would
+# read. Records the new head for the caller.
 eval_repoint() {
   local arm_dir="$1"
   (( LIVE )) && return 1
@@ -355,7 +366,8 @@ eval_repoint() {
   [[ "$new_head" == "$EVAL_HEAD" ]] && return 1
   git -C "$ARM_CHECKOUT" fetch -q origin "$ARM_HEAD_BRANCH" 2>/dev/null || true
   git -C "$ARM_CHECKOUT" diff "$ARM_BASE" "$new_head" >"$arm_dir/diff.txt"
-  eval_write_routes "$new_head" "$ARM_BASE_PRIME" "$arm_dir/diff.txt"
+  jq --arg h "$new_head" '.headRefOid = $h' "$ARM_STATE/pr.json" >"$ARM_STATE/pr.json.tmp" \
+    && mv "$ARM_STATE/pr.json.tmp" "$ARM_STATE/pr.json"
   EVAL_HEAD="$new_head"
   return 0
 }
