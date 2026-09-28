@@ -30,6 +30,8 @@ All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepa
 
 - **Codex legs report the stdout diagnosis when a turn fails.** The adapter extracted failure messages from stderr alone, missing the `turn.failed` event Codex writes to stdout when an execution fails. The adapter now parses `turn.failed` and `error` events from stdout before falling back to the stderr diagnosis, keeping the diagnosis lines from stderr when stdout reports no error.
 
+- **A streamed run drains unread child stdout before waiting.** `RunStream` launched a background goroutine to discard unread stdout concurrently with calling `cmd.Wait()`. Because `os/exec.Cmd.StdoutPipe` closes the pipe's read descriptor immediately when the child exits in `cmd.Wait()`, unread buffered bytes raced against pipe closure and could return `os.ErrClosed`, causing `result.StdoutBytes` to miss trailing output. Unread stdout is now drained to EOF synchronously before `cmd.Wait()` reaps the child process.
+
 ## [0.9.0] — 2026-09-26
 
 ### Fixed

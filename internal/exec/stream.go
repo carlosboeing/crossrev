@@ -22,11 +22,11 @@ var _ Streamer = (*OSRunner)(nil)
 // count.
 //
 // consume runs in the calling goroutine while the child writes. Once it
-// returns, whatever it left unread is discarded in the background: a child
-// blocked on a full pipe can still finish, and Wait still only returns
-// once it has exited. A consume error kills the group first, so the child
-// cannot outlive the caller that gave up on it; an orphan holding the pipe
-// past the drain grace ends the wait the way it does for Run.
+// returns, whatever it left unread is discarded so a child blocked on a
+// full pipe can still finish, and Wait reaps the child after all reads
+// complete. A consume error kills the group first, so the child cannot
+// outlive the caller that gave up on it; an orphan holding the pipe past
+// the drain grace ends the wait the way it does for Run.
 func (r *OSRunner) RunStream(ctx context.Context, spec Spec, consume func(io.Reader) error) Result {
 	started := time.Now()
 
@@ -118,17 +118,12 @@ func (r *OSRunner) RunStream(ctx context.Context, spec Spec, consume func(io.Rea
 		// to a pipe nobody drains, so end the group before waiting.
 		_ = killProcessGroup(cmd)
 	}
-	draining := make(chan struct{})
-	go func() {
-		defer close(draining)
-		_, _ = io.Copy(io.Discard, counted)
-	}()
+	// Drain whatever the caller left unread before Wait closes the pipe.
+	// As os/exec.Cmd.StdoutPipe documents, all reads from the pipe must
+	// complete before Wait is called, otherwise Wait closes the pipe
+	// upon child exit and truncates unread buffered bytes.
+	_, _ = io.Copy(io.Discard, counted)
 	waitErr := cmd.Wait()
-	// Wait closed the pipe once the child exited; closing it again only
-	// stops the drain when an orphan still holds the stream. Either way
-	// the drain is joined, never left behind.
-	_ = stdout.Close()
-	<-draining
 
 	result := Result{Duration: time.Since(started)}
 	result.Stdout = []byte{}
