@@ -11,6 +11,7 @@ import (
 	"github.com/carlosboeing/crossrev/internal/forge"
 	"github.com/carlosboeing/crossrev/internal/policy"
 	"github.com/carlosboeing/crossrev/internal/prstate"
+	"github.com/carlosboeing/crossrev/internal/ui"
 )
 
 // A leg that dies after posting its claim records the failure on the pull
@@ -94,6 +95,45 @@ func TestAnInterruptedReviewLegLeavesTheClaimResumable(t *testing.T) {
 	got := leg.Run(ctx, req)
 	if got.Err == nil {
 		t.Fatal("a cancelled run did not fail the leg")
+	}
+	if len(e.forge.edits) != 0 {
+		t.Fatalf("an interrupt rewrote the claim: %v", e.forge.edits)
+	}
+}
+
+// A child killed by a signal with the context still live — exit 137, no
+// cancellation — is an interrupt, not a harness failure. Signal deaths map to
+// 128+N (internal/exec/runner.go:29-33), and only the failure path that reads
+// Result.Interrupted turns them back into the cancellation the exit mapping
+// and the fatal-report skip already understand.
+func TestAnUncancelledSignalDeathReadsAsAnInterrupt(t *testing.T) {
+	e := newEnv(t)
+	writeAppGo(t, e.dir)
+	e.runner.script = []exec.Result{{ExitCode: 137, Stderr: []byte("killed\n")}}
+
+	got := runLeg(t, e, e.request(t))
+	if got.Err == nil {
+		t.Fatal("a killed harness did not fail the leg")
+	}
+	if !errors.Is(got.Err, context.Canceled) {
+		t.Fatalf("err = %v, want it to wrap context.Canceled", got.Err)
+	}
+	if msg := got.Err.Error(); strings.Contains(msg, "harness failed") || strings.Contains(msg, "authentication") {
+		t.Fatalf("an interrupt reads as a harness failure: %q", msg)
+	}
+	// The terminal must read an interrupt, not the generic refusal. A bare
+	// context.Canceled reaches refusalText as a plain error and prints
+	// "error  context canceled" with the doctor hint, so the error has to
+	// carry the interrupt refusal the terminal prints.
+	var fatal *ui.FatalError
+	if !errors.As(got.Err, &fatal) {
+		t.Fatalf("err = %T (%v), want it to carry the interrupt refusal", got.Err, got.Err)
+	}
+	if !strings.Contains(fatal.Reason, "interrupt") {
+		t.Fatalf("reason = %q, want it to name the interrupt", fatal.Reason)
+	}
+	if strings.Contains(fatal.Action, "doctor") {
+		t.Fatalf("action = %q, want no doctor hint on an interrupt", fatal.Action)
 	}
 	if len(e.forge.edits) != 0 {
 		t.Fatalf("an interrupt rewrote the claim: %v", e.forge.edits)
