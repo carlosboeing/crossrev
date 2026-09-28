@@ -50,7 +50,7 @@ func cycleCommand(ctx context.Context, out *ui.IO, doc harness.Document, req cli
 	}
 
 	driver := &cycle.Driver{
-		Review:  reviewAdapter{leg: reviewLeg(d, client, cfg), out: out},
+		Review:  reviewAdapter{leg: reviewLeg(d, client, cfg, out), out: out},
 		Resolve: resolveAdapter{leg: resolveLeg(d, client, cfg), out: out, author: author},
 		Loader:  &contextLoader{forge: client, show: d.show(), author: author},
 		Out:     out.Out,

@@ -105,8 +105,11 @@ func openLog(repo core.Slug, pr int, retention string, keep bool, leg string) *r
 // Runner is the model-facing one, which refuses a Spec whose environment names
 // a forge credential. Env is the allowlist above rather than this process's
 // environment, so a credential nobody named never reaches the child at all.
-func reviewLeg(d *deps, client forge.Forge, cfg *config.Config) *review.Leg {
-	return &review.Leg{
+// Progress prints each accepted batch while the pass runs: the leg's report
+// only prints after the pass settles, so without the sink a long pass shows
+// nothing on the terminal between the run header and the verdict.
+func reviewLeg(d *deps, client forge.Forge, cfg *config.Config, out *ui.IO) *review.Leg {
+	leg := &review.Leg{
 		Forge:   client,
 		VCS:     d.repo,
 		Harness: d.harnessDoc,
@@ -115,6 +118,10 @@ func reviewLeg(d *deps, client forge.Forge, cfg *config.Config) *review.Leg {
 		Runner:  d.model,
 		Env:     exec.Inherit(legEnvironment(cfg)),
 	}
+	if out != nil {
+		leg.Progress = out.Print
+	}
+	return leg
 }
 
 // legEnvironment is the allowlist plus the environment variables the configured
@@ -211,7 +218,7 @@ func reviewCommand(ctx context.Context, out *ui.IO, doc harness.Document, req cl
 		}
 	}
 
-	leg := reviewLeg(d, client, cfg)
+	leg := reviewLeg(d, client, cfg, out)
 	leg.Config = cfg
 	// No Workdir: an empty one pins a clean detached worktree at the pull
 	// request head, so the harness never runs in the operator checkout.

@@ -302,19 +302,38 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 		}
 		out.Marker = marker
 		selection = reportLedgerFallback(store, selection, out)
-		if raw := unionRawFindings(outcome.payloads); raw != nil {
-			// The accepted batch's findings go onto the claim the way the
-			// frozen path records its own before publishing: a failure in a
-			// later batch leaves them on the pull request, where the re-drive
-			// reads them back. The record stays a started claim — the pass
-			// has not settled.
+		// Every accepted batch moves the claim and the terminal: the batch
+		// position and the file counts, so a long pass shows progress while
+		// it runs rather than silence until the summary. The accepted
+		// batch's findings go onto the claim the way the frozen path
+		// records its own before publishing: a failure in a later batch
+		// leaves them on the pull request, where the re-drive reads them
+		// back. The record stays a started claim — the pass has not
+		// settled.
+		raw := unionRawFindings(outcome.payloads)
+		if raw != nil {
 			marker.Findings = raw
 			out.Marker.Findings = raw
-			recorded := marker
-			recorded.State = core.PassStarted
-			if _, err := l.editClaim(ctx, loaded.Repo, claimID, recordedFindingsBody(pass, loaded.Config), recorded, coverageOverflow(loaded)); err != nil {
-				return err
+		}
+		covered := 0
+		for _, unit := range scope.Required {
+			if acceptedIDs[unit.ID] {
+				covered++
 			}
+		}
+		recorded := marker
+		recorded.State = core.PassStarted
+		if _, err := l.editClaim(ctx, loaded.Repo, claimID, batchProgressBody(pass, loaded.Config, call, len(plan.Batches), covered, len(scope.Required), raw != nil), recorded, coverageOverflow(loaded)); err != nil {
+			return err
+		}
+		// The report only prints after the pass settles, so queuing here
+		// would leave the terminal silent while the pass runs. A wired
+		// sink prints now; without one the line queues with the rest.
+		line := ui.Say(batchProgressLine(call, len(plan.Batches), covered, len(scope.Required)))
+		if l.Progress != nil {
+			l.Progress(line)
+		} else {
+			out.Messages = append(out.Messages, line)
 		}
 	}
 	if plan.HaltReason != "" || len(plan.Carried) > 0 {
@@ -869,12 +888,25 @@ func findingsOnlyPayload(findings json.RawMessage) json.RawMessage {
 	return raw
 }
 
-// recordedFindingsBody is the claim body while a batched pass holds accepted
-// findings mid-run: the same findings-recorded record the frozen path writes,
-// with the pass still running underneath it.
-func recordedFindingsBody(pass int, cfg *config.Config) string {
-	return fmt.Sprintf("**crossrev — reviewing, %s**\n\nFindings recorded; the remaining batches are still running.",
-		PassLabel(pass, atoi(cfg.Get(".policy.max_passes_per_cycle"))))
+// batchProgressBody is the claim body after one accepted batch: the batch
+// position and the file counts, so a reader watching the pull request sees
+// the pass advance without waiting for the summary. The findings half keeps
+// the record the re-drive reads back when a later batch fails.
+func batchProgressBody(pass int, cfg *config.Config, call, total, covered, required int, findings bool) string {
+	status := "No findings so far"
+	if findings {
+		status = "Findings recorded"
+	}
+	return fmt.Sprintf("**crossrev — reviewing, %s**\n\n%s %s; the remaining batches are still running.",
+		PassLabel(pass, atoi(cfg.Get(".policy.max_passes_per_cycle"))),
+		batchProgressLine(call, total, covered, required), status)
+}
+
+// batchProgressLine is the per-batch progress both the terminal and the
+// claim report: the batch position in this run and the required files
+// covered so far, resumed verdicts included.
+func batchProgressLine(call, total, covered, required int) string {
+	return fmt.Sprintf("Batch %d of %d — covered %d of %d required files.", call, total, covered, required)
 }
 
 // mergePayloads folds every accepted batch payload into one findings
