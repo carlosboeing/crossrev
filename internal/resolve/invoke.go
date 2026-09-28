@@ -1,6 +1,7 @@
 package resolve
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -254,6 +255,14 @@ func (l *Leg) invoke(ctx context.Context, s *session, marker prstate.Marker, wor
 		shapeBudget = 2
 	}
 	semanticBudget := 1
+	// transientBudget is the one more attempt a server-side or transport
+	// failure earns: the harness failed before answering rather than
+	// answering badly. Authentication, quota and refusal errors never draw
+	// from it.
+	transientBudget := 1
+	// transientRefused sums the usage buckets of the attempts turned away
+	// as transient, so the accepted envelope reports every call it cost.
+	var transientRefused *harness.Usage
 
 	work := l.Git.WithDir(workdir)
 	snapIndex := filepath.Join(tmp, "index")
@@ -379,8 +388,46 @@ func (l *Leg) invoke(ctx context.Context, s *session, marker prstate.Marker, wor
 			if env.Error != nil && *env.Error != "" {
 				msg = *env.Error
 			}
+			if transientBudget > 0 && harness.IsTransientHarnessError(msg) {
+				transientBudget--
+				transientRefused = foldTransientAttempt(transientRefused, env.Usage)
+				if reset := l.retryReset(ctx, work, snapIndex, snapTree, s.settings.Harness, msg); reset != nil {
+					reset.Messages = append(msgs, reset.Messages...)
+					return *reset
+				}
+				// ui_warn, the pair kept apart. A failure before any answer
+				// is a server-side or transport failure worth asking once
+				// more about, never model drift.
+				msgs = append(msgs, ui.Warn(
+					fmt.Sprintf("%s hit a transient harness failure — %s", s.settings.Harness, msg),
+					"The harness failed before answering rather than answering badly, so this looks like a server-side or transport failure. Anything it edited has been put back, and it is being asked once more; a second failure is fatal."))
+				continue
+			}
 			out := refuse(fmt.Sprintf("the %s harness failed: %s", s.settings.Harness, msg),
 				"If the error above mentions authentication, a token or a 401, the harness is installed and cannot log in.")
+			out.Messages = append(msgs, out.Messages...)
+			return out
+		}
+		// A SUCCESS that answered nothing carries no resolutions to record:
+		// empty output is never a clean resolve. A harness that constrains
+		// its own output failing to produce any is worth asking once more
+		// about before the validator below ever sees it.
+		if len(bytes.TrimSpace(env.Payload)) == 0 {
+			if transientBudget > 0 {
+				transientBudget--
+				transientRefused = foldTransientAttempt(transientRefused, env.Usage)
+				if reset := l.retryReset(ctx, work, snapIndex, snapTree, s.settings.Harness, "the answer was empty"); reset != nil {
+					reset.Messages = append(msgs, reset.Messages...)
+					return *reset
+				}
+				msgs = append(msgs, ui.Warn(
+					fmt.Sprintf("%s answered successfully with an empty payload — empty output is never a clean resolve", s.settings.Harness),
+					"The harness constrains its own output and still answered nothing, so this looks like a harness failure rather than model drift. Anything it edited has been put back, and it is being asked once more; a second empty answer is fatal."))
+				continue
+			}
+			msgs = append(msgs, l.invokeAbort(ctx, work, snapIndex, snapTree)...)
+			out := refuse(fmt.Sprintf("%s twice answered successfully with an empty payload — empty output is never a clean resolve", s.settings.Harness),
+				"Both answers were empty, so there is nothing to record and nothing the retry could have quoted back: this is a harness failure rather than model drift. Nothing has been written to the pull request, and the rejected attempts' edits have been put back. Re-run the leg.")
 			out.Messages = append(msgs, out.Messages...)
 			return out
 		}
@@ -390,6 +437,7 @@ func (l *Leg) invoke(ctx context.Context, s *session, marker prstate.Marker, wor
 			if mapErr != nil {
 				return wrapErr(mapErr)
 			}
+			foldTransientRefused(&env, transientRefused)
 			return Result{
 				Outcome:     OutcomeInvoked,
 				Pass:        s.pass,
@@ -469,6 +517,56 @@ func (l *Leg) retryReset(ctx context.Context, work Git, index, tree, harnessName
 		fmt.Sprintf("%s needs asking again, and the working tree it already edited could not be put back — %s", harnessName, problem),
 		"Retrying on top of a discarded attempt's edits would commit changes no accepted answer describes. Nothing has been written to the pull request; check `git status` in the checkout and re-run the leg.")
 	return &out
+}
+
+// foldTransientAttempt joins one transient attempt's usage buckets into the
+// running sum, answering the sum to keep. A nil record contributes nothing.
+//
+// Each leg carries its own copy of this helper against the same review-leg
+// citation rather than sharing one across the tier boundary.
+func foldTransientAttempt(sum, attempt *harness.Usage) *harness.Usage {
+	if attempt == nil {
+		return sum
+	}
+	if sum == nil {
+		fresh := *attempt
+		return &fresh
+	}
+	addUsageBuckets(sum, attempt)
+	return sum
+}
+
+// foldTransientRefused carries the transient attempts' buckets into the
+// accepted envelope, so one prompt's envelope reports every call it cost.
+// Identity stays on the accepted attempt: the non-bucket usage fields are
+// untouched.
+func foldTransientRefused(envelope *harness.Envelope, refused *harness.Usage) {
+	if refused == nil {
+		return
+	}
+	if envelope.Usage == nil {
+		total := refused.WithTotal()
+		envelope.Usage = &total
+		envelope.Tokens = total.Total
+		return
+	}
+	sum := *envelope.Usage
+	addUsageBuckets(&sum, refused)
+	total := sum.WithTotal()
+	envelope.Usage = &total
+	envelope.Tokens = total.Total
+}
+
+// addUsageBuckets folds src's six buckets into dst. Non-bucket fields and
+// the total stay the caller's business: dst keeps its own record with the
+// summed buckets.
+func addUsageBuckets(dst, src *harness.Usage) {
+	dst.InputFresh += src.InputFresh
+	dst.CacheRead += src.CacheRead
+	dst.CacheWrite5m += src.CacheWrite5m
+	dst.CacheWrite1h += src.CacheWrite1h
+	dst.CacheWriteUnsplit += src.CacheWriteUnsplit
+	dst.Output += src.Output
 }
 
 // invokeAbort is _run_invoke_abort (lib/run.sh:704-710): the way out when an
