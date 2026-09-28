@@ -290,7 +290,16 @@ func SummaryBody(findings []Finding, marker prstate.Marker, ctx RenderContext) s
 		if reason == "" {
 			reason = "No reason was given."
 		}
-		b.WriteString(alert("WARNING", fmt.Sprintf("**The review could not be completed:** %s The loop halts here and a human is needed. Nothing in this comment is a judgement about the code.", reason)))
+		harn, _ := marker.Harness.Get()
+		if resetTime, ok := harness.QuotaReset(harn, reason); ok {
+			cmd := "crossrev review"
+			if ctx.PR > 0 {
+				cmd = fmt.Sprintf("crossrev review --pr %d", ctx.PR)
+			}
+			b.WriteString(alert("WARNING", fmt.Sprintf("**The review could not be completed:** %s The loop halts here — resumes after %s, then run `%s`. Nothing in this comment is a judgement about the code.", reason, resetTime, cmd)))
+		} else {
+			b.WriteString(alert("WARNING", fmt.Sprintf("**The review could not be completed:** %s The loop halts here and a human is needed. Nothing in this comment is a judgement about the code.", reason)))
+		}
 	default:
 		b.WriteString(alert("CAUTION", fmt.Sprintf("**%d %s need resolving.** A second agent now verifies every finding below against the codebase and either fixes it, skips it, defers it, or explains why it is wrong. It may change code for the %d at or above `min_fix_severity` (%s); the rest are verified and reported, never silently dropped.", n, noun, actionable, ctx.MinFix)))
 	}

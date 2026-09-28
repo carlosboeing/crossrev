@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/carlosboeing/crossrev/internal/core"
 	"github.com/carlosboeing/crossrev/internal/prstate"
 )
 
@@ -143,6 +144,41 @@ func TestRender(t *testing.T) {
 			t.Errorf("summary footnote missing trailing space:\n got: %q\nwant containing: %q", got, wantFootnote)
 		}
 	})
+}
+
+// A quota stop names its resume time and next command instead of saying
+// "a human is needed".
+func TestReviewSummaryBodyQuotaStopNamesResumeTime(t *testing.T) {
+	marker := prstate.Marker{
+		Verdict:       prstate.Some(string(core.VerdictBlocked)),
+		BlockedReason: prstate.Some("the codex harness failed: 429 rate limit exceeded"),
+		Harness:       prstate.Some("codex"),
+	}
+	findings := json.RawMessage(`[]`)
+	repo := mustSlug(t)
+	got := reviewSummaryBody(findings, marker, repo, 42, core.SeverityMedium, 3, commentCoverage{})
+	wantAlert := "The loop halts here — resumes after 5h, then run `crossrev review --pr 42`. Nothing in this comment is a judgement about the code."
+	if !strings.Contains(got, wantAlert) {
+		t.Errorf("summary body missing quota resume line:\n got: %s\nwant containing: %s", got, wantAlert)
+	}
+	if strings.Contains(got, "a human is needed") {
+		t.Errorf("a quota stop should not claim a human is needed:\n%s", got)
+	}
+
+	// Explicit reset in reason
+	marker.BlockedReason = prstate.Some("the codex harness failed: 429 rate limit exceeded (resets 2h 15m)")
+	gotExplicit := reviewSummaryBody(findings, marker, repo, 42, core.SeverityMedium, 3, commentCoverage{})
+	wantExplicit := "The loop halts here — resumes after 2h 15m, then run `crossrev review --pr 42`. Nothing in this comment is a judgement about the code."
+	if !strings.Contains(gotExplicit, wantExplicit) {
+		t.Errorf("summary body missing explicit reset line:\n got: %s\nwant containing: %s", gotExplicit, wantExplicit)
+	}
+
+	// Non-quota failure still says a human is needed
+	marker.BlockedReason = prstate.Some("the harness CLI is not installed")
+	gotNonQuota := reviewSummaryBody(findings, marker, repo, 42, core.SeverityMedium, 3, commentCoverage{})
+	if !strings.Contains(gotNonQuota, "The loop halts here and a human is needed.") {
+		t.Errorf("non-quota stop missing human is needed alert:\n%s", gotNonQuota)
+	}
 }
 
 func repoRoot(t *testing.T) string {
