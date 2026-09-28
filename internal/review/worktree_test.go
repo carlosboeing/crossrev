@@ -59,6 +59,9 @@ func TestPinnedWorktreeRunsHarnessAtHead(t *testing.T) {
 	if _, err := os.Stat(dirs[0]); !os.IsNotExist(err) {
 		t.Errorf("a clean finish left the worktree at %s", dirs[0])
 	}
+	if got.KeptWorktree != "" {
+		t.Errorf("a clean finish kept %q for debugging, want none", got.KeptWorktree)
+	}
 	if len(e.vcs.fetchCalls) != 0 {
 		t.Errorf("fetched a head the clone holds: %v", e.vcs.fetchCalls)
 	}
@@ -84,6 +87,60 @@ func TestFailedLegKeepsPinnedWorktree(t *testing.T) {
 	}
 	if _, err := os.Stat(dirs[0]); err != nil {
 		t.Errorf("a failed leg removed its worktree at %s: %v", dirs[0], err)
+	}
+	if got.KeptWorktree != dirs[0] {
+		t.Errorf("kept worktree = %q, want the failed leg's own %q", got.KeptWorktree, dirs[0])
+	}
+}
+
+// TestFailedLegReportsTheSelectedWorktree proves the kept path is the
+// directory selectWorktree actually selected: with the canonical review
+// path preserved as a dirty occupant, the failed leg works in the suffixed
+// directory beside it, and that is the path the caller is told to report.
+func TestFailedLegReportsTheSelectedWorktree(t *testing.T) {
+	e := newEnv(t)
+	state := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", state)
+	canonical, err := vcs.ReviewWorktreeDir(mustSlug(t), 42)
+	if err != nil {
+		t.Fatalf("ReviewWorktreeDir: %v", err)
+	}
+	if err := os.MkdirAll(canonical, 0o755); err != nil {
+		t.Fatalf("lay the occupant: %v", err)
+	}
+	sentinel := filepath.Join(canonical, "leftover.txt")
+	if err := os.WriteFile(sentinel, []byte("a failed attempt left this\n"), 0o644); err != nil {
+		t.Fatalf("plant the leftover: %v", err)
+	}
+	e.vcs.reusable = map[string]bool{canonical: true}
+	e.vcs.clean = map[string]bool{canonical: false}
+	if e.vcs.heads == nil {
+		e.vcs.heads = map[string]string{}
+	}
+	e.vcs.heads[canonical] = headSHA
+	e.validate = func([]byte, validate.ReviewExpectations) error {
+		return &validate.ShapeError{Problem: "no verdict key"}
+	}
+	leg := e.leg(t)
+	got := leg.Run(context.Background(), pinnedReq(t, e))
+	if got.Err == nil {
+		t.Fatal("wanted a shape failure")
+	}
+	specs := e.runner.Specs()
+	if len(specs) != 1 {
+		t.Fatalf("harness calls = %d, want 1", len(specs))
+	}
+	if specs[0].Dir == canonical {
+		t.Fatalf("the harness ran in the preserved occupant %s", canonical)
+	}
+	if got.KeptWorktree != specs[0].Dir {
+		t.Errorf("kept worktree = %q, want the selected %q", got.KeptWorktree, specs[0].Dir)
+	}
+	if _, err := os.Stat(specs[0].Dir); err != nil {
+		t.Errorf("a failed leg removed its own worktree at %s: %v", specs[0].Dir, err)
+	}
+	if _, err := os.Stat(sentinel); err != nil {
+		t.Errorf("the preserved occupant was not preserved: %v", err)
 	}
 }
 

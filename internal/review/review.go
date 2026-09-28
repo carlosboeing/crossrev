@@ -155,7 +155,8 @@ func (l *Leg) Run(ctx context.Context, req Request) (out Result) {
 			// The leg-end removal hook: a clean finish removes the
 			// worktree, a failed leg keeps it for debugging. lib/run.sh:96-99
 			// keeps the resolve worktree the same way, and the command
-			// reports the kept directory.
+			// reports the kept directory off Result.KeptWorktree.
+			out.KeptWorktree = wt
 			defer func() {
 				if out.Err != nil {
 					if l.Log != nil {
@@ -164,6 +165,7 @@ func (l *Leg) Run(ctx context.Context, req Request) (out Result) {
 					return
 				}
 				_ = l.VCS.RemoveWorktree(ctx, wt)
+				out.KeptWorktree = ""
 				if l.Log != nil {
 					l.Log.Event("worktree", "removed "+wt)
 				}

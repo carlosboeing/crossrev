@@ -72,6 +72,14 @@ type Result struct {
 	// claims to the enrich-and-publish path. Nil on the frozen path and on
 	// a bounded halt.
 	Covered any
+	// KeptWorktree is the pinned worktree a failed leg kept for debugging:
+	// the directory selectWorktree actually selected, not the canonical
+	// path it was selected from. Empty when the leg created none (an
+	// explicit workdir override stays the operator's), when the finish
+	// was clean (the leg-end hook removed it), or when the leg never
+	// reached the worktree. The composition root reports exactly this
+	// path, so it never names a preserved occupant this run worked beside.
+	KeptWorktree string
 }
 
 // Context is the one base/head load a review starts from (lib/run.sh:233-319).

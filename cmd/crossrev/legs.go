@@ -221,11 +221,12 @@ func reviewCommand(ctx context.Context, out *ui.IO, doc harness.Document, req cl
 	if result.Nudge && !req.NoTips {
 		upgradeNudge(out, cfg)
 	}
-	// The worktree the review leg works in is named from the same two facts
-	// the leg derives it from, because a failed leg keeps its worktree for
-	// debugging and this process holds no other handle on it.
-	worktree, _ := vcs.WorktreeDir(repo, req.PR)
-	closeRun(out, d.log, status, result.Err, worktree)
+	// The worktree a failed leg kept for debugging is the directory the
+	// leg actually selected, which this process holds no other handle on:
+	// after a preserved occupant the files are in a suffixed directory
+	// beside the canonical path, and re-deriving that path here would name
+	// the preserved tree this run worked beside instead of its own.
+	closeRun(out, d.log, status, result.Err, result.KeptWorktree)
 	return status, err
 }
 
