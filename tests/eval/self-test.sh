@@ -390,5 +390,122 @@ is "the runner exits clean with a space in the results path" "$space_rc" "0"
 is "the base map is written with a space in the results path" \
   "$(jq -e '.["refresh-helper"] | has("base_prime")' "$SPACE_R/base-map.json" >/dev/null 2>&1 && echo yes || echo no)" "yes"
 
+# --- live runs keep the stand-in and the frozen copy --------------------------
+#
+# --live changes only the harnesses: the forge stays tests/stub/gh seeded
+# empty per case and arm, and the repository stays a fresh copy of the frozen
+# bare repository with the synthetic base'. A fake harness CLI on PATH (not
+# the suite stub) answers the legs, and a tripwire gh earlier on PATH fails
+# the test if the ambient gh is ever called.
+printf '\nlive run against the stand-in\n'
+LIVEBIN="$T/livebin"
+TRIPBIN="$T/tripbin"
+mkdir -p "$LIVEBIN" "$TRIPBIN"
+cat >"$TRIPBIN/gh" <<EOF
+#!/usr/bin/env bash
+printf 'tripwire: ambient gh called: %s\n' "\$*" >>"$T/tripwire.log"
+exit 99
+EOF
+chmod +x "$TRIPBIN/gh"
+: >"$T/tripwire.log"
+# The fake answers from the payload files through the wrapper snapshot, the
+# way tests/stub/claude does, and runs the resolve edit in the checkout —
+# but it is its own file, so the run proves harness names resolve to PATH
+# rather than to the suite stub. The answering model is the requested one.
+cat >"$LIVEBIN/claude" <<EOF
+#!/usr/bin/env bash
+set -uo pipefail
+source "$ROOT/tests/stub/_stub-env.sh"
+[[ "\${1:-}" == "--version" ]] && { printf '9.9.9 (live-test fake)\n'; exit 0; }
+printf '%s\n' "\$*" >>"$T/live-claude.log"
+prompt=""
+if [[ ! -t 0 ]]; then prompt="\$(cat)"; fi
+[[ -n "\$prompt" ]] || prompt="\${!#}"
+requested=""; prev=""
+for a in "\$@"; do [[ "\$prev" == "--model" ]] && { requested="\$a"; break; }; prev="\$a"; done
+payload=""; model="\${requested:-live-fake-model}"
+if [[ "\$prompt" == *"You are the review leg"* ]]; then
+  [[ -n "\${CROSSREV_REVIEW_PAYLOAD:-}" ]] && payload="\$CROSSREV_REVIEW_PAYLOAD"
+elif [[ "\$prompt" == *"You are the resolve leg"* ]]; then
+  [[ -n "\${CROSSREV_RESOLVE_PAYLOAD:-}" ]] && payload="\$CROSSREV_RESOLVE_PAYLOAD"
+  [[ -n "\${CROSSREV_RESOLVE_EDIT:-}" ]] && bash "\$CROSSREV_RESOLVE_EDIT" || true
+fi
+if [[ -z "\$payload" || ! -f "\$payload" ]]; then
+  jq -cn '{is_error:true, result:"live fake has no payload"}'
+  exit 1
+fi
+jq -cn --arg r "\$(cat "\$payload")" --arg m "\$model" \
+  '{result:\$r, is_error:false, provider:"live-fake", total_cost_usd:0.12,
+    modelUsage:{(\$m):{inputTokens:10, outputTokens:10,
+      cacheReadInputTokens:0, cacheCreationInputTokens:0,
+      canonicalModel:\$m}},
+    usage:{cache_creation:{ephemeral_5m_input_tokens:0,
+      ephemeral_1h_input_tokens:0},
+      output_tokens_details:{thinking_tokens:0}}}'
+EOF
+chmod +x "$LIVEBIN/claude"
+: >"$T/live-claude.log"
+
+# Live runs the full case without the planted arm (planted stays refused
+# live) and the first arm only, to keep the loop short.
+MANIFEST_LIVE="$T/manifest-live.json"
+jq '.cases |= map(select(.mode == "full")) | .cases[0].arms |= .[0:1]' \
+  "$MANIFEST" >"$MANIFEST_LIVE"
+ASSIGN="$T/assignments.json"
+jq -n '[{"case":"refresh-helper","arm":"arm-a","reviewer":"live-reviewer","resolver":"live-resolver"}]' \
+  >"$ASSIGN"
+
+# The suite stub dir sits on PATH too: the live run must strip it so the
+# harness names reach the fake, while gh stays on the stand-in shim.
+printf '\nrunning the live loop\n'
+RL="$T/results-live"
+PATH="$TRIPBIN:$LIVEBIN:$ROOT/tests/stub:$PATH" bash "$RUNNER" --live \
+  --manifest "$MANIFEST_LIVE" --results-dir "$RL" --bin "$BIN" \
+  --assignments "$ASSIGN" >"$T/runner-live2-out.txt" 2>&1
+live2_rc=$?
+if (( live2_rc != 0 )); then
+  printf '\n--- live runner output ---\n'
+  cat "$T/runner-live2-out.txt"
+  printf '%s\n' "--- end live runner output (kept tree: $T) ---"
+fi
+is "the live runner exits clean" "$live2_rc" "0"
+LD="$RL/refresh-helper/arm-a"
+is "live results exist" "$([[ -d "$LD" ]] && echo yes || echo no)" "yes"
+is "live reaches the converged label" \
+  "$(jq -r '.terminal // empty' "$LD/result.json" 2>/dev/null)" "crossrev/converged"
+has "live ran review then resolve then review" \
+  "$(jq -r '.legs | join(",")' "$LD/result.json" 2>/dev/null)" "review,resolve,review"
+is "the fake harness answered every leg" \
+  "$(( $(wc -l <"$T/live-claude.log" 2>/dev/null || printf 0) >= 3 ? 1 : 0 ))" "1"
+is "the ambient gh was never called" \
+  "$([[ ! -s "$T/tripwire.log" ]] && echo yes || echo no)" "yes"
+has "the live markers came through the stand-in" \
+  "$(cat "$LD/markers.json" 2>/dev/null)" "issues-remain"
+is "live commits the same synthetic base-prime" \
+  "$(jq -r '.base_prime // empty' "$LD/result.json" 2>/dev/null)" "$BASE_PRIME"
+is "the live checkout points at the github.com address" \
+  "$(git -C "$LD/work/checkout" config --get remote.origin.url 2>/dev/null)" \
+  "https://github.com/acme/widget.git"
+has "the live push guard rewrites into the frozen copy" \
+  "$(git -C "$LD/work/checkout" config --get-regexp pushInsteadOf 2>/dev/null)" \
+  "$LD/work/origin.git"
+has "the live fix landed in the frozen copy" \
+  "$(git --git-dir="$LD/work/origin.git" log --format=%s refs/heads/feature 2>/dev/null)" \
+  "blue"
+has "the live checkout ran from the frozen copy" \
+  "$(cat "$LD/work/checkout/app.ts" 2>/dev/null)" "blue"
+is "the live run kept the assignments file" \
+  "$([[ -f "$RL/assignments.json" ]] && echo yes || echo no)" "yes"
+
+BAD_LIVE="$T/manifest-live-bad-head.json"
+jq '.cases[0].head = "0000000000000000000000000000000000000000"' \
+  "$MANIFEST_LIVE" >"$BAD_LIVE"
+PATH="$TRIPBIN:$LIVEBIN:$PATH" bash "$RUNNER" --live \
+  --manifest "$BAD_LIVE" --results-dir "$T/results-live-bad" --bin "$BIN" \
+  --assignments "$ASSIGN" >"$T/runner-live-bad-out.txt" 2>&1
+bad_live_rc=$?
+is "a live head that matches nothing refuses the run" "$(( bad_live_rc != 0 ? 1 : 0 ))" "1"
+has "and the live refusal names the head" "$(cat "$T/runner-live-bad-out.txt")" "head"
+
 printf '\n  %d passed, %d failed\n\n' "$pass" "$fail"
 (( fail == 0 ))

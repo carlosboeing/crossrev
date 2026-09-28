@@ -29,11 +29,16 @@
 # Offline (the default) drives the suite's stubs: tests/stub/gh as the
 # GitHub stand-in with a freshly seeded empty state directory per arm, and
 # the harness stubs answering from the manifest's payloads, so no model is
-# ever called. A live run (--live) uses the ambient gh and harness CLIs
-# against the current checkout instead, and is refused without an
-# --assignments file recording the four (case, arm, reviewer, resolver)
-# assignments; that file is copied into the results. Planted cases are
-# refused live: they need the stand-in to hold the marker.
+# ever called. A live run (--live) keeps the stand-in and the frozen copy —
+# the same fresh copy, pushInsteadOf, synthetic base', seeded-empty stand-in,
+# private XDG homes and head check — and changes only the harnesses: the real
+# harness CLIs on PATH instead of the stubs, with the model pins from the
+# manifest. It is refused without an --assignments file recording the four
+# (case, arm, reviewer, resolver) assignments; that file is copied into the
+# results. The ambient gh is never used on either path. Planted cases are
+# refused live. The harness CLIs keep the operator's own login because their
+# configuration lives outside the two private XDG homes: HOME, XDG_DATA_HOME
+# and the credential environment are inherited untouched.
 #
 # tests/run.sh never runs this directory (it globs only tests/test-*.sh)
 # and CI never runs it either.
@@ -143,7 +148,7 @@ for (( ci=0; ci<ncases; ci++ )); do
   [[ "$(jq -r --argjson i "$ci" '.cases[$i].mode' "$MANIFEST")" =~ ^(full|planted)$ ]] \
     || eval_fail ".cases[$ci].mode must be full or planted"
   if (( LIVE )) && [[ "$(jq -r --argjson i "$ci" '.cases[$i].mode' "$MANIFEST")" == "planted" ]]; then
-    printf 'run-loop: live run refused: case %s is planted-findings mode, which needs the stand-in\n' \
+    printf 'run-loop: live run refused: case %s is planted-findings mode, which is refused live\n' \
       "$(jq -r --argjson i "$ci" '.cases[$i].id' "$MANIFEST")" >&2
     exit 2
   fi
@@ -240,8 +245,8 @@ backlog:
 EOF
 }
 
-# Labels currently on the pull request, one per line. Offline this reads the
-# stand-in's live state; live it asks GitHub.
+# Labels currently on the pull request, one per line. Both paths read the
+# stand-in's live state through GH, which always names the stand-in.
 eval_labels() {
   "$GH" api "repos/$REPO/issues/$PR/labels" --jq '.[].name' 2>/dev/null || true
 }
@@ -364,7 +369,6 @@ eval_offline_setup() {
 # read. Records the new head for the caller.
 eval_repoint() {
   local arm_dir="$1"
-  (( LIVE )) && return 1
   local new_head
   new_head="$(git --git-dir="$arm_dir/work/origin.git" rev-parse "$ARM_HEAD_BRANCH")"
   [[ "$new_head" == "$EVAL_HEAD" ]] && return 1
@@ -603,9 +607,8 @@ eval_planted_arm() {
 # --- artifact collection -----------------------------------------------------------
 #
 # Markers, findings, resolutions, run logs, read logs and usage per case and
-# arm. Offline they are read out of the stand-in's state directory (the same
-# bytes the legs wrote); live they are read back through the GitHub API in
-# the same shapes.
+# arm, read out of the stand-in's state directory (the same bytes the legs
+# wrote) on both paths.
 
 eval_collect_offline() {
   local arm_dir="$1"
@@ -655,34 +658,6 @@ eval_collect_offline() {
   cp "$ARM_GH_LOG" "$arm_dir/reads.log"
 }
 
-eval_collect_live() {
-  local arm_dir="$1"
-  "$GH" api --paginate "repos/$REPO/issues/$PR/comments" \
-    --jq '[.[] | {id, author:.user.login, body}] | map(select(.body | contains("<!-- crossrev: ")))' \
-    >"$arm_dir/markers.json" 2>/dev/null || printf '[]\n' >"$arm_dir/markers.json"
-  "$GH" api graphql -F "owner=${REPO%%/*}" -F "name=${REPO##*/}" -F "number=$PR" \
-    -f query='query($owner:String!,$name:String!,$number:Int!) { repository(owner:$owner,name:$name) { pullRequest(number:$number) { reviewThreads(first:100) { nodes { id isResolved path line comments(first:30) { nodes { databaseId body author { login } } } } } } } }' \
-    --jq '[.data.repository.pullRequest.reviewThreads.nodes[] |
-      {thread_id:.id, isResolved, path, line,
-       comments:[.comments.nodes[] | {id:.databaseId, author:.author.login, body}]}]' \
-    >"$arm_dir/findings.json" 2>/dev/null || printf '[]\n' >"$arm_dir/findings.json"
-  jq -c '{resolve_markers:[], replies:[.[].comments[1:][]?]}' \
-    "$arm_dir/findings.json" >"$arm_dir/resolutions.json"
-  jq --slurpfile m "$arm_dir/markers.json" \
-    '.resolve_markers = [$m[0][] | .body
-      | capture("<!-- crossrev: (?<marker>.*) -->").marker
-      | fromjson? // empty | select(.leg == "resolve")]' \
-    "$arm_dir/resolutions.json" >"$arm_dir/resolutions.tmp" \
-    && mv "$arm_dir/resolutions.tmp" "$arm_dir/resolutions.json"
-  jq -c '[.[] | .body
-    | capture("<!-- crossrev: (?<marker>.*) -->").marker
-    | fromjson? // empty | select(.leg != null)
-    | {pass, leg, harness, model, model_reported,
-       tokens:(.tokens // null),
-       cost_usd:(.usage.cost_usd // null)}]' \
-    "$arm_dir/markers.json" >"$arm_dir/usage.json"
-}
-
 eval_write_result() {
   local arm_dir="$1" case_id="$2" arm_id="$3" mode="$4" base="$5" base_prime="$6"
   local legs_json labels_json rel
@@ -709,8 +684,29 @@ eval_write_result() {
 
 # --- main driver ---------------------------------------------------------------------
 
+# The forge is the stand-in on both paths: GH names the stub directly for the
+# runner's own reads, and PATH decides what the legs' `gh` finds. Offline the
+# whole stub directory goes first, so the harness names answer from the
+# manifest's payloads. Live it is stripped, so the harness names resolve to
+# the real CLIs on PATH, and a shim directory holding only `gh` keeps every
+# `gh` call — the runner's and the legs' — on the stand-in. The ambient gh is
+# never used on either path.
 if (( LIVE )); then
-  GH="gh"
+  GH="$EVAL_STUB_DIR/gh"
+  EVAL_LIVE_BIN="$RESULTS_DIR/live-bin"
+  mkdir -p "$EVAL_LIVE_BIN" || { printf 'run-loop: cannot create %s\n' "$EVAL_LIVE_BIN" >&2; exit 2; }
+  ln -sf "$EVAL_STUB_DIR/gh" "$EVAL_LIVE_BIN/gh"
+  _eval_path=":$PATH:"
+  _eval_path="${_eval_path//:$EVAL_STUB_DIR:/:}"
+  _eval_path="${_eval_path#:}"
+  _eval_path="${_eval_path%:}"
+  if [[ -n "$_eval_path" ]]; then
+    PATH="$EVAL_LIVE_BIN:$_eval_path"
+  else
+    PATH="$EVAL_LIVE_BIN"
+  fi
+  export PATH
+  unset _eval_path
 else
   GH="$EVAL_STUB_DIR/gh"
   case ":$PATH:" in
@@ -768,42 +764,32 @@ for (( ci=0; ci<ncases; ci++ )); do
     printf 'run-loop: case %s arm %s (%s)\n' "$case_id" "$arm_id" "$mode"
 
     if (( LIVE )); then
-      # Live: the current checkout is the repository under test. Policy
-      # comes from its real base revision, so no synthetic base' is
-      # committed and base_prime stays null in the results.
-      command -v gh >/dev/null 2>&1 \
-        || { eval_fail_result "$arm_dir" "$case_id" "$arm_id" "$mode" "$base" "$head" "gh is not on PATH";
-             failures=$((failures+1)); printf '%s\n' "$arm_dir/result.json" >>"$RESULT_LIST"; continue; }
-      git rev-parse --show-toplevel >/dev/null 2>&1 \
-        || { eval_fail_result "$arm_dir" "$case_id" "$arm_id" "$mode" "$base" "$head" "not inside a git checkout";
-             failures=$((failures+1)); printf '%s\n' "$arm_dir/result.json" >>"$RESULT_LIST"; continue; }
-      live_head="$(gh pr view "$PR" --repo "$REPO" --json headRefOid --jq .headRefOid 2>/dev/null || true)"
-      if [[ "$live_head" != "$head" ]]; then
+      # Live keeps the stand-in forge and the frozen copy: the same setup,
+      # the same stand-in reads, the same collection. Only the harnesses
+      # differ — PATH resolves them to the real CLIs (see the startup shim),
+      # with the model pins from the manifest committed on base'.
+      eval_offline_env "$arm_dir"
+      if ! eval_offline_setup "$case_id" "$base" "$head" "$base_branch" "$head_branch" "$arm_dir"; then
         eval_fail_result "$arm_dir" "$case_id" "$arm_id" "$mode" "$base" "$head" \
-          "head is $live_head, the manifest wants $head; refusing";
+          "setup refused (see above)";
         failures=$((failures+1)); printf '%s\n' "$arm_dir/result.json" >>"$RESULT_LIST"; continue
       fi
-      cat >"$arm_dir/gh-wrap" <<WRAP
-#!/usr/bin/env bash
-printf '%s\n' "\$*" >>"$arm_dir/reads.log"
-exec gh "\$@"
-WRAP
-      chmod +x "$arm_dir/gh-wrap"
-      : >"$arm_dir/reads.log"
-      GH="$arm_dir/gh-wrap"
-      WRAPPER="$BIN"
-      ARM_CHECKOUT="$(git rev-parse --show-toplevel)"
-      ARM_BASE_PRIME=""
+      export CROSSREV_GH_LOG="$ARM_GH_LOG" CROSSREV_GH_ROUTES="$ARM_ROUTES"
+      export CROSSREV_GH_STATE="$ARM_STATE" CROSSREV_GH_AUTHOR="$TRUSTED"
+      export CROSSREV_PROMPT_LOG="$arm_dir/prompt.log" CROSSREV_ARGV_LOG="$arm_dir/argv.log"
+      export CROSSREV_BROWSER_LOG="$arm_dir/browser.log"
+      : >"$arm_dir/prompt.log" "$arm_dir/argv.log" "$arm_dir/browser.log"
+      GH="$EVAL_STUB_DIR/gh"
+      WRAPPER="$(eval_wrapper_for "$BIN" "$arm_dir/wrap")"
       EVAL_HEAD="$head"
-      export CROSSREV_GH_LOG=/dev/null
       if [[ "$mode" == "planted" ]]; then
         eval_fail_result "$arm_dir" "$case_id" "$arm_id" "$mode" "$base" "$head" \
-          "planted-findings mode needs the stand-in; refused live";
+          "planted-findings mode is refused live";
         failures=$((failures+1)); printf '%s\n' "$arm_dir/result.json" >>"$RESULT_LIST"; continue
       fi
-      eval_full_loop "$arm_dir" "$arm_json"
-      eval_collect_live "$arm_dir"
-      eval_write_result "$arm_dir" "$case_id" "$arm_id" "$mode" "$base" ""
+      eval_full_loop "$arm_dir" "$arm_json" || failures=$((failures+1))
+      eval_collect_offline "$arm_dir"
+      eval_write_result "$arm_dir" "$case_id" "$arm_id" "$mode" "$base" "$ARM_BASE_PRIME"
     else
       eval_offline_env "$arm_dir"
       if ! eval_offline_setup "$case_id" "$base" "$head" "$base_branch" "$head_branch" "$arm_dir"; then
