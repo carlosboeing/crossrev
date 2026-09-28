@@ -128,21 +128,28 @@ func (r *Repository) WorktreeReusable(ctx context.Context, dir string, revision 
 }
 
 // WorktreeClean reports whether the worktree at dir holds no uncommitted
-// changes: `git status --porcelain` with empty output. Tracked edits, staged
-// entries and untracked files all count as unclean, because any of them would
-// be read as the pull request's own files by a leg that reuses the tree.
+// changes: `git status --porcelain --untracked-files=all` with empty output.
+// Tracked edits, staged entries and untracked files all count as unclean,
+// because any of them would be read as the pull request's own files by a leg
+// that reuses the tree.
+//
+// The untracked-files mode is spelled out because bare `--porcelain` honors
+// `status.showUntrackedFiles`: set to `no`, an untracked leftover produces
+// empty output, the next pass reuses the tree, and a clean finish deletes
+// the leftovers. Porcelain stability covers color and relative paths, not
+// this setting.
 //
 // A refused status is an error rather than unclean. The caller reads this
 // only for a directory WorktreeReusable already proved is this clone's own
 // worktree, so git failing to answer means something unexpected broke, not
 // that the tree is dirty.
 func (r *Repository) WorktreeClean(ctx context.Context, dir string) (bool, error) {
-	output, err := r.git.At(dir).Run(ctx, "status", "--porcelain")
+	output, err := r.git.At(dir).Run(ctx, "status", "--porcelain", "--untracked-files=all")
 	if err != nil {
 		return false, err
 	}
 	if !output.OK() {
-		return false, fmt.Errorf("git status --porcelain in %s: %s", dir, output.Stderr)
+		return false, fmt.Errorf("git status --porcelain --untracked-files=all in %s: %s", dir, output.Stderr)
 	}
 	return output.Text() == "", nil
 }

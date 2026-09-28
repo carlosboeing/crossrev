@@ -183,6 +183,21 @@ func TestWorktreeClean(t *testing.T) {
 	} else if clean {
 		t.Error("a worktree with an untracked file was clean")
 	}
+	if err := os.Remove(filepath.Join(dir, "untracked.ts")); err != nil {
+		t.Fatalf("remove the untracked file: %v", err)
+	}
+
+	// `git status --porcelain` honors status.showUntrackedFiles, so with it
+	// set to `no` an untracked leftover produces empty output and the next
+	// pass would reuse the tree — then delete the leftovers on a clean
+	// finish. The probe must list untracked files whatever the config says.
+	mustGit(t, repo, "config", "status.showUntrackedFiles", "no")
+	write(t, dir, "hidden.ts", "export const hidden = 1\n")
+	if clean, err := repo.WorktreeClean(ctx, dir); err != nil {
+		t.Fatalf("WorktreeClean: %v", err)
+	} else if clean {
+		t.Error("a worktree hiding an untracked file behind status.showUntrackedFiles=no was clean")
+	}
 }
 
 // A directory that is not a worktree of this clone must not be reused: the path
