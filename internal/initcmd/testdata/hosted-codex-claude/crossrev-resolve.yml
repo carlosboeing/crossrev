@@ -22,7 +22,7 @@ jobs:
       contents: read
     steps:
       - id: app
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
         with:
           app-id: ${{ secrets.APP_ID }}
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
@@ -32,7 +32,7 @@ jobs:
       # detached checkout of the merge ref has nothing to push to. crossrev's own
       # push guard asserts the branch matches the pull request's head and is not
       # the repository default before anything leaves the runner.
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.ref }}
           fetch-depth: 0
@@ -70,7 +70,7 @@ jobs:
       # went wrong. No GitHub credential reaches these files: the harness never
       # holds one, and the transcripts are redacted before they are kept.
       - if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: crossrev-run-${{ github.run_id }}
           path: ~/.local/state/crossrev/runs/
