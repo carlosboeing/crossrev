@@ -79,10 +79,10 @@ func TestEveryAdapterBuildsTheWholeArgv(t *testing.T) {
 		},
 		{
 			harness: "agy", write: false,
-			where: "lib/adapters/agy.sh:42,56,65,66,67,94",
+			where: "lib/adapters/agy.sh:42,56,65,66,67,94, plus the review leg's no-commands directive wrapping the prompt",
 			want: []string{"--output-format", "json", "--disable-slash-commands",
 				"--add-dir", "<workdir>", "--json-schema", "<schema-path>",
-				"--model", "<model>", "--effort", "high", "--print", "<prompt>"},
+				"--model", "<model>", "--effort", "high", "--print", "<agy-review-prompt>"},
 		},
 		{
 			harness: "agy", write: true,
@@ -175,6 +175,19 @@ func resolvePlaceholder(t *testing.T, element string, inv harness.Invocation) st
 	switch element {
 	case "<prompt>":
 		return commandSubstitution(t, inv.Prompt.Path)
+	case "<agy-review-prompt>":
+		// The review leg wraps the prompt in its no-commands directive. The
+		// two sentences are written out here rather than read out of the
+		// adapter, the way every other vector in this table is written out:
+		// a drift between this and reviewNoCommandsPrefix/Suffix in agy.go
+		// fails loudly, which is the point. commandSubstitution is the same
+		// `"$(cat …)"` oracle the "<prompt>" case uses.
+		return "You have no shell command tool in this environment. Never attempt to run a command.\n\n" +
+			commandSubstitution(t, inv.Prompt.Path) + "\n\n" +
+			"Shell commands are unavailable in this run: headless approval cannot be given, " +
+			"so a command attempt is denied and the run ends with no answer. " +
+			"Orient only by reading files. " +
+			"If something cannot be checked without a shell, say so in the answer and answer anyway."
 	case "<prompt-path>":
 		return inv.Prompt.Path
 	case "<schema-text>":

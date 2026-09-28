@@ -83,10 +83,44 @@ func (a *Agy) Spec(inv Invocation) (exec.Spec, error) {
 	if wanted(inv.Effort) {
 		args = append(args, "--effort", inv.Effort)
 	}
-	args = append(args, "--print", inv.Prompt.Argument())
+	prompt := inv.Prompt.Argument()
+	if !inv.Write {
+		// A review leg states outright that it has no shell command tool.
+		// A command attempt in headless mode is auto-denied, and the denial
+		// ends the run with an empty answer: measured on agy 1.2.12, a
+		// 152 KB review-style prompt answered `status: SUCCESS` with an
+		// empty `response`, `denied_actions` naming `command`, and the
+		// stderr line about headless mode being unable to prompt. The same
+		// prompt with this directive answers with no denied action and an
+		// empty stderr.
+		//
+		// The alternatives do not survive contact with this CLI. There is no
+		// tool flag to remove the command the way `--disallowedTools Bash`
+		// does on Claude Code; `--sandbox` confines the terminal but the
+		// ask-to-auto-deny path is unchanged, so the same prompt still
+		// answers empty with it; and a deny rule lives in the operator's
+		// global settings file, which is neither per-leg nor quarantined.
+		// The resolve leg is untouched: its prompt passes through byte for
+		// byte, keeping the Task 12 settlement exactly as it was.
+		prompt = reviewNoCommandsPrefix + prompt + "\n\n" + reviewNoCommandsSuffix
+	}
+	args = append(args, "--print", prompt)
 
 	return a.spec(inv, args), nil
 }
+
+// reviewNoCommandsPrefix and reviewNoCommandsSuffix are the directive a
+// review leg wraps its prompt in. The tool is not literally gone — it is
+// denied at approval — but the model treats "you have no X" the way
+// `--disallowedTools` treats it on Claude Code: as context the tool is
+// absent from, so it plans without it instead of attempting it and dying
+// on the denial.
+const reviewNoCommandsPrefix = "You have no shell command tool in this environment. Never attempt to run a command.\n\n"
+
+const reviewNoCommandsSuffix = "Shell commands are unavailable in this run: headless approval cannot be given, " +
+	"so a command attempt is denied and the run ends with no answer. " +
+	"Orient only by reading files. " +
+	"If something cannot be checked without a shell, say so in the answer and answer anyway."
 
 // Envelope reads what the child produced (lib/adapters/agy.sh:98-146).
 func (a *Agy) Envelope(_ Invocation, res exec.Result) Envelope {
