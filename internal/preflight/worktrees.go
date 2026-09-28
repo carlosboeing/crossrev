@@ -5,11 +5,11 @@ import (
 	"slices"
 )
 
-// ReportWorktrees names the tool-owned worktrees left behind by failed resolve
-// runs (preflight_report_worktrees, lib/preflight.sh:328-342).
+// ReportWorktrees names the tool-owned worktrees left behind by failed runs
+// (preflight_report_worktrees, lib/preflight.sh:328-342).
 //
-// A clean resolve run removes its worktree; a failed run leaves it behind so
-// the uncommitted edits and reflog can be inspected. Accumulation is reported
+// A clean run removes its worktree; a failed run leaves it behind so the
+// uncommitted edits and reflog can be inspected. Accumulation is reported
 // here so leftover worktrees are discoverable rather than silent. It never
 // fails: the Bash function returns 0 on every path.
 func (c *Checker) ReportWorktrees() {
@@ -22,7 +22,7 @@ func (c *Checker) ReportWorktrees() {
 	for _, worktree := range worktrees {
 		c.io().Opt(worktree)
 	}
-	c.io().Line("   Left behind by failed resolve runs. Safe to remove if no run is in progress.")
+	c.io().Line("   Left behind by failed runs. Safe to remove if no run is in progress.")
 }
 
 // worktreeBase is `${XDG_STATE_HOME:-$HOME/.local/state}/crossrev/worktrees`

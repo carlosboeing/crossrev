@@ -50,7 +50,7 @@ func cycleCommand(ctx context.Context, out *ui.IO, doc harness.Document, req cli
 	}
 
 	driver := &cycle.Driver{
-		Review:  reviewAdapter{leg: reviewLeg(d, client, cfg), out: out, workdir: d.repo.Dir()},
+		Review:  reviewAdapter{leg: reviewLeg(d, client, cfg), out: out},
 		Resolve: resolveAdapter{leg: resolveLeg(d, client, cfg), out: out, author: author},
 		Loader:  &contextLoader{forge: client, show: d.show(), author: author},
 		Out:     out.Out,
@@ -79,19 +79,19 @@ func cycleCommand(ctx context.Context, out *ui.IO, doc harness.Document, req cli
 // else. The messages a leg answers are printed as they arrive, which is what
 // the shell does: the leg prints as it goes and the driver prints around it.
 type reviewAdapter struct {
-	leg     *review.Leg
-	out     *ui.IO
-	workdir string
+	leg *review.Leg
+	out *ui.IO
 }
 
 func (a reviewAdapter) Run(ctx context.Context, req cycle.LegRequest) cycle.LegResult {
+	// No Workdir: an empty one pins a clean detached worktree at the pull
+	// request head, so the harness never runs in the operator checkout.
 	result := a.leg.Run(ctx, review.Request{
 		PR:              req.PR,
 		Repo:            req.Repo,
 		Trigger:         review.Trigger(req.Trigger),
 		Continuation:    req.Continuation,
 		HarnessOverride: req.HarnessOverride,
-		Workdir:         a.workdir,
 		RunID:           runlog.RunID(),
 	})
 	a.out.PrintAll(result.Messages)

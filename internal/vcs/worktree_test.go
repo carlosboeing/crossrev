@@ -87,6 +87,32 @@ func TestWorktreeDirRefusesTheZeroSlug(t *testing.T) {
 	}
 }
 
+// The review leg's worktree is a sibling of the resolve leg's under the same
+// repository directory: sharing that path let each leg reuse or delete the
+// other's tree. The zero slug is refused for the same reason as above.
+func TestReviewWorktreeDir(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", "/state")
+	t.Setenv("HOME", "/home/dev")
+	got, err := vcs.ReviewWorktreeDir(slug(t, "carlosboeing", "crossrev"), 42)
+	if err != nil {
+		t.Fatalf("ReviewWorktreeDir: %v", err)
+	}
+	want := "/state/crossrev/worktrees/carlosboeing-crossrev/review-pr-42"
+	if got != want {
+		t.Errorf("dir = %q, want %q", got, want)
+	}
+	resolve, err := vcs.WorktreeDir(slug(t, "carlosboeing", "crossrev"), 42)
+	if err != nil {
+		t.Fatalf("WorktreeDir: %v", err)
+	}
+	if got == resolve {
+		t.Errorf("the review worktree %q is the resolve worktree", got)
+	}
+	if got, err := vcs.ReviewWorktreeDir(core.Slug{}, 1); err == nil {
+		t.Errorf("ReviewWorktreeDir(zero) = %q, want a refusal", got)
+	}
+}
+
 // commitFile writes a file, stages it and commits, returning the new revision.
 func commitFile(t *testing.T, repo *vcs.Repository, name, content, message string) core.Revision {
 	t.Helper()
@@ -146,6 +172,57 @@ func TestWorktreeAddAndRemove(t *testing.T) {
 	// (lib/run.sh:2458-2460).
 	if _, err := os.Stat(filepath.Join(root, "state", "crossrev", "worktrees")); err != nil {
 		t.Errorf("the grandparent directory was removed as well: %v", err)
+	}
+}
+
+// A fresh worktree is clean, and any uncommitted change — a tracked edit, a
+// staged entry, an untracked file — makes it unclean. Reuse requires clean,
+// so a failed leg's leftovers never read as the pull request's own files.
+func TestWorktreeClean(t *testing.T) {
+	ctx := context.Background()
+	git := testGit(t)
+	root := realTempDir(t)
+	repo := initRepo(t, git, filepath.Join(root, "clone"))
+	head := commitFile(t, repo, "app.ts", "export const ok = 1\n", "init")
+
+	dir := filepath.Join(root, "state", "crossrev", "worktrees", "o-r", "pr-42")
+	if err := repo.AddWorktree(ctx, dir, head); err != nil {
+		t.Fatalf("AddWorktree: %v", err)
+	}
+	if clean, err := repo.WorktreeClean(ctx, dir); err != nil {
+		t.Fatalf("WorktreeClean: %v", err)
+	} else if !clean {
+		t.Error("a fresh worktree was not clean")
+	}
+
+	write(t, dir, "app.ts", "export const ok = 2\n")
+	if clean, err := repo.WorktreeClean(ctx, dir); err != nil {
+		t.Fatalf("WorktreeClean: %v", err)
+	} else if clean {
+		t.Error("a worktree with a tracked edit was clean")
+	}
+	mustGit(t, git.At(dir), "checkout", "--", "app.ts")
+
+	write(t, dir, "untracked.ts", "export const extra = 1\n")
+	if clean, err := repo.WorktreeClean(ctx, dir); err != nil {
+		t.Fatalf("WorktreeClean: %v", err)
+	} else if clean {
+		t.Error("a worktree with an untracked file was clean")
+	}
+	if err := os.Remove(filepath.Join(dir, "untracked.ts")); err != nil {
+		t.Fatalf("remove the untracked file: %v", err)
+	}
+
+	// `git status --porcelain` honors status.showUntrackedFiles, so with it
+	// set to `no` an untracked leftover produces empty output and the next
+	// pass would reuse the tree — then delete the leftovers on a clean
+	// finish. The probe must list untracked files whatever the config says.
+	mustGit(t, repo, "config", "status.showUntrackedFiles", "no")
+	write(t, dir, "hidden.ts", "export const hidden = 1\n")
+	if clean, err := repo.WorktreeClean(ctx, dir); err != nil {
+		t.Fatalf("WorktreeClean: %v", err)
+	} else if clean {
+		t.Error("a worktree hiding an untracked file behind status.showUntrackedFiles=no was clean")
 	}
 }
 

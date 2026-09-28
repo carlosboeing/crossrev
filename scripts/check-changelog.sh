@@ -35,8 +35,11 @@ if ! git rev-parse --verify --quiet "$BASE" >/dev/null; then
   exit 1
 fi
 
-# Everything the published tarball contains, one path per line.
-shipped="$(npm pack --dry-run --json 2>/dev/null | jq -r '.[0].files[].path')"
+# Everything the published tarball contains, one path per line. npm prints
+# two shapes — up to version 11 an array of pack results, from 12 an object
+# keyed by package name (npm/cli#9247) — and one program reads both. The
+# empty check below still fails loudly when neither shape yields paths.
+shipped="$(npm pack --dry-run --json 2>/dev/null | jq -r 'if type == "array" then .[0] else .[] end | .files[].path')"
 if [[ -z "$shipped" ]]; then
   echo "error  could not read the packed file list from npm." >&2
   exit 1
