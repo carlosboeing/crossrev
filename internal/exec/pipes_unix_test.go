@@ -5,6 +5,7 @@ package exec
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
 	"strconv"
 	"syscall"
@@ -58,6 +59,64 @@ func TestRunReportsPipesTheChildLeftHeldOpen(t *testing.T) {
 	// Cmd.WaitDelay this waits the full thirty seconds.
 	if elapsed > 10*time.Second {
 		t.Errorf("Run took %s to give up on the held pipes, want roughly %s", elapsed, pipeDrainGrace)
+	}
+}
+
+// A streamed run meets the same orphan a buffered one does: the child exits
+// at once and a grandchild outside the process group holds the streams. The
+// unread stdout must drain beside the wait rather than ahead of it —
+// Cmd.WaitDelay starts only once Wait observes the child exit, so draining
+// to EOF first hangs on the grandchild past the grace and ErrPipesAbandoned
+// is unreachable.
+//
+// This test is in the package rather than beside it so it can shrink
+// pipeDrainGrace. At its production value the case would cost ten seconds a run.
+func TestRunStreamReportsPipesTheChildLeftHeldOpen(t *testing.T) {
+	restore := pipeDrainGrace
+	pipeDrainGrace = 300 * time.Millisecond
+	t.Cleanup(func() { pipeDrainGrace = restore })
+
+	const holdFor = 30 * time.Second
+
+	spec := Spec{
+		Path: os.Args[0],
+		Args: []string{"-test.run=TestHelperProcess", "--", "orphan", strconv.Itoa(int(holdFor.Milliseconds()))},
+		Env:  []string{"CROSSREV_EXEC_HELPER=1"},
+	}
+
+	// One read only: the orphan's pid arrives at once, and reading to EOF
+	// here would wait on the grandchild the test is about.
+	var pidText []byte
+	started := time.Now()
+	result := NewOSRunner().RunStream(context.Background(), spec, func(rd io.Reader) error {
+		buf := make([]byte, 32)
+		n, _ := rd.Read(buf)
+		pidText = append(pidText, buf[:n]...)
+		return nil
+	})
+	elapsed := time.Since(started)
+
+	// Whatever the kill reached, the grandchild must not outlive the test.
+	t.Cleanup(func() {
+		if pid, err := strconv.Atoi(string(pidText)); err == nil {
+			_ = syscall.Kill(pid, syscall.SIGKILL)
+		}
+	})
+
+	if !errors.Is(result.Err, ErrPipesAbandoned) {
+		t.Fatalf("Err = %v, want ErrPipesAbandoned (stdout bytes %d, stderr %q)", result.Err, result.StdoutBytes, result.Stderr)
+	}
+	if result.OK() {
+		t.Error("OK reported true for a capture that was cut short; a truncated payload would read as a success")
+	}
+	if result.ExitCode != 0 {
+		t.Errorf("ExitCode = %d, want the 0 the child itself exited with", result.ExitCode)
+	}
+
+	// Bounded, and bounded well below what the grandchild holds for. Without
+	// the drain beside the wait this holds the full thirty seconds.
+	if elapsed > 10*time.Second {
+		t.Errorf("RunStream took %s to give up on the held pipes, want roughly %s", elapsed, pipeDrainGrace)
 	}
 }
 
