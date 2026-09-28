@@ -87,3 +87,22 @@ func TestAnInterruptedLegReportsAnInterrupt(t *testing.T) {
 		}
 	}
 }
+
+// reviewLeg wires the pass's live progress to the command's terminal, so an
+// accepted batch prints while later batches still run rather than with the
+// closing report. No terminal leaves the sink unset instead of printing
+// nowhere.
+func TestReviewLegWiresLiveProgressToTheCommandTerminal(t *testing.T) {
+	var buf bytes.Buffer
+	leg := reviewLeg(&deps{}, nil, nil, &ui.IO{Out: &buf})
+	if leg.Progress == nil {
+		t.Fatal("reviewLeg left Progress unset, so per-batch lines queue until the pass settles")
+	}
+	leg.Progress(ui.Say("Batch 1 of 2 — covered 40 of 41 required files."))
+	if !strings.Contains(buf.String(), "Batch 1 of 2") {
+		t.Errorf("the wired sink did not print to the command terminal; said %q", buf.String())
+	}
+	if wired := reviewLeg(&deps{}, nil, nil, nil); wired.Progress != nil {
+		t.Error("reviewLeg with no terminal wired a sink that prints nowhere")
+	}
+}

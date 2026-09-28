@@ -93,7 +93,7 @@ func TestTheOrchestratorRunnerInDepsCarriesAForgeCredential(t *testing.T) {
 // lib/adapters/claude.sh:72).
 func TestTheReviewLegStartsItsHarnessThroughTheModelRunner(t *testing.T) {
 	d := open(newIO(false), harness.Document{})
-	if err := credentialDecision(t, reviewLeg(d, nil, nil).Runner); !errors.Is(err, exec.ErrForgeCredential) {
+	if err := credentialDecision(t, reviewLeg(d, nil, nil, nil).Runner); !errors.Is(err, exec.ErrForgeCredential) {
 		t.Fatalf("the review leg's runner did not refuse a child holding GH_TOKEN: %v", err)
 	}
 }

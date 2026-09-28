@@ -320,7 +320,15 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 		if _, err := l.editClaim(ctx, loaded.Repo, claimID, batchProgressBody(pass, loaded.Config, call, len(plan.Batches), covered, len(scope.Required), raw != nil), recorded, coverageOverflow(loaded)); err != nil {
 			return err
 		}
-		out.Messages = append(out.Messages, ui.Say(batchProgressLine(call, len(plan.Batches), covered, len(scope.Required))))
+		// The report only prints after the pass settles, so queuing here
+		// would leave the terminal silent while the pass runs. A wired
+		// sink prints now; without one the line queues with the rest.
+		line := ui.Say(batchProgressLine(call, len(plan.Batches), covered, len(scope.Required)))
+		if l.Progress != nil {
+			l.Progress(line)
+		} else {
+			out.Messages = append(out.Messages, line)
+		}
 	}
 	if plan.HaltReason != "" || len(plan.Carried) > 0 {
 		return l.haltPass(ctx, req, loaded, pass, claimID, out, marker, &batchBound{plan: plan, scope: scope, accepted: acceptedIDs})
