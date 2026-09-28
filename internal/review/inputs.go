@@ -174,6 +174,12 @@ type Leg struct {
 	// the batch was built between. The batch loop fills it (C1 wires that
 	// loop); empty means the frozen prompt with no batch input.
 	Expect validate.ReviewExpectations
+	// Progress receives each accepted batch's progress line while the pass
+	// runs. A leg holds no terminal, so production wires this to print
+	// immediately and the line reports while later batches still run. Nil
+	// queues the line in Result.Messages instead, the way every other leg
+	// line travels.
+	Progress func(ui.Line)
 }
 
 func (l *Leg) now() time.Time {

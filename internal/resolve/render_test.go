@@ -46,7 +46,7 @@ func TestRender(t *testing.T) {
 			t.Fatal("presentation.json records no reply vectors")
 		}
 		for _, vector := range fixture.Replies {
-			got := ReplyBody(vector.Disposition, vector.Tracked, vector.Pass, vector.Harness, vector.Model)
+			got := ReplyBody(vector.Disposition, vector.Tracked, vector.Pass, vector.Harness, vector.Model, 0)
 			want, err := base64.StdEncoding.DecodeString(vector.BodyB64)
 			if err != nil {
 				t.Fatalf("%s: decode body: %v", vector.Name, err)
@@ -181,6 +181,30 @@ func TestReviewSummaryBodyQuotaStopNamesResumeTime(t *testing.T) {
 	}
 }
 
+// A mixed pass keeps its held count when the resolve leg rewrites the
+// review summary: the findings table still lists every finding, and the
+// count below names the held ones, matching the review leg's own summary.
+func TestReviewSummaryRewriteKeepsHeldCount(t *testing.T) {
+	findings := json.RawMessage(`[{` +
+		`"id":"aaaaaaaaaaaaaaaa","path":"a.go","line":1,"severity":"low","category":"maintainability","pre_existing":false,"title":"held nit","posted":false},` +
+		`{` +
+		`"id":"bbbbbbbbbbbbbbbb","path":"a.go","line":2,"severity":"high","category":"correctness","pre_existing":false,"title":"real bug"}]`)
+	marker := prstate.Marker{
+		Pass:    2,
+		HeadSHA: prstate.Some(testHeadSHA),
+		Harness: prstate.Some("claude"),
+		Model:   prstate.Some("claude-3-7-sonnet"),
+		Blocked: prstate.Some(false),
+	}
+	got := reviewSummaryBody(findings, marker, mustSlug(t), 42, core.SeverityMedium, 3, commentCoverage{})
+	if !strings.Contains(got, "1 finding below medium recorded and not posted.") {
+		t.Errorf("rewrite lost the held count:\n%s", got)
+	}
+	if !strings.Contains(got, "held nit") {
+		t.Errorf("rewrite lost the held finding's table row:\n%s", got)
+	}
+}
+
 func repoRoot(t *testing.T) string {
 	t.Helper()
 	dir, err := os.Getwd()
@@ -196,5 +220,99 @@ func repoRoot(t *testing.T) string {
 			t.Fatalf("no go.mod above %s", dir)
 		}
 		dir = parent
+	}
+}
+
+// A mixed pass renders honest counts after the rewrite too: the review
+// summary the resolve leg rewrites scopes its resolving claims to posted
+// findings, and the resolve summary says the posted findings were
+// verified and keeps the held count — matching the review leg's summary
+// from before the rewrite.
+func TestMixedPassRendersHonestCountsAfterRewrite(t *testing.T) {
+	findings := json.RawMessage(`[{` +
+		`"id":"aaaaaaaaaaaaaaaa","path":"a.go","line":1,"severity":"low","category":"maintainability","pre_existing":false,"title":"held nit","posted":false},` +
+		`{` +
+		`"id":"bbbbbbbbbbbbbbbb","path":"a.go","line":2,"severity":"high","category":"correctness","pre_existing":false,"title":"real bug"}]`)
+	marker := prstate.Marker{
+		Pass:    2,
+		HeadSHA: prstate.Some(testHeadSHA),
+		Harness: prstate.Some("claude"),
+		Model:   prstate.Some("claude-3-7-sonnet"),
+		Blocked: prstate.Some(false),
+	}
+	rewrite := reviewSummaryBody(findings, marker, mustSlug(t), 42, core.SeverityMedium, 3, commentCoverage{})
+	if !strings.Contains(rewrite, "1 posted finding needs resolving.") {
+		t.Errorf("rewrite alert does not scope to posted findings:\n%.800s", rewrite)
+	}
+	if strings.Contains(rewrite, "verifies every finding below") {
+		t.Errorf("rewrite alert still claims every finding is verified:\n%.800s", rewrite)
+	}
+	if !strings.Contains(rewrite, "1 finding below medium recorded and not posted.") {
+		t.Errorf("rewrite lost the held count:\n%.800s", rewrite)
+	}
+
+	resolutions := json.RawMessage(`[{"finding_id":"bbbbbbbbbbbbbbbb","resolution":"fixed"}]`)
+	resolveMarker := prstate.Marker{
+		Pass:    2,
+		Summary: prstate.Some("Fixed it."),
+		HeadSHA: prstate.Some(testHeadSHA),
+		Harness: prstate.Some("claude"),
+		Blocked: prstate.Some(false),
+	}
+	got := ResolveSummaryBody(resolutions, findings, "", resolveMarker, "acme/widget", 42, 3)
+	if !strings.Contains(got, "Every posted finding was verified") {
+		t.Errorf("resolve summary does not scope verification to posted findings:\n%.800s", got)
+	}
+	if strings.Contains(got, "Every finding was verified") {
+		t.Errorf("resolve summary still claims every finding was verified:\n%.800s", got)
+	}
+	if !strings.Contains(got, "1 held finding recorded and not posted") {
+		t.Errorf("resolve summary lost the held count:\n%.800s", got)
+	}
+
+	reply := ReplyBody(json.RawMessage(`{"finding_id":"bbbbbbbbbbbbbbbb","resolution":"fixed","reply":"done"}`), "", 2, "claude", "", 1)
+	if !strings.Contains(reply, "Every posted finding is verified") {
+		t.Errorf("reply footer does not scope verification to posted findings:\n%.800s", reply)
+	}
+	if strings.Contains(reply, "Every finding is verified") {
+		t.Errorf("reply footer still claims every finding is verified:\n%.800s", reply)
+	}
+	pure := ReplyBody(json.RawMessage(`{"finding_id":"bbbbbbbbbbbbbbbb","resolution":"fixed","reply":"done"}`), "", 2, "claude", "", 0)
+	if !strings.Contains(pure, "Every finding is verified") {
+		t.Errorf("pure-pass footer changed wording:\n%.800s", pure)
+	}
+}
+
+// The pass-3 end of a posted-held-upgraded sequence renders the posted
+// occurrence: under a duplicate id the resolutions table and the commit
+// body read the medium upgrade on its current thread, not the held low
+// entry beside it, which carries neither severity nor thread.
+func TestResolveTablesPreferPostedOccurrence(t *testing.T) {
+	const fid = "2222222222222222"
+	findings := json.RawMessage(`[
+{"id":"` + fid + `","path":"a.go","line":1,"severity":"low","category":"correctness","title":"same nit","posted":false,"resolution":null},
+{"id":"` + fid + `","path":"a.go","line":1,"severity":"medium","category":"correctness","title":"same nit","root_comment_id":77,"resolution":null}
+]`)
+	resolutions := json.RawMessage(`[{"finding_id":"` + fid + `","resolution":"fixed"}]`)
+	marker := prstate.Marker{
+		Pass:    3,
+		Summary: prstate.Some("Fixed it."),
+		HeadSHA: prstate.Some(testHeadSHA),
+		Harness: prstate.Some("claude"),
+		Blocked: prstate.Some(false),
+	}
+	got := ResolveSummaryBody(resolutions, findings, "", marker, "acme/widget", 42, 3)
+	if !strings.Contains(got, "Medium") {
+		t.Errorf("resolutions table does not show the posted upgrade's severity:\n%.800s", got)
+	}
+	if strings.Contains(got, "Low") {
+		t.Errorf("resolutions table shows the held entry's severity:\n%.800s", got)
+	}
+	if !strings.Contains(got, "https://github.com/acme/widget/pull/42/files#r77") {
+		t.Errorf("resolutions table does not link the current thread:\n%.800s", got)
+	}
+	body := CommitBody(resolutions, findings, "fixed", testHeadSHA, 3, "acme/widget", 42)
+	if !strings.Contains(body, "https://github.com/acme/widget/pull/42/files#r77") {
+		t.Errorf("commit body does not link the current thread:\n%s", body)
 	}
 }

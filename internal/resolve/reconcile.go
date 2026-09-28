@@ -20,8 +20,14 @@ func (l *Leg) postedFindingIDs(ctx context.Context, s *session) map[string]bool 
 			bodies = append(bodies, c.Body)
 		}
 	}
+	// Scoped to the current pass: a finding id's current thread is its
+	// latest posted comment, so a reply marker from an earlier pass
+	// answered a spent thread and must not suppress the upgrade's reply
+	// to its new thread. A marker from this pass still suppresses a
+	// same-pass retry, and a redrive re-answers its own findings through
+	// excludeCurrentFindings below.
 	out := map[string]bool{}
-	for _, id := range prstate.FindingIDs(bodies, core.LegResolve, 0) {
+	for _, id := range prstate.FindingIDs(bodies, core.LegResolve, s.pass) {
 		out[string(id)] = true
 	}
 	return out

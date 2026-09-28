@@ -573,3 +573,28 @@ func TestSummaryBodyQuotaStopNamesResumeTime(t *testing.T) {
 	}
 }
 
+// A mixed pass scopes the resolving claims to posted findings: the alert
+// counts only what the resolver will see, while the held count below the
+// table still names what stayed on the marker.
+func TestSummaryScopesResolvingClaimsToPostedFindings(t *testing.T) {
+	held := false
+	findings := []review.Finding{
+		{ID: "aaaaaaaaaaaaaaaa", Path: "a.go", Line: 1, Severity: "low", Category: "maintainability", Title: "held nit", Posted: &held},
+		{ID: "bbbbbbbbbbbbbbbb", Path: "a.go", Line: 2, Severity: "high", Category: "correctness", Title: "real bug"},
+	}
+	got := review.SummaryBody(findings, skipMarker("issues-remain"), review.RenderContext{
+		Repo: "acme/widget", PR: 42, MinFix: "medium", MaxPass: 3,
+	})
+	if !strings.Contains(got, "1 posted finding needs resolving.") {
+		t.Errorf("alert does not scope to posted findings:\n%.800s", got)
+	}
+	if strings.Contains(got, "verifies every finding below") {
+		t.Errorf("alert still claims every finding is verified:\n%.800s", got)
+	}
+	if !strings.Contains(got, "verifies every posted finding below") {
+		t.Errorf("alert names no posted scope:\n%.800s", got)
+	}
+	if !strings.Contains(got, "1 finding below medium recorded and not posted.") {
+		t.Errorf("held count missing:\n%.800s", got)
+	}
+}

@@ -252,3 +252,39 @@ func firstOpBefore(order []string, earlier, later string) bool {
 	}
 	return a >= 0 && b >= 0 && a < b
 }
+
+// Reply dedup is scoped to the current pass across a posted-held-upgraded
+// sequence: a pass-1 reply marker suppresses a same-pass retry but not the
+// pass-3 upgrade's reply to its new thread, and a redrive still re-answers
+// its own findings while remembering other passes' ids.
+func TestResolveDedupScopesToCurrentPass(t *testing.T) {
+	const fid = "3333333333333333"
+	fidVal := mustFindingID(t, fid)
+	e := setup(t)
+	e.forge.reviewComments = []forge.IssueComment{{
+		ID:          6001,
+		AuthorLogin: e.forge.viewer,
+		Body:        "noted" + prstate.EncodeFindingMarker(fidVal, 1, core.LegResolve),
+	}}
+	leg := &Leg{Forge: e.forge}
+	mkSession := func(pass int) *session {
+		return &session{pass: pass, repo: e.slug, req: Request{PR: 42}, author: e.forge.viewer}
+	}
+	if got := leg.postedFindingIDs(context.Background(), mkSession(3)); got[fid] {
+		t.Errorf("pass-3 dedup contains a pass-1 reply: an earlier pass would suppress the upgrade's reply")
+	}
+	if got := leg.postedFindingIDs(context.Background(), mkSession(1)); !got[fid] {
+		t.Errorf("pass-1 dedup misses its own reply: a same-pass retry would reply twice")
+	}
+	current, err := harness.DecodeStream([]byte(`{"id":"` + fid + `","path":"a.go","line":1,"severity":"medium"}`))
+	if err != nil {
+		t.Fatalf("decode findings: %v", err)
+	}
+	redriven := excludeCurrentFindings(map[string]bool{fid: true, "other": true}, current)
+	if redriven[fid] {
+		t.Errorf("redrive keeps its own finding suppressed: it would not re-answer")
+	}
+	if !redriven["other"] {
+		t.Errorf("redrive drops an unrelated id: it forgot another pass's reply")
+	}
+}
