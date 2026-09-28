@@ -38,6 +38,28 @@ func WorktreeDir(slug core.Slug, pr int) (string, error) {
 	return state + "/crossrev/worktrees/" + slug.PathKey() + "/pr-" + strconv.Itoa(pr), nil
 }
 
+// ReviewWorktreeDir is where the review leg's dedicated worktree lives: a
+// sibling of WorktreeDir under the same repository directory, so the two
+// legs never reuse or delete each other's tree. The resolve leg reuses its
+// path on HEAD and ownership alone with no cleanliness check, and removes
+// it outright once the head has moved — sharing that path let a failed
+// review's leftovers reach `git add -A`, let a moved head delete the tree
+// a failed review kept, and let a clean review finish delete a resolve
+// leftover sitting at the head.
+//
+// The construction mirrors WorktreeDir's — concatenation, not joining, and
+// the zero slug refused — for the reasons its comment gives.
+func ReviewWorktreeDir(slug core.Slug, pr int) (string, error) {
+	if slug.Incomplete() {
+		return "", fmt.Errorf("%w: the slug is %q", ErrWorktreePath, slug)
+	}
+	state := stateHome()
+	if state == "" {
+		return "", fmt.Errorf("%w: neither XDG_STATE_HOME nor HOME is set", ErrWorktreePath)
+	}
+	return state + "/crossrev/worktrees/" + slug.PathKey() + "/review-pr-" + strconv.Itoa(pr), nil
+}
+
 // stateHome is `${XDG_STATE_HOME:-$HOME/.local/state}`. The `:-` form falls
 // back on an empty value as well as an unset one.
 func stateHome() string {
@@ -125,6 +147,33 @@ func (r *Repository) WorktreeReusable(ctx context.Context, dir string, revision 
 		return false, nil
 	}
 	return owner == mine, nil
+}
+
+// WorktreeClean reports whether the worktree at dir holds no uncommitted
+// changes: `git status --porcelain --untracked-files=all` with empty output.
+// Tracked edits, staged entries and untracked files all count as unclean,
+// because any of them would be read as the pull request's own files by a leg
+// that reuses the tree.
+//
+// The untracked-files mode is spelled out because bare `--porcelain` honors
+// `status.showUntrackedFiles`: set to `no`, an untracked leftover produces
+// empty output, the next pass reuses the tree, and a clean finish deletes
+// the leftovers. Porcelain stability covers color and relative paths, not
+// this setting.
+//
+// A refused status is an error rather than unclean. The caller reads this
+// only for a directory WorktreeReusable already proved is this clone's own
+// worktree, so git failing to answer means something unexpected broke, not
+// that the tree is dirty.
+func (r *Repository) WorktreeClean(ctx context.Context, dir string) (bool, error) {
+	output, err := r.git.At(dir).Run(ctx, "status", "--porcelain", "--untracked-files=all")
+	if err != nil {
+		return false, err
+	}
+	if !output.OK() {
+		return false, fmt.Errorf("git status --porcelain --untracked-files=all in %s: %s", dir, output.Stderr)
+	}
+	return output.Text() == "", nil
 }
 
 // RemoveWorktree takes the worktree away, and then the directory that held it.

@@ -62,7 +62,7 @@ func TestReportWorktreesNamesEveryLeftoverWorktree(t *testing.T) {
 		"│  ○ " + base + "/acme-widget/pr-42\n" +
 		"│  ○ " + base + "/acme-widget/pr-7\n" +
 		"│  ○ " + base + "/zz-other/pr-1\n" +
-		"│     Left behind by failed resolve runs. Safe to remove if no run is in progress.\n"
+		"│     Left behind by failed runs. Safe to remove if no run is in progress.\n"
 	if got := buf.String(); got != want {
 		t.Errorf("report =\n%q\nwant\n%q", got, want)
 	}

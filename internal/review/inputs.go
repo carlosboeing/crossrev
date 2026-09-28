@@ -34,8 +34,11 @@ type Request struct {
 	Continuation    bool
 	HarnessOverride string
 	Author          string
-	Workdir         string
-	RunID           string
+	// Workdir overrides the pinned worktree: empty pins a clean detached
+	// worktree at the pull request head, set runs the harness there after
+	// proving its HEAD is the head.
+	Workdir string
+	RunID   string
 }
 
 // Outcome is how the leg stopped.
@@ -69,6 +72,14 @@ type Result struct {
 	// claims to the enrich-and-publish path. Nil on the frozen path and on
 	// a bounded halt.
 	Covered any
+	// KeptWorktree is the pinned worktree a failed leg kept for debugging:
+	// the directory selectWorktree actually selected, not the canonical
+	// path it was selected from. Empty when the leg created none (an
+	// explicit workdir override stays the operator's), when the finish
+	// was clean (the leg-end hook removed it), or when the leg never
+	// reached the worktree. The composition root reports exactly this
+	// path, so it never names a preserved occupant this run worked beside.
+	KeptWorktree string
 }
 
 // Context is the one base/head load a review starts from (lib/run.sh:233-319).
@@ -90,6 +101,11 @@ type Context struct {
 }
 
 // VCS is the base-revision file reader. Production wires *vcs.Repository.
+//
+// The second half is the pinned-worktree surface the review leg shares with
+// the resolve leg: the head fetch fallbacks, the detached worktree at the
+// pull request head, and the HEAD proof that an explicit workdir override
+// sits at that head.
 type VCS interface {
 	Show(ctx context.Context, revision core.Revision, path string) ([]byte, vcs.FileStatus, error)
 	ChangedFiles(ctx context.Context, base, head core.Revision) ([]core.FileChange, error)
@@ -98,6 +114,15 @@ type VCS interface {
 	RangeDiff(ctx context.Context, base, head core.Revision) ([]byte, error)
 	GeneratedAttributes(ctx context.Context, base core.Revision, paths []string) (map[string]vcs.AttributeDecision, *vcs.Warning, error)
 	RemovePersistedCredentials(ctx context.Context) ([]vcs.RemovedCredential, error)
+	HasCommit(ctx context.Context, revision core.Revision) (bool, error)
+	HeadAt(ctx context.Context, dir string) (core.Revision, error)
+	ConfigGet(ctx context.Context, key string) (string, error)
+	Fetch(ctx context.Context, remote, refspec string) error
+	WorktreeReusable(ctx context.Context, dir string, revision core.Revision) (bool, error)
+	WorktreeClean(ctx context.Context, dir string) (bool, error)
+	AddWorktree(ctx context.Context, dir string, revision core.Revision) error
+	RemoveWorktree(ctx context.Context, dir string) error
+	PruneWorktrees(ctx context.Context)
 }
 
 // intelAttributeDecisions maps the VCS attribute answer onto discovery's

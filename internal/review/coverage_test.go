@@ -216,6 +216,12 @@ func TestNewPassContinuesTheLedgerChain(t *testing.T) {
 
 	movedSHA := "4444444444444444444444444444444444444444"
 	e.forge.pr.HeadRefOid = mustRev(t, movedSHA)
+	// The checkout moved with the push: an explicit workdir whose HEAD is
+	// not the head under review is refused, so the override tracks it.
+	if e.vcs.heads == nil {
+		e.vcs.heads = map[string]string{}
+	}
+	e.vcs.heads[e.dir] = movedSHA
 	if e.vcs.files[movedSHA] == nil {
 		e.vcs.files[movedSHA] = map[string][]byte{}
 	}
