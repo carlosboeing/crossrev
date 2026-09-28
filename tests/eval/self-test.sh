@@ -373,7 +373,12 @@ printf 'not json' >"$T/stamp-probe.json"
 # it: the stamp name must read clean even then.
 CLICOLOR=1 CLICOLOR_FORCE=1 XDG_STATE_HOME="$T/xdg-state" bash "$RUNNER" --manifest "$T/stamp-probe.json" --bin "$BIN" \
   >"$T/stamp-probe-out.txt" 2>&1 || true
-stamp_dir="$(CLICOLOR=1 CLICOLOR_FORCE=1 ls "$T/xdg-state/crossrev-eval" 2>/dev/null || true)"
+# A glob and basename, never ls output: under forced color ls wraps the
+# name in ANSI codes and the stamp check fails on a correct directory.
+stamp_dir=""
+for stamp_path in "$T"/xdg-state/crossrev-eval/*/; do
+  [[ -d "$stamp_path" ]] && stamp_dir="$(basename "$stamp_path")"
+done
 is "the default results stamp carries the day" \
   "$([[ $stamp_dir =~ ^[0-9]{8}-[0-9]{6}$ ]] && echo yes || echo no)" "yes"
 
