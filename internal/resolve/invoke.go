@@ -360,6 +360,20 @@ func (l *Leg) invoke(ctx context.Context, s *session, marker prstate.Marker, wor
 		// The second child, for the one adapter whose telemetry is not in its
 		// own output (lib/adapters/opencode.sh:261-273).
 		l.mergeExport(ctx, adapter, inv, res, &env)
+		// The resolve-leg tripwire: a command event in the harness's own
+		// tool record fails the leg before any push, naming the harness
+		// and the command. The deny flags should have stopped it; this
+		// catches what they missed. It runs before the envelope check, so
+		// a transcript that ran a command and then failed still names the
+		// command and puts the tree back.
+		if command, tripped := harness.ResolveCommand(s.settings.Harness, res.Stdout); tripped {
+			msgs = append(msgs, l.invokeAbort(ctx, work, snapIndex, snapTree)...)
+			out := refuse(
+				fmt.Sprintf("the %s harness ran a command on a resolve leg that edits without running commands: %s", s.settings.Harness, command),
+				"The resolve leg denies commands, so anything the command changed has been put back and nothing has been written to the pull request. Re-run the leg; if it trips again, the harness is running commands its flags should deny.")
+			out.Messages = append(msgs, out.Messages...)
+			return out
+		}
 		if !env.OK {
 			msg := "no error reported"
 			if env.Error != nil && *env.Error != "" {

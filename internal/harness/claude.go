@@ -13,6 +13,7 @@ package harness
 
 import (
 	"encoding/json"
+	"strings"
 
 	"github.com/carlosboeing/crossrev/internal/exec"
 	"github.com/carlosboeing/crossrev/internal/runlog"
@@ -31,6 +32,13 @@ func (a *Claude) NotInstalled() *Refusal {
 // Spec builds the child process (lib/adapters/claude.sh:23-94).
 func (a *Claude) Spec(inv Invocation) (exec.Spec, error) {
 	args := []string{"-p", "--output-format", "json"}
+	if inv.Write {
+		// A resolve leg streams its tool record so the tripwire can read it.
+		// stream-json under -p requires --verbose at flag parsing; without
+		// it the leg never edits.
+		args[2] = "stream-json"
+		args = append(args, "--verbose")
+	}
 
 	// A resolve leg has to change files, and headless Claude Code denies a
 	// write tool unless something grants it. Locally that something is the
@@ -64,7 +72,11 @@ func (a *Claude) Spec(inv Invocation) (exec.Spec, error) {
 	// --disallowedTools removes the tool from context. The named-endpoint path
 	// builds through here, so it gets the same list.
 	if inv.Write {
-		args = append(args, "--permission-mode", "acceptEdits")
+		// A resolve leg edits without running commands: acceptEdits keeps
+		// file writes while --disallowedTools Bash removes the shell
+		// (`claude --help`). stream-json above leaves the tool record the
+		// tripwire reads.
+		args = append(args, "--permission-mode", "acceptEdits", "--disallowedTools", "Bash")
 	} else {
 		args = append(args, "--tools", "Read,Grep,Glob", "--disallowedTools", "Agent,Skill", "--strict-mcp-config")
 	}
@@ -128,7 +140,17 @@ func (a *Claude) schemaTextMissing() *Refusal {
 
 // Envelope reads what the child produced (lib/adapters/claude.sh:114-163).
 func (a *Claude) Envelope(inv Invocation, res exec.Result) Envelope {
-	answer, _ := decodeOrdered(res.Stdout)
+	// A resolve leg streams NDJSON; the terminal result event carries the
+	// same cumulative usage, modelUsage and cost as the buffered json object
+	// (verified against the stream-json event reference). The review leg
+	// keeps the single object.
+	stdout := res.Stdout
+	if inv.Write {
+		if result := claudeStreamResult(res.Stdout); result != nil {
+			stdout = result
+		}
+	}
+	answer, _ := decodeOrdered(stdout)
 	isError := answer.member("is_error")
 
 	if res.ExitCode != 0 || (isError.kind == kindBool && isError.boolean) {
@@ -151,19 +173,42 @@ func (a *Claude) Envelope(inv Invocation, res exec.Result) Envelope {
 	// across modelUsage plus the write-TTL split and thinking count that only
 	// top-level .usage carries. The answering model is the canonicalModel of the
 	// key holding the largest token share.
-	usage := ParseClaude(res.Stdout)
+	usage := ParseClaude(stdout)
 
 	endpoint := vendorEndpoint
 	if inv.Endpoint.Named() {
 		endpoint = inv.Endpoint.Name
 	}
-	envelope := succeeded(a.Name(), endpoint, resultPayload(res.Stdout), usage)
+	envelope := succeeded(a.Name(), endpoint, resultPayload(stdout), usage)
 	if usage != nil {
 		if model := ModelReportedFromModels(usage.Models); model != "" {
 			envelope.ModelReported = &model
 		}
 	}
 	return envelope
+}
+
+// claudeStreamResult is the terminal result event of a stream-json run: the
+// last line whose top-level type is "result". Each line is decoded alone, so
+// one malformed line skips rather than taking the whole stream down, the way
+// opencodeText reads.
+func claudeStreamResult(stdout []byte) []byte {
+	var last []byte
+	for _, line := range strings.Split(string(stdout), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		event, err := decodeOrdered([]byte(trimmed))
+		if err != nil {
+			continue
+		}
+		if kind, _ := event.member("type").asString(); kind != "result" {
+			continue
+		}
+		last = []byte(trimmed)
+	}
+	return last
 }
 
 // resultPayload is `.result` read back as JSON.
