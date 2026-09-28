@@ -173,6 +173,13 @@ func (l *Leg) postClaim(ctx context.Context, req Request, loaded Context, ad adm
 			if err := l.Forge.CommentEdit(ctx, loaded.Repo, id, body); err != nil {
 				return prstate.Marker{}, 0, err
 			}
+			// A fresh claim posts a new comment, which is its own record. A
+			// redrive rewrites the pass comment in place, which GitHub shows
+			// no new comment for — so the redrive reports what it posted, or
+			// the write the retry-safety marker depends on is untraceable.
+			if l.Log != nil {
+				l.Log.Event("claim", fmt.Sprintf("redrive pass=%d comment=%d", ad.pass, id))
+			}
 		}
 		return marker, id, nil
 	}

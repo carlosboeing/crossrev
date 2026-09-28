@@ -643,6 +643,12 @@ func (f *fakeForge) CommentCreate(_ context.Context, _ core.Slug, _ int, body st
 }
 
 func (f *fakeForge) CommentEdit(_ context.Context, _ core.Slug, commentID int64, body string) error {
+	// Only the redrive claim reads as a claim event. The claim heading alone
+	// would also match the mid-pass "Findings recorded" edit, which is a
+	// claim-comment write but not the claim post the order tests pin.
+	if f.log != nil && strings.Contains(body, "Driving the pass again") {
+		f.log.add("claim")
+	}
 	f.editIDs = append(f.editIDs, commentID)
 	f.edits = append(f.edits, body)
 	// An edit rewrites the comment, the way GitHub does: a later read — a

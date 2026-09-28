@@ -2,10 +2,12 @@ package review_test
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/carlosboeing/crossrev/internal/core"
+	"github.com/carlosboeing/crossrev/internal/forge"
 	"github.com/carlosboeing/crossrev/internal/review"
 
 	"github.com/carlosboeing/crossrev/internal/ui"
@@ -131,6 +133,48 @@ func TestClaimWriteCapabilityIsFalse(t *testing.T) {
 	}
 	if core.WriteCapabilityFor(core.RoleReviewer) != core.WriteNo {
 		t.Fatal("WriteCapabilityFor(reviewer) is not no")
+	}
+}
+
+// A redrive rewrites its claim comment in place, which leaves no new
+// comment on the pull request — and wrote nothing anywhere else either, so
+// the write the retry-safety marker depends on was untraceable: the stub's
+// event log showed only [harness], and the run log carried no claim line.
+// The redrive reports what it posted both places.
+func TestClaimRedriveReportsWhatItPosted(t *testing.T) {
+	e := newEnv(t)
+	raw := fmt.Sprintf(`{"v":1,"leg":"review","pass":1,"state":"complete","ts":1699950000,"comment_id":9001,"run_id":"x","head_sha":%q,"verdict":"blocked","findings":[]}`, headSHA)
+	e.forge.comments = []forge.IssueComment{commentWithMarker(t, 9001, parseMarker(t, raw))}
+	got := runLeg(t, e, e.request(t))
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
+	events := e.log.all()
+	claimAt, harnessAt := -1, -1
+	for i, name := range events {
+		switch name {
+		case "claim":
+			if claimAt < 0 {
+				claimAt = i
+			}
+		case "harness":
+			if harnessAt < 0 {
+				harnessAt = i
+			}
+		}
+	}
+	if claimAt < 0 {
+		t.Fatalf("events %v never posted a claim", events)
+	}
+	if harnessAt < 0 {
+		t.Fatalf("events %v never started a harness", events)
+	}
+	if claimAt > harnessAt {
+		t.Fatalf("harness at %d before claim at %d: %v", harnessAt, claimAt, events)
+	}
+	log := readRunLog(t, e)
+	if !strings.Contains(log, "claim redrive pass=1 comment=9001") {
+		t.Errorf("the run log does not report the redrive's claim:\n%s", log)
 	}
 }
 
