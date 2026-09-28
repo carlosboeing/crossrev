@@ -151,6 +151,10 @@ func redriveClaim(done prstate.Marker, head, runID string, ts int64) prstate.Mar
 	done.Tokens = json.RawMessage("null")
 	done.Usage = json.RawMessage("null")
 	done.Billing = prstate.Null[string]()
+	// The marker carries the redrive into the summary: the redrive claim
+	// edit is rewritten twice before the pass finishes, so only a field
+	// the renderers read keeps the notice on the comment a reader sees.
+	done.Redriven = prstate.Some(true)
 	return done
 }
 

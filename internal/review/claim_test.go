@@ -178,6 +178,36 @@ func TestClaimRedriveReportsWhatItPosted(t *testing.T) {
 	}
 }
 
+// The run log is the operator record; the record a pull request reader has
+// is the pass comment. The redrive claim edit is rewritten twice before the
+// pass finishes — "Findings recorded" mid-pass, then the summary — so the
+// summary has to name the redrive itself, or nothing the reader sees says
+// the pass ran again.
+func TestClaimRedriveNamesTheRedriveInTheSummary(t *testing.T) {
+	e := newEnv(t)
+	raw := fmt.Sprintf(`{"v":1,"leg":"review","pass":1,"state":"complete","ts":1699950000,"comment_id":9001,"run_id":"x","head_sha":%q,"verdict":"blocked","findings":[]}`, headSHA)
+	e.forge.comments = []forge.IssueComment{commentWithMarker(t, 9001, parseMarker(t, raw))}
+	got := runLeg(t, e, e.request(t))
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
+	var summary string
+	for i, id := range e.forge.editIDs {
+		if id == 9001 {
+			summary = e.forge.edits[i]
+		}
+	}
+	if summary == "" {
+		t.Fatal("the redrive never edited comment 9001")
+	}
+	if !strings.Contains(summary, "This pass ran again on this comment: the previous attempt could not be completed.") {
+		t.Errorf("the redriven summary names no redrive:\n%s", summary)
+	}
+	if !strings.Contains(summary, `"redriven":true`) {
+		t.Errorf("the redriven marker carries no redriven key:\n%s", summary)
+	}
+}
+
 func TestClaimWarnsWhenTheDailyReviewBackstopCannotReadComments(t *testing.T) {
 	e := newEnv(t)
 	e.cfg = mustConfig(t, "version: 2\npolicy:\n  max_prs_per_day: 3\n")

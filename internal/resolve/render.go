@@ -624,6 +624,12 @@ func reviewSummaryBody(findings json.RawMessage, marker prstate.Marker, repo cor
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "## crossrev review — %s\n\n", passLabel(pass, maxPasses))
+	// The rewrite renders from the marker rather than from the comment
+	// text, so the redrive notice is re-rendered from the marker's field —
+	// or the resolve leg would strip what the review summary wrote.
+	if marker.Redriven.Value() {
+		b.WriteString("This pass ran again on this comment: the previous attempt could not be completed.\n\n")
+	}
 	if cov.on && len(cov.skips) > 0 {
 		b.WriteString(intel.SkipWarning(cov.skips))
 	}
