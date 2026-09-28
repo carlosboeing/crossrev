@@ -31,6 +31,11 @@ type session struct {
 	pass      int
 	review    prstate.Marker
 	findings  []harness.Node
+	// resolvable is the filtered copy only the resolver reads: the full
+	// review record stays on findings for the marker and summary rewrite,
+	// so a held finding survives the resolve leg with its not_posted
+	// prior and its summary count.
+	resolvable []harness.Node
 	backlog   config.Backlog
 	minFix    core.Severity
 	maxPasses int
@@ -442,7 +447,7 @@ func (s *session) expect(candidates prompt.Candidates) *validate.Expectations {
 			nums = append(nums, n)
 		}
 	}
-	return &validate.Expectations{Findings: len(s.findings), Candidates: nums}
+	return &validate.Expectations{Findings: len(s.resolvable), Candidates: nums}
 }
 
 // describe is the harness half of the run header's Resolver line

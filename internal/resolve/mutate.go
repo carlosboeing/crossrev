@@ -68,6 +68,9 @@ func (l *Leg) publish(ctx context.Context, s *session, got Result, workdir strin
 	}
 
 	recs := unmarshalResolutions(marker.Resolutions)
+	// The full review record, held findings included: the resolver answered
+	// only the filtered copy, and the rewrite below carries the rest
+	// through unchanged, so no held prior or summary count is lost.
 	findings := s.findings
 	sha, _ := marker.HeadSHA.Get()
 	filed, matched, wrote, deferredLines, recs, persistMessages := l.persistDeferred(ctx, s, workdir, recs, findings, sha)

@@ -171,7 +171,7 @@ func (l *Leg) invoke(ctx context.Context, s *session, marker prstate.Marker, wor
 
 	threads := l.Forge.ReviewThreads(ctx, s.repo, s.req.PR)
 	s.findings = backfillRoots(s.findings, threads)
-	s.findings = enrichFindings(s.findings, s.markers, s.minFix)
+	s.resolvable = enrichFindings(s.findings, s.markers, s.minFix)
 
 	candidates, err := l.candidates(ctx, s)
 	if err != nil {
@@ -372,7 +372,7 @@ func (l *Leg) invoke(ctx context.Context, s *session, marker prstate.Marker, wor
 		}
 		err = validate.Resolve(env.Payload, s.expect(candidates))
 		if err == nil {
-			mapped, mapErr := mapNumbers(env.Payload, s.findings)
+			mapped, mapErr := mapNumbers(env.Payload, s.resolvable)
 			if mapErr != nil {
 				return wrapErr(mapErr)
 			}
@@ -475,7 +475,7 @@ func (l *Leg) invokeAbort(ctx context.Context, work Git, index, tree string) []u
 }
 
 func (l *Leg) renderPrompt(ctx context.Context, s *session, threads []forge.ReviewThread, candidates prompt.Candidates, workdir string) ([]byte, *vcs.Warning, error) {
-	findings, err := toPromptFindings(s.findings)
+	findings, err := toPromptFindings(s.resolvable)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -500,7 +500,7 @@ func (l *Leg) renderPrompt(ctx context.Context, s *session, threads []forge.Revi
 	}
 
 	openFindingPaths := make(map[string]bool)
-	for _, f := range s.findings {
+	for _, f := range s.resolvable {
 		if p := f.Member("path").StringVal(); p != "" {
 			openFindingPaths[p] = true
 		}
@@ -614,7 +614,7 @@ func (l *Leg) candidates(ctx context.Context, s *session) (prompt.Candidates, er
 	var out prompt.Candidates
 	limit := 10
 	searched := 0
-	for _, f := range s.findings {
+	for _, f := range s.resolvable {
 		if searched >= limit {
 			break
 		}
@@ -670,19 +670,47 @@ func backfillRoots(findings []harness.Node, threads []forge.ReviewThread) []harn
 		if root := findings[i].Member("root_comment_id"); root.Present() && !root.IsNull() {
 			continue
 		}
+		// Held entries carry no thread (see the finding-lifecycle rule
+		// with attachThreads in internal/review/publish.go), so only
+		// posted findings backfill a root — the current thread's.
+		if posted := findings[i].Member("posted"); !posted.IsNull() && !posted.Truthy() {
+			continue
+		}
 		id := findings[i].Member("id").StringVal()
+		var best int64
 		for _, th := range threads {
 			for _, fid := range th.FindingIDs {
-				if string(fid) == id && th.RootCommentID != 0 {
-					findings[i].Set("root_comment_id", harness.FromInt(th.RootCommentID))
+				if string(fid) == id && th.RootCommentID != 0 && th.RootCommentID > best {
+					best = th.RootCommentID
 				}
 			}
+		}
+		if best != 0 {
+			findings[i].Set("root_comment_id", harness.FromInt(best))
 		}
 	}
 	return findings
 }
 
 func enrichFindings(findings []harness.Node, markers []prstate.Marker, minFix core.Severity) []harness.Node {
+	// Findings the review leg recorded without posting never reach the
+	// resolver: with no comment on the pull request there is no thread to
+	// reply into and no top-level comment to name, so they are dropped
+	// before numbering. Absent reads as posted, keeping markers written
+	// before the field existed resolvable; only an explicit false filters.
+	// The answer is a new slice: the caller keeps the full record for the
+	// marker and summary rewrite, and only the resolver reads this copy.
+	kept := make([]harness.Node, 0, len(findings))
+	for _, f := range findings {
+		// Member, not Lookup: the environment contract scan reads a
+		// .Lookup("name") call shape as a process-environment read, and a
+		// finding key is not one.
+		if posted := f.Member("posted"); !posted.IsNull() && !posted.Truthy() {
+			continue
+		}
+		kept = append(kept, f)
+	}
+	findings = kept
 	priors := priorResolutions(markers)
 	for i := range findings {
 		n := i + 1

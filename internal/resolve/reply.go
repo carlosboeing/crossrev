@@ -16,14 +16,18 @@ type threadRef struct {
 	RootCommentID int64
 }
 
+// threadsByFinding answers each finding id's current thread: the latest
+// posted comment wins, so a reposted upgrade resolves its new thread
+// rather than the spent one. See the finding-lifecycle rule with
+// attachThreads in internal/review/publish.go.
 func threadsByFinding(threads []forge.ReviewThread) map[string]threadRef {
 	out := map[string]threadRef{}
 	for _, th := range threads {
 		for _, id := range th.FindingIDs {
-			if _, ok := out[string(id)]; ok {
-				continue
+			prev, ok := out[string(id)]
+			if !ok || th.RootCommentID > prev.RootCommentID {
+				out[string(id)] = threadRef{ID: th.ID, RootCommentID: th.RootCommentID}
 			}
-			out[string(id)] = threadRef{ID: th.ID, RootCommentID: th.RootCommentID}
 		}
 	}
 	return out
@@ -33,6 +37,15 @@ func (l *Leg) replyAndResolve(ctx context.Context, s *session, recs []harness.No
 	by := threadsByFinding(threads)
 	harnessName := s.settings.Harness
 	model := s.settings.Model
+	// The reply footer names what the resolver verified: posted findings
+	// only, so a mixed pass scopes it while a pass with nothing held
+	// keeps the frozen wording.
+	held := 0
+	for _, f := range findings {
+		if posted := f.Member("posted"); !posted.IsNull() && !posted.Truthy() {
+			held++
+		}
+	}
 	for _, d := range recs {
 		id := d.Member("finding_id").StringVal()
 		disp := d.Member("resolution").StringVal()
@@ -40,7 +53,7 @@ func (l *Leg) replyAndResolve(ctx context.Context, s *session, recs []harness.No
 		th := by[id]
 
 		if !already[id] {
-			body := ReplyBody(mustMarshal(d), tracked, s.pass, harnessName, model)
+			body := ReplyBody(mustMarshal(d), tracked, s.pass, harnessName, model, held)
 			if th.RootCommentID != 0 {
 				if err := l.Forge.ReviewReply(ctx, s.repo, s.req.PR, th.RootCommentID, body); err != nil {
 					unthreaded++
@@ -83,15 +96,31 @@ func (l *Leg) replyAndResolve(ctx context.Context, s *session, recs []harness.No
 			}
 		}
 
+		// Each resolution lands on the posted occurrence: under a
+		// duplicate id the held entry keeps posted:false and no
+		// resolution, so a later pass can still upgrade it, while the
+		// posted entry settles. Markers written before posted:false
+		// existed read as posted, so they still match; with no posted
+		// occurrence the first match keeps the record.
+		idx := -1
 		for j := range findings {
-			if findings[j].Member("id").StringVal() == id {
-				findings[j].Set("resolution", harness.FromString(disp))
-				if tracked == "" {
-					findings[j].Set("tracked_as", harness.FromNull())
-				} else {
-					findings[j].Set("tracked_as", harness.FromString(tracked))
-				}
+			if findings[j].Member("id").StringVal() != id {
+				continue
+			}
+			if idx == -1 {
+				idx = j
+			}
+			if posted := findings[j].Member("posted"); posted.IsNull() || posted.Truthy() {
+				idx = j
 				break
+			}
+		}
+		if idx != -1 {
+			findings[idx].Set("resolution", harness.FromString(disp))
+			if tracked == "" {
+				findings[idx].Set("tracked_as", harness.FromNull())
+			} else {
+				findings[idx].Set("tracked_as", harness.FromString(tracked))
 			}
 		}
 	}
