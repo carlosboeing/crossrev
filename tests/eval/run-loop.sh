@@ -364,7 +364,12 @@ eval_repoint() {
   local new_head
   new_head="$(git --git-dir="$arm_dir/work/origin.git" rev-parse "$ARM_HEAD_BRANCH")"
   [[ "$new_head" == "$EVAL_HEAD" ]] && return 1
-  git -C "$ARM_CHECKOUT" fetch -q origin "$ARM_HEAD_BRANCH" 2>/dev/null || true
+  # From the arm's bare copy, never from origin: pushInsteadOf rewrites
+  # pushes only, and origin is the github.com address the push guard reads,
+  # so fetching it would leave the checkout on every arm. The repair commit
+  # is already local (this checkout pushed it); the fetch only refreshes
+  # the tracking state the way a repointed pull request would read.
+  git -C "$ARM_CHECKOUT" fetch -q "$arm_dir/work/origin.git" "$ARM_HEAD_BRANCH" 2>/dev/null || true
   git -C "$ARM_CHECKOUT" diff "$ARM_BASE" "$new_head" >"$arm_dir/diff.txt"
   jq --arg h "$new_head" '.headRefOid = $h' "$ARM_STATE/pr.json" >"$ARM_STATE/pr.json.tmp" \
     && mv "$ARM_STATE/pr.json.tmp" "$ARM_STATE/pr.json"
