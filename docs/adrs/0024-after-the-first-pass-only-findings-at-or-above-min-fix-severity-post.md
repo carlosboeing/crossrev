@@ -42,13 +42,19 @@ A held finding still reaches the next review's prior table, with resolution `not
 
 The hold is decided per finding entry, not per id: two entries under one id at mixed severities hold only the below-threshold one, so the actionable entry still posts and still reaches the resolver. The resolve leg's rewrite of the review summary renders the same held count beside the table, so the count survives resolution.
 
-### 6. One lifecycle for a finding id across passes
-
-A finding id's current thread is its latest posted comment: held entries carry no thread and no resolution, an upgrade posts a new comment that becomes the current thread, a re-held id may upgrade again, and each resolution lands on the posted occurrence and its current thread. The review leg binds posted findings to the newest matching thread and binds held entries to none; the resolve leg replies into and resolves the current thread, records each resolution on the posted occurrence under a duplicate id, and scopes every resolving and verification claim — the review summary, its rewrite, the resolve summary and each reply footer — to posted findings, keeping the held count beside each one.
-
 ### 5. Convergence is untouched
 
 Held findings are a subset of the findings convergence already ignores. Actionable counts, verdicts and labels read the same record as before.
+
+### 6. One lifecycle for a finding id across passes
+
+A finding id's current thread is its latest posted comment.
+
+- Held entries carry no thread and no resolution.
+- An upgrade posts a new comment that becomes the current thread.
+- A re-held id may upgrade again.
+- Each resolution lands on the posted occurrence and its current thread.
+- Every resolving and verification claim counts posted findings only, with the held count beside it.
 
 ## Options considered
 
