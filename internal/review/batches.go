@@ -211,6 +211,12 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 	if claim.HeadSHA.Present() {
 		marker.HeadSHA = claim.HeadSHA
 	}
+	// The redrive notice renders from the pass marker, and the snapshot
+	// marker predates the claim that recorded it — so the copy carries it,
+	// or a review with files to read settles with no notice.
+	if claim.Redriven.Present() {
+		marker.Redriven = claim.Redriven
+	}
 	marker.TS = claim.TS
 	marker.Leg = core.LegReview
 	marker.Pass = pass
@@ -700,6 +706,11 @@ func (l *Leg) haltPass(ctx context.Context, req Request, loaded Context, pass in
 	}
 	if claim.HeadSHA.Present() {
 		marker.HeadSHA = claim.HeadSHA
+	}
+	// As in runCoverage: the halted marker keeps the redrive the claim
+	// recorded, so the halted comment still says the pass ran again.
+	if claim.Redriven.Present() {
+		marker.Redriven = claim.Redriven
 	}
 	marker.TS = claim.TS
 	marker.Leg = core.LegReview
