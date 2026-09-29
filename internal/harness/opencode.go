@@ -41,6 +41,34 @@
 // operator's global config and wins on these keys — measured twice, against a
 // global `edit: allow` and again against a later-loading config file.
 //
+// # 2.x keeps the config mechanism and changes everything around it
+//
+// opencode 2.x rejects `--pure` and `--dir` before any model call, takes no
+// `--variant`, and answers the session record through `session export`
+// rather than `export` (issue #272). Six live flash-model legs at 2.0.15
+// decide the shape below, and the second decision is the one that matters:
+// OPENCODE_CONFIG, OPENCODE_CONFIG_CONTENT and OPENCODE_PERMISSION are each
+// ignored by a run attached to the background service — `debug config` lists
+// only the operator's global file with any of them set — while the file
+// config is honoured by a run with `--standalone`, which is why a 2.x leg
+// passes it. The permission
+// keys themselves carry over: a review config denying `edit` held no writer
+// under any name when the model was told to try `write`, `apply_patch`,
+// `edit` and `bash` in turn, and a resolve config allowing `edit` wrote a
+// file (through the `write` tool — in 2.x `edit` only replaces text) while
+// `bash` stayed unavailable. `write` and `apply_patch` are still named
+// beside `edit` rather than left to the base rule, so the grant survives
+// whatever grouping a later 2.x draws between them. There is no 2.x
+// equivalent of `--pure`: the base rule is what holds plugin and MCP tools
+// on both majors, and on 2.x the plugin code itself loads. The effort rides
+// `--model` as provider/model#variant, the `--model` help's own format, so
+// an effort with no model to ride on refuses rather than starting without
+// what it was configured with. The checkout travels as the child's working
+// directory, which base.spec already sets to the workdir — 2.x takes no
+// `--dir`, and the probe files of those live legs landed in the directory
+// the process started in. `session export` answers the same `.info` shape
+// the usage parser reads, so no parsing changed with the subcommand.
+//
 // The answering model and a whole-run usage record come from
 // `opencode export <sessionID>`, which reads the local session database and costs
 // no model call. That is a SECOND child process, so it is a second Spec: Spec
@@ -56,7 +84,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
 
 	"github.com/carlosboeing/crossrev/internal/exec"
@@ -86,7 +113,7 @@ const (
 //
 // It is a template rather than a marshalled map because encoding/json sorts a
 // map's keys, and the key order here is read by a person auditing what a leg was
-// granted. One value varies, and %s is where the write flag lands.
+// granted. One value varies, and each %s is where the write flag lands.
 //
 // question and doom_loop are named denials rather than casualties of "*" so the
 // intent survives anyone reading only this block; doom_loop otherwise falls back
@@ -95,7 +122,11 @@ const (
 // spend without being asked for) and skill because it is the door to the
 // operator's own skill library. read stays a map, not the string "allow": a
 // string would replace opencode's own *.env deny and let the model quote an
-// untracked .env into a public comment.
+// untracked .env into a public comment. write and apply_patch are named beside
+// edit because 2.x splits creating a file from replacing text across them:
+// each mirrors the leg's grant, so a review leg holds no writer under any
+// name whatever grouping a 2.x draws between them, and the keys match nothing
+// on 1.x, where they are inert patterns.
 const isolationConfig = `{
   "$schema": "https://opencode.ai/config.json",
   "permission": {
@@ -112,6 +143,8 @@ const isolationConfig = `{
     "lsp": "allow",
     "todowrite": "allow",
     "edit": "%s",
+    "write": "%s",
+    "apply_patch": "%s",
     "bash": "deny",
     "task": "deny",
     "skill": "deny",
@@ -178,6 +211,10 @@ func (a *Opencode) Spec(inv Invocation) (exec.Spec, error) {
 		return exec.Spec{}, err
 	}
 
+	if inv.CLIMajor == 2 {
+		return a.spec2x(inv, prompt)
+	}
+
 	// --pure keeps external plugins out of the session entirely; see the header
 	// for why the permission block alone does not answer them.
 	args := []string{"run", "--pure", "--format", "json", "--dir", inv.Workdir}
@@ -186,6 +223,30 @@ func (a *Opencode) Spec(inv Invocation) (exec.Spec, error) {
 	}
 	if wanted(inv.Effort) {
 		args = append(args, "--variant", inv.Effort)
+	}
+	args = append(args, prompt)
+
+	return a.spec(inv, args, a.isolationEnv(inv)...), nil
+}
+
+// spec2x builds the child process for opencode 2.x, which rejects the 1.x
+// flags and ignores the isolation config unless the run is standalone (see
+// the header). The checkout travels as the child's working directory, which
+// base.spec already sets to the workdir, and the effort rides the model as
+// provider/model#variant.
+func (a *Opencode) spec2x(inv Invocation, prompt string) (exec.Spec, error) {
+	args := []string{"run", "--standalone", "--format", "json"}
+	switch {
+	case wanted(inv.Model) && wanted(inv.Effort):
+		args = append(args, "--model", inv.Model+"#"+inv.Effort)
+	case wanted(inv.Model):
+		args = append(args, "--model", inv.Model)
+	case wanted(inv.Effort):
+		return exec.Spec{}, &Refusal{
+			Reason: "the opencode adapter was given an effort with no model on opencode 2.x",
+			Action: "opencode 2.x takes no --variant flag: the effort rides --model as provider/model#variant, so name a model beside the effort or clear the effort for this leg.",
+			Kind:   ErrEffortWithoutModel,
+		}
 	}
 	args = append(args, prompt)
 
@@ -205,56 +266,40 @@ func (a *Opencode) VersionProbe(inv Invocation) exec.Spec {
 	return probe
 }
 
-// VersionRefusal refuses an install outside the major version this adapter
+// VersionRefusal refuses an install outside the major versions this adapter
 // drives, before the leg starts — and one it cannot read a version from.
 //
-// The rule is exactly 1.x, which is what every refusal here names. The upper
-// boundary is measured rather than defensive: opencode 2.x does not accept the
-// flags this adapter passes and does not read the isolation config it writes,
-// so a run on it would start with no constraints at all
-// (https://github.com/carlosboeing/crossrev/issues/272). Below 1.x nothing is
-// recorded, so it is refused on the same terms rather than run blind.
+// The rule is 1.x and 2.x, which is what every refusal here names. Each major
+// takes its own flags and its own session-export subcommand, and the spec is
+// built from the major the gate confirmed. Below 1.x nothing is recorded, so
+// it is refused on the same terms rather than run blind.
 //
 // A probe that names no version at all is refused too: the gate fails closed,
 // because an install CrossRev cannot confirm is not one it drives. The refusal
 // names the range in every shape rather than guessing what an unreadable
 // banner hid.
 func (a *Opencode) VersionRefusal(probe []byte) *Refusal {
-	token := opencodeVersionToken.FindString(string(probe))
+	token := versionToken.FindString(string(probe))
 	if token == "" {
 		return &Refusal{
-			Reason: "the opencode CLI did not report a version, and CrossRev supports opencode 1.x (issue #272)",
+			Reason: "the opencode CLI did not report a version, and CrossRev supports opencode 1.x and 2.x (issue #272)",
 			Action: "CrossRev cannot confirm this install is one it drives, so the leg is refused rather than started (https://github.com/carlosboeing/crossrev/issues/272). Install the supported CLI with: " + a.descriptor.Install.Command + ", or point this leg at another harness with --harness.",
 			Kind:   ErrVersionUnsupported,
 		}
 	}
-	if majorVersion(token) == 1 {
+	if major := majorVersion(token); major == 1 || major == 2 {
 		return nil
 	}
 	return &Refusal{
-		Reason: "the opencode CLI reports version " + token + ", and CrossRev supports opencode 1.x (issue #272)",
-		Action: "opencode 2.x does not accept the flags this adapter passes and does not read the isolation config it writes (https://github.com/carlosboeing/crossrev/issues/272), and nothing below 1.x is recorded. Install the supported CLI with: " + a.descriptor.Install.Command + ", or point this leg at another harness with --harness.",
+		Reason: "the opencode CLI reports version " + token + ", and CrossRev supports opencode 1.x and 2.x (issue #272)",
+		Action: "Nothing outside 1.x and 2.x is recorded (https://github.com/carlosboeing/crossrev/issues/272). Install the supported CLI with: " + a.descriptor.Install.Command + ", or point this leg at another harness with --harness.",
 		Kind:   ErrVersionUnsupported,
 	}
 }
 
-// opencodeVersionToken is the first version-shaped token of the probe, the
-// same shape preflight's versionToken reads.
-var opencodeVersionToken = regexp.MustCompile(`v?[0-9]+\.[0-9]+[0-9A-Za-z.+-]*`)
-
-// majorVersion reads a version token's leading major number, or 0 when it has
-// none.
-func majorVersion(token string) int {
-	major, _, _ := strings.Cut(strings.TrimPrefix(token, "v"), ".")
-	number, err := strconv.Atoi(major)
-	if err != nil {
-		return 0
-	}
-	return number
-}
-
-// ExportSpec is the second child: `opencode export <sessionID>`, which reads the
-// local session database and costs no model call
+// ExportSpec is the second child: `opencode export <sessionID>` on 1.x and
+// `opencode session export <sessionID>` on 2.x, which reads the local
+// session database and costs no model call
 // (lib/adapters/opencode.sh:266).
 //
 // It carries the same environment as the run, isolation config included, because
@@ -268,7 +313,11 @@ func (a *Opencode) ExportSpec(inv Invocation, sessionID string) (exec.Spec, erro
 			Kind:   ErrScratch,
 		}
 	}
-	return a.spec(inv, []string{"export", sessionID}, a.isolationEnv(inv)...), nil
+	args := []string{"export", sessionID}
+	if inv.CLIMajor == 2 {
+		args = []string{"session", "export", sessionID}
+	}
+	return a.spec(inv, args, a.isolationEnv(inv)...), nil
 }
 
 func (a *Opencode) isolationEnv(inv Invocation) []string {
@@ -283,7 +332,7 @@ func (a *Opencode) writeIsolation(inv Invocation) error {
 	if inv.Write {
 		permission = "allow"
 	}
-	config := fmt.Sprintf(isolationConfig, permission)
+	config := fmt.Sprintf(isolationConfig, permission, permission, permission)
 	if !json.Valid([]byte(config)) {
 		// Unreachable while the template above is a constant, and cheap enough
 		// to keep: the file is what stands between a review leg and a write

@@ -84,6 +84,14 @@ func TestOpencodeIsolationIsFailClosedInBothShapes(t *testing.T) {
 			if permission["edit"] != tt.edit {
 				t.Errorf("edit = %v, want %q", permission["edit"], tt.edit)
 			}
+			// write creates files in 2.x while edit only replaces text, and
+			// apply_patch is a second writer beside both: each mirrors the
+			// leg's grant, so a review leg holds no writer under any name.
+			for _, key := range []string{"write", "apply_patch"} {
+				if permission[key] != tt.edit {
+					t.Errorf("%s = %v, want %q", key, permission[key], tt.edit)
+				}
+			}
 			for _, key := range []string{"bash", "task", "skill", "webfetch", "websearch", "external_directory", "question", "doom_loop"} {
 				if permission[key] != "deny" {
 					t.Errorf("%s = %v, want deny in every shape", key, permission[key])
@@ -158,6 +166,99 @@ func TestOpencodeArgumentShape(t *testing.T) {
 	entries, err := os.ReadDir(configDir)
 	if err != nil || len(entries) != 0 {
 		t.Errorf("the config directory is not empty: %v", entries)
+	}
+}
+
+// A 2.x leg runs standalone with the same isolation config: the background
+// service ignores the process's OPENCODE_CONFIG, so without --standalone the
+// leg would start unconstrained (issue #272). --pure and --dir are gone —
+// 2.x rejects both before any model call — and the checkout travels as the
+// child's working directory, which base.spec already sets to the workdir.
+// --variant is gone too: the effort rides the model as provider/model#variant.
+func TestOpencodeArgumentShapeOn2x(t *testing.T) {
+	adapter := opencodeAdapter(t)
+	inv := invocation(t, "opencode", false)
+	inv.CLIMajor = 2
+
+	spec, err := adapter.Spec(inv)
+	if err != nil {
+		t.Fatalf("building the spec: %v", err)
+	}
+	if got := spec.Args[:4]; !slices.Equal(got, []string{"run", "--standalone", "--format", "json"}) {
+		t.Errorf("the invocation does not open with run --standalone --format json: %v", got)
+	}
+	for _, flag := range []string{"--pure", "--dir", "--variant", "--auto"} {
+		if slices.Contains(spec.Args, flag) {
+			t.Errorf("2.x rejects %s, but the spec passes it: %v", flag, spec.Args)
+		}
+	}
+	if !hasFlagPair(spec.Args, "--model", "opencode/a-model#high") {
+		t.Errorf("the effort does not ride the model as a variant: %v", spec.Args)
+	}
+	if spec.Dir != inv.Workdir {
+		t.Errorf("the child's working directory = %q, want the checkout %q — 2.x takes no --dir, so the directory is the isolation", spec.Dir, inv.Workdir)
+	}
+
+	prompt := spec.Args[len(spec.Args)-1]
+	if !strings.HasPrefix(prompt, inv.Prompt.Text) {
+		t.Error("the prompt is not the last argument")
+	}
+	if !strings.Contains(prompt, "This harness does not constrain your output.") {
+		t.Error("the prompt does not correct the skill's claim that the harness constrains the output")
+	}
+}
+
+// 2.x takes no --variant, so an effort with no model to ride on cannot be
+// passed at all. The leg is refused rather than started without the effort
+// it was configured with.
+func TestOpencodeRefusesEffortWithoutModelOn2x(t *testing.T) {
+	inv := invocation(t, "opencode", false)
+	inv.CLIMajor = 2
+	inv.Model = ""
+	inv.Effort = "high"
+
+	_, err := opencodeAdapter(t).Spec(inv)
+	if err == nil {
+		t.Fatal("the adapter accepted an effort with no model on 2.x")
+	}
+	if !errorIs(err, harness.ErrEffortWithoutModel) {
+		t.Fatalf("err = %v, want ErrEffortWithoutModel", err)
+	}
+}
+
+// The session record moved in 2.x: `export` is now `session export`, and it
+// answers the same `.info` shape the usage parser reads. The environment
+// still matches the run's in both majors.
+func TestOpencodeExportSpecFollowsMajor(t *testing.T) {
+	adapter := opencodeAdapter(t)
+
+	for _, tt := range []struct {
+		name  string
+		major int
+		want  []string
+	}{
+		{name: "1.x exports the session id", major: 1, want: []string{"export", "a-session"}},
+		{name: "an unprobed install keeps the 1.x export", major: 0, want: []string{"export", "a-session"}},
+		{name: "2.x exports through session export", major: 2, want: []string{"session", "export", "a-session"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			inv := invocation(t, "opencode", false)
+			inv.CLIMajor = tt.major
+			run, err := adapter.Spec(inv)
+			if err != nil {
+				t.Fatalf("building the run spec: %v", err)
+			}
+			export, err := adapter.ExportSpec(inv, "a-session")
+			if err != nil {
+				t.Fatalf("building the export spec: %v", err)
+			}
+			if !slices.Equal(export.Args, tt.want) {
+				t.Errorf("export args = %v, want %v", export.Args, tt.want)
+			}
+			if !slices.Equal(run.Env, export.Env) {
+				t.Errorf("the export environment differs from the run's:\n  run    %v\n  export %v", run.Env, export.Env)
+			}
+		})
 	}
 }
 
@@ -500,8 +601,6 @@ func TestOpencodeRefusesAnInstallPastTheSupportedMajor(t *testing.T) {
 		name string
 		out  string
 	}{
-		{name: "2.x", out: "opencode v2.0.15\n"},
-		{name: "2.0.0", out: "opencode v2.0.0\n"},
 		{name: "3.x", out: "opencode v3.1.4\n"},
 		{name: "0.x", out: "opencode v0.9.9\n"},
 		{name: "no version token at all", out: "no version token here\n"},
@@ -515,13 +614,13 @@ func TestOpencodeRefusesAnInstallPastTheSupportedMajor(t *testing.T) {
 			if !errorIs(refusal, harness.ErrVersionUnsupported) {
 				t.Errorf("err = %v, want ErrVersionUnsupported", refusal)
 			}
-			if !strings.Contains(refusal.Reason, "opencode 1.x") {
+			if !strings.Contains(refusal.Reason, "opencode 1.x and 2.x") {
 				t.Errorf("Reason does not name the supported range: %q", refusal.Reason)
 			}
 			if !strings.Contains(refusal.Action, "issues/272") {
 				t.Errorf("Action does not point at issue #272: %q", refusal.Action)
 			}
-			if !strings.Contains(refusal.Action, "opencode-ai@1.18.21") {
+			if !strings.Contains(refusal.Action, "opencode-ai@2.0.15") {
 				t.Errorf("Action does not name the supported install: %q", refusal.Action)
 			}
 		})
@@ -531,6 +630,8 @@ func TestOpencodeRefusesAnInstallPastTheSupportedMajor(t *testing.T) {
 		"1.18.21 (test stub)\n",
 		"opencode v1.18.21\n",
 		"opencode v1.0.0\n",
+		"opencode v2.0.15\n",
+		"opencode v2.0.0\n",
 	} {
 		t.Run(fmt.Sprintf("accepts %q", strings.TrimSpace(out)), func(t *testing.T) {
 			if refusal := pinned.VersionRefusal([]byte(out)); refusal != nil {
@@ -564,25 +665,43 @@ func TestCheckVersionRefusesAProbeThatDoesNotAnswer(t *testing.T) {
 		{name: "a probe that printed nothing", res: exec.Result{}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			refusal := harness.CheckVersion(context.Background(), fixedRunner{tt.res}, adapter, inv)
+			major, refusal := harness.CheckVersion(context.Background(), fixedRunner{tt.res}, adapter, inv)
 			if refusal == nil {
 				t.Fatal("the leg was allowed to start on an unconfirmed version")
+			}
+			if major != 0 {
+				t.Errorf("major = %d, want 0 for an unconfirmed version", major)
 			}
 			if !errorIs(refusal, harness.ErrVersionUnsupported) {
 				t.Errorf("err = %v, want ErrVersionUnsupported", refusal)
 			}
-			if !strings.Contains(refusal.Reason, "opencode 1.x") {
+			if !strings.Contains(refusal.Reason, "opencode 1.x and 2.x") {
 				t.Errorf("Reason does not name the supported range: %q", refusal.Reason)
 			}
 		})
 	}
 
-	t.Run("a supported version lets the leg start", func(t *testing.T) {
-		res := exec.Result{Stdout: []byte("opencode v1.18.21 (test stub)\n")}
-		if refusal := harness.CheckVersion(context.Background(), fixedRunner{res}, adapter, inv); refusal != nil {
-			t.Errorf("refusal = %v, want nil", refusal)
-		}
-	})
+	// The gate reports the confirmed major beside the refusal, because the
+	// two majors take different flags: the legs build the spec from it.
+	for _, tt := range []struct {
+		name  string
+		out   string
+		major int
+	}{
+		{name: "1.x", out: "opencode v1.18.21 (test stub)\n", major: 1},
+		{name: "2.x", out: "opencode v2.0.15\n", major: 2},
+	} {
+		t.Run("a supported version lets the leg start on "+tt.name, func(t *testing.T) {
+			res := exec.Result{Stdout: []byte(tt.out)}
+			major, refusal := harness.CheckVersion(context.Background(), fixedRunner{res}, adapter, inv)
+			if refusal != nil {
+				t.Fatalf("refusal = %v, want nil", refusal)
+			}
+			if major != tt.major {
+				t.Errorf("major = %d, want %d", major, tt.major)
+			}
+		})
+	}
 
 	t.Run("a missing binary stays the not-installed refusal", func(t *testing.T) {
 		// The real start failure, from the real runner: a missing binary
@@ -591,9 +710,12 @@ func TestCheckVersionRefusesAProbeThatDoesNotAnswer(t *testing.T) {
 		missing := exec.NewOSRunner().Run(context.Background(), exec.Spec{
 			Path: "crossrev-no-such-binary-for-tests", Args: []string{"--version"},
 		})
-		refusal := harness.CheckVersion(context.Background(), fixedRunner{missing}, adapter, inv)
+		major, refusal := harness.CheckVersion(context.Background(), fixedRunner{missing}, adapter, inv)
 		if refusal == nil {
 			t.Fatal("a missing binary was allowed to start the leg")
+		}
+		if major != 0 {
+			t.Errorf("major = %d, want 0 when no probe answered", major)
 		}
 		if !errorIs(refusal, harness.ErrNotInstalled) {
 			t.Errorf("err = %v, want ErrNotInstalled", refusal)

@@ -140,9 +140,9 @@ resolver:
 
 `harness` is one of `claude`, `codex`, `agy`, `grok` or `opencode`. `model` reaches the harness as given, so it must be **fully qualified** — `claude-fable-5`, never `fable-5`, which fails as an entitlement error rather than as a typo. `effort` is passed through verbatim. Either leg may name an `endpoint` instead of relying on the harness's own vendor.
 
-opencode carries two facts worth knowing before the first run:
+opencode carries three facts worth knowing before the first run:
 
-- **opencode serves either leg.** Its isolation config denies `edit` to a review leg and grants it to a resolve leg, while `bash`, `task`, `skill`, `webfetch`, `websearch` and `external_directory` stay denied on both. Its `--model` takes `provider/model`, not a bare id: `opencode/grok-code`, never `grok-code`.
+- **opencode serves either leg, on 1.x and 2.x.** Its isolation config denies `edit` to a review leg and grants it to a resolve leg, while `bash`, `task`, `skill`, `webfetch`, `websearch` and `external_directory` stay denied on both. On 2.x the file-writing tools are split — `write` creates, `edit` only replaces — so the config names `write` and `apply_patch` beside `edit`, each mirroring the leg's grant. Its `--model` takes `provider/model`, not a bare id: `opencode/grok-code`, never `grok-code`. On 2.x the leg runs `opencode run --standalone`, because the background service drops the isolation config; there is no 2.x equivalent of 1.x's `--pure`, so operator plugins load and are held only by the permission denials. `effort` rides `--variant` on 1.x and `--model` as `provider/model#variant` on 2.x, which refuses an effort with no model to ride on.
 - **opencode gets no schema enforcement from its CLI**, so CrossRev carries the schema inside the prompt and checks the shape itself, retrying once when the answer does not fit. Pick an opencode model that follows a JSON instruction; a model that answers in prose will fail its pass after that retry.
 
 With no config file anywhere the defaults are `codex` reviewing and `claude` resolving, in `local` mode, with no endpoints. Those defaults are deliberately not what `init` writes: a local user who has never heard of the CI pairing would otherwise be told to set an API key before their first review.

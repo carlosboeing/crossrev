@@ -38,6 +38,9 @@ func TestEveryAdapterBuildsTheWholeArgv(t *testing.T) {
 	tests := []struct {
 		harness string
 		write   bool
+		// major is the CLI major the version gate confirmed; zero keeps the
+		// legacy shape. Only opencode reads it.
+		major int
 		// where cites the Bash lines this vector is assembled from.
 		where string
 		want  []string
@@ -125,6 +128,24 @@ func TestEveryAdapterBuildsTheWholeArgv(t *testing.T) {
 			want: []string{"run", "--pure", "--format", "json", "--dir", "<workdir>",
 				"--model", "<model>", "--variant", "high", "<prompt-with-schema>"},
 		},
+		{
+			// The write flag reaches opencode through the isolation config in
+			// both majors, so both 2.x legs share one vector too. 2.x rejects
+			// --pure and --dir before any model call and takes no --variant:
+			// the run is standalone so the background service does not drop
+			// the isolation config, the checkout travels as the working
+			// directory, and the effort rides the model as a variant.
+			harness: "opencode", write: false, major: 2,
+			where: "opencode 2.0.15, measured (issue #272)",
+			want: []string{"run", "--standalone", "--format", "json",
+				"--model", "<model#effort>", "<prompt-with-schema>"},
+		},
+		{
+			harness: "opencode", write: true, major: 2,
+			where: "opencode 2.0.15, measured (issue #272)",
+			want: []string{"run", "--standalone", "--format", "json",
+				"--model", "<model#effort>", "<prompt-with-schema>"},
+		},
 	}
 
 	seen := map[string]bool{}
@@ -133,12 +154,17 @@ func TestEveryAdapterBuildsTheWholeArgv(t *testing.T) {
 		if tt.write {
 			leg = "resolve"
 		}
-		t.Run(tt.harness+"/"+leg, func(t *testing.T) {
+		name := tt.harness + "/" + leg
+		if tt.major != 0 {
+			name += fmt.Sprintf("/v%d", tt.major)
+		}
+		t.Run(name, func(t *testing.T) {
 			adapter, known := harness.For(doc, tt.harness)
 			if !known {
 				t.Fatalf("the descriptor names no %s adapter", tt.harness)
 			}
 			inv := invocation(t, tt.harness, tt.write)
+			inv.CLIMajor = tt.major
 			spec, err := adapter.Spec(inv)
 			if err != nil {
 				t.Fatalf("building the spec: %v", err)
@@ -200,6 +226,8 @@ func resolvePlaceholder(t *testing.T, element string, inv harness.Invocation) st
 		return inv.PayloadPath
 	case "<model>":
 		return inv.Model
+	case "<model#effort>":
+		return inv.Model + "#" + inv.Effort
 	case "<prompt-with-schema>":
 		return opencodeComposedPrompt(t, inv)
 	default:
