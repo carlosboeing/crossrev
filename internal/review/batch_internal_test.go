@@ -27,3 +27,33 @@ func TestVerdictsFromPayloadKeepsFindingPositions(t *testing.T) {
 		t.Errorf("FindingIDs = %v, want [2] (the reported 1-based position)", got.FindingIDs)
 	}
 }
+
+// An evidence revision the model invents is corrected, never refused:
+// verdictsFromPayload records the content revision the batch showed the
+// reviewer, so a cited revision that exists nowhere cannot halt the pass.
+func TestVerdictsFromPayloadRecordsTheReviewedRevision(t *testing.T) {
+	const reviewedSHA = "2c4a46cb321db01826d116b5ef2add6b0284d68c"
+	head, err := core.NewRevision(reviewedSHA)
+	if err != nil {
+		t.Fatalf("revision %s: %v", reviewedSHA, err)
+	}
+	payload := json.RawMessage(`{"coverage":[{"unit_number":1,"verdict":"no_issue","finding_numbers":[],` +
+		`"evidence":[{"path":"a.go","revision":"3333333333333333333333333333333333333333",` +
+		`"start_line":1,"end_line":10,"source":"git","note":null}],"reason":null}],` +
+		`"examined_scope":"read it","known_limits":[]}`)
+	files := []intel.FileUnit{{ID: core.UnitID("u1"), Path: "a.go", ContentRevision: head}}
+	verdicts, _, _, err := verdictsFromPayload(payload, files)
+	if err != nil {
+		t.Fatalf("verdictsFromPayload: %v", err)
+	}
+	got, ok := verdicts[core.UnitID("u1")]
+	if !ok {
+		t.Fatalf("no verdict for the batch's unit: %v", verdicts)
+	}
+	if len(got.Evidence) != 1 {
+		t.Fatalf("Evidence = %v, want the one reported item", got.Evidence)
+	}
+	if rev := got.Evidence[0].Revision.Value(); rev != reviewedSHA {
+		t.Errorf("Evidence revision = %q, want the reviewed %q", rev, reviewedSHA)
+	}
+}

@@ -142,13 +142,14 @@ func TestReviewCoverageSemanticContract(t *testing.T) {
 			code: 2,
 		},
 		{
-			name: "evidence naming an unprovided revision is a semantic contradiction",
+			// CrossRev records the revision it reviewed, so the model's
+			// value is never a reason to refuse: an unknown revision is
+			// accepted here and corrected at publish time.
+			name: "evidence naming an unknown revision is accepted",
 			payload: reviewPayload(`[]`, reviewCoverage(
 				reviewUnitNoIssue(1, "a.go", "3333333333333333333333333333333333333333", 1, 10),
 				reviewUnitNoIssue(2, "b.go", head.SHA(), 1, 4),
 			)),
-			want: `coverage for unit 1 cites evidence revision "3333333333333333333333333333333333333333", which is neither the base nor the head`,
-			code: 2,
 		},
 		{
 			name: "an inverted span is a semantic contradiction",
