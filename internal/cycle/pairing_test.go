@@ -120,9 +120,10 @@ func TestPairingServesAnOverrideOnBothLegs(t *testing.T) {
 }
 
 // TestPairingRefusesCodexAsResolverUnderShippedDescriptor pins that codex is
-// refused as a resolver even under the shipped descriptor where codex has not
-// had its legs rewritten to ["review"]: codex cannot read files, so a cycle
-// whose resolver is codex must not bill a review before failing.
+// refused as a resolver through the shared resolver rule
+// (harness.RefusedAsResolver), even under the shipped descriptor where codex
+// carries no legs field: codex cannot read files, so a cycle whose resolver
+// is codex must not bill a review before failing.
 func TestPairingRefusesCodexAsResolverUnderShippedDescriptor(t *testing.T) {
 	check := Pairing(shippedDescriptor(t), configWith("claude", "codex"))
 	wantFatal(t, check(""),

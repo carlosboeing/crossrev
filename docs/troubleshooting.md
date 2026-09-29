@@ -187,7 +187,7 @@ A `token_env` naming `GH_TOKEN`, `GITHUB_TOKEN`, `GH_ENTERPRISE_TOKEN` or `GITHU
 
 A harness may declare which legs it serves, and one that does not serve the leg you named is refused before anything is staged or billed. Each leg checks the descriptor before it runs, and a cycle checks both after the config loads, so a cycle stops without paying for a review it cannot follow with a resolve.
 
-No shipped harness currently restricts its legs, so this refusal only appears for a harness whose descriptor carries a `legs` field that omits the one you named. It is a configuration fact rather than a transient failure, so re-running changes nothing. Name a harness that serves the leg.
+No shipped harness restricts its legs through the descriptor; codex is refused as the resolver by rule instead, with the reason naming the file-reading tool it is missing. Apart from codex, this refusal only appears for a harness whose descriptor carries a `legs` field that omits the one you named. It is a configuration fact rather than a transient failure, so re-running changes nothing. Name a harness that serves the leg.
 
 `--harness` on `cycle` lands on both legs, which is how an operator with a single harness installed runs the loop. It is refused only when that harness cannot serve one of them.
 

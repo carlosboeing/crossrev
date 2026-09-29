@@ -133,6 +133,29 @@ func TestPairingSupportedRefusesALegTheDescriptorDoesNotName(t *testing.T) {
 	}
 }
 
+// Codex is refused as a resolver through the shared resolver rule
+// (harness.RefusedAsResolver), on every runner: the resolve leg's shell
+// denial strands codex self-hosted too. Codex as reviewer is unaffected, and
+// the bare credential question without a leg is unchanged.
+func TestPairingSupportedRefusesCodexAsResolver(t *testing.T) {
+	doc := document(t)
+	want := "Codex is limited to the review leg, and cannot serve the resolve leg"
+	for _, runner := range []string{"github-hosted", "self-hosted", "some-other-runner"} {
+		if reason, ok := preflight.PairingSupported(doc, runner, "codex", "resolve"); ok || reason != want {
+			t.Errorf("PairingSupported(%q, codex, resolve) = (%q, %v), want (%q, false)", runner, reason, ok, want)
+		}
+	}
+	for _, tt := range []struct{ runner, leg string; wantOK bool }{
+		{runner: "github-hosted", leg: "review", wantOK: true},
+		{runner: "self-hosted", leg: "review", wantOK: true},
+		{runner: "github-hosted", leg: "", wantOK: true},
+	} {
+		if reason, ok := preflight.PairingSupported(doc, tt.runner, "codex", tt.leg); ok != tt.wantOK {
+			t.Errorf("PairingSupported(%q, codex, %q) = (%q, %v), want ok=%v", tt.runner, tt.leg, reason, ok, tt.wantOK)
+		}
+	}
+}
+
 // Which secret carries a harness's subscription credential in automated mode
 // (lib/preflight.sh:236-241). A harness with no secret answers false.
 func TestHarnessSecret(t *testing.T) {
@@ -269,6 +292,17 @@ func TestReportPairings(t *testing.T) {
 			want: "\n◇  Pairings on runner: github-hosted\n" +
 				"│  ✗ reviewer — bogus by subscription cannot run on a github-hosted runner\n" +
 				"│     CrossRev has no adapter for 'bogus'\n" +
+				"│     Fixes: set runner: self-hosted, or name a different harness for this leg.\n",
+		},
+		{
+			name:   "a codex resolver is refused on every runner",
+			runner: "self-hosted",
+			yaml:   "version: \"2\"\nreviewer:\n  harness: claude\nresolver:\n  harness: codex\n",
+			wantOK: false,
+			want: "\n◇  Pairings on runner: self-hosted\n" +
+				"│  ✓ reviewer — claude by subscription\n" +
+				"│  ✗ resolver — codex by subscription cannot run on a self-hosted runner\n" +
+				"│     Codex is limited to the review leg, and cannot serve the resolve leg\n" +
 				"│     Fixes: set runner: self-hosted, or name a different harness for this leg.\n",
 		},
 	} {

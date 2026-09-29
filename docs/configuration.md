@@ -138,7 +138,7 @@ resolver:
   effort: high
 ```
 
-`harness` is one of `claude`, `codex`, `agy`, `grok` or `opencode`. `model` reaches the harness as given, so it must be **fully qualified** — `claude-fable-5`, never `fable-5`, which fails as an entitlement error rather than as a typo. `effort` is passed through verbatim. Either leg may name an `endpoint` instead of relying on the harness's own vendor.
+`harness` is one of `claude`, `codex`, `agy`, `grok` or `opencode` — codex serves the review leg only. `model` reaches the harness as given, so it must be **fully qualified** — `claude-fable-5`, never `fable-5`, which fails as an entitlement error rather than as a typo. `effort` is passed through verbatim. Either leg may name an `endpoint` instead of relying on the harness's own vendor.
 
 opencode carries two facts worth knowing before the first run:
 

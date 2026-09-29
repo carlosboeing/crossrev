@@ -29,7 +29,15 @@ import (
 func PairingSupported(doc harness.Document, runner, name, leg string) (string, bool) {
 	// A descriptor fact, not a runner fact: self-hosted skips the credential
 	// checks below because the machine already holds the login, but a harness
-	// that does not serve this leg is refused on every runner.
+	// that does not serve this leg is refused on every runner. The codex
+	// refusal is the shared resolver rule (harness.RefusedAsResolver), so
+	// `doctor` and `init` refuse the same resolver the runtime refuses, on
+	// every runner — the shell denial that strands codex applies
+	// self-hosted too.
+	if leg == harness.LegResolve && harness.RefusedAsResolver(name) {
+		return fmt.Sprintf("%s is limited to the review leg, and cannot serve the %s leg",
+			productName(doc, name), leg), false
+	}
 	//
 	// A name the descriptor does not carry serves every leg, so it falls to the
 	// adapter refusal below rather than to this one — jq's answer, and the
