@@ -170,7 +170,7 @@ Antigravity is the exception. Its `--output-format json` carries no tool events,
 
 `review_leg_ran_command`
 
-Review legs read without running commands. Codex reviews with `--disable shell_tool --disable unified_exec` beside the served tool; Claude Code reviews with an empty built-in tool list and only the served read allowed; Grok reviews with a tools allowlist holding neither shell nor read tools.
+Review legs read without running commands. Codex reviews with `--disable shell_tool --disable unified_exec` beside the served tool; Claude Code reviews with an empty built-in tool list and only the served read allowed; Grok reviews with an empty tools allowlist, granting no tool at all.
 
 Their review legs stream the tool record — Codex `--json`, Claude Code `--output-format stream-json`, Grok `--output-format streaming-json` — and the leg halts before anything is published when a command event appears. The command reaches the run log only, redacted: the failure names the harness and the failure mode, never the command. Nothing has been written to the pull request, so re-running the leg is safe; if it trips again, the harness is running commands its flags should deny.
 

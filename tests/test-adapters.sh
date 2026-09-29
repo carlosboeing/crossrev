@@ -189,7 +189,7 @@ tmp_prompt="$(mktemp)"
 printf 'You are the review leg\n' >"$tmp_prompt"
 ( unset CROSSREV_REVIEW_PAYLOAD CROSSREV_HARNESS_PAYLOAD
   "$HERE/stub/grok" --output-format streaming-json --permission-mode dontAsk \
-    --sandbox read-only --deny Edit --deny Write --tools Grep,Glob \
+    --sandbox read-only --deny Edit --deny Write --tools "" \
     --prompt-file "$tmp_prompt" \
     >/dev/null 2>&1 )
 is  "and accepts the flags the adapter uses" "$?" "1"
@@ -209,7 +209,10 @@ is  "a grok review leg writes no secret, ever"    "$(count 'secret set')" "0"
 
 has  "the grok review leg is pinned read-only"    "$grok_review_argv" "--sandbox read-only"
 has  "and streams for its tripwire"               "$grok_review_argv" "--output-format streaming-json"
-has  "and grants a tools allowlist with no shell" "$grok_review_argv" "--tools Grep,Glob"
+has  "and passes a tools allowlist"               "$grok_review_argv" "--tools"
+hasnt "and grants no Grep tool"                   "$grok_review_argv" "Grep"
+hasnt "and grants no Glob tool"                   "$grok_review_argv" "Glob"
+hasnt "and grants no Read tool"                   "$grok_review_argv" "Read"
 hasnt "and leaves the schema flag off the stream" "$grok_review_argv" "--json-schema"
 has  "and denies Edit"                            "$grok_review_argv" "--deny Edit"
 has  "and denies Write"                           "$grok_review_argv" "--deny Write"

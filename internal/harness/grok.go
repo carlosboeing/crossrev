@@ -77,10 +77,13 @@ func (a *Grok) Spec(inv Invocation) (exec.Spec, error) {
 			"--tools", "Read,Grep,Glob,Edit,Write")
 	} else if suppliedReview {
 		// The allowlist is what denies: a --deny rule did not remove the
-		// shell in the measured run. Grep and Glob stay for orienting inside
-		// the supplied prompt; Read, Edit, Write and any shell entry go.
+		// shell in the measured run. It grants no tool at all — Grep
+		// returns file content and Glob enumerates paths over the
+		// checkout, and neither carries a command the tripwire would
+		// catch, so even those two stay out. An empty allowlist fails
+		// closed if the CLI ever refuses it.
 		args = append(args, "--sandbox", "read-only", "--deny", "Edit", "--deny", "Write",
-			"--tools", "Grep,Glob")
+			"--tools", "")
 	} else {
 		args = append(args, "--sandbox", "read-only", "--deny", "Edit", "--deny", "Write")
 	}

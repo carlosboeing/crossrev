@@ -301,8 +301,10 @@ func TestReviewCommandRefusalNamesTheFailure(t *testing.T) {
 	}
 }
 
-// Grok reviews as supplied with a tripwire: streaming-json output and a
-// tools allowlist with no shell and no read tools.
+// Grok reviews as supplied with a tripwire: streaming-json output and an
+// empty tools allowlist, so no read tool is granted. Grep returns file
+// content and Glob enumerates paths, and neither trips the command
+// tripwire, so even those two stay out.
 func TestGrokReviewSuppliedStreamsWithTripwire(t *testing.T) {
 	adapter := grokAdapter(t)
 	inv := invocation(t, "grok", false)
@@ -315,16 +317,21 @@ func TestGrokReviewSuppliedStreamsWithTripwire(t *testing.T) {
 	if !hasFlagPair(spec.Args, "--output-format", "streaming-json") {
 		t.Errorf("a grok review streams for its tripwire; got %v", spec.Args)
 	}
+	seen := false
 	tools := ""
 	for at := 0; at+1 < len(spec.Args); at++ {
 		if spec.Args[at] == "--tools" {
+			seen = true
 			tools = spec.Args[at+1]
 		}
 	}
-	if tools == "" {
+	if !seen {
 		t.Fatalf("a grok review passes a tools allowlist; got %v", spec.Args)
 	}
-	for _, banned := range []string{"Bash", "Read", "Edit", "Write"} {
+	if tools != "" {
+		t.Errorf("a grok supplied review grants no tools; got %q", tools)
+	}
+	for _, banned := range []string{"Bash", "Read", "Grep", "Glob", "Edit", "Write"} {
 		if strings.Contains(tools, banned) {
 			t.Errorf("a grok review allowlist holds %s; got %q", banned, tools)
 		}

@@ -15,7 +15,7 @@
 # takes a path; `-p` / `--print` / `--single` consume the next argv as the
 # prompt, so using them is the same class of bug as agy's `--print`. A blanket
 # bypass is never a CrossRev grant. A review leg reads as supplied with a
-# tripwire: `--tools` holds neither shell nor read tools, and
+# tripwire: `--tools` is empty, granting no tool at all, and
 # `--output-format streaming-json` leaves the tool record the tripwire reads
 # as tool_call and tool_call_update events. A resolve leg edits without
 # running commands: `--tools` holds the read and edit tools with no shell
@@ -58,6 +58,7 @@ deny_edit=0
 deny_write=0
 format=""
 tools=""
+tools_seen=0
 requested=""
 
 while (( $# )); do
@@ -105,7 +106,7 @@ while (( $# )); do
     --output-format)
       format="${2:-}"; shift 2 ;;
     --tools)
-      tools="${2:-}"; shift 2 ;;
+      tools="${2:-}"; tools_seen=1; shift 2 ;;
     --reasoning-effort|--effort|--disallowed-tools|--rules|--system-prompt-override|--system-prompt)
       shift 2 ;;
     *)
@@ -142,19 +143,18 @@ if [[ "$prompt" == *"You are the review leg"* ]]; then
     printf 'test stub: a streaming review leg must not pass --json-schema, which implies --output-format json\n' >&2
     exit 96
   fi
-  # The supplied allowlist orients without reading: Grep and Glob stay, and
-  # anything that runs a command or reads a file goes. Deny rules alone did
-  # not remove the shell in the measured run, so the allowlist is what denies.
-  if [[ -z "$tools" ]]; then
+  # A supplied review grants no tool at all: Grep returns file content and
+  # Glob enumerates paths over the checkout, and neither carries a command
+  # the tripwire would catch. Deny rules alone did not remove the shell in
+  # the measured run, so the empty allowlist is what denies.
+  if [[ "$tools_seen" -ne 1 ]]; then
     printf 'test stub: a supplied review leg needs a --tools allowlist\n' >&2
     exit 96
   fi
-  for banned in Bash bash shell run_terminal_command Read Edit Write; do
-    if [[ "$tools" == *"$banned"* ]]; then
-      printf 'test stub: the supplied --tools allowlist must hold no shell or read tool, got %s\n' "$tools" >&2
-      exit 96
-    fi
-  done
+  if [[ -n "$tools" ]]; then
+    printf 'test stub: a supplied review leg grants no tools, got %s\n' "$tools" >&2
+    exit 96
+  fi
 elif [[ "$prompt" == *"You are the resolve leg"* ]]; then
   if [[ "$sandbox" != "workspace" || "$allow_edit" -ne 1 || "$allow_write" -ne 1 ]]; then
     printf 'test stub: a resolve leg needs --sandbox workspace --allow Edit --allow Write\n' >&2
