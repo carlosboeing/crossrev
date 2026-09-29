@@ -181,6 +181,7 @@ var processTestPermitted = map[string]string{
 
 	"internal/config/merge_test.go":              "runs this test binary as a helper child for the config merge oracle",
 	"internal/prompt/convention_test.go":         "runs git to build real histories for the frozen convention vectors",
+	"internal/intel/split_gutter_test.go":        "runs git to build real histories so every split-path gutter is held against `git show`",
 	"internal/forge/ghexec/stub_test.go":         "exec.LookPath, to skip when the stub's tools are not installed",
 	"internal/harness/alternatives_test.go":      "runs bash for the jq session-id filter",
 	"internal/harness/argv_test.go":              "runs bash for the argv oracle",

@@ -65,17 +65,19 @@ The reviewer gives each required file one file verdict: `no_issue`, `finding`, `
 
 Covered means a verdict was recorded for the file. A `could_not_review` verdict still prevents convergence.
 
+A verdict covers the supplied ranges on both sides — the numbered lines the hunks showed — not the whole file. Each file arrives as its own gutter-numbered hunks: in full (`full_text`), as the enclosing function of each change (`hunks_context`), or header-only with its access reason (`diff_only`). Evidence for a verdict must sit inside those ranges on the side its revision names: a removed line is cited at the base, and anything outside the shown spans is refused. Lines the hunks did not show are unseen and belong in `known_limits`, never in evidence. A file that fits no call alone is reviewed in slices across calls and merges to one verdict carrying the union of the slices' ranges.
+
 One pass reads at most 400 required files. Batches hold at most 40 files in path order.
 
-Batches measure the full rendered prompt against 180 KB (184,320 bytes).
+Calls measure the full rendered prompt against the calling harness's packing limit (390,000 bytes for Codex, 312,000 for Claude Code, 120 KiB for argv transports).
 
-Generated files (lockfiles, bundle names, minified files, or files with generated headers) that fit in a batch are reviewed. An oversized generated file is skipped with a prominent warning in the comment summary and terminal. Skipped files do not use the 400 review slots, so later files can be reviewed in the same pass. An oversized plain file that fits in no batch stays outstanding with `input_exceeds_budget` and halts the pass.
+Generated files (lockfiles, bundle names, minified files, or files with generated headers) that fit in a call are reviewed. An oversized generated file is skipped with a prominent warning in the comment summary and terminal. Skipped files do not use the 400 review slots, so later files can be reviewed in the same pass. An oversized plain file splits into parts across calls instead of halting the pass. Only shared context alone past the hard limit halts, with `shared_context_exceeds_window`.
 
 A pull request whose changed files are all excluded by policy or skipped halts without invoking a model, applying `crossrev/halted` with verdict `blocked`.
 
 To override built-in detection, configure `.gitattributes` in your base branch:
 - `path/to/file linguist-generated`: Exclude the file from review without a warning.
-- `path/to/file -linguist-generated`: Force CrossRev to review the file (if oversized, it halts with `input_exceeds_budget`).
+- `path/to/file -linguist-generated`: Force CrossRev to review the file (if oversized, it splits across calls).
 
 Files past the pass budget carry `review_budget_reached`.
 

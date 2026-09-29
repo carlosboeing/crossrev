@@ -21,7 +21,6 @@ import (
 
 	"github.com/carlosboeing/crossrev/internal/core"
 	"github.com/carlosboeing/crossrev/internal/exec"
-	"github.com/carlosboeing/crossrev/internal/intel"
 	"github.com/carlosboeing/crossrev/internal/policy"
 	"github.com/carlosboeing/crossrev/internal/prstate"
 	"github.com/carlosboeing/crossrev/internal/review"
@@ -309,8 +308,8 @@ func TestReviewSkipsTheGeneratedFileAndConverges(t *testing.T) {
 	if strings.Contains((*prompts)[0], "webAssets") {
 		t.Error("the measured prompt names the skipped file")
 	}
-	if len((*prompts)[0]) > intel.MaxPromptBytes {
-		t.Errorf("prompt is %d bytes, over the %d budget", len((*prompts)[0]), intel.MaxPromptBytes)
+	if len((*prompts)[0]) > claudePackBytes() {
+		t.Errorf("prompt is %d bytes, over the %d budget", len((*prompts)[0]), claudePackBytes())
 	}
 
 	// The terminal shows the skip as it happens.

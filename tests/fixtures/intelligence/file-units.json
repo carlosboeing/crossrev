@@ -114,8 +114,8 @@
     }
   ],
   "doc": "Frozen oracle for file-unit discovery (Task A1). Hand-authored before the implementation: each case lists the required path, change kind, content revision, UnitID and body digest the production code must return. UnitID is the first 16 lowercase hex characters of SHA-256 over the u1 file identity preimage. Body digest is full SHA-256 hex over the evidence bytes, or over the empty string when no bytes are available. Do not regenerate from production code.",
-  "engine": "file-v2",
-  "engine_id": "9224cacfc387067f",
+  "engine": "hunk-v1",
+  "engine_id": "81b7d675834623a3",
   "advisory": {
     "doc": "Frozen vectors for advisory discovery (Task A2). Hand-authored before the implementation: term_vectors list the ASCII identifier set the production code must extract from each body, and conventions list the adjacent-test candidates it must derive from each path. Terms use [A-Za-z_][A-Za-z0-9_]* with terms shorter than four bytes dropped, deduplicated and sorted. Do not regenerate from production code.",
     "max_search_hits": 200,
@@ -153,9 +153,8 @@
     ]
   },
   "batching": {
-    "doc": "Frozen bounds for deterministic batching (Task A2). Batches hold at most 40 files; a pass admits at most 400 required files; the fully rendered prompt, including headers and prior context, holds at most 184320 bytes (180 KiB).",
+    "doc": "Frozen bounds for deterministic batching. Calls hold at most 40 files; a pass admits at most 400 required files; the fully rendered prompt, including headers and prior context, holds at most the calling harness's packing limit P, derived from its input window (390000 bytes for codex, 312000 for claude, 120 KiB for argv transports). A file that fits no call alone splits into parts rather than halting the pass.",
     "max_files_per_batch": 40,
-    "max_units_per_pass": 400,
-    "max_prompt_bytes": 184320
+    "max_units_per_pass": 400
   }
 }

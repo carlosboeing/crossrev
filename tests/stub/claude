@@ -76,6 +76,16 @@ model="${CROSSREV_HARNESS_MODEL:-${requested:-claude-test-model}}"
 if [[ "$prompt" == *"You are the review leg"* ]]; then
   [[ -n "${CROSSREV_REVIEW_PAYLOAD:-}" ]] && payload_file="$CROSSREV_REVIEW_PAYLOAD"
   model="${CROSSREV_REVIEW_MODEL:-$model}"
+  # A pass that splits one file across calls invokes this once per call, and
+  # a test about the split needs the part answers to differ from the
+  # whole-file answer — otherwise "it split" and "it packed one call" look
+  # identical. The counter is a file because each invocation is its own
+  # process, the same mechanism the resolve leg's retry uses below.
+  if [[ -n "${CROSSREV_REVIEW_PAYLOAD_2:-}" && -n "${CROSSREV_STUB_COUNT:-}" ]]; then
+    n=$(( $(cat "$CROSSREV_STUB_COUNT" 2>/dev/null || printf 0) + 1 ))
+    printf '%s' "$n" >"$CROSSREV_STUB_COUNT"
+    [[ "$n" -ge 2 ]] && payload_file="$CROSSREV_REVIEW_PAYLOAD_2"
+  fi
 elif [[ "$prompt" == *"You are the resolve leg"* ]]; then
   [[ -n "${CROSSREV_RESOLVE_PAYLOAD:-}" ]] && payload_file="$CROSSREV_RESOLVE_PAYLOAD"
   model="${CROSSREV_RESOLVE_MODEL:-$model}"

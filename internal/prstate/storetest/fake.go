@@ -231,7 +231,7 @@ func FixtureGeneration(t interface{ Fatal(...any); Helper() }, form string) prst
 				FindingIDs: []string{},
 				Evidence:   []prstate.Evidence{},
 				Reason:     prstate.Null[string](),
-				Supplied:   prstate.Some(prstate.SuppliedInput{Digest: strings.Repeat("c", 64), Form: "full_text", Truncated: false}),
+				Supplied:   prstate.Some(prstate.SuppliedInput{Digest: strings.Repeat("c", 64), Form: "full_text", Parts: 1, Truncated: false}),
 				Reaction:   prstate.UnimplementedReaction(),
 			},
 			{
@@ -245,7 +245,7 @@ func FixtureGeneration(t interface{ Fatal(...any); Helper() }, form string) prst
 				FindingIDs: []string{},
 				Evidence:   []prstate.Evidence{},
 				Reason:     prstate.Null[string](),
-				Supplied:   prstate.Some(prstate.SuppliedInput{Digest: strings.Repeat("d", 64), Form: "full_text", Truncated: false}),
+				Supplied:   prstate.Some(prstate.SuppliedInput{Digest: strings.Repeat("d", 64), Form: "full_text", Parts: 1, Truncated: false}),
 				Reaction:   prstate.UnimplementedReaction(),
 			},
 		},

@@ -187,6 +187,13 @@ func (l *Leg) invoke(ctx context.Context, s *session, marker prstate.Marker, wor
 		promptMsgs = append(promptMsgs, ui.Warn(promptWarn.Message, promptWarn.Hint))
 	}
 
+	// The size gate, before anything starts: a prompt no child could read
+	// refuses here rather than burning a run that cannot judge.
+	if refused := l.refuseOversizedPrompt(ctx, s, marker, promptBytes); refused != nil {
+		refused.Messages = append(promptMsgs, refused.Messages...)
+		return *refused
+	}
+
 	tmp, err := os.MkdirTemp("", "crossrev-resolve-*")
 	if err != nil {
 		return wrapErr(err)

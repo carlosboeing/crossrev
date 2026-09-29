@@ -244,7 +244,18 @@ func TestClaimRedriveKeepsTheNoticeOnAHaltedPass(t *testing.T) {
 	e := newEnv(t)
 	raw := fmt.Sprintf(`{"v":1,"leg":"review","pass":1,"state":"complete","ts":1699950000,"comment_id":9001,"run_id":"x","head_sha":%q,"verdict":"blocked","findings":[]}`, headSHA)
 	e.forge.comments = []forge.IssueComment{commentWithMarker(t, 9001, parseMarker(t, raw))}
-	writeRequiredHead(e, "huge.go", "package huge\n"+strings.Repeat("// filler line to exceed the prompt budget\n", 8000))
+	// Oversized files split rather than halting now, so the halt is the
+	// 400-file pass budget carrying the last file.
+	var paths []string
+	for i := 0; i <= 400; i++ {
+		path := fmt.Sprintf("file%03d.go", i)
+		writeRequiredHead(e, path, "package x\n")
+		paths = append(paths, path)
+	}
+	for i := 0; i < 400; i += 40 {
+		end := i + 40
+		e.runner.script = append(e.runner.script, exec.Result{ExitCode: 0, Stdout: claudeStdout(batchAnswerFor(t, paths[i:end]))})
+	}
 	got := runLeg(t, e, e.request(t))
 	if got.Err != nil {
 		t.Fatalf("Run: %v", got.Err)

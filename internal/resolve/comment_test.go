@@ -45,7 +45,7 @@ func TestResolveKeepsTheSkipWarningWhenItRewritesTheReviewComment(t *testing.T) 
 			Verdict:    prstate.Some("no_issue"),
 		}},
 		Excluded: []prstate.CoverageExclusion{
-			{Path: skipPath, Reason: intel.SkipReason(intel.FileUnit{Generated: intel.SignalHeader, Body: make([]byte, size)})},
+			{Path: skipPath, Reason: intel.SkipReason(intel.FileUnit{Generated: intel.SignalHeader, Body: make([]byte, size)}, 312000)},
 			{Path: excludedPath, Reason: intel.GeneratedAttributeReason},
 		},
 		ScopeReport: prstate.ScopeReport{ExaminedScope: "read the batch"},
@@ -78,7 +78,7 @@ func TestResolveKeepsTheSkipWarningWhenItRewritesTheReviewComment(t *testing.T) 
 	}
 	for _, want := range []string{
 		"> **Warning: 1 changed file was not reviewed.**",
-		"- `src/webAssets.ts` — generated (header: `" + excerpt + "`), 350,797 bytes, over the 184,320-byte budget.",
+		"- `src/webAssets.ts` — generated (header: `" + excerpt + "`), 350,797 bytes, over the 312,000-byte budget.",
 		"Excluded by repository policy: `dist/bundle.js` — not reviewed.",
 		"Reviewed 1 of 3 changed files at `aaaaaaa`. 1 was not reviewed; see the warning above.",
 	} {

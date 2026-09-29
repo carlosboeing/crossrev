@@ -54,7 +54,6 @@ type acceptanceOracle struct {
 	Batching struct {
 		MaxFilesPerBatch int `json:"max_files_per_batch"`
 		MaxUnitsPerPass  int `json:"max_units_per_pass"`
-		MaxPromptBytes   int `json:"max_prompt_bytes"`
 	} `json:"batching"`
 }
 
@@ -239,15 +238,15 @@ func TestReviewIntelligenceAcceptanceOracle(t *testing.T) {
 		t.Errorf("MaxSearchHits = %d, want frozen %d", intel.MaxSearchHits, oracle.Advisory.MaxSearchHits)
 	}
 
-	// The batching budgets are literal: file, pass and rendered-byte bounds.
+	// The batching budgets are literal: the file and pass bounds. The
+	// rendered-byte bound is per harness now — the packing limit P the
+	// harness's input window derives — so no single constant answers it,
+	// and budget_test.go pins each window's bytes instead.
 	if intel.MaxFilesPerBatch != oracle.Batching.MaxFilesPerBatch {
 		t.Errorf("MaxFilesPerBatch = %d, want frozen %d", intel.MaxFilesPerBatch, oracle.Batching.MaxFilesPerBatch)
 	}
 	if intel.MaxUnitsPerPass != oracle.Batching.MaxUnitsPerPass {
 		t.Errorf("MaxUnitsPerPass = %d, want frozen %d", intel.MaxUnitsPerPass, oracle.Batching.MaxUnitsPerPass)
-	}
-	if intel.MaxPromptBytes != oracle.Batching.MaxPromptBytes {
-		t.Errorf("MaxPromptBytes = %d, want frozen %d", intel.MaxPromptBytes, oracle.Batching.MaxPromptBytes)
 	}
 }
 

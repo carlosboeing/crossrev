@@ -95,7 +95,7 @@ func (l *Leg) finishNothingToReviewRun(ctx context.Context, req Request, loaded 
 		PR:       req.PR,
 		MinFix:   minFix,
 		MaxPass:  atoi(loaded.Config.Get(".policy.max_passes_per_cycle")),
-		Skipped:  skipRenderDetails(scope.Skipped),
+		Skipped:  skipRenderDetails(scope),
 		Excluded: policyExclusionPaths(scope),
 	})
 

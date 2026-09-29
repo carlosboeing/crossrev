@@ -81,7 +81,7 @@ func (l *Leg) reportFatal(ctx context.Context, req Request, loaded Context, mark
 	// A fatal can land after packing skipped generated files; the record of
 	// what was not reviewed belongs on the summary however the pass ended.
 	if loaded.Scope != nil {
-		renderCtx.Skipped = skipRenderDetails(loaded.Scope.Skipped)
+		renderCtx.Skipped = skipRenderDetails(*loaded.Scope)
 		renderCtx.Excluded = policyExclusionPaths(*loaded.Scope)
 	}
 	body := SummaryBody(parseFindings(marker.Findings), marker, renderCtx)

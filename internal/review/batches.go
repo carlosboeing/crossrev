@@ -162,19 +162,44 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 		_, effective := EffectiveReadMode(entry.ReadMode())
 		shared.reads = prompt.ReadsBlock(string(effective))
 	}
-	render := func(files []intel.FileUnit) int {
-		promptBytes, _ := shared.render(files, scope.Base, scope.Head)
+	budget, ok := l.Harness.InputBudget(settings.harness, settings.model)
+	if !ok {
+		return fmt.Errorf("no input budget for harness %q", settings.harness)
+	}
+	var whole *WholePolicy
+	if loaded.Config.ReviewInputPolicy() == config.ReviewInputWholeWhenFits {
+		whole = &WholePolicy{}
+	}
+	sharedBytes, _ := shared.render(nil, scope.Base, scope.Head, true, whole)
+	if whole != nil {
+		whole.MaxBytes = budget.PackBytes - len(sharedBytes)
+		if whole.MaxBytes < 0 {
+			whole.MaxBytes = 0
+		}
+	}
+	render := func(call intel.Call) int {
+		if call.Part != nil {
+			return len(shared.renderPart(call.Part, scope.Base, scope.Head, true))
+		}
+		promptBytes, _ := shared.render(call.Files, scope.Base, scope.Head, true, whole)
 		return len(promptBytes)
 	}
 	packStart := l.now()
-	plan := intel.Batches(scope, acceptedIDs, render)
+	plan := intel.PlanCalls(scope, acceptedIDs, intel.PlanOptions{Limits: budget, SharedBytes: len(sharedBytes)}, render)
 	l.Log.Phase("pack", l.now().Sub(packStart).Milliseconds())
+	if plan.OverBudget {
+		outcome.limits = append(outcome.limits, string(core.LimitOverBudget))
+		out.Messages = append(out.Messages, ui.Warn(
+			"shared context alone is past 0.75 of the per-call packing limit, so this pass runs over budget",
+			"Calls pack against the packing limit until shared context passes it, and only then against the hard limit; over_budget is recorded on its generations."))
+		l.Log.Event("budget", fmt.Sprintf("over_budget shared=%d pack=%d hard=%d", len(sharedBytes), budget.PackBytes, budget.HardBytes))
+	}
 	// Packing's skips join the exclusion record before the first
 	// publication: the generation records each skipped path with its
 	// reason, and the required set no longer waits on a file no prompt can
-	// hold. The prompts packing measured were rendered above from the
-	// pre-skip scope, so no measured prompt names a skip.
-	scope = moveSkips(scope, plan.Skipped)
+	// hold without a split. The prompts packing measured were rendered
+	// above from the pre-skip scope, so no measured prompt names a skip.
+	scope = moveSkips(scope, plan.Skipped, budget.PackBytes)
 	if loaded.Scope != nil {
 		// The bound scope is the post-skip one: convergence, the footnote
 		// and the summary read what the pass actually required.
@@ -254,42 +279,76 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 	// them.
 	out.Marker = marker
 	selection = reportLedgerFallback(store, selection, out)
-	for i, batch := range plan.Batches {
+	// pending holds one split file's in-memory part verdicts: every part
+	// judged in this run, merged when the last part lands. Nothing here
+	// reaches a publication until the merge, so an interrupted pass leaves
+	// no part verdict or finding in the generation or on the claim, and
+	// the next run restarts the file from part 1.
+	pending := make(map[core.UnitID]*pendingSplit)
+	confirmationDone := false
+	for i, scheduled := range plan.Calls {
 		call := i + 1
-		expected, _ := batchExpectations(batch.Files, scope.Base, scope.Head)
-		if shared.diffErr != nil {
-			return shared.diffErr
-		}
-		promptBytes, supplied := shared.render(batch.Files, scope.Base, scope.Head)
-		start := l.now()
-		payload, envelope, batchMsgs, err := l.invokePrompt(ctx, req, loaded, settings, expected, promptBytes, call)
-		ms := l.now().Sub(start).Milliseconds()
-		out.Messages = append(out.Messages, batchMsgs...)
-		if err != nil {
-			return err
-		}
-		l.logAcceptedCall(call, promptBytes, suppliedBytes(batch.Files), envelope, ms)
-		verdicts, examined, limits, err := verdictsFromPayload(payload, batch.Files)
-		if err != nil {
-			return err
+		var (
+			verdicts map[core.UnitID]recordVerdict
+			supplied map[core.UnitID]prstate.SuppliedInput
+			payload  json.RawMessage
+			envelope harness.Envelope
+			examined []string
+			limits   []string
+		)
+		if scheduled.Part != nil {
+			merged, v, s, p, env, ex, li, err := l.invokePartCall(ctx, req, loaded, settings, scope, shared, scheduled.Part, !confirmationDone, call, len(plan.Calls), &outcome, pending, out)
+			if err != nil {
+				return err
+			}
+			if !merged {
+				continue
+			}
+			verdicts, supplied, payload, envelope, examined, limits = v, s, p, env, ex, li
+		} else {
+			expected, _ := batchExpectations(scheduled.Files, scope.Base, scope.Head, whole)
+			if shared.diffErr != nil {
+				return shared.diffErr
+			}
+			promptBytes, callSupplied := shared.render(scheduled.Files, scope.Base, scope.Head, !confirmationDone, whole)
+			start := l.now()
+			answer, env, batchMsgs, err := l.invokePrompt(ctx, req, loaded, settings, expected, promptBytes, call)
+			ms := l.now().Sub(start).Milliseconds()
+			out.Messages = append(out.Messages, batchMsgs...)
+			if err != nil {
+				return err
+			}
+			l.logAcceptedCall(call, promptBytes, suppliedBytes(scheduled.Files), env, ms)
+			parsed, ex, li, err := verdictsFromPayload(answer, scheduled.Files)
+			if err != nil {
+				return err
+			}
+			verdicts, supplied, payload, envelope, examined, limits = parsed, callSupplied, answer, env, []string{ex}, li
 		}
 		for id, disp := range verdicts {
 			outcome.verdicts[id] = disp
 			acceptedIDs[id] = true
 		}
-		// Only an accepted batch's measurement persists: a refused answer
+		// Only an accepted call's measurement persists: a refused answer
 		// judged nothing, so its bytes describe no record.
 		for id, s := range supplied {
 			outcome.supplied[id] = s
 		}
 		outcome.verdict = verdictFromPayload(payload)
 		outcome.payloads = append(outcome.payloads, payload)
-		out.Messages = append(out.Messages, outcome.addEnvelope(envelope)...)
-		outcome.examined = append(outcome.examined, examined)
+		// A merged split file's envelope already folded when its final
+		// part call was accepted, so the loop folds only whole-file
+		// calls: folding the merged envelope again would count the final
+		// part's usage twice.
+		if scheduled.Part == nil {
+			out.Messages = append(out.Messages, outcome.addEnvelope(envelope)...)
+		}
+		outcome.examined = append(outcome.examined, examined...)
 		outcome.limits = append(outcome.limits, limits...)
 		for _, finding := range findingsFromPayload(payload) {
 			outcome.findings = append(outcome.findings, finding)
 		}
+		confirmationDone = true
 		outcome.batches++
 		producer = producerOf(settings, outcome.model)
 		handle, stop, err := l.publishBatchGeneration(ctx, req, loaded, store, marker, scope, advisory, gen+outcome.batches+1, producer, outcome.verdicts, outcome.supplied, outcome.examined, outcome.limits)
@@ -329,13 +388,13 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 		}
 		recorded := marker
 		recorded.State = core.PassStarted
-		if _, err := l.editClaim(ctx, loaded.Repo, claimID, batchProgressBody(pass, loaded.Config, call, len(plan.Batches), covered, len(scope.Required), raw != nil), recorded, coverageOverflow(loaded)); err != nil {
+		if _, err := l.editClaim(ctx, loaded.Repo, claimID, batchProgressBody(pass, loaded.Config, call, len(plan.Calls), covered, len(scope.Required), raw != nil), recorded, coverageOverflow(loaded)); err != nil {
 			return err
 		}
 		// The report only prints after the pass settles, so queuing here
 		// would leave the terminal silent while the pass runs. A wired
 		// sink prints now; without one the line queues with the rest.
-		line := ui.Say(batchProgressLine(call, len(plan.Batches), covered, len(scope.Required)))
+		line := ui.Say(batchProgressLine(call, len(plan.Calls), covered, len(scope.Required)))
 		if l.Progress != nil {
 			l.Progress(line)
 		} else {
@@ -352,14 +411,14 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 // exclusion record, in path order, with the reason each skip carries. The
 // ledger schema does not change: a skip is a prstate.CoverageExclusion like
 // any other.
-func moveSkips(scope intel.Scope, skipped []intel.FileUnit) intel.Scope {
+func moveSkips(scope intel.Scope, skipped []intel.FileUnit, budgetBytes int) intel.Scope {
 	if len(skipped) == 0 {
 		return scope
 	}
 	dropped := make(map[core.UnitID]bool, len(skipped))
 	for _, unit := range skipped {
 		dropped[unit.ID] = true
-		scope.Excluded = append(scope.Excluded, intel.Exclusion{Path: unit.Path, Reason: intel.SkipReason(unit)})
+		scope.Excluded = append(scope.Excluded, intel.Exclusion{Path: unit.Path, Reason: intel.SkipReason(unit, budgetBytes)})
 	}
 	kept := make([]intel.FileUnit, 0, len(scope.Required)-len(skipped))
 	for _, unit := range scope.Required {
@@ -393,7 +452,7 @@ func reportLedgerFallback(store prstate.LedgerStore, selection ledgerSelection, 
 }
 
 // batchBound carries a bounded halt out of the batch loop: the 400-file pass
-// bound, the ledger's exhaustion bound, or the single-file input bound.
+// bound, the ledger's exhaustion bound, or the shared-context input bound.
 // stop is the ledger's own stop when the ledger reported the halt, so the
 // recorded halt carries what it measured rather than a recomputation of it;
 // zero for a halt the batch plan reached on its own.
@@ -406,7 +465,7 @@ type batchBound struct {
 
 func (e *batchBound) Error() string {
 	if e.plan.HaltReason != "" {
-		return fmt.Sprintf("halted: %s on %s", e.plan.HaltReason, e.plan.HaltPath)
+		return fmt.Sprintf("halted: %s", e.plan.HaltReason)
 	}
 	return fmt.Sprintf("halted: %s carries %d files", intel.CarryReviewBudgetReached, len(e.plan.Carried))
 }
@@ -816,7 +875,6 @@ func stopForBound(bound *batchBound) prstate.CoverageStop {
 // halt the ledger reported.
 func planForStop(plan intel.BatchPlan, stop prstate.CoverageStop) intel.BatchPlan {
 	plan.HaltReason = stop.Limit
-	plan.HaltPath = ""
 	plan.CarryReason = stop.Limit
 	return plan
 }

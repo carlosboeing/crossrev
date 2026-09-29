@@ -99,6 +99,10 @@ type SkippedFile struct {
 	Signal string
 	// Bytes is the file's byte size.
 	Bytes int
+	// Reason is the recorded exclusion text, naming the signal, the size
+	// and the packing limit in force. It renders verbatim; Signal and
+	// Bytes stay for callers that build a skip without a record.
+	Reason string
 	// Excerpt quotes the matched marker line for a header signal: sanitized
 	// and capped by intel.HeaderExcerpt. Empty for the other signals.
 	Excerpt string
@@ -436,25 +440,34 @@ func skipWarning(skipped []SkippedFile) string {
 	}
 	notices := make([]intel.SkipNotice, len(skipped))
 	for i, s := range skipped {
+		reason := s.Reason
+		if reason == "" {
+			reason = intel.SkipReasonText(s.Signal, s.Bytes, 0)
+		}
 		notices[i] = intel.SkipNotice{
 			Path:    s.Path,
-			Reason:  intel.SkipReasonText(s.Signal, s.Bytes),
+			Reason:  reason,
 			Excerpt: s.Excerpt,
 		}
 	}
 	return intel.SkipWarning(notices)
 }
 
-// skipRenderDetails turns packing's skipped units into the render shape. The
-// header excerpt derives from the same bounded window the detector read.
-// The ledger stores the reason, not the quote.
-func skipRenderDetails(skipped []intel.FileUnit) []SkippedFile {
-	if len(skipped) == 0 {
+// skipRenderDetails turns packing's skipped units into the render shape.
+// The header excerpt derives from the same bounded window the detector
+// read. The reason is the exclusion record packing wrote, naming the
+// packing limit in force; the ledger stores the reason, not the quote.
+func skipRenderDetails(scope intel.Scope) []SkippedFile {
+	if len(scope.Skipped) == 0 {
 		return nil
 	}
-	out := make([]SkippedFile, 0, len(skipped))
-	for _, unit := range skipped {
-		detail := SkippedFile{Path: unit.Path, Signal: unit.Generated, Bytes: len(unit.Body)}
+	reasons := make(map[string]string, len(scope.Excluded))
+	for _, e := range scope.Excluded {
+		reasons[e.Path] = e.Reason
+	}
+	out := make([]SkippedFile, 0, len(scope.Skipped))
+	for _, unit := range scope.Skipped {
+		detail := SkippedFile{Path: unit.Path, Signal: unit.Generated, Bytes: len(unit.Body), Reason: reasons[unit.Path]}
 		if unit.Generated == intel.SignalHeader {
 			detail.Excerpt = intel.HeaderExcerpt(unit.Body)
 		}

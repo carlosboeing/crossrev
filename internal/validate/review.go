@@ -7,8 +7,9 @@
 // batch. Review first applies the shape check, then returns a SemanticError
 // when unit numbers do not equal the expected set exactly, finding numbers
 // name no returned finding, evidence names an unprovided path,
-// spans are inverted or outside supplied readable content, finding has no
-// finding number, not_affected has no evidence and reason, or
+// spans are inverted or outside the supplied ranges on the side the evidence
+// revision names, finding has no finding number, not_affected has no
+// evidence and reason, or
 // could_not_review has no failed-fallback reason. The error orders and names
 // missing, duplicate and unknown unit numbers so the retry prompt can quote
 // them.
@@ -42,6 +43,10 @@ type UnitExpectation struct {
 	Lines int
 	// Readable reports whether any bytes were supplied at all.
 	Readable bool
+	// Ranges are the line spans the reviewer was actually shown, per
+	// side, numbered as the gutter shows them. Evidence spans must sit
+	// inside the ranges on the side the evidence revision names.
+	Ranges core.SuppliedRanges
 }
 
 // ReviewExpectations is what the orchestrator handed the review leg: the
@@ -430,11 +435,14 @@ type reviewCoverageEntry struct {
 }
 
 // reviewEvidenceRef is one coverage entry's evidence item, decoded past the
-// shape half's range checks. It carries no revision: the shape half still
-// requires one on the wire, but CrossRev records the revision it reviewed
-// when the verdict is accepted, so the model's value is never read here.
+// shape half's range checks. The revision names which side's ranges the
+// span is checked against: the base for removed lines, the head for every
+// other kind. CrossRev still records the revision it reviewed when the
+// verdict is accepted, so a wrong value is corrected rather than refused —
+// unless it names neither side, when both sides' ranges answer.
 type reviewEvidenceRef struct {
 	path     string
+	revision string
 	source   string
 	hasStart bool
 	start    int
@@ -494,6 +502,7 @@ func decodeReviewCoverageEntry(entry json.RawMessage) (reviewCoverageEntry, bool
 func decodeReviewEvidenceRef(raw json.RawMessage) (reviewEvidenceRef, bool) {
 	var ev struct {
 		Path      string          `json:"path"`
+		Revision  string          `json:"revision"`
 		StartLine json.RawMessage `json:"start_line"`
 		EndLine   json.RawMessage `json:"end_line"`
 		Source    string          `json:"source"`
@@ -503,6 +512,7 @@ func decodeReviewEvidenceRef(raw json.RawMessage) (reviewEvidenceRef, bool) {
 		return ref, false
 	}
 	ref.path = ev.Path
+	ref.revision = ev.Revision
 	ref.source = ev.Source
 	if jqType(ev.StartLine) != "null" {
 		s, ok := jqFloat(ev.StartLine)
@@ -525,9 +535,13 @@ func decodeReviewEvidenceRef(raw json.RawMessage) (reviewEvidenceRef, bool) {
 
 // checkReviewEvidence compares one evidence item against the unit it answers
 // for: the path must be one the batch supplied, and the span must sit inside
-// readable content the batch supplied — or be file-level nulls. The model's
-// revision is not checked: CrossRev records the revision it reviewed when the
-// verdict is accepted, so a wrong value is corrected rather than refused.
+// the supplied ranges on the side the evidence revision names — or be
+// file-level nulls. A removed line cited at the base is accepted even when
+// the head side never showed it; a span outside the supplied ranges is
+// refused even when it sits inside the whole file. A revision naming
+// neither side is checked against both, and CrossRev still records the
+// revision it reviewed when the verdict is accepted, so a wrong value is
+// corrected rather than refused.
 func checkReviewEvidence(ev reviewEvidenceRef, unit UnitExpectation, expected ReviewExpectations, number int) error {
 	supplied := false
 	for _, u := range expected.Units {
@@ -555,11 +569,49 @@ func checkReviewEvidence(ev reviewEvidenceRef, unit UnitExpectation, expected Re
 		return semanticf("coverage for unit %d cites lines %d-%d for content supplied as an access limit, and a limit carries file-level evidence only",
 			number, ev.start, ev.end)
 	}
-	if ev.start < 1 || ev.end > unit.Lines {
-		return semanticf("coverage for unit %d cites lines %d-%d outside the %d readable line(s) supplied",
-			number, ev.start, ev.end, unit.Lines)
+	side, spans := evidenceRanges(ev.revision, unit.Ranges, expected)
+	covered := false
+	switch side {
+	case "base":
+		covered = unit.Ranges.CoversBase(ev.start, ev.end)
+	case "head":
+		covered = unit.Ranges.CoversHead(ev.start, ev.end)
+	default:
+		covered = unit.Ranges.CoversBase(ev.start, ev.end) || unit.Ranges.CoversHead(ev.start, ev.end)
+	}
+	if !covered {
+		return semanticf("coverage for unit %d cites lines %d-%d outside the supplied %s ranges (%s)",
+			number, ev.start, ev.end, side, rangeWords(spans))
 	}
 	return nil
+}
+
+// evidenceRanges answers the side an evidence revision names and the spans
+// that side was shown: the base SHA means the base ranges, the head SHA the
+// head ranges, and anything else both. The spanning set travels with the
+// side so the refusal can quote what was actually supplied.
+func evidenceRanges(revision string, ranges core.SuppliedRanges, expected ReviewExpectations) (string, []core.LineSpan) {
+	switch revision {
+	case expected.Base.SHA():
+		return "base", ranges.Base
+	case expected.Head.SHA():
+		return "head", ranges.Head
+	default:
+		return "base and head", append(append([]core.LineSpan(nil), ranges.Base...), ranges.Head...)
+	}
+}
+
+// rangeWords renders supplied spans the way the retry prompt quotes them:
+// one dash-joined span per run, or none when the side showed nothing.
+func rangeWords(spans []core.LineSpan) string {
+	if len(spans) == 0 {
+		return "none"
+	}
+	parts := make([]string, len(spans))
+	for i, s := range spans {
+		parts[i] = fmt.Sprintf("%d-%d", s.Start, s.End)
+	}
+	return strings.Join(parts, ", ")
 }
 
 // coverageSetWords names the missing, duplicate and unknown unit numbers one

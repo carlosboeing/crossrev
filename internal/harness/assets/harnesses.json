@@ -32,6 +32,7 @@
       "schema_native": true,
       "prompt_transport": "stdin",
       "read_mode": "served",
+      "window_tokens": 200000,
       "sandbox_args": [],
       "quarantine": [".claude", "CLAUDE.md", ".clauderc"],
       "credential": {
@@ -67,6 +68,7 @@
       "schema_native": true,
       "prompt_transport": "stdin",
       "read_mode": "served",
+      "window_tokens": 258400,
       "sandbox_args": ["--ignore-user-config"],
       "quarantine": [".codex"],
       "credential": {
@@ -102,6 +104,7 @@
       "schema_native": true,
       "prompt_transport": "argv",
       "read_mode": "supplied",
+      "window_tokens": 128000,
       "sandbox_args": [],
       "quarantine": [".gemini"],
       "credential": {
@@ -137,6 +140,7 @@
       "schema_native": true,
       "prompt_transport": "file",
       "read_mode": "supplied",
+      "window_tokens": 128000,
       "sandbox_args": [],
       "quarantine": [".grok"],
       "credential": {
@@ -172,6 +176,7 @@
       "schema_native": false,
       "prompt_transport": "argv",
       "read_mode": "supplied",
+      "window_tokens": 128000,
       "legs": ["review", "resolve"],
       "sandbox_args": [],
       "quarantine": [".opencode", "opencode.json", "opencode.jsonc"],

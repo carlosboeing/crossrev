@@ -352,10 +352,10 @@ has "advisory context adds no required unit" "$(cat "$GH_STATE"/blob-*)" '"requi
 
 # --- input, review and ledger bounds ------------------------------------------
 
-# A file that cannot fit alone in one rendered prompt halts with
-# input_exceeds_budget only after the schedulable batches have run: the
-# accepted batch (app.ts) persists first, so a re-drive resumes with just
-# the oversized file outstanding rather than repeating work.
+# A file that fits no rendered prompt alone splits into parts across calls
+# rather than halting: the first call judges the schedulable file (app.ts),
+# every later call judges one part of the oversized file, and the pass
+# converges with no halted label.
 fixture_repo; stub_reset
 git checkout -q feature
 { printf 'package huge\n'; yes '// filler line to exceed the prompt budget' | head -n 8000; } >huge.go
@@ -364,12 +364,18 @@ FIX_HEAD="$(git rev-parse feature)"
 routes_review_empty
 CROSSREV_REVIEW_PAYLOAD="$(review_payload_for converged "[$(unit1 no_issue '[]' "$(evidence_file)")]" | payload)"
 export CROSSREV_REVIEW_PAYLOAD
+CROSSREV_REVIEW_PAYLOAD_2="$(review_payload_for converged "[$(unit1 no_issue '[]' "$(jq -cn --arg sha "$FIX_HEAD" '[{path:"huge.go", revision:$sha, start_line:null, end_line:null, source:"git", note:null}]')")]" | payload)"
+export CROSSREV_REVIEW_PAYLOAD_2
+CROSSREV_STUB_COUNT="$(mktemp)"; export CROSSREV_STUB_COUNT
 out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
-is "an oversized file halts rather than converging" "$rc" "0"
-has "the halt names the input budget" "$out" "input_exceeds_budget"
-has "the halt applies the halted label" "$(applied_labels)" "labels[]=crossrev/halted"
-has "the schedulable batch persisted before the halt" "$(cat "$GH_STATE"/blob-*)" '"gen":2'
-has "the accepted batch left only the oversized file outstanding" "$(cat "$GH_STATE"/blob-*)" '"outstanding_count":1'
+unset CROSSREV_REVIEW_PAYLOAD_2 CROSSREV_STUB_COUNT
+is "an oversized file converges rather than halting" "$rc" "0"
+has "the split pass converges" "$(applied_labels)" "labels[]=crossrev/converged"
+hasnt "the split pass applies no halted label" "$(applied_labels)" "labels[]=crossrev/halted"
+hasnt "the split pass names no input budget" "$out" "input_exceeds_budget"
+calls="$(wc -l <"$ARGV_LOG" | tr -d ' ')"
+[[ "$calls" -ge 2 ]] && ok "the oversized file split across calls" ">= 2" "$calls" \
+  || notok "the oversized file split across calls" ">= 2" "$calls"
 
 # --- unchanged-head restart ----------------------------------------------------
 

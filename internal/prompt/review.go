@@ -151,6 +151,11 @@ type BatchUnit struct {
 	// never passed through hunk shaping and renders the legacy way, from
 	// its body alone.
 	Form intel.InputForm
+	// Part names the slice of a split file this unit carries, "1 of 3".
+	// Empty for a whole file. A part renders its own gutter-numbered
+	// hunks with this position in its header; every part is judged, and
+	// the file completes when every part has a verdict in the same pass.
+	Part string
 }
 
 // AdvisoryRef is one untouched pointer offered as uncertain context, with
@@ -317,7 +322,8 @@ func (r Review) Render() []byte {
 // the resolver produced, rendered ahead of the current full scope. It takes
 // no verdict and satisfies no coverage entry: it says what changed since
 // the reviewed head, so the reviewer confirms the repair before re-judging
-// the whole. Empty renders nothing.
+// the whole. Empty renders nothing. The delta is gutter-numbered like any
+// other change, so a finding on it anchors the same way.
 func renderConfirmation(delta []byte) string {
 	if len(delta) == 0 {
 		return ""
@@ -328,7 +334,7 @@ func renderConfirmation(delta []byte) string {
 		"first: it is required input, and the verdicts below still account for " +
 		"every current required file.\n\n")
 	b.WriteString("````diff\n")
-	b.Write(delta)
+	b.Write(diff.Parse(delta, core.RevisionPair{}).Numbered())
 	b.WriteString("\n````\n\n")
 	return b.String()
 }
@@ -345,8 +351,8 @@ func renderBatch(units []BatchUnit, advisory []AdvisoryRef, omitted int, exclude
 	b.WriteString("## The files under review\n\n")
 	if len(units) > 0 {
 		b.WriteString("Account for every numbered file below in `coverage`, one entry per " +
-			"number. A file verdict means you examined the supplied content and change, " +
-			"not merely its pathname. `not_affected` does not exempt a changed file: it says " +
+			"number. A file verdict means you examined the supplied ranges on both " +
+			"sides, not merely its pathname. `not_affected` does not exempt a changed file: it says " +
 			"the file was read and needs no change, with evidence saying why.\n\n")
 		for i, u := range units {
 			renderBatchUnit(&b, i+1, u)
@@ -391,9 +397,17 @@ func renderBatch(units []BatchUnit, advisory []AdvisoryRef, omitted int, exclude
 // file as one hunk, the clipped function-context hunks, or the header
 // lines with the access reason.
 func renderBatchUnit(b *strings.Builder, number int, u BatchUnit) {
-	fmt.Fprintf(b, "### %d. `%s` — %s at `%s`\n\n", number, u.Path, u.Change, u.ContentRevision)
+	if u.Part != "" {
+		fmt.Fprintf(b, "### %d. `%s` (part %s) — %s at `%s`\n\n", number, u.Path, u.Part, u.Change, u.ContentRevision)
+	} else {
+		fmt.Fprintf(b, "### %d. `%s` — %s at `%s`\n\n", number, u.Path, u.Change, u.ContentRevision)
+	}
 	if u.OldPath != "" && u.OldPath != u.Path {
 		fmt.Fprintf(b, "Previously `%s`.\n\n", u.OldPath)
+	}
+	if u.Part != "" {
+		renderPartUnit(b, u)
+		return
 	}
 	if u.Form != "" {
 		renderShapedUnit(b, u)
@@ -410,6 +424,18 @@ func renderBatchUnit(b *strings.Builder, number int, u BatchUnit) {
 	default:
 		fmt.Fprintf(b, "````\n%s\n````\n\n", quoteBytes(u.Body))
 	}
+	if len(u.NumberedDiff) > 0 {
+		fmt.Fprintf(b, "Its numbered diff:\n\n````diff\n%s\n````\n\n",
+			quoteBytes(u.NumberedDiff))
+	}
+}
+
+// renderPartUnit is one numbered slice of a split file: its position
+// among the file's parts with its own gutter-numbered hunks. The part is
+// the supplied content: there is no second body fence beside it.
+func renderPartUnit(b *strings.Builder, u BatchUnit) {
+	b.WriteString("Shown as slice " + u.Part + " of this file's numbered hunks. Judge this " +
+		"slice on its own lines; the file completes when every slice has a verdict.\n\n")
 	if len(u.NumberedDiff) > 0 {
 		fmt.Fprintf(b, "Its numbered diff:\n\n````diff\n%s\n````\n\n",
 			quoteBytes(u.NumberedDiff))
