@@ -473,7 +473,7 @@ func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settin
 			if l.Log != nil {
 				l.Log.Event("tripwire", harness.RedactedCommand(command))
 			}
-			l.noteReads(readsNote{declared: declared, effective: effective, reason: "review_leg_ran_command"})
+			l.noteReads(readsNote{declared: declared, effective: effective, reason: ReadsReasonReviewCommand})
 			return envelope, nil, outMsgs, &ui.FatalError{
 				Reason: refusal.Reason,
 				Action: refusal.Action,

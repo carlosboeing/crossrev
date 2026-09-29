@@ -192,6 +192,58 @@ func TestUnverifiedGrokReviewIsRefused(t *testing.T) {
 	}
 }
 
+// A tripwire halt still records the envelope-only marker entry the
+// Marker.Reads comment promises: the halted call publishes nothing, and
+// the envelope is the record the call happened.
+func TestTripwireHaltRecordsTheReadsEnvelope(t *testing.T) {
+	e := newEnv(t)
+	writeRequiredHead(e, "a.go", "package a\n")
+	e.runner.script = []exec.Result{{
+		ExitCode: 0,
+		Stdout:   []byte("{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Bash\",\"input\":{\"command\":\"id\"}}]}}\n" + string(claudeStdout(batchAnswerFor(t, []string{"a.go"})))),
+	}}
+
+	got := runLeg(t, e, e.request(t))
+	if got.Err == nil {
+		t.Fatal("Run: want the tripwire to halt the leg")
+	}
+	if len(got.Marker.Reads) == 0 {
+		t.Fatal("the halted marker carries no reads envelope")
+	}
+	envelope, err := prstate.DecodeReadsEnvelope(got.Marker.Reads)
+	if err != nil {
+		t.Fatalf("decoding the halted marker envelope: %v", err)
+	}
+	if envelope.Reason != "review_leg_ran_command" {
+		t.Errorf("envelope reason = %q, want review_leg_ran_command", envelope.Reason)
+	}
+}
+
+// A self-test halt still records the envelope-only marker entry: the leg
+// stops before any child starts, and the envelope is the record the call
+// was attempted.
+func TestSelfTestHaltRecordsTheReadsEnvelope(t *testing.T) {
+	e := newEnv(t)
+	writeRequiredHead(e, "a.go", "package a\n")
+	e.cfg = mustConfig(t, "version: 2\npolicy:\n  on_reads_unavailable: halt\n")
+	e.runner.serveErr = errors.New("connection refused")
+
+	got := runLeg(t, e, e.request(t))
+	if got.Err == nil {
+		t.Fatal("Run: want the halt to stop the leg")
+	}
+	if len(got.Marker.Reads) == 0 {
+		t.Fatal("the halted marker carries no reads envelope")
+	}
+	envelope, err := prstate.DecodeReadsEnvelope(got.Marker.Reads)
+	if err != nil {
+		t.Fatalf("decoding the halted marker envelope: %v", err)
+	}
+	if envelope.DeclaredMode != "served" || envelope.EffectiveMode != "served" || envelope.Reason != "self_test_failed" {
+		t.Errorf("envelope = %+v, want a served self_test_failed halt", envelope)
+	}
+}
+
 // A command event on the review leg halts with review_leg_ran_command and
 // publishes nothing, under either policy.
 func TestReviewTripwireHaltsTheLeg(t *testing.T) {

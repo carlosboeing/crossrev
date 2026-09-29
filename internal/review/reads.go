@@ -29,6 +29,11 @@ const (
 	ReadsReasonFileToolUnwired = "file_tool_unwired"
 )
 
+// ReadsReasonReviewCommand is the envelope reason for a call the tripwire
+// discarded. A command event halts rather than degrades, and the reason
+// names the failure every surface reports it under.
+const ReadsReasonReviewCommand = "review_leg_ran_command"
+
 // AssessReads maps one call's reads health onto the policy: the reason to
 // record, and whether the leg halts. A refused call, a missing handshake
 // and a failed self-test degrade where the policy says degrade and stop it

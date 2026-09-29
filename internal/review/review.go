@@ -299,6 +299,10 @@ func (l *Leg) Run(ctx context.Context, req Request) (out Result) {
 			return out
 		}
 		if covErr := l.runCoverage(ctx, req, loaded, settings, ad.pass, claimID, scope, store, selection, &out); covErr != nil {
+			// A halted batch call recorded its reads note before the
+			// error returned: the envelope-only entry lands on the
+			// halted marker the way haltPass records it.
+			l.attachReads(&out.Marker)
 			out.Outcome = OutcomeError
 			out.Err = covErr
 			return out
@@ -329,6 +333,10 @@ func (l *Leg) Run(ctx context.Context, req Request) (out Result) {
 			if errors.As(err, &restoreErr) {
 				out.Messages = append(out.Messages, restoreErr.Warning())
 			}
+			// A halted frozen call recorded its reads note before the
+			// error returned: the envelope-only entry lands on the
+			// halted marker the way haltPass records it.
+			l.attachReads(&out.Marker)
 			out.Outcome = OutcomeError
 			out.Err = err
 			return out
