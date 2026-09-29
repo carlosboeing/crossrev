@@ -60,69 +60,69 @@
       "name": "a leading dash is the default cycle, and the options are the cycle's own",
       "args": ["--pr", "42"],
       "command": "cycle",
-      "request": {"PR": "42", "Repo": "", "Trigger": "human", "HarnessOverride": "", "NoTips": "false", "KeepTranscripts": "false"}
+      "request": {"PR": "42", "Repo": "", "Trigger": "human", "HarnessOverride": "", "NoTips": "false", "KeepTranscripts": "false", "ModelOverride": "", "EffortOverride": ""}
     },
     {
       "name": "cycle named explicitly",
       "args": ["cycle", "--pr", "42"],
       "command": "cycle",
-      "request": {"PR": "42", "Repo": "", "Trigger": "human", "HarnessOverride": "", "NoTips": "false", "KeepTranscripts": "false"}
+      "request": {"PR": "42", "Repo": "", "Trigger": "human", "HarnessOverride": "", "NoTips": "false", "KeepTranscripts": "false", "ModelOverride": "", "EffortOverride": ""}
     },
     {
       "name": "cycle with every flag it takes",
-      "args": ["cycle", "--pr", "42", "--repo", "owner/name", "--harness", "codex", "--trigger", "automatic", "--no-tips", "--keep-transcripts"],
+      "args": ["cycle", "--pr", "42", "--repo", "owner/name", "--harness", "codex", "--model", "cli-model", "--effort", "high", "--trigger", "automatic", "--no-tips", "--keep-transcripts"],
       "command": "cycle",
-      "request": {"PR": "42", "Repo": "owner/name", "Trigger": "automatic", "HarnessOverride": "codex", "NoTips": "true", "KeepTranscripts": "true"}
+      "request": {"PR": "42", "Repo": "owner/name", "Trigger": "automatic", "HarnessOverride": "codex", "NoTips": "true", "KeepTranscripts": "true", "ModelOverride": "cli-model", "EffortOverride": "high"}
     },
     {
       "name": "cycle by the dash rule with every flag it takes",
-      "args": ["--pr", "42", "--repo", "owner/name", "--harness", "codex", "--trigger", "automatic", "--no-tips", "--keep-transcripts"],
+      "args": ["--pr", "42", "--repo", "owner/name", "--harness", "codex", "--model", "cli-model", "--effort", "high", "--trigger", "automatic", "--no-tips", "--keep-transcripts"],
       "command": "cycle",
-      "request": {"PR": "42", "Repo": "owner/name", "Trigger": "automatic", "HarnessOverride": "codex", "NoTips": "true", "KeepTranscripts": "true"}
+      "request": {"PR": "42", "Repo": "owner/name", "Trigger": "automatic", "HarnessOverride": "codex", "NoTips": "true", "KeepTranscripts": "true", "ModelOverride": "cli-model", "EffortOverride": "high"}
     },
     {
       "name": "the last --pr wins",
       "args": ["cycle", "--pr", "1", "--pr", "42"],
       "command": "cycle",
-      "request": {"PR": "42", "Repo": "", "Trigger": "human", "HarnessOverride": "", "NoTips": "false", "KeepTranscripts": "false"}
+      "request": {"PR": "42", "Repo": "", "Trigger": "human", "HarnessOverride": "", "NoTips": "false", "KeepTranscripts": "false", "ModelOverride": "", "EffortOverride": ""}
     },
 
     {
       "name": "review with the number alone",
       "args": ["review", "--pr", "42"],
       "command": "review",
-      "request": {"PR": "42", "Repo": "", "Trigger": "human", "HarnessOverride": "", "Continuation": "false", "NoTips": "false", "KeepTranscripts": "false"}
+      "request": {"PR": "42", "Repo": "", "Trigger": "human", "HarnessOverride": "", "Continuation": "false", "NoTips": "false", "KeepTranscripts": "false", "ModelOverride": "", "EffortOverride": ""}
     },
     {
       "name": "review with every flag it takes",
-      "args": ["review", "--pr", "42", "--repo", "owner/name", "--harness", "codex", "--trigger", "automatic", "--continuation", "--no-tips", "--keep-transcripts"],
+      "args": ["review", "--pr", "42", "--repo", "owner/name", "--harness", "codex", "--model", "cli-model", "--effort", "high", "--trigger", "automatic", "--continuation", "--no-tips", "--keep-transcripts"],
       "command": "review",
-      "request": {"PR": "42", "Repo": "owner/name", "Trigger": "automatic", "HarnessOverride": "codex", "Continuation": "true", "NoTips": "true", "KeepTranscripts": "true"}
+      "request": {"PR": "42", "Repo": "owner/name", "Trigger": "automatic", "HarnessOverride": "codex", "Continuation": "true", "NoTips": "true", "KeepTranscripts": "true", "ModelOverride": "cli-model", "EffortOverride": "high"}
     },
     {
       "name": "review accepts and ignores --pass",
       "args": ["review", "--pr", "42", "--pass", "3"],
       "command": "review",
-      "request": {"PR": "42", "Repo": "", "Trigger": "human", "HarnessOverride": "", "Continuation": "false", "NoTips": "false", "KeepTranscripts": "false"}
+      "request": {"PR": "42", "Repo": "", "Trigger": "human", "HarnessOverride": "", "Continuation": "false", "NoTips": "false", "KeepTranscripts": "false", "ModelOverride": "", "EffortOverride": ""}
     },
 
     {
       "name": "resolve with the number alone",
       "args": ["resolve", "--pr", "7"],
       "command": "resolve",
-      "request": {"PR": "7", "Repo": "", "Trigger": "human", "HarnessOverride": "", "NoTips": "false", "KeepTranscripts": "false"}
+      "request": {"PR": "7", "Repo": "", "Trigger": "human", "HarnessOverride": "", "NoTips": "false", "KeepTranscripts": "false", "ModelOverride": "", "EffortOverride": ""}
     },
     {
       "name": "resolve with every flag it takes",
-      "args": ["resolve", "--pr", "7", "--repo", "owner/name", "--harness", "claude", "--trigger", "automatic", "--no-tips", "--keep-transcripts"],
+      "args": ["resolve", "--pr", "7", "--repo", "owner/name", "--harness", "claude", "--model", "cli-model", "--effort", "high", "--trigger", "automatic", "--no-tips", "--keep-transcripts"],
       "command": "resolve",
-      "request": {"PR": "7", "Repo": "owner/name", "Trigger": "automatic", "HarnessOverride": "claude", "NoTips": "true", "KeepTranscripts": "true"}
+      "request": {"PR": "7", "Repo": "owner/name", "Trigger": "automatic", "HarnessOverride": "claude", "NoTips": "true", "KeepTranscripts": "true", "ModelOverride": "cli-model", "EffortOverride": "high"}
     },
     {
       "name": "resolve accepts and ignores --pass",
       "args": ["resolve", "--pr", "7", "--pass", "2"],
       "command": "resolve",
-      "request": {"PR": "7", "Repo": "", "Trigger": "human", "HarnessOverride": "", "NoTips": "false", "KeepTranscripts": "false"}
+      "request": {"PR": "7", "Repo": "", "Trigger": "human", "HarnessOverride": "", "NoTips": "false", "KeepTranscripts": "false", "ModelOverride": "", "EffortOverride": ""}
     },
 
     {
@@ -334,43 +334,43 @@
       "name": "an unknown option for review names the harnesses",
       "args": ["review", "--bogus"],
       "reason": "unknown option for review: --bogus",
-      "action": "Usage: crossrev review --pr <number> [--harness <one of: claude|codex|agy|grok|opencode>] [--no-tips] [--keep-transcripts]"
+      "action": "Usage: crossrev review --pr <number> [--harness <one of: claude|codex|agy|grok|opencode>] [--model <id>] [--effort <level>] [--no-tips] [--keep-transcripts]"
     },
     {
       "name": "an unknown option for resolve names the harnesses",
       "args": ["resolve", "--bogus"],
       "reason": "unknown option for resolve: --bogus",
-      "action": "Usage: crossrev resolve --pr <number> [--harness <one of: claude|codex|agy|grok|opencode>] [--trigger human|automatic] [--keep-transcripts]"
+      "action": "Usage: crossrev resolve --pr <number> [--harness <one of: claude|codex|agy|grok|opencode>] [--model <id>] [--effort <level>] [--trigger human|automatic] [--keep-transcripts]"
     },
     {
       "name": "an unknown option for cycle",
       "args": ["cycle", "--bogus"],
       "reason": "unknown option for cycle: --bogus",
-      "action": "Usage: crossrev cycle --pr <number> [--trigger human|automatic] [--no-tips] [--keep-transcripts]"
+      "action": "Usage: crossrev cycle --pr <number> [--trigger human|automatic] [--model <id>] [--effort <level>] [--no-tips] [--keep-transcripts]"
     },
     {
       "name": "an unknown leading option is the cycle's, not an unknown command",
       "args": ["--bogus"],
       "reason": "unknown option for cycle: --bogus",
-      "action": "Usage: crossrev cycle --pr <number> [--trigger human|automatic] [--no-tips] [--keep-transcripts]"
+      "action": "Usage: crossrev cycle --pr <number> [--trigger human|automatic] [--model <id>] [--effort <level>] [--no-tips] [--keep-transcripts]"
     },
     {
       "name": "cycle does not take --continuation",
       "args": ["cycle", "--pr", "3", "--continuation"],
       "reason": "unknown option for cycle: --continuation",
-      "action": "Usage: crossrev cycle --pr <number> [--trigger human|automatic] [--no-tips] [--keep-transcripts]"
+      "action": "Usage: crossrev cycle --pr <number> [--trigger human|automatic] [--model <id>] [--effort <level>] [--no-tips] [--keep-transcripts]"
     },
     {
       "name": "cycle does not take --pass",
       "args": ["cycle", "--pr", "3", "--pass", "2"],
       "reason": "unknown option for cycle: --pass",
-      "action": "Usage: crossrev cycle --pr <number> [--trigger human|automatic] [--no-tips] [--keep-transcripts]"
+      "action": "Usage: crossrev cycle --pr <number> [--trigger human|automatic] [--model <id>] [--effort <level>] [--no-tips] [--keep-transcripts]"
     },
     {
       "name": "resolve does not take --continuation",
       "args": ["resolve", "--pr", "3", "--continuation"],
       "reason": "unknown option for resolve: --continuation",
-      "action": "Usage: crossrev resolve --pr <number> [--harness <one of: claude|codex|agy|grok|opencode>] [--trigger human|automatic] [--keep-transcripts]"
+      "action": "Usage: crossrev resolve --pr <number> [--harness <one of: claude|codex|agy|grok|opencode>] [--model <id>] [--effort <level>] [--trigger human|automatic] [--keep-transcripts]"
     },
     {
       "name": "an unknown option for status",

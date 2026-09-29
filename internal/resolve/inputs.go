@@ -63,6 +63,8 @@ type Request struct {
 	Repo            core.Slug
 	Trigger         Trigger
 	Harness         string
+	ModelOverride   string
+	EffortOverride  string
 	Author          string
 	KeepTranscripts bool
 }

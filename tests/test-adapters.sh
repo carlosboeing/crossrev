@@ -706,3 +706,52 @@ is  "and keeps the .env denial in the read map" \
   "$(jq -r '.permission.read["*.env"] // "absent"' <<<"$ocx_write_cfg")" "deny"
 
 finish
+
+# --- CLI model and effort overrides --------------------------------------------
+# The flags land in the same settings the config fills, so the harness gets
+# the operator's value byte-identical and the marker records it: argv, the run
+# header and the posted marker all name the CLI value, never the configured
+# one. There is no allowlist on either side — the config passes both through
+# verbatim and a bad id fails as the harness's own entitlement error — so
+# equivalence with the config path is the whole of the validation.
+config_opencode_cli_model() {
+  cat <<'YAML'
+version: 2
+reviewer:
+  harness: opencode
+  model: configured-model
+resolver:
+  harness: opencode
+  model: configured-model
+YAML
+}
+
+fixture_repo "$(config_opencode_cli_model)"
+stub_reset
+routes_baseline ""
+CROSSREV_OPENCODE_CFG_LOG="$(mktemp)"; export CROSSREV_OPENCODE_CFG_LOG
+
+out="$("$CROSSREV" review --pr 42 --model cli-overridden-model --effort cli-high 2>&1)"
+review_argv="$(cat "$ARGV_LOG")"
+
+has "the review leg passes the CLI model through" "$review_argv" "--model cli-overridden-model"
+has "and the CLI effort as the adapter's variant" "$review_argv" "--variant cli-high"
+has "and names both in the run header" "$out" "Reviewer: opencode, cli-overridden-model, cli-high effort"
+has "and records the CLI model on the marker" "$(calls)" '"model":"cli-overridden-model"'
+has "and the CLI effort beside it" "$(calls)" '"effort":"cli-high"'
+
+stub_reset
+routes_baseline "$(marker_comment 9001 "$(ocx_review_marker)" | jq -cs . | payload)"
+CROSSREV_RESOLVE_PAYLOAD="$(ocx_resolve_payload | payload)"; export CROSSREV_RESOLVE_PAYLOAD
+CROSSREV_RESOLVE_EDIT="$(mktemp)"; export CROSSREV_RESOLVE_EDIT
+
+out="$("$CROSSREV" resolve --pr 42 --model resolve-cli-model --effort resolve-high 2>&1)"
+resolve_argv="$(cat "$ARGV_LOG")"
+
+has "the resolve leg passes the CLI model through" "$resolve_argv" "--model resolve-cli-model"
+has "and the CLI effort as the adapter's variant" "$resolve_argv" "--variant resolve-high"
+has "and names both in the run header" "$out" "Resolver: opencode, resolve-cli-model, resolve-high effort"
+has "and records the CLI model on the marker" "$(calls)" '"model":"resolve-cli-model"'
+has "and the CLI effort beside it" "$(calls)" '"effort":"resolve-high"'
+
+finish

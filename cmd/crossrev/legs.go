@@ -228,6 +228,8 @@ func reviewCommand(ctx context.Context, out *ui.IO, doc harness.Document, req cl
 		Trigger:         review.Trigger(req.Trigger),
 		Continuation:    req.Continuation,
 		HarnessOverride: req.HarnessOverride,
+		ModelOverride:   req.ModelOverride,
+		EffortOverride:  req.EffortOverride,
 		Author:          author,
 		RunID:           runlog.RunID(),
 	})
@@ -281,6 +283,8 @@ func resolveCommand(ctx context.Context, out *ui.IO, doc harness.Document, req c
 		Repo:            repo,
 		Trigger:         resolve.Trigger(req.Trigger),
 		Harness:         req.HarnessOverride,
+		ModelOverride:   req.ModelOverride,
+		EffortOverride:  req.EffortOverride,
 		Author:          author,
 		KeepTranscripts: req.KeepTranscripts,
 	})
