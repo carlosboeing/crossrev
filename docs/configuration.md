@@ -138,7 +138,9 @@ resolver:
   effort: high
 ```
 
-`harness` is one of `claude`, `codex`, `agy`, `grok` or `opencode`. `model` reaches the harness as given, so it must be **fully qualified** — `claude-fable-5`, never `fable-5`, which fails as an entitlement error rather than as a typo. `effort` is passed through verbatim. Either leg may name an `endpoint` instead of relying on the harness's own vendor.
+`harness` is one of `claude`, `codex`, `agy`, `grok` or `opencode` — codex serves the review leg only. `model` reaches the harness as given, so it must be **fully qualified** — `claude-fable-5`, never `fable-5`, which fails as an entitlement error rather than as a typo. `effort` is passed through verbatim. Either leg may name an `endpoint` instead of relying on the harness's own vendor.
+
+For one run, `crossrev review --model <id> --effort <level>` — and the same flags on `resolve`, or on `cycle` for both legs — overrides the configured values the way `--harness` overrides the harness. The flags land in the same settings the config fills, so the harness gets the operator's value exactly as written and the marker records it; `--model` without `--harness` keeps the configured harness and replaces only its model.
 
 opencode carries two facts worth knowing before the first run:
 

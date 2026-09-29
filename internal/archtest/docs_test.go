@@ -128,6 +128,40 @@ func TestPublicDocsAuditVerdict(t *testing.T) {
 	}
 }
 
+// Every place that reports which harness may resolve names the same rule:
+// codex serves the review leg only. The README's `--harness` line once said
+// that about opencode, which serves both legs; troubleshooting once said no
+// shipped harness is restricted at all. Both went stale the day the resolver
+// rule landed, so this pins the current sentences.
+func TestPublicDocsNameCodexAsReviewOnly(t *testing.T) {
+	root := findRepoRoot(t)
+	read := func(name string) string {
+		raw, err := os.ReadFile(filepath.Join(root, name)) //nolint:gosec // a path this test names
+		if err != nil {
+			t.Fatalf("reading %s: %v", name, err)
+		}
+		return string(raw)
+	}
+	readme := read("README.md")
+	if !strings.Contains(readme, "`codex` on `review` only") {
+		t.Error("README.md does not say `codex` on `review` only in its --harness line")
+	}
+	if strings.Contains(readme, "`opencode` on `review` only") {
+		t.Error("README.md still says `opencode` on `review` only, but opencode serves both legs")
+	}
+	troubleshooting := read("docs/troubleshooting.md")
+	if !strings.Contains(troubleshooting, "the codex resolver cannot read files") {
+		t.Error("docs/troubleshooting.md does not carry the codex-resolver refusal")
+	}
+	if strings.Contains(troubleshooting, "No shipped harness currently restricts its legs") {
+		t.Error("docs/troubleshooting.md still claims no shipped harness is restricted")
+	}
+	configuration := read("docs/configuration.md")
+	if !strings.Contains(configuration, "codex serves the review leg only") {
+		t.Error("docs/configuration.md does not say codex serves the review leg only")
+	}
+}
+
 // auditDocsVerdict reports every coverage-not-verification violation in one
 // document's text: a banned verified phrase, or a documented out-of-scope
 // verification state.

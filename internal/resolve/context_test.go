@@ -421,7 +421,7 @@ func TestSettingsRefusesWhenNothingThatCanResolveIsInstalled(t *testing.T) {
 	}
 	wantRefusal(t, got.Err,
 		"the resolver is configured to use 'claude', which is not installed, and no other harness that can serve the resolve leg is either",
-		"Install one of claude, codex, agy, grok and opencode. CrossRev needs at least one, and two different ones is what makes the cross-model check mean anything.")
+		"Install one of claude, agy, grok and opencode. CrossRev needs at least one, and two different ones is what makes the cross-model check mean anything.")
 	if e.runner.specs != nil {
 		t.Errorf("harness started on a refusal: %d specs", len(e.runner.specs))
 	}
@@ -450,6 +450,80 @@ func TestSettingsNamesOnlyTheHarnessesThatCanResolve(t *testing.T) {
 	wantRefusal(t, got.Err,
 		"the resolver is configured to use 'claude', which is not installed, and no other harness that can serve the resolve leg is either",
 		"Install one of claude and opencode. CrossRev needs at least one, and two different ones is what makes the cross-model check mean anything.")
+}
+
+// TestSettingsRefusesCodexAsAResolver pins the codex-as-resolver refusal:
+// codex 0.158.0 with the resolve leg's shell denial has no way to read files
+// and answers `blocked` instead of editing, so the leg would verify nothing
+// and the pass would halt. The refusal lands in settings, before any child
+// starts, on both the configured-resolver path and the --harness override,
+// and names the resolvers that work. Codex as reviewer is unaffected: the
+// review leg carries no such refusal.
+func TestSettingsRefusesCodexAsAResolver(t *testing.T) {
+	message := "the codex resolver cannot read files, so a resolve leg on codex answers `blocked` instead of editing"
+	hint := "codex 0.158.0 with the shell disabled has no file-reading tool: the resolve leg's `--disable shell_tool --disable unified_exec` leaves it nothing to verify against, so it edits nothing and the pass halts. " +
+		"CrossRev runs the resolve leg on claude, agy, grok and opencode until the served read tool also serves resolve legs. " +
+		"Point the resolver at one of them with --harness, or set resolver.harness in the repository config."
+
+	t.Run("harness override", func(t *testing.T) {
+		e := setup(t)
+		e.addReview(t, defaultFindings(), "issues-remain")
+
+		got := e.runReq(t, Request{PR: 42, Repo: e.slug, Trigger: TriggerHuman, Harness: "codex"})
+
+		if got.Outcome != OutcomeRefused {
+			t.Errorf("Outcome = %q, want %q", got.Outcome, OutcomeRefused)
+		}
+		wantRefusal(t, got.Err, message, hint)
+		if e.runner.specs != nil {
+			t.Errorf("harness started on a refusal: %d specs", len(e.runner.specs))
+		}
+	})
+
+	t.Run("configured resolver", func(t *testing.T) {
+		e := setup(t)
+		e.addReview(t, defaultFindings(), "issues-remain")
+		e.git.show = map[string][]byte{
+			e.base.SHA() + ":.github/crossrev.yml": []byte("version: 2\nresolver:\n  harness: codex\n"),
+		}
+
+		got := e.runReq(t, Request{PR: 42, Repo: e.slug, Trigger: TriggerHuman})
+
+		if got.Outcome != OutcomeRefused {
+			t.Errorf("Outcome = %q, want %q", got.Outcome, OutcomeRefused)
+		}
+		wantRefusal(t, got.Err, message, hint)
+		if e.runner.specs != nil {
+			t.Errorf("harness started on a refusal: %d specs", len(e.runner.specs))
+		}
+	})
+}
+
+// TestSettingsRefusesWhenOnlyCodexIsInstalled pins that a machine where only
+// codex is on PATH refuses rather than substituting codex as the resolver.
+// The default resolver is claude, and codex cannot read files with its shell
+// disabled, so the substitution loop must not start codex.
+func TestSettingsRefusesWhenOnlyCodexIsInstalled(t *testing.T) {
+	e := setup(t)
+	e.lookPath = func(name string) (string, error) {
+		if name == "codex" {
+			return "/bin/codex", nil
+		}
+		return "", os.ErrNotExist
+	}
+	e.addReview(t, defaultFindings(), "issues-remain")
+
+	got := e.run(t)
+
+	if got.Outcome != OutcomeRefused {
+		t.Errorf("Outcome = %q, want %q", got.Outcome, OutcomeRefused)
+	}
+	wantRefusal(t, got.Err,
+		"the resolver is configured to use 'claude', which is not installed, and no other harness that can serve the resolve leg is either",
+		"Install one of claude, agy, grok and opencode. CrossRev needs at least one, and two different ones is what makes the cross-model check mean anything.")
+	if e.runner.specs != nil {
+		t.Errorf("harness started on a refusal: %d specs", len(e.runner.specs))
+	}
 }
 
 // TestCapitaliseName pins the Bash

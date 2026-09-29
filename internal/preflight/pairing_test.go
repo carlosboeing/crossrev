@@ -2,10 +2,12 @@ package preflight_test
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/carlosboeing/crossrev/internal/config"
 	"github.com/carlosboeing/crossrev/internal/core"
+	"github.com/carlosboeing/crossrev/internal/harness"
 	"github.com/carlosboeing/crossrev/internal/preflight"
 )
 
@@ -130,6 +132,29 @@ func TestPairingSupportedRefusesALegTheDescriptorDoesNotName(t *testing.T) {
 	reason, ok = preflight.PairingSupported(doc, "github-hosted", "bogus", "verify")
 	if ok || reason != " is limited to the  leg, and cannot serve the verify leg" {
 		t.Errorf("PairingSupported(bogus, verify) = (%q, %v)", reason, ok)
+	}
+}
+
+// Codex is refused as a resolver through the shared resolver rule
+// (harness.RefusedAsResolver), on every runner: the resolve leg's shell
+// denial strands codex self-hosted too. Codex as reviewer is unaffected, and
+// the bare credential question without a leg is unchanged.
+func TestPairingSupportedRefusesCodexAsResolver(t *testing.T) {
+	doc := document(t)
+	want := "Codex is limited to the review leg, and cannot serve the resolve leg"
+	for _, runner := range []string{"github-hosted", "self-hosted", "some-other-runner"} {
+		if reason, ok := preflight.PairingSupported(doc, runner, "codex", "resolve"); ok || reason != want {
+			t.Errorf("PairingSupported(%q, codex, resolve) = (%q, %v), want (%q, false)", runner, reason, ok, want)
+		}
+	}
+	for _, tt := range []struct{ runner, leg string; wantOK bool }{
+		{runner: "github-hosted", leg: "review", wantOK: true},
+		{runner: "self-hosted", leg: "review", wantOK: true},
+		{runner: "github-hosted", leg: "", wantOK: true},
+	} {
+		if reason, ok := preflight.PairingSupported(doc, tt.runner, "codex", tt.leg); ok != tt.wantOK {
+			t.Errorf("PairingSupported(%q, codex, %q) = (%q, %v), want ok=%v", tt.runner, tt.leg, reason, ok, tt.wantOK)
+		}
 	}
 }
 
@@ -271,6 +296,16 @@ func TestReportPairings(t *testing.T) {
 				"│     CrossRev has no adapter for 'bogus'\n" +
 				"│     Fixes: set runner: self-hosted, or name a different harness for this leg.\n",
 		},
+		{
+			name:   "a codex resolver is refused on every runner",
+			runner: "self-hosted",
+			yaml:   "version: \"2\"\nreviewer:\n  harness: claude\nresolver:\n  harness: codex\n",
+			wantOK: false,
+			want: "\n◇  Pairings on runner: self-hosted\n" +
+				"│  ✓ reviewer — claude by subscription\n" +
+				"│  ✗ resolver — Codex is limited to the review leg, and cannot serve the resolve leg\n" +
+				"│     Fix: name a different harness for this leg.\n",
+		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			io, buf := capture()
@@ -283,4 +318,63 @@ func TestReportPairings(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A leg-servability refusal is a descriptor fact, not a runner fact, so the
+// report carries the reason as the headline with only the harness fix: no
+// runner claim, and no runner fix that would still refuse. The codex row above
+// pins the resolver-rule half; this pins the descriptor-legs half, which no
+// shipped harness reaches — every shipped entry serves both legs — so the
+// document is the shipped one with grok narrowed to the review leg.
+func TestReportPairingsGivesDescriptorLegRefusalsTheirOwnLine(t *testing.T) {
+	io, buf := capture()
+	c := &preflight.Checker{
+		IO:      io,
+		Harness: documentWithLegs(t, "grok", []string{"review"}),
+		Config:  configFor(t, "version: \"2\"\nreviewer:\n  harness: claude\nresolver:\n  harness: grok\n"),
+	}
+	if got := c.ReportPairings("github-hosted"); got {
+		t.Errorf("ReportPairings = true, want false")
+	}
+	want := "\n◇  Pairings on runner: github-hosted\n" +
+		"│  ✓ reviewer — claude by subscription\n" +
+		"│  ✗ resolver — Grok is limited to the review leg, and cannot serve the resolve leg\n" +
+		"│     Fix: name a different harness for this leg.\n"
+	if got := buf.String(); got != want {
+		t.Errorf("report =\n%q\nwant\n%q", got, want)
+	}
+}
+
+// documentWithLegs is the shipped descriptor with one harness entry narrowed
+// to the given legs, reloaded through the same validation the build reads.
+func documentWithLegs(t *testing.T, name string, legs []string) harness.Document {
+	t.Helper()
+	var root map[string]any
+	if err := json.Unmarshal(document(t).Raw(), &root); err != nil {
+		t.Fatalf("unmarshal shipped descriptor: %v", err)
+	}
+	found := false
+	for _, h := range root["harnesses"].([]any) {
+		entry := h.(map[string]any)
+		if entry["name"] == name {
+			narrowed := make([]any, len(legs))
+			for i, leg := range legs {
+				narrowed[i] = leg
+			}
+			entry["legs"] = narrowed
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("no harness %q in the shipped descriptor", name)
+	}
+	raw, err := json.Marshal(root)
+	if err != nil {
+		t.Fatalf("marshal narrowed descriptor: %v", err)
+	}
+	doc, err := harness.Load(raw)
+	if err != nil {
+		t.Fatalf("harness.Load: %v", err)
+	}
+	return doc
 }

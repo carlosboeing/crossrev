@@ -92,6 +92,7 @@ func TestOpenWithNoDirectory(t *testing.T) {
 	l.Phase("enumerate", 0)
 	l.PhaseTerms(0, 0)
 	l.Call(1, 0, 0, 0, 0, 0, "", 0)
+	l.Settings("", "", "")
 	l.SetLeg("review")
 	l.ClearTranscripts("")
 	l.RedactFile(blocked)
@@ -150,6 +151,27 @@ func TestEventAppends(t *testing.T) {
 
 	if got, want := strings.Count(readLog(t, l), "\n"), 3; got != want {
 		t.Errorf("run log holds %d lines, want %d:\n%s", got, want, readLog(t, l))
+	}
+}
+
+// TestSettingsNamesTheResolvedHarnessModelAndEffort: one line per leg names
+// what the config and the command-line overrides settled on, so a run's
+// requested model and effort read back off the run log. Unset halves read as
+// dashes, the way Call renders an unnamed answering model.
+func TestSettingsNamesTheResolvedHarnessModelAndEffort(t *testing.T) {
+	l := openLog(t, runlog.Options{Repo: "acme/widget", PR: "7"})
+	l.Settings("claude", "cli-model", "high")
+
+	want := "2026-08-29T01:02:03Z run start repo=acme/widget pr=7 revision=-\n" +
+		"2026-08-29T01:02:03Z settings harness=claude model=cli-model effort=high\n"
+	if got := readLog(t, l); got != want {
+		t.Errorf("run log = %q, want %q", got, want)
+	}
+
+	bare := openLog(t, runlog.Options{Repo: "acme/widget", PR: "7"})
+	bare.Settings("claude", "", "")
+	if got := readLog(t, bare); !strings.Contains(got, "settings harness=claude model=- effort=-\n") {
+		t.Errorf("unset halves do not read as dashes:\n%s", got)
 	}
 }
 

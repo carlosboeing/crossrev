@@ -65,7 +65,8 @@ endpoints:
 #
 # Model ids must be fully qualified: `claude-fable-5`, never `fable-5`, which fails
 # as an entitlement error rather than a typo. `effort` reaches the harness verbatim.
-# Override a leg for one run with `--harness codex`, without touching this.
+# Override a leg for one run with `--harness`, without touching this (codex serves
+# the review leg only).
 reviewer:
   harness: claude
   model: reviewer-model

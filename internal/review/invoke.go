@@ -48,6 +48,12 @@ func (l *Leg) settings(req Request, loaded Context) (legSettings, ui.Line, error
 		s.model = ""
 		s.endpoint = ""
 	}
+	if req.ModelOverride != "" {
+		s.model = req.ModelOverride
+	}
+	if req.EffortOverride != "" {
+		s.effort = req.EffortOverride
+	}
 	if !l.Harness.Known(s.harness) {
 		return s, ui.Line{}, noAdapterRefusal(l.Harness, s.harness)
 	}
