@@ -330,7 +330,13 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 		}
 		outcome.verdict = verdictFromPayload(payload)
 		outcome.payloads = append(outcome.payloads, payload)
-		out.Messages = append(out.Messages, outcome.addEnvelope(envelope)...)
+		// A merged split file's envelope already folded when its final
+		// part call was accepted, so the loop folds only whole-file
+		// calls: folding the merged envelope again would count the final
+		// part's usage twice.
+		if scheduled.Part == nil {
+			out.Messages = append(out.Messages, outcome.addEnvelope(envelope)...)
+		}
 		outcome.examined = append(outcome.examined, examined...)
 		outcome.limits = append(outcome.limits, limits...)
 		for _, finding := range findingsFromPayload(payload) {

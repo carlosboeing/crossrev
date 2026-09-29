@@ -100,22 +100,32 @@ func (l *Leg) invokePartCall(ctx context.Context, req Request, loaded Context, s
 		ps.verdict = v
 	}
 	out.Messages = append(out.Messages, outcome.addEnvelope(env)...)
-	covered := 0
-	for _, unit := range scope.Required {
-		if _, ok := outcome.verdicts[unit.ID]; ok {
-			covered++
-		}
-	}
-	line := ui.Say(batchProgressLine(call, total, covered, len(scope.Required)))
-	if l.Progress != nil {
-		l.Progress(line)
-	} else {
-		out.Messages = append(out.Messages, line)
-	}
+	// The batch loop prints the merged file's own progress line after the
+	// merge returns, so this call prints one only while the file still has
+	// unjudged parts: printing on the merging call too would show the same
+	// "Batch N of M" line twice, the first with a covered count from
+	// before the verdicts were recorded.
+	allJudged := true
 	for _, judged := range ps.judged() {
 		if !judged {
-			return false, nil, nil, nil, harness.Envelope{}, nil, nil, nil
+			allJudged = false
+			break
 		}
+	}
+	if !allJudged {
+		covered := 0
+		for _, unit := range scope.Required {
+			if _, ok := outcome.verdicts[unit.ID]; ok {
+				covered++
+			}
+		}
+		line := ui.Say(batchProgressLine(call, total, covered, len(scope.Required)))
+		if l.Progress != nil {
+			l.Progress(line)
+		} else {
+			out.Messages = append(out.Messages, line)
+		}
+		return false, nil, nil, nil, harness.Envelope{}, nil, nil, nil
 	}
 	verdicts, supplied, payload = mergePendingSplit(ps)
 	return true, verdicts, supplied, payload, env, ps.examined, ps.limits, nil

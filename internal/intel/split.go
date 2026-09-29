@@ -220,7 +220,10 @@ func chunkHunk(block []string, maxBytes int) [][]string {
 			oldLen += c.old
 			newLen += c.new
 		}
-		head := fmt.Sprintf("@@ -%d,%d +%d,%d @@%s\n", old, oldLen, new, newLen, suffix)
+		// The suffix carries its own newline from the split input, so it
+		// is trimmed and re-terminated: two newlines would number a blank
+		// line as the chunk's first context row and shift every gutter.
+		head := fmt.Sprintf("@@ -%d,%d +%d,%d @@%s", old, oldLen, new, newLen, strings.TrimSuffix(suffix, "\n")+"\n")
 		chunk := []string{head}
 		for _, c := range cells[start:end] {
 			chunk = append(chunk, c.lines...)
