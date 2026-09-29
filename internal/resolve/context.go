@@ -294,6 +294,9 @@ func (l *Leg) settings(s *session) (*Refusal, ui.Line, error) {
 	if !doc.ServesLeg(name, "resolve") {
 		return servesLegRefusal(doc, name), ui.Line{}, nil
 	}
+	if name == "codex" {
+		return codexResolverRefusal(doc), ui.Line{}, nil
+	}
 
 	asked := name
 	if l.binaryInstalled(asked) {
@@ -392,6 +395,29 @@ func servesLegRefusal(doc harness.Document, name string) *Refusal {
 			harness.NamesHuman(doc.NamesForLeg(leg)),
 			entry.ProductName,
 			strings.Join(entry.Legs(), ", ")),
+	}
+}
+
+// codexResolverRefusal refuses codex as the resolver before the leg starts.
+// codex 0.158.0 with the resolve leg's shell denial has no way to read files
+// and answers `blocked` instead of editing, so the leg would verify nothing
+// and the pass would halt. The hint names the resolvers that work, read off
+// the descriptor rather than written into the sentence, and the refusal stands
+// until the served read tool also serves resolve legs. Codex as reviewer is
+// unaffected: the review leg carries no such refusal.
+func codexResolverRefusal(doc harness.Document) *Refusal {
+	const leg = "resolve"
+	var resolvers []string
+	for _, name := range doc.NamesForLeg(leg) {
+		if name != "codex" {
+			resolvers = append(resolvers, name)
+		}
+	}
+	return &Refusal{
+		Message: "the codex resolver cannot read files, so a resolve leg on codex answers `blocked` instead of editing",
+		Hint: "codex 0.158.0 with the shell disabled has no file-reading tool: the resolve leg's `--disable shell_tool --disable unified_exec` leaves it nothing to verify against, so it edits nothing and the pass halts. " +
+			fmt.Sprintf("CrossRev runs the %s leg on %s until the served read tool also serves resolve legs. ", leg, harness.NamesHuman(resolvers)) +
+			"Point the resolver at one of them with --harness, or set resolver.harness in the repository config.",
 	}
 }
 

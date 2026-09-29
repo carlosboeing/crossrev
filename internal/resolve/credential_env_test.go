@@ -1,81 +1,63 @@
 package resolve
 
 import (
-	"encoding/base64"
-	"encoding/json"
 	"strings"
 	"testing"
 )
 
-// stagedCodexCredential is a codex auth.json whose access token expires far
-// enough ahead that cred.AssertFresh passes under the frozen test clock and
-// under the real one.
-func stagedCodexCredential(t *testing.T) string {
-	t.Helper()
-	claims, err := json.Marshal(map[string]any{
-		"exp":       int64(4_070_908_800), // 2099-01-01
-		"iss":       "https://auth.example.com",
-		"client_id": "app_test",
-	})
-	if err != nil {
-		t.Fatalf("building the claims: %v", err)
-	}
-	token := "eyJhbGciOiJub25lIn0." + base64.RawURLEncoding.EncodeToString(claims) + ".signature"
-
-	raw, err := json.Marshal(map[string]any{
-		"OPENAI_API_KEY": nil,
-		"auth_mode":      "chatgpt",
-		"last_refresh":   "2026-08-01T00:00:00Z",
-		"tokens": map[string]any{
-			"access_token":  token,
-			"refresh_token": "refresh-abc",
-			"id_token":      "id-abc",
-			"account_id":    "acct",
-		},
-	})
-	if err != nil {
-		t.Fatalf("building the credential fixture: %v", err)
-	}
-	return string(raw)
+// stagedGrokCredential is a placeholder grok auth.json. Grok's descriptor
+// asserts no freshness, so the leg stages these bytes opaquely; the property
+// under test is that the staging directory reaches the child, not what the
+// credential says.
+func stagedGrokCredential() string {
+	return `{"auth":"stub"}`
 }
 
 // The resolve leg stages a credential the same way the review leg does, and it
 // reached the same fault from the same cause: Leg.Env is read at the
 // composition root (cmd/crossrev/legs.go:168) before cred.Prepare exports
-// CODEX_HOME, so the child was handed a list that never named the scratch home.
+// GROK_HOME, so the child was handed a list that never named the scratch home.
 //
 // The review leg has the matching case. Both are kept: the fix is one line in
 // each file, and one line is exactly what a later edit drops from one of them.
+//
+// This ran on codex until codex was refused as a resolver: with its shell
+// disabled codex 0.158.0 has no file-reading tool, answers `blocked` instead
+// of editing, and never starts a child to stage for. Grok stages the same way
+// through GROK_HOME, so the pin moved to it.
 func TestTheStagedCredentialReachesTheResolveHarness(t *testing.T) {
 	e := setup(t)
-	t.Setenv("CROSSREV_CODEX_AUTH", stagedCodexCredential(t))
+	t.Setenv("CROSSREV_GROK_AUTH", stagedGrokCredential())
 	e.addReview(t, defaultFindings(), "issues-remain")
 
 	got := e.runReq(t, Request{
 		PR:      42,
 		Repo:    e.slug,
 		Trigger: TriggerHuman,
-		Harness: "codex",
+		Harness: "grok",
 	})
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
 
 	var home string
 	found := 0
 	for _, entry := range got.Invocation.Env {
-		if rest, ok := strings.CutPrefix(entry, "CODEX_HOME="); ok {
+		if rest, ok := strings.CutPrefix(entry, "GROK_HOME="); ok {
 			home = rest
 			found++
 		}
 	}
 
 	if found == 0 {
-		t.Fatalf("the child environment names no CODEX_HOME, so codex reads its own store instead of the staged copy: %v", got.Invocation.Env)
+		t.Fatalf("the child environment names no GROK_HOME, so grok reads its own store instead of the staged copy: %v", got.Invocation.Env)
 	}
 	// One entry, not two. Go's exec takes the last of a repeated name, so a
 	// second one would work by accident rather than by design.
 	if found > 1 {
-		t.Errorf("CODEX_HOME appears %d times: %v", found, got.Invocation.Env)
+		t.Errorf("GROK_HOME appears %d times: %v", found, got.Invocation.Env)
 	}
 	if home == "" {
-		t.Error("CODEX_HOME is empty, which points codex at nothing")
+		t.Error("GROK_HOME is empty, which points grok at nothing")
 	}
 }

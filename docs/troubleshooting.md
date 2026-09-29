@@ -197,6 +197,10 @@ No shipped harness currently restricts its legs, so this refusal only appears fo
 
 opencode 2.x does not accept the flags the adapter passes and does not read the isolation config it writes, so a leg on it would run without the constraints that config exists to hold ([#272](https://github.com/carlosboeing/crossrev/issues/272)). Both legs probe `opencode --version` and refuse any install outside 1.x before starting. The second message is the same refusal on the same terms for a probe that reports no version — CrossRev fails closed rather than starting a leg on an install it cannot confirm. Install the supported CLI — `npm install -g opencode-ai@1.18.21`, the version the descriptor pins — or point the leg at another harness with `--harness`.
 
+``the codex resolver cannot read files, so a resolve leg on codex answers `blocked` instead of editing``
+
+codex 0.158.0 with its shell disabled has no file-reading tool, and the resolve leg denies commands on every harness — on Codex, `--sandbox workspace-write` with `--disable shell_tool --disable unified_exec` — so nothing is left to verify the findings against: the leg answers `blocked`, edits nothing, and the pass halts. CrossRev refuses codex as the resolver before the leg starts, whether codex comes from `resolver.harness` or from `--harness codex` on `crossrev resolve`. Point the resolver at one of claude, agy, grok or opencode instead. Codex as reviewer is unaffected: the review leg carries no such refusal. The refusal stands until the served read tool also serves resolve legs.
+
 ## A credential problem in CI
 
 | Symptom | Cause |
