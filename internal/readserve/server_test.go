@@ -196,6 +196,29 @@ func TestEveryRefusalReason(t *testing.T) {
 	}
 }
 
+func TestResultCarriesRangeHeader(t *testing.T) {
+	dir, base, head := createRepo(t)
+	logPath := filepath.Join(t.TempDir(), "log.jsonl")
+
+	reqs := []rpcRequest{
+		{JSONRPC: "2.0", ID: 1, Method: "tools/call", Params: map[string]any{
+			"name": "read_file", "arguments": map[string]any{
+				"path": "small.txt", "revision": "head", "start_line": 1, "end_line": 2,
+			},
+		}},
+	}
+	args := []string{"--repo", dir, "--base", base, "--head", head, "--log", logPath, "--per-call-bytes", "262144"}
+	resps, _ := runRPC(t, args, reqs)
+
+	if resps[0].Result.IsError {
+		t.Fatalf("expected success, got error: %s", resps[0].Result.Content[0].Text)
+	}
+	want := "small.txt@head lines 1-2\n1: line 1 edited\n2: line 2\n"
+	if resps[0].Result.Content[0].Text != want {
+		t.Errorf("got %q, want %q", resps[0].Result.Content[0].Text, want)
+	}
+}
+
 func TestCutResultsNamingNextStart(t *testing.T) {
 	dir, base, head := createRepo(t)
 	logPath := filepath.Join(t.TempDir(), "log.jsonl")
@@ -215,6 +238,9 @@ func TestCutResultsNamingNextStart(t *testing.T) {
 	text := resps[0].Result.Content[0].Text
 	if !strings.Contains(text, "start_line=11") {
 		t.Errorf("expected cut message naming next start line 11, got: %s", text)
+	}
+	if first := strings.SplitN(text, "\n", 2)[0]; first != "large.txt@head lines 1-10" {
+		t.Errorf("expected header naming the returned range, got: %q", first)
 	}
 }
 

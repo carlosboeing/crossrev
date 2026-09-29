@@ -359,6 +359,7 @@ func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 			}
 
 			var sb strings.Builder
+			last := end
 			for i := start - 1; i < end; i++ {
 				lineBytes := len(lines[i]) + 1
 				if bytesReadInCall + sb.Len() + lineBytes > cfg.PerCallBytes {
@@ -380,18 +381,20 @@ func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 				if sb.Len() + lineBytes > cfg.MaxResultBytes || (i - start + 1) >= cfg.MaxResultLines {
 					// Cut before this line
 					sb.WriteString(fmt.Sprintf("(cut, next start_line=%d)\n", i+1))
+					last = i
 					break
 				}
 				sb.WriteString(fmt.Sprintf("%d: %s\n", i+1, lines[i]))
 			}
 
-			bytesReadInCall += sb.Len()
+			text := fmt.Sprintf("%s@%s lines %d-%d\n%s", argsStruct.Path, argsStruct.Revision, start, last, sb.String())
+			bytesReadInCall += len(text)
 			_ = encoder.Encode(newResultResponse(req.ID, map[string]interface{}{
-				"content": []map[string]interface{}{{"type": "text", "text": sb.String()}},
+				"content": []map[string]interface{}{{"type": "text", "text": text}},
 			}))
-			
+
 			h := sha256.New()
-			h.Write([]byte(sb.String()))
+			h.Write([]byte(text))
 			argsStruct.Digest = hex.EncodeToString(h.Sum(nil))
 			lg.event("read", argsStruct)
 
