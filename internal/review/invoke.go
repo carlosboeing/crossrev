@@ -18,6 +18,7 @@ import (
 	"github.com/carlosboeing/crossrev/internal/forge"
 	"github.com/carlosboeing/crossrev/internal/harness"
 	"github.com/carlosboeing/crossrev/internal/prompt"
+	"github.com/carlosboeing/crossrev/internal/runlog"
 	"github.com/carlosboeing/crossrev/internal/sandbox"
 	"github.com/carlosboeing/crossrev/internal/ui"
 	"github.com/carlosboeing/crossrev/internal/validate"
@@ -232,6 +233,37 @@ func (l *Leg) invoke(ctx context.Context, req Request, loaded Context, settings 
 	return envelope, payload, outMsgs, err
 }
 
+// copyReadLog archives one call's read-server log into the run directory,
+// beside the transcripts WriteTranscript archives just above. The scratch
+// copy is removed only after the run-directory write succeeds: a failed
+// copy keeps the evidence where the read server left it and records the
+// loss in the run log, in the same words WriteTranscript uses for a
+// transcript it could not write. A missing or empty source means no read
+// server ran for the call, so there is nothing to archive.
+func copyReadLog(l *runlog.Log, tmp string, call int) {
+	readLog := filepath.Join(tmp, "reads.jsonl")
+	b, err := os.ReadFile(readLog)
+	if err != nil || len(b) == 0 {
+		return
+	}
+	target := filepath.Join(l.Dir(), fmt.Sprintf("reads.call-%d.jsonl", call))
+	f, err := os.OpenFile(target, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		l.Event("transcript", "could not write "+target)
+		return
+	}
+	if _, err := f.Write(b); err != nil {
+		_ = f.Close()
+		l.Event("transcript", "could not write "+target)
+		return
+	}
+	if err := f.Close(); err != nil {
+		l.Event("transcript", "could not write "+target)
+		return
+	}
+	_ = os.Remove(readLog)
+}
+
 // runPrompt runs one rendered prompt through the harness child with the
 // leg's validation seam: one semantic retry naming the rejected numbers,
 // then a fatal refusal that publishes nothing. The deferred sandbox restore
@@ -366,6 +398,9 @@ func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settin
 		// different findings depending on whether a run directory exists
 		// (lib/adapters/claude.sh:126-130, :148-154).
 		l.Log.WriteTranscript(transcript, res.Stdout, res.Stderr)
+		if l.Log != nil && l.Log.Dir() != "" {
+			copyReadLog(l.Log, tmp, call)
+		}
 		if res.Interrupted() {
 			// A signal death is an interrupt, not a harness failure: the
 			// child was killed rather than answering badly. The refusal

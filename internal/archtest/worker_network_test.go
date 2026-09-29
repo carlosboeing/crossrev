@@ -77,3 +77,69 @@ func TestWorkerNetworkIsolation(t *testing.T) {
 		}
 	}
 }
+
+func TestReadServeNetworkIsolation(t *testing.T) {
+	cfg := &packages.Config{
+		Mode: packages.NeedName |
+			packages.NeedFiles |
+			packages.NeedCompiledGoFiles |
+			packages.NeedImports |
+			packages.NeedTypes |
+			packages.NeedTypesSizes |
+			packages.NeedSyntax |
+			packages.NeedTypesInfo |
+			packages.NeedDeps,
+		Tests: false,
+	}
+
+	pkgs, err := packages.Load(cfg, "github.com/carlosboeing/crossrev/internal/readserve")
+	if err != nil {
+		t.Fatalf("failed to load packages: %v", err)
+	}
+	if packages.PrintErrors(pkgs) > 0 {
+		t.Fatalf("package loading reported errors")
+	}
+
+	prog, ssaPkgs := ssautil.AllPackages(pkgs, 0)
+	prog.Build()
+
+	var readserveMain *ssa.Function
+	for _, ssaPkg := range ssaPkgs {
+		if ssaPkg != nil && ssaPkg.Pkg.Path() == "github.com/carlosboeing/crossrev/internal/readserve" {
+			readserveMain = ssaPkg.Func("Run")
+		}
+	}
+
+	if readserveMain == nil {
+		t.Fatalf("readserve.Run not found in SSA packages")
+	}
+
+	cg := cha.CallGraph(prog)
+	rootNode := cg.Nodes[readserveMain]
+	if rootNode == nil {
+		return
+	}
+
+	visited := make(map[*callgraph.Node]bool)
+	queue := []*callgraph.Node{rootNode}
+	visited[rootNode] = true
+
+	for len(queue) > 0 {
+		curr := queue[0]
+		queue = queue[1:]
+
+		if curr.Func != nil && curr.Func.Pkg != nil && curr.Func.Pkg.Pkg != nil {
+			pkgPath := curr.Func.Pkg.Pkg.Path()
+			if pkgPath == "net" || strings.HasPrefix(pkgPath, "net/") || strings.Contains(pkgPath, "internal/forge") {
+				t.Errorf("reachable forbidden function %s in package %s from readserve.Run", curr.Func.String(), pkgPath)
+			}
+		}
+
+		for _, edge := range curr.Out {
+			if edge.Callee != nil && !visited[edge.Callee] {
+				visited[edge.Callee] = true
+				queue = append(queue, edge.Callee)
+			}
+		}
+	}
+}
