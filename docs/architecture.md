@@ -148,9 +148,9 @@ A **required file** is a changed file the review must account for. The reviewer 
 
 The review reads in batches because one prompt cannot hold a large pull request. One pass reads at most 400 required files; oversized generated files skipped before review do not use those slots. Batches hold at most 40 files in path order.
 
-Batches measure the full rendered prompt against 180 KB (184,320 bytes).
+Calls measure the full rendered prompt — headers, shared context and file content together — against the calling harness's packing limit, derived from its input window (390,000 bytes for Codex, 312,000 for Claude Code, 120 KiB for argv transports).
 
-A plain file that fits in no batch waits with `input_exceeds_budget` and halts the pass. An oversized generated file is skipped instead, with a warning in the comment summary and the terminal.
+A plain file that fits in no call alone splits into parts at hunk boundaries, one oversized hunk into line chunks, each reviewed with its header and gutter numbers and merged into one verdict when every part lands. An oversized generated file is skipped instead, with a warning in the comment summary and the terminal. Only shared context alone past the hard limit halts the pass, with `shared_context_exceeds_window`; between 0.75 of the packing limit and the hard limit the pass runs over budget and records `over_budget`.
 
 Files past the pass budget carry `review_budget_reached`.
 
@@ -331,7 +331,7 @@ scripts/         lint.sh, check-changelog.sh, check-parity-coverage.sh,
 tests/           the stubbed-gh suite. tests/run.sh builds the binary once and runs all of it
 ```
 
-Maintainer scripts keep vendored data current without putting network fetches on runtime paths: `scripts/refresh-prices.sh` extracts token rates from LiteLLM into `assets/prices.json`, and `scripts/refresh-generated-rules.sh` inspects upstream Linguist's `generated.rb` and reports additions for `internal/intel/generated.go`. Both tools leave production runs offline and deterministic.
+Maintainer scripts keep vendored data current without putting network fetches on runtime paths: `scripts/refresh-prices.sh` extracts token rates and input windows from LiteLLM into `assets/prices.json`, and `scripts/refresh-generated-rules.sh` inspects upstream Linguist's `generated.rb` and reports additions for `internal/intel/generated.go`. Both tools leave production runs offline and deterministic.
 
 ## The test suite
 

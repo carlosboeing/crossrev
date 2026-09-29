@@ -70,11 +70,11 @@ If that process is still running, wait for it or stop it. If it isn't, CrossRev 
 
 Three halt words name a pass that could not read every changed file. The marker records state `incomplete` with the word and the stop counts. The counts show what ran and what still waits for a verdict.
 
-`coverage_incomplete` means an accepted batch left files waiting. `ledger_exhausted` means a marker-carried generation outgrew the 64 KiB comment cap after the retention ladder ran, so the pass keeps the last generation that fit — a cap the ref store does not share, its generations persisting as git objects. `input_exceeds_budget` means one plain file fits in no rendered prompt (files with a generated signal are skipped with a visible warning rather than halting). Files past the 400-file pass budget carry `review_budget_reached`.
+`coverage_incomplete` means an accepted call left files waiting. `ledger_exhausted` means a marker-carried generation outgrew the 64 KiB comment cap after the retention ladder ran, so the pass keeps the last generation that fit — a cap the ref store does not share, its generations persisting as git objects. `shared_context_exceeds_window` means the shared context alone overflowed the hard input limit, so no file fits beside it. Files past the 400-file pass budget carry `review_budget_reached`.
 
-When `input_exceeds_budget` halts a pass, inspect the file named in the claim:
+Oversized files no longer halt: a plain file that fits no call alone splits into parts at hunk boundaries — one oversized hunk into line chunks — and the parts merge into one verdict when every part lands in the same pass. A recognised generated file whose rendering would need splitting is skipped with a visible warning rather than split. If a file CrossRev must review keeps appearing unreviewed, inspect it:
 - If the file is generated, mark it `path linguist-generated` in `.gitattributes` on the base branch to exclude it from review.
-- If the file is marked `path -linguist-generated`, CrossRev is required to review it; if it cannot fit in 180 KB, it halts.
+- If the file is marked `path -linguist-generated`, CrossRev is required to review it, splitting it across calls however large it is.
 
 If a pull request has nothing left to review because all changed files are excluded by `.gitattributes` or skipped as oversized generated files, the pass halts with `blocked` and `crossrev/halted` without calling a model harness.
 
@@ -151,6 +151,12 @@ The error names what git said, so read that line first. Two causes are common.
 **The identity was rejected.** CrossRev commits as `crossrev <crossrev@users.noreply.github.com>` unless `CROSSREV_GIT_NAME` and `CROSSREV_GIT_EMAIL` say otherwise. A repository requiring signed commits or a verified address refuses that.
 
 Either way the fix is not lost. It stays in the worktree, which CrossRev keeps and names on its way out, and the pass halts with the reason recorded on the pull request rather than only in your terminal.
+
+## The resolve prompt exceeds its window
+
+`resolve_prompt_exceeds_limit` means the rendered resolve prompt overflowed the resolver harness's hard input limit, so the leg refused before any child started and the pass halted with `crossrev/halted`. Nothing was judged, and nothing needs resuming — the claim stays open for the next attempt.
+
+Two ways forward, and only these two: resolve fewer findings in the pass, or move the resolver to a harness with a larger input window (`resolver.harness`, or `--harness` for one run). Shrinking anything else — the diff, the thread list — does not change the accounting, because the prompt is measured whole before the comparison.
 
 ## A resolve leg ran a command
 

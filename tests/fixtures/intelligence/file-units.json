@@ -153,9 +153,8 @@
     ]
   },
   "batching": {
-    "doc": "Frozen bounds for deterministic batching (Task A2). Batches hold at most 40 files; a pass admits at most 400 required files; the fully rendered prompt, including headers and prior context, holds at most 184320 bytes (180 KiB).",
+    "doc": "Frozen bounds for deterministic batching. Calls hold at most 40 files; a pass admits at most 400 required files; the fully rendered prompt, including headers and prior context, holds at most the calling harness's packing limit P, derived from its input window (390000 bytes for codex, 312000 for claude, 120 KiB for argv transports). A file that fits no call alone splits into parts rather than halting the pass.",
     "max_files_per_batch": 40,
-    "max_units_per_pass": 400,
-    "max_prompt_bytes": 184320
+    "max_units_per_pass": 400
   }
 }

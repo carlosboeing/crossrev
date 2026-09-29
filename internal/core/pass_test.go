@@ -143,16 +143,16 @@ func TestMarkerVersionIsOne(t *testing.T) {
 	t.Skip("superseded by TestMarkerVersionIsTwo: this release writes v:2, and v:1 stays readable for context only")
 }
 
-// The three closed halt reasons and the two recorded limit reasons are the
+// The three closed halt reasons and the three recorded limit reasons are the
 // only words a marker may carry for why a pass stopped or what deferred it.
 func TestHaltAndLimitVocabulariesAreClosed(t *testing.T) {
-	if HaltCoverageIncomplete != "coverage_incomplete" || HaltLedgerExhausted != "ledger_exhausted" || HaltInputExceedsBudget != "input_exceeds_budget" {
-		t.Fatalf("halt reasons are %q, %q, %q", HaltCoverageIncomplete, HaltLedgerExhausted, HaltInputExceedsBudget)
+	if HaltCoverageIncomplete != "coverage_incomplete" || HaltLedgerExhausted != "ledger_exhausted" || HaltSharedContextExceedsWindow != "shared_context_exceeds_window" {
+		t.Fatalf("halt reasons are %q, %q, %q", HaltCoverageIncomplete, HaltLedgerExhausted, HaltSharedContextExceedsWindow)
 	}
-	if LimitReviewBudgetReached != "review_budget_reached" || LimitTooCommon != "too_common" {
-		t.Fatalf("limit reasons are %q and %q", LimitReviewBudgetReached, LimitTooCommon)
+	if LimitReviewBudgetReached != "review_budget_reached" || LimitTooCommon != "too_common" || LimitOverBudget != "over_budget" {
+		t.Fatalf("limit reasons are %q, %q and %q", LimitReviewBudgetReached, LimitTooCommon, LimitOverBudget)
 	}
-	for _, in := range []string{"coverage_incomplete", "ledger_exhausted", "input_exceeds_budget"} {
+	for _, in := range []string{"coverage_incomplete", "ledger_exhausted", "shared_context_exceeds_window"} {
 		if _, err := ParseHaltReason(in); err != nil {
 			t.Fatalf("ParseHaltReason(%q): %v", in, err)
 		}
@@ -160,7 +160,7 @@ func TestHaltAndLimitVocabulariesAreClosed(t *testing.T) {
 	if _, err := ParseHaltReason("verification_failed"); err == nil {
 		t.Fatal("ParseHaltReason(verification_failed) = nil error, want a refusal")
 	}
-	for _, in := range []string{"review_budget_reached", "too_common"} {
+	for _, in := range []string{"review_budget_reached", "too_common", "over_budget"} {
 		if _, err := ParseLimitReason(in); err != nil {
 			t.Fatalf("ParseLimitReason(%q): %v", in, err)
 		}
@@ -168,7 +168,7 @@ func TestHaltAndLimitVocabulariesAreClosed(t *testing.T) {
 	if _, err := ParseLimitReason("fix_unverified"); err == nil {
 		t.Fatal("ParseLimitReason(fix_unverified) = nil error, want a refusal")
 	}
-	if len(HaltReasons()) != 3 || len(LimitReasons()) != 2 {
+	if len(HaltReasons()) != 3 || len(LimitReasons()) != 3 {
 		t.Fatalf("halt/limit counts are %d and %d", len(HaltReasons()), len(LimitReasons()))
 	}
 }

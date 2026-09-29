@@ -7,9 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/carlosboeing/crossrev/internal/core"
 	"github.com/carlosboeing/crossrev/internal/exec"
-	"github.com/carlosboeing/crossrev/internal/intel"
 	"github.com/carlosboeing/crossrev/internal/prstate"
 	"github.com/carlosboeing/crossrev/internal/review"
 	"github.com/carlosboeing/crossrev/internal/validate"
@@ -45,43 +43,68 @@ func parseTestFindings(t *testing.T, raw json.RawMessage) []map[string]json.RawM
 	return out
 }
 
-// TestReviewHaltListsOutstandingPaths pins the bounded halt record: a file
-// that cannot fit alone in one rendered prompt halts the pass with the halt
-// word, the stop counts and the outstanding path, and no convergence.
-func TestReviewHaltListsOutstandingPaths(t *testing.T) {
+// partAnswer answers one split-file part: the file's single position
+// judged no_issue with file-level evidence. Every part of the file takes
+// the same shape, so one scripted answer serves every part call.
+func partAnswer(t *testing.T, path string) string {
+	t.Helper()
+	return `{"verdict":"issues-remain","blocked_reason":null,"findings":[],"coverage":[` +
+		`{"unit_number":1,"verdict":"no_issue","finding_numbers":[],"evidence":[{"path":"` + path + `","revision":"` + headSHA + `","start_line":null,"end_line":null,"source":"git","note":null}],"reason":null}` +
+		`],"examined_scope":"read the slice","known_limits":[]}`
+}
+
+// TestReviewSplitsAnOversizedFileAcrossCalls pins the split path: a file
+// that fits no rendered prompt alone is reviewed in parts rather than
+// halting the pass. Every part's call fits the packing limit, the parts
+// merge to one verdict, and the pass converges with no halted label.
+func TestReviewSplitsAnOversizedFileAcrossCalls(t *testing.T) {
 	e := newEnv(t)
 	writeRequiredHead(e, "huge.go", "package huge\n"+strings.Repeat("// filler line to exceed the prompt budget\n", 8000))
+	e.runner.script = []exec.Result{
+		{ExitCode: 0, Stdout: claudeStdout(partAnswer(t, "huge.go"))},
+	}
+	prompts := capturePrompt(e)
 	got := runLeg(t, e, e.request(t))
 	if got.Err != nil {
 		t.Fatalf("Run: %v", got.Err)
 	}
-	if got.Outcome != review.OutcomeHalted {
-		t.Fatalf("Outcome = %q, want halted", got.Outcome)
+	if got.Outcome != review.OutcomeInvoked {
+		t.Fatalf("Outcome = %q, want invoked (the file splits instead of halting)", got.Outcome)
 	}
-	if got.Reason != "input_exceeds_budget" {
-		t.Errorf("Reason = %q, want input_exceeds_budget", got.Reason)
+	if len(*prompts) < 2 {
+		t.Fatalf("prompts = %d, want at least 2 part calls", len(*prompts))
 	}
-	stop, ok := got.Marker.CoverageStop.Get()
-	if !ok {
-		t.Fatal("halted marker carries no coverage_stop")
-	}
-	if stop.OutstandingCount != 1 || stop.RequiredCount != 1 {
-		t.Errorf("stop = %+v, want required 1 outstanding 1", stop)
-	}
-	if len(e.runner.Specs()) != 0 {
-		t.Errorf("harness calls = %d, want 0 (halt before the first batch)", len(e.runner.Specs()))
-	}
-	var halted bool
-	for _, label := range e.forge.labelsAdded {
-		if label == "crossrev/halted" {
-			halted = true
+	for i, prompt := range *prompts {
+		if len(prompt) > claudePackBytes() {
+			t.Errorf("prompt %d is %d bytes, over the %d packing limit", i+1, len(prompt), claudePackBytes())
+		}
+		if !strings.Contains(prompt, "(part ") {
+			t.Errorf("prompt %d names no part slice", i+1)
 		}
 	}
-	if !halted {
-		t.Errorf("labels added = %v, want crossrev/halted", e.forge.labelsAdded)
+	for _, label := range e.forge.labelsAdded {
+		if strings.Contains(label, "halted") {
+			t.Fatalf("split pass applied a halted label: %q", label)
+		}
 	}
-	if got.Marker.State != core.PassIncomplete {
-		t.Errorf("marker state = %q, want incomplete", got.Marker.State)
+	if !prstate.MarkerConverges(got.Marker) {
+		t.Error("the settled marker does not converge after the parts merge")
+	}
+	gens := ledgerGenerations(t, e)
+	if len(gens) == 0 {
+		t.Fatal("no complete generation after the merged parts")
+	}
+	record := suppliedRecordFor(t, gens[len(gens)-1], "huge.go")
+	verdict, ok := record.Verdict.Get()
+	if !ok || verdict == "" {
+		t.Fatal("huge.go carries no merged verdict in the current generation")
+	}
+	supplied, ok := record.Supplied.Get()
+	if !ok {
+		t.Fatal("the merged record carries no supplied input")
+	}
+	if supplied.Form != prstate.SuppliedFormFullText {
+		t.Errorf("merged supplied form = %q, want full_text for the unshaped file", supplied.Form)
 	}
 }
 
@@ -329,39 +352,35 @@ func TestReviewRunsAdmittedBatchesBeforeBudgetHalt(t *testing.T) {
 	}
 }
 
-// TestReviewRunsSchedulableBatchesBeforeInputHalt pins the same ordering when
-// the halt is an oversized file: the schedulable batch ahead of it runs and
-// persists, and the halt counts only that accepted verdict as covered.
-func TestReviewRunsSchedulableBatchesBeforeInputHalt(t *testing.T) {
+// TestReviewRunsSchedulableCallsBeforeSplitCompletes pins the same ordering
+// when a file splits: the schedulable call ahead of it runs and persists,
+// and the split file's parts merge after it, covering the whole scope.
+func TestReviewRunsSchedulableCallsBeforeSplitCompletes(t *testing.T) {
 	e := newEnv(t)
 	writeRequiredHead(e, "a.go", "package a\n")
 	writeRequiredHead(e, "z_huge.go", "package huge\n"+strings.Repeat("// filler line to exceed the prompt budget\n", 8000))
 	e.runner.script = []exec.Result{
 		{ExitCode: 0, Stdout: claudeStdout(batchAnswerFor(t, []string{"a.go"}))},
+		{ExitCode: 0, Stdout: claudeStdout(partAnswer(t, "z_huge.go"))},
 	}
 	got := runLeg(t, e, e.request(t))
 	if got.Err != nil {
 		t.Fatalf("Run: %v", got.Err)
 	}
-	if got.Outcome != review.OutcomeHalted {
-		t.Fatalf("Outcome = %q, want halted", got.Outcome)
+	if got.Outcome != review.OutcomeInvoked {
+		t.Fatalf("Outcome = %q, want invoked (a.go runs, then the split completes)", got.Outcome)
 	}
-	if got.Reason != "input_exceeds_budget" {
-		t.Errorf("Reason = %q, want input_exceeds_budget", got.Reason)
+	if e.runner.calls < 2 {
+		t.Errorf("harness calls = %d, want at least 2 (the schedulable call plus the split's parts)", e.runner.calls)
 	}
-	if e.runner.calls != 1 {
-		t.Errorf("harness calls = %d, want 1 (the schedulable batch runs before the halt)", e.runner.calls)
-	}
-	stop, ok := got.Marker.CoverageStop.Get()
-	if !ok {
-		t.Fatal("halted marker carries no coverage_stop")
-	}
-	if stop.RequiredCount != 2 || stop.CoveredCount != 1 || stop.OutstandingCount != 1 {
-		t.Errorf("stop = %+v, want required 2 covered 1 outstanding 1", stop)
+	for _, label := range e.forge.labelsAdded {
+		if strings.Contains(label, "halted") {
+			t.Fatalf("split pass applied a halted label: %q", label)
+		}
 	}
 	gens := ledgerGenerations(t, e)
 	if len(gens) == 0 {
-		t.Fatal("no complete generation published for the accepted batch")
+		t.Fatal("no complete generation published for the accepted calls")
 	}
 	last := gens[len(gens)-1]
 	covered := 0
@@ -370,8 +389,8 @@ func TestReviewRunsSchedulableBatchesBeforeInputHalt(t *testing.T) {
 			covered++
 		}
 	}
-	if covered != 1 {
-		t.Errorf("covered units in the current generation = %d, want 1 (a.go accepted, z_huge.go outstanding)", covered)
+	if covered != 2 {
+		t.Errorf("covered units in the current generation = %d, want 2 (a.go accepted, z_huge.go merged)", covered)
 	}
 }
 
@@ -379,15 +398,22 @@ func TestReviewRunsSchedulableBatchesBeforeInputHalt(t *testing.T) {
 // reviewed carries no supplied input: the halt leaves z_huge.go outstanding
 // in the current generation, and nothing was handed to a reviewer for it —
 // a different fact from handing over empty bytes. The judged sibling proves
-// the null is real: a.go carries its measurement in the same candidate, so
-// the outstanding null means nothing was handed over, not that the
-// observation dropped the field.
+// the null is real: file000.go carries its measurement in the same
+// candidate, so the outstanding null means nothing was handed over, not
+// that the observation dropped the field. Oversized files split rather
+// than halting now, so the unreviewed file is the one carried past the
+// 400-file pass budget.
 func TestAnOutstandingRecordCarriesNoSuppliedInput(t *testing.T) {
 	e := newEnv(t)
-	writeRequiredHead(e, "a.go", "package a\n")
-	writeRequiredHead(e, "z_huge.go", "package huge\n"+strings.Repeat("// filler line to exceed the prompt budget\n", 8000))
-	e.runner.script = []exec.Result{
-		{ExitCode: 0, Stdout: claudeStdout(batchAnswerFor(t, []string{"a.go"}))},
+	var paths []string
+	for i := 0; i <= 400; i++ {
+		path := fmt.Sprintf("file%03d.go", i)
+		writeRequiredHead(e, path, "package x\n")
+		paths = append(paths, path)
+	}
+	for i := 0; i < 400; i += 40 {
+		end := i + 40
+		e.runner.script = append(e.runner.script, exec.Result{ExitCode: 0, Stdout: claudeStdout(batchAnswerFor(t, paths[i:end]))})
 	}
 	published := capturePublished(t)
 	got := runLeg(t, e, e.request(t))
@@ -395,19 +421,19 @@ func TestAnOutstandingRecordCarriesNoSuppliedInput(t *testing.T) {
 		t.Fatalf("Run: %v", got.Err)
 	}
 	if got.Outcome != review.OutcomeHalted {
-		t.Fatalf("Outcome = %q, want halted (z_huge.go never reviewed)", got.Outcome)
+		t.Fatalf("Outcome = %q, want halted (file400.go carried past the pass budget)", got.Outcome)
 	}
 	if len(*published) == 0 {
 		t.Fatal("no complete generation published")
 	}
 	last := (*published)[len(*published)-1]
-	sibling := suppliedRecordFor(t, last, "a.go")
+	sibling := suppliedRecordFor(t, last, "file000.go")
 	if _, ok := sibling.Supplied.Get(); !ok {
 		t.Fatal("the judged sibling carries no supplied input, so the outstanding null proves nothing")
 	}
-	record := suppliedRecordFor(t, last, "z_huge.go")
+	record := suppliedRecordFor(t, last, "file400.go")
 	if _, ok := record.Verdict.Get(); ok {
-		t.Fatal("z_huge.go carries a verdict in a halted pass")
+		t.Fatal("file400.go carries a verdict in a halted pass")
 	}
 	if _, ok := record.Supplied.Get(); ok {
 		t.Fatal("a file nobody reviewed claims bytes were supplied for it")
@@ -415,10 +441,10 @@ func TestAnOutstandingRecordCarriesNoSuppliedInput(t *testing.T) {
 }
 
 // TestTruncatedIsFalseBecauseNothingTruncates is a guard, not a tautology: a
-// file that cannot fit a prompt alone halts with input_exceeds_budget rather
-// than being cut, so every supplied record must read truncated false. If a
-// truncation path is ever added, this test fails and forces the field to be
-// set honestly. It reads the candidates the leg handed to publication: the
+// file that cannot fit a prompt alone splits into parts rather than being
+// cut, so every supplied record must read truncated false. If a truncation
+// path is ever added, this test fails and forces the field to be set
+// honestly. It reads the candidates the leg handed to publication: the
 // v1 codec drops the field on the wire, so store read-back would check
 // nothing.
 func TestTruncatedIsFalseBecauseNothingTruncates(t *testing.T) {
@@ -457,24 +483,24 @@ func acceptAll(e *env) {
 }
 
 // TestReviewSplitsAnOversizedDiffAcrossBatches reproduces the measurement
-// behind per-batch diff slicing: a rendered diff past the 180 KiB prompt
-// budget, spread across 41 individually small files, used to halt every
-// candidate — even a one-file batch carried the whole diff — so the pass made
-// zero model calls and stopped on input_exceeds_budget. With each batch
-// carrying only its own files' hunks, splitting shrinks the input and the
-// pass covers the scope.
+// behind per-call diff slicing: a rendered diff past the packing limit,
+// spread across 41 individually small files, once halted every candidate —
+// even a one-file batch carried the whole diff — so the pass made zero
+// model calls and stopped on input_exceeds_budget. With each call carrying
+// only its own files' hunks, splitting shrinks the input and the pass
+// covers the scope.
 func TestReviewSplitsAnOversizedDiffAcrossBatches(t *testing.T) {
 	e := newEnv(t)
 	var raw strings.Builder
-	filler := strings.Repeat("+// a rendered line of change to price the batch\n", 100)
+	filler := strings.Repeat("+// a rendered line of change to price the batch\n", 160)
 	for i := 1; i <= 41; i++ {
 		path := fmt.Sprintf("file%02d.go", i)
 		writeRequiredHead(e, path, "package x\n")
 		fmt.Fprintf(&raw, "diff --git a/%s b/%s\n--- a/%s\n+++ b/%s\n@@ -1,1 +1,101 @@\n context\n%s", path, path, path, path, filler)
 	}
 	e.forge.diff = []byte(raw.String())
-	if len(e.forge.diff) <= intel.MaxPromptBytes {
-		t.Fatalf("fixture diff is %d bytes, want it past the %d budget so the whole diff cannot fit one prompt", len(e.forge.diff), intel.MaxPromptBytes)
+	if len(e.forge.diff) <= claudePackBytes() {
+		t.Fatalf("fixture diff is %d bytes, want it past the %d budget so the whole diff cannot fit one prompt", len(e.forge.diff), claudePackBytes())
 	}
 	acceptAll(e)
 	prompts := capturePrompt(e)
@@ -489,8 +515,8 @@ func TestReviewSplitsAnOversizedDiffAcrossBatches(t *testing.T) {
 		t.Fatalf("harness calls = %d, want at least 2 (the budget splits the 41 files into batches)", e.runner.calls)
 	}
 	for i, prompt := range *prompts {
-		if len(prompt) > intel.MaxPromptBytes {
-			t.Errorf("prompt %d is %d bytes, over the %d budget the packer measured against", i+1, len(prompt), intel.MaxPromptBytes)
+		if len(prompt) > claudePackBytes() {
+			t.Errorf("prompt %d is %d bytes, over the %d budget the packer measured against", i+1, len(prompt), claudePackBytes())
 		}
 	}
 }
@@ -524,8 +550,8 @@ func TestReviewBatchDiffDropsFilesOutsideTheBatch(t *testing.T) {
 	if strings.Contains(prompt, "gen/big.go") {
 		t.Error("prompt carried a diff section the batch does not hold")
 	}
-	if len(prompt) > intel.MaxPromptBytes {
-		t.Errorf("prompt is %d bytes, over the %d budget", len(prompt), intel.MaxPromptBytes)
+	if len(prompt) > claudePackBytes() {
+		t.Errorf("prompt is %d bytes, over the %d budget", len(prompt), claudePackBytes())
 	}
 }
 
