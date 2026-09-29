@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/carlosboeing/crossrev/internal/core"
+	"github.com/carlosboeing/crossrev/internal/diff"
 	"github.com/carlosboeing/crossrev/internal/harness"
 	"github.com/carlosboeing/crossrev/internal/intel"
 	"github.com/carlosboeing/crossrev/internal/prstate"
@@ -145,15 +146,17 @@ func (ps *pendingSplit) judged() []bool {
 // finding numbers map into the file's merged finding order — the parts'
 // findings concatenated in part order — so the merged finding numbers
 // index the merged finding list the way a batch-local number indexes its
-// batch's. The supplied digest covers the concatenated part diffs in
-// order, in the file's own supplied form.
+// batch's. The supplied digest covers the concatenated rendered part diffs
+// in order, in the file's own supplied form, with the union of the parts'
+// ranges and the part count beside it.
 func mergePendingSplit(ps *pendingSplit) (map[core.UnitID]recordVerdict, map[core.UnitID]prstate.SuppliedInput, json.RawMessage) {
 	unit := ps.unit
 	split := make([]intel.SplitVerdict, ps.count)
 	base := 0
 	var evidence []prstate.Evidence
 	var reasons []string
-	var diffs []byte
+	var rendered []byte
+	ranges := core.SuppliedRanges{}
 	for i := 0; i < ps.count; i++ {
 		mapped := make([]int, 0, len(ps.numbers[i]))
 		for _, n := range ps.numbers[i] {
@@ -165,7 +168,10 @@ func mergePendingSplit(ps *pendingSplit) (map[core.UnitID]recordVerdict, map[cor
 		if ps.reasons[i] != "" {
 			reasons = append(reasons, ps.reasons[i])
 		}
-		diffs = append(diffs, ps.diffs[i]...)
+		part := diff.Parse(ps.diffs[i], core.RevisionPair{})
+		rendered = append(rendered, part.Numbered()...)
+		partBase, partHead := part.LineRanges()
+		ranges = ranges.Union(core.SuppliedRanges{Base: partBase, Head: partHead})
 	}
 	verdict, numbers := intel.MergeSplitVerdicts(split)
 	ids := make([]string, 0, len(numbers))
@@ -176,7 +182,7 @@ func mergePendingSplit(ps *pendingSplit) (map[core.UnitID]recordVerdict, map[cor
 		unit.ID: {Verdict: verdict, FindingIDs: ids, Evidence: evidence, Reason: strings.Join(reasons, "; ")},
 	}
 	supplied := map[core.UnitID]prstate.SuppliedInput{
-		unit.ID: {Digest: core.BodyDigestHex(diffs), Form: mergedSuppliedForm(unit.Form)},
+		unit.ID: {Digest: core.BodyDigestHex(rendered), Form: mergedSuppliedForm(unit.Form), Ranges: ranges, Parts: ps.count},
 	}
 	return verdicts, supplied, mergePartPayload(ps)
 }

@@ -30,12 +30,25 @@ import (
 func TestReviewCoverageSemanticContract(t *testing.T) {
 	base := mustReviewRevision(t, "1111111111111111111111111111111111111111")
 	head := mustReviewRevision(t, "2222222222222222222222222222222222222222")
+	span := func(start, end int) core.LineSpan { return core.LineSpan{Start: start, End: end} }
 	expect := validate.ReviewExpectations{
 		Base: base,
 		Head: head,
 		Units: []validate.UnitExpectation{
-			{Path: "a.go", Revision: head, Lines: 10, Readable: true},
-			{Path: "b.go", Revision: head, Lines: 4, Readable: true},
+			{
+				Path: "a.go", Revision: head, Lines: 10, Readable: true,
+				Ranges: core.SuppliedRanges{
+					Base: []core.LineSpan{span(1, 10)},
+					Head: []core.LineSpan{span(1, 10)},
+				},
+			},
+			{
+				Path: "b.go", Revision: head, Lines: 4, Readable: true,
+				Ranges: core.SuppliedRanges{
+					Base: []core.LineSpan{span(1, 4)},
+					Head: []core.LineSpan{span(1, 4)},
+				},
+			},
 		},
 	}
 
@@ -161,12 +174,12 @@ func TestReviewCoverageSemanticContract(t *testing.T) {
 			code: 2,
 		},
 		{
-			name: "a span outside the supplied content is a semantic contradiction",
+			name: "a span outside the supplied ranges is a semantic contradiction",
 			payload: reviewPayload(`[]`, reviewCoverage(
 				reviewUnitNoIssue(1, "a.go", head.SHA(), 1, 40),
 				reviewUnitNoIssue(2, "b.go", head.SHA(), 1, 4),
 			)),
-			want: "coverage for unit 1 cites lines 1-40 outside the 10 readable line(s) supplied",
+			want: "coverage for unit 1 cites lines 1-40 outside the supplied head ranges (1-10)",
 			code: 2,
 		},
 		{
@@ -227,9 +240,9 @@ func TestReviewNamesMissingDuplicateAndUnknownInRetryOrder(t *testing.T) {
 		Base: base,
 		Head: head,
 		Units: []validate.UnitExpectation{
-			{Path: "a.go", Revision: head, Lines: 10, Readable: true},
-			{Path: "b.go", Revision: head, Lines: 10, Readable: true},
-			{Path: "c.go", Revision: head, Lines: 10, Readable: true},
+			{Path: "a.go", Revision: head, Lines: 10, Readable: true, Ranges: fullRanges(10)},
+			{Path: "b.go", Revision: head, Lines: 10, Readable: true, Ranges: fullRanges(10)},
+			{Path: "c.go", Revision: head, Lines: 10, Readable: true, Ranges: fullRanges(10)},
 		},
 	}
 	payload := reviewPayload(`[]`, reviewCoverage(
@@ -257,8 +270,8 @@ func TestReviewNumberingFollowsThePromptNotDiscoveryOrder(t *testing.T) {
 		Base: base,
 		Head: head,
 		Units: []validate.UnitExpectation{
-			{Path: "b.go", Revision: head, Lines: 10, Readable: true},
-			{Path: "a.go", Revision: head, Lines: 10, Readable: true},
+			{Path: "b.go", Revision: head, Lines: 10, Readable: true, Ranges: fullRanges(10)},
+			{Path: "a.go", Revision: head, Lines: 10, Readable: true, Ranges: fullRanges(10)},
 		},
 	}
 	payload := reviewPayload(`[]`, reviewCoverage(
@@ -282,7 +295,7 @@ func TestAnEvidenceNoteCarryingACodeFenceIsRefused(t *testing.T) {
 		Base: base,
 		Head: head,
 		Units: []validate.UnitExpectation{
-			{Path: "a.go", Revision: head, Lines: 10, Readable: true},
+			{Path: "a.go", Revision: head, Lines: 10, Readable: true, Ranges: fullRanges(10)},
 		},
 	}
 	evidence := func(note string) string {
@@ -305,6 +318,15 @@ func TestAnEvidenceNoteCarryingACodeFenceIsRefused(t *testing.T) {
 	plain := reviewPayload(`[]`, reviewCoverage(unit(`"the nil check at lines 3-5 covers the empty case"`)))
 	if err := validate.Review([]byte(plain), expect); err != nil {
 		t.Fatalf("wanted a note without source text accepted, got %q", err)
+	}
+}
+
+// fullRanges is the whole-file span on both sides: what an unshaped unit
+// shows, and what the range cases below narrow.
+func fullRanges(n int) core.SuppliedRanges {
+	return core.SuppliedRanges{
+		Base: []core.LineSpan{{Start: 1, End: n}},
+		Head: []core.LineSpan{{Start: 1, End: n}},
 	}
 }
 

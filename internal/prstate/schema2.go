@@ -11,8 +11,14 @@ import (
 	"github.com/carlosboeing/crossrev/internal/core"
 )
 
-// CoverageSchemaV2 is the v2 schema version for ref-store and marker-store
-// coverage generations.
+// CoverageSchemaV3 is the v3 schema version for ref-store and marker-store
+// coverage generations. v2 pairs still decode, migrated: no reads envelope,
+// no ranges, one part — read well enough to retire under the hunk engine,
+// never well enough to reuse.
+const CoverageSchemaV3 = 3
+
+// CoverageSchemaV2 is the retired v2 schema version. Writers never emit it;
+// the v3 decoder accepts it only to retire what it names.
 const CoverageSchemaV2 = 2
 
 // Supplied input forms: the whole file as one hunk, the clipped
@@ -23,15 +29,21 @@ const (
 	SuppliedFormDiffOnly     = "diff_only"
 )
 
-// CoverageKindRecords is the kind of records payload in v2.
+// CoverageKindRecords is the kind of records payload in v3.
 const CoverageKindRecords = "records"
 
 // SuppliedInput is what the reviewer was actually given for one file:
-// measured at prompt-assembly time, never reported by the model.
+// measured at prompt-assembly time, never reported by the model. Ranges
+// are the gutter-numbered spans shown on each side; Parts counts the
+// prompt slices the digest covers — one for a whole file, more for a file
+// reviewed in slices. Truncated stays false: a file that cannot fit a
+// prompt alone splits into parts rather than being cut.
 type SuppliedInput struct {
-	Digest    string `json:"digest"` // sha256 over the exact bytes handed over
-	Form      string `json:"form"`   // full_text | hunks_context | diff_only
-	Truncated bool   `json:"truncated"`
+	Digest    string             `json:"digest"` // sha256 over the exact bytes handed over
+	Form      string             `json:"form"`   // full_text | hunks_context | diff_only
+	Ranges    core.SuppliedRanges `json:"ranges"`
+	Parts     int                `json:"parts"`
+	Truncated bool               `json:"truncated"`
 }
 
 // Reaction is the reserved human-reaction envelope. Every member is null in
@@ -200,8 +212,32 @@ func suppliedOf(s Opt[SuppliedInput]) json.RawMessage {
 	return object{
 		{key: "digest", value: appendJSONString(nil, v.Digest)},
 		{key: "form", value: appendJSONString(nil, v.Form)},
+		{key: "ranges", value: rangesOf(v.Ranges)},
+		{key: "parts", value: json.RawMessage(fmt.Sprintf("%d", v.Parts))},
 		{key: "truncated", value: json.RawMessage(trunc)},
 	}.marshal()
+}
+
+// rangesOf renders the supplied spans as the schema holds them: the base
+// and head arrays of [start, end] pairs, numbered as the gutter shows
+// them. An empty side renders as an empty array, never null: nothing shown
+// is a different fact from an unmeasured span.
+func rangesOf(r core.SuppliedRanges) json.RawMessage {
+	return object{
+		{key: "base", value: spansOf(r.Base)},
+		{key: "head", value: spansOf(r.Head)},
+	}.marshal()
+}
+
+func spansOf(in []core.LineSpan) json.RawMessage {
+	out := []byte{'['}
+	for i, s := range in {
+		if i > 0 {
+			out = append(out, ',')
+		}
+		out = append(out, fmt.Sprintf("[%d,%d]", s.Start, s.End)...)
+	}
+	return append(out, ']')
 }
 
 func reactionOf(r Reaction) json.RawMessage {
@@ -274,10 +310,10 @@ func generationCounts(g Generation) (outstanding, required int) {
 	return outstanding, required
 }
 
-func manifestFieldsV2(g Generation, recordsDigest, manifestDigest string) object {
+func manifestFieldsV3(g Generation, recordsDigest, manifestDigest string) object {
 	outstanding, required := generationCounts(g)
 	return object{
-		{key: "v", value: json.RawMessage(fmt.Sprintf("%d", CoverageSchemaV2))},
+		{key: "v", value: json.RawMessage(fmt.Sprintf("%d", CoverageSchemaV3))},
 		{key: "kind", value: appendJSONString(nil, CoverageKindManifest)},
 		{key: "gen", value: json.RawMessage(fmt.Sprintf("%d", g.Gen))},
 		{key: "base_sha", value: appendJSONString(nil, g.Revision.Base.SHA())},
@@ -294,6 +330,7 @@ func manifestFieldsV2(g Generation, recordsDigest, manifestDigest string) object
 		{key: "excluded", value: exclusionsOf(g.Excluded)},
 		{key: "scope_report", value: scopeReportOf(g.ScopeReport)},
 		{key: "verification", value: verificationOf(UnimplementedVerification())},
+		{key: "reads", value: json.RawMessage("null")},
 		{key: "records_digest", value: appendJSONString(nil, recordsDigest)},
 		{key: "digest", value: appendJSONString(nil, manifestDigest)},
 	}
@@ -301,7 +338,7 @@ func manifestFieldsV2(g Generation, recordsDigest, manifestDigest string) object
 
 func compactRecordsFields(verdicts, digest string) object {
 	return object{
-		{key: "v", value: json.RawMessage(fmt.Sprintf("%d", CoverageSchemaV2))},
+		{key: "v", value: json.RawMessage(fmt.Sprintf("%d", CoverageSchemaV3))},
 		{key: "kind", value: appendJSONString(nil, CoverageKindRecords)},
 		{key: "form", value: appendJSONString(nil, GenerationCompact)},
 		{key: "verdicts", value: appendJSONString(nil, verdicts)},
@@ -311,7 +348,7 @@ func compactRecordsFields(verdicts, digest string) object {
 
 func fullRecordsFields(records []Record, digest string) object {
 	return object{
-		{key: "v", value: json.RawMessage(fmt.Sprintf("%d", CoverageSchemaV2))},
+		{key: "v", value: json.RawMessage(fmt.Sprintf("%d", CoverageSchemaV3))},
 		{key: "kind", value: appendJSONString(nil, CoverageKindRecords)},
 		{key: "form", value: appendJSONString(nil, GenerationFull)},
 		{key: "records", value: recordsOfV2(records)},
@@ -319,10 +356,10 @@ func fullRecordsFields(records []Record, digest string) object {
 	}
 }
 
-// EncodeGenerationV2 returns the two blobs a generation is stored as. The
+// EncodeGenerationV3 returns the two blobs a generation is stored as. The
 // manifest carries the digest of the records bytes, which binds the pair;
 // the commit or the marker binds them again by holding both.
-func EncodeGenerationV2(g Generation) (manifest, records []byte, err error) {
+func EncodeGenerationV3(g Generation) (manifest, records []byte, err error) {
 	form := g.Form
 	if form == "" {
 		form = GenerationFull
@@ -382,14 +419,14 @@ func EncodeGenerationV2(g Generation) (manifest, records []byte, err error) {
 
 	gCopy := g
 	gCopy.Form = form
-	manObj := manifestFieldsV2(gCopy, manifestRecordsDigest, "")
+	manObj := manifestFieldsV3(gCopy, manifestRecordsDigest, "")
 	rawManifest := json.RawMessage(manObj.marshal())
 	manDigest, err := digestWithoutField(rawManifest, "digest")
 	if err != nil {
 		return nil, nil, coverageErrorf("computing manifest digest: %v", err)
 	}
 
-	manObj = manifestFieldsV2(gCopy, manifestRecordsDigest, manDigest)
+	manObj = manifestFieldsV3(gCopy, manifestRecordsDigest, manDigest)
 	normalisedManifest, err := normalise(json.RawMessage(manObj.marshal()))
 	if err != nil {
 		return nil, nil, coverageErrorf("normalising manifest: %v", err)
@@ -398,23 +435,19 @@ func EncodeGenerationV2(g Generation) (manifest, records []byte, err error) {
 	return normalisedManifest, normalisedRecords, nil
 }
 
-// DecodeGenerationV2 reads the pair back, refusing a digest mismatch, an
+// DecodeGenerationV3 reads the pair back, refusing a digest mismatch, an
 // unknown schema version, an unknown form, a verdict string whose length
 // does not match the path table, and any record whose key set is not exactly
-// the one its form declares.
-func DecodeGenerationV2(manifestBytes, recordsBytes []byte) (Generation, error) {
+// the one its form and version declare.
+//
+// A v2 pair still decodes, migrated to the v3 shape: no reads envelope, no
+// ranges, one part. The hunk engine retires it on the next read — file-v2
+// never answers for hunk-v1 — so the migration only has to read well enough
+// to retire, never well enough to reuse.
+func DecodeGenerationV3(manifestBytes, recordsBytes []byte) (Generation, error) {
 	manObj, err := parseObject(manifestBytes)
 	if err != nil {
 		return Generation{}, coverageErrorf("malformed manifest JSON: %v", err)
-	}
-
-	wantManifestKeys := []string{
-		"v", "kind", "gen", "base_sha", "head_sha", "engine", "slot", "producer",
-		"form", "granularity", "paths", "outstanding_count", "required_count",
-		"advisory", "excluded", "scope_report", "verification", "records_digest", "digest",
-	}
-	if !exactKeys(manObj, wantManifestKeys) {
-		return Generation{}, coverageErrorf("manifest keys do not match v2 schema")
 	}
 
 	getMan := func(key string) json.RawMessage {
@@ -423,8 +456,24 @@ func DecodeGenerationV2(manifestBytes, recordsBytes []byte) (Generation, error) 
 	}
 
 	version, ok := decodeInt(getMan("v"))
-	if !ok || version != CoverageSchemaV2 {
-		return Generation{}, coverageErrorf("manifest schema version %d is not v2", version)
+	if !ok || (version != CoverageSchemaV3 && version != CoverageSchemaV2) {
+		return Generation{}, coverageErrorf("manifest schema version %d is not v3", version)
+	}
+
+	wantManifestKeys := []string{
+		"v", "kind", "gen", "base_sha", "head_sha", "engine", "slot", "producer",
+		"form", "granularity", "paths", "outstanding_count", "required_count",
+		"advisory", "excluded", "scope_report", "verification", "records_digest", "digest",
+	}
+	if version == CoverageSchemaV3 {
+		wantManifestKeys = []string{
+			"v", "kind", "gen", "base_sha", "head_sha", "engine", "slot", "producer",
+			"form", "granularity", "paths", "outstanding_count", "required_count",
+			"advisory", "excluded", "scope_report", "verification", "reads", "records_digest", "digest",
+		}
+	}
+	if !exactKeys(manObj, wantManifestKeys) {
+		return Generation{}, coverageErrorf("manifest keys do not match v%d schema", version)
 	}
 
 	var kind string
@@ -513,6 +562,13 @@ func DecodeGenerationV2(manifestBytes, recordsBytes []byte) (Generation, error) 
 	}
 	_ = verification
 
+	// Reads is the reserved related-reads envelope. This release writes it
+	// null and refuses anything else: a populated reads is a newer
+	// writer's, not this one's. A v2 manifest carries no reads key at all.
+	if version == CoverageSchemaV3 && !isNull(getMan("reads")) {
+		return Generation{}, coverageErrorf("non-null reads envelope")
+	}
+
 	if err := json.Unmarshal(getMan("records_digest"), &recordsDigest); err != nil || !isHex64(recordsDigest) {
 		return Generation{}, coverageErrorf("invalid records_digest")
 	}
@@ -541,8 +597,8 @@ func DecodeGenerationV2(manifestBytes, recordsBytes []byte) (Generation, error) 
 	}
 
 	recVersion, ok := decodeInt(getRec("v"))
-	if !ok || recVersion != CoverageSchemaV2 {
-		return Generation{}, coverageErrorf("records version %d is not v2", recVersion)
+	if !ok || recVersion != version {
+		return Generation{}, coverageErrorf("records version %d does not match manifest version %d", recVersion, version)
 	}
 
 	var recKind, recForm, recDigest string
@@ -592,7 +648,7 @@ func DecodeGenerationV2(manifestBytes, recordsBytes []byte) (Generation, error) 
 			return Generation{}, coverageErrorf("full records keys do not match schema")
 		}
 
-		recs, ok := decodeRecordsV2(getRec("records"))
+		recs, ok := decodeRecordsV2(getRec("records"), version)
 		if !ok {
 			return Generation{}, coverageErrorf("invalid records array")
 		}
@@ -614,7 +670,7 @@ func DecodeGenerationV2(manifestBytes, recordsBytes []byte) (Generation, error) 
 	}, nil
 }
 
-func decodeRecordsV2(raw json.RawMessage) ([]Record, bool) {
+func decodeRecordsV2(raw json.RawMessage, version int) ([]Record, bool) {
 	if len(bytes.TrimSpace(raw)) == 0 || raw[0] != '[' {
 		return nil, false
 	}
@@ -628,7 +684,7 @@ func decodeRecordsV2(raw json.RawMessage) ([]Record, bool) {
 		if err := dec.Decode(&element); err != nil {
 			return nil, false
 		}
-		record, ok := decodeRecordV2(element)
+		record, ok := decodeRecordV2(element, version)
 		if !ok {
 			return nil, false
 		}
@@ -640,7 +696,7 @@ func decodeRecordsV2(raw json.RawMessage) ([]Record, bool) {
 	return out, true
 }
 
-func decodeRecordV2(raw json.RawMessage) (Record, bool) {
+func decodeRecordV2(raw json.RawMessage, version int) (Record, bool) {
 	obj, err := parseObject(raw)
 	if err != nil {
 		return Record{}, false
@@ -717,7 +773,7 @@ func decodeRecordV2(raw json.RawMessage) (Record, bool) {
 		return Record{}, false
 	}
 
-	supplied, ok := decodeSuppliedInput(mustGet(obj, "supplied"))
+	supplied, ok := decodeSuppliedInput(mustGet(obj, "supplied"), version)
 	if !ok {
 		return Record{}, false
 	}
@@ -751,7 +807,7 @@ func decodeRecordV2(raw json.RawMessage) (Record, bool) {
 	}, true
 }
 
-func decodeSuppliedInput(raw json.RawMessage) (Opt[SuppliedInput], bool) {
+func decodeSuppliedInput(raw json.RawMessage, version int) (Opt[SuppliedInput], bool) {
 	if isNull(raw) {
 		return Null[SuppliedInput](), true
 	}
@@ -759,7 +815,32 @@ func decodeSuppliedInput(raw json.RawMessage) (Opt[SuppliedInput], bool) {
 	if err != nil {
 		return Opt[SuppliedInput]{}, false
 	}
-	if !exactKeys(obj, []string{"digest", "form", "truncated"}) {
+	if version == CoverageSchemaV2 {
+		// The retired shape carries no ranges and no part count: one
+		// recorded measurement per file reads as one part with unmeasured
+		// spans. The hunk engine retires the generation before those
+		// spans could answer for anything.
+		if !exactKeys(obj, []string{"digest", "form", "truncated"}) {
+			return Opt[SuppliedInput]{}, false
+		}
+		var digest, form string
+		if err := json.Unmarshal(mustGet(obj, "digest"), &digest); err != nil || !isHex64(digest) {
+			return Opt[SuppliedInput]{}, false
+		}
+		if err := json.Unmarshal(mustGet(obj, "form"), &form); err != nil || !validSuppliedForm(form) {
+			return Opt[SuppliedInput]{}, false
+		}
+		rawTrunc := mustGet(obj, "truncated")
+		if isNull(rawTrunc) {
+			return Opt[SuppliedInput]{}, false
+		}
+		var trunc bool
+		if err := json.Unmarshal(rawTrunc, &trunc); err != nil {
+			return Opt[SuppliedInput]{}, false
+		}
+		return Some(SuppliedInput{Digest: digest, Form: form, Parts: 1, Truncated: trunc}), true
+	}
+	if !exactKeys(obj, []string{"digest", "form", "ranges", "parts", "truncated"}) {
 		return Opt[SuppliedInput]{}, false
 	}
 	var digest, form string
@@ -767,6 +848,14 @@ func decodeSuppliedInput(raw json.RawMessage) (Opt[SuppliedInput], bool) {
 		return Opt[SuppliedInput]{}, false
 	}
 	if err := json.Unmarshal(mustGet(obj, "form"), &form); err != nil || !validSuppliedForm(form) {
+		return Opt[SuppliedInput]{}, false
+	}
+	ranges, ok := decodeSuppliedRanges(mustGet(obj, "ranges"))
+	if !ok {
+		return Opt[SuppliedInput]{}, false
+	}
+	parts, ok := decodeInt(mustGet(obj, "parts"))
+	if !ok || parts < 1 {
 		return Opt[SuppliedInput]{}, false
 	}
 	rawTrunc := mustGet(obj, "truncated")
@@ -777,7 +866,86 @@ func decodeSuppliedInput(raw json.RawMessage) (Opt[SuppliedInput], bool) {
 	if err := json.Unmarshal(rawTrunc, &trunc); err != nil {
 		return Opt[SuppliedInput]{}, false
 	}
-	return Some(SuppliedInput{Digest: digest, Form: form, Truncated: trunc}), true
+	return Some(SuppliedInput{Digest: digest, Form: form, Ranges: ranges, Parts: parts, Truncated: trunc}), true
+}
+
+// decodeSuppliedRanges reads the base and head span arrays. An empty array
+// decodes to nil, so a header-only diff — nothing shown on either side —
+// round-trips the way it encoded: an empty array reads back as no spans,
+// and no spans encode as an empty array.
+func decodeSuppliedRanges(raw json.RawMessage) (core.SuppliedRanges, bool) {
+	obj, err := parseObject(raw)
+	if err != nil {
+		return core.SuppliedRanges{}, false
+	}
+	if !exactKeys(obj, []string{"base", "head"}) {
+		return core.SuppliedRanges{}, false
+	}
+	base, ok := decodeLineSpans(mustGet(obj, "base"))
+	if !ok {
+		return core.SuppliedRanges{}, false
+	}
+	head, ok := decodeLineSpans(mustGet(obj, "head"))
+	if !ok {
+		return core.SuppliedRanges{}, false
+	}
+	return core.SuppliedRanges{Base: base, Head: head}, true
+}
+
+func decodeLineSpans(raw json.RawMessage) ([]core.LineSpan, bool) {
+	if len(bytes.TrimSpace(raw)) == 0 || raw[0] != '[' {
+		return nil, false
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	if _, err := dec.Token(); err != nil {
+		return nil, false
+	}
+	var out []core.LineSpan
+	for dec.More() {
+		var element json.RawMessage
+		if err := dec.Decode(&element); err != nil {
+			return nil, false
+		}
+		span, ok := decodeLineSpan(element)
+		if !ok {
+			return nil, false
+		}
+		out = append(out, span)
+	}
+	return out, true
+}
+
+// decodeLineSpan reads one [start, end] pair: whole line numbers at or
+// above one, start inside end. The gutter never numbers backwards, so a
+// backwards pair refuses the record.
+func decodeLineSpan(raw json.RawMessage) (core.LineSpan, bool) {
+	if len(bytes.TrimSpace(raw)) == 0 || raw[0] != '[' {
+		return core.LineSpan{}, false
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	if _, err := dec.Token(); err != nil {
+		return core.LineSpan{}, false
+	}
+	var ends []json.RawMessage
+	for dec.More() {
+		var element json.RawMessage
+		if err := dec.Decode(&element); err != nil {
+			return core.LineSpan{}, false
+		}
+		ends = append(ends, element)
+	}
+	if len(ends) != 2 {
+		return core.LineSpan{}, false
+	}
+	start, ok := decodeInt(ends[0])
+	if !ok || start < 1 {
+		return core.LineSpan{}, false
+	}
+	end, ok := decodeInt(ends[1])
+	if !ok || end < start {
+		return core.LineSpan{}, false
+	}
+	return core.LineSpan{Start: start, End: end}, true
 }
 
 func decodeOptBool(raw json.RawMessage) Opt[bool] {

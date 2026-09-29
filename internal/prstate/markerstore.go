@@ -95,7 +95,7 @@ func ShedToFit(m *Marker, render func(Marker) (string, error), onOverflow string
 }
 
 func encodeGenerationPayload(g Generation) (json.RawMessage, error) {
-	manifest, records, err := EncodeGenerationV2(g)
+	manifest, records, err := EncodeGenerationV3(g)
 	if err != nil {
 		return nil, err
 	}
@@ -120,7 +120,7 @@ func decodeGenerationPayload(raw json.RawMessage) (Generation, error) {
 	if len(p.Manifest) == 0 || len(p.Records) == 0 {
 		return Generation{}, fmt.Errorf("%w: missing manifest or records", ErrLedgerCorrupt)
 	}
-	gen, err := DecodeGenerationV2(p.Manifest, p.Records)
+	gen, err := DecodeGenerationV3(p.Manifest, p.Records)
 	if err != nil {
 		return Generation{}, fmt.Errorf("%w: %v", ErrLedgerCorrupt, err)
 	}

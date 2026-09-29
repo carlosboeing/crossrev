@@ -67,7 +67,7 @@ func validFixtureGeneration(t *testing.T, form string) prstate.Generation {
 					},
 				},
 				Reason:   prstate.Null[string](),
-				Supplied: prstate.Some(prstate.SuppliedInput{Digest: strings.Repeat("c", 64), Form: "full_text", Truncated: false}),
+				Supplied: prstate.Some(prstate.SuppliedInput{Digest: strings.Repeat("c", 64), Form: "full_text", Parts: 1, Truncated: false}),
 				Reaction: prstate.UnimplementedReaction(),
 			},
 			{
@@ -159,11 +159,11 @@ func generationOfPaths(t *testing.T, n int) prstate.Generation {
 func TestSchema2RoundTripsFullAndCompact(t *testing.T) {
 	for _, form := range []string{prstate.GenerationFull, prstate.GenerationCompact} {
 		gen := validFixtureGeneration(t, form)
-		manifest, records, err := prstate.EncodeGenerationV2(gen)
+		manifest, records, err := prstate.EncodeGenerationV3(gen)
 		if err != nil {
 			t.Fatalf("encode %s: %v", form, err)
 		}
-		back, err := prstate.DecodeGenerationV2(manifest, records)
+		back, err := prstate.DecodeGenerationV3(manifest, records)
 		if err != nil {
 			t.Fatalf("decode %s: %v", form, err)
 		}
@@ -175,7 +175,7 @@ func TestSchema2RoundTripsFullAndCompact(t *testing.T) {
 
 func TestCompactRecordsArePositionalAndSmall(t *testing.T) {
 	gen := prstate.CompactGeneration(generationOfPaths(t, 900))
-	_, records, err := prstate.EncodeGenerationV2(gen)
+	_, records, err := prstate.EncodeGenerationV3(gen)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,93 +185,93 @@ func TestCompactRecordsArePositionalAndSmall(t *testing.T) {
 }
 
 func TestSchema2RefusesMismatchedRecordsDigest(t *testing.T) {
-	manifest, records, err := prstate.EncodeGenerationV2(validFixtureGeneration(t, prstate.GenerationFull))
+	manifest, records, err := prstate.EncodeGenerationV3(validFixtureGeneration(t, prstate.GenerationFull))
 	if err != nil {
 		t.Fatalf("encode: %v", err)
 	}
 	altered := bytes.Replace(records, []byte(`"no_issue"`), []byte(`"finding"`), 1)
-	if _, err := prstate.DecodeGenerationV2(manifest, altered); err == nil {
+	if _, err := prstate.DecodeGenerationV3(manifest, altered); err == nil {
 		t.Fatal("altered records decoded; the manifest digest does not bind them")
 	}
 }
 
 func TestSchema2RefusesUnknownKeyUnknownVersionAndShortVerdicts(t *testing.T) {
-	// extra record key; "v":3; a verdicts string shorter than the path table;
+	// extra record key; "v":4; a verdicts string shorter than the path table;
 	// a verdict character outside the enum
 	t.Run("extra record key in full form", func(t *testing.T) {
-		manifest, records, err := prstate.EncodeGenerationV2(validFixtureGeneration(t, prstate.GenerationFull))
+		manifest, records, err := prstate.EncodeGenerationV3(validFixtureGeneration(t, prstate.GenerationFull))
 		if err != nil {
 			t.Fatalf("encode: %v", err)
 		}
 		altered := bytes.Replace(records, []byte(`"type":"unit"`), []byte(`"type":"unit","extra":"forbidden"`), 1)
-		if _, err := prstate.DecodeGenerationV2(manifest, altered); err == nil {
+		if _, err := prstate.DecodeGenerationV3(manifest, altered); err == nil {
 			t.Fatal("records with extra key decoded")
 		}
 	})
 
 	t.Run("extra manifest key", func(t *testing.T) {
-		manifest, records, err := prstate.EncodeGenerationV2(validFixtureGeneration(t, prstate.GenerationFull))
+		manifest, records, err := prstate.EncodeGenerationV3(validFixtureGeneration(t, prstate.GenerationFull))
 		if err != nil {
 			t.Fatalf("encode: %v", err)
 		}
-		altered := bytes.Replace(manifest, []byte(`"v":2`), []byte(`"v":2,"extra":"forbidden"`), 1)
-		if _, err := prstate.DecodeGenerationV2(altered, records); err == nil {
+		altered := bytes.Replace(manifest, []byte(`"v":3`), []byte(`"v":3,"extra":"forbidden"`), 1)
+		if _, err := prstate.DecodeGenerationV3(altered, records); err == nil {
 			t.Fatal("manifest with extra key decoded")
 		}
 	})
 
-	t.Run("manifest version 3", func(t *testing.T) {
-		manifest, records, err := prstate.EncodeGenerationV2(validFixtureGeneration(t, prstate.GenerationFull))
+	t.Run("manifest version 4", func(t *testing.T) {
+		manifest, records, err := prstate.EncodeGenerationV3(validFixtureGeneration(t, prstate.GenerationFull))
 		if err != nil {
 			t.Fatalf("encode: %v", err)
 		}
-		altered := bytes.Replace(manifest, []byte(`"v":2`), []byte(`"v":3`), 1)
-		if _, err := prstate.DecodeGenerationV2(altered, records); err == nil {
-			t.Fatal("manifest with v=3 decoded")
+		altered := bytes.Replace(manifest, []byte(`"v":3`), []byte(`"v":4`), 1)
+		if _, err := prstate.DecodeGenerationV3(altered, records); err == nil {
+			t.Fatal("manifest with v=4 decoded")
 		}
 	})
 
-	t.Run("records version 3", func(t *testing.T) {
-		manifest, records, err := prstate.EncodeGenerationV2(validFixtureGeneration(t, prstate.GenerationFull))
+	t.Run("records version 4", func(t *testing.T) {
+		manifest, records, err := prstate.EncodeGenerationV3(validFixtureGeneration(t, prstate.GenerationFull))
 		if err != nil {
 			t.Fatalf("encode: %v", err)
 		}
-		altered := bytes.Replace(records, []byte(`"v":2`), []byte(`"v":3`), 1)
-		if _, err := prstate.DecodeGenerationV2(manifest, altered); err == nil {
-			t.Fatal("records with v=3 decoded")
+		altered := bytes.Replace(records, []byte(`"v":3`), []byte(`"v":4`), 1)
+		if _, err := prstate.DecodeGenerationV3(manifest, altered); err == nil {
+			t.Fatal("records with v=4 decoded")
 		}
 	})
 
 	t.Run("short verdicts string in compact form", func(t *testing.T) {
-		manifest, records, err := prstate.EncodeGenerationV2(validFixtureGeneration(t, prstate.GenerationCompact))
+		manifest, records, err := prstate.EncodeGenerationV3(validFixtureGeneration(t, prstate.GenerationCompact))
 		if err != nil {
 			t.Fatalf("encode: %v", err)
 		}
 		// replace 2-char verdicts with 1-char verdicts
 		altered := bytes.Replace(records, []byte(`"verdicts":"10"`), []byte(`"verdicts":"1"`), 1)
-		if _, err := prstate.DecodeGenerationV2(manifest, altered); err == nil {
+		if _, err := prstate.DecodeGenerationV3(manifest, altered); err == nil {
 			t.Fatal("compact records with short verdicts decoded")
 		}
 	})
 
 	t.Run("long verdicts string in compact form", func(t *testing.T) {
-		manifest, records, err := prstate.EncodeGenerationV2(validFixtureGeneration(t, prstate.GenerationCompact))
+		manifest, records, err := prstate.EncodeGenerationV3(validFixtureGeneration(t, prstate.GenerationCompact))
 		if err != nil {
 			t.Fatalf("encode: %v", err)
 		}
 		altered := bytes.Replace(records, []byte(`"verdicts":"10"`), []byte(`"verdicts":"100"`), 1)
-		if _, err := prstate.DecodeGenerationV2(manifest, altered); err == nil {
+		if _, err := prstate.DecodeGenerationV3(manifest, altered); err == nil {
 			t.Fatal("compact records with long verdicts decoded")
 		}
 	})
 
 	t.Run("verdict char outside enum in compact form", func(t *testing.T) {
-		manifest, records, err := prstate.EncodeGenerationV2(validFixtureGeneration(t, prstate.GenerationCompact))
+		manifest, records, err := prstate.EncodeGenerationV3(validFixtureGeneration(t, prstate.GenerationCompact))
 		if err != nil {
 			t.Fatalf("encode: %v", err)
 		}
 		altered := bytes.Replace(records, []byte(`"verdicts":"10"`), []byte(`"verdicts":"19"`), 1)
-		if _, err := prstate.DecodeGenerationV2(manifest, altered); err == nil {
+		if _, err := prstate.DecodeGenerationV3(manifest, altered); err == nil {
 			t.Fatal("compact records with verdict char 9 decoded")
 		}
 	})
@@ -297,7 +297,7 @@ func TestSchema2CorpusSeeds(t *testing.T) {
 	}
 	for _, form := range []string{prstate.GenerationFull, prstate.GenerationCompact} {
 		gen := validFixtureGeneration(t, form)
-		manifest, records, err := prstate.EncodeGenerationV2(gen)
+		manifest, records, err := prstate.EncodeGenerationV3(gen)
 		if err != nil {
 			t.Fatalf("encode %s: %v", form, err)
 		}

@@ -75,10 +75,10 @@ func (l *Leg) discoverBatchContext(ctx context.Context, req Request, loaded Cont
 // invoke path drops it once the first file completes. whole promotes
 // hunk-shaped files to whole-file rendering under whole_when_fits.
 func (c batchContext) render(files []intel.FileUnit, base, head core.Revision, withConfirmation bool, whole *WholePolicy) ([]byte, map[core.UnitID]prstate.SuppliedInput) {
-	_, units := batchExpectations(files, base, head, whole)
+	expected, units := batchExpectations(files, base, head, whole)
 	supplied := make(map[core.UnitID]prstate.SuppliedInput, len(files))
 	for i, unit := range units {
-		supplied[files[i].ID] = suppliedFor(unit)
+		supplied[files[i].ID] = suppliedFor(unit, expected.Units[i].Ranges)
 	}
 	advisory, omitted := batchPointerRefs(c.advisory, c.fileTerms, files)
 	confirmation := c.confirmation
@@ -130,36 +130,37 @@ func (c batchContext) renderPart(part *intel.FilePart, base, head core.Revision,
 }
 
 // suppliedFor measures what the reviewer is actually given for one unit: a
-// digest over the unit's body bytes as handed to prompt rendering. A unit
+// digest over the unit's body bytes as handed to prompt rendering, with the
+// gutter-numbered ranges shown on each side and the slice count. A unit
 // with readable bytes supplied in full reads full_text; an unavailable or
 // binary unit reaches the model through the diff slice alone and reads
 // diff_only, with the digest over the empty input because no body bytes were
 // handed over. Truncated stays false: a file that cannot fit a prompt alone
 // splits into parts rather than being cut.
-func suppliedFor(unit prompt.BatchUnit) prstate.SuppliedInput {
+func suppliedFor(unit prompt.BatchUnit, ranges core.SuppliedRanges) prstate.SuppliedInput {
 	if unit.Form != "" {
-		return shapedSupplied(unit)
+		return shapedSupplied(unit, ranges)
 	}
 	if unit.Available && !unit.Binary {
-		return prstate.SuppliedInput{Digest: core.BodyDigestHex(unit.Body), Form: prstate.SuppliedFormFullText}
+		return prstate.SuppliedInput{Digest: core.BodyDigestHex(unit.Body), Form: prstate.SuppliedFormFullText, Ranges: ranges, Parts: 1}
 	}
-	return prstate.SuppliedInput{Digest: core.BodyDigestHex(nil), Form: prstate.SuppliedFormDiffOnly}
+	return prstate.SuppliedInput{Digest: core.BodyDigestHex(nil), Form: prstate.SuppliedFormDiffOnly, Ranges: ranges, Parts: 1}
 }
 
 // shapedSupplied measures what the reviewer is actually given for one
 // shaped unit: the digest over the gutter-numbered hunk bytes the prompt
-// shows, with the form the shaping step decided. A header-only unit with
-// no header to show digests the empty input, the way the legacy diff-only
-// unit does.
-func shapedSupplied(unit prompt.BatchUnit) prstate.SuppliedInput {
+// shows, with the form the shaping step decided and the ranges those hunks
+// show on each side. A header-only unit with no header to show digests the
+// empty input, the way the legacy diff-only unit does.
+func shapedSupplied(unit prompt.BatchUnit, ranges core.SuppliedRanges) prstate.SuppliedInput {
 	digest := core.BodyDigestHex(unit.NumberedDiff)
 	switch unit.Form {
 	case intel.FormHunksContext:
-		return prstate.SuppliedInput{Digest: digest, Form: prstate.SuppliedFormHunksContext}
+		return prstate.SuppliedInput{Digest: digest, Form: prstate.SuppliedFormHunksContext, Ranges: ranges, Parts: 1}
 	case intel.FormDiffOnly:
-		return prstate.SuppliedInput{Digest: digest, Form: prstate.SuppliedFormDiffOnly}
+		return prstate.SuppliedInput{Digest: digest, Form: prstate.SuppliedFormDiffOnly, Ranges: ranges, Parts: 1}
 	default:
-		return prstate.SuppliedInput{Digest: digest, Form: prstate.SuppliedFormFullText}
+		return prstate.SuppliedInput{Digest: digest, Form: prstate.SuppliedFormFullText, Ranges: ranges, Parts: 1}
 	}
 }
 

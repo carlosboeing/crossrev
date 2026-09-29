@@ -93,7 +93,7 @@ func FuzzSchema2RoundTrip(f *testing.F) {
 					Note:      prstate.Null[string](),
 				}},
 				Reason:   prstate.Null[string](),
-				Supplied: prstate.Some(prstate.SuppliedInput{Digest: suppliedDigest, Form: suppliedForm, Truncated: suppliedTruncated}),
+				Supplied: prstate.Some(prstate.SuppliedInput{Digest: suppliedDigest, Form: suppliedForm, Parts: 1, Truncated: suppliedTruncated}),
 				Reaction: prstate.UnimplementedReaction(),
 			}
 			if verdict == "not_affected" || verdict == "could_not_review" {
@@ -119,12 +119,12 @@ func FuzzSchema2RoundTrip(f *testing.F) {
 			gen = prstate.CompactGeneration(gen)
 		}
 
-		manifest, records, err := prstate.EncodeGenerationV2(gen)
+		manifest, records, err := prstate.EncodeGenerationV3(gen)
 		if err != nil {
 			t.Fatalf("encode: %v", err)
 		}
 
-		decoded, err := prstate.DecodeGenerationV2(manifest, records)
+		decoded, err := prstate.DecodeGenerationV3(manifest, records)
 		if err != nil {
 			t.Fatalf("decode: %v", err)
 		}
@@ -133,7 +133,7 @@ func FuzzSchema2RoundTrip(f *testing.F) {
 			t.Fatalf("roundtrip mismatch:\n want: %+v\n  got: %+v", gen, decoded)
 		}
 
-		againManifest, againRecords, err := prstate.EncodeGenerationV2(decoded)
+		againManifest, againRecords, err := prstate.EncodeGenerationV3(decoded)
 		if err != nil {
 			t.Fatalf("re-encode: %v", err)
 		}
@@ -148,7 +148,7 @@ func FuzzSchema2RoundTrip(f *testing.F) {
 		if len(records) > 0 {
 			tamperedRecords := append([]byte(nil), records...)
 			tamperedRecords[len(tamperedRecords)-1] ^= 0xff
-			if _, err := prstate.DecodeGenerationV2(manifest, tamperedRecords); err == nil {
+			if _, err := prstate.DecodeGenerationV3(manifest, tamperedRecords); err == nil {
 				t.Fatal("tampered records decoded")
 			}
 		}
@@ -157,7 +157,7 @@ func FuzzSchema2RoundTrip(f *testing.F) {
 		if len(manifest) > 0 {
 			tamperedManifest := append([]byte(nil), manifest...)
 			tamperedManifest[len(tamperedManifest)-1] ^= 0xff
-			if _, err := prstate.DecodeGenerationV2(tamperedManifest, records); err == nil {
+			if _, err := prstate.DecodeGenerationV3(tamperedManifest, records); err == nil {
 				t.Fatal("tampered manifest decoded")
 			}
 		}
@@ -166,13 +166,13 @@ func FuzzSchema2RoundTrip(f *testing.F) {
 
 func FuzzSchema2Decode(f *testing.F) {
 	genFull := validFixtureGeneration(nil, prstate.GenerationFull)
-	manFull, recFull, err := prstate.EncodeGenerationV2(genFull)
+	manFull, recFull, err := prstate.EncodeGenerationV3(genFull)
 	if err == nil {
 		f.Add(manFull, recFull)
 	}
 
 	genCompact := validFixtureGeneration(nil, prstate.GenerationCompact)
-	manCompact, recCompact, err := prstate.EncodeGenerationV2(genCompact)
+	manCompact, recCompact, err := prstate.EncodeGenerationV3(genCompact)
 	if err == nil {
 		f.Add(manCompact, recCompact)
 	}
@@ -195,9 +195,9 @@ func FuzzSchema2Decode(f *testing.F) {
 	f.Add([]byte("not json"), []byte("not json"))
 
 	f.Fuzz(func(t *testing.T, manifest, records []byte) {
-		gen, err := prstate.DecodeGenerationV2(manifest, records)
+		gen, err := prstate.DecodeGenerationV3(manifest, records)
 		if err == nil {
-			_, _, reErr := prstate.EncodeGenerationV2(gen)
+			_, _, reErr := prstate.EncodeGenerationV3(gen)
 			if reErr != nil {
 				t.Fatalf("decoded generation failed to re-encode: %v", reErr)
 			}

@@ -152,6 +152,10 @@ Calls measure the full rendered prompt — headers, shared context and file cont
 
 A plain file that fits in no call alone splits into parts at hunk boundaries, one oversized hunk into line chunks, each reviewed with its header and gutter numbers and merged into one verdict when every part lands. An oversized generated file is skipped instead, with a warning in the comment summary and the terminal. Only shared context alone past the hard limit halts the pass, with `shared_context_exceeds_window`; between 0.75 of the packing limit and the hard limit the pass runs over budget and records `over_budget`.
 
+A **hunk** is the gutter-numbered diff the prompt shows for one file: every line inside a hunk prefixed by its number in the old file, its number in the new file, and a `|`, with a dash where the line does not exist on that side ([ADR 0025](adrs/0025-review-input-is-hunks-that-split.md), decision 5). Each required file arrives as its own hunks in one of three forms: `full_text` shows the whole file as one hunk, `hunks_context` shows each change with its enclosing function clipped to 100 lines of surrounding context, and `diff_only` shows the diff header with the access reason and no hunks. The spans each side shows are the **supplied ranges**, numbered as the gutter shows them.
+
+A file verdict means the supplied ranges on both sides were examined, not merely the pathname. Evidence must sit inside the ranges on the side its revision names — a removed line cited at the base is accepted, any span outside the supplied ranges is refused — and lines the hunks did not show are unseen: never evidence, and named in `known_limits` when they limit the review. See [ADR 0026](adrs/0026-coverage-counts-supplied-bytes-only.md).
+
 Files past the pass budget carry `review_budget_reached`.
 
 The next review after a repair reads what the repair changed first, then the full scope.
@@ -172,7 +176,7 @@ Coverage is stored in the repository itself, as a commit addressed by one ref pe
 
 One generation holds a record for every required file, outstanding ones included. The pass marker on the pull request records the handle naming the generation — its number, its commit SHA, and where it lives — and that handle is what a reader trusts: it resolves the commit, not the ref.
 
-The scope report stays a reviewer claim — the examined scope and known limits the reviewer reported, labelled as claims rather than deterministic discovery — and each covered record now also carries a measurement of what the reviewer was given for it: a digest over the exact bytes, the form they arrived in, and whether they were truncated.
+The scope report stays a reviewer claim — the examined scope and known limits the reviewer reported, labelled as claims rather than deterministic discovery — and each covered record now also carries a measurement of what the reviewer was given for it: a digest over the exact rendered bytes, the form they arrived in (`full_text`, `hunks_context` or `diff_only`), the supplied ranges on each side, the part count, and whether they were truncated (never: an oversized file splits instead). A split file's merged record carries the union of its parts' ranges with the slice count. The manifest carries the `reads` envelope reserved as null beside the verification envelope. The engine is `hunk-v1` and the record schema is v3, so generations stored under `file-v2` retire and each open pull request is re-reviewed once.
 
 A read failure is reported, never answered as empty. Only the trusted author counts. A ref that went missing while its commit survives is re-created on read; objects that are gone lose the ledger, and the next pass re-reviews; objects that do not verify fail the pass closed.
 
@@ -245,6 +249,8 @@ That's there because a model asked to derive a line number counts lines under a 
 
 The orchestrator re-derives the same mapping before posting, and snaps a finding up to three lines to reach a hunk — exactly the margin a miscount lands in, since three is git's own context width. Past that the reviewer meant somewhere else, and moving the comment would anchor it to code the finding never mentions.
 
+The gutter is also what coverage counts: the supplied ranges are the spans each side shows, numbered as the gutter shows them, and a verdict's evidence must sit inside them on the side its revision names.
+
 **Both legs get the same description of the gutter**, because pass 2 has to mean the same thing by a line number as pass 1 did.
 
 ## Where the skill text comes from
@@ -295,7 +301,7 @@ internal/        Go packages, in tiers
   buildinfo/       Tier 1: version and build metadata
   policy/          Tier 1: pure policy functions and termination rules
   prstate/         Tier 1: marker parsing, finding identity, coverage ledger stores
-  diff/            Tier 1: gutter mapping and hunk snapping
+  diff/            Tier 1: gutter mapping, hunk snapping, supplied line ranges
   validate/        Tier 1: payload validation
   intel/           Tier 1: Review Intelligence contracts
   config/          Tier 2: configuration loading

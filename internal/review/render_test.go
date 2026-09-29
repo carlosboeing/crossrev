@@ -294,14 +294,15 @@ func TestTheCoverageFootnoteReadsAsASentence(t *testing.T) {
 			Supplied: prstate.Some(prstate.SuppliedInput{
 				Digest:    fmt.Sprintf("%064x", i+100),
 				Form:      "full_text",
+				Parts:     1,
 				Truncated: false,
 			}),
 			Reaction: prstate.UnimplementedReaction(),
 		}
 	}
-	manifest, records, err := prstate.EncodeGenerationV2(gen)
+	manifest, records, err := prstate.EncodeGenerationV3(gen)
 	if err != nil {
-		t.Fatalf("EncodeGenerationV2: %v", err)
+		t.Fatalf("EncodeGenerationV3: %v", err)
 	}
 	payload, err := json.Marshal(map[string]json.RawMessage{"manifest": manifest, "records": records})
 	if err != nil {

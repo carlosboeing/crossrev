@@ -272,7 +272,7 @@ func TestRefStoreAbortsOnFilterFailureWithRawSchemaV2JSON(t *testing.T) {
 	ctx := context.Background()
 	ref := storetest.FixtureSlotRef(t)
 
-	_, records, err := prstate.EncodeGenerationV2(fixtureGeneration(t, prstate.GenerationFull))
+	_, records, err := prstate.EncodeGenerationV3(fixtureGeneration(t, prstate.GenerationFull))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -324,7 +324,7 @@ func TestRefStoreFiltersBeforeDigesting(t *testing.T) {
 	unfilteredGen := fixtureGeneration(t, prstate.GenerationFull)
 	unfilteredGen.Records[0].Reason = prstate.Some("sensitive-data")
 	unfilteredGen.ScopeReport.ExaminedScope = "sensitive-data"
-	_, unfilteredRecords, err := prstate.EncodeGenerationV2(unfilteredGen)
+	_, unfilteredRecords, err := prstate.EncodeGenerationV3(unfilteredGen)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -645,7 +645,7 @@ func TestRefStoreRefusesUnmarkedContentWhenTheFilterFails(t *testing.T) {
 	ctx := context.Background()
 	ref := storetest.FixtureSlotRef(t)
 
-	_, records, err := prstate.EncodeGenerationV2(fixtureGeneration(t, prstate.GenerationFull))
+	_, records, err := prstate.EncodeGenerationV3(fixtureGeneration(t, prstate.GenerationFull))
 	if err != nil {
 		t.Fatal(err)
 	}

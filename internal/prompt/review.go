@@ -338,8 +338,8 @@ func renderBatch(units []BatchUnit, advisory []AdvisoryRef, omitted int, exclude
 	b.WriteString("## The files under review\n\n")
 	if len(units) > 0 {
 		b.WriteString("Account for every numbered file below in `coverage`, one entry per " +
-			"number. A file verdict means you examined the supplied content and change, " +
-			"not merely its pathname. `not_affected` does not exempt a changed file: it says " +
+			"number. A file verdict means you examined the supplied ranges on both " +
+			"sides, not merely its pathname. `not_affected` does not exempt a changed file: it says " +
 			"the file was read and needs no change, with evidence saying why.\n\n")
 		for i, u := range units {
 			renderBatchUnit(&b, i+1, u)
