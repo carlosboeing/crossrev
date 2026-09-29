@@ -317,8 +317,9 @@ func TestReviewSharedContextOverHardHalts(t *testing.T) {
 }
 
 // TestReviewSharedContextInBandRunsOverBudget pins the band: shared
-// context between 0.75 x P and H still runs, measured against H, and
-// records over_budget on the generations with a terminal warning.
+// context between 0.75 x P and H still runs and records over_budget on
+// the generations with a terminal warning, packing against P until
+// shared context passes it.
 func TestReviewSharedContextInBandRunsOverBudget(t *testing.T) {
 	e := newEnv(t)
 	writeRequiredHead(e, "a.go", "package a\n")
@@ -348,14 +349,24 @@ func TestReviewSharedContextInBandRunsOverBudget(t *testing.T) {
 	if !recorded {
 		t.Error("no generation records over_budget")
 	}
-	var warned bool
+	var warned, switched bool
 	for _, line := range got.Messages {
-		if line.Kind == ui.KindWarn && strings.Contains(line.Text, "over budget") {
-			warned = true
+		if line.Kind != ui.KindWarn || !strings.Contains(line.Text, "over budget") {
+			continue
+		}
+		warned = true
+		// In this band every call still packs against the packing
+		// limit: the hint must say so, not claim the hard limit.
+		if strings.Contains(line.Action, "packing limit until") &&
+			strings.Contains(line.Action, "only then against the hard limit") {
+			switched = true
 		}
 	}
 	if !warned {
 		t.Error("the pass ran over budget with no terminal warning")
+	}
+	if !switched {
+		t.Error("the over-budget hint does not match the packing switch")
 	}
 }
 

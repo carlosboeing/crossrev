@@ -25,7 +25,8 @@ const (
 // 400-file pass budget for a later pass; shared_context_exceeds_window
 // marks shared context alone past the hard limit, which no file fits
 // beside. over_budget is recorded, not halted: shared context between
-// 0.75 x P and H still runs, with every call measured against H.
+// 0.75 x P and H still runs, and past P every call measures against H
+// instead.
 const (
 	CarryReviewBudgetReached      = "review_budget_reached"
 	HaltSharedContextExceedsWindow = "shared_context_exceeds_window"
@@ -75,7 +76,9 @@ type FilePart struct {
 // sits between this shape and its consumer.
 type BatchPlan struct {
 	// Calls holds the scheduled calls in review order. Every call fits
-	// the file-count and the rendered-byte budgets.
+	// the file-count budget; every call but a carried unsplittable unit
+	// fits the rendered-byte budget, and that one rides whole because
+	// no split of it exists.
 	Calls []Call
 	// Carried holds outstanding files past the 400-reviewable-file pass budget, in path
 	// order, for a later pass. Empty means the pass admitted everything.
@@ -95,8 +98,8 @@ type BatchPlan struct {
 	// scheduled under a halt.
 	HaltReason string
 	// OverBudget reports that the shared context alone sits between
-	// 0.75 x P and H: the pass runs with every call measured against H
-	// and records over_budget.
+	// 0.75 x P and H: the pass runs and records over_budget, packing
+	// against P until shared context passes it and only then against H.
 	OverBudget bool
 }
 
@@ -177,8 +180,9 @@ func ParseSkipReason(reason string) (signal string, size, budget int, ok bool) {
 // boundaries — one oversized hunk into line chunks, each with its header
 // and gutter numbers — and each part becomes its own call. A recognised
 // generated file whose rendering would need splitting is skipped instead,
-// and packing continues; plain files always split rather than halting.
-// Only shared context alone past the hard limit halts the pass.
+// and packing continues; a unit with no blocks to split on rides one
+// call whole, past the budget if it must. Only shared context alone
+// past the hard limit halts the pass.
 func PlanCalls(scope Scope, accepted map[core.UnitID]bool, opts PlanOptions, measure MeasureCall) BatchPlan {
 	var plan BatchPlan
 	maxFiles := opts.MaxFilesPerCall
@@ -255,6 +259,16 @@ func PlanCalls(scope Scope, accepted map[core.UnitID]bool, opts PlanOptions, mea
 			plan.Skipped = append(plan.Skipped, unit)
 			continue
 		}
+		// A unit with no blocks cannot split — binary, unreadable, or
+		// a shaping with no hunk structure — so it rides one call
+		// whole even past the budget: the whole-file render shows its
+		// header lines and access reason, where a part would show
+		// neither.
+		if _, blocks := unitBlocks(unit); len(blocks) == 0 {
+			plan.Calls = append(plan.Calls, Call{Files: []FileUnit{unit}})
+			admittedCount++
+			continue
+		}
 		for _, part := range splitAndVerify(unit, callBudget, opts.SharedBytes, measure) {
 			part := part
 			plan.Calls = append(plan.Calls, Call{Part: &part})
@@ -276,6 +290,9 @@ func splitAndVerify(unit FileUnit, callBudget, sharedBytes int, measure MeasureC
 		contentBudget = 512
 	}
 	header, blocks := unitBlocks(unit)
+	// Packing carries a blockless unit whole before reaching here; this
+	// single part is the fallback that keeps the file reviewed rather
+	// than dropped.
 	if len(blocks) == 0 {
 		return []FilePart{{Unit: unit, Index: 0, Count: 1}}
 	}

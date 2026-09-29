@@ -384,8 +384,8 @@ func TestSharedContextOverHardHalts(t *testing.T) {
 	}
 }
 
-// Shared context between 0.75 x P and H still runs, measured against H,
-// and records over_budget.
+// Shared context between 0.75 x P and H still runs and records
+// over_budget, packing against P until shared context passes it.
 func TestSharedContextInBandRunsOverBudget(t *testing.T) {
 	const pack, hard = 184320, 368640
 	shared := int(0.75*float64(pack)) + 1000
@@ -668,5 +668,177 @@ func TestMergeSplitVerdictsPrecedence(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// blocklessScope plans one unit alone: the no-block cases below replace
+// the scope's single file with a shaped unit carrying no splittable
+// content.
+func blocklessScope(t *testing.T, unit intel.FileUnit) intel.Scope {
+	t.Helper()
+	scope := batchScope(t, 1, nil)
+	unit.ID = scope.Required[0].ID
+	unit.Path = scope.Required[0].Path
+	unit.Change = core.ChangeModified
+	unit.ContentRevision = scope.Required[0].ContentRevision
+	unit.BodyDigest = core.BodyDigestHex(unit.Body)
+	scope.Required[0] = unit
+	return scope
+}
+
+// blocklessMeasure counts what the rendered prompt charges a unit with
+// no readable bytes: its shaped diff and its access reason beside the
+// shared context every call carries.
+func blocklessMeasure(shared int) intel.MeasureCall {
+	return func(call intel.Call) int {
+		total := shared
+		for _, f := range call.Files {
+			total += len(f.Body) + len(f.Diff) + len(f.Reason)
+		}
+		if call.Part != nil {
+			total += len(call.Part.Diff)
+		}
+		return total
+	}
+}
+
+// planBlocklessUnit runs the split path for one unit with no hunk
+// blocks: shared context sits ten bytes under the packing limit, so the
+// unit fits no call alone however small its rendering.
+func planBlocklessUnit(t *testing.T, unit intel.FileUnit) intel.BatchPlan {
+	t.Helper()
+	const pack, hard = 184320, 368640
+	shared := pack - 10
+	measure := blocklessMeasure(shared)
+	if got := measure(intel.Call{Files: []intel.FileUnit{unit}}); got <= pack {
+		t.Fatalf("fixture measures %d bytes, want it past the %d packing limit so it reaches the split path", got, pack)
+	}
+	return intel.PlanCalls(blocklessScope(t, unit), nil, planOpts(pack, hard, shared), measure)
+}
+
+// assertCarriedWhole requires the plan to hold the unit as one
+// whole-file call: no part, no skip, no halt — the whole-file render
+// shows the shaped header and reason a part would drop.
+func assertCarriedWhole(t *testing.T, plan intel.BatchPlan, path string) {
+	t.Helper()
+	if plan.HaltReason != "" {
+		t.Fatalf("halt = %q, want none: an unsplittable unit rides whole", plan.HaltReason)
+	}
+	if len(plan.Skipped) != 0 {
+		t.Fatalf("skipped = %v, want none: a plain unit is carried, not skipped", plan.Skipped)
+	}
+	if len(plan.Calls) != 1 {
+		t.Fatalf("calls = %d, want 1 whole-file call", len(plan.Calls))
+	}
+	call := plan.Calls[0]
+	if call.Part != nil {
+		t.Fatalf("scheduled as part %d of %d with a %d-byte diff, want the unit carried whole", call.Part.Index+1, call.Part.Count, len(call.Part.Diff))
+	}
+	if len(call.Files) != 1 || call.Files[0].Path != path {
+		t.Fatalf("call holds %v, want the whole unit %q", call.Files, path)
+	}
+}
+
+// A binary unit with no body to split on is carried whole: the
+// whole-file render shows its header lines and access reason, where a
+// part would show neither.
+func TestPlanCallsCarriesABinaryUnitWhole(t *testing.T) {
+	diff := "diff --git a/src/f0000.go b/src/f0000.go\nBinary files a/src/f0000.go and b/src/f0000.go differ\n"
+	unit := intel.FileUnit{Binary: true, Reason: "binary content is not shown", Form: intel.FormDiffOnly, Diff: []byte(diff)}
+	plan := planBlocklessUnit(t, unit)
+	assertCarriedWhole(t, plan, "src/f0000.go")
+	if got := plan.Calls[0].Files[0]; len(got.Diff) == 0 || got.Reason == "" {
+		t.Errorf("carried unit keeps diff=%d bytes reason=%q, want the header and reason intact", len(got.Diff), got.Reason)
+	}
+}
+
+// An unreadable unit is carried whole: its header lines and access
+// reason stay on the scheduled call rather than scheduling an empty
+// part.
+func TestPlanCallsCarriesAnUnreadableUnitWhole(t *testing.T) {
+	diff := "diff --git a/src/f0000.go b/src/f0000.go\n"
+	unit := intel.FileUnit{Reason: "evidence unreadable: permission denied", Form: intel.FormDiffOnly, Diff: []byte(diff)}
+	plan := planBlocklessUnit(t, unit)
+	assertCarriedWhole(t, plan, "src/f0000.go")
+	if got := plan.Calls[0].Files[0]; len(got.Diff) == 0 || got.Reason == "" {
+		t.Errorf("carried unit keeps diff=%d bytes reason=%q, want the header and reason intact", len(got.Diff), got.Reason)
+	}
+}
+
+// A shaping that found no header to show — Diff nil, the reason alone
+// — is carried whole rather than scheduled as an empty part.
+func TestPlanCallsCarriesAHeaderlessShapedUnitWhole(t *testing.T) {
+	unit := intel.FileUnit{Reason: "no changed lines: pure rename", Form: intel.FormDiffOnly}
+	plan := planBlocklessUnit(t, unit)
+	assertCarriedWhole(t, plan, "src/f0000.go")
+	if got := plan.Calls[0].Files[0].Reason; got == "" {
+		t.Error("carried unit lost its access reason, want it intact")
+	}
+}
+
+// Shared context in the band between 0.75 x P and P still packs every
+// call against the packing limit: an oversized file splits into parts
+// that each fit P.
+func TestPlanCallsPackAgainstPackInBand(t *testing.T) {
+	const pack, hard = 184320, 368640
+	body := append([]byte("package f\n"), []byte(strings.Repeat("// a filler line to force a split\n", 3000))...)
+	shared := int(0.75*float64(pack)) + 1000
+	measure := callMeasure(shared)
+	plan := intel.PlanCalls(batchScope(t, 1, body), nil, planOpts(pack, hard, shared), measure)
+	if plan.HaltReason != "" {
+		t.Fatalf("halt = %q, want none: the band runs", plan.HaltReason)
+	}
+	if !plan.OverBudget {
+		t.Error("OverBudget = false, want true between 0.75P and P")
+	}
+	var parts int
+	for i, call := range plan.Calls {
+		if call.Part == nil {
+			t.Fatalf("call %d holds whole files, want only parts in the band", i)
+		}
+		parts++
+		if got := measure(call); got > pack {
+			t.Errorf("part %d measures %d bytes, over the %d packing limit it packs against", call.Part.Index, got, pack)
+		}
+	}
+	if parts < 2 {
+		t.Errorf("split into %d parts, want at least 2", parts)
+	}
+}
+
+// Shared context past the packing limit but inside the hard limit packs
+// every call against the hard limit instead: parts may exceed P and
+// must fit H.
+func TestPlanCallsPackAgainstHardPastPack(t *testing.T) {
+	const pack, hard = 184320, 368640
+	body := append([]byte("package f\n"), []byte(strings.Repeat("// a filler line to force a split\n", 6000))...)
+	shared := pack + 1000
+	measure := callMeasure(shared)
+	plan := intel.PlanCalls(batchScope(t, 1, body), nil, planOpts(pack, hard, shared), measure)
+	if plan.HaltReason != "" {
+		t.Fatalf("halt = %q, want none: shared context inside H runs", plan.HaltReason)
+	}
+	if !plan.OverBudget {
+		t.Error("OverBudget = false, want true past P inside H")
+	}
+	var parts, pastPack int
+	for i, call := range plan.Calls {
+		if call.Part == nil {
+			t.Fatalf("call %d holds whole files, want only parts past the packing limit", i)
+		}
+		parts++
+		got := measure(call)
+		if got > hard {
+			t.Errorf("part %d measures %d bytes, over the %d hard limit", call.Part.Index, got, hard)
+		}
+		if got > pack {
+			pastPack++
+		}
+	}
+	if parts < 2 {
+		t.Errorf("split into %d parts, want at least 2", parts)
+	}
+	if pastPack == 0 {
+		t.Errorf("no part measures past the %d packing limit, want hard-limit packing past P", pack)
 	}
 }

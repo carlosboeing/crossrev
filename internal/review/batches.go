@@ -185,7 +185,7 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 		outcome.limits = append(outcome.limits, string(core.LimitOverBudget))
 		out.Messages = append(out.Messages, ui.Warn(
 			"shared context alone is past 0.75 of the per-call packing limit, so this pass runs over budget",
-			"Every call is measured against the hard limit instead, and over_budget is recorded on its generations."))
+			"Calls pack against the packing limit until shared context passes it, and only then against the hard limit; over_budget is recorded on its generations."))
 		l.Log.Event("budget", fmt.Sprintf("over_budget shared=%d pack=%d hard=%d", len(sharedBytes), budget.PackBytes, budget.HardBytes))
 	}
 	// Packing's skips join the exclusion record before the first
