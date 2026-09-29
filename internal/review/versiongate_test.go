@@ -5,20 +5,20 @@ import (
 	"testing"
 )
 
-// The review leg refuses an opencode past its supported major before any run
+// The review leg refuses an opencode past its supported majors before any run
 // child starts (issue #272). The version probe is the only spec the runner
 // sees.
 func TestReviewRefusesAnOpencodePastTheSupportedMajor(t *testing.T) {
 	e := newEnv(t)
-	e.runner.version = "opencode v2.0.15"
+	e.runner.version = "opencode v3.1.4"
 	req := e.request(t)
 	req.HarnessOverride = "opencode"
 
 	got := runLeg(t, e, req)
 	if got.Err == nil {
-		t.Fatal("the leg accepted an opencode 2.x install")
+		t.Fatal("the leg accepted an opencode 3.x install")
 	}
-	if !strings.Contains(got.Err.Error(), "opencode 1.x") {
+	if !strings.Contains(got.Err.Error(), "opencode 1.x and 2.x") {
 		t.Errorf("err = %q, want the supported range named", got.Err)
 	}
 	if !strings.Contains(got.Err.Error(), "#272") {
@@ -32,5 +32,26 @@ func TestReviewRefusesAnOpencodePastTheSupportedMajor(t *testing.T) {
 	}
 	if got := e.runner.probes[0].Args; len(got) != 1 || got[0] != "--version" {
 		t.Errorf("the only child was the version probe; got %v", got)
+	}
+}
+
+// A supported 2.x install passes the gate, and the confirmed major reaches
+// the spec: the run child carries the 2.x vector rather than the 1.x one.
+func TestReviewBuildsThe2xVectorOnA2xInstall(t *testing.T) {
+	e := newEnv(t)
+	e.runner.version = "opencode v2.0.15"
+	req := e.request(t)
+	req.HarnessOverride = "opencode"
+
+	runLeg(t, e, req)
+	if len(e.runner.probes) == 0 {
+		t.Fatal("the leg started no version probe")
+	}
+	if len(e.runner.specs) == 0 {
+		t.Fatal("the leg started no run child on a supported install")
+	}
+	got := e.runner.specs[0].Args
+	if len(got) < 2 || got[0] != "run" || got[1] != "--standalone" {
+		t.Errorf("the run child does not open with run --standalone: %v", got)
 	}
 }

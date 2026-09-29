@@ -40,6 +40,7 @@ var tier2IntraEdges = map[string][]string{
 	"internal/verify/ghactions": {"internal/verify", "internal/forge", "internal/exec"},
 	"internal/harness":          {"internal/exec", "internal/cred", "internal/runlog"},
 	"internal/sandbox":          {"internal/vcs"},
+	"internal/readserve":        {"internal/exec", "internal/vcs"},
 }
 
 var tier3 = map[string]bool{

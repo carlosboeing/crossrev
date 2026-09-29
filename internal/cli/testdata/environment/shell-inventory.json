@@ -1,6 +1,6 @@
 {
   "note": "Every environment variable the shipped Bash reads, sets for a child, or strips from one. Derived from bin/crossrev, lib/*.sh and lib/adapters/*.sh, and from lib/harnesses.json for the names an adapter resolves at run time. Bash's own variables (BASH_SOURCE, SECONDS, IFS, the positional parameters) are out, and so is every shell global initialised at source time, because an inherited value cannot survive the assignment. Each `shell` entry was read back with sed before it was written down. A variable whose `spelled` is false is never written out in the shell: the shell reaches it through an indirect expansion of a descriptor field, or — for PATH — through `command -v`.",
-  "count": 40,
+  "count": 41,
   "classes": [
     "operator input",
     "runner signal",
@@ -413,6 +413,16 @@
         "lib/adapters/opencode.sh:184"
       ],
       "why": "An empty directory, which displaces the agents and commands that would otherwise load from beside the operator's global config.",
+      "spelled": true
+    },
+    {
+      "name": "OPENCODE_DISABLE_PROJECT_CONFIG",
+      "class": "child-specific output",
+      "descriptor": false,
+      "shell": [
+        "internal/harness/opencode.go: isolationEnv sets it on every opencode child; there is no shell site because the variable postdates the Bash implementation"
+      ],
+      "why": "Skips project config discovery, so no opencode.json(c) from the checkout or a parent directory loads beside the isolation config.",
       "spelled": true
     },
     {

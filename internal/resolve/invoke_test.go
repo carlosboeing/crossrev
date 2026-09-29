@@ -693,20 +693,20 @@ func hasFlagPair(args []string, flag, value string) bool {
 	return false
 }
 
-// The version gate refuses an opencode past its supported major before the
+// The version gate refuses an opencode past its supported majors before the
 // leg's run child starts (issue #272): the probe is the only child the runner
 // ever sees.
 func TestOpencodeVersionGateRefusesBeforeTheRun(t *testing.T) {
 	e := setup(t)
 	e.addReview(t, defaultFindings(), "issues-remain")
 	e.adapter = nil // the real adapters build the specs
-	e.runner.stdout = []byte("opencode v2.0.15\n")
+	e.runner.stdout = []byte("opencode v3.1.4\n")
 
 	got := e.runReq(t, Request{PR: 42, Repo: e.slug, Trigger: TriggerHuman, Harness: "opencode"})
 	if got.Err == nil {
-		t.Fatal("the leg accepted an opencode 2.x install")
+		t.Fatal("the leg accepted an opencode 3.x install")
 	}
-	if !strings.Contains(got.Err.Error(), "opencode 1.x") {
+	if !strings.Contains(got.Err.Error(), "opencode 1.x and 2.x") {
 		t.Errorf("err = %q, want the supported range named", got.Err)
 	}
 	if !strings.Contains(got.Err.Error(), "#272") {
@@ -738,5 +738,22 @@ func TestOpencodeVersionGateRunsASupportedInstall(t *testing.T) {
 	}
 	if got := e.runner.specs[1].Args[0]; got != "run" {
 		t.Errorf("the second child is the run; got %v", e.runner.specs[1].Args)
+	}
+}
+
+// A supported 2.x install passes the gate the same way, and the confirmed
+// major reaches the spec: the run child carries the 2.x vector.
+func TestOpencodeVersionGateRunsA2xInstall(t *testing.T) {
+	e := setup(t)
+	e.addReview(t, defaultFindings(), "issues-remain")
+	e.adapter = nil
+	e.runner.stdout = []byte("opencode v2.0.15\n")
+
+	e.runReq(t, Request{PR: 42, Repo: e.slug, Trigger: TriggerHuman, Harness: "opencode"})
+	if len(e.runner.specs) != 2 {
+		t.Fatalf("the runner started %d children, want the probe and the run: %v", len(e.runner.specs), e.runner.specs)
+	}
+	if got := e.runner.specs[1].Args; len(got) < 2 || got[0] != "run" || got[1] != "--standalone" {
+		t.Errorf("the run child does not open with run --standalone: %v", got)
 	}
 }
