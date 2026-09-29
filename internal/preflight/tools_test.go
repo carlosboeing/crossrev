@@ -575,8 +575,10 @@ func TestCheckReportsGitBelow240(t *testing.T) {
 	}
 }
 
-// At or past 2.40 the report is the plain version line and nothing more.
-func TestCheckReportsGit240Silently(t *testing.T) {
+// At 2.40 the check-attr warning is gone but the hunk-shaping one stands:
+// --attr-source for diffs arrived in 2.41, so the report still names that
+// gap as advisory rather than fatal.
+func TestCheckReportsGit240WarnsAbout241Only(t *testing.T) {
 	t.Setenv("GITHUB_ACTIONS", "")
 	r := coreVersions(newRecorder())
 	r.answer("git --version", "git version 2.40.0\n", 0)
@@ -586,7 +588,27 @@ func TestCheckReportsGit240Silently(t *testing.T) {
 	if !c.Check(context.Background(), preflight.NeedCore) {
 		t.Errorf("Check = false, want true")
 	}
-	if strings.Contains(buf.String(), "2.40,") || strings.Contains(buf.String(), "○ git") {
+	report := buf.String()
+	if strings.Contains(report, "below 2.40") {
+		t.Errorf("report warned about the 2.40 requirement a 2.40 git meets:\n%s", report)
+	}
+	if !strings.Contains(report, "│  ○ git 2.40.0 — below 2.41") {
+		t.Errorf("report did not warn about the 2.41 requirement:\n%s", report)
+	}
+}
+
+// At or past 2.41 the report is the plain version line and nothing more.
+func TestCheckReportsGit241Silently(t *testing.T) {
+	t.Setenv("GITHUB_ACTIONS", "")
+	r := coreVersions(newRecorder())
+	r.answer("git --version", "git version 2.41.0\n", 0)
+	r.answer("gh api user --jq .login", "carlosboeing\n", 0)
+	c, buf := checker(t, r, onPath(corePath...))
+
+	if !c.Check(context.Background(), preflight.NeedCore) {
+		t.Errorf("Check = false, want true")
+	}
+	if strings.Contains(buf.String(), "2.40,") || strings.Contains(buf.String(), "2.41,") || strings.Contains(buf.String(), "○ git") {
 		t.Errorf("report warned about a git that meets the requirement:\n%s", buf)
 	}
 }
