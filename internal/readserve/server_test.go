@@ -57,6 +57,20 @@ func createRepo(t *testing.T) (dir, base, head string) {
 	mustGit(t, dir, "add", "small.txt")
 	mustGit(t, dir, "commit", "-m", "head")
 
+	// A submodule the server must refuse with the `submodule` reason. The
+	// source is a local scratch repository, so the add stays offline; the
+	// file protocol is allowed for this invocation only.
+	subSrc := t.TempDir()
+	mustGit(t, subSrc, "init", "-q", "-b", "main")
+	mustGit(t, subSrc, "config", "user.name", "Test")
+	mustGit(t, subSrc, "config", "user.email", "test@example.com")
+	_ = os.WriteFile(filepath.Join(subSrc, "inner.txt"), []byte("inner\n"), 0o644)
+	mustGit(t, subSrc, "add", "inner.txt")
+	mustGit(t, subSrc, "commit", "-m", "inner")
+	mustGit(t, dir, "-c", "protocol.file.allow=always", "submodule", "add", subSrc, "submod")
+	mustGit(t, dir, "add", ".gitmodules", "submod")
+	mustGit(t, dir, "commit", "-m", "submodule")
+
 	res = exec.NewOSRunner().Run(context.Background(), exec.Spec{
 		Path: "git", Args: []string{"rev-parse", "HEAD"}, Dir: dir,
 	})
@@ -65,7 +79,6 @@ func createRepo(t *testing.T) (dir, base, head string) {
 	return dir, base, head
 }
 
-// Tests to add: ranges from base and head byte-match git; every refusal reason; cut results naming the next start; line_too_long moving forward; budget exhaustion as a refusal; the log replaying from (path, revision, returned) with matching digests; arch tests on the new package.
 type rpcRequest struct {
 	JSONRPC string `json:"jsonrpc"`
 	ID      int    `json:"id"`
@@ -180,11 +193,14 @@ func TestEveryRefusalReason(t *testing.T) {
 		{JSONRPC: "2.0", ID: 7, Method: "tools/call", Params: map[string]any{
 			"name": "read_file", "arguments": map[string]any{"path": "nested", "revision": "head"},
 		}},
+		{JSONRPC: "2.0", ID: 8, Method: "tools/call", Params: map[string]any{
+			"name": "read_file", "arguments": map[string]any{"path": "submod", "revision": "head"},
+		}},
 	}
 	args := []string{"--repo", dir, "--base", base, "--head", head, "--log", logPath, "--per-call-bytes", "262144"}
 	resps, _ := runRPC(t, args, reqs)
 
-	wants := []string{"outside_revisions", "path_invalid", "not_found", "binary", "symlink", "bad_range", "not_found"}
+	wants := []string{"outside_revisions", "path_invalid", "not_found", "binary", "symlink", "bad_range", "not_found", "submodule"}
 	for i, resp := range resps {
 		if !resp.Result.IsError {
 			t.Errorf("expected error for case %d, got success", i)
