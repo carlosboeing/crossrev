@@ -140,6 +140,8 @@ resolver:
 
 `harness` is one of `claude`, `codex`, `agy`, `grok` or `opencode`. `model` reaches the harness as given, so it must be **fully qualified** — `claude-fable-5`, never `fable-5`, which fails as an entitlement error rather than as a typo. `effort` is passed through verbatim. Either leg may name an `endpoint` instead of relying on the harness's own vendor.
 
+For one run, `crossrev review --model <id> --effort <level>` — and the same flags on `resolve`, or on `cycle` for both legs — overrides the configured values the way `--harness` overrides the harness. The flags land in the same settings the config fills, so the harness gets the operator's value exactly as written and the marker records it; `--model` without `--harness` keeps the configured harness and replaces only its model.
+
 opencode carries three facts worth knowing before the first run:
 
 - **opencode serves either leg, on 1.x and 2.x.** Its isolation config denies `edit` to a review leg and grants it to a resolve leg, while `bash`, `task`, `skill`, `webfetch`, `websearch` and `external_directory` stay denied on both. On 2.x the file-writing tools are split — `write` creates, `edit` only replaces — so the config names `write` and `apply_patch` beside `edit`, each mirroring the leg's grant. Its `--model` takes `provider/model`, not a bare id: `opencode/grok-code`, never `grok-code`. On 2.x the leg runs `opencode run --standalone`, because the background service drops the isolation config; there is no 2.x equivalent of 1.x's `--pure`, so operator plugins load and are held only by the permission denials. `effort` rides `--variant` on 1.x and `--model` as `provider/model#variant` on 2.x, which refuses an effort with no model to ride on.

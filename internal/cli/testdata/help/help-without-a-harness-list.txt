@@ -26,6 +26,8 @@
 
   OPTIONS on cycle, review and resolve
     --harness <harness>   Override the harness the config names for that leg
+    --model <id>             Name a specific model for the harness to use
+    --effort <level>         Set the reasoning effort (e.g. low, high)
     --repo owner/name        Target another repository than this checkout
     --no-tips                Suppress the automated-mode suggestion
     --keep-transcripts       Keep the harness transcript even when the leg succeeds

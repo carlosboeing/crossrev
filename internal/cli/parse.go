@@ -211,6 +211,10 @@ func parseCycle(args []string, out *ui.IO) (Invocation, error) {
 			repo, err = s.value()
 		case "--harness":
 			req.HarnessOverride, err = s.value()
+		case "--model":
+			req.ModelOverride, err = s.value()
+		case "--effort":
+			req.EffortOverride, err = s.value()
 		case "--trigger":
 			req.Trigger, err = s.value()
 		case "--no-tips":
@@ -253,6 +257,10 @@ func parseReview(args []string, out *ui.IO, harnesses []string) (Invocation, err
 			repo, err = s.value()
 		case "--harness":
 			req.HarnessOverride, err = s.value()
+		case "--model":
+			req.ModelOverride, err = s.value()
+		case "--effort":
+			req.EffortOverride, err = s.value()
 		case "--trigger":
 			req.Trigger, err = s.value()
 		case "--continuation":
@@ -302,6 +310,10 @@ func parseResolve(args []string, out *ui.IO, harnesses []string) (Invocation, er
 			repo, err = s.value()
 		case "--harness":
 			req.HarnessOverride, err = s.value()
+		case "--model":
+			req.ModelOverride, err = s.value()
+		case "--effort":
+			req.EffortOverride, err = s.value()
 		case "--trigger":
 			req.Trigger, err = s.value()
 		case "--no-tips":

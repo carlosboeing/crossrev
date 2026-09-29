@@ -30,6 +30,8 @@ type Request struct {
 	Repo            core.Slug
 	Trigger         Trigger
 	HarnessOverride string
+	ModelOverride   string
+	EffortOverride  string
 	KeepTranscripts bool
 	NoTips          bool
 }
@@ -46,6 +48,8 @@ type LegRequest struct {
 	Repo            core.Slug
 	Trigger         Trigger
 	HarnessOverride string
+	ModelOverride   string
+	EffortOverride  string
 	KeepTranscripts bool
 	Continuation    bool
 	NoTips          bool
@@ -335,6 +339,8 @@ func (d *Driver) legRequest(req Request, continuation bool) LegRequest {
 		Repo:            req.Repo,
 		Trigger:         req.Trigger,
 		HarnessOverride: req.HarnessOverride,
+		ModelOverride:   req.ModelOverride,
+		EffortOverride:  req.EffortOverride,
 		KeepTranscripts: req.KeepTranscripts,
 		Continuation:    continuation,
 		NoTips:          true,

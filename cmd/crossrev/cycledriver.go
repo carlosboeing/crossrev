@@ -63,6 +63,8 @@ func cycleCommand(ctx context.Context, out *ui.IO, doc harness.Document, req cli
 		Repo:            req.Repo,
 		Trigger:         cycle.Trigger(req.Trigger),
 		HarnessOverride: req.HarnessOverride,
+		ModelOverride:   req.ModelOverride,
+		EffortOverride:  req.EffortOverride,
 		KeepTranscripts: req.KeepTranscripts,
 		NoTips:          req.NoTips,
 	})
@@ -92,6 +94,8 @@ func (a reviewAdapter) Run(ctx context.Context, req cycle.LegRequest) cycle.LegR
 		Trigger:         review.Trigger(req.Trigger),
 		Continuation:    req.Continuation,
 		HarnessOverride: req.HarnessOverride,
+		ModelOverride:   req.ModelOverride,
+		EffortOverride:  req.EffortOverride,
 		RunID:           runlog.RunID(),
 	})
 	a.out.PrintAll(result.Messages)
@@ -115,6 +119,8 @@ func (a resolveAdapter) Run(ctx context.Context, req cycle.LegRequest) cycle.Leg
 		Repo:            req.Repo,
 		Trigger:         resolve.Trigger(req.Trigger),
 		Harness:         req.HarnessOverride,
+		ModelOverride:   req.ModelOverride,
+		EffortOverride:  req.EffortOverride,
 		Author:          a.author,
 		KeepTranscripts: req.KeepTranscripts,
 	})
