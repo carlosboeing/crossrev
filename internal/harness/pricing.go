@@ -154,6 +154,27 @@ func (p Prices) Key(reported string) string {
 // hold rates at all.
 func (e priceEntry) priceable() bool { return e.rates.kind == kindObject }
 
+// MaxInputTokens is the price table's max_input_tokens for a reported
+// model id, and whether the table names one. The refresh script keeps the
+// field from the upstream table; a model the table does not list, or an
+// entry that carries no window, answers false, and the caller keeps the
+// harness's own window rather than guessing.
+func (p Prices) MaxInputTokens(reported string) (int, bool) {
+	key := p.Key(reported)
+	if key == "" {
+		return 0, false
+	}
+	at, listed := p.index[key]
+	if !listed {
+		return 0, false
+	}
+	window, ok := p.entries[at].rates.member("max_input_tokens").asFloat()
+	if !ok || window != float64(int(window)) || int(window) <= 0 {
+		return 0, false
+	}
+	return int(window), true
+}
+
 // bareID is `.key | split("/") | last`.
 func bareID(key string) string {
 	if at := strings.LastIndex(key, "/"); at >= 0 {

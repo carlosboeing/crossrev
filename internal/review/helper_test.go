@@ -63,6 +63,14 @@ func mustDoc(t *testing.T) harness.Document {
 	return doc
 }
 
+// claudePackBytes is the per-call packing limit the tests run under: the
+// claude harness window at 3.9 bytes per token. Every leg test drives the
+// claude harness override, so packing budgets read from here rather than
+// repeating the window math.
+func claudePackBytes() int {
+	return intel.ComputeLimits(200000, false).PackBytes
+}
+
 func mustConfig(t *testing.T, yaml string) *config.Config {
 	t.Helper()
 	base := mustRev(t, baseSHA)

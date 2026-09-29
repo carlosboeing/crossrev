@@ -8,7 +8,6 @@ import (
 	"github.com/carlosboeing/crossrev/internal/core"
 	"github.com/carlosboeing/crossrev/internal/exec"
 	"github.com/carlosboeing/crossrev/internal/forge"
-	"github.com/carlosboeing/crossrev/internal/intel"
 	"github.com/carlosboeing/crossrev/internal/prstate"
 	"github.com/carlosboeing/crossrev/internal/review"
 )
@@ -171,8 +170,8 @@ func TestConfirmationKeepsTheRepairDeltaWhenTheDiffIsSliced(t *testing.T) {
 	if strings.Contains(prompt, "gen/big.go") {
 		t.Error("prompt carried a diff section the batch does not hold")
 	}
-	if len(prompt) > intel.MaxPromptBytes {
-		t.Errorf("prompt is %d bytes, over the %d budget", len(prompt), intel.MaxPromptBytes)
+	if len(prompt) > claudePackBytes() {
+		t.Errorf("prompt is %d bytes, over the %d budget", len(prompt), claudePackBytes())
 	}
 }
 

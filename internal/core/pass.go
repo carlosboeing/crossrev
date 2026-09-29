@@ -157,19 +157,20 @@ func (s PassState) String() string { return string(s) }
 type HaltReason string
 
 // The three closed halt reasons: coverage left outstanding, the ledger could
-// not publish, and one file that cannot fit the input budget alone.
+// not publish, and shared context alone past the hard input limit. Oversized
+// files no longer halt: they split across calls instead.
 const (
-	HaltCoverageIncomplete HaltReason = "coverage_incomplete"
-	HaltLedgerExhausted    HaltReason = "ledger_exhausted"
-	HaltInputExceedsBudget HaltReason = "input_exceeds_budget"
+	HaltCoverageIncomplete         HaltReason = "coverage_incomplete"
+	HaltLedgerExhausted            HaltReason = "ledger_exhausted"
+	HaltSharedContextExceedsWindow HaltReason = "shared_context_exceeds_window"
 )
 
 // ErrHaltReason is returned for a halt reason no marker writer produces.
-var ErrHaltReason = errors.New("a halt reason is coverage_incomplete, ledger_exhausted or input_exceeds_budget")
+var ErrHaltReason = errors.New("a halt reason is coverage_incomplete, ledger_exhausted or shared_context_exceeds_window")
 
 // HaltReasons lists the three halt reasons.
 func HaltReasons() []HaltReason {
-	return []HaltReason{HaltCoverageIncomplete, HaltLedgerExhausted, HaltInputExceedsBudget}
+	return []HaltReason{HaltCoverageIncomplete, HaltLedgerExhausted, HaltSharedContextExceedsWindow}
 }
 
 // ParseHaltReason accepts only the three written values.
@@ -179,8 +180,8 @@ func ParseHaltReason(s string) (HaltReason, error) {
 		return HaltCoverageIncomplete, nil
 	case HaltLedgerExhausted:
 		return HaltLedgerExhausted, nil
-	case HaltInputExceedsBudget:
-		return HaltInputExceedsBudget, nil
+	case HaltSharedContextExceedsWindow:
+		return HaltSharedContextExceedsWindow, nil
 	}
 	return "", fmt.Errorf("%w: %q", ErrHaltReason, s)
 }
@@ -189,29 +190,35 @@ func ParseHaltReason(s string) (HaltReason, error) {
 func (h HaltReason) String() string { return string(h) }
 
 // LimitReason is a recorded limit word: work deferred by a budget rather
-// than halted by one. The set is closed: only these two are recorded.
+// than halted by one. The set is closed: only these three are recorded.
 type LimitReason string
 
-// The two recorded limit reasons: files carried past the pass budget, and a
-// search term capped for being too common.
+// The three recorded limit reasons: files carried past the pass budget, a
+// search term capped for being too common, and a pass that ran with its
+// shared context between 0.75 x P and H.
 const (
 	LimitReviewBudgetReached LimitReason = "review_budget_reached"
 	LimitTooCommon           LimitReason = "too_common"
+	LimitOverBudget          LimitReason = "over_budget"
 )
 
 // ErrLimitReason is returned for a limit reason no writer records.
-var ErrLimitReason = errors.New("a limit reason is review_budget_reached or too_common")
+var ErrLimitReason = errors.New("a limit reason is review_budget_reached, too_common or over_budget")
 
-// LimitReasons lists the two recorded limit reasons.
-func LimitReasons() []LimitReason { return []LimitReason{LimitReviewBudgetReached, LimitTooCommon} }
+// LimitReasons lists the three recorded limit reasons.
+func LimitReasons() []LimitReason {
+	return []LimitReason{LimitReviewBudgetReached, LimitTooCommon, LimitOverBudget}
+}
 
-// ParseLimitReason accepts only the two recorded values.
+// ParseLimitReason accepts only the three recorded values.
 func ParseLimitReason(s string) (LimitReason, error) {
 	switch LimitReason(s) {
 	case LimitReviewBudgetReached:
 		return LimitReviewBudgetReached, nil
 	case LimitTooCommon:
 		return LimitTooCommon, nil
+	case LimitOverBudget:
+		return LimitOverBudget, nil
 	}
 	return "", fmt.Errorf("%w: %q", ErrLimitReason, s)
 }

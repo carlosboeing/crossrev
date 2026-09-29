@@ -94,7 +94,7 @@ critical-gen.ts  -linguist-generated
 ```
 
 - `linguist-generated` excludes the path from review before prompt packing and drops it from the resolve diff.
-- `-linguist-generated` overrides built-in recognition (lockfiles, bundle suffixes, minified text, headers). CrossRev must review the file if it fits, or halt with `input_exceeds_budget` if oversized.
+- `-linguist-generated` overrides built-in recognition (lockfiles, bundle suffixes, minified text, headers). CrossRev must review the file, splitting it across calls if it fits no call alone.
 - All attributes with prefix `crossrev-*` are reserved and ignored.
 - Git 2.40 or newer is required for base-tree attribute resolution (`git check-attr --source`). Older Git versions warn once and fall through to built-in rules. See [ADR 0023](adrs/0023-generated-files-are-recognised-without-configuration.md).
 
@@ -182,6 +182,7 @@ These keys live here alone: `crossrev init` never writes them, so the starter co
 | `coverage.ref_namespace` | The namespace ledger refs live under, one ref per pull request per reviewer. Default `refs/crossrev`. Anything not under `refs/`, anything under `refs/heads`, `refs/tags`, `refs/pull` or `refs/remotes`, and any unsafe component is refused. |
 | `coverage.on_overflow` | What a marker-carried generation does when the comment would pass 64 KiB. `degrade` sheds the predecessor, then compacts the current generation to counts, then halts; `halt` skips compaction. Default `degrade`. |
 | `reviewers` | The reviewer slots, each with an `id`, `harness`, `model`, `effort` and `endpoint`. The list wins over the `reviewer:` shorthand whenever it names a slot. Ids are explicit and stable — never derived from list position — because each slot owns its ledger ref. **One reviewer runs in this release**; a second entry is refused. |
+| `review.input_policy` | How a required file reaches the reviewer. `hunks_first` sends every file in hunk form — whole files in full when new or small, function-context hunks past the size bound. `whole_when_fits` sends a file whole when its rendered form fits the per-call budget and uses the hunk form otherwise. Splitting applies to anything over the budget under either policy. Default `hunks_first`. |
 
 ### backlog
 

@@ -185,7 +185,7 @@ func (l *Leg) publish(ctx context.Context, req Request, loaded Context, settings
 		// exclusions included, and the skips and policy exclusions render
 		// beside it.
 		renderCtx.Coverage = &CoverageCounts{Covered: conv.Covered, Required: conv.Required, Excluded: len(loaded.Scope.Excluded)}
-		renderCtx.Skipped = skipRenderDetails(loaded.Scope.Skipped)
+		renderCtx.Skipped = skipRenderDetails(*loaded.Scope)
 		renderCtx.Excluded = policyExclusionPaths(*loaded.Scope)
 	}
 	summary := SummaryBody(parseFindings(marker.Findings), marker, renderCtx)

@@ -312,12 +312,22 @@ func evidenceLines(body []byte) int {
 	return n
 }
 
+// WholePolicy promotes hunk-shaped files to whole-file rendering under
+// the whole_when_fits input policy: a file whose whole body fits
+// MaxBytes renders in full, and anything past it keeps the Task 1 hunk
+// form. Nil means hunks_first: every file renders in its shaped form.
+// Splitting still applies to anything over the budget under either
+// policy.
+type WholePolicy struct {
+	MaxBytes int
+}
+
 // batchExpectations maps one rendered batch to the numbered expectations the
 // semantic check holds the answer against: positions 1 to len(units) in
 // prompt order, with the base and head the batch was built between. A
 // shaped unit carries its gutter-numbered hunks into the prompt; an
 // unshaped one renders from its body the way it always did.
-func batchExpectations(units []intel.FileUnit, base, head core.Revision) (expected validate.ReviewExpectations, promptUnits []prompt.BatchUnit) {
+func batchExpectations(units []intel.FileUnit, base, head core.Revision, whole *WholePolicy) (expected validate.ReviewExpectations, promptUnits []prompt.BatchUnit) {
 	expected.Base = base
 	expected.Head = head
 	for _, unit := range units {
@@ -331,6 +341,10 @@ func batchExpectations(units []intel.FileUnit, base, head core.Revision) (expect
 		if unit.Form == intel.FormDiffOnly && reason == "" && !unit.Binary {
 			reason = intel.DiffOnlyReason(unit.Change, len(unit.Body), false, "")
 		}
+		form := unit.Form
+		if whole != nil && form == intel.FormHunksContext && readable && len(unit.Body) <= whole.MaxBytes {
+			form = ""
+		}
 		pu := prompt.BatchUnit{
 			Path:            unit.Path,
 			OldPath:         unit.OldPath,
@@ -340,13 +354,43 @@ func batchExpectations(units []intel.FileUnit, base, head core.Revision) (expect
 			Available:       unit.Available,
 			Binary:          unit.Binary,
 			Reason:          reason,
-			Form:            unit.Form,
+			Form:            form,
 		}
-		if unit.Form != "" && len(unit.Diff) > 0 {
+		if form != "" && len(unit.Diff) > 0 {
 			pu.NumberedDiff = diff.Parse(unit.Diff, core.RevisionPair{}).Numbered()
 		}
 		promptUnits = append(promptUnits, pu)
 	}
+	return expected, promptUnits
+}
+
+// partExpectations maps one split-file part to the numbered expectations
+// the semantic check holds the answer against: the part's single position
+// with the base and head the pass was built between. The span stays the
+// whole file's readable lines, because findings anchor against the full
+// base-to-head diff rather than the slice the part shows.
+func partExpectations(part *intel.FilePart, base, head core.Revision) (expected validate.ReviewExpectations, promptUnits []prompt.BatchUnit) {
+	unit := part.Unit
+	expected.Base = base
+	expected.Head = head
+	lines := 0
+	readable := unit.Available && !unit.Binary && len(unit.Body) > 0
+	if readable {
+		lines = evidenceLines(unit.Body)
+	}
+	expected.Units = append(expected.Units, validate.UnitExpectation{Path: unit.Path, Revision: unit.ContentRevision, Lines: lines, Readable: readable})
+	promptUnits = append(promptUnits, prompt.BatchUnit{
+		Path:            unit.Path,
+		OldPath:         unit.OldPath,
+		Change:          unit.Change,
+		ContentRevision: unit.ContentRevision,
+		Available:       unit.Available,
+		Binary:          unit.Binary,
+		Reason:          unit.Reason,
+		Form:            unit.Form,
+		Part:            fmt.Sprintf("%d of %d", part.Index+1, part.Count),
+		NumberedDiff:    diff.Parse(part.Diff, core.RevisionPair{}).Numbered(),
+	})
 	return expected, promptUnits
 }
 

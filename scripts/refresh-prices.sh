@@ -8,8 +8,10 @@
 #
 # The extract holds the models CrossRev can name and the fields pricing needs:
 # five per-token rates plus the unsuffixed long-context break fields the second
-# refuse rule reads. Everything else upstream ships — search-context queries,
-# flex, priority and batches variants — is dropped here.
+# refuse rule reads, plus max_input_tokens, which narrows a harness's input
+# window when a pinned model names a smaller one. Everything else upstream
+# ships — search-context queries, flex, priority and batches variants — is
+# dropped here.
 
 set -euo pipefail
 
@@ -65,7 +67,8 @@ jq --argjson keys "$keys_json" --arg version "$version" '
        "output_cost_per_token",
        "cache_read_input_token_cost",
        "cache_creation_input_token_cost",
-       "cache_creation_input_token_cost_above_1hr");
+       "cache_creation_input_token_cost_above_1hr",
+       "max_input_tokens");
   def tier_break:
     test("^[a-z_]+_above_[0-9]+k_tokens$")
     and (test("flex|priority|batches") | not);

@@ -188,6 +188,13 @@ type Descriptor struct {
 	// prompt. Codex and Claude Code read it from stdin, grok takes a file
 	// path, and agy and opencode take it on argv.
 	PromptTransport string `json:"prompt_transport"`
+	// WindowTokens is the harness's input window in tokens. Codex carries
+	// the measured 258,400; Claude Code 200,000 and agy, grok and opencode
+	// 128,000 are assumed until measured. The per-call packing budget and
+	// the hard limit derive from it (see internal/intel/budget.go), and a
+	// pinned model whose price-table entry names a smaller
+	// max_input_tokens narrows it further.
+	WindowTokens int `json:"window_tokens"`
 	// SandboxArgs are the hardening arguments the adapter must pass.
 	SandboxArgs []string `json:"sandbox_args"`
 	// Quarantine are the paths this harness auto-loads configuration from.
@@ -396,6 +403,11 @@ func Validate(raw []byte) string {
 	for _, entry := range harnessList {
 		if !installerComplete(entry) {
 			return fmt.Sprintf("harness %s has an installer with no url, no command, or a pinned version its command does not carry", entryName(entry))
+		}
+	}
+	for _, entry := range harnessList {
+		if !windowTokensComplete(entry) {
+			return fmt.Sprintf("harness %s carries a window_tokens that is not a whole number of tokens above zero", entryName(entry))
 		}
 	}
 	return ""
@@ -610,6 +622,27 @@ func (d Document) QuarantinePaths() []string {
 // harnesses as a sentence fragment, for message text that has to name the set.
 func (d Document) NamesHuman() string { return NamesHuman(d.Names()) }
 
+// WindowTokens is the harness's input window in tokens, and whether the
+// document carries the harness at all. An unknown name answers zero and
+// false; the legs refuse an unknown harness before any budget is read, so
+// no caller budgets from that answer.
+func (d Document) WindowTokens(name string) (int, bool) {
+	entry, found := d.For(name)
+	if !found {
+		return 0, false
+	}
+	return entry.WindowTokens, true
+}
+
+// ArgvTransport reports whether the harness takes its prompt on argv. An
+// argv prompt shares the process argument limit with the rest of the
+// command line, so the hard byte limit caps there whatever the window
+// says. Unknown names answer false; the legs refuse them first.
+func (d Document) ArgvTransport(name string) bool {
+	entry, found := d.For(name)
+	return found && entry.PromptTransport == "argv"
+}
+
 // NamesHuman is _names_human (lib/harnesses.sh:171-178) over any list:
 // "claude, codex, agy and opencode".
 func NamesHuman(names []string) string {
@@ -812,6 +845,22 @@ func installerComplete(entry any) bool {
 		return false
 	}
 	return strings.Contains(line, text)
+}
+
+// windowTokensComplete answers whether the entry carries a usable input
+// window: a JSON whole number above zero. encoding/json decodes every JSON
+// number into float64, so a fractional value or a non-number is refused
+// rather than truncated into a budget.
+func windowTokensComplete(entry any) bool {
+	value, declared := valueAt(entry, "window_tokens")
+	if !declared || value == nil {
+		return false
+	}
+	number, isNumber := value.(float64)
+	if !isNumber || number != float64(int(number)) || int(number) <= 0 {
+		return false
+	}
+	return true
 }
 
 // emptyOrAbsent is jq's `(x // "") == ""`, which is true for a null, a false

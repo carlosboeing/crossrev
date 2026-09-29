@@ -69,13 +69,22 @@ func (l *Leg) discoverBatchContext(ctx context.Context, req Request, loaded Cont
 // measured bytes. The measurement happens once, here, and travels with the
 // batch to publication; it is never recomputed there from a second read,
 // which could disagree with what was sent.
-func (c batchContext) render(files []intel.FileUnit, base, head core.Revision) ([]byte, map[core.UnitID]prstate.SuppliedInput) {
-	_, units := batchExpectations(files, base, head)
+//
+// withConfirmation carries the repair delta: required input of the first
+// call or calls only, so planning measures every candidate with it and the
+// invoke path drops it once the first file completes. whole promotes
+// hunk-shaped files to whole-file rendering under whole_when_fits.
+func (c batchContext) render(files []intel.FileUnit, base, head core.Revision, withConfirmation bool, whole *WholePolicy) ([]byte, map[core.UnitID]prstate.SuppliedInput) {
+	_, units := batchExpectations(files, base, head, whole)
 	supplied := make(map[core.UnitID]prstate.SuppliedInput, len(files))
 	for i, unit := range units {
 		supplied[files[i].ID] = suppliedFor(unit)
 	}
 	advisory, omitted := batchPointerRefs(c.advisory, c.fileTerms, files)
+	confirmation := c.confirmation
+	if !withConfirmation {
+		confirmation = nil
+	}
 	return prompt.Review{
 		Skill:           prompt.ReviewSkill(),
 		Diff:            c.diff.Only(batchPaths(files)),
@@ -87,8 +96,37 @@ func (c batchContext) render(files []intel.FileUnit, base, head core.Revision) (
 		Advisory:        advisory,
 		AdvisoryOmitted: omitted,
 		Excluded:        c.excluded,
-		Confirmation:    c.confirmation,
+		Confirmation:    confirmation,
 	}.Render(), supplied
+}
+
+// renderPart builds one split-file part's complete prompt from the
+// snapshot: the shared headers and context with the part's own
+// gutter-numbered hunks as the only file content. The separate diff
+// section stays out — the part's hunks are the diff — so a part call
+// measures only its slice. The part's supplied measurement is recorded
+// when the file's parts merge, not here: a slice nobody completed
+// describes no record.
+func (c batchContext) renderPart(part *intel.FilePart, base, head core.Revision, withConfirmation bool) []byte {
+	_, units := partExpectations(part, base, head)
+	files := []intel.FileUnit{part.Unit}
+	advisory, omitted := batchPointerRefs(c.advisory, c.fileTerms, files)
+	confirmation := c.confirmation
+	if !withConfirmation {
+		confirmation = nil
+	}
+	return prompt.Review{
+		Skill:           prompt.ReviewSkill(),
+		Meta:            c.meta,
+		Prior:           c.prior,
+		Threads:         c.threads,
+		ReviewMD:        c.reviewMD,
+		Batch:           units,
+		Advisory:        advisory,
+		AdvisoryOmitted: omitted,
+		Excluded:        c.excluded,
+		Confirmation:    confirmation,
+	}.Render()
 }
 
 // suppliedFor measures what the reviewer is actually given for one unit: a
@@ -97,7 +135,7 @@ func (c batchContext) render(files []intel.FileUnit, base, head core.Revision) (
 // binary unit reaches the model through the diff slice alone and reads
 // diff_only, with the digest over the empty input because no body bytes were
 // handed over. Truncated stays false: a file that cannot fit a prompt alone
-// halts with input_exceeds_budget rather than being cut.
+// splits into parts rather than being cut.
 func suppliedFor(unit prompt.BatchUnit) prstate.SuppliedInput {
 	if unit.Form != "" {
 		return shapedSupplied(unit)
