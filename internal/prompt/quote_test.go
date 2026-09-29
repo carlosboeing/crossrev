@@ -130,6 +130,33 @@ func TestSkillBodyLeavesAFileWithNoFrontmatterAlone(t *testing.T) {
 	}
 }
 
+// The evidence revision follows the cited side — base for removed lines,
+// head for everything else — because checkReviewEvidence refuses a span
+// outside the ranges on the side the named revision selects, and only a
+// revision naming neither side is checked against both and corrected
+// (ADR 0026 decision 3). The skill must say exactly that: naming the
+// file's own content revision while citing a removed line fails the pass.
+func TestReviewSkillDirectsRevisionToFollowTheCitedSide(t *testing.T) {
+	skill := string(readFile(t, "../../skills/pr-review/SKILL.md"))
+	for _, want := range []string{
+		"Name the revision of the side you cite",
+		"naming neither side is corrected rather than refused",
+		"a span outside the named side's ranges still fails the pass",
+	} {
+		if !strings.Contains(skill, want) {
+			t.Errorf("skill is missing %q", want)
+		}
+	}
+	for _, stale := range []string{
+		"Name the content revision shown beside the file",
+		"a wrong `revision` is corrected rather than refused",
+	} {
+		if strings.Contains(skill, stale) {
+			t.Errorf("skill still carries the conflicting direction %q", stale)
+		}
+	}
+}
+
 // The embedded copies are what a compiled binary reproduces into the prompt, so
 // they have to be the files a contributor edits (ADR 0007, design section 18.5).
 func TestEmbeddedSkillsAreTheCanonicalFiles(t *testing.T) {
