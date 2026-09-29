@@ -6,7 +6,7 @@
 // Findings stays the compatibility entry point for tests that have no input
 // batch. Review first applies the shape check, then returns a SemanticError
 // when unit numbers do not equal the expected set exactly, finding numbers
-// name no returned finding, evidence names an unprovided path or revision,
+// name no returned finding, evidence names an unprovided path,
 // spans are inverted or outside supplied readable content, finding has no
 // finding number, not_affected has no evidence and reason, or
 // could_not_review has no failed-fallback reason. The error orders and names
@@ -244,9 +244,10 @@ func coverageEntryIsBad(entry json.RawMessage) bool {
 
 // coverageEvidenceIsBad reports whether one evidence item fails the member
 // shape: a non-empty path and revision, a source inside the four, whole or
-// null line spans, and a note carrying no fenced block. Whether the path and
-// revision were supplied, and whether the span sits inside readable content,
-// is the semantic half's question.
+// null line spans, and a note carrying no fenced block. Whether the path was
+// supplied, and whether the span sits inside readable content, is the
+// semantic half's question. The revision value itself is never judged here:
+// CrossRev records the revision it reviewed when the verdict is accepted.
 func coverageEvidenceIsBad(item json.RawMessage) bool {
 	if jqType(item) != "object" {
 		return true
@@ -429,10 +430,11 @@ type reviewCoverageEntry struct {
 }
 
 // reviewEvidenceRef is one coverage entry's evidence item, decoded past the
-// shape half's range checks.
+// shape half's range checks. It carries no revision: the shape half still
+// requires one on the wire, but CrossRev records the revision it reviewed
+// when the verdict is accepted, so the model's value is never read here.
 type reviewEvidenceRef struct {
 	path     string
-	revision string
 	source   string
 	hasStart bool
 	start    int
@@ -492,7 +494,6 @@ func decodeReviewCoverageEntry(entry json.RawMessage) (reviewCoverageEntry, bool
 func decodeReviewEvidenceRef(raw json.RawMessage) (reviewEvidenceRef, bool) {
 	var ev struct {
 		Path      string          `json:"path"`
-		Revision  string          `json:"revision"`
 		StartLine json.RawMessage `json:"start_line"`
 		EndLine   json.RawMessage `json:"end_line"`
 		Source    string          `json:"source"`
@@ -502,7 +503,6 @@ func decodeReviewEvidenceRef(raw json.RawMessage) (reviewEvidenceRef, bool) {
 		return ref, false
 	}
 	ref.path = ev.Path
-	ref.revision = ev.Revision
 	ref.source = ev.Source
 	if jqType(ev.StartLine) != "null" {
 		s, ok := jqFloat(ev.StartLine)
@@ -524,9 +524,10 @@ func decodeReviewEvidenceRef(raw json.RawMessage) (reviewEvidenceRef, bool) {
 }
 
 // checkReviewEvidence compares one evidence item against the unit it answers
-// for: the path must be one the batch supplied, the revision must be the base
-// or head the batch was built between, and the span must sit inside readable
-// content the batch supplied — or be file-level nulls.
+// for: the path must be one the batch supplied, and the span must sit inside
+// readable content the batch supplied — or be file-level nulls. The model's
+// revision is not checked: CrossRev records the revision it reviewed when the
+// verdict is accepted, so a wrong value is corrected rather than refused.
 func checkReviewEvidence(ev reviewEvidenceRef, unit UnitExpectation, expected ReviewExpectations, number int) error {
 	supplied := false
 	for _, u := range expected.Units {
@@ -538,10 +539,6 @@ func checkReviewEvidence(ev reviewEvidenceRef, unit UnitExpectation, expected Re
 	if !supplied {
 		return semanticf("coverage for unit %d cites evidence path %q, which the batch did not supply",
 			number, ev.path)
-	}
-	if ev.revision != expected.Base.SHA() && ev.revision != expected.Head.SHA() {
-		return semanticf("coverage for unit %d cites evidence revision %q, which is neither the base nor the head",
-			number, ev.revision)
 	}
 	if !ev.hasStart && !ev.hasEnd {
 		return nil

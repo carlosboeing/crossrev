@@ -501,7 +501,9 @@ func (l *Leg) publishInitialGeneration(ctx context.Context, req Request, loaded 
 // the reviewer reported, not stable finding ids: the reviewer numbers
 // findings per batch, and the stable id is minted later, at enrich time,
 // from path, title and anchor. Nothing joins these positions to posted
-// comments; they record which payload entries the verdict named.
+// comments; they record which payload entries the verdict named. Evidence
+// revisions are the content revisions the batch showed, not the model's
+// values (reviewedEvidence).
 func verdictsFromPayload(payload json.RawMessage, files []intel.FileUnit) (map[core.UnitID]recordVerdict, string, []string, error) {
 	var doc struct {
 		Coverage []struct {
@@ -531,9 +533,34 @@ func verdictsFromPayload(payload json.RawMessage, files []intel.FileUnit) (map[c
 		if entry.Reason != nil {
 			reason = *entry.Reason
 		}
-		out[unit.ID] = recordVerdict{Verdict: entry.Verdict, FindingIDs: ids, Evidence: entry.Evidence, Reason: reason}
+		out[unit.ID] = recordVerdict{Verdict: entry.Verdict, FindingIDs: ids, Evidence: reviewedEvidence(files, entry.Evidence), Reason: reason}
 	}
 	return out, doc.ExaminedScope, doc.KnownLimits, nil
+}
+
+// reviewedEvidence records the content revision CrossRev showed the reviewer
+// on every evidence item, rather than trusting the model's value: a cited
+// revision that exists nowhere is corrected here instead of refusing the
+// whole answer. A coverage entry may cite any supplied path, and a deletion
+// is read at the base while every other change is read at the head, so each
+// item takes the content revision of the file its own path names, not the
+// covering unit's. An item naming no supplied file keeps what the model
+// sent, so a missing measurement never blanks a record.
+func reviewedEvidence(files []intel.FileUnit, evidence []prstate.Evidence) []prstate.Evidence {
+	reviewed := make(map[string]string, len(files))
+	for _, unit := range files {
+		if sha := unit.ContentRevision.SHA(); sha != "" {
+			reviewed[unit.Path] = sha
+		}
+	}
+	out := make([]prstate.Evidence, 0, len(evidence))
+	for _, ev := range evidence {
+		if sha, ok := reviewed[ev.Path]; ok {
+			ev.Revision = prstate.Some(sha)
+		}
+		out = append(out, ev)
+	}
+	return out
 }
 
 // findingsFromPayload reads the findings out of one accepted batch payload
