@@ -99,10 +99,30 @@ func (c batchContext) render(files []intel.FileUnit, base, head core.Revision) (
 // handed over. Truncated stays false: a file that cannot fit a prompt alone
 // halts with input_exceeds_budget rather than being cut.
 func suppliedFor(unit prompt.BatchUnit) prstate.SuppliedInput {
+	if unit.Form != "" {
+		return shapedSupplied(unit)
+	}
 	if unit.Available && !unit.Binary {
 		return prstate.SuppliedInput{Digest: core.BodyDigestHex(unit.Body), Form: prstate.SuppliedFormFullText}
 	}
 	return prstate.SuppliedInput{Digest: core.BodyDigestHex(nil), Form: prstate.SuppliedFormDiffOnly}
+}
+
+// shapedSupplied measures what the reviewer is actually given for one
+// shaped unit: the digest over the gutter-numbered hunk bytes the prompt
+// shows, with the form the shaping step decided. A header-only unit with
+// no header to show digests the empty input, the way the legacy diff-only
+// unit does.
+func shapedSupplied(unit prompt.BatchUnit) prstate.SuppliedInput {
+	digest := core.BodyDigestHex(unit.NumberedDiff)
+	switch unit.Form {
+	case intel.FormHunksContext:
+		return prstate.SuppliedInput{Digest: digest, Form: prstate.SuppliedFormHunksContext}
+	case intel.FormDiffOnly:
+		return prstate.SuppliedInput{Digest: digest, Form: prstate.SuppliedFormDiffOnly}
+	default:
+		return prstate.SuppliedInput{Digest: digest, Form: prstate.SuppliedFormFullText}
+	}
 }
 
 // batchPaths names the sections one batch keeps from the full diff: each
@@ -167,12 +187,17 @@ func (l *Leg) logAcceptedCall(call int, promptBytes []byte, suppliedBytes int, e
 }
 
 // suppliedBytes measures what the reviewer was actually given for one batch:
-// the evidence body bytes handed to prompt rendering. Units reaching the
-// model through the diff slice alone contribute nothing, the way their
-// supplied record reads diff_only.
+// the evidence bytes handed to prompt rendering. A shaped unit contributes
+// its hunk bytes; an unshaped one contributes its body, or nothing when it
+// reaches the model through the diff slice alone, the way its supplied
+// record reads diff_only.
 func suppliedBytes(files []intel.FileUnit) int {
 	total := 0
 	for _, unit := range files {
+		if unit.Form != "" {
+			total += len(unit.Diff)
+			continue
+		}
 		if unit.Available && !unit.Binary {
 			total += len(unit.Body)
 		}

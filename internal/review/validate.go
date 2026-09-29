@@ -130,7 +130,13 @@ const (
 )
 
 func anchorKind(parsed *diff.Diff, required map[string]bool, path string, side core.Side, line int) (AnchorKind, string) {
-	if _, ok := parsed.Anchor(path, side, line, diff.DefaultSnap); ok {
+	// Line-level placement needs a changed line, not merely a visible
+	// one: the hunks show context for orientation, and a finding on a
+	// context line takes file-level placement. Anchoring still reads the
+	// full base-to-head diff — the clipped hunks never decide it — and
+	// the snap in the caller still moves a near miss onto a changed line
+	// first, so only an exact context line lands here.
+	if parsed.ChangedLine(path, side, line) {
 		return AnchorLine, ""
 	}
 	// A nil required set means the frozen path, where the prompt was the
@@ -138,7 +144,7 @@ func anchorKind(parsed *diff.Diff, required map[string]bool, path string, side c
 	// still lands a file-level comment rather than a top-level one. Only
 	// a known required set that excludes the path proves outside_diff.
 	if required == nil || required[path] {
-		return AnchorFile, "no hunk line covers this file, so the comment lands on the file rather than a line"
+		return AnchorFile, "no changed line covers this finding, so the comment lands on the file rather than a line"
 	}
 	return AnchorOutsideDiff, "outside the changed files, so the comment lands at the top level and keeps its finding id"
 }

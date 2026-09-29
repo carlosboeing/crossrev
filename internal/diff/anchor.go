@@ -86,6 +86,36 @@ func (d *Diff) Anchor(path string, side core.Side, want, bound int) (int, bool) 
 	return 0, false
 }
 
+// ChangedLine reports whether the diff shows the line as a changed line on
+// the named side: an addition or a deletion, never context. A finding on a
+// context line the hunks show for orientation takes file-level placement,
+// so only a changed line earns a line-level comment.
+func (d *Diff) ChangedLine(path string, side core.Side, want int) bool {
+	for _, l := range d.lines {
+		if l.header {
+			continue
+		}
+		s := d.sections[l.section]
+		if s.pathA != path && s.pathB != path {
+			continue
+		}
+		if l.hasOld == l.hasNew {
+			continue
+		}
+		if side == core.SideLeft {
+			if !l.hasOld || l.oldNo != want {
+				continue
+			}
+		} else {
+			if !l.hasNew || l.newNo != want {
+				continue
+			}
+		}
+		return true
+	}
+	return false
+}
+
 // distance is |v - want|, saturating instead of wrapping.
 //
 // The awk subtracts in floating point (lib/diff.sh:138), where the gap between

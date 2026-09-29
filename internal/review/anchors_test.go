@@ -37,3 +37,21 @@ func TestAnchorKindWithoutRequiredSetAssumesOnDiff(t *testing.T) {
 		t.Errorf("nil-set hunkless kind = %q, want file", kind)
 	}
 }
+
+// TestAnchorKindFilesAContextLineFinding pins the hunk-input rule: the
+// hunks show context for orientation, so a finding on a context line —
+// visible in the diff but not a change — takes file-level placement
+// rather than a line-level comment.
+func TestAnchorKindFilesAContextLineFinding(t *testing.T) {
+	raw := []byte("diff --git a/app.go b/app.go\n--- a/app.go\n+++ b/app.go\n" +
+		"@@ -1 +1,2 @@\n context\n+added\n")
+	parsed := diff.Parse(raw, core.RevisionPair{})
+	required := map[string]bool{"app.go": true}
+
+	if kind, reason := anchorKind(parsed, required, "app.go", core.SideRight, 1); kind != AnchorFile || reason == "" {
+		t.Errorf("context-line kind = %q reason %q, want file with a reason", kind, reason)
+	}
+	if kind, reason := anchorKind(parsed, required, "app.go", core.SideRight, 2); kind != AnchorLine || reason != "" {
+		t.Errorf("changed-line kind = %q reason %q, want line with no reason", kind, reason)
+	}
+}
