@@ -30,7 +30,7 @@ const CoverageKindRecords = "records"
 // measured at prompt-assembly time, never reported by the model.
 type SuppliedInput struct {
 	Digest    string `json:"digest"` // sha256 over the exact bytes handed over
-	Form      string `json:"form"`   // full_text | diff_only
+	Form      string `json:"form"`   // full_text | hunks_context | diff_only
 	Truncated bool   `json:"truncated"`
 }
 
