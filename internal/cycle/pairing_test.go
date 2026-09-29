@@ -112,11 +112,28 @@ func wantFatal(t *testing.T, err error, reason, action string) {
 // and the seam the driver holds has no writer to put one on.
 func TestPairingServesAnOverrideOnBothLegs(t *testing.T) {
 	check := Pairing(shippedDescriptor(t), configWith("codex", "claude"))
-	for _, override := range []string{"claude", "codex", "agy", "grok", "opencode"} {
+	for _, override := range []string{"claude", "agy", "grok", "opencode"} {
 		if err := check(override); err != nil {
 			t.Errorf("check(%q) = %v, want nil", override, err)
 		}
 	}
+}
+
+// TestPairingRefusesCodexAsResolverUnderShippedDescriptor pins that codex is
+// refused as a resolver through the shared resolver rule
+// (harness.RefusedAsResolver), even under the shipped descriptor where codex
+// carries no legs field: codex cannot read files, so a cycle whose resolver
+// is codex must not bill a review before failing.
+func TestPairingRefusesCodexAsResolverUnderShippedDescriptor(t *testing.T) {
+	check := Pairing(shippedDescriptor(t), configWith("claude", "codex"))
+	wantFatal(t, check(""),
+		"the harness 'codex' cannot serve the resolve leg",
+		"CrossRev runs the resolve leg on claude, agy, grok and opencode. Codex is limited to the review leg.")
+
+	overrideCheck := Pairing(shippedDescriptor(t), configWith("claude", "claude"))
+	wantFatal(t, overrideCheck("codex"),
+		"the harness 'codex' cannot serve the resolve leg",
+		"CrossRev runs the resolve leg on claude, agy, grok and opencode. Codex is limited to the review leg.")
 }
 
 // TestPairingRefusesAnOverrideThatCannotResolve pins the resolve-leg refusal,

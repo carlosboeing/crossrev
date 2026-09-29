@@ -317,6 +317,39 @@ func TestResolveAsksThePairingInTheDescriptorsVocabulary(t *testing.T) {
 	}
 }
 
+func TestResolveRefusesACodexResolverBeforeAnythingIsInstalled(t *testing.T) {
+	// Init reads the same shared resolver rule the runtime reads, through the
+	// Pairing seam: a resolver the resolve leg would refuse must fail the plan
+	// rather than install workflows that die on every resolve. The fake
+	// carries the preflight answer for codex on resolve — the production
+	// wiring names preflight.PairingSupported, which the preflight suite pins
+	// against the rule itself.
+	configuration := `version: 2
+mode: automated
+policy:
+  max_passes_per_cycle: 3
+reviewer:
+  harness: codex
+resolver:
+  harness: codex
+backlog:
+  destination: none
+`
+	req := request(t, configuration)
+	req.Pairing = fakePairing{legs: map[string]string{
+		"codex/resolve": "Codex is limited to the review leg, and cannot serve the resolve leg",
+	}}
+
+	_, err := initcmd.Resolve(context.Background(), req)
+	var fatal *ui.FatalError
+	if !errors.As(err, &fatal) {
+		t.Fatalf("err = %v, want a fatal refusal", err)
+	}
+	if !strings.HasPrefix(fatal.Reason, "the resolver is configured to run codex") {
+		t.Errorf("reason = %q, want the resolver refused rather than the reviewer", fatal.Reason)
+	}
+}
+
 func TestResolveNeverAsksThePairingAboutALegOnAnEndpoint(t *testing.T) {
 	// An endpoint means a static token in a secret, which never rotates and
 	// so never cares what kind of runner it is on.

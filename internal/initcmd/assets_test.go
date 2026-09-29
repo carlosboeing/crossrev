@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/carlosboeing/crossrev/internal/initcmd"
@@ -72,6 +73,22 @@ func TestEveryTemplateHasAnAccessor(t *testing.T) {
 	}
 	if len(entries) == 0 {
 		t.Fatalf("%s is empty, so this test proves nothing", templateDir)
+	}
+}
+
+// The generated policy is what `init` leaves behind, so its guidance has to
+// match the shared resolver rule: codex serves the review leg only, and the
+// shipped reviewer/resolver defaults are a pairing the rule allows.
+func TestPolicyTemplateMatchesTheResolverRule(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join(repoRoot, templateDir, "crossrev.yml"))
+	if err != nil {
+		t.Fatalf("reading the policy template: %v", err)
+	}
+	if !strings.Contains(string(raw), "codex serves\n# the review leg only") {
+		t.Error("the policy template does not say codex serves the review leg only")
+	}
+	if strings.Contains(string(raw), "resolver:\n  harness: codex") {
+		t.Error("the policy template defaults the resolver to codex, which the resolver rule refuses")
 	}
 }
 

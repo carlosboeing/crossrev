@@ -17,45 +17,25 @@ import (
 )
 
 // TestInvokeSetsPayloadPathPerAttempt pins that the resolve invoke loop sets
-// inv.PayloadPath to <transcriptBase>.payload for each attempt.
-// Without it, the codex adapter refuses with ErrScratch.
+// inv.PayloadPath to <transcriptBase>.payload for each attempt. The codex
+// adapter was the one that refused with ErrScratch without it, read off the
+// `-o` pair it passes; codex can no longer resolve, so the pin now reads the
+// path off the recorded invocation, which every adapter receives.
 func TestInvokeSetsPayloadPathPerAttempt(t *testing.T) {
 	e := setup(t)
 	e.addReview(t, defaultFindings(), "issues-remain")
-	e.adapter = nil // use the codex adapter from harness descriptors
-	e.runner.onRun = func(spec exec.Spec) {
-		for i := 0; i < len(spec.Args)-1; i++ {
-			if spec.Args[i] == "-o" {
-				_ = os.WriteFile(spec.Args[i+1], oneFindingPayload(), 0o644)
-			}
-		}
-	}
 
-	got := e.runReq(t, Request{
-		PR:      42,
-		Repo:    e.slug,
-		Trigger: TriggerHuman,
-		Harness: "codex",
-	})
+	got := e.run(t)
 	if got.Err != nil {
 		t.Fatalf("Run: %v", got.Err)
 	}
-	if len(e.runner.specs) == 0 {
-		t.Fatal("no runner spec recorded")
+	if len(e.adapter.invs) == 0 {
+		t.Fatal("adapter was not invoked")
 	}
-	spec := e.runner.specs[0]
-	var payloadPath string
-	for i := 0; i < len(spec.Args)-1; i++ {
-		if spec.Args[i] == "-o" {
-			payloadPath = spec.Args[i+1]
-			break
+	for i, inv := range e.adapter.invs {
+		if !strings.HasSuffix(inv.PayloadPath, ".payload") {
+			t.Fatalf("attempt %d payload path %q does not end with .payload", i, inv.PayloadPath)
 		}
-	}
-	if payloadPath == "" {
-		t.Fatalf("spec args missing -o <payloadPath>: %v", spec.Args)
-	}
-	if !strings.HasSuffix(payloadPath, ".payload") {
-		t.Fatalf("payload path %q does not end with .payload", payloadPath)
 	}
 }
 
@@ -107,7 +87,7 @@ func TestResolveSubstituteHarnessWarningKeepsSecondSentence(t *testing.T) {
 	e := setup(t)
 	e.addReview(t, defaultFindings(), "issues-remain")
 	e.git.show = map[string][]byte{
-		e.base.SHA() + ":.github/crossrev.yml": []byte("version: 2\nresolver:\n  harness: codex\n"),
+		e.base.SHA() + ":.github/crossrev.yml": []byte("version: 2\nresolver:\n  harness: grok\n"),
 	}
 	e.lookPath = func(name string) (string, error) {
 		if name == "claude" {
@@ -119,7 +99,7 @@ func TestResolveSubstituteHarnessWarningKeepsSecondSentence(t *testing.T) {
 	if got.Err != nil {
 		t.Fatalf("Run: %v", got.Err)
 	}
-	const wantSentence = "Both legs now run on the same harness, so a bug it misses while reviewing it also misses while resolving. Install codex to get the second lineage back."
+	const wantSentence = "Both legs now run on the same harness, so a bug it misses while reviewing it also misses while resolving. Install grok to get the second lineage back."
 	found := false
 	for _, msg := range ui.Texts(got.Messages) {
 		if strings.Contains(msg, wantSentence) {
