@@ -491,6 +491,54 @@ func TestSettingsAcceptsCodexAsAResolver(t *testing.T) {
 	})
 }
 
+// TestMovedPinDoesNotRefuseGrokResolve pins the resolve half of the
+// isolation gate: a grok review leg at a moved pin is refused with
+// review_isolation_unverified before any child starts, while a grok
+// resolve leg at the same moved pin starts its harness child.
+func TestMovedPinDoesNotRefuseGrokResolve(t *testing.T) {
+	e := setup(t)
+	e.addReview(t, defaultFindings(), "issues-remain")
+	e.git.show = map[string][]byte{
+		e.base.SHA() + ":.github/crossrev.yml": []byte("version: 2\nresolver:\n  harness: grok\n  model: x\n"),
+	}
+	raw := harness.DescriptorJSON()
+	var document map[string]any
+	if err := json.Unmarshal(raw, &document); err != nil {
+		t.Fatalf("decoding the descriptor: %v", err)
+	}
+	for _, entry := range document["harnesses"].([]any) {
+		if entry.(map[string]any)["name"] == "grok" {
+			install := entry.(map[string]any)["install"].(map[string]any)
+			install["pinned_version"] = "9.9.9"
+			install["command"] = "install 9.9.9"
+		}
+	}
+	mutated, _ := json.Marshal(document)
+	doc, err := harness.Load(mutated)
+	if err != nil {
+		t.Fatalf("loading the moved pin: %v", err)
+	}
+	e.doc = doc
+
+	got := e.run(t)
+	if got.Err != nil && strings.Contains(got.Err.Error(), "review_isolation_unverified") {
+		t.Errorf("grok resolve refused at a moved pin: %v", got.Err)
+	}
+	if e.runner.specs == nil {
+		t.Error("no harness started for a grok resolver at a moved pin")
+	}
+	// The setup is what the test claims: the claim names the grok
+	// resolver, and the descriptor in force carries the moved pin, so a
+	// pass here means the resolve leg started under the unverified pin
+	// rather than under the shipped one.
+	if len(e.forge.created) == 0 || !strings.Contains(e.forge.created[0].Body, `"harness":"grok"`) {
+		t.Error("the claim names no grok resolver, so the test proved nothing about one")
+	}
+	if entry, ok := e.doc.For("grok"); !ok || entry.Install.PinnedVersion != "9.9.9" {
+		t.Error("the descriptor in force carries no moved grok pin, so the test proved nothing about one")
+	}
+}
+
 // TestSettingsSubstitutesCodexWhenOnlyCodexIsInstalled pins that a machine
 // where only codex is on PATH substitutes codex as the resolver. The served
 // read tool gives the codex resolve leg its reads, so the substitution loop
