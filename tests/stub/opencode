@@ -56,6 +56,12 @@ fi
 # so a config without the rule is the bug this stub refuses. bash, task,
 # skill, webfetch, websearch and external_directory stay denied in both
 # shapes, and so does the .env denial inside the read map.
+#
+# The config also defines the agent the leg runs as: agent rules are appended
+# after all config-file rules with last match winning, so a global
+# agents.build allow overrides the file's deny unless the leg is pinned to
+# its own agent. The agent block mirrors the leg's grant for the same reason
+# the top level does, and the leg passes --agent to run as it.
 _assert_isolation() {
   local cfg="${OPENCODE_CONFIG:-}" cfg_content key
   cfg_content="$(tr -d '[:space:]' <"$cfg" 2>/dev/null || true)"
@@ -95,6 +101,36 @@ _assert_isolation() {
       exit 96
     fi
   done
+  # The pinned agent carries its own block, checked structurally: a global
+  # agents.build allow is appended after the file's rules, so only the
+  # agent's own rules hold the leg.
+  local agent_mode agent_grant
+  agent_mode="$(jq -r '.agent.crossrev.mode // "absent"' "$cfg" 2>/dev/null)"
+  if [[ "$agent_mode" != "primary" ]]; then
+    printf 'test stub: the isolation config must define a primary crossrev agent, got %s\n' "$agent_mode" >&2
+    exit 96
+  fi
+  for key in edit write apply_patch; do
+    agent_grant="$(jq -r --arg k "$key" '.agent.crossrev.permission[$k] // "absent"' "$cfg" 2>/dev/null)"
+    if [[ "$agent_grant" != "$want" ]]; then
+      printf 'test stub: the pinned agent must mirror the %s grant, want %s got %s\n' "$key" "$want" "$agent_grant" >&2
+      exit 96
+    fi
+  done
+  agent_grant="$(jq -r '.agent.crossrev.permission.bash // "absent"' "$cfg" 2>/dev/null)"
+  if [[ "$agent_grant" != "deny" ]]; then
+    printf 'test stub: the pinned agent must deny bash, got %s\n' "$agent_grant" >&2
+    exit 96
+  fi
+  agent_grant="$(jq -r '.agent.crossrev.permission."*" // "absent"' "$cfg" 2>/dev/null)"
+  if [[ "$agent_grant" != "deny" ]]; then
+    printf 'test stub: the pinned agent must keep the fail-closed base rule, got %s\n' "$agent_grant" >&2
+    exit 96
+  fi
+  if [[ "${OPENCODE_DISABLE_PROJECT_CONFIG:-}" != "1" ]]; then
+    printf 'test stub: OPENCODE_DISABLE_PROJECT_CONFIG=1 must be set so no project or parent config loads\n' >&2
+    exit 96
+  fi
   if [[ -z "${OPENCODE_CONFIG_DIR:-}" || ! -d "${OPENCODE_CONFIG_DIR:-}" ]]; then
     printf 'test stub: OPENCODE_CONFIG_DIR must name an existing directory\n' >&2
     exit 96
@@ -114,7 +150,16 @@ if [[ "$major" == "2" && "${1:-}" == "export" ]]; then
 fi
 if [[ "$major" == "2" && "${1:-}" == "session" ]]; then
   [[ "${2:-}" == "export" ]] || { printf 'test stub: unexpected invocation: %s\n' "$*" >&2; exit 96; }
-  set -- "export" "${3:-}"
+  shift 2
+  standalone_export=""
+  if [[ "${1:-}" == "--standalone" ]]; then
+    standalone_export=1; shift
+  fi
+  if [[ "$major" == "2" && -z "$standalone_export" ]]; then
+    printf 'test stub: 2.x session export runs --standalone so it does not attach to the shared service\n' >&2
+    exit 96
+  fi
+  set -- "export" "${1:-}"
 fi
 if [[ "${1:-}" == "export" ]]; then
   _assert_isolation
@@ -135,12 +180,18 @@ shift
 # granted. Appended, because one `crossrev review` invokes this twice on a retry.
 [[ -n "${CROSSREV_ARGV_LOG:-}" ]] && printf '%s\n' "run $*" >>"$CROSSREV_ARGV_LOG"
 
-fmt="" dir="" pure="" standalone=""
+fmt="" dir="" pure="" standalone="" agent=""
 while (( $# )); do
   case "$1" in
     --auto)
       printf 'test stub: %s is a blanket bypass and must not be passed\n' "$1" >&2
       exit 96 ;;
+    --agent)
+      agent="${2:-}"; shift 2
+      if [[ "$agent" != "crossrev" ]]; then
+        printf 'test stub: --agent must name the pinned crossrev agent, got %s\n' "$agent" >&2
+        exit 96
+      fi ;;
     --format) fmt="${2:-}"; shift 2 ;;
     --dir)
       if [[ "$major" == "2" ]]; then
@@ -188,6 +239,10 @@ prompt="${*:-}"
 # whitespace-stripped content, so the check is about the keys and not about how
 # the file was printed.
 _assert_isolation
+if [[ -z "$agent" ]]; then
+  printf 'test stub: --agent crossrev is required so the leg runs as its pinned agent\n' >&2
+  exit 96
+fi
 if [[ "$major" == "2" ]]; then
   # Standalone is what keeps the isolation config in force on 2.x: the
   # background service drops the process's OPENCODE_CONFIG, so a 2.x leg

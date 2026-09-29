@@ -30,22 +30,29 @@
 // absent from the session rather than refused at call time, and nothing prompts
 // for approval, so there is nothing for a headless run to block on.
 //
-// Two more doors are closed beside the permission block. `run --pure` keeps
+// Three more doors are closed beside the permission block. `run --pure` keeps
 // external plugins from loading at all — belt for the base rule's braces, since a
 // plugin's registered tools would be denied anyway but its code would still run.
 // And `OPENCODE_CONFIG_DIR` at an empty directory displaces the agents and
 // commands that would otherwise load from beside the operator's global config;
 // plugins are NOT displaced by it — opencode resolves them from its own
 // directories regardless — which is why the base rule and --pure, not the empty
-// directory, are what answer them. OPENCODE_CONFIG itself merges on top of the
-// operator's global config and wins on these keys — measured twice, against a
-// global `edit: allow` and again against a later-loading config file.
+// directory, are what answer them.
+//
+// The last door is which agent runs. The leg passes --agent naming the agent
+// the isolation config defines, whose own permission block mirrors the leg's
+// grant. Agent rules are appended after all config-file rules with last match
+// winning, so without the pin the leg runs the default build agent and a
+// global agents.build allow widens it back. OPENCODE_DISABLE_PROJECT_CONFIG
+// keeps project and parent-directory configs from merging at all, and any
+// operator-exported OPENCODE_CONFIG beside the adapter's own is dropped
+// before the child starts, so the isolation entries are the only ones.
 //
 // # 2.x keeps the config mechanism and changes everything around it
 //
 // opencode 2.x rejects `--pure` and `--dir` before any model call, takes no
 // `--variant`, and answers the session record through `session export`
-// rather than `export` (issue #272). Six live flash-model legs at 2.0.15
+// rather than `export` (issue #272). Live flash-model legs at 2.0.15
 // decide the shape below, and the second decision is the one that matters:
 // OPENCODE_CONFIG, OPENCODE_CONFIG_CONTENT and OPENCODE_PERMISSION are each
 // ignored by a run attached to the background service — `debug config` lists
@@ -67,7 +74,17 @@
 // directory, which base.spec already sets to the workdir — 2.x takes no
 // `--dir`, and the probe files of those live legs landed in the directory
 // the process started in. `session export` answers the same `.info` shape
-// the usage parser reads, so no parsing changed with the subcommand.
+// the usage parser reads, so no parsing changed with the subcommand — but it
+// runs `--standalone` too, because without it the child attaches to the
+// shared background service and stalls instead of answering.
+//
+// The agent pin matters more on 2.x than on 1.x: the isolation config merges
+// on top of the operator's global config, but an agent's rules are appended
+// after all config-file rules with last match winning, so a global
+// agents.build allow overrides the file's deny unless the leg runs as its
+// own pinned agent. The pin holds on both majors, and live legs against a
+// widening global config proved it: a review leg still wrote nothing and ran
+// nothing, while a resolve leg wrote its file and still ran nothing.
 //
 // The answering model and a whole-run usage record come from
 // `opencode export <sessionID>`, which reads the local session database and costs
@@ -107,13 +124,28 @@ const (
 	opencodeConfigDir    = "config-home"
 	opencodeConfigVar    = "OPENCODE_CONFIG"
 	opencodeConfigDirVar = "OPENCODE_CONFIG_DIR"
+	// opencodeDisableProjectConfigVar skips project config discovery, so no
+	// opencode.json(c) from the checkout or a parent directory loads beside
+	// the isolation config. It is defense in depth beside the agent pin:
+	// agent rules take precedence over every merged config, while this
+	// variable keeps those configs from merging at all.
+	opencodeDisableProjectConfigVar = "OPENCODE_DISABLE_PROJECT_CONFIG"
+	// opencodeAgentName is the agent the isolation config defines and every
+	// leg runs as via --agent. Without it the leg runs the default build
+	// agent, whose global rules are appended after the config-file rules
+	// with last match winning — a global agents.build allow then widens the
+	// leg back. The agent is a primary one: newer runtimes silently fall
+	// back to the default agent on a subagent dispatch, dropping the
+	// permission block outright.
+	opencodeAgentName = "crossrev"
 )
 
 // isolationConfig is the config jq builds at lib/adapters/opencode.sh:125-151.
 //
 // It is a template rather than a marshalled map because encoding/json sorts a
 // map's keys, and the key order here is read by a person auditing what a leg was
-// granted. One value varies, and each %s is where the write flag lands.
+// granted. One value varies, and each %s is where the write flag lands — the
+// first three in the top-level block, the second three in the pinned agent's.
 //
 // question and doom_loop are named denials rather than casualties of "*" so the
 // intent survives anyone reading only this block; doom_loop otherwise falls back
@@ -127,6 +159,11 @@ const (
 // each mirrors the leg's grant, so a review leg holds no writer under any
 // name whatever grouping a 2.x draws between them, and the keys match nothing
 // on 1.x, where they are inert patterns.
+//
+// The agent block defines the agent the leg runs as via --agent, carrying a
+// full mirror of the top-level block. Agent rules take precedence over every
+// merged config, so a key missing here would fall back to whatever the
+// operator's global file says — the mirror leaves no such key.
 const isolationConfig = `{
   "$schema": "https://opencode.ai/config.json",
   "permission": {
@@ -153,6 +190,36 @@ const isolationConfig = `{
     "external_directory": "deny",
     "question": "deny",
     "doom_loop": "deny"
+  },
+  "agent": {
+    "crossrev": {
+      "mode": "primary",
+      "permission": {
+        "*": "deny",
+        "read": {
+          "*": "allow",
+          "*.env": "deny",
+          "*.env.*": "deny",
+          "*.env.example": "allow"
+        },
+        "glob": "allow",
+        "grep": "allow",
+        "list": "allow",
+        "lsp": "allow",
+        "todowrite": "allow",
+        "edit": "%s",
+        "write": "%s",
+        "apply_patch": "%s",
+        "bash": "deny",
+        "task": "deny",
+        "skill": "deny",
+        "webfetch": "deny",
+        "websearch": "deny",
+        "external_directory": "deny",
+        "question": "deny",
+        "doom_loop": "deny"
+      }
+    }
   }
 }
 `
@@ -216,8 +283,10 @@ func (a *Opencode) Spec(inv Invocation) (exec.Spec, error) {
 	}
 
 	// --pure keeps external plugins out of the session entirely; see the header
-	// for why the permission block alone does not answer them.
-	args := []string{"run", "--pure", "--format", "json", "--dir", inv.Workdir}
+	// for why the permission block alone does not answer them. --agent runs
+	// the session as the agent the isolation config defines, whose rules are
+	// appended last and take precedence over any merged global.
+	args := []string{"run", "--pure", "--format", "json", "--agent", opencodeAgentName, "--dir", inv.Workdir}
 	if wanted(inv.Model) {
 		args = append(args, "--model", inv.Model)
 	}
@@ -226,7 +295,7 @@ func (a *Opencode) Spec(inv Invocation) (exec.Spec, error) {
 	}
 	args = append(args, prompt)
 
-	return a.spec(inv, args, a.isolationEnv(inv)...), nil
+	return a.opencodeSpec(inv, args, a.isolationEnv(inv)...), nil
 }
 
 // spec2x builds the child process for opencode 2.x, which rejects the 1.x
@@ -235,7 +304,7 @@ func (a *Opencode) Spec(inv Invocation) (exec.Spec, error) {
 // base.spec already sets to the workdir, and the effort rides the model as
 // provider/model#variant.
 func (a *Opencode) spec2x(inv Invocation, prompt string) (exec.Spec, error) {
-	args := []string{"run", "--standalone", "--format", "json"}
+	args := []string{"run", "--standalone", "--format", "json", "--agent", opencodeAgentName}
 	switch {
 	case wanted(inv.Model) && wanted(inv.Effort):
 		args = append(args, "--model", inv.Model+"#"+inv.Effort)
@@ -250,7 +319,7 @@ func (a *Opencode) spec2x(inv Invocation, prompt string) (exec.Spec, error) {
 	}
 	args = append(args, prompt)
 
-	return a.spec(inv, args, a.isolationEnv(inv)...), nil
+	return a.opencodeSpec(inv, args, a.isolationEnv(inv)...), nil
 }
 
 // VersionProbe is `opencode --version`, which reports "opencode vX.Y.Z" and
@@ -315,16 +384,42 @@ func (a *Opencode) ExportSpec(inv Invocation, sessionID string) (exec.Spec, erro
 	}
 	args := []string{"export", sessionID}
 	if inv.CLIMajor == 2 {
-		args = []string{"session", "export", sessionID}
+		// --standalone for the same reason the run carries it: without it
+		// the child attaches to the shared background service, where the
+		// export stalls instead of answering.
+		args = []string{"session", "export", "--standalone", sessionID}
 	}
-	return a.spec(inv, args, a.isolationEnv(inv)...), nil
+	return a.opencodeSpec(inv, args, a.isolationEnv(inv)...), nil
 }
 
 func (a *Opencode) isolationEnv(inv Invocation) []string {
 	return []string{
 		opencodeConfigVar + "=" + filepath.Join(inv.Scratch, opencodeConfigFile),
 		opencodeConfigDirVar + "=" + filepath.Join(inv.Scratch, opencodeConfigDir),
+		opencodeDisableProjectConfigVar + "=1",
 	}
+}
+
+// opencodeSpec builds the child through base.spec after dropping any
+// inherited entry for a variable the adapter sets itself. The leg allowlist
+// inherits an operator-exported OPENCODE_CONFIG beside the adapter's own,
+// and whichever duplicate the runtime honours first would then decide what
+// the leg may do — so the isolation entries are the only ones.
+func (a *Opencode) opencodeSpec(inv Invocation, args []string, additions ...string) exec.Spec {
+	owned := map[string]bool{
+		opencodeConfigVar:               true,
+		opencodeConfigDirVar:            true,
+		opencodeDisableProjectConfigVar: true,
+	}
+	env := make([]string, 0, len(inv.Env))
+	for _, entry := range inv.Env {
+		if variable, _, found := strings.Cut(entry, "="); found && owned[variable] {
+			continue
+		}
+		env = append(env, entry)
+	}
+	inv.Env = env
+	return a.spec(inv, args, additions...)
 }
 
 func (a *Opencode) writeIsolation(inv Invocation) error {
@@ -332,7 +427,9 @@ func (a *Opencode) writeIsolation(inv Invocation) error {
 	if inv.Write {
 		permission = "allow"
 	}
-	config := fmt.Sprintf(isolationConfig, permission, permission, permission)
+	config := fmt.Sprintf(isolationConfig,
+		permission, permission, permission,
+		permission, permission, permission)
 	if !json.Valid([]byte(config)) {
 		// Unreachable while the template above is a constant, and cheap enough
 		// to keep: the file is what stands between a review leg and a write
