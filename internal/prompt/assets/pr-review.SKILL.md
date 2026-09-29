@@ -29,11 +29,13 @@ The orchestrator supplies everything in the prompt. **You do not fetch anything.
 | `REVIEW.md` | Per-repository review instruction, when the repository has one |
 | `min_fix_severity` | The fixing threshold in force this pass, which is what the verdict keys off |
 
-If something you need is missing, say so in `blocked_reason` and return verdict `blocked`. Do not guess at a diff you were not given.
+Everything to judge is in the prompt. If something you need is missing, say so in `blocked_reason` and return verdict `blocked`. Do not guess at a diff you were not given.
 
 ## Read-only
 
-You modify nothing. No files, no working tree, no index, no branch state. You may read the checkout to understand context the diff does not carry — a function's other callers, a type definition, an existing test — and reading widely is encouraged, because a finding that ignores surrounding code is the kind the resolve leg disputes.
+You modify nothing. No files, no working tree, no index, no branch state.
+
+When the prompt offers a file-reading tool, it is context-only: read the same way in every harness, never as required work — a function's other callers, a type definition, an existing test. Reading widely is encouraged, because a finding that ignores surrounding code is the kind the resolve leg disputes.
 
 ## What to check
 
@@ -96,7 +98,9 @@ Return one entry per numbered file: no more, no fewer, no duplicates. A file lef
 
 Unsupported reading, difficult code, a large batch, ordinary uncertainty, missing tests and one failed attempt do not qualify for `could_not_review`.
 
-Each coverage entry names `evidence`: at least one item with a supplied path and its content revision, `start_line` and `end_line` for the lines the judgement rests on — null for file-level evidence — a `source` of `git`, `search`, `convention` or `reviewer`, and a `note` saying what it shows. Name the content revision shown beside the file; CrossRev records that revision itself, so a wrong `revision` is corrected rather than refused, while a wrong path or line range still fails the pass. **Notes carry locations and reasoning, never source text**: name the lines and say what they show, but do not quote them. Coverage records persist outside normal history, so a quoted line would survive a force-push meant to remove it — and a note carrying a fenced block is refused. Each coverage entry names `reason`: one line for the verdict, expected for `not_affected` and `could_not_review` where the verdict is a judgement rather than an observation.
+A verdict covers the supplied ranges on both sides — the numbered lines shown — not the whole file and not a context read. Lines outside them are unseen: never evidence, and `known_limits` when they limit the review.
+
+Each coverage entry names `evidence`: at least one item with a supplied path and its content revision, `start_line` and `end_line` for the lines the judgement rests on — null for file-level evidence — a `source` of `git`, `search`, `convention` or `reviewer`, and a `note` saying what it shows. `start_line` and `end_line` must sit inside the supplied ranges on the side the revision names — base for removed lines, head for everything else. A span outside those ranges is refused. Name the content revision shown beside the file; CrossRev records that revision itself, so a wrong `revision` is corrected rather than refused, while a wrong path or line range still fails the pass. **Notes carry locations and reasoning, never source text**: name the lines and say what they show, but do not quote them. Coverage records persist outside normal history, so a quoted line would survive a force-push meant to remove it — and a note carrying a fenced block is refused. Each coverage entry names `reason`: one line for the verdict, expected for `not_affected` and `could_not_review` where the verdict is a judgement rather than an observation.
 
 Advisory files never take a verdict and never satisfy one: a real defect found there is still published as a finding, but the required file it was found from keeps its own verdict. Excluded paths never take one either: they sit outside the required set, visibly, with their reason.
 

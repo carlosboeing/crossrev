@@ -75,12 +75,12 @@ func TestParseUnitIDStrict(t *testing.T) {
 }
 
 func TestFileEngineIDMatchesFrozenValue(t *testing.T) {
-	const want = "9224cacfc387067f"
+	const want = "81b7d675834623a3"
 	if got := FileEngineID(); got != want {
 		t.Errorf("FileEngineID() = %q, want %q", got, want)
 	}
-	if FileEngineVersion != "file-v2" {
-		t.Errorf("FileEngineVersion = %q, want file-v2", FileEngineVersion)
+	if FileEngineVersion != "hunk-v1" {
+		t.Errorf("FileEngineVersion = %q, want hunk-v1", FileEngineVersion)
 	}
 }
 

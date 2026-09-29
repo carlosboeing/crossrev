@@ -60,8 +60,8 @@ func (s *refStore) PublishGeneration(ctx context.Context, ref prstate.SlotRef, p
 		candCopy.Gen = genNum
 	}
 
-	// 2. Encode generation v2, compute digests
-	manifestBytes, recordsBytes, err := prstate.EncodeGenerationV2(candCopy)
+	// 2. Encode generation v3, compute digests
+	manifestBytes, recordsBytes, err := prstate.EncodeGenerationV3(candCopy)
 	if err != nil {
 		return prstate.Handle{}, err
 	}
@@ -295,8 +295,8 @@ func (s *refStore) ReadGeneration(ctx context.Context, ref prstate.SlotRef, hand
 		return prstate.Generation{}, fmt.Errorf("%w: reading records blob: %v", prstate.ErrLedgerCorrupt, err)
 	}
 
-	// Decode and verify generation v2
-	gen, err := prstate.DecodeGenerationV2(manifestBytes, recordsBytes)
+	// Decode and verify generation v3
+	gen, err := prstate.DecodeGenerationV3(manifestBytes, recordsBytes)
 	if err != nil {
 		return prstate.Generation{}, fmt.Errorf("%w: %v", prstate.ErrLedgerCorrupt, err)
 	}

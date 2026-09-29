@@ -10,7 +10,7 @@ import (
 )
 
 // Ledger limits (v1 comment ledger, retained for fixture compatibility; live
-// storage uses LedgerStore and the v2 schema).
+// storage uses LedgerStore and the v3 schema).
 //
 // A generation holds at most MaxCoverageShards shards. The design's §10.6
 // fires its halt bound there; this release keeps the last complete generation

@@ -65,6 +65,8 @@ The reviewer gives each required file one file verdict: `no_issue`, `finding`, `
 
 Covered means a verdict was recorded for the file. A `could_not_review` verdict still prevents convergence.
 
+A verdict covers the supplied ranges on both sides — the numbered lines the hunks showed — not the whole file. Each file arrives as its own gutter-numbered hunks: in full (`full_text`), as the enclosing function of each change (`hunks_context`), or header-only with its access reason (`diff_only`). Evidence for a verdict must sit inside those ranges on the side its revision names: a removed line is cited at the base, and anything outside the shown spans is refused. Lines the hunks did not show are unseen and belong in `known_limits`, never in evidence. A file that fits no call alone is reviewed in slices across calls and merges to one verdict carrying the union of the slices' ranges.
+
 One pass reads at most 400 required files. Batches hold at most 40 files in path order.
 
 Calls measure the full rendered prompt against the calling harness's packing limit (390,000 bytes for Codex, 312,000 for Claude Code, 120 KiB for argv transports).

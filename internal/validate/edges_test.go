@@ -331,8 +331,8 @@ func reviewExpectation(t *testing.T) validate.ReviewExpectations {
 		Base: base,
 		Head: head,
 		Units: []validate.UnitExpectation{
-			{Path: "a.go", Revision: head, Lines: 10, Readable: true},
-			{Path: "b.go", Revision: head, Lines: 4, Readable: true},
+			{Path: "a.go", Revision: head, Lines: 10, Readable: true, Ranges: fullRanges(10)},
+			{Path: "b.go", Revision: head, Lines: 4, Readable: true, Ranges: fullRanges(4)},
 		},
 	}
 }

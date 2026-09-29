@@ -294,7 +294,7 @@ type CoverageStop struct {
 }
 
 // EncodeCoverageManifest serialises a v1 manifest for embedding in a comment
-// body (retained for fixture compatibility; live storage uses EncodeGenerationV2).
+// body (retained for fixture compatibility; live storage uses EncodeGenerationV3).
 // The manifest digest is recomputed from bytes with the digest member
 // removed, so a caller-supplied digest can neither survive nor mismatch: the
 // bytes on the wire always carry the digest of the bytes on the wire. The
@@ -317,7 +317,7 @@ func EncodeCoverageManifest(m Manifest) (string, error) {
 }
 
 // EncodeCoverageShard serialises a v1 shard for embedding in a comment body
-// (retained for fixture compatibility; live storage uses EncodeGenerationV2).
+// (retained for fixture compatibility; live storage uses EncodeGenerationV3).
 // The shard digest is recomputed from bytes with the digest member removed,
 // for the same reason the manifest's is. The returned body carries no human
 // text; the retired v1 comment publisher prefixed the rendered line.
@@ -338,7 +338,7 @@ func EncodeCoverageShard(s Shard) (string, error) {
 }
 
 // DecodeCoverageManifest pulls a v1 manifest out of one comment body (retained
-// for fixture compatibility; live storage uses DecodeGenerationV2), checks its
+// for fixture compatibility; live storage uses DecodeGenerationV3), checks its
 // shape strictly, and verifies its integrity digest before returning it. A
 // body carrying no coverage marker, a payload of any other kind, or a digest
 // mismatch decodes to nothing.
@@ -357,7 +357,7 @@ func DecodeCoverageManifest(body string) (Manifest, bool) {
 }
 
 // DecodeCoverageShard pulls a v1 shard out of one comment body (retained for
-// fixture compatibility; live storage uses DecodeGenerationV2), checks its shape
+// fixture compatibility; live storage uses DecodeGenerationV3), checks its shape
 // strictly, and verifies its integrity digest before returning it.
 func DecodeCoverageShard(body string) (Shard, bool) {
 	payload := extractCoveragePayload(body)
