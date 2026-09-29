@@ -25,6 +25,7 @@ import (
 
 	"github.com/carlosboeing/crossrev/internal/cli"
 	"github.com/carlosboeing/crossrev/internal/harness"
+	"github.com/carlosboeing/crossrev/internal/readserve"
 	"github.com/carlosboeing/crossrev/internal/ui"
 )
 
@@ -33,13 +34,17 @@ func main() { os.Exit(run(os.Args[1:])) }
 // run is main with the arguments and the status handed back rather than taken
 // from the process, so a test can drive it.
 func run(args []string) int {
+	ctx, stop := interruptible()
+	defer stop()
+
+	if len(args) > 0 && args[0] == "__read-server" {
+		return readserve.Run(ctx, args[1:], os.Stdin, os.Stdout, os.Stderr)
+	}
+
 	// The palette is decided once, and --yes is decided per command, so this
 	// IO answers every question. compose builds a second one for the commands
 	// that carry the flag.
 	out := newIO(false)
-
-	ctx, stop := interruptible()
-	defer stop()
 
 	doc, refusal := descriptor(out)
 	if refusal != nil {

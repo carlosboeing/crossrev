@@ -356,6 +356,17 @@ func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settin
 		// different findings depending on whether a run directory exists
 		// (lib/adapters/claude.sh:126-130, :148-154).
 		l.Log.WriteTranscript(transcript, res.Stdout, res.Stderr)
+		if l.Log != nil && l.Log.Dir() != "" {
+			readLog := filepath.Join(tmp, "reads.jsonl")
+			if b, err := os.ReadFile(readLog); err == nil && len(b) > 0 {
+				target := filepath.Join(l.Log.Dir(), fmt.Sprintf("reads.call-%d.jsonl", call))
+				if f, err := os.OpenFile(target, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644); err == nil {
+					_, _ = f.Write(b)
+					_ = f.Close()
+				}
+				_ = os.Remove(readLog)
+			}
+		}
 		if res.Interrupted() {
 			// A signal death is an interrupt, not a harness failure: the
 			// child was killed rather than answering badly. The refusal
