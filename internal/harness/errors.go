@@ -57,6 +57,13 @@ var (
 	// hand the CLI, and was given nowhere (lib/adapters/opencode.sh:122-124).
 	ErrScratch = errors.New("the adapter needs a scratch directory and was given none")
 
+	// ErrEffortWithoutModel is an effort the adapter can only pass as a
+	// variant of the model, with no model to attach it to. opencode 2.x
+	// takes no --variant flag: the effort rides `--model` as
+	// provider/model#variant, so an effort with no model cannot be passed
+	// at all (issue #272).
+	ErrEffortWithoutModel = errors.New("an effort was set with no model to attach it to")
+
 	// ErrEndpointLeaked is an endpoint variable set in the environment CrossRev
 	// inherited, which redirects a harness process-wide
 	// (lib/legs.sh:494-501).

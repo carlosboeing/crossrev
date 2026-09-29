@@ -354,6 +354,7 @@ has "the leg asks for the json event stream"      "$opencode_review_argv" "--for
 has "the leg names the checkout as the workspace" "$opencode_review_argv" "--dir"
 has "the leg passes the configured model through" "$opencode_review_argv" "--model opencode/reviewer-model"
 has "and runs without external plugins"           "$opencode_review_argv" "--pure"
+has "and runs as its pinned agent"                "$opencode_review_argv" "--agent crossrev"
 hasnt "a leg is granted no blanket bypass"        "$opencode_review_argv" "--auto"
 
 # The permission block is the whole security story for a reading leg, so it is
@@ -369,47 +370,63 @@ for key in bash task skill webfetch websearch external_directory; do
 done
 is  "and keeps the .env denial in the read map" \
   "$(jq -r '.permission.read["*.env"] // "absent"' <<<"$opencode_review_cfg")" "deny"
+is  "and pins a primary agent" \
+  "$(jq -r '.agent.crossrev.mode // "absent"' <<<"$opencode_review_cfg")" "primary"
+is  "and the agent denies edit" \
+  "$(jq -r '.agent.crossrev.permission.edit // "absent"' <<<"$opencode_review_cfg")" "deny"
+is  "and the agent denies bash" \
+  "$(jq -r '.agent.crossrev.permission.bash // "absent"' <<<"$opencode_review_cfg")" "deny"
 
 read_only_cfg="$(mktemp)"
-printf '{"permission":{"*":"deny","edit":"deny","bash":"deny","task":"deny","skill":"deny","webfetch":"deny","websearch":"deny","external_directory":"deny","read":{"*.env":"deny"}}}' >"$read_only_cfg"
+printf '{"permission":{"*":"deny","edit":"deny","write":"deny","apply_patch":"deny","bash":"deny","task":"deny","skill":"deny","webfetch":"deny","websearch":"deny","external_directory":"deny","read":{"*.env":"deny"}},"agent":{"crossrev":{"mode":"primary","permission":{"*":"deny","edit":"deny","write":"deny","apply_patch":"deny","bash":"deny","task":"deny","skill":"deny","webfetch":"deny","websearch":"deny","external_directory":"deny","read":{"*.env":"deny"}}}}}' >"$read_only_cfg"
 ( unset OPENCODE_CONFIG OPENCODE_CONFIG_DIR
   "$HERE/stub/opencode" run --format json --dir "$HERE" "prompt" >/dev/null 2>&1 )
 is  "the stub refuses a run with no isolation config" "$?" "96"
 ( unset OPENCODE_CONFIG OPENCODE_CONFIG_DIR
   "$HERE/stub/opencode" run --format json --auto --dir "$HERE" "prompt" >/dev/null 2>&1 )
 is  "the stub still refuses --auto, which is a blanket bypass" "$?" "96"
-( export OPENCODE_CONFIG="$read_only_cfg" OPENCODE_CONFIG_DIR="$HERE"
+( export OPENCODE_CONFIG="$read_only_cfg" OPENCODE_CONFIG_DIR="$HERE" OPENCODE_DISABLE_PROJECT_CONFIG=1
   unset CROSSREV_REVIEW_PAYLOAD
   "$HERE/stub/opencode" run --format json --dir "$HERE" "prompt" >/dev/null 2>&1 )
 is  "and refuses a run with no --pure" "$?" "96"
 
-( export OPENCODE_CONFIG="$read_only_cfg" OPENCODE_CONFIG_DIR="$HERE"
+( export OPENCODE_CONFIG="$read_only_cfg" OPENCODE_CONFIG_DIR="$HERE" OPENCODE_DISABLE_PROJECT_CONFIG=1
   "$HERE/stub/opencode" run --pure --format json --dir "$HERE" "prompt" >/dev/null 2>&1 )
+is  "and refuses a run with no --agent" "$?" "96"
+( export OPENCODE_CONFIG="$read_only_cfg" OPENCODE_CONFIG_DIR="$HERE" OPENCODE_DISABLE_PROJECT_CONFIG=1
+  "$HERE/stub/opencode" run --pure --format json --agent build --dir "$HERE" "prompt" >/dev/null 2>&1 )
+is  "and refuses a run as another agent" "$?" "96"
+( export OPENCODE_CONFIG="$read_only_cfg" OPENCODE_CONFIG_DIR="$HERE" OPENCODE_DISABLE_PROJECT_CONFIG=1
+  "$HERE/stub/opencode" run --pure --format json --agent crossrev --dir "$HERE" "prompt" >/dev/null 2>&1 )
 is  "and accepts the flags and config the adapter uses" "$?" "1"
+( export OPENCODE_CONFIG="$read_only_cfg" OPENCODE_CONFIG_DIR="$HERE"
+  unset OPENCODE_DISABLE_PROJECT_CONFIG
+  "$HERE/stub/opencode" run --pure --format json --agent crossrev --dir "$HERE" "prompt" >/dev/null 2>&1 )
+is  "and refuses a run that lets project configs load" "$?" "96"
 
 # The write shape is the read shape with one key flipped: edit allowed BESIDE
 # the base rule, measured at 1.18.21 writing files in exactly this form. The
 # rule stays because it is what denies every tool no key names — a future
 # built-in, a custom tool, whatever a plugin or MCP server registers.
 write_cfg="$(mktemp)"
-printf '{"permission":{"*":"deny","edit":"allow","bash":"deny","task":"deny","skill":"deny","webfetch":"deny","websearch":"deny","external_directory":"deny","read":{"*.env":"deny"}}}' >"$write_cfg"
-( export OPENCODE_CONFIG="$write_cfg" OPENCODE_CONFIG_DIR="$HERE"
-  "$HERE/stub/opencode" run --pure --format json --dir "$HERE" "prompt" >/dev/null 2>&1 )
+printf '{"permission":{"*":"deny","edit":"allow","write":"allow","apply_patch":"allow","bash":"deny","task":"deny","skill":"deny","webfetch":"deny","websearch":"deny","external_directory":"deny","read":{"*.env":"deny"}},"agent":{"crossrev":{"mode":"primary","permission":{"*":"deny","edit":"allow","write":"allow","apply_patch":"allow","bash":"deny","task":"deny","skill":"deny","webfetch":"deny","websearch":"deny","external_directory":"deny","read":{"*.env":"deny"}}}}}' >"$write_cfg"
+( export OPENCODE_CONFIG="$write_cfg" OPENCODE_CONFIG_DIR="$HERE" OPENCODE_DISABLE_PROJECT_CONFIG=1
+  "$HERE/stub/opencode" run --pure --format json --agent crossrev --dir "$HERE" "prompt" >/dev/null 2>&1 )
 is  "the stub accepts the write shape beside the base rule" "$?" "1"
 
 # Dropping the base rule to make room for a grant is the bug that leaks every
 # unnamed tool: the rule must be present in both shapes.
 nostar_cfg="$(mktemp)"
-printf '{"permission":{"edit":"allow","bash":"deny","task":"deny","skill":"deny","webfetch":"deny","websearch":"deny","external_directory":"deny","read":{"*.env":"deny"}}}' >"$nostar_cfg"
-( export OPENCODE_CONFIG="$nostar_cfg" OPENCODE_CONFIG_DIR="$HERE"
-  "$HERE/stub/opencode" run --pure --format json --dir "$HERE" "prompt" >/dev/null 2>&1 )
+printf '{"permission":{"edit":"allow","write":"allow","apply_patch":"allow","bash":"deny","task":"deny","skill":"deny","webfetch":"deny","websearch":"deny","external_directory":"deny","read":{"*.env":"deny"}}}' >"$nostar_cfg"
+( export OPENCODE_CONFIG="$nostar_cfg" OPENCODE_CONFIG_DIR="$HERE" OPENCODE_DISABLE_PROJECT_CONFIG=1
+  "$HERE/stub/opencode" run --pure --format json --agent crossrev --dir "$HERE" "prompt" >/dev/null 2>&1 )
 is  "and refuses any shape without the fail-closed base rule" "$?" "96"
 
 # A shape that loses one of the standing denials is not a grant, it is a leak.
 leaky_cfg="$(mktemp)"
-printf '{"permission":{"*":"deny","edit":"allow","bash":"allow","task":"deny","skill":"deny","webfetch":"deny","websearch":"deny","external_directory":"deny","read":{"*.env":"deny"}}}' >"$leaky_cfg"
-( export OPENCODE_CONFIG="$leaky_cfg" OPENCODE_CONFIG_DIR="$HERE"
-  "$HERE/stub/opencode" run --pure --format json --dir "$HERE" "prompt" >/dev/null 2>&1 )
+printf '{"permission":{"*":"deny","edit":"allow","write":"allow","apply_patch":"allow","bash":"allow","task":"deny","skill":"deny","webfetch":"deny","websearch":"deny","external_directory":"deny","read":{"*.env":"deny"}}}' >"$leaky_cfg"
+( export OPENCODE_CONFIG="$leaky_cfg" OPENCODE_CONFIG_DIR="$HERE" OPENCODE_DISABLE_PROJECT_CONFIG=1
+  "$HERE/stub/opencode" run --pure --format json --agent crossrev --dir "$HERE" "prompt" >/dev/null 2>&1 )
 is  "and refuses a write shape without the bash denial" "$?" "96"
 rm -f "$read_only_cfg" "$write_cfg" "$nostar_cfg" "$leaky_cfg"
 
@@ -692,6 +709,7 @@ has "the resolve leg asks for the json event stream" "$ocx_resolve_argv" "--form
 has "names a workspace as before"                    "$ocx_resolve_argv" "--dir"
 has "and passes the configured model through"        "$ocx_resolve_argv" "--model opencode/resolver-model"
 has "and runs without external plugins"              "$ocx_resolve_argv" "--pure"
+has "and runs as its pinned agent"                   "$ocx_resolve_argv" "--agent crossrev"
 hasnt "while no blanket bypass appears"              "$ocx_resolve_argv" "--auto"
 
 is  "the write block keeps the fail-closed base rule" \
@@ -704,6 +722,85 @@ for key in bash task skill webfetch websearch external_directory; do
 done
 is  "and keeps the .env denial in the read map" \
   "$(jq -r '.permission.read["*.env"] // "absent"' <<<"$ocx_write_cfg")" "deny"
+is  "and pins a primary agent on the write leg" \
+  "$(jq -r '.agent.crossrev.mode // "absent"' <<<"$ocx_write_cfg")" "primary"
+is  "and the agent grants edit beside the rule" \
+  "$(jq -r '.agent.crossrev.permission.edit // "absent"' <<<"$ocx_write_cfg")" "allow"
+is  "and the agent still denies bash" \
+  "$(jq -r '.agent.crossrev.permission.bash // "absent"' <<<"$ocx_write_cfg")" "deny"
+
+# --- opencode 2.x: the same review leg through the 2.x contract ---------------
+#
+# CROSSREV_OPENCODE_MAJOR=2 switches the stub to the 2.x shape: the probe
+# reports 2.0.15, so the version gate confirms major 2 and the adapter builds
+# the 2.x vector — standalone instead of --pure, no --dir, no --variant — and
+# reads the session record through `session export`. Measured live at 2.0.15:
+# the background service drops the process's isolation config, so a 2.x leg
+# without --standalone would start unconstrained (issue #272).
+fixture_repo "$(config_opencode_reviews)"; stub_reset
+routes_baseline "$(printf '[]' | payload)"
+route 'api --method POST repos/*/issues/42/comments*' '{"id":9001}'
+route '*reviewThreads*' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}'
+CROSSREV_REVIEW_PAYLOAD="$(printf '%s' "$REVIEW_PAYLOAD" | sed "s/REPLACE_HEAD_SHA/$FIX_HEAD/g" | payload)"; export CROSSREV_REVIEW_PAYLOAD
+CROSSREV_OPENCODE_CFG_LOG="$(mktemp)"; export CROSSREV_OPENCODE_CFG_LOG
+CROSSREV_OPENCODE_MAJOR=2; export CROSSREV_OPENCODE_MAJOR
+out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
+unset CROSSREV_OPENCODE_MAJOR
+ocx2_review_argv="$(cat "$ARGV_LOG")"
+ocx2_review_cfg="$(jq -sc '.[0]' "$CROSSREV_OPENCODE_CFG_LOG")"
+
+is  "a review leg runs on opencode 2.x"              "$rc" "0"
+has "and names it in the run header"                 "$out" "Reviewer: opencode"
+is  "and posts the finding it carried"               "$(count 'method POST repos/acme/widget/pulls/42/comments')" "1"
+has "the 2.x leg asks for the json event stream"     "$ocx2_review_argv" "--format json"
+has "and runs standalone so the config is honoured"  "$ocx2_review_argv" "--standalone"
+has "and runs as its pinned agent"                   "$ocx2_review_argv" "--agent crossrev"
+has "and passes the configured model through"        "$ocx2_review_argv" "--model opencode/reviewer-model"
+hasnt "with no --pure, which 2.x rejects"            "$ocx2_review_argv" "--pure"
+hasnt "with no --dir, which 2.x rejects"             "$ocx2_review_argv" "--dir"
+hasnt "with no --variant, which 2.x rejects"         "$ocx2_review_argv" "--variant"
+hasnt "and no blanket bypass"                        "$ocx2_review_argv" "--auto"
+is  "the 2.x read-only block keeps the base rule" \
+  "$(jq -r '.permission."*" // "absent"' <<<"$ocx2_review_cfg")" "deny"
+is  "and denies edit" \
+  "$(jq -r '.permission.edit // "absent"' <<<"$ocx2_review_cfg")" "deny"
+is  "and denies the 2.x file writer beside it" \
+  "$(jq -r '.permission.write // "absent"' <<<"$ocx2_review_cfg")" "deny"
+is  "and denies apply_patch beside it" \
+  "$(jq -r '.permission.apply_patch // "absent"' <<<"$ocx2_review_cfg")" "deny"
+is  "and the 2.x leg pins a primary agent" \
+  "$(jq -r '.agent.crossrev.mode // "absent"' <<<"$ocx2_review_cfg")" "primary"
+is  "and the 2.x agent denies the file writer" \
+  "$(jq -r '.agent.crossrev.permission.write // "absent"' <<<"$ocx2_review_cfg")" "deny"
+has "the marker records the answering model from the session export" \
+  "$(calls)" '"model_reported":"stub-model"'
+has "and the token count excludes reasoning"         "$(calls)" '"tokens":16'
+
+# Direct probes against the 2.x stub shape: the 1.x flags and the 1.x export
+# are refused, and the 2.x vector the adapter builds is accepted.
+ocx2_cfg="$(mktemp)"
+printf '{"permission":{"*":"deny","edit":"deny","write":"deny","apply_patch":"deny","bash":"deny","task":"deny","skill":"deny","webfetch":"deny","websearch":"deny","external_directory":"deny","read":{"*.env":"deny"}},"agent":{"crossrev":{"mode":"primary","permission":{"*":"deny","edit":"deny","write":"deny","apply_patch":"deny","bash":"deny","task":"deny","skill":"deny","webfetch":"deny","websearch":"deny","external_directory":"deny","read":{"*.env":"deny"}}}}}' >"$ocx2_cfg"
+( export CROSSREV_OPENCODE_MAJOR=2 OPENCODE_CONFIG="$ocx2_cfg" OPENCODE_CONFIG_DIR="$HERE" OPENCODE_DISABLE_PROJECT_CONFIG=1
+  "$HERE/stub/opencode" run --pure --format json --dir "$HERE" "prompt" >/dev/null 2>&1 )
+is  "and the 2.x stub refuses the 1.x flags" "$?" "96"
+( export CROSSREV_OPENCODE_MAJOR=2 OPENCODE_CONFIG="$ocx2_cfg" OPENCODE_CONFIG_DIR="$HERE" OPENCODE_DISABLE_PROJECT_CONFIG=1
+  unset CROSSREV_REVIEW_PAYLOAD
+  "$HERE/stub/opencode" run --standalone --format json "prompt" >/dev/null 2>&1 )
+is  "and refuses a 2.x run with no --agent" "$?" "96"
+( export CROSSREV_OPENCODE_MAJOR=2 OPENCODE_CONFIG="$ocx2_cfg" OPENCODE_CONFIG_DIR="$HERE" OPENCODE_DISABLE_PROJECT_CONFIG=1
+  unset CROSSREV_REVIEW_PAYLOAD
+  "$HERE/stub/opencode" run --standalone --format json --agent crossrev "prompt" >/dev/null 2>&1 )
+is  "and accepts the vector the 2.x adapter builds" "$?" "1"
+( export CROSSREV_OPENCODE_MAJOR=2 OPENCODE_CONFIG="$ocx2_cfg" OPENCODE_CONFIG_DIR="$HERE" OPENCODE_DISABLE_PROJECT_CONFIG=1
+  "$HERE/stub/opencode" export ses_stub >/dev/null 2>&1 )
+is  "and refuses the 1.x export" "$?" "96"
+( export CROSSREV_OPENCODE_MAJOR=2 OPENCODE_CONFIG="$ocx2_cfg" OPENCODE_CONFIG_DIR="$HERE" OPENCODE_DISABLE_PROJECT_CONFIG=1
+  "$HERE/stub/opencode" session export ses_stub >/dev/null 2>&1 )
+is  "and refuses a 2.x export attached to the shared service" "$?" "96"
+( export CROSSREV_OPENCODE_MAJOR=2 OPENCODE_CONFIG="$ocx2_cfg" OPENCODE_CONFIG_DIR="$HERE" OPENCODE_DISABLE_PROJECT_CONFIG=1
+  "$HERE/stub/opencode" session export --standalone ses_stub >/dev/null 2>&1 )
+is  "while session export answers the record" "$?" "0"
+rm -f "$ocx2_cfg"
 
 finish
 

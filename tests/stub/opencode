@@ -24,18 +24,30 @@ set -uo pipefail
 source "$(_s="${BASH_SOURCE[0]}"; while [[ -L "$_s" ]]; do _d="$(cd -P "$(dirname "$_s")" && pwd)"; _s="$(readlink "$_s")"; [[ "$_s" != /* ]] && _s="$_d/$_s"; done; cd -P "$(dirname "$_s")" && pwd)/_stub-env.sh"
 
 
-[[ "${1:-}" == "--version" ]] && { printf '1.18.21 (test stub)\n'; exit 0; }
+# CROSSREV_OPENCODE_MAJOR=2 switches the stub to the 2.x contract: the probe
+# reports 2.0.15, `run` requires --standalone and refuses --pure, --dir and
+# --variant, and the session record answers through `session export`. Unset
+# keeps the 1.x contract every existing suite was written against.
+major="${CROSSREV_OPENCODE_MAJOR:-1}"
+
+if [[ "${1:-}" == "--version" ]]; then
+  if [[ "$major" == "2" ]]; then printf '2.0.15 (test stub)\n'; else printf '1.18.21 (test stub)\n'; fi
+  exit 0
+fi
 
 # Isolation is checked identically for `run` and `export`: the adapter reuses
 # the same env for the session-record call, and a check only on `run` would
 # miss deleting that config before export.
 #
 # Every shape carries the fail-closed `"*": "deny"` base rule, and which leg
-# runs decides one key under it:
+# runs decides one grant under it:
 #
 #   read-only — `"edit": "deny"`;
 #   write     — `"edit": "allow"` beside the base rule, measured at 1.18.21
 #               editing files in this exact form.
+#
+# `write` and `apply_patch` mirror that grant in both shapes, because 2.x
+# splits creating a file from replacing text across them.
 #
 # The base rule is what holds the surface no key names: a tool a future
 # opencode adds, a custom tool, and whatever an MCP server or plugin
@@ -44,6 +56,12 @@ source "$(_s="${BASH_SOURCE[0]}"; while [[ -L "$_s" ]]; do _d="$(cd -P "$(dirnam
 # so a config without the rule is the bug this stub refuses. bash, task,
 # skill, webfetch, websearch and external_directory stay denied in both
 # shapes, and so does the .env denial inside the read map.
+#
+# The config also defines the agent the leg runs as: agent rules are appended
+# after all config-file rules with last match winning, so a global
+# agents.build allow overrides the file's deny unless the leg is pinned to
+# its own agent. The agent block mirrors the leg's grant for the same reason
+# the top level does, and the leg passes --agent to run as it.
 _assert_isolation() {
   local cfg="${OPENCODE_CONFIG:-}" cfg_content key
   cfg_content="$(tr -d '[:space:]' <"$cfg" 2>/dev/null || true)"
@@ -72,6 +90,47 @@ _assert_isolation() {
     printf 'test stub: edit must be exactly one of deny or allow\n' >&2
     exit 96
   fi
+  # 2.x splits creating a file from replacing text across write and
+  # apply_patch, so each mirrors the leg's grant: a review config denying
+  # edit while allowing either writer is the leak this refuses.
+  local want="deny"
+  (( edit_allow == 1 )) && want="allow"
+  for key in write apply_patch; do
+    if [[ "$cfg_content" != *"\"$key\":\"$want\""* ]]; then
+      printf 'test stub: %s must mirror the edit grant, want %s\n' "$key" "$want" >&2
+      exit 96
+    fi
+  done
+  # The pinned agent carries its own block, checked structurally: a global
+  # agents.build allow is appended after the file's rules, so only the
+  # agent's own rules hold the leg.
+  local agent_mode agent_grant
+  agent_mode="$(jq -r '.agent.crossrev.mode // "absent"' "$cfg" 2>/dev/null)"
+  if [[ "$agent_mode" != "primary" ]]; then
+    printf 'test stub: the isolation config must define a primary crossrev agent, got %s\n' "$agent_mode" >&2
+    exit 96
+  fi
+  for key in edit write apply_patch; do
+    agent_grant="$(jq -r --arg k "$key" '.agent.crossrev.permission[$k] // "absent"' "$cfg" 2>/dev/null)"
+    if [[ "$agent_grant" != "$want" ]]; then
+      printf 'test stub: the pinned agent must mirror the %s grant, want %s got %s\n' "$key" "$want" "$agent_grant" >&2
+      exit 96
+    fi
+  done
+  agent_grant="$(jq -r '.agent.crossrev.permission.bash // "absent"' "$cfg" 2>/dev/null)"
+  if [[ "$agent_grant" != "deny" ]]; then
+    printf 'test stub: the pinned agent must deny bash, got %s\n' "$agent_grant" >&2
+    exit 96
+  fi
+  agent_grant="$(jq -r '.agent.crossrev.permission."*" // "absent"' "$cfg" 2>/dev/null)"
+  if [[ "$agent_grant" != "deny" ]]; then
+    printf 'test stub: the pinned agent must keep the fail-closed base rule, got %s\n' "$agent_grant" >&2
+    exit 96
+  fi
+  if [[ "${OPENCODE_DISABLE_PROJECT_CONFIG:-}" != "1" ]]; then
+    printf 'test stub: OPENCODE_DISABLE_PROJECT_CONFIG=1 must be set so no project or parent config loads\n' >&2
+    exit 96
+  fi
   if [[ -z "${OPENCODE_CONFIG_DIR:-}" || ! -d "${OPENCODE_CONFIG_DIR:-}" ]]; then
     printf 'test stub: OPENCODE_CONFIG_DIR must name an existing directory\n' >&2
     exit 96
@@ -83,7 +142,25 @@ _assert_isolation() {
 
 # The export subcommand answers from the local session database in the real CLI,
 # costing no model call. The adapter reads both the answering model and the
-# whole-run token total from it.
+# whole-run token total from it. On 2.x it moved to `session export`, and a
+# bare `export` is refused the way the real CLI would not recognise the shape.
+if [[ "$major" == "2" && "${1:-}" == "export" ]]; then
+  printf 'test stub: 2.x exports through `session export`, not `export`\n' >&2
+  exit 96
+fi
+if [[ "$major" == "2" && "${1:-}" == "session" ]]; then
+  [[ "${2:-}" == "export" ]] || { printf 'test stub: unexpected invocation: %s\n' "$*" >&2; exit 96; }
+  shift 2
+  standalone_export=""
+  if [[ "${1:-}" == "--standalone" ]]; then
+    standalone_export=1; shift
+  fi
+  if [[ "$major" == "2" && -z "$standalone_export" ]]; then
+    printf 'test stub: 2.x session export runs --standalone so it does not attach to the shared service\n' >&2
+    exit 96
+  fi
+  set -- "export" "${1:-}"
+fi
 if [[ "${1:-}" == "export" ]]; then
   _assert_isolation
   if [[ -n "${CROSSREV_OPENCODE_NO_EXPORT:-}" ]]; then
@@ -103,24 +180,52 @@ shift
 # granted. Appended, because one `crossrev review` invokes this twice on a retry.
 [[ -n "${CROSSREV_ARGV_LOG:-}" ]] && printf '%s\n' "run $*" >>"$CROSSREV_ARGV_LOG"
 
-fmt="" dir="" pure=""
+fmt="" dir="" pure="" standalone="" agent=""
 while (( $# )); do
   case "$1" in
     --auto)
       printf 'test stub: %s is a blanket bypass and must not be passed\n' "$1" >&2
       exit 96 ;;
+    --agent)
+      agent="${2:-}"; shift 2
+      if [[ "$agent" != "crossrev" ]]; then
+        printf 'test stub: --agent must name the pinned crossrev agent, got %s\n' "$agent" >&2
+        exit 96
+      fi ;;
     --format) fmt="${2:-}"; shift 2 ;;
-    --dir) dir="${2:-}"; shift 2 ;;
-    --pure) pure=1; shift ;;
+    --dir)
+      if [[ "$major" == "2" ]]; then
+        printf 'test stub: 2.x rejects --dir; the checkout travels as the working directory\n' >&2
+        exit 96
+      fi
+      dir="${2:-}"; shift 2 ;;
+    --pure)
+      if [[ "$major" == "2" ]]; then
+        printf 'test stub: 2.x rejects --pure; the run is standalone instead\n' >&2
+        exit 96
+      fi
+      pure=1; shift ;;
+    --standalone)
+      if [[ "$major" != "2" ]]; then
+        printf 'test stub: 1.x takes no --standalone\n' >&2
+        exit 96
+      fi
+      standalone=1; shift ;;
     --model)
       # The real CLI takes provider/model, not a bare id — the configuration
-      # docs say so, so the stub enforces it.
+      # docs say so, so the stub enforces it. On 2.x the effort rides along
+      # as provider/model#variant, which still carries the slash.
       case "${2:-}" in
         */*) ;;
         *) printf 'test stub: %s takes provider/model, not a bare id\n' "$1" >&2; exit 96 ;;
       esac
       shift 2 ;;
-    --variant) shift 2 ;;
+    --variant)
+      if [[ "$major" == "2" ]]; then
+        printf 'test stub: 2.x takes no --variant; the effort rides --model\n' >&2
+        exit 96
+      fi
+      shift 2 ;;
     --*) shift 2 ;;
     *) break ;;
   esac
@@ -134,16 +239,30 @@ prompt="${*:-}"
 # whitespace-stripped content, so the check is about the keys and not about how
 # the file was printed.
 _assert_isolation
-if [[ -z "$pure" ]]; then
-  printf 'test stub: --pure is required so external plugins never load\n' >&2
+if [[ -z "$agent" ]]; then
+  printf 'test stub: --agent crossrev is required so the leg runs as its pinned agent\n' >&2
   exit 96
+fi
+if [[ "$major" == "2" ]]; then
+  # Standalone is what keeps the isolation config in force on 2.x: the
+  # background service drops the process's OPENCODE_CONFIG, so a 2.x leg
+  # without it would start unconstrained.
+  if [[ -z "$standalone" ]]; then
+    printf 'test stub: --standalone is required so the isolation config is honoured\n' >&2
+    exit 96
+  fi
+else
+  if [[ -z "$pure" ]]; then
+    printf 'test stub: --pure is required so external plugins never load\n' >&2
+    exit 96
+  fi
+  if [[ -z "$dir" || ! -d "$dir" ]]; then
+    printf 'test stub: --dir is required and must name a real directory\n' >&2
+    exit 96
+  fi
 fi
 if [[ "$fmt" != "json" ]]; then
   printf 'test stub: --format json is required, got %s\n' "${fmt:-nothing}" >&2
-  exit 96
-fi
-if [[ -z "$dir" || ! -d "$dir" ]]; then
-  printf 'test stub: --dir is required and must name a real directory\n' >&2
   exit 96
 fi
 

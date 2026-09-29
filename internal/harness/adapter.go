@@ -32,6 +32,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -90,26 +91,51 @@ type VersionPinned interface {
 }
 
 // CheckVersion runs the version probe of an adapter that has one and answers
-// its refusal, or nil when the leg may start. An adapter that pins no version
-// is left alone. The review leg prompts per batch, so this runs per prompt
-// rather than once per leg: `--version` starts no model and costs no call, and
-// a cache would be state a crash loses.
-func CheckVersion(ctx context.Context, runner exec.Runner, adapter Adapter, inv Invocation) *Refusal {
+// the confirmed major version beside its refusal, or nil when the leg may
+// start. An adapter that pins no version is left alone. The review leg
+// prompts per batch, so this runs per prompt rather than once per leg:
+// `--version` starts no model and costs no call, and a cache would be state
+// a crash loses.
+//
+// The major is what lets one adapter drive CLIs whose flags differ across
+// majors: the legs set Invocation.CLIMajor from it before building the spec.
+// Zero means no version was confirmed — unanswered, unsupported, or unpinned
+// — and the adapter keeps its legacy shape on zero, which fails closed on an
+// install it does not drive rather than running it unconstrained.
+func CheckVersion(ctx context.Context, runner exec.Runner, adapter Adapter, inv Invocation) (int, *Refusal) {
 	pinned, ok := adapter.(VersionPinned)
 	if !ok {
-		return nil
+		return 0, nil
 	}
 	res := runner.Run(ctx, pinned.VersionProbe(inv))
 	if res.Err != nil && exec.IsNotFound(res.Err) {
-		return adapter.NotInstalled()
+		return 0, adapter.NotInstalled()
 	}
 	if res.Err != nil || res.ExitCode != 0 {
 		// Fail closed: a probe that did not answer leaves the version
 		// unconfirmed, and unconfirmed is not supported. The adapter's own
 		// "did not report" refusal is the answer, and the leg does not start.
-		return pinned.VersionRefusal(nil)
+		return 0, pinned.VersionRefusal(nil)
 	}
-	return pinned.VersionRefusal(res.Stdout)
+	if refusal := pinned.VersionRefusal(res.Stdout); refusal != nil {
+		return 0, refusal
+	}
+	return majorVersion(versionToken.FindString(string(res.Stdout))), nil
+}
+
+// versionToken is the first version-shaped token of a probe banner, the same
+// shape preflight's versionToken reads.
+var versionToken = regexp.MustCompile(`v?[0-9]+\.[0-9]+[0-9A-Za-z.+-]*`)
+
+// majorVersion reads a version token's leading major number, or 0 when it has
+// none.
+func majorVersion(token string) int {
+	major, _, _ := strings.Cut(strings.TrimPrefix(token, "v"), ".")
+	number, err := strconv.Atoi(major)
+	if err != nil {
+		return 0
+	}
+	return number
 }
 
 // Exporter is the adapter that answers its telemetry from a SECOND child.

@@ -69,7 +69,7 @@ func TestResolveRefusedHarnessRefusesBeforeChild(t *testing.T) {
 	e := setup(t)
 	e.addReview(t, defaultFindings(), "issues-remain")
 	e.adapter = nil
-	e.runner.stdout = []byte("opencode v2.0.15\n")
+	e.runner.stdout = []byte("opencode v3.1.4\n")
 	got := e.runReq(t, Request{PR: 42, Repo: e.slug, Trigger: TriggerHuman, Harness: "opencode"})
 	if got.Err == nil {
 		t.Fatal("the leg accepted a refused harness install")

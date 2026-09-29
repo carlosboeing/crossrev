@@ -159,8 +159,8 @@
       "install": {
         "kind": "npm",
         "url": "https://opencode.ai",
-        "command": "npm install -g opencode-ai@1.18.21",
-        "pinned_version": "1.18.21",
+        "command": "npm install -g @opencode/cli@2.0.15",
+        "pinned_version": "2.0.15",
         "needs_credential": false,
         "hint": "https://opencode.ai"
       },

@@ -344,8 +344,12 @@ func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settin
 
 	// The version gate, before anything starts: an adapter that pins its CLI
 	// version refuses an install it does not drive rather than run a leg on it.
-	if refusal := harness.CheckVersion(ctx, l.runner(), adapter, inv); refusal != nil {
+	// The confirmed major travels into the invocation, because one adapter can
+	// drive CLIs whose flags differ across majors.
+	if major, refusal := harness.CheckVersion(ctx, l.runner(), adapter, inv); refusal != nil {
 		return harness.Envelope{}, nil, outMsgs, refusal
+	} else {
+		inv.CLIMajor = major
 	}
 
 	shapeBudget := 1

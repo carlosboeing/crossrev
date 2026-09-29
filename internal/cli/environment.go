@@ -276,6 +276,11 @@ var environment = []Variable{
 		Readers: []string{"internal/harness", "cmd/crossrev"},
 	},
 	{
+		Name:    "OPENCODE_DISABLE_PROJECT_CONFIG",
+		Class:   ClassChildOutput,
+		Readers: []string{"internal/harness"},
+	},
+	{
 		Name:  "PATH",
 		Class: ClassPathOverride,
 		Readers: []string{
