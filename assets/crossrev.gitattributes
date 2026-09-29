@@ -1,0 +1,47 @@
+# CrossRev review attributes — the function-context drivers hunk shaping
+# diffs under.
+#
+# `git diff -W` finds each change's enclosing function through the diff
+# driver the path's `diff` attribute names. Git already recognises these
+# languages by extension, so this file changes nothing on a stock setup;
+# what it buys is independence from the operator's own git config. The
+# shaping call passes this file as `core.attributesFile`, which replaces
+# the user's global attributes — a `* -diff` or an experimental driver in
+# `~/.config/git/attributes` cannot widen a hunk to the whole file or
+# collapse one to nothing. Repository `.gitattributes` read from the base
+# revision still apply on top: repository policy outranks these defaults.
+#
+# Only `diff=` pins appear here, and only names git has long carried as
+# built-ins. A name an older git does not know falls back to the default
+# text driver rather than failing, so a wider set stays safe. Nothing here
+# touches text, eol, binary detection or filters: shaping reads content,
+# never converts it (`--no-ext-diff --no-textconv` on every call).
+
+*.ada diff=ada
+*.c diff=c
+*.h diff=cpp
+*.cc diff=cpp
+*.cpp diff=cpp
+*.cs diff=csharp
+*.css diff=css
+*.d diff=d
+*.ex diff=elixir
+*.exs diff=elixir
+*.f diff=fortran
+*.f90 diff=fortran
+*.go diff=go
+*.html diff=html
+*.htm diff=html
+*.java diff=java
+*.js diff=javascript
+*.jsx diff=javascript
+*.m diff=objc
+*.mm diff=objc
+*.pas diff=pascal
+*.pl diff=perl
+*.pm diff=perl
+*.php diff=php
+*.py diff=python
+*.rb diff=ruby
+*.rs diff=rust
+*.tex diff=tex

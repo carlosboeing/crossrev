@@ -395,8 +395,9 @@ func (c *Checker) Check(ctx context.Context, need string) bool {
 }
 
 // reportGitAttributes says when the installed git cannot read .gitattributes
-// from a tree-ish: check-attr --source arrived in 2.40. Below it the legs
-// warn once and run on the built-in generated-file rules, so the report is
+// from a tree-ish: check-attr --source arrived in 2.40, and the global
+// --attr-source the hunk shaping reads them through arrived in 2.41. Below
+// either floor the legs warn once and run degraded, so the report is
 // advisory rather than fatal.
 func (c *Checker) reportGitAttributes(version string) {
 	parsed, ok := vcs.ParseGitVersion(version)
@@ -405,6 +406,9 @@ func (c *Checker) reportGitAttributes(version string) {
 	}
 	if !parsed.AtLeast(2, 40) {
 		c.io().Opt(version + " — below 2.40, so .gitattributes linguist-generated is not read at the base; the built-in generated-file rules still apply")
+	}
+	if !parsed.AtLeast(2, 41) {
+		c.io().Opt(version + " — below 2.41, so review hunks are shaped without --attr-source and read .gitattributes from the worktree rather than the base")
 	}
 }
 

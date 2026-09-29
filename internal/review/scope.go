@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/carlosboeing/crossrev/internal/core"
+	"github.com/carlosboeing/crossrev/internal/diff"
 	"github.com/carlosboeing/crossrev/internal/intel"
 	"github.com/carlosboeing/crossrev/internal/prompt"
 	"github.com/carlosboeing/crossrev/internal/prstate"
@@ -105,7 +106,72 @@ func (l *Leg) buildScope(ctx context.Context, base, head core.Revision, excluded
 	if err != nil {
 		return intel.Scope{}, nil, err
 	}
+	// Hunk shaping runs once per pass, before packing measures the first
+	// candidate: every unit carries its own gutter-numbered hunks into
+	// every render, so the packer measures what the reviewer is actually
+	// given. A git failure shaping one file fails the pass, the way a
+	// failed enumeration does; a shaping the leg cannot run — no git
+	// reader behind the interface — keeps the legacy body rendering.
+	if shaping, err := shapeScope(ctx, l.VCS, base, head, &scope); err != nil {
+		return intel.Scope{}, nil, err
+	} else if shaping != nil {
+		warning = joinWarnings(warning, shaping)
+	}
 	return scope, warning, nil
+}
+
+// hunkShaper is the per-file hunk shaping surface. Production wires
+// *vcs.Repository; a VCS that does not implement it keeps the legacy
+// prompt, where each unit renders from its body alone.
+type hunkShaper interface {
+	HunkDiffSupport(ctx context.Context) (bool, *vcs.Warning, error)
+	ShapeFileDiff(ctx context.Context, base, head core.Revision, change core.FileChange, body []byte, binary bool, unavailableReason string, support bool) (vcs.ShapedFile, error)
+}
+
+// shapeScope shapes every required unit's hunk input and answers the
+// old-git warning, if any. Units a shaping failure would leave behind
+// never exist: the error fails the pass before packing measures anything.
+func shapeScope(ctx context.Context, vcsIface VCS, base, head core.Revision, scope *intel.Scope) (*vcs.Warning, error) {
+	shaper, ok := vcsIface.(hunkShaper)
+	if !ok {
+		return nil, nil
+	}
+	support, warning, err := shaper.HunkDiffSupport(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for i := range scope.Required {
+		unit := &scope.Required[i]
+		var reason string
+		if !unit.Available {
+			reason = unit.Reason
+		}
+		shaped, err := shaper.ShapeFileDiff(ctx, base, head,
+			core.FileChange{OldPath: unit.OldPath, Path: unit.Path, Kind: unit.Change},
+			unit.Body, unit.Binary, reason, support)
+		if err != nil {
+			return nil, err
+		}
+		unit.Form = shaped.Form
+		unit.Diff = shaped.Diff
+	}
+	return warning, nil
+}
+
+// joinWarnings carries two non-fatal conditions in the one warning slot
+// the scope read returns: an old git trips both the attribute read and
+// the hunk shaping gate, and the operator should see both halves.
+func joinWarnings(first, second *vcs.Warning) *vcs.Warning {
+	if first == nil {
+		return second
+	}
+	if second == nil {
+		return first
+	}
+	return &vcs.Warning{
+		Message: first.Message + "; " + second.Message,
+		Hint:    first.Hint + " " + second.Hint,
+	}
 }
 
 type errNoScopeReader struct{}
@@ -198,10 +264,10 @@ func generationRecords(scope intel.Scope, verdicts map[core.UnitID]recordVerdict
 // recordVerdict is one accepted unit: its verdict, finding ids and
 // evidence, as the reviewer reported them.
 type recordVerdict struct {
-	Verdict string
-	FindingIDs  []string
-	Evidence    []prstate.Evidence
-	Reason      string
+	Verdict    string
+	FindingIDs []string
+	Evidence   []prstate.Evidence
+	Reason     string
 }
 
 func unitRecord(unit intel.FileUnit, pathIdx int, disp recordVerdict) prstate.Record {
@@ -248,7 +314,9 @@ func evidenceLines(body []byte) int {
 
 // batchExpectations maps one rendered batch to the numbered expectations the
 // semantic check holds the answer against: positions 1 to len(units) in
-// prompt order, with the base and head the batch was built between.
+// prompt order, with the base and head the batch was built between. A
+// shaped unit carries its gutter-numbered hunks into the prompt; an
+// unshaped one renders from its body the way it always did.
 func batchExpectations(units []intel.FileUnit, base, head core.Revision) (expected validate.ReviewExpectations, promptUnits []prompt.BatchUnit) {
 	expected.Base = base
 	expected.Head = head
@@ -259,7 +327,11 @@ func batchExpectations(units []intel.FileUnit, base, head core.Revision) (expect
 			lines = evidenceLines(unit.Body)
 		}
 		expected.Units = append(expected.Units, validate.UnitExpectation{Path: unit.Path, Revision: unit.ContentRevision, Lines: lines, Readable: readable})
-		promptUnits = append(promptUnits, prompt.BatchUnit{
+		reason := unit.Reason
+		if unit.Form == intel.FormDiffOnly && reason == "" && !unit.Binary {
+			reason = intel.DiffOnlyReason(unit.Change, len(unit.Body), false, "")
+		}
+		pu := prompt.BatchUnit{
 			Path:            unit.Path,
 			OldPath:         unit.OldPath,
 			Change:          unit.Change,
@@ -267,8 +339,13 @@ func batchExpectations(units []intel.FileUnit, base, head core.Revision) (expect
 			Body:            unit.Body,
 			Available:       unit.Available,
 			Binary:          unit.Binary,
-			Reason:          unit.Reason,
-		})
+			Reason:          reason,
+			Form:            unit.Form,
+		}
+		if unit.Form != "" && len(unit.Diff) > 0 {
+			pu.NumberedDiff = diff.Parse(unit.Diff, core.RevisionPair{}).Numbered()
+		}
+		promptUnits = append(promptUnits, pu)
 	}
 	return expected, promptUnits
 }

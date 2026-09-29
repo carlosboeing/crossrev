@@ -15,10 +15,12 @@ import (
 // coverage generations.
 const CoverageSchemaV2 = 2
 
-// Supplied input forms.
+// Supplied input forms: the whole file as one hunk, the clipped
+// function-context hunks, or the header lines alone.
 const (
-	SuppliedFormFullText = "full_text"
-	SuppliedFormDiffOnly = "diff_only"
+	SuppliedFormFullText     = "full_text"
+	SuppliedFormHunksContext = "hunks_context"
+	SuppliedFormDiffOnly     = "diff_only"
 )
 
 // CoverageKindRecords is the kind of records payload in v2.
@@ -54,7 +56,7 @@ func UnimplementedReaction() Reaction {
 }
 
 func validSuppliedForm(s string) bool {
-	return s == SuppliedFormFullText || s == SuppliedFormDiffOnly
+	return s == SuppliedFormFullText || s == SuppliedFormHunksContext || s == SuppliedFormDiffOnly
 }
 
 func verdictCode(r Record) (byte, error) {

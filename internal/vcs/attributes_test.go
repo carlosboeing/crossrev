@@ -2,6 +2,7 @@ package vcs_test
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -306,6 +307,15 @@ func TestParseGitVersion(t *testing.T) {
 	if !forty.AtLeast(2, 40) {
 		t.Error("2.40.0 failed AtLeast(2, 40)")
 	}
+}
+
+func readCanonical(t *testing.T, name string) ([]byte, error) {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(repoRoot(t), name))
+	if err != nil {
+		return nil, err
+	}
+	return raw, nil
 }
 
 func mustRevision(t *testing.T, sha string) core.Revision {
