@@ -164,8 +164,10 @@ type Leg struct {
 	LookPath func(string) (string, error)
 	// Validate checks the review payload. Nil means Review against the
 	// leg's own batch expectations: exact unit-number coverage, valid
-	// finding references, valid evidence revisions and spans, evidence
+	// finding references, valid evidence paths and spans, evidence
 	// for not_affected, and failed-fallback reasons for could_not_review.
+	// The model's evidence revision is not checked: the reviewed revision
+	// is recorded on the verdict when it is accepted.
 	// Tests that drive the retry budgets without a batch set a substitute
 	// directly.
 	Validate func(payload []byte, expected validate.ReviewExpectations) error
