@@ -533,7 +533,7 @@ func verdictsFromPayload(payload json.RawMessage, files []intel.FileUnit) (map[c
 		if entry.Reason != nil {
 			reason = *entry.Reason
 		}
-		out[unit.ID] = recordVerdict{Verdict: entry.Verdict, FindingIDs: ids, Evidence: reviewedEvidence(unit, entry.Evidence), Reason: reason}
+		out[unit.ID] = recordVerdict{Verdict: entry.Verdict, FindingIDs: ids, Evidence: reviewedEvidence(files, entry.Evidence), Reason: reason}
 	}
 	return out, doc.ExaminedScope, doc.KnownLimits, nil
 }
@@ -541,16 +541,23 @@ func verdictsFromPayload(payload json.RawMessage, files []intel.FileUnit) (map[c
 // reviewedEvidence records the content revision CrossRev showed the reviewer
 // on every evidence item, rather than trusting the model's value: a cited
 // revision that exists nowhere is corrected here instead of refusing the
-// whole answer. A unit with no recorded revision keeps what the model sent,
-// so a missing measurement never blanks a record.
-func reviewedEvidence(unit intel.FileUnit, evidence []prstate.Evidence) []prstate.Evidence {
-	reviewed := unit.ContentRevision.SHA()
-	if reviewed == "" {
-		return evidence
+// whole answer. A coverage entry may cite any supplied path, and a deletion
+// is read at the base while every other change is read at the head, so each
+// item takes the content revision of the file its own path names, not the
+// covering unit's. An item naming no supplied file keeps what the model
+// sent, so a missing measurement never blanks a record.
+func reviewedEvidence(files []intel.FileUnit, evidence []prstate.Evidence) []prstate.Evidence {
+	reviewed := make(map[string]string, len(files))
+	for _, unit := range files {
+		if sha := unit.ContentRevision.SHA(); sha != "" {
+			reviewed[unit.Path] = sha
+		}
 	}
 	out := make([]prstate.Evidence, 0, len(evidence))
 	for _, ev := range evidence {
-		ev.Revision = prstate.Some(reviewed)
+		if sha, ok := reviewed[ev.Path]; ok {
+			ev.Revision = prstate.Some(sha)
+		}
 		out = append(out, ev)
 	}
 	return out

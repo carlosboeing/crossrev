@@ -2,6 +2,7 @@ package review
 
 import (
 	"encoding/json"
+	"strconv"
 	"testing"
 
 	"github.com/carlosboeing/crossrev/internal/core"
@@ -55,5 +56,51 @@ func TestVerdictsFromPayloadRecordsTheReviewedRevision(t *testing.T) {
 	}
 	if rev := got.Evidence[0].Revision.Value(); rev != reviewedSHA {
 		t.Errorf("Evidence revision = %q, want the reviewed %q", rev, reviewedSHA)
+	}
+}
+
+// A coverage entry may cite any supplied path, and a deletion is read at the
+// base while every other change is read at the head, so the recorded
+// revision follows the cited path's content revision, not the covering
+// unit's: evidence for the deleted file records the base even when the
+// verdict covers the modified file, and vice versa.
+func TestVerdictsFromPayloadFollowsTheCitedPath(t *testing.T) {
+	const baseSHA = "1111111111111111111111111111111111111111"
+	const headSHA = "2c4a46cb321db01826d116b5ef2add6b0284d68c"
+	base, err := core.NewRevision(baseSHA)
+	if err != nil {
+		t.Fatalf("revision %s: %v", baseSHA, err)
+	}
+	head, err := core.NewRevision(headSHA)
+	if err != nil {
+		t.Fatalf("revision %s: %v", headSHA, err)
+	}
+	evidence := func(path string) string {
+		return `{"path":` + strconv.Quote(path) + `,"revision":"3333333333333333333333333333333333333333",` +
+			`"start_line":1,"end_line":10,"source":"git","note":null}`
+	}
+	payload := json.RawMessage(`{"coverage":[` +
+		`{"unit_number":1,"verdict":"no_issue","finding_numbers":[],"evidence":[` + evidence("a.go") + `],"reason":null},` +
+		`{"unit_number":2,"verdict":"no_issue","finding_numbers":[],"evidence":[` + evidence("old.go") + `],"reason":null}],` +
+		`"examined_scope":"read it","known_limits":[]}`)
+	files := []intel.FileUnit{
+		{ID: core.UnitID("u1"), Path: "old.go", Change: core.ChangeDeleted, ContentRevision: base},
+		{ID: core.UnitID("u2"), Path: "a.go", Change: core.ChangeModified, ContentRevision: head},
+	}
+	verdicts, _, _, err := verdictsFromPayload(payload, files)
+	if err != nil {
+		t.Fatalf("verdictsFromPayload: %v", err)
+	}
+	for id, want := range map[core.UnitID]string{"u1": headSHA, "u2": baseSHA} {
+		got, ok := verdicts[id]
+		if !ok {
+			t.Fatalf("no verdict for unit %s: %v", id, verdicts)
+		}
+		if len(got.Evidence) != 1 {
+			t.Fatalf("unit %s: Evidence = %v, want the one reported item", id, got.Evidence)
+		}
+		if rev := got.Evidence[0].Revision.Value(); rev != want {
+			t.Errorf("unit %s: Evidence revision = %q, want the cited path's %q", id, rev, want)
+		}
 	}
 }
