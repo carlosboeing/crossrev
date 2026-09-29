@@ -310,14 +310,11 @@ func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 				}
 			}
 
-			bytesOut, fileStatus, err := repo.Show(ctx, rev, argsStruct.Path)
-			if err != nil {
-				_ = encoder.Encode(newResultResponse(req.ID, map[string]interface{}{
-					"isError": true,
-					"content": []map[string]interface{}{{"type": "text", "text": "error: " + err.Error()}},
-				}))
-				continue
-			}
+			// Show pairs a runner failure with a NotFound status rather than
+			// leaving it unclassified, and the refusal contract carries one
+			// of nine reasons rather than raw git text, so the status below
+			// drives the refusal and the transport error is not stringified.
+			bytesOut, fileStatus, _ := repo.Show(ctx, rev, argsStruct.Path)
 
 			if fileStatus == vcs.NotFound {
 				_ = encoder.Encode(newResultResponse(req.ID, map[string]interface{}{
@@ -327,9 +324,11 @@ func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 				continue
 			}
 			if fileStatus == vcs.IsOther {
+				// A tree holds no file content, and the contract has no
+				// reason for one, so it refuses as not_found.
 				_ = encoder.Encode(newResultResponse(req.ID, map[string]interface{}{
 					"isError": true,
-					"content": []map[string]interface{}{{"type": "text", "text": "directory"}},
+					"content": []map[string]interface{}{{"type": "text", "text": "not_found"}},
 				}))
 				continue
 			}

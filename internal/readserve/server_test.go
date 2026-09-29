@@ -41,6 +41,7 @@ func createRepo(t *testing.T) (dir, base, head string) {
 	_ = os.WriteFile(filepath.Join(dir, "large.txt"), []byte(content), 0o644)
 	_ = os.WriteFile(filepath.Join(dir, "small.txt"), []byte("line 1\nline 2\n"), 0o644)
 	_ = os.Mkdir(filepath.Join(dir, "nested"), 0o755)
+	_ = os.WriteFile(filepath.Join(dir, "nested", "file.txt"), []byte("nested\n"), 0o644)
 	_ = os.Symlink("small.txt", filepath.Join(dir, "symlink.txt"))
 	_ = os.WriteFile(filepath.Join(dir, "blob.bin"), []byte("GIF89a\x00\x01\x02"), 0o644)
 
@@ -176,18 +177,21 @@ func TestEveryRefusalReason(t *testing.T) {
 		{JSONRPC: "2.0", ID: 6, Method: "tools/call", Params: map[string]any{
 			"name": "read_file", "arguments": map[string]any{"path": "small.txt", "revision": "head", "start_line": 5},
 		}},
+		{JSONRPC: "2.0", ID: 7, Method: "tools/call", Params: map[string]any{
+			"name": "read_file", "arguments": map[string]any{"path": "nested", "revision": "head"},
+		}},
 	}
 	args := []string{"--repo", dir, "--base", base, "--head", head, "--log", logPath, "--per-call-bytes", "262144"}
 	resps, _ := runRPC(t, args, reqs)
-	
-	wants := []string{"outside_revisions", "path_invalid", "not_found", "binary", "symlink", "bad_range"}
+
+	wants := []string{"outside_revisions", "path_invalid", "not_found", "binary", "symlink", "bad_range", "not_found"}
 	for i, resp := range resps {
 		if !resp.Result.IsError {
 			t.Errorf("expected error for case %d, got success", i)
 			continue
 		}
-		if !strings.Contains(resp.Result.Content[0].Text, wants[i]) {
-			t.Errorf("expected reason %s for case %d, got %s", wants[i], i, resp.Result.Content[0].Text)
+		if resp.Result.Content[0].Text != wants[i] {
+			t.Errorf("expected reason %q for case %d, got %q", wants[i], i, resp.Result.Content[0].Text)
 		}
 	}
 }
