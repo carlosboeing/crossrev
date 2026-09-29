@@ -17,6 +17,7 @@ import (
 
 	"github.com/carlosboeing/crossrev/internal/core"
 	"github.com/carlosboeing/crossrev/internal/diff"
+	"github.com/carlosboeing/crossrev/internal/intel"
 )
 
 // Prior is one finding carried in from an earlier pass, as the marker recorded
@@ -140,6 +141,11 @@ type BatchUnit struct {
 	// NumberedDiff is the gutter-numbered diff for this file's own lines, or
 	// nil when none applies.
 	NumberedDiff []byte
+	// Form is the supplied input form this unit takes: a whole-file hunk,
+	// function-context hunks, or a header-only diff. Empty means the unit
+	// never passed through hunk shaping and renders the legacy way, from
+	// its body alone.
+	Form intel.InputForm
 }
 
 // AdvisoryRef is one untouched pointer offered as uncertain context, with
@@ -253,14 +259,21 @@ func (r Review) Render() []byte {
 		b.WriteString("\n")
 	}
 
-	b.WriteString("## The diff under review\n\n")
-	b.WriteString(gutterNotice)
-	b.WriteString("Copy a finding's `line` out of this gutter. Do not count lines under a `@@` " +
-		"header to arrive at one — a number one past the end of a hunk is not part of the diff, " +
-		"GitHub refuses the comment, and the finding ends up outside the thread it belongs in.\n\n")
-	b.WriteString("````diff\n")
-	b.Write(diff.Parse(r.Diff, core.RevisionPair{}).Numbered())
-	b.WriteString("\n````\n\n")
+	// The separate diff section renders only while no unit carries its own
+	// hunks: a shaped batch supplies every file's gutter-numbered hunks
+	// with the unit, so the whole-diff slice would repeat them. A batch
+	// whose units never shaped keeps the sliced diff it always had, and a
+	// batch-free prompt keeps the frozen bytes exactly.
+	if len(r.Diff) > 0 && !shapedBatch(r.Batch) {
+		b.WriteString("## The diff under review\n\n")
+		b.WriteString(gutterNotice)
+		b.WriteString("Copy a finding's `line` out of this gutter. Do not count lines under a `@@` " +
+			"header to arrive at one — a number one past the end of a hunk is not part of the diff, " +
+			"GitHub refuses the comment, and the finding ends up outside the thread it belongs in.\n\n")
+		b.WriteString("````diff\n")
+		b.Write(diff.Parse(r.Diff, core.RevisionPair{}).Numbered())
+		b.WriteString("\n````\n\n")
+	}
 
 	// The confirmation delta renders ahead of the full scope: after a
 	// repair, the reviewer confirms what the resolver changed before
@@ -360,11 +373,18 @@ func renderBatch(units []BatchUnit, advisory []AdvisoryRef, omitted int, exclude
 }
 
 // renderBatchUnit is one numbered required file: its change, its evidence
-// revision, and either readable bytes or an explicit access limit.
+// revision, and either readable bytes or an explicit access limit. A
+// shaped unit renders its single gutter-numbered diff instead: the whole
+// file as one hunk, the clipped function-context hunks, or the header
+// lines with the access reason.
 func renderBatchUnit(b *strings.Builder, number int, u BatchUnit) {
 	fmt.Fprintf(b, "### %d. `%s` — %s at `%s`\n\n", number, u.Path, u.Change, u.ContentRevision)
 	if u.OldPath != "" && u.OldPath != u.Path {
 		fmt.Fprintf(b, "Previously `%s`.\n\n", u.OldPath)
+	}
+	if u.Form != "" {
+		renderShapedUnit(b, u)
+		return
 	}
 	switch {
 	case !u.Available:
@@ -376,6 +396,49 @@ func renderBatchUnit(b *strings.Builder, number int, u BatchUnit) {
 			"limit in `known_limits`.\n\n")
 	default:
 		fmt.Fprintf(b, "````\n%s\n````\n\n", quoteBytes(u.Body))
+	}
+	if len(u.NumberedDiff) > 0 {
+		fmt.Fprintf(b, "Its numbered diff:\n\n````diff\n%s\n````\n\n",
+			quoteBytes(u.NumberedDiff))
+	}
+}
+
+// shapedBatch reports whether any unit carries shaped hunk input. While
+// none does, the batch renders the legacy way and the separate diff
+// section stays where it always was.
+func shapedBatch(units []BatchUnit) bool {
+	for _, u := range units {
+		if u.Form != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// renderShapedUnit is one numbered required file's single gutter-numbered
+// diff: the whole-file hunk, the function-context hunks, or the headers
+// with the access reason. There is no second body fence beside it: the
+// hunk is the supplied content.
+func renderShapedUnit(b *strings.Builder, u BatchUnit) {
+	switch u.Form {
+	case intel.FormHunksContext:
+		b.WriteString("Shown as the enclosing function of each change, clipped to 100 lines " +
+			"of surrounding context.\n\n")
+	case intel.FormDiffOnly:
+		switch {
+		case !u.Available:
+			fmt.Fprintf(b, "No readable content: %s. This file stays required: record "+
+				"`could_not_review` with the failed fallbacks in `reason`.\n\n", u.Reason)
+		case u.Binary:
+			b.WriteString("Binary content is not shown. This file stays required: judge it on " +
+				"provenance, integrity, and build or reproducibility evidence, and record the " +
+				"limit in `known_limits`.\n\n")
+		default:
+			fmt.Fprintf(b, "No changed lines: %s. This file stays required: record "+
+				"`not_affected` with evidence from the diff below.\n\n", u.Reason)
+		}
+	default:
+		b.WriteString("Shown in full as one numbered hunk.\n\n")
 	}
 	if len(u.NumberedDiff) > 0 {
 		fmt.Fprintf(b, "Its numbered diff:\n\n````diff\n%s\n````\n\n",

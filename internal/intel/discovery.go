@@ -142,6 +142,17 @@ type FileUnit struct {
 	Generated string
 	// Reason names the access limit when the unit is unavailable.
 	Reason string
+	// Form is the supplied input form this unit takes in the review
+	// prompt: a whole-file hunk, function-context hunks, or a header-only
+	// diff. Empty means the unit never passed through hunk shaping and
+	// renders the legacy way, from its body alone.
+	Form InputForm
+	// Diff is the shaped per-file diff the prompt numbers and shows: the
+	// whole-file hunk, the clipped function-context hunks, or the header
+	// lines. Nil with a set Form means shaping found no header to show,
+	// and the reason below carries the obligation alone. Nil with an
+	// empty Form means unshaped.
+	Diff []byte
 }
 
 // Scope is the required file set for one revision pair and engine, plus the

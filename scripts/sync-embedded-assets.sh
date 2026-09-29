@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 #
-# Copy the canonical schemas, skills, harness descriptor, price extract and
-# workflow templates into the Go packages that embed them.
+# Copy the canonical schemas, skills, harness descriptor, price extract,
+# review attributes and workflow templates into the Go packages that embed
+# them.
 #
 # `go:embed` patterns are package-relative and cannot contain `..`, so a Go
 # package cannot embed a file from the repository root. The canonical files stay
 # where every other reader already finds them — `schemas/`, `skills/`,
-# `templates/`, `assets/harnesses.json` and `assets/prices.json` — and this script
+# `templates/`, `assets/harnesses.json`, `assets/prices.json` and
+# `assets/crossrev.gitattributes` — and this script
 # keeps a byte-identical copy beside each package that embeds one. A source may
 # appear twice: the descriptor is embedded by two packages, and both copies are
 # compared against the canonical file rather than against each other.
@@ -47,6 +49,7 @@ ASSETS=(
   "assets/harnesses.json"         "internal/cred/assets/harnesses.json"
   "assets/harnesses.json"         "internal/harness/assets/harnesses.json"
   "assets/prices.json"            "internal/harness/assets/prices.json"
+  "assets/crossrev.gitattributes" "internal/vcs/assets/crossrev.gitattributes"
 
   # The workflow and config templates `init` writes into a repository. A
   # binary has no checkout, so internal/initcmd carries the bytes. Every file

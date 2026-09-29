@@ -16,6 +16,7 @@ import (
 	"github.com/carlosboeing/crossrev/internal/exec"
 	"github.com/carlosboeing/crossrev/internal/forge"
 	"github.com/carlosboeing/crossrev/internal/harness"
+	"github.com/carlosboeing/crossrev/internal/intel"
 	"github.com/carlosboeing/crossrev/internal/prstate"
 	"github.com/carlosboeing/crossrev/internal/prstate/storetest"
 	"github.com/carlosboeing/crossrev/internal/review"
@@ -171,6 +172,16 @@ type fakeVCS struct {
 	changedLines      []byte
 	changedLinesErr   error
 	changedLinesCalls int
+	// shapeFunc, when non-nil, answers ShapeFileDiff per unit with the
+	// scripted hunk input; nil leaves every unit unshaped, so the batch
+	// renders from its body the way it always did. shapeWarn rides with
+	// the support answer the way an old git reports it, and shapeErr
+	// fails the shaping step. shapeCalls counts ShapeFileDiff
+	// invocations.
+	shapeFunc  func(unit intel.FileUnit) (vcs.ShapedFile, error)
+	shapeWarn  *vcs.Warning
+	shapeErr   error
+	shapeCalls int
 	// removePersistedCalls counts RemovePersistedCredentials invocations, and
 	// removePersistedErr is the failure it returns.
 	removePersistedCalls int
@@ -256,6 +267,25 @@ func (f *fakeVCS) ChangedLines(_ context.Context, _, _ core.Revision) ([]byte, e
 		return nil, f.changedLinesErr
 	}
 	return f.changedLines, nil
+}
+
+func (f *fakeVCS) HunkDiffSupport(context.Context) (bool, *vcs.Warning, error) {
+	if f.shapeErr != nil {
+		return false, nil, f.shapeErr
+	}
+	return true, f.shapeWarn, nil
+}
+
+func (f *fakeVCS) ShapeFileDiff(_ context.Context, _, _ core.Revision, change core.FileChange, body []byte, binary bool, unavailableReason string, _ bool) (vcs.ShapedFile, error) {
+	f.shapeCalls++
+	if f.shapeErr != nil {
+		return vcs.ShapedFile{}, f.shapeErr
+	}
+	if f.shapeFunc == nil {
+		return vcs.ShapedFile{}, nil
+	}
+	unit := intel.FileUnit{Path: change.Path, OldPath: change.OldPath, Change: change.Kind, Body: body, Available: unavailableReason == "", Binary: binary, Reason: unavailableReason}
+	return f.shapeFunc(unit)
 }
 
 // repairDelta, when set, is the B-to-C delta RangeDiff answers: the bytes a
