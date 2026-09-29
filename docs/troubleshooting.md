@@ -191,11 +191,11 @@ No shipped harness restricts its legs through the descriptor; codex is refused a
 
 `--harness` on `cycle` lands on both legs, which is how an operator with a single harness installed runs the loop. It is refused only when that harness cannot serve one of them.
 
-`the opencode CLI reports version 2.x, and CrossRev supports opencode 1.x (issue #272)`
+`the opencode CLI reports version 3.x, and CrossRev supports opencode 1.x and 2.x (issue #272)`
 
-`the opencode CLI did not report a version, and CrossRev supports opencode 1.x (issue #272)`
+`the opencode CLI did not report a version, and CrossRev supports opencode 1.x and 2.x (issue #272)`
 
-opencode 2.x does not accept the flags the adapter passes and does not read the isolation config it writes, so a leg on it would run without the constraints that config exists to hold ([#272](https://github.com/carlosboeing/crossrev/issues/272)). Both legs probe `opencode --version` and refuse any install outside 1.x before starting. The second message is the same refusal on the same terms for a probe that reports no version — CrossRev fails closed rather than starting a leg on an install it cannot confirm. Install the supported CLI — `npm install -g opencode-ai@1.18.21`, the version the descriptor pins — or point the leg at another harness with `--harness`.
+Both legs probe `opencode --version` and refuse any install outside 1.x and 2.x before starting, because each major takes its own flags and its own session-export subcommand ([#272](https://github.com/carlosboeing/crossrev/issues/272)). The second message is the same refusal on the same terms for a probe that reports no version — CrossRev fails closed rather than starting a leg on an install it cannot confirm. Install the supported CLI — `npm install -g @opencode/cli@2.0.15`, the version the descriptor pins — or point the leg at another harness with `--harness`. On 2.x the leg runs `opencode run --standalone`: the background service drops the process's isolation config, so without it the leg would start unconstrained. On both majors the leg passes `--agent crossrev`, the agent the isolation config defines: agent rules take precedence over every merged config, so a global `agents.build` allow cannot widen the leg back, and `OPENCODE_DISABLE_PROJECT_CONFIG` keeps project and parent-directory configs from merging at all.
 
 ``the codex resolver cannot read files, so a resolve leg on codex answers `blocked` instead of editing``
 

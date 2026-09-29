@@ -102,6 +102,14 @@ type Invocation struct {
 	// Write is whether this leg may change files. It is derived from the leg
 	// rather than configured (lib/adapters/claude.sh:12).
 	Write bool
+	// CLIMajor is the major version of the harness CLI the version gate
+	// confirmed, zero when the gate has not run or the adapter pins none.
+	// The opencode adapter is the only reader: its 1.x and 2.x CLIs take
+	// different flags and export the session record through different
+	// subcommands, so the legs set this from CheckVersion before building
+	// the spec. Zero keeps the 1.x shape, which fails closed on a 2.x
+	// install (unrecognised flags) rather than running it unconstrained.
+	CLIMajor int
 	// Env is the environment the orchestrator built for this leg, as NAME=VALUE
 	// entries. An adapter subtracts its strip set from it and adds whatever the
 	// invocation needs; it never inherits this process's own, which is what
