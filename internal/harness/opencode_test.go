@@ -111,6 +111,176 @@ func TestOpencodeIsolationIsFailClosedInBothShapes(t *testing.T) {
 	}
 }
 
+// isolationFile reads the whole config the adapter wrote for one leg, not
+// just its top-level permission block: the pinned agent carries its own.
+func isolationFile(t *testing.T, spec exec.Spec) map[string]any {
+	t.Helper()
+	for _, entry := range spec.Env {
+		variable, value, _ := strings.Cut(entry, "=")
+		if variable != "OPENCODE_CONFIG" {
+			continue
+		}
+		raw, err := os.ReadFile(value) //nolint:gosec // the adapter wrote this path
+		if err != nil {
+			t.Fatalf("reading the isolation config: %v", err)
+		}
+		var config map[string]any
+		if err := json.Unmarshal(raw, &config); err != nil {
+			t.Fatalf("decoding the isolation config: %v", err)
+		}
+		return config
+	}
+	t.Fatal("the spec names no OPENCODE_CONFIG")
+	return nil
+}
+
+// The isolation config defines the agent the leg runs as, with its own
+// permission block mirroring the leg's grant: agent rules take precedence
+// over every merged config, so a global agents.build allow cannot widen the
+// leg back. The agent is a primary one — newer runtimes silently fall back
+// to the default agent on a subagent dispatch, dropping the block outright.
+func TestOpencodeIsolationDefinesAPinnedAgent(t *testing.T) {
+	adapter := opencodeAdapter(t)
+
+	for _, tt := range []struct {
+		name  string
+		write bool
+		grant string
+	}{
+		{name: "a reading leg pins a denying agent", write: false, grant: "deny"},
+		{name: "a writing leg pins an allowing agent", write: true, grant: "allow"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			spec, err := adapter.Spec(invocation(t, "opencode", tt.write))
+			if err != nil {
+				t.Fatalf("building the spec: %v", err)
+			}
+			config := isolationFile(t, spec)
+			agents, ok := config["agent"].(map[string]any)
+			if !ok {
+				t.Fatal("the isolation config defines no agent")
+			}
+			pinned, ok := agents["crossrev"].(map[string]any)
+			if !ok {
+				t.Fatal("the isolation config defines no crossrev agent")
+			}
+			if pinned["mode"] != "primary" {
+				t.Errorf("agent mode = %v, want primary — a subagent dispatch falls back to the default agent and drops the permission block", pinned["mode"])
+			}
+			permission, ok := pinned["permission"].(map[string]any)
+			if !ok {
+				t.Fatal("the pinned agent carries no permission block")
+			}
+			if permission["*"] != "deny" {
+				t.Errorf("the agent's fail-closed base rule is missing: %v", permission["*"])
+			}
+			for _, key := range []string{"edit", "write", "apply_patch"} {
+				if permission[key] != tt.grant {
+					t.Errorf("agent %s = %v, want %q", key, permission[key], tt.grant)
+				}
+			}
+			for _, key := range []string{"bash", "task", "skill", "webfetch", "websearch", "external_directory", "question", "doom_loop"} {
+				if permission[key] != "deny" {
+					t.Errorf("agent %s = %v, want deny in every shape", key, permission[key])
+				}
+			}
+		})
+	}
+}
+
+// The leg runs as its pinned agent on both majors: without --agent it runs
+// the default build agent, whose global rules are appended after the
+// config-file rules with last match winning.
+func TestOpencodePinsItsAgentOnBothMajors(t *testing.T) {
+	adapter := opencodeAdapter(t)
+
+	for _, major := range []int{1, 2} {
+		inv := invocation(t, "opencode", false)
+		inv.CLIMajor = major
+		spec, err := adapter.Spec(inv)
+		if err != nil {
+			t.Fatalf("building the spec: %v", err)
+		}
+		if !hasFlagPair(spec.Args, "--agent", "crossrev") {
+			t.Errorf("major %d: the leg does not run as its pinned agent: %v", major, spec.Args)
+		}
+	}
+}
+
+// Project and parent-directory configs never load: the variable the docs
+// name for skipping project config discovery rides every opencode child,
+// run and session export alike.
+func TestOpencodeDisablesProjectConfig(t *testing.T) {
+	adapter := opencodeAdapter(t)
+
+	for _, major := range []int{1, 2} {
+		inv := invocation(t, "opencode", false)
+		inv.CLIMajor = major
+		run, err := adapter.Spec(inv)
+		if err != nil {
+			t.Fatalf("building the run spec: %v", err)
+		}
+		export, err := adapter.ExportSpec(inv, "a-session")
+		if err != nil {
+			t.Fatalf("building the export spec: %v", err)
+		}
+		for name, spec := range map[string]exec.Spec{"run": run, "export": export} {
+			found := false
+			for _, entry := range spec.Env {
+				if entry == "OPENCODE_DISABLE_PROJECT_CONFIG=1" {
+					found = true
+				}
+			}
+			if !found {
+				t.Errorf("major %d %s: OPENCODE_DISABLE_PROJECT_CONFIG=1 is not set: %v", major, name, spec.Env)
+			}
+		}
+	}
+}
+
+// The isolation entries are the only ones: an operator-exported
+// OPENCODE_CONFIG would otherwise travel beside the adapter's own — the leg
+// allowlist inherits it — and whichever duplicate the runtime honours first
+// decides what the leg may do.
+func TestOpencodeIsolationWinsOverInheritedEnv(t *testing.T) {
+	adapter := opencodeAdapter(t)
+	inv := invocation(t, "opencode", false)
+	inv.Env = append(inv.Env,
+		"OPENCODE_CONFIG=/operator/config.json",
+		"OPENCODE_CONFIG_DIR=/operator/config-dir",
+		"OPENCODE_DISABLE_PROJECT_CONFIG=",
+	)
+
+	spec, err := adapter.Spec(inv)
+	if err != nil {
+		t.Fatalf("building the spec: %v", err)
+	}
+	for _, variable := range []string{"OPENCODE_CONFIG", "OPENCODE_CONFIG_DIR", "OPENCODE_DISABLE_PROJECT_CONFIG"} {
+		count := 0
+		for _, entry := range spec.Env {
+			name, value, _ := strings.Cut(entry, "=")
+			if name != variable {
+				continue
+			}
+			count++
+			if variable == "OPENCODE_CONFIG" {
+				if value == "/operator/config.json" {
+					t.Errorf("the operator's %s survived beside the isolation config", variable)
+				}
+				if _, err := os.Stat(value); err != nil {
+					t.Errorf("the surviving %s names nothing the adapter wrote: %v", variable, err)
+				}
+			}
+			if variable == "OPENCODE_DISABLE_PROJECT_CONFIG" && value != "1" {
+				t.Errorf("%s = %q, want 1", variable, value)
+			}
+		}
+		if count != 1 {
+			t.Errorf("%s appears %d times, want exactly the isolation entry", variable, count)
+		}
+	}
+}
+
 func TestOpencodeArgumentShape(t *testing.T) {
 	adapter := opencodeAdapter(t)
 	inv := invocation(t, "opencode", false)
@@ -239,7 +409,7 @@ func TestOpencodeExportSpecFollowsMajor(t *testing.T) {
 	}{
 		{name: "1.x exports the session id", major: 1, want: []string{"export", "a-session"}},
 		{name: "an unprobed install keeps the 1.x export", major: 0, want: []string{"export", "a-session"}},
-		{name: "2.x exports through session export", major: 2, want: []string{"session", "export", "a-session"}},
+		{name: "2.x exports through session export", major: 2, want: []string{"session", "export", "--standalone", "a-session"}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			inv := invocation(t, "opencode", false)
@@ -620,7 +790,7 @@ func TestOpencodeRefusesAnInstallPastTheSupportedMajor(t *testing.T) {
 			if !strings.Contains(refusal.Action, "issues/272") {
 				t.Errorf("Action does not point at issue #272: %q", refusal.Action)
 			}
-			if !strings.Contains(refusal.Action, "opencode-ai@2.0.15") {
+			if !strings.Contains(refusal.Action, "@opencode/cli@2.0.15") {
 				t.Errorf("Action does not name the supported install: %q", refusal.Action)
 			}
 		})

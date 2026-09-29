@@ -118,14 +118,14 @@ func TestEveryAdapterBuildsTheWholeArgv(t *testing.T) {
 			// is asserted rather than assumed: an adapter that started spelling
 			// the difference in argv would fail one of these two rows.
 			harness: "opencode", write: false,
-			where: "lib/adapters/opencode.sh:155,156,157,187",
-			want: []string{"run", "--pure", "--format", "json", "--dir", "<workdir>",
+			where: "lib/adapters/opencode.sh:155,156,157,187, plus --agent for the pinned isolation agent",
+			want: []string{"run", "--pure", "--format", "json", "--agent", "crossrev", "--dir", "<workdir>",
 				"--model", "<model>", "--variant", "high", "<prompt-with-schema>"},
 		},
 		{
 			harness: "opencode", write: true,
-			where: "lib/adapters/opencode.sh:155,156,157,187",
-			want: []string{"run", "--pure", "--format", "json", "--dir", "<workdir>",
+			where: "lib/adapters/opencode.sh:155,156,157,187, plus --agent for the pinned isolation agent",
+			want: []string{"run", "--pure", "--format", "json", "--agent", "crossrev", "--dir", "<workdir>",
 				"--model", "<model>", "--variant", "high", "<prompt-with-schema>"},
 		},
 		{
@@ -136,14 +136,14 @@ func TestEveryAdapterBuildsTheWholeArgv(t *testing.T) {
 			// the isolation config, the checkout travels as the working
 			// directory, and the effort rides the model as a variant.
 			harness: "opencode", write: false, major: 2,
-			where: "opencode 2.0.15, measured (issue #272)",
-			want: []string{"run", "--standalone", "--format", "json",
+			where: "opencode 2.0.15, measured (issue #272), plus --agent for the pinned isolation agent",
+			want: []string{"run", "--standalone", "--format", "json", "--agent", "crossrev",
 				"--model", "<model#effort>", "<prompt-with-schema>"},
 		},
 		{
 			harness: "opencode", write: true, major: 2,
-			where: "opencode 2.0.15, measured (issue #272)",
-			want: []string{"run", "--standalone", "--format", "json",
+			where: "opencode 2.0.15, measured (issue #272), plus --agent for the pinned isolation agent",
+			want: []string{"run", "--standalone", "--format", "json", "--agent", "crossrev",
 				"--model", "<model#effort>", "<prompt-with-schema>"},
 		},
 	}
