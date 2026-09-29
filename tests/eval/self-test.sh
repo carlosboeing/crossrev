@@ -7,7 +7,8 @@
 # single-harness path; never codex, which is a tripwire that exits loudly
 # instead of running). Two arms of the case run back to back, asserting no
 # pushed commit, comment, label or marker carries over, plus one
-# planted-findings resolve-only run.
+# planted-findings resolve-only run, plus a live planted-findings
+# resolve-only run against the stand-in with a fake resolve harness.
 #
 # Not run by tests/run.sh (which globs only tests/test-*.sh) and never run
 # by CI. Run it directly:
@@ -446,8 +447,8 @@ EOF
 chmod +x "$LIVEBIN/claude"
 : >"$T/live-claude.log"
 
-# Live runs the full case without the planted arm (planted stays refused
-# live) and the first arm only, to keep the loop short.
+# Live runs the full case (the first arm only, to keep the loop short);
+# the planted arm runs live separately below.
 MANIFEST_LIVE="$T/manifest-live.json"
 jq '.cases |= map(select(.mode == "full")) | .cases[0].arms |= .[0:1]' \
   "$MANIFEST" >"$MANIFEST_LIVE"
@@ -496,6 +497,56 @@ has "the live checkout ran from the frozen copy" \
   "$(cat "$LD/work/checkout/app.ts" 2>/dev/null)" "blue"
 is "the live run kept the assignments file" \
   "$([[ -f "$RL/assignments.json" ]] && echo yes || echo no)" "yes"
+
+# --- live planted run: resolve-only against the stand-in --------------------
+#
+# Live runs use the stand-in, which can hold the planted marker, so a
+# planted case runs live resolve-only: the marker goes straight into the
+# stand-in with no review harness involved, and only the resolve leg's
+# harness (the fake on PATH) is real. The tripwire gh fails the test if
+# the ambient gh is ever called.
+printf '\nlive planted run against the stand-in\n'
+MANIFEST_LIVE_PLANTED="$T/manifest-live-planted.json"
+jq '.cases |= map(select(.mode == "planted"))' "$MANIFEST" >"$MANIFEST_LIVE_PLANTED"
+ASSIGN_P="$T/assignments-planted.json"
+jq -n '[{"case":"planted-check","arm":"arm-p","reviewer":"live-reviewer","resolver":"live-resolver"}]' \
+  >"$ASSIGN_P"
+: >"$T/live-claude.log"
+RPL="$T/results-live-planted"
+PATH="$TRIPBIN:$LIVEBIN:$ROOT/tests/stub:$PATH" bash "$RUNNER" --live \
+  --manifest "$MANIFEST_LIVE_PLANTED" --results-dir "$RPL" --bin "$BIN" \
+  --assignments "$ASSIGN_P" >"$T/runner-live-planted-out.txt" 2>&1
+livep_rc=$?
+if (( livep_rc != 0 )); then
+  printf '\n--- live planted runner output ---\n'
+  cat "$T/runner-live-planted-out.txt"
+  printf '%s\n' "--- end live planted runner output (kept tree: $T) ---"
+fi
+is "the live planted runner exits clean" "$livep_rc" "0"
+PL="$RPL/planted-check/arm-p"
+is "live planted results exist" "$([[ -d "$PL" ]] && echo yes || echo no)" "yes"
+is "the live planted run is resolve-only" \
+  "$(jq -r '.legs | join(",")' "$PL/result.json" 2>/dev/null)" "resolve"
+has "the live planted marker held the real finding" "$(cat "$PL/markers.json" 2>/dev/null)" "Unchecked fetch response"
+has "and the live planted finding" "$(cat "$PL/markers.json" 2>/dev/null)" "Untyped legacy export"
+has "the live planted fix landed in the frozen copy" \
+  "$(git --git-dir="$PL/work/origin.git" log --format=%s refs/heads/feature 2>/dev/null)" \
+  "amber"
+is "the live planted run resolved every thread it posted" \
+  "$(jq -r '[.[] | select(.isResolved != true)] | length' "$PL/state/threads.json" 2>/dev/null)" "0"
+is "the fake resolve harness answered the leg" \
+  "$(( $(wc -l <"$T/live-claude.log" 2>/dev/null || printf 0) >= 1 ? 1 : 0 ))" "1"
+is "the ambient gh was never called for the planted run" \
+  "$([[ ! -s "$T/tripwire.log" ]] && echo yes || echo no)" "yes"
+is "the live planted run kept the assignments file" \
+  "$([[ -f "$RPL/assignments.json" ]] && echo yes || echo no)" "yes"
+
+PATH="$TRIPBIN:$LIVEBIN:$PATH" bash "$RUNNER" --live \
+  --manifest "$MANIFEST_LIVE_PLANTED" --results-dir "$T/results-live-planted-noassign" --bin "$BIN" \
+  >"$T/runner-live-planted-noassign-out.txt" 2>&1
+noassign_p_rc=$?
+is "a live planted run without assignments is refused" "$(( noassign_p_rc != 0 ? 1 : 0 ))" "1"
+has "and the planted refusal names the assignments file" "$(cat "$T/runner-live-planted-noassign-out.txt")" "assignments"
 
 BAD_LIVE="$T/manifest-live-bad-head.json"
 jq '.cases[0].head = "0000000000000000000000000000000000000000"' \

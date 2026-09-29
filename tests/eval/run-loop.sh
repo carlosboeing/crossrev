@@ -35,8 +35,10 @@
 # harness CLIs on PATH instead of the stubs, with the model pins from the
 # manifest. It is refused without an --assignments file recording the four
 # (case, arm, reviewer, resolver) assignments; that file is copied into the
-# results. The ambient gh is never used on either path. Planted cases are
-# refused live. The harness CLIs keep the operator's own login because their
+# results. The ambient gh is never used on either path. Planted cases run
+# live too, resolve-only: the review marker is written straight into the
+# stand-in with no review harness involved, so only the resolve leg's
+# harness is real. The harness CLIs keep the operator's own login because their
 # configuration lives outside the two private XDG homes: HOME, XDG_DATA_HOME
 # and the credential environment are inherited untouched.
 #
@@ -147,11 +149,6 @@ for (( ci=0; ci<ncases; ci++ )); do
   done
   [[ "$(jq -r --argjson i "$ci" '.cases[$i].mode' "$MANIFEST")" =~ ^(full|planted)$ ]] \
     || eval_fail ".cases[$ci].mode must be full or planted"
-  if (( LIVE )) && [[ "$(jq -r --argjson i "$ci" '.cases[$i].mode' "$MANIFEST")" == "planted" ]]; then
-    printf 'run-loop: live run refused: case %s is planted-findings mode, which is refused live\n' \
-      "$(jq -r --argjson i "$ci" '.cases[$i].id' "$MANIFEST")" >&2
-    exit 2
-  fi
   narms="$(jq -r --argjson i "$ci" '.cases[$i].arms | length' "$MANIFEST")"
   [[ "$narms" != "0" ]] || eval_fail ".cases[$ci].arms must not be empty"
   for (( ai=0; ai<narms; ai++ )); do
@@ -783,11 +780,12 @@ for (( ci=0; ci<ncases; ci++ )); do
       WRAPPER="$(eval_wrapper_for "$BIN" "$arm_dir/wrap")"
       EVAL_HEAD="$head"
       if [[ "$mode" == "planted" ]]; then
-        eval_fail_result "$arm_dir" "$case_id" "$arm_id" "$mode" "$base" "$head" \
-          "planted-findings mode is refused live";
-        failures=$((failures+1)); printf '%s\n' "$arm_dir/result.json" >>"$RESULT_LIST"; continue
+        # Resolve-only, like offline: the marker goes straight into the
+        # stand-in, so only the resolve leg's harness is real.
+        eval_planted_arm "$arm_dir" "$arm_json" || failures=$((failures+1))
+      else
+        eval_full_loop "$arm_dir" "$arm_json" || failures=$((failures+1))
       fi
-      eval_full_loop "$arm_dir" "$arm_json" || failures=$((failures+1))
       eval_collect_offline "$arm_dir"
       eval_write_result "$arm_dir" "$case_id" "$arm_id" "$mode" "$base" "$ARM_BASE_PRIME"
     else
