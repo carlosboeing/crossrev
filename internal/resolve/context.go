@@ -303,7 +303,7 @@ func (l *Leg) settings(s *session) (*Refusal, ui.Line, error) {
 		s.settings = legSettings{Harness: name, Model: model, Effort: effort, Endpoint: endpoint}
 		return nil, ui.Line{}, nil
 	}
-	for _, alt := range doc.NamesForLeg("resolve") {
+	for _, alt := range workingResolvers(doc) {
 		if l.binaryInstalled(alt) {
 			s.settings = legSettings{Harness: alt, Model: "", Effort: effort, Endpoint: ""}
 			// ui_warn, condition and consequence apart (lib/run.sh:548-549).
@@ -316,17 +316,29 @@ func (l *Leg) settings(s *session) (*Refusal, ui.Line, error) {
 	return notInstalledRefusal(doc, asked), ui.Line{}, nil
 }
 
+// workingResolvers returns the harnesses that serve the resolve leg, excluding
+// codex until the served read tool also serves resolve legs.
+func workingResolvers(doc harness.Document) []string {
+	var resolvers []string
+	for _, name := range doc.NamesForLeg("resolve") {
+		if name != "codex" {
+			resolvers = append(resolvers, name)
+		}
+	}
+	return resolvers
+}
+
 // notInstalledRefusal is the last refusal in run_leg_settings
 // (lib/run.sh:544-546), reached once the configured harness has no binary and
 // the substitution loop at lib/run.sh:537-543 finds no other harness that
 // serves the leg.
 //
 // The hint names every harness that CAN take the leg, read off the descriptor
-// with harness_names_for_leg — which is why the refused harness appears in the
-// list it is told to install from. Measured on the shipped descriptor with a
+// with harness_names_for_leg excluding codex — which has no file-reading tool
+// when its shell is disabled. Measured on the shipped descriptor with a
 // PATH carrying jq and yq but no harness binary:
 //
-//	Install one of claude, codex, agy, grok and opencode. CrossRev needs at least one, and two different ones is what makes the cross-model check mean anything.
+//	Install one of claude, agy, grok and opencode. CrossRev needs at least one, and two different ones is what makes the cross-model check mean anything.
 //
 // and with codex, agy and grok rewritten to legs ["review"]:
 //
@@ -336,7 +348,7 @@ func notInstalledRefusal(doc harness.Document, asked string) *Refusal {
 	return &Refusal{
 		Message: fmt.Sprintf("the resolver is configured to use '%s', which is not installed, and no other harness that can serve the %s leg is either", asked, leg),
 		Hint: fmt.Sprintf("Install one of %s. CrossRev needs at least one, and two different ones is what makes the cross-model check mean anything.",
-			harness.NamesHuman(doc.NamesForLeg(leg))),
+			harness.NamesHuman(workingResolvers(doc))),
 	}
 }
 
@@ -407,16 +419,10 @@ func servesLegRefusal(doc harness.Document, name string) *Refusal {
 // unaffected: the review leg carries no such refusal.
 func codexResolverRefusal(doc harness.Document) *Refusal {
 	const leg = "resolve"
-	var resolvers []string
-	for _, name := range doc.NamesForLeg(leg) {
-		if name != "codex" {
-			resolvers = append(resolvers, name)
-		}
-	}
 	return &Refusal{
 		Message: "the codex resolver cannot read files, so a resolve leg on codex answers `blocked` instead of editing",
 		Hint: "codex 0.158.0 with the shell disabled has no file-reading tool: the resolve leg's `--disable shell_tool --disable unified_exec` leaves it nothing to verify against, so it edits nothing and the pass halts. " +
-			fmt.Sprintf("CrossRev runs the %s leg on %s until the served read tool also serves resolve legs. ", leg, harness.NamesHuman(resolvers)) +
+			fmt.Sprintf("CrossRev runs the %s leg on %s until the served read tool also serves resolve legs. ", leg, harness.NamesHuman(workingResolvers(doc))) +
 			"Point the resolver at one of them with --harness, or set resolver.harness in the repository config.",
 	}
 }

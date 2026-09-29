@@ -421,7 +421,7 @@ func TestSettingsRefusesWhenNothingThatCanResolveIsInstalled(t *testing.T) {
 	}
 	wantRefusal(t, got.Err,
 		"the resolver is configured to use 'claude', which is not installed, and no other harness that can serve the resolve leg is either",
-		"Install one of claude, codex, agy, grok and opencode. CrossRev needs at least one, and two different ones is what makes the cross-model check mean anything.")
+		"Install one of claude, agy, grok and opencode. CrossRev needs at least one, and two different ones is what makes the cross-model check mean anything.")
 	if e.runner.specs != nil {
 		t.Errorf("harness started on a refusal: %d specs", len(e.runner.specs))
 	}
@@ -497,6 +497,33 @@ func TestSettingsRefusesCodexAsAResolver(t *testing.T) {
 			t.Errorf("harness started on a refusal: %d specs", len(e.runner.specs))
 		}
 	})
+}
+
+// TestSettingsRefusesWhenOnlyCodexIsInstalled pins that a machine where only
+// codex is on PATH refuses rather than substituting codex as the resolver.
+// The default resolver is claude, and codex cannot read files with its shell
+// disabled, so the substitution loop must not start codex.
+func TestSettingsRefusesWhenOnlyCodexIsInstalled(t *testing.T) {
+	e := setup(t)
+	e.lookPath = func(name string) (string, error) {
+		if name == "codex" {
+			return "/bin/codex", nil
+		}
+		return "", os.ErrNotExist
+	}
+	e.addReview(t, defaultFindings(), "issues-remain")
+
+	got := e.run(t)
+
+	if got.Outcome != OutcomeRefused {
+		t.Errorf("Outcome = %q, want %q", got.Outcome, OutcomeRefused)
+	}
+	wantRefusal(t, got.Err,
+		"the resolver is configured to use 'claude', which is not installed, and no other harness that can serve the resolve leg is either",
+		"Install one of claude, agy, grok and opencode. CrossRev needs at least one, and two different ones is what makes the cross-model check mean anything.")
+	if e.runner.specs != nil {
+		t.Errorf("harness started on a refusal: %d specs", len(e.runner.specs))
+	}
 }
 
 // TestCapitaliseName pins the Bash
