@@ -159,7 +159,7 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 	// The batch prompts name the pass's read path ahead of the output
 	// instruction, measured by packing like every other prompt byte.
 	if entry, ok := l.Harness.For(settings.harness); ok {
-		_, effective := EffectiveReadMode(entry.ReadMode())
+		effective, _ := EffectiveReadMode(entry.ReadMode())
 		shared.reads = prompt.ReadsBlock(string(effective))
 	}
 	budget, ok := l.Harness.InputBudget(settings.harness, settings.model)

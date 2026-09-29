@@ -202,7 +202,7 @@ func (l *Leg) invoke(ctx context.Context, req Request, loaded Context, settings 
 
 	// The prompt names the call's read path ahead of the output
 	// instruction: the served read tool or no read tool at all.
-	_, effectivePromptMode := EffectiveReadMode(entry.ReadMode())
+	effectivePromptMode, _ := EffectiveReadMode(entry.ReadMode())
 
 	staged, err := cred.Prepare(l.Harness.Credentials().For(settings.harness), settings.endpoint, cred.Options{Now: l.Now})
 	if err != nil {
@@ -387,6 +387,17 @@ func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settin
 			inv.Serve = nil
 			effective = harness.ReadModeSupplied
 			readsReason = ReadsReasonSelfTestFailed
+			// The prompt rendered for the served tool before the
+			// self-test ran: rewrite its reads block to the supplied
+			// one, in hand, in the invocation and on disk, so the
+			// reviewer is never told it has a tool the child was not
+			// granted. The invocation already snapshotted the text,
+			// so it is re-pointed too.
+			promptBytes = rewriteReadsBlock(promptBytes)
+			inv.Prompt.Text = string(promptBytes)
+			if err := os.WriteFile(promptPath, promptBytes, 0o600); err != nil {
+				return harness.Envelope{}, nil, outMsgs, err
+			}
 			outMsgs = append(outMsgs, readsDegradedWarning(readsReason))
 			if l.Log != nil {
 				l.Log.Event("reads", "self-test failed ("+selfTestErr.Error()+"); degrading to supplied")

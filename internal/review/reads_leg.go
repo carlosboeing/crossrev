@@ -18,6 +18,7 @@
 package review
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -28,6 +29,7 @@ import (
 
 	"github.com/carlosboeing/crossrev/internal/core"
 	"github.com/carlosboeing/crossrev/internal/harness"
+	"github.com/carlosboeing/crossrev/internal/prompt"
 	"github.com/carlosboeing/crossrev/internal/prstate"
 	"github.com/carlosboeing/crossrev/internal/readserve"
 	"github.com/carlosboeing/crossrev/internal/ui"
@@ -153,6 +155,16 @@ func (l *Leg) runReadsSelfTest(ctx context.Context, command string, session read
 // noteReads records one call's reads health for the envelopes.
 func (l *Leg) noteReads(note readsNote) {
 	l.readsNotes = append(l.readsNotes, note)
+}
+
+// rewriteReadsBlock swaps the served reads block for the supplied one in
+// an already-rendered prompt. Prompts render before the leg-start
+// self-test runs, so a call that falls back to supplied rewrites what the
+// reviewer is told rather than naming a tool the child was not granted.
+func rewriteReadsBlock(promptBytes []byte) []byte {
+	return bytes.Replace(promptBytes,
+		[]byte(prompt.ReadsBlock(string(harness.ReadModeServed))),
+		[]byte(prompt.ReadsBlock(string(harness.ReadModeSupplied))), 1)
 }
 
 // assessCallReads is the post-call reads check: the handshake in this

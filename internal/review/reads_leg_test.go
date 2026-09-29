@@ -44,6 +44,67 @@ func TestReadsDegradeOnABrokenTool(t *testing.T) {
 	}
 }
 
+// A call that fails its self-test and degrades to supplied is sent the
+// supplied reads block: the prompt renders before the self-test runs, so
+// the fallback rewrites the block rather than telling the reviewer it has
+// a tool the child was not granted.
+func TestDegradedCallIsSentTheSuppliedReadsBlock(t *testing.T) {
+	e := newEnv(t)
+	writeRequiredHead(e, "a.go", "package a\n")
+	e.runner.serveErr = errors.New("connection refused")
+	var prompts []string
+	e.runner.onSpec = func(spec exec.Spec) {
+		prompts = append(prompts, specPrompt(spec))
+	}
+	e.runner.script = []exec.Result{
+		{ExitCode: 0, Stdout: claudeStdout(batchAnswerFor(t, []string{"a.go"}))},
+	}
+
+	got := runLeg(t, e, e.request(t))
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
+	if len(prompts) == 0 {
+		t.Fatal("the harness received no prompt")
+	}
+	for _, p := range prompts {
+		if strings.Contains(p, "You have one file-reading tool") {
+			t.Errorf("a degraded prompt names the served tool")
+		}
+		if !strings.Contains(p, "You have no file-reading tool") {
+			t.Errorf("a degraded prompt carries no supplied reads block")
+		}
+	}
+}
+
+// A healthy served call is sent the served reads block: the prompt names
+// the tool the child is granted, so the reviewer reads through it rather
+// than judging the supplied content alone.
+func TestServedCallIsSentTheServedReadsBlock(t *testing.T) {
+	e := newEnv(t)
+	writeRequiredHead(e, "a.go", "package a\n")
+	var prompts []string
+	e.runner.onSpec = func(spec exec.Spec) {
+		prompts = append(prompts, specPrompt(spec))
+	}
+	e.runner.script = []exec.Result{
+		{ExitCode: 0, Stdout: claudeStdout(batchAnswerFor(t, []string{"a.go"}))},
+	}
+
+	got := runLeg(t, e, e.request(t))
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
+	if len(prompts) == 0 {
+		t.Fatal("the harness received no prompt")
+	}
+	for _, p := range prompts {
+		if !strings.Contains(p, "You have one file-reading tool") {
+			t.Errorf("a served prompt names no served tool")
+		}
+	}
+}
+
 // A broken served tool halts where the policy says halt: the call
 // publishes nothing and the failure names reads_unavailable.
 func TestReadsHaltOnABrokenTool(t *testing.T) {
