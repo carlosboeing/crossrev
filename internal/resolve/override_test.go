@@ -1,6 +1,9 @@
 package resolve
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/carlosboeing/crossrev/internal/ui"
@@ -85,5 +88,40 @@ func TestSettingsModelOverrideMatchesTheSameModelFromConfig(t *testing.T) {
 	}
 	if effortFlag != effortConfig || effortConfig != "shared-effort" {
 		t.Errorf("marker effort = %q from the flag and %q from the config, want shared-effort both", effortFlag, effortConfig)
+	}
+}
+
+// The run log records the resolved model and effort, so a run's requested
+// values read back off run.log rather than only off the marker and the
+// printed header.
+func TestTheRunLogRecordsTheResolvedModelAndEffort(t *testing.T) {
+	run := func(t *testing.T, cfg string, model, effort string) string {
+		t.Helper()
+		e := setup(t)
+		e.git.staged = true
+		e.git.show = map[string][]byte{e.base.SHA() + ":.github/crossrev.yml": []byte(cfg)}
+		e.addReview(t, defaultFindings(), "issues-remain")
+
+		got := e.runReq(t, Request{PR: 42, Repo: e.slug, Trigger: TriggerHuman,
+			ModelOverride: model, EffortOverride: effort})
+		if got.Err != nil {
+			t.Fatalf("Run: %v", got.Err)
+		}
+		if got.Outcome != OutcomeComplete {
+			t.Fatalf("Outcome = %q, want complete", got.Outcome)
+		}
+		body, err := os.ReadFile(filepath.Join(e.log.Dir(), "run.log"))
+		if err != nil {
+			t.Fatalf("read run.log: %v", err)
+		}
+		return string(body)
+	}
+	const cfg = "version: 2\nresolver:\n  harness: claude\n  model: configured-model\n  effort: configured-effort\n"
+
+	if log := run(t, cfg, "cli-model", "cli-effort"); !strings.Contains(log, "settings harness=claude model=cli-model effort=cli-effort") {
+		t.Errorf("run.log does not record the CLI model and effort:\n%s", log)
+	}
+	if log := run(t, cfg, "", ""); !strings.Contains(log, "settings harness=claude model=configured-model effort=configured-effort") {
+		t.Errorf("run.log does not record the configured model and effort:\n%s", log)
 	}
 }

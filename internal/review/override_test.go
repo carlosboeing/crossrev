@@ -104,3 +104,34 @@ func TestAModelOverrideMatchesTheSameModelFromConfig(t *testing.T) {
 		}
 	}
 }
+
+// The run log records the resolved model and effort, so a run's requested
+// values read back off run.log rather than only off the marker and the
+// printed header: the `call` lines name only the answering model.
+func TestTheRunLogRecordsTheResolvedModelAndEffort(t *testing.T) {
+	run := func(t *testing.T, cfg string, model, effort string) string {
+		t.Helper()
+		e := newEnv(t)
+		e.cfg = mustConfig(t, cfg)
+		writeAppGo(t, e.dir)
+		e.runner.script = []exec.Result{{ExitCode: 0, Stdout: claudeStdout(issuesPayload(twoFindings))}}
+
+		req := e.request(t)
+		req.HarnessOverride = ""
+		req.ModelOverride = model
+		req.EffortOverride = effort
+		leg := e.leg(t)
+		if got := leg.Run(context.Background(), req); got.Err != nil {
+			t.Fatalf("Run: %v", got.Err)
+		}
+		return readRunLog(t, e)
+	}
+	const cfg = "version: 2\nreviewer:\n  harness: claude\n  model: configured-model\n  effort: configured-effort\n"
+
+	if log := run(t, cfg, "cli-model", "cli-effort"); !strings.Contains(log, "settings harness=claude model=cli-model effort=cli-effort") {
+		t.Errorf("run.log does not record the CLI model and effort:\n%s", log)
+	}
+	if log := run(t, cfg, "", ""); !strings.Contains(log, "settings harness=claude model=configured-model effort=configured-effort") {
+		t.Errorf("run.log does not record the configured model and effort:\n%s", log)
+	}
+}
