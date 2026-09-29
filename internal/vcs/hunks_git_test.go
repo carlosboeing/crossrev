@@ -165,3 +165,101 @@ func TestShapeFileDiffLargeJSONAgainstRealGit(t *testing.T) {
 		t.Error("clipped hunks lost the changed line")
 	}
 }
+
+// Every diff= pin in the embedded attributes names a built-in driver from
+// gitattributes(5). An unknown name silently falls back to the default
+// funcname pattern: under `diff=go` a change in a Go import block heads
+// its -W hunk with `package`, while `diff=golang` finds no enclosing
+// function. The probes below are the built-in list on the installed git,
+// checked by hand against `git help gitattributes`; check-attr under the
+// embedded file must answer each one, and must leave the extensions git
+// carries no driver for unspecified.
+func TestReviewAttributesNameBuiltInDrivers(t *testing.T) {
+	attrs := write(t, t.TempDir(), "review.gitattributes", string(vcs.ReviewAttributes()))
+	git := testGit(t)
+	repo := initRepo(t, git, filepath.Join(realTempDir(t), "clone"))
+
+	probes := []struct{ path, driver string }{
+		{"probe.ada", "ada"},
+		{"probe.c", "cpp"},
+		{"probe.h", "cpp"},
+		{"probe.cc", "cpp"},
+		{"probe.cpp", "cpp"},
+		{"probe.cs", "csharp"},
+		{"probe.css", "css"},
+		{"probe.ex", "elixir"},
+		{"probe.exs", "elixir"},
+		{"probe.f", "fortran"},
+		{"probe.f90", "fortran"},
+		{"probe.go", "golang"},
+		{"probe.html", "html"},
+		{"probe.htm", "html"},
+		{"probe.java", "java"},
+		{"probe.m", "objc"},
+		{"probe.mm", "objc"},
+		{"probe.pas", "pascal"},
+		{"probe.pl", "perl"},
+		{"probe.pm", "perl"},
+		{"probe.php", "php"},
+		{"probe.py", "python"},
+		{"probe.rb", "ruby"},
+		{"probe.rs", "rust"},
+		{"probe.tex", "tex"},
+	}
+	// git carries no driver for these, so the file must not pin them:
+	// they stay unspecified and shape under the default pattern.
+	unspecified := []string{"probe.d", "probe.js", "probe.jsx"}
+
+	args := []string{"-c", "core.attributesFile=" + attrs, "check-attr", "diff", "--"}
+	for _, probe := range probes {
+		args = append(args, probe.path)
+	}
+	args = append(args, unspecified...)
+	answers := map[string]string{}
+	for _, line := range mustGit(t, repo, args...).Lines() {
+		path, value, ok := strings.Cut(line, ": diff: ")
+		if !ok {
+			t.Fatalf("unparseable check-attr line %q", line)
+		}
+		answers[path] = value
+	}
+	for _, probe := range probes {
+		if answers[probe.path] != probe.driver {
+			t.Errorf("check-attr diff %s = %q, want built-in driver %q", probe.path, answers[probe.path], probe.driver)
+		}
+	}
+	for _, path := range unspecified {
+		if answers[path] != "unspecified" {
+			t.Errorf("check-attr diff %s = %q, want unspecified (git carries no driver for it)", path, answers[path])
+		}
+	}
+
+	// Every diff= pin in the file is covered above: a line pinning an
+	// unlisted name passes check-attr silently, so the file cannot grow
+	// one without this test naming it.
+	pinned := map[string]bool{}
+	for _, line := range strings.Split(string(vcs.ReviewAttributes()), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) != 2 || !strings.HasPrefix(fields[1], "diff=") {
+			continue
+		}
+		probe := "probe." + strings.TrimPrefix(fields[0], "*.")
+		pinned[probe] = true
+		want := ""
+		for _, p := range probes {
+			if p.path == probe {
+				want = p.driver
+			}
+		}
+		if want == "" {
+			t.Errorf("embedded attributes pin %q, which no probe above covers", line)
+		} else if want != strings.TrimPrefix(fields[1], "diff=") {
+			t.Errorf("embedded attributes pin %q, want diff=%s", line, want)
+		}
+	}
+	for _, probe := range probes {
+		if !pinned[probe.path] {
+			t.Errorf("probe path %s has no pin in the embedded attributes", probe.path)
+		}
+	}
+}

@@ -18,23 +18,20 @@
 # never converts it (`--no-ext-diff --no-textconv` on every call).
 
 *.ada diff=ada
-*.c diff=c
+*.c diff=cpp
 *.h diff=cpp
 *.cc diff=cpp
 *.cpp diff=cpp
 *.cs diff=csharp
 *.css diff=css
-*.d diff=d
 *.ex diff=elixir
 *.exs diff=elixir
 *.f diff=fortran
 *.f90 diff=fortran
-*.go diff=go
+*.go diff=golang
 *.html diff=html
 *.htm diff=html
 *.java diff=java
-*.js diff=javascript
-*.jsx diff=javascript
 *.m diff=objc
 *.mm diff=objc
 *.pas diff=pascal
