@@ -32,10 +32,24 @@ type Config struct {
 	PerLegBytes    int
 }
 
+// The contract budgets and caps for the read server: a result is cut
+// between lines at 12 KiB or 400 lines, one call's server answers within
+// 256 KiB, and one leg stays within 200 reads and 1 MiB. The per-call
+// share is min(256 KiB, 0.25 x W x 3.9 bytes); the server cannot see the
+// model's window W, so its default is the window-independent bound and
+// the harness passes the computed share through --per-call-bytes.
+const (
+	DefaultMaxResultBytes = 12288
+	DefaultMaxResultLines = 400
+	DefaultPerCallBytes   = 262144
+	DefaultPerLegReads    = 200
+	DefaultPerLegBytes    = 1048576
+)
+
 func parseArgs(args []string) Config {
 	c := Config{
-		MaxResultBytes: 12288,
-		MaxResultLines: 400,
+		MaxResultBytes: DefaultMaxResultBytes,
+		MaxResultLines: DefaultMaxResultLines,
 	}
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
@@ -70,6 +84,23 @@ func parseArgs(args []string) Config {
 			c.PerLegBytes, _ = strconv.Atoi(args[i+1])
 			i++
 		}
+	}
+	// A non-positive budget is no flag at all: without this a missing
+	// --per-call-bytes left the zero value, which refused every read.
+	if c.MaxResultBytes <= 0 {
+		c.MaxResultBytes = DefaultMaxResultBytes
+	}
+	if c.MaxResultLines <= 0 {
+		c.MaxResultLines = DefaultMaxResultLines
+	}
+	if c.PerCallBytes <= 0 {
+		c.PerCallBytes = DefaultPerCallBytes
+	}
+	if c.PerLegReads <= 0 {
+		c.PerLegReads = DefaultPerLegReads
+	}
+	if c.PerLegBytes <= 0 {
+		c.PerLegBytes = DefaultPerLegBytes
 	}
 	return c
 }
@@ -164,7 +195,12 @@ func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 
 	git := vcs.New(exec.NewOSRunner(), nil)
 	repo := git.At(cfg.Repo)
-	bytesReadInCall := 0
+	// Cumulative counters for this server process, which serves one call:
+	// the per-call share bounds what this process may return, and the
+	// per-leg caps bound it from outside. Only successful reads charge;
+	// refusals cost nothing.
+	bytesReturned := 0
+	legReads := 0
 
 	scanner := bufio.NewScanner(in)
 	buf := make([]byte, 0, 1024*1024)
@@ -341,16 +377,37 @@ func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 				continue
 			}
 
-			lines := strings.Split(string(bytesOut), "\n")
+			// Lines match `git show` exactly: one trailing newline is the
+			// terminator of the last line, not a phantom empty line after
+			// it, and an empty blob is zero lines rather than one empty line.
+			var lines []string
+			if len(bytesOut) > 0 {
+				lines = strings.Split(strings.TrimSuffix(string(bytesOut), "\n"), "\n")
+			}
+
 			start := argsStruct.StartLine
 			if start < 1 {
 				start = 1
 			}
+			// An end below the start is inverted, never empty: it refuses
+			// rather than extending to end of file. An end past the last
+			// line clamps to it, and the header names the clamped range.
+			if argsStruct.EndLine != 0 && argsStruct.EndLine < start {
+				_ = encoder.Encode(newResultResponse(req.ID, map[string]interface{}{
+					"isError": true,
+					"content": []map[string]interface{}{{"type": "text", "text": "bad_range"}},
+				}))
+				continue
+			}
 			end := argsStruct.EndLine
-			if end < start || end > len(lines) {
+			if end == 0 || end > len(lines) {
 				end = len(lines)
 			}
-			if start > len(lines) {
+			// A start past the last line is out of range, except the
+			// default read of an empty file: `git show` succeeds with
+			// zero bytes, so the server answers the empty range rather
+			// than refusing what git reports.
+			if start > len(lines) && !(len(lines) == 0 && start == 1) {
 				_ = encoder.Encode(newResultResponse(req.ID, map[string]interface{}{
 					"isError": true,
 					"content": []map[string]interface{}{{"type": "text", "text": "bad_range"}},
@@ -358,11 +415,23 @@ func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 				continue
 			}
 
+			// The leg's read count is checked before rendering; exhaustion
+			// is a refusal on this request, never a halt of the server.
+			if legReads >= cfg.PerLegReads {
+				_ = encoder.Encode(newResultResponse(req.ID, map[string]interface{}{
+					"isError": true,
+					"content": []map[string]interface{}{{"type": "text", "text": "budget_exhausted"}},
+				}))
+				continue
+			}
+
 			var sb strings.Builder
 			last := end
+			nextStart := 0
 			for i := start - 1; i < end; i++ {
 				lineBytes := len(lines[i]) + 1
-				if bytesReadInCall + sb.Len() + lineBytes > cfg.PerCallBytes {
+				if bytesReturned+sb.Len()+lineBytes > cfg.PerCallBytes ||
+					bytesReturned+sb.Len()+lineBytes > cfg.PerLegBytes {
 					// Budget exhausted
 					_ = encoder.Encode(newResultResponse(req.ID, map[string]interface{}{
 						"isError": true,
@@ -370,7 +439,7 @@ func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 					}))
 					goto nextReq
 				}
-				if i == start - 1 && lineBytes > cfg.MaxResultBytes {
+				if i == start-1 && lineBytes > cfg.MaxResultBytes {
 					// Line itself is too long
 					_ = encoder.Encode(newResultResponse(req.ID, map[string]interface{}{
 						"isError": true,
@@ -378,9 +447,10 @@ func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 					}))
 					goto nextReq
 				}
-				if sb.Len() + lineBytes > cfg.MaxResultBytes || (i - start + 1) >= cfg.MaxResultLines {
+				if sb.Len()+lineBytes > cfg.MaxResultBytes || (i-start+1) >= cfg.MaxResultLines {
 					// Cut before this line
-					sb.WriteString(fmt.Sprintf("(cut, next start_line=%d)\n", i+1))
+					nextStart = i + 1
+					sb.WriteString(fmt.Sprintf("(cut, next start_line=%d)\n", nextStart))
 					last = i
 					break
 				}
@@ -388,15 +458,27 @@ func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 			}
 
 			text := fmt.Sprintf("%s@%s lines %d-%d\n%s", argsStruct.Path, argsStruct.Revision, start, last, sb.String())
-			bytesReadInCall += len(text)
+			bytesReturned += len(text)
+			legReads++
 			_ = encoder.Encode(newResultResponse(req.ID, map[string]interface{}{
 				"content": []map[string]interface{}{{"type": "text", "text": text}},
 			}))
 
 			h := sha256.New()
 			h.Write([]byte(text))
-			argsStruct.Digest = hex.EncodeToString(h.Sum(nil))
-			lg.event("read", argsStruct)
+			// The log carries the returned range and the cut marker, so a
+			// read replays from (path, revision, returned) with a digest
+			// over the same bytes; it never carries text.
+			lg.event("read", map[string]interface{}{
+				"path":            argsStruct.Path,
+				"revision":        argsStruct.Revision,
+				"start_line":      start,
+				"end_line":        last,
+				"requested_start": argsStruct.StartLine,
+				"requested_end":   argsStruct.EndLine,
+				"next_start":      nextStart,
+				"digest":          hex.EncodeToString(h.Sum(nil)),
+			})
 
 		case "ping":
 			_ = encoder.Encode(newResultResponse(req.ID, map[string]interface{}{}))
