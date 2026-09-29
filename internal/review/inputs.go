@@ -33,6 +33,8 @@ type Request struct {
 	Trigger         Trigger
 	Continuation    bool
 	HarnessOverride string
+	ModelOverride   string
+	EffortOverride  string
 	Author          string
 	// Workdir overrides the pinned worktree: empty pins a clean detached
 	// worktree at the pull request head, set runs the harness there after

@@ -30,13 +30,8 @@ func PairingSupported(doc harness.Document, runner, name, leg string) (string, b
 	// A descriptor fact, not a runner fact: self-hosted skips the credential
 	// checks below because the machine already holds the login, but a harness
 	// that does not serve this leg is refused on every runner.
-	//
-	// A name the descriptor does not carry serves every leg, so it falls to the
-	// adapter refusal below rather than to this one — jq's answer, and the
-	// reason is on harness.Document.ServesLeg.
-	if leg != "" && !doc.ServesLeg(name, leg) {
-		return fmt.Sprintf("%s is limited to the %s leg, and cannot serve the %s leg",
-			productName(doc, name), strings.Join(declaredLegs(doc, name), ", "), leg), false
+	if reason, refused := legRefusal(doc, name, leg); refused {
+		return reason, false
 	}
 
 	if runner == "self-hosted" {
@@ -68,6 +63,32 @@ func PairingSupported(doc harness.Document, runner, name, leg string) (string, b
 	return fmt.Sprintf(
 		"%s's subscription token lives about %d minutes, and CrossRev has no way to seed it into a hosted runner yet",
 		entry.ProductName, seconds/60), false
+}
+
+// legRefusal is the leg-servability half of PairingSupported: the resolver
+// rule, then the descriptor's own legs. Both PairingSupported and
+// ReportPairings read it, so the report frame and the refusal reason cannot
+// drift apart — a reason from either branch is a descriptor fact, refused on
+// every runner.
+//
+// The codex refusal is the shared resolver rule
+// (harness.RefusedAsResolver), so `doctor` and `init` refuse the same
+// resolver the runtime refuses, on every runner — the shell denial that
+// strands codex applies self-hosted too.
+func legRefusal(doc harness.Document, name, leg string) (string, bool) {
+	if leg == harness.LegResolve && harness.RefusedAsResolver(name) {
+		return fmt.Sprintf("%s is limited to the review leg, and cannot serve the %s leg",
+			productName(doc, name), leg), true
+	}
+	//
+	// A name the descriptor does not carry serves every leg, so it falls
+	// through to PairingSupported's adapter refusal rather than to this one
+	// — jq's answer, and the reason is on harness.Document.ServesLeg.
+	if leg != "" && !doc.ServesLeg(name, leg) {
+		return fmt.Sprintf("%s is limited to the %s leg, and cannot serve the %s leg",
+			productName(doc, name), strings.Join(declaredLegs(doc, name), ", "), leg), true
+	}
+	return "", false
 }
 
 // declaredLegs is `.legs // []`: the legs the descriptor writes down, and
@@ -153,6 +174,16 @@ func (c *Checker) ReportPairings(runner string) bool {
 		}
 		reason, ok := PairingSupported(c.Harness, runner, name, legName)
 		if !ok {
+			// A leg-servability refusal is a descriptor fact, so the
+			// runner frame below would lie twice: the harness cannot
+			// run on the runner it is already on, and the runner fix
+			// would still refuse. It reports its own line instead —
+			// the reason as the headline, only the harness fix.
+			if _, refused := legRefusal(c.Harness, name, legName); refused {
+				c.io().No(leg + " — " + reason)
+				c.io().Line("   Fix: name a different harness for this leg.")
+				return false
+			}
 			c.io().No(leg + " — " + name + " by subscription cannot run on a " + runner + " runner")
 			c.io().Line("   " + reason)
 			c.io().Line("   Fixes: set runner: self-hosted, or name a different harness for this leg.")

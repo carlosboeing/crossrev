@@ -21,6 +21,8 @@ Options on `cycle`, `review` and `resolve`:
 | Option | What it does |
 |---|---|
 | `--harness claude\|codex\|agy\|grok\|opencode` | Override the harness the config names for that leg, for this run. On `cycle` it lands on both legs, which is how an operator with one harness runs the loop; not `kimi`, which is an endpoint rather than an adapter |
+| `--model <id>` | Override the configured model for this run, passed to the harness exactly as written. Without `--harness` it keeps the configured harness and replaces only its model; on `cycle` it lands on both legs |
+| `--effort <level>` | Override the configured reasoning effort for this run, passed through verbatim like the config value; on `cycle` it lands on both legs |
 | `--repo owner/name` | Target a repository other than this checkout |
 | `--no-tips` | Suppress the closing suggestion about automated mode |
 
@@ -223,7 +225,7 @@ One exception keeps the green honest: a pass that raises nothing new while an es
 With no config file anywhere, the defaults are `codex` reviewing and `claude` resolving, in `local` mode, with nothing persisted. Override a leg for one run without touching the repository:
 
 ```bash
-crossrev review --pr 42 --harness claude
+crossrev review --pr 42 --harness claude --model claude-3-7-sonnet-20250219 --effort high
 ```
 
 Repository policy lives in `.github/crossrev.yml`, and **it is read from the base revision, never the branch under review** — so a config committed on the pull request branch has no effect until it merges. A pull request cannot rewrite the loop that reviews it. See [configuration.md](configuration.md).

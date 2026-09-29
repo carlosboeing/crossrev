@@ -22,6 +22,8 @@ type CycleRequest struct {
 	Repo            core.Slug
 	Trigger         string
 	HarnessOverride string
+	ModelOverride   string
+	EffortOverride  string
 	NoTips          bool
 	KeepTranscripts bool
 }
@@ -32,6 +34,8 @@ type ReviewRequest struct {
 	Repo            core.Slug
 	Trigger         string
 	HarnessOverride string
+	ModelOverride   string
+	EffortOverride  string
 	Continuation    bool
 	NoTips          bool
 	KeepTranscripts bool
@@ -46,6 +50,8 @@ type ResolveRequest struct {
 	Repo            core.Slug
 	Trigger         string
 	HarnessOverride string
+	ModelOverride   string
+	EffortOverride  string
 	NoTips          bool
 	KeepTranscripts bool
 }
@@ -154,7 +160,7 @@ type VersionRequest struct{}
 // option. They are the strings the shell prints, measured with
 // `NO_COLOR=1 bash bin/crossrev <command> --bogus`.
 const (
-	usageCycle    = "Usage: crossrev cycle --pr <number> [--trigger human|automatic] [--no-tips] [--keep-transcripts]"
+	usageCycle    = "Usage: crossrev cycle --pr <number> [--trigger human|automatic] [--model <id>] [--effort <level>] [--no-tips] [--keep-transcripts]"
 	usageStatus   = "Usage: crossrev status --pr <number>"
 	usageRestart  = "Usage: crossrev restart --pr <number>"
 	usageWatchdog = "Usage: crossrev watchdog [--repo owner/name] [--timeout <seconds>]"
@@ -192,12 +198,12 @@ func harnessOption(harnesses []string) string {
 
 func usageReview(harnesses []string) string {
 	return "Usage: crossrev review --pr <number> [" + harnessOption(harnesses) +
-		"] [--no-tips] [--keep-transcripts]"
+		"] [--model <id>] [--effort <level>] [--no-tips] [--keep-transcripts]"
 }
 
 func usageResolve(harnesses []string) string {
 	return "Usage: crossrev resolve --pr <number> [" + harnessOption(harnesses) +
-		"] [--trigger human|automatic] [--keep-transcripts]"
+		"] [--model <id>] [--effort <level>] [--trigger human|automatic] [--keep-transcripts]"
 }
 
 // scanner walks an argument list the way `while (( $# ))` walks "$@".
