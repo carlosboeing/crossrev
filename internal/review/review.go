@@ -121,6 +121,10 @@ func (l *Leg) Run(ctx context.Context, req Request) (out Result) {
 	if warn.Text != "" {
 		out.Messages = append(out.Messages, warn)
 	}
+	// The resolved settings, beside the header and the marker: the `leg`
+	// line above fires before the settings are known, and the `call` lines
+	// name only the answering model.
+	l.Log.Settings(settings.harness, settings.model, settings.effort)
 
 	// The token the checkout persisted, if any, is removed before the
 	// harness starts. Generated workflows persist none, but a checkout from

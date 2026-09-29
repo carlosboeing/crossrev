@@ -284,6 +284,12 @@ func (l *Leg) settings(s *session) (*Refusal, ui.Line, error) {
 		name = s.req.Harness
 		model, endpoint = "", ""
 	}
+	if s.req.ModelOverride != "" {
+		model = s.req.ModelOverride
+	}
+	if s.req.EffortOverride != "" {
+		effort = s.req.EffortOverride
+	}
 	doc, err := l.document()
 	if err != nil {
 		return nil, ui.Line{}, err

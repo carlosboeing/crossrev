@@ -284,3 +284,21 @@ func (l *Log) Call(call, promptBytes, suppliedBytes int, fresh, cached, output i
 		" model="+model+
 		" ms="+strconv.FormatInt(ms, 10))
 }
+
+// Settings records one leg's resolved harness, model and effort: what the
+// config and the command-line overrides settled on before the claim. The
+// call lines name only the answering model, so without this a run's
+// requested model and effort cannot be read back from the run log. Unset
+// halves read as dashes, the way Call renders an unnamed model.
+func (l *Log) Settings(harness, model, effort string) {
+	if l == nil {
+		return
+	}
+	if model == "" {
+		model = "-"
+	}
+	if effort == "" {
+		effort = "-"
+	}
+	l.Event("settings", "harness="+harness+" model="+model+" effort="+effort)
+}

@@ -783,6 +783,36 @@ func TestDriverForwardsTheRequestsRepositoryNotTheLoadedOne(t *testing.T) {
 	}
 }
 
+// TestDriverForwardsModelAndEffortOverridesToBothLegs pins that `cycle
+// --model` and `cycle --effort` land on both legs the way `--harness` does.
+// The shell forwards the flags as typed in `args` (lib/run.sh:2906-2911), so
+// one operator override drives the review and the resolve alike.
+func TestDriverForwardsModelAndEffortOverridesToBothLegs(t *testing.T) {
+	r := newRig(t, []loadStep{
+		{state: loaded(t)},
+		{state: loaded(t, marker(reviewIssues, 1))},
+		{state: loaded(t, marker(reviewIssues, 1), marker(resolveSettled, 1))},
+	})
+
+	req := request()
+	req.ModelOverride = "cycle-model"
+	req.EffortOverride = "high"
+	r.driver.Run(context.Background(), req)
+
+	r.wantOrder(t, "load", "review", "load", "resolve", "load", "nudge")
+	if len(r.rec.legs) != 2 {
+		t.Fatalf("leg calls = %d, want 2", len(r.rec.legs))
+	}
+	for i, call := range r.rec.legs {
+		if call.req.ModelOverride != "cycle-model" {
+			t.Errorf("leg %d model = %q, want cycle-model", i, call.req.ModelOverride)
+		}
+		if call.req.EffortOverride != "high" {
+			t.Errorf("leg %d effort = %q, want high", i, call.req.EffortOverride)
+		}
+	}
+}
+
 // --- a leg that fails -------------------------------------------------------
 
 // TestDriverReturnsOneWhenAReviewLegFails pins `leg_review … || return 1`
