@@ -6,7 +6,7 @@ All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepa
 
 ### Added
 
-- **The `__read-server` command serves local reads over JSON-RPC.** A new `internal/readserve` package reads `base` or `head` revisions up to a per-call budget without network access, logging requests for the orchestrator to copy to the run directory.
+- **The `__read-server` command serves local reads over JSON-RPC.** A new `internal/readserve` package reads `base` or `head` revisions up to a per-call budget without network access, logging requests for the orchestrator to copy to the run directory. Each result opens with a header naming the path, revision, and returned line range, and every refusal carries one of the nine contract reasons rather than raw git text.
 
 
 - **`crossrev restart --pr N` restarts a halted leg with one command.** The watchdog's halt comment and the halted-loop docs both told the operator to remove `crossrev/halted` (and `crossrev/watchdog-retried` when present) and re-apply the halted leg's awaiting label by hand; this is that sequence, with the leg read off the pull request's markers rather than guessed. The awaiting label goes on first and the halt labels come off only once the add has landed, so a failed label write leaves the pull request halted and restartable; an awaiting label already on the pull request is taken off and put back so the labeled event the workflows listen for still fires. A pull request carrying `crossrev/stop` is refused — red is the human brake, and no command clears it — as is one that is not halted, with the refusal naming what applies instead.
