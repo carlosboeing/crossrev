@@ -174,7 +174,7 @@ Review legs read without running commands. Codex reviews with `--disable shell_t
 
 Their review legs stream the tool record — Codex `--json`, Claude Code `--output-format stream-json`, Grok `--output-format streaming-json` — and the leg halts before anything is published when a command event appears. The command reaches the run log only, redacted: the failure names the harness and the failure mode, never the command. Nothing has been written to the pull request, so re-running the leg is safe; if it trips again, the harness is running commands its flags should deny.
 
-Opencode is denied through its isolation config with no command record to watch, and agy emits no tool events at all: commands denied, no tripwire. `crossrev doctor` names both gaps. A command either ran anyway would not be caught here. Those gaps are known and stated here rather than implied away.
+Opencode is denied through its isolation config with no command record to watch, and agy emits no tool events at all: commands denied, no tripwire. `crossrev doctor` names both gaps. A command it ran anyway would not be caught here. Those gaps are known and stated here rather than implied away.
 
 ## Both legs ran the same model
 

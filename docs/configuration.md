@@ -56,7 +56,7 @@ policy:
 | `max_prs_per_day` | `25` | Distinct pull requests reviewed across the repository in a rolling 24 hours |
 | `on_reads_unavailable` | `degrade` | What a review leg does when the served read path is not serving: degrade visibly and continue on the supplied prompt, or halt and publish nothing |
 
-**The last three are continuation bounds. They end automatic reviewing and never block a person** — a review a human asked for runs regardless. `min_fix_severity` is different in kind: it bounds what an agent may *change* rather than whether the loop continues, so it holds on attended and unattended runs alike.
+**`max_passes_per_cycle`, `max_files_changed_per_pr` and `max_prs_per_day` are continuation bounds. They end automatic reviewing and never block a person** — a review a human asked for runs regardless. `on_reads_unavailable` is not one: `halt` stops an attended review too. `min_fix_severity` is different in kind: it bounds what an agent may *change* rather than whether the loop continues, so it holds on attended and unattended runs alike.
 
 A pull request consumes at most one daily unit however many passes it takes, because only the review marker participates in the count. The daily window rolls over 24 hours rather than resetting at midnight.
 

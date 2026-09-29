@@ -3,8 +3,8 @@
 //
 // Health is three checks: the leg-start self-test (initialize, tools/list,
 // one read byte-checked against git), the post-call handshake (initialize
-// plus tools_list in the server log), and post-call refusal matching
-// (refused calls in the log matched against the harness transcript). Any
+// plus tools_list in the server log), and the post-call refusal tally
+// (refused calls counted from the server log). Any
 // command event is not a degradation: it halts with
 // review_leg_ran_command, discards the call unpublished, and redacts the
 // command into the run log only.
