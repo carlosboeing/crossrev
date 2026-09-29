@@ -45,8 +45,14 @@ func (a *Grok) Spec(inv Invocation) (exec.Spec, error) {
 	// --prompt-file last: it takes a path, so remaining flags are not
 	// swallowed, but putting the prompt after the rest matches the other
 	// adapters' shape.
+	//
+	// A supplied review leg reviews the way the spike ran it: streaming-json
+	// output with a tools allowlist holding neither shell nor read tools, so
+	// the tripwire can parse tool_call and tool_call_update events. The
+	// zero mode keeps the legacy json shape every stub test pins.
+	suppliedReview := !inv.Write && inv.ReadMode == ReadModeSupplied
 	outputFormat := "json"
-	if inv.Write {
+	if inv.Write || suppliedReview {
 		// A resolve leg streams its tool record so the tripwire can read it.
 		outputFormat = "streaming-json"
 	}
@@ -69,17 +75,26 @@ func (a *Grok) Spec(inv Invocation) (exec.Spec, error) {
 	if inv.Write {
 		args = append(args, "--sandbox", "workspace", "--allow", "Edit", "--allow", "Write",
 			"--tools", "Read,Grep,Glob,Edit,Write")
+	} else if suppliedReview {
+		// The allowlist is what denies: a --deny rule did not remove the
+		// shell in the measured run. Grep and Glob stay for orienting inside
+		// the supplied prompt; Read, Edit, Write and any shell entry go.
+		args = append(args, "--sandbox", "read-only", "--deny", "Edit", "--deny", "Write",
+			"--tools", "Grep,Glob")
 	} else {
 		args = append(args, "--sandbox", "read-only", "--deny", "Edit", "--deny", "Write")
 	}
 
-	// --json-schema travels on the review leg only. With the flag and a
-	// prompt carrying the full diff, the model answers in one structured
-	// turn and never calls an edit tool, so a resolve leg's claimed fixes
-	// land nowhere. Without it the resolve leg edits first and its answer
-	// is read out of the text instead (see grokPayload); the shape check
-	// downstream still validates that text against the same schema.
-	if inv.Schema.Present() && !inv.Write {
+	// --json-schema travels on the legacy review leg only. A supplied
+	// review streams like a resolve leg: without the flag the model answers
+	// in text and the answer is read out of the stream instead (see
+	// grokPayload); the shape check downstream still validates that text
+	// against the same schema. With the flag and a prompt carrying the full
+	// diff, the model answers in one structured turn and never calls a
+	// tool, so a streaming leg's tool record would stay empty.
+	// (grok --help: --json-schema implies --output-format json, which is
+	// why the flag and the stream cannot travel together.)
+	if inv.Schema.Present() && !inv.Write && !suppliedReview {
 		if inv.Schema.Text == "" {
 			return exec.Spec{}, &Refusal{
 				Reason: "the grok adapter was given a schema path with no schema text",
@@ -115,10 +130,12 @@ var grokCredentialRejection = regexp.MustCompile(`(?i)not signed in|XAI_API_KEY`
 func (a *Grok) Envelope(inv Invocation, res exec.Result) Envelope {
 	// A resolve leg streams NDJSON; the terminal end event carries the usage
 	// envelope while the text deltas accumulate to the constrained answer.
-	// The review leg keeps the single json object.
+	// A supplied review leg streams the same way. Any other review leg keeps
+	// the single json object.
+	streaming := inv.Write || (!inv.Write && inv.ReadMode == ReadModeSupplied)
 	stdout := res.Stdout
 	var streamText string
-	if inv.Write {
+	if streaming {
 		if end := grokStreamEnd(res.Stdout); end != nil {
 			stdout = end
 		}
@@ -128,7 +145,7 @@ func (a *Grok) Envelope(inv Invocation, res exec.Result) Envelope {
 
 	if res.ExitCode != 0 {
 		message := firstAlternative(answer, "error", "text")
-		if message == "" && inv.Write {
+		if message == "" && streaming {
 			message = grokStreamError(res.Stdout)
 		}
 		if message == "" {
@@ -157,7 +174,7 @@ func (a *Grok) Envelope(inv Invocation, res exec.Result) Envelope {
 	// the only report.
 	usage := ParseGrok(stdout)
 	payload := grokPayload(stdout, answer)
-	if inv.Write && payload == nil && streamText != "" {
+	if streaming && payload == nil && streamText != "" {
 		// The resolve leg runs without --json-schema, so the streamed
 		// answer is prose around the payload rather than the payload.
 		if parsed, ok := ExtractJSON(streamText); ok {

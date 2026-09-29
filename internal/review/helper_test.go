@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -103,15 +104,20 @@ func commentWithMarker(t *testing.T, id int64, marker prstate.Marker) forge.Issu
 	}
 }
 
+// claudeStdout is the harness answer the fixtures speak: the final result
+// event of a served stream-json run, the shape a served claude review
+// leg's envelope reads its answer and usage off. Usage travels absent the
+// way it always did here; the envelope answers nil usage for both shapes.
 func claudeStdout(payload string) []byte {
 	raw, err := json.Marshal(map[string]any{
+		"type":     "result",
 		"result":   payload,
 		"is_error": false,
 	})
 	if err != nil {
 		panic(err)
 	}
-	return raw
+	return append(raw, '\n')
 }
 
 func convergedPayload() string {
@@ -477,10 +483,28 @@ type fakeRunner struct {
 	// before it logs anything.
 	probes  []exec.Spec
 	version string
+	// vcs answers the served read server the leg-start self-test speaks to.
+	// A `__read-server` session is not a harness child either: the fake
+	// serves it from the same file map the fixture's VCS reads, renders
+	// the answer the way the server renders it, and appends the call log
+	// the post-call check reads — so the self-test byte-checks the
+	// wiring, not canned bytes.
+	vcs *fakeVCS
+	// serveErr, when set, is the failure the served session answers: the
+	// broken-tool posture the degrade and halt paths are proved against.
+	serveErr error
 }
 
 func (r *fakeRunner) Run(_ context.Context, spec exec.Spec) exec.Result {
-	if r.log != nil {
+	served := false
+	for _, arg := range spec.Args {
+		if arg == "__read-server" {
+			served = true
+		}
+	}
+	// The served session is not a harness child, so it leaves no harness
+	// event: progress tests read the harness boundary off these events.
+	if r.log != nil && !served {
 		r.log.add("harness")
 	}
 	r.mu.Lock()
@@ -492,6 +516,17 @@ func (r *fakeRunner) Run(_ context.Context, spec exec.Spec) exec.Result {
 		}
 		r.mu.Unlock()
 		return exec.Result{ExitCode: 0, Stdout: []byte(version + "\n")}
+	}
+	for _, arg := range spec.Args {
+		if arg == "__read-server" {
+			vcs := r.vcs
+			serveErr := r.serveErr
+			r.mu.Unlock()
+			if serveErr != nil {
+				return exec.Result{ExitCode: 1, Err: serveErr}
+			}
+			return serveFixtureSession(spec, vcs)
+		}
 	}
 	r.specs = append(r.specs, spec)
 	r.calls++
@@ -510,6 +545,116 @@ func (r *fakeRunner) Run(_ context.Context, spec exec.Spec) exec.Result {
 		idx = len(script) - 1
 	}
 	return script[idx]
+}
+
+// serveFixtureSession answers a `__read-server` session from the fixture's
+// own file map: the same bytes the fixture's VCS reads, rendered the way
+// the server renders them. The self-test byte-checks the wiring against
+// these bytes, and the call log appended beside them is what the post-call
+// check reads.
+func serveFixtureSession(spec exec.Spec, vcs *fakeVCS) exec.Result {
+	flag := func(name string) string {
+		for at := 0; at+1 < len(spec.Args); at++ {
+			if spec.Args[at] == name {
+				return spec.Args[at+1]
+			}
+		}
+		return ""
+	}
+	base, head, logPath := flag("--base"), flag("--head"), flag("--log")
+	appendLog := func(event, payload string) {
+		if logPath == "" {
+			return
+		}
+		line := `{"event":` + strconv.Quote(event)
+		if payload != "" {
+			line += `,"payload":` + payload
+		}
+		line += "}\n"
+		f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+		if err != nil {
+			return
+		}
+		_, _ = f.WriteString(line)
+		_ = f.Close()
+	}
+	answer := func(id json.RawMessage, result string) string {
+		return `{"jsonrpc":"2.0","id":` + string(id) + `,"result":` + result + "}\n"
+	}
+	refuse := func(id json.RawMessage, text string) string {
+		raw, _ := json.Marshal(map[string]any{
+			"isError": true,
+			"content": []map[string]any{{"type": "text", "text": text}},
+		})
+		return `{"jsonrpc":"2.0","id":` + string(id) + `,"result":` + string(raw) + "}\n"
+	}
+	var out strings.Builder
+	appendLog("start", "")
+	for _, line := range strings.Split(strings.TrimRight(string(spec.Stdin), "\n"), "\n") {
+		var req struct {
+			ID     json.RawMessage `json:"id"`
+			Method string          `json:"method"`
+			Params struct {
+				Name      string `json:"name"`
+				Arguments struct {
+					Path     string `json:"path"`
+					Revision string `json:"revision"`
+				} `json:"arguments"`
+			} `json:"params"`
+		}
+		if err := json.Unmarshal([]byte(line), &req); err != nil {
+			continue
+		}
+		switch req.Method {
+		case "initialize":
+			appendLog("initialize", "")
+			out.WriteString(answer(req.ID, `{"protocolVersion":"2025-06-18"}`))
+		case "tools/list":
+			appendLog("tools_list", "")
+			out.WriteString(answer(req.ID, `{"tools":[{"name":"read_file"}]}`))
+		case "tools/call":
+			if req.Params.Name != "read_file" {
+				appendLog("refused", `{"reason":"unknown_tool"}`)
+				out.WriteString(refuse(req.ID, "Method not found: "+req.Params.Name))
+				continue
+			}
+			sha := base
+			if req.Params.Arguments.Revision == "head" {
+				sha = head
+			}
+			var body []byte
+			if vcs != nil {
+				body = vcs.files[sha][req.Params.Arguments.Path]
+			}
+			if len(body) == 0 {
+				appendLog("refused", `{"reason":"not_found"}`)
+				out.WriteString(refuse(req.ID, "not_found"))
+				continue
+			}
+			text := strings.TrimSuffix(string(body), "\n")
+			lines := strings.Split(text, "\n")
+			var rendered strings.Builder
+			rendered.WriteString(req.Params.Arguments.Path + "@" + req.Params.Arguments.Revision +
+				" lines 1-" + strconv.Itoa(len(lines)) + "\n")
+			for at, content := range lines {
+				rendered.WriteString(strconv.Itoa(at+1) + ": " + content + "\n")
+			}
+			payload, _ := json.Marshal(map[string]any{
+				"path":       req.Params.Arguments.Path,
+				"revision":   req.Params.Arguments.Revision,
+				"start_line": 1,
+				"end_line":   len(lines),
+				"bytes":      len(rendered.String()),
+			})
+			appendLog("read", string(payload))
+			content, _ := json.Marshal(map[string]any{
+				"content": []map[string]any{{"type": "text", "text": rendered.String()}},
+			})
+			out.WriteString(answer(req.ID, string(content)))
+		}
+	}
+	appendLog("end", "")
+	return exec.Result{ExitCode: 0, Stdout: []byte(out.String())}
 }
 
 func (r *fakeRunner) Specs() []exec.Spec {
@@ -798,6 +943,10 @@ func newEnv(t *testing.T) *env {
 	events := &eventLog{}
 	head := mustRev(t, headSHA)
 	base := mustRev(t, baseSHA)
+	vcs := &fakeVCS{files: map[string]map[string][]byte{
+		baseSHA: {},
+		"":      {},
+	}}
 	return &env{
 		log: events,
 		forge: &fakeForge{
@@ -816,11 +965,8 @@ func newEnv(t *testing.T) *env {
 				State:        "OPEN",
 			},
 		},
-		vcs: &fakeVCS{files: map[string]map[string][]byte{
-			baseSHA: {},
-			"":      {},
-		}},
-		runner: &fakeRunner{log: events},
+		vcs:    vcs,
+		runner: &fakeRunner{log: events, vcs: vcs},
 		cfg:    mustConfig(t, ""),
 		doc:    mustDoc(t),
 		dir:    dir,

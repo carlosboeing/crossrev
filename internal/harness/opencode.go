@@ -233,6 +233,62 @@ const isolationConfig = `{
 // an input — nothing reads it by path — so the Go builds the string.
 const schemaInstruction = "\n\nThis harness does not constrain your output. The answer text itself is what is parsed, so return a single JSON object matching exactly this schema, with no markdown fence and no commentary:\n\n```json\n%s\n```\n"
 
+// isolationConfigSuppliedReview is the isolation config for a supplied
+// review leg: no read tool at all. The review judges the supplied prompt
+// alone, so read, glob, grep, list and lsp are denied beside the write
+// tools, in both the top-level block and the pinned agent's mirror. A
+// resolve leg keeps the shared template with its read tools allowed: it
+// has to orient in the checkout to apply a fix.
+const isolationConfigSuppliedReview = `{
+  "$schema": "https://opencode.ai/config.json",
+  "permission": {
+    "*": "deny",
+    "read": "deny",
+    "glob": "deny",
+    "grep": "deny",
+    "list": "deny",
+    "lsp": "deny",
+    "todowrite": "allow",
+    "edit": "deny",
+    "write": "deny",
+    "apply_patch": "deny",
+    "bash": "deny",
+    "task": "deny",
+    "skill": "deny",
+    "webfetch": "deny",
+    "websearch": "deny",
+    "external_directory": "deny",
+    "question": "deny",
+    "doom_loop": "deny"
+  },
+  "agent": {
+    "crossrev": {
+      "mode": "primary",
+      "permission": {
+        "*": "deny",
+        "read": "deny",
+        "glob": "deny",
+        "grep": "deny",
+        "list": "deny",
+        "lsp": "deny",
+        "todowrite": "allow",
+        "edit": "deny",
+        "write": "deny",
+        "apply_patch": "deny",
+        "bash": "deny",
+        "task": "deny",
+        "skill": "deny",
+        "webfetch": "deny",
+        "websearch": "deny",
+        "external_directory": "deny",
+        "question": "deny",
+        "doom_loop": "deny"
+      }
+    }
+  }
+}
+`
+
 // Spec builds the child process, and writes the isolation config it names
 // (lib/adapters/opencode.sh:89-188).
 func (a *Opencode) Spec(inv Invocation) (exec.Spec, error) {
@@ -423,6 +479,13 @@ func (a *Opencode) opencodeSpec(inv Invocation, args []string, additions ...stri
 }
 
 func (a *Opencode) writeIsolation(inv Invocation) error {
+	// A supplied review leg is denied the five read tools outright; any
+	// other leg keeps the shared template with the write flag landing in
+	// the edit, write and apply_patch keys. The zero mode keeps the legacy
+	// shape every stub test pins.
+	if !inv.Write && inv.ReadMode == ReadModeSupplied {
+		return writeIsolationConfig(inv, isolationConfigSuppliedReview)
+	}
 	permission := "deny"
 	if inv.Write {
 		permission = "allow"
@@ -430,6 +493,10 @@ func (a *Opencode) writeIsolation(inv Invocation) error {
 	config := fmt.Sprintf(isolationConfig,
 		permission, permission, permission,
 		permission, permission, permission)
+	return writeIsolationConfig(inv, config)
+}
+
+func writeIsolationConfig(inv Invocation, config string) error {
 	if !json.Valid([]byte(config)) {
 		// Unreachable while the template above is a constant, and cheap enough
 		// to keep: the file is what stands between a review leg and a write

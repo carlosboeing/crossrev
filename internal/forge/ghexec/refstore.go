@@ -105,22 +105,53 @@ func (s *refStore) PublishGeneration(ctx context.Context, ref prstate.SlotRef, p
 		return prstate.Handle{}, fmt.Errorf("parsing records blob response: %w", err)
 	}
 
+	// 3b. POST /git/blobs for reads.json when the generation carries the
+	// per-call detail. Generations published before legs read through the
+	// served tool carry none, and their trees keep the two-blob shape.
+	entries := []map[string]string{
+		{
+			"path": "manifest.json",
+			"mode": "100644",
+			"type": "blob",
+			"sha":  manifestBlobResp.SHA,
+		},
+		{
+			"path": "records.json",
+			"mode": "100644",
+			"type": "blob",
+			"sha":  recordsBlobResp.SHA,
+		},
+	}
+	if len(candCopy.ReadsJSON) != 0 {
+		readsBlobReq, err := json.Marshal(map[string]string{
+			"content":  string(candCopy.ReadsJSON),
+			"encoding": "utf-8",
+		})
+		if err != nil {
+			return prstate.Handle{}, err
+		}
+		res = s.client.runInput(ctx, readsBlobReq, "api", "--method", "POST",
+			fmt.Sprintf("repos/%s/git/blobs", ref.Repo.String()), "--input", "-")
+		if !answered(res) {
+			return prstate.Handle{}, publishFailure("creating reads blob", res)
+		}
+		var readsBlobResp struct {
+			SHA string `json:"sha"`
+		}
+		if err := json.Unmarshal(res.Stdout, &readsBlobResp); err != nil || readsBlobResp.SHA == "" {
+			return prstate.Handle{}, fmt.Errorf("parsing reads blob response: %w", err)
+		}
+		entries = append(entries, map[string]string{
+			"path": "reads.json",
+			"mode": "100644",
+			"type": "blob",
+			"sha":  readsBlobResp.SHA,
+		})
+	}
+
 	// 4. POST /git/trees naming both
 	treePayload, err := json.Marshal(map[string]any{
-		"tree": []map[string]string{
-			{
-				"path": "manifest.json",
-				"mode": "100644",
-				"type": "blob",
-				"sha":  manifestBlobResp.SHA,
-			},
-			{
-				"path": "records.json",
-				"mode": "100644",
-				"type": "blob",
-				"sha":  recordsBlobResp.SHA,
-			},
-		},
+		"tree": entries,
 	})
 	if err != nil {
 		return prstate.Handle{}, err
@@ -256,13 +287,15 @@ func (s *refStore) ReadGeneration(ctx context.Context, ref prstate.SlotRef, hand
 	if err := json.Unmarshal(res.Stdout, &treeObj); err != nil {
 		return prstate.Generation{}, fmt.Errorf("%w: malformed tree: %v", prstate.ErrLedgerCorrupt, err)
 	}
-	var manifestSHA, recordsSHA string
+	var manifestSHA, recordsSHA, readsSHA string
 	for _, entry := range treeObj.Tree {
 		switch entry.Path {
 		case "manifest.json":
 			manifestSHA = entry.SHA
 		case "records.json":
 			recordsSHA = entry.SHA
+		case "reads.json":
+			readsSHA = entry.SHA
 		}
 	}
 	if manifestSHA == "" || recordsSHA == "" {
@@ -299,6 +332,27 @@ func (s *refStore) ReadGeneration(ctx context.Context, ref prstate.SlotRef, hand
 	gen, err := prstate.DecodeGenerationV2(manifestBytes, recordsBytes)
 	if err != nil {
 		return prstate.Generation{}, fmt.Errorf("%w: %v", prstate.ErrLedgerCorrupt, err)
+	}
+
+	// reads.json travels beside the pair, never inside it. A tree without
+	// one predates served reads; a malformed one is corrupt state, never
+	// an old generation.
+	if readsSHA != "" {
+		res = s.client.run(ctx, "api", fmt.Sprintf("repos/%s/git/blobs/%s", ref.Repo.String(), readsSHA))
+		if !answered(res) {
+			if isNotFound(res) {
+				return prstate.Generation{}, prstate.ErrLedgerLost
+			}
+			return prstate.Generation{}, failure("reading reads blob", res)
+		}
+		readsBytes, err := parseBlobContent(res.Stdout)
+		if err != nil {
+			return prstate.Generation{}, fmt.Errorf("%w: reading reads blob: %v", prstate.ErrLedgerCorrupt, err)
+		}
+		if !json.Valid(readsBytes) {
+			return prstate.Generation{}, fmt.Errorf("%w: reads.json is not JSON", prstate.ErrLedgerCorrupt)
+		}
+		gen.ReadsJSON = readsBytes
 	}
 
 	// A deleted ref is not a lost ledger: re-create it at the generation

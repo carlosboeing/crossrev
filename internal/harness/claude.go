@@ -31,6 +31,19 @@ func (a *Claude) NotInstalled() *Refusal {
 
 // Spec builds the child process (lib/adapters/claude.sh:23-94).
 func (a *Claude) Spec(inv Invocation) (exec.Spec, error) {
+	// A served review leg reads only through CrossRev's tool: the MCP
+	// config naming the read server, an empty built-in tool list, the
+	// served allowlist, and the stream-json output the tripwire and the
+	// envelope both read — replacing the PR 273 tool list. The answer and
+	// the usage come from the final result event.
+	if inv.ReadMode == ReadModeServed && !inv.Write {
+		return a.servedReviewSpec(inv)
+	}
+	// A supplied review leg carries no read tool at all: an empty tool list
+	// and no MCP server, answering from the supplied prompt alone.
+	if inv.ReadMode == ReadModeSupplied && !inv.Write {
+		return a.suppliedReviewSpec(inv)
+	}
 	args := []string{"-p", "--output-format", "json"}
 	if inv.Write {
 		// A resolve leg streams its tool record so the tripwire can read it.
@@ -130,6 +143,67 @@ func (a *Claude) Spec(inv Invocation) (exec.Spec, error) {
 	return spec, nil
 }
 
+// servedReviewSpec is the served review leg: the MCP config travels in a
+// file outside the quarantined checkout, --strict-mcp-config keeps the
+// session from loading any other server, --tools empties the built-ins, and
+// the allowlist names the one served read. stream-json under -p requires
+// --verbose at flag parsing, the same requirement the resolve leg meets.
+func (a *Claude) servedReviewSpec(inv Invocation) (exec.Spec, error) {
+	mcpPath, err := WriteMCPConfig(inv.Scratch, inv.Serve)
+	if err != nil {
+		return exec.Spec{}, err
+	}
+	args := []string{"-p", "--mcp-config", mcpPath, "--strict-mcp-config",
+		"--tools", "", "--allowedTools", "mcp__crossrev__read_file",
+		"--output-format", "stream-json", "--verbose"}
+	return a.finishReviewSpec(inv, args)
+}
+
+// suppliedReviewSpec is the supplied review leg: no read tool, no MCP
+// server, buffered json output. There is no tool record to watch, so a
+// supplied review degrades the tripwire along with the reads; the reason
+// records it.
+func (a *Claude) suppliedReviewSpec(inv Invocation) (exec.Spec, error) {
+	args := []string{"-p", "--output-format", "json",
+		"--tools", "", "--strict-mcp-config"}
+	return a.finishReviewSpec(inv, args)
+}
+
+// finishReviewSpec appends the schema, model and effort to a review args
+// prefix and builds the child. The schema stays inline: Claude Code takes
+// it as a JSON string, never as a path.
+func (a *Claude) finishReviewSpec(inv Invocation, args []string) (exec.Spec, error) {
+	if inv.Schema.Present() {
+		if inv.Schema.Text == "" {
+			return exec.Spec{}, a.schemaTextMissing()
+		}
+		args = append(args, "--json-schema", inv.Schema.Argument())
+	}
+	if wanted(inv.Model) {
+		args = append(args, "--model", inv.Model)
+	}
+	if wanted(inv.Effort) {
+		args = append(args, "--effort", inv.Effort)
+	}
+	var additions []string
+	if inv.Endpoint.Named() {
+		if inv.Endpoint.Token == "" {
+			return exec.Spec{}, &Refusal{
+				Reason: "the endpoint '" + inv.Endpoint.Name + "' needs $" + inv.Endpoint.TokenVar + ", which is unset",
+				Action: "Export it, or set it as a repository secret for CI. CrossRev will not fall back to the vendor's own API.",
+				Kind:   ErrEndpointToken,
+			}
+		}
+		additions = []string{
+			"ANTHROPIC_BASE_URL=" + inv.Endpoint.URL,
+			"ANTHROPIC_AUTH_TOKEN=" + inv.Endpoint.Token,
+		}
+	}
+	spec := a.spec(inv, args, additions...)
+	spec.Stdin = promptStdin(inv)
+	return spec, nil
+}
+
 func (a *Claude) schemaTextMissing() *Refusal {
 	return &Refusal{
 		Reason: "the claude adapter was given a schema path with no schema text",
@@ -142,10 +216,11 @@ func (a *Claude) schemaTextMissing() *Refusal {
 func (a *Claude) Envelope(inv Invocation, res exec.Result) Envelope {
 	// A resolve leg streams NDJSON; the terminal result event carries the
 	// same cumulative usage, modelUsage and cost as the buffered json object
-	// (verified against the stream-json event reference). The review leg
-	// keeps the single object.
+	// (verified against the stream-json event reference). A served review
+	// leg streams the same way, and its answer and usage come from the
+	// final result event. Any other review leg keeps the single object.
 	stdout := res.Stdout
-	if inv.Write {
+	if inv.Write || (inv.ReadMode == ReadModeServed && !inv.Write) {
 		if result := claudeStreamResult(res.Stdout); result != nil {
 			stdout = result
 		}

@@ -160,6 +160,16 @@ On Codex, Claude Code and Grok the denial is watched afterwards. Their resolve l
 
 Antigravity is the exception. Its `--output-format json` carries no tool events, so there is nothing to watch: commands denied, no tripwire. A command it ran anyway would not be caught here. That gap is known and stated here rather than implied away.
 
+## A review leg ran a command
+
+`review_leg_ran_command`
+
+Review legs read without running commands. Codex reviews with `--disable shell_tool --disable unified_exec` beside the served tool; Claude Code reviews with an empty built-in tool list and only the served read allowed; Grok reviews with a tools allowlist holding neither shell nor read tools.
+
+Their review legs stream the tool record — Codex `--json`, Claude Code `--output-format stream-json`, Grok `--output-format streaming-json` — and the leg halts before anything is published when a command event appears. The command reaches the run log only, redacted: the failure names the harness and the failure mode, never the command. Nothing has been written to the pull request, so re-running the leg is safe; if it trips again, the harness is running commands its flags should deny.
+
+Opencode is denied through its isolation config with no command record to watch, and agy emits no tool events at all: commands denied, no tripwire. `crossrev doctor` names both gaps. A command either ran anyway would not be caught here. Those gaps are known and stated here rather than implied away.
+
 ## Both legs ran the same model
 
 CrossRev refuses to continue when it detects this, because it's the failure the whole cross-model design exists to prevent and it otherwise completes normally with no error anywhere.
@@ -187,7 +197,7 @@ A `token_env` naming `GH_TOKEN`, `GITHUB_TOKEN`, `GH_ENTERPRISE_TOKEN` or `GITHU
 
 A harness may declare which legs it serves, and one that does not serve the leg you named is refused before anything is staged or billed. Each leg checks the descriptor before it runs, and a cycle checks both after the config loads, so a cycle stops without paying for a review it cannot follow with a resolve.
 
-No shipped harness restricts its legs through the descriptor; codex is refused as the resolver by rule instead, with the reason naming the file-reading tool it is missing. Apart from codex, this refusal only appears for a harness whose descriptor carries a `legs` field that omits the one you named. It is a configuration fact rather than a transient failure, so re-running changes nothing. Name a harness that serves the leg.
+No shipped harness restricts its legs through the descriptor, and no shipped harness is refused as a resolver by rule either — the codex refusal was lifted when the served read tool started serving resolve legs. This refusal only appears for a harness whose descriptor carries a `legs` field that omits the one you named. It is a configuration fact rather than a transient failure, so re-running changes nothing. Name a harness that serves the leg.
 
 `--harness` on `cycle` lands on both legs, which is how an operator with a single harness installed runs the loop. It is refused only when that harness cannot serve one of them.
 
@@ -197,9 +207,17 @@ No shipped harness restricts its legs through the descriptor; codex is refused a
 
 Both legs probe `opencode --version` and refuse any install outside 1.x and 2.x before starting, because each major takes its own flags and its own session-export subcommand ([#272](https://github.com/carlosboeing/crossrev/issues/272)). The second message is the same refusal on the same terms for a probe that reports no version — CrossRev fails closed rather than starting a leg on an install it cannot confirm. Install the supported CLI — `npm install -g @opencode/cli@2.0.15`, the version the descriptor pins — or point the leg at another harness with `--harness`. On 2.x the leg runs `opencode run --standalone`: the background service drops the process's isolation config, so without it the leg would start unconstrained. On both majors the leg passes `--agent crossrev`, the agent the isolation config defines: agent rules take precedence over every merged config, so a global `agents.build` allow cannot widen the leg back, and `OPENCODE_DISABLE_PROJECT_CONFIG` keeps project and parent-directory configs from merging at all.
 
-``the codex resolver cannot read files, so a resolve leg on codex answers `blocked` instead of editing``
+Codex resolves again: the served read tool serves resolve legs too, so the refusal that once kept codex off the resolve leg is lifted. A `blocked` answer naming file reads on an old pin means the leg ran without the served wiring — upgrade CrossRev.
 
-codex 0.158.0 with its shell disabled has no file-reading tool, and the resolve leg denies commands on every harness — on Codex, `--sandbox workspace-write` with `--disable shell_tool --disable unified_exec` — so nothing is left to verify the findings against: the leg answers `blocked`, edits nothing, and the pass halts. CrossRev refuses codex as the resolver before the leg starts, whether codex comes from `resolver.harness` or from `--harness codex` on `crossrev resolve`. Point the resolver at one of claude, agy, grok or opencode instead. Codex as reviewer is unaffected: the review leg carries no such refusal. The refusal stands until the served read tool also serves resolve legs.
+`the <harness> review leg cannot be verified at pin <version> (review_isolation_unverified)`
+
+A review leg whose served-or-tripwire command block is unverified at its pin never reviews: the leg is refused before any child starts, while its resolve leg is unaffected. The block is verified on each pinned version — codex 0.148.0, claude 2.1.237, grok 1.0.5 — or the pin moves. Moving a pin unverifies it until the flags are verified again, so a custom pin that changes any of those versions refuses the review leg on purpose. Verify the flags on the new version and record the pin, or point the leg at another harness with `--harness`. `crossrev doctor` prints each harness's mode and verification before the leg runs.
+
+## Served reads are unavailable
+
+`served reads are unavailable: <reason> (reads_unavailable)`
+
+The served read path is not serving: a failed leg-start self-test, a missing handshake in the server log, or refused read calls. The reason travels in the pass comment, the reads envelope on the marker and the generation, and the run log together. `.policy.on_reads_unavailable` decides what the leg does, read from the base revision like every other policy key: `degrade` records the reason and continues on the supplied prompt (the default), `halt` stops the leg and publishes nothing. A repeated failure under `degrade` is the tool genuinely down rather than a blip — check the run log's `reads` events, then re-run; under `halt`, fix the tool first, because the call published nothing and the pass made no progress.
 
 ## A credential problem in CI
 

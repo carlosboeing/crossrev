@@ -10,6 +10,8 @@
 # It also asserts the contract the adapter is supposed to meet. This harness
 # grants `edit` and `bash` out of the box, so the isolation config IS the
 # security story, and which shape a leg gets is the write-grant question.
+# A supplied review leg is denied the five read tools outright — read, glob,
+# grep, list and lsp — because the review judges the supplied prompt alone.
 # Violations exit 96.
 
 set -uo pipefail
@@ -75,7 +77,18 @@ _assert_isolation() {
       exit 96
     fi
   done
-  if [[ "$cfg_content" != *'"*.env":"deny"'* ]]; then
+  # A supplied review denies reading entirely: `"read": "deny"` with no read
+  # map at all. Nothing is readable, so the .env denial inside the map is
+  # moot — and glob, grep, list and lsp go with it, the five read tools.
+  # Any other shape keeps the read map with its .env denial.
+  if [[ "$cfg_content" == *'"read":"deny"'* ]]; then
+    for key in glob grep list lsp; do
+      if [[ "$cfg_content" != *"\"$key\":\"deny\""* ]]; then
+        printf 'test stub: a supplied review denies reading entirely, so %s must be denied too\n' "$key" >&2
+        exit 96
+      fi
+    done
+  elif [[ "$cfg_content" != *'"*.env":"deny"'* ]]; then
     printf 'test stub: the read map must keep the .env denial\n' >&2
     exit 96
   fi

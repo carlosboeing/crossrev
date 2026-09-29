@@ -156,10 +156,11 @@ func isClaudeShellTool(name string) bool {
 	return false
 }
 
-// GrokResolveCommand is the grok half: the first tool_call whose rawInput
-// carries a command. The toolName is what the record calls the shell;
-// rawInput.command is the command to name. Edit and write calls carry file
-// paths, not commands, and never trip.
+// GrokResolveCommand is the grok half: the first tool_call or
+// tool_call_update whose rawInput carries a command. The toolName is what
+// the record calls the shell; rawInput.command is the command to name. Edit
+// and write calls carry file paths, not commands, and never trip. The
+// review leg reads the same shapes through ReviewCommand.
 func GrokResolveCommand(stdout []byte) (string, bool) {
 	for _, line := range strings.Split(string(stdout), "\n") {
 		trimmed := strings.TrimSpace(line)
@@ -170,7 +171,8 @@ func GrokResolveCommand(stdout []byte) (string, bool) {
 		if err != nil {
 			continue
 		}
-		if kind, _ := event.member("type").asString(); kind != "tool_call" {
+		kind, _ := event.member("type").asString()
+		if kind != "tool_call" && kind != "tool_call_update" {
 			continue
 		}
 		raw := event.member("rawInput")

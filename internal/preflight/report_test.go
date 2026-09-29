@@ -52,6 +52,12 @@ func TestDoctorOnAWorkingMachine(t *testing.T) {
 		"\n◇  Pairings on runner: github-hosted\n" +
 		"│  ✓ reviewer — codex by subscription, kept warm by the refresher workflow\n" +
 		"│  ✓ resolver — claude by subscription\n" +
+		"\n◇  Review reads\n" +
+		"  claude — served reads, command block verified at pin 2.1.237\n" +
+		"  codex — served reads, command block verified at pin 0.148.0\n" +
+		"  agy — supplied reads, no tripwire: agy emits no tool events to watch\n" +
+		"  grok — supplied reads, tripwire verified at pin 1.0.5\n" +
+		"  opencode — supplied reads, no tripwire: the five read tools are denied through the isolation config with no command record to watch\n" +
 		"\n◇  Coverage ledger\n" +
 		"│  store auto (the default): tries git refs first, and falls back to the marker comment when a ref write is refused\n" +
 		"│  namespace refs/crossrev — one ref per pull request per reviewer, refs/crossrev/pr/<number>/<slot>/coverage\n" +

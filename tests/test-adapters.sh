@@ -188,8 +188,9 @@ is  "the stub still refuses -p, which would swallow the next flag as the prompt"
 tmp_prompt="$(mktemp)"
 printf 'You are the review leg\n' >"$tmp_prompt"
 ( unset CROSSREV_REVIEW_PAYLOAD CROSSREV_HARNESS_PAYLOAD
-  "$HERE/stub/grok" --output-format json --permission-mode dontAsk \
-    --sandbox read-only --deny Edit --deny Write --prompt-file "$tmp_prompt" \
+  "$HERE/stub/grok" --output-format streaming-json --permission-mode dontAsk \
+    --sandbox read-only --deny Edit --deny Write --tools Grep,Glob \
+    --prompt-file "$tmp_prompt" \
     >/dev/null 2>&1 )
 is  "and accepts the flags the adapter uses" "$?" "1"
 rm -f "$tmp_prompt"
@@ -207,7 +208,9 @@ has "and the marker records grok's usage total"     "$(calls)" '"tokens":7'
 is  "a grok review leg writes no secret, ever"    "$(count 'secret set')" "0"
 
 has  "the grok review leg is pinned read-only"    "$grok_review_argv" "--sandbox read-only"
-has  "and constrains the answer with the schema"  "$grok_review_argv" "--json-schema"
+has  "and streams for its tripwire"               "$grok_review_argv" "--output-format streaming-json"
+has  "and grants a tools allowlist with no shell" "$grok_review_argv" "--tools Grep,Glob"
+hasnt "and leaves the schema flag off the stream" "$grok_review_argv" "--json-schema"
 has  "and denies Edit"                            "$grok_review_argv" "--deny Edit"
 has  "and denies Write"                           "$grok_review_argv" "--deny Write"
 has  "and runs dontAsk, not a promptable default" "$grok_review_argv" "--permission-mode dontAsk"
@@ -359,8 +362,9 @@ hasnt "a leg is granted no blanket bypass"        "$opencode_review_argv" "--aut
 
 # The permission block is the whole security story for a reading leg, so it is
 # asserted from the config the stub received: fail-closed base rule, edit
-# denied with it, the six standing denials, and opencode's own .env denial
-# kept in the read map.
+# denied with it, the six standing denials, and — because a supplied review
+# judges the prompt alone — the five read tools denied outright, which moots
+# the read map's .env denial by denying the whole map.
 is  "the read-only block keeps the fail-closed base rule" \
   "$(jq -r '.permission."*" // "absent"' <<<"$opencode_review_cfg")" "deny"
 is  "and denies edit" "$(jq -r '.permission.edit' <<<"$opencode_review_cfg")" "deny"
@@ -368,8 +372,10 @@ for key in bash task skill webfetch websearch external_directory; do
   is "and denies $key" \
     "$(jq -r --arg k "$key" '.permission[$k] // "absent"' <<<"$opencode_review_cfg")" "deny"
 done
-is  "and keeps the .env denial in the read map" \
-  "$(jq -r '.permission.read["*.env"] // "absent"' <<<"$opencode_review_cfg")" "deny"
+for key in read glob grep list lsp; do
+  is  "and denies the $key tool outright" \
+    "$(jq -r --arg k "$key" '.permission[$k] // "absent"' <<<"$opencode_review_cfg")" "deny"
+done
 is  "and pins a primary agent" \
   "$(jq -r '.agent.crossrev.mode // "absent"' <<<"$opencode_review_cfg")" "primary"
 is  "and the agent denies edit" \
@@ -597,6 +603,37 @@ is  "a review with both credential names present runs" "$rc" "0"
 has "and records api billing, not subscription"   "$(calls)" '"billing":"api"'
 hasnt "and never claims subscription on an api run" "$(calls)" '"billing":"subscription"'
 has "keeping the harness's own cost figure"       "$(calls)" '"cost_source":"harness"'
+
+# --- a served review reads only through the served tool ----------------------
+#
+# The review leg wires CrossRev's read tool as its only read path: the MCP
+# config travels in a scratch file outside the checkout, --strict-mcp-config
+# keeps any other server out, the built-in tool list is emptied, and the
+# allowlist names the one served read. The stream carries the same answer
+# and counters the buffered shape did, which the cost assertions above prove.
+run_claude_review
+out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
+claude_review_argv="$(cat "$ARGV_LOG")"
+is  "a served review runs"                            "$rc" "0"
+has "and writes an MCP config outside the checkout"   "$claude_review_argv" "--mcp-config"
+has "and loads no other server beside it"             "$claude_review_argv" "--strict-mcp-config"
+has "and allows only the served read"                 "$claude_review_argv" "--allowedTools mcp__crossrev__read_file"
+has "and streams for the tripwire"                    "$claude_review_argv" "--output-format stream-json"
+has "and passes --verbose, which the stream requires" "$claude_review_argv" "--verbose"
+hasnt "and grants no built-in read tool"              "$claude_review_argv" "Read,Grep,Glob"
+
+# --- a command event halts the review leg ------------------------------------
+#
+# The stub emits a command event ahead of its answer; the tripwire halts with
+# review_leg_ran_command, discards the call unpublished, and redacts the
+# command into the run log only.
+run_claude_review
+CROSSREV_CLAUDE_COMMAND="id"; export CROSSREV_CLAUDE_COMMAND
+out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
+unset CROSSREV_CLAUDE_COMMAND
+is   "a review leg that ran a command fails"    "$rc" "1"
+has  "and names the failure"                       "$out" "review_leg_ran_command"
+is   "and publishes no finding comment at all"     "$(count 'method POST repos/acme/widget/pulls/42/comments')" "0"
 
 # A named endpoint wipes the harness cost: Claude Code prices its figure
 # against Anthropic's rate card whichever endpoint served the call, so the

@@ -65,6 +65,11 @@ type Marker struct {
 	ModelReported  Opt[string]     `json:"model_reported,omitzero"`
 	Tokens         json.RawMessage `json:"tokens,omitzero"`
 	Usage          json.RawMessage `json:"usage,omitzero"`
+	// Reads is the reads envelope for the pass: declared and effective
+	// modes, the reason they differ, and what the calls cost. A halted
+	// call that publishes nothing still records it — the envelope-only
+	// entry is the record the call happened.
+	Reads json.RawMessage `json:"reads,omitzero"`
 	Billing        Opt[string]     `json:"billing,omitzero"`
 	Verdict        Opt[string]     `json:"verdict,omitzero"`
 	Blocked        Opt[bool]       `json:"blocked,omitzero"`
@@ -173,7 +178,7 @@ func (m Marker) Raw() json.RawMessage { return bytes.Clone(m.raw) }
 // input". Every reader here already reads a zero-length payload as absent —
 // DecodeFindings and DecodeResolutions both — so the writer agrees with them.
 func (m Marker) MarshalJSON() ([]byte, error) {
-	for _, payload := range []*json.RawMessage{&m.Tokens, &m.Usage, &m.Findings, &m.Resolutions, &m.CoveragePayload, &m.CoveragePrevPayload} {
+	for _, payload := range []*json.RawMessage{&m.Tokens, &m.Usage, &m.Reads, &m.Findings, &m.Resolutions, &m.CoveragePayload, &m.CoveragePrevPayload} {
 		if len(*payload) == 0 {
 			*payload = nil
 		}

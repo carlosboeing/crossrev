@@ -156,6 +156,12 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 		confirmation = nil
 	}
 	shared := l.discoverBatchContext(ctx, req, loaded, pass, scope, advisory, fileTerms, confirmation)
+	// The batch prompts name the pass's read path ahead of the output
+	// instruction, measured by packing like every other prompt byte.
+	if entry, ok := l.Harness.For(settings.harness); ok {
+		_, effective := EffectiveReadMode(entry.ReadMode())
+		shared.reads = prompt.ReadsBlock(string(effective))
+	}
 	render := func(files []intel.FileUnit) int {
 		promptBytes, _ := shared.render(files, scope.Base, scope.Head)
 		return len(promptBytes)
@@ -446,6 +452,23 @@ func (l *Leg) publishBatchGeneration(ctx context.Context, req Request, loaded Co
 		Advisory:    prstate.Advisory{Count: advisory.Count, Rules: advisory.Rules, Limits: advisoryLimits(advisory)},
 		Excluded:    excludedRecords(scope),
 		ScopeReport: scopeReportOf(examinedScope, limits),
+	}
+	// The manifest carries the reads envelope and the ref-store tree
+	// carries reads.json beside it: the envelope when the pass degraded
+	// or read through the tool, the per-call detail whenever served
+	// calls ran. Overlap is measured against the generation's own paths —
+	// the content the pass supplied.
+	if envelope, calls, ok := l.summarizeReads(); ok {
+		if envelope.Reason != "" || envelope.Calls > 0 {
+			if raw, err := json.Marshal(envelope); err == nil {
+				candidate.Reads = prstate.Some(json.RawMessage(raw))
+			}
+		}
+		if len(calls) > 0 {
+			if readsJSON, err := prstate.BuildReadsJSON(calls, paths); err == nil {
+				candidate.ReadsJSON = readsJSON
+			}
+		}
 	}
 	stillCurrent := func() error {
 		// The pair is re-read from the forge rather than compared against the
@@ -745,6 +768,10 @@ func (l *Leg) haltPass(ctx context.Context, req Request, loaded Context, pass in
 	marker.Version = core.MarkerVersion
 	marker.State = core.PassIncomplete
 	marker.CoverageStop = prstate.Some(stop)
+	// The halted marker carries the reads envelope when the pass degraded
+	// or read through the tool: the envelope-only entry is the record the
+	// halted calls happened.
+	l.attachReads(&marker)
 	if findingCount(claim.Findings) > 0 {
 		// Findings the accepted batches recorded stay on the halted claim,
 		// so the re-drive restores them beside the outstanding paths.

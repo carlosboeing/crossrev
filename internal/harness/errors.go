@@ -72,6 +72,20 @@ var (
 	// ErrModelsConverged is two legs configured to differ that the same model
 	// answered (lib/legs.sh:554-561).
 	ErrModelsConverged = errors.New("both legs were configured to differ and one model answered each")
+
+	// ErrReviewCommand is a command event on a review leg, which reads
+	// without running commands. Reported as review_leg_ran_command.
+	ErrReviewCommand = errors.New("the review leg ran a command")
+
+	// ErrReadsUnavailable is a served read path that is not serving: a
+	// failed self-test, a missing handshake or refused calls. Reported as
+	// reads_unavailable, degrading or halting per policy.
+	ErrReadsUnavailable = errors.New("served reads are unavailable")
+
+	// ErrIsolationUnverified is a review leg whose served-or-tripwire
+	// command block is unverified at this pin. Reported as
+	// review_isolation_unverified.
+	ErrIsolationUnverified = errors.New("the review isolation is unverified")
 )
 
 // Refusal is a fatal harness decision: what went wrong, and what to do about it.

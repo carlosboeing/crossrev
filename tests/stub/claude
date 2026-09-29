@@ -7,6 +7,11 @@
 # That shape matters — it is what lib/adapters/claude.sh parses, and layer two of
 # the divergence guard reads the key.
 #
+# Asked for `--output-format stream-json`, it answers the stream shape instead:
+# the final result event carrying the same answer and the same counters, which
+# is what a served review leg and every resolve leg read. The counters match
+# the buffered shape exactly, so suites asserting usage prove both shapes.
+#
 # The leg is inferred from the prompt rather than from a flag, so one stub covers
 # `crossrev run` calling both legs in sequence.
 
@@ -35,6 +40,24 @@ if [[ ! -t 0 ]]; then prompt="$(cat)"; fi
 # Every flag the adapter built, so a suite can assert what a leg was and was not
 # granted. Appended, because one `crossrev run` invokes this twice.
 [[ -n "${CROSSREV_ARGV_LOG:-}" ]] && printf '%s\n' "$*" >>"$CROSSREV_ARGV_LOG"
+
+# _emit_claude answers the shape that was asked for: the buffered object for
+# `--output-format json`, the final result event for stream-json. The event
+# carries the same answer and the same counters, so suites asserting usage
+# prove both shapes. The shape is read off the invocation, because the
+# function itself runs behind a pipe with no argv of its own.
+_stream_json=0
+[[ "$*" == *"stream-json"* ]] && _stream_json=1
+_emit_claude() {
+  if (( _stream_json == 1 )); then
+    # The result event carries the harness's own cost figure beside the
+    # counters, the way the real CLI does: total_cost_usd is what the
+    # run-details table shows as ~$0.12.
+    jq -c '{type:"result", result:.result, is_error:.is_error, modelUsage:.modelUsage, usage:.usage, total_cost_usd:.total_cost_usd}'
+  else
+    cat
+  fi
+}
 
 # The answering model defaults to the one that was asked for, which is what the
 # real CLI reports when nothing substitutes it. A stub that answered as something
@@ -78,16 +101,30 @@ if [[ "$prompt" == *"You are the resolve leg"* && -n "${CROSSREV_RESOLVE_EDIT:-}
   bash "$CROSSREV_RESOLVE_EDIT" || true
 fi
 
+# CROSSREV_CLAUDE_COMMAND makes a review leg emit a command event before its
+# answer: an assistant tool_use of Bash carrying the command. The review
+# tripwire must halt on it with review_leg_ran_command and publish nothing.
+# A suite that genuinely wants to exercise the command path sets this to the
+# command the transcript should show.
+_prepend_command_event() {
+  if [[ -n "${CROSSREV_CLAUDE_COMMAND:-}" && "$prompt" == *"You are the review leg"* ]]; then
+    jq -cn --arg c "$CROSSREV_CLAUDE_COMMAND" \
+      '{type:"assistant", message:{content:[{type:"tool_use", name:"Bash", input:{command:$c}}]}}'
+  fi
+}
+
 # CROSSREV_REVIEW_MODEL_USAGE replaces the single-key modelUsage with a whole
 # map, for the mixed-session case: two models on one leg, where the answering
 # model has to be the largest token share rather than the first sorted key.
 if [[ -n "${CROSSREV_REVIEW_MODEL_USAGE:-}" && "$prompt" == *"You are the review leg"* ]]; then
+  _prepend_command_event
   jq -cn --arg r "$(cat "$payload_file")" --argjson mu "$CROSSREV_REVIEW_MODEL_USAGE" \
     '{result:$r, is_error:false, provider:"stub", total_cost_usd:0.12,
       modelUsage:$mu,
       usage:{cache_creation:{ephemeral_5m_input_tokens:0,
                              ephemeral_1h_input_tokens:0},
-             output_tokens_details:{thinking_tokens:0}}}'
+             output_tokens_details:{thinking_tokens:0}}}' \
+    | _emit_claude
   exit 0
 fi
 
@@ -97,6 +134,7 @@ fi
 # write-TTL split and thinking count the adapter reads beside modelUsage; its
 # split is zero, so the 5 cacheCreationInputTokens surface as unsplit writes.
 # total_cost_usd is what the run-details table shows as ~$0.12.
+_prepend_command_event
 jq -cn --arg r "$(cat "$payload_file")" --arg m "$model" \
   '{result:$r, is_error:false, provider:"stub", total_cost_usd:0.12,
     modelUsage:{($m):{inputTokens:1200, outputTokens:300,
@@ -104,4 +142,5 @@ jq -cn --arg r "$(cat "$payload_file")" --arg m "$model" \
                       canonicalModel:$m}},
     usage:{cache_creation:{ephemeral_5m_input_tokens:0,
                            ephemeral_1h_input_tokens:0},
-           output_tokens_details:{thinking_tokens:0}}}'
+           output_tokens_details:{thinking_tokens:0}}}' \
+  | _emit_claude

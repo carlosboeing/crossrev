@@ -195,6 +195,12 @@ type Descriptor struct {
 	// Credential is the credential block.
 	Credential Credential `json:"credential"`
 
+	// DeclaredReadMode is `.read_mode` as written: served, file_tool or
+	// supplied. Empty when the key is absent, which reads as supplied —
+	// fail closed, since no shell says otherwise. Named apart from the
+	// ReadMode method for the same reason legs keeps its own name.
+	DeclaredReadMode string `json:"read_mode"`
+
 	// legs is `.legs`, nil when the descriptor carries no such key. An absent
 	// legs field means both legs, which is why the four entries that predate
 	// the field carry no edit (lib/harnesses.sh:150-153). Unexported so that
@@ -217,6 +223,17 @@ func (d Descriptor) Legs() []string {
 // DeclaresLegs reports that the descriptor carries a `legs` key for this
 // harness, which is a different fact from which legs it serves.
 func (d Descriptor) DeclaresLegs() bool { return d.legs != nil }
+
+// ReadMode is the read path this harness reviews with: served, file_tool or
+// supplied. An absent or unparsable value reads as supplied — fail closed —
+// but Load refuses an unknown value first, so a validated document never
+// reaches the fallback.
+func (d Descriptor) ReadMode() ReadMode {
+	if mode, ok := ParseReadMode(d.DeclaredReadMode); ok {
+		return mode
+	}
+	return ReadModeSupplied
+}
 
 // The descriptor's own vocabulary for the two legs. run_leg_settings and
 // preflight receive reviewer and resolver, so their callers normalise
@@ -278,8 +295,10 @@ var (
 	envNamePattern     = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
 )
 
-// Validate is harness_validate (lib/harnesses.sh:27-83): twelve checks in one
-// pass, answering the first problem or the empty string.
+// Validate is harness_validate (lib/harnesses.sh:27-83): thirteen checks in
+// one pass, answering the first problem or the empty string. The thirteenth
+// is read_mode, which the shell never gated and which therefore has no
+// parity sentence to keep.
 //
 // The order is the Bash function's `elif` chain and is load-bearing. A
 // descriptor with two faults reports the earlier one, and
@@ -386,6 +405,17 @@ func Validate(raw []byte) string {
 		legs, isArray := jsonArray(raw)
 		if !isArray || len(legs) == 0 || !everyLeg(legs) {
 			return fmt.Sprintf("harness %s carries a legs field that is not a non-empty array drawn from review and resolve", entryName(entry))
+		}
+	}
+	for _, entry := range harnessList {
+		// Absent reads as supplied at the accessor, fail closed, so only a
+		// present value outside the vocabulary is refused. There is no shell
+		// counterpart: the shell never gated a read path, so this check has
+		// no parity sentence to keep.
+		if raw, declared := valueAt(entry, "read_mode"); declared && truthyJSON(raw) {
+			if text, isText := raw.(string); !isText || !validReadMode(text) {
+				return fmt.Sprintf("harness %s carries a read_mode that is not %s", entryName(entry), readModeNames())
+			}
 		}
 	}
 	for _, path := range declaredPaths(harnessList, document["quarantine_shared"]) {
@@ -736,6 +766,15 @@ func inRange(entry any) bool {
 		slices.Contains([]string{"stdin", "file", "argv"}, stringAt(entry, "prompt_transport")) &&
 		slices.Contains([]string{"script", "npm"}, stringAt(entry, "install", "kind")) &&
 		slices.Contains([]string{"none", "file", "home", "env"}, stringAt(entry, "credential", "staging", "kind"))
+}
+
+// validReadMode reports the descriptor's own vocabulary for the three read
+// paths. file_tool is accepted though unused until slice 9: a leg resolves
+// it to supplied and records why, rather than refusing a word the
+// descriptor is allowed to carry.
+func validReadMode(text string) bool {
+	_, ok := ParseReadMode(text)
+	return ok
 }
 
 func everyLeg(legs []any) bool {

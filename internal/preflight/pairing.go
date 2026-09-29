@@ -71,10 +71,11 @@ func PairingSupported(doc harness.Document, runner, name, leg string) (string, b
 // drift apart — a reason from either branch is a descriptor fact, refused on
 // every runner.
 //
-// The codex refusal is the shared resolver rule
-// (harness.RefusedAsResolver), so `doctor` and `init` refuse the same
-// resolver the runtime refuses, on every runner — the shell denial that
-// strands codex applies self-hosted too.
+// The resolver rule (harness.RefusedAsResolver) is the shared refusal every
+// surface reads, so `doctor` and `init` refuse the same resolver the runtime
+// refuses, on every runner. Nothing is refused today — the served read tool
+// serves every resolve leg — and the branch stays so the next reason-specific
+// limit lands in one place.
 func legRefusal(doc harness.Document, name, leg string) (string, bool) {
 	if leg == harness.LegResolve && harness.RefusedAsResolver(name) {
 		return fmt.Sprintf("%s is limited to the review leg, and cannot serve the %s leg",

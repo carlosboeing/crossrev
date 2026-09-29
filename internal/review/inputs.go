@@ -184,6 +184,11 @@ type Leg struct {
 	// queues the line in Result.Messages instead, the way every other leg
 	// line travels.
 	Progress func(ui.Line)
+
+	// readsNotes records one entry per review call for the marker and
+	// generation reads envelopes finalized later in the pass. Calls run
+	// sequentially, so the slice needs no mutex.
+	readsNotes []readsNote
 }
 
 func (l *Leg) now() time.Time {

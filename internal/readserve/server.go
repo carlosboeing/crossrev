@@ -208,6 +208,23 @@ func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 
 	encoder := json.NewEncoder(out)
 
+	// refuse answers a refused read with the contract reason and records
+	// the refusal beside the reads: the leg matches refused calls against
+	// the harness transcript after the call, and the ledger counts them.
+	// The log carries the reason alone, never file bytes.
+	refuse := func(id json.RawMessage, reason, text string) {
+		lg.event("refused", map[string]interface{}{"reason": reason})
+		_ = encoder.Encode(newResultResponse(id, map[string]interface{}{
+			"isError": true,
+			"content": []map[string]interface{}{
+				{
+					"type": "text",
+					"text": text,
+				},
+			},
+		}))
+	}
+
 	for scanner.Scan() {
 		line := scanner.Bytes()
 		var req JSONRPCRequest
@@ -275,15 +292,9 @@ func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 			}
 
 			if params.Name != "read_file" {
-				_ = encoder.Encode(newResultResponse(req.ID, map[string]interface{}{
-					"isError": true,
-					"content": []map[string]interface{}{
-						{
-							"type": "text",
-							"text": "Method not found: " + params.Name,
-						},
-					},
-				}))
+				// A probe call is rejected: anything outside read_file
+				// never serves, including a call literally named probe.
+				refuse(req.ID, "unknown_tool", "Method not found: "+params.Name)
 				continue
 			}
 
@@ -300,10 +311,7 @@ func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 			}
 
 			if strings.Contains(argsStruct.Path, "..") || filepath.IsAbs(argsStruct.Path) || strings.HasPrefix(argsStruct.Path, "/") {
-				_ = encoder.Encode(newResultResponse(req.ID, map[string]interface{}{
-					"isError": true,
-					"content": []map[string]interface{}{{"type": "text", "text": "path_invalid"}},
-				}))
+				refuse(req.ID, "path_invalid", "path_invalid")
 				continue
 			}
 
@@ -318,10 +326,7 @@ func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 			}
 
 			if err != nil {
-				_ = encoder.Encode(newResultResponse(req.ID, map[string]interface{}{
-					"isError": true,
-					"content": []map[string]interface{}{{"type": "text", "text": "outside_revisions"}},
-				}))
+				refuse(req.ID, "outside_revisions", "outside_revisions")
 				continue
 			}
 
@@ -330,17 +335,11 @@ func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 				parts := strings.Fields(lsOut.Text())
 				if len(parts) >= 2 {
 					if parts[0] == "120000" {
-						_ = encoder.Encode(newResultResponse(req.ID, map[string]interface{}{
-							"isError": true,
-							"content": []map[string]interface{}{{"type": "text", "text": "symlink"}},
-						}))
+						refuse(req.ID, "symlink", "symlink")
 						continue
 					}
 					if parts[0] == "160000" {
-						_ = encoder.Encode(newResultResponse(req.ID, map[string]interface{}{
-							"isError": true,
-							"content": []map[string]interface{}{{"type": "text", "text": "submodule"}},
-						}))
+						refuse(req.ID, "submodule", "submodule")
 						continue
 					}
 				}
@@ -353,27 +352,18 @@ func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 			bytesOut, fileStatus, _ := repo.Show(ctx, rev, argsStruct.Path)
 
 			if fileStatus == vcs.NotFound {
-				_ = encoder.Encode(newResultResponse(req.ID, map[string]interface{}{
-					"isError": true,
-					"content": []map[string]interface{}{{"type": "text", "text": "not_found"}},
-				}))
+				refuse(req.ID, "not_found", "not_found")
 				continue
 			}
 			if fileStatus == vcs.IsOther {
 				// A tree holds no file content, and the contract has no
 				// reason for one, so it refuses as not_found.
-				_ = encoder.Encode(newResultResponse(req.ID, map[string]interface{}{
-					"isError": true,
-					"content": []map[string]interface{}{{"type": "text", "text": "not_found"}},
-				}))
+				refuse(req.ID, "not_found", "not_found")
 				continue
 			}
-			
+
 			if bytes.Contains(bytesOut, []byte{0}) {
-				_ = encoder.Encode(newResultResponse(req.ID, map[string]interface{}{
-					"isError": true,
-					"content": []map[string]interface{}{{"type": "text", "text": "binary"}},
-				}))
+				refuse(req.ID, "binary", "binary")
 				continue
 			}
 
@@ -393,10 +383,7 @@ func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 			// rather than extending to end of file. An end past the last
 			// line clamps to it, and the header names the clamped range.
 			if argsStruct.EndLine != 0 && argsStruct.EndLine < start {
-				_ = encoder.Encode(newResultResponse(req.ID, map[string]interface{}{
-					"isError": true,
-					"content": []map[string]interface{}{{"type": "text", "text": "bad_range"}},
-				}))
+				refuse(req.ID, "bad_range", "bad_range")
 				continue
 			}
 			end := argsStruct.EndLine
@@ -408,20 +395,14 @@ func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 			// zero bytes, so the server answers the empty range rather
 			// than refusing what git reports.
 			if start > len(lines) && !(len(lines) == 0 && start == 1) {
-				_ = encoder.Encode(newResultResponse(req.ID, map[string]interface{}{
-					"isError": true,
-					"content": []map[string]interface{}{{"type": "text", "text": "bad_range"}},
-				}))
+				refuse(req.ID, "bad_range", "bad_range")
 				continue
 			}
 
 			// The leg's read count is checked before rendering; exhaustion
 			// is a refusal on this request, never a halt of the server.
 			if legReads >= cfg.PerLegReads {
-				_ = encoder.Encode(newResultResponse(req.ID, map[string]interface{}{
-					"isError": true,
-					"content": []map[string]interface{}{{"type": "text", "text": "budget_exhausted"}},
-				}))
+				refuse(req.ID, "budget_exhausted", "budget_exhausted")
 				continue
 			}
 
@@ -433,18 +414,12 @@ func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 				if bytesReturned+sb.Len()+lineBytes > cfg.PerCallBytes ||
 					bytesReturned+sb.Len()+lineBytes > cfg.PerLegBytes {
 					// Budget exhausted
-					_ = encoder.Encode(newResultResponse(req.ID, map[string]interface{}{
-						"isError": true,
-						"content": []map[string]interface{}{{"type": "text", "text": "budget_exhausted"}},
-					}))
+					refuse(req.ID, "budget_exhausted", "budget_exhausted")
 					goto nextReq
 				}
 				if i == start-1 && lineBytes > cfg.MaxResultBytes {
 					// Line itself is too long
-					_ = encoder.Encode(newResultResponse(req.ID, map[string]interface{}{
-						"isError": true,
-						"content": []map[string]interface{}{{"type": "text", "text": fmt.Sprintf("line_too_long %d start_line=%d", lineBytes, i+2)}},
-					}))
+					refuse(req.ID, "line_too_long", fmt.Sprintf("line_too_long %d start_line=%d", lineBytes, i+2))
 					goto nextReq
 				}
 				if sb.Len()+lineBytes > cfg.MaxResultBytes || (i-start+1) >= cfg.MaxResultLines {
@@ -468,7 +443,8 @@ func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 			h.Write([]byte(text))
 			// The log carries the returned range and the cut marker, so a
 			// read replays from (path, revision, returned) with a digest
-			// over the same bytes; it never carries text.
+			// over the same bytes; it never carries text. bytes is the
+			// result length the ledger sums into the reads envelope.
 			lg.event("read", map[string]interface{}{
 				"path":            argsStruct.Path,
 				"revision":        argsStruct.Revision,
@@ -477,6 +453,7 @@ func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 				"requested_start": argsStruct.StartLine,
 				"requested_end":   argsStruct.EndLine,
 				"next_start":      nextStart,
+				"bytes":           len(text),
 				"digest":          hex.EncodeToString(h.Sum(nil)),
 			})
 

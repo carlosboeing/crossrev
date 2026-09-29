@@ -276,7 +276,7 @@ func generationCounts(g Generation) (outstanding, required int) {
 
 func manifestFieldsV2(g Generation, recordsDigest, manifestDigest string) object {
 	outstanding, required := generationCounts(g)
-	return object{
+	out := object{
 		{key: "v", value: json.RawMessage(fmt.Sprintf("%d", CoverageSchemaV2))},
 		{key: "kind", value: appendJSONString(nil, CoverageKindManifest)},
 		{key: "gen", value: json.RawMessage(fmt.Sprintf("%d", g.Gen))},
@@ -294,9 +294,19 @@ func manifestFieldsV2(g Generation, recordsDigest, manifestDigest string) object
 		{key: "excluded", value: exclusionsOf(g.Excluded)},
 		{key: "scope_report", value: scopeReportOf(g.ScopeReport)},
 		{key: "verification", value: verificationOf(UnimplementedVerification())},
-		{key: "records_digest", value: appendJSONString(nil, recordsDigest)},
-		{key: "digest", value: appendJSONString(nil, manifestDigest)},
 	}
+	// The manifest carries the reads envelope alone; reads.json travels
+	// beside the manifest in the ref-store tree, never inside it. Absent
+	// for generations published before legs read through the served tool,
+	// so old manifests keep decoding on the legacy key set.
+	if raw, ok := g.Reads.Get(); ok && len(raw) != 0 {
+		out = append(out, member{key: "reads", value: json.RawMessage(bytes.Clone(raw))})
+	}
+	out = append(out,
+		member{key: "records_digest", value: appendJSONString(nil, recordsDigest)},
+		member{key: "digest", value: appendJSONString(nil, manifestDigest)},
+	)
+	return out
 }
 
 func compactRecordsFields(verdicts, digest string) object {
@@ -413,7 +423,20 @@ func DecodeGenerationV2(manifestBytes, recordsBytes []byte) (Generation, error) 
 		"form", "granularity", "paths", "outstanding_count", "required_count",
 		"advisory", "excluded", "scope_report", "verification", "records_digest", "digest",
 	}
-	if !exactKeys(manObj, wantManifestKeys) {
+	// The reads envelope rides beside records_digest on generations
+	// published by legs that read through the served tool. Generations
+	// from before keep decoding on the legacy key set.
+	withReadsKeys := []string{
+		"v", "kind", "gen", "base_sha", "head_sha", "engine", "slot", "producer",
+		"form", "granularity", "paths", "outstanding_count", "required_count",
+		"advisory", "excluded", "scope_report", "verification", "reads", "records_digest", "digest",
+	}
+	hasReads := manObj.index("reads") >= 0
+	if hasReads {
+		if !exactKeys(manObj, withReadsKeys) {
+			return Generation{}, coverageErrorf("manifest keys do not match v2 schema")
+		}
+	} else if !exactKeys(manObj, wantManifestKeys) {
 		return Generation{}, coverageErrorf("manifest keys do not match v2 schema")
 	}
 
@@ -599,7 +622,7 @@ func DecodeGenerationV2(manifestBytes, recordsBytes []byte) (Generation, error) 
 		records = recs
 	}
 
-	return Generation{
+	out := Generation{
 		Gen:         gen,
 		Revision:    core.RevisionPair{Base: baseRev, Head: headRev},
 		Engine:      engine,
@@ -611,7 +634,15 @@ func DecodeGenerationV2(manifestBytes, recordsBytes []byte) (Generation, error) 
 		Advisory:    advisory,
 		Excluded:    excluded,
 		ScopeReport: scopeReport,
-	}, nil
+	}
+	if hasReads {
+		readsRaw := getMan("reads")
+		if _, err := DecodeReadsEnvelope(readsRaw); err != nil {
+			return Generation{}, coverageErrorf("invalid reads envelope: %v", err)
+		}
+		out.Reads = Some(json.RawMessage(bytes.Clone(readsRaw)))
+	}
+	return out, nil
 }
 
 func decodeRecordsV2(raw json.RawMessage) ([]Record, bool) {

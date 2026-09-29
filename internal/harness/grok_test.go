@@ -106,6 +106,12 @@ func TestGrokAgainstTheStub(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			inv := invocation(t, "grok", write)
+			if !write {
+				// The stub asserts the production shape: a supplied
+				// review streams for its tripwire, and the legacy json
+				// shape no longer runs anywhere.
+				inv.ReadMode = harness.ReadModeSupplied
+			}
 			spec, err := adapter.Spec(inv)
 			if err != nil {
 				t.Fatalf("building the spec: %v", err)

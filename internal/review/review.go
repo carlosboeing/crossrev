@@ -367,6 +367,7 @@ func (l *Leg) Run(ctx context.Context, req Request) (out Result) {
 			marker.EffortReported = prstate.Null[string]()
 		}
 		l.attachUsage(&marker, envelope, settings)
+		l.attachReads(&marker)
 		out.Marker = marker
 		raw, err := marker.MarshalJSON()
 		if err != nil {
@@ -432,6 +433,7 @@ func (l *Leg) finishCoveredRun(ctx context.Context, req Request, loaded Context,
 		}
 		l.attachUsage(&marker, *covered.envelope, settings)
 	}
+	l.attachReads(&marker)
 	workdir := req.Workdir
 	diffBytes, _ := l.reviewDiff(ctx, loaded)
 	enriched, snaps, err := enrichFindingsInScope(covered.payload, diffBytes, workdir, requiredPaths(loaded))

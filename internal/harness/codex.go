@@ -92,6 +92,33 @@ func (a *Codex) Spec(inv Invocation) (exec.Spec, error) {
 		args = append(args, "--sandbox", "read-only")
 	}
 
+	// A review leg reads without running commands. shell_tool is the tool
+	// itself and unified_exec is the runner behind it; denying one without
+	// the other leaves the other to run the command. The zero mode keeps
+	// the legacy shape every stub test pins; an explicit served or supplied
+	// mode disables both, and served additionally wires CrossRev's read tool
+	// as the leg's only read path: the mcp_servers.crossrev command, its
+	// args array and the approval mode beside --ignore-user-config.
+	// file_tool resolves to supplied and is recorded at the leg.
+	switch inv.ReadMode {
+	case ReadModeServed:
+		if inv.Serve == nil {
+			return exec.Spec{}, &Refusal{
+				Reason: "the codex adapter was given the served mode with no serve command",
+				Action: "A served leg hands the harness the read-server command; without one the leg cannot claim the served mode. This is a CrossRev bug.",
+				Kind:   ErrScratch,
+			}
+		}
+		if !inv.Write {
+			args = append(args, "--disable", "shell_tool", "--disable", "unified_exec")
+		}
+		args = append(args, inv.Serve.CodexConfigArgs()...)
+	case ReadModeSupplied:
+		if !inv.Write {
+			args = append(args, "--disable", "shell_tool", "--disable", "unified_exec")
+		}
+	}
+
 	// Codex takes the schema as a FILE PATH, where Claude Code takes it inline.
 	if inv.Schema.Present() {
 		args = append(args, "--output-schema", inv.Schema.Path)

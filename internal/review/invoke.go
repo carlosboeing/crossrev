@@ -199,6 +199,11 @@ func (l *Leg) invoke(ctx context.Context, req Request, loaded Context, settings 
 	}
 
 	entry, _ := l.Harness.For(settings.harness)
+
+	// The prompt names the call's read path ahead of the output
+	// instruction: the served read tool or no read tool at all.
+	_, effectivePromptMode := EffectiveReadMode(entry.ReadMode())
+
 	staged, err := cred.Prepare(l.Harness.Credentials().For(settings.harness), settings.endpoint, cred.Options{Now: l.Now})
 	if err != nil {
 		return harness.Envelope{}, nil, msgs, err
@@ -223,6 +228,7 @@ func (l *Leg) invoke(ctx context.Context, req Request, loaded Context, settings 
 		Prior:    priorFindings(loaded),
 		Threads:  promptThreads(l.Forge.ReviewThreads(ctx, loaded.Repo, req.PR)),
 		ReviewMD: loaded.ReviewMD,
+		Reads:    prompt.ReadsBlock(string(effectivePromptMode)),
 	}.Render()
 
 	start := l.now()
@@ -272,6 +278,19 @@ func copyReadLog(l *runlog.Log, tmp string, call int) {
 // is the call's number in the pass, naming its transcripts.
 func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settings legSettings, adapter harness.Adapter, entry harness.Descriptor, staged *cred.Staged, tmp string, promptBytes []byte, msgs []ui.Line, call int) (envelope harness.Envelope, payload json.RawMessage, outMsgs []ui.Line, retErr error) {
 	outMsgs = msgs
+
+	// A harness whose served-or-tripwire command block is unverified at
+	// this pin never reviews: the leg is refused with
+	// review_isolation_unverified before any child starts, while its
+	// resolve leg is unaffected. The gate sits here, on the one path
+	// every call takes, so the frozen prompt and the batch loop refuse
+	// the same way.
+	if refusal := harness.ReviewIsolationRefusal(l.Harness, settings.harness); refusal != nil {
+		return harness.Envelope{}, nil, outMsgs, &ui.FatalError{
+			Reason: refusal.Reason,
+			Action: refusal.Action,
+		}
+	}
 
 	promptPath := filepath.Join(tmp, "prompt")
 	schemaPath := filepath.Join(tmp, "schema.json")
@@ -328,6 +347,12 @@ func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settin
 		return harness.Envelope{}, nil, outMsgs, err
 	}
 
+	// The call declares the descriptor's read mode and runs the effective
+	// one: file_tool resolves to supplied, unwired until slice 9. A served
+	// call hands the harness the read-server command; a served call without
+	// one is refused by the adapter rather than run unserved.
+	declared := entry.ReadMode()
+	effective, unwired := EffectiveReadMode(declared)
 	inv := harness.Invocation{
 		Prompt:   harness.File{Path: promptPath, Text: string(promptBytes)},
 		Schema:   harness.File{Path: schemaPath, Text: string(schemaBytes)},
@@ -336,10 +361,37 @@ func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settin
 		Effort:   settings.effort,
 		Endpoint: endpoint,
 		Write:    false,
+		ReadMode: effective,
 		// staged, not l.Env: the allowlist was read before Prepare staged
 		// anything, so the staging variable reaches the child only from here.
 		Env:     staged.Apply(l.Env),
 		Scratch: tmp,
+	}
+	readsReason := unwired
+	if effective == harness.ReadModeServed {
+		command, session, err := serveSession(workdir, tmp, loaded.PR.BaseRefOid, loaded.PR.HeadRefOid, call)
+		if err != nil {
+			return harness.Envelope{}, nil, outMsgs, err
+		}
+		inv.Serve = &harness.ServeConfig{Command: command, Args: session.Args()}
+		// The leg-start self-test runs before any harness child —
+		// including the version probe below. On failure the leg halts
+		// where the policy says halt and falls back to supplied where it
+		// says degrade, recording why either way.
+		if selfTestErr := l.runReadsSelfTest(ctx, command, session, loaded); selfTestErr != nil {
+			if readsPolicy(loaded) == "halt" {
+				l.noteReads(readsNote{declared: declared, effective: effective, reason: ReadsReasonSelfTestFailed})
+				return harness.Envelope{}, nil, outMsgs, readsUnavailableFatal(ReadsReasonSelfTestFailed+": "+selfTestErr.Error())
+			}
+			inv.ReadMode = harness.ReadModeSupplied
+			inv.Serve = nil
+			effective = harness.ReadModeSupplied
+			readsReason = ReadsReasonSelfTestFailed
+			outMsgs = append(outMsgs, readsDegradedWarning(readsReason))
+			if l.Log != nil {
+				l.Log.Event("reads", "self-test failed ("+selfTestErr.Error()+"); degrading to supplied")
+			}
+		}
 	}
 
 	// The version gate, before anything starts: an adapter that pins its CLI
@@ -400,6 +452,33 @@ func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settin
 		l.Log.WriteTranscript(transcript, res.Stdout, res.Stderr)
 		if l.Log != nil && l.Log.Dir() != "" {
 			copyReadLog(l.Log, tmp, call)
+		}
+		// The review-leg tripwire: a command event in the harness's own
+		// output halts with review_leg_ran_command. The call is discarded
+		// unpublished — nothing below runs — and the command reaches the
+		// run log only, redacted, never the pull request or the terminal.
+		if command, tripped := harness.ReviewCommand(settings.harness, res.Stdout); tripped {
+			refusal := harness.ReviewCommandRefusal(settings.harness, command)
+			if l.Log != nil {
+				l.Log.Event("tripwire", harness.RedactedCommand(command))
+			}
+			l.noteReads(readsNote{declared: declared, effective: effective, reason: "review_leg_ran_command"})
+			return envelope, nil, outMsgs, &ui.FatalError{
+				Reason: refusal.Reason,
+				Action: refusal.Action,
+			}
+		}
+		// The post-call reads check: the handshake in the server log, and
+		// refused calls matched against the log. A failed check degrades
+		// visibly where the policy says degrade and halts the leg where it
+		// says halt — and a halted call publishes nothing.
+		if note, assessMsgs, assessErr := l.assessCallReads(loaded, tmp, declared, effective, readsReason); assessErr != nil {
+			l.noteReads(note)
+			return envelope, nil, outMsgs, assessErr
+		} else {
+			l.noteReads(note)
+			outMsgs = append(outMsgs, assessMsgs...)
+			readsReason = note.reason
 		}
 		if res.Interrupted() {
 			// A signal death is an interrupt, not a harness failure: the
