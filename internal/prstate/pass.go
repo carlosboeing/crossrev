@@ -50,26 +50,26 @@ import (
 // of the bytes into commentID, so the byte route through Raw cannot carry it
 // back either.
 type Marker struct {
-	Version        int             `json:"v,omitzero"`
-	Leg            core.Leg        `json:"leg,omitzero"`
-	Pass           int             `json:"pass,omitzero"`
-	State          core.PassState  `json:"state,omitzero"`
-	TS             int64           `json:"ts,omitzero"`
-	DoneTS         Opt[int64]      `json:"done_ts,omitzero"`
-	RunID          Opt[string]     `json:"run_id,omitzero"`
-	HeadSHA        Opt[string]     `json:"head_sha,omitzero"`
-	Harness        Opt[string]     `json:"harness,omitzero"`
-	Model          Opt[string]     `json:"model,omitzero"`
-	Effort         Opt[string]     `json:"effort,omitzero"`
-	Endpoint       Opt[string]     `json:"endpoint,omitzero"`
-	ModelReported  Opt[string]     `json:"model_reported,omitzero"`
-	Tokens         json.RawMessage `json:"tokens,omitzero"`
-	Usage          json.RawMessage `json:"usage,omitzero"`
+	Version       int             `json:"v,omitzero"`
+	Leg           core.Leg        `json:"leg,omitzero"`
+	Pass          int             `json:"pass,omitzero"`
+	State         core.PassState  `json:"state,omitzero"`
+	TS            int64           `json:"ts,omitzero"`
+	DoneTS        Opt[int64]      `json:"done_ts,omitzero"`
+	RunID         Opt[string]     `json:"run_id,omitzero"`
+	HeadSHA       Opt[string]     `json:"head_sha,omitzero"`
+	Harness       Opt[string]     `json:"harness,omitzero"`
+	Model         Opt[string]     `json:"model,omitzero"`
+	Effort        Opt[string]     `json:"effort,omitzero"`
+	Endpoint      Opt[string]     `json:"endpoint,omitzero"`
+	ModelReported Opt[string]     `json:"model_reported,omitzero"`
+	Tokens        json.RawMessage `json:"tokens,omitzero"`
+	Usage         json.RawMessage `json:"usage,omitzero"`
 	// Reads is the reads envelope for the pass: declared and effective
 	// modes, the reason they differ, and what the calls cost. A halted
 	// call that publishes nothing still records it — the envelope-only
 	// entry is the record the call happened.
-	Reads json.RawMessage `json:"reads,omitzero"`
+	Reads          json.RawMessage `json:"reads,omitzero"`
 	Billing        Opt[string]     `json:"billing,omitzero"`
 	Verdict        Opt[string]     `json:"verdict,omitzero"`
 	Blocked        Opt[bool]       `json:"blocked,omitzero"`
