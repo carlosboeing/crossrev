@@ -209,8 +209,8 @@ func Run(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer
 	encoder := json.NewEncoder(out)
 
 	// refuse answers a refused read with the contract reason and records
-	// the refusal beside the reads: the leg matches refused calls against
-	// the harness transcript after the call, and the ledger counts them.
+	// the refusal beside the reads: the leg counts refused calls from
+	// this log after the call, and the ledger records them.
 	// The log carries the reason alone, never file bytes.
 	refuse := func(id json.RawMessage, reason, text string) {
 		lg.event("refused", map[string]interface{}{"reason": reason})
