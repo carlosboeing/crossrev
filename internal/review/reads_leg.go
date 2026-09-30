@@ -222,7 +222,7 @@ func (l *Leg) assessCallReads(loaded Context, tmp string, declared, effective ha
 	if priorReason != "" {
 		return note, nil, nil
 	}
-	reason, halt := AssessReads(readsPolicy(loaded), effective, stats, nil)
+	reason, halt := AssessReads(readsPolicy(loaded), effective, stats)
 	if reason == "" {
 		return note, nil, nil
 	}
@@ -258,7 +258,6 @@ func (l *Leg) summarizeReads() (envelope prstate.ReadsEnvelope, calls []prstate.
 	effective := first.effective
 	var reason string
 	var stats prstate.ReadsStats
-	handshake := true
 	for _, note := range l.readsNotes {
 		// A pass runs one mode until a failed self-test falls it back:
 		// the envelope reports the degraded mode when any call ran it.
@@ -270,20 +269,11 @@ func (l *Leg) summarizeReads() (envelope prstate.ReadsEnvelope, calls []prstate.
 		stats.Bytes += note.stats.Bytes
 		stats.Refused += note.stats.Refused
 		stats.BudgetExhausted = stats.BudgetExhausted || note.stats.BudgetExhausted
-		// The handshake is required on every served call, whatever its
-		// count: a served child that never reached the server leaves an
-		// empty log, and the envelope must not report a handshake no
-		// call performed. Supplied calls have no server to shake hands
-		// with, so their empty logs leave the fold alone.
-		if note.effective == harness.ReadModeServed && !note.stats.Handshake {
-			handshake = false
-		}
 		calls = append(calls, note.calls...)
 		if note.reason != "" && reason == "" {
 			reason = note.reason
 		}
 	}
-	stats.Handshake = handshake
 	envelope = ReadsEnvelope(first.declared, effective, reason, stats)
 	return envelope, calls, true
 }
@@ -308,18 +298,6 @@ func (l *Leg) attachReads(marker *prstate.Marker) {
 	marker.Reads = raw
 }
 
-// readsDegradedSentence words one degradation for a person: the reason,
-// with refused and served counts for calls_refused beside served reads.
-// The terminal warning and the posted summary share it, so both halves of
-// the pass say the same thing.
-func readsDegradedSentence(reason string, refused, served int) string {
-	if reason == ReadsReasonCallsRefused && served > 0 {
-		return fmt.Sprintf("Served reads degraded (%s: %d refused, %d served): the refused reads were judged on the supplied content alone; the rest the reviewer read through the served tool.",
-			reason, refused, served)
-	}
-	return "Served reads degraded (" + reason + "): this review judged the supplied content alone."
-}
-
 // readsDegradedWarning is the terminal half of a degradation: the reason,
 // in the open, where the pass comment carries it. A refused call beside
 // served reads is worded for what happened: the reviewer read the rest
@@ -329,10 +307,10 @@ func readsDegradedSentence(reason string, refused, served int) string {
 func readsDegradedWarning(reason string, stats prstate.ReadsStats) ui.Line {
 	if reason == ReadsReasonCallsRefused && stats.Reads > 0 {
 		return ui.Warn(
-			readsDegradedSentence(reason, stats.Refused, stats.Reads),
+			prstate.ReadsDegradedSentence(reason, stats.Refused, stats.Reads),
 			"The run log carries the refused calls and the ledger carries the envelope.")
 	}
 	return ui.Warn(
-		readsDegradedSentence(reason, stats.Refused, stats.Reads),
+		prstate.ReadsDegradedSentence(reason, stats.Refused, stats.Reads),
 		"The served read path is not serving, so the reviewer saw only the prompt. The run log carries the detail; the ledger carries the envelope.")
 }

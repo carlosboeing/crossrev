@@ -20,36 +20,35 @@ import (
 	"github.com/carlosboeing/crossrev/internal/prstate"
 )
 
-// Reads degradation reasons, one per failed check. They travel in the reads
-// envelope, the pass comment warning and the run log together.
+// Reads degradation reasons, one per failed check. The values live beside
+// the envelope that carries them (prstate); these aliases keep the leg's
+// own code naming them without the package qualifier.
 const (
-	ReadsReasonSelfTestFailed   = "self_test_failed"
-	ReadsReasonMissingHandshake = "missing_handshake"
-	ReadsReasonCallsRefused     = "calls_refused"
-	ReadsReasonFileToolUnwired  = "file_tool_unwired"
+	ReadsReasonSelfTestFailed   = prstate.ReadsReasonSelfTestFailed
+	ReadsReasonMissingHandshake = prstate.ReadsReasonMissingHandshake
+	ReadsReasonCallsRefused     = prstate.ReadsReasonCallsRefused
+	ReadsReasonFileToolUnwired  = prstate.ReadsReasonFileToolUnwired
 )
 
 // ReadsReasonReviewCommand is the envelope reason for a call the tripwire
 // discarded. A command event halts rather than degrades, and the reason
 // names the failure every surface reports it under.
-const ReadsReasonReviewCommand = "review_leg_ran_command"
+const ReadsReasonReviewCommand = prstate.ReadsReasonReviewCommand
 
 // AssessReads maps one call's reads health onto the policy: the reason to
-// record, and whether the leg halts. A refused call, a missing handshake
-// and a failed self-test degrade where the policy says degrade and stop it
-// where it says halt. A healthy call leaves no reason and never halts,
-// whatever the policy.
+// record, and whether the leg halts. A refused call and a missing
+// handshake degrade where the policy says degrade and stop the leg where
+// it says halt. A healthy call leaves no reason and never halts, whatever
+// the policy. A failed self-test never reaches this check: runPrompt
+// decides its disposition inline, before the call starts.
 //
 // The handshake is required on every served call, whatever the call count:
 // reads and refusals only arrive after initialize and tools/list, so a
 // served child that never reached the server leaves an empty log with zero
 // calls — exactly the failure the post-call handshake exists to catch. A
 // supplied call has no server, so its empty log is healthy.
-func AssessReads(onUnavailable string, effective harness.ReadMode, stats prstate.ReadsStats, selfTestErr error) (reason string, halt bool) {
+func AssessReads(onUnavailable string, effective harness.ReadMode, stats prstate.ReadsStats) (reason string, halt bool) {
 	halt = onUnavailable == "halt"
-	if selfTestErr != nil {
-		return ReadsReasonSelfTestFailed, halt
-	}
 	if effective == harness.ReadModeServed && !stats.Handshake {
 		return ReadsReasonMissingHandshake, halt
 	}

@@ -19,6 +19,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/carlosboeing/crossrev/internal/core"
 )
 
 // ReadsEnvelope is the reads account of one pass: the modes, the reason,
@@ -37,6 +39,61 @@ type ReadsEnvelope struct {
 // readsEnvelopeKeys is the exact key set a reads envelope carries.
 var readsEnvelopeKeys = []string{
 	"declared_mode", "effective_mode", "reason", "calls", "reads", "bytes", "refused", "budget_exhausted",
+}
+
+// Reads degradation reasons, one per failed check. They travel in the
+// reads envelope, the pass comment warning and the run log together. They
+// live here, beside the envelope that carries them, so both the review leg
+// that records them and the resolve leg that re-renders them name the same
+// values.
+const (
+	ReadsReasonSelfTestFailed   = "self_test_failed"
+	ReadsReasonMissingHandshake = "missing_handshake"
+	ReadsReasonCallsRefused     = "calls_refused"
+	ReadsReasonFileToolUnwired  = "file_tool_unwired"
+)
+
+// ReadsReasonReviewCommand is the envelope reason for a call the tripwire
+// discarded. A command event halts rather than degrades, and the reason
+// names the failure every surface reports it under.
+const ReadsReasonReviewCommand = "review_leg_ran_command"
+
+// ReadsDegradedSentence words one degradation for a person: the reason,
+// with refused and served counts for calls_refused beside served reads.
+// The terminal warning and the posted summary share it, so both halves of
+// the pass say the same thing.
+func ReadsDegradedSentence(reason string, refused, served int) string {
+	if reason == ReadsReasonCallsRefused && served > 0 {
+		return fmt.Sprintf("Served reads degraded (%s: %d refused, %d served): the refused reads were judged on the supplied content alone; the rest the reviewer read through the served tool.",
+			reason, refused, served)
+	}
+	return "Served reads degraded (" + reason + "): this review judged the supplied content alone."
+}
+
+// ReadsDegradedComment renders the posted half of a reads degradation
+// from the marker's reads envelope: the reason, with refused and served
+// counts for calls_refused beside served reads. The sentence is the
+// terminal warning's own (ReadsDegradedSentence), so both halves of the
+// pass say the same thing. A halted pass carries no line: its call
+// published nothing, so the supplied-content sentence would state
+// something false, and its blocked alert already names the halt. The
+// tripwire reason carries none either: a command event is not a
+// degradation, and its refusal names it.
+func ReadsDegradedComment(marker Marker) string {
+	if len(marker.Reads) == 0 {
+		return ""
+	}
+	envelope, err := DecodeReadsEnvelope(marker.Reads)
+	if err != nil || envelope.Reason == "" {
+		return ""
+	}
+	if envelope.Reason == ReadsReasonReviewCommand {
+		return ""
+	}
+	if verdict, ok := marker.Verdict.Get(); ok && verdict == string(core.VerdictBlocked) {
+		return ""
+	}
+	return ReadsDegradedSentence(envelope.Reason, envelope.Refused, envelope.Reads) + "\n\n"
 }
 
 // NewReadsEnvelope builds the envelope the legs record.
