@@ -54,7 +54,7 @@ const helpBlock = `
 
   OPTIONS on cycle and review
     --input-policy hunks_first|whole_when_fits
-                            Override review.input_policy for this run
+                             Override review.input_policy for this run
 
   OPTIONS on doctor
     --level core|harness     Which preflight to run. core is git and gh;
