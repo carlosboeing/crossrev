@@ -82,13 +82,13 @@ func readsPolicy(loaded Context) string {
 	return "degrade"
 }
 
-// serveSession is the read-server invocation for one call: the crossrev
-// binary re-executed over stdio, reading between the pass's own revisions
-// and appending this call's log beside the prompt and schema files. Each
-// server process is per call, so the call is granted the leg's remaining
-// allowance: the contract caps bind the whole pass, and a spent leg passes
-// an explicit zero the server refuses as exhaustion rather than resetting
-// to the defaults.
+// serveSession is the read-server invocation for one model attempt: the
+// crossrev binary re-executed over stdio, reading between the pass's own
+// revisions and appending this call's log beside the prompt and schema
+// files. Each server process is per attempt, so the attempt is granted
+// the leg's remaining allowance: the contract caps bind the whole pass,
+// and a spent leg passes an explicit zero the server refuses as exhaustion
+// rather than resetting to the defaults.
 func serveSession(workdir, tmp string, base, head core.Revision, call int, legReads int, legBytes int64) (command string, session readserve.Session, err error) {
 	exe, err := os.Executable()
 	if err != nil {

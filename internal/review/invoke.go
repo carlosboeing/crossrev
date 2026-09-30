@@ -486,6 +486,20 @@ func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settin
 			}
 			l.Log.Event("invoke", fmt.Sprintf("harness=%s attempt=%d start", settings.harness, attempt))
 		}
+		// Every attempt spawns a fresh read server seeded from its flags,
+		// so the grant is recomputed from the remainder the recorded
+		// notes leave: a failed attempt's served reads are charged at its
+		// exit before the retry, and the retry must not regain them. The
+		// self-test, the degrade decision and the version gates above run
+		// once per call, not once per attempt.
+		if inv.Serve != nil {
+			remainingReads, remainingBytes := l.readsRemaining()
+			command, session, err := serveSession(workdir, tmp, loaded.PR.BaseRefOid, loaded.PR.HeadRefOid, call, remainingReads, remainingBytes)
+			if err != nil {
+				return harness.Envelope{}, nil, outMsgs, err
+			}
+			inv.Serve = &harness.ServeConfig{Command: command, Args: session.Args()}
+		}
 		spec, err := adapter.Spec(inv)
 		if err != nil {
 			return harness.Envelope{}, nil, outMsgs, err

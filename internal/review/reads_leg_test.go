@@ -1293,6 +1293,56 @@ func TestSecondBatchReceivesTheRemainingAllowance(t *testing.T) {
 	}
 }
 
+// A retried attempt is granted the remainder the failed attempt left, not
+// the allowance computed before the first attempt: every attempt spawns a
+// fresh read server seeded from its flags, so a stale grant would let one
+// call retry past the leg caps.
+func TestRetryReceivesTheRemainingAllowance(t *testing.T) {
+	e := newEnv(t)
+	writeRequiredHead(e, "a.go", "package a\n")
+	var granted [][]string
+	var children int
+	e.runner.onSpec = func(spec exec.Spec) {
+		children++
+		granted = append(granted, servedArgs(t, spec))
+		lines := []string{
+			`{"event":"start"}`,
+			`{"event":"initialize"}`,
+			`{"event":"tools_list"}`,
+		}
+		if children == 1 {
+			lines = append(lines,
+				`{"event":"read","payload":{"path":"a.go","revision":"head","start_line":1,"end_line":2,"bytes":11}}`,
+				`{"event":"read","payload":{"path":"a.go","revision":"head","start_line":3,"end_line":4,"bytes":11}}`,
+				`{"event":"read","payload":{"path":"a.go","revision":"head","start_line":5,"end_line":6,"bytes":11}}`,
+			)
+		}
+		lines = append(lines, `{"event":"end"}`)
+		serveChildSession(t, spec, lines...)
+	}
+	e.runner.script = []exec.Result{
+		{ExitCode: 1, Stderr: []byte("UNAVAILABLE (code 503): Deadline expired")},
+		{ExitCode: 0, Stdout: claudeStdout(batchAnswerFor(t, []string{"a.go"}))},
+	}
+
+	got := runLeg(t, e, e.request(t))
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
+	if e.runner.calls != 2 {
+		t.Fatalf("harness calls = %d, want 2 (one transient retry)", e.runner.calls)
+	}
+	if len(granted) != 2 {
+		t.Fatalf("granted sessions = %d, want 2", len(granted))
+	}
+	if value, ok := servedFlag(granted[1], "--per-leg-reads"); !ok || value != "197" {
+		t.Errorf("retry --per-leg-reads = %q, want 197 after three served reads", value)
+	}
+	if value, ok := servedFlag(granted[1], "--per-leg-bytes"); !ok || value != "1048543" {
+		t.Errorf("retry --per-leg-bytes = %q, want 1048543 after 33 served bytes", value)
+	}
+}
+
 func TestReviewTripwireHaltsTheLeg(t *testing.T) {
 	for _, policy := range []string{"", "version: 2\npolicy:\n  on_reads_unavailable: halt\n"} {
 		e := newEnv(t)
