@@ -48,6 +48,7 @@
 # Usage:
 #   bash tests/eval/run-loop.sh --manifest <path> --bin <path>
 #     [--results-dir <dir>] [--live] [--assignments <file>]
+#     [--input-policy <hunks_first|whole_when_fits>]
 #
 # Prior art: the fixture layout and the stub-env snapshot below follow
 # tests/harness.sh (the pushInsteadOf origin, the per-case route table and
@@ -63,7 +64,7 @@ EVAL_HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 EVAL_ROOT="$(cd "$EVAL_HERE/../.." && pwd)"
 EVAL_STUB_DIR="$EVAL_ROOT/tests/stub"
 
-MANIFEST=""; RESULTS_DIR=""; BIN=""; LIVE=0; ASSIGNMENTS=""
+MANIFEST=""; RESULTS_DIR=""; BIN=""; LIVE=0; ASSIGNMENTS=""; INPUT_POLICY=""
 while (( $# )); do
   case "$1" in
     --manifest) [[ $# -ge 2 ]] || { printf 'run-loop: --manifest needs a value\n' >&2; exit 2; }
@@ -75,8 +76,10 @@ while (( $# )); do
     --live) LIVE=1; shift ;;
     --assignments) [[ $# -ge 2 ]] || { printf 'run-loop: --assignments needs a value\n' >&2; exit 2; }
       ASSIGNMENTS="$2"; shift 2 ;;
+    --input-policy) [[ $# -ge 2 ]] || { printf 'run-loop: --input-policy needs a value\n' >&2; exit 2; }
+      INPUT_POLICY="$2"; shift 2 ;;
     -h|--help)
-      printf 'Usage: run-loop.sh --manifest <path> --bin <path> [--results-dir <dir>] [--live] [--assignments <file>]\n'
+      printf 'Usage: run-loop.sh --manifest <path> --bin <path> [--results-dir <dir>] [--live] [--assignments <file>] [--input-policy <hunks_first|whole_when_fits>]\n'
       exit 0 ;;
     *) printf 'run-loop: unknown option: %s\n' "$1" >&2; exit 2 ;;
   esac
@@ -87,6 +90,12 @@ done
 [[ -n "$BIN" ]] || { printf 'run-loop: --bin is required\n' >&2; exit 2; }
 [[ "$BIN" = /* ]] || { printf 'run-loop: --bin must be an absolute path: %s\n' "$BIN" >&2; exit 2; }
 [[ -x "$BIN" ]] || { printf 'run-loop: --bin is not executable: %s\n' "$BIN" >&2; exit 2; }
+if [[ -n "$INPUT_POLICY" ]]; then
+  case "$INPUT_POLICY" in
+    hunks_first|whole_when_fits) ;;
+    *) printf 'run-loop: --input-policy must be hunks_first or whole_when_fits: %s\n' "$INPUT_POLICY" >&2; exit 2 ;;
+  esac
+fi
 
 if (( LIVE )) && [[ -z "$ASSIGNMENTS" ]]; then
   printf 'run-loop: a live run needs --assignments <file> recording the case, arm, reviewer and resolver assignments; refusing\n' >&2
@@ -174,6 +183,14 @@ cp "$MANIFEST" "$RESULTS_DIR/manifest.json"
 if [[ -n "$ASSIGNMENTS" ]]; then
   cp "$ASSIGNMENTS" "$RESULTS_DIR/assignments.json"
 fi
+# The review input policy this run committed on every synthetic base
+# revision, beside the other run-level inputs. `default` means the flag was
+# absent and the config carries no review section at all.
+if [[ -n "$INPUT_POLICY" ]]; then
+  printf '%s\n' "$INPUT_POLICY" >"$RESULTS_DIR/input-policy.txt"
+else
+  printf 'default\n' >"$RESULTS_DIR/input-policy.txt"
+fi
 
 printf 'run-loop: %d case(s), repo %s, pr %s, results %s\n' "$ncases" "$REPO" "$PR" "$RESULTS_DIR"
 
@@ -219,7 +236,10 @@ WRAP
 # The uniform eval config committed on every synthetic base revision:
 # explicit model pins, marker coverage, six passes, no backlog sink, and a
 # medium floor. Six rather than the usual three so a slow convergence still
-# terminates inside the loop instead of at the policy bound.
+# terminates inside the loop instead of at the policy bound. With
+# --input-policy the config gains a review section naming it; without the
+# flag the output below is byte-identical to before, so earlier results stay
+# comparable.
 eval_uniform_config() {
   cat <<EOF
 version: 2
@@ -237,6 +257,11 @@ reviewer:
 resolver:
   harness: $RESOLVER_HARNESS
   model: $RESOLVER_MODEL
+EOF
+  if [[ -n "$INPUT_POLICY" ]]; then
+    printf 'review:\n  input_policy: %s\n' "$INPUT_POLICY"
+  fi
+  cat <<EOF
 backlog:
   destination: none
 EOF
