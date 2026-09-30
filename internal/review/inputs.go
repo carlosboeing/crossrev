@@ -28,14 +28,15 @@ const (
 
 // Request is one review-leg invocation.
 type Request struct {
-	PR              int
-	Repo            core.Slug
-	Trigger         Trigger
-	Continuation    bool
-	HarnessOverride string
-	ModelOverride   string
-	EffortOverride  string
-	Author          string
+	PR                  int
+	Repo                core.Slug
+	Trigger             Trigger
+	Continuation        bool
+	HarnessOverride     string
+	ModelOverride       string
+	EffortOverride      string
+	InputPolicyOverride string
+	Author              string
 	// Workdir overrides the pinned worktree: empty pins a clean detached
 	// worktree at the pull request head, set runs the harness there after
 	// proving its HEAD is the head.

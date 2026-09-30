@@ -60,50 +60,50 @@
       "name": "a leading dash is the default cycle, and the options are the cycle's own",
       "args": ["--pr", "42"],
       "command": "cycle",
-      "request": {"PR": "42", "Repo": "", "Trigger": "human", "HarnessOverride": "", "NoTips": "false", "KeepTranscripts": "false", "ModelOverride": "", "EffortOverride": ""}
+      "request": {"PR": "42", "Repo": "", "Trigger": "human", "HarnessOverride": "", "NoTips": "false", "KeepTranscripts": "false", "ModelOverride": "", "EffortOverride": "", "InputPolicyOverride": ""}
     },
     {
       "name": "cycle named explicitly",
       "args": ["cycle", "--pr", "42"],
       "command": "cycle",
-      "request": {"PR": "42", "Repo": "", "Trigger": "human", "HarnessOverride": "", "NoTips": "false", "KeepTranscripts": "false", "ModelOverride": "", "EffortOverride": ""}
+      "request": {"PR": "42", "Repo": "", "Trigger": "human", "HarnessOverride": "", "NoTips": "false", "KeepTranscripts": "false", "ModelOverride": "", "EffortOverride": "", "InputPolicyOverride": ""}
     },
     {
       "name": "cycle with every flag it takes",
-      "args": ["cycle", "--pr", "42", "--repo", "owner/name", "--harness", "codex", "--model", "cli-model", "--effort", "high", "--trigger", "automatic", "--no-tips", "--keep-transcripts"],
+      "args": ["cycle", "--pr", "42", "--repo", "owner/name", "--harness", "codex", "--model", "cli-model", "--effort", "high", "--trigger", "automatic", "--no-tips", "--keep-transcripts", "--input-policy", "whole_when_fits"],
       "command": "cycle",
-      "request": {"PR": "42", "Repo": "owner/name", "Trigger": "automatic", "HarnessOverride": "codex", "NoTips": "true", "KeepTranscripts": "true", "ModelOverride": "cli-model", "EffortOverride": "high"}
+      "request": {"PR": "42", "Repo": "owner/name", "Trigger": "automatic", "HarnessOverride": "codex", "NoTips": "true", "KeepTranscripts": "true", "ModelOverride": "cli-model", "EffortOverride": "high", "InputPolicyOverride": "whole_when_fits"}
     },
     {
       "name": "cycle by the dash rule with every flag it takes",
-      "args": ["--pr", "42", "--repo", "owner/name", "--harness", "codex", "--model", "cli-model", "--effort", "high", "--trigger", "automatic", "--no-tips", "--keep-transcripts"],
+      "args": ["--pr", "42", "--repo", "owner/name", "--harness", "codex", "--model", "cli-model", "--effort", "high", "--trigger", "automatic", "--no-tips", "--keep-transcripts", "--input-policy", "whole_when_fits"],
       "command": "cycle",
-      "request": {"PR": "42", "Repo": "owner/name", "Trigger": "automatic", "HarnessOverride": "codex", "NoTips": "true", "KeepTranscripts": "true", "ModelOverride": "cli-model", "EffortOverride": "high"}
+      "request": {"PR": "42", "Repo": "owner/name", "Trigger": "automatic", "HarnessOverride": "codex", "NoTips": "true", "KeepTranscripts": "true", "ModelOverride": "cli-model", "EffortOverride": "high", "InputPolicyOverride": "whole_when_fits"}
     },
     {
       "name": "the last --pr wins",
       "args": ["cycle", "--pr", "1", "--pr", "42"],
       "command": "cycle",
-      "request": {"PR": "42", "Repo": "", "Trigger": "human", "HarnessOverride": "", "NoTips": "false", "KeepTranscripts": "false", "ModelOverride": "", "EffortOverride": ""}
+      "request": {"PR": "42", "Repo": "", "Trigger": "human", "HarnessOverride": "", "NoTips": "false", "KeepTranscripts": "false", "ModelOverride": "", "EffortOverride": "", "InputPolicyOverride": ""}
     },
 
     {
       "name": "review with the number alone",
       "args": ["review", "--pr", "42"],
       "command": "review",
-      "request": {"PR": "42", "Repo": "", "Trigger": "human", "HarnessOverride": "", "Continuation": "false", "NoTips": "false", "KeepTranscripts": "false", "ModelOverride": "", "EffortOverride": ""}
+      "request": {"PR": "42", "Repo": "", "Trigger": "human", "HarnessOverride": "", "Continuation": "false", "NoTips": "false", "KeepTranscripts": "false", "ModelOverride": "", "EffortOverride": "", "InputPolicyOverride": ""}
     },
     {
       "name": "review with every flag it takes",
-      "args": ["review", "--pr", "42", "--repo", "owner/name", "--harness", "codex", "--model", "cli-model", "--effort", "high", "--trigger", "automatic", "--continuation", "--no-tips", "--keep-transcripts"],
+      "args": ["review", "--pr", "42", "--repo", "owner/name", "--harness", "codex", "--model", "cli-model", "--effort", "high", "--trigger", "automatic", "--continuation", "--no-tips", "--keep-transcripts", "--input-policy", "whole_when_fits"],
       "command": "review",
-      "request": {"PR": "42", "Repo": "owner/name", "Trigger": "automatic", "HarnessOverride": "codex", "Continuation": "true", "NoTips": "true", "KeepTranscripts": "true", "ModelOverride": "cli-model", "EffortOverride": "high"}
+      "request": {"PR": "42", "Repo": "owner/name", "Trigger": "automatic", "HarnessOverride": "codex", "Continuation": "true", "NoTips": "true", "KeepTranscripts": "true", "ModelOverride": "cli-model", "EffortOverride": "high", "InputPolicyOverride": "whole_when_fits"}
     },
     {
       "name": "review accepts and ignores --pass",
       "args": ["review", "--pr", "42", "--pass", "3"],
       "command": "review",
-      "request": {"PR": "42", "Repo": "", "Trigger": "human", "HarnessOverride": "", "Continuation": "false", "NoTips": "false", "KeepTranscripts": "false", "ModelOverride": "", "EffortOverride": ""}
+      "request": {"PR": "42", "Repo": "", "Trigger": "human", "HarnessOverride": "", "Continuation": "false", "NoTips": "false", "KeepTranscripts": "false", "ModelOverride": "", "EffortOverride": "", "InputPolicyOverride": ""}
     },
 
     {
@@ -334,7 +334,7 @@
       "name": "an unknown option for review names the harnesses",
       "args": ["review", "--bogus"],
       "reason": "unknown option for review: --bogus",
-      "action": "Usage: crossrev review --pr <number> [--harness <one of: claude|codex|agy|grok|opencode>] [--model <id>] [--effort <level>] [--no-tips] [--keep-transcripts]"
+      "action": "Usage: crossrev review --pr <number> [--harness <one of: claude|codex|agy|grok|opencode>] [--model <id>] [--effort <level>] [--input-policy hunks_first|whole_when_fits] [--no-tips] [--keep-transcripts]"
     },
     {
       "name": "an unknown option for resolve names the harnesses",
@@ -346,25 +346,25 @@
       "name": "an unknown option for cycle",
       "args": ["cycle", "--bogus"],
       "reason": "unknown option for cycle: --bogus",
-      "action": "Usage: crossrev cycle --pr <number> [--trigger human|automatic] [--model <id>] [--effort <level>] [--no-tips] [--keep-transcripts]"
+      "action": "Usage: crossrev cycle --pr <number> [--trigger human|automatic] [--model <id>] [--effort <level>] [--input-policy hunks_first|whole_when_fits] [--no-tips] [--keep-transcripts]"
     },
     {
       "name": "an unknown leading option is the cycle's, not an unknown command",
       "args": ["--bogus"],
       "reason": "unknown option for cycle: --bogus",
-      "action": "Usage: crossrev cycle --pr <number> [--trigger human|automatic] [--model <id>] [--effort <level>] [--no-tips] [--keep-transcripts]"
+      "action": "Usage: crossrev cycle --pr <number> [--trigger human|automatic] [--model <id>] [--effort <level>] [--input-policy hunks_first|whole_when_fits] [--no-tips] [--keep-transcripts]"
     },
     {
       "name": "cycle does not take --continuation",
       "args": ["cycle", "--pr", "3", "--continuation"],
       "reason": "unknown option for cycle: --continuation",
-      "action": "Usage: crossrev cycle --pr <number> [--trigger human|automatic] [--model <id>] [--effort <level>] [--no-tips] [--keep-transcripts]"
+      "action": "Usage: crossrev cycle --pr <number> [--trigger human|automatic] [--model <id>] [--effort <level>] [--input-policy hunks_first|whole_when_fits] [--no-tips] [--keep-transcripts]"
     },
     {
       "name": "cycle does not take --pass",
       "args": ["cycle", "--pr", "3", "--pass", "2"],
       "reason": "unknown option for cycle: --pass",
-      "action": "Usage: crossrev cycle --pr <number> [--trigger human|automatic] [--model <id>] [--effort <level>] [--no-tips] [--keep-transcripts]"
+      "action": "Usage: crossrev cycle --pr <number> [--trigger human|automatic] [--model <id>] [--effort <level>] [--input-policy hunks_first|whole_when_fits] [--no-tips] [--keep-transcripts]"
     },
     {
       "name": "resolve does not take --continuation",
@@ -604,6 +604,94 @@
       "args": ["watchdog", "--timeout", "abc"],
       "command": "watchdog",
       "request": {"Repo": "", "Timeout": "abc"}
+    },
+    {
+      "name": "review accepts input policy hunks_first",
+      "args": ["review", "--pr", "42", "--input-policy", "hunks_first"],
+      "command": "review",
+      "request": {"PR": "42", "Repo": "", "Trigger": "human", "HarnessOverride": "", "Continuation": "false", "NoTips": "false", "KeepTranscripts": "false", "ModelOverride": "", "EffortOverride": "", "InputPolicyOverride": "hunks_first"}
+    },
+    {
+      "name": "review accepts input policy whole_when_fits",
+      "args": ["review", "--pr", "42", "--input-policy", "whole_when_fits"],
+      "command": "review",
+      "request": {"PR": "42", "Repo": "", "Trigger": "human", "HarnessOverride": "", "Continuation": "false", "NoTips": "false", "KeepTranscripts": "false", "ModelOverride": "", "EffortOverride": "", "InputPolicyOverride": "whole_when_fits"}
+    },
+    {
+      "name": "review refuses input policy 'whole'",
+      "args": ["review", "--pr", "42", "--input-policy", "whole"],
+      "reason": "unknown review input policy: whole",
+      "action": "Use --input-policy hunks_first or --input-policy whole_when_fits."
+    },
+    {
+      "name": "review refuses input policy ''",
+      "args": ["review", "--pr", "42", "--input-policy", ""],
+      "reason": "unknown review input policy: ",
+      "action": "Use --input-policy hunks_first or --input-policy whole_when_fits."
+    },
+    {
+      "name": "review refuses input policy 'HUNKS_FIRST'",
+      "args": ["review", "--pr", "42", "--input-policy", "HUNKS_FIRST"],
+      "reason": "unknown review input policy: HUNKS_FIRST",
+      "action": "Use --input-policy hunks_first or --input-policy whole_when_fits."
+    },
+    {
+      "name": "review input policy needs a value",
+      "args": ["review", "--pr", "42", "--input-policy"],
+      "silent": true
+    },
+    {
+      "name": "review last input policy wins",
+      "args": ["review", "--pr", "42", "--input-policy", "whole_when_fits", "--input-policy", "hunks_first"],
+      "command": "review",
+      "request": {"PR": "42", "Repo": "", "Trigger": "human", "HarnessOverride": "", "Continuation": "false", "NoTips": "false", "KeepTranscripts": "false", "ModelOverride": "", "EffortOverride": "", "InputPolicyOverride": "hunks_first"}
+    },
+    {
+      "name": "cycle accepts input policy hunks_first",
+      "args": ["cycle", "--pr", "42", "--input-policy", "hunks_first"],
+      "command": "cycle",
+      "request": {"PR": "42", "Repo": "", "Trigger": "human", "HarnessOverride": "", "NoTips": "false", "KeepTranscripts": "false", "ModelOverride": "", "EffortOverride": "", "InputPolicyOverride": "hunks_first"}
+    },
+    {
+      "name": "cycle accepts input policy whole_when_fits",
+      "args": ["cycle", "--pr", "42", "--input-policy", "whole_when_fits"],
+      "command": "cycle",
+      "request": {"PR": "42", "Repo": "", "Trigger": "human", "HarnessOverride": "", "NoTips": "false", "KeepTranscripts": "false", "ModelOverride": "", "EffortOverride": "", "InputPolicyOverride": "whole_when_fits"}
+    },
+    {
+      "name": "cycle refuses input policy 'whole'",
+      "args": ["cycle", "--pr", "42", "--input-policy", "whole"],
+      "reason": "unknown cycle input policy: whole",
+      "action": "Use --input-policy hunks_first or --input-policy whole_when_fits."
+    },
+    {
+      "name": "cycle refuses input policy ''",
+      "args": ["cycle", "--pr", "42", "--input-policy", ""],
+      "reason": "unknown cycle input policy: ",
+      "action": "Use --input-policy hunks_first or --input-policy whole_when_fits."
+    },
+    {
+      "name": "cycle refuses input policy 'HUNKS_FIRST'",
+      "args": ["cycle", "--pr", "42", "--input-policy", "HUNKS_FIRST"],
+      "reason": "unknown cycle input policy: HUNKS_FIRST",
+      "action": "Use --input-policy hunks_first or --input-policy whole_when_fits."
+    },
+    {
+      "name": "cycle input policy needs a value",
+      "args": ["cycle", "--pr", "42", "--input-policy"],
+      "silent": true
+    },
+    {
+      "name": "cycle last input policy wins",
+      "args": ["cycle", "--pr", "42", "--input-policy", "whole_when_fits", "--input-policy", "hunks_first"],
+      "command": "cycle",
+      "request": {"PR": "42", "Repo": "", "Trigger": "human", "HarnessOverride": "", "NoTips": "false", "KeepTranscripts": "false", "ModelOverride": "", "EffortOverride": "", "InputPolicyOverride": "hunks_first"}
+    },
+    {
+      "name": "resolve refuses input policy",
+      "args": ["resolve", "--pr", "42", "--input-policy", "hunks_first"],
+      "reason": "unknown option for resolve: --input-policy",
+      "action": "Usage: crossrev resolve --pr <number> [--harness <one of: claude|codex|agy|grok|opencode>] [--model <id>] [--effort <level>] [--trigger human|automatic] [--keep-transcripts]"
     }
   ]
 }

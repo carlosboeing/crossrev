@@ -291,6 +291,12 @@ func (l *Log) Call(call, promptBytes, suppliedBytes int, fresh, cached, output i
 // requested model and effort cannot be read back from the run log. Unset
 // halves read as dashes, the way Call renders an unnamed model.
 func (l *Log) Settings(harness, model, effort string) {
+	l.ReviewSettings(harness, model, effort, "", "")
+}
+
+// ReviewSettings also records the effective review input policy and its source.
+// An empty policy leaves the settings line without review fields for resolve.
+func (l *Log) ReviewSettings(harness, model, effort, inputPolicy, source string) {
 	if l == nil {
 		return
 	}
@@ -300,5 +306,9 @@ func (l *Log) Settings(harness, model, effort string) {
 	if effort == "" {
 		effort = "-"
 	}
-	l.Event("settings", "harness="+harness+" model="+model+" effort="+effort)
+	detail := "harness=" + harness + " model=" + model + " effort=" + effort
+	if inputPolicy != "" {
+		detail += " input_policy=" + inputPolicy + " input_policy_source=" + source
+	}
+	l.Event("settings", detail)
 }

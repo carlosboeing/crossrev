@@ -161,7 +161,7 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 		return fmt.Errorf("no input budget for harness %q", settings.harness)
 	}
 	var whole *WholePolicy
-	if loaded.Config.ReviewInputPolicy() == config.ReviewInputWholeWhenFits {
+	if settings.inputPolicy == config.ReviewInputWholeWhenFits {
 		whole = &WholePolicy{}
 	}
 	sharedBytes, _ := shared.render(nil, scope.Base, scope.Head, true, whole)

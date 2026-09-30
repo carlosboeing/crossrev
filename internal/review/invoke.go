@@ -25,10 +25,12 @@ import (
 )
 
 type legSettings struct {
-	harness  string
-	model    string
-	effort   string
-	endpoint string
+	harness           string
+	model             string
+	effort            string
+	endpoint          string
+	inputPolicy       string
+	inputPolicySource string
 }
 
 func (l *Leg) settings(req Request, loaded Context) (legSettings, ui.Line, error) {
@@ -39,10 +41,19 @@ func (l *Leg) settings(req Request, loaded Context) (legSettings, ui.Line, error
 	// always names a harness.
 	reviewer := loaded.Config.Reviewers()[0]
 	s := legSettings{
-		harness:  reviewer.Harness,
-		model:    reviewer.Model,
-		effort:   reviewer.Effort,
-		endpoint: reviewer.Endpoint,
+		harness:           reviewer.Harness,
+		model:             reviewer.Model,
+		effort:            reviewer.Effort,
+		endpoint:          reviewer.Endpoint,
+		inputPolicy:       loaded.Config.ReviewInputPolicy(),
+		inputPolicySource: "default",
+	}
+	if loaded.Config.Get(".review.input_policy") != "" {
+		s.inputPolicySource = "config"
+	}
+	if req.InputPolicyOverride != "" {
+		s.inputPolicy = req.InputPolicyOverride
+		s.inputPolicySource = "flag"
 	}
 	if req.HarnessOverride != "" {
 		s.harness = req.HarnessOverride
