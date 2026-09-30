@@ -106,7 +106,7 @@ func TestCodexReviewServedDisablesTheShellAndServesMCP(t *testing.T) {
 	if !hasConfigPair(spec.Args, "mcp_servers.crossrev.command", "/bin/crossrev") {
 		t.Errorf("a served codex review names the served command; got %v", spec.Args)
 	}
-	if !hasConfigPair(spec.Args, "default_tools_approval_mode", "approve") {
+	if !hasConfigPair(spec.Args, "mcp_servers.crossrev.default_tools_approval_mode", "approve") {
 		t.Errorf("a served codex review approves the served tool; got %v", spec.Args)
 	}
 	found := false
@@ -149,6 +149,9 @@ func TestCodexResolveServedCarriesMCP(t *testing.T) {
 	}
 	if !hasConfigPair(spec.Args, "mcp_servers.crossrev.command", "/bin/crossrev") {
 		t.Errorf("a served codex resolve names the served command; got %v", spec.Args)
+	}
+	if !hasConfigPair(spec.Args, "mcp_servers.crossrev.default_tools_approval_mode", "approve") {
+		t.Errorf("a served codex resolve approves the served tool; got %v", spec.Args)
 	}
 	if !hasFlagPair(spec.Args, "--sandbox", "workspace-write") {
 		t.Errorf("a served codex resolve stays workspace-writable; got %v", spec.Args)

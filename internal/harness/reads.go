@@ -150,13 +150,15 @@ func (s *ServeConfig) TOMLArgs() string {
 }
 
 // CodexConfigArgs answers the `-c` pairs wiring the served tool into a codex
-// leg: the server command, its args array, and the approval mode that lets
-// the model call the tool without a headless prompt it cannot answer.
+// leg: the server command, its args array, and the per-server approval mode
+// that lets the model call the tool without a headless prompt it cannot
+// answer. The approval key is per server, not top level: a top-level key
+// approves nothing and leaves read_file unapproved on a headless leg.
 func (s *ServeConfig) CodexConfigArgs() []string {
 	return []string{
 		"-c", "mcp_servers.crossrev.command=" + tomlQuote(s.Command),
 		"-c", "mcp_servers.crossrev.args=" + s.TOMLArgs(),
-		"-c", `default_tools_approval_mode="approve"`,
+		"-c", "mcp_servers.crossrev.default_tools_approval_mode=" + tomlQuote("approve"),
 	}
 }
 
