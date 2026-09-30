@@ -48,6 +48,12 @@ func TestReadsDegradeOnABrokenTool(t *testing.T) {
 	if envelope.DeclaredMode != "served" || envelope.EffectiveMode != "supplied" || envelope.Reason != "self_test_failed" {
 		t.Errorf("envelope = %+v, want served-to-supplied with self_test_failed", envelope)
 	}
+	// The reason reaches the run log beside the pass comment and the
+	// ledger: deleting the self-test event must fail this test the way
+	// deleting the warning or the envelope does.
+	if log := readRunLog(t, e); !strings.Contains(log, "reads self-test failed") {
+		t.Errorf("run.log carries no reads self-test record:\n%s", log)
+	}
 }
 
 // A call that fails its self-test and degrades to supplied is sent the
@@ -454,6 +460,12 @@ func TestServedChildSessionRefusalsDegrade(t *testing.T) {
 	}
 	if envelope.Reason != "calls_refused" || envelope.Refused != 1 {
 		t.Errorf("envelope = %+v, want one refused call", envelope)
+	}
+	// The reason reaches the run log beside the pass comment and the
+	// ledger: deleting the degrade event must fail this test the way
+	// deleting the warning or the envelope does.
+	if log := readRunLog(t, e); !strings.Contains(log, "reads degraded (calls_refused") {
+		t.Errorf("run.log carries no reads degrade record:\n%s", log)
 	}
 }
 
