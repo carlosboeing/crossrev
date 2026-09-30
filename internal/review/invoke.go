@@ -461,8 +461,20 @@ func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settin
 		// different findings depending on whether a run directory exists
 		// (lib/adapters/claude.sh:126-130, :148-154).
 		l.Log.WriteTranscript(transcript, res.Stdout, res.Stderr)
-		if l.Log != nil && l.Log.Dir() != "" {
-			copyReadLog(l.Log, tmp, call)
+		// archiveReadLog files one attempt's server log beside its
+		// transcript and drains the scratch copy, so one call's reads do
+		// not leak into the next. Every exit below archives — including
+		// the tripwire and reads-halt returns — and the post-call check
+		// always assesses before the archive: copyReadLog removes the source
+		// after a successful copy, so assessing after it would always see
+		// an empty log and the handshake and refusal checks would never
+		// fire. Assessing first also keeps retried attempts from
+		// double-counting the cumulative log — each attempt drains what
+		// it assessed.
+		archiveReadLog := func() {
+			if l.Log != nil && l.Log.Dir() != "" {
+				copyReadLog(l.Log, tmp, call)
+			}
 		}
 		// The review-leg tripwire: a command event in the harness's own
 		// output halts with review_leg_ran_command. The call is discarded
@@ -473,6 +485,7 @@ func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settin
 			if l.Log != nil {
 				l.Log.Event("tripwire", harness.RedactedCommand(command))
 			}
+			archiveReadLog()
 			l.noteReads(readsNote{declared: declared, effective: effective, reason: ReadsReasonReviewCommand})
 			return envelope, nil, outMsgs, &ui.FatalError{
 				Reason: refusal.Reason,
@@ -485,12 +498,14 @@ func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settin
 		// says halt — and a halted call publishes nothing.
 		if note, assessMsgs, assessErr := l.assessCallReads(loaded, tmp, declared, effective, readsReason); assessErr != nil {
 			l.noteReads(note)
+			archiveReadLog()
 			return envelope, nil, outMsgs, assessErr
 		} else {
 			l.noteReads(note)
 			outMsgs = append(outMsgs, assessMsgs...)
 			readsReason = note.reason
 		}
+		archiveReadLog()
 		if res.Interrupted() {
 			// A signal death is an interrupt, not a harness failure: the
 			// child was killed rather than answering badly. The refusal
