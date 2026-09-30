@@ -23,10 +23,10 @@ import (
 // Reads degradation reasons, one per failed check. They travel in the reads
 // envelope, the pass comment warning and the run log together.
 const (
-	ReadsReasonSelfTestFailed  = "self_test_failed"
+	ReadsReasonSelfTestFailed   = "self_test_failed"
 	ReadsReasonMissingHandshake = "missing_handshake"
-	ReadsReasonCallsRefused    = "calls_refused"
-	ReadsReasonFileToolUnwired = "file_tool_unwired"
+	ReadsReasonCallsRefused     = "calls_refused"
+	ReadsReasonFileToolUnwired  = "file_tool_unwired"
 )
 
 // ReadsReasonReviewCommand is the envelope reason for a call the tripwire

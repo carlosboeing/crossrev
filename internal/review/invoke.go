@@ -393,7 +393,7 @@ func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settin
 		if selfTestErr := l.runReadsSelfTest(ctx, command, session, loaded); selfTestErr != nil {
 			if readsPolicy(loaded) == "halt" {
 				l.noteReads(readsNote{declared: declared, effective: effective, reason: ReadsReasonSelfTestFailed})
-				return harness.Envelope{}, nil, outMsgs, readsUnavailableFatal(ReadsReasonSelfTestFailed+": "+selfTestErr.Error())
+				return harness.Envelope{}, nil, outMsgs, readsUnavailableFatal(ReadsReasonSelfTestFailed + ": " + selfTestErr.Error())
 			}
 			inv.ReadMode = harness.ReadModeSupplied
 			inv.Serve = nil
@@ -411,8 +411,8 @@ func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settin
 				return harness.Envelope{}, nil, outMsgs, err
 			}
 			// No call ran yet, so no reads were served: the empty stats keep
-		// the generic wording, which holds when nothing was served.
-		outMsgs = append(outMsgs, readsDegradedWarning(readsReason, prstate.ReadsStats{}))
+			// the generic wording, which holds when nothing was served.
+			outMsgs = append(outMsgs, readsDegradedWarning(readsReason, prstate.ReadsStats{}))
 			if l.Log != nil {
 				l.Log.Event("reads", "self-test failed ("+selfTestErr.Error()+"); degrading to supplied")
 			}
