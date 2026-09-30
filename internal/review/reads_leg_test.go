@@ -261,6 +261,31 @@ func TestUnverifiedGrokReviewIsRefused(t *testing.T) {
 	}
 }
 
+// A grok review leg at the shipped pin is refused with
+// review_isolation_unverified before any child starts: the empty tools
+// allowlist left the command tool callable on 1.0.5, so the verified table
+// carries no grok entry at any pin. The resolve leg is unaffected.
+func TestShippedGrokReviewIsRefused(t *testing.T) {
+	e := newEnv(t)
+	writeRequiredHead(e, "a.go", "package a\n")
+	req := e.request(t)
+	req.HarnessOverride = "grok"
+	e.runner.script = []exec.Result{
+		{ExitCode: 0, Stdout: claudeStdout(batchAnswerFor(t, []string{"a.go"}))},
+	}
+
+	got := runLeg(t, e, req)
+	if got.Err == nil {
+		t.Fatal("Run: want the shipped grok review refused")
+	}
+	if !strings.Contains(got.Err.Error(), "review_isolation_unverified") {
+		t.Errorf("err = %v, want the review_isolation_unverified name", got.Err)
+	}
+	if e.runner.calls != 0 {
+		t.Errorf("harness calls = %d, want 0 (refused before any child)", e.runner.calls)
+	}
+}
+
 // A tripwire halt still records the envelope-only marker entry the
 // Marker.Reads comment promises: the halted call publishes nothing, and
 // the envelope is the record the call happened.

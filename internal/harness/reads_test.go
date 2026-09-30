@@ -158,6 +158,56 @@ func TestCodexResolveServedCarriesMCP(t *testing.T) {
 	}
 }
 
+// The image reader is a local-file read path outside the served server, and
+// the shell denial leaves it enabled: an empty CODEX_HOME reports
+// view_image=true beside shell_tool=false on 0.159.2. Every explicit served
+// and supplied mode denies it on both legs; the zero mode keeps the legacy
+// shape every stub test pins.
+func TestCodexExplicitModesDisableViewImage(t *testing.T) {
+	adapter := codexAdapter(t)
+	serve := &harness.ServeConfig{Command: "/bin/crossrev", Args: []string{"__read-server"}}
+	tests := []struct {
+		name  string
+		write bool
+		mode  harness.ReadMode
+	}{
+		{name: "served review", write: false, mode: harness.ReadModeServed},
+		{name: "served resolve", write: true, mode: harness.ReadModeServed},
+		{name: "supplied review", write: false, mode: harness.ReadModeSupplied},
+		{name: "supplied resolve", write: true, mode: harness.ReadModeSupplied},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			inv := invocation(t, "codex", tt.write)
+			inv.ReadMode = tt.mode
+			inv.Serve = serve
+			spec, err := adapter.Spec(inv)
+			if err != nil {
+				t.Fatalf("building the spec: %v", err)
+			}
+			if !hasFlagPair(spec.Args, "--disable", "view_image") {
+				t.Errorf("an explicit %s keeps the image reader enabled; got %v", tt.name, spec.Args)
+			}
+		})
+	}
+}
+
+// The zero mode keeps the legacy argv every stub test pins: no image-reader
+// denial travels on a call that names no read mode.
+func TestCodexZeroModeOmitsTheViewImageDisable(t *testing.T) {
+	adapter := codexAdapter(t)
+	for _, write := range []bool{false, true} {
+		inv := invocation(t, "codex", write)
+		spec, err := adapter.Spec(inv)
+		if err != nil {
+			t.Fatalf("building the spec: %v", err)
+		}
+		if hasFlagPair(spec.Args, "--disable", "view_image") {
+			t.Errorf("a zero-mode leg denies the image reader; got %v", spec.Args)
+		}
+	}
+}
+
 // Codex resolves: the served tool gives the resolve leg its reads, so the
 // working resolvers list it. TestWorkingResolversOnShippedDescriptor pins
 // the whole list; this names codex because the refusal that once kept it
@@ -376,16 +426,18 @@ func TestGrokReviewTripwireSeesToolCallUpdate(t *testing.T) {
 	}
 }
 
-// A grok review leg that cannot be verified is refused before any child
-// starts, while its resolve leg is unaffected.
+// A grok review leg is refused before any child starts, while its resolve
+// leg is unaffected: the empty tools allowlist left the command tool
+// callable on the pinned version, so the verified table carries no grok
+// entry at any pin.
 func TestGrokReviewUnverifiedIsRefused(t *testing.T) {
-	if !harness.IsolationVerified("grok", "1.0.5") {
-		t.Error("the pinned grok tripwire block reads as unverified")
+	if harness.IsolationVerified("grok", "1.0.5") {
+		t.Error("the pinned grok tripwire block reads as verified")
 	}
 	if harness.IsolationVerified("grok", "9.9.9") {
 		t.Error("a moved grok pin reads as verified")
 	}
-	if !harness.IsolationVerified("codex", "0.148.0") {
+	if !harness.IsolationVerified("codex", "0.159.2") {
 		t.Error("the pinned codex served block reads as unverified")
 	}
 	if !harness.IsolationVerified("claude", "2.1.237") {

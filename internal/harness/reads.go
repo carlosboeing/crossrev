@@ -65,11 +65,13 @@ func readModeNames() string { return "served, file_tool or supplied" }
 // review_isolation_unverified before any child starts, while its resolve leg
 // is unaffected. agy and opencode carry no entry: agy emits no tool record
 // and opencode is denied through its isolation config, so there is no
-// command block to verify and doctor names the gap instead.
+// command block to verify and doctor names the gap instead. grok carries no
+// entry either: its empty tools allowlist left the command tool callable on
+// the pinned version, so every grok review is refused until a block is
+// verified and recorded again.
 var verifiedCommandBlocks = map[string]string{
-	"codex":  "0.148.0",
+	"codex":  "0.159.2",
 	"claude": "2.1.237",
-	"grok":   "1.0.5",
 }
 
 // IsolationVerified reports whether harness's command block at this pinned

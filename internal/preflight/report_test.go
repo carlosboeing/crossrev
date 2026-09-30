@@ -45,7 +45,7 @@ func TestDoctorOnAWorkingMachine(t *testing.T) {
 		"│  ✓ git 2.50.1\n" +
 		"│  ✓ gh 2.97.0 — authenticated as carlosboeing\n" +
 		"│  ✓ claude 2.1.258 — known good (2.1.237-2.1.281)\n" +
-		"│  ✓ codex 0.152.1 — unverified, outside the recorded range (0.148.0)\n" +
+		"│  ✓ codex 0.152.1 — unverified, outside the recorded range (0.159.2)\n" +
 		"│  ○ agy — not found, optional\n" +
 		"│  ○ grok — not found, optional\n" +
 		"│  ○ opencode — not found, optional\n" +
@@ -54,9 +54,9 @@ func TestDoctorOnAWorkingMachine(t *testing.T) {
 		"│  ✓ resolver — claude by subscription\n" +
 		"\n◇  Review reads\n" +
 		"  claude — served reads, command block verified at pin 2.1.237\n" +
-		"  codex — served reads, command block verified at pin 0.148.0\n" +
+		"  codex — served reads, command block verified at pin 0.159.2\n" +
 		"  agy — supplied reads, no tripwire: agy emits no tool events to watch\n" +
-		"  grok — supplied reads, tripwire verified at pin 1.0.5\n" +
+		"  grok — supplied reads, tripwire UNVERIFIED at pin 1.0.5 (review_isolation_unverified)\n" +
 		"  opencode — supplied reads, no tripwire: the five read tools are denied through the isolation config with no command record to watch\n" +
 		"\n◇  Coverage ledger\n" +
 		"│  store auto (the default): tries git refs first, and falls back to the marker comment when a ref write is refused\n" +

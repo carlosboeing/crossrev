@@ -75,11 +75,11 @@ func (a *Codex) Spec(inv Invocation) (exec.Spec, error) {
 	// arbitrary commands.
 	//
 	// A resolve leg edits without running commands: workspace-write keeps file
-	// writes while --disable removes the shell. shell_tool is the tool itself
-	// and unified_exec is the runner behind it; denying one without the other
-	// leaves the other to run the command. --disable is repeatable
-	// (`codex exec --help`), and --sandbox workspace-write is the same grant
-	// the leg has always had.
+	// writes while --disable removes the shell. Disabling shell_tool is what
+	// removes the command tools on the verified pin: add_shell_tools returns
+	// before registering them when that feature is off, whatever unified_exec
+	// reports. --disable is repeatable (`codex exec --help`), and --sandbox
+	// workspace-write is the same grant the leg has always had.
 	//
 	// A reading leg is pinned read-only rather than left to the default, because
 	// codex reads a user config that can set one. Saying it costs nothing and
@@ -92,13 +92,19 @@ func (a *Codex) Spec(inv Invocation) (exec.Spec, error) {
 		args = append(args, "--sandbox", "read-only")
 	}
 
-	// A review leg reads without running commands. shell_tool is the tool
-	// itself and unified_exec is the runner behind it; denying one without
-	// the other leaves the other to run the command. The zero mode keeps
-	// the legacy shape every stub test pins; an explicit served or supplied
-	// mode disables both, and served additionally wires CrossRev's read tool
-	// as the leg's only read path: the mcp_servers.crossrev command, its
-	// args array and the approval mode beside --ignore-user-config.
+	// A review leg reads without running commands. Disabling shell_tool is
+	// what removes the command tools on the verified pin: add_shell_tools
+	// returns before registering them when that feature is off, while the
+	// feature normalization re-enables unified_exec, so the unified_exec
+	// denial beside it grants nothing on its own and stays as a retained
+	// flag rather than a second block. The image reader is registered
+	// independently of the shell flag, so explicit modes deny view_image
+	// too: without it a served leg keeps a local-file read path outside
+	// the logged server. The zero mode keeps the legacy shape every stub
+	// test pins; an explicit served or supplied mode disables all three,
+	// and served additionally wires CrossRev's read tool as the leg's only
+	// read path: the mcp_servers.crossrev command, its args array and the
+	// approval mode beside --ignore-user-config.
 	// file_tool resolves to supplied and is recorded at the leg.
 	switch inv.ReadMode {
 	case ReadModeServed:
@@ -112,11 +118,13 @@ func (a *Codex) Spec(inv Invocation) (exec.Spec, error) {
 		if !inv.Write {
 			args = append(args, "--disable", "shell_tool", "--disable", "unified_exec")
 		}
+		args = append(args, "--disable", "view_image")
 		args = append(args, inv.Serve.CodexConfigArgs()...)
 	case ReadModeSupplied:
 		if !inv.Write {
 			args = append(args, "--disable", "shell_tool", "--disable", "unified_exec")
 		}
+		args = append(args, "--disable", "view_image")
 	}
 
 	// Codex takes the schema as a FILE PATH, where Claude Code takes it inline.

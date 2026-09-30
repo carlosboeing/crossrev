@@ -122,7 +122,7 @@ jobs:
       # `run:` block emptied by the filter is a workflow that fails to parse.
       - if: steps.pr.outputs.skip != 'true'
         run: |
-          curl -fsSL https://chatgpt.com/codex/install.sh | sh -s -- --release 0.148.0
+          curl -fsSL https://chatgpt.com/codex/install.sh | sh -s -- --release 0.159.2
           curl -fsSL https://claude.ai/install.sh | bash -s 2.1.237
 
       # A tag is not a pin: `git tag -f` plus a force push moves it. The 40

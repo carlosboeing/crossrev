@@ -103,7 +103,7 @@ resolver:
 	want := "head ubuntu-latest ubuntu-latest\n" +
 		"sha 0123456789abcdef0123456789abcdef01234567 ref v9.9.9\n" +
 		"scope --repo acme/widget harness codex secret CROSSREV_CODEX_AUTH\n" +
-		"          curl -fsSL https://chatgpt.com/codex/install.sh | sh -s -- --release 0.148.0\n" +
+		"          curl -fsSL https://chatgpt.com/codex/install.sh | sh -s -- --release 0.159.2\n" +
 		"          curl -fsSL https://claude.ai/install.sh | bash -s 2.1.237\n" +
 		"  hosted only\n" +
 		"tail\n"
@@ -163,7 +163,7 @@ endpoints:
     base_url: https://api.moonshot.ai/anthropic
     token_env: KIMI_API_KEY
 `
-	codex := "          curl -fsSL https://chatgpt.com/codex/install.sh | sh -s -- --release 0.148.0"
+	codex := "          curl -fsSL https://chatgpt.com/codex/install.sh | sh -s -- --release 0.159.2"
 	claude := "          curl -fsSL https://claude.ai/install.sh | bash -s 2.1.237"
 
 	for _, row := range []struct {

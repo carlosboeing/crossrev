@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -229,57 +228,12 @@ func TestInvokeRefusesALeakedEndpointVariable(t *testing.T) {
 	}
 }
 
-// A supplied grok review carries its schema in the prompt rather than in
-// the harness, so the call is as unconstrained as opencode's: a streamed
-// answer that misses the schema once is retried, and the retry passing
-// settles the pass.
-func TestInvokeGrokSuppliedReviewShapeErrorRetriesOnce(t *testing.T) {
-	e := newEnv(t)
-	writeRequiredHead(e, "a.go", "package a\n")
-	answer := batchAnswerFor(t, []string{"a.go"})
-	stream := `{"type":"text","data":` + strconv.Quote(answer) + "}\n" +
-		`{"type":"end","usage":{"input_tokens":3,"output_tokens":4}}` + "\n"
-	e.runner.script = []exec.Result{{ExitCode: 0, Stdout: []byte(stream)}}
-	var prompts []string
-	e.runner.onSpec = func(spec exec.Spec) {
-		for at := 0; at+1 < len(spec.Args); at++ {
-			if spec.Args[at] == "--prompt-file" {
-				raw, err := os.ReadFile(spec.Args[at+1])
-				if err != nil {
-					t.Errorf("reading the grok prompt file: %v", err)
-					return
-				}
-				prompts = append(prompts, string(raw))
-			}
-		}
-	}
-	leg := e.leg(t)
-	req := e.request(t)
-	req.HarnessOverride = "grok"
-	calls := 0
-	leg.Validate = func([]byte, validate.ReviewExpectations) error {
-		calls++
-		if calls == 1 {
-			return &validate.ShapeError{Problem: "no verdict key"}
-		}
-		return nil
-	}
-	got := leg.Run(context.Background(), req)
-	if got.Err != nil {
-		t.Fatalf("Run: %v", got.Err)
-	}
-	if len(e.runner.Specs()) != 2 {
-		t.Fatalf("harness calls = %d, want 2 (a supplied grok review retries a shape miss once)", len(e.runner.Specs()))
-	}
-	if len(prompts) == 0 {
-		t.Fatal("the grok child read no prompt file")
-	}
-	for _, p := range prompts {
-		if !strings.Contains(p, "does not constrain your output") {
-			t.Error("a supplied grok prompt carries no schema instruction")
-		}
-	}
-}
+// No grok review runs while the verified table carries no grok entry —
+// every one is refused with review_isolation_unverified before any child
+// starts — so there is no leg-level shape-retry test for grok the way
+// opencode keeps one below. The adapter half (the schema travels in the
+// prompt) stays pinned by TestGrokSuppliedReviewCarriesTheSchemaInThePrompt,
+// and the tripwire parsing stays pinned as synthetic stream records.
 
 func TestInvokeOpencodeShapeErrorRetriesOnce(t *testing.T) {
 	e := newEnv(t)

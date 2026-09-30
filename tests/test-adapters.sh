@@ -169,17 +169,16 @@ route 'api --method POST repos/*/issues/42/comments*' '{"id":9001}'
 route '*reviewThreads*' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}'
 CROSSREV_REVIEW_PAYLOAD="$(printf '%s' "$REVIEW_PAYLOAD" | sed "s/REPLACE_HEAD_SHA/$FIX_HEAD/g" | payload)"; export CROSSREV_REVIEW_PAYLOAD
 out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
-# Capture before the probes below invoke the stub and append to the same log.
-grok_review_argv="$(cat "$ARGV_LOG")"
 
-is  "a review leg runs on grok"                   "$rc" "0"
-has "and names it in the run header"              "$out" "Reviewer: grok"
-has "it reads the payload out of structuredOutput" "$out" "verdict: issues-remain"
-is  "and posts the finding it carried"            "$(count 'method POST repos/acme/widget/pulls/42/comments')" "1"
-has "the comment names the harness that produced it" "$(calls)" "grok"
-
-has "the grok review leg really did get the review prompt" \
-  "$(cat "$PROMPT_LOG")" "You are the review leg"
+# The empty tools allowlist left the command tool callable on the pinned
+# version, so the verified table carries no grok entry: every grok review is
+# refused with review_isolation_unverified before any child starts, while the
+# resolve leg below is unaffected.
+is  "a grok review leg is refused"                "$rc" "1"
+has "naming the unverified block"                 "$out" "review_isolation_unverified"
+has "and the pin it was refused at"               "$out" "cannot be verified at pin 1.0.5"
+is  "and posts no finding"                        "$(count 'method POST repos/acme/widget/pulls/42/comments')" "0"
+is  "and starts no harness child"                 "$(cat "$ARGV_LOG")" ""
 
 ( unset CROSSREV_REVIEW_PAYLOAD CROSSREV_HARNESS_PAYLOAD
   "$HERE/stub/grok" -p "prompt" --output-format json >/dev/null 2>&1 )
@@ -195,34 +194,7 @@ printf 'You are the review leg\n' >"$tmp_prompt"
 is  "and accepts the flags the adapter uses" "$?" "1"
 rm -f "$tmp_prompt"
 
-has "the marker records the answering model from modelUsage" \
-  "$(calls)" '"model_reported":"reviewer-model"'
-has "the cell names grok and the answering model" \
-  "$(calls)" '`grok` · `reviewer-model`'
-hasnt "a reported model is not described as a gap" \
-  "$(calls)" "grok does not report which model answered"
-
-has "the token count reaches the run-details table" "$(calls)" "| review |"
-has "and the marker records grok's usage total"     "$(calls)" '"tokens":7'
-
-is  "a grok review leg writes no secret, ever"    "$(count 'secret set')" "0"
-
-has  "the grok review leg is pinned read-only"    "$grok_review_argv" "--sandbox read-only"
-has  "and streams for its tripwire"               "$grok_review_argv" "--output-format streaming-json"
-has  "and passes a tools allowlist"               "$grok_review_argv" "--tools"
-hasnt "and grants no Grep tool"                   "$grok_review_argv" "Grep"
-hasnt "and grants no Glob tool"                   "$grok_review_argv" "Glob"
-hasnt "and grants no Read tool"                   "$grok_review_argv" "Read"
-hasnt "and leaves the schema flag off the stream" "$grok_review_argv" "--json-schema"
-has  "and denies Edit"                            "$grok_review_argv" "--deny Edit"
-has  "and denies Write"                           "$grok_review_argv" "--deny Write"
-has  "and runs dontAsk, not a promptable default" "$grok_review_argv" "--permission-mode dontAsk"
-hasnt "a grok review leg is granted no Edit"      "$grok_review_argv" "--allow Edit"
-hasnt "nor Write"                                 "$grok_review_argv" "--allow Write"
-hasnt "nor a blanket bypass"                      "$grok_review_argv" "bypassPermissions"
-hasnt "nor --always-approve"                      "$grok_review_argv" "--always-approve"
-hasnt "nor --yolo"                                "$grok_review_argv" "--yolo"
-hasnt "nor anything --dangerously"                "$grok_review_argv" "--dangerously"
+is  "a refused grok review leg writes no secret, ever" "$(count 'secret set')" "0"
 
 # --- grok resolve leg gets the write grant the review leg was denied --------
 ID_A="a1b2c3d4"
@@ -265,13 +237,12 @@ hasnt "nor given a blanket bypass"                "$grok_resolve_argv" "bypassPe
 hasnt "a grok resolve leg leaves the schema flag off, so it edits before it answers" "$grok_resolve_argv" "--json-schema"
 
 # --- grok authentication rejection is a credential failure ------------------
-fixture_repo "$(config_grok_reviews)"; stub_reset
-routes_baseline "$(printf '[]' | payload)"
-route 'api --method POST repos/*/issues/42/comments*' '{"id":9001}'
-route '*reviewThreads*' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}'
-CROSSREV_REVIEW_PAYLOAD="$(printf '%s' "$REVIEW_PAYLOAD" | sed "s/REPLACE_HEAD_SHA/$FIX_HEAD/g" | payload)"; export CROSSREV_REVIEW_PAYLOAD
+#
+# Reviews never reach the child — they are refused with
+# review_isolation_unverified first — so the rejection is exercised through
+# the resolve leg above, which still starts one.
 CROSSREV_GROK_UNAUTH=1; export CROSSREV_GROK_UNAUTH
-out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
+out="$("$CROSSREV" resolve --pr 42 2>&1)"; rc=$?
 unset CROSSREV_GROK_UNAUTH
 
 is  "an unauthenticated grok run fails"           "$rc" "1"

@@ -28,7 +28,7 @@ Forward view of CrossRev: what's in flight, what's next, what's deliberately def
 
 - **The Bash implementation is removed.** A defect is fixed in Go. The frozen oracle under `tests/fixtures/parity/` stays read-only.
 
-- **Review legs read only through the served tool.** Codex and Claude Code review with CrossRev's read tool as their only read path, and their event streams feed a review-leg tripwire that halts with `review_leg_ran_command` on any command event; grok, opencode and agy review supplied with no read tool granted. A leg-start self-test and the post-call handshake guard the path, degrading visibly or halting per `.policy.on_reads_unavailable`, and the marker and manifest carry the `reads` envelope. See [ADR 0027](adrs/0027-review-legs-read-only-through-the-served-tool.md).
+- **Review legs read only through the served tool.** Codex and Claude Code review with CrossRev's read tool as their granted read path, and their event streams feed a review-leg tripwire that halts with `review_leg_ran_command` on any command event; opencode and agy review supplied with no read tool granted, and grok reviews are refused with `review_isolation_unverified` until its command block is verified again. A leg-start self-test and the post-call handshake guard the path, degrading visibly or halting per `.policy.on_reads_unavailable`, and the marker and manifest carry the `reads` envelope. See [ADR 0027](adrs/0027-review-legs-read-only-through-the-served-tool.md).
 
 ## Next actions
 

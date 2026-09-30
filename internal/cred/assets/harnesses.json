@@ -59,8 +59,8 @@
       "install": {
         "kind": "script",
         "url": "https://chatgpt.com/codex/install.sh",
-        "command": "curl -fsSL https://chatgpt.com/codex/install.sh | sh -s -- --release 0.148.0",
-        "pinned_version": "0.148.0",
+        "command": "curl -fsSL https://chatgpt.com/codex/install.sh | sh -s -- --release 0.159.2",
+        "pinned_version": "0.159.2",
         "needs_credential": false,
         "hint": "https://chatgpt.com/codex"
       },
