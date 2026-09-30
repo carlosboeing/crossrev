@@ -311,7 +311,7 @@ func TestReviewCommandIgnoresServedCodexReads(t *testing.T) {
 
 // The review tripwire refusal carries the review_leg_ran_command name.
 func TestReviewCommandRefusalNamesTheFailure(t *testing.T) {
-	refusal := harness.ReviewCommandRefusal("codex", "git status")
+	refusal := harness.ReviewCommandRefusal("codex")
 	if refusal == nil {
 		t.Fatal("no refusal for a review-leg command")
 	}

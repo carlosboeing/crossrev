@@ -504,7 +504,7 @@ func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settin
 		// unpublished — nothing below runs — and the command reaches the
 		// run log only, redacted, never the pull request or the terminal.
 		if command, tripped := harness.ReviewCommand(settings.harness, res.Stdout); tripped {
-			refusal := harness.ReviewCommandRefusal(settings.harness, command)
+			refusal := harness.ReviewCommandRefusal(settings.harness)
 			if l.Log != nil {
 				l.Log.Event("tripwire", harness.RedactedCommand(command))
 			}

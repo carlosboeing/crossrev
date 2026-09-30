@@ -232,8 +232,7 @@ func ReviewCommand(harnessName string, stdout []byte) (string, bool) {
 // ReviewCommandRefusal is the halt for a command event on a review leg. The
 // command itself reaches the run log only, redacted there; the refusal names
 // the failure mode every surface reports it under.
-func ReviewCommandRefusal(harnessName, command string) *Refusal {
-	_ = command
+func ReviewCommandRefusal(harnessName string) *Refusal {
 	return &Refusal{
 		Reason: fmt.Sprintf("the %s harness ran a command on a review leg that reads without running commands (review_leg_ran_command)", harnessName),
 		Action: "The review leg denies commands, so nothing has been written to the pull request and the call is discarded unpublished. The command is in the run log. Re-run the leg; if it trips again, the harness is running commands its flags should deny.",

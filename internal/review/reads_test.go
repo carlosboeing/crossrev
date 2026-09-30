@@ -70,16 +70,3 @@ func TestReadsDispositionSelfTestAndHandshake(t *testing.T) {
 		t.Errorf("halt answers (%q, %t) for a supplied call with an empty log, want no reason", reason, halt)
 	}
 }
-
-// A command event always halts: the tripwire is not a degradation.
-func TestReviewTripwireAlwaysHalts(t *testing.T) {
-	stdout := []byte("{\"type\":\"item.completed\",\"item\":{\"type\":\"command_execution\",\"command\":\"id\"}}\n")
-	if _, tripped := harness.ReviewCommand("codex", stdout); !tripped {
-		t.Fatal("the fixture command does not trip")
-	}
-	for _, policy := range []string{"degrade", "halt"} {
-		if !review.ReviewCommandHalts(policy) {
-			t.Errorf("policy %s does not halt on a review-leg command", policy)
-		}
-	}
-}

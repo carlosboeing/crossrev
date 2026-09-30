@@ -59,10 +59,6 @@ func AssessReads(onUnavailable string, effective harness.ReadMode, stats prstate
 	return "", false
 }
 
-// ReviewCommandHalts reports that a command event on a review leg always
-// halts, under either policy: the tripwire is not a degradation.
-func ReviewCommandHalts(onUnavailable string) bool { return true }
-
 // EffectiveReadMode resolves the declared mode to the one the leg runs:
 // file_tool is accepted but unwired until slice 9, so it runs supplied and
 // records why. Served and supplied run as declared; the served-to-supplied
