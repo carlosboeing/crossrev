@@ -2,10 +2,11 @@
 date: 2026-09-30
 title: "Every setting is settable by config and by flag"
 type: adr
-status: draft
+status: approved
 authors:
   - "Carlos Boeing"
   - "GPT-6 (Codex)"
+  - "gpt-6.1-sol (Codex)"
 scope: [configuration, cli, security]
 related:
   - docs/adrs/0003-policy-read-from-the-base-revision.md
@@ -15,7 +16,7 @@ related:
 
 ## Context
 
-CrossRev exposes some settings through flags and others only through configuration. A one-run change to a config-only setting requires a persistent edit, and an operator cannot discover that distinction from a consistent rule. This ADR is draft, awaiting the maintainer's approval. It records the rule and audits the gaps; it implements no flags or runtime changes.
+CrossRev exposes some settings through flags and others only through configuration. A one-run change to a config-only setting requires a persistent edit, and an operator cannot discover that distinction from a consistent rule. The maintainer approved this ADR on 2026-09-30. It records the rule and audits the gaps; it implements no flags or runtime changes.
 
 The [Command Line Interface Guidelines](https://clig.dev/#configuration) put flags ahead of configuration files in precedence and recommend flags for values that vary per invocation. CrossRev adopts that precedence and extends parity to every user-facing setting, including settings usually stable within a repository. The guide does not supply the base-revision security constraint required by [ADR 0003](0003-policy-read-from-the-base-revision.md).
 
@@ -110,7 +111,7 @@ Usage: crossrev cycle --pr <number> [--trigger human|automatic] [--model <id>] [
 
 Cycle has no `--harness` in its usage today. The parser does accept it, just as resolve accepts an unadvertised `--no-tips`; these are discoverability gaps rather than absent parser support. The audit deliberately uses printed usage as its contract. Parser behavior is in `internal/cli/parse.go`; the usage strings are in `internal/cli/flags.go`. Resolve's reviewer dependencies are in `internal/resolve/convergence.go`. Partial boolean overrides and shared cycle values do not yet satisfy full parity.
 
-Review and resolve currently clear the configured endpoint and model when `--harness` is supplied, including in automated mode. See `internal/review/invoke.go` and `internal/resolve/context.go`. The `harness` action input in `action.yml` exposes this behavior to pull-request-edited workflows. This is an existing gap against the proposed protection of endpoint selection, even though the harness flag itself is allowed. In automated mode the implementation must preserve the base endpoint, or refuse the override with an ADR 0003 message if that endpoint cannot serve the requested harness. This draft changes no runtime behavior.
+Review and resolve currently clear the configured endpoint and model when `--harness` is supplied, including in automated mode. See `internal/review/invoke.go` and `internal/resolve/context.go`. The `harness` action input in `action.yml` exposes this behavior to pull-request-edited workflows. This is an existing gap against the proposed protection of endpoint selection, even though the harness flag itself is allowed. In automated mode the implementation must preserve the base endpoint, or refuse the override with an ADR 0003 message if that endpoint cannot serve the requested harness. This decision changes no runtime behavior.
 
 Path attributes in `.gitattributes` are a separate base-revision policy format under [ADR 0023](0023-generated-files-are-recognised-without-configuration.md), not config-file keys in this audit. Internal `CROSSREV_*` state is excluded.
 
