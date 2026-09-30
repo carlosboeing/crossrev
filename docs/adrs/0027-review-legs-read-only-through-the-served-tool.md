@@ -35,10 +35,12 @@ moves every review leg onto it, or onto nothing.
 1. **Served where a tool can be served, supplied everywhere else.** Codex
    and Claude Code review through CrossRev's read tool as their only read
    path, with their own file and command tools disabled where a flag
-   exists. Grok, opencode and agy review supplied: the prompt carries
-   everything and no read tool is granted. Grok keeps a tripwire over its
-   tool record; opencode is denied through its isolation config; agy emits
-   no record and doctor says so.
+   exists. Opencode and agy review supplied: the prompt carries everything
+   and no read tool is granted; opencode is denied through its isolation
+   config, and agy emits no record and doctor says so. Grok reviews are
+   refused until a command block is verified and recorded again — its
+   empty tools allowlist left the command tool callable on the pinned
+   version — while its resolve leg is unaffected.
 
 2. **A command on a review leg halts.** Any command event discards the call
    unpublished. The command reaches the run log only, redacted — never the
