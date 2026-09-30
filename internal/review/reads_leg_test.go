@@ -379,6 +379,7 @@ func TestServedChildSessionRefusalsDegrade(t *testing.T) {
 			`{"event":"start"}`,
 			`{"event":"initialize"}`,
 			`{"event":"tools_list"}`,
+			`{"event":"read","payload":{"path":"a.go","revision":"head","start_line":1,"end_line":2,"bytes":11}}`,
 			`{"event":"refused","payload":{"reason":"not_found"}}`,
 			`{"event":"end"}`,
 		)
@@ -392,8 +393,17 @@ func TestServedChildSessionRefusalsDegrade(t *testing.T) {
 		t.Fatalf("Run: %v", got.Err)
 	}
 	joined := strings.Join(ui.Texts(got.Messages), "\n")
-	if !strings.Contains(joined, "Served reads degraded (calls_refused)") {
+	if !strings.Contains(joined, "Served reads degraded (calls_refused:") {
 		t.Errorf("no calls_refused warning in the pass comment: %q", ui.Texts(got.Messages))
+	}
+	// The reviewer also read through the tool, so the warning must not
+	// claim the review judged the supplied content alone: it names the
+	// refused and served counts instead.
+	if !strings.Contains(joined, "1 refused, 1 served") {
+		t.Errorf("the calls_refused warning names no refused and served counts: %q", ui.Texts(got.Messages))
+	}
+	if strings.Contains(joined, "judged the supplied content alone") {
+		t.Errorf("the calls_refused warning claims a served review judged the supplied content alone: %q", ui.Texts(got.Messages))
 	}
 	if len(got.Marker.Reads) == 0 {
 		t.Fatal("the marker carries no reads envelope")

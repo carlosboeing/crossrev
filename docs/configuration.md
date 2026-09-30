@@ -54,7 +54,7 @@ policy:
 | `max_passes_per_cycle` | `3` | Passes in one cycle |
 | `max_files_changed_per_pr` | `200` | Pull request size CrossRev will review unattended |
 | `max_prs_per_day` | `25` | Distinct pull requests reviewed across the repository in a rolling 24 hours |
-| `on_reads_unavailable` | `degrade` | What a review leg does when the served read path is not serving: degrade visibly and continue on the supplied prompt, or halt and publish nothing |
+| `on_reads_unavailable` | `degrade` | What a review leg does when the served read path is not serving: degrade visibly and continue on the supplied prompt, or halt and publish nothing. Under `halt` any refused read stops the leg — even one benign `not_found` beside served reads |
 
 **`max_passes_per_cycle`, `max_files_changed_per_pr` and `max_prs_per_day` are continuation bounds. They end automatic reviewing and never block a person** — a review a human asked for runs regardless. `on_reads_unavailable` is not one: `halt` stops an attended review too. `min_fix_severity` is different in kind: it bounds what an agent may *change* rather than whether the loop continues, so it holds on attended and unattended runs alike.
 

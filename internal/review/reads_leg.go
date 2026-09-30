@@ -214,7 +214,7 @@ func (l *Leg) assessCallReads(loaded Context, tmp string, declared, effective ha
 	if l.Log != nil {
 		l.Log.Event("reads", fmt.Sprintf("degraded (%s): calls=%d reads=%d refused=%d", reason, stats.Calls, stats.Reads, stats.Refused))
 	}
-	return note, []ui.Line{readsDegradedWarning(reason)}, nil
+	return note, []ui.Line{readsDegradedWarning(reason, stats)}, nil
 }
 
 // readsUnavailableFatal halts the leg where the policy says halt: served
@@ -290,8 +290,18 @@ func (l *Leg) attachReads(marker *prstate.Marker) {
 }
 
 // readsDegradedWarning is the pass-comment half of a degradation: the
-// reason, in the open, where the pass comment carries it.
-func readsDegradedWarning(reason string) ui.Line {
+// reason, in the open, where the pass comment carries it. A refused call
+// beside served reads is worded for what happened: the reviewer read the
+// rest through the tool, so the warning names the refused and served
+// counts instead of claiming the review judged the supplied content alone
+// — which holds only when nothing was served.
+func readsDegradedWarning(reason string, stats prstate.ReadsStats) ui.Line {
+	if reason == ReadsReasonCallsRefused && stats.Reads > 0 {
+		return ui.Warn(
+			fmt.Sprintf("Served reads degraded (%s: %d refused, %d served): the refused reads were judged on the supplied content alone; the rest the reviewer read through the served tool.",
+				reason, stats.Refused, stats.Reads),
+			"The run log carries the refused calls and the ledger carries the envelope.")
+	}
 	return ui.Warn(
 		"Served reads degraded ("+reason+"): this review judged the supplied content alone.",
 		"The served read path is not serving, so the reviewer saw only the prompt. The run log carries the detail; the ledger carries the envelope.")

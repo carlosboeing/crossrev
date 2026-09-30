@@ -18,6 +18,7 @@ import (
 	"github.com/carlosboeing/crossrev/internal/forge"
 	"github.com/carlosboeing/crossrev/internal/harness"
 	"github.com/carlosboeing/crossrev/internal/prompt"
+	"github.com/carlosboeing/crossrev/internal/prstate"
 	"github.com/carlosboeing/crossrev/internal/runlog"
 	"github.com/carlosboeing/crossrev/internal/sandbox"
 	"github.com/carlosboeing/crossrev/internal/ui"
@@ -409,7 +410,9 @@ func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settin
 			if err := os.WriteFile(promptPath, promptBytes, 0o600); err != nil {
 				return harness.Envelope{}, nil, outMsgs, err
 			}
-			outMsgs = append(outMsgs, readsDegradedWarning(readsReason))
+			// No call ran yet, so no reads were served: the empty stats keep
+		// the generic wording, which holds when nothing was served.
+		outMsgs = append(outMsgs, readsDegradedWarning(readsReason, prstate.ReadsStats{}))
 			if l.Log != nil {
 				l.Log.Event("reads", "self-test failed ("+selfTestErr.Error()+"); degrading to supplied")
 			}
