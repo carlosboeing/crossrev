@@ -215,6 +215,11 @@ func parseCycle(args []string, out *ui.IO) (Invocation, error) {
 			req.ModelOverride, err = s.value()
 		case "--effort":
 			req.EffortOverride, err = s.value()
+		case "--input-policy":
+			req.InputPolicyOverride, err = s.value()
+			if err == nil {
+				err = requireInputPolicy(out, "cycle", req.InputPolicyOverride)
+			}
 		case "--trigger":
 			req.Trigger, err = s.value()
 		case "--no-tips":
@@ -261,6 +266,11 @@ func parseReview(args []string, out *ui.IO, harnesses []string) (Invocation, err
 			req.ModelOverride, err = s.value()
 		case "--effort":
 			req.EffortOverride, err = s.value()
+		case "--input-policy":
+			req.InputPolicyOverride, err = s.value()
+			if err == nil {
+				err = requireInputPolicy(out, "review", req.InputPolicyOverride)
+			}
 		case "--trigger":
 			req.Trigger, err = s.value()
 		case "--continuation":

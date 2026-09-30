@@ -223,15 +223,16 @@ func reviewCommand(ctx context.Context, out *ui.IO, doc harness.Document, req cl
 	// No Workdir: an empty one pins a clean detached worktree at the pull
 	// request head, so the harness never runs in the operator checkout.
 	result := leg.Run(ctx, review.Request{
-		PR:              req.PR,
-		Repo:            repo,
-		Trigger:         review.Trigger(req.Trigger),
-		Continuation:    req.Continuation,
-		HarnessOverride: req.HarnessOverride,
-		ModelOverride:   req.ModelOverride,
-		EffortOverride:  req.EffortOverride,
-		Author:          author,
-		RunID:           runlog.RunID(),
+		PR:                  req.PR,
+		Repo:                repo,
+		Trigger:             review.Trigger(req.Trigger),
+		Continuation:        req.Continuation,
+		HarnessOverride:     req.HarnessOverride,
+		ModelOverride:       req.ModelOverride,
+		EffortOverride:      req.EffortOverride,
+		InputPolicyOverride: req.InputPolicyOverride,
+		Author:              author,
+		RunID:               runlog.RunID(),
 	})
 	status, err = reportLeg(out, result.Messages, result.Err)
 	if result.Nudge && !req.NoTips {

@@ -16,13 +16,14 @@ crossrev resolve --pr 42    # verify each finding, fix, reply, resolve, push
 crossrev status  --pr 42    # where the loop is, and how to resume it
 ```
 
-Options on `cycle`, `review` and `resolve`:
+Options on `cycle`, `review` and `resolve`, unless noted:
 
 | Option | What it does |
 |---|---|
 | `--harness claude\|codex\|agy\|grok\|opencode` | Override the harness the config names for that leg, for this run. On `cycle` it lands on both legs, which is how an operator with one harness runs the loop; not `kimi`, which is an endpoint rather than an adapter |
 | `--model <id>` | Override the configured model for this run, passed to the harness exactly as written. Without `--harness` it keeps the configured harness and replaces only its model; on `cycle` it lands on both legs |
 | `--effort <level>` | Override the configured reasoning effort for this run, passed through verbatim like the config value; on `cycle` it lands on both legs |
+| `--input-policy hunks_first\|whole_when_fits` | Override `review.input_policy` for this run. On `review` and `cycle` only; on `cycle` it applies to the review legs |
 | `--repo owner/name` | Target a repository other than this checkout |
 | `--no-tips` | Suppress the closing suggestion about automated mode |
 
