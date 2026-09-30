@@ -212,8 +212,9 @@ func rewriteReadsBlock(promptBytes []byte) []byte {
 // call's server log, and refused calls matched against it. A prior reason
 // (an unwired file_tool mode, a fallen-back self-test) is recorded, not a
 // failure. A fresh failure degrades visibly where the policy says degrade
-// — the warning the pass comment carries, and the run-log event beside it
-// — and halts the leg where it says halt, publishing nothing.
+// — the terminal warning, the summary line the pass comment carries, and
+// the run-log event beside them — and halts the leg where it says halt,
+// publishing nothing.
 func (l *Leg) assessCallReads(loaded Context, tmp string, declared, effective harness.ReadMode, priorReason string) (readsNote, []ui.Line, error) {
 	raw, _ := os.ReadFile(filepath.Join(tmp, "reads.jsonl")) //nolint:gosec // the leg's own scratch file
 	calls, stats := prstate.ParseReadLog(raw)
@@ -307,20 +308,31 @@ func (l *Leg) attachReads(marker *prstate.Marker) {
 	marker.Reads = raw
 }
 
-// readsDegradedWarning is the pass-comment half of a degradation: the
-// reason, in the open, where the pass comment carries it. A refused call
-// beside served reads is worded for what happened: the reviewer read the
-// rest through the tool, so the warning names the refused and served
-// counts instead of claiming the review judged the supplied content alone
-// — which holds only when nothing was served.
+// readsDegradedSentence words one degradation for a person: the reason,
+// with refused and served counts for calls_refused beside served reads.
+// The terminal warning and the posted summary share it, so both halves of
+// the pass say the same thing.
+func readsDegradedSentence(reason string, refused, served int) string {
+	if reason == ReadsReasonCallsRefused && served > 0 {
+		return fmt.Sprintf("Served reads degraded (%s: %d refused, %d served): the refused reads were judged on the supplied content alone; the rest the reviewer read through the served tool.",
+			reason, refused, served)
+	}
+	return "Served reads degraded (" + reason + "): this review judged the supplied content alone."
+}
+
+// readsDegradedWarning is the terminal half of a degradation: the reason,
+// in the open, where the pass comment carries it. A refused call beside
+// served reads is worded for what happened: the reviewer read the rest
+// through the tool, so the warning names the refused and served counts
+// instead of claiming the review judged the supplied content alone —
+// which holds only when nothing was served.
 func readsDegradedWarning(reason string, stats prstate.ReadsStats) ui.Line {
 	if reason == ReadsReasonCallsRefused && stats.Reads > 0 {
 		return ui.Warn(
-			fmt.Sprintf("Served reads degraded (%s: %d refused, %d served): the refused reads were judged on the supplied content alone; the rest the reviewer read through the served tool.",
-				reason, stats.Refused, stats.Reads),
+			readsDegradedSentence(reason, stats.Refused, stats.Reads),
 			"The run log carries the refused calls and the ledger carries the envelope.")
 	}
 	return ui.Warn(
-		"Served reads degraded ("+reason+"): this review judged the supplied content alone.",
+		readsDegradedSentence(reason, stats.Refused, stats.Reads),
 		"The served read path is not serving, so the reviewer saw only the prompt. The run log carries the detail; the ledger carries the envelope.")
 }

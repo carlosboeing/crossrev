@@ -515,20 +515,16 @@ func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settin
 				Action: refusal.Action,
 			}
 		}
-		// The post-call reads check: the handshake in the server log, and
-		// refused calls matched against the log. A failed check degrades
-		// visibly where the policy says degrade and halts the leg where it
-		// says halt — and a halted call publishes nothing.
-		if note, assessMsgs, assessErr := l.assessCallReads(loaded, tmp, declared, effective, readsReason); assessErr != nil {
-			l.noteReads(note)
-			archiveReadLog()
-			return envelope, nil, outMsgs, assessErr
-		} else {
-			l.noteReads(note)
-			outMsgs = append(outMsgs, assessMsgs...)
-			readsReason = note.reason
-		}
-		archiveReadLog()
+		// The post-call reads check runs only on a call that answered. A
+		// child that failed or was killed before reaching the read server
+		// leaves an empty log with no handshake, which is a harness
+		// failure (or an interrupt) rather than unavailable reads:
+		// judging it would report missing_handshake over the real error,
+		// and on a transient failure the failed attempt's reason would
+		// ride readsReason into the retry and degrade a healthy answer.
+		// The tripwire above still halts first, and every exit below
+		// still archives — a failed or killed attempt drains what it
+		// logged, so a retry assesses only its own session.
 		if res.Interrupted() {
 			// A signal death is an interrupt, not a harness failure: the
 			// child was killed rather than answering badly. The refusal
@@ -538,6 +534,7 @@ func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settin
 			// leaves the claim resumable instead of printing the
 			// harness-failure message. Bare context.Canceled would reach
 			// the terminal as a plain error with the doctor hint.
+			archiveReadLog()
 			return envelope, nil, outMsgs, errors.Join(&ui.FatalError{
 				Reason: fmt.Sprintf("the %s harness was interrupted", settings.harness),
 				Action: "The harness did not answer. Re-run the leg.",
@@ -557,13 +554,29 @@ func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settin
 				outMsgs = append(outMsgs, ui.Warn(
 					fmt.Sprintf("%s hit a transient harness failure — %s", settings.harness, msg),
 					"The harness failed before answering rather than answering badly, so this looks like a server-side or transport failure. It is being asked once more; a second failure is fatal."))
+				archiveReadLog()
 				continue
 			}
+			archiveReadLog()
 			return envelope, nil, outMsgs, &ui.FatalError{
 				Reason: fmt.Sprintf("the %s harness failed: %s", settings.harness, msg),
 				Action: "If the error above mentions authentication, a token or a 401, the harness is installed and cannot log in.",
 			}
 		}
+		// The post-call reads check: the handshake in the server log, and
+		// refused calls matched against the log. A failed check degrades
+		// visibly where the policy says degrade and halts the leg where it
+		// says halt — and a halted call publishes nothing.
+		if note, assessMsgs, assessErr := l.assessCallReads(loaded, tmp, declared, effective, readsReason); assessErr != nil {
+			l.noteReads(note)
+			archiveReadLog()
+			return envelope, nil, outMsgs, assessErr
+		} else {
+			l.noteReads(note)
+			outMsgs = append(outMsgs, assessMsgs...)
+			readsReason = note.reason
+		}
+		archiveReadLog()
 		// The second child, for the one adapter whose telemetry is not in its
 		// own output (lib/adapters/opencode.sh:261-273). Telemetry, not the
 		// answer: an export that will not build or will not run leaves the

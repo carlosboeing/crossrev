@@ -32,10 +32,11 @@ func TestReadsDegradeOnABrokenTool(t *testing.T) {
 	if got.Err != nil {
 		t.Fatalf("Run: %v", got.Err)
 	}
-	texts := ui.Texts(got.Messages)
-	joined := strings.Join(texts, "\n")
-	if !strings.Contains(joined, "Served reads degraded (self_test_failed)") {
-		t.Errorf("no degrade warning in the pass comment: %q", texts)
+	// The reason reaches the posted summary, not only the terminal
+	// warning: a reader of the pull request sees the same sentence.
+	posted := strings.Join(append(append([]string{}, e.forge.created...), e.forge.edits...), "\n")
+	if !strings.Contains(posted, "Served reads degraded (self_test_failed): this review judged the supplied content alone.") {
+		t.Errorf("no degrade line in the posted pass comment")
 	}
 	if len(got.Marker.Reads) == 0 {
 		t.Fatal("the marker carries no reads envelope")
@@ -513,9 +514,11 @@ func TestServedChildWithNoSessionDegrades(t *testing.T) {
 	if got.Err != nil {
 		t.Fatalf("Run: %v", got.Err)
 	}
-	joined := strings.Join(ui.Texts(got.Messages), "\n")
-	if !strings.Contains(joined, "Served reads degraded (missing_handshake)") {
-		t.Errorf("no missing_handshake warning in the pass comment: %q", ui.Texts(got.Messages))
+	// The reason reaches the posted summary, not only the terminal
+	// warning: a reader of the pull request sees the same sentence.
+	posted := strings.Join(append(append([]string{}, e.forge.created...), e.forge.edits...), "\n")
+	if !strings.Contains(posted, "Served reads degraded (missing_handshake): this review judged the supplied content alone.") {
+		t.Errorf("no missing_handshake line in the posted pass comment")
 	}
 	if len(got.Marker.Reads) == 0 {
 		t.Fatal("the marker carries no reads envelope")
@@ -748,6 +751,88 @@ func TestSecondRunOnOneLegCarriesOnlyItsOwnReads(t *testing.T) {
 
 // A command event on the review leg halts with review_leg_ran_command and
 // publishes nothing, under either policy.
+// A harness failure before any answer is a harness failure, not unavailable
+// reads: the post-call check runs only on a call that answered. A transient
+// 503 on the first attempt followed by a healthy served retry ends served
+// with no reason — the failed attempt's empty log never becomes
+// missing_handshake, and never rides readsReason into the retry to degrade
+// a healthy answer.
+func TestTransientFailureThenHealthyRetryStaysServed(t *testing.T) {
+	for _, policy := range []string{"", "version: 2\npolicy:\n  on_reads_unavailable: halt\n"} {
+		e := newEnv(t)
+		writeRequiredHead(e, "a.go", "package a\n")
+		if policy != "" {
+			e.cfg = mustConfig(t, policy)
+		}
+		var children int
+		e.runner.onSpec = func(spec exec.Spec) {
+			children++
+			// The failed first attempt never reaches the server, so only
+			// the retry logs a child session.
+			if children == 2 {
+				serveChildSession(t, spec,
+					`{"event":"start"}`,
+					`{"event":"initialize"}`,
+					`{"event":"tools_list"}`,
+					`{"event":"read","payload":{"path":"a.go","revision":"head","start_line":1,"end_line":2,"bytes":11}}`,
+					`{"event":"end"}`,
+				)
+			}
+		}
+		e.runner.script = []exec.Result{
+			{ExitCode: 1, Stderr: []byte("UNAVAILABLE (code 503): overloaded")},
+			{ExitCode: 0, Stdout: claudeStdout(batchAnswerFor(t, []string{"a.go"}))},
+		}
+
+		got := runLeg(t, e, e.request(t))
+		if got.Err != nil {
+			t.Fatalf("policy %q: Run: %v", policy, got.Err)
+		}
+		if e.runner.calls != 2 {
+			t.Fatalf("policy %q: the harness was invoked %d time(s), want the transient retry", policy, e.runner.calls)
+		}
+		for _, line := range ui.Texts(got.Messages) {
+			if strings.Contains(line, "Served reads degraded") {
+				t.Errorf("policy %q: a retried served session degrades: %q", policy, line)
+			}
+		}
+		if len(got.Marker.Reads) == 0 {
+			t.Fatalf("policy %q: the marker carries no reads envelope for a served session", policy)
+		}
+		envelope, err := prstate.DecodeReadsEnvelope(got.Marker.Reads)
+		if err != nil {
+			t.Fatalf("policy %q: decoding the marker envelope: %v", policy, err)
+		}
+		if envelope.EffectiveMode != "served" || envelope.Reason != "" {
+			t.Errorf("policy %q: envelope = %+v, want a healthy served session with no reason", policy, envelope)
+		}
+	}
+}
+
+// A failed harness under halt reports the harness failure, not
+// reads_unavailable: an authentication failure never reaches the read
+// server, so there is no handshake to miss and nothing to degrade or halt
+// on.
+func TestFailedHarnessUnderHaltReportsTheHarnessFailure(t *testing.T) {
+	e := newEnv(t)
+	writeRequiredHead(e, "a.go", "package a\n")
+	e.cfg = mustConfig(t, "version: 2\npolicy:\n  on_reads_unavailable: halt\n")
+	e.runner.script = []exec.Result{
+		{ExitCode: 1, Stderr: []byte("Invalid API key")},
+	}
+
+	got := runLeg(t, e, e.request(t))
+	if got.Err == nil {
+		t.Fatal("Run: want the harness failure to stop the leg")
+	}
+	if !strings.Contains(got.Err.Error(), "harness failed") {
+		t.Errorf("err = %v, want the harness failure", got.Err)
+	}
+	if strings.Contains(got.Err.Error(), "reads_unavailable") {
+		t.Errorf("err = %v, a failed harness is not unavailable reads", got.Err)
+	}
+}
+
 func TestReviewTripwireHaltsTheLeg(t *testing.T) {
 	for _, policy := range []string{"", "version: 2\npolicy:\n  on_reads_unavailable: halt\n"} {
 		e := newEnv(t)

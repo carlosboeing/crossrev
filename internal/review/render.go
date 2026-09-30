@@ -315,6 +315,11 @@ func SummaryBody(findings []Finding, marker prstate.Marker, ctx RenderContext) s
 		b.WriteString(skipWarning(ctx.Skipped))
 	}
 
+	// A degraded reads path is the same kind of caveat: the reviewer judged
+	// less than the pass claims without it, so the reason sits beside the
+	// skip warning, in the terminal warning's own sentence.
+	b.WriteString(readsDegradedComment(marker))
+
 	noun := "findings"
 	if n == 1 {
 		noun = "finding"
@@ -428,6 +433,32 @@ func coverageFootnote(marker prstate.Marker, ctx RenderContext) string {
 // mark thousands of changed paths generated.
 func exclusionLine(excluded []string) string {
 	return intel.ExclusionLine(excluded)
+}
+
+// readsDegradedComment renders the posted half of a reads degradation
+// from the marker's reads envelope: the reason, with refused and served
+// counts for calls_refused beside served reads. The sentence is the
+// terminal warning's own (readsDegradedSentence), so both halves of the
+// pass say the same thing. A halted pass carries no line: its call
+// published nothing, so the supplied-content sentence would state
+// something false, and its blocked alert already names the halt. The
+// tripwire reason carries none either: a command event is not a
+// degradation, and its refusal names it.
+func readsDegradedComment(marker prstate.Marker) string {
+	if len(marker.Reads) == 0 {
+		return ""
+	}
+	envelope, err := prstate.DecodeReadsEnvelope(marker.Reads)
+	if err != nil || envelope.Reason == "" {
+		return ""
+	}
+	if envelope.Reason == ReadsReasonReviewCommand {
+		return ""
+	}
+	if verdict, ok := marker.Verdict.Get(); ok && verdict == string(core.VerdictBlocked) {
+		return ""
+	}
+	return readsDegradedSentence(envelope.Reason, envelope.Refused, envelope.Reads) + "\n\n"
 }
 
 // skipWarning renders the block that opens a summary whose pass skipped
