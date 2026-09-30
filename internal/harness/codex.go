@@ -99,14 +99,16 @@ func (a *Codex) Spec(inv Invocation) (exec.Spec, error) {
 	// denial beside it grants nothing on its own and stays as a retained
 	// flag rather than a second block. The image reader and the
 	// connected-app connectors are registered independently of the shell
-	// flag, so a served leg denies view_image and apps too: without them
-	// it keeps a local-file read path and remote-connector tools outside
-	// the logged server. The zero mode keeps the legacy shape every stub
+	// flag, so a served leg denies view_image, apps and image_generation
+	// too, with web search resolved through its disabled mode: without
+	// them it keeps local-file, connector, web and image read paths
+	// outside the logged server. The zero mode keeps the legacy shape every stub
 	// test pins; an explicit served or supplied mode disables the shell
 	// pair and the image reader, and served additionally denies the
-	// connectors and wires CrossRev's read tool as the leg's granted read
-	// path: the mcp_servers.crossrev command, its args array and the
-	// approval mode beside --ignore-user-config.
+	// connectors and image generation, disables web search, and wires
+	// CrossRev's read tool as the leg's only read path: the
+	// mcp_servers.crossrev command, its args array and the approval mode
+	// beside --ignore-user-config.
 	// file_tool resolves to supplied and is recorded at the leg.
 	switch inv.ReadMode {
 	case ReadModeServed:
@@ -123,7 +125,12 @@ func (a *Codex) Spec(inv Invocation) (exec.Spec, error) {
 		// Connected-app tools are registered independently of the shell
 		// flag, so a served leg denies them the way it denies the image
 		// reader: without it the connectors stay beside the served read.
-		args = append(args, "--disable", "view_image", "--disable", "apps")
+		// Web search and image generation read outside the served server
+		// through their own tools, so they go too: the web search mode
+		// resolves through a disabled variant, and image generation is
+		// its own feature.
+		args = append(args, "--disable", "view_image", "--disable", "apps", "--disable", "image_generation")
+		args = append(args, "-c", "web_search="+tomlQuote("disabled"))
 		args = append(args, inv.Serve.CodexConfigArgs()...)
 	case ReadModeSupplied:
 		if !inv.Write {

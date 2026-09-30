@@ -221,6 +221,43 @@ func TestCodexServedModesDisableApps(t *testing.T) {
 	}
 }
 
+// Web search and image generation read outside the served server through
+// their own tools, independently of Apps and the local image viewer. Served
+// review and resolve deny both; the zero mode keeps the legacy argv every
+// stub test pins.
+func TestCodexServedModesDisableWebAndImagegen(t *testing.T) {
+	adapter := codexAdapter(t)
+	serve := &harness.ServeConfig{Command: "/bin/crossrev", Args: []string{"__read-server"}}
+	for _, write := range []bool{false, true} {
+		inv := invocation(t, "codex", write)
+		inv.ReadMode = harness.ReadModeServed
+		inv.Serve = serve
+		spec, err := adapter.Spec(inv)
+		if err != nil {
+			t.Fatalf("building the spec: %v", err)
+		}
+		if !hasFlagPair(spec.Args, "--disable", "image_generation") {
+			t.Errorf("a served codex leg keeps image generation enabled; got %v", spec.Args)
+		}
+		if !hasConfigPair(spec.Args, "web_search", "disabled") {
+			t.Errorf("a served codex leg keeps web search enabled; got %v", spec.Args)
+		}
+	}
+	inv := invocation(t, "codex", false)
+	spec, err := adapter.Spec(inv)
+	if err != nil {
+		t.Fatalf("building the spec: %v", err)
+	}
+	if hasFlagPair(spec.Args, "--disable", "image_generation") {
+		t.Errorf("a zero-mode leg denies image generation; got %v", spec.Args)
+	}
+	for _, arg := range spec.Args {
+		if strings.HasPrefix(arg, "web_search=") {
+			t.Errorf("a zero-mode leg sets a web search mode; got %v", spec.Args)
+		}
+	}
+}
+
 // The zero mode keeps the legacy argv every stub test pins: no image-reader
 // denial travels on a call that names no read mode.
 func TestCodexZeroModeOmitsTheViewImageDisable(t *testing.T) {
