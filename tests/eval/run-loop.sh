@@ -64,7 +64,7 @@ EVAL_HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 EVAL_ROOT="$(cd "$EVAL_HERE/../.." && pwd)"
 EVAL_STUB_DIR="$EVAL_ROOT/tests/stub"
 
-MANIFEST=""; RESULTS_DIR=""; BIN=""; LIVE=0; ASSIGNMENTS=""; INPUT_POLICY=""
+MANIFEST=""; RESULTS_DIR=""; BIN=""; LIVE=0; ASSIGNMENTS=""; INPUT_POLICY=""; INPUT_POLICY_SET=0
 while (( $# )); do
   case "$1" in
     --manifest) [[ $# -ge 2 ]] || { printf 'run-loop: --manifest needs a value\n' >&2; exit 2; }
@@ -77,7 +77,7 @@ while (( $# )); do
     --assignments) [[ $# -ge 2 ]] || { printf 'run-loop: --assignments needs a value\n' >&2; exit 2; }
       ASSIGNMENTS="$2"; shift 2 ;;
     --input-policy) [[ $# -ge 2 ]] || { printf 'run-loop: --input-policy needs a value\n' >&2; exit 2; }
-      INPUT_POLICY="$2"; shift 2 ;;
+      INPUT_POLICY="$2"; INPUT_POLICY_SET=1; shift 2 ;;
     -h|--help)
       printf 'Usage: run-loop.sh --manifest <path> --bin <path> [--results-dir <dir>] [--live] [--assignments <file>] [--input-policy <hunks_first|whole_when_fits>]\n'
       exit 0 ;;
@@ -90,7 +90,9 @@ done
 [[ -n "$BIN" ]] || { printf 'run-loop: --bin is required\n' >&2; exit 2; }
 [[ "$BIN" = /* ]] || { printf 'run-loop: --bin must be an absolute path: %s\n' "$BIN" >&2; exit 2; }
 [[ -x "$BIN" ]] || { printf 'run-loop: --bin is not executable: %s\n' "$BIN" >&2; exit 2; }
-if [[ -n "$INPUT_POLICY" ]]; then
+# The flag being given is what counts, not the value being non-empty: an
+# empty value must hit the refusal below, never read as an absent flag.
+if (( INPUT_POLICY_SET )); then
   case "$INPUT_POLICY" in
     hunks_first|whole_when_fits) ;;
     *) printf 'run-loop: --input-policy must be hunks_first or whole_when_fits: %s\n' "$INPUT_POLICY" >&2; exit 2 ;;
@@ -186,7 +188,7 @@ fi
 # The review input policy this run committed on every synthetic base
 # revision, beside the other run-level inputs. `default` means the flag was
 # absent and the config carries no review section at all.
-if [[ -n "$INPUT_POLICY" ]]; then
+if (( INPUT_POLICY_SET )); then
   printf '%s\n' "$INPUT_POLICY" >"$RESULTS_DIR/input-policy.txt"
 else
   printf 'default\n' >"$RESULTS_DIR/input-policy.txt"
@@ -258,7 +260,7 @@ resolver:
   harness: $RESOLVER_HARNESS
   model: $RESOLVER_MODEL
 EOF
-  if [[ -n "$INPUT_POLICY" ]]; then
+  if (( INPUT_POLICY_SET )); then
     printf 'review:\n  input_policy: %s\n' "$INPUT_POLICY"
   fi
   cat <<EOF

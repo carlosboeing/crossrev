@@ -405,6 +405,13 @@ is "a bad input policy is refused" "$(( badpolicy_rc != 0 ? 1 : 0 ))" "1"
 has "and the refusal names the accepted values" "$(cat "$T/runner-badpolicy-out.txt")" "hunks_first or whole_when_fits"
 is "and the refusal runs no case" "$([[ ! -e "$T/results-badpolicy" ]] && echo yes || echo no)" "yes"
 
+bash "$RUNNER" --manifest "$MANIFEST" --results-dir "$T/results-emptypolicy" --bin "$BIN" \
+  --input-policy "" >"$T/runner-emptypolicy-out.txt" 2>&1
+emptypolicy_rc=$?
+is "an empty input policy is refused" "$(( emptypolicy_rc != 0 ? 1 : 0 ))" "1"
+has "and the empty refusal names the accepted values" "$(cat "$T/runner-emptypolicy-out.txt")" "hunks_first or whole_when_fits"
+is "and the empty refusal runs no case" "$([[ ! -e "$T/results-emptypolicy" ]] && echo yes || echo no)" "yes"
+
 printf 'not json' >"$T/stamp-probe.json"
 # Color-forced end to end, the way a user shell with color forcing runs
 # it: the stamp name must read clean even then.
