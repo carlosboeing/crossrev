@@ -1,6 +1,7 @@
 package harness_test
 
 import (
+	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -258,6 +259,45 @@ func TestGrokResolveSpecOmitsJsonSchema(t *testing.T) {
 		if arg == "--json-schema" {
 			t.Errorf("resolve spec must not pass --json-schema: got %v", spec.Args)
 		}
+	}
+}
+
+// A supplied review streams, and --json-schema implies --output-format
+// json, so the flag cannot travel with it: the schema travels inside the
+// prompt instead, and the prompt file the child reads is the composed copy.
+func TestGrokSuppliedReviewCarriesTheSchemaInThePrompt(t *testing.T) {
+	adapter := grokAdapter(t)
+	inv := invocation(t, "grok", false)
+	inv.ReadMode = harness.ReadModeSupplied
+
+	spec, err := adapter.Spec(inv)
+	if err != nil {
+		t.Fatalf("building the supplied review spec: %v", err)
+	}
+	if slices.Contains(spec.Args, "--json-schema") {
+		t.Errorf("a streaming supplied review must not pass --json-schema: got %v", spec.Args)
+	}
+	var promptPath string
+	for at := 0; at+1 < len(spec.Args); at++ {
+		if spec.Args[at] == "--prompt-file" {
+			promptPath = spec.Args[at+1]
+		}
+	}
+	if promptPath == "" {
+		t.Fatalf("no --prompt-file in %v", spec.Args)
+	}
+	if promptPath == inv.Prompt.Path {
+		t.Error("the child reads the composed prompt, not the bare prompt file")
+	}
+	raw, err := os.ReadFile(promptPath)
+	if err != nil {
+		t.Fatalf("reading the composed prompt: %v", err)
+	}
+	if !strings.Contains(string(raw), inv.Prompt.Text) {
+		t.Error("the composed prompt lost the review prompt")
+	}
+	if !strings.Contains(string(raw), inv.Schema.Text) {
+		t.Error("the composed prompt carries no schema")
 	}
 }
 

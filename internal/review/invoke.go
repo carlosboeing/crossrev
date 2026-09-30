@@ -429,8 +429,17 @@ func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settin
 		inv.CLIMajor = major
 	}
 
+	// A supplied grok review carries its schema in the prompt rather than
+	// in the harness: --json-schema implies --output-format json, which
+	// cannot travel with the streaming output the tripwire reads. The call
+	// is as unconstrained as opencode's, so it earns the same second shape
+	// attempt and the model-drift wording rather than the adapter-bug one.
+	schemaNative := entry.SchemaNative
+	if settings.harness == "grok" && effective == harness.ReadModeSupplied {
+		schemaNative = false
+	}
 	shapeBudget := 1
-	if !entry.SchemaNative {
+	if !schemaNative {
 		shapeBudget = 2
 	}
 	semanticBudget := 1
@@ -569,7 +578,7 @@ func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settin
 		// refusal keeps its existing words. A harness without a native
 		// schema already retries a shape miss below, so spending the
 		// transient budget there too would ask a third time.
-		if len(bytes.TrimSpace(envelope.Payload)) == 0 && entry.SchemaNative && transientBudget > 0 {
+		if len(bytes.TrimSpace(envelope.Payload)) == 0 && schemaNative && transientBudget > 0 {
 			transientBudget--
 			refused = foldAttempt(refused, envelope.Usage)
 			outMsgs = append(outMsgs, ui.Warn(
@@ -616,7 +625,7 @@ func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settin
 		// model that simply did not follow the instruction.
 		return envelope, nil, outMsgs, &ui.FatalError{
 			Reason: fmt.Sprintf("%s returned an object that does not match the schema — %s", settings.harness, problem),
-			Action: shapeExhaustedAction(entry.SchemaNative),
+			Action: shapeExhaustedAction(schemaNative),
 		}
 	}
 }

@@ -215,7 +215,7 @@ Each adapter takes a prompt file, a schema, a working directory, an optional mod
 | `claude` | Claude Code | Takes the schema **inline** as a JSON string. Also the path to any Anthropic-compatible endpoint |
 | `codex` | Codex | Takes the schema as a **file path**. Runs with `--ignore-user-config` |
 | `agy` | Antigravity | |
-| `grok` | Grok | Takes the schema **inline** as a JSON string. |
+| `grok` | Grok | No schema flag: the schema travels inside the prompt, and CrossRev extracts the JSON from the answer text itself. |
 | `opencode` | opencode | No schema flag: the schema travels inside the prompt, and CrossRev extracts the JSON from the answer text itself. |
 <!-- crossrev:harness-table:end -->
 
@@ -232,7 +232,7 @@ Silent substitution is the failure the cross-model design exists to prevent, and
 
 ## The two schemas
 
-`schemas/findings.schema.json` and `schemas/resolve.schema.json` constrain what each leg returns. Every shipped harness enforces them natively, so a shape failure is an adapter bug rather than model drift.
+`schemas/findings.schema.json` and `schemas/resolve.schema.json` constrain what each leg returns. A harness that constrains its own output enforces them natively, so a shape failure there is an adapter bug rather than model drift; opencode and supplied grok reviews carry the schema in the prompt instead, so a shape miss there is retried once as model drift.
 
 Validation splits by exit code, and the split is about who is at fault:
 

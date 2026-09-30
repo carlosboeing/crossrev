@@ -224,8 +224,11 @@ const isolationConfig = `{
 }
 `
 
-// schemaInstruction is the paragraph appended to the prompt for the one harness
+// schemaInstruction is the paragraph appended to the prompt for a harness
 // that does not constrain its own output (lib/adapters/opencode.sh:105).
+// Grok's supplied reviews carry the same paragraph: --json-schema implies
+// --output-format json, which cannot travel with the streaming output the
+// tripwire reads.
 //
 // The Bash writes a copy of the prompt to a temporary file and then passes
 // `$(cat "$prompt_copy")` as argv, deleting the copy immediately after
@@ -305,8 +308,9 @@ func (a *Opencode) Spec(inv Invocation) (exec.Spec, error) {
 	}
 
 	// The schema travels inside the prompt, under an instruction that also
-	// corrects the skill's "the harness constrains your output" claim — true for
-	// the other four, false here. This keeps prompt building unaware of which
+	// corrects the skill's "the harness constrains your output" claim — true
+	// for the harnesses that constrain their own output, false here and on
+	// a supplied grok review. This keeps prompt building unaware of which
 	// harness will read what it built — the same class of per-CLI fact as
 	// Antigravity's flag order or Codex's schema path.
 	// The composition order matters, and this is the one adapter where it is

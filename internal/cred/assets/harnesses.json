@@ -136,7 +136,7 @@
         "needs_credential": false,
         "hint": "https://x.ai/cli"
       },
-      "schema_style": "inline",
+      "schema_style": "prompt",
       "schema_native": true,
       "prompt_transport": "file",
       "read_mode": "supplied",
