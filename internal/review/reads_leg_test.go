@@ -5,12 +5,14 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/carlosboeing/crossrev/internal/exec"
 	"github.com/carlosboeing/crossrev/internal/harness"
 	"github.com/carlosboeing/crossrev/internal/prstate"
+	"github.com/carlosboeing/crossrev/internal/prstate/storetest"
 	"github.com/carlosboeing/crossrev/internal/ui"
 )
 
@@ -579,6 +581,67 @@ func TestSelfTestSkipsWhenEveryCandidateIsASymlink(t *testing.T) {
 	}
 	if len(got.Marker.Reads) != 0 {
 		t.Errorf("the marker carries a reads envelope after a clean served call: %s", got.Marker.Reads)
+	}
+}
+
+// A command event publishes nothing: no findings reach the pull request,
+// no generation reaches the ledger, and the command text reaches the run
+// log only — named there, absent from the error, the marker, the pass
+// comment and every comment the leg wrote. The frozen path publishes no
+// generation before the call, so an empty ledger proves the halted call
+// published nothing.
+func TestReviewTripwirePublishesNothing(t *testing.T) {
+	const sentinel = "touch /tmp/crossrev-tripwire-sentinel-9f31aa-probe"
+	for _, policy := range []string{"", "version: 2\npolicy:\n  on_reads_unavailable: halt\n"} {
+		e := newEnv(t)
+		writeAppGo(t, e.dir)
+		if policy != "" {
+			e.cfg = mustConfig(t, policy)
+		}
+		store := storetest.NewFakeStore()
+		e.forge.store = store
+		e.runner.script = []exec.Result{{
+			ExitCode: 0,
+			Stdout:   []byte(`{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":` + strconv.Quote(sentinel) + `}}]}}` + "\n" + string(claudeStdout(`{"verdict":"converged","findings":[]}`))),
+		}}
+
+		got := runLeg(t, e, e.request(t))
+		if got.Err == nil {
+			t.Fatalf("policy %q: want the tripwire to halt the leg", policy)
+		}
+		if !strings.Contains(got.Err.Error(), "review_leg_ran_command") {
+			t.Fatalf("policy %q: err = %v, want the review_leg_ran_command name", policy, got.Err)
+		}
+		if strings.Contains(got.Err.Error(), sentinel) {
+			t.Errorf("policy %q: the error carries the command text: %v", policy, got.Err)
+		}
+		encoded, err := got.Marker.Encode()
+		if err != nil {
+			t.Fatalf("policy %q: encoding the marker: %v", policy, err)
+		}
+		if strings.Contains(encoded, sentinel) {
+			t.Errorf("policy %q: the marker carries the command text", policy)
+		}
+		for _, line := range ui.Texts(got.Messages) {
+			if strings.Contains(line, sentinel) {
+				t.Errorf("policy %q: the pass comment carries the command text: %q", policy, line)
+			}
+		}
+		for _, body := range append(append([]string{}, e.forge.created...), e.forge.edits...) {
+			if strings.Contains(body, sentinel) {
+				t.Errorf("policy %q: a pull request comment carries the command text", policy)
+			}
+		}
+		log := readRunLog(t, e)
+		if !strings.Contains(log, "review command:") || !strings.Contains(log, sentinel) {
+			t.Errorf("policy %q: run.log carries no redacted tripwire record:\n%s", policy, log)
+		}
+		if len(e.forge.reviewPosted) != 0 || len(e.forge.filePosted) != 0 {
+			t.Errorf("policy %q: the halted call posted findings: %+v %+v", policy, e.forge.reviewPosted, e.forge.filePosted)
+		}
+		if len(store.Published()) != 0 {
+			t.Errorf("policy %q: the halted call published %d generations", policy, len(store.Published()))
+		}
 	}
 }
 
