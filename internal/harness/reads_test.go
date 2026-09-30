@@ -158,11 +158,11 @@ func TestCodexResolveServedCarriesMCP(t *testing.T) {
 	}
 }
 
-// Codex may resolve again: the served tool gives the resolve leg its reads.
-func TestCodexIsNoLongerRefusedAsResolver(t *testing.T) {
-	if harness.RefusedAsResolver("codex") {
-		t.Error("codex is still refused as a resolver after the served tool reached its resolve leg")
-	}
+// Codex resolves: the served tool gives the resolve leg its reads, so the
+// working resolvers list it. TestWorkingResolversOnShippedDescriptor pins
+// the whole list; this names codex because the refusal that once kept it
+// off the resolve leg is what this change lifts.
+func TestCodexResolvesThroughTheServedTool(t *testing.T) {
 	found := false
 	for _, name := range harness.WorkingResolvers(descriptors(t)) {
 		if name == "codex" {

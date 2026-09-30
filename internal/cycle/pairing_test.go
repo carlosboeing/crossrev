@@ -119,11 +119,10 @@ func TestPairingServesAnOverrideOnBothLegs(t *testing.T) {
 	}
 }
 
-// TestPairingServesCodexAsResolverUnderShippedDescriptor pins that codex is
-// served as a resolver through the shared resolver rule
-// (harness.RefusedAsResolver): the served read tool serves codex resolve
-// legs, so a cycle whose resolver is codex runs rather than refusing before
-// billing a review.
+// TestPairingServesCodexAsResolverUnderShippedDescriptor pins that codex
+// serves as a resolver: the served read tool serves codex resolve legs, so
+// a cycle whose resolver is codex runs rather than refusing before billing
+// a review.
 func TestPairingServesCodexAsResolverUnderShippedDescriptor(t *testing.T) {
 	check := Pairing(shippedDescriptor(t), configWith("claude", "codex"))
 	if err := check(""); err != nil {

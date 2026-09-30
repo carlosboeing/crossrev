@@ -90,20 +90,6 @@ func Pairing(doc harness.Document, cfg *config.Config) func(override string) err
 // resolve (lib/harnesses.sh:66-70). So a refused entry has declared exactly one
 // leg, and Descriptor.Legs is its declared list.
 func assertServesLeg(doc harness.Document, name, leg string) error {
-	// The resolver rule (harness.RefusedAsResolver over
-	// harness.WorkingResolvers) is the shared refusal every surface reads,
-	// so the cycle refuses before billing a review what the leg would
-	// refuse before starting. Nothing is refused today — the served read
-	// tool serves every resolve leg — and the branch stays so the next
-	// reason-specific limit lands in one place.
-	if leg == harness.LegResolve && harness.RefusedAsResolver(name) {
-		return &ui.FatalError{
-			Reason: "the harness 'codex' cannot serve the resolve leg",
-			Action: fmt.Sprintf("CrossRev runs the %s leg on %s. Codex is limited to the review leg.",
-				leg,
-				harness.NamesHuman(harness.WorkingResolvers(doc))),
-		}
-	}
 	entry, found := doc.For(name)
 	if !found || slices.Contains(entry.Legs(), leg) {
 		return nil

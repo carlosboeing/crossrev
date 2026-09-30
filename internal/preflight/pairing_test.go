@@ -135,13 +135,10 @@ func TestPairingSupportedRefusesALegTheDescriptorDoesNotName(t *testing.T) {
 	}
 }
 
-// Codex is refused as a resolver through the shared resolver rule
-// (harness.RefusedAsResolver), on every runner: the resolve leg's shell
-// denial strands codex self-hosted too. Codex as reviewer is unaffected, and
-// the bare credential question without a leg is unchanged.
-// The served read tool serves codex resolve legs too, so the resolver rule
-// no longer refuses codex on any runner: codex resolves wherever its
-// subscription credential can live.
+// Codex serves as a resolver on every runner: the served read tool serves
+// codex resolve legs too, so codex resolves wherever its subscription
+// credential can live. Codex as reviewer is unaffected, and the bare
+// credential question without a leg is unchanged.
 func TestPairingSupportedAcceptsCodexAsResolver(t *testing.T) {
 	doc := document(t)
 	for _, runner := range []string{"github-hosted", "self-hosted", "some-other-runner"} {

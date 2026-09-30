@@ -300,11 +300,9 @@ func (l *Leg) settings(s *session) (*Refusal, ui.Line, error) {
 	if !doc.ServesLeg(name, "resolve") {
 		return servesLegRefusal(doc, name), ui.Line{}, nil
 	}
-	// Nothing further is refused here: the shared resolver rule
-	// (harness.RefusedAsResolver) that once refused codex is lifted now
-	// that the served read tool serves every resolve leg, and preflight
-	// still reads the rule so the next reason-specific limit lands in one
-	// place.
+	// Nothing further is refused here: the rule that once refused codex is
+	// lifted now that the served read tool serves every resolve leg, and
+	// which legs a harness serves lives on the descriptor entry itself.
 
 	asked := name
 	if l.binaryInstalled(asked) {
