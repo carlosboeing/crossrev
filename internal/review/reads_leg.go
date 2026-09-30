@@ -84,19 +84,49 @@ func readsPolicy(loaded Context) string {
 
 // serveSession is the read-server invocation for one call: the crossrev
 // binary re-executed over stdio, reading between the pass's own revisions
-// and appending this call's log beside the prompt and schema files.
-func serveSession(workdir, tmp string, base, head core.Revision, call int) (command string, session readserve.Session, err error) {
+// and appending this call's log beside the prompt and schema files. Each
+// server process is per call, so the call is granted the leg's remaining
+// allowance: the contract caps bind the whole pass, and a spent leg passes
+// an explicit zero the server refuses as exhaustion rather than resetting
+// to the defaults.
+func serveSession(workdir, tmp string, base, head core.Revision, call int, legReads int, legBytes int64) (command string, session readserve.Session, err error) {
 	exe, err := os.Executable()
 	if err != nil {
 		return "", readserve.Session{}, fmt.Errorf("reading the crossrev binary path: %w", err)
 	}
 	return exe, readserve.Session{
-		Repo:    workdir,
-		Base:    base.SHA(),
-		Head:    head.SHA(),
-		LogPath: filepath.Join(tmp, "reads.jsonl"),
-		Call:    strconv.Itoa(call),
+		Repo:     workdir,
+		Base:     base.SHA(),
+		Head:     head.SHA(),
+		LogPath:  filepath.Join(tmp, "reads.jsonl"),
+		Call:     strconv.Itoa(call),
+		LimitLeg: true,
+		LegReads: legReads,
+		LegBytes: legBytes,
 	}, nil
+}
+
+// readsRemaining answers the leg's remaining served-read allowance: the
+// contract caps minus what the pass's recorded calls already served. Only
+// successful reads charge, the way the server counts them; refusals cost
+// nothing. A new leg resets its notes, so a new pass starts whole; the
+// per-call share stays per call and never decrements here.
+func (l *Leg) readsRemaining() (int, int64) {
+	usedReads := 0
+	var usedBytes int64
+	for _, note := range l.readsNotes {
+		usedReads += note.stats.Reads
+		usedBytes += note.stats.Bytes
+	}
+	remainingReads := readserve.DefaultPerLegReads - usedReads
+	if remainingReads < 0 {
+		remainingReads = 0
+	}
+	remainingBytes := int64(readserve.DefaultPerLegBytes) - usedBytes
+	if remainingBytes < 0 {
+		remainingBytes = 0
+	}
+	return remainingReads, remainingBytes
 }
 
 // selectProbeCandidates lists the self-test reads in try order: a small
@@ -171,6 +201,10 @@ func (l *Leg) runReadsSelfTest(ctx context.Context, command string, session read
 	}
 	session.LogPath = filepath.Join(filepath.Dir(session.LogPath), "reads.selftest.jsonl")
 	session.Call = "selftest"
+	// The self-test checks the tool's health on the full defaults and
+	// spends none of the model budget: it carries no leg remainder and
+	// its session logs apart from every model call.
+	session.LimitLeg = false
 	// The server runs on the leg's own environment, never on a freshly
 	// read one: l.Env is the allowlisted orchestrator environment without
 	// any staged harness credential, which the read server neither needs
@@ -215,9 +249,19 @@ func rewriteReadsBlock(promptBytes []byte) []byte {
 // — the terminal warning, the summary line the pass comment carries, and
 // the run-log event beside them — and halts the leg where it says halt,
 // publishing nothing.
-func (l *Leg) assessCallReads(loaded Context, tmp string, declared, effective harness.ReadMode, priorReason string) (readsNote, []ui.Line, error) {
+// currentCallReads parses the current call's server log the way the
+// post-call check does: what the server served before this exit. Every
+// exit past the model child charges it — a tripwire halt, an interrupt,
+// a harness failure or an exhausted shape budget — so the ledger accounts
+// served reads even when the call publishes nothing. Callers read before
+// archiving drains the log.
+func (l *Leg) currentCallReads(tmp string) ([]prstate.ReadsCall, prstate.ReadsStats) {
 	raw, _ := os.ReadFile(filepath.Join(tmp, "reads.jsonl")) //nolint:gosec // the leg's own scratch file
-	calls, stats := prstate.ParseReadLog(raw)
+	return prstate.ParseReadLog(raw)
+}
+
+func (l *Leg) assessCallReads(loaded Context, tmp string, declared, effective harness.ReadMode, priorReason string) (readsNote, []ui.Line, error) {
+	calls, stats := l.currentCallReads(tmp)
 	note := readsNote{declared: declared, effective: effective, reason: priorReason, stats: stats, calls: calls}
 	if priorReason != "" {
 		return note, nil, nil

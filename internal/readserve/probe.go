@@ -27,17 +27,25 @@ import (
 
 // Session is one server invocation: the repository and revisions it may
 // read, the call log it appends to, and the call number naming the log.
+// LimitLeg bounds a model call's server to the leg's remaining allowance:
+// an explicit zero exhausts rather than resetting to the defaults, so a
+// spent leg refuses every further read. The leg-start self-test leaves it
+// unset: the self-test checks the tool's health on the full defaults and
+// spends none of the model budget.
 type Session struct {
-	Repo    string
-	Base    string
-	Head    string
-	LogPath string
-	Call    string
+	Repo     string
+	Base     string
+	Head     string
+	LogPath  string
+	Call     string
+	LimitLeg bool
+	LegReads int
+	LegBytes int64
 }
 
 // Args answers the server argv after the program name.
 func (s Session) Args() []string {
-	return []string{
+	args := []string{
 		"__read-server",
 		"--repo", s.Repo,
 		"--base", s.Base,
@@ -45,6 +53,13 @@ func (s Session) Args() []string {
 		"--log", s.LogPath,
 		"--call", s.Call,
 	}
+	if s.LimitLeg {
+		args = append(args,
+			"--per-leg-reads", strconv.Itoa(s.LegReads),
+			"--per-leg-bytes", strconv.FormatInt(s.LegBytes, 10),
+		)
+	}
+	return args
 }
 
 // Probe is the one read the self-test byte-checks against git: the path,

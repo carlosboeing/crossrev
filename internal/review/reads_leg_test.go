@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -965,6 +966,330 @@ func TestFailedHarnessUnderHaltReportsTheHarnessFailure(t *testing.T) {
 	}
 	if strings.Contains(got.Err.Error(), "reads_unavailable") {
 		t.Errorf("err = %v, a failed harness is not unavailable reads", got.Err)
+	}
+}
+
+// An installed CLI between the pin and a later recorded run is not
+// verified for this served configuration: general compatibility history is
+// not isolation evidence, so a claude install at an unrecorded
+// intermediate version is refused before any model child starts.
+func TestInstalledIntermediateClaudeRefuses(t *testing.T) {
+	e := newEnv(t)
+	writeRequiredHead(e, "a.go", "package a\n")
+	e.runner.versions["claude"] = "2.1.250 (Claude Code)"
+	e.runner.script = []exec.Result{
+		{ExitCode: 0, Stdout: claudeStdout(batchAnswerFor(t, []string{"a.go"}))},
+	}
+
+	got := runLeg(t, e, e.request(t))
+	if got.Err == nil {
+		t.Fatal("Run: want the unrecorded intermediate install refused")
+	}
+	if !strings.Contains(got.Err.Error(), "review_isolation_unverified") {
+		t.Errorf("err = %v, want the review_isolation_unverified name", got.Err)
+	}
+	if !strings.Contains(got.Err.Error(), "2.1.250") {
+		t.Errorf("err = %v, want the installed version named", got.Err)
+	}
+	if e.runner.calls != 0 {
+		t.Errorf("harness calls = %d, want 0 (refused before any model child)", e.runner.calls)
+	}
+	if len(e.runner.probes) != 1 {
+		t.Errorf("probes = %d, want the one version probe apart from session children", len(e.runner.probes))
+	}
+}
+
+// A prerelease token is not the verified version either: isolation is an
+// exact version proven under this served configuration, never a numeric
+// span the token happens to fall in.
+func TestInstalledPrereleaseClaudeRefuses(t *testing.T) {
+	e := newEnv(t)
+	writeRequiredHead(e, "a.go", "package a\n")
+	e.runner.versions["claude"] = "2.1.237-beta (Claude Code)"
+	e.runner.script = []exec.Result{
+		{ExitCode: 0, Stdout: claudeStdout(batchAnswerFor(t, []string{"a.go"}))},
+	}
+
+	got := runLeg(t, e, e.request(t))
+	if got.Err == nil {
+		t.Fatal("Run: want the prerelease install refused")
+	}
+	if !strings.Contains(got.Err.Error(), "review_isolation_unverified") {
+		t.Errorf("err = %v, want the review_isolation_unverified name", got.Err)
+	}
+	if e.runner.calls != 0 {
+		t.Errorf("harness calls = %d, want 0 (refused before any model child)", e.runner.calls)
+	}
+}
+
+// A failed self-test degrades the read path but never the installed-version
+// gate: a served codex leg that falls back to supplied still refuses an
+// unverified installed CLI before any model child starts.
+func TestDegradedSelfTestKeepsTheInstalledGateOnCodex(t *testing.T) {
+	e := newEnv(t)
+	writeRequiredHead(e, "a.go", "package a\n")
+	e.runner.serveErr = errors.New("connection refused")
+	e.runner.versions["codex"] = "codex-cli 0.152.1"
+	req := e.request(t)
+	req.HarnessOverride = "codex"
+	e.runner.script = []exec.Result{
+		{ExitCode: 0, Stdout: claudeStdout(batchAnswerFor(t, []string{"a.go"}))},
+	}
+
+	got := runLeg(t, e, req)
+	if got.Err == nil {
+		t.Fatal("Run: want the degraded install refused")
+	}
+	if !strings.Contains(got.Err.Error(), "review_isolation_unverified") {
+		t.Errorf("err = %v, want the review_isolation_unverified name", got.Err)
+	}
+	if e.runner.calls != 0 {
+		t.Errorf("harness calls = %d, want 0 (refused before any model child)", e.runner.calls)
+	}
+	if len(e.runner.probes) != 1 {
+		t.Errorf("probes = %d, want the one version probe apart from session children", len(e.runner.probes))
+	}
+}
+
+// The same gate holds for claude: a failed self-test with an unverified
+// installed CLI refuses rather than running command-denial flags on it.
+func TestDegradedSelfTestKeepsTheInstalledGateOnClaude(t *testing.T) {
+	e := newEnv(t)
+	writeRequiredHead(e, "a.go", "package a\n")
+	e.runner.serveErr = errors.New("connection refused")
+	e.runner.versions["claude"] = "9.9.9 (Claude Code)"
+	e.runner.script = []exec.Result{
+		{ExitCode: 0, Stdout: claudeStdout(batchAnswerFor(t, []string{"a.go"}))},
+	}
+
+	got := runLeg(t, e, e.request(t))
+	if got.Err == nil {
+		t.Fatal("Run: want the degraded install refused")
+	}
+	if !strings.Contains(got.Err.Error(), "review_isolation_unverified") {
+		t.Errorf("err = %v, want the review_isolation_unverified name", got.Err)
+	}
+	if e.runner.calls != 0 {
+		t.Errorf("harness calls = %d, want 0 (refused before any model child)", e.runner.calls)
+	}
+}
+
+// A harness failure still charges the served reads the call made: the
+// failed call reached the server before failing, so the halted marker
+// carries its reads even though the leg reports the harness failure.
+func TestFailedHarnessChargesTheServedReads(t *testing.T) {
+	e := newEnv(t)
+	writeRequiredHead(e, "a.go", "package a\n")
+	e.runner.onSpec = func(spec exec.Spec) {
+		serveChildSession(t, spec,
+			`{"event":"start"}`,
+			`{"event":"initialize"}`,
+			`{"event":"tools_list"}`,
+			`{"event":"read","payload":{"path":"a.go","revision":"head","start_line":1,"end_line":2,"bytes":11}}`,
+			`{"event":"end"}`,
+		)
+	}
+	e.runner.script = []exec.Result{
+		{ExitCode: 1, Stderr: []byte("Invalid API key")},
+	}
+
+	got := runLeg(t, e, e.request(t))
+	if got.Err == nil {
+		t.Fatal("Run: want the harness failure to stop the leg")
+	}
+	if !strings.Contains(got.Err.Error(), "harness failed") {
+		t.Fatalf("err = %v, want the harness failure", got.Err)
+	}
+	if len(got.Marker.Reads) == 0 {
+		t.Fatal("the failed marker carries no reads envelope for its served reads")
+	}
+	envelope, err := prstate.DecodeReadsEnvelope(got.Marker.Reads)
+	if err != nil {
+		t.Fatalf("decoding the failed marker envelope: %v", err)
+	}
+	if envelope.Reads != 1 || envelope.Bytes != 11 {
+		t.Errorf("envelope = %+v, want the one served read of 11 bytes", envelope)
+	}
+}
+
+// An interrupted call still charges the served reads the call made before
+// the kill: the ledger accounts what the server served, not only what the
+// harness answered.
+func TestInterruptedCallChargesTheServedReads(t *testing.T) {
+	e := newEnv(t)
+	writeRequiredHead(e, "a.go", "package a\n")
+	e.runner.onSpec = func(spec exec.Spec) {
+		serveChildSession(t, spec,
+			`{"event":"start"}`,
+			`{"event":"initialize"}`,
+			`{"event":"tools_list"}`,
+			`{"event":"read","payload":{"path":"a.go","revision":"head","start_line":1,"end_line":2,"bytes":11}}`,
+			`{"event":"read","payload":{"path":"a.go","revision":"head","start_line":3,"end_line":4,"bytes":11}}`,
+			`{"event":"end"}`,
+		)
+	}
+	e.runner.script = []exec.Result{
+		{ExitCode: 130},
+	}
+
+	got := runLeg(t, e, e.request(t))
+	if got.Err == nil {
+		t.Fatal("Run: want the interrupt to stop the leg")
+	}
+	if !strings.Contains(got.Err.Error(), "interrupted") {
+		t.Fatalf("err = %v, want the interrupt", got.Err)
+	}
+	if len(got.Marker.Reads) == 0 {
+		t.Fatal("the interrupted marker carries no reads envelope for its served reads")
+	}
+	envelope, err := prstate.DecodeReadsEnvelope(got.Marker.Reads)
+	if err != nil {
+		t.Fatalf("decoding the interrupted marker envelope: %v", err)
+	}
+	if envelope.Reads != 2 || envelope.Bytes != 22 {
+		t.Errorf("envelope = %+v, want the two served reads of 22 bytes", envelope)
+	}
+}
+
+// servedArgs reads the read-server argv the harness child was granted out
+// of the MCP config its spec names, or nil when the child was granted no
+// served tool. It mirrors serveChildSession's config walk.
+func servedArgs(t *testing.T, spec exec.Spec) []string {
+	t.Helper()
+	var mcpPath string
+	for at := 0; at+1 < len(spec.Args); at++ {
+		if spec.Args[at] == "--mcp-config" {
+			mcpPath = spec.Args[at+1]
+		}
+	}
+	if mcpPath == "" {
+		return nil
+	}
+	raw, err := os.ReadFile(mcpPath)
+	if err != nil {
+		t.Fatalf("reading the child MCP config: %v", err)
+	}
+	var document struct {
+		Servers map[string]struct {
+			Args []string `json:"args"`
+		} `json:"mcpServers"`
+	}
+	if err := json.Unmarshal(raw, &document); err != nil {
+		t.Fatalf("decoding the child MCP config: %v", err)
+	}
+	return document.Servers["crossrev"].Args
+}
+
+// servedFlag reads one flag value out of a served argv.
+func servedFlag(args []string, name string) (string, bool) {
+	for at := 0; at+1 < len(args); at++ {
+		if args[at] == name {
+			return args[at+1], true
+		}
+	}
+	return "", false
+}
+
+// Each read server is per call, so every model call is granted the leg's
+// remaining allowance: the first call carries the full 200-read / 1 MiB
+// leg caps.
+func TestFirstCallCarriesTheFullLegAllowance(t *testing.T) {
+	e := newEnv(t)
+	writeRequiredHead(e, "a.go", "package a\n")
+	var granted [][]string
+	e.runner.onSpec = func(spec exec.Spec) {
+		granted = append(granted, servedArgs(t, spec))
+		serveChildSession(t, spec,
+			`{"event":"start"}`,
+			`{"event":"initialize"}`,
+			`{"event":"tools_list"}`,
+			`{"event":"end"}`,
+		)
+	}
+	e.runner.script = []exec.Result{
+		{ExitCode: 0, Stdout: claudeStdout(batchAnswerFor(t, []string{"a.go"}))},
+	}
+
+	got := runLeg(t, e, e.request(t))
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
+	if len(granted) != 1 {
+		t.Fatalf("granted sessions = %d, want 1", len(granted))
+	}
+	if value, ok := servedFlag(granted[0], "--per-leg-reads"); !ok || value != "200" {
+		t.Errorf("--per-leg-reads = %q, want the full 200-read leg allowance", value)
+	}
+	if value, ok := servedFlag(granted[0], "--per-leg-bytes"); !ok || value != "1048576" {
+		t.Errorf("--per-leg-bytes = %q, want the full 1 MiB leg allowance", value)
+	}
+}
+
+// The leg caps bind the whole pass, not each batch: a second batch is
+// granted the first batch's remainder, so two batches cannot serve 200
+// reads each.
+func TestSecondBatchReceivesTheRemainingAllowance(t *testing.T) {
+	e := newEnv(t)
+	var first, rest []string
+	for i := 1; i <= 41; i++ {
+		path := fmt.Sprintf("file%02d.go", i)
+		writeRequiredHead(e, path, "package x\n")
+		if i <= 40 {
+			first = append(first, path)
+		} else {
+			rest = append(rest, path)
+		}
+	}
+	var granted [][]string
+	var children int
+	e.runner.onSpec = func(spec exec.Spec) {
+		children++
+		granted = append(granted, servedArgs(t, spec))
+		lines := []string{
+			`{"event":"start"}`,
+			`{"event":"initialize"}`,
+			`{"event":"tools_list"}`,
+		}
+		if children == 1 {
+			lines = append(lines,
+				`{"event":"read","payload":{"path":"file1.go","revision":"head","start_line":1,"end_line":2,"bytes":11}}`,
+				`{"event":"read","payload":{"path":"file2.go","revision":"head","start_line":1,"end_line":2,"bytes":11}}`,
+				`{"event":"read","payload":{"path":"file3.go","revision":"head","start_line":1,"end_line":2,"bytes":11}}`,
+			)
+		}
+		lines = append(lines, `{"event":"end"}`)
+		serveChildSession(t, spec, lines...)
+	}
+	e.runner.script = []exec.Result{
+		{ExitCode: 0, Stdout: claudeStdout(findingAnswer(t, first[0], first[1:], "First batch finding"))},
+		{ExitCode: 0, Stdout: claudeStdout(findingAnswer(t, rest[0], nil, "Second batch finding"))},
+	}
+
+	got := runLeg(t, e, e.request(t))
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
+	if e.runner.calls != 2 {
+		t.Fatalf("harness calls = %d, want 2 (two batches)", e.runner.calls)
+	}
+	if len(granted) != 2 {
+		t.Fatalf("granted sessions = %d, want 2", len(granted))
+	}
+	if value, ok := servedFlag(granted[1], "--per-leg-reads"); !ok || value != "197" {
+		t.Errorf("second batch --per-leg-reads = %q, want 197 after three served reads", value)
+	}
+	if value, ok := servedFlag(granted[1], "--per-leg-bytes"); !ok || value != "1048543" {
+		t.Errorf("second batch --per-leg-bytes = %q, want 1048543 after 33 served bytes", value)
+	}
+	if len(got.Marker.Reads) == 0 {
+		t.Fatal("the marker carries no reads envelope")
+	}
+	envelope, err := prstate.DecodeReadsEnvelope(got.Marker.Reads)
+	if err != nil {
+		t.Fatalf("decoding the marker envelope: %v", err)
+	}
+	if envelope.Reads != 3 || envelope.Bytes != 33 {
+		t.Errorf("envelope = %+v, want the three served reads of 33 bytes", envelope)
 	}
 }
 

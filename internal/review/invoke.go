@@ -381,7 +381,8 @@ func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settin
 	}
 	readsReason := unwired
 	if effective == harness.ReadModeServed {
-		command, session, err := serveSession(workdir, tmp, loaded.PR.BaseRefOid, loaded.PR.HeadRefOid, call)
+		remainingReads, remainingBytes := l.readsRemaining()
+		command, session, err := serveSession(workdir, tmp, loaded.PR.BaseRefOid, loaded.PR.HeadRefOid, call, remainingReads, remainingBytes)
 		if err != nil {
 			return harness.Envelope{}, nil, outMsgs, err
 		}
@@ -427,10 +428,13 @@ func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settin
 	// unverified flags. A mismatch — or a probe that fails or names no
 	// version — is refused with review_isolation_unverified. The probe is
 	// `<binary> --version`, which starts no model and costs no call.
-	// Supplied legs with no command block never reach this: only served
-	// legs and the grok tripwire review are checked. Every resolve leg is
-	// unaffected.
-	if effective == harness.ReadModeServed || settings.harness == "grok" {
+	// The declared mode decides, not the effective one: a failed self-test
+	// degrades the read path to supplied above, and the gate must still
+	// hold on the degraded call rather than running command-denial flags
+	// on an unverified CLI. Supplied legs with no command block never
+	// reach this: only served-declared legs and the grok tripwire review
+	// are checked. Every resolve leg is unaffected.
+	if declared == harness.ReadModeServed || settings.harness == "grok" {
 		if refusal := harness.InstalledIsolationRefusal(ctx, l.runner(), adapter, settings.harness, entry.Install.PinnedVersion, inv); refusal != nil {
 			return harness.Envelope{}, nil, outMsgs, &ui.FatalError{
 				Reason: refusal.Reason,
@@ -528,8 +532,13 @@ func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settin
 			if l.Log != nil {
 				l.Log.Event("tripwire", harness.RedactedCommand(command))
 			}
+			// The discarded call still served reads before it tripped:
+			// the ledger charges what the server served even though the
+			// call publishes nothing. The check reads before the archive
+			// drains the log, the way the post-call check does.
+			trippedCalls, trippedStats := l.currentCallReads(tmp)
+			l.noteReads(readsNote{declared: declared, effective: effective, reason: ReadsReasonReviewCommand, stats: trippedStats, calls: trippedCalls})
 			archiveReadLog()
-			l.noteReads(readsNote{declared: declared, effective: effective, reason: ReadsReasonReviewCommand})
 			return envelope, nil, outMsgs, &ui.FatalError{
 				Reason: refusal.Reason,
 				Action: refusal.Action,
@@ -554,6 +563,10 @@ func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settin
 			// leaves the claim resumable instead of printing the
 			// harness-failure message. Bare context.Canceled would reach
 			// the terminal as a plain error with the doctor hint.
+			// An interrupt ends the child, not the served reads behind
+			// it: charge what the server served before the kill.
+			interruptedCalls, interruptedStats := l.currentCallReads(tmp)
+			l.noteReads(readsNote{declared: declared, effective: effective, reason: readsReason, stats: interruptedStats, calls: interruptedCalls})
 			archiveReadLog()
 			return envelope, nil, outMsgs, errors.Join(&ui.FatalError{
 				Reason: fmt.Sprintf("the %s harness was interrupted", settings.harness),
@@ -574,9 +587,18 @@ func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settin
 				outMsgs = append(outMsgs, ui.Warn(
 					fmt.Sprintf("%s hit a transient harness failure — %s", settings.harness, msg),
 					"The harness failed before answering rather than answering badly, so this looks like a server-side or transport failure. It is being asked once more; a second failure is fatal."))
+				// The failed attempt's session drains here while the retry
+				// starts its own, so its served reads are charged now
+				// rather than folded into the retry's assessment.
+				failedCalls, failedStats := l.currentCallReads(tmp)
+				l.noteReads(readsNote{declared: declared, effective: effective, reason: readsReason, stats: failedStats, calls: failedCalls})
 				archiveReadLog()
 				continue
 			}
+			// The failed call reached the server before failing: charge
+			// what it served even though the leg reports the failure.
+			failedCalls, failedStats := l.currentCallReads(tmp)
+			l.noteReads(readsNote{declared: declared, effective: effective, reason: readsReason, stats: failedStats, calls: failedCalls})
 			archiveReadLog()
 			return envelope, nil, outMsgs, &ui.FatalError{
 				Reason: fmt.Sprintf("the %s harness failed: %s", settings.harness, msg),
@@ -636,6 +658,12 @@ func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settin
 					"The shape is right, so this is the model drifting rather than a bug in CrossRev or the harness. Anything it edited has been put back, and it is being asked once more; a second one is fatal."))
 				continue
 			}
+			// Twice-rejected answers still ran their served sessions:
+			// charge them and archive the log the success path would
+			// have archived.
+			rejectedCalls, rejectedStats := l.currentCallReads(tmp)
+			l.noteReads(readsNote{declared: declared, effective: effective, reason: readsReason, stats: rejectedStats, calls: rejectedCalls})
+			archiveReadLog()
 			return envelope, nil, outMsgs, &ui.FatalError{
 				Reason: fmt.Sprintf("%s twice returned an answer that contradicts what it was given — %s", settings.harness, problem),
 				Action: "The shape was right both times, so the schema cannot catch this and CrossRev will not guess which finding was meant. Nothing has been written to the pull request, and the edits both rejected attempts made have been put back. Re-run the leg, or try the other harness.",
@@ -655,7 +683,12 @@ func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settin
 		// Two endings, and the difference is whose bug it is
 		// (lib/run.sh:905-911). Printing the native-schema one for a harness
 		// that has no native schema sends the reader to the adapter over a
-		// model that simply did not follow the instruction.
+		// model that simply did not follow the instruction. The rejected
+		// attempts still ran their served sessions, so they are charged
+		// and archived here rather than leaking out of the ledger.
+		rejectedCalls, rejectedStats := l.currentCallReads(tmp)
+		l.noteReads(readsNote{declared: declared, effective: effective, reason: readsReason, stats: rejectedStats, calls: rejectedCalls})
+		archiveReadLog()
 		return envelope, nil, outMsgs, &ui.FatalError{
 			Reason: fmt.Sprintf("%s returned an object that does not match the schema — %s", settings.harness, problem),
 			Action: shapeExhaustedAction(schemaNative),

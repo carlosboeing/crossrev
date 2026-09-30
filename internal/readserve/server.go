@@ -51,6 +51,11 @@ func parseArgs(args []string) Config {
 		MaxResultBytes: DefaultMaxResultBytes,
 		MaxResultLines: DefaultMaxResultLines,
 	}
+	// The leg passes its remainder down to every server session, and a
+	// spent leg passes an explicit zero: that zero is exhaustion, never
+	// an absent flag, so only an unseen flag defaults.
+	perLegReadsSet := false
+	perLegBytesSet := false
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		if arg == "--repo" && i+1 < len(args) {
@@ -79,9 +84,11 @@ func parseArgs(args []string) Config {
 			i++
 		} else if arg == "--per-leg-reads" && i+1 < len(args) {
 			c.PerLegReads, _ = strconv.Atoi(args[i+1])
+			perLegReadsSet = true
 			i++
 		} else if arg == "--per-leg-bytes" && i+1 < len(args) {
 			c.PerLegBytes, _ = strconv.Atoi(args[i+1])
+			perLegBytesSet = true
 			i++
 		}
 	}
@@ -96,11 +103,19 @@ func parseArgs(args []string) Config {
 	if c.PerCallBytes <= 0 {
 		c.PerCallBytes = DefaultPerCallBytes
 	}
-	if c.PerLegReads <= 0 {
+	// An explicit leg remainder of zero exhausts the server: every read
+	// refuses as budget_exhausted while the handshake still answers. A
+	// negative remainder is clamped to the same exhaustion rather than
+	// resetting to the defaults the leg meant to spend down.
+	if !perLegReadsSet {
 		c.PerLegReads = DefaultPerLegReads
+	} else if c.PerLegReads < 0 {
+		c.PerLegReads = 0
 	}
-	if c.PerLegBytes <= 0 {
+	if !perLegBytesSet {
 		c.PerLegBytes = DefaultPerLegBytes
+	} else if c.PerLegBytes < 0 {
+		c.PerLegBytes = 0
 	}
 	return c
 }

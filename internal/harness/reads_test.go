@@ -553,6 +553,48 @@ func TestUnverifiedServedBlockNeverReviews(t *testing.T) {
 	}
 }
 
+// A supplied codex leg keeps every independent reader denied: Apps, web
+// search and image generation register independently of the shell flag, so
+// a served-to-supplied fallback after a failed self-test must not regain
+// the readers the served leg denied. Both legs deny them; the zero mode
+// keeps the legacy argv every stub test pins.
+func TestCodexSuppliedModesDenyIndependentReaders(t *testing.T) {
+	adapter := codexAdapter(t)
+	for _, write := range []bool{false, true} {
+		inv := invocation(t, "codex", write)
+		inv.ReadMode = harness.ReadModeSupplied
+		spec, err := adapter.Spec(inv)
+		if err != nil {
+			t.Fatalf("building the spec: %v", err)
+		}
+		if !hasFlagPair(spec.Args, "--disable", "apps") {
+			t.Errorf("a supplied codex leg keeps the app connectors enabled; got %v", spec.Args)
+		}
+		if !hasFlagPair(spec.Args, "--disable", "image_generation") {
+			t.Errorf("a supplied codex leg keeps image generation enabled; got %v", spec.Args)
+		}
+		if !hasConfigPair(spec.Args, "web_search", "disabled") {
+			t.Errorf("a supplied codex leg keeps web search enabled; got %v", spec.Args)
+		}
+	}
+	inv := invocation(t, "codex", false)
+	spec, err := adapter.Spec(inv)
+	if err != nil {
+		t.Fatalf("building the spec: %v", err)
+	}
+	if hasFlagPair(spec.Args, "--disable", "apps") {
+		t.Errorf("a zero-mode leg denies the app connectors; got %v", spec.Args)
+	}
+	if hasFlagPair(spec.Args, "--disable", "image_generation") {
+		t.Errorf("a zero-mode leg denies image generation; got %v", spec.Args)
+	}
+	for _, arg := range spec.Args {
+		if strings.HasPrefix(arg, "web_search=") {
+			t.Errorf("a zero-mode leg sets a web search mode; got %v", spec.Args)
+		}
+	}
+}
+
 // hasConfigPair reports a codex -c key=value override.
 func hasConfigPair(args []string, key, value string) bool {
 	for at := 0; at+1 < len(args); at++ {

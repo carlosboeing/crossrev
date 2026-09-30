@@ -117,14 +117,17 @@ func ReviewIsolationRefusal(doc Document, name string) *Refusal {
 // the verified command block: the descriptor pin says what the operator
 // asked for, and a local install at a different version passes that gate
 // while running unverified flags. The probe is `<binary> --version`, which
-// starts no model and costs no call. An install outside the recorded span,
-// a probe that fails, or a banner naming no version is refused with
-// review_isolation_unverified before any child starts. Adapters with no
-// probe — supplied harnesses with no command block — are unaffected.
+// starts no model and costs no call. An install that is not the verified
+// version, a probe that fails, or a banner naming no version is refused
+// with review_isolation_unverified before any child starts. Adapters with
+// no probe — supplied harnesses with no command block — are unaffected.
 //
 // Both halves have to hold: the pin's block verified (grok carries no entry
-// at any pin) and the installed version inside the recorded span (exact for
-// codex, the recorded-runs span for claude).
+// at any pin) and the installed version exactly the verified one. General
+// compatibility history is not isolation evidence: an intermediate version
+// between two recorded runs, or a prerelease token over a verified one,
+// was never verified under this served-or-tripwire configuration and is
+// refused the way an unknown version is.
 func InstalledIsolationRefusal(ctx context.Context, runner exec.Runner, adapter Adapter, name, pin string, inv Invocation) *Refusal {
 	pinned, ok := adapter.(VersionPinned)
 	if !ok {
@@ -143,7 +146,6 @@ func InstalledIsolationRefusal(ctx context.Context, runner exec.Runner, adapter 
 	if res.Err == nil && res.ExitCode == 0 {
 		token = versionToken.FindString(string(res.Stdout))
 	}
-	span, _ := RecordedSpan(name, pin)
 	if token == "" {
 		return &Refusal{
 			Reason: fmt.Sprintf("the installed %s CLI reported no version, so the verified command block cannot be confirmed (review_isolation_unverified)", name),
@@ -151,14 +153,23 @@ func InstalledIsolationRefusal(ctx context.Context, runner exec.Runner, adapter 
 			Kind:   ErrIsolationUnverified,
 		}
 	}
-	if !span.ContainsToken(token) {
+	want, _ := verifiedCommandBlocks[name]
+	if normalizeIsolationToken(token) != want {
 		return &Refusal{
-			Reason: fmt.Sprintf("the installed %s CLI reports version %s, outside the recorded span %s (review_isolation_unverified)", name, token, span.Label(pin)),
+			Reason: fmt.Sprintf("the installed %s CLI reports version %s, which carries no verified command block for this configuration (review_isolation_unverified)", name, token),
 			Action: action,
 			Kind:   ErrIsolationUnverified,
 		}
 	}
 	return nil
+}
+
+// normalizeIsolationToken strips the probe banner down to the comparable
+// release: a leading `v` names the same release, while any prerelease
+// suffix names a different one. The comparison stays an exact string
+// match, never a numeric span.
+func normalizeIsolationToken(token string) string {
+	return strings.TrimPrefix(token, "v")
 }
 
 // --- the served tool ---------------------------------------------------------

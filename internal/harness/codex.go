@@ -99,13 +99,12 @@ func (a *Codex) Spec(inv Invocation) (exec.Spec, error) {
 	// denial beside it grants nothing on its own and stays as a retained
 	// flag rather than a second block. The image reader and the
 	// connected-app connectors are registered independently of the shell
-	// flag, so a served leg denies view_image, apps and image_generation
+	// flag, so an explicit leg denies view_image, apps and image_generation
 	// too, with web search resolved through its disabled mode: without
 	// them it keeps local-file, connector, web and image read paths
 	// outside the logged server. The zero mode keeps the legacy shape every stub
 	// test pins; an explicit served or supplied mode disables the shell
-	// pair and the image reader, and served additionally denies the
-	// connectors and image generation, disables web search, and wires
+	// pair and every independent reader, and served additionally wires
 	// CrossRev's read tool as the leg's only read path: the
 	// mcp_servers.crossrev command, its args array and the approval mode
 	// beside --ignore-user-config.
@@ -136,7 +135,13 @@ func (a *Codex) Spec(inv Invocation) (exec.Spec, error) {
 		if !inv.Write {
 			args = append(args, "--disable", "shell_tool", "--disable", "unified_exec")
 		}
-		args = append(args, "--disable", "view_image")
+		// A supplied leg is an explicit mode, including the served-to-supplied
+		// fallback after a failed self-test: it keeps the independent-reader
+		// denials the served leg carries above, so degrading the read path
+		// never regains Apps, web search or image generation beside the
+		// prompt. The zero mode matches no case and keeps its legacy shape.
+		args = append(args, "--disable", "view_image", "--disable", "apps", "--disable", "image_generation")
+		args = append(args, "-c", "web_search="+tomlQuote("disabled"))
 	}
 
 	// Codex takes the schema as a FILE PATH, where Claude Code takes it inline.

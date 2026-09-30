@@ -6,9 +6,11 @@
 // recorded runs proved past the pin, and only Claude Code has any: its pin
 // is 2.1.237 and recorded runs reach 2.1.281.
 //
-// Both `crossrev doctor` and the review leg's installed-version gate read
-// this: doctor reports where an install falls, and the leg refuses a
-// served-or-tripwire review on an install outside it.
+// Only `crossrev doctor` reads this: doctor reports where an install falls
+// inside general compatibility history. The review leg's installed-version
+// gate never reads it — a span across tool configurations is not isolation
+// evidence for this served-or-tripwire one, so the gate compares the
+// installed version against the exact verified pin instead.
 
 package harness
 

@@ -59,5 +59,11 @@ served tool served, so a pass is reproducible from its own record: the
 reads envelope on the marker and the generation, and reads.json beside the
 generation. A harness whose served-or-tripwire command block is unverified
 at its pin never reviews — moving a pin unverifies it until the flags are
-verified again. The release proof re-proves the event legs on the testbed
-once this ships, the way v0.8.0 did, because this changes what CI legs run.
+verified again — and the installed CLI must be the exact verified version:
+recorded compatibility history is not isolation evidence, and a failed
+self-test that degrades reads to supplied keeps the version gate while the
+supplied fallback keeps every served denial. Each model call is granted the
+leg's remaining allowance against the pass caps, and served reads are
+charged even when the call publishes nothing. The release proof re-proves
+the event legs on the testbed once this ships, the way v0.8.0 did, because
+this changes what CI legs run.
