@@ -276,7 +276,7 @@ func (m *Marker) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-// clone copies the four payloads a marker carries as raw bytes.
+// clone copies the seven payloads a marker carries as raw bytes.
 //
 // Marker is returned by value, but a slice header shares its backing array, so
 // a caller editing what a reader handed it would reach the marker list the
@@ -284,6 +284,7 @@ func (m *Marker) UnmarshalJSON(b []byte) error {
 func (m Marker) clone() Marker {
 	m.Tokens = bytes.Clone(m.Tokens)
 	m.Usage = bytes.Clone(m.Usage)
+	m.Reads = bytes.Clone(m.Reads)
 	m.Findings = bytes.Clone(m.Findings)
 	m.Resolutions = bytes.Clone(m.Resolutions)
 	m.CoveragePayload = bytes.Clone(m.CoveragePayload)
