@@ -44,3 +44,15 @@ func TestOnReadsUnavailableRefusesAThirdValue(t *testing.T) {
 		t.Errorf("err = %q, want it to name on_reads_unavailable", got)
 	}
 }
+
+// A quote inside the refused value must not break the refusal's quoting:
+// the value renders double-quoted, so a single quote rides along intact.
+func TestOnReadsUnavailableRefusalQuotesAQuote(t *testing.T) {
+	_, err := load(t, "version: 2\npolicy:\n  on_reads_unavailable: \"re'try\"\n")
+	if err == nil {
+		t.Fatal("a quoted third value for on_reads_unavailable loads")
+	}
+	if got := err.Error(); !strings.Contains(got, `is "re'try", which is not one of`) {
+		t.Errorf("err = %q, want the value double-quoted with its quote intact", got)
+	}
+}

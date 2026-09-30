@@ -13,6 +13,7 @@ package harness
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/carlosboeing/crossrev/internal/exec"
@@ -122,7 +123,7 @@ func (a *Claude) Spec(inv Invocation) (exec.Spec, error) {
 	if inv.Endpoint.Named() {
 		if inv.Endpoint.Token == "" {
 			return exec.Spec{}, &Refusal{
-				Reason: "the endpoint '" + inv.Endpoint.Name + "' needs $" + inv.Endpoint.TokenVar + ", which is unset",
+				Reason: fmt.Sprintf("the endpoint %q needs $%s, which is unset", inv.Endpoint.Name, inv.Endpoint.TokenVar),
 				Action: "Export it, or set it as a repository secret for CI. CrossRev will not fall back to the vendor's own API.",
 				Kind:   ErrEndpointToken,
 			}
@@ -189,7 +190,7 @@ func (a *Claude) finishReviewSpec(inv Invocation, args []string) (exec.Spec, err
 	if inv.Endpoint.Named() {
 		if inv.Endpoint.Token == "" {
 			return exec.Spec{}, &Refusal{
-				Reason: "the endpoint '" + inv.Endpoint.Name + "' needs $" + inv.Endpoint.TokenVar + ", which is unset",
+				Reason: fmt.Sprintf("the endpoint %q needs $%s, which is unset", inv.Endpoint.Name, inv.Endpoint.TokenVar),
 				Action: "Export it, or set it as a repository secret for CI. CrossRev will not fall back to the vendor's own API.",
 				Kind:   ErrEndpointToken,
 			}

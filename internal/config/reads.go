@@ -26,7 +26,7 @@ func (c *Config) assertOnReadsUnavailable() error {
 		return nil
 	default:
 		return &Refusal{
-			Message: fmt.Sprintf("policy.on_reads_unavailable is '%s', which is not one of degrade or halt", named(value)),
+			Message: fmt.Sprintf("policy.on_reads_unavailable is %q, which is not one of degrade or halt", named(value)),
 			Hint:    "It decides whether a leg with no served reads degrades visibly or stops. Set it to degrade or halt in the repository config, or remove it to take the default of degrade.",
 		}
 	}
