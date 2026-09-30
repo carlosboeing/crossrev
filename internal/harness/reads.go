@@ -24,6 +24,7 @@
 package harness
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -31,6 +32,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/carlosboeing/crossrev/internal/exec"
 	"github.com/carlosboeing/crossrev/internal/runlog"
 )
 
@@ -109,6 +111,54 @@ func ReviewIsolationRefusal(doc Document, name string) *Refusal {
 		Action: "The served-or-tripwire command block is verified on each pinned version, or the pin moves. Verify the flags on this version and record the pin, or point this leg at another harness with --harness.",
 		Kind:   ErrIsolationUnverified,
 	}
+}
+
+// InstalledIsolationRefusal checks the CLI that will actually run against
+// the verified command block: the descriptor pin says what the operator
+// asked for, and a local install at a different version passes that gate
+// while running unverified flags. The probe is `<binary> --version`, which
+// starts no model and costs no call. An install outside the recorded span,
+// a probe that fails, or a banner naming no version is refused with
+// review_isolation_unverified before any child starts. Adapters with no
+// probe — supplied harnesses with no command block — are unaffected.
+//
+// Both halves have to hold: the pin's block verified (grok carries no entry
+// at any pin) and the installed version inside the recorded span (exact for
+// codex, the recorded-runs span for claude).
+func InstalledIsolationRefusal(ctx context.Context, runner exec.Runner, adapter Adapter, name, pin string, inv Invocation) *Refusal {
+	pinned, ok := adapter.(VersionPinned)
+	if !ok {
+		return nil
+	}
+	action := "The served-or-tripwire command block is verified on each pinned version, or the pin moves. Verify the flags on the installed version and record the pin, or point this leg at another harness with --harness."
+	if !IsolationVerified(name, pin) {
+		return &Refusal{
+			Reason: fmt.Sprintf("the %s command block carries no verified pin (review_isolation_unverified)", name),
+			Action: action,
+			Kind:   ErrIsolationUnverified,
+		}
+	}
+	res := runner.Run(ctx, pinned.VersionProbe(inv))
+	token := ""
+	if res.Err == nil && res.ExitCode == 0 {
+		token = versionToken.FindString(string(res.Stdout))
+	}
+	span, _ := RecordedSpan(name, pin)
+	if token == "" {
+		return &Refusal{
+			Reason: fmt.Sprintf("the installed %s CLI reported no version, so the verified command block cannot be confirmed (review_isolation_unverified)", name),
+			Action: action,
+			Kind:   ErrIsolationUnverified,
+		}
+	}
+	if !span.ContainsToken(token) {
+		return &Refusal{
+			Reason: fmt.Sprintf("the installed %s CLI reports version %s, outside the recorded span %s (review_isolation_unverified)", name, token, span.Label(pin)),
+			Action: action,
+			Kind:   ErrIsolationUnverified,
+		}
+	}
+	return nil
 }
 
 // --- the served tool ---------------------------------------------------------

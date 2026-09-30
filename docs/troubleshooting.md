@@ -160,7 +160,7 @@ Two ways forward, and only these two: resolve fewer findings in the pass, or mov
 
 ## A resolve leg ran a command
 
-Resolve legs edit files and never run commands. Each harness denies commands on its resolve leg: Codex runs `--sandbox workspace-write` with `--disable shell_tool --disable unified_exec --disable view_image`; Claude Code runs `--permission-mode acceptEdits` with `--disallowedTools Bash`; Grok runs `--tools Read,Grep,Glob,Edit,Write` with no shell entry; Antigravity runs `--mode accept-edits` with no bypass flag.
+Resolve legs edit files and never run commands. Each harness denies commands on its resolve leg: Codex runs `--sandbox workspace-write` with `--disable shell_tool --disable unified_exec --disable view_image --disable apps`; Claude Code runs `--permission-mode acceptEdits` with `--disallowedTools Bash`; Grok runs `--tools Read,Grep,Glob,Edit,Write` with no shell entry; Antigravity runs `--mode accept-edits` with no bypass flag.
 
 On Codex, Claude Code and Grok the denial is watched afterwards. Their resolve legs stream the tool record — Codex `--json`, Claude Code `--output-format stream-json`, Grok `--output-format streaming-json` — and the leg fails before anything is pushed when a command event appears, naming the harness and the command. Anything the command changed is put back.
 
@@ -170,7 +170,7 @@ Antigravity is the exception. Its `--output-format json` carries no tool events,
 
 `review_leg_ran_command`
 
-Review legs read without running commands. Codex reviews with `--disable shell_tool --disable unified_exec --disable view_image` beside the served tool; Claude Code reviews with an empty built-in tool list and only the served read allowed. Grok reviews are refused with `review_isolation_unverified` before any child starts — the empty tools allowlist left the command tool callable on the pinned version — while its resolve leg is unaffected.
+Review legs read without running commands. Codex reviews with `--disable shell_tool --disable unified_exec --disable view_image --disable apps` beside the served tool; Claude Code reviews with an empty built-in tool list and only the served read allowed. Grok reviews are refused with `review_isolation_unverified` before any child starts — the empty tools allowlist left the command tool callable on the pinned version — while its resolve leg is unaffected.
 
 Codex and Claude Code stream the tool record — Codex `--json`, Claude Code `--output-format stream-json` — and the leg halts before anything is published when a command event appears. The command reaches the run log only, redacted: the failure names the harness and the failure mode, never the command. Nothing has been written to the pull request, so re-running the leg is safe; if it trips again, the harness is running commands its flags should deny.
 
@@ -217,7 +217,7 @@ Codex resolves again: the served read tool serves resolve legs too, so the refus
 
 `the <harness> review leg cannot be verified at pin <version> (review_isolation_unverified)`
 
-A review leg whose served-or-tripwire command block is unverified at its pin never reviews: the leg is refused before any child starts, while its resolve leg is unaffected. The block is verified on each pinned version — codex 0.159.2, claude 2.1.237 — or the pin moves. Grok carries no verified entry — its block failed on the pinned version — so every grok review is refused until a block is verified and recorded again. Moving a pin unverifies it until the flags are verified again, so a custom pin that changes any of those versions refuses the review leg on purpose. Verify the flags on the new version and record the pin, or point the leg at another harness with `--harness`. `crossrev doctor` prints each harness's mode and verification before the leg runs.
+A review leg whose served-or-tripwire command block is unverified at its pin never reviews: the leg is refused before any child starts, while its resolve leg is unaffected. The block is verified on each pinned version — codex 0.159.2, claude 2.1.237 — or the pin moves. The leg also probes the installed CLI (`<binary> --version`, which starts no model) and refuses an install outside the recorded span under the same name: the descriptor pin says what the operator asked for, while the probe says what will actually run. Grok carries no verified entry — its block failed on the pinned version — so every grok review is refused until a block is verified and recorded again. Moving a pin unverifies it until the flags are verified again, so a custom pin that changes any of those versions refuses the review leg on purpose. Verify the flags on the new version and record the pin, or point the leg at another harness with `--harness`. `crossrev doctor` prints each harness's mode and verification before the leg runs.
 
 ## Served reads are unavailable
 

@@ -419,6 +419,26 @@ func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settin
 		}
 	}
 
+	// The installed gate, before any child starts: a served or tripwire
+	// review runs only on the CLI version the command block was verified
+	// against. The descriptor pin above says what the operator asked for;
+	// the probe says what will actually run, and a local CLI at a
+	// different, unverified version passes the pin gate while running
+	// unverified flags. A mismatch — or a probe that fails or names no
+	// version — is refused with review_isolation_unverified. The probe is
+	// `<binary> --version`, which starts no model and costs no call.
+	// Supplied legs with no command block never reach this: only served
+	// legs and the grok tripwire review are checked. Every resolve leg is
+	// unaffected.
+	if effective == harness.ReadModeServed || settings.harness == "grok" {
+		if refusal := harness.InstalledIsolationRefusal(ctx, l.runner(), adapter, settings.harness, entry.Install.PinnedVersion, inv); refusal != nil {
+			return harness.Envelope{}, nil, outMsgs, &ui.FatalError{
+				Reason: refusal.Reason,
+				Action: refusal.Action,
+			}
+		}
+	}
+
 	// The version gate, before anything starts: an adapter that pins its CLI
 	// version refuses an install it does not drive rather than run a leg on it.
 	// The confirmed major travels into the invocation, because one adapter can

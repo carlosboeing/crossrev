@@ -490,12 +490,16 @@ type fakeRunner struct {
 	script []exec.Result
 	calls  int
 	onSpec func(exec.Spec)
-	// probes records `--version` children, and version is what they answer.
-	// A probe is not a session child: it neither advances the script nor
-	// counts in calls, the same way tests/stub/opencode answers --version
-	// before it logs anything.
-	probes  []exec.Spec
-	version string
+	// probes records `--version` children, and versions answers them by
+	// binary: the installed CLI each probe reports. A probe is not a
+	// session child: it neither advances the script nor counts in calls,
+	// the same way tests/stub/opencode answers --version before it logs
+	// anything. version keeps answering the opencode probe for the tests
+	// that set it; probeFail answers every probe as a failure.
+	probes    []exec.Spec
+	versions  map[string]string
+	version   string
+	probeFail bool
 	// vcs answers the served read server the leg-start self-test speaks to.
 	// A `__read-server` session is not a harness child either: the fake
 	// serves it from the same file map the fixture's VCS reads, renders
@@ -515,19 +519,27 @@ func (r *fakeRunner) Run(_ context.Context, spec exec.Spec) exec.Result {
 			served = true
 		}
 	}
-	// The served session is not a harness child, so it leaves no harness
-	// event: progress tests read the harness boundary off these events.
-	if r.log != nil && !served {
+	// Neither the served session nor a version probe is a harness child,
+	// so neither leaves a harness event: progress tests read the harness
+	// boundary off these events.
+	if r.log != nil && !served && !(len(spec.Args) == 1 && spec.Args[0] == "--version") {
 		r.log.add("harness")
 	}
 	r.mu.Lock()
 	if len(spec.Args) == 1 && spec.Args[0] == "--version" {
 		r.probes = append(r.probes, spec)
-		version := r.version
+		probeFail := r.probeFail
+		version := r.versions[spec.Path]
+		if version == "" {
+			version = r.version
+		}
 		if version == "" {
 			version = "1.18.21 (test stub)"
 		}
 		r.mu.Unlock()
+		if probeFail {
+			return exec.Result{ExitCode: 1}
+		}
 		return exec.Result{ExitCode: 0, Stdout: []byte(version + "\n")}
 	}
 	for _, arg := range spec.Args {
@@ -978,6 +990,21 @@ func newEnv(t *testing.T) *env {
 		baseSHA: {},
 		"":      {},
 	}}
+	doc := mustDoc(t)
+	// Probes report the descriptor's own pins unless a test says
+	// otherwise: the installed CLI matches the verified pin, so the
+	// installed gate passes and only the tests that move the install
+	// exercise the refusal.
+	versions := map[string]string{}
+	for name, banner := range map[string]string{
+		"codex":  "codex-cli %s",
+		"claude": "%s (Claude Code)",
+		"grok":   "grok %s (test stub)",
+	} {
+		if entry, found := doc.For(name); found {
+			versions[entry.Binary] = fmt.Sprintf(banner, entry.Install.PinnedVersion)
+		}
+	}
 	return &env{
 		log: events,
 		forge: &fakeForge{
@@ -997,9 +1024,9 @@ func newEnv(t *testing.T) *env {
 			},
 		},
 		vcs:    vcs,
-		runner: &fakeRunner{log: events, vcs: vcs},
+		runner: &fakeRunner{log: events, vcs: vcs, versions: versions},
 		cfg:    mustConfig(t, ""),
-		doc:    mustDoc(t),
+		doc:    doc,
 		dir:    dir,
 	}
 }

@@ -286,6 +286,104 @@ func TestShippedGrokReviewIsRefused(t *testing.T) {
 	}
 }
 
+// A served review on an install outside the verified pin is refused with
+// review_isolation_unverified before any model child starts: the descriptor
+// pin says what the operator asked for, and the probe says what will
+// actually run. The probe is recorded apart from session children.
+func TestInstalledMismatchRefusesBeforeAnyModelChild(t *testing.T) {
+	e := newEnv(t)
+	writeRequiredHead(e, "a.go", "package a\n")
+	e.runner.versions["codex"] = "codex-cli 0.152.1"
+	req := e.request(t)
+	req.HarnessOverride = "codex"
+	e.runner.script = []exec.Result{
+		{ExitCode: 0, Stdout: claudeStdout(batchAnswerFor(t, []string{"a.go"}))},
+	}
+
+	got := runLeg(t, e, req)
+	if got.Err == nil {
+		t.Fatal("Run: want the installed mismatch refused")
+	}
+	if !strings.Contains(got.Err.Error(), "review_isolation_unverified") {
+		t.Errorf("err = %v, want the review_isolation_unverified name", got.Err)
+	}
+	if !strings.Contains(got.Err.Error(), "0.152.1") {
+		t.Errorf("err = %v, want the installed version named", got.Err)
+	}
+	if e.runner.calls != 0 {
+		t.Errorf("harness calls = %d, want 0 (refused before any model child)", e.runner.calls)
+	}
+	if len(e.runner.probes) != 1 {
+		t.Errorf("probes = %d, want the one version probe apart from session children", len(e.runner.probes))
+	}
+}
+
+// A version probe that fails is refused the same way: fail closed, since an
+// install CrossRev cannot confirm is not one it drives.
+func TestFailedVersionProbeRefuses(t *testing.T) {
+	e := newEnv(t)
+	writeRequiredHead(e, "a.go", "package a\n")
+	e.runner.probeFail = true
+	req := e.request(t)
+	req.HarnessOverride = "codex"
+	e.runner.script = []exec.Result{
+		{ExitCode: 0, Stdout: claudeStdout(batchAnswerFor(t, []string{"a.go"}))},
+	}
+
+	got := runLeg(t, e, req)
+	if got.Err == nil {
+		t.Fatal("Run: want the failed probe refused")
+	}
+	if !strings.Contains(got.Err.Error(), "review_isolation_unverified") {
+		t.Errorf("err = %v, want the review_isolation_unverified name", got.Err)
+	}
+	if e.runner.calls != 0 {
+		t.Errorf("harness calls = %d, want 0 (refused before any model child)", e.runner.calls)
+	}
+}
+
+// A served review on the verified install proceeds: the probe runs and the
+// model child follows.
+func TestVerifiedInstallProceeds(t *testing.T) {
+	e := newEnv(t)
+	writeRequiredHead(e, "a.go", "package a\n")
+	e.runner.script = []exec.Result{
+		{ExitCode: 0, Stdout: claudeStdout(batchAnswerFor(t, []string{"a.go"}))},
+	}
+
+	got := runLeg(t, e, e.request(t))
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
+	if len(e.runner.probes) == 0 {
+		t.Error("no version probe ran on a served review")
+	}
+	if e.runner.calls != 1 {
+		t.Errorf("harness calls = %d, want the model child beside the probe", e.runner.calls)
+	}
+}
+
+// A supplied review on a harness with no command block starts no version
+// probe and runs: agy implements no probe, and the installed gate does not
+// apply to it.
+func TestSuppliedReviewStartsNoVersionProbe(t *testing.T) {
+	e := newEnv(t)
+	writeAppGo(t, e.dir)
+	e.runner.script = []exec.Result{
+		{ExitCode: 0, Stdout: agyStructuredStdout(t, issuesPayload(twoFindings), 7, 3)},
+	}
+	req := e.request(t)
+	req.HarnessOverride = "agy"
+
+	got := runLeg(t, e, req)
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
+	if len(e.runner.probes) != 0 {
+		t.Errorf("probes = %d, want none on a supplied review with no command block", len(e.runner.probes))
+	}
+}
+
 // A tripwire halt still records the envelope-only marker entry the
 // Marker.Reads comment promises: the halted call publishes nothing, and
 // the envelope is the record the call happened.

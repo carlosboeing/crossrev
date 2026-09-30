@@ -181,6 +181,30 @@ func writeSuppliedPrompt(inv Invocation) (string, error) {
 // authenticate (lib/adapters/grok.sh:94).
 var grokCredentialRejection = regexp.MustCompile(`(?i)not signed in|XAI_API_KEY`)
 
+// VersionProbe is `grok --version`, which costs no model call. Scratch dir,
+// for the same reason opencode probes there: --version needs no checkout,
+// and the probe must not read repository-provided configuration.
+func (a *Grok) VersionProbe(inv Invocation) exec.Spec {
+	probe := a.spec(inv, []string{"--version"})
+	probe.Dir = inv.Scratch
+	return probe
+}
+
+// VersionRefusal fails closed when the probe names no version: an install
+// CrossRev cannot confirm is not one it drives. Any named version is one
+// the adapter drives — whether a review may run on it is the review leg's
+// installed-version gate, which reads the verified table, not the adapter.
+func (a *Grok) VersionRefusal(probe []byte) *Refusal {
+	if versionToken.FindString(string(probe)) == "" {
+		return &Refusal{
+			Reason: "the grok CLI did not report a version",
+			Action: "CrossRev cannot confirm this install is one it drives, so the leg is refused rather than started. Install Grok from https://x.ai/cli, or point this leg at another harness with --harness.",
+			Kind:   ErrVersionUnsupported,
+		}
+	}
+	return nil
+}
+
 // Envelope reads what the child produced (lib/adapters/grok.sh:83-149).
 func (a *Grok) Envelope(inv Invocation, res exec.Result) Envelope {
 	// A resolve leg streams NDJSON; the terminal end event carries the usage

@@ -213,6 +213,31 @@ func (a *Claude) schemaTextMissing() *Refusal {
 	}
 }
 
+// VersionProbe is `claude --version`, which costs no model call. Scratch
+// dir, for the same reason opencode probes there: --version needs no
+// checkout, and the probe must not read repository-provided configuration.
+func (a *Claude) VersionProbe(inv Invocation) exec.Spec {
+	probe := a.spec(inv, []string{"--version"})
+	probe.Dir = inv.Scratch
+	return probe
+}
+
+// VersionRefusal fails closed when the probe names no version: an install
+// CrossRev cannot confirm is not one it drives. Any named version is one
+// the adapter drives — whether a served review may run on it is the review
+// leg's installed-version gate, which reads the verified table, not the
+// adapter.
+func (a *Claude) VersionRefusal(probe []byte) *Refusal {
+	if versionToken.FindString(string(probe)) == "" {
+		return &Refusal{
+			Reason: "the claude CLI did not report a version",
+			Action: "CrossRev cannot confirm this install is one it drives, so the leg is refused rather than started. Install it from https://claude.com/claude-code, or point this leg at another harness with --harness.",
+			Kind:   ErrVersionUnsupported,
+		}
+	}
+	return nil
+}
+
 // Envelope reads what the child produced (lib/adapters/claude.sh:114-163).
 func (a *Claude) Envelope(inv Invocation, res exec.Result) Envelope {
 	// A resolve leg streams NDJSON; the terminal result event carries the

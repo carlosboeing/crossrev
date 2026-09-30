@@ -97,13 +97,15 @@ func (a *Codex) Spec(inv Invocation) (exec.Spec, error) {
 	// returns before registering them when that feature is off, while the
 	// feature normalization re-enables unified_exec, so the unified_exec
 	// denial beside it grants nothing on its own and stays as a retained
-	// flag rather than a second block. The image reader is registered
-	// independently of the shell flag, so explicit modes deny view_image
-	// too: without it a served leg keeps a local-file read path outside
+	// flag rather than a second block. The image reader and the
+	// connected-app connectors are registered independently of the shell
+	// flag, so a served leg denies view_image and apps too: without them
+	// it keeps a local-file read path and remote-connector tools outside
 	// the logged server. The zero mode keeps the legacy shape every stub
-	// test pins; an explicit served or supplied mode disables all three,
-	// and served additionally wires CrossRev's read tool as the leg's only
-	// read path: the mcp_servers.crossrev command, its args array and the
+	// test pins; an explicit served or supplied mode disables the shell
+	// pair and the image reader, and served additionally denies the
+	// connectors and wires CrossRev's read tool as the leg's granted read
+	// path: the mcp_servers.crossrev command, its args array and the
 	// approval mode beside --ignore-user-config.
 	// file_tool resolves to supplied and is recorded at the leg.
 	switch inv.ReadMode {
@@ -118,7 +120,10 @@ func (a *Codex) Spec(inv Invocation) (exec.Spec, error) {
 		if !inv.Write {
 			args = append(args, "--disable", "shell_tool", "--disable", "unified_exec")
 		}
-		args = append(args, "--disable", "view_image")
+		// Connected-app tools are registered independently of the shell
+		// flag, so a served leg denies them the way it denies the image
+		// reader: without it the connectors stay beside the served read.
+		args = append(args, "--disable", "view_image", "--disable", "apps")
 		args = append(args, inv.Serve.CodexConfigArgs()...)
 	case ReadModeSupplied:
 		if !inv.Write {
@@ -147,6 +152,32 @@ func (a *Codex) Spec(inv Invocation) (exec.Spec, error) {
 	spec := a.spec(inv, args)
 	spec.Stdin = promptStdin(inv)
 	return spec, nil
+}
+
+// VersionProbe is `codex --version`, which reports "codex-cli X.Y.Z" and
+// costs no model call. Scratch dir, for the same reason opencode probes
+// there: --version needs no checkout, and the probe must not read
+// repository-provided configuration.
+func (a *Codex) VersionProbe(inv Invocation) exec.Spec {
+	probe := a.spec(inv, []string{"--version"})
+	probe.Dir = inv.Scratch
+	return probe
+}
+
+// VersionRefusal fails closed when the probe names no version: an install
+// CrossRev cannot confirm is not one it drives. Any named version is one
+// the adapter drives — whether a served review may run on it is the review
+// leg's installed-version gate, which reads the verified table, not the
+// adapter.
+func (a *Codex) VersionRefusal(probe []byte) *Refusal {
+	if versionToken.FindString(string(probe)) == "" {
+		return &Refusal{
+			Reason: "the codex CLI did not report a version",
+			Action: "CrossRev cannot confirm this install is one it drives, so the leg is refused rather than started. Install it from " + a.descriptor.Install.Hint + ", or point this leg at another harness with --harness.",
+			Kind:   ErrVersionUnsupported,
+		}
+	}
+	return nil
 }
 
 // Envelope reads what the child produced (lib/adapters/codex.sh:99-166).

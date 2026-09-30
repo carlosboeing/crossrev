@@ -721,9 +721,22 @@ type recordingRunner struct {
 	// result, when set, is what Run answers instead of the canned zero exit.
 	// A case driving a signal death sets it to the kill's exit status.
 	result *exec.Result
+	// probes records `--version` children separately from specs: a probe is
+	// not a session child. probeVersion is what they answer; the default
+	// parses, so legs under test proceed past the version gate.
+	probes       []exec.Spec
+	probeVersion string
 }
 
 func (r *recordingRunner) Run(_ context.Context, spec exec.Spec) exec.Result {
+	if len(spec.Args) == 1 && spec.Args[0] == "--version" {
+		r.probes = append(r.probes, spec)
+		version := r.probeVersion
+		if version == "" {
+			version = "9.9.9 (test stub)"
+		}
+		return exec.Result{ExitCode: 0, Stdout: []byte(version + "\n")}
+	}
 	r.specs = append(r.specs, spec)
 	if r.onRun != nil {
 		r.onRun(spec)

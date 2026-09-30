@@ -27,7 +27,11 @@ set -uo pipefail
 source "$(_s="${BASH_SOURCE[0]}"; while [[ -L "$_s" ]]; do _d="$(cd -P "$(dirname "$_s")" && pwd)"; _s="$(readlink "$_s")"; [[ "$_s" != /* ]] && _s="$_d/$_s"; done; cd -P "$(dirname "$_s")" && pwd)/_stub-env.sh"
 
 
-[[ "${1:-}" == "--version" ]] && { printf '9.9.9 (test stub)\n'; exit 0; }
+# The reported install matches the verified pin, so served review legs under
+# test pass the installed-version gate the way a verified machine does. A
+# moved install is a Go-fixture affair (e.runner.versions); the stub stays on
+# the pin the descriptor names.
+[[ "${1:-}" == "--version" ]] && { printf '2.1.237 (test stub)\n'; exit 0; }
 
 # The adapter hands the prompt on stdin and keeps every other flag on argv, so
 # the stub reads stdin first and falls back to the last argument — which is

@@ -192,6 +192,35 @@ func TestCodexExplicitModesDisableViewImage(t *testing.T) {
 	}
 }
 
+// Connected-app tools bypass the served read path, and removing the shell
+// does not remove the connectors: the served registry on 0.159.2 exposes
+// them beside the served read. Served review and resolve deny them; the
+// zero mode keeps the legacy argv every stub test pins.
+func TestCodexServedModesDisableApps(t *testing.T) {
+	adapter := codexAdapter(t)
+	serve := &harness.ServeConfig{Command: "/bin/crossrev", Args: []string{"__read-server"}}
+	for _, write := range []bool{false, true} {
+		inv := invocation(t, "codex", write)
+		inv.ReadMode = harness.ReadModeServed
+		inv.Serve = serve
+		spec, err := adapter.Spec(inv)
+		if err != nil {
+			t.Fatalf("building the spec: %v", err)
+		}
+		if !hasFlagPair(spec.Args, "--disable", "apps") {
+			t.Errorf("a served codex leg keeps the app connectors enabled; got %v", spec.Args)
+		}
+	}
+	inv := invocation(t, "codex", false)
+	spec, err := adapter.Spec(inv)
+	if err != nil {
+		t.Fatalf("building the spec: %v", err)
+	}
+	if hasFlagPair(spec.Args, "--disable", "apps") {
+		t.Errorf("a zero-mode leg denies the app connectors; got %v", spec.Args)
+	}
+}
+
 // The zero mode keeps the legacy argv every stub test pins: no image-reader
 // denial travels on a call that names no read mode.
 func TestCodexZeroModeOmitsTheViewImageDisable(t *testing.T) {

@@ -700,7 +700,7 @@ func TestOpencodeVersionGateRefusesBeforeTheRun(t *testing.T) {
 	e := setup(t)
 	e.addReview(t, defaultFindings(), "issues-remain")
 	e.adapter = nil // the real adapters build the specs
-	e.runner.stdout = []byte("opencode v3.1.4\n")
+	e.runner.probeVersion = "opencode v3.1.4"
 
 	got := e.runReq(t, Request{PR: 42, Repo: e.slug, Trigger: TriggerHuman, Harness: "opencode"})
 	if got.Err == nil {
@@ -712,11 +712,14 @@ func TestOpencodeVersionGateRefusesBeforeTheRun(t *testing.T) {
 	if !strings.Contains(got.Err.Error(), "#272") {
 		t.Errorf("err = %q, want issue #272 named", got.Err)
 	}
-	if len(e.runner.specs) != 1 {
-		t.Fatalf("the runner started %d children, want only the version probe: %v", len(e.runner.specs), e.runner.specs)
+	if len(e.runner.probes) != 1 {
+		t.Fatalf("the runner started %d probes, want only the version probe: %v", len(e.runner.probes), e.runner.probes)
 	}
-	if !slices.Equal(e.runner.specs[0].Args, []string{"--version"}) {
-		t.Errorf("the only child was the version probe; got %v", e.runner.specs[0].Args)
+	if !slices.Equal(e.runner.probes[0].Args, []string{"--version"}) {
+		t.Errorf("the only child was the version probe; got %v", e.runner.probes[0].Args)
+	}
+	if len(e.runner.specs) != 0 {
+		t.Fatalf("the runner started %d session children, want none: %v", len(e.runner.specs), e.runner.specs)
 	}
 }
 
@@ -727,17 +730,20 @@ func TestOpencodeVersionGateRunsASupportedInstall(t *testing.T) {
 	e := setup(t)
 	e.addReview(t, defaultFindings(), "issues-remain")
 	e.adapter = nil
-	e.runner.stdout = []byte("opencode v1.18.21 (test stub)\n")
+	e.runner.probeVersion = "opencode v1.18.21 (test stub)"
 
 	e.runReq(t, Request{PR: 42, Repo: e.slug, Trigger: TriggerHuman, Harness: "opencode"})
-	if len(e.runner.specs) != 2 {
-		t.Fatalf("the runner started %d children, want the probe and the run: %v", len(e.runner.specs), e.runner.specs)
+	if len(e.runner.probes) != 1 {
+		t.Fatalf("the runner started %d probes, want the version probe: %v", len(e.runner.probes), e.runner.probes)
 	}
-	if !slices.Equal(e.runner.specs[0].Args, []string{"--version"}) {
-		t.Errorf("the first child is the version probe; got %v", e.runner.specs[0].Args)
+	if !slices.Equal(e.runner.probes[0].Args, []string{"--version"}) {
+		t.Errorf("the first child is the version probe; got %v", e.runner.probes[0].Args)
 	}
-	if got := e.runner.specs[1].Args[0]; got != "run" {
-		t.Errorf("the second child is the run; got %v", e.runner.specs[1].Args)
+	if len(e.runner.specs) != 1 {
+		t.Fatalf("the runner started %d session children, want the run: %v", len(e.runner.specs), e.runner.specs)
+	}
+	if got := e.runner.specs[0].Args[0]; got != "run" {
+		t.Errorf("the second child is the run; got %v", e.runner.specs[0].Args)
 	}
 }
 
@@ -747,13 +753,16 @@ func TestOpencodeVersionGateRunsA2xInstall(t *testing.T) {
 	e := setup(t)
 	e.addReview(t, defaultFindings(), "issues-remain")
 	e.adapter = nil
-	e.runner.stdout = []byte("opencode v2.0.15\n")
+	e.runner.probeVersion = "opencode v2.0.15"
 
 	e.runReq(t, Request{PR: 42, Repo: e.slug, Trigger: TriggerHuman, Harness: "opencode"})
-	if len(e.runner.specs) != 2 {
-		t.Fatalf("the runner started %d children, want the probe and the run: %v", len(e.runner.specs), e.runner.specs)
+	if len(e.runner.probes) != 1 {
+		t.Fatalf("the runner started %d probes, want the version probe: %v", len(e.runner.probes), e.runner.probes)
 	}
-	if got := e.runner.specs[1].Args; len(got) < 2 || got[0] != "run" || got[1] != "--standalone" {
+	if len(e.runner.specs) != 1 {
+		t.Fatalf("the runner started %d session children, want the run: %v", len(e.runner.specs), e.runner.specs)
+	}
+	if got := e.runner.specs[0].Args; len(got) < 2 || got[0] != "run" || got[1] != "--standalone" {
 		t.Errorf("the run child does not open with run --standalone: %v", got)
 	}
 }
