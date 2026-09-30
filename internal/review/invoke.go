@@ -252,12 +252,14 @@ func (l *Leg) invoke(ctx context.Context, req Request, loaded Context, settings 
 }
 
 // copyReadLog archives one call's read-server log into the run directory,
-// beside the transcripts WriteTranscript archives just above. The scratch
-// copy is removed only after the run-directory write succeeds: a failed
-// copy keeps the evidence where the read server left it and records the
-// loss in the run log, in the same words WriteTranscript uses for a
-// transcript it could not write. A missing or empty source means no read
-// server ran for the call, so there is nothing to archive.
+// beside the transcripts WriteTranscript archives just above. A failed
+// copy records the loss in the run log, in the same words WriteTranscript
+// uses for a transcript it could not write. A missing or empty source
+// means no read server ran for the call, so there is nothing to archive.
+// The caller drains the scratch copy afterward whether the archive
+// succeeded or not: every exit charges the log before archiving, so the
+// drain discards only what the ledger already holds, and a kept copy
+// would re-charge those reads on the next attempt.
 func copyReadLog(l *runlog.Log, tmp string, call int) {
 	readLog := filepath.Join(tmp, "reads.jsonl")
 	b, err := os.ReadFile(readLog)
@@ -280,6 +282,21 @@ func copyReadLog(l *runlog.Log, tmp string, call int) {
 		return
 	}
 	_ = os.Remove(readLog)
+}
+
+// drainReadLog removes one attempt's scratch server log after the ledger
+// has charged it, whether or not a run directory archives it. Without a
+// run directory there is no archive, and a failed archive keeps its
+// source; either survivor would be re-read by the next attempt's check.
+// A removal that fails is recorded in the run log rather than silenced,
+// and a missing source is nothing to drain.
+func drainReadLog(l *runlog.Log, tmp string) {
+	readLog := filepath.Join(tmp, "reads.jsonl")
+	if err := os.Remove(readLog); err != nil && !os.IsNotExist(err) {
+		if l != nil {
+			l.Event("reads", "could not drain "+readLog)
+		}
+	}
 }
 
 // runPrompt runs one rendered prompt through the harness child with the
@@ -523,19 +540,23 @@ func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settin
 		// (lib/adapters/claude.sh:126-130, :148-154).
 		l.Log.WriteTranscript(transcript, res.Stdout, res.Stderr)
 		// archiveReadLog files one attempt's server log beside its
-		// transcript and drains the scratch copy, so one call's reads do
-		// not leak into the next. Every exit below archives — including
-		// the tripwire and reads-halt returns — and the post-call check
-		// always assesses before the archive: copyReadLog removes the source
-		// after a successful copy, so assessing after it would always see
-		// an empty log and the handshake and refusal checks would never
-		// fire. Assessing first also keeps retried attempts from
-		// double-counting the cumulative log — each attempt drains what
-		// it assessed.
+		// transcript and drains the scratch copy, so one attempt's reads
+		// are never assessed twice. Every exit below archives —
+		// including the tripwire and reads-halt returns — and the
+		// post-call check always assesses before the archive: assessing
+		// after the drain would always see an empty log and the
+		// handshake and refusal checks would never fire. The drain is
+		// unconditional: without a run directory, or when the archive
+		// write fails, the scratch copy would otherwise survive and the
+		// next attempt's check would re-charge the attempts already
+		// noted while inheriting their handshake. Every call site reads
+		// the log before archiving, so the drain discards only what the
+		// ledger already charged.
 		archiveReadLog := func() {
 			if l.Log != nil && l.Log.Dir() != "" {
 				copyReadLog(l.Log, tmp, call)
 			}
+			drainReadLog(l.Log, tmp)
 		}
 		// The review-leg tripwire: a command event in the harness's own
 		// output halts with review_leg_ran_command. The call is discarded

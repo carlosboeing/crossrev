@@ -969,6 +969,155 @@ func TestFailedHarnessUnderHaltReportsTheHarnessFailure(t *testing.T) {
 	}
 }
 
+// Without a run directory the served call log has nowhere to archive to,
+// but the scratch copy must still drain between attempts: a transient
+// failure followed by a healthy retry used to re-read the failed
+// attempt's session, charging its reads a second time.
+func TestRetryWithoutRunDirectoryChargesEachServedReadOnce(t *testing.T) {
+	e := newEnv(t)
+	writeRequiredHead(e, "a.go", "package a\n")
+	e.runner.onSpec = func(spec exec.Spec) {
+		// Both attempts serve one read through the tool; the first
+		// fails with a transient error after serving it.
+		serveChildSession(t, spec,
+			`{"event":"start"}`,
+			`{"event":"initialize"}`,
+			`{"event":"tools_list"}`,
+			`{"event":"read","payload":{"path":"a.go","revision":"head","start_line":1,"end_line":2,"bytes":11}}`,
+			`{"event":"end"}`,
+		)
+	}
+	e.runner.script = []exec.Result{
+		{ExitCode: 1, Stderr: []byte("UNAVAILABLE (code 503): overloaded")},
+		{ExitCode: 0, Stdout: claudeStdout(batchAnswerFor(t, []string{"a.go"}))},
+	}
+	// No run directory: a leg whose directory cannot be created runs
+	// with a nil Log, and the archive step is a no-op without one.
+	leg := e.leg(t)
+	leg.Log = nil
+	got := leg.Run(context.Background(), e.request(t))
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
+	if e.runner.calls != 2 {
+		t.Fatalf("harness calls = %d, want the transient retry", e.runner.calls)
+	}
+	if len(got.Marker.Reads) == 0 {
+		t.Fatal("the marker carries no reads envelope for the served sessions")
+	}
+	envelope, err := prstate.DecodeReadsEnvelope(got.Marker.Reads)
+	if err != nil {
+		t.Fatalf("decoding the marker envelope: %v", err)
+	}
+	if envelope.EffectiveMode != "served" || envelope.Reason != "" {
+		t.Errorf("envelope = %+v, want a healthy served pass with no reason", envelope)
+	}
+	// One read per attempt, each charged once: the retry must not
+	// re-charge the failed attempt's session.
+	if envelope.Reads != 2 || envelope.Bytes != 22 {
+		t.Errorf("envelope = %+v, want the two served reads of 22 bytes", envelope)
+	}
+}
+
+// A retry starts its own served session: the failed attempt's handshake
+// must not stand in for the retry's. The first attempt serves a read and
+// fails transiently; the retry answers without ever reaching the server,
+// so the pass degrades on a missing handshake rather than passing on the
+// failed attempt's initialize and tools_list.
+func TestRetryWithoutASessionCannotInheritTheHandshake(t *testing.T) {
+	e := newEnv(t)
+	writeRequiredHead(e, "a.go", "package a\n")
+	var children int
+	e.runner.onSpec = func(spec exec.Spec) {
+		children++
+		if children == 1 {
+			serveChildSession(t, spec,
+				`{"event":"start"}`,
+				`{"event":"initialize"}`,
+				`{"event":"tools_list"}`,
+				`{"event":"read","payload":{"path":"a.go","revision":"head","start_line":1,"end_line":2,"bytes":11}}`,
+				`{"event":"end"}`,
+			)
+		}
+	}
+	e.runner.script = []exec.Result{
+		{ExitCode: 1, Stderr: []byte("UNAVAILABLE (code 503): overloaded")},
+		{ExitCode: 0, Stdout: claudeStdout(batchAnswerFor(t, []string{"a.go"}))},
+	}
+	leg := e.leg(t)
+	leg.Log = nil
+	got := leg.Run(context.Background(), e.request(t))
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
+	if len(got.Marker.Reads) == 0 {
+		t.Fatal("the marker carries no reads envelope for the served session")
+	}
+	envelope, err := prstate.DecodeReadsEnvelope(got.Marker.Reads)
+	if err != nil {
+		t.Fatalf("decoding the marker envelope: %v", err)
+	}
+	if envelope.Reason != "missing_handshake" {
+		t.Errorf("envelope = %+v, want the retry's missing handshake", envelope)
+	}
+	// The failed attempt's single read is charged once, not re-charged
+	// beside the retry's empty session.
+	if envelope.Reads != 1 || envelope.Bytes != 11 {
+		t.Errorf("envelope = %+v, want the one served read of 11 bytes", envelope)
+	}
+	if joined := strings.Join(ui.Texts(got.Messages), "\n"); !strings.Contains(joined, "Served reads degraded (missing_handshake") {
+		t.Errorf("no missing_handshake warning in the pass comment: %q", ui.Texts(got.Messages))
+	}
+}
+
+// A failed archive write must not keep the scratch log in place: the
+// failed attempt's session would otherwise be re-charged by the retry.
+// The loss is still recorded in the run log.
+func TestRetryAfterAFailedArchiveChargesEachServedReadOnce(t *testing.T) {
+	e := newEnv(t)
+	writeRequiredHead(e, "a.go", "package a\n")
+	e.runner.onSpec = func(spec exec.Spec) {
+		serveChildSession(t, spec,
+			`{"event":"start"}`,
+			`{"event":"initialize"}`,
+			`{"event":"tools_list"}`,
+			`{"event":"read","payload":{"path":"a.go","revision":"head","start_line":1,"end_line":2,"bytes":11}}`,
+			`{"event":"end"}`,
+		)
+	}
+	e.runner.script = []exec.Result{
+		{ExitCode: 1, Stderr: []byte("UNAVAILABLE (code 503): overloaded")},
+		{ExitCode: 0, Stdout: claudeStdout(batchAnswerFor(t, []string{"a.go"}))},
+	}
+	leg := e.leg(t)
+	// Block the archive the way a read-only run directory would: the
+	// call's archive target as a directory fails the run-directory
+	// write, so the copy keeps the scratch file it could not file.
+	if err := os.MkdirAll(filepath.Join(e.dir, "run", "reads.call-1.jsonl"), 0o755); err != nil {
+		t.Fatalf("blocking the reads archive: %v", err)
+	}
+	got := leg.Run(context.Background(), e.request(t))
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
+	if len(got.Marker.Reads) == 0 {
+		t.Fatal("the marker carries no reads envelope for the served sessions")
+	}
+	envelope, err := prstate.DecodeReadsEnvelope(got.Marker.Reads)
+	if err != nil {
+		t.Fatalf("decoding the marker envelope: %v", err)
+	}
+	if envelope.EffectiveMode != "served" || envelope.Reason != "" {
+		t.Errorf("envelope = %+v, want a healthy served pass with no reason", envelope)
+	}
+	if envelope.Reads != 2 || envelope.Bytes != 22 {
+		t.Errorf("envelope = %+v, want the two served reads of 22 bytes", envelope)
+	}
+	if log := readRunLog(t, e); !strings.Contains(log, "could not write") {
+		t.Errorf("run.log carries no record of the failed archive:\n%s", log)
+	}
+}
+
 // An installed CLI between the pin and a later recorded run is not
 // verified for this served configuration: general compatibility history is
 // not isolation evidence, so a claude install at an unrecorded
