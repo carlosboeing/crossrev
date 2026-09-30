@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/carlosboeing/crossrev/internal/exec"
 	"github.com/carlosboeing/crossrev/internal/forge"
 	"github.com/carlosboeing/crossrev/internal/harness"
 )
@@ -489,6 +490,74 @@ func TestSettingsAcceptsCodexAsAResolver(t *testing.T) {
 			t.Error("no harness started for a codex resolver")
 		}
 	})
+}
+
+// TestCodexResolverStartsWithTheServedReadTool pins the resolve leg's
+// serve wiring: a codex resolver's harness child carries the read-server
+// command, its --base/--head/--call resolve args and the approval key. The
+// leg builds that invocation (not the adapter), so the test drives the
+// real codex adapter — the stub records invocations but never reads Serve,
+// and deleting the block left the suite green. A supplied resolver (agy)
+// starts with none of it.
+func TestCodexResolverStartsWithTheServedReadTool(t *testing.T) {
+	e := setup(t)
+	e.adapter = nil
+	e.doc = mustHarness(t)
+	e.addReview(t, defaultFindings(), "issues-remain")
+
+	_ = e.runReq(t, Request{PR: 42, Repo: e.slug, Trigger: TriggerHuman, Harness: "codex"})
+
+	var child *exec.Spec
+	for i, spec := range e.runner.specs {
+		if spec.Path == "codex" {
+			child = &e.runner.specs[i]
+			break
+		}
+	}
+	if child == nil {
+		t.Fatal("no codex harness child started for a codex resolver")
+	}
+	joined := strings.Join(child.Args, " ")
+	for _, want := range []string{
+		"mcp_servers.crossrev.command=",
+		"__read-server",
+		"--base",
+		"--head",
+		"--call",
+		"resolve",
+		`mcp_servers.crossrev.default_tools_approval_mode="approve"`,
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("a served codex resolve carries %q; got %v", want, child.Args)
+		}
+	}
+	// The setup is what the test claims: the claim names the codex
+	// resolver, and the descriptor in force serves reads to codex, so a
+	// pass here means the read tool reached the child through the leg's
+	// wiring rather than around it.
+	if len(e.forge.created) == 0 || !strings.Contains(e.forge.created[0].Body, `"harness":"codex"`) {
+		t.Error("the claim names no codex resolver, so the test proved nothing about one")
+	}
+	if entry, ok := e.doc.For("codex"); !ok || entry.ReadMode() != harness.ReadModeServed {
+		t.Error("the descriptor in force serves no reads to codex, so the test proved nothing about served mode")
+	}
+
+	supplied := setup(t)
+	supplied.adapter = nil
+	supplied.addReview(t, defaultFindings(), "issues-remain")
+
+	_ = supplied.runReq(t, Request{PR: 42, Repo: supplied.slug, Trigger: TriggerHuman, Harness: "agy"})
+
+	if len(supplied.runner.specs) == 0 {
+		t.Fatal("no agy harness child started for an agy resolver")
+	}
+	for _, spec := range supplied.runner.specs {
+		for _, arg := range spec.Args {
+			if strings.Contains(arg, "mcp_servers.crossrev") || arg == "__read-server" {
+				t.Errorf("a supplied agy resolve carries served wiring: %q in %v", arg, spec.Args)
+			}
+		}
+	}
 }
 
 // TestMovedPinDoesNotRefuseGrokResolve pins the resolve half of the
