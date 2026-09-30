@@ -290,6 +290,25 @@ func TestReviewCommandTripwire(t *testing.T) {
 	}
 }
 
+// A served codex read stream passes the tripwire: mcp_tool_call items are
+// the served path a served review wires, and only a command_execution item
+// trips. Without this a change to the command match could halt every served
+// codex review unseen.
+func TestReviewCommandIgnoresServedCodexReads(t *testing.T) {
+	reads := []byte(
+		"{\"type\":\"item.completed\",\"item\":{\"type\":\"mcp_tool_call\",\"server\":\"crossrev\",\"tool\":\"read_file\",\"arguments\":\"{\\\"path\\\":\\\"a.go\\\"}\"}}\n" +
+			"{\"type\":\"item.completed\",\"item\":{\"type\":\"mcp_tool_call\",\"server\":\"crossrev\",\"tool\":\"read_file\",\"arguments\":\"{\\\"path\\\":\\\"b.go\\\"}\"}}\n")
+	if command, tripped := harness.ReviewCommand("codex", reads); tripped {
+		t.Errorf("served codex reads tripped the review tripwire with %q", command)
+	}
+	// A command after the reads still trips, naming the command.
+	tripped := append(reads,
+		[]byte("{\"type\":\"item.completed\",\"item\":{\"type\":\"command_execution\",\"command\":\"git status\"}}\n")...)
+	if command, ok := harness.ReviewCommand("codex", tripped); !ok || command != "git status" {
+		t.Errorf("a command after served reads tripped = (%q, %t), want (git status, true)", command, ok)
+	}
+}
+
 // The review tripwire refusal carries the review_leg_ran_command name.
 func TestReviewCommandRefusalNamesTheFailure(t *testing.T) {
 	refusal := harness.ReviewCommandRefusal("codex", "git status")
