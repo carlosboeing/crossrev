@@ -39,7 +39,7 @@ Settings that are not user-facing are out of scope. Credentials stay in the envi
 
 ## Audit of the current gaps
 
-This audit compares every documented config field in [configuration.md](../configuration.md) with the binary's printed usage on 2026-09-30 at revision `6bb38a90326a563a78c55e16708c7efd0e847160`. The following commands exit with an unknown-option error before running a leg:
+This audit compares every documented config field in [configuration.md](../configuration.md) with the binary's printed usage on 2026-09-30 at revision `1a8d97653f96e653f295879a9d3c1c0f45c39b4e`. The following commands exit with an unknown-option error before running a leg:
 
 ```sh
 go run ./cmd/crossrev review --bogus
@@ -50,9 +50,9 @@ go run ./cmd/crossrev cycle --bogus
 Their usage lines print:
 
 ```text
-Usage: crossrev review --pr <number> [--harness <one of: claude|codex|agy|grok|opencode>] [--model <id>] [--effort <level>] [--no-tips] [--keep-transcripts]
+Usage: crossrev review --pr <number> [--harness <one of: claude|codex|agy|grok|opencode>] [--model <id>] [--effort <level>] [--input-policy hunks_first|whole_when_fits] [--no-tips] [--keep-transcripts]
 Usage: crossrev resolve --pr <number> [--harness <one of: claude|codex|agy|grok|opencode>] [--model <id>] [--effort <level>] [--trigger human|automatic] [--keep-transcripts]
-Usage: crossrev cycle --pr <number> [--trigger human|automatic] [--model <id>] [--effort <level>] [--no-tips] [--keep-transcripts]
+Usage: crossrev cycle --pr <number> [--trigger human|automatic] [--model <id>] [--effort <level>] [--input-policy hunks_first|whole_when_fits] [--no-tips] [--keep-transcripts]
 ```
 
 `Present` means a corresponding flag appears in that command's usage. `Missing` means no corresponding flag is printed for a setting that affects that command. `N/A` means not applicable to that command or excluded from this rule. Parent mappings group the leaf fields below; `reviewers[].*` names fields in the reviewer slot list, and `endpoints.<name>.*` covers every endpoint definition.
@@ -86,7 +86,7 @@ Usage: crossrev cycle --pr <number> [--trigger human|automatic] [--model <id>] [
 | `reviewers[].model` | Present: `--model` | Missing | Present: `--model` | Cycle cannot independently address a slot and the resolver. |
 | `reviewers[].effort` | Present: `--effort` | Missing | Present: `--effort` | Same shared cycle override. |
 | `reviewers[].endpoint` | Missing | Missing | Missing | Slot endpoint and coverage producer identity. |
-| `review.input_policy` | Missing | N/A | Missing | Review input shaping. |
+| `review.input_policy` | Present: `--input-policy` | N/A | Present: `--input-policy` | Review input shaping; logs its effective value and source as `flag`, `config` or `default`. |
 | `backlog.destination` | Missing | Missing | Missing | Review context and resolve deferred-work destination. |
 | `backlog.github_issues.labels` | N/A | Missing | Missing | Labels on filed issues. |
 | `backlog.github_issues.tracking_label` | N/A | Missing | Missing | Matching earlier issues. |
@@ -99,6 +99,8 @@ Usage: crossrev cycle --pr <number> [--trigger human|automatic] [--model <id>] [
 | `endpoints.<name>.token_env` | Missing | Missing | Missing | Variable name only; its secret value is excluded. |
 
 Cycle has no `--harness` in its usage today. The parser does accept it, just as resolve accepts an unadvertised `--no-tips`; these are discoverability gaps rather than absent parser support. The audit deliberately uses printed usage as its contract. Parser behavior is in `internal/cli/parse.go`; the usage strings are in `internal/cli/flags.go`. Resolve's reviewer dependencies are in `internal/resolve/convergence.go`. Partial boolean overrides and shared cycle values do not yet satisfy full parity.
+
+Review and resolve currently clear the configured endpoint and model when `--harness` is supplied, including in automated mode. See `internal/review/invoke.go` and `internal/resolve/context.go`. The `harness` action input in `action.yml` exposes this behavior to pull-request-edited workflows. This is an existing gap against the proposed protection of endpoint selection, even though the harness flag itself is allowed. In automated mode the implementation must preserve the base endpoint, or refuse the override with an ADR 0003 message if that endpoint cannot serve the requested harness. This draft changes no runtime behavior.
 
 Path attributes in `.gitattributes` are a separate base-revision policy format under [ADR 0023](0023-generated-files-are-recognised-without-configuration.md), not config-file keys in this audit. Internal `CROSSREV_*` state is excluded.
 
@@ -137,4 +139,5 @@ The documented `XDG_CONFIG_HOME` and `XDG_DATA_HOME` are standard directory conv
 - New user-facing settings must supply both config and flag forms on affected commands, with effective-value source records.
 - Existing settings have the gaps recorded above; approval of this ADR does not implement or claim to close them.
 - Automated policy overrides are refused with an ADR 0003 message; non-policy overrides remain allowed. The existing human-trigger admission bypass is unchanged.
+- Existing `--harness` endpoint clearing requires a runtime change before automated overrides satisfy this rule: preserve the base endpoint, or refuse an incompatible harness override with an ADR 0003 message.
 - Credentials and internal state acquire no flags under this rule.
