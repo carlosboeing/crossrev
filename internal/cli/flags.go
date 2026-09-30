@@ -18,27 +18,29 @@ import (
 
 // CycleRequest is `crossrev cycle` (lib/run.sh:2901-2922).
 type CycleRequest struct {
-	PR              int
-	Repo            core.Slug
-	Trigger         string
-	HarnessOverride string
-	ModelOverride   string
-	EffortOverride  string
-	NoTips          bool
-	KeepTranscripts bool
+	PR                  int
+	Repo                core.Slug
+	Trigger             string
+	HarnessOverride     string
+	ModelOverride       string
+	EffortOverride      string
+	InputPolicyOverride string
+	NoTips              bool
+	KeepTranscripts     bool
 }
 
 // ReviewRequest is `crossrev review` (lib/run.sh:919-947).
 type ReviewRequest struct {
-	PR              int
-	Repo            core.Slug
-	Trigger         string
-	HarnessOverride string
-	ModelOverride   string
-	EffortOverride  string
-	Continuation    bool
-	NoTips          bool
-	KeepTranscripts bool
+	PR                  int
+	Repo                core.Slug
+	Trigger             string
+	HarnessOverride     string
+	ModelOverride       string
+	EffortOverride      string
+	InputPolicyOverride string
+	Continuation        bool
+	NoTips              bool
+	KeepTranscripts     bool
 }
 
 // ResolveRequest is `crossrev resolve` (lib/run.sh:1736-1762).
@@ -160,7 +162,7 @@ type VersionRequest struct{}
 // option. They are the strings the shell prints, measured with
 // `NO_COLOR=1 bash bin/crossrev <command> --bogus`.
 const (
-	usageCycle    = "Usage: crossrev cycle --pr <number> [--trigger human|automatic] [--model <id>] [--effort <level>] [--no-tips] [--keep-transcripts]"
+	usageCycle    = "Usage: crossrev cycle --pr <number> [--trigger human|automatic] [--model <id>] [--effort <level>] [--input-policy hunks_first|whole_when_fits] [--no-tips] [--keep-transcripts]"
 	usageStatus   = "Usage: crossrev status --pr <number>"
 	usageRestart  = "Usage: crossrev restart --pr <number>"
 	usageWatchdog = "Usage: crossrev watchdog [--repo owner/name] [--timeout <seconds>]"
@@ -198,7 +200,7 @@ func harnessOption(harnesses []string) string {
 
 func usageReview(harnesses []string) string {
 	return "Usage: crossrev review --pr <number> [" + harnessOption(harnesses) +
-		"] [--model <id>] [--effort <level>] [--no-tips] [--keep-transcripts]"
+		"] [--model <id>] [--effort <level>] [--input-policy hunks_first|whole_when_fits] [--no-tips] [--keep-transcripts]"
 }
 
 func usageResolve(harnesses []string) string {
@@ -314,3 +316,13 @@ func optionalSlug(out *ui.IO, raw string) (core.Slug, error) {
 // converts it until the sweep compares against it. cmd/crossrev does that
 // conversion, and it exports this so the number is written down once.
 const WatchdogDefaultTimeout = "1800"
+
+// requireInputPolicy refuses values the review input planner cannot apply.
+func requireInputPolicy(out *ui.IO, command, policy string) error {
+	switch policy {
+	case "hunks_first", "whole_when_fits":
+		return nil
+	}
+	return out.Die("unknown "+command+" input policy: "+policy,
+		"Use --input-policy hunks_first or --input-policy whole_when_fits.")
+}

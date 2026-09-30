@@ -813,6 +813,24 @@ func TestDriverForwardsModelAndEffortOverridesToBothLegs(t *testing.T) {
 	}
 }
 
+func TestDriverForwardsInputPolicyOverrideToReviewLegs(t *testing.T) {
+	r := newRig(t, []loadStep{
+		{state: loaded(t)},
+		{state: loaded(t, marker(reviewIssues, 1))},
+		{state: loaded(t, marker(reviewIssues, 1), marker(resolveSettled, 1))},
+	})
+	req := request()
+	req.InputPolicyOverride = "whole_when_fits"
+	r.driver.Run(context.Background(), req)
+	r.wantOrder(t, "load", "review", "load", "resolve", "load", "nudge")
+	if len(r.rec.legs) != 2 {
+		t.Fatalf("leg calls = %d, want 2", len(r.rec.legs))
+	}
+	if got := r.rec.legs[0].req.InputPolicyOverride; got != "whole_when_fits" {
+		t.Errorf("review input policy = %q, want whole_when_fits", got)
+	}
+}
+
 // --- a leg that fails -------------------------------------------------------
 
 // TestDriverReturnsOneWhenAReviewLegFails pins `leg_review … || return 1`

@@ -59,14 +59,15 @@ func cycleCommand(ctx context.Context, out *ui.IO, doc harness.Document, req cli
 	}
 
 	result := driver.Run(ctx, cycle.Request{
-		PR:              req.PR,
-		Repo:            req.Repo,
-		Trigger:         cycle.Trigger(req.Trigger),
-		HarnessOverride: req.HarnessOverride,
-		ModelOverride:   req.ModelOverride,
-		EffortOverride:  req.EffortOverride,
-		KeepTranscripts: req.KeepTranscripts,
-		NoTips:          req.NoTips,
+		PR:                  req.PR,
+		Repo:                req.Repo,
+		Trigger:             cycle.Trigger(req.Trigger),
+		HarnessOverride:     req.HarnessOverride,
+		ModelOverride:       req.ModelOverride,
+		EffortOverride:      req.EffortOverride,
+		InputPolicyOverride: req.InputPolicyOverride,
+		KeepTranscripts:     req.KeepTranscripts,
+		NoTips:              req.NoTips,
 	})
 	if result.Err != nil {
 		return cli.ExitFailure, reportFatal(out, result.Err)
@@ -89,14 +90,15 @@ func (a reviewAdapter) Run(ctx context.Context, req cycle.LegRequest) cycle.LegR
 	// No Workdir: an empty one pins a clean detached worktree at the pull
 	// request head, so the harness never runs in the operator checkout.
 	result := a.leg.Run(ctx, review.Request{
-		PR:              req.PR,
-		Repo:            req.Repo,
-		Trigger:         review.Trigger(req.Trigger),
-		Continuation:    req.Continuation,
-		HarnessOverride: req.HarnessOverride,
-		ModelOverride:   req.ModelOverride,
-		EffortOverride:  req.EffortOverride,
-		RunID:           runlog.RunID(),
+		PR:                  req.PR,
+		Repo:                req.Repo,
+		Trigger:             review.Trigger(req.Trigger),
+		Continuation:        req.Continuation,
+		HarnessOverride:     req.HarnessOverride,
+		ModelOverride:       req.ModelOverride,
+		EffortOverride:      req.EffortOverride,
+		InputPolicyOverride: req.InputPolicyOverride,
+		RunID:               runlog.RunID(),
 	})
 	a.out.PrintAll(result.Messages)
 	if result.Err != nil {
