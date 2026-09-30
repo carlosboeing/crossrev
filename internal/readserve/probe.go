@@ -56,6 +56,12 @@ type Probe struct {
 	Want     []byte
 }
 
+// ErrProbeUnservable marks a probe the server refused for what the path is
+// — a symlink or a submodule — rather than for a broken tool. The refusal
+// text names the path kind, so the leg tries its next candidate instead of
+// failing the self-test on a healthy server.
+var ErrProbeUnservable = errors.New("self-test: the probe path is not servable")
+
 // SelfTest speaks the served handshake to a fresh server: initialize,
 // tools/list, one byte-checked read, and one refused probe call.
 func SelfTest(ctx context.Context, runner exec.Runner, command string, args, env []string, probe Probe) error {
@@ -128,6 +134,9 @@ func SelfTest(ctx context.Context, runner exec.Runner, command string, args, env
 		IsError bool `json:"isError"`
 	}
 	if err := json.Unmarshal(answers["3"], &read); err != nil || read.IsError || len(read.Content) == 0 {
+		if read.IsError && len(read.Content) > 0 && (read.Content[0].Text == "symlink" || read.Content[0].Text == "submodule") {
+			return fmt.Errorf("self-test: the byte-check read of %s was refused as %s: %w", probe.Path, read.Content[0].Text, ErrProbeUnservable)
+		}
 		return fmt.Errorf("self-test: the byte-check read was refused")
 	}
 	if err := checkProbeBytes(probe, read.Content[0].Text); err != nil {

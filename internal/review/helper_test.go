@@ -171,6 +171,10 @@ type fakeVCS struct {
 	// reads counts Show calls per path, so a test can prove an excluded
 	// path's body was never read.
 	reads map[string]int
+	// symlinks marks head paths the served read server refuses with the
+	// symlink reason: the blob holds the link target text, the way git
+	// show reads a symlink, but the server never serves mode 120000.
+	symlinks map[string]bool
 	// searchResults scripts the blob-pass answers per term, searchTooCommon
 	// caps per term, and searchErr fails the whole pass. gotTerms records
 	// the last call's terms, and searchCalls counts SearchAll invocations,
@@ -624,6 +628,11 @@ func serveFixtureSession(spec exec.Spec, vcs *fakeVCS) exec.Result {
 			if req.Params.Name != "read_file" {
 				appendLog("refused", `{"reason":"unknown_tool"}`)
 				out.WriteString(refuse(req.ID, "Method not found: "+req.Params.Name))
+				continue
+			}
+			if vcs != nil && vcs.symlinks[req.Params.Arguments.Path] {
+				appendLog("refused", `{"reason":"symlink"}`)
+				out.WriteString(refuse(req.ID, "symlink"))
 				continue
 			}
 			sha := base

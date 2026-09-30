@@ -509,6 +509,79 @@ func TestServedChildWithNoSessionHalts(t *testing.T) {
 	}
 }
 
+// A symlink first candidate does not fail the self-test: the server
+// refuses mode 120000 for what the path is, so the leg byte-checks the
+// next candidate and the served call runs clean.
+func TestSelfTestSkipsASymlinkCandidate(t *testing.T) {
+	e := newEnv(t)
+	writeRequiredHead(e, "a-link.go", "b.go\n")
+	writeRequiredHead(e, "b.go", "package b\n")
+	if e.vcs.symlinks == nil {
+		e.vcs.symlinks = map[string]bool{}
+	}
+	e.vcs.symlinks["a-link.go"] = true
+	e.runner.onSpec = func(spec exec.Spec) {
+		serveChildSession(t, spec,
+			`{"event":"start"}`,
+			`{"event":"initialize"}`,
+			`{"event":"tools_list"}`,
+			`{"event":"end"}`,
+		)
+	}
+	e.runner.script = []exec.Result{
+		{ExitCode: 0, Stdout: claudeStdout(batchAnswerFor(t, []string{"a-link.go", "b.go"}))},
+	}
+
+	got := runLeg(t, e, e.request(t))
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
+	for _, line := range ui.Texts(got.Messages) {
+		if strings.Contains(line, "Served reads degraded") {
+			t.Errorf("a skipped symlink candidate degrades: %q", line)
+		}
+	}
+	if len(got.Marker.Reads) != 0 {
+		t.Errorf("the marker carries a reads envelope after a clean served call: %s", got.Marker.Reads)
+	}
+}
+
+// A pass whose only candidate is a symlink skips the self-test rather than
+// failing it: there is nothing to byte-check against, the served call runs,
+// and the marker stays clean.
+func TestSelfTestSkipsWhenEveryCandidateIsASymlink(t *testing.T) {
+	e := newEnv(t)
+	writeRequiredHead(e, "a-link.go", "b.go\n")
+	if e.vcs.symlinks == nil {
+		e.vcs.symlinks = map[string]bool{}
+	}
+	e.vcs.symlinks["a-link.go"] = true
+	e.runner.onSpec = func(spec exec.Spec) {
+		serveChildSession(t, spec,
+			`{"event":"start"}`,
+			`{"event":"initialize"}`,
+			`{"event":"tools_list"}`,
+			`{"event":"end"}`,
+		)
+	}
+	e.runner.script = []exec.Result{
+		{ExitCode: 0, Stdout: claudeStdout(batchAnswerFor(t, []string{"a-link.go"}))},
+	}
+
+	got := runLeg(t, e, e.request(t))
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
+	for _, line := range ui.Texts(got.Messages) {
+		if strings.Contains(line, "Served reads degraded") {
+			t.Errorf("an all-symlink pass degrades: %q", line)
+		}
+	}
+	if len(got.Marker.Reads) != 0 {
+		t.Errorf("the marker carries a reads envelope after a clean served call: %s", got.Marker.Reads)
+	}
+}
+
 // A command event on the review leg halts with review_leg_ran_command and
 // publishes nothing, under either policy.
 func TestReviewTripwireHaltsTheLeg(t *testing.T) {

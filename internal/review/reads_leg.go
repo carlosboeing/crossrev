@@ -83,17 +83,18 @@ func serveSession(workdir, tmp string, base, head core.Revision, call int) (comm
 	}, nil
 }
 
-// selectProbe picks the self-test read: a small available unit the leg
-// already holds evidence bytes for, at the revision it read them from. A
-// frozen pass with no scope falls back to the changed paths, shown through
-// the VCS layer. An error fails the self-test rather than running served
-// reads no byte-check vouches for.
-func (l *Leg) selectProbe(ctx context.Context, loaded Context) (readserve.Probe, error) {
+// selectProbeCandidates lists the self-test reads in try order: a small
+// available unit the leg already holds evidence bytes for, at the revision
+// it read them from. A frozen pass with no scope falls back to the changed
+// paths, shown through the VCS layer. An error fails the self-test rather
+// than running served reads no byte-check vouches for.
+func (l *Leg) selectProbeCandidates(ctx context.Context, loaded Context) ([]readserve.Probe, error) {
 	// The required units first: they are the files this pass judges, with
 	// the evidence bytes already in hand. An empty required set falls
 	// through to the file listing, so a pass the enumeration left empty
 	// still byte-checks when git names files.
 	if loaded.Scope != nil {
+		var out []readserve.Probe
 		for _, unit := range loaded.Scope.Required {
 			if !unit.Available || unit.Binary || len(unit.Body) == 0 || len(unit.Body) > maxProbeBytes {
 				continue
@@ -102,13 +103,17 @@ func (l *Leg) selectProbe(ctx context.Context, loaded Context) (readserve.Probe,
 			if unit.ContentRevision.SHA() == loaded.Scope.Base.SHA() {
 				revision = "base"
 			}
-			return readserve.Probe{Path: unit.Path, Revision: revision, Want: unit.Body}, nil
+			out = append(out, readserve.Probe{Path: unit.Path, Revision: revision, Want: unit.Body})
+		}
+		if len(out) > 0 {
+			return out, nil
 		}
 	}
 	changed, err := l.VCS.ChangedFiles(ctx, loaded.PR.BaseRefOid, loaded.PR.HeadRefOid)
 	if err != nil {
-		return readserve.Probe{}, fmt.Errorf("listing changed files: %w", err)
+		return nil, fmt.Errorf("listing changed files: %w", err)
 	}
+	var out []readserve.Probe
 	tried := 0
 	for _, file := range changed {
 		if tried >= 5 {
@@ -122,11 +127,14 @@ func (l *Leg) selectProbe(ctx context.Context, loaded Context) (readserve.Probe,
 			if err != nil || len(body) == 0 || len(body) > maxProbeBytes {
 				continue
 			}
-			return readserve.Probe{Path: file.Path, Revision: revision.name, Want: body}, nil
+			out = append(out, readserve.Probe{Path: file.Path, Revision: revision.name, Want: body})
 		}
 		tried++
 	}
-	return readserve.Probe{}, errNoProbeFile
+	if len(out) == 0 {
+		return nil, errNoProbeFile
+	}
+	return out, nil
 }
 
 // runReadsSelfTest speaks the handshake to a fresh server before any
@@ -136,7 +144,7 @@ func (l *Leg) selectProbe(ctx context.Context, loaded Context) (readserve.Probe,
 // tool, not the harness reading through it, and the post-call check must
 // not count it.
 func (l *Leg) runReadsSelfTest(ctx context.Context, command string, session readserve.Session, loaded Context) error {
-	probe, err := l.selectProbe(ctx, loaded)
+	probes, err := l.selectProbeCandidates(ctx, loaded)
 	if err != nil {
 		if errors.Is(err, errNoProbeFile) {
 			return nil
@@ -149,7 +157,22 @@ func (l *Leg) runReadsSelfTest(ctx context.Context, command string, session read
 	// read one: l.Env is the allowlisted orchestrator environment without
 	// any staged harness credential, which the read server neither needs
 	// nor receives.
-	return readserve.SelfTest(ctx, l.runner(), command, session.Args(), l.Env, probe)
+	for _, probe := range probes {
+		err := readserve.SelfTest(ctx, l.runner(), command, session.Args(), l.Env, probe)
+		if err == nil {
+			return nil
+		}
+		// A symlink or submodule candidate is unservable for what it is,
+		// not for a broken tool: try the next candidate rather than
+		// failing the self-test on a healthy server.
+		if errors.Is(err, readserve.ErrProbeUnservable) {
+			continue
+		}
+		return err
+	}
+	// Every candidate unservable: there is nothing to byte-check against,
+	// the same skip an empty file listing earns.
+	return nil
 }
 
 // noteReads records one call's reads health for the envelopes.

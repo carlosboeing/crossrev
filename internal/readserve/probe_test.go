@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -92,6 +93,36 @@ func TestSelfTestFailsOnAMismatch(t *testing.T) {
 	probe := Probe{Path: "a.go", Revision: "base", Want: []byte("package b\n")}
 	if err := SelfTest(context.Background(), exec.NewOSRunner(), command, argv, env, probe); err == nil {
 		t.Error("a self-test byte mismatch passes")
+	}
+}
+
+// A probe naming a symlink or a submodule fails as unservable rather than
+// as a broken tool: the refusals name what the path is, so the leg tries
+// its next candidate instead of failing the self-test on a healthy server.
+func TestSelfTestMarksUnservableProbes(t *testing.T) {
+	dir, base, _ := probeFixture(t)
+	if err := os.Symlink("a.go", filepath.Join(dir, "link.go")); err != nil {
+		t.Fatalf("linking the fixture: %v", err)
+	}
+	subSrc := t.TempDir()
+	mustGit(t, subSrc, "init")
+	mustGit(t, subSrc, "config", "user.email", "test@example.invalid")
+	mustGit(t, subSrc, "config", "user.name", "test")
+	if err := os.WriteFile(filepath.Join(subSrc, "inner.txt"), []byte("inner\n"), 0o644); err != nil {
+		t.Fatalf("writing the submodule fixture: %v", err)
+	}
+	mustGit(t, subSrc, "add", "inner.txt")
+	mustGit(t, subSrc, "commit", "-m", "inner")
+	mustGit(t, dir, "-c", "protocol.file.allow=always", "submodule", "add", subSrc, "submod")
+	mustGit(t, dir, "add", "link.go", ".gitmodules", "submod")
+	mustGit(t, dir, "commit", "-m", "unservable")
+	head := gitOutput(t, dir, "rev-parse", "HEAD")
+	command, argv, env := serveChildSession(t, dir, base, head)
+	for _, path := range []string{"link.go", "submod"} {
+		probe := Probe{Path: path, Revision: "head", Want: []byte("whatever\n")}
+		if err := SelfTest(context.Background(), exec.NewOSRunner(), command, argv, env, probe); !errors.Is(err, ErrProbeUnservable) {
+			t.Errorf("self-test on %s = %v, want ErrProbeUnservable", path, err)
+		}
 	}
 }
 
