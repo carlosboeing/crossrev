@@ -6,6 +6,8 @@ All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepa
 
 ### Added
 
+- **Review and cycle take `--input-policy` for one run.** `--input-policy hunks_first|whole_when_fits` overrides `review.input_policy` on `review` and on the review legs of `cycle`. The run log records the effective policy and whether it came from the flag, the config or the default.
+
 - **The `__read-server` command serves local reads over JSON-RPC.** A new `internal/readserve` package reads `base` or `head` revisions within the 256 KiB per-call share and the 200-read / 1 MiB per-leg caps (contract defaults when the flags are absent), without network access, logging requests for the orchestrator to copy to the run directory. Each result opens with a header naming the path, revision, and returned line range, with rendered ranges byte-matching `git show` (no phantom trailing line, empty files read as zero lines, inverted ranges refused, over-long ends clamped); exhaustion is a refusal, never a halt. Every refusal carries one of the nine contract reasons rather than raw git text, and the log records the returned range with a digest that replays from `(path, revision, returned)`.
 
 

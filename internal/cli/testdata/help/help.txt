@@ -32,6 +32,10 @@
     --no-tips                Suppress the automated-mode suggestion
     --keep-transcripts       Keep the harness transcript even when the leg succeeds
 
+  OPTIONS on cycle and review
+    --input-policy hunks_first|whole_when_fits
+                            Override review.input_policy for this run
+
   OPTIONS on doctor
     --level core|harness     Which preflight to run. core is git and gh;
                              harness adds a model CLI. Defaults to harness

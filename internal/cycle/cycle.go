@@ -26,14 +26,15 @@ const (
 // `--no-tips` out of `args` (lib/run.sh:2910) and appends its own to every leg
 // call, so the flag suppresses the cycle's single tip and nothing else.
 type Request struct {
-	PR              int
-	Repo            core.Slug
-	Trigger         Trigger
-	HarnessOverride string
-	ModelOverride   string
-	EffortOverride  string
-	KeepTranscripts bool
-	NoTips          bool
+	PR                  int
+	Repo                core.Slug
+	Trigger             Trigger
+	HarnessOverride     string
+	ModelOverride       string
+	EffortOverride      string
+	InputPolicyOverride string
+	KeepTranscripts     bool
+	NoTips              bool
 }
 
 // LegRequest is what one leg is invoked with: the arguments the shell collected
@@ -44,15 +45,16 @@ type Request struct {
 // parsed, so a cycle started without `--repo` forwards none and each leg
 // resolves the repository for itself.
 type LegRequest struct {
-	PR              int
-	Repo            core.Slug
-	Trigger         Trigger
-	HarnessOverride string
-	ModelOverride   string
-	EffortOverride  string
-	KeepTranscripts bool
-	Continuation    bool
-	NoTips          bool
+	PR                  int
+	Repo                core.Slug
+	Trigger             Trigger
+	HarnessOverride     string
+	ModelOverride       string
+	EffortOverride      string
+	InputPolicyOverride string
+	KeepTranscripts     bool
+	Continuation        bool
+	NoTips              bool
 }
 
 // LegResult is how a leg stopped, as the driver reads it.
@@ -335,15 +337,16 @@ func (d *Driver) reload(req Request) LoadRequest {
 
 func (d *Driver) legRequest(req Request, continuation bool) LegRequest {
 	return LegRequest{
-		PR:              req.PR,
-		Repo:            req.Repo,
-		Trigger:         req.Trigger,
-		HarnessOverride: req.HarnessOverride,
-		ModelOverride:   req.ModelOverride,
-		EffortOverride:  req.EffortOverride,
-		KeepTranscripts: req.KeepTranscripts,
-		Continuation:    continuation,
-		NoTips:          true,
+		PR:                  req.PR,
+		Repo:                req.Repo,
+		Trigger:             req.Trigger,
+		HarnessOverride:     req.HarnessOverride,
+		ModelOverride:       req.ModelOverride,
+		EffortOverride:      req.EffortOverride,
+		InputPolicyOverride: req.InputPolicyOverride,
+		KeepTranscripts:     req.KeepTranscripts,
+		Continuation:        continuation,
+		NoTips:              true,
 	}
 }
 

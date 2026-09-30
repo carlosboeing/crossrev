@@ -239,49 +239,56 @@ func TestReviewArgvPacksUnder120KiBWhileCodexPacksTo390000(t *testing.T) {
 // reads the file whole where its rendered form fits the per-call budget,
 // and both converge.
 func TestReviewInputPoliciesShareFixtures(t *testing.T) {
-	inputs := func(t *testing.T, policy string) (*env, *[]string) {
-		e := newEnv(t)
-		if policy != "" {
-			e.cfg = mustConfig(t, "reviewers:\n  - harness: claude\nreview:\n  input_policy: "+policy+"\n")
-		}
-		writeRequiredHead(e, "a.go", "package a\n")
-		writeRequiredHead(e, "b.go", strings.Repeat("package b\n", 150))
-		canned := "diff --git a/b.go b/b.go\n--- a/b.go\n+++ b/b.go\n@@ -1,2 +1,3 @@\n package b\n+func B() {}\n package b\n"
-		e.vcs.shapeFunc = func(unit intel.FileUnit) (vcs.ShapedFile, error) {
-			if unit.Path != "b.go" {
-				return vcs.ShapedFile{}, nil
+	for _, tc := range []struct {
+		name, configured, override, policy, source string
+	}{
+		{"default", "", "", "hunks_first", "default"},
+		{"configured hunks", "hunks_first", "", "hunks_first", "config"},
+		{"configured whole", "whole_when_fits", "", "whole_when_fits", "config"},
+		{"flag whole overrides hunks", "hunks_first", "whole_when_fits", "whole_when_fits", "flag"},
+		{"flag hunks overrides whole", "whole_when_fits", "hunks_first", "hunks_first", "flag"},
+		{"flag whole without config", "", "whole_when_fits", "whole_when_fits", "flag"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newEnv(t)
+			if tc.configured != "" {
+				e.cfg = mustConfig(t, "reviewers:\n  - harness: claude\nreview:\n  input_policy: "+tc.configured+"\n")
 			}
-			return vcs.ShapedFile{Form: intel.FormHunksContext, Diff: []byte(canned)}, nil
-		}
-		e.runner.script = []exec.Result{
-			{ExitCode: 0, Stdout: claudeStdout(batchAnswerFor(t, []string{"a.go", "b.go"}))},
-		}
-		return e, capturePrompt(e)
-	}
-	hunks, hunksPrompts := inputs(t, "")
-	if got := runLeg(t, hunks, hunks.request(t)); got.Err != nil {
-		t.Fatalf("hunks_first Run: %v", got.Err)
-	} else if got.Outcome != review.OutcomeInvoked {
-		t.Fatalf("hunks_first Outcome = %q, want invoked", got.Outcome)
-	}
-	whole, wholePrompts := inputs(t, "whole_when_fits")
-	if got := runLeg(t, whole, whole.request(t)); got.Err != nil {
-		t.Fatalf("whole_when_fits Run: %v", got.Err)
-	} else if got.Outcome != review.OutcomeInvoked {
-		t.Fatalf("whole_when_fits Outcome = %q, want invoked", got.Outcome)
-	}
-	if len(*hunksPrompts) != 1 || len(*wholePrompts) != 1 {
-		t.Fatalf("prompts = %d and %d, want 1 call under each policy", len(*hunksPrompts), len(*wholePrompts))
-	}
-	if !strings.Contains((*hunksPrompts)[0], "the enclosing function of each change") {
-		t.Error("hunks_first does not read the hunk form")
-	}
-	wholePrompt := (*wholePrompts)[0]
-	if strings.Contains(wholePrompt, "the enclosing function of each change") {
-		t.Error("whole_when_fits still reads the hunk form for a file that fits whole")
-	}
-	if !strings.Contains(wholePrompt, "package b") {
-		t.Error("whole_when_fits does not send the file whole")
+			writeRequiredHead(e, "a.go", "package a\n")
+			writeRequiredHead(e, "b.go", strings.Repeat("package b\n", 150))
+			canned := "diff --git a/b.go b/b.go\n--- a/b.go\n+++ b/b.go\n@@ -1,2 +1,3 @@\n package b\n+func B() {}\n package b\n"
+			e.vcs.shapeFunc = func(unit intel.FileUnit) (vcs.ShapedFile, error) {
+				if unit.Path != "b.go" {
+					return vcs.ShapedFile{}, nil
+				}
+				return vcs.ShapedFile{Form: intel.FormHunksContext, Diff: []byte(canned)}, nil
+			}
+			e.runner.script = []exec.Result{{ExitCode: 0, Stdout: claudeStdout(batchAnswerFor(t, []string{"a.go", "b.go"}))}}
+			prompts := capturePrompt(e)
+			req := e.request(t)
+			req.InputPolicyOverride = tc.override
+			got := runLeg(t, e, req)
+			if got.Err != nil || got.Outcome != review.OutcomeInvoked {
+				t.Fatalf("Run: outcome=%q err=%v", got.Outcome, got.Err)
+			}
+			if len(*prompts) != 1 {
+				t.Fatalf("prompts = %d, want 1", len(*prompts))
+			}
+			prompt := (*prompts)[0]
+			if hunks := strings.Contains(prompt, "the enclosing function of each change"); hunks != (tc.policy == "hunks_first") {
+				t.Errorf("hunk form = %t under %s", hunks, tc.policy)
+			}
+			if tc.policy == "whole_when_fits" && !strings.Contains(prompt, "package b") {
+				t.Error("whole_when_fits does not send the file whole")
+			}
+			want := "input_policy=" + tc.policy + " input_policy_source=" + tc.source
+			if log := readRunLog(t, e); !strings.Contains(log, "settings harness=claude ") || !strings.Contains(log, want) {
+				t.Errorf("run log does not record %s:\n%s", want, log)
+			}
+			if tc.configured != "" && e.cfg.ReviewInputPolicy() != tc.configured {
+				t.Error("the override mutated the configuration")
+			}
+		})
 	}
 }
 
@@ -369,4 +376,3 @@ func TestReviewSharedContextInBandRunsOverBudget(t *testing.T) {
 		t.Error("the over-budget hint does not match the packing switch")
 	}
 }
-

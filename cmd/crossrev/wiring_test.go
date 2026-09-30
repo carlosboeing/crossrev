@@ -715,3 +715,21 @@ func TestTheReviewLegGetsTheSlugFromTheMetadataFile(t *testing.T) {
 		t.Fatalf("status = %d\nstdout: %q\nstderr: %q", got.status, got.stdout, got.stderr)
 	}
 }
+
+// Exercise both composition-root paths through offline harness stubs. A bad
+// answer ends the first review, after its effective settings have been logged.
+func TestInputPolicyFlagReachesReviewSettings(t *testing.T) {
+	bin := binary(t)
+	for _, command := range []string{"review", "cycle"} {
+		t.Run(command, func(t *testing.T) {
+			fixture := newFixtureWith(t, `{}`)
+			got := invoke(t, bin, fixture.env, command, "--pr", "42", "--repo", "acme/widget", "--input-policy", "whole_when_fits")
+			if got.status != 1 {
+				t.Fatalf("status = %d, want the offline answer refused: %s", got.status, got.stderr)
+			}
+			if log := lastRunLog(t, fixture); !strings.Contains(log, "input_policy=whole_when_fits input_policy_source=flag") {
+				t.Errorf("the review settings did not receive the flag:\n%s", log)
+			}
+		})
+	}
+}
