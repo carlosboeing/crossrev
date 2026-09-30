@@ -1,6 +1,7 @@
 package review_test
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -652,6 +653,58 @@ func TestReviewTripwirePublishesNothing(t *testing.T) {
 		if len(store.Published()) != 0 {
 			t.Errorf("policy %q: the halted call published %d generations", policy, len(store.Published()))
 		}
+	}
+}
+
+// One Leg drives every pass the cycle asks it for, so a pass must not fold
+// an earlier pass into its own ledger: a halted first pass followed by a
+// healthy second pass on the same Leg records only the second pass's
+// counts, with no reason.
+func TestSecondRunOnOneLegCarriesOnlyItsOwnReads(t *testing.T) {
+	e := newEnv(t)
+	writeRequiredHead(e, "a.go", "package a\n")
+	e.cfg = mustConfig(t, "version: 2\npolicy:\n  on_reads_unavailable: halt\n")
+	e.runner.serveErr = errors.New("connection refused")
+	e.runner.script = []exec.Result{
+		{ExitCode: 0, Stdout: claudeStdout(batchAnswerFor(t, []string{"a.go"}))},
+	}
+	leg := e.leg(t)
+	req := e.request(t)
+	first := leg.Run(context.Background(), req)
+	if first.Err == nil {
+		t.Fatal("first Run: want the self-test halt to stop the leg")
+	}
+	if len(first.Marker.Reads) == 0 {
+		t.Fatal("the halted marker carries no reads envelope")
+	}
+
+	// The tool recovers; the same leg drives the next pass.
+	e.runner.serveErr = nil
+	e.runner.onSpec = func(spec exec.Spec) {
+		serveChildSession(t, spec,
+			`{"event":"start"}`,
+			`{"event":"initialize"}`,
+			`{"event":"tools_list"}`,
+			`{"event":"read","payload":{"path":"a.go","revision":"head","start_line":1,"end_line":2,"bytes":11}}`,
+			`{"event":"end"}`,
+		)
+	}
+	second := leg.Run(context.Background(), req)
+	if second.Err != nil {
+		t.Fatalf("second Run: %v", second.Err)
+	}
+	if len(second.Marker.Reads) == 0 {
+		t.Fatal("the second marker carries no reads envelope")
+	}
+	envelope, err := prstate.DecodeReadsEnvelope(second.Marker.Reads)
+	if err != nil {
+		t.Fatalf("decoding the second marker envelope: %v", err)
+	}
+	if envelope.Reason != "" {
+		t.Errorf("envelope reason = %q, want no reason on a healthy second pass", envelope.Reason)
+	}
+	if envelope.Calls != 1 || envelope.Reads != 1 || envelope.Bytes != 11 || envelope.Refused != 0 {
+		t.Errorf("envelope = %+v, want the second pass's single read of 11 bytes", envelope)
 	}
 }
 

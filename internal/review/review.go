@@ -16,7 +16,12 @@ import (
 
 // Run loads context, admits the pass, posts the claim, invokes the reviewer,
 // then publishes findings and completes the original claim.
+//
+// One Leg drives every pass the cycle asks it for, so the per-pass reads
+// ledger resets here: without it a later pass folds every earlier pass's
+// calls into its own envelope and inherits the first non-empty reason.
 func (l *Leg) Run(ctx context.Context, req Request) (out Result) {
+	l.readsNotes = nil
 	if req.PR == 0 {
 		out.Outcome = OutcomeError
 		out.Err = &ui.FatalError{
