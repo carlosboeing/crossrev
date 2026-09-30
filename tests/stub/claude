@@ -41,6 +41,23 @@ if [[ ! -t 0 ]]; then prompt="$(cat)"; fi
 # granted. Appended, because one `crossrev run` invokes this twice.
 [[ -n "${CROSSREV_ARGV_LOG:-}" ]] && printf '%s\n' "$*" >>"$CROSSREV_ARGV_LOG"
 
+# A served child connects to the read server before it answers: the post-call
+# handshake requires initialize and tools_list in the call log, so the stub
+# logs the session a real CLI opens when it is handed --mcp-config. Suites
+# asserting argv prove the config travels; this proves the child used it.
+_mcp_config=""
+_mcp_prev=""
+for _mcp_arg in "$@"; do
+  [[ "$_mcp_prev" == "--mcp-config" ]] && _mcp_config="$_mcp_arg"
+  _mcp_prev="$_mcp_arg"
+done
+if [[ -n "$_mcp_config" && -f "$_mcp_config" ]]; then
+  _served_log="$(jq -r '.mcpServers.crossrev.args | . as $a | range(0; length) as $i | select($a[$i] == "--log") | $a[$i+1]' "$_mcp_config" | head -n 1)"
+  if [[ -n "$_served_log" ]]; then
+    printf '%s\n' '{"event":"start"}' '{"event":"initialize"}' '{"event":"tools_list"}' '{"event":"end"}' >>"$_served_log"
+  fi
+fi
+
 # _emit_claude answers the shape that was asked for: the buffered object for
 # `--output-format json`, the final result event for stream-json. The event
 # carries the same answer and the same counters, so suites asserting usage
