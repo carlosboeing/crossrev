@@ -311,6 +311,35 @@ for key in "store: marker" "max_passes_per_cycle: 6" "destination: none" \
   has "base-prime carries the uniform eval config ($key)" "$eval_config_on_base_prime" "$key"
 done
 
+# The main run above passed no --input-policy, so its committed config must
+# read byte-identical to the uniform config, and the run records `default`.
+UNIFORM_EXPECTED="$T/uniform-expected.yml"
+cat >"$UNIFORM_EXPECTED" <<'EOF'
+version: 2
+mode: local
+policy:
+  min_fix_severity: medium
+  max_passes_per_cycle: 6
+  max_files_changed_per_pr: 200
+  max_prs_per_day: 25
+coverage:
+  store: marker
+reviewer:
+  harness: claude
+  model: reviewer-model-eval
+resolver:
+  harness: claude
+  model: resolver-model-eval
+backlog:
+  destination: none
+EOF
+git --git-dir="$A/work/origin.git" show "$BASE_PRIME:.github/crossrev.yml" >"$T/uniform-actual.yml" 2>/dev/null || true
+is "the absent flag leaves the uniform config byte-identical" \
+  "$(cmp -s "$UNIFORM_EXPECTED" "$T/uniform-actual.yml" && echo yes || echo no)" "yes"
+hasnt "the absent flag writes no input_policy" "$(cat "$T/uniform-actual.yml")" "input_policy"
+is "the unflagged run records the default policy" \
+  "$(cat "$R/input-policy.txt" 2>/dev/null)" "default"
+
 # --- planted-findings resolve-only run -----------------------------------------
 P="$R/planted-check/arm-p"
 is "results exist for the planted arm" "$([[ -d "$P" ]] && echo yes || echo no)" "yes"
@@ -369,6 +398,20 @@ nopay_rc=$?
 is "a full arm with no review_payloads is refused" "$(( nopay_rc != 0 ? 1 : 0 ))" "1"
 has "and the refusal names the field" "$(cat "$T/runner-no-payloads-out.txt")" "review_payloads"
 
+bash "$RUNNER" --manifest "$MANIFEST" --results-dir "$T/results-badpolicy" --bin "$BIN" \
+  --input-policy whole >"$T/runner-badpolicy-out.txt" 2>&1
+badpolicy_rc=$?
+is "a bad input policy is refused" "$(( badpolicy_rc != 0 ? 1 : 0 ))" "1"
+has "and the refusal names the accepted values" "$(cat "$T/runner-badpolicy-out.txt")" "hunks_first or whole_when_fits"
+is "and the refusal runs no case" "$([[ ! -e "$T/results-badpolicy" ]] && echo yes || echo no)" "yes"
+
+bash "$RUNNER" --manifest "$MANIFEST" --results-dir "$T/results-emptypolicy" --bin "$BIN" \
+  --input-policy "" >"$T/runner-emptypolicy-out.txt" 2>&1
+emptypolicy_rc=$?
+is "an empty input policy is refused" "$(( emptypolicy_rc != 0 ? 1 : 0 ))" "1"
+has "and the empty refusal names the accepted values" "$(cat "$T/runner-emptypolicy-out.txt")" "hunks_first or whole_when_fits"
+is "and the empty refusal runs no case" "$([[ ! -e "$T/results-emptypolicy" ]] && echo yes || echo no)" "yes"
+
 printf 'not json' >"$T/stamp-probe.json"
 # Color-forced end to end, the way a user shell with color forcing runs
 # it: the stamp name must read clean even then.
@@ -390,6 +433,37 @@ space_rc=$?
 is "the runner exits clean with a space in the results path" "$space_rc" "0"
 is "the base map is written with a space in the results path" \
   "$(jq -e '.["refresh-helper"] | has("base_prime")' "$SPACE_R/base-map.json" >/dev/null 2>&1 && echo yes || echo no)" "yes"
+
+# --- the flag reaches the committed config ----------------------------------
+#
+# One arm per policy value: each run must converge (the review section
+# parses), commit the value on its synthetic base, and record it.
+printf '\nrunning one arm per input policy\n'
+MANIFEST_POLICY="$T/manifest-policy.json"
+jq '.cases |= map(select(.mode == "full")) | .cases[0].arms |= .[0:1]' \
+  "$MANIFEST" >"$MANIFEST_POLICY"
+for policy in hunks_first whole_when_fits; do
+  RP="$T/results-policy-$policy"
+  bash "$RUNNER" --manifest "$MANIFEST_POLICY" --results-dir "$RP" --bin "$BIN" \
+    --input-policy "$policy" >"$T/runner-policy-$policy-out.txt" 2>&1
+  policy_rc=$?
+  if (( policy_rc != 0 )); then
+    printf '\n--- policy %s runner output ---\n' "$policy"
+    cat "$T/runner-policy-$policy-out.txt"
+    printf '%s\n' "--- end policy $policy runner output (kept tree: $T) ---"
+  fi
+  is "the runner exits clean with --input-policy $policy" "$policy_rc" "0"
+  PD="$RP/refresh-helper/arm-a"
+  is "$policy reaches the converged label" \
+    "$(jq -r '.terminal // empty' "$PD/result.json" 2>/dev/null)" "crossrev/converged"
+  POLICY_BASE_PRIME="$(jq -r '.["refresh-helper"].base_prime // empty' "$RP/base-map.json" 2>/dev/null)"
+  policy_config="$(git --git-dir="$PD/work/origin.git" show "$POLICY_BASE_PRIME:.github/crossrev.yml" 2>/dev/null || true)"
+  has "the $policy config carries a review section" "$policy_config" "review:"
+  has "the $policy config names the policy" "$policy_config" "input_policy: $policy"
+  has "the $policy config keeps the uniform keys" "$policy_config" "store: marker"
+  is "the $policy run records its policy" \
+    "$(cat "$RP/input-policy.txt" 2>/dev/null)" "$policy"
+done
 
 # --- live runs keep the stand-in and the frozen copy --------------------------
 #
