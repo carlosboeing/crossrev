@@ -88,6 +88,14 @@ func TestServedCallIsSentTheServedReadsBlock(t *testing.T) {
 	var prompts []string
 	e.runner.onSpec = func(spec exec.Spec) {
 		prompts = append(prompts, specPrompt(spec))
+		// A healthy served child reaches the server, so the call the
+		// prompt names stays healthy at the post-call check.
+		serveChildSession(t, spec,
+			`{"event":"start"}`,
+			`{"event":"initialize"}`,
+			`{"event":"tools_list"}`,
+			`{"event":"end"}`,
+		)
 	}
 	e.runner.script = []exec.Result{
 		{ExitCode: 0, Stdout: claudeStdout(batchAnswerFor(t, []string{"a.go"}))},
@@ -136,6 +144,17 @@ func TestReadsHaltOnABrokenTool(t *testing.T) {
 func TestReadsSkipWithNothingToByteCheck(t *testing.T) {
 	e := newEnv(t)
 	writeAppGo(t, e.dir)
+	// The child reaches the server but reads nothing: the handshake lands
+	// in the log with no calls behind it, so the skipped self-test stays
+	// clean.
+	e.runner.onSpec = func(spec exec.Spec) {
+		serveChildSession(t, spec,
+			`{"event":"start"}`,
+			`{"event":"initialize"}`,
+			`{"event":"tools_list"}`,
+			`{"event":"end"}`,
+		)
+	}
 	e.runner.script = []exec.Result{{ExitCode: 0, Stdout: claudeStdout(`{"verdict":"converged","findings":[]}`)}}
 
 	got := runLeg(t, e, e.request(t))
@@ -422,6 +441,71 @@ func TestServedChildSessionRefusalsHalt(t *testing.T) {
 	}
 	if envelope.Reason != "calls_refused" {
 		t.Errorf("envelope reason = %q, want calls_refused", envelope.Reason)
+	}
+}
+
+// A served child that never reaches the server leaves an empty call log,
+// and the post-call handshake catches it: the call degrades where the
+// policy says degrade, with the reason in the pass comment and the marker
+// envelope.
+func TestServedChildWithNoSessionDegrades(t *testing.T) {
+	e := newEnv(t)
+	writeRequiredHead(e, "a.go", "package a\n")
+	// No serveChildSession: the fake child never speaks to the read
+	// server, so the call log stays empty the way a failed MCP startup
+	// leaves it.
+	e.runner.script = []exec.Result{
+		{ExitCode: 0, Stdout: claudeStdout(batchAnswerFor(t, []string{"a.go"}))},
+	}
+
+	got := runLeg(t, e, e.request(t))
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
+	joined := strings.Join(ui.Texts(got.Messages), "\n")
+	if !strings.Contains(joined, "Served reads degraded (missing_handshake)") {
+		t.Errorf("no missing_handshake warning in the pass comment: %q", ui.Texts(got.Messages))
+	}
+	if len(got.Marker.Reads) == 0 {
+		t.Fatal("the marker carries no reads envelope")
+	}
+	envelope, err := prstate.DecodeReadsEnvelope(got.Marker.Reads)
+	if err != nil {
+		t.Fatalf("decoding the marker envelope: %v", err)
+	}
+	if envelope.Reason != "missing_handshake" {
+		t.Errorf("envelope reason = %q, want missing_handshake", envelope.Reason)
+	}
+}
+
+// A served child that never reaches the server halts where the policy says
+// halt: the call publishes nothing and the failure names
+// reads_unavailable, with the envelope-only entry as the record the call
+// happened.
+func TestServedChildWithNoSessionHalts(t *testing.T) {
+	e := newEnv(t)
+	writeRequiredHead(e, "a.go", "package a\n")
+	e.cfg = mustConfig(t, "version: 2\npolicy:\n  on_reads_unavailable: halt\n")
+	e.runner.script = []exec.Result{
+		{ExitCode: 0, Stdout: claudeStdout(batchAnswerFor(t, []string{"a.go"}))},
+	}
+
+	got := runLeg(t, e, e.request(t))
+	if got.Err == nil {
+		t.Fatal("Run: want the halt to stop the leg")
+	}
+	if !strings.Contains(got.Err.Error(), "reads_unavailable") {
+		t.Errorf("err = %v, want the reads_unavailable name", got.Err)
+	}
+	if len(got.Marker.Reads) == 0 {
+		t.Fatal("the halted marker carries no reads envelope")
+	}
+	envelope, err := prstate.DecodeReadsEnvelope(got.Marker.Reads)
+	if err != nil {
+		t.Fatalf("decoding the halted marker envelope: %v", err)
+	}
+	if envelope.Reason != "missing_handshake" {
+		t.Errorf("envelope reason = %q, want missing_handshake", envelope.Reason)
 	}
 }
 

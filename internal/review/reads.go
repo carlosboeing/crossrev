@@ -39,12 +39,18 @@ const ReadsReasonReviewCommand = "review_leg_ran_command"
 // and a failed self-test degrade where the policy says degrade and stop it
 // where it says halt. A healthy call leaves no reason and never halts,
 // whatever the policy.
-func AssessReads(onUnavailable string, stats prstate.ReadsStats, selfTestErr error) (reason string, halt bool) {
+//
+// The handshake is required on every served call, whatever the call count:
+// reads and refusals only arrive after initialize and tools/list, so a
+// served child that never reached the server leaves an empty log with zero
+// calls — exactly the failure the post-call handshake exists to catch. A
+// supplied call has no server, so its empty log is healthy.
+func AssessReads(onUnavailable string, effective harness.ReadMode, stats prstate.ReadsStats, selfTestErr error) (reason string, halt bool) {
 	halt = onUnavailable == "halt"
 	if selfTestErr != nil {
 		return ReadsReasonSelfTestFailed, halt
 	}
-	if stats.Calls > 0 && !stats.Handshake {
+	if effective == harness.ReadModeServed && !stats.Handshake {
 		return ReadsReasonMissingHandshake, halt
 	}
 	if stats.Refused > 0 {

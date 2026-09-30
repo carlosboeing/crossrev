@@ -180,7 +180,7 @@ func (l *Leg) assessCallReads(loaded Context, tmp string, declared, effective ha
 	if priorReason != "" {
 		return note, nil, nil
 	}
-	reason, halt := AssessReads(readsPolicy(loaded), stats, nil)
+	reason, halt := AssessReads(readsPolicy(loaded), effective, stats, nil)
 	if reason == "" {
 		return note, nil, nil
 	}
@@ -228,7 +228,12 @@ func (l *Leg) summarizeReads() (envelope prstate.ReadsEnvelope, calls []prstate.
 		stats.Bytes += note.stats.Bytes
 		stats.Refused += note.stats.Refused
 		stats.BudgetExhausted = stats.BudgetExhausted || note.stats.BudgetExhausted
-		if note.stats.Calls > 0 && !note.stats.Handshake {
+		// The handshake is required on every served call, whatever its
+		// count: a served child that never reached the server leaves an
+		// empty log, and the envelope must not report a handshake no
+		// call performed. Supplied calls have no server to shake hands
+		// with, so their empty logs leave the fold alone.
+		if note.effective == harness.ReadModeServed && !note.stats.Handshake {
 			handshake = false
 		}
 		calls = append(calls, note.calls...)
