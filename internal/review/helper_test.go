@@ -20,6 +20,7 @@ import (
 	"github.com/carlosboeing/crossrev/internal/intel"
 	"github.com/carlosboeing/crossrev/internal/prstate"
 	"github.com/carlosboeing/crossrev/internal/prstate/storetest"
+	"github.com/carlosboeing/crossrev/internal/readserve"
 	"github.com/carlosboeing/crossrev/internal/review"
 	"github.com/carlosboeing/crossrev/internal/runlog"
 	"github.com/carlosboeing/crossrev/internal/validate"
@@ -650,11 +651,24 @@ func serveFixtureSession(spec exec.Spec, vcs *fakeVCS) exec.Result {
 			}
 			text := strings.TrimSuffix(string(body), "\n")
 			lines := strings.Split(text, "\n")
+			// The server cuts a result at DefaultMaxResultLines: render
+			// the cut the way it renders it, so the byte-check meets the
+			// same answer production meets.
+			last := len(lines)
+			nextStart := 0
+			if len(lines) > readserve.DefaultMaxResultLines {
+				last = readserve.DefaultMaxResultLines
+				nextStart = last + 1
+				lines = lines[:last]
+			}
 			var rendered strings.Builder
 			rendered.WriteString(req.Params.Arguments.Path + "@" + req.Params.Arguments.Revision +
-				" lines 1-" + strconv.Itoa(len(lines)) + "\n")
+				" lines 1-" + strconv.Itoa(last) + "\n")
 			for at, content := range lines {
 				rendered.WriteString(strconv.Itoa(at+1) + ": " + content + "\n")
+			}
+			if nextStart > 0 {
+				rendered.WriteString("(cut, next start_line=" + strconv.Itoa(nextStart) + ")\n")
 			}
 			payload, _ := json.Marshal(map[string]any{
 				"path":       req.Params.Arguments.Path,

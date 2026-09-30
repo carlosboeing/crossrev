@@ -174,6 +174,44 @@ func TestReadsSkipWithNothingToByteCheck(t *testing.T) {
 	}
 }
 
+// A required file past the server's line cap does not fail the self-test:
+// the server would cut the read at DefaultMaxResultLines, so there is
+// nothing whole to byte-check against. The pass runs clean, with no warning
+// and no envelope on the marker.
+func TestReadsSkipWhenTheOnlyCandidateIsPastTheLineCap(t *testing.T) {
+	e := newEnv(t)
+	long := strings.Repeat("x\n", 500)
+	if len(long) >= 4096 {
+		t.Fatalf("the fixture is %d bytes, want it under the probe byte cap", len(long))
+	}
+	writeRequiredHead(e, "long.go", long)
+	// The child reaches the server but reads nothing: the handshake lands
+	// in the log with no calls behind it, so the skipped self-test stays
+	// clean.
+	e.runner.onSpec = func(spec exec.Spec) {
+		serveChildSession(t, spec,
+			`{"event":"start"}`,
+			`{"event":"initialize"}`,
+			`{"event":"tools_list"}`,
+			`{"event":"end"}`,
+		)
+	}
+	e.runner.script = []exec.Result{{ExitCode: 0, Stdout: claudeStdout(batchAnswerFor(t, []string{"long.go"}))}}
+
+	got := runLeg(t, e, e.request(t))
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
+	for _, line := range ui.Texts(got.Messages) {
+		if strings.Contains(line, "Served reads degraded") {
+			t.Errorf("a skipped long-file self-test degrades: %q", line)
+		}
+	}
+	if len(got.Marker.Reads) != 0 {
+		t.Errorf("the marker carries a reads envelope with no served reads: %s", got.Marker.Reads)
+	}
+}
+
 // A grok review leg at a moved pin is refused with
 // review_isolation_unverified before any child starts: the tripwire block
 // is verified on the pinned version, or the pin moves.

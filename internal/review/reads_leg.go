@@ -56,6 +56,22 @@ type readsNote struct {
 // containment, so a whole large file buys nothing over its head.
 const maxProbeBytes = 4096
 
+// probeLineCount counts the lines the served read would render: the server
+// cuts a result at DefaultMaxResultLines, so a candidate past that cap
+// comes back with a cut marker instead of its last lines and the byte-check
+// would fail on a healthy tool. Selection skips such a candidate for the
+// next one rather than failing the self-test on what the path is.
+func probeLineCount(body []byte) int {
+	if len(body) == 0 {
+		return 0
+	}
+	lines := bytes.Count(body, []byte{'\n'})
+	if !bytes.HasSuffix(body, []byte{'\n'}) {
+		lines++
+	}
+	return lines
+}
+
 // readsPolicy answers the degradation policy for this pass, defaulting to
 // degrade. A nil config — fixtures, and any caller that never loaded one —
 // degrades rather than refusing to run.
@@ -96,7 +112,8 @@ func (l *Leg) selectProbeCandidates(ctx context.Context, loaded Context) ([]read
 	if loaded.Scope != nil {
 		var out []readserve.Probe
 		for _, unit := range loaded.Scope.Required {
-			if !unit.Available || unit.Binary || len(unit.Body) == 0 || len(unit.Body) > maxProbeBytes {
+			if !unit.Available || unit.Binary || len(unit.Body) == 0 || len(unit.Body) > maxProbeBytes ||
+				probeLineCount(unit.Body) > readserve.DefaultMaxResultLines {
 				continue
 			}
 			revision := "head"
@@ -124,7 +141,8 @@ func (l *Leg) selectProbeCandidates(ctx context.Context, loaded Context) ([]read
 			rev  core.Revision
 		}{{"head", loaded.PR.HeadRefOid}, {"base", loaded.PR.BaseRefOid}} {
 			body, _, err := l.VCS.Show(ctx, revision.rev, file.Path)
-			if err != nil || len(body) == 0 || len(body) > maxProbeBytes {
+			if err != nil || len(body) == 0 || len(body) > maxProbeBytes ||
+				probeLineCount(body) > readserve.DefaultMaxResultLines {
 				continue
 			}
 			out = append(out, readserve.Probe{Path: file.Path, Revision: revision.name, Want: body})
