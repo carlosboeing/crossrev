@@ -826,6 +826,42 @@ func TestCheckBatchPathConfirmsBeforePosting(t *testing.T) {
 	}
 }
 
+// With two concerns the batch path merges before the check: both
+// concern calls raise the same candidate, and one check call judges the
+// merged finding carrying both concerns.
+func TestCheckBatchPathMergesConcernsBeforeChecking(t *testing.T) {
+	e := newEnv(t)
+	e.cfg = mustConfig(t, "version: 2\n")
+	writeRequiredHead(e, "app.go", "package app\n")
+	answer := claudeStdout(findingAnswer(t, "app.go", nil, "Unchecked fetch"))
+	e.runner.script = []exec.Result{
+		{ExitCode: 0, Stdout: answer},
+		{ExitCode: 0, Stdout: answer},
+		{ExitCode: 0, Stdout: claudeStdout(checkPayload(confirmDecision(1)))},
+	}
+	got := runLeg(t, e, e.request(t))
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
+	if e.runner.calls != 3 {
+		t.Fatalf("harness calls = %d, want 3 (two batches and the check)", e.runner.calls)
+	}
+	if len(e.forge.filePosted) != 1 {
+		t.Fatalf("posted %d file comments, want 1", len(e.forge.filePosted))
+	}
+	findings := parseTestFindings(t, got.Marker.Findings)
+	if len(findings) != 1 {
+		t.Fatalf("findings = %d, want the merged one", len(findings))
+	}
+	var concerns []string
+	if err := json.Unmarshal(findings[0]["concerns"], &concerns); err != nil || len(concerns) != 2 {
+		t.Fatalf("concerns = %s, want both", findings[0]["concerns"])
+	}
+	if record := checkRecordOf(t, got.Marker); len(record.Decisions) != 1 {
+		t.Errorf("record decisions = %d, want 1", len(record.Decisions))
+	}
+}
+
 // A batch finding outside the diff still reads an excerpt: the
 // committed lines around its anchor at head.
 func TestCheckBatchOutsideDiffReadsCommittedLines(t *testing.T) {
