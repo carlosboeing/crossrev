@@ -47,6 +47,7 @@ func status(ctx context.Context, out *ui.IO, doc harness.Document, req cli.Statu
 		Now:      time.Now,
 		Show:     d.show(),
 		AppSlug:  appSlug(osEnv{}),
+		Harness:  doc,
 	}
 	report, err := reader.Load(ctx, repo, req.PR)
 	if err != nil {

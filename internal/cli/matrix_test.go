@@ -6,6 +6,7 @@ import (
 	"os"
 	"reflect"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -93,6 +94,8 @@ func renderField(t *testing.T, v reflect.Value) string {
 		return strconv.FormatBool(value)
 	case int:
 		return strconv.Itoa(value)
+	case []string:
+		return strings.Join(value, ",")
 	}
 	t.Fatalf("the matrix has no rendering for %s", v.Type())
 	return ""

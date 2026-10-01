@@ -295,12 +295,33 @@ func (l *Log) Call(call, promptBytes, suppliedBytes, reads int, fresh, cached, o
 // requested model and effort cannot be read back from the run log. Unset
 // halves read as dashes, the way Call renders an unnamed model.
 func (l *Log) Settings(harness, model, effort string) {
-	l.ReviewSettings(harness, model, effort, "", "")
+	l.ReviewSettings(harness, model, effort, ReviewDetail{})
 }
 
-// ReviewSettings also records the effective review input policy and its source.
-// An empty policy leaves the settings line without review fields for resolve.
-func (l *Log) ReviewSettings(harness, model, effort, inputPolicy, source string) {
+// EffectiveSetting is one resolved setting: the value the leg runs with
+// and where it came from — flag, config or default. An empty source
+// leaves the setting off the line, which is how the resolve leg omits the
+// review-only fields. An empty value with a source set records honestly:
+// no required check reads as an empty list from the default.
+type EffectiveSetting struct {
+	Value  string
+	Source string
+}
+
+// ReviewDetail carries the review-contract settings beside harness, model
+// and effort: the effective input policy, concerns, check mode, required
+// checks and wait, each with its source.
+type ReviewDetail struct {
+	InputPolicy    EffectiveSetting
+	Concerns       EffectiveSetting
+	Check          EffectiveSetting
+	RequiredChecks EffectiveSetting
+	CheckWait      EffectiveSetting
+}
+
+// ReviewSettings also records the effective review settings and their
+// sources. A setting with no source stays off the line.
+func (l *Log) ReviewSettings(harness, model, effort string, detail ReviewDetail) {
 	if l == nil {
 		return
 	}
@@ -310,9 +331,21 @@ func (l *Log) ReviewSettings(harness, model, effort, inputPolicy, source string)
 	if effort == "" {
 		effort = "-"
 	}
-	detail := "harness=" + harness + " model=" + model + " effort=" + effort
-	if inputPolicy != "" {
-		detail += " input_policy=" + inputPolicy + " input_policy_source=" + source
+	line := "harness=" + harness + " model=" + model + " effort=" + effort
+	for _, field := range []struct {
+		name    string
+		setting EffectiveSetting
+	}{
+		{"input_policy", detail.InputPolicy},
+		{"concerns", detail.Concerns},
+		{"check", detail.Check},
+		{"required_checks", detail.RequiredChecks},
+		{"check_wait", detail.CheckWait},
+	} {
+		if field.setting.Source == "" {
+			continue
+		}
+		line += " " + field.name + "=" + field.setting.Value + " " + field.name + "_source=" + field.setting.Source
 	}
-	l.Event("settings", detail)
+	l.Event("settings", line)
 }

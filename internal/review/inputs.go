@@ -36,6 +36,11 @@ type Request struct {
 	ModelOverride       string
 	EffortOverride      string
 	InputPolicyOverride string
+	ConcernsOverride    string
+	CheckOverride       string
+	RequiredChecks      []string
+	NoRequiredChecks    bool
+	CheckWait           string
 	Author              string
 	// Workdir overrides the pinned worktree: empty pins a clean detached
 	// worktree at the pull request head, set runs the harness there after

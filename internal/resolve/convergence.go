@@ -6,6 +6,7 @@ import (
 	"github.com/carlosboeing/crossrev/internal/config"
 	"github.com/carlosboeing/crossrev/internal/core"
 	"github.com/carlosboeing/crossrev/internal/forge"
+	"github.com/carlosboeing/crossrev/internal/harness"
 	"github.com/carlosboeing/crossrev/internal/policy"
 	"github.com/carlosboeing/crossrev/internal/prstate"
 )
@@ -96,10 +97,26 @@ func (l *Leg) generationIfCurrent(ctx context.Context, s *session, h prstate.Han
 	if err != nil {
 		return prstate.Generation{}, false
 	}
-	if !prstate.GenerationCurrent(gen, core.RevisionPair{Base: s.pr.BaseRefOid, Head: s.pr.HeadRefOid}, core.FileEngineVersion, producer) {
+	if !prstate.GenerationCurrent(gen, core.RevisionPair{Base: s.pr.BaseRefOid, Head: s.pr.HeadRefOid}, l.reviewEngineID(s.cfg), producer) {
 		return prstate.Generation{}, false
 	}
 	return gen, true
+}
+
+// reviewEngineID answers the review-contract engine identity under the
+// base policy: the configured concerns, check mode and input policy
+// beside the configured reviewer's effective read mode. It is the same
+// identity the review leg publishes under, so a generation judged under
+// another contract retires here instead of being trusted by the settle.
+func (l *Leg) reviewEngineID(cfg *config.Config) string {
+	reviewer := cfg.Reviewers()[0]
+	effective := harness.ReadModeSupplied
+	if doc, err := l.document(); err == nil {
+		if entry, found := doc.For(reviewer.Harness); found {
+			effective = harness.EffectiveReadMode(entry.ReadMode())
+		}
+	}
+	return core.ReviewEngineID(cfg.ReviewContract(string(effective)))
 }
 
 // resolveStoreFor answers the store the named handle reads through: the

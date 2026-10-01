@@ -175,6 +175,39 @@ func TestSettingsNamesTheResolvedHarnessModelAndEffort(t *testing.T) {
 	}
 }
 
+// TestReviewSettingsRecordsEachEffectiveValueAndItsSource: the settings
+// line carries every review-contract setting the leg resolved and where
+// each came from. A setting with no source stays off the line, which is
+// how the resolve leg omits the review-only fields; an empty value with a
+// source set records honestly.
+func TestReviewSettingsRecordsEachEffectiveValueAndItsSource(t *testing.T) {
+	l := openLog(t, runlog.Options{Repo: "acme/widget", PR: "7"})
+	l.ReviewSettings("codex", "", "", runlog.ReviewDetail{
+		InputPolicy:    runlog.EffectiveSetting{Value: "whole_when_fits", Source: "flag"},
+		Concerns:       runlog.EffectiveSetting{Value: "correctness", Source: "config"},
+		Check:          runlog.EffectiveSetting{Value: "resolver", Source: "default"},
+		RequiredChecks: runlog.EffectiveSetting{Value: "", Source: "default"},
+		CheckWait:      runlog.EffectiveSetting{Value: "10", Source: "default"},
+	})
+	want := "settings harness=codex model=- effort=-" +
+		" input_policy=whole_when_fits input_policy_source=flag" +
+		" concerns=correctness concerns_source=config" +
+		" check=resolver check_source=default" +
+		" required_checks= required_checks_source=default" +
+		" check_wait=10 check_wait_source=default\n"
+	if got := readLog(t, l); !strings.Contains(got, want) {
+		t.Errorf("run log does not record the effective settings:\n%s", got)
+	}
+
+	resolve := openLog(t, runlog.Options{Repo: "acme/widget", PR: "7"})
+	resolve.ReviewSettings("claude", "cli-model", "high", runlog.ReviewDetail{
+		RequiredChecks: runlog.EffectiveSetting{Value: "build", Source: "flag"},
+	})
+	if got := readLog(t, resolve); !strings.Contains(got, "settings harness=claude model=cli-model effort=high required_checks=build required_checks_source=flag\n") {
+		t.Errorf("the resolve settings line is wrong:\n%s", got)
+	}
+}
+
 // TestEventStampsUTCWhateverTheClockSays: the format ends in a literal Z, so a
 // clock that is not already UTC has to be converted rather than formatted.
 //

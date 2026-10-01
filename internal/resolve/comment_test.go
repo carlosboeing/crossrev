@@ -30,7 +30,7 @@ func TestResolveKeepsTheSkipWarningWhenItRewritesTheReviewComment(t *testing.T) 
 	gen := prstate.Generation{
 		Gen:      1,
 		Revision: core.RevisionPair{Base: e.base, Head: e.head},
-		Engine:   core.FileEngineVersion,
+		Engine:   testEngineID(),
 		Slot:     prstate.DefaultSlot,
 		Producer: prstate.Producer{Harness: "codex"},
 		Form:     prstate.GenerationFull,

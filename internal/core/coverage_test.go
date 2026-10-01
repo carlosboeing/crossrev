@@ -75,12 +75,55 @@ func TestParseUnitIDStrict(t *testing.T) {
 }
 
 func TestFileEngineIDMatchesFrozenValue(t *testing.T) {
-	const want = "81b7d675834623a3"
+	const want = "75fd20f3bc997c36"
 	if got := FileEngineID(); got != want {
 		t.Errorf("FileEngineID() = %q, want %q", got, want)
 	}
-	if FileEngineVersion != "hunk-v1" {
-		t.Errorf("FileEngineVersion = %q, want hunk-v1", FileEngineVersion)
+	if FileEngineVersion != "hunk-v2" {
+		t.Errorf("FileEngineVersion = %q, want hunk-v2", FileEngineVersion)
+	}
+}
+
+// The engine identity carries the review contract: the digest covers the
+// concerns in fixed order, the check mode, the effective input policy and
+// the effective read mode, so a generation judged under other settings
+// retires at the engine comparison instead of being reused.
+func TestReviewEngineIDCarriesTheContract(t *testing.T) {
+	base := ReviewContract{
+		Concerns:    []string{"correctness", "consistency"},
+		Check:       "resolver",
+		InputPolicy: "hunks_first",
+		ReadMode:    "served",
+	}
+	id := ReviewEngineID(base)
+	if !strings.HasPrefix(id, "hunk-v2+") || len(id) != len("hunk-v2+")+12 {
+		t.Fatalf("ReviewEngineID(base) = %q, want hunk-v2+12 hex", id)
+	}
+	if rest := strings.TrimPrefix(id, "hunk-v2+"); strings.Trim(rest, "0123456789abcdef") != "" {
+		t.Errorf("ReviewEngineID(base) = %q, want lowercase hex after the +", id)
+	}
+	if again := ReviewEngineID(base); again != id {
+		t.Errorf("ReviewEngineID(base) = %q then %q, want stable", id, again)
+	}
+	narrower := base
+	narrower.Concerns = []string{"correctness"}
+	if got := ReviewEngineID(narrower); got == id {
+		t.Errorf("narrowed concerns share the engine id %q", id)
+	}
+	off := base
+	off.Check = "off"
+	if got := ReviewEngineID(off); got == id {
+		t.Errorf("check off shares the engine id %q", id)
+	}
+	whole := base
+	whole.InputPolicy = "whole_when_fits"
+	if got := ReviewEngineID(whole); got == id {
+		t.Errorf("whole_when_fits shares the engine id %q", id)
+	}
+	supplied := base
+	supplied.ReadMode = "supplied"
+	if got := ReviewEngineID(supplied); got == id {
+		t.Errorf("supplied reads share the engine id %q", id)
 	}
 }
 

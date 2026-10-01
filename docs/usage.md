@@ -24,6 +24,11 @@ Options on `cycle`, `review` and `resolve`, unless noted:
 | `--model <id>` | Override the configured model for this run, passed to the harness exactly as written. Without `--harness` it keeps the configured harness and replaces only its model; on `cycle` it lands on both legs |
 | `--effort <level>` | Override the configured reasoning effort for this run, passed through verbatim like the config value; on `cycle` it lands on both legs |
 | `--input-policy hunks_first\|whole_when_fits` | Override `review.input_policy` for this run. On `review` and `cycle` only; on `cycle` it applies to the review legs |
+| `--concerns a,b` | Override `review.concerns` for this run, for example `--concerns correctness,consistency`. On `review` and `cycle` only; refused where the base policy says automated |
+| `--check resolver\|off` | Override `review.check` for this run. On `review` and `cycle` only; refused where the base policy says automated |
+| `--required-check NAME[@APP]` | Override `verification.required_checks` for this run; repeat the flag for more than one check. On all three commands; refused where the base policy says automated |
+| `--no-required-checks` | Clear `verification.required_checks` for this run. On all three commands; refused where the base policy says automated |
+| `--check-wait MINUTES` | Override `verification.wait_minutes` for this run, from 0 to 30. On `review` and `cycle` only; refused where the base policy says automated |
 | `--repo owner/name` | Target a repository other than this checkout |
 | `--no-tips` | Suppress the closing suggestion about automated mode |
 

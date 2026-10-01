@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/carlosboeing/crossrev/internal/config"
@@ -26,12 +27,20 @@ import (
 )
 
 type legSettings struct {
-	harness           string
-	model             string
-	effort            string
-	endpoint          string
-	inputPolicy       string
-	inputPolicySource string
+	harness              string
+	model                string
+	effort               string
+	endpoint             string
+	inputPolicy          string
+	inputPolicySource    string
+	concerns             []string
+	concernsSource       string
+	checkMode            string
+	checkSource          string
+	requiredChecks       []config.RequiredCheck
+	requiredChecksSource string
+	checkWait            int
+	checkWaitSource      string
 }
 
 func (l *Leg) settings(req Request, loaded Context) (legSettings, ui.Line, error) {
@@ -41,20 +50,86 @@ func (l *Leg) settings(req Request, loaded Context) (legSettings, ui.Line, error
 	// default an empty harness used to fall back to here, so a resolved slot
 	// always names a harness.
 	reviewer := loaded.Config.Reviewers()[0]
+	verification := loaded.Config.Verification()
 	s := legSettings{
-		harness:           reviewer.Harness,
-		model:             reviewer.Model,
-		effort:            reviewer.Effort,
-		endpoint:          reviewer.Endpoint,
-		inputPolicy:       loaded.Config.ReviewInputPolicy(),
-		inputPolicySource: "default",
+		harness:              reviewer.Harness,
+		model:                reviewer.Model,
+		effort:               reviewer.Effort,
+		endpoint:             reviewer.Endpoint,
+		inputPolicy:          loaded.Config.ReviewInputPolicy(),
+		inputPolicySource:    "default",
+		concerns:             loaded.Config.ReviewConcerns(),
+		concernsSource:       "default",
+		checkMode:            loaded.Config.ReviewCheck(),
+		checkSource:          "default",
+		requiredChecks:       verification.RequiredChecks,
+		requiredChecksSource: "default",
+		checkWait:            verification.WaitMinutes,
+		checkWaitSource:      "default",
 	}
 	if loaded.Config.Get(".review.input_policy") != "" {
 		s.inputPolicySource = "config"
 	}
+	if loaded.Config.Get(".review.concerns") != "" {
+		s.concernsSource = "config"
+	}
+	if loaded.Config.Get(".review.check") != "" {
+		s.checkSource = "config"
+	}
+	if loaded.Config.Get(".verification.required_checks") != "" {
+		s.requiredChecksSource = "config"
+	}
+	if loaded.Config.Get(".verification.wait_minutes") != "" {
+		s.checkWaitSource = "config"
+	}
 	if req.InputPolicyOverride != "" {
 		s.inputPolicy = req.InputPolicyOverride
 		s.inputPolicySource = "flag"
+	}
+	if req.ConcernsOverride != "" {
+		normalized, err := config.NormalizeConcerns(splitConcerns(req.ConcernsOverride))
+		if err != nil {
+			return s, ui.Line{}, overrideRefusal("--concerns", err)
+		}
+		s.concerns = normalized
+		s.concernsSource = "flag"
+	}
+	if req.CheckOverride != "" {
+		mode, err := config.NormalizeCheckMode(req.CheckOverride)
+		if err != nil {
+			return s, ui.Line{}, overrideRefusal("--check", err)
+		}
+		s.checkMode = mode
+		s.checkSource = "flag"
+	}
+	if req.NoRequiredChecks {
+		// The clear wins over --required-check on the same line: it names
+		// the empty set absolutely, where the list names members.
+		s.requiredChecks = nil
+		s.requiredChecksSource = "flag"
+	} else if len(req.RequiredChecks) > 0 {
+		parsed := make([]config.RequiredCheck, 0, len(req.RequiredChecks))
+		for _, item := range req.RequiredChecks {
+			check, err := config.ParseRequiredCheck(item)
+			if err != nil {
+				return s, ui.Line{}, overrideRefusal("--required-check", err)
+			}
+			parsed = append(parsed, check)
+		}
+		normalized, err := config.NormalizeRequiredChecks(parsed)
+		if err != nil {
+			return s, ui.Line{}, overrideRefusal("--required-check", err)
+		}
+		s.requiredChecks = normalized
+		s.requiredChecksSource = "flag"
+	}
+	if req.CheckWait != "" {
+		minutes, err := config.ParseWaitMinutes(req.CheckWait)
+		if err != nil {
+			return s, ui.Line{}, overrideRefusal("--check-wait", err)
+		}
+		s.checkWait = minutes
+		s.checkWaitSource = "flag"
 	}
 	if req.HarnessOverride != "" {
 		s.harness = req.HarnessOverride
@@ -91,6 +166,58 @@ func (l *Leg) settings(req Request, loaded Context) (legSettings, ui.Line, error
 		}
 	}
 	return s, ui.Line{}, notInstalledRefusal(l.Harness, asked)
+}
+
+// splitConcerns reads one --concerns value the way the flag parser does:
+// comma-separated, with surrounding spaces trimmed.
+func splitConcerns(value string) []string {
+	parts := strings.Split(value, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		out = append(out, strings.TrimSpace(part))
+	}
+	return out
+}
+
+// overrideRefusal refuses a flag value the parser already validated. It is
+// reached only by a caller that bypassed the parser, so it names the flag
+// rather than the request field.
+func overrideRefusal(flag string, err error) *ui.FatalError {
+	return &ui.FatalError{
+		Reason: flag + ": " + err.Error(),
+		Action: "Pass a value the config validator accepts; the flag and the config key share it.",
+	}
+}
+
+// reviewEngineID answers the review-contract engine identity this pass
+// publishes under: the configured concerns, check mode and input policy
+// beside the configured reviewer's effective read mode. It is read from
+// the base policy, not the resolved settings, so a local flag override
+// neither retires the pass's own checkpoint at the convergence reads nor
+// strands a generation resolve and status can no longer reproduce. What
+// the pass ran with is recorded in the run log and on the marker; only a
+// policy change retires the checkpoint.
+func (l *Leg) reviewEngineID(cfg *config.Config) string {
+	reviewer := cfg.Reviewers()[0]
+	entry, _ := l.Harness.For(reviewer.Harness)
+	effective := harness.EffectiveReadMode(entry.ReadMode())
+	return core.ReviewEngineID(cfg.ReviewContract(string(effective)))
+}
+
+// detail renders the resolved settings for the run log: each effective
+// value and its source.
+func (s legSettings) detail() runlog.ReviewDetail {
+	checks := make([]string, 0, len(s.requiredChecks))
+	for _, check := range s.requiredChecks {
+		checks = append(checks, check.String())
+	}
+	return runlog.ReviewDetail{
+		InputPolicy:    runlog.EffectiveSetting{Value: s.inputPolicy, Source: s.inputPolicySource},
+		Concerns:       runlog.EffectiveSetting{Value: strings.Join(s.concerns, ","), Source: s.concernsSource},
+		Check:          runlog.EffectiveSetting{Value: s.checkMode, Source: s.checkSource},
+		RequiredChecks: runlog.EffectiveSetting{Value: strings.Join(checks, ","), Source: s.requiredChecksSource},
+		CheckWait:      runlog.EffectiveSetting{Value: strconv.Itoa(s.checkWait), Source: s.checkWaitSource},
+	}
 }
 
 // notInstalledRefusal is the last refusal in run_leg_settings

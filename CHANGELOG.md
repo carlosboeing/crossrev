@@ -4,6 +4,10 @@ All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepa
 
 ## [Unreleased]
 
+### Added
+
+- **Review concern, check and required-check settings.** `review.concerns` (correctness, consistency or both), `review.check` (`resolver` or `off`), `verification.required_checks` (`NAME`, `NAME@APP` or name/app mappings) and `verification.wait_minutes` (0 to 30) are configurable per repository and per run via `--concerns`, `--check`, `--required-check` (repeatable), `--no-required-checks` and `--check-wait`. The config and the flag pass the same validator, the flags are refused where the base policy says automated, and the run log records each effective value and its source. The configured concerns, check mode, input policy and read mode fingerprint the coverage engine identity (`hunk-v2` plus a digest), so a generation judged under other settings retires instead of being reused.
+
 ### Changed
 
 - **The pre-pull-request checks are one list.** `CONTRIBUTING.md` now lists the five checks CI runs — the suite, `go test`, `lint.sh`, the parity ledger check and the changelog gate — and the README, the pull request template and the agent brief point to it instead of keeping their own shorter copies. `scripts/check-parity-coverage.sh` drops its `--native` mode, which refused shell suites that sourced `lib/*.sh` or ran `bin/crossrev`; both paths were removed with the Bash implementation, so a suite reaching for them already fails on its own.

@@ -66,6 +66,11 @@ func cycleCommand(ctx context.Context, out *ui.IO, doc harness.Document, req cli
 		ModelOverride:       req.ModelOverride,
 		EffortOverride:      req.EffortOverride,
 		InputPolicyOverride: req.InputPolicyOverride,
+		ConcernsOverride:    req.ConcernsOverride,
+		CheckOverride:       req.CheckOverride,
+		RequiredChecks:      req.RequiredChecks,
+		NoRequiredChecks:    req.NoRequiredChecks,
+		CheckWait:           req.CheckWait,
 		KeepTranscripts:     req.KeepTranscripts,
 		NoTips:              req.NoTips,
 	})
@@ -98,6 +103,11 @@ func (a reviewAdapter) Run(ctx context.Context, req cycle.LegRequest) cycle.LegR
 		ModelOverride:       req.ModelOverride,
 		EffortOverride:      req.EffortOverride,
 		InputPolicyOverride: req.InputPolicyOverride,
+		ConcernsOverride:    req.ConcernsOverride,
+		CheckOverride:       req.CheckOverride,
+		RequiredChecks:      req.RequiredChecks,
+		NoRequiredChecks:    req.NoRequiredChecks,
+		CheckWait:           req.CheckWait,
 		RunID:               runlog.RunID(),
 	})
 	a.out.PrintAll(result.Messages)
@@ -117,14 +127,16 @@ type resolveAdapter struct {
 
 func (a resolveAdapter) Run(ctx context.Context, req cycle.LegRequest) cycle.LegResult {
 	result := a.leg.Run(ctx, resolve.Request{
-		PR:              req.PR,
-		Repo:            req.Repo,
-		Trigger:         resolve.Trigger(req.Trigger),
-		Harness:         req.HarnessOverride,
-		ModelOverride:   req.ModelOverride,
-		EffortOverride:  req.EffortOverride,
-		Author:          a.author,
-		KeepTranscripts: req.KeepTranscripts,
+		PR:               req.PR,
+		Repo:             req.Repo,
+		Trigger:          resolve.Trigger(req.Trigger),
+		Harness:          req.HarnessOverride,
+		ModelOverride:    req.ModelOverride,
+		EffortOverride:   req.EffortOverride,
+		RequiredChecks:   req.RequiredChecks,
+		NoRequiredChecks: req.NoRequiredChecks,
+		Author:           a.author,
+		KeepTranscripts:  req.KeepTranscripts,
 	})
 	a.out.PrintAll(result.Messages)
 	if result.Message != "" {

@@ -733,3 +733,75 @@ func TestInputPolicyFlagReachesReviewSettings(t *testing.T) {
 		})
 	}
 }
+
+// The review-contract flags reach the review settings on both commands
+// that take them. A bad answer ends the first review, after its effective
+// settings have been logged.
+func TestReviewContractFlagsReachReviewSettings(t *testing.T) {
+	bin := binary(t)
+	for _, command := range []string{"review", "cycle"} {
+		t.Run(command, func(t *testing.T) {
+			fixture := newFixtureWith(t, `{}`)
+			got := invoke(t, bin, fixture.env, command, "--pr", "42", "--repo", "acme/widget",
+				"--concerns", "correctness", "--check", "off",
+				"--required-check", "build", "--required-check", "test@my-app",
+				"--check-wait", "5")
+			if got.status != 1 {
+				t.Fatalf("status = %d, want the offline answer refused: %s", got.status, got.stderr)
+			}
+			log := lastRunLog(t, fixture)
+			for _, want := range []string{
+				"concerns=correctness concerns_source=flag",
+				"check=off check_source=flag",
+				"required_checks=build,test@my-app required_checks_source=flag",
+				"check_wait=5 check_wait_source=flag",
+			} {
+				if !strings.Contains(log, want) {
+					t.Errorf("the review settings did not receive the flags (want %q):\n%s", want, log)
+				}
+			}
+		})
+	}
+}
+
+// A setting-override flag is refused where the committed policy says
+// automated, on every command that takes one — even when its value equals
+// the base value.
+func TestReviewContractFlagsRefusedInAutomatedMode(t *testing.T) {
+	bin := binary(t)
+	for _, tc := range []struct {
+		name    string
+		command string
+		args    []string
+		flag    string
+	}{
+		{"review concerns", "review", []string{"--concerns", "correctness"}, "--concerns"},
+		{"review check", "review", []string{"--check", "off"}, "--check"},
+		{"review required check", "review", []string{"--required-check", "build"}, "--required-check"},
+		{"review no required checks", "review", []string{"--no-required-checks"}, "--no-required-checks"},
+		{"review check wait", "review", []string{"--check-wait", "5"}, "--check-wait"},
+		{"review equal to the base value", "review", []string{"--check", "resolver"}, "--check"},
+		{"resolve required check", "resolve", []string{"--required-check", "build"}, "--required-check"},
+		{"resolve no required checks", "resolve", []string{"--no-required-checks"}, "--no-required-checks"},
+		{"cycle concerns", "cycle", []string{"--concerns", "correctness"}, "--concerns"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fixture := newFixtureAutomated(t)
+
+			apps := filepath.Join(fixture.home(t), "cfg", "crossrev", "apps")
+			mkdirs(t, apps)
+			write(t, filepath.Join(apps, "acme.loop.json"), `{"slug":"crossrev-acme","role":"loop","owner":"acme"}`)
+
+			env := append([]string{"CROSSREV_OWNER=acme", "CROSSREV_APP_SLUG=crossrev-acme"}, fixture.env...)
+			args := append([]string{tc.command, "--pr", "42", "--repo", "acme/widget"}, tc.args...)
+			got := invoke(t, bin, env, args...)
+			if got.status != 1 {
+				t.Fatalf("status = %d, want the automated-mode refusal: %s", got.status, got.stderr)
+			}
+			want := "the " + tc.flag + " flag cannot override policy in automated mode (ADR 0003)"
+			if !strings.Contains(got.stderr, want) {
+				t.Errorf("stderr does not carry the refusal (want %q):\n%s", want, got.stderr)
+			}
+		})
+	}
+}
