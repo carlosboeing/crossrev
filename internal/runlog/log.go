@@ -260,6 +260,13 @@ func (l *Log) PhaseTerms(terms int, ms int64) {
 	l.Event("phase", "terms terms="+strconv.Itoa(terms)+" ms="+strconv.FormatInt(ms, 10))
 }
 
+// CallIdentity identifies the purpose and input slice of a model call.
+type CallIdentity struct {
+	Kind    string
+	Concern string
+	Part    int
+}
+
 // Call records one accepted model call: the rendered prompt's byte length,
 // the evidence bytes handed over with it, the usage buckets the accepted
 // envelope folded in, the call's served reads from the reads ledger, the
@@ -271,12 +278,25 @@ func (l *Log) PhaseTerms(terms int, ms int64) {
 // a call with no served reader — supplied mode — reads zero. commands
 // reads zero because an accepted call never ran one: any command event
 // halts the leg with review_leg_ran_command before a call line is written.
-func (l *Log) Call(call, promptBytes, suppliedBytes, reads int, fresh, cached, output int64, model string, ms int64) {
+func (l *Log) Call(call, promptBytes, suppliedBytes, reads int, fresh, cached, output int64, model string, ms int64, identity ...CallIdentity) {
 	if l == nil {
 		return
 	}
 	if model == "" {
 		model = "-"
+	}
+	suffix := ""
+	if len(identity) > 0 {
+		detail := identity[0]
+		part := "-"
+		if detail.Part > 0 {
+			part = strconv.Itoa(detail.Part)
+		}
+		concern := detail.Concern
+		if concern == "" {
+			concern = "-"
+		}
+		suffix = " kind=" + detail.Kind + " concern=" + concern + " part=" + part
 	}
 	l.Event("call", strconv.Itoa(call)+
 		" prompt_bytes="+strconv.Itoa(promptBytes)+
@@ -286,7 +306,7 @@ func (l *Log) Call(call, promptBytes, suppliedBytes, reads int, fresh, cached, o
 		" output="+strconv.FormatInt(output, 10)+
 		" reads="+strconv.Itoa(reads)+" commands=0"+
 		" model="+model+
-		" ms="+strconv.FormatInt(ms, 10))
+		" ms="+strconv.FormatInt(ms, 10)+suffix)
 }
 
 // Settings records one leg's resolved harness, model and effort: what the
