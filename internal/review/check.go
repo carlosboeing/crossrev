@@ -390,15 +390,19 @@ func checkDegrade(err error) (string, string, bool) {
 	}
 	var refusal *harness.Refusal
 	if errors.As(err, &refusal) {
+		// An explicit allowlist of the refusals that mean the
+		// checker could not run at all: anything else — a
+		// hardening refusal, a leaked endpoint variable, a
+		// missing schema or scratch directory — propagates as
+		// the review leg's own failure does. A generic refusal
+		// is never unavailability on its own.
 		switch {
-		case errors.Is(err, harness.ErrEndpointUnsupported), errors.Is(err, harness.ErrEndpointToken):
-			return "", "", false
 		case errors.Is(err, harness.ErrNotInstalled):
 			return prstate.CheckUnavailable, checkReasonNotInstalled, true
 		case errors.Is(err, harness.ErrVersionUnsupported):
 			return prstate.CheckUnavailable, checkReasonVersionRefused, true
 		default:
-			return prstate.CheckUnavailable, checkReasonUnavailable, true
+			return "", "", false
 		}
 	}
 	return "", "", false

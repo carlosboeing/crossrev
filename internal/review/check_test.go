@@ -13,6 +13,7 @@ import (
 
 	"github.com/carlosboeing/crossrev/internal/exec"
 	"github.com/carlosboeing/crossrev/internal/forge"
+	"github.com/carlosboeing/crossrev/internal/harness"
 	"github.com/carlosboeing/crossrev/internal/prstate"
 	"github.com/carlosboeing/crossrev/internal/sandbox"
 	"github.com/carlosboeing/crossrev/internal/ui"
@@ -672,6 +673,64 @@ func TestCheckUsageIsPricedWithTheChecker(t *testing.T) {
 	if !strings.Contains(readRunLog(t, e), "kind=check concern=- part=-") {
 		t.Error("run.log carries no kind=check call line")
 	}
+}
+
+// A hardening refusal under the check propagates as the review leg's
+// own failure does: refusing to run unhardened never becomes
+// unchecked publication.
+func TestCheckHardeningRefusalPropagates(t *testing.T) {
+	e := checkEnv(t)
+	e.doc = strippedCodexDoc(t)
+	e.cfg = mustConfig(t, "version: 2\nreview:\n  concerns: [correctness]\nresolver:\n  harness: codex\n")
+	e.runner.script = []exec.Result{
+		{ExitCode: 0, Stdout: claudeStdout(issuesPayload(twoFindings))},
+	}
+	got := runLeg(t, e, e.request(t))
+	if got.Err == nil {
+		t.Fatal("want the hardening refusal to fail the pass")
+	}
+	if !strings.Contains(got.Err.Error(), "hardening") {
+		t.Fatalf("err = %v, want the hardening refusal", got.Err)
+	}
+	if len(e.forge.reviewPosted) != 0 {
+		t.Errorf("posted %d finding comments past the hardening refusal", len(e.forge.reviewPosted))
+	}
+	if check := got.Marker.Check.Value(); check != "" {
+		t.Errorf("check = %q, want no check outcome recorded", check)
+	}
+}
+
+// strippedCodexDoc answers the shipped descriptor with codex's
+// sandbox_args emptied: the only way to reach the hardening refusal,
+// because the shipped one carries the flags.
+func strippedCodexDoc(t *testing.T) harness.Document {
+	t.Helper()
+	var document map[string]any
+	if err := json.Unmarshal(mustDoc(t).Raw(), &document); err != nil {
+		t.Fatal(err)
+	}
+	harnesses, ok := document["harnesses"].([]any)
+	if !ok {
+		t.Fatal("the descriptor carries no harnesses")
+	}
+	for _, entry := range harnesses {
+		harnessEntry, ok := entry.(map[string]any)
+		if !ok {
+			t.Fatal("a harness entry is not an object")
+		}
+		if harnessEntry["name"] == "codex" {
+			harnessEntry["sandbox_args"] = []any{}
+		}
+	}
+	raw, err := json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := harness.Load(raw)
+	if err != nil {
+		t.Fatalf("loading the stripped descriptor: %v", err)
+	}
+	return doc
 }
 
 // A checker that runs a command trips the same tripwire the review leg

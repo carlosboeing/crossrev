@@ -349,7 +349,6 @@ func TestCheckDegradeMapsTheFailureClasses(t *testing.T) {
 		{"answer rejected", fatal(harness.ErrAnswerRejected, "claude twice returned an answer that contradicts what it was given"), prstate.CheckDegraded, checkReasonAnswerRejected},
 		{"not installed", &harness.Refusal{Reason: "no claude binary", Kind: harness.ErrNotInstalled}, prstate.CheckUnavailable, checkReasonNotInstalled},
 		{"version refused", &harness.Refusal{Reason: "unsupported CLI", Kind: harness.ErrVersionUnsupported}, prstate.CheckUnavailable, checkReasonVersionRefused},
-		{"other refusal", &harness.Refusal{Reason: "no scratch", Kind: harness.ErrScratch}, prstate.CheckUnavailable, checkReasonUnavailable},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			state, reason, ok := checkDegrade(tc.err)
@@ -369,6 +368,12 @@ func TestCheckDegradeMapsTheFailureClasses(t *testing.T) {
 		{"restore", newSandboxRestoreFailure("claude", "the answer failed", "permission denied")},
 		{"endpoint", &harness.Refusal{Reason: "no endpoint", Kind: harness.ErrEndpointUnsupported}},
 		{"endpoint token", &harness.Refusal{Reason: "no token", Kind: harness.ErrEndpointToken}},
+		{"hardening", &harness.Refusal{Reason: "could not resolve hardening arguments for codex", Kind: harness.ErrHardening}},
+		{"endpoint leaked", &harness.Refusal{Reason: "an endpoint variable is set", Kind: harness.ErrEndpointLeaked}},
+		{"schema unavailable", &harness.Refusal{Reason: "no schema text", Kind: harness.ErrSchemaUnavailable}},
+		{"scratch", &harness.Refusal{Reason: "no scratch", Kind: harness.ErrScratch}},
+		{"effort without model", &harness.Refusal{Reason: "no model", Kind: harness.ErrEffortWithoutModel}},
+		{"models converged", &harness.Refusal{Reason: "one model answered", Kind: harness.ErrModelsConverged}},
 		{"reads halt", fatal(nil, "reads unavailable and the policy says halt (reads_unavailable)")},
 		{"cancelled", errors.Join(context.Canceled, &ui.FatalError{Reason: "interrupted"})},
 		{"unknown", errors.New("boom")},
