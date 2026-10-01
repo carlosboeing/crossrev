@@ -306,13 +306,7 @@ CrossRev reconstructs every pass from the pull request and the repository's ledg
 
 Contributions are welcome. See [Contributing to CrossRev](CONTRIBUTING.md) for development setup, project constraints, test layers, and the pull-request process. Participation follows the [Code of Conduct](CODE_OF_CONDUCT.md).
 
-Run the offline checks before opening a pull request:
-
-```bash
-bash tests/run.sh
-bash scripts/lint.sh
-go test ./...
-```
+Run the offline checks listed under [Tests](CONTRIBUTING.md#tests) before opening a pull request. CI runs the same five.
 
 Use the repository's [issue templates](.github/ISSUE_TEMPLATE/) for bug reports and feature requests.
 

@@ -2,8 +2,7 @@
 # Columns: suite, class, behaviour, destinations (space-separated).
 # A go-test row is proved by Go package tests. A black-box row is proved by running
 # the shell suite itself against one built binary, which is what tests/run.sh
-# builds and runs; those suites must neither source lib/*.sh nor execute
-# bin/crossrev, which scripts/check-parity-coverage.sh --native enforces.
+# builds and runs.
 # Rows for deleted suites stay as the record of where their behaviour went.
 test-action.sh	black-box	action.yml forwards only flags the named leg accepts, and asks each leg for the preflight it needs	tests/test-action.sh
 test-adapters.sh	black-box	agy adapter behaviour through a real review leg	tests/test-adapters.sh
