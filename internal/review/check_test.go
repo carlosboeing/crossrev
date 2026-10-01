@@ -939,6 +939,54 @@ func TestCheckOversizedRecordFailsTheMarkerWrite(t *testing.T) {
 	}
 }
 
+// A confirmed survivor keeps its comment when a checked-out candidate
+// shares its finding id: ids carry path, title and anchor but no
+// severity or explanation, so the filter reconciles by position and the
+// survivor posts and counts as actionable.
+func TestCheckSharedIDKeepsTheConfirmedSurvivor(t *testing.T) {
+	shared := `[{"path":"app.go","line":2,"side":"RIGHT","severity":"high","category":"correctness","pre_existing":false,"title":"Same title","why":"first words","fix":"Check it"},` +
+		`{"path":"app.go","line":2,"side":"RIGHT","severity":"low","category":"correctness","pre_existing":false,"title":"Same title","why":"second words","fix":"Check it"}]`
+	e := checkEnv(t)
+	e.runner.script = []exec.Result{
+		{ExitCode: 0, Stdout: claudeStdout(issuesPayload(shared))},
+		{ExitCode: 0, Stdout: claudeStdout(checkPayload(confirmDecision(1), duplicateDecision(2, 1, "same defect as candidate 1")))},
+	}
+	got := runLeg(t, e, e.request(t))
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
+	findings := parseTestFindings(t, got.Marker.Findings)
+	if len(findings) != 2 {
+		t.Fatalf("stored findings = %d, want 2", len(findings))
+	}
+	var firstID, secondID string
+	_ = json.Unmarshal(findings[0]["id"], &firstID)
+	_ = json.Unmarshal(findings[1]["id"], &secondID)
+	if firstID == "" || firstID != secondID {
+		t.Fatalf("ids = %q and %q, want one shared id", firstID, secondID)
+	}
+	if len(e.forge.reviewPosted) != 1 {
+		t.Fatalf("posted %d finding comments, want 1 (the confirmed survivor)", len(e.forge.reviewPosted))
+	}
+	if !strings.Contains(e.forge.reviewPosted[0].Body, "first words") {
+		t.Errorf("posted body = %s, want the survivor's words", e.forge.reviewPosted[0].Body)
+	}
+	checkedOut := got.Marker.DecodeCheckedOut()
+	if len(checkedOut) != 1 || checkedOut[0].Position != 2 || checkedOut[0].Decision != "duplicate" {
+		t.Fatalf("checked_out = %+v, want the duplicate at position 2", checkedOut)
+	}
+	body := finalClaimBody(e)
+	if !strings.Contains(body, "Same title") {
+		t.Errorf("the summary table names no survivor:\n%s", body)
+	}
+	if strings.Contains(body, "No findings posted.") {
+		t.Errorf("the summary reports no findings posted:\n%s", body)
+	}
+	if got.Marker.Verdict.Value() == "converged" {
+		t.Errorf("the pass converged with a confirmed high finding actionable")
+	}
+}
+
 // A rejected candidate raised again on a later pass is checked again:
 // the new pass records its own decisions.
 func TestCheckRechecksARaisedAgainCandidate(t *testing.T) {

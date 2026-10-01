@@ -3,6 +3,7 @@ package prstate
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -134,10 +135,10 @@ func DecodeCheckedOutRaw(raw json.RawMessage) []CheckedOutEntry {
 }
 
 // CheckedOutIDs answers the finding ids the check kept off the pull
-// request: every rejected and duplicate candidate. Both review-summary
-// renderers filter the table and the counts on this set, and the
-// posting loop reconciles against it, so a checked-out candidate never
-// posts however its entry reads.
+// request: every rejected and duplicate candidate. It is the fallback
+// set CheckedOutDrops answers for entries whose positions no longer
+// reconcile, so a checked-out candidate never posts however its entry
+// reads.
 func CheckedOutIDs(raw json.RawMessage) map[string]bool {
 	entries := DecodeCheckedOutRaw(raw)
 	if len(entries) == 0 {
@@ -150,6 +151,72 @@ func CheckedOutIDs(raw json.RawMessage) map[string]bool {
 		}
 	}
 	return out
+}
+
+// CandidateAnchor is the stored finding a candidate position addresses:
+// its id beside the path, line and side the positions sort on.
+type CandidateAnchor struct {
+	ID   string
+	Path string
+	Line int
+	Side string
+}
+
+// OrderCandidateIndexes numbers stored findings the way the check
+// numbers candidates: path, then line, then side, with payload order
+// breaking ties. It answers the stored index of each position in
+// turn, so position p lives at order[p-1]. The single definition of
+// candidate order: the check packs from it and every renderer
+// reconciles against it.
+func OrderCandidateIndexes(anchors []CandidateAnchor) []int {
+	order := make([]int, len(anchors))
+	for i := range anchors {
+		order[i] = i
+	}
+	sort.SliceStable(order, func(i, j int) bool {
+		a, b := anchors[order[i]], anchors[order[j]]
+		if a.Path != b.Path {
+			return a.Path < b.Path
+		}
+		if a.Line != b.Line {
+			return a.Line < b.Line
+		}
+		return a.Side < b.Side
+	})
+	return order
+}
+
+// CheckedOutDrops reconciles the checked-out entries against the stored
+// findings they judged: anchors in stored order, one per entry. A
+// reconciled entry drops its own stored index; finding ids omit
+// severity and explanation, so an id alone would also drop a confirmed
+// entry sharing it. An entry whose position is out of range or names
+// another id answers its id instead: the record moved underfoot, and
+// dropping by id keeps a rejection off the pull request. Empty when
+// nothing was checked out.
+func CheckedOutDrops(anchors []CandidateAnchor, checkedOut json.RawMessage) (dropIndex map[int]bool, dropID map[string]bool) {
+	entries := DecodeCheckedOutRaw(checkedOut)
+	if len(entries) == 0 {
+		return nil, nil
+	}
+	order := OrderCandidateIndexes(anchors)
+	for _, entry := range entries {
+		if entry.Position >= 1 && entry.Position <= len(order) &&
+			anchors[order[entry.Position-1]].ID == entry.ID {
+			if dropIndex == nil {
+				dropIndex = map[int]bool{}
+			}
+			dropIndex[order[entry.Position-1]] = true
+			continue
+		}
+		if entry.ID != "" {
+			if dropID == nil {
+				dropID = map[string]bool{}
+			}
+			dropID[entry.ID] = true
+		}
+	}
+	return dropIndex, dropID
 }
 
 // checkSummaryListed caps the rejected candidates the summary names;

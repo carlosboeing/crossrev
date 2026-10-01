@@ -853,18 +853,25 @@ func parseFindings(raw json.RawMessage) []Finding {
 }
 
 // excludeCheckedOut drops the findings the cross-model check kept off the
-// pull request: every id the marker's checked_out names. Only confirmed
-// candidates — and every candidate when the check degraded or was off —
-// post and count as actionable; the dropped entries stay on the marker
-// for the record.
+// pull request: each checked-out entry's own stored entry, reconciled
+// by position. Only confirmed candidates — and every candidate when
+// the check degraded or was off — post and count as actionable; the
+// dropped entries stay on the marker for the record.
 func excludeCheckedOut(findings []Finding, checkedOut json.RawMessage) []Finding {
-	ids := prstate.CheckedOutIDs(checkedOut)
-	if len(ids) == 0 {
+	if len(prstate.DecodeCheckedOutRaw(checkedOut)) == 0 {
 		return findings
 	}
+	anchors := make([]prstate.CandidateAnchor, len(findings))
+	for i, f := range findings {
+		anchors[i] = prstate.CandidateAnchor{ID: f.ID, Path: f.Path, Line: f.Line, Side: f.Side}
+	}
+	dropIndex, dropID := prstate.CheckedOutDrops(anchors, checkedOut)
 	out := make([]Finding, 0, len(findings))
-	for _, f := range findings {
-		if f.ID != "" && ids[f.ID] {
+	for i, f := range findings {
+		if dropIndex[i] {
+			continue
+		}
+		if f.ID != "" && dropID[f.ID] {
 			continue
 		}
 		out = append(out, f)

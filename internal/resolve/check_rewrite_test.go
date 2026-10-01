@@ -87,6 +87,35 @@ func TestReviewSummaryRewriteKeepsTheDegradeNote(t *testing.T) {
 	}
 }
 
+// A confirmed survivor sharing its id with a checked-out duplicate
+// survives the rewrite: the filter reconciles by position, so the
+// survivor stays in the table and the counts while the duplicate stays
+// out.
+func TestReviewSummaryRewriteKeepsASharedIDSurvivor(t *testing.T) {
+	findings := json.RawMessage(`[{` +
+		`"id":"cccccccccccccccc","path":"a.go","line":1,"side":"RIGHT","severity":"high","category":"correctness","pre_existing":false,"title":"shared title"},` +
+		`{` +
+		`"id":"cccccccccccccccc","path":"a.go","line":1,"side":"RIGHT","severity":"low","category":"correctness","pre_existing":false,"title":"shared title","posted":false}]`)
+	marker := prstate.Marker{
+		Pass:        1,
+		HeadSHA:     prstate.Some(testHeadSHA),
+		Harness:     prstate.Some("claude"),
+		Verdict:     prstate.Some(string(core.VerdictIssuesRemain)),
+		Check:       prstate.Some(prstate.CheckRan),
+		CheckedOut:  json.RawMessage(`[{"position":2,"id":"cccccccccccccccc","path":"a.go","line":1,"title":"shared title","reason":"same defect as candidate 1","decision":"duplicate"}]`),
+	}
+	got := reviewSummaryBody(findings, marker, mustSlug(t), 42, core.SeverityMedium, 3, commentCoverage{})
+	if !strings.Contains(got, "**1 finding need resolving.**") {
+		t.Errorf("the rewrite drops the shared-id survivor:\n%s", got)
+	}
+	if !strings.Contains(got, "shared title") {
+		t.Errorf("the rewrite names no survivor:\n%s", got)
+	}
+	if strings.Contains(got, "No findings posted.") {
+		t.Errorf("the rewrite reports no findings posted:\n%s", got)
+	}
+}
+
 // The resolve summary never counts a checked-out entry as held: the
 // rejection never reached the resolver.
 func TestResolveSummaryExcludesCheckedOutFromHeld(t *testing.T) {

@@ -683,22 +683,51 @@ func actionableCount(findings []harness.Node, minFix core.Severity) int {
 }
 
 // excludeCheckedOut drops the findings the cross-model check kept off the
-// pull request: every id the marker's checked_out names. The rewrite
-// renders the same visible set the review leg published, so a rejected
-// candidate stays out of the table and the counts here too.
+// pull request: each checked-out entry's own stored entry, reconciled
+// by position. The rewrite renders the same visible set the review leg
+// published, so a rejected candidate stays out of the table and the
+// counts here too. A line that is not a number leaves positions
+// unreproducible, so the whole set falls back to ids.
 func excludeCheckedOut(fs []harness.Node, checkedOut json.RawMessage) []harness.Node {
-	ids := prstate.CheckedOutIDs(checkedOut)
-	if len(ids) == 0 {
+	if len(prstate.DecodeCheckedOutRaw(checkedOut)) == 0 {
 		return fs
 	}
+	var anchors []prstate.CandidateAnchor
+	if extracted, ok := checkedOutAnchors(fs); ok {
+		anchors = extracted
+	}
+	dropIndex, dropID := prstate.CheckedOutDrops(anchors, checkedOut)
 	out := make([]harness.Node, 0, len(fs))
-	for _, f := range fs {
-		if id, ok := f.Member("id").AsString(); ok && ids[id] {
+	for i, f := range fs {
+		if dropIndex[i] {
+			continue
+		}
+		if id, ok := f.Member("id").AsString(); ok && id != "" && dropID[id] {
 			continue
 		}
 		out = append(out, f)
 	}
 	return out
+}
+
+// checkedOutAnchors reads the stored findings' anchors for the
+// position reconciliation: one per node, in stored order. False when
+// any line is not a number, in which case the caller filters by id.
+func checkedOutAnchors(fs []harness.Node) ([]prstate.CandidateAnchor, bool) {
+	anchors := make([]prstate.CandidateAnchor, len(fs))
+	for i, f := range fs {
+		line, ok := f.Member("line").AsInt()
+		if !ok {
+			return nil, false
+		}
+		anchors[i] = prstate.CandidateAnchor{
+			ID:   f.Member("id").StringVal(),
+			Path: f.Member("path").StringVal(),
+			Line: int(line),
+			Side: f.Member("side").StringVal(),
+		}
+	}
+	return anchors, true
 }
 
 func reviewSummaryBody(findings json.RawMessage, marker prstate.Marker, repo core.Slug, pr int, minFix core.Severity, maxPasses int, cov commentCoverage) string {

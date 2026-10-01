@@ -91,6 +91,65 @@ func TestCheckedOutIDsNamesBothDecisions(t *testing.T) {
 	}
 }
 
+// Candidate positions count the stored findings in path order: path,
+// then line, then side, with payload order breaking ties.
+func TestOrderCandidateIndexesSortsByAnchor(t *testing.T) {
+	anchors := []prstate.CandidateAnchor{
+		{ID: "third", Path: "b.go", Line: 1, Side: "RIGHT"},
+		{ID: "first", Path: "a.go", Line: 2, Side: "RIGHT"},
+		{ID: "second", Path: "a.go", Line: 10, Side: "RIGHT"},
+		{ID: "tied", Path: "a.go", Line: 2, Side: "RIGHT"},
+	}
+	got := prstate.OrderCandidateIndexes(anchors)
+	want := []int{1, 3, 2, 0}
+	if len(got) != len(want) {
+		t.Fatalf("order = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("order = %v, want %v", got, want)
+		}
+	}
+}
+
+// A checked-out entry drops its own stored entry by reconciled
+// position: a confirmed entry sharing the id survives, and an entry
+// whose position no longer reconciles falls back to its id.
+func TestCheckedOutDropsReconcilesPositions(t *testing.T) {
+	anchors := []prstate.CandidateAnchor{
+		{ID: "shared", Path: "a.go", Line: 1, Side: "RIGHT"},
+		{ID: "shared", Path: "a.go", Line: 1, Side: "RIGHT"},
+		{ID: "other", Path: "b.go", Line: 1, Side: "RIGHT"},
+	}
+	raw := json.RawMessage(`[{"position":2,"id":"shared","decision":"duplicate"}]`)
+	dropIndex, dropID := prstate.CheckedOutDrops(anchors, raw)
+	if len(dropIndex) != 1 || !dropIndex[1] {
+		t.Errorf("dropIndex = %v, want only the duplicate's stored entry", dropIndex)
+	}
+	if len(dropID) != 0 {
+		t.Errorf("dropID = %v, want no id fallback", dropID)
+	}
+	moved := json.RawMessage(`[{"position":9,"id":"other","decision":"rejected"}]`)
+	dropIndex, dropID = prstate.CheckedOutDrops(anchors, moved)
+	if len(dropIndex) != 0 {
+		t.Errorf("dropIndex = %v, want none for an unreconciled position", dropIndex)
+	}
+	if len(dropID) != 1 || !dropID["other"] {
+		t.Errorf("dropID = %v, want the unreconciled id", dropID)
+	}
+	mismatched := json.RawMessage(`[{"position":3,"id":"shared","decision":"rejected"}]`)
+	dropIndex, dropID = prstate.CheckedOutDrops(anchors, mismatched)
+	if len(dropIndex) != 0 {
+		t.Errorf("dropIndex = %v, want none for a mismatched id", dropIndex)
+	}
+	if len(dropID) != 1 || !dropID["shared"] {
+		t.Errorf("dropID = %v, want the mismatched id", dropID)
+	}
+	if dropIndex, dropID := prstate.CheckedOutDrops(anchors, nil); dropIndex != nil || dropID != nil {
+		t.Errorf("empty checked_out drops %v %v, want nothing", dropIndex, dropID)
+	}
+}
+
 // The summary block lists rejected candidates, at most ten with a count of
 // the rest; duplicates stay on the marker and out of the summary.
 func TestCheckSummaryBlockListsRejectedCandidates(t *testing.T) {

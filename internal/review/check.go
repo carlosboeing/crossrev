@@ -496,26 +496,13 @@ func nonEmpty(model string) string {
 // tiebreak: findings on one anchor keep payload order, so a human
 // reading the reviewer's answer can count along.
 func orderCandidates(findings []Finding) []checkCandidate {
-	type indexed struct {
-		finding Finding
-		index   int
-	}
-	ordered := make([]indexed, 0, len(findings))
+	anchors := make([]prstate.CandidateAnchor, len(findings))
 	for i, finding := range findings {
-		ordered = append(ordered, indexed{finding: finding, index: i})
+		anchors[i] = prstate.CandidateAnchor{ID: finding.ID, Path: finding.Path, Line: finding.Line, Side: finding.Side}
 	}
-	sort.SliceStable(ordered, func(i, j int) bool {
-		if ordered[i].finding.Path != ordered[j].finding.Path {
-			return ordered[i].finding.Path < ordered[j].finding.Path
-		}
-		if ordered[i].finding.Line != ordered[j].finding.Line {
-			return ordered[i].finding.Line < ordered[j].finding.Line
-		}
-		return ordered[i].finding.Side < ordered[j].finding.Side
-	})
-	out := make([]checkCandidate, 0, len(ordered))
-	for i, entry := range ordered {
-		out = append(out, checkCandidate{position: i + 1, index: entry.index, finding: entry.finding})
+	out := make([]checkCandidate, 0, len(findings))
+	for i, index := range prstate.OrderCandidateIndexes(anchors) {
+		out = append(out, checkCandidate{position: i + 1, index: index, finding: findings[index]})
 	}
 	return out
 }
