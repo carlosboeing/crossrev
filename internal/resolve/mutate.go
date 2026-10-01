@@ -231,10 +231,14 @@ func (l *Leg) publish(ctx context.Context, s *session, got Result, workdir strin
 		// nothing fixable is open; the predicate adds the ledger, counts,
 		// scope, confirmation and gate guards. With no coverage claim on
 		// the marker no coverage pass ran here, so the frozen-path settle
-		// keeps its legacy label; a claim the store no longer backs
-		// re-reviews instead of keeping converged.
+		// keeps its legacy label — held to the gate when one is
+		// configured, awaiting-review while the checks refuse. A claim
+		// the store no longer backs re-reviews instead of keeping
+		// converged.
 		if settleOK {
 			next = policy.ResolvePassLabelWithCoverage(asPolicyResolve(marker), other, settleConv)
+		} else if frozenGateRefuses(settlement) {
+			next = policy.PassAwaitingReview
 		}
 	}
 	if err := l.applyPassLabels(ctx, s, s.pass, next); err != nil {
@@ -418,14 +422,17 @@ func (l *Leg) finishEmpty(ctx context.Context, s *session, got Result) Result {
 		// The no-findings path reports converged only with the coverage
 		// obligation met. With no coverage claim on the marker no
 		// coverage pass ran here, so the frozen-path ending keeps its
-		// legacy label; a claim the store no longer backs, and corrupt
-		// or incomplete coverage, fail closed to halted, because the
-		// resolve leg cannot cover files itself and a human must
-		// re-drive the review.
-		if conv, ok := l.resolveConvergence(ctx, s); ok {
+		// legacy label — held to the gate when one is configured,
+		// halted while the checks refuse. A claim the store no longer
+		// backs, and corrupt or incomplete coverage, fail closed to
+		// halted, because the resolve leg cannot cover files itself and
+		// a human must re-drive the review.
+		if conv, settlement, ok := l.resolveConvergenceEvidence(ctx, s); ok {
 			if !policy.Converged(conv) {
 				next = policy.PassHalted
 			}
+		} else if frozenGateRefuses(settlement) {
+			next = policy.PassHalted
 		}
 	}
 	_ = l.applyPassLabels(ctx, s, s.pass, next)

@@ -193,6 +193,67 @@ func TestUnconfiguredSettleReadsNoCheckRuns(t *testing.T) {
 	}
 }
 
+// A no-commit settle over a review marker with no coverage claim still
+// judges the required-check gate: with checks failing, the frozen path
+// holds off converged rather than keeping its legacy label.
+func TestSettleWithoutCoverageClaimRefusesConvergedOnAFailedGate(t *testing.T) {
+	e := setup(t)
+	e.addReview(t, defaultFindings(), "issues-remain")
+	e.adapter.payloads = []json.RawMessage{json.RawMessage(
+		`{"blocked":false,"blocked_reason":null,"summary":"Not a bug.","commit_subject":null,` +
+			`"resolutions":[{"finding_number":1,"resolution":"skipped","reply":"no",` +
+			`"persist":null,"duplicate_of":null}]}`)}
+	e.git.show = map[string][]byte{
+		e.base.SHA() + ":.github/crossrev.yml": []byte(settleGateConfig),
+	}
+	e.forge.checks = []forge.CheckRun{
+		{ID: 11, Name: "build", App: "github-actions", Status: "completed", Conclusion: "failure",
+			URL: "https://github.com/acme/widget/runs/11"},
+	}
+	got := e.run(t)
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
+	if settleHasLabel(e, policy.LabelConverged) {
+		t.Fatalf("converged label applied with a failed check: %v", settleAdded(e))
+	}
+	if !settleHasLabel(e, policy.LabelAwaitingReview) {
+		t.Fatalf("addedLabels = %v, want %q", settleAdded(e), policy.LabelAwaitingReview)
+	}
+	if e.forge.checksCalls != 1 {
+		t.Errorf("check-run reads = %d, want 1", e.forge.checksCalls)
+	}
+}
+
+// A no-commit settle over a review marker with no coverage claim keeps its
+// legacy label when the gate passes: the frozen path holds converged to
+// the checks, it does not refuse it outright.
+func TestSettleWithoutCoverageClaimKeepsLegacyLabelOnAPassingGate(t *testing.T) {
+	e := setup(t)
+	e.addReview(t, defaultFindings(), "issues-remain")
+	e.adapter.payloads = []json.RawMessage{json.RawMessage(
+		`{"blocked":false,"blocked_reason":null,"summary":"Not a bug.","commit_subject":null,` +
+			`"resolutions":[{"finding_number":1,"resolution":"skipped","reply":"no",` +
+			`"persist":null,"duplicate_of":null}]}`)}
+	e.git.show = map[string][]byte{
+		e.base.SHA() + ":.github/crossrev.yml": []byte(settleGateConfig),
+	}
+	e.forge.checks = []forge.CheckRun{
+		{ID: 11, Name: "build", App: "github-actions", Status: "completed", Conclusion: "success",
+			URL: "https://github.com/acme/widget/runs/11"},
+	}
+	got := e.run(t)
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
+	if !settleHasLabel(e, policy.LabelConverged) {
+		t.Fatalf("addedLabels = %v, want %q", settleAdded(e), policy.LabelConverged)
+	}
+	if e.forge.checksCalls != 1 {
+		t.Errorf("check-run reads = %d, want 1", e.forge.checksCalls)
+	}
+}
+
 var errSettleDenied = errors.New("gh exited 1")
 
 // The empty-findings route refuses converged on a failed gate: with no
@@ -243,5 +304,33 @@ func TestEmptyFindingsRefusesConvergedOnAFailedGate(t *testing.T) {
 	}
 	if !settleHasLabel(e, policy.LabelHalted) {
 		t.Fatalf("addedLabels = %v, want %q", settleAdded(e), policy.LabelHalted)
+	}
+}
+
+// The empty-findings route holds off converged on a failed gate even with
+// no coverage claim on the marker: the legacy label stands only when the
+// checks passed or none were required.
+func TestEmptyFindingsWithoutCoverageClaimRefusesConvergedOnAFailedGate(t *testing.T) {
+	e := setup(t)
+	e.forge.ledger = storetest.NewFakeStore()
+	review := cutoverReviewMarker(t, e, nil)
+	s := cutoverSession(t, e, review)
+	s.settings.RequiredChecks = []config.RequiredCheck{{Name: "build", App: "github-actions"}}
+	e.forge.checks = []forge.CheckRun{
+		{ID: 11, Name: "build", App: "github-actions", Status: "completed", Conclusion: "failure",
+			URL: "https://github.com/acme/widget/runs/11"},
+	}
+	got := cutoverLeg(e).finishEmpty(context.Background(), s, Result{Outcome: OutcomeComplete})
+	if got.Outcome != OutcomeComplete {
+		t.Fatalf("Outcome = %q, want the pass outcome carried through", got.Outcome)
+	}
+	if settleHasLabel(e, policy.LabelConverged) {
+		t.Fatalf("converged label applied with a failed check: %v", settleAdded(e))
+	}
+	if !settleHasLabel(e, policy.LabelHalted) {
+		t.Fatalf("addedLabels = %v, want %q", settleAdded(e), policy.LabelHalted)
+	}
+	if e.forge.checksCalls != 1 {
+		t.Errorf("check-run reads = %d, want 1", e.forge.checksCalls)
 	}
 }
