@@ -79,7 +79,7 @@ func TestReviewSplitsTwoMegabyteHandwrittenFile(t *testing.T) {
 // of the PR 270 shape: a handwritten file past the old single-prompt
 // budget reviews in its hunk form with no halt and no split.
 func TestReviewChangeLogReviewsAsHunksWithNoHalt(t *testing.T) {
-	e := newEnv(t)
+	e := newEnv(t, "correctness")
 	body := strings.Repeat("package changelog\n", 250)
 	writeRequiredHead(e, "CHANGELOG.md", body)
 	var raw strings.Builder
@@ -175,7 +175,7 @@ func TestReviewInterruptedSplitLeavesNothing(t *testing.T) {
 // argv calls, and every prompt on either harness fits its own budget.
 func TestReviewArgvPacksUnder120KiBWhileCodexPacksTo390000(t *testing.T) {
 	inputs := func(t *testing.T, wrap func(string) []byte) *env {
-		e := newEnv(t)
+		e := newEnv(t, "correctness")
 		for i := 0; i < 4; i++ {
 			writeRequiredHead(e, fmt.Sprintf("f%d.go", i), "package x\n"+strings.Repeat("// filler line to price the transport\n", 1300))
 		}
@@ -250,7 +250,7 @@ func TestReviewInputPoliciesShareFixtures(t *testing.T) {
 		{"flag whole without config", "", "whole_when_fits", "whole_when_fits", "flag"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			e := newEnv(t)
+			e := newEnv(t, "correctness")
 			if tc.configured != "" {
 				e.cfg = mustConfig(t, "reviewers:\n  - harness: claude\nreview:\n  input_policy: "+tc.configured+"\n")
 			}

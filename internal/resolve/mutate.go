@@ -200,7 +200,8 @@ func (l *Leg) publish(ctx context.Context, s *session, got Result, workdir strin
 	marker.DoneTS = prstate.Some(now)
 	marker.Unthreaded = prstate.Some(unthreaded)
 	marker.Resolutions = marshalResolutions(recs)
-	summary := ResolveSummaryBody(marker.Resolutions, findingsRaw, deferredLines, marker, s.repo.String(), s.req.PR, s.maxPasses)
+	summary := resolveSummaryBody(marker.Resolutions, findingsRaw, deferredLines, marker, s.repo.String(), s.req.PR, s.maxPasses,
+		recurrenceCount(s.markers, s.pass, s.findings))
 	encoded, err := marker.Encode()
 	if err != nil {
 		return fail(err)

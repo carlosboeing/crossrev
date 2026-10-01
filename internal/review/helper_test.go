@@ -994,9 +994,11 @@ type env struct {
 	validate func([]byte, validate.ReviewExpectations) error
 	// legEnv is what the leg hands a child. Nil is the default pair below.
 	legEnv []string
+
+	concernsOverride string
 }
 
-func newEnv(t *testing.T) *env {
+func newEnv(t *testing.T, concerns ...string) *env {
 	t.Helper()
 	// cred.Prepare reads process RUNNER_ENVIRONMENT. GitHub-hosted runners set
 	// it to github-hosted, and a missing harness secret then stops the leg.
@@ -1025,8 +1027,13 @@ func newEnv(t *testing.T) *env {
 			versions[entry.Binary] = fmt.Sprintf(banner, entry.Install.PinnedVersion)
 		}
 	}
+	concern := ""
+	if len(concerns) > 0 {
+		concern = concerns[0]
+	}
 	return &env{
-		log: events,
+		concernsOverride: concern,
+		log:              events,
 		forge: &fakeForge{
 			store: storetest.NewFakeStore(),
 			log:   events,
@@ -1085,13 +1092,14 @@ func (e *env) leg(t *testing.T) review.Leg {
 func (e *env) request(t *testing.T) review.Request {
 	t.Helper()
 	return review.Request{
-		PR:              42,
-		Repo:            mustSlug(t),
-		Trigger:         review.TriggerHuman,
-		HarnessOverride: "claude",
-		Author:          author,
-		Workdir:         e.dir,
-		RunID:           runID,
+		PR:               42,
+		Repo:             mustSlug(t),
+		Trigger:          review.TriggerHuman,
+		HarnessOverride:  "claude",
+		ConcernsOverride: e.concernsOverride,
+		Author:           author,
+		Workdir:          e.dir,
+		RunID:            runID,
 	}
 }
 

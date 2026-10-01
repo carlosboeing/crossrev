@@ -37,6 +37,8 @@ type Finding struct {
 	// finding back. Omitted on the wire when unset, so a posted finding
 	// encodes exactly as it always has.
 	Posted *bool `json:"posted,omitempty"`
+
+	Concerns []string `json:"concerns,omitempty"`
 }
 
 // IsPosted reports whether the finding reached the pull request. Absent

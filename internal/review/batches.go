@@ -170,6 +170,7 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 	if settings.inputPolicy == config.ReviewInputWholeWhenFits {
 		whole = &WholePolicy{}
 	}
+	shared.concern = longestConcern(settings.concerns)
 	sharedBytes, _ := shared.render(nil, scope.Base, scope.Head, true, whole)
 	if whole != nil {
 		whole.MaxBytes = budget.PackBytes - len(sharedBytes)
@@ -292,39 +293,39 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 			verdicts map[core.UnitID]recordVerdict
 			supplied map[core.UnitID]prstate.SuppliedInput
 			payload  json.RawMessage
-			envelope harness.Envelope
 			examined []string
 			limits   []string
 		)
 		if scheduled.Part != nil {
-			merged, v, s, p, env, ex, li, err := l.invokePartCall(ctx, req, loaded, settings, scope, shared, scheduled.Part, !confirmationDone, call, len(plan.Calls), &outcome, pending, out)
+			merged, v, s, p, ex, li, err := l.invokePartCall(ctx, req, loaded, settings, scope, shared, scheduled.Part, !confirmationDone, call, len(plan.Calls), &outcome, pending, out)
 			if err != nil {
 				return err
 			}
 			if !merged {
 				continue
 			}
-			verdicts, supplied, payload, envelope, examined, limits = v, s, p, env, ex, li
+			verdicts, supplied, payload, examined, limits = v, s, p, ex, li
 		} else {
 			expected, _ := batchExpectations(scheduled.Files, scope.Base, scope.Head, whole)
 			if shared.diffErr != nil {
 				return shared.diffErr
 			}
-			promptBytes, callSupplied := shared.render(scheduled.Files, scope.Base, scope.Head, !confirmationDone, whole)
-			start := l.now()
-			readsMark := len(l.readsNotes)
-			answer, env, batchMsgs, err := l.invokePrompt(ctx, req, loaded, settings, expected, promptBytes, call)
-			ms := l.now().Sub(start).Milliseconds()
-			out.Messages = append(out.Messages, batchMsgs...)
+			_, callSupplied := shared.render(scheduled.Files, scope.Base, scope.Head, !confirmationDone, whole)
+			renderConcern := func(concern string) []byte {
+				focused := shared
+				focused.concern = concern
+				rendered, _ := focused.render(scheduled.Files, scope.Base, scope.Head, !confirmationDone, whole)
+				return rendered
+			}
+			answer, err := l.invokeConcerns(ctx, req, loaded, settings, expected, renderConcern, suppliedBytes(scheduled.Files), call, len(plan.Calls), 0, scope, &outcome, out)
 			if err != nil {
 				return err
 			}
-			l.logAcceptedCall(call, promptBytes, suppliedBytes(scheduled.Files), l.callReadsSince(readsMark), env, ms)
 			parsed, ex, li, err := verdictsFromPayload(answer, scheduled.Files)
 			if err != nil {
 				return err
 			}
-			verdicts, supplied, payload, envelope, examined, limits = parsed, callSupplied, answer, env, []string{ex}, li
+			verdicts, supplied, payload, examined, limits = parsed, callSupplied, answer, []string{ex}, li
 		}
 		for id, disp := range verdicts {
 			outcome.verdicts[id] = disp
@@ -337,13 +338,6 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 		}
 		outcome.verdict = verdictFromPayload(payload)
 		outcome.payloads = append(outcome.payloads, payload)
-		// A merged split file's envelope already folded when its final
-		// part call was accepted, so the loop folds only whole-file
-		// calls: folding the merged envelope again would count the final
-		// part's usage twice.
-		if scheduled.Part == nil {
-			out.Messages = append(out.Messages, outcome.addEnvelope(envelope)...)
-		}
 		outcome.examined = append(outcome.examined, examined...)
 		outcome.limits = append(outcome.limits, limits...)
 		for _, finding := range findingsFromPayload(payload) {

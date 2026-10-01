@@ -153,7 +153,7 @@ func TestReviewCoveredPassAppliesNoHaltedLabel(t *testing.T) {
 // required files pack into two batches (40 + 1), each batch's finding
 // reaches the marker, and the current generation covers all 41 units.
 func TestReviewPublishesFindingsFromEveryBatch(t *testing.T) {
-	e := newEnv(t)
+	e := newEnv(t, "correctness")
 	var first, rest []string
 	for i := 1; i <= 41; i++ {
 		path := fmt.Sprintf("file%02d.go", i)
@@ -233,7 +233,7 @@ func TestReviewResumeSkipsCoveredBatches(t *testing.T) {
 // failed pass: batch one's accepted finding survives batch two's failure, so
 // the re-drive publishes it rather than converging over an empty record.
 func TestReviewResumeRestoresAcceptedBatchFindings(t *testing.T) {
-	e := newEnv(t)
+	e := newEnv(t, "correctness")
 	var first []string
 	for i := 1; i <= 41; i++ {
 		path := fmt.Sprintf("file%02d.go", i)
@@ -292,7 +292,7 @@ func TestReviewResumeRestoresAcceptedBatchFindings(t *testing.T) {
 // the stop counts only accepted verdicts as covered, and a re-drive at the
 // same revision resumes the carried remainder instead of starting over.
 func TestReviewRunsAdmittedBatchesBeforeBudgetHalt(t *testing.T) {
-	e := newEnv(t)
+	e := newEnv(t, "correctness")
 	var paths []string
 	for i := 0; i <= 400; i++ {
 		path := fmt.Sprintf("file%03d.go", i)
@@ -356,7 +356,7 @@ func TestReviewRunsAdmittedBatchesBeforeBudgetHalt(t *testing.T) {
 // when a file splits: the schedulable call ahead of it runs and persists,
 // and the split file's parts merge after it, covering the whole scope.
 func TestReviewRunsSchedulableCallsBeforeSplitCompletes(t *testing.T) {
-	e := newEnv(t)
+	e := newEnv(t, "correctness")
 	writeRequiredHead(e, "a.go", "package a\n")
 	writeRequiredHead(e, "z_huge.go", "package huge\n"+strings.Repeat("// filler line to exceed the prompt budget\n", 8000))
 	e.runner.script = []exec.Result{
@@ -404,7 +404,7 @@ func TestReviewRunsSchedulableCallsBeforeSplitCompletes(t *testing.T) {
 // than halting now, so the unreviewed file is the one carried past the
 // 400-file pass budget.
 func TestAnOutstandingRecordCarriesNoSuppliedInput(t *testing.T) {
-	e := newEnv(t)
+	e := newEnv(t, "correctness")
 	var paths []string
 	for i := 0; i <= 400; i++ {
 		path := fmt.Sprintf("file%03d.go", i)
@@ -490,7 +490,7 @@ func acceptAll(e *env) {
 // only its own files' hunks, splitting shrinks the input and the pass
 // covers the scope.
 func TestReviewSplitsAnOversizedDiffAcrossBatches(t *testing.T) {
-	e := newEnv(t)
+	e := newEnv(t, "correctness")
 	var raw strings.Builder
 	filler := strings.Repeat("+// a rendered line of change to price the batch\n", 160)
 	for i := 1; i <= 41; i++ {
@@ -526,7 +526,7 @@ func TestReviewSplitsAnOversizedDiffAcrossBatches(t *testing.T) {
 // The batch prompt slices the diff to its own files, so a section the batch
 // does not hold cannot price the pass out, no matter its size.
 func TestReviewBatchDiffDropsFilesOutsideTheBatch(t *testing.T) {
-	e := newEnv(t)
+	e := newEnv(t, "correctness")
 	writeRequiredHead(e, "small.go", "package small\n")
 	e.forge.diff = []byte("diff --git a/small.go b/small.go\n--- a/small.go\n+++ b/small.go\n@@ -1,1 +1,2 @@\n context\n+added\n" +
 		"diff --git a/gen/big.go b/gen/big.go\n--- a/gen/big.go\n+++ b/gen/big.go\n@@ -1,1 +1,8001 @@\n context\n" +
@@ -561,7 +561,7 @@ func TestReviewBatchDiffDropsFilesOutsideTheBatch(t *testing.T) {
 // shared context is discovered once per pass and candidates render from it:
 // one changed-line read and one blob pass however many candidates pack.
 func TestReviewDiscoversSharedContextOncePerPass(t *testing.T) {
-	e := newEnv(t)
+	e := newEnv(t, "correctness")
 	for i := 0; i < 4; i++ {
 		writeRequiredHead(e, fmt.Sprintf("f%d.go", i), "alphaBeta gammaDelta\n")
 	}

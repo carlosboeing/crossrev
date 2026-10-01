@@ -31,11 +31,13 @@ func TestMergePendingSplitCarriesRangesAndParts(t *testing.T) {
 		numbers:  [][]int{nil, nil},
 		reasons:  []string{"", ""},
 		evidence: [][]prstate.Evidence{nil, nil},
-		findings: [][]Finding{nil, nil},
-		payloads: []json.RawMessage{nil, nil},
+		payloads: []json.RawMessage{[]byte(`{"findings":[]}`), []byte(`{"findings":[]}`)},
 		diffs:    [][]byte{[]byte(part1), []byte(part2)},
 	}
-	verdicts, supplied, _ := mergePendingSplit(ps)
+	verdicts, supplied, _, err := mergePendingSplit(ps)
+	if err != nil {
+		t.Fatal(err)
+	}
 	disp, ok := verdicts[unit.ID]
 	if !ok || disp.Verdict != "no_issue" {
 		t.Fatalf("merged verdict = %+v, want no_issue", disp)

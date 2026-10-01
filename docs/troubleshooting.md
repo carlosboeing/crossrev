@@ -170,7 +170,7 @@ Either way the fix is not lost. It stays in the worktree, which CrossRev keeps a
 
 `resolve_prompt_exceeds_limit` means the rendered resolve prompt overflowed the resolver harness's hard input limit, so the leg refused before any child started and the pass halted with `crossrev/halted`. Nothing was judged, and nothing needs resuming — the claim stays open for the next attempt.
 
-Two ways forward, and only these two: resolve fewer findings in the pass, or move the resolver to a harness with a larger input window (`resolver.harness`, or `--harness` for one run). Shrinking anything else — the diff, the thread list — does not change the accounting, because the prompt is measured whole before the comparison.
+Two ways forward, and only these two: resolve fewer findings in the pass, or move the resolver to a harness with a larger input window (`resolver.harness`, or `--harness` for one run). Shrinking anything else — the diff, the thread list — does not change the accounting, because the prompt is measured whole before the comparison. The sibling-location lists are the exception: they shrink before the leg refuses, so they are never the reason it does.
 
 ## A resolve leg ran a command
 
