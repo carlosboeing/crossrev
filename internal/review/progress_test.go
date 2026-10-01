@@ -16,7 +16,7 @@ import (
 // caller with no terminal still sees the counts, just with the closing
 // report rather than while the pass runs.
 func TestReviewReportsPerBatchProgressWithoutASink(t *testing.T) {
-	e := newEnv(t)
+	e := newEnv(t, "correctness")
 	var first, rest []string
 	for i := 1; i <= 41; i++ {
 		path := fmt.Sprintf("file%02d.go", i)
@@ -50,7 +50,7 @@ func TestReviewReportsPerBatchProgressWithoutASink(t *testing.T) {
 // claim is edited after every accepted batch — not only once findings exist,
 // which left a clean pass silent until the summary landed.
 func TestReviewReportsPerBatchProgressOnTheClaim(t *testing.T) {
-	e := newEnv(t)
+	e := newEnv(t, "correctness")
 	var first, rest []string
 	for i := 1; i <= 41; i++ {
 		path := fmt.Sprintf("file%02d.go", i)
@@ -93,7 +93,7 @@ func TestReviewReportsPerBatchProgressOnTheClaim(t *testing.T) {
 // findings-recorded record beside the counts: a failure in a later batch
 // still leaves them on the pull request, where the re-drive reads them back.
 func TestReviewProgressEditKeepsTheFindingsRecord(t *testing.T) {
-	e := newEnv(t)
+	e := newEnv(t, "correctness")
 	var first, rest []string
 	for i := 1; i <= 41; i++ {
 		path := fmt.Sprintf("file%02d.go", i)
@@ -152,7 +152,7 @@ func (r orderRunner) Run(ctx context.Context, spec exec.Spec) exec.Result {
 // what queuing every line in Messages did. A wired sink reports each line
 // once — queued again in the report, the terminal would print it twice.
 func TestReviewEmitsPerBatchProgressBeforeTheNextBatchStarts(t *testing.T) {
-	e := newEnv(t)
+	e := newEnv(t, "correctness")
 	var first, rest []string
 	for i := 1; i <= 41; i++ {
 		path := fmt.Sprintf("file%02d.go", i)

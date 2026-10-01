@@ -142,7 +142,7 @@ func TestReviewFailsClosedOnCorruptCoverage(t *testing.T) {
 // missing unit named: the first answer omits unit 2 of 2, the leg asks once
 // more quoting the missing number, and the accepted retry publishes.
 func TestReviewRetriesSemanticOmissionOnce(t *testing.T) {
-	e := newEnv(t)
+	e := newEnv(t, "correctness")
 	writeRequiredHead(e, "a.go", "package a\n")
 	writeRequiredHead(e, "b.go", "package b\n")
 	omitSecond := `{"verdict":"issues-remain","blocked_reason":null,"findings":[],"coverage":[{"unit_number":1,"verdict":"no_issue","finding_numbers":[],"evidence":[],"reason":null}],"examined_scope":"read half the batch","known_limits":[]}`
@@ -303,7 +303,7 @@ var _ = context.Background
 // cannot complete green — the writer records blocked with the debt named,
 // applies no converged label, and never falls back to the model verdict.
 func TestReviewWriterDowngradesUncoveredConvergedVerdict(t *testing.T) {
-	e := newEnv(t)
+	e := newEnv(t, "correctness")
 	writeRequiredHead(e, "a.go", "package a\n")
 	writeRequiredHead(e, "b.go", "package b\n")
 	unexaminable := `{"verdict":"converged","blocked_reason":null,"findings":[],"coverage":[` +
@@ -440,7 +440,7 @@ func bodyHandedTo(t *testing.T, prompt, path string) []byte {
 // the candidate the leg handed to publication, which the v1 codec drops on
 // the wire and store read-back can never observe.
 func TestSuppliedDigestMatchesTheBytesHandedToTheHarness(t *testing.T) {
-	e := newEnv(t)
+	e := newEnv(t, "correctness")
 	// No trailing newline: the prompt fence trims one, so this keeps the
 	// extraction byte-exact (see bodyHandedTo).
 	body := "package a\n\nconst HandedOver = true"
@@ -482,7 +482,7 @@ func TestSuppliedDigestMatchesTheBytesHandedToTheHarness(t *testing.T) {
 // quarantined content stays required with a named access limit and no body:
 // the record must say diff_only rather than claim a full-text supply.
 func TestAnUnavailableFileRecordsDiffOnly(t *testing.T) {
-	e := newEnv(t)
+	e := newEnv(t, "correctness")
 	writeRequiredHead(e, "blob.bin", "GIF89a\x00\x01binary-bytes")
 	prompts := capturePrompt(e)
 	published := capturePublished(t)
@@ -595,7 +595,7 @@ func oversizedHeaderBody() string {
 // its reason, the file appears in no unit record, and the files that fit are
 // still reviewed.
 func TestReviewMovesSkipsIntoExclusionsBeforePublishing(t *testing.T) {
-	e := newEnv(t)
+	e := newEnv(t, "correctness")
 	writeRequiredHead(e, "a.go", "package a\n")
 	big := oversizedHeaderBody()
 	writeRequiredHead(e, "src/webAssets.ts", big)
@@ -687,7 +687,7 @@ func TestReviewSkipReasonReachesTheMarkerStore(t *testing.T) {
 // budget — oversized files split rather than halting now — so the
 // re-drive is admitted and judges only the carried file.
 func TestReviewRedriveSkipsTheSameFile(t *testing.T) {
-	e := newEnv(t)
+	e := newEnv(t, "correctness")
 	writeRequiredHead(e, "a.go", "package a\n")
 	big := oversizedHeaderBody()
 	writeRequiredHead(e, "gen/big.ts", big)
@@ -765,7 +765,7 @@ func TestReviewRedriveSkipsTheSameFile(t *testing.T) {
 // producer rather than an empty model.
 func TestReviewRecordsAnsweringModelWhenHarnessNamesNone(t *testing.T) {
 	t.Run("reported model is recorded when configured model is empty", func(t *testing.T) {
-		e := newEnv(t)
+		e := newEnv(t, "correctness")
 		writeRequiredHead(e, "a.go", "package a\n")
 		e.runner.script = []exec.Result{
 			{ExitCode: 0, Stdout: claudeStdoutWithUsage(t, batchAnswer(t, 1), "claude-3-5-sonnet", 100, 10, 20, 30)},
@@ -785,7 +785,7 @@ func TestReviewRecordsAnsweringModelWhenHarnessNamesNone(t *testing.T) {
 	})
 
 	t.Run("configured model is preserved over reported model", func(t *testing.T) {
-		e := newEnv(t)
+		e := newEnv(t, "correctness")
 		e.cfg = mustConfig(t, "reviewers:\n  - harness: claude\n    model: configured-model\n")
 		writeRequiredHead(e, "a.go", "package a\n")
 		e.runner.script = []exec.Result{
@@ -809,7 +809,7 @@ func TestReviewRecordsAnsweringModelWhenHarnessNamesNone(t *testing.T) {
 	})
 
 	t.Run("first answering model is recorded when calls report different models", func(t *testing.T) {
-		e := newEnv(t)
+		e := newEnv(t, "correctness")
 		paths := writeNumberedFiles(e, 81)
 		models := []string{"claude-first", "claude-second"}
 		for i := 0; i < 2; i++ {
@@ -845,7 +845,7 @@ func TestReviewRecordsAnsweringModelWhenHarnessNamesNone(t *testing.T) {
 // marker must keep the stored model rather than clearing it, or the
 // convergence check retires its own coverage and blocks an honest pass.
 func TestReviewKeepsStoredModelWhenFirstEnvelopeNamesNone(t *testing.T) {
-	e := newEnv(t)
+	e := newEnv(t, "correctness")
 	paths := writeNumberedFiles(e, 81)
 	e.runner.script = []exec.Result{
 		{ExitCode: 0, Stdout: claudeStdout(batchAnswerFor(t, paths[0:40]))},

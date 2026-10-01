@@ -23,7 +23,10 @@ import (
 func checkEnv(t *testing.T) *env {
 	t.Helper()
 	e := newEnv(t)
-	e.cfg = mustConfig(t, "version: 2\n")
+	// One concern: the check proves itself against a single review
+	// call, and a second concern's call would only spend a script
+	// entry. Cases proving concern interplay set their own config.
+	e.cfg = mustConfig(t, "version: 2\nreview:\n  concerns: [correctness]\n")
 	return e
 }
 
@@ -145,7 +148,13 @@ func TestCheckConfirmsAndRejectsBeforePosting(t *testing.T) {
 		t.Errorf("messages = %q, want the filtered line", joined)
 	}
 	log := readRunLog(t, e)
-	if !strings.Contains(log, "call 2 kind=check") {
+	named := false
+	for _, line := range strings.Split(log, "\n") {
+		if strings.Contains(line, " call 2 ") && strings.HasSuffix(line, "kind=check concern=- part=-") {
+			named = true
+		}
+	}
+	if !named {
 		t.Errorf("run.log carries no kind=check call line:\n%s", log)
 	}
 	if !strings.Contains(log, "check result=ran candidates=2 confirmed=1 rejected=1 duplicate=0") {
@@ -468,7 +477,7 @@ func TestCheckUsageIsPricedWithTheChecker(t *testing.T) {
 	if len(got.Marker.Usage) != 0 && string(got.Marker.Usage) != "null" {
 		t.Errorf("the review record carries usage %s, want the checker's kept separate", got.Marker.Usage)
 	}
-	if !strings.Contains(readRunLog(t, e), "call 2 kind=check") {
+	if !strings.Contains(readRunLog(t, e), "kind=check concern=- part=-") {
 		t.Error("run.log carries no kind=check call line")
 	}
 }

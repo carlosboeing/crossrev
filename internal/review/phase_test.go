@@ -13,7 +13,7 @@ import (
 // TestPhaseAndCallLinesForATwoCallPass pins the run-log instrumentation: one
 // phase line per preparation step, and one call line per accepted call.
 func TestPhaseAndCallLinesForATwoCallPass(t *testing.T) {
-	e := newEnv(t)
+	e := newEnv(t, "correctness")
 	var first, rest []string
 	for i := 1; i <= 41; i++ {
 		path := fmt.Sprintf("file%02d.go", i)
@@ -65,8 +65,8 @@ func TestPhaseAndCallLinesForATwoCallPass(t *testing.T) {
 	// prompt with trailing newlines trimmed (internal/harness/adapter.go) —
 	// so it reads one byte short of the rendered batch prompt ending in "\n".
 	for i, want := range []string{
-		fmt.Sprintf("1 prompt_bytes=%d supplied_bytes=400 fresh=0 cached=0 output=0 reads=0 commands=0 model=- ms=0", len((*prompts)[0])+1),
-		fmt.Sprintf("2 prompt_bytes=%d supplied_bytes=10 fresh=0 cached=0 output=0 reads=0 commands=0 model=- ms=0", len((*prompts)[1])+1),
+		fmt.Sprintf("1 prompt_bytes=%d supplied_bytes=400 fresh=0 cached=0 output=0 reads=0 commands=0 model=- ms=0 kind=review concern=correctness part=-", len((*prompts)[0])+1),
+		fmt.Sprintf("2 prompt_bytes=%d supplied_bytes=10 fresh=0 cached=0 output=0 reads=0 commands=0 model=- ms=0 kind=review concern=correctness part=-", len((*prompts)[1])+1),
 	} {
 		if callLines[i] != want {
 			t.Errorf("call line %d = %q, want %q", i+1, callLines[i], want)
@@ -78,7 +78,7 @@ func TestPhaseAndCallLinesForATwoCallPass(t *testing.T) {
 // under the per-call stems: the accepted first call's transcript survives
 // the second call's failure, and only the accepted call gets a call line.
 func TestFailedTwoCallPassKeepsBothCallTranscripts(t *testing.T) {
-	e := newEnv(t)
+	e := newEnv(t, "correctness")
 	var first []string
 	for i := 1; i <= 41; i++ {
 		path := fmt.Sprintf("file%02d.go", i)
@@ -133,7 +133,7 @@ func runLogLines(log, event string) []string {
 // clear finds the per-call stems: a successful pass leaves no call file
 // behind, under either the old or the new stem.
 func TestReviewCallStemsAreSweptWithTheLeg(t *testing.T) {
-	e := newEnv(t)
+	e := newEnv(t, "correctness")
 	var first, rest []string
 	for i := 1; i <= 41; i++ {
 		path := fmt.Sprintf("file%02d.go", i)

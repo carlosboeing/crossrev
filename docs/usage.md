@@ -173,6 +173,13 @@ Every posted finding gets a reply, whatever the resolve leg decides. Nothing is 
 | `disputed` | Technically wrong for this codebase |
 | `escalated` | Needs a human decision. Applies `crossrev/stop` and leaves the thread open |
 
+### What the resolver is shown besides the finding
+
+Two pieces of evidence travel with a finding into the resolve prompt. Both are advice, and neither changes a resolution or escalates a finding.
+
+- **Recurrence candidate.** A finding is a candidate when an earlier pass resolved `fixed` and pushed a commit for a finding with the same id, or with the same path, side and category and an anchor within 10 lines of the earlier one. The prompt names the earlier pass, finding and commit, and asks the resolver to check whether that fix was incomplete and to say what it concluded in its reply. The resolve summary counts the candidates.
+- **Sibling locations.** Up to 10 places at the pull request's head where an identifier from the finding's anchored line also occurs, the finding's own file included and the anchored line itself left out, from one pass over the committed files. Rarest identifier first. The list is partial and says so. The resolver looks at them before it calls a repair complete, and fixes a sibling only when this pull request introduced the same defect there. When the prompt would pass the resolver's input limit, the lists shrink first, to fewer entries and then none, before anything else is cut.
+
 ### The six labels
 
 The label row on a pull request reads at a glance, because no two of the six colours are adjacent on the wheel:

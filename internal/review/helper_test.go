@@ -974,9 +974,11 @@ type env struct {
 	validate func([]byte, validate.ReviewExpectations) error
 	// legEnv is what the leg hands a child. Nil is the default pair below.
 	legEnv []string
+
+	concernsOverride string
 }
 
-func newEnv(t *testing.T) *env {
+func newEnv(t *testing.T, concerns ...string) *env {
 	t.Helper()
 	// cred.Prepare reads process RUNNER_ENVIRONMENT. GitHub-hosted runners set
 	// it to github-hosted, and a missing harness secret then stops the leg.
@@ -1005,6 +1007,10 @@ func newEnv(t *testing.T) *env {
 			versions[entry.Binary] = fmt.Sprintf(banner, entry.Install.PinnedVersion)
 		}
 	}
+	concern := ""
+	if len(concerns) > 0 {
+		concern = concerns[0]
+	}
 	// The cross-model check is off unless a case says otherwise: most
 	// cases prove the review and publish path, and a second model call
 	// behind every one of them would assert nothing about their
@@ -1012,7 +1018,8 @@ func newEnv(t *testing.T) *env {
 	// explicitly.
 	cfg := mustConfig(t, "version: 2\nreview:\n  check: off\n")
 	return &env{
-		log: events,
+		concernsOverride: concern,
+		log:              events,
 		forge: &fakeForge{
 			store: storetest.NewFakeStore(),
 			log:   events,
@@ -1071,13 +1078,14 @@ func (e *env) leg(t *testing.T) review.Leg {
 func (e *env) request(t *testing.T) review.Request {
 	t.Helper()
 	return review.Request{
-		PR:              42,
-		Repo:            mustSlug(t),
-		Trigger:         review.TriggerHuman,
-		HarnessOverride: "claude",
-		Author:          author,
-		Workdir:         e.dir,
-		RunID:           runID,
+		PR:               42,
+		Repo:             mustSlug(t),
+		Trigger:          review.TriggerHuman,
+		HarnessOverride:  "claude",
+		ConcernsOverride: e.concernsOverride,
+		Author:           author,
+		Workdir:          e.dir,
+		RunID:            runID,
 	}
 }
 

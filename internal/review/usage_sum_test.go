@@ -70,7 +70,7 @@ func writeNumberedFiles(e *env, n int) []string {
 // three batches whose envelopes carry distinct bucket values sum exactly
 // into the marker's tokens and usage, instead of the first envelope alone.
 func TestReviewSumsUsageAcrossEveryAcceptedBatch(t *testing.T) {
-	e := newEnv(t)
+	e := newEnv(t, "correctness")
 	paths := writeNumberedFiles(e, 81)
 	buckets := [][4]int64{{100, 10, 20, 30}, {200, 40, 50, 60}, {300, 70, 80, 90}}
 	for i := 0; i < 3; i++ {
@@ -111,7 +111,7 @@ func TestReviewSumsUsageAcrossEveryAcceptedBatch(t *testing.T) {
 // the calls it accepted: batch one's envelope stays out of the marker when
 // batch two is the run's only fresh call.
 func TestReviewResumeAddsOnlyFreshBatchUsage(t *testing.T) {
-	e := newEnv(t)
+	e := newEnv(t, "correctness")
 	paths := writeNumberedFiles(e, 41)
 	e.runner.script = []exec.Result{
 		{ExitCode: 0, Stdout: claudeStdoutWithUsage(t, batchAnswerFor(t, paths[:40]), "claude-test", 1000, 100, 200, 300)},
@@ -143,7 +143,7 @@ func TestReviewResumeAddsOnlyFreshBatchUsage(t *testing.T) {
 // later call answering under another model warns once naming both, the marker
 // keeps the first, and a third model adds no second warning.
 func TestReviewUsageWarnsOnceWhenTheModelChanges(t *testing.T) {
-	e := newEnv(t)
+	e := newEnv(t, "correctness")
 	paths := writeNumberedFiles(e, 81)
 	models := []string{"claude-alpha", "claude-beta", "claude-gamma"}
 	for i := 0; i < 3; i++ {
@@ -186,7 +186,7 @@ func TestReviewUsageWarnsOnceWhenTheModelChanges(t *testing.T) {
 // and retried carries both attempts' buckets into the marker, while model
 // identity stays on the accepted attempt alone.
 func TestReviewRetryReportsBothAttemptsUsage(t *testing.T) {
-	e := newEnv(t)
+	e := newEnv(t, "correctness")
 	writeRequiredHead(e, "a.go", "package a\n")
 	calls := 0
 	e.validate = func([]byte, validate.ReviewExpectations) error {
