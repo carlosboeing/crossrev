@@ -60,6 +60,21 @@ func mustHarness(t *testing.T) harness.Document {
 	return doc
 }
 
+// testEngineID is the review-contract engine identity the default test
+// configuration publishes under: both concerns, the resolver check, the
+// hunks-first policy and the served reads of the default codex reviewer.
+// It states the digest inputs, not the digest, so a production read that
+// stops computing the identity from the base policy retires these
+// generations and fails below.
+func testEngineID() string {
+	return core.ReviewEngineID(core.ReviewContract{
+		Concerns:    []string{"correctness", "consistency"},
+		Check:       "resolver",
+		InputPolicy: "hunks_first",
+		ReadMode:    "served",
+	})
+}
+
 type testEnv struct {
 	forge    *fakeForge
 	git      *fakeGit

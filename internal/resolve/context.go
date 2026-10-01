@@ -16,40 +16,67 @@ import (
 	"github.com/carlosboeing/crossrev/internal/policy"
 	"github.com/carlosboeing/crossrev/internal/prompt"
 	"github.com/carlosboeing/crossrev/internal/prstate"
+	"github.com/carlosboeing/crossrev/internal/runlog"
 	"github.com/carlosboeing/crossrev/internal/ui"
 	"github.com/carlosboeing/crossrev/internal/validate"
 	"github.com/carlosboeing/crossrev/internal/vcs"
 )
 
 type session struct {
-	req       Request
-	repo      core.Slug
-	pr        forge.PullRequest
-	cfg       *config.Config
-	markers   []prstate.Marker
-	author    string
-	pass      int
-	review    prstate.Marker
-	findings  []harness.Node
+	req      Request
+	repo     core.Slug
+	pr       forge.PullRequest
+	cfg      *config.Config
+	markers  []prstate.Marker
+	author   string
+	pass     int
+	review   prstate.Marker
+	findings []harness.Node
 	// resolvable is the filtered copy only the resolver reads: the full
 	// review record stays on findings for the marker and summary rewrite,
 	// so a held finding survives the resolve leg with its not_posted
 	// prior and its summary count.
 	resolvable []harness.Node
-	backlog   config.Backlog
-	minFix    core.Severity
-	maxPasses int
-	mode      string
-	redrive   prstate.Marker
-	redriving bool
-	settings  legSettings
+	backlog    config.Backlog
+	minFix     core.Severity
+	maxPasses  int
+	mode       string
+	redrive    prstate.Marker
+	redriving  bool
+	settings   legSettings
 }
 
 type legSettings struct {
-	Harness  string
-	Model    string
-	Effort   string
-	Endpoint string
+	Harness              string
+	Model                string
+	Effort               string
+	Endpoint             string
+	Concerns             []string
+	ConcernsSource       string
+	Check                string
+	CheckSource          string
+	RequiredChecks       []config.RequiredCheck
+	RequiredChecksSource string
+	CheckWait            int
+	CheckWaitSource      string
+}
+
+// detail renders the resolved settings for the run log: the review
+// contract beside harness, model and effort. The resolve leg reads
+// concerns, check mode and the wait from the base config, never a flag,
+// so their sources are config or default; the input policy stays off
+// the line.
+func (s legSettings) detail() runlog.ReviewDetail {
+	checks := make([]string, 0, len(s.RequiredChecks))
+	for _, check := range s.RequiredChecks {
+		checks = append(checks, check.String())
+	}
+	return runlog.ReviewDetail{
+		Concerns:       runlog.EffectiveSetting{Value: strings.Join(s.Concerns, ","), Source: s.ConcernsSource},
+		Check:          runlog.EffectiveSetting{Value: s.Check, Source: s.CheckSource},
+		RequiredChecks: runlog.EffectiveSetting{Value: strings.Join(checks, ","), Source: s.RequiredChecksSource},
+		CheckWait:      runlog.EffectiveSetting{Value: strconv.Itoa(s.CheckWait), Source: s.CheckWaitSource},
+	}
 }
 
 func (l *Leg) load(ctx context.Context, req Request) (*session, Result) {
@@ -104,6 +131,12 @@ func (l *Leg) load(ctx context.Context, req Request) (*session, Result) {
 	}
 	s.cfg = cfg
 	s.mode = cfg.Get(".mode")
+	// A setting-override flag is refused here, where the mode is known
+	// and before anything else about the invocation is judged: the
+	// invocation is invalid whether or not a review waits.
+	if refusal := automatedOverrideRefusal(s); refusal != nil {
+		return s, Result{Outcome: OutcomeRefused, Err: refusal}
+	}
 	s.minFix = core.Severity(cfg.Get(".policy.min_fix_severity"))
 	s.maxPasses, _ = strconv.Atoi(cfg.Get(".policy.max_passes_per_cycle"))
 	s.backlog, err = cfg.ResolveBacklog(ctx, pr.BaseRefOid, cfg.Get(".backlog.destination"))
@@ -290,6 +323,48 @@ func (l *Leg) settings(s *session) (*Refusal, ui.Line, error) {
 	if s.req.EffortOverride != "" {
 		effort = s.req.EffortOverride
 	}
+	verification := s.cfg.Verification()
+	concerns := s.cfg.ReviewConcerns()
+	concernsSource := "default"
+	if s.cfg.Get(".review.concerns") != "" {
+		concernsSource = "config"
+	}
+	checkMode := s.cfg.ReviewCheck()
+	checkSource := "default"
+	if s.cfg.Get(".review.check") != "" {
+		checkSource = "config"
+	}
+	checks := verification.RequiredChecks
+	checksSource := "default"
+	if s.cfg.Get(".verification.required_checks") != "" {
+		checksSource = "config"
+	}
+	checkWait := verification.WaitMinutes
+	checkWaitSource := "default"
+	if s.cfg.Get(".verification.wait_minutes") != "" {
+		checkWaitSource = "config"
+	}
+	if s.req.NoRequiredChecks {
+		// The clear wins over --required-check on the same line: it names
+		// the empty set absolutely, where the list names members.
+		checks = nil
+		checksSource = "flag"
+	} else if len(s.req.RequiredChecks) > 0 {
+		parsed := make([]config.RequiredCheck, 0, len(s.req.RequiredChecks))
+		for _, item := range s.req.RequiredChecks {
+			check, err := config.ParseRequiredCheck(item)
+			if err != nil {
+				return overrideRefusal(err), ui.Line{}, nil
+			}
+			parsed = append(parsed, check)
+		}
+		normalized, err := config.NormalizeRequiredChecks(parsed)
+		if err != nil {
+			return overrideRefusal(err), ui.Line{}, nil
+		}
+		checks = normalized
+		checksSource = "flag"
+	}
 	doc, err := l.document()
 	if err != nil {
 		return nil, ui.Line{}, err
@@ -306,12 +381,12 @@ func (l *Leg) settings(s *session) (*Refusal, ui.Line, error) {
 
 	asked := name
 	if l.binaryInstalled(asked) {
-		s.settings = legSettings{Harness: name, Model: model, Effort: effort, Endpoint: endpoint}
+		s.settings = legSettings{Harness: name, Model: model, Effort: effort, Endpoint: endpoint, Concerns: concerns, ConcernsSource: concernsSource, Check: checkMode, CheckSource: checkSource, RequiredChecks: checks, RequiredChecksSource: checksSource, CheckWait: checkWait, CheckWaitSource: checkWaitSource}
 		return nil, ui.Line{}, nil
 	}
 	for _, alt := range harness.WorkingResolvers(doc) {
 		if l.binaryInstalled(alt) {
-			s.settings = legSettings{Harness: alt, Model: "", Effort: effort, Endpoint: ""}
+			s.settings = legSettings{Harness: alt, Model: "", Effort: effort, Endpoint: "", Concerns: concerns, ConcernsSource: concernsSource, Check: checkMode, CheckSource: checkSource, RequiredChecks: checks, RequiredChecksSource: checksSource, CheckWait: checkWait, CheckWaitSource: checkWaitSource}
 			// ui_warn, condition and consequence apart (lib/run.sh:548-549).
 			warn := ui.Warn(
 				fmt.Sprintf("'%s' is not installed, so the resolver runs on '%s' instead", asked, alt),
@@ -320,6 +395,43 @@ func (l *Leg) settings(s *session) (*Refusal, ui.Line, error) {
 		}
 	}
 	return notInstalledRefusal(doc, asked), ui.Line{}, nil
+}
+
+// overrideRefusal refuses a flag value the parser already validated. It is
+// reached only by a caller that bypassed the parser, so it names the flag
+// rather than the request field.
+func overrideRefusal(err error) *Refusal {
+	return &Refusal{
+		Message: "--required-check: " + err.Error(),
+		Hint:    "Pass a value the config validator accepts; the flag and the config key share it.",
+	}
+}
+
+// automatedOverrideRefusal refuses a setting-override flag where the base
+// policy says automated. The session holds the pull request's base
+// revision, never the head, so a flag cannot evade the restriction by the
+// value it carries — not even by equalling the base value. Local runs may
+// set any valid value.
+func automatedOverrideRefusal(s *session) *Refusal {
+	if s == nil || s.mode != "automated" {
+		return nil
+	}
+	for _, override := range []struct {
+		flag string
+		set  bool
+	}{
+		{"--required-check", len(s.req.RequiredChecks) > 0},
+		{"--no-required-checks", s.req.NoRequiredChecks},
+	} {
+		if !override.set {
+			continue
+		}
+		return &Refusal{
+			Message: "the " + override.flag + " flag cannot override policy in automated mode (ADR 0003)",
+			Hint:    "Set verification.required_checks in .github/crossrev.yml on the base revision instead: policy from a pull request takes effect when it merges.",
+		}
+	}
+	return nil
 }
 
 // notInstalledRefusal is the last refusal in run_leg_settings

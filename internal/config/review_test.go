@@ -53,3 +53,83 @@ func TestReviewInputPolicyRefusesANonMapping(t *testing.T) {
 		t.Errorf("err = %q, want it to name review", err)
 	}
 }
+
+// Concerns default to both, and read back in fixed order whatever order
+// the config lists them in.
+func TestReviewConcernsDefaultAndFixedOrder(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		yaml string
+		want []string
+	}{
+		{name: "absent", yaml: "version: 2\n", want: []string{"correctness", "consistency"}},
+		{name: "both", yaml: "version: 2\nreview:\n  concerns: [correctness, consistency]\n", want: []string{"correctness", "consistency"}},
+		{name: "reversed", yaml: "version: 2\nreview:\n  concerns: [consistency, correctness]\n", want: []string{"correctness", "consistency"}},
+		{name: "one", yaml: "version: 2\nreview:\n  concerns: [consistency]\n", want: []string{"consistency"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := loadYAML(t, tc.yaml).ReviewConcerns()
+			if len(got) != len(tc.want) {
+				t.Fatalf("ReviewConcerns() = %v, want %v", got, tc.want)
+			}
+			for i := range got {
+				if got[i] != tc.want[i] {
+					t.Fatalf("ReviewConcerns() = %v, want %v", got, tc.want)
+				}
+			}
+		})
+	}
+}
+
+// Unknown, duplicate, empty and non-list concerns are refused at load.
+func TestReviewConcernsRefusals(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		yaml string
+	}{
+		{name: "unknown", yaml: "version: 2\nreview:\n  concerns: [correctness, speed]\n"},
+		{name: "duplicate", yaml: "version: 2\nreview:\n  concerns: [correctness, correctness]\n"},
+		{name: "empty list", yaml: "version: 2\nreview:\n  concerns: []\n"},
+		{name: "empty item", yaml: "version: 2\nreview:\n  concerns: [correctness, '']\n"},
+		{name: "non-list", yaml: "version: 2\nreview:\n  concerns: correctness\n"},
+		{name: "non-string item", yaml: "version: 2\nreview:\n  concerns: [correctness, 7]\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := load(t, tc.yaml); err == nil {
+				t.Fatalf("loaded %s, want a refusal", tc.name)
+			} else if !strings.Contains(err.Error(), "review.concerns") {
+				t.Errorf("err = %q, want it to name review.concerns", err)
+			}
+		})
+	}
+}
+
+// The cross-model check defaults to the resolver and reads off.
+func TestReviewCheckDefaultsAndReads(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		yaml  string
+		check string
+	}{
+		{name: "absent", yaml: "version: 2\n", check: config.ReviewCheckResolver},
+		{name: "resolver", yaml: "version: 2\nreview:\n  check: resolver\n", check: config.ReviewCheckResolver},
+		{name: "off", yaml: "version: 2\nreview:\n  check: off\n", check: config.ReviewCheckOff},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := loadYAML(t, tc.yaml).ReviewCheck(); got != tc.check {
+				t.Errorf("ReviewCheck() = %q, want %q", got, tc.check)
+			}
+		})
+	}
+}
+
+// A third check mode is refused at load rather than read leniently.
+func TestReviewCheckRefusesAThirdValue(t *testing.T) {
+	_, err := load(t, "version: 2\nreview:\n  check: reviewer\n")
+	if err == nil {
+		t.Fatal("a check of reviewer loaded; nothing would run it")
+	}
+	if !strings.Contains(err.Error(), "review.check") {
+		t.Errorf("err = %q, want it to name review.check", err)
+	}
+}

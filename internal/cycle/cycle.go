@@ -33,6 +33,11 @@ type Request struct {
 	ModelOverride       string
 	EffortOverride      string
 	InputPolicyOverride string
+	ConcernsOverride    string
+	CheckOverride       string
+	RequiredChecks      []string
+	NoRequiredChecks    bool
+	CheckWait           string
 	KeepTranscripts     bool
 	NoTips              bool
 }
@@ -52,6 +57,11 @@ type LegRequest struct {
 	ModelOverride       string
 	EffortOverride      string
 	InputPolicyOverride string
+	ConcernsOverride    string
+	CheckOverride       string
+	RequiredChecks      []string
+	NoRequiredChecks    bool
+	CheckWait           string
 	KeepTranscripts     bool
 	Continuation        bool
 	NoTips              bool
@@ -344,6 +354,11 @@ func (d *Driver) legRequest(req Request, continuation bool) LegRequest {
 		ModelOverride:       req.ModelOverride,
 		EffortOverride:      req.EffortOverride,
 		InputPolicyOverride: req.InputPolicyOverride,
+		ConcernsOverride:    req.ConcernsOverride,
+		CheckOverride:       req.CheckOverride,
+		RequiredChecks:      req.RequiredChecks,
+		NoRequiredChecks:    req.NoRequiredChecks,
+		CheckWait:           req.CheckWait,
 		KeepTranscripts:     req.KeepTranscripts,
 		Continuation:        continuation,
 		NoTips:              true,

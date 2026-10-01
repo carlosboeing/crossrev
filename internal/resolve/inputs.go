@@ -59,14 +59,16 @@ const (
 
 // Request is one resolve-leg invocation.
 type Request struct {
-	PR              int
-	Repo            core.Slug
-	Trigger         Trigger
-	Harness         string
-	ModelOverride   string
-	EffortOverride  string
-	Author          string
-	KeepTranscripts bool
+	PR               int
+	Repo             core.Slug
+	Trigger          Trigger
+	Harness          string
+	ModelOverride    string
+	EffortOverride   string
+	RequiredChecks   []string
+	NoRequiredChecks bool
+	Author           string
+	KeepTranscripts  bool
 }
 
 // Result is what Run returns after selection, claim, invocation, replies,
