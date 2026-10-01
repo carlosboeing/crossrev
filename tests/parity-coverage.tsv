@@ -38,3 +38,4 @@ test-watchdog.sh	black-box	watchdog retry then halt on dropped label events	test
 test-worktree.sh	go-test	resolve-leg worktree isolation and doctor	internal/vcs/worktree_test.go internal/preflight/worktrees_test.go
 test-review-intelligence.sh	black-box	review intelligence acceptance oracle through the binary	tests/test-review-intelligence.sh
 test-refresh-generated-rules.sh	black-box	upstream Linguist rules inspection and unmapped pattern reporting	tests/test-refresh-generated-rules.sh
+test-next-version.sh	black-box	next version measured from the VERSION tag, including a release squash-merged off its tag	tests/test-next-version.sh
