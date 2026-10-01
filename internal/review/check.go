@@ -264,21 +264,7 @@ func (l *Leg) runCheck(ctx context.Context, req Request, loaded Context, claimID
 	var envelopes []harness.Envelope
 	base := l.callsMade + 1
 	for i, call := range calls {
-		positions := make([]int, 0, len(call))
-		for _, candidate := range call {
-			positions = append(positions, candidate.position)
-		}
-		promptBytes := renderCheckCall(meta, reads, call, len(candidates))
-		suppliedBytes := 0
-		for _, candidate := range call {
-			if len(candidate.excerpt) > 0 {
-				suppliedBytes += len(candidate.excerpt)
-			}
-		}
-		start := l.now()
-		readsMark := len(l.readsNotes)
-		payload, envelope, callMsgs, err := l.invokeCheckCall(ctx, req, loaded, checker, positions, promptBytes, base+i)
-		ms := l.now().Sub(start).Milliseconds()
+		decisions, envelope, callMsgs, err := l.invokeCheckedCall(ctx, req, loaded, checker, call, len(candidates), meta, reads, base+i)
 		if err != nil {
 			if state, reason, ok := checkDegrade(err); ok {
 				return degraded(state, reason, strings.TrimSpace(ui.Reason(err)))
@@ -286,21 +272,32 @@ func (l *Leg) runCheck(ctx context.Context, req Request, loaded Context, claimID
 			return marker, callMsgs, err
 		}
 		msgs = append(msgs, callMsgs...)
-		l.logCheckCall(base+i, promptBytes, suppliedBytes, l.callReadsSince(readsMark), envelope, ms)
-		decisions, err := validate.Check(payload, validate.CheckExpectations{Positions: positions})
-		if err != nil {
-			// Unreachable: the call's own validation seam accepted
-			// this payload before it was answered. Kept rather than
-			// trusted, because a seam that stopped validating must
-			// degrade rather than apply garbage.
-			return degraded(prstate.CheckDegraded, checkReasonAnswerRejected, strings.TrimSpace(err.Error()))
-		}
 		merged = append(merged, decisions...)
 		envelopes = append(envelopes, envelope)
 	}
 	l.callsMade = base + len(calls) - 1
 	if err := validate.CheckChains(merged); err != nil {
-		return degraded(prstate.CheckDegraded, checkReasonAnswerRejected, strings.TrimSpace(err.Error()))
+		// One merged retry: each call's answer was valid on its
+		// own, so the calls behind the broken chains are asked
+		// once more and their fresh decisions replace the
+		// contradicted ones. A second contradiction degrades.
+		members := validate.FailingChainPositions(merged)
+		msgs = append(msgs, ui.Warn(
+			fmt.Sprintf("the cross-model check's calls contradicted each other — %s", strings.TrimSpace(err.Error())),
+			"Each call's answer was valid on its own, so the calls behind the broken chains are being asked once more; a second contradiction degrades to posting unchecked."))
+		if len(members) > 0 {
+			fresh, callMsgs, rerr := l.recheckFailedChains(ctx, req, loaded, checker, calls, members, len(candidates), meta, reads, &envelopes, &msgs)
+			if rerr != nil {
+				if state, reason, ok := checkDegrade(rerr); ok {
+					return degraded(state, reason, strings.TrimSpace(ui.Reason(rerr)))
+				}
+				return marker, callMsgs, rerr
+			}
+			merged = spliceCheckDecisions(merged, calls, fresh)
+		}
+		if err := validate.CheckChains(merged); err != nil {
+			return degraded(prstate.CheckDegraded, checkReasonAnswerRejected, strings.TrimSpace(err.Error()))
+		}
 	}
 	applied, records, checkedOut, err := applyCheckDecisions(clean, candidates, merged)
 	if err != nil {
@@ -756,11 +753,118 @@ func renderCheckCall(meta prompt.Meta, reads string, call []checkCandidate, tota
 	return prompt.Check{Meta: meta, Candidates: rendered, Reads: reads}.Render()
 }
 
+// invokeCheckedCall runs one packed check call through the checker and
+// validates its answer against the call's positions and the pass's
+// range: the per-call half the merged retry reuses.
+func (l *Leg) invokeCheckedCall(ctx context.Context, req Request, loaded Context, checker legSettings, call []checkCandidate, total int, meta prompt.Meta, reads string, callNum int) ([]validate.CheckDecision, harness.Envelope, []ui.Line, error) {
+	positions := make([]int, 0, len(call))
+	for _, candidate := range call {
+		positions = append(positions, candidate.position)
+	}
+	promptBytes := renderCheckCall(meta, reads, call, total)
+	suppliedBytes := 0
+	for _, candidate := range call {
+		if len(candidate.excerpt) > 0 {
+			suppliedBytes += len(candidate.excerpt)
+		}
+	}
+	start := l.now()
+	readsMark := len(l.readsNotes)
+	payload, envelope, callMsgs, err := l.invokeCheckCall(ctx, req, loaded, checker, positions, promptBytes, callNum, total)
+	ms := l.now().Sub(start).Milliseconds()
+	if err != nil {
+		return nil, harness.Envelope{}, callMsgs, err
+	}
+	l.logCheckCall(callNum, promptBytes, suppliedBytes, l.callReadsSince(readsMark), envelope, ms)
+	decisions, err := validate.Check(payload, validate.CheckExpectations{Positions: positions, Total: total})
+	if err != nil {
+		// Unreachable: the call's own validation seam accepted
+		// this payload before it was answered. Kept rather than
+		// trusted, because a seam that stopped validating must
+		// degrade rather than apply garbage.
+		return nil, harness.Envelope{}, callMsgs, &ui.FatalError{
+			Reason: strings.TrimSpace(err.Error()),
+			Action: "The checker's answer passed its own validation and failed it on the re-read; the run log carries both.",
+			Kind:   harness.ErrAnswerRejected,
+		}
+	}
+	return decisions, envelope, callMsgs, nil
+}
+
+// recheckFailedChains asks once more the check calls holding the failed
+// chains' positions, in call order with fresh call numbers, and answers
+// each re-invoked call's fresh decisions by call index. The retry's
+// envelopes join the pass's for usage and provenance: spent calls stay
+// spent however their decisions read.
+func (l *Leg) recheckFailedChains(ctx context.Context, req Request, loaded Context, checker legSettings, calls [][]checkCandidate, members []int, total int, meta prompt.Meta, reads string, envelopes *[]harness.Envelope, msgs *[]ui.Line) (map[int][]validate.CheckDecision, []ui.Line, error) {
+	wanted := make(map[int]bool, len(members))
+	for _, position := range members {
+		wanted[position] = true
+	}
+	var indexes []int
+	for i, call := range calls {
+		for _, candidate := range call {
+			if wanted[candidate.position] {
+				indexes = append(indexes, i)
+				break
+			}
+		}
+	}
+	fresh := make(map[int][]validate.CheckDecision, len(indexes))
+	var retried []string
+	for _, i := range indexes {
+		l.callsMade++
+		decisions, envelope, callMsgs, err := l.invokeCheckedCall(ctx, req, loaded, checker, calls[i], total, meta, reads, l.callsMade)
+		if err != nil {
+			return nil, callMsgs, err
+		}
+		*msgs = append(*msgs, callMsgs...)
+		*envelopes = append(*envelopes, envelope)
+		fresh[i] = decisions
+		retried = append(retried, strconv.Itoa(l.callsMade))
+	}
+	if l.Log != nil && len(retried) > 0 {
+		l.Log.Event("check", fmt.Sprintf("retrying calls %s after the merged contradiction", strings.Join(retried, ",")))
+	}
+	return fresh, nil, nil
+}
+
+// spliceCheckDecisions replaces the contradicted decisions with the
+// retry's fresh ones: each re-invoked call's positions read fresh,
+// every other position keeps its answer. Fresh calls splice in call
+// order, so the merged order stays deterministic.
+func spliceCheckDecisions(merged []validate.CheckDecision, calls [][]checkCandidate, fresh map[int][]validate.CheckDecision) []validate.CheckDecision {
+	if len(fresh) == 0 {
+		return merged
+	}
+	replaced := map[int]bool{}
+	for i := range fresh {
+		for _, candidate := range calls[i] {
+			replaced[candidate.position] = true
+		}
+	}
+	out := make([]validate.CheckDecision, 0, len(merged))
+	for _, decision := range merged {
+		if !replaced[decision.Position] {
+			out = append(out, decision)
+		}
+	}
+	var indexes []int
+	for i := range fresh {
+		indexes = append(indexes, i)
+	}
+	sort.Ints(indexes)
+	for _, i := range indexes {
+		out = append(out, fresh[i]...)
+	}
+	return out
+}
+
 // invokeCheckCall runs one rendered check prompt through the checker's
 // harness with the review leg's isolation: quarantine, the version
 // gates, served reads or supplied mode as the harness's review read
 // mode declares, credential staging and the command tripwire.
-func (l *Leg) invokeCheckCall(ctx context.Context, req Request, loaded Context, checker legSettings, positions []int, promptBytes []byte, call int) (json.RawMessage, harness.Envelope, []ui.Line, error) {
+func (l *Leg) invokeCheckCall(ctx context.Context, req Request, loaded Context, checker legSettings, positions []int, promptBytes []byte, call int, total int) (json.RawMessage, harness.Envelope, []ui.Line, error) {
 	if err := harness.AssertEnvClean(l.Env); err != nil {
 		return nil, harness.Envelope{}, nil, err
 	}
@@ -780,7 +884,7 @@ func (l *Leg) invokeCheckCall(ctx context.Context, req Request, loaded Context, 
 	}
 	defer os.RemoveAll(tmp)
 	check := func(payload []byte) error {
-		_, err := validate.Check(payload, validate.CheckExpectations{Positions: positions})
+		_, err := validate.Check(payload, validate.CheckExpectations{Positions: positions, Total: total})
 		return err
 	}
 	envelope, payload, msgs, err := l.runPrompt(ctx, req, loaded, checker, adapter, entry, staged, tmp, promptBytes, nil, call, promptSpec{schema: validate.CheckSchema(), check: check})

@@ -307,6 +307,114 @@ func TestCheckCandidatePastTheHardLimitDegradesWithoutACall(t *testing.T) {
 	}
 }
 
+// A duplicate naming a candidate no call numbered fails the call's
+// own validation, so the semantic retry corrects it there instead of
+// degrading on the merged chains.
+func TestCheckDuplicateOutsideTheRangeEarnsTheSemanticRetry(t *testing.T) {
+	e := checkEnv(t)
+	e.runner.script = []exec.Result{
+		{ExitCode: 0, Stdout: claudeStdout(issuesPayload(twoFindings))},
+		{ExitCode: 0, Stdout: claudeStdout(checkPayload(confirmDecision(1), duplicateDecision(2, 3, "same as the third")))},
+		{ExitCode: 0, Stdout: claudeStdout(checkPayload(confirmDecision(1), confirmDecision(2)))},
+	}
+	got := runLeg(t, e, e.request(t))
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
+	if got.Marker.Check.Value() != prstate.CheckRan {
+		t.Fatalf("check = %q, want ran", got.Marker.Check.Value())
+	}
+	if e.runner.calls != 3 {
+		t.Fatalf("harness calls = %d, want 3 (the review and the check's two attempts)", e.runner.calls)
+	}
+	if len(e.forge.reviewPosted) != 2 {
+		t.Errorf("posted %d finding comments, want 2 (the corrected check confirmed both)", len(e.forge.reviewPosted))
+	}
+	joined := ui.Joined(got.Messages)
+	if !strings.Contains(joined, "returned an answer that contradicts what it was given") {
+		t.Errorf("messages = %q, want the semantic retry note", joined)
+	}
+}
+
+// A merged contradiction across check calls re-asks the calls behind
+// the broken chains once: each call's answer was valid on its own,
+// so the retry corrects them jointly instead of degrading.
+func TestCheckMergedChainsEarnOneRetry(t *testing.T) {
+	e, findings := twoCheckCallEnv(t)
+	e.runner.script = []exec.Result{
+		{ExitCode: 0, Stdout: claudeStdout(issuesPayload(findings))},
+		{ExitCode: 0, Stdout: claudeStdout(checkPayload(duplicateDecision(1, 2, "same defect")))},
+		{ExitCode: 0, Stdout: claudeStdout(checkPayload(rejectDecision(2, "wrong")))},
+		{ExitCode: 0, Stdout: claudeStdout(checkPayload(confirmDecision(1)))},
+		{ExitCode: 0, Stdout: claudeStdout(checkPayload(confirmDecision(2)))},
+	}
+	got := runLeg(t, e, e.request(t))
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
+	if got.Marker.Check.Value() != prstate.CheckRan {
+		t.Fatalf("check = %q, want ran", got.Marker.Check.Value())
+	}
+	if e.runner.calls != 5 {
+		t.Fatalf("harness calls = %d, want 5 (the review, two calls and their retry)", e.runner.calls)
+	}
+	if len(e.forge.reviewPosted) != 2 {
+		t.Errorf("posted %d finding comments, want 2 (the retry confirmed both)", len(e.forge.reviewPosted))
+	}
+	joined := ui.Joined(got.Messages)
+	if !strings.Contains(joined, "contradicted each other") {
+		t.Errorf("messages = %q, want the merged retry note", joined)
+	}
+	if log := readRunLog(t, e); !strings.Contains(log, "retrying calls") {
+		t.Errorf("run.log names no retried calls:\n%s", log)
+	}
+}
+
+// A merged contradiction that survives its retry degrades: one more
+// round, then every candidate posts unchecked.
+func TestCheckMergedChainsDegradeAfterOneRetry(t *testing.T) {
+	e, findings := twoCheckCallEnv(t)
+	e.runner.script = []exec.Result{
+		{ExitCode: 0, Stdout: claudeStdout(issuesPayload(findings))},
+		{ExitCode: 0, Stdout: claudeStdout(checkPayload(duplicateDecision(1, 2, "same defect")))},
+		{ExitCode: 0, Stdout: claudeStdout(checkPayload(rejectDecision(2, "wrong")))},
+		{ExitCode: 0, Stdout: claudeStdout(checkPayload(duplicateDecision(1, 2, "same defect")))},
+		{ExitCode: 0, Stdout: claudeStdout(checkPayload(rejectDecision(2, "wrong")))},
+	}
+	got := runLeg(t, e, e.request(t))
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
+	if got.Marker.Check.Value() != prstate.CheckDegraded {
+		t.Fatalf("check = %q, want degraded", got.Marker.Check.Value())
+	}
+	if got.Marker.CheckReason.Value() != "answer_rejected" {
+		t.Errorf("check_reason = %q, want answer_rejected", got.Marker.CheckReason.Value())
+	}
+	if e.runner.calls != 5 {
+		t.Fatalf("harness calls = %d, want 5 (the review, two calls and one retry)", e.runner.calls)
+	}
+	if len(e.forge.reviewPosted) != 2 {
+		t.Errorf("posted %d finding comments, want 2 (both unchecked)", len(e.forge.reviewPosted))
+	}
+}
+
+// twoCheckCallEnv is a check env whose candidates pack into two check
+// calls: one finding per file, each with a hunk too big to share a
+// call with the other.
+func twoCheckCallEnv(t *testing.T) (*env, string) {
+	t.Helper()
+	e := checkEnv(t)
+	hunk := func(fill string) string {
+		return " context\n+" + strings.Repeat(fill, 200000) + "\n"
+	}
+	e.forge.diff = []byte("diff --git a/app.go b/app.go\n--- a/app.go\n+++ b/app.go\n@@ -1,1 +1,2 @@\n" + hunk("a") +
+		"diff --git a/bee.go b/bee.go\n--- a/bee.go\n+++ b/bee.go\n@@ -1,1 +1,2 @@\n" + hunk("b"))
+	findings := `[{"path":"app.go","line":2,"side":"RIGHT","severity":"high","category":"correctness","pre_existing":false,"title":"App defect","why":"The app path mishandles it","fix":"Handle it"},` +
+		`{"path":"bee.go","line":2,"side":"RIGHT","severity":"high","category":"correctness","pre_existing":false,"title":"Bee defect","why":"The bee path mishandles it","fix":"Handle it"}]`
+	return e, findings
+}
+
 func TestCheckDegradedPostsAllWithTheNote(t *testing.T) {
 	e := checkEnv(t)
 	e.runner.script = []exec.Result{

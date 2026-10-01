@@ -11,6 +11,7 @@ package validate
 import (
 	"bytes"
 	"encoding/json"
+	"sort"
 )
 
 // CheckExpectations is what one check call's answer must cover: the
@@ -21,6 +22,10 @@ type CheckExpectations struct {
 	// means the frozen shape with no call input, which callers that
 	// hold no candidates use: shape only.
 	Positions []int
+	// Total is the pass's candidate count: duplicate targets must
+	// number within it. Zero skips the range check, for callers
+	// holding no pass numbering to contradict.
+	Total int
 }
 
 // CheckDecision is one validated decision: the position it judges, what it
@@ -48,7 +53,7 @@ func Check(payload []byte, expected CheckExpectations) ([]CheckDecision, error) 
 	if len(expected.Positions) == 0 {
 		return decisions, nil
 	}
-	if err := checkPositions(decisions, expected.Positions); err != nil {
+	if err := checkPositions(decisions, expected); err != nil {
 		return nil, err
 	}
 	return decisions, nil
@@ -150,9 +155,11 @@ func checkDecisionShape(element json.RawMessage) (CheckDecision, error) {
 }
 
 // checkPositions contradicts the decisions against the positions the call
-// numbered: exactly one decision per position, no self-reference, and
-// every duplicate chain ending at a confirmed candidate with no cycle.
-func checkPositions(decisions []CheckDecision, positions []int) error {
+// numbered: exactly one decision per position, duplicate targets within
+// the pass's range, no self-reference, and every duplicate chain ending
+// at a confirmed candidate with no cycle.
+func checkPositions(decisions []CheckDecision, expected CheckExpectations) error {
+	positions := expected.Positions
 	want := make(map[int]bool, len(positions))
 	for _, position := range positions {
 		want[position] = true
@@ -183,10 +190,13 @@ func checkPositions(decisions []CheckDecision, positions []int) error {
 		if decision.DuplicateOf == decision.Position {
 			return semanticf("candidate %d duplicates itself", decision.Position)
 		}
+		if expected.Total > 0 && decision.DuplicateOf > expected.Total {
+			return semanticf("candidate %d duplicates candidate %d, which is not a candidate in this pass", decision.Position, decision.DuplicateOf)
+		}
 		// The chain leaves this call's numbering behind: a packed call
 		// judges a subset, and its duplicates may name a candidate
 		// another call numbered. The merge validates the union; here
-		// only the self-reference above is in reach.
+		// only the range and self-reference above are in reach.
 		if _, ok := byPosition[decision.DuplicateOf]; !ok {
 			continue
 		}
@@ -201,22 +211,33 @@ func checkPositions(decisions []CheckDecision, positions []int) error {
 // candidate, reached without revisiting a position and without landing on
 // a rejection. Callers hold every position the chain may name.
 func checkDuplicateChain(byPosition map[int]CheckDecision, start int) error {
+	_, err := walkDuplicateChain(byPosition, start)
+	return err
+}
+
+// walkDuplicateChain follows one duplicate chain from its start,
+// answering the positions it visited and where the chain fails: a
+// cycle, a rejection, or a position with no decision. Callers hold
+// every position the chain may name.
+func walkDuplicateChain(byPosition map[int]CheckDecision, start int) ([]int, error) {
 	visited := map[int]bool{start: true}
+	chain := []int{start}
 	at := byPosition[start].DuplicateOf
 	for {
 		next, ok := byPosition[at]
 		if !ok {
-			return semanticf("candidate %d duplicates candidate %d, which carries no decision", start, at)
+			return chain, semanticf("candidate %d duplicates candidate %d, which carries no decision", start, at)
 		}
 		if visited[at] {
-			return semanticf("candidate %d sits on a duplicate cycle", start)
+			return chain, semanticf("candidate %d sits on a duplicate cycle", start)
 		}
 		visited[at] = true
+		chain = append(chain, at)
 		switch next.Decision {
 		case "confirmed":
-			return nil
+			return chain, nil
 		case "rejected":
-			return semanticf("candidate %d duplicates rejected candidate %d", start, at)
+			return chain, semanticf("candidate %d duplicates rejected candidate %d", start, at)
 		}
 		at = next.DuplicateOf
 	}
@@ -240,6 +261,36 @@ func CheckChains(decisions []CheckDecision) error {
 		}
 	}
 	return nil
+}
+
+// FailingChainPositions answers the sorted positions sitting on
+// duplicate chains that fail: cycles, chains ending at a rejection,
+// and chains naming a position with no decision. Empty when every
+// chain ends confirmed.
+func FailingChainPositions(decisions []CheckDecision) []int {
+	byPosition := make(map[int]CheckDecision, len(decisions))
+	for _, decision := range decisions {
+		byPosition[decision.Position] = decision
+	}
+	seen := map[int]bool{}
+	var out []int
+	for _, decision := range decisions {
+		if decision.Decision != "duplicate" {
+			continue
+		}
+		chain, err := walkDuplicateChain(byPosition, decision.Position)
+		if err == nil {
+			continue
+		}
+		for _, position := range chain {
+			if !seen[position] {
+				seen[position] = true
+				out = append(out, position)
+			}
+		}
+	}
+	sort.Ints(out)
+	return out
 }
 
 // jqInt reports a raw value's integer content, and whether it was a whole

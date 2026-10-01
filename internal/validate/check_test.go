@@ -142,6 +142,73 @@ func TestCheckAcceptsADuplicateChainEndingConfirmed(t *testing.T) {
 	}
 }
 
+// A duplicate naming a candidate no call numbered is refused against
+// the pass's full range at the call, so the semantic retry corrects it
+// there; a duplicate naming another call's candidate still passes to
+// the merge.
+func TestCheckRefusesADuplicateOutsideThePassRange(t *testing.T) {
+	dec := func(position int, decision string, dup int) string {
+		target := "null"
+		if dup > 0 {
+			target = itoa(dup)
+		}
+		return `{"position":` + itoa(position) +
+			`,"decision":"` + decision + `","duplicate_of":` + target +
+			`,"reason":"because","severity":null,"pre_existing":null}`
+	}
+	ranged := `{"decisions":[` + dec(1, "duplicate", 3) + `]}`
+	if _, err := validate.Check([]byte(ranged), validate.CheckExpectations{Positions: []int{1}, Total: 2}); err == nil {
+		t.Fatal("a duplicate of candidate 3 in a 2-candidate pass was accepted")
+	} else {
+		var semantic *validate.SemanticError
+		if !errors.As(err, &semantic) {
+			t.Fatalf("err = %T %v, want a *SemanticError", err, err)
+		}
+		if !strings.Contains(err.Error(), "candidate 1 duplicates candidate 3, which is not a candidate in this pass") {
+			t.Errorf("err = %q", err)
+		}
+	}
+	crossCall := `{"decisions":[` + dec(1, "duplicate", 2) + `]}`
+	if _, err := validate.Check([]byte(crossCall), validate.CheckExpectations{Positions: []int{1}, Total: 2}); err != nil {
+		t.Errorf("a duplicate of another call's candidate was refused: %v", err)
+	}
+	unranged := `{"decisions":[` + dec(1, "duplicate", 3) + `]}`
+	if _, err := validate.Check([]byte(unranged), validate.CheckExpectations{Positions: []int{1}}); err != nil {
+		t.Errorf("a caller without pass numbering is range-checked: %v", err)
+	}
+}
+
+// FailingChainPositions names the positions on broken duplicate
+// chains — cycles and chains ending at a rejection — and nothing on
+// chains ending confirmed.
+func TestFailingChainPositionsNamesOnlyBrokenChains(t *testing.T) {
+	decisions := []validate.CheckDecision{
+		{Position: 1, Decision: "confirmed"},
+		{Position: 2, Decision: "duplicate", DuplicateOf: 1},
+		{Position: 3, Decision: "duplicate", DuplicateOf: 4},
+		{Position: 4, Decision: "rejected"},
+		{Position: 5, Decision: "duplicate", DuplicateOf: 6},
+		{Position: 6, Decision: "duplicate", DuplicateOf: 5},
+	}
+	got := validate.FailingChainPositions(decisions)
+	want := []int{3, 4, 5, 6}
+	if len(got) != len(want) {
+		t.Fatalf("positions = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("positions = %v, want %v", got, want)
+		}
+	}
+	clean := []validate.CheckDecision{
+		{Position: 1, Decision: "confirmed"},
+		{Position: 2, Decision: "duplicate", DuplicateOf: 1},
+	}
+	if got := validate.FailingChainPositions(clean); len(got) != 0 {
+		t.Errorf("positions = %v, want none", got)
+	}
+}
+
 // A packed call judges a subset, and its duplicates may name a candidate
 // another call numbered: the per-call check leaves the cross-call chain
 // for the merge, which CheckChains then judges.
