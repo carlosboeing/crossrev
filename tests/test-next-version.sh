@@ -16,6 +16,9 @@
 #   - a release tagged on the main line behaves as before
 #   - no tag matching VERSION falls back to the nearest reachable version tag
 #   - the floating v0 tag is never chosen as the measuring point
+#   - a squash-merged release with HEAD on the squash reports that nothing
+#     has landed: the plain tag range would still contain the squash commit
+#     itself, so this is the case that proves the anchor excludes it
 
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -101,6 +104,19 @@ printf '0.10.0\n' >"$fl/VERSION"
 fl_out="$(bash "$fl/scripts/next-version.sh" 2>&1)"
 has "floating v0: measures since the version tag, not v0" "$fl_out" "since v0.9.0"
 has "floating v0: fixes only mean a patch" "$fl_out" "0.10.1   (patch"
+
+# --- 5. HEAD sits on the squash commit itself: the range is empty ---
+em="$(mkcase)"
+commit "$em" VERSION "0.9.0" "chore(release): cut 0.9.0"
+git -C "$em" tag v0.9.0
+commit "$em" feat.txt "a feature" "feat: something that shipped in 0.10.0"
+em_parent="$(git -C "$em" rev-parse HEAD)"
+commit "$em" VERSION "0.10.0" "chore(release): cut 0.10.0 (#321)"
+em_tree="$(git -C "$em" rev-parse 'HEAD^{tree}')"
+em_side="$(git -C "$em" commit-tree "$em_tree" -p "$em_parent" -m "chore(release): cut 0.10.0")"
+git -C "$em" tag v0.10.0 "$em_side"
+em_out="$(bash "$em/scripts/next-version.sh" 2>&1)"
+has "squash at HEAD: nothing has landed since the release" "$em_out" "Nothing has landed since v0.10.0"
 
 printf '\n  %d passed, %d failed\n' "$pass" "$fail"
 (( fail == 0 ))
