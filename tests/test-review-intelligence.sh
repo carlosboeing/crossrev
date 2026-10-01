@@ -160,7 +160,7 @@ out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
 hasnt "an omitted unit never converges" "$out" "verdict: converged"
 has "an omitted unit names the missing number on retry" "$out" "missing unit number(s) 1"
 is "a semantic retry invokes the harness once more" \
-  "$(grep -c -- "-p --output-format json" "$ARGV_LOG" | tr -d ' ')" "2"
+  "$(grep -c -- "--output-format stream-json" "$ARGV_LOG" | tr -d ' ')" "2"
 
 # Duplicate unit number: unit 1 twice, unit count still one required file.
 fixture_repo; stub_reset

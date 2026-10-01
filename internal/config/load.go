@@ -149,6 +149,7 @@ func Load(ctx context.Context, base core.Revision, show ShowFile) (*Config, erro
 		loaded.assertBacklog,
 		loaded.assertEndpoints,
 		loaded.assertCoverage,
+		loaded.assertOnReadsUnavailable,
 		loaded.assertReviewers,
 		loaded.assertReviewer,
 		loaded.assertReviewInputPolicy,

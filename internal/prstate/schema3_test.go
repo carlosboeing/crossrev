@@ -12,9 +12,9 @@ import (
 	"github.com/carlosboeing/crossrev/internal/prstate"
 )
 
-// The manifest carries the null reads envelope: the reservation this slice
-// makes so a later slice can populate reads without a second schema bump.
-// It follows the verification envelope, and writers emit nothing else.
+// The manifest carries the null reads envelope when the pass served
+// nothing: the reads key is always present on a v3 manifest. It follows
+// the verification envelope, and writers emit nothing else.
 func TestSchemaV3ManifestCarriesNullReadsEnvelope(t *testing.T) {
 	gen := validFixtureGeneration(t, prstate.GenerationFull)
 	manifest, records, err := prstate.EncodeGenerationV3(gen)
@@ -29,17 +29,42 @@ func TestSchemaV3ManifestCarriesNullReadsEnvelope(t *testing.T) {
 	}
 }
 
-// A non-null reads envelope is refused: the reservation is null in this
-// release, so a populated one is a newer writer's, not this one's.
-func TestSchemaV3RefusesPopulatedReadsEnvelope(t *testing.T) {
+// A populated reads envelope round-trips: legs that read through the
+// served tool publish the envelope in the manifest, and the same schema
+// reads it back. A malformed envelope is still refused.
+func TestSchemaV3DecodesPopulatedReadsEnvelope(t *testing.T) {
 	gen := validFixtureGeneration(t, prstate.GenerationFull)
+	envelope := prstate.NewReadsEnvelope("served", "served", "", 2, 2, 512, 0, false)
+	raw, err := json.Marshal(envelope)
+	if err != nil {
+		t.Fatalf("encode envelope: %v", err)
+	}
+	gen.Reads = prstate.Some(json.RawMessage(raw))
 	manifest, records, err := prstate.EncodeGenerationV3(gen)
 	if err != nil {
 		t.Fatalf("encode: %v", err)
 	}
-	altered := strings.Replace(string(manifest), `"reads":null`, `"reads":{"status":"passed"}`, 1)
-	if _, err := prstate.DecodeGenerationV3([]byte(altered), records); err == nil {
-		t.Fatal("manifest with a populated reads envelope decoded")
+	if !strings.Contains(string(manifest), `"reads":{"declared_mode":"served"`) {
+		t.Fatalf("manifest carries no populated reads envelope:\n%s", manifest)
+	}
+	back, err := prstate.DecodeGenerationV3(manifest, records)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	backRaw, ok := back.Reads.Get()
+	if !ok {
+		t.Fatal("decoded generation carries no reads envelope")
+	}
+	backEnvelope, err := prstate.DecodeReadsEnvelope(backRaw)
+	if err != nil {
+		t.Fatalf("decode envelope: %v", err)
+	}
+	if !reflect.DeepEqual(envelope, backEnvelope) {
+		t.Fatalf("reads envelope does not round-trip\n want: %+v\n  got: %+v", envelope, backEnvelope)
+	}
+	malformed := strings.Replace(string(manifest), `"budget_exhausted":false`, `"budget_exhausted":"never"`, 1)
+	if _, err := prstate.DecodeGenerationV3([]byte(malformed), records); err == nil {
+		t.Fatal("manifest with a malformed reads envelope decoded")
 	}
 }
 

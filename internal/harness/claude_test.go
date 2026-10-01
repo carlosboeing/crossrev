@@ -191,11 +191,30 @@ func TestClaudeRefusesAnEndpointWithNoToken(t *testing.T) {
 	if !asRefusal(err, &refusal) {
 		t.Fatal("the error is not a Refusal")
 	}
-	if want := "the endpoint 'an-endpoint' needs $AN_ENDPOINT_TOKEN, which is unset"; refusal.Reason != want {
+	if want := `the endpoint "an-endpoint" needs $AN_ENDPOINT_TOKEN, which is unset`; refusal.Reason != want {
 		t.Errorf("Reason = %q, want %q", refusal.Reason, want)
 	}
 	if !strings.Contains(refusal.Action, "will not fall back to the vendor's own API") {
 		t.Errorf("Action does not say it will not fall back: %q", refusal.Action)
+	}
+}
+
+// A quote inside the endpoint name must not break the refusal's quoting:
+// the name renders double-quoted, so a single quote rides along intact.
+func TestClaudeRefusalQuotesAnEndpointQuote(t *testing.T) {
+	inv := invocation(t, "claude", false)
+	inv.Endpoint = harness.Endpoint{Name: "an'-endpoint", URL: "https://example.invalid", TokenVar: "AN_ENDPOINT_TOKEN"}
+
+	_, err := claudeAdapter(t).Spec(inv)
+	if err == nil {
+		t.Fatal("the adapter accepted an endpoint with no token")
+	}
+	var refusal *harness.Refusal
+	if !asRefusal(err, &refusal) {
+		t.Fatal("the error is not a Refusal")
+	}
+	if want := `the endpoint "an'-endpoint" needs $AN_ENDPOINT_TOKEN, which is unset`; refusal.Reason != want {
+		t.Errorf("Reason = %q, want %q", refusal.Reason, want)
 	}
 }
 

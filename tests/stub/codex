@@ -13,7 +13,7 @@
 
 set -uo pipefail
 
-[[ "${1:-}" == "--version" ]] && { printf 'codex-cli 9.9.9 (test tripwire)\n'; exit 0; }
+[[ "${1:-}" == "--version" ]] && { printf 'codex-cli 0.159.2 (test tripwire)\n'; exit 0; }
 
 printf 'test tripwire: the real codex CLI must never be reached from the offline suite.\n' >&2
 printf 'A leg resolved to codex, which means the fixture config did not load.\n' >&2

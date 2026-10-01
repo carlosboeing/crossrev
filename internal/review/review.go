@@ -16,7 +16,12 @@ import (
 
 // Run loads context, admits the pass, posts the claim, invokes the reviewer,
 // then publishes findings and completes the original claim.
+//
+// One Leg drives every pass the cycle asks it for, so the per-pass reads
+// ledger resets here: without it a later pass folds every earlier pass's
+// calls into its own envelope and inherits the first non-empty reason.
 func (l *Leg) Run(ctx context.Context, req Request) (out Result) {
+	l.readsNotes = nil
 	if req.PR == 0 {
 		out.Outcome = OutcomeError
 		out.Err = &ui.FatalError{
@@ -299,6 +304,10 @@ func (l *Leg) Run(ctx context.Context, req Request) (out Result) {
 			return out
 		}
 		if covErr := l.runCoverage(ctx, req, loaded, settings, ad.pass, claimID, scope, store, selection, &out); covErr != nil {
+			// A halted batch call recorded its reads note before the
+			// error returned: the envelope-only entry lands on the
+			// halted marker the way haltPass records it.
+			l.attachReads(&out.Marker)
 			out.Outcome = OutcomeError
 			out.Err = covErr
 			return out
@@ -329,6 +338,10 @@ func (l *Leg) Run(ctx context.Context, req Request) (out Result) {
 			if errors.As(err, &restoreErr) {
 				out.Messages = append(out.Messages, restoreErr.Warning())
 			}
+			// A halted frozen call recorded its reads note before the
+			// error returned: the envelope-only entry lands on the
+			// halted marker the way haltPass records it.
+			l.attachReads(&out.Marker)
 			out.Outcome = OutcomeError
 			out.Err = err
 			return out
@@ -367,6 +380,7 @@ func (l *Leg) Run(ctx context.Context, req Request) (out Result) {
 			marker.EffortReported = prstate.Null[string]()
 		}
 		l.attachUsage(&marker, envelope, settings)
+		l.attachReads(&marker)
 		out.Marker = marker
 		raw, err := marker.MarshalJSON()
 		if err != nil {
@@ -432,6 +446,7 @@ func (l *Leg) finishCoveredRun(ctx context.Context, req Request, loaded Context,
 		}
 		l.attachUsage(&marker, *covered.envelope, settings)
 	}
+	l.attachReads(&marker)
 	workdir := req.Workdir
 	diffBytes, _ := l.reviewDiff(ctx, loaded)
 	enriched, snaps, err := enrichFindingsInScope(covered.payload, diffBytes, workdir, requiredPaths(loaded))

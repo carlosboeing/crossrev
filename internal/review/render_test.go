@@ -626,3 +626,55 @@ func TestSummaryScopesResolvingClaimsToPostedFindings(t *testing.T) {
 		t.Errorf("held count missing:\n%.800s", got)
 	}
 }
+
+// A degraded pass carries its reads reason in the posted summary, not only
+// in the terminal warning: a reader of the pull request sees the same
+// sentence the operator saw. calls_refused beside served reads names the
+// refused and served counts instead of claiming the supplied content alone.
+func TestDegradedReadsReasonReachesThePostedSummary(t *testing.T) {
+	ctx := review.RenderContext{Repo: "acme/widget", PR: 42, MinFix: "medium", MaxPass: 3}
+	readsMarker := func(reason string, calls, reads, refused int) prstate.Marker {
+		marker := skipMarker("issues-remain")
+		raw, err := json.Marshal(prstate.NewReadsEnvelope("served", "supplied", reason, calls, reads, 0, refused, false))
+		if err != nil {
+			t.Fatal(err)
+		}
+		marker.Reads = raw
+		return marker
+	}
+
+	got := review.SummaryBody(nil, readsMarker("self_test_failed", 0, 0, 0), ctx)
+	if !strings.Contains(got, "Served reads degraded (self_test_failed): this review judged the supplied content alone.") {
+		t.Errorf("the posted summary carries no degrade line:\n%.1200s", got)
+	}
+
+	got = review.SummaryBody(nil, readsMarker("calls_refused", 2, 3, 1), ctx)
+	if !strings.Contains(got, "Served reads degraded (calls_refused: 1 refused, 3 served)") {
+		t.Errorf("the posted summary names no refused and served counts:\n%.1200s", got)
+	}
+
+	healthy := skipMarker("issues-remain")
+	raw, err := json.Marshal(prstate.NewReadsEnvelope("served", "served", "", 1, 1, 11, 0, false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	healthy.Reads = raw
+	if got := review.SummaryBody(nil, healthy, ctx); strings.Contains(got, "Served reads degraded") {
+		t.Errorf("a healthy served pass warns it degraded:\n%.1200s", got)
+	}
+
+	// A halted pass reports its halt through the blocked alert: its call
+	// published nothing, so the supplied-content sentence would state
+	// something false, and the tripwire reason is not a degradation at all.
+	halted := readsMarker("missing_handshake", 0, 0, 0)
+	halted.Verdict = prstate.Some("blocked")
+	halted.BlockedReason = prstate.Some("served reads are unavailable: missing_handshake (reads_unavailable)")
+	if got := review.SummaryBody(nil, halted, ctx); strings.Contains(got, "Served reads degraded") {
+		t.Errorf("a halted pass prints the degrade line beside its halt:\n%.1200s", got)
+	}
+	tripped := readsMarker("review_leg_ran_command", 0, 0, 0)
+	tripped.Verdict = prstate.Some("issues-remain")
+	if got := review.SummaryBody(nil, tripped, ctx); strings.Contains(got, "Served reads degraded") {
+		t.Errorf("a tripwire halt prints as a degradation:\n%.1200s", got)
+	}
+}

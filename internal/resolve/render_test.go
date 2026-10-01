@@ -205,6 +205,50 @@ func TestReviewSummaryRewriteKeepsHeldCount(t *testing.T) {
 	}
 }
 
+// A degraded pass keeps its reads reason when the resolve leg rewrites the
+// review summary: the rewrite re-renders from the marker, so the posted
+// degradation line must survive it the way the redrive notice and the skip
+// warning do.
+func TestReviewSummaryRewriteKeepsReadsDegradation(t *testing.T) {
+	readsMarker := func(reason string, calls, reads, refused int) prstate.Marker {
+		marker := prstate.Marker{
+			Pass:    2,
+			Harness: prstate.Some("claude"),
+			Model:   prstate.Some("claude-3-7-sonnet"),
+			Blocked: prstate.Some(false),
+		}
+		raw, err := json.Marshal(prstate.NewReadsEnvelope("served", "supplied", reason, calls, reads, 0, refused, false))
+		if err != nil {
+			t.Fatal(err)
+		}
+		marker.Reads = raw
+		return marker
+	}
+
+	got := reviewSummaryBody(json.RawMessage(`[]`), readsMarker("self_test_failed", 0, 0, 0), mustSlug(t), 42, core.SeverityMedium, 3, commentCoverage{})
+	if !strings.Contains(got, "Served reads degraded (self_test_failed): this review judged the supplied content alone.") {
+		t.Errorf("rewrite lost the degrade line:\n%.1200s", got)
+	}
+
+	got = reviewSummaryBody(json.RawMessage(`[]`), readsMarker("calls_refused", 2, 3, 1), mustSlug(t), 42, core.SeverityMedium, 3, commentCoverage{})
+	if !strings.Contains(got, "Served reads degraded (calls_refused: 1 refused, 3 served)") {
+		t.Errorf("rewrite lost the refused and served counts:\n%.1200s", got)
+	}
+
+	// The blocked and tripwire gates travel with the line: a halted pass
+	// reports its halt, and a command event is not a degradation.
+	halted := readsMarker("missing_handshake", 0, 0, 0)
+	halted.Verdict = prstate.Some("blocked")
+	halted.BlockedReason = prstate.Some("served reads are unavailable: missing_handshake (reads_unavailable)")
+	if got := reviewSummaryBody(json.RawMessage(`[]`), halted, mustSlug(t), 42, core.SeverityMedium, 3, commentCoverage{}); strings.Contains(got, "Served reads degraded") {
+		t.Errorf("a halted pass prints the degrade line beside its halt:\n%.1200s", got)
+	}
+	tripped := readsMarker("review_leg_ran_command", 0, 0, 0)
+	if got := reviewSummaryBody(json.RawMessage(`[]`), tripped, mustSlug(t), 42, core.SeverityMedium, 3, commentCoverage{}); strings.Contains(got, "Served reads degraded") {
+		t.Errorf("a tripwire halt prints as a degradation:\n%.1200s", got)
+	}
+}
+
 func repoRoot(t *testing.T) string {
 	t.Helper()
 	dir, err := os.Getwd()

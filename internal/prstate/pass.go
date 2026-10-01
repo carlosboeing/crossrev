@@ -50,21 +50,26 @@ import (
 // of the bytes into commentID, so the byte route through Raw cannot carry it
 // back either.
 type Marker struct {
-	Version        int             `json:"v,omitzero"`
-	Leg            core.Leg        `json:"leg,omitzero"`
-	Pass           int             `json:"pass,omitzero"`
-	State          core.PassState  `json:"state,omitzero"`
-	TS             int64           `json:"ts,omitzero"`
-	DoneTS         Opt[int64]      `json:"done_ts,omitzero"`
-	RunID          Opt[string]     `json:"run_id,omitzero"`
-	HeadSHA        Opt[string]     `json:"head_sha,omitzero"`
-	Harness        Opt[string]     `json:"harness,omitzero"`
-	Model          Opt[string]     `json:"model,omitzero"`
-	Effort         Opt[string]     `json:"effort,omitzero"`
-	Endpoint       Opt[string]     `json:"endpoint,omitzero"`
-	ModelReported  Opt[string]     `json:"model_reported,omitzero"`
-	Tokens         json.RawMessage `json:"tokens,omitzero"`
-	Usage          json.RawMessage `json:"usage,omitzero"`
+	Version       int             `json:"v,omitzero"`
+	Leg           core.Leg        `json:"leg,omitzero"`
+	Pass          int             `json:"pass,omitzero"`
+	State         core.PassState  `json:"state,omitzero"`
+	TS            int64           `json:"ts,omitzero"`
+	DoneTS        Opt[int64]      `json:"done_ts,omitzero"`
+	RunID         Opt[string]     `json:"run_id,omitzero"`
+	HeadSHA       Opt[string]     `json:"head_sha,omitzero"`
+	Harness       Opt[string]     `json:"harness,omitzero"`
+	Model         Opt[string]     `json:"model,omitzero"`
+	Effort        Opt[string]     `json:"effort,omitzero"`
+	Endpoint      Opt[string]     `json:"endpoint,omitzero"`
+	ModelReported Opt[string]     `json:"model_reported,omitzero"`
+	Tokens        json.RawMessage `json:"tokens,omitzero"`
+	Usage         json.RawMessage `json:"usage,omitzero"`
+	// Reads is the reads envelope for the pass: declared and effective
+	// modes, the reason they differ, and what the calls cost. A halted
+	// call that publishes nothing still records it — the envelope-only
+	// entry is the record the call happened.
+	Reads          json.RawMessage `json:"reads,omitzero"`
 	Billing        Opt[string]     `json:"billing,omitzero"`
 	Verdict        Opt[string]     `json:"verdict,omitzero"`
 	Blocked        Opt[bool]       `json:"blocked,omitzero"`
@@ -173,7 +178,7 @@ func (m Marker) Raw() json.RawMessage { return bytes.Clone(m.raw) }
 // input". Every reader here already reads a zero-length payload as absent —
 // DecodeFindings and DecodeResolutions both — so the writer agrees with them.
 func (m Marker) MarshalJSON() ([]byte, error) {
-	for _, payload := range []*json.RawMessage{&m.Tokens, &m.Usage, &m.Findings, &m.Resolutions, &m.CoveragePayload, &m.CoveragePrevPayload} {
+	for _, payload := range []*json.RawMessage{&m.Tokens, &m.Usage, &m.Reads, &m.Findings, &m.Resolutions, &m.CoveragePayload, &m.CoveragePrevPayload} {
 		if len(*payload) == 0 {
 			*payload = nil
 		}
@@ -271,7 +276,7 @@ func (m *Marker) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-// clone copies the four payloads a marker carries as raw bytes.
+// clone copies the seven payloads a marker carries as raw bytes.
 //
 // Marker is returned by value, but a slice header shares its backing array, so
 // a caller editing what a reader handed it would reach the marker list the
@@ -279,6 +284,7 @@ func (m *Marker) UnmarshalJSON(b []byte) error {
 func (m Marker) clone() Marker {
 	m.Tokens = bytes.Clone(m.Tokens)
 	m.Usage = bytes.Clone(m.Usage)
+	m.Reads = bytes.Clone(m.Reads)
 	m.Findings = bytes.Clone(m.Findings)
 	m.Resolutions = bytes.Clone(m.Resolutions)
 	m.CoveragePayload = bytes.Clone(m.CoveragePayload)

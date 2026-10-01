@@ -5,7 +5,6 @@ import (
 	"os"
 	"regexp"
 	"runtime"
-	"strconv"
 	"strings"
 
 	"github.com/carlosboeing/crossrev/internal/config"
@@ -227,90 +226,20 @@ func (c *Checker) versionRefusal(name, token string) *harness.Refusal {
 	return pinned.VersionRefusal([]byte(token))
 }
 
-// versionSpan is the span of one harness CLI's version CrossRev has on record.
-type versionSpan struct {
-	// lo and hi are the inclusive bounds of the record.
-	lo, hi [3]int
-	// label is the span the way this report prints it.
-	label string
-}
-
-// recordedRuns is the recorded-run evidence above a descriptor pin. The lower
-// bound of every span is the descriptor's own install pin
-// (internal/harness/assets/harnesses.json), read where the report is built, so
-// a pin bump moves the span with it and nothing here has to follow. This map
-// holds only what recorded runs proved past the pin, and only Claude Code has
-// any: its pin is 2.1.237 and recorded runs reach 2.1.281.
-var recordedRuns = map[string]string{
-	"claude": "2.1.281",
-}
-
-// versionSpanFor is the recorded span for one harness: its install pin up to
-// whatever recorded runs proved above it. No pin is no record — agy pins
-// nothing — and a pin past every recorded run narrows back to the pin itself.
-func versionSpanFor(name, pin string) (versionSpan, bool) {
-	if pin == "" {
-		return versionSpan{}, false
-	}
-	lo := versionNumbers(pin)
-	hi, label := lo, pin
-	if upper, ok := recordedRuns[name]; ok && compareVersions(versionNumbers(upper), hi) > 0 {
-		hi = versionNumbers(upper)
-		label = pin + "-" + upper
-	}
-	return versionSpan{lo: lo, hi: hi, label: label}, true
-}
-
 // versionVerdict is what the report adds to one reported version: the
 // comparison against the record, and nothing stronger. Every line is
 // information — an unverified version fails nothing, because the refusal that
-// stops work lives in the leg and says so.
+// stops work lives in the leg and says so. The span itself lives with the
+// harness package, which the review leg's installed-version gate shares.
 func versionVerdict(name, token, pin string) string {
-	span, recorded := versionSpanFor(name, pin)
+	span, recorded := harness.RecordedSpan(name, pin)
 	if !recorded {
 		return " — unverified, no recorded version range"
 	}
-	if span.contains(versionNumbers(token)) {
-		return " — known good (" + span.label + ")"
+	if span.ContainsToken(token) {
+		return " — known good (" + span.Label(pin) + ")"
 	}
-	return " — unverified, outside the recorded range (" + span.label + ")"
-}
-
-// contains is the inclusive recorded span.
-func (s versionSpan) contains(version [3]int) bool {
-	return compareVersions(s.lo, version) <= 0 && compareVersions(version, s.hi) <= 0
-}
-
-// compareVersions orders two version triples component by component.
-func compareVersions(a, b [3]int) int {
-	for at := range a {
-		if a[at] != b[at] {
-			if a[at] < b[at] {
-				return -1
-			}
-			return 1
-		}
-	}
-	return 0
-}
-
-// versionNumbers reads up to three numeric components of a version token.
-// "v2.1.281" and "2.1.281-beta" both read as 2.1.281: the digits before any
-// suffix, with a missing component counting as zero.
-func versionNumbers(token string) [3]int {
-	var numbers [3]int
-	for at, part := range strings.SplitN(strings.TrimPrefix(token, "v"), ".", 3) {
-		digits := part
-		for index, r := range part {
-			if r < '0' || r > '9' {
-				digits = part[:index]
-				break
-			}
-		}
-		number, _ := strconv.Atoi(digits)
-		numbers[at] = number
-	}
-	return numbers
+	return " — unverified, outside the recorded range (" + span.Label(pin) + ")"
 }
 
 // The three outcomes of a version probe (lib/preflight.sh:44-47). They are

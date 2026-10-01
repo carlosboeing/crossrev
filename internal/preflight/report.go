@@ -5,11 +5,13 @@ import "context"
 // Doctor is the whole `crossrev doctor` report and its exit code
 // (bin/crossrev:163-180).
 //
-// Five probes in this order, because the reader works down the page: what is
-// installed, what a killed run left in the checkout, what the configured runner
-// can serve, what the coverage ledger would do, and which worktrees are still
-// sitting in the state directory. The first four can fail the command; the
-// fifth never does, which is why the Bash call carries no `|| doctor_ok=1`.
+// Six sections in this order, because the reader works down the page: what
+// is installed, what a killed run left in the checkout, what the configured
+// runner can serve, which read path each harness reviews with, what the
+// coverage ledger would do, and which worktrees are still sitting in the
+// state directory. The reads section never fails the command; of the rest,
+// the worktrees never do, which is why the Bash call carries no
+// `|| doctor_ok=1`.
 //
 // Two things the caller does first, matching what bin/crossrev does around this
 // branch. It does not source the harness adapters — doctor's whole job is to
@@ -37,6 +39,10 @@ func (c *Checker) Doctor(ctx context.Context) int {
 		if !c.ReportPairings(c.Config.Get(".runner")) {
 			ok = false
 		}
+		// Which read path each harness reviews with, and where the
+		// tripwire cannot run. Informational: an unverified block refuses
+		// the review leg at runtime, and this names it before that happens.
+		c.ReportReadModes()
 		if !c.ReportCoverage(ctx) {
 			ok = false
 		}

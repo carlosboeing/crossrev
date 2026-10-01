@@ -232,7 +232,7 @@ Automated mode reviews branches in the repository, including Dependabot branches
 
 ## Harness support
 
-CrossRev has adapters for Claude Code, Codex, Antigravity, Grok, and opencode, and any of them may take either leg. Kimi runs through the Claude adapter as a named endpoint.
+CrossRev has adapters for Claude Code, Codex, Antigravity, Grok, and opencode. Any of them may take the resolve leg; the review leg refuses a harness whose command block is unverified at its pin, which today means grok reviews are refused with `review_isolation_unverified` while its resolve leg runs. Kimi runs through the Claude adapter as a named endpoint.
 
 Running a harness locally needs nothing beyond its own CLI installed and logged in the way you already use it. CrossRev shells out to the CLI and never handles the credential itself, and `crossrev doctor` reports which harnesses it found.
 
@@ -252,7 +252,7 @@ Whether a harness works in GitHub Actions is a separate question, because a host
 
 `crossrev init` refuses a pairing that its runner cannot serve. A self-hosted runner uses its installed logins and supports every pairing. [CrossRev credentials](docs/credentials.md) explains the hosted-runner requirements and the Codex refresher.
 
-`--harness` overrides one leg for one run, and takes any of the five adapter names — `claude`, `codex`, `agy`, `grok`, `opencode`; `codex` on `review` only. Kimi is not one of them: it is reached through an `endpoints:` entry rather than an adapter, so it is named by `endpoint` in the configuration. Pass the flag to `review` and `resolve` separately, because a pairing is two choices:
+`--harness` overrides one leg for one run, and takes any of the five adapter names — `claude`, `codex`, `agy`, `grok`, `opencode`. Kimi is not one of them: it is reached through an `endpoints:` entry rather than an adapter, so it is named by `endpoint` in the configuration. Pass the flag to `review` and `resolve` separately, because a pairing is two choices:
 
 ```bash
 crossrev review  --pr 42 --harness codex    # reviewer leg on codex

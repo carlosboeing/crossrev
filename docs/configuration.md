@@ -45,6 +45,7 @@ policy:
   max_passes_per_cycle: 3
   max_files_changed_per_pr: 200
   max_prs_per_day: 25
+  on_reads_unavailable: degrade    # degrade | halt
 ```
 
 | Field | Default | What it bounds |
@@ -53,15 +54,17 @@ policy:
 | `max_passes_per_cycle` | `3` | Passes in one cycle |
 | `max_files_changed_per_pr` | `200` | Pull request size CrossRev will review unattended |
 | `max_prs_per_day` | `25` | Distinct pull requests reviewed across the repository in a rolling 24 hours |
+| `on_reads_unavailable` | `degrade` | What a review leg does when the served read path is not serving: degrade visibly and continue on the supplied prompt, or halt and publish nothing. Under `halt` any refused read stops the leg — even one benign `not_found` beside served reads |
 
-**The last three are continuation bounds. They end automatic reviewing and never block a person** — a review a human asked for runs regardless. `min_fix_severity` is different in kind: it bounds what an agent may *change* rather than whether the loop continues, so it holds on attended and unattended runs alike.
+**`max_passes_per_cycle`, `max_files_changed_per_pr` and `max_prs_per_day` are continuation bounds. They end automatic reviewing and never block a person** — a review a human asked for runs regardless. `on_reads_unavailable` is not one: `halt` stops an attended review too. `min_fix_severity` is different in kind: it bounds what an agent may *change* rather than whether the loop continues, so it holds on attended and unattended runs alike.
 
 A pull request consumes at most one daily unit however many passes it takes, because only the review marker participates in the count. The daily window rolls over 24 hours rather than resetting at midnight.
 
-Two values are refused rather than accepted and misread:
+Three values are refused rather than accepted and misread:
 
 - **`min_fix_severity` must be `high`, `medium` or `low`.** A typo ranks zero, zero meets nothing, so every finding would count as non-actionable, the pass would report converged, and the cycle would stop with a high-severity finding sitting on the pull request. A typo would look exactly like a clean review.
 - **`max_passes_per_cycle` must be a whole number above zero.** Zero is already spoken for internally as "no pass bound applies to this invocation", which is what lets a person ask for one attended pass past the bound. To stop CrossRev reviewing a repository at all, remove its workflows rather than setting the bound to zero. The limit counts all passes on a pull request, manual and automatic. Three manual passes therefore leave no automatic passes.
+- **`on_reads_unavailable` must be `degrade` or `halt`.** A third value would fall through to whichever branch is not `halt`, so a repository that meant to stop a leg with no reads would silently degrade instead and nothing would ever say so.
 
 ### git
 
@@ -138,7 +141,7 @@ resolver:
   effort: high
 ```
 
-`harness` is one of `claude`, `codex`, `agy`, `grok` or `opencode` — codex serves the review leg only. `model` reaches the harness as given, so it must be **fully qualified** — `claude-fable-5`, never `fable-5`, which fails as an entitlement error rather than as a typo. `effort` is passed through verbatim. Either leg may name an `endpoint` instead of relying on the harness's own vendor.
+`harness` is one of `claude`, `codex`, `agy`, `grok` or `opencode`. `model` reaches the harness as given, so it must be **fully qualified** — `claude-fable-5`, never `fable-5`, which fails as an entitlement error rather than as a typo. `effort` is passed through verbatim. Either leg may name an `endpoint` instead of relying on the harness's own vendor.
 
 For one run, `crossrev review --model <id> --effort <level>` — and the same flags on `resolve`, or on `cycle` for both legs — overrides the configured values the way `--harness` overrides the harness. The flags land in the same settings the config fills, so the harness gets the operator's value exactly as written and the marker records it; `--model` without `--harness` keeps the configured harness and replaces only its model.
 

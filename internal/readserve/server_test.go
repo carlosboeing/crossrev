@@ -501,6 +501,57 @@ func TestPerLegByteLimitRefuses(t *testing.T) {
 	}
 }
 
+// An explicit zero leg allowance is exhaustion, not an absent flag: the
+// leg passes its remainder down to every server session, and a spent leg
+// refuses every further read instead of resetting to the contract
+// defaults. Absent flags still default; only an explicit zero exhausts.
+func TestExplicitZeroLegReadsRefuses(t *testing.T) {
+	dir, base, head := createRepo(t)
+	logPath := filepath.Join(t.TempDir(), "log.jsonl")
+
+	reqs := []rpcRequest{
+		{JSONRPC: "2.0", ID: 1, Method: "tools/call", Params: map[string]any{
+			"name": "read_file", "arguments": map[string]any{"path": "small.txt", "revision": "head"},
+		}},
+		{JSONRPC: "2.0", ID: 2, Method: "ping"},
+	}
+	args := []string{"--repo", dir, "--base", base, "--head", head, "--log", logPath,
+		"--per-leg-reads", "0"}
+	resps, _ := runRPC(t, args, reqs)
+
+	if !resps[0].Result.IsError || resps[0].Result.Content[0].Text != "budget_exhausted" {
+		t.Errorf("a read with no remaining leg allowance should refuse budget_exhausted, got %+v", resps[0].Result)
+	}
+	if resps[1].Error != nil {
+		t.Errorf("the server halted after the refusal: ping answered %+v", resps[1].Error)
+	}
+}
+
+// An explicit zero leg byte allowance exhausts the same way: any positive
+// read refuses, while the handshake the leg checks still answers.
+func TestExplicitZeroLegBytesRefuses(t *testing.T) {
+	dir, base, head := createRepo(t)
+	logPath := filepath.Join(t.TempDir(), "log.jsonl")
+
+	reqs := []rpcRequest{
+		{JSONRPC: "2.0", ID: 1, Method: "initialize"},
+		{JSONRPC: "2.0", ID: 2, Method: "tools/list"},
+		{JSONRPC: "2.0", ID: 3, Method: "tools/call", Params: map[string]any{
+			"name": "read_file", "arguments": map[string]any{"path": "small.txt", "revision": "head"},
+		}},
+	}
+	args := []string{"--repo", dir, "--base", base, "--head", head, "--log", logPath,
+		"--per-leg-bytes", "0"}
+	resps, _ := runRPC(t, args, reqs)
+
+	if resps[0].Error != nil || resps[1].Error != nil {
+		t.Fatalf("the handshake should answer with no remaining byte allowance: %+v %+v", resps[0].Error, resps[1].Error)
+	}
+	if !resps[2].Result.IsError || resps[2].Result.Content[0].Text != "budget_exhausted" {
+		t.Errorf("a read with no remaining leg bytes should refuse budget_exhausted, got %+v", resps[2].Result)
+	}
+}
+
 func TestBudgetExhaustionNeverHalts(t *testing.T) {
 	dir, base, head := createRepo(t)
 	logPath := filepath.Join(t.TempDir(), "log.jsonl")

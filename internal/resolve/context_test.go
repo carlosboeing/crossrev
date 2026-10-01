@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/carlosboeing/crossrev/internal/exec"
 	"github.com/carlosboeing/crossrev/internal/forge"
 	"github.com/carlosboeing/crossrev/internal/harness"
 )
@@ -421,7 +422,7 @@ func TestSettingsRefusesWhenNothingThatCanResolveIsInstalled(t *testing.T) {
 	}
 	wantRefusal(t, got.Err,
 		"the resolver is configured to use 'claude', which is not installed, and no other harness that can serve the resolve leg is either",
-		"Install one of claude, agy, grok and opencode. CrossRev needs at least one, and two different ones is what makes the cross-model check mean anything.")
+		"Install one of claude, codex, agy, grok and opencode. CrossRev needs at least one, and two different ones is what makes the cross-model check mean anything.")
 	if e.runner.specs != nil {
 		t.Errorf("harness started on a refusal: %d specs", len(e.runner.specs))
 	}
@@ -452,31 +453,24 @@ func TestSettingsNamesOnlyTheHarnessesThatCanResolve(t *testing.T) {
 		"Install one of claude and opencode. CrossRev needs at least one, and two different ones is what makes the cross-model check mean anything.")
 }
 
-// TestSettingsRefusesCodexAsAResolver pins the codex-as-resolver refusal:
-// codex 0.158.0 with the resolve leg's shell denial has no way to read files
-// and answers `blocked` instead of editing, so the leg would verify nothing
-// and the pass would halt. The refusal lands in settings, before any child
-// starts, on both the configured-resolver path and the --harness override,
-// and names the resolvers that work. Codex as reviewer is unaffected: the
-// review leg carries no such refusal.
-func TestSettingsRefusesCodexAsAResolver(t *testing.T) {
-	message := "the codex resolver cannot read files, so a resolve leg on codex answers `blocked` instead of editing"
-	hint := "codex 0.158.0 with the shell disabled has no file-reading tool: the resolve leg's `--disable shell_tool --disable unified_exec` leaves it nothing to verify against, so it edits nothing and the pass halts. " +
-		"CrossRev runs the resolve leg on claude, agy, grok and opencode until the served read tool also serves resolve legs. " +
-		"Point the resolver at one of them with --harness, or set resolver.harness in the repository config."
-
+// TestSettingsAcceptsCodexAsAResolver pins the lifted codex-as-resolver
+// refusal: the served read tool serves codex resolve legs too, so the
+// settings that used to refuse codex before any child starts now let the
+// leg through on both the configured-resolver path and the --harness
+// override. The leg may still fail downstream on canned output, but never
+// with the old refusal, and a harness child starts.
+func TestSettingsAcceptsCodexAsAResolver(t *testing.T) {
 	t.Run("harness override", func(t *testing.T) {
 		e := setup(t)
 		e.addReview(t, defaultFindings(), "issues-remain")
 
 		got := e.runReq(t, Request{PR: 42, Repo: e.slug, Trigger: TriggerHuman, Harness: "codex"})
 
-		if got.Outcome != OutcomeRefused {
-			t.Errorf("Outcome = %q, want %q", got.Outcome, OutcomeRefused)
+		if got.Err != nil && strings.Contains(got.Err.Error(), "cannot read files") {
+			t.Errorf("codex refused as a resolver: %v", got.Err)
 		}
-		wantRefusal(t, got.Err, message, hint)
-		if e.runner.specs != nil {
-			t.Errorf("harness started on a refusal: %d specs", len(e.runner.specs))
+		if e.runner.specs == nil {
+			t.Error("no harness started for a codex resolver")
 		}
 	})
 
@@ -489,21 +483,136 @@ func TestSettingsRefusesCodexAsAResolver(t *testing.T) {
 
 		got := e.runReq(t, Request{PR: 42, Repo: e.slug, Trigger: TriggerHuman})
 
-		if got.Outcome != OutcomeRefused {
-			t.Errorf("Outcome = %q, want %q", got.Outcome, OutcomeRefused)
+		if got.Err != nil && strings.Contains(got.Err.Error(), "cannot read files") {
+			t.Errorf("codex refused as a resolver: %v", got.Err)
 		}
-		wantRefusal(t, got.Err, message, hint)
-		if e.runner.specs != nil {
-			t.Errorf("harness started on a refusal: %d specs", len(e.runner.specs))
+		if e.runner.specs == nil {
+			t.Error("no harness started for a codex resolver")
 		}
 	})
 }
 
-// TestSettingsRefusesWhenOnlyCodexIsInstalled pins that a machine where only
-// codex is on PATH refuses rather than substituting codex as the resolver.
-// The default resolver is claude, and codex cannot read files with its shell
-// disabled, so the substitution loop must not start codex.
-func TestSettingsRefusesWhenOnlyCodexIsInstalled(t *testing.T) {
+// TestCodexResolverStartsWithTheServedReadTool pins the resolve leg's
+// serve wiring: a codex resolver's harness child carries the read-server
+// command, its --base/--head/--call resolve args and the approval key. The
+// leg builds that invocation (not the adapter), so the test drives the
+// real codex adapter — the stub records invocations but never reads Serve,
+// and deleting the block left the suite green. A supplied resolver (agy)
+// starts with none of it.
+func TestCodexResolverStartsWithTheServedReadTool(t *testing.T) {
+	e := setup(t)
+	e.adapter = nil
+	e.doc = mustHarness(t)
+	e.addReview(t, defaultFindings(), "issues-remain")
+
+	_ = e.runReq(t, Request{PR: 42, Repo: e.slug, Trigger: TriggerHuman, Harness: "codex"})
+
+	var child *exec.Spec
+	for i, spec := range e.runner.specs {
+		if spec.Path == "codex" {
+			child = &e.runner.specs[i]
+			break
+		}
+	}
+	if child == nil {
+		t.Fatal("no codex harness child started for a codex resolver")
+	}
+	joined := strings.Join(child.Args, " ")
+	for _, want := range []string{
+		"mcp_servers.crossrev.command=",
+		"__read-server",
+		"--base",
+		"--head",
+		"--call",
+		"resolve",
+		`mcp_servers.crossrev.default_tools_approval_mode="approve"`,
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("a served codex resolve carries %q; got %v", want, child.Args)
+		}
+	}
+	// The setup is what the test claims: the claim names the codex
+	// resolver, and the descriptor in force serves reads to codex, so a
+	// pass here means the read tool reached the child through the leg's
+	// wiring rather than around it.
+	if len(e.forge.created) == 0 || !strings.Contains(e.forge.created[0].Body, `"harness":"codex"`) {
+		t.Error("the claim names no codex resolver, so the test proved nothing about one")
+	}
+	if entry, ok := e.doc.For("codex"); !ok || entry.ReadMode() != harness.ReadModeServed {
+		t.Error("the descriptor in force serves no reads to codex, so the test proved nothing about served mode")
+	}
+
+	supplied := setup(t)
+	supplied.adapter = nil
+	supplied.addReview(t, defaultFindings(), "issues-remain")
+
+	_ = supplied.runReq(t, Request{PR: 42, Repo: supplied.slug, Trigger: TriggerHuman, Harness: "agy"})
+
+	if len(supplied.runner.specs) == 0 {
+		t.Fatal("no agy harness child started for an agy resolver")
+	}
+	for _, spec := range supplied.runner.specs {
+		for _, arg := range spec.Args {
+			if strings.Contains(arg, "mcp_servers.crossrev") || arg == "__read-server" {
+				t.Errorf("a supplied agy resolve carries served wiring: %q in %v", arg, spec.Args)
+			}
+		}
+	}
+}
+
+// TestMovedPinDoesNotRefuseGrokResolve pins the resolve half of the
+// isolation gate: a grok review leg at a moved pin is refused with
+// review_isolation_unverified before any child starts, while a grok
+// resolve leg at the same moved pin starts its harness child.
+func TestMovedPinDoesNotRefuseGrokResolve(t *testing.T) {
+	e := setup(t)
+	e.addReview(t, defaultFindings(), "issues-remain")
+	e.git.show = map[string][]byte{
+		e.base.SHA() + ":.github/crossrev.yml": []byte("version: 2\nresolver:\n  harness: grok\n  model: x\n"),
+	}
+	raw := harness.DescriptorJSON()
+	var document map[string]any
+	if err := json.Unmarshal(raw, &document); err != nil {
+		t.Fatalf("decoding the descriptor: %v", err)
+	}
+	for _, entry := range document["harnesses"].([]any) {
+		if entry.(map[string]any)["name"] == "grok" {
+			install := entry.(map[string]any)["install"].(map[string]any)
+			install["pinned_version"] = "9.9.9"
+			install["command"] = "install 9.9.9"
+		}
+	}
+	mutated, _ := json.Marshal(document)
+	doc, err := harness.Load(mutated)
+	if err != nil {
+		t.Fatalf("loading the moved pin: %v", err)
+	}
+	e.doc = doc
+
+	got := e.run(t)
+	if got.Err != nil && strings.Contains(got.Err.Error(), "review_isolation_unverified") {
+		t.Errorf("grok resolve refused at a moved pin: %v", got.Err)
+	}
+	if e.runner.specs == nil {
+		t.Error("no harness started for a grok resolver at a moved pin")
+	}
+	// The setup is what the test claims: the claim names the grok
+	// resolver, and the descriptor in force carries the moved pin, so a
+	// pass here means the resolve leg started under the unverified pin
+	// rather than under the shipped one.
+	if len(e.forge.created) == 0 || !strings.Contains(e.forge.created[0].Body, `"harness":"grok"`) {
+		t.Error("the claim names no grok resolver, so the test proved nothing about one")
+	}
+	if entry, ok := e.doc.For("grok"); !ok || entry.Install.PinnedVersion != "9.9.9" {
+		t.Error("the descriptor in force carries no moved grok pin, so the test proved nothing about one")
+	}
+}
+
+// TestSettingsSubstitutesCodexWhenOnlyCodexIsInstalled pins that a machine
+// where only codex is on PATH substitutes codex as the resolver. The served
+// read tool gives the codex resolve leg its reads, so the substitution loop
+// starts it rather than refusing.
+func TestSettingsSubstitutesCodexWhenOnlyCodexIsInstalled(t *testing.T) {
 	e := setup(t)
 	e.lookPath = func(name string) (string, error) {
 		if name == "codex" {
@@ -515,14 +624,11 @@ func TestSettingsRefusesWhenOnlyCodexIsInstalled(t *testing.T) {
 
 	got := e.run(t)
 
-	if got.Outcome != OutcomeRefused {
-		t.Errorf("Outcome = %q, want %q", got.Outcome, OutcomeRefused)
+	if got.Err != nil && strings.Contains(got.Err.Error(), "cannot read files") {
+		t.Errorf("codex refused as a resolver: %v", got.Err)
 	}
-	wantRefusal(t, got.Err,
-		"the resolver is configured to use 'claude', which is not installed, and no other harness that can serve the resolve leg is either",
-		"Install one of claude, agy, grok and opencode. CrossRev needs at least one, and two different ones is what makes the cross-model check mean anything.")
-	if e.runner.specs != nil {
-		t.Errorf("harness started on a refusal: %d specs", len(e.runner.specs))
+	if e.runner.specs == nil {
+		t.Error("no harness started for a substituted codex resolver")
 	}
 }
 

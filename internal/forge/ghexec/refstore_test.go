@@ -702,3 +702,147 @@ func TestRefStoreStoresTheFilteredBytes(t *testing.T) {
 		t.Errorf("read examined scope = %q, want %q", read.ScopeReport.ExaminedScope, "masked")
 	}
 }
+
+// The reads.json path: a generation carrying per-call detail POSTs a third
+// blob and lands a reads.json tree entry beside the pair, and reading the
+// generation back returns the bytes in gen.ReadsJSON.
+func TestRefStorePublishesReadsJSONBesideThePair(t *testing.T) {
+	ctx := context.Background()
+	ref := storetest.FixtureSlotRef(t)
+	store, gh := newStubbedRefStore(t)
+
+	gen := fixtureGeneration(t, prstate.GenerationFull)
+	gen.ReadsJSON = json.RawMessage(`{"calls":[{"path":"a.go","reads":1,"bytes":11}]}`)
+	if len(gen.ReadsJSON) == 0 {
+		t.Fatal("the generation carries no reads detail, so the publish would pass for the wrong reason")
+	}
+	handle, err := store.PublishGeneration(ctx, ref, prstate.Handle{}, gen)
+	if err != nil {
+		t.Fatalf("PublishGeneration: %v", err)
+	}
+
+	blobPosts := 0
+	for _, call := range gh.calls() {
+		if strings.Contains(call, "--method POST") && strings.Contains(call, "/git/blobs") {
+			blobPosts++
+		}
+	}
+	if blobPosts != 3 {
+		t.Errorf("the publish POSTed %d blobs, want 3 (manifest, records, reads)", blobPosts)
+	}
+	stored := gh.readBlob(t, "reads.json", handle.Commit)
+	if !bytes.Equal(bytes.TrimSpace(stored), bytes.TrimSpace(gen.ReadsJSON)) {
+		t.Errorf("reads.json holds %q, want %q", stored, gen.ReadsJSON)
+	}
+
+	read, err := store.ReadGeneration(ctx, ref, handle)
+	if err != nil {
+		t.Fatalf("ReadGeneration: %v", err)
+	}
+	if !bytes.Equal(bytes.TrimSpace(read.ReadsJSON), bytes.TrimSpace(gen.ReadsJSON)) {
+		t.Errorf("read ReadsJSON = %q, want %q", read.ReadsJSON, gen.ReadsJSON)
+	}
+}
+
+// A generation without per-call detail keeps the two-blob shape: no third
+// POST, and the read-back carries no reads bytes. Generations published
+// before legs read through the served tool look exactly like this.
+func TestRefStoreGenerationWithoutReadsJSONReadsBackNil(t *testing.T) {
+	ctx := context.Background()
+	ref := storetest.FixtureSlotRef(t)
+	store, gh := newStubbedRefStore(t)
+
+	gen := fixtureGeneration(t, prstate.GenerationFull)
+	if len(gen.ReadsJSON) != 0 {
+		t.Fatal("the fixture carries reads detail, so the two-blob shape would pass for the wrong reason")
+	}
+	handle, err := store.PublishGeneration(ctx, ref, prstate.Handle{}, gen)
+	if err != nil {
+		t.Fatalf("PublishGeneration: %v", err)
+	}
+	blobPosts := 0
+	for _, call := range gh.calls() {
+		if strings.Contains(call, "--method POST") && strings.Contains(call, "/git/blobs") {
+			blobPosts++
+		}
+	}
+	if blobPosts != 2 {
+		t.Errorf("the publish POSTed %d blobs, want 2 (manifest, records)", blobPosts)
+	}
+	read, err := store.ReadGeneration(ctx, ref, handle)
+	if err != nil {
+		t.Fatalf("ReadGeneration: %v", err)
+	}
+	if len(read.ReadsJSON) != 0 {
+		t.Errorf("read ReadsJSON = %q, want nil for a tree with no reads.json", read.ReadsJSON)
+	}
+}
+
+// storedBlobPath returns the stub state file holding want, so a test can
+// remove or corrupt one blob without touching the others.
+func storedBlobPath(t *testing.T, g *stubGh, want []byte) string {
+	t.Helper()
+	entries, err := os.ReadDir(g.stateDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if !strings.HasPrefix(entry.Name(), "blob-") {
+			continue
+		}
+		raw, err := os.ReadFile(filepath.Join(g.stateDir, entry.Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), bytes.TrimSpace(want)) {
+			return filepath.Join(g.stateDir, entry.Name())
+		}
+	}
+	t.Fatalf("no stored blob holds %q", want)
+	return ""
+}
+
+// A reads blob the API no longer serves is a lost ledger, the same as a
+// missing manifest or records blob.
+func TestRefStoreMissingReadsBlobIsALostLedger(t *testing.T) {
+	ctx := context.Background()
+	ref := storetest.FixtureSlotRef(t)
+	store, gh := newStubbedRefStore(t)
+
+	gen := fixtureGeneration(t, prstate.GenerationFull)
+	gen.ReadsJSON = json.RawMessage(`{"calls":[{"path":"a.go","reads":1,"bytes":11}]}`)
+	handle, err := store.PublishGeneration(ctx, ref, prstate.Handle{}, gen)
+	if err != nil {
+		t.Fatalf("PublishGeneration: %v", err)
+	}
+	if err := os.Remove(storedBlobPath(t, gh, gen.ReadsJSON)); err != nil {
+		t.Fatal(err)
+	}
+	_, err = store.ReadGeneration(ctx, ref, handle)
+	if !errors.Is(err, prstate.ErrLedgerLost) {
+		t.Fatalf("reading with a missing reads blob answered %v, want %v", err, prstate.ErrLedgerLost)
+	}
+}
+
+// A reads blob that is not JSON is corrupt state, never an old
+// generation: the tree names it, so it cannot be mistaken for a
+// generation that predates served reads.
+func TestRefStoreNonJSONReadsBlobIsCorrupt(t *testing.T) {
+	ctx := context.Background()
+	ref := storetest.FixtureSlotRef(t)
+	store, gh := newStubbedRefStore(t)
+
+	gen := fixtureGeneration(t, prstate.GenerationFull)
+	gen.ReadsJSON = json.RawMessage(`{"calls":[{"path":"a.go","reads":1,"bytes":11}]}`)
+	handle, err := store.PublishGeneration(ctx, ref, prstate.Handle{}, gen)
+	if err != nil {
+		t.Fatalf("PublishGeneration: %v", err)
+	}
+	if err := os.WriteFile(storedBlobPath(t, gh, gen.ReadsJSON), []byte("not json at all"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err = store.ReadGeneration(ctx, ref, handle)
+	if !errors.Is(err, prstate.ErrLedgerCorrupt) {
+		t.Fatalf("reading a non-JSON reads blob answered %v, want %v", err, prstate.ErrLedgerCorrupt)
+	}
+}

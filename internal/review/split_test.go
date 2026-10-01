@@ -177,7 +177,7 @@ func TestReviewArgvPacksUnder120KiBWhileCodexPacksTo390000(t *testing.T) {
 	inputs := func(t *testing.T, wrap func(string) []byte) *env {
 		e := newEnv(t)
 		for i := 0; i < 4; i++ {
-			writeRequiredHead(e, fmt.Sprintf("f%d.go", i), "package x\n"+strings.Repeat("// filler line to price the transport\n", 1400))
+			writeRequiredHead(e, fmt.Sprintf("f%d.go", i), "package x\n"+strings.Repeat("// filler line to price the transport\n", 1300))
 		}
 		acceptAll(e)
 		for i := 0; i < 8; i++ {

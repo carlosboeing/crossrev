@@ -224,14 +224,73 @@ const isolationConfig = `{
 }
 `
 
-// schemaInstruction is the paragraph appended to the prompt for the one harness
+// schemaInstruction is the paragraph appended to the prompt for a harness
 // that does not constrain its own output (lib/adapters/opencode.sh:105).
+// Grok's supplied reviews carry the same paragraph: --json-schema implies
+// --output-format json, which cannot travel with the streaming output the
+// tripwire reads.
 //
 // The Bash writes a copy of the prompt to a temporary file and then passes
 // `$(cat "$prompt_copy")` as argv, deleting the copy immediately after
 // (lib/adapters/opencode.sh:100-108 and :190). The file is a vehicle rather than
 // an input — nothing reads it by path — so the Go builds the string.
 const schemaInstruction = "\n\nThis harness does not constrain your output. The answer text itself is what is parsed, so return a single JSON object matching exactly this schema, with no markdown fence and no commentary:\n\n```json\n%s\n```\n"
+
+// isolationConfigSuppliedReview is the isolation config for a supplied
+// review leg: no read tool at all. The review judges the supplied prompt
+// alone, so read, glob, grep, list and lsp are denied beside the write
+// tools, in both the top-level block and the pinned agent's mirror. A
+// resolve leg keeps the shared template with its read tools allowed: it
+// has to orient in the checkout to apply a fix.
+const isolationConfigSuppliedReview = `{
+  "$schema": "https://opencode.ai/config.json",
+  "permission": {
+    "*": "deny",
+    "read": "deny",
+    "glob": "deny",
+    "grep": "deny",
+    "list": "deny",
+    "lsp": "deny",
+    "todowrite": "allow",
+    "edit": "deny",
+    "write": "deny",
+    "apply_patch": "deny",
+    "bash": "deny",
+    "task": "deny",
+    "skill": "deny",
+    "webfetch": "deny",
+    "websearch": "deny",
+    "external_directory": "deny",
+    "question": "deny",
+    "doom_loop": "deny"
+  },
+  "agent": {
+    "crossrev": {
+      "mode": "primary",
+      "permission": {
+        "*": "deny",
+        "read": "deny",
+        "glob": "deny",
+        "grep": "deny",
+        "list": "deny",
+        "lsp": "deny",
+        "todowrite": "allow",
+        "edit": "deny",
+        "write": "deny",
+        "apply_patch": "deny",
+        "bash": "deny",
+        "task": "deny",
+        "skill": "deny",
+        "webfetch": "deny",
+        "websearch": "deny",
+        "external_directory": "deny",
+        "question": "deny",
+        "doom_loop": "deny"
+      }
+    }
+  }
+}
+`
 
 // Spec builds the child process, and writes the isolation config it names
 // (lib/adapters/opencode.sh:89-188).
@@ -249,8 +308,9 @@ func (a *Opencode) Spec(inv Invocation) (exec.Spec, error) {
 	}
 
 	// The schema travels inside the prompt, under an instruction that also
-	// corrects the skill's "the harness constrains your output" claim — true for
-	// the other four, false here. This keeps prompt building unaware of which
+	// corrects the skill's "the harness constrains your output" claim — true
+	// for the harnesses that constrain their own output, false here and on
+	// a supplied grok review. This keeps prompt building unaware of which
 	// harness will read what it built — the same class of per-CLI fact as
 	// Antigravity's flag order or Codex's schema path.
 	// The composition order matters, and this is the one adapter where it is
@@ -423,6 +483,13 @@ func (a *Opencode) opencodeSpec(inv Invocation, args []string, additions ...stri
 }
 
 func (a *Opencode) writeIsolation(inv Invocation) error {
+	// A supplied review leg is denied the five read tools outright; any
+	// other leg keeps the shared template with the write flag landing in
+	// the edit, write and apply_patch keys. The zero mode keeps the legacy
+	// shape every stub test pins.
+	if !inv.Write && inv.ReadMode == ReadModeSupplied {
+		return writeIsolationConfig(inv, isolationConfigSuppliedReview)
+	}
 	permission := "deny"
 	if inv.Write {
 		permission = "allow"
@@ -430,6 +497,10 @@ func (a *Opencode) writeIsolation(inv Invocation) error {
 	config := fmt.Sprintf(isolationConfig,
 		permission, permission, permission,
 		permission, permission, permission)
+	return writeIsolationConfig(inv, config)
+}
+
+func writeIsolationConfig(inv Invocation, config string) error {
 	if !json.Valid([]byte(config)) {
 		// Unreachable while the template above is a constant, and cheap enough
 		// to keep: the file is what stands between a review leg and a write

@@ -206,6 +206,13 @@ func TestSchemaStyleMatchesTheDescriptor(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			adapter, _ := harness.For(doc, name)
 			inv := invocation(t, name, false)
+			if name == "grok" {
+				// Grok reviews run supplied — the descriptor's read
+				// mode — so the streaming shape production takes, with
+				// the schema carried in the prompt rather than the
+				// legacy --json-schema flag the zero mode keeps.
+				inv.ReadMode = harness.ReadModeSupplied
+			}
 
 			spec, err := adapter.Spec(inv)
 			if err != nil {
@@ -231,8 +238,19 @@ func TestSchemaStyleMatchesTheDescriptor(t *testing.T) {
 				if slices.Contains(spec.Args, inv.Schema.Path) {
 					t.Error("a prompt harness takes no schema flag")
 				}
-				last := spec.Args[len(spec.Args)-1]
-				if !strings.Contains(last, inv.Schema.Text) {
+				// The prompt travels on argv or by file, depending on
+				// the harness's transport: read what the child reads.
+				prompt := spec.Args[len(spec.Args)-1]
+				for at := 0; at+1 < len(spec.Args); at++ {
+					if spec.Args[at] == "--prompt-file" {
+						raw, err := os.ReadFile(spec.Args[at+1])
+						if err != nil {
+							t.Fatalf("reading the prompt file: %v", err)
+						}
+						prompt = string(raw)
+					}
+				}
+				if !strings.Contains(prompt, inv.Schema.Text) {
 					t.Error("a prompt harness carries the schema inside the prompt")
 				}
 			default:

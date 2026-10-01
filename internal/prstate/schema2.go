@@ -312,7 +312,7 @@ func generationCounts(g Generation) (outstanding, required int) {
 
 func manifestFieldsV3(g Generation, recordsDigest, manifestDigest string) object {
 	outstanding, required := generationCounts(g)
-	return object{
+	out := object{
 		{key: "v", value: json.RawMessage(fmt.Sprintf("%d", CoverageSchemaV3))},
 		{key: "kind", value: appendJSONString(nil, CoverageKindManifest)},
 		{key: "gen", value: json.RawMessage(fmt.Sprintf("%d", g.Gen))},
@@ -330,10 +330,21 @@ func manifestFieldsV3(g Generation, recordsDigest, manifestDigest string) object
 		{key: "excluded", value: exclusionsOf(g.Excluded)},
 		{key: "scope_report", value: scopeReportOf(g.ScopeReport)},
 		{key: "verification", value: verificationOf(UnimplementedVerification())},
-		{key: "reads", value: json.RawMessage("null")},
-		{key: "records_digest", value: appendJSONString(nil, recordsDigest)},
-		{key: "digest", value: appendJSONString(nil, manifestDigest)},
 	}
+	// The manifest carries the reads envelope alone; reads.json travels
+	// beside the manifest in the ref-store tree, never inside it. Null
+	// when the pass served nothing, the envelope when legs read through
+	// the served tool, so the v3 key set holds either way.
+	if raw, ok := g.Reads.Get(); ok && len(raw) != 0 {
+		out = append(out, member{key: "reads", value: json.RawMessage(bytes.Clone(raw))})
+	} else {
+		out = append(out, member{key: "reads", value: json.RawMessage("null")})
+	}
+	out = append(out,
+		member{key: "records_digest", value: appendJSONString(nil, recordsDigest)},
+		member{key: "digest", value: appendJSONString(nil, manifestDigest)},
+	)
+	return out
 }
 
 func compactRecordsFields(verdicts, digest string) object {
@@ -562,11 +573,14 @@ func DecodeGenerationV3(manifestBytes, recordsBytes []byte) (Generation, error) 
 	}
 	_ = verification
 
-	// Reads is the reserved related-reads envelope. This release writes it
-	// null and refuses anything else: a populated reads is a newer
-	// writer's, not this one's. A v2 manifest carries no reads key at all.
-	if version == CoverageSchemaV3 && !isNull(getMan("reads")) {
-		return Generation{}, coverageErrorf("non-null reads envelope")
+	// Reads is the related-reads envelope written by legs that read
+	// through the served tool: null when the pass served nothing, the
+	// envelope otherwise. A v2 manifest carries no reads key at all.
+	readsRaw := getMan("reads")
+	if version == CoverageSchemaV3 && !isNull(readsRaw) {
+		if _, err := DecodeReadsEnvelope(readsRaw); err != nil {
+			return Generation{}, coverageErrorf("invalid reads envelope: %v", err)
+		}
 	}
 
 	if err := json.Unmarshal(getMan("records_digest"), &recordsDigest); err != nil || !isHex64(recordsDigest) {
@@ -655,7 +669,7 @@ func DecodeGenerationV3(manifestBytes, recordsBytes []byte) (Generation, error) 
 		records = recs
 	}
 
-	return Generation{
+	out := Generation{
 		Gen:         gen,
 		Revision:    core.RevisionPair{Base: baseRev, Head: headRev},
 		Engine:      engine,
@@ -667,7 +681,11 @@ func DecodeGenerationV3(manifestBytes, recordsBytes []byte) (Generation, error) 
 		Advisory:    advisory,
 		Excluded:    excluded,
 		ScopeReport: scopeReport,
-	}, nil
+	}
+	if version == CoverageSchemaV3 && !isNull(readsRaw) {
+		out.Reads = Some(json.RawMessage(bytes.Clone(readsRaw)))
+	}
+	return out, nil
 }
 
 func decodeRecordsV2(raw json.RawMessage, version int) ([]Record, bool) {

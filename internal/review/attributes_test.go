@@ -67,6 +67,16 @@ func TestReviewWarnsWhenGitCannotReadBaseAttributes(t *testing.T) {
 		Message: "git 2.39.2 is older than 2.40, so .gitattributes linguist-generated is not read at the base",
 		Hint:    "The built-in generated-file rules still apply. Upgrade git to 2.40 or newer to read repository policy.",
 	}
+	// A healthy served child reaches the server, so the only warning the
+	// pass carries is the one this test pins.
+	e.runner.onSpec = func(spec exec.Spec) {
+		serveChildSession(t, spec,
+			`{"event":"start"}`,
+			`{"event":"initialize"}`,
+			`{"event":"tools_list"}`,
+			`{"event":"end"}`,
+		)
+	}
 	e.runner.script = []exec.Result{
 		{ExitCode: 0, Stdout: claudeStdout(batchAnswer(t, 1))},
 	}

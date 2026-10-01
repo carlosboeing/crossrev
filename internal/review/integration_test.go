@@ -48,10 +48,18 @@ func TestIntegrationReviewPassPublishesTheMarkerResolveReads(t *testing.T) {
 		t.Fatalf("read review payload fixture: %v", err)
 	}
 	quarantinedDuringRun := false
-	e.runner.onSpec = func(exec.Spec) {
+	e.runner.onSpec = func(spec exec.Spec) {
 		if _, err := os.Stat(filepath.Join(e.dir, "CLAUDE.md")); os.IsNotExist(err) {
 			quarantinedDuringRun = true
 		}
+		// A healthy served child reaches the server, so the handoff
+		// marker carries no reads envelope.
+		serveChildSession(t, spec,
+			`{"event":"start"}`,
+			`{"event":"initialize"}`,
+			`{"event":"tools_list"}`,
+			`{"event":"end"}`,
+		)
 	}
 	e.runner.script = []exec.Result{{ExitCode: 0, Stdout: claudeStdout(strings.TrimSpace(string(payload)))}}
 

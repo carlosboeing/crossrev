@@ -126,14 +126,21 @@ func TestReviewProgressEditKeepsTheFindingsRecord(t *testing.T) {
 
 // orderRunner records each session child start in order, so a test can pin
 // a live progress line against the harness call that follows it. Version
-// probes are not session children and are not recorded.
+// probes are not session children and are not recorded; neither is the
+// served read-server session the self-test speaks to before the child.
 type orderRunner struct {
 	inner  exec.Runner
 	onCall func()
 }
 
 func (r orderRunner) Run(ctx context.Context, spec exec.Spec) exec.Result {
-	if !(len(spec.Args) == 1 && spec.Args[0] == "--version") {
+	served := false
+	for _, arg := range spec.Args {
+		if arg == "__read-server" {
+			served = true
+		}
+	}
+	if !(len(spec.Args) == 1 && spec.Args[0] == "--version") && !served {
 		r.onCall()
 	}
 	return r.inner.Run(ctx, spec)

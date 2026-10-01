@@ -687,6 +687,11 @@ func reviewSummaryBody(findings json.RawMessage, marker prstate.Marker, repo cor
 	if cov.on && len(cov.skips) > 0 {
 		b.WriteString(intel.SkipWarning(cov.skips))
 	}
+	// A degraded reads path is the same caveat the review summary carries
+	// beside its skip warning: the rewrite renders from the marker, so the
+	// line comes from the same helper or the resolve leg would strip what
+	// the review summary wrote.
+	b.WriteString(prstate.ReadsDegradedComment(marker))
 	noun := "findings"
 	if n == 1 {
 		noun = "finding"

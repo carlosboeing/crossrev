@@ -36,6 +36,11 @@ type batchContext struct {
 	fileTerms    map[string][]string
 	excluded     []prompt.ExclusionRef
 	confirmation []byte
+	// reads is the reads block naming the pass's read path: the served
+	// read tool or no read tool at all. It renders into every batch
+	// prompt, so packing measures the bytes the harness is actually
+	// given.
+	reads string
 }
 
 // discoverBatchContext reads the pass's shared context exactly once. The
@@ -97,6 +102,7 @@ func (c batchContext) render(files []intel.FileUnit, base, head core.Revision, w
 		AdvisoryOmitted: omitted,
 		Excluded:        c.excluded,
 		Confirmation:    confirmation,
+		Reads:           c.reads,
 	}.Render(), supplied
 }
 
@@ -126,6 +132,7 @@ func (c batchContext) renderPart(part *intel.FilePart, base, head core.Revision,
 		AdvisoryOmitted: omitted,
 		Excluded:        c.excluded,
 		Confirmation:    confirmation,
+		Reads:           c.reads,
 	}.Render()
 }
 

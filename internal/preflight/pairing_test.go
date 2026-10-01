@@ -135,16 +135,15 @@ func TestPairingSupportedRefusesALegTheDescriptorDoesNotName(t *testing.T) {
 	}
 }
 
-// Codex is refused as a resolver through the shared resolver rule
-// (harness.RefusedAsResolver), on every runner: the resolve leg's shell
-// denial strands codex self-hosted too. Codex as reviewer is unaffected, and
-// the bare credential question without a leg is unchanged.
-func TestPairingSupportedRefusesCodexAsResolver(t *testing.T) {
+// Codex serves as a resolver on every runner: the served read tool serves
+// codex resolve legs too, so codex resolves wherever its subscription
+// credential can live. Codex as reviewer is unaffected, and the bare
+// credential question without a leg is unchanged.
+func TestPairingSupportedAcceptsCodexAsResolver(t *testing.T) {
 	doc := document(t)
-	want := "Codex is limited to the review leg, and cannot serve the resolve leg"
 	for _, runner := range []string{"github-hosted", "self-hosted", "some-other-runner"} {
-		if reason, ok := preflight.PairingSupported(doc, runner, "codex", "resolve"); ok || reason != want {
-			t.Errorf("PairingSupported(%q, codex, resolve) = (%q, %v), want (%q, false)", runner, reason, ok, want)
+		if reason, ok := preflight.PairingSupported(doc, runner, "codex", "resolve"); !ok {
+			t.Errorf("PairingSupported(%q, codex, resolve) = (%q, %v), want ok", runner, reason, ok)
 		}
 	}
 	for _, tt := range []struct{ runner, leg string; wantOK bool }{
@@ -297,14 +296,13 @@ func TestReportPairings(t *testing.T) {
 				"│     Fixes: set runner: self-hosted, or name a different harness for this leg.\n",
 		},
 		{
-			name:   "a codex resolver is refused on every runner",
+			name:   "a codex resolver is served on every runner",
 			runner: "self-hosted",
 			yaml:   "version: \"2\"\nreviewer:\n  harness: claude\nresolver:\n  harness: codex\n",
-			wantOK: false,
+			wantOK: true,
 			want: "\n◇  Pairings on runner: self-hosted\n" +
 				"│  ✓ reviewer — claude by subscription\n" +
-				"│  ✗ resolver — Codex is limited to the review leg, and cannot serve the resolve leg\n" +
-				"│     Fix: name a different harness for this leg.\n",
+				"│  ✓ resolver — codex by subscription\n",
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -322,10 +320,10 @@ func TestReportPairings(t *testing.T) {
 
 // A leg-servability refusal is a descriptor fact, not a runner fact, so the
 // report carries the reason as the headline with only the harness fix: no
-// runner claim, and no runner fix that would still refuse. The codex row above
-// pins the resolver-rule half; this pins the descriptor-legs half, which no
-// shipped harness reaches — every shipped entry serves both legs — so the
-// document is the shipped one with grok narrowed to the review leg.
+// runner claim, and no runner fix that would still refuse. This pins the
+// descriptor-legs half, which no shipped harness reaches — every shipped
+// entry serves both legs — so the document is the shipped one with grok
+// narrowed to the review leg.
 func TestReportPairingsGivesDescriptorLegRefusalsTheirOwnLine(t *testing.T) {
 	io, buf := capture()
 	c := &preflight.Checker{

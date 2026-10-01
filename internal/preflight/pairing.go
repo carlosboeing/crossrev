@@ -65,21 +65,11 @@ func PairingSupported(doc harness.Document, runner, name, leg string) (string, b
 		entry.ProductName, seconds/60), false
 }
 
-// legRefusal is the leg-servability half of PairingSupported: the resolver
-// rule, then the descriptor's own legs. Both PairingSupported and
-// ReportPairings read it, so the report frame and the refusal reason cannot
-// drift apart — a reason from either branch is a descriptor fact, refused on
-// every runner.
-//
-// The codex refusal is the shared resolver rule
-// (harness.RefusedAsResolver), so `doctor` and `init` refuse the same
-// resolver the runtime refuses, on every runner — the shell denial that
-// strands codex applies self-hosted too.
+// legRefusal is the leg-servability half of PairingSupported: the
+// descriptor's own legs. Both PairingSupported and ReportPairings read it,
+// so the report frame and the refusal reason cannot drift apart — a reason
+// from either branch is a descriptor fact, refused on every runner.
 func legRefusal(doc harness.Document, name, leg string) (string, bool) {
-	if leg == harness.LegResolve && harness.RefusedAsResolver(name) {
-		return fmt.Sprintf("%s is limited to the review leg, and cannot serve the %s leg",
-			productName(doc, name), leg), true
-	}
 	//
 	// A name the descriptor does not carry serves every leg, so it falls
 	// through to PairingSupported's adapter refusal rather than to this one

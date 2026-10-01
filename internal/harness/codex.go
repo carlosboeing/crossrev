@@ -75,11 +75,11 @@ func (a *Codex) Spec(inv Invocation) (exec.Spec, error) {
 	// arbitrary commands.
 	//
 	// A resolve leg edits without running commands: workspace-write keeps file
-	// writes while --disable removes the shell. shell_tool is the tool itself
-	// and unified_exec is the runner behind it; denying one without the other
-	// leaves the other to run the command. --disable is repeatable
-	// (`codex exec --help`), and --sandbox workspace-write is the same grant
-	// the leg has always had.
+	// writes while --disable removes the shell. Disabling shell_tool is what
+	// removes the command tools on the verified pin: add_shell_tools returns
+	// before registering them when that feature is off, whatever unified_exec
+	// reports. --disable is repeatable (`codex exec --help`), and --sandbox
+	// workspace-write is the same grant the leg has always had.
 	//
 	// A reading leg is pinned read-only rather than left to the default, because
 	// codex reads a user config that can set one. Saying it costs nothing and
@@ -90,6 +90,58 @@ func (a *Codex) Spec(inv Invocation) (exec.Spec, error) {
 		args = append(args, "--sandbox", "workspace-write")
 	} else {
 		args = append(args, "--sandbox", "read-only")
+	}
+
+	// A review leg reads without running commands. Disabling shell_tool is
+	// what removes the command tools on the verified pin: add_shell_tools
+	// returns before registering them when that feature is off, while the
+	// feature normalization re-enables unified_exec, so the unified_exec
+	// denial beside it grants nothing on its own and stays as a retained
+	// flag rather than a second block. The image reader and the
+	// connected-app connectors are registered independently of the shell
+	// flag, so an explicit leg denies view_image, apps and image_generation
+	// too, with web search resolved through its disabled mode: without
+	// them it keeps local-file, connector, web and image read paths
+	// outside the logged server. The zero mode keeps the legacy shape every stub
+	// test pins; an explicit served or supplied mode disables the shell
+	// pair and every independent reader, and served additionally wires
+	// CrossRev's read tool as the leg's only read path: the
+	// mcp_servers.crossrev command, its args array and the approval mode
+	// beside --ignore-user-config.
+	// file_tool resolves to supplied and is recorded at the leg.
+	switch inv.ReadMode {
+	case ReadModeServed:
+		if inv.Serve == nil {
+			return exec.Spec{}, &Refusal{
+				Reason: "the codex adapter was given the served mode with no serve command",
+				Action: "A served leg hands the harness the read-server command; without one the leg cannot claim the served mode. This is a CrossRev bug.",
+				Kind:   ErrScratch,
+			}
+		}
+		if !inv.Write {
+			args = append(args, "--disable", "shell_tool", "--disable", "unified_exec")
+		}
+		// Connected-app tools are registered independently of the shell
+		// flag, so a served leg denies them the way it denies the image
+		// reader: without it the connectors stay beside the served read.
+		// Web search and image generation read outside the served server
+		// through their own tools, so they go too: the web search mode
+		// resolves through a disabled variant, and image generation is
+		// its own feature.
+		args = append(args, "--disable", "view_image", "--disable", "apps", "--disable", "image_generation")
+		args = append(args, "-c", "web_search="+tomlQuote("disabled"))
+		args = append(args, inv.Serve.CodexConfigArgs()...)
+	case ReadModeSupplied:
+		if !inv.Write {
+			args = append(args, "--disable", "shell_tool", "--disable", "unified_exec")
+		}
+		// A supplied leg is an explicit mode, including the served-to-supplied
+		// fallback after a failed self-test: it keeps the independent-reader
+		// denials the served leg carries above, so degrading the read path
+		// never regains Apps, web search or image generation beside the
+		// prompt. The zero mode matches no case and keeps its legacy shape.
+		args = append(args, "--disable", "view_image", "--disable", "apps", "--disable", "image_generation")
+		args = append(args, "-c", "web_search="+tomlQuote("disabled"))
 	}
 
 	// Codex takes the schema as a FILE PATH, where Claude Code takes it inline.
@@ -112,6 +164,32 @@ func (a *Codex) Spec(inv Invocation) (exec.Spec, error) {
 	spec := a.spec(inv, args)
 	spec.Stdin = promptStdin(inv)
 	return spec, nil
+}
+
+// VersionProbe is `codex --version`, which reports "codex-cli X.Y.Z" and
+// costs no model call. Scratch dir, for the same reason opencode probes
+// there: --version needs no checkout, and the probe must not read
+// repository-provided configuration.
+func (a *Codex) VersionProbe(inv Invocation) exec.Spec {
+	probe := a.spec(inv, []string{"--version"})
+	probe.Dir = inv.Scratch
+	return probe
+}
+
+// VersionRefusal fails closed when the probe names no version: an install
+// CrossRev cannot confirm is not one it drives. Any named version is one
+// the adapter drives — whether a served review may run on it is the review
+// leg's installed-version gate, which reads the verified table, not the
+// adapter.
+func (a *Codex) VersionRefusal(probe []byte) *Refusal {
+	if versionToken.FindString(string(probe)) == "" {
+		return &Refusal{
+			Reason: "the codex CLI did not report a version",
+			Action: "CrossRev cannot confirm this install is one it drives, so the leg is refused rather than started. Install it from " + a.descriptor.Install.Hint + ", or point this leg at another harness with --harness.",
+			Kind:   ErrVersionUnsupported,
+		}
+	}
+	return nil
 }
 
 // Envelope reads what the child produced (lib/adapters/codex.sh:99-166).

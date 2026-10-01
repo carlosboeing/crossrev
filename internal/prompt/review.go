@@ -111,6 +111,11 @@ type Review struct {
 	// clean review with nothing to confirm. A set delta renders ahead of
 	// the full scope as required confirmation input.
 	Confirmation []byte
+
+	// Reads is the reads block naming this call's read path: the served
+	// read tool or no read tool at all. Empty renders nothing, so prompts
+	// built without a mode keep their bytes exactly.
+	Reads string
 }
 
 // BatchUnit is one numbered required file: its change, its evidence revision,
@@ -292,6 +297,14 @@ func (r Review) Render() []byte {
 	// batch input renders nothing, so the frozen parity-era prompt keeps its
 	// bytes exactly.
 	b.WriteString(renderBatch(r.Batch, r.Advisory, r.AdvisoryOmitted, r.Excluded))
+
+	// The reads block names the call's read path ahead of the output
+	// instruction. Empty renders nothing, so prompts built without a mode
+	// keep their bytes exactly.
+	if r.Reads != "" {
+		b.WriteString(r.Reads)
+		b.WriteString("\n")
+	}
 
 	b.WriteString("## Output\n\n")
 	b.WriteString("Return JSON matching the schema you were given, and nothing else. An empty " +

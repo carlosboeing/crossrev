@@ -17,6 +17,9 @@ package harness
 
 import (
 	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -45,8 +48,14 @@ func (a *Grok) Spec(inv Invocation) (exec.Spec, error) {
 	// --prompt-file last: it takes a path, so remaining flags are not
 	// swallowed, but putting the prompt after the rest matches the other
 	// adapters' shape.
+	//
+	// A supplied review leg reviews the way the spike ran it: streaming-json
+	// output with a tools allowlist holding neither shell nor read tools, so
+	// the tripwire can parse tool_call and tool_call_update events. The
+	// zero mode keeps the legacy json shape every stub test pins.
+	suppliedReview := !inv.Write && inv.ReadMode == ReadModeSupplied
 	outputFormat := "json"
-	if inv.Write {
+	if inv.Write || suppliedReview {
 		// A resolve leg streams its tool record so the tripwire can read it.
 		outputFormat = "streaming-json"
 	}
@@ -69,17 +78,31 @@ func (a *Grok) Spec(inv Invocation) (exec.Spec, error) {
 	if inv.Write {
 		args = append(args, "--sandbox", "workspace", "--allow", "Edit", "--allow", "Write",
 			"--tools", "Read,Grep,Glob,Edit,Write")
+	} else if suppliedReview {
+		// The allowlist is what denies: a --deny rule did not remove the
+		// shell in the measured run. It grants no tool at all — Grep
+		// returns file content and Glob enumerates paths over the
+		// checkout, and neither carries a command the tripwire would
+		// catch, so even those two stay out. An empty allowlist fails
+		// closed if the CLI ever refuses it.
+		args = append(args, "--sandbox", "read-only", "--deny", "Edit", "--deny", "Write",
+			"--tools", "")
 	} else {
 		args = append(args, "--sandbox", "read-only", "--deny", "Edit", "--deny", "Write")
 	}
 
-	// --json-schema travels on the review leg only. With the flag and a
-	// prompt carrying the full diff, the model answers in one structured
-	// turn and never calls an edit tool, so a resolve leg's claimed fixes
-	// land nowhere. Without it the resolve leg edits first and its answer
-	// is read out of the text instead (see grokPayload); the shape check
-	// downstream still validates that text against the same schema.
-	if inv.Schema.Present() && !inv.Write {
+	// --json-schema travels on the legacy review leg only. A supplied
+	// review streams like a resolve leg: without the flag the model answers
+	// in text and the answer is read out of the stream instead (see
+	// grokPayload); the shape check downstream still validates that text
+	// against the schema the prompt carries, and the call earns the second
+	// shape attempt of a harness that does not constrain its own output.
+	// With the flag and a prompt carrying the full diff, the model answers
+	// in one structured turn and never calls a tool, so a streaming leg's
+	// tool record would stay empty.
+	// (grok --help: --json-schema implies --output-format json, which is
+	// why the flag and the stream cannot travel together.)
+	if inv.Schema.Present() && !inv.Write && !suppliedReview {
 		if inv.Schema.Text == "" {
 			return exec.Spec{}, &Refusal{
 				Reason: "the grok adapter was given a schema path with no schema text",
@@ -88,6 +111,24 @@ func (a *Grok) Spec(inv Invocation) (exec.Spec, error) {
 			}
 		}
 		args = append(args, "--json-schema", inv.Schema.Argument())
+	}
+	// A supplied review cannot take the flag, so the schema travels inside
+	// the prompt instead, the way opencode's does. The child reads the
+	// composed copy, never the bare prompt file.
+	promptPath := inv.Prompt.Path
+	if suppliedReview && inv.Schema.Present() {
+		if inv.Schema.Text == "" {
+			return exec.Spec{}, &Refusal{
+				Reason: "the grok adapter was given a schema path with no schema text",
+				Action: "A supplied grok review carries the schema inside the prompt, so the orchestrator has to read the file before the leg runs.",
+				Kind:   ErrSchemaUnavailable,
+			}
+		}
+		composed, err := writeSuppliedPrompt(inv)
+		if err != nil {
+			return exec.Spec{}, err
+		}
+		promptPath = composed
 	}
 	if wanted(inv.Model) {
 		args = append(args, "--model", inv.Model)
@@ -102,23 +143,78 @@ func (a *Grok) Spec(inv Invocation) (exec.Spec, error) {
 			Kind:   ErrSchemaUnavailable,
 		}
 	}
-	args = append(args, "--prompt-file", inv.Prompt.Path)
+	args = append(args, "--prompt-file", promptPath)
 
 	return a.spec(inv, args), nil
+}
+
+// grokSuppliedPromptFile is the composed prompt a supplied review reads:
+// the review prompt with the schema appended under the instruction, beside
+// the bare prompt the leg rendered.
+const grokSuppliedPromptFile = "prompt.supplied"
+
+// writeSuppliedPrompt composes the prompt a supplied review is read: the
+// schema cannot travel as --json-schema on a streaming leg, so it travels
+// inside the prompt under the same instruction opencode's carries.
+func writeSuppliedPrompt(inv Invocation) (string, error) {
+	if inv.Scratch == "" {
+		return "", &Refusal{
+			Reason: "the grok adapter was given no scratch directory",
+			Action: "A supplied grok review carries the schema inside the prompt, so the orchestrator has to name a directory to compose one in.",
+			Kind:   ErrScratch,
+		}
+	}
+	composed := inv.Prompt.Text + fmt.Sprintf(schemaInstruction, inv.Schema.Argument())
+	path := filepath.Join(inv.Scratch, grokSuppliedPromptFile)
+	if err := os.WriteFile(path, []byte(composed), 0o600); err != nil {
+		return "", &Refusal{
+			Reason: "the grok adapter could not write its composed prompt",
+			Action: "Check that the scratch directory is writable.",
+			Kind:   ErrScratch,
+			Err:    err,
+		}
+	}
+	return path, nil
 }
 
 // grokCredentialRejection matches the stderr of a run Grok refused to
 // authenticate (lib/adapters/grok.sh:94).
 var grokCredentialRejection = regexp.MustCompile(`(?i)not signed in|XAI_API_KEY`)
 
+// VersionProbe is `grok --version`, which costs no model call. Scratch dir,
+// for the same reason opencode probes there: --version needs no checkout,
+// and the probe must not read repository-provided configuration.
+func (a *Grok) VersionProbe(inv Invocation) exec.Spec {
+	probe := a.spec(inv, []string{"--version"})
+	probe.Dir = inv.Scratch
+	return probe
+}
+
+// VersionRefusal fails closed when the probe names no version: an install
+// CrossRev cannot confirm is not one it drives. Any named version is one
+// the adapter drives — whether a review may run on it is the review leg's
+// installed-version gate, which reads the verified table, not the adapter.
+func (a *Grok) VersionRefusal(probe []byte) *Refusal {
+	if versionToken.FindString(string(probe)) == "" {
+		return &Refusal{
+			Reason: "the grok CLI did not report a version",
+			Action: "CrossRev cannot confirm this install is one it drives, so the leg is refused rather than started. Install Grok from https://x.ai/cli, or point this leg at another harness with --harness.",
+			Kind:   ErrVersionUnsupported,
+		}
+	}
+	return nil
+}
+
 // Envelope reads what the child produced (lib/adapters/grok.sh:83-149).
 func (a *Grok) Envelope(inv Invocation, res exec.Result) Envelope {
 	// A resolve leg streams NDJSON; the terminal end event carries the usage
 	// envelope while the text deltas accumulate to the constrained answer.
-	// The review leg keeps the single json object.
+	// A supplied review leg streams the same way. Any other review leg keeps
+	// the single json object.
+	streaming := inv.Write || (!inv.Write && inv.ReadMode == ReadModeSupplied)
 	stdout := res.Stdout
 	var streamText string
-	if inv.Write {
+	if streaming {
 		if end := grokStreamEnd(res.Stdout); end != nil {
 			stdout = end
 		}
@@ -128,7 +224,7 @@ func (a *Grok) Envelope(inv Invocation, res exec.Result) Envelope {
 
 	if res.ExitCode != 0 {
 		message := firstAlternative(answer, "error", "text")
-		if message == "" && inv.Write {
+		if message == "" && streaming {
 			message = grokStreamError(res.Stdout)
 		}
 		if message == "" {
@@ -157,7 +253,7 @@ func (a *Grok) Envelope(inv Invocation, res exec.Result) Envelope {
 	// the only report.
 	usage := ParseGrok(stdout)
 	payload := grokPayload(stdout, answer)
-	if inv.Write && payload == nil && streamText != "" {
+	if streaming && payload == nil && streamText != "" {
 		// The resolve leg runs without --json-schema, so the streamed
 		// answer is prose around the payload rather than the payload.
 		if parsed, ok := ExtractJSON(streamText); ok {

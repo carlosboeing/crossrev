@@ -14,11 +14,15 @@
 # It also asserts the flags the adapter is supposed to pass. `--prompt-file`
 # takes a path; `-p` / `--print` / `--single` consume the next argv as the
 # prompt, so using them is the same class of bug as agy's `--print`. A blanket
-# bypass is never a CrossRev grant. A resolve leg edits without running
-# commands: `--tools` holds the read and edit tools with no shell entry, and
-# `--output-format streaming-json` leaves the tool record the tripwire reads.
-# A resolve leg also leaves `--json-schema` off, so the model edits before it
-# answers instead of ending in one structured turn with no tool calls.
+# bypass is never a CrossRev grant. A review leg reads as supplied with a
+# tripwire: `--tools` is empty, granting no tool at all, and
+# `--output-format streaming-json` leaves the tool record the tripwire reads
+# as tool_call and tool_call_update events. A resolve leg edits without
+# running commands: `--tools` holds the read and edit tools with no shell
+# entry, and `--output-format streaming-json` leaves the tool record the
+# tripwire reads. Both streaming legs leave `--json-schema` off — the flag
+# implies `--output-format json` — so the model answers in text the adapter
+# reads out of the stream instead of ending in one structured turn.
 # Wrong flags exit 96.
 
 set -uo pipefail
@@ -54,6 +58,7 @@ deny_edit=0
 deny_write=0
 format=""
 tools=""
+tools_seen=0
 requested=""
 
 while (( $# )); do
@@ -101,7 +106,7 @@ while (( $# )); do
     --output-format)
       format="${2:-}"; shift 2 ;;
     --tools)
-      tools="${2:-}"; shift 2 ;;
+      tools="${2:-}"; tools_seen=1; shift 2 ;;
     --reasoning-effort|--effort|--disallowed-tools|--rules|--system-prompt-override|--system-prompt)
       shift 2 ;;
     *)
@@ -130,8 +135,24 @@ if [[ "$prompt" == *"You are the review leg"* ]]; then
     printf 'test stub: a review leg must not pass --allow Edit or --allow Write\n' >&2
     exit 96
   fi
-  if [[ "$format" != "json" ]]; then
-    printf 'test stub: a review leg needs --output-format json, not %s\n' "${format:-unset}" >&2
+  if [[ "$format" != "streaming-json" ]]; then
+    printf 'test stub: a supplied review leg needs --output-format streaming-json, not %s\n' "${format:-unset}" >&2
+    exit 96
+  fi
+  if [[ -n "$schema" ]]; then
+    printf 'test stub: a streaming review leg must not pass --json-schema, which implies --output-format json\n' >&2
+    exit 96
+  fi
+  # A supplied review grants no tool at all: Grep returns file content and
+  # Glob enumerates paths over the checkout, and neither carries a command
+  # the tripwire would catch. Deny rules alone did not remove the shell in
+  # the measured run, so the empty allowlist is what denies.
+  if [[ "$tools_seen" -ne 1 ]]; then
+    printf 'test stub: a supplied review leg needs a --tools allowlist\n' >&2
+    exit 96
+  fi
+  if [[ -n "$tools" ]]; then
+    printf 'test stub: a supplied review leg grants no tools, got %s\n' "$tools" >&2
     exit 96
   fi
 elif [[ "$prompt" == *"You are the resolve leg"* ]]; then

@@ -228,6 +228,13 @@ func TestInvokeRefusesALeakedEndpointVariable(t *testing.T) {
 	}
 }
 
+// No grok review runs while the verified table carries no grok entry —
+// every one is refused with review_isolation_unverified before any child
+// starts — so there is no leg-level shape-retry test for grok the way
+// opencode keeps one below. The adapter half (the schema travels in the
+// prompt) stays pinned by TestGrokSuppliedReviewCarriesTheSchemaInThePrompt,
+// and the tripwire parsing stays pinned as synthetic stream records.
+
 func TestInvokeOpencodeShapeErrorRetriesOnce(t *testing.T) {
 	e := newEnv(t)
 	e.runner.script = []exec.Result{{

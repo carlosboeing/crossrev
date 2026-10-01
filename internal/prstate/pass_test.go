@@ -116,11 +116,12 @@ func TestMarkerHeadSHAAcceptsAnAbbreviatedValue(t *testing.T) {
 	}
 }
 
-// M1. Marker is returned by value, but its four payloads are json.RawMessage
-// and a slice header copies the backing array. A caller editing what it was
-// handed must not be able to reach the marker list it came from.
+// M1. Marker is returned by value, but its seven raw payloads are
+// json.RawMessage and a slice header copies the backing array. A caller
+// editing what it was handed must not be able to reach the marker list
+// it came from.
 func TestMarkerForDoesNotShareItsPayloads(t *testing.T) {
-	markers := mustMarkers(t, `[{"leg":"review","pass":1,"findings":[{"id":"a"}],"tokens":{"in":1},"usage":{"u":1},"resolutions":[]}]`)
+	markers := mustMarkers(t, `[{"leg":"review","pass":1,"findings":[{"id":"a"}],"tokens":{"in":1},"usage":{"u":1},"resolutions":[],"reads":{"declared_mode":"served"}}]`)
 	got, ok := prstate.MarkerFor(markers, 1, core.LegReview)
 	if !ok {
 		t.Fatal("no marker found")
@@ -130,6 +131,7 @@ func TestMarkerForDoesNotShareItsPayloads(t *testing.T) {
 	got.Tokens[1] = 'X'
 	got.Usage[1] = 'X'
 	got.Resolutions[0] = ' '
+	got.Reads[1] = 'X'
 	if string(markers[0].Findings) != before {
 		t.Errorf("editing the returned findings reached the list: %s", markers[0].Findings)
 	}
@@ -138,6 +140,9 @@ func TestMarkerForDoesNotShareItsPayloads(t *testing.T) {
 	}
 	if string(markers[0].Resolutions) != `[]` {
 		t.Errorf("resolutions %s", markers[0].Resolutions)
+	}
+	if string(markers[0].Reads) != `{"declared_mode":"served"}` {
+		t.Errorf("editing the returned reads reached the list: %s", markers[0].Reads)
 	}
 }
 

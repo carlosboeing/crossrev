@@ -64,6 +64,15 @@ type Generation struct {
 	Advisory    Advisory
 	Excluded    []CoverageExclusion
 	ScopeReport ScopeReport
+	// Reads is the reads envelope for the pass that published this
+	// generation: declared and effective modes, the reason they differ,
+	// and what the calls cost. Absent for generations published before
+	// legs read through the served tool.
+	Reads Opt[json.RawMessage]
+	// ReadsJSON is reads.json: the per-call detail with overlaps_supplied
+	// flags. It travels in memory and in the ref-store tree, never in the
+	// manifest — the manifest carries the envelope alone.
+	ReadsJSON json.RawMessage
 }
 
 // Handle is what a marker records to name a published generation, and what a

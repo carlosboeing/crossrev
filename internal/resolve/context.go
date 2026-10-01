@@ -300,9 +300,9 @@ func (l *Leg) settings(s *session) (*Refusal, ui.Line, error) {
 	if !doc.ServesLeg(name, "resolve") {
 		return servesLegRefusal(doc, name), ui.Line{}, nil
 	}
-	if harness.RefusedAsResolver(name) {
-		return codexResolverRefusal(doc), ui.Line{}, nil
-	}
+	// Nothing further is refused here: the rule that once refused codex is
+	// lifted now that the served read tool serves every resolve leg, and
+	// which legs a harness serves lives on the descriptor entry itself.
 
 	asked := name
 	if l.binaryInstalled(asked) {
@@ -331,7 +331,7 @@ func (l *Leg) settings(s *session) (*Refusal, ui.Line, error) {
 // resolver rule (harness.WorkingResolvers). Measured on the shipped
 // descriptor with a PATH carrying jq and yq but no harness binary:
 //
-//	Install one of claude, agy, grok and opencode. CrossRev needs at least one, and two different ones is what makes the cross-model check mean anything.
+//	Install one of claude, codex, agy, grok and opencode. CrossRev needs at least one, and two different ones is what makes the cross-model check mean anything.
 //
 // and with codex, agy and grok rewritten to legs ["review"]:
 //
@@ -400,21 +400,6 @@ func servesLegRefusal(doc harness.Document, name string) *Refusal {
 			harness.NamesHuman(doc.NamesForLeg(leg)),
 			entry.ProductName,
 			strings.Join(entry.Legs(), ", ")),
-	}
-}
-
-// codexResolverRefusal refuses codex as the resolver before the leg starts,
-// reached through the shared resolver rule (harness.RefusedAsResolver). The
-// hint names the resolvers that work, read off the same rule rather than
-// written into the sentence. Codex as reviewer is unaffected: the review leg
-// carries no such refusal.
-func codexResolverRefusal(doc harness.Document) *Refusal {
-	const leg = "resolve"
-	return &Refusal{
-		Message: "the codex resolver cannot read files, so a resolve leg on codex answers `blocked` instead of editing",
-		Hint: "codex 0.158.0 with the shell disabled has no file-reading tool: the resolve leg's `--disable shell_tool --disable unified_exec` leaves it nothing to verify against, so it edits nothing and the pass halts. " +
-			fmt.Sprintf("CrossRev runs the %s leg on %s until the served read tool also serves resolve legs. ", leg, harness.NamesHuman(harness.WorkingResolvers(doc))) +
-			"Point the resolver at one of them with --harness, or set resolver.harness in the repository config.",
 	}
 }
 

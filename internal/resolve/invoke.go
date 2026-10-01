@@ -249,6 +249,22 @@ func (l *Leg) invoke(ctx context.Context, s *session, marker prstate.Marker, wor
 	if err := os.MkdirAll(inv.Scratch, 0o700); err != nil {
 		return wrapErr(err)
 	}
+	// The served read tool serves the resolve leg too: a served resolver
+	// hands the harness the read-server command beside the prompt, so the
+	// leg orients in the checkout without a shell of its own.
+	if serveEntry, ok := doc.For(s.settings.Harness); ok && serveEntry.ReadMode() == harness.ReadModeServed {
+		inv.ReadMode = harness.ReadModeServed
+		if exe, err := os.Executable(); err == nil {
+			inv.Serve = &harness.ServeConfig{Command: exe, Args: []string{
+				"__read-server",
+				"--repo", workdir,
+				"--base", s.pr.BaseRefOid.SHA(),
+				"--head", s.pr.HeadRefOid.SHA(),
+				"--log", filepath.Join(tmp, "reads.jsonl"),
+				"--call", "resolve",
+			}}
+		}
+	}
 
 	// The version gate, before anything starts: an adapter that pins its CLI
 	// version refuses an install it does not drive rather than run a leg on it.

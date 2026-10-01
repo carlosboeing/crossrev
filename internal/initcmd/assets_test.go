@@ -77,18 +77,22 @@ func TestEveryTemplateHasAnAccessor(t *testing.T) {
 }
 
 // The generated policy is what `init` leaves behind, so its guidance has to
-// match the shared resolver rule: codex serves the review leg only, and the
-// shipped reviewer/resolver defaults are a pairing the rule allows.
+// match the shared resolver rule: codex serves both legs (a grok review is
+// refused until its command block is verified),
+// and the shipped reviewer/resolver defaults are a pairing the rule allows.
 func TestPolicyTemplateMatchesTheResolverRule(t *testing.T) {
 	raw, err := os.ReadFile(filepath.Join(repoRoot, templateDir, "crossrev.yml"))
 	if err != nil {
 		t.Fatalf("reading the policy template: %v", err)
 	}
-	if !strings.Contains(string(raw), "codex serves\n# the review leg only") {
-		t.Error("the policy template does not say codex serves the review leg only")
+	if !strings.Contains(string(raw), "without touching this (codex serves\n# both legs)") {
+		t.Error("the policy template does not say codex serves both legs")
+	}
+	if strings.Contains(string(raw), "codex serves\n# the review leg only") {
+		t.Error("the policy template still says codex serves the review leg only, but codex resolves again")
 	}
 	if strings.Contains(string(raw), "resolver:\n  harness: codex") {
-		t.Error("the policy template defaults the resolver to codex, which the resolver rule refuses")
+		t.Error("the policy template defaults the resolver to codex, but the shipped default is claude")
 	}
 }
 

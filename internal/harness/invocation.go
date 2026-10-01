@@ -102,6 +102,15 @@ type Invocation struct {
 	// Write is whether this leg may change files. It is derived from the leg
 	// rather than configured (lib/adapters/claude.sh:12).
 	Write bool
+	// ReadMode is the read path this call runs with: served, file_tool or
+	// supplied. The zero value keeps the adapters' legacy shape, which is
+	// what every existing caller and stub test pins; legs always set an
+	// explicit mode from the descriptor, so the legacy shape never runs in
+	// production.
+	ReadMode ReadMode
+	// Serve is the read-server command for a served call, nil otherwise.
+	// A served call without one is refused rather than run unserved.
+	Serve *ServeConfig
 	// CLIMajor is the major version of the harness CLI the version gate
 	// confirmed, zero when the gate has not run or the adapter pins none.
 	// The opencode adapter is the only reader: its 1.x and 2.x CLIs take

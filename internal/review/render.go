@@ -315,6 +315,13 @@ func SummaryBody(findings []Finding, marker prstate.Marker, ctx RenderContext) s
 		b.WriteString(skipWarning(ctx.Skipped))
 	}
 
+	// A degraded reads path is the same kind of caveat: the reviewer judged
+	// less than the pass claims without it, so the reason sits beside the
+	// skip warning, in the terminal warning's own sentence. The helper
+	// lives beside the envelope (prstate) so the resolve leg's rewrite of
+	// this same comment renders the same line.
+	b.WriteString(prstate.ReadsDegradedComment(marker))
+
 	noun := "findings"
 	if n == 1 {
 		noun = "finding"
