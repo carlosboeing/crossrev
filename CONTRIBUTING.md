@@ -36,24 +36,34 @@ is pinned rather than floated.
 
 ## Tests
 
+**Run these five checks before opening a pull request.** CI runs the same five,
+and the `required` gate fails if any of them does. All are offline: no network,
+no model, no pull request.
+
 ```bash
-bash tests/run.sh      # the offline suite: no network, no model, no PR
-bash tests/run.sh -j 1 # the same suites, one at a time
-bash scripts/lint.sh   # bash -n syntax plus shellcheck -S warning
+bash tests/run.sh < /dev/null                     # the offline suite: ends with "all suites passed"
+go test ./... < /dev/null                         # the Go packages and the frozen parity vectors
+bash scripts/lint.sh < /dev/null                  # syntax, shellcheck, go vet, drift checks: "lint clean"
+bash scripts/check-parity-coverage.sh < /dev/null # every tests/test-*.sh suite has one ledger row
+bash scripts/check-changelog.sh < /dev/null       # a shipped change has an [Unreleased] entry
 ```
+
+Close stdin as shown. GitHub's runners have no terminal, and a command that asks
+a question dies there while it waits at yours. `lint.sh` skips shellcheck with a
+note when it is not installed and still prints `lint clean`, so check that it
+ran.
 
 Suites run in parallel, one job per core up to eight. Nothing is shared between
 them, so the order means nothing and the output stays in glob order whatever the
-job count. `-j 1` runs them one at a time and streams as it goes, which is easier
-to read when you are watching one suite. `CROSSREV_TEST_JOBS` sets the default.
-
-Both are offline and take seconds. **Run both before opening a pull request**;
-CI runs the same two commands.
+job count. `bash tests/run.sh -j 1` runs them one at a time and streams as it
+goes, which is easier to read when you are watching one suite.
+`CROSSREV_TEST_JOBS` sets the default.
 
 The suite stubs `gh` and `claude` onto PATH and builds throwaway git
 repositories with real histories and real bare origins, so the assertions are
 about what CrossRev actually did rather than what it printed. Test files are
-auto-discovered — `tests/test-*.sh` is the whole registration mechanism.
+auto-discovered from `tests/test-*.sh`; a new one also needs its row in
+`tests/parity-coverage.tsv`, which the parity check enforces.
 
 `tests/stub/codex` is a deliberate tripwire: it exits loudly instead of running,
 because the no-config default names codex as reviewer and a fixture whose config

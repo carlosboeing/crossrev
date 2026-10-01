@@ -2,6 +2,12 @@
 
 All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **The pre-pull-request checks are one list.** `CONTRIBUTING.md` now lists the five checks CI runs — the suite, `go test`, `lint.sh`, the parity ledger check and the changelog gate — and the README, the pull request template and the agent brief point to it instead of keeping their own shorter copies. `scripts/check-parity-coverage.sh` drops its `--native` mode, which refused shell suites that sourced `lib/*.sh` or ran `bin/crossrev`; both paths were removed with the Bash implementation, so a suite reaching for them already fails on its own.
+
 ## [0.10.1] — 2026-10-01
 
 ### Fixed

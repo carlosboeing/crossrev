@@ -93,7 +93,6 @@ jobs:
         run: |
           set -euo pipefail
           bash scripts/check-parity-coverage.sh
-          bash scripts/check-parity-coverage.sh --native
 
   # A pull request only. The check compares against the base branch, and a push
   # has no base to compare against.

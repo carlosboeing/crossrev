@@ -17,8 +17,7 @@ Restate the reasoning here rather than pointing at where it was written down.
 
 <!-- Paste the output. Do not just assert. -->
 
-- [ ] `bash tests/run.sh` — all suites passed
-- [ ] `bash scripts/lint.sh` — lint clean
+- [ ] The five checks in [CONTRIBUTING.md](../CONTRIBUTING.md#tests) pass, with their output pasted above
 - [ ] Ran it against a real pull request, if the change touches a leg
 
 ## Checklist
