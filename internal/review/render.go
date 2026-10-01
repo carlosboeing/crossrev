@@ -380,6 +380,7 @@ func SummaryBody(findings []Finding, marker prstate.Marker, ctx RenderContext) s
 	}
 	b.WriteString(coverageFootnote(marker, ctx))
 	b.WriteString(exclusionLine(ctx.Excluded))
+	b.WriteString(verificationSection(marker))
 
 	unanchored := 0
 	if u, ok := marker.Unanchored.Get(); ok {
@@ -437,6 +438,58 @@ func coverageFootnote(marker prstate.Marker, ctx RenderContext) string {
 // mark thousands of changed paths generated.
 func exclusionLine(excluded []string) string {
 	return intel.ExclusionLine(excluded)
+}
+
+// verificationSection names each required check the pass judged with its run
+// URL, so the evidence behind a convergence — or a halt — reads on the
+// summary rather than only in the marker. Absent without a verification
+// record, so an unconfigured summary reads exactly as it always has.
+//
+// The runs are what GitHub reports for the pull request's head commit — the
+// same association required status checks use — and workflows triggered by
+// pull_request report against that head commit too, so a check that never
+// ran for it is what reads as missing.
+func verificationSection(marker prstate.Marker) string {
+	record, ok := marker.Verification.Get()
+	if !ok {
+		return ""
+	}
+	if record.State == "unreadable" {
+		return fmt.Sprintf("Required checks could not be read: %s.\n\n", record.Reason)
+	}
+	var parts []string
+	for _, check := range record.Checks {
+		parts = append(parts, verificationCheckText(check))
+	}
+	return "Required checks: " + strings.Join(parts, ", ") + ".\n\n"
+}
+
+// verificationCheckText renders one required check's evidence: its state,
+// its qualifier where one applies, and its run URL.
+func verificationCheckText(check prstate.MarkerVerificationCheck) string {
+	name := "`" + check.Name + "`"
+	link := ""
+	if check.URL != "" {
+		link = " ([run](" + check.URL + "))"
+	}
+	switch check.State {
+	case "passed":
+		if check.Note != "" {
+			return fmt.Sprintf("%s passed (%s)%s", name, check.Note, link)
+		}
+		return fmt.Sprintf("%s passed%s", name, link)
+	case "pending":
+		return fmt.Sprintf("%s is still running%s", name, link)
+	case "failed":
+		if check.Conclusion != "" {
+			return fmt.Sprintf("%s failed (%s)%s", name, check.Conclusion, link)
+		}
+		return fmt.Sprintf("%s failed%s", name, link)
+	case "missing":
+		return fmt.Sprintf("%s has no reported run", name)
+	default:
+		return fmt.Sprintf("%s could not be read", name)
+	}
 }
 
 // skipWarning renders the block that opens a summary whose pass skipped

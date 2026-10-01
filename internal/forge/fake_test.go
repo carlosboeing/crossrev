@@ -53,6 +53,9 @@ func (f *fakeForge) AwaitingPullRequests(context.Context, core.Slug) []forge.Awa
 	return nil
 }
 func (f *fakeForge) WorkflowRunStatus(context.Context, core.Slug, string) forge.RunStatus { return "" }
+func (f *fakeForge) CheckRuns(context.Context, core.Slug, core.Revision) (forge.CheckRuns, error) {
+	return forge.CheckRuns{}, nil
+}
 func (f *fakeForge) LabelColour(context.Context, core.Slug, string) string                { return "" }
 func (f *fakeForge) IssueByFinding(context.Context, core.Slug, string, core.FindingID) (int, bool) {
 	return 0, false

@@ -174,6 +174,51 @@ func (s RunStatus) Known() bool { return s != "" }
 // String renders the status as GitHub spells it.
 func (s RunStatus) String() string { return string(s) }
 
+// CheckRun is one check run GitHub reports for a commit: the name the
+// required-check entry matches, the slug of the App that published it, the
+// status and conclusion the evaluator maps, and the run URL the summary
+// names beside it.
+type CheckRun struct {
+	// ID orders reruns: the greatest id is the newest run, so a rerun
+	// supersedes an older result for the same name and app.
+	ID int64
+	// Name is the check-run name, which for a workflow job is the job id.
+	Name string
+	// App is the publishing App's slug, `github-actions` for workflow jobs.
+	App    string
+	Status string
+	// Conclusion is empty when GitHub reports null, which is every
+	// unfinished run.
+	Conclusion string
+	URL        string
+}
+
+// CheckRuns is the check-run enumeration for one commit, paginated to
+// completion.
+type CheckRuns struct {
+	Runs []CheckRun
+	// Truncated reports the endpoint's total exceeded the runs it listed,
+	// so the enumeration is partial and the evaluator fails closed on it
+	// rather than judging a list with runs missing.
+	Truncated bool
+}
+
+// CheckRunsDenied is a 403 or 404 reading check runs. GitHub answers 404
+// where it will not admit 403, so both name the same missing permission:
+// the App's `checks: read`.
+type CheckRunsDenied struct {
+	Status int
+	Err    error
+}
+
+// Error names the permission the read was refused for.
+func (e *CheckRunsDenied) Error() string {
+	return "could not read check runs: the token holds no checks: read permission"
+}
+
+// Unwrap is the refused invocation underneath.
+func (e *CheckRunsDenied) Unwrap() error { return e.Err }
+
 // Publisher is the filter every published body passes through on its way out.
 //
 // It is a dependency rather than a decision made here: what text is safe to

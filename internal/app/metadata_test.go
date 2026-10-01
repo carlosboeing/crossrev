@@ -80,7 +80,7 @@ func TestSlugLowercasesASCIIOnly(t *testing.T) {
 
 func TestRoleSummary(t *testing.T) {
 	for _, tc := range []struct{ role, want string }{
-		{app.RoleLoop, "contents:write, issues:write, pull_requests:write"},
+		{app.RoleLoop, "contents:write, issues:write, pull_requests:write, checks:read"},
 		{app.RoleRefresher, "secrets:write (repository secrets only)"},
 		{"bogus", ""},
 	} {
