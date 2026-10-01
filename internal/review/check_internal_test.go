@@ -398,7 +398,8 @@ func TestCheckGroupsStopsAMalformedChain(t *testing.T) {
 
 // Packing keeps path order, holds a shared excerpt in one call, and
 // fits each call's rendered bytes to the limit; a group past the
-// limit alone still goes, in a call of its own.
+// limit alone splits, and a singleton past the limit still goes, in a
+// call of its own.
 func TestPackCheckCallsBoundsAndDedupes(t *testing.T) {
 	meta := prompt.Meta{Repo: prompt.Str("acme/widget"), PR: prompt.Num(42), Pass: prompt.Num(1)}
 	mk := func(position int, path string, excerpt string) checkCandidate {
@@ -437,12 +438,52 @@ func TestPackCheckCallsBoundsAndDedupes(t *testing.T) {
 		t.Errorf("the shared rendering names no sharing:\n%s", rendered)
 	}
 	// A limit fitting everything packs one call; a limit fitting
-	// nothing still sends each group alone rather than dropping one.
+	// nothing splits the shared group and still sends each candidate
+	// alone rather than dropping one.
 	if calls := packCheckCalls(meta, "", candidates, overhead, overhead+shared+solo); len(calls) != 1 {
 		t.Errorf("roomy packing makes %d calls, want 1", len(calls))
 	}
-	if calls := packCheckCalls(meta, "", candidates, overhead, overhead); len(calls) != 2 {
-		t.Errorf("tight packing makes %d calls, want 2", len(calls))
+	if calls := packCheckCalls(meta, "", candidates, overhead, overhead); len(calls) != 3 {
+		t.Errorf("tight packing makes %d calls, want 3", len(calls))
+	}
+}
+
+// A group past the limit alone splits across calls instead of going
+// unbounded: each candidate renders the shared excerpt in its own
+// call. A singleton past the limit still goes in a call of its own,
+// for the hard-limit preflight to judge.
+func TestPackCheckCallsSplitsAnOverflowingGroup(t *testing.T) {
+	meta := prompt.Meta{Repo: prompt.Str("acme/widget"), PR: prompt.Num(42), Pass: prompt.Num(1)}
+	mk := func(position int, excerpt string) checkCandidate {
+		return checkCandidate{
+			position:     position,
+			finding:      Finding{ID: "id", Path: "a.go", Line: 1, Side: "RIGHT", Severity: "high", Category: "correctness", Title: "t", Why: "w"},
+			excerptLabel: "excerpt",
+			excerpt:      []byte(excerpt),
+		}
+	}
+	shared := "a hunk long enough to matter, " + strings.Repeat("x", 2000)
+	candidates := []checkCandidate{mk(1, shared), mk(2, shared)}
+	overhead := len(prompt.Check{Meta: meta}.Render())
+	solo := len(renderCheckCall(meta, "", candidates[:1], 2)) - overhead
+	calls := packCheckCalls(meta, "", candidates, overhead, overhead+solo)
+	if len(calls) != 2 {
+		t.Fatalf("calls = %d, want 2 (the overflowing group split)", len(calls))
+	}
+	if got := positionsOf(calls[0]); len(got) != 1 || got[0] != 1 {
+		t.Errorf("first call holds positions %v, want 1", got)
+	}
+	if got := positionsOf(calls[1]); len(got) != 1 || got[0] != 2 {
+		t.Errorf("second call holds positions %v, want 2", got)
+	}
+	for i, call := range calls {
+		rendered := string(renderCheckCall(meta, "", call, 2))
+		if strings.Count(rendered, shared) != 1 {
+			t.Errorf("call %d renders the excerpt %d times, want once", i+1, strings.Count(rendered, shared))
+		}
+	}
+	if calls := packCheckCalls(meta, "", candidates[:1], overhead, overhead); len(calls) != 1 {
+		t.Errorf("an overflowing singleton makes %d calls, want 1", len(calls))
 	}
 }
 

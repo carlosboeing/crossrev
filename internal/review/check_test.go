@@ -266,6 +266,47 @@ func TestCheckCorrectionsApplyBeforePosting(t *testing.T) {
 
 // A check that fails past its retries degrades: every candidate posts
 // unchecked, and the summary and marker say so with the reason.
+// A candidate whose rendered call exceeds the checker's hard input
+// limit degrades before any check call runs: nothing invokes the
+// harness with a prompt past its window, and every candidate posts
+// unchecked with the reason named.
+func TestCheckCandidatePastTheHardLimitDegradesWithoutACall(t *testing.T) {
+	// The excerpt carries the bulk: a hunk past the checker's hard
+	// input limit, where a finding of that size would exhaust the
+	// coverage ledger first.
+	giant := strings.Repeat("x", 630000)
+	findings := `[{"path":"app.go","line":2,"side":"RIGHT","severity":"high","category":"correctness","pre_existing":false,"title":"Giant line","why":"A generated line dwarfs the window","fix":"Shrink it"}]`
+	e := checkEnv(t)
+	e.forge.diff = []byte("diff --git a/app.go b/app.go\n--- a/app.go\n+++ b/app.go\n@@ -1,1 +1,2 @@\n context\n+" + giant + "\n")
+	e.runner.script = []exec.Result{
+		{ExitCode: 0, Stdout: claudeStdout(issuesPayload(findings))},
+	}
+	got := runLeg(t, e, e.request(t))
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
+	if e.runner.calls != 1 {
+		t.Fatalf("harness calls = %d, want 1 (the review alone)", e.runner.calls)
+	}
+	if got.Marker.Check.Value() != prstate.CheckDegraded {
+		t.Errorf("check = %q, want degraded", got.Marker.Check.Value())
+	}
+	if got.Marker.CheckReason.Value() != "candidate_exceeds_limit" {
+		t.Errorf("check_reason = %q, want candidate_exceeds_limit", got.Marker.CheckReason.Value())
+	}
+	if len(e.forge.reviewPosted) != 1 {
+		t.Fatalf("posted %d finding comments, want 1 (the candidate unchecked)", len(e.forge.reviewPosted))
+	}
+	body := finalClaimBody(e)
+	if !strings.Contains(body, "check: degraded (candidate_exceeds_limit): every candidate posted unchecked.") {
+		t.Errorf("summary carries no degrade note:\n%s", body)
+	}
+	joined := ui.Joined(got.Messages)
+	if !strings.Contains(joined, "the cross-model check degraded (candidate_exceeds_limit), so every candidate posts unchecked") {
+		t.Errorf("messages = %q, want the degrade warning", joined)
+	}
+}
+
 func TestCheckDegradedPostsAllWithTheNote(t *testing.T) {
 	e := checkEnv(t)
 	e.runner.script = []exec.Result{

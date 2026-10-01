@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/carlosboeing/crossrev/internal/config"
@@ -34,6 +35,7 @@ const (
 	checkReasonTransient           = "transient"
 	checkReasonHarnessFailed       = "harness_failed"
 	checkReasonAnswerRejected      = "answer_rejected"
+	checkReasonCandidateExceeds    = "candidate_exceeds_limit"
 )
 
 // outsideDiffRadius is the committed-lines window around an outside-diff
@@ -244,6 +246,17 @@ func (l *Leg) runCheck(ctx context.Context, req Request, loaded Context, claimID
 		limit = budget.HardBytes
 	}
 	calls := packCheckCalls(meta, reads, candidates, overhead, limit)
+	// The hard-limit preflight runs before any call does: a packed
+	// call is measured in rendered bytes, and one past the checker's
+	// hard input limit degrades the check rather than invoking the
+	// harness with a prompt past its window.
+	for _, call := range calls {
+		if rendered := len(renderCheckCall(meta, reads, call, len(candidates))); rendered > budget.HardBytes {
+			return degraded(prstate.CheckDegraded, checkReasonCandidateExceeds,
+				fmt.Sprintf("candidate %s renders %d bytes past the %d-byte hard input limit",
+					checkPositionsList(call), rendered, budget.HardBytes))
+		}
+	}
 	if l.Log != nil {
 		l.Log.Event("check", fmt.Sprintf("harness=%s model=%s candidates=%d calls=%d", checker.harness, checker.model, len(candidates), len(calls)))
 	}
@@ -489,6 +502,19 @@ func nonEmpty(model string) string {
 	return model
 }
 
+// checkPositionsList names a packed call's candidates for the run log:
+// their positions, with the finding id beside a singleton.
+func checkPositionsList(call []checkCandidate) string {
+	positions := make([]string, 0, len(call))
+	for _, candidate := range call {
+		positions = append(positions, strconv.Itoa(candidate.position))
+	}
+	if len(call) == 1 {
+		return positions[0] + " " + call[0].finding.ID
+	}
+	return strings.Join(positions, ",")
+}
+
 // orderCandidates numbers the findings in path order: positions count
 // the sorted candidates while each keeps its index into the stored
 // record, so decisions apply onto the entries they judged whatever
@@ -618,13 +644,29 @@ func checkDigest(candidates []checkCandidate) string {
 
 // packCheckCalls groups candidates into bounded calls in path order.
 // Candidates sharing one excerpt stay in one call and render it once;
-// each call's rendered bytes fit the limit, and a group past the limit
-// alone still goes, in a call of its own.
+// each call's rendered bytes fit the limit where any packing can fit
+// them. A group past the limit alone splits into singleton groups,
+// each rendering the shared excerpt in its own call; a singleton
+// past the limit still goes, in a call of its own, for the hard-limit
+// preflight to judge.
 func packCheckCalls(meta prompt.Meta, reads string, candidates []checkCandidate, overhead, limit int) [][]checkCandidate {
 	groups := groupSharedExcerpts(candidates)
-	measured := make([]int, len(groups))
-	for i, group := range groups {
-		measured[i] = len(renderCheckCall(meta, reads, group, len(candidates))) - overhead
+	measure := func(group []checkCandidate) int {
+		return len(renderCheckCall(meta, reads, group, len(candidates))) - overhead
+	}
+	var split [][]checkCandidate
+	for _, group := range groups {
+		if len(group) > 1 && measure(group) > limit-overhead {
+			for _, candidate := range group {
+				split = append(split, []checkCandidate{candidate})
+			}
+			continue
+		}
+		split = append(split, group)
+	}
+	measured := make([]int, len(split))
+	for i, group := range split {
+		measured[i] = measure(group)
 	}
 	var calls [][]checkCandidate
 	var current []checkCandidate
@@ -636,7 +678,7 @@ func packCheckCalls(meta prompt.Meta, reads string, candidates []checkCandidate,
 			currentBytes = 0
 		}
 	}
-	for i, group := range groups {
+	for i, group := range split {
 		if len(current) > 0 && currentBytes+measured[i] > limit-overhead {
 			flush()
 		}
