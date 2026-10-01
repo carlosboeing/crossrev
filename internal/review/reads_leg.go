@@ -232,6 +232,25 @@ func (l *Leg) noteReads(note readsNote) {
 	l.readsNotes = append(l.readsNotes, note)
 }
 
+// callReadsSince sums the served reads recorded since the mark: the notes
+// one call added while it ran, across its attempts. Calls run
+// sequentially, so the caller marks len(l.readsNotes) before the call and
+// reads the sum once the call is accepted. A supplied call notes zero
+// reads and sums to zero.
+func (l *Leg) callReadsSince(mark int) int {
+	if mark < 0 {
+		mark = 0
+	}
+	if mark > len(l.readsNotes) {
+		return 0
+	}
+	total := 0
+	for _, note := range l.readsNotes[mark:] {
+		total += note.stats.Reads
+	}
+	return total
+}
+
 // rewriteReadsBlock swaps the served reads block for the supplied one in
 // an already-rendered prompt. Prompts render before the leg-start
 // self-test runs, so a call that falls back to supplied rewrites what the
