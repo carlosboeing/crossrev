@@ -301,7 +301,7 @@ func (l *Log) Settings(harness, model, effort string) {
 // EffectiveSetting is one resolved setting: the value the leg runs with
 // and where it came from — flag, config or default. An empty source
 // leaves the setting off the line, which is how the resolve leg omits the
-// review-only fields. An empty value with a source set records honestly:
+// review input policy. An empty value with a source set records honestly:
 // no required check reads as an empty list from the default.
 type EffectiveSetting struct {
 	Value  string

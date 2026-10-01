@@ -51,20 +51,31 @@ type legSettings struct {
 	Model                string
 	Effort               string
 	Endpoint             string
+	Concerns             []string
+	ConcernsSource       string
+	Check                string
+	CheckSource          string
 	RequiredChecks       []config.RequiredCheck
 	RequiredChecksSource string
+	CheckWait            int
+	CheckWaitSource      string
 }
 
-// detail renders the resolved settings for the run log: the required
-// checks beside harness, model and effort. The review-only fields stay
-// off the line.
+// detail renders the resolved settings for the run log: the review
+// contract beside harness, model and effort. The resolve leg reads
+// concerns, check mode and the wait from the base config, never a flag,
+// so their sources are config or default; the input policy stays off
+// the line.
 func (s legSettings) detail() runlog.ReviewDetail {
 	checks := make([]string, 0, len(s.RequiredChecks))
 	for _, check := range s.RequiredChecks {
 		checks = append(checks, check.String())
 	}
 	return runlog.ReviewDetail{
+		Concerns:       runlog.EffectiveSetting{Value: strings.Join(s.Concerns, ","), Source: s.ConcernsSource},
+		Check:          runlog.EffectiveSetting{Value: s.Check, Source: s.CheckSource},
 		RequiredChecks: runlog.EffectiveSetting{Value: strings.Join(checks, ","), Source: s.RequiredChecksSource},
+		CheckWait:      runlog.EffectiveSetting{Value: strconv.Itoa(s.CheckWait), Source: s.CheckWaitSource},
 	}
 }
 
@@ -312,10 +323,26 @@ func (l *Leg) settings(s *session) (*Refusal, ui.Line, error) {
 	if s.req.EffortOverride != "" {
 		effort = s.req.EffortOverride
 	}
-	checks := s.cfg.Verification().RequiredChecks
+	verification := s.cfg.Verification()
+	concerns := s.cfg.ReviewConcerns()
+	concernsSource := "default"
+	if s.cfg.Get(".review.concerns") != "" {
+		concernsSource = "config"
+	}
+	checkMode := s.cfg.ReviewCheck()
+	checkSource := "default"
+	if s.cfg.Get(".review.check") != "" {
+		checkSource = "config"
+	}
+	checks := verification.RequiredChecks
 	checksSource := "default"
 	if s.cfg.Get(".verification.required_checks") != "" {
 		checksSource = "config"
+	}
+	checkWait := verification.WaitMinutes
+	checkWaitSource := "default"
+	if s.cfg.Get(".verification.wait_minutes") != "" {
+		checkWaitSource = "config"
 	}
 	if s.req.NoRequiredChecks {
 		// The clear wins over --required-check on the same line: it names
@@ -354,12 +381,12 @@ func (l *Leg) settings(s *session) (*Refusal, ui.Line, error) {
 
 	asked := name
 	if l.binaryInstalled(asked) {
-		s.settings = legSettings{Harness: name, Model: model, Effort: effort, Endpoint: endpoint, RequiredChecks: checks, RequiredChecksSource: checksSource}
+		s.settings = legSettings{Harness: name, Model: model, Effort: effort, Endpoint: endpoint, Concerns: concerns, ConcernsSource: concernsSource, Check: checkMode, CheckSource: checkSource, RequiredChecks: checks, RequiredChecksSource: checksSource, CheckWait: checkWait, CheckWaitSource: checkWaitSource}
 		return nil, ui.Line{}, nil
 	}
 	for _, alt := range harness.WorkingResolvers(doc) {
 		if l.binaryInstalled(alt) {
-			s.settings = legSettings{Harness: alt, Model: "", Effort: effort, Endpoint: "", RequiredChecks: checks, RequiredChecksSource: checksSource}
+			s.settings = legSettings{Harness: alt, Model: "", Effort: effort, Endpoint: "", Concerns: concerns, ConcernsSource: concernsSource, Check: checkMode, CheckSource: checkSource, RequiredChecks: checks, RequiredChecksSource: checksSource, CheckWait: checkWait, CheckWaitSource: checkWaitSource}
 			// ui_warn, condition and consequence apart (lib/run.sh:548-549).
 			warn := ui.Warn(
 				fmt.Sprintf("'%s' is not installed, so the resolver runs on '%s' instead", asked, alt),

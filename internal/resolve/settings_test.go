@@ -65,6 +65,52 @@ func TestTheRunLogRecordsTheRequiredChecksAndTheirSource(t *testing.T) {
 	}
 }
 
+// The run log records the review-contract settings on the resolve leg
+// too, so a run's concerns, check mode and wait read back off run.log
+// for both legs of a cycle. The resolve leg takes no override flags
+// for them, so their sources are config or default.
+func TestTheRunLogRecordsTheReviewSettingsOnTheResolveLeg(t *testing.T) {
+	run := func(t *testing.T, cfg string) string {
+		t.Helper()
+		e := setup(t)
+		e.git.staged = true
+		if cfg != "" {
+			e.git.show = map[string][]byte{e.base.SHA() + ":.github/crossrev.yml": []byte(cfg)}
+		}
+		e.addReview(t, defaultFindings(), "issues-remain")
+
+		got := e.runReq(t, Request{PR: 42, Repo: e.slug, Trigger: TriggerHuman})
+		if got.Err != nil {
+			t.Fatalf("Run: %v", got.Err)
+		}
+		if got.Outcome != OutcomeComplete {
+			t.Fatalf("Outcome = %q, want complete", got.Outcome)
+		}
+		body, err := os.ReadFile(filepath.Join(e.log.Dir(), "run.log"))
+		if err != nil {
+			t.Fatalf("read run.log: %v", err)
+		}
+		return string(body)
+	}
+
+	if log := run(t, ""); !strings.Contains(log,
+		"concerns=correctness,consistency concerns_source=default"+
+			" check=resolver check_source=default"+
+			" required_checks= required_checks_source=default"+
+			" check_wait=10 check_wait_source=default") {
+		t.Errorf("run.log does not record the default settings on the resolve leg:\n%s", log)
+	}
+
+	const cfg = "version: 2\nreview:\n  concerns: [correctness]\n  check: off\nverification:\n  required_checks: [build]\n  wait_minutes: 5\n"
+	if log := run(t, cfg); !strings.Contains(log,
+		"concerns=correctness concerns_source=config"+
+			" check=off check_source=config"+
+			" required_checks=build required_checks_source=config"+
+			" check_wait=5 check_wait_source=config") {
+		t.Errorf("run.log does not record the configured settings on the resolve leg:\n%s", log)
+	}
+}
+
 // A setting-override flag is refused where the base policy says
 // automated, even when its value equals the base value: the mode is read
 // from the pull request's base revision, never the head, so no value can
