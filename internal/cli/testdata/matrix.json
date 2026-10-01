@@ -808,8 +808,8 @@
     },
     {
       "name": "review refuses its own job as a required check",
-      "args": ["review", "--pr", "42", "--required-check", "crossrev review / review"],
-      "reason": "invalid review --required-check: \"crossrev review / review\" is CrossRev's own review job, which a review cannot wait for",
+      "args": ["review", "--pr", "42", "--required-check", "review"],
+      "reason": "invalid review --required-check: \"review\" is one of CrossRev's own jobs, which a review cannot wait for",
       "action": "Use --required-check NAME[@APP], for example: --required-check build."
     },
     {
@@ -856,8 +856,8 @@
     },
     {
       "name": "resolve refuses its own job as a required check",
-      "args": ["resolve", "--pr", "42", "--required-check", "crossrev resolve / resolve"],
-      "reason": "invalid resolve --required-check: \"crossrev resolve / resolve\" is CrossRev's own resolve job, which a review cannot wait for",
+      "args": ["resolve", "--pr", "42", "--required-check", "resolve"],
+      "reason": "invalid resolve --required-check: \"resolve\" is one of CrossRev's own jobs, which a review cannot wait for",
       "action": "Use --required-check NAME[@APP], for example: --required-check build."
     },
     {

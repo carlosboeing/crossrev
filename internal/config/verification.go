@@ -16,9 +16,10 @@ const (
 )
 
 // OwnCheckNames are the check runs CrossRev's own generated workflows
-// publish: each workflow's name over its leg job, the way GitHub names a
-// check run where the job sets no name. A review that waited for one of
-// these would wait for itself, so required checks naming one are refused.
+// publish: the job ids of the review and resolve workflows, which GitHub
+// uses as their check-run names. A review that waited for one of these
+// from the GitHub Actions app would wait for itself, so required checks
+// naming one there are refused.
 //
 // The literals live here because this package may not import the
 // generator; a test binds them to its templates instead, so a rename on
@@ -29,7 +30,7 @@ const (
 // any package in the binary, and shortening this one would admit the
 // self-gating it exists to refuse.
 func OwnCheckNames() []string {
-	return []string{"crossrev review / review", "crossrev resolve / resolve"}
+	return []string{"review", "resolve", "notice"}
 }
 
 // RequiredCheck is one entry of verification.required_checks: a check run
@@ -70,7 +71,8 @@ func ParseRequiredCheck(item string) (RequiredCheck, error) {
 // NormalizeRequiredChecks validates parsed checks — config items or flag
 // values — refusing duplicates and CrossRev's own jobs. A duplicate is
 // the same name from the same app: `build` and `build@github-actions`
-// name one check. It is the one list validator both surfaces pass
+// name one check. An own name from another app is not CrossRev's own
+// and reads through. It is the one list validator both surfaces pass
 // through.
 func NormalizeRequiredChecks(checks []RequiredCheck) ([]RequiredCheck, error) {
 	seen := map[RequiredCheck]bool{}
@@ -79,13 +81,12 @@ func NormalizeRequiredChecks(checks []RequiredCheck) ([]RequiredCheck, error) {
 			return nil, fmt.Errorf("duplicate required check %q", check.String())
 		}
 		seen[check] = true
+		if check.App != DefaultRequiredCheckApp {
+			continue
+		}
 		for _, own := range OwnCheckNames() {
 			if check.Name == own {
-				leg := "review"
-				if strings.Contains(own, "resolve") {
-					leg = "resolve"
-				}
-				return nil, fmt.Errorf("%q is CrossRev's own %s job, which a review cannot wait for", own, leg)
+				return nil, fmt.Errorf("%q is one of CrossRev's own jobs, which a review cannot wait for", own)
 			}
 		}
 	}
@@ -225,7 +226,7 @@ func (c *Config) assertVerification() error {
 		if _, err := decodeRequiredChecks(list); err != nil {
 			return &Refusal{
 				Message: "verification.required_checks: " + err.Error(),
-				Hint:    "Each entry is a NAME or NAME@APP string or a name/app mapping, naming a check run that is not CrossRev's own review or resolve job. Correct it where it is set, or remove it to wait for none.",
+				Hint:    "Each entry is a NAME or NAME@APP string or a name/app mapping, naming a check run that is not one of CrossRev's own review, resolve or notice jobs. Correct it where it is set, or remove it to wait for none.",
 			}
 		}
 	}

@@ -64,8 +64,10 @@ func TestVerificationRequiredChecksRefusals(t *testing.T) {
 		{name: "duplicate strings", yaml: "version: 2\nverification:\n  required_checks: [build, build]\n"},
 		{name: "duplicate across forms", yaml: "version: 2\nverification:\n  required_checks: [build, build@github-actions]\n"},
 		{name: "duplicate mappings", yaml: "version: 2\nverification:\n  required_checks:\n    - name: build\n    - name: build\n      app: github-actions\n"},
-		{name: "review job", yaml: "version: 2\nverification:\n  required_checks: ['crossrev review / review']\n"},
-		{name: "resolve job", yaml: "version: 2\nverification:\n  required_checks:\n    - name: 'crossrev resolve / resolve'\n"},
+		{name: "review job", yaml: "version: 2\nverification:\n  required_checks: [review]\n"},
+		{name: "resolve job", yaml: "version: 2\nverification:\n  required_checks:\n    - name: resolve\n"},
+		{name: "notice job", yaml: "version: 2\nverification:\n  required_checks: [notice]\n"},
+		{name: "own job under the explicit default app", yaml: "version: 2\nverification:\n  required_checks: ['resolve@github-actions']\n"},
 		{name: "non-list", yaml: "version: 2\nverification:\n  required_checks: build\n"},
 		{name: "non-string item", yaml: "version: 2\nverification:\n  required_checks: [build, 7]\n"},
 	} {
@@ -76,6 +78,17 @@ func TestVerificationRequiredChecksRefusals(t *testing.T) {
 				t.Errorf("err = %q, want it to name verification.required_checks", err)
 			}
 		})
+	}
+}
+
+// A check run published by another app is not one of CrossRev's own,
+// whatever its name.
+func TestVerificationOwnJobNameUnderAnotherAppReads(t *testing.T) {
+	loaded := loadYAML(t, "version: 2\nverification:\n  required_checks: [review@my-app]\n")
+	got := loaded.Verification().RequiredChecks
+	want := []config.RequiredCheck{{Name: "review", App: "my-app"}}
+	if len(got) != len(want) || got[0] != want[0] {
+		t.Fatalf("required checks = %v, want %v", got, want)
 	}
 }
 
@@ -133,41 +146,62 @@ func TestVerificationRefusesANonMapping(t *testing.T) {
 }
 
 // The refused self-gating names are the check runs CrossRev's own
-// workflows publish: each generated workflow's name over its leg job.
-// The literals live here because this package may not import the
-// generator; this test binds them to its templates instead, so a rename
-// on either side fails here rather than gating a review on itself.
+// workflows publish: the job ids of the generated event workflows,
+// which GitHub uses as their check-run names. The literals live here
+// because this package may not import the generator; this test binds
+// them to its templates instead, so a rename on either side fails here
+// rather than gating a review on itself.
 func TestOwnCheckNamesMatchTheGeneratedWorkflows(t *testing.T) {
-	review := workflowCheck(t, initcmd.ReviewWorkflowTemplate())
-	resolve := workflowCheck(t, initcmd.ResolveWorkflowTemplate())
-	want := []string{review, resolve}
-	if got := config.OwnCheckNames(); len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
-		t.Errorf("OwnCheckNames() = %v, want %v from the generated workflows", got, want)
-	}
-}
-
-// workflowCheck reads one generated workflow's check name: its `name:`
-// over the first job id under `jobs:`, which is the leg job. GitHub
-// names the check run "workflow / job" where the job sets no name.
-func workflowCheck(t *testing.T, template []byte) string {
-	t.Helper()
-	workflow := ""
-	jobs := false
-	for _, line := range strings.Split(string(template), "\n") {
-		if strings.HasPrefix(line, "name: ") {
-			workflow = strings.TrimPrefix(line, "name: ")
-			continue
-		}
-		if line == "jobs:" {
-			jobs = true
-			continue
-		}
-		if jobs && strings.HasPrefix(line, "  ") && !strings.HasPrefix(line, "   ") {
-			if trimmed := strings.TrimSpace(line); strings.HasSuffix(trimmed, ":") && !strings.Contains(trimmed, " ") {
-				return workflow + " / " + strings.TrimSuffix(trimmed, ":")
+	var want []string
+	seen := map[string]bool{}
+	for _, template := range [][]byte{initcmd.ReviewWorkflowTemplate(), initcmd.ResolveWorkflowTemplate()} {
+		for _, job := range workflowJobs(t, template) {
+			if !seen[job] {
+				seen[job] = true
+				want = append(want, job)
 			}
 		}
 	}
-	t.Fatalf("no leg job found in the generated workflow")
-	return ""
+	got := config.OwnCheckNames()
+	if len(got) != len(want) {
+		t.Fatalf("OwnCheckNames() = %v, want %v from the generated workflows", got, want)
+	}
+	names := map[string]bool{}
+	for _, name := range got {
+		names[name] = true
+	}
+	for _, name := range want {
+		if !names[name] {
+			t.Errorf("OwnCheckNames() = %v, want %v from the generated workflows", got, want)
+		}
+	}
+}
+
+// workflowJobs reads one generated workflow's job ids: the keys under
+// the top-level `jobs:`, which GitHub uses as their check-run names.
+func workflowJobs(t *testing.T, template []byte) []string {
+	t.Helper()
+	var jobs []string
+	started := false
+	for _, line := range strings.Split(string(template), "\n") {
+		if line == "jobs:" {
+			started = true
+			continue
+		}
+		if !started {
+			continue
+		}
+		if line != "" && !strings.HasPrefix(line, " ") && !strings.HasPrefix(line, "\t") {
+			break
+		}
+		if strings.HasPrefix(line, "  ") && !strings.HasPrefix(line, "   ") {
+			if trimmed := strings.TrimSpace(line); strings.HasSuffix(trimmed, ":") && !strings.Contains(trimmed, " ") {
+				jobs = append(jobs, strings.TrimSuffix(trimmed, ":"))
+			}
+		}
+	}
+	if len(jobs) == 0 {
+		t.Fatalf("no jobs found in the generated workflow")
+	}
+	return jobs
 }

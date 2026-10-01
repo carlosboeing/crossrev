@@ -870,11 +870,11 @@
         "--pr",
         "42",
         "--required-check",
-        "crossrev review / review"
+        "review"
       ],
       "native": {
         "exit": 1,
-        "stderr": "\nerror  invalid review --required-check: \"crossrev review / review\" is CrossRev's own review job, which a review cannot wait for\n       Use --required-check NAME[@APP], for example: --required-check build.\n\n"
+        "stderr": "\nerror  invalid review --required-check: \"review\" is one of CrossRev's own jobs, which a review cannot wait for\n       Use --required-check NAME[@APP], for example: --required-check build.\n\n"
       },
       "note": "Native-only flag; the removed shell had no required-check option."
     },
@@ -994,11 +994,11 @@
         "--pr",
         "42",
         "--required-check",
-        "crossrev resolve / resolve"
+        "resolve"
       ],
       "native": {
         "exit": 1,
-        "stderr": "\nerror  invalid resolve --required-check: \"crossrev resolve / resolve\" is CrossRev's own resolve job, which a review cannot wait for\n       Use --required-check NAME[@APP], for example: --required-check build.\n\n"
+        "stderr": "\nerror  invalid resolve --required-check: \"resolve\" is one of CrossRev's own jobs, which a review cannot wait for\n       Use --required-check NAME[@APP], for example: --required-check build.\n\n"
       },
       "note": "Native-only flag; the removed shell had no required-check option."
     },

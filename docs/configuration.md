@@ -201,7 +201,7 @@ verification:
 
 | Field | What it does |
 |---|---|
-| `verification.required_checks` | The check runs a review waits for before judging. Each entry is a `NAME` or `NAME@APP` string, or a `name`/`app` mapping; the app defaults to `github-actions`. An empty name, a duplicate, and CrossRev's own review or resolve job are refused. Default none. |
+| `verification.required_checks` | The check runs a review waits for before judging. Each entry is a `NAME` or `NAME@APP` string, or a `name`/`app` mapping; the app defaults to `github-actions`. An empty name, a duplicate, and CrossRev's own review, resolve or notice job from the GitHub Actions app are refused. Default none. |
 | `verification.wait_minutes` | How long a review waits for its required checks before judging without them, from 0 to 30. Default `10`. |
 
 Every setting above and in the review table is also a flag on `review` and `cycle` — `--concerns`, `--check`, `--required-check` (repeatable), `--no-required-checks` and `--check-wait` — and `--required-check` and `--no-required-checks` are also on `resolve`. The flags are refused where the base policy says automated, the config and the flag pass the same validator, and the run log records each effective value and its source. The configured concerns, check mode, input policy and read mode fingerprint the coverage engine identity, so a generation judged under other settings retires instead of being reused.
