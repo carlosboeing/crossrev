@@ -312,13 +312,14 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 			}
 			promptBytes, callSupplied := shared.render(scheduled.Files, scope.Base, scope.Head, !confirmationDone, whole)
 			start := l.now()
+			readsMark := len(l.readsNotes)
 			answer, env, batchMsgs, err := l.invokePrompt(ctx, req, loaded, settings, expected, promptBytes, call)
 			ms := l.now().Sub(start).Milliseconds()
 			out.Messages = append(out.Messages, batchMsgs...)
 			if err != nil {
 				return err
 			}
-			l.logAcceptedCall(call, promptBytes, suppliedBytes(scheduled.Files), env, ms)
+			l.logAcceptedCall(call, promptBytes, suppliedBytes(scheduled.Files), l.callReadsSince(readsMark), env, ms)
 			parsed, ex, li, err := verdictsFromPayload(answer, scheduled.Files)
 			if err != nil {
 				return err

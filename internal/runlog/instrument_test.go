@@ -56,15 +56,15 @@ func TestPhaseEventLines(t *testing.T) {
 	}
 }
 
-// TestCallEventLine pins the per-accepted-call instrumentation, and that a
-// harness naming no model reads as a dash.
+// TestCallEventLine pins the per-accepted-call instrumentation, the call's
+// served-read count, and that a harness naming no model reads as a dash.
 func TestCallEventLine(t *testing.T) {
 	l := openLog(t, runlog.Options{Repo: "acme/widget", PR: "7", Leg: "review"})
-	l.Call(2, 184320, 409600, 1000, 2000, 300, "stub-model", 12)
-	l.Call(3, 184320, 409600, 0, 0, 0, "", 9)
+	l.Call(2, 184320, 409600, 3, 1000, 2000, 300, "stub-model", 12)
+	l.Call(3, 184320, 409600, 0, 0, 0, 0, "", 9)
 
 	want := "2026-08-29T01:02:03Z run start repo=acme/widget pr=7 revision=-\n" +
-		"2026-08-29T01:02:03Z call 2 prompt_bytes=184320 supplied_bytes=409600 fresh=1000 cached=2000 output=300 reads=0 commands=0 model=stub-model ms=12\n" +
+		"2026-08-29T01:02:03Z call 2 prompt_bytes=184320 supplied_bytes=409600 fresh=1000 cached=2000 output=300 reads=3 commands=0 model=stub-model ms=12\n" +
 		"2026-08-29T01:02:03Z call 3 prompt_bytes=184320 supplied_bytes=409600 fresh=0 cached=0 output=0 reads=0 commands=0 model=- ms=9\n"
 	if got := readLog(t, l); got != want {
 		t.Errorf("run log = %q, want %q", got, want)

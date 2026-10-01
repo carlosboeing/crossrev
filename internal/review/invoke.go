@@ -244,9 +244,10 @@ func (l *Leg) invoke(ctx context.Context, req Request, loaded Context, settings 
 	}.Render()
 
 	start := l.now()
+	readsMark := len(l.readsNotes)
 	envelope, payload, outMsgs, err := l.runPrompt(ctx, req, loaded, settings, adapter, entry, staged, tmp, promptBytes, msgs, 1)
 	if err == nil {
-		l.logAcceptedCall(1, promptBytes, len(diffBytes), envelope, l.now().Sub(start).Milliseconds())
+		l.logAcceptedCall(1, promptBytes, len(diffBytes), l.callReadsSince(readsMark), envelope, l.now().Sub(start).Milliseconds())
 	}
 	return envelope, payload, outMsgs, err
 }

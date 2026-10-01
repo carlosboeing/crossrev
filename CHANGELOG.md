@@ -4,6 +4,10 @@ All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepa
 
 ## [Unreleased]
 
+### Fixed
+
+- **The review call line reports the call's served reads.** `run.log`'s `call <n> …` line carried `reads=0` on every accepted call, even when the call read through the served tool — the reads envelope on the marker counted them while the call line did not. It now prints the served-read count from the reads ledger, summed across the call's attempts the way the usage buckets fold in refused attempts; a call with no served reader still reads zero. `commands=` stays zero because an accepted call never ran one: any command event halts the leg with `review_leg_ran_command` before a call line is written.
+
 ## [0.10.0] — 2026-10-01
 
 ### Added

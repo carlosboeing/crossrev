@@ -262,12 +262,16 @@ func (l *Log) PhaseTerms(terms int, ms int64) {
 
 // Call records one accepted model call: the rendered prompt's byte length,
 // the evidence bytes handed over with it, the usage buckets the accepted
-// envelope folded in, the answering model (or a dash where the harness
-// names none), and the call's wall time including its refused attempts.
+// envelope folded in, the call's served reads from the reads ledger, the
+// answering model (or a dash where the harness names none), and the call's
+// wall time including its refused attempts.
 //
-// reads and commands stay zero: later slices fill them from the tool-call
-// record, and until then the fields read honestly rather than missing.
-func (l *Log) Call(call, promptBytes, suppliedBytes int, fresh, cached, output int64, model string, ms int64) {
+// reads counts what the call served through the served read tool, summed
+// across its attempts the way the usage buckets fold in refused attempts;
+// a call with no served reader — supplied mode — reads zero. commands
+// reads zero because an accepted call never ran one: any command event
+// halts the leg with review_leg_ran_command before a call line is written.
+func (l *Log) Call(call, promptBytes, suppliedBytes, reads int, fresh, cached, output int64, model string, ms int64) {
 	if l == nil {
 		return
 	}
@@ -280,7 +284,7 @@ func (l *Log) Call(call, promptBytes, suppliedBytes int, fresh, cached, output i
 		" fresh="+strconv.FormatInt(fresh, 10)+
 		" cached="+strconv.FormatInt(cached, 10)+
 		" output="+strconv.FormatInt(output, 10)+
-		" reads=0 commands=0"+
+		" reads="+strconv.Itoa(reads)+" commands=0"+
 		" model="+model+
 		" ms="+strconv.FormatInt(ms, 10))
 }

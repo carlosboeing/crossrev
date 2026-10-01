@@ -91,7 +91,7 @@ func TestOpenWithNoDirectory(t *testing.T) {
 	l.Event("run", "start")
 	l.Phase("enumerate", 0)
 	l.PhaseTerms(0, 0)
-	l.Call(1, 0, 0, 0, 0, 0, "", 0)
+	l.Call(1, 0, 0, 0, 0, 0, 0, "", 0)
 	l.Settings("", "", "")
 	l.SetLeg("review")
 	l.ClearTranscripts("")

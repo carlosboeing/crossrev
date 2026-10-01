@@ -213,9 +213,9 @@ func (l *Leg) invokePrompt(ctx context.Context, req Request, loaded Context, set
 // logAcceptedCall writes one accepted call's run-log line: the rendered
 // prompt's byte length, the evidence bytes handed over with it, the usage
 // buckets the accepted envelope folded in (refused attempts included), the
-// answering model, and the call's wall time. A refused answer judged
-// nothing and gets no line.
-func (l *Leg) logAcceptedCall(call int, promptBytes []byte, suppliedBytes int, envelope harness.Envelope, ms int64) {
+// call's served reads from the reads ledger, the answering model, and the
+// call's wall time. A refused answer judged nothing and gets no line.
+func (l *Leg) logAcceptedCall(call int, promptBytes []byte, suppliedBytes, reads int, envelope harness.Envelope, ms int64) {
 	if l.Log == nil {
 		return
 	}
@@ -229,7 +229,7 @@ func (l *Leg) logAcceptedCall(call int, promptBytes []byte, suppliedBytes int, e
 	if envelope.ModelReported != nil {
 		model = *envelope.ModelReported
 	}
-	l.Log.Call(call, len(promptBytes), suppliedBytes, fresh, cached, output, model, ms)
+	l.Log.Call(call, len(promptBytes), suppliedBytes, reads, fresh, cached, output, model, ms)
 }
 
 // suppliedBytes measures what the reviewer was actually given for one batch:

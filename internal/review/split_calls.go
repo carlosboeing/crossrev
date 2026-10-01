@@ -50,13 +50,14 @@ func (l *Leg) invokePartCall(ctx context.Context, req Request, loaded Context, s
 	}
 	promptBytes := shared.renderPart(part, scope.Base, scope.Head, withConfirmation)
 	start := l.now()
+	readsMark := len(l.readsNotes)
 	answer, env, batchMsgs, err := l.invokePrompt(ctx, req, loaded, settings, expected, promptBytes, call)
 	ms := l.now().Sub(start).Milliseconds()
 	out.Messages = append(out.Messages, batchMsgs...)
 	if err != nil {
 		return false, nil, nil, nil, harness.Envelope{}, nil, nil, err
 	}
-	l.logAcceptedCall(call, promptBytes, len(part.Diff), env, ms)
+	l.logAcceptedCall(call, promptBytes, len(part.Diff), l.callReadsSince(readsMark), env, ms)
 	parsed, ex, li, err := verdictsFromPayload(answer, []intel.FileUnit{part.Unit})
 	if err != nil {
 		return false, nil, nil, nil, harness.Envelope{}, nil, nil, err

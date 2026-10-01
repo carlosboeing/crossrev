@@ -538,6 +538,40 @@ func TestServedChildSessionReadsLandInTheEnvelope(t *testing.T) {
 	}
 }
 
+// An accepted call that served reads reports their count on its run-log
+// call line: the reads ledger and the call line agree. A call that served
+// nothing — supplied mode, or a served call with an empty session — still
+// reads zero.
+func TestCallLineReportsTheCallsServedReads(t *testing.T) {
+	e := newEnv(t)
+	writeRequiredHead(e, "a.go", "package a\n")
+	e.runner.onSpec = func(spec exec.Spec) {
+		serveChildSession(t, spec,
+			`{"event":"start"}`,
+			`{"event":"initialize"}`,
+			`{"event":"tools_list"}`,
+			`{"event":"read","payload":{"path":"a.go","revision":"head","start_line":1,"end_line":2,"bytes":11}}`,
+			`{"event":"read","payload":{"path":"a.go","revision":"head","start_line":3,"end_line":4,"bytes":12}}`,
+			`{"event":"end"}`,
+		)
+	}
+	e.runner.script = []exec.Result{
+		{ExitCode: 0, Stdout: claudeStdout(batchAnswerFor(t, []string{"a.go"}))},
+	}
+
+	got := runLeg(t, e, e.request(t))
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
+	lines := runLogLines(readRunLog(t, e), "call")
+	if len(lines) != 1 {
+		t.Fatalf("call lines = %d, want 1:\n%s", len(lines), readRunLog(t, e))
+	}
+	if !strings.Contains(lines[0], "reads=2 commands=0") {
+		t.Errorf("call line = %q, want reads=2 commands=0", lines[0])
+	}
+}
+
 // A refused call in the child's served session degrades where the policy
 // says degrade: the reason travels in the pass comment and the marker
 // carries the envelope.
