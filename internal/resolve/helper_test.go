@@ -338,8 +338,14 @@ type fakeForge struct {
 	replyErr       error
 	threadErr      error
 	issueErr       error
-	zeroCreateID   bool
-	order          []string
+	zeroCreateID bool
+	order        []string
+	// checks is what CheckRuns answers: the required-check evidence for
+	// the head. checksCalls counts the reads, so a case can pin that the
+	// settle refreshed its evidence.
+	checks      []forge.CheckRun
+	checksErr   error
+	checksCalls int
 }
 
 type reviewReply struct {
@@ -424,6 +430,14 @@ func (f *fakeForge) AwaitingPullRequests(context.Context, core.Slug) []forge.Awa
 }
 func (f *fakeForge) WorkflowRunStatus(context.Context, core.Slug, string) forge.RunStatus {
 	return ""
+}
+func (f *fakeForge) CheckRuns(context.Context, core.Slug, core.Revision) (forge.CheckRuns, error) {
+	f.note("CheckRuns")
+	f.checksCalls++
+	if f.checksErr != nil {
+		return forge.CheckRuns{}, f.checksErr
+	}
+	return forge.CheckRuns{Runs: f.checks}, nil
 }
 func (f *fakeForge) LabelColour(context.Context, core.Slug, string) string { return "" }
 func (f *fakeForge) IssueByFinding(_ context.Context, _ core.Slug, _ string, id core.FindingID) (int, bool) {

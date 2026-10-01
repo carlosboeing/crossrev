@@ -999,6 +999,27 @@ if [[ -n "${CROSSREV_GH_STATE:-}" ]]; then
       exit 0
     fi
   fi
+
+  # Check runs for a commit: GET repos/<slug>/commits/<sha>/check-runs.
+  # The route table wins when it matches, so a case scripts a refusal
+  # with !fail or !deny and a truncation with a total above its runs;
+  # otherwise a seeded check-runs.json answers, paginated the way the
+  # endpoint paginates; otherwise the commit carries no runs.
+  if [[ "$joined" == "api repos/"*"/commits/"*"/check-runs"* ]]; then
+    match_routes
+    page="$(extract_field page "$@")"
+    [[ "$page" =~ ^[0-9]+$ ]] || page="1"
+    per_page="$(extract_field per_page "$@")"
+    [[ "$per_page" =~ ^[0-9]+$ ]] || per_page="100"
+    if [[ -f "$CROSSREV_GH_STATE/check-runs.json" ]]; then
+      jq -c --argjson page "$page" --argjson per "$per_page" \
+        '{total_count: length, check_runs: .[(($page - 1) * $per):($page * $per)]}' \
+        "$CROSSREV_GH_STATE/check-runs.json" | emit
+      exit 0
+    fi
+    printf '{"total_count":0,"check_runs":[]}\n' | emit
+    exit 0
+  fi
 fi
 
 match_routes

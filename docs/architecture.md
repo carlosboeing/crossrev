@@ -318,7 +318,7 @@ internal/        Go packages, in tiers
   cred/            Tier 2: credential resolution
   harness/         Tier 2: model harness adapters
   symbols/         Tier 2: symbol indexing and worker entrypoint
-  verify/          Tier 2: verification runner
+  verify/          Tier 2: required-check gate evaluator, verification runner
   verify/ghactions/ Tier 2: GitHub Actions simulation
   testgen/         Tier 2: policy-table fixture generator
   archtest/        Tier 2: structural rules over the source tree
@@ -327,7 +327,7 @@ internal/        Go packages, in tiers
   cycle/           Tier 3: multi-pass cycle driver
   app/             Tier 3: application lifecycle
   initcmd/         Tier 3: init command
-  preflight/       Tier 3: dependency checks and the coverage report
+  preflight/       Tier 3: dependency checks, the coverage report and the gate report
   cli/             Tier 3: CLI command router
 schemas/         findings.schema.json, resolve.schema.json, check.schema.json
 skills/          pr-review/, pr-resolve/
