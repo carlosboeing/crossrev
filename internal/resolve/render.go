@@ -523,6 +523,14 @@ func runDetails(m prstate.Marker, leg string) string {
 
 // ResolveSummaryBody is _resolve_summary_body at lib/run.sh:2729-2781.
 func ResolveSummaryBody(resolutions, findings json.RawMessage, deferredLines string, marker prstate.Marker, repo string, pr, maxPasses int) string {
+	// The check's rejected and duplicate entries never reached the
+	// resolver, so they read as neither held nor awaiting resolution
+	// here. Untouched when nothing was checked out.
+	var resolveNodes []harness.Node
+	_ = json.Unmarshal(findings, &resolveNodes)
+	if filtered := excludeCheckedOut(resolveNodes, marker.CheckedOut); len(filtered) != len(resolveNodes) {
+		findings, _ = json.Marshal(filtered)
+	}
 	summary, _ := marker.Summary.Get()
 	pass := marker.Pass
 	if pass == 0 {
@@ -661,9 +669,37 @@ func actionableCount(findings []harness.Node, minFix core.Severity) int {
 	return n
 }
 
+// excludeCheckedOut drops the findings the cross-model check kept off the
+// pull request: every id the marker's checked_out names. The rewrite
+// renders the same visible set the review leg published, so a rejected
+// candidate stays out of the table and the counts here too.
+func excludeCheckedOut(fs []harness.Node, checkedOut json.RawMessage) []harness.Node {
+	ids := prstate.CheckedOutIDs(checkedOut)
+	if len(ids) == 0 {
+		return fs
+	}
+	out := make([]harness.Node, 0, len(fs))
+	for _, f := range fs {
+		if id, ok := f.Member("id").AsString(); ok && ids[id] {
+			continue
+		}
+		out = append(out, f)
+	}
+	return out
+}
+
 func reviewSummaryBody(findings json.RawMessage, marker prstate.Marker, repo core.Slug, pr int, minFix core.Severity, maxPasses int, cov commentCoverage) string {
 	var fs []harness.Node
 	_ = json.Unmarshal(findings, &fs)
+	if filtered := excludeCheckedOut(fs, marker.CheckedOut); len(filtered) != len(fs) {
+		// The rewrite renders from the same visible set the review
+		// leg published: remarshal so the table and the held counts
+		// below read the filtered record. Untouched when nothing was
+		// checked out, so a pass without a check renders byte for byte
+		// as before.
+		fs = filtered
+		findings, _ = json.Marshal(fs)
+	}
 	n := len(fs)
 	actionable := actionableCount(fs, minFix)
 	verdict, ok := marker.Verdict.Get()
@@ -717,8 +753,12 @@ func reviewSummaryBody(findings json.RawMessage, marker prstate.Marker, repo cor
 		// As in the review leg's own summary: held findings never reach
 		// the resolver, so on a mixed pass the resolving claims scope to
 		// posted findings. A pass with nothing held reads exactly as it
-		// always has.
-		if held := countUnposted(findings); held > 0 {
+		// always has. A pass whose every candidate stayed off the pull
+		// request says so rather than sending a second agent after zero
+		// findings.
+		if n == 0 && len(prstate.DecodeCheckedOutRaw(marker.CheckedOut)) > 0 {
+			b.WriteString(alert("TIP", "**No findings need resolving.** Every candidate stayed off the pull request; the list below names them."))
+		} else if held := countUnposted(findings); held > 0 {
 			posted := n - held
 			need := fmt.Sprintf("**%d posted findings need resolving.**", posted)
 			if posted == 1 {
@@ -731,7 +771,11 @@ func reviewSummaryBody(findings json.RawMessage, marker prstate.Marker, repo cor
 	}
 	fmt.Fprintf(&b, "Verdict: **%s**.\n\n", verdict)
 	if n == 0 {
-		b.WriteString("No findings. Low-severity and pre-existing issues would be listed here too, so this is an empty review rather than a filtered one.\n\n")
+		if len(prstate.DecodeCheckedOutRaw(marker.CheckedOut)) > 0 {
+			b.WriteString("No findings posted.\n\n")
+		} else {
+			b.WriteString("No findings. Low-severity and pre-existing issues would be listed here too, so this is an empty review rather than a filtered one.\n\n")
+		}
 	} else {
 		sha, _ := marker.HeadSHA.Get()
 		b.WriteString(findingsTable(findings, sha, repo))
@@ -747,6 +791,9 @@ func reviewSummaryBody(findings json.RawMessage, marker prstate.Marker, repo cor
 			fmt.Fprintf(&b, "%d %s below %s recorded and not posted.\n\n", held, noun, minFix)
 		}
 	}
+	// The same check lines the review leg wrote, or the rewrite would
+	// strip them.
+	b.WriteString(prstate.CheckSummaryBlock(marker.Check.Value(), marker.CheckReason.Value(), marker.CheckedOut))
 	if cov.on {
 		b.WriteString(intel.CoverageFootnote(cov.counts, cov.sha))
 		b.WriteString(intel.ExclusionLine(cov.excluded))

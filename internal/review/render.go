@@ -37,6 +37,15 @@ type Finding struct {
 	// finding back. Omitted on the wire when unset, so a posted finding
 	// encodes exactly as it always has.
 	Posted *bool `json:"posted,omitempty"`
+	// Concerns names what raised the finding, in fixed order. Absent for
+	// a finding recorded before concerns existed.
+	Concerns []string `json:"concerns,omitempty"`
+	// OriginalSeverity and OriginalPreExisting record what the reviewer
+	// raised before the cross-model check corrected it. Absent when the
+	// check left the value alone — which is every finding the check
+	// never saw.
+	OriginalSeverity    *string `json:"original_severity,omitempty"`
+	OriginalPreExisting *bool   `json:"original_pre_existing,omitempty"`
 }
 
 // IsPosted reports whether the finding reached the pull request. Absent
@@ -281,6 +290,7 @@ func CommentBody(f Finding, pass int, harn, model, minFix string) string {
 
 // SummaryBody is _review_summary_body (lib/run.sh:1675-1730).
 func SummaryBody(findings []Finding, marker prstate.Marker, ctx RenderContext) string {
+	findings = excludeCheckedOut(findings, marker.CheckedOut)
 	n := len(findings)
 	actionable := ActionableCount(findings, ctx.MinFix)
 	verdict := "issues-remain"
@@ -348,8 +358,12 @@ func SummaryBody(findings []Finding, marker prstate.Marker, ctx RenderContext) s
 		// Held findings never reach the resolver, so on a mixed pass the
 		// resolving claims scope to posted findings; the held count below
 		// the table still names the rest. A pass with nothing held reads
-		// exactly as it always has.
-		if held := countHeld(findings); held > 0 {
+		// exactly as it always has. A pass whose every candidate stayed
+		// off the pull request says so rather than sending a second
+		// agent after zero findings.
+		if n == 0 && len(prstate.DecodeCheckedOutRaw(marker.CheckedOut)) > 0 {
+			b.WriteString(alert("TIP", "**No findings need resolving.** Every candidate stayed off the pull request; the list below names them."))
+		} else if held := countHeld(findings); held > 0 {
 			posted := n - held
 			need := fmt.Sprintf("**%d posted findings need resolving.**", posted)
 			if posted == 1 {
@@ -364,7 +378,11 @@ func SummaryBody(findings []Finding, marker prstate.Marker, ctx RenderContext) s
 	fmt.Fprintf(&b, "Verdict: **%s**.\n\n", verdict)
 
 	if n == 0 {
-		b.WriteString("No findings. Low-severity and pre-existing issues would be listed here too, so this is an empty review rather than a filtered one.\n\n")
+		if len(prstate.DecodeCheckedOutRaw(marker.CheckedOut)) > 0 {
+			b.WriteString("No findings posted.\n\n")
+		} else {
+			b.WriteString("No findings. Low-severity and pre-existing issues would be listed here too, so this is an empty review rather than a filtered one.\n\n")
+		}
 	} else {
 		sha, _ := marker.HeadSHA.Get()
 		b.WriteString(findingsTable(findings, ctx.Repo, sha))
@@ -376,6 +394,7 @@ func SummaryBody(findings []Finding, marker prstate.Marker, ctx RenderContext) s
 			fmt.Fprintf(&b, "%d %s below %s recorded and not posted.\n\n", held, noun, ctx.MinFix)
 		}
 	}
+	b.WriteString(prstate.CheckSummaryBlock(marker.Check.Value(), marker.CheckReason.Value(), marker.CheckedOut))
 	b.WriteString(coverageFootnote(marker, ctx))
 	b.WriteString(exclusionLine(ctx.Excluded))
 
@@ -776,6 +795,26 @@ func parseFindings(raw json.RawMessage) []Finding {
 	var out []Finding
 	if err := json.Unmarshal(raw, &out); err != nil {
 		return nil
+	}
+	return out
+}
+
+// excludeCheckedOut drops the findings the cross-model check kept off the
+// pull request: every id the marker's checked_out names. Only confirmed
+// candidates — and every candidate when the check degraded or was off —
+// post and count as actionable; the dropped entries stay on the marker
+// for the record.
+func excludeCheckedOut(findings []Finding, checkedOut json.RawMessage) []Finding {
+	ids := prstate.CheckedOutIDs(checkedOut)
+	if len(ids) == 0 {
+		return findings
+	}
+	out := make([]Finding, 0, len(findings))
+	for _, f := range findings {
+		if f.ID != "" && ids[f.ID] {
+			continue
+		}
+		out = append(out, f)
 	}
 	return out
 }

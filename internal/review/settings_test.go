@@ -34,7 +34,9 @@ func TestTheRunLogRecordsEachEffectiveSettingAndItsSource(t *testing.T) {
 		return readRunLog(t, e)
 	}
 
-	if log := run(t, "", nil); !strings.Contains(log,
+	// The helper scopes cases to check: off; the default case names the
+	// bare config explicitly.
+	if log := run(t, "version: 2\n", nil); !strings.Contains(log,
 		"concerns=correctness,consistency concerns_source=default"+
 			" check=resolver check_source=default"+
 			" required_checks= required_checks_source=default"+
@@ -129,6 +131,7 @@ func TestReviewSettingOverrideFlagsAcceptedInLocalMode(t *testing.T) {
 // computed from the base policy, not the bare engine version.
 func TestReviewPublishesTheBasePolicyEngineID(t *testing.T) {
 	e := newEnv(t)
+	e.cfg = mustConfig(t, "version: 2\n")
 	writeRequiredHead(e, "a.go", "package a\n")
 	e.runner.script = []exec.Result{
 		{ExitCode: 0, Stdout: claudeStdout(batchAnswer(t, 1))},
@@ -182,6 +185,7 @@ func TestReviewEngineIDMovesWithTheBasePolicy(t *testing.T) {
 // in the run log, not the identity.
 func TestReviewFlagOverridesDoNotMoveThePublishedEngineID(t *testing.T) {
 	e := newEnv(t)
+	e.cfg = mustConfig(t, "version: 2\n")
 	writeRequiredHead(e, "a.go", "package a\n")
 	e.runner.script = []exec.Result{
 		{ExitCode: 0, Stdout: claudeStdout(batchAnswer(t, 1))},

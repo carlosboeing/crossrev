@@ -10,6 +10,7 @@ import (
 
 	"github.com/carlosboeing/crossrev/internal/config"
 	"github.com/carlosboeing/crossrev/internal/core"
+	"github.com/carlosboeing/crossrev/internal/diff"
 	"github.com/carlosboeing/crossrev/internal/harness"
 	"github.com/carlosboeing/crossrev/internal/intel"
 	"github.com/carlosboeing/crossrev/internal/policy"
@@ -405,7 +406,7 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 	if plan.HaltReason != "" || len(plan.Carried) > 0 {
 		return l.haltPass(ctx, req, loaded, pass, claimID, out, marker, &batchBound{plan: plan, scope: scope, accepted: acceptedIDs})
 	}
-	return l.finishCoveredPass(ctx, req, loaded, settings, pass, claimID, marker, scope, outcome, pair, out)
+	return l.finishCoveredPass(ctx, req, loaded, settings, pass, claimID, marker, scope, outcome, pair, shared.diff, out)
 }
 
 // moveSkips transfers packing's skipped units from the required set into the
@@ -907,7 +908,7 @@ func haltUILines(outstanding []string, stop prstate.CoverageStop) []ui.Line {
 // finishCoveredPass folds a fully covered pass into the result: the marker
 // carries the current coverage manifest id and the batch findings, and the
 // caller continues to the existing enrich-and-publish path with them.
-func (l *Leg) finishCoveredPass(ctx context.Context, req Request, loaded Context, settings legSettings, pass int, claimID int64, marker prstate.Marker, scope intel.Scope, outcome batchOutcome, pair confirmationPair, out *Result) error {
+func (l *Leg) finishCoveredPass(ctx context.Context, req Request, loaded Context, settings legSettings, pass int, claimID int64, marker prstate.Marker, scope intel.Scope, outcome batchOutcome, pair confirmationPair, parsed *diff.Diff, out *Result) error {
 	_ = ctx
 	_ = req
 	_ = loaded
@@ -932,7 +933,7 @@ func (l *Leg) finishCoveredPass(ctx context.Context, req Request, loaded Context
 	// predicate has already applied the converged label.
 	marker.CoverageStop = prstate.Null[prstate.CoverageStop]()
 	out.Marker = marker
-	out.Covered = coveredPass{findings: outcome.findings, verdict: verdict, envelope: summedEnvelope(outcome), payload: mergePayloads(outcome.payloads, verdict), examined: outcome.examined, limits: outcome.limits}
+	out.Covered = coveredPass{findings: outcome.findings, verdict: verdict, envelope: summedEnvelope(outcome), payload: mergePayloads(outcome.payloads, verdict), examined: outcome.examined, limits: outcome.limits, parsed: parsed}
 	return nil
 }
 
@@ -1096,6 +1097,10 @@ type coveredPass struct {
 	payload  json.RawMessage
 	examined []string
 	limits   []string
+	// parsed is the pass's base-to-head diff, already read for the
+	// batch snapshot: the cross-model check slices its excerpts from
+	// this rather than reading the diff a second time.
+	parsed *diff.Diff
 }
 
 var _ validate.ReviewExpectations

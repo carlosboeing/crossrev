@@ -372,7 +372,7 @@ func (l *Leg) invoke(ctx context.Context, req Request, loaded Context, settings 
 
 	start := l.now()
 	readsMark := len(l.readsNotes)
-	envelope, payload, outMsgs, err := l.runPrompt(ctx, req, loaded, settings, adapter, entry, staged, tmp, promptBytes, msgs, 1)
+	envelope, payload, outMsgs, err := l.runPrompt(ctx, req, loaded, settings, adapter, entry, staged, tmp, promptBytes, msgs, 1, promptSpec{schema: validate.FindingsSchema(), check: l.checkPayload})
 	if err == nil {
 		l.logAcceptedCall(1, promptBytes, len(diffBytes), l.callReadsSince(readsMark), envelope, l.now().Sub(start).Milliseconds())
 	}
@@ -427,13 +427,28 @@ func drainReadLog(l *runlog.Log, tmp string) {
 	}
 }
 
+// promptSpec is what varies between the two prompts that share runPrompt:
+// the review prompt and the cross-model check prompt. Everything else the
+// call runs under — quarantine, the isolation and version gates, served
+// reads, credential staging and the command tripwire — is identical,
+// which is what makes the checker's answer independent of the reviewer
+// without a second isolation implementation to keep in step.
+type promptSpec struct {
+	// schema is the output schema the harness is handed beside the prompt.
+	schema []byte
+	// check validates one answer: nil accepts it, a *validate.SemanticError
+	// earns the one semantic retry, and any other error spends the shape
+	// budget.
+	check func(payload []byte) error
+}
+
 // runPrompt runs one rendered prompt through the harness child with the
 // leg's validation seam: one semantic retry naming the rejected numbers,
 // then a fatal refusal that publishes nothing. The deferred sandbox restore
 // assigns through the named retErr return, so a restore failure after a
 // successful answer still fails the leg the way the frozen path does. call
 // is the call's number in the pass, naming its transcripts.
-func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settings legSettings, adapter harness.Adapter, entry harness.Descriptor, staged *cred.Staged, tmp string, promptBytes []byte, msgs []ui.Line, call int) (envelope harness.Envelope, payload json.RawMessage, outMsgs []ui.Line, retErr error) {
+func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settings legSettings, adapter harness.Adapter, entry harness.Descriptor, staged *cred.Staged, tmp string, promptBytes []byte, msgs []ui.Line, call int, pspec promptSpec) (envelope harness.Envelope, payload json.RawMessage, outMsgs []ui.Line, retErr error) {
 	outMsgs = msgs
 
 	// A harness whose served-or-tripwire command block is unverified at
@@ -441,11 +456,13 @@ func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settin
 	// review_isolation_unverified before any child starts, while its
 	// resolve leg is unaffected. The gate sits here, on the one path
 	// every call takes, so the frozen prompt and the batch loop refuse
-	// the same way.
+	// the same way — and the cross-model check degrades on it rather
+	// than failing the pass, which is what the Kind below lets it ask.
 	if refusal := harness.ReviewIsolationRefusal(l.Harness, settings.harness); refusal != nil {
 		return harness.Envelope{}, nil, outMsgs, &ui.FatalError{
 			Reason: refusal.Reason,
 			Action: refusal.Action,
+			Kind:   harness.ErrIsolationUnverified,
 		}
 	}
 
@@ -454,7 +471,7 @@ func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settin
 	if err := os.WriteFile(promptPath, promptBytes, 0o600); err != nil {
 		return harness.Envelope{}, nil, outMsgs, err
 	}
-	schemaBytes := validate.FindingsSchema()
+	schemaBytes := pspec.schema
 	if err := os.WriteFile(schemaPath, schemaBytes, 0o600); err != nil {
 		return harness.Envelope{}, nil, outMsgs, err
 	}
@@ -584,6 +601,7 @@ func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settin
 			return harness.Envelope{}, nil, outMsgs, &ui.FatalError{
 				Reason: refusal.Reason,
 				Action: refusal.Action,
+				Kind:   harness.ErrIsolationUnverified,
 			}
 		}
 	}
@@ -766,6 +784,7 @@ func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settin
 			return envelope, nil, outMsgs, &ui.FatalError{
 				Reason: fmt.Sprintf("the %s harness failed: %s", settings.harness, msg),
 				Action: "If the error above mentions authentication, a token or a 401, the harness is installed and cannot log in.",
+				Kind:   harness.ErrHarnessFailed,
 			}
 		}
 		// The post-call reads check: the handshake in the server log, and
@@ -805,7 +824,7 @@ func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settin
 			continue
 		}
 
-		problem := l.checkPayload(envelope.Payload)
+		problem := pspec.check(envelope.Payload)
 		if problem == nil {
 			foldRefusedAttempts(&envelope, refused)
 			return envelope, envelope.Payload, outMsgs, nil
@@ -830,6 +849,7 @@ func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settin
 			return envelope, nil, outMsgs, &ui.FatalError{
 				Reason: fmt.Sprintf("%s twice returned an answer that contradicts what it was given — %s", settings.harness, problem),
 				Action: "The shape was right both times, so the schema cannot catch this and CrossRev will not guess which finding was meant. Nothing has been written to the pull request, and the edits both rejected attempts made have been put back. Re-run the leg, or try the other harness.",
+				Kind:   harness.ErrAnswerRejected,
 			}
 		}
 		shapeBudget--
@@ -855,6 +875,7 @@ func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settin
 		return envelope, nil, outMsgs, &ui.FatalError{
 			Reason: fmt.Sprintf("%s returned an object that does not match the schema — %s", settings.harness, problem),
 			Action: shapeExhaustedAction(schemaNative),
+			Kind:   harness.ErrAnswerRejected,
 		}
 	}
 }

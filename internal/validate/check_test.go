@@ -1,0 +1,195 @@
+package validate_test
+
+import (
+	"errors"
+	"strings"
+	"testing"
+
+	"github.com/carlosboeing/crossrev/internal/validate"
+)
+
+// A well-formed answer over two candidates is accepted, with its decisions
+// and corrections read back.
+func TestCheckAcceptsOneDecisionPerPosition(t *testing.T) {
+	payload := `{"decisions":[
+		{"position":1,"decision":"confirmed","duplicate_of":null,"reason":"the nil dereference is real","severity":null,"pre_existing":null},
+		{"position":2,"decision":"duplicate","duplicate_of":1,"reason":"same nil dereference","severity":"high","pre_existing":false}
+	]}`
+	got, err := validate.Check([]byte(payload), validate.CheckExpectations{Positions: []int{1, 2}})
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("decisions = %d, want 2", len(got))
+	}
+	if got[0].Decision != "confirmed" || got[0].Reason != "the nil dereference is real" {
+		t.Errorf("decision 1 = %+v", got[0])
+	}
+	if got[0].HasSeverity || got[0].HasPre {
+		t.Errorf("decision 1 carries corrections it did not name: %+v", got[0])
+	}
+	if got[1].Decision != "duplicate" || got[1].DuplicateOf != 1 {
+		t.Errorf("decision 2 = %+v", got[1])
+	}
+	if !got[1].HasSeverity || got[1].Severity != "high" {
+		t.Errorf("decision 2 severity = %q, want the high correction", got[1].Severity)
+	}
+	if !got[1].HasPre || got[1].PreExisting {
+		t.Errorf("decision 2 pre_existing = %v, want the false correction", got[1].PreExisting)
+	}
+}
+
+// Shape failures are ShapeErrors: unparseable JSON, a non-object, a missing
+// decisions array, and mistyped entries.
+func TestCheckShapeRefusesMalformedPayloads(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		payload string
+		want    string
+	}{
+		{"unparseable", `{"decisions":`, "not parseable"},
+		{"non-object", `[]`, "not a JSON object"},
+		{"missing decisions", `{}`, "decisions is missing"},
+		{"decisions not an array", `{"decisions":{}}`, "decisions is missing"},
+		{"non-object entry", `{"decisions":[1]}`, "not an object"},
+		{"missing position", `{"decisions":[{"decision":"confirmed","duplicate_of":null,"reason":"x","severity":null,"pre_existing":null}]}`, "no usable position"},
+		{"fractional position", `{"decisions":[{"position":1.5,"decision":"confirmed","duplicate_of":null,"reason":"x","severity":null,"pre_existing":null}]}`, "no usable position"},
+		{"unknown decision", `{"decisions":[{"position":1,"decision":"maybe","duplicate_of":null,"reason":"x","severity":null,"pre_existing":null}]}`, "no usable decision"},
+		{"duplicate without target", `{"decisions":[{"position":1,"decision":"duplicate","duplicate_of":null,"reason":"x","severity":null,"pre_existing":null}]}`, "naming no other candidate"},
+		{"confirmed with target", `{"decisions":[{"position":1,"decision":"confirmed","duplicate_of":2,"reason":"x","severity":null,"pre_existing":null}]}`, "still names candidate 2"},
+		{"missing reason", `{"decisions":[{"position":1,"decision":"confirmed","duplicate_of":null,"reason":"","severity":null,"pre_existing":null}]}`, "carries no reason"},
+		{"bad severity", `{"decisions":[{"position":1,"decision":"confirmed","duplicate_of":null,"reason":"x","severity":"critical","pre_existing":null}]}`, "no usable severity"},
+		{"bad pre_existing", `{"decisions":[{"position":1,"decision":"confirmed","duplicate_of":null,"reason":"x","severity":null,"pre_existing":"no"}]}`, "no usable pre_existing"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := validate.Check([]byte(tc.payload), validate.CheckExpectations{Positions: []int{1}})
+			if err == nil {
+				t.Fatal("the payload was accepted")
+			}
+			var shape *validate.ShapeError
+			if !errors.As(err, &shape) {
+				t.Fatalf("err = %T %v, want a *ShapeError", err, err)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("err = %q, want it to say %q", err, tc.want)
+			}
+		})
+	}
+}
+
+// Semantic failures are SemanticErrors: a missing or repeated position, a
+// decision for a candidate the call never numbered, a self-reference, a
+// chain that does not end confirmed, and a cycle.
+func TestCheckSemanticRefusesContradictoryAnswers(t *testing.T) {
+	dec := func(position int, decision string, dup int) string {
+		target := "null"
+		if dup > 0 {
+			target = itoa(dup)
+		}
+		return `{"position":` + itoa(position) +
+			`,"decision":"` + decision + `","duplicate_of":` + target +
+			`,"reason":"because","severity":null,"pre_existing":null}`
+	}
+	for _, tc := range []struct {
+		name      string
+		positions []int
+		payload   string
+		want      string
+	}{
+		{"missing position", []int{1, 2},
+			`{"decisions":[` + dec(1, "confirmed", 0) + `]}`, "candidate 2 carries no decision"},
+		{"repeated position", []int{1},
+			`{"decisions":[` + dec(1, "confirmed", 0) + `,` + dec(1, "rejected", 0) + `]}`, "candidate 1 carries two decisions"},
+		{"unnumbered position", []int{1},
+			`{"decisions":[` + dec(2, "confirmed", 0) + `]}`, "decision 2 judges no candidate"},
+		{"self reference", []int{1, 2},
+			`{"decisions":[` + dec(1, "duplicate", 1) + `,` + dec(2, "confirmed", 0) + `]}`, "candidate 1 duplicates itself"},
+		{"duplicate of rejected", []int{1, 2},
+			`{"decisions":[` + dec(1, "rejected", 0) + `,` + dec(2, "duplicate", 1) + `]}`, "duplicates rejected candidate 1"},
+		{"two-cycle", []int{1, 2},
+			`{"decisions":[` + dec(1, "duplicate", 2) + `,` + dec(2, "duplicate", 1) + `]}`, "duplicate cycle"},
+		{"three-cycle", []int{1, 2, 3},
+			`{"decisions":[` + dec(1, "duplicate", 2) + `,` + dec(2, "duplicate", 3) + `,` + dec(3, "duplicate", 1) + `]}`, "duplicate cycle"},
+		{"chain through rejected", []int{1, 2, 3},
+			`{"decisions":[` + dec(1, "rejected", 0) + `,` + dec(2, "duplicate", 1) + `,` + dec(3, "duplicate", 2) + `]}`, "duplicates rejected candidate 1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := validate.Check([]byte(tc.payload), validate.CheckExpectations{Positions: tc.positions})
+			if err == nil {
+				t.Fatal("the payload was accepted")
+			}
+			var semantic *validate.SemanticError
+			if !errors.As(err, &semantic) {
+				t.Fatalf("err = %T %v, want a *SemanticError", err, err)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("err = %q, want it to say %q", err, tc.want)
+			}
+		})
+	}
+}
+
+// A duplicate chain through another duplicate still ends confirmed, and is
+// accepted.
+func TestCheckAcceptsADuplicateChainEndingConfirmed(t *testing.T) {
+	payload := `{"decisions":[
+		{"position":1,"decision":"confirmed","duplicate_of":null,"reason":"real","severity":null,"pre_existing":null},
+		{"position":2,"decision":"duplicate","duplicate_of":1,"reason":"same","severity":null,"pre_existing":null},
+		{"position":3,"decision":"duplicate","duplicate_of":2,"reason":"same again","severity":null,"pre_existing":null}
+	]}`
+	if _, err := validate.Check([]byte(payload), validate.CheckExpectations{Positions: []int{1, 2, 3}}); err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+}
+
+// A packed call judges a subset, and its duplicates may name a candidate
+// another call numbered: the per-call check leaves the cross-call chain
+// for the merge, which CheckChains then judges.
+func TestCheckChainsJudgesTheMergedDecisions(t *testing.T) {
+	one := `{"decisions":[{"position":1,"decision":"duplicate","duplicate_of":2,"reason":"same","severity":null,"pre_existing":null}]}`
+	two := `{"decisions":[{"position":2,"decision":"rejected","duplicate_of":null,"reason":"wrong","severity":null,"pre_existing":null}]}`
+	first, err := validate.Check([]byte(one), validate.CheckExpectations{Positions: []int{1}})
+	if err != nil {
+		t.Fatalf("first call: %v", err)
+	}
+	second, err := validate.Check([]byte(two), validate.CheckExpectations{Positions: []int{2}})
+	if err != nil {
+		t.Fatalf("second call: %v", err)
+	}
+	if err := validate.CheckChains(append(first, second...)); err == nil {
+		t.Fatal("the merged chain ending rejected was accepted")
+	} else if !strings.Contains(err.Error(), "duplicates rejected candidate 2") {
+		t.Errorf("err = %q", err)
+	}
+	three := `{"decisions":[{"position":2,"decision":"confirmed","duplicate_of":null,"reason":"real","severity":null,"pre_existing":null}]}`
+	confirmed, err := validate.Check([]byte(three), validate.CheckExpectations{Positions: []int{2}})
+	if err != nil {
+		t.Fatalf("second call: %v", err)
+	}
+	if err := validate.CheckChains(append(first, confirmed...)); err != nil {
+		t.Errorf("the merged chain ending confirmed was refused: %v", err)
+	}
+}
+
+// With no numbered positions the check is shape only, for callers holding
+// no candidate numbering to contradict.
+func TestCheckWithoutPositionsChecksShapeOnly(t *testing.T) {
+	if _, err := validate.Check([]byte(`{"decisions":[]}`), validate.CheckExpectations{}); err != nil {
+		t.Errorf("an empty decision list is well-shaped: %v", err)
+	}
+	if _, err := validate.Check([]byte(`{}`), validate.CheckExpectations{}); err == nil {
+		t.Error("a missing decisions array was accepted")
+	}
+}
+
+func itoa(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	var b []byte
+	for n > 0 {
+		b = append([]byte{byte('0' + n%10)}, b...)
+		n /= 10
+	}
+	return string(b)
+}

@@ -177,6 +177,7 @@ func TestReviewRetriesSemanticOmissionOnce(t *testing.T) {
 // verdicts, while a moved head starts from zero accepted units.
 func TestReviewRestartUsesOnlySameRevisionCoverage(t *testing.T) {
 	e := newEnv(t)
+	e.cfg = mustConfig(t, "version: 2\n")
 	writeRequiredHead(e, "a.go", "package a\n")
 	e.runner.script = []exec.Result{
 		{ExitCode: 0, Stdout: claudeStdout(batchAnswer(t, 1))},
