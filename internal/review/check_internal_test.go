@@ -487,6 +487,74 @@ func TestPackCheckCallsSplitsAnOverflowingGroup(t *testing.T) {
 	}
 }
 
+// Check usage prices each accepted call at its own answering model
+// and aggregates: buckets summed, costs summed where every priced
+// call carries one. A call no rate prices clears the total rather
+// than understating it, and a cost mixing harness and table sources
+// reads mixed.
+func TestPriceCheckUsageAggregatesPerCallCosts(t *testing.T) {
+	doc, err := harness.Descriptors()
+	if err != nil {
+		t.Fatalf("harness descriptor: %v", err)
+	}
+	checker := legSettings{harness: "claude"}
+	mk := func(model string, in, out int64) harness.Envelope {
+		return harness.Envelope{
+			ModelReported: &model,
+			Usage:         &harness.Usage{InputFresh: in, Output: out},
+		}
+	}
+	mixed := priceCheckUsage([]harness.Envelope{
+		mk("gpt-5.6", 1000, 100),
+		mk("claude-opus-5", 1000, 100),
+	}, doc, checker, false)
+	if mixed == nil {
+		t.Fatal("no usage aggregated")
+	}
+	if mixed.InputFresh != 2000 || mixed.Output != 200 {
+		t.Errorf("buckets = %+v, want both calls summed", mixed)
+	}
+	// 0.006 for the gpt-5.6 call beside 0.0075 for the opus call.
+	if mixed.CostUSD == nil || *mixed.CostUSD < 0.0134 || *mixed.CostUSD > 0.0136 {
+		t.Errorf("cost = %v, want the per-call sum near 0.0135", mixed.CostUSD)
+	}
+	if mixed.CostSource == nil || *mixed.CostSource != "table" {
+		t.Errorf("source = %v, want table", mixed.CostSource)
+	}
+	unpriced := priceCheckUsage([]harness.Envelope{
+		mk("gpt-5.6", 1000, 100),
+		mk("no-such-model-xyz", 1000, 100),
+	}, doc, checker, false)
+	if unpriced == nil {
+		t.Fatal("no usage aggregated")
+	}
+	if unpriced.CostUSD != nil || unpriced.CostSource != nil {
+		t.Errorf("cost = %v (%v), want the total cleared", unpriced.CostUSD, unpriced.CostSource)
+	}
+	if unpriced.InputFresh != 2000 {
+		t.Errorf("buckets = %+v, want both calls summed", unpriced)
+	}
+	harnessCost := 1.5
+	blended := priceCheckUsage([]harness.Envelope{
+		{ModelReported: strptr("gpt-5.6"), Usage: &harness.Usage{InputFresh: 1000, Output: 100, CostUSD: &harnessCost}},
+		mk("claude-opus-5", 1000, 100),
+	}, doc, checker, false)
+	if blended == nil || blended.CostUSD == nil {
+		t.Fatal("no cost aggregated")
+	}
+	if *blended.CostUSD < 1.5074 || *blended.CostUSD > 1.5076 {
+		t.Errorf("cost = %v, want the harness cost beside the table cost", *blended.CostUSD)
+	}
+	if blended.CostSource == nil || *blended.CostSource != "mixed" {
+		t.Errorf("source = %v, want mixed", blended.CostSource)
+	}
+	if priceCheckUsage(nil, doc, checker, false) != nil {
+		t.Error("no calls aggregate usage")
+	}
+}
+
+func strptr(s string) *string { return &s }
+
 func positionsOf(candidates []checkCandidate) []int {
 	out := make([]int, 0, len(candidates))
 	for _, candidate := range candidates {

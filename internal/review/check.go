@@ -304,11 +304,9 @@ func (l *Leg) runCheck(ctx context.Context, req Request, loaded Context, claimID
 		return marker, nil, err
 	}
 	checkerReported := firstReportedModel(envelopes)
-	usage := sumCheckUsage(envelopes)
 	var usageRaw json.RawMessage
-	if usage != nil {
-		priced := priceUsage(*usage, l.Harness, checker, checkerReported, envValueSet(l.Env, "ANTHROPIC_API_KEY"))
-		if raw, err := json.Marshal(priced); err == nil {
+	if usage := priceCheckUsage(envelopes, l.Harness, checker, envValueSet(l.Env, "ANTHROPIC_API_KEY")); usage != nil {
+		if raw, err := json.Marshal(usage); err == nil {
 			usageRaw = raw
 		}
 	}
@@ -348,13 +346,15 @@ func (l *Leg) runCheck(ctx context.Context, req Request, loaded Context, claimID
 	if rejected+duplicates > 0 {
 		msgs = append(msgs, ui.Say(checkFilteredLine(len(candidates), confirmed, rejected, duplicates)))
 	}
-	if reviewerReported := marker.ModelReported.Value(); reviewerReported != "" && checkerReported != "" && SameModel(reviewerReported, checkerReported) {
-		marker.CheckReason = prstate.Some(prstate.CheckReasonSameModel)
-		msgs = append(msgs, ui.Warn(
-			"the cross-model check ran on the reviewer's own model, so this pass had no second lineage",
-			"The decisions stand, and the marker records same_model rather than a cross-model check. Point the resolver at another harness to get the second lineage back."))
-		if l.Log != nil {
-			l.Log.Event("check", "same_model reviewer="+reviewerReported+" checker="+checkerReported)
+	if reviewerReported := marker.ModelReported.Value(); reviewerReported != "" {
+		if matched := checkSameModels(envelopes, reviewerReported); len(matched) > 0 {
+			marker.CheckReason = prstate.Some(prstate.CheckReasonSameModel)
+			msgs = append(msgs, ui.Warn(
+				"the cross-model check ran on the reviewer's own model, so this pass had no second lineage",
+				"The decisions stand, and the marker records same_model rather than a cross-model check. Point the resolver at another harness to get the second lineage back."))
+			if l.Log != nil {
+				l.Log.Event("check", "same_model reviewer="+reviewerReported+" checker="+strings.Join(matched, ","))
+			}
 		}
 	}
 	l.attachReads(&marker)
@@ -415,18 +415,88 @@ func firstReportedModel(envelopes []harness.Envelope) string {
 	return ""
 }
 
-// sumCheckUsage sums the check calls' usage buckets, the way the batch
-// outcome sums its calls'. Nil when no call reported usage.
-func sumCheckUsage(envelopes []harness.Envelope) *harness.Usage {
-	var sum *harness.Usage
+// priceCheckUsage prices each accepted check call's usage with its own
+// answering model and aggregates: buckets summed, costs summed where
+// every priced call carries one. A call no rate prices clears the
+// total rather than understating it, and a cost mixing harness and
+// table sources reads mixed. Identity stays on the first priced call,
+// the way the batch outcome keeps its first envelope's. Nil when no
+// call reported usage.
+func priceCheckUsage(envelopes []harness.Envelope, doc harness.Document, checker legSettings, anthropic bool) *harness.Usage {
+	var priced []harness.Usage
 	for _, envelope := range envelopes {
-		sum = foldAttempt(sum, envelope.Usage)
+		if envelope.Usage == nil {
+			continue
+		}
+		reported := ""
+		if envelope.ModelReported != nil {
+			reported = *envelope.ModelReported
+		}
+		priced = append(priced, priceUsage(*envelope.Usage, doc, checker, reported, anthropic))
 	}
-	if sum == nil {
+	if len(priced) == 0 {
 		return nil
+	}
+	sum := priced[0]
+	for i := 1; i < len(priced); i++ {
+		addUsageBuckets(&sum, &priced[i])
+	}
+	var cost float64
+	for _, p := range priced {
+		if p.CostUSD == nil {
+			sum.CostUSD, sum.CostSource, sum.PriceTable = nil, nil, nil
+			total := sum.WithTotal()
+			return &total
+		}
+		cost += *p.CostUSD
+	}
+	sum.CostUSD = &cost
+	if !samePricedSource(priced) {
+		mixed := "mixed"
+		sum.CostSource = &mixed
+		sum.PriceTable = nil
 	}
 	total := sum.WithTotal()
 	return &total
+}
+
+// samePricedSource reports whether every priced call's cost triple
+// agrees with the first's: one source for the summed cost, else mixed.
+func samePricedSource(priced []harness.Usage) bool {
+	for _, p := range priced[1:] {
+		if !sameOptionalString(priced[0].CostSource, p.CostSource) ||
+			!sameOptionalString(priced[0].PriceTable, p.PriceTable) {
+			return false
+		}
+	}
+	return true
+}
+
+func sameOptionalString(a, b *string) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
+}
+
+// checkSameModels answers the distinct check-call models that read as
+// the reviewer's own: one same-model call means the pass had no fully
+// independent second lineage, however the other calls read.
+func checkSameModels(envelopes []harness.Envelope, reviewer string) []string {
+	var matched []string
+	seen := map[string]bool{}
+	for _, envelope := range envelopes {
+		reported := ""
+		if envelope.ModelReported != nil {
+			reported = *envelope.ModelReported
+		}
+		if reported == "" || seen[reported] || !SameModel(reviewer, reported) {
+			continue
+		}
+		seen[reported] = true
+		matched = append(matched, reported)
+	}
+	return matched
 }
 
 // priceUsage prices one usage record with the checker's harness,

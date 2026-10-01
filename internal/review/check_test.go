@@ -592,6 +592,49 @@ func TestCheckSameModelRecordsSameModel(t *testing.T) {
 	}
 }
 
+// Every accepted check call's model counts: a later call answering as
+// the reviewer's model records same_model however the first call
+// read, and each call's usage prices at its own model before the
+// record aggregates.
+func TestCheckMixedModelsRecordSameModelAndPricePerCall(t *testing.T) {
+	e, findings := twoCheckCallEnv(t)
+	e.runner.script = []exec.Result{
+		{ExitCode: 0, Stdout: claudeStdoutWithUsage(t, issuesPayload(findings), "claude-opus-5", 10, 0, 0, 5)},
+		{ExitCode: 0, Stdout: claudeStdoutWithUsage(t, checkPayload(confirmDecision(1)), "gpt-5.6", 1000, 0, 0, 100)},
+		{ExitCode: 0, Stdout: claudeStdoutWithUsage(t, checkPayload(confirmDecision(2)), "claude-opus-5", 1000, 0, 0, 100)},
+	}
+	got := runLeg(t, e, e.request(t))
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
+	if got.Marker.Check.Value() != prstate.CheckRan {
+		t.Fatalf("check = %q, want ran", got.Marker.Check.Value())
+	}
+	if got.Marker.CheckReason.Value() != prstate.CheckReasonSameModel {
+		t.Errorf("check_reason = %q, want same_model (the second call answered as the reviewer)", got.Marker.CheckReason.Value())
+	}
+	record := checkRecordOf(t, got.Marker)
+	if record.ModelReported != "gpt-5.6" {
+		t.Errorf("record model = %q, want the first answering model", record.ModelReported)
+	}
+	buckets := usageBuckets(t, record.Usage)
+	if buckets["input_fresh"] != 2000 || buckets["output"] != 200 {
+		t.Errorf("check usage buckets = %v, want both calls summed", buckets)
+	}
+	var priced map[string]any
+	if err := json.Unmarshal(record.Usage, &priced); err != nil {
+		t.Fatalf("usage decode: %v", err)
+	}
+	// 0.006 for the gpt-5.6 call beside 0.0075 for the opus call:
+	// costing both at the first model would answer 0.012.
+	if cost, _ := priced["cost_usd"].(float64); cost < 0.0134 || cost > 0.0136 {
+		t.Errorf("check usage costs %v, want the per-call sum near 0.0135", priced["cost_usd"])
+	}
+	if priced["cost_source"] != "table" {
+		t.Errorf("check usage source = %v, want table", priced["cost_source"])
+	}
+}
+
 // The checker's usage is priced with the checker's harness and model
 // and kept off the review's own record: separate provenance, separate
 // buckets.
