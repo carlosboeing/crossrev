@@ -31,6 +31,23 @@ func TestParseReadMode(t *testing.T) {
 	}
 }
 
+// file_tool runs supplied until it is wired; served and supplied run as
+// declared. Resolve and status read this to compute the same review-contract
+// engine identity the review leg publishes under.
+func TestEffectiveReadMode(t *testing.T) {
+	for _, tt := range []struct {
+		declared, want harness.ReadMode
+	}{
+		{declared: harness.ReadModeServed, want: harness.ReadModeServed},
+		{declared: harness.ReadModeFileTool, want: harness.ReadModeSupplied},
+		{declared: harness.ReadModeSupplied, want: harness.ReadModeSupplied},
+	} {
+		if got := harness.EffectiveReadMode(tt.declared); got != tt.want {
+			t.Errorf("EffectiveReadMode(%q) = %q, want %q", tt.declared, got, tt.want)
+		}
+	}
+}
+
 // The shipped mapping: codex and claude read only through the served tool,
 // grok and opencode run supplied, agy stays supplied with its no-commands
 // directive.

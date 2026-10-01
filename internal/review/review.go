@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/carlosboeing/crossrev/internal/config"
 	"github.com/carlosboeing/crossrev/internal/harness"
 	"github.com/carlosboeing/crossrev/internal/prstate"
 	"github.com/carlosboeing/crossrev/internal/ui"
@@ -79,6 +80,14 @@ func (l *Leg) Run(ctx context.Context, req Request) (out Result) {
 		return out
 	}
 
+	// A setting-override flag is refused before admission, which is the
+	// first point that can write: a declined pass posts its decline.
+	if refusal := automatedOverrideRefusal(loaded.Config, req); refusal != nil {
+		out.Outcome = OutcomeError
+		out.Err = refusal
+		return out
+	}
+
 	ad, err := l.admit(ctx, req, loaded)
 	if err != nil {
 		out.Outcome = OutcomeError
@@ -129,7 +138,7 @@ func (l *Leg) Run(ctx context.Context, req Request) (out Result) {
 	// The resolved settings, beside the header and the marker: the `leg`
 	// line above fires before the settings are known, and the `call` lines
 	// name only the answering model.
-	l.Log.ReviewSettings(settings.harness, settings.model, settings.effort, settings.inputPolicy, settings.inputPolicySource)
+	l.Log.ReviewSettings(settings.harness, settings.model, settings.effort, settings.detail())
 
 	// The token the checkout persisted, if any, is removed before the
 	// harness starts. Generated workflows persist none, but a checkout from
@@ -273,6 +282,11 @@ func (l *Leg) Run(ctx context.Context, req Request) (out Result) {
 	// reaches because cmd/crossrev/legs.go:124 always supplies a reader,
 	// leaves the obligation unbound.
 	if scopeErr == nil {
+		// The scope publishes under the review-contract engine identity,
+		// not the bare engine version: a generation judged under another
+		// contract retires at the engine comparison instead of being
+		// reused by a resume, a redrive or a convergence read.
+		scope.Engine = l.reviewEngineID(loaded.Config)
 		loaded.Scope = &scope
 	}
 
@@ -415,6 +429,36 @@ func (l *Leg) Run(ctx context.Context, req Request) (out Result) {
 	}
 	out.Outcome = OutcomeInvoked
 	return out
+}
+
+// automatedOverrideRefusal refuses a setting-override flag where the base
+// policy says automated. The config it reads is the pull request's base
+// revision, never the head, so a flag cannot evade the restriction by the
+// value it carries — not even by equalling the base value. Local runs may
+// set any valid value.
+func automatedOverrideRefusal(cfg *config.Config, req Request) *ui.FatalError {
+	if cfg == nil || cfg.Get(".mode") != "automated" {
+		return nil
+	}
+	for _, override := range []struct {
+		flag, key string
+		set       bool
+	}{
+		{"--concerns", "review.concerns", req.ConcernsOverride != ""},
+		{"--check", "review.check", req.CheckOverride != ""},
+		{"--required-check", "verification.required_checks", len(req.RequiredChecks) > 0},
+		{"--no-required-checks", "verification.required_checks", req.NoRequiredChecks},
+		{"--check-wait", "verification.wait_minutes", req.CheckWait != ""},
+	} {
+		if !override.set {
+			continue
+		}
+		return &ui.FatalError{
+			Reason: "the " + override.flag + " flag cannot override policy in automated mode (ADR 0003)",
+			Action: "Set " + override.key + " in .github/crossrev.yml on the base revision instead: policy from a pull request takes effect when it merges.",
+		}
+	}
+	return nil
 }
 
 // finishCoveredRun folds a fully covered batch pass into the frozen

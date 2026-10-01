@@ -220,6 +220,33 @@ func parseCycle(args []string, out *ui.IO) (Invocation, error) {
 			if err == nil {
 				err = requireInputPolicy(out, "cycle", req.InputPolicyOverride)
 			}
+		case "--concerns":
+			req.ConcernsOverride, err = s.value()
+			if err == nil {
+				err = requireConcerns(out, "cycle", req.ConcernsOverride)
+			}
+		case "--check":
+			req.CheckOverride, err = s.value()
+			if err == nil {
+				err = requireCheckMode(out, "cycle", req.CheckOverride)
+			}
+		case "--required-check":
+			var check string
+			check, err = s.value()
+			if err == nil {
+				err = requireRequiredCheck(out, "cycle", req.RequiredChecks, check)
+			}
+			if err == nil {
+				req.RequiredChecks = append(req.RequiredChecks, check)
+			}
+		case "--no-required-checks":
+			req.NoRequiredChecks = true
+			s.skip()
+		case "--check-wait":
+			req.CheckWait, err = s.value()
+			if err == nil {
+				err = requireCheckWait(out, "cycle", req.CheckWait)
+			}
 		case "--trigger":
 			req.Trigger, err = s.value()
 		case "--no-tips":
@@ -270,6 +297,33 @@ func parseReview(args []string, out *ui.IO, harnesses []string) (Invocation, err
 			req.InputPolicyOverride, err = s.value()
 			if err == nil {
 				err = requireInputPolicy(out, "review", req.InputPolicyOverride)
+			}
+		case "--concerns":
+			req.ConcernsOverride, err = s.value()
+			if err == nil {
+				err = requireConcerns(out, "review", req.ConcernsOverride)
+			}
+		case "--check":
+			req.CheckOverride, err = s.value()
+			if err == nil {
+				err = requireCheckMode(out, "review", req.CheckOverride)
+			}
+		case "--required-check":
+			var check string
+			check, err = s.value()
+			if err == nil {
+				err = requireRequiredCheck(out, "review", req.RequiredChecks, check)
+			}
+			if err == nil {
+				req.RequiredChecks = append(req.RequiredChecks, check)
+			}
+		case "--no-required-checks":
+			req.NoRequiredChecks = true
+			s.skip()
+		case "--check-wait":
+			req.CheckWait, err = s.value()
+			if err == nil {
+				err = requireCheckWait(out, "review", req.CheckWait)
 			}
 		case "--trigger":
 			req.Trigger, err = s.value()
@@ -324,6 +378,18 @@ func parseResolve(args []string, out *ui.IO, harnesses []string) (Invocation, er
 			req.ModelOverride, err = s.value()
 		case "--effort":
 			req.EffortOverride, err = s.value()
+		case "--required-check":
+			var check string
+			check, err = s.value()
+			if err == nil {
+				err = requireRequiredCheck(out, "resolve", req.RequiredChecks, check)
+			}
+			if err == nil {
+				req.RequiredChecks = append(req.RequiredChecks, check)
+			}
+		case "--no-required-checks":
+			req.NoRequiredChecks = true
+			s.skip()
 		case "--trigger":
 			req.Trigger, err = s.value()
 		case "--no-tips":

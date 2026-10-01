@@ -25,6 +25,21 @@ func statusProducer() prstate.Producer {
 	return prstate.Producer{Harness: "claude", Model: "reviewer-model"}
 }
 
+// statusEngineID is the review-contract engine identity the status
+// fixture configuration publishes under: both concerns, the resolver
+// check, the hunks-first policy and the served reads of the configured
+// claude reviewer. It states the digest inputs, not the digest, so a
+// production read that stops computing the identity from the base policy
+// retires these generations and fails below.
+func statusEngineID() string {
+	return core.ReviewEngineID(core.ReviewContract{
+		Concerns:    []string{"correctness", "consistency"},
+		Check:       "resolver",
+		InputPolicy: "hunks_first",
+		ReadMode:    "served",
+	})
+}
+
 func statusSlotRef(t *testing.T) prstate.SlotRef {
 	t.Helper()
 	slug, err := core.ParseSlug(statusRepo)
@@ -39,6 +54,36 @@ func statusSlotRef(t *testing.T) prstate.SlotRef {
 func statusPublishGeneration(t *testing.T, store *storetest.FakeStore, base, head string, paths []string, records []prstate.Record) prstate.Handle {
 	t.Helper()
 	return statusPublishGenerationAs(t, store, base, head, paths, records, statusProducer())
+}
+
+// statusPublishGenerationUnder publishes one complete generation judged
+// under another review contract, which the status read must retire.
+func statusPublishGenerationUnder(t *testing.T, store *storetest.FakeStore, base, head string, paths []string, records []prstate.Record, engine string) prstate.Handle {
+	t.Helper()
+	baseRev, err := core.NewRevision(base)
+	if err != nil {
+		t.Fatalf("base revision: %v", err)
+	}
+	headRev, err := core.NewRevision(head)
+	if err != nil {
+		t.Fatalf("head revision: %v", err)
+	}
+	gen := prstate.Generation{
+		Gen:         1,
+		Revision:    core.RevisionPair{Base: baseRev, Head: headRev},
+		Engine:      engine,
+		Slot:        prstate.DefaultSlot,
+		Producer:    statusProducer(),
+		Form:        prstate.GenerationFull,
+		Paths:       paths,
+		Records:     records,
+		ScopeReport: prstate.ScopeReport{ExaminedScope: "every changed file at the head revision"},
+	}
+	handle, err := store.PublishGeneration(context.Background(), statusSlotRef(t), prstate.Handle{}, gen)
+	if err != nil {
+		t.Fatalf("PublishGeneration: %v", err)
+	}
+	return handle
 }
 
 // statusPublishGenerationAs publishes under the given producer: a pass
@@ -57,7 +102,7 @@ func statusPublishGenerationAs(t *testing.T, store *storetest.FakeStore, base, h
 	gen := prstate.Generation{
 		Gen:         1,
 		Revision:    core.RevisionPair{Base: baseRev, Head: headRev},
-		Engine:      core.FileEngineVersion,
+		Engine:      statusEngineID(),
 		Slot:        prstate.DefaultSlot,
 		Producer:    producer,
 		Form:        prstate.GenerationFull,
@@ -253,6 +298,27 @@ func TestStatusConvergenceReadsTheLedger(t *testing.T) {
 		handle := statusPublishGeneration(t, store, statusBase, statusLedgerHead, paths,
 			[]prstate.Record{prstate.OutstandingRecord(string(core.FileUnitID("app.go")), 0,
 				string(core.ChangeModified), core.BodyDigestHex([]byte("body of app.go")), "awaiting review")})
+		comments := []forge.IssueComment{
+			statusConvergedMarkerComment(t, statusLedgerHead, statusNameHandle(handle)),
+		}
+		if got := statusLoadLedger(t, comments, store).State; got != core.LoopAwaitingReview {
+			t.Errorf("state = %q, want %q", got, core.LoopAwaitingReview)
+		}
+	})
+
+	t.Run("a generation judged under another contract cannot underwrite convergence", func(t *testing.T) {
+		// The fixture config reviews both concerns; this generation was
+		// judged under correctness alone. Same revision, same producer,
+		// same records — only the contract differs, and the read retires
+		// it instead of trusting verdicts judged under other settings.
+		narrower := core.ReviewEngineID(core.ReviewContract{
+			Concerns:    []string{"correctness"},
+			Check:       "resolver",
+			InputPolicy: "hunks_first",
+			ReadMode:    "served",
+		})
+		store := storetest.NewFakeStore()
+		handle := statusPublishGenerationUnder(t, store, statusBase, statusLedgerHead, paths, covered, narrower)
 		comments := []forge.IssueComment{
 			statusConvergedMarkerComment(t, statusLedgerHead, statusNameHandle(handle)),
 		}

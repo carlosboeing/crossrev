@@ -264,11 +264,26 @@ func TestNewPassContinuesTheLedgerChain(t *testing.T) {
 
 // acceptedReuse counts the prior generation's verdicts the leg would
 // reuse at the given revision pair under the current engine.
+// testEngineID is the review-contract engine identity the default test
+// configuration publishes under: both concerns, the resolver check, the
+// hunks-first policy and the served reads of the default codex reviewer.
+// It states the digest inputs, not the digest, so a review leg that stops
+// publishing the identity from the base policy retires these generations
+// and fails below.
+func testEngineID() string {
+	return core.ReviewEngineID(core.ReviewContract{
+		Concerns:    []string{"correctness", "consistency"},
+		Check:       "resolver",
+		InputPolicy: "hunks_first",
+		ReadMode:    "served",
+	})
+}
+
 func acceptedReuse(t *testing.T, e *env, base, head core.Revision) int {
 	t.Helper()
 	accepted := 0
 	for _, gen := range ledgerGenerations(t, e) {
-		if gen.Revision.Base.SHA() != base.SHA() || gen.Revision.Head.SHA() != head.SHA() || gen.Engine != core.FileEngineVersion {
+		if gen.Revision.Base.SHA() != base.SHA() || gen.Revision.Head.SHA() != head.SHA() || gen.Engine != testEngineID() {
 			continue
 		}
 		for _, record := range gen.Records {

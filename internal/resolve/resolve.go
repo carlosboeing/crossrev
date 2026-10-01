@@ -48,7 +48,7 @@ func (l *Leg) Run(ctx context.Context, req Request) (out Result) {
 	}
 	// The resolved settings, beside the header and the marker: the `leg`
 	// line above fires before the settings are known.
-	l.Log.Settings(s.settings.Harness, s.settings.Model, s.settings.Effort)
+	l.Log.ReviewSettings(s.settings.Harness, s.settings.Model, s.settings.Effort, s.settings.detail())
 
 	// The run header, two bare printfs after the settings are chosen and
 	// before the claim (lib/run.sh:1919-1920):

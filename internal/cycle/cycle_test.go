@@ -5,10 +5,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/carlosboeing/crossrev/internal/config"
 	"github.com/carlosboeing/crossrev/internal/core"
+	"github.com/carlosboeing/crossrev/internal/harness"
 	"github.com/carlosboeing/crossrev/internal/prstate"
 	"github.com/carlosboeing/crossrev/internal/ui"
 )
@@ -693,7 +696,7 @@ func TestDriverHandsAPassAlreadyAtTheCapToTheBoundSeam(t *testing.T) {
 		t.Errorf("bound got pass=%d max=%d, want 3 and 3", seen[0].Pass, seen[0].Max)
 	}
 	want := LegRequest{PR: 42, Trigger: TriggerHuman, HarnessOverride: "opencode", KeepTranscripts: true, NoTips: true}
-	if seen[0].Leg != want {
+	if !reflect.DeepEqual(seen[0].Leg, want) {
 		t.Errorf("bound leg request = %+v, want %+v", seen[0].Leg, want)
 	}
 }
@@ -828,6 +831,77 @@ func TestDriverForwardsInputPolicyOverrideToReviewLegs(t *testing.T) {
 	}
 	if got := r.rec.legs[0].req.InputPolicyOverride; got != "whole_when_fits" {
 		t.Errorf("review input policy = %q, want whole_when_fits", got)
+	}
+}
+
+// TestDriverForwardsReviewSettingsToBothLegs pins that the review-contract
+// flags travel on the leg requests: concerns, the check mode and the wait
+// to the review leg, and the required checks to both legs.
+func TestDriverForwardsReviewSettingsToBothLegs(t *testing.T) {
+	r := newRig(t, []loadStep{
+		{state: loaded(t)},
+		{state: loaded(t, marker(reviewIssues, 1))},
+		{state: loaded(t, marker(reviewIssues, 1), marker(resolveSettled, 1))},
+	})
+	req := request()
+	req.ConcernsOverride = "correctness"
+	req.CheckOverride = "off"
+	req.RequiredChecks = []string{"build", "test@my-app"}
+	req.CheckWait = "5"
+	r.driver.Run(context.Background(), req)
+	r.wantOrder(t, "load", "review", "load", "resolve", "load", "nudge")
+	if len(r.rec.legs) != 2 {
+		t.Fatalf("leg calls = %d, want 2", len(r.rec.legs))
+	}
+	review := r.rec.legs[0].req
+	if review.ConcernsOverride != "correctness" {
+		t.Errorf("review concerns = %q, want correctness", review.ConcernsOverride)
+	}
+	if review.CheckOverride != "off" {
+		t.Errorf("review check = %q, want off", review.CheckOverride)
+	}
+	if !reflect.DeepEqual(review.RequiredChecks, []string{"build", "test@my-app"}) {
+		t.Errorf("review required checks = %v, want build and test@my-app", review.RequiredChecks)
+	}
+	if review.CheckWait != "5" {
+		t.Errorf("review check wait = %q, want 5", review.CheckWait)
+	}
+	resolve := r.rec.legs[1].req
+	if !reflect.DeepEqual(resolve.RequiredChecks, []string{"build", "test@my-app"}) {
+		t.Errorf("resolve required checks = %v, want build and test@my-app", resolve.RequiredChecks)
+	}
+}
+
+// TestReviewEngineIDMatchesTheBasePolicy pins that status computes the
+// review-contract engine identity from the same base policy the review
+// leg publishes under: the configured concerns, check mode and input
+// policy beside the configured reviewer's effective read mode. The
+// resolve leg computes the same identity; both retire a generation
+// judged under another contract.
+func TestReviewEngineIDMatchesTheBasePolicy(t *testing.T) {
+	rev, err := core.NewRevision(strings.Repeat("a", 40))
+	if err != nil {
+		t.Fatalf("revision: %v", err)
+	}
+	cfg, err := config.Load(context.Background(), rev,
+		func(context.Context, core.Revision, string) ([]byte, config.FileStatus, error) {
+			return []byte("version: 2\nreviewer:\n  harness: opencode\nreview:\n  concerns: [correctness]\n  check: off\n  input_policy: whole_when_fits\n"), config.IsFile, nil
+		})
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	doc, err := harness.Load(harness.DescriptorJSON())
+	if err != nil {
+		t.Fatalf("harness.Load: %v", err)
+	}
+	want := core.ReviewEngineID(core.ReviewContract{
+		Concerns:    []string{"correctness"},
+		Check:       "off",
+		InputPolicy: "whole_when_fits",
+		ReadMode:    "supplied",
+	})
+	if got := reviewEngineID(cfg, "opencode", doc); got != want {
+		t.Errorf("reviewEngineID = %q, want %q", got, want)
 	}
 }
 
