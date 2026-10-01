@@ -108,7 +108,7 @@ Four halt words name a pass the required-check gate stopped. The marker records 
 
 `required_checks_unreadable` means the runs could not be read at all. The commonest cause is an installation approved before the loop App asked for Checks: Read — approve the new permission (see [the loop App](credentials.md#the-loop-app)) and run the pass again. Anything else names its own error beside the word.
 
-The gate reads check runs, not commit statuses: a status context never satisfies a required check. The runs are what GitHub reports for the pull request's head commit — the same association required status checks use — and for `pull_request` workflows that is the merge commit, so a check that ran only on the branch head reads as missing here.
+The gate reads check runs, not commit statuses: a status context never satisfies a required check. The runs are what GitHub reports for the pull request's head commit — the same association required status checks use — and `pull_request` workflows report against that head commit too, so a check that never ran for it (e.g. a workflow triggered only on the base branch) is what reads as missing.
 
 ## The loop went quiet in automated mode
 

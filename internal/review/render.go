@@ -446,8 +446,9 @@ func exclusionLine(excluded []string) string {
 // record, so an unconfigured summary reads exactly as it always has.
 //
 // The runs are what GitHub reports for the pull request's head commit — the
-// same association required status checks use. For workflows triggered by
-// pull_request that is the merge commit, not the head of the branch.
+// same association required status checks use — and workflows triggered by
+// pull_request report against that head commit too, so a check that never
+// ran for it is what reads as missing.
 func verificationSection(marker prstate.Marker) string {
 	record, ok := marker.Verification.Get()
 	if !ok {
