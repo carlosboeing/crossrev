@@ -94,9 +94,12 @@ func (c Check) Render() []byte {
 		"a wrong finding off the pull request, so judge strictly and reject what does not hold.\n\n")
 
 	b.WriteString("## How to judge\n\n")
-	b.WriteString("Confirm a candidate when the defect is real on the code shown. " +
-		"Reject it when the code is correct, when the finding faults code this pull request " +
-		"neither touched nor could have broken, or when its reasoning contradicts the excerpt. " +
+	b.WriteString("Confirm a candidate when the defect is real on the code shown — " +
+		"including a real defect this pull request did not introduce. " +
+		"Correct `pre_existing` when the reviewer's attribution is wrong rather than " +
+		"rejecting the defect: pre-existing defects are still reported. " +
+		"Reject a candidate only when the code is correct or its reasoning contradicts " +
+		"the excerpt. " +
 		"Fold a candidate into another as a duplicate when both fault the same defect, naming " +
 		"the survivor; a duplicate of a duplicate is fine, and the chain must end at a confirmed candidate.\n\n")
 	b.WriteString("Each candidate carries whether its anchored lines changed between base and head. " +

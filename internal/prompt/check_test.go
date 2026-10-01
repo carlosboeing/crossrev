@@ -78,6 +78,26 @@ func TestCheckPromptNumbersEveryCandidate(t *testing.T) {
 	}
 }
 
+// The check confirms a real defect however old it is: a defect the
+// pull request did not introduce earns a pre_existing correction,
+// never a rejection for its age alone.
+func TestCheckPromptConfirmsRealPreExistingDefects(t *testing.T) {
+	got := string(checkFixture().Render())
+	if strings.Contains(got, "neither touched nor could have broken") {
+		t.Error("the prompt rejects findings by attribution rather than validity")
+	}
+	for _, want := range []string{
+		"including a real defect this pull request did not introduce",
+		"Correct `pre_existing`",
+		"pre-existing defects are still reported",
+		"Reject a candidate only when the code is correct",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("prompt carries no %q:\n%s", want, got)
+		}
+	}
+}
+
 // The opening names the check rather than a leg, so a prompt-routed stub
 // answers from its own route rather than the review's.
 func TestCheckPromptNamesNoLeg(t *testing.T) {
