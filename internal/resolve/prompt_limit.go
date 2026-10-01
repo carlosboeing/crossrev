@@ -50,3 +50,17 @@ func (l *Leg) refuseOversizedPrompt(ctx context.Context, s *session, marker prst
 		},
 	}
 }
+
+// hardInputBytes is the resolver harness's hard input limit, or false when it
+// cannot be read. The size gate reports that case itself.
+func (l *Leg) hardInputBytes(s *session) (int, bool) {
+	doc, err := l.document()
+	if err != nil {
+		return 0, false
+	}
+	limit, ok := doc.InputBudget(s.settings.Harness, s.settings.Model)
+	if !ok {
+		return 0, false
+	}
+	return limit.HardBytes, true
+}

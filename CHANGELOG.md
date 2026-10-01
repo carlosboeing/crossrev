@@ -4,6 +4,10 @@ All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepa
 
 ## [Unreleased]
 
+### Added
+
+- **The resolver sees reopened findings and sibling locations.** A finding is a recurrence candidate when an earlier pass resolved `fixed` with a pushed commit for a finding with the same id, or with the same path, side and category and an anchor within 10 lines. The resolve prompt marks it with the earlier pass, finding id and commit, `skills/pr-resolve/SKILL.md` asks the resolver to check whether that fix was incomplete and to say what it concluded in its reply, and the resolve summary counts the candidates. Each finding also carries up to 10 advisory sibling locations at head where an identifier from its anchored line occurs, from one blob pass, rarest identifier first and marked partial; the resolver looks at them before it calls a repair complete and fixes a sibling only when this pull request introduced the same defect there. The lists count toward the resolve prompt's hard input limit and shrink to fewer entries, then none, before it is reached. Nothing escalates automatically: the prior-settlement line for a finding fixed before no longer tells the resolver to escalate it, and the skill names the escalation rule as one for a point the resolver disputed and was re-raised unchanged.
+
 ### Changed
 
 - **The pre-pull-request checks are one list.** `CONTRIBUTING.md` now lists the five checks CI runs — the suite, `go test`, `lint.sh`, the parity ledger check and the changelog gate — and the README, the pull request template and the agent brief point to it instead of keeping their own shorter copies. `scripts/check-parity-coverage.sh` drops its `--native` mode, which refused shell suites that sourced `lib/*.sh` or ran `bin/crossrev`; both paths were removed with the Bash implementation, so a suite reaching for them already fails on its own.

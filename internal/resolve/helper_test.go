@@ -547,6 +547,8 @@ type fakeGit struct {
 	generatedAttrsCalls  []core.Revision
 	removePersistedCalls int
 	removePersistedErr   error
+	searchErr            error
+	searchCalls          int
 	removed              []vcs.RemovedCredential
 	// onAddWorktree, when set, lays files into the fresh worktree.
 	onAddWorktree func(dir string) error

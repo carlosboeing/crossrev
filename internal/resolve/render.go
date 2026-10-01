@@ -523,6 +523,13 @@ func runDetails(m prstate.Marker, leg string) string {
 
 // ResolveSummaryBody is _resolve_summary_body at lib/run.sh:2729-2781.
 func ResolveSummaryBody(resolutions, findings json.RawMessage, deferredLines string, marker prstate.Marker, repo string, pr, maxPasses int) string {
+	return resolveSummaryBody(resolutions, findings, deferredLines, marker, repo, pr, maxPasses, 0)
+}
+
+// resolveSummaryBody is ResolveSummaryBody plus the count of findings the pass
+// handed the resolver as recurrence candidates. Zero prints nothing, so a pass
+// with none reads exactly as it always has.
+func resolveSummaryBody(resolutions, findings json.RawMessage, deferredLines string, marker prstate.Marker, repo string, pr, maxPasses, recurrences int) string {
 	summary, _ := marker.Summary.Get()
 	pass := marker.Pass
 	if pass == 0 {
@@ -592,6 +599,12 @@ func ResolveSummaryBody(resolutions, findings json.RawMessage, deferredLines str
 			verb = "it never"
 		}
 		fmt.Fprintf(&b, "%d held %s recorded and not posted; %s reached the resolver.\n\n", held, noun, verb)
+	}
+
+	if recurrences == 1 {
+		b.WriteString("1 finding was a recurrence candidate: an earlier pass fixed a finding in the same place, so the resolver was asked to check whether that fix was incomplete.\n\n")
+	} else if recurrences > 1 {
+		fmt.Fprintf(&b, "%d findings were recurrence candidates: an earlier pass fixed a finding in the same place as each, so the resolver was asked to check whether that fix was incomplete.\n\n", recurrences)
 	}
 
 	if deferredLines != "" {

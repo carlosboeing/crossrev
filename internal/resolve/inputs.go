@@ -152,6 +152,7 @@ type Git interface {
 	RemoteHead(ctx context.Context, url, branch string) (string, error)
 	RemoveWorktree(ctx context.Context, dir string) error
 	GeneratedAttributes(ctx context.Context, base core.Revision, paths []string) (map[string]vcs.AttributeDecision, *vcs.Warning, error)
+	SearchAll(ctx context.Context, revision core.Revision, terms []string, limit int) ([]vcs.TermResult, error)
 }
 
 // GitFrom wraps a *vcs.Repository as Git.
@@ -165,6 +166,9 @@ func (g repoGit) WithDir(dir string) Git {
 }
 func (g repoGit) GeneratedAttributes(ctx context.Context, base core.Revision, paths []string) (map[string]vcs.AttributeDecision, *vcs.Warning, error) {
 	return g.repo.GeneratedAttributes(ctx, base, paths)
+}
+func (g repoGit) SearchAll(ctx context.Context, revision core.Revision, terms []string, limit int) ([]vcs.TermResult, error) {
+	return g.repo.SearchAll(ctx, revision, terms, limit)
 }
 func (g repoGit) Show(ctx context.Context, revision core.Revision, path string) ([]byte, vcs.FileStatus, error) {
 	return g.repo.Show(ctx, revision, path)
