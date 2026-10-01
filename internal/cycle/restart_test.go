@@ -337,6 +337,9 @@ func (f *restartForge) AwaitingPullRequests(context.Context, core.Slug) []forge.
 func (f *restartForge) WorkflowRunStatus(context.Context, core.Slug, string) forge.RunStatus {
 	panic("restart does not read workflow runs")
 }
+func (f *restartForge) CheckRuns(context.Context, core.Slug, core.Revision) (forge.CheckRuns, error) {
+	panic("restart reads no check runs")
+}
 func (f *restartForge) LabelColour(context.Context, core.Slug, string) string {
 	panic("restart mints no labels")
 }

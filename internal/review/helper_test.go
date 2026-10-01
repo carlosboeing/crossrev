@@ -749,7 +749,16 @@ type fakeForge struct {
 	diff        []byte
 	// diffCalls counts PullRequestDiff invocations, so a test can pin how
 	// often the diff is read.
-	diffCalls       int
+	diffCalls int
+	// checks is what CheckRuns answers: the required-check evidence for
+	// the head. onCheckRuns, when set, runs after each CheckRuns call
+	// with the running call count, so a case can move a run from pending
+	// to passed mid-wait the way a finishing check would.
+	checks          []forge.CheckRun
+	checksErr       error
+	checksTruncated bool
+	checksCalls     int
+	onCheckRuns     func(calls int)
 	repoComments    []forge.IssueComment
 	repoCommentsErr error
 	nextID          int64
@@ -822,6 +831,17 @@ func (f *fakeForge) AwaitingPullRequests(context.Context, core.Slug) []forge.Awa
 
 func (f *fakeForge) WorkflowRunStatus(context.Context, core.Slug, string) forge.RunStatus {
 	return ""
+}
+
+func (f *fakeForge) CheckRuns(context.Context, core.Slug, core.Revision) (forge.CheckRuns, error) {
+	f.checksCalls++
+	if f.onCheckRuns != nil {
+		f.onCheckRuns(f.checksCalls)
+	}
+	if f.checksErr != nil {
+		return forge.CheckRuns{}, f.checksErr
+	}
+	return forge.CheckRuns{Runs: f.checks, Truncated: f.checksTruncated}, nil
 }
 
 func (f *fakeForge) LabelColour(context.Context, core.Slug, string) string { return "" }

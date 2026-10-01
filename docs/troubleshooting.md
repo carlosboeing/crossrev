@@ -82,7 +82,7 @@ The ladder sheds the predecessor generation first, then compacts the current one
 
 Run the same command again. It resumes the waiting files, reusing recorded verdicts while the base commit, the pull request commit, the review-engine version and the review producer (harness, model, effort and endpoint) are unchanged. A new push retires every prior result and starts over.
 
-No check runs in this release. The coverage record names verification status not_implemented. A halt never means checks failed.
+Coverage is not the only gate that halts a pass. When required checks are configured, the check gate can halt it instead — those words live under [Required-check halts](#required-check-halts).
 
 The last row is why a marker never reads `started` after the process is gone. A leg that dies writes its reason into the claim it already posted, so `crossrev status` reports the cause rather than only that the run ended.
 
@@ -95,6 +95,20 @@ Remove `crossrev/halted` once you've looked, then run the command `status` sugge
 ### `crossrev/stop`
 
 Somebody applied it, and it outranks everything including a healthy verdict — checked first, every pass. It is an instruction, not a state. Remove it to continue; `status` names the leg that was owed when the brake went on.
+
+## Required-check halts
+
+Four halt words name a pass the required-check gate stopped. The marker records verdict `blocked` with the word and the evidence, and the summary names each check with its run URL. None of them is a judgement on the code, and none of them becomes a code finding: a failed check is a fact for its own logs, not an attribution CrossRev makes.
+
+`required_check_failed` means a required check's newest run failed. The reason names the check, its conclusion and its run URL. Fix what the run's logs fault, let the check report again, then run `crossrev restart --pr N`.
+
+`required_check_pending` means a check was still running when the wait ran out. The review re-reads every 30 seconds up to `verification.wait_minutes`, then halts rather than judging mid-run. Run `crossrev restart --pr N` once the checks have reported.
+
+`required_check_missing` means no run carries a required check's name from its App. Usually the workflow never ran for this head — a skipped trigger, a path filter, a job that only runs on another event. Check the Actions tab for the head commit, then run `crossrev restart --pr N`.
+
+`required_checks_unreadable` means the runs could not be read at all. The commonest cause is an installation approved before the loop App asked for Checks: Read — approve the new permission (see [the loop App](credentials.md#the-loop-app)) and run the pass again. Anything else names its own error beside the word.
+
+The gate reads check runs, not commit statuses: a status context never satisfies a required check. The runs are what GitHub reports for the pull request's head commit — the same association required status checks use — and for `pull_request` workflows that is the merge commit, so a check that ran only on the branch head reads as missing here.
 
 ## The loop went quiet in automated mode
 

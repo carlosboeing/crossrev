@@ -87,8 +87,9 @@ type Marker struct {
 	// stopped against, the stop diagnostics a halted pass records, and the
 	// confirmation pair the orchestrator writes only after accepted review
 	// at the repair head. An initial clean review carries both confirmation
-	// SHAs null. There is no verification SHA or check list here:
-	// verification is not implemented.
+	// SHAs null. The `verification` key below is the required-check
+	// evidence, not a SHA: the overall state and the per-check detail the
+	// pass judged.
 	//
 	// A v1 marker never carries these keys, so they stay absent on the wire
 	// for one. Absent is the whole of the v1 answer: a historical marker
@@ -129,6 +130,13 @@ type Marker struct {
 	// review-summary renderers read it, so the notice survives the resolve
 	// leg rewriting the review comment from the marker.
 	Redriven Opt[bool] `json:"redriven,omitzero"`
+	// Verification is the required-check evidence the pass judged: the
+	// overall state and the per-check detail. Absent when no checks were
+	// required, so a marker from before the gate reads exactly as it
+	// always has. The retention ladder never sheds it: a marker that
+	// cannot fit it fails the write loudly rather than dropping the
+	// evidence a halt stands on.
+	Verification Opt[MarkerVerification] `json:"verification,omitzero"`
 
 	// commentID is which comment the marker was read off, and raw is the
 	// bytes it was read as. Both are unexported so no encoder can reach

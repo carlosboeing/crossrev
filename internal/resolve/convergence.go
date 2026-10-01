@@ -9,6 +9,7 @@ import (
 	"github.com/carlosboeing/crossrev/internal/harness"
 	"github.com/carlosboeing/crossrev/internal/policy"
 	"github.com/carlosboeing/crossrev/internal/prstate"
+	"github.com/carlosboeing/crossrev/internal/verify"
 )
 
 // refLedgerSource is implemented by forge clients that can read coverage
@@ -20,8 +21,28 @@ type refLedgerSource interface {
 // resolveConvergence builds the one convergence input for a no-commit
 // settle: the generation the review marker names must exactly account for
 // the required set at the pull request's base and head, with no
-// outstanding or unexamined record, a reported scope, and any repair delta
-// confirmed.
+// outstanding or unexamined record, a reported scope, any repair delta
+// confirmed, and the required checks passed or none required.
+func (l *Leg) resolveConvergence(ctx context.Context, s *session) (policy.Convergence, bool) {
+	conv, _, ok := l.resolveConvergenceEvidence(ctx, s)
+	return conv, ok
+}
+
+// resolveConvergenceEvidence is resolveConvergence with the required-check
+// evidence attached, so the settle records what it judged on its marker
+// and reuses it for the label rather than re-reading the gate.
+func (l *Leg) resolveConvergenceEvidence(ctx context.Context, s *session) (policy.Convergence, verify.Evidence, bool) {
+	conv, ok := l.resolveCoverageConvergence(ctx, s)
+	if !ok {
+		return conv, verify.Evidence{}, false
+	}
+	ev := l.settlementEvidence(ctx, s)
+	conv.Verification = ev.State
+	return conv, ev, true
+}
+
+// resolveCoverageConvergence builds the coverage half of the settle's
+// convergence input.
 //
 // It re-reads coverage rather than trusting the marker a previous step
 // wrote. The marker is asked first, before the store is called: no claim
@@ -37,7 +58,7 @@ type refLedgerSource interface {
 // support stays awaiting-review, never converged. The read-outcome table
 // this routing transcribes is stated once, on coverageOutcome in
 // internal/review/ledger.go.
-func (l *Leg) resolveConvergence(ctx context.Context, s *session) (policy.Convergence, bool) {
+func (l *Leg) resolveCoverageConvergence(ctx context.Context, s *session) (policy.Convergence, bool) {
 	var conv policy.Convergence
 	h, claimed, err := s.review.CoverageHandle()
 	if err != nil {

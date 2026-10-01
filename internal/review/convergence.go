@@ -6,19 +6,43 @@ import (
 	"github.com/carlosboeing/crossrev/internal/core"
 	"github.com/carlosboeing/crossrev/internal/policy"
 	"github.com/carlosboeing/crossrev/internal/prstate"
+	"github.com/carlosboeing/crossrev/internal/verify"
 )
 
 // buildConvergence builds the one convergence input from the current head,
-// the generation the marker names, the findings and the confirmation state.
-// It re-reads coverage rather than trusting the label or marker a previous
-// step wrote: a stale green can only come from current bytes.
+// the generation the marker names, the findings, the confirmation state and
+// the required-check evidence. It re-reads coverage rather than trusting the
+// label or marker a previous step wrote: a stale green can only come from
+// current bytes.
 //
 // A nil scope means the frozen single-prompt path, which carries no coverage
 // obligation: the second return is false and the caller keeps the legacy
 // label rule. Every other failure — a store this leg cannot open, a corrupt
 // claim, no claim at all, a lost, corrupt or unreadable ledger, a retired
 // generation — answers the obligation unmet, never green.
-func (l *Leg) buildConvergence(ctx context.Context, loaded Context, marker prstate.Marker, actionable int, producer prstate.Producer) (policy.Convergence, bool) {
+func (l *Leg) buildConvergence(ctx context.Context, loaded Context, marker prstate.Marker, actionable int, producer prstate.Producer, settings legSettings) (policy.Convergence, bool) {
+	conv, _, ok := l.buildConvergenceEvidence(ctx, loaded, marker, actionable, producer, settings)
+	return conv, ok
+}
+
+// buildConvergenceEvidence is buildConvergence with the required-check
+// evidence attached, so publish waits on and records one read rather than
+// judging the state and re-reading the detail.
+func (l *Leg) buildConvergenceEvidence(ctx context.Context, loaded Context, marker prstate.Marker, actionable int, producer prstate.Producer, settings legSettings) (policy.Convergence, verify.Evidence, bool) {
+	conv, ok := l.buildCoverageConvergence(ctx, loaded, marker, actionable, producer)
+	if !ok {
+		return conv, verify.Evidence{}, false
+	}
+	ev := l.verificationEvidence(ctx, loaded, settings, loaded.Scope.Head)
+	conv.Verification = ev.State
+	return conv, ev, true
+}
+
+// buildCoverageConvergence builds the coverage half of the convergence
+// input. Publish rebuilds it after the claim edits from the marker as
+// written, carrying the pass's one evidence forward rather than re-reading
+// the gate for a second verdict.
+func (l *Leg) buildCoverageConvergence(ctx context.Context, loaded Context, marker prstate.Marker, actionable int, producer prstate.Producer) (policy.Convergence, bool) {
 	if loaded.Scope == nil {
 		return policy.Convergence{}, false
 	}
