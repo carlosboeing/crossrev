@@ -97,7 +97,7 @@ func TestReviewSplitSumsUsageOncePerCall(t *testing.T) {
 // appears exactly once, and the merged file's completion line carries the
 // final covered count rather than a stale one beside it.
 func TestReviewSplitPrintsOneProgressLinePerCall(t *testing.T) {
-	e := newEnv(t)
+	e := newEnv(t, "correctness")
 	writeRequiredHead(e, "huge.go", "package huge\n"+strings.Repeat("// filler line to exceed the prompt budget\n", 8000))
 	e.runner.script = splitUsageScript(t, "huge.go", 40)
 	got := runLeg(t, e, e.request(t))

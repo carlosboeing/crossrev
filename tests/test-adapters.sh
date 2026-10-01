@@ -48,7 +48,7 @@ routes_baseline "$(printf '[]' | payload)"
 route 'api --method POST repos/*/issues/42/comments*' '{"id":9001}'
 route '*reviewThreads*' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}'
 CROSSREV_REVIEW_PAYLOAD="$(printf '%s' "$REVIEW_PAYLOAD" | sed "s/REPLACE_HEAD_SHA/$FIX_HEAD/g" | payload)"; export CROSSREV_REVIEW_PAYLOAD
-out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
+out="$("$CROSSREV" review --pr 42 --concerns correctness 2>&1)"; rc=$?
 # Captured before the direct-stub probes below append to the same log.
 agy_review_argv="$(cat "$ARGV_LOG")"
 
@@ -291,7 +291,7 @@ CROSSREV_REVIEW_PAYLOAD="$(printf '%s' "$REVIEW_PAYLOAD" | sed "s/REPLACE_HEAD_S
 # below read what a leg was actually granted rather than what the adapter
 # meant to write.
 CROSSREV_OPENCODE_CFG_LOG="$(mktemp)"; export CROSSREV_OPENCODE_CFG_LOG
-out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
+out="$("$CROSSREV" review --pr 42 --concerns correctness 2>&1)"; rc=$?
 # Captured before the direct-stub probes below append to the same log.
 opencode_review_argv="$(cat "$ARGV_LOG")"
 opencode_review_cfg="$(jq -sc '.[0]' "$CROSSREV_OPENCODE_CFG_LOG")"
@@ -755,7 +755,7 @@ route '*reviewThreads*' '{"data":{"repository":{"pullRequest":{"reviewThreads":{
 CROSSREV_REVIEW_PAYLOAD="$(printf '%s' "$REVIEW_PAYLOAD" | sed "s/REPLACE_HEAD_SHA/$FIX_HEAD/g" | payload)"; export CROSSREV_REVIEW_PAYLOAD
 CROSSREV_OPENCODE_CFG_LOG="$(mktemp)"; export CROSSREV_OPENCODE_CFG_LOG
 CROSSREV_OPENCODE_MAJOR=2; export CROSSREV_OPENCODE_MAJOR
-out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
+out="$("$CROSSREV" review --pr 42 --concerns correctness 2>&1)"; rc=$?
 unset CROSSREV_OPENCODE_MAJOR
 ocx2_review_argv="$(cat "$ARGV_LOG")"
 ocx2_review_cfg="$(jq -sc '.[0]' "$CROSSREV_OPENCODE_CFG_LOG")"

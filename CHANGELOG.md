@@ -6,6 +6,7 @@ All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepa
 
 ### Added
 
+- **Review each planned input by concern.** Every whole-file input or split part runs once per configured concern, in correctness then consistency order. Concern answers merge before coverage publishes, with unjudged units kept unjudged, finding references renumbered, identical candidates collapsed and `concerns` provenance preserved. Interrupted inputs restart from their first concern; usage, transcripts and progress identify each invocation, the read allowance stays shared, and packing reserves the longest focus block.
 - **Review concern, check and required-check settings.** `review.concerns` (correctness, consistency or both), `review.check` (`resolver` or `off`), `verification.required_checks` (`NAME`, `NAME@APP` or name/app mappings) and `verification.wait_minutes` (0 to 30) are configurable per repository and per run via `--concerns`, `--check`, `--required-check` (repeatable), `--no-required-checks` and `--check-wait`. The config and the flag pass the same validator, the flags are refused where the base policy says automated, and the run log records each effective value and its source. The configured concerns, check mode, input policy and read mode fingerprint the coverage engine identity (`hunk-v2` plus a digest), so a generation judged under other settings retires instead of being reused.
 
 ### Changed
