@@ -21,14 +21,38 @@ current="$(tr -d '[:space:]' <VERSION)"
 # `v[0-9]*.*.*` and not `v*`, because `v0` is the floating tag ADR 0009 reserves
 # for the README's copy-paste example. It moves, so describing against it would
 # silently measure from the wrong place.
-last_tag="$(git describe --tags --abbrev=0 --match='v[0-9]*.[0-9]*.[0-9]*' 2>/dev/null)"
-
-if [[ -n "$last_tag" ]]; then
-  range="$last_tag..HEAD"
+version_tag="v$current"
+if git rev-parse -q --verify "refs/tags/$version_tag" >/dev/null 2>&1; then
+  # The checkout names its own release, so the tag comes from VERSION rather
+  # than from reachability. A release cut on a pull request that was then
+  # squash-merged is not an ancestor of HEAD — the tag stays on the pull
+  # request's commit — so the range starts after the first-parent commit that
+  # carried the release onto the main line: the oldest one whose tree equals
+  # the tag's. VERSION is part of every tree and changes at each cut, so that
+  # tree matches only commits that carried this release.
+  last_tag="$version_tag"
+  if git merge-base --is-ancestor "$version_tag" HEAD 2>/dev/null; then
+    range="$version_tag..HEAD"
+  else
+    tag_tree="$(git rev-parse "$version_tag^{tree}" 2>/dev/null)"
+    release_commit="$(git log --first-parent --format='%H %T' HEAD 2>/dev/null \
+      | awk -v "tree=$tag_tree" '$2 == tree { found=$1 } END { print found }')"
+    if [[ -n "$release_commit" ]]; then
+      range="$release_commit..HEAD"
+    else
+      range="$version_tag..HEAD"
+    fi
+  fi
   since="since $last_tag"
 else
-  range="HEAD"
-  since="across all history — no version tag found"
+  last_tag="$(git describe --tags --abbrev=0 --match='v[0-9]*.[0-9]*.[0-9]*' 2>/dev/null)"
+  if [[ -n "$last_tag" ]]; then
+    range="$last_tag..HEAD"
+    since="since $last_tag"
+  else
+    range="HEAD"
+    since="across all history — no version tag found"
+  fi
 fi
 
 subjects="$(git log --format=%s "$range" 2>/dev/null)"
