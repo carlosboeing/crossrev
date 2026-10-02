@@ -65,10 +65,14 @@ itself used only one of them.
 
 4. **Both mechanisms are settings, not constants.**
    `review.concerns` narrows the lenses and `review.check` turns the
-   check off, per repository or per run. The configured concerns,
-   check mode, input policy and read mode fingerprint the coverage
-   engine identity, so a generation judged under other settings
-   retires instead of being trusted by a later pass.
+   check off, per repository or per run. The concerns, check mode,
+   input policy and read mode the pass actually ran with fingerprint
+   the coverage engine identity — a local flag override moves it —
+   so a generation judged under other settings retires instead of
+   being trusted by a later pass. The pass records the identity on
+   its marker; resolve and status judge by the recorded identity,
+   falling back to the base-policy identity for markers written
+   before it.
 
 ## Consequences
 

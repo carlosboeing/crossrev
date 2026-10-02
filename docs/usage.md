@@ -107,7 +107,7 @@ A gate that fails, waits, misses or cannot be read never falls back to the revie
 
 A review pass makes `k × c + m` calls: `k` inputs (split slices count separately), times `c` concerns, plus `m` cross-model check calls — none when no finding was raised, usually one. A one-input pull request under the defaults costs three calls where it cost one; `review.concerns: [correctness]` and `review.check: off` return it to one.
 
-Each call is one accepted answer, not one attempt. A call earns one semantic retry and one transient retry — three attempts where the harness constrains its own output, four for opencode — and the refused attempts' usage folds into the accepted call's record. A resumed pass reuses its completed calls and repeats from the interrupted input, which restarts from its first concern.
+Each call is one accepted answer, not one attempt. A call earns one semantic retry and one transient retry — three attempts where the harness constrains its own output, four for opencode — and the refused attempts' usage folds into the accepted call's record. A resumed pass reuses its completed calls and repeats from the interrupted input, which restarts from its first concern. Reuse needs the same effective contract — concerns, check mode, input policy and reviewing harness — so a resume under different flags re-examines rather than trusting verdicts judged under other settings.
 
 ### The commits CrossRev makes
 

@@ -2,6 +2,7 @@ package review_test
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -178,12 +179,12 @@ func TestReviewEngineIDMovesWithTheBasePolicy(t *testing.T) {
 	}
 }
 
-// A local flag override does not move the published identity: resolve
-// and status reproduce it from the same base policy, so a flagged run
-// neither retires its own checkpoint at their reads nor strands a
-// generation they cannot reproduce. What the pass ran with is recorded
-// in the run log, not the identity.
-func TestReviewFlagOverridesDoNotMoveThePublishedEngineID(t *testing.T) {
+// A local flag override moves the published identity: the pass publishes
+// under the contract it actually ran with, not the base policy, so a
+// later pass under other settings retires its verdicts instead of
+// reusing them. Resolve and status read the recorded identity off the
+// marker rather than reproducing it.
+func TestReviewFlagOverridesMoveThePublishedEngineID(t *testing.T) {
 	e := newEnv(t)
 	e.cfg = mustConfig(t, "version: 2\n")
 	writeRequiredHead(e, "a.go", "package a\n")
@@ -201,7 +202,80 @@ func TestReviewFlagOverridesDoNotMoveThePublishedEngineID(t *testing.T) {
 	if len(gens) == 0 {
 		t.Fatal("no generation published")
 	}
-	if gens[0].Engine != testEngineID() {
-		t.Errorf("engine = %q, want the base-policy identity %q", gens[0].Engine, testEngineID())
+	narrower := core.ReviewEngineID(core.ReviewContract{
+		Concerns:    []string{"correctness"},
+		Check:       "off",
+		InputPolicy: "whole_when_fits",
+		ReadMode:    "served",
+	})
+	if gens[0].Engine != narrower {
+		t.Errorf("engine = %q, want the flagged identity %q", gens[0].Engine, narrower)
+	}
+	if gens[0].Engine == testEngineID() {
+		t.Errorf("engine = %q, want it retired against the base-policy identity", gens[0].Engine)
+	}
+}
+
+// A resume under different flags re-examines rather than reuses: the
+// earlier calls' verdicts were judged under another contract, so the
+// resumed pass invokes the harness again instead of skipping the
+// covered batches.
+func TestReviewResumeUnderDifferentFlagsReexaminesCoveredFiles(t *testing.T) {
+	e := newEnv(t)
+	writeRequiredHead(e, "a.go", "package a\n")
+	// Untouched adjacent test: advisory context, not required work.
+	writeHead(e, "a_test.go", "package a\n\nfunc TestNothing(t *testing.T) {}\n")
+	e.runner.script = []exec.Result{
+		{ExitCode: 0, Stdout: claudeStdout(outsideDiffAnswer(t))},
+	}
+	// The first run accepts the batch and commits the generation, then dies
+	// posting the outside-diff finding: the claim stays resumable.
+	e.runner.onSpec = func(exec.Spec) { e.forge.createErr = errors.New("comments API down") }
+	first := runLeg(t, e, e.request(t))
+	if first.Err == nil {
+		t.Fatal("first Run: want the posting failure to stop the leg")
+	}
+	calls := e.runner.calls
+	e.forge.createErr = nil
+	e.runner.onSpec = nil
+	req := e.request(t)
+	req.ConcernsOverride = "correctness"
+	second := runLeg(t, e, req)
+	if second.Err != nil {
+		t.Fatalf("second Run: %v", second.Err)
+	}
+	if second.Outcome != review.OutcomeInvoked {
+		t.Fatalf("second Outcome = %q, want invoked", second.Outcome)
+	}
+	if e.runner.calls == calls {
+		t.Fatalf("second run invoked no batch under narrowed concerns, want the covered file re-examined")
+	}
+}
+
+// The pass marker records the engine identity the pass published under,
+// so resolve and status judge the generation by what ran rather than by
+// the base policy they can reproduce.
+func TestReviewMarkerRecordsThePublishedEngineID(t *testing.T) {
+	e := newEnv(t)
+	e.cfg = mustConfig(t, "version: 2\n")
+	writeRequiredHead(e, "a.go", "package a\n")
+	e.runner.script = []exec.Result{
+		{ExitCode: 0, Stdout: claudeStdout(batchAnswer(t, 1))},
+	}
+	req := e.request(t)
+	req.ConcernsOverride = "correctness"
+	got := runLeg(t, e, req)
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
+	narrower := core.ReviewEngineID(core.ReviewContract{
+		Concerns:    []string{"correctness"},
+		Check:       "resolver",
+		InputPolicy: "hunks_first",
+		ReadMode:    "served",
+	})
+	engine, ok := got.Marker.CoverageEngine.Get()
+	if !ok || engine != narrower {
+		t.Errorf("marker coverage_engine = %q,%v, want the flagged identity %q", engine, ok, narrower)
 	}
 }

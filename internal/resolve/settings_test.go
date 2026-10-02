@@ -144,11 +144,10 @@ func TestResolveSettingOverrideFlagsRefusedInAutomatedMode(t *testing.T) {
 	}
 }
 
-// TestReviewEngineIDMatchesTheBasePolicy pins that the resolve leg
-// computes the review-contract engine identity from the same base policy
-// the review leg publishes under: the configured concerns, check mode
-// and input policy beside the configured reviewer's effective read mode.
-// Status computes the same identity from the same base policy; the
+// TestReviewEngineIDMatchesTheBasePolicy pins the resolve leg's fallback:
+// the review-contract engine identity under the base policy — the
+// configured concerns, check mode and input policy beside the configured
+// reviewer's effective read mode. Status computes the same fallback; the
 // no-findings settle below and the converged report retire a generation
 // judged under another contract alike.
 func TestReviewEngineIDMatchesTheBasePolicy(t *testing.T) {
@@ -172,10 +171,11 @@ func TestReviewEngineIDMatchesTheBasePolicy(t *testing.T) {
 	}
 }
 
-// TestSettleWithAnotherContractCoverageHalts pins the fingerprint on the
-// resolve side: a complete generation judged under narrowed concerns is
-// not current under the base policy's both, so the no-findings settle
-// cannot take its converged verdict on trust and halts for a human.
+// TestSettleWithAnotherContractCoverageHalts pins the fallback on the
+// resolve side: the marker predates the recorded identity, so a complete
+// generation judged under narrowed concerns is not current under the
+// base policy's both, and the no-findings settle cannot take its
+// converged verdict on trust and halts for a human.
 func TestSettleWithAnotherContractCoverageHalts(t *testing.T) {
 	e := setup(t)
 	e.addReview(t, json.RawMessage(`[]`), "issues-remain")
@@ -221,5 +221,57 @@ func TestSettleWithAnotherContractCoverageHalts(t *testing.T) {
 		if label == policy.LabelConverged {
 			t.Fatalf("converged label applied on coverage judged under another contract: %v", e.forge.addedLabels)
 		}
+	}
+}
+
+// TestSettleWithFlaggedCoverageConverges pins the marker read on the
+// resolve side: the same narrowed generation is current when the review
+// marker records the identity its pass published under, so the
+// no-findings settle converges instead of halting.
+func TestSettleWithFlaggedCoverageConverges(t *testing.T) {
+	e := setup(t)
+	e.addReview(t, json.RawMessage(`[]`), "issues-remain")
+	narrower := core.ReviewEngineID(core.ReviewContract{
+		Concerns:    []string{"correctness"},
+		Check:       "resolver",
+		InputPolicy: "hunks_first",
+		ReadMode:    "served",
+	})
+	gen := prstate.Generation{
+		Gen:      1,
+		Revision: core.RevisionPair{Base: e.base, Head: e.head},
+		Engine:   narrower,
+		Slot:     prstate.DefaultSlot,
+		Producer: prstate.Producer{Harness: "codex"},
+		Form:     prstate.GenerationFull,
+		Paths:    []string{"a.go"},
+		Records: []prstate.Record{{
+			Type:       prstate.CoverageRecordUnit,
+			UnitID:     string(core.FileUnitID("a.go")),
+			PathIndex:  0,
+			Kind:       prstate.CoverageGranularityFile,
+			Change:     string(core.ChangeModified),
+			BodyDigest: core.BodyDigestHex([]byte("body of a.go")),
+			Verdict:    prstate.Some("no_issue"),
+		}},
+		ScopeReport: prstate.ScopeReport{ExaminedScope: "read the batch"},
+	}
+	store := storetest.NewFakeStore()
+	e.forge.ledger = store
+	handle, err := store.PublishGeneration(context.Background(),
+		prstate.SlotRef{Repo: e.slug, Number: 42, Slot: prstate.DefaultSlot}, prstate.Handle{}, gen)
+	if err != nil {
+		t.Fatalf("PublishGeneration: %v", err)
+	}
+	// The pass ran under flags and recorded what it ran with.
+	handle.Engine = narrower
+	setReviewCoverage(t, e, handle)
+
+	got := e.run(t)
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
+	if !settleHasLabel(e, policy.LabelConverged) {
+		t.Fatalf("addedLabels = %v, want %q", settleAdded(e), policy.LabelConverged)
 	}
 }

@@ -84,6 +84,24 @@ func TestFileEngineIDMatchesFrozenValue(t *testing.T) {
 	}
 }
 
+// A pass run with no overrides publishes under exactly this identity:
+// both concerns, the resolver check, the hunks-first policy and served
+// reads. The digest is pinned as a literal, not recomputed, so any
+// change to the canonical form fails here rather than silently
+// retiring every stored generation.
+func TestDefaultContractEngineIDIsUnchanged(t *testing.T) {
+	const want = "hunk-v2+493d6306af16"
+	got := ReviewEngineID(ReviewContract{
+		Concerns:    []string{"correctness", "consistency"},
+		Check:       "resolver",
+		InputPolicy: "hunks_first",
+		ReadMode:    "served",
+	})
+	if got != want {
+		t.Errorf("ReviewEngineID(default) = %q, want %q", got, want)
+	}
+}
+
 // The engine identity carries the review contract: the digest covers the
 // concerns in fixed order, the check mode, the effective input policy and
 // the effective read mode, so a generation judged under other settings

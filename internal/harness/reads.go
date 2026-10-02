@@ -65,7 +65,7 @@ func readModeNames() string { return "served, file_tool or supplied" }
 // file_tool is accepted but unwired, so it runs supplied. Served and
 // supplied run as declared. The review leg's own EffectiveReadMode carries
 // the reason the two differ; resolve and status read the mode alone to
-// compute the same review-contract engine identity from the same policy.
+// compute the base-policy fallback identity for markers that name none.
 func EffectiveReadMode(declared ReadMode) ReadMode {
 	if declared == ReadModeFileTool {
 		return ReadModeSupplied

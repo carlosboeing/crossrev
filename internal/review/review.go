@@ -287,8 +287,10 @@ func (l *Leg) Run(ctx context.Context, req Request) (out Result) {
 		// The scope publishes under the review-contract engine identity,
 		// not the bare engine version: a generation judged under another
 		// contract retires at the engine comparison instead of being
-		// reused by a resume, a redrive or a convergence read.
-		scope.Engine = l.reviewEngineID(loaded.Config)
+		// reused by a resume, a redrive or a convergence read. The
+		// identity is computed from the resolved settings, so a pass run
+		// under flags publishes under what it ran with.
+		scope.Engine = l.reviewEngineID(settings)
 		loaded.Scope = &scope
 	}
 
