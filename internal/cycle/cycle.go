@@ -381,6 +381,13 @@ func hasStop(labels []string) bool {
 	return false
 }
 
+// gateHeldSettle reports a completed resolve pass the required checks held:
+// whatever the review verdict said, the pass ended halted on the gate.
+func gateHeldSettle(markers []prstate.Marker, pass int) bool {
+	m, ok := prstate.MarkerFor(markers, pass, core.LegResolve)
+	return ok && m.State == core.PassComplete && policy.ResolveGateHeld(asPolicyResolve(m))
+}
+
 // asPolicyResolve is the marker view legs_resolve_pass_label reads
 // (lib/legs.sh:234-248).
 func asPolicyResolve(m prstate.Marker) policy.ResolveMarker {

@@ -555,6 +555,11 @@ func statusStateFromMarkers(ctx context.Context, in statusInput) core.LoopState 
 	if !ok || review.State != core.PassComplete {
 		return core.LoopAwaitingReview
 	}
+	// A settle the required checks held is halted however the review ended:
+	// an empty pass can reach the resolve leg with a converged verdict.
+	if gateHeldSettle(in.markers, pass) {
+		return core.LoopHalted
+	}
 	switch core.Verdict(review.Verdict.Value()) {
 	case core.VerdictConverged:
 		// A converged verdict reports green only with the marker's own

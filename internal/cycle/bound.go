@@ -152,6 +152,12 @@ func readReview(out *ui.IO, state State, pass int) reviewReading {
 		out.End(fmt.Sprintf("Halted after pass %d — the reviewer could not complete.", pass))
 		return reviewHalted
 	}
+	if gateHeldSettle(state.Markers, pass) {
+		out.End(fmt.Sprintf(
+			"Halted after pass %d — required checks block convergence. When they have reported, run `crossrev restart --pr %d`.",
+			pass, state.PR))
+		return reviewHalted
+	}
 	if verdict != core.VerdictConverged && actionable != 0 {
 		return reviewContinues
 	}
