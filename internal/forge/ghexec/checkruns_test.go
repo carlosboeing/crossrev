@@ -49,7 +49,7 @@ func TestCheckRunsDecodesOnePage(t *testing.T) {
 	if lint.ID != 12 || lint.Status != "in_progress" || lint.Conclusion != "" {
 		t.Errorf("lint = %+v, want the null conclusion as empty", lint)
 	}
-	r.wantArgs(t, 0, "api", "repos/acme/widget/commits/1111111111111111111111111111111111111111/check-runs",
+	r.wantArgs(t, 0, "api", "--method", "GET", "repos/acme/widget/commits/1111111111111111111111111111111111111111/check-runs",
 		"-F", "per_page=100", "-F", "page=1")
 }
 
@@ -77,8 +77,30 @@ func TestCheckRunsPaginatesToCompletion(t *testing.T) {
 	if len(r.specs) != 2 {
 		t.Fatalf("gh calls = %d, want 2", len(r.specs))
 	}
-	r.wantArgs(t, 1, "api", "repos/acme/widget/commits/1111111111111111111111111111111111111111/check-runs",
+	r.wantArgs(t, 1, "api", "--method", "GET", "repos/acme/widget/commits/1111111111111111111111111111111111111111/check-runs",
 		"-F", "per_page=100", "-F", "page=2")
+}
+
+// Every page request names its method: gh answers POST to any api call
+// carrying -f or -F, and the check-runs enumeration is a GET. Without
+// the flag each page would create nothing and read nothing.
+func TestCheckRunsReadsEveryPageWithGET(t *testing.T) {
+	first := `{"total_count":101,"check_runs":[` + strings.Repeat(`{"id":1,"name":"a","status":"completed","conclusion":"success","html_url":"u","app":{"slug":"github-actions"}},`, 99) +
+		`{"id":100,"name":"a","status":"completed","conclusion":"success","html_url":"u","app":{"slug":"github-actions"}}]}`
+	second := `{"total_count":101,"check_runs":[{"id":101,"name":"b","status":"completed","conclusion":"success","html_url":"u","app":{"slug":"github-actions"}}]}`
+	c, r := client(t, out(first), out(second))
+
+	if _, err := c.CheckRuns(context.Background(), testSlug(t), checkHead(t)); err != nil {
+		t.Fatalf("CheckRuns: %v", err)
+	}
+	if len(r.specs) != 2 {
+		t.Fatalf("gh calls = %d, want the two pages", len(r.specs))
+	}
+	for i, argv := range r.argvs() {
+		if !strings.Contains(argv, "--method GET") {
+			t.Errorf("page %d argv = %q, want it to carry --method GET", i+1, argv)
+		}
+	}
 }
 
 // A response whose total exceeds the runs it lists is truncated, and the
@@ -130,7 +152,7 @@ func TestCheckRunsDenialNamesThePermission(t *testing.T) {
 // Against the offline suite's stub the client issues the same call the
 // shell suites would see in the log, and reads the routed enumeration.
 func TestCheckRunsAgainstTheStub(t *testing.T) {
-	routes := "api repos/acme/widget/commits/1111111111111111111111111111111111111111/check-runs*\t" +
+	routes := "api --method GET repos/acme/widget/commits/1111111111111111111111111111111111111111/check-runs*\t" +
 		"{\"total_count\":1,\"check_runs\":[{\"id\":11,\"name\":\"build\",\"status\":\"completed\"," +
 		"\"conclusion\":\"success\",\"html_url\":\"https://github.com/acme/widget/runs/11\"," +
 		"\"app\":{\"slug\":\"github-actions\"}}]}\n"
@@ -143,7 +165,7 @@ func TestCheckRunsAgainstTheStub(t *testing.T) {
 	if len(got.Runs) != 1 || got.Runs[0].Name != "build" || got.Runs[0].Conclusion != "success" {
 		t.Fatalf("runs = %+v", got.Runs)
 	}
-	want := "api repos/acme/widget/commits/1111111111111111111111111111111111111111/check-runs -F per_page=100 -F page=1"
+	want := "api --method GET repos/acme/widget/commits/1111111111111111111111111111111111111111/check-runs -F per_page=100 -F page=1"
 	if lines := calls(); len(lines) != 1 || lines[0] != want {
 		t.Errorf("calls = %q, want %q", lines, want)
 	}

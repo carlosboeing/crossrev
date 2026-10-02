@@ -47,7 +47,7 @@ func (c *Client) CheckRuns(ctx context.Context, repo core.Slug, head core.Revisi
 	var out forge.CheckRuns
 	total := 0
 	for page := 1; ; page++ {
-		res := c.run(ctx, "api", "repos/"+repo.String()+"/commits/"+head.SHA()+"/check-runs",
+		res := c.run(ctx, "api", "--method", "GET", "repos/"+repo.String()+"/commits/"+head.SHA()+"/check-runs",
 			"-F", "per_page="+strconv.Itoa(checkRunsPerPage),
 			"-F", "page="+strconv.Itoa(page))
 		if !answered(res) {
