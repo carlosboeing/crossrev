@@ -232,6 +232,12 @@ func readResolve(out *ui.IO, state State, pass int) resolveReading {
 	// each by the thing that records them; the halts left here — a deferral
 	// nobody filed, a fix that reached no commit — apply no crossrev/stop,
 	// because nobody pulled the brake.
+	if label == policy.PassHalted && policy.ResolveGateHeld(asPolicyResolve(marker)) {
+		out.End(fmt.Sprintf(
+			"Halted after pass %d — required checks block convergence. When they have reported, run `crossrev restart --pr %d`.",
+			pass, state.PR))
+		return resolveHalted
+	}
 	if label == policy.PassHalted {
 		out.End(fmt.Sprintf(
 			"Halted after pass %d — the resolve leg left something a person has to settle. `crossrev status --pr %d` says what.",

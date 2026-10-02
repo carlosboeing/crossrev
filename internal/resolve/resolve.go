@@ -26,6 +26,11 @@ func (l *Leg) Run(ctx context.Context, req Request) (out Result) {
 	s, early := l.load(ctx, req)
 	if early.Outcome != "" || early.Err != nil {
 		if early.Outcome == OutcomeNoFindings || early.Outcome == OutcomeHalted {
+			if s.redriving && gateHeldAtMovedHead(s) {
+				// An empty settle held at an older head: the new revision is
+				// the reviewer's, whatever its checks now report.
+				return l.handBackMovedHead(ctx, s)
+			}
 			if refusal := l.verificationSettings(s); refusal != nil {
 				return Result{Outcome: OutcomeRefused, Err: refusal, Pass: s.pass}
 			}
