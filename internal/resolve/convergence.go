@@ -131,7 +131,8 @@ func (l *Leg) generationIfCurrent(ctx context.Context, s *session, h prstate.Han
 	if err != nil {
 		return prstate.Generation{}, false
 	}
-	if !prstate.GenerationCurrent(gen, core.RevisionPair{Base: s.pr.BaseRefOid, Head: s.pr.HeadRefOid}, l.reviewEngineID(s.cfg), producer) {
+	engine := prstate.EngineFor(s.review, l.reviewEngineID(s.cfg))
+	if !prstate.GenerationCurrent(gen, core.RevisionPair{Base: s.pr.BaseRefOid, Head: s.pr.HeadRefOid}, engine, producer) {
 		return prstate.Generation{}, false
 	}
 	return gen, true
@@ -139,9 +140,10 @@ func (l *Leg) generationIfCurrent(ctx context.Context, s *session, h prstate.Han
 
 // reviewEngineID answers the review-contract engine identity under the
 // base policy: the configured concerns, check mode and input policy
-// beside the configured reviewer's effective read mode. It is the same
-// identity the review leg publishes under, so a generation judged under
-// another contract retires here instead of being trusted by the settle.
+// beside the configured reviewer's effective read mode. A generation
+// whose marker records the identity its pass published under is judged
+// by that; this is the fallback for markers written before the pass
+// recorded it.
 func (l *Leg) reviewEngineID(cfg *config.Config) string {
 	reviewer := cfg.Reviewers()[0]
 	effective := harness.ReadModeSupplied

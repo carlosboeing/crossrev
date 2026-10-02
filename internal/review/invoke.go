@@ -190,18 +190,17 @@ func overrideRefusal(flag string, err error) *ui.FatalError {
 }
 
 // reviewEngineID answers the review-contract engine identity this pass
-// publishes under: the configured concerns, check mode and input policy
-// beside the configured reviewer's effective read mode. It is read from
-// the base policy, not the resolved settings, so a local flag override
-// neither retires the pass's own checkpoint at the convergence reads nor
-// strands a generation resolve and status can no longer reproduce. What
-// the pass ran with is recorded in the run log and on the marker; only a
-// policy change retires the checkpoint.
-func (l *Leg) reviewEngineID(cfg *config.Config) string {
-	reviewer := cfg.Reviewers()[0]
-	entry, _ := l.Harness.For(reviewer.Harness)
+// publishes under: the effective concerns, check mode and input policy
+// beside the effective read mode of the harness that actually reviews.
+func (l *Leg) reviewEngineID(settings legSettings) string {
+	entry, _ := l.Harness.For(settings.harness)
 	effective := harness.EffectiveReadMode(entry.ReadMode())
-	return core.ReviewEngineID(cfg.ReviewContract(string(effective)))
+	return core.ReviewEngineID(core.ReviewContract{
+		Concerns:    settings.concerns,
+		Check:       settings.checkMode,
+		InputPolicy: settings.inputPolicy,
+		ReadMode:    string(effective),
+	})
 }
 
 // detail renders the resolved settings for the run log: each effective

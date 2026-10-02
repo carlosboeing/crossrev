@@ -269,7 +269,7 @@ func TestNewPassContinuesTheLedgerChain(t *testing.T) {
 // configuration publishes under: both concerns, the resolver check, the
 // hunks-first policy and the served reads of the default codex reviewer.
 // It states the digest inputs, not the digest, so a review leg that stops
-// publishing the identity from the base policy retires these generations
+// publishing the effective-settings identity retires these generations
 // and fails below.
 func testEngineID() string {
 	return core.ReviewEngineID(core.ReviewContract{
