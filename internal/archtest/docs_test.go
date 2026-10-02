@@ -80,7 +80,7 @@ func TestPublicDocsShowCurrentConfigVersion(t *testing.T) {
 // the suite still green: dropping the banned-phrase list keeps the docs'
 // own text passing while a new "verified" sentence slips in, and dropping
 // the required-phrase halves keeps it passing while the required_checks
-// sentence is deleted.
+// sentence or the not_implemented one is deleted.
 func TestPublicDocsAuditVerdict(t *testing.T) {
 	tests := []struct {
 		name string
@@ -93,13 +93,13 @@ func TestPublicDocsAuditVerdict(t *testing.T) {
 	}{
 		{
 			name:        "review completion with the gate named",
-			doc:         "crossrev/converged means review completion with required_checks judged.",
+			doc:         "crossrev/converged means review completion with required_checks judged. verification.status stays not_implemented.",
 			wantBanned:  0,
 			wantMissing: 0,
 		},
 		{
 			name:        "a verified claim",
-			doc:         "the pass reports verified convergence with required_checks judged.",
+			doc:         "the pass reports verified convergence with required_checks judged. verification.status stays not_implemented.",
 			wantBanned:  1,
 			wantMissing: 0,
 		},
@@ -107,11 +107,17 @@ func TestPublicDocsAuditVerdict(t *testing.T) {
 			name:        "the gate omitted",
 			doc:         "crossrev/converged means review completion.",
 			wantBanned:  0,
+			wantMissing: 2,
+		},
+		{
+			name:        "the manifest status omitted",
+			doc:         "crossrev/converged means review completion with required_checks judged.",
+			wantBanned:  0,
 			wantMissing: 1,
 		},
 		{
 			name:        "a documented out-of-scope state",
-			doc:         "review completion with required_checks. verification.status: passed is recorded.",
+			doc:         "review completion with required_checks. verification.status: passed is recorded. verification.status stays not_implemented.",
 			wantBanned:  1,
 			wantMissing: 0,
 		},
@@ -192,11 +198,16 @@ func auditDocsVerdict(doc string) []string {
 	return found
 }
 
-// auditDocsMissing reports the required gate statement one document's text
-// lacks.
+// auditDocsMissing reports the required statements one document's text
+// lacks: the gate convergence reads, and the manifest status that says
+// CrossRev itself runs no check.
 func auditDocsMissing(doc string) []string {
-	if strings.Contains(doc, "required_checks") {
-		return nil
+	var missing []string
+	if !strings.Contains(doc, "required_checks") {
+		missing = append(missing, "the required_checks gate")
 	}
-	return []string{"the required_checks gate"}
+	if !strings.Contains(doc, "not_implemented") {
+		missing = append(missing, "verification.status not_implemented")
+	}
+	return missing
 }
