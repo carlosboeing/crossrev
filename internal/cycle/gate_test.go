@@ -2,6 +2,7 @@ package cycle
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -48,5 +49,41 @@ func TestCycleReadsAPassedGateSettleAsBefore(t *testing.T) {
 	want := readResolve(&ui.IO{Out: &base}, gateSettleState(""), 1)
 	if got := readResolve(&ui.IO{Out: &passed}, gateSettleState("passed"), 1); got != want || passed.String() != base.String() {
 		t.Fatalf("passed gate = %v %q, want %v %q", got, passed.String(), want, base.String())
+	}
+}
+
+// emptyReviewGateHeld is one pass whose review raised nothing actionable
+// and whose resolve leg recorded the empty settle under a held gate.
+func emptyReviewGateHeld(verdict string) []prstate.Marker {
+	review := prstate.Marker{Leg: core.LegReview, Pass: 1, State: core.PassComplete, Verdict: prstate.Some(verdict), Findings: json.RawMessage("[]")}
+	resolve := prstate.Marker{
+		Leg:          core.LegResolve,
+		Pass:         1,
+		State:        core.PassComplete,
+		Resolutions:  json.RawMessage("[]"),
+		Verification: prstate.Some(prstate.MarkerVerification{State: "failed"}),
+	}
+	return []prstate.Marker{review, resolve}
+}
+
+// Status reads a gate-held empty settle as halted whatever the review
+// verdict said, the way the resolve leg labelled it.
+func TestStatusReadsAGateHeldEmptySettleAsHalted(t *testing.T) {
+	for _, verdict := range []string{"converged", "issues_remain"} {
+		in := statusInput{markers: emptyReviewGateHeld(verdict), minFix: core.Severity("medium")}
+		if got := statusStateFromMarkers(context.Background(), in); got != core.LoopHalted {
+			t.Errorf("verdict %s: state = %s, want halted", verdict, got)
+		}
+	}
+}
+
+// The cycle does not announce convergence over a gate-held empty settle.
+func TestCycleReviewReadingHaltsOnAGateHeldEmptySettle(t *testing.T) {
+	for _, verdict := range []string{"converged", "issues_remain"} {
+		var buf bytes.Buffer
+		state := State{Markers: emptyReviewGateHeld(verdict), MinFixSeverity: core.Severity("medium")}
+		if got := readReview(&ui.IO{Out: &buf}, state, 1); got != reviewHalted || strings.Contains(buf.String(), "Converged") {
+			t.Errorf("verdict %s: reading = %v\n%s", verdict, got, buf.String())
+		}
 	}
 }
