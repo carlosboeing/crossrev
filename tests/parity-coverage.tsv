@@ -38,3 +38,4 @@ test-worktree.sh	go-test	resolve-leg worktree isolation and doctor	internal/vcs/
 test-review-intelligence.sh	black-box	review intelligence acceptance oracle through the binary	tests/test-review-intelligence.sh
 test-refresh-generated-rules.sh	black-box	upstream Linguist rules inspection and unmapped pattern reporting	tests/test-refresh-generated-rules.sh
 test-next-version.sh	black-box	next version measured from the VERSION tag, including a release squash-merged off its tag	tests/test-next-version.sh
+test-review-quality.sh	black-box	concern passes, the cross-model check and the required-check gate across review and resolve	tests/test-review-quality.sh
