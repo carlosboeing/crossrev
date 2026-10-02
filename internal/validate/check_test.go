@@ -209,6 +209,51 @@ func TestFailingChainPositionsNamesOnlyBrokenChains(t *testing.T) {
 	}
 }
 
+// A duplicate chain may leave the call after an intermediate local
+// candidate: positions 1 and 2 judged here, 2 naming 3, which another
+// call numbered. The per-call check stops at the foreign position and
+// leaves the endpoint for the merge, which still requires confirmed.
+func TestCheckAcceptsAMultiHopChainCrossingACallBoundary(t *testing.T) {
+	dec := func(position int, decision string, dup int) string {
+		target := "null"
+		if dup > 0 {
+			target = itoa(dup)
+		}
+		return `{"position":` + itoa(position) +
+			`,"decision":"` + decision + `","duplicate_of":` + target +
+			`,"reason":"because","severity":null,"pre_existing":null}`
+	}
+	crossing := `{"decisions":[` + dec(1, "duplicate", 2) + `,` + dec(2, "duplicate", 3) + `]}`
+	first, err := validate.Check([]byte(crossing), validate.CheckExpectations{Positions: []int{1, 2}, Total: 3})
+	if err != nil {
+		t.Fatalf("a chain leaving the call after a local candidate was refused: %v", err)
+	}
+	confirmed := `{"decisions":[` + dec(3, "confirmed", 0) + `]}`
+	second, err := validate.Check([]byte(confirmed), validate.CheckExpectations{Positions: []int{3}, Total: 3})
+	if err != nil {
+		t.Fatalf("second call: %v", err)
+	}
+	if err := validate.CheckChains(append(first, second...)); err != nil {
+		t.Errorf("the merged chain ending confirmed was refused: %v", err)
+	}
+	rejected := `{"decisions":[` + dec(3, "rejected", 0) + `]}`
+	third, err := validate.Check([]byte(rejected), validate.CheckExpectations{Positions: []int{3}, Total: 3})
+	if err != nil {
+		t.Fatalf("second call: %v", err)
+	}
+	if err := validate.CheckChains(append(first, third...)); err == nil {
+		t.Error("the merged chain ending rejected was accepted")
+	}
+	// A cycle the walk can close without leaving the call is still
+	// refused at the call, foreign positions beside it or not.
+	cycled := `{"decisions":[` + dec(1, "duplicate", 2) + `,` + dec(2, "duplicate", 3) + `,` + dec(3, "duplicate", 2) + `]}`
+	if _, err := validate.Check([]byte(cycled), validate.CheckExpectations{Positions: []int{1, 2, 3}, Total: 5}); err == nil {
+		t.Error("a cycle closed inside the call was accepted")
+	} else if !strings.Contains(err.Error(), "duplicate cycle") {
+		t.Errorf("err = %q, want it to name the cycle", err)
+	}
+}
+
 // A packed call judges a subset, and its duplicates may name a candidate
 // another call numbered: the per-call check leaves the cross-call chain
 // for the merge, which CheckChains then judges.

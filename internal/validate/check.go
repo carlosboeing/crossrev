@@ -156,8 +156,9 @@ func checkDecisionShape(element json.RawMessage) (CheckDecision, error) {
 
 // checkPositions contradicts the decisions against the positions the call
 // numbered: exactly one decision per position, duplicate targets within
-// the pass's range, no self-reference, and every duplicate chain ending
-// at a confirmed candidate with no cycle.
+// the pass's range, no self-reference, and every duplicate chain free of
+// local cycles and rejections. A chain may leave the call for a position
+// another call numbered, at any hop; the merge proves the endpoint.
 func checkPositions(decisions []CheckDecision, expected CheckExpectations) error {
 	positions := expected.Positions
 	want := make(map[int]bool, len(positions))
@@ -200,7 +201,7 @@ func checkPositions(decisions []CheckDecision, expected CheckExpectations) error
 		if _, ok := byPosition[decision.DuplicateOf]; !ok {
 			continue
 		}
-		if err := checkDuplicateChain(byPosition, decision.Position); err != nil {
+		if err := checkDuplicateChainLocal(byPosition, decision.Position, expected.Total); err != nil {
 			return err
 		}
 	}
@@ -213,6 +214,38 @@ func checkPositions(decisions []CheckDecision, expected CheckExpectations) error
 func checkDuplicateChain(byPosition map[int]CheckDecision, start int) error {
 	_, err := walkDuplicateChain(byPosition, start)
 	return err
+}
+
+// checkDuplicateChainLocal walks one duplicate chain as far as this call
+// numbered: a local cycle or a local rejection fails, and a position the
+// call never numbered ends the walk successfully when it numbers within
+// the pass — another call judges it, and the merge proves the endpoint.
+// A position outside the pass fails, the way a direct one does above. A
+// zero total skips the range check, for callers holding no pass numbering
+// to contradict.
+func checkDuplicateChainLocal(byPosition map[int]CheckDecision, start int, total int) error {
+	visited := map[int]bool{start: true}
+	at := byPosition[start].DuplicateOf
+	for {
+		next, ok := byPosition[at]
+		if !ok {
+			if total > 0 && (at < 1 || at > total) {
+				return semanticf("candidate %d duplicates candidate %d, which is not a candidate in this pass", start, at)
+			}
+			return nil
+		}
+		if visited[at] {
+			return semanticf("candidate %d sits on a duplicate cycle", start)
+		}
+		visited[at] = true
+		switch next.Decision {
+		case "confirmed":
+			return nil
+		case "rejected":
+			return semanticf("candidate %d duplicates rejected candidate %d", start, at)
+		}
+		at = next.DuplicateOf
+	}
 }
 
 // walkDuplicateChain follows one duplicate chain from its start,
