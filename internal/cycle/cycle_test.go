@@ -872,12 +872,11 @@ func TestDriverForwardsReviewSettingsToBothLegs(t *testing.T) {
 	}
 }
 
-// TestReviewEngineIDMatchesTheBasePolicy pins that status computes the
-// review-contract engine identity from the same base policy the review
-// leg publishes under: the configured concerns, check mode and input
-// policy beside the configured reviewer's effective read mode. The
-// resolve leg computes the same identity; both retire a generation
-// judged under another contract.
+// TestReviewEngineIDMatchesTheBasePolicy pins status's fallback: the
+// review-contract engine identity under the base policy — the configured
+// concerns, check mode and input policy beside the configured reviewer's
+// effective read mode. The resolve leg computes the same fallback; both
+// retire a generation judged under another contract.
 func TestReviewEngineIDMatchesTheBasePolicy(t *testing.T) {
 	rev, err := core.NewRevision(strings.Repeat("a", 40))
 	if err != nil {

@@ -29,7 +29,7 @@ func statusProducer() prstate.Producer {
 // fixture configuration publishes under: both concerns, the resolver
 // check, the hunks-first policy and the served reads of the configured
 // claude reviewer. It states the digest inputs, not the digest, so a
-// production read that stops computing the identity from the base policy
+// production read that stops falling back to the base-policy identity
 // retires these generations and fails below.
 func statusEngineID() string {
 	return core.ReviewEngineID(core.ReviewContract{
@@ -308,9 +308,10 @@ func TestStatusConvergenceReadsTheLedger(t *testing.T) {
 
 	t.Run("a generation judged under another contract cannot underwrite convergence", func(t *testing.T) {
 		// The fixture config reviews both concerns; this generation was
-		// judged under correctness alone. Same revision, same producer,
-		// same records — only the contract differs, and the read retires
-		// it instead of trusting verdicts judged under other settings.
+		// judged under correctness alone, and the marker predates the
+		// recorded identity. Same revision, same producer, same records —
+		// only the contract differs, and the fallback read retires it
+		// instead of trusting verdicts judged under other settings.
 		narrower := core.ReviewEngineID(core.ReviewContract{
 			Concerns:    []string{"correctness"},
 			Check:       "resolver",
@@ -324,6 +325,27 @@ func TestStatusConvergenceReadsTheLedger(t *testing.T) {
 		}
 		if got := statusLoadLedger(t, comments, store).State; got != core.LoopAwaitingReview {
 			t.Errorf("state = %q, want %q", got, core.LoopAwaitingReview)
+		}
+	})
+
+	t.Run("a generation published under flags underwrites convergence when the marker names its engine", func(t *testing.T) {
+		// The same narrowed generation, but the pass recorded the identity
+		// it published under on its marker. Status judges by what ran
+		// rather than by the base policy it can reproduce.
+		narrower := core.ReviewEngineID(core.ReviewContract{
+			Concerns:    []string{"correctness"},
+			Check:       "resolver",
+			InputPolicy: "hunks_first",
+			ReadMode:    "served",
+		})
+		store := storetest.NewFakeStore()
+		handle := statusPublishGenerationUnder(t, store, statusBase, statusLedgerHead, paths, covered, narrower)
+		handle.Engine = narrower
+		comments := []forge.IssueComment{
+			statusConvergedMarkerComment(t, statusLedgerHead, statusNameHandle(handle)),
+		}
+		if got := statusLoadLedger(t, comments, store).State; got != core.LoopConverged {
+			t.Errorf("state = %q, want %q", got, core.LoopConverged)
 		}
 	})
 

@@ -64,7 +64,7 @@ func mustHarness(t *testing.T) harness.Document {
 // configuration publishes under: both concerns, the resolver check, the
 // hunks-first policy and the served reads of the default codex reviewer.
 // It states the digest inputs, not the digest, so a production read that
-// stops computing the identity from the base policy retires these
+// stops falling back to the base-policy identity retires these
 // generations and fails below.
 func testEngineID() string {
 	return core.ReviewEngineID(core.ReviewContract{
