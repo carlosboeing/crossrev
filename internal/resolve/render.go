@@ -14,6 +14,7 @@ import (
 	"github.com/carlosboeing/crossrev/internal/intel"
 	"github.com/carlosboeing/crossrev/internal/policy"
 	"github.com/carlosboeing/crossrev/internal/prstate"
+	"github.com/carlosboeing/crossrev/internal/verify"
 )
 
 // ReplyBody is _resolve_reply_body at lib/run.sh:2570-2585. Held counts
@@ -572,6 +573,11 @@ func resolveSummaryBody(resolutions, findings json.RawMessage, deferredLines str
 		b.WriteString(alert("WARNING", fmt.Sprintf("**%d %s need a human decision.** `crossrev/stop` is applied, so the loop halts until somebody removes it. %s", escalated, noun, counts)))
 	} else {
 		b.WriteString(alert("NOTE", fmt.Sprintf("**%s** Every posted finding was verified whatever its severity — severity governs what happens afterwards, not whether the check happens.", counts)))
+	}
+
+	if policy.ResolveGateHeld(asPolicyResolve(marker)) {
+		record, _ := marker.Verification.Get()
+		fmt.Fprintf(&b, "Required checks block convergence: %s. When they have reported, run `crossrev restart --pr %d` to drive the pass again.\n\n", verify.Debt(verify.FromRecord(record)), pr)
 	}
 
 	if commit != "" && commit != "null" {

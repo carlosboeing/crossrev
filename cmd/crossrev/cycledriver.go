@@ -135,6 +135,7 @@ func (a resolveAdapter) Run(ctx context.Context, req cycle.LegRequest) cycle.Leg
 		EffortOverride:   req.EffortOverride,
 		RequiredChecks:   req.RequiredChecks,
 		NoRequiredChecks: req.NoRequiredChecks,
+		CheckWait:        req.CheckWait,
 		Author:           a.author,
 		KeepTranscripts:  req.KeepTranscripts,
 	})

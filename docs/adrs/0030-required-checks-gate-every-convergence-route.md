@@ -7,6 +7,7 @@ scope: [review, resolve]
 authors:
   - "Carlos Boeing"
   - "Muse Spark (Muse Code)"
+  - "GPT-6 (Codex)"
 related:
   - docs/adrs/0001-cross-model-review-loop.md
   - docs/adrs/0003-policy-read-from-the-base-revision.md
@@ -29,7 +30,7 @@ every route already reads.
 
 1. **The repository names the checks that must pass.**
    `verification.required_checks` lists check names with their Apps,
-   and `verification.wait_minutes` bounds how long a review waits for
+   and `verification.wait_minutes` bounds how long either leg waits for
    them. Both are policy, read from the base revision like every
    other key, with local flags for one run that automated mode
    refuses.
@@ -39,20 +40,13 @@ every route already reads.
    a rerun supersedes, and only check runs count — a commit-status
    context never satisfies an entry. A failure outranks a wait, a
    wait outranks an absence, and a refused or truncated enumeration
-   is unreadable and fails closed. The review re-reads every 30
+   is unreadable and fails closed. Both legs re-read every 30
    seconds up to the wait, stopping early on `crossrev/stop`, a head
    change or cancellation; then a pending, missing, failed or
    unreadable gate halts with a named word rather than judging
    mid-run.
 
-3. **Every route that can converge judges the gate.** The review
-   publish, the resolve no-commit settle and the resolve
-   empty-findings route all read the same evidence, and only `passed`
-   and `none_required` converge. The resolve leg never waits: it
-   judges one read, and a gate still outstanding holds the settle
-   off converged until the review leg looks again. A failed check
-   never becomes a code finding — it is a fact for its own logs, not
-   an attribution the loop makes.
+3. **Every route that can converge judges the gate.** The review publish, the resolve no-commit settle and the resolve empty-findings route all read the same evidence, and only `passed` and `none_required` converge. Resolve loads the verification settings and validates local overrides before the empty-findings route. When coverage would converge, both resolve routes wait for pending or missing checks through the same bounded loop as review. A gate still blocked afterwards applies `crossrev/halted`, with its halt word, blocking checks and restart command in the summary and output. The complete resolve marker records the evidence under `verification`. Restart reads that evidence and selects resolve. An unchanged pass that settled every finding without a commit re-judges only the gate, without invoking the model or repeating replies. Empty findings and older review markers without a coverage claim follow the same rules. A failed check never becomes a code finding. It is a fact for its own logs, not an attribution the loop makes.
 
 4. **Reading runs needs a permission the App now asks for.**
    `checks: read` joins the installation, and `crossrev doctor`

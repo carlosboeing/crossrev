@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/carlosboeing/crossrev/internal/config"
 	"github.com/carlosboeing/crossrev/internal/core"
@@ -14,9 +17,7 @@ import (
 	"github.com/carlosboeing/crossrev/internal/prstate/storetest"
 )
 
-// settleGateConfig names one required check. The wait is irrelevant to the
-// settle — the resolve leg reads once — but the config carries it the way
-// a real one would.
+// settleGateConfig names one required check and a bounded wait.
 const settleGateConfig = "version: 2\nverification:\n  required_checks: [build]\n  wait_minutes: 10\n"
 
 // seedCompleteGeneration publishes one generation at the fixture head with
@@ -104,10 +105,8 @@ func TestSettleWithPassingChecksConverges(t *testing.T) {
 	}
 }
 
-// A no-commit settle with a failed check stays awaiting-review: the loop
-// owes the reviewer another look, which waits on and then halts over the
-// same evidence.
-func TestSettleWithFailedChecksStaysAwaitingReview(t *testing.T) {
+// A failed check halts an otherwise settled no-commit pass.
+func TestSettleWithFailedChecksHalts(t *testing.T) {
 	e := setup(t)
 	settleSkipped(t, e)
 	e.forge.checks = []forge.CheckRun{
@@ -121,8 +120,8 @@ func TestSettleWithFailedChecksStaysAwaitingReview(t *testing.T) {
 	if settleHasLabel(e, policy.LabelConverged) {
 		t.Fatalf("converged label applied with a failed check: %v", settleAdded(e))
 	}
-	if !settleHasLabel(e, policy.LabelAwaitingReview) {
-		t.Fatalf("addedLabels = %v, want %q", settleAdded(e), policy.LabelAwaitingReview)
+	if !settleHasLabel(e, policy.LabelHalted) {
+		t.Fatalf("addedLabels = %v, want %q", settleAdded(e), policy.LabelHalted)
 	}
 	record, ok := got.Marker.Verification.Get()
 	if !ok || record.State != "failed" {
@@ -130,29 +129,99 @@ func TestSettleWithFailedChecksStaysAwaitingReview(t *testing.T) {
 	}
 }
 
-// The settle reads once and never waits: a pending gate refuses converged
-// on one read.
-func TestSettleReadsTheGateOnce(t *testing.T) {
+// Pending checks can finish while the settle waits, without another model call.
+func TestSettleWaitsForPassingChecks(t *testing.T) {
 	e := setup(t)
 	settleSkipped(t, e)
-	e.forge.checks = []forge.CheckRun{
-		{ID: 11, Name: "build", App: "github-actions", Status: "in_progress",
-			URL: "https://github.com/acme/widget/runs/11"},
+	e.forge.checks = []forge.CheckRun{{ID: 11, Name: "build", App: "github-actions", Status: "in_progress"}}
+	sleeps := 0
+	e.sleep = func(d time.Duration) {
+		sleeps++
+		e.now = e.now.Add(d)
+		e.forge.checks[0].Status = "completed"
+		e.forge.checks[0].Conclusion = "success"
 	}
 	got := e.run(t)
 	if got.Err != nil {
-		t.Fatalf("Run: %v", got.Err)
+		t.Fatal(got.Err)
 	}
-	if settleHasLabel(e, policy.LabelConverged) {
-		t.Fatalf("converged label applied with a pending check: %v", settleAdded(e))
+	if !settleHasLabel(e, policy.LabelConverged) || sleeps != 1 || e.adapter.calls != 1 {
+		t.Fatalf("labels=%v sleeps=%d model calls=%d", settleAdded(e), sleeps, e.adapter.calls)
 	}
-	if e.forge.checksCalls != 1 {
-		t.Errorf("check-run reads = %d, want 1 (the settle does not wait)", e.forge.checksCalls)
+}
+
+func TestGateHeldSettleRedrivesWithoutModel(t *testing.T) {
+	e := setup(t)
+	settleSkipped(t, e)
+	e.forge.checks = []forge.CheckRun{{ID: 11, Name: "build", App: "github-actions", Status: "completed", Conclusion: "failure"}}
+	got := e.run(t)
+	if got.Err != nil {
+		t.Fatal(got.Err)
+	}
+	if !settleHasLabel(e, policy.LabelHalted) {
+		t.Fatalf("labels=%v", settleAdded(e))
+	}
+	var output strings.Builder
+	for _, line := range got.Messages {
+		output.WriteString(line.Text)
+	}
+	if !strings.Contains(output.String(), "required_check_failed: build") || !strings.Contains(output.String(), "crossrev restart --pr 42") {
+		t.Fatalf("output=%s", output.String())
+	}
+	if !strings.Contains(e.forge.edits[len(e.forge.edits)-1].Body, "required_check_failed: build") {
+		t.Fatal("summary omits gate debt")
+	}
+	// Persist edits as GitHub does, including the complete resolve marker.
+	for _, edit := range e.forge.edits {
+		for i := range e.forge.comments {
+			if e.forge.comments[i].ID == edit.CommentID {
+				e.forge.comments[i].Body = edit.Body
+			}
+		}
+	}
+	e.forge.addedLabels = nil
+	e.forge.checks[0].Conclusion = "success"
+	got = e.run(t)
+	if got.Err != nil {
+		t.Fatal(got.Err)
+	}
+	if !settleHasLabel(e, policy.LabelConverged) || e.adapter.calls != 1 {
+		t.Fatalf("labels=%v model calls=%d outcome=%s", settleAdded(e), e.adapter.calls, got.Outcome)
+	}
+	if ev, ok := got.Marker.Verification.Get(); !ok || ev.State != "passed" {
+		t.Fatalf("evidence=%+v", ev)
+	}
+}
+
+func TestEmptyFindingsRunLoadsGate(t *testing.T) {
+	for _, covered := range []bool{false, true} {
+		t.Run(fmt.Sprint(covered), func(t *testing.T) {
+			e := setup(t)
+			e.addReview(t, nil, "converged")
+			if covered {
+				seedCompleteGeneration(t, e)
+			}
+			e.git.show = map[string][]byte{e.base.SHA() + ":.github/crossrev.yml": []byte(settleGateConfig)}
+			e.forge.checks = []forge.CheckRun{{ID: 11, Name: "build", App: "github-actions", Status: "completed", Conclusion: "failure"}}
+			got := e.run(t)
+			if got.Err != nil {
+				t.Fatal(got.Err)
+			}
+			if settleHasLabel(e, policy.LabelConverged) || !settleHasLabel(e, policy.LabelHalted) {
+				t.Fatalf("labels=%v", settleAdded(e))
+			}
+			if ev, ok := got.Marker.Verification.Get(); !ok || ev.State != "failed" {
+				t.Fatalf("evidence=%+v", ev)
+			}
+			if e.adapter.calls != 0 {
+				t.Fatal("empty settle invoked model")
+			}
+		})
 	}
 }
 
 // An unreadable gate refuses the settle the way a failed one does.
-func TestSettleWithUnreadableGateStaysAwaitingReview(t *testing.T) {
+func TestSettleWithUnreadableGateHalts(t *testing.T) {
 	e := setup(t)
 	settleSkipped(t, e)
 	e.forge.checksErr = &forge.CheckRunsDenied{Status: 403, Err: errSettleDenied}
@@ -162,6 +231,9 @@ func TestSettleWithUnreadableGateStaysAwaitingReview(t *testing.T) {
 	}
 	if settleHasLabel(e, policy.LabelConverged) {
 		t.Fatalf("converged label applied with an unreadable gate: %v", settleAdded(e))
+	}
+	if !settleHasLabel(e, policy.LabelHalted) {
+		t.Fatalf("addedLabels=%v, want halted", settleAdded(e))
 	}
 	record, ok := got.Marker.Verification.Get()
 	if !ok || record.State != "unreadable" {
@@ -217,8 +289,8 @@ func TestSettleWithoutCoverageClaimRefusesConvergedOnAFailedGate(t *testing.T) {
 	if settleHasLabel(e, policy.LabelConverged) {
 		t.Fatalf("converged label applied with a failed check: %v", settleAdded(e))
 	}
-	if !settleHasLabel(e, policy.LabelAwaitingReview) {
-		t.Fatalf("addedLabels = %v, want %q", settleAdded(e), policy.LabelAwaitingReview)
+	if !settleHasLabel(e, policy.LabelHalted) {
+		t.Fatalf("addedLabels = %v, want %q", settleAdded(e), policy.LabelHalted)
 	}
 	if e.forge.checksCalls != 1 {
 		t.Errorf("check-run reads = %d, want 1", e.forge.checksCalls)
@@ -332,5 +404,34 @@ func TestEmptyFindingsWithoutCoverageClaimRefusesConvergedOnAFailedGate(t *testi
 	}
 	if e.forge.checksCalls != 1 {
 		t.Errorf("check-run reads = %d, want 1", e.forge.checksCalls)
+	}
+}
+
+func TestEmptyGateHaltCanClearChecksOnRedrive(t *testing.T) {
+	e := setup(t)
+	e.addReview(t, nil, "converged")
+	e.git.show = map[string][]byte{e.base.SHA() + ":.github/crossrev.yml": []byte(settleGateConfig)}
+	e.forge.checks = []forge.CheckRun{{ID: 11, Name: "build", App: "github-actions", Status: "completed", Conclusion: "failure"}}
+	got := e.run(t)
+	if got.Err != nil {
+		t.Fatal(got.Err)
+	}
+	for _, edit := range e.forge.edits {
+		for i := range e.forge.comments {
+			if e.forge.comments[i].ID == edit.CommentID {
+				e.forge.comments[i].Body = edit.Body
+			}
+		}
+	}
+	e.forge.addedLabels = nil
+	got = e.runReq(t, Request{PR: 42, Repo: e.slug, NoRequiredChecks: true})
+	if got.Err != nil {
+		t.Fatal(got.Err)
+	}
+	if ev, ok := got.Marker.Verification.Get(); !ok || ev.State != "none_required" {
+		t.Fatalf("verification=%+v", ev)
+	}
+	if !settleHasLabel(e, policy.LabelConverged) || e.adapter.calls != 0 {
+		t.Fatalf("labels=%v model calls=%d", settleAdded(e), e.adapter.calls)
 	}
 }

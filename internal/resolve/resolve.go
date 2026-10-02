@@ -26,9 +26,18 @@ func (l *Leg) Run(ctx context.Context, req Request) (out Result) {
 	s, early := l.load(ctx, req)
 	if early.Outcome != "" || early.Err != nil {
 		if early.Outcome == OutcomeNoFindings || early.Outcome == OutcomeHalted {
+			if refusal := l.verificationSettings(s); refusal != nil {
+				return Result{Outcome: OutcomeRefused, Err: refusal, Pass: s.pass}
+			}
 			return l.finishEmpty(ctx, s, early)
 		}
 		return early
+	}
+	if s.redriving && gateOnlySettle(s) {
+		if refusal := l.verificationSettings(s); refusal != nil {
+			return Result{Outcome: OutcomeRefused, Err: refusal, Pass: s.pass}
+		}
+		return l.redriveGate(ctx, s)
 	}
 	if l.Log != nil {
 		l.Log.SetLeg("resolve")

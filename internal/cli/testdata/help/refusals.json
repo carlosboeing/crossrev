@@ -66,7 +66,7 @@
       ],
       "shell": {
         "exit": 1,
-        "stderr": "\nerror  unknown option for resolve: --bogus\n       Usage: crossrev resolve --pr <number> [--harness <one of: claude|codex|agy|grok|opencode>] [--model <id>] [--effort <level>] [--trigger human|automatic] [--required-check NAME[@APP]] [--no-required-checks] [--keep-transcripts]\n\n"
+        "stderr": "\nerror  unknown option for resolve: --bogus\n       Usage: crossrev resolve --pr <number> [--harness <one of: claude|codex|agy|grok|opencode>] [--model <id>] [--effort <level>] [--trigger human|automatic] [--required-check NAME[@APP]] [--no-required-checks] [--check-wait MINUTES] [--keep-transcripts]\n\n"
       }
     },
     {
@@ -127,7 +127,7 @@
       ],
       "shell": {
         "exit": 1,
-        "stderr": "\nerror  unknown option for resolve: --continuation\n       Usage: crossrev resolve --pr <number> [--harness <one of: claude|codex|agy|grok|opencode>] [--model <id>] [--effort <level>] [--trigger human|automatic] [--required-check NAME[@APP]] [--no-required-checks] [--keep-transcripts]\n\n"
+        "stderr": "\nerror  unknown option for resolve: --continuation\n       Usage: crossrev resolve --pr <number> [--harness <one of: claude|codex|agy|grok|opencode>] [--model <id>] [--effort <level>] [--trigger human|automatic] [--required-check NAME[@APP]] [--no-required-checks] [--check-wait MINUTES] [--keep-transcripts]\n\n"
       }
     },
     {
@@ -768,7 +768,7 @@
       ],
       "native": {
         "exit": 1,
-        "stderr": "\nerror  unknown option for resolve: --input-policy\n       Usage: crossrev resolve --pr <number> [--harness <one of: claude|codex|agy|grok|opencode>] [--model <id>] [--effort <level>] [--trigger human|automatic] [--required-check NAME[@APP]] [--no-required-checks] [--keep-transcripts]\n\n"
+        "stderr": "\nerror  unknown option for resolve: --input-policy\n       Usage: crossrev resolve --pr <number> [--harness <one of: claude|codex|agy|grok|opencode>] [--model <id>] [--effort <level>] [--trigger human|automatic] [--required-check NAME[@APP]] [--no-required-checks] [--check-wait MINUTES] [--keep-transcripts]\n\n"
       },
       "note": "Native-only flag; the removed shell had no input-policy option."
     },
@@ -1013,7 +1013,7 @@
       ],
       "native": {
         "exit": 1,
-        "stderr": "\nerror  unknown option for resolve: --concerns\n       Usage: crossrev resolve --pr <number> [--harness <one of: claude|codex|agy|grok|opencode>] [--model <id>] [--effort <level>] [--trigger human|automatic] [--required-check NAME[@APP]] [--no-required-checks] [--keep-transcripts]\n\n"
+        "stderr": "\nerror  unknown option for resolve: --concerns\n       Usage: crossrev resolve --pr <number> [--harness <one of: claude|codex|agy|grok|opencode>] [--model <id>] [--effort <level>] [--trigger human|automatic] [--required-check NAME[@APP]] [--no-required-checks] [--check-wait MINUTES] [--keep-transcripts]\n\n"
       },
       "note": "Native-only flag; the removed shell had no concerns option."
     },
@@ -1028,22 +1028,22 @@
       ],
       "native": {
         "exit": 1,
-        "stderr": "\nerror  unknown option for resolve: --check\n       Usage: crossrev resolve --pr <number> [--harness <one of: claude|codex|agy|grok|opencode>] [--model <id>] [--effort <level>] [--trigger human|automatic] [--required-check NAME[@APP]] [--no-required-checks] [--keep-transcripts]\n\n"
+        "stderr": "\nerror  unknown option for resolve: --check\n       Usage: crossrev resolve --pr <number> [--harness <one of: claude|codex|agy|grok|opencode>] [--model <id>] [--effort <level>] [--trigger human|automatic] [--required-check NAME[@APP]] [--no-required-checks] [--check-wait MINUTES] [--keep-transcripts]\n\n"
       },
       "note": "Native-only flag; the removed shell had no check option."
     },
     {
-      "name": "resolve refuses check wait",
+      "name": "resolve refuses check wait above 30",
       "args": [
         "resolve",
         "--pr",
         "42",
         "--check-wait",
-        "5"
+        "31"
       ],
       "native": {
         "exit": 1,
-        "stderr": "\nerror  unknown option for resolve: --check-wait\n       Usage: crossrev resolve --pr <number> [--harness <one of: claude|codex|agy|grok|opencode>] [--model <id>] [--effort <level>] [--trigger human|automatic] [--required-check NAME[@APP]] [--no-required-checks] [--keep-transcripts]\n\n"
+        "stderr": "\nerror  invalid resolve --check-wait: \"31\" is more than the 30 minute wait\n       Use --check-wait with 0 to 30 minutes, for example: --check-wait 10.\n\n"
       },
       "note": "Native-only flag; the removed shell had no check-wait option."
     }

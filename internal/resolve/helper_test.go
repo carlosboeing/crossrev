@@ -95,6 +95,7 @@ type testEnv struct {
 	// runCtx is what Run is given. Nil means context.Background(); a case
 	// that needs a cancelled one sets it.
 	runCtx context.Context
+	sleep  func(time.Duration)
 }
 
 func setup(t *testing.T) *testEnv {
@@ -202,6 +203,7 @@ func (e *testEnv) runReq(t *testing.T, req Request) Result {
 		Runner:   e.runner,
 		Log:      e.log,
 		Clock:    func() time.Time { return e.now },
+		Sleep:    e.sleep,
 		Env:      env,
 		Harness:  doc,
 		Adapter:  adapter,
@@ -338,8 +340,8 @@ type fakeForge struct {
 	replyErr       error
 	threadErr      error
 	issueErr       error
-	zeroCreateID bool
-	order        []string
+	zeroCreateID   bool
+	order          []string
 	// checks is what CheckRuns answers: the required-check evidence for
 	// the head. checksCalls counts the reads, so a case can pin that the
 	// settle refreshed its evidence.

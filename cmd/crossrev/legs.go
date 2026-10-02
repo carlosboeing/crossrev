@@ -293,6 +293,7 @@ func resolveCommand(ctx context.Context, out *ui.IO, doc harness.Document, req c
 		EffortOverride:   req.EffortOverride,
 		RequiredChecks:   req.RequiredChecks,
 		NoRequiredChecks: req.NoRequiredChecks,
+		CheckWait:        req.CheckWait,
 		Author:           author,
 		KeepTranscripts:  req.KeepTranscripts,
 	})

@@ -110,19 +110,19 @@
       "name": "resolve with the number alone",
       "args": ["resolve", "--pr", "7"],
       "command": "resolve",
-      "request": {"PR": "7", "Repo": "", "Trigger": "human", "HarnessOverride": "", "NoTips": "false", "KeepTranscripts": "false", "ModelOverride": "", "EffortOverride": "", "RequiredChecks": "", "NoRequiredChecks": "false"}
+      "request": {"PR": "7", "Repo": "", "Trigger": "human", "HarnessOverride": "", "NoTips": "false", "KeepTranscripts": "false", "ModelOverride": "", "EffortOverride": "", "RequiredChecks": "", "NoRequiredChecks": "false", "CheckWait": ""}
     },
     {
       "name": "resolve with every flag it takes",
       "args": ["resolve", "--pr", "7", "--repo", "owner/name", "--harness", "claude", "--model", "cli-model", "--effort", "high", "--trigger", "automatic", "--no-tips", "--keep-transcripts", "--required-check", "build", "--required-check", "test@my-app"],
       "command": "resolve",
-      "request": {"PR": "7", "Repo": "owner/name", "Trigger": "automatic", "HarnessOverride": "claude", "NoTips": "true", "KeepTranscripts": "true", "ModelOverride": "cli-model", "EffortOverride": "high", "RequiredChecks": "build,test@my-app", "NoRequiredChecks": "false"}
+      "request": {"PR": "7", "Repo": "owner/name", "Trigger": "automatic", "HarnessOverride": "claude", "NoTips": "true", "KeepTranscripts": "true", "ModelOverride": "cli-model", "EffortOverride": "high", "RequiredChecks": "build,test@my-app", "NoRequiredChecks": "false", "CheckWait": ""}
     },
     {
       "name": "resolve accepts and ignores --pass",
       "args": ["resolve", "--pr", "7", "--pass", "2"],
       "command": "resolve",
-      "request": {"PR": "7", "Repo": "", "Trigger": "human", "HarnessOverride": "", "NoTips": "false", "KeepTranscripts": "false", "ModelOverride": "", "EffortOverride": "", "RequiredChecks": "", "NoRequiredChecks": "false"}
+      "request": {"PR": "7", "Repo": "", "Trigger": "human", "HarnessOverride": "", "NoTips": "false", "KeepTranscripts": "false", "ModelOverride": "", "EffortOverride": "", "RequiredChecks": "", "NoRequiredChecks": "false", "CheckWait": ""}
     },
 
     {
@@ -340,7 +340,7 @@
       "name": "an unknown option for resolve names the harnesses",
       "args": ["resolve", "--bogus"],
       "reason": "unknown option for resolve: --bogus",
-      "action": "Usage: crossrev resolve --pr <number> [--harness <one of: claude|codex|agy|grok|opencode>] [--model <id>] [--effort <level>] [--trigger human|automatic] [--required-check NAME[@APP]] [--no-required-checks] [--keep-transcripts]"
+      "action": "Usage: crossrev resolve --pr <number> [--harness <one of: claude|codex|agy|grok|opencode>] [--model <id>] [--effort <level>] [--trigger human|automatic] [--required-check NAME[@APP]] [--no-required-checks] [--check-wait MINUTES] [--keep-transcripts]"
     },
     {
       "name": "an unknown option for cycle",
@@ -370,7 +370,7 @@
       "name": "resolve does not take --continuation",
       "args": ["resolve", "--pr", "3", "--continuation"],
       "reason": "unknown option for resolve: --continuation",
-      "action": "Usage: crossrev resolve --pr <number> [--harness <one of: claude|codex|agy|grok|opencode>] [--model <id>] [--effort <level>] [--trigger human|automatic] [--required-check NAME[@APP]] [--no-required-checks] [--keep-transcripts]"
+      "action": "Usage: crossrev resolve --pr <number> [--harness <one of: claude|codex|agy|grok|opencode>] [--model <id>] [--effort <level>] [--trigger human|automatic] [--required-check NAME[@APP]] [--no-required-checks] [--check-wait MINUTES] [--keep-transcripts]"
     },
     {
       "name": "an unknown option for status",
@@ -691,7 +691,7 @@
       "name": "resolve refuses input policy",
       "args": ["resolve", "--pr", "42", "--input-policy", "hunks_first"],
       "reason": "unknown option for resolve: --input-policy",
-      "action": "Usage: crossrev resolve --pr <number> [--harness <one of: claude|codex|agy|grok|opencode>] [--model <id>] [--effort <level>] [--trigger human|automatic] [--required-check NAME[@APP]] [--no-required-checks] [--keep-transcripts]"
+      "action": "Usage: crossrev resolve --pr <number> [--harness <one of: claude|codex|agy|grok|opencode>] [--model <id>] [--effort <level>] [--trigger human|automatic] [--required-check NAME[@APP]] [--no-required-checks] [--check-wait MINUTES] [--keep-transcripts]"
     },
     {
       "name": "review accepts concerns correctness,consistency",
@@ -763,13 +763,13 @@
       "name": "resolve accepts a required check",
       "args": ["resolve", "--pr", "42", "--required-check", "build@my-app"],
       "command": "resolve",
-      "request": {"PR": "42", "Repo": "", "Trigger": "human", "HarnessOverride": "", "NoTips": "false", "KeepTranscripts": "false", "ModelOverride": "", "EffortOverride": "", "RequiredChecks": "build@my-app", "NoRequiredChecks": "false"}
+      "request": {"PR": "42", "Repo": "", "Trigger": "human", "HarnessOverride": "", "NoTips": "false", "KeepTranscripts": "false", "ModelOverride": "", "EffortOverride": "", "RequiredChecks": "build@my-app", "NoRequiredChecks": "false", "CheckWait": ""}
     },
     {
       "name": "resolve accepts no required checks",
       "args": ["resolve", "--pr", "42", "--no-required-checks"],
       "command": "resolve",
-      "request": {"PR": "42", "Repo": "", "Trigger": "human", "HarnessOverride": "", "NoTips": "false", "KeepTranscripts": "false", "ModelOverride": "", "EffortOverride": "", "RequiredChecks": "", "NoRequiredChecks": "true"}
+      "request": {"PR": "42", "Repo": "", "Trigger": "human", "HarnessOverride": "", "NoTips": "false", "KeepTranscripts": "false", "ModelOverride": "", "EffortOverride": "", "RequiredChecks": "", "NoRequiredChecks": "true", "CheckWait": ""}
     },
     {
       "name": "review refuses concerns 'speed'",
@@ -864,19 +864,19 @@
       "name": "resolve refuses concerns",
       "args": ["resolve", "--pr", "42", "--concerns", "correctness"],
       "reason": "unknown option for resolve: --concerns",
-      "action": "Usage: crossrev resolve --pr <number> [--harness <one of: claude|codex|agy|grok|opencode>] [--model <id>] [--effort <level>] [--trigger human|automatic] [--required-check NAME[@APP]] [--no-required-checks] [--keep-transcripts]"
+      "action": "Usage: crossrev resolve --pr <number> [--harness <one of: claude|codex|agy|grok|opencode>] [--model <id>] [--effort <level>] [--trigger human|automatic] [--required-check NAME[@APP]] [--no-required-checks] [--check-wait MINUTES] [--keep-transcripts]"
     },
     {
       "name": "resolve refuses check",
       "args": ["resolve", "--pr", "42", "--check", "off"],
       "reason": "unknown option for resolve: --check",
-      "action": "Usage: crossrev resolve --pr <number> [--harness <one of: claude|codex|agy|grok|opencode>] [--model <id>] [--effort <level>] [--trigger human|automatic] [--required-check NAME[@APP]] [--no-required-checks] [--keep-transcripts]"
+      "action": "Usage: crossrev resolve --pr <number> [--harness <one of: claude|codex|agy|grok|opencode>] [--model <id>] [--effort <level>] [--trigger human|automatic] [--required-check NAME[@APP]] [--no-required-checks] [--check-wait MINUTES] [--keep-transcripts]"
     },
     {
-      "name": "resolve refuses check wait",
+      "name": "resolve accepts check wait",
       "args": ["resolve", "--pr", "42", "--check-wait", "5"],
-      "reason": "unknown option for resolve: --check-wait",
-      "action": "Usage: crossrev resolve --pr <number> [--harness <one of: claude|codex|agy|grok|opencode>] [--model <id>] [--effort <level>] [--trigger human|automatic] [--required-check NAME[@APP]] [--no-required-checks] [--keep-transcripts]"
+      "command": "resolve",
+      "request": {"PR": "42", "Repo": "", "Trigger": "human", "HarnessOverride": "", "NoTips": "false", "KeepTranscripts": "false", "ModelOverride": "", "EffortOverride": "", "RequiredChecks": "", "NoRequiredChecks": "false", "CheckWait": "5"}
     }
   ]
 }

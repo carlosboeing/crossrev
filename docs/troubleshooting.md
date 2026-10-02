@@ -100,11 +100,11 @@ Somebody applied it, and it outranks everything including a healthy verdict — 
 
 ## Required-check halts
 
-Four halt words name a pass the required-check gate stopped. The marker records verdict `blocked` with the word and the evidence, and the summary names each check with its run URL. None of them is a judgement on the code, and none of them becomes a code finding: a failed check is a fact for its own logs, not an attribution CrossRev makes.
+Four halt words name a pass the required-check gate stopped. The review marker records verdict `blocked`; a completed resolve marker records the gate evidence under `verification`. Both routes apply `crossrev/halted`, and their summaries name the halt word and blocking checks with their run URLs. None of them is a judgement on the code, and none of them becomes a code finding: a failed check is a fact for its own logs, not an attribution CrossRev makes.
 
 `required_check_failed` means a required check's newest run failed. The reason names the check, its conclusion and its run URL. Fix what the run's logs fault, let the check report again, then run `crossrev restart --pr N`.
 
-`required_check_pending` means a check was still running when the wait ran out. The review re-reads every 30 seconds up to `verification.wait_minutes`, then halts rather than judging mid-run. Run `crossrev restart --pr N` once the checks have reported.
+`required_check_pending` means a check was still running when the wait ran out. Both legs re-read every 30 seconds up to `verification.wait_minutes`, then halt rather than judging mid-run. Run `crossrev restart --pr N` once the checks have reported.
 
 `required_check_missing` means no run carries a required check's name from its App. Usually the workflow never ran for this head — a skipped trigger, a path filter, a job that only runs on another event. Check the Actions tab for the head commit, then run `crossrev restart --pr N`.
 
@@ -112,7 +112,7 @@ Four halt words name a pass the required-check gate stopped. The marker records 
 
 The gate reads check runs, not commit statuses: a status context never satisfies a required check. The runs are what GitHub reports for the pull request's head commit — the same association required status checks use — and `pull_request` workflows report against that head commit too, so a check that never ran for it (e.g. a workflow triggered only on the base branch) is what reads as missing.
 
-The resolve leg never waits: it judges one read, and a gate still outstanding holds a no-commit settle off converged until the review leg looks again.
+A no-commit settle and an empty-findings resolve wait only when coverage would otherwise permit convergence. A failed, unreadable, or still outstanding gate halts the resolve pass instead of handing an unchanged head back to review. `crossrev status --pr N` names the blocking checks and restart remedy. Once the checks report, `crossrev restart --pr N` selects resolve; it re-judges a gate-held settle without invoking the model or repeating settled replies. Older review markers without a coverage claim follow the same gate rules. With no configured checks, every route behaves as before.
 
 ## The loop went quiet in automated mode
 
