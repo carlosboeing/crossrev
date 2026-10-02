@@ -55,6 +55,24 @@ func gateOnlySettle(s *session) bool {
 	return policy.ResolvePassLabel(m, otherEscalated(s.markers, s.pass)) == policy.PassConverged
 }
 
+// gateHeldAtMovedHead reports a gate-held settle whose head has moved since
+// it was judged. Review admission reads a moved head as a new revision.
+func gateHeldAtMovedHead(s *session) bool {
+	return policy.ResolveGateHeld(asPolicyResolve(s.redrive)) && s.redrive.HeadSHA.Value() != s.pr.HeadRefOid.SHA()
+}
+
+// handBackMovedHead applies awaiting-review for a gate-held settle whose
+// head moved, leaving the settled marker as it is.
+func (l *Leg) handBackMovedHead(ctx context.Context, s *session) Result {
+	got := Result{Outcome: OutcomeComplete, Pass: s.pass, Marker: s.redrive}
+	if err := l.applyPassLabels(ctx, s, s.pass, policy.PassAwaitingReview); err != nil {
+		got.Messages = append(got.Messages, ui.Say(err.Error()))
+	}
+	got.Messages = append(got.Messages, ui.Say(fmt.Sprintf(
+		"The head moved since the required checks held pass %d, so the new revision goes back to the reviewer.", s.pass)))
+	return got
+}
+
 func (l *Leg) redriveGate(ctx context.Context, s *session) Result {
 	marker := s.redrive
 	conv, ev, ok := l.resolveConvergenceEvidence(ctx, s)

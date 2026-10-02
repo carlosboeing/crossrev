@@ -33,6 +33,11 @@ func (l *Leg) Run(ctx context.Context, req Request) (out Result) {
 		}
 		return early
 	}
+	if s.redriving && gateHeldAtMovedHead(s) {
+		// The checks held a settle at a head that has since moved: the new
+		// revision is the reviewer's to read, so hand back without the model.
+		return l.handBackMovedHead(ctx, s)
+	}
 	if s.redriving && gateOnlySettle(s) {
 		if refusal := l.verificationSettings(s); refusal != nil {
 			return Result{Outcome: OutcomeRefused, Err: refusal, Pass: s.pass}

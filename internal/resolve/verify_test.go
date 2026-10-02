@@ -435,3 +435,42 @@ func TestEmptyGateHaltCanClearChecksOnRedrive(t *testing.T) {
 		t.Fatalf("labels=%v model calls=%d", settleAdded(e), e.adapter.calls)
 	}
 }
+
+// A gate-held settle whose head moved owes the reviewer the new revision:
+// the restart hands back to review instead of re-running the resolver.
+func TestGateHeldSettleWithMovedHeadHandsBackToReview(t *testing.T) {
+	e := setup(t)
+	settleSkipped(t, e)
+	e.forge.checks = []forge.CheckRun{{ID: 11, Name: "build", App: "github-actions", Status: "completed", Conclusion: "failure"}}
+	if got := e.run(t); got.Err != nil {
+		t.Fatal(got.Err)
+	}
+	for _, edit := range e.forge.edits {
+		for i := range e.forge.comments {
+			if e.forge.comments[i].ID == edit.CommentID {
+				e.forge.comments[i].Body = edit.Body
+			}
+		}
+	}
+	e.forge.addedLabels = nil
+	moved := mustRev(t, "9999999999999999999999999999999999999999")
+	e.forge.pr.HeadRefOid = moved
+	e.git.head = moved
+	got := e.run(t)
+	if got.Err != nil {
+		t.Fatal(got.Err)
+	}
+	if !settleHasLabel(e, policy.LabelAwaitingReview) || settleHasLabel(e, policy.LabelConverged) || e.adapter.calls != 1 {
+		t.Fatalf("labels=%v model calls=%d outcome=%s", settleAdded(e), e.adapter.calls, got.Outcome)
+	}
+}
+
+// A full re-drive starts its claim without the previous pass's gate
+// record, so the old evidence neither skips the wait nor outlives the
+// pass that judged it.
+func TestResetRedriveClearsTheGateRecord(t *testing.T) {
+	done := prstate.Marker{Verification: prstate.Some(prstate.MarkerVerification{State: "failed"})}
+	if got := resetRedrive(done, 1, testHeadSHA, "run", legSettings{Harness: "claude"}); got.Verification.Present() {
+		t.Fatalf("verification=%+v, want cleared", got.Verification)
+	}
+}
