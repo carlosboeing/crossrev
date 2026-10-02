@@ -385,6 +385,9 @@ func hasStop(labels []string) bool {
 // (lib/legs.sh:234-248).
 func asPolicyResolve(m prstate.Marker) policy.ResolveMarker {
 	out := policy.ResolveMarker{CommitSHA: m.CommitSHA.Value()}
+	if ev, ok := m.Verification.Get(); ok {
+		out.Verification = policy.VerificationState(ev.State)
+	}
 	if blocked, ok := m.Blocked.Get(); ok {
 		out.Blocked = blocked
 	}

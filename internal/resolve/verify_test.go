@@ -474,3 +474,35 @@ func TestResetRedriveClearsTheGateRecord(t *testing.T) {
 		t.Fatalf("verification=%+v, want cleared", got.Verification)
 	}
 }
+
+// An empty-findings settle the checks held, at a head that has since moved,
+// hands the new revision back to review: passing checks on an unreviewed
+// head must not converge it.
+func TestEmptyGateHeldWithMovedHeadHandsBackToReview(t *testing.T) {
+	e := setup(t)
+	e.addReview(t, nil, "converged")
+	e.git.show = map[string][]byte{e.base.SHA() + ":.github/crossrev.yml": []byte(settleGateConfig)}
+	e.forge.checks = []forge.CheckRun{{ID: 11, Name: "build", App: "github-actions", Status: "completed", Conclusion: "failure"}}
+	if got := e.run(t); got.Err != nil {
+		t.Fatal(got.Err)
+	}
+	for _, edit := range e.forge.edits {
+		for i := range e.forge.comments {
+			if e.forge.comments[i].ID == edit.CommentID {
+				e.forge.comments[i].Body = edit.Body
+			}
+		}
+	}
+	e.forge.addedLabels = nil
+	moved := mustRev(t, "9999999999999999999999999999999999999999")
+	e.forge.pr.HeadRefOid = moved
+	e.git.head = moved
+	e.forge.checks[0].Conclusion = "success"
+	got := e.run(t)
+	if got.Err != nil {
+		t.Fatal(got.Err)
+	}
+	if !settleHasLabel(e, policy.LabelAwaitingReview) || settleHasLabel(e, policy.LabelConverged) || e.adapter.calls != 0 {
+		t.Fatalf("labels=%v model calls=%d outcome=%s", settleAdded(e), e.adapter.calls, got.Outcome)
+	}
+}
