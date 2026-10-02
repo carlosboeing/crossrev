@@ -235,7 +235,7 @@ A resolve pass that ended blocked or escalated is complete but not settled, so i
 
 `crossrev restart --pr N` is the one-command form of that remedy for a halted pull request: it clears `crossrev/halted`, and `crossrev/watchdog-retried` when present, and re-applies the halted leg's awaiting label. It refuses a pull request carrying `crossrev/stop` — red is the human brake, and no command clears it — and one that is not halted, saying what applies instead.
 
-A resolve pass can also finish the loop itself. A pass that settled every finding without pushing a commit — each disputed, skipped, or deferred and tracked — converges on the spot when the required checks allow it: the head never moved, so a re-review would find nothing new and decline. A pass that pushed hands back to the reviewer, because there is something new to see.
+A resolve pass can also finish the loop itself. A pass that settled every finding without pushing a commit — each disputed, skipped, or deferred and tracked — converges on the spot when the required checks allow it, and otherwise waits for them and halts as described below: the head never moved, so a re-review would find nothing new and decline. A pass that pushed hands back to the reviewer, because there is something new to see.
 
 Converged does not mean "no findings". It means no finding this pull request introduced, at or above the threshold, remains, every required file has an accepted verdict, none is marked `could_not_review`, any repair has been confirmed, and the required checks passed or none were required. Findings below the threshold and pre-existing ones are reported and cannot keep the loop alive — a loop that cannot converge because of a naming quibble is one nobody leaves switched on.
 
