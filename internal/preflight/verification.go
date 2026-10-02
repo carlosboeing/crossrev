@@ -67,9 +67,10 @@ func (c *Checker) reportVerificationPermission(ctx context.Context) bool {
 		c.io().Opt("checks permission unprobed — gh could not read the default branch")
 		return true
 	}
+	// gh sends POST whenever a field is given, so the read names its method.
 	result := c.runner().Run(ctx, exec.Spec{
 		Path: "gh",
-		Args: []string{"api", "repos/" + slug + "/commits/" + sha + "/check-runs",
+		Args: []string{"api", "--method", "GET", "repos/" + slug + "/commits/" + sha + "/check-runs",
 			"-F", "per_page=1", "--jq", ".total_count"},
 		Env: c.env(),
 		Dir: c.Dir,

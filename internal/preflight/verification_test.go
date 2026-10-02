@@ -15,7 +15,7 @@ func gateAnswers(r *recorder, total string, code int) *recorder {
 		"2c4a46cb321db01826d116b5ef2add6b0284d68c\n", 0)
 	// gh writes a refusal to stderr; the recorder answers stdout only, and
 	// the probe classifies on both streams the way the forge client does.
-	r.answer("gh api repos/acme/widget/commits/2c4a46cb321db01826d116b5ef2add6b0284d68c/check-runs -F per_page=1 --jq .total_count",
+	r.answer("gh api --method GET repos/acme/widget/commits/2c4a46cb321db01826d116b5ef2add6b0284d68c/check-runs -F per_page=1 --jq .total_count",
 		total, code)
 	return r
 }
