@@ -51,9 +51,11 @@ itself used only one of them.
    values kept beside them.
 
 3. **A check that cannot judge degrades visibly; a check that must not
-   run fails the pass.** Harness, quota, transient, schema and
-   isolation failures degrade to posting everything unchecked, with
-   `check: degraded` and the reason in the summary and the marker —
+   run fails the pass.** Harness, quota, transient and schema
+   failures degrade to posting everything unchecked, with
+   `check: degraded` and the reason in the summary and the marker; a
+   checker that cannot run at all — unverified isolation included —
+   records `check: unavailable` the same way —
    the reviewer's findings are still the review. The command tripwire,
    a restore failure, a credential, endpoint or hardening refusal, a
    reads halt and cancellation propagate as the review leg's own

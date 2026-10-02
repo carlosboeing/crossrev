@@ -20,6 +20,18 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/harness.sh"
 # One review payload for the single required file app.ts at the fixture head.
 # $1 verdict, $2 coverage JSON, $3 findings JSON (default []), $4 scope
 # (default a fixed sentence), $5 limits JSON (default []).
+# comments_since prints the stub comments created after comments_mark
+# was taken, so an assertion reads one leg's own comments rather than
+# every comment on the pull request.
+comments_mark() { ls "$GH_STATE"/comment-[0-9]* 2>/dev/null; }
+comments_since() {
+  local f
+  for f in "$GH_STATE"/comment-[0-9]*; do
+    [[ -e "$f" ]] || continue
+    grep -qxF "$f" <<<"$1" || cat "$f"
+  done
+}
+
 review_payload_for() {
   local verdict="$1" coverage="$2" findings="${3:-[]}"
   local scope="${4:-read app.ts at the head}" limits="${5:-[]}"
@@ -183,12 +195,13 @@ is "a review under a failed gate runs" "$rc" "0"
 has "a review under a failed gate still owes the resolve leg" "$(applied_labels)" "labels[]=crossrev/awaiting-resolution"
 unset CROSSREV_REVIEW_PAYLOAD CROSSREV_HARNESS_PAYLOAD
 CROSSREV_RESOLVE_PAYLOAD="$(dispute_payload | payload)"; export CROSSREV_RESOLVE_PAYLOAD
+before="$(comments_mark)"
 mark="$(wc -l <"$GH_LOG" | tr -d ' ')"
 out="$("$CROSSREV" resolve --pr 42 2>&1)"; rc=$?
 is "a dispute under a failed gate runs" "$rc" "0"
 has "a dispute under a failed gate hands back to the reviewer" "$(labels_since "$mark")" "labels[]=crossrev/awaiting-review"
 hasnt "a dispute under a failed gate never converges" "$(labels_since "$mark")" "labels[]=crossrev/converged"
-has "the settle records the failed gate" "$(cat "$GH_STATE"/comment-[0-9]* 2>/dev/null)" '"verification":{"state":"failed"'
+has "the settle records the failed gate" "$(comments_since "$before")" '"verification":{"state":"failed"'
 unset CROSSREV_RESOLVE_PAYLOAD
 
 # Checked-out findings under a failed gate block the review: the check
@@ -233,12 +246,13 @@ is "a review under a superseded success runs" "$rc" "0"
 has "a review under a superseded success still owes the resolve leg" "$(applied_labels)" "labels[]=crossrev/awaiting-resolution"
 unset CROSSREV_REVIEW_PAYLOAD CROSSREV_HARNESS_PAYLOAD
 CROSSREV_RESOLVE_PAYLOAD="$(dispute_payload | payload)"; export CROSSREV_RESOLVE_PAYLOAD
+before="$(comments_mark)"
 mark="$(wc -l <"$GH_LOG" | tr -d ' ')"
 out="$("$CROSSREV" resolve --pr 42 2>&1)"; rc=$?
 is "a dispute under a superseded success runs" "$rc" "0"
 has "a dispute under a superseded success hands back to the reviewer" "$(labels_since "$mark")" "labels[]=crossrev/awaiting-review"
 hasnt "a dispute under a superseded success never converges" "$(labels_since "$mark")" "labels[]=crossrev/converged"
-has "the settle records the newer queued run" "$(cat "$GH_STATE"/comment-[0-9]* 2>/dev/null)" '"verification":{"state":"pending"'
+has "the settle records the newer queued run" "$(comments_since "$before")" '"verification":{"state":"pending"'
 unset CROSSREV_RESOLVE_PAYLOAD
 
 finish

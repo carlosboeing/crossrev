@@ -243,9 +243,9 @@ A review leg whose served-or-tripwire command block is unverified at its pin nev
 
 The served read path is not serving: a failed leg-start self-test, a missing handshake in the server log, or refused read calls. The reason travels in the pass comment, the reads envelope on the marker and the generation, and the run log together. `.policy.on_reads_unavailable` decides what the leg does, read from the base revision like every other policy key: `degrade` records the reason and continues on the supplied prompt (the default), `halt` stops the leg and publishes nothing. A repeated failure under `degrade` is the tool genuinely down rather than a blip — check the run log's `reads` events, then re-run; under `halt`, fix the tool first, because the call published nothing and the pass made no progress.
 
-## The cross-model check degraded
+## The cross-model check degraded or was unavailable
 
-`check: degraded` in the pass summary means the second model could not judge the findings — a harness, quota, transient, schema or isolation failure, or a checker that could not run at all — so every finding posted unchecked with the reason beside it. The reviewer's findings are still the review; nothing was judged twice and nothing was skipped. A resume reuses the check's durable decisions where the candidates still match, and re-checks where they moved.
+`check: degraded` in the pass summary means the second model was called and failed past its retries — a harness, quota, transient or schema failure. `check: unavailable` means the checker could not run at all — no adapter, unverified review isolation, a CLI that is not installed or a version that is refused. Either way every finding posted unchecked with the reason beside it. The reviewer's findings are still the review; nothing was judged twice and nothing was skipped. A resume reuses the check's durable decisions where the candidates still match, and re-checks where they moved.
 
 Some failures are not degradations: the command tripwire, a restore failure, a credential, endpoint or hardening refusal, a reads halt and cancellation fail the pass the way the review leg's own failures do, because none of them is evidence about the findings.
 
