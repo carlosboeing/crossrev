@@ -15,6 +15,7 @@ import (
 	"github.com/carlosboeing/crossrev/internal/policy"
 	"github.com/carlosboeing/crossrev/internal/prstate"
 	"github.com/carlosboeing/crossrev/internal/ui"
+	"github.com/carlosboeing/crossrev/internal/verify"
 )
 
 // Life is what can be shown about the process behind an unfinished claim
@@ -1038,6 +1039,12 @@ func statusNextHalted(in statusInput, pass int) []NextLine {
 	settledPass := hasResolve && m.State == core.PassComplete && !(hasBlocked && blocked)
 	record := statusResolveMarker(m)
 	switch {
+	case settledPass && policy.ResolveGateHeld(record):
+		ev, _ := m.Verification.Get()
+		next.line("Required checks block convergence: %s.", verify.Debt(verify.FromRecord(ev)))
+		next.line("When they have reported, restart the resolve pass:")
+		next.cmd("crossrev restart --pr %d", in.pr)
+		return next
 	// A deferral whose record never landed is not settled: the thread stayed
 	// open on purpose, and the remedy is filing the work and driving the pass
 	// again.
@@ -1186,6 +1193,9 @@ func statusResolutionsOf(resolutions json.RawMessage) []statusResolution {
 // and pass-label decisions read (lib/legs.sh:225-248).
 func statusResolveMarker(m prstate.Marker) policy.ResolveMarker {
 	out := policy.ResolveMarker{CommitSHA: m.CommitSHA.Value()}
+	if ev, ok := m.Verification.Get(); ok {
+		out.Verification = policy.VerificationState(ev.State)
+	}
 	if blocked, ok := m.Blocked.Get(); ok {
 		out.Blocked = blocked
 	}

@@ -118,6 +118,9 @@ func resetRedrive(done prstate.Marker, ts int64, head, runID string, set legSett
 	done.Summary = prstate.Some("")
 	done.Resolutions = json.RawMessage("[]")
 	done.Unthreaded = prstate.Opt[int]{}
+	// The previous pass's gate record judged its own settle; carried over,
+	// it would read as gate-held, skip the wait and outlive the pass.
+	done.Verification = prstate.Opt[prstate.MarkerVerification]{}
 	return done
 }
 

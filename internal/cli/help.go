@@ -52,6 +52,7 @@ const helpBlock = `
     --required-check NAME[@APP]
                              Override verification.required_checks for this run (repeatable)
     --no-required-checks     Clear verification.required_checks for this run
+    --check-wait MINUTES     Override verification.wait_minutes for this run
     --no-tips                Suppress the automated-mode suggestion
     --keep-transcripts       Keep the harness transcript even when the leg succeeds
 
@@ -60,7 +61,6 @@ const helpBlock = `
                              Override review.input_policy for this run
     --concerns a,b           Override review.concerns for this run
     --check resolver|off     Override review.check for this run
-    --check-wait MINUTES     Override verification.wait_minutes for this run
 
   OPTIONS on doctor
     --level core|harness     Which preflight to run. core is git and gh;

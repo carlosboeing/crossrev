@@ -98,6 +98,12 @@ dispute_payload() {
 # unrouted so the stand-in's live state answers them across both legs.
 routes_loop_empty() {
   routes_baseline "$(printf '[]' | payload)"
+  # Let the stateful stand-in reflect labels on metadata reads too.
+  awk -F '\t' '/^pr view / {print $2}' "$GH_ROUTES" >"$GH_STATE/pr.json"
+  local tmp
+  tmp="$(mktemp)"
+  awk '!/^pr view /' "$GH_ROUTES" >"$tmp"
+  cat "$tmp" >"$GH_ROUTES"
 }
 
 # The fixture config for the gate cases: one concern, so the review
@@ -180,8 +186,7 @@ unset CROSSREV_RESOLVE_PAYLOAD
 
 # A failed required check holds the settle off converged: the review
 # posts its confirmed finding while the gate reports failure, and the
-# resolve leg's no-commit dispute lands awaiting-review with the
-# failed evidence on its marker.
+# resolve leg's no-commit dispute halts with failed evidence on its marker.
 fixture_repo "$(gate_config)"; stub_reset
 routes_loop_empty
 printf '%s' '[{"id":7,"name":"build","status":"completed","conclusion":"failure",
@@ -199,10 +204,28 @@ before="$(comments_mark)"
 mark="$(wc -l <"$GH_LOG" | tr -d ' ')"
 out="$("$CROSSREV" resolve --pr 42 2>&1)"; rc=$?
 is "a dispute under a failed gate runs" "$rc" "0"
-has "a dispute under a failed gate hands back to the reviewer" "$(labels_since "$mark")" "labels[]=crossrev/awaiting-review"
+has "a dispute under a failed gate halts" "$(labels_since "$mark")" "labels[]=crossrev/halted"
+has "the halt names the check" "$out" "required_check_failed: build"
+has "the halt names restart" "$out" "crossrev restart --pr 42"
 hasnt "a dispute under a failed gate never converges" "$(labels_since "$mark")" "labels[]=crossrev/converged"
 has "the settle records the failed gate" "$(comments_since "$before")" '"verification":{"state":"failed"'
 unset CROSSREV_RESOLVE_PAYLOAD
+out="$("$CROSSREV" status --pr 42 2>&1)"; rc=$?
+is "status reads the gate-held settle" "$rc" "0"
+has "status names the failed gate" "$out" "required_check_failed"
+has "status names restart" "$out" "crossrev restart --pr 42"
+out="$("$CROSSREV" restart --pr 42 2>&1)"; rc=$?
+is "restart admits the gate-held settle" "$rc" "0"
+has "restart selects resolve" "$out" "crossrev/awaiting-resolution"
+printf '%s' '[{"id":8,"name":"build","status":"completed","conclusion":"success",
+ "app":{"slug":"github-actions"}}]' >"$GH_STATE/check-runs.json"
+mark="$(wc -l <"$GH_LOG" | tr -d ' ')"
+# The harness argv log proves the re-drive invokes no model.
+model_mark="$(wc -l <"$ARGV_LOG" | tr -d ' ')"
+out="$("$CROSSREV" resolve --pr 42 2>&1)"; rc=$?
+is "the gate-only re-drive runs without a model" "$rc" "0"
+has "the passing re-drive converges" "$(labels_since "$mark")" "labels[]=crossrev/converged"
+is "the re-drive invokes no model" "$(wc -l <"$ARGV_LOG" | tr -d ' ')" "$model_mark"
 
 # Checked-out findings under a failed gate block the review: the check
 # rejects the only finding, so nothing posts and the pass records
@@ -228,8 +251,8 @@ is "resolving a gate-blocked review refuses" "$rc" "1"
 has "the refusal names the blocked review" "$out" "was blocked"
 
 # A newer queued run supersedes an older success: the gate judges the
-# run with the greatest id, so the settle reads pending and hands
-# back to the reviewer instead of converging on the old success.
+# run with the greatest id, so the settle reads pending and halts
+# instead of converging on the old success.
 fixture_repo "$(gate_config)"; stub_reset
 routes_loop_empty
 printf '%s' '[{"id":7,"name":"build","status":"completed","conclusion":"success",
@@ -250,9 +273,59 @@ before="$(comments_mark)"
 mark="$(wc -l <"$GH_LOG" | tr -d ' ')"
 out="$("$CROSSREV" resolve --pr 42 2>&1)"; rc=$?
 is "a dispute under a superseded success runs" "$rc" "0"
-has "a dispute under a superseded success hands back to the reviewer" "$(labels_since "$mark")" "labels[]=crossrev/awaiting-review"
+has "a dispute under a superseded success halts" "$(labels_since "$mark")" "labels[]=crossrev/halted"
 hasnt "a dispute under a superseded success never converges" "$(labels_since "$mark")" "labels[]=crossrev/converged"
 has "the settle records the newer queued run" "$(comments_since "$before")" '"verification":{"state":"pending"'
 unset CROSSREV_RESOLVE_PAYLOAD
+
+# An empty review that previously converged must still judge today's gate.
+# Seed it with a passing check, then make the check fail before resolve.
+fixture_repo "$(gate_config)"; stub_reset
+routes_loop_empty
+printf '%s' '[{"id":7,"name":"build","status":"completed","conclusion":"success",
+ "app":{"slug":"github-actions"}}]' >"$GH_STATE/check-runs.json"
+CROSSREV_REVIEW_PAYLOAD="$(review_payload_for converged "[$(unit1 no_issue '[]' "$(evidence_file)")]" | payload)"
+export CROSSREV_REVIEW_PAYLOAD
+out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
+is "a clean review under a passing gate runs" "$rc" "0"
+unset CROSSREV_REVIEW_PAYLOAD
+printf '%s' '[{"id":8,"name":"build","status":"completed","conclusion":"failure",
+ "app":{"slug":"github-actions"}}]' >"$GH_STATE/check-runs.json"
+mark="$(wc -l <"$GH_LOG" | tr -d ' ')"
+model_mark="$(wc -l <"$ARGV_LOG" | tr -d ' ')"
+out="$("$CROSSREV" resolve --pr 42 2>&1)"; rc=$?
+is "empty findings under a failed gate run" "$rc" "0"
+has "empty findings halt on the configured gate" "$(labels_since "$mark")" "labels[]=crossrev/halted"
+has "empty findings name the halt word" "$out" "required_check_failed"
+hasnt "empty findings never converge over failure" "$(labels_since "$mark")" "labels[]=crossrev/converged"
+is "empty findings invoke no model" "$(wc -l <"$ARGV_LOG" | tr -d ' ')" "$model_mark"
+
+# Re-drive the empty settle with a pending check that turns green during the
+# real shared wait. Update only after the initial enumeration is logged.
+out="$("$CROSSREV" restart --pr 42 2>&1)"; rc=$?
+is "restart admits the empty gate-held settle" "$rc" "0"
+has "empty restart selects resolve" "$out" "crossrev/awaiting-resolution"
+printf '%s' '[{"id":9,"name":"build","status":"in_progress","conclusion":null,
+ "app":{"slug":"github-actions"}}]' >"$GH_STATE/check-runs.json"
+mark="$(wc -l <"$GH_LOG" | tr -d ' ')"
+(
+  for ((tick=0; tick<100; tick++)); do
+    if tail -n +"$((mark + 1))" "$GH_LOG" | grep -q 'check-runs'; then
+      sleep 1
+      printf '%s' '[{"id":9,"name":"build","status":"completed","conclusion":"success",
+       "app":{"slug":"github-actions"}}]' >"$GH_STATE/check-runs.json"
+      exit 0
+    fi
+    sleep 0.1
+  done
+  exit 1
+) &
+reporter=$!
+out="$("$CROSSREV" resolve --pr 42 --check-wait 1 2>&1)"; rc=$?
+wait "$reporter"; reporter_rc=$?
+is "the queued check reports during the wait" "$reporter_rc" "0"
+is "empty settlement waits for a passing gate" "$rc" "0"
+has "a green check during the wait converges" "$(labels_since "$mark")" "labels[]=crossrev/converged"
+is "the waiting re-drive invokes no model" "$(wc -l <"$ARGV_LOG" | tr -d ' ')" "$model_mark"
 
 finish

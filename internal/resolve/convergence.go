@@ -36,7 +36,8 @@ func (l *Leg) resolveConvergence(ctx context.Context, s *session) (policy.Conver
 // marker no coverage pass ran here, but required checks still count, so a
 // configured gate holds the legacy label to passed or none required.
 // Unconfigured the read costs no call, so the frozen path keeps its legacy
-// label exactly as it always has. Either way the settle reads once.
+// label exactly as it always has. The caller waits only when coverage permits
+// convergence and pending or missing checks are the remaining debt.
 func (l *Leg) resolveConvergenceEvidence(ctx context.Context, s *session) (policy.Convergence, verify.Evidence, bool) {
 	conv, ok := l.resolveCoverageConvergence(ctx, s)
 	ev := l.settlementEvidence(ctx, s)

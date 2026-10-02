@@ -63,8 +63,8 @@ type legSettings struct {
 
 // detail renders the resolved settings for the run log: the review
 // contract beside harness, model and effort. The resolve leg reads
-// concerns, check mode and the wait from the base config, never a flag,
-// so their sources are config or default; the input policy stays off
+// concerns and check mode from the base config, never a flag; required
+// checks and their wait also accept local overrides. The input policy stays off
 // the line.
 func (s legSettings) detail() runlog.ReviewDetail {
 	checks := make([]string, 0, len(s.RequiredChecks))
@@ -263,6 +263,9 @@ func markersFromComments(comments []forge.IssueComment, author string) []prstate
 
 func asPolicyResolve(m prstate.Marker) policy.ResolveMarker {
 	out := policy.ResolveMarker{CommitSHA: m.CommitSHA.Value()}
+	if ev, ok := m.Verification.Get(); ok {
+		out.Verification = policy.VerificationState(ev.State)
+	}
 	if b, ok := m.Blocked.Get(); ok {
 		out.Blocked = b
 	}
@@ -301,6 +304,9 @@ func escalatedCount(markers []prstate.Marker) int {
 }
 
 func (l *Leg) settings(s *session) (*Refusal, ui.Line, error) {
+	if refusal := l.verificationSettings(s); refusal != nil {
+		return refusal, ui.Line{}, nil
+	}
 	// Derived from the leg, not configured. lib/run.sh:494-495:
 	// LEG_WRITE=no
 	// [[ "$leg" == "resolver" ]] && LEG_WRITE=yes
@@ -323,7 +329,6 @@ func (l *Leg) settings(s *session) (*Refusal, ui.Line, error) {
 	if s.req.EffortOverride != "" {
 		effort = s.req.EffortOverride
 	}
-	verification := s.cfg.Verification()
 	concerns := s.cfg.ReviewConcerns()
 	concernsSource := "default"
 	if s.cfg.Get(".review.concerns") != "" {
@@ -334,6 +339,40 @@ func (l *Leg) settings(s *session) (*Refusal, ui.Line, error) {
 	if s.cfg.Get(".review.check") != "" {
 		checkSource = "config"
 	}
+	doc, err := l.document()
+	if err != nil {
+		return nil, ui.Line{}, err
+	}
+	if _, ok := harnessFor(doc, name); !ok {
+		return noAdapterRefusal(doc, name), ui.Line{}, nil
+	}
+	if !doc.ServesLeg(name, "resolve") {
+		return servesLegRefusal(doc, name), ui.Line{}, nil
+	}
+	// Nothing further is refused here: the rule that once refused codex is
+	// lifted now that the served read tool serves every resolve leg, and
+	// which legs a harness serves lives on the descriptor entry itself.
+
+	asked := name
+	if l.binaryInstalled(asked) {
+		s.settings = legSettings{Harness: name, Model: model, Effort: effort, Endpoint: endpoint, Concerns: concerns, ConcernsSource: concernsSource, Check: checkMode, CheckSource: checkSource, RequiredChecks: s.settings.RequiredChecks, RequiredChecksSource: s.settings.RequiredChecksSource, CheckWait: s.settings.CheckWait, CheckWaitSource: s.settings.CheckWaitSource}
+		return nil, ui.Line{}, nil
+	}
+	for _, alt := range harness.WorkingResolvers(doc) {
+		if l.binaryInstalled(alt) {
+			s.settings = legSettings{Harness: alt, Model: "", Effort: effort, Endpoint: "", Concerns: concerns, ConcernsSource: concernsSource, Check: checkMode, CheckSource: checkSource, RequiredChecks: s.settings.RequiredChecks, RequiredChecksSource: s.settings.RequiredChecksSource, CheckWait: s.settings.CheckWait, CheckWaitSource: s.settings.CheckWaitSource}
+			// ui_warn, condition and consequence apart (lib/run.sh:548-549).
+			warn := ui.Warn(
+				fmt.Sprintf("'%s' is not installed, so the resolver runs on '%s' instead", asked, alt),
+				fmt.Sprintf("Both legs now run on the same harness, so a bug it misses while reviewing it also misses while resolving. Install %s to get the second lineage back.", asked))
+			return nil, warn, nil
+		}
+	}
+	return notInstalledRefusal(doc, asked), ui.Line{}, nil
+}
+
+func (l *Leg) verificationSettings(s *session) *Refusal {
+	verification := s.cfg.Verification()
 	checks := verification.RequiredChecks
 	checksSource := "default"
 	if s.cfg.Get(".verification.required_checks") != "" {
@@ -354,47 +393,28 @@ func (l *Leg) settings(s *session) (*Refusal, ui.Line, error) {
 		for _, item := range s.req.RequiredChecks {
 			check, err := config.ParseRequiredCheck(item)
 			if err != nil {
-				return overrideRefusal(err), ui.Line{}, nil
+				return overrideRefusal(err)
 			}
 			parsed = append(parsed, check)
 		}
 		normalized, err := config.NormalizeRequiredChecks(parsed)
 		if err != nil {
-			return overrideRefusal(err), ui.Line{}, nil
+			return overrideRefusal(err)
 		}
 		checks = normalized
 		checksSource = "flag"
 	}
-	doc, err := l.document()
-	if err != nil {
-		return nil, ui.Line{}, err
-	}
-	if _, ok := harnessFor(doc, name); !ok {
-		return noAdapterRefusal(doc, name), ui.Line{}, nil
-	}
-	if !doc.ServesLeg(name, "resolve") {
-		return servesLegRefusal(doc, name), ui.Line{}, nil
-	}
-	// Nothing further is refused here: the rule that once refused codex is
-	// lifted now that the served read tool serves every resolve leg, and
-	// which legs a harness serves lives on the descriptor entry itself.
 
-	asked := name
-	if l.binaryInstalled(asked) {
-		s.settings = legSettings{Harness: name, Model: model, Effort: effort, Endpoint: endpoint, Concerns: concerns, ConcernsSource: concernsSource, Check: checkMode, CheckSource: checkSource, RequiredChecks: checks, RequiredChecksSource: checksSource, CheckWait: checkWait, CheckWaitSource: checkWaitSource}
-		return nil, ui.Line{}, nil
-	}
-	for _, alt := range harness.WorkingResolvers(doc) {
-		if l.binaryInstalled(alt) {
-			s.settings = legSettings{Harness: alt, Model: "", Effort: effort, Endpoint: "", Concerns: concerns, ConcernsSource: concernsSource, Check: checkMode, CheckSource: checkSource, RequiredChecks: checks, RequiredChecksSource: checksSource, CheckWait: checkWait, CheckWaitSource: checkWaitSource}
-			// ui_warn, condition and consequence apart (lib/run.sh:548-549).
-			warn := ui.Warn(
-				fmt.Sprintf("'%s' is not installed, so the resolver runs on '%s' instead", asked, alt),
-				fmt.Sprintf("Both legs now run on the same harness, so a bug it misses while reviewing it also misses while resolving. Install %s to get the second lineage back.", asked))
-			return nil, warn, nil
+	if s.req.CheckWait != "" {
+		minutes, err := config.ParseWaitMinutes(s.req.CheckWait)
+		if err != nil {
+			return &Refusal{Message: "--check-wait: " + err.Error(), Hint: "Use --check-wait with 0 to 30 minutes."}
 		}
+		checkWait, checkWaitSource = minutes, "flag"
 	}
-	return notInstalledRefusal(doc, asked), ui.Line{}, nil
+	s.settings.RequiredChecks, s.settings.RequiredChecksSource = checks, checksSource
+	s.settings.CheckWait, s.settings.CheckWaitSource = checkWait, checkWaitSource
+	return nil
 }
 
 // overrideRefusal refuses a flag value the parser already validated. It is
@@ -422,13 +442,18 @@ func automatedOverrideRefusal(s *session) *Refusal {
 	}{
 		{"--required-check", len(s.req.RequiredChecks) > 0},
 		{"--no-required-checks", s.req.NoRequiredChecks},
+		{"--check-wait", s.req.CheckWait != ""},
 	} {
 		if !override.set {
 			continue
 		}
+		key := "verification.required_checks"
+		if override.flag == "--check-wait" {
+			key = "verification.wait_minutes"
+		}
 		return &Refusal{
 			Message: "the " + override.flag + " flag cannot override policy in automated mode (ADR 0003)",
-			Hint:    "Set verification.required_checks in .github/crossrev.yml on the base revision instead: policy from a pull request takes effect when it merges.",
+			Hint:    "Set " + key + " in .github/crossrev.yml on the base revision instead: policy from a pull request takes effect when it merges.",
 		}
 	}
 	return nil

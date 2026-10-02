@@ -58,9 +58,8 @@ type ReviewRequest struct {
 //
 // It takes no `--continuation`: the flag exists so a cycle can tell the review
 // leg it is not the first of the loop, and the resolve leg has no such state.
-// It takes no review-contract flag either: concerns, the check mode and the
-// wait shape the review leg, and the resolve leg only waits on the same
-// required checks.
+// It takes no review-contract flag: concerns and the check mode shape review.
+// Both legs can override the required checks and their bounded wait.
 type ResolveRequest struct {
 	PR               int
 	Repo             core.Slug
@@ -70,6 +69,7 @@ type ResolveRequest struct {
 	EffortOverride   string
 	RequiredChecks   []string
 	NoRequiredChecks bool
+	CheckWait        string
 	NoTips           bool
 	KeepTranscripts  bool
 }
@@ -221,7 +221,7 @@ func usageReview(harnesses []string) string {
 
 func usageResolve(harnesses []string) string {
 	return "Usage: crossrev resolve --pr <number> [" + harnessOption(harnesses) +
-		"] [--model <id>] [--effort <level>] [--trigger human|automatic] [--required-check NAME[@APP]] [--no-required-checks] [--keep-transcripts]"
+		"] [--model <id>] [--effort <level>] [--trigger human|automatic] [--required-check NAME[@APP]] [--no-required-checks] [--check-wait MINUTES] [--keep-transcripts]"
 }
 
 // scanner walks an argument list the way `while (( $# ))` walks "$@".

@@ -67,6 +67,7 @@ type Request struct {
 	EffortOverride   string
 	RequiredChecks   []string
 	NoRequiredChecks bool
+	CheckWait        string
 	Author           string
 	KeepTranscripts  bool
 }
@@ -107,6 +108,7 @@ type Leg struct {
 	Runner  exec.Runner
 	Log     *runlog.Log
 	Clock   func() time.Time
+	Sleep   func(time.Duration)
 	Env     []string
 	Harness harness.Document
 	// Adapter, when set, is used instead of harness.For. Tests inject one;

@@ -10,6 +10,7 @@ import (
 	"github.com/carlosboeing/crossrev/internal/harness"
 	"github.com/carlosboeing/crossrev/internal/policy"
 	"github.com/carlosboeing/crossrev/internal/prstate"
+	"github.com/carlosboeing/crossrev/internal/verify"
 )
 
 func (l *Leg) publish(ctx context.Context, s *session, got Result, workdir string) Result {
@@ -188,11 +189,14 @@ func (l *Leg) publish(ctx context.Context, s *session, got Result, workdir strin
 		return fail(err)
 	}
 
-	// The settlement evidence, read once: the marker below records what the
-	// settle judged, and the label decision reuses it rather than
-	// re-reading the gate for a second verdict.
+	// Read settlement evidence, waiting only when the gate alone prevents
+	// convergence. The marker and label decision reuse the final evidence.
 	settleConv, settlement, settleOK := l.resolveConvergenceEvidence(ctx, s)
-	if settleOK && settlement.Configured() {
+	if policy.ResolvePassLabel(asPolicyResolve(marker), otherEscalated(s.markers, s.pass)) == policy.PassConverged && (!settleOK || policy.ConvergedExceptVerification(settleConv)) {
+		settlement = l.waitForSettlement(ctx, s, settlement)
+		settleConv.Verification = settlement.State
+	}
+	if settlement.Configured() {
 		marker.Verification = prstate.Some(settlement.MarkerRecord())
 	}
 
@@ -232,13 +236,13 @@ func (l *Leg) publish(ctx context.Context, s *session, got Result, workdir strin
 		// scope, confirmation and gate guards. With no coverage claim on
 		// the marker no coverage pass ran here, so the frozen-path settle
 		// keeps its legacy label — held to the gate when one is
-		// configured, awaiting-review while the checks refuse. A claim
+		// configured, halted while the checks refuse. A claim
 		// the store no longer backs re-reviews instead of keeping
 		// converged.
 		if settleOK {
 			next = policy.ResolvePassLabelWithCoverage(asPolicyResolve(marker), other, settleConv)
 		} else if frozenGateRefuses(settlement) {
-			next = policy.PassAwaitingReview
+			next = policy.PassHalted
 		}
 	}
 	if err := l.applyPassLabels(ctx, s, s.pass, next); err != nil {
@@ -277,6 +281,9 @@ func closingReport(marker prstate.Marker, next policy.PassLabelState, pass, pr i
 	}
 	out := []ui.Line{ui.Say("→ resolved pass " + strconv.Itoa(pass)), ui.Blank()}
 	switch {
+	case next == policy.PassHalted && policy.ResolveGateHeld(asPolicyResolve(marker)):
+		ev, _ := marker.Verification.Get()
+		out = append(out, gateHaltLines(pr, verify.FromRecord(ev))...)
 	case next == policy.PassAwaitingReview:
 		out = append(out,
 			ui.Say("To look again with the reviewer:"),
@@ -419,22 +426,25 @@ func (l *Leg) finishEmpty(ctx context.Context, s *session, got Result) Result {
 		next = policy.PassHalted
 	}
 	if next == policy.PassConverged {
-		// The no-findings path reports converged only with the coverage
-		// obligation met. With no coverage claim on the marker no
-		// coverage pass ran here, so the frozen-path ending keeps its
-		// legacy label — held to the gate when one is configured,
-		// halted while the checks refuse. A claim the store no longer
-		// backs, and corrupt or incomplete coverage, fail closed to
-		// halted, because the resolve leg cannot cover files itself and
-		// a human must re-drive the review.
-		if conv, settlement, ok := l.resolveConvergenceEvidence(ctx, s); ok {
-			if !policy.Converged(conv) {
-				next = policy.PassHalted
-			}
-		} else if frozenGateRefuses(settlement) {
+		conv, ev, ok := l.resolveConvergenceEvidence(ctx, s)
+		if !ok || policy.ConvergedExceptVerification(conv) {
+			ev = l.waitForSettlement(ctx, s, ev)
+			conv.Verification = ev.State
+		}
+		if (ok && !policy.Converged(conv)) || frozenGateRefuses(ev) {
 			next = policy.PassHalted
 		}
+		if ev.Configured() || (s.redriving && s.redrive.Verification.Present()) {
+			got = l.recordEmptySettlement(ctx, s, ev, got)
+			if got.Err != nil {
+				return got
+			}
+			if next == policy.PassHalted && frozenGateRefuses(ev) {
+				got.Messages = append(got.Messages, gateHaltLines(s.req.PR, ev)...)
+			}
+		}
 	}
+
 	_ = l.applyPassLabels(ctx, s, s.pass, next)
 	return got
 }

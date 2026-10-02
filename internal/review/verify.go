@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"slices"
-	"strings"
-	"time"
 
 	"github.com/carlosboeing/crossrev/internal/core"
 	"github.com/carlosboeing/crossrev/internal/policy"
@@ -16,7 +14,7 @@ import (
 // waitInterval is the re-read cadence while required checks are outstanding.
 // Thirty seconds against a ten-minute default wait is twenty re-reads, and
 // three reads a tick — labels, head, evidence — is cheap against the API.
-const waitInterval = 30 * time.Second
+const waitInterval = verify.WaitInterval
 
 // verificationEvidence reads the required-check evidence once for head. With
 // no required checks it answers none_required without touching the forge, so
@@ -37,33 +35,15 @@ func (l *Leg) verificationEvidence(ctx context.Context, loaded Context, settings
 // The clock and the sleep are both the leg's, so a test advances time
 // without waiting out thirty seconds a tick.
 func (l *Leg) waitForVerification(ctx context.Context, req Request, loaded Context, settings legSettings, head core.Revision, current verify.Evidence) verify.Evidence {
-	if current.State != verify.Pending && current.State != verify.Missing {
-		return current
-	}
-	if settings.checkWait <= 0 {
-		return current
-	}
-	deadline := l.now().Add(time.Duration(settings.checkWait) * time.Minute)
-	for l.now().Before(deadline) {
-		if ctx.Err() != nil {
-			return current
-		}
-		l.sleep(waitInterval)
-		if ctx.Err() != nil {
-			return current
-		}
-		if slices.Contains(l.Forge.PullRequestLabels(ctx, loaded.Repo, req.PR), policy.LabelStop) {
-			return current
-		}
-		if pr, err := l.Forge.PullRequest(ctx, loaded.Repo, req.PR); err == nil && pr.HeadRefOid.SHA() != head.SHA() {
-			return current
-		}
-		current = l.verificationEvidence(ctx, loaded, settings, head)
-		if current.State != verify.Pending && current.State != verify.Missing {
-			return current
-		}
-	}
-	return current
+	return verify.Wait(ctx, settings.checkWait, current, l.now, l.sleep,
+		func() bool {
+			return slices.Contains(l.Forge.PullRequestLabels(ctx, loaded.Repo, req.PR), policy.LabelStop)
+		},
+		func() bool {
+			pr, err := l.Forge.PullRequest(ctx, loaded.Repo, req.PR)
+			return err == nil && pr.HeadRefOid.SHA() != head.SHA()
+		},
+		func() verify.Evidence { return l.verificationEvidence(ctx, loaded, settings, head) })
 }
 
 // verificationDebt names the blocking evidence for a halted pass: the halt
@@ -71,33 +51,7 @@ func (l *Leg) waitForVerification(ctx context.Context, req Request, loaded Conte
 // conclusion and run URL; pending and missing name each check still
 // outstanding; an unreadable enumeration names why it could not be trusted.
 func verificationDebt(ev verify.Evidence) string {
-	word, _ := ev.HaltWord()
-	switch ev.State {
-	case verify.Unreadable:
-		return word + ": " + ev.Reason
-	case verify.Failed:
-		var parts []string
-		for _, check := range ev.Checks {
-			if check.State != verify.Failed {
-				continue
-			}
-			part := check.Name + " (" + check.Conclusion + ")"
-			if check.URL != "" {
-				part += " " + check.URL
-			}
-			parts = append(parts, part)
-		}
-		return word + ": " + strings.Join(parts, ", ")
-	default:
-		var names []string
-		for _, check := range ev.Checks {
-			if check.State == verify.Passed {
-				continue
-			}
-			names = append(names, check.Name)
-		}
-		return word + ": " + strings.Join(names, ", ")
-	}
+	return verify.Debt(ev)
 }
 
 // verificationHaltLines is what the operator reads when required checks halt

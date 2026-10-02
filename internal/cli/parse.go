@@ -390,6 +390,11 @@ func parseResolve(args []string, out *ui.IO, harnesses []string) (Invocation, er
 		case "--no-required-checks":
 			req.NoRequiredChecks = true
 			s.skip()
+		case "--check-wait":
+			req.CheckWait, err = s.value()
+			if err == nil {
+				err = requireCheckWait(out, "resolve", req.CheckWait)
+			}
 		case "--trigger":
 			req.Trigger, err = s.value()
 		case "--no-tips":
