@@ -220,6 +220,9 @@ func (l *Leg) invokePrompt(ctx context.Context, req Request, loaded Context, set
 // call's served reads from the reads ledger, the answering model, and the
 // call's wall time. A refused answer judged nothing and gets no line.
 func (l *Leg) logAcceptedCall(call int, promptBytes []byte, suppliedBytes, reads int, envelope harness.Envelope, ms int64, identity ...runlog.CallIdentity) {
+	if call > l.callsMade {
+		l.callsMade = call
+	}
 	if l.Log == nil {
 		return
 	}
@@ -278,7 +281,7 @@ func (l *Leg) invokeWithStaged(ctx context.Context, req Request, loaded Context,
 		return nil, harness.Envelope{}, nil, err
 	}
 	defer os.RemoveAll(tmp)
-	envelope, payload, msgs, err := l.runPrompt(ctx, req, loaded, settings, adapter, entry, staged, tmp, promptBytes, nil, call)
+	envelope, payload, msgs, err := l.runPrompt(ctx, req, loaded, settings, adapter, entry, staged, tmp, promptBytes, nil, call, promptSpec{schema: validate.FindingsSchema(), check: l.checkPayload})
 	return payload, envelope, msgs, err
 }
 

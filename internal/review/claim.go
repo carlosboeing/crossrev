@@ -64,6 +64,10 @@ func (l *Leg) admit(ctx context.Context, req Request, loaded Context) (admission
 			claim.TS = l.now().Unix()
 			claim.HeadSHA = prstate.Some(head)
 			claim.Findings = json.RawMessage("[]")
+			claim.Check = prstate.Opt[string]{}
+			claim.CheckReason = prstate.Opt[string]{}
+			claim.CheckRecord = nil
+			claim.CheckedOut = nil
 			claim.Verdict = prstate.Null[string]()
 			ad.recovering = true
 			ad.pass = current
@@ -147,6 +151,10 @@ func redriveClaim(done prstate.Marker, head, runID string, ts int64) prstate.Mar
 	done.Findings = json.RawMessage("[]")
 	done.Verdict = prstate.Null[string]()
 	done.BlockedReason = prstate.Null[string]()
+	done.Check = prstate.Opt[string]{}
+	done.CheckReason = prstate.Opt[string]{}
+	done.CheckRecord = nil
+	done.CheckedOut = nil
 	done.ModelReported = prstate.Null[string]()
 	done.Tokens = json.RawMessage("null")
 	done.Usage = json.RawMessage("null")

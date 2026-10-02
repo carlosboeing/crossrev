@@ -24,7 +24,7 @@ func TestConcernCallsUsageIdentityAndSingleConcern(t *testing.T) {
 			prompts := capturePrompt(e)
 			req := e.request(t)
 			if concerns != "" {
-				e.cfg = mustConfig(t, "version: 2\nreview:\n  concerns: ["+concerns+"]\n")
+				e.cfg = mustConfig(t, "version: 2\nreview:\n  concerns: ["+concerns+"]\n  check: off\n")
 			}
 			got := runLeg(t, e, req)
 			if got.Err != nil {

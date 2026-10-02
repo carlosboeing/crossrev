@@ -199,6 +199,11 @@ type Leg struct {
 	// generation reads envelopes finalized later in the pass. Calls run
 	// sequentially, so the slice needs no mutex.
 	readsNotes []readsNote
+
+	// callsMade counts the pass's accepted model calls, review and
+	// check alike: the next call's number in the pass, naming its
+	// transcripts and its run-log line.
+	callsMade int
 }
 
 func (l *Leg) now() time.Time {

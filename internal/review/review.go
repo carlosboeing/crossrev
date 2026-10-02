@@ -9,6 +9,8 @@ import (
 	"strings"
 
 	"github.com/carlosboeing/crossrev/internal/config"
+	"github.com/carlosboeing/crossrev/internal/core"
+	"github.com/carlosboeing/crossrev/internal/diff"
 	"github.com/carlosboeing/crossrev/internal/harness"
 	"github.com/carlosboeing/crossrev/internal/prstate"
 	"github.com/carlosboeing/crossrev/internal/ui"
@@ -344,6 +346,21 @@ func (l *Leg) Run(ctx context.Context, req Request) (out Result) {
 	if hasRecordedFindings(marker) {
 		// ui_say (lib/run.sh:1124).
 		out.Messages = append(out.Messages, ui.Say("The previous attempt already recorded its findings, so the review is not run again."))
+		diffBytes, _ := l.reviewDiff(ctx, loaded)
+		checked, checkMsgs, checkErr := l.checkCandidates(ctx, req, loaded, settings, claimID, marker, diff.Parse(diffBytes, core.RevisionPair{}))
+		out.Messages = append(out.Messages, checkMsgs...)
+		marker = checked
+		out.Marker = marker
+		if checkErr != nil {
+			var restoreErr *sandboxRestoreFailure
+			if errors.As(checkErr, &restoreErr) {
+				out.Messages = append(out.Messages, restoreErr.Warning())
+			}
+			l.attachReads(&out.Marker)
+			out.Outcome = OutcomeError
+			out.Err = checkErr
+			return out
+		}
 	} else {
 		envelope, payload, invokeMsgs, err := l.invoke(ctx, req, loaded, settings, ad.pass)
 		out.Messages = append(out.Messages, invokeMsgs...)
@@ -407,6 +424,20 @@ func (l *Leg) Run(ctx context.Context, req Request) (out Result) {
 		if err := l.Forge.CommentEdit(ctx, loaded.Repo, claimID, body); err != nil {
 			out.Outcome = OutcomeError
 			out.Err = err
+			return out
+		}
+		checked, checkMsgs, checkErr := l.checkCandidates(ctx, req, loaded, settings, claimID, marker, diff.Parse(diffBytes, core.RevisionPair{}))
+		out.Messages = append(out.Messages, checkMsgs...)
+		marker = checked
+		out.Marker = marker
+		if checkErr != nil {
+			var restoreErr *sandboxRestoreFailure
+			if errors.As(checkErr, &restoreErr) {
+				out.Messages = append(out.Messages, restoreErr.Warning())
+			}
+			l.attachReads(&out.Marker)
+			out.Outcome = OutcomeError
+			out.Err = checkErr
 			return out
 		}
 	}
@@ -498,7 +529,21 @@ func (l *Leg) finishCoveredRun(ctx context.Context, req Request, loaded Context,
 		marker.Findings = enriched
 	}
 	out.Messages = append(out.Messages, ui.SayLines(snaps...)...)
+	checked, checkMsgs, checkErr := l.checkCandidates(ctx, req, loaded, settings, claimID, marker, covered.parsed)
+	out.Messages = append(out.Messages, checkMsgs...)
+	marker = checked
 	out.Marker = marker
+	if checkErr != nil {
+		var restoreErr *sandboxRestoreFailure
+		if errors.As(checkErr, &restoreErr) {
+			out.Messages = append(out.Messages, restoreErr.Warning())
+		}
+		l.attachReads(&marker)
+		out.Marker = marker
+		out.Outcome = OutcomeError
+		out.Err = checkErr
+		return *out, publishState{}
+	}
 	published, pubMsgs, state, err := l.publish(ctx, req, loaded, settings, ad.pass, claimID, marker)
 	out.Messages = append(out.Messages, pubMsgs...)
 	out.Marker = published

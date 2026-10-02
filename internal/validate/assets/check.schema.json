@@ -1,0 +1,76 @@
+{
+  "title": "crossrev finding check",
+  "description": "What the cross-model check returns: one decision per numbered candidate the prompt carried. The checker runs on the resolver's harness and model, so the model judging a finding is not the model that raised it. The two shapes here are forced by the harnesses rather than chosen: no $schema or $id key, because Claude Code's --json-schema rejects a schema naming the 2020-12 meta-schema and fails before the model is called; and every property listed in 'required', because Codex enforces OpenAI strict mode, which demands it. Genuinely optional fields are therefore nullable rather than absent.",
+  "type": "object",
+  "required": [
+    "decisions"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "decisions": {
+      "type": "array",
+      "description": "Exactly one decision per candidate the prompt numbered — no more, no fewer, no repeated positions. The orchestrator checks the numbers against the candidates it sent: a candidate left out has no decision recorded, which is a silent loss rather than a visible one.",
+      "items": {
+        "type": "object",
+        "required": [
+          "position",
+          "decision",
+          "duplicate_of",
+          "reason",
+          "severity",
+          "pre_existing"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "position": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The number shown beside the candidate in the prompt — 1 for the first, 2 for the second, and so on. A small integer rather than the finding's 16-character id, because copying a hash accurately is clerical work models are poor at and a mistyped one is accepted silently."
+          },
+          "decision": {
+            "type": "string",
+            "enum": [
+              "confirmed",
+              "rejected",
+              "duplicate"
+            ],
+            "description": "confirmed: the finding holds against the code and posts. rejected: the finding is wrong and stays off the pull request. duplicate: the finding is the same point as another candidate, named in duplicate_of, and folds into it."
+          },
+          "duplicate_of": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "description": "The position this candidate duplicates, or null unless decision is duplicate. The chain must end at a confirmed candidate: a duplicate of a duplicate is fine, a duplicate of a rejected candidate and a cycle are not."
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "description": "One line saying why: the evidence the decision rests on, in at most 300 characters. A duplicate names what makes the two the same point; a base-versus-head explanation comes before any pre_existing correction."
+          },
+          "severity": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "high",
+              "medium",
+              "low",
+              null
+            ],
+            "description": "The severity the candidate should have carried, or null when the reviewer's stands. A correction, not a second opinion filed beside the first: it replaces the severity before the finding posts."
+          },
+          "pre_existing": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Whether the defect would still exist if this pull request were reverted, or null when the reviewer's stands. A correction with the same force as severity: it replaces the value before the finding posts, and the reason explains the base-versus-head reading behind it."
+          }
+        }
+      }
+    }
+  }
+}

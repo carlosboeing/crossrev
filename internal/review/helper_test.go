@@ -1031,6 +1031,12 @@ func newEnv(t *testing.T, concerns ...string) *env {
 	if len(concerns) > 0 {
 		concern = concerns[0]
 	}
+	// The cross-model check is off unless a case says otherwise: most
+	// cases prove the review and publish path, and a second model call
+	// behind every one of them would assert nothing about their
+	// subject. Cases proving the check set e.cfg to a resolver config
+	// explicitly.
+	cfg := mustConfig(t, "version: 2\nreview:\n  check: off\n")
 	return &env{
 		concernsOverride: concern,
 		log:              events,
@@ -1052,7 +1058,7 @@ func newEnv(t *testing.T, concerns ...string) *env {
 		},
 		vcs:    vcs,
 		runner: &fakeRunner{log: events, vcs: vcs, versions: versions},
-		cfg:    mustConfig(t, ""),
+		cfg:    cfg,
 		doc:    doc,
 		dir:    dir,
 	}

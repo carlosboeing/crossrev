@@ -39,6 +39,13 @@ func (l *Leg) publish(ctx context.Context, req Request, loaded Context, settings
 	}
 	cap := atoi(loaded.Config.Get(".policy.max_passes_per_cycle"))
 
+	// Only confirmed candidates post and count as actionable: the
+	// check's rejected and duplicate entries stay on the marker under
+	// checked_out, and everything below — the counts, the posting
+	// loop, the convergence read — works from the visible set. The
+	// hold stamp underneath still aligns with the full record.
+	visible := excludeCheckedOut(findings, marker.CheckedOut)
+
 	already := postedSet(PostedFindingIDs(
 		l.Forge.ReviewComments(ctx, loaded.Repo, req.PR),
 		l.Forge.IssueComments(ctx, loaded.Repo, req.PR),
@@ -47,7 +54,7 @@ func (l *Leg) publish(ctx context.Context, req Request, loaded Context, settings
 	unanchored := len(UnthreadedFindingIDs(l.Forge.IssueComments(ctx, loaded.Repo, req.PR), loaded.Author, pass))
 
 	high, medium, low, pre := 0, 0, 0, 0
-	for _, f := range findings {
+	for _, f := range visible {
 		switch f.Severity {
 		case "high":
 			high++
@@ -60,11 +67,11 @@ func (l *Leg) publish(ctx context.Context, req Request, loaded Context, settings
 			pre++
 		}
 	}
-	actionable := ActionableCount(findings, minFix)
-	if len(findings) > 0 {
+	actionable := ActionableCount(visible, minFix)
+	if len(visible) > 0 {
 		// Three ui_say lines (lib/run.sh:1234-1236).
 		msgs = append(msgs, ui.SayLines(
-			fmt.Sprintf("Found %d issue(s) — %d high, %d medium, %d low, of which %d pre-existing.", len(findings), high, medium, low, pre),
+			fmt.Sprintf("Found %d issue(s) — %d high, %d medium, %d low, of which %d pre-existing.", len(visible), high, medium, low, pre),
 			fmt.Sprintf("%d at or above min_fix_severity (%s); the rest are reported and left alone.", actionable, minFix),
 			"Posting them as inline comments on the lines they affect.",
 		)...)
@@ -77,11 +84,12 @@ func (l *Leg) publish(ctx context.Context, req Request, loaded Context, settings
 	// the same record; convergence still counts every finding, held or not.
 	marker.Findings = stampNotPosted(marker.Findings, heldEntries(findings, minFix, pass))
 	findings = parseFindings(marker.Findings)
+	visible = excludeCheckedOut(findings, marker.CheckedOut)
 
 	heldEarlier := heldEarlierIDs(loaded.Markers)
 	postedThisPass := map[string]bool{}
 	posted, skipped := 0, 0
-	for _, f := range findings {
+	for _, f := range visible {
 		// Within-pass retries post once: a second finding under an id
 		// this pass already posted is the same point twice.
 		if f.ID != "" && postedThisPass[f.ID] {

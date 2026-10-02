@@ -130,6 +130,26 @@ type Marker struct {
 	// review-summary renderers read it, so the notice survives the resolve
 	// leg rewriting the review comment from the marker.
 	Redriven Opt[bool] `json:"redriven,omitzero"`
+	// The cross-model check's outcome for this pass: ran, off,
+	// no_candidates, degraded or unavailable. Absent when the pass never
+	// reached the check phase — an early exit, or a marker written
+	// before the check existed. A mixed-version rewrite may drop these
+	// fields; the check then runs again on resume.
+	Check Opt[string] `json:"check,omitzero"`
+	// CheckReason is why: same_model when the checker answered as the
+	// reviewer's own model, otherwise the token naming the degrade or
+	// unavailable cause. Absent when the check ran clean.
+	CheckReason Opt[string] `json:"check_reason,omitzero"`
+	// CheckRecord is the durable checked state: the candidate-set digest,
+	// the revisions, the checker's provenance and every decision. Present
+	// only when the check ran; a resume whose digest, revision or check
+	// setting no longer matches discards it and checks again.
+	CheckRecord json.RawMessage `json:"check_record,omitzero"`
+	// CheckedOut is the rejected and duplicate candidates, each with its
+	// position, id, path, line, title and reason. The retention ladder
+	// never sheds it: a marker that cannot hold its decisions fails its
+	// write rather than dropping one to fit.
+	CheckedOut json.RawMessage `json:"checked_out,omitzero"`
 	// Verification is the required-check evidence the pass judged: the
 	// overall state and the per-check detail. Absent when no checks were
 	// required, so a marker from before the gate reads exactly as it
@@ -186,7 +206,7 @@ func (m Marker) Raw() json.RawMessage { return bytes.Clone(m.raw) }
 // input". Every reader here already reads a zero-length payload as absent —
 // DecodeFindings and DecodeResolutions both — so the writer agrees with them.
 func (m Marker) MarshalJSON() ([]byte, error) {
-	for _, payload := range []*json.RawMessage{&m.Tokens, &m.Usage, &m.Reads, &m.Findings, &m.Resolutions, &m.CoveragePayload, &m.CoveragePrevPayload} {
+	for _, payload := range []*json.RawMessage{&m.Tokens, &m.Usage, &m.Reads, &m.Findings, &m.Resolutions, &m.CoveragePayload, &m.CoveragePrevPayload, &m.CheckRecord, &m.CheckedOut} {
 		if len(*payload) == 0 {
 			*payload = nil
 		}
@@ -284,7 +304,7 @@ func (m *Marker) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-// clone copies the seven payloads a marker carries as raw bytes.
+// clone copies the nine payloads a marker carries as raw bytes.
 //
 // Marker is returned by value, but a slice header shares its backing array, so
 // a caller editing what a reader handed it would reach the marker list the
@@ -297,6 +317,8 @@ func (m Marker) clone() Marker {
 	m.Resolutions = bytes.Clone(m.Resolutions)
 	m.CoveragePayload = bytes.Clone(m.CoveragePayload)
 	m.CoveragePrevPayload = bytes.Clone(m.CoveragePrevPayload)
+	m.CheckRecord = bytes.Clone(m.CheckRecord)
+	m.CheckedOut = bytes.Clone(m.CheckedOut)
 	return m
 }
 

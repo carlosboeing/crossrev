@@ -31,6 +31,8 @@ policy:
   max_passes_per_cycle: 3
   max_files_changed_per_pr: 200
   max_prs_per_day: 25
+review:
+  check: off
 reviewer:
   harness: agy
   model: reviewer-model
@@ -132,6 +134,8 @@ policy:
   max_passes_per_cycle: 3
   max_files_changed_per_pr: 200
   max_prs_per_day: 25
+review:
+  check: off
 reviewer:
   harness: grok
   model: reviewer-model
@@ -152,6 +156,8 @@ policy:
   max_passes_per_cycle: 3
   max_files_changed_per_pr: 200
   max_prs_per_day: 25
+review:
+  check: off
 reviewer:
   harness: claude
   model: reviewer-model
@@ -265,6 +271,8 @@ policy:
   max_passes_per_cycle: 3
   max_files_changed_per_pr: 200
   max_prs_per_day: 25
+review:
+  check: off
 reviewer:
   harness: opencode
   model: opencode/reviewer-model
@@ -541,6 +549,8 @@ policy:
   max_passes_per_cycle: 3
   max_files_changed_per_pr: 200
   max_prs_per_day: 25
+review:
+  check: off
 reviewer:
   harness: claude
   model: reviewer-model
@@ -621,6 +631,8 @@ policy:
   max_passes_per_cycle: 3
   max_files_changed_per_pr: 200
   max_prs_per_day: 25
+review:
+  check: off
 reviewer:
   harness: claude
   model: reviewer-model
@@ -665,6 +677,8 @@ policy:
   max_passes_per_cycle: 3
   max_files_changed_per_pr: 200
   max_prs_per_day: 25
+review:
+  check: off
 reviewer:
   harness: claude
   model: reviewer-model

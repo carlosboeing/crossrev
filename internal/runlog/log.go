@@ -279,6 +279,20 @@ type CallIdentity struct {
 // reads zero because an accepted call never ran one: any command event
 // halts the leg with review_leg_ran_command before a call line is written.
 func (l *Log) Call(call, promptBytes, suppliedBytes, reads int, fresh, cached, output int64, model string, ms int64, identity ...CallIdentity) {
+	writeCall(l, call, promptBytes, suppliedBytes, reads, fresh, cached, output, model, ms, identity)
+}
+
+// CheckCall records one accepted cross-model check call: the same line a
+// review call writes, with a kind=check identity so the checker's usage
+// reads back separately from the reviewer's. A check packs candidates
+// across concerns, so concern and part read as dashes.
+func (l *Log) CheckCall(call, promptBytes, suppliedBytes, reads int, fresh, cached, output int64, model string, ms int64) {
+	writeCall(l, call, promptBytes, suppliedBytes, reads, fresh, cached, output, model, ms, []CallIdentity{{Kind: "check"}})
+}
+
+// writeCall writes one accepted call's line, naming the identity only when the
+// caller names one. No identity keeps the review line's bytes exactly.
+func writeCall(l *Log, call, promptBytes, suppliedBytes, reads int, fresh, cached, output int64, model string, ms int64, identity []CallIdentity) {
 	if l == nil {
 		return
 	}

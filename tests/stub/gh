@@ -1005,7 +1005,7 @@ if [[ -n "${CROSSREV_GH_STATE:-}" ]]; then
   # with !fail or !deny and a truncation with a total above its runs;
   # otherwise a seeded check-runs.json answers, paginated the way the
   # endpoint paginates; otherwise the commit carries no runs.
-  if [[ "$joined" == "api repos/"*"/commits/"*"/check-runs"* ]]; then
+  if [[ "$joined" == "api repos/"*"/commits/"*"/check-runs"* || "$joined" == "api --method GET repos/"*"/commits/"*"/check-runs"* ]]; then
     match_routes
     page="$(extract_field page "$@")"
     [[ "$page" =~ ^[0-9]+$ ]] || page="1"

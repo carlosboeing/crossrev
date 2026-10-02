@@ -334,6 +334,8 @@ policy:
   max_passes_per_cycle: 3
   max_files_changed_per_pr: 200
   max_prs_per_day: 25
+review:
+  check: off
 reviewer:
   harness: claude
   model: reviewer-model

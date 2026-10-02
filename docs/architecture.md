@@ -329,7 +329,7 @@ internal/        Go packages, in tiers
   initcmd/         Tier 3: init command
   preflight/       Tier 3: dependency checks, the coverage report and the gate report
   cli/             Tier 3: CLI command router
-schemas/         findings.schema.json, resolve.schema.json
+schemas/         findings.schema.json, resolve.schema.json, check.schema.json
 skills/          pr-review/, pr-resolve/
 templates/       workflows, starter config, example operator config
 scripts/         lint.sh, check-changelog.sh, check-parity-coverage.sh,
