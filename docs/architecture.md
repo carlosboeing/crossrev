@@ -53,14 +53,14 @@ flowchart TD
 3. Work out the pass number from the markers, and whether this head SHA has already been reviewed.
 4. Ask whether a pass should begin at all — the caps, the `crossrev/stop` label, the draft check.
 5. **Post a claim comment before doing any work**, carrying a marker.
-6. Quarantine repository-provided harness configuration, assemble the prompt, invoke the reviewer, validate what came back.
-7. Post one inline comment per finding, each carrying its own marker; rewrite the claim comment into the pass summary; set the labels.
+6. Quarantine repository-provided harness configuration, assemble the prompt, invoke the reviewer once per concern and merge the answers, validate what came back.
+7. Have the resolver's model check each merged finding, and post one inline comment per confirmed one, each carrying its own marker; rewrite the claim comment into the pass summary; wait for required checks where the pass would otherwise converge; set the labels.
 
 ### The resolve leg
 
 1. Same context load, same policy source.
 2. Find the newest review pass's marker and read its findings.
-3. Post its own claim, then invoke the resolver with the diff, the findings and the prior threads.
+3. Post its own claim, then invoke the resolver with the diff, the findings — each marked where an earlier pass fixed the same point, and with sibling locations where the same identifiers occur — and the prior threads.
 4. For each finding: reply in-thread, resolve the thread where the resolution says to, and commit a fix where policy allows one.
 5. Persist deferred findings to the backlog.
 6. Push, behind the branch guard. Post the summary. Set the labels.
@@ -71,7 +71,7 @@ flowchart TD
 
 There is no database, no cache and no local state file. Everything the loop knows is on the pull request, in **markers** — HTML comments embedded in comment bodies, invisible in the UI and readable by anyone who views the source.
 
-A marker carries the protocol version, the leg, the pass number, its state, timestamps, the run id, the head SHA, the harness and model and effort and endpoint, the model that actually answered, the token cost, the verdict, and the findings or resolutions.
+A marker carries the protocol version, the leg, the pass number, its state, timestamps, the run id, the head SHA, the harness and model and effort and endpoint, the model that actually answered, the token cost, the verdict, and the findings or resolutions. A review marker also carries each finding's concerns, the candidates the cross-model check kept off the pull request with their reasons, the check's durable decisions, and the required-check evidence the pass judged.
 
 | Prefix | Where | What it records |
 |---|---|---|
@@ -133,7 +133,7 @@ It terminates on the first of:
 
 1. A human applied `crossrev/stop`. **Checked first**, because it's an instruction rather than a state, and it outranks a healthy verdict.
 2. The resolver returned `blocked`.
-3. The reviewer returned `converged` — nothing at or above `min_fix_severity` remains.
+3. The reviewer returned `converged` — nothing at or above `min_fix_severity` remains, and the required checks passed or none were required.
 4. The pass count reached `max_passes_per_cycle`. Pass 3 of a cap of 3 is the last pass, not the one after which a fourth begins.
 5. The daily pull request cap is exceeded.
 6. The pull request is larger than the file cap.
@@ -144,7 +144,7 @@ The last three are continuation bounds: they end *automatic* reviewing and never
 
 Each review pass reads every changed file: every added, modified, deleted, renamed and type-changed path between the base branch and the pull request branch. A rename counts as new work and is read again from scratch.
 
-A **required file** is a changed file the review must account for. The reviewer gives each one a verdict, and the pass converges only when every required file has one. When the branch moves, every prior result is retired and the next pass starts over. A re-run reuses recorded verdicts only when the base commit, the pull request commit, the review-engine version and the review producer (harness, model, effort and endpoint) are unchanged; then it resumes the files still waiting for a verdict.
+A **required file** is a changed file the review must account for. The reviewer gives each one a verdict, and the pass converges only when every required file has one. When the branch moves, every prior result is retired and the next pass starts over. A re-run reuses recorded verdicts only when the base commit, the pull request commit, the review-engine version and the review producer (harness, model, effort and endpoint) are unchanged; then it resumes the files still waiting for a verdict. The engine version fingerprints the review contract — concerns, check mode, input policy and read mode — so a generation judged under other settings retires instead of being reused.
 
 The review reads in batches because one prompt cannot hold a large pull request. One pass reads at most 400 required files; oversized generated files skipped before review do not use those slots. Batches hold at most 40 files in path order.
 
@@ -158,15 +158,17 @@ A file verdict means the supplied ranges on both sides were examined, not merely
 
 Files past the pass budget carry `review_budget_reached`.
 
+Each input is judged once per concern and the answers merge before coverage publishes: identical findings collapse into one claim carrying both concerns, and `could_not_review` from either concern wins the file's verdict and blocks convergence.
+
 The next review after a repair reads what the repair changed first, then the full scope.
 
 The pass records which repair it confirmed only after it reads every current file. A first clean review records none.
 
 The reviewer reports a scope note saying what was read, and a list of known limits saying what constrained it.
 
-One convergence rule reads that note with the counts and the confirmed repair. The review writer, both label rules, the local cycle and both status paths all read that rule. A failed check never falls back to the reviewer verdict.
+One convergence rule reads that note with the counts, the confirmed repair and the required-check evidence. The review writer, both label rules, the local cycle and both status paths all read that rule. A gate that fails, waits, misses or cannot be read never falls back to the reviewer verdict.
 
-The coverage record names verification status not_implemented and five nulls. No check runs in this release. `crossrev/converged` means review work is complete.
+`crossrev/converged` means the review work is complete and the required checks passed — or none were required, in which case nothing is read and every route behaves as before. The pass marker records the evidence each pass judged; the generation's own verification envelope stays reserved.
 
 The file list lives in `internal/intel`, the stored record in `internal/prstate`, the batch loop in `internal/review`, and the convergence rule in `internal/policy`.
 
@@ -230,9 +232,9 @@ Silent substitution is the failure the cross-model design exists to prevent, and
 - **What the orchestrator asked for.** It knows exactly what it invoked, so it asserts the legs differ in binary, resolved base URL or model — and that no endpoint variable is set in the inherited environment, which would redirect the harness process-wide.
 - **What answered.** Where a harness reports the answering model, the two are compared. Where it doesn't, the marker records the absence rather than implying a check that never ran.
 
-## The two schemas
+## The three schemas
 
-`schemas/findings.schema.json` and `schemas/resolve.schema.json` constrain what each leg returns. A harness that constrains its own output enforces them natively, so a shape failure there is an adapter bug rather than model drift; opencode and supplied grok reviews carry the schema in the prompt instead, so a shape miss there is retried once as model drift.
+`schemas/findings.schema.json` and `schemas/resolve.schema.json` constrain what each leg returns, and `schemas/check.schema.json` constrains the cross-model check's one decision per numbered candidate. A harness that constrains its own output enforces them natively, so a shape failure there is an adapter bug rather than model drift; opencode and supplied grok reviews carry the schema in the prompt instead, so a shape miss there is retried once as model drift.
 
 Validation splits by exit code, and the split is about who is at fault:
 

@@ -7,12 +7,13 @@ import (
 	"testing"
 )
 
-// Public documentation describes Review Intelligence as review completion,
-// never as verification. The coverage manifest records verification.status
-// not_implemented, and crossrev/converged means the current review
-// obligation is complete — not that checks passed or the code is correct.
-// A doc that calls the result verified, or that omits the not_implemented
-// statement, lets a reader believe the loop checked something it never ran.
+// Public documentation describes convergence as review completion plus the
+// required-check gate, never as bare verification. crossrev/converged means
+// the current review obligation is complete and the required checks passed
+// or none were required — not that the code is correct. A doc that calls
+// the result verified, or that omits the required_checks gate, lets a
+// reader believe the loop checked something it never ran, or ran with a
+// gate it never names.
 func TestPublicDocsDescribeCoverageNotVerification(t *testing.T) {
 	docs := []string{
 		"README.md",
@@ -34,7 +35,7 @@ func TestPublicDocsDescribeCoverageNotVerification(t *testing.T) {
 		t.Errorf("public docs claim %q, which states a verification this release never runs", banned)
 	}
 	for _, missing := range auditDocsMissing(joined) {
-		t.Errorf("public docs lack %q, so nothing says checks are out of scope", missing)
+		t.Errorf("public docs lack %q, so nothing names the gate convergence reads", missing)
 	}
 	// The reserved envelope states are decoder vocabulary for another
 	// writer's bytes, not states this release documents as its own outcomes.
@@ -78,7 +79,7 @@ func TestPublicDocsShowCurrentConfigVersion(t *testing.T) {
 // Each clause of the verdict has a fixture, because each was removable with
 // the suite still green: dropping the banned-phrase list keeps the docs'
 // own text passing while a new "verified" sentence slips in, and dropping
-// the required-phrase halves keeps it passing while the not_implemented
+// the required-phrase halves keeps it passing while the required_checks
 // sentence is deleted.
 func TestPublicDocsAuditVerdict(t *testing.T) {
 	tests := []struct {
@@ -91,26 +92,26 @@ func TestPublicDocsAuditVerdict(t *testing.T) {
 		wantMissing int
 	}{
 		{
-			name:        "review completion with the status named",
-			doc:         "crossrev/converged means review completion. verification.status stays not_implemented.",
+			name:        "review completion with the gate named",
+			doc:         "crossrev/converged means review completion with required_checks judged.",
 			wantBanned:  0,
 			wantMissing: 0,
 		},
 		{
 			name:        "a verified claim",
-			doc:         "the pass reports verified convergence with verification.status not_implemented.",
+			doc:         "the pass reports verified convergence with required_checks judged.",
 			wantBanned:  1,
 			wantMissing: 0,
 		},
 		{
-			name:        "the status omitted",
+			name:        "the gate omitted",
 			doc:         "crossrev/converged means review completion.",
 			wantBanned:  0,
 			wantMissing: 1,
 		},
 		{
 			name:        "a documented out-of-scope state",
-			doc:         "review completion. verification.status: passed is recorded. verification.status stays not_implemented.",
+			doc:         "review completion with required_checks. verification.status: passed is recorded.",
 			wantBanned:  1,
 			wantMissing: 0,
 		},
@@ -175,7 +176,6 @@ func auditDocsVerdict(doc string) []string {
 		"verified convergence",
 		"verify convergence",
 		"verification passed",
-		"checks passed",
 		"all checks pass",
 		"no_checks_discovered",
 		"verification.status: passed",
@@ -192,11 +192,11 @@ func auditDocsVerdict(doc string) []string {
 	return found
 }
 
-// auditDocsMissing reports the required coverage-not-verification statements
-// one document's text lacks.
+// auditDocsMissing reports the required gate statement one document's text
+// lacks.
 func auditDocsMissing(doc string) []string {
-	if strings.Contains(doc, "not_implemented") {
+	if strings.Contains(doc, "required_checks") {
 		return nil
 	}
-	return []string{"verification.status not_implemented"}
+	return []string{"the required_checks gate"}
 }

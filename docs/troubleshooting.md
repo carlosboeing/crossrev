@@ -54,7 +54,7 @@ If that process is still running, wait for it or stop it. If it isn't, CrossRev 
 
 ## A halted loop
 
-`crossrev/halted` means the loop stopped short and a human is needed. **Nothing about a halt is a judgement on the code.** Six things cause one:
+`crossrev/halted` means the loop stopped short and a human is needed. **Nothing about a halt is a judgement on the code.** Nine things cause one:
 
 | Cause | What to do |
 |---|---|
@@ -65,6 +65,8 @@ If that process is still running, wait for it or stop it. If it isn't, CrossRev 
 | A finding was `escalated` | It needs a human decision, so `crossrev/stop` went on and the thread stayed open |
 | **A leg stopped with an error** | The harness failed to answer, a commit was refused, a push was rejected. The claim comment and its marker carry the reason. Fix what it names, then run the same command again |
 | The pass left files without a verdict | The claim names them with its halt word and stop counts. Run the same command again to resume — recorded verdicts are reused while the base commit, the pull request commit, the review-engine version and the review producer (harness, model, effort and endpoint) are unchanged |
+| A file no concern could examine | The verdict is `blocked` with "N required file(s) could not be examined". The record names the failed fallbacks in its reason. Fix what it names, then push so the next pass re-examines the file — a re-run at the same head reuses the recorded verdict |
+| A required check failed, waited out, missed or could not be read | The verdict is `blocked` with the gate's halt word. See [Required-check halts](#required-check-halts) |
 
 ## Coverage halts
 
@@ -109,6 +111,8 @@ Four halt words name a pass the required-check gate stopped. The marker records 
 `required_checks_unreadable` means the runs could not be read at all. The commonest cause is an installation approved before the loop App asked for Checks: Read — approve the new permission (see [the loop App](credentials.md#the-loop-app)) and run the pass again. Anything else names its own error beside the word.
 
 The gate reads check runs, not commit statuses: a status context never satisfies a required check. The runs are what GitHub reports for the pull request's head commit — the same association required status checks use — and `pull_request` workflows report against that head commit too, so a check that never ran for it (e.g. a workflow triggered only on the base branch) is what reads as missing.
+
+The resolve leg never waits: it judges one read, and a gate still outstanding holds a no-commit settle off converged until the review leg looks again.
 
 ## The loop went quiet in automated mode
 
@@ -238,6 +242,14 @@ A review leg whose served-or-tripwire command block is unverified at its pin nev
 `served reads are unavailable: <reason> (reads_unavailable)`
 
 The served read path is not serving: a failed leg-start self-test, a missing handshake in the server log, or refused read calls. The reason travels in the pass comment, the reads envelope on the marker and the generation, and the run log together. `.policy.on_reads_unavailable` decides what the leg does, read from the base revision like every other policy key: `degrade` records the reason and continues on the supplied prompt (the default), `halt` stops the leg and publishes nothing. A repeated failure under `degrade` is the tool genuinely down rather than a blip — check the run log's `reads` events, then re-run; under `halt`, fix the tool first, because the call published nothing and the pass made no progress.
+
+## The cross-model check degraded
+
+`check: degraded` in the pass summary means the second model could not judge the findings — a harness, quota, transient, schema or isolation failure, or a checker that could not run at all — so every finding posted unchecked with the reason beside it. The reviewer's findings are still the review; nothing was judged twice and nothing was skipped. A resume reuses the check's durable decisions where the candidates still match, and re-checks where they moved.
+
+Some failures are not degradations: the command tripwire, a restore failure, a credential, endpoint or hardening refusal, a reads halt and cancellation fail the pass the way the review leg's own failures do, because none of them is evidence about the findings.
+
+A check that answered as the reviewer's own model is recorded as `same_model`, never as cross-model. `review.check: off` skips the check and posts everything the reviewer raised.
 
 ## A credential problem in CI
 
