@@ -125,6 +125,12 @@ type Marker struct {
 	// carry a verdict code and nothing else. A later pass can still resume
 	// from it; what is missing is evidence, reasons and finding ids.
 	CoverageDegraded Opt[bool] `json:"coverage_degraded,omitzero"`
+	// CoverageEngine is the review-contract engine identity the pass
+	// published its generation under: the effective concerns, check mode,
+	// input policy and read mode it ran with, hashed into the identity.
+	// Absent on markers written before the pass recorded it; readers
+	// fall back to the base-policy identity for those.
+	CoverageEngine Opt[string] `json:"coverage_engine,omitzero"`
 	// Redriven marks a pass that ran again on its comment after a previous
 	// attempt could not be completed. The review claim sets it; both
 	// review-summary renderers read it, so the notice survives the resolve
@@ -396,7 +402,7 @@ func (m Marker) coveragePresent() bool {
 }
 
 // CoverageHandle is the handle this marker names. It is the only place a
-// handle is reconstructed from a marker, so a fifth field cannot be read in
+// handle is reconstructed from a marker, so a sixth field cannot be read in
 // three readers and missed in the fourth.
 //
 // Three answers, not two. No claim is the normal first-pass state and the
@@ -416,6 +422,7 @@ func (m Marker) CoverageHandle() (h Handle, claimed bool, err error) {
 		Location: m.CoverageRef.Value(),
 		Commit:   m.CoverageCommit.Value(),
 		Degraded: m.CoverageDegraded.Value(),
+		Engine:   m.CoverageEngine.Value(),
 	}
 	if len(m.CoveragePayload) > 0 {
 		h.Payload = Some(json.RawMessage(bytes.Clone(m.CoveragePayload)))
@@ -441,6 +448,11 @@ func (m *Marker) RecordCoverage(h Handle) {
 		m.CoverageCommit = Opt[string]{}
 	}
 	m.CoverageDegraded = Some(h.Degraded)
+	if h.Engine != "" {
+		m.CoverageEngine = Some(h.Engine)
+	} else {
+		m.CoverageEngine = Opt[string]{}
+	}
 	payload, ok := h.Payload.Get()
 	if !ok || len(payload) == 0 {
 		// No inline payload: the predecessor lives in the parent commit

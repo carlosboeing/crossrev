@@ -274,6 +274,7 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 		// way, before recording.
 		return l.haltPass(ctx, req, loaded, pass, claimID, out, marker, &batchBound{plan: planForStop(plan, initialStop), scope: scope, accepted: acceptedIDs, stop: initialStop})
 	}
+	initial.Engine = scope.Engine
 	marker.RecordCoverage(initial)
 	// The reported marker tracks the commit point: a failure in a later
 	// batch reports this checkpoint rather than the bare claim, so the
@@ -357,6 +358,7 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 		if stop.Limit != "" {
 			return l.haltPass(ctx, req, loaded, pass, claimID, out, marker, &batchBound{plan: planForStop(plan, stop), scope: scope, accepted: acceptedIDs, stop: stop})
 		}
+		handle.Engine = scope.Engine
 		marker.RecordCoverage(handle)
 		if outcome.model != "" {
 			marker.ModelReported = prstate.Some(outcome.model)

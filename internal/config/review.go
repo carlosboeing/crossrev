@@ -131,8 +131,8 @@ func (c *Config) ReviewCheck() string {
 // ReviewContract answers the review half of the coverage identity from the
 // merged configuration: the configured concerns, check mode and input
 // policy beside the effective read mode the caller resolved. Resolve and
-// status read this to judge a generation by the same contract the review
-// leg published under.
+// status read this as the fallback for markers written before the review
+// leg recorded the identity its pass published under.
 func (c *Config) ReviewContract(readMode string) core.ReviewContract {
 	return core.ReviewContract{
 		Concerns:    c.ReviewConcerns(),
