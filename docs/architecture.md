@@ -56,7 +56,7 @@ CrossRev uses a small vocabulary. Each word below means one thing.
 
 ## 3. Components
 
-CrossRev is one Go binary. Its packages sit in tiers, and a package may import only from tiers below it. `internal/archtest` enforces this.
+CrossRev is one Go binary. Its packages sit in tiers. A package imports from lower tiers, a few Tier 2 packages may also import named Tier 2 peers, and `cmd/crossrev` wires everything together as the composition root. `internal/archtest` enforces these rules.
 
 ```mermaid
 flowchart TB
@@ -84,6 +84,7 @@ flowchart TB
         validate["validate<br/>answer validation"]
     end
     core["Tier 0: core types"]
+    root["cmd/crossrev<br/>composition root"] --> t3
     t3 --> t2 --> t1 --> core
 ```
 
@@ -115,16 +116,18 @@ sequenceDiagram
     O->>G: read PR, labels, markers, base-revision config
     O->>G: post claim comment (marker, state started)
     O->>O: plan required files into inputs
-    loop each input, each concern
-        O->>R: prompt with gutter-numbered hunks
-        R-->>O: verdicts and findings (JSON)
+    loop each input
+        loop each concern
+            O->>R: prompt with gutter-numbered hunks
+            R-->>O: verdicts and findings (JSON)
+        end
+        O->>O: merge concern answers for this input
+        O->>G: publish coverage generation to the git ref
     end
-    O->>O: merge concern answers, collapse duplicates
     O->>C: numbered candidate findings
     C-->>O: confirmed, rejected or duplicate, each
-    O->>G: one inline comment per confirmed finding
-    O->>G: publish coverage generation to the git ref
-    O->>G: read check runs, wait if pending
+    O->>G: post confirmed findings as comments
+    O->>G: read check runs, wait if pending or missing
     O->>G: rewrite claim into pass summary, set labels
 ```
 
@@ -133,41 +136,50 @@ sequenceDiagram
 3. **Claim.** Post a summary comment with a marker before any work, so a run that dies can be resumed.
 4. **Plan.** List the required files and pack them into model calls that fit the harness's input window. A file too big for one call is split into parts.
 5. **Review.** Call the reviewer once per input per concern: `correctness` first, then `consistency`. Each call returns a verdict per file and any findings, validated against `schemas/findings.schema.json`.
-6. **Merge.** Combine the concern answers per file. The same finding from both concerns becomes one finding. If either concern could not review a file, the file's verdict is `could_not_review`, which blocks convergence.
+6. **Merge and record.** Combine the concern answers for the input. The same finding from both concerns becomes one finding. If either concern could not review a file, the file's verdict is `could_not_review`, which blocks convergence. Each accepted input publishes a new coverage generation to the git ref straight away, so an interrupted pass resumes from the inputs still waiting.
 7. **Cross-model check.** Send every merged finding, numbered, to the resolver's model in read-only mode. It confirms, rejects, or marks each a duplicate, and may correct a severity. Rejected findings stay on the marker with the reason; they do not post. If the check fails, every finding posts unchecked and the summary says `check: degraded` or `check: unavailable`.
-8. **Post.** One inline comment per confirmed finding, each with its own marker.
-9. **Publish coverage.** Write the file verdicts as a new generation in the git ref.
-10. **Gate.** If the pass would converge, judge the required checks. Wait for pending ones, then converge or halt.
-11. **Finish.** Rewrite the claim into the pass summary and apply the next label.
+8. **Post.** Each confirmed finding posts once, with its own marker: inline on its line, or as a file-level comment when the line is outside the diff. A finding already posted on an earlier pass is not posted again. On later passes, findings below `min_fix_severity` are held: listed in the summary and recorded on the marker, but not posted.
+9. **Gate.** If the pass would converge, judge the required checks. Wait for pending or missing ones, then converge or halt.
+10. **Finish.** Rewrite the claim into the pass summary and apply the next label.
 
-A pass with no actionable finding and a verdict for every required file can converge at step 10. Otherwise it hands over to the resolve leg with `crossrev/awaiting-resolution`.
+The pass then ends one of three ways:
+- **Actionable findings:** hand over to the resolve leg with `crossrev/awaiting-resolution`.
+- **No actionable finding, and every required file has an accepted verdict:** converge at step 9, subject to the gate.
+- **No actionable finding, but files remain without a verdict or marked `could_not_review`:** halt with verdict `blocked`. The resolver has nothing to fix, so a person must look.
 
 ### 4.2 The resolve leg
 
 1. **Load context** the same way, and read the review leg's findings from its marker.
 2. **Claim**, then call the resolver with the diff, the findings and the existing threads. Each finding carries two hints: whether an earlier pass already fixed the same point (so the earlier fix may be incomplete), and up to 10 places elsewhere where the same identifiers occur.
-3. **Answer each finding.** Reply in its thread, resolve the thread where the resolution says to, and edit files where policy allows a fix.
+3. **Validate the answers**: one resolution per finding, and fixes only where policy allows, at or above `min_fix_severity`.
 4. **Record deferrals** in the configured backlog.
-5. **Commit and push** behind a branch guard.
-6. **Settle.** A pass that pushed hands back to review with `crossrev/awaiting-review`. A pass that settled every finding without pushing can converge directly, behind the same required-check gate as the review.
+5. **Commit and push** the fixes behind a branch guard.
+6. **Reply.** Answer each finding in its thread, and resolve the thread where the resolution says to.
+7. **Settle.** A pass that pushed hands back to review with `crossrev/awaiting-review`. A pass that settled every finding without pushing can converge directly, behind the same required-check gate as the review.
 
 ### 4.3 How a pass ends
+
+Each leg ends by choosing the next state. The checks run in this order, and the first that applies decides.
 
 ```mermaid
 flowchart TD
     start(["Leg finishes"]) --> stop{"crossrev/stop applied?"}
     stop -->|yes| stopped["Stopped"]
-    stop -->|no| blocked{"Blocked, escalated,<br/>or a limit reached?"}
+    stop -->|no| blocked{"Resolver blocked or escalated,<br/>or files left unreviewed?"}
     blocked -->|yes| halted["Halted<br/>crossrev/halted"]
-    blocked -->|no| work{"Actionable findings<br/>or uncovered files?"}
-    work -->|"yes, after review"| res["Awaiting resolution"]
-    work -->|"yes, after a pushed fix"| rev["Awaiting review"]
-    work -->|no| gate{"Required checks"}
+    blocked -->|no| work{"Work left?"}
+    work -->|"findings to resolve"| res["Awaiting resolution"]
+    work -->|"resolver pushed a fix"| more{"Another pass allowed?<br/>pass cap, daily cap, file cap"}
+    more -->|yes| rev["Awaiting review"]
+    more -->|no| halted
+    work -->|nothing left| gate{"Required checks"}
     gate -->|"passed or none required"| conv["Converged<br/>crossrev/converged"]
-    gate -->|pending| wait["Wait up to wait_minutes,<br/>re-reading every 30 seconds"]
+    gate -->|"pending or missing"| wait["Wait up to wait_minutes,<br/>re-reading every 30 seconds"]
     wait --> gate
-    gate -->|"failed, missing, unreadable,<br/>or still pending"| halted
+    gate -->|"failed, unreadable,<br/>or still waiting at the deadline"| halted
 ```
+
+A pass that converges on the last allowed pass still converges. The caps only stop another pass from starting.
 
 A failing check never becomes a code finding. It halts the pass with one of `required_check_pending`, `required_check_missing`, `required_check_failed` or `required_checks_unreadable`, naming each blocking check with its run URL. `crossrev restart --pr N` drives the pass again once the checks report. A restart that only needs the checks re-judged makes no model call.
 
@@ -201,6 +213,8 @@ Three properties follow from keeping state in markers:
 - **A crash loses nothing.** The claim goes up before the work, so the next run sees how far the last one got and resumes.
 - **A duplicate comment is impossible.** A finding's marker is inside the comment it records, so posting the comment and recording it are one API call.
 - **Local and automated runs share one code path.** Nothing about the state is specific to CI.
+
+**Markers are versioned.** New markers are written as `v:2`. A `v:1` marker still reads for its findings and pass number but carries no coverage. A marker from a newer version than this build understands is refused.
 
 **Only trusted authors count.** Anyone can write an HTML comment, so CrossRev reads markers only from one author: the GitHub App in automated mode, and the invoking user locally.
 
@@ -255,9 +269,9 @@ The last two end automatic reviewing only. A review a person asks for still runs
 
 ## 7. What a review covers
 
-**Every changed file is read.** Added, modified, deleted, renamed and type-changed paths between the base and head commits are required files. A pass reads at most 400, in batches of at most 40 in path order. Generated files too large to show whole are skipped with a warning.
+**Every changed file is read, unless policy excludes it.** Added, modified, deleted, renamed and type-changed paths between the base and head commits are required files, except files marked `linguist-generated` in `.gitattributes` and the repository's own backlog file. A pull request whose changed files are all excluded halts without calling a model. A pass reads at most 400, in batches of at most 40 in path order. Generated files too large to show whole are skipped with a warning.
 
-**Files arrive as numbered hunks.** Each line of a hunk carries its old line number, its new line number and a `|`, with a dash where the line does not exist on that side. Models miscount lines under a bare `@@` header, and GitHub refuses a comment on a line the diff does not show, so the numbers are given rather than derived. CrossRev re-derives the same mapping before posting and moves a comment at most three lines to reach a hunk. A file arrives in one of three forms:
+**Files arrive as numbered hunks.** Each line of a hunk carries its old line number, its new line number and a `|`, with a dash where the line does not exist on that side. Models miscount lines under a bare `@@` header, and GitHub refuses a comment on a line the diff does not show, so the numbers are given rather than derived. CrossRev re-derives the same mapping before posting and moves a comment at most three lines to reach a hunk. Under the default `review.input_policy: hunks_first`, a file arrives in one of three forms:
 
 | Form | When | What the reviewer sees |
 |---|---|---|
@@ -265,11 +279,13 @@ The last two end automatic reviewing only. A review a person asks for still runs
 | `hunks_context` | Larger edited files | Each change with its enclosing function, clipped to 100 lines of context |
 | `diff_only` | Binary, unreadable, rename-only or mode-only | The diff header and the reason, no content |
 
+Under `whole_when_fits`, an edited file is sent whole whenever its whole form fits the call, and as hunks otherwise.
+
 **A verdict covers only what was shown.** The spans each side showed are the supplied ranges. Evidence for a verdict must cite lines inside them, and lines outside them are recorded as unseen in `known_limits`, never as evidence ([ADR 0026](adrs/0026-coverage-counts-supplied-bytes-only.md)).
 
-**Calls are sized to the harness.** Each call's full prompt is measured against the harness's input window (390,000 bytes for Codex, 312,000 for Claude Code, 120 KiB where the prompt travels as an argument). A file too large for one call splits at hunk boundaries, and its parts merge back into one verdict. Only shared context alone past the hard limit halts a pass, with `shared_context_exceeds_window`.
+**Calls are sized to the harness.** Each call's full prompt is measured against a packing target derived from the model's input window, for example 390,000 bytes for Codex and 312,000 for Claude Code at their default models, and 120 KiB where the prompt travels as a command argument. A configured model with a smaller window lowers the target. Up to 0.75 of the target packs normally; past it the call runs over budget and records `over_budget`, up to a hard limit. A file too large for one call splits at hunk boundaries, and its parts merge back into one verdict. Only shared context alone past the hard limit halts a pass, with `shared_context_exceeds_window`.
 
-**Model calls per pass.** A review pass makes `k × c + m` calls: `k` inputs, `c` concerns and `m` cross-model check calls. Under the defaults a one-file pull request makes three. `review.concerns: [correctness]` with `review.check: off` makes it one.
+**Model calls per pass.** A review pass makes `k × c + m` accepted calls: `k` inputs, `c` concerns, and `m` cross-model check calls. `m` is zero when the review raised no findings and usually one otherwise. Under the defaults, a one-file pull request makes two calls when clean and three when it has findings. A rejected answer can be retried, which adds attempts but not calls. `review.concerns: [correctness]` with `review.check: off` makes it one call.
 
 ## 8. Security boundaries
 
@@ -299,7 +315,9 @@ The quarantine and the notice are best-effort layers. Credential separation is t
 
 ## 9. Harness adapters
 
-Each adapter receives a prompt file, a schema, a working directory, an optional model, effort and endpoint, and whether the leg may write. It returns the answer and metadata: which harness and endpoint ran, which model answered where the harness reports it, and normalised token usage. An adapter refuses a CLI version it has not been verified against before the leg starts.
+Each adapter receives a prompt file, a schema, a working directory, an optional model, effort and endpoint, and whether the leg may write. It returns the answer and metadata: which harness and endpoint ran, which model answered where the harness reports it, and normalised token usage. Usage is split into fresh input, cache reads, cache writes and output; `total` is their sum, and reasoning tokens are recorded beside the total, never added to it. `internal/harness` estimates cost from the vendored rates in `assets/prices.json`, and refuses to estimate rather than guess when a rate is missing.
+
+Version gates differ by adapter. Codex and Claude Code review only on the exact CLI version their read isolation was verified on. opencode refuses installs outside its supported major version, 1.x. The other adapters are not version-gated.
 
 <!-- crossrev:harness-table:start -->
 <!-- Generated by scripts/render-harness-docs.sh — do not edit -->
@@ -316,7 +334,7 @@ Each adapter receives a prompt file, a schema, a working directory, an optional 
 
 | Kind | Meaning | Response |
 |---|---|---|
-| Shape | A key missing, a wrong type, an out-of-range value | An adapter or harness bug. Fails, since a retry reproduces it |
+| Shape | A key missing, a wrong type, an out-of-range value | Where the harness enforces the schema itself, an adapter bug: fails, since a retry reproduces it. Where the schema travels in the prompt (opencode, grok), model drift: one more attempt |
 | Semantic | Valid shape, but contradicts what was sent: an unknown finding number, one answered twice or left out | Model drift. One more attempt |
 
 **The two legs must really differ.** CrossRev checks that the legs differ in binary, endpoint or model, and that no inherited environment variable redirects a harness. Where a harness reports the model that answered, the two are compared. A cross-model check that answered as the reviewer's own model is recorded as `same_model`, never as cross-model.
