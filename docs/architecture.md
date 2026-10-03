@@ -137,8 +137,8 @@ sequenceDiagram
 4. **Plan.** List the required files and pack them into model calls that fit the harness's input window. A file too big for one call is split into parts.
 5. **Review.** Call the reviewer once per input per concern: `correctness` first, then `consistency`. Each call returns a verdict per file and any findings, validated against `schemas/findings.schema.json`.
 6. **Merge and record.** Combine the concern answers for the input. The same finding from both concerns becomes one finding. If either concern could not review a file, the file's verdict is `could_not_review`, which blocks convergence. Each accepted input publishes a new coverage generation to the git ref straight away, so an interrupted pass resumes from the inputs still waiting.
-7. **Cross-model check.** Send every merged finding, numbered, to the resolver's model in read-only mode. It confirms, rejects, or marks each a duplicate, and may correct a severity. Rejected findings stay on the marker with the reason; they do not post. If the check fails, every finding posts unchecked and the summary says `check: degraded` or `check: unavailable`.
-8. **Post.** Each confirmed finding posts once, with its own marker: inline on its line, or as a file-level comment when the line is outside the diff. A finding already posted on an earlier pass is not posted again. On later passes, findings below `min_fix_severity` are held: listed in the summary and recorded on the marker, but not posted.
+7. **Cross-model check.** Send every merged finding, numbered, to the resolver's model in read-only mode. It confirms, rejects, or marks each a duplicate, and may correct a severity. Rejected findings stay on the marker with the reason; they do not post. If the check call fails past its retries, every finding posts unchecked and the summary says `check: degraded`; if the checker cannot run at all, it says `check: unavailable`. A safety failure is different: a command run by the checker, a credential, endpoint or hardening refusal, a failed restore of quarantined files, or cancellation stops the pass and publishes nothing, the same as in the review itself.
+8. **Post.** Each confirmed finding posts once, with its own marker: inline on its line when the diff shows that line, as a file-level comment when the file is in the diff but the line is not, and as a comment on the pull request itself when the file is outside the diff or GitHub refuses the anchor. A finding already posted on an earlier pass is not posted again. On later passes, findings below `min_fix_severity` are held: listed in the summary and recorded on the marker, but not posted.
 9. **Gate.** If the pass would converge, judge the required checks. Wait for pending or missing ones, then converge or halt.
 10. **Finish.** Rewrite the claim into the pass summary and apply the next label.
 
@@ -159,27 +159,38 @@ The pass then ends one of three ways:
 
 ### 4.3 How a pass ends
 
-Each leg ends by choosing the next state. The checks run in this order, and the first that applies decides.
+Each leg ends by choosing the next label. `crossrev/stop` is checked first on both legs and always wins.
 
 ```mermaid
 flowchart TD
-    start(["Leg finishes"]) --> stop{"crossrev/stop applied?"}
-    stop -->|yes| stopped["Stopped"]
-    stop -->|no| blocked{"Resolver blocked or escalated,<br/>or files left unreviewed?"}
-    blocked -->|yes| halted["Halted<br/>crossrev/halted"]
-    blocked -->|no| work{"Work left?"}
-    work -->|"findings to resolve"| res["Awaiting resolution"]
-    work -->|"resolver pushed a fix"| more{"Another pass allowed?<br/>pass cap, daily cap, file cap"}
-    more -->|yes| rev["Awaiting review"]
-    more -->|no| halted
-    work -->|nothing left| gate{"Required checks"}
-    gate -->|"passed or none required"| conv["Converged<br/>crossrev/converged"]
+    subgraph rv["After the review leg"]
+        r0(["Review finishes"]) --> r1{"Blocked?<br/>e.g. every file excluded"}
+        r1 -->|yes| rh["Halted"]
+        r1 -->|no| r2{"Actionable findings?"}
+        r2 -->|yes| rr["Awaiting resolution"]
+        r2 -->|no| r3{"Every required file<br/>has a verdict?"}
+        r3 -->|no| rh
+        r3 -->|yes| r4{"Escalations from earlier passes,<br/>and the reviewer did not<br/>report converged?"}
+        r4 -->|yes| rh
+        r4 -->|no| rg["Required-check gate"]
+    end
+    subgraph sv["After the resolve leg"]
+        s0(["Resolve finishes"]) --> s1{"Blocked, escalated, a fix not committed,<br/>or a deferral not recorded?"}
+        s1 -->|yes| sh["Halted"]
+        s1 -->|no| s2{"Pushed a commit?"}
+        s2 -->|yes| sr["Awaiting review"]
+        s2 -->|no| sg["Required-check gate"]
+    end
+    gate{"Required checks"}
+    rg --> gate
+    sg --> gate
+    gate -->|"passed or none required"| conv["Converged"]
     gate -->|"pending or missing"| wait["Wait up to wait_minutes,<br/>re-reading every 30 seconds"]
     wait --> gate
-    gate -->|"failed, unreadable,<br/>or still waiting at the deadline"| halted
+    gate -->|"failed, unreadable,<br/>or still waiting at the deadline"| gh["Halted"]
 ```
 
-A pass that converges on the last allowed pass still converges. The caps only stop another pass from starting.
+The caps (`max_passes_per_cycle`, the daily pull request cap and the file-count cap) are checked when a review is about to start. A refused start halts the pull request. A pass that converges on the last allowed pass still converges.
 
 A failing check never becomes a code finding. It halts the pass with one of `required_check_pending`, `required_check_missing`, `required_check_failed` or `required_checks_unreadable`, naming each blocking check with its run URL. `crossrev restart --pr N` drives the pass again once the checks report. A restart that only needs the checks re-judged makes no model call.
 
@@ -283,7 +294,7 @@ Under `whole_when_fits`, an edited file is sent whole whenever its whole form fi
 
 **A verdict covers only what was shown.** The spans each side showed are the supplied ranges. Evidence for a verdict must cite lines inside them, and lines outside them are recorded as unseen in `known_limits`, never as evidence ([ADR 0026](adrs/0026-coverage-counts-supplied-bytes-only.md)).
 
-**Calls are sized to the harness.** Each call's full prompt is measured against a packing target derived from the model's input window, for example 390,000 bytes for Codex and 312,000 for Claude Code at their default models, and 120 KiB where the prompt travels as a command argument. A configured model with a smaller window lowers the target. Up to 0.75 of the target packs normally; past it the call runs over budget and records `over_budget`, up to a hard limit. A file too large for one call splits at hunk boundaries, and its parts merge back into one verdict. Only shared context alone past the hard limit halts a pass, with `shared_context_exceeds_window`.
+**Calls are sized to the harness.** Each call's full prompt is measured against a packing target derived from the model's input window, for example 390,000 bytes for Codex and 312,000 for Claude Code at their default models, and 120 KiB where the prompt travels as a command argument. A configured model with a smaller window lowers the target. Calls pack up to the target. Shared context, the part every call repeats such as the pull request description, is judged on its own: past 0.75 of the target, calls run over budget and record `over_budget`, and past the hard limit the pass halts. A file too large for one call splits at hunk boundaries, and its parts merge back into one verdict. That halt is `shared_context_exceeds_window`, and it is the only size limit that stops a pass.
 
 **Model calls per pass.** A review pass makes `k × c + m` accepted calls: `k` inputs, `c` concerns, and `m` cross-model check calls. `m` is zero when the review raised no findings and usually one otherwise. Under the defaults, a one-file pull request makes two calls when clean and three when it has findings. A rejected answer can be retried, which adds attempts but not calls. `review.concerns: [correctness]` with `review.check: off` makes it one call.
 
@@ -308,7 +319,7 @@ flowchart LR
 1. **Credential separation.** Every GitHub call goes through the orchestrator. Adapters strip `GH_TOKEN`, `GITHUB_TOKEN`, `GH_ENTERPRISE_TOKEN` and `GITHUB_ENTERPRISE_TOKEN` before starting a model process. On runners, workflows persist no checkout token, legs remove any persisted one, and git authenticates per call through `gh`. An injected instruction that reaches tool use still cannot post, push or read a secret. This is the layer the others back up.
 2. **Policy from the base branch.** Settings are read from the base revision, so a pull request cannot loosen the rules it is reviewed under ([ADR 0003](adrs/0003-policy-read-from-the-base-revision.md)).
 3. **Quarantine.** A branch can contain files that configure the harness reviewing it: settings, instruction files, hooks, MCP servers. CrossRev moves every known such path out of the checkout before a model runs and restores it before committing. Moved, not deleted, so a pull request that adds a hook is still reviewed as text.
-4. **Least privilege per leg.** The review leg gets no write access. The resolve leg may edit files but never run with full bypass modes. Codex and Claude Code review with CrossRev's own read tool as their only way to read files, and a review leg that runs a command halts with `review_leg_ran_command` and publishes nothing ([ADR 0027](adrs/0027-review-legs-read-only-through-the-served-tool.md)). The cross-model check runs under the same review isolation.
+4. **Least privilege per leg.** The review leg gets no write access. The resolve leg may edit files but never run with full bypass modes. Codex and Claude Code review with CrossRev's own read tool as their only way to read files, and their event streams are watched: a review leg that runs a command halts with `review_leg_ran_command` and publishes nothing. If the read tool stops serving, the leg falls back to the prompt alone under the default `.policy.on_reads_unavailable: degrade`, or stops under `halt`. opencode reviews with its read tools denied, and agy reviews from the prompt alone; neither reports command events, so the tripwire cannot run on them, and `crossrev doctor` says so. Grok reviews are refused until its isolation is verified again ([ADR 0027](adrs/0027-review-legs-read-only-through-the-served-tool.md)). The cross-model check runs under the same review isolation.
 5. **A prompt notice** tells each leg that everything under a given heading is data, not instruction, and that text addressing the model is itself a finding.
 
 The quarantine and the notice are best-effort layers. Credential separation is the one that holds the line.
@@ -317,7 +328,7 @@ The quarantine and the notice are best-effort layers. Credential separation is t
 
 Each adapter receives a prompt file, a schema, a working directory, an optional model, effort and endpoint, and whether the leg may write. It returns the answer and metadata: which harness and endpoint ran, which model answered where the harness reports it, and normalised token usage. Usage is split into fresh input, cache reads, cache writes and output; `total` is their sum, and reasoning tokens are recorded beside the total, never added to it. `internal/harness` estimates cost from the vendored rates in `assets/prices.json`, and refuses to estimate rather than guess when a rate is missing.
 
-Version gates differ by adapter. Codex and Claude Code review only on the exact CLI version their read isolation was verified on. opencode refuses installs outside its supported major version, 1.x. The other adapters are not version-gated.
+Version gates differ by adapter. Codex and Claude Code review only on the exact CLI version their read isolation was verified on. opencode accepts major versions 1.x and 2.x and refuses anything else. Grok must report a version or the leg is refused, and its reviews are refused on isolation grounds regardless. agy is not version-gated.
 
 <!-- crossrev:harness-table:start -->
 <!-- Generated by scripts/render-harness-docs.sh — do not edit -->
@@ -357,7 +368,9 @@ flowchart LR
     sw -->|"pushed a fix:<br/>crossrev/awaiting-review"| rw
     rw --> end1["converged or halted"]
     sw --> end1
-    cron1["Watchdog, every 30 minutes"] -.->|"retries a stalled leg once, then halts it"| rw
+    cron1["Watchdog, every 30 minutes"] -.->|"retry a stalled review once"| rw
+    cron1 -.->|"retry a stalled resolve once"| sw
+    cron1 -.->|"second stall"| hlt["Halted"]
     cron2["Token refresh, every 12 hours,<br/>only for pairings that need it"] -.->|"keeps the harness login fresh"| cred["Stored harness credential"]
 ```
 
