@@ -17,9 +17,10 @@ type ResolutionRecord struct {
 // `resolutions` array and an empty one are likewise one state, for the same
 // reason at lib/legs.sh:140.
 type ResolveMarker struct {
-	Blocked     bool
-	CommitSHA   string
-	Resolutions []ResolutionRecord
+	Blocked      bool
+	Verification VerificationState
+	CommitSHA    string
+	Resolutions  []ResolutionRecord
 }
 
 // ReviewMarker is the part of a completed review marker ReviewRedrivable reads.
@@ -65,15 +66,16 @@ func ResolveUnpushedFix(m ResolveMarker) bool {
 // ResolveUnrecorded reports a completed pass that recorded no resolutions and
 // pushed no commit (lib/legs.sh:137-141).
 //
-// The leg returns before it writes a resolve marker when its review pass raised
-// nothing, so a marker that reached `complete` answered at least one finding.
+// Without a configured gate, the leg writes no resolve marker when review
+// raised nothing. A configured empty settle records passed or none_required
+// as evidence that it settled, even though its resolutions array is empty.
 // One that records none of those answers is a legacy marker and says nothing
 // about what happened to the findings. Silence is not a settle.
 //
 // The commit is read for the same reason ResolveUnpushedFix reads it: a legacy
 // marker that pushed moved the head, so the reviewer has something new to see.
 func ResolveUnrecorded(m ResolveMarker) bool {
-	return m.CommitSHA == "" && len(m.Resolutions) == 0
+	return m.CommitSHA == "" && len(m.Resolutions) == 0 && m.Verification != VerificationPassed && m.Verification != VerificationNone
 }
 
 // ResolveRedrivable reports whether a completed resolve pass may be driven again
@@ -84,12 +86,14 @@ func ResolveUnrecorded(m ResolveMarker) bool {
 // ended either way could never run again once whatever stopped it was fixed.
 // Both endings leave something undecided, so both admit a re-drive. So does a
 // deferral whose record never landed, a fix that reached no commit, and a pass
-// that recorded no resolutions at all. A pass that settled every finding stays
-// refused: running it again would re-decide work that is done.
+// that recorded no resolutions at all. A gate-held settle admits evidence-only
+// recovery; otherwise settled work stays refused.
 //
-// This reads current marker fields only. Recurrence, coverage and verification
-// are Review Intelligence inputs and are deliberately absent.
+// This reads current marker fields, including a recorded gate-held settle.
 func ResolveRedrivable(m ResolveMarker) bool {
+	if ResolveGateHeld(m) {
+		return true
+	}
 	if m.Blocked {
 		return true
 	}
@@ -173,4 +177,10 @@ func countResolution(m ResolveMarker, want core.Resolution) int {
 		}
 	}
 	return n
+}
+
+// ResolveGateHeld reports a recorded gate that refused a no-commit settle.
+// A pushed pass owes review of its new revision rather than gate-only recovery.
+func ResolveGateHeld(m ResolveMarker) bool {
+	return m.CommitSHA == "" && m.Verification != "" && m.Verification != VerificationPassed && m.Verification != VerificationNone
 }

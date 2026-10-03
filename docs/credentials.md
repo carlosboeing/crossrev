@@ -52,15 +52,18 @@ Run `crossrev init --dry-run` for the exact list derived from your current confi
 
 `APP_ID` and `APP_PRIVATE_KEY` identify the loop App. Each job exchanges them for a one-hour installation token, uses it as `GH_TOKEN`, and revokes it at the end.
 
-The App holds three repository permissions, at write, and nothing else — no Secrets, no Administration, no Workflows:
+The App holds three repository permissions at write, plus one at read, and nothing else — no Secrets, no Administration, no Workflows:
 
 | Permission | Purpose |
 |---|---|
 | `contents: write` | Push fixes, publish coverage refs |
 | `pull_requests: write` | Comment, reply and resolve threads |
 | `issues: write` | Apply pull request labels, and file issues for deferred findings |
+| `checks: read` | Read check runs for the required-check gate |
 
 `issues: write` looks surprising and isn't trimmable: **GitHub models pull request labels under the Issues API**, and the whole loop is label-driven.
+
+`checks: read` is new, and an installation approved before it existed does not hold it. GitHub asks the owner to approve the new permission: open the App's settings, save the added Checks permission, then accept the updated installation request it queues. Until then a configured gate halts with `required_checks_unreadable` rather than converging on runs it cannot see. `crossrev doctor` reports whether the installation holds it whenever required checks are configured.
 
 **CrossRev does not use the default `GITHUB_TOKEN` for the writes that advance the loop.** GitHub deliberately does not trigger another workflow from those writes, so the loop would stop after one leg. Read-only workflow steps may still use the default token.
 
@@ -71,7 +74,7 @@ crossrev auth login                  # detects the owner from the repository you
 crossrev auth login --owner your-org
 ```
 
-Two approvals in a browser, nothing to copy back. CrossRev builds a manifest prefilling the name, the three permissions and the webhook setting, opens your browser at the right page, catches GitHub's redirect on a local port, exchanges the code for an App ID and private key, then opens the install page with your account already selected and waits until the installation appears. If the local listener can't start, it falls back to asking you to paste the redirect URL — that path is the floor, not the plan.
+Two approvals in a browser, nothing to copy back. CrossRev builds a manifest prefilling the name, the four permissions and the webhook setting, opens your browser at the right page, catches GitHub's redirect on a local port, exchanges the code for an App ID and private key, then opens the install page with your account already selected and waits until the installation appears. If the local listener can't start, it falls back to asking you to paste the redirect URL — that path is the floor, not the plan.
 
 `crossrev auth status` confirms where each App is actually installed by signing a JWT and asking GitHub, rather than assuming the setup worked. The same call re-reads the App's own name and slug. Renaming an App in its settings moves both, and CrossRev recorded them once at registration — so if they have drifted, `auth status` says so and corrects its cached copy. That matters more than it looks: the cached slug is what automated mode falls back to when deciding whose markers to trust, and a stale one makes it trust an author that does not exist.
 

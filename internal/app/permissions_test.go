@@ -15,14 +15,14 @@ import (
 // The permission set goes into the App manifest GitHub registers from
 // (lib/auth.sh:580), so these bytes are what the App ends up holding. ADR 0006
 // is the decision they encode: three repository permissions for the loop, all
-// at write, and nothing else.
+// at write, plus the read-only checks the gate judges with, and nothing else.
 
 // The exact bytes `jq -cn` prints, key order included. Measured by sourcing
 // lib/auth.sh and running the function: the shell prints a trailing newline
 // that both call sites drop, because both read it through `$( )`.
 func TestRolePermissionsBytes(t *testing.T) {
 	for _, tc := range []struct{ role, want string }{
-		{app.RoleLoop, `{"contents":"write","issues":"write","pull_requests":"write"}`},
+		{app.RoleLoop, `{"contents":"write","issues":"write","pull_requests":"write","checks":"read"}`},
 		{app.RoleRefresher, `{"secrets":"write"}`},
 	} {
 		got, err := app.RolePermissions(tc.role)
@@ -35,13 +35,14 @@ func TestRolePermissionsBytes(t *testing.T) {
 	}
 }
 
-// The assertion ADR 0006 exists for: three permissions and no fourth.
+// The assertion ADR 0006 exists for: the three write permissions, the
+// read-only checks the required-check gate judges with, and no fifth.
 //
-// A fourth key is how this App would quietly grow a capability nobody decided
+// A fifth key is how this App would quietly grow a capability nobody decided
 // on, and the manifest is registered once — an operator who has already
 // approved it does not re-approve it. Reading the JSON back rather than
 // comparing the string means the test still fires if the bytes are reformatted.
-func TestTheLoopRoleRequestsThreeRepositoryPermissionsAndNoFourth(t *testing.T) {
+func TestTheLoopRoleRequestsThreeWritesChecksReadAndNoFifth(t *testing.T) {
 	raw, err := app.RolePermissions(app.RoleLoop)
 	if err != nil {
 		t.Fatalf("RolePermissions: %v", err)
@@ -54,6 +55,7 @@ func TestTheLoopRoleRequestsThreeRepositoryPermissionsAndNoFourth(t *testing.T) 
 		"contents":      "write",
 		"issues":        "write",
 		"pull_requests": "write",
+		"checks":        "read",
 	}
 	if len(perms) != len(want) {
 		t.Fatalf("the loop role requests %d permissions, want exactly %d: %s", len(perms), len(want), raw)

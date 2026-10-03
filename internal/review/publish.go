@@ -11,6 +11,7 @@ import (
 	"github.com/carlosboeing/crossrev/internal/policy"
 	"github.com/carlosboeing/crossrev/internal/prstate"
 	"github.com/carlosboeing/crossrev/internal/ui"
+	"github.com/carlosboeing/crossrev/internal/verify"
 )
 
 // publishState is what the caller has to know beyond the marker and the lines.
@@ -38,6 +39,13 @@ func (l *Leg) publish(ctx context.Context, req Request, loaded Context, settings
 	}
 	cap := atoi(loaded.Config.Get(".policy.max_passes_per_cycle"))
 
+	// Only confirmed candidates post and count as actionable: the
+	// check's rejected and duplicate entries stay on the marker under
+	// checked_out, and everything below — the counts, the posting
+	// loop, the convergence read — works from the visible set. The
+	// hold stamp underneath still aligns with the full record.
+	visible := excludeCheckedOut(findings, marker.CheckedOut)
+
 	already := postedSet(PostedFindingIDs(
 		l.Forge.ReviewComments(ctx, loaded.Repo, req.PR),
 		l.Forge.IssueComments(ctx, loaded.Repo, req.PR),
@@ -46,7 +54,7 @@ func (l *Leg) publish(ctx context.Context, req Request, loaded Context, settings
 	unanchored := len(UnthreadedFindingIDs(l.Forge.IssueComments(ctx, loaded.Repo, req.PR), loaded.Author, pass))
 
 	high, medium, low, pre := 0, 0, 0, 0
-	for _, f := range findings {
+	for _, f := range visible {
 		switch f.Severity {
 		case "high":
 			high++
@@ -59,11 +67,11 @@ func (l *Leg) publish(ctx context.Context, req Request, loaded Context, settings
 			pre++
 		}
 	}
-	actionable := ActionableCount(findings, minFix)
-	if len(findings) > 0 {
+	actionable := ActionableCount(visible, minFix)
+	if len(visible) > 0 {
 		// Three ui_say lines (lib/run.sh:1234-1236).
 		msgs = append(msgs, ui.SayLines(
-			fmt.Sprintf("Found %d issue(s) — %d high, %d medium, %d low, of which %d pre-existing.", len(findings), high, medium, low, pre),
+			fmt.Sprintf("Found %d issue(s) — %d high, %d medium, %d low, of which %d pre-existing.", len(visible), high, medium, low, pre),
 			fmt.Sprintf("%d at or above min_fix_severity (%s); the rest are reported and left alone.", actionable, minFix),
 			"Posting them as inline comments on the lines they affect.",
 		)...)
@@ -76,11 +84,12 @@ func (l *Leg) publish(ctx context.Context, req Request, loaded Context, settings
 	// the same record; convergence still counts every finding, held or not.
 	marker.Findings = stampNotPosted(marker.Findings, heldEntries(findings, minFix, pass))
 	findings = parseFindings(marker.Findings)
+	visible = excludeCheckedOut(findings, marker.CheckedOut)
 
 	heldEarlier := heldEarlierIDs(loaded.Markers)
 	postedThisPass := map[string]bool{}
 	posted, skipped := 0, 0
-	for _, f := range findings {
+	for _, f := range visible {
 		// Within-pass retries post once: a second finding under an id
 		// this pass already posted is the same point twice.
 		if f.ID != "" && postedThisPass[f.ID] {
@@ -145,7 +154,20 @@ func (l *Leg) publish(ctx context.Context, req Request, loaded Context, settings
 	// Both convergence reads below judge the same settled marker, so they
 	// share one producer built from the model the pass stored.
 	producer := producerOf(settings, marker.ModelReported.Value())
-	conv, obliged := l.buildConvergence(ctx, loaded, marker, actionable, producer)
+	conv, ev, obliged := l.buildConvergenceEvidence(ctx, loaded, marker, actionable, producer, settings)
+	if obliged && ev.Configured() {
+		// The record of what the pass judged, written with the claim
+		// below. Absent without a configured gate, so an unconfigured
+		// marker reads exactly as it always has.
+		marker.Verification = prstate.Some(ev.MarkerRecord())
+	}
+	if obliged && policy.ConvergedExceptVerification(conv) && (ev.State == verify.Pending || ev.State == verify.Missing) {
+		// The route would converge if the checks reported: wait for them,
+		// then judge what the wait ended with.
+		ev = l.waitForVerification(ctx, req, loaded, settings, loaded.Scope.Head, ev)
+		conv.Verification = ev.State
+		marker.Verification = prstate.Some(ev.MarkerRecord())
+	}
 	if obliged && !policy.Converged(conv) {
 		// The coverage obligation is unmet: a green verdict cannot stand,
 		// and a quiet one cannot pass as finished. With actionable findings
@@ -163,10 +185,16 @@ func (l *Leg) publish(ctx context.Context, req Request, loaded Context, settings
 		} else {
 			verdict = core.VerdictBlocked
 			marker.Verdict = prstate.Some(string(verdict))
-			marker.BlockedReason = prstate.Some(coverageDebt(conv))
-			msgs = append(msgs, ui.Warn(
-				"the review leaves its coverage obligation unmet with nothing actionable",
-				"The pass records blocked instead of finished: "+coverageDebt(conv)+". Nothing here judges the code."))
+			debt := coverageDebt(conv, ev)
+			marker.BlockedReason = prstate.Some(debt)
+			if policy.ConvergedExceptVerification(conv) {
+				// Only the gate blocks: name the checks and the next step.
+				msgs = append(msgs, verificationHaltLines(req.PR, debt)...)
+			} else {
+				msgs = append(msgs, ui.Warn(
+					"the review leaves its coverage obligation unmet with nothing actionable",
+					"The pass records blocked instead of finished: "+debt+". Nothing here judges the code."))
+			}
 		}
 	}
 
@@ -230,7 +258,10 @@ func (l *Leg) publish(ctx context.Context, req Request, loaded Context, settings
 	}
 
 	next := policy.PassLabel(verdict, actionable, escalated)
-	if conv, ok := l.buildConvergence(ctx, loaded, marker, actionable, producer); ok {
+	if conv, ok := l.buildCoverageConvergence(ctx, loaded, marker, actionable, producer); ok {
+		// The pass's one evidence, carried forward: the label judges the
+		// same gate the marker records.
+		conv.Verification = ev.State
 		next = policy.PassLabelWithCoverage(verdict, actionable, escalated, conv)
 	}
 	if verdict == core.VerdictConverged && next != policy.PassConverged {
@@ -267,9 +298,11 @@ func (l *Leg) publish(ctx context.Context, req Request, loaded Context, settings
 	return marker, msgs, state, nil
 }
 
-// coverageDebt names the specific unmet coverage obligation for a blocked
-// pass: the counts, the missing scope report, or the unconfirmed repair.
-func coverageDebt(conv policy.Convergence) string {
+// coverageDebt names the specific unmet obligation for a blocked pass: the
+// coverage counts, the missing scope report, the unconfirmed repair, or the
+// blocking required checks. Coverage reads first: a pass that could not
+// cover its files re-drives however the checks report.
+func coverageDebt(conv policy.Convergence, ev verify.Evidence) string {
 	switch {
 	case !conv.LedgerCurrent:
 		return "no current coverage generation at this revision"
@@ -283,6 +316,8 @@ func coverageDebt(conv policy.Convergence) string {
 		return "the reviewer reported no examined scope"
 	case conv.ConfirmationRequired && !conv.ConfirmationComplete:
 		return "the repair delta has no accepted confirmation"
+	case ev.State == verify.Pending || ev.State == verify.Missing || ev.State == verify.Failed || ev.State == verify.Unreadable:
+		return verificationDebt(ev)
 	default:
 		return "the coverage obligation is unmet"
 	}

@@ -87,6 +87,14 @@ type Forge interface {
 	// whether that leg is still going (lib/github.sh:61-64).
 	WorkflowRunStatus(ctx context.Context, repo core.Slug, runID string) RunStatus
 
+	// CheckRuns is every check run GitHub reports for a commit, paginated
+	// to completion. Unlike the comment reads above it reports its
+	// failure: a gate that read a refused enumeration as no runs would
+	// converge on evidence it never saw. A 403 or 404 answers as a
+	// *CheckRunsDenied naming the `checks: read` permission; anything
+	// else is an ordinary error.
+	CheckRuns(ctx context.Context, repo core.Slug, head core.Revision) (CheckRuns, error)
+
 	// LabelColour is the hex a label currently carries, lowercased, or the
 	// empty string if it does not exist (lib/github.sh:270-274). Absence is
 	// the answer rather than an error: every fresh repository is that case.

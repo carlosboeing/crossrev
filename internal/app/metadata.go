@@ -47,7 +47,7 @@ func RoleDefaultName(role, owner string) string {
 func RoleSummary(role string) string {
 	switch role {
 	case RoleLoop:
-		return "contents:write, issues:write, pull_requests:write"
+		return "contents:write, issues:write, pull_requests:write, checks:read"
 	case RoleRefresher:
 		return "secrets:write (repository secrets only)"
 	}

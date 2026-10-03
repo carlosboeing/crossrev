@@ -174,7 +174,7 @@ func TestStatusReportsTheRenameAndCorrectsTheCache(t *testing.T) {
 	}
 
 	wantBlock(t, b.text(), "\n◇  Apps\n"+
-		"│  ✓ ShoreLogic — CrossRev ShoreLogic (id 987, role loop: contents:write, issues:write, pull_requests:write)\n"+
+		"│  ✓ ShoreLogic — CrossRev ShoreLogic (id 987, role loop: contents:write, issues:write, pull_requests:write, checks:read)\n"+
 		"│     name was revloop-ShoreLogic, now CrossRev ShoreLogic\n"+
 		"│     slug was revloop-shorelogic, now crossrev-shorelogic\n"+
 		"\n⚠  ShoreLogic's App was renamed since CrossRev recorded it — the cached copy has been corrected\n"+
@@ -207,7 +207,7 @@ func TestStatusOnAnAppThatWasNotRenamedReportsNoDrift(t *testing.T) {
 		t.Fatalf("Status: %v", err)
 	}
 	wantBlock(t, b.text(), "\n◇  Apps\n"+
-		"│  ✓ ShoreLogic — CrossRev ShoreLogic (id 987, role loop: contents:write, issues:write, pull_requests:write)\n"+
+		"│  ✓ ShoreLogic — CrossRev ShoreLogic (id 987, role loop: contents:write, issues:write, pull_requests:write, checks:read)\n"+
 		"│     key "+pem+" (0600)\n"+
 		"│     installed on ShoreLogic (selected repositories)\n"+
 		"└  An App reaches only the repositories it is installed on.\n\n")
@@ -244,7 +244,7 @@ func TestStatusOnAnAppInstalledNowherePrintsTheInstallURL(t *testing.T) {
 		t.Fatalf("Status: %v", err)
 	}
 	wantBlock(t, b.text(), "\n◇  Apps\n"+
-		"│  ✓ ShoreLogic — CrossRev ShoreLogic (id 987, role loop: contents:write, issues:write, pull_requests:write)\n"+
+		"│  ✓ ShoreLogic — CrossRev ShoreLogic (id 987, role loop: contents:write, issues:write, pull_requests:write, checks:read)\n"+
 		"│     key "+pem+" (0600)\n"+
 		"│  ✗    installed nowhere — it can reach no repository at all\n"+
 		"│  → install: https://github.com/apps/crossrev-shorelogic/installations/new/permissions?target_id=12345&target_type=Organization\n"+
@@ -317,7 +317,7 @@ func TestStatusWarnsAboutAKeyWiderThan0600(t *testing.T) {
 		t.Fatalf("Status: %v", err)
 	}
 	wantBlock(t, b.text(), "\n◇  Apps\n"+
-		"│  ✓ ShoreLogic — CrossRev ShoreLogic (id 987, role loop: contents:write, issues:write, pull_requests:write)\n"+
+		"│  ✓ ShoreLogic — CrossRev ShoreLogic (id 987, role loop: contents:write, issues:write, pull_requests:write, checks:read)\n"+
 		"│     key "+pem+" (0644)\n"+
 		"\n⚠  the private key for ShoreLogic is mode 0644, not 0600\n"+
 		"   Any process running as you can read it, and it can mint a token for every repository this App is installed on. Fix with: chmod 600 "+pem+"\n\n"+
@@ -367,7 +367,7 @@ func TestStatusOnAMissingKeySaysTheAppCannotMintAToken(t *testing.T) {
 		t.Fatalf("Status: %v", err)
 	}
 	wantBlock(t, b.text(), "\n◇  Apps\n"+
-		"│  ✓ ShoreLogic — CrossRev ShoreLogic (id 987, role loop: contents:write, issues:write, pull_requests:write)\n"+
+		"│  ✓ ShoreLogic — CrossRev ShoreLogic (id 987, role loop: contents:write, issues:write, pull_requests:write, checks:read)\n"+
 		"│  ✗    key missing at "+filepath.Join(b.dir, "ShoreLogic.loop.pem")+" — this App cannot mint a token\n"+
 		"└  An App reaches only the repositories it is installed on.\n\n")
 	if len(b.gh.specs) != 0 {
@@ -438,7 +438,7 @@ func TestStatusReportsEveryAppInPathOrder(t *testing.T) {
 		t.Fatalf("Status: %v", err)
 	}
 	alpha := strings.Index(b.text(), "alpha — n (id 7, role refresher: secrets:write (repository secrets only))")
-	zeta := strings.Index(b.text(), "zeta — n (id 7, role loop: contents:write, issues:write, pull_requests:write)")
+	zeta := strings.Index(b.text(), "zeta — n (id 7, role loop: contents:write, issues:write, pull_requests:write, checks:read)")
 	if alpha < 0 || zeta < 0 {
 		t.Fatalf("printed:\n%s", b.text())
 	}
@@ -458,7 +458,7 @@ func TestStatusReadsAnAbsentRoleAsTheLoops(t *testing.T) {
 	if err := b.cmds.Status(context.Background()); err != nil {
 		t.Fatalf("Status: %v", err)
 	}
-	if !strings.Contains(b.text(), "role loop: contents:write, issues:write, pull_requests:write") {
+	if !strings.Contains(b.text(), "role loop: contents:write, issues:write, pull_requests:write, checks:read") {
 		t.Fatalf("printed:\n%s", b.text())
 	}
 }

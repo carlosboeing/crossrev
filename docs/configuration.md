@@ -188,6 +188,23 @@ These keys live here alone: `crossrev init` never writes them, so the starter co
 | `coverage.on_overflow` | What a marker-carried generation does when the comment would pass 64 KiB. `degrade` sheds the predecessor, then compacts the current generation to counts, then halts; `halt` skips compaction. Default `degrade`. |
 | `reviewers` | The reviewer slots, each with an `id`, `harness`, `model`, `effort` and `endpoint`. The list wins over the `reviewer:` shorthand whenever it names a slot. Ids are explicit and stable — never derived from list position — because each slot owns its ledger ref. **One reviewer runs in this release**; a second entry is refused. |
 | `review.input_policy` | How a required file reaches the reviewer. `hunks_first` sends every file in hunk form — whole files in full when new or small, function-context hunks past the size bound. `whole_when_fits` sends a file whole when its rendered form fits the per-call budget and uses the hunk form otherwise. Splitting applies to anything over the budget under either policy. Default `hunks_first`. |
+| `review.concerns` | What the reviewer looks for: `correctness`, `consistency` or both. Anything else, a duplicate, or an empty list is refused. Default both. |
+| `review.check` | Whether the resolver verifies each finding as a second model. `resolver` runs the cross-model check; `off` skips it. Default `resolver`. |
+
+### verification
+
+```yaml
+verification:
+  required_checks: [build, test@my-app]
+  wait_minutes: 10
+```
+
+| Field | What it does |
+|---|---|
+| `verification.required_checks` | The check runs that must report for the head commit before any route converges. Each entry is a `NAME` or `NAME@APP` string, or a `name`/`app` mapping; the app defaults to `github-actions`. An empty name, a duplicate, and CrossRev's own review, resolve or notice job from the GitHub Actions app are refused. The runs are what GitHub reports for the pull request's head commit — the same association required status checks use — and `pull_request` workflows report against that head commit too, so a check that never ran for it (e.g. a workflow triggered only on the base branch) is what reads as missing. Only check runs count: a commit-status context never satisfies an entry. Default none. |
+| `verification.wait_minutes` | How long either leg, when it would otherwise converge, waits for pending or missing checks before halting on them, from 0 to 30. Default `10`. |
+
+Every setting above and in the review table is also a flag on `review` and `cycle` — `--concerns`, `--check`, `--required-check` (repeatable), `--no-required-checks` and `--check-wait` — and `--required-check`, `--no-required-checks` and `--check-wait` are also on `resolve`. The flags are refused where the base policy says automated, the config and the flag pass the same validator, and the run log records each effective value and its source. The effective concerns, check mode, input policy and read mode — what the pass actually ran with, flags included — fingerprint the coverage engine identity, so a generation judged under other settings retires instead of being reused. The pass records the identity on its marker for resolve and status to read.
 
 ### backlog
 

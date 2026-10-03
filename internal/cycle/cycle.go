@@ -33,6 +33,11 @@ type Request struct {
 	ModelOverride       string
 	EffortOverride      string
 	InputPolicyOverride string
+	ConcernsOverride    string
+	CheckOverride       string
+	RequiredChecks      []string
+	NoRequiredChecks    bool
+	CheckWait           string
 	KeepTranscripts     bool
 	NoTips              bool
 }
@@ -52,6 +57,11 @@ type LegRequest struct {
 	ModelOverride       string
 	EffortOverride      string
 	InputPolicyOverride string
+	ConcernsOverride    string
+	CheckOverride       string
+	RequiredChecks      []string
+	NoRequiredChecks    bool
+	CheckWait           string
 	KeepTranscripts     bool
 	Continuation        bool
 	NoTips              bool
@@ -344,6 +354,11 @@ func (d *Driver) legRequest(req Request, continuation bool) LegRequest {
 		ModelOverride:       req.ModelOverride,
 		EffortOverride:      req.EffortOverride,
 		InputPolicyOverride: req.InputPolicyOverride,
+		ConcernsOverride:    req.ConcernsOverride,
+		CheckOverride:       req.CheckOverride,
+		RequiredChecks:      req.RequiredChecks,
+		NoRequiredChecks:    req.NoRequiredChecks,
+		CheckWait:           req.CheckWait,
 		KeepTranscripts:     req.KeepTranscripts,
 		Continuation:        continuation,
 		NoTips:              true,
@@ -366,10 +381,20 @@ func hasStop(labels []string) bool {
 	return false
 }
 
+// gateHeldSettle reports a completed resolve pass the required checks held:
+// whatever the review verdict said, the pass ended halted on the gate.
+func gateHeldSettle(markers []prstate.Marker, pass int) bool {
+	m, ok := prstate.MarkerFor(markers, pass, core.LegResolve)
+	return ok && m.State == core.PassComplete && policy.ResolveGateHeld(asPolicyResolve(m))
+}
+
 // asPolicyResolve is the marker view legs_resolve_pass_label reads
 // (lib/legs.sh:234-248).
 func asPolicyResolve(m prstate.Marker) policy.ResolveMarker {
 	out := policy.ResolveMarker{CommitSHA: m.CommitSHA.Value()}
+	if ev, ok := m.Verification.Get(); ok {
+		out.Verification = policy.VerificationState(ev.State)
+	}
 	if blocked, ok := m.Blocked.Get(); ok {
 		out.Blocked = blocked
 	}

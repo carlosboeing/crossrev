@@ -196,3 +196,11 @@ func TestParseDoctorRefusesAnUnknownOption(t *testing.T) {
 		t.Error("doctor accepted --verbose; the arm now has an argument loop and must refuse the rest")
 	}
 }
+
+func TestParseResolveAcceptsCheckWait(t *testing.T) {
+	io, _, _ := captureIO()
+	_, err := Parse([]string{"resolve", "--pr", "42", "--check-wait", "1"}, io, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+}

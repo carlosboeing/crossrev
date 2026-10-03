@@ -167,6 +167,7 @@ func ResolvePassLabelWithCoverage(m ResolveMarker, otherEscalated int, converged
 func ResolvePassLabel(m ResolveMarker, otherEscalated int) PassLabelState {
 	switch {
 	case m.Blocked,
+		ResolveGateHeld(m),
 		countResolution(m, core.ResolutionEscalated) > 0,
 		otherEscalated > 0,
 		ResolveUnpushedFix(m),

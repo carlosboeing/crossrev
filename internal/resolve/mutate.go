@@ -10,6 +10,7 @@ import (
 	"github.com/carlosboeing/crossrev/internal/harness"
 	"github.com/carlosboeing/crossrev/internal/policy"
 	"github.com/carlosboeing/crossrev/internal/prstate"
+	"github.com/carlosboeing/crossrev/internal/verify"
 )
 
 func (l *Leg) publish(ctx context.Context, s *session, got Result, workdir string) Result {
@@ -188,11 +189,23 @@ func (l *Leg) publish(ctx context.Context, s *session, got Result, workdir strin
 		return fail(err)
 	}
 
+	// Read settlement evidence, waiting only when the gate alone prevents
+	// convergence. The marker and label decision reuse the final evidence.
+	settleConv, settlement, settleOK := l.resolveConvergenceEvidence(ctx, s)
+	if policy.ResolvePassLabel(asPolicyResolve(marker), otherEscalated(s.markers, s.pass)) == policy.PassConverged && (!settleOK || policy.ConvergedExceptVerification(settleConv)) {
+		settlement = l.waitForSettlement(ctx, s, settlement)
+		settleConv.Verification = settlement.State
+	}
+	if settlement.Configured() {
+		marker.Verification = prstate.Some(settlement.MarkerRecord())
+	}
+
 	now := l.now().Unix()
 	marker.DoneTS = prstate.Some(now)
 	marker.Unthreaded = prstate.Some(unthreaded)
 	marker.Resolutions = marshalResolutions(recs)
-	summary := ResolveSummaryBody(marker.Resolutions, findingsRaw, deferredLines, marker, s.repo.String(), s.req.PR, s.maxPasses)
+	summary := resolveSummaryBody(marker.Resolutions, findingsRaw, deferredLines, marker, s.repo.String(), s.req.PR, s.maxPasses,
+		recurrenceCount(s.markers, s.pass, s.findings))
 	encoded, err := marker.Encode()
 	if err != nil {
 		return fail(err)
@@ -217,14 +230,19 @@ func (l *Leg) publish(ctx context.Context, s *session, got Result, workdir strin
 	next := policy.ResolvePassLabel(asPolicyResolve(marker), other)
 	if next == policy.PassConverged {
 		// A no-commit settle reports converged only when the current
-		// coverage obligation is met at this head. The base rule already
-		// established nothing fixable is open; the predicate adds the
-		// ledger, counts, scope and confirmation guards. With no coverage
-		// claim on the marker no coverage pass ran here, so the
-		// frozen-path settle keeps its legacy label; a claim the store
-		// no longer backs re-reviews instead of keeping converged.
-		if conv, ok := l.resolveConvergence(ctx, s); ok {
-			next = policy.ResolvePassLabelWithCoverage(asPolicyResolve(marker), other, conv)
+		// coverage obligation is met at this head and the required checks
+		// passed or none were required. The base rule already established
+		// nothing fixable is open; the predicate adds the ledger, counts,
+		// scope, confirmation and gate guards. With no coverage claim on
+		// the marker no coverage pass ran here, so the frozen-path settle
+		// keeps its legacy label — held to the gate when one is
+		// configured, halted while the checks refuse. A claim
+		// the store no longer backs re-reviews instead of keeping
+		// converged.
+		if settleOK {
+			next = policy.ResolvePassLabelWithCoverage(asPolicyResolve(marker), other, settleConv)
+		} else if frozenGateRefuses(settlement) {
+			next = policy.PassHalted
 		}
 	}
 	if err := l.applyPassLabels(ctx, s, s.pass, next); err != nil {
@@ -263,6 +281,9 @@ func closingReport(marker prstate.Marker, next policy.PassLabelState, pass, pr i
 	}
 	out := []ui.Line{ui.Say("→ resolved pass " + strconv.Itoa(pass)), ui.Blank()}
 	switch {
+	case next == policy.PassHalted && policy.ResolveGateHeld(asPolicyResolve(marker)):
+		ev, _ := marker.Verification.Get()
+		out = append(out, gateHaltLines(pr, verify.FromRecord(ev))...)
 	case next == policy.PassAwaitingReview:
 		out = append(out,
 			ui.Say("To look again with the reviewer:"),
@@ -405,19 +426,25 @@ func (l *Leg) finishEmpty(ctx context.Context, s *session, got Result) Result {
 		next = policy.PassHalted
 	}
 	if next == policy.PassConverged {
-		// The no-findings path reports converged only with the coverage
-		// obligation met. With no coverage claim on the marker no
-		// coverage pass ran here, so the frozen-path ending keeps its
-		// legacy label; a claim the store no longer backs, and corrupt
-		// or incomplete coverage, fail closed to halted, because the
-		// resolve leg cannot cover files itself and a human must
-		// re-drive the review.
-		if conv, ok := l.resolveConvergence(ctx, s); ok {
-			if !policy.Converged(conv) {
-				next = policy.PassHalted
+		conv, ev, ok := l.resolveConvergenceEvidence(ctx, s)
+		if !ok || policy.ConvergedExceptVerification(conv) {
+			ev = l.waitForSettlement(ctx, s, ev)
+			conv.Verification = ev.State
+		}
+		if (ok && !policy.Converged(conv)) || frozenGateRefuses(ev) {
+			next = policy.PassHalted
+		}
+		if ev.Configured() || (s.redriving && s.redrive.Verification.Present()) {
+			got = l.recordEmptySettlement(ctx, s, ev, got)
+			if got.Err != nil {
+				return got
+			}
+			if next == policy.PassHalted && frozenGateRefuses(ev) {
+				got.Messages = append(got.Messages, gateHaltLines(s.req.PR, ev)...)
 			}
 		}
 	}
+
 	_ = l.applyPassLabels(ctx, s, s.pass, next)
 	return got
 }

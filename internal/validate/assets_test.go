@@ -21,6 +21,7 @@ func TestEmbeddedSchemasAreTheCanonicalFiles(t *testing.T) {
 	}{
 		{"findings", validate.FindingsSchema(), "../../schemas/findings.schema.json"},
 		{"resolve", validate.ResolveSchema(), "../../schemas/resolve.schema.json"},
+		{"check", validate.CheckSchema(), "../../schemas/check.schema.json"},
 	} {
 		canonical, err := os.ReadFile(tc.path)
 		if err != nil {
@@ -44,6 +45,7 @@ func TestEmbeddedSchemasCarryNoMetaSchemaKey(t *testing.T) {
 	}{
 		{"findings", validate.FindingsSchema()},
 		{"resolve", validate.ResolveSchema()},
+		{"check", validate.CheckSchema()},
 	} {
 		var doc map[string]json.RawMessage
 		if err := json.Unmarshal(tc.raw, &doc); err != nil {
@@ -67,6 +69,7 @@ func TestTheEmbeddedSchemasCannotBeWrittenThrough(t *testing.T) {
 	}{
 		{"findings", validate.FindingsSchema},
 		{"resolve", validate.ResolveSchema},
+		{"check", validate.CheckSchema},
 	} {
 		got := tc.read()
 		if len(got) == 0 {

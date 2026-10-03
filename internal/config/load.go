@@ -153,6 +153,9 @@ func Load(ctx context.Context, base core.Revision, show ShowFile) (*Config, erro
 		loaded.assertReviewers,
 		loaded.assertReviewer,
 		loaded.assertReviewInputPolicy,
+		loaded.assertReviewConcerns,
+		loaded.assertReviewCheck,
+		loaded.assertVerification,
 	} {
 		if err := assert(); err != nil {
 			return nil, err

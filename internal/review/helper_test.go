@@ -749,7 +749,16 @@ type fakeForge struct {
 	diff        []byte
 	// diffCalls counts PullRequestDiff invocations, so a test can pin how
 	// often the diff is read.
-	diffCalls       int
+	diffCalls int
+	// checks is what CheckRuns answers: the required-check evidence for
+	// the head. onCheckRuns, when set, runs after each CheckRuns call
+	// with the running call count, so a case can move a run from pending
+	// to passed mid-wait the way a finishing check would.
+	checks          []forge.CheckRun
+	checksErr       error
+	checksTruncated bool
+	checksCalls     int
+	onCheckRuns     func(calls int)
 	repoComments    []forge.IssueComment
 	repoCommentsErr error
 	nextID          int64
@@ -822,6 +831,17 @@ func (f *fakeForge) AwaitingPullRequests(context.Context, core.Slug) []forge.Awa
 
 func (f *fakeForge) WorkflowRunStatus(context.Context, core.Slug, string) forge.RunStatus {
 	return ""
+}
+
+func (f *fakeForge) CheckRuns(context.Context, core.Slug, core.Revision) (forge.CheckRuns, error) {
+	f.checksCalls++
+	if f.onCheckRuns != nil {
+		f.onCheckRuns(f.checksCalls)
+	}
+	if f.checksErr != nil {
+		return forge.CheckRuns{}, f.checksErr
+	}
+	return forge.CheckRuns{Runs: f.checks, Truncated: f.checksTruncated}, nil
 }
 
 func (f *fakeForge) LabelColour(context.Context, core.Slug, string) string { return "" }
@@ -974,9 +994,11 @@ type env struct {
 	validate func([]byte, validate.ReviewExpectations) error
 	// legEnv is what the leg hands a child. Nil is the default pair below.
 	legEnv []string
+
+	concernsOverride string
 }
 
-func newEnv(t *testing.T) *env {
+func newEnv(t *testing.T, concerns ...string) *env {
 	t.Helper()
 	// cred.Prepare reads process RUNNER_ENVIRONMENT. GitHub-hosted runners set
 	// it to github-hosted, and a missing harness secret then stops the leg.
@@ -1005,8 +1027,19 @@ func newEnv(t *testing.T) *env {
 			versions[entry.Binary] = fmt.Sprintf(banner, entry.Install.PinnedVersion)
 		}
 	}
+	concern := ""
+	if len(concerns) > 0 {
+		concern = concerns[0]
+	}
+	// The cross-model check is off unless a case says otherwise: most
+	// cases prove the review and publish path, and a second model call
+	// behind every one of them would assert nothing about their
+	// subject. Cases proving the check set e.cfg to a resolver config
+	// explicitly.
+	cfg := mustConfig(t, "version: 2\nreview:\n  check: off\n")
 	return &env{
-		log: events,
+		concernsOverride: concern,
+		log:              events,
 		forge: &fakeForge{
 			store: storetest.NewFakeStore(),
 			log:   events,
@@ -1025,7 +1058,7 @@ func newEnv(t *testing.T) *env {
 		},
 		vcs:    vcs,
 		runner: &fakeRunner{log: events, vcs: vcs, versions: versions},
-		cfg:    mustConfig(t, ""),
+		cfg:    cfg,
 		doc:    doc,
 		dir:    dir,
 	}
@@ -1065,13 +1098,14 @@ func (e *env) leg(t *testing.T) review.Leg {
 func (e *env) request(t *testing.T) review.Request {
 	t.Helper()
 	return review.Request{
-		PR:              42,
-		Repo:            mustSlug(t),
-		Trigger:         review.TriggerHuman,
-		HarnessOverride: "claude",
-		Author:          author,
-		Workdir:         e.dir,
-		RunID:           runID,
+		PR:               42,
+		Repo:             mustSlug(t),
+		Trigger:          review.TriggerHuman,
+		HarnessOverride:  "claude",
+		ConcernsOverride: e.concernsOverride,
+		Author:           author,
+		Workdir:          e.dir,
+		RunID:            runID,
 	}
 }
 

@@ -55,7 +55,7 @@
       ],
       "shell": {
         "exit": 1,
-        "stderr": "\nerror  unknown option for review: --bogus\n       Usage: crossrev review --pr <number> [--harness <one of: claude|codex|agy|grok|opencode>] [--model <id>] [--effort <level>] [--input-policy hunks_first|whole_when_fits] [--no-tips] [--keep-transcripts]\n\n"
+        "stderr": "\nerror  unknown option for review: --bogus\n       Usage: crossrev review --pr <number> [--harness <one of: claude|codex|agy|grok|opencode>] [--model <id>] [--effort <level>] [--input-policy hunks_first|whole_when_fits] [--concerns a,b] [--check resolver|off] [--required-check NAME[@APP]] [--no-required-checks] [--check-wait MINUTES] [--no-tips] [--keep-transcripts]\n\n"
       }
     },
     {
@@ -66,7 +66,7 @@
       ],
       "shell": {
         "exit": 1,
-        "stderr": "\nerror  unknown option for resolve: --bogus\n       Usage: crossrev resolve --pr <number> [--harness <one of: claude|codex|agy|grok|opencode>] [--model <id>] [--effort <level>] [--trigger human|automatic] [--keep-transcripts]\n\n"
+        "stderr": "\nerror  unknown option for resolve: --bogus\n       Usage: crossrev resolve --pr <number> [--harness <one of: claude|codex|agy|grok|opencode>] [--model <id>] [--effort <level>] [--trigger human|automatic] [--required-check NAME[@APP]] [--no-required-checks] [--check-wait MINUTES] [--keep-transcripts]\n\n"
       }
     },
     {
@@ -77,7 +77,7 @@
       ],
       "shell": {
         "exit": 1,
-        "stderr": "\nerror  unknown option for cycle: --bogus\n       Usage: crossrev cycle --pr <number> [--trigger human|automatic] [--model <id>] [--effort <level>] [--input-policy hunks_first|whole_when_fits] [--no-tips] [--keep-transcripts]\n\n"
+        "stderr": "\nerror  unknown option for cycle: --bogus\n       Usage: crossrev cycle --pr <number> [--trigger human|automatic] [--model <id>] [--effort <level>] [--input-policy hunks_first|whole_when_fits] [--concerns a,b] [--check resolver|off] [--required-check NAME[@APP]] [--no-required-checks] [--check-wait MINUTES] [--no-tips] [--keep-transcripts]\n\n"
       }
     },
     {
@@ -87,7 +87,7 @@
       ],
       "shell": {
         "exit": 1,
-        "stderr": "\nerror  unknown option for cycle: --bogus\n       Usage: crossrev cycle --pr <number> [--trigger human|automatic] [--model <id>] [--effort <level>] [--input-policy hunks_first|whole_when_fits] [--no-tips] [--keep-transcripts]\n\n"
+        "stderr": "\nerror  unknown option for cycle: --bogus\n       Usage: crossrev cycle --pr <number> [--trigger human|automatic] [--model <id>] [--effort <level>] [--input-policy hunks_first|whole_when_fits] [--concerns a,b] [--check resolver|off] [--required-check NAME[@APP]] [--no-required-checks] [--check-wait MINUTES] [--no-tips] [--keep-transcripts]\n\n"
       }
     },
     {
@@ -100,7 +100,7 @@
       ],
       "shell": {
         "exit": 1,
-        "stderr": "\nerror  unknown option for cycle: --continuation\n       Usage: crossrev cycle --pr <number> [--trigger human|automatic] [--model <id>] [--effort <level>] [--input-policy hunks_first|whole_when_fits] [--no-tips] [--keep-transcripts]\n\n"
+        "stderr": "\nerror  unknown option for cycle: --continuation\n       Usage: crossrev cycle --pr <number> [--trigger human|automatic] [--model <id>] [--effort <level>] [--input-policy hunks_first|whole_when_fits] [--concerns a,b] [--check resolver|off] [--required-check NAME[@APP]] [--no-required-checks] [--check-wait MINUTES] [--no-tips] [--keep-transcripts]\n\n"
       }
     },
     {
@@ -114,7 +114,7 @@
       ],
       "shell": {
         "exit": 1,
-        "stderr": "\nerror  unknown option for cycle: --pass\n       Usage: crossrev cycle --pr <number> [--trigger human|automatic] [--model <id>] [--effort <level>] [--input-policy hunks_first|whole_when_fits] [--no-tips] [--keep-transcripts]\n\n"
+        "stderr": "\nerror  unknown option for cycle: --pass\n       Usage: crossrev cycle --pr <number> [--trigger human|automatic] [--model <id>] [--effort <level>] [--input-policy hunks_first|whole_when_fits] [--concerns a,b] [--check resolver|off] [--required-check NAME[@APP]] [--no-required-checks] [--check-wait MINUTES] [--no-tips] [--keep-transcripts]\n\n"
       }
     },
     {
@@ -127,7 +127,7 @@
       ],
       "shell": {
         "exit": 1,
-        "stderr": "\nerror  unknown option for resolve: --continuation\n       Usage: crossrev resolve --pr <number> [--harness <one of: claude|codex|agy|grok|opencode>] [--model <id>] [--effort <level>] [--trigger human|automatic] [--keep-transcripts]\n\n"
+        "stderr": "\nerror  unknown option for resolve: --continuation\n       Usage: crossrev resolve --pr <number> [--harness <one of: claude|codex|agy|grok|opencode>] [--model <id>] [--effort <level>] [--trigger human|automatic] [--required-check NAME[@APP]] [--no-required-checks] [--check-wait MINUTES] [--keep-transcripts]\n\n"
       }
     },
     {
@@ -768,9 +768,284 @@
       ],
       "native": {
         "exit": 1,
-        "stderr": "\nerror  unknown option for resolve: --input-policy\n       Usage: crossrev resolve --pr <number> [--harness <one of: claude|codex|agy|grok|opencode>] [--model <id>] [--effort <level>] [--trigger human|automatic] [--keep-transcripts]\n\n"
+        "stderr": "\nerror  unknown option for resolve: --input-policy\n       Usage: crossrev resolve --pr <number> [--harness <one of: claude|codex|agy|grok|opencode>] [--model <id>] [--effort <level>] [--trigger human|automatic] [--required-check NAME[@APP]] [--no-required-checks] [--check-wait MINUTES] [--keep-transcripts]\n\n"
       },
       "note": "Native-only flag; the removed shell had no input-policy option."
+    },
+    {
+      "name": "review refuses concerns 'speed'",
+      "args": [
+        "review",
+        "--pr",
+        "42",
+        "--concerns",
+        "speed"
+      ],
+      "native": {
+        "exit": 1,
+        "stderr": "\nerror  invalid review --concerns: unknown concern \"speed\"\n       Use --concerns with correctness, consistency or both, for example: --concerns correctness,consistency.\n\n"
+      },
+      "note": "Native-only flag; the removed shell had no concerns option."
+    },
+    {
+      "name": "review refuses duplicate concerns",
+      "args": [
+        "review",
+        "--pr",
+        "42",
+        "--concerns",
+        "correctness,correctness"
+      ],
+      "native": {
+        "exit": 1,
+        "stderr": "\nerror  invalid review --concerns: duplicate concern \"correctness\"\n       Use --concerns with correctness, consistency or both, for example: --concerns correctness,consistency.\n\n"
+      },
+      "note": "Native-only flag; the removed shell had no concerns option."
+    },
+    {
+      "name": "review concerns needs a value",
+      "args": [
+        "review",
+        "--pr",
+        "42",
+        "--concerns"
+      ],
+      "native": {
+        "exit": 1,
+        "stderr": ""
+      },
+      "note": "Native-only flag; the removed shell had no concerns option."
+    },
+    {
+      "name": "review refuses check 'reviewer'",
+      "args": [
+        "review",
+        "--pr",
+        "42",
+        "--check",
+        "reviewer"
+      ],
+      "native": {
+        "exit": 1,
+        "stderr": "\nerror  invalid review --check: unknown check mode \"reviewer\"\n       Use --check resolver or --check off.\n\n"
+      },
+      "note": "Native-only flag; the removed shell had no check option."
+    },
+    {
+      "name": "review refuses required check ''",
+      "args": [
+        "review",
+        "--pr",
+        "42",
+        "--required-check",
+        ""
+      ],
+      "native": {
+        "exit": 1,
+        "stderr": "\nerror  invalid review --required-check: empty check name\n       Use --required-check NAME[@APP], for example: --required-check build.\n\n"
+      },
+      "note": "Native-only flag; the removed shell had no required-check option."
+    },
+    {
+      "name": "review refuses duplicate required checks",
+      "args": [
+        "review",
+        "--pr",
+        "42",
+        "--required-check",
+        "build",
+        "--required-check",
+        "build@github-actions"
+      ],
+      "native": {
+        "exit": 1,
+        "stderr": "\nerror  invalid review --required-check: duplicate required check \"build\"\n       Use --required-check NAME[@APP], for example: --required-check build.\n\n"
+      },
+      "note": "Native-only flag; the removed shell had no required-check option."
+    },
+    {
+      "name": "review refuses its own job as a required check",
+      "args": [
+        "review",
+        "--pr",
+        "42",
+        "--required-check",
+        "review"
+      ],
+      "native": {
+        "exit": 1,
+        "stderr": "\nerror  invalid review --required-check: \"review\" is one of CrossRev's own jobs, which a review cannot wait for\n       Use --required-check NAME[@APP], for example: --required-check build.\n\n"
+      },
+      "note": "Native-only flag; the removed shell had no required-check option."
+    },
+    {
+      "name": "review refuses check wait 'ten'",
+      "args": [
+        "review",
+        "--pr",
+        "42",
+        "--check-wait",
+        "ten"
+      ],
+      "native": {
+        "exit": 1,
+        "stderr": "\nerror  invalid review --check-wait: \"ten\" is not a whole number of minutes from 0 to 30\n       Use --check-wait with 0 to 30 minutes, for example: --check-wait 10.\n\n"
+      },
+      "note": "Native-only flag; the removed shell had no check-wait option."
+    },
+    {
+      "name": "review refuses check wait 31",
+      "args": [
+        "review",
+        "--pr",
+        "42",
+        "--check-wait",
+        "31"
+      ],
+      "native": {
+        "exit": 1,
+        "stderr": "\nerror  invalid review --check-wait: \"31\" is more than the 30 minute wait\n       Use --check-wait with 0 to 30 minutes, for example: --check-wait 10.\n\n"
+      },
+      "note": "Native-only flag; the removed shell had no check-wait option."
+    },
+    {
+      "name": "cycle refuses concerns 'speed'",
+      "args": [
+        "cycle",
+        "--pr",
+        "42",
+        "--concerns",
+        "speed"
+      ],
+      "native": {
+        "exit": 1,
+        "stderr": "\nerror  invalid cycle --concerns: unknown concern \"speed\"\n       Use --concerns with correctness, consistency or both, for example: --concerns correctness,consistency.\n\n"
+      },
+      "note": "Native-only flag; the removed shell had no concerns option."
+    },
+    {
+      "name": "cycle refuses check 'reviewer'",
+      "args": [
+        "cycle",
+        "--pr",
+        "42",
+        "--check",
+        "reviewer"
+      ],
+      "native": {
+        "exit": 1,
+        "stderr": "\nerror  invalid cycle --check: unknown check mode \"reviewer\"\n       Use --check resolver or --check off.\n\n"
+      },
+      "note": "Native-only flag; the removed shell had no check option."
+    },
+    {
+      "name": "cycle refuses duplicate required checks",
+      "args": [
+        "cycle",
+        "--pr",
+        "42",
+        "--required-check",
+        "build",
+        "--required-check",
+        "build"
+      ],
+      "native": {
+        "exit": 1,
+        "stderr": "\nerror  invalid cycle --required-check: duplicate required check \"build\"\n       Use --required-check NAME[@APP], for example: --required-check build.\n\n"
+      },
+      "note": "Native-only flag; the removed shell had no required-check option."
+    },
+    {
+      "name": "cycle refuses check wait 31",
+      "args": [
+        "cycle",
+        "--pr",
+        "42",
+        "--check-wait",
+        "31"
+      ],
+      "native": {
+        "exit": 1,
+        "stderr": "\nerror  invalid cycle --check-wait: \"31\" is more than the 30 minute wait\n       Use --check-wait with 0 to 30 minutes, for example: --check-wait 10.\n\n"
+      },
+      "note": "Native-only flag; the removed shell had no check-wait option."
+    },
+    {
+      "name": "resolve refuses duplicate required checks",
+      "args": [
+        "resolve",
+        "--pr",
+        "42",
+        "--required-check",
+        "build",
+        "--required-check",
+        "build"
+      ],
+      "native": {
+        "exit": 1,
+        "stderr": "\nerror  invalid resolve --required-check: duplicate required check \"build\"\n       Use --required-check NAME[@APP], for example: --required-check build.\n\n"
+      },
+      "note": "Native-only flag; the removed shell had no required-check option."
+    },
+    {
+      "name": "resolve refuses its own job as a required check",
+      "args": [
+        "resolve",
+        "--pr",
+        "42",
+        "--required-check",
+        "resolve"
+      ],
+      "native": {
+        "exit": 1,
+        "stderr": "\nerror  invalid resolve --required-check: \"resolve\" is one of CrossRev's own jobs, which a review cannot wait for\n       Use --required-check NAME[@APP], for example: --required-check build.\n\n"
+      },
+      "note": "Native-only flag; the removed shell had no required-check option."
+    },
+    {
+      "name": "resolve refuses concerns",
+      "args": [
+        "resolve",
+        "--pr",
+        "42",
+        "--concerns",
+        "correctness"
+      ],
+      "native": {
+        "exit": 1,
+        "stderr": "\nerror  unknown option for resolve: --concerns\n       Usage: crossrev resolve --pr <number> [--harness <one of: claude|codex|agy|grok|opencode>] [--model <id>] [--effort <level>] [--trigger human|automatic] [--required-check NAME[@APP]] [--no-required-checks] [--check-wait MINUTES] [--keep-transcripts]\n\n"
+      },
+      "note": "Native-only flag; the removed shell had no concerns option."
+    },
+    {
+      "name": "resolve refuses check",
+      "args": [
+        "resolve",
+        "--pr",
+        "42",
+        "--check",
+        "off"
+      ],
+      "native": {
+        "exit": 1,
+        "stderr": "\nerror  unknown option for resolve: --check\n       Usage: crossrev resolve --pr <number> [--harness <one of: claude|codex|agy|grok|opencode>] [--model <id>] [--effort <level>] [--trigger human|automatic] [--required-check NAME[@APP]] [--no-required-checks] [--check-wait MINUTES] [--keep-transcripts]\n\n"
+      },
+      "note": "Native-only flag; the removed shell had no check option."
+    },
+    {
+      "name": "resolve refuses check wait above 30",
+      "args": [
+        "resolve",
+        "--pr",
+        "42",
+        "--check-wait",
+        "31"
+      ],
+      "native": {
+        "exit": 1,
+        "stderr": "\nerror  invalid resolve --check-wait: \"31\" is more than the 30 minute wait\n       Use --check-wait with 0 to 30 minutes, for example: --check-wait 10.\n\n"
+      },
+      "note": "Native-only flag; the removed shell had no check-wait option."
     }
   ]
 }

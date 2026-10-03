@@ -260,6 +260,13 @@ func (l *Log) PhaseTerms(terms int, ms int64) {
 	l.Event("phase", "terms terms="+strconv.Itoa(terms)+" ms="+strconv.FormatInt(ms, 10))
 }
 
+// CallIdentity identifies the purpose and input slice of a model call.
+type CallIdentity struct {
+	Kind    string
+	Concern string
+	Part    int
+}
+
 // Call records one accepted model call: the rendered prompt's byte length,
 // the evidence bytes handed over with it, the usage buckets the accepted
 // envelope folded in, the call's served reads from the reads ledger, the
@@ -271,12 +278,39 @@ func (l *Log) PhaseTerms(terms int, ms int64) {
 // a call with no served reader — supplied mode — reads zero. commands
 // reads zero because an accepted call never ran one: any command event
 // halts the leg with review_leg_ran_command before a call line is written.
-func (l *Log) Call(call, promptBytes, suppliedBytes, reads int, fresh, cached, output int64, model string, ms int64) {
+func (l *Log) Call(call, promptBytes, suppliedBytes, reads int, fresh, cached, output int64, model string, ms int64, identity ...CallIdentity) {
+	writeCall(l, call, promptBytes, suppliedBytes, reads, fresh, cached, output, model, ms, identity)
+}
+
+// CheckCall records one accepted cross-model check call: the same line a
+// review call writes, with a kind=check identity so the checker's usage
+// reads back separately from the reviewer's. A check packs candidates
+// across concerns, so concern and part read as dashes.
+func (l *Log) CheckCall(call, promptBytes, suppliedBytes, reads int, fresh, cached, output int64, model string, ms int64) {
+	writeCall(l, call, promptBytes, suppliedBytes, reads, fresh, cached, output, model, ms, []CallIdentity{{Kind: "check"}})
+}
+
+// writeCall writes one accepted call's line, naming the identity only when the
+// caller names one. No identity keeps the review line's bytes exactly.
+func writeCall(l *Log, call, promptBytes, suppliedBytes, reads int, fresh, cached, output int64, model string, ms int64, identity []CallIdentity) {
 	if l == nil {
 		return
 	}
 	if model == "" {
 		model = "-"
+	}
+	suffix := ""
+	if len(identity) > 0 {
+		detail := identity[0]
+		part := "-"
+		if detail.Part > 0 {
+			part = strconv.Itoa(detail.Part)
+		}
+		concern := detail.Concern
+		if concern == "" {
+			concern = "-"
+		}
+		suffix = " kind=" + detail.Kind + " concern=" + concern + " part=" + part
 	}
 	l.Event("call", strconv.Itoa(call)+
 		" prompt_bytes="+strconv.Itoa(promptBytes)+
@@ -286,7 +320,7 @@ func (l *Log) Call(call, promptBytes, suppliedBytes, reads int, fresh, cached, o
 		" output="+strconv.FormatInt(output, 10)+
 		" reads="+strconv.Itoa(reads)+" commands=0"+
 		" model="+model+
-		" ms="+strconv.FormatInt(ms, 10))
+		" ms="+strconv.FormatInt(ms, 10)+suffix)
 }
 
 // Settings records one leg's resolved harness, model and effort: what the
@@ -295,12 +329,33 @@ func (l *Log) Call(call, promptBytes, suppliedBytes, reads int, fresh, cached, o
 // requested model and effort cannot be read back from the run log. Unset
 // halves read as dashes, the way Call renders an unnamed model.
 func (l *Log) Settings(harness, model, effort string) {
-	l.ReviewSettings(harness, model, effort, "", "")
+	l.ReviewSettings(harness, model, effort, ReviewDetail{})
 }
 
-// ReviewSettings also records the effective review input policy and its source.
-// An empty policy leaves the settings line without review fields for resolve.
-func (l *Log) ReviewSettings(harness, model, effort, inputPolicy, source string) {
+// EffectiveSetting is one resolved setting: the value the leg runs with
+// and where it came from — flag, config or default. An empty source
+// leaves the setting off the line, which is how the resolve leg omits the
+// review input policy. An empty value with a source set records honestly:
+// no required check reads as an empty list from the default.
+type EffectiveSetting struct {
+	Value  string
+	Source string
+}
+
+// ReviewDetail carries the review-contract settings beside harness, model
+// and effort: the effective input policy, concerns, check mode, required
+// checks and wait, each with its source.
+type ReviewDetail struct {
+	InputPolicy    EffectiveSetting
+	Concerns       EffectiveSetting
+	Check          EffectiveSetting
+	RequiredChecks EffectiveSetting
+	CheckWait      EffectiveSetting
+}
+
+// ReviewSettings also records the effective review settings and their
+// sources. A setting with no source stays off the line.
+func (l *Log) ReviewSettings(harness, model, effort string, detail ReviewDetail) {
 	if l == nil {
 		return
 	}
@@ -310,9 +365,21 @@ func (l *Log) ReviewSettings(harness, model, effort, inputPolicy, source string)
 	if effort == "" {
 		effort = "-"
 	}
-	detail := "harness=" + harness + " model=" + model + " effort=" + effort
-	if inputPolicy != "" {
-		detail += " input_policy=" + inputPolicy + " input_policy_source=" + source
+	line := "harness=" + harness + " model=" + model + " effort=" + effort
+	for _, field := range []struct {
+		name    string
+		setting EffectiveSetting
+	}{
+		{"input_policy", detail.InputPolicy},
+		{"concerns", detail.Concerns},
+		{"check", detail.Check},
+		{"required_checks", detail.RequiredChecks},
+		{"check_wait", detail.CheckWait},
+	} {
+		if field.setting.Source == "" {
+			continue
+		}
+		line += " " + field.name + "=" + field.setting.Value + " " + field.name + "_source=" + field.setting.Source
 	}
-	l.Event("settings", detail)
+	l.Event("settings", line)
 }
