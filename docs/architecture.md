@@ -5,210 +5,334 @@ authors:
   - "Carlos Boeing"
   - "gemini-2.5-pro (agy)"
   - "GPT-5 (Codex)"
-last_reviewed: 2026-09-04
+  - "claude-opus-5-5 (Claude Code)"
+last_reviewed: 2026-10-03
 ---
 
 # Architecture
 
-How CrossRev is built, as it stands today. For *why* a decision went the way it did, see the [decision records](adrs/).
+This page explains how CrossRev is built today: its parts, how one review round runs, where its state lives, and where its security boundaries sit. It is for an engineer meeting CrossRev for the first time. Decisions and their reasons live in the [decision records](adrs/); settings live in [configuration](configuration.md).
 
-## The shape of it
+## 1. What CrossRev does
 
-One model reviews a pull request and leaves inline comments. A second verifies each point and either fixes it, skips it, defers it, or pushes back, replies in-thread, resolves what it handled, and pushes. Then the first looks again.
+CrossRev runs a code review loop between two AI models on a GitHub pull request. One model reviews the change and posts findings as inline comments. A second model answers each finding: it fixes it, disputes it, skips it or defers it, replies in the thread, and pushes any fix. Then the first model reviews again. The loop ends when nothing worth fixing remains, when a limit is reached, or when a person stops it.
 
-Three words, each meaning one thing: a **cycle** contains **passes**, and a pass has two **legs**.
+The models run through the command-line tools you already pay for (Claude Code, Codex and others), not through API keys. The same binary runs the loop from a terminal or from GitHub Actions.
+
+```mermaid
+flowchart LR
+    dev["Developer or GitHub event"] --> bin["crossrev binary<br/>(the orchestrator)"]
+    bin -->|"prompt"| rv["Reviewer CLI<br/>e.g. Codex"]
+    rv -->|"findings"| bin
+    bin -->|"prompt"| rs["Resolver CLI<br/>e.g. Claude Code"]
+    rs -->|"resolutions and edits"| bin
+    bin <-->|"comments, labels, check runs"| pr["GitHub pull request"]
+    bin <-->|"commits, coverage ref"| repo["Git repository"]
+```
+
+The binary is the only part that talks to GitHub. The model tools never receive a GitHub credential. Section 8 explains why that matters.
+
+## 2. Terms
+
+CrossRev uses a small vocabulary. Each word below means one thing.
+
+| Term | Meaning |
+|---|---|
+| **Cycle** | A run of the loop on one pull request, from the first review until it ends. Made of passes. |
+| **Pass** | One round: a review followed by a resolve. Numbered from 1, and shown on the `crossrev/pass-N` label. |
+| **Leg** | One half of a pass. The **review leg** finds problems; the **resolve leg** answers them. |
+| **Harness** | A model command-line tool CrossRev drives, such as Claude Code or Codex. Each has an **adapter** in the binary. |
+| **Reviewer / resolver** | The harness and model configured for each leg. They should be different models, so one catches what the other misses. |
+| **Finding** | One problem the reviewer reports: file, line, severity, title, explanation. |
+| **Resolution** | The resolver's answer to one finding: `fixed`, `disputed`, `skipped`, `deferred` or `escalated`. |
+| **Concern** | What the reviewer is asked to look for in one model call: `correctness` (bugs in the logic) or `consistency` (the change against the code around it). |
+| **Cross-model check** | Before findings post, the resolver's model reads each one and confirms it, rejects it, or marks it a duplicate. Only confirmed findings post. |
+| **Required checks** | GitHub check runs (your CI jobs) that must pass on the pull request's head commit before CrossRev reports it finished. Not to be confused with the cross-model check. |
+| **Required file** | A changed file the review must give a verdict on. |
+| **Coverage** | The record of which required files have a verdict at the current head. Stored as **generations** in a git ref. |
+| **Marker** | An HTML comment inside a CrossRev comment that carries machine-readable state. Invisible in the GitHub UI. |
+| **Converged** | The loop finished on its own: nothing at or above the fix threshold remains, every required file has a verdict, and the required checks passed or none are required. |
+| **Halted** | The loop stopped short and needs a person. Each halt names its reason, such as `required_check_failed`. |
+
+## 3. Components
+
+CrossRev is one Go binary. Its packages sit in tiers. A package imports from lower tiers, a few Tier 2 packages may also import named Tier 2 peers, and `cmd/crossrev` wires everything together as the composition root. `internal/archtest` enforces these rules.
+
+```mermaid
+flowchart TB
+    subgraph t3["Tier 3: commands and legs"]
+        cli["cli<br/>command router"]
+        review["review<br/>review leg"]
+        resolve["resolve<br/>resolve leg"]
+        cycle["cycle<br/>multi-pass driver, status, restart, watchdog"]
+        preflight["preflight<br/>doctor"]
+    end
+    subgraph t2["Tier 2: adapters to the outside"]
+        harness["harness<br/>model CLI adapters"]
+        forge["forge / ghexec<br/>GitHub through gh"]
+        vcs["vcs<br/>git"]
+        sandbox["sandbox<br/>quarantine"]
+        prompt["prompt<br/>prompt text"]
+        config["config<br/>settings"]
+        verify["verify<br/>required-check evaluation"]
+    end
+    subgraph t1["Tier 1: pure rules and data"]
+        policy["policy<br/>convergence and labels"]
+        prstate["prstate<br/>markers and coverage"]
+        intel["intel<br/>file planning and batching"]
+        diff["diff<br/>gutter and line mapping"]
+        validate["validate<br/>answer validation"]
+    end
+    core["Tier 0: core types"]
+    root["cmd/crossrev<br/>composition root"] --> t3
+    t3 --> t2 --> t1 --> core
+```
+
+| Component | Responsibility |
+|---|---|
+| `review` | Runs the review leg: plans the files, calls the reviewer once per input and concern, runs the cross-model check, posts findings, publishes coverage, applies the gate and labels. |
+| `resolve` | Runs the resolve leg: calls the resolver with the findings, replies to threads, commits and pushes fixes, settles the pass. |
+| `cycle` | Drives both legs in one process for local runs, and implements `status`, `restart` and the watchdog. |
+| `policy` | Pure functions that decide convergence, the next label and whether another pass may start. No network, so fully table-tested. |
+| `prstate` | Reads and writes markers, finding identity, and the coverage ledger. |
+| `intel` | Decides which files a pass must cover and how they are packed into model calls. |
+| `harness` | One adapter per model CLI: builds the command line, strips credentials, parses the answer and token usage. |
+| `forge/ghexec` | Every GitHub read and write, through the `gh` CLI. |
+| `verify` | Reads the head commit's check runs and judges them against the required checks, including the bounded wait. |
+| `sandbox` | Moves files a pull request could use to configure a harness out of the checkout before any model runs. |
+
+The full file list is in [the layout](#the-layout).
+
+## 4. One pass, step by step
+
+### 4.1 The review leg
+
+```mermaid
+sequenceDiagram
+    participant O as crossrev
+    participant G as GitHub
+    participant R as Reviewer model
+    participant C as Resolver model
+    O->>G: read PR, labels, markers, base-revision config
+    O->>G: post claim comment (marker, state started)
+    O->>O: plan required files into inputs
+    loop each input
+        loop each concern
+            O->>R: prompt with gutter-numbered hunks
+            R-->>O: verdicts and findings (JSON)
+        end
+        O->>O: merge concern answers for this input
+        O->>G: publish coverage generation to the git ref<br/>(a split file: once its last part has answered)
+    end
+    O->>C: numbered candidate findings
+    C-->>O: confirmed, rejected or duplicate, each
+    O->>G: post confirmed findings as comments
+    O->>G: read check runs, wait if pending or missing
+    O->>G: rewrite claim into pass summary, set labels
+```
+
+1. **Load context.** Read the pull request, its base and head commits, its labels and every trusted marker on it. Read settings **from the base branch**, never from the branch under review.
+2. **Decide whether to run.** Work out the pass number. Stop if `crossrev/stop` is applied, the head was already reviewed, or a limit is reached.
+3. **Claim.** Post a summary comment with a marker before any work, so a run that dies can be resumed.
+4. **Plan.** List the required files and pack them into model calls that fit the harness's input window. A file too big for one call is split into parts.
+5. **Review.** Call the reviewer once per input per concern: `correctness` first, then `consistency`. Each call returns a verdict per file and any findings, validated against `schemas/findings.schema.json`.
+6. **Merge and record.** Combine the concern answers for the input. The same finding from both concerns becomes one finding. If either concern could not review a file, the file's verdict is `could_not_review`, which blocks convergence. Each accepted input publishes a new coverage generation to the git ref straight away, so an interrupted pass resumes from the inputs still waiting. The parts of a split file publish together, once every part has an answer, so an interrupted split file is reviewed again from its first part.
+7. **Cross-model check.** Send every merged finding, numbered, to the resolver's model in read-only mode. It confirms, rejects, or marks each a duplicate, and may correct a severity. Rejected findings stay on the marker with the reason; they do not post. If the check call fails past its retries, every finding posts unchecked and the summary says `check: degraded`; if the checker cannot run at all, it says `check: unavailable`. A safety failure is different: a command run by the checker, a credential, endpoint or hardening refusal, a failed restore of quarantined files, or cancellation stops the pass and publishes nothing, the same as in the review itself.
+8. **Post.** Each confirmed finding posts once, with its own marker: inline on its line when the diff shows that line, as a file-level comment when the file is in the diff but the line is not, and as a comment on the pull request itself when the file is outside the diff or GitHub refuses the anchor. A finding already posted on an earlier pass is not posted again, except one that was held on a later pass and has since risen to a posting severity. On later passes, findings below `min_fix_severity` are held: listed in the summary and recorded on the marker, but not posted.
+9. **Gate.** If the pass would converge, judge the required checks. Wait for pending or missing ones, then converge or halt.
+10. **Finish.** Rewrite the claim into the pass summary and apply the next label.
+
+The pass then ends one of three ways:
+- **Actionable findings:** hand over to the resolve leg with `crossrev/awaiting-resolution`.
+- **No actionable finding, and every required file has an accepted verdict:** converge at step 9, subject to the gate.
+- **No actionable finding, but files remain without a verdict or marked `could_not_review`:** halt with verdict `blocked`. The resolver has nothing to fix, so a person must look.
+
+### 4.2 The resolve leg
+
+1. **Load context** the same way, and read the review leg's findings from its marker.
+2. **Claim**, then call the resolver with the diff, the findings and the existing threads. Each finding carries two hints: whether an earlier pass already fixed the same point (so the earlier fix may be incomplete), and up to 10 places elsewhere where the same identifiers occur.
+3. **Validate the answers**: one resolution per finding, and fixes only where policy allows, at or above `min_fix_severity`.
+4. **Record deferrals** in the configured backlog.
+5. **Commit and push** the fixes behind a branch guard.
+6. **Reply.** Answer each finding in its thread, and resolve the thread where the resolution says to.
+7. **Settle.** A pass that pushed hands back to review with `crossrev/awaiting-review`. A pass that settled every finding without pushing can converge directly, behind the same required-check gate as the review, but only when the coverage rules in section 6 also hold at this head. When they do not, for example a file still has no verdict or a repair is unconfirmed, the pass hands back to review without pushing.
+
+### 4.3 How a pass ends
+
+Each leg ends by choosing the next label. `crossrev/stop` is checked first on both legs and always wins.
 
 ```mermaid
 flowchart TD
-    trigger["A pull request event, or a terminal command"] --> orch
-
-    subgraph orch["The orchestrator — the crossrev binary"]
-        ctx["Load context: the PR, the base-revision config, the markers"]
-        review["Review leg"]
-        resolve["Resolve leg"]
-        term["Should another pass begin?"]
-        ctx --> review --> resolve --> term
-        term -->|"issues remain, no cap reached"| review
+    subgraph rv["After the review leg"]
+        r0(["Review finishes"]) --> r1{"Blocked?<br/>e.g. every file excluded"}
+        r1 -->|yes| rh["Halted"]
+        r1 -->|no| r2{"Actionable findings?"}
+        r2 -->|yes| rr["Awaiting resolution"]
+        r2 -->|no| r3{"Every required file<br/>has a verdict?"}
+        r3 -->|no| rh
+        r3 -->|yes| r4{"Escalations from earlier passes,<br/>and the reviewer did not<br/>report converged?"}
+        r4 -->|yes| rh
+        r4 -->|no| rg["Required-check gate"]
     end
-
-    review -->|"prompt, diff, prior threads"| ra["Reviewer harness"]
-    resolve -->|"prompt, diff, findings"| sa["Resolver harness"]
-    ra -->|"findings JSON"| review
-    sa -->|"resolutions JSON"| resolve
-
-    orch -->|"comments, replies, labels, commits"| gh["The pull request"]
-    gh -->|"markers are the state"| ctx
-
-    term -->|"converged, capped, blocked or stopped"| done["Terminal state, on a label"]
+    subgraph sv["After the resolve leg"]
+        s0(["Resolve finishes"]) --> s1{"Blocked, escalated, a fix not committed,<br/>or a deferral not recorded?"}
+        s1 -->|yes| sh["Halted"]
+        s1 -->|no| s2{"Pushed a commit?"}
+        s2 -->|yes| sr["Awaiting review"]
+        s2 -->|no| s3{"Coverage rules hold<br/>at this head?"}
+        s3 -->|no| sr
+        s3 -->|yes| sg["Required-check gate"]
+    end
+    gate{"Required checks"}
+    rg --> gate
+    sg --> gate
+    gate -->|"passed or none required"| conv["Converged"]
+    gate -->|"pending or missing"| wait["Wait up to wait_minutes,<br/>re-reading every 30 seconds"]
+    wait --> gate
+    gate -->|"failed, unreadable,<br/>or still waiting at the deadline"| gh["Halted"]
 ```
 
-**The orchestrator makes every GitHub call.** The agent process makes none — see [the credential seam](#the-credential-seam) below, which is the load-bearing security property.
+The caps (`max_passes_per_cycle`, the daily pull request cap and the file-count cap) are checked when a review is about to start. A refused start halts the pull request. A pass that converges on the last allowed pass still converges.
 
-## The two legs
+A failing check never becomes a code finding. It halts the pass with one of `required_check_pending`, `required_check_missing`, `required_check_failed` or `required_checks_unreadable`, naming each blocking check with its run URL. `crossrev restart --pr N` drives the pass again once the checks report. A restart that only needs the checks re-judged makes no model call.
 
-### The review leg
+## 5. The pull request is the state
 
-1. Load context: the pull request, its base and head SHAs, its labels, and every trusted marker already on it.
-2. Read repository policy **from the base revision**, never from the branch under review.
-3. Work out the pass number from the markers, and whether this head SHA has already been reviewed.
-4. Ask whether a pass should begin at all — the caps, the `crossrev/stop` label, the draft check.
-5. **Post a claim comment before doing any work**, carrying a marker.
-6. Quarantine repository-provided harness configuration, assemble the prompt, invoke the reviewer once per concern and merge the answers, validate what came back.
-7. Have the resolver's model check each merged finding, and post one inline comment per confirmed one, each carrying its own marker; rewrite the claim comment into the pass summary; wait for required checks where the pass would otherwise converge; set the labels.
+CrossRev keeps no database, cache or local state file. Everything it knows lives in three places, all owned by the repository.
 
-### The resolve leg
+```mermaid
+flowchart LR
+    subgraph pr["On the pull request"]
+        m["Markers<br/>in comment bodies"]
+        l["Labels<br/>crossrev/*"]
+    end
+    subgraph git["In the repository"]
+        ref["Coverage ref<br/>refs/crossrev/pr/N/reviewer1/coverage"]
+    end
+    m -->|"handle names the generation"| ref
+```
 
-1. Same context load, same policy source.
-2. Find the newest review pass's marker and read its findings.
-3. Post its own claim, then invoke the resolver with the diff, the findings — each marked where an earlier pass fixed the same point, and with sibling locations where the same identifiers occur — and the prior threads.
-4. For each finding: reply in-thread, resolve the thread where the resolution says to, and commit a fix where policy allows one.
-5. Persist deferred findings to the backlog.
-6. Push, behind the branch guard. Post the summary. Set the labels.
+### 5.1 Markers
 
-`crossrev cycle` drives both legs in one process, up to `max_passes_per_cycle`. In automated mode each leg is its own workflow run, chained by labels.
-
-## The pull request is the state
-
-There is no database, no cache and no local state file. Everything the loop knows is on the pull request, in **markers** — HTML comments embedded in comment bodies, invisible in the UI and readable by anyone who views the source.
-
-A marker carries the protocol version, the leg, the pass number, its state, timestamps, the run id, the head SHA, the harness and model and effort and endpoint, the model that actually answered, the token cost, the verdict, and the findings or resolutions. A review marker also carries each finding's concerns, the candidates the cross-model check kept off the pull request with their reasons, the check's durable decisions, and the required-check evidence the pass judged.
+A marker is an HTML comment such as `<!-- crossrev:{...} -->` inside a comment CrossRev posted.
 
 | Prefix | Where | What it records |
 |---|---|---|
-| `<!-- crossrev:` | The pass summary comment | The whole pass: verdict, findings, resolutions, cost |
-| `<!-- crossrev:f` | Each inline comment and each reply | One finding id, its pass, and the leg that wrote it |
-| `<!-- crossrev:c` | No longer written | The retired comment ledger: shards plus a manifest per generation. Comment-era generations are never read again; live coverage publishes to the ledger ref below |
+| `<!-- crossrev:` | The pass summary comment | The pass: leg, number, state, head commit, harness and model, verdict, findings or resolutions, token usage, cross-model check decisions, required-check evidence, and the handle of its coverage generation |
+| `<!-- crossrev:f` | Each inline comment and reply | One finding id, its pass, and the leg that wrote it |
 
-New markers open with `v:2`. They name the coverage record, the stop counts and the confirmed repair.
+Three properties follow from keeping state in markers:
 
-Markers at `v:1` still read for findings and pass numbers, but they carry no coverage. Readers refuse `v:3` and later.
+- **A crash loses nothing.** The claim goes up before the work, so the next run sees how far the last one got and resumes.
+- **A duplicate comment is impossible.** A finding's marker is inside the comment it records, so posting the comment and recording it are one API call.
+- **Local and automated runs share one code path.** Nothing about the state is specific to CI.
 
-Three properties follow, and each one is why a marker exists rather than a ledger:
+**Markers are versioned.** New markers are written as `v:2`. A `v:1` marker still reads for its findings and pass number but carries no coverage. A marker from a newer version than this build understands is refused.
 
-- **A crash loses nothing.** The claim marker goes up before the work starts, so a run that dies mid-flight is resumed rather than restarted. The next run reads how far the last one got.
-- **A duplicate is impossible by construction.** The per-finding marker rides in the body of the comment it records, so the record and the thing it records are one HTTP call. A ledger written *after* a successful post has a window in it: GitHub accepts the comment, the process dies, and recovery can't tell an already-posted finding from a missing one.
-- **The same code runs in both modes.** Nothing about the state is specific to CI.
+**Only trusted authors count.** Anyone can write an HTML comment, so CrossRev reads markers only from one author: the GitHub App in automated mode, and the invoking user locally.
 
-**Markers are lowercase in every form.** They're matched literally, so a capitalised prefix would break matching silently, on every existing pull request.
+**A finding's id** is a hash of its path, its normalised title and a fingerprint of the line and its neighbours. It stays stable across passes, so "already posted" is a lookup, not a guess.
 
-### Trust
+Markers and labels are lowercase and matched literally. Changing their case would break every existing pull request silently.
 
-Anyone who can comment on a pull request can write an HTML comment, so a marker's *author* is the only signal GitHub controls and nobody can forge. Which author counts depends on the mode:
+### 5.2 Labels
 
-| Mode | Trusted author | Why |
-|---|---|---|
-| `automated` | The GitHub App, and nothing else | A forged marker makes an *agent* act — push a commit, skip a finding, believe a leg finished |
-| `local` | The invoking user | You are the orchestrator. A forged marker can only mislead you about work you asked for |
-
-Hard-coding the App would break local mode outright: a local run would find no App-authored marker on any pass, report pass 1 forever, reconcile nothing, and never reach the cap.
-
-### Finding identity
-
-A finding's id is a hash of its path, its normalised title, and an anchor — a fingerprint of the commented line and its two neighbours either side. Path and title carry the identity; the anchor is what lets a finding still be matched after the line moves. Stable across passes, so "already posted" is a set-membership test rather than a guess.
-
-## The label contract
-
-The six loop labels are the state a human reads, and in automated mode they are also the event chain: each leg's completion applies the label the next leg waits behind.
+Labels are the state a person reads. In automated mode they are also the event chain: each leg ends by applying the label the next workflow waits for.
 
 | Label | Colour | Meaning |
 |---|---|---|
 | `crossrev/awaiting-review` | blue | A review is owed |
-| `crossrev/awaiting-resolution` | purple | The review landed, the resolve leg is owed |
+| `crossrev/awaiting-resolution` | purple | The review landed, a resolve is owed |
 | `crossrev/converged` | green | The loop finished on its own |
-| `crossrev/halted` | orange | Stopped short, a human is needed |
-| `crossrev/stop` | red | A human applied it |
-| `crossrev/pass-N` | grey | Which pass it reached |
+| `crossrev/halted` | orange | Stopped short, a person is needed |
+| `crossrev/stop` | red | A person applied it to stop the loop |
+| `crossrev/pass-N` | grey | The pass reached |
 
-No two colours are adjacent on the wheel, and every one is dark enough that GitHub renders its text white in all three renderings it uses — the solid pill on the labels page, and the tinted chip in light and dark themes. **Red is reserved for `stop`**, the one label a human applies, so a red pill in a pull request list always means somebody pulled the brake.
+A seventh label, `crossrev/watchdog-retried` (yellow), is bookkeeping: it marks a leg the watchdog has already retried once. Red is reserved for `stop`, the one label a person applies. In automated mode a label that cannot be applied fails the leg, because a missing label silently breaks the chain.
 
-The label a leg waits behind is named for the noun where the leg is named for the verb: `resolve` waits behind `crossrev/awaiting-resolution`. Derived in one place, because the workflows key off these exact strings and a mismatch stalls the chain silently — the label sits on the pull request with nothing listening.
+### 5.3 The coverage ledger
 
-**In automated mode a label that can't be applied is fatal**, not cosmetic. Locally it's the reverse: one process drives both legs, so the label is decoration.
+Each review pass publishes a **generation**: a git commit holding `manifest.json` and `records.json`, parented on the previous generation, under one ref per pull request per reviewer slot. It holds one record per required file: its verdict, the evidence, and a digest of exactly what the reviewer was shown. The pass marker names the generation by commit, and readers trust that handle, not the ref.
 
-## Termination
+A generation is reused only when the base commit, head commit, reviewer, and **engine id** all match. The engine id is `hunk-v2` plus a digest of the settings the pass ran with: concerns, cross-model check mode, input policy and read mode. A pass run under other settings never reuses another's verdicts. The marker records the engine id so later readers judge the generation by what actually ran.
 
-One function decides, over state the orchestrator already holds, so it's testable with no network, no harness and no pull request. That matters, because its failure mode is silence — a loop that stops one pass early looks exactly like a loop that converged.
+If the ref cannot be written, `coverage.store: auto` falls back to storing the generation in the marker comment, within GitHub's 64 KiB comment limit. A ledger that can no longer be read means the next pass re-reviews; one that fails verification fails the pass closed. [What CrossRev writes](what-crossrev-writes.md) lists every write; [ADR 0022](adrs/0022-the-coverage-ledger-lives-in-git-refs.md) records the decision.
 
-It terminates on the first of:
+## 6. When a pull request converges
 
-1. A human applied `crossrev/stop`. **Checked first**, because it's an instruction rather than a state, and it outranks a healthy verdict.
-2. The resolver returned `blocked`.
-3. The reviewer returned `converged` — nothing at or above `min_fix_severity` remains, and the required checks passed or none were required.
-4. The pass count reached `max_passes_per_cycle`. Pass 3 of a cap of 3 is the last pass, not the one after which a fourth begins.
-5. The daily pull request cap is exceeded.
-6. The pull request is larger than the file cap.
+One function in `internal/policy` decides convergence. Every route that can apply `crossrev/converged` calls it: the review leg's publish, the resolve leg's no-commit settle, and the resolve leg's no-findings route. `crossrev status` and the local cycle read the same rule, so the label, the terminal and the status report cannot disagree.
 
-The last three are continuation bounds: they end *automatic* reviewing and never block a person. `min_fix_severity` is different in kind — it bounds what an agent may change, so it holds on every run.
+A pull request converges when all of these hold:
 
-## File coverage
+- No finding the pull request introduced remains at or above `min_fix_severity`. Pre-existing and lower-severity findings are reported but do not block.
+- The coverage generation is current: recorded for this base, head and engine id.
+- Every required file has an accepted verdict, and none is `could_not_review`. The required set is not empty.
+- The reviewer reported its examined scope and known limits.
+- Any repair the resolver made has been re-read by the reviewer.
+- The required checks passed, or none are configured.
 
-Each review pass reads every changed file: every added, modified, deleted, renamed and type-changed path between the base branch and the pull request branch. A rename counts as new work and is read again from scratch.
+Converged means the review is complete. It does not mean the code is correct, and it means checks passed only when checks are required. The coverage manifest's own `verification.status` stays `not_implemented`, because CrossRev runs no checks itself; the gate's evidence lives on the pass marker.
 
-A **required file** is a changed file the review must account for. The reviewer gives each one a verdict, and the pass converges only when every required file has one. When the branch moves, every prior result is retired and the next pass starts over. A re-run reuses recorded verdicts only when the base commit, the pull request commit, the review-engine version and the review producer (harness, model, effort and endpoint) are unchanged; then it resumes the files still waiting for a verdict. The engine version fingerprints the review contract — the concerns, check mode, input policy and read mode the pass ran with — so a generation judged under other settings retires instead of being reused.
+The loop also ends, in this order of precedence, when:
 
-The review reads in batches because one prompt cannot hold a large pull request. One pass reads at most 400 required files; oversized generated files skipped before review do not use those slots. Batches hold at most 40 files in path order.
+1. A person applied `crossrev/stop`. Checked first, because it is an instruction.
+2. The resolver reported `blocked`, or escalated a finding to a person.
+3. The pass count reached `max_passes_per_cycle`.
+4. The daily pull request cap or the file-count cap is exceeded.
 
-Calls measure the full rendered prompt — headers, shared context and file content together — against the calling harness's packing limit, derived from its input window (390,000 bytes for Codex, 312,000 for Claude Code, 120 KiB for argv transports).
+The last two end automatic reviewing only. A review a person asks for still runs.
 
-A plain file that fits in no call alone splits into parts at hunk boundaries, one oversized hunk into line chunks, each reviewed with its header and gutter numbers and merged into one verdict when every part lands. An oversized generated file is skipped instead, with a warning in the comment summary and the terminal. Only shared context alone past the hard limit halts the pass, with `shared_context_exceeds_window`; between 0.75 of the packing limit and the hard limit the pass runs over budget and records `over_budget`.
+## 7. What a review covers
 
-A **hunk** is the gutter-numbered diff the prompt shows for one file: every line inside a hunk prefixed by its number in the old file, its number in the new file, and a `|`, with a dash where the line does not exist on that side ([ADR 0025](adrs/0025-review-input-is-hunks-that-split.md), decision 5). Each required file arrives as its own hunks in one of three forms: `full_text` shows the whole file as one hunk, `hunks_context` shows each change with its enclosing function clipped to 100 lines of surrounding context, and `diff_only` shows the diff header with the access reason and no hunks. The spans each side shows are the **supplied ranges**, numbered as the gutter shows them.
+**Every changed file is read, unless policy excludes it.** Added, modified, deleted, renamed and type-changed paths between the base and head commits are required files, except files marked `linguist-generated` in `.gitattributes` and the repository's own backlog file. A pull request whose changed files are all excluded halts without calling a model. A pass reads at most 400, in batches of at most 40 in path order. Generated files too large to show whole are skipped with a warning.
 
-A file verdict means the supplied ranges on both sides were examined, not merely the pathname. Evidence must sit inside the ranges on the side its revision names — a removed line cited at the base is accepted, any span outside the supplied ranges is refused — and lines the hunks did not show are unseen: never evidence, and named in `known_limits` when they limit the review. See [ADR 0026](adrs/0026-coverage-counts-supplied-bytes-only.md).
+**Files arrive as numbered hunks.** Each line of a hunk carries its old line number, its new line number and a `|`, with a dash where the line does not exist on that side. Models miscount lines under a bare `@@` header, and GitHub refuses a comment on a line the diff does not show, so the numbers are given rather than derived. CrossRev re-derives the same mapping before posting and moves a comment at most three lines to reach a hunk. Under the default `review.input_policy: hunks_first`, a file arrives in one of three forms:
 
-Files past the pass budget carry `review_budget_reached`.
+| Form | When | What the reviewer sees |
+|---|---|---|
+| `full_text` | New, deleted, or at most 8 KiB | The whole file as one hunk |
+| `hunks_context` | Larger edited files | Each change with its enclosing function, clipped to 100 lines of context |
+| `diff_only` | Binary, unreadable, rename-only or mode-only | The diff header and the reason, no content |
 
-Each input is judged once per concern and the answers merge before coverage publishes: identical findings collapse into one claim carrying both concerns, and `could_not_review` from either concern wins the file's verdict and blocks convergence.
+Under `whole_when_fits`, an edited file is sent whole whenever its whole form fits the call, and as hunks otherwise.
 
-The next review after a repair reads what the repair changed first, then the full scope.
+**A verdict covers only what was shown.** The spans each side showed are the supplied ranges. Evidence for a verdict must cite lines inside them, and lines outside them are recorded as unseen in `known_limits`, never as evidence ([ADR 0026](adrs/0026-coverage-counts-supplied-bytes-only.md)).
 
-The pass records which repair it confirmed only after it reads every current file. A first clean review records none.
+**Calls are sized to the harness.** Each call's full prompt is measured against a packing target derived from the model's input window, for example 390,000 bytes for Codex and 312,000 for Claude Code at their default models, and 120 KiB where the prompt travels as a command argument. A configured model with a smaller window lowers the target. Calls pack up to the target. Shared context, the part every call repeats such as the pull request description, is judged on its own: past 0.75 of the target, calls run over budget and record `over_budget`, and past the hard limit the pass halts. A file too large for one call splits at hunk boundaries, and its parts merge back into one verdict. That halt is `shared_context_exceeds_window`, and it is the only size limit that stops a pass.
 
-The reviewer reports a scope note saying what was read, and a list of known limits saying what constrained it.
+**Model calls per pass.** A review pass makes `k × c + m` accepted calls: `k` inputs, `c` concerns, and `m` cross-model check calls. `m` is zero when the review raised no findings and usually one otherwise. Under the defaults, a pull request that fits one input makes two calls when clean and three when it has findings. Each part of a split file counts as its own input in `k`. A rejected answer can be retried, which adds attempts but not calls. `review.concerns: [correctness]` with `review.check: off` makes it one call.
 
-One convergence rule reads that note with the counts, the confirmed repair and the required-check evidence. The review writer, both label rules, the local cycle and both status paths all read that rule. A gate that fails, waits, misses or cannot be read never falls back to the reviewer verdict.
+## 8. Security boundaries
 
-`crossrev/converged` means the review work is complete and the required checks passed — or none were required, in which case nothing is read and every route behaves as before. The pass marker records the evidence each pass judged; the generation's own verification envelope stays reserved.
+Pull request titles, bodies, diffs and comments are untrusted text that a reviewer must read, and any of it can try to instruct the model. CrossRev's design rests on one rule: **the process that reads untrusted text holds no credential.**
 
-The file list lives in `internal/intel`, the stored record in `internal/prstate`, the batch loop in `internal/review`, and the convergence rule in `internal/policy`.
+```mermaid
+flowchart LR
+    subgraph trusted["Holds the GitHub credential"]
+        orch["crossrev orchestrator"]
+    end
+    subgraph untrusted["Reads untrusted text, holds no GitHub credential"]
+        model["Model CLI process"]
+    end
+    gh["GitHub API"]
+    orch -->|"all reads and writes"| gh
+    orch -->|"prompt, with GH_TOKEN and friends stripped"| model
+    model -->|"JSON answer only"| orch
+```
 
-### The coverage ledger
+1. **Credential separation.** Every GitHub call goes through the orchestrator. Adapters strip `GH_TOKEN`, `GITHUB_TOKEN`, `GH_ENTERPRISE_TOKEN` and `GITHUB_ENTERPRISE_TOKEN` before starting a model process. On runners, workflows persist no checkout token, legs remove any persisted one, and git authenticates per call through `gh`. An injected instruction that reaches tool use still cannot post, push or read a secret. This is the layer the others back up.
+2. **Policy from the base branch.** Settings are read from the base revision, so a pull request cannot loosen the rules it is reviewed under ([ADR 0003](adrs/0003-policy-read-from-the-base-revision.md)).
+3. **Quarantine.** A branch can contain files that configure the harness reviewing it: settings, instruction files, hooks, MCP servers. CrossRev moves every known such path out of the checkout before a model runs and restores it before committing. Moved, not deleted, so a pull request that adds a hook is still reviewed as text.
+4. **Least privilege per leg.** The review leg gets no write access. The resolve leg may edit files but never run with full bypass modes. Codex and Claude Code review with CrossRev's own read tool as their only way to read files, and their event streams are watched: a review leg that runs a command halts with `review_leg_ran_command` and publishes nothing. One review leg may make at most 200 reads totalling 1 MiB. Each model attempt gets what is left of that allowance, and reads count against it even when the attempt fails or is interrupted. If the read tool stops serving, the leg falls back to the prompt alone under the default `.policy.on_reads_unavailable: degrade`, or stops under `halt`. opencode reviews with its read tools denied, and agy reviews from the prompt alone; neither reports command events, so the tripwire cannot run on them, and `crossrev doctor` says so. Grok reviews are refused until its isolation is verified again ([ADR 0027](adrs/0027-review-legs-read-only-through-the-served-tool.md)). The cross-model check runs under the same review isolation.
+5. **A prompt notice** tells each leg that everything under a given heading is data, not instruction, and that text addressing the model is itself a finding.
 
-Coverage is stored in the repository itself, as a commit addressed by one ref per pull request per reviewer slot: `refs/crossrev/pr/42/reviewer1/coverage`. Each generation is a commit carrying `manifest.json` and `records.json`, parented on the previous generation.
+The quarantine and the notice are best-effort layers. Credential separation is the one that holds the line.
 
-One generation holds a record for every required file, outstanding ones included. The pass marker on the pull request records the handle naming the generation — its number, its commit SHA, and where it lives — and that handle is what a reader trusts: it resolves the commit, not the ref.
+## 9. Harness adapters
 
-The scope report stays a reviewer claim — the examined scope and known limits the reviewer reported, labelled as claims rather than deterministic discovery — and each covered record now also carries a measurement of what the reviewer was given for it: a digest over the exact rendered bytes, the form they arrived in (`full_text`, `hunks_context` or `diff_only`), the supplied ranges on each side, the part count, and whether they were truncated (never: an oversized file splits instead). A split file's merged record carries the union of its parts' ranges with the slice count. The manifest carries the `reads` envelope reserved as null beside the verification envelope. The engine is `hunk-v2` plus the review-contract digest — the effective concerns, check mode, input policy and read mode the pass ran with, hashed into the identity and recorded on its marker — and the record schema is v3, so generations stored under `hunk-v1` retire and each open pull request is re-reviewed once.
+Each adapter receives a prompt file, a schema, a working directory, an optional model, effort and endpoint, and whether the leg may write. It returns the answer and metadata: which harness and endpoint ran, which model answered where the harness reports it, and normalised token usage. Usage is split into fresh input, cache reads, cache writes and output; `total` is their sum, and reasoning tokens are recorded beside the total, never added to it. `internal/harness` estimates cost from the vendored rates in `assets/prices.json`, and refuses to estimate rather than guess when a rate is missing.
 
-A read failure is reported, never answered as empty. Only the trusted author counts. A ref that went missing while its commit survives is re-created on read; objects that are gone lose the ledger, and the next pass re-reviews; objects that do not verify fail the pass closed.
-
-Under `coverage.store: auto` a refused ref write falls back to the marker comment, which must fit in 64 KiB — a cap the ref store does not share, its generations persisting as git objects. The retention ladder sheds the predecessor generation first, then compacts the current generation to counts under `on_overflow: degrade`, then halts with the `ledger_exhausted` limit and stop counts. `crossrev doctor` reports which store is in force and why.
-
-[What CrossRev writes](what-crossrev-writes.md) carries the blast-radius contract; [ADR 0022](adrs/0022-the-coverage-ledger-lives-in-git-refs.md) records the decision.
-
-Repository files declare `version: 2`. A file that still declares `version: 1` is refused. Run `crossrev init --upgrade` to re-render workflows. It leaves the policy file alone, so change the version line by hand.
-
-## The credential seam
-
-**The process reading attacker-controlled text is deliberately the process holding no credential.**
-
-A pull request's title, body, diff, code comments and review threads are all material a reviewer must read, and any of it can address the model directly. CrossRev handles that in three layers, of which only the first is load-bearing:
-
-1. **Credential separation.** Every GitHub read and write goes through the orchestrator. The adapters strip `GH_TOKEN`, `GITHUB_TOKEN`, `GH_ENTERPRISE_TOKEN` and `GITHUB_ENTERPRISE_TOKEN` from the environment before starting the model-facing process. An injection that reaches tool use still cannot post as the App, push a commit, or read a secret. On a runner the same separation extends to the checkout: generated workflows persist no checkout token, the legs remove a persisted one before the harness starts, and git authenticates per invocation through `gh`.
-2. **Quarantine.** A pull request branch contains files that configure the thing reviewing it — settings, instruction files, hooks, MCP server definitions, agents. A hook is arbitrary code execution before the model sees a token. CrossRev moves every known harness-loaded path out of the checkout before any invocation and restores it before anything is committed. **Quarantined rather than deleted**, because a pull request that *adds* a hook is exactly the pull request a reviewer should be flagging: the diff still carries the text, at a path no harness auto-loads.
-3. **An explicit notice in the prompt** telling each leg that everything below a given heading is data rather than instruction, and that text addressing the model is itself a finding.
-
-The quarantine list is deliberately over-broad and deliberately not exhaustive. It is a best-effort layer, not the thing standing between an injected hook and the App token.
-
-If the harness writes to a quarantined path anyway, that write was made blind and is discarded on restore — with a warning, because a finding "fixed" by editing a quarantined file is reported as fixed and lands in no commit.
-
-## The harness seam
-
-Each adapter takes a prompt file, a schema, a working directory, an optional model, effort and endpoint, and whether the leg may write to the working tree. An adapter that pins its CLI versions refuses an install it does not drive before the leg starts — today the opencode adapter refuses any install outside 1.x that way (issue #272). Each returns **two things**: the payload, and execution metadata naming the harness, the resolved endpoint, the answering model where the harness reports one, and a normalized usage record — fresh input, cache read, cache writes split by TTL with an unsplit remainder for harnesses that name none, and output, with `total` defined as their sum rather than read from the vendor, and reasoning persisted beside the total and never added to it. `internal/harness` owns the record's identity, table pricing against the vendored extract at `assets/prices.json`, the two rules that refuse to price rather than guess, billing-mode derivation and footnote composition. Adapters parse vendor fields into buckets and read neither credentials nor price data.
-
-**Write permission is derived from the leg, not configured.** The resolve leg has to change files, so it is granted file edits — `--permission-mode acceptEdits` on Claude Code, `--sandbox workspace-write` on Codex, `--mode accept-edits` on Antigravity. The review leg is granted nothing: it has no reason to write, and write access widens the blast radius of a prompt injection carried in a diff for nothing in return. The line held is between editing files and running arbitrary commands, so `bypassPermissions` and `danger-full-access` are never passed. The grant is a flag rather than a settings file because the quarantine above would move a settings file out of the way before the harness started — and a grant that survived it would be the hole the quarantine exists to close.
-
-**Read permission is derived from the descriptor's `read_mode`, not configured.** Codex and Claude Code review served: CrossRev's read tool is their only read path — Codex takes the server command as `-c mcp_servers.crossrev.*` config beside `--disable shell_tool --disable unified_exec --disable view_image --disable apps --disable image_generation` and `-c web_search="disabled"`, Claude Code takes an MCP config file with `--strict-mcp-config`, an empty built-in tool list and `--allowedTools mcp__crossrev__read_file` — and their event streams feed the review tripwire. The command block is verified live on each pinned version (codex 0.159.2, claude 2.1.237); the leg probes the installed CLI and refuses anything but the exact verified version — an intermediate or prerelease install is refused even inside recorded compatibility history, which doctor reports but the gate never reads. The live tool registries were captured at Codex 0.159.2 and Claude Code 2.1.237: Codex completed a served review and an editing resolve, and Claude completed a bounded review with one byte-verified served read. Codex resource-helper scope was checked against its source and actual configuration; the complete runtime MCP server catalog remains unobserved. Each model attempt is granted the leg's remaining allowance against the 200-read / 1 MiB caps, and served reads are charged to the ledger even when the call is interrupted, fails or exhausts its retries. Grok, opencode and agy review supplied: the prompt carries everything and no read tool is granted. Grok reviews are refused with `review_isolation_unverified` — the empty tools allowlist left the command tool callable on the pinned version, so there is no verified block until one is recorded again; opencode is denied the five read tools through its isolation config; agy emits no tool events and `crossrev doctor` names the gap. A review leg that runs a command halts with `review_leg_ran_command` and publishes nothing; a read path that stops serving degrades visibly or halts per `.policy.on_reads_unavailable` (default `degrade`), with the reason in the pass comment, the reads envelope on the marker and the generation, and the run log. The manifest envelope carries declared and effective modes with the reason and the counts; `reads.json` beside each ref-store generation carries the per-call detail with `overlaps_supplied` flags. See [ADR 0027](adrs/0027-review-legs-read-only-through-the-served-tool.md).
+Version gates differ by adapter. Codex and Claude Code review only on the exact CLI version their read isolation was verified on. opencode accepts major versions 1.x and 2.x and refuses anything else. Grok must report a version or the leg is refused, and its reviews are refused on isolation grounds regardless. agy is not version-gated.
 
 <!-- crossrev:harness-table:start -->
 <!-- Generated by scripts/render-harness-docs.sh — do not edit -->
@@ -221,54 +345,42 @@ Each adapter takes a prompt file, a schema, a working directory, an optional mod
 | `opencode` | opencode | No schema flag: the schema travels inside the prompt, and CrossRev extracts the JSON from the answer text itself. |
 <!-- crossrev:harness-table:end -->
 
-The inline-versus-path difference is not a detail: handing Claude a path fails with a JSON parse error about the leading slash, which reads like a corrupt schema rather than a wrong argument type.
+**Answers are validated against three schemas**: `schemas/findings.schema.json` for the review, `schemas/resolve.schema.json` for the resolve, and `schemas/check.schema.json` for the cross-model check. A failure is one of two kinds:
 
-**Model ids must be fully qualified.** `--model fable-5` fails as an entitlement error rather than as a typo.
-
-### Making sure the two legs really differed
-
-Silent substitution is the failure the cross-model design exists to prevent, and it completes normally when unchecked. Two layers:
-
-- **What the orchestrator asked for.** It knows exactly what it invoked, so it asserts the legs differ in binary, resolved base URL or model — and that no endpoint variable is set in the inherited environment, which would redirect the harness process-wide.
-- **What answered.** Where a harness reports the answering model, the two are compared. Where it doesn't, the marker records the absence rather than implying a check that never ran.
-
-## The three schemas
-
-`schemas/findings.schema.json` and `schemas/resolve.schema.json` constrain what each leg returns, and `schemas/check.schema.json` constrains the cross-model check's one decision per numbered candidate. A harness that constrains its own output enforces them natively, so a shape failure there is an adapter bug rather than model drift; opencode and supplied grok reviews carry the schema in the prompt instead, so a shape miss there is retried once as model drift.
-
-Validation splits by exit code, and the split is about who is at fault:
-
-| Code | Kind | Meaning |
+| Kind | Meaning | Response |
 |---|---|---|
-| 1 | **shape** | A key missing, a type wrong, an enum value out of range. An adapter or harness bug — a retry reproduces it |
-| 2 | **semantic** | The shape is perfect and the content contradicts what the orchestrator supplied: a finding number nothing was numbered with, the same finding answered twice, one left out, an issue number nobody offered. Model drift by definition, so it earns one more attempt |
+| Shape | A key missing, a wrong type, an out-of-range value | Where the harness enforces the schema itself, an adapter bug: fails, since a retry reproduces it. Where the schema travels in the prompt (opencode, grok), model drift: one more attempt |
+| Semantic | Valid shape, but contradicts what was sent: an unknown finding number, one answered twice or left out | Model drift. One more attempt |
 
-Validation stays narrower than general JSON Schema validation. It checks required keys, types and enum ranges. The schemas stay flat enough for that to be sufficient. A schema that outgrows the check is the signal to add a real validator rather than to let the check drift behind it.
+**The two legs must really differ.** CrossRev checks that the legs differ in binary, endpoint or model, and that no inherited environment variable redirects a harness. Where a harness reports the model that answered, the two are compared. A cross-model check that answered as the reviewer's own model is recorded as `same_model`, never as cross-model.
 
-## The gutter
+**Prompts carry the skill text.** The orchestrator copies `skills/pr-review/SKILL.md` and `skills/pr-resolve/SKILL.md` into every prompt instead of relying on the harness to find them. That keeps prompts identical across harnesses, and the quarantine would move installed skills out of the checkout anyway.
 
-Both legs are given the diff with every line inside a hunk prefixed by its number in the old file, its number in the new file, and a `|`. A dash stands where the line doesn't exist on that side.
+## 10. Running it: local and automated
 
-That's there because a model asked to derive a line number counts lines under a `@@` header and sometimes counts wrong, and GitHub accepts a comment only on a line the diff actually shows — a finding one line outside a hunk is refused and falls out of the thread it belongs in. The gutter is also what `side` means: `RIGHT` reads the second column, `LEFT` the first, and a line showing a dash on one side can't take a comment there.
+| | Local | Automated |
+|---|---|---|
+| Started by | `crossrev review`, `crossrev resolve` or `crossrev cycle` in a terminal | GitHub Actions workflows that `crossrev init` generates |
+| Legs | `cycle` runs both in one process | Each leg is its own workflow run, chained by labels |
+| Trusted marker author | The invoking user | The GitHub App only |
+| Credential | Your `gh` login | A GitHub App installation token |
 
-The orchestrator re-derives the same mapping before posting, and snaps a finding up to three lines to reach a hunk — exactly the margin a miscount lands in, since three is git's own context width. Past that the reviewer meant somewhere else, and moving the comment would anchor it to code the finding never mentions.
+```mermaid
+flowchart LR
+    open["PR opened, ready, labelled,<br/>or /crossrev review comment"] --> rw["Review workflow"]
+    rw -->|"crossrev/awaiting-resolution"| sw["Resolve workflow"]
+    sw -->|"pushed a fix, or coverage unmet:<br/>crossrev/awaiting-review"| rw
+    rw --> end1["converged or halted"]
+    sw --> end1
+    cron1["Watchdog, every 30 minutes"] -.->|"retry a stalled review once"| rw
+    cron1 -.->|"retry a stalled resolve once"| sw
+    cron1 -.->|"second stall"| hlt["Halted"]
+    cron2["Token refresh, every 12 hours,<br/>only for pairings that need it"] -.->|"keeps the harness login fresh"| cred["Stored harness credential"]
+```
 
-The gutter is also what coverage counts: the supplied ranges are the spans each side shows, numbered as the gutter shows them, and a verdict's evidence must sit inside them on the side its revision names.
+Both event workflows share one concurrency group per pull request, so two legs never write at once. Writes made with `GITHUB_TOKEN` do not trigger workflows, so the chain needs the App token, and the action has no default for it.
 
-**Both legs get the same description of the gutter**, because pass 2 has to mean the same thing by a line number as pass 1 did.
-
-## Where the skill text comes from
-
-The orchestrator reproduces `skills/pr-review/SKILL.md` and `skills/pr-resolve/SKILL.md` into each prompt rather than relying on the harness discovering them. Two reasons:
-
-- The quarantine moves `.claude/` and `.agents/` out of the checkout before any invocation — exactly where a workflow would have placed the skills. Re-planting into a quarantined tree and removing them again before the commit leaves a window where a crash commits CrossRev's own skills into someone's pull request.
-- Reproducing the text makes the prompt **byte-identical across harnesses**, which is the property that lets pass 2 judge pass 1's findings.
-
-The skills stay installable and usable by hand; nothing about them changes. The generated workflows just don't need to place them anywhere.
-
-## Delivery
-
-CrossRev is delivered to consuming repositories as a **composite action pinned by full 40-character SHA**, with the tag riding in a trailing comment:
+**Delivery.** Workflows call CrossRev as a composite action pinned by full 40-character commit SHA, because a tag can be moved ([ADR 0009](adrs/0009-delivery-via-sha-pinned-composite-action.md)):
 
 ```yaml
 - uses: carlosboeing/crossrev@<40-char-sha>   # v0.1.0
@@ -279,57 +391,62 @@ CrossRev is delivered to consuming repositories as a **composite action pinned b
     trigger: automatic
 ```
 
-The SHA is the pin because `git tag -f` plus a force push moves a tag, and the failure mode is a repository whose review behaviour changes with nothing in its own history to show for it. `crossrev init` generates the pinned form; the floating `@v0` in the README is a human choosing convenience knowingly.
+The action downloads the release binary, checks its digest against the release's `checksums.txt`, and runs `crossrev doctor` before the leg. `trigger` defaults to `automatic`, so a workflow that forgets it still gets the caps.
 
-Two inputs are worth understanding:
+## 11. Settings that shape a pass
 
-- **`app-token` has no default, deliberately.** Writes made with `GITHUB_TOKEN` do not trigger workflows, so defaulting to it would stall the chain after pass 1 while looking healthy the whole way. Published review actions commonly default this input; copying that here would be the exact bug the design exists to prevent. The action fails loudly on an empty token.
-- **`trigger` defaults to `automatic`**, the opposite of the CLI's default, because the two entry points fail safe in opposite directions. Forgetting the input in a workflow should give you the caps, not an uncapped loop.
+All live in `.github/crossrev.yml` on the base branch. Each review setting also has a flag for one local run; automated mode refuses those flags. The run log records each effective value and where it came from. Full reference: [configuration](configuration.md).
 
-The action's first step downloads the release binary for the runner platform and checks its digest against the release's `checksums.txt`. The second runs `crossrev doctor` from that binary, so a consumer's workflow cannot forget the preflight. Installation stays the runner's job.
-
-Every generated workflow calls the composite action, including the **credential refresher**. It passes `leg: auth-refresh` and the harness credential as step `env`, and checks nothing out at all — it never sees the pull request branch, never runs a model and never reads a diff. The action's preflight asks each leg for the level it needs: a model-running leg for a harness CLI, a forge-only leg for the core two.
+| Setting | Default | Effect | Flag |
+|---|---|---|---|
+| `review.concerns` | both | Which concerns each input is reviewed for | `--concerns` |
+| `review.check` | `resolver` | Run the cross-model check, or `off` | `--check` |
+| `review.input_policy` | `hunks_first` | How files are shown to the reviewer | `--input-policy` |
+| `verification.required_checks` | none | Check runs that must pass, as `NAME` or `NAME@APP` | `--required-check`, `--no-required-checks` |
+| `verification.wait_minutes` | `10` | How long a leg waits for pending checks, 0 to 30 | `--check-wait` |
+| `policy.min_fix_severity` | `medium` | Lowest severity the resolver may change code for | |
+| `policy.max_passes_per_cycle` | `3` | Passes in one cycle | |
+| `policy.max_files_changed_per_pr` | `200` | Largest pull request reviewed unattended | |
+| `policy.max_prs_per_day` | `25` | Pull requests reviewed per rolling 24 hours | |
 
 ## The layout
 
-CrossRev is a Go binary plus the files it is built from and the files it writes elsewhere. `cmd/crossrev` is the composition root. `internal/` holds the packages. `assets/` holds the canonical harness descriptor and price extract. Everything else is schemas, skills, templates, scripts, tests, or delivery.
-
 ```
 action.yml       the composite action consuming repositories call
-cmd/crossrev/    the native entrypoint: CLI table, wiring, legs, init
-assets/          canonical data compiled into the binary
-  harnesses.json   the single validated descriptor for every harness fact
-  prices.json      vendored rate extract for the table-priced estimate, stamped with its upstream revision
+cmd/crossrev/    the entrypoint: CLI table, wiring, legs, init
+assets/          data compiled into the binary
+  harnesses.json   the validated descriptor for every harness fact
+  prices.json      vendored token rates for the usage estimate, stamped with its upstream revision
 internal/        Go packages, in tiers
   core/            Tier 0: domain primitives and FindingID
   buildinfo/       Tier 1: version and build metadata
-  policy/          Tier 1: pure policy functions and termination rules
-  prstate/         Tier 1: marker parsing, finding identity, coverage ledger stores
+  policy/          Tier 1: convergence, labels and termination rules
+  prstate/         Tier 1: markers, finding identity, coverage ledger stores
   diff/            Tier 1: gutter mapping, hunk snapping, supplied line ranges
-  validate/        Tier 1: payload validation
-  intel/           Tier 1: Review Intelligence contracts
-  config/          Tier 2: configuration loading
+  validate/        Tier 1: answer validation for all three schemas
+  intel/           Tier 1: required files, input planning, batching and splitting
+  config/          Tier 2: configuration loading and validation
   prompt/          Tier 2: assembled prompt text
   exec/            Tier 2: command execution and the environment allowlist
   ui/              Tier 2: output and formatting
-  runlog/          Tier 2: logging and redaction
+  runlog/          Tier 2: run log and redaction
   vcs/             Tier 2: git operations
   sandbox/         Tier 2: harness quarantine
   forge/           Tier 2: forge abstractions
   forge/ghexec/    Tier 2: GitHub CLI adapter
   cred/            Tier 2: credential resolution
-  harness/         Tier 2: model harness adapters
+  harness/         Tier 2: model harness adapters and token usage
   symbols/         Tier 2: symbol indexing and worker entrypoint
-  verify/          Tier 2: required-check gate evaluator, verification runner
+  verify/          Tier 2: required-check evaluation and the shared wait
   verify/ghactions/ Tier 2: GitHub Actions simulation
   testgen/         Tier 2: policy-table fixture generator
   archtest/        Tier 2: structural rules over the source tree
-  review/          Tier 3: review leg orchestration
-  resolve/         Tier 3: resolve leg orchestration
-  cycle/           Tier 3: multi-pass cycle driver
-  app/             Tier 3: application lifecycle
+  review/          Tier 3: review leg, concern calls, cross-model check
+  resolve/         Tier 3: resolve leg, settle and gate re-drive
+  cycle/           Tier 3: multi-pass cycle, status, restart, watchdog
+  app/             Tier 3: GitHub App lifecycle
   initcmd/         Tier 3: init command
-  preflight/       Tier 3: dependency checks, the coverage report and the gate report
+  preflight/       Tier 3: doctor checks, the coverage report and the gate report
   cli/             Tier 3: CLI command router
 schemas/         findings.schema.json, resolve.schema.json, check.schema.json
 skills/          pr-review/, pr-resolve/
@@ -338,19 +455,17 @@ scripts/         lint.sh, check-changelog.sh, check-parity-coverage.sh,
                   next-version.sh, refresh-prices.sh, refresh-generated-rules.sh,
                   render-harness-docs.sh, build-binary.sh, sync-embedded-assets.sh,
                   verify-native-toolchain.sh, release-targets.json
-tests/           the stubbed-gh suite. tests/run.sh builds the binary once and runs all of it
+tests/           the offline suite with stubbed gh and harness CLIs
 ```
 
-Maintainer scripts keep vendored data current without putting network fetches on runtime paths: `scripts/refresh-prices.sh` extracts token rates and input windows from LiteLLM into `assets/prices.json`, and `scripts/refresh-generated-rules.sh` inspects upstream Linguist's `generated.rb` and reports additions for `internal/intel/generated.go`. Both tools leave production runs offline and deterministic.
+Maintainer scripts keep vendored data current without network calls at run time: `scripts/refresh-prices.sh` extracts token rates and input windows into `assets/prices.json`, and `scripts/refresh-generated-rules.sh` reports upstream additions to the generated-file rules in `internal/intel/generated.go`.
 
-## The test suite
+## Tests
 
-`tests/run.sh` builds the binary once and runs the whole suite offline against it, with no network, no model and no pull request. It stubs `gh` and the harness CLIs onto PATH and builds throwaway git repositories with real histories and real bare origins, so the assertions are about what CrossRev actually did rather than what it printed.
+Everything is tested offline: no network, no model, no real pull request.
 
-Suites run in parallel, one job per core up to eight, because nothing is shared between them: each suite gets its own `XDG_CONFIG_HOME` and `XDG_STATE_HOME`, each case gets its own `gh` route table and call log, and `fixture_repo` builds a fresh checkout and bare origin per case. Output keeps glob order whatever the job count, so a parallel run and a sequential one print the same bytes. `-j 1` runs them one at a time. The time goes on starting processes rather than on computing.
+- **`tests/run.sh`** builds the binary once and runs the shell suites against it in parallel. It stubs `gh` and the harness CLIs onto PATH and builds throwaway git repositories with real histories and bare origins, so assertions check what CrossRev did rather than what it printed. Each suite and case gets its own config, state and stub route table.
+- **`go test ./...`** covers the packages, the frozen parity vectors under `tests/fixtures/parity/`, the policy tables under `tests/fixtures/policy/`, and the tier rules in `internal/archtest`.
+- **`scripts/lint.sh`** runs syntax checks, `shellcheck -S warning`, `go vet`, and the embedded-asset and policy-table drift checks.
 
-`tests/stub/codex` is a deliberate tripwire: it exits loudly instead of running, because the no-config default names codex as reviewer, and a fixture whose config failed to load would otherwise reach the real CLI and make a real billed call. A Go test asserts it still refuses.
-
-`go test ./...` proves the packages beside the suite: the frozen parity vectors under `tests/fixtures/parity/`, the policy tables under `tests/fixtures/policy/`, the tier-structure rules in `internal/archtest`, and the environment contract in `internal/cli`. `scripts/check-parity-coverage.sh` ledgers every original shell suite to its proof. `tests/parity-coverage.tsv` keeps the rows for deleted suites as the record of where their behaviour went.
-
-`scripts/lint.sh` runs syntax checks plus `shellcheck -S warning` across the remaining shell, `go vet`, the embedded-asset drift check, and the policy-table regeneration check.
+`tests/stub/codex` deliberately exits loudly instead of running. The default config names Codex as reviewer, so a fixture whose config failed to load would otherwise reach the real CLI and make a billed call.

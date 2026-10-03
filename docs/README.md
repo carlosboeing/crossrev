@@ -10,7 +10,7 @@ Start with [installation](installation.md), then [usage](usage.md). Everything e
 | [configuration.md](configuration.md) | `.github/crossrev.yml` field by field, machine-local endpoints, environment variables |
 | [credentials.md](credentials.md) | Which secrets automated mode needs, what each one holds, and why Codex needs a second App |
 | [troubleshooting.md](troubleshooting.md) | The failure modes, each with the name it reports itself under |
-| [architecture.md](architecture.md) | How the loop is built: the two legs, the orchestrator, the adapters, the marker and label contract |
+| [architecture.md](architecture.md) | How CrossRev is built: terms, components, one pass step by step, state, convergence, coverage, security boundaries, adapters and delivery, with diagrams |
 | [adrs/](adrs/) | Decision records — what was decided, what was considered, what it costs |
 | [ROADMAP.md](ROADMAP.md) | What's next, and what's deliberately deferred |
 | [changelog-0.x.md](changelog-0.x.md) | Release notes for 0.1.0 to 0.5.0, moved out of `CHANGELOG.md` |
