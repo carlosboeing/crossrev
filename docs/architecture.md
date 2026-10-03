@@ -136,9 +136,9 @@ sequenceDiagram
 3. **Claim.** Post a summary comment with a marker before any work, so a run that dies can be resumed.
 4. **Plan.** List the required files and pack them into model calls that fit the harness's input window. A file too big for one call is split into parts.
 5. **Review.** Call the reviewer once per input per concern: `correctness` first, then `consistency`. Each call returns a verdict per file and any findings, validated against `schemas/findings.schema.json`.
-6. **Merge and record.** Combine the concern answers for the input. The same finding from both concerns becomes one finding. If either concern could not review a file, the file's verdict is `could_not_review`, which blocks convergence. Each accepted input publishes a new coverage generation to the git ref straight away, so an interrupted pass resumes from the inputs still waiting.
+6. **Merge and record.** Combine the concern answers for the input. The same finding from both concerns becomes one finding. If either concern could not review a file, the file's verdict is `could_not_review`, which blocks convergence. Each accepted input publishes a new coverage generation to the git ref straight away, so an interrupted pass resumes from the inputs still waiting. The parts of a split file publish together, once every part has an answer, so an interrupted split file is reviewed again from its first part.
 7. **Cross-model check.** Send every merged finding, numbered, to the resolver's model in read-only mode. It confirms, rejects, or marks each a duplicate, and may correct a severity. Rejected findings stay on the marker with the reason; they do not post. If the check call fails past its retries, every finding posts unchecked and the summary says `check: degraded`; if the checker cannot run at all, it says `check: unavailable`. A safety failure is different: a command run by the checker, a credential, endpoint or hardening refusal, a failed restore of quarantined files, or cancellation stops the pass and publishes nothing, the same as in the review itself.
-8. **Post.** Each confirmed finding posts once, with its own marker: inline on its line when the diff shows that line, as a file-level comment when the file is in the diff but the line is not, and as a comment on the pull request itself when the file is outside the diff or GitHub refuses the anchor. A finding already posted on an earlier pass is not posted again. On later passes, findings below `min_fix_severity` are held: listed in the summary and recorded on the marker, but not posted.
+8. **Post.** Each confirmed finding posts once, with its own marker: inline on its line when the diff shows that line, as a file-level comment when the file is in the diff but the line is not, and as a comment on the pull request itself when the file is outside the diff or GitHub refuses the anchor. A finding already posted on an earlier pass is not posted again, except one that was held on a later pass and has since risen to a posting severity. On later passes, findings below `min_fix_severity` are held: listed in the summary and recorded on the marker, but not posted.
 9. **Gate.** If the pass would converge, judge the required checks. Wait for pending or missing ones, then converge or halt.
 10. **Finish.** Rewrite the claim into the pass summary and apply the next label.
 
@@ -155,7 +155,7 @@ The pass then ends one of three ways:
 4. **Record deferrals** in the configured backlog.
 5. **Commit and push** the fixes behind a branch guard.
 6. **Reply.** Answer each finding in its thread, and resolve the thread where the resolution says to.
-7. **Settle.** A pass that pushed hands back to review with `crossrev/awaiting-review`. A pass that settled every finding without pushing can converge directly, behind the same required-check gate as the review.
+7. **Settle.** A pass that pushed hands back to review with `crossrev/awaiting-review`. A pass that settled every finding without pushing can converge directly, behind the same required-check gate as the review, but only when the coverage rules in section 6 also hold at this head. When they do not, for example a file still has no verdict or a repair is unconfirmed, the pass hands back to review without pushing.
 
 ### 4.3 How a pass ends
 
@@ -179,7 +179,9 @@ flowchart TD
         s1 -->|yes| sh["Halted"]
         s1 -->|no| s2{"Pushed a commit?"}
         s2 -->|yes| sr["Awaiting review"]
-        s2 -->|no| sg["Required-check gate"]
+        s2 -->|no| s3{"Coverage rules hold<br/>at this head?"}
+        s3 -->|no| sr
+        s3 -->|yes| sg["Required-check gate"]
     end
     gate{"Required checks"}
     rg --> gate
@@ -263,7 +265,9 @@ One function in `internal/policy` decides convergence. Every route that can appl
 A pull request converges when all of these hold:
 
 - No finding the pull request introduced remains at or above `min_fix_severity`. Pre-existing and lower-severity findings are reported but do not block.
-- Every required file has an accepted verdict, and none is `could_not_review`.
+- The coverage generation is current: recorded for this base, head and engine id.
+- Every required file has an accepted verdict, and none is `could_not_review`. The required set is not empty.
+- The reviewer reported its examined scope and known limits.
 - Any repair the resolver made has been re-read by the reviewer.
 - The required checks passed, or none are configured.
 
@@ -296,7 +300,7 @@ Under `whole_when_fits`, an edited file is sent whole whenever its whole form fi
 
 **Calls are sized to the harness.** Each call's full prompt is measured against a packing target derived from the model's input window, for example 390,000 bytes for Codex and 312,000 for Claude Code at their default models, and 120 KiB where the prompt travels as a command argument. A configured model with a smaller window lowers the target. Calls pack up to the target. Shared context, the part every call repeats such as the pull request description, is judged on its own: past 0.75 of the target, calls run over budget and record `over_budget`, and past the hard limit the pass halts. A file too large for one call splits at hunk boundaries, and its parts merge back into one verdict. That halt is `shared_context_exceeds_window`, and it is the only size limit that stops a pass.
 
-**Model calls per pass.** A review pass makes `k × c + m` accepted calls: `k` inputs, `c` concerns, and `m` cross-model check calls. `m` is zero when the review raised no findings and usually one otherwise. Under the defaults, a one-file pull request makes two calls when clean and three when it has findings. A rejected answer can be retried, which adds attempts but not calls. `review.concerns: [correctness]` with `review.check: off` makes it one call.
+**Model calls per pass.** A review pass makes `k × c + m` accepted calls: `k` inputs, `c` concerns, and `m` cross-model check calls. `m` is zero when the review raised no findings and usually one otherwise. Under the defaults, a pull request that fits one input makes two calls when clean and three when it has findings. Each part of a split file counts as its own input in `k`. A rejected answer can be retried, which adds attempts but not calls. `review.concerns: [correctness]` with `review.check: off` makes it one call.
 
 ## 8. Security boundaries
 
@@ -319,7 +323,7 @@ flowchart LR
 1. **Credential separation.** Every GitHub call goes through the orchestrator. Adapters strip `GH_TOKEN`, `GITHUB_TOKEN`, `GH_ENTERPRISE_TOKEN` and `GITHUB_ENTERPRISE_TOKEN` before starting a model process. On runners, workflows persist no checkout token, legs remove any persisted one, and git authenticates per call through `gh`. An injected instruction that reaches tool use still cannot post, push or read a secret. This is the layer the others back up.
 2. **Policy from the base branch.** Settings are read from the base revision, so a pull request cannot loosen the rules it is reviewed under ([ADR 0003](adrs/0003-policy-read-from-the-base-revision.md)).
 3. **Quarantine.** A branch can contain files that configure the harness reviewing it: settings, instruction files, hooks, MCP servers. CrossRev moves every known such path out of the checkout before a model runs and restores it before committing. Moved, not deleted, so a pull request that adds a hook is still reviewed as text.
-4. **Least privilege per leg.** The review leg gets no write access. The resolve leg may edit files but never run with full bypass modes. Codex and Claude Code review with CrossRev's own read tool as their only way to read files, and their event streams are watched: a review leg that runs a command halts with `review_leg_ran_command` and publishes nothing. If the read tool stops serving, the leg falls back to the prompt alone under the default `.policy.on_reads_unavailable: degrade`, or stops under `halt`. opencode reviews with its read tools denied, and agy reviews from the prompt alone; neither reports command events, so the tripwire cannot run on them, and `crossrev doctor` says so. Grok reviews are refused until its isolation is verified again ([ADR 0027](adrs/0027-review-legs-read-only-through-the-served-tool.md)). The cross-model check runs under the same review isolation.
+4. **Least privilege per leg.** The review leg gets no write access. The resolve leg may edit files but never run with full bypass modes. Codex and Claude Code review with CrossRev's own read tool as their only way to read files, and their event streams are watched: a review leg that runs a command halts with `review_leg_ran_command` and publishes nothing. One review leg may make at most 200 reads totalling 1 MiB. Each model attempt gets what is left of that allowance, and reads count against it even when the attempt fails or is interrupted. If the read tool stops serving, the leg falls back to the prompt alone under the default `.policy.on_reads_unavailable: degrade`, or stops under `halt`. opencode reviews with its read tools denied, and agy reviews from the prompt alone; neither reports command events, so the tripwire cannot run on them, and `crossrev doctor` says so. Grok reviews are refused until its isolation is verified again ([ADR 0027](adrs/0027-review-legs-read-only-through-the-served-tool.md)). The cross-model check runs under the same review isolation.
 5. **A prompt notice** tells each leg that everything under a given heading is data, not instruction, and that text addressing the model is itself a finding.
 
 The quarantine and the notice are best-effort layers. Credential separation is the one that holds the line.
