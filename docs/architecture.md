@@ -122,7 +122,7 @@ sequenceDiagram
             R-->>O: verdicts and findings (JSON)
         end
         O->>O: merge concern answers for this input
-        O->>G: publish coverage generation to the git ref
+        O->>G: publish coverage generation to the git ref<br/>(a split file: once its last part has answered)
     end
     O->>C: numbered candidate findings
     C-->>O: confirmed, rejected or duplicate, each
@@ -369,7 +369,7 @@ Version gates differ by adapter. Codex and Claude Code review only on the exact 
 flowchart LR
     open["PR opened, ready, labelled,<br/>or /crossrev review comment"] --> rw["Review workflow"]
     rw -->|"crossrev/awaiting-resolution"| sw["Resolve workflow"]
-    sw -->|"pushed a fix:<br/>crossrev/awaiting-review"| rw
+    sw -->|"pushed a fix, or coverage unmet:<br/>crossrev/awaiting-review"| rw
     rw --> end1["converged or halted"]
     sw --> end1
     cron1["Watchdog, every 30 minutes"] -.->|"retry a stalled review once"| rw
