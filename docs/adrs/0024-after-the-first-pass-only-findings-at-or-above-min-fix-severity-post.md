@@ -8,8 +8,8 @@ authors:
   - "Carlos Boeing"
   - "Muse Spark (Muse Code)"
 related:
-  - docs/adrs/0002-the-pull-request-is-the-state.md
-  - docs/adrs/0003-policy-read-from-the-base-revision.md
+  - 0002-the-pull-request-is-the-state.md
+  - 0003-policy-read-from-the-base-revision.md
 ---
 
 # 0024 — After the first pass, only findings at or above min_fix_severity post

@@ -8,9 +8,9 @@ authors:
   - "Carlos Boeing"
   - "Claude Opus 4.6 (Antigravity)"
 related:
-  - docs/adrs/0009-delivery-via-sha-pinned-composite-action.md
-  - docs/adrs/0018-go-native-parity-contract.md
-  - docs/adrs/0020-the-first-native-release-ships-a-reduced-scope.md
+  - 0009-delivery-via-sha-pinned-composite-action.md
+  - 0018-go-native-parity-contract.md
+  - 0020-the-first-native-release-ships-a-reduced-scope.md
 ---
 
 # 0021 — Cron legs run through the composite action

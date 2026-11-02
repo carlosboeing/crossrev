@@ -8,8 +8,8 @@ authors:
   - "Carlos Boeing"
   - "Muse Spark (Muse Code)"
 related:
-  - docs/adrs/0001-cross-model-review-loop.md
-  - docs/adrs/0003-policy-read-from-the-base-revision.md
+  - 0001-cross-model-review-loop.md
+  - 0003-policy-read-from-the-base-revision.md
 ---
 
 # 0027 — Review legs read only through the served tool
