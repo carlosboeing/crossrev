@@ -8,9 +8,9 @@ authors:
   - "Carlos Boeing"
   - "Muse Spark (Muse Code)"
 related:
-  - docs/adrs/0022-the-coverage-ledger-lives-in-git-refs.md
-  - docs/adrs/0023-generated-files-are-recognised-without-configuration.md
-  - docs/adrs/0025-review-input-is-hunks-that-split.md
+  - 0022-the-coverage-ledger-lives-in-git-refs.md
+  - 0023-generated-files-are-recognised-without-configuration.md
+  - 0025-review-input-is-hunks-that-split.md
 ---
 
 # 0026 — Coverage counts supplied bytes only
