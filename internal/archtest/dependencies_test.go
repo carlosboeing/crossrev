@@ -35,7 +35,7 @@ var tier2IntraEdges = map[string][]string{
 	"internal/vcs":              {"internal/exec"},
 	"internal/cred":             {"internal/exec"},
 	"internal/symbols":          {"internal/exec"},
-	"internal/verify":           {"internal/exec"},
+	"internal/verify":           {"internal/exec", "internal/forge", "internal/config"},
 	"internal/forge/ghexec":     {"internal/forge", "internal/exec"},
 	"internal/verify/ghactions": {"internal/verify", "internal/forge", "internal/exec"},
 	"internal/harness":          {"internal/exec", "internal/cred", "internal/runlog"},

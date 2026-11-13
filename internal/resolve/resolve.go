@@ -26,9 +26,28 @@ func (l *Leg) Run(ctx context.Context, req Request) (out Result) {
 	s, early := l.load(ctx, req)
 	if early.Outcome != "" || early.Err != nil {
 		if early.Outcome == OutcomeNoFindings || early.Outcome == OutcomeHalted {
+			if s.redriving && gateHeldAtMovedHead(s) {
+				// An empty settle held at an older head: the new revision is
+				// the reviewer's, whatever its checks now report.
+				return l.handBackMovedHead(ctx, s)
+			}
+			if refusal := l.verificationSettings(s); refusal != nil {
+				return Result{Outcome: OutcomeRefused, Err: refusal, Pass: s.pass}
+			}
 			return l.finishEmpty(ctx, s, early)
 		}
 		return early
+	}
+	if s.redriving && gateHeldAtMovedHead(s) {
+		// The checks held a settle at a head that has since moved: the new
+		// revision is the reviewer's to read, so hand back without the model.
+		return l.handBackMovedHead(ctx, s)
+	}
+	if s.redriving && gateOnlySettle(s) {
+		if refusal := l.verificationSettings(s); refusal != nil {
+			return Result{Outcome: OutcomeRefused, Err: refusal, Pass: s.pass}
+		}
+		return l.redriveGate(ctx, s)
 	}
 	if l.Log != nil {
 		l.Log.SetLeg("resolve")
@@ -48,7 +67,7 @@ func (l *Leg) Run(ctx context.Context, req Request) (out Result) {
 	}
 	// The resolved settings, beside the header and the marker: the `leg`
 	// line above fires before the settings are known.
-	l.Log.Settings(s.settings.Harness, s.settings.Model, s.settings.Effort)
+	l.Log.ReviewSettings(s.settings.Harness, s.settings.Model, s.settings.Effort, s.settings.detail())
 
 	// The run header, two bare printfs after the settings are chosen and
 	// before the claim (lib/run.sh:1919-1920):

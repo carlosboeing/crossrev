@@ -224,7 +224,7 @@ func TestLoginPrintsTheLoopPanelAndStopsWhenDeclined(t *testing.T) {
 		"│  Owner        ShoreLogic (Organization)\n"+
 		"│  Name         CrossRev ShoreLogic (override with --name)\n"+
 		"│  Role         loop\n"+
-		"│  Permissions  contents:write, issues:write, pull_requests:write\n"+
+		"│  Permissions  contents:write, issues:write, pull_requests:write, checks:read\n"+
 		"│               and nothing else\n"+
 		"│  Webhook      disabled. GitHub never calls CrossRev; your workflows do\n"+
 		"│  Visibility   private to ShoreLogic\n"+

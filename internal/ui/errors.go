@@ -31,9 +31,17 @@ type FatalError struct {
 	// Action is what to do about it — rule 4 of the output voice. It is
 	// printed, not stored on the pull request.
 	Action string
+	// Kind is the sentinel this fatal matches under errors.Is, for the
+	// callers that degrade on one failure and propagate another. Nil
+	// matches nothing, which is every refusal minted before the field
+	// existed. It never reaches the message: Error is the reason alone.
+	Kind error
 }
 
 func (e *FatalError) Error() string { return e.Reason }
+
+// Is answers errors.Is for the sentinel this fatal was minted under.
+func (e *FatalError) Is(target error) bool { return e.Kind != nil && target == e.Kind }
 
 // Reason returns the die reason carried by err, or the empty string when err
 // is not one and wraps none. This is the read the EXIT trap does.

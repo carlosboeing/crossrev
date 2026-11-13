@@ -11,9 +11,11 @@ import (
 	"github.com/carlosboeing/crossrev/internal/config"
 	"github.com/carlosboeing/crossrev/internal/core"
 	"github.com/carlosboeing/crossrev/internal/forge"
+	"github.com/carlosboeing/crossrev/internal/harness"
 	"github.com/carlosboeing/crossrev/internal/policy"
 	"github.com/carlosboeing/crossrev/internal/prstate"
 	"github.com/carlosboeing/crossrev/internal/ui"
+	"github.com/carlosboeing/crossrev/internal/verify"
 )
 
 // Life is what can be shown about the process behind an unfinished claim
@@ -159,6 +161,10 @@ type Status struct {
 	// composition root resolves both and hands the answer in. Empty in
 	// automated mode is the refusal, never a fallback to the invoking user.
 	AppSlug string
+	// Harness is the harness descriptor, which names the configured
+	// reviewer's read mode for the coverage engine identity. Empty reads
+	// the compiled descriptor, the way the resolve leg does.
+	Harness harness.Document
 }
 
 // Load reads the pull request and derives the whole report.
@@ -214,7 +220,7 @@ func (s *Status) Load(ctx context.Context, repo core.Slug, pr int) (Report, erro
 		labels:    statusLabelNames(pull.Labels),
 		markers:   statusMarkers(comments, author),
 		threads:   s.Forge.ReviewThreads(ctx, repo, pr),
-		coverage:  statusCoverageSourceFor(s.Forge, cfg, repo, pr),
+		coverage:  statusCoverageSourceFor(s.Forge, cfg, repo, pr, s.Harness),
 		author:    author,
 		base:      pull.BaseRefOid,
 		head:      pull.HeadRefOid,
@@ -348,7 +354,8 @@ func statusCoverageConverges(ctx context.Context, in statusInput, review prstate
 	// The pass is judged by what it ran with, read off its marker — not by
 	// the configuration text, which an override or a substitution parts
 	// from and a later edit can move under a settled pass.
-	if !prstate.GenerationCurrent(generation, core.RevisionPair{Base: in.base, Head: in.head}, core.FileEngineVersion, prstate.ProducerFor(review, in.coverage.producer)) {
+	engine := prstate.EngineFor(review, in.coverage.engine)
+	if !prstate.GenerationCurrent(generation, core.RevisionPair{Base: in.base, Head: in.head}, engine, prstate.ProducerFor(review, in.coverage.producer)) {
 		return false
 	}
 	conv := policy.Convergence{
@@ -376,16 +383,18 @@ func statusCoverageConverges(ctx context.Context, in statusInput, review prstate
 }
 
 // coverageSource is what the status coverage read goes through: the client
-// the report already holds, the slot it addresses, and the configured
-// producer a marker without one falls back to. Reads route by handle
-// location — a marker handle reads through the marker store and a ref
-// handle through the ref store — so a store the marker never named is
-// never consulted.
+// the report already holds, the slot it addresses, the configured
+// producer a marker without one falls back to, and the base-policy
+// review-contract engine identity a marker without a recorded one falls
+// back to. Reads route by handle location — a marker handle reads through
+// the marker store and a ref handle through the ref store — so a store the
+// marker never named is never consulted.
 type coverageSource struct {
 	refs     prstate.LedgerStore
 	marker   prstate.LedgerStore
 	slot     prstate.SlotRef
 	producer prstate.Producer
+	engine   string
 }
 
 // refLedgerSource is implemented by forge clients that can read coverage
@@ -394,7 +403,7 @@ type refLedgerSource interface {
 	RefLedger(namespace string) prstate.LedgerStore
 }
 
-func statusCoverageSourceFor(client forge.Forge, cfg *config.Config, repo core.Slug, pr int) coverageSource {
+func statusCoverageSourceFor(client forge.Forge, cfg *config.Config, repo core.Slug, pr int, doc harness.Document) coverageSource {
 	reviewer := cfg.Reviewers()[0]
 	out := coverageSource{
 		// Read-only: status never publishes, so no filter.
@@ -406,11 +415,31 @@ func statusCoverageSourceFor(client forge.Forge, cfg *config.Config, repo core.S
 			Effort:   reviewer.Effort,
 			Endpoint: reviewer.Endpoint,
 		},
+		engine: reviewEngineID(cfg, reviewer.Harness, doc),
 	}
 	if src, ok := client.(refLedgerSource); ok && src != nil {
 		out.refs = src.RefLedger(cfg.Coverage().RefNamespace)
 	}
 	return out
+}
+
+// reviewEngineID answers the review-contract engine identity under the
+// base policy: the configured concerns, check mode and input policy
+// beside the configured reviewer's effective read mode. A generation
+// whose marker records the identity its pass published under is judged
+// by that; this is the fallback for markers written before the pass
+// recorded it.
+func reviewEngineID(cfg *config.Config, reviewer string, doc harness.Document) string {
+	if len(doc.Names()) == 0 {
+		if compiled, err := harness.Load(harness.DescriptorJSON()); err == nil {
+			doc = compiled
+		}
+	}
+	effective := harness.ReadModeSupplied
+	if entry, found := doc.For(reviewer); found {
+		effective = harness.EffectiveReadMode(entry.ReadMode())
+	}
+	return core.ReviewEngineID(cfg.ReviewContract(string(effective)))
 }
 
 // storeFor answers the store the named handle reads through, or false when
@@ -525,6 +554,11 @@ func statusStateFromMarkers(ctx context.Context, in statusInput) core.LoopState 
 	review, ok := prstate.MarkerFor(in.markers, pass, core.LegReview)
 	if !ok || review.State != core.PassComplete {
 		return core.LoopAwaitingReview
+	}
+	// A settle the required checks held is halted however the review ended:
+	// an empty pass can reach the resolve leg with a converged verdict.
+	if gateHeldSettle(in.markers, pass) {
+		return core.LoopHalted
 	}
 	switch core.Verdict(review.Verdict.Value()) {
 	case core.VerdictConverged:
@@ -1010,6 +1044,12 @@ func statusNextHalted(in statusInput, pass int) []NextLine {
 	settledPass := hasResolve && m.State == core.PassComplete && !(hasBlocked && blocked)
 	record := statusResolveMarker(m)
 	switch {
+	case settledPass && policy.ResolveGateHeld(record):
+		ev, _ := m.Verification.Get()
+		next.line("Required checks block convergence: %s.", verify.Debt(verify.FromRecord(ev)))
+		next.line("When they have reported, restart the resolve pass:")
+		next.cmd("crossrev restart --pr %d", in.pr)
+		return next
 	// A deferral whose record never landed is not settled: the thread stayed
 	// open on purpose, and the remedy is filing the work and driving the pass
 	// again.
@@ -1158,6 +1198,9 @@ func statusResolutionsOf(resolutions json.RawMessage) []statusResolution {
 // and pass-label decisions read (lib/legs.sh:225-248).
 func statusResolveMarker(m prstate.Marker) policy.ResolveMarker {
 	out := policy.ResolveMarker{CommitSHA: m.CommitSHA.Value()}
+	if ev, ok := m.Verification.Get(); ok {
+		out.Verification = policy.VerificationState(ev.State)
+	}
 	if blocked, ok := m.Blocked.Get(); ok {
 		out.Blocked = blocked
 	}

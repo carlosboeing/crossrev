@@ -656,6 +656,9 @@ func (f *watchdogForge) AwaitingPullRequests(context.Context, core.Slug) []forge
 func (f *watchdogForge) WorkflowRunStatus(context.Context, core.Slug, string) forge.RunStatus {
 	return ""
 }
+func (f *watchdogForge) CheckRuns(context.Context, core.Slug, core.Revision) (forge.CheckRuns, error) {
+	return forge.CheckRuns{}, nil
+}
 func (f *watchdogForge) LabelColour(context.Context, core.Slug, string) string { return "" }
 func (f *watchdogForge) IssueByFinding(context.Context, core.Slug, string, core.FindingID) (int, bool) {
 	return 0, false

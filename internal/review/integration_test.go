@@ -284,7 +284,7 @@ func assertSameMarkerBytes(t *testing.T, gotBody, wantBody string) {
 // "do not edit" header. The pass reviews the six, skips the generated one
 // with a warning above the verdict, and converges.
 func TestReviewSkipsTheGeneratedFileAndConverges(t *testing.T) {
-	e := newEnv(t)
+	e := newEnv(t, "correctness")
 	paths := []string{"a.go", "b.go", "c.go", "d.go", "e.go", "f.go"}
 	for _, path := range paths {
 		writeRequiredHead(e, path, "package p\n")

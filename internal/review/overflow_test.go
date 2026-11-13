@@ -118,7 +118,7 @@ func checkNoRereview(t *testing.T, pass int, seen map[string]bool, prompts []str
 // the path table is what fills the comment.
 func TestOverflowConvergesAcrossPassesRatherThanLooping(t *testing.T) {
 	const files = 900
-	e := newEnv(t)
+	e := newEnv(t, "correctness")
 	e.cfg = mustConfig(t, "coverage:\n  store: marker\n  on_overflow: degrade\n")
 	paths := requiredFilesWithRealisticPaths(t, e, files)
 	prompts := capturePrompt(e)
@@ -196,7 +196,7 @@ func TestARenderedCommentTooSmallForOneCompactGenerationExhausts(t *testing.T) {
 // works. Verdicts are persisted without the evidence behind them — what is
 // lost is detail.
 func TestADegradedGenerationStillConvergesAndStillResumes(t *testing.T) {
-	e := newEnv(t)
+	e := newEnv(t, "correctness")
 	e.cfg = mustConfig(t, "coverage:\n  store: marker\n  on_overflow: degrade\n")
 	paths := requiredFilesWithRealisticPaths(t, e, 410)
 	prompts := capturePrompt(e)
@@ -260,7 +260,7 @@ func TestADegradedGenerationStillConvergesAndStillResumes(t *testing.T) {
 // nothing.
 func TestTheSameFixtureUnderTheRefStoreNeverDegrades(t *testing.T) {
 	const files = 900
-	e := newEnv(t)
+	e := newEnv(t, "correctness")
 	e.cfg = mustConfig(t, "coverage:\n  store: refs\n  on_overflow: degrade\n")
 	paths := requiredFilesWithRealisticPaths(t, e, files)
 	prompts := capturePrompt(e)
@@ -303,7 +303,7 @@ func TestTheSameFixtureUnderTheRefStoreNeverDegrades(t *testing.T) {
 // the scope then grows past what one compact generation can fit, so the
 // re-drive's initial publication exhausts before any batch runs.
 func TestInitialExhaustionKeepsThePriorCoverageClaim(t *testing.T) {
-	e := newEnv(t)
+	e := newEnv(t, "correctness")
 	e.cfg = mustConfig(t, "coverage:\n  store: marker\n  on_overflow: degrade\n")
 	paths := requiredFilesWithRealisticPaths(t, e, 410)
 

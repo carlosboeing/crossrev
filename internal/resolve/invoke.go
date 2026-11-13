@@ -705,6 +705,19 @@ func (l *Leg) renderPrompt(ctx context.Context, s *session, threads []forge.Revi
 		email = "crossrev@users.noreply.github.com"
 	}
 
+	// Evidence for the resolver, computed from the same numbered findings it is
+	// shown. The siblings come last: they are the one input that shrinks.
+	recurrences := recurrenceCandidates(s.markers, s.pass, s.resolvable)
+	siblings := l.siblingPointers(ctx, s, s.resolvable, sbx.Paths())
+	for i := range findings {
+		if i < len(recurrences) {
+			findings[i].Recurrence = recurrences[i]
+		}
+		if i < len(siblings) {
+			findings[i].Siblings = siblings[i]
+		}
+	}
+
 	r := prompt.Resolve{
 		Skill:            prompt.ResolveSkill(),
 		Diff:             diffBytes,
@@ -719,6 +732,12 @@ func (l *Leg) renderPrompt(ctx context.Context, s *session, threads []forge.Revi
 			ExcludeEmail: email,
 			Template:     template,
 		},
+	}
+	// Siblings count toward the hard input limit and give way to it. With no
+	// budget to measure against, the full render goes to the size gate, which
+	// refuses a leg it cannot measure.
+	if limit, ok := l.hardInputBytes(s); ok {
+		return r.RenderWithin(limit), warn, nil
 	}
 	return r.Render(), warn, nil
 }
@@ -846,14 +865,8 @@ func backfillRoots(findings []harness.Node, threads []forge.ReviewThread) []harn
 	return findings
 }
 
-func enrichFindings(findings []harness.Node, markers []prstate.Marker, minFix core.Severity) []harness.Node {
-	// Findings the review leg recorded without posting never reach the
-	// resolver: with no comment on the pull request there is no thread to
-	// reply into and no top-level comment to name, so they are dropped
-	// before numbering. Absent reads as posted, keeping markers written
-	// before the field existed resolvable; only an explicit false filters.
-	// The answer is a new slice: the caller keeps the full record for the
-	// marker and summary rewrite, and only the resolver reads this copy.
+// postedOnly is the findings the resolver can be shown, as a new slice.
+func postedOnly(findings []harness.Node) []harness.Node {
 	kept := make([]harness.Node, 0, len(findings))
 	for _, f := range findings {
 		// Member, not Lookup: the environment contract scan reads a
@@ -864,7 +877,18 @@ func enrichFindings(findings []harness.Node, markers []prstate.Marker, minFix co
 		}
 		kept = append(kept, f)
 	}
-	findings = kept
+	return kept
+}
+
+func enrichFindings(findings []harness.Node, markers []prstate.Marker, minFix core.Severity) []harness.Node {
+	// Findings the review leg recorded without posting never reach the
+	// resolver: with no comment on the pull request there is no thread to
+	// reply into and no top-level comment to name, so they are dropped
+	// before numbering. Absent reads as posted, keeping markers written
+	// before the field existed resolvable; only an explicit false filters.
+	// The answer is a new slice: the caller keeps the full record for the
+	// marker and summary rewrite, and only the resolver reads this copy.
+	findings = postedOnly(findings)
 	priors := priorResolutions(markers)
 	for i := range findings {
 		n := i + 1

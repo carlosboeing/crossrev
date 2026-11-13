@@ -9,7 +9,6 @@ import (
 
 	"github.com/carlosboeing/crossrev/internal/core"
 	"github.com/carlosboeing/crossrev/internal/diff"
-	"github.com/carlosboeing/crossrev/internal/harness"
 	"github.com/carlosboeing/crossrev/internal/intel"
 	"github.com/carlosboeing/crossrev/internal/prstate"
 	"github.com/carlosboeing/crossrev/internal/ui"
@@ -27,7 +26,6 @@ type pendingSplit struct {
 	numbers  [][]int
 	reasons  []string
 	evidence [][]prstate.Evidence
-	findings [][]Finding
 	payloads []json.RawMessage
 	diffs    [][]byte
 	examined []string
@@ -43,28 +41,27 @@ type pendingSplit struct {
 // unmerged, having recorded nothing but the call's run-log line, usage
 // and terminal progress. An error fails the leg the way a batch error
 // does, and the in-memory parts never reach a publication.
-func (l *Leg) invokePartCall(ctx context.Context, req Request, loaded Context, settings legSettings, scope intel.Scope, shared batchContext, part *intel.FilePart, withConfirmation bool, call, total int, outcome *batchOutcome, pending map[core.UnitID]*pendingSplit, out *Result) (merged bool, verdicts map[core.UnitID]recordVerdict, supplied map[core.UnitID]prstate.SuppliedInput, payload json.RawMessage, envelope harness.Envelope, examined []string, limits []string, retErr error) {
+func (l *Leg) invokePartCall(ctx context.Context, req Request, loaded Context, settings legSettings, scope intel.Scope, shared batchContext, part *intel.FilePart, withConfirmation bool, call, total int, outcome *batchOutcome, pending map[core.UnitID]*pendingSplit, out *Result) (merged bool, verdicts map[core.UnitID]recordVerdict, supplied map[core.UnitID]prstate.SuppliedInput, payload json.RawMessage, examined []string, limits []string, retErr error) {
 	expected, _ := partExpectations(part, scope.Base, scope.Head)
 	if shared.diffErr != nil {
-		return false, nil, nil, nil, harness.Envelope{}, nil, nil, shared.diffErr
+		return false, nil, nil, nil, nil, nil, shared.diffErr
 	}
-	promptBytes := shared.renderPart(part, scope.Base, scope.Head, withConfirmation)
-	start := l.now()
-	readsMark := len(l.readsNotes)
-	answer, env, batchMsgs, err := l.invokePrompt(ctx, req, loaded, settings, expected, promptBytes, call)
-	ms := l.now().Sub(start).Milliseconds()
-	out.Messages = append(out.Messages, batchMsgs...)
+	renderConcern := func(concern string) []byte {
+		focused := shared
+		focused.concern = concern
+		return focused.renderPart(part, scope.Base, scope.Head, withConfirmation)
+	}
+	answer, err := l.invokeConcerns(ctx, req, loaded, settings, expected, renderConcern, len(part.Diff), call, total, part.Index+1, scope, outcome, out)
 	if err != nil {
-		return false, nil, nil, nil, harness.Envelope{}, nil, nil, err
+		return false, nil, nil, nil, nil, nil, err
 	}
-	l.logAcceptedCall(call, promptBytes, len(part.Diff), l.callReadsSince(readsMark), env, ms)
 	parsed, ex, li, err := verdictsFromPayload(answer, []intel.FileUnit{part.Unit})
 	if err != nil {
-		return false, nil, nil, nil, harness.Envelope{}, nil, nil, err
+		return false, nil, nil, nil, nil, nil, err
 	}
 	disp, ok := parsed[part.Unit.ID]
 	if !ok {
-		return false, nil, nil, nil, harness.Envelope{}, nil, nil, fmt.Errorf("the part answer names no verdict for %s", part.Unit.Path)
+		return false, nil, nil, nil, nil, nil, fmt.Errorf("the part answer names no verdict for %s", part.Unit.Path)
 	}
 	ps, ok := pending[part.Unit.ID]
 	if !ok {
@@ -75,7 +72,6 @@ func (l *Leg) invokePartCall(ctx context.Context, req Request, loaded Context, s
 			numbers:  make([][]int, part.Count),
 			reasons:  make([]string, part.Count),
 			evidence: make([][]prstate.Evidence, part.Count),
-			findings: make([][]Finding, part.Count),
 			payloads: make([]json.RawMessage, part.Count),
 			diffs:    make([][]byte, part.Count),
 		}
@@ -85,7 +81,7 @@ func (l *Leg) invokePartCall(ctx context.Context, req Request, loaded Context, s
 	for _, id := range disp.FindingIDs {
 		n, err := strconv.Atoi(id)
 		if err != nil {
-			return false, nil, nil, nil, harness.Envelope{}, nil, nil, fmt.Errorf("the part answer names finding %q for %s", id, part.Unit.Path)
+			return false, nil, nil, nil, nil, nil, fmt.Errorf("the part answer names finding %q for %s", id, part.Unit.Path)
 		}
 		numbers = append(numbers, n)
 	}
@@ -93,7 +89,6 @@ func (l *Leg) invokePartCall(ctx context.Context, req Request, loaded Context, s
 	ps.numbers[part.Index] = numbers
 	ps.reasons[part.Index] = disp.Reason
 	ps.evidence[part.Index] = disp.Evidence
-	ps.findings[part.Index] = findingsFromPayload(answer)
 	ps.payloads[part.Index] = answer
 	ps.diffs[part.Index] = part.Diff
 	ps.examined = append(ps.examined, ex)
@@ -101,7 +96,6 @@ func (l *Leg) invokePartCall(ctx context.Context, req Request, loaded Context, s
 	if v := verdictFromPayload(answer); v != "" {
 		ps.verdict = v
 	}
-	out.Messages = append(out.Messages, outcome.addEnvelope(env)...)
 	// The batch loop prints the merged file's own progress line after the
 	// merge returns, so this call prints one only while the file still has
 	// unjudged parts: printing on the merging call too would show the same
@@ -127,10 +121,10 @@ func (l *Leg) invokePartCall(ctx context.Context, req Request, loaded Context, s
 		} else {
 			out.Messages = append(out.Messages, line)
 		}
-		return false, nil, nil, nil, harness.Envelope{}, nil, nil, nil
+		return false, nil, nil, nil, nil, nil, nil
 	}
-	verdicts, supplied, payload = mergePendingSplit(ps)
-	return true, verdicts, supplied, payload, env, ps.examined, ps.limits, nil
+	verdicts, supplied, payload, err = mergePendingSplit(ps)
+	return err == nil, verdicts, supplied, payload, ps.examined, ps.limits, err
 }
 
 // judged reports which parts have an accepted verdict.
@@ -142,18 +136,17 @@ func (ps *pendingSplit) judged() []bool {
 	return out
 }
 
-// mergePendingSplit folds every part's accepted verdict into the split
-// file's single verdict, supplied measurement and payload. Part-local
-// finding numbers map into the file's merged finding order — the parts'
-// findings concatenated in part order — so the merged finding numbers
-// index the merged finding list the way a batch-local number indexes its
-// batch's. The supplied digest covers the concatenated rendered part diffs
-// in order, in the file's own supplied form, with the union of the parts'
-// ranges and the part count beside it.
-func mergePendingSplit(ps *pendingSplit) (map[core.UnitID]recordVerdict, map[core.UnitID]prstate.SuppliedInput, json.RawMessage) {
+// mergePendingSplit folds completed parts into one file verdict. Local
+// finding positions map into the candidate union in part order, with
+// identical candidates collapsed and their concern sets joined. The supplied
+// digest covers rendered part diffs in order, with their ranges and count.
+func mergePendingSplit(ps *pendingSplit) (map[core.UnitID]recordVerdict, map[core.UnitID]prstate.SuppliedInput, json.RawMessage, error) {
+	findings, mappings, err := mergeCandidatePayloads(ps.payloads, nil)
+	if err != nil {
+		return nil, nil, nil, err
+	}
 	unit := ps.unit
 	split := make([]intel.SplitVerdict, ps.count)
-	base := 0
 	var evidence []prstate.Evidence
 	var reasons []string
 	var rendered []byte
@@ -161,10 +154,12 @@ func mergePendingSplit(ps *pendingSplit) (map[core.UnitID]recordVerdict, map[cor
 	for i := 0; i < ps.count; i++ {
 		mapped := make([]int, 0, len(ps.numbers[i]))
 		for _, n := range ps.numbers[i] {
-			mapped = append(mapped, base+n)
+			if n < 1 || n > len(mappings[i]) {
+				return nil, nil, nil, fmt.Errorf("part %d names unknown finding %d", i+1, n)
+			}
+			mapped = append(mapped, mappings[i][n-1])
 		}
 		split[i] = intel.SplitVerdict{Verdict: ps.verdicts[i], FindingNumbers: mapped}
-		base += len(ps.findings[i])
 		evidence = append(evidence, ps.evidence[i]...)
 		if ps.reasons[i] != "" {
 			reasons = append(reasons, ps.reasons[i])
@@ -185,7 +180,8 @@ func mergePendingSplit(ps *pendingSplit) (map[core.UnitID]recordVerdict, map[cor
 	supplied := map[core.UnitID]prstate.SuppliedInput{
 		unit.ID: {Digest: core.BodyDigestHex(rendered), Form: mergedSuppliedForm(unit.Form), Ranges: ranges, Parts: ps.count},
 	}
-	return verdicts, supplied, mergePartPayload(ps)
+	payload, err := mergePartPayload(ps, findings)
+	return verdicts, supplied, payload, err
 }
 
 // mergedSuppliedForm answers the supplied form a merged split file
@@ -206,7 +202,7 @@ func mergedSuppliedForm(form intel.InputForm) string {
 // findings in part order, the last part's verdict, and every part's
 // scope claims. Generations already carry the merged coverage; the
 // marker and summary need the union.
-func mergePartPayload(ps *pendingSplit) json.RawMessage {
+func mergePartPayload(ps *pendingSplit, findings json.RawMessage) (json.RawMessage, error) {
 	verdict := ps.verdict
 	if verdict == "" {
 		verdict = "issues-remain"
@@ -219,14 +215,11 @@ func mergePartPayload(ps *pendingSplit) json.RawMessage {
 		}
 	}
 	merged, err := json.Marshal(struct {
-		Verdict       string            `json:"verdict"`
-		BlockedReason *string           `json:"blocked_reason"`
-		Findings      json.RawMessage   `json:"findings"`
-		ExaminedScope string            `json:"examined_scope"`
-		KnownLimits   []string          `json:"known_limits"`
-	}{Verdict: verdict, BlockedReason: nil, Findings: unionRawFindings(ps.payloads), ExaminedScope: examined, KnownLimits: ps.limits})
-	if err != nil {
-		return ps.payloads[len(ps.payloads)-1]
-	}
-	return merged
+		Verdict       string          `json:"verdict"`
+		BlockedReason *string         `json:"blocked_reason"`
+		Findings      json.RawMessage `json:"findings"`
+		ExaminedScope string          `json:"examined_scope"`
+		KnownLimits   []string        `json:"known_limits"`
+	}{Verdict: verdict, BlockedReason: nil, Findings: findings, ExaminedScope: examined, KnownLimits: ps.limits})
+	return merged, err
 }

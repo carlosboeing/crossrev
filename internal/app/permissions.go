@@ -6,7 +6,8 @@ import "github.com/carlosboeing/crossrev/internal/ui"
 // it (_auth_role_permissions, lib/auth.sh:70).
 //
 // ADR 0006 is the decision: three repository permissions for the loop, all at
-// write, and nothing else — no Secrets, no Administration, no Workflows.
+// write, plus the read-only `checks` the required-check gate judges with —
+// and nothing else: no Secrets, no Administration, no Workflows.
 // `issues` is not trimmable, because GitHub models pull request labels under
 // the Issues API and the whole loop is label-driven.
 //
@@ -29,7 +30,7 @@ import "github.com/carlosboeing/crossrev/internal/ui"
 func RolePermissions(role string) ([]byte, error) {
 	switch role {
 	case RoleLoop:
-		return []byte(`{"contents":"write","issues":"write","pull_requests":"write"}`), nil
+		return []byte(`{"contents":"write","issues":"write","pull_requests":"write","checks":"read"}`), nil
 	case RoleRefresher:
 		return []byte(`{"secrets":"write"}`), nil
 	}

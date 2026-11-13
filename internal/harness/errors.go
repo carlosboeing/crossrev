@@ -86,6 +86,20 @@ var (
 	// command block is unverified at this pin. Reported as
 	// review_isolation_unverified.
 	ErrIsolationUnverified = errors.New("the review isolation is unverified")
+
+	// ErrHarnessFailed is a harness that failed instead of answering:
+	// quota, a transient failure past its retry, an authentication
+	// failure, or anything else the envelope carries as an error. The
+	// review leg fails on it; the cross-model check degrades to
+	// posting unchecked, naming the harness's own sentence as the
+	// reason.
+	ErrHarnessFailed = errors.New("the harness failed instead of answering")
+
+	// ErrAnswerRejected is a harness answer the orchestrator turned away
+	// past its retries: a shape the schema cannot hold, or a payload
+	// contradicting what the call was given. The review leg fails on
+	// it; the cross-model check degrades to posting unchecked.
+	ErrAnswerRejected = errors.New("the harness answer was rejected past its retries")
 )
 
 // Refusal is a fatal harness decision: what went wrong, and what to do about it.

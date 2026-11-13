@@ -83,7 +83,7 @@ var _ prstate.LedgerStore = (*readFailingLedger)(nil)
 // ledger store. It returns the environment and the recorder.
 func cutoverEnv(t *testing.T) (*env, *recordingLedger) {
 	t.Helper()
-	e := newEnv(t)
+	e := newEnv(t, "correctness")
 	var first, rest []string
 	for i := 1; i <= 41; i++ {
 		path := fmt.Sprintf("file%02d.go", i)

@@ -353,7 +353,8 @@ has "advisory context adds no required unit" "$(cat "$GH_STATE"/blob-*)" '"requi
 # --- input, review and ledger bounds ------------------------------------------
 
 # A file that fits no rendered prompt alone splits into parts across calls
-# rather than halting: the first call judges the schedulable file (app.ts),
+# rather than halting. This fixture selects correctness alone: the first
+# call judges the schedulable file (app.ts),
 # every later call judges one part of the oversized file, and the pass
 # converges with no halted label.
 fixture_repo; stub_reset
@@ -367,7 +368,7 @@ export CROSSREV_REVIEW_PAYLOAD
 CROSSREV_REVIEW_PAYLOAD_2="$(review_payload_for converged "[$(unit1 no_issue '[]' "$(jq -cn --arg sha "$FIX_HEAD" '[{path:"huge.go", revision:$sha, start_line:null, end_line:null, source:"git", note:null}]')")]" | payload)"
 export CROSSREV_REVIEW_PAYLOAD_2
 CROSSREV_STUB_COUNT="$(mktemp)"; export CROSSREV_STUB_COUNT
-out="$("$CROSSREV" review --pr 42 2>&1)"; rc=$?
+out="$("$CROSSREV" review --pr 42 --concerns correctness 2>&1)"; rc=$?
 unset CROSSREV_REVIEW_PAYLOAD_2 CROSSREV_STUB_COUNT
 is "an oversized file converges rather than halting" "$rc" "0"
 has "the split pass converges" "$(applied_labels)" "labels[]=crossrev/converged"

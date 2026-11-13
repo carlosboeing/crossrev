@@ -263,6 +263,82 @@ func TestRecordCoverageRoundTripsThroughCoverageHandle(t *testing.T) {
 	}
 }
 
+// The handle carries the engine identity the named generation was
+// published under: recording it writes coverage_engine beside the claim,
+// and reading the claim answers it back. A handle without one leaves the
+// field absent, the way a marker written before the pass recorded it reads.
+func TestCoverageEngineRoundTripsWithTheHandle(t *testing.T) {
+	const sha = "9f3c1abdeadbeef9f3c1abdeadbeef9f3c1abd"
+	const engine = "hunk-v2+28dcc30489bb"
+	var m prstate.Marker
+	m.RecordCoverage(prstate.Handle{Gen: 3, Commit: sha, Location: "refs/crossrev/pr/42/reviewer1/coverage", Engine: engine})
+	h, claimed, err := m.CoverageHandle()
+	if !claimed || err != nil {
+		t.Fatalf("a recorded handle reads back claimed=%v err=%v", claimed, err)
+	}
+	if h.Engine != engine {
+		t.Fatalf("a recorded handle reads back engine %q, want %q", h.Engine, engine)
+	}
+	raw, err := m.MarshalJSON()
+	if err != nil {
+		t.Fatalf("MarshalJSON: %v", err)
+	}
+	var keys map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &keys); err != nil {
+		t.Fatalf("reading the marker back: %v", err)
+	}
+	if string(keys["coverage_engine"]) != `"`+engine+`"` {
+		t.Fatalf("coverage_engine = %s, want %q", keys["coverage_engine"], engine)
+	}
+	decoded, err := prstate.ParseMarker(raw)
+	if err != nil {
+		t.Fatalf("ParseMarker: %v", err)
+	}
+	if got, ok := decoded.CoverageEngine.Get(); !ok || got != engine {
+		t.Fatalf("decoded engine = %q,%v, want %q", got, ok, engine)
+	}
+	// A handle without an engine leaves the field absent: the claim still
+	// reads, and readers fall back to the base-policy identity.
+	var old prstate.Marker
+	old.RecordCoverage(prstate.Handle{Gen: 3, Commit: sha, Location: "refs/crossrev/pr/42/reviewer1/coverage"})
+	if old.CoverageEngine.Present() {
+		t.Fatal("a handle without an engine recorded one on the marker")
+	}
+	h, claimed, err = old.CoverageHandle()
+	if !claimed || err != nil {
+		t.Fatalf("a claim without an engine reads back claimed=%v err=%v", claimed, err)
+	}
+	if h.Engine != "" {
+		t.Fatalf("a claim without an engine reads back engine %q", h.Engine)
+	}
+}
+
+// A generation is judged by the identity its pass recorded on the marker.
+// A marker written before the pass recorded it — the field absent, null
+// or empty — falls back to the base-policy identity the caller computed.
+func TestEngineForFallsBackWithoutTheField(t *testing.T) {
+	const fallback = "hunk-v2+493d6306af16"
+	const recorded = "hunk-v2+28dcc30489bb"
+	const sha = "9f3c1abdeadbeef9f3c1abdeadbeef9f3c1abd"
+	claim := `"coverage_gen":3,"coverage_ref":"refs/crossrev/pr/42/reviewer1/coverage","coverage_commit":"` + sha + `"`
+	old := v2MarkerWith(t, claim)
+	if got := prstate.EngineFor(old, fallback); got != fallback {
+		t.Errorf("EngineFor without the field = %q, want the fallback %q", got, fallback)
+	}
+	for _, extra := range []string{
+		claim + `,"coverage_engine":null`,
+		claim + `,"coverage_engine":""`,
+	} {
+		if got := prstate.EngineFor(v2MarkerWith(t, extra), fallback); got != fallback {
+			t.Errorf("EngineFor with %s = %q, want the fallback %q", extra, got, fallback)
+		}
+	}
+	named := v2MarkerWith(t, claim+`,"coverage_engine":"`+recorded+`"`)
+	if got := prstate.EngineFor(named, fallback); got != recorded {
+		t.Errorf("EngineFor with the field = %q, want the recorded %q", got, recorded)
+	}
+}
+
 func TestUnknownMarkerKeysStillRoundTrip(t *testing.T) {
 	const sha = "9f3c1abdeadbeef9f3c1abdeadbeef9f3c1abd"
 	// Raw() is the documented route for continuing state an older writer left

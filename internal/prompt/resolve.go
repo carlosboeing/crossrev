@@ -54,7 +54,38 @@ type Finding struct {
 	// whole sentence with nothing inside the backticks, and false prints no
 	// line at all.
 	PriorResolution Value `json:"prior_resolution"`
+
+	// Recurrence is set when an earlier pass fixed, with a pushed commit, what
+	// looks like this same finding. It is new in this leg's prompt and has no
+	// shell counterpart, so it is a plain struct rather than a Value, and a
+	// finding without it prints nothing.
+	Recurrence *Recurrence `json:"recurrence,omitempty"`
+
+	// Siblings is the advisory, partial list of places at head where an
+	// identifier from the finding's anchored line also occurs. Ranked and
+	// capped by the caller; RenderWithin shortens it under the size limit.
+	Siblings []Sibling `json:"siblings,omitempty"`
 }
+
+// Recurrence names the earlier fix a current finding may be reopening.
+type Recurrence struct {
+	// Pass is the earlier resolve pass, FindingID the finding it fixed, and
+	// Commit the commit that pass pushed.
+	Pass      int    `json:"pass"`
+	FindingID string `json:"finding_id"`
+	Commit    string `json:"commit"`
+}
+
+// Sibling is one location where an identifier from a finding's anchored line
+// occurs at head.
+type Sibling struct {
+	Path string `json:"path"`
+	Line int    `json:"line"`
+	Term string `json:"term"`
+}
+
+// MaxSiblings is the most locations one finding lists.
+const MaxSiblings = 10
 
 // Issue is one existing issue offered as a duplicate candidate.
 type Issue struct {
@@ -171,6 +202,27 @@ type Resolve struct {
 // Render is the prompt, byte for byte as lib/prompt.sh's prompt_resolve writes
 // it.
 func (r Resolve) Render() []byte {
+	return r.render(MaxSiblings)
+}
+
+// RenderWithin renders the prompt in at most hardBytes where it can, by
+// shortening every finding's sibling list rather than touching anything else:
+// first to half as many entries, then half again, then none. Siblings are
+// advisory, so they give way before the limit is reached instead of being the
+// reason a pass refuses. A prompt over hardBytes with no sibling left comes
+// back whole, because the size gate that measures it owns the refusal.
+func (r Resolve) RenderWithin(hardBytes int) []byte {
+	keep := MaxSiblings
+	for {
+		out := r.render(keep)
+		if len(out) <= hardBytes || keep == 0 {
+			return out
+		}
+		keep /= 2
+	}
+}
+
+func (r Resolve) render(keepSiblings int) []byte {
 	var b strings.Builder
 
 	b.WriteString("# Your task\n\n")
@@ -244,8 +296,34 @@ func (r Resolve) Render() []byte {
 		}
 		fmt.Fprintf(&b, "- May fix: %s\n", mayFix)
 		if f.PriorResolution.Truthy() {
-			fmt.Fprintf(&b, "- **You settled this `%s` in an earlier pass.** If it is unchanged "+
-				"and re-raised, escalate rather than re-argue.\n", f.PriorResolution)
+			if f.PriorResolution.EqualsString("fixed") {
+				// A fix that did not hold is a reopened finding to check, not a
+				// disagreement to hand to a human: escalating is for a point
+				// disputed twice.
+				b.WriteString("- **You settled this `fixed` in an earlier pass** and it is raised " +
+					"again. Check whether that fix was incomplete; do not escalate it for that reason alone.\n")
+			} else {
+				fmt.Fprintf(&b, "- **You settled this `%s` in an earlier pass.** If it is unchanged "+
+					"and re-raised, escalate rather than re-argue.\n", f.PriorResolution)
+			}
+		}
+		if f.Recurrence != nil {
+			fmt.Fprintf(&b, "- **Recurrence candidate.** In pass %d you fixed `%s` here with commit `%s`, "+
+				"and this finding sits in the same place. Before repeating that fix, check whether it "+
+				"was incomplete, and say what you concluded in your reply.\n",
+				f.Recurrence.Pass, f.Recurrence.FindingID, shortCommit(f.Recurrence.Commit))
+		}
+		if sib := f.Siblings; len(sib) > 0 && keepSiblings > 0 {
+			if len(sib) > keepSiblings {
+				sib = sib[:keepSiblings]
+			}
+			b.WriteString("- Sibling locations (advisory and partial, not a complete search): where an " +
+				"identifier from the anchored line also occurs at the head. Look at them before you " +
+				"call a repair complete. Fix one only when it carries the same defect this pull " +
+				"request introduced, and only inside your repair scope.\n")
+			for _, s := range sib {
+				fmt.Fprintf(&b, "  - `%s:%d` (`%s`)\n", s.Path, s.Line, s.Term)
+			}
 		}
 		// One newline from the jq expression, one from `jq -r` itself.
 		b.WriteString("\n\n")
@@ -344,4 +422,13 @@ func sortedUnique(in []string) []string {
 		}
 	}
 	return kept
+}
+
+// shortCommit is the seven-character form of a commit SHA, as the resolve
+// summary prints it.
+func shortCommit(sha string) string {
+	if len(sha) > 7 {
+		return sha[:7]
+	}
+	return sha
 }

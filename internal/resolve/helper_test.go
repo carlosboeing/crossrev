@@ -60,6 +60,21 @@ func mustHarness(t *testing.T) harness.Document {
 	return doc
 }
 
+// testEngineID is the review-contract engine identity the default test
+// configuration publishes under: both concerns, the resolver check, the
+// hunks-first policy and the served reads of the default codex reviewer.
+// It states the digest inputs, not the digest, so a production read that
+// stops falling back to the base-policy identity retires these
+// generations and fails below.
+func testEngineID() string {
+	return core.ReviewEngineID(core.ReviewContract{
+		Concerns:    []string{"correctness", "consistency"},
+		Check:       "resolver",
+		InputPolicy: "hunks_first",
+		ReadMode:    "served",
+	})
+}
+
 type testEnv struct {
 	forge    *fakeForge
 	git      *fakeGit
@@ -80,6 +95,7 @@ type testEnv struct {
 	// runCtx is what Run is given. Nil means context.Background(); a case
 	// that needs a cancelled one sets it.
 	runCtx context.Context
+	sleep  func(time.Duration)
 }
 
 func setup(t *testing.T) *testEnv {
@@ -187,6 +203,7 @@ func (e *testEnv) runReq(t *testing.T, req Request) Result {
 		Runner:   e.runner,
 		Log:      e.log,
 		Clock:    func() time.Time { return e.now },
+		Sleep:    e.sleep,
 		Env:      env,
 		Harness:  doc,
 		Adapter:  adapter,
@@ -325,6 +342,12 @@ type fakeForge struct {
 	issueErr       error
 	zeroCreateID   bool
 	order          []string
+	// checks is what CheckRuns answers: the required-check evidence for
+	// the head. checksCalls counts the reads, so a case can pin that the
+	// settle refreshed its evidence.
+	checks      []forge.CheckRun
+	checksErr   error
+	checksCalls int
 }
 
 type reviewReply struct {
@@ -409,6 +432,14 @@ func (f *fakeForge) AwaitingPullRequests(context.Context, core.Slug) []forge.Awa
 }
 func (f *fakeForge) WorkflowRunStatus(context.Context, core.Slug, string) forge.RunStatus {
 	return ""
+}
+func (f *fakeForge) CheckRuns(context.Context, core.Slug, core.Revision) (forge.CheckRuns, error) {
+	f.note("CheckRuns")
+	f.checksCalls++
+	if f.checksErr != nil {
+		return forge.CheckRuns{}, f.checksErr
+	}
+	return forge.CheckRuns{Runs: f.checks}, nil
 }
 func (f *fakeForge) LabelColour(context.Context, core.Slug, string) string { return "" }
 func (f *fakeForge) IssueByFinding(_ context.Context, _ core.Slug, _ string, id core.FindingID) (int, bool) {
@@ -547,6 +578,8 @@ type fakeGit struct {
 	generatedAttrsCalls  []core.Revision
 	removePersistedCalls int
 	removePersistedErr   error
+	searchErr            error
+	searchCalls          int
 	removed              []vcs.RemovedCredential
 	// onAddWorktree, when set, lays files into the fresh worktree.
 	onAddWorktree func(dir string) error

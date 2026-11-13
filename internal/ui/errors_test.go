@@ -53,3 +53,24 @@ func TestReasonOfSomethingElse(t *testing.T) {
 		t.Errorf("Reason(nil) = %q, want empty", got)
 	}
 }
+
+// A fatal minted under a Kind matches it under errors.Is, so a caller
+// degrades on one failure and propagates another; the message stays the
+// reason alone, and a fatal minted before the field matches nothing.
+func TestFatalErrorMatchesItsKind(t *testing.T) {
+	kind := errors.New("the harness failed instead of answering")
+	fatal := &ui.FatalError{Reason: "the claude harness failed: gone", Kind: kind}
+	if !errors.Is(fatal, kind) {
+		t.Error("the fatal does not match the kind it was minted under")
+	}
+	if errors.Is(fatal, errors.New("another sentinel")) {
+		t.Error("the fatal matches a sentinel it was not minted under")
+	}
+	if fatal.Error() != "the claude harness failed: gone" {
+		t.Errorf("Error() = %q, want the reason alone", fatal.Error())
+	}
+	plain := &ui.FatalError{Reason: "the review leg ran a command"}
+	if errors.Is(plain, kind) {
+		t.Error("a fatal with no kind matches one")
+	}
+}

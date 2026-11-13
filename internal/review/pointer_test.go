@@ -14,7 +14,7 @@ import (
 // holder carries a distinct line number.
 func pointerPass(t *testing.T) (*env, []string) {
 	t.Helper()
-	e := newEnv(t)
+	e := newEnv(t, "correctness")
 	var diff strings.Builder
 	e.vcs.searchResults = map[string][]vcs.SearchHit{}
 	for i := 1; i <= 41; i++ {
@@ -70,7 +70,7 @@ func TestReviewBatchPointersArePerCall(t *testing.T) {
 // blob-pass lines were capped to render its retained pointers with the
 // counted rest on the prompt's remainder line.
 func TestReviewBatchPromptCountsCappedHolderLines(t *testing.T) {
-	e := newEnv(t)
+	e := newEnv(t, "correctness")
 	writeRequiredHead(e, "file01.go", "package x\n")
 	e.vcs.searchResults = map[string][]vcs.SearchHit{
 		"UniqueTerm01": {{Path: "docs/noisy.md", Lines: []int{1, 2}, OmittedLines: 98}},

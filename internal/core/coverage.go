@@ -6,24 +6,55 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 )
 
 // FileEngineVersion is the file-coverage engine. Its manifest identity
 // is FileEngineID. A later change to enumeration, evidence or verdict
 // semantics must change this literal and invalidate prior generations.
 //
-// hunk-v1 counts coverage over supplied ranges: every required file reaches
-// the reviewer as its own gutter-numbered hunks, and the ledger records
-// the ranges shown on each side rather than the whole file, so the ranges
-// a file-v2 generation recorded no longer mean the same thing.
-const FileEngineVersion = "hunk-v1"
+// hunk-v2 is hunk-v1 with the review contract fingerprinted into the
+// identity: see ReviewEngineID. Generations published under hunk-v1 retire
+// at the engine comparison, the way every earlier engine retired.
+const FileEngineVersion = "hunk-v2"
 
 // FileEngineID is the first 16 lowercase hex characters of SHA-256 over
-// "crossrev-review-intelligence\nhunk-v1\n". It binds a coverage generation
+// "crossrev-review-intelligence\nhunk-v2\n". It binds a coverage generation
 // to the engine semantics that produced it.
 func FileEngineID() string {
 	sum := sha256.Sum256([]byte("crossrev-review-intelligence\n" + FileEngineVersion + "\n"))
 	return hex.EncodeToString(sum[:])[:16]
+}
+
+// ReviewContract is the review half of a coverage generation's identity:
+// the settings the verdicts were judged under. A generation may be reused
+// only under the same contract; anything else retires it at the engine
+// comparison in prstate.GenerationCurrent.
+type ReviewContract struct {
+	// Concerns are the review concerns in fixed order, correctness then
+	// consistency, filtered to what is in force.
+	Concerns []string
+	// Check is the cross-model check mode: resolver or off.
+	Check string
+	// InputPolicy is the effective review input policy.
+	InputPolicy string
+	// ReadMode is the effective read mode: served or supplied.
+	ReadMode string
+}
+
+// ReviewEngineID is the engine identity a review pass publishes under:
+// hunk-v2 plus the first 12 lowercase hex characters of SHA-256 over the
+// canonical contract string — concerns comma-joined in fixed order, check
+// mode, input policy and read mode, each on its own line. The digest is 12
+// hex characters rather than 16 because it is a change detector between
+// consecutive generations, not a content address.
+func ReviewEngineID(contract ReviewContract) string {
+	canonical := strings.Join(contract.Concerns, ",") + "\n" +
+		contract.Check + "\n" +
+		contract.InputPolicy + "\n" +
+		contract.ReadMode + "\n"
+	sum := sha256.Sum256([]byte(canonical))
+	return FileEngineVersion + "+" + hex.EncodeToString(sum[:])[:12]
 }
 
 // UnitID is a review unit's identity. For this release every unit is a file

@@ -54,7 +54,7 @@ If that process is still running, wait for it or stop it. If it isn't, CrossRev 
 
 ## A halted loop
 
-`crossrev/halted` means the loop stopped short and a human is needed. **Nothing about a halt is a judgement on the code.** Six things cause one:
+`crossrev/halted` means the loop stopped short and a human is needed. **Nothing about a halt is a judgement on the code.** Nine things cause one:
 
 | Cause | What to do |
 |---|---|
@@ -65,6 +65,8 @@ If that process is still running, wait for it or stop it. If it isn't, CrossRev 
 | A finding was `escalated` | It needs a human decision, so `crossrev/stop` went on and the thread stayed open |
 | **A leg stopped with an error** | The harness failed to answer, a commit was refused, a push was rejected. The claim comment and its marker carry the reason. Fix what it names, then run the same command again |
 | The pass left files without a verdict | The claim names them with its halt word and stop counts. Run the same command again to resume — recorded verdicts are reused while the base commit, the pull request commit, the review-engine version and the review producer (harness, model, effort and endpoint) are unchanged |
+| A file no concern could examine | The verdict is `blocked` with "N required file(s) could not be examined". The record names the failed fallbacks in its reason. Fix what it names, then push so the next pass re-examines the file — a re-run at the same head reuses the recorded verdict |
+| A required check failed, waited out, missed or could not be read | The verdict is `blocked` with the gate's halt word. See [Required-check halts](#required-check-halts) |
 
 ## Coverage halts
 
@@ -82,7 +84,7 @@ The ladder sheds the predecessor generation first, then compacts the current one
 
 Run the same command again. It resumes the waiting files, reusing recorded verdicts while the base commit, the pull request commit, the review-engine version and the review producer (harness, model, effort and endpoint) are unchanged. A new push retires every prior result and starts over.
 
-No check runs in this release. The coverage record names verification status not_implemented. A halt never means checks failed.
+Coverage is not the only gate that halts a pass. When required checks are configured, the check gate can halt it instead — those words live under [Required-check halts](#required-check-halts).
 
 The last row is why a marker never reads `started` after the process is gone. A leg that dies writes its reason into the claim it already posted, so `crossrev status` reports the cause rather than only that the run ended.
 
@@ -95,6 +97,22 @@ Remove `crossrev/halted` once you've looked, then run the command `status` sugge
 ### `crossrev/stop`
 
 Somebody applied it, and it outranks everything including a healthy verdict — checked first, every pass. It is an instruction, not a state. Remove it to continue; `status` names the leg that was owed when the brake went on.
+
+## Required-check halts
+
+Four halt words name a pass the required-check gate stopped. The review marker records verdict `blocked`; a completed resolve marker records the gate evidence under `verification`. Both routes apply `crossrev/halted`, and their summaries name the halt word and blocking checks with their run URLs. None of them is a judgement on the code, and none of them becomes a code finding: a failed check is a fact for its own logs, not an attribution CrossRev makes.
+
+`required_check_failed` means a required check's newest run failed. The reason names the check, its conclusion and its run URL. Fix what the run's logs fault, let the check report again, then run `crossrev restart --pr N`.
+
+`required_check_pending` means a check was still running when the wait ran out. Both legs re-read every 30 seconds up to `verification.wait_minutes`, then halt rather than judging mid-run. Run `crossrev restart --pr N` once the checks have reported.
+
+`required_check_missing` means no run carries a required check's name from its App. Usually the workflow never ran for this head — a skipped trigger, a path filter, a job that only runs on another event. Check the Actions tab for the head commit, then run `crossrev restart --pr N`.
+
+`required_checks_unreadable` means the runs could not be read at all. The commonest cause is an installation approved before the loop App asked for Checks: Read — approve the new permission (see [the loop App](credentials.md#the-loop-app)) and run the pass again. Anything else names its own error beside the word.
+
+The gate reads check runs, not commit statuses: a status context never satisfies a required check. The runs are what GitHub reports for the pull request's head commit — the same association required status checks use — and `pull_request` workflows report against that head commit too, so a check that never ran for it (e.g. a workflow triggered only on the base branch) is what reads as missing.
+
+A no-commit settle and an empty-findings resolve wait only when coverage would otherwise permit convergence. A failed, unreadable, or still outstanding gate halts the resolve pass instead of handing an unchanged head back to review. `crossrev status --pr N` names the blocking checks and restart remedy. Once the checks report, `crossrev restart --pr N` selects resolve; it re-judges a gate-held settle without invoking the model or repeating settled replies. Older review markers without a coverage claim follow the same gate rules. With no configured checks, every route behaves as before.
 
 ## The loop went quiet in automated mode
 
@@ -156,7 +174,7 @@ Either way the fix is not lost. It stays in the worktree, which CrossRev keeps a
 
 `resolve_prompt_exceeds_limit` means the rendered resolve prompt overflowed the resolver harness's hard input limit, so the leg refused before any child started and the pass halted with `crossrev/halted`. Nothing was judged, and nothing needs resuming — the claim stays open for the next attempt.
 
-Two ways forward, and only these two: resolve fewer findings in the pass, or move the resolver to a harness with a larger input window (`resolver.harness`, or `--harness` for one run). Shrinking anything else — the diff, the thread list — does not change the accounting, because the prompt is measured whole before the comparison.
+Two ways forward, and only these two: resolve fewer findings in the pass, or move the resolver to a harness with a larger input window (`resolver.harness`, or `--harness` for one run). Shrinking anything else — the diff, the thread list — does not change the accounting, because the prompt is measured whole before the comparison. The sibling-location lists are the exception: they shrink before the leg refuses, so they are never the reason it does.
 
 ## A resolve leg ran a command
 
@@ -224,6 +242,14 @@ A review leg whose served-or-tripwire command block is unverified at its pin nev
 `served reads are unavailable: <reason> (reads_unavailable)`
 
 The served read path is not serving: a failed leg-start self-test, a missing handshake in the server log, or refused read calls. The reason travels in the pass comment, the reads envelope on the marker and the generation, and the run log together. `.policy.on_reads_unavailable` decides what the leg does, read from the base revision like every other policy key: `degrade` records the reason and continues on the supplied prompt (the default), `halt` stops the leg and publishes nothing. A repeated failure under `degrade` is the tool genuinely down rather than a blip — check the run log's `reads` events, then re-run; under `halt`, fix the tool first, because the call published nothing and the pass made no progress.
+
+## The cross-model check degraded or was unavailable
+
+`check: degraded` in the pass summary means the second model was called and failed past its retries — a harness, quota, transient or schema failure. `check: unavailable` means the checker could not run at all — no adapter, unverified review isolation, a CLI that is not installed or a version that is refused. Either way every finding posted unchecked with the reason beside it. The reviewer's findings are still the review; nothing was judged twice and nothing was skipped. A resume reuses the check's durable decisions where the candidates still match, and re-checks where they moved.
+
+Some failures are not degradations: the command tripwire, a restore failure, a credential, endpoint or hardening refusal, a reads halt and cancellation fail the pass the way the review leg's own failures do, because none of them is evidence about the findings.
+
+A check that answered as the reviewer's own model is recorded as `same_model`, never as cross-model. `review.check: off` skips the check and posts everything the reviewer raised.
 
 ## A credential problem in CI
 

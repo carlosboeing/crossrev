@@ -14,6 +14,7 @@ import (
 	"github.com/carlosboeing/crossrev/internal/intel"
 	"github.com/carlosboeing/crossrev/internal/policy"
 	"github.com/carlosboeing/crossrev/internal/prstate"
+	"github.com/carlosboeing/crossrev/internal/verify"
 )
 
 // ReplyBody is _resolve_reply_body at lib/run.sh:2570-2585. Held counts
@@ -523,6 +524,21 @@ func runDetails(m prstate.Marker, leg string) string {
 
 // ResolveSummaryBody is _resolve_summary_body at lib/run.sh:2729-2781.
 func ResolveSummaryBody(resolutions, findings json.RawMessage, deferredLines string, marker prstate.Marker, repo string, pr, maxPasses int) string {
+	// The check's rejected and duplicate entries never reached the
+	// resolver, so they read as neither held nor awaiting resolution
+	// here. Untouched when nothing was checked out.
+	var resolveNodes []harness.Node
+	_ = json.Unmarshal(findings, &resolveNodes)
+	if filtered := excludeCheckedOut(resolveNodes, marker.CheckedOut); len(filtered) != len(resolveNodes) {
+		findings, _ = json.Marshal(filtered)
+	}
+	return resolveSummaryBody(resolutions, findings, deferredLines, marker, repo, pr, maxPasses, 0)
+}
+
+// resolveSummaryBody is ResolveSummaryBody plus the count of findings the pass
+// handed the resolver as recurrence candidates. Zero prints nothing, so a pass
+// with none reads exactly as it always has.
+func resolveSummaryBody(resolutions, findings json.RawMessage, deferredLines string, marker prstate.Marker, repo string, pr, maxPasses, recurrences int) string {
 	summary, _ := marker.Summary.Get()
 	pass := marker.Pass
 	if pass == 0 {
@@ -559,6 +575,11 @@ func ResolveSummaryBody(resolutions, findings json.RawMessage, deferredLines str
 		b.WriteString(alert("NOTE", fmt.Sprintf("**%s** Every posted finding was verified whatever its severity — severity governs what happens afterwards, not whether the check happens.", counts)))
 	}
 
+	if policy.ResolveGateHeld(asPolicyResolve(marker)) {
+		record, _ := marker.Verification.Get()
+		fmt.Fprintf(&b, "Required checks block convergence: %s. When they have reported, run `crossrev restart --pr %d` to drive the pass again.\n\n", verify.Debt(verify.FromRecord(record)), pr)
+	}
+
 	if commit != "" && commit != "null" {
 		short := commit
 		if len(short) > 7 {
@@ -592,6 +613,12 @@ func ResolveSummaryBody(resolutions, findings json.RawMessage, deferredLines str
 			verb = "it never"
 		}
 		fmt.Fprintf(&b, "%d held %s recorded and not posted; %s reached the resolver.\n\n", held, noun, verb)
+	}
+
+	if recurrences == 1 {
+		b.WriteString("1 finding was a recurrence candidate: an earlier pass fixed a finding in the same place, so the resolver was asked to check whether that fix was incomplete.\n\n")
+	} else if recurrences > 1 {
+		fmt.Fprintf(&b, "%d findings were recurrence candidates: an earlier pass fixed a finding in the same place as each, so the resolver was asked to check whether that fix was incomplete.\n\n", recurrences)
 	}
 
 	if deferredLines != "" {
@@ -661,9 +688,66 @@ func actionableCount(findings []harness.Node, minFix core.Severity) int {
 	return n
 }
 
+// excludeCheckedOut drops the findings the cross-model check kept off the
+// pull request: each checked-out entry's own stored entry, reconciled
+// by position. The rewrite renders the same visible set the review leg
+// published, so a rejected candidate stays out of the table and the
+// counts here too. A line that is not a number leaves positions
+// unreproducible, so the whole set falls back to ids.
+func excludeCheckedOut(fs []harness.Node, checkedOut json.RawMessage) []harness.Node {
+	if len(prstate.DecodeCheckedOutRaw(checkedOut)) == 0 {
+		return fs
+	}
+	var anchors []prstate.CandidateAnchor
+	if extracted, ok := checkedOutAnchors(fs); ok {
+		anchors = extracted
+	}
+	dropIndex, dropID := prstate.CheckedOutDrops(anchors, checkedOut)
+	out := make([]harness.Node, 0, len(fs))
+	for i, f := range fs {
+		if dropIndex[i] {
+			continue
+		}
+		if id, ok := f.Member("id").AsString(); ok && id != "" && dropID[id] {
+			continue
+		}
+		out = append(out, f)
+	}
+	return out
+}
+
+// checkedOutAnchors reads the stored findings' anchors for the
+// position reconciliation: one per node, in stored order. False when
+// any line is not a number, in which case the caller filters by id.
+func checkedOutAnchors(fs []harness.Node) ([]prstate.CandidateAnchor, bool) {
+	anchors := make([]prstate.CandidateAnchor, len(fs))
+	for i, f := range fs {
+		line, ok := f.Member("line").AsInt()
+		if !ok {
+			return nil, false
+		}
+		anchors[i] = prstate.CandidateAnchor{
+			ID:   f.Member("id").StringVal(),
+			Path: f.Member("path").StringVal(),
+			Line: int(line),
+			Side: f.Member("side").StringVal(),
+		}
+	}
+	return anchors, true
+}
+
 func reviewSummaryBody(findings json.RawMessage, marker prstate.Marker, repo core.Slug, pr int, minFix core.Severity, maxPasses int, cov commentCoverage) string {
 	var fs []harness.Node
 	_ = json.Unmarshal(findings, &fs)
+	if filtered := excludeCheckedOut(fs, marker.CheckedOut); len(filtered) != len(fs) {
+		// The rewrite renders from the same visible set the review
+		// leg published: remarshal so the table and the held counts
+		// below read the filtered record. Untouched when nothing was
+		// checked out, so a pass without a check renders byte for byte
+		// as before.
+		fs = filtered
+		findings, _ = json.Marshal(fs)
+	}
 	n := len(fs)
 	actionable := actionableCount(fs, minFix)
 	verdict, ok := marker.Verdict.Get()
@@ -717,8 +801,12 @@ func reviewSummaryBody(findings json.RawMessage, marker prstate.Marker, repo cor
 		// As in the review leg's own summary: held findings never reach
 		// the resolver, so on a mixed pass the resolving claims scope to
 		// posted findings. A pass with nothing held reads exactly as it
-		// always has.
-		if held := countUnposted(findings); held > 0 {
+		// always has. A pass whose every candidate stayed off the pull
+		// request says so rather than sending a second agent after zero
+		// findings.
+		if n == 0 && len(prstate.DecodeCheckedOutRaw(marker.CheckedOut)) > 0 {
+			b.WriteString(alert("TIP", "**No findings need resolving.** Every candidate stayed off the pull request; the list below names them."))
+		} else if held := countUnposted(findings); held > 0 {
 			posted := n - held
 			need := fmt.Sprintf("**%d posted findings need resolving.**", posted)
 			if posted == 1 {
@@ -731,7 +819,11 @@ func reviewSummaryBody(findings json.RawMessage, marker prstate.Marker, repo cor
 	}
 	fmt.Fprintf(&b, "Verdict: **%s**.\n\n", verdict)
 	if n == 0 {
-		b.WriteString("No findings. Low-severity and pre-existing issues would be listed here too, so this is an empty review rather than a filtered one.\n\n")
+		if len(prstate.DecodeCheckedOutRaw(marker.CheckedOut)) > 0 {
+			b.WriteString("No findings posted.\n\n")
+		} else {
+			b.WriteString("No findings. Low-severity and pre-existing issues would be listed here too, so this is an empty review rather than a filtered one.\n\n")
+		}
 	} else {
 		sha, _ := marker.HeadSHA.Get()
 		b.WriteString(findingsTable(findings, sha, repo))
@@ -747,6 +839,9 @@ func reviewSummaryBody(findings json.RawMessage, marker prstate.Marker, repo cor
 			fmt.Fprintf(&b, "%d %s below %s recorded and not posted.\n\n", held, noun, minFix)
 		}
 	}
+	// The same check lines the review leg wrote, or the rewrite would
+	// strip them.
+	b.WriteString(prstate.CheckSummaryBlock(marker.Check.Value(), marker.CheckReason.Value(), marker.CheckedOut))
 	if cov.on {
 		b.WriteString(intel.CoverageFootnote(cov.counts, cov.sha))
 		b.WriteString(intel.ExclusionLine(cov.excluded))

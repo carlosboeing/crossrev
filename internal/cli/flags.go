@@ -4,6 +4,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/carlosboeing/crossrev/internal/config"
 	"github.com/carlosboeing/crossrev/internal/core"
 	"github.com/carlosboeing/crossrev/internal/ui"
 )
@@ -25,6 +26,11 @@ type CycleRequest struct {
 	ModelOverride       string
 	EffortOverride      string
 	InputPolicyOverride string
+	ConcernsOverride    string
+	CheckOverride       string
+	RequiredChecks      []string
+	NoRequiredChecks    bool
+	CheckWait           string
 	NoTips              bool
 	KeepTranscripts     bool
 }
@@ -38,6 +44,11 @@ type ReviewRequest struct {
 	ModelOverride       string
 	EffortOverride      string
 	InputPolicyOverride string
+	ConcernsOverride    string
+	CheckOverride       string
+	RequiredChecks      []string
+	NoRequiredChecks    bool
+	CheckWait           string
 	Continuation        bool
 	NoTips              bool
 	KeepTranscripts     bool
@@ -47,15 +58,20 @@ type ReviewRequest struct {
 //
 // It takes no `--continuation`: the flag exists so a cycle can tell the review
 // leg it is not the first of the loop, and the resolve leg has no such state.
+// It takes no review-contract flag: concerns and the check mode shape review.
+// Both legs can override the required checks and their bounded wait.
 type ResolveRequest struct {
-	PR              int
-	Repo            core.Slug
-	Trigger         string
-	HarnessOverride string
-	ModelOverride   string
-	EffortOverride  string
-	NoTips          bool
-	KeepTranscripts bool
+	PR               int
+	Repo             core.Slug
+	Trigger          string
+	HarnessOverride  string
+	ModelOverride    string
+	EffortOverride   string
+	RequiredChecks   []string
+	NoRequiredChecks bool
+	CheckWait        string
+	NoTips           bool
+	KeepTranscripts  bool
 }
 
 // StatusRequest is `crossrev status` (lib/run.sh:3040-3055).
@@ -162,7 +178,7 @@ type VersionRequest struct{}
 // option. They are the strings the shell prints, measured with
 // `NO_COLOR=1 bash bin/crossrev <command> --bogus`.
 const (
-	usageCycle    = "Usage: crossrev cycle --pr <number> [--trigger human|automatic] [--model <id>] [--effort <level>] [--input-policy hunks_first|whole_when_fits] [--no-tips] [--keep-transcripts]"
+	usageCycle    = "Usage: crossrev cycle --pr <number> [--trigger human|automatic] [--model <id>] [--effort <level>] [--input-policy hunks_first|whole_when_fits] [--concerns a,b] [--check resolver|off] [--required-check NAME[@APP]] [--no-required-checks] [--check-wait MINUTES] [--no-tips] [--keep-transcripts]"
 	usageStatus   = "Usage: crossrev status --pr <number>"
 	usageRestart  = "Usage: crossrev restart --pr <number>"
 	usageWatchdog = "Usage: crossrev watchdog [--repo owner/name] [--timeout <seconds>]"
@@ -200,12 +216,12 @@ func harnessOption(harnesses []string) string {
 
 func usageReview(harnesses []string) string {
 	return "Usage: crossrev review --pr <number> [" + harnessOption(harnesses) +
-		"] [--model <id>] [--effort <level>] [--input-policy hunks_first|whole_when_fits] [--no-tips] [--keep-transcripts]"
+		"] [--model <id>] [--effort <level>] [--input-policy hunks_first|whole_when_fits] [--concerns a,b] [--check resolver|off] [--required-check NAME[@APP]] [--no-required-checks] [--check-wait MINUTES] [--no-tips] [--keep-transcripts]"
 }
 
 func usageResolve(harnesses []string) string {
 	return "Usage: crossrev resolve --pr <number> [" + harnessOption(harnesses) +
-		"] [--model <id>] [--effort <level>] [--trigger human|automatic] [--keep-transcripts]"
+		"] [--model <id>] [--effort <level>] [--trigger human|automatic] [--required-check NAME[@APP]] [--no-required-checks] [--check-wait MINUTES] [--keep-transcripts]"
 }
 
 // scanner walks an argument list the way `while (( $# ))` walks "$@".
@@ -325,4 +341,68 @@ func requireInputPolicy(out *ui.IO, command, policy string) error {
 	}
 	return out.Die("unknown "+command+" input policy: "+policy,
 		"Use --input-policy hunks_first or --input-policy whole_when_fits.")
+}
+
+// The four validators below pass flag values through the same validators
+// the config asserts use, and render the shared fault in the flag's own
+// words. A value refused in the config is refused on the flag, and an
+// accepted one is accepted on both.
+func requireConcerns(out *ui.IO, command, value string) error {
+	if _, err := config.NormalizeConcerns(splitConcerns(value)); err != nil {
+		return out.Die("invalid "+command+" --concerns: "+err.Error(),
+			"Use --concerns with correctness, consistency or both, for example: --concerns correctness,consistency.")
+	}
+	return nil
+}
+
+// splitConcerns reads one --concerns value as the config reads its list:
+// comma-separated, with surrounding spaces trimmed.
+func splitConcerns(value string) []string {
+	parts := strings.Split(value, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		out = append(out, strings.TrimSpace(part))
+	}
+	return out
+}
+
+func requireCheckMode(out *ui.IO, command, value string) error {
+	if _, err := config.NormalizeCheckMode(value); err != nil {
+		return out.Die("invalid "+command+" --check: "+err.Error(),
+			"Use --check resolver or --check off.")
+	}
+	return nil
+}
+
+// requireRequiredCheck validates one --required-check value against the
+// checks collected so far, so a duplicate or a self-gating name is refused
+// at the flag that completes it.
+func requireRequiredCheck(out *ui.IO, command string, collected []string, value string) error {
+	parsed := make([]config.RequiredCheck, 0, len(collected)+1)
+	for _, item := range collected {
+		check, err := config.ParseRequiredCheck(item)
+		if err != nil {
+			return out.Die("invalid "+command+" --required-check: "+err.Error(),
+				"Use --required-check NAME[@APP], for example: --required-check build.")
+		}
+		parsed = append(parsed, check)
+	}
+	check, err := config.ParseRequiredCheck(value)
+	if err != nil {
+		return out.Die("invalid "+command+" --required-check: "+err.Error(),
+			"Use --required-check NAME[@APP], for example: --required-check build.")
+	}
+	if _, err := config.NormalizeRequiredChecks(append(parsed, check)); err != nil {
+		return out.Die("invalid "+command+" --required-check: "+err.Error(),
+			"Use --required-check NAME[@APP], for example: --required-check build.")
+	}
+	return nil
+}
+
+func requireCheckWait(out *ui.IO, command, value string) error {
+	if _, err := config.ParseWaitMinutes(value); err != nil {
+		return out.Die("invalid "+command+" --check-wait: "+err.Error(),
+			"Use --check-wait with 0 to 30 minutes, for example: --check-wait 10.")
+	}
+	return nil
 }

@@ -36,6 +36,11 @@ type Request struct {
 	ModelOverride       string
 	EffortOverride      string
 	InputPolicyOverride string
+	ConcernsOverride    string
+	CheckOverride       string
+	RequiredChecks      []string
+	NoRequiredChecks    bool
+	CheckWait           string
 	Author              string
 	// Workdir overrides the pinned worktree: empty pins a clean detached
 	// worktree at the pull request head, set runs the harness there after
@@ -185,11 +190,20 @@ type Leg struct {
 	// queues the line in Result.Messages instead, the way every other leg
 	// line travels.
 	Progress func(ui.Line)
+	// Sleep waits out one interval of the required-check wait. Nil sleeps
+	// for real; tests inject a fake that advances Now instead, so the
+	// wait is exercised without waiting out thirty seconds a tick.
+	Sleep func(time.Duration)
 
 	// readsNotes records one entry per review call for the marker and
 	// generation reads envelopes finalized later in the pass. Calls run
 	// sequentially, so the slice needs no mutex.
 	readsNotes []readsNote
+
+	// callsMade counts the pass's accepted model calls, review and
+	// check alike: the next call's number in the pass, naming its
+	// transcripts and its run-log line.
+	callsMade int
 }
 
 func (l *Leg) now() time.Time {
@@ -197,6 +211,14 @@ func (l *Leg) now() time.Time {
 		return l.Now()
 	}
 	return time.Now()
+}
+
+func (l *Leg) sleep(d time.Duration) {
+	if l != nil && l.Sleep != nil {
+		l.Sleep(d)
+		return
+	}
+	time.Sleep(d)
 }
 
 func (l *Leg) runner() exec.Runner {

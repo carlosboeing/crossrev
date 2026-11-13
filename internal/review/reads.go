@@ -64,8 +64,8 @@ func AssessReads(onUnavailable string, effective harness.ReadMode, stats prstate
 // fallback on a failed self-test is decided by the caller, which owns the
 // policy.
 func EffectiveReadMode(declared harness.ReadMode) (effective harness.ReadMode, reason string) {
-	if declared == harness.ReadModeFileTool {
-		return harness.ReadModeSupplied, ReadsReasonFileToolUnwired
+	if effective := harness.EffectiveReadMode(declared); effective != declared {
+		return effective, ReadsReasonFileToolUnwired
 	}
 	return declared, ""
 }

@@ -574,6 +574,10 @@ func (f *statusForge) WorkflowRunStatus(context.Context, core.Slug, string) forg
 	panic("the liveness seam answers this, not the report")
 }
 
+func (f *statusForge) CheckRuns(context.Context, core.Slug, core.Revision) (forge.CheckRuns, error) {
+	panic("status reads no check runs")
+}
+
 func (f *statusForge) LabelColour(context.Context, core.Slug, string) string {
 	panic("status mints no labels")
 }

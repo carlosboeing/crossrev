@@ -116,6 +116,9 @@ type Review struct {
 	// read tool or no read tool at all. Empty renders nothing, so prompts
 	// built without a mode keep their bytes exactly.
 	Reads string
+
+	// Concern selects the checklist rendered before the output instruction.
+	Concern string
 }
 
 // BatchUnit is one numbered required file: its change, its evidence revision,
@@ -305,6 +308,8 @@ func (r Review) Render() []byte {
 		b.WriteString(r.Reads)
 		b.WriteString("\n")
 	}
+
+	b.WriteString(ConcernBlock(r.Concern))
 
 	b.WriteString("## Output\n\n")
 	b.WriteString("Return JSON matching the schema you were given, and nothing else. An empty " +

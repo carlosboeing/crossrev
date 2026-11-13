@@ -231,6 +231,11 @@ func reviewCommand(ctx context.Context, out *ui.IO, doc harness.Document, req cl
 		ModelOverride:       req.ModelOverride,
 		EffortOverride:      req.EffortOverride,
 		InputPolicyOverride: req.InputPolicyOverride,
+		ConcernsOverride:    req.ConcernsOverride,
+		CheckOverride:       req.CheckOverride,
+		RequiredChecks:      req.RequiredChecks,
+		NoRequiredChecks:    req.NoRequiredChecks,
+		CheckWait:           req.CheckWait,
 		Author:              author,
 		RunID:               runlog.RunID(),
 	})
@@ -280,14 +285,17 @@ func resolveCommand(ctx context.Context, out *ui.IO, doc harness.Document, req c
 
 	leg := resolveLeg(d, client, cfg)
 	result := leg.Run(ctx, resolve.Request{
-		PR:              req.PR,
-		Repo:            repo,
-		Trigger:         resolve.Trigger(req.Trigger),
-		Harness:         req.HarnessOverride,
-		ModelOverride:   req.ModelOverride,
-		EffortOverride:  req.EffortOverride,
-		Author:          author,
-		KeepTranscripts: req.KeepTranscripts,
+		PR:               req.PR,
+		Repo:             repo,
+		Trigger:          resolve.Trigger(req.Trigger),
+		Harness:          req.HarnessOverride,
+		ModelOverride:    req.ModelOverride,
+		EffortOverride:   req.EffortOverride,
+		RequiredChecks:   req.RequiredChecks,
+		NoRequiredChecks: req.NoRequiredChecks,
+		CheckWait:        req.CheckWait,
+		Author:           author,
+		KeepTranscripts:  req.KeepTranscripts,
 	})
 	messages := result.Messages
 	if result.Message != "" {

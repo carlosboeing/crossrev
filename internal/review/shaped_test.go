@@ -24,7 +24,7 @@ var errShaping = errors.New("shaping failed")
 // names the form it was shown under with the digest over the numbered
 // hunk bytes.
 func TestShapedBatchRendersHunksAndRecordsTheirForms(t *testing.T) {
-	e := newEnv(t)
+	e := newEnv(t, "correctness")
 	writeRequiredHead(e, "a.go", "package a\n")
 	bigBody := strings.Repeat("package big\n\nfunc F() int { return 0 }\n", 400)
 	writeRequiredHead(e, "b.go", bigBody)

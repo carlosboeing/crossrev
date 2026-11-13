@@ -44,6 +44,7 @@ esac
 ASSETS=(
   "schemas/findings.schema.json"  "internal/validate/assets/findings.schema.json"
   "schemas/resolve.schema.json"   "internal/validate/assets/resolve.schema.json"
+  "schemas/check.schema.json"     "internal/validate/assets/check.schema.json"
   "skills/pr-review/SKILL.md"     "internal/prompt/assets/pr-review.SKILL.md"
   "skills/pr-resolve/SKILL.md"    "internal/prompt/assets/pr-resolve.SKILL.md"
   "assets/harnesses.json"         "internal/cred/assets/harnesses.json"

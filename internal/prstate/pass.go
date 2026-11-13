@@ -87,8 +87,9 @@ type Marker struct {
 	// stopped against, the stop diagnostics a halted pass records, and the
 	// confirmation pair the orchestrator writes only after accepted review
 	// at the repair head. An initial clean review carries both confirmation
-	// SHAs null. There is no verification SHA or check list here:
-	// verification is not implemented.
+	// SHAs null. The `verification` key below is the required-check
+	// evidence, not a SHA: the overall state and the per-check detail the
+	// pass judged.
 	//
 	// A v1 marker never carries these keys, so they stay absent on the wire
 	// for one. Absent is the whole of the v1 answer: a historical marker
@@ -124,11 +125,44 @@ type Marker struct {
 	// carry a verdict code and nothing else. A later pass can still resume
 	// from it; what is missing is evidence, reasons and finding ids.
 	CoverageDegraded Opt[bool] `json:"coverage_degraded,omitzero"`
+	// CoverageEngine is the review-contract engine identity the pass
+	// published its generation under: the effective concerns, check mode,
+	// input policy and read mode it ran with, hashed into the identity.
+	// Absent on markers written before the pass recorded it; readers
+	// fall back to the base-policy identity for those.
+	CoverageEngine Opt[string] `json:"coverage_engine,omitzero"`
 	// Redriven marks a pass that ran again on its comment after a previous
 	// attempt could not be completed. The review claim sets it; both
 	// review-summary renderers read it, so the notice survives the resolve
 	// leg rewriting the review comment from the marker.
 	Redriven Opt[bool] `json:"redriven,omitzero"`
+	// The cross-model check's outcome for this pass: ran, off,
+	// no_candidates, degraded or unavailable. Absent when the pass never
+	// reached the check phase — an early exit, or a marker written
+	// before the check existed. A mixed-version rewrite may drop these
+	// fields; the check then runs again on resume.
+	Check Opt[string] `json:"check,omitzero"`
+	// CheckReason is why: same_model when the checker answered as the
+	// reviewer's own model, otherwise the token naming the degrade or
+	// unavailable cause. Absent when the check ran clean.
+	CheckReason Opt[string] `json:"check_reason,omitzero"`
+	// CheckRecord is the durable checked state: the candidate-set digest,
+	// the revisions, the checker's provenance and every decision. Present
+	// only when the check ran; a resume whose digest, revision or check
+	// setting no longer matches discards it and checks again.
+	CheckRecord json.RawMessage `json:"check_record,omitzero"`
+	// CheckedOut is the rejected and duplicate candidates, each with its
+	// position, id, path, line, title and reason. The retention ladder
+	// never sheds it: a marker that cannot hold its decisions fails its
+	// write rather than dropping one to fit.
+	CheckedOut json.RawMessage `json:"checked_out,omitzero"`
+	// Verification is the required-check evidence the pass judged: the
+	// overall state and the per-check detail. Absent when no checks were
+	// required, so a marker from before the gate reads exactly as it
+	// always has. The retention ladder never sheds it: a marker that
+	// cannot fit it fails the write loudly rather than dropping the
+	// evidence a halt stands on.
+	Verification Opt[MarkerVerification] `json:"verification,omitzero"`
 
 	// commentID is which comment the marker was read off, and raw is the
 	// bytes it was read as. Both are unexported so no encoder can reach
@@ -178,7 +212,7 @@ func (m Marker) Raw() json.RawMessage { return bytes.Clone(m.raw) }
 // input". Every reader here already reads a zero-length payload as absent —
 // DecodeFindings and DecodeResolutions both — so the writer agrees with them.
 func (m Marker) MarshalJSON() ([]byte, error) {
-	for _, payload := range []*json.RawMessage{&m.Tokens, &m.Usage, &m.Reads, &m.Findings, &m.Resolutions, &m.CoveragePayload, &m.CoveragePrevPayload} {
+	for _, payload := range []*json.RawMessage{&m.Tokens, &m.Usage, &m.Reads, &m.Findings, &m.Resolutions, &m.CoveragePayload, &m.CoveragePrevPayload, &m.CheckRecord, &m.CheckedOut} {
 		if len(*payload) == 0 {
 			*payload = nil
 		}
@@ -276,7 +310,7 @@ func (m *Marker) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-// clone copies the seven payloads a marker carries as raw bytes.
+// clone copies the nine payloads a marker carries as raw bytes.
 //
 // Marker is returned by value, but a slice header shares its backing array, so
 // a caller editing what a reader handed it would reach the marker list the
@@ -289,6 +323,8 @@ func (m Marker) clone() Marker {
 	m.Resolutions = bytes.Clone(m.Resolutions)
 	m.CoveragePayload = bytes.Clone(m.CoveragePayload)
 	m.CoveragePrevPayload = bytes.Clone(m.CoveragePrevPayload)
+	m.CheckRecord = bytes.Clone(m.CheckRecord)
+	m.CheckedOut = bytes.Clone(m.CheckedOut)
 	return m
 }
 
@@ -366,7 +402,7 @@ func (m Marker) coveragePresent() bool {
 }
 
 // CoverageHandle is the handle this marker names. It is the only place a
-// handle is reconstructed from a marker, so a fifth field cannot be read in
+// handle is reconstructed from a marker, so a sixth field cannot be read in
 // three readers and missed in the fourth.
 //
 // Three answers, not two. No claim is the normal first-pass state and the
@@ -386,6 +422,7 @@ func (m Marker) CoverageHandle() (h Handle, claimed bool, err error) {
 		Location: m.CoverageRef.Value(),
 		Commit:   m.CoverageCommit.Value(),
 		Degraded: m.CoverageDegraded.Value(),
+		Engine:   m.CoverageEngine.Value(),
 	}
 	if len(m.CoveragePayload) > 0 {
 		h.Payload = Some(json.RawMessage(bytes.Clone(m.CoveragePayload)))
@@ -411,6 +448,11 @@ func (m *Marker) RecordCoverage(h Handle) {
 		m.CoverageCommit = Opt[string]{}
 	}
 	m.CoverageDegraded = Some(h.Degraded)
+	if h.Engine != "" {
+		m.CoverageEngine = Some(h.Engine)
+	} else {
+		m.CoverageEngine = Opt[string]{}
+	}
 	payload, ok := h.Payload.Get()
 	if !ok || len(payload) == 0 {
 		// No inline payload: the predecessor lives in the parent commit

@@ -136,7 +136,7 @@ func TestReviewRefusesGreenWhenTheLedgerIsLost(t *testing.T) {
 	leg := &Leg{Forge: &cutoverForge{store: storetest.NewFakeStore()}}
 	marker := cutoverMarkerNaming("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 
-	conv, obliged := leg.buildConvergence(ctx, loaded, marker, 0, cutoverProducer)
+	conv, obliged := leg.buildConvergence(ctx, loaded, marker, 0, cutoverProducer, legSettings{})
 	if !obliged {
 		t.Fatal("a lost ledger took the frozen path")
 	}
@@ -215,7 +215,7 @@ func TestEveryReaderFailsClosedOnCorruptionAndOnAnUnreadableStore(t *testing.T) 
 		loaded := cutoverLoaded(t, scope)
 		leg := &Leg{Forge: &cutoverForge{store: storetest.NewFakeStore()}}
 
-		conv, _ := leg.buildConvergence(ctx, loaded, corrupt, 0, cutoverProducer)
+		conv, _ := leg.buildConvergence(ctx, loaded, corrupt, 0, cutoverProducer, legSettings{})
 		if policy.Converged(conv) {
 			t.Fatal("a corrupt claim reported green")
 		}
@@ -230,7 +230,7 @@ func TestEveryReaderFailsClosedOnCorruptionAndOnAnUnreadableStore(t *testing.T) 
 		leg := &Leg{Forge: &cutoverForge{store: store}}
 		marker := cutoverMarkerNaming("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 
-		conv, obliged := leg.buildConvergence(ctx, loaded, marker, 0, cutoverProducer)
+		conv, obliged := leg.buildConvergence(ctx, loaded, marker, 0, cutoverProducer, legSettings{})
 		if !obliged {
 			t.Fatal("an unreadable store took the frozen path")
 		}
@@ -269,7 +269,7 @@ func TestSubstitutedRefCannotMoveTheConvergenceAnswer(t *testing.T) {
 	// The marker names commit A, whose generation covers both files.
 	marker := cutoverPublish(t, ctx, loaded, store, cutoverGeneration(t, prstate.GenerationFull, scope))
 
-	conv, obliged := leg.buildConvergence(ctx, loaded, marker, 0, cutoverProducer)
+	conv, obliged := leg.buildConvergence(ctx, loaded, marker, 0, cutoverProducer, legSettings{})
 	if !obliged {
 		t.Fatal("the substituted read took the frozen path")
 	}

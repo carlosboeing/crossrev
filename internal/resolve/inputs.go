@@ -59,14 +59,17 @@ const (
 
 // Request is one resolve-leg invocation.
 type Request struct {
-	PR              int
-	Repo            core.Slug
-	Trigger         Trigger
-	Harness         string
-	ModelOverride   string
-	EffortOverride  string
-	Author          string
-	KeepTranscripts bool
+	PR               int
+	Repo             core.Slug
+	Trigger          Trigger
+	Harness          string
+	ModelOverride    string
+	EffortOverride   string
+	RequiredChecks   []string
+	NoRequiredChecks bool
+	CheckWait        string
+	Author           string
+	KeepTranscripts  bool
 }
 
 // Result is what Run returns after selection, claim, invocation, replies,
@@ -105,6 +108,7 @@ type Leg struct {
 	Runner  exec.Runner
 	Log     *runlog.Log
 	Clock   func() time.Time
+	Sleep   func(time.Duration)
 	Env     []string
 	Harness harness.Document
 	// Adapter, when set, is used instead of harness.For. Tests inject one;
@@ -152,6 +156,7 @@ type Git interface {
 	RemoteHead(ctx context.Context, url, branch string) (string, error)
 	RemoveWorktree(ctx context.Context, dir string) error
 	GeneratedAttributes(ctx context.Context, base core.Revision, paths []string) (map[string]vcs.AttributeDecision, *vcs.Warning, error)
+	SearchAll(ctx context.Context, revision core.Revision, terms []string, limit int) ([]vcs.TermResult, error)
 }
 
 // GitFrom wraps a *vcs.Repository as Git.
@@ -165,6 +170,9 @@ func (g repoGit) WithDir(dir string) Git {
 }
 func (g repoGit) GeneratedAttributes(ctx context.Context, base core.Revision, paths []string) (map[string]vcs.AttributeDecision, *vcs.Warning, error) {
 	return g.repo.GeneratedAttributes(ctx, base, paths)
+}
+func (g repoGit) SearchAll(ctx context.Context, revision core.Revision, terms []string, limit int) ([]vcs.TermResult, error) {
+	return g.repo.SearchAll(ctx, revision, terms, limit)
 }
 func (g repoGit) Show(ctx context.Context, revision core.Revision, path string) ([]byte, vcs.FileStatus, error) {
 	return g.repo.Show(ctx, revision, path)

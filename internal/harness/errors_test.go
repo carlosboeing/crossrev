@@ -127,6 +127,8 @@ func TestSentinelsAreDistinct(t *testing.T) {
 		harness.ErrModelsConverged,
 		harness.ErrDescriptor,
 		harness.ErrNotJSON,
+		harness.ErrHarnessFailed,
+		harness.ErrAnswerRejected,
 	}
 	for i := range sentinels {
 		for j := range sentinels {

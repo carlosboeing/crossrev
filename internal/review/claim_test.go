@@ -241,7 +241,7 @@ func TestClaimRedriveNamesTheRedriveInTheSummary(t *testing.T) {
 // path, so the halted comment's marker still says the pass ran again —
 // which is what the next attempt re-drives from.
 func TestClaimRedriveKeepsTheNoticeOnAHaltedPass(t *testing.T) {
-	e := newEnv(t)
+	e := newEnv(t, "correctness")
 	raw := fmt.Sprintf(`{"v":1,"leg":"review","pass":1,"state":"complete","ts":1699950000,"comment_id":9001,"run_id":"x","head_sha":%q,"verdict":"blocked","findings":[]}`, headSHA)
 	e.forge.comments = []forge.IssueComment{commentWithMarker(t, 9001, parseMarker(t, raw))}
 	// Oversized files split rather than halting now, so the halt is the

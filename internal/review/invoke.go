@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/carlosboeing/crossrev/internal/config"
@@ -26,12 +27,20 @@ import (
 )
 
 type legSettings struct {
-	harness           string
-	model             string
-	effort            string
-	endpoint          string
-	inputPolicy       string
-	inputPolicySource string
+	harness              string
+	model                string
+	effort               string
+	endpoint             string
+	inputPolicy          string
+	inputPolicySource    string
+	concerns             []string
+	concernsSource       string
+	checkMode            string
+	checkSource          string
+	requiredChecks       []config.RequiredCheck
+	requiredChecksSource string
+	checkWait            int
+	checkWaitSource      string
 }
 
 func (l *Leg) settings(req Request, loaded Context) (legSettings, ui.Line, error) {
@@ -41,20 +50,86 @@ func (l *Leg) settings(req Request, loaded Context) (legSettings, ui.Line, error
 	// default an empty harness used to fall back to here, so a resolved slot
 	// always names a harness.
 	reviewer := loaded.Config.Reviewers()[0]
+	verification := loaded.Config.Verification()
 	s := legSettings{
-		harness:           reviewer.Harness,
-		model:             reviewer.Model,
-		effort:            reviewer.Effort,
-		endpoint:          reviewer.Endpoint,
-		inputPolicy:       loaded.Config.ReviewInputPolicy(),
-		inputPolicySource: "default",
+		harness:              reviewer.Harness,
+		model:                reviewer.Model,
+		effort:               reviewer.Effort,
+		endpoint:             reviewer.Endpoint,
+		inputPolicy:          loaded.Config.ReviewInputPolicy(),
+		inputPolicySource:    "default",
+		concerns:             loaded.Config.ReviewConcerns(),
+		concernsSource:       "default",
+		checkMode:            loaded.Config.ReviewCheck(),
+		checkSource:          "default",
+		requiredChecks:       verification.RequiredChecks,
+		requiredChecksSource: "default",
+		checkWait:            verification.WaitMinutes,
+		checkWaitSource:      "default",
 	}
 	if loaded.Config.Get(".review.input_policy") != "" {
 		s.inputPolicySource = "config"
 	}
+	if loaded.Config.Get(".review.concerns") != "" {
+		s.concernsSource = "config"
+	}
+	if loaded.Config.Get(".review.check") != "" {
+		s.checkSource = "config"
+	}
+	if loaded.Config.Get(".verification.required_checks") != "" {
+		s.requiredChecksSource = "config"
+	}
+	if loaded.Config.Get(".verification.wait_minutes") != "" {
+		s.checkWaitSource = "config"
+	}
 	if req.InputPolicyOverride != "" {
 		s.inputPolicy = req.InputPolicyOverride
 		s.inputPolicySource = "flag"
+	}
+	if req.ConcernsOverride != "" {
+		normalized, err := config.NormalizeConcerns(splitConcerns(req.ConcernsOverride))
+		if err != nil {
+			return s, ui.Line{}, overrideRefusal("--concerns", err)
+		}
+		s.concerns = normalized
+		s.concernsSource = "flag"
+	}
+	if req.CheckOverride != "" {
+		mode, err := config.NormalizeCheckMode(req.CheckOverride)
+		if err != nil {
+			return s, ui.Line{}, overrideRefusal("--check", err)
+		}
+		s.checkMode = mode
+		s.checkSource = "flag"
+	}
+	if req.NoRequiredChecks {
+		// The clear wins over --required-check on the same line: it names
+		// the empty set absolutely, where the list names members.
+		s.requiredChecks = nil
+		s.requiredChecksSource = "flag"
+	} else if len(req.RequiredChecks) > 0 {
+		parsed := make([]config.RequiredCheck, 0, len(req.RequiredChecks))
+		for _, item := range req.RequiredChecks {
+			check, err := config.ParseRequiredCheck(item)
+			if err != nil {
+				return s, ui.Line{}, overrideRefusal("--required-check", err)
+			}
+			parsed = append(parsed, check)
+		}
+		normalized, err := config.NormalizeRequiredChecks(parsed)
+		if err != nil {
+			return s, ui.Line{}, overrideRefusal("--required-check", err)
+		}
+		s.requiredChecks = normalized
+		s.requiredChecksSource = "flag"
+	}
+	if req.CheckWait != "" {
+		minutes, err := config.ParseWaitMinutes(req.CheckWait)
+		if err != nil {
+			return s, ui.Line{}, overrideRefusal("--check-wait", err)
+		}
+		s.checkWait = minutes
+		s.checkWaitSource = "flag"
 	}
 	if req.HarnessOverride != "" {
 		s.harness = req.HarnessOverride
@@ -91,6 +166,57 @@ func (l *Leg) settings(req Request, loaded Context) (legSettings, ui.Line, error
 		}
 	}
 	return s, ui.Line{}, notInstalledRefusal(l.Harness, asked)
+}
+
+// splitConcerns reads one --concerns value the way the flag parser does:
+// comma-separated, with surrounding spaces trimmed.
+func splitConcerns(value string) []string {
+	parts := strings.Split(value, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		out = append(out, strings.TrimSpace(part))
+	}
+	return out
+}
+
+// overrideRefusal refuses a flag value the parser already validated. It is
+// reached only by a caller that bypassed the parser, so it names the flag
+// rather than the request field.
+func overrideRefusal(flag string, err error) *ui.FatalError {
+	return &ui.FatalError{
+		Reason: flag + ": " + err.Error(),
+		Action: "Pass a value the config validator accepts; the flag and the config key share it.",
+	}
+}
+
+// reviewEngineID answers the review-contract engine identity this pass
+// publishes under: the effective concerns, check mode and input policy
+// beside the effective read mode of the harness that actually reviews.
+func (l *Leg) reviewEngineID(settings legSettings) string {
+	entry, _ := l.Harness.For(settings.harness)
+	effective := harness.EffectiveReadMode(entry.ReadMode())
+	return core.ReviewEngineID(core.ReviewContract{
+		Concerns:    settings.concerns,
+		Check:       settings.checkMode,
+		InputPolicy: settings.inputPolicy,
+		ReadMode:    string(effective),
+	})
+}
+
+// detail renders the resolved settings for the run log: each effective
+// value and its source.
+func (s legSettings) detail() runlog.ReviewDetail {
+	checks := make([]string, 0, len(s.requiredChecks))
+	for _, check := range s.requiredChecks {
+		checks = append(checks, check.String())
+	}
+	return runlog.ReviewDetail{
+		InputPolicy:    runlog.EffectiveSetting{Value: s.inputPolicy, Source: s.inputPolicySource},
+		Concerns:       runlog.EffectiveSetting{Value: strings.Join(s.concerns, ","), Source: s.concernsSource},
+		Check:          runlog.EffectiveSetting{Value: s.checkMode, Source: s.checkSource},
+		RequiredChecks: runlog.EffectiveSetting{Value: strings.Join(checks, ","), Source: s.requiredChecksSource},
+		CheckWait:      runlog.EffectiveSetting{Value: strconv.Itoa(s.checkWait), Source: s.checkWaitSource},
+	}
 }
 
 // notInstalledRefusal is the last refusal in run_leg_settings
@@ -245,7 +371,7 @@ func (l *Leg) invoke(ctx context.Context, req Request, loaded Context, settings 
 
 	start := l.now()
 	readsMark := len(l.readsNotes)
-	envelope, payload, outMsgs, err := l.runPrompt(ctx, req, loaded, settings, adapter, entry, staged, tmp, promptBytes, msgs, 1)
+	envelope, payload, outMsgs, err := l.runPrompt(ctx, req, loaded, settings, adapter, entry, staged, tmp, promptBytes, msgs, 1, promptSpec{schema: validate.FindingsSchema(), check: l.checkPayload})
 	if err == nil {
 		l.logAcceptedCall(1, promptBytes, len(diffBytes), l.callReadsSince(readsMark), envelope, l.now().Sub(start).Milliseconds())
 	}
@@ -300,13 +426,28 @@ func drainReadLog(l *runlog.Log, tmp string) {
 	}
 }
 
+// promptSpec is what varies between the two prompts that share runPrompt:
+// the review prompt and the cross-model check prompt. Everything else the
+// call runs under — quarantine, the isolation and version gates, served
+// reads, credential staging and the command tripwire — is identical,
+// which is what makes the checker's answer independent of the reviewer
+// without a second isolation implementation to keep in step.
+type promptSpec struct {
+	// schema is the output schema the harness is handed beside the prompt.
+	schema []byte
+	// check validates one answer: nil accepts it, a *validate.SemanticError
+	// earns the one semantic retry, and any other error spends the shape
+	// budget.
+	check func(payload []byte) error
+}
+
 // runPrompt runs one rendered prompt through the harness child with the
 // leg's validation seam: one semantic retry naming the rejected numbers,
 // then a fatal refusal that publishes nothing. The deferred sandbox restore
 // assigns through the named retErr return, so a restore failure after a
 // successful answer still fails the leg the way the frozen path does. call
 // is the call's number in the pass, naming its transcripts.
-func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settings legSettings, adapter harness.Adapter, entry harness.Descriptor, staged *cred.Staged, tmp string, promptBytes []byte, msgs []ui.Line, call int) (envelope harness.Envelope, payload json.RawMessage, outMsgs []ui.Line, retErr error) {
+func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settings legSettings, adapter harness.Adapter, entry harness.Descriptor, staged *cred.Staged, tmp string, promptBytes []byte, msgs []ui.Line, call int, pspec promptSpec) (envelope harness.Envelope, payload json.RawMessage, outMsgs []ui.Line, retErr error) {
 	outMsgs = msgs
 
 	// A harness whose served-or-tripwire command block is unverified at
@@ -314,11 +455,13 @@ func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settin
 	// review_isolation_unverified before any child starts, while its
 	// resolve leg is unaffected. The gate sits here, on the one path
 	// every call takes, so the frozen prompt and the batch loop refuse
-	// the same way.
+	// the same way — and the cross-model check degrades on it rather
+	// than failing the pass, which is what the Kind below lets it ask.
 	if refusal := harness.ReviewIsolationRefusal(l.Harness, settings.harness); refusal != nil {
 		return harness.Envelope{}, nil, outMsgs, &ui.FatalError{
 			Reason: refusal.Reason,
 			Action: refusal.Action,
+			Kind:   harness.ErrIsolationUnverified,
 		}
 	}
 
@@ -327,7 +470,7 @@ func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settin
 	if err := os.WriteFile(promptPath, promptBytes, 0o600); err != nil {
 		return harness.Envelope{}, nil, outMsgs, err
 	}
-	schemaBytes := validate.FindingsSchema()
+	schemaBytes := pspec.schema
 	if err := os.WriteFile(schemaPath, schemaBytes, 0o600); err != nil {
 		return harness.Envelope{}, nil, outMsgs, err
 	}
@@ -457,6 +600,7 @@ func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settin
 			return harness.Envelope{}, nil, outMsgs, &ui.FatalError{
 				Reason: refusal.Reason,
 				Action: refusal.Action,
+				Kind:   harness.ErrIsolationUnverified,
 			}
 		}
 	}
@@ -639,6 +783,7 @@ func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settin
 			return envelope, nil, outMsgs, &ui.FatalError{
 				Reason: fmt.Sprintf("the %s harness failed: %s", settings.harness, msg),
 				Action: "If the error above mentions authentication, a token or a 401, the harness is installed and cannot log in.",
+				Kind:   harness.ErrHarnessFailed,
 			}
 		}
 		// The post-call reads check: the handshake in the server log, and
@@ -678,7 +823,7 @@ func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settin
 			continue
 		}
 
-		problem := l.checkPayload(envelope.Payload)
+		problem := pspec.check(envelope.Payload)
 		if problem == nil {
 			foldRefusedAttempts(&envelope, refused)
 			return envelope, envelope.Payload, outMsgs, nil
@@ -703,6 +848,7 @@ func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settin
 			return envelope, nil, outMsgs, &ui.FatalError{
 				Reason: fmt.Sprintf("%s twice returned an answer that contradicts what it was given — %s", settings.harness, problem),
 				Action: "The shape was right both times, so the schema cannot catch this and CrossRev will not guess which finding was meant. Nothing has been written to the pull request, and the edits both rejected attempts made have been put back. Re-run the leg, or try the other harness.",
+				Kind:   harness.ErrAnswerRejected,
 			}
 		}
 		shapeBudget--
@@ -728,6 +874,7 @@ func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settin
 		return envelope, nil, outMsgs, &ui.FatalError{
 			Reason: fmt.Sprintf("%s returned an object that does not match the schema — %s", settings.harness, problem),
 			Action: shapeExhaustedAction(schemaNative),
+			Kind:   harness.ErrAnswerRejected,
 		}
 	}
 }

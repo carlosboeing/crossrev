@@ -10,6 +10,7 @@ import (
 
 	"github.com/carlosboeing/crossrev/internal/config"
 	"github.com/carlosboeing/crossrev/internal/core"
+	"github.com/carlosboeing/crossrev/internal/diff"
 	"github.com/carlosboeing/crossrev/internal/harness"
 	"github.com/carlosboeing/crossrev/internal/intel"
 	"github.com/carlosboeing/crossrev/internal/policy"
@@ -170,6 +171,7 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 	if settings.inputPolicy == config.ReviewInputWholeWhenFits {
 		whole = &WholePolicy{}
 	}
+	shared.concern = longestConcern(settings.concerns)
 	sharedBytes, _ := shared.render(nil, scope.Base, scope.Head, true, whole)
 	if whole != nil {
 		whole.MaxBytes = budget.PackBytes - len(sharedBytes)
@@ -272,6 +274,7 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 		// way, before recording.
 		return l.haltPass(ctx, req, loaded, pass, claimID, out, marker, &batchBound{plan: planForStop(plan, initialStop), scope: scope, accepted: acceptedIDs, stop: initialStop})
 	}
+	initial.Engine = scope.Engine
 	marker.RecordCoverage(initial)
 	// The reported marker tracks the commit point: a failure in a later
 	// batch reports this checkpoint rather than the bare claim, so the
@@ -292,39 +295,39 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 			verdicts map[core.UnitID]recordVerdict
 			supplied map[core.UnitID]prstate.SuppliedInput
 			payload  json.RawMessage
-			envelope harness.Envelope
 			examined []string
 			limits   []string
 		)
 		if scheduled.Part != nil {
-			merged, v, s, p, env, ex, li, err := l.invokePartCall(ctx, req, loaded, settings, scope, shared, scheduled.Part, !confirmationDone, call, len(plan.Calls), &outcome, pending, out)
+			merged, v, s, p, ex, li, err := l.invokePartCall(ctx, req, loaded, settings, scope, shared, scheduled.Part, !confirmationDone, call, len(plan.Calls), &outcome, pending, out)
 			if err != nil {
 				return err
 			}
 			if !merged {
 				continue
 			}
-			verdicts, supplied, payload, envelope, examined, limits = v, s, p, env, ex, li
+			verdicts, supplied, payload, examined, limits = v, s, p, ex, li
 		} else {
 			expected, _ := batchExpectations(scheduled.Files, scope.Base, scope.Head, whole)
 			if shared.diffErr != nil {
 				return shared.diffErr
 			}
-			promptBytes, callSupplied := shared.render(scheduled.Files, scope.Base, scope.Head, !confirmationDone, whole)
-			start := l.now()
-			readsMark := len(l.readsNotes)
-			answer, env, batchMsgs, err := l.invokePrompt(ctx, req, loaded, settings, expected, promptBytes, call)
-			ms := l.now().Sub(start).Milliseconds()
-			out.Messages = append(out.Messages, batchMsgs...)
+			_, callSupplied := shared.render(scheduled.Files, scope.Base, scope.Head, !confirmationDone, whole)
+			renderConcern := func(concern string) []byte {
+				focused := shared
+				focused.concern = concern
+				rendered, _ := focused.render(scheduled.Files, scope.Base, scope.Head, !confirmationDone, whole)
+				return rendered
+			}
+			answer, err := l.invokeConcerns(ctx, req, loaded, settings, expected, renderConcern, suppliedBytes(scheduled.Files), call, len(plan.Calls), 0, scope, &outcome, out)
 			if err != nil {
 				return err
 			}
-			l.logAcceptedCall(call, promptBytes, suppliedBytes(scheduled.Files), l.callReadsSince(readsMark), env, ms)
 			parsed, ex, li, err := verdictsFromPayload(answer, scheduled.Files)
 			if err != nil {
 				return err
 			}
-			verdicts, supplied, payload, envelope, examined, limits = parsed, callSupplied, answer, env, []string{ex}, li
+			verdicts, supplied, payload, examined, limits = parsed, callSupplied, answer, []string{ex}, li
 		}
 		for id, disp := range verdicts {
 			outcome.verdicts[id] = disp
@@ -337,13 +340,6 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 		}
 		outcome.verdict = verdictFromPayload(payload)
 		outcome.payloads = append(outcome.payloads, payload)
-		// A merged split file's envelope already folded when its final
-		// part call was accepted, so the loop folds only whole-file
-		// calls: folding the merged envelope again would count the final
-		// part's usage twice.
-		if scheduled.Part == nil {
-			out.Messages = append(out.Messages, outcome.addEnvelope(envelope)...)
-		}
 		outcome.examined = append(outcome.examined, examined...)
 		outcome.limits = append(outcome.limits, limits...)
 		for _, finding := range findingsFromPayload(payload) {
@@ -362,6 +358,7 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 		if stop.Limit != "" {
 			return l.haltPass(ctx, req, loaded, pass, claimID, out, marker, &batchBound{plan: planForStop(plan, stop), scope: scope, accepted: acceptedIDs, stop: stop})
 		}
+		handle.Engine = scope.Engine
 		marker.RecordCoverage(handle)
 		if outcome.model != "" {
 			marker.ModelReported = prstate.Some(outcome.model)
@@ -405,7 +402,7 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 	if plan.HaltReason != "" || len(plan.Carried) > 0 {
 		return l.haltPass(ctx, req, loaded, pass, claimID, out, marker, &batchBound{plan: plan, scope: scope, accepted: acceptedIDs})
 	}
-	return l.finishCoveredPass(ctx, req, loaded, settings, pass, claimID, marker, scope, outcome, pair, out)
+	return l.finishCoveredPass(ctx, req, loaded, settings, pass, claimID, marker, scope, outcome, pair, shared.diff, out)
 }
 
 // moveSkips transfers packing's skipped units from the required set into the
@@ -907,7 +904,7 @@ func haltUILines(outstanding []string, stop prstate.CoverageStop) []ui.Line {
 // finishCoveredPass folds a fully covered pass into the result: the marker
 // carries the current coverage manifest id and the batch findings, and the
 // caller continues to the existing enrich-and-publish path with them.
-func (l *Leg) finishCoveredPass(ctx context.Context, req Request, loaded Context, settings legSettings, pass int, claimID int64, marker prstate.Marker, scope intel.Scope, outcome batchOutcome, pair confirmationPair, out *Result) error {
+func (l *Leg) finishCoveredPass(ctx context.Context, req Request, loaded Context, settings legSettings, pass int, claimID int64, marker prstate.Marker, scope intel.Scope, outcome batchOutcome, pair confirmationPair, parsed *diff.Diff, out *Result) error {
 	_ = ctx
 	_ = req
 	_ = loaded
@@ -932,7 +929,7 @@ func (l *Leg) finishCoveredPass(ctx context.Context, req Request, loaded Context
 	// predicate has already applied the converged label.
 	marker.CoverageStop = prstate.Null[prstate.CoverageStop]()
 	out.Marker = marker
-	out.Covered = coveredPass{findings: outcome.findings, verdict: verdict, envelope: summedEnvelope(outcome), payload: mergePayloads(outcome.payloads, verdict), examined: outcome.examined, limits: outcome.limits}
+	out.Covered = coveredPass{findings: outcome.findings, verdict: verdict, envelope: summedEnvelope(outcome), payload: mergePayloads(outcome.payloads, verdict), examined: outcome.examined, limits: outcome.limits, parsed: parsed}
 	return nil
 }
 
@@ -1096,6 +1093,10 @@ type coveredPass struct {
 	payload  json.RawMessage
 	examined []string
 	limits   []string
+	// parsed is the pass's base-to-head diff, already read for the
+	// batch snapshot: the cross-model check slices its excerpts from
+	// this rather than reading the diff a second time.
+	parsed *diff.Diff
 }
 
 var _ validate.ReviewExpectations

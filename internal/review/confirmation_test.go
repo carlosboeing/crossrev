@@ -134,7 +134,7 @@ func TestOutsideDiffFindingKeepsResolutionIdentityWithoutAThread(t *testing.T) {
 // delta: the delta is required confirmation input, rendered ahead of the
 // numbered files even when the full diff had to be sliced to fit the budget.
 func TestConfirmationKeepsTheRepairDeltaWhenTheDiffIsSliced(t *testing.T) {
-	e := newEnv(t)
+	e := newEnv(t, "correctness")
 	writeRequiredHead(e, "repair.go", "package repair\n\nfunc Fixed() int { return 1 }\n")
 	e.forge.diff = []byte("diff --git a/repair.go b/repair.go\n--- a/repair.go\n+++ b/repair.go\n@@ -1,3 +1,3 @@\n-func Broken() int { return 0 }\n+func Fixed() int { return 1 }\n" +
 		"diff --git a/gen/big.go b/gen/big.go\n--- a/gen/big.go\n+++ b/gen/big.go\n@@ -1,1 +1,8001 @@\n context\n" +

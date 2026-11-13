@@ -171,7 +171,7 @@ func TestResolveSettlesAPassThatRanUnderAnOverride(t *testing.T) {
 	gen := prstate.Generation{
 		Gen:      1,
 		Revision: core.RevisionPair{Base: e.forge.pr.BaseRefOid, Head: e.forge.pr.HeadRefOid},
-		Engine:   core.FileEngineVersion,
+		Engine:   testEngineID(),
 		Slot:     prstate.DefaultSlot,
 		Producer: overridden,
 		Form:     prstate.GenerationFull,

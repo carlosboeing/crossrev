@@ -6,8 +6,10 @@ import (
 	"github.com/carlosboeing/crossrev/internal/config"
 	"github.com/carlosboeing/crossrev/internal/core"
 	"github.com/carlosboeing/crossrev/internal/forge"
+	"github.com/carlosboeing/crossrev/internal/harness"
 	"github.com/carlosboeing/crossrev/internal/policy"
 	"github.com/carlosboeing/crossrev/internal/prstate"
+	"github.com/carlosboeing/crossrev/internal/verify"
 )
 
 // refLedgerSource is implemented by forge clients that can read coverage
@@ -19,13 +21,46 @@ type refLedgerSource interface {
 // resolveConvergence builds the one convergence input for a no-commit
 // settle: the generation the review marker names must exactly account for
 // the required set at the pull request's base and head, with no
-// outstanding or unexamined record, a reported scope, and any repair delta
-// confirmed.
+// outstanding or unexamined record, a reported scope, any repair delta
+// confirmed, and the required checks passed or none required.
+func (l *Leg) resolveConvergence(ctx context.Context, s *session) (policy.Convergence, bool) {
+	conv, _, ok := l.resolveConvergenceEvidence(ctx, s)
+	return conv, ok
+}
+
+// resolveConvergenceEvidence is resolveConvergence with the required-check
+// evidence attached, so the settle records what it judged on its marker
+// and reuses it for the label rather than re-reading the gate.
+//
+// The gate is judged on the frozen path too: with no coverage claim on the
+// marker no coverage pass ran here, but required checks still count, so a
+// configured gate holds the legacy label to passed or none required.
+// Unconfigured the read costs no call, so the frozen path keeps its legacy
+// label exactly as it always has. The caller waits only when coverage permits
+// convergence and pending or missing checks are the remaining debt.
+func (l *Leg) resolveConvergenceEvidence(ctx context.Context, s *session) (policy.Convergence, verify.Evidence, bool) {
+	conv, ok := l.resolveCoverageConvergence(ctx, s)
+	ev := l.settlementEvidence(ctx, s)
+	conv.Verification = ev.State
+	return conv, ev, ok
+}
+
+// frozenGateRefuses reports whether the required-check gate holds the
+// frozen settle off converged: the marker carries no coverage claim, so
+// the legacy label stands or falls on the gate alone — converged only
+// when the checks passed or none were required.
+func frozenGateRefuses(ev verify.Evidence) bool {
+	return ev.Configured() && ev.State != verify.Passed
+}
+
+// resolveCoverageConvergence builds the coverage half of the settle's
+// convergence input.
 //
 // It re-reads coverage rather than trusting the marker a previous step
 // wrote. The marker is asked first, before the store is called: no claim
 // means no coverage pass ran and the frozen-path settle keeps its legacy
-// label — the only source of that answer. A claim that is not a valid
+// label, held to the required-check gate when one is configured. A claim
+// that is not a valid
 // handle is corrupt state and refuses, never "no coverage". A marker
 // carrying only the legacy coverage manifest id is the lost-ledger row:
 // comment-era generations are never read again, so the settle re-reviews
@@ -36,7 +71,7 @@ type refLedgerSource interface {
 // support stays awaiting-review, never converged. The read-outcome table
 // this routing transcribes is stated once, on coverageOutcome in
 // internal/review/ledger.go.
-func (l *Leg) resolveConvergence(ctx context.Context, s *session) (policy.Convergence, bool) {
+func (l *Leg) resolveCoverageConvergence(ctx context.Context, s *session) (policy.Convergence, bool) {
 	var conv policy.Convergence
 	h, claimed, err := s.review.CoverageHandle()
 	if err != nil {
@@ -96,10 +131,28 @@ func (l *Leg) generationIfCurrent(ctx context.Context, s *session, h prstate.Han
 	if err != nil {
 		return prstate.Generation{}, false
 	}
-	if !prstate.GenerationCurrent(gen, core.RevisionPair{Base: s.pr.BaseRefOid, Head: s.pr.HeadRefOid}, core.FileEngineVersion, producer) {
+	engine := prstate.EngineFor(s.review, l.reviewEngineID(s.cfg))
+	if !prstate.GenerationCurrent(gen, core.RevisionPair{Base: s.pr.BaseRefOid, Head: s.pr.HeadRefOid}, engine, producer) {
 		return prstate.Generation{}, false
 	}
 	return gen, true
+}
+
+// reviewEngineID answers the review-contract engine identity under the
+// base policy: the configured concerns, check mode and input policy
+// beside the configured reviewer's effective read mode. A generation
+// whose marker records the identity its pass published under is judged
+// by that; this is the fallback for markers written before the pass
+// recorded it.
+func (l *Leg) reviewEngineID(cfg *config.Config) string {
+	reviewer := cfg.Reviewers()[0]
+	effective := harness.ReadModeSupplied
+	if doc, err := l.document(); err == nil {
+		if entry, found := doc.For(reviewer.Harness); found {
+			effective = harness.EffectiveReadMode(entry.ReadMode())
+		}
+	}
+	return core.ReviewEngineID(cfg.ReviewContract(string(effective)))
 }
 
 // resolveStoreFor answers the store the named handle reads through: the

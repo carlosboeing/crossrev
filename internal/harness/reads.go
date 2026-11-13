@@ -61,6 +61,18 @@ func ParseReadMode(text string) (ReadMode, bool) {
 // readModeNames is the sentence the validator joins.
 func readModeNames() string { return "served, file_tool or supplied" }
 
+// EffectiveReadMode resolves the declared mode to the one a review runs:
+// file_tool is accepted but unwired, so it runs supplied. Served and
+// supplied run as declared. The review leg's own EffectiveReadMode carries
+// the reason the two differ; resolve and status read the mode alone to
+// compute the base-policy fallback identity for markers that name none.
+func EffectiveReadMode(declared ReadMode) ReadMode {
+	if declared == ReadModeFileTool {
+		return ReadModeSupplied
+	}
+	return declared
+}
+
 // verifiedCommandBlocks is the served-or-tripwire command block verified live
 // on each pinned version, or the pin moves. A harness whose block is
 // unverified never reviews: the review leg is refused with

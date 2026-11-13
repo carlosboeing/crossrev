@@ -82,6 +82,10 @@ type Handle struct {
 	Commit   string // the commit SHA; empty for the marker store
 	Location string // a ref name, or HandleMarker
 	Degraded bool   // published in the compact form
+	// Engine is the review-contract engine identity the named generation
+	// was published under, recorded on the marker beside the claim. Empty
+	// for markers written before the pass recorded it.
+	Engine string
 	// Payload is the encoded generation the marker store carries inline,
 	// absent for the ref store. The marker is the fallback's authority and
 	// its transport both.
@@ -200,6 +204,17 @@ func ProducerFor(m Marker, fallback Producer) Producer {
 		model = m.ModelReported.Value()
 	}
 	return Producer{Harness: harness, Model: model, Effort: m.Effort.Value(), Endpoint: m.Endpoint.Value()}
+}
+
+// EngineFor answers the review-contract engine identity a generation is
+// judged by, read off its marker: the identity the pass that published it
+// recorded beside the claim. A marker that names none predates the field
+// and falls back to the base-policy identity the caller computed.
+func EngineFor(m Marker, fallback string) string {
+	if engine, ok := m.CoverageEngine.Get(); ok && engine != "" {
+		return engine
+	}
+	return fallback
 }
 
 // GenerationCurrent reports whether a generation may still be reused: the

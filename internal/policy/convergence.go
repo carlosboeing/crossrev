@@ -1,12 +1,37 @@
 package policy
 
+// VerificationState is the required-check gate's verdict on one entry or on
+// the whole list. Only passed and none_required let a route converge.
+//
+// It lives in this package rather than beside the evaluator because the
+// convergence predicate reads it: tier 1 may not import the tier-2
+// evaluator, so the vocabulary sits below both and the mapping sits above.
+type VerificationState string
+
+const (
+	// VerificationNone means no checks are required, so the gate is open
+	// by default.
+	VerificationNone VerificationState = "none_required"
+	// VerificationPassed means every required check reported a passing run.
+	VerificationPassed VerificationState = "passed"
+	// VerificationPending means a required check's newest run is still going.
+	VerificationPending VerificationState = "pending"
+	// VerificationFailed means a required check's newest run failed.
+	VerificationFailed VerificationState = "failed"
+	// VerificationMissing means no run carries a required check's name
+	// and app.
+	VerificationMissing VerificationState = "missing"
+	// VerificationUnreadable means the enumeration itself could not be
+	// trusted: a refused read or a partial list. It fails closed, never
+	// open.
+	VerificationUnreadable VerificationState = "unreadable"
+)
+
 // Convergence is the one input every convergence decision reads. It names
 // the review obligation and what settled it: open fixable findings, whether
 // the ledger is current, the required/covered/outstanding/could_not_review
-// counts, whether the reviewer reported its scope, and whether a repair
-// delta needed and got its confirmation pair. Verification is not an input:
-// this release records verification.status not_implemented, and an
-// unimplemented check is never evidence for convergence.
+// counts, whether the reviewer reported its scope, whether a repair delta
+// needed and got its confirmation pair, and the required-check evidence.
 type Convergence struct {
 	// UnresolvedFixable counts findings at or above min_fix_severity with
 	// no fix, skip, dispute, deferral or escalation settling them.
@@ -31,15 +56,22 @@ type Convergence struct {
 	// ConfirmationComplete reports the repair delta carries its accepted
 	// B/C confirmation pair.
 	ConfirmationComplete bool
+	// Verification is the required-check evidence for the head. Empty
+	// reads as none_required: no gate was configured, so there is nothing
+	// to refuse on. Every leg with a configured gate supplies an explicit
+	// state instead of leaving this unset.
+	Verification VerificationState
 }
 
 // Converged is the one convergence predicate. It holds only when no
 // unresolved fixable finding remains, the current complete generation
 // exactly accounts for the required set, no outstanding or could_not_review
-// record exists, the scope was reported, and any repair delta has its
-// matching accepted confirmation pair. Every other shape — a stale label,
-// a stale marker, an outstanding record, an unexamined file, a missing
-// scope report, an unconfirmed repair — refuses.
+// record exists, the scope was reported, any repair delta has its matching
+// accepted confirmation pair, and the required checks passed or none were
+// required. Every other shape — a stale label, a stale marker, an
+// outstanding record, an unexamined file, a missing scope report, an
+// unconfirmed repair, a pending, missing, failed or unreadable check —
+// refuses.
 func Converged(c Convergence) bool {
 	if c.UnresolvedFixable != 0 {
 		return false
@@ -62,5 +94,18 @@ func Converged(c Convergence) bool {
 	if c.ConfirmationRequired && !c.ConfirmationComplete {
 		return false
 	}
-	return true
+	switch c.Verification {
+	case "", VerificationNone, VerificationPassed:
+		return true
+	}
+	return false
+}
+
+// ConvergedExceptVerification is the predicate with the gate held open:
+// whether the pass would converge if its required checks passed. The review
+// leg waits on exactly this shape — anything else cannot converge however
+// the checks report, so waiting would only spend the wait.
+func ConvergedExceptVerification(c Convergence) bool {
+	c.Verification = VerificationNone
+	return Converged(c)
 }

@@ -12,6 +12,7 @@ import (
 	"github.com/carlosboeing/crossrev/internal/intel"
 	"github.com/carlosboeing/crossrev/internal/prompt"
 	"github.com/carlosboeing/crossrev/internal/prstate"
+	"github.com/carlosboeing/crossrev/internal/runlog"
 	"github.com/carlosboeing/crossrev/internal/ui"
 	"github.com/carlosboeing/crossrev/internal/validate"
 )
@@ -40,7 +41,8 @@ type batchContext struct {
 	// read tool or no read tool at all. It renders into every batch
 	// prompt, so packing measures the bytes the harness is actually
 	// given.
-	reads string
+	reads   string
+	concern string
 }
 
 // discoverBatchContext reads the pass's shared context exactly once. The
@@ -103,6 +105,7 @@ func (c batchContext) render(files []intel.FileUnit, base, head core.Revision, w
 		Excluded:        c.excluded,
 		Confirmation:    confirmation,
 		Reads:           c.reads,
+		Concern:         c.concern,
 	}.Render(), supplied
 }
 
@@ -133,6 +136,7 @@ func (c batchContext) renderPart(part *intel.FilePart, base, head core.Revision,
 		Excluded:        c.excluded,
 		Confirmation:    confirmation,
 		Reads:           c.reads,
+		Concern:         c.concern,
 	}.Render()
 }
 
@@ -215,7 +219,10 @@ func (l *Leg) invokePrompt(ctx context.Context, req Request, loaded Context, set
 // buckets the accepted envelope folded in (refused attempts included), the
 // call's served reads from the reads ledger, the answering model, and the
 // call's wall time. A refused answer judged nothing and gets no line.
-func (l *Leg) logAcceptedCall(call int, promptBytes []byte, suppliedBytes, reads int, envelope harness.Envelope, ms int64) {
+func (l *Leg) logAcceptedCall(call int, promptBytes []byte, suppliedBytes, reads int, envelope harness.Envelope, ms int64, identity ...runlog.CallIdentity) {
+	if call > l.callsMade {
+		l.callsMade = call
+	}
 	if l.Log == nil {
 		return
 	}
@@ -229,7 +236,7 @@ func (l *Leg) logAcceptedCall(call int, promptBytes []byte, suppliedBytes, reads
 	if envelope.ModelReported != nil {
 		model = *envelope.ModelReported
 	}
-	l.Log.Call(call, len(promptBytes), suppliedBytes, reads, fresh, cached, output, model, ms)
+	l.Log.Call(call, len(promptBytes), suppliedBytes, reads, fresh, cached, output, model, ms, identity...)
 }
 
 // suppliedBytes measures what the reviewer was actually given for one batch:
@@ -274,7 +281,7 @@ func (l *Leg) invokeWithStaged(ctx context.Context, req Request, loaded Context,
 		return nil, harness.Envelope{}, nil, err
 	}
 	defer os.RemoveAll(tmp)
-	envelope, payload, msgs, err := l.runPrompt(ctx, req, loaded, settings, adapter, entry, staged, tmp, promptBytes, nil, call)
+	envelope, payload, msgs, err := l.runPrompt(ctx, req, loaded, settings, adapter, entry, staged, tmp, promptBytes, nil, call, promptSpec{schema: validate.FindingsSchema(), check: l.checkPayload})
 	return payload, envelope, msgs, err
 }
 

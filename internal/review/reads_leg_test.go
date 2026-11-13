@@ -346,7 +346,7 @@ func TestFailedVersionProbeRefuses(t *testing.T) {
 // A served review on the verified install proceeds: the probe runs and the
 // model child follows.
 func TestVerifiedInstallProceeds(t *testing.T) {
-	e := newEnv(t)
+	e := newEnv(t, "correctness")
 	writeRequiredHead(e, "a.go", "package a\n")
 	e.runner.script = []exec.Result{
 		{ExitCode: 0, Stdout: claudeStdout(batchAnswerFor(t, []string{"a.go"}))},
@@ -492,7 +492,7 @@ func serveChildSession(t *testing.T, spec exec.Spec, lines ...string) {
 // scratch log before the assessment read it, so a healthy pass recorded
 // nothing.
 func TestServedChildSessionReadsLandInTheEnvelope(t *testing.T) {
-	e := newEnv(t)
+	e := newEnv(t, "correctness")
 	writeRequiredHead(e, "a.go", "package a\n")
 	e.runner.onSpec = func(spec exec.Spec) {
 		serveChildSession(t, spec,
@@ -543,7 +543,7 @@ func TestServedChildSessionReadsLandInTheEnvelope(t *testing.T) {
 // nothing — supplied mode, or a served call with an empty session — still
 // reads zero.
 func TestCallLineReportsTheCallsServedReads(t *testing.T) {
-	e := newEnv(t)
+	e := newEnv(t, "correctness")
 	writeRequiredHead(e, "a.go", "package a\n")
 	e.runner.onSpec = func(spec exec.Spec) {
 		serveChildSession(t, spec,
@@ -576,7 +576,7 @@ func TestCallLineReportsTheCallsServedReads(t *testing.T) {
 // says degrade: the reason travels in the pass comment and the marker
 // carries the envelope.
 func TestServedChildSessionRefusalsDegrade(t *testing.T) {
-	e := newEnv(t)
+	e := newEnv(t, "correctness")
 	writeRequiredHead(e, "a.go", "package a\n")
 	e.runner.onSpec = func(spec exec.Spec) {
 		serveChildSession(t, spec,
@@ -872,7 +872,7 @@ func TestReviewTripwirePublishesNothing(t *testing.T) {
 // healthy second pass on the same Leg records only the second pass's
 // counts, with no reason.
 func TestSecondRunOnOneLegCarriesOnlyItsOwnReads(t *testing.T) {
-	e := newEnv(t)
+	e := newEnv(t, "correctness")
 	writeRequiredHead(e, "a.go", "package a\n")
 	e.cfg = mustConfig(t, "version: 2\npolicy:\n  on_reads_unavailable: halt\n")
 	e.runner.serveErr = errors.New("connection refused")
@@ -929,7 +929,7 @@ func TestSecondRunOnOneLegCarriesOnlyItsOwnReads(t *testing.T) {
 // a healthy answer.
 func TestTransientFailureThenHealthyRetryStaysServed(t *testing.T) {
 	for _, policy := range []string{"", "version: 2\npolicy:\n  on_reads_unavailable: halt\n"} {
-		e := newEnv(t)
+		e := newEnv(t, "correctness")
 		writeRequiredHead(e, "a.go", "package a\n")
 		if policy != "" {
 			e.cfg = mustConfig(t, policy)
@@ -1008,7 +1008,7 @@ func TestFailedHarnessUnderHaltReportsTheHarnessFailure(t *testing.T) {
 // failure followed by a healthy retry used to re-read the failed
 // attempt's session, charging its reads a second time.
 func TestRetryWithoutRunDirectoryChargesEachServedReadOnce(t *testing.T) {
-	e := newEnv(t)
+	e := newEnv(t, "correctness")
 	writeRequiredHead(e, "a.go", "package a\n")
 	e.runner.onSpec = func(spec exec.Spec) {
 		// Both attempts serve one read through the tool; the first
@@ -1108,7 +1108,7 @@ func TestRetryWithoutASessionCannotInheritTheHandshake(t *testing.T) {
 // failed attempt's session would otherwise be re-charged by the retry.
 // The loss is still recorded in the run log.
 func TestRetryAfterAFailedArchiveChargesEachServedReadOnce(t *testing.T) {
-	e := newEnv(t)
+	e := newEnv(t, "correctness")
 	writeRequiredHead(e, "a.go", "package a\n")
 	e.runner.onSpec = func(spec exec.Spec) {
 		serveChildSession(t, spec,
@@ -1377,7 +1377,7 @@ func servedFlag(args []string, name string) (string, bool) {
 // remaining allowance: the first call carries the full 200-read / 1 MiB
 // leg caps.
 func TestFirstCallCarriesTheFullLegAllowance(t *testing.T) {
-	e := newEnv(t)
+	e := newEnv(t, "correctness")
 	writeRequiredHead(e, "a.go", "package a\n")
 	var granted [][]string
 	e.runner.onSpec = func(spec exec.Spec) {
@@ -1412,7 +1412,7 @@ func TestFirstCallCarriesTheFullLegAllowance(t *testing.T) {
 // granted the first batch's remainder, so two batches cannot serve 200
 // reads each.
 func TestSecondBatchReceivesTheRemainingAllowance(t *testing.T) {
-	e := newEnv(t)
+	e := newEnv(t, "correctness")
 	var first, rest []string
 	for i := 1; i <= 41; i++ {
 		path := fmt.Sprintf("file%02d.go", i)
@@ -1481,7 +1481,7 @@ func TestSecondBatchReceivesTheRemainingAllowance(t *testing.T) {
 // fresh read server seeded from its flags, so a stale grant would let one
 // call retry past the leg caps.
 func TestRetryReceivesTheRemainingAllowance(t *testing.T) {
-	e := newEnv(t)
+	e := newEnv(t, "correctness")
 	writeRequiredHead(e, "a.go", "package a\n")
 	var granted [][]string
 	var children int

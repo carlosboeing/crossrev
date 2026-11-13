@@ -24,6 +24,11 @@ Options on `cycle`, `review` and `resolve`, unless noted:
 | `--model <id>` | Override the configured model for this run, passed to the harness exactly as written. Without `--harness` it keeps the configured harness and replaces only its model; on `cycle` it lands on both legs |
 | `--effort <level>` | Override the configured reasoning effort for this run, passed through verbatim like the config value; on `cycle` it lands on both legs |
 | `--input-policy hunks_first\|whole_when_fits` | Override `review.input_policy` for this run. On `review` and `cycle` only; on `cycle` it applies to the review legs |
+| `--concerns a,b` | Override `review.concerns` for this run, for example `--concerns correctness,consistency`. On `review` and `cycle` only; refused where the base policy says automated |
+| `--check resolver\|off` | Override `review.check` for this run. On `review` and `cycle` only; refused where the base policy says automated |
+| `--required-check NAME[@APP]` | Override `verification.required_checks` for this run; repeat the flag for more than one check. On all three commands; refused where the base policy says automated |
+| `--no-required-checks` | Clear `verification.required_checks` for this run. On all three commands; refused where the base policy says automated |
+| `--check-wait MINUTES` | Override `verification.wait_minutes` for this run, from 0 to 30. On all three commands; refused where the base policy says automated |
 | `--repo owner/name` | Target a repository other than this checkout |
 | `--no-tips` | Suppress the closing suggestion about automated mode |
 
@@ -66,6 +71,8 @@ The reviewer gives each required file one file verdict: `no_issue`, `finding`, `
 
 Covered means a verdict was recorded for the file. A `could_not_review` verdict still prevents convergence.
 
+Every input runs once per concern. An input is a whole file or, for a file that fits no call alone, one slice of it; a concern is a lens — `correctness` for bugs in the logic, `consistency` for the change against the code around it. The answers merge before coverage publishes: the same point raised under both lenses collapses into one finding carrying both, and verdicts merge with `could_not_review` winning, so a file either concern could not examine blocks convergence however the other judged it. An interrupted input restarts from its first concern. `review.concerns` narrows the lenses; the default is both.
+
 A verdict covers the supplied ranges on both sides — the numbered lines the hunks showed — not the whole file. Each file arrives as its own gutter-numbered hunks: in full (`full_text`), as the enclosing function of each change (`hunks_context`), or header-only with its access reason (`diff_only`). Evidence for a verdict must sit inside those ranges on the side its revision names: a removed line is cited at the base, and anything outside the shown spans is refused. Lines the hunks did not show are unseen and belong in `known_limits`, never in evidence. A file that fits no call alone is reviewed in slices across calls and merges to one verdict carrying the union of the slices' ranges.
 
 One pass reads at most 400 required files. Batches hold at most 40 files in path order.
@@ -90,11 +97,17 @@ The pass records which repair it confirmed only after it reads every current fil
 
 The reviewer reports a scope note saying what was read, and a list of known limits saying what constrained it.
 
-One convergence rule reads that note with the counts and the confirmed repair.
+One convergence rule reads that note with the counts, the confirmed repair and the required-check evidence.
 
 The review writer and both label rules read that rule. The local cycle and both status paths read it too.
 
-A failed check never falls back to the reviewer verdict.
+A gate that fails, waits, misses or cannot be read never falls back to the reviewer verdict.
+
+### How many model calls a pass makes
+
+A review pass makes `k × c + m` calls: `k` inputs (split slices count separately), times `c` concerns, plus `m` cross-model check calls — none when no finding was raised, usually one. A one-input pull request under the defaults costs three calls where it cost one; `review.concerns: [correctness]` and `review.check: off` return it to one.
+
+Each call is one accepted answer, not one attempt. A call earns one semantic retry and one transient retry — three attempts where the harness constrains its own output, four for opencode — and the refused attempts' usage folds into the accepted call's record. A resumed pass reuses its completed calls and repeats from the interrupted input, which restarts from its first concern. Reuse needs the same effective contract — concerns, check mode, input policy and reviewing harness — so a resume under different flags re-examines rather than trusting verdicts judged under other settings.
 
 ### The commits CrossRev makes
 
@@ -152,7 +165,9 @@ Category is a closed set — `correctness`, `security`, `performance`, `maintain
 
 A finding also carries `pre_existing`, true when the defect would still be there if the pull request were reverted. Pre-existing defects are reported at any severity but never fixed, and they cannot keep the loop alive. A pull request that also fixes old bugs is one nobody can review.
 
-The first pass posts every finding as a comment. On later passes, findings below `min_fix_severity` are held: recorded on the pass marker, listed in the summary table, and counted there ("N findings below \<severity\> recorded and not posted"), but never posted. A pre-existing finding at or above the threshold still posts. Held findings never reach the resolve leg — with no comment there is no thread to reply into — and return in the next review's prior findings with resolution `not_posted`. A held finding raised again at a higher severity posts then, even when an earlier pass posted it at the lower severity; findings never held back are still posted only once.
+The first pass posts every finding as a comment, subject to the cross-model check below. On later passes, findings below `min_fix_severity` are held: recorded on the pass marker, listed in the summary table, and counted there ("N findings below \<severity\> recorded and not posted"), but never posted. A pre-existing finding at or above the threshold still posts. Held findings never reach the resolve leg — with no comment there is no thread to reply into — and return in the next review's prior findings with resolution `not_posted`. A held finding raised again at a higher severity posts then, even when an earlier pass posted it at the lower severity; findings never held back are still posted only once.
+
+Before the first finding comment, the cross-model check has the resolver's model judge each finding — confirmed, rejected, or duplicate of another candidate — and only confirmed findings post. Rejected and duplicate findings stay on the pass marker with the checker's reason, the summary names the rejected ones, and severity and `pre_existing` corrections apply before posting with the reviewer's values kept on the finding. When the check fails past its retries, every finding posts unchecked and the summary says `check: degraded` with the reason; when the checker cannot run at all, it says `check: unavailable`. `review.check: off` skips the check and posts everything the reviewer raised.
 
 ### The five resolutions
 
@@ -165,6 +180,13 @@ Every posted finding gets a reply, whatever the resolve leg decides. Nothing is 
 | `deferred` | Real, worth doing, not here. Persisted to the backlog |
 | `disputed` | Technically wrong for this codebase |
 | `escalated` | Needs a human decision. Applies `crossrev/stop` and leaves the thread open |
+
+### What the resolver is shown besides the finding
+
+Two pieces of evidence travel with a finding into the resolve prompt. Both are advice, and neither changes a resolution or escalates a finding.
+
+- **Recurrence candidate.** A finding is a candidate when an earlier pass resolved `fixed` and pushed a commit for a finding with the same id, or with the same path, side and category and an anchor within 10 lines of the earlier one. The prompt names the earlier pass, finding and commit, and asks the resolver to check whether that fix was incomplete and to say what it concluded in its reply. The resolve summary counts the candidates.
+- **Sibling locations.** Up to 10 places at the pull request's head where an identifier from the finding's anchored line also occurs, the finding's own file included and the anchored line itself left out, from one pass over the committed files. Rarest identifier first. The list is partial and says so. The resolver looks at them before it calls a repair complete, and fixes a sibling only when this pull request introduced the same defect there. When the prompt would pass the resolver's input limit, the lists shrink first, to fewer entries and then none, before anything else is cut.
 
 ### The six labels
 
@@ -191,7 +213,7 @@ Markers are HTML comments in comment bodies. They carry the pass number, the leg
 
 Every run also writes locally, under `~/.local/state/crossrev/runs/<repo-slug>/pr-<n>/<run-id>/` (the slash in the repository name becomes a hyphen) — beside the worktrees a failed resolve leg keeps, and named by the same run id the marker carries.
 
-`run.log` is one line per event — timestamp, phase, subprocess, exit code, duration — so a stall inside a step is attributable to that step, and a dead run says where it stopped. On a review pass it also carries one `phase` line per preparation step and one `call` line per accepted model call, and `run start` names the build revision. A failed leg also keeps the harness transcript there (`review.call-N.attempt-M.stdout` and `.stderr` on the review leg, `<leg>.attempt-N` on the resolve leg), so what the model actually did can be read afterwards instead of being deleted by the code that noticed the failure. Successful legs delete their transcripts; `--keep-transcripts` keeps them, for the failure that is a wrong answer rather than an error.
+`run.log` is one line per event — timestamp, phase, subprocess, exit code, duration — so a stall inside a step is attributable to that step, and a dead run says where it stopped. On a review pass it also carries one `phase` line per preparation step and one `call` line per accepted model call — each batch call naming its `kind` (`review` or `check`), `concern` and `part` — and `run start` names the build revision. Each leg also records its effective review settings with their source, so a run's concerns, check mode and gate read back off the log. A failed leg also keeps the harness transcript there (`review.call-N.attempt-M.stdout` and `.stderr` on the review leg, `<leg>.attempt-N` on the resolve leg), so what the model actually did can be read afterwards instead of being deleted by the code that noticed the failure. Successful legs delete their transcripts; `--keep-transcripts` keeps them, for the failure that is a wrong answer rather than an error.
 
 Run directories older than `logs.retention_days` (default 14) are swept, logs and transcripts alike. The harness process holds no GitHub token, and captured output passes the credential-shape filter before it lands in either file. An unrecognized or re-encoded secret can still pass through.
 
@@ -205,19 +227,19 @@ In automated mode the runner is discarded after the job, so the generated workfl
 |---|---|
 | awaiting review | A review leg is owed |
 | awaiting resolution | The review landed; the resolve leg is owed |
-| converged | Nothing at or above `min_fix_severity` remains, every required file has an accepted verdict, none is marked `could_not_review`, and any repair has been confirmed |
-| halted | It stopped short — a cap, a blocked leg, an escalated finding, a deferral whose record never landed, or a pull request that changes no files. A human is needed |
+| converged | Nothing at or above `min_fix_severity` remains, every required file has an accepted verdict, none is marked `could_not_review`, any repair has been confirmed, and the required checks passed or none were required |
+| halted | It stopped short — a cap, a blocked leg, an escalated finding, a deferral whose record never landed, a required check that failed, waited out, missed or could not be read, or a pull request that changes no files. A human is needed |
 | stopped | Somebody applied `crossrev/stop` |
 
-A resolve pass that ended blocked or escalated is complete but not settled, so it can be driven again. Once whatever stopped it is fixed, `crossrev resolve --pr N` runs the resolver over the same findings instead of refusing. The same goes for a pass that left a deferral unpersisted, and for one whose claimed fix reached no commit. A pass that settled every finding stays finished. `status` names whichever command applies.
+A resolve pass that ended blocked or escalated is complete but not settled, so it can be driven again. Once whatever stopped it is fixed, `crossrev resolve --pr N` runs the resolver over the same findings instead of refusing. The same goes for a pass that left a deferral unpersisted, and for one whose claimed fix reached no commit. A pass held only by required checks can also be driven again, without invoking the model or repeating its replies. `status` names the blocking checks and `crossrev restart --pr N` as the remedy. Other passes that settled every finding stay finished.
 
 `crossrev restart --pr N` is the one-command form of that remedy for a halted pull request: it clears `crossrev/halted`, and `crossrev/watchdog-retried` when present, and re-applies the halted leg's awaiting label. It refuses a pull request carrying `crossrev/stop` — red is the human brake, and no command clears it — and one that is not halted, saying what applies instead.
 
-A resolve pass can also finish the loop itself. A pass that settled every finding without pushing a commit — each disputed, skipped, or deferred and tracked — converges on the spot: the head never moved, so a re-review would find nothing new and decline. A pass that pushed hands back to the reviewer, because there is something new to see.
+A resolve pass can also finish the loop itself. A pass that settled every finding without pushing a commit — each disputed, skipped, or deferred and tracked — converges on the spot when the required checks allow it, and otherwise waits for them and halts as described below: the head never moved, so a re-review would find nothing new and decline. A pass that pushed hands back to the reviewer, because there is something new to see.
 
-Converged does not mean "no findings". It means no finding this pull request introduced, at or above the threshold, remains, every required file has an accepted verdict, none is marked `could_not_review`, and any repair has been confirmed. Findings below the threshold and pre-existing ones are reported and cannot keep the loop alive — a loop that cannot converge because of a naming quibble is one nobody leaves switched on.
+Converged does not mean "no findings". It means no finding this pull request introduced, at or above the threshold, remains, every required file has an accepted verdict, none is marked `could_not_review`, any repair has been confirmed, and the required checks passed or none were required. Findings below the threshold and pre-existing ones are reported and cannot keep the loop alive — a loop that cannot converge because of a naming quibble is one nobody leaves switched on.
 
-Converged also does not mean checks ran. The coverage record names verification status not_implemented. No check runs in this release.
+Converged does not mean the code is correct, and it means checks passed only when checks are required. `verification.required_checks` names the check runs that must report green for the head commit before any route converges — the review publish, the resolve no-commit settle and the resolve empty-findings route all judge the same evidence. Both legs wait for pending or missing checks up to `verification.wait_minutes` when coverage would otherwise permit convergence. They re-read every 30 seconds, stopping early on `crossrev/stop`, a head change or cancellation. A gate still blocked after the wait applies `crossrev/halted` and names `crossrev restart --pr N`. Restart selects resolve for a gate-held settle at an unchanged head, which re-judges the checks without invoking the model. When the head has moved since, the resolve leg hands the new revision back to the reviewer instead, again without the model. This also applies to empty findings and older review markers without a coverage claim. A failed check never becomes a code finding. Without configured checks nothing is read and every route behaves as before. The gate's evidence sits on the pass marker under `verification`; the coverage manifest's own `verification.status` stays `not_implemented`, because CrossRev itself runs no check.
 
 A pull request that changes no files never converges either. Its head is identical to its base — the branch was reverted, or the same work reached the base by a merge, a rebase or a cherry-pick — so there is no diff to read and no required file to account for. CrossRev settles that pass itself, without calling a reviewer: it posts a summary naming the state and applies `crossrev/halted`. Close the pull request, or add a commit and then comment `/crossrev review` to start the next pass. A push on its own restarts nothing — the generated review workflow subscribes to `opened`, `ready_for_review` and `labeled`, never to `synchronize` — and this path clears the awaiting labels the watchdog looks for. Locally, run `crossrev review --pr N`.
 
