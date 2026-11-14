@@ -4,6 +4,14 @@ All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepa
 
 ## [Unreleased]
 
+### Added
+
+- **`crossrev stop --pr N` stops a local run and clears its lock.** Stopping a local run meant deleting `.git/crossrev/pr-<n>.lock` by hand. The stop reads the lock, sends a live holder `SIGTERM` and waits for its orderly unwind (`SIGKILL` only after a five-second grace), clears a holder that is already dead without signalling anything, and refuses a lock naming another host with the lock left in place. The refusal a second local run gets now names the command.
+
+### Fixed
+
+- **A zombie local run no longer holds its pull request forever.** The lock's liveness probe was `kill -0` alone, and a process that had terminated but was never reaped by its long-lived parent still answers that probe as alive, so the dead-holder takeover never ran and every later `crossrev --pr N`, `review` or `resolve` was refused quoting the dead pid. The probe now reads the process state beside the signal — `Z` in `/proc/<pid>/stat` on Linux, the `SZOMB` entry in the Darwin process table — and answers not alive for a zombie. `crossrev status` asked the same question with a second copy of the old probe and could report the dead leg as still running; it now shares the one corrected probe, so a zombie leg reads as gone.
+
 ### Changed
 
 - **The pre-pull-request checks are one list.** `CONTRIBUTING.md` now lists the five checks CI runs — the suite, `go test`, `lint.sh`, the parity ledger check and the changelog gate — and the README, the pull request template and the agent brief point to it instead of keeping their own shorter copies. `scripts/check-parity-coverage.sh` drops its `--native` mode, which refused shell suites that sourced `lib/*.sh` or ran `bin/crossrev`; both paths were removed with the Bash implementation, so a suite reaching for them already fails on its own.

@@ -14,6 +14,7 @@ crossrev cycle   --pr 42    # the same thing, spelled out
 crossrev review  --pr 42    # one review leg: inline comments plus a summary
 crossrev resolve --pr 42    # verify each finding, fix, reply, resolve, push
 crossrev status  --pr 42    # where the loop is, and how to resume it
+crossrev stop    --pr 42    # stop a local run holding the pull request, and clear its lock
 ```
 
 Options on `cycle`, `review` and `resolve`, unless noted:
@@ -212,6 +213,8 @@ In automated mode the runner is discarded after the job, so the generated workfl
 A resolve pass that ended blocked or escalated is complete but not settled, so it can be driven again. Once whatever stopped it is fixed, `crossrev resolve --pr N` runs the resolver over the same findings instead of refusing. The same goes for a pass that left a deferral unpersisted, and for one whose claimed fix reached no commit. A pass that settled every finding stays finished. `status` names whichever command applies.
 
 `crossrev restart --pr N` is the one-command form of that remedy for a halted pull request: it clears `crossrev/halted`, and `crossrev/watchdog-retried` when present, and re-applies the halted leg's awaiting label. It refuses a pull request carrying `crossrev/stop` — red is the human brake, and no command clears it — and one that is not halted, saying what applies instead.
+
+A local run holds its pull request with a lock naming its pid, host and start time, so a second local run against the same pull request refuses rather than interleaving comments and replies. A holder that is no longer running — a zombie included, since a terminated process its parent never reaped still answers `kill -0` — has its lock taken over by the next run, which says so. `crossrev stop --pr N` is how a live local run is stopped without deleting the lock by hand: it sends the holder `SIGTERM`, waits for the orderly unwind, sends `SIGKILL` only after the term grace, and removes the lock once the holder is dead. A holder already dead is cleared with no signal sent, and a lock naming another host is refused with the lock left in place.
 
 A resolve pass can also finish the loop itself. A pass that settled every finding without pushing a commit — each disputed, skipped, or deferred and tracked — converges on the spot: the head never moved, so a re-review would find nothing new and decline. A pass that pushed hands back to the reviewer, because there is something new to see.
 

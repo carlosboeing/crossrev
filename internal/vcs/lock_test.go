@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/carlosboeing/crossrev/internal/vcs"
 )
@@ -203,6 +204,290 @@ func TestRunLockTakesOverADeadHolder(t *testing.T) {
 	}
 	if got := vcs.ParseHolder(strings.TrimRight(string(raw), "\n")).PID; got != os.Getpid() {
 		t.Errorf("the lock still names pid %d, not %d", got, os.Getpid())
+	}
+}
+
+// A zombie holder is dead even though `kill -0` still answers for it: the
+// process has terminated, its parent has not reaped it, and on macOS and
+// Linux the process entry stays signalable until it is reaped. The lock it
+// held must be taken over, not refused as a live run.
+func TestRunLockTakesOverAZombieHolder(t *testing.T) {
+	ctx := context.Background()
+	git := testGit(t)
+	repo := initRepo(t, git, filepath.Join(realTempDir(t), "clone"))
+	commitFile(t, repo, "app.ts", "x\n", "init")
+
+	// A child of this test that has been killed but not waited for is a
+	// zombie: terminated, unreaped, and still answering `kill -0`.
+	zombie := osexec.Command("sleep", "60")
+	if err := zombie.Start(); err != nil {
+		t.Fatalf("start a holder to zombify: %v", err)
+	}
+	t.Cleanup(func() { _ = zombie.Wait() })
+	if err := zombie.Process.Kill(); err != nil {
+		t.Fatalf("kill the holder: %v", err)
+	}
+	// Give the kernel a moment to move the child to zombie state; the
+	// probe, not this sleep, is what must tell the two states apart.
+	time.Sleep(200 * time.Millisecond)
+
+	holder := fmt.Sprintf("%d on elsewhere since 2026-01-01T00:00:00Z", zombie.Process.Pid)
+	seedLock(t, repo, 42, holder)
+
+	lock, err := repo.AcquireRunLock(ctx, 42, "local")
+	if err != nil {
+		t.Fatalf("AcquireRunLock over a zombie holder: %v", err)
+	}
+	t.Cleanup(func() { _ = lock.Release() })
+	if !lock.Held() {
+		t.Fatal("the zombie holder's lock was not taken over")
+	}
+	if lock.Warning == nil {
+		t.Fatal("taking over a zombie holder's lock said nothing")
+	}
+}
+
+func TestStopRunLockWithNoLock(t *testing.T) {
+	ctx := context.Background()
+	git := testGit(t)
+	repo := initRepo(t, git, filepath.Join(realTempDir(t), "clone"))
+	commitFile(t, repo, "app.ts", "x\n", "init")
+
+	result, err := repo.StopRunLock(ctx, 42)
+	if err != nil {
+		t.Fatalf("StopRunLock: %v", err)
+	}
+	if result.State != vcs.StopNone {
+		t.Errorf("state = %q, want %q", result.State, vcs.StopNone)
+	}
+}
+
+func TestStopRunLockClearsADeadHolder(t *testing.T) {
+	ctx := context.Background()
+	git := testGit(t)
+	repo := initRepo(t, git, filepath.Join(realTempDir(t), "clone"))
+	commitFile(t, repo, "app.ts", "x\n", "init")
+
+	dead := osexec.Command("sh", "-c", "exit 0")
+	if err := dead.Run(); err != nil {
+		t.Fatalf("run a process to death: %v", err)
+	}
+	holder := fmt.Sprintf("%d on %s since 2026-01-01T00:00:00Z", dead.Process.Pid, hostForLock(t))
+	seedLock(t, repo, 42, holder)
+
+	result, err := repo.StopRunLock(ctx, 42)
+	if err != nil {
+		t.Fatalf("StopRunLock: %v", err)
+	}
+	if result.State != vcs.StopCleared {
+		t.Errorf("state = %q, want %q", result.State, vcs.StopCleared)
+	}
+	if _, err := os.Stat(lockPath(t, repo, 42)); !os.IsNotExist(err) {
+		t.Errorf("the stale lock survived a stop: %v", err)
+	}
+
+	lock, err := repo.AcquireRunLock(ctx, 42, "local")
+	if err != nil {
+		t.Fatalf("AcquireRunLock after clearing: %v", err)
+	}
+	t.Cleanup(func() { _ = lock.Release() })
+	if !lock.Held() {
+		t.Error("no lock was taken after the stale one was cleared")
+	}
+}
+
+func TestStopRunLockClearsAZombieHolderWithoutSignalling(t *testing.T) {
+	ctx := context.Background()
+	git := testGit(t)
+	repo := initRepo(t, git, filepath.Join(realTempDir(t), "clone"))
+	commitFile(t, repo, "app.ts", "x\n", "init")
+
+	zombie := osexec.Command("sleep", "60")
+	if err := zombie.Start(); err != nil {
+		t.Fatalf("start a holder to zombify: %v", err)
+	}
+	t.Cleanup(func() { _ = zombie.Wait() })
+	if err := zombie.Process.Kill(); err != nil {
+		t.Fatalf("kill the holder: %v", err)
+	}
+	time.Sleep(200 * time.Millisecond)
+	holder := fmt.Sprintf("%d on %s since 2026-01-01T00:00:00Z", zombie.Process.Pid, hostForLock(t))
+	seedLock(t, repo, 42, holder)
+
+	result, err := repo.StopRunLock(ctx, 42)
+	if err != nil {
+		t.Fatalf("StopRunLock: %v", err)
+	}
+	if result.State != vcs.StopCleared {
+		t.Errorf("state = %q, want %q (a zombie is already dead, so there is nothing to signal)", result.State, vcs.StopCleared)
+	}
+	if _, err := os.Stat(lockPath(t, repo, 42)); !os.IsNotExist(err) {
+		t.Errorf("the zombie's lock survived a stop: %v", err)
+	}
+}
+
+func TestStopRunLockStopsALiveHolder(t *testing.T) {
+	ctx := context.Background()
+	git := testGit(t)
+	repo := initRepo(t, git, filepath.Join(realTempDir(t), "clone"))
+	commitFile(t, repo, "app.ts", "x\n", "init")
+
+	sleeper := osexec.Command("sleep", "60")
+	if err := sleeper.Start(); err != nil {
+		t.Fatalf("start a live holder: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = sleeper.Process.Kill()
+		_ = sleeper.Wait()
+	})
+	holder := fmt.Sprintf("%d on %s since 2026-01-01T00:00:00Z", sleeper.Process.Pid, hostForLock(t))
+	seedLock(t, repo, 42, holder)
+
+	result, err := repo.StopRunLock(ctx, 42)
+	if err != nil {
+		t.Fatalf("StopRunLock: %v", err)
+	}
+	if result.State != vcs.StopStopped {
+		t.Errorf("state = %q, want %q", result.State, vcs.StopStopped)
+	}
+	if vcs.PIDAlive(sleeper.Process.Pid) {
+		t.Error("the holder still reads alive after a stop")
+	}
+	_ = sleeper.Wait()
+	if _, err := os.Stat(lockPath(t, repo, 42)); !os.IsNotExist(err) {
+		t.Errorf("the stopped run's lock survived: %v", err)
+	}
+
+	lock, err := repo.AcquireRunLock(ctx, 42, "local")
+	if err != nil {
+		t.Fatalf("AcquireRunLock after stopping: %v", err)
+	}
+	t.Cleanup(func() { _ = lock.Release() })
+	if !lock.Held() {
+		t.Error("no lock was taken after the live run was stopped")
+	}
+}
+
+func TestStopRunLockKillsAHolderThatIgnoresTerm(t *testing.T) {
+	ctx := context.Background()
+	git := testGit(t)
+	repo := initRepo(t, git, filepath.Join(realTempDir(t), "clone"))
+	commitFile(t, repo, "app.ts", "x\n", "init")
+
+	// A holder that traps TERM away can only be stopped by the kill the
+	// term grace expires into. The grace is the production five seconds,
+	// so this test takes that long; shortening it per test would leave
+	// the escalation itself unexercised.
+	holderProc := osexec.Command("sh", "-c", `trap "" TERM; while :; do sleep 1; done`)
+	if err := holderProc.Start(); err != nil {
+		t.Fatalf("start a term-ignoring holder: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = holderProc.Process.Kill()
+		_ = holderProc.Wait()
+	})
+	holder := fmt.Sprintf("%d on %s since 2026-01-01T00:00:00Z", holderProc.Process.Pid, hostForLock(t))
+	seedLock(t, repo, 42, holder)
+
+	result, err := repo.StopRunLock(ctx, 42)
+	if err != nil {
+		t.Fatalf("StopRunLock: %v", err)
+	}
+	if result.State != vcs.StopStopped {
+		t.Errorf("state = %q, want %q", result.State, vcs.StopStopped)
+	}
+	_ = holderProc.Wait()
+	if vcs.PIDAlive(holderProc.Process.Pid) {
+		t.Error("the term-ignoring holder still reads alive after a stop")
+	}
+	if _, err := os.Stat(lockPath(t, repo, 42)); !os.IsNotExist(err) {
+		t.Errorf("the killed holder's lock survived: %v", err)
+	}
+}
+
+func TestStopRunLockRefusesAHolderOnAnotherHost(t *testing.T) {
+	ctx := context.Background()
+	git := testGit(t)
+	repo := initRepo(t, git, filepath.Join(realTempDir(t), "clone"))
+	commitFile(t, repo, "app.ts", "x\n", "init")
+
+	sleeper := osexec.Command("sleep", "60")
+	if err := sleeper.Start(); err != nil {
+		t.Fatalf("start a live holder: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = sleeper.Process.Kill()
+		_ = sleeper.Wait()
+	})
+	holder := fmt.Sprintf("%d on elsewhere.example since 2026-01-01T00:00:00Z", sleeper.Process.Pid)
+	seedLock(t, repo, 42, holder)
+
+	_, err := repo.StopRunLock(ctx, 42)
+	refusal, ok := err.(*vcs.Refusal)
+	if !ok {
+		t.Fatalf("StopRunLock = %v, want a refusal", err)
+	}
+	if !strings.Contains(refusal.Message, "elsewhere.example") {
+		t.Errorf("message = %q, want it to name the other host", refusal.Message)
+	}
+	if !vcs.PIDAlive(sleeper.Process.Pid) {
+		t.Error("a stop refused for another host signalled the local process carrying that pid")
+	}
+	if _, err := os.Stat(lockPath(t, repo, 42)); err != nil {
+		t.Errorf("a refused stop removed the lock: %v", err)
+	}
+}
+
+// hostForLock is this machine's own name as the lock records it, which a
+// stop compares the holder's host against before it signals anything.
+func hostForLock(t *testing.T) string {
+	t.Helper()
+	host, err := os.Hostname()
+	if err != nil || host == "" {
+		t.Skip("this machine will not name itself")
+	}
+	return host
+}
+
+func TestPIDAliveDistinguishesLiveDeadAndZombie(t *testing.T) {
+	if !vcs.PIDAlive(os.Getpid()) {
+		t.Error("this test's own process reads as not alive")
+	}
+	if vcs.PIDAlive(0) || vcs.PIDAlive(-1) {
+		t.Error("a pid that cannot name a process reads as alive")
+	}
+
+	live := osexec.Command("sleep", "60")
+	if err := live.Start(); err != nil {
+		t.Fatalf("start a live process: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = live.Process.Kill()
+		_ = live.Wait()
+	})
+	if !vcs.PIDAlive(live.Process.Pid) {
+		t.Errorf("live pid %d reads as not alive", live.Process.Pid)
+	}
+
+	dead := osexec.Command("sh", "-c", "exit 0")
+	if err := dead.Run(); err != nil {
+		t.Fatalf("run a process to death: %v", err)
+	}
+	if vcs.PIDAlive(dead.Process.Pid) {
+		t.Errorf("reaped pid %d reads as alive", dead.Process.Pid)
+	}
+
+	zombie := osexec.Command("sleep", "60")
+	if err := zombie.Start(); err != nil {
+		t.Fatalf("start a holder to zombify: %v", err)
+	}
+	t.Cleanup(func() { _ = zombie.Wait() })
+	if err := zombie.Process.Kill(); err != nil {
+		t.Fatalf("kill the holder: %v", err)
+	}
+	time.Sleep(200 * time.Millisecond)
+	if vcs.PIDAlive(zombie.Process.Pid) {
+		t.Errorf("zombie pid %d reads as alive; kill -0 alone would say the same, which is the defect", zombie.Process.Pid)
 	}
 }
 

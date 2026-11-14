@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -112,9 +111,11 @@ func (l RunLock) Release() error {
 //   - A lock held by this same process: kept, not re-taken. See Release.
 //   - A lock held by a dead process: taken over, with a warning that says so.
 //
-// A lock held by a live process is a refusal. `kill -0` is what the shell asks,
-// and a process this one may not signal answers the same way a process that is
-// gone does — the probe cannot tell them apart, and neither can this.
+// A lock held by a live process is a refusal. The shell asks `kill -0`,
+// and a process this one may not signal answers the same way a process that
+// is gone does — the probe cannot tell them apart, and neither can this.
+// A zombie holder answers the signal probe as alive while being dead, so
+// PIDAlive corrects for that before the refusal is reached; see pidalive.go.
 func (r *Repository) AcquireRunLock(ctx context.Context, pr int, mode string) (RunLock, error) {
 	if mode == AutomatedMode {
 		return RunLock{}, nil
@@ -142,7 +143,7 @@ func (r *Repository) AcquireRunLock(ctx context.Context, pr int, mode string) (R
 		if holder.PID != 0 && pidAlive(holder.PID) {
 			return RunLock{}, &Refusal{
 				Message: fmt.Sprintf("another CrossRev run already holds pull request %d — %s", pr, holder.Raw),
-				Hint:    "Two runs writing the same pull request would interleave comments and replies. Wait for it to finish, or stop that process.",
+				Hint:    fmt.Sprintf("Two runs writing the same pull request would interleave comments and replies. Wait for it to finish, or stop it with: crossrev stop --pr %d", pr),
 			}
 		}
 		warning = &Warning{
@@ -168,22 +169,4 @@ func hostname() string {
 		return unknownHost
 	}
 	return name
-}
-
-// pidAlive is `kill -0 "$pid" 2>/dev/null`.
-//
-// Signal zero delivers nothing and reports whether the process could be
-// signalled. A process owned by another user answers "permission denied", which
-// the shell reads as a non-zero status and therefore as "not running" — and so
-// does this. Reading it the other way would refuse a run because some unrelated
-// process inherited a recycled pid.
-//
-// A variable so that a test can answer for a pid without needing a process to
-// exist at that number.
-var pidAlive = func(pid int) bool {
-	process, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-	return process.Signal(syscall.Signal(0)) == nil
 }

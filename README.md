@@ -268,6 +268,7 @@ crossrev resolve --pr 42 --harness claude   # resolver leg on claude
 | `crossrev resolve --pr 42` | Verifies the latest findings, then may commit and push fixes |
 | `crossrev status --pr 42` | Shows the current state, every pass, and the command that resumes the loop |
 | `crossrev restart --pr 42` | Restarts a halted leg: clears the halt and re-applies its awaiting label |
+| `crossrev stop --pr 42` | Stops a local run holding the pull request and clears its lock |
 | `crossrev watchdog --repo owner/name` | Finds stalled automated work, retries once, then halts it for inspection |
 | `crossrev doctor` | Checks dependencies, GitHub authentication, installed harnesses, and runner compatibility |
 | `crossrev init` | Plans and installs automated mode after confirmation |

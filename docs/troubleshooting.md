@@ -48,7 +48,9 @@ Either way it starts the pass again and reuses the comment.
 
 Two terminals against the same pull request would interleave comments and replies, so a local run takes a lock and names the holder — pid, host, and when it started.
 
-If that process is still running, wait for it or stop it. If it isn't, CrossRev takes the lock over by itself and says so; the dead run's marker records how far it got, and this run posts only the difference.
+If that process is still running, wait for it, or stop it with `crossrev stop --pr N`. The stop sends the run `SIGTERM` — the signal a CrossRev run turns into an orderly unwind — waits for it to finish, sends `SIGKILL` only if the term grace expires, and removes the lock once the holder is dead. It refuses a lock naming another host, with the lock left in place: the pid in it names a process on that machine.
+
+If the holder isn't running, CrossRev takes the lock over by itself and says so; the dead run's marker records how far it got, and this run posts only the difference. A holder that terminated but was never reaped by its parent — a zombie, `STAT Z` in `ps` — counts as not running: it still answers `kill -0`, so the liveness probe reads the process state as well as the signal, on the lock's behalf and on `crossrev status`'s. `crossrev stop --pr N` clears a dead holder's lock, zombie included, without signalling anything.
 
 `crossrev status` uses the same lock to answer "is this actually still running?" rather than probing a bare pid — pids are recycled and every machine has its own, so a bare probe from a second machine can find a stranger's process and print "running now" over a leg that died.
 
