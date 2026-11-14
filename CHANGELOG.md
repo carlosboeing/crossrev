@@ -4,8 +4,13 @@ All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepa
 
 ## [Unreleased]
 
+### Added
+
+- **`crossrev stop --pr N` stops a local run and clears its lock.** Stopping a local run meant deleting `.git/crossrev/pr-<n>.lock` by hand. The stop reads the lock, sends a live holder `SIGTERM` and waits for its orderly unwind (`SIGKILL` only after a five-second grace), clears a holder that is already dead without signalling anything, and refuses a lock naming another host — or one whose live pid started after the lock was written, which is a recycled pid rather than the run — with the lock left in place. Acquisition and lock removal share a guard, so a stop cannot delete a lock a new run took over while it was looking. The refusal a second local run gets now names the command.
+
 ### Fixed
 
+- **A zombie local run no longer holds its pull request forever.** The lock's liveness probe was `kill -0` alone, and a process that had terminated but was never reaped by its long-lived parent still answers that probe as alive, so the dead-holder takeover never ran and every later `crossrev --pr N`, `review` or `resolve` was refused quoting the dead pid. The probe now reads the process state beside the signal — `Z` in `/proc/<pid>/stat` on Linux, the `SZOMB` entry in the Darwin process table — and answers not alive for a zombie. `crossrev status` asked the same question with a second copy of the old probe and could report the dead leg as still running; it now shares the one corrected probe, so a zombie leg reads as gone.
 - **Your own config file now sets your defaults.** `~/.config/crossrev/config.yml` was merged for its endpoints alone; every other key in it was read for its version and ignored, so a personal pairing or model choice had nowhere to live and `crossrev config show` printed the shipped defaults in every repository no matter what the file said. The layer order is now shipped defaults, the operator file over them, and the repository file over those, so the models a person runs across every project are set once and a repository narrows them only where it declares a value. Endpoint definitions keep their older rule on top: merged by name, the operator file winning. Repository policy for a leg still comes from the base revision and still wins wherever it declares a value, and a hosted runner has no operator file, so automated runs are unchanged. See [ADR 0029](docs/adrs/0029-user-config-overrides-shipped-defaults.md).
 
 ### Changed

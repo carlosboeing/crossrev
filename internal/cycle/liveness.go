@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 
 	"github.com/carlosboeing/crossrev/internal/core"
 	"github.com/carlosboeing/crossrev/internal/forge"
@@ -57,7 +56,8 @@ type LivenessProbe struct {
 	// a claim that the leg died.
 	GitDir func(ctx context.Context) (string, error)
 
-	// PIDAlive is `kill -0` (lib/run.sh:3338). Nil means the real signal.
+	// PIDAlive is `kill -0` (lib/run.sh:3338), corrected for zombies.
+	// Nil means vcs.PIDAlive, the probe the lock itself takes.
 	PIDAlive func(pid int) bool
 
 	// Hostname is the `hostname` half of
@@ -189,13 +189,14 @@ func (p *LivenessProbe) hostname() string {
 	return name
 }
 
-// alive is `kill -0 "$pid" 2>/dev/null` (lib/run.sh:3338).
+// alive is `kill -0 "$pid" 2>/dev/null` (lib/run.sh:3338), corrected for
+// zombies by the same probe the lock takes.
 //
-// Signal zero delivers nothing and reports whether the process could be
-// signalled. A process owned by another user answers "permission denied", which
-// the shell reads as a non-zero status and therefore as "not running", and so
-// does this. It is the same probe vcs.AcquireRunLock makes, and it is repeated
-// here rather than shared because internal/vcs does not export it.
+// Signal zero alone reports a zombie as running, because the terminated
+// process still has an entry until its parent reaps it. internal/vcs now
+// exports that probe as PIDAlive, so this asks it rather than keeping a
+// second copy — the copy is what let status report a dead local leg as
+// still running while the lock, once corrected, would have taken over.
 func (p *LivenessProbe) alive(pid string) bool {
 	n, err := strconv.Atoi(pid)
 	if err != nil {
@@ -204,11 +205,7 @@ func (p *LivenessProbe) alive(pid string) bool {
 	if p.PIDAlive != nil {
 		return p.PIDAlive(n)
 	}
-	process, err := os.FindProcess(n)
-	if err != nil {
-		return false
-	}
-	return process.Signal(syscall.Signal(0)) == nil
+	return vcs.PIDAlive(n)
 }
 
 // statusIsPID is `[[ "$pid" =~ ^[0-9]+$ ]]` (lib/run.sh:3320).

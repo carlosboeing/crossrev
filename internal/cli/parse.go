@@ -18,6 +18,7 @@ const (
 	CommandResolve       Command = "resolve"
 	CommandStatus        Command = "status"
 	CommandRestart       Command = "restart"
+	CommandStop          Command = "stop"
 	CommandInit          Command = "init"
 	CommandWatchdog      Command = "watchdog"
 	CommandConfigShow    Command = "config show"
@@ -36,7 +37,7 @@ const (
 func AllCommands() []Command {
 	return []Command{
 		CommandCycle, CommandReview, CommandResolve, CommandStatus,
-		CommandRestart, CommandInit, CommandWatchdog, CommandConfigShow, CommandConfigBacklog,
+		CommandRestart, CommandStop, CommandInit, CommandWatchdog, CommandConfigShow, CommandConfigBacklog,
 		CommandAuthStatus, CommandAuthLogin, CommandAuthInstall,
 		CommandAuthRotate, CommandAuthRefresh, CommandDoctor,
 		CommandVersion, CommandHelp,
@@ -110,6 +111,8 @@ func Parse(args []string, out *ui.IO, harnesses []string) (Invocation, error) {
 		return parseStatus(rest, out)
 	case string(CommandRestart):
 		return parseRestart(rest, out)
+	case string(CommandStop):
+		return parseStop(rest, out)
 	case string(CommandInit):
 		return parseInit(rest, out)
 	case string(CommandWatchdog):
@@ -421,6 +424,33 @@ func parseRestart(args []string, out *ui.IO) (Invocation, error) {
 		return Invocation{}, err
 	}
 	return Invocation{Command: CommandRestart, Request: req}, nil
+}
+
+// parseStop is stop's argument loop. The command is new with this fix, so
+// there is no shell loop to mirror. It acts on this checkout's lock, so --pr
+// is the only flag it reads. --repo names a repository the command cannot
+// act on, and is refused rather than accepted and silently ignored.
+func parseStop(args []string, out *ui.IO) (Invocation, error) {
+	var req StopRequest
+	var pr string
+	s := &scanner{args: args}
+	for s.more() {
+		var err error
+		switch flag := s.flag(); flag {
+		case "--pr":
+			pr, err = s.value()
+		default:
+			err = unknownOption(out, "stop", flag, usageStop)
+		}
+		if err != nil {
+			return Invocation{}, err
+		}
+	}
+	var err error
+	if req.PR, err = requirePR(out, "stop", pr); err != nil {
+		return Invocation{}, err
+	}
+	return Invocation{Command: CommandStop, Request: req}, nil
 }
 
 // parseWatchdog is cmd_watchdog's argument loop (lib/run.sh:3682-3696).
