@@ -72,7 +72,7 @@ func readModeNames() string { return "served, file_tool or supplied" }
 // the pinned version, so every grok review is refused until a block is
 // verified and recorded again.
 var verifiedCommandBlocks = map[string]string{
-	"codex":  "0.159.2",
+	"codex":  "0.169.0",
 	"claude": "2.1.237",
 }
 

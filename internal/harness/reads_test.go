@@ -503,8 +503,11 @@ func TestGrokReviewUnverifiedIsRefused(t *testing.T) {
 	if harness.IsolationVerified("grok", "9.9.9") {
 		t.Error("a moved grok pin reads as verified")
 	}
-	if !harness.IsolationVerified("codex", "0.159.2") {
+	if !harness.IsolationVerified("codex", "0.169.0") {
 		t.Error("the pinned codex served block reads as unverified")
+	}
+	if harness.IsolationVerified("codex", "0.159.2") {
+		t.Error("the superseded codex pin still reads as verified after the move")
 	}
 	if !harness.IsolationVerified("claude", "2.1.237") {
 		t.Error("the pinned claude served block reads as unverified")
