@@ -73,11 +73,12 @@ type RestartRequest struct {
 
 // StopRequest is `crossrev stop`. New with this fix — the shell had no
 // counterpart, and neither did the binary before it: stopping a local run
-// meant deleting its lock file by hand. --repo is accepted for symmetry
-// with restart; the lock keys on the checkout, so it changes nothing.
+// meant deleting its lock file by hand. It acts on this checkout's lock, so
+// it takes no --repo: a repository other than this checkout's is not
+// something the command can act on, and accepting the flag would leave the
+// run the operator named untouched while stopping the one they did not.
 type StopRequest struct {
-	PR   int
-	Repo core.Slug
+	PR int
 }
 
 // InitRequest is `crossrev init` (lib/init.sh:34-46).

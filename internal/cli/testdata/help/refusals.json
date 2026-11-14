@@ -314,6 +314,22 @@
       "note": "stop is a new command with no shell counterpart. There is nothing to measure; these bytes are what ui.Die prints with the Plain palette."
     },
     {
+      "name": "stop does not take --repo",
+      "args": [
+        "stop",
+        "--pr",
+        "7",
+        "--repo",
+        "owner/name"
+      ],
+      "shell": null,
+      "native": {
+        "exit": 1,
+        "stderr": "\nerror  unknown option for stop: --repo\n       Usage: crossrev stop --pr <number>\n\n"
+      },
+      "note": "stop acts on this checkout's lock, so a --repo naming another repository is refused rather than silently ignored. stop is a new command with no shell counterpart, so there is nothing to measure; these bytes are what ui.Die prints with the Plain palette."
+    },
+    {
       "name": "an unknown review trigger",
       "args": [
         "review",

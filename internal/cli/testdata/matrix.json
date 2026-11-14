@@ -154,13 +154,7 @@
       "name": "stop with the number alone",
       "args": ["stop", "--pr", "42"],
       "command": "stop",
-      "request": {"PR": "42", "Repo": ""}
-    },
-    {
-      "name": "stop with both flags it takes",
-      "args": ["stop", "--pr", "7", "--repo", "owner/name"],
-      "command": "stop",
-      "request": {"PR": "7", "Repo": "owner/name"}
+      "request": {"PR": "42"}
     },
 
     {
@@ -400,6 +394,12 @@
       "name": "an unknown option for stop",
       "args": ["stop", "--bogus"],
       "reason": "unknown option for stop: --bogus",
+      "action": "Usage: crossrev stop --pr <number>"
+    },
+    {
+      "name": "stop does not take --repo",
+      "args": ["stop", "--pr", "7", "--repo", "owner/name"],
+      "reason": "unknown option for stop: --repo",
       "action": "Usage: crossrev stop --pr <number>"
     },
     {

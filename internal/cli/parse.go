@@ -427,19 +427,18 @@ func parseRestart(args []string, out *ui.IO) (Invocation, error) {
 }
 
 // parseStop is stop's argument loop. The command is new with this fix, so
-// there is no shell loop to mirror, and its shape is parseRestart's: the
-// two flags it reads, and nothing accepted and thrown away.
+// there is no shell loop to mirror. It acts on this checkout's lock, so --pr
+// is the only flag it reads. --repo names a repository the command cannot
+// act on, and is refused rather than accepted and silently ignored.
 func parseStop(args []string, out *ui.IO) (Invocation, error) {
 	var req StopRequest
-	var pr, repo string
+	var pr string
 	s := &scanner{args: args}
 	for s.more() {
 		var err error
 		switch flag := s.flag(); flag {
 		case "--pr":
 			pr, err = s.value()
-		case "--repo":
-			repo, err = s.value()
 		default:
 			err = unknownOption(out, "stop", flag, usageStop)
 		}
@@ -449,9 +448,6 @@ func parseStop(args []string, out *ui.IO) (Invocation, error) {
 	}
 	var err error
 	if req.PR, err = requirePR(out, "stop", pr); err != nil {
-		return Invocation{}, err
-	}
-	if req.Repo, err = optionalSlug(out, repo); err != nil {
 		return Invocation{}, err
 	}
 	return Invocation{Command: CommandStop, Request: req}, nil
