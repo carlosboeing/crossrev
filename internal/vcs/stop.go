@@ -61,19 +61,36 @@ var signalProcess = func(pid int, sig syscall.Signal) error {
 	return process.Signal(sig)
 }
 
+// beforeLockRemove runs between the comparison and the removal in
+// removeLockIfUnchanged. It does nothing; it is a variable so a test can
+// attempt a takeover at the one moment the guard exists to close.
+var beforeLockRemove = func() {}
+
+// holderStartSlack is how far after the lock's own timestamp a process may
+// have started and still be taken for the run that wrote it. The two times
+// reach this code by different routes — the lock line from the wall clock,
+// the start time from the process table, on Linux as ticks after a boot
+// time held in whole seconds — so a comparison exact to the second could
+// refuse a real holder on rounding alone. A reused pid starts after its
+// previous owner died, which no pid allocator brings round in two seconds.
+const holderStartSlack = 2 * time.Second
+
 // StopRunLock stops the local run holding one pull request, or clears the
 // lock it left when it is already dead.
 //
 // A lock on another host is refused with the lock left in place: the pid in
 // it names a process on that machine, and signalling a local process that
-// happens to carry the same number would stop a stranger. A holder that is
+// happens to carry the same number would stop a stranger. A live holder
+// whose line names no host is refused for the same reason. A holder that is
 // already dead — a zombie counts as dead, which is the whole reason
-// PIDAlive exists — is cleared without a signal. A live holder gets
-// SIGTERM first, because that is the signal a CrossRev run turns into an
-// orderly unwind, and SIGKILL only after the term grace expires. The lock
-// is removed only once the holder is dead, and only if the file still
-// carries the line this call read, so a lock a new run took in the meantime
-// is never the file this stop deletes.
+// PIDAlive exists — is cleared without a signal. A live process carrying
+// the holder's pid is signalled only when it started before the lock was
+// taken; see refuseUnidentifiedHolder. It gets SIGTERM first, because that
+// is the signal a CrossRev run turns into an orderly unwind, and SIGKILL
+// only after the term grace expires. The lock is removed only once the
+// holder is dead, and only if the file still carries the line this call
+// read, so a lock a new run took in the meantime is never the file this
+// stop deletes.
 func (r *Repository) StopRunLock(ctx context.Context, pr int) (StopResult, error) {
 	common, err := r.CommonDir(ctx)
 	if err != nil || common == "" {
@@ -131,6 +148,9 @@ func (r *Repository) StopRunLock(ctx context.Context, pr int) (StopResult, error
 			Hint:    "Run crossrev stop again to act on the current holder. Nothing was signalled.",
 		}
 	}
+	if refusal := refuseUnidentifiedHolder(pr, holder, path); refusal != nil {
+		return result, refusal
+	}
 
 	if err := signalProcess(holder.PID, syscall.SIGTERM); err != nil {
 		if !pidAlive(holder.PID) {
@@ -173,6 +193,54 @@ func (r *Repository) StopRunLock(ctx context.Context, pr int) (StopResult, error
 	}
 }
 
+// refuseUnidentifiedHolder answers a refusal unless the live process
+// carrying the holder's pid can be shown to be the run that took the lock.
+//
+// A lock outlives a holder that died without releasing it, and the kernel
+// hands that pid to a later process. The host, the liveness probe and the
+// unchanged lock line all still pass then, and a signal would stop a
+// stranger. What tells the two apart is when the process started: a process
+// keeps its pid from start to exit, so one that started before the lock was
+// written held that pid when it was written, and is the writer. One that
+// started afterwards cannot be.
+//
+// Nothing is signalled and the lock stays in place in all four refusals: a
+// lock line that names no host, one with no readable timestamp, a process
+// whose start time this machine will not give, and a process that started
+// after the lock was taken. The last is not cleared as a dead holder's lock
+// would be, because a wall clock stepped forward since the lock was taken
+// reads the same way for a holder that is still running.
+func refuseUnidentifiedHolder(pr int, holder Holder, path string) *Refusal {
+	hint := fmt.Sprintf("Nothing was signalled and the lock was left in place. Check the process with: ps -p %d. If no CrossRev run is working on the pull request, remove %s", holder.PID, path)
+	if holder.Host == "" {
+		return &Refusal{
+			Message: fmt.Sprintf("cannot tell which machine took the lock on pull request %d, because the holder line names no host — %s", pr, holder.Raw),
+			Hint:    hint,
+		}
+	}
+	since, err := time.Parse(time.RFC3339, holder.Since)
+	if err != nil {
+		return &Refusal{
+			Message: fmt.Sprintf("cannot tell whether pid %d is the run that took the lock on pull request %d, because the lock does not say when it was taken — %s", holder.PID, pr, holder.Raw),
+			Hint:    hint,
+		}
+	}
+	started, ok := processStartTime(holder.PID)
+	if !ok {
+		return &Refusal{
+			Message: fmt.Sprintf("cannot tell whether pid %d is the run that took the lock on pull request %d, because its start time could not be read — %s", holder.PID, pr, holder.Raw),
+			Hint:    hint,
+		}
+	}
+	if started.After(since.Add(holderStartSlack)) {
+		return &Refusal{
+			Message: fmt.Sprintf("pid %d is not the run that took the lock on pull request %d: it started at %s, after the lock was taken — %s", holder.PID, pr, started.UTC().Format(time.RFC3339), holder.Raw),
+			Hint:    hint,
+		}
+	}
+	return nil
+}
+
 // waitForHolder polls until the holder is dead or its lock has gone, which
 // for a CrossRev holder are the same moment seen from two sides: the run
 // releases the lock as it unwinds. It answers false only when the grace
@@ -203,18 +271,23 @@ func waitForHolder(ctx context.Context, pid int, path string, grace time.Duratio
 // removeLockIfUnchanged removes the lock only when it still carries the
 // line the caller read. A lock a new run rewrote in the meantime is that
 // run's file, not this caller's to delete.
+//
+// The comparison and the removal run under the guard AcquireRunLock takes a
+// lock under, so no run can replace the file between the two. A lock, or a
+// lock directory, that is already gone leaves nothing to remove.
 func removeLockIfUnchanged(path, line string) error {
-	current, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
+	err := withLockGuard(filepath.Dir(path), func() error {
+		current, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if strings.TrimRight(string(current), "\n") != line {
 			return nil
 		}
-		return err
-	}
-	if strings.TrimRight(string(current), "\n") != line {
-		return nil
-	}
-	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		beforeLockRemove()
+		return os.Remove(path)
+	})
+	if err != nil && !os.IsNotExist(err) {
 		return err
 	}
 	return nil

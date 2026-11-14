@@ -69,6 +69,10 @@ type RunLock struct {
 	Warning *Warning
 
 	held bool
+	// line is the holder line this acquisition wrote. Release removes the
+	// lock only while it still carries this line, so a lock a later run
+	// took over is never removed by the run it replaced.
+	line string
 }
 
 // Held reports that this call is the one that wrote the lock, and so the one
@@ -83,14 +87,15 @@ func (l RunLock) Held() bool { return l.held }
 // the first took, and a release there would drop the lock mid-loop and open a
 // window for a second terminal to start a pass halfway through this one
 // (lib/run.sh:199-205).
+//
+// The removal is the guarded compare-and-remove stop uses. A lock that no
+// longer carries the line this acquisition wrote belongs to a later run, and
+// removing it would drop that run's lock.
 func (l RunLock) Release() error {
 	if !l.held || l.Path == "" {
 		return nil
 	}
-	if err := os.Remove(l.Path); err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	return nil
+	return removeLockIfUnchanged(l.Path, l.line)
 }
 
 // AcquireRunLock takes the local run lock for one pull request. It is
@@ -134,6 +139,24 @@ func (r *Repository) AcquireRunLock(ctx context.Context, pr int, mode string) (R
 	}
 	path := filepath.Join(directory, "pr-"+strconv.Itoa(pr)+".lock")
 
+	// Reading the holder, judging it and writing the new line are separate
+	// calls, so they run under the guard every lock write and removal takes.
+	// Without it a stop could compare a dead holder's line, lose the file to
+	// this takeover, and then remove the lock this run had just written.
+	var lock RunLock
+	if err := withLockGuard(directory, func() error {
+		var takeErr error
+		lock, takeErr = takeRunLock(path, pr)
+		return takeErr
+	}); err != nil {
+		return RunLock{}, err
+	}
+	return lock, nil
+}
+
+// takeRunLock is the read, the judgement and the write of AcquireRunLock,
+// which calls it holding the guard.
+func takeRunLock(path string, pr int) (RunLock, error) {
 	var warning *Warning
 	if raw, readErr := os.ReadFile(path); readErr == nil {
 		holder := ParseHolder(strings.TrimRight(string(raw), "\n"))
@@ -159,7 +182,7 @@ func (r *Repository) AcquireRunLock(ctx context.Context, pr int, mode string) (R
 	if err := os.WriteFile(path, []byte(line.String()+"\n"), 0o644); err != nil {
 		return RunLock{}, err
 	}
-	return RunLock{Path: path, Warning: warning, held: true}, nil
+	return RunLock{Path: path, Warning: warning, held: true, line: line.String()}, nil
 }
 
 // hostname is `hostname 2>/dev/null || echo local`.

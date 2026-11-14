@@ -6,7 +6,7 @@ All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepa
 
 ### Added
 
-- **`crossrev stop --pr N` stops a local run and clears its lock.** Stopping a local run meant deleting `.git/crossrev/pr-<n>.lock` by hand. The stop reads the lock, sends a live holder `SIGTERM` and waits for its orderly unwind (`SIGKILL` only after a five-second grace), clears a holder that is already dead without signalling anything, and refuses a lock naming another host with the lock left in place. The refusal a second local run gets now names the command.
+- **`crossrev stop --pr N` stops a local run and clears its lock.** Stopping a local run meant deleting `.git/crossrev/pr-<n>.lock` by hand. The stop reads the lock, sends a live holder `SIGTERM` and waits for its orderly unwind (`SIGKILL` only after a five-second grace), clears a holder that is already dead without signalling anything, and refuses a lock naming another host — or one whose live pid started after the lock was written, which is a recycled pid rather than the run — with the lock left in place. Acquisition and lock removal share a guard, so a stop cannot delete a lock a new run took over while it was looking. The refusal a second local run gets now names the command.
 
 ### Fixed
 

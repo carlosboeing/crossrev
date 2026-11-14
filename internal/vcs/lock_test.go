@@ -7,6 +7,7 @@ import (
 	osexec "os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -85,6 +86,39 @@ func TestRunLockHolderLine(t *testing.T) {
 	}
 	if _, err := os.Stat(lock.Path); !os.IsNotExist(err) {
 		t.Errorf("the lock survived release: %v", err)
+	}
+}
+
+// Release removes the lock only while it still names this acquisition. A
+// later run's lock, written over it, is that run's to remove: deleting it
+// would open the pull request to a third run.
+func TestRunLockReleaseLeavesAReplacedLock(t *testing.T) {
+	ctx := context.Background()
+	git := testGit(t)
+	repo := initRepo(t, git, filepath.Join(realTempDir(t), "clone"))
+	commitFile(t, repo, "app.ts", "x\n", "init")
+
+	lock, err := repo.AcquireRunLock(ctx, 42, "local")
+	if err != nil {
+		t.Fatalf("AcquireRunLock: %v", err)
+	}
+	if !lock.Held() {
+		t.Fatal("the acquisition took no lock")
+	}
+
+	replacement := fmt.Sprintf("%d on replacement.example since 2026-01-01T00:00:00Z", os.Getpid())
+	if err := os.WriteFile(lock.Path, []byte(replacement+"\n"), 0o644); err != nil {
+		t.Fatalf("replace the lock: %v", err)
+	}
+	if err := lock.Release(); err != nil {
+		t.Fatalf("Release: %v", err)
+	}
+	raw, err := os.ReadFile(lock.Path)
+	if err != nil {
+		t.Fatalf("Release removed a replacement lock: %v", err)
+	}
+	if got := strings.TrimRight(string(raw), "\n"); got != replacement {
+		t.Errorf("lock = %q, want the replacement %q", got, replacement)
 	}
 }
 
@@ -340,7 +374,7 @@ func TestStopRunLockStopsALiveHolder(t *testing.T) {
 		_ = sleeper.Process.Kill()
 		_ = sleeper.Wait()
 	})
-	holder := fmt.Sprintf("%d on %s since 2026-01-01T00:00:00Z", sleeper.Process.Pid, hostForLock(t))
+	holder := fmt.Sprintf("%d on %s since %s", sleeper.Process.Pid, hostForLock(t), lockTakenNow())
 	seedLock(t, repo, 42, holder)
 
 	result, err := repo.StopRunLock(ctx, 42)
@@ -378,15 +412,34 @@ func TestStopRunLockKillsAHolderThatIgnoresTerm(t *testing.T) {
 	// term grace expires into. The grace is the production five seconds,
 	// so this test takes that long; shortening it per test would leave
 	// the escalation itself unexercised.
-	holderProc := osexec.Command("sh", "-c", `trap "" TERM; while :; do sleep 1; done`)
+	//
+	// The child writes a readiness file after installing the trap, and the
+	// test waits for it before the stop runs. Start returning only says the
+	// process exists: a SIGTERM delivered before the trap is in place would
+	// kill the shell outright, and the test would pass with the escalation
+	// path never exercised.
+	ready := filepath.Join(t.TempDir(), "ready")
+	holderProc := osexec.Command("sh", "-c", `trap "" TERM; : > "$1"; while :; do sleep 1; done`, "sh", ready)
 	if err := holderProc.Start(); err != nil {
 		t.Fatalf("start a term-ignoring holder: %v", err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, err := os.Stat(ready); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			_ = holderProc.Process.Kill()
+			_ = holderProc.Wait()
+			t.Fatal("the holder did not install its TERM trap")
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 	t.Cleanup(func() {
 		_ = holderProc.Process.Kill()
 		_ = holderProc.Wait()
 	})
-	holder := fmt.Sprintf("%d on %s since 2026-01-01T00:00:00Z", holderProc.Process.Pid, hostForLock(t))
+	holder := fmt.Sprintf("%d on %s since %s", holderProc.Process.Pid, hostForLock(t), lockTakenNow())
 	seedLock(t, repo, 42, holder)
 
 	result, err := repo.StopRunLock(ctx, 42)
@@ -396,7 +449,13 @@ func TestStopRunLockKillsAHolderThatIgnoresTerm(t *testing.T) {
 	if result.State != vcs.StopStopped {
 		t.Errorf("state = %q, want %q", result.State, vcs.StopStopped)
 	}
-	_ = holderProc.Wait()
+	if err := holderProc.Wait(); err == nil {
+		t.Fatal("the term-ignoring holder exited cleanly; SIGTERM was not ignored")
+	} else if status, ok := err.(*osexec.ExitError); !ok {
+		t.Fatalf("the holder exited with %v, want SIGKILL", err)
+	} else if state, ok := status.ProcessState.Sys().(syscall.WaitStatus); !ok || !state.Signaled() || state.Signal() != syscall.SIGKILL {
+		t.Fatalf("the holder exited with %v, want SIGKILL", err)
+	}
 	if vcs.PIDAlive(holderProc.Process.Pid) {
 		t.Error("the term-ignoring holder still reads alive after a stop")
 	}
@@ -438,6 +497,115 @@ func TestStopRunLockRefusesAHolderOnAnotherHost(t *testing.T) {
 	}
 }
 
+// A lock can outlive the process that took it, and the kernel can then hand
+// that pid to a stranger. The stranger is live, on this host, and the lock line
+// is unchanged, so only the process start time tells it apart from the run the
+// lock names. Stop must refuse rather than signal the stranger.
+func TestStopRunLockRefusesAStaleLockNamingALiveStranger(t *testing.T) {
+	ctx := context.Background()
+	git := testGit(t)
+	repo := initRepo(t, git, filepath.Join(realTempDir(t), "clone"))
+	commitFile(t, repo, "app.ts", "x\n", "init")
+
+	stranger := osexec.Command("sleep", "60")
+	if err := stranger.Start(); err != nil {
+		t.Fatalf("start a live stranger: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = stranger.Process.Kill()
+		_ = stranger.Wait()
+	})
+
+	// The lock predates the process carrying its pid, so that process cannot
+	// be the run that wrote it.
+	taken := time.Now().UTC().Add(-time.Minute).Format("2006-01-02T15:04:05Z")
+	holder := fmt.Sprintf("%d on %s since %s", stranger.Process.Pid, hostForLock(t), taken)
+	seedLock(t, repo, 42, holder)
+
+	_, err := repo.StopRunLock(ctx, 42)
+	refusal, ok := err.(*vcs.Refusal)
+	if !ok {
+		t.Fatalf("StopRunLock = %v, want a refusal", err)
+	}
+	if !strings.Contains(refusal.Message, "after the lock was taken") {
+		t.Errorf("message = %q, want it to say the process started after the lock was taken", refusal.Message)
+	}
+	if !vcs.PIDAlive(stranger.Process.Pid) {
+		t.Error("a stop signalled a process that was not the lock's writer")
+	}
+	if _, err := os.Stat(lockPath(t, repo, 42)); err != nil {
+		t.Errorf("a refused stop removed the lock: %v", err)
+	}
+}
+
+// A lock with no usable timestamp cannot be tied to the process now carrying
+// its pid, so it is refused rather than signalled. This is the shape a lock
+// left by an older CrossRev, or one edited by hand, can have.
+func TestStopRunLockRefusesALockWithoutATimestamp(t *testing.T) {
+	ctx := context.Background()
+	git := testGit(t)
+	repo := initRepo(t, git, filepath.Join(realTempDir(t), "clone"))
+	commitFile(t, repo, "app.ts", "x\n", "init")
+
+	sleeper := osexec.Command("sleep", "60")
+	if err := sleeper.Start(); err != nil {
+		t.Fatalf("start a live holder: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = sleeper.Process.Kill()
+		_ = sleeper.Wait()
+	})
+	holder := fmt.Sprintf("%d on %s since when", sleeper.Process.Pid, hostForLock(t))
+	seedLock(t, repo, 42, holder)
+
+	_, err := repo.StopRunLock(ctx, 42)
+	if _, ok := err.(*vcs.Refusal); !ok {
+		t.Fatalf("StopRunLock = %v, want a refusal", err)
+	}
+	if !vcs.PIDAlive(sleeper.Process.Pid) {
+		t.Error("a stop signalled a holder whose identity it could not establish")
+	}
+	if _, err := os.Stat(lockPath(t, repo, 42)); err != nil {
+		t.Errorf("a refused stop removed the lock: %v", err)
+	}
+}
+
+// A lock that names no host cannot be tied to this machine, so a live pid is
+// not signalled: a lock from another machine sharing the git directory would
+// otherwise point at a local stranger with the same pid.
+func TestStopRunLockRefusesALockWithNoHost(t *testing.T) {
+	ctx := context.Background()
+	git := testGit(t)
+	repo := initRepo(t, git, filepath.Join(realTempDir(t), "clone"))
+	commitFile(t, repo, "app.ts", "x\n", "init")
+
+	sleeper := osexec.Command("sleep", "60")
+	if err := sleeper.Start(); err != nil {
+		t.Fatalf("start a live holder: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = sleeper.Process.Kill()
+		_ = sleeper.Wait()
+	})
+	holder := fmt.Sprintf("%d on  since %s", sleeper.Process.Pid, lockTakenNow())
+	seedLock(t, repo, 42, holder)
+
+	_, err := repo.StopRunLock(ctx, 42)
+	refusal, ok := err.(*vcs.Refusal)
+	if !ok {
+		t.Fatalf("StopRunLock = %v, want a refusal", err)
+	}
+	if !strings.Contains(refusal.Message, "names no host") {
+		t.Errorf("message = %q, want it to say the holder line names no host", refusal.Message)
+	}
+	if !vcs.PIDAlive(sleeper.Process.Pid) {
+		t.Error("a stop signalled a holder whose machine it could not establish")
+	}
+	if _, err := os.Stat(lockPath(t, repo, 42)); err != nil {
+		t.Errorf("a refused stop removed the lock: %v", err)
+	}
+}
+
 // hostForLock is this machine's own name as the lock records it, which a
 // stop compares the holder's host against before it signals anything.
 func hostForLock(t *testing.T) string {
@@ -447,6 +615,12 @@ func hostForLock(t *testing.T) string {
 		t.Skip("this machine will not name itself")
 	}
 	return host
+}
+
+// lockTakenNow is a holder timestamp written after the holder process started,
+// so a stop's identity check sees a process that predates the lock.
+func lockTakenNow() string {
+	return time.Now().UTC().Format("2006-01-02T15:04:05Z")
 }
 
 func TestPIDAliveDistinguishesLiveDeadAndZombie(t *testing.T) {
