@@ -4,6 +4,10 @@ All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepa
 
 ## [Unreleased]
 
+### Fixed
+
+- **Your own config file now sets your defaults.** `~/.config/crossrev/config.yml` was merged for its endpoints alone; every other key in it was read for its version and ignored, so a personal pairing or model choice had nowhere to live and `crossrev config show` printed the shipped defaults in every repository no matter what the file said. The layer order is now shipped defaults, the operator file over them, and the repository file over those, so the models a person runs across every project are set once and a repository narrows them only where it declares a value. Endpoint definitions keep their older rule on top: merged by name, the operator file winning. Repository policy for a leg still comes from the base revision and still wins wherever it declares a value, and a hosted runner has no operator file, so automated runs are unchanged. See [ADR 0029](docs/adrs/0029-user-config-overrides-shipped-defaults.md).
+
 ### Changed
 
 - **The pre-pull-request checks are one list.** `CONTRIBUTING.md` now lists the five checks CI runs — the suite, `go test`, `lint.sh`, the parity ledger check and the changelog gate — and the README, the pull request template and the agent brief point to it instead of keeping their own shorter copies. `scripts/check-parity-coverage.sh` drops its `--native` mode, which refused shell suites that sourced `lib/*.sh` or ran `bin/crossrev`; both paths were removed with the Bash implementation, so a suite reaching for them already fails on its own.

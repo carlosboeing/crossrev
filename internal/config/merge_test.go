@@ -77,26 +77,60 @@ func TestUnknownKeysSurviveTheMerge(t *testing.T) {
 	}
 }
 
-// The operator file affects named endpoints only. Anything else in it is read
-// for its version and then ignored, because policy is repository-specific and
-// belongs in the repository (lib/config.sh:4-8, 174-184).
-func TestTheOperatorFileAffectsNamedEndpointsOnly(t *testing.T) {
+// The layer order is shipped defaults, the operator file over them, and
+// repository policy over those. The operator file is the user's own
+// defaults across every project — the pairing and models a person runs
+// everywhere — and a repository narrows them where it declares a value.
+// Before this order the operator file affected named endpoints only, so a
+// personal model choice had nowhere to live and `config show` in any
+// repository printed the shipped defaults no matter what the file said.
+func TestTheOperatorFileOverridesShippedDefaultsAndTheRepositoryOverridesIt(t *testing.T) {
 	operatorPath := config.OperatorPath()
 	tree := files{"": {
 		".github/crossrev.yml": "version: 2\npolicy:\n  max_passes_per_cycle: 5\n",
 		operatorPath: "version: 2\npolicy:\n  max_passes_per_cycle: 9\nmode: automated\n" +
+			"resolver:\n  harness: opencode\n  model: opencode-go/deepseek-v4.1-flash\n  effort: max\n" +
 			"endpoints:\n  mine:\n    base_url: http://local/\n    token_env: TOKEN\n",
 	}}
 	loaded := mustLoad(t, core.Revision{}, tree)
 
+	// The repository declares this one, so it wins over the operator file.
 	if got := loaded.Get(".policy.max_passes_per_cycle"); got != "5" {
-		t.Errorf("the operator file changed policy: max_passes_per_cycle = %q, want %q", got, "5")
+		t.Errorf("repository over operator: max_passes_per_cycle = %q, want %q", got, "5")
 	}
-	if got := loaded.Get(".mode"); got != "local" {
-		t.Errorf("the operator file changed mode: %q, want %q", got, "local")
+	// The repository declares neither of these, so the operator file wins
+	// over the shipped defaults (local mode, a claude resolver).
+	if got := loaded.Get(".mode"); got != "automated" {
+		t.Errorf("operator over shipped defaults: mode = %q, want %q", got, "automated")
+	}
+	if got := loaded.Get(".resolver.harness"); got != "opencode" {
+		t.Errorf("operator over shipped defaults: resolver.harness = %q, want %q", got, "opencode")
+	}
+	if got := loaded.Get(".resolver.model"); got != "opencode-go/deepseek-v4.1-flash" {
+		t.Errorf("operator over shipped defaults: resolver.model = %q, want %q", got, "opencode-go/deepseek-v4.1-flash")
+	}
+	if got := loaded.Get(".resolver.effort"); got != "max" {
+		t.Errorf("operator over shipped defaults: resolver.effort = %q, want %q", got, "max")
 	}
 	if got := loaded.Get(".endpoints.mine.base_url"); got != "http://local/" {
 		t.Errorf("the operator endpoint is missing: %q", got)
+	}
+}
+
+// With no repository file at all the operator layer still applies, which
+// is the cross-project case: a personal pairing follows the user from
+// repository to repository until one of them declares its own.
+func TestTheOperatorFileAppliesWithNoRepositoryFile(t *testing.T) {
+	operatorPath := config.OperatorPath()
+	tree := files{"": {
+		operatorPath: "version: 2\nresolver:\n  harness: opencode\n",
+	}}
+	loaded := mustLoad(t, core.Revision{}, tree)
+	if got := loaded.Get(".resolver.harness"); got != "opencode" {
+		t.Errorf("resolver.harness = %q, want the operator file's %q", got, "opencode")
+	}
+	if got := loaded.Get(".reviewer.harness"); got != "codex" {
+		t.Errorf("reviewer.harness = %q, want the shipped default %q the file left alone", got, "codex")
 	}
 }
 

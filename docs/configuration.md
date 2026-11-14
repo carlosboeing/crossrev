@@ -1,11 +1,12 @@
 # Configuring CrossRev
 
-Two files, at two layers. Policy is repository-specific and belongs in the repository. Endpoint URLs are cross-project, and some of them — an Ollama box on your LAN, a router on localhost — are meaningless on a GitHub-hosted runner, so committing them would assert something false for half the places the config is read.
+Three layers, in order: the defaults shipped in the binary, your own file over them, and the repository's file over yours. The shipped defaults are what a machine with no file anywhere runs. Your file is your defaults across every project — the pairing and models you run everywhere. A repository narrows them wherever it declares a value, and stays silent on the rest, so declare in a repository only what that project decides differently. Endpoint URLs are the exception that proves the split: some of them — an Ollama box on your LAN, a router on localhost — are meaningless on a GitHub-hosted runner, so committing them would assert something false for half the places the config is read, and endpoint definitions merge by name with your file winning.
 
-| File | Holds | Committed |
+| Layer | Holds | Committed |
 |---|---|---|
+| Shipped defaults | What runs with no file anywhere: local mode, `codex` reviewing, `claude` resolving | In the binary |
+| `~/.config/crossrev/config.yml` | Your defaults across projects, and endpoints that only exist on your machine | Never |
 | `.github/crossrev.yml` | Repository policy: mode, runner, caps, the pairing, the backlog | Yes |
-| `~/.config/crossrev/config.yml` | Endpoints that only exist on your machine | Never |
 
 `.crossrev.yml` at the repository root works too, and is checked second. Both files are YAML and both carry `version: 2`. A `version` key present and not `2` is a refusal rather than a warning — the whole point of the key is that a future shape can be rejected by an old binary.
 
@@ -229,9 +230,9 @@ enable_automation_hint: true
 
 Set to `false` to permanently silence the suggestion that a repository already running Actions could run this loop automatically. The hint appears only where it applies — a repository with `.github/workflows` but no CrossRev workflows — and only on a run that reached a terminal state. `--no-tips` does it per run.
 
-## Endpoints and the operator file
+## Your defaults and endpoints: the operator file
 
-`~/.config/crossrev/config.yml` never leaves your machine and is never committed. It holds what's true *here* and false everywhere else.
+`~/.config/crossrev/config.yml` never leaves your machine and is never committed. It holds two kinds of thing: your defaults across every project — the pairing, models and effort you run unless a repository says otherwise — and what is true *here* and false everywhere else, which is its endpoints. Any key in the file applies wherever the repository does not declare that key; a repository value wins over yours, and yours wins over the shipped default. On a hosted runner the file is absent, so automated runs read the shipped defaults narrowed by the repository alone. See [ADR 0029](adrs/0029-user-config-overrides-shipped-defaults.md).
 
 ```yaml
 version: 2
