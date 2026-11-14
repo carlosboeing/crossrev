@@ -4,7 +4,13 @@ All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepa
 
 ## [Unreleased]
 
+### Fixed
+
+- **Codex reviews run on Codex 0.169.0.** The served command block pin moves from 0.159.2 to 0.169.0, in the descriptor, its embedded copies and the verified-block table together. The block was probed on the installed 0.169.0 before the move — under the served flags a directed shell and file-read attempt produced no command event and left its canary file uncreated — and a live served review on the new pin is the release proof. Installs on 0.159.2 now refuse the review leg as unverified, as any superseded pin does; the resolve leg is unaffected.
+
 ### Changed
+
+- **The roadmap records how unverified harness versions stop halting reviews.** Two items join `docs/ROADMAP.md` from the 0.169.0 refusal: degrading an unverified version's review to supplied instead of refusing it ([#346](https://github.com/carlosboeing/crossrev/issues/346)), and automating pin verification on a schedule so the verified set grows with vendor releases ([#347](https://github.com/carlosboeing/crossrev/issues/347)).
 
 - **The pre-pull-request checks are one list.** `CONTRIBUTING.md` now lists the five checks CI runs — the suite, `go test`, `lint.sh`, the parity ledger check and the changelog gate — and the README, the pull request template and the agent brief point to it instead of keeping their own shorter copies. `scripts/check-parity-coverage.sh` drops its `--native` mode, which refused shell suites that sourced `lib/*.sh` or ran `bin/crossrev`; both paths were removed with the Bash implementation, so a suite reaching for them already fails on its own.
 

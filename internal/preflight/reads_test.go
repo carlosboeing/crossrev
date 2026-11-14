@@ -19,7 +19,7 @@ func TestReportReadModesNamesModesAndGaps(t *testing.T) {
 	for _, want := range []string{
 		"Review reads",
 		"claude — served reads, command block verified at pin 2.1.237",
-		"codex — served reads, command block verified at pin 0.159.2",
+		"codex — served reads, command block verified at pin 0.169.0",
 		"grok — supplied reads, tripwire UNVERIFIED at pin 1.0.5 (review_isolation_unverified)",
 		"opencode — supplied reads, no tripwire",
 		"agy — supplied reads, no tripwire",
