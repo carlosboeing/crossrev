@@ -28,6 +28,10 @@ Forward view of CrossRev: what's in flight, what's next, what's deliberately def
 
 - **The Bash implementation is removed.** A defect is fixed in Go. The frozen oracle under `tests/fixtures/parity/` stays read-only.
 
+## Telemetry normalization
+
+The current implementation keeps Tokens and Cached in review and resolve comments. It recovers Codex session identity, handles OpenCode 2.x reasoning and identity, aggregates independent call costs with provenance, labels partial usage, and explains unavailable estimates. Offline regression tests cover parser, invocation, marker and renderer paths. Successful Claude subagent accounting, resumed-session boundaries and hosted-runner telemetry remain live validation gaps; token totals alone do not rank model efficiency or review quality.
+
 ## Next actions
 
 - **Automate harness pin verification** ([#347](https://github.com/carlosboeing/crossrev/issues/347)). A scheduled job installs the latest Codex and Claude Code, runs the live command-block verification (denied shell and readers, served reads checked against git, a completed served review), and opens the pin-bump pull request when it passes, so the verified set grows with vendor releases instead of being discovered broken by a user. A leg-start canary that attempts the denied operations belongs in the same work as a second layer: it catches a block that broke, but a model that never tries proves nothing, so it supplements the recorded verification rather than replacing it. The end state is a verified range with evidence behind it, not one exact version held by hand.
@@ -56,6 +60,7 @@ Everything here is deferred past the native rewrite, and all of it is a door del
 ## Recently shipped
 
 - **An unverified harness version degrades a review instead of refusing it** ([#346](https://github.com/carlosboeing/crossrev/issues/346), 2026-11-15, unreleased). A served review whose pin carries no verified block, whose installed CLI is not the exact verified version, or whose version probe reports no version now runs supplied — the prompt carries everything and no read tool is granted — with `unverified_version` recorded in the pass comment, the marker's reads envelope and the run log, or halts where `.policy.on_reads_unavailable: halt` says so. A verified version reviews served as before, grok reviews stay refused, and every resolve leg is unaffected. No `--allow-unverified` flag. See [ADR 0030](adrs/0030-unverified-harness-versions-review-supplied.md).
+- **A refused review answer is retried with the reason** (2026-11-15). When a review answer contradicts what it was given, the one retry's prompt now ends with the refusal reason; it used to be the first prompt again, and the reviewer repeated the answer. The skill and the batch prompt state that one evidence span sits inside one supplied range, and the run log records why each answer was refused.
 
 - **Review legs read only through the served tool** (2026-10-01, v0.10.0). Codex and Claude Code review with CrossRev's read tool as their only read path, and their event streams feed a review-leg tripwire that halts with `review_leg_ran_command` on any command event; opencode and agy review supplied with no read tool granted, and grok reviews are refused with `review_isolation_unverified` until its command block is verified again. A leg-start self-test and the post-call handshake guard the path, degrading visibly or halting per `.policy.on_reads_unavailable`, and the marker and manifest carry the `reads` envelope. See [ADR 0027](adrs/0027-review-legs-read-only-through-the-served-tool.md).
 

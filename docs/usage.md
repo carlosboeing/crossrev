@@ -53,6 +53,10 @@ The review leg writes:
 
 The resolve leg adds threaded replies, resolves the threads it settled, commits any fixes, files deferred defects to the configured backlog, and posts its own summary comment.
 
+The run-details table keeps two token columns. **Tokens** counts input, cache traffic and output, including reasoning once. **Cached** counts cache reads and writes already included in Tokens; do not add the columns together. These are token counts, not equal units of compute or money across models. Retries and batches contribute to the leg's total. A footnote identifies known omitted activity or partial usage and explains unavailable cost estimates.
+
+The answering model and effort take precedence over requested values. When only the requested model is available, the comment labels that fallback. CrossRev leaves harness defaults in place when no model or effort is configured. Cost uses a harness estimate when available, otherwise bundled vendor token rates for the resolved model. Missing rates, unknown cache retention, ambiguous context tiers, custom endpoints and incomplete multi-model breakdowns can leave cost unavailable. Subscription estimates are API equivalents, not subscription charges.
+
 ### Which files a review reads
 
 Each review pass reads every changed file: every added, modified, deleted, renamed and type-changed path between the base branch and the pull request branch. A rename counts as new work and is read again from scratch. Nothing carries over from an earlier revision: when the branch moves, the next pass reads every current file again.
@@ -192,7 +196,7 @@ Markers are HTML comments in comment bodies. They carry the pass number, the leg
 
 Every run also writes locally, under `~/.local/state/crossrev/runs/<repo-slug>/pr-<n>/<run-id>/` (the slash in the repository name becomes a hyphen) — beside the worktrees a failed resolve leg keeps, and named by the same run id the marker carries.
 
-`run.log` is one line per event — timestamp, phase, subprocess, exit code, duration — so a stall inside a step is attributable to that step, and a dead run says where it stopped. On a review pass it also carries one `phase` line per preparation step and one `call` line per accepted model call, and `run start` names the build revision. A failed leg also keeps the harness transcript there (`review.call-N.attempt-M.stdout` and `.stderr` on the review leg, `<leg>.attempt-N` on the resolve leg), so what the model actually did can be read afterwards instead of being deleted by the code that noticed the failure. Successful legs delete their transcripts; `--keep-transcripts` keeps them, for the failure that is a wrong answer rather than an error.
+`run.log` is one line per event — timestamp, phase, subprocess, exit code, duration — so a stall inside a step is attributable to that step, and a dead run says where it stopped. On a review pass it also carries one `phase` line per preparation step and one `call` line per accepted model call and one `refused` line per answer the validator turned away, with its kind and reason, and `run start` names the build revision. A failed leg also keeps the harness transcript there (`review.call-N.attempt-M.stdout` and `.stderr` on the review leg, `<leg>.attempt-N` on the resolve leg), so what the model actually did can be read afterwards instead of being deleted by the code that noticed the failure. Successful legs delete their transcripts; `--keep-transcripts` keeps them, for the failure that is a wrong answer rather than an error.
 
 Run directories older than `logs.retention_days` (default 14) are swept, logs and transcripts alike. The harness process holds no GitHub token, and captured output passes the credential-shape filter before it lands in either file. An unrecognized or re-encoded secret can still pass through.
 

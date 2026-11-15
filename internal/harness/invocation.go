@@ -135,8 +135,8 @@ type Invocation struct {
 	// in the run directory beside the streams.
 	PayloadPath string
 	// CodexHome is the directory holding the session rollout, which carries the
-	// model and effort Codex's event stream does not report. The caller
-	// resolves the fallback: `${CODEX_HOME:-$HOME/.codex}`, because
+	// model and effort Codex's event stream does not report. When unset, the
+	// adapter resolves CODEX_HOME or HOME/.codex from Invocation.Env, because
 	// cred_prepare exports that variable only in automated mode and a local run
 	// would otherwise report no model on every leg
 	// (lib/adapters/codex.sh:140-143).

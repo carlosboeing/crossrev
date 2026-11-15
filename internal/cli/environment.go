@@ -124,7 +124,7 @@ var environment = []Variable{
 	},
 	{
 		Name:       "CODEX_HOME",
-		Readers:    []string{"cmd/crossrev"},
+		Readers:    []string{"internal/harness", "cmd/crossrev"},
 		Class:      ClassPathOverride,
 		Descriptor: true,
 	},
@@ -250,7 +250,7 @@ var environment = []Variable{
 		Name:  "HOME",
 		Class: ClassPathOverride,
 		Readers: []string{
-			"internal/app", "internal/config", "internal/forge/ghexec",
+			"internal/app", "internal/config", "internal/forge/ghexec", "internal/harness",
 			"internal/preflight", "internal/runlog", "internal/vcs",
 			"cmd/crossrev",
 		},

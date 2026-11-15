@@ -641,6 +641,8 @@ func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settin
 			}, context.Canceled)
 		}
 		if !envelope.OK {
+			telemetry := harness.TelemetryJSON(&envelope, inv.CLIMajor)
+			l.Log.Event("usage", telemetry)
 			msg := "no error reported"
 			if envelope.Error != nil && *envelope.Error != "" {
 				msg = *envelope.Error
@@ -691,6 +693,10 @@ func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settin
 		// answer: an export that will not build or will not run leaves the
 		// fields unset and the leg stands.
 		l.mergeExport(ctx, adapter, inv, res, &envelope)
+		telemetry := harness.TelemetryJSON(&envelope, inv.CLIMajor)
+		if l.Log != nil {
+			l.Log.Event("usage", telemetry)
+		}
 
 		// A SUCCESS that answered nothing is a harness failure, not clean
 		// coverage: empty output never means the code was examined. A
@@ -715,10 +721,29 @@ func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settin
 			return envelope, envelope.Payload, outMsgs, nil
 		}
 		code := validateCode(problem)
+		// The reason goes in the run log, not only to the terminal: a retry
+		// that succeeds otherwise leaves no account of what the refused
+		// answer got wrong.
+		if l.Log != nil {
+			kind := "shape"
+			if code == 2 {
+				kind = "semantic"
+			}
+			l.Log.Event("refused", fmt.Sprintf("harness=%s attempt=%d kind=%s %s", settings.harness, attempt, kind, problem))
+		}
 		if code == 2 {
 			if semanticBudget > 0 {
 				semanticBudget--
 				refused = foldAttempt(refused, envelope.Usage)
+				// The retry says what was refused. The same prompt sent
+				// again drew the same answer: the reviewer was never told
+				// which claim contradicted its input. In hand, in the
+				// invocation and on disk, as the reads rewrite above does.
+				promptBytes = prompt.Refused(promptBytes, problem.Error())
+				inv.Prompt.Text = string(promptBytes)
+				if err := os.WriteFile(promptPath, promptBytes, 0o600); err != nil {
+					return harness.Envelope{}, nil, outMsgs, err
+				}
 				// ui_warn, the pair kept apart (lib/run.sh:888-889).
 				outMsgs = append(outMsgs, ui.Warn(
 					fmt.Sprintf("%s returned an answer that contradicts what it was given — %s", settings.harness, problem),
@@ -764,29 +789,21 @@ func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settin
 }
 
 // foldAttempt joins one refused attempt's usage buckets into the running
-// sum, answering the sum to keep. A nil record contributes nothing.
+// sum, answering the sum to keep. A nil record marks the aggregate as incomplete.
 func foldAttempt(sum, attempt *harness.Usage) *harness.Usage {
-	if attempt == nil {
-		return sum
-	}
-	if sum == nil {
-		fresh := *attempt
-		return &fresh
-	}
-	addUsageBuckets(sum, attempt)
-	return sum
+	return harness.FoldUsage(sum, attempt)
 }
 
 // foldRefusedAttempts carries the refused attempts' buckets into the
 // accepted envelope, so one prompt's envelope reports every call it
-// cost. Identity stays on the accepted attempt: model, effort and the
-// non-bucket usage fields are untouched.
+// cost. Reported model and effort stay on the accepted attempt.
 func foldRefusedAttempts(envelope *harness.Envelope, refused *harness.Usage) {
 	if refused == nil {
 		return
 	}
 	if envelope.Usage == nil {
-		total := refused.WithTotal()
+		partial := harness.FoldUsage(refused, nil)
+		total := partial.WithTotal()
 		envelope.Usage = &total
 		envelope.Tokens = total.Total
 		return

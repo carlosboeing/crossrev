@@ -468,6 +468,15 @@ func runDetails(m prstate.Marker, leg string) string {
 	if effortReported != "" && effortReported != "null" {
 		effort = effortReported
 	}
+	if usage != nil && usage.Normalization > 0 {
+		if reported == "" && model == "" {
+			gaps += " Model unavailable: the harness did not report one and none was requested."
+		}
+		if effort == "" {
+			gaps += " Effort unavailable: the harness did not report one and none was requested."
+		}
+	}
+
 	if effort != "" && effort != "null" {
 		agent += " · " + effort + " effort"
 	}
@@ -481,7 +490,9 @@ func runDetails(m prstate.Marker, leg string) string {
 	cached, cost := "—", "—"
 	costSource := ""
 	if usage != nil {
-		cached = thousands(strconv.FormatInt(usage.Cached(), 10))
+		if !usage.CountsUnavailable {
+			cached = thousands(strconv.FormatInt(usage.Cached(), 10))
+		}
 		if usage.CostUSD != nil {
 			cost = harness.FormatCost(strconv.FormatFloat(*usage.CostUSD, 'f', -1, 64))
 		} else {
@@ -513,6 +524,13 @@ func runDetails(m prstate.Marker, leg string) string {
 	} else {
 		foot = harness.Footnote(costSource, billing)
 	}
+	if note := harness.TelemetryNote(usage); note != "" {
+		if foot != "" {
+			foot += " "
+		}
+		foot += note
+	}
+
 	if foot != "" {
 		b.WriteString("<sub>")
 		b.WriteString(foot)
