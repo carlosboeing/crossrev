@@ -53,6 +53,10 @@ The review leg writes:
 
 The resolve leg adds threaded replies, resolves the threads it settled, commits any fixes, files deferred defects to the configured backlog, and posts its own summary comment.
 
+The run-details table keeps two token columns. **Tokens** counts input, cache traffic and output, including reasoning once. **Cached** counts cache reads and writes already included in Tokens; do not add the columns together. These are token counts, not equal units of compute or money across models. Retries and batches contribute to the leg's total. A footnote identifies known omitted activity or partial usage and explains unavailable cost estimates.
+
+The answering model and effort take precedence over requested values. When only the requested model is available, the comment labels that fallback. CrossRev leaves harness defaults in place when no model or effort is configured. Cost uses a harness estimate when available, otherwise bundled vendor token rates for the resolved model. Missing rates, unknown cache retention, ambiguous context tiers, custom endpoints and incomplete multi-model breakdowns can leave cost unavailable. Subscription estimates are API equivalents, not subscription charges.
+
 ### Which files a review reads
 
 Each review pass reads every changed file: every added, modified, deleted, renamed and type-changed path between the base branch and the pull request branch. A rename counts as new work and is read again from scratch. Nothing carries over from an earlier revision: when the branch moves, the next pass reads every current file again.

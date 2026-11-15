@@ -44,16 +44,9 @@ type batchOutcome struct {
 	retries     int
 }
 
-// addUsageBuckets folds src's six buckets into dst. Non-bucket fields and
-// the total stay the caller's business: dst keeps its own record with the
-// summed buckets.
+// addUsageBuckets combines independent calls, including their cost provenance.
 func addUsageBuckets(dst, src *harness.Usage) {
-	dst.InputFresh += src.InputFresh
-	dst.CacheRead += src.CacheRead
-	dst.CacheWrite5m += src.CacheWrite5m
-	dst.CacheWrite1h += src.CacheWrite1h
-	dst.CacheWriteUnsplit += src.CacheWriteUnsplit
-	dst.Output += src.Output
+	*dst = harness.MergeUsage(*dst, *src)
 }
 
 // addEnvelope folds one accepted call's envelope into the outcome: the
@@ -66,14 +59,7 @@ func (o *batchOutcome) addEnvelope(envelope harness.Envelope) []ui.Line {
 	if o.envelope == nil {
 		o.envelope = &envelope
 	}
-	if envelope.Usage != nil {
-		if o.usage == nil {
-			sum := *envelope.Usage
-			o.usage = &sum
-		} else {
-			addUsageBuckets(o.usage, envelope.Usage)
-		}
-	}
+	o.usage = harness.FoldUsage(o.usage, envelope.Usage)
 	reported := ""
 	if envelope.ModelReported != nil {
 		reported = *envelope.ModelReported

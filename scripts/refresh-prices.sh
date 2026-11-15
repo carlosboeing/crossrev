@@ -17,7 +17,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEST="$ROOT/assets/prices.json"
-UPSTREAM_URL="https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json"
+UPSTREAM_ROOT="https://raw.githubusercontent.com/BerriAI/litellm"
 COMMITS_URL="https://api.github.com/repos/BerriAI/litellm/commits?path=model_prices_and_context_window.json&per_page=1"
 
 # The models CrossRev can name. Extending coverage is one edit to this array,
@@ -27,6 +27,10 @@ MODELS=(
   "claude-sonnet-5"
   "claude-haiku-4-5"
   "claude-opus-4-8"
+  "gpt-6.1-sol"
+  "gpt-6.1-terra"
+  "gpt-6-astra"
+  "gpt-6-luna"
   "gpt-5.6"
   "gpt-5.6-cyber"
   "gpt-5.6-luna"
@@ -55,7 +59,7 @@ sha="$(curl -fsSL "$COMMITS_URL" | jq -r '.[0].sha // empty')"
 [[ -n "$sha" ]] || { printf 'could not resolve the upstream commit\n' >&2; exit 1; }
 version="${sha:0:12}@$(date -u +%Y-%m-%d)"
 
-curl -fsSL "$UPSTREAM_URL" -o "$tmp"
+curl -fsSL "$UPSTREAM_ROOT/$sha/model_prices_and_context_window.json" -o "$tmp"
 
 keys_json="$(printf '%s\n' "${MODELS[@]}" | jq -Rs 'split("\n") | map(select(length > 0))')"
 
@@ -68,6 +72,7 @@ jq --argjson keys "$keys_json" --arg version "$version" '
        "cache_read_input_token_cost",
        "cache_creation_input_token_cost",
        "cache_creation_input_token_cost_above_1hr",
+       "cache_creation_input_token_cost_above_12hr",
        "max_input_tokens");
   def tier_break:
     test("^[a-z_]+_above_[0-9]+k_tokens$")
