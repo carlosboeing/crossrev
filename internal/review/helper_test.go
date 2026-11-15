@@ -993,8 +993,8 @@ func newEnv(t *testing.T) *env {
 	doc := mustDoc(t)
 	// Probes report the descriptor's own pins unless a test says
 	// otherwise: the installed CLI matches the verified pin, so the
-	// installed gate passes and only the tests that move the install
-	// exercise the refusal.
+	// version check passes and only the tests that move the install
+	// exercise the degradation.
 	versions := map[string]string{}
 	for name, banner := range map[string]string{
 		"codex":  "codex-cli %s",

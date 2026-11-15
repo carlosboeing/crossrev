@@ -71,6 +71,16 @@ type RestartRequest struct {
 	Repo core.Slug
 }
 
+// StopRequest is `crossrev stop`. New with this fix — the shell had no
+// counterpart, and neither did the binary before it: stopping a local run
+// meant deleting its lock file by hand. It acts on this checkout's lock, so
+// it takes no --repo: a repository other than this checkout's is not
+// something the command can act on, and accepting the flag would leave the
+// run the operator named untouched while stopping the one they did not.
+type StopRequest struct {
+	PR int
+}
+
 // InitRequest is `crossrev init` (lib/init.sh:34-46).
 type InitRequest struct {
 	Owner   string
@@ -165,6 +175,7 @@ const (
 	usageCycle    = "Usage: crossrev cycle --pr <number> [--trigger human|automatic] [--model <id>] [--effort <level>] [--input-policy hunks_first|whole_when_fits] [--no-tips] [--keep-transcripts]"
 	usageStatus   = "Usage: crossrev status --pr <number>"
 	usageRestart  = "Usage: crossrev restart --pr <number>"
+	usageStop     = "Usage: crossrev stop --pr <number>"
 	usageWatchdog = "Usage: crossrev watchdog [--repo owner/name] [--timeout <seconds>]"
 	usageInit     = "Usage: crossrev init [--owner <owner>] [--upgrade] [--dry-run] [--yes]"
 

@@ -1,13 +1,16 @@
 # crossrev — operator configuration.  Copy to ~/.config/crossrev/config.yml
 #
-# This file never leaves your machine and is never committed. It holds the things
-# that are true HERE and false everywhere else: an Ollama instance on your LAN, a
-# router on localhost, a gateway on a home server. Committing those into a
-# repository asserts something false for half the places the config is read.
+# This file never leaves your machine and is never committed. It holds your
+# defaults across every project — a pairing or model you run everywhere applies
+# wherever a repository does not declare its own — and the things that are true
+# HERE and false everywhere else: an Ollama instance on your LAN, a router on
+# localhost, a gateway on a home server. Committing those into a repository
+# asserts something false for half the places the config is read.
 #
-# Endpoint definitions merge by name with the repository's, and this file wins. So
-# a repo can declare a public endpoint while you point the same name at your own
-# instance, with no change to the repo.
+# The layer order is shipped defaults, this file, then the repository. Endpoint
+# definitions are the exception: they merge by name with the repository's, and
+# this file wins. So a repo can declare a public endpoint while you point the
+# same name at your own instance, with no change to the repo.
 #
 # Tokens are never in here. `token_env` names an environment variable; its value
 # comes from your shell locally and from a repository secret in CI.

@@ -19,7 +19,7 @@ func TestShippedWindowsReadBack(t *testing.T) {
 		{name: "claude", window: 200000, argv: false},
 		{name: "agy", window: 128000, argv: true},
 		{name: "grok", window: 128000, argv: false},
-		{name: "opencode", window: 128000, argv: true},
+		{name: "opencode", window: 128000, argv: false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			window, found := doc.WindowTokens(tc.name)
@@ -79,8 +79,8 @@ func TestEffectiveWindowTakesTheSmallerOfHarnessAndModel(t *testing.T) {
 	if got, found := doc.EffectiveWindow("codex", ""); !found || got != 258400 {
 		t.Errorf("EffectiveWindow(codex, unset) = %d, %v; want 258400, true", got, found)
 	}
-	if got, found := doc.EffectiveWindow("codex", "claude-sonnet-5"); !found || got != 200000 {
-		t.Errorf("EffectiveWindow(codex, claude-sonnet-5) = %d, %v; want 200000, true", got, found)
+	if got, found := doc.EffectiveWindow("codex", "claude-haiku-4-5"); !found || got != 200000 {
+		t.Errorf("EffectiveWindow(codex, claude-haiku-4-5) = %d, %v; want 200000, true", got, found)
 	}
 	if got, found := doc.EffectiveWindow("claude", "claude-sonnet-5"); !found || got != 200000 {
 		t.Errorf("EffectiveWindow(claude, claude-sonnet-5) = %d, %v; want 200000, true", got, found)
@@ -124,9 +124,9 @@ func TestPriceTableNamesAModelWindow(t *testing.T) {
 		t.Fatalf("PriceTable: %v", err)
 	}
 	for model, want := range map[string]int{
-		"claude-sonnet-5": 200000,
-		"gpt-5.6":         400000,
-		"xai/grok-4.6":    2000000,
+		"claude-sonnet-5": 1000000,
+		"gpt-5.6":         922000,
+		"xai/grok-4.6":    500000,
 	} {
 		if got, ok := table.MaxInputTokens(model); !ok || got != want {
 			t.Errorf("MaxInputTokens(%q) = %d, %v; want %d, true", model, got, ok, want)

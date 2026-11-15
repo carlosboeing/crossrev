@@ -232,7 +232,7 @@ Automated mode reviews branches in the repository, including Dependabot branches
 
 ## Harness support
 
-CrossRev has adapters for Claude Code, Codex, Antigravity, Grok, and opencode. Any of them may take the resolve leg; the review leg refuses a harness whose command block is unverified at its pin, which today means grok reviews are refused with `review_isolation_unverified` while its resolve leg runs. Kimi runs through the Claude adapter as a named endpoint.
+CrossRev has adapters for Claude Code, Codex, Antigravity, Grok, and opencode. Any of them may take the resolve leg; a served review (Codex, Claude Code) on a harness version nobody has verified reviews from the supplied prompt instead of refusing, with the degradation recorded on the pass, while grok reviews are refused with `review_isolation_unverified` and its resolve leg runs. Kimi runs through the Claude adapter as a named endpoint.
 
 Running a harness locally needs nothing beyond its own CLI installed and logged in the way you already use it. CrossRev shells out to the CLI and never handles the credential itself, and `crossrev doctor` reports which harnesses it found.
 
@@ -268,6 +268,7 @@ crossrev resolve --pr 42 --harness claude   # resolver leg on claude
 | `crossrev resolve --pr 42` | Verifies the latest findings, then may commit and push fixes |
 | `crossrev status --pr 42` | Shows the current state, every pass, and the command that resumes the loop |
 | `crossrev restart --pr 42` | Restarts a halted leg: clears the halt and re-applies its awaiting label |
+| `crossrev stop --pr 42` | Stops a local run holding the pull request and clears its lock |
 | `crossrev watchdog --repo owner/name` | Finds stalled automated work, retries once, then halts it for inspection |
 | `crossrev doctor` | Checks dependencies, GitHub authentication, installed harnesses, and runner compatibility |
 | `crossrev init` | Plans and installs automated mode after confirmation |

@@ -14,6 +14,7 @@ crossrev cycle   --pr 42    # the same thing, spelled out
 crossrev review  --pr 42    # one review leg: inline comments plus a summary
 crossrev resolve --pr 42    # verify each finding, fix, reply, resolve, push
 crossrev status  --pr 42    # where the loop is, and how to resume it
+crossrev stop    --pr 42    # stop a local run holding the pull request, and clear its lock
 ```
 
 Options on `cycle`, `review` and `resolve`, unless noted:
@@ -52,6 +53,10 @@ The review leg writes:
 
 The resolve leg adds threaded replies, resolves the threads it settled, commits any fixes, files deferred defects to the configured backlog, and posts its own summary comment.
 
+The run-details table keeps two token columns. **Tokens** counts input, cache traffic and output, including reasoning once. **Cached** counts cache reads and writes already included in Tokens; do not add the columns together. These are token counts, not equal units of compute or money across models. Retries and batches contribute to the leg's total. A footnote identifies known omitted activity or partial usage and explains unavailable cost estimates.
+
+The answering model and effort take precedence over requested values. When only the requested model is available, the comment labels that fallback. CrossRev leaves harness defaults in place when no model or effort is configured. Cost uses a harness estimate when available, otherwise bundled vendor token rates for the resolved model. Missing rates, unknown cache retention, ambiguous context tiers, custom endpoints and incomplete multi-model breakdowns can leave cost unavailable. Subscription estimates are API equivalents, not subscription charges.
+
 ### Which files a review reads
 
 Each review pass reads every changed file: every added, modified, deleted, renamed and type-changed path between the base branch and the pull request branch. A rename counts as new work and is read again from scratch. Nothing carries over from an earlier revision: when the branch moves, the next pass reads every current file again.
@@ -70,7 +75,7 @@ A verdict covers the supplied ranges on both sides — the numbered lines the hu
 
 One pass reads at most 400 required files. Batches hold at most 40 files in path order.
 
-Calls measure the full rendered prompt against the calling harness's packing limit (390,000 bytes for Codex, 312,000 for Claude Code, 120 KiB for argv transports).
+Calls measure the rendered prompt, adapter instructions and schema text against the calling harness's packing limit. Native schemas count conservatively as context. The default packing limits are 390,000 bytes for Codex, 312,000 for Claude Code, 199,680 for Grok and OpenCode, and 120 KiB for Antigravity's argv transport. OpenCode reads the prompt through stdin on both supported CLI majors. A known smaller model window can reduce these budgets.
 
 Generated files (lockfiles, bundle names, minified files, or files with generated headers) that fit in a call are reviewed. An oversized generated file is skipped with a prominent warning in the comment summary and terminal. Skipped files do not use the 400 review slots, so later files can be reviewed in the same pass. An oversized plain file splits into parts across calls instead of halting the pass. Only shared context alone past the hard limit halts, with `shared_context_exceeds_window`.
 
@@ -191,7 +196,7 @@ Markers are HTML comments in comment bodies. They carry the pass number, the leg
 
 Every run also writes locally, under `~/.local/state/crossrev/runs/<repo-slug>/pr-<n>/<run-id>/` (the slash in the repository name becomes a hyphen) — beside the worktrees a failed resolve leg keeps, and named by the same run id the marker carries.
 
-`run.log` is one line per event — timestamp, phase, subprocess, exit code, duration — so a stall inside a step is attributable to that step, and a dead run says where it stopped. On a review pass it also carries one `phase` line per preparation step and one `call` line per accepted model call, and `run start` names the build revision. A failed leg also keeps the harness transcript there (`review.call-N.attempt-M.stdout` and `.stderr` on the review leg, `<leg>.attempt-N` on the resolve leg), so what the model actually did can be read afterwards instead of being deleted by the code that noticed the failure. Successful legs delete their transcripts; `--keep-transcripts` keeps them, for the failure that is a wrong answer rather than an error.
+`run.log` is one line per event — timestamp, phase, subprocess, exit code, duration — so a stall inside a step is attributable to that step, and a dead run says where it stopped. On a review pass it also carries one `phase` line per preparation step and one `call` line per accepted model call and one `refused` line per answer the validator turned away, with its kind and reason, and `run start` names the build revision. A failed leg also keeps the harness transcript there (`review.call-N.attempt-M.stdout` and `.stderr` on the review leg, `<leg>.attempt-N` on the resolve leg), so what the model actually did can be read afterwards instead of being deleted by the code that noticed the failure. Successful legs delete their transcripts; `--keep-transcripts` keeps them, for the failure that is a wrong answer rather than an error.
 
 Run directories older than `logs.retention_days` (default 14) are swept, logs and transcripts alike. The harness process holds no GitHub token, and captured output passes the credential-shape filter before it lands in either file. An unrecognized or re-encoded secret can still pass through.
 
@@ -212,6 +217,8 @@ In automated mode the runner is discarded after the job, so the generated workfl
 A resolve pass that ended blocked or escalated is complete but not settled, so it can be driven again. Once whatever stopped it is fixed, `crossrev resolve --pr N` runs the resolver over the same findings instead of refusing. The same goes for a pass that left a deferral unpersisted, and for one whose claimed fix reached no commit. A pass that settled every finding stays finished. `status` names whichever command applies.
 
 `crossrev restart --pr N` is the one-command form of that remedy for a halted pull request: it clears `crossrev/halted`, and `crossrev/watchdog-retried` when present, and re-applies the halted leg's awaiting label. It refuses a pull request carrying `crossrev/stop` — red is the human brake, and no command clears it — and one that is not halted, saying what applies instead.
+
+A local run holds its pull request with a lock naming its pid, host and start time, so a second local run against the same pull request refuses rather than interleaving comments and replies. A holder that is no longer running — a zombie included, since a terminated process its parent never reaped still answers `kill -0` — has its lock taken over by the next run, which says so. `crossrev stop --pr N` is how a live local run is stopped without deleting the lock by hand: it sends the holder `SIGTERM`, waits for the orderly unwind, sends `SIGKILL` only after the term grace, and removes the lock once the holder is dead. A holder already dead is cleared with no signal sent, and a lock naming another host is refused with the lock left in place. So is a live holder whose pid started after the lock was written, one whose holder line names no host, or one whose timestamp cannot be read: the pid may be a stranger's after reuse, and nothing is signalled.
 
 A resolve pass can also finish the loop itself. A pass that settled every finding without pushing a commit — each disputed, skipped, or deferred and tracked — converges on the spot: the head never moved, so a re-review would find nothing new and decline. A pass that pushed hands back to the reviewer, because there is something new to see.
 

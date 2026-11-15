@@ -181,7 +181,7 @@ func TestEveryAdapterStripsTheForgeCredentialsAndForeignVendorCredentials(t *tes
 			if entry.PromptTransport == "stdin" {
 				// The prompt travels on this stdin, which reaches EOF after
 				// it — the open-stdin block the CLIs exhibit cannot recur.
-				if string(spec.Stdin) != inv.Prompt.Argument() {
+				if !strings.HasPrefix(string(spec.Stdin), inv.Prompt.Argument()) {
 					t.Error("a stdin transport carries the prompt on stdin")
 				}
 			} else if spec.Stdin != nil {
@@ -241,6 +241,9 @@ func TestSchemaStyleMatchesTheDescriptor(t *testing.T) {
 				// The prompt travels on argv or by file, depending on
 				// the harness's transport: read what the child reads.
 				prompt := spec.Args[len(spec.Args)-1]
+				if spec.Stdin != nil {
+					prompt = string(spec.Stdin)
+				}
 				for at := 0; at+1 < len(spec.Args); at++ {
 					if spec.Args[at] == "--prompt-file" {
 						raw, err := os.ReadFile(spec.Args[at+1])

@@ -110,7 +110,7 @@ func TestEveryAdapterBuildsTheWholeArgv(t *testing.T) {
 				"--sandbox", "workspace", "--allow", "Edit", "--allow", "Write",
 				"--tools", "Read,Grep,Glob,Edit,Write",
 				"--model", "<model>",
-				"--reasoning-effort", "high", "--prompt-file", "<prompt-path>"},
+				"--reasoning-effort", "high", "--prompt-file", "<grok-stream-prompt-path>"},
 		},
 		{
 			// The write flag reaches opencode through the isolation config it
@@ -120,13 +120,13 @@ func TestEveryAdapterBuildsTheWholeArgv(t *testing.T) {
 			harness: "opencode", write: false,
 			where: "lib/adapters/opencode.sh:155,156,157,187, plus --agent for the pinned isolation agent",
 			want: []string{"run", "--pure", "--format", "json", "--agent", "crossrev", "--dir", "<workdir>",
-				"--model", "<model>", "--variant", "high", "<prompt-with-schema>"},
+				"--model", "<model>", "--variant", "high"},
 		},
 		{
 			harness: "opencode", write: true,
 			where: "lib/adapters/opencode.sh:155,156,157,187, plus --agent for the pinned isolation agent",
 			want: []string{"run", "--pure", "--format", "json", "--agent", "crossrev", "--dir", "<workdir>",
-				"--model", "<model>", "--variant", "high", "<prompt-with-schema>"},
+				"--model", "<model>", "--variant", "high"},
 		},
 		{
 			// The write flag reaches opencode through the isolation config in
@@ -138,13 +138,13 @@ func TestEveryAdapterBuildsTheWholeArgv(t *testing.T) {
 			harness: "opencode", write: false, major: 2,
 			where: "opencode 2.0.15, measured (issue #272), plus --agent for the pinned isolation agent",
 			want: []string{"run", "--standalone", "--format", "json", "--agent", "crossrev",
-				"--model", "<model#effort>", "<prompt-with-schema>"},
+				"--model", "<model#effort>"},
 		},
 		{
 			harness: "opencode", write: true, major: 2,
 			where: "opencode 2.0.15, measured (issue #272), plus --agent for the pinned isolation agent",
 			want: []string{"run", "--standalone", "--format", "json", "--agent", "crossrev",
-				"--model", "<model#effort>", "<prompt-with-schema>"},
+				"--model", "<model#effort>"},
 		},
 	}
 
@@ -214,6 +214,8 @@ func resolvePlaceholder(t *testing.T, element string, inv harness.Invocation) st
 			"so a command attempt is denied and the run ends with no answer. " +
 			"Orient only by reading files. " +
 			"If something cannot be checked without a shell, say so in the answer and answer anyway."
+	case "<grok-stream-prompt-path>":
+		return filepath.Join(inv.Scratch, "prompt.supplied")
 	case "<prompt-path>":
 		return inv.Prompt.Path
 	case "<schema-text>":
@@ -379,7 +381,7 @@ func TestOpencodeComposesTheRawPromptBeforeTheSubstitution(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building the spec: %v", err)
 			}
-			got := spec.Args[len(spec.Args)-1]
+			got := string(spec.Stdin)
 			want := opencodeComposedPrompt(t, inv)
 			if got == want {
 				return

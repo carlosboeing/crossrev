@@ -150,6 +150,12 @@
       "command": "restart",
       "request": {"PR": "7", "Repo": "owner/name"}
     },
+    {
+      "name": "stop with the number alone",
+      "args": ["stop", "--pr", "42"],
+      "command": "stop",
+      "request": {"PR": "42"}
+    },
 
     {
       "name": "init with no flags",
@@ -385,6 +391,18 @@
       "action": "Usage: crossrev restart --pr <number>"
     },
     {
+      "name": "an unknown option for stop",
+      "args": ["stop", "--bogus"],
+      "reason": "unknown option for stop: --bogus",
+      "action": "Usage: crossrev stop --pr <number>"
+    },
+    {
+      "name": "stop does not take --repo",
+      "args": ["stop", "--pr", "7", "--repo", "owner/name"],
+      "reason": "unknown option for stop: --repo",
+      "action": "Usage: crossrev stop --pr <number>"
+    },
+    {
       "name": "an unknown option for watchdog",
       "args": ["watchdog", "--bogus"],
       "reason": "unknown option for watchdog: --bogus",
@@ -456,6 +474,12 @@
       "args": ["restart"],
       "reason": "crossrev restart needs a pull request number",
       "action": "Usage: crossrev restart --pr 42"
+    },
+    {
+      "name": "stop without a pull request number",
+      "args": ["stop"],
+      "reason": "crossrev stop needs a pull request number",
+      "action": "Usage: crossrev stop --pr 42"
     },
 
     {

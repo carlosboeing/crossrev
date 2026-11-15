@@ -24,10 +24,11 @@ import (
 // the envelope that carries them (prstate); these aliases keep the leg's
 // own code naming them without the package qualifier.
 const (
-	ReadsReasonSelfTestFailed   = prstate.ReadsReasonSelfTestFailed
-	ReadsReasonMissingHandshake = prstate.ReadsReasonMissingHandshake
-	ReadsReasonCallsRefused     = prstate.ReadsReasonCallsRefused
-	ReadsReasonFileToolUnwired  = prstate.ReadsReasonFileToolUnwired
+	ReadsReasonSelfTestFailed    = prstate.ReadsReasonSelfTestFailed
+	ReadsReasonMissingHandshake  = prstate.ReadsReasonMissingHandshake
+	ReadsReasonCallsRefused      = prstate.ReadsReasonCallsRefused
+	ReadsReasonFileToolUnwired   = prstate.ReadsReasonFileToolUnwired
+	ReadsReasonUnverifiedVersion = prstate.ReadsReasonUnverifiedVersion
 )
 
 // ReadsReasonReviewCommand is the envelope reason for a call the tripwire

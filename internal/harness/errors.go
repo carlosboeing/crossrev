@@ -25,6 +25,9 @@ import (
 // The kinds a caller can ask about with errors.Is. Each is the sentinel a
 // Refusal reports itself as; none is ever returned on its own.
 var (
+	// ErrEffortUnsupported is an effort outside the selected CLI's choices.
+	ErrEffortUnsupported = errors.New("the harness does not support this effort")
+
 	// ErrNotInstalled is a leg configured to use a CLI that is not on the PATH
 	// (lib/adapters/claude.sh:19-21).
 	ErrNotInstalled = errors.New("the harness CLI is not installed")

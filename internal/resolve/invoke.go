@@ -277,8 +277,11 @@ func (l *Leg) invoke(ctx context.Context, s *session, marker prstate.Marker, wor
 	}
 
 	entry, _ := doc.For(s.settings.Harness)
+	// Grok resolves stream tool events, which excludes --json-schema.
+	// The schema is prompt text, so allow the same bounded shape retry as OpenCode.
+	schemaNative := entry.SchemaNative && s.settings.Harness != "grok"
 	shapeBudget := 1
-	if !entry.SchemaNative {
+	if !schemaNative {
 		shapeBudget = 2
 	}
 	semanticBudget := 1
@@ -401,6 +404,10 @@ func (l *Leg) invoke(ctx context.Context, s *session, marker prstate.Marker, wor
 		// The second child, for the one adapter whose telemetry is not in its
 		// own output (lib/adapters/opencode.sh:261-273).
 		l.mergeExport(ctx, adapter, inv, res, &env)
+		telemetry := harness.TelemetryJSON(&env, inv.CLIMajor)
+		if l.Log != nil {
+			l.Log.Event("usage", telemetry)
+		}
 		// The resolve-leg tripwire: a command event in the harness's own
 		// tool record fails the leg before any push, naming the harness
 		// and the command. The deny flags should have stopped it; this
@@ -530,7 +537,7 @@ func (l *Leg) invoke(ctx context.Context, s *session, marker prstate.Marker, wor
 		// Two endings, and the difference is whose bug it is
 		// (lib/run.sh:905-911).
 		out := refuse(fmt.Sprintf("%s returned an object that does not match the schema — %s", s.settings.Harness, problem),
-			shapeExhaustedAction(entry.SchemaNative))
+			shapeExhaustedAction(schemaNative))
 		out.Messages = append(msgs, out.Messages...)
 		return out
 	}
@@ -562,32 +569,24 @@ func (l *Leg) retryReset(ctx context.Context, work Git, index, tree, harnessName
 }
 
 // foldTransientAttempt joins one transient attempt's usage buckets into the
-// running sum, answering the sum to keep. A nil record contributes nothing.
+// running sum, answering the sum to keep. A nil record marks the aggregate as incomplete.
 //
 // Each leg carries its own copy of this helper against the same review-leg
 // citation rather than sharing one across the tier boundary.
 func foldTransientAttempt(sum, attempt *harness.Usage) *harness.Usage {
-	if attempt == nil {
-		return sum
-	}
-	if sum == nil {
-		fresh := *attempt
-		return &fresh
-	}
-	addUsageBuckets(sum, attempt)
-	return sum
+	return harness.FoldUsage(sum, attempt)
 }
 
 // foldTransientRefused carries the transient attempts' buckets into the
 // accepted envelope, so one prompt's envelope reports every call it cost.
-// Identity stays on the accepted attempt: the non-bucket usage fields are
-// untouched.
+// Reported model and effort stay on the accepted attempt.
 func foldTransientRefused(envelope *harness.Envelope, refused *harness.Usage) {
 	if refused == nil {
 		return
 	}
 	if envelope.Usage == nil {
-		total := refused.WithTotal()
+		partial := harness.FoldUsage(refused, nil)
+		total := partial.WithTotal()
 		envelope.Usage = &total
 		envelope.Tokens = total.Total
 		return
@@ -599,16 +598,9 @@ func foldTransientRefused(envelope *harness.Envelope, refused *harness.Usage) {
 	envelope.Tokens = total.Total
 }
 
-// addUsageBuckets folds src's six buckets into dst. Non-bucket fields and
-// the total stay the caller's business: dst keeps its own record with the
-// summed buckets.
+// addUsageBuckets combines independent calls, including their cost provenance.
 func addUsageBuckets(dst, src *harness.Usage) {
-	dst.InputFresh += src.InputFresh
-	dst.CacheRead += src.CacheRead
-	dst.CacheWrite5m += src.CacheWrite5m
-	dst.CacheWrite1h += src.CacheWrite1h
-	dst.CacheWriteUnsplit += src.CacheWriteUnsplit
-	dst.Output += src.Output
+	*dst = harness.MergeUsage(*dst, *src)
 }
 
 // invokeAbort is _run_invoke_abort (lib/run.sh:704-710): the way out when an

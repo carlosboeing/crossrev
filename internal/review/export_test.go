@@ -123,3 +123,39 @@ func TestOpencodeProseIsRejectedAndRetried(t *testing.T) {
 		t.Errorf("refusal = %q", got.Err)
 	}
 }
+
+// Exercise the modern export through execution, marker construction and comment rendering.
+func TestModernOpencodeTelemetryReachesTheReviewComment(t *testing.T) {
+	e := newEnv(t)
+	writeAppGo(t, e.dir)
+	e.runner.script = []exec.Result{
+		{ExitCode: 0, Stdout: opencodeStream(issuesPayload(twoFindings))},
+		{ExitCode: 0, Stdout: []byte(`{"info":{"tokens":{"input":16315,"output":304,"reasoning":616,"cache":{"read":19382,"write":0}},"cost":0.03192035},"messages":[{"type":"assistant","model":{"id":"gemini-4-hydrogen"},"tokens":{"input":16315,"output":304,"reasoning":616,"cache":{"read":19382,"write":0}}}]}`)},
+	}
+	req := e.request(t)
+	req.HarnessOverride = "opencode"
+	leg := e.leg(t)
+	got := leg.Run(t.Context(), req)
+	if got.Err != nil {
+		t.Fatal(got.Err)
+	}
+	var comments strings.Builder
+	for _, comment := range e.forge.comments {
+		comments.WriteString(comment.Body)
+	}
+	for _, want := range []string{"36,617", "19,382", "~$0.03", "Cached is the read/write portion already included in Tokens."} {
+		if !strings.Contains(comments.String(), want) {
+			t.Errorf("comment missing %q: %s", want, comments.String())
+		}
+	}
+
+	raw, err := got.Marker.MarshalJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"tokens":36617`, `"cost_usd":0.03192035`, `"model_reported":"gemini-4-hydrogen"`, `"normalization_version":1`} {
+		if !strings.Contains(string(raw), want) {
+			t.Errorf("marker missing %s: %s", want, raw)
+		}
+	}
+}
