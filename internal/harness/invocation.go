@@ -335,3 +335,30 @@ func childEnv(doc Document, name string, env []string, additions ...string) []st
 	}
 	return append(kept, additions...)
 }
+
+// ValidateEffort checks CLI-level choices, not model-specific capabilities.
+// Codex effort and OpenCode variants are model- or provider-defined, so
+// they must not use a fixed local allowlist. Claude endpoint calls still
+// pass through the Claude CLI and share its fixed effort choices.
+func ValidateEffort(name, effort string) error {
+	if !wanted(effort) || name == "opencode" || name == "codex" {
+		return nil
+	}
+	var levels []string
+	switch name {
+	case "grok":
+		levels = []string{"low", "medium", "high", "xhigh"}
+	case "agy", "claude":
+		levels = []string{"low", "medium", "high", "xhigh", "max"}
+	default:
+		return nil
+	}
+	if slices.Contains(levels, effort) {
+		return nil
+	}
+	return &Refusal{
+		Reason: fmt.Sprintf("unsupported effort %q for %s; use one of: %s", effort, name, strings.Join(levels, ", ")),
+		Action: "Set --effort explicitly for the selected harness, or clear the configured effort to use its default. A --harness override preserves configured effort; CrossRev does not translate effort levels.",
+		Kind:   ErrEffortUnsupported,
+	}
+}

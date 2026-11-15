@@ -277,8 +277,11 @@ func (l *Leg) invoke(ctx context.Context, s *session, marker prstate.Marker, wor
 	}
 
 	entry, _ := doc.For(s.settings.Harness)
+	// Grok resolves stream tool events, which excludes --json-schema.
+	// The schema is prompt text, so allow the same bounded shape retry as OpenCode.
+	schemaNative := entry.SchemaNative && s.settings.Harness != "grok"
 	shapeBudget := 1
-	if !entry.SchemaNative {
+	if !schemaNative {
 		shapeBudget = 2
 	}
 	semanticBudget := 1
@@ -534,7 +537,7 @@ func (l *Leg) invoke(ctx context.Context, s *session, marker prstate.Marker, wor
 		// Two endings, and the difference is whose bug it is
 		// (lib/run.sh:905-911).
 		out := refuse(fmt.Sprintf("%s returned an object that does not match the schema — %s", s.settings.Harness, problem),
-			shapeExhaustedAction(entry.SchemaNative))
+			shapeExhaustedAction(schemaNative))
 		out.Messages = append(msgs, out.Messages...)
 		return out
 	}

@@ -156,29 +156,40 @@ func (l *Leg) runCoverage(ctx context.Context, req Request, loaded Context, sett
 	if settings.inputPolicy == config.ReviewInputWholeWhenFits {
 		whole = &WholePolicy{}
 	}
+	entry, _ := l.Harness.For(settings.harness)
+	effective, _ := EffectiveReadMode(entry.ReadMode())
+	schema := string(validate.FindingsSchema())
+	measure := func(text []byte) int {
+		return harness.InputBytes(settings.harness, harness.Invocation{
+			Prompt:   harness.File{Text: string(text)},
+			Schema:   harness.File{Path: "schema", Text: schema},
+			ReadMode: effective,
+		})
+	}
 	sharedBytes, _ := shared.render(nil, scope.Base, scope.Head, true, whole)
+	sharedSize := measure(sharedBytes)
 	if whole != nil {
-		whole.MaxBytes = budget.PackBytes - len(sharedBytes)
+		whole.MaxBytes = budget.PackBytes - sharedSize
 		if whole.MaxBytes < 0 {
 			whole.MaxBytes = 0
 		}
 	}
 	render := func(call intel.Call) int {
 		if call.Part != nil {
-			return len(shared.renderPart(call.Part, scope.Base, scope.Head, true))
+			return measure(shared.renderPart(call.Part, scope.Base, scope.Head, true))
 		}
 		promptBytes, _ := shared.render(call.Files, scope.Base, scope.Head, true, whole)
-		return len(promptBytes)
+		return measure(promptBytes)
 	}
 	packStart := l.now()
-	plan := intel.PlanCalls(scope, acceptedIDs, intel.PlanOptions{Limits: budget, SharedBytes: len(sharedBytes)}, render)
+	plan := intel.PlanCalls(scope, acceptedIDs, intel.PlanOptions{Limits: budget, SharedBytes: sharedSize}, render)
 	l.Log.Phase("pack", l.now().Sub(packStart).Milliseconds())
 	if plan.OverBudget {
 		outcome.limits = append(outcome.limits, string(core.LimitOverBudget))
 		out.Messages = append(out.Messages, ui.Warn(
 			"shared context alone is past 0.75 of the per-call packing limit, so this pass runs over budget",
 			"Calls pack against the packing limit until shared context passes it, and only then against the hard limit; over_budget is recorded on its generations."))
-		l.Log.Event("budget", fmt.Sprintf("over_budget shared=%d pack=%d hard=%d", len(sharedBytes), budget.PackBytes, budget.HardBytes))
+		l.Log.Event("budget", fmt.Sprintf("over_budget shared=%d pack=%d hard=%d", sharedSize, budget.PackBytes, budget.HardBytes))
 	}
 	// Packing's skips join the exclusion record before the first
 	// publication: the generation records each skipped path with its

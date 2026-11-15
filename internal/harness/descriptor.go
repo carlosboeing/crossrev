@@ -185,8 +185,8 @@ type Descriptor struct {
 	// shape-retry (lib/adapters/opencode.sh:8-15).
 	SchemaNative bool `json:"schema_native"`
 	// PromptTransport is stdin, file or argv: how this harness is handed the
-	// prompt. Codex and Claude Code read it from stdin, grok takes a file
-	// path, and agy and opencode take it on argv.
+	// prompt. Codex, Claude Code and OpenCode read stdin, Grok takes a file
+	// path, and Antigravity takes argv.
 	PromptTransport string `json:"prompt_transport"`
 	// WindowTokens is the harness's input window in tokens. Codex carries
 	// the measured 258,400; Claude Code 200,000 and agy, grok and opencode

@@ -307,9 +307,9 @@ func TestOpencodeArgumentShape(t *testing.T) {
 
 	// The schema travels inside the prompt, because this harness has no schema
 	// flag at all.
-	prompt := spec.Args[len(spec.Args)-1]
+	prompt := string(spec.Stdin)
 	if !strings.HasPrefix(prompt, inv.Prompt.Text) {
-		t.Error("the prompt is not the last argument")
+		t.Error("the prompt is not on stdin")
 	}
 	if !strings.Contains(prompt, "This harness does not constrain your output.") {
 		t.Error("the prompt does not correct the skill's claim that the harness constrains the output")
@@ -369,9 +369,9 @@ func TestOpencodeArgumentShapeOn2x(t *testing.T) {
 		t.Errorf("the child's working directory = %q, want the checkout %q — 2.x takes no --dir, so the directory is the isolation", spec.Dir, inv.Workdir)
 	}
 
-	prompt := spec.Args[len(spec.Args)-1]
+	prompt := string(spec.Stdin)
 	if !strings.HasPrefix(prompt, inv.Prompt.Text) {
-		t.Error("the prompt is not the last argument")
+		t.Error("the prompt is not on stdin")
 	}
 	if !strings.Contains(prompt, "This harness does not constrain your output.") {
 		t.Error("the prompt does not correct the skill's claim that the harness constrains the output")
@@ -442,7 +442,7 @@ func TestOpencodePromptIsUntouchedWithNoSchema(t *testing.T) {
 	if err != nil {
 		t.Fatalf("building the spec: %v", err)
 	}
-	if last := spec.Args[len(spec.Args)-1]; last != inv.Prompt.Text {
+	if last := string(spec.Stdin); last != inv.Prompt.Text {
 		t.Errorf("the prompt was rewritten with no schema to add: %q", last)
 	}
 }

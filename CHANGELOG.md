@@ -4,6 +4,11 @@ All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepa
 
 ## [Unreleased]
 
+### Fixed
+
+- **OpenCode prompts use stdin on both supported CLI majors.** Large review and resolve prompts no longer hit CrossRev's 120 KiB argv cap. Budgeting includes adapter instructions and schema text across all harnesses, and streaming Grok resolves receive their output schema in the prompt with one retry for a schema mismatch.
+- **Unsupported effort fails before model execution.** Grok, Antigravity and Claude calls validate CLI effort choices, including inherited values after a harness override or fallback. Codex model-defined effort and OpenCode provider variants remain unchanged; CrossRev does not translate effort levels.
+
 ### Changed
 
 - **An unverified harness version degrades a review instead of refusing it.** A served review (Codex, Claude Code) whose descriptor pin carries no verified command block, whose installed CLI is not the exact verified version, or whose version probe reports no version now reviews supplied — the prompt carries everything and no read tool is granted — instead of refusing with `review_isolation_unverified`. The degradation is recorded as `unverified_version` in the pass comment, the marker's reads envelope and the run log, and `.policy.on_reads_unavailable` governs it: `degrade` (the default) runs supplied, `halt` stops the leg with `reads_unavailable`. A verified version reviews served exactly as before, grok reviews stay refused (grok already reviews supplied, so it has no served path to degrade from), every resolve leg is unaffected, and no `--allow-unverified` flag is added. `crossrev doctor` now names an unverified served pin as degrading to supplied. See [ADR 0030](docs/adrs/0030-unverified-harness-versions-review-supplied.md), which supersedes the exact-version gate in [ADR 0027](docs/adrs/0027-review-legs-read-only-through-the-served-tool.md).

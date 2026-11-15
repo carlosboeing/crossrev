@@ -19,7 +19,7 @@ func TestShippedWindowsReadBack(t *testing.T) {
 		{name: "claude", window: 200000, argv: false},
 		{name: "agy", window: 128000, argv: true},
 		{name: "grok", window: 128000, argv: false},
-		{name: "opencode", window: 128000, argv: true},
+		{name: "opencode", window: 128000, argv: false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			window, found := doc.WindowTokens(tc.name)

@@ -766,3 +766,16 @@ func TestOpencodeVersionGateRunsA2xInstall(t *testing.T) {
 		t.Errorf("the run child does not open with run --standalone: %v", got)
 	}
 }
+
+func TestStreamingGrokSchemaMismatchRetriesOnce(t *testing.T) {
+	e := setup(t)
+	e.addReview(t, defaultFindings(), "issues-remain")
+	e.adapter.payloads = []json.RawMessage{shapePayload(), oneFindingPayload()}
+	got := e.runReq(t, Request{PR: 42, Repo: e.slug, Trigger: TriggerHuman, Harness: "grok"})
+	if got.Err != nil {
+		t.Fatal(got.Err)
+	}
+	if e.adapter.calls != 2 {
+		t.Fatalf("calls=%d, want one schema retry for a streaming Grok resolve", e.adapter.calls)
+	}
+}

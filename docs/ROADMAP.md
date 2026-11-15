@@ -59,6 +59,8 @@ Everything here is deferred past the native rewrite, and all of it is a door del
 
 ## Recently shipped
 
+- Harness input handling sends OpenCode prompts through stdin, includes adapter instructions and schemas in prompt budgets, and supplies the schema to streaming Grok resolves. Fixed CLI effort choices are validated before model execution, while model-defined effort and variants pass through.
+
 - **An unverified harness version degrades a review instead of refusing it** ([#346](https://github.com/carlosboeing/crossrev/issues/346), 2026-11-15, unreleased). A served review whose pin carries no verified block, whose installed CLI is not the exact verified version, or whose version probe reports no version now runs supplied — the prompt carries everything and no read tool is granted — with `unverified_version` recorded in the pass comment, the marker's reads envelope and the run log, or halts where `.policy.on_reads_unavailable: halt` says so. A verified version reviews served as before, grok reviews stay refused, and every resolve leg is unaffected. No `--allow-unverified` flag. See [ADR 0030](adrs/0030-unverified-harness-versions-review-supplied.md).
 - **A refused review answer is retried with the reason** (2026-11-15). When a review answer contradicts what it was given, the one retry's prompt now ends with the refusal reason; it used to be the first prompt again, and the reviewer repeated the answer. The skill and the batch prompt state that one evidence span sits inside one supplied range, and the run log records why each answer was refused.
 

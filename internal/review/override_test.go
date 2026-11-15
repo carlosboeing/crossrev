@@ -16,7 +16,7 @@ import (
 // operator's value.
 func TestAModelOverrideWithoutAHarnessOverrideReplacesTheConfiguredModel(t *testing.T) {
 	e := newEnv(t)
-	e.cfg = mustConfig(t, "version: 2\nreviewer:\n  harness: claude\n  model: configured-model\n  effort: configured-effort\n")
+	e.cfg = mustConfig(t, "version: 2\nreviewer:\n  harness: claude\n  model: configured-model\n  effort: medium\n")
 	writeAppGo(t, e.dir)
 	e.runner.script = []exec.Result{{ExitCode: 0, Stdout: claudeStdout(issuesPayload(twoFindings))}}
 
@@ -26,14 +26,14 @@ func TestAModelOverrideWithoutAHarnessOverrideReplacesTheConfiguredModel(t *test
 	req := e.request(t)
 	req.HarnessOverride = ""
 	req.ModelOverride = "cli-model"
-	req.EffortOverride = "cli-effort"
+	req.EffortOverride = "xhigh"
 	leg := e.leg(t)
 	got := leg.Run(context.Background(), req)
 	if got.Err != nil {
 		t.Fatalf("Run: %v", got.Err)
 	}
 
-	if !containsRun(got.Messages, []ui.Line{ui.Say("Reviewer: claude, cli-model, cli-effort effort")}) {
+	if !containsRun(got.Messages, []ui.Line{ui.Say("Reviewer: claude, cli-model, xhigh effort")}) {
 		t.Fatalf("the header does not name the CLI model and effort: %q", ui.Texts(got.Messages))
 	}
 	marker, err := got.Marker.MarshalJSON()
@@ -43,10 +43,10 @@ func TestAModelOverrideWithoutAHarnessOverrideReplacesTheConfiguredModel(t *test
 	if !strings.Contains(string(marker), `"model":"cli-model"`) {
 		t.Errorf("the marker does not record the CLI model: %s", marker)
 	}
-	if !strings.Contains(string(marker), `"effort":"cli-effort"`) {
+	if !strings.Contains(string(marker), `"effort":"xhigh"`) {
 		t.Errorf("the marker does not record the CLI effort: %s", marker)
 	}
-	if strings.Contains(string(marker), "configured-model") || strings.Contains(string(marker), "configured-effort") {
+	if strings.Contains(string(marker), "configured-model") || strings.Contains(string(marker), "medium") {
 		t.Errorf("the configured values survived the override: %s", marker)
 	}
 }
@@ -88,14 +88,14 @@ func TestAModelOverrideMatchesTheSameModelFromConfig(t *testing.T) {
 	}
 
 	fromConfig, markerConfig := run(t,
-		"version: 2\nreviewer:\n  harness: claude\n  model: shared-model\n  effort: shared-effort\n", "", "")
+		"version: 2\nreviewer:\n  harness: claude\n  model: shared-model\n  effort: high\n", "", "")
 	fromFlag, markerFlag := run(t,
-		"version: 2\nreviewer:\n  harness: claude\n", "shared-model", "shared-effort")
+		"version: 2\nreviewer:\n  harness: claude\n", "shared-model", "high")
 
 	if fromConfig != fromFlag {
 		t.Errorf("header = %q from the flag, want the config's %q", fromFlag, fromConfig)
 	}
-	for _, want := range []string{`"model":"shared-model"`, `"effort":"shared-effort"`} {
+	for _, want := range []string{`"model":"shared-model"`, `"effort":"high"`} {
 		if !strings.Contains(markerConfig, want) {
 			t.Fatalf("the config run did not record %s: %s", want, markerConfig)
 		}
@@ -126,12 +126,26 @@ func TestTheRunLogRecordsTheResolvedModelAndEffort(t *testing.T) {
 		}
 		return readRunLog(t, e)
 	}
-	const cfg = "version: 2\nreviewer:\n  harness: claude\n  model: configured-model\n  effort: configured-effort\n"
+	const cfg = "version: 2\nreviewer:\n  harness: claude\n  model: configured-model\n  effort: medium\n"
 
-	if log := run(t, cfg, "cli-model", "cli-effort"); !strings.Contains(log, "settings harness=claude model=cli-model effort=cli-effort") {
+	if log := run(t, cfg, "cli-model", "xhigh"); !strings.Contains(log, "settings harness=claude model=cli-model effort=xhigh") {
 		t.Errorf("run.log does not record the CLI model and effort:\n%s", log)
 	}
-	if log := run(t, cfg, "", ""); !strings.Contains(log, "settings harness=claude model=configured-model effort=configured-effort") {
+	if log := run(t, cfg, "", ""); !strings.Contains(log, "settings harness=claude model=configured-model effort=medium") {
 		t.Errorf("run.log does not record the configured model and effort:\n%s", log)
+	}
+}
+
+func TestReviewRefusesGrokMaxBeforeModelInvocation(t *testing.T) {
+	e := newEnv(t)
+	req := e.request(t)
+	req.HarnessOverride = "grok"
+	req.EffortOverride = "max"
+	got := runLeg(t, e, req)
+	if got.Err == nil || !strings.Contains(got.Err.Error(), `unsupported effort "max" for grok`) {
+		t.Fatalf("wrong refusal: %v", got.Err)
+	}
+	if e.runner.calls != 0 {
+		t.Fatal("invalid effort started a model")
 	}
 }
