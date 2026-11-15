@@ -1,6 +1,7 @@
 package harness_test
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"strings"
@@ -542,8 +543,43 @@ func TestOpencodeReviewDeniesTheFiveReadTools(t *testing.T) {
 	}
 }
 
+type probeRunner struct{ result exec.Result }
+
+func (r probeRunner) Run(context.Context, exec.Spec) exec.Result { return r.result }
+
+// UnverifiedServedVersion names why a served block is unverified: a pin
+// nobody verified, an installed version that is not the exact verified
+// one, or a probe that reports no version. The exact verified install
+// answers false.
+func TestUnverifiedServedVersion(t *testing.T) {
+	adapter := codexAdapter(t)
+	inv := invocation(t, "codex", false)
+	for _, tt := range []struct {
+		name       string
+		pin        string
+		stdout     string
+		wantDetail string
+		want       bool
+	}{
+		{name: "verified install", pin: "0.169.0", stdout: "codex-cli 0.169.0\n", want: false},
+		{name: "installed mismatch", pin: "0.169.0", stdout: "codex-cli 0.170.0\n", wantDetail: "0.170.0", want: true},
+		{name: "unverified pin", pin: "9.9.9", stdout: "codex-cli 9.9.9\n", wantDetail: "9.9.9", want: true},
+		{name: "no version reported", pin: "0.169.0", stdout: "codex-cli\n", wantDetail: "reported no version", want: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			detail, got := harness.UnverifiedServedVersion(context.Background(), probeRunner{result: exec.Result{ExitCode: 0, Stdout: []byte(tt.stdout)}}, adapter, "codex", tt.pin, inv)
+			if got != tt.want {
+				t.Fatalf("UnverifiedServedVersion = (%q, %t), want unverified %t", detail, got, tt.want)
+			}
+			if tt.want && !strings.Contains(detail, tt.wantDetail) {
+				t.Errorf("detail = %q, want it to name %q", detail, tt.wantDetail)
+			}
+		})
+	}
+}
+
 // Served-mode flags are verified on each pinned version or the pin moves:
-// a harness whose command block is unverified never reviews.
+// a harness whose command block is unverified never reviews served.
 func TestUnverifiedServedBlockNeverReviews(t *testing.T) {
 	if harness.IsolationVerified("codex", "0.0.0") {
 		t.Error("an unknown codex pin reads as verified")
