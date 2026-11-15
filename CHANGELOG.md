@@ -2,6 +2,12 @@
 
 All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **`crossrev init` exports the credentials the pairing actually uses.** `templates/crossrev-review.yml` and `templates/crossrev-resolve.yml` carried hardcoded `CLAUDE_CODE_OAUTH_TOKEN` and `CROSSREV_CODEX_AUTH` lines, so a hosted pairing naming `opencode`, `grok` or an endpoint wrote a workflow that installed the CLI, demanded the secret in the plan, and never exported it to the leg. The env block is now rendered from the pairing's credential descriptors and endpoint `token_env` entries — the same rules `requiredSecrets` reads — so `CROSSREV_OPENCODE_AUTH`, `CROSSREV_GROK_AUTH` and endpoint token variables reach the action, while a self-hosted subscription harness still exports none.
+
 ## [0.12.0] — 2026-11-15
 
 ### Fixed

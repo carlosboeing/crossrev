@@ -63,9 +63,8 @@ jobs:
           # crossrev:only github-hosted
           # Read-only, and discarded when the leg finishes. See the review
           # workflow: one writer, and it is the refresher.
-          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          CROSSREV_CODEX_AUTH: ${{ secrets.CROSSREV_CODEX_AUTH }}
           # crossrev:end
+          # __HARNESS_ENV__
 
       # The run log — and the transcripts, which survive only a failed leg —
       # dies with the runner unless it leaves as an artifact. The pull request
