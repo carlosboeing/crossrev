@@ -12,6 +12,7 @@
 package prompt
 
 import (
+	"bytes"
 	"fmt"
 	"strings"
 
@@ -339,6 +340,27 @@ func renderConfirmation(delta []byte) string {
 	return b.String()
 }
 
+// Refused is a prompt whose answer the semantic check turned away, with
+// the reason appended for the one retry. Every byte of the first prompt
+// stays: the reviewer answers the same question, now knowing which claim
+// contradicted what it was given. The reason is quoted as a block because
+// it can carry text from the refused answer.
+func Refused(prompt []byte, problem string) []byte {
+	var b strings.Builder
+	b.Write(prompt)
+	if !bytes.HasSuffix(prompt, []byte("\n")) {
+		b.WriteString("\n")
+	}
+	b.WriteString("\n## Your previous answer was refused\n\n")
+	b.WriteString("CrossRev checked your previous answer to this prompt against what it " +
+		"was given, and refused it for this reason:\n\n")
+	b.Write(QuoteBlock([]byte(problem)))
+	b.WriteString("\n\nAnswer the whole prompt again as one complete object, with that " +
+		"corrected. Nothing from the previous answer was kept. This is the last attempt: " +
+		"a second refusal halts the review.\n")
+	return []byte(b.String())
+}
+
 // renderBatch is the Review Intelligence batch input: numbered required files
 // with readable content or an explicit access limit, advisory summaries and
 // exclusions. It renders nothing when the batch is empty, so the frozen
@@ -353,7 +375,9 @@ func renderBatch(units []BatchUnit, advisory []AdvisoryRef, omitted int, exclude
 		b.WriteString("Account for every numbered file below in `coverage`, one entry per " +
 			"number. A file verdict means you examined the supplied ranges on both " +
 			"sides, not merely its pathname. `not_affected` does not exempt a changed file: it says " +
-			"the file was read and needs no change, with evidence saying why.\n\n")
+			"the file was read and needs no change, with evidence saying why. Each evidence span " +
+			"sits inside one supplied range — one hunk's numbered lines. A span that starts in " +
+			"one hunk and ends in another is refused: cite each hunk as its own evidence item.\n\n")
 		for i, u := range units {
 			renderBatchUnit(&b, i+1, u)
 		}

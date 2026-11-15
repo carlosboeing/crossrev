@@ -160,3 +160,70 @@ func refusalPair(t *testing.T, err error) (reason, action string) {
 	}
 	return fatal.Reason, fatal.Action
 }
+
+// A semantic retry tells the reviewer what was refused. The same prompt went
+// out twice, so the second answer repeated the first: a span cited across two
+// hunks came back two lines shorter and still across both, and the leg halted
+// on a contradiction the reviewer was never told about.
+func TestASemanticRetryTellsTheReviewerWhatWasRefused(t *testing.T) {
+	e := newEnv(t)
+	writeAppGo(t, e.dir)
+	const problem = "coverage for unit 5 cites lines 262-301 outside the supplied head ranges (249-278, 284-308)"
+	calls := 0
+	e.validate = func([]byte, validate.ReviewExpectations) error {
+		calls++
+		if calls == 1 {
+			return semanticProblem(problem)
+		}
+		return nil
+	}
+	e.runner.script = []exec.Result{{ExitCode: 0, Stdout: claudeStdout(issuesPayload(twoFindings))}}
+
+	got := runLeg(t, e, e.request(t))
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
+	specs := e.runner.Specs()
+	if len(specs) != 2 {
+		t.Fatalf("the harness was invoked %d time(s), want 2", len(specs))
+	}
+	first, second := specPrompt(specs[0]), specPrompt(specs[1])
+	if strings.Contains(first, problem) || strings.Contains(first, "previous answer was refused") {
+		t.Errorf("the first prompt already speaks of a refusal")
+	}
+	if !strings.HasPrefix(second, first) {
+		t.Errorf("the retry does not carry the whole first prompt")
+	}
+	tail := strings.TrimPrefix(second, first)
+	if !strings.Contains(tail, "## Your previous answer was refused") {
+		t.Errorf("the retry names no refusal; it added %q", tail)
+	}
+	if !strings.Contains(tail, problem) {
+		t.Errorf("the retry does not say what was refused; it added %q", tail)
+	}
+}
+
+// The run log records why an answer was refused. It recorded the second
+// attempt and nothing else, so a retry that succeeded left no account of
+// what the first answer got wrong.
+func TestTheRunLogRecordsWhyAnAnswerWasRefused(t *testing.T) {
+	e := newEnv(t)
+	writeAppGo(t, e.dir)
+	const problem = "finding 3 was answered twice"
+	e.validate = func([]byte, validate.ReviewExpectations) error { return semanticProblem(problem) }
+	e.runner.script = []exec.Result{{ExitCode: 0, Stdout: claudeStdout(issuesPayload(twoFindings))}}
+
+	got := runLeg(t, e, e.request(t))
+	if got.Err == nil {
+		t.Fatal("two contradictions in a row did not fail the leg")
+	}
+	log := readRunLog(t, e)
+	for _, want := range []string{
+		"refused harness=claude attempt=1 kind=semantic " + problem,
+		"refused harness=claude attempt=2 kind=semantic " + problem,
+	} {
+		if !strings.Contains(log, want) {
+			t.Errorf("the run log does not carry %q:\n%s", want, log)
+		}
+	}
+}

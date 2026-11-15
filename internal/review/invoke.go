@@ -690,10 +690,29 @@ func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settin
 			return envelope, envelope.Payload, outMsgs, nil
 		}
 		code := validateCode(problem)
+		// The reason goes in the run log, not only to the terminal: a retry
+		// that succeeds otherwise leaves no account of what the refused
+		// answer got wrong.
+		if l.Log != nil {
+			kind := "shape"
+			if code == 2 {
+				kind = "semantic"
+			}
+			l.Log.Event("refused", fmt.Sprintf("harness=%s attempt=%d kind=%s %s", settings.harness, attempt, kind, problem))
+		}
 		if code == 2 {
 			if semanticBudget > 0 {
 				semanticBudget--
 				refused = foldAttempt(refused, envelope.Usage)
+				// The retry says what was refused. The same prompt sent
+				// again drew the same answer: the reviewer was never told
+				// which claim contradicted its input. In hand, in the
+				// invocation and on disk, as the reads rewrite above does.
+				promptBytes = prompt.Refused(promptBytes, problem.Error())
+				inv.Prompt.Text = string(promptBytes)
+				if err := os.WriteFile(promptPath, promptBytes, 0o600); err != nil {
+					return harness.Envelope{}, nil, outMsgs, err
+				}
 				// ui_warn, the pair kept apart (lib/run.sh:888-889).
 				outMsgs = append(outMsgs, ui.Warn(
 					fmt.Sprintf("%s returned an answer that contradicts what it was given — %s", settings.harness, problem),

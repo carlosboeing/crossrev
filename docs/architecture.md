@@ -154,7 +154,7 @@ A plain file that fits in no call alone splits into parts at hunk boundaries, on
 
 A **hunk** is the gutter-numbered diff the prompt shows for one file: every line inside a hunk prefixed by its number in the old file, its number in the new file, and a `|`, with a dash where the line does not exist on that side ([ADR 0025](adrs/0025-review-input-is-hunks-that-split.md), decision 5). Each required file arrives as its own hunks in one of three forms: `full_text` shows the whole file as one hunk, `hunks_context` shows each change with its enclosing function clipped to 100 lines of surrounding context, and `diff_only` shows the diff header with the access reason and no hunks. The spans each side shows are the **supplied ranges**, numbered as the gutter shows them.
 
-A file verdict means the supplied ranges on both sides were examined, not merely the pathname. Evidence must sit inside the ranges on the side its revision names — a removed line cited at the base is accepted, any span outside the supplied ranges is refused — and lines the hunks did not show are unseen: never evidence, and named in `known_limits` when they limit the review. See [ADR 0026](adrs/0026-coverage-counts-supplied-bytes-only.md).
+A file verdict means the supplied ranges on both sides were examined, not merely the pathname. Evidence must sit inside one supplied range on the side its revision names — a removed line cited at the base is accepted, any span outside the supplied ranges is refused, and so is a span that starts in one hunk and ends in another — and lines the hunks did not show are unseen: never evidence, and named in `known_limits` when they limit the review. See [ADR 0026](adrs/0026-coverage-counts-supplied-bytes-only.md).
 
 Files past the pass budget carry `review_budget_reached`.
 
@@ -241,7 +241,7 @@ Validation splits by exit code, and the split is about who is at fault:
 | Code | Kind | Meaning |
 |---|---|---|
 | 1 | **shape** | A key missing, a type wrong, an enum value out of range. An adapter or harness bug — a retry reproduces it |
-| 2 | **semantic** | The shape is perfect and the content contradicts what the orchestrator supplied: a finding number nothing was numbered with, the same finding answered twice, one left out, an issue number nobody offered. Model drift by definition, so it earns one more attempt |
+| 2 | **semantic** | The shape is perfect and the content contradicts what the orchestrator supplied: a finding number nothing was numbered with, the same finding answered twice, one left out, an issue number nobody offered. Model drift by definition, so it earns one more attempt. On the review leg that attempt's prompt ends with the refusal reason, so the reviewer knows which claim to correct; the resolve leg asks again unchanged |
 
 Validation stays narrower than general JSON Schema validation. It checks required keys, types and enum ranges. The schemas stay flat enough for that to be sufficient. A schema that outgrows the check is the signal to add a real validator rather than to let the check drift behind it.
 
