@@ -2,6 +2,12 @@
 
 All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **The `opencode` install pin moves to 2.3.0, and 2.x stdout error events are reported.** `@opencode/cli@2.0.15` marks `20260805200742_import_legacy_credentials` complete without running it when bootstrapping a new `opencode.db`, so `$XDG_DATA_HOME/opencode/auth.json` is never imported on a fresh GitHub-hosted runner and every model call fails with `provider.no-route` (observed on `carlosboeing/crossrev-testbed` run `43678398297`). `@opencode/cli@2.3.0` runs that migration during schema bootstrap and imports the staged credential. Separately, `opencode` 2.x in `--format json` mode writes `"type":"error"` NDJSON events to stdout with stderr empty; the adapter now extracts `.error.message` instead of reporting `opencode exited 1 with no output on either stream`, and classifies `provider.auth` or status `401` events as credential rejections.
+
 ## [0.12.1] — 2026-11-15
 
 ### Fixed

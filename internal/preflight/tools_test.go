@@ -277,7 +277,7 @@ func TestCheckHarnessComparesVersionsAgainstRecordedEvidence(t *testing.T) {
 	r.answer("gh api user --jq .login", "carlosboeing\n", 0)
 	r.answer("claude --version", "2.1.300 (Claude Code)\n", 0)
 	r.answer("agy --version", "0.1.5\n", 0)
-	r.answer("opencode --version", "opencode v2.0.15\n", 0)
+	r.answer("opencode --version", "opencode v2.3.0\n", 0)
 	c, buf := checker(t, r, onPath("git", "gh", "claude", "agy", "opencode"))
 
 	if !c.Check(context.Background(), preflight.NeedHarness) {
@@ -287,7 +287,7 @@ func TestCheckHarnessComparesVersionsAgainstRecordedEvidence(t *testing.T) {
 	for _, want := range []string{
 		"│  ✓ claude 2.1.300 — unverified, outside the recorded range (2.1.237-2.1.281)\n",
 		"│  ✓ agy 0.1.5 — unverified, no recorded version range\n",
-		"│  ✓ opencode v2.0.15 — known good (2.0.15)\n",
+		"│  ✓ opencode v2.3.0 — known good (2.3.0)\n",
 	} {
 		if !strings.Contains(report, want) {
 			t.Errorf("report =\n%s\nwant a line %q", report, want)

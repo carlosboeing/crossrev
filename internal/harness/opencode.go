@@ -546,10 +546,16 @@ func (a *Opencode) Envelope(_ Invocation, res exec.Result) Envelope {
 	// cannot authenticate — measured — so "the harness failed" sends the reader
 	// looking in the wrong place entirely. A bare error event is not that shape
 	// — rate limits, overloads, tool failures — and falls through to the generic
-	// harness-error branch below.
-	if opencodeAPICallError.Match(res.Stderr) && opencodeUnauthorized.Match(res.Stderr) {
+	// harness-error branch below. On 2.x in `--format json` mode, both shapes
+	// land on stdout as a structured `"type":"error"` event with stderr empty.
+	streamMessage, streamAuth := opencodeStreamError(res.Stdout)
+	if (opencodeAPICallError.Match(res.Stderr) && opencodeUnauthorized.Match(res.Stderr)) || streamAuth {
 		message := "opencode rejected its credential. CrossRev classifies this as a credential failure, not a generic harness error."
-		if detail := HarnessError(res.Stderr); detail != "" {
+		detail := HarnessError(res.Stderr)
+		if detail == "" {
+			detail = streamMessage
+		}
+		if detail != "" {
 			message += " " + detail
 		}
 		return failed(a.Name(), runlog.Redact(message))
@@ -557,6 +563,9 @@ func (a *Opencode) Envelope(_ Invocation, res exec.Result) Envelope {
 
 	if res.ExitCode != 0 {
 		message := HarnessError(res.Stderr)
+		if message == "" {
+			message = streamMessage
+		}
 		if message == "" {
 			message = "opencode exited " + itoa(res.ExitCode) + " with no output on either stream"
 		}
@@ -680,6 +689,50 @@ func opencodeText(stdout []byte) string {
 		}
 	}
 	return answer.String()
+}
+
+// opencodeStreamError reads the `"type":"error"` NDJSON event opencode 2.x
+// writes to stdout in `--format json` mode, where stderr stays empty.
+//
+// An event whose `.error.type` is `"provider.auth"` or whose `.error.status` is
+// 401 is a credential rejection, classified the same way as 1.x's stderr
+// AI_APICallError + Unauthorized pair. Any other error event supplies the
+// message `Envelope` reports when `res.Stderr` is empty.
+func opencodeStreamError(stdout []byte) (string, bool) {
+	var last string
+	var auth bool
+	for _, line := range strings.Split(string(stdout), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		event, err := decodeOrdered([]byte(trimmed))
+		if err != nil {
+			continue
+		}
+		if kind, _ := event.member("type").asString(); kind != "error" {
+			continue
+		}
+		errNode := event.member("error")
+		if errType, _ := errNode.member("type").asString(); errType == "provider.auth" {
+			auth = true
+		}
+		if errNode.number("status") == 401 {
+			auth = true
+		}
+		for _, candidate := range []Node{
+			errNode.member("message"),
+			errNode.member("data").member("message"),
+			errNode,
+			event.member("message"),
+		} {
+			if msg, ok := candidate.asString(); ok && strings.TrimSpace(msg) != "" {
+				last = strings.TrimSpace(msg)
+				break
+			}
+		}
+	}
+	return last, auth
 }
 
 // fenceOpening is the `^```[a-zA-Z0-9_-]*[ \t]*\r?\n` of
