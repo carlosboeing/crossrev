@@ -60,6 +60,8 @@ Everything here is deferred past the native rewrite, and all of it is a door del
 
 ## Recently shipped
 
+- **A refused review answer is retried with the reason** (2026-11-15). When a review answer contradicts what it was given, the one retry's prompt now ends with the refusal reason; it used to be the first prompt again, and the reviewer repeated the answer. The skill and the batch prompt state that one evidence span sits inside one supplied range, and the run log records why each answer was refused.
+
 - **Review legs read only through the served tool** (2026-10-01, v0.10.0). Codex and Claude Code review with CrossRev's read tool as their only read path, and their event streams feed a review-leg tripwire that halts with `review_leg_ran_command` on any command event; opencode and agy review supplied with no read tool granted, and grok reviews are refused with `review_isolation_unverified` until its command block is verified again. A leg-start self-test and the post-call handshake guard the path, degrading visibly or halting per `.policy.on_reads_unavailable`, and the marker and manifest carry the `reads` envelope. See [ADR 0027](adrs/0027-review-legs-read-only-through-the-served-tool.md).
 
 - **Choose the review input policy for one run** (2026-09-30). `review` and `cycle` take `--input-policy hunks_first|whole_when_fits` to override `review.input_policy` for review legs, with the effective value and its source recorded in the run log.
