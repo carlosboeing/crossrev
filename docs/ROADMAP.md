@@ -28,6 +28,10 @@ Forward view of CrossRev: what's in flight, what's next, what's deliberately def
 
 - **The Bash implementation is removed.** A defect is fixed in Go. The frozen oracle under `tests/fixtures/parity/` stays read-only.
 
+## Telemetry normalization
+
+The current implementation keeps Tokens and Cached in review and resolve comments. It recovers Codex session identity, handles OpenCode 2.x reasoning and identity, aggregates independent call costs with provenance, labels partial usage, and explains unavailable estimates. Offline regression tests cover parser, invocation, marker and renderer paths. Successful Claude subagent accounting, resumed-session boundaries and hosted-runner telemetry remain live validation gaps; token totals alone do not rank model efficiency or review quality.
+
 ## Next actions
 
 - **An unverified harness version degrades a review instead of refusing it** ([#346](https://github.com/carlosboeing/crossrev/issues/346)). The served command block is verified on one exact CLI version per harness (`internal/harness/reads.go`), and the harness CLIs update daily, so a routine `codex update` makes every review refuse with `review_isolation_unverified` until a maintainer re-verifies and moves the pin — observed locally on 2026-11-15, when Codex 0.169.0 met the 0.159.2 pin. The fix keeps the claim honest without keeping the halt: an installed version nobody has verified reviews supplied (the prompt carries everything, no read tool is granted), with the degradation recorded in the marker, the reads envelope and the summary the way a failed read self-test already degrades, while a verified version reviews served as today. No `--allow-unverified` flag: it would become the pasted answer to the first refusal. The exact-version gate in ADR 0027 needs a successor decision before this ships.

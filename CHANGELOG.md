@@ -2,6 +2,14 @@
 
 All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Review and resolve telemetry includes whole-leg usage.** OpenCode 2.x session exports contribute separate reasoning tokens to inclusive output, recover model identity from assistant messages, and retain the harness's cost estimate. Codex recovers model and effort from its session record using the actual child environment, including staged credentials. Independent batches and retries sum cost only when its provenance is compatible; missing counts mark usage partial and suppress a complete cost estimate. Resolver table estimates use the resolved model and billing descriptor.
+- **Run details explain token and cost measurements.** Tokens includes cache traffic and reasoning once; Cached remains the cache-read/write subset. New records explain missing cost and known coverage gaps, while numeric usage events retain normalized buckets, source and normalization version without model payloads. Model and effort fall back to requested values when available; no defaults are forced.
+- **Bundled vendor token rates include current Codex models.** Refresh the pinned extract, including its model input windows, and refuse estimates for cache writes with unknown retention when rates differ. The refresh downloads rates from the revision recorded in the extract.
+
 ## [0.11.0] — 2026-11-15
 
 ### Added

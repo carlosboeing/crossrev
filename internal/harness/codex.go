@@ -17,6 +17,8 @@ package harness
 
 import (
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/carlosboeing/crossrev/internal/exec"
 	"github.com/carlosboeing/crossrev/internal/runlog"
@@ -220,7 +222,7 @@ func (a *Codex) Envelope(inv Invocation, res exec.Result) Envelope {
 	// The event stream names neither model nor effort; this session's rollout
 	// carries both. Any failure here is a miss — nil and nil — never a failed
 	// leg: the payload has already been read by the time this runs.
-	model, effort := ReadCodexRollout(inv.CodexHome, CodexSessionID(res.Stdout))
+	model, effort := ReadCodexRollout(codexRolloutHome(inv), CodexSessionID(res.Stdout))
 	if model != "" {
 		envelope.ModelReported = &model
 	}
@@ -228,4 +230,25 @@ func (a *Codex) Envelope(inv Invocation, res exec.Result) Envelope {
 		envelope.EffortReported = &effort
 	}
 	return envelope
+}
+
+// Resolve from the actual child environment, including a staged CODEX_HOME.
+// Do not read the parent process environment or another session's newest file.
+func codexRolloutHome(inv Invocation) string {
+	if inv.CodexHome != "" {
+		return inv.CodexHome
+	}
+	values := map[string]string{}
+	for _, entry := range inv.Env {
+		if key, value, ok := strings.Cut(entry, "="); ok {
+			values[key] = value
+		}
+	}
+	if home := values["CODEX_HOME"]; home != "" {
+		return home
+	}
+	if home := values["HOME"]; home != "" {
+		return filepath.Join(home, ".codex")
+	}
+	return ""
 }
