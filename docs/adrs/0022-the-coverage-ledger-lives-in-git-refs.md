@@ -8,8 +8,8 @@ authors:
   - "Carlos Boeing"
   - "muse-spark (muse)"
 related:
-  - docs/adrs/0002-the-pull-request-is-the-state.md
-  - docs/adrs/0006-three-app-permissions-and-nothing-else.md
+  - 0002-the-pull-request-is-the-state.md
+  - 0006-three-app-permissions-and-nothing-else.md
 ---
 
 # 0022 — The coverage ledger lives in git refs

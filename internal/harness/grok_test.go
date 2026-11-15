@@ -376,3 +376,24 @@ func TestGrokEndpointRefusalNamesTheDescriptorsHost(t *testing.T) {
 		t.Errorf("Action = %q", refusal.Action)
 	}
 }
+
+func TestGrokResolveCarriesSchemaInPrompt(t *testing.T) {
+	inv := invocation(t, "grok", true)
+	spec, err := grokAdapter(t).Spec(inv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, arg := range spec.Args {
+		if arg == "--prompt-file" {
+			raw, err := os.ReadFile(spec.Args[i+1])
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(raw), inv.Schema.Argument()) {
+				t.Fatal("resolve streams without --json-schema but its prompt omits the schema too")
+			}
+			return
+		}
+	}
+	t.Fatal("no prompt file")
+}

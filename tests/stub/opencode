@@ -245,6 +245,10 @@ while (( $# )); do
 done
 
 prompt="${*:-}"
+if [[ ! -t 0 ]]; then
+  piped_prompt="$(cat)"
+  if [[ -n "$piped_prompt" ]]; then prompt="${prompt}${prompt:+$'\n'}${piped_prompt}"; fi
+fi
 [[ -n "${CROSSREV_PROMPT_LOG:-}" ]] && printf '%s' "$prompt" >"$CROSSREV_PROMPT_LOG"
 
 # A reading leg holds `edit` and `bash` unless something takes them away, and a

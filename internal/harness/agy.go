@@ -43,6 +43,9 @@ func (a *Agy) NotInstalled() *Refusal {
 
 // Spec builds the child process (lib/adapters/agy.sh:36-94).
 func (a *Agy) Spec(inv Invocation) (exec.Spec, error) {
+	if err := ValidateEffort("agy", inv.Effort); err != nil {
+		return exec.Spec{}, err
+	}
 	if inv.Endpoint.Named() {
 		return exec.Spec{}, a.endpointRefusal(inv.Endpoint, endpointHostName, "")
 	}
@@ -83,27 +86,7 @@ func (a *Agy) Spec(inv Invocation) (exec.Spec, error) {
 	if wanted(inv.Effort) {
 		args = append(args, "--effort", inv.Effort)
 	}
-	prompt := inv.Prompt.Argument()
-	if !inv.Write {
-		// A review leg states outright that it has no shell command tool.
-		// A command attempt in headless mode is auto-denied, and the denial
-		// ends the run with an empty answer: measured on agy 1.2.12, a
-		// 152 KB review-style prompt answered `status: SUCCESS` with an
-		// empty `response`, `denied_actions` naming `command`, and the
-		// stderr line about headless mode being unable to prompt. The same
-		// prompt with this directive answers with no denied action and an
-		// empty stderr.
-		//
-		// The alternatives do not survive contact with this CLI. There is no
-		// tool flag to remove the command the way `--disallowedTools Bash`
-		// does on Claude Code; `--sandbox` confines the terminal but the
-		// ask-to-auto-deny path is unchanged, so the same prompt still
-		// answers empty with it; and a deny rule lives in the operator's
-		// global settings file, which is neither per-leg nor quarantined.
-		// The resolve leg is untouched: its prompt passes through byte for
-		// byte, keeping the Task 12 settlement exactly as it was.
-		prompt = reviewNoCommandsPrefix + prompt + "\n\n" + reviewNoCommandsSuffix
-	}
+	prompt := promptText("agy", inv)
 	args = append(args, "--print", prompt)
 
 	return a.spec(inv, args), nil

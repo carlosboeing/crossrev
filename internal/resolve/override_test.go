@@ -18,11 +18,11 @@ func TestSettingsModelOverrideWithoutAHarnessOverrideReplacesTheConfiguredModel(
 	e := setup(t)
 	e.git.staged = true
 	e.git.show = map[string][]byte{e.base.SHA() + ":.github/crossrev.yml": []byte(
-		"version: 2\nresolver:\n  harness: claude\n  model: configured-model\n  effort: configured-effort\n")}
+		"version: 2\nresolver:\n  harness: claude\n  model: configured-model\n  effort: medium\n")}
 	e.addReview(t, defaultFindings(), "issues-remain")
 
 	got := e.runReq(t, Request{PR: 42, Repo: e.slug, Trigger: TriggerHuman,
-		ModelOverride: "cli-model", EffortOverride: "cli-effort"})
+		ModelOverride: "cli-model", EffortOverride: "xhigh"})
 	if got.Err != nil {
 		t.Fatalf("Run: %v", got.Err)
 	}
@@ -30,14 +30,14 @@ func TestSettingsModelOverrideWithoutAHarnessOverrideReplacesTheConfiguredModel(
 		t.Fatalf("Outcome = %q, want complete", got.Outcome)
 	}
 
-	if !containsRun(got.Messages, []ui.Line{ui.Say("Resolver: claude, cli-model, cli-effort effort")}) {
+	if !containsRun(got.Messages, []ui.Line{ui.Say("Resolver: claude, cli-model, xhigh effort")}) {
 		t.Fatalf("the header does not name the CLI model and effort: %q", ui.Texts(got.Messages))
 	}
 	if model, _ := got.Marker.Model.Get(); model != "cli-model" {
 		t.Errorf("marker model = %q, want cli-model", model)
 	}
-	if effort, _ := got.Marker.Effort.Get(); effort != "cli-effort" {
-		t.Errorf("marker effort = %q, want cli-effort", effort)
+	if effort, _ := got.Marker.Effort.Get(); effort != "xhigh" {
+		t.Errorf("marker effort = %q, want xhigh", effort)
 	}
 }
 
@@ -77,8 +77,8 @@ func TestSettingsModelOverrideMatchesTheSameModelFromConfig(t *testing.T) {
 	}
 
 	fromConfig, modelConfig, effortConfig := run(t,
-		"version: 2\nresolver:\n  harness: claude\n  model: shared-model\n  effort: shared-effort\n", "", "")
-	fromFlag, modelFlag, effortFlag := run(t, "", "shared-model", "shared-effort")
+		"version: 2\nresolver:\n  harness: claude\n  model: shared-model\n  effort: high\n", "", "")
+	fromFlag, modelFlag, effortFlag := run(t, "", "shared-model", "high")
 
 	if fromConfig != fromFlag {
 		t.Errorf("header = %q from the flag, want the config's %q", fromFlag, fromConfig)
@@ -86,8 +86,8 @@ func TestSettingsModelOverrideMatchesTheSameModelFromConfig(t *testing.T) {
 	if modelFlag != modelConfig || modelConfig != "shared-model" {
 		t.Errorf("marker model = %q from the flag and %q from the config, want shared-model both", modelFlag, modelConfig)
 	}
-	if effortFlag != effortConfig || effortConfig != "shared-effort" {
-		t.Errorf("marker effort = %q from the flag and %q from the config, want shared-effort both", effortFlag, effortConfig)
+	if effortFlag != effortConfig || effortConfig != "high" {
+		t.Errorf("marker effort = %q from the flag and %q from the config, want high both", effortFlag, effortConfig)
 	}
 }
 
@@ -116,12 +116,12 @@ func TestTheRunLogRecordsTheResolvedModelAndEffort(t *testing.T) {
 		}
 		return string(body)
 	}
-	const cfg = "version: 2\nresolver:\n  harness: claude\n  model: configured-model\n  effort: configured-effort\n"
+	const cfg = "version: 2\nresolver:\n  harness: claude\n  model: configured-model\n  effort: medium\n"
 
-	if log := run(t, cfg, "cli-model", "cli-effort"); !strings.Contains(log, "settings harness=claude model=cli-model effort=cli-effort") {
+	if log := run(t, cfg, "cli-model", "xhigh"); !strings.Contains(log, "settings harness=claude model=cli-model effort=xhigh") {
 		t.Errorf("run.log does not record the CLI model and effort:\n%s", log)
 	}
-	if log := run(t, cfg, "", ""); !strings.Contains(log, "settings harness=claude model=configured-model effort=configured-effort") {
+	if log := run(t, cfg, "", ""); !strings.Contains(log, "settings harness=claude model=configured-model effort=medium") {
 		t.Errorf("run.log does not record the configured model and effort:\n%s", log)
 	}
 }

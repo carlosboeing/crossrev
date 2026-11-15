@@ -103,7 +103,7 @@ resolver:
 	want := "head ubuntu-latest ubuntu-latest\n" +
 		"sha 0123456789abcdef0123456789abcdef01234567 ref v9.9.9\n" +
 		"scope --repo acme/widget harness codex secret CROSSREV_CODEX_AUTH\n" +
-		"          curl -fsSL https://chatgpt.com/codex/install.sh | sh -s -- --release 0.159.2\n" +
+		"          curl -fsSL https://chatgpt.com/codex/install.sh | sh -s -- --release 0.169.0\n" +
 		"          curl -fsSL https://claude.ai/install.sh | bash -s 2.1.237\n" +
 		"  hosted only\n" +
 		"tail\n"
@@ -163,7 +163,7 @@ endpoints:
     base_url: https://api.moonshot.ai/anthropic
     token_env: KIMI_API_KEY
 `
-	codex := "          curl -fsSL https://chatgpt.com/codex/install.sh | sh -s -- --release 0.159.2"
+	codex := "          curl -fsSL https://chatgpt.com/codex/install.sh | sh -s -- --release 0.169.0"
 	claude := "          curl -fsSL https://claude.ai/install.sh | bash -s 2.1.237"
 
 	for _, row := range []struct {
@@ -331,6 +331,86 @@ resolver:
 	}
 	if !strings.Contains(got, "leg: auth-refresh") {
 		t.Errorf("the rendered token-refresh workflow names no leg:\n%s", got)
+	}
+}
+
+func TestRenderHarnessEnvBlock(t *testing.T) {
+	endpoints := `
+endpoints:
+  kimi:
+    base_url: https://api.moonshot.ai/anthropic
+    token_env: KIMI_API_KEY
+`
+	template := []byte("env:\n  CROSSREV_APP_SLUG: ${{ steps.app.outputs.app-slug }}\n  __HARNESS_ENV__\ntail\n")
+	line := func(name string) string {
+		return "          " + name + ": ${{ secrets." + name + " }}"
+	}
+
+	for _, row := range []struct {
+		name          string
+		configuration string
+		runner        string
+		want          []string
+	}{
+		{
+			name:          "two subscription harnesses export in leg order",
+			configuration: "version: 2\nreviewer:\n  harness: codex\nresolver:\n  harness: claude\n",
+			runner:        "github-hosted",
+			want:          []string{line("CROSSREV_CODEX_AUTH"), line("CLAUDE_CODE_OAUTH_TOKEN")},
+		},
+		{
+			name:          "opencode on both legs exports CROSSREV_OPENCODE_AUTH once",
+			configuration: "version: 2\nreviewer:\n  harness: opencode\nresolver:\n  harness: opencode\n",
+			runner:        "github-hosted",
+			want:          []string{line("CROSSREV_OPENCODE_AUTH")},
+		},
+		{
+			name:          "grok on a leg exports CROSSREV_GROK_AUTH",
+			configuration: "version: 2\nreviewer:\n  harness: opencode\nresolver:\n  harness: grok\n",
+			runner:        "github-hosted",
+			want:          []string{line("CROSSREV_OPENCODE_AUTH"), line("CROSSREV_GROK_AUTH")},
+		},
+		{
+			name:          "a leg on a named endpoint exports the endpoint's token_env",
+			configuration: "version: 2\nreviewer:\n  harness: opencode\nresolver:\n  harness: claude\n  endpoint: kimi\n" + endpoints,
+			runner:        "github-hosted",
+			want:          []string{line("CROSSREV_OPENCODE_AUTH"), line("KIMI_API_KEY")},
+		},
+		{
+			name:          "a self-hosted runner exports no subscription secret",
+			configuration: "version: 2\nreviewer:\n  harness: claude\nresolver:\n  harness: agy\n",
+			runner:        "self-hosted",
+			want:          nil,
+		},
+		{
+			name:          "an endpoint on a self-hosted runner still exports its token_env",
+			configuration: "version: 2\nreviewer:\n  harness: claude\n  endpoint: kimi\nresolver:\n  harness: agy\n" + endpoints,
+			runner:        "self-hosted",
+			want:          []string{line("KIMI_API_KEY")},
+		},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			got := rendering(t, row.configuration, row.runner, template)
+			for _, templateName := range []string{"review", "resolve"} {
+				full := rendering(t, row.configuration, row.runner, templateFor(t, templateName))
+				for _, expected := range row.want {
+					if !strings.Contains(full, expected) {
+						t.Errorf("%s workflow missing %q:\n%s", templateName, expected, full)
+					}
+				}
+				if strings.Contains(full, "__HARNESS_ENV__") {
+					t.Errorf("%s workflow left the placeholder unexpanded", templateName)
+				}
+			}
+			wantDoc := "env:\n  CROSSREV_APP_SLUG: ${{ steps.app.outputs.app-slug }}\n"
+			if len(row.want) > 0 {
+				wantDoc += strings.Join(row.want, "\n") + "\n"
+			}
+			wantDoc += "tail\n"
+			if got != wantDoc {
+				t.Errorf("rendered:\n%q\nwant:\n%q", got, wantDoc)
+			}
+		})
 	}
 }
 

@@ -287,59 +287,186 @@ func TestShippedGrokReviewIsRefused(t *testing.T) {
 	}
 }
 
-// A served review on an install outside the verified pin is refused with
-// review_isolation_unverified before any model child starts: the descriptor
-// pin says what the operator asked for, and the probe says what will
-// actually run. The probe is recorded apart from session children.
-func TestInstalledMismatchRefusesBeforeAnyModelChild(t *testing.T) {
+// A served review on an install outside the verified pin reviews supplied
+// instead of refusing (ADR 0030): the descriptor pin says what the operator
+// asked for, and the probe says what will actually run. The probe is
+// recorded apart from session children, the model child follows it, and
+// the degradation reaches the posted summary, the marker envelope and
+// the run log with its reason.
+func TestInstalledMismatchDegradesToSupplied(t *testing.T) {
 	e := newEnv(t)
 	writeRequiredHead(e, "a.go", "package a\n")
 	e.runner.versions["codex"] = "codex-cli 0.152.1"
 	req := e.request(t)
 	req.HarnessOverride = "codex"
+	var prompts []string
+	e.runner.onSpec = func(spec exec.Spec) {
+		prompts = append(prompts, specPrompt(spec))
+		for i, arg := range spec.Args {
+			if arg == "-o" && i+1 < len(spec.Args) {
+				if err := os.WriteFile(spec.Args[i+1], []byte(batchAnswerFor(t, []string{"a.go"})), 0o600); err != nil {
+					t.Errorf("writing the codex payload file: %v", err)
+				}
+			}
+		}
+		for _, arg := range spec.Args {
+			if strings.Contains(arg, "mcp_servers") {
+				t.Errorf("a degraded codex review names an MCP server; got %v", spec.Args)
+			}
+		}
+	}
 	e.runner.script = []exec.Result{
 		{ExitCode: 0, Stdout: claudeStdout(batchAnswerFor(t, []string{"a.go"}))},
 	}
 
 	got := runLeg(t, e, req)
-	if got.Err == nil {
-		t.Fatal("Run: want the installed mismatch refused")
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
 	}
-	if !strings.Contains(got.Err.Error(), "review_isolation_unverified") {
-		t.Errorf("err = %v, want the review_isolation_unverified name", got.Err)
-	}
-	if !strings.Contains(got.Err.Error(), "0.152.1") {
-		t.Errorf("err = %v, want the installed version named", got.Err)
-	}
-	if e.runner.calls != 0 {
-		t.Errorf("harness calls = %d, want 0 (refused before any model child)", e.runner.calls)
+	if e.runner.calls != 1 {
+		t.Errorf("harness calls = %d, want the one model child beside the probe", e.runner.calls)
 	}
 	if len(e.runner.probes) != 1 {
 		t.Errorf("probes = %d, want the one version probe apart from session children", len(e.runner.probes))
 	}
+	for _, p := range prompts {
+		if strings.Contains(p, "You have one file-reading tool") {
+			t.Errorf("a degraded prompt names the served tool")
+		}
+		if !strings.Contains(p, "You have no file-reading tool") {
+			t.Errorf("a degraded prompt carries no supplied reads block")
+		}
+	}
+	posted := strings.Join(append(append([]string{}, e.forge.created...), e.forge.edits...), "\n")
+	if !strings.Contains(posted, "Served reads degraded (unverified_version): this review judged the supplied content alone.") {
+		t.Errorf("no degrade line in the posted pass comment")
+	}
+	if len(got.Marker.Reads) == 0 {
+		t.Fatal("the marker carries no reads envelope")
+	}
+	envelope, err := prstate.DecodeReadsEnvelope(got.Marker.Reads)
+	if err != nil {
+		t.Fatalf("decoding the marker envelope: %v", err)
+	}
+	if envelope.DeclaredMode != "served" || envelope.EffectiveMode != "supplied" || envelope.Reason != "unverified_version" {
+		t.Errorf("envelope = %+v, want served-to-supplied with unverified_version", envelope)
+	}
+	if log := readRunLog(t, e); !strings.Contains(log, "reads unverified version") || !strings.Contains(log, "0.152.1") {
+		t.Errorf("run.log carries no unverified-version record:\n%s", log)
+	}
 }
 
-// A version probe that fails is refused the same way: fail closed, since an
-// install CrossRev cannot confirm is not one it drives.
-func TestFailedVersionProbeRefuses(t *testing.T) {
+// A version probe that fails degrades the same way: an install CrossRev
+// cannot confirm carries no verified block, so it reviews supplied
+// rather than refusing every review until the pin catches up.
+func TestFailedVersionProbeDegradesToSupplied(t *testing.T) {
 	e := newEnv(t)
 	writeRequiredHead(e, "a.go", "package a\n")
 	e.runner.probeFail = true
-	req := e.request(t)
-	req.HarnessOverride = "codex"
 	e.runner.script = []exec.Result{
 		{ExitCode: 0, Stdout: claudeStdout(batchAnswerFor(t, []string{"a.go"}))},
 	}
 
-	got := runLeg(t, e, req)
-	if got.Err == nil {
-		t.Fatal("Run: want the failed probe refused")
+	got := runLeg(t, e, e.request(t))
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
 	}
-	if !strings.Contains(got.Err.Error(), "review_isolation_unverified") {
-		t.Errorf("err = %v, want the review_isolation_unverified name", got.Err)
+	if e.runner.calls != 1 {
+		t.Errorf("harness calls = %d, want the one degraded model child", e.runner.calls)
+	}
+	if len(got.Marker.Reads) == 0 {
+		t.Fatal("the marker carries no reads envelope")
+	}
+	envelope, err := prstate.DecodeReadsEnvelope(got.Marker.Reads)
+	if err != nil {
+		t.Fatalf("decoding the marker envelope: %v", err)
+	}
+	if envelope.DeclaredMode != "served" || envelope.EffectiveMode != "supplied" || envelope.Reason != "unverified_version" {
+		t.Errorf("envelope = %+v, want served-to-supplied with unverified_version", envelope)
+	}
+}
+
+// An unverified served version halts where the policy says halt: the
+// call publishes nothing and the failure names reads_unavailable, with
+// the envelope-only marker entry recording the attempt.
+func TestUnverifiedVersionHaltsUnderHaltPolicy(t *testing.T) {
+	e := newEnv(t)
+	writeRequiredHead(e, "a.go", "package a\n")
+	e.cfg = mustConfig(t, "version: 2\npolicy:\n  on_reads_unavailable: halt\n")
+	e.runner.versions["claude"] = "9.9.9 (Claude Code)"
+	e.runner.script = []exec.Result{
+		{ExitCode: 0, Stdout: claudeStdout(batchAnswerFor(t, []string{"a.go"}))},
+	}
+
+	got := runLeg(t, e, e.request(t))
+	if got.Err == nil {
+		t.Fatal("Run: want the halt to stop the leg")
+	}
+	if !strings.Contains(got.Err.Error(), "reads_unavailable") {
+		t.Errorf("err = %v, want the reads_unavailable name", got.Err)
+	}
+	if !strings.Contains(got.Err.Error(), "unverified_version") {
+		t.Errorf("err = %v, want the unverified_version reason", got.Err)
 	}
 	if e.runner.calls != 0 {
-		t.Errorf("harness calls = %d, want 0 (refused before any model child)", e.runner.calls)
+		t.Errorf("harness calls = %d, want 0 (halted before any model child)", e.runner.calls)
+	}
+	if len(got.Marker.Reads) == 0 {
+		t.Fatal("the halted marker carries no reads envelope")
+	}
+	envelope, err := prstate.DecodeReadsEnvelope(got.Marker.Reads)
+	if err != nil {
+		t.Fatalf("decoding the halted marker envelope: %v", err)
+	}
+	if envelope.DeclaredMode != "served" || envelope.EffectiveMode != "served" || envelope.Reason != "unverified_version" {
+		t.Errorf("envelope = %+v, want a served unverified_version halt", envelope)
+	}
+}
+
+// A served review whose descriptor pin carries no verified block reviews
+// supplied too: the installed CLI matches the pin, but nobody verified
+// that version under this configuration.
+func TestUnverifiedPinDegradesToSupplied(t *testing.T) {
+	e := newEnv(t)
+	writeRequiredHead(e, "a.go", "package a\n")
+	raw := harness.DescriptorJSON()
+	var document map[string]any
+	if err := json.Unmarshal(raw, &document); err != nil {
+		t.Fatalf("decoding the descriptor: %v", err)
+	}
+	for _, entry := range document["harnesses"].([]any) {
+		if entry.(map[string]any)["name"] == "claude" {
+			install := entry.(map[string]any)["install"].(map[string]any)
+			install["pinned_version"] = "9.9.9"
+			install["command"] = "install 9.9.9"
+		}
+	}
+	mutated, _ := json.Marshal(document)
+	doc, err := harness.Load(mutated)
+	if err != nil {
+		t.Fatalf("loading the moved pin: %v", err)
+	}
+	e.doc = doc
+	// The probe answers the pin the descriptor names, the way newEnv
+	// seeded it from the shipped pin: keep it answering the moved pin.
+	e.runner.versions["claude"] = "9.9.9 (Claude Code)"
+	e.runner.script = []exec.Result{
+		{ExitCode: 0, Stdout: claudeStdout(batchAnswerFor(t, []string{"a.go"}))},
+	}
+
+	got := runLeg(t, e, e.request(t))
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
+	}
+	if e.runner.calls != 1 {
+		t.Errorf("harness calls = %d, want the one degraded model child", e.runner.calls)
+	}
+	envelope, err := prstate.DecodeReadsEnvelope(got.Marker.Reads)
+	if err != nil {
+		t.Fatalf("decoding the marker envelope: %v", err)
+	}
+	if envelope.DeclaredMode != "served" || envelope.EffectiveMode != "supplied" || envelope.Reason != "unverified_version" {
+		t.Errorf("envelope = %+v, want served-to-supplied with unverified_version", envelope)
 	}
 }
 
@@ -1155,8 +1282,8 @@ func TestRetryAfterAFailedArchiveChargesEachServedReadOnce(t *testing.T) {
 // An installed CLI between the pin and a later recorded run is not
 // verified for this served configuration: general compatibility history is
 // not isolation evidence, so a claude install at an unrecorded
-// intermediate version is refused before any model child starts.
-func TestInstalledIntermediateClaudeRefuses(t *testing.T) {
+// intermediate version reviews supplied rather than served.
+func TestInstalledIntermediateClaudeDegrades(t *testing.T) {
 	e := newEnv(t)
 	writeRequiredHead(e, "a.go", "package a\n")
 	e.runner.versions["claude"] = "2.1.250 (Claude Code)"
@@ -1165,27 +1292,31 @@ func TestInstalledIntermediateClaudeRefuses(t *testing.T) {
 	}
 
 	got := runLeg(t, e, e.request(t))
-	if got.Err == nil {
-		t.Fatal("Run: want the unrecorded intermediate install refused")
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
 	}
-	if !strings.Contains(got.Err.Error(), "review_isolation_unverified") {
-		t.Errorf("err = %v, want the review_isolation_unverified name", got.Err)
-	}
-	if !strings.Contains(got.Err.Error(), "2.1.250") {
-		t.Errorf("err = %v, want the installed version named", got.Err)
-	}
-	if e.runner.calls != 0 {
-		t.Errorf("harness calls = %d, want 0 (refused before any model child)", e.runner.calls)
+	if e.runner.calls != 1 {
+		t.Errorf("harness calls = %d, want the one degraded model child", e.runner.calls)
 	}
 	if len(e.runner.probes) != 1 {
 		t.Errorf("probes = %d, want the one version probe apart from session children", len(e.runner.probes))
+	}
+	envelope, err := prstate.DecodeReadsEnvelope(got.Marker.Reads)
+	if err != nil {
+		t.Fatalf("decoding the marker envelope: %v", err)
+	}
+	if envelope.EffectiveMode != "supplied" || envelope.Reason != "unverified_version" {
+		t.Errorf("envelope = %+v, want supplied with unverified_version", envelope)
+	}
+	if log := readRunLog(t, e); !strings.Contains(log, "2.1.250") {
+		t.Errorf("run.log carries no installed-version record:\n%s", log)
 	}
 }
 
 // A prerelease token is not the verified version either: isolation is an
 // exact version proven under this served configuration, never a numeric
-// span the token happens to fall in.
-func TestInstalledPrereleaseClaudeRefuses(t *testing.T) {
+// span the token happens to fall in, so it degrades rather than serving.
+func TestInstalledPrereleaseClaudeDegrades(t *testing.T) {
 	e := newEnv(t)
 	writeRequiredHead(e, "a.go", "package a\n")
 	e.runner.versions["claude"] = "2.1.237-beta (Claude Code)"
@@ -1194,49 +1325,66 @@ func TestInstalledPrereleaseClaudeRefuses(t *testing.T) {
 	}
 
 	got := runLeg(t, e, e.request(t))
-	if got.Err == nil {
-		t.Fatal("Run: want the prerelease install refused")
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
 	}
-	if !strings.Contains(got.Err.Error(), "review_isolation_unverified") {
-		t.Errorf("err = %v, want the review_isolation_unverified name", got.Err)
+	if e.runner.calls != 1 {
+		t.Errorf("harness calls = %d, want the one degraded model child", e.runner.calls)
 	}
-	if e.runner.calls != 0 {
-		t.Errorf("harness calls = %d, want 0 (refused before any model child)", e.runner.calls)
+	envelope, err := prstate.DecodeReadsEnvelope(got.Marker.Reads)
+	if err != nil {
+		t.Fatalf("decoding the marker envelope: %v", err)
+	}
+	if envelope.EffectiveMode != "supplied" || envelope.Reason != "unverified_version" {
+		t.Errorf("envelope = %+v, want supplied with unverified_version", envelope)
 	}
 }
 
-// A failed self-test degrades the read path but never the installed-version
-// gate: a served codex leg that falls back to supplied still refuses an
-// unverified installed CLI before any model child starts.
-func TestDegradedSelfTestKeepsTheInstalledGateOnCodex(t *testing.T) {
+// An unverified version degrades before the self-test: no served tool is
+// granted on the degraded call, so a broken tool beside an unverified
+// codex install still reviews supplied, with the version as the reason.
+func TestUnverifiedVersionDegradesBeforeTheSelfTestOnCodex(t *testing.T) {
 	e := newEnv(t)
 	writeRequiredHead(e, "a.go", "package a\n")
 	e.runner.serveErr = errors.New("connection refused")
 	e.runner.versions["codex"] = "codex-cli 0.152.1"
 	req := e.request(t)
 	req.HarnessOverride = "codex"
+	e.runner.onSpec = func(spec exec.Spec) {
+		for i, arg := range spec.Args {
+			if arg == "-o" && i+1 < len(spec.Args) {
+				if err := os.WriteFile(spec.Args[i+1], []byte(batchAnswerFor(t, []string{"a.go"})), 0o600); err != nil {
+					t.Errorf("writing the codex payload file: %v", err)
+				}
+			}
+		}
+	}
 	e.runner.script = []exec.Result{
 		{ExitCode: 0, Stdout: claudeStdout(batchAnswerFor(t, []string{"a.go"}))},
 	}
 
 	got := runLeg(t, e, req)
-	if got.Err == nil {
-		t.Fatal("Run: want the degraded install refused")
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
 	}
-	if !strings.Contains(got.Err.Error(), "review_isolation_unverified") {
-		t.Errorf("err = %v, want the review_isolation_unverified name", got.Err)
-	}
-	if e.runner.calls != 0 {
-		t.Errorf("harness calls = %d, want 0 (refused before any model child)", e.runner.calls)
+	if e.runner.calls != 1 {
+		t.Errorf("harness calls = %d, want the one degraded model child", e.runner.calls)
 	}
 	if len(e.runner.probes) != 1 {
 		t.Errorf("probes = %d, want the one version probe apart from session children", len(e.runner.probes))
 	}
+	envelope, err := prstate.DecodeReadsEnvelope(got.Marker.Reads)
+	if err != nil {
+		t.Fatalf("decoding the marker envelope: %v", err)
+	}
+	if envelope.EffectiveMode != "supplied" || envelope.Reason != "unverified_version" {
+		t.Errorf("envelope = %+v, want supplied with unverified_version", envelope)
+	}
 }
 
-// The same gate holds for claude: a failed self-test with an unverified
-// installed CLI refuses rather than running command-denial flags on it.
-func TestDegradedSelfTestKeepsTheInstalledGateOnClaude(t *testing.T) {
+// The same holds for claude: an unverified install degrades on the
+// version check, before any self-test of a tool it will not be granted.
+func TestUnverifiedVersionDegradesBeforeTheSelfTestOnClaude(t *testing.T) {
 	e := newEnv(t)
 	writeRequiredHead(e, "a.go", "package a\n")
 	e.runner.serveErr = errors.New("connection refused")
@@ -1246,14 +1394,18 @@ func TestDegradedSelfTestKeepsTheInstalledGateOnClaude(t *testing.T) {
 	}
 
 	got := runLeg(t, e, e.request(t))
-	if got.Err == nil {
-		t.Fatal("Run: want the degraded install refused")
+	if got.Err != nil {
+		t.Fatalf("Run: %v", got.Err)
 	}
-	if !strings.Contains(got.Err.Error(), "review_isolation_unverified") {
-		t.Errorf("err = %v, want the review_isolation_unverified name", got.Err)
+	if e.runner.calls != 1 {
+		t.Errorf("harness calls = %d, want the one degraded model child", e.runner.calls)
 	}
-	if e.runner.calls != 0 {
-		t.Errorf("harness calls = %d, want 0 (refused before any model child)", e.runner.calls)
+	envelope, err := prstate.DecodeReadsEnvelope(got.Marker.Reads)
+	if err != nil {
+		t.Fatalf("decoding the marker envelope: %v", err)
+	}
+	if envelope.EffectiveMode != "supplied" || envelope.Reason != "unverified_version" {
+		t.Errorf("envelope = %+v, want supplied with unverified_version", envelope)
 	}
 }
 

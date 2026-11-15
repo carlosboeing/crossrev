@@ -9,8 +9,8 @@ authors:
   - "Kimi (Kimi Code)"
   - "Gemini 3.8 Flash (Antigravity)"
 related:
-  - docs/adrs/0003-policy-read-from-the-base-revision.md
-  - docs/adrs/0022-the-coverage-ledger-lives-in-git-refs.md
+  - 0003-policy-read-from-the-base-revision.md
+  - 0022-the-coverage-ledger-lives-in-git-refs.md
 ---
 
 # 0023 — Generated files are recognised without configuration

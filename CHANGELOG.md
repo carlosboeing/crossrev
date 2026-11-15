@@ -4,7 +4,52 @@ All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepa
 
 ## [Unreleased]
 
+### Fixed
+
+- **The `opencode` install pin moves to 2.3.0, and 2.x stdout error events are reported.** `@opencode/cli@2.0.15` marks `20260805200742_import_legacy_credentials` complete without running it when bootstrapping a new `opencode.db`, so `$XDG_DATA_HOME/opencode/auth.json` is never imported on a fresh GitHub-hosted runner and every model call fails with `provider.no-route` (observed on `carlosboeing/crossrev-testbed` run `43678398297`). `@opencode/cli@2.3.0` runs that migration during schema bootstrap and imports the staged credential. Separately, `opencode` 2.x in `--format json` mode writes `"type":"error"` NDJSON events to stdout with stderr empty; the adapter now extracts `.error.message` instead of reporting `opencode exited 1 with no output on either stream`, and classifies `provider.auth` or status `401` events as credential rejections.
+
+## [0.12.1] — 2026-11-15
+
+### Fixed
+
+- **`crossrev init` exports the credentials the pairing actually uses.** `templates/crossrev-review.yml` and `templates/crossrev-resolve.yml` carried hardcoded `CLAUDE_CODE_OAUTH_TOKEN` and `CROSSREV_CODEX_AUTH` lines, so a hosted pairing naming `opencode`, `grok` or an endpoint wrote a workflow that installed the CLI, demanded the secret in the plan, and never exported it to the leg. The env block is now rendered from the pairing's credential descriptors and endpoint `token_env` entries — the same rules `requiredSecrets` reads — so `CROSSREV_OPENCODE_AUTH`, `CROSSREV_GROK_AUTH` and endpoint token variables reach the action, while a self-hosted subscription harness still exports none.
+
+## [0.12.0] — 2026-11-15
+
+### Fixed
+
+- **OpenCode prompts use stdin on both supported CLI majors.** Large review and resolve prompts no longer hit CrossRev's 120 KiB argv cap. Budgeting includes adapter instructions and schema text across all harnesses, and streaming Grok resolves receive their output schema in the prompt with one retry for a schema mismatch.
+- **Unsupported effort fails before model execution.** Grok, Antigravity and Claude calls validate CLI effort choices, including inherited values after a harness override or fallback. Codex model-defined effort and OpenCode provider variants remain unchanged; CrossRev does not translate effort levels.
+
 ### Changed
+
+- **An unverified harness version degrades a review instead of refusing it.** A served review (Codex, Claude Code) whose descriptor pin carries no verified command block, whose installed CLI is not the exact verified version, or whose version probe reports no version now reviews supplied — the prompt carries everything and no read tool is granted — instead of refusing with `review_isolation_unverified`. The degradation is recorded as `unverified_version` in the pass comment, the marker's reads envelope and the run log, and `.policy.on_reads_unavailable` governs it: `degrade` (the default) runs supplied, `halt` stops the leg with `reads_unavailable`. A verified version reviews served exactly as before, grok reviews stay refused (grok already reviews supplied, so it has no served path to degrade from), every resolve leg is unaffected, and no `--allow-unverified` flag is added. `crossrev doctor` now names an unverified served pin as degrading to supplied. See [ADR 0030](docs/adrs/0030-unverified-harness-versions-review-supplied.md), which supersedes the exact-version gate in [ADR 0027](docs/adrs/0027-review-legs-read-only-through-the-served-tool.md).
+
+## [0.11.1] — 2026-11-15
+
+### Fixed
+
+- **A review retry tells the reviewer what was refused.** A review answer that contradicts what it was given earns one more attempt, and that attempt received the first prompt again, unchanged. A reviewer that cited one evidence span across two neighbouring hunks — lines 260-301 against supplied ranges 249-278 and 284-308 — was refused, asked the identical question, cited 262-301 and halted the pass. The retry's prompt now ends with the refusal reason. The review skill and the batch prompt also state the rule the check enforces: one evidence span sits inside one supplied range, and a judgement resting on two hunks names two evidence items. `run.log` gains a `refused` line per refused answer with its kind and reason; it recorded the second attempt and not why there was one. The resolve leg's retry is unchanged.
+
+- **Review and resolve telemetry includes whole-leg usage.** OpenCode 2.x session exports contribute separate reasoning tokens to inclusive output, recover model identity from assistant messages, and retain the harness's cost estimate. Codex recovers model and effort from its session record using the actual child environment, including staged credentials. Independent batches and retries sum cost only when its provenance is compatible; missing counts mark usage partial and suppress a complete cost estimate. Resolver table estimates use the resolved model and billing descriptor.
+- **Run details explain token and cost measurements.** Tokens includes cache traffic and reasoning once; Cached remains the cache-read/write subset. New records explain missing cost and known coverage gaps, while numeric usage events retain normalized buckets, source and normalization version without model payloads. Model and effort fall back to requested values when available; no defaults are forced.
+- **Bundled vendor token rates include current Codex models.** Refresh the pinned extract, including its model input windows, and refuse estimates for cache writes with unknown retention when rates differ. The refresh downloads rates from the revision recorded in the extract.
+
+## [0.11.0] — 2026-11-15
+
+### Added
+
+- **`crossrev stop --pr N` stops a local run and clears its lock.** Stopping a local run meant deleting `.git/crossrev/pr-<n>.lock` by hand. The stop reads the lock, sends a live holder `SIGTERM` and waits for its orderly unwind (`SIGKILL` only after a five-second grace), clears a holder that is already dead without signalling anything, and refuses a lock naming another host — or one whose live pid started after the lock was written, which is a recycled pid rather than the run — with the lock left in place. Acquisition and lock removal share a guard, so a stop cannot delete a lock a new run took over while it was looking. The refusal a second local run gets now names the command.
+
+### Fixed
+
+- **Codex reviews run on Codex 0.169.0.** The served command block pin moves from 0.159.2 to 0.169.0, in the descriptor, its embedded copies and the verified-block table together. The block was probed on the installed 0.169.0 before the move — under the served flags a directed shell and file-read attempt produced no command event and left its canary file uncreated — and a live served review on the new pin is the release proof. Installs on 0.159.2 now refuse the review leg as unverified, as any superseded pin does; the resolve leg is unaffected.
+- **A zombie local run no longer holds its pull request forever.** The lock's liveness probe was `kill -0` alone, and a process that had terminated but was never reaped by its long-lived parent still answers that probe as alive, so the dead-holder takeover never ran and every later `crossrev --pr N`, `review` or `resolve` was refused quoting the dead pid. The probe now reads the process state beside the signal — `Z` in `/proc/<pid>/stat` on Linux, the `SZOMB` entry in the Darwin process table — and answers not alive for a zombie. `crossrev status` asked the same question with a second copy of the old probe and could report the dead leg as still running; it now shares the one corrected probe, so a zombie leg reads as gone.
+- **Your own config file now sets your defaults.** `~/.config/crossrev/config.yml` was merged for its endpoints alone; every other key in it was read for its version and ignored, so a personal pairing or model choice had nowhere to live and `crossrev config show` printed the shipped defaults in every repository no matter what the file said. The layer order is now shipped defaults, the operator file over them, and the repository file over those, so the models a person runs across every project are set once and a repository narrows them only where it declares a value. Endpoint definitions keep their older rule on top: merged by name, the operator file winning. Repository policy for a leg still comes from the base revision and still wins wherever it declares a value, and a hosted runner has no operator file, so automated runs are unchanged. See [ADR 0029](docs/adrs/0029-user-config-overrides-shipped-defaults.md).
+
+### Changed
+
+- **The roadmap records how unverified harness versions stop halting reviews.** Two items join `docs/ROADMAP.md` from the 0.169.0 refusal: degrading an unverified version's review to supplied instead of refusing it ([#346](https://github.com/carlosboeing/crossrev/issues/346)), and automating pin verification on a schedule so the verified set grows with vendor releases ([#347](https://github.com/carlosboeing/crossrev/issues/347)).
 
 - **The pre-pull-request checks are one list.** `CONTRIBUTING.md` now lists the five checks CI runs — the suite, `go test`, `lint.sh`, the parity ledger check and the changelog gate — and the README, the pull request template and the agent brief point to it instead of keeping their own shorter copies. `scripts/check-parity-coverage.sh` drops its `--native` mode, which refused shell suites that sourced `lib/*.sh` or ran `bin/crossrev`; both paths were removed with the Bash implementation, so a suite reaching for them already fails on its own.
 

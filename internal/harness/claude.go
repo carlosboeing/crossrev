@@ -32,6 +32,9 @@ func (a *Claude) NotInstalled() *Refusal {
 
 // Spec builds the child process (lib/adapters/claude.sh:23-94).
 func (a *Claude) Spec(inv Invocation) (exec.Spec, error) {
+	if err := ValidateEffort("claude", inv.Effort); err != nil {
+		return exec.Spec{}, err
+	}
 	// A served review leg reads only through CrossRev's tool: the MCP
 	// config naming the read server, an empty built-in tool list, the
 	// served allowlist, and the stream-json output the tripwire and the

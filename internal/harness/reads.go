@@ -62,17 +62,18 @@ func ParseReadMode(text string) (ReadMode, bool) {
 func readModeNames() string { return "served, file_tool or supplied" }
 
 // verifiedCommandBlocks is the served-or-tripwire command block verified live
-// on each pinned version, or the pin moves. A harness whose block is
-// unverified never reviews: the review leg is refused with
-// review_isolation_unverified before any child starts, while its resolve leg
-// is unaffected. agy and opencode carry no entry: agy emits no tool record
+// on each pinned version, or the pin moves. A served harness whose block is
+// unverified reviews supplied instead of served (ADR 0030): the review leg
+// degrades with unverified_version recorded, while its resolve leg is
+// unaffected. agy and opencode carry no entry: agy emits no tool record
 // and opencode is denied through its isolation config, so there is no
 // command block to verify and doctor names the gap instead. grok carries no
 // entry either: its empty tools allowlist left the command tool callable on
 // the pinned version, so every grok review is refused until a block is
-// verified and recorded again.
+// verified and recorded again — grok already reviews supplied, so there is
+// no served path to degrade from.
 var verifiedCommandBlocks = map[string]string{
-	"codex":  "0.159.2",
+	"codex":  "0.169.0",
 	"claude": "2.1.237",
 }
 
@@ -85,25 +86,19 @@ func IsolationVerified(name, pinnedVersion string) bool {
 }
 
 // ReviewIsolationRefusal refuses a review leg whose read path cannot be
-// verified: a served block (codex, claude) or a tripwire block (grok) the
-// verified table does not cover at this pin. Supplied harnesses with no
-// command block (agy, opencode) and file_tool legs, which resolve to
-// supplied, are never refused here.
+// verified and cannot degrade: a tripwire block (grok) the verified table
+// does not cover at this pin. A served block (codex, claude) is never
+// refused here: an unverified served version degrades to supplied in the
+// leg, where the probe, the prompt rewrite and the reads envelope live
+// (UnverifiedServedVersion). Supplied harnesses with no command block
+// (agy, opencode) and file_tool legs, which resolve to supplied, are
+// never refused here either.
 func ReviewIsolationRefusal(doc Document, name string) *Refusal {
 	entry, found := doc.For(name)
 	if !found {
 		return nil
 	}
-	switch entry.ReadMode() {
-	case ReadModeServed:
-		if IsolationVerified(name, entry.Install.PinnedVersion) {
-			return nil
-		}
-	case ReadModeSupplied:
-		if name != "grok" || IsolationVerified(name, entry.Install.PinnedVersion) {
-			return nil
-		}
-	default:
+	if entry.ReadMode() != ReadModeSupplied || name != "grok" || IsolationVerified(name, entry.Install.PinnedVersion) {
 		return nil
 	}
 	return &Refusal{
@@ -113,21 +108,58 @@ func ReviewIsolationRefusal(doc Document, name string) *Refusal {
 	}
 }
 
+// UnverifiedServedVersion reports whether a served review leg's command
+// block is unverified for the CLI that will actually run, and names why:
+// the pin carries no verified block, the probe reports no version, or the
+// installed version is not the exact verified one. The caller degrades
+// the leg to supplied on a true answer and reviews served on a false
+// one. An adapter with no version probe carries no installed version to
+// check past the pin, so a verified pin answers false. General
+// compatibility history is not isolation evidence: an intermediate
+// version between two recorded runs, or a prerelease token over a
+// verified one, was never verified under this served configuration and
+// degrades the way an unknown version does.
+func UnverifiedServedVersion(ctx context.Context, runner exec.Runner, adapter Adapter, name, pin string, inv Invocation) (string, bool) {
+	if !IsolationVerified(name, pin) {
+		if pin == "" {
+			return fmt.Sprintf("the %s command block carries no verified pin", name), true
+		}
+		return fmt.Sprintf("the %s command block carries no verified pin %s", name, pin), true
+	}
+	pinned, ok := adapter.(VersionPinned)
+	if !ok {
+		return "", false
+	}
+	res := runner.Run(ctx, pinned.VersionProbe(inv))
+	token := ""
+	if res.Err == nil && res.ExitCode == 0 {
+		token = versionToken.FindString(string(res.Stdout))
+	}
+	if token == "" {
+		return fmt.Sprintf("the installed %s CLI reported no version, so the verified command block cannot be confirmed", name), true
+	}
+	want, _ := verifiedCommandBlocks[name]
+	if normalizeIsolationToken(token) != want {
+		return fmt.Sprintf("the installed %s CLI reports version %s, which carries no verified command block for this configuration", name, token), true
+	}
+	return "", false
+}
+
 // InstalledIsolationRefusal checks the CLI that will actually run against
-// the verified command block: the descriptor pin says what the operator
-// asked for, and a local install at a different version passes that gate
-// while running unverified flags. The probe is `<binary> --version`, which
-// starts no model and costs no call. An install that is not the verified
-// version, a probe that fails, or a banner naming no version is refused
-// with review_isolation_unverified before any child starts. Adapters with
-// no probe — supplied harnesses with no command block — are unaffected.
+// the verified command block, for the one review path that still refuses:
+// a supplied tripwire leg (grok) has no served path to degrade from. The
+// probe is `<binary> --version`, which starts no model and costs no call.
+// An install that is not the verified version, a probe that fails, or a
+// banner naming no version is refused with review_isolation_unverified
+// before any child starts. Served legs call UnverifiedServedVersion
+// instead and degrade to supplied. Adapters with no probe — supplied
+// harnesses with no command block — are unaffected.
 //
 // Both halves have to hold: the pin's block verified (grok carries no entry
 // at any pin) and the installed version exactly the verified one. General
 // compatibility history is not isolation evidence: an intermediate version
 // between two recorded runs, or a prerelease token over a verified one,
-// was never verified under this served-or-tripwire configuration and is
-// refused the way an unknown version is.
+// was never verified under this served-or-tripwire configuration.
 func InstalledIsolationRefusal(ctx context.Context, runner exec.Runner, adapter Adapter, name, pin string, inv Invocation) *Refusal {
 	pinned, ok := adapter.(VersionPinned)
 	if !ok {

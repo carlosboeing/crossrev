@@ -228,13 +228,13 @@ func (p Prices) Price(u Usage, model string) Usage {
 		}
 	}
 
-	// An unsplit write cannot be priced where the two TTLs cost differently,
+	// An unsplit write cannot be priced where retention periods cost differently,
 	// because nothing says which one it was. The test is `has(…)` and then a
-	// value comparison, so an entry listing only the standard rate — gpt-5.6 is
-	// one — prices its unsplit writes at that rate rather than refusing.
+	// value comparison, so an entry listing only the standard rate prices its
+	// unsplit writes at that rate rather than refusing.
 	if u.CacheWriteUnsplit > 0 {
-		if above, declared := rates.lookup("cache_creation_input_token_cost_above_1hr"); declared {
-			if !sameValue(above, rates.member("cache_creation_input_token_cost")) {
+		for _, key := range []string{"cache_creation_input_token_cost_above_1hr", "cache_creation_input_token_cost_above_12hr"} {
+			if above, declared := rates.lookup(key); declared && !sameValue(above, rates.member("cache_creation_input_token_cost")) {
 				return clearCost(u)
 			}
 		}
@@ -379,16 +379,42 @@ func (p Prices) Attach(u Usage, doc Document, harness, endpoint, model string, a
 	if billing == BillingEndpoint {
 		u = clearCost(u)
 		u.Billing = &billing
+		u.CostUnavailable = "endpoint_rates_unavailable"
+		return u
+	}
+	u.Billing = optionalString(billing)
+	if slices.Contains(u.Omissions, "missing_usage") {
+		u = clearCost(u)
+		u.CostUnavailable = "partial_usage"
 		return u
 	}
 	if u.CostUSD != nil {
-		source := costSourceHarness
-		u.CostSource, u.PriceTable = &source, nil
+		u.CostUnavailable = ""
+		if u.CostSource == nil {
+			source := costSourceHarness
+			u.CostSource = &source
+		}
 		u.Billing = optionalString(billing)
 		return u
 	}
+	if len(u.Models) > 1 {
+		u = clearCost(u)
+		u.CostUnavailable = "multiple_models"
+		return u
+	}
 	u = p.Price(u, model)
-	u.Billing = optionalString(billing)
+	if u.CostUSD == nil {
+		switch {
+		case model == "":
+			u.CostUnavailable = "model_unavailable"
+		case p.Key(model) == "":
+			u.CostUnavailable = "model_rates_unavailable"
+		default:
+			u.CostUnavailable = "rates_ambiguous"
+		}
+	} else {
+		u.CostUnavailable = ""
+	}
 	return u
 }
 
