@@ -2,6 +2,12 @@
 
 All notable changes to CrossRev. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **An unverified harness version degrades a review instead of refusing it.** A served review (Codex, Claude Code) whose descriptor pin carries no verified command block, whose installed CLI is not the exact verified version, or whose version probe reports no version now reviews supplied — the prompt carries everything and no read tool is granted — instead of refusing with `review_isolation_unverified`. The degradation is recorded as `unverified_version` in the pass comment, the marker's reads envelope and the run log, and `.policy.on_reads_unavailable` governs it: `degrade` (the default) runs supplied, `halt` stops the leg with `reads_unavailable`. A verified version reviews served exactly as before, grok reviews stay refused (grok already reviews supplied, so it has no served path to degrade from), every resolve leg is unaffected, and no `--allow-unverified` flag is added. `crossrev doctor` now names an unverified served pin as degrading to supplied. See [ADR 0030](docs/adrs/0030-unverified-harness-versions-review-supplied.md), which supersedes the exact-version gate in [ADR 0027](docs/adrs/0027-review-legs-read-only-through-the-served-tool.md).
+
 ## [0.11.0] — 2026-11-15
 
 ### Added

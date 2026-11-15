@@ -7,9 +7,10 @@ import (
 // ReportReadModes is the review-reads half of `crossrev doctor`: each
 // harness's read mode, whether its served-or-tripwire command block is
 // verified at the shipped pin, and where the tripwire cannot run. It never
-// fails the command: an unverified block refuses the review leg at runtime
-// with review_isolation_unverified, and doctor's job here is to name it
-// before that happens.
+// fails the command: an unverified served block degrades the review leg
+// to supplied at runtime (ADR 0030), an unverified grok tripwire still
+// refuses it with review_isolation_unverified, and doctor's job here is
+// to name both before that happens.
 func (c *Checker) ReportReadModes() {
 	io := c.io()
 	io.Section("Review reads")
@@ -28,7 +29,7 @@ func readModeLine(name string, entry harness.Descriptor) string {
 		if harness.IsolationVerified(name, entry.Install.PinnedVersion) {
 			return name + " — served reads, command block verified at pin " + entry.Install.PinnedVersion
 		}
-		return name + " — served reads, command block UNVERIFIED at pin " + entry.Install.PinnedVersion + " (review_isolation_unverified)"
+		return name + " — served reads, command block UNVERIFIED at pin " + entry.Install.PinnedVersion + ": reviews degrade to supplied (unverified_version)"
 	case harness.ReadModeFileTool:
 		return name + " — file_tool reads, unwired: reviews run supplied until slice 9"
 	default:
