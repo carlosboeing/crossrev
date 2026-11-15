@@ -565,6 +565,33 @@ func TestOpencodeClassifiesACredentialRejection(t *testing.T) {
 	if strings.Contains(deref(generic.Error), "rejected its credential") {
 		t.Errorf("a provider overload was reported as a credential failure: %q", deref(generic.Error))
 	}
+
+	// opencode 2.x in `--format json` mode writes structured error events to
+	// stdout with stderr empty: `provider.auth` / status 401 classifies as a
+	// credential rejection, and other error events (`provider.no-route`,
+	// `provider.rate-limit`) surface their `.error.message` instead of "with no
+	// output on either stream".
+	auth2x := adapter.Envelope(inv, exec.Result{
+		ExitCode: 1,
+		Stdout:   []byte(`{"type":"error","timestamp":1794718575772,"sessionID":"ses_1","error":{"type":"provider.auth","message":"This API key has expired.","status":401}}` + "\n"),
+	})
+	if auth2x.OK {
+		t.Fatal("a 2.x provider.auth event is a failure")
+	}
+	if !strings.HasPrefix(deref(auth2x.Error), "opencode rejected its credential.") || !strings.Contains(deref(auth2x.Error), "This API key has expired.") {
+		t.Errorf("2.x auth error = %q, want credential prefix plus event message", deref(auth2x.Error))
+	}
+
+	noRoute2x := adapter.Envelope(inv, exec.Result{
+		ExitCode: 1,
+		Stdout:   []byte(`{"type":"error","timestamp":1794718171056,"sessionID":"ses_2","error":{"type":"provider.no-route","message":"Model unavailable: opencode-go/deepseek-v4.1-flash"}}` + "\n"),
+	})
+	if noRoute2x.OK {
+		t.Fatal("a 2.x provider.no-route event is a failure")
+	}
+	if got, want := deref(noRoute2x.Error), "Model unavailable: opencode-go/deepseek-v4.1-flash"; got != want {
+		t.Errorf("2.x no-route error = %q, want %q", got, want)
+	}
 }
 
 // No text event at all is a different fault from a malformed answer: the run
@@ -790,7 +817,7 @@ func TestOpencodeRefusesAnInstallPastTheSupportedMajor(t *testing.T) {
 			if !strings.Contains(refusal.Action, "issues/272") {
 				t.Errorf("Action does not point at issue #272: %q", refusal.Action)
 			}
-			if !strings.Contains(refusal.Action, "@opencode/cli@2.0.15") {
+			if !strings.Contains(refusal.Action, "@opencode/cli@2.3.0") {
 				t.Errorf("Action does not name the supported install: %q", refusal.Action)
 			}
 		})
