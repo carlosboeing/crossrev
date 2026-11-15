@@ -30,7 +30,7 @@ func TestReportReadModesNamesModesAndGaps(t *testing.T) {
 	}
 }
 
-// A moved pin reads as unverified in the report, before the leg refuses it.
+// A moved pin reads as unverified in the report, before the leg degrades it.
 func TestReportReadModesNamesAnUnverifiedPin(t *testing.T) {
 	raw := harness.DescriptorJSON()
 	var root map[string]any
@@ -52,7 +52,7 @@ func TestReportReadModesNamesAnUnverifiedPin(t *testing.T) {
 	io, buf := capture()
 	c := &preflight.Checker{IO: io, Harness: doc}
 	c.ReportReadModes()
-	if !strings.Contains(buf.String(), "codex — served reads, command block UNVERIFIED at pin 9.9.9 (review_isolation_unverified)") {
+	if !strings.Contains(buf.String(), "codex — served reads, command block UNVERIFIED at pin 9.9.9: reviews degrade to supplied (unverified_version)") {
 		t.Errorf("report names no unverified codex block:\n%s", buf.String())
 	}
 }
