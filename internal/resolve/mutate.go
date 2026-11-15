@@ -336,7 +336,11 @@ func (l *Leg) attachPayload(marker prstate.Marker, got Result) prstate.Marker {
 	if got.Envelope.Usage != nil {
 		usage := *got.Envelope.Usage
 		if table, err := harness.PriceTable(); err == nil {
-			usage = table.Attach(usage, harness.Document{}, got.Envelope.Harness, "", "", false)
+			model := marker.Model.Value()
+			if got.Envelope.ModelReported != nil && *got.Envelope.ModelReported != "" {
+				model = *got.Envelope.ModelReported
+			}
+			usage = table.Attach(usage, descriptor, marker.Harness.Value(), marker.Endpoint.Value(), model, lookupEnv(l.Env, "ANTHROPIC_API_KEY") != "")
 		}
 		b, _ := json.Marshal(usage)
 		marker.Usage = b

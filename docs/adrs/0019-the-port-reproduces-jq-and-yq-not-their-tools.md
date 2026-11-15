@@ -8,7 +8,7 @@ authors:
   - "Carlos Boeing"
   - "Claude Opus 5 (Claude Code)"
 related:
-  - docs/adrs/0018-go-native-parity-contract.md
+  - 0018-go-native-parity-contract.md
 ---
 
 # 0019 — The port reproduces what jq and yq print, not the tools themselves

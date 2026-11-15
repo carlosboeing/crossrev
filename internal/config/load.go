@@ -70,8 +70,9 @@ type Config struct {
 	Repo *Object
 	// Operator is the operator file layer, as decoded.
 	Operator *Object
-	// Merged is the defaults, the repository layer over them, and the
-	// operator file's endpoints over those.
+	// Merged is the shipped defaults, the operator layer over them, and
+	// the repository layer over those — with one exception: endpoints
+	// merge by name with the operator file winning, as they always have.
 	Merged *Object
 
 	show ShowFile
@@ -125,11 +126,18 @@ func Load(ctx context.Context, base core.Revision, show ShowFile) (*Config, erro
 		return nil, err
 	}
 
-	// Repository policy over defaults; then endpoints merged by name with the
-	// operator file winning, so a repository can declare a public endpoint
-	// while you point the same name at your own instance locally without
-	// touching the repository (lib/config.sh:174-184).
-	merged := deepMerge(Defaults(), repoLayer)
+	// The operator file is the user's own defaults over the shipped ones,
+	// and repository policy is over those: what a person prefers across
+	// every project, narrowed by what one project declares. The repository
+	// layer still comes from the base revision for a leg, so a pull
+	// request cannot reach it, and an operator file on a hosted runner —
+	// where nobody's home directory is staged — simply is not there.
+	//
+	// Endpoints keep their older rule on top of that order: merged by name
+	// with the operator file winning, so a repository can declare a public
+	// endpoint while you point the same name at your own instance locally
+	// without touching the repository (lib/config.sh:174-184).
+	merged := deepMerge(deepMerge(Defaults(), operatorLayer), repoLayer)
 	repoEndpoints, err := endpointsOf(merged, "endpoints")
 	if err != nil {
 		return nil, err

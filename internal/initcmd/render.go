@@ -11,7 +11,10 @@ import (
 
 // The placeholder the install block replaces (lib/init.sh:741), and the two
 // fence markers (lib/init.sh:754-755, documented at :662-664).
-const installPlaceholder = "__HARNESS_INSTALL__"
+const (
+	installPlaceholder = "__HARNESS_INSTALL__"
+	envPlaceholder     = "__HARNESS_ENV__"
+)
 
 var (
 	fenceOpen  = regexp.MustCompile(`^[[:space:]]*# crossrev:only `)
@@ -69,6 +72,7 @@ func (p Plan) RenderWorkflow(req Request, template []byte) []byte {
 	}
 
 	rendered := expandInstall(string(template), harnessInstallLine(req.Harness, p.Config))
+	rendered = expandEnv(rendered, harnessEnvBlock(req, p.Config, p.Runner))
 	rendered = strings.NewReplacer(
 		"__SOURCE_SHA__", p.SourceSHA,
 		"__SOURCE_REF__", p.SourceRef,
@@ -99,6 +103,25 @@ func expandInstall(document, install string) string {
 			continue
 		}
 		out = append(out, strings.Split(install, "\n")...)
+	}
+	return join(out)
+}
+
+// expandEnv replaces the whole placeholder line with the credential env block.
+// An empty block leaves nothing at all rather than a blank line, so a
+// self-hosted workflow gains no stray whitespace after `CROSSREV_APP_SLUG`.
+func expandEnv(document, env string) string {
+	lines := records(document)
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if !strings.Contains(line, envPlaceholder) {
+			out = append(out, line)
+			continue
+		}
+		if env == "" {
+			continue
+		}
+		out = append(out, strings.Split(env, "\n")...)
 	}
 	return join(out)
 }
@@ -167,6 +190,49 @@ func harnessInstallLine(doc harness.Document, cfg *config.Config) string {
 			continue
 		}
 		out.WriteString("          " + entry.Install.Command + "\n")
+	}
+	return strings.TrimSuffix(out.String(), "\n")
+}
+
+// harnessEnvBlock is the `NAME: ${{ secrets.NAME }}` lines the leg step needs
+// to pass this pairing's credentials into the action.
+//
+// Derived from the same pairing and endpoint rules `requiredSecrets` reads, so
+// a secret `init` asks the operator to set is a secret the rendered workflow
+// actually exports. A self-hosted subscription harness contributes nothing —
+// its login is already on disk — while an endpoint contributes its `token_env`
+// on any runner.
+func harnessEnvBlock(req Request, cfg *config.Config, runner string) string {
+	seen := map[string]bool{}
+	var out strings.Builder
+	add := func(name string) {
+		if name == "" || seen[name] {
+			return
+		}
+		seen[name] = true
+		out.WriteString("          " + name + ": ${{ secrets." + name + " }}\n")
+	}
+	for _, role := range core.Roles() {
+		name := cfg.Get("." + string(role) + ".harness")
+		endpoint := cfg.Get("." + string(role) + ".endpoint")
+		if named(endpoint) {
+			resolved, err := cfg.Endpoint(endpoint)
+			if err != nil {
+				continue
+			}
+			add(resolved.TokenEnv)
+			continue
+		}
+		if runner == "self-hosted" {
+			continue
+		}
+		secret, found := req.Pairing.Secret(name)
+		if !found {
+			if entry, ok := req.Harness.For(name); ok {
+				secret = entry.Credential.Secret
+			}
+		}
+		add(secret)
 	}
 	return strings.TrimSuffix(out.String(), "\n")
 }

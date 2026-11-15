@@ -4,8 +4,7 @@
 // the fields. `total` is a defined identity rather than a vendor number, so it
 // means the same thing on every row: input_fresh + cache_read + the three
 // cache-write counts + output. `reasoning` is persisted beside that total and
-// never added to it, because every harness that reports reasoning nests it
-// inside output already (lib/usage.sh:1-9).
+// never added again. Adapters fold separate reasoning into output first.
 //
 // Two sides write the record. An adapter fills buckets and, where its harness
 // supplies one, the harness's own cost. The orchestrator attaches billing mode
@@ -68,13 +67,18 @@ type Usage struct {
 	PriceTable        *string  `json:"price_table"`
 	Billing           *string  `json:"billing"`
 	Models            []Model  `json:"models"`
-	// Derived names the buckets that are a subtraction rather than a reported
-	// figure. Codex is the only harness with one (lib/usage.sh:117-119).
+	// Derived names buckets computed from upstream fields rather than copied.
 	Derived []string `json:"derived"`
 	// Total is the identity, absent until WithTotal has run. usage_zero prints
 	// no `total` key and usage_with_total adds one, and the two are frozen
 	// separately in the oracle as `zero` and `zero_with_total`.
 	Total *int64 `json:"total,omitempty"`
+	// Optional fields preserve compatibility with historical usage records.
+	CountsUnavailable bool     `json:"counts_unavailable,omitempty"`
+	Normalization     int      `json:"normalization_version,omitempty"`
+	Source            string   `json:"source,omitempty"`
+	Omissions         []string `json:"omissions,omitempty"`
+	CostUnavailable   string   `json:"cost_unavailable,omitempty"`
 }
 
 // Zero is usage_zero (lib/usage.sh:31-36).
@@ -83,6 +87,10 @@ func Zero() Usage { return Usage{Derived: []string{}} }
 // WithTotal is usage_with_total (lib/usage.sh:38-42): the six buckets summed
 // into `total`, with reasoning deliberately left out.
 func (u Usage) WithTotal() Usage {
+	if u.CountsUnavailable {
+		u.Total = nil
+		return u
+	}
 	total := u.InputFresh + u.CacheRead + u.CacheWrite5m + u.CacheWrite1h +
 		u.CacheWriteUnsplit + u.Output
 	u.Total = &total
@@ -363,10 +371,9 @@ func ParseAgy(raw []byte) *Usage {
 // ParseOpencodeExport is usage_parse_opencode_export (lib/usage.sh:202-234),
 // reading what `opencode export <sessionID>` prints.
 //
-// Reasoning is persisted beside the total and never added to it: every other
-// harness that reports reasoning nests it inside output, and opencode publishes
-// no vendor total to check against, so consistency decides
-// (lib/adapters/opencode.sh:52-58).
+// Legacy exports retain their frozen interpretation. OpenCode 2.x session
+// exports have a messages array and no info.model: their output excludes
+// reasoning, and model identity lives on assistant messages.
 func ParseOpencodeExport(raw []byte) *Usage {
 	root, err := decodeOrdered(raw)
 	if err != nil {
@@ -377,6 +384,7 @@ func ParseOpencodeExport(raw []byte) *Usage {
 		return nil
 	}
 
+	modern := root.member("messages").kind == kindArray && !root.member("info").member("model").present()
 	record := Zero()
 	record.InputFresh = tokens.number("input")
 	record.CacheRead = tokens.member("cache").number("read")
@@ -385,7 +393,18 @@ func ParseOpencodeExport(raw []byte) *Usage {
 	if reasoning, ok := tokens.member("reasoning").asInt(); ok {
 		record.Reasoning = &reasoning
 	}
-	if id, ok := root.member("info").member("model").member("id").asString(); ok {
+	if modern {
+		if record.Reasoning != nil {
+			record.Output += *record.Reasoning
+		}
+		record.Derived = append(record.Derived, "output")
+		record.Models = opencodeMessageModels(root)
+		if cost, ok := root.member("info").member("cost").asFloat(); ok && cost >= 0 {
+			record.CostUSD = &cost
+			source := costSourceHarness
+			record.CostSource = &source
+		}
+	} else if id, ok := root.member("info").member("model").member("id").asString(); ok {
 		record.Models = []Model{{ID: id}}
 	}
 
@@ -400,8 +419,46 @@ func OpencodeModelID(exported []byte) string {
 	if err != nil {
 		return ""
 	}
-	id, _ := root.member("info").member("model").member("id").asString()
-	return id
+	if id, ok := root.member("info").member("model").member("id").asString(); ok && id != "" {
+		return id
+	}
+	return ModelReportedFromModels(opencodeMessageModels(root))
+}
+
+// OpenCode 2.x moves identity to assistant messages. Sum each model's reported
+// message counts only to select the primary model; session totals remain the
+// accounting source and may include work absent from message records.
+func opencodeMessageModels(root node) []Model {
+	var models []Model
+	positions := map[string]int{}
+	for _, message := range root.member("messages").items {
+		kind, _ := message.member("type").asString()
+		if kind != "assistant" {
+			continue
+		}
+		id, _ := message.member("model").member("id").asString()
+		if id == "" {
+			continue
+		}
+		counts := message.member("tokens")
+		total := counts.number("input") + counts.number("output") + counts.number("reasoning") + counts.member("cache").number("read") + counts.member("cache").number("write")
+		if at, ok := positions[id]; ok {
+			*models[at].Total += total
+		} else {
+			positions[id] = len(models)
+			models = append(models, Model{ID: id, Total: &total})
+		}
+	}
+	slices.SortStableFunc(models, func(a, b Model) int {
+		if *a.Total > *b.Total {
+			return -1
+		}
+		if *a.Total < *b.Total {
+			return 1
+		}
+		return 0
+	})
+	return models
 }
 
 // CodexSessionID is usage_codex_session_id (lib/usage.sh:246-253): the session

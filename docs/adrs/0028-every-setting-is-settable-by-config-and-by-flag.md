@@ -9,7 +9,7 @@ authors:
   - "gpt-6.1-sol (Codex)"
 scope: [configuration, cli, security]
 related:
-  - docs/adrs/0003-policy-read-from-the-base-revision.md
+  - 0003-policy-read-from-the-base-revision.md
 ---
 
 # 0028 — Every setting is settable by config and by flag

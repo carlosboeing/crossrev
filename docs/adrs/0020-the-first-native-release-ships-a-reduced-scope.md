@@ -8,10 +8,10 @@ authors:
   - "Carlos Boeing"
   - "Claude Opus 5 (Claude Code)"
 related:
-  - docs/adrs/0018-go-native-parity-contract.md
-  - docs/adrs/0009-delivery-via-sha-pinned-composite-action.md
-  - docs/adrs/0011-npm-as-a-second-install-route.md
-  - docs/adrs/0012-versions-are-cut-deliberately.md
+  - 0018-go-native-parity-contract.md
+  - 0009-delivery-via-sha-pinned-composite-action.md
+  - 0011-npm-as-a-second-install-route.md
+  - 0012-versions-are-cut-deliberately.md
 ---
 
 # 0020 — The first native release ships a reduced scope

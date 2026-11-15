@@ -125,9 +125,11 @@ func TestPolicyIsReadAtTheRevisionRatherThanFromTheWorkingTree(t *testing.T) {
 // answers the wrong status.
 //
 // Cycle, Review, Resolve, Status and Restart share the refusal a command with
-// no repository makes. Each takes its own request type, so no one of them can
-// be wired to another's handler and still build; the marker is there to prove
-// the closure reaches a real handler rather than a stub.
+// no repository makes. Stop needs no repository at all, so in the same sandbox
+// it refuses on the git directory it cannot find. Each takes its own request
+// type, so no one of them can be wired to another's handler and still build;
+// the marker is there to prove the closure reaches a real handler rather
+// than a stub.
 func commandTable(t *testing.T) []struct {
 	field      string
 	wantStatus int
@@ -144,6 +146,7 @@ func commandTable(t *testing.T) []struct {
 		{"Resolve", cli.ExitFailure, "Run crossrev from a checkout with a GitHub remote"},
 		{"Status", cli.ExitFailure, "Run crossrev from a checkout with a GitHub remote"},
 		{"Restart", cli.ExitFailure, "Run crossrev from a checkout with a GitHub remote"},
+		{"Stop", cli.ExitFailure, "could not find this checkout's shared git directory"},
 		{"Init", cli.ExitFailure, `a repository slug must be owner/name`},
 		{"Watchdog", cli.ExitFailure, "could not work out which repository to watch"},
 		{"ConfigShow", cli.ExitOK, `"min_fix_severity": "medium"`},

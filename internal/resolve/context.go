@@ -22,27 +22,27 @@ import (
 )
 
 type session struct {
-	req       Request
-	repo      core.Slug
-	pr        forge.PullRequest
-	cfg       *config.Config
-	markers   []prstate.Marker
-	author    string
-	pass      int
-	review    prstate.Marker
-	findings  []harness.Node
+	req      Request
+	repo     core.Slug
+	pr       forge.PullRequest
+	cfg      *config.Config
+	markers  []prstate.Marker
+	author   string
+	pass     int
+	review   prstate.Marker
+	findings []harness.Node
 	// resolvable is the filtered copy only the resolver reads: the full
 	// review record stays on findings for the marker and summary rewrite,
 	// so a held finding survives the resolve leg with its not_posted
 	// prior and its summary count.
 	resolvable []harness.Node
-	backlog   config.Backlog
-	minFix    core.Severity
-	maxPasses int
-	mode      string
-	redrive   prstate.Marker
-	redriving bool
-	settings  legSettings
+	backlog    config.Backlog
+	minFix     core.Severity
+	maxPasses  int
+	mode       string
+	redrive    prstate.Marker
+	redriving  bool
+	settings   legSettings
 }
 
 type legSettings struct {
@@ -276,11 +276,9 @@ func (l *Leg) settings(s *session) (*Refusal, ui.Line, error) {
 	effort := s.cfg.Get(".resolver.effort")
 	endpoint := s.cfg.Get(".resolver.endpoint")
 	if s.req.Harness != "" {
-		// Bash clears the model and the endpoint and keeps the effort
-		// (lib/run.sh:501): a model id for the harness that was asked for is
-		// wrong for a different one, but an effort level is not tied to a
-		// harness. Clearing effort here wrote "effort":null into the marker
-		// where Bash writes the configured value.
+		// Preserve configured effort for compatibility, but do not translate
+		// it between harnesses. The selected adapter validates fixed CLI
+		// choices and reports an actionable refusal for an incompatible value.
 		name = s.req.Harness
 		model, endpoint = "", ""
 	}
@@ -300,14 +298,13 @@ func (l *Leg) settings(s *session) (*Refusal, ui.Line, error) {
 	if !doc.ServesLeg(name, "resolve") {
 		return servesLegRefusal(doc, name), ui.Line{}, nil
 	}
-	// Nothing further is refused here: the rule that once refused codex is
-	// lifted now that the served read tool serves every resolve leg, and
-	// which legs a harness serves lives on the descriptor entry itself.
+	// Leg support comes from the descriptor. Validate fixed effort choices
+	// against the harness actually selected, including an installed fallback.
 
 	asked := name
 	if l.binaryInstalled(asked) {
 		s.settings = legSettings{Harness: name, Model: model, Effort: effort, Endpoint: endpoint}
-		return nil, ui.Line{}, nil
+		return nil, ui.Line{}, harness.ValidateEffort(name, effort)
 	}
 	for _, alt := range harness.WorkingResolvers(doc) {
 		if l.binaryInstalled(alt) {
@@ -316,7 +313,7 @@ func (l *Leg) settings(s *session) (*Refusal, ui.Line, error) {
 			warn := ui.Warn(
 				fmt.Sprintf("'%s' is not installed, so the resolver runs on '%s' instead", asked, alt),
 				fmt.Sprintf("Both legs now run on the same harness, so a bug it misses while reviewing it also misses while resolving. Install %s to get the second lineage back.", asked))
-			return nil, warn, nil
+			return nil, warn, harness.ValidateEffort(alt, effort)
 		}
 	}
 	return notInstalledRefusal(doc, asked), ui.Line{}, nil

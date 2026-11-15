@@ -4,15 +4,18 @@ title: "Review legs read only through the served tool"
 type: adr
 status: approved
 scope: [review, resolve]
+superseded_by: 0030-unverified-harness-versions-review-supplied.md
 authors:
   - "Carlos Boeing"
   - "Muse Spark (Muse Code)"
 related:
-  - docs/adrs/0001-cross-model-review-loop.md
-  - docs/adrs/0003-policy-read-from-the-base-revision.md
+  - 0001-cross-model-review-loop.md
+  - 0003-policy-read-from-the-base-revision.md
 ---
 
 # 0027 — Review legs read only through the served tool
+
+Superseded in one point by [0030](0030-unverified-harness-versions-review-supplied.md): an unverified harness version now reviews supplied instead of refusing. The body below is left as written, because an ADR records what was decided at the time.
 
 ## Context
 

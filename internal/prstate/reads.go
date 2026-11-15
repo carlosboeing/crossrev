@@ -47,10 +47,11 @@ var readsEnvelopeKeys = []string{
 // that records them and the resolve leg that re-renders them name the same
 // values.
 const (
-	ReadsReasonSelfTestFailed   = "self_test_failed"
-	ReadsReasonMissingHandshake = "missing_handshake"
-	ReadsReasonCallsRefused     = "calls_refused"
-	ReadsReasonFileToolUnwired  = "file_tool_unwired"
+	ReadsReasonSelfTestFailed    = "self_test_failed"
+	ReadsReasonMissingHandshake  = "missing_handshake"
+	ReadsReasonCallsRefused      = "calls_refused"
+	ReadsReasonFileToolUnwired   = "file_tool_unwired"
+	ReadsReasonUnverifiedVersion = "unverified_version"
 )
 
 // ReadsReasonReviewCommand is the envelope reason for a call the tripwire

@@ -54,7 +54,7 @@ func TestDescriptorFieldsMatchTheShellReads(t *testing.T) {
 		{name: "codex prompt transport", read: func(d harness.Document) string { return entry(d, "codex").PromptTransport }, want: "stdin"},
 		{name: "agy prompt transport", read: func(d harness.Document) string { return entry(d, "agy").PromptTransport }, want: "argv"},
 		{name: "grok prompt transport", read: func(d harness.Document) string { return entry(d, "grok").PromptTransport }, want: "file"},
-		{name: "opencode prompt transport", read: func(d harness.Document) string { return entry(d, "opencode").PromptTransport }, want: "argv"},
+		{name: "opencode prompt transport", read: func(d harness.Document) string { return entry(d, "opencode").PromptTransport }, want: "stdin"},
 		{name: "opencode secret", read: func(d harness.Document) string { return credential(d, "opencode").Secret }, want: "CROSSREV_OPENCODE_AUTH"},
 		{name: "opencode archetype", read: func(d harness.Document) string { return credential(d, "opencode").Archetype }, want: "A"},
 		{name: "opencode staging env", read: func(d harness.Document) string { return credential(d, "opencode").Staging.Env }, want: "XDG_DATA_HOME"},

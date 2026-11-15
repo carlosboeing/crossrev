@@ -11,6 +11,7 @@ import (
 	"github.com/carlosboeing/crossrev/internal/prstate"
 	"github.com/carlosboeing/crossrev/internal/review"
 	"github.com/carlosboeing/crossrev/internal/ui"
+	"github.com/carlosboeing/crossrev/internal/validate"
 	"github.com/carlosboeing/crossrev/internal/vcs"
 )
 
@@ -197,8 +198,9 @@ func TestReviewArgvPacksUnder120KiBWhileCodexPacksTo390000(t *testing.T) {
 		t.Fatalf("agy calls = %d, want at least 2 (200 KB of files past the 120 KiB packing limit)", agy.runner.calls)
 	}
 	for i, prompt := range *agyPrompts {
-		if len(prompt) > argvPack {
-			t.Errorf("agy prompt %d is %d bytes, over the %d argv packing limit", i+1, len(prompt), argvPack)
+		inputBytes := len(prompt) + len(validate.FindingsSchema())
+		if inputBytes > argvPack {
+			t.Errorf("agy prompt %d is %d bytes, over the %d argv packing limit", i+1, inputBytes, argvPack)
 		}
 	}
 	codex := inputs(t, claudeStdout)

@@ -283,9 +283,13 @@ func assertRecord(t *testing.T, got *harness.Usage, want string) {
 
 func priceTable(t *testing.T) harness.Prices {
 	t.Helper()
-	prices, err := harness.PriceTable()
+	raw, err := os.ReadFile("testdata/prices-2026-08-23.json")
 	if err != nil {
-		t.Fatalf("reading the embedded price extract: %v", err)
+		t.Fatal(err)
+	}
+	prices, err := harness.LoadPrices(raw)
+	if err != nil {
+		t.Fatalf("reading the historical parity price extract: %v", err)
 	}
 	return prices
 }
@@ -383,4 +387,3 @@ func TestParseCodexError(t *testing.T) {
 		})
 	}
 }
-

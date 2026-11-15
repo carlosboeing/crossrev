@@ -76,7 +76,7 @@ func (l *Leg) settings(req Request, loaded Context) (legSettings, ui.Line, error
 
 	asked := s.harness
 	if l.binaryInstalled(asked) {
-		return s, ui.Line{}, nil
+		return s, ui.Line{}, harness.ValidateEffort(s.harness, s.effort)
 	}
 	for _, name := range l.Harness.NamesForLeg(string(core.LegReview)) {
 		if l.binaryInstalled(name) {
@@ -87,7 +87,7 @@ func (l *Leg) settings(req Request, loaded Context) (legSettings, ui.Line, error
 			warn := ui.Warn(
 				fmt.Sprintf("'%s' is not installed, so the reviewer runs on '%s' instead", asked, name),
 				fmt.Sprintf("Both legs now run on the same harness, so a bug it misses while reviewing it also misses while resolving. Install %s to get the second lineage back.", asked))
-			return s, warn, nil
+			return s, warn, harness.ValidateEffort(s.harness, s.effort)
 		}
 	}
 	return s, ui.Line{}, notInstalledRefusal(l.Harness, asked)
@@ -309,12 +309,14 @@ func drainReadLog(l *runlog.Log, tmp string) {
 func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settings legSettings, adapter harness.Adapter, entry harness.Descriptor, staged *cred.Staged, tmp string, promptBytes []byte, msgs []ui.Line, call int) (envelope harness.Envelope, payload json.RawMessage, outMsgs []ui.Line, retErr error) {
 	outMsgs = msgs
 
-	// A harness whose served-or-tripwire command block is unverified at
-	// this pin never reviews: the leg is refused with
+	// A harness whose tripwire command block is unverified at this pin
+	// never reviews: the leg is refused with
 	// review_isolation_unverified before any child starts, while its
-	// resolve leg is unaffected. The gate sits here, on the one path
-	// every call takes, so the frozen prompt and the batch loop refuse
-	// the same way.
+	// resolve leg is unaffected. A served harness is not refused here:
+	// an unverified served version degrades to supplied below, where
+	// the probe and the prompt rewrite live (ADR 0030). The gate sits
+	// here, on the one path every call takes, so the frozen prompt and
+	// the batch loop refuse the same way.
 	if refusal := harness.ReviewIsolationRefusal(l.Harness, settings.harness); refusal != nil {
 		return harness.Envelope{}, nil, outMsgs, &ui.FatalError{
 			Reason: refusal.Reason,
@@ -398,6 +400,36 @@ func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settin
 		Scratch: tmp,
 	}
 	readsReason := unwired
+	degradedUnverified := false
+	// An unverified served version reviews supplied instead of refusing
+	// (ADR 0030): the pin carries no verified block, or the installed CLI
+	// is not the exact verified version. The probe is `<binary>
+	// --version`, which starts no model and costs no call. The leg halts
+	// where the policy says halt and falls back to supplied where it
+	// says degrade, recording why either way — the same disposition a
+	// failed self-test gets below. No served tool is granted on the
+	// degraded call, and no self-test runs for a tool nobody will use.
+	if declared == harness.ReadModeServed {
+		if detail, unverified := harness.UnverifiedServedVersion(ctx, l.runner(), adapter, settings.harness, entry.Install.PinnedVersion, inv); unverified {
+			if readsPolicy(loaded) == "halt" {
+				l.noteReads(readsNote{declared: declared, effective: effective, reason: ReadsReasonUnverifiedVersion})
+				return harness.Envelope{}, nil, outMsgs, readsUnavailableFatal(ReadsReasonUnverifiedVersion + ": " + detail)
+			}
+			inv.ReadMode = harness.ReadModeSupplied
+			effective = harness.ReadModeSupplied
+			degradedUnverified = true
+			readsReason = ReadsReasonUnverifiedVersion
+			promptBytes = rewriteReadsBlock(promptBytes)
+			inv.Prompt.Text = string(promptBytes)
+			if err := os.WriteFile(promptPath, promptBytes, 0o600); err != nil {
+				return harness.Envelope{}, nil, outMsgs, err
+			}
+			outMsgs = append(outMsgs, readsDegradedWarning(readsReason, prstate.ReadsStats{}))
+			if l.Log != nil {
+				l.Log.Event("reads", "unverified version ("+detail+"); degrading to supplied")
+			}
+		}
+	}
 	if effective == harness.ReadModeServed {
 		remainingReads, remainingBytes := l.readsRemaining()
 		command, session, err := serveSession(workdir, tmp, loaded.PR.BaseRefOid, loaded.PR.HeadRefOid, call, remainingReads, remainingBytes)
@@ -405,10 +437,10 @@ func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settin
 			return harness.Envelope{}, nil, outMsgs, err
 		}
 		inv.Serve = &harness.ServeConfig{Command: command, Args: session.Args()}
-		// The leg-start self-test runs before any harness child —
-		// including the version probe below. On failure the leg halts
-		// where the policy says halt and falls back to supplied where it
-		// says degrade, recording why either way.
+		// The leg-start self-test runs before any model child, on a
+		// version the check above already verified. On failure the leg
+		// halts where the policy says halt and falls back to supplied
+		// where it says degrade, recording why either way.
 		if selfTestErr := l.runReadsSelfTest(ctx, command, session, loaded); selfTestErr != nil {
 			if readsPolicy(loaded) == "halt" {
 				l.noteReads(readsNote{declared: declared, effective: effective, reason: ReadsReasonSelfTestFailed})
@@ -438,21 +470,13 @@ func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settin
 		}
 	}
 
-	// The installed gate, before any child starts: a served or tripwire
-	// review runs only on the CLI version the command block was verified
-	// against. The descriptor pin above says what the operator asked for;
-	// the probe says what will actually run, and a local CLI at a
-	// different, unverified version passes the pin gate while running
-	// unverified flags. A mismatch — or a probe that fails or names no
-	// version — is refused with review_isolation_unverified. The probe is
-	// `<binary> --version`, which starts no model and costs no call.
-	// The declared mode decides, not the effective one: a failed self-test
-	// degrades the read path to supplied above, and the gate must still
-	// hold on the degraded call rather than running command-denial flags
-	// on an unverified CLI. Supplied legs with no command block never
-	// reach this: only served-declared legs and the grok tripwire review
-	// are checked. Every resolve leg is unaffected.
-	if declared == harness.ReadModeServed || settings.harness == "grok" {
+	// The grok tripwire gate, before any child starts: grok already
+	// reviews supplied, so an unverified block has no served path to
+	// degrade from and still refuses with review_isolation_unverified.
+	// Served legs were checked above and degrade instead; supplied legs
+	// with no command block never reach this. Every resolve leg is
+	// unaffected.
+	if settings.harness == "grok" {
 		if refusal := harness.InstalledIsolationRefusal(ctx, l.runner(), adapter, settings.harness, entry.Install.PinnedVersion, inv); refusal != nil {
 			return harness.Envelope{}, nil, outMsgs, &ui.FatalError{
 				Reason: refusal.Reason,
@@ -464,11 +488,18 @@ func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settin
 	// The version gate, before anything starts: an adapter that pins its CLI
 	// version refuses an install it does not drive rather than run a leg on it.
 	// The confirmed major travels into the invocation, because one adapter can
-	// drive CLIs whose flags differ across majors.
-	if major, refusal := harness.CheckVersion(ctx, l.runner(), adapter, inv); refusal != nil {
-		return harness.Envelope{}, nil, outMsgs, refusal
-	} else {
-		inv.CLIMajor = major
+	// drive CLIs whose flags differ across majors. A leg the check above
+	// already degraded for an unverified version skips this gate: it probed
+	// the install there, and a probe that named no version is the
+	// unverified case itself rather than a second refusal stacked on the
+	// degradation. Codex and claude supplied specs read no major, so the
+	// zero major the degraded invocation keeps changes no flag.
+	if !degradedUnverified {
+		if major, refusal := harness.CheckVersion(ctx, l.runner(), adapter, inv); refusal != nil {
+			return harness.Envelope{}, nil, outMsgs, refusal
+		} else {
+			inv.CLIMajor = major
+		}
 	}
 
 	// A supplied grok review carries its schema in the prompt rather than
@@ -610,6 +641,8 @@ func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settin
 			}, context.Canceled)
 		}
 		if !envelope.OK {
+			telemetry := harness.TelemetryJSON(&envelope, inv.CLIMajor)
+			l.Log.Event("usage", telemetry)
 			msg := "no error reported"
 			if envelope.Error != nil && *envelope.Error != "" {
 				msg = *envelope.Error
@@ -660,6 +693,10 @@ func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settin
 		// answer: an export that will not build or will not run leaves the
 		// fields unset and the leg stands.
 		l.mergeExport(ctx, adapter, inv, res, &envelope)
+		telemetry := harness.TelemetryJSON(&envelope, inv.CLIMajor)
+		if l.Log != nil {
+			l.Log.Event("usage", telemetry)
+		}
 
 		// A SUCCESS that answered nothing is a harness failure, not clean
 		// coverage: empty output never means the code was examined. A
@@ -684,10 +721,29 @@ func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settin
 			return envelope, envelope.Payload, outMsgs, nil
 		}
 		code := validateCode(problem)
+		// The reason goes in the run log, not only to the terminal: a retry
+		// that succeeds otherwise leaves no account of what the refused
+		// answer got wrong.
+		if l.Log != nil {
+			kind := "shape"
+			if code == 2 {
+				kind = "semantic"
+			}
+			l.Log.Event("refused", fmt.Sprintf("harness=%s attempt=%d kind=%s %s", settings.harness, attempt, kind, problem))
+		}
 		if code == 2 {
 			if semanticBudget > 0 {
 				semanticBudget--
 				refused = foldAttempt(refused, envelope.Usage)
+				// The retry says what was refused. The same prompt sent
+				// again drew the same answer: the reviewer was never told
+				// which claim contradicted its input. In hand, in the
+				// invocation and on disk, as the reads rewrite above does.
+				promptBytes = prompt.Refused(promptBytes, problem.Error())
+				inv.Prompt.Text = string(promptBytes)
+				if err := os.WriteFile(promptPath, promptBytes, 0o600); err != nil {
+					return harness.Envelope{}, nil, outMsgs, err
+				}
 				// ui_warn, the pair kept apart (lib/run.sh:888-889).
 				outMsgs = append(outMsgs, ui.Warn(
 					fmt.Sprintf("%s returned an answer that contradicts what it was given — %s", settings.harness, problem),
@@ -733,29 +789,21 @@ func (l *Leg) runPrompt(ctx context.Context, req Request, loaded Context, settin
 }
 
 // foldAttempt joins one refused attempt's usage buckets into the running
-// sum, answering the sum to keep. A nil record contributes nothing.
+// sum, answering the sum to keep. A nil record marks the aggregate as incomplete.
 func foldAttempt(sum, attempt *harness.Usage) *harness.Usage {
-	if attempt == nil {
-		return sum
-	}
-	if sum == nil {
-		fresh := *attempt
-		return &fresh
-	}
-	addUsageBuckets(sum, attempt)
-	return sum
+	return harness.FoldUsage(sum, attempt)
 }
 
 // foldRefusedAttempts carries the refused attempts' buckets into the
 // accepted envelope, so one prompt's envelope reports every call it
-// cost. Identity stays on the accepted attempt: model, effort and the
-// non-bucket usage fields are untouched.
+// cost. Reported model and effort stay on the accepted attempt.
 func foldRefusedAttempts(envelope *harness.Envelope, refused *harness.Usage) {
 	if refused == nil {
 		return
 	}
 	if envelope.Usage == nil {
-		total := refused.WithTotal()
+		partial := harness.FoldUsage(refused, nil)
+		total := partial.WithTotal()
 		envelope.Usage = &total
 		envelope.Tokens = total.Total
 		return
