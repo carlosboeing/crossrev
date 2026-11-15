@@ -321,18 +321,14 @@ func (a *Opencode) Spec(inv Invocation) (exec.Spec, error) {
 	// string, and the block's closing `\n` after the fence is what gets
 	// stripped. Trimming the prompt first would lose a newline the model sees
 	// and keep one it does not.
-	prompt := inv.Prompt.Text
-	if inv.Schema.Present() {
-		if inv.Schema.Text == "" {
-			return exec.Spec{}, &Refusal{
-				Reason: "the opencode adapter was given a schema path with no schema text",
-				Action: "This harness takes no schema flag, so the schema is reproduced inside the prompt and the orchestrator has to read the file before the leg runs.",
-				Kind:   ErrSchemaUnavailable,
-			}
+	prompt := promptText("opencode", inv)
+	if inv.Schema.Present() && inv.Schema.Text == "" {
+		return exec.Spec{}, &Refusal{
+			Reason: "the opencode adapter was given a schema path with no schema text",
+			Action: "This harness takes no schema flag, so the schema is reproduced inside the prompt and the orchestrator has to read the file before the leg runs.",
+			Kind:   ErrSchemaUnavailable,
 		}
-		prompt += fmt.Sprintf(schemaInstruction, inv.Schema.Argument())
 	}
-	prompt = strings.TrimRight(prompt, "\n")
 
 	if err := a.writeIsolation(inv); err != nil {
 		return exec.Spec{}, err
@@ -353,9 +349,9 @@ func (a *Opencode) Spec(inv Invocation) (exec.Spec, error) {
 	if wanted(inv.Effort) {
 		args = append(args, "--variant", inv.Effort)
 	}
-	args = append(args, prompt)
-
-	return a.opencodeSpec(inv, args, a.isolationEnv(inv)...), nil
+	spec := a.opencodeSpec(inv, args, a.isolationEnv(inv)...)
+	spec.Stdin = []byte(prompt)
+	return spec, nil
 }
 
 // spec2x builds the child process for opencode 2.x, which rejects the 1.x
@@ -377,9 +373,9 @@ func (a *Opencode) spec2x(inv Invocation, prompt string) (exec.Spec, error) {
 			Kind:   ErrEffortWithoutModel,
 		}
 	}
-	args = append(args, prompt)
-
-	return a.opencodeSpec(inv, args, a.isolationEnv(inv)...), nil
+	spec := a.opencodeSpec(inv, args, a.isolationEnv(inv)...)
+	spec.Stdin = []byte(prompt)
+	return spec, nil
 }
 
 // VersionProbe is `opencode --version`, which reports "opencode vX.Y.Z" and

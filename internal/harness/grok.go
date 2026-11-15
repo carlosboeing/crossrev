@@ -17,7 +17,6 @@ package harness
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -39,6 +38,9 @@ func (a *Grok) NotInstalled() *Refusal {
 
 // Spec builds the child process (lib/adapters/grok.sh:27-79).
 func (a *Grok) Spec(inv Invocation) (exec.Spec, error) {
+	if err := ValidateEffort("grok", inv.Effort); err != nil {
+		return exec.Spec{}, err
+	}
 	if inv.Endpoint.Named() {
 		// This adapter names the endpoint host out of the descriptor where the
 		// other three spell it (lib/adapters/grok.sh:28-31).
@@ -112,15 +114,14 @@ func (a *Grok) Spec(inv Invocation) (exec.Spec, error) {
 		}
 		args = append(args, "--json-schema", inv.Schema.Argument())
 	}
-	// A supplied review cannot take the flag, so the schema travels inside
-	// the prompt instead, the way opencode's does. The child reads the
-	// composed copy, never the bare prompt file.
+	// Streaming review and resolve calls cannot take --json-schema. Carry
+	// the schema in the prompt so both legs receive their output contract.
 	promptPath := inv.Prompt.Path
-	if suppliedReview && inv.Schema.Present() {
+	if (suppliedReview || inv.Write) && inv.Schema.Present() {
 		if inv.Schema.Text == "" {
 			return exec.Spec{}, &Refusal{
 				Reason: "the grok adapter was given a schema path with no schema text",
-				Action: "A supplied grok review carries the schema inside the prompt, so the orchestrator has to read the file before the leg runs.",
+				Action: "A streaming Grok call carries the schema inside the prompt, so the orchestrator has to read the file before the leg runs.",
 				Kind:   ErrSchemaUnavailable,
 			}
 		}
@@ -148,23 +149,19 @@ func (a *Grok) Spec(inv Invocation) (exec.Spec, error) {
 	return a.spec(inv, args), nil
 }
 
-// grokSuppliedPromptFile is the composed prompt a supplied review reads:
-// the review prompt with the schema appended under the instruction, beside
-// the bare prompt the leg rendered.
+// grokSuppliedPromptFile holds the schema-bearing prompt for streaming calls.
 const grokSuppliedPromptFile = "prompt.supplied"
 
-// writeSuppliedPrompt composes the prompt a supplied review is read: the
-// schema cannot travel as --json-schema on a streaming leg, so it travels
-// inside the prompt under the same instruction opencode's carries.
+// writeSuppliedPrompt appends the schema for a streaming review or resolve.
 func writeSuppliedPrompt(inv Invocation) (string, error) {
 	if inv.Scratch == "" {
 		return "", &Refusal{
 			Reason: "the grok adapter was given no scratch directory",
-			Action: "A supplied grok review carries the schema inside the prompt, so the orchestrator has to name a directory to compose one in.",
+			Action: "A streaming Grok call carries the schema inside the prompt, so the orchestrator has to name a directory to compose one in.",
 			Kind:   ErrScratch,
 		}
 	}
-	composed := inv.Prompt.Text + fmt.Sprintf(schemaInstruction, inv.Schema.Argument())
+	composed := promptText("grok", inv)
 	path := filepath.Join(inv.Scratch, grokSuppliedPromptFile)
 	if err := os.WriteFile(path, []byte(composed), 0o600); err != nil {
 		return "", &Refusal{

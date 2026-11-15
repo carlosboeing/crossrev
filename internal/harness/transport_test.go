@@ -105,15 +105,15 @@ func TestStdinTransportCarriesThePromptAsTheShellSpelledIt(t *testing.T) {
 	}
 }
 
-// The other three transports keep their shape under the same 200 KiB prompt:
-// grok names the prompt file, agy and opencode still pass the prompt on argv,
+// The remaining transports keep their shape under the same 200 KiB prompt:
+// grok names the prompt file and agy passes the prompt on argv,
 // and none of them holds stdin open with anything on it. agy's review leg
 // wraps the prompt in its no-commands directive, so only its resolve leg
 // carries the prompt verbatim.
 func TestFileAndArgvTransportsKeepTheirShape(t *testing.T) {
 	doc := descriptors(t)
 
-	for _, name := range []string{"grok", "agy", "opencode"} {
+	for _, name := range []string{"grok", "agy"} {
 		for _, write := range []bool{false, true} {
 			leg := "review"
 			if write {
@@ -135,7 +135,7 @@ func TestFileAndArgvTransportsKeepTheirShape(t *testing.T) {
 				}
 				switch name {
 				case "grok":
-					if !hasFlagPair(spec.Args, "--prompt-file", inv.Prompt.Path) {
+					if !write && !hasFlagPair(spec.Args, "--prompt-file", inv.Prompt.Path) {
 						t.Errorf("the prompt file is not named: %v", spec.Args)
 					}
 					if slices.Contains(spec.Args, inv.Prompt.Text) {
@@ -162,11 +162,6 @@ func TestFileAndArgvTransportsKeepTheirShape(t *testing.T) {
 					if !strings.HasSuffix(got, "answer anyway.") {
 						t.Error("the review prompt does not close with the no-commands directive")
 					}
-				case "opencode":
-					last := spec.Args[len(spec.Args)-1]
-					if !strings.HasPrefix(last, inv.Prompt.Text) {
-						t.Error("the composed prompt does not open with the prompt text")
-					}
 				}
 			})
 		}
@@ -190,7 +185,7 @@ func TestPromptTransportMatchesTheDescriptor(t *testing.T) {
 			entry, _ := doc.For(name)
 			switch entry.PromptTransport {
 			case "stdin":
-				if got := string(spec.Stdin); got != inv.Prompt.Argument() {
+				if got := string(spec.Stdin); !strings.HasPrefix(got, inv.Prompt.Argument()) {
 					t.Error("a stdin harness is handed the prompt on stdin")
 				}
 				if slices.Contains(spec.Args, inv.Prompt.Text) {
@@ -279,4 +274,73 @@ func longPromptInvocation(t *testing.T, name string, write bool) harness.Invocat
 	}
 	inv.Prompt.Text = big
 	return inv
+}
+
+func TestOpencodeLongPromptUsesStdinOnBothMajors(t *testing.T) {
+	for _, major := range []int{1, 2} {
+		for _, write := range []bool{false, true} {
+			inv := legSchema(t, longPromptInvocation(t, "opencode", write), write)
+			inv.CLIMajor = major
+			spec, err := opencodeAdapter(t).Spec(inv)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.HasPrefix(string(spec.Stdin), inv.Prompt.Text) || !strings.Contains(string(spec.Stdin), inv.Schema.Argument()) {
+				t.Fatal("stdin lost the prompt or schema")
+			}
+			for _, arg := range spec.Args {
+				if len(arg) > maxArgBytes {
+					t.Errorf("prompt still travels on argv: %d bytes", len(arg))
+				}
+			}
+		}
+	}
+}
+
+// Compare accounting with what each child actually receives, including native
+// schema flags/files and the composed prompts used by streaming Grok calls.
+func TestInputBudgetMeasuresDeliveredPromptAndSchema(t *testing.T) {
+	for _, name := range descriptors(t).Names() {
+		for _, write := range []bool{false, true} {
+			inv := legSchema(t, invocation(t, name, write), write)
+			if name == "grok" && !write {
+				inv.ReadMode = harness.ReadModeSupplied
+			}
+			adapter, _ := harness.For(descriptors(t), name)
+			spec, err := adapter.Spec(inv)
+			if err != nil {
+				t.Fatal(err)
+			}
+			text := string(spec.Stdin)
+			schemaBytes := 0
+			for i, arg := range spec.Args {
+				if i+1 == len(spec.Args) {
+					break
+				}
+				switch arg {
+				case "--print":
+					text = spec.Args[i+1]
+				case "--prompt-file":
+					raw, err := os.ReadFile(spec.Args[i+1])
+					if err != nil {
+						t.Fatal(err)
+					}
+					text = string(raw)
+				case "--json-schema":
+					if name == "agy" {
+						schemaBytes = len(inv.Schema.Text)
+					} else {
+						schemaBytes = len(spec.Args[i+1])
+					}
+				case "--output-schema":
+					schemaBytes = len(inv.Schema.Text)
+				}
+			}
+			measured := harness.InputBytes(name, inv)
+			actual := len(text) + schemaBytes
+			if measured < actual || measured > actual+1 {
+				t.Fatalf("%s write=%t: measured=%d delivered=%d", name, write, measured, actual)
+			}
+		}
+	}
 }

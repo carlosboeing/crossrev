@@ -348,3 +348,51 @@ func TestSameModelHoldsInBothDirections(t *testing.T) {
 		}
 	}
 }
+
+func TestAdaptersRefuseUnsupportedEffortBeforeStarting(t *testing.T) {
+	for _, name := range []string{"grok", "agy", "claude"} {
+		t.Run(name, func(t *testing.T) {
+			adapter, _ := harness.For(descriptors(t), name)
+			inv := invocation(t, name, true)
+			inv.Effort = "unsupported-effort"
+			_, err := adapter.Spec(inv)
+			if err == nil {
+				t.Fatal("unsupported effort reached the child specification")
+			}
+			if !strings.Contains(err.Error(), "effort") {
+				t.Fatalf("wrong refusal: %v", err)
+			}
+		})
+	}
+	inv := invocation(t, "grok", true)
+	inv.Effort = "max"
+	adapter, _ := harness.For(descriptors(t), "grok")
+	if _, err := adapter.Spec(inv); err == nil {
+		t.Fatal("Grok accepted max, which its CLI rejects")
+	}
+}
+
+func TestEffortValidationPreservesHarnessSpecificValues(t *testing.T) {
+	for _, name := range []string{"grok", "agy", "claude", "codex", "opencode"} {
+		for _, effort := range []string{"", "null", "low", "medium", "high", "xhigh"} {
+			adapter, _ := harness.For(descriptors(t), name)
+			inv := invocation(t, name, true)
+			inv.Effort = effort
+			if _, err := adapter.Spec(inv); err != nil {
+				t.Fatalf("%s/%s: %v", name, effort, err)
+			}
+		}
+	}
+	for _, name := range []string{"codex", "opencode"} {
+		adapter, _ := harness.For(descriptors(t), name)
+		inv := invocation(t, name, true)
+		inv.Effort = "model-defined-effort"
+		spec, err := adapter.Spec(inv)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(strings.Join(spec.Args, " "), inv.Effort) {
+			t.Fatalf("%s effort was dropped or translated", name)
+		}
+	}
+}

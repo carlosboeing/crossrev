@@ -76,7 +76,7 @@ func (l *Leg) settings(req Request, loaded Context) (legSettings, ui.Line, error
 
 	asked := s.harness
 	if l.binaryInstalled(asked) {
-		return s, ui.Line{}, nil
+		return s, ui.Line{}, harness.ValidateEffort(s.harness, s.effort)
 	}
 	for _, name := range l.Harness.NamesForLeg(string(core.LegReview)) {
 		if l.binaryInstalled(name) {
@@ -87,7 +87,7 @@ func (l *Leg) settings(req Request, loaded Context) (legSettings, ui.Line, error
 			warn := ui.Warn(
 				fmt.Sprintf("'%s' is not installed, so the reviewer runs on '%s' instead", asked, name),
 				fmt.Sprintf("Both legs now run on the same harness, so a bug it misses while reviewing it also misses while resolving. Install %s to get the second lineage back.", asked))
-			return s, warn, nil
+			return s, warn, harness.ValidateEffort(s.harness, s.effort)
 		}
 	}
 	return s, ui.Line{}, notInstalledRefusal(l.Harness, asked)

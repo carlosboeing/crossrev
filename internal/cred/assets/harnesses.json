@@ -174,7 +174,7 @@
       },
       "schema_style": "prompt",
       "schema_native": false,
-      "prompt_transport": "argv",
+      "prompt_transport": "stdin",
       "read_mode": "supplied",
       "window_tokens": 128000,
       "legs": ["review", "resolve"],

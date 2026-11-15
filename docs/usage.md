@@ -75,7 +75,7 @@ A verdict covers the supplied ranges on both sides — the numbered lines the hu
 
 One pass reads at most 400 required files. Batches hold at most 40 files in path order.
 
-Calls measure the full rendered prompt against the calling harness's packing limit (390,000 bytes for Codex, 312,000 for Claude Code, 120 KiB for argv transports).
+Calls measure the rendered prompt, adapter instructions and schema text against the calling harness's packing limit. Native schemas count conservatively as context. The default packing limits are 390,000 bytes for Codex, 312,000 for Claude Code, 199,680 for Grok and OpenCode, and 120 KiB for Antigravity's argv transport. OpenCode reads the prompt through stdin on both supported CLI majors. A known smaller model window can reduce these budgets.
 
 Generated files (lockfiles, bundle names, minified files, or files with generated headers) that fit in a call are reviewed. An oversized generated file is skipped with a prominent warning in the comment summary and terminal. Skipped files do not use the 400 review slots, so later files can be reviewed in the same pass. An oversized plain file splits into parts across calls instead of halting the pass. Only shared context alone past the hard limit halts, with `shared_context_exceeds_window`.
 

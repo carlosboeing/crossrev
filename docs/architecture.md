@@ -148,7 +148,7 @@ A **required file** is a changed file the review must account for. The reviewer 
 
 The review reads in batches because one prompt cannot hold a large pull request. One pass reads at most 400 required files; oversized generated files skipped before review do not use those slots. Batches hold at most 40 files in path order.
 
-Calls measure the full rendered prompt — headers, shared context and file content together — against the calling harness's packing limit, derived from its input window (390,000 bytes for Codex, 312,000 for Claude Code, 120 KiB for argv transports).
+Calls measure headers, shared context, file content, adapter instructions and schema text against the calling harness's packing limit. Native output schemas count conservatively as context; provider-added system prompts are not observable. Prompt composition is shared with adapter delivery so appended instructions cannot escape accounting. Default packing limits are 390,000 bytes for Codex, 312,000 for Claude Code, 199,680 for Grok and OpenCode, and 120 KiB for Antigravity's argv transport. OpenCode 1.x and 2.x receive the composed prompt through stdin, with EOF after its final byte.
 
 A plain file that fits in no call alone splits into parts at hunk boundaries, one oversized hunk into line chunks, each reviewed with its header and gutter numbers and merged into one verdict when every part lands. An oversized generated file is skipped instead, with a warning in the comment summary and the terminal. Only shared context alone past the hard limit halts the pass, with `shared_context_exceeds_window`; between 0.75 of the packing limit and the hard limit the pass runs over budget and records `over_budget`.
 

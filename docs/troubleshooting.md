@@ -154,11 +154,15 @@ The error names what git said, so read that line first. Two causes are common.
 
 Either way the fix is not lost. It stays in the worktree, which CrossRev keeps and names on its way out, and the pass halts with the reason recorded on the pull request rather than only in your terminal.
 
+## The selected harness rejects effort
+
+A harness override preserves configured effort, while clearing model and endpoint. Effort names are not portable: Grok accepts `low`, `medium`, `high` and `xhigh`, but rejects `max`. CrossRev checks fixed CLI choices before model execution and names the accepted values. Set `--effort` for that run, or set the configured effort to `null` to let the harness choose. CrossRev does not translate `max` to `xhigh`. Model-specific support still belongs to the harness; Codex effort and OpenCode variants pass through. Claude-compatible endpoints still use the Claude CLI choices.
+
 ## The resolve prompt exceeds its window
 
 `resolve_prompt_exceeds_limit` means the rendered resolve prompt overflowed the resolver harness's hard input limit, so the leg refused before any child started and the pass halted with `crossrev/halted`. Nothing was judged, and nothing needs resuming — the claim stays open for the next attempt.
 
-Two ways forward, and only these two: resolve fewer findings in the pass, or move the resolver to a harness with a larger input window (`resolver.harness`, or `--harness` for one run). Shrinking anything else — the diff, the thread list — does not change the accounting, because the prompt is measured whole before the comparison.
+The measurement includes the prompt, adapter instructions and schema text. Reduce the supplied findings or other prompt context, or select a harness/model with a larger budget. Antigravity's argv transport also has a 120 KiB cap; a larger model on that transport does not remove the cap. OpenCode uses stdin and is governed by the window-derived budget instead. CrossRev has no flag to select a subset of findings for resolution.
 
 ## A resolve leg ran a command
 
