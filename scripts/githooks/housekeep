@@ -913,17 +913,23 @@ cmd_check() { # cmd_check -> always exits 0; it reports, it never refuses
   local resolved_prs=0
   local findings_tmp
   findings_tmp="$(mktemp)"
+  local sweep_list gh_missing=0
+  sweep_list="$(mktemp)"
 
   for n in $prs; do
     local json
     if [ -n "$repo" ]; then
       json="$("$GH" pr view "$n" -R "$repo" --json state,headRefName,closingIssuesReferences 2>/dev/null)" || {
         printf '  pull request %s: no answer from GitHub, unresolved\n' "$n" >> "$findings_tmp"
+        printf '%s|%s|\n' "$n" "$(_merge_commit_for "$n" ORIG_HEAD..HEAD)" >> "$sweep_list"
+        gh_missing=1
         continue
       }
     else
       json="$("$GH" pr view "$n" --json state,headRefName,closingIssuesReferences 2>/dev/null)" || {
         printf '  pull request %s: no answer from GitHub, unresolved\n' "$n" >> "$findings_tmp"
+        printf '%s|%s|\n' "$n" "$(_merge_commit_for "$n" ORIG_HEAD..HEAD)" >> "$sweep_list"
+        gh_missing=1
         continue
       }
     fi
@@ -931,6 +937,7 @@ cmd_check() { # cmd_check -> always exits 0; it reports, it never refuses
     state="$(printf '%s' "$json" | sed -n 's/.*"state":"\([A-Z]*\)".*/\1/p')"
     [ "$state" = "MERGED" ] || continue
     head="$(printf '%s' "$json" | sed -n 's/.*"headRefName":"\([^"]*\)".*/\1/p')"
+    printf '%s|%s|%s\n' "$n" "$(_merge_commit_for "$n" ORIG_HEAD..HEAD)" "$head" >> "$sweep_list"
 
     if [ -n "$head" ] && git show-ref --verify --quiet "refs/heads/$head"; then
       printf '  pull request %s merged, branch %s still here\n' "$n" "$head" >> "$findings_tmp"
@@ -962,6 +969,8 @@ cmd_check() { # cmd_check -> always exits 0; it reports, it never refuses
 
   [ -s "$findings_tmp" ] && cat "$findings_tmp"
   rm -f "$findings_tmp"
+  [ -s "$sweep_list" ] && HOUSEKEEP_GH_MISSING="$gh_missing" _sweep_records "$sweep_list" log
+  rm -f "$sweep_list"
 
   if ! git remote prune --dry-run origin >/dev/null 2>&1; then
     printf '  could not contact origin; stale-ref state unknown\n'
@@ -1116,6 +1125,229 @@ cmd_fix() { # cmd_fix -> removes a merged branch and its worktree, locally only
   return 0
 }
 
+# --- records: working-memory records a merge may have made stale ------------
+#
+# After a merge, list the records in each working-memory folder that refer to
+# a merged pull request and changed before it merged. It reads local files and
+# prints; it never edits, blocks or sends anything. Deciding whether a listed
+# record is still true is left to the person or agent.
+
+RECORD_LIFECYCLE_DIRS='0-brainstorms 1-discovery 1-research 2-requirements 2-design 3-design 3-plans 4-plans 4-reviews 5-reviews 6-retros'
+RECORD_SKIP_NAMES='README.md CHANGELOG.md ROADMAP.md CLAUDE.md AGENTS.md GEMINI.md'
+RECORD_PATH_CAP=50
+
+_ere_escape() { printf '%s' "$1" | sed 's/[][\.*^$+?(){}|/]/\\&/g'; }
+
+_norm_root() { # _norm_root <path> -> without leading ./ or trailing /; "." for the top
+  local p="$1"
+  while [ "${p#./}" != "$p" ]; do p="${p#./}"; done
+  while [ "${p%/}" != "$p" ] && [ "$p" != "/" ]; do p="${p%/}"; done
+  [ -n "$p" ] || p="."
+  printf '%s' "$p"
+}
+
+_has_lifecycle_dir() { # _has_lifecycle_dir <dir> -> 0 when it holds a lifecycle folder
+  local d
+  for d in $RECORD_LIFECYCLE_DIRS; do [ -d "$1/$d" ] && return 0; done
+  return 1
+}
+
+_project_map_roots() { # -> one declared working-memory path per line
+  local f line rest ticks
+  for f in CLAUDE.md AGENTS.md GEMINI.md; do
+    [ -f "$f" ] || continue
+    line="$(grep -m1 -E '^[[:space:]]*[-*][[:space:]]+\*\*Working memory:?\*\*' "$f" 2>/dev/null)" || continue
+    rest="$(printf '%s' "$line" | sed -E 's/^[[:space:]]*[-*][[:space:]]+\*\*Working memory:?\*\*:?[[:space:]]*//')"
+    ticks="$(printf '%s' "$rest" | grep -oE '`[^`]+`' | tr -d '`')"
+    if [ -n "$ticks" ]; then printf '%s\n' "$ticks"
+    else printf '%s' "$rest" | awk '{print $1}'
+    fi
+  done
+}
+
+_record_roots() { # -> "<root>|<source>" per line, run from the top
+  local seen="" p src out=""
+  _add_root() {
+    p="$(_norm_root "$1")"
+    case "|$seen|" in *"|$p|"*) return ;; esac
+    seen="$seen|$p"
+    out="$out$p|$2"$'\n'
+  }
+  if [ -n "${HOUSEKEEP_RECORD_ROOTS:-}" ]; then
+    local IFS=:
+    for p in $HOUSEKEEP_RECORD_ROOTS; do [ -n "$p" ] && _add_root "$p" "HOUSEKEEP_RECORD_ROOTS"; done
+    printf '%s' "$out"; return 0
+  fi
+  while IFS= read -r p; do [ -n "$p" ] && _add_root "$p" "git config"; done <<INNER
+$(git config --get-all housekeep.recordRoot 2>/dev/null)
+INNER
+  while IFS= read -r p; do [ -n "$p" ] && _add_root "$p" "Project Map"; done <<INNER
+$(_project_map_roots)
+INNER
+  if [ -z "$out" ]; then
+    _has_lifecycle_dir . && _add_root "." "found"
+    for p in .[!.]* *; do
+      [ -d "$p" ] || continue
+      case "$p" in .git|.worktrees|node_modules) continue ;; esac
+      _has_lifecycle_dir "$p" && _add_root "$p" "found"
+    done
+  fi
+  printf '%s' "$out"
+}
+
+_record_files() { # _record_files <root> -> Markdown files, NUL-separated
+  find "$1" \( -name .git -o -name .worktrees -o -name node_modules -o -name assets \
+               -o -name pre-publication-snapshots \) -prune -o -type f -name '*.md' -print0 2>/dev/null
+}
+
+_last_change() { # _last_change <file> -> epoch seconds of its last change, or "now" when edited
+  local dir base t
+  dir="$(dirname "$1")"; base="$(basename "$1")"
+  if git -C "$dir" rev-parse --git-dir >/dev/null 2>&1; then
+    if [ -n "$(git -C "$dir" status --porcelain -- "$base" 2>/dev/null)" ]; then printf 'now'; return 0; fi
+    t="$(git -C "$dir" log -1 --format=%ct -- "$base" 2>/dev/null)"
+    [ -n "$t" ] && { printf '%s' "$t"; return 0; }
+  fi
+  stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null
+}
+
+_merge_commit_for() { # _merge_commit_for <n> [range] -> the commit whose subject ends (#n)
+  git log --format='%H %s' "${2:-HEAD}" 2>/dev/null | grep -m1 -E " \(#$1\)\$" | cut -d' ' -f1
+}
+
+_sweep_records() { # _sweep_records <file of "n|commit|branch" lines> [log] -> prints the records block
+  # With "log", append one line per pull request to the local sweep log.
+  local list="$1" log_to="${2:-}" pr_listed pr_closed pr_paths log_file roots repo top default n commit branch keys when t root src
+  local cands f why label doctype status shown listed=0 stale_total=0 changed count closed=0
+  roots="$(_record_roots)"
+  if [ -z "$roots" ]; then
+    printf '  record roots: none found (set git config housekeep.recordRoot <path>)\n'
+    return 0
+  fi
+  repo="$(_github_identity || true)"
+  default="$(_default_branch || true)"
+  printf '  record roots:'
+  while IFS='|' read -r root src; do
+    [ -n "$root" ] || continue
+    if [ -d "$root" ]; then printf ' %s (%s)' "$root" "$src"; else printf ' %s (%s, missing)' "$root" "$src"; fi
+  done <<INNER
+$roots
+INNER
+  printf '\n'
+  [ "${HOUSEKEEP_GH_MISSING:-0}" = 1 ] && printf '  branch names unknown, GitHub did not answer; matching on links and paths\n'
+
+  keys="$(mktemp)"
+  while IFS='|' read -r n commit branch; do
+    [ -n "$n" ] || continue
+    : > "$keys"
+    [ -n "$repo" ] && printf 'github.com/%s/pull/%s\n%s#%s\n' "$repo" "$n" "$repo" "$n" >> "$keys"
+    [ -n "$branch" ] && [ "$branch" != "$default" ] && printf '%s\n' "$branch" >> "$keys"
+    changed=""
+    if [ -n "$commit" ]; then
+      changed="$(git diff --name-only "$commit^" "$commit" 2>/dev/null)"
+      count="$(printf '%s\n' "$changed" | grep -c . || true)"
+      if [ "$count" -le "$RECORD_PATH_CAP" ]; then
+        while IFS= read -r f; do
+          [ -n "$f" ] || continue
+          case " $RECORD_SKIP_NAMES " in *" $(basename "$f") "*) continue ;; esac
+          printf '%s\n' "$f" >> "$keys"
+        done <<INNER
+$changed
+INNER
+      else
+        printf '  pull request %s changed %s files; matching on links and branch only\n' "$n" "$count"
+      fi
+      when="$(git log -1 --format=%ct "$commit" 2>/dev/null)"
+    else
+      printf '  pull request %s: no merge commit on this branch, so no paths or date; pull first\n' "$n"
+      continue
+    fi
+    [ -s "$keys" ] || continue
+
+    shown=0; pr_listed=0; pr_closed=0; pr_paths=""
+    while IFS='|' read -r root src; do
+      [ -d "$root" ] || continue
+      cands="$(_record_files "$root" | xargs -0 grep -lF -f "$keys" 2>/dev/null || true)"
+      while IFS= read -r f; do
+        [ -n "$f" ] || continue
+        why=""
+        if [ -n "$repo" ] && grep -qE "github\.com/$(_ere_escape "$repo")/pull/$n([^0-9]|\$)|(^|[^A-Za-z0-9_./-])$(_ere_escape "$repo")#$n([^0-9]|\$)" "$f"; then
+          why="links the PR"
+        elif [ -n "$branch" ] && [ "$branch" != "$default" ] && grep -qF "$branch" "$f"; then
+          why="names branch $branch"
+        else
+          while IFS= read -r label; do
+            [ -n "$label" ] || continue
+            case "$label" in "github.com/"*|"$repo#"*|"$branch") continue ;; esac
+            grep -qF "$label" "$f" && { why="names $label"; break; }
+          done < "$keys"
+        fi
+        [ -n "$why" ] || continue
+        t="$(_last_change "$f")"
+        [ "$t" = "now" ] && continue
+        [ -n "$t" ] && [ -n "$when" ] && [ "$t" -ge "$when" ] && continue
+        status="$(_scalar_field "$f" status)"
+        # A closed record that only names a path or branch describes past
+        # work; a later change to that file does not make it false.
+        if [ "$why" != "links the PR" ]; then
+          case "$status" in shipped|resolved|superseded|abandoned) closed=$((closed + 1)); pr_closed=$((pr_closed + 1)); continue ;; esac
+        fi
+        doctype="$(_scalar_field "$f" type)"
+        if [ "$shown" -eq 0 ]; then
+          printf '  records older than pull request %s%s:\n' "$n" "${branch:+ ($branch)}"
+          shown=1
+        fi
+        label="${doctype:-no type}, ${status:-no status}, last changed $(date -r "${t:-0}" +%F 2>/dev/null || date -d "@${t:-0}" +%F 2>/dev/null)"
+        if [ "$why" = "links the PR" ] \
+           && printf '%s' "$doctype" | grep -qE '^(requirements|design|plan)$' \
+           && printf '%s' "$status" | grep -qE '^(draft|approved|in-progress)$'; then
+          why="$why, status not shipped"
+        fi
+        printf '    %s  %s: %s\n' "${f#./}" "$label" "$why"
+        listed=$((listed + 1)); pr_listed=$((pr_listed + 1)); pr_paths="$pr_paths ${f#./}"
+      done <<INNER
+$cands
+INNER
+    done <<INNER
+$roots
+INNER
+    [ "$shown" -eq 1 ] && stale_total=1
+    if [ -n "$log_to" ]; then
+      log_file="${HOUSEKEEP_RECORD_LOG:-$(git rev-parse --git-common-dir 2>/dev/null)/housekeep-records.log}"
+      printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${repo:-unknown}" "$n" \
+        "$pr_listed" "$pr_closed" "${pr_paths# }" >> "$log_file" 2>/dev/null || true
+    fi
+  done < "$list"
+  rm -f "$keys"
+  [ "$closed" -gt 0 ] && printf '  skipped %s closed records (shipped, resolved, superseded or abandoned) that only name a path or branch\n' "$closed"
+  if [ "$stale_total" -eq 1 ]; then
+    printf '  edit each record, or leave it when it is still true, then: housekeep records %s\n' \
+      "$(cut -d'|' -f1 "$list" | tr '\n' ' ' | sed 's/ $//')"
+  else
+    printf '  records: none older than the merged pull requests\n'
+  fi
+  return 0
+}
+
+cmd_records() { # cmd_records <n>... -> the sweep for named pull requests, always exits 0
+  local repo n json branch list
+  [ "$#" -gt 0 ] || { printf 'usage: housekeep records <pull-request-number>...\n' >&2; return 0; }
+  repo="$(_github_identity || true)"
+  list="$(mktemp)"
+  for n in "$@"; do
+    case "$n" in ''|*[!0-9]*) printf '  %s is not a pull request number\n' "$n"; continue ;; esac
+    branch=""
+    if json="$("$GH" pr view "$n" ${repo:+-R "$repo"} --json headRefName 2>/dev/null)"; then
+      branch="$(printf '%s' "$json" | sed -n 's/.*"headRefName":"\([^"]*\)".*/\1/p')"
+    else
+      HOUSEKEEP_GH_MISSING=1
+    fi
+    printf '%s|%s|%s\n' "$n" "$(_merge_commit_for "$n")" "$branch" >> "$list"
+  done
+  HOUSEKEEP_GH_MISSING="${HOUSEKEEP_GH_MISSING:-0}" _sweep_records "$list"
+  rm -f "$list"
+}
+
 # --- entry point ------------------------------------------------------------
 
 cmd_check_push() { # cmd_check_push <base> <head>
@@ -1144,5 +1376,6 @@ case "${1:-}" in
     cmd_check; exit 0 ;;
   audit) cmd_audit; exit 0 ;;
   fix) cmd_fix; exit 0 ;;
-  *) printf 'usage: housekeep check [--push <base> <head>] | housekeep audit | housekeep fix\n' >&2; exit 2 ;;
+  records) shift; cmd_records "$@"; exit 0 ;;
+  *) printf 'usage: housekeep check [--push <base> <head>] | housekeep audit | housekeep fix | housekeep records <n>...\n' >&2; exit 2 ;;
 esac
